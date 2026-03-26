@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { createIssue } from "@/api/issues";
 import type { CreateIssueRequest } from "@/api/issues";
 import { useRegisterEscapeLayer, LAYER_MODAL } from "@/hooks";
+import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
 import { useFocusReturn } from "@/hooks/useFocusReturn";
 import type { Issue, IssueType, Priority } from "@/types";
@@ -36,6 +37,7 @@ export function CreateIssueModal({
   onClose,
   onSuccess,
 }: CreateIssueModalProps): JSX.Element | null {
+  const { workspaceId } = useWorkspaceContext();
   const [title, setTitle] = useState("");
   const [issueType, setIssueType] = useState<IssueType>("task");
   const [priority, setPriority] = useState<Priority>(2);
@@ -98,7 +100,7 @@ export function CreateIssueModal({
       }
 
       try {
-        const issue = await createIssue(req);
+        const issue = await createIssue(workspaceId, req);
         if (!mountedRef.current) return;
         onSuccess(issue);
         onClose();

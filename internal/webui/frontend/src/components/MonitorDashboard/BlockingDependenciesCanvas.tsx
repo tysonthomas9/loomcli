@@ -14,6 +14,7 @@ import {
   type UseAutoLayoutOptions,
 } from "@/hooks/useAutoLayout";
 import { useBlockedIssues } from "@/hooks/useBlockedIssues";
+import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
 import { useGraphData, type UseGraphDataOptions } from "@/hooks/useGraphData";
 import type {
   Issue,
@@ -67,8 +68,12 @@ export function BlockingDependenciesCanvas({
   onExpandClick,
   className,
 }: BlockingDependenciesCanvasProps): JSX.Element {
+  const { workspaceId } = useWorkspaceContext();
   // Fetch blocked issues for status calculation
-  const { data: blockedIssues } = useBlockedIssues({ enabled: true });
+  const { data: blockedIssues } = useBlockedIssues({
+    workspaceId,
+    enabled: true,
+  });
 
   const blockedIssueIds = useMemo(() => {
     if (!blockedIssues) return new Set<string>();

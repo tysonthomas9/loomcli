@@ -40,6 +40,10 @@ vi.mock("@/api", () => ({
   updateIssue: vi.fn(),
 }));
 
+vi.mock("@/hooks/useWorkspaceContext", () => ({
+  useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
+}));
+
 const mockUpdateIssue = vi.mocked(updateIssue);
 
 /**
@@ -227,9 +231,13 @@ describe("IssueDetailView", () => {
 
       await waitFor(() => {
         expect(mockUpdateIssue).toHaveBeenCalledTimes(1);
-        expect(mockUpdateIssue).toHaveBeenCalledWith("test-issue-abc123", {
-          status: "closed",
-        });
+        expect(mockUpdateIssue).toHaveBeenCalledWith(
+          "test-ws-id",
+          "test-issue-abc123",
+          {
+            status: "closed",
+          },
+        );
         expect(onIssueUpdate).toHaveBeenCalledTimes(1);
         expect(onIssueUpdate).toHaveBeenCalledWith(updatedIssue);
       });

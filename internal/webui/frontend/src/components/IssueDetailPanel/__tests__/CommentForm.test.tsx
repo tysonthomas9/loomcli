@@ -27,6 +27,10 @@ import { CommentForm } from "../CommentForm";
 vi.mock("@/api", () => ({
   addComment: vi.fn(),
 }));
+
+vi.mock("@/hooks/useWorkspaceContext", () => ({
+  useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
+}));
 const mockAddComment = vi.mocked(addComment);
 
 /**
@@ -129,6 +133,7 @@ describe("CommentForm", () => {
       });
       await waitFor(() => {
         expect(mockAddComment).toHaveBeenCalledWith(
+          "test-ws-id",
           "test-issue-123",
           "My comment",
         );
@@ -144,6 +149,7 @@ describe("CommentForm", () => {
       });
       await waitFor(() => {
         expect(mockAddComment).toHaveBeenCalledWith(
+          "test-ws-id",
           "test-issue-123",
           "trimmed comment",
         );
@@ -159,6 +165,7 @@ describe("CommentForm", () => {
       });
       await waitFor(() => {
         expect(mockAddComment).toHaveBeenCalledWith(
+          "test-ws-id",
           "test-issue-123",
           "Comment via keyboard",
         );
@@ -174,6 +181,7 @@ describe("CommentForm", () => {
       });
       await waitFor(() => {
         expect(mockAddComment).toHaveBeenCalledWith(
+          "test-ws-id",
           "test-issue-123",
           "Comment via ctrl",
         );

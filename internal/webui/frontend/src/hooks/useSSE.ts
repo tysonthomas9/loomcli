@@ -21,6 +21,8 @@ import {
  * Options for the useSSE hook.
  */
 export interface UseSSEOptions {
+  /** Workspace UUID for path-based SSE routing */
+  workspaceId: string;
   /** Called when a mutation event is received */
   onMutation?: (mutation: MutationPayload) => void;
   /** Called when an error occurs */
@@ -76,8 +78,9 @@ export interface UseSSEReturn {
  * }
  * ```
  */
-export function useSSE(options: UseSSEOptions = {}): UseSSEReturn {
+export function useSSE(options: UseSSEOptions): UseSSEReturn {
   const {
+    workspaceId,
     autoConnect = true,
     since,
     onMutation,
@@ -164,7 +167,7 @@ export function useSSE(options: UseSSEOptions = {}): UseSSEReturn {
       },
     };
 
-    const client = new BeadsSSEClient(clientOptions);
+    const client = new BeadsSSEClient(workspaceId, clientOptions);
     clientRef.current = client;
 
     // Auto-connect if enabled
@@ -178,7 +181,7 @@ export function useSSE(options: UseSSEOptions = {}): UseSSEReturn {
       client.destroy();
       clientRef.current = null;
     };
-  }, [autoConnect]);
+  }, [autoConnect, workspaceId]);
 
   // Reconnect when sourceRepos changes (disconnect + reconnect with new URL)
   useEffect(() => {

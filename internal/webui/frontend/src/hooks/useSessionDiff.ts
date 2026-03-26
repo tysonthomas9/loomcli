@@ -18,6 +18,7 @@ export interface UseSessionDiffResult {
 }
 
 export function useSessionDiff(
+  workspaceId: string,
   taskId: string | null,
   sessionId: string | null,
   enabled: boolean,
@@ -36,7 +37,7 @@ export function useSessionDiff(
 
     const fetchDiff = async () => {
       try {
-        const result = await getSessionDiff(taskId, sessionId);
+        const result = await getSessionDiff(workspaceId, taskId, sessionId);
         if (!cancelled) {
           setDiff(result);
           setError(null);
@@ -57,7 +58,7 @@ export function useSessionDiff(
     return () => {
       cancelled = true;
     };
-  }, [taskId, sessionId, enabled]);
+  }, [workspaceId, taskId, sessionId, enabled]);
 
   return { diff, isLoading, error };
 }

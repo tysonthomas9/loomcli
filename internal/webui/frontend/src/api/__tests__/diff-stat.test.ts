@@ -33,19 +33,21 @@ describe("fetchIssueDiffStat", () => {
     };
     mockGet.mockResolvedValue(diffStat);
 
-    const result = await fetchIssueDiffStat("issue-123");
+    const result = await fetchIssueDiffStat("test-ws-id", "issue-123");
 
     expect(result).toEqual(diffStat);
-    expect(mockGet).toHaveBeenCalledWith("/api/issues/issue-123/git/diff-stat");
+    expect(mockGet).toHaveBeenCalledWith(
+      "/api/workspaces/test-ws-id/issues/issue-123/git/diff-stat",
+    );
   });
 
   it("encodes issue ID with special characters in URL", async () => {
     mockGet.mockResolvedValue({ branch: "main", added: 0, removed: 0 });
 
-    await fetchIssueDiffStat("issue/with spaces");
+    await fetchIssueDiffStat("test-ws-id", "issue/with spaces");
 
     expect(mockGet).toHaveBeenCalledWith(
-      "/api/issues/issue%2Fwith%20spaces/git/diff-stat",
+      "/api/workspaces/test-ws-id/issues/issue%2Fwith%20spaces/git/diff-stat",
     );
   });
 

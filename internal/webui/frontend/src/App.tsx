@@ -215,7 +215,7 @@ function App() {
           ? "kanban"
           : "ready",
     sourceRepos: sourceReposFilter,
-    workspaceName: activeWorkspaceName,
+    workspaceId,
   });
 
   // Filter state with URL synchronization
@@ -252,6 +252,7 @@ function App() {
 
   // Only fetch blocked issues separately when NOT in kanban mode (kanban mode includes it inline)
   const { data: blockedIssuesData } = useBlockedIssues({
+    workspaceId,
     enabled: activeView !== "kanban",
   });
 
@@ -362,7 +363,7 @@ function App() {
     fetchIssue,
     clearIssue,
     updateIssueDetails,
-  } = useIssueDetail();
+  } = useIssueDetail(workspaceId);
 
   // Previous view state for issue-detail back navigation.
   // When on the issue route, the query-param view is the "previous" view.
@@ -540,7 +541,10 @@ function App() {
 
       try {
         // Update both status and assignee
-        await updateIssue(issueId, { status: newStatus, assignee });
+        await updateIssue(workspaceId, issueId, {
+          status: newStatus,
+          assignee,
+        });
       } catch (err) {
         if (!mountedRef.current) return;
         const message =
@@ -615,7 +619,11 @@ function App() {
 
         if (reviewType === "code") {
           // Code review: Close the issue (PR was reviewed and approved)
-          await closeIssue(issue.id, "PR approved after code review");
+          await closeIssue(
+            workspaceId,
+            issue.id,
+            "PR approved after code review",
+          );
           await refetch();
         } else if (reviewType === "plan") {
           // Plan review: Move to open (ready for implementation)
@@ -650,10 +658,10 @@ function App() {
 
         // Add feedback comment
         const prefix = reviewType === "code" ? "CODE REVIEW" : "FEEDBACK";
-        await addComment(issue.id, `${prefix}: ${comment}`);
+        await addComment(workspaceId, issue.id, `${prefix}: ${comment}`);
 
         // Add needs-revision label and set status to open
-        await updateIssue(issue.id, {
+        await updateIssue(workspaceId, issue.id, {
           status: "open",
           add_labels: ["needs-revision"],
         });

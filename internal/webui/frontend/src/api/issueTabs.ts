@@ -44,7 +44,9 @@ function unwrap<T>(response: ApiResult<T>): T {
  * Fetch persisted tab state for an issue.
  * Returns null if no saved state exists.
  */
+// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export async function fetchIssueTabState(
+  _workspaceId: string,
   issueId: string,
 ): Promise<IssueTabState | null> {
   const response = await get<ApiResult<IssueTabState | null>>(
@@ -56,7 +58,9 @@ export async function fetchIssueTabState(
 /**
  * Save full tab state for an issue via PUT.
  */
+// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export async function saveIssueTabState(
+  _workspaceId: string,
   issueId: string,
   tabs: IssueTab[],
   activeTabId: string,
@@ -70,7 +74,11 @@ export async function saveIssueTabState(
 /**
  * Delete persisted tab state for an issue.
  */
-export async function deleteIssueTabState(issueId: string): Promise<void> {
+// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
+export async function deleteIssueTabState(
+  _workspaceId: string,
+  issueId: string,
+): Promise<void> {
   await del<ApiResult<undefined>>(
     `/api/issues/${encodeURIComponent(issueId)}/tabs`,
   );

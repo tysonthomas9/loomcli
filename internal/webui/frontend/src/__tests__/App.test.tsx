@@ -1728,10 +1728,12 @@ describe("App", () => {
 
       render(<App />);
 
-      expect(useIssues).toHaveBeenCalledWith({
-        mode: "kanban",
-        workspaceName: null,
-      });
+      expect(useIssues).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mode: "kanban",
+          workspaceId: "test-ws-id",
+        }),
+      );
     });
 
     it('calls useIssues with mode: "ready" when activeView is "table"', () => {
@@ -1741,10 +1743,12 @@ describe("App", () => {
 
       render(<App />);
 
-      expect(useIssues).toHaveBeenCalledWith({
-        mode: "ready",
-        workspaceName: null,
-      });
+      expect(useIssues).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mode: "ready",
+          workspaceId: "test-ws-id",
+        }),
+      );
     });
 
     it('calls useIssues with mode: "graph" when activeView is "graph"', () => {
@@ -1754,10 +1758,12 @@ describe("App", () => {
 
       render(<App />);
 
-      expect(useIssues).toHaveBeenCalledWith({
-        mode: "graph",
-        workspaceName: null,
-      });
+      expect(useIssues).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mode: "graph",
+          workspaceId: "test-ws-id",
+        }),
+      );
     });
 
     it("refetches issues when view changes from kanban to graph", () => {
@@ -1773,7 +1779,7 @@ describe("App", () => {
       // Verify initial call with mode: 'kanban'
       expect(useIssues).toHaveBeenLastCalledWith({
         mode: "kanban",
-        workspaceName: null,
+        workspaceId: "test-ws-id",
       });
 
       // Clear mock to track the next call
@@ -1787,7 +1793,7 @@ describe("App", () => {
       // Verify useIssues is called with mode: 'graph' after view change
       expect(useIssues).toHaveBeenLastCalledWith({
         mode: "graph",
-        workspaceName: null,
+        workspaceId: "test-ws-id",
       });
     });
 
@@ -1804,7 +1810,7 @@ describe("App", () => {
       // Verify initial call with mode: 'graph'
       expect(useIssues).toHaveBeenLastCalledWith({
         mode: "graph",
-        workspaceName: null,
+        workspaceId: "test-ws-id",
       });
 
       // Clear mock to track the next call
@@ -1818,7 +1824,7 @@ describe("App", () => {
       // Verify useIssues is called with mode: 'kanban' after view change
       expect(useIssues).toHaveBeenLastCalledWith({
         mode: "kanban",
-        workspaceName: null,
+        workspaceId: "test-ws-id",
       });
     });
 
@@ -1835,7 +1841,7 @@ describe("App", () => {
       // Verify initial call with mode: 'graph'
       expect(useIssues).toHaveBeenLastCalledWith({
         mode: "graph",
-        workspaceName: null,
+        workspaceId: "test-ws-id",
       });
 
       // Clear mock to track the next call
@@ -1849,7 +1855,7 @@ describe("App", () => {
       // Verify useIssues is called with mode: 'ready' after view change
       expect(useIssues).toHaveBeenLastCalledWith({
         mode: "ready",
-        workspaceName: null,
+        workspaceId: "test-ws-id",
       });
     });
 
@@ -1866,7 +1872,7 @@ describe("App", () => {
       // Verify initial call with mode: 'kanban'
       expect(useIssues).toHaveBeenLastCalledWith({
         mode: "kanban",
-        workspaceName: null,
+        workspaceId: "test-ws-id",
       });
 
       // Clear mock to track the next call
@@ -1880,7 +1886,7 @@ describe("App", () => {
       // Verify useIssues is still called with mode: 'ready'
       expect(useIssues).toHaveBeenLastCalledWith({
         mode: "ready",
-        workspaceName: null,
+        workspaceId: "test-ws-id",
       });
     });
 
@@ -1916,10 +1922,12 @@ describe("App", () => {
 
       render(<App />);
 
-      expect(useIssues).toHaveBeenCalledWith({
-        mode: "ready",
-        workspaceName: null,
-      });
+      expect(useIssues).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mode: "ready",
+          workspaceId: "test-ws-id",
+        }),
+      );
     });
   });
 
@@ -2730,6 +2738,7 @@ describe("App", () => {
       await waitFor(() => {
         expect(mockCloseIssue).toHaveBeenCalledTimes(1);
         expect(mockCloseIssue).toHaveBeenCalledWith(
+          "test-ws-id",
           "code-issue",
           "PR approved after code review",
         );
@@ -2787,6 +2796,7 @@ describe("App", () => {
       await waitFor(() => {
         expect(mockAddComment).toHaveBeenCalledTimes(1);
         expect(mockAddComment).toHaveBeenCalledWith(
+          "test-ws-id",
           "reject-issue",
           "FEEDBACK: Needs more work on the design",
         );
@@ -2794,10 +2804,14 @@ describe("App", () => {
 
       await waitFor(() => {
         expect(mockUpdateIssue).toHaveBeenCalledTimes(1);
-        expect(mockUpdateIssue).toHaveBeenCalledWith("reject-issue", {
-          status: "open",
-          add_labels: ["needs-revision"],
-        });
+        expect(mockUpdateIssue).toHaveBeenCalledWith(
+          "test-ws-id",
+          "reject-issue",
+          {
+            status: "open",
+            add_labels: ["needs-revision"],
+          },
+        );
       });
 
       await waitFor(() => {
@@ -2849,6 +2863,7 @@ describe("App", () => {
       await waitFor(() => {
         expect(mockAddComment).toHaveBeenCalledTimes(1);
         expect(mockAddComment).toHaveBeenCalledWith(
+          "test-ws-id",
           "code-reject-issue",
           "CODE REVIEW: Fix the lint errors",
         );

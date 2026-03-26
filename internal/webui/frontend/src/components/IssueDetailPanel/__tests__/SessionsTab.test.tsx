@@ -54,6 +54,10 @@ vi.mock("../SessionDetailView", () => ({
   ),
 }));
 
+vi.mock("@/hooks/useWorkspaceContext", () => ({
+  useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
+}));
+
 // Mock the hook
 vi.mock("@/hooks/useTaskSessions", () => ({
   useTaskSessions: vi.fn(),
@@ -229,7 +233,7 @@ describe("SessionsTab", () => {
         refetch: vi.fn(),
       });
       render(<SessionsTab taskId="task-42" />);
-      expect(mockUseTaskSessions).toHaveBeenCalledWith("task-42");
+      expect(mockUseTaskSessions).toHaveBeenCalledWith("test-ws-id", "task-42");
     });
   });
 });

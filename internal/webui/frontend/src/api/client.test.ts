@@ -10,6 +10,7 @@ import {
   getAuthState,
   onAuthStateChange,
   getAuthToken,
+  wsUrl,
 } from "./client";
 
 describe("API Client", () => {
@@ -962,6 +963,22 @@ describe("API Client", () => {
       } finally {
         unsubscribe();
       }
+    });
+  });
+
+  describe("wsUrl", () => {
+    it("builds workspace-scoped API path", () => {
+      expect(wsUrl("my-ws", "/issues")).toBe("/api/workspaces/my-ws/issues");
+    });
+
+    it("encodes workspace ID with special characters", () => {
+      expect(wsUrl("ws with spaces", "/issues")).toBe(
+        "/api/workspaces/ws%20with%20spaces/issues",
+      );
+    });
+
+    it("handles slashes in workspace ID", () => {
+      expect(wsUrl("ws/id", "/issues")).toBe("/api/workspaces/ws%2Fid/issues");
     });
   });
 });

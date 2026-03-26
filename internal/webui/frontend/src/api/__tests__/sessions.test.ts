@@ -69,7 +69,7 @@ describe("sessions API", () => {
         data: { sessions },
       });
 
-      const result = await getTaskSessions("bd-abc123");
+      const result = await getTaskSessions("test-ws-id", "bd-abc123");
 
       expect(result).toEqual(sessions);
       expect(mockGet).toHaveBeenCalledWith("/api/tasks/bd-abc123/sessions");
@@ -78,7 +78,7 @@ describe("sessions API", () => {
     it("returns empty array when data is null", async () => {
       mockGet.mockResolvedValueOnce({ data: null });
 
-      const result = await getTaskSessions("bd-abc123");
+      const result = await getTaskSessions("test-ws-id", "bd-abc123");
 
       expect(result).toEqual([]);
     });
@@ -88,7 +88,7 @@ describe("sessions API", () => {
         data: { sessions: null },
       });
 
-      const result = await getTaskSessions("bd-abc123");
+      const result = await getTaskSessions("test-ws-id", "bd-abc123");
 
       expect(result).toEqual([]);
     });
@@ -96,7 +96,7 @@ describe("sessions API", () => {
     it("returns empty array on 404 error", async () => {
       mockGet.mockRejectedValueOnce(new ApiError(404, "Not Found"));
 
-      const result = await getTaskSessions("bd-nonexistent");
+      const result = await getTaskSessions("test-ws-id", "bd-nonexistent");
 
       expect(result).toEqual([]);
     });
@@ -104,7 +104,7 @@ describe("sessions API", () => {
     it("throws on non-404 API errors", async () => {
       mockGet.mockRejectedValueOnce(new ApiError(500, "Internal Server Error"));
 
-      await expect(getTaskSessions("bd-err")).rejects.toThrow(
+      await expect(getTaskSessions("test-ws-id", "bd-err")).rejects.toThrow(
         "API Error: 500 Internal Server Error",
       );
     });
@@ -112,13 +112,15 @@ describe("sessions API", () => {
     it("throws on network errors", async () => {
       mockGet.mockRejectedValueOnce(new Error("Network error"));
 
-      await expect(getTaskSessions("bd-err")).rejects.toThrow("Network error");
+      await expect(getTaskSessions("test-ws-id", "bd-err")).rejects.toThrow(
+        "Network error",
+      );
     });
 
     it("URL-encodes the task ID", async () => {
       mockGet.mockResolvedValueOnce({ data: { sessions: [] } });
 
-      await getTaskSessions("task with spaces");
+      await getTaskSessions("test-ws-id", "task with spaces");
 
       expect(mockGet).toHaveBeenCalledWith(
         "/api/tasks/task%20with%20spaces/sessions",
@@ -153,7 +155,7 @@ describe("sessions API", () => {
 
       mockGet.mockResolvedValueOnce({ data: session });
 
-      const result = await getSession("bd-123", "s1");
+      const result = await getSession("test-ws-id", "bd-123", "s1");
 
       expect(result).toEqual(session);
       expect(mockGet).toHaveBeenCalledWith("/api/tasks/bd-123/sessions/s1");
@@ -162,7 +164,7 @@ describe("sessions API", () => {
     it("returns null when data is null", async () => {
       mockGet.mockResolvedValueOnce({ data: null });
 
-      const result = await getSession("bd-123", "s-missing");
+      const result = await getSession("test-ws-id", "bd-123", "s-missing");
 
       expect(result).toBeNull();
     });
@@ -170,7 +172,7 @@ describe("sessions API", () => {
     it("returns null on 404 error", async () => {
       mockGet.mockRejectedValueOnce(new ApiError(404, "Not Found"));
 
-      const result = await getSession("bd-123", "s-nonexistent");
+      const result = await getSession("test-ws-id", "bd-123", "s-nonexistent");
 
       expect(result).toBeNull();
     });
@@ -178,7 +180,7 @@ describe("sessions API", () => {
     it("throws on non-404 errors", async () => {
       mockGet.mockRejectedValueOnce(new ApiError(500, "Internal Server Error"));
 
-      await expect(getSession("bd-123", "s1")).rejects.toThrow(
+      await expect(getSession("test-ws-id", "bd-123", "s1")).rejects.toThrow(
         "API Error: 500 Internal Server Error",
       );
     });
@@ -186,7 +188,7 @@ describe("sessions API", () => {
     it("URL-encodes both task and session IDs", async () => {
       mockGet.mockResolvedValueOnce({ data: null });
 
-      await getSession("task/id", "session/id");
+      await getSession("test-ws-id", "task/id", "session/id");
 
       expect(mockGet).toHaveBeenCalledWith(
         "/api/tasks/task%2Fid/sessions/session%2Fid",
@@ -219,7 +221,7 @@ describe("sessions API", () => {
         data: { entries },
       });
 
-      const result = await getSessionTranscript("bd-123", "s1");
+      const result = await getSessionTranscript("test-ws-id", "bd-123", "s1");
 
       expect(result).toEqual(entries);
       expect(mockGet).toHaveBeenCalledWith(
@@ -230,7 +232,7 @@ describe("sessions API", () => {
     it("returns empty array when data is null", async () => {
       mockGet.mockResolvedValueOnce({ data: null });
 
-      const result = await getSessionTranscript("bd-123", "s1");
+      const result = await getSessionTranscript("test-ws-id", "bd-123", "s1");
 
       expect(result).toEqual([]);
     });
@@ -240,7 +242,7 @@ describe("sessions API", () => {
         data: { entries: null },
       });
 
-      const result = await getSessionTranscript("bd-123", "s1");
+      const result = await getSessionTranscript("test-ws-id", "bd-123", "s1");
 
       expect(result).toEqual([]);
     });
@@ -248,7 +250,11 @@ describe("sessions API", () => {
     it("returns empty array on 404 error", async () => {
       mockGet.mockRejectedValueOnce(new ApiError(404, "Not Found"));
 
-      const result = await getSessionTranscript("bd-123", "s-missing");
+      const result = await getSessionTranscript(
+        "test-ws-id",
+        "bd-123",
+        "s-missing",
+      );
 
       expect(result).toEqual([]);
     });
@@ -256,15 +262,15 @@ describe("sessions API", () => {
     it("throws on non-404 errors", async () => {
       mockGet.mockRejectedValueOnce(new ApiError(500, "Internal Server Error"));
 
-      await expect(getSessionTranscript("bd-123", "s1")).rejects.toThrow(
-        "API Error: 500 Internal Server Error",
-      );
+      await expect(
+        getSessionTranscript("test-ws-id", "bd-123", "s1"),
+      ).rejects.toThrow("API Error: 500 Internal Server Error");
     });
 
     it("URL-encodes both IDs", async () => {
       mockGet.mockResolvedValueOnce({ data: { entries: [] } });
 
-      await getSessionTranscript("task id", "session id");
+      await getSessionTranscript("test-ws-id", "task id", "session id");
 
       expect(mockGet).toHaveBeenCalledWith(
         "/api/tasks/task%20id/sessions/session%20id/transcript",
@@ -280,7 +286,7 @@ describe("sessions API", () => {
         "diff --git a/file.ts b/file.ts\n+added line\n",
       );
 
-      const result = await getSessionDiff("bd-123", "s1");
+      const result = await getSessionDiff("test-ws-id", "bd-123", "s1");
 
       expect(result).toBe("diff --git a/file.ts b/file.ts\n+added line\n");
       expect(mockGetText).toHaveBeenCalledWith(
@@ -291,7 +297,7 @@ describe("sessions API", () => {
     it("returns null on 404", async () => {
       mockGetText.mockRejectedValueOnce(new ApiError(404, "Not Found"));
 
-      const result = await getSessionDiff("bd-123", "s-missing");
+      const result = await getSessionDiff("test-ws-id", "bd-123", "s-missing");
 
       expect(result).toBeNull();
     });
@@ -301,13 +307,15 @@ describe("sessions API", () => {
         new ApiError(500, "Internal Server Error"),
       );
 
-      await expect(getSessionDiff("bd-123", "s1")).rejects.toThrow(ApiError);
+      await expect(
+        getSessionDiff("test-ws-id", "bd-123", "s1"),
+      ).rejects.toThrow(ApiError);
     });
 
     it("returns empty string for empty diff", async () => {
       mockGetText.mockResolvedValueOnce("");
 
-      const result = await getSessionDiff("bd-123", "s1");
+      const result = await getSessionDiff("test-ws-id", "bd-123", "s1");
 
       expect(result).toBe("");
     });
@@ -315,7 +323,7 @@ describe("sessions API", () => {
     it("URL-encodes both IDs in the getText call", async () => {
       mockGetText.mockResolvedValueOnce("");
 
-      await getSessionDiff("task/id", "session/id");
+      await getSessionDiff("test-ws-id", "task/id", "session/id");
 
       expect(mockGetText).toHaveBeenCalledWith(
         "/api/tasks/task%2Fid/sessions/session%2Fid/diff",

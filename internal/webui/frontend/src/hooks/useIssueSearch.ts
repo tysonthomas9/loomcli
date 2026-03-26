@@ -24,7 +24,7 @@ export interface UseIssueSearchReturn {
   query: string;
 }
 
-export function useIssueSearch(): UseIssueSearchReturn {
+export function useIssueSearch(workspaceId: string): UseIssueSearchReturn {
   const [allIssues, setAllIssues] = useState<Issue[]>(cachedIssues ?? []);
   const [isLoading, setIsLoading] = useState(cachedIssues === null);
   const [query, setQuery] = useState("");
@@ -42,7 +42,7 @@ export function useIssueSearch(): UseIssueSearchReturn {
     async function fetchIssues() {
       // Deduplicate concurrent fetches
       if (!fetchPromise) {
-        fetchPromise = getKanbanIssues();
+        fetchPromise = getKanbanIssues(workspaceId);
       }
 
       try {
@@ -65,7 +65,7 @@ export function useIssueSearch(): UseIssueSearchReturn {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [workspaceId]);
 
   const search = useCallback((q: string) => {
     setQuery(q);

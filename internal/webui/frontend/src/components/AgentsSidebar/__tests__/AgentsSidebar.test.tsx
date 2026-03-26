@@ -1238,7 +1238,7 @@ describe("AgentsSidebar", () => {
         fireEvent.click(pushButtons[0]!);
       });
 
-      expect(mockGitPush).toHaveBeenCalledWith("nova");
+      expect(mockGitPush).toHaveBeenCalledWith(TEST_WS_ID, "nova");
     });
 
     it('Push button shows "Pushing..." while in progress', async () => {

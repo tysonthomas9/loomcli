@@ -59,7 +59,7 @@ describe("useIssueDetail", () => {
 
   describe("Initial state", () => {
     it("returns expected shape with all properties", () => {
-      const { result } = renderHook(() => useIssueDetail());
+      const { result } = renderHook(() => useIssueDetail("test-ws-id"));
 
       expect(result.current).toHaveProperty("issueDetails");
       expect(result.current).toHaveProperty("isLoading");
@@ -74,7 +74,7 @@ describe("useIssueDetail", () => {
     });
 
     it("starts with null issueDetails, not loading, no error", () => {
-      const { result } = renderHook(() => useIssueDetail());
+      const { result } = renderHook(() => useIssueDetail("test-ws-id"));
 
       expect(result.current.issueDetails).toBeNull();
       expect(result.current.isLoading).toBe(false);
@@ -90,7 +90,7 @@ describe("useIssueDetail", () => {
       });
       mockGetIssue.mockResolvedValue(testIssue);
 
-      const { result } = renderHook(() => useIssueDetail());
+      const { result } = renderHook(() => useIssueDetail("test-ws-id"));
 
       await act(async () => {
         await result.current.fetchIssue("issue-123");
@@ -100,7 +100,7 @@ describe("useIssueDetail", () => {
       expect(result.current.error).toBeNull();
       expect(result.current.isLoading).toBe(false);
       expect(mockGetIssue).toHaveBeenCalledTimes(1);
-      expect(mockGetIssue).toHaveBeenCalledWith("issue-123");
+      expect(mockGetIssue).toHaveBeenCalledWith("test-ws-id", "issue-123");
     });
 
     it("sets isLoading to true during fetch", async () => {
@@ -110,7 +110,7 @@ describe("useIssueDetail", () => {
       });
       mockGetIssue.mockReturnValue(slowPromise);
 
-      const { result } = renderHook(() => useIssueDetail());
+      const { result } = renderHook(() => useIssueDetail("test-ws-id"));
 
       // Start fetch
       act(() => {
@@ -133,7 +133,7 @@ describe("useIssueDetail", () => {
       // First call fails
       mockGetIssue.mockRejectedValueOnce(new Error("Network error"));
 
-      const { result } = renderHook(() => useIssueDetail());
+      const { result } = renderHook(() => useIssueDetail("test-ws-id"));
 
       await act(async () => {
         await result.current.fetchIssue("issue-1");
@@ -152,7 +152,7 @@ describe("useIssueDetail", () => {
     });
 
     it("does not fetch when id is empty string", async () => {
-      const { result } = renderHook(() => useIssueDetail());
+      const { result } = renderHook(() => useIssueDetail("test-ws-id"));
 
       await act(async () => {
         await result.current.fetchIssue("");
@@ -163,7 +163,9 @@ describe("useIssueDetail", () => {
     });
 
     it("fetchIssue is stable across renders", async () => {
-      const { result, rerender } = renderHook(() => useIssueDetail());
+      const { result, rerender } = renderHook(() =>
+        useIssueDetail("test-ws-id"),
+      );
 
       const initialFetchIssue = result.current.fetchIssue;
 
@@ -178,7 +180,7 @@ describe("useIssueDetail", () => {
       const testError = new Error("Network error");
       mockGetIssue.mockRejectedValue(testError);
 
-      const { result } = renderHook(() => useIssueDetail());
+      const { result } = renderHook(() => useIssueDetail("test-ws-id"));
 
       await act(async () => {
         await result.current.fetchIssue("issue-1");
@@ -191,7 +193,7 @@ describe("useIssueDetail", () => {
     it("converts non-Error thrown values to string", async () => {
       mockGetIssue.mockRejectedValue("string error");
 
-      const { result } = renderHook(() => useIssueDetail());
+      const { result } = renderHook(() => useIssueDetail("test-ws-id"));
 
       await act(async () => {
         await result.current.fetchIssue("issue-1");
@@ -207,7 +209,7 @@ describe("useIssueDetail", () => {
       });
       mockGetIssue.mockResolvedValueOnce(testIssue);
 
-      const { result } = renderHook(() => useIssueDetail());
+      const { result } = renderHook(() => useIssueDetail("test-ws-id"));
 
       await act(async () => {
         await result.current.fetchIssue("issue-1");
@@ -233,7 +235,7 @@ describe("useIssueDetail", () => {
       const testIssue = createIssueDetails();
       mockGetIssue.mockResolvedValueOnce(testIssue);
 
-      const { result } = renderHook(() => useIssueDetail());
+      const { result } = renderHook(() => useIssueDetail("test-ws-id"));
 
       await act(async () => {
         await result.current.fetchIssue("issue-1");
@@ -253,7 +255,7 @@ describe("useIssueDetail", () => {
     it("clearIssue also clears error state", async () => {
       mockGetIssue.mockRejectedValueOnce(new Error("Network error"));
 
-      const { result } = renderHook(() => useIssueDetail());
+      const { result } = renderHook(() => useIssueDetail("test-ws-id"));
 
       await act(async () => {
         await result.current.fetchIssue("issue-1");
@@ -275,7 +277,7 @@ describe("useIssueDetail", () => {
       });
       mockGetIssue.mockReturnValue(slowPromise);
 
-      const { result } = renderHook(() => useIssueDetail());
+      const { result } = renderHook(() => useIssueDetail("test-ws-id"));
 
       // Start fetch
       act(() => {
@@ -304,7 +306,9 @@ describe("useIssueDetail", () => {
     });
 
     it("clearIssue is stable across renders", async () => {
-      const { result, rerender } = renderHook(() => useIssueDetail());
+      const { result, rerender } = renderHook(() =>
+        useIssueDetail("test-ws-id"),
+      );
 
       const initialClearIssue = result.current.clearIssue;
 
@@ -339,7 +343,7 @@ describe("useIssueDetail", () => {
         .mockReturnValueOnce(firstPromise)
         .mockReturnValueOnce(secondPromise);
 
-      const { result } = renderHook(() => useIssueDetail());
+      const { result } = renderHook(() => useIssueDetail("test-ws-id"));
 
       // Start first fetch
       act(() => {
@@ -388,7 +392,7 @@ describe("useIssueDetail", () => {
         .mockReturnValueOnce(firstPromise)
         .mockReturnValueOnce(secondPromise);
 
-      const { result } = renderHook(() => useIssueDetail());
+      const { result } = renderHook(() => useIssueDetail("test-ws-id"));
 
       // Start first fetch
       act(() => {
@@ -438,7 +442,7 @@ describe("useIssueDetail", () => {
         .mockReturnValueOnce(firstPromise)
         .mockReturnValueOnce(secondPromise);
 
-      const { result } = renderHook(() => useIssueDetail());
+      const { result } = renderHook(() => useIssueDetail("test-ws-id"));
 
       // Start first fetch
       act(() => {
@@ -484,7 +488,7 @@ describe("useIssueDetail", () => {
         .mockReturnValueOnce(firstPromise)
         .mockReturnValueOnce(secondPromise);
 
-      const { result } = renderHook(() => useIssueDetail());
+      const { result } = renderHook(() => useIssueDetail("test-ws-id"));
 
       // Start first fetch
       act(() => {
@@ -526,7 +530,9 @@ describe("useIssueDetail", () => {
       });
       mockGetIssue.mockReturnValue(slowPromise);
 
-      const { result, unmount } = renderHook(() => useIssueDetail());
+      const { result, unmount } = renderHook(() =>
+        useIssueDetail("test-ws-id"),
+      );
 
       // Start fetch
       act(() => {
@@ -553,7 +559,9 @@ describe("useIssueDetail", () => {
       });
       mockGetIssue.mockReturnValue(slowPromise);
 
-      const { result, unmount } = renderHook(() => useIssueDetail());
+      const { result, unmount } = renderHook(() =>
+        useIssueDetail("test-ws-id"),
+      );
 
       // Start fetch
       act(() => {
@@ -583,7 +591,7 @@ describe("useIssueDetail", () => {
         .mockResolvedValueOnce(issue2)
         .mockResolvedValueOnce(issue3);
 
-      const { result } = renderHook(() => useIssueDetail());
+      const { result } = renderHook(() => useIssueDetail("test-ws-id"));
 
       await act(async () => {
         await result.current.fetchIssue("issue-1");
@@ -635,7 +643,7 @@ describe("useIssueDetail", () => {
 
       mockGetIssue.mockResolvedValueOnce(fullIssue);
 
-      const { result } = renderHook(() => useIssueDetail());
+      const { result } = renderHook(() => useIssueDetail("test-ws-id"));
 
       await act(async () => {
         await result.current.fetchIssue("issue-full");
@@ -659,7 +667,7 @@ describe("useIssueDetail", () => {
       });
       mockGetIssue.mockResolvedValueOnce(original);
 
-      const { result } = renderHook(() => useIssueDetail());
+      const { result } = renderHook(() => useIssueDetail("test-ws-id"));
 
       await act(async () => {
         await result.current.fetchIssue("issue-1");
@@ -727,7 +735,7 @@ describe("useIssueDetail", () => {
       });
       mockGetIssue.mockResolvedValueOnce(original);
 
-      const { result } = renderHook(() => useIssueDetail());
+      const { result } = renderHook(() => useIssueDetail("test-ws-id"));
 
       await act(async () => {
         await result.current.fetchIssue("issue-1");
@@ -761,7 +769,7 @@ describe("useIssueDetail", () => {
     });
 
     it("is a no-op when issueDetails is null", () => {
-      const { result } = renderHook(() => useIssueDetail());
+      const { result } = renderHook(() => useIssueDetail("test-ws-id"));
 
       // issueDetails starts as null
       expect(result.current.issueDetails).toBeNull();
@@ -797,7 +805,7 @@ describe("useIssueDetail", () => {
       });
       mockGetIssue.mockResolvedValueOnce(original);
 
-      const { result } = renderHook(() => useIssueDetail());
+      const { result } = renderHook(() => useIssueDetail("test-ws-id"));
 
       await act(async () => {
         await result.current.fetchIssue("issue-1");
@@ -858,7 +866,7 @@ describe("useIssueDetail", () => {
       });
       mockGetIssue.mockResolvedValueOnce(original);
 
-      const { result } = renderHook(() => useIssueDetail());
+      const { result } = renderHook(() => useIssueDetail("test-ws-id"));
 
       await act(async () => {
         await result.current.fetchIssue("issue-1");
@@ -912,7 +920,7 @@ describe("useIssueDetail", () => {
       });
       mockGetIssue.mockResolvedValueOnce(original);
 
-      const { result } = renderHook(() => useIssueDetail());
+      const { result } = renderHook(() => useIssueDetail("test-ws-id"));
 
       await act(async () => {
         await result.current.fetchIssue("issue-1");
@@ -937,7 +945,9 @@ describe("useIssueDetail", () => {
     });
 
     it("is stable across renders (referential equality)", () => {
-      const { result, rerender } = renderHook(() => useIssueDetail());
+      const { result, rerender } = renderHook(() =>
+        useIssueDetail("test-ws-id"),
+      );
 
       const initialUpdateFn = result.current.updateIssueDetails;
 

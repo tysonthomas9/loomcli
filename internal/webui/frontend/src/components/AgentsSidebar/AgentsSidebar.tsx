@@ -171,24 +171,27 @@ export function AgentsSidebar({
 
   const anyAgentPushing = Object.values(pushingAgents).some(Boolean);
 
-  const handleAgentPush = useCallback(async (agentName: string) => {
-    setPushingAgents((prev) => ({ ...prev, [agentName]: true }));
-    setAgentPushErrors((prev) => {
-      const next = { ...prev };
-      delete next[agentName];
-      return next;
-    });
-    try {
-      await gitPush(agentName);
-    } catch (err) {
-      setAgentPushErrors((prev) => ({
-        ...prev,
-        [agentName]: err instanceof ApiError ? err.statusText : "Push failed",
-      }));
-    } finally {
-      setPushingAgents((prev) => ({ ...prev, [agentName]: false }));
-    }
-  }, []);
+  const handleAgentPush = useCallback(
+    async (agentName: string) => {
+      setPushingAgents((prev) => ({ ...prev, [agentName]: true }));
+      setAgentPushErrors((prev) => {
+        const next = { ...prev };
+        delete next[agentName];
+        return next;
+      });
+      try {
+        await gitPush(workspaceId, agentName);
+      } catch (err) {
+        setAgentPushErrors((prev) => ({
+          ...prev,
+          [agentName]: err instanceof ApiError ? err.statusText : "Push failed",
+        }));
+      } finally {
+        setPushingAgents((prev) => ({ ...prev, [agentName]: false }));
+      }
+    },
+    [workspaceId],
+  );
 
   const handleToggle = useCallback(() => {
     if (!collapsible) return;
@@ -211,7 +214,7 @@ export function AgentsSidebar({
     setIsPushing(true);
     setPushError(null);
     try {
-      const data = await gitPushAll();
+      const data = await gitPushAll(workspaceId);
       if (data.failed > 0) {
         const failedNames = data.results
           .filter((r) => !r.success)

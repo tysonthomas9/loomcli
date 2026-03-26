@@ -25,11 +25,15 @@ const mockGet = vi.fn();
 const mockPost = vi.fn();
 const mockPatch = vi.fn();
 
-vi.mock("@/api/client", () => ({
-  get: (...args: unknown[]) => mockGet(...args),
-  post: (...args: unknown[]) => mockPost(...args),
-  patch: (...args: unknown[]) => mockPatch(...args),
-}));
+vi.mock("@/api/client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/api/client")>();
+  return {
+    ...actual,
+    get: (...args: unknown[]) => mockGet(...args),
+    post: (...args: unknown[]) => mockPost(...args),
+    patch: (...args: unknown[]) => mockPatch(...args),
+  };
+});
 
 describe("git API functions", () => {
   beforeEach(() => {
@@ -41,27 +45,33 @@ describe("git API functions", () => {
       const mockStatus = { branch: "main", ahead: 0, behind: 0 };
       mockGet.mockResolvedValue(mockStatus);
 
-      const result = await fetchGitStatus("nova");
+      const result = await fetchGitStatus("test-ws-id", "nova");
 
-      expect(mockGet).toHaveBeenCalledWith("/api/agents/nova/git/status");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/agents/nova/git/status",
+      );
       expect(result).toEqual(mockStatus);
     });
 
     it("encodes agent name in URL", async () => {
       mockGet.mockResolvedValue({});
 
-      await fetchGitStatus("my agent");
+      await fetchGitStatus("test-ws-id", "my agent");
 
-      expect(mockGet).toHaveBeenCalledWith("/api/agents/my%20agent/git/status");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/agents/my%20agent/git/status",
+      );
     });
 
     it("does not pass timeout options", async () => {
       mockGet.mockResolvedValue({});
 
-      await fetchGitStatus("nova");
+      await fetchGitStatus("test-ws-id", "nova");
 
       // fetchGitStatus only passes the URL, no options
-      expect(mockGet).toHaveBeenCalledWith("/api/agents/nova/git/status");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/agents/nova/git/status",
+      );
       expect(mockGet.mock.calls[0]).toHaveLength(1);
     });
   });
@@ -75,10 +85,10 @@ describe("git API functions", () => {
       };
       mockPost.mockResolvedValue(mockResult);
 
-      const result = await gitPush("nova", "main");
+      const result = await gitPush("test-ws-id", "nova", "main");
 
       expect(mockPost).toHaveBeenCalledWith(
-        "/api/agents/nova/git/push",
+        "/api/workspaces/test-ws-id/agents/nova/git/push",
         { target: "main" },
         { timeout: 60000 },
       );
@@ -88,10 +98,10 @@ describe("git API functions", () => {
     it("passes undefined target when not specified", async () => {
       mockPost.mockResolvedValue({});
 
-      await gitPush("nova");
+      await gitPush("test-ws-id", "nova");
 
       expect(mockPost).toHaveBeenCalledWith(
-        "/api/agents/nova/git/push",
+        "/api/workspaces/test-ws-id/agents/nova/git/push",
         { target: undefined },
         { timeout: 60000 },
       );
@@ -100,10 +110,10 @@ describe("git API functions", () => {
     it("encodes agent name in URL", async () => {
       mockPost.mockResolvedValue({});
 
-      await gitPush("special/agent");
+      await gitPush("test-ws-id", "special/agent");
 
       expect(mockPost).toHaveBeenCalledWith(
-        "/api/agents/special%2Fagent/git/push",
+        "/api/workspaces/test-ws-id/agents/special%2Fagent/git/push",
         { target: undefined },
         { timeout: 60000 },
       );
@@ -119,10 +129,10 @@ describe("git API functions", () => {
       };
       mockPost.mockResolvedValue(mockResult);
 
-      const result = await gitPull("falcon", "origin/main");
+      const result = await gitPull("test-ws-id", "falcon", "origin/main");
 
       expect(mockPost).toHaveBeenCalledWith(
-        "/api/agents/falcon/git/pull",
+        "/api/workspaces/test-ws-id/agents/falcon/git/pull",
         { source: "origin/main" },
         { timeout: 60000 },
       );
@@ -132,10 +142,10 @@ describe("git API functions", () => {
     it("passes undefined source when not specified", async () => {
       mockPost.mockResolvedValue({});
 
-      await gitPull("falcon");
+      await gitPull("test-ws-id", "falcon");
 
       expect(mockPost).toHaveBeenCalledWith(
-        "/api/agents/falcon/git/pull",
+        "/api/workspaces/test-ws-id/agents/falcon/git/pull",
         { source: undefined },
         { timeout: 60000 },
       );
@@ -150,10 +160,10 @@ describe("git API functions", () => {
       };
       mockPost.mockResolvedValue(mockResult);
 
-      const result = await gitSync("ember");
+      const result = await gitSync("test-ws-id", "ember");
 
       expect(mockPost).toHaveBeenCalledWith(
-        "/api/agents/ember/git/sync",
+        "/api/workspaces/test-ws-id/agents/ember/git/sync",
         {},
         { timeout: 60000 },
       );
@@ -171,10 +181,10 @@ describe("git API functions", () => {
       };
       mockPost.mockResolvedValue(mockResult);
 
-      const result = await gitCreatePR("nova", "develop");
+      const result = await gitCreatePR("test-ws-id", "nova", "develop");
 
       expect(mockPost).toHaveBeenCalledWith(
-        "/api/agents/nova/git/pr",
+        "/api/workspaces/test-ws-id/agents/nova/git/pr",
         { target: "develop" },
         { timeout: 60000 },
       );
@@ -184,10 +194,10 @@ describe("git API functions", () => {
     it("passes undefined target when not specified", async () => {
       mockPost.mockResolvedValue({});
 
-      await gitCreatePR("nova");
+      await gitCreatePR("test-ws-id", "nova");
 
       expect(mockPost).toHaveBeenCalledWith(
-        "/api/agents/nova/git/pr",
+        "/api/workspaces/test-ws-id/agents/nova/git/pr",
         { target: undefined },
         { timeout: 60000 },
       );
@@ -199,10 +209,10 @@ describe("git API functions", () => {
       const mockResult = { success: true, message: "Reset to main" };
       mockPost.mockResolvedValue(mockResult);
 
-      const result = await gitReset("nova", "main", true);
+      const result = await gitReset("test-ws-id", "nova", "main", true);
 
       expect(mockPost).toHaveBeenCalledWith(
-        "/api/agents/nova/git/reset",
+        "/api/workspaces/test-ws-id/agents/nova/git/reset",
         { branch: "main", force: true },
         { timeout: 60000 },
       );
@@ -212,10 +222,10 @@ describe("git API functions", () => {
     it("passes undefined branch and force when not specified", async () => {
       mockPost.mockResolvedValue({});
 
-      await gitReset("nova");
+      await gitReset("test-ws-id", "nova");
 
       expect(mockPost).toHaveBeenCalledWith(
-        "/api/agents/nova/git/reset",
+        "/api/workspaces/test-ws-id/agents/nova/git/reset",
         { branch: undefined, force: undefined },
         { timeout: 60000 },
       );
@@ -227,23 +237,29 @@ describe("git API functions", () => {
       const mockResult = { success: true, branch: "develop" };
       mockPatch.mockResolvedValue(mockResult);
 
-      const result = await gitUpdateTarget("nova", "develop");
+      const result = await gitUpdateTarget("test-ws-id", "nova", "develop");
 
-      expect(mockPatch).toHaveBeenCalledWith("/api/agents/nova/git/target", {
-        branch: "develop",
-      });
+      expect(mockPatch).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/agents/nova/git/target",
+        {
+          branch: "develop",
+        },
+      );
       expect(result).toEqual(mockResult);
     });
 
     it("does not pass timeout option", async () => {
       mockPatch.mockResolvedValue({});
 
-      await gitUpdateTarget("nova", "main");
+      await gitUpdateTarget("test-ws-id", "nova", "main");
 
       // patch is called with only URL and body, no options
-      expect(mockPatch).toHaveBeenCalledWith("/api/agents/nova/git/target", {
-        branch: "main",
-      });
+      expect(mockPatch).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/agents/nova/git/target",
+        {
+          branch: "main",
+        },
+      );
       expect(mockPatch.mock.calls[0]).toHaveLength(2);
     });
   });

@@ -25,9 +25,11 @@ export class SlashCommandInterceptor {
   private disposed = false;
   private escapeSeqRemaining = 0;
   private terminal: Terminal;
+  private workspaceId: string;
 
-  constructor(terminal: Terminal) {
+  constructor(terminal: Terminal, workspaceId: string) {
     this.terminal = terminal;
+    this.workspaceId = workspaceId;
   }
 
   /**
@@ -148,7 +150,7 @@ export class SlashCommandInterceptor {
           }
         } else {
           try {
-            const result = await cmd.execute(parsed.args);
+            const result = await cmd.execute(parsed.args, this.workspaceId);
             if (!this.disposed) {
               this.terminal.write(result + "\r\n");
             }

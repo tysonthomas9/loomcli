@@ -97,6 +97,10 @@ vi.mock("@/api", () => ({
   updateIssue: vi.fn(),
 }));
 
+vi.mock("@/hooks/useWorkspaceContext", () => ({
+  useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
+}));
+
 import { updateIssue } from "@/api";
 
 const mockUpdateIssue = vi.mocked(updateIssue);
@@ -270,7 +274,7 @@ describe("SplitDetailSummary", () => {
       fireEvent.click(screen.getByTestId("save-description"));
 
       await waitFor(() => {
-        expect(mockUpdateIssue).toHaveBeenCalledWith("issue-1", {
+        expect(mockUpdateIssue).toHaveBeenCalledWith("test-ws-id", "issue-1", {
           description: "new desc",
         });
       });
@@ -291,7 +295,7 @@ describe("SplitDetailSummary", () => {
       fireEvent.click(screen.getByTestId("save-description"));
 
       await waitFor(() => {
-        expect(mockUpdateIssue).toHaveBeenCalledWith("issue-1", {
+        expect(mockUpdateIssue).toHaveBeenCalledWith("test-ws-id", "issue-1", {
           description: "new desc",
         });
       });

@@ -3,12 +3,7 @@
  * Provides a simpler push model compared to WebSocket with built-in browser reconnection.
  */
 
-import {
-  getAuthToken,
-  getAuthState,
-  getActiveWorkspace,
-  initAuth,
-} from "./client";
+import { getAuthToken, getAuthState, wsUrl, initAuth } from "./client";
 
 // Track page unload to suppress false-positive SSE errors during workspace switching.
 // Without this, rapid page navigation causes the EventSource to fire error events
@@ -85,13 +80,15 @@ export class BeadsSSEClient {
   private lastEventId: number | undefined;
   private manualDisconnect = false;
   private currentSourceRepos?: string[] | undefined;
+  private workspaceId: string;
 
   private onMutation: ((mutation: MutationPayload) => void) | undefined;
   private onError: ((error: string) => void) | undefined;
   private onStateChange: ((state: ConnectionState) => void) | undefined;
   private onReconnect: ((attempt: number) => void) | undefined;
 
-  constructor(options: SSEClientOptions = {}) {
+  constructor(workspaceId: string, options: SSEClientOptions = {}) {
+    this.workspaceId = workspaceId;
     this.onMutation = options.onMutation;
     this.onError = options.onError;
     this.onStateChange = options.onStateChange;
@@ -127,7 +124,7 @@ export class BeadsSSEClient {
 
     // Use provided since value or fall back to last received event ID
     const sinceParam = since ?? this.lastEventId;
-    const url = getSSEUrl(sinceParam, sourceRepos);
+    const url = getSSEUrl(this.workspaceId, sinceParam, sourceRepos);
 
     try {
       this.eventSource = new EventSource(url);
@@ -306,14 +303,15 @@ export class BeadsSSEClient {
 
 /**
  * Get the SSE URL for the events endpoint.
+ * @param workspaceId Workspace UUID for path-based routing
  * @param since Optional timestamp (ms) for catch-up events
  */
-export function getSSEUrl(since?: number, sourceRepos?: string[]): string {
-  const workspace = getActiveWorkspace();
-  // SSE endpoint is workspace-scoped; without a workspace the server will reject
-  const base = workspace
-    ? `${window.location.origin}/api/workspaces/${encodeURIComponent(workspace)}/events`
-    : `${window.location.origin}/api/events`;
+export function getSSEUrl(
+  workspaceId: string,
+  since?: number,
+  sourceRepos?: string[],
+): string {
+  const base = `${window.location.origin}${wsUrl(workspaceId, "/events")}`;
   const params = new URLSearchParams();
   if (since !== undefined) {
     params.set("since", String(since));

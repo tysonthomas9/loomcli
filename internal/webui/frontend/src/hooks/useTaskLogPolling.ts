@@ -5,6 +5,7 @@ import { getTaskLogContent } from "@/api";
 import type { LogChunk, LogStreamState } from "./logTypes";
 
 export interface UseTaskLogPollingOptions {
+  workspaceId: string;
   taskId: string | null;
   phase: "planning" | "implementation" | null;
   enabled: boolean;
@@ -21,6 +22,7 @@ export interface UseTaskLogPollingReturn {
 }
 
 export function useTaskLogPolling({
+  workspaceId,
   taskId,
   phase,
   enabled,
@@ -66,7 +68,12 @@ export function useTaskLogPolling({
       setState(hasConnectedRef.current ? "reconnecting" : "connecting");
 
       try {
-        const snapshot = await getTaskLogContent(taskId, phase, lines);
+        const snapshot = await getTaskLogContent(
+          workspaceId,
+          taskId,
+          phase,
+          lines,
+        );
         if (cancelled) return;
 
         const text = (snapshot.lines ?? []).join("\n");
@@ -112,7 +119,7 @@ export function useTaskLogPolling({
         clearTimeout(timer);
       }
     };
-  }, [enabled, lines, phase, pollIntervalMs, reloadKey, taskId]);
+  }, [enabled, lines, phase, pollIntervalMs, reloadKey, workspaceId, taskId]);
 
   return {
     chunks,

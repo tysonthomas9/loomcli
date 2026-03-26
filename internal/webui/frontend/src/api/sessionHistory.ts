@@ -41,7 +41,9 @@ function unwrap<T>(response: ApiResult<T>): T {
  * List session history records for an issue.
  * Returns records sorted by most recent first.
  */
+// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export async function listSessionHistory(
+  _workspaceId: string,
   issueId: string,
 ): Promise<SessionRecord[]> {
   const response = await get<ApiResult<SessionRecord[]>>(
@@ -53,7 +55,9 @@ export async function listSessionHistory(
 /**
  * Get scrollback content for a completed session.
  */
+// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export async function getSessionScrollback(
+  _workspaceId: string,
   issueId: string,
   recordId: string,
 ): Promise<{ content: string; lines: number }> {

@@ -12,7 +12,7 @@ export interface SlashCommand {
   name: string;
   description: string;
   usage: string;
-  execute: (args: string) => Promise<string>;
+  execute: (args: string, workspaceId: string) => Promise<string>;
 }
 
 /**
@@ -84,7 +84,10 @@ function parseFlags(args: string): {
   return { positional: parts.join(" "), flags };
 }
 
-async function handleCreateIssue(args: string): Promise<string> {
+async function handleCreateIssue(
+  args: string,
+  workspaceId: string,
+): Promise<string> {
   if (!args.trim()) {
     return formatSystemMessage(
       `Usage: /create-issue <title> [--priority 0-4] [--type ${[...VALID_TYPES].join("|")}]`,
@@ -123,7 +126,7 @@ async function handleCreateIssue(args: string): Promise<string> {
     issueType = typeStr as IssueType;
   }
 
-  const issue = await createIssue({
+  const issue = await createIssue(workspaceId, {
     title,
     priority,
     issue_type: issueType,
@@ -134,20 +137,26 @@ async function handleCreateIssue(args: string): Promise<string> {
   );
 }
 
-async function handleAssign(args: string): Promise<string> {
+async function handleAssign(
+  args: string,
+  workspaceId: string,
+): Promise<string> {
   const parts = args.trim().split(/\s+/);
   if (parts.length < 2 || !parts[0] || !parts[1]) {
     return formatSystemMessage("Usage: /assign <issue-id> <assignee>", "info");
   }
   const [issueId, assignee] = parts;
-  await updateIssue(issueId, { assignee });
+  await updateIssue(workspaceId, issueId, { assignee });
   return formatSystemMessage(`Assigned ${issueId} to ${assignee}`, "success");
 }
 
-async function handleStatus(args: string): Promise<string> {
+async function handleStatus(
+  args: string,
+  workspaceId: string,
+): Promise<string> {
   const issueId = args.trim();
   if (issueId) {
-    const issue = await getIssue(issueId);
+    const issue = await getIssue(workspaceId, issueId);
     const lines = [
       `${issue.id}: ${issue.title}`,
       `  Status: ${issue.status}  Priority: P${issue.priority}  Type: ${issue.issue_type}`,
@@ -157,7 +166,7 @@ async function handleStatus(args: string): Promise<string> {
     return formatSystemMessage(lines.join("\n"), "info");
   }
 
-  const stats = await getStats();
+  const stats = await getStats(workspaceId);
   const lines = [
     "Project Status:",
     `  Total: ${stats.total_issues}  Open: ${stats.open_issues}  In Progress: ${stats.in_progress_issues}`,
@@ -224,7 +233,7 @@ export const COMMAND_REGISTRY: Map<string, SlashCommand> = new Map([
       description: "Show available commands",
       usage: "/help [command]",
       // help is synchronous but wraps in promise for interface consistency
-      execute: async (args: string) => handleHelp(args),
+      execute: async (args: string, _workspaceId: string) => handleHelp(args),
     },
   ],
 ]);

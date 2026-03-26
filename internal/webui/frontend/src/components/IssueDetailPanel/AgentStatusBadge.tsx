@@ -8,6 +8,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 
 import { fetchGitStatus } from "@/api/git";
 import { useAgentContext } from "@/hooks/useAgentContext";
+import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
 import { parseLoomStatus } from "@/types";
 import { getStatusDotColor, getStatusLabel } from "@/components/AgentCard";
 
@@ -36,6 +37,7 @@ export function AgentStatusBadge({
   onOpenTerminal,
 }: AgentStatusBadgeProps): JSX.Element | null {
   const { getAgentByName } = useAgentContext();
+  const { workspaceId } = useWorkspaceContext();
   const [prBranch, setPrBranch] = useState<string | null>(null);
   const mountedRef = useRef(true);
 
@@ -56,7 +58,7 @@ export function AgentStatusBadge({
 
     const fetchPr = async () => {
       try {
-        const status = await fetchGitStatus(agentName);
+        const status = await fetchGitStatus(workspaceId, agentName);
         if (mountedRef.current && status.ahead > 0) {
           setPrBranch(status.branch);
         }

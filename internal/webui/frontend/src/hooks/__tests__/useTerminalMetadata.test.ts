@@ -146,11 +146,10 @@ describe("useTerminalMetadata", () => {
         await result.current.createTab("new-sess", "New Tab", 0);
       });
 
-      expect(mockPut).toHaveBeenCalledWith(
-        "new-sess",
-        { label: "New Tab", sort_order: 0 },
-        "test-ws",
-      );
+      expect(mockPut).toHaveBeenCalledWith("test-ws", "new-sess", {
+        label: "New Tab",
+        sort_order: 0,
+      });
       expect(result.current.tabs).toHaveLength(1);
       expect(result.current.tabs[0].session_name).toBe("new-sess");
     });
@@ -185,11 +184,9 @@ describe("useTerminalMetadata", () => {
       });
 
       expect(result.current.tabs[0].label).toBe("Renamed");
-      expect(mockPatch).toHaveBeenCalledWith(
-        "sess-1",
-        { label: "Renamed" },
-        "test-ws",
-      );
+      expect(mockPatch).toHaveBeenCalledWith("test-ws", "sess-1", {
+        label: "Renamed",
+      });
     });
 
     it("rolls back label on error and sets error state", async () => {
@@ -208,11 +205,9 @@ describe("useTerminalMetadata", () => {
 
       // Verify error was set and API was called
       expect(result.current.error?.message).toBe("Patch failed");
-      expect(mockPatch).toHaveBeenCalledWith(
-        "sess-1",
-        { label: "Renamed" },
-        "test-ws",
-      );
+      expect(mockPatch).toHaveBeenCalledWith("test-ws", "sess-1", {
+        label: "Renamed",
+      });
     });
   });
 
@@ -229,11 +224,9 @@ describe("useTerminalMetadata", () => {
       });
 
       expect(result.current.tabs[0].notes).toBe("my notes");
-      expect(mockPatch).toHaveBeenCalledWith(
-        "sess-1",
-        { notes: "my notes" },
-        "test-ws",
-      );
+      expect(mockPatch).toHaveBeenCalledWith("test-ws", "sess-1", {
+        notes: "my notes",
+      });
     });
   });
 
@@ -250,11 +243,9 @@ describe("useTerminalMetadata", () => {
       });
 
       expect(result.current.tabs[0].pinned).toBe(true);
-      expect(mockPatch).toHaveBeenCalledWith(
-        "sess-1",
-        { pinned: true },
-        "test-ws",
-      );
+      expect(mockPatch).toHaveBeenCalledWith("test-ws", "sess-1", {
+        pinned: true,
+      });
     });
   });
 
@@ -321,7 +312,7 @@ describe("useTerminalMetadata", () => {
 
       expect(result.current.tabs).toHaveLength(1);
       expect(result.current.tabs[0].session_name).toBe("b");
-      expect(mockDelete).toHaveBeenCalledWith("a", "test-ws");
+      expect(mockDelete).toHaveBeenCalledWith("test-ws", "a");
     });
 
     it("sets error on delete failure", async () => {
@@ -338,7 +329,7 @@ describe("useTerminalMetadata", () => {
       });
 
       expect(result.current.error?.message).toBe("Delete failed");
-      expect(mockDelete).toHaveBeenCalledWith("sess-1", "test-ws");
+      expect(mockDelete).toHaveBeenCalledWith("test-ws", "sess-1");
     });
   });
 
@@ -355,11 +346,9 @@ describe("useTerminalMetadata", () => {
       });
 
       expect(result.current.tabs[0].issue_id).toBe("PROJ-1");
-      expect(mockPatch).toHaveBeenCalledWith(
-        "sess-1",
-        { issue_id: "PROJ-1" },
-        "test-ws",
-      );
+      expect(mockPatch).toHaveBeenCalledWith("test-ws", "sess-1", {
+        issue_id: "PROJ-1",
+      });
     });
 
     it("optimistically removes issue_id on unlink", async () => {
@@ -374,11 +363,9 @@ describe("useTerminalMetadata", () => {
       });
 
       expect(result.current.tabs[0].issue_id).toBeUndefined();
-      expect(mockPatch).toHaveBeenCalledWith(
-        "sess-1",
-        { issue_id: "" },
-        "test-ws",
-      );
+      expect(mockPatch).toHaveBeenCalledWith("test-ws", "sess-1", {
+        issue_id: "",
+      });
     });
   });
 

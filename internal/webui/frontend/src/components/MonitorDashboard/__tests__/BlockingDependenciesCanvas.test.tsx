@@ -31,6 +31,10 @@ vi.mock("@/hooks/useBlockedIssues", () => ({
   useBlockedIssues: vi.fn(),
 }));
 
+vi.mock("@/hooks/useWorkspaceContext", () => ({
+  useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
+}));
+
 // Mock React Flow components
 vi.mock("@xyflow/react", () => ({
   ReactFlow: vi.fn(({ children, onNodeClick, nodes }) => (
@@ -339,7 +343,10 @@ describe("BlockingDependenciesCanvas", () => {
     it("calls useBlockedIssues hook", () => {
       render(<BlockingDependenciesCanvas issues={[]} />);
 
-      expect(useBlockedIssues).toHaveBeenCalledWith({ enabled: true });
+      expect(useBlockedIssues).toHaveBeenCalledWith({
+        workspaceId: "test-ws-id",
+        enabled: true,
+      });
     });
 
     it("passes blocked issue IDs to useGraphData options", () => {

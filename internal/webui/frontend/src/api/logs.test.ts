@@ -36,16 +36,18 @@ describe("logs API", () => {
         data: { phases: ["planning", "implementation"] },
       });
 
-      const result = await getTaskLogPhases("beads-abc");
+      const result = await getTaskLogPhases("test-ws-id", "beads-abc");
 
       expect(result).toEqual(["planning", "implementation"]);
-      expect(mockGet).toHaveBeenCalledWith("/api/tasks/beads-abc/logs");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/tasks/beads-abc/logs",
+      );
     });
 
     it("returns empty array on 404", async () => {
       mockGet.mockRejectedValue(new ApiError(404, "Not Found"));
 
-      const result = await getTaskLogPhases("nonexistent");
+      const result = await getTaskLogPhases("test-ws-id", "nonexistent");
 
       expect(result).toEqual([]);
     });
@@ -64,17 +66,26 @@ describe("logs API", () => {
         data: { lines: ["a", "b"], line_count: 2 },
       });
 
-      const content = await getTaskLogContent("beads-abc", "planning", 25);
+      const content = await getTaskLogContent(
+        "test-ws-id",
+        "beads-abc",
+        "planning",
+        25,
+      );
       expect(content).toEqual({ lines: ["a", "b"], lineCount: 2 });
       expect(mockGet).toHaveBeenCalledWith(
-        "/api/tasks/beads-abc/logs/planning?lines=25",
+        "/api/workspaces/test-ws-id/tasks/beads-abc/logs/planning?lines=25",
       );
     });
 
     it("returns empty content for 404 responses", async () => {
       mockGet.mockRejectedValue(new ApiError(404, "Not Found"));
 
-      const content = await getTaskLogContent("missing", "implementation");
+      const content = await getTaskLogContent(
+        "test-ws-id",
+        "missing",
+        "implementation",
+      );
       expect(content).toEqual({ lines: [], lineCount: 0 });
     });
 
@@ -92,7 +103,11 @@ describe("logs API", () => {
         data: { lines: null, line_count: null },
       });
 
-      const content = await getTaskLogContent("beads-abc", "planning");
+      const content = await getTaskLogContent(
+        "test-ws-id",
+        "beads-abc",
+        "planning",
+      );
       expect(content).toEqual({ lines: [], lineCount: 0 });
     });
   });
@@ -104,7 +119,7 @@ describe("logs API", () => {
         data: { agent: "ember", mode: "tmux" },
       });
 
-      const mode = await getAgentTerminalInfo("ember");
+      const mode = await getAgentTerminalInfo("test-ws-id", "ember");
 
       expect(mode).toBe("tmux");
       expect(mockGet).toHaveBeenCalledWith("/api/agents/ember/terminal/info");
@@ -116,14 +131,14 @@ describe("logs API", () => {
         data: { token: "abc123" },
       });
 
-      const token = await getAgentTerminalToken("ember");
+      const token = await getAgentTerminalToken("test-ws-id", "ember");
 
       expect(token).toBe("abc123");
       expect(mockGet).toHaveBeenCalledWith("/api/agents/ember/terminal/token");
     });
 
     it("builds ws url for agent terminal", () => {
-      const url = getAgentTerminalWsUrl("ember", "abc123");
+      const url = getAgentTerminalWsUrl("test-ws-id", "ember", "abc123");
       expect(url).toContain("/api/agents/ember/terminal/ws?token=abc123");
       expect(url.startsWith("ws://") || url.startsWith("wss://")).toBe(true);
     });
@@ -134,20 +149,22 @@ describe("logs API", () => {
         data: { lines: ["a", "b"], line_count: 2, start_line: 1 },
       });
 
-      const archive = await getAgentLogArchive("ember", 100);
+      const archive = await getAgentLogArchive("test-ws-id", "ember", 100);
 
       expect(archive).toEqual({
         lines: ["a", "b"],
         lineCount: 2,
         startLine: 1,
       });
-      expect(mockGet).toHaveBeenCalledWith("/api/agents/ember/logs?lines=100");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/agents/ember/logs?lines=100",
+      );
     });
 
     it("returns empty results on 404 (no logs available)", async () => {
       mockGet.mockRejectedValue(new ApiError(404, "Not Found"));
 
-      const archive = await getAgentLogArchive("idle-agent", 100);
+      const archive = await getAgentLogArchive("test-ws-id", "idle-agent", 100);
 
       expect(archive).toEqual({ lines: [], lineCount: 0, startLine: 1 });
     });
@@ -166,10 +183,12 @@ describe("logs API", () => {
         data: { lines: null, line_count: null, start_line: null },
       });
 
-      const archive = await getAgentLogArchive("ember", 50);
+      const archive = await getAgentLogArchive("test-ws-id", "ember", 50);
 
       expect(archive).toEqual({ lines: [], lineCount: 0, startLine: 1 });
-      expect(mockGet).toHaveBeenCalledWith("/api/agents/ember/logs?lines=50");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/agents/ember/logs?lines=50",
+      );
     });
   });
 });

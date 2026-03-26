@@ -11,6 +11,8 @@ import type { IssueDiffStat } from "@/api";
 
 /** Options for the useIssueDiffStat hook. */
 export interface UseIssueDiffStatOptions {
+  /** Workspace ID for scoped API calls. */
+  workspaceId: string;
   /** Issue ID to fetch diff stats for. Null skips fetching. */
   issueId: string | null;
   /** Whether to fetch (default: true). */
@@ -34,7 +36,12 @@ export interface UseIssueDiffStatReturn {
 export function useIssueDiffStat(
   options: UseIssueDiffStatOptions,
 ): UseIssueDiffStatReturn {
-  const { issueId, enabled = true, pollInterval = 30000 } = options;
+  const {
+    workspaceId,
+    issueId,
+    enabled = true,
+    pollInterval = 30000,
+  } = options;
 
   const [data, setData] = useState<IssueDiffStat | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -49,7 +56,7 @@ export function useIssueDiffStat(
     setIsLoading(true);
 
     try {
-      const result = await fetchIssueDiffStat(issueId);
+      const result = await fetchIssueDiffStat(workspaceId, issueId);
       if (mountedRef.current) {
         setData(result);
         setError(null);
@@ -64,7 +71,7 @@ export function useIssueDiffStat(
       }
       fetchInProgressRef.current = false;
     }
-  }, [issueId]);
+  }, [workspaceId, issueId]);
 
   const refetch = useCallback(async () => {
     await fetchData();

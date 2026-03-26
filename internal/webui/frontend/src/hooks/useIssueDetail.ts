@@ -55,7 +55,7 @@ export interface UseIssueDetailReturn {
  * }
  * ```
  */
-export function useIssueDetail(): UseIssueDetailReturn {
+export function useIssueDetail(workspaceId: string): UseIssueDetailReturn {
   const [issueDetails, setIssueDetails] = useState<IssueDetails | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -74,40 +74,43 @@ export function useIssueDetail(): UseIssueDetailReturn {
     };
   }, []);
 
-  const fetchIssue = useCallback(async (id: string): Promise<void> => {
-    // Validate ID
-    if (!id) {
-      return;
-    }
-
-    // Increment request ID to handle concurrent requests
-    const requestId = ++currentRequestIdRef.current;
-
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const details = await getIssue(id);
-
-      // Only update state if this is the latest request and still mounted
-      if (requestId === currentRequestIdRef.current && mountedRef.current) {
-        setIssueDetails(details);
-        setError(null);
+  const fetchIssue = useCallback(
+    async (id: string): Promise<void> => {
+      // Validate ID
+      if (!id) {
+        return;
       }
-    } catch (err) {
-      // Only update state if this is the latest request and still mounted
-      if (requestId === currentRequestIdRef.current && mountedRef.current) {
-        const errorMessage = err instanceof Error ? err.message : String(err);
-        setError(errorMessage);
-        // Don't clear existing details on error - show stale data with error
+
+      // Increment request ID to handle concurrent requests
+      const requestId = ++currentRequestIdRef.current;
+
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        const details = await getIssue(workspaceId, id);
+
+        // Only update state if this is the latest request and still mounted
+        if (requestId === currentRequestIdRef.current && mountedRef.current) {
+          setIssueDetails(details);
+          setError(null);
+        }
+      } catch (err) {
+        // Only update state if this is the latest request and still mounted
+        if (requestId === currentRequestIdRef.current && mountedRef.current) {
+          const errorMessage = err instanceof Error ? err.message : String(err);
+          setError(errorMessage);
+          // Don't clear existing details on error - show stale data with error
+        }
+      } finally {
+        // Only update loading state if this is the latest request
+        if (requestId === currentRequestIdRef.current && mountedRef.current) {
+          setIsLoading(false);
+        }
       }
-    } finally {
-      // Only update loading state if this is the latest request
-      if (requestId === currentRequestIdRef.current && mountedRef.current) {
-        setIsLoading(false);
-      }
-    }
-  }, []);
+    },
+    [workspaceId],
+  );
 
   const clearIssue = useCallback(() => {
     currentRequestIdRef.current++; // Cancel any in-flight requests

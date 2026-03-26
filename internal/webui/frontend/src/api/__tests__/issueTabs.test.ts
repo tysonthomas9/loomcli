@@ -66,7 +66,7 @@ describe("issueTabs API", () => {
         data: state,
       });
 
-      const result = await fetchIssueTabState("PROJ-123");
+      const result = await fetchIssueTabState("test-ws-id", "PROJ-123");
 
       expect(result).toEqual(state);
       expect(mockGet).toHaveBeenCalledWith("/api/issues/PROJ-123/tabs");
@@ -78,7 +78,7 @@ describe("issueTabs API", () => {
         data: null,
       });
 
-      const result = await fetchIssueTabState("PROJ-456");
+      const result = await fetchIssueTabState("test-ws-id", "PROJ-456");
 
       expect(result).toBeNull();
       expect(mockGet).toHaveBeenCalledWith("/api/issues/PROJ-456/tabs");
@@ -90,10 +90,12 @@ describe("issueTabs API", () => {
         error: "issue tab state not available (no Redis)",
       });
 
-      await expect(fetchIssueTabState("PROJ-789")).rejects.toThrow(ApiError);
-      await expect(fetchIssueTabState("PROJ-789")).rejects.toThrow(
-        "issue tab state not available (no Redis)",
-      );
+      await expect(
+        fetchIssueTabState("test-ws-id", "PROJ-789"),
+      ).rejects.toThrow(ApiError);
+      await expect(
+        fetchIssueTabState("test-ws-id", "PROJ-789"),
+      ).rejects.toThrow("issue tab state not available (no Redis)");
     });
 
     it("URL-encodes the issue ID", async () => {
@@ -102,7 +104,7 @@ describe("issueTabs API", () => {
         data: null,
       });
 
-      await fetchIssueTabState("issue with spaces");
+      await fetchIssueTabState("test-ws-id", "issue with spaces");
 
       expect(mockGet).toHaveBeenCalledWith(
         "/api/issues/issue%20with%20spaces/tabs",
@@ -112,9 +114,9 @@ describe("issueTabs API", () => {
     it("propagates network errors from client", async () => {
       mockGet.mockRejectedValue(new ApiError(500, "Internal Server Error"));
 
-      await expect(fetchIssueTabState("PROJ-ERR")).rejects.toThrow(
-        "API Error: 500 Internal Server Error",
-      );
+      await expect(
+        fetchIssueTabState("test-ws-id", "PROJ-ERR"),
+      ).rejects.toThrow("API Error: 500 Internal Server Error");
     });
   });
 
@@ -143,7 +145,7 @@ describe("issueTabs API", () => {
         { id: "details", type: "details", label: "Details", sort_order: 0 },
       ];
 
-      await saveIssueTabState("PROJ-100", tabs, "details");
+      await saveIssueTabState("test-ws-id", "PROJ-100", tabs, "details");
 
       expect(mockPut).toHaveBeenCalledWith("/api/issues/PROJ-100/tabs", {
         tabs,
@@ -169,7 +171,7 @@ describe("issueTabs API", () => {
         },
       ];
 
-      await saveIssueTabState("PROJ-200", tabs, "terminal-s1");
+      await saveIssueTabState("test-ws-id", "PROJ-200", tabs, "terminal-s1");
 
       expect(mockPut).toHaveBeenCalledWith("/api/issues/PROJ-200/tabs", {
         tabs,
@@ -180,7 +182,12 @@ describe("issueTabs API", () => {
     it("URL-encodes the issue ID", async () => {
       mockPut.mockResolvedValue({ success: true, data: {} });
 
-      await saveIssueTabState("issue/with/slashes", [], "details");
+      await saveIssueTabState(
+        "test-ws-id",
+        "issue/with/slashes",
+        [],
+        "details",
+      );
 
       expect(mockPut).toHaveBeenCalledWith(
         "/api/issues/issue%2Fwith%2Fslashes/tabs",
@@ -195,7 +202,7 @@ describe("issueTabs API", () => {
     it("calls correct endpoint", async () => {
       mockDel.mockResolvedValue({ success: true });
 
-      await deleteIssueTabState("PROJ-300");
+      await deleteIssueTabState("test-ws-id", "PROJ-300");
 
       expect(mockDel).toHaveBeenCalledWith("/api/issues/PROJ-300/tabs");
     });
@@ -203,7 +210,7 @@ describe("issueTabs API", () => {
     it("URL-encodes the issue ID", async () => {
       mockDel.mockResolvedValue({ success: true });
 
-      await deleteIssueTabState("issue with spaces");
+      await deleteIssueTabState("test-ws-id", "issue with spaces");
 
       expect(mockDel).toHaveBeenCalledWith(
         "/api/issues/issue%20with%20spaces/tabs",
@@ -213,9 +220,9 @@ describe("issueTabs API", () => {
     it("propagates errors from client", async () => {
       mockDel.mockRejectedValue(new ApiError(503, "Service Unavailable"));
 
-      await expect(deleteIssueTabState("PROJ-ERR")).rejects.toThrow(
-        "API Error: 503 Service Unavailable",
-      );
+      await expect(
+        deleteIssueTabState("test-ws-id", "PROJ-ERR"),
+      ).rejects.toThrow("API Error: 503 Service Unavailable");
     });
   });
 });

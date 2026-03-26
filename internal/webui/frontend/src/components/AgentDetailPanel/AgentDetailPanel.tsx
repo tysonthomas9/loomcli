@@ -21,6 +21,7 @@ import {
   useRegisterEscapeLayer,
   LAYER_AGENT_PANEL,
 } from "@/hooks";
+import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
 import type { LoomAgentStatus, LoomTaskInfo } from "@/types";
 import { parseLoomStatus } from "@/types";
 
@@ -81,6 +82,7 @@ export function AgentDetailPanel({
   onClose,
   onTaskClick,
 }: AgentDetailPanelProps): JSX.Element {
+  const { workspaceId } = useWorkspaceContext();
   const panelRef = useRef<HTMLElement>(null);
   const [activeTab, setActiveTab] = useState<TabType>("info");
 
@@ -97,6 +99,7 @@ export function AgentDetailPanel({
     hasMoreLines,
     isLoadingMore,
   } = useAgentTerminalLogs({
+    workspaceId,
     agentName,
     enabled: isOpen && activeTab === "logs" && agentName !== null,
   });
@@ -136,7 +139,7 @@ export function AgentDetailPanel({
     loadingCommits,
     handleShowAll: handleShowAllCommits,
     handleShowLess,
-  } = useExpandedCommits(agentName);
+  } = useExpandedCommits(workspaceId, agentName);
 
   // Find the agent from the array
   const agent = agentName

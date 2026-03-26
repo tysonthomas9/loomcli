@@ -50,8 +50,8 @@ export interface UseIssuesOptions {
   subscribeOnConnect?: boolean;
   /** Source repo filter — when set, refetch uses source_repos and SSE reconnects with updated URL */
   sourceRepos?: string[] | undefined;
-  /** Active workspace name — triggers re-fetch when workspace changes (header set automatically by fetchApi) */
-  workspaceName?: string | null;
+  /** Workspace UUID — required for workspace-scoped API calls */
+  workspaceId: string;
 }
 
 /**
@@ -123,7 +123,7 @@ export interface UseIssuesReturn {
  * }
  * ```
  */
-export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
+export function useIssues(options: UseIssuesOptions): UseIssuesReturn {
   const {
     filter,
     mode = "ready",
@@ -131,7 +131,7 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
     autoFetch = true,
     autoConnect = true,
     sourceRepos,
-    workspaceName,
+    workspaceId,
     // Note: subscribeOnConnect is deprecated with SSE - connection equals subscription
   } = options;
 
@@ -204,10 +204,10 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
   }, [sourceRepos]);
 
   // Track active workspace for workspace-level SSE filtering
-  const workspaceNameRef = useRef(workspaceName);
+  const workspaceIdRef = useRef(workspaceId);
   useEffect(() => {
-    workspaceNameRef.current = workspaceName;
-  }, [workspaceName]);
+    workspaceIdRef.current = workspaceId;
+  }, [workspaceId]);
 
   const gatedHandleMutation = useCallback(
     (mutation: MutationPayload) => {
@@ -218,7 +218,7 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
 
       // Gate: only process mutations for the active workspace
       // Allow mutations without workspace_id (legacy/single-workspace mode)
-      const activeWs = workspaceNameRef.current;
+      const activeWs = workspaceIdRef.current;
       if (
         activeWs &&
         mutation.workspace_id &&
@@ -271,6 +271,7 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
     lastEventId,
     retryNow,
   } = useSSE({
+    workspaceId,
     autoConnect,
     since:
       fetchTimestampRef.current > 0 ? fetchTimestampRef.current : undefined,
@@ -303,11 +304,11 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
 
       let data: Issue[];
       if (mode === "kanban") {
-        data = await getKanbanIssues(effectiveFilter);
+        data = await getKanbanIssues(workspaceId, effectiveFilter);
       } else if (mode === "graph") {
-        data = await fetchGraphIssues(effectiveGraphFilter);
+        data = await fetchGraphIssues(workspaceId, effectiveGraphFilter);
       } else {
-        data = await getReadyIssues(effectiveFilter);
+        data = await getReadyIssues(workspaceId, effectiveFilter);
       }
       if (!mountedRef.current) return;
 
@@ -375,10 +376,7 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
       fetchingRef.current = false;
       deletedDuringFetchRef.current.clear();
     }
-    // workspaceName is intentionally in deps: triggers re-fetch when workspace changes
-    // (the Workspace header is set at module level, not used directly in the callback)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filter, mode, graphFilter, sourceRepos, workspaceName]);
+  }, [filter, mode, graphFilter, sourceRepos, workspaceId]);
 
   // Keep refetchRef in sync with the latest refetch callback
   refetchRef.current = refetch;
@@ -511,7 +509,7 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
       setIssuesMap(newMap);
 
       try {
-        await apiUpdateIssue(issueId, { status: newStatus });
+        await apiUpdateIssue(workspaceId, issueId, { status: newStatus });
         // Confirm: clear optimistic state, flush buffered SSE mutations
         handle.confirm();
       } catch (err) {

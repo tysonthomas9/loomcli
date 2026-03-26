@@ -1,4 +1,4 @@
-import { get, post, put, patch, del, ApiError } from "./client";
+import { get, post, put, patch, del, ApiError, wsUrl } from "./client";
 
 // ============= Types =============
 
@@ -31,10 +31,13 @@ function unwrap<T>(response: ApiResult<T>): T {
 
 // ============= API Functions =============
 
+// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 /**
  * List active terminal sessions from GET /api/terminal/sessions.
  */
-export async function listTerminalSessions(): Promise<TerminalSessionInfo[]> {
+export async function listTerminalSessions(
+  _workspaceId: string,
+): Promise<TerminalSessionInfo[]> {
   const response = await get<ApiResult<{ sessions: TerminalSessionInfo[] }>>(
     "/api/terminal/sessions",
   );
@@ -45,7 +48,9 @@ export async function listTerminalSessions(): Promise<TerminalSessionInfo[]> {
  * Fetch a one-time terminal auth token for the given session.
  * Returns null on failure (WebSocket will be rejected by server).
  */
+// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export async function fetchTerminalToken(
+  _workspaceId: string,
   sessionName: string,
 ): Promise<string | null> {
   try {
@@ -61,7 +66,9 @@ export async function fetchTerminalToken(
 /**
  * Build the WebSocket URL for the terminal relay endpoint.
  */
+// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export function buildTerminalWsUrl(
+  _workspaceId: string,
   sessionName: string,
   token: string | null,
 ): string {
@@ -84,7 +91,9 @@ export function buildTerminalWsUrl(
  * Pre-create a tmux session for the given backend via POST /api/terminal/spawn.
  * Used for shell tabs to ensure the correct command before WebSocket connects.
  */
+// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export async function spawnTerminalSession(
+  _workspaceId: string,
   sessionName: string,
   backend: string,
 ): Promise<void> {
@@ -100,7 +109,9 @@ export async function spawnTerminalSession(
  * Restart a terminal session with the current backend.
  * POST /api/terminal/restart?session=<name>&token=<token>
  */
+// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export async function restartTerminalSession(
+  _workspaceId: string,
   sessionName: string,
   token: string | null,
 ): Promise<{ success: boolean; backend: string }> {
@@ -117,7 +128,9 @@ export async function restartTerminalSession(
  * Forcibly kill a terminal session (for hung backends).
  * POST /api/terminal/kill?session=<name>&token=<token>
  */
+// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export async function killTerminalSession(
+  _workspaceId: string,
   sessionName: string,
   token: string | null,
 ): Promise<void> {
@@ -134,7 +147,9 @@ export async function killTerminalSession(
  * Check whether a terminal session's backend is alive.
  * GET /api/terminal/session-status?session=<name>
  */
+// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export async function getSessionStatus(
+  _workspaceId: string,
   sessionName: string,
 ): Promise<{ alive: boolean; exit_reason?: string }> {
   return get<{ alive: boolean; exit_reason?: string }>(
@@ -155,7 +170,9 @@ export interface IssueContext {
 /**
  * Seed a terminal session with issue context via POST /api/terminal/sessions/{name}/seed.
  */
+// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export async function seedTerminalSession(
+  _workspaceId: string,
   sessionName: string,
   context: IssueContext,
 ): Promise<void> {
@@ -185,11 +202,11 @@ export interface TabMetadata {
  * Returns an empty array when tab metadata is unavailable (404 = no Redis, 503 = Redis down).
  */
 export async function listTabMetadata(
-  workspace: string,
+  workspaceId: string,
 ): Promise<TabMetadata[]> {
   try {
     const response = await get<ApiResult<TabMetadata[]>>(
-      `/api/workspaces/${encodeURIComponent(workspace)}/terminal/tabs`,
+      wsUrl(workspaceId, "/terminal/tabs"),
     );
     return unwrap(response);
   } catch (error) {
@@ -207,11 +224,11 @@ export async function listTabMetadata(
  * Get metadata for a single tab from GET /api/workspaces/{workspace}/terminal/tabs/{session}.
  */
 export async function getTabMetadata(
+  workspaceId: string,
   session: string,
-  workspace: string,
 ): Promise<TabMetadata> {
   const response = await get<ApiResult<TabMetadata>>(
-    `/api/workspaces/${encodeURIComponent(workspace)}/terminal/tabs/${encodeURIComponent(session)}`,
+    wsUrl(workspaceId, `/terminal/tabs/${encodeURIComponent(session)}`),
   );
   return unwrap(response);
 }
@@ -220,6 +237,7 @@ export async function getTabMetadata(
  * Partially update tab metadata via PATCH /api/workspaces/{workspace}/terminal/tabs/{session}.
  */
 export async function patchTabMetadata(
+  workspaceId: string,
   session: string,
   fields: Partial<{
     label: string;
@@ -228,10 +246,9 @@ export async function patchTabMetadata(
     pinned: boolean;
     issue_id: string;
   }>,
-  workspace: string,
 ): Promise<TabMetadata> {
   const response = await patch<ApiResult<TabMetadata>>(
-    `/api/workspaces/${encodeURIComponent(workspace)}/terminal/tabs/${encodeURIComponent(session)}`,
+    wsUrl(workspaceId, `/terminal/tabs/${encodeURIComponent(session)}`),
     fields,
   );
   return unwrap(response);
@@ -241,12 +258,12 @@ export async function patchTabMetadata(
  * Create or replace tab metadata via PUT /api/workspaces/{workspace}/terminal/tabs/{session}.
  */
 export async function putTabMetadata(
+  workspaceId: string,
   session: string,
   fields: { label: string; sort_order: number; notes?: string },
-  workspace: string,
 ): Promise<TabMetadata> {
   const response = await put<ApiResult<TabMetadata>>(
-    `/api/workspaces/${encodeURIComponent(workspace)}/terminal/tabs/${encodeURIComponent(session)}`,
+    wsUrl(workspaceId, `/terminal/tabs/${encodeURIComponent(session)}`),
     fields,
   );
   return unwrap(response);
@@ -256,11 +273,11 @@ export async function putTabMetadata(
  * Delete tab metadata via DELETE /api/workspaces/{workspace}/terminal/tabs/{session}.
  */
 export async function deleteTabMetadata(
+  workspaceId: string,
   session: string,
-  workspace: string,
 ): Promise<void> {
   await del<ApiResult<undefined>>(
-    `/api/workspaces/${encodeURIComponent(workspace)}/terminal/tabs/${encodeURIComponent(session)}`,
+    wsUrl(workspaceId, `/terminal/tabs/${encodeURIComponent(session)}`),
   );
 }
 
@@ -268,7 +285,11 @@ export async function deleteTabMetadata(
  * Schedule a deferred tmux session kill with grace period.
  * POST /api/terminal/sessions/{session}/kill
  */
-export async function scheduleSessionKill(sessionName: string): Promise<void> {
+// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
+export async function scheduleSessionKill(
+  _workspaceId: string,
+  sessionName: string,
+): Promise<void> {
   await post<{ success: boolean }>(
     `/api/terminal/sessions/${encodeURIComponent(sessionName)}/kill`,
     {},
@@ -283,11 +304,11 @@ export async function scheduleSessionKill(sessionName: string): Promise<void> {
  * Returns an empty map when tab metadata is unavailable (404 = no Redis, 503 = Redis down).
  */
 export async function listSessionsByIssue(
-  workspace: string,
+  workspaceId: string,
 ): Promise<Record<string, string[]>> {
   try {
     const response = await get<ApiResult<Record<string, string[]>>>(
-      `/api/workspaces/${encodeURIComponent(workspace)}/terminal/sessions/by-issue`,
+      wsUrl(workspaceId, "/terminal/sessions/by-issue"),
     );
     return unwrap(response);
   } catch (error) {
@@ -305,7 +326,8 @@ export async function listSessionsByIssue(
  * Close all terminal sessions via POST /api/terminal/sessions/close-all.
  * Kills all tmux sessions and clears all tab metadata.
  */
-export async function closeAllSessions(): Promise<void> {
+// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
+export async function closeAllSessions(_workspaceId: string): Promise<void> {
   await post<{ success: boolean }>("/api/terminal/sessions/close-all", {});
 }
 
@@ -315,7 +337,9 @@ export async function closeAllSessions(): Promise<void> {
  * Fetch scrollback content for a terminal session.
  * GET /api/terminal/sessions/{session}/scrollback
  */
+// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export async function fetchScrollback(
+  _workspaceId: string,
   sessionName: string,
 ): Promise<{ content: string; lines: number }> {
   const response = await get<ApiResult<{ content: string; lines: number }>>(
@@ -336,7 +360,9 @@ export interface ScrollbackInfo {
  * Get scrollback buffer info for a terminal session.
  * GET /api/terminal/sessions/{session}/scrollback-info
  */
+// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export async function getScrollbackInfo(
+  _workspaceId: string,
   sessionName: string,
 ): Promise<ScrollbackInfo> {
   return get<ScrollbackInfo>(
@@ -348,7 +374,9 @@ export async function getScrollbackInfo(
  * Export session scrollback as a downloadable file.
  * Returns the URL for direct browser download.
  */
+// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export function getExportUrl(
+  _workspaceId: string,
   sessionName: string,
   format: "txt" | "md" = "txt",
 ): string {
@@ -361,7 +389,10 @@ export function getExportUrl(
  * Get persisted terminal UI state (active tab).
  * GET /api/terminal/state
  */
-export async function getTerminalState(): Promise<{ active_tab: string }> {
+// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
+export async function getTerminalState(
+  _workspaceId: string,
+): Promise<{ active_tab: string }> {
   return get<{ active_tab: string }>("/api/terminal/state");
 }
 
@@ -369,8 +400,12 @@ export async function getTerminalState(): Promise<{ active_tab: string }> {
  * Persist terminal UI state (active tab).
  * PATCH /api/terminal/state
  */
-export async function patchTerminalState(state: {
-  active_tab: string;
-}): Promise<void> {
+// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
+export async function patchTerminalState(
+  _workspaceId: string,
+  state: {
+    active_tab: string;
+  },
+): Promise<void> {
   await patch<{ active_tab: string }>("/api/terminal/state", state);
 }

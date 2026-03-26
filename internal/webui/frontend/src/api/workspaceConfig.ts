@@ -3,7 +3,7 @@
  * Interfaces with PATCH /api/workspace/{name}/config/backend.
  */
 
-import { patch, ApiError } from "./client";
+import { patch, ApiError, wsUrl } from "./client";
 import { refreshWorkspace, type WorkspaceData } from "./workspace";
 
 interface ApiSuccess<T> {
@@ -23,11 +23,11 @@ type ApiResult<T> = ApiSuccess<T> | ApiFailure;
  * and returns refreshed workspace data.
  */
 export async function updateWorkspaceBackend(
-  workspaceName: string,
+  workspaceId: string,
   backend: string,
 ): Promise<WorkspaceData> {
   const response = await patch<ApiResult<WorkspaceData>>(
-    `/api/workspace/${encodeURIComponent(workspaceName)}/config/backend`,
+    wsUrl(workspaceId, "/config/backend"),
     { backend },
   );
   if (!response.success) {

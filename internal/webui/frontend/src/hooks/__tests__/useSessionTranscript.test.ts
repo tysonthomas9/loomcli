@@ -54,7 +54,7 @@ describe("useSessionTranscript", () => {
   describe("initial state", () => {
     it("returns empty entries when taskId is null", async () => {
       const { result } = renderHook(() =>
-        useSessionTranscript(null, "sess-1", false),
+        useSessionTranscript("test-ws-id", null, "sess-1", false),
       );
 
       expect(result.current.entries).toEqual([]);
@@ -68,7 +68,7 @@ describe("useSessionTranscript", () => {
 
     it("returns empty entries when sessionId is null", async () => {
       const { result } = renderHook(() =>
-        useSessionTranscript("task-1", null, false),
+        useSessionTranscript("test-ws-id", "task-1", null, false),
       );
 
       expect(result.current.entries).toEqual([]);
@@ -85,12 +85,16 @@ describe("useSessionTranscript", () => {
       mockGetTranscript.mockResolvedValueOnce(entries);
 
       const { result } = renderHook(() =>
-        useSessionTranscript("task-1", "sess-1", false),
+        useSessionTranscript("test-ws-id", "task-1", "sess-1", false),
       );
 
       await flushPromises();
 
-      expect(mockGetTranscript).toHaveBeenCalledWith("task-1", "sess-1");
+      expect(mockGetTranscript).toHaveBeenCalledWith(
+        "test-ws-id",
+        "task-1",
+        "sess-1",
+      );
       expect(result.current.entries).toEqual(entries);
       expect(result.current.isLoading).toBe(false);
       expect(result.current.error).toBeNull();
@@ -101,19 +105,27 @@ describe("useSessionTranscript", () => {
 
       const { rerender } = renderHook(
         ({ taskId }: { taskId: string }) =>
-          useSessionTranscript(taskId, "sess-1", false),
+          useSessionTranscript("test-ws-id", taskId, "sess-1", false),
         { initialProps: { taskId: "task-1" } },
       );
 
       await flushPromises();
-      expect(mockGetTranscript).toHaveBeenCalledWith("task-1", "sess-1");
+      expect(mockGetTranscript).toHaveBeenCalledWith(
+        "test-ws-id",
+        "task-1",
+        "sess-1",
+      );
 
       mockGetTranscript.mockResolvedValueOnce([createMockEntry({ seq: 2 })]);
 
       rerender({ taskId: "task-2" });
       await flushPromises();
 
-      expect(mockGetTranscript).toHaveBeenLastCalledWith("task-2", "sess-1");
+      expect(mockGetTranscript).toHaveBeenLastCalledWith(
+        "test-ws-id",
+        "task-2",
+        "sess-1",
+      );
     });
 
     it("refetches when sessionId changes", async () => {
@@ -121,7 +133,7 @@ describe("useSessionTranscript", () => {
 
       const { rerender } = renderHook(
         ({ sessionId }: { sessionId: string }) =>
-          useSessionTranscript("task-1", sessionId, false),
+          useSessionTranscript("test-ws-id", "task-1", sessionId, false),
         { initialProps: { sessionId: "sess-1" } },
       );
 
@@ -132,7 +144,11 @@ describe("useSessionTranscript", () => {
       rerender({ sessionId: "sess-2" });
       await flushPromises();
 
-      expect(mockGetTranscript).toHaveBeenLastCalledWith("task-1", "sess-2");
+      expect(mockGetTranscript).toHaveBeenLastCalledWith(
+        "test-ws-id",
+        "task-1",
+        "sess-2",
+      );
     });
   });
 
@@ -140,7 +156,9 @@ describe("useSessionTranscript", () => {
     it("polls every 3s when isActive is true", async () => {
       mockGetTranscript.mockResolvedValueOnce([createMockEntry()]);
 
-      renderHook(() => useSessionTranscript("task-1", "sess-1", true));
+      renderHook(() =>
+        useSessionTranscript("test-ws-id", "task-1", "sess-1", true),
+      );
 
       await flushPromises();
       expect(mockGetTranscript).toHaveBeenCalledTimes(1);
@@ -161,7 +179,9 @@ describe("useSessionTranscript", () => {
     it("does not poll when isActive is false", async () => {
       mockGetTranscript.mockResolvedValueOnce([createMockEntry()]);
 
-      renderHook(() => useSessionTranscript("task-1", "sess-1", false));
+      renderHook(() =>
+        useSessionTranscript("test-ws-id", "task-1", "sess-1", false),
+      );
 
       await flushPromises();
       expect(mockGetTranscript).toHaveBeenCalledTimes(1);
@@ -179,7 +199,7 @@ describe("useSessionTranscript", () => {
 
       const { rerender } = renderHook(
         ({ active }: { active: boolean }) =>
-          useSessionTranscript("task-1", "sess-1", active),
+          useSessionTranscript("test-ws-id", "task-1", "sess-1", active),
         { initialProps: { active: false } },
       );
 
@@ -210,7 +230,7 @@ describe("useSessionTranscript", () => {
       mockGetTranscript.mockRejectedValueOnce(new Error("Fetch failed"));
 
       const { result } = renderHook(() =>
-        useSessionTranscript("task-1", "sess-1", false),
+        useSessionTranscript("test-ws-id", "task-1", "sess-1", false),
       );
 
       await flushPromises();
@@ -224,7 +244,7 @@ describe("useSessionTranscript", () => {
       mockGetTranscript.mockRejectedValueOnce("string error");
 
       const { result } = renderHook(() =>
-        useSessionTranscript("task-1", "sess-1", false),
+        useSessionTranscript("test-ws-id", "task-1", "sess-1", false),
       );
 
       await flushPromises();
@@ -237,7 +257,7 @@ describe("useSessionTranscript", () => {
       mockGetTranscript.mockRejectedValueOnce(new Error("Failed"));
 
       const { result } = renderHook(() =>
-        useSessionTranscript("task-1", "sess-1", true),
+        useSessionTranscript("test-ws-id", "task-1", "sess-1", true),
       );
 
       await flushPromises();
@@ -259,7 +279,7 @@ describe("useSessionTranscript", () => {
       mockGetTranscript.mockResolvedValueOnce([createMockEntry()]);
 
       const { unmount } = renderHook(() =>
-        useSessionTranscript("task-1", "sess-1", true),
+        useSessionTranscript("test-ws-id", "task-1", "sess-1", true),
       );
 
       await flushPromises();
@@ -285,7 +305,7 @@ describe("useSessionTranscript", () => {
       );
 
       const { result, unmount } = renderHook(() =>
-        useSessionTranscript("task-1", "sess-1", false),
+        useSessionTranscript("test-ws-id", "task-1", "sess-1", false),
       );
 
       unmount();
@@ -308,7 +328,7 @@ describe("useSessionTranscript", () => {
         }: {
           taskId: string | null;
           sessionId: string | null;
-        }) => useSessionTranscript(taskId, sessionId, false),
+        }) => useSessionTranscript("test-ws-id", taskId, sessionId, false),
         {
           initialProps: {
             taskId: "task-1" as string | null,

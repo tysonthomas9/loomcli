@@ -75,14 +75,15 @@ export function EpicTaskTree({
   backend,
   onTalkToLead,
 }: EpicTaskTreeProps): JSX.Element {
+  const { workspaceId } = useWorkspaceContext();
   const { epics, orphanTasks, isLoading, refetch } = useWorkspaceTree(
     workspaceName,
     activeFilter,
     sourceRepos,
+    workspaceId,
   );
 
   const { showToast } = useToast();
-  const { workspaceId } = useWorkspaceContext();
 
   const [collapseState, setCollapseState] = useState<Record<string, boolean>>(
     () => loadCollapseState(getLastWorkspaceId()),
@@ -114,8 +115,8 @@ export function EpicTaskTree({
   const renameInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleCreateEpic = useCallback(
-    (title: string) => createWorkspaceEpic(workspaceName, title),
-    [workspaceName],
+    (title: string) => createWorkspaceEpic(workspaceId, title),
+    [workspaceId],
   );
 
   const addEpic = useInlineCreate({
@@ -218,7 +219,7 @@ export function EpicTaskTree({
 
     setIsSaving(true);
     try {
-      await updateIssue(editingId, { title: trimmed });
+      await updateIssue(workspaceId, editingId, { title: trimmed });
       setEditingId(null);
       setEditingType(null);
       setDraftTitle("");
@@ -254,7 +255,7 @@ export function EpicTaskTree({
     if (!contextMenu) return;
     const { id, type } = contextMenu;
     try {
-      await closeIssue(id);
+      await closeIssue(workspaceId, id);
       await refetch();
       showToast(`${type === "epic" ? "Epic" : "Task"} marked as done`, {
         type: "success",
@@ -268,7 +269,7 @@ export function EpicTaskTree({
     if (!contextMenu) return;
     const { id, type } = contextMenu;
     try {
-      await updateIssue(id, { status: "tombstone" });
+      await updateIssue(workspaceId, id, { status: "tombstone" });
       await refetch();
       showToast(`${type === "epic" ? "Epic" : "Task"} archived`, {
         type: "success",

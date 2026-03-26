@@ -2,7 +2,7 @@
  * API functions for log streaming endpoints.
  */
 
-import { ApiError, get } from "./client";
+import { ApiError, get, wsUrl } from "./client";
 
 /**
  * Response from GET /api/tasks/{id}/logs
@@ -53,10 +53,13 @@ interface AgentLogContentResponse {
  * @param taskId The task ID (e.g., "beads-abc123")
  * @returns Array of available phases (e.g., ["planning", "implementation"])
  */
-export async function getTaskLogPhases(taskId: string): Promise<string[]> {
+export async function getTaskLogPhases(
+  workspaceId: string,
+  taskId: string,
+): Promise<string[]> {
   try {
     const data = await get<LogPhaseResponse>(
-      `/api/tasks/${encodeURIComponent(taskId)}/logs`,
+      wsUrl(workspaceId, `/tasks/${encodeURIComponent(taskId)}/logs`),
     );
     return data.data.phases;
   } catch (err) {
@@ -71,13 +74,17 @@ export async function getTaskLogPhases(taskId: string): Promise<string[]> {
  * Fetch task log snapshot content for a single phase.
  */
 export async function getTaskLogContent(
+  workspaceId: string,
   taskId: string,
   phase: "planning" | "implementation",
   lines = 500,
 ): Promise<{ lines: string[]; lineCount: number }> {
   try {
     const data = await get<TaskLogContentResponse>(
-      `/api/tasks/${encodeURIComponent(taskId)}/logs/${encodeURIComponent(phase)}?lines=${lines}`,
+      wsUrl(
+        workspaceId,
+        `/tasks/${encodeURIComponent(taskId)}/logs/${encodeURIComponent(phase)}?lines=${lines}`,
+      ),
     );
     return {
       lines: Array.isArray(data.data?.lines) ? data.data.lines : [],
@@ -95,7 +102,9 @@ export async function getTaskLogContent(
 /**
  * Fetch whether agent logs should use live tmux streaming or archive fallback.
  */
+// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export async function getAgentTerminalInfo(
+  _workspaceId: string,
   agentName: string,
 ): Promise<"tmux" | "archive"> {
   const response = await get<AgentTerminalInfoResponse>(
@@ -110,7 +119,9 @@ export async function getAgentTerminalInfo(
 /**
  * Fetch one-time WebSocket auth token for agent terminal stream.
  */
+// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export async function getAgentTerminalToken(
+  _workspaceId: string,
   agentName: string,
 ): Promise<string> {
   const response = await get<AgentTerminalTokenResponse>(
@@ -125,7 +136,9 @@ export async function getAgentTerminalToken(
 /**
  * Build WebSocket URL for agent terminal stream.
  */
+// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export function getAgentTerminalWsUrl(
+  _workspaceId: string,
   agentName: string,
   token: string,
 ): string {
@@ -144,11 +157,15 @@ export function getAgentTerminalWsUrl(
  * (for paginated backward scrolling).
  */
 export async function getAgentLogArchive(
+  workspaceId: string,
   agentName: string,
   lines = 500,
   beforeLine?: number,
 ): Promise<{ lines: string[]; lineCount: number; startLine: number }> {
-  let url = `/api/agents/${encodeURIComponent(agentName)}/logs?lines=${lines}`;
+  let url = wsUrl(
+    workspaceId,
+    `/agents/${encodeURIComponent(agentName)}/logs?lines=${lines}`,
+  );
   if (beforeLine !== undefined) {
     url += `&before_line=${beforeLine}`;
   }

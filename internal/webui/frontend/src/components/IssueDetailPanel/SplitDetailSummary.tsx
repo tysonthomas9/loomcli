@@ -5,6 +5,7 @@
  */
 
 import { updateIssue } from "@/api";
+import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
 import type { Issue, IssueDetails, Priority, IssueType } from "@/types";
 import type { LoomAgentStatus, LoomTaskInfo } from "@/types";
 
@@ -40,6 +41,7 @@ export function SplitDetailSummary({
   onAssigneeSave,
   onIssueUpdate,
 }: SplitDetailSummaryProps): JSX.Element {
+  const { workspaceId } = useWorkspaceContext();
   return (
     <div className={styles.detailContent}>
       <div className={issue.design ? styles.detailColumns : undefined}>
@@ -73,7 +75,7 @@ export function SplitDetailSummary({
               description={issue.description}
               isEditable={true}
               onSave={async (newDescription) => {
-                const updatedIssue = await updateIssue(issue.id, {
+                const updatedIssue = await updateIssue(workspaceId, issue.id, {
                   description: newDescription,
                 });
                 onIssueUpdate?.(updatedIssue);

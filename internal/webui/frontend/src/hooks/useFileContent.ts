@@ -20,7 +20,10 @@ export interface UseFileContentReturn {
   clearFile: () => void;
 }
 
-export function useFileContent(agentName: string): UseFileContentReturn {
+export function useFileContent(
+  workspaceId: string,
+  agentName: string,
+): UseFileContentReturn {
   const [fileData, setFileData] = useState<FileReadData | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -45,7 +48,7 @@ export function useFileContent(agentName: string): UseFileContentReturn {
       setError(null);
 
       try {
-        const data = await readWorktreeFile(agentName, path);
+        const data = await readWorktreeFile(workspaceId, agentName, path);
         if (requestId === currentRequestIdRef.current && mountedRef.current) {
           setFileData(data);
           setError(null);
@@ -60,7 +63,7 @@ export function useFileContent(agentName: string): UseFileContentReturn {
         }
       }
     },
-    [agentName],
+    [workspaceId, agentName],
   );
 
   const clearFile = useCallback(() => {

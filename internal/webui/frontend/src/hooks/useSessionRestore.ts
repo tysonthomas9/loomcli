@@ -11,14 +11,16 @@ interface UseSessionRestoreReturn {
  * Hook that fetches the persisted active tab ID from the server on mount.
  * Falls back to sessionStorage if the API call fails.
  */
-export function useSessionRestore(): UseSessionRestoreReturn {
+export function useSessionRestore(
+  workspaceId: string,
+): UseSessionRestoreReturn {
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [isRestoring, setIsRestoring] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
 
-    getTerminalState()
+    getTerminalState(workspaceId)
       .then((state) => {
         if (cancelled) return;
         setActiveTabId(state.active_tab || null);
@@ -36,7 +38,7 @@ export function useSessionRestore(): UseSessionRestoreReturn {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [workspaceId]);
 
   return { activeTabId, isRestoring };
 }

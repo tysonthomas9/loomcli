@@ -18,6 +18,7 @@ import type { GitResetLockedResponse } from "@/api/git";
 import { useToast } from "./useToast";
 
 export interface UseGitActionsOptions {
+  workspaceId: string;
   agentName: string | null;
   onStatusChange?: () => void;
 }
@@ -62,6 +63,7 @@ function extractErrorMessage(err: unknown): string {
 }
 
 export function useGitActions({
+  workspaceId,
   agentName,
   onStatusChange,
 }: UseGitActionsOptions): UseGitActionsReturn {
@@ -129,7 +131,7 @@ export function useGitActions({
       if (!agentName) return;
       setPushState({ isLoading: true, error: null });
       try {
-        const result = await gitPush(agentName, target);
+        const result = await gitPush(workspaceId, agentName, target);
         if (mountedRef.current) {
           setPushState({ isLoading: false, error: null });
           showToast(result.message || "Push successful", { type: "success" });
@@ -143,7 +145,7 @@ export function useGitActions({
         }
       }
     },
-    [agentName, showToast, handleApiError],
+    [workspaceId, agentName, showToast, handleApiError],
   );
 
   const pull = useCallback(
@@ -151,7 +153,7 @@ export function useGitActions({
       if (!agentName) return;
       setPullState({ isLoading: true, error: null });
       try {
-        const result = await gitPull(agentName, source);
+        const result = await gitPull(workspaceId, agentName, source);
         if (mountedRef.current) {
           setPullState({ isLoading: false, error: null });
           showToast(result.message || "Pull successful", { type: "success" });
@@ -165,14 +167,14 @@ export function useGitActions({
         }
       }
     },
-    [agentName, showToast, handleApiError],
+    [workspaceId, agentName, showToast, handleApiError],
   );
 
   const sync = useCallback(async () => {
     if (!agentName) return;
     setSyncState({ isLoading: true, error: null });
     try {
-      await gitSync(agentName);
+      await gitSync(workspaceId, agentName);
       if (mountedRef.current) {
         setSyncState({ isLoading: false, error: null });
         showToast("Sync successful", { type: "success" });
@@ -185,14 +187,14 @@ export function useGitActions({
         onStatusChangeRef.current?.();
       }
     }
-  }, [agentName, showToast, handleApiError]);
+  }, [workspaceId, agentName, showToast, handleApiError]);
 
   const createPR = useCallback(
     async (target?: string) => {
       if (!agentName) return;
       setPrState({ isLoading: true, error: null });
       try {
-        const result = await gitCreatePR(agentName, target);
+        const result = await gitCreatePR(workspaceId, agentName, target);
         if (mountedRef.current) {
           setPrState({ isLoading: false, error: null });
           if (result.already_exists) {
@@ -220,7 +222,7 @@ export function useGitActions({
         }
       }
     },
-    [agentName, showToast, handleApiError],
+    [workspaceId, agentName, showToast, handleApiError],
   );
 
   const reset = useCallback(
@@ -228,7 +230,7 @@ export function useGitActions({
       if (!agentName) return;
       setResetState({ isLoading: true, error: null });
       try {
-        const result = await gitReset(agentName, branch, force);
+        const result = await gitReset(workspaceId, agentName, branch, force);
         if (mountedRef.current) {
           setResetState({ isLoading: false, error: null });
           showToast(result.message || "Reset successful", { type: "success" });
@@ -242,7 +244,7 @@ export function useGitActions({
         }
       }
     },
-    [agentName, showToast, handleApiError],
+    [workspaceId, agentName, showToast, handleApiError],
   );
 
   const updateTarget = useCallback(
@@ -250,7 +252,7 @@ export function useGitActions({
       if (!agentName) return;
       setTargetState({ isLoading: true, error: null });
       try {
-        await gitUpdateTarget(agentName, branch);
+        await gitUpdateTarget(workspaceId, agentName, branch);
         if (mountedRef.current) {
           setTargetState({ isLoading: false, error: null });
           showToast(`Target branch updated to ${branch}`, { type: "success" });
@@ -263,7 +265,7 @@ export function useGitActions({
         }
       }
     },
-    [agentName, showToast, handleApiError],
+    [workspaceId, agentName, showToast, handleApiError],
   );
 
   const anyLoading =

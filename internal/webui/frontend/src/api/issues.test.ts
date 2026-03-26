@@ -32,22 +32,16 @@ import type { CreateIssueRequest, UpdateIssueRequest } from "./issues";
 // Import mocked functions after mock setup
 
 // Mock the client module
-vi.mock("./client", () => ({
-  get: vi.fn(),
-  post: vi.fn(),
-  patch: vi.fn(),
-  del: vi.fn(),
-  ApiError: class ApiError extends Error {
-    constructor(
-      public status: number,
-      public statusText: string,
-      public body?: unknown,
-    ) {
-      super(`API Error: ${status} ${statusText}`);
-      this.name = "ApiError";
-    }
-  },
-}));
+vi.mock("./client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./client")>();
+  return {
+    ...actual,
+    get: vi.fn(),
+    post: vi.fn(),
+    patch: vi.fn(),
+    del: vi.fn(),
+  };
+});
 
 const mockGet = get as ReturnType<typeof vi.fn>;
 const mockPost = post as ReturnType<typeof vi.fn>;
@@ -246,15 +240,17 @@ describe("issues API", () => {
     it("calls get with correct URL", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockIssueDetails });
 
-      await getIssue("issue-123");
+      await getIssue("test-ws-id", "issue-123");
 
-      expect(mockGet).toHaveBeenCalledWith("/api/issues/issue-123");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/issues/issue-123",
+      );
     });
 
     it("unwraps successful response and returns IssueDetails", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockIssueDetails });
 
-      const result = await getIssue("issue-123");
+      const result = await getIssue("test-ws-id", "issue-123");
 
       expect(result).toEqual(mockIssueDetails);
     });
@@ -262,19 +258,21 @@ describe("issues API", () => {
     it("encodes special characters in ID", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockIssueDetails });
 
-      await getIssue("issue/with/slashes");
+      await getIssue("test-ws-id", "issue/with/slashes");
 
       expect(mockGet).toHaveBeenCalledWith(
-        "/api/issues/issue%2Fwith%2Fslashes",
+        "/api/workspaces/test-ws-id/issues/issue%2Fwith%2Fslashes",
       );
     });
 
     it("encodes spaces in ID", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockIssueDetails });
 
-      await getIssue("issue with spaces");
+      await getIssue("test-ws-id", "issue with spaces");
 
-      expect(mockGet).toHaveBeenCalledWith("/api/issues/issue%20with%20spaces");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/issues/issue%20with%20spaces",
+      );
     });
 
     it("throws ApiError on failure response", async () => {
@@ -324,41 +322,43 @@ describe("issues API", () => {
     it("calls get with /api/ready when no options", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockIssues });
 
-      await getReadyIssues();
+      await getReadyIssues("test-ws-id");
 
-      expect(mockGet).toHaveBeenCalledWith("/api/ready");
+      expect(mockGet).toHaveBeenCalledWith("/api/workspaces/test-ws-id/ready");
     });
 
     it("calls get with /api/ready when empty options", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockIssues });
 
-      await getReadyIssues({});
+      await getReadyIssues("test-ws-id", {});
 
-      expect(mockGet).toHaveBeenCalledWith("/api/ready");
+      expect(mockGet).toHaveBeenCalledWith("/api/workspaces/test-ws-id/ready");
     });
 
     it("builds query string from filter options", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockIssues });
 
-      await getReadyIssues({ status: "open", priority: "high" });
+      await getReadyIssues("test-ws-id", { status: "open", priority: "high" });
 
       expect(mockGet).toHaveBeenCalledWith(
-        "/api/ready?status=open&priority=high",
+        "/api/workspaces/test-ws-id/ready?status=open&priority=high",
       );
     });
 
     it("renames sort_policy to sort in query", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockIssues });
 
-      await getReadyIssues({ sort_policy: "priority" });
+      await getReadyIssues("test-ws-id", { sort_policy: "priority" });
 
-      expect(mockGet).toHaveBeenCalledWith("/api/ready?sort=priority");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/ready?sort=priority",
+      );
     });
 
     it("unwraps successful response and returns Issue array", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockIssues });
 
-      const result = await getReadyIssues();
+      const result = await getReadyIssues("test-ws-id");
 
       expect(result).toEqual(mockIssues);
     });
@@ -385,14 +385,14 @@ describe("issues API", () => {
     it("handles complex filter with labels array", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockIssues });
 
-      await getReadyIssues({
+      await getReadyIssues("test-ws-id", {
         labels: ["bug", "urgent"],
         sort_policy: "oldest",
         assignee: "dev1",
       });
 
       const callArg = mockGet.mock.calls[0][0] as string;
-      expect(callArg).toContain("/api/ready?");
+      expect(callArg).toContain("/api/workspaces/test-ws-id/ready?");
       expect(callArg).toContain("labels=bug%2Curgent");
       expect(callArg).toContain("sort=oldest");
       expect(callArg).toContain("assignee=dev1");
@@ -426,10 +426,10 @@ describe("issues API", () => {
     it("calls get with default kanban params when no options", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockIssues });
 
-      await getKanbanIssues();
+      await getKanbanIssues("test-ws-id");
 
       const callArg = mockGet.mock.calls[0][0] as string;
-      expect(callArg).toContain("/api/issues?");
+      expect(callArg).toContain("/api/workspaces/test-ws-id/issues?");
       expect(callArg).toContain("exclude_status=tombstone");
       expect(callArg).toContain("include_blocked=true");
     });
@@ -437,10 +437,10 @@ describe("issues API", () => {
     it("calls get with default kanban params when empty options", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockIssues });
 
-      await getKanbanIssues({});
+      await getKanbanIssues("test-ws-id", {});
 
       const callArg = mockGet.mock.calls[0][0] as string;
-      expect(callArg).toContain("/api/issues?");
+      expect(callArg).toContain("/api/workspaces/test-ws-id/issues?");
       expect(callArg).toContain("exclude_status=tombstone");
       expect(callArg).toContain("include_blocked=true");
     });
@@ -448,10 +448,10 @@ describe("issues API", () => {
     it("merges WorkFilter options with kanban defaults", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockIssues });
 
-      await getKanbanIssues({ assignee: "dev1", priority: 2 });
+      await getKanbanIssues("test-ws-id", { assignee: "dev1", priority: 2 });
 
       const callArg = mockGet.mock.calls[0][0] as string;
-      expect(callArg).toContain("/api/issues?");
+      expect(callArg).toContain("/api/workspaces/test-ws-id/issues?");
       expect(callArg).toContain("exclude_status=tombstone");
       expect(callArg).toContain("include_blocked=true");
       expect(callArg).toContain("assignee=dev1");
@@ -461,7 +461,7 @@ describe("issues API", () => {
     it("renames sort_policy to sort in merged query", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockIssues });
 
-      await getKanbanIssues({ sort_policy: "priority" });
+      await getKanbanIssues("test-ws-id", { sort_policy: "priority" });
 
       const callArg = mockGet.mock.calls[0][0] as string;
       expect(callArg).toContain("sort=priority");
@@ -471,7 +471,7 @@ describe("issues API", () => {
     it("unwraps successful response and returns Issue array", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockIssues });
 
-      const result = await getKanbanIssues();
+      const result = await getKanbanIssues("test-ws-id");
 
       expect(result).toEqual(mockIssues);
     });
@@ -479,7 +479,7 @@ describe("issues API", () => {
     it("returns empty array when no issues", async () => {
       mockGet.mockResolvedValue({ success: true, data: [] });
 
-      const result = await getKanbanIssues();
+      const result = await getKanbanIssues("test-ws-id");
 
       expect(result).toEqual([]);
     });
@@ -506,7 +506,7 @@ describe("issues API", () => {
     it("handles filter with labels array", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockIssues });
 
-      await getKanbanIssues({
+      await getKanbanIssues("test-ws-id", {
         labels: ["bug", "urgent"],
         assignee: "dev1",
       });
@@ -525,7 +525,7 @@ describe("issues API", () => {
       // This test documents that behavior.
       mockGet.mockResolvedValue({ success: true, data: mockIssues });
 
-      await getKanbanIssues({ status: "open" });
+      await getKanbanIssues("test-ws-id", { status: "open" });
 
       const callArg = mockGet.mock.calls[0][0] as string;
       expect(callArg).toContain("status=open");
@@ -537,10 +537,10 @@ describe("issues API", () => {
     it("uses /api/issues endpoint (not /api/ready)", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockIssues });
 
-      await getKanbanIssues();
+      await getKanbanIssues("test-ws-id");
 
       const callArg = mockGet.mock.calls[0][0] as string;
-      expect(callArg).toMatch(/^\/api\/issues\?/);
+      expect(callArg).toMatch(/^\/api\/workspaces\/test-ws-id\/issues\?/);
     });
   });
 
@@ -566,15 +566,15 @@ describe("issues API", () => {
     it("calls get with /api/stats", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockStats });
 
-      await getStats();
+      await getStats("test-ws-id");
 
-      expect(mockGet).toHaveBeenCalledWith("/api/stats");
+      expect(mockGet).toHaveBeenCalledWith("/api/workspaces/test-ws-id/stats");
     });
 
     it("unwraps successful response and returns Statistics", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockStats });
 
-      const result = await getStats();
+      const result = await getStats("test-ws-id");
 
       expect(result).toEqual(mockStats);
     });
@@ -612,79 +612,97 @@ describe("issues API", () => {
     it("calls get with /api/blocked when no options", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
 
-      await getBlockedIssues();
+      await getBlockedIssues("test-ws-id");
 
-      expect(mockGet).toHaveBeenCalledWith("/api/blocked");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/blocked",
+      );
     });
 
     it("calls get with /api/blocked when empty options", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
 
-      await getBlockedIssues({});
+      await getBlockedIssues("test-ws-id", {});
 
-      expect(mockGet).toHaveBeenCalledWith("/api/blocked");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/blocked",
+      );
     });
 
     it("builds query string with parent_id", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
 
-      await getBlockedIssues({ parent_id: "epic-1" });
+      await getBlockedIssues("test-ws-id", { parent_id: "epic-1" });
 
-      expect(mockGet).toHaveBeenCalledWith("/api/blocked?parent_id=epic-1");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/blocked?parent_id=epic-1",
+      );
     });
 
     it("builds query string with priority", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
 
-      await getBlockedIssues({ priority: 2 });
+      await getBlockedIssues("test-ws-id", { priority: 2 });
 
-      expect(mockGet).toHaveBeenCalledWith("/api/blocked?priority=2");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/blocked?priority=2",
+      );
     });
 
     it("builds query string with priority 0", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
 
-      await getBlockedIssues({ priority: 0 });
+      await getBlockedIssues("test-ws-id", { priority: 0 });
 
-      expect(mockGet).toHaveBeenCalledWith("/api/blocked?priority=0");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/blocked?priority=0",
+      );
     });
 
     it("builds query string with type", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
 
-      await getBlockedIssues({ type: "bug" });
+      await getBlockedIssues("test-ws-id", { type: "bug" });
 
-      expect(mockGet).toHaveBeenCalledWith("/api/blocked?type=bug");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/blocked?type=bug",
+      );
     });
 
     it("builds query string with assignee", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
 
-      await getBlockedIssues({ assignee: "dev1" });
+      await getBlockedIssues("test-ws-id", { assignee: "dev1" });
 
-      expect(mockGet).toHaveBeenCalledWith("/api/blocked?assignee=dev1");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/blocked?assignee=dev1",
+      );
     });
 
     it("builds query string with limit", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
 
-      await getBlockedIssues({ limit: 10 });
+      await getBlockedIssues("test-ws-id", { limit: 10 });
 
-      expect(mockGet).toHaveBeenCalledWith("/api/blocked?limit=10");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/blocked?limit=10",
+      );
     });
 
     it("builds query string with limit 0", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
 
-      await getBlockedIssues({ limit: 0 });
+      await getBlockedIssues("test-ws-id", { limit: 0 });
 
-      expect(mockGet).toHaveBeenCalledWith("/api/blocked?limit=0");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/blocked?limit=0",
+      );
     });
 
     it("builds query string with all filter options", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
 
-      await getBlockedIssues({
+      await getBlockedIssues("test-ws-id", {
         parent_id: "epic-1",
         priority: 1,
         type: "bug",
@@ -693,7 +711,7 @@ describe("issues API", () => {
       });
 
       const callArg = mockGet.mock.calls[0][0] as string;
-      expect(callArg).toContain("/api/blocked?");
+      expect(callArg).toContain("/api/workspaces/test-ws-id/blocked?");
       expect(callArg).toContain("parent_id=epic-1");
       expect(callArg).toContain("priority=1");
       expect(callArg).toContain("type=bug");
@@ -704,31 +722,37 @@ describe("issues API", () => {
     it("omits empty string parent_id", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
 
-      await getBlockedIssues({ parent_id: "" });
+      await getBlockedIssues("test-ws-id", { parent_id: "" });
 
-      expect(mockGet).toHaveBeenCalledWith("/api/blocked");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/blocked",
+      );
     });
 
     it("omits empty string type", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
 
-      await getBlockedIssues({ type: "" });
+      await getBlockedIssues("test-ws-id", { type: "" });
 
-      expect(mockGet).toHaveBeenCalledWith("/api/blocked");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/blocked",
+      );
     });
 
     it("omits empty string assignee", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
 
-      await getBlockedIssues({ assignee: "" });
+      await getBlockedIssues("test-ws-id", { assignee: "" });
 
-      expect(mockGet).toHaveBeenCalledWith("/api/blocked");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/blocked",
+      );
     });
 
     it("unwraps successful response and returns BlockedIssue array", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
 
-      const result = await getBlockedIssues();
+      const result = await getBlockedIssues("test-ws-id");
 
       expect(result).toEqual(mockBlockedIssues);
     });
@@ -736,7 +760,7 @@ describe("issues API", () => {
     it("returns empty array when no blocked issues", async () => {
       mockGet.mockResolvedValue({ success: true, data: [] });
 
-      const result = await getBlockedIssues();
+      const result = await getBlockedIssues("test-ws-id");
 
       expect(result).toEqual([]);
     });
@@ -767,70 +791,83 @@ describe("issues API", () => {
     it("calls get with /api/issues/graph when no options", async () => {
       mockGet.mockResolvedValue({ success: true, issues: [] });
 
-      await fetchGraphIssues();
+      await fetchGraphIssues("test-ws-id");
 
-      expect(mockGet).toHaveBeenCalledWith("/api/issues/graph");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/issues/graph",
+      );
     });
 
     it("calls get with /api/issues/graph when empty options", async () => {
       mockGet.mockResolvedValue({ success: true, issues: [] });
 
-      await fetchGraphIssues({});
+      await fetchGraphIssues("test-ws-id", {});
 
-      expect(mockGet).toHaveBeenCalledWith("/api/issues/graph");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/issues/graph",
+      );
     });
 
     it("builds query string with status parameter", async () => {
       mockGet.mockResolvedValue({ success: true, issues: [] });
 
-      await fetchGraphIssues({ status: "open" });
+      await fetchGraphIssues("test-ws-id", { status: "open" });
 
-      expect(mockGet).toHaveBeenCalledWith("/api/issues/graph?status=open");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/issues/graph?status=open",
+      );
     });
 
     it("builds query string with status=closed parameter", async () => {
       mockGet.mockResolvedValue({ success: true, issues: [] });
 
-      await fetchGraphIssues({ status: "closed" });
+      await fetchGraphIssues("test-ws-id", { status: "closed" });
 
-      expect(mockGet).toHaveBeenCalledWith("/api/issues/graph?status=closed");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/issues/graph?status=closed",
+      );
     });
 
     it("builds query string with status=all parameter", async () => {
       mockGet.mockResolvedValue({ success: true, issues: [] });
 
-      await fetchGraphIssues({ status: "all" });
+      await fetchGraphIssues("test-ws-id", { status: "all" });
 
-      expect(mockGet).toHaveBeenCalledWith("/api/issues/graph?status=all");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/issues/graph?status=all",
+      );
     });
 
     it("builds query string with include_closed=true parameter", async () => {
       mockGet.mockResolvedValue({ success: true, issues: [] });
 
-      await fetchGraphIssues({ includeClosed: true });
+      await fetchGraphIssues("test-ws-id", { includeClosed: true });
 
       expect(mockGet).toHaveBeenCalledWith(
-        "/api/issues/graph?include_closed=true",
+        "/api/workspaces/test-ws-id/issues/graph?include_closed=true",
       );
     });
 
     it("builds query string with include_closed=false parameter", async () => {
       mockGet.mockResolvedValue({ success: true, issues: [] });
 
-      await fetchGraphIssues({ includeClosed: false });
+      await fetchGraphIssues("test-ws-id", { includeClosed: false });
 
       expect(mockGet).toHaveBeenCalledWith(
-        "/api/issues/graph?include_closed=false",
+        "/api/workspaces/test-ws-id/issues/graph?include_closed=false",
       );
     });
 
     it("builds query string with both status and include_closed parameters", async () => {
       mockGet.mockResolvedValue({ success: true, issues: [] });
 
-      await fetchGraphIssues({ status: "all", includeClosed: true });
+      await fetchGraphIssues("test-ws-id", {
+        status: "all",
+        includeClosed: true,
+      });
 
       const callArg = mockGet.mock.calls[0][0] as string;
-      expect(callArg).toContain("/api/issues/graph?");
+      expect(callArg).toContain("/api/workspaces/test-ws-id/issues/graph?");
       expect(callArg).toContain("status=all");
       expect(callArg).toContain("include_closed=true");
     });
@@ -838,7 +875,7 @@ describe("issues API", () => {
     it("returns empty array when issues is empty", async () => {
       mockGet.mockResolvedValue({ success: true, issues: [] });
 
-      const result = await fetchGraphIssues();
+      const result = await fetchGraphIssues("test-ws-id");
 
       expect(result).toEqual([]);
     });
@@ -846,7 +883,7 @@ describe("issues API", () => {
     it("returns empty array when issues is undefined in response", async () => {
       mockGet.mockResolvedValue({ success: true });
 
-      const result = await fetchGraphIssues();
+      const result = await fetchGraphIssues("test-ws-id");
 
       expect(result).toEqual([]);
     });
@@ -871,7 +908,7 @@ describe("issues API", () => {
       };
       mockGet.mockResolvedValue(graphApiResponse);
 
-      const result = await fetchGraphIssues();
+      const result = await fetchGraphIssues("test-ws-id");
 
       expect(result).toHaveLength(1);
       expect(result[0].dependencies).toHaveLength(2);
@@ -907,7 +944,7 @@ describe("issues API", () => {
       };
       mockGet.mockResolvedValue(graphApiResponse);
 
-      const result = await fetchGraphIssues();
+      const result = await fetchGraphIssues("test-ws-id");
 
       expect(result).toHaveLength(1);
       expect(result[0].id).toBe("issue-1");
@@ -933,7 +970,7 @@ describe("issues API", () => {
       };
       mockGet.mockResolvedValue(graphApiResponse);
 
-      const result = await fetchGraphIssues();
+      const result = await fetchGraphIssues("test-ws-id");
 
       expect(result).toHaveLength(1);
       expect(result[0].dependencies).toEqual([]);
@@ -958,7 +995,7 @@ describe("issues API", () => {
       };
       mockGet.mockResolvedValue(graphApiResponse);
 
-      const result = await fetchGraphIssues();
+      const result = await fetchGraphIssues("test-ws-id");
 
       expect(result).toHaveLength(1);
       const issue = result[0];
@@ -1016,7 +1053,7 @@ describe("issues API", () => {
       };
       mockGet.mockResolvedValue(graphApiResponse);
 
-      const result = await fetchGraphIssues();
+      const result = await fetchGraphIssues("test-ws-id");
 
       expect(result).toHaveLength(3);
       expect(result[0].dependencies).toHaveLength(1);
@@ -1040,7 +1077,7 @@ describe("issues API", () => {
       });
 
       try {
-        await fetchGraphIssues();
+        await fetchGraphIssues("test-ws-id");
         expect.fail("Expected fetchGraphIssues to throw");
       } catch (e) {
         expect(e).toBeInstanceOf(ApiError);
@@ -1053,7 +1090,7 @@ describe("issues API", () => {
       mockGet.mockResolvedValue({ success: false });
 
       try {
-        await fetchGraphIssues();
+        await fetchGraphIssues("test-ws-id");
         expect.fail("Expected fetchGraphIssues to throw");
       } catch (e) {
         expect(e).toBeInstanceOf(ApiError);
@@ -1091,7 +1128,7 @@ describe("issues API", () => {
       };
       mockGet.mockResolvedValue(graphApiResponse);
 
-      const result = await fetchGraphIssues();
+      const result = await fetchGraphIssues("test-ws-id");
 
       expect(result[0].dependencies![0].type).toBe("custom-type");
     });
@@ -1120,15 +1157,18 @@ describe("issues API", () => {
     it("calls post with /api/issues and request body", async () => {
       mockPost.mockResolvedValue({ success: true, data: mockCreatedIssue });
 
-      await createIssue(validCreateRequest);
+      await createIssue("test-ws-id", validCreateRequest);
 
-      expect(mockPost).toHaveBeenCalledWith("/api/issues", validCreateRequest);
+      expect(mockPost).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/issues",
+        validCreateRequest,
+      );
     });
 
     it("unwraps successful response and returns Issue", async () => {
       mockPost.mockResolvedValue({ success: true, data: mockCreatedIssue });
 
-      const result = await createIssue(validCreateRequest);
+      const result = await createIssue("test-ws-id", validCreateRequest);
 
       expect(result).toEqual(mockCreatedIssue);
     });
@@ -1157,9 +1197,12 @@ describe("issues API", () => {
 
       mockPost.mockResolvedValue({ success: true, data: mockCreatedIssue });
 
-      await createIssue(fullRequest);
+      await createIssue("test-ws-id", fullRequest);
 
-      expect(mockPost).toHaveBeenCalledWith("/api/issues", fullRequest);
+      expect(mockPost).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/issues",
+        fullRequest,
+      );
     });
 
     it("throws ApiError on failure response", async () => {
@@ -1201,10 +1244,10 @@ describe("issues API", () => {
       const updateData: UpdateIssueRequest = { title: "Updated Title" };
       mockPatch.mockResolvedValue({ success: true, data: mockUpdatedIssue });
 
-      await updateIssue("issue-123", updateData);
+      await updateIssue("test-ws-id", "issue-123", updateData);
 
       expect(mockPatch).toHaveBeenCalledWith(
-        "/api/issues/issue-123",
+        "/api/workspaces/test-ws-id/issues/issue-123",
         updateData,
       );
     });
@@ -1213,10 +1256,10 @@ describe("issues API", () => {
       const updateData: UpdateIssueRequest = { status: "closed" };
       mockPatch.mockResolvedValue({ success: true, data: mockUpdatedIssue });
 
-      await updateIssue("issue/special", updateData);
+      await updateIssue("test-ws-id", "issue/special", updateData);
 
       expect(mockPatch).toHaveBeenCalledWith(
-        "/api/issues/issue%2Fspecial",
+        "/api/workspaces/test-ws-id/issues/issue%2Fspecial",
         updateData,
       );
     });
@@ -1225,7 +1268,7 @@ describe("issues API", () => {
       const updateData: UpdateIssueRequest = { priority: "high" };
       mockPatch.mockResolvedValue({ success: true, data: mockUpdatedIssue });
 
-      const result = await updateIssue("issue-123", updateData);
+      const result = await updateIssue("test-ws-id", "issue-123", updateData);
 
       expect(result).toEqual(mockUpdatedIssue);
     });
@@ -1243,10 +1286,10 @@ describe("issues API", () => {
       };
       mockPatch.mockResolvedValue({ success: true, data: mockUpdatedIssue });
 
-      await updateIssue("issue-123", fullUpdate);
+      await updateIssue("test-ws-id", "issue-123", fullUpdate);
 
       expect(mockPatch).toHaveBeenCalledWith(
-        "/api/issues/issue-123",
+        "/api/workspaces/test-ws-id/issues/issue-123",
         fullUpdate,
       );
     });
@@ -1273,28 +1316,34 @@ describe("issues API", () => {
     it("calls post with correct URL and empty body when no reason", async () => {
       mockPost.mockResolvedValue({ success: true, data: null });
 
-      await closeIssue("issue-123");
+      await closeIssue("test-ws-id", "issue-123");
 
-      expect(mockPost).toHaveBeenCalledWith("/api/issues/issue-123/close", {});
+      expect(mockPost).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/issues/issue-123/close",
+        {},
+      );
     });
 
     it("calls post with reason in body when provided", async () => {
       mockPost.mockResolvedValue({ success: true, data: null });
 
-      await closeIssue("issue-123", "Completed successfully");
+      await closeIssue("test-ws-id", "issue-123", "Completed successfully");
 
-      expect(mockPost).toHaveBeenCalledWith("/api/issues/issue-123/close", {
-        reason: "Completed successfully",
-      });
+      expect(mockPost).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/issues/issue-123/close",
+        {
+          reason: "Completed successfully",
+        },
+      );
     });
 
     it("encodes special characters in ID", async () => {
       mockPost.mockResolvedValue({ success: true, data: null });
 
-      await closeIssue("issue/with/path");
+      await closeIssue("test-ws-id", "issue/with/path");
 
       expect(mockPost).toHaveBeenCalledWith(
-        "/api/issues/issue%2Fwith%2Fpath/close",
+        "/api/workspaces/test-ws-id/issues/issue%2Fwith%2Fpath/close",
         {},
       );
     });
@@ -1302,7 +1351,7 @@ describe("issues API", () => {
     it("returns void on success", async () => {
       mockPost.mockResolvedValue({ success: true, data: null });
 
-      const result = await closeIssue("issue-123");
+      const result = await closeIssue("test-ws-id", "issue-123");
 
       expect(result).toBeUndefined();
     });
@@ -1332,9 +1381,12 @@ describe("issues API", () => {
       mockPost.mockResolvedValue({ success: true, data: null });
 
       // Empty string is falsy, so should send empty object
-      await closeIssue("issue-123", "");
+      await closeIssue("test-ws-id", "issue-123", "");
 
-      expect(mockPost).toHaveBeenCalledWith("/api/issues/issue-123/close", {});
+      expect(mockPost).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/issues/issue-123/close",
+        {},
+      );
     });
   });
 
@@ -1344,10 +1396,10 @@ describe("issues API", () => {
     it("calls post with correct URL and default dep_type", async () => {
       mockPost.mockResolvedValue({ success: true, data: null });
 
-      await addDependency("issue-1", "issue-2");
+      await addDependency("test-ws-id", "issue-1", "issue-2");
 
       expect(mockPost).toHaveBeenCalledWith(
-        "/api/issues/issue-1/dependencies",
+        "/api/workspaces/test-ws-id/issues/issue-1/dependencies",
         {
           depends_on_id: "issue-2",
           dep_type: "blocks",
@@ -1358,10 +1410,10 @@ describe("issues API", () => {
     it("calls post with custom dep_type", async () => {
       mockPost.mockResolvedValue({ success: true, data: null });
 
-      await addDependency("issue-1", "issue-2", "related");
+      await addDependency("test-ws-id", "issue-1", "issue-2", "related");
 
       expect(mockPost).toHaveBeenCalledWith(
-        "/api/issues/issue-1/dependencies",
+        "/api/workspaces/test-ws-id/issues/issue-1/dependencies",
         {
           depends_on_id: "issue-2",
           dep_type: "related",
@@ -1372,10 +1424,10 @@ describe("issues API", () => {
     it("encodes special characters in issueId", async () => {
       mockPost.mockResolvedValue({ success: true, data: null });
 
-      await addDependency("issue/1", "issue-2");
+      await addDependency("test-ws-id", "issue/1", "issue-2");
 
       expect(mockPost).toHaveBeenCalledWith(
-        "/api/issues/issue%2F1/dependencies",
+        "/api/workspaces/test-ws-id/issues/issue%2F1/dependencies",
         {
           depends_on_id: "issue-2",
           dep_type: "blocks",
@@ -1386,10 +1438,10 @@ describe("issues API", () => {
     it("does not encode dependsOnId in URL (sent in body)", async () => {
       mockPost.mockResolvedValue({ success: true, data: null });
 
-      await addDependency("issue-1", "dep/with/slashes");
+      await addDependency("test-ws-id", "issue-1", "dep/with/slashes");
 
       expect(mockPost).toHaveBeenCalledWith(
-        "/api/issues/issue-1/dependencies",
+        "/api/workspaces/test-ws-id/issues/issue-1/dependencies",
         {
           depends_on_id: "dep/with/slashes",
           dep_type: "blocks",
@@ -1400,7 +1452,7 @@ describe("issues API", () => {
     it("returns void on success", async () => {
       mockPost.mockResolvedValue({ success: true, data: null });
 
-      const result = await addDependency("issue-1", "issue-2");
+      const result = await addDependency("test-ws-id", "issue-1", "issue-2");
 
       expect(result).toBeUndefined();
     });
@@ -1433,47 +1485,47 @@ describe("issues API", () => {
     it("calls del with correct URL", async () => {
       mockDel.mockResolvedValue({ success: true, data: null });
 
-      await removeDependency("issue-1", "dep-2");
+      await removeDependency("test-ws-id", "issue-1", "dep-2");
 
       expect(mockDel).toHaveBeenCalledWith(
-        "/api/issues/issue-1/dependencies/dep-2",
+        "/api/workspaces/test-ws-id/issues/issue-1/dependencies/dep-2",
       );
     });
 
     it("encodes special characters in issueId", async () => {
       mockDel.mockResolvedValue({ success: true, data: null });
 
-      await removeDependency("issue/1", "dep-2");
+      await removeDependency("test-ws-id", "issue/1", "dep-2");
 
       expect(mockDel).toHaveBeenCalledWith(
-        "/api/issues/issue%2F1/dependencies/dep-2",
+        "/api/workspaces/test-ws-id/issues/issue%2F1/dependencies/dep-2",
       );
     });
 
     it("encodes special characters in dependsOnId", async () => {
       mockDel.mockResolvedValue({ success: true, data: null });
 
-      await removeDependency("issue-1", "dep/2");
+      await removeDependency("test-ws-id", "issue-1", "dep/2");
 
       expect(mockDel).toHaveBeenCalledWith(
-        "/api/issues/issue-1/dependencies/dep%2F2",
+        "/api/workspaces/test-ws-id/issues/issue-1/dependencies/dep%2F2",
       );
     });
 
     it("encodes special characters in both IDs", async () => {
       mockDel.mockResolvedValue({ success: true, data: null });
 
-      await removeDependency("issue/1", "dep/2");
+      await removeDependency("test-ws-id", "issue/1", "dep/2");
 
       expect(mockDel).toHaveBeenCalledWith(
-        "/api/issues/issue%2F1/dependencies/dep%2F2",
+        "/api/workspaces/test-ws-id/issues/issue%2F1/dependencies/dep%2F2",
       );
     });
 
     it("returns void on success", async () => {
       mockDel.mockResolvedValue({ success: true, data: null });
 
-      const result = await removeDependency("issue-1", "dep-2");
+      const result = await removeDependency("test-ws-id", "issue-1", "dep-2");
 
       expect(result).toBeUndefined();
     });
@@ -1516,27 +1568,37 @@ describe("issues API", () => {
     it("calls post with correct URL and body", async () => {
       mockPost.mockResolvedValue({ success: true, data: mockComment });
 
-      await addComment("issue-123", "This is a comment");
+      await addComment("test-ws-id", "issue-123", "This is a comment");
 
-      expect(mockPost).toHaveBeenCalledWith("/api/issues/issue-123/comments", {
-        text: "This is a comment",
-      });
+      expect(mockPost).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/issues/issue-123/comments",
+        {
+          text: "This is a comment",
+        },
+      );
     });
 
     it("encodes special characters in issueId", async () => {
       mockPost.mockResolvedValue({ success: true, data: mockComment });
 
-      await addComment("issue/1", "hello");
+      await addComment("test-ws-id", "issue/1", "hello");
 
-      expect(mockPost).toHaveBeenCalledWith("/api/issues/issue%2F1/comments", {
-        text: "hello",
-      });
+      expect(mockPost).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/issues/issue%2F1/comments",
+        {
+          text: "hello",
+        },
+      );
     });
 
     it("unwraps successful response and returns Comment", async () => {
       mockPost.mockResolvedValue({ success: true, data: mockComment });
 
-      const result = await addComment("issue-123", "This is a comment");
+      const result = await addComment(
+        "test-ws-id",
+        "issue-123",
+        "This is a comment",
+      );
 
       expect(result).toEqual(mockComment);
     });
@@ -1544,21 +1606,31 @@ describe("issues API", () => {
     it("sends text as-is without sanitization", async () => {
       mockPost.mockResolvedValue({ success: true, data: mockComment });
 
-      await addComment("issue-123", '<script>alert("xss")</script>');
+      await addComment(
+        "test-ws-id",
+        "issue-123",
+        '<script>alert("xss")</script>',
+      );
 
-      expect(mockPost).toHaveBeenCalledWith("/api/issues/issue-123/comments", {
-        text: '<script>alert("xss")</script>',
-      });
+      expect(mockPost).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/issues/issue-123/comments",
+        {
+          text: '<script>alert("xss")</script>',
+        },
+      );
     });
 
     it("handles empty text", async () => {
       mockPost.mockResolvedValue({ success: true, data: mockComment });
 
-      await addComment("issue-123", "");
+      await addComment("test-ws-id", "issue-123", "");
 
-      expect(mockPost).toHaveBeenCalledWith("/api/issues/issue-123/comments", {
-        text: "",
-      });
+      expect(mockPost).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/issues/issue-123/comments",
+        {
+          text: "",
+        },
+      );
     });
 
     it("throws ApiError on failure response", async () => {

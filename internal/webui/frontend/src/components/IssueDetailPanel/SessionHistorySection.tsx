@@ -5,6 +5,7 @@ import {
   getSessionScrollback,
   type SessionRecord,
 } from "@/api/sessionHistory";
+import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
 
 import styles from "./IssueDetailPanel.module.css";
 
@@ -49,6 +50,7 @@ export function SessionHistorySection({
   issueId,
   onJumpToSession,
 }: SessionHistorySectionProps): JSX.Element {
+  const { workspaceId } = useWorkspaceContext();
   const [records, setRecords] = useState<SessionRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -64,7 +66,7 @@ export function SessionHistorySection({
     setLoading(true);
     setError(null);
 
-    listSessionHistory(issueId)
+    listSessionHistory(workspaceId, issueId)
       .then((data) => {
         if (!cancelled) {
           setRecords(data);
@@ -89,7 +91,11 @@ export function SessionHistorySection({
       setScrollbackLoading(true);
       setScrollbackContent("");
       try {
-        const result = await getSessionScrollback(issueId, recordId);
+        const result = await getSessionScrollback(
+          workspaceId,
+          issueId,
+          recordId,
+        );
         setScrollbackContent(result.content);
       } catch {
         setScrollbackContent("Failed to load scrollback content.");

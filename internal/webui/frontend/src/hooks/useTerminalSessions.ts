@@ -14,7 +14,9 @@ export interface UseTerminalSessionsReturn {
   refetch: () => Promise<void>;
 }
 
-export function useTerminalSessions(): UseTerminalSessionsReturn {
+export function useTerminalSessions(
+  workspaceId: string,
+): UseTerminalSessionsReturn {
   const [sessions, setSessions] =
     useState<TerminalSessionInfo[]>(DEFAULT_SESSIONS);
   const [isLoading, setIsLoading] = useState(true);
@@ -32,7 +34,7 @@ export function useTerminalSessions(): UseTerminalSessionsReturn {
     setIsLoading(true);
     setError(null);
     try {
-      const data = await listTerminalSessions();
+      const data = await listTerminalSessions(workspaceId);
       if (mountedRef.current) {
         setSessions(data.length > 0 ? data : DEFAULT_SESSIONS);
       }
@@ -45,7 +47,7 @@ export function useTerminalSessions(): UseTerminalSessionsReturn {
         setIsLoading(false);
       }
     }
-  }, []);
+  }, [workspaceId]);
 
   useEffect(() => {
     fetchSessions();

@@ -6,6 +6,7 @@ export {
   put,
   patch,
   del,
+  wsUrl,
   initAuth,
   getAuthToken,
   getAuthState,

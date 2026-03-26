@@ -9,6 +9,7 @@ import { useCallback } from "react";
 import type { Issue } from "@/types";
 import { createWorkspaceTask } from "@/api/workspace";
 import { useToast } from "@/hooks/useToast";
+import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
 import { useInlineCreate } from "@/hooks/useInlineCreate";
 
 import { TaskRow, type TaskRowProps } from "./TaskRow";
@@ -88,11 +89,12 @@ export function EpicRow({
   taskIsSaving,
   onTaskCreated,
 }: EpicRowProps): JSX.Element {
+  const { workspaceId } = useWorkspaceContext();
   const { showToast } = useToast();
 
   const handleCreateTask = useCallback(
-    (title: string) => createWorkspaceTask(epic.id, title),
-    [epic.id],
+    (title: string) => createWorkspaceTask(workspaceId, epic.id, title),
+    [workspaceId, epic.id],
   );
 
   const addTask = useInlineCreate({

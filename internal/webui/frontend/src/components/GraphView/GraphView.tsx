@@ -269,7 +269,10 @@ export function GraphView({
     useState<TooltipPosition | null>(null);
 
   // Fetch blocked issues for ready state calculation
-  const { data: blockedIssues } = useBlockedIssues({ enabled: true });
+  const { data: blockedIssues } = useBlockedIssues({
+    workspaceId,
+    enabled: true,
+  });
   const blockedIssueIds = useMemo(() => {
     if (!blockedIssues) return new Set<string>();
     return new Set(blockedIssues.map((bi) => bi.id));

@@ -77,7 +77,7 @@ export function useIssueSessionMap(
     [fetchMap],
   );
 
-  useSSE({ onMutation: handleMutation });
+  useSSE({ workspaceId: workspace, onMutation: handleMutation });
 
   return {
     issueSessionMap,

@@ -9,6 +9,7 @@ import type {
 import { sanitizeSessionName, type TabState } from "./terminalTabUtils";
 
 interface SessionMgmtArgs {
+  workspaceId: string;
   setTabs: React.Dispatch<React.SetStateAction<TabState[]>>;
   setActiveTabId: React.Dispatch<React.SetStateAction<string>>;
   instanceRefs: MutableRefObject<Map<string, TerminalInstanceHandle>>;
@@ -23,6 +24,7 @@ interface SessionMgmtArgs {
 
 export function useSessionManagement(args: SessionMgmtArgs) {
   const {
+    workspaceId,
     setTabs,
     setActiveTabId,
     instanceRefs,
@@ -47,7 +49,7 @@ export function useSessionManagement(args: SessionMgmtArgs) {
   const handleCloseAll = useCallback(() => {
     if (!window.confirm("Close all terminal sessions? This cannot be undone."))
       return;
-    closeAllSessions()
+    closeAllSessions(workspaceId)
       .then(() => {
         setTabs([]);
         setActiveTabId("");
@@ -55,7 +57,7 @@ export function useSessionManagement(args: SessionMgmtArgs) {
         initializedRef.current = false;
       })
       .catch((err) => console.error("Failed to close all sessions:", err));
-  }, [setTabs, setActiveTabId, instanceRefs, initializedRef]);
+  }, [workspaceId, setTabs, setActiveTabId, instanceRefs, initializedRef]);
 
   useEffect(() => {
     if (!issueId || !isActive || !initializedRef.current) return;

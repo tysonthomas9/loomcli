@@ -4,7 +4,7 @@
 
 import type { Event } from "@/types";
 
-import { get, ApiError } from "./client";
+import { get, ApiError, wsUrl } from "./client";
 
 interface ApiSuccess<T> {
   success: true;
@@ -30,12 +30,16 @@ function unwrap<T>(response: ApiResult<T>): T {
  * Returns audit trail events (status changes, label changes, dependency changes, etc.)
  */
 export async function getIssueEvents(
+  workspaceId: string,
   issueId: string,
   limit = 100,
 ): Promise<Event[]> {
   const params = limit !== 100 ? `?limit=${limit}` : "";
   const response = await get<ApiResult<Event[]>>(
-    `/api/issues/${encodeURIComponent(issueId)}/events${params}`,
+    wsUrl(
+      workspaceId,
+      `/issues/${encodeURIComponent(issueId)}/events${params}`,
+    ),
   );
   return unwrap(response);
 }

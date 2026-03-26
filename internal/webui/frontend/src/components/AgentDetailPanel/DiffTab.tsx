@@ -8,6 +8,7 @@ import { useState, useEffect } from "react";
 
 import type { LoomAgentStatus } from "@/types";
 import { useDiff } from "@/hooks/useDiff";
+import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
 
 import { DiffFileRow } from "./DiffFileRow";
 import { DiffFileViewer } from "./DiffFileViewer";
@@ -19,6 +20,7 @@ interface DiffTabProps {
 }
 
 export function DiffTab({ agent, isActive }: DiffTabProps): JSX.Element {
+  const { workspaceId } = useWorkspaceContext();
   const {
     files,
     isLoading,
@@ -28,7 +30,11 @@ export function DiffTab({ agent, isActive }: DiffTabProps): JSX.Element {
     patchCache,
     fetchPatch,
     summaryStats,
-  } = useDiff({ agentName: agent.name, enabled: isActive ?? true });
+  } = useDiff({
+    workspaceId,
+    agentName: agent.name,
+    enabled: isActive ?? true,
+  });
 
   const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
 

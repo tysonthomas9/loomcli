@@ -82,7 +82,9 @@ function unwrap<T>(response: ApiResult<T>): T {
  * Fetch workspace data. Returns cached data if available.
  * Deduplicates concurrent in-flight requests.
  */
-export async function fetchWorkspace(): Promise<WorkspaceData> {
+export async function fetchWorkspace(
+  workspaceId?: string,
+): Promise<WorkspaceData> {
   if (workspaceCache !== null) {
     return workspaceCache;
   }
@@ -90,7 +92,10 @@ export async function fetchWorkspace(): Promise<WorkspaceData> {
     return fetchPromise;
   }
   const gen = cacheGeneration;
-  fetchPromise = get<ApiResult<WorkspaceData>>("/api/workspace").then(
+  const path = workspaceId
+    ? `/api/workspaces/${encodeURIComponent(workspaceId)}`
+    : "/api/workspace";
+  fetchPromise = get<ApiResult<WorkspaceData>>(path).then(
     (response) => {
       // Discard stale response if a refresh happened while we were in-flight
       if (gen !== cacheGeneration) {
@@ -261,10 +266,11 @@ export function getCachedWorkspace(): WorkspaceData | null {
  * Create a task under an epic with sensible defaults.
  */
 export async function createWorkspaceTask(
+  workspaceId: string,
   epicId: string,
   title: string,
 ): Promise<Issue> {
-  return createIssue({
+  return createIssue(workspaceId, {
     title,
     issue_type: "task",
     priority: 3,
@@ -277,10 +283,10 @@ export async function createWorkspaceTask(
  * Note: workspace association via source_repos is handled at the backend level.
  */
 export async function createWorkspaceEpic(
-  _workspaceName: string,
+  workspaceId: string,
   title: string,
 ): Promise<Issue> {
-  return createIssue({
+  return createIssue(workspaceId, {
     title,
     issue_type: "epic",
     priority: 2,

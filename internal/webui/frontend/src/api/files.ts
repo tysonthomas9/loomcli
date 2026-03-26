@@ -3,7 +3,7 @@
  * Interfaces with GET/PUT /api/agents/{name}/files/* endpoints.
  */
 
-import { get, put } from "./client";
+import { get, put, wsUrl } from "./client";
 
 // ============= Types =============
 
@@ -33,10 +33,14 @@ export interface FileReadData {
  * GET /api/agents/{name}/files/tree?path=
  */
 export async function listWorktreeDir(
+  workspaceId: string,
   agentName: string,
   path?: string,
 ): Promise<DirListData> {
-  let url = `/api/agents/${encodeURIComponent(agentName)}/files/tree`;
+  let url = wsUrl(
+    workspaceId,
+    `/agents/${encodeURIComponent(agentName)}/files/tree`,
+  );
   if (path !== undefined && path !== "") {
     url += `?path=${encodeURIComponent(path)}`;
   }
@@ -45,25 +49,33 @@ export async function listWorktreeDir(
 
 /**
  * Read a file from an agent worktree.
- * GET /api/agents/{name}/files?path=
+ * GET /api/workspaces/{ws}/agents/{name}/files?path=
  */
 export async function readWorktreeFile(
+  workspaceId: string,
   agentName: string,
   path: string,
 ): Promise<FileReadData> {
-  const url = `/api/agents/${encodeURIComponent(agentName)}/files?path=${encodeURIComponent(path)}`;
+  const url = wsUrl(
+    workspaceId,
+    `/agents/${encodeURIComponent(agentName)}/files?path=${encodeURIComponent(path)}`,
+  );
   return get<FileReadData>(url);
 }
 
 /**
  * Write a file to an agent worktree (atomic write).
- * PUT /api/agents/{name}/files?path=
+ * PUT /api/workspaces/{ws}/agents/{name}/files?path=
  */
 export async function writeWorktreeFile(
+  workspaceId: string,
   agentName: string,
   path: string,
   content: string,
 ): Promise<void> {
-  const url = `/api/agents/${encodeURIComponent(agentName)}/files?path=${encodeURIComponent(path)}`;
+  const url = wsUrl(
+    workspaceId,
+    `/agents/${encodeURIComponent(agentName)}/files?path=${encodeURIComponent(path)}`,
+  );
   await put<{ success: boolean }>(url, { content });
 }

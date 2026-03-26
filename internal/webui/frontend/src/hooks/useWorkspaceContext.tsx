@@ -25,7 +25,6 @@ import {
   clearDefaultWorkspace as clearDefaultWorkspaceApi,
   refreshWorkspace,
 } from "@/api/workspace";
-import { setActiveWorkspace as setActiveWorkspaceClient } from "@/api/client";
 import { wsGet, wsSet, setLastWorkspaceId } from "@/utils/scopedStorage";
 
 import { useWorkspace as useWorkspaceData } from "./useWorkspace";
@@ -148,16 +147,13 @@ export function WorkspaceProvider({
 }: WorkspaceProviderProps): JSX.Element {
   const navigate = useNavigate();
 
-  // Set the API client workspace header so all fetchApi calls use the correct
-  // workspace routing. This will be removed by T13 (path-based API routing).
+  // Track last workspace for root redirect
   useEffect(() => {
-    setActiveWorkspaceClient(workspaceId);
     setLastWorkspaceId(workspaceId);
   }, [workspaceId]);
 
-  // Initialize API client header synchronously on first render
+  // Set last workspace synchronously on first render
   useState(() => {
-    setActiveWorkspaceClient(workspaceId);
     setLastWorkspaceId(workspaceId);
   });
 

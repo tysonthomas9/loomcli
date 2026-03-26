@@ -42,7 +42,7 @@ const srcEntries: FileEntry[] = [
 /** Helper to render the hook and wait for the initial root load to complete. */
 async function renderAndWaitForRoot(agentName = "agent-1") {
   const hookResult = renderHook(
-    ({ agent }: { agent: string }) => useFileTree(agent),
+    ({ agent }: { agent: string }) => useFileTree("test-ws-id", agent),
     { initialProps: { agent: agentName } },
   );
 
@@ -66,7 +66,7 @@ describe("useFileTree", () => {
 
   describe("Initial state and root auto-load", () => {
     it("starts loading and auto-loads root directory", async () => {
-      const { result } = renderHook(() => useFileTree("agent-1"));
+      const { result } = renderHook(() => useFileTree("test-ws-id", "agent-1"));
 
       // Initially loading
       expect(result.current.isLoading).toBe(true);
@@ -81,11 +81,11 @@ describe("useFileTree", () => {
 
       expect(result.current.treeData.get("")).toEqual(rootEntries);
       expect(result.current.expanded.has("")).toBe(true);
-      expect(mockListDir).toHaveBeenCalledWith("agent-1");
+      expect(mockListDir).toHaveBeenCalledWith("test-ws-id", "agent-1");
     });
 
     it("does not load when agentName is empty", () => {
-      const { result } = renderHook(() => useFileTree(""));
+      const { result } = renderHook(() => useFileTree("test-ws-id", ""));
 
       expect(result.current.isLoading).toBe(false);
       expect(mockListDir).not.toHaveBeenCalled();
@@ -109,7 +109,7 @@ describe("useFileTree", () => {
       });
 
       expect(result.current.treeData.get("")).toEqual(newEntries);
-      expect(mockListDir).toHaveBeenCalledWith("agent-2");
+      expect(mockListDir).toHaveBeenCalledWith("test-ws-id", "agent-2");
     });
   });
 
@@ -125,7 +125,7 @@ describe("useFileTree", () => {
 
       expect(result.current.expanded.has("src")).toBe(true);
       expect(result.current.treeData.get("src")).toEqual(srcEntries);
-      expect(mockListDir).toHaveBeenCalledWith("agent-1", "src");
+      expect(mockListDir).toHaveBeenCalledWith("test-ws-id", "agent-1", "src");
     });
 
     it("collapses a directory without clearing cache", async () => {
@@ -196,7 +196,7 @@ describe("useFileTree", () => {
       mockListDir.mockReset();
       mockListDir.mockRejectedValueOnce(new Error("fail"));
 
-      const { result } = renderHook(() => useFileTree("agent-1"));
+      const { result } = renderHook(() => useFileTree("test-ws-id", "agent-1"));
 
       await waitFor(() => {
         expect(result.current.isLoading).toBe(false);
@@ -244,7 +244,7 @@ describe("useFileTree", () => {
     it("updates filterText immediately", () => {
       vi.useFakeTimers();
       // With fake timers, the root load promise won't resolve, but we don't need it for this test
-      const { result } = renderHook(() => useFileTree("agent-1"));
+      const { result } = renderHook(() => useFileTree("test-ws-id", "agent-1"));
 
       act(() => {
         result.current.setFilterText("main");
@@ -257,7 +257,7 @@ describe("useFileTree", () => {
     it("debouncedFilterText updates after delay", () => {
       vi.useFakeTimers();
 
-      const { result } = renderHook(() => useFileTree("agent-1"));
+      const { result } = renderHook(() => useFileTree("test-ws-id", "agent-1"));
 
       act(() => {
         result.current.setFilterText("main");
@@ -281,7 +281,7 @@ describe("useFileTree", () => {
       mockListDir.mockReset();
       mockListDir.mockRejectedValueOnce(new Error("Connection refused"));
 
-      const { result } = renderHook(() => useFileTree("agent-1"));
+      const { result } = renderHook(() => useFileTree("test-ws-id", "agent-1"));
 
       await waitFor(() => {
         expect(result.current.isLoading).toBe(false);
@@ -306,7 +306,7 @@ describe("useFileTree", () => {
       mockListDir.mockReset();
       mockListDir.mockRejectedValueOnce("string error");
 
-      const { result } = renderHook(() => useFileTree("agent-1"));
+      const { result } = renderHook(() => useFileTree("test-ws-id", "agent-1"));
 
       await waitFor(() => {
         expect(result.current.isLoading).toBe(false);
@@ -324,7 +324,9 @@ describe("useFileTree", () => {
       });
       mockListDir.mockReturnValue(slowPromise);
 
-      const { result, unmount } = renderHook(() => useFileTree("agent-1"));
+      const { result, unmount } = renderHook(() =>
+        useFileTree("test-ws-id", "agent-1"),
+      );
 
       expect(result.current.isLoading).toBe(true);
 

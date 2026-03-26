@@ -765,7 +765,10 @@ describe("GraphView", () => {
       const props = createTestProps();
       render(<GraphView {...props} />);
 
-      expect(useBlockedIssues).toHaveBeenCalledWith({ enabled: true });
+      expect(useBlockedIssues).toHaveBeenCalledWith({
+        workspaceId: TEST_WS_ID,
+        enabled: true,
+      });
     });
 
     it("passes blocked issue IDs to useGraphData options", () => {
