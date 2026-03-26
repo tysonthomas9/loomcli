@@ -87,6 +87,17 @@ func extractToken(r *http.Request) string {
 		return ""
 	}
 
-	// Fallback to query parameter (for WebSocket and EventSource)
-	return r.URL.Query().Get("token")
+	// Fallback to query parameter (for WebSocket and EventSource opaque tokens)
+	qp := r.URL.Query().Get("token")
+
+	// Defense-in-depth: reject query-param tokens that look like JWTs.
+	// JWTs have the format header.payload.signature (two dots) and are typically
+	// >200 chars. Opaque tokens (API keys, HMAC tokens) don't match this pattern.
+	// This prevents accidental JWT leakage into URLs (which may be logged in access
+	// logs, browser history, or referrer headers).
+	if len(qp) > 200 && strings.Count(qp, ".") == 2 {
+		return ""
+	}
+
+	return qp
 }
