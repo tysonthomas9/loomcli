@@ -3,14 +3,17 @@
  */
 
 /**
- * Unit tests for useWorkspaceParam hook and parseWorkspaceFromUrl helper.
+ * Unit tests for useRepoFilterParam hook and parseRepoFilterFromUrl helper.
  * Follows useRepoFilter test pattern: URL-synced state via replaceState + popstate.
  */
 
 import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { useWorkspaceParam, parseWorkspaceFromUrl } from "../useWorkspaceParam";
+import {
+  useRepoFilterParam,
+  parseRepoFilterFromUrl,
+} from "../useRepoFilterParam";
 
 /**
  * Mock window.location for URL sync tests.
@@ -43,7 +46,7 @@ function mockWindowHistory(): { replaceState: ReturnType<typeof vi.fn> } {
   return { replaceState };
 }
 
-describe("useWorkspaceParam", () => {
+describe("useRepoFilterParam", () => {
   beforeEach(() => {
     mockWindowLocation();
     mockWindowHistory();
@@ -56,78 +59,78 @@ describe("useWorkspaceParam", () => {
   describe("initial state", () => {
     it("initializes with null when no URL param", () => {
       mockWindowLocation("");
-      const { result } = renderHook(() => useWorkspaceParam());
+      const { result } = renderHook(() => useRepoFilterParam());
 
-      const [workspace] = result.current;
-      expect(workspace).toBeNull();
+      const [repoFilter] = result.current;
+      expect(repoFilter).toBeNull();
     });
 
-    it("initializes with value when workspace param is present", () => {
-      mockWindowLocation("?workspace=myproject");
-      const { result } = renderHook(() => useWorkspaceParam());
+    it("initializes with value when repoFilter param is present", () => {
+      mockWindowLocation("?repoFilter=myproject");
+      const { result } = renderHook(() => useRepoFilterParam());
 
-      const [workspace] = result.current;
-      expect(workspace).toBe("myproject");
+      const [repoFilter] = result.current;
+      expect(repoFilter).toBe("myproject");
     });
 
     it("initializes with null when syncUrl is false", () => {
-      mockWindowLocation("?workspace=myproject");
+      mockWindowLocation("?repoFilter=myproject");
       const { result } = renderHook(() =>
-        useWorkspaceParam({ syncUrl: false }),
+        useRepoFilterParam({ syncUrl: false }),
       );
 
-      const [workspace] = result.current;
-      expect(workspace).toBeNull();
+      const [repoFilter] = result.current;
+      expect(repoFilter).toBeNull();
     });
   });
 
   describe("URL parsing", () => {
-    it("parses workspace name from URL", () => {
-      mockWindowLocation("?workspace=myproject");
-      const { result } = renderHook(() => useWorkspaceParam());
+    it("parses repo filter name from URL", () => {
+      mockWindowLocation("?repoFilter=myproject");
+      const { result } = renderHook(() => useRepoFilterParam());
 
-      const [workspace] = result.current;
-      expect(workspace).toBe("myproject");
+      const [repoFilter] = result.current;
+      expect(repoFilter).toBe("myproject");
     });
 
-    it("handles empty workspace param as null", () => {
-      mockWindowLocation("?workspace=");
-      const { result } = renderHook(() => useWorkspaceParam());
+    it("handles empty repoFilter param as null", () => {
+      mockWindowLocation("?repoFilter=");
+      const { result } = renderHook(() => useRepoFilterParam());
 
-      const [workspace] = result.current;
-      expect(workspace).toBeNull();
+      const [repoFilter] = result.current;
+      expect(repoFilter).toBeNull();
     });
 
-    it("handles whitespace-only workspace param as null", () => {
-      mockWindowLocation("?workspace=%20%20");
-      const { result } = renderHook(() => useWorkspaceParam());
+    it("handles whitespace-only repoFilter param as null", () => {
+      mockWindowLocation("?repoFilter=%20%20");
+      const { result } = renderHook(() => useRepoFilterParam());
 
-      const [workspace] = result.current;
-      expect(workspace).toBeNull();
+      const [repoFilter] = result.current;
+      expect(repoFilter).toBeNull();
     });
 
-    it("handles workspace names with spaces encoded as +", () => {
-      mockWindowLocation("?workspace=my+project");
-      const { result } = renderHook(() => useWorkspaceParam());
+    it("handles repo filter names with spaces encoded as +", () => {
+      mockWindowLocation("?repoFilter=my+project");
+      const { result } = renderHook(() => useRepoFilterParam());
 
-      const [workspace] = result.current;
-      expect(workspace).toBe("my project");
+      const [repoFilter] = result.current;
+      expect(repoFilter).toBe("my project");
     });
 
     it("handles URL-encoded special characters", () => {
-      mockWindowLocation("?workspace=my%2Fproject");
-      const { result } = renderHook(() => useWorkspaceParam());
+      mockWindowLocation("?repoFilter=my%2Fproject");
+      const { result } = renderHook(() => useRepoFilterParam());
 
-      const [workspace] = result.current;
-      expect(workspace).toBe("my/project");
+      const [repoFilter] = result.current;
+      expect(repoFilter).toBe("my/project");
     });
 
-    it("ignores other URL params and parses workspace correctly", () => {
-      mockWindowLocation("?view=kanban&workspace=myproject&priority=2");
-      const { result } = renderHook(() => useWorkspaceParam());
+    it("ignores other URL params and parses repoFilter correctly", () => {
+      mockWindowLocation("?view=kanban&repoFilter=myproject&priority=2");
+      const { result } = renderHook(() => useRepoFilterParam());
 
-      const [workspace] = result.current;
-      expect(workspace).toBe("myproject");
+      const [repoFilter] = result.current;
+      expect(repoFilter).toBe("myproject");
     });
   });
 
@@ -140,7 +143,7 @@ describe("useWorkspaceParam", () => {
     });
 
     it("updates state when setter is called", () => {
-      const { result } = renderHook(() => useWorkspaceParam());
+      const { result } = renderHook(() => useRepoFilterParam());
 
       act(() => {
         result.current[1]("myproject");
@@ -149,8 +152,8 @@ describe("useWorkspaceParam", () => {
       expect(result.current[0]).toBe("myproject");
     });
 
-    it("calls replaceState when workspace changes", () => {
-      const { result } = renderHook(() => useWorkspaceParam());
+    it("calls replaceState when repoFilter changes", () => {
+      const { result } = renderHook(() => useRepoFilterParam());
 
       act(() => {
         result.current[1]("myproject");
@@ -159,13 +162,13 @@ describe("useWorkspaceParam", () => {
       expect(historyMock.replaceState).toHaveBeenCalledWith(
         null,
         "",
-        "/app?workspace=myproject",
+        "/app?repoFilter=myproject",
       );
     });
 
-    it("removes workspace param from URL when setting to null", () => {
-      mockWindowLocation("?workspace=myproject");
-      const { result } = renderHook(() => useWorkspaceParam());
+    it("removes repoFilter param from URL when setting to null", () => {
+      mockWindowLocation("?repoFilter=myproject");
+      const { result } = renderHook(() => useRepoFilterParam());
 
       act(() => {
         result.current[1](null);
@@ -175,10 +178,10 @@ describe("useWorkspaceParam", () => {
       expect(lastCall?.[2]).toBe("/app");
     });
 
-    it("preserves other URL params when updating workspace", () => {
+    it("preserves other URL params when updating repoFilter", () => {
       mockWindowLocation("?view=kanban&priority=2");
       historyMock = mockWindowHistory();
-      const { result } = renderHook(() => useWorkspaceParam());
+      const { result } = renderHook(() => useRepoFilterParam());
 
       act(() => {
         result.current[1]("myproject");
@@ -189,12 +192,12 @@ describe("useWorkspaceParam", () => {
       )?.[2] as string;
       expect(lastCall).toContain("view=kanban");
       expect(lastCall).toContain("priority=2");
-      expect(lastCall).toContain("workspace=myproject");
+      expect(lastCall).toContain("repoFilter=myproject");
     });
 
     it("does not call replaceState when syncUrl is false", () => {
       const { result } = renderHook(() =>
-        useWorkspaceParam({ syncUrl: false }),
+        useRepoFilterParam({ syncUrl: false }),
       );
 
       act(() => {
@@ -204,17 +207,18 @@ describe("useWorkspaceParam", () => {
       // State should update
       expect(result.current[0]).toBe("myproject");
 
-      // replaceState should not be called for workspace changes
+      // replaceState should not be called for repoFilter changes
       const calls = historyMock.replaceState.mock.calls;
-      const workspaceCall = calls.find(
-        (call) => typeof call[2] === "string" && call[2].includes("workspace="),
+      const repoFilterCall = calls.find(
+        (call) =>
+          typeof call[2] === "string" && call[2].includes("repoFilter="),
       );
-      expect(workspaceCall).toBeUndefined();
+      expect(repoFilterCall).toBeUndefined();
     });
 
-    it("allows changing workspace multiple times", () => {
+    it("allows changing repoFilter multiple times", () => {
       const { result } = renderHook(() =>
-        useWorkspaceParam({ syncUrl: false }),
+        useRepoFilterParam({ syncUrl: false }),
       );
 
       act(() => {
@@ -241,23 +245,23 @@ describe("useWorkspaceParam", () => {
     });
 
     it("updates state on browser back/forward navigation", () => {
-      mockWindowLocation("?workspace=project-a");
-      const { result } = renderHook(() => useWorkspaceParam());
+      mockWindowLocation("?repoFilter=project-a");
+      const { result } = renderHook(() => useRepoFilterParam());
 
       expect(result.current[0]).toBe("project-a");
 
       // Simulate browser navigation
       act(() => {
-        mockWindowLocation("?workspace=project-b");
+        mockWindowLocation("?repoFilter=project-b");
         window.dispatchEvent(new PopStateEvent("popstate"));
       });
 
       expect(result.current[0]).toBe("project-b");
     });
 
-    it("returns to null when navigating to URL without workspace param", () => {
-      mockWindowLocation("?workspace=myproject");
-      const { result } = renderHook(() => useWorkspaceParam());
+    it("returns to null when navigating to URL without repoFilter param", () => {
+      mockWindowLocation("?repoFilter=myproject");
+      const { result } = renderHook(() => useRepoFilterParam());
 
       expect(result.current[0]).toBe("myproject");
 
@@ -272,7 +276,7 @@ describe("useWorkspaceParam", () => {
     it("cleans up popstate listener on unmount", () => {
       const removeEventListenerSpy = vi.spyOn(window, "removeEventListener");
 
-      const { unmount } = renderHook(() => useWorkspaceParam());
+      const { unmount } = renderHook(() => useRepoFilterParam());
 
       unmount();
 
@@ -285,7 +289,7 @@ describe("useWorkspaceParam", () => {
     it("does not add popstate listener when syncUrl is false", () => {
       const addEventListenerSpy = vi.spyOn(window, "addEventListener");
 
-      renderHook(() => useWorkspaceParam({ syncUrl: false }));
+      renderHook(() => useRepoFilterParam({ syncUrl: false }));
 
       const popstateCall = addEventListenerSpy.mock.calls.find(
         (call) => call[0] === "popstate",
@@ -295,39 +299,39 @@ describe("useWorkspaceParam", () => {
   });
 
   describe("setter reference stability", () => {
-    it("setWorkspace function is stable across re-renders", () => {
+    it("setRepoFilter function is stable across re-renders", () => {
       const { result, rerender } = renderHook(() =>
-        useWorkspaceParam({ syncUrl: false }),
+        useRepoFilterParam({ syncUrl: false }),
       );
 
-      const setWorkspace1 = result.current[1];
+      const setRepoFilter1 = result.current[1];
 
       rerender();
 
-      const setWorkspace2 = result.current[1];
+      const setRepoFilter2 = result.current[1];
 
-      expect(setWorkspace1).toBe(setWorkspace2);
+      expect(setRepoFilter1).toBe(setRepoFilter2);
     });
 
-    it("setWorkspace remains stable when workspace changes", () => {
+    it("setRepoFilter remains stable when repoFilter changes", () => {
       const { result } = renderHook(() =>
-        useWorkspaceParam({ syncUrl: false }),
+        useRepoFilterParam({ syncUrl: false }),
       );
 
-      const setWorkspace1 = result.current[1];
+      const setRepoFilter1 = result.current[1];
 
       act(() => {
         result.current[1]("myproject");
       });
 
-      const setWorkspace2 = result.current[1];
+      const setRepoFilter2 = result.current[1];
 
-      expect(setWorkspace1).toBe(setWorkspace2);
+      expect(setRepoFilter1).toBe(setRepoFilter2);
     });
   });
 });
 
-describe("parseWorkspaceFromUrl", () => {
+describe("parseRepoFilterFromUrl", () => {
   beforeEach(() => {
     mockWindowHistory();
   });
@@ -336,39 +340,39 @@ describe("parseWorkspaceFromUrl", () => {
     vi.restoreAllMocks();
   });
 
-  it("returns null when no workspace param", () => {
+  it("returns null when no repoFilter param", () => {
     mockWindowLocation("");
-    const result = parseWorkspaceFromUrl();
+    const result = parseRepoFilterFromUrl();
     expect(result).toBeNull();
   });
 
-  it("parses workspace name", () => {
-    mockWindowLocation("?workspace=myproject");
-    const result = parseWorkspaceFromUrl();
+  it("parses repo filter name", () => {
+    mockWindowLocation("?repoFilter=myproject");
+    const result = parseRepoFilterFromUrl();
     expect(result).toBe("myproject");
   });
 
-  it("returns null for empty workspace param", () => {
-    mockWindowLocation("?workspace=");
-    const result = parseWorkspaceFromUrl();
+  it("returns null for empty repoFilter param", () => {
+    mockWindowLocation("?repoFilter=");
+    const result = parseRepoFilterFromUrl();
     expect(result).toBeNull();
   });
 
-  it("returns null for whitespace-only workspace param", () => {
-    mockWindowLocation("?workspace=%20%20");
-    const result = parseWorkspaceFromUrl();
+  it("returns null for whitespace-only repoFilter param", () => {
+    mockWindowLocation("?repoFilter=%20%20");
+    const result = parseRepoFilterFromUrl();
     expect(result).toBeNull();
   });
 
-  it("handles workspace names with special characters", () => {
-    mockWindowLocation("?workspace=my%2Fproject");
-    const result = parseWorkspaceFromUrl();
+  it("handles repo filter names with special characters", () => {
+    mockWindowLocation("?repoFilter=my%2Fproject");
+    const result = parseRepoFilterFromUrl();
     expect(result).toBe("my/project");
   });
 
-  it("handles workspace names with spaces encoded as +", () => {
-    mockWindowLocation("?workspace=my+project");
-    const result = parseWorkspaceFromUrl();
+  it("handles repo filter names with spaces encoded as +", () => {
+    mockWindowLocation("?repoFilter=my+project");
+    const result = parseRepoFilterFromUrl();
     expect(result).toBe("my project");
   });
 });
@@ -385,19 +389,19 @@ describe("SSR/non-browser environment", () => {
     vi.restoreAllMocks();
   });
 
-  it("parseWorkspaceFromUrl returns null when window is undefined", () => {
+  it("parseRepoFilterFromUrl returns null when window is undefined", () => {
     // @ts-expect-error - intentionally setting window to undefined for SSR test
     delete globalThis.window;
 
-    const result = parseWorkspaceFromUrl();
+    const result = parseRepoFilterFromUrl();
     expect(result).toBeNull();
   });
 
-  it("parseWorkspaceFromUrl returns null when location is undefined", () => {
+  it("parseRepoFilterFromUrl returns null when location is undefined", () => {
     // @ts-expect-error - intentionally creating partial window for SSR test
     globalThis.window = {};
 
-    const result = parseWorkspaceFromUrl();
+    const result = parseRepoFilterFromUrl();
     expect(result).toBeNull();
   });
 });

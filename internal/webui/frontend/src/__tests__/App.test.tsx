@@ -358,7 +358,7 @@ vi.mock("@/hooks", () => ({
   })),
   useFocusReturn: vi.fn(),
   useFocusTrap: vi.fn(),
-  useWorkspaceParam: vi.fn(() => [null, vi.fn()]),
+  useRepoFilterParam: vi.fn(() => [null, vi.fn()]),
   useSearchScope: vi.fn(() => ({
     scopeName: undefined,
     clearScope: vi.fn(),

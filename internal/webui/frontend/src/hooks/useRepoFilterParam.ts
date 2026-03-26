@@ -1,24 +1,24 @@
 /**
- * useWorkspaceParam - React hook for syncing the `workspace` URL parameter.
+ * useRepoFilterParam - React hook for syncing the `repoFilter` URL parameter.
  * Follows useRepoFilter pattern: URL-synced state via replaceState + popstate.
  */
 
 import { useState, useCallback, useEffect } from "react";
 
-const WORKSPACE_PARAM = "workspace";
+const REPO_FILTER_PARAM = "repoFilter";
 
 /**
- * Options for useWorkspaceParam hook.
+ * Options for useRepoFilterParam hook.
  */
-export interface UseWorkspaceParamOptions {
+export interface UseRepoFilterParamOptions {
   /** Whether to sync with URL (default: true) */
   syncUrl?: boolean;
 }
 
 /**
- * Return type for useWorkspaceParam hook.
+ * Return type for useRepoFilterParam hook.
  */
-export type UseWorkspaceParamReturn = [
+export type UseRepoFilterParamReturn = [
   string | null,
   (name: string | null) => void,
 ];
@@ -33,32 +33,32 @@ function isBrowser(): boolean {
 }
 
 /**
- * Parse workspace from URL search parameters.
- * Returns null for missing or empty param (meaning "all workspaces").
+ * Parse repo filter from URL search parameters.
+ * Returns null for missing or empty param (meaning "all repos").
  */
-export function parseWorkspaceFromUrl(): string | null {
+export function parseRepoFilterFromUrl(): string | null {
   if (!isBrowser()) return null;
 
   const params = new URLSearchParams(window.location.search);
-  const raw = params.get(WORKSPACE_PARAM);
+  const raw = params.get(REPO_FILTER_PARAM);
 
   if (!raw || raw.trim() === "") return null;
   return raw;
 }
 
 /**
- * Update URL with workspace param without triggering navigation.
- * Removes the param when workspace is null (all workspaces) for clean URLs.
+ * Update URL with repo filter param without triggering navigation.
+ * Removes the param when repoFilter is null (all repos) for clean URLs.
  */
-function updateWorkspaceUrl(workspace: string | null): void {
+function updateRepoFilterUrl(repoFilter: string | null): void {
   if (!isBrowser()) return;
 
   const params = new URLSearchParams(window.location.search);
 
-  if (workspace === null) {
-    params.delete(WORKSPACE_PARAM);
+  if (repoFilter === null) {
+    params.delete(REPO_FILTER_PARAM);
   } else {
-    params.set(WORKSPACE_PARAM, workspace);
+    params.set(REPO_FILTER_PARAM, repoFilter);
   }
 
   const queryString = params.toString();
@@ -70,17 +70,17 @@ function updateWorkspaceUrl(workspace: string | null): void {
 }
 
 /**
- * React hook for syncing the workspace URL parameter.
- * null means "all workspaces" (no filtering).
+ * React hook for syncing the repo filter URL parameter.
+ * null means "all repos" (no filtering).
  */
-export function useWorkspaceParam(
-  options: UseWorkspaceParamOptions = {},
-): UseWorkspaceParamReturn {
+export function useRepoFilterParam(
+  options: UseRepoFilterParamOptions = {},
+): UseRepoFilterParamReturn {
   const { syncUrl = true } = options;
 
-  const [workspace, setWorkspaceState] = useState<string | null>(() => {
+  const [repoFilter, setRepoFilterState] = useState<string | null>(() => {
     if (syncUrl) {
-      return parseWorkspaceFromUrl();
+      return parseRepoFilterFromUrl();
     }
     return null;
   });
@@ -88,16 +88,16 @@ export function useWorkspaceParam(
   // Sync URL when state changes
   useEffect(() => {
     if (syncUrl && isBrowser()) {
-      updateWorkspaceUrl(workspace);
+      updateRepoFilterUrl(repoFilter);
     }
-  }, [workspace, syncUrl]);
+  }, [repoFilter, syncUrl]);
 
   // Handle browser back/forward navigation
   useEffect(() => {
     if (!syncUrl || !isBrowser()) return;
 
     const handlePopState = () => {
-      setWorkspaceState(parseWorkspaceFromUrl());
+      setRepoFilterState(parseRepoFilterFromUrl());
     };
 
     window.addEventListener("popstate", handlePopState);
@@ -105,9 +105,9 @@ export function useWorkspaceParam(
   }, [syncUrl]);
 
   // Memoized setter
-  const setWorkspace = useCallback((name: string | null) => {
-    setWorkspaceState(name);
+  const setRepoFilter = useCallback((name: string | null) => {
+    setRepoFilterState(name);
   }, []);
 
-  return [workspace, setWorkspace];
+  return [repoFilter, setRepoFilter];
 }

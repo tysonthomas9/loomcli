@@ -68,7 +68,7 @@ import {
   useTheme,
   useWorkspaceContext,
   useWorkspaceState,
-  useWorkspaceParam,
+  useRepoFilterParam,
   useSearchScope,
   useDaemonHealth,
   usePanelManager,
@@ -151,8 +151,8 @@ function App() {
     sourceReposFilter,
   } = useWorkspaceContext();
 
-  // Workspace URL param sync (deep linking for workspace selection)
-  const [workspaceParam, setWorkspaceParam] = useWorkspaceParam();
+  // Repo filter URL param sync (deep linking for repo selection)
+  const [repoFilterParam, setRepoFilterParam] = useRepoFilterParam();
 
   // Available repo names for repo selector
   const availableRepoNames = useMemo(
@@ -440,8 +440,8 @@ function App() {
 
   // Sync workspace URL param → repo selection (mount deep-link + popstate back/forward)
   useEffect(() => {
-    if (workspaceParam === null) {
-      // null means "all workspaces" — only call selectAll if currently filtered
+    if (repoFilterParam === null) {
+      // null means "all repos" — only call selectAll if currently filtered
       if (
         selectedRepoNames.size !== workspaceRepos.length &&
         workspaceRepos.length > 0
@@ -451,11 +451,11 @@ function App() {
       return;
     }
     if (
-      !(selectedRepoNames.size === 1 && selectedRepoNames.has(workspaceParam))
+      !(selectedRepoNames.size === 1 && selectedRepoNames.has(repoFilterParam))
     ) {
-      selectRepos([workspaceParam]);
+      selectRepos([repoFilterParam]);
     }
-  }, [workspaceParam]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [repoFilterParam]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Deep-link: auto-fetch issue from URL; handle back/forward via popstate → useViewState
   useEffect(() => {
@@ -730,14 +730,14 @@ function App() {
         selectRepos([repoName]);
       }
       // Sync workspace URL param
-      setWorkspaceParam(repoName);
+      setRepoFilterParam(repoName);
     },
     [
       activeRepoName,
       switchWorkspace,
       selectAll,
       selectRepos,
-      setWorkspaceParam,
+      setRepoFilterParam,
     ],
   );
 
