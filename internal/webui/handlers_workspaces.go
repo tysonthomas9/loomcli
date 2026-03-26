@@ -23,13 +23,19 @@ func handleListWorkspaces(mp *daemon.MultiPool, configFn func() (*WorkspaceData,
 		// Get registered workspace IDs from the MultiPool.
 		ids := mp.WorkspaceIDs()
 
-		// Build workspace metadata map from config if available.
-		var wsMeta map[string]WorkspaceSummary
+		// Build workspace metadata maps from config if available.
+		// Two maps allow enrichment whether MultiPool is keyed by name (pre-T2) or UUID (post-T2).
+		var wsMetaByName map[string]WorkspaceSummary
+		var wsMetaByID map[string]WorkspaceSummary
 		if configFn != nil {
 			if data, err := configFn(); err == nil && data != nil {
-				wsMeta = make(map[string]WorkspaceSummary, len(data.Workspaces))
+				wsMetaByName = make(map[string]WorkspaceSummary, len(data.Workspaces))
+				wsMetaByID = make(map[string]WorkspaceSummary, len(data.Workspaces))
 				for _, ws := range data.Workspaces {
-					wsMeta[ws.Name] = ws
+					wsMetaByName[ws.Name] = ws
+					if ws.ID != "" {
+						wsMetaByID[ws.ID] = ws
+					}
 				}
 			}
 		}
@@ -42,7 +48,16 @@ func handleListWorkspaces(mp *daemon.MultiPool, configFn func() (*WorkspaceData,
 			}
 
 			// Enrich with config metadata if available.
-			if meta, ok := wsMeta[id]; ok {
+			// Try UUID-keyed lookup first (post-T2), then fall back to name-keyed (pre-T2).
+			if meta, ok := wsMetaByID[id]; ok {
+				item.Name = meta.Name
+				item.ID = meta.ID
+				item.Path = meta.Path
+				item.Active = meta.Active
+			} else if meta, ok := wsMetaByName[id]; ok {
+				if meta.ID != "" {
+					item.ID = meta.ID
+				}
 				item.Path = meta.Path
 				item.Active = meta.Active
 			}
@@ -93,10 +108,15 @@ func handleGetWorkspace(mp *daemon.MultiPool, configFn func() (*WorkspaceData, e
 		}
 
 		// Enrich with config metadata if available.
+		// Match by ID (UUID) or Name to handle both pre-T2 and post-T2 pool keys.
 		if configFn != nil {
 			if data, err := configFn(); err == nil && data != nil {
 				for _, ws := range data.Workspaces {
-					if ws.Name == wsID {
+					if ws.ID == wsID || ws.Name == wsID {
+						item.Name = ws.Name
+						if ws.ID != "" {
+							item.ID = ws.ID
+						}
 						item.Path = ws.Path
 						item.Active = ws.Active
 						break

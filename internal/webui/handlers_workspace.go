@@ -53,7 +53,7 @@ func handleWorkspace(configFn func() (*WorkspaceData, error)) http.HandlerFunc {
 		// configFn returned (which defaults to cfg.DefaultWorkspace), look up
 		// that workspace in the summaries and swap in its repos/agents/name/path.
 		requestedWS := strings.TrimSpace(r.Header.Get("Workspace"))
-		if requestedWS != "" && requestedWS != data.Name {
+		if requestedWS != "" && requestedWS != data.Name && requestedWS != data.ID {
 			if resolved := resolveWorkspaceOverride(data, requestedWS); resolved != nil {
 				data = resolved
 			}
@@ -85,10 +85,10 @@ func emptyWorkspaceData() *WorkspaceData {
 // Returns nil if the workspace is not found in the summaries (caller keeps
 // the original data).
 func resolveWorkspaceOverride(orig *WorkspaceData, targetName string) *WorkspaceData {
-	// Verify the target exists in the known summaries
+	// Verify the target exists in the known summaries (match by ID or Name)
 	var targetSummary *WorkspaceSummary
 	for i := range orig.Workspaces {
-		if orig.Workspaces[i].Name == targetName {
+		if orig.Workspaces[i].ID == targetName || orig.Workspaces[i].Name == targetName {
 			targetSummary = &orig.Workspaces[i]
 			break
 		}
@@ -105,11 +105,12 @@ func resolveWorkspaceOverride(orig *WorkspaceData, targetName string) *Workspace
 	newSummaries := make([]WorkspaceSummary, len(orig.Workspaces))
 	copy(newSummaries, orig.Workspaces)
 	for i := range newSummaries {
-		newSummaries[i].Active = newSummaries[i].Name == targetName
+		newSummaries[i].Active = newSummaries[i].Name == targetSummary.Name
 	}
 
 	return &WorkspaceData{
-		Name:             targetName,
+		ID:               targetSummary.ID,
+		Name:             targetSummary.Name,
 		Path:             targetSummary.Path,
 		Repos:            repos,
 		Groups:           nil,
