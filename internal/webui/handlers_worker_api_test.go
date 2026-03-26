@@ -241,14 +241,20 @@ func TestHandleWorkerDeregister(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestHandleWorkerState(t *testing.T) {
-	// Create a temp worktree dir with a lock file.
+	// Create a temp worktree dir with agent-scoped lock file.
 	tmpDir := t.TempDir()
+	agentDir := filepath.Join(tmpDir, "worktrees", "a1")
+	if err := os.MkdirAll(agentDir, 0700); err != nil {
+		t.Fatal(err)
+	}
 	lockData := `{"state":"idle","pid":12345}`
-	if err := os.WriteFile(filepath.Join(tmpDir, ".agent.lock"), []byte(lockData), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(agentDir, ".agent.lock"), []byte(lockData), 0600); err != nil {
 		t.Fatal(err)
 	}
 
-	resolveWT := func(workspace, agent string) string { return tmpDir }
+	resolveWT := func(workspace, agent string) string {
+		return filepath.Join(tmpDir, "worktrees", agent)
+	}
 
 	reg := NewWorkerRegistry()
 	reg.Register(&WorkerInfo{ID: "w1", Workspace: "ws", Agent: "a1"})
@@ -332,6 +338,238 @@ func TestHandleWorkerState_EmptyWorktreePath(t *testing.T) {
 
 	if w.Code != http.StatusInternalServerError {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestResolveWorktreePath_AgentIsolation(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Simulate the resolveWorktreePath closure with agent incorporation
+	resolveWT := func(workspace, agent string) string {
+		if agent == "" {
+			return ""
+		}
+		candidate := filepath.Clean(filepath.Join(tmpDir, "worktrees", agent))
+		absBase, _ := filepath.Abs(tmpDir)
+		absCandidate, _ := filepath.Abs(candidate)
+		if !strings.HasPrefix(absCandidate, absBase+string(filepath.Separator)) {
+			return ""
+		}
+		os.MkdirAll(candidate, 0700)
+		return candidate
+	}
+
+	// Different agents get different paths
+	pathA := resolveWT("ws1", "falcon")
+	pathB := resolveWT("ws1", "nova")
+	if pathA == pathB {
+		t.Errorf("agents falcon and nova resolved to same path: %s", pathA)
+	}
+	if pathA == "" || pathB == "" {
+		t.Fatal("resolved path should not be empty")
+	}
+	// Paths contain agent names
+	if !strings.Contains(pathA, "falcon") {
+		t.Errorf("path %q does not contain agent name 'falcon'", pathA)
+	}
+	if !strings.Contains(pathB, "nova") {
+		t.Errorf("path %q does not contain agent name 'nova'", pathB)
+	}
+	// Directory should exist
+	if _, err := os.Stat(pathA); err != nil {
+		t.Errorf("agent directory not created: %v", err)
+	}
+}
+
+func TestResolveWorktreePath_TraversalBlocked(t *testing.T) {
+	tmpDir := t.TempDir()
+	resolveWT := func(workspace, agent string) string {
+		if agent == "" {
+			return ""
+		}
+		candidate := filepath.Clean(filepath.Join(tmpDir, "worktrees", agent))
+		absBase, _ := filepath.Abs(tmpDir)
+		absCandidate, _ := filepath.Abs(candidate)
+		if !strings.HasPrefix(absCandidate, absBase+string(filepath.Separator)) {
+			return ""
+		}
+		return candidate
+	}
+
+	tests := []struct {
+		agent string
+		want  string // empty = should be rejected
+	}{
+		{"../../etc/passwd", ""},   // escapes workspace root
+		{"../../../tmp/evil", ""},  // escapes workspace root
+		{"../escape", "non-empty"}, // stays under workspace root (benign)
+		{"valid-agent", "non-empty"},
+		{"agent_123", "non-empty"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		got := resolveWT("ws1", tt.agent)
+		if tt.want == "" && got != "" {
+			t.Errorf("agent %q should be rejected but got path %q", tt.agent, got)
+		}
+		if tt.want != "" && got == "" {
+			t.Errorf("agent %q should be accepted but was rejected", tt.agent)
+		}
+	}
+}
+
+func TestHandleWorkerState_AgentIsolatedLockFiles(t *testing.T) {
+	// Verify that two agents writing state through the handler produce
+	// independent lock files under worktrees/<agent>/.agent.lock.
+	tmpDir := t.TempDir()
+
+	resolveWT := func(workspace, agent string) string {
+		if agent == "" {
+			return ""
+		}
+		candidate := filepath.Clean(filepath.Join(tmpDir, "worktrees", agent))
+		absBase, _ := filepath.Abs(tmpDir)
+		absCandidate, _ := filepath.Abs(candidate)
+		if !strings.HasPrefix(absCandidate, absBase+string(filepath.Separator)) {
+			return ""
+		}
+		os.MkdirAll(candidate, 0700)
+		return candidate
+	}
+
+	// Pre-create lock files for both agents.
+	agent1Dir := filepath.Join(tmpDir, "worktrees", "agent1")
+	agent2Dir := filepath.Join(tmpDir, "worktrees", "agent2")
+	os.MkdirAll(agent1Dir, 0700)
+	os.MkdirAll(agent2Dir, 0700)
+	os.WriteFile(filepath.Join(agent1Dir, ".agent.lock"), []byte(`{"state":"idle"}`), 0600)
+	os.WriteFile(filepath.Join(agent2Dir, ".agent.lock"), []byte(`{"state":"idle"}`), 0600)
+
+	reg := NewWorkerRegistry()
+	reg.Register(&WorkerInfo{ID: "w1", Workspace: "ws", Agent: "agent1"})
+	reg.Register(&WorkerInfo{ID: "w2", Workspace: "ws", Agent: "agent2"})
+
+	handler := handleWorkerState(reg, resolveWT)
+
+	// Update agent1 state to "building".
+	req1 := httptest.NewRequest(http.MethodPost, "/api/internal/workers/w1/state",
+		strings.NewReader(`{"action":"update_state","state":"building"}`))
+	req1.SetPathValue("id", "w1")
+	rec1 := httptest.NewRecorder()
+	handler.ServeHTTP(rec1, req1)
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("agent1 update: status = %d, want %d; body = %s", rec1.Code, http.StatusOK, rec1.Body.String())
+	}
+
+	// Update agent2 state to "testing".
+	req2 := httptest.NewRequest(http.MethodPost, "/api/internal/workers/w2/state",
+		strings.NewReader(`{"action":"update_state","state":"testing"}`))
+	req2.SetPathValue("id", "w2")
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("agent2 update: status = %d, want %d; body = %s", rec2.Code, http.StatusOK, rec2.Body.String())
+	}
+
+	// Verify each agent's lock file has its own state.
+	info1, err := readWorkerLock(agent1Dir)
+	if err != nil {
+		t.Fatalf("readWorkerLock agent1: %v", err)
+	}
+	if info1["state"] != "building" {
+		t.Errorf("agent1 state = %v, want %q", info1["state"], "building")
+	}
+
+	info2, err := readWorkerLock(agent2Dir)
+	if err != nil {
+		t.Fatalf("readWorkerLock agent2: %v", err)
+	}
+	if info2["state"] != "testing" {
+		t.Errorf("agent2 state = %v, want %q", info2["state"], "testing")
+	}
+}
+
+func TestResolveWorktreePath_EmptyAgent(t *testing.T) {
+	// The closure should return "" when agent is empty, even if workspace resolves.
+	tmpDir := t.TempDir()
+
+	resolveWT := func(workspace, agent string) string {
+		if workspace == "" || agent == "" {
+			return ""
+		}
+		candidate := filepath.Clean(filepath.Join(tmpDir, "worktrees", agent))
+		absBase, _ := filepath.Abs(tmpDir)
+		absCandidate, _ := filepath.Abs(candidate)
+		if !strings.HasPrefix(absCandidate, absBase+string(filepath.Separator)) {
+			return ""
+		}
+		os.MkdirAll(candidate, 0700)
+		return candidate
+	}
+
+	// Both empty.
+	if got := resolveWT("", ""); got != "" {
+		t.Errorf("both empty: got %q, want empty", got)
+	}
+	// Workspace empty, agent present.
+	if got := resolveWT("", "agent1"); got != "" {
+		t.Errorf("workspace empty: got %q, want empty", got)
+	}
+	// Workspace present, agent empty.
+	if got := resolveWT("ws1", ""); got != "" {
+		t.Errorf("agent empty: got %q, want empty", got)
+	}
+	// Both present — should succeed.
+	if got := resolveWT("ws1", "agent1"); got == "" {
+		t.Error("both present: got empty, want non-empty path")
+	}
+}
+
+func TestResolveWorktreePath_DirectoryCreation(t *testing.T) {
+	// Verify that MkdirAll creates the full worktrees/<agent> hierarchy.
+	tmpDir := t.TempDir()
+
+	resolveWT := func(workspace, agent string) string {
+		if agent == "" {
+			return ""
+		}
+		candidate := filepath.Clean(filepath.Join(tmpDir, "worktrees", agent))
+		absBase, _ := filepath.Abs(tmpDir)
+		absCandidate, _ := filepath.Abs(candidate)
+		if !strings.HasPrefix(absCandidate, absBase+string(filepath.Separator)) {
+			return ""
+		}
+		os.MkdirAll(candidate, 0700)
+		return candidate
+	}
+
+	// worktrees/ does not exist yet.
+	wtDir := filepath.Join(tmpDir, "worktrees")
+	if _, err := os.Stat(wtDir); err == nil {
+		t.Fatal("worktrees dir should not exist before resolve")
+	}
+
+	path := resolveWT("ws1", "deep-agent")
+	if path == "" {
+		t.Fatal("expected non-empty path")
+	}
+
+	// Both the worktrees parent and the agent subdir should exist.
+	if fi, err := os.Stat(wtDir); err != nil {
+		t.Errorf("worktrees dir not created: %v", err)
+	} else if !fi.IsDir() {
+		t.Error("worktrees is not a directory")
+	}
+	if fi, err := os.Stat(path); err != nil {
+		t.Errorf("agent dir not created: %v", err)
+	} else if !fi.IsDir() {
+		t.Error("agent path is not a directory")
+	}
+
+	// Verify returned path matches expected.
+	expected := filepath.Join(tmpDir, "worktrees", "deep-agent")
+	if path != expected {
+		t.Errorf("path = %q, want %q", path, expected)
 	}
 }
 

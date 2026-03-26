@@ -273,7 +273,26 @@ func registerWorkerAPIRoutes(mux *http.ServeMux, workspaceConfigFn func() (*Work
 
 	SetupWorkerAPIRoutes(mux, workerToken,
 		func(workspace, agent string) string {
-			return resolveWorkspacePath(workspaceConfigFn, workspace)
+			wsPath := resolveWorkspacePath(workspaceConfigFn, workspace)
+			if wsPath == "" || agent == "" {
+				return ""
+			}
+			candidate := filepath.Clean(filepath.Join(wsPath, "worktrees", agent))
+			absBase, err := filepath.Abs(wsPath)
+			if err != nil {
+				return ""
+			}
+			absCandidate, err := filepath.Abs(candidate)
+			if err != nil {
+				return ""
+			}
+			if !strings.HasPrefix(absCandidate, absBase+string(filepath.Separator)) {
+				return "" // agent name escapes workspace dir
+			}
+			if err := os.MkdirAll(candidate, 0700); err != nil {
+				return ""
+			}
+			return candidate
 		},
 		func(workspace string) string {
 			path := resolveWorkspacePath(workspaceConfigFn, workspace)
