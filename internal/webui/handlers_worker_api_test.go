@@ -159,7 +159,7 @@ func TestHandleWorkerRegister(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			reg := NewWorkerRegistry()
-			handler := handleWorkerRegister(reg)
+			handler := handleWorkerRegister(reg, nil)
 
 			req := httptest.NewRequest(http.MethodPost, "/api/internal/workers/register", strings.NewReader(tt.body))
 			w := httptest.NewRecorder()
@@ -768,7 +768,7 @@ func TestSetupWorkerAPIRoutes(t *testing.T) {
 	resolveEvt := func(ws string) string { return tmpDir }
 	resolveLog := func(ws, ag string) string { return filepath.Join(tmpDir, "agent.log") }
 
-	reg := SetupWorkerAPIRoutes(mux, "test-token", resolveWT, resolveEvt, resolveLog)
+	reg := SetupWorkerAPIRoutes(mux, "test-token", resolveWT, resolveEvt, resolveLog, nil)
 	if reg == nil {
 		t.Fatal("SetupWorkerAPIRoutes returned nil registry")
 	}
@@ -814,7 +814,7 @@ func TestSetupWorkerAPIRoutes(t *testing.T) {
 func TestSetupWorkerAPIRoutes_RejectsWithoutAuth(t *testing.T) {
 	mux := http.NewServeMux()
 	tmpDir := t.TempDir()
-	SetupWorkerAPIRoutes(mux, "secret", func(_, _ string) string { return tmpDir }, func(_ string) string { return tmpDir }, func(_, _ string) string { return filepath.Join(tmpDir, "a.log") })
+	SetupWorkerAPIRoutes(mux, "secret", func(_, _ string) string { return tmpDir }, func(_ string) string { return tmpDir }, func(_, _ string) string { return filepath.Join(tmpDir, "a.log") }, nil)
 
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
@@ -837,7 +837,7 @@ func TestSetupWorkerAPIRoutes_RejectsWithoutAuth(t *testing.T) {
 
 func TestHandleWorkerRegister_EmptyBody(t *testing.T) {
 	reg := NewWorkerRegistry()
-	handler := handleWorkerRegister(reg)
+	handler := handleWorkerRegister(reg, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/internal/workers/register", strings.NewReader(""))
 	w := httptest.NewRecorder()
@@ -850,7 +850,7 @@ func TestHandleWorkerRegister_EmptyBody(t *testing.T) {
 
 func TestHandleWorkerRegister_BothFieldsEmpty(t *testing.T) {
 	reg := NewWorkerRegistry()
-	handler := handleWorkerRegister(reg)
+	handler := handleWorkerRegister(reg, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/internal/workers/register", strings.NewReader(`{"workspace":"","agent":""}`))
 	w := httptest.NewRecorder()
@@ -863,7 +863,7 @@ func TestHandleWorkerRegister_BothFieldsEmpty(t *testing.T) {
 
 func TestHandleWorkerRegister_NoBackend(t *testing.T) {
 	reg := NewWorkerRegistry()
-	handler := handleWorkerRegister(reg)
+	handler := handleWorkerRegister(reg, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/internal/workers/register", strings.NewReader(`{"workspace":"ws","agent":"a1"}`))
 	w := httptest.NewRecorder()
@@ -1589,5 +1589,295 @@ func TestAppendToLogFile_ReadOnlyParent(t *testing.T) {
 	err := appendToLogFile(logPath, []byte("data"))
 	if err == nil {
 		t.Error("expected error writing to read-only parent")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// findWorkspacePathByID tests (loomcli-n28bt.10)
+// ---------------------------------------------------------------------------
+
+func TestFindWorkspacePathByID(t *testing.T) {
+	wsData := &WorkspaceData{
+		Path: "/default/path",
+		Workspaces: []WorkspaceSummary{
+			{ID: "uuid-aaa", Name: "alpha", Path: "/ws/alpha"},
+			{ID: "uuid-bbb", Name: "beta", Path: "/ws/beta"},
+		},
+	}
+
+	tests := []struct {
+		name   string
+		wsData *WorkspaceData
+		id     string
+		want   string
+	}{
+		{
+			name:   "found first workspace",
+			wsData: wsData,
+			id:     "uuid-aaa",
+			want:   "/ws/alpha",
+		},
+		{
+			name:   "found second workspace",
+			wsData: wsData,
+			id:     "uuid-bbb",
+			want:   "/ws/beta",
+		},
+		{
+			name:   "unknown ID returns empty",
+			wsData: wsData,
+			id:     "uuid-zzz",
+			want:   "",
+		},
+		{
+			name:   "nil wsData returns empty",
+			wsData: nil,
+			id:     "uuid-aaa",
+			want:   "",
+		},
+		{
+			name: "empty ID in summary is skipped",
+			wsData: &WorkspaceData{
+				Workspaces: []WorkspaceSummary{
+					{ID: "", Name: "no-id", Path: "/ws/no-id"},
+					{ID: "uuid-ccc", Name: "gamma", Path: "/ws/gamma"},
+				},
+			},
+			id:   "uuid-ccc",
+			want: "/ws/gamma",
+		},
+		{
+			name: "lookup with empty ID returns empty",
+			wsData: &WorkspaceData{
+				Workspaces: []WorkspaceSummary{
+					{ID: "uuid-aaa", Name: "alpha", Path: "/ws/alpha"},
+				},
+			},
+			id:   "",
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := findWorkspacePathByID(tt.wsData, tt.id)
+			if got != tt.want {
+				t.Errorf("findWorkspacePathByID() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// handleWorkerRegister — workspace UUID validation (loomcli-n28bt.10)
+// ---------------------------------------------------------------------------
+
+func TestHandleWorkerRegister_ValidatesWorkspaceUUID(t *testing.T) {
+	knownUUID := "550e8400-e29b-41d4-a716-446655440000"
+	unknownUUID := "00000000-0000-0000-0000-000000000000"
+
+	validator := func(id string) bool {
+		return id == knownUUID
+	}
+
+	tests := []struct {
+		name     string
+		body     string
+		wantCode int
+		wantErr  string
+	}{
+		{
+			name:     "known workspace UUID succeeds",
+			body:     `{"workspace":"` + knownUUID + `","agent":"a1","backend":"local"}`,
+			wantCode: http.StatusCreated,
+		},
+		{
+			name:     "unknown workspace UUID returns 400",
+			body:     `{"workspace":"` + unknownUUID + `","agent":"a1","backend":"local"}`,
+			wantCode: http.StatusBadRequest,
+			wantErr:  "unknown workspace ID",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reg := NewWorkerRegistry()
+			handler := handleWorkerRegister(reg, validator)
+
+			req := httptest.NewRequest(http.MethodPost, "/api/internal/workers/register", strings.NewReader(tt.body))
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+
+			if w.Code != tt.wantCode {
+				t.Fatalf("status = %d, want %d; body = %s", w.Code, tt.wantCode, w.Body.String())
+			}
+			if tt.wantErr != "" && !strings.Contains(w.Body.String(), tt.wantErr) {
+				t.Errorf("body = %q, want to contain %q", w.Body.String(), tt.wantErr)
+			}
+			if tt.wantCode == http.StatusCreated {
+				var resp workerRegisterResponse
+				if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+					t.Fatalf("decode error: %v", err)
+				}
+				if resp.WorkerID == "" {
+					t.Error("WorkerID is empty")
+				}
+				if reg.Get(resp.WorkerID) == nil {
+					t.Error("worker not found in registry after register")
+				}
+			}
+		})
+	}
+}
+
+func TestHandleWorkerRegister_NilValidator(t *testing.T) {
+	// nil validateWorkspace means no validation — registration succeeds
+	// regardless of workspace value (existing behavior preserved).
+	reg := NewWorkerRegistry()
+	handler := handleWorkerRegister(reg, nil)
+
+	body := `{"workspace":"any-arbitrary-string","agent":"a1"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/internal/workers/register", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body = %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+
+	var resp workerRegisterResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if resp.WorkerID == "" {
+		t.Error("WorkerID is empty")
+	}
+	if reg.Get(resp.WorkerID) == nil {
+		t.Error("worker not found in registry after register with nil validator")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Resolver closures use workspace UUID via findWorkspacePathByID (loomcli-n28bt.10)
+// ---------------------------------------------------------------------------
+
+func TestResolveWorktreePath_UsesWorkspaceUUID(t *testing.T) {
+	// Set up two workspaces with distinct paths and lock files.
+	tmpDir := t.TempDir()
+	wsAPath := filepath.Join(tmpDir, "ws-alpha")
+	wsBPath := filepath.Join(tmpDir, "ws-beta")
+	os.MkdirAll(wsAPath, 0700)
+	os.MkdirAll(wsBPath, 0700)
+
+	uuidA := "aaaa1111-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+	uuidB := "bbbb2222-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+
+	// Pre-create lock files in each workspace.
+	os.WriteFile(filepath.Join(wsAPath, ".agent.lock"), []byte(`{"state":"idle"}`), 0600)
+	os.WriteFile(filepath.Join(wsBPath, ".agent.lock"), []byte(`{"state":"idle"}`), 0600)
+
+	wsData := &WorkspaceData{
+		Path: tmpDir,
+		Workspaces: []WorkspaceSummary{
+			{ID: uuidA, Name: "alpha", Path: wsAPath},
+			{ID: uuidB, Name: "beta", Path: wsBPath},
+		},
+	}
+
+	resolveWT := func(workspace, agent string) string {
+		return findWorkspacePathByID(wsData, workspace)
+	}
+	resolveEvt := func(workspace string) string {
+		path := findWorkspacePathByID(wsData, workspace)
+		if path == "" {
+			return ""
+		}
+		return filepath.Join(path, ".loom", "events")
+	}
+	resolveLog := func(workspace, agent string) string {
+		path := findWorkspacePathByID(wsData, workspace)
+		if path == "" {
+			return ""
+		}
+		return filepath.Join(path, ".loom", "logs", "task-"+agent+".log")
+	}
+	validator := func(id string) bool {
+		return findWorkspacePathByID(wsData, id) != ""
+	}
+
+	mux := http.NewServeMux()
+	SetupWorkerAPIRoutes(mux, "test-token", resolveWT, resolveEvt, resolveLog, validator)
+
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	// Helper to do an authed request.
+	doReq := func(method, path, body string) *http.Response {
+		t.Helper()
+		req, err := http.NewRequest(method, ts.URL+path, strings.NewReader(body))
+		if err != nil {
+			t.Fatalf("create request: %v", err)
+		}
+		req.Header.Set("Authorization", "Bearer test-token")
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("request error: %v", err)
+		}
+		return resp
+	}
+
+	// Register worker A with workspace UUID A.
+	respA := doReq("POST", "/api/internal/workers/register",
+		`{"workspace":"`+uuidA+`","agent":"agent1","backend":"test"}`)
+	defer respA.Body.Close()
+	if respA.StatusCode != http.StatusCreated {
+		t.Fatalf("register A: status = %d, want %d", respA.StatusCode, http.StatusCreated)
+	}
+	var regA workerRegisterResponse
+	json.NewDecoder(respA.Body).Decode(&regA)
+
+	// Register worker B with workspace UUID B.
+	respB := doReq("POST", "/api/internal/workers/register",
+		`{"workspace":"`+uuidB+`","agent":"agent2","backend":"test"}`)
+	defer respB.Body.Close()
+	if respB.StatusCode != http.StatusCreated {
+		t.Fatalf("register B: status = %d, want %d", respB.StatusCode, http.StatusCreated)
+	}
+	var regB workerRegisterResponse
+	json.NewDecoder(respB.Body).Decode(&regB)
+
+	// Update state for worker A — should write to wsAPath.
+	stateRespA := doReq("POST", "/api/internal/workers/"+regA.WorkerID+"/state",
+		`{"action":"update_state","state":"running-alpha"}`)
+	defer stateRespA.Body.Close()
+	if stateRespA.StatusCode != http.StatusOK {
+		t.Fatalf("state A: status = %d, want %d", stateRespA.StatusCode, http.StatusOK)
+	}
+
+	// Update state for worker B — should write to wsBPath.
+	stateRespB := doReq("POST", "/api/internal/workers/"+regB.WorkerID+"/state",
+		`{"action":"update_state","state":"running-beta"}`)
+	defer stateRespB.Body.Close()
+	if stateRespB.StatusCode != http.StatusOK {
+		t.Fatalf("state B: status = %d, want %d", stateRespB.StatusCode, http.StatusOK)
+	}
+
+	// Verify workspace A's lock file has the correct state.
+	infoA, err := readWorkerLock(wsAPath)
+	if err != nil {
+		t.Fatalf("readWorkerLock A: %v", err)
+	}
+	if infoA["state"] != "running-alpha" {
+		t.Errorf("workspace A state = %v, want %q", infoA["state"], "running-alpha")
+	}
+
+	// Verify workspace B's lock file has the correct state.
+	infoB, err := readWorkerLock(wsBPath)
+	if err != nil {
+		t.Fatalf("readWorkerLock B: %v", err)
+	}
+	if infoB["state"] != "running-beta" {
+		t.Errorf("workspace B state = %v, want %q", infoB["state"], "running-beta")
 	}
 }

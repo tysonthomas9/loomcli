@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
 
@@ -66,7 +68,7 @@ func init() {
 	defaultBackend := os.Getenv("LOOM_WORKER_BACKEND")
 
 	workerCmd.Flags().StringVar(&workerControlPlane, "control-plane", defaultControlPlane, "Control plane URL (env: LOOM_WORKER_CONTROL_PLANE)")
-	workerCmd.Flags().StringVar(&workerWorkspace, "workspace", defaultWorkspace, "Workspace name (env: LOOM_WORKER_WORKSPACE)")
+	workerCmd.Flags().StringVar(&workerWorkspace, "workspace", defaultWorkspace, "Workspace UUID or name (env: LOOM_WORKER_WORKSPACE)")
 	workerCmd.Flags().StringVar(&workerAgent, "agent", defaultAgent, "Agent name (env: LOOM_WORKER_AGENT)")
 	workerCmd.Flags().StringVar(&workerBackend, "backend", defaultBackend, "AI backend (env: LOOM_WORKER_BACKEND)")
 	workerCmd.Flags().IntVarP(&workerInterval, "interval", "i", 30, "Polling interval in seconds when no tasks available")
@@ -113,8 +115,38 @@ func validateWorkerFlags() (string, string) {
 	return os.Getenv("LOOM_WORKER_TOKEN"), worktreePath
 }
 
+// isUUIDFormat checks whether s is a valid UUID string.
+func isUUIDFormat(s string) bool {
+	_, err := uuid.Parse(s)
+	return err == nil
+}
+
+// resolveWorkerWorkspace resolves a workspace name to its UUID if needed.
+// If the value is already a valid UUID, it is returned as-is.
+// If it's a name and local config is available, the name is resolved to a UUID.
+// If resolution fails (no local config, unknown name), the value is returned as-is
+// and the server will reject it at registration time.
+func resolveWorkerWorkspace(workspace string) string {
+	if isUUIDFormat(workspace) {
+		return workspace
+	}
+	cfg, err := LoadConfig()
+	if err != nil || cfg == nil {
+		return workspace
+	}
+	if ws, ok := cfg.Workspaces[workspace]; ok && ws.ID != "" {
+		slog.Info("resolved workspace name to UUID",
+			"name", workspace, "id", ws.ID)
+		return ws.ID
+	}
+	return workspace
+}
+
 func runWorker(cmd *cobra.Command, args []string) {
 	workerToken, worktreePath := validateWorkerFlags()
+
+	// Resolve workspace name to UUID if needed
+	workerWorkspace = resolveWorkerWorkspace(workerWorkspace)
 
 	fmt.Println("=========================================")
 	fmt.Println("LOOM WORKER (Remote Agent)")

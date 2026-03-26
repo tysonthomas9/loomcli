@@ -169,59 +169,91 @@ func wrapWorkspaceCreateFn(
 	}
 }
 
+// findWorkspacePathByID scans workspace summaries for a matching UUID and
+// returns its filesystem path. Returns empty string if not found.
+func findWorkspacePathByID(wsData *WorkspaceData, id string) string {
+	if wsData == nil {
+		return ""
+	}
+	for _, ws := range wsData.Workspaces {
+		if ws.ID == id {
+			return ws.Path
+		}
+	}
+	return ""
+}
+
+// resolveWorkspacePath loads config and resolves a workspace UUID to its
+// filesystem path. Returns empty string on any failure.
+func resolveWorkspacePath(configFn func() (*WorkspaceData, error), workspaceID string) string {
+	if configFn == nil {
+		return ""
+	}
+	wsData, err := configFn()
+	if err != nil || wsData == nil {
+		return ""
+	}
+	return findWorkspacePathByID(wsData, workspaceID)
+}
+
+// safeLogPath builds a log file path for an agent, guarding against path traversal.
+func safeLogPath(basePath, agent string) string {
+	logsDir := filepath.Join(basePath, ".loom", "logs")
+	candidate := filepath.Clean(filepath.Join(logsDir, fmt.Sprintf("task-%s.log", agent)))
+	absLogs, err := filepath.Abs(logsDir)
+	if err != nil {
+		return ""
+	}
+	absCandidate, err := filepath.Abs(candidate)
+	if err != nil {
+		return ""
+	}
+	if !strings.HasPrefix(absCandidate, absLogs+string(filepath.Separator)) {
+		return "" // agent name escapes log dir
+	}
+	return candidate
+}
+
 func registerWorkerAPIRoutes(mux *http.ServeMux, workspaceConfigFn func() (*WorkspaceData, error)) {
 	workerToken := os.Getenv("LOOM_WORKER_TOKEN")
 	if workerToken == "" {
 		return
 	}
+
+	validateWorkspace := func(id string) bool {
+		if workspaceConfigFn == nil {
+			return false
+		}
+		wsData, err := workspaceConfigFn()
+		if err != nil {
+			slog.Warn("workspace validation failed due to config error", "workspace_id", id, "err", err)
+			return false
+		}
+		if wsData == nil {
+			return false
+		}
+		return findWorkspacePathByID(wsData, id) != ""
+	}
+
 	SetupWorkerAPIRoutes(mux, workerToken,
-		// resolveWorktreePath: map (workspace, agent) to filesystem path
 		func(workspace, agent string) string {
-			if workspaceConfigFn == nil {
-				return ""
-			}
-			wsData, err := workspaceConfigFn()
-			if err != nil || wsData == nil {
-				return ""
-			}
-			// Use the workspace path as the worktree base
-			return wsData.Path
+			return resolveWorkspacePath(workspaceConfigFn, workspace)
 		},
-		// resolveEventsDir: map workspace to events directory
 		func(workspace string) string {
-			if workspaceConfigFn == nil {
+			path := resolveWorkspacePath(workspaceConfigFn, workspace)
+			if path == "" {
 				return ""
 			}
-			wsData, err := workspaceConfigFn()
-			if err != nil || wsData == nil {
-				return ""
-			}
-			return filepath.Join(wsData.Path, ".loom", "events")
+			return filepath.Join(path, ".loom", "events")
 		},
-		// resolveLogPath: map (workspace, agent) to log file path
 		func(workspace, agent string) string {
-			if workspaceConfigFn == nil {
+			path := resolveWorkspacePath(workspaceConfigFn, workspace)
+			if path == "" {
 				return ""
 			}
-			wsData, err := workspaceConfigFn()
-			if err != nil || wsData == nil {
-				return ""
-			}
-			logsDir := filepath.Join(wsData.Path, ".loom", "logs")
-			candidate := filepath.Clean(filepath.Join(logsDir, fmt.Sprintf("task-%s.log", agent)))
-			absLogs, err := filepath.Abs(logsDir)
-			if err != nil {
-				return ""
-			}
-			absCandidate, err := filepath.Abs(candidate)
-			if err != nil {
-				return ""
-			}
-			if !strings.HasPrefix(absCandidate, absLogs+string(filepath.Separator)) {
-				return "" // agent name escapes log dir
-			}
-			return candidate
+			return safeLogPath(path, agent)
 		},
+		validateWorkspace,
 	)
 	slog.Info("worker API routes registered", "component", "worker")
 }
