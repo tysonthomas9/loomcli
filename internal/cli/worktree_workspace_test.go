@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -356,6 +357,110 @@ func TestResolver_ResolveWorktreePath_Workspace(t *testing.T) {
 	}
 	if path != repoPath {
 		t.Errorf("expected %s, got %s", repoPath, path)
+	}
+}
+
+func TestResolver_ResolveWorktreePath_Workspace_UnregisteredWorktree(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+
+	// Create a registered repo
+	registeredPath := filepath.Join(tmpDir, "worktrees", "registered")
+	createGitRepo(t, registeredPath)
+
+	// Create an unregistered worktree on disk (exists in worktrees/ but not in config)
+	unregisteredPath := filepath.Join(tmpDir, "worktrees", "ember")
+	createGitRepo(t, unregisteredPath)
+
+	cfg := &LoomConfig{
+		DefaultWorkspace: "ws",
+		Workspaces: map[string]WorkspaceConfig{
+			"ws": {
+				Path: tmpDir,
+				Repos: []RepoConfig{
+					{Name: "registered", Path: registeredPath},
+				},
+			},
+		},
+	}
+	setupWorkspaceConfig(t, cfg)
+
+	old := defaultResolver
+	defaultResolver = nil
+	defer func() { defaultResolver = old }()
+
+	r, err := NewResolver()
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+
+	// Registered repo resolves normally
+	path, err := r.ResolveWorktreePath("registered")
+	if err != nil {
+		t.Fatalf("ResolveWorktreePath(registered): %v", err)
+	}
+	if path != registeredPath {
+		t.Errorf("expected %s, got %s", registeredPath, path)
+	}
+
+	// Unregistered worktree that exists on disk should error with actionable message
+	_, err = r.ResolveWorktreePath("ember")
+	if err == nil {
+		t.Fatal("expected error for unregistered worktree, got nil")
+	}
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "exists on disk but is not registered") {
+		t.Errorf("expected 'exists on disk but is not registered' in error, got: %s", errMsg)
+	}
+	if !strings.Contains(errMsg, "loom config add-repo") {
+		t.Errorf("expected 'loom config add-repo' hint in error, got: %s", errMsg)
+	}
+	if !strings.Contains(errMsg, "ember") {
+		t.Errorf("expected worktree name 'ember' in error, got: %s", errMsg)
+	}
+}
+
+func TestResolver_ResolveWorktreePath_Workspace_TrulyMissing(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+
+	repoPath := filepath.Join(tmpDir, "worktrees", "myrepo")
+	createGitRepo(t, repoPath)
+
+	cfg := &LoomConfig{
+		DefaultWorkspace: "ws",
+		Workspaces: map[string]WorkspaceConfig{
+			"ws": {
+				Path: tmpDir,
+				Repos: []RepoConfig{
+					{Name: "myrepo", Path: repoPath},
+				},
+			},
+		},
+	}
+	setupWorkspaceConfig(t, cfg)
+
+	old := defaultResolver
+	defaultResolver = nil
+	defer func() { defaultResolver = old }()
+
+	r, err := NewResolver()
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+
+	// Name that doesn't exist on disk or in config gets the generic error
+	_, err = r.ResolveWorktreePath("ghost")
+	if err == nil {
+		t.Fatal("expected error for nonexistent worktree, got nil")
+	}
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "not found in workspace") {
+		t.Errorf("expected 'not found in workspace' in error, got: %s", errMsg)
+	}
+	// Should NOT contain the add-repo hint since it doesn't exist on disk
+	if strings.Contains(errMsg, "loom config add-repo") {
+		t.Errorf("should not suggest add-repo for worktree that doesn't exist on disk, got: %s", errMsg)
 	}
 }
 
