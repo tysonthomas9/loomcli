@@ -396,6 +396,37 @@ func createCloneWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir st
 	return nil
 }
 
+// resolveInitialWorkspaceID returns the stable UUID for the current working
+// directory's workspace. Falls back to filepath.Base(cwd) if config is
+// unavailable or the workspace has no UUID (pre-migration config).
+func resolveInitialWorkspaceID() string {
+	cfg, err := LoadConfig()
+	if err == nil && cfg != nil && cfg.DefaultWorkspaceID != "" {
+		return cfg.DefaultWorkspaceID
+	}
+	// Fallback: CWD basename (pre-UUID config or load failure)
+	if cwd, err := os.Getwd(); err == nil {
+		return filepath.Base(cwd)
+	}
+	return "default"
+}
+
+// resolveWorkspaceID loads config and resolves a workspace name to its UUID.
+func resolveWorkspaceID(name string) (string, error) {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return "", err
+	}
+	ws, ok := cfg.Workspaces[name]
+	if !ok {
+		return "", fmt.Errorf("workspace %q not found in config", name)
+	}
+	if ws.ID == "" {
+		return "", fmt.Errorf("workspace %q has no stable ID", name)
+	}
+	return ws.ID, nil
+}
+
 // ensureCurrentProjectRegistered adds the current working directory as a
 // workspace in the global config if it isn't already registered. This ensures
 // buildWorkspaceInfo and buildWorkspaceInfoForName are in serve_workspace_info.go

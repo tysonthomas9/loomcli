@@ -102,10 +102,14 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	multiPool := daemon.NewMultiPool(WorkspaceFromContext, config.PoolSize)
 
 	// Initialize the initial workspace connection pool (current project).
-	// Uses CWD basename as workspace ID (not config default, which may differ).
-	initialWorkspaceID := "default"
-	if cwd, err := os.Getwd(); err == nil {
-		initialWorkspaceID = filepath.Base(cwd)
+	// Prefer the stable UUID from config; fall back to CWD basename for
+	// backwards compatibility with pre-migration configs.
+	initialWorkspaceID := config.InitialWorkspaceID
+	if initialWorkspaceID == "" {
+		initialWorkspaceID = "default"
+		if cwd, err := os.Getwd(); err == nil {
+			initialWorkspaceID = filepath.Base(cwd)
+		}
 	}
 	var rawPool *daemon.ConnectionPool
 	var pool daemon.Pool // may be ProtectedPool or raw ConnectionPool
@@ -141,13 +145,6 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		pool = daemon.NewProtectedPool(rawPool, breaker)
 		slog.Info("daemon connection pool initialized with circuit breaker")
 
-		// Register the initial workspace in the MultiPool
-		if err := multiPool.Register(initialWorkspaceID, pool); err != nil {
-			slog.Warn("failed to register initial workspace in MultiPool", "err", err)
-		} else {
-			slog.Info("registered initial workspace in MultiPool", "workspace", initialWorkspaceID)
-		}
-
 		// Test the connection
 		func() {
 			testCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -172,16 +169,17 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	// goroutine that tags mutations with the workspace ID.
 	multiSub := NewMultiWorkspaceSubscriber(hub, multiPool, config.Logger)
 	var getMutationsSince func(wsID string, since int64) []rpc.MutationEvent
+
+	// Create central WorkspaceRegistry to coordinate all workspace lifecycle.
+	registry := NewWorkspaceRegistry(multiPool, multiSub, config.PoolSize, config.Logger)
 	if pool != nil {
-		if err := multiSub.AddWorkspace(initialWorkspaceID); err != nil {
-			slog.Warn("failed to add initial workspace subscriber", "workspace", initialWorkspaceID, "err", err)
-		} else {
-			slog.Info("workspace subscriber started", "workspace", initialWorkspaceID)
+		if err := registry.RegisterPool(initialWorkspaceID, pool); err != nil {
+			slog.Warn("failed to register initial workspace", "err", err)
 		}
 		getMutationsSince = multiSub.GetMutationsSinceForWorkspace
 	}
 
-	reconcileConfigWorkspaces(config.WorkspaceListFn, initialWorkspaceID, pool != nil, multiPool, multiSub, config.PoolSize)
+	reconcileConfigWorkspaces(config.WorkspaceListFn, initialWorkspaceID, pool != nil, registry)
 
 	// Initialize terminal manager for WebSocket terminal sessions.
 	// Include the workspace ID in the session prefix to prevent same-name agents
@@ -371,7 +369,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		}
 	}
 
-	wrappedCreateFn := wrapWorkspaceCreateFn(config.WorkspaceCreateFn, multiPool, multiSub, config.PoolSize)
+	wrappedCreateFn := wrapWorkspaceCreateFn(config.WorkspaceCreateFn, registry, config.WorkspaceIDResolverFn)
 	// Workspace-existence checker for WorkspaceMiddleware (MultiPool is authoritative registry).
 	wsExistsFn := func(id string) bool {
 		return multiPool.PoolForWorkspace(id) != nil
@@ -379,7 +377,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 
 	// Create HTTP server and register routes (allowedOrigins: nil = same-origin only)
 	mux := http.NewServeMux()
-	clientErrLimiter, cspLimiter := setupRoutes(mux, pool, multiPool, hub, getMutationsSince, termMgr, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, timeoutEnforcer, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL, config.GitOps, config.FileOps, tabMetaStore, issueTabStore, config.WorkspaceConfigFn, config.WorkspaceDeleteFn, config.SetDefaultWorkspaceFn, config.ClearDefaultWorkspaceFn, wrappedCreateFn, config.BackendOps, sessionHistoryStore, config.SessionsStore, wsExistsFn)
+	clientErrLimiter, cspLimiter := setupRoutes(mux, pool, multiPool, hub, getMutationsSince, termMgr, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, timeoutEnforcer, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL, config.GitOps, config.FileOps, tabMetaStore, issueTabStore, config.WorkspaceConfigFn, config.WorkspaceDeleteFn, config.SetDefaultWorkspaceFn, config.ClearDefaultWorkspaceFn, wrappedCreateFn, config.BackendOps, sessionHistoryStore, config.SessionsStore, wsExistsFn, registry, config.WorkspaceIDResolverFn)
 	defer clientErrLimiter.stop()
 	defer cspLimiter.stop()
 
@@ -473,6 +471,8 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 			slog.Info("terminal manager stopped", "component", "terminal")
 		}
 	}
+
+	_ = registry.Close() // prevent new registrations during shutdown
 
 	// Stop multi-workspace subscriber (no more handlers need it)
 	if multiSub != nil {

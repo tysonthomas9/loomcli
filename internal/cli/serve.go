@@ -305,9 +305,11 @@ func runServe(cmd *cobra.Command, args []string) {
 					}
 					return result, nil
 				},
-				BackendOps:    backendOps,
-				SessionsStore: sessStore,
-				Logger:        slog.Default(),
+				InitialWorkspaceID:    resolveInitialWorkspaceID(),
+				WorkspaceIDResolverFn: resolveWorkspaceID,
+				BackendOps:            backendOps,
+				SessionsStore:         sessStore,
+				Logger:                slog.Default(),
 			}
 			if serveCorsOrigin != "" {
 				cfg.CORSEnabled = true

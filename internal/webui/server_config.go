@@ -49,6 +49,8 @@ type ServerConfig struct {
 	ClearDefaultWorkspaceFn func() error                      // Clear default workspace in config; nil = feature disabled
 	WorkspaceCreateFn       WorkspaceCreateFn                 // Workspace creation function; nil = creation unavailable
 	WorkspaceListFn         func() (map[string]string, error) // Returns all configured workspaces as name→path; nil = single-workspace mode
+	InitialWorkspaceID      string                            // Stable UUID of the initial workspace (CWD); if empty, falls back to filepath.Base(cwd)
+	WorkspaceIDResolverFn   WorkspaceIDResolverFn             // Resolves workspace name → UUID; nil = no resolution available
 	BackendOps              BackendOps                        // Backend health operations interface (optional; nil disables backend health endpoint)
 	ScrollbackMaxLines      int                               // Maximum lines per scrollback buffer (0 = default 10000)
 	SessionsStore           *sessions.Store                   // File-based session audit trail store (optional; nil disables session endpoints)

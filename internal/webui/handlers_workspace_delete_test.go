@@ -18,7 +18,7 @@ func TestHandleWorkspaceDelete_Success(t *testing.T) {
 		return nil
 	}
 
-	handler := handleWorkspaceDelete(deleteFn, mockWorkspaceConfigFn)
+	handler := handleWorkspaceDelete(deleteFn, mockWorkspaceConfigFn, nil, nil)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/workspace/{name}", nil)
 	req.SetPathValue("name", "my-ws")
@@ -52,7 +52,7 @@ func TestHandleWorkspaceDelete_SuccessNilWorkspaceConfigFn(t *testing.T) {
 		return nil
 	}
 
-	handler := handleWorkspaceDelete(deleteFn, nil)
+	handler := handleWorkspaceDelete(deleteFn, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/workspace/{name}", nil)
 	req.SetPathValue("name", "my-ws")
@@ -81,7 +81,7 @@ func TestHandleWorkspaceDelete_MissingName(t *testing.T) {
 		return nil
 	}
 
-	handler := handleWorkspaceDelete(deleteFn, nil)
+	handler := handleWorkspaceDelete(deleteFn, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/workspace/", nil)
 	// Do not call SetPathValue — name is empty
@@ -109,7 +109,7 @@ func TestHandleWorkspaceDelete_NotFound(t *testing.T) {
 		return fmt.Errorf("workspace %q not found", name)
 	}
 
-	handler := handleWorkspaceDelete(deleteFn, nil)
+	handler := handleWorkspaceDelete(deleteFn, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/workspace/{name}", nil)
 	req.SetPathValue("name", "nonexistent")
@@ -137,7 +137,7 @@ func TestHandleWorkspaceDelete_HasRunningAgents(t *testing.T) {
 		return fmt.Errorf("workspace %q has running agents", name)
 	}
 
-	handler := handleWorkspaceDelete(deleteFn, nil)
+	handler := handleWorkspaceDelete(deleteFn, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/workspace/{name}", nil)
 	req.SetPathValue("name", "busy-ws")
@@ -165,7 +165,7 @@ func TestHandleWorkspaceDelete_InternalError(t *testing.T) {
 		return fmt.Errorf("disk I/O error")
 	}
 
-	handler := handleWorkspaceDelete(deleteFn, nil)
+	handler := handleWorkspaceDelete(deleteFn, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/workspace/{name}", nil)
 	req.SetPathValue("name", "some-ws")
@@ -189,7 +189,7 @@ func TestHandleWorkspaceDelete_InternalError(t *testing.T) {
 }
 
 func TestHandleWorkspaceDelete_NilDeleteFn(t *testing.T) {
-	handler := handleWorkspaceDelete(nil, nil)
+	handler := handleWorkspaceDelete(nil, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/workspace/{name}", nil)
 	req.SetPathValue("name", "some-ws")

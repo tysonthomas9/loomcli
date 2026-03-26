@@ -12,9 +12,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 )
 
-// --- registerWorkspacePool unit tests ---
+// --- Registry.Register unit tests ---
 
-func TestRegisterWorkspacePool_RegistersInMultiPoolAndSubscriber(t *testing.T) {
+func TestRegistry_Register_RegistersInMultiPoolAndSubscriber(t *testing.T) {
 	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 10)
 	hub := NewSSEHub()
 	go hub.Run()
@@ -23,8 +23,12 @@ func TestRegisterWorkspacePool_RegistersInMultiPoolAndSubscriber(t *testing.T) {
 	multiSub := NewMultiWorkspaceSubscriber(hub, multiPool, slog.Default())
 	defer multiSub.Stop()
 
+	registry := NewWorkspaceRegistry(multiPool, multiSub, 10, slog.Default())
+
 	wsPath := t.TempDir()
-	registerWorkspacePool("test-ws", wsPath, multiPool, multiSub, 10)
+	if err := registry.Register("test-ws", wsPath); err != nil {
+		t.Fatalf("Register returned error: %v", err)
+	}
 
 	// Verify the pool was registered in MultiPool
 	pool := multiPool.PoolForWorkspace("test-ws")
@@ -45,7 +49,7 @@ func TestRegisterWorkspacePool_RegistersInMultiPoolAndSubscriber(t *testing.T) {
 	}
 }
 
-func TestRegisterWorkspacePool_MultipleWorkspaces(t *testing.T) {
+func TestRegistry_Register_MultipleWorkspaces(t *testing.T) {
 	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 10)
 	hub := NewSSEHub()
 	go hub.Run()
@@ -54,9 +58,13 @@ func TestRegisterWorkspacePool_MultipleWorkspaces(t *testing.T) {
 	multiSub := NewMultiWorkspaceSubscriber(hub, multiPool, slog.Default())
 	defer multiSub.Stop()
 
+	registry := NewWorkspaceRegistry(multiPool, multiSub, 10, slog.Default())
+
 	for _, name := range []string{"alpha", "beta", "gamma"} {
 		wsPath := t.TempDir()
-		registerWorkspacePool(name, wsPath, multiPool, multiSub, 10)
+		if err := registry.Register(name, wsPath); err != nil {
+			t.Fatalf("Register(%q) returned error: %v", name, err)
+		}
 	}
 
 	ids := multiPool.WorkspaceIDs()
@@ -77,7 +85,7 @@ func TestRegisterWorkspacePool_MultipleWorkspaces(t *testing.T) {
 	}
 }
 
-func TestRegisterWorkspacePool_DuplicateReplacesExisting(t *testing.T) {
+func TestRegistry_Register_DuplicateReplacesExisting(t *testing.T) {
 	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 10)
 	hub := NewSSEHub()
 	go hub.Run()
@@ -86,13 +94,15 @@ func TestRegisterWorkspacePool_DuplicateReplacesExisting(t *testing.T) {
 	multiSub := NewMultiWorkspaceSubscriber(hub, multiPool, slog.Default())
 	defer multiSub.Stop()
 
+	registry := NewWorkspaceRegistry(multiPool, multiSub, 10, slog.Default())
+
 	wsPath1 := t.TempDir()
 	wsPath2 := t.TempDir()
 
-	registerWorkspacePool("dup-ws", wsPath1, multiPool, multiSub, 10)
+	_ = registry.Register("dup-ws", wsPath1)
 	pool1 := multiPool.PoolForWorkspace("dup-ws")
 
-	registerWorkspacePool("dup-ws", wsPath2, multiPool, multiSub, 10)
+	_ = registry.Register("dup-ws", wsPath2)
 	pool2 := multiPool.PoolForWorkspace("dup-ws")
 
 	// Pool should have been replaced (MultiPool.Register replaces existing)
@@ -337,8 +347,8 @@ func TestStartupReconciliation_WorkspaceListFnReturnsEmptyMap(t *testing.T) {
 }
 
 // --- Unit-level reconciliation logic tests ---
-// These test the reconciliation logic directly using MultiPool and
-// MultiWorkspaceSubscriber, without starting a full HTTP server.
+// These test the reconciliation logic directly using the WorkspaceRegistry,
+// without starting a full HTTP server.
 
 func TestReconciliationLogic_SkipsInitialWorkspace(t *testing.T) {
 	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 10)
@@ -349,10 +359,12 @@ func TestReconciliationLogic_SkipsInitialWorkspace(t *testing.T) {
 	multiSub := NewMultiWorkspaceSubscriber(hub, multiPool, slog.Default())
 	defer multiSub.Stop()
 
+	registry := NewWorkspaceRegistry(multiPool, multiSub, 10, slog.Default())
+
 	// Simulate the initial workspace already being registered
 	initialWS := "my-project"
 	initialPath := t.TempDir()
-	registerWorkspacePool(initialWS, initialPath, multiPool, multiSub, 10)
+	_ = registry.Register(initialWS, initialPath)
 
 	// Simulate WorkspaceListFn returning a map that includes the initial workspace
 	workspaces := map[string]string{
@@ -366,7 +378,7 @@ func TestReconciliationLogic_SkipsInitialWorkspace(t *testing.T) {
 		if wsName == initialWS {
 			continue
 		}
-		registerWorkspacePool(wsName, wsPath, multiPool, multiSub, 10)
+		_ = registry.Register(wsName, wsPath)
 	}
 
 	// Verify all workspaces are registered
@@ -399,6 +411,8 @@ func TestReconciliationLogic_EmptyWorkspaceMap(t *testing.T) {
 	multiSub := NewMultiWorkspaceSubscriber(hub, multiPool, slog.Default())
 	defer multiSub.Stop()
 
+	registry := NewWorkspaceRegistry(multiPool, multiSub, 10, slog.Default())
+
 	// Simulate empty workspace map (no workspaces configured besides initial)
 	workspaces := map[string]string{}
 
@@ -406,7 +420,7 @@ func TestReconciliationLogic_EmptyWorkspaceMap(t *testing.T) {
 		if wsName == "default" {
 			continue
 		}
-		registerWorkspacePool(wsName, wsPath, multiPool, multiSub, 10)
+		_ = registry.Register(wsName, wsPath)
 	}
 
 	// No extra pools should have been registered
@@ -430,13 +444,15 @@ func TestReconciliationLogic_NilWorkspaceListFn(t *testing.T) {
 	multiSub := NewMultiWorkspaceSubscriber(hub, multiPool, slog.Default())
 	defer multiSub.Stop()
 
+	registry := NewWorkspaceRegistry(multiPool, multiSub, 10, slog.Default())
+
 	// Replicate the guard from StartServer: if WorkspaceListFn is nil, skip.
 	var workspaceListFn func() (map[string]string, error)
 	if workspaceListFn != nil {
 		workspaces, err := workspaceListFn()
 		if err == nil {
 			for wsName, wsPath := range workspaces {
-				registerWorkspacePool(wsName, wsPath, multiPool, multiSub, 10)
+				_ = registry.Register(wsName, wsPath)
 			}
 		}
 	}
@@ -457,6 +473,8 @@ func TestReconciliationLogic_ErrorFromWorkspaceListFn(t *testing.T) {
 	multiSub := NewMultiWorkspaceSubscriber(hub, multiPool, slog.Default())
 	defer multiSub.Stop()
 
+	registry := NewWorkspaceRegistry(multiPool, multiSub, 10, slog.Default())
+
 	// Replicate the reconciliation with an error-returning function
 	workspaceListFn := func() (map[string]string, error) {
 		return nil, fmt.Errorf("disk I/O error")
@@ -468,7 +486,7 @@ func TestReconciliationLogic_ErrorFromWorkspaceListFn(t *testing.T) {
 		t.Logf("WorkspaceListFn returned error (expected): %v", err)
 	} else {
 		for wsName, wsPath := range workspaces {
-			registerWorkspacePool(wsName, wsPath, multiPool, multiSub, 10)
+			_ = registry.Register(wsName, wsPath)
 		}
 	}
 
@@ -488,9 +506,11 @@ func TestReconciliationLogic_OnlyInitialInMap(t *testing.T) {
 	multiSub := NewMultiWorkspaceSubscriber(hub, multiPool, slog.Default())
 	defer multiSub.Stop()
 
+	registry := NewWorkspaceRegistry(multiPool, multiSub, 10, slog.Default())
+
 	initialWS := "my-workspace"
 	initialPath := t.TempDir()
-	registerWorkspacePool(initialWS, initialPath, multiPool, multiSub, 10)
+	_ = registry.Register(initialWS, initialPath)
 
 	// WorkspaceListFn returns only the initial workspace
 	workspaces := map[string]string{
@@ -501,7 +521,7 @@ func TestReconciliationLogic_OnlyInitialInMap(t *testing.T) {
 		if wsName == initialWS {
 			continue
 		}
-		registerWorkspacePool(wsName, wsPath, multiPool, multiSub, 10)
+		_ = registry.Register(wsName, wsPath)
 	}
 
 	// Only the initial workspace should be registered (no extra registrations)

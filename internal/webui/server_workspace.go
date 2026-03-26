@@ -8,11 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
-
-	"github.com/tysonthomas9/loomcli/internal/circuitbreaker"
-	"github.com/tysonthomas9/loomcli/internal/rpc"
-	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 )
 
 // WorkspaceData represents the full workspace topology returned by the API.
@@ -57,17 +52,15 @@ type WorkspaceAgentInfo struct {
 	CrossRepo  bool     `json:"cross_repo"`
 }
 
-// reconcileConfigWorkspaces registers all configured workspaces in MultiPool
-// at startup. Skips the initial workspace if it was already registered with a
-// custom pool. Connection pools are lazy-connecting, so workspaces whose
-// daemons are not running will connect on first request.
+// reconcileConfigWorkspaces registers all configured workspaces via the
+// WorkspaceRegistry at startup. Skips the initial workspace if it was already
+// registered with a custom pool. Connection pools are lazy-connecting, so
+// workspaces whose daemons are not running will connect on first request.
 func reconcileConfigWorkspaces(
 	listFn func() (map[string]string, error),
 	initialID string,
 	initialRegistered bool,
-	multiPool *daemon.MultiPool,
-	multiSub *MultiWorkspaceSubscriber,
-	poolSize int,
+	registry *WorkspaceRegistry,
 ) {
 	if listFn == nil {
 		return
@@ -81,61 +74,17 @@ func reconcileConfigWorkspaces(
 		if initialRegistered && wsName == initialID {
 			continue
 		}
-		registerWorkspacePool(wsName, wsPath, multiPool, multiSub, poolSize)
+		_ = registry.Register(wsName, wsPath)
 	}
 	slog.Info("startup reconciliation complete",
 		"total_workspaces", len(workspaces),
-		"registered", len(multiPool.WorkspaceIDs()))
-}
-
-// registerWorkspacePool creates a connection pool with circuit breaker for a
-// workspace and registers it in the MultiPool + subscriber. Non-fatal: logs
-// warnings on failure.
-func registerWorkspacePool(
-	wsName, wsPath string,
-	multiPool *daemon.MultiPool,
-	multiSub *MultiWorkspaceSubscriber,
-	poolSize int,
-) {
-	socketPath := rpc.ShortSocketPath(wsPath)
-	rawPool, err := daemon.NewConnectionPool(socketPath, poolSize)
-	if err != nil {
-		slog.Warn("failed to create connection pool for workspace",
-			"workspace", wsName, "socket", socketPath, "err", err)
-		return
-	}
-	breaker := circuitbreaker.NewBreaker("ws-"+wsName, circuitbreaker.Config{
-		FailureThreshold:  5,
-		OpenTimeout:       30 * time.Second,
-		HalfOpenMaxProbes: 1,
-		ShouldTrip:        daemon.DaemonShouldTrip,
-		OnStateChange: func(from, to circuitbreaker.State) {
-			slog.Info("circuit breaker state change", "component", "circuit_breaker", "workspace", wsName, "from", from, "to", to)
-		},
-	})
-	pool := daemon.NewProtectedPool(rawPool, breaker)
-
-	if err := multiPool.Register(wsName, pool); err != nil {
-		slog.Warn("failed to register pool for workspace",
-			"workspace", wsName, "err", err)
-		return
-	}
-	slog.Info("registered connection pool for workspace",
-		"workspace", wsName, "socket", socketPath)
-
-	if err := multiSub.AddWorkspace(wsName); err != nil {
-		slog.Warn("failed to start subscriber for workspace",
-			"workspace", wsName, "err", err)
-	} else {
-		slog.Info("started subscriber for workspace", "workspace", wsName)
-	}
+		"registered", len(registry.WorkspaceIDs()))
 }
 
 func wrapWorkspaceCreateFn(
 	innerCreate WorkspaceCreateFn,
-	multiPool *daemon.MultiPool,
-	multiSub *MultiWorkspaceSubscriber,
-	poolSize int,
+	registry *WorkspaceRegistry,
+	resolveID WorkspaceIDResolverFn,
 ) WorkspaceCreateFn {
 	if innerCreate == nil {
 		return nil
@@ -143,6 +92,17 @@ func wrapWorkspaceCreateFn(
 	return func(ctx context.Context, req WorkspaceCreateRequest) error {
 		if err := innerCreate(ctx, req); err != nil {
 			return err
+		}
+
+		// Resolve UUID — config was just saved by innerCreate, so resolution should succeed.
+		wsID := req.Name // fallback to name if resolver unavailable
+		if resolveID != nil {
+			if id, err := resolveID(req.Name); err != nil {
+				slog.Warn("failed to resolve workspace UUID after creation",
+					"workspace", req.Name, "err", err)
+			} else {
+				wsID = id
+			}
 		}
 
 		// Determine the workspace directory (mirrors GetWorkspaceDir logic in cli/config.go)
@@ -164,7 +124,7 @@ func wrapWorkspaceCreateFn(
 		}
 		wsDir = filepath.Clean(wsDir)
 
-		registerWorkspacePool(req.Name, wsDir, multiPool, multiSub, poolSize)
+		_ = registry.Register(wsID, wsDir)
 		return nil
 	}
 }
