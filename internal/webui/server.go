@@ -102,10 +102,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	multiPool := daemon.NewMultiPool(WorkspaceFromContext, config.PoolSize)
 
 	// Initialize the initial workspace connection pool (current project).
-	// The workspace ID must match the current working directory's name because
-	// the daemon pool connects to the local daemon socket. Using the default
-	// workspace from config here would be wrong when a different workspace is
-	// the default (e.g., after creating a second workspace).
+	// Uses CWD basename as workspace ID (not config default, which may differ).
 	initialWorkspaceID := "default"
 	if cwd, err := os.Getwd(); err == nil {
 		initialWorkspaceID = filepath.Base(cwd)
@@ -183,6 +180,8 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		}
 		getMutationsSince = multiSub.GetMutationsSince
 	}
+
+	reconcileConfigWorkspaces(config.WorkspaceListFn, initialWorkspaceID, pool != nil, multiPool, multiSub, config.PoolSize)
 
 	// Initialize terminal manager for WebSocket terminal sessions.
 	// Include the workspace ID in the session prefix to prevent same-name agents

@@ -291,9 +291,23 @@ func runServe(cmd *cobra.Command, args []string) {
 				SetDefaultWorkspaceFn:   setDefaultWorkspace,
 				ClearDefaultWorkspaceFn: clearDefaultWorkspace,
 				WorkspaceCreateFn:       createWorkspace,
-				BackendOps:              backendOps,
-				SessionsStore:           sessStore,
-				Logger:                  slog.Default(),
+				WorkspaceListFn: func() (map[string]string, error) {
+					cfg, err := LoadConfig()
+					if err != nil {
+						return nil, err
+					}
+					if cfg == nil || len(cfg.Workspaces) == 0 {
+						return nil, nil
+					}
+					result := make(map[string]string, len(cfg.Workspaces))
+					for name, ws := range cfg.Workspaces {
+						result[name] = ws.Path
+					}
+					return result, nil
+				},
+				BackendOps:    backendOps,
+				SessionsStore: sessStore,
+				Logger:        slog.Default(),
 			}
 			if serveCorsOrigin != "" {
 				cfg.CORSEnabled = true

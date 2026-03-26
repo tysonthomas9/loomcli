@@ -57,6 +57,80 @@ type WorkspaceAgentInfo struct {
 	CrossRepo  bool     `json:"cross_repo"`
 }
 
+// reconcileConfigWorkspaces registers all configured workspaces in MultiPool
+// at startup. Skips the initial workspace if it was already registered with a
+// custom pool. Connection pools are lazy-connecting, so workspaces whose
+// daemons are not running will connect on first request.
+func reconcileConfigWorkspaces(
+	listFn func() (map[string]string, error),
+	initialID string,
+	initialRegistered bool,
+	multiPool *daemon.MultiPool,
+	multiSub *MultiWorkspaceSubscriber,
+	poolSize int,
+) {
+	if listFn == nil {
+		return
+	}
+	workspaces, err := listFn()
+	if err != nil {
+		slog.Warn("failed to load workspace list for startup reconciliation", "err", err)
+		return
+	}
+	for wsName, wsPath := range workspaces {
+		if initialRegistered && wsName == initialID {
+			continue
+		}
+		registerWorkspacePool(wsName, wsPath, multiPool, multiSub, poolSize)
+	}
+	slog.Info("startup reconciliation complete",
+		"total_workspaces", len(workspaces),
+		"registered", len(multiPool.WorkspaceIDs()))
+}
+
+// registerWorkspacePool creates a connection pool with circuit breaker for a
+// workspace and registers it in the MultiPool + subscriber. Non-fatal: logs
+// warnings on failure.
+func registerWorkspacePool(
+	wsName, wsPath string,
+	multiPool *daemon.MultiPool,
+	multiSub *MultiWorkspaceSubscriber,
+	poolSize int,
+) {
+	socketPath := rpc.ShortSocketPath(wsPath)
+	rawPool, err := daemon.NewConnectionPool(socketPath, poolSize)
+	if err != nil {
+		slog.Warn("failed to create connection pool for workspace",
+			"workspace", wsName, "socket", socketPath, "err", err)
+		return
+	}
+	breaker := circuitbreaker.NewBreaker("ws-"+wsName, circuitbreaker.Config{
+		FailureThreshold:  5,
+		OpenTimeout:       30 * time.Second,
+		HalfOpenMaxProbes: 1,
+		ShouldTrip:        daemon.DaemonShouldTrip,
+		OnStateChange: func(from, to circuitbreaker.State) {
+			slog.Info("circuit breaker state change", "component", "circuit_breaker", "workspace", wsName, "from", from, "to", to)
+		},
+	})
+	pool := daemon.NewProtectedPool(rawPool, breaker)
+
+	if err := multiPool.Register(wsName, pool); err != nil {
+		slog.Warn("failed to register pool for workspace",
+			"workspace", wsName, "err", err)
+		return
+	}
+	slog.Info("registered connection pool for workspace",
+		"workspace", wsName, "socket", socketPath)
+
+	if err := multiSub.AddWorkspace(wsName); err != nil {
+		slog.Warn("failed to start subscriber for workspace",
+			"workspace", wsName, "err", err)
+	} else {
+		slog.Info("started subscriber for workspace", "workspace", wsName)
+	}
+}
+
 func wrapWorkspaceCreateFn(
 	innerCreate WorkspaceCreateFn,
 	multiPool *daemon.MultiPool,
@@ -90,36 +164,7 @@ func wrapWorkspaceCreateFn(
 		}
 		wsDir = filepath.Clean(wsDir)
 
-		// Compute the daemon socket path and create a connection pool with circuit breaker
-		socketPath := rpc.ShortSocketPath(wsDir)
-		newRawPool, err := daemon.NewConnectionPool(socketPath, poolSize)
-		if err != nil {
-			slog.Warn("failed to create connection pool for new workspace",
-				"workspace", req.Name, "socket", socketPath, "err", err)
-			return nil // non-fatal: workspace was created successfully
-		}
-		breaker := circuitbreaker.NewBreaker("ws-"+req.Name, circuitbreaker.Config{
-			FailureThreshold: 5,
-			OpenTimeout:      30 * time.Second,
-		})
-		newPool := daemon.NewProtectedPool(newRawPool, breaker)
-
-		if err := multiPool.Register(req.Name, newPool); err != nil {
-			slog.Warn("failed to register pool for new workspace",
-				"workspace", req.Name, "err", err)
-			return nil
-		}
-		slog.Info("registered connection pool for new workspace",
-			"workspace", req.Name, "socket", socketPath)
-
-		// Start a DaemonSubscriber for the new workspace
-		if err := multiSub.AddWorkspace(req.Name); err != nil {
-			slog.Warn("failed to start subscriber for new workspace",
-				"workspace", req.Name, "err", err)
-		} else {
-			slog.Info("started subscriber for new workspace", "workspace", req.Name)
-		}
-
+		registerWorkspacePool(req.Name, wsDir, multiPool, multiSub, poolSize)
 		return nil
 	}
 }
