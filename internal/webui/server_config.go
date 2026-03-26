@@ -48,7 +48,7 @@ type ServerConfig struct {
 	SetDefaultWorkspaceFn   func(name string) error           // Set default workspace in config; nil = feature disabled
 	ClearDefaultWorkspaceFn func() error                      // Clear default workspace in config; nil = feature disabled
 	WorkspaceCreateFn       WorkspaceCreateFn                 // Workspace creation function; nil = creation unavailable
-	WorkspaceListFn         func() (map[string]string, error) // Returns all configured workspaces as name→path; nil = single-workspace mode
+	WorkspaceListFn         func() (map[string]string, error) // Returns all configured workspaces as id→path (UUID preferred, name fallback for pre-migration); nil = single-workspace mode
 	InitialWorkspaceID      string                            // Stable UUID of the initial workspace (CWD); if empty, falls back to filepath.Base(cwd)
 	WorkspaceIDResolverFn   WorkspaceIDResolverFn             // Resolves workspace name → UUID; nil = no resolution available
 	BackendOps              BackendOps                        // Backend health operations interface (optional; nil disables backend health endpoint)

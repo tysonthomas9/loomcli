@@ -301,7 +301,14 @@ func runServe(cmd *cobra.Command, args []string) {
 					}
 					result := make(map[string]string, len(cfg.Workspaces))
 					for name, ws := range cfg.Workspaces {
-						result[name] = ws.Path
+						// Use stable UUID as map key so MultiPool is keyed
+						// by UUID (matches InitialWorkspaceID). Fall back to
+						// config name for pre-migration workspaces.
+						key := name
+						if ws.ID != "" {
+							key = ws.ID
+						}
+						result[key] = ws.Path
 					}
 					return result, nil
 				},

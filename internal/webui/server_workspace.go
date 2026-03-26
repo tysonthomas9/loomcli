@@ -70,11 +70,11 @@ func reconcileConfigWorkspaces(
 		slog.Warn("failed to load workspace list for startup reconciliation", "err", err)
 		return
 	}
-	for wsName, wsPath := range workspaces {
-		if initialRegistered && wsName == initialID {
+	for wsID, wsPath := range workspaces {
+		if initialRegistered && wsID == initialID {
 			continue
 		}
-		_ = registry.Register(wsName, wsPath)
+		_ = registry.Register(wsID, wsPath)
 	}
 	slog.Info("startup reconciliation complete",
 		"total_workspaces", len(workspaces),

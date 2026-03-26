@@ -497,6 +497,137 @@ func TestReconciliationLogic_ErrorFromWorkspaceListFn(t *testing.T) {
 	}
 }
 
+func TestReconcileConfigWorkspaces_UUIDKeys(t *testing.T) {
+	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 10)
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	multiSub := NewMultiWorkspaceSubscriber(hub, multiPool, slog.Default())
+	defer multiSub.Stop()
+
+	registry := NewWorkspaceRegistry(multiPool, multiSub, 10, slog.Default())
+
+	// Simulate initial workspace registered by UUID (as server.go does post-T2)
+	initialUUID := "aaaabbbb-1111-2222-3333-444455556666"
+	initialPath := t.TempDir()
+	_ = registry.Register(initialUUID, initialPath)
+
+	extraUUID := "ccccdddd-5555-6666-7777-888899990000"
+	extraPath := t.TempDir()
+
+	// WorkspaceListFn now returns uuid→path
+	listFn := func() (map[string]string, error) {
+		return map[string]string{
+			initialUUID: initialPath,
+			extraUUID:   extraPath,
+		}, nil
+	}
+
+	reconcileConfigWorkspaces(listFn, initialUUID, true, registry)
+
+	// Verify: initial workspace not double-registered, extra workspace added
+	ids := multiPool.WorkspaceIDs()
+	sort.Strings(ids)
+	if len(ids) != 2 {
+		t.Fatalf("expected 2 workspace IDs, got %d: %v", len(ids), ids)
+	}
+	if ids[0] != initialUUID {
+		t.Errorf("WorkspaceIDs[0] = %q, want %q", ids[0], initialUUID)
+	}
+	if ids[1] != extraUUID {
+		t.Errorf("WorkspaceIDs[1] = %q, want %q", ids[1], extraUUID)
+	}
+}
+
+func TestReconcileConfigWorkspaces_PreMigrationNameKeys(t *testing.T) {
+	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 10)
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	multiSub := NewMultiWorkspaceSubscriber(hub, multiPool, slog.Default())
+	defer multiSub.Stop()
+
+	registry := NewWorkspaceRegistry(multiPool, multiSub, 10, slog.Default())
+
+	// Pre-migration: initial workspace registered by name (no UUID available)
+	initialName := "my-project"
+	initialPath := t.TempDir()
+	_ = registry.Register(initialName, initialPath)
+
+	extraName := "other-project"
+	extraPath := t.TempDir()
+
+	// WorkspaceListFn returns name→path (pre-migration fallback)
+	listFn := func() (map[string]string, error) {
+		return map[string]string{
+			initialName: initialPath,
+			extraName:   extraPath,
+		}, nil
+	}
+
+	reconcileConfigWorkspaces(listFn, initialName, true, registry)
+
+	ids := multiPool.WorkspaceIDs()
+	sort.Strings(ids)
+	if len(ids) != 2 {
+		t.Fatalf("expected 2 workspace IDs, got %d: %v", len(ids), ids)
+	}
+	if ids[0] != "my-project" {
+		t.Errorf("WorkspaceIDs[0] = %q, want %q", ids[0], "my-project")
+	}
+	if ids[1] != "other-project" {
+		t.Errorf("WorkspaceIDs[1] = %q, want %q", ids[1], "other-project")
+	}
+}
+
+func TestReconcileConfigWorkspaces_UUIDSkipMatchesInitialID(t *testing.T) {
+	// Verifies the skip logic works when both initialID and map keys are UUIDs.
+	// This was the core bug T2 fixes: previously, map keys were names but
+	// initialID was a UUID, so the skip check failed and the initial workspace
+	// got re-registered (replacing the custom auto-discovered pool).
+	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 10)
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	multiSub := NewMultiWorkspaceSubscriber(hub, multiPool, slog.Default())
+	defer multiSub.Stop()
+
+	registry := NewWorkspaceRegistry(multiPool, multiSub, 10, slog.Default())
+
+	initialUUID := "11112222-3333-4444-5555-666677778888"
+	initialPath := t.TempDir()
+	_ = registry.Register(initialUUID, initialPath)
+
+	// Capture the original pool reference
+	originalPool := multiPool.PoolForWorkspace(initialUUID)
+	if originalPool == nil {
+		t.Fatal("initial pool should be registered")
+	}
+
+	// reconcileConfigWorkspaces with only the initial workspace in the map
+	listFn := func() (map[string]string, error) {
+		return map[string]string{
+			initialUUID: initialPath,
+		}, nil
+	}
+	reconcileConfigWorkspaces(listFn, initialUUID, true, registry)
+
+	// The pool should NOT have been replaced (skip logic worked)
+	poolAfter := multiPool.PoolForWorkspace(initialUUID)
+	if poolAfter != originalPool {
+		t.Error("initial workspace pool was replaced — skip logic failed")
+	}
+
+	// Still exactly one workspace
+	ids := multiPool.WorkspaceIDs()
+	if len(ids) != 1 || ids[0] != initialUUID {
+		t.Errorf("expected [%s], got %v", initialUUID, ids)
+	}
+}
+
 func TestReconciliationLogic_OnlyInitialInMap(t *testing.T) {
 	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 10)
 	hub := NewSSEHub()
