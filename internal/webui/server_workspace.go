@@ -148,6 +148,54 @@ func wrapWorkspaceCreateFn(
 	}
 }
 
+// wrapWorkspaceDeleteFn wraps a workspace deletion function with post-deletion
+// cleanup. After the inner delete succeeds, it deregisters the workspace from
+// the WorkspaceRegistry (closing pools and stopping subscribers) and the
+// FleetStoreRegistry (stopping fleet Store and TimeoutEnforcer).
+func wrapWorkspaceDeleteFn(
+	innerDelete func(name string) error,
+	registry *WorkspaceRegistry,
+	fleetRegistry *fleet.StoreRegistry,
+	resolveID WorkspaceIDResolverFn,
+) func(name string) error {
+	if innerDelete == nil {
+		return nil
+	}
+	return func(name string) error {
+		// 1. Resolve UUID BEFORE deletion (config entry is removed by innerDelete).
+		wsID := name // fallback to name if resolution fails
+		if resolveID != nil {
+			if resolved, err := resolveID(name); err == nil && resolved != "" {
+				wsID = resolved
+			} else {
+				slog.Warn("could not resolve workspace UUID for deletion cleanup, using name as fallback",
+					"workspace", name, "err", err)
+			}
+		}
+
+		// 2. Perform the config deletion (the critical path).
+		if err := innerDelete(name); err != nil {
+			return err
+		}
+
+		// 3. Clean up pool and subscriber state (best-effort, non-fatal).
+		if registry != nil {
+			registry.Deregister(wsID)
+			slog.Info("workspace pool and subscriber cleaned up after deletion",
+				"workspace", name, "id", wsID)
+		}
+
+		// 4. Clean up fleet state (best-effort, non-fatal).
+		if fleetRegistry != nil {
+			fleetRegistry.Deregister(wsID)
+			slog.Info("workspace fleet store cleaned up after deletion",
+				"workspace", name, "id", wsID)
+		}
+
+		return nil
+	}
+}
+
 // findWorkspacePathByID scans workspace summaries for a matching UUID and
 // returns its filesystem path. Returns empty string if not found.
 func findWorkspacePathByID(wsData *WorkspaceData, id string) string {
