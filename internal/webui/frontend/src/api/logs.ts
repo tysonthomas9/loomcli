@@ -102,13 +102,15 @@ export async function getTaskLogContent(
 /**
  * Fetch whether agent logs should use live tmux streaming or archive fallback.
  */
-// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export async function getAgentTerminalInfo(
-  _workspaceId: string,
+  workspaceId: string,
   agentName: string,
 ): Promise<"tmux" | "archive"> {
   const response = await get<AgentTerminalInfoResponse>(
-    `/api/agents/${encodeURIComponent(agentName)}/terminal/info`,
+    wsUrl(
+      workspaceId,
+      `/agents/${encodeURIComponent(agentName)}/terminal/info`,
+    ),
   );
   if (!response.success || !response.data) {
     throw new Error(response.error || "Failed to fetch agent terminal info");
@@ -119,13 +121,15 @@ export async function getAgentTerminalInfo(
 /**
  * Fetch one-time WebSocket auth token for agent terminal stream.
  */
-// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export async function getAgentTerminalToken(
-  _workspaceId: string,
+  workspaceId: string,
   agentName: string,
 ): Promise<string> {
   const response = await get<AgentTerminalTokenResponse>(
-    `/api/agents/${encodeURIComponent(agentName)}/terminal/token`,
+    wsUrl(
+      workspaceId,
+      `/agents/${encodeURIComponent(agentName)}/terminal/token`,
+    ),
   );
   if (!response.success || !response.data) {
     throw new Error(response.error || "Failed to fetch agent terminal token");
@@ -136,9 +140,8 @@ export async function getAgentTerminalToken(
 /**
  * Build WebSocket URL for agent terminal stream.
  */
-// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export function getAgentTerminalWsUrl(
-  _workspaceId: string,
+  workspaceId: string,
   agentName: string,
   token: string,
 ): string {
@@ -148,7 +151,11 @@ export function getAgentTerminalWsUrl(
       : (globalThis as { location?: Location }).location;
   const proto = location?.protocol === "https:" ? "wss:" : "ws:";
   const host = location?.host || "localhost";
-  return `${proto}//${host}/api/agents/${encodeURIComponent(agentName)}/terminal/ws?token=${encodeURIComponent(token)}`;
+  const path = wsUrl(
+    workspaceId,
+    `/agents/${encodeURIComponent(agentName)}/terminal/ws`,
+  );
+  return `${proto}//${host}${path}?token=${encodeURIComponent(token)}`;
 }
 
 /**

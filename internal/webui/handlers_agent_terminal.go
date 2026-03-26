@@ -67,11 +67,7 @@ func handleGetAgentTerminalInfo(manager *TerminalManager) http.HandlerFunc {
 			return
 		}
 
-		// Get workspace ID from context (set by WorkspaceMiddleware) or query param fallback.
 		wsID := WorkspaceFromContext(r.Context())
-		if wsID == "" {
-			wsID = r.URL.Query().Get("workspace")
-		}
 
 		mode := agentTerminalModeArchive
 		if _, found, err := manager.FindLatestAgentSession(wsID, agentName); err != nil {
@@ -186,11 +182,7 @@ func handleAgentTerminalWS(manager *TerminalManager, auth *terminalAuth, allowed
 			return
 		}
 
-		// Get workspace ID from context (set by WorkspaceMiddleware) or query param fallback.
 		wsID := WorkspaceFromContext(r.Context())
-		if wsID == "" {
-			wsID = r.URL.Query().Get("workspace")
-		}
 
 		sessionName, found, err := manager.FindLatestAgentSession(wsID, agentName)
 		if err != nil {

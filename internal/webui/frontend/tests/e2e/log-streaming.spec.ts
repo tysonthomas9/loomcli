@@ -176,7 +176,7 @@ test.describe('Agent Logs Terminal Transport UI', () => {
 
   test('archive mode renders with refresh control', async ({ page }) => {
     await setupBaseMocks(page);
-    await page.route('**/api/agents/ember/terminal/info', async (route) => {
+    await page.route('**/agents/ember/terminal/info', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -209,7 +209,7 @@ test.describe('Agent Logs Terminal Transport UI', () => {
     await setupBaseMocks(page);
 
     let archiveRequests = 0;
-    await page.route('**/api/agents/ember/terminal/info', async (route) => {
+    await page.route('**/agents/ember/terminal/info', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -241,7 +241,7 @@ test.describe('Agent Logs Terminal Transport UI', () => {
     await setupBaseMocks(page);
 
     let tokenRequests = 0;
-    await page.route('**/api/agents/ember/terminal/info', async (route) => {
+    await page.route('**/agents/ember/terminal/info', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -251,7 +251,7 @@ test.describe('Agent Logs Terminal Transport UI', () => {
         }),
       });
     });
-    await page.route('**/api/agents/ember/terminal/token', async (route) => {
+    await page.route('**/agents/ember/terminal/token', async (route) => {
       tokenRequests++;
       await route.fulfill({
         status: 200,
@@ -271,7 +271,7 @@ test.describe('Agent Logs Terminal Transport UI', () => {
 
   test('archive mode handles null log payload without UI crash', async ({ page }) => {
     await setupBaseMocks(page);
-    await page.route('**/api/agents/ember/terminal/info', async (route) => {
+    await page.route('**/agents/ember/terminal/info', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',

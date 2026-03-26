@@ -122,7 +122,9 @@ describe("logs API", () => {
       const mode = await getAgentTerminalInfo("test-ws-id", "ember");
 
       expect(mode).toBe("tmux");
-      expect(mockGet).toHaveBeenCalledWith("/api/agents/ember/terminal/info");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/agents/ember/terminal/info",
+      );
     });
 
     it("fetches one-time agent terminal token", async () => {
@@ -134,12 +136,16 @@ describe("logs API", () => {
       const token = await getAgentTerminalToken("test-ws-id", "ember");
 
       expect(token).toBe("abc123");
-      expect(mockGet).toHaveBeenCalledWith("/api/agents/ember/terminal/token");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/agents/ember/terminal/token",
+      );
     });
 
     it("builds ws url for agent terminal", () => {
       const url = getAgentTerminalWsUrl("test-ws-id", "ember", "abc123");
-      expect(url).toContain("/api/agents/ember/terminal/ws?token=abc123");
+      expect(url).toContain(
+        "/api/workspaces/test-ws-id/agents/ember/terminal/ws?token=abc123",
+      );
       expect(url.startsWith("ws://") || url.startsWith("wss://")).toBe(true);
     });
 

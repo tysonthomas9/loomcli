@@ -1115,7 +1115,7 @@ func TestFindLatestAgentSession_WithWorkspaceID(t *testing.T) {
 }
 
 // TestFindLatestAgentSession_EmptyWorkspaceID verifies that when no workspace
-// ID is provided, sessions for any workspace are matched (backwards-compatible).
+// ID is provided, no sessions are matched (fail-closed behavior).
 func TestFindLatestAgentSession_EmptyWorkspaceID(t *testing.T) {
 	skipIfNoTmux(t)
 
@@ -1137,17 +1137,13 @@ func TestFindLatestAgentSession_EmptyWorkspaceID(t *testing.T) {
 		t.Cleanup(func() { killTmuxSession(t, s) })
 	}
 
-	// With empty workspace ID: should find at least one session.
-	name, found, err := mgr.FindLatestAgentSession("", agentName)
+	// With empty workspace ID: should NOT find any session (fail-closed).
+	_, found, err := mgr.FindLatestAgentSession("", agentName)
 	if err != nil {
 		t.Fatalf("FindLatestAgentSession() error: %v", err)
 	}
-	if !found {
-		t.Fatal("FindLatestAgentSession() found = false, want true")
-	}
-	// The returned session should be one of the two we created.
-	if name != session1 && name != session2 {
-		t.Errorf("FindLatestAgentSession() = %q, want one of %q or %q", name, session1, session2)
+	if found {
+		t.Fatal("FindLatestAgentSession() found = true, want false (fail-closed on empty workspace)")
 	}
 }
 
