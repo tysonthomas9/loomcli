@@ -86,10 +86,13 @@ const defaultAgentContext = {
 let reposOverride: Partial<typeof defaultReposReturn> = {};
 let agentOverride: Partial<typeof defaultAgentContext> = {};
 
+const TEST_WS_ID = "test-ws-uuid-1234";
+
 vi.mock("@/hooks", () => ({
   useWorkspaceRepos: () => ({ ...defaultReposReturn, ...reposOverride }),
   useAgentContext: () => ({ ...defaultAgentContext, ...agentOverride }),
   useWorkspaceContext: () => ({
+    workspaceId: TEST_WS_ID,
     activeWorkspaceName: null,
     defaultWorkspaceName: null,
     setDefaultWorkspace: vi.fn(),
@@ -133,6 +136,7 @@ vi.mock("@/hooks/useWorkspaceTree", () => ({
 describe("WorkspaceTree", () => {
   beforeEach(() => {
     localStorage.clear();
+    localStorage.setItem("loom:last-workspace-id", TEST_WS_ID);
     reposOverride = {};
     agentOverride = {};
   });
@@ -323,18 +327,22 @@ describe("WorkspaceTree", () => {
     it("persists collapsed state to localStorage", () => {
       render(<WorkspaceTree defaultCollapsed={false} />);
 
-      expect(localStorage.getItem("workspace-tree-collapsed")).toBe("false");
+      expect(localStorage.getItem(`loom:${TEST_WS_ID}:tree-collapsed`)).toBe(
+        "false",
+      );
 
       const collapseButton = screen.getByRole("button", {
         name: /collapse workspace tree/i,
       });
       fireEvent.click(collapseButton);
 
-      expect(localStorage.getItem("workspace-tree-collapsed")).toBe("true");
+      expect(localStorage.getItem(`loom:${TEST_WS_ID}:tree-collapsed`)).toBe(
+        "true",
+      );
     });
 
     it("reads initial state from localStorage", () => {
-      localStorage.setItem("workspace-tree-collapsed", "false");
+      localStorage.setItem(`loom:${TEST_WS_ID}:tree-collapsed`, "false");
 
       reposOverride = {
         repos: [
@@ -722,7 +730,7 @@ describe("WorkspaceTree", () => {
 
       // Pre-set repo collapsed state
       localStorage.setItem(
-        "workspace-tree-repo-collapsed",
+        `loom:${TEST_WS_ID}:tree-repo-collapsed`,
         JSON.stringify({ alpha: true }),
       );
 
@@ -924,14 +932,14 @@ describe("WorkspaceTree", () => {
       fireEvent.click(chevron);
 
       const stored = JSON.parse(
-        localStorage.getItem("workspace-tree-repo-collapsed") || "{}",
+        localStorage.getItem(`loom:${TEST_WS_ID}:tree-repo-collapsed`) || "{}",
       );
       expect(stored.alpha).toBe(true);
     });
 
     it("reads initial per-repo collapse state from localStorage", () => {
       localStorage.setItem(
-        "workspace-tree-repo-collapsed",
+        `loom:${TEST_WS_ID}:tree-repo-collapsed`,
         JSON.stringify({ alpha: true }),
       );
 
@@ -1016,7 +1024,7 @@ describe("WorkspaceTree", () => {
       expect(screen.getAllByText("nova").length).toBeGreaterThanOrEqual(1);
 
       const stored = JSON.parse(
-        localStorage.getItem("workspace-tree-repo-collapsed") || "{}",
+        localStorage.getItem(`loom:${TEST_WS_ID}:tree-repo-collapsed`) || "{}",
       );
       expect(stored.alpha).toBe(true);
       expect(stored.beta).toBeUndefined();

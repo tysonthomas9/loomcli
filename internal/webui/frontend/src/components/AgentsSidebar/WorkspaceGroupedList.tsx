@@ -5,13 +5,15 @@
 
 import { useState, useCallback, useMemo } from "react";
 
+import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
 import type { LoomAgentStatus } from "@/types";
+import { wsGet, wsSet, getLastWorkspaceId } from "@/utils/scopedStorage";
 
 import { AgentCard } from "../AgentCard";
 import type { AgentTaskMap } from "./AgentsSidebar";
 import styles from "./AgentsSidebar.module.css";
 
-const WS_COLLAPSED_STORAGE_KEY = "agents-sidebar-ws-collapsed";
+const SK_WS_COLLAPSED = "agents-sidebar-ws-collapsed";
 
 export interface WorkspaceGroupedListProps {
   agents: LoomAgentStatus[];
@@ -48,12 +50,16 @@ export function WorkspaceGroupedList({
   agentTasks,
   onAgentClick,
 }: WorkspaceGroupedListProps): JSX.Element {
+  const { workspaceId } = useWorkspaceContext();
+
   const [collapsedWorkspaces, setCollapsedWorkspaces] = useState<
     Record<string, boolean>
   >(() => {
+    const wsId = getLastWorkspaceId();
+    if (!wsId) return {};
+    const stored = wsGet(wsId, SK_WS_COLLAPSED);
+    if (!stored) return {};
     try {
-      const stored = localStorage.getItem(WS_COLLAPSED_STORAGE_KEY);
-      if (!stored) return {};
       const parsed = JSON.parse(stored);
       return parsed && typeof parsed === "object" && !Array.isArray(parsed)
         ? (parsed as Record<string, boolean>)
@@ -65,17 +71,17 @@ export function WorkspaceGroupedList({
 
   const workspaceGroups = useWorkspaceGroups(agents);
 
-  const toggleWorkspaceCollapse = useCallback((wsName: string) => {
-    setCollapsedWorkspaces((prev) => {
-      const next = { ...prev, [wsName]: !prev[wsName] };
-      try {
-        localStorage.setItem(WS_COLLAPSED_STORAGE_KEY, JSON.stringify(next));
-      } catch {
-        // Ignore localStorage errors
-      }
-      return next;
-    });
-  }, []);
+  const toggleWorkspaceCollapse = useCallback(
+    (wsName: string) => {
+      setCollapsedWorkspaces((prev) => {
+        const next = { ...prev, [wsName]: !prev[wsName] };
+        if (workspaceId)
+          wsSet(workspaceId, SK_WS_COLLAPSED, JSON.stringify(next));
+        return next;
+      });
+    },
+    [workspaceId],
+  );
 
   const renderAgent = (agent: LoomAgentStatus) => (
     <AgentCard

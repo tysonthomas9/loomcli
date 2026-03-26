@@ -7,7 +7,8 @@ import { useState, useCallback, useEffect } from "react";
 import { ApiError } from "@/api/client";
 import { gitPush, gitPushAll } from "@/api/git";
 import { ConfirmDialog, ErrorDisplay, LoadingSkeleton } from "@/components";
-import { useAgentContext, useRepoFilter } from "@/hooks";
+import { useAgentContext, useRepoFilter, useWorkspaceContext } from "@/hooks";
+import { wsGet, wsSet, getLastWorkspaceId } from "@/utils/scopedStorage";
 import type {
   LoomAgentStatus,
   LoomTaskInfo,
@@ -69,8 +70,9 @@ export interface AgentsSidebarProps {
   viewSwitcher?: ReactNode;
 }
 
-const COLLAPSE_STORAGE_KEY = "agents-sidebar-collapsed";
-const WORK_QUEUE_STORAGE_KEY = "agents-sidebar-work-queue-expanded";
+// Scoped key suffixes
+const SK_COLLAPSED = "agents-sidebar-collapsed";
+const SK_WORK_QUEUE = "agents-sidebar-work-queue-expanded";
 
 /**
  * AgentsSidebar displays a collapsible panel with agent status cards.
@@ -82,24 +84,22 @@ export function AgentsSidebar({
   onAgentClick,
   viewSwitcher,
 }: AgentsSidebarProps): JSX.Element {
-  // Load initial collapsed state from localStorage
+  const { workspaceId } = useWorkspaceContext();
+
+  // Load initial collapsed state from scoped localStorage
   const [isCollapsed, setIsCollapsed] = useState(() => {
-    try {
-      const stored = localStorage.getItem(COLLAPSE_STORAGE_KEY);
-      return stored !== null ? stored === "true" : defaultCollapsed;
-    } catch {
-      return defaultCollapsed;
-    }
+    const wsId = getLastWorkspaceId();
+    if (!wsId) return defaultCollapsed;
+    const stored = wsGet(wsId, SK_COLLAPSED);
+    return stored !== null ? stored === "true" : defaultCollapsed;
   });
 
-  // Load work queue expanded state from localStorage
+  // Load work queue expanded state from scoped localStorage
   const [isWorkQueueExpanded, setIsWorkQueueExpanded] = useState(() => {
-    try {
-      const stored = localStorage.getItem(WORK_QUEUE_STORAGE_KEY);
-      return stored !== null ? stored === "true" : true;
-    } catch {
-      return true;
-    }
+    const wsId = getLastWorkspaceId();
+    if (!wsId) return true;
+    const stored = wsGet(wsId, SK_WORK_QUEUE);
+    return stored !== null ? stored === "true" : true;
   });
 
   // Track which category drawer is open
@@ -137,23 +137,16 @@ export function AgentsSidebar({
   const [selectedRepos] = useRepoFilter();
   const isGrouped = selectedRepos.length > 0;
 
-  // Persist collapsed state
+  // Persist collapsed state to scoped storage
   useEffect(() => {
-    try {
-      localStorage.setItem(COLLAPSE_STORAGE_KEY, String(isCollapsed));
-    } catch {
-      // Ignore localStorage errors
-    }
-  }, [isCollapsed]);
+    if (workspaceId) wsSet(workspaceId, SK_COLLAPSED, String(isCollapsed));
+  }, [isCollapsed, workspaceId]);
 
-  // Persist work queue expanded state
+  // Persist work queue expanded state to scoped storage
   useEffect(() => {
-    try {
-      localStorage.setItem(WORK_QUEUE_STORAGE_KEY, String(isWorkQueueExpanded));
-    } catch {
-      // Ignore localStorage errors
-    }
-  }, [isWorkQueueExpanded]);
+    if (workspaceId)
+      wsSet(workspaceId, SK_WORK_QUEUE, String(isWorkQueueExpanded));
+  }, [isWorkQueueExpanded, workspaceId]);
 
   // Auto-collapse at <1024px viewport width
   useEffect(() => {

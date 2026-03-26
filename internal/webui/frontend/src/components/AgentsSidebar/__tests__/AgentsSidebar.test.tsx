@@ -59,10 +59,12 @@ let mockContextOverride: Partial<typeof defaultMockContext> = {};
 
 // Mock the hooks to prevent API calls in tests
 let mockSelectedRepos: string[] = [];
+const TEST_WS_ID = "test-ws-uuid-1234";
 
 vi.mock("@/hooks", () => ({
   useAgentContext: () => ({ ...defaultMockContext, ...mockContextOverride }),
   useRepoFilter: () => [mockSelectedRepos, vi.fn()],
+  useWorkspaceContext: () => ({ workspaceId: TEST_WS_ID }),
   useFocusReturn: vi.fn(),
   useFocusTrap: vi.fn(),
   useRegisterEscapeLayer: vi.fn(),
@@ -100,9 +102,14 @@ vi.mock("@/api/client", () => ({
   },
 }));
 
+vi.mock("@/hooks/useWorkspaceContext", () => ({
+  useWorkspaceContext: () => ({ workspaceId: TEST_WS_ID }),
+}));
+
 describe("AgentsSidebar", () => {
   beforeEach(() => {
     localStorage.clear();
+    localStorage.setItem("loom:last-workspace-id", TEST_WS_ID);
     mockContextOverride = {};
     mockSelectedRepos = [];
     mockGitPush.mockReset();
@@ -1073,7 +1080,9 @@ describe("AgentsSidebar", () => {
       fireEvent.click(backendHeader);
 
       // localStorage should have the collapsed state
-      const stored = localStorage.getItem("agents-sidebar-ws-collapsed");
+      const stored = localStorage.getItem(
+        `loom:${TEST_WS_ID}:agents-sidebar-ws-collapsed`,
+      );
       expect(stored).toBeTruthy();
       const parsed = JSON.parse(stored!);
       expect(parsed["backend"]).toBe(true);
@@ -1100,7 +1109,9 @@ describe("AgentsSidebar", () => {
       fireEvent.click(backendHeader);
       fireEvent.click(backendHeader);
 
-      const stored = localStorage.getItem("agents-sidebar-ws-collapsed");
+      const stored = localStorage.getItem(
+        `loom:${TEST_WS_ID}:agents-sidebar-ws-collapsed`,
+      );
       expect(stored).toBeTruthy();
       const parsed = JSON.parse(stored!);
       expect(parsed["backend"]).toBe(false);

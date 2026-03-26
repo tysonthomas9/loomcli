@@ -25,14 +25,21 @@ import {
   setActiveWorkspace as setActiveWorkspaceClient,
   getActiveWorkspace,
 } from "@/api/client";
+import {
+  wsGet,
+  wsSet,
+  getLastWorkspaceId,
+  setLastWorkspaceId,
+} from "@/utils/scopedStorage";
 
 import { useWorkspace as useWorkspaceData } from "./useWorkspace";
 import type { UseWorkspaceReturn } from "./useWorkspace";
 
 // localStorage keys
 const LS_ACTIVE_WORKSPACE = "loom-active-workspace";
-const LS_SELECTED_REPOS = "loom-selected-repos";
 const LS_DEFAULT_WORKSPACE = "loom-default-workspace";
+// Scoped key suffix for selected repos (stored as loom:{wsId}:selected-repos)
+const SK_SELECTED_REPOS = "selected-repos";
 
 /**
  * Safe localStorage getter.
@@ -67,6 +74,9 @@ export interface WorkspaceContextValue extends UseWorkspaceReturn {
   getReposByGroup: (group: string) => RepoInfo[];
   /** Get agent info by name. Returns undefined if not found. */
   getAgentByName: (name: string) => WorkspaceAgentInfo | undefined;
+
+  /** Stable workspace UUID, used for scoping localStorage keys. */
+  workspaceId: string | null;
 
   /** Name of the active workspace */
   activeWorkspaceName: string | null;
@@ -112,11 +122,14 @@ export interface WorkspaceProviderProps {
 }
 
 /**
- * Read initial selected repos from localStorage.
+ * Read initial selected repos from scoped localStorage.
+ * Uses workspace ID from loom:last-workspace-id for synchronous initialization.
  * Returns empty Set (meaning "all") if not found or invalid.
  */
 function readStoredRepoSelection(): Set<string> {
-  const raw = lsGet(LS_SELECTED_REPOS);
+  const wsId = getLastWorkspaceId();
+  if (!wsId) return new Set<string>();
+  const raw = wsGet(wsId, SK_SELECTED_REPOS);
   if (raw === null) return new Set<string>();
   try {
     const parsed = JSON.parse(raw);
@@ -163,6 +176,11 @@ export function WorkspaceProvider({
 
   const workspaceResult = useWorkspaceData({ pollInterval: 60000 });
 
+  // Stable workspace UUID — initialized from localStorage, synced from API
+  const [workspaceId, setWorkspaceId] = useState<string | null>(() =>
+    getLastWorkspaceId(),
+  );
+
   // Default workspace state (fast-path from localStorage, synced from server)
   const [defaultWorkspaceName, setDefaultWorkspaceNameRaw] = useState<
     string | null
@@ -173,10 +191,11 @@ export function WorkspaceProvider({
     readStoredRepoSelection(),
   );
 
-  // Sync activeWorkspaceName when workspace data loads
+  // Sync activeWorkspaceName and workspaceId when workspace data loads
   useEffect(() => {
     if (workspaceResult.workspace) {
       const wsName = workspaceResult.workspace.name;
+      const wsId = workspaceResult.workspace.id;
       setActiveWorkspaceNameRaw((prev) => {
         if (prev !== wsName) {
           lsSet(LS_ACTIVE_WORKSPACE, wsName);
@@ -184,6 +203,16 @@ export function WorkspaceProvider({
         }
         return prev;
       });
+      // Sync workspace UUID to localStorage and state
+      if (wsId) {
+        setWorkspaceId((prev) => {
+          if (prev !== wsId) {
+            setLastWorkspaceId(wsId);
+            return wsId;
+          }
+          return prev;
+        });
+      }
     }
   }, [workspaceResult.workspace]);
 
@@ -218,10 +247,12 @@ export function WorkspaceProvider({
       if (!changed) return prev;
       // If all selected repos were stale, fall back to "all"
       if (cleaned.size === 0) {
-        lsSet(LS_SELECTED_REPOS, JSON.stringify([]));
+        if (workspaceId)
+          wsSet(workspaceId, SK_SELECTED_REPOS, JSON.stringify([]));
         return new Set<string>();
       }
-      lsSet(LS_SELECTED_REPOS, JSON.stringify([...cleaned]));
+      if (workspaceId)
+        wsSet(workspaceId, SK_SELECTED_REPOS, JSON.stringify([...cleaned]));
       return cleaned;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -280,30 +311,38 @@ export function WorkspaceProvider({
     [defaultWorkspaceName],
   );
 
-  // Repo selection actions
-  const selectRepos = useCallback((names: string[]) => {
-    const next = new Set(names);
-    setSelectedRepoNames(next);
-    lsSet(LS_SELECTED_REPOS, JSON.stringify(names));
-  }, []);
+  // Repo selection actions — use workspace-scoped storage
+  const selectRepos = useCallback(
+    (names: string[]) => {
+      const next = new Set(names);
+      setSelectedRepoNames(next);
+      if (workspaceId)
+        wsSet(workspaceId, SK_SELECTED_REPOS, JSON.stringify(names));
+    },
+    [workspaceId],
+  );
 
   const selectAll = useCallback(() => {
     setSelectedRepoNames(new Set<string>());
-    lsSet(LS_SELECTED_REPOS, JSON.stringify([]));
-  }, []);
+    if (workspaceId) wsSet(workspaceId, SK_SELECTED_REPOS, JSON.stringify([]));
+  }, [workspaceId]);
 
-  const toggleRepo = useCallback((name: string) => {
-    setSelectedRepoNames((prev) => {
-      const next = new Set(prev);
-      if (next.has(name)) {
-        next.delete(name);
-      } else {
-        next.add(name);
-      }
-      lsSet(LS_SELECTED_REPOS, JSON.stringify([...next]));
-      return next;
-    });
-  }, []);
+  const toggleRepo = useCallback(
+    (name: string) => {
+      setSelectedRepoNames((prev) => {
+        const next = new Set(prev);
+        if (next.has(name)) {
+          next.delete(name);
+        } else {
+          next.add(name);
+        }
+        if (workspaceId)
+          wsSet(workspaceId, SK_SELECTED_REPOS, JSON.stringify([...next]));
+        return next;
+      });
+    },
+    [workspaceId],
+  );
 
   // Derived: active repos
   const isAllSelected = useMemo(
@@ -361,6 +400,7 @@ export function WorkspaceProvider({
       getRepoByName,
       getReposByGroup,
       getAgentByName,
+      workspaceId,
       activeWorkspaceName,
       setActiveWorkspace,
       defaultWorkspaceName,
@@ -380,6 +420,7 @@ export function WorkspaceProvider({
       getRepoByName,
       getReposByGroup,
       getAgentByName,
+      workspaceId,
       activeWorkspaceName,
       setActiveWorkspace,
       defaultWorkspaceName,
@@ -415,6 +456,7 @@ const NO_WORKSPACE_CONTEXT: WorkspaceContextValue = {
   getRepoByName: () => undefined,
   getReposByGroup: () => [],
   getAgentByName: () => undefined,
+  workspaceId: null,
   activeWorkspaceName: null,
   setActiveWorkspace: () => {},
   defaultWorkspaceName: null,

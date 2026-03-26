@@ -18,6 +18,8 @@ import {
 } from "@dnd-kit/core";
 import { useState, useMemo, useCallback, useEffect } from "react";
 
+import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
+import { wsGet, wsSet, getLastWorkspaceId } from "@/utils/scopedStorage";
 import { DraggableIssueCard } from "@/components/DraggableIssueCard";
 import { EmptyWorkspaceBoard } from "@/components/EmptyWorkspaceBoard";
 import type { BlockedInfo } from "@/components/KanbanBoard";
@@ -41,25 +43,23 @@ import {
 import styles from "./SwimLaneBoard.module.css";
 
 /**
- * Storage key prefix for collapsed lanes state.
+ * Scoped key suffix for collapsed lanes state.
  * Combined with groupBy for unique key per grouping mode.
  */
-const STORAGE_KEY_PREFIX = "swimlane-collapsed-";
-
-/**
- * Helper to get storage key for a groupBy mode.
- */
-function getStorageKey(groupBy: GroupByField): string {
-  return `${STORAGE_KEY_PREFIX}${groupBy}`;
+function scopedLaneKey(groupBy: GroupByField): string {
+  return `swimlane-collapsed-${groupBy}`;
 }
 
 /**
- * Helper to load collapsed lanes from localStorage.
+ * Helper to load collapsed lanes from scoped localStorage.
  */
-function loadCollapsedLanes(groupBy: GroupByField): Set<string> {
-  if (groupBy === "none") return new Set();
+function loadCollapsedLanes(
+  groupBy: GroupByField,
+  wsId: string | null,
+): Set<string> {
+  if (groupBy === "none" || !wsId) return new Set();
   try {
-    const stored = localStorage.getItem(getStorageKey(groupBy));
+    const stored = wsGet(wsId, scopedLaneKey(groupBy));
     if (stored) {
       const parsed: unknown = JSON.parse(stored);
       if (
@@ -76,15 +76,15 @@ function loadCollapsedLanes(groupBy: GroupByField): Set<string> {
 }
 
 /**
- * Helper to save collapsed lanes to localStorage.
+ * Helper to save collapsed lanes to scoped localStorage.
  */
-function saveCollapsedLanes(groupBy: GroupByField, lanes: Set<string>): void {
-  if (groupBy === "none") return;
-  try {
-    localStorage.setItem(getStorageKey(groupBy), JSON.stringify([...lanes]));
-  } catch {
-    // Silently fail if localStorage unavailable
-  }
+function saveCollapsedLanes(
+  groupBy: GroupByField,
+  lanes: Set<string>,
+  wsId: string | null,
+): void {
+  if (groupBy === "none" || !wsId) return;
+  wsSet(wsId, scopedLaneKey(groupBy), JSON.stringify([...lanes]));
 }
 
 /**
@@ -230,25 +230,26 @@ function SwimLaneBoardContent({
   groupBy: Exclude<GroupByField, "none">;
   columns: KanbanColumnConfig[];
 }): JSX.Element {
+  const { workspaceId } = useWorkspaceContext();
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
   const [sourceColumnId, setSourceColumnId] = useState<string | null>(null);
   // Track lanes that have been toggled from their default state.
   // When defaultCollapsed=true, this tracks lanes that were EXPANDED (toggled to open).
   // When defaultCollapsed=false, this tracks lanes that were COLLAPSED (toggled to closed).
-  // Initialize from localStorage for persistence across page refreshes.
+  // Initialize from scoped localStorage for persistence across page refreshes.
   const [toggledLanes, setToggledLanes] = useState<Set<string>>(() =>
-    loadCollapsedLanes(groupBy),
+    loadCollapsedLanes(groupBy, getLastWorkspaceId()),
   );
 
-  // Persist toggledLanes to localStorage when it changes
+  // Persist toggledLanes to scoped localStorage when it changes
   useEffect(() => {
-    saveCollapsedLanes(groupBy, toggledLanes);
-  }, [toggledLanes, groupBy]);
+    saveCollapsedLanes(groupBy, toggledLanes, workspaceId);
+  }, [toggledLanes, groupBy, workspaceId]);
 
-  // When groupBy changes, reset toggledLanes from localStorage for the new groupBy mode
+  // When groupBy changes, reset toggledLanes from scoped localStorage for the new groupBy mode
   useEffect(() => {
-    setToggledLanes(loadCollapsedLanes(groupBy));
-  }, [groupBy]);
+    setToggledLanes(loadCollapsedLanes(groupBy, workspaceId));
+  }, [groupBy, workspaceId]);
 
   // Configure drag sensors with activation constraints
   const sensors = useSensors(

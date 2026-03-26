@@ -36,6 +36,7 @@ import {
   useToast,
   useWorkspaceContext,
 } from "@/hooks";
+import { wsGet, wsSet, getLastWorkspaceId } from "@/utils/scopedStorage";
 import {
   computeRepoHealth,
   worstHealthColor,
@@ -89,14 +90,10 @@ export interface WorkspaceTreeProps {
   workQueueCounts?: WorkQueueCounts;
 }
 
-const COLLAPSE_STORAGE_KEY = "workspace-tree-collapsed";
-const ACTIVE_FILTER_STORAGE_KEY = "workspace-tree-active-filter";
-
-/**
- * WorkspaceTree displays a collapsible sidebar with repo navigation.
- * Consumes useWorkspaceRepos for repo list and useAgents for agent counts.
- */
-const REPO_COLLAPSE_STORAGE_KEY = "workspace-tree-repo-collapsed";
+// Scoped key suffixes for workspace-specific tree state
+const SK_COLLAPSED = "tree-collapsed";
+const SK_ACTIVE_FILTER = "tree-active-filter";
+const SK_REPO_COLLAPSED = "tree-repo-collapsed";
 
 export function WorkspaceTree({
   className,
@@ -114,24 +111,20 @@ export function WorkspaceTree({
   onFilterChange,
   workQueueCounts,
 }: WorkspaceTreeProps): JSX.Element {
-  // Load initial collapsed state from localStorage
+  // Load initial collapsed state from scoped localStorage
   const [isCollapsed, setIsCollapsed] = useState(() => {
-    try {
-      const stored = localStorage.getItem(COLLAPSE_STORAGE_KEY);
-      return stored !== null ? stored === "true" : defaultCollapsed;
-    } catch {
-      return defaultCollapsed;
-    }
+    const wsId = getLastWorkspaceId();
+    if (!wsId) return defaultCollapsed;
+    const stored = wsGet(wsId, SK_COLLAPSED);
+    return stored !== null ? stored === "true" : defaultCollapsed;
   });
 
-  // Active/All filter state persisted to localStorage
+  // Active/All filter state persisted to scoped localStorage
   const [activeFilter, setActiveFilter] = useState<ActiveFilter>(() => {
-    try {
-      const stored = localStorage.getItem(ACTIVE_FILTER_STORAGE_KEY);
-      return stored === "all" ? "all" : "active";
-    } catch {
-      return "active";
-    }
+    const wsId = getLastWorkspaceId();
+    if (!wsId) return "active";
+    const stored = wsGet(wsId, SK_ACTIVE_FILTER);
+    return stored === "all" ? "all" : "active";
   });
 
   const handleFilterChange = useCallback(
@@ -141,15 +134,6 @@ export function WorkspaceTree({
     },
     [onFilterChange],
   );
-
-  // Persist activeFilter state
-  useEffect(() => {
-    try {
-      localStorage.setItem(ACTIVE_FILTER_STORAGE_KEY, activeFilter);
-    } catch {
-      // Ignore localStorage errors
-    }
-  }, [activeFilter]);
 
   const {
     workspace,
@@ -165,11 +149,17 @@ export function WorkspaceTree({
     useAgentContext();
   const { showToast } = useToast();
   const {
+    workspaceId,
     activeWorkspaceName,
     defaultWorkspaceName,
     setDefaultWorkspace,
     agents: workspaceConfigAgents,
   } = useWorkspaceContext();
+
+  // Persist activeFilter state to scoped storage
+  useEffect(() => {
+    if (workspaceId) wsSet(workspaceId, SK_ACTIVE_FILTER, activeFilter);
+  }, [activeFilter, workspaceId]);
 
   // Merge fleet agents with workspace config agents.
   // Config agents that aren't yet running appear as "configured" placeholders.
@@ -287,14 +277,10 @@ export function WorkspaceTree({
     [rollbackOrder],
   );
 
-  // Persist collapsed state
+  // Persist collapsed state to scoped storage
   useEffect(() => {
-    try {
-      localStorage.setItem(COLLAPSE_STORAGE_KEY, String(isCollapsed));
-    } catch {
-      // Ignore localStorage errors
-    }
-  }, [isCollapsed]);
+    if (workspaceId) wsSet(workspaceId, SK_COLLAPSED, String(isCollapsed));
+  }, [isCollapsed, workspaceId]);
 
   // Focus rename input when entering edit mode
   useEffect(() => {
@@ -477,29 +463,32 @@ export function WorkspaceTree({
   // Workspace summaries from the data
   const workspaces: WorkspaceSummary[] = workspace?.workspaces ?? [];
 
-  // Per-repo collapse state (persisted to localStorage)
+  // Per-repo collapse state (persisted to scoped localStorage)
   const [repoCollapseState, setRepoCollapseState] = useState<
     Record<string, boolean>
   >(() => {
+    const wsId = getLastWorkspaceId();
+    if (!wsId) return {};
+    const stored = wsGet(wsId, SK_REPO_COLLAPSED);
+    if (!stored) return {};
     try {
-      const stored = localStorage.getItem(REPO_COLLAPSE_STORAGE_KEY);
-      return stored ? JSON.parse(stored) : {};
+      return JSON.parse(stored);
     } catch {
       return {};
     }
   });
 
-  const handleRepoToggle = useCallback((repoName: string) => {
-    setRepoCollapseState((prev) => {
-      const next = { ...prev, [repoName]: !prev[repoName] };
-      try {
-        localStorage.setItem(REPO_COLLAPSE_STORAGE_KEY, JSON.stringify(next));
-      } catch {
-        // Ignore localStorage errors
-      }
-      return next;
-    });
-  }, []);
+  const handleRepoToggle = useCallback(
+    (repoName: string) => {
+      setRepoCollapseState((prev) => {
+        const next = { ...prev, [repoName]: !prev[repoName] };
+        if (workspaceId)
+          wsSet(workspaceId, SK_REPO_COLLAPSED, JSON.stringify(next));
+        return next;
+      });
+    },
+    [workspaceId],
+  );
 
   // Group agents by repo, collect unassigned
   const { repoAgents, unassignedAgents } = useMemo(() => {

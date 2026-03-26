@@ -23,18 +23,22 @@ vi.mock("../useWorkspace", () => ({
 }));
 const mockUseWorkspace = vi.mocked(useWorkspace);
 
+const TEST_WS_ID = "test-ws-uuid-1234";
+
 /**
  * Helper to create a mock UseWorkspaceReturn.
  */
 function setupMockWorkspace(overrides?: Partial<UseWorkspaceReturn>): void {
   const defaultReturn: UseWorkspaceReturn = {
     workspace: {
+      id: TEST_WS_ID,
       name: "test-workspace",
       path: "/home/user/workspace",
       repos: [],
       groups: [],
       agents: [],
       workspaces: [],
+      default_workspace: "",
     },
     repos: [],
     groups: [],
@@ -361,17 +365,20 @@ describe("useWorkspaceContext", () => {
 
     beforeEach(() => {
       localStorage.clear();
+      localStorage.setItem("loom:last-workspace-id", TEST_WS_ID);
     });
 
     it("is set to workspace.name on load", () => {
       setupMockWorkspace({
         workspace: {
+          id: TEST_WS_ID,
           name: "my-workspace",
           path: "/home/user/workspace",
           repos: [],
           groups: [],
           agents: [],
           workspaces: [],
+          default_workspace: "",
         },
       });
 
@@ -400,6 +407,7 @@ describe("useWorkspaceContext", () => {
 
     beforeEach(() => {
       localStorage.clear();
+      localStorage.setItem("loom:last-workspace-id", TEST_WS_ID);
     });
 
     it("persists workspace name to localStorage on setActiveWorkspace", () => {
@@ -452,6 +460,7 @@ describe("useWorkspaceContext", () => {
 
     beforeEach(() => {
       localStorage.clear();
+      localStorage.setItem("loom:last-workspace-id", TEST_WS_ID);
     });
 
     it("updates activeRepos to only the named repos", () => {
@@ -510,7 +519,7 @@ describe("useWorkspaceContext", () => {
       });
 
       expect(setItemSpy).toHaveBeenCalledWith(
-        "loom-selected-repos",
+        `loom:${TEST_WS_ID}:selected-repos`,
         JSON.stringify(["api"]),
       );
 
@@ -525,6 +534,7 @@ describe("useWorkspaceContext", () => {
 
     beforeEach(() => {
       localStorage.clear();
+      localStorage.setItem("loom:last-workspace-id", TEST_WS_ID);
     });
 
     it("clears selection and returns all repos", () => {
@@ -568,7 +578,7 @@ describe("useWorkspaceContext", () => {
       });
 
       expect(setItemSpy).toHaveBeenCalledWith(
-        "loom-selected-repos",
+        `loom:${TEST_WS_ID}:selected-repos`,
         JSON.stringify([]),
       );
 
@@ -583,6 +593,7 @@ describe("useWorkspaceContext", () => {
 
     beforeEach(() => {
       localStorage.clear();
+      localStorage.setItem("loom:last-workspace-id", TEST_WS_ID);
     });
 
     it("adds a repo to selection", () => {
@@ -640,7 +651,7 @@ describe("useWorkspaceContext", () => {
       });
 
       expect(setItemSpy).toHaveBeenCalledWith(
-        "loom-selected-repos",
+        `loom:${TEST_WS_ID}:selected-repos`,
         JSON.stringify(["api"]),
       );
 
@@ -655,6 +666,7 @@ describe("useWorkspaceContext", () => {
 
     beforeEach(() => {
       localStorage.clear();
+      localStorage.setItem("loom:last-workspace-id", TEST_WS_ID);
     });
 
     it("returns undefined when all repos selected", () => {
@@ -776,17 +788,20 @@ describe("useWorkspaceContext", () => {
 
     beforeEach(() => {
       localStorage.clear();
+      localStorage.setItem("loom:last-workspace-id", TEST_WS_ID);
     });
 
     it("workspace name survives unmount/remount", () => {
       setupMockWorkspace({
         workspace: {
+          id: TEST_WS_ID,
           name: "persistent-ws",
           path: "/home/user/workspace",
           repos: [],
           groups: [],
           agents: [],
           workspaces: [],
+          default_workspace: "",
         },
       });
 
@@ -842,12 +857,13 @@ describe("useWorkspaceContext", () => {
 
     beforeEach(() => {
       localStorage.clear();
+      localStorage.setItem("loom:last-workspace-id", TEST_WS_ID);
     });
 
     it("discards stored repo names not in workspace", () => {
       // Pre-populate localStorage with stale + valid repos
       localStorage.setItem(
-        "loom-selected-repos",
+        `loom:${TEST_WS_ID}:selected-repos`,
         JSON.stringify(["api", "removed-repo"]),
       );
 
@@ -871,7 +887,7 @@ describe("useWorkspaceContext", () => {
     it("falls back to all repos when all stored repos are stale", () => {
       // Pre-populate localStorage with only stale repos
       localStorage.setItem(
-        "loom-selected-repos",
+        `loom:${TEST_WS_ID}:selected-repos`,
         JSON.stringify(["removed-1", "removed-2"]),
       );
 
@@ -992,6 +1008,7 @@ describe("useWorkspaceContext", () => {
 
     beforeEach(() => {
       localStorage.clear();
+      localStorage.setItem("loom:last-workspace-id", TEST_WS_ID);
     });
 
     it("is true when selectedRepoNames is empty (no filter)", () => {
@@ -1056,6 +1073,7 @@ describe("useWorkspaceContext", () => {
 
     beforeEach(() => {
       localStorage.clear();
+      localStorage.setItem("loom:last-workspace-id", TEST_WS_ID);
     });
 
     it("returns all repo names when no filter applied", () => {

@@ -6,6 +6,9 @@
 
 import { useState, useCallback, useEffect } from "react";
 
+import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
+import { wsGet, wsSet, getLastWorkspaceId } from "@/utils/scopedStorage";
+
 import styles from "./WorkQueueSection.module.css";
 
 /** Counts for each Work Queue category. */
@@ -22,27 +25,24 @@ export interface WorkQueueSectionProps {
   counts: WorkQueueCounts;
 }
 
-const STORAGE_KEY = "workspace-tree-work-queue-expanded";
+const SK_WORK_QUEUE_EXPANDED = "work-queue-expanded";
 
 export function WorkQueueSection({
   counts,
 }: WorkQueueSectionProps): JSX.Element {
+  const { workspaceId } = useWorkspaceContext();
+
   const [isExpanded, setIsExpanded] = useState(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      return stored !== null ? stored === "true" : true;
-    } catch {
-      return true;
-    }
+    const wsId = getLastWorkspaceId();
+    if (!wsId) return true;
+    const stored = wsGet(wsId, SK_WORK_QUEUE_EXPANDED);
+    return stored !== null ? stored === "true" : true;
   });
 
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, String(isExpanded));
-    } catch {
-      // Ignore localStorage errors
-    }
-  }, [isExpanded]);
+    if (workspaceId)
+      wsSet(workspaceId, SK_WORK_QUEUE_EXPANDED, String(isExpanded));
+  }, [isExpanded, workspaceId]);
 
   const handleToggle = useCallback(() => {
     setIsExpanded((prev) => !prev);
