@@ -33,13 +33,52 @@ Check the task's labels for 'needs-revision':
 **If no 'needs-revision' label:**
 - This is a NEW task - create a fresh design
 
-### Step 2: Research the Codebase
-Before creating a plan:
+### Step 2: Ground Yourself Before Designing
+
+Before writing any plan, you MUST build context from three sources: the epic, sibling tasks, and the codebase. Do NOT skip any sub-step.
+
+#### 2a. Read the Epic
+
+Understand the big picture before designing a piece of it:
+- Determine the parent epic from the task ID (e.g., `loomcli-abc.5` -> parent is `loomcli-abc`) or from `bd show <id> --json` parent field
+- Run `bd show <epic-id>` to read the epic's title, description, and notes
+- The epic notes may contain architectural decisions, naming conventions, or scope boundaries — these are **authoritative**. Your design must conform to them.
+- If the epic has no notes, proceed — but be aware that you are establishing conventions that sibling tasks must follow
+
+#### 2b. Read Sibling Task Designs
+
+Check what other tasks in this epic have already decided:
+- Run: `bd list --parent <epic-id> --json | jq -r '.[] | select(.design and .design != "") | "\(.id) \(.title)"'`
+- For each sibling that has a design, run `bd show <sibling-id>` and read its design
+- Extract and note:
+  - **Naming conventions**: sentinel values, fallback constants, key prefixes
+  - **Identity patterns**: what type of ID is used (UUID, name, slug), how empty/missing is handled
+  - **File patterns**: key format templates, directory structures, namespace schemes
+  - **Interface contracts**: struct fields, method signatures, middleware patterns
+- Your design MUST be consistent with conventions already established by sibling designs. If you need to diverge, explicitly call it out in your Technical Approach with a justification.
+- If no siblings have designs yet, you are the first — document your conventions clearly so later planners can follow them
+
+#### 2c. Research the Codebase
+
+Now read the actual code:
 - Read relevant existing code to understand patterns and conventions
 - Identify what files need to be created or modified
 - Understand the existing architecture
 - Look for similar implementations to follow as patterns
 - Identify dependencies and potential blockers
+
+#### 2d. Scan the Neighborhood (MANDATORY)
+
+For every file you plan to modify or that contains the pattern you're changing:
+1. **List the parent directory** — run `ls` on the directory containing the file
+2. **Scan sibling files** — for each sibling file in the same directory, read the first 30-50 lines and grep for the same pattern (key construction, sentinel value, struct shape, etc.)
+3. **Ask**: "Does this sibling use the same pattern I am about to change?"
+4. **Decide**:
+   - If yes and it's in scope: include it in your Files to Modify list
+   - If yes but out of scope: explicitly note it in your design under the "Out of Scope" section — name the file, the pattern, and why it was excluded
+   - If no: move on
+
+Then run a **repo-wide grep** for the primary pattern you're changing (e.g., the key construction idiom, the sentinel value, the struct shape). List every match. Account for every hit in your design — either in scope or explicitly excluded.
 
 ### Step 3: Create a Detailed Plan
 Write a comprehensive plan that includes:
@@ -53,25 +92,35 @@ Write a comprehensive plan that includes:
 - Key design patterns to use
 - Trade-offs considered and why this approach was chosen
 
-#### 3c. Files to Create
+#### 3c. Conventions Established
+- List any new naming conventions, sentinel values, key formats, or patterns this task introduces
+- If following conventions from a sibling task, cite which task established them
+- This section helps future planners and implementers maintain consistency
+
+#### 3d. Files to Create
 - List each new file with its purpose
 - Include file path and brief description of contents
 
-#### 3d. Files to Modify
+#### 3e. Files to Modify
 - List each existing file that needs changes
 - Describe what changes are needed and why
 
-#### 3e. Dependencies
+#### 3f. Out of Scope (Needs Separate Task)
+- List any files/patterns found during the neighborhood scan (Step 2d) that have the same pattern but are excluded from this task
+- For each: file path, the pattern found, and why it's excluded
+- If nothing was found, write "None — neighborhood scan found no unaddressed siblings"
+
+#### 3g. Dependencies
 - External packages/libraries needed
 - Internal modules this depends on
 - Tasks that should be completed first (if any)
 
-#### 3f. Edge Cases & Error Handling
+#### 3h. Edge Cases & Error Handling
 - List edge cases to handle
 - Error scenarios and how to handle them
 - Validation requirements
 
-#### 3g. Testing Strategy
+#### 3i. Testing Strategy
 - What tests should be written
 - Key scenarios to cover
 - How to manually verify the implementation works
