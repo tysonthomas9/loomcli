@@ -10,7 +10,7 @@ import type {
   TranscriptResponse,
 } from "../types/session";
 
-import { ApiError, get, getAuthToken } from "./client";
+import { ApiError, get, getText } from "./client";
 
 /**
  * Fetch all sessions for a task.
@@ -84,23 +84,14 @@ export async function getSessionDiff(
   taskId: string,
   sessionId: string,
 ): Promise<string | null> {
-  const headers: Record<string, string> = {};
-  const token = getAuthToken();
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
-
-  const response = await fetch(
-    `/api/tasks/${encodeURIComponent(taskId)}/sessions/${encodeURIComponent(sessionId)}/diff`,
-    { headers },
-  );
-
-  if (!response.ok) {
-    if (response.status === 404) {
+  try {
+    return await getText(
+      `/api/tasks/${encodeURIComponent(taskId)}/sessions/${encodeURIComponent(sessionId)}/diff`,
+    );
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) {
       return null;
     }
-    throw new ApiError(response.status, response.statusText);
+    throw err;
   }
-
-  return response.text();
 }

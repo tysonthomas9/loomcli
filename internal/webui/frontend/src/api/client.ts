@@ -63,6 +63,7 @@ export type RequestOptions = {
   headers?: Record<string, string>;
   timeout?: number;
   signal?: AbortSignal;
+  responseType?: "json" | "text";
 };
 
 function setAuthState(state: AuthState): void {
@@ -295,6 +296,10 @@ async function fetchApi<T>(
       return undefined as T;
     }
 
+    if (options.responseType === "text") {
+      return (await response.text()) as T;
+    }
+
     return (await response.json()) as T;
   } catch (error) {
     clearTimeoutCleanup();
@@ -328,6 +333,15 @@ async function fetchApi<T>(
 
 export const get = <T>(path: string, options?: RequestOptions): Promise<T> =>
   fetchApi<T>("GET", path, undefined, options);
+
+export const getText = (
+  path: string,
+  options?: RequestOptions,
+): Promise<string> =>
+  fetchApi<string>("GET", path, undefined, {
+    ...options,
+    responseType: "text",
+  });
 
 export const post = <T>(
   path: string,

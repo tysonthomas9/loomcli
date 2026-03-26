@@ -1,6 +1,7 @@
 export {
   ApiError,
   get,
+  getText,
   post,
   put,
   patch,

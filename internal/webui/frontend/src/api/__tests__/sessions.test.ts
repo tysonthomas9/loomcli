@@ -9,7 +9,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { ApiError, get, getAuthToken } from "../client";
+import { ApiError, get, getText } from "../client";
 import {
   getTaskSessions,
   getSession,
@@ -17,32 +17,21 @@ import {
   getSessionDiff,
 } from "../sessions";
 
-vi.mock("../client", () => ({
-  get: vi.fn(),
-  getAuthToken: vi.fn(),
-  ApiError: class ApiError extends Error {
-    constructor(
-      public status: number,
-      public statusText: string,
-      public body?: unknown,
-    ) {
-      super(`API Error: ${status} ${statusText}`);
-      this.name = "ApiError";
-    }
-  },
-}));
+vi.mock("../client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../client")>();
+  return {
+    ...actual,
+    get: vi.fn(),
+    getText: vi.fn(),
+  };
+});
 
 const mockGet = vi.mocked(get);
-const mockGetAuthToken = vi.mocked(getAuthToken);
-
-// Mock global fetch for getSessionDiff (it uses raw fetch)
-const mockFetch = vi.fn();
-global.fetch = mockFetch;
+const mockGetText = vi.mocked(getText);
 
 describe("sessions API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockGetAuthToken.mockReturnValue(null);
   });
 
   afterEach(() => {
@@ -287,26 +276,20 @@ describe("sessions API", () => {
 
   describe("getSessionDiff", () => {
     it("returns diff text on success", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        text: async () => "diff --git a/file.ts b/file.ts\n+added line\n",
-      });
+      mockGetText.mockResolvedValueOnce(
+        "diff --git a/file.ts b/file.ts\n+added line\n",
+      );
 
       const result = await getSessionDiff("bd-123", "s1");
 
       expect(result).toBe("diff --git a/file.ts b/file.ts\n+added line\n");
-      expect(mockFetch).toHaveBeenCalledWith(
+      expect(mockGetText).toHaveBeenCalledWith(
         "/api/tasks/bd-123/sessions/s1/diff",
-        { headers: {} },
       );
     });
 
     it("returns null on 404", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 404,
-        statusText: "Not Found",
-      });
+      mockGetText.mockRejectedValueOnce(new ApiError(404, "Not Found"));
 
       const result = await getSessionDiff("bd-123", "s-missing");
 
@@ -314,53 +297,29 @@ describe("sessions API", () => {
     });
 
     it("throws ApiError on non-404 error", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 500,
-        statusText: "Internal Server Error",
-      });
+      mockGetText.mockRejectedValueOnce(
+        new ApiError(500, "Internal Server Error"),
+      );
 
       await expect(getSessionDiff("bd-123", "s1")).rejects.toThrow(ApiError);
     });
 
-    it("includes Authorization header when auth token is available", async () => {
-      mockGetAuthToken.mockReturnValue("test-token");
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        text: async () => "",
-      });
+    it("returns empty string for empty diff", async () => {
+      mockGetText.mockResolvedValueOnce("");
 
-      await getSessionDiff("bd-123", "s1");
+      const result = await getSessionDiff("bd-123", "s1");
 
-      const [, options] = mockFetch.mock.calls[0];
-      expect(options.headers).toEqual({
-        Authorization: "Bearer test-token",
-      });
+      expect(result).toBe("");
     });
 
-    it("omits Authorization header when auth token is null", async () => {
-      mockGetAuthToken.mockReturnValue(null);
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        text: async () => "",
-      });
-
-      await getSessionDiff("bd-123", "s1");
-
-      const [, options] = mockFetch.mock.calls[0];
-      expect(options.headers).toEqual({});
-    });
-
-    it("URL-encodes both IDs in the fetch URL", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        text: async () => "",
-      });
+    it("URL-encodes both IDs in the getText call", async () => {
+      mockGetText.mockResolvedValueOnce("");
 
       await getSessionDiff("task/id", "session/id");
 
-      const [url] = mockFetch.mock.calls[0];
-      expect(url).toBe("/api/tasks/task%2Fid/sessions/session%2Fid/diff");
+      expect(mockGetText).toHaveBeenCalledWith(
+        "/api/tasks/task%2Fid/sessions/session%2Fid/diff",
+      );
     });
   });
 });

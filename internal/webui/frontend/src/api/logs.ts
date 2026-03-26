@@ -2,7 +2,7 @@
  * API functions for log streaming endpoints.
  */
 
-import { ApiError, get, getAuthToken } from "./client";
+import { ApiError, get } from "./client";
 
 /**
  * Response from GET /api/tasks/{id}/logs
@@ -54,27 +54,17 @@ interface AgentLogContentResponse {
  * @returns Array of available phases (e.g., ["planning", "implementation"])
  */
 export async function getTaskLogPhases(taskId: string): Promise<string[]> {
-  const headers: Record<string, string> = {};
-  const token = getAuthToken();
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
-
-  const response = await fetch(
-    `/api/tasks/${encodeURIComponent(taskId)}/logs`,
-    { headers },
-  );
-
-  if (!response.ok) {
-    if (response.status === 404) {
-      // No logs yet for this task
+  try {
+    const data = await get<LogPhaseResponse>(
+      `/api/tasks/${encodeURIComponent(taskId)}/logs`,
+    );
+    return data.data.phases;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) {
       return [];
     }
-    throw new Error("Failed to fetch log phases");
+    throw err;
   }
-
-  const data: LogPhaseResponse = await response.json();
-  return data.data.phases;
 }
 
 /**
@@ -85,30 +75,21 @@ export async function getTaskLogContent(
   phase: "planning" | "implementation",
   lines = 500,
 ): Promise<{ lines: string[]; lineCount: number }> {
-  const headers: Record<string, string> = {};
-  const token = getAuthToken();
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
-
-  const response = await fetch(
-    `/api/tasks/${encodeURIComponent(taskId)}/logs/${encodeURIComponent(phase)}?lines=${lines}`,
-    { headers },
-  );
-
-  if (!response.ok) {
-    if (response.status === 404) {
+  try {
+    const data = await get<TaskLogContentResponse>(
+      `/api/tasks/${encodeURIComponent(taskId)}/logs/${encodeURIComponent(phase)}?lines=${lines}`,
+    );
+    return {
+      lines: Array.isArray(data.data?.lines) ? data.data.lines : [],
+      lineCount:
+        typeof data.data?.line_count === "number" ? data.data.line_count : 0,
+    };
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) {
       return { lines: [], lineCount: 0 };
     }
-    throw new Error("Failed to fetch task logs");
+    throw err;
   }
-
-  const data: TaskLogContentResponse = await response.json();
-  return {
-    lines: Array.isArray(data.data?.lines) ? data.data.lines : [],
-    lineCount:
-      typeof data.data?.line_count === "number" ? data.data.line_count : 0,
-  };
 }
 
 /**

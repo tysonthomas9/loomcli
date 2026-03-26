@@ -8,54 +8,42 @@ import {
   getAgentTerminalWsUrl,
   getAgentLogArchive,
 } from "./logs";
-import { ApiError, getAuthToken, get } from "./client";
+import { ApiError, get } from "./client";
 
 vi.mock("./client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./client")>();
   return {
     ...actual,
-    getAuthToken: vi.fn(),
     get: vi.fn(),
   };
 });
 
-const mockGetAuthToken = getAuthToken as ReturnType<typeof vi.fn>;
 const mockGet = get as ReturnType<typeof vi.fn>;
 
 describe("logs API", () => {
-  let originalFetch: typeof global.fetch;
-
   beforeEach(() => {
-    originalFetch = global.fetch;
     vi.clearAllMocks();
   });
 
   afterEach(() => {
-    global.fetch = originalFetch;
     vi.restoreAllMocks();
   });
 
   describe("getTaskLogPhases", () => {
     it("returns phases on successful response", async () => {
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: () =>
-          Promise.resolve({
-            success: true,
-            data: { phases: ["planning", "implementation"] },
-          }),
+      mockGet.mockResolvedValue({
+        success: true,
+        data: { phases: ["planning", "implementation"] },
       });
 
       const result = await getTaskLogPhases("beads-abc");
 
       expect(result).toEqual(["planning", "implementation"]);
+      expect(mockGet).toHaveBeenCalledWith("/api/tasks/beads-abc/logs");
     });
 
     it("returns empty array on 404", async () => {
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: false,
-        status: 404,
-      });
+      mockGet.mockRejectedValue(new ApiError(404, "Not Found"));
 
       const result = await getTaskLogPhases("nonexistent");
 
@@ -63,93 +51,49 @@ describe("logs API", () => {
     });
 
     it("throws on non-404 error", async () => {
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: false,
-        status: 500,
-      });
+      mockGet.mockRejectedValue(new ApiError(500, "Internal Server Error"));
 
-      await expect(getTaskLogPhases("beads-abc")).rejects.toThrow(
-        "Failed to fetch log phases",
-      );
-    });
-
-    it("includes Authorization header when token exists", async () => {
-      mockGetAuthToken.mockReturnValue("test-token");
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({ success: true, data: { phases: [] } }),
-      });
-
-      await getTaskLogPhases("beads-abc");
-
-      const mockFn = global.fetch as ReturnType<typeof vi.fn>;
-      const call = mockFn.mock.calls[0];
-      const options = call?.[1] as { headers: Record<string, string> };
-      expect(options.headers).toHaveProperty(
-        "Authorization",
-        "Bearer test-token",
-      );
-    });
-
-    it("omits Authorization header when no token", async () => {
-      mockGetAuthToken.mockReturnValue(null);
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({ success: true, data: { phases: [] } }),
-      });
-
-      await getTaskLogPhases("beads-abc");
-
-      const mockFn = global.fetch as ReturnType<typeof vi.fn>;
-      const call = mockFn.mock.calls[0];
-      const options = call?.[1] as { headers: Record<string, string> };
-      expect(options.headers).not.toHaveProperty("Authorization");
+      await expect(getTaskLogPhases("beads-abc")).rejects.toThrow(ApiError);
     });
   });
 
   describe("getTaskLogContent", () => {
     it("returns log snapshot content on success", async () => {
-      mockGetAuthToken.mockReturnValue("test-token");
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: () =>
-          Promise.resolve({
-            success: true,
-            data: { lines: ["a", "b"], line_count: 2 },
-          }),
+      mockGet.mockResolvedValue({
+        success: true,
+        data: { lines: ["a", "b"], line_count: 2 },
       });
 
       const content = await getTaskLogContent("beads-abc", "planning", 25);
       expect(content).toEqual({ lines: ["a", "b"], lineCount: 2 });
-
-      const mockFn = global.fetch as ReturnType<typeof vi.fn>;
-      const [url, options] = mockFn.mock.calls[0] as [
-        string,
-        { headers: Record<string, string> },
-      ];
-      expect(url).toBe("/api/tasks/beads-abc/logs/planning?lines=25");
-      expect(options.headers.Authorization).toBe("Bearer test-token");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/tasks/beads-abc/logs/planning?lines=25",
+      );
     });
 
     it("returns empty content for 404 responses", async () => {
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: false,
-        status: 404,
-      });
+      mockGet.mockRejectedValue(new ApiError(404, "Not Found"));
 
       const content = await getTaskLogContent("missing", "implementation");
       expect(content).toEqual({ lines: [], lineCount: 0 });
     });
 
     it("throws on non-404 error", async () => {
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: false,
-        status: 500,
-      });
+      mockGet.mockRejectedValue(new ApiError(500, "Internal Server Error"));
 
       await expect(getTaskLogContent("beads-abc", "planning")).rejects.toThrow(
-        "Failed to fetch task logs",
+        ApiError,
       );
+    });
+
+    it("normalizes missing data fields", async () => {
+      mockGet.mockResolvedValue({
+        success: true,
+        data: { lines: null, line_count: null },
+      });
+
+      const content = await getTaskLogContent("beads-abc", "planning");
+      expect(content).toEqual({ lines: [], lineCount: 0 });
     });
   });
 
