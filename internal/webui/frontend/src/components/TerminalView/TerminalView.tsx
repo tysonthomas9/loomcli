@@ -83,7 +83,7 @@ export function TerminalView({
   const [tabs, setTabs] = useState<TabState[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>("");
   const initializedRef = useRef(false);
-  const workspace = useWorkspaceTabState({
+  const { name: workspace, id: workspaceId } = useWorkspaceTabState({
     tabs,
     activeTabId,
     setTabs,
@@ -100,7 +100,7 @@ export function TerminalView({
     linkToIssue,
     reorderTabs: reorderTabMeta,
     isLoading: metaLoading,
-  } = useTerminalMetadata(workspace);
+  } = useTerminalMetadata(workspaceId);
   const { config, isLoading: configLoading } = useBackendConfig();
   const { activeTabId: restoredTabId, isRestoring } = useSessionRestore();
 

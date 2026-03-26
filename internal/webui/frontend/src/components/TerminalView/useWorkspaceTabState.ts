@@ -18,9 +18,20 @@ interface WorkspaceTabStateArgs {
   initializedRef: MutableRefObject<boolean>;
 }
 
-export function useWorkspaceTabState(args: WorkspaceTabStateArgs): string {
+interface WorkspaceTabStateReturn {
+  /** Workspace name (for tab state keying and session naming) */
+  name: string;
+  /** Workspace stable ID (for API calls) */
+  id: string;
+}
+
+export function useWorkspaceTabState(
+  args: WorkspaceTabStateArgs,
+): WorkspaceTabStateReturn {
   const { tabs, activeTabId, setTabs, setActiveTabId, initializedRef } = args;
-  const workspace = useWorkspaceContext().activeWorkspaceName || "default";
+  const { activeWorkspaceName, workspace: wsData } = useWorkspaceContext();
+  const workspace = activeWorkspaceName || "default";
+  const workspaceId = wsData?.id || "";
 
   const stateMapRef = useRef<
     Map<string, { tabs: TabState[]; activeTabId: string }>
@@ -47,5 +58,5 @@ export function useWorkspaceTabState(args: WorkspaceTabStateArgs): string {
     prevWorkspaceRef.current = workspace;
   }, [workspace]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return workspace;
+  return { name: workspace, id: workspaceId };
 }

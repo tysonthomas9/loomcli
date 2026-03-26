@@ -17,7 +17,9 @@ export interface UseIssueSessionMapReturn {
 
 const DEBOUNCE_MS = 200;
 
-export function useIssueSessionMap(): UseIssueSessionMapReturn {
+export function useIssueSessionMap(
+  workspace: string,
+): UseIssueSessionMapReturn {
   const [issueSessionMap, setIssueSessionMap] = useState<
     Record<string, string[]>
   >({});
@@ -35,15 +37,16 @@ export function useIssueSessionMap(): UseIssueSessionMapReturn {
   }, []);
 
   const fetchMap = useCallback(async () => {
+    if (!workspace) return; // Wait until workspace ID is known
     try {
-      const data = await listSessionsByIssue();
+      const data = await listSessionsByIssue(workspace);
       if (mountedRef.current) {
         setIssueSessionMap(data);
       }
     } catch {
       // Silently fail — session map is non-critical UI enhancement
     }
-  }, []);
+  }, [workspace]);
 
   useEffect(() => {
     fetchMap();

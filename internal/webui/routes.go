@@ -120,15 +120,8 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 		mux.HandleFunc("POST /api/terminal/sessions/{session}/kill", handleScheduleSessionKill(termManager))
 		mux.HandleFunc("POST /api/terminal/sessions/close-all", handleCloseAllSessions(termManager, tabMetaStore, hub))
 
-		// Terminal tab metadata endpoints (Redis-backed persistence)
-		if tabMetaStore != nil {
-			mux.HandleFunc("GET /api/terminal/sessions/by-issue", handleListSessionsByIssue(tabMetaStore))
-			mux.HandleFunc("GET /api/terminal/tabs", handleListTerminalTabs(tabMetaStore, termManager))
-			mux.HandleFunc("GET /api/terminal/tabs/{session}", handleGetTerminalTab(tabMetaStore))
-			mux.HandleFunc("PUT /api/terminal/tabs/{session}", handlePutTerminalTab(tabMetaStore, hub))
-			mux.HandleFunc("PATCH /api/terminal/tabs/{session}", handlePatchTerminalTab(tabMetaStore, hub))
-			mux.HandleFunc("DELETE /api/terminal/tabs/{session}", handleDeleteTerminalTab(tabMetaStore, hub))
-		}
+		// Note: Terminal tab metadata endpoints have moved to workspace-scoped routes
+		// in registerWorkspaceRoutes. The by-issue endpoint is also workspace-scoped.
 
 		// Terminal UI state endpoints (Redis-backed active tab persistence)
 		if tabMetaStore != nil {
@@ -190,7 +183,7 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 
 	// Workspace management and workspace-scoped API routes
 	if multiPool != nil {
-		registerWorkspaceRoutes(mux, multiPool, workspaceConfigFn, wsExistsFn)
+		registerWorkspaceRoutes(mux, multiPool, workspaceConfigFn, wsExistsFn, tabMetaStore, termManager, hub)
 	}
 
 	// Static file serving with SPA routing (must be last - catches all paths)
@@ -204,7 +197,7 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 }
 
 // registerWorkspaceRoutes sets up workspace listing and workspace-scoped API routes.
-func registerWorkspaceRoutes(mux *http.ServeMux, multiPool *daemon.MultiPool, workspaceConfigFn func() (*WorkspaceData, error), wsExistsFn func(string) bool) {
+func registerWorkspaceRoutes(mux *http.ServeMux, multiPool *daemon.MultiPool, workspaceConfigFn func() (*WorkspaceData, error), wsExistsFn func(string) bool, tabMetaStore *tabmeta.Store, termManager *TerminalManager, hub *SSEHub) {
 	// Workspace listing (not workspace-scoped themselves)
 	mux.HandleFunc("GET /api/workspaces", handleListWorkspaces(multiPool, workspaceConfigFn))
 	mux.HandleFunc("GET /api/workspaces/{ws}", handleGetWorkspace(multiPool, workspaceConfigFn, wsExistsFn))
@@ -244,6 +237,18 @@ func registerWorkspaceRoutes(mux *http.ServeMux, multiPool *daemon.MultiPool, wo
 	wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/logs", handleGetAgentLog())
 	wsMux.HandleFunc("GET /api/workspaces/{ws}/tasks/{id}/logs", handleListTaskPhases())
 	wsMux.HandleFunc("GET /api/workspaces/{ws}/tasks/{id}/logs/{phase}", handleGetTaskLog())
+
+	// Terminal tab metadata endpoints (workspace-scoped, Redis-backed)
+	if tabMetaStore != nil {
+		wsMux.HandleFunc("GET /api/workspaces/{ws}/terminal/tabs", handleListTerminalTabs(tabMetaStore, termManager))
+		wsMux.HandleFunc("GET /api/workspaces/{ws}/terminal/tabs/{session}", handleGetTerminalTab(tabMetaStore))
+		wsMux.HandleFunc("PUT /api/workspaces/{ws}/terminal/tabs/{session}", handlePutTerminalTab(tabMetaStore, hub))
+		wsMux.HandleFunc("PATCH /api/workspaces/{ws}/terminal/tabs/{session}", handlePatchTerminalTab(tabMetaStore, hub))
+		wsMux.HandleFunc("DELETE /api/workspaces/{ws}/terminal/tabs/{session}", handleDeleteTerminalTab(tabMetaStore, hub))
+		// Cross-workspace endpoint: the workspace in the URL is for auth context,
+		// but ListByIssue searches across all workspaces intentionally.
+		wsMux.HandleFunc("GET /api/workspaces/{ws}/terminal/sessions/by-issue", handleListSessionsByIssue(tabMetaStore))
+	}
 
 	// Apply WorkspaceMiddleware to all workspace-scoped routes
 	mux.Handle("/api/workspaces/{ws}/", WorkspaceMiddleware(wsExistsFn, wsMux))

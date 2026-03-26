@@ -468,6 +468,215 @@ func TestMigrateLegacyKeys(t *testing.T) {
 	}
 }
 
+func TestMigrateNamedKeys_RenamesKeys(t *testing.T) {
+	store, mr := setupTest(t)
+	ctx := context.Background()
+
+	// Create keys using workspace names (old format: terminal:meta:{name}:{session})
+	mr.HSet("terminal:meta:my-project:session-a", "label", "Session A", "sort_order", "1",
+		"created_at", "2024-01-01T00:00:00Z", "updated_at", "2024-01-01T00:00:00Z")
+	mr.HSet("terminal:meta:other-project:session-b", "label", "Session B", "sort_order", "2",
+		"created_at", "2024-01-01T00:00:00Z", "updated_at", "2024-01-01T00:00:00Z")
+
+	nameToID := map[string]string{
+		"my-project":    "abc-123-uuid",
+		"other-project": "def-456-uuid",
+	}
+
+	if err := store.MigrateNamedKeys(ctx, nameToID); err != nil {
+		t.Fatalf("MigrateNamedKeys: %v", err)
+	}
+
+	// Old keys should no longer exist
+	if mr.Exists("terminal:meta:my-project:session-a") {
+		t.Error("old key terminal:meta:my-project:session-a should have been renamed")
+	}
+	if mr.Exists("terminal:meta:other-project:session-b") {
+		t.Error("old key terminal:meta:other-project:session-b should have been renamed")
+	}
+
+	// New UUID-keyed entries should be accessible
+	got, err := store.Get(ctx, "abc-123-uuid", "session-a")
+	if err != nil {
+		t.Fatalf("Get migrated session-a: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected migrated session-a metadata, got nil")
+	}
+	if got.Label != "Session A" {
+		t.Errorf("Label = %q, want %q", got.Label, "Session A")
+	}
+
+	got, err = store.Get(ctx, "def-456-uuid", "session-b")
+	if err != nil {
+		t.Fatalf("Get migrated session-b: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected migrated session-b metadata, got nil")
+	}
+	if got.Label != "Session B" {
+		t.Errorf("Label = %q, want %q", got.Label, "Session B")
+	}
+}
+
+func TestMigrateNamedKeys_SkipsAlreadyMigrated(t *testing.T) {
+	store, mr := setupTest(t)
+	ctx := context.Background()
+
+	// Create a key that already uses a UUID-like workspace (not in nameToID map)
+	mr.HSet("terminal:meta:abc-123-uuid:session-x", "label", "Already UUID", "sort_order", "1",
+		"created_at", "2024-01-01T00:00:00Z", "updated_at", "2024-01-01T00:00:00Z")
+
+	nameToID := map[string]string{
+		"my-project": "def-456-uuid",
+	}
+
+	if err := store.MigrateNamedKeys(ctx, nameToID); err != nil {
+		t.Fatalf("MigrateNamedKeys: %v", err)
+	}
+
+	// UUID key should still exist unchanged
+	if !mr.Exists("terminal:meta:abc-123-uuid:session-x") {
+		t.Error("UUID-keyed entry should not have been renamed")
+	}
+
+	got, err := store.Get(ctx, "abc-123-uuid", "session-x")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected metadata, got nil")
+	}
+	if got.Label != "Already UUID" {
+		t.Errorf("Label = %q, want %q", got.Label, "Already UUID")
+	}
+}
+
+func TestMigrateNamedKeys_SkipsUnknownWorkspace(t *testing.T) {
+	store, mr := setupTest(t)
+	ctx := context.Background()
+
+	// Create keys with workspace names that are NOT in the map
+	mr.HSet("terminal:meta:unknown-ws:session-z", "label", "Unknown WS", "sort_order", "1",
+		"created_at", "2024-01-01T00:00:00Z", "updated_at", "2024-01-01T00:00:00Z")
+
+	nameToID := map[string]string{
+		"my-project": "abc-123-uuid",
+	}
+
+	if err := store.MigrateNamedKeys(ctx, nameToID); err != nil {
+		t.Fatalf("MigrateNamedKeys: %v", err)
+	}
+
+	// Unknown workspace key should still exist at original location
+	if !mr.Exists("terminal:meta:unknown-ws:session-z") {
+		t.Error("unknown workspace key should not have been renamed")
+	}
+
+	got, err := store.Get(ctx, "unknown-ws", "session-z")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected metadata, got nil")
+	}
+	if got.Label != "Unknown WS" {
+		t.Errorf("Label = %q, want %q", got.Label, "Unknown WS")
+	}
+}
+
+func TestMigrateNamedKeys_Idempotent(t *testing.T) {
+	store, mr := setupTest(t)
+	ctx := context.Background()
+
+	// Create key with workspace name
+	mr.HSet("terminal:meta:my-project:session-1", "label", "Project Session", "sort_order", "3",
+		"created_at", "2024-02-15T10:00:00Z", "updated_at", "2024-02-15T12:00:00Z")
+
+	nameToID := map[string]string{
+		"my-project": "abc-123-uuid",
+	}
+
+	// First migration
+	if err := store.MigrateNamedKeys(ctx, nameToID); err != nil {
+		t.Fatalf("MigrateNamedKeys (1st): %v", err)
+	}
+
+	// Verify migrated
+	got, err := store.Get(ctx, "abc-123-uuid", "session-1")
+	if err != nil {
+		t.Fatalf("Get after 1st migration: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected metadata after 1st migration, got nil")
+	}
+	if got.Label != "Project Session" {
+		t.Errorf("Label = %q, want %q", got.Label, "Project Session")
+	}
+	if got.SortOrder != 3 {
+		t.Errorf("SortOrder = %d, want 3", got.SortOrder)
+	}
+
+	// Second migration — should be a no-op
+	if err := store.MigrateNamedKeys(ctx, nameToID); err != nil {
+		t.Fatalf("MigrateNamedKeys (2nd): %v", err)
+	}
+
+	// Data should be identical after second run
+	got2, err := store.Get(ctx, "abc-123-uuid", "session-1")
+	if err != nil {
+		t.Fatalf("Get after 2nd migration: %v", err)
+	}
+	if got2 == nil {
+		t.Fatal("expected metadata after 2nd migration, got nil")
+	}
+	if got2.Label != "Project Session" {
+		t.Errorf("Label = %q, want %q", got2.Label, "Project Session")
+	}
+	if got2.SortOrder != 3 {
+		t.Errorf("SortOrder = %d, want 3", got2.SortOrder)
+	}
+
+	// Only one key should exist (the UUID key)
+	all, err := store.ListAll(ctx)
+	if err != nil {
+		t.Fatalf("ListAll: %v", err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("expected 1 key total, got %d", len(all))
+	}
+}
+
+func TestMigrateNamedKeys_EmptyMap(t *testing.T) {
+	store, mr := setupTest(t)
+	ctx := context.Background()
+
+	// Create some keys
+	mr.HSet("terminal:meta:my-project:session-1", "label", "Keep Me", "sort_order", "1",
+		"created_at", "2024-01-01T00:00:00Z", "updated_at", "2024-01-01T00:00:00Z")
+
+	// Call with empty map — should be a no-op
+	if err := store.MigrateNamedKeys(ctx, map[string]string{}); err != nil {
+		t.Fatalf("MigrateNamedKeys: %v", err)
+	}
+
+	// Key should still exist at original location
+	if !mr.Exists("terminal:meta:my-project:session-1") {
+		t.Error("key should not have been renamed with empty map")
+	}
+
+	got, err := store.Get(ctx, "my-project", "session-1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected metadata, got nil")
+	}
+	if got.Label != "Keep Me" {
+		t.Errorf("Label = %q, want %q", got.Label, "Keep Me")
+	}
+}
+
 func TestValidateWorkspaceName(t *testing.T) {
 	tests := []struct {
 		name  string

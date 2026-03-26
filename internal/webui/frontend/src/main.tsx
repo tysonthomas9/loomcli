@@ -12,6 +12,7 @@ import {
   AgentProvider,
   WorkspaceProvider,
   useIssueSessionMap,
+  useWorkspaceContext,
 } from "@/hooks";
 import { IssueSessionProvider } from "@/contexts/IssueSessionContext";
 import {
@@ -33,7 +34,8 @@ if (!rootElement) {
 }
 
 function IssueSessionWrapper({ children }: { children: React.ReactNode }) {
-  const issueSessionMap = useIssueSessionMap();
+  const { workspace } = useWorkspaceContext();
+  const issueSessionMap = useIssueSessionMap(workspace?.id ?? "");
   return (
     <IssueSessionProvider value={issueSessionMap}>
       {children}

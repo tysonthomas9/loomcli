@@ -316,7 +316,18 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		tabMetaStore = tabmeta.NewStore(tmClient, nil)
 		defer func() { _ = tabMetaStore.Close() }()
 		slog.Info("tab metadata store initialized", "redis_address", config.FleetRedis.Address)
-		_ = tabMetaStore.MigrateLegacyKeys(ctx, DefaultWorkspace) // best-effort migration
+		_ = tabMetaStore.MigrateLegacyKeys(ctx, "default")
+		if config.WorkspaceConfigFn != nil { // best-effort: migrate name-keyed → UUID-keyed entries
+			if wsData, err := config.WorkspaceConfigFn(); err == nil && wsData != nil {
+				nameToID := make(map[string]string, len(wsData.Workspaces))
+				for _, ws := range wsData.Workspaces {
+					if ws.Name != "" && ws.ID != "" {
+						nameToID[ws.Name] = ws.ID
+					}
+				}
+				_ = tabMetaStore.MigrateNamedKeys(ctx, nameToID)
+			}
+		}
 	}
 
 	// Initialize issue tab state store for tab persistence across navigation
@@ -362,10 +373,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	}
 
 	wrappedCreateFn := wrapWorkspaceCreateFn(config.WorkspaceCreateFn, multiPool, multiSub, config.PoolSize)
-
-	// Construct workspace-existence checker for WorkspaceMiddleware.
-	// MultiPool is the authoritative runtime registry — a workspace exists
-	// if and only if it has a registered pool.
+	// Workspace-existence checker for WorkspaceMiddleware (MultiPool is authoritative registry).
 	wsExistsFn := func(id string) bool {
 		return multiPool.PoolForWorkspace(id) != nil
 	}

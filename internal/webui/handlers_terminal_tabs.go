@@ -12,23 +12,11 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
-// DefaultWorkspace is the workspace name used when no workspace query parameter is provided.
-const DefaultWorkspace = "default"
-
 // tabMetadataResponse wraps tab metadata API responses.
 type tabMetadataResponse struct {
 	Success bool        `json:"success"`
 	Data    interface{} `json:"data,omitempty"`
 	Error   string      `json:"error,omitempty"`
-}
-
-// workspaceFromRequest reads the "workspace" query parameter, defaulting to DefaultWorkspace.
-func workspaceFromRequest(r *http.Request) string {
-	ws := r.URL.Query().Get("workspace")
-	if ws == "" {
-		return DefaultWorkspace
-	}
-	return ws
 }
 
 // handleListTerminalTabs returns all tab metadata, auto-creating defaults for new sessions.
@@ -42,14 +30,7 @@ func handleListTerminalTabs(store *tabmeta.Store, manager *TerminalManager) http
 			return
 		}
 
-		workspace := workspaceFromRequest(r)
-		if err := tabmeta.ValidateWorkspaceName(workspace); err != nil {
-			respondJSON(w, http.StatusBadRequest, tabMetadataResponse{
-				Success: false,
-				Error:   err.Error(),
-			})
-			return
-		}
+		workspace := WorkspaceFromContext(r.Context())
 
 		// Get active sessions from tmux
 		var activeNames []string
@@ -92,14 +73,7 @@ func handleGetTerminalTab(store *tabmeta.Store) http.HandlerFunc {
 			return
 		}
 
-		workspace := workspaceFromRequest(r)
-		if err := tabmeta.ValidateWorkspaceName(workspace); err != nil {
-			respondJSON(w, http.StatusBadRequest, tabMetadataResponse{
-				Success: false,
-				Error:   err.Error(),
-			})
-			return
-		}
+		workspace := WorkspaceFromContext(r.Context())
 
 		session := r.PathValue("session")
 		if err := tabmeta.ValidateSessionName(session); err != nil {
@@ -176,14 +150,7 @@ func handlePatchTerminalTab(store *tabmeta.Store, hub *SSEHub) http.HandlerFunc 
 			return
 		}
 
-		workspace := workspaceFromRequest(r)
-		if err := tabmeta.ValidateWorkspaceName(workspace); err != nil {
-			respondJSON(w, http.StatusBadRequest, tabMetadataResponse{
-				Success: false,
-				Error:   err.Error(),
-			})
-			return
-		}
+		workspace := WorkspaceFromContext(r.Context())
 
 		session := r.PathValue("session")
 		if err := tabmeta.ValidateSessionName(session); err != nil {
@@ -270,14 +237,7 @@ func handlePutTerminalTab(store *tabmeta.Store, hub *SSEHub) http.HandlerFunc {
 			return
 		}
 
-		workspace := workspaceFromRequest(r)
-		if err := tabmeta.ValidateWorkspaceName(workspace); err != nil {
-			respondJSON(w, http.StatusBadRequest, tabMetadataResponse{
-				Success: false,
-				Error:   err.Error(),
-			})
-			return
-		}
+		workspace := WorkspaceFromContext(r.Context())
 
 		session := r.PathValue("session")
 		if err := tabmeta.ValidateSessionName(session); err != nil {
@@ -353,14 +313,7 @@ func handleDeleteTerminalTab(store *tabmeta.Store, hub *SSEHub) http.HandlerFunc
 			return
 		}
 
-		workspace := workspaceFromRequest(r)
-		if err := tabmeta.ValidateWorkspaceName(workspace); err != nil {
-			respondJSON(w, http.StatusBadRequest, tabMetadataResponse{
-				Success: false,
-				Error:   err.Error(),
-			})
-			return
-		}
+		workspace := WorkspaceFromContext(r.Context())
 
 		session := r.PathValue("session")
 		if err := tabmeta.ValidateSessionName(session); err != nil {

@@ -380,48 +380,6 @@ func (s *Store) ListIssueSessionMap(ctx context.Context) (map[string][]string, e
 	return result, nil
 }
 
-// MigrateLegacyKeys scans for old-format keys (terminal:meta:{session} without workspace)
-// and renames them to workspace-scoped format (terminal:meta:{workspace}:{session}).
-// This is idempotent — already-migrated keys are skipped.
-func (s *Store) MigrateLegacyKeys(ctx context.Context, defaultWorkspace string) error {
-	var cursor uint64
-	var migratedCount int
-
-	for {
-		keys, nextCursor, err := s.client.Scan(ctx, cursor, keyPrefix+"*", 100).Result()
-		if err != nil {
-			return fmt.Errorf("scan: %w", err)
-		}
-
-		for _, key := range keys {
-			remainder := key[len(keyPrefix):]
-			// Legacy keys have no ":" in the remainder (just session name).
-			// New keys have format {workspace}:{session}.
-			if strings.Contains(remainder, ":") {
-				continue // Already workspace-scoped
-			}
-
-			newKey := metaKey(defaultWorkspace, remainder)
-			if err := s.client.Rename(ctx, key, newKey).Err(); err != nil {
-				s.logger.Warn("failed to migrate legacy key", "key", key, "error", err)
-				continue
-			}
-			migratedCount++
-		}
-
-		cursor = nextCursor
-		if cursor == 0 {
-			break
-		}
-	}
-
-	if migratedCount > 0 {
-		s.logger.Info("migrated legacy tab metadata keys", "count", migratedCount, "workspace", defaultWorkspace)
-	}
-
-	return nil
-}
-
 // parseMetadata converts a Redis hash map to a TabMetadata struct.
 func parseMetadata(workspace, sessionName string, vals map[string]string) (*TabMetadata, error) {
 	meta := &TabMetadata{

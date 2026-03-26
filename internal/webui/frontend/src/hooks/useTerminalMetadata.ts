@@ -33,7 +33,7 @@ export interface UseTerminalMetadataReturn {
 const DEBOUNCE_MS = 100;
 
 export function useTerminalMetadata(
-  workspace?: string,
+  workspace: string,
 ): UseTerminalMetadataReturn {
   const [tabs, setTabs] = useState<TabMetadata[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -52,6 +52,10 @@ export function useTerminalMetadata(
   }, []);
 
   const fetchTabs = useCallback(async () => {
+    if (!workspace) {
+      setIsLoading(false);
+      return; // Wait until workspace ID is known
+    }
     setIsLoading(true);
     setError(null);
     try {

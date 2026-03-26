@@ -165,9 +165,11 @@ describe("terminal API", () => {
 
       mockGet.mockResolvedValue({ success: true, data: tabs });
 
-      const result = await listTabMetadata();
+      const result = await listTabMetadata("ws-123");
       expect(result).toEqual(tabs);
-      expect(mockGet).toHaveBeenCalledWith("/api/terminal/tabs");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/ws-123/terminal/tabs",
+      );
     });
 
     it("throws on failure response", async () => {
@@ -176,13 +178,13 @@ describe("terminal API", () => {
         error: "no Redis",
       });
 
-      await expect(listTabMetadata()).rejects.toThrow(ApiError);
+      await expect(listTabMetadata("ws-123")).rejects.toThrow(ApiError);
     });
 
     it("returns empty array on 404 ApiError (tab metadata disabled)", async () => {
       mockGet.mockRejectedValue(new ApiError(404, "Not Found"));
 
-      const result = await listTabMetadata();
+      const result = await listTabMetadata("ws-123");
 
       expect(result).toEqual([]);
     });
@@ -190,7 +192,7 @@ describe("terminal API", () => {
     it("returns empty array on 503 ApiError (Redis unavailable)", async () => {
       mockGet.mockRejectedValue(new ApiError(503, "Service Unavailable"));
 
-      const result = await listTabMetadata();
+      const result = await listTabMetadata("ws-123");
 
       expect(result).toEqual([]);
     });
@@ -198,7 +200,7 @@ describe("terminal API", () => {
     it("re-throws non-404/503 ApiError", async () => {
       mockGet.mockRejectedValue(new ApiError(500, "Internal Server Error"));
 
-      await expect(listTabMetadata()).rejects.toThrow(
+      await expect(listTabMetadata("ws-123")).rejects.toThrow(
         "API Error: 500 Internal Server Error",
       );
     });
@@ -206,7 +208,9 @@ describe("terminal API", () => {
     it("re-throws non-ApiError errors", async () => {
       mockGet.mockRejectedValue(new Error("network failure"));
 
-      await expect(listTabMetadata()).rejects.toThrow("network failure");
+      await expect(listTabMetadata("ws-123")).rejects.toThrow(
+        "network failure",
+      );
     });
   });
 
@@ -225,9 +229,11 @@ describe("terminal API", () => {
 
       mockGet.mockResolvedValue({ success: true, data: tab });
 
-      const result = await getTabMetadata("test");
+      const result = await getTabMetadata("test", "ws-123");
       expect(result).toEqual(tab);
-      expect(mockGet).toHaveBeenCalledWith("/api/terminal/tabs/test");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/ws-123/terminal/tabs/test",
+      );
     });
 
     it("URL-encodes the session name", async () => {
@@ -243,8 +249,10 @@ describe("terminal API", () => {
         },
       });
 
-      await getTabMetadata("my-tab");
-      expect(mockGet).toHaveBeenCalledWith("/api/terminal/tabs/my-tab");
+      await getTabMetadata("my-tab", "ws-123");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/ws-123/terminal/tabs/my-tab",
+      );
     });
   });
 
@@ -263,11 +271,18 @@ describe("terminal API", () => {
 
       mockPatch.mockResolvedValue({ success: true, data: updated });
 
-      const result = await patchTabMetadata("test", { label: "Updated" });
+      const result = await patchTabMetadata(
+        "test",
+        { label: "Updated" },
+        "ws-123",
+      );
       expect(result).toEqual(updated);
-      expect(mockPatch).toHaveBeenCalledWith("/api/terminal/tabs/test", {
-        label: "Updated",
-      });
+      expect(mockPatch).toHaveBeenCalledWith(
+        "/api/workspaces/ws-123/terminal/tabs/test",
+        {
+          label: "Updated",
+        },
+      );
     });
   });
 
@@ -277,8 +292,10 @@ describe("terminal API", () => {
     it("sends delete request", async () => {
       mockDel.mockResolvedValue({ success: true });
 
-      await deleteTabMetadata("test");
-      expect(mockDel).toHaveBeenCalledWith("/api/terminal/tabs/test");
+      await deleteTabMetadata("test", "ws-123");
+      expect(mockDel).toHaveBeenCalledWith(
+        "/api/workspaces/ws-123/terminal/tabs/test",
+      );
     });
   });
 

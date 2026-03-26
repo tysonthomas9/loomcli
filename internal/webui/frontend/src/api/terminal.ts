@@ -180,21 +180,16 @@ export interface TabMetadata {
 
 // ============= Tab Metadata API Functions =============
 
-/** Build workspace query string suffix for tab metadata requests. */
-function wsQuery(workspace?: string): string {
-  return workspace ? `?workspace=${encodeURIComponent(workspace)}` : "";
-}
-
 /**
- * List all tab metadata from GET /api/terminal/tabs.
+ * List all tab metadata from GET /api/workspaces/{workspace}/terminal/tabs.
  * Returns an empty array when tab metadata is unavailable (404 = no Redis, 503 = Redis down).
  */
 export async function listTabMetadata(
-  workspace?: string,
+  workspace: string,
 ): Promise<TabMetadata[]> {
   try {
     const response = await get<ApiResult<TabMetadata[]>>(
-      `/api/terminal/tabs${wsQuery(workspace)}`,
+      `/api/workspaces/${encodeURIComponent(workspace)}/terminal/tabs`,
     );
     return unwrap(response);
   } catch (error) {
@@ -209,20 +204,20 @@ export async function listTabMetadata(
 }
 
 /**
- * Get metadata for a single tab from GET /api/terminal/tabs/{session}.
+ * Get metadata for a single tab from GET /api/workspaces/{workspace}/terminal/tabs/{session}.
  */
 export async function getTabMetadata(
   session: string,
-  workspace?: string,
+  workspace: string,
 ): Promise<TabMetadata> {
   const response = await get<ApiResult<TabMetadata>>(
-    `/api/terminal/tabs/${encodeURIComponent(session)}${wsQuery(workspace)}`,
+    `/api/workspaces/${encodeURIComponent(workspace)}/terminal/tabs/${encodeURIComponent(session)}`,
   );
   return unwrap(response);
 }
 
 /**
- * Partially update tab metadata via PATCH /api/terminal/tabs/{session}.
+ * Partially update tab metadata via PATCH /api/workspaces/{workspace}/terminal/tabs/{session}.
  */
 export async function patchTabMetadata(
   session: string,
@@ -233,39 +228,39 @@ export async function patchTabMetadata(
     pinned: boolean;
     issue_id: string;
   }>,
-  workspace?: string,
+  workspace: string,
 ): Promise<TabMetadata> {
   const response = await patch<ApiResult<TabMetadata>>(
-    `/api/terminal/tabs/${encodeURIComponent(session)}${wsQuery(workspace)}`,
+    `/api/workspaces/${encodeURIComponent(workspace)}/terminal/tabs/${encodeURIComponent(session)}`,
     fields,
   );
   return unwrap(response);
 }
 
 /**
- * Create or replace tab metadata via PUT /api/terminal/tabs/{session}.
+ * Create or replace tab metadata via PUT /api/workspaces/{workspace}/terminal/tabs/{session}.
  */
 export async function putTabMetadata(
   session: string,
   fields: { label: string; sort_order: number; notes?: string },
-  workspace?: string,
+  workspace: string,
 ): Promise<TabMetadata> {
   const response = await put<ApiResult<TabMetadata>>(
-    `/api/terminal/tabs/${encodeURIComponent(session)}${wsQuery(workspace)}`,
+    `/api/workspaces/${encodeURIComponent(workspace)}/terminal/tabs/${encodeURIComponent(session)}`,
     fields,
   );
   return unwrap(response);
 }
 
 /**
- * Delete tab metadata via DELETE /api/terminal/tabs/{session}.
+ * Delete tab metadata via DELETE /api/workspaces/{workspace}/terminal/tabs/{session}.
  */
 export async function deleteTabMetadata(
   session: string,
-  workspace?: string,
+  workspace: string,
 ): Promise<void> {
   await del<ApiResult<undefined>>(
-    `/api/terminal/tabs/${encodeURIComponent(session)}${wsQuery(workspace)}`,
+    `/api/workspaces/${encodeURIComponent(workspace)}/terminal/tabs/${encodeURIComponent(session)}`,
   );
 }
 
@@ -283,14 +278,16 @@ export async function scheduleSessionKill(sessionName: string): Promise<void> {
 // ============= Issue Session Management =============
 
 /**
- * List sessions grouped by issue ID from GET /api/terminal/sessions/by-issue.
+ * List sessions grouped by issue ID from GET /api/workspaces/{workspace}/terminal/sessions/by-issue.
  * Returns a map of issue_id → session_name[].
  * Returns an empty map when tab metadata is unavailable (404 = no Redis, 503 = Redis down).
  */
-export async function listSessionsByIssue(): Promise<Record<string, string[]>> {
+export async function listSessionsByIssue(
+  workspace: string,
+): Promise<Record<string, string[]>> {
   try {
     const response = await get<ApiResult<Record<string, string[]>>>(
-      "/api/terminal/sessions/by-issue",
+      `/api/workspaces/${encodeURIComponent(workspace)}/terminal/sessions/by-issue`,
     );
     return unwrap(response);
   } catch (error) {

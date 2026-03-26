@@ -21,7 +21,7 @@ describe("useIssueSessionMap", () => {
       new Promise(() => {}),
     );
 
-    const { result } = renderHook(() => useIssueSessionMap());
+    const { result } = renderHook(() => useIssueSessionMap("test-ws"));
 
     expect(result.current.issueSessionMap).toEqual({});
   });
@@ -33,7 +33,7 @@ describe("useIssueSessionMap", () => {
     };
     vi.mocked(terminalApi.listSessionsByIssue).mockResolvedValue(mockData);
 
-    const { result } = renderHook(() => useIssueSessionMap());
+    const { result } = renderHook(() => useIssueSessionMap("test-ws"));
 
     await waitFor(() => {
       expect(result.current.issueSessionMap).toEqual(mockData);
@@ -47,7 +47,7 @@ describe("useIssueSessionMap", () => {
       "PROJ-1": ["s1"],
     });
 
-    const { result } = renderHook(() => useIssueSessionMap());
+    const { result } = renderHook(() => useIssueSessionMap("test-ws"));
 
     await waitFor(() => {
       expect(result.current.hasActiveSession("PROJ-1")).toBe(true);
@@ -59,7 +59,7 @@ describe("useIssueSessionMap", () => {
       "PROJ-1": ["s1"],
     });
 
-    const { result } = renderHook(() => useIssueSessionMap());
+    const { result } = renderHook(() => useIssueSessionMap("test-ws"));
 
     await waitFor(() => {
       expect(result.current.issueSessionMap).toEqual({ "PROJ-1": ["s1"] });
@@ -73,7 +73,7 @@ describe("useIssueSessionMap", () => {
       "PROJ-1": [],
     });
 
-    const { result } = renderHook(() => useIssueSessionMap());
+    const { result } = renderHook(() => useIssueSessionMap("test-ws"));
 
     await waitFor(() => {
       expect(result.current.issueSessionMap).toEqual({ "PROJ-1": [] });
@@ -87,7 +87,7 @@ describe("useIssueSessionMap", () => {
       new Error("network error"),
     );
 
-    const { result } = renderHook(() => useIssueSessionMap());
+    const { result } = renderHook(() => useIssueSessionMap("test-ws"));
 
     // Wait for the rejected promise to settle
     await waitFor(() => {
@@ -103,7 +103,7 @@ describe("useIssueSessionMap", () => {
       .mockResolvedValueOnce({ "PROJ-1": ["s1"] })
       .mockResolvedValueOnce({ "PROJ-1": ["s1", "s2"] });
 
-    const { result } = renderHook(() => useIssueSessionMap());
+    const { result } = renderHook(() => useIssueSessionMap("test-ws"));
 
     await waitFor(() => {
       expect(result.current.issueSessionMap).toEqual({ "PROJ-1": ["s1"] });
@@ -127,7 +127,7 @@ describe("useIssueSessionMap", () => {
       .mockResolvedValueOnce({})
       .mockResolvedValueOnce({ "PROJ-1": ["s1"] });
 
-    const { result } = renderHook(() => useIssueSessionMap());
+    const { result } = renderHook(() => useIssueSessionMap("test-ws"));
 
     await waitFor(() => {
       expect(terminalApi.listSessionsByIssue).toHaveBeenCalledTimes(1);
@@ -155,7 +155,7 @@ describe("useIssueSessionMap", () => {
       .mockResolvedValueOnce({})
       .mockResolvedValueOnce({ "PROJ-1": ["s1"] });
 
-    const { result } = renderHook(() => useIssueSessionMap());
+    const { result } = renderHook(() => useIssueSessionMap("test-ws"));
 
     await waitFor(() => {
       expect(terminalApi.listSessionsByIssue).toHaveBeenCalledTimes(1);
@@ -180,7 +180,7 @@ describe("useIssueSessionMap", () => {
   it("handleMutation ignores unrelated mutation types", async () => {
     vi.mocked(terminalApi.listSessionsByIssue).mockResolvedValue({});
 
-    const { result } = renderHook(() => useIssueSessionMap());
+    const { result } = renderHook(() => useIssueSessionMap("test-ws"));
 
     await waitFor(() => {
       expect(terminalApi.listSessionsByIssue).toHaveBeenCalledTimes(1);
@@ -205,7 +205,7 @@ describe("useIssueSessionMap", () => {
       .mockResolvedValueOnce({})
       .mockResolvedValueOnce({ "PROJ-1": ["s1"] });
 
-    const { result } = renderHook(() => useIssueSessionMap());
+    const { result } = renderHook(() => useIssueSessionMap("test-ws"));
 
     await waitFor(() => {
       expect(terminalApi.listSessionsByIssue).toHaveBeenCalledTimes(1);

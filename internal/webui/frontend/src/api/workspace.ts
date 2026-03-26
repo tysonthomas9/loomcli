@@ -26,6 +26,7 @@ export interface WorkspaceAgentInfo {
 }
 
 export interface WorkspaceSummary {
+  id: string;
   name: string;
   path: string;
   active: boolean;
@@ -35,6 +36,7 @@ export interface WorkspaceSummary {
 }
 
 export interface WorkspaceData {
+  id: string;
   name: string;
   path: string;
   repos: RepoInfo[];

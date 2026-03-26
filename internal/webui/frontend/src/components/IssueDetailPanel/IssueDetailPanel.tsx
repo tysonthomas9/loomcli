@@ -409,7 +409,8 @@ function DefaultContent({
       // Fire-and-forget backend cleanup for terminal tabs
       if (tab?.type === "terminal" && tab.metadata?.sessionName) {
         const sessionName = tab.metadata.sessionName;
-        deleteTabMetadata(sessionName).catch(() => {});
+        if (workspace?.id)
+          deleteTabMetadata(sessionName, workspace.id).catch(() => {});
         scheduleSessionKill(sessionName).catch(() => {});
       }
 
