@@ -580,11 +580,11 @@ describe("module exports", () => {
     assert.equal(mod.dialect, "sqlite");
   });
 
-  it("plugins array is empty (placeholder for future JWT plugin)", async () => {
+  it("plugins array contains JWT plugin", async () => {
     setupMocks();
     const { auth } = await importAuthFresh();
     assert.ok(Array.isArray(auth.options.plugins), "plugins should be an array");
-    assert.equal(auth.options.plugins.length, 0, "plugins should be empty");
+    assert.equal(auth.options.plugins.length, 1, "plugins should have JWT plugin");
   });
 
   it("account linking is enabled", async () => {
@@ -603,5 +603,130 @@ describe("module exports", () => {
     setupMocks();
     const { auth } = await importAuthFresh();
     assert.equal(auth.options.secret, VALID_SECRET);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: JWT plugin configuration
+// ---------------------------------------------------------------------------
+
+describe("JWT plugin configuration", () => {
+  afterEach(() => {
+    mock.restoreAll();
+  });
+
+  it("plugins array contains exactly one plugin (jwt)", async () => {
+    setupMocks();
+    const { auth } = await importAuthFresh();
+    assert.ok(Array.isArray(auth.options.plugins), "plugins should be an array");
+    assert.equal(auth.options.plugins.length, 1, "should have exactly one plugin");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const plugin = auth.options.plugins[0] as any;
+    assert.equal(plugin.id, "jwt", "the single plugin should be jwt");
+  });
+
+  it("JWT plugin configures RS256 algorithm with 4096 modulusLength", async () => {
+    setupMocks();
+    const { auth } = await importAuthFresh();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const plugin = auth.options.plugins![0] as any;
+    const keyPairConfig = plugin.options.jwks.keyPairConfig;
+    assert.equal(keyPairConfig.alg, "RS256");
+    assert.equal(keyPairConfig.modulusLength, 4096);
+  });
+
+  it("JWT plugin sets 15-minute expiration time", async () => {
+    setupMocks();
+    const { auth } = await importAuthFresh();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const plugin = auth.options.plugins![0] as any;
+    assert.equal(plugin.options.jwt.expirationTime, "15m");
+  });
+
+  it("JWT plugin sets issuer from BETTER_AUTH_URL origin", async () => {
+    setupMocks({ BETTER_AUTH_URL: "https://auth.example.com:8443/api/auth" });
+    const { auth } = await importAuthFresh();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const plugin = auth.options.plugins![0] as any;
+    assert.equal(plugin.options.jwt.issuer, "https://auth.example.com:8443");
+  });
+
+  it("JWT plugin sets audience from JWT_AUDIENCE env", async () => {
+    setupMocks({ JWT_AUDIENCE: "my-custom-audience" });
+    const { auth } = await importAuthFresh();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const plugin = auth.options.plugins![0] as any;
+    assert.equal(plugin.options.jwt.audience, "my-custom-audience");
+  });
+
+  it("JWT plugin has disableSettingJwtHeader true", async () => {
+    setupMocks();
+    const { auth } = await importAuthFresh();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const plugin = auth.options.plugins![0] as any;
+    assert.equal(plugin.options.disableSettingJwtHeader, true);
+  });
+
+  it("JWT plugin configures 7-day rotation interval", async () => {
+    setupMocks();
+    const { auth } = await importAuthFresh();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const plugin = auth.options.plugins![0] as any;
+    const sevenDays = 60 * 60 * 24 * 7;
+    assert.equal(plugin.options.jwks.rotationInterval, sevenDays);
+  });
+
+  it("JWT plugin configures 24-hour grace period", async () => {
+    setupMocks();
+    const { auth } = await importAuthFresh();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const plugin = auth.options.plugins![0] as any;
+    const twentyFourHours = 60 * 60 * 24;
+    assert.equal(plugin.options.jwks.gracePeriod, twentyFourHours);
+  });
+
+  it("definePayload includes email, name, role, and jti", async () => {
+    setupMocks();
+    const { auth } = await importAuthFresh();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const plugin = auth.options.plugins![0] as any;
+    const definePayload = plugin.options.jwt.definePayload;
+    assert.ok(definePayload, "definePayload should be defined");
+
+    const mockUser = {
+      email: "alice@example.com",
+      name: "Alice",
+      role: "admin",
+    };
+    const payload = definePayload({ user: mockUser });
+    assert.equal(payload.email, "alice@example.com");
+    assert.equal(payload.name, "Alice");
+    assert.equal(payload.role, "admin");
+    assert.ok(typeof payload.jti === "string", "jti should be a string");
+    assert.ok(payload.jti.length > 0, "jti should be non-empty");
+  });
+
+  it("definePayload defaults role to 'user' when absent", async () => {
+    setupMocks();
+    const { auth } = await importAuthFresh();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const plugin = auth.options.plugins![0] as any;
+    const definePayload = plugin.options.jwt.definePayload;
+
+    const mockUser = { email: "bob@example.com", name: "Bob" };
+    const payload = definePayload({ user: mockUser });
+    assert.equal(payload.role, "user", "role should default to 'user'");
+  });
+
+  it("definePayload uses existing role when present", async () => {
+    setupMocks();
+    const { auth } = await importAuthFresh();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const plugin = auth.options.plugins![0] as any;
+    const definePayload = plugin.options.jwt.definePayload;
+
+    const mockUser = { email: "carol@example.com", name: "Carol", role: "admin" };
+    const payload = definePayload({ user: mockUser });
+    assert.equal(payload.role, "admin", "role should be 'admin' from user");
   });
 });

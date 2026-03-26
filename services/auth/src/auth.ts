@@ -1,6 +1,8 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { jwt } from "better-auth/plugins";
 import { APIError } from "better-auth/api";
+import { randomUUID } from "node:crypto";
 import { createDb } from "./db/index.js";
 import { env } from "./lib/env.js";
 
@@ -126,7 +128,28 @@ export const auth = betterAuth({
   },
 
   plugins: [
-    // Task .4 adds: jwt({ ... })
+    jwt({
+      jwks: {
+        keyPairConfig: {
+          alg: "RS256",
+          modulusLength: 4096,
+        },
+        rotationInterval: 60 * 60 * 24 * 7, // 7 days
+        gracePeriod: 60 * 60 * 24, // 24 hours
+      },
+      jwt: {
+        expirationTime: "15m",
+        issuer: new URL(env.BETTER_AUTH_URL).origin,
+        audience: env.JWT_AUDIENCE,
+        definePayload: ({ user }) => ({
+          email: user.email,
+          name: user.name,
+          role: (user as Record<string, unknown>).role ?? "user",
+          jti: randomUUID(),
+        }),
+      },
+      disableSettingJwtHeader: true,
+    }),
   ],
 });
 
