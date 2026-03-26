@@ -24,6 +24,7 @@ import {
   setDefaultWorkspace as setDefaultWorkspaceApi,
   clearDefaultWorkspace as clearDefaultWorkspaceApi,
   refreshWorkspace,
+  invalidateWorkspaceCache,
 } from "@/api/workspace";
 import { wsGet, wsSet, setLastWorkspaceId } from "@/utils/scopedStorage";
 
@@ -237,6 +238,9 @@ export function WorkspaceProvider({
       const workspaces = workspaceResult.workspace?.workspaces ?? [];
       const target = workspaces.find((ws) => ws.name === name);
       if (target) {
+        // Invalidate cached workspace data before navigating to prevent
+        // stale data from the old workspace being served to new components
+        invalidateWorkspaceCache();
         navigate(`/ws/${target.id}/`);
       }
     },

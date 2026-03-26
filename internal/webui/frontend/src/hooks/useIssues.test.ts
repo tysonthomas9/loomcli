@@ -184,6 +184,7 @@ describe("useIssues", () => {
         expect(issuesApi.getReadyIssues).toHaveBeenCalledWith(
           "test-ws-id",
           filter,
+          expect.anything(),
         );
       });
     });
@@ -806,6 +807,7 @@ describe("useIssues", () => {
       expect(issuesApi.fetchGraphIssues).toHaveBeenCalledWith(
         "test-ws-id",
         graphFilter,
+        expect.anything(),
       );
     });
 
@@ -1177,6 +1179,7 @@ describe("useIssues", () => {
         expect(issuesApi.getKanbanIssues).toHaveBeenCalledWith(
           "test-ws-id",
           filter,
+          expect.anything(),
         );
       });
     });
@@ -1578,10 +1581,14 @@ describe("useIssues", () => {
           await result.current.refetch();
         });
 
-        expect(issuesApi.getReadyIssues).toHaveBeenCalledWith("test-ws-id", {
-          priority: 1,
-          source_repos: ["repo-a", "repo-b"],
-        });
+        expect(issuesApi.getReadyIssues).toHaveBeenCalledWith(
+          "test-ws-id",
+          {
+            priority: 1,
+            source_repos: ["repo-a", "repo-b"],
+          },
+          undefined,
+        );
       });
 
       it("builds WorkFilter with source_repos for kanban mode", async () => {
@@ -1602,10 +1609,14 @@ describe("useIssues", () => {
           await result.current.refetch();
         });
 
-        expect(issuesApi.getKanbanIssues).toHaveBeenCalledWith("test-ws-id", {
-          assignee: "dev@example.com",
-          source_repos: ["repo-c"],
-        });
+        expect(issuesApi.getKanbanIssues).toHaveBeenCalledWith(
+          "test-ws-id",
+          {
+            assignee: "dev@example.com",
+            source_repos: ["repo-c"],
+          },
+          undefined,
+        );
       });
 
       it("builds GraphFilter with source_repos for graph mode", async () => {
@@ -1626,11 +1637,15 @@ describe("useIssues", () => {
           await result.current.refetch();
         });
 
-        expect(issuesApi.fetchGraphIssues).toHaveBeenCalledWith("test-ws-id", {
-          status: "open",
-          includeClosed: false,
-          source_repos: ["repo-d"],
-        });
+        expect(issuesApi.fetchGraphIssues).toHaveBeenCalledWith(
+          "test-ws-id",
+          {
+            status: "open",
+            includeClosed: false,
+            source_repos: ["repo-d"],
+          },
+          undefined,
+        );
       });
 
       it("does not add source_repos when sourceRepos is undefined", async () => {
@@ -1651,9 +1666,13 @@ describe("useIssues", () => {
           await result.current.refetch();
         });
 
-        expect(issuesApi.getReadyIssues).toHaveBeenCalledWith("test-ws-id", {
-          priority: 1,
-        });
+        expect(issuesApi.getReadyIssues).toHaveBeenCalledWith(
+          "test-ws-id",
+          {
+            priority: 1,
+          },
+          undefined,
+        );
       });
 
       it("does not add source_repos when sourceRepos is empty", async () => {
@@ -1674,6 +1693,7 @@ describe("useIssues", () => {
 
         expect(issuesApi.getReadyIssues).toHaveBeenCalledWith(
           "test-ws-id",
+          undefined,
           undefined,
         );
       });

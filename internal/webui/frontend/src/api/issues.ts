@@ -16,7 +16,15 @@ import type {
   Comment,
 } from "@/types";
 
-import { get, post, patch, del, ApiError, wsUrl } from "./client";
+import {
+  get,
+  post,
+  patch,
+  del,
+  ApiError,
+  wsUrl,
+  type RequestOptions,
+} from "./client";
 
 // ============= Response Types =============
 
@@ -116,11 +124,13 @@ export async function getIssue(
 export async function getReadyIssues(
   workspaceId: string,
   options?: WorkFilter,
+  requestOptions?: Pick<RequestOptions, "signal">,
 ): Promise<Issue[]> {
   const query = buildQueryString(mapWorkFilterToQueryParams(options ?? {}));
-  const response = await get<ApiResult<Issue[]>>(
-    wsUrl(workspaceId, `/ready${query}`),
-  );
+  const url = wsUrl(workspaceId, `/ready${query}`);
+  const response = requestOptions
+    ? await get<ApiResult<Issue[]>>(url, requestOptions)
+    : await get<ApiResult<Issue[]>>(url);
   return unwrap(response);
 }
 
@@ -188,6 +198,7 @@ export async function getBlockedIssues(
 export async function getKanbanIssues(
   workspaceId: string,
   options?: WorkFilter,
+  requestOptions?: Pick<RequestOptions, "signal">,
 ): Promise<Issue[]> {
   const params: Record<string, unknown> = {
     exclude_status: "tombstone",
@@ -198,9 +209,10 @@ export async function getKanbanIssues(
     Object.assign(params, mapped);
   }
   const query = buildQueryString(params);
-  const response = await get<ApiResult<Issue[]>>(
-    wsUrl(workspaceId, `/issues${query}`),
-  );
+  const url = wsUrl(workspaceId, `/issues${query}`);
+  const response = requestOptions
+    ? await get<ApiResult<Issue[]>>(url, requestOptions)
+    : await get<ApiResult<Issue[]>>(url);
   return unwrap(response);
 }
 
@@ -254,6 +266,7 @@ interface GraphApiIssue {
 export async function fetchGraphIssues(
   workspaceId: string,
   options?: GraphFilter,
+  requestOptions?: Pick<RequestOptions, "signal">,
 ): Promise<Issue[]> {
   const params: Record<string, unknown> = {};
   if (options?.status) {
@@ -266,9 +279,10 @@ export async function fetchGraphIssues(
     params.source_repos = options.source_repos;
   }
   const query = buildQueryString(params);
-  const response = await get<GraphApiResponse>(
-    wsUrl(workspaceId, `/issues/graph${query}`),
-  );
+  const url = wsUrl(workspaceId, `/issues/graph${query}`);
+  const response = requestOptions
+    ? await get<GraphApiResponse>(url, requestOptions)
+    : await get<GraphApiResponse>(url);
 
   if (!response.success) {
     throw new ApiError(0, response.error || "Unknown error");

@@ -116,6 +116,17 @@ export async function fetchWorkspace(
 }
 
 /**
+ * Invalidate the workspace cache without triggering a refetch.
+ * Call during workspace switch to prevent stale data from the old workspace
+ * being served to the new workspace's components on mount.
+ */
+export function invalidateWorkspaceCache(): void {
+  cacheGeneration++;
+  workspaceCache = null;
+  fetchPromise = null;
+}
+
+/**
  * Invalidate the cache and re-fetch workspace data from the backend.
  */
 export async function refreshWorkspace(): Promise<WorkspaceData> {

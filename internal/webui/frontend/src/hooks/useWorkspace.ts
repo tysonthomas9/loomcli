@@ -53,32 +53,36 @@ export function useWorkspace(
 
   const mountedRef = useRef(true);
 
-  const fetchData = useCallback(async (invalidateCache = false) => {
-    try {
-      const data = invalidateCache
-        ? await refreshWorkspace()
-        : await fetchWorkspace();
-      if (mountedRef.current) {
-        setWorkspace(data);
-        setError(null);
-      }
-    } catch (err) {
-      if (mountedRef.current) {
+  // Initial fetch and polling.
+  // Note: AbortController gates post-fetch state updates only — it does NOT cancel
+  // the HTTP request because fetchWorkspace/refreshWorkspace use a module-level cache
+  // with generation counters that already discard stale in-flight responses.
+  useEffect(() => {
+    mountedRef.current = true;
+    const controller = new AbortController();
+
+    const fetchData = async (invalidateCache = false) => {
+      try {
+        const data = invalidateCache
+          ? await refreshWorkspace()
+          : await fetchWorkspace();
+        if (mountedRef.current && !controller.signal.aborted) {
+          setWorkspace(data);
+          setError(null);
+        }
+      } catch (err) {
+        if (!mountedRef.current || controller.signal.aborted) return;
+        if (err instanceof DOMException && err.name === "AbortError") return;
         const message =
           err instanceof Error ? err.message : "Failed to load workspace data";
         setError(message);
         // Keep stale data on error
+      } finally {
+        if (mountedRef.current && !controller.signal.aborted) {
+          setIsLoading(false);
+        }
       }
-    } finally {
-      if (mountedRef.current) {
-        setIsLoading(false);
-      }
-    }
-  }, []);
-
-  // Initial fetch and polling
-  useEffect(() => {
-    mountedRef.current = true;
+    };
 
     void fetchData();
 
@@ -99,16 +103,33 @@ export function useWorkspace(
 
     return () => {
       mountedRef.current = false;
+      controller.abort();
       if (intervalId) {
         clearInterval(intervalId);
       }
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [pollInterval, fetchData]);
+  }, [pollInterval]);
 
   const refetch = useCallback(() => {
-    void fetchData(true);
-  }, [fetchData]);
+    void refreshWorkspace().then(
+      (data) => {
+        if (mountedRef.current) {
+          setWorkspace(data);
+          setError(null);
+        }
+      },
+      (err) => {
+        if (mountedRef.current) {
+          const message =
+            err instanceof Error
+              ? err.message
+              : "Failed to load workspace data";
+          setError(message);
+        }
+      },
+    );
+  }, []);
 
   return {
     workspace,

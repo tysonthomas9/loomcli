@@ -31,6 +31,7 @@ vi.mock("@/api/workspace", () => ({
   setDefaultWorkspace: vi.fn().mockResolvedValue(undefined),
   clearDefaultWorkspace: vi.fn().mockResolvedValue(undefined),
   refreshWorkspace: vi.fn().mockResolvedValue(undefined),
+  invalidateWorkspaceCache: vi.fn(),
 }));
 
 vi.mock("@/api/client", () => ({
