@@ -93,6 +93,7 @@ type Store struct {
 	client      *redis.Client
 	logger      *slog.Logger
 	workspaceID string // workspace ID for key namespacing; empty = global
+	clientOwned bool   // true if this Store owns the Redis client (should close it)
 
 	claimScript *redis.Script
 }
@@ -129,8 +130,9 @@ func NewStore(cfg RedisConfig, logger *slog.Logger) (*Store, error) {
 	})
 
 	s := &Store{
-		client: client,
-		logger: logger,
+		client:      client,
+		logger:      logger,
+		clientOwned: true,
 	}
 	s.claimScript = redis.NewScript(claimLua)
 
@@ -156,8 +158,27 @@ func NewStoreFromClient(client *redis.Client, logger *slog.Logger) *Store {
 		logger = slog.Default()
 	}
 	s := &Store{
-		client: client,
-		logger: logger,
+		client:      client,
+		logger:      logger,
+		clientOwned: true,
+	}
+	s.claimScript = redis.NewScript(claimLua)
+	return s
+}
+
+// NewStoreForClient creates a workspace-scoped Store from a shared redis.Client.
+// Unlike NewStoreFromClient, the Store does NOT own the client — calling Close()
+// on this Store is a no-op. The caller (typically StoreRegistry) manages the
+// client's lifecycle.
+func NewStoreForClient(client *redis.Client, wsID string, logger *slog.Logger) *Store {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	s := &Store{
+		client:      client,
+		logger:      logger,
+		workspaceID: wsID,
+		clientOwned: false,
 	}
 	s.claimScript = redis.NewScript(claimLua)
 	return s
@@ -180,8 +201,12 @@ func NewRedisClient(addr, password string, db int) *redis.Client {
 	})
 }
 
-// Close closes the underlying Redis connection.
+// Close closes the underlying Redis connection if the Store owns it.
+// Stores created via NewStoreForClient (shared client) are no-ops.
 func (s *Store) Close() error {
+	if !s.clientOwned {
+		return nil
+	}
 	return s.client.Close()
 }
 

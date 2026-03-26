@@ -18,7 +18,7 @@ import (
 
 // setupRoutes configures all HTTP routes for the server.
 // allowedOrigins is the list of allowed CORS origins for WebSocket validation.
-func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPool, hub *SSEHub, getMutationsSince func(wsID string, since int64) []rpc.MutationEvent, termManager *TerminalManager, termAuth *terminalAuth, fleetStore *fleet.Store, tokenCfg *TokenConfig, apiKey string, authEnabled bool, allowedOrigins []string, fleetRegCfg *FleetRegisterConfig, timeoutEnforcer *fleet.TimeoutEnforcer, claimMetrics *fleet.ClaimMetrics, fleetEnabled bool, devMode bool, devFrontendDir string, loomServerURL string, gitOps GitOps, fileOps FileOps, tabMetaStore *tabmeta.Store, issueTabStore *issuetabs.Store, workspaceConfigFn func() (*WorkspaceData, error), workspaceDeleteFn func(string) error, setDefaultWsFn func(string) error, clearDefaultWsFn func() error, workspaceCreateFn WorkspaceCreateFn, backendOps BackendOps, sessionHistoryStore *sessionhistory.Store, sessStore *sessions.Store, wsExistsFn func(string) bool, registry *WorkspaceRegistry, resolveID WorkspaceIDResolverFn) (*clientErrorLimiter, *cspReportLimiter) { //nolint:funlen // route registration function
+func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPool, hub *SSEHub, getMutationsSince func(wsID string, since int64) []rpc.MutationEvent, termManager *TerminalManager, termAuth *terminalAuth, fleetRegistry *fleet.StoreRegistry, tokenCfg *TokenConfig, apiKey string, authEnabled bool, allowedOrigins []string, fleetRegCfg *FleetRegisterConfig, claimMetrics *fleet.ClaimMetrics, fleetEnabled bool, devMode bool, devFrontendDir string, loomServerURL string, gitOps GitOps, fileOps FileOps, tabMetaStore *tabmeta.Store, issueTabStore *issuetabs.Store, workspaceConfigFn func() (*WorkspaceData, error), workspaceDeleteFn func(string) error, setDefaultWsFn func(string) error, clearDefaultWsFn func() error, workspaceCreateFn WorkspaceCreateFn, backendOps BackendOps, sessionHistoryStore *sessionhistory.Store, sessStore *sessions.Store, wsExistsFn func(string) bool, registry *WorkspaceRegistry, resolveID WorkspaceIDResolverFn, initialWorkspaceID string) (*clientErrorLimiter, *cspReportLimiter) { //nolint:funlen // route registration function
 	// Health check endpoint for load balancers and monitoring
 	mux.HandleFunc("GET /health", handleHealth(pool))
 
@@ -46,7 +46,11 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 	mux.HandleFunc("GET /api/stats", handleStats(pool)) // Keep using main pool for now
 
 	// SSE hub metrics endpoint
-	mux.HandleFunc("GET /api/metrics", handleMetrics(hub, timeoutEnforcer, claimMetrics))
+	var getFleetTimeouts func() int64
+	if fleetRegistry != nil {
+		getFleetTimeouts = fleetRegistry.GetTotalTimeoutCount
+	}
+	mux.HandleFunc("GET /api/metrics", handleMetrics(hub, getFleetTimeouts, claimMetrics))
 
 	// Daemon status endpoint - exposes daemon configuration (auto-commit, auto-push, etc.)
 	mux.HandleFunc("GET /api/daemon/status", handleDaemonStatus(pool))
@@ -70,22 +74,24 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 		mux.HandleFunc("GET /api/backends", handleGetBackendsHealth(backendOps))
 	}
 
-	// Fleet endpoints for worker registration, task acquisition, and completion
-	// Only registered when fleet coordination (Redis) is configured.
-	if fleetEnabled {
-		mux.HandleFunc("POST /api/fleet/register", handleFleetRegister(fleetStore, tokenCfg, fleetRegCfg))
+	// Fleet endpoints for worker registration, task acquisition, and completion.
+	// Legacy routes fall back to the initial workspace's Store. Workspace-scoped
+	// routes are registered in registerWorkspaceRoutes below.
+	if fleetEnabled && fleetRegistry != nil {
+		initialStore, _ := fleetRegistry.Get(initialWorkspaceID)
+		mux.HandleFunc("POST /api/fleet/register", handleFleetRegister(initialStore, tokenCfg, fleetRegCfg))
 		if tokenCfg != nil && len(tokenCfg.SigningKey) > 0 {
 			fleetAuth := NewFleetAuthMiddleware(tokenCfg.SigningKey)
 			mux.Handle("POST /api/fleet/claim", fleetAuth(handleFleetClaim(pool, claimMetrics)))
 		} else {
 			mux.HandleFunc("POST /api/fleet/claim", handleFleetClaim(pool, claimMetrics))
 		}
-		mux.HandleFunc("POST /api/fleet/done/{id}", handleFleetDone(fleetStore))
+		mux.HandleFunc("POST /api/fleet/done/{id}", handleFleetDone(initialStore))
 		if tokenCfg != nil && len(tokenCfg.SigningKey) > 0 {
 			fleetAuth := NewFleetAuthMiddleware(tokenCfg.SigningKey)
-			mux.Handle("POST /api/fleet/heartbeat", fleetAuth(handleFleetHeartbeat(fleetStore)))
+			mux.Handle("POST /api/fleet/heartbeat", fleetAuth(handleFleetHeartbeat(initialStore)))
 		} else {
-			mux.HandleFunc("POST /api/fleet/heartbeat", handleFleetHeartbeat(fleetStore))
+			mux.HandleFunc("POST /api/fleet/heartbeat", handleFleetHeartbeat(initialStore))
 		}
 	}
 
@@ -180,7 +186,7 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 
 	// Workspace management and workspace-scoped API routes
 	if multiPool != nil {
-		registerWorkspaceRoutes(mux, multiPool, workspaceConfigFn, wsExistsFn, tabMetaStore, termManager, hub, getMutationsSince)
+		registerWorkspaceRoutes(mux, multiPool, workspaceConfigFn, wsExistsFn, tabMetaStore, termManager, hub, getMutationsSince, fleetRegistry, tokenCfg, fleetRegCfg, claimMetrics)
 	}
 
 	// Static file serving with SPA routing (must be last - catches all paths)
@@ -194,7 +200,7 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 }
 
 // registerWorkspaceRoutes sets up workspace listing and workspace-scoped API routes.
-func registerWorkspaceRoutes(mux *http.ServeMux, multiPool *daemon.MultiPool, workspaceConfigFn func() (*WorkspaceData, error), wsExistsFn func(string) bool, tabMetaStore *tabmeta.Store, termManager *TerminalManager, hub *SSEHub, getMutationsSince func(wsID string, since int64) []rpc.MutationEvent) {
+func registerWorkspaceRoutes(mux *http.ServeMux, multiPool *daemon.MultiPool, workspaceConfigFn func() (*WorkspaceData, error), wsExistsFn func(string) bool, tabMetaStore *tabmeta.Store, termManager *TerminalManager, hub *SSEHub, getMutationsSince func(wsID string, since int64) []rpc.MutationEvent, fleetRegistry *fleet.StoreRegistry, tokenCfg *TokenConfig, fleetRegCfg *FleetRegisterConfig, claimMetrics *fleet.ClaimMetrics) {
 	// Workspace listing (not workspace-scoped themselves)
 	mux.HandleFunc("GET /api/workspaces", handleListWorkspaces(multiPool, workspaceConfigFn))
 	mux.HandleFunc("GET /api/workspaces/{ws}", handleGetWorkspace(multiPool, workspaceConfigFn, wsExistsFn))
@@ -252,6 +258,51 @@ func registerWorkspaceRoutes(mux *http.ServeMux, multiPool *daemon.MultiPool, wo
 		wsMux.HandleFunc("GET /api/workspaces/{ws}/terminal/sessions/by-issue", handleListSessionsByIssue(tabMetaStore))
 	}
 
+	// Workspace-scoped fleet routes. Claim uses multiPool (routes to correct
+	// workspace daemon); register/done/heartbeat resolve the Store per-request.
+	if fleetRegistry != nil {
+		wsMux.HandleFunc("POST /api/workspaces/{ws}/fleet/register",
+			fleetWSHandler(fleetRegistry, func(s *fleet.Store) http.HandlerFunc {
+				return handleFleetRegister(s, tokenCfg, fleetRegCfg)
+			}))
+		if tokenCfg != nil && len(tokenCfg.SigningKey) > 0 {
+			fleetAuth := NewFleetAuthMiddleware(tokenCfg.SigningKey)
+			wsMux.Handle("POST /api/workspaces/{ws}/fleet/claim",
+				fleetAuth(handleFleetClaim(multiPool, claimMetrics)))
+		} else {
+			wsMux.HandleFunc("POST /api/workspaces/{ws}/fleet/claim",
+				handleFleetClaim(multiPool, claimMetrics))
+		}
+		wsMux.HandleFunc("POST /api/workspaces/{ws}/fleet/done/{id}",
+			fleetWSHandler(fleetRegistry, handleFleetDone))
+		if tokenCfg != nil && len(tokenCfg.SigningKey) > 0 {
+			fleetAuth := NewFleetAuthMiddleware(tokenCfg.SigningKey)
+			wsMux.Handle("POST /api/workspaces/{ws}/fleet/heartbeat",
+				fleetAuth(fleetWSHandler(fleetRegistry, handleFleetHeartbeat)))
+		} else {
+			wsMux.HandleFunc("POST /api/workspaces/{ws}/fleet/heartbeat",
+				fleetWSHandler(fleetRegistry, handleFleetHeartbeat))
+		}
+	}
+
 	// Apply WorkspaceMiddleware to all workspace-scoped routes
 	mux.Handle("/api/workspaces/{ws}/", WorkspaceMiddleware(wsExistsFn, wsMux))
+}
+
+// fleetWSHandler resolves a per-workspace fleet Store from the registry and
+// delegates to the given handler factory. Returns 404 if the workspace is not
+// found in the fleet registry.
+func fleetWSHandler(registry *fleet.StoreRegistry, makeHandler func(*fleet.Store) http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		wsID := WorkspaceFromContext(r.Context())
+		store, ok := registry.Get(wsID)
+		if !ok {
+			respondJSON(w, http.StatusServiceUnavailable, map[string]any{
+				"success": false,
+				"error":   "fleet not configured for workspace",
+			})
+			return
+		}
+		makeHandler(store).ServeHTTP(w, r)
+	}
 }

@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 )
 
 // WorkspaceData represents the full workspace topology returned by the API.
@@ -61,6 +63,7 @@ func reconcileConfigWorkspaces(
 	initialID string,
 	initialRegistered bool,
 	registry *WorkspaceRegistry,
+	fleetRegistry *fleet.StoreRegistry,
 ) {
 	if listFn == nil {
 		return
@@ -75,6 +78,12 @@ func reconcileConfigWorkspaces(
 			continue
 		}
 		_ = registry.Register(wsID, wsPath)
+		if fleetRegistry != nil {
+			if err := fleetRegistry.Register(wsID); err != nil {
+				slog.Warn("failed to register workspace in fleet registry",
+					"workspace", wsID, "err", err)
+			}
+		}
 	}
 	slog.Info("startup reconciliation complete",
 		"total_workspaces", len(workspaces),
@@ -85,6 +94,7 @@ func wrapWorkspaceCreateFn(
 	innerCreate WorkspaceCreateFn,
 	registry *WorkspaceRegistry,
 	resolveID WorkspaceIDResolverFn,
+	fleetRegistry *fleet.StoreRegistry,
 ) WorkspaceCreateFn {
 	if innerCreate == nil {
 		return nil
@@ -125,6 +135,15 @@ func wrapWorkspaceCreateFn(
 		wsDir = filepath.Clean(wsDir)
 
 		_ = registry.Register(wsID, wsDir)
+
+		// Register workspace in fleet store registry (non-fatal on error).
+		if fleetRegistry != nil {
+			if err := fleetRegistry.Register(wsID); err != nil {
+				slog.Warn("failed to register workspace in fleet registry",
+					"workspace", wsID, "err", err)
+			}
+		}
+
 		return nil
 	}
 }

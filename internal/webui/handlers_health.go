@@ -247,7 +247,8 @@ func handleStatsWithPool(pool statsConnectionGetter) http.HandlerFunc {
 }
 
 // handleMetrics returns a handler that exposes SSE hub runtime metrics.
-func handleMetrics(hub *SSEHub, timeoutEnforcer *fleet.TimeoutEnforcer, claimMetrics *fleet.ClaimMetrics) http.HandlerFunc {
+// getFleetTimeouts returns the aggregate fleet timeout count (nil = fleet disabled).
+func handleMetrics(hub *SSEHub, getFleetTimeouts func() int64, claimMetrics *fleet.ClaimMetrics) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if hub == nil {
 			respondJSON(w, http.StatusServiceUnavailable, MetricsResponse{
@@ -262,8 +263,8 @@ func handleMetrics(hub *SSEHub, timeoutEnforcer *fleet.TimeoutEnforcer, claimMet
 			RetryQueueDepth:  hub.GetRetryQueueDepth(),
 			UptimeSeconds:    hub.GetUptime().Seconds(),
 		}
-		if timeoutEnforcer != nil {
-			metrics.FleetTimeoutsTotal = timeoutEnforcer.GetTimeoutCount()
+		if getFleetTimeouts != nil {
+			metrics.FleetTimeoutsTotal = getFleetTimeouts()
 		}
 		if claimMetrics != nil {
 			snap := claimMetrics.Snapshot()

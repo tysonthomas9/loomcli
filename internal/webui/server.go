@@ -179,7 +179,8 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		getMutationsSince = multiSub.GetMutationsSinceForWorkspace
 	}
 
-	reconcileConfigWorkspaces(config.WorkspaceListFn, initialWorkspaceID, pool != nil, registry)
+	// NOTE: reconcileConfigWorkspaces is called below, after fleet registry
+	// initialization, so that other workspaces are also registered in the fleet.
 
 	// Initialize terminal manager for WebSocket terminal sessions.
 	// Include the workspace ID in the session prefix to prevent same-name agents
@@ -240,15 +241,22 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		}
 	}
 
-	// Initialize fleet store and JWT config for worker registration
-	var fleetStore *fleet.Store
+	// Initialize fleet store registry and JWT config for worker registration.
+	// The registry manages per-workspace Stores and TimeoutEnforcers. All
+	// workspace Stores share a single Redis client; key prefixes provide isolation.
+	var fleetRegistry *fleet.StoreRegistry
 	var tokenCfg *TokenConfig
 	if config.FleetRedis != nil {
 		var err error
-		fleetStore, err = fleet.NewStoreForWorkspace(*config.FleetRedis, initialWorkspaceID, nil)
+		fleetRegistry, err = fleet.NewStoreRegistry(*config.FleetRedis, fleet.DefaultTimeoutConfig(), nil)
 		if err != nil {
-			slog.Warn("failed to initialize fleet store", "component", "fleet", "err", err)
+			slog.Warn("failed to initialize fleet store registry", "component", "fleet", "err", err)
 		} else {
+			if regErr := fleetRegistry.Register(initialWorkspaceID); regErr != nil {
+				slog.Warn("failed to register initial workspace in fleet registry",
+					"workspace", initialWorkspaceID, "err", regErr)
+			}
+
 			// Use pre-provisioned key if available, otherwise generate ephemeral key
 			var jwtKey []byte
 			if len(config.FleetJWTKey) > 0 {
@@ -258,40 +266,36 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 				jwtKey = make([]byte, 32)
 				if _, err := rand.Read(jwtKey); err != nil {
 					slog.Warn("failed to generate JWT signing key", "component", "fleet", "err", err)
-					_ = fleetStore.Close()
-					fleetStore = nil
+					_ = fleetRegistry.Close()
+					fleetRegistry = nil
 				}
 			}
-			if fleetStore != nil {
+			if fleetRegistry != nil {
 				tokenCfg = &TokenConfig{
 					SigningKey: jwtKey,
 					Expiry:     time.Hour,
 				}
-				slog.Info("fleet store initialized", "component", "fleet", "redis_address", config.FleetRedis.Address)
+				slog.Info("fleet store registry initialized", "component", "fleet", "redis_address", config.FleetRedis.Address)
 			}
 		}
 	}
-	if fleetStore != nil {
-		defer func() { _ = fleetStore.Close() }()
-	}
-
-	// Initialize fleet timeout enforcer
-	var timeoutEnforcer *fleet.TimeoutEnforcer
-	if fleetStore != nil {
-		timeoutEnforcer = fleet.NewTimeoutEnforcer(fleetStore, fleet.DefaultTimeoutConfig(), nil)
-		timeoutEnforcer.Start()
-		slog.Info("fleet timeout enforcer started", "component", "fleet", "task_timeout", "30m")
+	if fleetRegistry != nil {
+		defer func() { _ = fleetRegistry.Close() }()
 	}
 
 	// Initialize fleet claim metrics
 	var claimMetrics *fleet.ClaimMetrics
-	if fleetStore != nil {
+	if fleetRegistry != nil {
 		claimMetrics = fleet.NewClaimMetrics()
 	}
 
+	// Reconcile all config workspaces (deferred until after fleet registry init
+	// so that other workspaces are also registered in the fleet).
+	reconcileConfigWorkspaces(config.WorkspaceListFn, initialWorkspaceID, pool != nil, registry, fleetRegistry)
+
 	// Build fleet registration config (API key + rate limiter)
 	var fleetRegCfg *FleetRegisterConfig
-	if config.FleetAPIKey != "" && fleetStore != nil {
+	if config.FleetAPIKey != "" && fleetRegistry != nil {
 		fleetRegCfg = &FleetRegisterConfig{
 			APIKey: config.FleetAPIKey,
 		}
@@ -302,7 +306,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 			defer func() { _ = fleetRegCfg.RateLimiter.Close() }()
 		}
 		slog.Info("fleet API key authentication enabled", "component", "fleet")
-	} else if fleetStore != nil && config.FleetAPIKey == "" {
+	} else if fleetRegistry != nil && config.FleetAPIKey == "" {
 		slog.Warn("fleet store configured but no fleet API key set", "component", "fleet", "env_var", "LOOM_FLEET_API_KEY")
 		slog.Warn("fleet registration endpoint will return 503 until fleet API key is configured", "component", "fleet")
 	}
@@ -369,7 +373,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		}
 	}
 
-	wrappedCreateFn := wrapWorkspaceCreateFn(config.WorkspaceCreateFn, registry, config.WorkspaceIDResolverFn)
+	wrappedCreateFn := wrapWorkspaceCreateFn(config.WorkspaceCreateFn, registry, config.WorkspaceIDResolverFn, fleetRegistry)
 	// Workspace-existence checker for WorkspaceMiddleware (MultiPool is authoritative registry).
 	wsExistsFn := func(id string) bool {
 		return multiPool.PoolForWorkspace(id) != nil
@@ -377,7 +381,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 
 	// Create HTTP server and register routes (allowedOrigins: nil = same-origin only)
 	mux := http.NewServeMux()
-	clientErrLimiter, cspLimiter := setupRoutes(mux, pool, multiPool, hub, getMutationsSince, termMgr, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, timeoutEnforcer, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL, config.GitOps, config.FileOps, tabMetaStore, issueTabStore, config.WorkspaceConfigFn, config.WorkspaceDeleteFn, config.SetDefaultWorkspaceFn, config.ClearDefaultWorkspaceFn, wrappedCreateFn, config.BackendOps, sessionHistoryStore, config.SessionsStore, wsExistsFn, registry, config.WorkspaceIDResolverFn)
+	clientErrLimiter, cspLimiter := setupRoutes(mux, pool, multiPool, hub, getMutationsSince, termMgr, termAuth, fleetRegistry, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL, config.GitOps, config.FileOps, tabMetaStore, issueTabStore, config.WorkspaceConfigFn, config.WorkspaceDeleteFn, config.SetDefaultWorkspaceFn, config.ClearDefaultWorkspaceFn, wrappedCreateFn, config.BackendOps, sessionHistoryStore, config.SessionsStore, wsExistsFn, registry, config.WorkspaceIDResolverFn, initialWorkspaceID)
 	defer clientErrLimiter.stop()
 	defer cspLimiter.stop()
 
@@ -448,12 +452,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	slog.Info("server stopped")
 
 	// Stop components in reverse-initialization order now that no handlers are running.
-
-	// Stop fleet timeout enforcer
-	if timeoutEnforcer != nil {
-		timeoutEnforcer.Stop()
-		slog.Info("fleet timeout enforcer stopped", "component", "fleet")
-	}
+	// Fleet timeout enforcers are stopped by fleetRegistry.Close() (deferred above).
 
 	// Stop rate limiter cleanup goroutine
 	rl.Stop()
