@@ -1062,5 +1062,71 @@ describe("useSSE", () => {
       expect(MockEventSource.instances.length).toBe(2);
       expect(MockEventSource.lastInstance?.url).not.toContain("source_repos");
     });
+
+    it("workspace switch with different sourceRepos does NOT trigger double connect", () => {
+      const { rerender } = renderHook(
+        ({
+          workspaceId,
+          sourceRepos,
+        }: {
+          workspaceId: string;
+          sourceRepos: string[];
+        }) => useSSE({ workspaceId, autoConnect: true, sourceRepos }),
+        {
+          initialProps: {
+            workspaceId: "ws-a",
+            sourceRepos: ["repo-a"],
+          },
+        },
+      );
+
+      expect(MockEventSource.instances.length).toBe(1);
+      expect(MockEventSource.instances[0].url).toContain("ws-a");
+      expect(MockEventSource.instances[0].url).toContain("source_repos=repo-a");
+
+      // Switch workspace AND sourceRepos at the same time
+      rerender({ workspaceId: "ws-b", sourceRepos: ["repo-b"] });
+
+      // Should be exactly 2 instances: one destroyed for ws-a, one new for ws-b
+      // Without the fix, there would be 3 (Effect B would trigger a redundant reconnect)
+      expect(MockEventSource.instances.length).toBe(2);
+      expect(MockEventSource.instances[0].readyState).toBe(
+        MockEventSource.CLOSED,
+      );
+      expect(MockEventSource.instances[1].url).toContain("ws-b");
+      expect(MockEventSource.instances[1].url).toContain("source_repos=repo-b");
+    });
+
+    it("workspace switch with same sourceRepos does NOT trigger reconnect", () => {
+      const { rerender } = renderHook(
+        ({
+          workspaceId,
+          sourceRepos,
+        }: {
+          workspaceId: string;
+          sourceRepos: string[];
+        }) => useSSE({ workspaceId, autoConnect: true, sourceRepos }),
+        {
+          initialProps: {
+            workspaceId: "ws-a",
+            sourceRepos: ["repo-a"],
+          },
+        },
+      );
+
+      expect(MockEventSource.instances.length).toBe(1);
+
+      // Switch workspace but keep same sourceRepos
+      rerender({ workspaceId: "ws-b", sourceRepos: ["repo-a"] });
+
+      // Should be exactly 2 instances (old destroyed, new created by Effect A)
+      // No third from Effect B since prevSourceReposRef was reset
+      expect(MockEventSource.instances.length).toBe(2);
+      expect(MockEventSource.instances[0].readyState).toBe(
+        MockEventSource.CLOSED,
+      );
+      expect(MockEventSource.instances[1].url).toContain("ws-b");
+      expect(MockEventSource.instances[1].url).toContain("source_repos=repo-a");
+    });
   });
 });
