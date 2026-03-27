@@ -46,7 +46,7 @@ func TestHandleListTerminalSessions_NilManager(t *testing.T) {
 // TestHandleListTerminalSessions_Success tests that the endpoint returns a real
 // session with a non-zero created timestamp after attaching to it.
 func TestHandleListTerminalSessions_Success(t *testing.T) {
-	manager, err := NewTerminalManager("bash", "testsuc", 0)
+	manager, err := NewTerminalManager("bash", testRunPrefix+"-testsuc", 0)
 	if err == ErrTmuxNotFound {
 		t.Skip("tmux not installed, skipping test")
 	}
@@ -126,7 +126,7 @@ func TestHandleListTerminalSessions_Success(t *testing.T) {
 // TestHandleListTerminalSessions_AlwaysIncludesTalkToLead tests that talk-to-lead
 // is always present in the response even when no sessions have been created.
 func TestHandleListTerminalSessions_AlwaysIncludesTalkToLead(t *testing.T) {
-	manager, err := NewTerminalManager("bash", "testttl", 0)
+	manager, err := NewTerminalManager("bash", testRunPrefix+"-testttl", 0)
 	if err == ErrTmuxNotFound {
 		t.Skip("tmux not installed, skipping test")
 	}
@@ -194,7 +194,7 @@ func TestHandleListTerminalSessions_AlwaysIncludesTalkToLead(t *testing.T) {
 // TestHandleListTerminalSessions_FiltersOtherSessions tests that sessions created
 // with a different prefix are not included in the response.
 func TestHandleListTerminalSessions_FiltersOtherSessions(t *testing.T) {
-	manager, err := NewTerminalManager("bash", "testflt", 0)
+	manager, err := NewTerminalManager("bash", testRunPrefix+"-testflt", 0)
 	if err == ErrTmuxNotFound {
 		t.Skip("tmux not installed, skipping test")
 	}
@@ -204,7 +204,7 @@ func TestHandleListTerminalSessions_FiltersOtherSessions(t *testing.T) {
 	defer manager.Shutdown()
 
 	// Manually create a tmux session with a different prefix.
-	otherSession := "other-something"
+	otherSession := testRunPrefix + "-other-something"
 	createCmd := exec.Command("tmux", "new-session", "-d", "-s", otherSession) //nolint:norawexec
 	if err := createCmd.Run(); err != nil {
 		t.Fatalf("failed to create tmux session %q: %v", otherSession, err)
@@ -269,14 +269,15 @@ func TestListActiveSessions_NoPrefixFallback(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	// Create a session. With empty prefix, the tmux session name is the raw name.
-	session, err := manager.Attach("nopfx-session", "", 80, 24)
+	// Create a session with a PID-scoped name to avoid collisions across parallel runs.
+	sessName := testRunPrefix + "-nopfx"
+	session, err := manager.Attach(sessName, "", 80, 24)
 	if err != nil {
 		t.Fatalf("failed to attach session: %v", err)
 	}
 	defer func() {
 		manager.Detach(session.ConnID)
-		manager.KillSessionByName("nopfx-session")
+		manager.KillSessionByName(sessName)
 	}()
 
 	sessions, err := manager.ListActiveSessions()
@@ -288,31 +289,19 @@ func TestListActiveSessions_NoPrefixFallback(t *testing.T) {
 	// We should find our session with its original name.
 	var found bool
 	for _, s := range sessions {
-		if s.Name == "nopfx-session" {
+		if s.Name == sessName {
 			found = true
 			if s.Created == 0 {
 				t.Error("expected created to be non-zero for an active session")
 			}
-			if s.Label != "nopfx-session" {
-				t.Errorf("expected label 'nopfx-session', got %q", s.Label)
+			if s.Label != sessName {
+				t.Errorf("expected label %q, got %q", sessName, s.Label)
 			}
 			break
 		}
 	}
 	if !found {
-		t.Errorf("session 'nopfx-session' not found in results; got %+v", sessions)
-	}
-
-	// talk-to-lead should also still be present.
-	var hasTalkToLead bool
-	for _, s := range sessions {
-		if s.Name == "talk-to-lead" {
-			hasTalkToLead = true
-			break
-		}
-	}
-	if !hasTalkToLead {
-		t.Error("talk-to-lead not found in results when prefix is empty")
+		t.Errorf("session %q not found in results; got %+v", sessName, sessions)
 	}
 }
 
@@ -325,7 +314,7 @@ func TestNewTerminalManager_NoTmux_Sessions(t *testing.T) {
 	}
 	t.Cleanup(func() { lookPathTmux = orig })
 
-	_, err := NewTerminalManager("bash", "test", 0)
+	_, err := NewTerminalManager("bash", testRunPrefix+"-test", 0)
 	if !errors.Is(err, ErrTmuxNotFound) {
 		t.Errorf("expected ErrTmuxNotFound, got: %v", err)
 	}

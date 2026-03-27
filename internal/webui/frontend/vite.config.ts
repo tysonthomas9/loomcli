@@ -75,6 +75,7 @@ export default defineConfig(({ mode }) => ({
     globals: true,
     environment: "node",
     exclude: ["tests/e2e/**", "node_modules/**"],
+    pool: "forks",
     coverage: {
       provider: "v8",
       include: ["src/**/*.{ts,tsx}"],

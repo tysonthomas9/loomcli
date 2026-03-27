@@ -120,7 +120,7 @@ func TestRegistry_Register_DuplicateReplacesExisting(t *testing.T) {
 // --- Startup reconciliation integration tests ---
 
 func TestStartupReconciliation_SkipsInitialWorkspace(t *testing.T) {
-	port := 59830
+	port := grabEphemeralPort(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -186,7 +186,7 @@ func TestStartupReconciliation_SkipsInitialWorkspace(t *testing.T) {
 }
 
 func TestStartupReconciliation_NilWorkspaceListFn(t *testing.T) {
-	port := 59831
+	port := grabEphemeralPort(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -238,7 +238,7 @@ func TestStartupReconciliation_NilWorkspaceListFn(t *testing.T) {
 }
 
 func TestStartupReconciliation_WorkspaceListFnReturnsError(t *testing.T) {
-	port := 59832
+	port := grabEphemeralPort(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -293,7 +293,7 @@ func TestStartupReconciliation_WorkspaceListFnReturnsError(t *testing.T) {
 }
 
 func TestStartupReconciliation_WorkspaceListFnReturnsEmptyMap(t *testing.T) {
-	port := 59833
+	port := grabEphemeralPort(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

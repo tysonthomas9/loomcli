@@ -154,7 +154,7 @@ func TestHandleCloseAllSessions_NilManager(t *testing.T) {
 func TestHandleCloseAllSessions_DeletesTabMetadata(t *testing.T) {
 	skipIfNoTmux(t)
 
-	mgr, err := NewTerminalManager("", "testcloseall", 0)
+	mgr, err := NewTerminalManager("", testRunPrefix+"-testcloseall", 0)
 	if err != nil {
 		t.Fatalf("NewTerminalManager: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestHandleCloseAllSessions_DeletesTabMetadata(t *testing.T) {
 func TestHandleCloseAllSessions_WorksWithNilStore(t *testing.T) {
 	skipIfNoTmux(t)
 
-	mgr, err := NewTerminalManager("", "testclosenil", 0)
+	mgr, err := NewTerminalManager("", testRunPrefix+"-testclosenil", 0)
 	if err != nil {
 		t.Fatalf("NewTerminalManager: %v", err)
 	}

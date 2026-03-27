@@ -5,6 +5,7 @@ package rpc
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -204,7 +205,7 @@ func TestCleanupSocketDir(t *testing.T) {
 
 	t.Run("tmp beads directory cleanup", func(t *testing.T) {
 		// Create a /tmp/beads-* directory to test the removal path
-		dirName := "beads-test-cleanup"
+		dirName := fmt.Sprintf("beads-test-cleanup-%d", os.Getpid())
 		dirPath := filepath.Join("/tmp", dirName)
 		t.Cleanup(func() { os.RemoveAll(dirPath) })
 

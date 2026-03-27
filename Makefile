@@ -40,7 +40,7 @@ test-integration-race-cover:
 # Run Go linter
 lint:
 	@echo "Running Go linter..."
-	golangci-lint run --timeout=5m
+	golangci-lint run --timeout=5m --allow-parallel-runners
 
 # Run Go tests with coverage threshold enforcement
 test-coverage: test
@@ -154,7 +154,7 @@ check-go: frontend-ensure
 	@echo "=== [3/8] Go: build ==="
 	@go build -buildvcs=false ./...
 	@echo "=== [4/8] Go: lint (golangci-lint + depguard) ==="
-	@golangci-lint run --timeout=5m
+	@golangci-lint run --timeout=5m --allow-parallel-runners
 	@echo "=== [5/8] Go: LOC check ==="
 	@./scripts/check-loc.sh 500
 	@echo "=== [6/8] Go: exec.Command guard ==="
@@ -166,7 +166,7 @@ check-go: frontend-ensure
 	@echo "=== Go quality gates PASSED ==="
 
 # Frontend-only quality gate (builds frontend first)
-check-frontend: frontend
+check-frontend: frontend-ensure
 	@echo "=== [1/5] Frontend: format check ==="
 	@cd $(FRONTEND_DIR) && npm run format:check
 	@echo "=== [2/5] Frontend: typecheck ==="
@@ -179,8 +179,28 @@ check-frontend: frontend
 	@cd $(FRONTEND_DIR) && npm run test:unit
 	@echo "=== Frontend quality gates PASSED ==="
 
-# Unified quality gate — runs all Go + frontend checks
-check: check-go check-frontend
+# Unified quality gate — runs Go + frontend checks in parallel
+check: frontend
+	@echo "=== Running Go and Frontend checks in parallel ==="
+	@go_log=$$(mktemp); fe_log=$$(mktemp); \
+	$(MAKE) check-go >"$$go_log" 2>&1 & go_pid=$$!; \
+	$(MAKE) check-frontend >"$$fe_log" 2>&1 & fe_pid=$$!; \
+	go_rc=0; fe_rc=0; \
+	wait $$go_pid || go_rc=$$?; \
+	wait $$fe_pid || fe_rc=$$?; \
+	if [ $$go_rc -ne 0 ] || [ $$fe_rc -ne 0 ]; then \
+		if [ $$go_rc -ne 0 ]; then \
+			echo ""; echo "━━━ Go output (FAILED) ━━━"; cat "$$go_log"; \
+		fi; \
+		if [ $$fe_rc -ne 0 ]; then \
+			echo ""; echo "━━━ Frontend output (FAILED) ━━━"; cat "$$fe_log"; \
+		fi; \
+		rm -f "$$go_log" "$$fe_log"; \
+		exit 1; \
+	fi; \
+	echo "=== Go quality gates PASSED ==="; \
+	echo "=== Frontend quality gates PASSED ==="; \
+	rm -f "$$go_log" "$$fe_log"
 	@echo "=== All quality gates PASSED ==="
 
 # Backward-compatible alias for 'make check'

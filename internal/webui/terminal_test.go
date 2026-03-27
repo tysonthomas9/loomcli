@@ -3,7 +3,9 @@ package webui
 import (
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -34,6 +36,21 @@ func killTmuxSession(t *testing.T, name string) {
 func tmuxSessionExists(name string) bool {
 	cmd := exec.Command("tmux", "has-session", "-t", name) //nolint:norawexec
 	return cmd.Run() == nil
+}
+
+// testRunPrefix scopes all tmux session names to this test process.
+// Embedding os.Getpid() prevents collisions when multiple make gate runs
+// execute simultaneously on the same machine (sharing the same tmux server).
+var testRunPrefix = fmt.Sprintf("tr%d", os.Getpid())
+
+// testSessionName returns a tmux session name unique to this process and test.
+func testSessionName(t *testing.T, suffix ...string) string {
+	t.Helper()
+	name := testRunPrefix + "-" + strings.ReplaceAll(t.Name(), "/", "-")
+	if len(suffix) > 0 {
+		name += "-" + suffix[0]
+	}
+	return name
 }
 
 // TestTerminalNewManagerTmuxNotFound verifies that NewTerminalManager returns
@@ -87,7 +104,7 @@ func TestTerminalAttach(t *testing.T) {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
 
-	name := "test-" + t.Name()
+	name := testSessionName(t)
 	t.Cleanup(func() {
 		mgr.Shutdown()
 		killTmuxSession(t, name)
@@ -126,7 +143,7 @@ func TestTerminalMultipleAttach(t *testing.T) {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
 
-	name := "test-" + t.Name()
+	name := testSessionName(t)
 	t.Cleanup(func() {
 		mgr.Shutdown()
 		killTmuxSession(t, name)
@@ -180,7 +197,7 @@ func TestTerminalResize(t *testing.T) {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
 
-	name := "test-" + t.Name()
+	name := testSessionName(t)
 	t.Cleanup(func() {
 		mgr.Shutdown()
 		killTmuxSession(t, name)
@@ -209,7 +226,7 @@ func TestTerminalDetach(t *testing.T) {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
 
-	name := "test-" + t.Name()
+	name := testSessionName(t)
 	t.Cleanup(func() {
 		killTmuxSession(t, name)
 	})
@@ -244,7 +261,7 @@ func TestTerminalDetachOneOfMany(t *testing.T) {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
 
-	name := "test-" + t.Name()
+	name := testSessionName(t)
 	t.Cleanup(func() {
 		mgr.Shutdown()
 		killTmuxSession(t, name)
@@ -288,8 +305,8 @@ func TestTerminalShutdown(t *testing.T) {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
 
-	name1 := "test-" + t.Name() + "-1"
-	name2 := "test-" + t.Name() + "-2"
+	name1 := testSessionName(t, "1")
+	name2 := testSessionName(t, "2")
 	t.Cleanup(func() {
 		killTmuxSession(t, name1)
 		killTmuxSession(t, name2)
@@ -364,7 +381,7 @@ func TestTerminalDefaultCommand(t *testing.T) {
 		t.Errorf("expected defaultCommand=bash, got %q", mgr.defaultCommand)
 	}
 
-	name := "test-" + t.Name()
+	name := testSessionName(t)
 	t.Cleanup(func() {
 		mgr.Shutdown()
 		killTmuxSession(t, name)
@@ -391,9 +408,9 @@ func TestTerminalMaxSessionsReached(t *testing.T) {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
 
-	name1 := "test-" + t.Name() + "-1"
-	name2 := "test-" + t.Name() + "-2"
-	name3 := "test-" + t.Name() + "-3"
+	name1 := testSessionName(t, "1")
+	name2 := testSessionName(t, "2")
+	name3 := testSessionName(t, "3")
 	t.Cleanup(func() {
 		mgr.Shutdown()
 		killTmuxSession(t, name1)
@@ -440,8 +457,8 @@ func TestTerminalSessionCount(t *testing.T) {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
 
-	name1 := "test-" + t.Name() + "-1"
-	name2 := "test-" + t.Name() + "-2"
+	name1 := testSessionName(t, "1")
+	name2 := testSessionName(t, "2")
 	t.Cleanup(func() {
 		mgr.Shutdown()
 		killTmuxSession(t, name1)
@@ -558,20 +575,23 @@ func TestKillSessionByName_NoSuchSession(t *testing.T) {
 func TestTerminalMultipleManagersWithPrefixes(t *testing.T) {
 	skipIfNoTmux(t)
 
-	mgr1, err := NewTerminalManager("", "8080", 0)
+	prefix1 := testRunPrefix + "-8080"
+	prefix2 := testRunPrefix + "-8081"
+
+	mgr1, err := NewTerminalManager("", prefix1, 0)
 	if err != nil {
-		t.Fatalf("NewTerminalManager(8080) error: %v", err)
+		t.Fatalf("NewTerminalManager(%s) error: %v", prefix1, err)
 	}
 
-	mgr2, err := NewTerminalManager("", "8081", 0)
+	mgr2, err := NewTerminalManager("", prefix2, 0)
 	if err != nil {
-		t.Fatalf("NewTerminalManager(8081) error: %v", err)
+		t.Fatalf("NewTerminalManager(%s) error: %v", prefix2, err)
 	}
 
-	sessionName := "test-isolation"
+	sessionName := "isolation"
 	t.Cleanup(func() {
-		killTmuxSession(t, "8080-"+sessionName)
-		killTmuxSession(t, "8081-"+sessionName)
+		killTmuxSession(t, prefix1+"-"+sessionName)
+		killTmuxSession(t, prefix2+"-"+sessionName)
 	})
 
 	sess1, err := mgr1.Attach(sessionName, "", 80, 24)
@@ -590,32 +610,32 @@ func TestTerminalMultipleManagersWithPrefixes(t *testing.T) {
 	if sess1.Name == sess2.Name {
 		t.Errorf("expected different tmux session names, both are %q", sess1.Name)
 	}
-	if sess1.Name != "8080-"+sessionName {
-		t.Errorf("expected session1 name %q, got %q", "8080-"+sessionName, sess1.Name)
+	if sess1.Name != prefix1+"-"+sessionName {
+		t.Errorf("expected session1 name %q, got %q", prefix1+"-"+sessionName, sess1.Name)
 	}
-	if sess2.Name != "8081-"+sessionName {
-		t.Errorf("expected session2 name %q, got %q", "8081-"+sessionName, sess2.Name)
+	if sess2.Name != prefix2+"-"+sessionName {
+		t.Errorf("expected session2 name %q, got %q", prefix2+"-"+sessionName, sess2.Name)
 	}
 
 	// Both tmux sessions should exist.
-	if !tmuxSessionExists("8080-" + sessionName) {
-		t.Error("expected 8080-test-isolation to exist")
+	if !tmuxSessionExists(prefix1 + "-" + sessionName) {
+		t.Errorf("expected %s to exist", prefix1+"-"+sessionName)
 	}
-	if !tmuxSessionExists("8081-" + sessionName) {
-		t.Error("expected 8081-test-isolation to exist")
+	if !tmuxSessionExists(prefix2 + "-" + sessionName) {
+		t.Errorf("expected %s to exist", prefix2+"-"+sessionName)
 	}
 
-	// Shutdown mgr1 — should only kill 8080 sessions.
+	// Shutdown mgr1 — should only kill prefix1 sessions.
 	if err := mgr1.Shutdown(); err != nil {
 		t.Fatalf("mgr1.Shutdown() error: %v", err)
 	}
 	time.Sleep(200 * time.Millisecond)
 
-	if tmuxSessionExists("8080-" + sessionName) {
-		t.Error("expected 8080-test-isolation to be killed after mgr1.Shutdown()")
+	if tmuxSessionExists(prefix1 + "-" + sessionName) {
+		t.Errorf("expected %s to be killed after mgr1.Shutdown()", prefix1+"-"+sessionName)
 	}
-	if !tmuxSessionExists("8081-" + sessionName) {
-		t.Error("expected 8081-test-isolation to still exist after mgr1.Shutdown()")
+	if !tmuxSessionExists(prefix2 + "-" + sessionName) {
+		t.Errorf("expected %s to still exist after mgr1.Shutdown()", prefix2+"-"+sessionName)
 	}
 
 	// Cleanup mgr2.
@@ -632,7 +652,7 @@ func TestTerminalShutdownConcurrentWithAttach(t *testing.T) {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
 
-	baseName := "test-" + t.Name()
+	baseName := testSessionName(t)
 	t.Cleanup(func() {
 		// Clean up any straggler tmux sessions.
 		for i := 0; i < 15; i++ {
@@ -690,7 +710,7 @@ func TestTerminalShutdownIdempotent(t *testing.T) {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
 
-	name := "test-" + t.Name()
+	name := testSessionName(t)
 	t.Cleanup(func() {
 		killTmuxSession(t, name)
 	})
@@ -726,7 +746,7 @@ func TestTerminalKillSessionByNameConcurrentWithAttach(t *testing.T) {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
 
-	name := "test-" + t.Name()
+	name := testSessionName(t)
 	t.Cleanup(func() {
 		mgr.Shutdown()
 		killTmuxSession(t, name)
@@ -776,7 +796,7 @@ func TestTerminalPTYWriteAfterClose(t *testing.T) {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
 
-	name := "test-" + t.Name()
+	name := testSessionName(t)
 	t.Cleanup(func() {
 		mgr.Shutdown()
 		killTmuxSession(t, name)
@@ -811,7 +831,7 @@ func TestTerminalPTYWriteCloseConcurrent(t *testing.T) {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
 
-	name := "test-" + t.Name()
+	name := testSessionName(t)
 	t.Cleanup(func() {
 		mgr.Shutdown()
 		killTmuxSession(t, name)
@@ -861,7 +881,7 @@ func TestTerminalMaxSessionsExactBoundary(t *testing.T) {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
 
-	baseName := "test-" + t.Name()
+	baseName := testSessionName(t)
 	t.Cleanup(func() {
 		mgr.Shutdown()
 		for i := 0; i < maxSess+2; i++ {
@@ -921,7 +941,7 @@ func TestTerminalMaxSessionsConcurrentAttach(t *testing.T) {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
 
-	baseName := "test-" + t.Name()
+	baseName := testSessionName(t)
 	t.Cleanup(func() {
 		mgr.Shutdown()
 		for i := 0; i < totalAttempts; i++ {
@@ -980,7 +1000,7 @@ func TestTerminalDetachDuringShutdown(t *testing.T) {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
 
-	baseName := "test-" + t.Name()
+	baseName := testSessionName(t)
 	t.Cleanup(func() {
 		for i := 0; i < 5; i++ {
 			killTmuxSession(t, fmt.Sprintf("%s-%d", baseName, i))
@@ -1088,14 +1108,16 @@ func TestFindLatestAgentSession_WithWorkspaceID(t *testing.T) {
 	agentName := "ember"
 
 	// Create a session matching the workspace naming convention.
-	sessionName := fmt.Sprintf("loom-%s-task-%s-99999", wsPrefix, agentName)
+	// Use PID as the numeric suffix to avoid collisions across parallel runs.
+	pid := os.Getpid()
+	sessionName := fmt.Sprintf("loom-%s-task-%s-%d", wsPrefix, agentName, pid)
 	if err := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "sleep", "300").Run(); err != nil { //nolint:norawexec
 		t.Fatalf("failed to create tmux session %q: %v", sessionName, err)
 	}
 	t.Cleanup(func() { killTmuxSession(t, sessionName) })
 
 	// Create a session for a different workspace to verify isolation.
-	otherSession := fmt.Sprintf("loom-bbbbcccc-task-%s-88888", agentName)
+	otherSession := fmt.Sprintf("loom-bbbbcccc-task-%s-%d", agentName, pid+1)
 	if err := exec.Command("tmux", "new-session", "-d", "-s", otherSession, "sleep", "300").Run(); err != nil { //nolint:norawexec
 		t.Fatalf("failed to create tmux session %q: %v", otherSession, err)
 	}
@@ -1128,8 +1150,9 @@ func TestFindLatestAgentSession_EmptyWorkspaceID(t *testing.T) {
 	agentName := "spark"
 
 	// Create sessions from two different workspaces.
-	session1 := fmt.Sprintf("loom-aaaabbbb-task-%s-11111", agentName)
-	session2 := fmt.Sprintf("loom-ccccdddd-task-%s-22222", agentName)
+	pid := os.Getpid()
+	session1 := fmt.Sprintf("loom-aaaabbbb-task-%s-%d", agentName, pid)
+	session2 := fmt.Sprintf("loom-ccccdddd-task-%s-%d", agentName, pid+1)
 	for _, s := range []string{session1, session2} {
 		if err := exec.Command("tmux", "new-session", "-d", "-s", s, "sleep", "300").Run(); err != nil { //nolint:norawexec
 			t.Fatalf("failed to create tmux session %q: %v", s, err)
@@ -1164,8 +1187,9 @@ func TestFindLatestAgentSession_WorkspaceIsolation(t *testing.T) {
 	wsPrefixA := shortWorkspaceID(wsA) // "11112222"
 	wsPrefixB := shortWorkspaceID(wsB) // "99998888"
 
-	sessionA := fmt.Sprintf("loom-%s-task-%s-55555", wsPrefixA, agentName)
-	sessionB := fmt.Sprintf("loom-%s-task-%s-66666", wsPrefixB, agentName)
+	pid := os.Getpid()
+	sessionA := fmt.Sprintf("loom-%s-task-%s-%d", wsPrefixA, agentName, pid)
+	sessionB := fmt.Sprintf("loom-%s-task-%s-%d", wsPrefixB, agentName, pid+1)
 	for _, s := range []string{sessionA, sessionB} {
 		if err := exec.Command("tmux", "new-session", "-d", "-s", s, "sleep", "300").Run(); err != nil { //nolint:norawexec
 			t.Fatalf("failed to create tmux session %q: %v", s, err)

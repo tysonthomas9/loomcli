@@ -15,7 +15,7 @@ func TestScheduleKill_FiresAfterDelay(t *testing.T) {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
 
-	name := "test-" + t.Name()
+	name := testSessionName(t)
 	t.Cleanup(func() {
 		mgr.Shutdown()
 		killTmuxSession(t, name)
@@ -50,7 +50,7 @@ func TestCancelPendingKill_CancelsPendingKill(t *testing.T) {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
 
-	name := "test-" + t.Name()
+	name := testSessionName(t)
 	t.Cleanup(func() {
 		mgr.Shutdown()
 		killTmuxSession(t, name)
@@ -104,7 +104,7 @@ func TestAttach_CancelsPendingKill(t *testing.T) {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
 
-	name := "test-" + t.Name()
+	name := testSessionName(t)
 	t.Cleanup(func() {
 		mgr.Shutdown()
 		killTmuxSession(t, name)
@@ -153,7 +153,7 @@ func TestScheduleKill_ReplacesExistingPending(t *testing.T) {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
 
-	name := "test-" + t.Name()
+	name := testSessionName(t)
 	t.Cleanup(func() {
 		mgr.Shutdown()
 		killTmuxSession(t, name)
@@ -192,7 +192,7 @@ func TestHasActiveConnections(t *testing.T) {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
 
-	name := "test-" + t.Name()
+	name := testSessionName(t)
 	t.Cleanup(func() {
 		mgr.Shutdown()
 		killTmuxSession(t, name)
@@ -233,7 +233,7 @@ func TestScheduleKill_DoesNotKillWithActiveConnections(t *testing.T) {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
 
-	name := "test-" + t.Name()
+	name := testSessionName(t)
 	t.Cleanup(func() {
 		mgr.Shutdown()
 		killTmuxSession(t, name)

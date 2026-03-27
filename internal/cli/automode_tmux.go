@@ -107,7 +107,11 @@ func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
 		available, err := hasAvailableTasks()
 		if err != nil {
 			fmt.Printf("[auto] Error checking tasks: %v\n", err)
-			time.Sleep(5 * time.Second)
+			if interruptibleSleep(5*time.Second, shutdown) {
+				cleanupTmuxSession(sessionName)
+				printTmuxSummary(taskCount)
+				return
+			}
 			continue
 		}
 		if !available {
@@ -142,7 +146,11 @@ func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
 
 		if err := startTmuxSession(sessionName, opts, logFile); err != nil {
 			fmt.Printf("[auto] Failed to start session: %v\n", err)
-			time.Sleep(5 * time.Second)
+			if interruptibleSleep(5*time.Second, shutdown) {
+				cleanupTmuxSession(sessionName)
+				printTmuxSummary(taskCount)
+				return
+			}
 			continue
 		}
 
