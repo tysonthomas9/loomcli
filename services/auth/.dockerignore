@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.env
+.env.local
+*.db
+*.db-wal
+*.db-shm
+.git/
+.gitignore
+README.md
+DEPLOYMENT.md
+docker-compose.yml
+docker-compose.prod.yml
+Caddyfile
+.dockerignore
