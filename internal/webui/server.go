@@ -337,8 +337,8 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		issueTabStore = issuetabs.NewStore(itClient, initialWorkspaceID, nil)
 		defer func() { _ = issueTabStore.Close() }()
 		slog.Info("issue tab store initialized", "redis_address", config.FleetRedis.Address)
+		_, _ = issueTabStore.MigrateLegacyKeys(ctx)
 	}
-
 	var sessionHistoryStore *sessionhistory.Store
 	if config.FleetRedis != nil {
 		shClient := fleet.NewRedisClient(config.FleetRedis.Address, config.FleetRedis.Password, 0)

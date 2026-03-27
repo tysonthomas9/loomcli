@@ -340,6 +340,119 @@ func TestIsolation_DifferentWorkspaces(t *testing.T) {
 	}
 }
 
+func TestMigrateLegacyKeys(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { rdb.Close() })
+
+	// Insert 3 keys in old "issue:tabs:{id}" format directly into miniredis.
+	mr.Set("issue:tabs:PROJ-1", `{"issue_id":"PROJ-1","tabs":[{"id":"details","type":"details","label":"Details","sort_order":0}],"active_tab_id":"details","updated_at":"2025-01-15T10:00:00Z"}`)
+	mr.Set("issue:tabs:PROJ-2", `{"issue_id":"PROJ-2","tabs":[{"id":"logs","type":"logs","label":"Logs","sort_order":0}],"active_tab_id":"logs","updated_at":"2025-01-16T10:00:00Z"}`)
+	mr.Set("issue:tabs:PROJ-3", `{"issue_id":"PROJ-3","tabs":[{"id":"details","type":"details","label":"Details","sort_order":0},{"id":"terminal-s1","type":"terminal","label":"Term","session_name":"s1","sort_order":1}],"active_tab_id":"terminal-s1","updated_at":"2025-01-17T10:00:00Z"}`)
+
+	store := NewStore(rdb, "my-ws", nil)
+	ctx := context.Background()
+
+	count, err := store.MigrateLegacyKeys(ctx)
+	if err != nil {
+		t.Fatalf("MigrateLegacyKeys: %v", err)
+	}
+	if count != 3 {
+		t.Errorf("migrated count = %d, want 3", count)
+	}
+
+	// Verify all 3 now exist under the new namespaced key format via store.Get.
+	for _, issueID := range []string{"PROJ-1", "PROJ-2", "PROJ-3"} {
+		got, err := store.Get(ctx, issueID)
+		if err != nil {
+			t.Fatalf("Get(%s): %v", issueID, err)
+		}
+		if got == nil {
+			t.Errorf("Get(%s): expected state, got nil", issueID)
+		}
+	}
+
+	// Verify old keys are gone.
+	for _, oldKey := range []string{"issue:tabs:PROJ-1", "issue:tabs:PROJ-2", "issue:tabs:PROJ-3"} {
+		if mr.Exists(oldKey) {
+			t.Errorf("old key %q should no longer exist", oldKey)
+		}
+	}
+}
+
+func TestMigrateLegacyKeys_Idempotent(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { rdb.Close() })
+
+	mr.Set("issue:tabs:PROJ-1", `{"issue_id":"PROJ-1","tabs":[{"id":"details","type":"details","label":"Details","sort_order":0}],"active_tab_id":"details","updated_at":"2025-01-15T10:00:00Z"}`)
+
+	store := NewStore(rdb, "my-ws", nil)
+	ctx := context.Background()
+
+	count1, err := store.MigrateLegacyKeys(ctx)
+	if err != nil {
+		t.Fatalf("MigrateLegacyKeys (first run): %v", err)
+	}
+	if count1 != 1 {
+		t.Errorf("first run: migrated count = %d, want 1", count1)
+	}
+
+	count2, err := store.MigrateLegacyKeys(ctx)
+	if err != nil {
+		t.Fatalf("MigrateLegacyKeys (second run): %v", err)
+	}
+	if count2 != 0 {
+		t.Errorf("second run: migrated count = %d, want 0", count2)
+	}
+}
+
+func TestMigrateLegacyKeys_SkipsNamespacedKeys(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { rdb.Close() })
+
+	// Insert keys already in ws:... format directly into miniredis.
+	mr.Set("ws:other-ws:issue:tabs:PROJ-1", `{"issue_id":"PROJ-1","tabs":[],"active_tab_id":"details","updated_at":"2025-01-15T10:00:00Z"}`)
+	mr.Set("ws:other-ws:issue:tabs:PROJ-2", `{"issue_id":"PROJ-2","tabs":[],"active_tab_id":"details","updated_at":"2025-01-16T10:00:00Z"}`)
+
+	store := NewStore(rdb, "my-ws", nil)
+	ctx := context.Background()
+
+	count, err := store.MigrateLegacyKeys(ctx)
+	if err != nil {
+		t.Fatalf("MigrateLegacyKeys: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("migrated count = %d, want 0 (namespaced keys should be skipped)", count)
+	}
+
+	// Verify original keys are untouched.
+	if !mr.Exists("ws:other-ws:issue:tabs:PROJ-1") {
+		t.Error("ws:other-ws:issue:tabs:PROJ-1 should still exist")
+	}
+	if !mr.Exists("ws:other-ws:issue:tabs:PROJ-2") {
+		t.Error("ws:other-ws:issue:tabs:PROJ-2 should still exist")
+	}
+}
+
+func TestMigrateLegacyKeys_EmptyDB(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { rdb.Close() })
+
+	store := NewStore(rdb, "my-ws", nil)
+	ctx := context.Background()
+
+	count, err := store.MigrateLegacyKeys(ctx)
+	if err != nil {
+		t.Fatalf("MigrateLegacyKeys: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("migrated count = %d, want 0", count)
+	}
+}
+
 func TestNewStore_PanicsOnEmptyWorkspaceID(t *testing.T) {
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
