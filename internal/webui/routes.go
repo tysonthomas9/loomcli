@@ -72,11 +72,16 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 	if fleetEnabled && fleetRegistry != nil {
 		initialStore, _ := fleetRegistry.Get(initialWorkspaceID)
 		mux.HandleFunc("POST /api/fleet/register", handleFleetRegister(initialStore, tokenCfg, fleetRegCfg))
+		// Legacy claim injects initialWorkspaceID so multiPool.Get(ctx) resolves correctly.
+		legacyClaim := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := WithWorkspace(r.Context(), initialWorkspaceID)
+			handleFleetClaim(multiPool, claimMetrics).ServeHTTP(w, r.WithContext(ctx))
+		})
 		if tokenCfg != nil && len(tokenCfg.SigningKey) > 0 {
 			fleetAuth := NewFleetAuthMiddleware(tokenCfg.SigningKey)
-			mux.Handle("POST /api/fleet/claim", fleetAuth(handleFleetClaim(pool, claimMetrics)))
+			mux.Handle("POST /api/fleet/claim", fleetAuth(legacyClaim))
 		} else {
-			mux.HandleFunc("POST /api/fleet/claim", handleFleetClaim(pool, claimMetrics))
+			mux.Handle("POST /api/fleet/claim", legacyClaim)
 		}
 		mux.HandleFunc("POST /api/fleet/done/{id}", handleFleetDone(initialStore))
 		if tokenCfg != nil && len(tokenCfg.SigningKey) > 0 {

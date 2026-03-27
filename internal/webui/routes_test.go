@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 )
 
 // TestHandleStats_NilPool verifies that handleStats returns 503 when pool is nil.
@@ -1761,6 +1762,62 @@ func TestSetupRoutes_FleetEndpoints_AllRoutes(t *testing.T) {
 				t.Errorf("GET %s: Content-Type = %q, want %q", path, ct, "application/json")
 			}
 		})
+	}
+}
+
+// --- Legacy fleet claim workspace context injection test ---
+
+// capturePool records whether Get was called — used to verify the legacy claim
+// route injects a workspace into the context so that MultiPool.Get reaches the
+// underlying pool instead of failing with ErrNoWorkspaceInContext.
+type capturePool struct {
+	getCalled bool
+}
+
+func (p *capturePool) Get(_ context.Context) (*rpc.Client, error) {
+	p.getCalled = true
+	return nil, errors.New("capture pool: not connected")
+}
+func (p *capturePool) Put(_ *rpc.Client)       {}
+func (p *capturePool) Discard(_ *rpc.Client)   {}
+func (p *capturePool) Stats() daemon.PoolStats { return daemon.PoolStats{} }
+func (p *capturePool) Close() error            { return nil }
+
+// TestSetupRoutes_LegacyFleetClaimInjectsWorkspaceContext verifies that the
+// legacy POST /api/fleet/claim route injects initialWorkspaceID into the request
+// context so that MultiPool.Get resolves to the correct workspace pool.
+func TestSetupRoutes_LegacyFleetClaimInjectsWorkspaceContext(t *testing.T) {
+	cp := &capturePool{}
+	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 1)
+	_ = multiPool.Register("test-ws", cp)
+
+	registry, err := fleet.NewStoreRegistry(fleet.RedisConfig{Address: "localhost:0"}, fleet.TimeoutConfig{}, nil)
+	if err != nil {
+		t.Fatalf("failed to create store registry: %v", err)
+	}
+	defer registry.Close()
+
+	mux := http.NewServeMux()
+	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
+	setupRoutes(mux, nil, multiPool, nil, nil, nil, nil, registry, nil, "", false, nil, nil, nil, true, false, "", "", nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, wsExistsFn, "test-ws")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/claim", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	// The key assertion: capturePool.Get must have been called, proving that
+	// MultiPool.Get resolved the workspace from context (injected by the legacy
+	// route wrapper) and dispatched to the underlying pool. Without the context
+	// injection, MultiPool.Get would fail with ErrNoWorkspaceInContext before
+	// ever reaching capturePool.
+	if !cp.getCalled {
+		t.Fatal("expected capturePool.Get to be called — legacy route did not inject workspace into context")
+	}
+
+	// The handler should return 503 "daemon not available" since capturePool
+	// returns an error from Get.
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusServiceUnavailable)
 	}
 }
 
