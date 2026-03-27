@@ -5185,7 +5185,7 @@ func TestShortWorkspaceID(t *testing.T) {
 		{
 			name: "empty string returns default",
 			id:   "",
-			want: "default",
+			want: "_default",
 		},
 		{
 			name: "full UUID returns first 8 chars",

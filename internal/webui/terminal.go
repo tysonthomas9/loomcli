@@ -345,10 +345,10 @@ func (m *TerminalManager) listTmuxSessions() ([]tmuxSessionMeta, error) {
 }
 
 // shortWorkspaceID returns the first 8 characters of a workspace UUID for use
-// in tmux session name matching. Returns "default" if the ID is empty.
+// in tmux session name matching. Returns "_default" if the ID is empty.
 func shortWorkspaceID(id string) string {
 	if id == "" {
-		return "default"
+		return "_default"
 	}
 	if len(id) > 8 {
 		return id[:8]
