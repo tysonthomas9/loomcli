@@ -490,11 +490,9 @@ func recordSessionUsage(store *usage.Store, collector *usage.Collector, worktree
 // captureHEADRef returns the current HEAD ref for the worktree.
 // Returns empty string on error (ComputeDiffStats handles this gracefully).
 func captureHEADRef(worktreePath string) string {
-	cmd := exec.Command("git", "rev-parse", "HEAD")
-	cmd.Dir = worktreePath
-	out, err := cmd.Output()
+	out, err := RunGitCommand(worktreePath, "rev-parse", "HEAD")
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(out))
+	return strings.TrimSpace(out)
 }
