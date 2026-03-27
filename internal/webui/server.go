@@ -224,7 +224,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 			if _, err := os.Stat(scrollbackPath); err != nil {
 				scrollbackPath = ""
 			}
-			if err := store.Complete(context.Background(), issueID, sessionName, scrollbackPath); err != nil {
+			if err := store.Complete(context.Background(), initialWorkspaceID, issueID, sessionName, scrollbackPath); err != nil { // TODO(T41): derive workspace from session metadata
 				slog.Warn("failed to complete session history", "session", sessionName, "err", err)
 			}
 		})
@@ -334,19 +334,19 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	var issueTabStore *issuetabs.Store
 	if config.FleetRedis != nil {
 		itClient := fleet.NewRedisClient(config.FleetRedis.Address, config.FleetRedis.Password, 0)
-		issueTabStore = issuetabs.NewStore(itClient, initialWorkspaceID, nil)
+		issueTabStore = issuetabs.NewStore(itClient, nil)
 		defer func() { _ = issueTabStore.Close() }()
 		slog.Info("issue tab store initialized", "redis_address", config.FleetRedis.Address)
-		_, _ = issueTabStore.MigrateLegacyKeys(ctx)
+		_, _ = issueTabStore.MigrateLegacyKeys(ctx, initialWorkspaceID)
 	}
 	var sessionHistoryStore *sessionhistory.Store
 	if config.FleetRedis != nil {
 		shClient := fleet.NewRedisClient(config.FleetRedis.Address, config.FleetRedis.Password, 0)
-		sessionHistoryStore = sessionhistory.NewStore(shClient, initialWorkspaceID, nil)
+		sessionHistoryStore = sessionhistory.NewStore(shClient, nil)
 		defer func() { _ = sessionHistoryStore.Close() }()
 		sessionHistoryStoreRef = sessionHistoryStore
 		slog.Info("session history store initialized", "redis_address", config.FleetRedis.Address)
-		if n, err := sessionHistoryStore.MigrateLegacyKeys(ctx); err == nil && n > 0 {
+		if n, err := sessionHistoryStore.MigrateLegacyKeys(ctx, initialWorkspaceID); err == nil && n > 0 {
 			slog.Info("session history legacy keys migrated", "count", n)
 		}
 	}

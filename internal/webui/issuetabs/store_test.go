@@ -9,12 +9,14 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+const testWorkspaceID = "test-ws-uuid"
+
 func setupTest(t *testing.T) (*Store, *miniredis.Miniredis) {
 	t.Helper()
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { rdb.Close() })
-	return NewStore(rdb, "test-ws-uuid", nil), mr
+	return NewStore(rdb, nil), mr
 }
 
 func TestSaveAndGet_RoundTrip(t *testing.T) {
@@ -31,11 +33,11 @@ func TestSaveAndGet_RoundTrip(t *testing.T) {
 		ActiveTabID: "terminal-sess1",
 	}
 
-	if err := store.Save(ctx, state); err != nil {
+	if err := store.Save(ctx, testWorkspaceID, state); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
-	got, err := store.Get(ctx, "PROJ-123")
+	got, err := store.Get(ctx, testWorkspaceID, "PROJ-123")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -70,7 +72,7 @@ func TestSaveAndGet_RoundTrip(t *testing.T) {
 
 func TestGet_NotFound(t *testing.T) {
 	store, _ := setupTest(t)
-	state, err := store.Get(context.Background(), "nonexistent")
+	state, err := store.Get(context.Background(), testWorkspaceID, "nonexistent")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -81,7 +83,7 @@ func TestGet_NotFound(t *testing.T) {
 
 func TestGet_EmptyIssueID(t *testing.T) {
 	store, _ := setupTest(t)
-	_, err := store.Get(context.Background(), "")
+	_, err := store.Get(context.Background(), testWorkspaceID, "")
 	if err == nil {
 		t.Fatal("expected error for empty issue ID")
 	}
@@ -89,7 +91,7 @@ func TestGet_EmptyIssueID(t *testing.T) {
 
 func TestSave_EmptyIssueID(t *testing.T) {
 	store, _ := setupTest(t)
-	err := store.Save(context.Background(), &IssueTabState{
+	err := store.Save(context.Background(), testWorkspaceID, &IssueTabState{
 		IssueID: "",
 		Tabs:    []IssueTab{},
 	})
@@ -108,11 +110,11 @@ func TestSave_SetsTTL(t *testing.T) {
 		ActiveTabID: "details",
 	}
 
-	if err := store.Save(ctx, state); err != nil {
+	if err := store.Save(ctx, testWorkspaceID, state); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
-	redisTTL := mr.TTL(store.issueKey("TTL-TEST"))
+	redisTTL := mr.TTL(issueKey(testWorkspaceID, "TTL-TEST"))
 	// TTL should be approximately 24 hours (allow some margin)
 	expected := 24 * time.Hour
 	if redisTTL < expected-time.Minute || redisTTL > expected+time.Minute {
@@ -130,15 +132,15 @@ func TestDelete(t *testing.T) {
 		ActiveTabID: "details",
 	}
 
-	if err := store.Save(ctx, state); err != nil {
+	if err := store.Save(ctx, testWorkspaceID, state); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
-	if err := store.Delete(ctx, "DEL-TEST"); err != nil {
+	if err := store.Delete(ctx, testWorkspaceID, "DEL-TEST"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	got, err := store.Get(ctx, "DEL-TEST")
+	got, err := store.Get(ctx, testWorkspaceID, "DEL-TEST")
 	if err != nil {
 		t.Fatalf("Get after delete: %v", err)
 	}
@@ -149,7 +151,7 @@ func TestDelete(t *testing.T) {
 
 func TestDelete_EmptyIssueID(t *testing.T) {
 	store, _ := setupTest(t)
-	err := store.Delete(context.Background(), "")
+	err := store.Delete(context.Background(), testWorkspaceID, "")
 	if err == nil {
 		t.Fatal("expected error for empty issue ID")
 	}
@@ -287,8 +289,7 @@ func TestIsolation_DifferentWorkspaces(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { rdb.Close() })
 
-	storeA := NewStore(rdb, "ws-A", nil)
-	storeB := NewStore(rdb, "ws-B", nil)
+	store := NewStore(rdb, nil)
 	ctx := context.Background()
 
 	stateA := &IssueTabState{
@@ -302,18 +303,18 @@ func TestIsolation_DifferentWorkspaces(t *testing.T) {
 		ActiveTabID: "logs",
 	}
 
-	if err := storeA.Save(ctx, stateA); err != nil {
+	if err := store.Save(ctx, "ws-A", stateA); err != nil {
 		t.Fatalf("Save ws-A: %v", err)
 	}
-	if err := storeB.Save(ctx, stateB); err != nil {
+	if err := store.Save(ctx, "ws-B", stateB); err != nil {
 		t.Fatalf("Save ws-B: %v", err)
 	}
 
-	gotA, err := storeA.Get(ctx, "PROJ-1")
+	gotA, err := store.Get(ctx, "ws-A", "PROJ-1")
 	if err != nil {
 		t.Fatalf("Get ws-A: %v", err)
 	}
-	gotB, err := storeB.Get(ctx, "PROJ-1")
+	gotB, err := store.Get(ctx, "ws-B", "PROJ-1")
 	if err != nil {
 		t.Fatalf("Get ws-B: %v", err)
 	}
@@ -350,10 +351,10 @@ func TestMigrateLegacyKeys(t *testing.T) {
 	mr.Set("issue:tabs:PROJ-2", `{"issue_id":"PROJ-2","tabs":[{"id":"logs","type":"logs","label":"Logs","sort_order":0}],"active_tab_id":"logs","updated_at":"2025-01-16T10:00:00Z"}`)
 	mr.Set("issue:tabs:PROJ-3", `{"issue_id":"PROJ-3","tabs":[{"id":"details","type":"details","label":"Details","sort_order":0},{"id":"terminal-s1","type":"terminal","label":"Term","session_name":"s1","sort_order":1}],"active_tab_id":"terminal-s1","updated_at":"2025-01-17T10:00:00Z"}`)
 
-	store := NewStore(rdb, "my-ws", nil)
+	store := NewStore(rdb, nil)
 	ctx := context.Background()
 
-	count, err := store.MigrateLegacyKeys(ctx)
+	count, err := store.MigrateLegacyKeys(ctx, "my-ws")
 	if err != nil {
 		t.Fatalf("MigrateLegacyKeys: %v", err)
 	}
@@ -362,13 +363,13 @@ func TestMigrateLegacyKeys(t *testing.T) {
 	}
 
 	// Verify all 3 now exist under the new namespaced key format via store.Get.
-	for _, issueID := range []string{"PROJ-1", "PROJ-2", "PROJ-3"} {
-		got, err := store.Get(ctx, issueID)
+	for _, id := range []string{"PROJ-1", "PROJ-2", "PROJ-3"} {
+		got, err := store.Get(ctx, "my-ws", id)
 		if err != nil {
-			t.Fatalf("Get(%s): %v", issueID, err)
+			t.Fatalf("Get(%s): %v", id, err)
 		}
 		if got == nil {
-			t.Errorf("Get(%s): expected state, got nil", issueID)
+			t.Errorf("Get(%s): expected state, got nil", id)
 		}
 	}
 
@@ -387,10 +388,10 @@ func TestMigrateLegacyKeys_Idempotent(t *testing.T) {
 
 	mr.Set("issue:tabs:PROJ-1", `{"issue_id":"PROJ-1","tabs":[{"id":"details","type":"details","label":"Details","sort_order":0}],"active_tab_id":"details","updated_at":"2025-01-15T10:00:00Z"}`)
 
-	store := NewStore(rdb, "my-ws", nil)
+	store := NewStore(rdb, nil)
 	ctx := context.Background()
 
-	count1, err := store.MigrateLegacyKeys(ctx)
+	count1, err := store.MigrateLegacyKeys(ctx, "my-ws")
 	if err != nil {
 		t.Fatalf("MigrateLegacyKeys (first run): %v", err)
 	}
@@ -398,7 +399,7 @@ func TestMigrateLegacyKeys_Idempotent(t *testing.T) {
 		t.Errorf("first run: migrated count = %d, want 1", count1)
 	}
 
-	count2, err := store.MigrateLegacyKeys(ctx)
+	count2, err := store.MigrateLegacyKeys(ctx, "my-ws")
 	if err != nil {
 		t.Fatalf("MigrateLegacyKeys (second run): %v", err)
 	}
@@ -416,10 +417,10 @@ func TestMigrateLegacyKeys_SkipsNamespacedKeys(t *testing.T) {
 	mr.Set("ws:other-ws:issue:tabs:PROJ-1", `{"issue_id":"PROJ-1","tabs":[],"active_tab_id":"details","updated_at":"2025-01-15T10:00:00Z"}`)
 	mr.Set("ws:other-ws:issue:tabs:PROJ-2", `{"issue_id":"PROJ-2","tabs":[],"active_tab_id":"details","updated_at":"2025-01-16T10:00:00Z"}`)
 
-	store := NewStore(rdb, "my-ws", nil)
+	store := NewStore(rdb, nil)
 	ctx := context.Background()
 
-	count, err := store.MigrateLegacyKeys(ctx)
+	count, err := store.MigrateLegacyKeys(ctx, "my-ws")
 	if err != nil {
 		t.Fatalf("MigrateLegacyKeys: %v", err)
 	}
@@ -441,29 +442,14 @@ func TestMigrateLegacyKeys_EmptyDB(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { rdb.Close() })
 
-	store := NewStore(rdb, "my-ws", nil)
+	store := NewStore(rdb, nil)
 	ctx := context.Background()
 
-	count, err := store.MigrateLegacyKeys(ctx)
+	count, err := store.MigrateLegacyKeys(ctx, "my-ws")
 	if err != nil {
 		t.Fatalf("MigrateLegacyKeys: %v", err)
 	}
 	if count != 0 {
 		t.Errorf("migrated count = %d, want 0", count)
 	}
-}
-
-func TestNewStore_PanicsOnEmptyWorkspaceID(t *testing.T) {
-	mr := miniredis.RunT(t)
-	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	t.Cleanup(func() { rdb.Close() })
-
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Fatal("expected panic for empty workspaceID, but did not panic")
-		}
-	}()
-
-	NewStore(rdb, "", nil)
 }

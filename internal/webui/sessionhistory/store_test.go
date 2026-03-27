@@ -9,12 +9,14 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+const testWorkspaceID = "test-ws-uuid"
+
 func setupTest(t *testing.T) (*Store, *miniredis.Miniredis) {
 	t.Helper()
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { rdb.Close() })
-	return NewStore(rdb, "test-ws-uuid", nil), mr
+	return NewStore(rdb, nil), mr
 }
 
 func TestAddAndList_RoundTrip(t *testing.T) {
@@ -31,11 +33,11 @@ func TestAddAndList_RoundTrip(t *testing.T) {
 		StartedAt:   time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC),
 	}
 
-	if err := store.Add(ctx, record); err != nil {
+	if err := store.Add(ctx, testWorkspaceID, record); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 
-	records, err := store.List(ctx, "proj-abc.1")
+	records, err := store.List(ctx, testWorkspaceID, "proj-abc.1")
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -66,7 +68,7 @@ func TestList_EmptySliceForUnknownIssue(t *testing.T) {
 	store, _ := setupTest(t)
 	ctx := context.Background()
 
-	records, err := store.List(ctx, "unknown-issue.99")
+	records, err := store.List(ctx, testWorkspaceID, "unknown-issue.99")
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -114,12 +116,12 @@ func TestList_SortedByMostRecentFirst(t *testing.T) {
 	}
 
 	for _, r := range records {
-		if err := store.Add(ctx, r); err != nil {
+		if err := store.Add(ctx, testWorkspaceID, r); err != nil {
 			t.Fatalf("Add(%s): %v", r.ID, err)
 		}
 	}
 
-	got, err := store.List(ctx, "proj.1")
+	got, err := store.List(ctx, testWorkspaceID, "proj.1")
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -153,16 +155,16 @@ func TestComplete_MarksActiveSession(t *testing.T) {
 		StartedAt:   time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC),
 	}
 
-	if err := store.Add(ctx, record); err != nil {
+	if err := store.Add(ctx, testWorkspaceID, record); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 
 	scrollbackPath := "/home/user/.loom/session-scrollback/issue-proj-1.log"
-	if err := store.Complete(ctx, "proj.1", "issue-proj-1", scrollbackPath); err != nil {
+	if err := store.Complete(ctx, testWorkspaceID, "proj.1", "issue-proj-1", scrollbackPath); err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
 
-	records, err := store.List(ctx, "proj.1")
+	records, err := store.List(ctx, testWorkspaceID, "proj.1")
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -198,18 +200,18 @@ func TestComplete_NoOpWhenNoMatchingActiveSession(t *testing.T) {
 		StartedAt:   time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC),
 	}
 
-	if err := store.Add(ctx, record); err != nil {
+	if err := store.Add(ctx, testWorkspaceID, record); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 
 	// Complete for a session name that doesn't match any active session.
-	err := store.Complete(ctx, "proj.1", "nonexistent-session", "/tmp/scrollback.log")
+	err := store.Complete(ctx, testWorkspaceID, "proj.1", "nonexistent-session", "/tmp/scrollback.log")
 	if err != nil {
 		t.Fatalf("Complete should be no-op, got error: %v", err)
 	}
 
 	// Verify the existing record was not modified.
-	records, err := store.List(ctx, "proj.1")
+	records, err := store.List(ctx, testWorkspaceID, "proj.1")
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -226,7 +228,7 @@ func TestComplete_NoOpForEmptyHistory(t *testing.T) {
 	ctx := context.Background()
 
 	// Complete for an issue with no history at all.
-	err := store.Complete(ctx, "proj.1", "issue-proj-1", "/tmp/scrollback.log")
+	err := store.Complete(ctx, testWorkspaceID, "proj.1", "issue-proj-1", "/tmp/scrollback.log")
 	if err != nil {
 		t.Fatalf("Complete on empty history should be no-op, got error: %v", err)
 	}
@@ -244,7 +246,7 @@ func TestAdd_InvalidIssueID(t *testing.T) {
 		Status:      "active",
 	}
 
-	err := store.Add(ctx, record)
+	err := store.Add(ctx, testWorkspaceID, record)
 	if err == nil {
 		t.Fatal("expected error for empty issue ID")
 	}
@@ -252,7 +254,7 @@ func TestAdd_InvalidIssueID(t *testing.T) {
 
 func TestList_InvalidIssueID(t *testing.T) {
 	store, _ := setupTest(t)
-	_, err := store.List(context.Background(), "")
+	_, err := store.List(context.Background(), testWorkspaceID, "")
 	if err == nil {
 		t.Fatal("expected error for empty issue ID")
 	}
@@ -260,7 +262,7 @@ func TestList_InvalidIssueID(t *testing.T) {
 
 func TestComplete_InvalidIssueID(t *testing.T) {
 	store, _ := setupTest(t)
-	err := store.Complete(context.Background(), "", "session", "/tmp/scrollback.log")
+	err := store.Complete(context.Background(), testWorkspaceID, "", "session", "/tmp/scrollback.log")
 	if err == nil {
 		t.Fatal("expected error for empty issue ID")
 	}
@@ -293,8 +295,7 @@ func TestIsolation_DifferentWorkspaces(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { rdb.Close() })
 
-	storeA := NewStore(rdb, "ws-A", nil)
-	storeB := NewStore(rdb, "ws-B", nil)
+	store := NewStore(rdb, nil)
 	ctx := context.Background()
 
 	recA := SessionRecord{
@@ -316,18 +317,18 @@ func TestIsolation_DifferentWorkspaces(t *testing.T) {
 		StartedAt:   time.Date(2025, 2, 20, 14, 0, 0, 0, time.UTC),
 	}
 
-	if err := storeA.Add(ctx, recA); err != nil {
+	if err := store.Add(ctx, "ws-A", recA); err != nil {
 		t.Fatalf("Add ws-A: %v", err)
 	}
-	if err := storeB.Add(ctx, recB); err != nil {
+	if err := store.Add(ctx, "ws-B", recB); err != nil {
 		t.Fatalf("Add ws-B: %v", err)
 	}
 
-	gotA, err := storeA.List(ctx, "proj.1")
+	gotA, err := store.List(ctx, "ws-A", "proj.1")
 	if err != nil {
 		t.Fatalf("List ws-A: %v", err)
 	}
-	gotB, err := storeB.List(ctx, "proj.1")
+	gotB, err := store.List(ctx, "ws-B", "proj.1")
 	if err != nil {
 		t.Fatalf("List ws-B: %v", err)
 	}
@@ -363,10 +364,10 @@ func TestMigrateLegacyKeys(t *testing.T) {
 	mr.Set("issue:sessions:proj.2", `{"issue_id":"proj.2","sessions":[{"id":"s2","session_name":"sess2","issue_id":"proj.2","backend":"shell","status":"completed","launcher":"start-work","started_at":"2025-01-16T10:00:00Z"}]}`)
 	mr.Set("issue:sessions:proj.3", `{"issue_id":"proj.3","sessions":[{"id":"s3","session_name":"sess3","issue_id":"proj.3","backend":"claude","status":"active","launcher":"user","started_at":"2025-01-17T10:00:00Z"}]}`)
 
-	store := NewStore(rdb, "my-ws", nil)
+	store := NewStore(rdb, nil)
 	ctx := context.Background()
 
-	count, err := store.MigrateLegacyKeys(ctx)
+	count, err := store.MigrateLegacyKeys(ctx, "my-ws")
 	if err != nil {
 		t.Fatalf("MigrateLegacyKeys: %v", err)
 	}
@@ -375,13 +376,13 @@ func TestMigrateLegacyKeys(t *testing.T) {
 	}
 
 	// Verify all 3 now exist under the new namespaced key format.
-	for _, issueID := range []string{"proj.1", "proj.2", "proj.3"} {
-		records, err := store.List(ctx, issueID)
+	for _, id := range []string{"proj.1", "proj.2", "proj.3"} {
+		records, err := store.List(ctx, "my-ws", id)
 		if err != nil {
-			t.Fatalf("List(%s): %v", issueID, err)
+			t.Fatalf("List(%s): %v", id, err)
 		}
 		if len(records) != 1 {
-			t.Errorf("List(%s): len(records) = %d, want 1", issueID, len(records))
+			t.Errorf("List(%s): len(records) = %d, want 1", id, len(records))
 		}
 	}
 
@@ -400,10 +401,10 @@ func TestMigrateLegacyKeys_Idempotent(t *testing.T) {
 
 	mr.Set("issue:sessions:proj.1", `{"issue_id":"proj.1","sessions":[{"id":"s1","session_name":"sess1","issue_id":"proj.1","backend":"claude","status":"active","launcher":"user","started_at":"2025-01-15T10:00:00Z"}]}`)
 
-	store := NewStore(rdb, "my-ws", nil)
+	store := NewStore(rdb, nil)
 	ctx := context.Background()
 
-	count1, err := store.MigrateLegacyKeys(ctx)
+	count1, err := store.MigrateLegacyKeys(ctx, "my-ws")
 	if err != nil {
 		t.Fatalf("MigrateLegacyKeys (first run): %v", err)
 	}
@@ -411,7 +412,7 @@ func TestMigrateLegacyKeys_Idempotent(t *testing.T) {
 		t.Errorf("first run: migrated count = %d, want 1", count1)
 	}
 
-	count2, err := store.MigrateLegacyKeys(ctx)
+	count2, err := store.MigrateLegacyKeys(ctx, "my-ws")
 	if err != nil {
 		t.Fatalf("MigrateLegacyKeys (second run): %v", err)
 	}
@@ -429,10 +430,10 @@ func TestMigrateLegacyKeys_SkipsNamespacedKeys(t *testing.T) {
 	mr.Set("ws:other-ws:issue:sessions:proj.1", `{"issue_id":"proj.1","sessions":[]}`)
 	mr.Set("ws:other-ws:issue:sessions:proj.2", `{"issue_id":"proj.2","sessions":[]}`)
 
-	store := NewStore(rdb, "my-ws", nil)
+	store := NewStore(rdb, nil)
 	ctx := context.Background()
 
-	count, err := store.MigrateLegacyKeys(ctx)
+	count, err := store.MigrateLegacyKeys(ctx, "my-ws")
 	if err != nil {
 		t.Fatalf("MigrateLegacyKeys: %v", err)
 	}
@@ -454,29 +455,14 @@ func TestMigrateLegacyKeys_EmptyDB(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { rdb.Close() })
 
-	store := NewStore(rdb, "my-ws", nil)
+	store := NewStore(rdb, nil)
 	ctx := context.Background()
 
-	count, err := store.MigrateLegacyKeys(ctx)
+	count, err := store.MigrateLegacyKeys(ctx, "my-ws")
 	if err != nil {
 		t.Fatalf("MigrateLegacyKeys: %v", err)
 	}
 	if count != 0 {
 		t.Errorf("migrated count = %d, want 0", count)
 	}
-}
-
-func TestNewStore_PanicsOnEmptyWorkspaceID(t *testing.T) {
-	mr := miniredis.RunT(t)
-	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	t.Cleanup(func() { rdb.Close() })
-
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Fatal("expected panic for empty workspaceID, but did not panic")
-		}
-	}()
-
-	NewStore(rdb, "", nil)
 }
