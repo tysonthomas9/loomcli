@@ -175,9 +175,10 @@ export function useSSE(options: UseSSEOptions): UseSSEReturn {
       client.connect(sinceRef.current, sourceReposRef.current);
     }
 
-    // Cleanup on unmount
+    // Cleanup on unmount or workspaceId change
     return () => {
       mountedRef.current = false;
+      prevSourceReposRef.current = undefined;
       client.destroy();
       clientRef.current = null;
     };
