@@ -74,10 +74,10 @@ func (r *WorkspaceRegistry) Register(id, path string) error {
 		return ErrEmptyWorkspacePath
 	}
 
-	r.mu.RLock()
-	closed := r.closed
-	r.mu.RUnlock()
-	if closed {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.closed {
 		return ErrRegistryClosed
 	}
 
@@ -130,10 +130,10 @@ func (r *WorkspaceRegistry) RegisterPool(id string, pool daemon.Pool) error {
 		return errors.New("pool must not be nil")
 	}
 
-	r.mu.RLock()
-	closed := r.closed
-	r.mu.RUnlock()
-	if closed {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.closed {
 		return ErrRegistryClosed
 	}
 

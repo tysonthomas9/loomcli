@@ -347,6 +347,146 @@ func TestRegistry_Register_PoolFailure_StillAttemptsSubscriber(t *testing.T) {
 	}
 }
 
+func TestRegistry_CloseBlocksInFlightRegister(t *testing.T) {
+	const N = 20
+
+	registry, multiPool, _ := newTestRegistry(t)
+
+	var wg sync.WaitGroup
+
+	// Launch N goroutines that each try to Register a unique workspace.
+	errs := make([]error, N)
+	for i := 0; i < N; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			wsID := fmt.Sprintf("race-register-%d", idx)
+			wsPath := t.TempDir()
+			errs[idx] = registry.Register(wsID, wsPath)
+		}(i)
+	}
+
+	// Close concurrently with the registrations.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_ = registry.Close()
+	}()
+
+	wg.Wait()
+
+	// Invariant: for each goroutine, either the registration succeeded
+	// (pool present in MultiPool) or it returned ErrRegistryClosed
+	// (pool NOT present). No ambiguous state.
+	registeredIDs := make(map[string]bool)
+	for _, id := range multiPool.WorkspaceIDs() {
+		registeredIDs[id] = true
+	}
+
+	var succeeded, rejected int
+	for i := 0; i < N; i++ {
+		wsID := fmt.Sprintf("race-register-%d", i)
+		if errs[i] == nil {
+			// Register returns nil even when pool creation fails (best-effort),
+			// so we don't assert pool presence here. The safety property is the
+			// reverse: rejected => pool absent.
+			succeeded++
+		} else if errors.Is(errs[i], ErrRegistryClosed) {
+			rejected++
+			if registeredIDs[wsID] {
+				t.Errorf("Register returned ErrRegistryClosed for %q but pool IS in MultiPool", wsID)
+			}
+		} else {
+			t.Errorf("unexpected error for %q: %v", wsID, errs[i])
+		}
+	}
+
+	if succeeded+rejected != N {
+		t.Errorf("expected %d total outcomes, got succeeded=%d rejected=%d", N, succeeded, rejected)
+	}
+
+	t.Logf("Register outcomes: %d succeeded, %d rejected (ErrRegistryClosed)", succeeded, rejected)
+}
+
+func TestRegistry_CloseBlocksInFlightRegisterPool(t *testing.T) {
+	const N = 20
+
+	registry, multiPool, _ := newTestRegistry(t)
+
+	// Pre-build pools for each goroutine.
+	type poolEntry struct {
+		id   string
+		pool daemon.Pool
+	}
+	entries := make([]poolEntry, N)
+	for i := 0; i < N; i++ {
+		socketPath := rpc.ShortSocketPath(t.TempDir())
+		rawPool, err := daemon.NewConnectionPool(socketPath, 2)
+		if err != nil {
+			t.Fatalf("NewConnectionPool[%d]: %v", i, err)
+		}
+		breaker := circuitbreaker.NewBreaker(fmt.Sprintf("race-pool-%d", i), circuitbreaker.Config{
+			FailureThreshold:  5,
+			OpenTimeout:       30 * time.Second,
+			HalfOpenMaxProbes: 1,
+			ShouldTrip:        daemon.DaemonShouldTrip,
+		})
+		entries[i] = poolEntry{
+			id:   fmt.Sprintf("race-regpool-%d", i),
+			pool: daemon.NewProtectedPool(rawPool, breaker),
+		}
+	}
+
+	var wg sync.WaitGroup
+
+	errs := make([]error, N)
+	for i := 0; i < N; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			errs[idx] = registry.RegisterPool(entries[idx].id, entries[idx].pool)
+		}(i)
+	}
+
+	// Close concurrently.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_ = registry.Close()
+	}()
+
+	wg.Wait()
+
+	registeredIDs := make(map[string]bool)
+	for _, id := range multiPool.WorkspaceIDs() {
+		registeredIDs[id] = true
+	}
+
+	var succeeded, rejected int
+	for i := 0; i < N; i++ {
+		wsID := entries[i].id
+		if errs[i] == nil {
+			succeeded++
+			if !registeredIDs[wsID] {
+				t.Errorf("RegisterPool succeeded for %q but pool not in MultiPool", wsID)
+			}
+		} else if errors.Is(errs[i], ErrRegistryClosed) {
+			rejected++
+			if registeredIDs[wsID] {
+				t.Errorf("RegisterPool returned ErrRegistryClosed for %q but pool IS in MultiPool", wsID)
+			}
+		} else {
+			t.Errorf("unexpected error for %q: %v", wsID, errs[i])
+		}
+	}
+
+	if succeeded+rejected != N {
+		t.Errorf("expected %d total outcomes, got succeeded=%d rejected=%d", N, succeeded, rejected)
+	}
+
+	t.Logf("RegisterPool outcomes: %d succeeded, %d rejected (ErrRegistryClosed)", succeeded, rejected)
+}
+
 func TestRegistry_WorkspaceIDs_ReturnsRegisteredUUIDs(t *testing.T) {
 	registry, _, _ := newTestRegistry(t)
 
