@@ -508,6 +508,247 @@ Full keyboard navigation for power users who want to never touch the mouse.
 - Search within cheatsheet to find a shortcut
 - "Press any key to dismiss"
 
+### 11. Merge Conflict Dashboard
+
+Dedicated panel showing branch conflict state *before* merging.
+
+**Matrix view:**
+- Agent branches on both axes (falcon, nova, ember, cobalt, etc.)
+- Each cell: green (clean merge) | red (conflict) | grey (same branch / not applicable)
+- Click a red cell → shows list of conflicting files with conflict type (both modified, delete/modify, etc.)
+- Header row/column shows branch name + commits ahead of main
+
+**Merge sequencing:**
+- Recommended merge order: sorted by fewest conflicts first
+- "Merge clean first" button: auto-merges all green branches in sequence
+- After each merge, matrix re-evaluates (some conflicts may resolve)
+- Conflict resolution: click "Resolve" → opens conflict resolution terminal (same as `loom merge` but interactive)
+
+**Access:** NavRail Monitor view → "Branches" tab, or `loom merge --preview` equivalent in UI.
+
+### 12. Agent Replay / Rollback
+
+Every agent run creates an implicit checkpoint.
+
+**Checkpoint list (per task):**
+- Shown in Sessions tab as a timeline
+- Each checkpoint: "Run #3 — falcon — 2026-03-27 14:23" with git SHA
+- Expand: files changed, tests pass/fail, token cost
+
+**Rollback:**
+- "Rollback to before run #3" button
+- Resets the worktree branch to the git SHA from before that run started
+- Orphaned task goes back to `open` status
+- Confirmation dialog: "This will discard all changes from runs #3-#5 (3 commits, +247/-89 lines). Continue?"
+
+**Replay:**
+- "Replay run #3" — re-runs the same agent with the same task and design, but from the rollback point
+- Useful when a transient error (rate limit, network) caused failure
+- Different from "retry" because it starts from a clean checkpoint, not the corrupted state
+
+### 13. Epic Planning Assistant
+
+Automate epic breakdown from description to task graph.
+
+**Workflow:**
+1. Create epic with title + description (high-level requirements)
+2. Click "Break Down" button → sends to a planning agent
+3. Agent returns: proposed task list with titles, descriptions, dependencies, priority estimates
+4. Review in a diff-like view:
+   - Left: empty (no tasks yet)
+   - Right: proposed tasks as a list with dependency arrows
+5. Edit individual tasks: change title, adjust dependencies, remove unnecessary ones
+6. "Apply" → creates all tasks as children of the epic with dependencies wired
+7. Dependency graph immediately available
+
+**Planning prompt context:**
+- Includes epic description, existing codebase structure, and conventions from CLAUDE.md
+- References completed sibling epics for pattern matching
+- Estimates priority based on keywords (security → P0, docs → P3)
+
+**Access:** "Break Down" button in Epic Detail Panel → Overview tab, or right-click epic in sidebar → "Plan breakdown"
+
+### 14. Agent Handoff Visualizer
+
+Pipeline view showing how a task flows through agent stages.
+
+**Pipeline layout (horizontal):**
+```
+[Design Agent] → [Task Agent] → [Review Agent]
+   falcon            nova            ember
+   12m, $0.89        34m, $2.41      8m, $0.56
+   3 files read      12 files written  2 issues found
+```
+
+- Each stage = a box with: agent name, time spent, tokens/cost, files touched
+- Arrow between stages shows handoff time (idle time between sessions)
+- Current stage highlighted with a pulsing border
+- Completed stages show green checkmark
+
+**Bottleneck detection:**
+- If one stage consistently takes disproportionate time, it's highlighted amber
+- "Review is averaging 2.3x longer than implementation across this epic"
+- Suggestion: "Consider adding a second review agent or simplifying review checklist"
+
+**Access:** Task Detail Panel → Sessions tab → "Pipeline View" toggle (vs default list view)
+
+### 15. Stale Branch Detector
+
+Identify and clean up abandoned agent branches.
+
+**Branch Health panel (Settings or Monitor view):**
+
+| Branch | Agent | Last Activity | Ahead/Behind | Status | Action |
+|--------|-------|---------------|--------------|--------|--------|
+| falcon-bd-xyz | falcon | 3 days ago | ↑12 ↓0 | Unmerged work | Merge / Archive |
+| nova-bd-abc | nova | 7 days ago | ↑3 ↓45 | Stale, diverged | Reset / Delete |
+| ember-bd-def | ember | 1 hour ago | ↑5 ↓2 | Active | — |
+
+**Stale criteria (configurable):**
+- No commits for N days (default: 3)
+- Diverged from main by > N commits behind (default: 20)
+- Associated task is closed but branch not merged
+
+**Bulk cleanup:**
+- Checkbox selection → "Archive selected" (moves to `archived/` prefix) or "Delete selected"
+- "Clean all stale" button with confirmation showing what will be deleted
+- Safe: never deletes branches with unmerged commits without explicit confirmation
+
+### 16. Cost Forecast
+
+Predict epic/project costs based on historical data.
+
+**Epic cost card (in Epic Overview tab):**
+- Completed tasks: N tasks, $X total, avg $Y/task
+- Remaining tasks: M tasks, estimated $Z based on:
+  - Average cost per task type (bug: $2.10, feature: $4.50, task: $3.13)
+  - Average cost per priority (P0: $5.20, P2: $2.80)
+  - Weighted by remaining task types and priorities
+- Progress: "$47 of estimated $112 spent (42%)"
+- Burn rate: "$8.50/day at current pace"
+
+**Budget alerts:**
+- Configurable per epic or globally in Settings
+- Warning at 80% of estimate (amber toast)
+- Alert at 100% (red toast, persistent)
+- "Epic Auth is at 80% of estimated budget with 40% of tasks remaining — may exceed by ~$30"
+
+**Project-level cost view (Monitor/Dashboard):**
+- Daily cost chart (line graph, last 30 days)
+- Cost by epic (stacked bar)
+- Cost by agent (pie chart)
+- Monthly projection based on trailing 7-day average
+
+### 17. Split Screen / Multi-Panel
+
+Allow splitting the main content area for parallel viewing.
+
+**Split modes:**
+- Vertical split: left panel | right panel (default)
+- Horizontal split: top panel | bottom panel
+- Triggered by: drag a tab to the edge, or keyboard shortcut `Cmd+\`
+
+**Use cases:**
+- Left: task A's diff | Right: task B's diff (compare two agent's approaches)
+- Left: agent terminal (live) | Right: agent's file changes (live diff updating as agent writes)
+- Left: epic dependency graph | Right: review queue for that epic
+- Left: task design | Right: task diff (review design vs implementation)
+
+**Behavior:**
+- Each panel is independent — has its own tab bar and content
+- Resizable divider between panels (drag to resize, double-click to reset 50/50)
+- Close a panel to return to single-panel mode
+- Panel state persisted to localStorage per workspace
+
+**Constraints:**
+- Maximum 2 panels (no infinite splitting)
+- Terminal tabs can live in either panel
+- Drag tabs between panels to reorganize
+
+### 18. Custom Views / Saved Filters
+
+Save and share filter+sort+group combinations as named views.
+
+**Creating a view:**
+1. Apply filters in kanban/table (status, priority, epic, assignee, search term)
+2. Set grouping (by epic, assignee, priority)
+3. Set sort order
+4. Click "Save View" → name it (e.g. "My Review Queue", "Auth Epic Board")
+
+**View storage:**
+- Saved to workspace config (shared with team) or user-local (personal)
+- Each view stores: filters, sort, groupBy, view mode (kanban/table/graph)
+
+**Accessing views:**
+- Sidebar: "Saved Views" section (collapsible, above or below WORKSPACES)
+- Command palette: type view name to switch
+- URL: each view has a stable URL fragment (`?view=my-review-queue`)
+
+**Built-in views (pre-configured):**
+- "Needs Review" — status:review, sorted by priority
+- "Blocked" — status:blocked, grouped by blocker
+- "Recently Closed" — status:closed, sorted by updated_at desc, limit 20
+- "All Open" — status:open+in_progress+review, sorted by priority
+
+**View as sidebar shortcut:**
+- Pin a saved view to the sidebar for one-click access
+- Shows count badge: "My Review Queue (3)"
+
+### 19. Activity Heatmap
+
+Calendar-style visualization of project activity over time.
+
+**Layout:**
+- GitHub contributions style: weeks as columns, days as rows
+- Each cell = one day
+- Intensity = number of tasks completed (0=empty, 1-2=light, 3-5=medium, 6+=dark)
+- Color: green gradient matching the design tokens
+
+**Hover detail:**
+- "March 15, 2026: 8 tasks completed, 2 errors, 3 reviews approved, $12.40 spent"
+- Mini breakdown: 3 by falcon, 2 by nova, 3 by ember
+
+**Time range:** Last 90 days (scrollable), with month labels
+
+**Overlays (toggleable):**
+- Error markers: red dots on days with agent errors
+- Cost markers: amber dots on days exceeding daily budget
+- Milestone markers: blue dots on days when epics were closed
+
+**Access:** Monitor/Dashboard view → "Activity" tab, or Epic Overview tab (scoped to that epic)
+
+### 20. Webhook / Integration Panel
+
+Configure outbound notifications for project events. (Promotes existing epic loomcli-ytxcj to V7 design.)
+
+**Settings → Notifications sub-panel:**
+
+**Webhook configuration:**
+- List of configured webhooks with: name, URL, events, status (active/paused)
+- "Add Webhook" → form: name, URL, secret (auto-generated HMAC), event filter
+- Event filter: checkboxes for event types:
+  - Task completed / Task failed / Task status changed
+  - Agent error / Agent idle timeout
+  - Review needed / Review approved / Review rejected
+  - Epic completed / Epic progress milestone (25%, 50%, 75%)
+  - Merge conflict detected / Merge completed
+- Priority filter: only trigger for P0/P1, or all priorities
+- Test button: sends a sample payload and shows response
+
+**Payload preview:**
+- Shows the JSON payload that will be sent for each event type
+- Includes: event type, task/agent details, timestamp, workspace
+
+**Delivery log:**
+- Table: timestamp, event, webhook name, HTTP status, response time
+- Click to expand: full request/response headers and body
+- Retry failed deliveries (3 retries with exponential backoff, then dead-letter)
+
+**Built-in integrations (shortcuts):**
+- Slack: paste webhook URL, auto-formats as Slack Block Kit message
+- Discord: paste webhook URL, auto-formats as Discord embed
+- Email: SMTP config, sends HTML-formatted email digest
+
 ---
 
 ## Design Tokens (from mock)
