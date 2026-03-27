@@ -991,6 +991,248 @@ Horizontal timeline showing task execution over time.
 
 **Access:** New header tab "Timeline" alongside Kanban, Table, Graph, Monitor
 
+### 31. Agent Chat / Interrupt
+
+Pause a running agent and inject guidance mid-execution.
+
+**Interrupt button:**
+- Visible on active agent entries in sidebar (next to the status dot)
+- Also in Agent Panel header when viewing an active agent
+- Click → sends SIGTSTP-equivalent to the agent process (pauses, doesn't kill)
+
+**Chat interface (after interrupt):**
+- Agent Panel switches to a chat view showing:
+  - What the agent was doing when interrupted (last tool call + output)
+  - The agent's current context summary (task, step, files open)
+- Text input: "Type guidance for the agent..."
+- Send → injects your message into the agent's conversation context
+- "Resume" button → agent continues execution with your input as additional context
+
+**Use cases:**
+- Agent is about to go down the wrong path — interrupt before it wastes tokens
+- Agent is stuck in a loop — interrupt and say "try a different approach"
+- You see a test failing in the live ticker — interrupt and say "the test expects X not Y"
+
+**Safety:**
+- Interrupt is non-destructive — agent can always resume
+- If agent was mid-tool-call (e.g. writing a file), the call completes before pause
+- Timeout: if you don't resume within 10 minutes, agent auto-resumes (configurable)
+
+### 33. Conflict Preview on Assign
+
+Before dispatching parallel tasks, preview potential file conflicts.
+
+**Trigger:** When bulk-assigning tasks from the dependency graph "ready wave" or from the review queue.
+
+**Analysis:**
+- Parse each task's design → extract "Files to Modify" and "Files to Create" sections
+- Build a file overlap matrix: which tasks touch the same files
+- Flag overlaps: "Tasks bd-abc and bd-def both modify `handlers_auth.go`"
+
+**Preview panel:**
+- Shows before you confirm assignment:
+```
+Wave 1 (5 tasks ready):
+  ✓ bd-abc → handlers_auth.go, middleware.go
+  ✓ bd-def → handlers_webhook.go, routes.go
+  ⚠ bd-ghi → handlers_auth.go, config.go     ← conflicts with bd-abc
+  ✓ bd-jkl → frontend/App.tsx
+  ✓ bd-mno → frontend/Settings.tsx
+
+  1 potential conflict detected.
+  Suggestion: Run bd-abc first, then bd-ghi in the next wave.
+```
+
+**Actions:**
+- "Assign all anyway" — parallel, accept the merge conflict risk
+- "Split wave" — removes conflicting tasks, assigns the rest now
+- "Sequence" — auto-creates a dependency between conflicting tasks
+
+**Automatic detection:**
+- Also runs passively when you drag a card to In Progress
+- Toast warning: "This task modifies files that falcon is currently editing"
+
+### 34. Epic Retrospective
+
+Auto-generated summary when an epic is closed.
+
+**Trigger:** When you close an epic (all children done), a "View Retrospective" button appears.
+
+**Retrospective content:**
+
+```
+Epic: Auth & Identity (loomcli-laf73)
+Duration: 12 days (March 3 - March 15, 2026)
+Tasks: 29 total — 27 completed, 2 closed as won't-do
+
+Cost & Effort:
+  Total cost: $87.40 (avg $3.01/task)
+  Total tokens: 2.4M input, 890K output
+  Agent hours: 14.2h active time
+  Most expensive task: laf73.22 E2E Auth Flow ($8.40, 3 retries)
+  Cheapest task: laf73.29 Decision doc ($0.45, first try)
+
+Agents:
+  falcon: 12 tasks, $34.20, 4% error rate
+  nova: 10 tasks, $31.50, 8% error rate
+  ember: 7 tasks, $21.70, 2% error rate
+
+Bottlenecks:
+  laf73.13 (Wire ExtAuth Middleware) blocked 5 downstream tasks for 2 days
+  laf73.22 (E2E Auth Flow) required 3 retries due to test environment issues
+
+Design Quality:
+  First-try approval rate: 72% (21/29)
+  Revision rounds: avg 1.3 per task
+  Tasks needing 3+ revisions: laf73.11, laf73.22
+
+Files Most Modified:
+  internal/webui/server.go — 8 tasks touched this file
+  internal/cli/auth.go — 6 tasks
+  frontend/src/api/auth.ts — 5 tasks
+```
+
+**Export:** Download as markdown, or copy to clipboard for pasting into a project update.
+
+**Storage:** Saved as a note on the epic, viewable anytime from Epic Detail → Overview tab.
+
+### 35. File Ownership Map
+
+Heatmap showing which files are modified most and by whom.
+
+**Visualization (Files tab or dedicated Monitor sub-tab):**
+- File tree with heatmap overlay
+- Each file/directory has a color intensity based on modification count
+- Bright red = hotspot (many modifications by multiple tasks/agents)
+- Dim grey = rarely touched
+
+**Hover detail:**
+- "handlers_auth.go: modified by 4 tasks across 2 epics"
+- "Last modified: 2h ago by falcon (laf73.13)"
+- "Agents: falcon (3x), nova (1x)"
+
+**Timeline scrubber:**
+- Slider at the bottom: adjust time range (last 24h, 7d, 30d, all time)
+- Heatmap updates to show modification density for the selected period
+- Animated playback: watch the heatmap evolve over time (which areas got hot when)
+
+**Conflict risk indicator:**
+- Files currently being modified by an active agent get a pulsing border
+- If two agents are modifying the same file simultaneously: red alert icon
+- "handlers_auth.go is being modified by both falcon and nova right now"
+
+**Access:** Monitor → "Files" tab, or Epic Detail → Files tab (scoped to epic)
+
+### 36. Design Template Library
+
+Reusable scaffolding for planning agents to produce consistent designs.
+
+**Template structure:**
+Each template defines sections that a design must contain:
+
+```yaml
+name: "Go HTTP Handler"
+sections:
+  - name: Summary
+    required: true
+    hint: "1-3 sentences describing the handler's purpose"
+  - name: Technical Approach
+    required: true
+    hint: "HTTP method, route path, request/response types, middleware"
+  - name: Files to Modify
+    required: true
+    hint: "List existing files with specific line ranges and changes"
+  - name: Files to Create
+    required: false
+    hint: "New files with full path and purpose"
+  - name: Edge Cases
+    required: true
+    hint: "Error responses, auth failures, validation, rate limits"
+  - name: Testing Strategy
+    required: true
+    hint: "Unit tests, integration tests, manual verification steps"
+```
+
+**Built-in templates:**
+- Go HTTP Handler — handler, route registration, middleware
+- React Component — component, CSS module, test file, storybook
+- CLI Command — cobra command, flags, help text, tests
+- Database Migration — schema change, migration file, rollback
+- Bug Fix — root cause analysis, fix description, regression test
+- Refactor — before/after, mechanical steps, no behavior change
+
+**Usage:**
+- Planning agent receives template as part of its prompt context
+- Template selected based on task type + labels, or manually by lead
+- Design field validated against template: "Missing required section: Testing Strategy"
+
+**Management:** Settings → Design Templates → list, create, edit, delete
+
+### 37. Agent Environment Diff
+
+Quick diagnostic showing how an agent's worktree has diverged from main.
+
+**Environment card (in Agent Panel → Info tab):**
+```
+Worktree Health:
+  Branch: falcon (bd-laf73.7)
+  Commits ahead of main: 5 (↑5)
+  Commits behind main: 23 (↓23)  ⚠ Stale
+  Last sync: 2 days ago
+  Conflicting files with main: 3
+    - internal/webui/server.go
+    - internal/cli/auth.go
+    - go.sum
+```
+
+**Status indicators:**
+- Green: ≤5 commits behind, no conflicts — healthy
+- Amber: 6-20 commits behind, or 1-2 conflicts — needs sync
+- Red: >20 commits behind, or 3+ conflicts — stale, likely to fail
+
+**Actions:**
+- "Sync to main" → runs `loom sync <agent>` (pull latest main into worktree)
+- "Show conflicts" → opens a diff view of conflicting files
+- "Reset to main" → runs `loom reset <agent> --force` (with confirmation)
+- "View divergence" → shows `git log main..<branch>` as a commit list
+
+**Proactive alerts:**
+- Toast: "ember is 23 commits behind main — sync recommended before next task"
+- Sidebar: amber dot on agent entry when worktree is stale
+- Auto-sync option in Settings: "Sync worktrees before each task assignment" (default: off)
+
+### 40. Per-Workspace Theme Accent
+
+Visual distinction between workspaces via accent color.
+
+**Configuration:**
+- Workspace Settings → "Accent Color" picker
+- Preset palette: amber, cyan, emerald, violet, rose, blue, orange
+- Custom hex input for any color
+
+**Where accent appears:**
+- Sidebar: workspace name text color, left border highlight on active workspace
+- Breadcrumb: workspace name in the accent color
+- Panel header: thin accent-colored top border on the detail panel
+- NavRail: active icon tinted with workspace accent
+- Tab bar: active tab underline in accent color
+
+**Default accents (auto-assigned):**
+- First workspace: amber (#f59e0b)
+- Second workspace: cyan (#06b6d4)
+- Third workspace: violet (#8b5cf6)
+- Additional: rotate through preset palette
+
+**Dark/Light theme:**
+- Global toggle in Settings (current: dark only)
+- Accent colors adjust saturation/lightness per theme
+- Dark theme: accent at full saturation on dark background
+- Light theme: accent slightly muted, darker text
+
+**Per-workspace override:**
+- Workspace Settings → "Theme" dropdown: "Use global" | "Force dark" | "Force light"
+- Useful for visual context switching: "Platform Core is dark, Dev Tools is light — I immediately know which workspace I'm in"
+
 ---
 
 ## Design Tokens (from mock)
