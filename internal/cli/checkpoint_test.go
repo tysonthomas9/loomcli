@@ -159,12 +159,13 @@ func TestTruncateDiff(t *testing.T) {
 }
 
 func TestCaptureGitDiffCleanWorktree(t *testing.T) {
+	clearGitEnvVars(t)
 	// Create a temp git repo with no changes
 	tmpDir := t.TempDir()
 	run := func(args ...string) {
 		cmd := exec.Command("git", args...) //nolint:norawexec
 		cmd.Dir = tmpDir
-		cmd.Env = append(os.Environ(),
+		cmd.Env = gitSafeEnv(
 			"GIT_AUTHOR_NAME=test",
 			"GIT_AUTHOR_EMAIL=test@test.com",
 			"GIT_COMMITTER_NAME=test",
@@ -185,11 +186,12 @@ func TestCaptureGitDiffCleanWorktree(t *testing.T) {
 }
 
 func TestCaptureGitDiff(t *testing.T) {
+	clearGitEnvVars(t)
 	tmpDir := t.TempDir()
 	run := func(args ...string) {
 		cmd := exec.Command("git", args...) //nolint:norawexec
 		cmd.Dir = tmpDir
-		cmd.Env = append(os.Environ(),
+		cmd.Env = gitSafeEnv(
 			"GIT_AUTHOR_NAME=test",
 			"GIT_AUTHOR_EMAIL=test@test.com",
 			"GIT_COMMITTER_NAME=test",
@@ -223,11 +225,12 @@ func TestCaptureGitDiff(t *testing.T) {
 }
 
 func TestCaptureGitDiffTruncation(t *testing.T) {
+	clearGitEnvVars(t)
 	tmpDir := t.TempDir()
 	run := func(args ...string) {
 		cmd := exec.Command("git", args...) //nolint:norawexec
 		cmd.Dir = tmpDir
-		cmd.Env = append(os.Environ(),
+		cmd.Env = gitSafeEnv(
 			"GIT_AUTHOR_NAME=test",
 			"GIT_AUTHOR_EMAIL=test@test.com",
 			"GIT_COMMITTER_NAME=test",

@@ -27,6 +27,8 @@ func setupWorkspaceConfig(t *testing.T, cfg *LoomConfig) {
 // createGitRepo creates a minimal git repo at the given path with an initial commit.
 func createGitRepo(t *testing.T, path string) {
 	t.Helper()
+	clearGitEnvVars(t)
+
 	if err := os.MkdirAll(path, 0755); err != nil {
 		t.Fatalf("mkdir %s: %v", path, err)
 	}

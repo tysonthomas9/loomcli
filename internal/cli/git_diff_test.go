@@ -19,7 +19,7 @@ func setupDiffTestRepo(t *testing.T) (string, string) {
 		t.Helper()
 		cmd := exec.Command("git", args...) //nolint:norawexec
 		cmd.Dir = dir
-		cmd.Env = append(os.Environ(),
+		cmd.Env = gitSafeEnv(
 			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
 			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
 		)
@@ -157,7 +157,7 @@ func TestDiffCommits_NoCommits(t *testing.T) {
 		t.Helper()
 		cmd := exec.Command("git", args...) //nolint:norawexec
 		cmd.Dir = dir
-		cmd.Env = append(os.Environ(),
+		cmd.Env = gitSafeEnv(
 			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
 			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
 		)
@@ -271,7 +271,7 @@ func TestDiffFiles_NoChanges(t *testing.T) {
 		t.Helper()
 		cmd := exec.Command("git", args...) //nolint:norawexec
 		cmd.Dir = dir
-		cmd.Env = append(os.Environ(),
+		cmd.Env = gitSafeEnv(
 			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
 			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
 		)
@@ -346,7 +346,7 @@ func TestDiffFilePatch_TooLarge(t *testing.T) {
 		t.Helper()
 		cmd := exec.Command("git", args...) //nolint:norawexec
 		cmd.Dir = dir
-		cmd.Env = append(os.Environ(),
+		cmd.Env = gitSafeEnv(
 			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
 			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
 		)
@@ -393,7 +393,7 @@ func TestDiffFilePatch_NoChange(t *testing.T) {
 		t.Helper()
 		cmd := exec.Command("git", args...) //nolint:norawexec
 		cmd.Dir = dir
-		cmd.Env = append(os.Environ(),
+		cmd.Env = gitSafeEnv(
 			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
 			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
 		)

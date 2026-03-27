@@ -66,7 +66,7 @@ func TestComputeDiffStats_WithRealRepo(t *testing.T) {
 		t.Helper()
 		cmd := exec.Command("git", args...) //nolint:norawexec
 		cmd.Dir = dir
-		cmd.Env = append(os.Environ(),
+		cmd.Env = gitSafeEnv(
 			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
 			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
 		)
@@ -89,6 +89,7 @@ func TestComputeDiffStats_WithRealRepo(t *testing.T) {
 	// Get initial ref
 	cmd := exec.Command("git", "rev-parse", "HEAD") //nolint:norawexec
 	cmd.Dir = dir
+	cmd.Env = gitSafeEnv()
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatal(err)
@@ -120,7 +121,7 @@ func TestComputeDiffStats_NoChanges(t *testing.T) {
 		t.Helper()
 		cmd := exec.Command("git", args...) //nolint:norawexec
 		cmd.Dir = dir
-		cmd.Env = append(os.Environ(),
+		cmd.Env = gitSafeEnv(
 			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
 			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
 		)
@@ -140,6 +141,7 @@ func TestComputeDiffStats_NoChanges(t *testing.T) {
 
 	cmd := exec.Command("git", "rev-parse", "HEAD") //nolint:norawexec
 	cmd.Dir = dir
+	cmd.Env = gitSafeEnv()
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatal(err)
@@ -156,6 +158,7 @@ func TestComputeDiffStats_InvalidRef(t *testing.T) {
 	dir := t.TempDir()
 	cmd := exec.Command("git", "init") //nolint:norawexec
 	cmd.Dir = dir
+	cmd.Env = gitSafeEnv()
 	if err := cmd.Run(); err != nil {
 		t.Fatal(err)
 	}
