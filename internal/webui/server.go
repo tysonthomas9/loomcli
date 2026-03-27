@@ -1,5 +1,4 @@
-// Package webui provides the web UI server for loomcli, embedding the React frontend
-// at compile time and serving it along with API endpoints for the loomcli daemon.
+// Package webui provides the web UI server for loomcli, embedding the React frontend and serving API endpoints.
 package webui
 
 import (
@@ -25,6 +24,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
+	"github.com/tysonthomas9/loomcli/internal/workspace"
 )
 
 // StartServer starts the web UI server with the given configuration.
@@ -185,7 +185,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	// Initialize terminal manager for WebSocket terminal sessions.
 	// Include the workspace ID in the session prefix to prevent same-name agents
 	// across workspaces from sharing tmux sessions.
-	termSessionPrefix := fmt.Sprintf("%d-%s", actualPort, shortWorkspaceID(initialWorkspaceID))
+	termSessionPrefix := fmt.Sprintf("%d-%s", actualPort, workspace.ShortWorkspaceID(initialWorkspaceID))
 	var termMgr *TerminalManager
 	if termMgr, err = NewTerminalManager(config.TerminalCmd, termSessionPrefix, config.MaxTerminalSessions); err != nil {
 		if errors.Is(err, ErrTmuxNotFound) {
