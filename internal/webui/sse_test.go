@@ -1,9 +1,11 @@
 package webui
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -2248,4 +2250,79 @@ func TestSSEHub_BroadcastFailClosedNoWorkspace(t *testing.T) {
 	default:
 		t.Error("normalClient: expected to receive mutation")
 	}
+}
+
+// TestHandleSSE_EmptyWorkspaceLogsWarning tests that an empty workspaceID
+// still connects (fail-closed: no mutations delivered).
+func TestHandleSSE_EmptyWorkspaceLogsWarning(t *testing.T) {
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	// Capture log output — use a synchronized writer to avoid races with
+	// parallel tests that also write to the global logger.
+	var logBuf bytes.Buffer
+	var mu sync.Mutex
+	origOutput := log.Writer()
+	log.SetOutput(syncWriter{&logBuf, &mu})
+	t.Cleanup(func() { log.SetOutput(origOutput) })
+
+	handler := handleSSE(hub, nil)
+
+	// Use context with NO workspace (empty string from WorkspaceFromContext)
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces//events", nil)
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		handler.ServeHTTP(rr, req)
+		close(done)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Broadcast a mutation — should NOT be delivered to this client
+	hub.Broadcast(&MutationPayload{
+		Type:        "create",
+		IssueID:     "bd-ghost",
+		WorkspaceID: "some-ws",
+	})
+
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	<-done
+
+	body := rr.Body.String()
+
+	// Client still receives the connected event (connection is not rejected)
+	if !strings.Contains(body, "event: connected") {
+		t.Error("expected connected event even with empty workspaceID")
+	}
+
+	// No mutation should be delivered (fail-closed)
+	if strings.Contains(body, "bd-ghost") {
+		t.Error("expected no mutations delivered to empty-workspace client")
+	}
+
+	// Warning should appear in logs
+	mu.Lock()
+	logOutput := logBuf.String()
+	mu.Unlock()
+	if !strings.Contains(logOutput, "WARNING") || !strings.Contains(logOutput, "empty workspaceID") {
+		t.Errorf("expected warning about empty workspaceID in logs, got: %s", logOutput)
+	}
+}
+
+// syncWriter wraps a writer with a mutex for thread-safe log capture in tests.
+type syncWriter struct {
+	w  *bytes.Buffer
+	mu *sync.Mutex
+}
+
+func (sw syncWriter) Write(p []byte) (int, error) {
+	sw.mu.Lock()
+	defer sw.mu.Unlock()
+	return sw.w.Write(p)
 }

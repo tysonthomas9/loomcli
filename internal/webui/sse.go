@@ -363,6 +363,9 @@ func handleSSE(hub *SSEHub, getMutationsSince func(wsID string, since int64) []r
 
 		// Read workspace from context (injected by WorkspaceMiddleware)
 		workspaceID := WorkspaceFromContext(r.Context())
+		if workspaceID == "" {
+			log.Printf("SSE: WARNING client %d from %s connected with empty workspaceID — will not receive mutations (fail-closed)", clientID, r.RemoteAddr)
+		}
 
 		// Create client
 		client := &SSEClient{
