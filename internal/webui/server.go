@@ -61,6 +61,12 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		}
 	}
 
+	// Auto-add auth service origin to CORS when external auth is configured
+	if authOrigin := extractOrigin(config.ExtAuthURL); authOrigin != "" {
+		corsConfig.Enabled = true
+		corsConfig.AllowedOrigins = append(corsConfig.AllowedOrigins, authOrigin)
+	}
+
 	// Log configuration
 	slog.Info("starting web UI server", "port", config.Port, "pool_size", config.PoolSize, "bind_address", config.BindAddress)
 	if config.SocketPath != "" {
@@ -73,6 +79,9 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	}
 	if config.HSTSEnabled {
 		slog.Info("HSTS enabled: ensure this server is behind a TLS-terminating proxy")
+	}
+	if config.ExtAuthURL == "" && !config.AuthEnabled && config.BindAddress != "127.0.0.1" && config.BindAddress != "::1" {
+		slog.Warn("no authentication configured and server is exposed to network", "bind_address", config.BindAddress)
 	}
 	if config.DevMode {
 		dir := config.DevFrontendDir
@@ -96,14 +105,10 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		slog.Info("configured port in use, using fallback", "requested_port", config.Port, "actual_port", actualPort)
 	}
 
-	// Initialize MultiPool for workspace-aware connection routing.
-	// The MultiPool implements daemon.Pool and dispatches Get calls to the
-	// correct per-workspace ConnectionPool based on the workspace ID in context.
+	// MultiPool for workspace-aware connection routing.
 	multiPool := daemon.NewMultiPool(WorkspaceFromContext, config.PoolSize)
 
-	// Initialize the initial workspace connection pool (current project).
-	// Prefer the stable UUID from config; fall back to CWD basename for
-	// backwards compatibility with pre-migration configs.
+	// Initialize the initial workspace connection pool (stable UUID or CWD basename).
 	initialWorkspaceID := config.InitialWorkspaceID
 	if initialWorkspaceID == "" {
 		initialWorkspaceID = "default"
@@ -164,9 +169,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	hub := NewSSEHub()
 	go hub.Run()
 
-	// Create multi-workspace subscriber to bridge mutations from per-workspace
-	// daemons to SSE clients. Each workspace gets its own DaemonSubscriber
-	// goroutine that tags mutations with the workspace ID.
+	// Bridge per-workspace daemon mutations to SSE clients.
 	multiSub := NewMultiWorkspaceSubscriber(hub, multiPool, config.Logger)
 	var getMutationsSince func(wsID string, since int64) []rpc.MutationEvent
 
@@ -179,12 +182,9 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		getMutationsSince = multiSub.GetMutationsSinceForWorkspace
 	}
 
-	// NOTE: reconcileConfigWorkspaces is called below, after fleet registry
-	// initialization, so that other workspaces are also registered in the fleet.
+	// NOTE: reconcileConfigWorkspaces called below after fleet registry init.
 
-	// Initialize terminal manager for WebSocket terminal sessions.
-	// Include the workspace ID in the session prefix to prevent same-name agents
-	// across workspaces from sharing tmux sessions.
+	// Terminal manager for WebSocket sessions (workspace-scoped prefix prevents collisions).
 	termSessionPrefix := fmt.Sprintf("%d-%s", actualPort, workspace.ShortWorkspaceID(initialWorkspaceID))
 	var termMgr *TerminalManager
 	if termMgr, err = NewTerminalManager(config.TerminalCmd, termSessionPrefix, config.MaxTerminalSessions); err != nil {
@@ -200,10 +200,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		slog.Info("terminal manager initialized", "component", "terminal", "default_command", config.TerminalCmd)
 	}
 
-	// Wire session history callback (deferred until sessionHistoryStore is initialized below).
-	// We use a closure that captures a pointer so it can reference sessionHistoryStore
-	// which is initialized later. The callback is only invoked after server startup,
-	// by which point sessionHistoryStore is set.
+	// Wire session history callback (closure captures pointer, set after store init below).
 	var sessionHistoryStoreRef *sessionhistory.Store
 	if termMgr != nil {
 		termMgr.SetOnSessionKilled(func(sessionName string) {
@@ -241,9 +238,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		}
 	}
 
-	// Initialize fleet store registry and JWT config for worker registration.
-	// The registry manages per-workspace Stores and TimeoutEnforcers. All
-	// workspace Stores share a single Redis client; key prefixes provide isolation.
+	// Fleet store registry and JWT config for worker registration.
 	var fleetRegistry *fleet.StoreRegistry
 	var tokenCfg *TokenConfig
 	if config.FleetRedis != nil {
@@ -374,6 +369,12 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		}
 	}
 
+	// Initialize external auth (JWKS cache + middleware)
+	extAuthMiddleware, jwksCleanup := initExtAuth(config)
+	if jwksCleanup != nil {
+		defer jwksCleanup()
+	}
+
 	wrappedCreateFn := wrapWorkspaceCreateFn(config.WorkspaceCreateFn, registry, config.WorkspaceIDResolverFn, fleetRegistry)
 	wrappedDeleteFn := wrapWorkspaceDeleteFn(config.WorkspaceDeleteFn, registry, fleetRegistry, config.WorkspaceIDResolverFn)
 	// Workspace-existence checker for WorkspaceMiddleware (MultiPool is authoritative registry).
@@ -389,20 +390,20 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 
 	registerWorkerAPIRoutes(mux, config.WorkspaceConfigFn)
 
-	// Wrap with middleware chain: rate-limit -> security -> auth -> CORS -> mux
-	// Rate limiting is outermost to reject floods before spending CPU on other middleware.
-	// Auth sits between security headers and CORS so that:
-	// - CORS preflight OPTIONS pass through without auth
-	// - Security headers apply to all responses including 401s
+	// Middleware chain: rate-limit -> security -> auth -> CORS -> mux
 	corsMiddleware := NewCORSMiddleware(corsConfig)
-	authMiddleware := NewAuthMiddleware(AuthConfig{APIKey: apiKey, Enabled: config.AuthEnabled})
-	securityMiddleware := NewSecurityHeadersMiddleware(SecurityConfig{HSTSEnabled: config.HSTSEnabled})
+	authMW := NewAuthMiddleware(AuthConfig{APIKey: apiKey, Enabled: config.AuthEnabled})
+	if extAuthMiddleware != nil {
+		authMW = extAuthMiddleware
+	}
+	securityMiddleware := NewSecurityHeadersMiddleware(SecurityConfig{
+		HSTSEnabled:   config.HSTSEnabled,
+		ExtAuthOrigin: extractOrigin(config.ExtAuthURL),
+	})
 	rl, rateLimitMiddleware := NewRateLimitMiddleware(DefaultRateLimitConfig())
-	handler := h2c.NewHandler(NewRequestLogMiddleware(config.Logger)(rateLimitMiddleware(securityMiddleware(authMiddleware(corsMiddleware(mux))))), &http2.Server{})
+	handler := h2c.NewHandler(NewRequestLogMiddleware(config.Logger)(rateLimitMiddleware(securityMiddleware(authMW(corsMiddleware(mux))))), &http2.Server{})
 
-	// Create a shutdown context that all request contexts will derive from.
-	// When canceled, in-flight handlers' r.Context().Done() fires, causing
-	// them to abort quickly rather than waiting the full drain timeout.
+	// Shutdown context: when canceled, in-flight handlers abort quickly.
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	defer shutdownCancel()
 
@@ -439,12 +440,10 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 
 	slog.Info("shutting down server")
 
-	// Cancel the server-wide shutdown context so in-flight handlers' r.Context().Done()
-	// fires immediately, causing them to abort quickly (e.g., pool.Get(r.Context()) fails fast).
+	// Cancel server-wide context so in-flight handlers abort quickly.
 	shutdownCancel()
 
-	// Drain in-flight HTTP requests first (up to ShutdownTimeout, but most abort quickly due to canceled context).
-	// This ensures no handlers are running when we stop components below.
+	// Drain in-flight requests (most abort quickly due to canceled context).
 	drainCtx, drainCancel := context.WithTimeout(context.Background(), config.ShutdownTimeout)
 	defer drainCancel()
 
@@ -453,8 +452,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	}
 	slog.Info("server stopped")
 
-	// Stop components in reverse-initialization order now that no handlers are running.
-	// Fleet timeout enforcers are stopped by fleetRegistry.Close() (deferred above).
+	// Stop components in reverse-initialization order.
 
 	// Stop rate limiter cleanup goroutine
 	rl.Stop()

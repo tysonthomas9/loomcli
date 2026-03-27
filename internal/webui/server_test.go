@@ -290,6 +290,30 @@ func TestStartServer_WriteTimeout(t *testing.T) {
 	}
 }
 
+// TestExtractOrigin verifies extractOrigin returns scheme://host for valid URLs.
+func TestExtractOrigin(t *testing.T) {
+	tests := []struct {
+		name   string
+		rawURL string
+		want   string
+	}{
+		{"https without path", "https://auth.example.com", "https://auth.example.com"},
+		{"https with port and path", "https://auth.example.com:8443/path", "https://auth.example.com:8443"},
+		{"http localhost with port", "http://localhost:3000", "http://localhost:3000"},
+		{"empty string", "", ""},
+		{"not a url", "not-a-url", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractOrigin(tt.rawURL)
+			if got != tt.want {
+				t.Errorf("extractOrigin(%q) = %q, want %q", tt.rawURL, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestDefaultConfig tests that DefaultConfig returns sensible defaults.
 func TestDefaultConfig(t *testing.T) {
 	config := DefaultConfig()

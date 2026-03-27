@@ -18,6 +18,11 @@ func isPublicRoute(method, path string) bool {
 		return true
 	}
 
+	// Worker API routes use their own LOOM_WORKER_TOKEN auth
+	if strings.HasPrefix(normalizedPath, "/api/internal/workers/") {
+		return true
+	}
+
 	// Client error reporting is public so errors during auth bootstrap are captured
 	if method == http.MethodPost && normalizedPath == "/api/client-errors" {
 		return true
@@ -25,6 +30,11 @@ func isPublicRoute(method, path string) bool {
 
 	// CSP violation reports are sent by browsers automatically without auth headers
 	if method == http.MethodPost && normalizedPath == "/api/csp-report" {
+		return true
+	}
+
+	// Session notifications use their own auth mechanism
+	if method == http.MethodPost && normalizedPath == "/api/sessions/notify" {
 		return true
 	}
 
@@ -38,6 +48,12 @@ func isPublicRoute(method, path string) bool {
 	case normalizedPath == "/api/health":
 		return true
 	case normalizedPath == "/api/auth/token":
+		return true
+	case normalizedPath == "/api/config":
+		// Auth discovery endpoint must be accessible without JWT (bootstrap)
+		return true
+	case normalizedPath == "/api/events":
+		// SSE endpoint uses its own auth (sseAuth middleware or token exchange)
 		return true
 	case normalizedPath == "/api/terminal/ws":
 		// Terminal WebSocket uses its own one-time token auth (validated in handler)

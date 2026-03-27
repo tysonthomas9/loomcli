@@ -30,7 +30,7 @@ func TestIsPublicRoute(t *testing.T) {
 		{"GET /api/issues", http.MethodGet, "/api/issues", false},
 		{"GET /api/stats", http.MethodGet, "/api/stats", false},
 		{"GET /api/issues/123", http.MethodGet, "/api/issues/123", false},
-		{"GET /api/events", http.MethodGet, "/api/events", false},
+		{"GET /api/events (SSE, own auth)", http.MethodGet, "/api/events", true},
 
 		// Non-GET methods on public paths should not be public
 		{"POST /health", http.MethodPost, "/health", false},
@@ -51,6 +51,16 @@ func TestIsPublicRoute(t *testing.T) {
 		{"POST /api/fleet/heartbeat", http.MethodPost, "/api/fleet/heartbeat", true},
 		{"POST /api/fleet/done/worker-1", http.MethodPost, "/api/fleet/done/worker-1", true},
 		{"GET /api/fleet/register", http.MethodGet, "/api/fleet/register", true},
+
+		// Config endpoint is public (auth discovery bootstrap)
+		{"GET /api/config", http.MethodGet, "/api/config", true},
+
+		// Session notification uses its own auth
+		{"POST /api/sessions/notify", http.MethodPost, "/api/sessions/notify", true},
+
+		// Worker API routes use their own LOOM_WORKER_TOKEN auth
+		{"GET /api/internal/workers/test", http.MethodGet, "/api/internal/workers/test", true},
+		{"POST /api/internal/workers/test/result", http.MethodPost, "/api/internal/workers/test/result", true},
 	}
 
 	for _, tt := range tests {
@@ -215,6 +225,10 @@ func TestIsPublicRoute_WorkspaceScoped(t *testing.T) {
 
 		// Workspace-scoped agent terminal ws
 		{"ws agent terminal ws GET", "GET", "/api/workspaces/ws1/agents/a1/terminal/ws", true},
+
+		// Workspace-scoped config and events should be public
+		{"ws config GET", "GET", "/api/workspaces/ws1/config", true},
+		{"ws events GET", "GET", "/api/workspaces/ws1/events", true},
 	}
 
 	for _, tt := range tests {

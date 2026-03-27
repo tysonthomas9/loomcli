@@ -38,6 +38,10 @@ type ServerConfig struct {
 	APIKey                  string                            `json:"-"` // Pre-shared API key for WebUI auth (if empty and AuthEnabled, auto-generate)
 	AuthEnabled             bool                              // Whether API authentication is enabled (default: true)
 	HSTSEnabled             bool                              // Whether to send Strict-Transport-Security header (use when behind TLS-terminating proxy)
+	ExtAuthURL              string                            // Auth service base URL (e.g., "https://auth.loomcli.com"); empty = open mode
+	ExtAuthIssuer           string                            // Expected JWT issuer (validated against "iss" claim; defaults to ExtAuthURL)
+	ExtAuthAudience         string                            // Expected JWT audience (validated against "aud" claim; defaults to "loom")
+	ExtAuthAllowInsecure    bool                              // Allow HTTP for non-loopback --auth-url (escape hatch for Docker networks)
 	LoomServerURL           string                            // Default target URL for the loom API proxy (set by 'loom serve')
 	DevMode                 bool                              // Serve frontend from disk instead of embedded FS
 	DevFrontendDir          string                            // Directory to serve in dev mode (default: internal/webui/frontend/dist)

@@ -1,10 +1,15 @@
 package webui
 
-import "net/http"
+import (
+	"fmt"
+	"net/http"
+	"net/url"
+)
 
 // SecurityConfig controls optional security headers.
 type SecurityConfig struct {
-	HSTSEnabled bool
+	HSTSEnabled   bool
+	ExtAuthOrigin string // Auth service origin to add to CSP connect-src (e.g., "https://auth.loomcli.com")
 }
 
 // NewSecurityHeadersMiddleware creates a middleware that sets standard HTTP
@@ -23,8 +28,12 @@ func NewSecurityHeadersMiddleware(cfg SecurityConfig) func(http.Handler) http.Ha
 			// The sha256 hash allows the inline theme-detection script in index.html
 			// (prevents flash-of-wrong-theme). If that script changes, regenerate with:
 			//   python3 -c "import hashlib,base64;f=open('internal/webui/frontend/index.html').read();s=f[f.index('<script>')+8:f.index('</script>')];print('sha256-'+base64.b64encode(hashlib.sha256(s.encode()).digest()).decode())"
+			connectSrc := "'self'"
+			if cfg.ExtAuthOrigin != "" {
+				connectSrc += " " + cfg.ExtAuthOrigin
+			}
 			h.Set("Content-Security-Policy",
-				"default-src 'self'; script-src 'self' 'sha256-E907z9SPF4o7blRe1MXfQVC2tBrJopXOXrMYZvksy/o='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; report-uri /api/csp-report")
+				fmt.Sprintf("default-src 'self'; script-src 'self' 'sha256-E907z9SPF4o7blRe1MXfQVC2tBrJopXOXrMYZvksy/o='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src %s; font-src 'self'; frame-ancestors 'none'; report-uri /api/csp-report", connectSrc))
 			h.Set("X-Content-Type-Options", "nosniff")
 			h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
 			h.Set("X-Frame-Options", "DENY")
@@ -36,4 +45,14 @@ func NewSecurityHeadersMiddleware(cfg SecurityConfig) func(http.Handler) http.Ha
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// extractOrigin returns the scheme://host portion of a URL, suitable for
+// CORS and CSP origin matching.
+func extractOrigin(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host
 }
