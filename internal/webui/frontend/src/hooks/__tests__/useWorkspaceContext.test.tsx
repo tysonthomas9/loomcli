@@ -813,18 +813,37 @@ describe("useWorkspaceContext", () => {
         },
       });
 
-      // First render sets localStorage
+      // First render sets activeWorkspaceName from useWorkspace hook
       const { unmount } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
       unmount();
 
-      // Second render reads from localStorage
+      // Second render gets name from useWorkspace hook (not localStorage)
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
 
       expect(result.current.activeWorkspaceName).toBe("persistent-ws");
+    });
+
+    it("does not write to loom-active-workspace", () => {
+      setupMockWorkspace({
+        workspace: {
+          id: TEST_WS_ID,
+          name: "my-workspace",
+          path: "/home/user/workspace",
+          repos: [],
+          groups: [],
+          agents: [],
+          workspaces: [],
+          default_workspace: "",
+        },
+      });
+
+      renderHook(() => useWorkspaceContext(), { wrapper });
+
+      expect(localStorage.getItem("loom-active-workspace")).toBeNull();
     });
   });
 

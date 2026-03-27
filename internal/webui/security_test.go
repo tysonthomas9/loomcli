@@ -3,6 +3,7 @@ package webui
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -166,5 +167,49 @@ func TestSecurityHeaders_HSTSDisabledByDefault(t *testing.T) {
 
 	if got := w.Header().Get("Strict-Transport-Security"); got != "" {
 		t.Errorf("Strict-Transport-Security = %q, want empty (HSTS should be disabled by default)", got)
+	}
+}
+
+func TestSecurityHeaders_ExtAuthOriginInCSP(t *testing.T) {
+	middleware := NewSecurityHeadersMiddleware(SecurityConfig{
+		ExtAuthOrigin: "https://auth.example.com",
+	})
+	handler := middleware(testHandler())
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	csp := w.Header().Get("Content-Security-Policy")
+
+	// connect-src should include both 'self' and the auth origin
+	wantConnectSrc := "connect-src 'self' https://auth.example.com"
+	if !strings.Contains(csp, wantConnectSrc) {
+		t.Errorf("CSP = %q, want it to contain %q", csp, wantConnectSrc)
+	}
+}
+
+func TestSecurityHeaders_NoExtAuth_DefaultCSP(t *testing.T) {
+	middleware := NewSecurityHeadersMiddleware(SecurityConfig{})
+	handler := middleware(testHandler())
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	csp := w.Header().Get("Content-Security-Policy")
+
+	// connect-src should be just 'self' (no external auth origin)
+	wantConnectSrc := "connect-src 'self';"
+	if !strings.Contains(csp, wantConnectSrc) {
+		t.Errorf("CSP = %q, want it to contain %q", csp, wantConnectSrc)
+	}
+
+	// Ensure no extra origins in connect-src
+	unwanted := "connect-src 'self' "
+	if strings.Contains(csp, unwanted) {
+		t.Errorf("CSP = %q, should not contain %q (no ext auth configured)", csp, unwanted)
 	}
 }

@@ -216,3 +216,31 @@ func classifyJWTError(err error) string {
 func isTokenMalformed(err error) bool {
 	return errors.Is(err, jwt.ErrTokenMalformed)
 }
+
+// initExtAuth initializes external JWT auth from ServerConfig. Returns
+// the middleware (nil if unconfigured) and a cleanup function for the JWKS cache.
+func initExtAuth(config ServerConfig) (func(http.Handler) http.Handler, func()) {
+	if config.ExtAuthURL == "" {
+		return nil, nil
+	}
+	jwksURL := config.ExtAuthURL + "/api/auth/jwks"
+	var jwksClient *http.Client
+	if config.ExtAuthAllowInsecure {
+		jwksClient = newJWKSHTTPClient(safeDialContext(true))
+	}
+	jwksCache := NewJWKSCache(jwksURL, jwksClient, config.Logger)
+
+	mw := NewExtAuthMiddleware(ExtAuthConfig{
+		JWKSCache: jwksCache,
+		Issuer:    config.ExtAuthIssuer,
+		Audience:  config.ExtAuthAudience,
+		Logger:    config.Logger,
+	})
+	slog.Info("external auth enabled",
+		"component", "auth",
+		"auth_url", config.ExtAuthURL,
+		"jwks_url", jwksURL,
+		"issuer", config.ExtAuthIssuer,
+	)
+	return mw, jwksCache.Stop
+}

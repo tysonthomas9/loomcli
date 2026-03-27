@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/workspace"
 )
 
 // hasTmux reports whether tmux is available on the system.
@@ -1045,51 +1047,6 @@ func TestTerminalDetachDuringShutdown(t *testing.T) {
 	}
 }
 
-// --- shortWorkspaceID tests ---
-
-func TestShortWorkspaceID(t *testing.T) {
-	tests := []struct {
-		name string
-		id   string
-		want string
-	}{
-		{
-			name: "empty string returns default",
-			id:   "",
-			want: "_default",
-		},
-		{
-			name: "full UUID returns first 8 chars",
-			id:   "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-			want: "a1b2c3d4",
-		},
-		{
-			name: "string shorter than 8 returns as-is",
-			id:   "abc",
-			want: "abc",
-		},
-		{
-			name: "exactly 8 chars returns as-is",
-			id:   "abcdefgh",
-			want: "abcdefgh",
-		},
-		{
-			name: "9 chars returns first 8",
-			id:   "abcdefghi",
-			want: "abcdefgh",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := shortWorkspaceID(tt.id)
-			if got != tt.want {
-				t.Errorf("shortWorkspaceID(%q) = %q, want %q", tt.id, got, tt.want)
-			}
-		})
-	}
-}
-
 // --- FindLatestAgentSession tests ---
 
 // TestFindLatestAgentSession_WithWorkspaceID verifies that when a workspace ID
@@ -1104,7 +1061,7 @@ func TestFindLatestAgentSession_WithWorkspaceID(t *testing.T) {
 	defer mgr.Shutdown()
 
 	wsID := "aaaabbbb-cccc-dddd-eeee-ffffffffffff"
-	wsPrefix := shortWorkspaceID(wsID) // "aaaabbbb"
+	wsPrefix := workspace.ShortWorkspaceID(wsID) // "aaaabbbb"
 	agentName := "ember"
 
 	// Create a session matching the workspace naming convention.
@@ -1184,8 +1141,8 @@ func TestFindLatestAgentSession_WorkspaceIsolation(t *testing.T) {
 	agentName := "bolt"
 	wsA := "11112222-3333-4444-5555-666677778888"
 	wsB := "99998888-7777-6666-5555-444433332222"
-	wsPrefixA := shortWorkspaceID(wsA) // "11112222"
-	wsPrefixB := shortWorkspaceID(wsB) // "99998888"
+	wsPrefixA := workspace.ShortWorkspaceID(wsA) // "11112222"
+	wsPrefixB := workspace.ShortWorkspaceID(wsB) // "99998888"
 
 	pid := os.Getpid()
 	sessionA := fmt.Sprintf("loom-%s-task-%s-%d", wsPrefixA, agentName, pid)

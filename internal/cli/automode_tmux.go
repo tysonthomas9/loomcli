@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/workspace"
 )
 
 // IsTmuxAvailable checks if tmux is installed and available.
@@ -28,8 +30,8 @@ func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
 	}
 
 	// Resolve workspace ID for session naming and log isolation.
-	wsID := ResolveWorkspaceID(opts.WorkspaceID)
-	wsPrefix := ShortWorkspaceID(wsID)
+	wsID := workspace.ResolveWorkspaceID(opts.WorkspaceID)
+	wsPrefix := workspace.ShortWorkspaceID(wsID)
 
 	// Include workspace prefix and PID to prevent session name collisions
 	sessionName := fmt.Sprintf("loom-%s-%s-%s-%d", wsPrefix, opts.AgentType, opts.AgentName, os.Getpid())

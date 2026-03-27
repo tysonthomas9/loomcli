@@ -32,7 +32,6 @@ import { useWorkspace as useWorkspaceData } from "./useWorkspace";
 import type { UseWorkspaceReturn } from "./useWorkspace";
 
 // localStorage keys
-const LS_ACTIVE_WORKSPACE = "loom-active-workspace";
 const LS_DEFAULT_WORKSPACE = "loom-default-workspace";
 // Scoped key suffix for selected repos (stored as loom:{wsId}:selected-repos)
 const SK_SELECTED_REPOS = "selected-repos";
@@ -179,13 +178,7 @@ export function WorkspaceProvider({
   useEffect(() => {
     if (workspaceResult.workspace) {
       const wsName = workspaceResult.workspace.name;
-      setActiveWorkspaceNameRaw((prev) => {
-        if (prev !== wsName) {
-          lsSet(LS_ACTIVE_WORKSPACE, wsName);
-          return wsName;
-        }
-        return prev;
-      });
+      setActiveWorkspaceNameRaw((prev) => (prev !== wsName ? wsName : prev));
     }
   }, [workspaceResult.workspace]);
 

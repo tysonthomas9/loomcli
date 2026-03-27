@@ -579,7 +579,7 @@ func TestNewAuthMiddleware_QueryParamWithWrongKey(t *testing.T) {
 	middleware := NewAuthMiddleware(config)
 	handler := middleware(testHandler())
 
-	req := httptest.NewRequest(http.MethodGet, "/api/events?token=wrong-key", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/issues?token=wrong-key", nil)
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
