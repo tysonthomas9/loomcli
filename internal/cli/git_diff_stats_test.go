@@ -60,6 +60,7 @@ func TestComputeDiffStats_EmptyRef(t *testing.T) {
 }
 
 func TestComputeDiffStats_WithRealRepo(t *testing.T) {
+	clearGitEnvVars(t)
 	// Create a temp git repo
 	dir := t.TempDir()
 	run := func(args ...string) {

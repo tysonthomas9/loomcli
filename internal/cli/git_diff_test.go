@@ -13,6 +13,7 @@ import (
 // Returns the repo dir and the merge-base hash.
 func setupDiffTestRepo(t *testing.T) (string, string) {
 	t.Helper()
+	clearGitEnvVars(t)
 	dir := t.TempDir()
 
 	run := func(args ...string) string {
@@ -152,6 +153,7 @@ func TestDiffCommits_WithLimit(t *testing.T) {
 }
 
 func TestDiffCommits_NoCommits(t *testing.T) {
+	clearGitEnvVars(t)
 	dir := t.TempDir()
 	run := func(args ...string) string {
 		t.Helper()
@@ -266,6 +268,7 @@ func TestDiffFiles_WithRename(t *testing.T) {
 }
 
 func TestDiffFiles_NoChanges(t *testing.T) {
+	clearGitEnvVars(t)
 	dir := t.TempDir()
 	run := func(args ...string) string {
 		t.Helper()
@@ -341,6 +344,7 @@ func TestDiffFilePatch_BinaryFile(t *testing.T) {
 }
 
 func TestDiffFilePatch_TooLarge(t *testing.T) {
+	clearGitEnvVars(t)
 	dir := t.TempDir()
 	run := func(args ...string) string {
 		t.Helper()
@@ -388,6 +392,7 @@ func TestDiffFilePatch_TooLarge(t *testing.T) {
 }
 
 func TestDiffFilePatch_NoChange(t *testing.T) {
+	clearGitEnvVars(t)
 	dir := t.TempDir()
 	run := func(args ...string) string {
 		t.Helper()
