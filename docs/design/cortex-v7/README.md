@@ -749,6 +749,248 @@ Configure outbound notifications for project events. (Promotes existing epic loo
 - Discord: paste webhook URL, auto-formats as Discord embed
 - Email: SMTP config, sends HTML-formatted email digest
 
+### 21. Agent Prompt Inspector
+
+See the exact prompt an agent received after template rendering.
+
+**Prompt tab (in Session detail):**
+- Shows the fully rendered prompt: task.md / fleet_task.md / plan.md after Go template execution
+- All injected blocks visible: SafetyBlock, WorkspaceBlock, EpicScope, TestStep, ReviewStep
+- Syntax highlighted as markdown
+- Collapsible sections for each injected block
+- Diff between this session's prompt and the previous session's prompt (if template changed between runs)
+
+**Use cases:**
+- Debug why an agent ignored a rule → check if the safety block was present
+- Verify epic scope was injected correctly
+- Compare prompts across agents working the same epic (should be consistent)
+
+**Access:** Sessions tab → expand a session → "Prompt" sub-tab alongside Transcript
+
+### 22. Task Design Revision Diff
+
+When a plan gets `needs-revision` and is rewritten, show what changed.
+
+**Revision history:**
+- Task detail → Design section → "History" button (shows revision count)
+- Click → side-by-side diff: revision N vs revision N+1
+- Markdown diff with red/green highlighting (deleted/added lines)
+- Each revision timestamped with the agent that wrote it
+
+**Inline annotations:**
+- Feedback comments that triggered the revision linked to the diff
+- "FEEDBACK: Do not use custom HTML harness" → highlighted next to the section that changed
+
+**Workflow:**
+1. Lead reviews design, adds feedback, sets `needs-revision`
+2. Planning agent rewrites design
+3. Lead opens revision diff → sees exactly what changed in response to feedback
+4. Approves or sends another round of feedback
+
+**Storage:** Design revisions stored as comments with `design-revision` label, or as separate fields in the beads database.
+
+### 23. Agent Log Correlation
+
+Unified timeline correlating git commits, tool calls, session transcripts, and test results.
+
+**Correlated timeline (in Session detail):**
+- Single scrollable timeline with interleaved entries:
+  - 🔧 Tool call: `Read internal/cli/recover.go` (2.3s)
+  - 🔧 Tool call: `Write internal/cli/recover.go` (+47 lines)
+  - 📝 Git commit: `abc1234 "Add post-exit tree validation"`
+  - ✅ Bash: `go test ./internal/cli/...` (passed, 12.4s)
+  - ❌ Bash: `make gate` (failed, exit code 1)
+  - 🔧 Tool call: `Read` the error output
+  - 📝 Git commit: `def5678 "Fix lint error in recover.go"`
+
+**Cross-linking:**
+- Click a commit → highlights the tool calls that produced it (the Write calls between this commit and the previous one)
+- Click a tool call → shows the git diff at that moment
+- Click a test run → shows which files were modified since last passing test
+
+**Filter:**
+- Toggle visibility: commits only, tool calls only, test results only, errors only
+- Search within timeline
+
+### 24. Workspace Templates
+
+Save and reuse workspace configurations.
+
+**Saving a template:**
+- Settings → Workspace Templates → "Save Current as Template"
+- Captures: agent roles (planner, implementer, reviewer), backend config per role, loom.yaml structure, hook configuration
+- Does NOT capture: task/epic data, git state, session history
+- Name and description for the template
+
+**Using a template:**
+- "+ New Workspace" → "From Template" option
+- Select template → pre-fills: agent count, role assignments, backend config
+- Customizable before creation (change agent names, adjust roles)
+
+**Built-in templates:**
+- "Standard" — 3 agents: planner (claude), implementer (claude), reviewer (claude)
+- "Multi-Backend" — 4 agents: planner (claude), 2x implementer (claude + codex), reviewer (claude)
+- "Solo" — 1 agent: does everything (plan + implement + review)
+
+**Sharing:**
+- Export template as YAML file
+- Import from file or URL
+- Community templates (future: template registry)
+
+### 25. PR Integration Panel
+
+Track pull request status within Cortex.
+
+**PR section in Task Detail → Details tab:**
+- Auto-detected: when agent pushes a branch, detect associated PR via `gh pr list --head <branch>`
+- Shows: PR title, number, link, CI status, review status, merge status
+- CI status: green checkmark / red X / yellow spinner with individual check names
+- Review status: "Approved by @user" / "Changes requested" / "Pending review"
+
+**Actions:**
+- "Open in GitHub" → external link
+- "Merge" → one-click merge from within Cortex (calls `gh pr merge`)
+- "Request Review" → assigns GitHub reviewers
+- "Close PR" → closes without merging
+
+**Auto-link rules:**
+- Branch name matches task ID pattern (e.g. `falcon-bd-xyz`) → auto-attach PR
+- Commit message contains task ID → auto-attach
+- Manual link: paste PR URL in task detail
+
+**PR status in kanban cards:**
+- Small icon on card: no PR (grey), PR open (blue), CI passing (green), CI failing (red), merged (purple)
+- Hover → PR title and status summary
+
+### 26. Design Comparison View
+
+Compare a task's design against sibling designs in the same epic.
+
+**Comparison panel:**
+- Task Detail → Design section → "Compare" button
+- Opens side-by-side: this task's design (left) | selected sibling's design (right)
+- Dropdown to pick which sibling to compare against
+
+**Pattern detection:**
+- Highlight common patterns: naming conventions, file structure, test strategy
+- Flag deviations: "Tasks 1-4 use `handlers_*.go` naming, this task uses `handle_*.go`"
+- Consistency score: "This design follows 8/10 patterns from sibling tasks"
+
+**Use case:**
+- Before approving task 7 in an epic, compare it against the completed task 3 to ensure consistent architecture
+- Catch a planning agent that drifted from established conventions
+
+### 27. Agent Leaderboard / Stats
+
+Per-agent performance metrics for routing decisions.
+
+**Leaderboard view (Monitor → Agents tab):**
+
+| Agent | Tasks Done | Avg Time | Error Rate | Review Pass | Best At |
+|-------|-----------|----------|------------|-------------|---------|
+| falcon | 47 | 18m | 4% | 92% | Bug fixes |
+| nova | 38 | 24m | 8% | 85% | Features |
+| ember | 52 | 15m | 2% | 96% | Reviews |
+
+**Per-agent detail:**
+- Task completion histogram (time distribution)
+- Error classification breakdown
+- Most frequently modified files/packages
+- Token efficiency: tokens per completed task (lower is better)
+
+**Routing suggestions:**
+- When assigning a task, show: "Recommended: falcon (fastest for bugs, 92% pass rate)"
+- Based on historical performance by task type and priority
+- Override-able — suggestion only, not automatic
+
+### 28. Offline / Disconnection Resilience
+
+App-wide handling of connection loss, not just per-component.
+
+**Disconnection banner:**
+- Full-width amber banner at top: "Connection lost — reconnecting in 5s..."
+- Countdown timer, manual "Reconnect Now" button
+- Shows which connections are down: SSE, Loom Server, or both
+
+**Stale data indication:**
+- All data rendered with 60% opacity when stale (global CSS class on app root)
+- Timestamp: "Data as of 2 minutes ago"
+- Sidebar, kanban, detail panels all dimmed simultaneously
+
+**Offline action queue:**
+- Actions taken while disconnected are queued locally:
+  - Status changes, priority changes, comments, assignee changes
+- Queue indicator: "3 pending actions" in the header
+- On reconnect: replay queue in order, show success/failure per action
+- Conflict resolution: if server state diverged, show diff and let user choose
+
+**Progressive reconnection:**
+- SSE reconnects with exponential backoff (1s, 2s, 4s, 8s, max 30s)
+- Loom server polls at 5s intervals when disconnected
+- On reconnect: full data refresh, then resume incremental SSE
+
+### 29. Multi-Cursor Task Editing
+
+Bulk property editor for multiple selected tasks.
+
+**Selection:**
+- Kanban: Cmd+click cards to multi-select, or drag-select with marquee
+- Table: checkbox column for selection
+- Sidebar: Cmd+click tasks in the tree
+- Selection count shown in header: "5 tasks selected"
+
+**Bulk editor panel:**
+- Appears as a toolbar/banner at the top of the main content area
+- Fields (each with "Apply to N tasks" button):
+  - Priority: dropdown → "Set all to P1"
+  - Status: dropdown → "Set all to open"
+  - Assignee: dropdown → "Assign all to falcon"
+  - Labels: add/remove → "Add label 'frontend' to all"
+  - Epic: dropdown → "Move all to Auth epic"
+  - Dependencies: "Add dependency on bd-xyz to all"
+
+**Preview before apply:**
+- "This will change priority on 5 tasks (2 from P2→P1, 3 from P3→P1) and assign 3 unassigned tasks to falcon"
+- Confirm / Cancel
+
+**Keyboard:**
+- Select with Space, extend with Shift+j/k
+- Apply: Enter opens the bulk editor
+- Esc: clear selection
+
+### 30. Timeline / Gantt View
+
+Horizontal timeline showing task execution over time.
+
+**Layout:**
+- Y-axis: tasks grouped by epic (epic name as row group header)
+- X-axis: time (hours/days depending on zoom)
+- Each task = a horizontal bar from open_at to closed_at (or current time if still open)
+- Bar color = status (green=done, blue=in progress, yellow=open, red=blocked)
+- Bar segments show agent stages: design (lighter) → implementation (normal) → review (darker)
+
+**Dependencies:**
+- Arrows between bars showing dependency relationships
+- Critical path highlighted with bold red arrows
+
+**Agent lanes (alternative grouping):**
+- Toggle: group by epic vs group by agent
+- Agent grouping shows each agent as a swim lane with their tasks as bars
+- Visualize agent utilization: gaps = idle time, overlaps = impossible (one task at a time)
+
+**Zoom levels:**
+- Hours: see individual agent runs within a task
+- Days: see task durations and parallelism
+- Weeks: see epic-level progress and milestones
+
+**Interactions:**
+- Hover bar → tooltip with: task title, duration, agent, cost
+- Click bar → opens task detail panel
+- Drag bar edges to adjust dates (for planning/estimation, not actual modification)
+- Today line: vertical red line showing current time
+
+**Access:** New header tab "Timeline" alongside Kanban, Table, Graph, Monitor
+
 ---
 
 ## Design Tokens (from mock)
