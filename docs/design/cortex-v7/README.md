@@ -53,9 +53,34 @@ Below title: branch name | git stats (+N green / -N red)
 - Clicking a kanban card (Kanban View)
 - Clicking a task in the sidebar tree (Sidebar View)
 
-**Panel layout:**
+**Tab bar:**
+The panel has a tabbed interface. Fixed tabs on the left, dynamic terminal tabs in the middle, and a "+" button to create new terminal sessions.
+
+| Tab | Type | Description |
+|-----|------|-------------|
+| **Details** | Fixed | Issue detail view (default active tab) |
+| **Sessions** | Fixed | Agent session logs — shows all agent sessions for this task (design agent, task agent, review agent, etc.) |
+| **Diff** | Fixed | Diff between task branch and main |
+| **Files** | Fixed | File browser for the agent's worktree |
+| **[Claude]** | Dynamic | Terminal session with Claude backend (brand color #d4a574) |
+| **[Codex]** | Dynamic | Terminal session with Codex backend (brand color #10a37f) |
+| **[+]** | Action | Opens backend selector dropdown to create a new terminal tab |
+
+Multiple terminal tabs can be open simultaneously (e.g. a Claude tab and a Codex tab side by side). Each terminal session is scoped to the task.
+
+**Backend selector dropdown** (from "+" button):
+- Claude (Anthropic) — #d4a574
+- Codex (OpenAI) — #10a37f
+- OpenCode (Open Source) — #6366f1
+- Gemini (Google) — #8e24aa
+- Cursor (Anysphere) — #00e5ff
+- Browser (System) — #f59e0b
+- Terminal/Shell (System) — #6b7280
+
+Only available/configured backends are shown. Each backend has a brand color used for the tab indicator.
+
+**Details tab layout:**
 - **Left pane (~60%)**:
-  - "Details" tab (active)
   - Assignee with avatar + email
   - Status badge (e.g. "CRITICAL" red) + tags
   - Approve / Reject buttons (green/red, shown for review-status tasks)
@@ -64,7 +89,28 @@ Below title: branch name | git stats (+N green / -N red)
   - Comment form: "Write a message..." textarea + "Post Comment" button
 - **Right pane (~40%)**:
   - "Summary" metadata section
+  - Child issues section
   - Additional context fields
+
+**Sessions tab:**
+Lists all agent sessions that have run against this task. Each session shows:
+- Agent name + backend (e.g. "falcon — Claude")
+- Session type: design, task, review
+- Start/end time, duration
+- Token usage / cost
+- Expandable transcript
+
+**Diff tab:**
+Side-by-side or unified diff between the task's branch and main. Shows:
+- File list with change counts
+- Expandable file diffs with syntax highlighting
+- Commit selector for comparing specific commits
+
+**Files tab:**
+File browser for the agent's worktree. Shows:
+- Directory tree
+- File viewer with syntax highlighting (CodeMirror)
+- Read-only by default
 
 ### Agent Panel (Kanban View only)
 3/4-width slide-out from right, triggered by clicking an agent card in the sidebar.
