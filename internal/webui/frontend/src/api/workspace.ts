@@ -66,6 +66,7 @@ type ApiResult<T> = ApiSuccess<T> | ApiFailure;
 let workspaceCache: WorkspaceData | null = null;
 let fetchPromise: Promise<WorkspaceData> | null = null;
 let cacheGeneration = 0; // incremented on refresh to discard stale in-flight responses
+let cachedWorkspaceId: string | null = null; // tracks which workspace the cache holds
 
 // ============= Helpers =============
 
@@ -85,6 +86,15 @@ function unwrap<T>(response: ApiResult<T>): T {
 export async function fetchWorkspace(
   workspaceId?: string,
 ): Promise<WorkspaceData> {
+  const requestedId = workspaceId ?? null;
+
+  // Invalidate cache if the requested workspace differs from what's cached
+  if (requestedId !== cachedWorkspaceId) {
+    workspaceCache = null;
+    fetchPromise = null;
+    cachedWorkspaceId = requestedId;
+  }
+
   if (workspaceCache !== null) {
     return workspaceCache;
   }
@@ -99,9 +109,10 @@ export async function fetchWorkspace(
     (response) => {
       // Discard stale response if a refresh happened while we were in-flight
       if (gen !== cacheGeneration) {
-        return fetchWorkspace();
+        return fetchWorkspace(workspaceId);
       }
       workspaceCache = unwrap(response);
+      cachedWorkspaceId = requestedId;
       fetchPromise = null;
       return workspaceCache;
     },
@@ -124,16 +135,20 @@ export function invalidateWorkspaceCache(): void {
   cacheGeneration++;
   workspaceCache = null;
   fetchPromise = null;
+  cachedWorkspaceId = null;
 }
 
 /**
  * Invalidate the cache and re-fetch workspace data from the backend.
  */
-export async function refreshWorkspace(): Promise<WorkspaceData> {
+export async function refreshWorkspace(
+  workspaceId?: string,
+): Promise<WorkspaceData> {
   cacheGeneration++; // Invalidate any in-flight fetch from prior generation
   workspaceCache = null;
   fetchPromise = null;
-  return fetchWorkspace();
+  cachedWorkspaceId = workspaceId ?? null;
+  return fetchWorkspace(workspaceId);
 }
 
 /**

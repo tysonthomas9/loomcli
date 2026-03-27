@@ -158,7 +158,10 @@ export function WorkspaceProvider({
     setLastWorkspaceId(workspaceId);
   });
 
-  const workspaceResult = useWorkspaceData({ pollInterval: 60000 });
+  const workspaceResult = useWorkspaceData({
+    pollInterval: 60000,
+    workspaceId,
+  });
 
   // Track workspace name for display and localStorage
   const [activeWorkspaceName, setActiveWorkspaceNameRaw] = useState<

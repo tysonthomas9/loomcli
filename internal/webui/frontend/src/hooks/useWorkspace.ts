@@ -16,6 +16,8 @@ import type {
 export interface UseWorkspaceOptions {
   /** Poll interval in ms (default: 60000 = 60s) */
   pollInterval?: number;
+  /** Workspace UUID to fetch. If omitted, falls back to /api/workspaces/active */
+  workspaceId?: string;
 }
 
 export interface UseWorkspaceReturn {
@@ -45,13 +47,15 @@ const DEFAULT_POLL_INTERVAL = 60000;
 export function useWorkspace(
   options?: UseWorkspaceOptions,
 ): UseWorkspaceReturn {
-  const { pollInterval = DEFAULT_POLL_INTERVAL } = options ?? {};
+  const { pollInterval = DEFAULT_POLL_INTERVAL, workspaceId } = options ?? {};
 
   const [workspace, setWorkspace] = useState<WorkspaceData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const mountedRef = useRef(true);
+  const workspaceIdRef = useRef(workspaceId);
+  workspaceIdRef.current = workspaceId;
 
   // Initial fetch and polling.
   // Note: AbortController gates post-fetch state updates only — it does NOT cancel
@@ -64,8 +68,8 @@ export function useWorkspace(
     const fetchData = async (invalidateCache = false) => {
       try {
         const data = invalidateCache
-          ? await refreshWorkspace()
-          : await fetchWorkspace();
+          ? await refreshWorkspace(workspaceId)
+          : await fetchWorkspace(workspaceId);
         if (mountedRef.current && !controller.signal.aborted) {
           setWorkspace(data);
           setError(null);
@@ -109,10 +113,10 @@ export function useWorkspace(
       }
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [pollInterval]);
+  }, [pollInterval, workspaceId]);
 
   const refetch = useCallback(() => {
-    void refreshWorkspace().then(
+    void refreshWorkspace(workspaceIdRef.current).then(
       (data) => {
         if (mountedRef.current) {
           setWorkspace(data);

@@ -220,6 +220,7 @@ describe("useWorkspaceContext", () => {
 
       expect(mockUseWorkspace).toHaveBeenCalledWith({
         pollInterval: 60000,
+        workspaceId: TEST_WS_ID,
       });
     });
   });

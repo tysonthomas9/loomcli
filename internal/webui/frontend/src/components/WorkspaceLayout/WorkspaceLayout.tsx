@@ -38,22 +38,32 @@ export function WorkspaceLayout() {
       return;
     }
 
-    // Validate workspace ID exists
+    // Validate workspace ID exists by fetching it directly
     let cancelled = false;
-    fetchWorkspace()
+    fetchWorkspace(workspaceId)
       .then((data) => {
         if (cancelled) return;
-        const found = data.workspaces.some((ws) => ws.id === workspaceId);
-        if (!found) {
-          navigate("/", { replace: true });
-        } else {
+        if (data && data.id) {
           setValid(true);
+        } else {
+          navigate("/", { replace: true });
         }
         setValidating(false);
       })
-      .catch(() => {
+      .catch((err) => {
         if (cancelled) return;
-        // On error, proceed anyway — the workspace data fetch in the provider
+        // 404 means workspace doesn't exist — redirect to root
+        if (
+          err &&
+          typeof err === "object" &&
+          "status" in err &&
+          err.status === 404
+        ) {
+          navigate("/", { replace: true });
+          setValidating(false);
+          return;
+        }
+        // On other errors, proceed anyway — the workspace data fetch in the provider
         // will handle errors with proper UI
         setValid(true);
         setValidating(false);
