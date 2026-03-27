@@ -332,21 +332,24 @@ func TestWrapWorkspaceDeleteFn_NilFleetRegistry(t *testing.T) {
 }
 
 func TestWrapWorkspaceDeleteFn_UUIDResolutionFails(t *testing.T) {
-	registry, multiPool, _ := newTestRegistry(t)
+	registry, multiPool, multiSub := newTestRegistry(t)
 
+	wsID := "eeeeeeee-1111-2222-3333-444444444444"
 	wsName := "unresolvable-workspace"
 
-	// Register with the name as key (simulating fallback behavior).
+	// Register under UUID (production behavior).
 	wsPath := t.TempDir()
-	if err := registry.Register(wsName, wsPath); err != nil {
+	if err := registry.Register(wsID, wsPath); err != nil {
 		t.Fatalf("Register returned error: %v", err)
 	}
 
+	var innerCalled bool
 	innerDelete := func(name string) error {
+		innerCalled = true
 		return nil
 	}
 
-	// resolveID returns an error; wrapper should fall back to using the workspace name.
+	// resolveID returns an error; cleanup should be skipped (not called with name).
 	resolveID := func(name string) (string, error) {
 		return "", fmt.Errorf("config not found")
 	}
@@ -356,37 +359,138 @@ func TestWrapWorkspaceDeleteFn_UUIDResolutionFails(t *testing.T) {
 		t.Fatalf("wrapped delete returned error: %v", err)
 	}
 
-	// When UUID resolution fails, the wrapper uses the name as deregistration key.
-	// Since we registered with the name, the pool should now be removed.
-	if multiPool.PoolForWorkspace(wsName) != nil {
-		t.Error("expected pool to be deregistered using workspace name as fallback key")
+	if !innerCalled {
+		t.Error("expected innerDelete to be called even when UUID resolution fails")
+	}
+
+	// Cleanup was skipped — pool should still be registered under the UUID (leak accepted).
+	if multiPool.PoolForWorkspace(wsID) == nil {
+		t.Error("expected pool to still be registered (cleanup skipped on resolution failure)")
+	}
+	if len(multiSub.WorkspaceIDs()) != 1 {
+		t.Error("expected subscriber to still have 1 workspace (cleanup skipped)")
 	}
 }
 
 func TestWrapWorkspaceDeleteFn_NilResolveID(t *testing.T) {
-	registry, multiPool, _ := newTestRegistry(t)
+	registry, multiPool, multiSub := newTestRegistry(t)
 
+	wsID := "ffffffff-1111-2222-3333-444444444444"
 	wsName := "nil-resolver-workspace"
 
-	// Register with the name as key (simulating no UUID available).
+	// Register under UUID (production behavior).
 	wsPath := t.TempDir()
-	if err := registry.Register(wsName, wsPath); err != nil {
+	if err := registry.Register(wsID, wsPath); err != nil {
 		t.Fatalf("Register returned error: %v", err)
 	}
 
+	var innerCalled bool
 	innerDelete := func(name string) error {
+		innerCalled = true
 		return nil
 	}
 
-	// Pass nil resolveID. Wrapper should use the workspace name directly.
+	// Pass nil resolveID. Cleanup should be skipped entirely.
 	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, nil, nil)
 	if err := wrapped(wsName); err != nil {
 		t.Fatalf("wrapped delete returned error: %v", err)
 	}
 
-	// Pool should be deregistered using the name (fallback when resolveID is nil).
-	if multiPool.PoolForWorkspace(wsName) != nil {
-		t.Error("expected pool to be deregistered using workspace name when resolveID is nil")
+	if !innerCalled {
+		t.Error("expected innerDelete to be called even when resolveID is nil")
+	}
+
+	// Cleanup was skipped — pool should still be registered under the UUID (leak accepted).
+	if multiPool.PoolForWorkspace(wsID) == nil {
+		t.Error("expected pool to still be registered (cleanup skipped when resolveID is nil)")
+	}
+	if len(multiSub.WorkspaceIDs()) != 1 {
+		t.Error("expected subscriber to still have 1 workspace (cleanup skipped)")
+	}
+}
+
+func TestWrapWorkspaceDeleteFn_ResolveIDEmptyString(t *testing.T) {
+	registry, multiPool, multiSub := newTestRegistry(t)
+
+	wsID := "11111111-aaaa-bbbb-cccc-dddddddddddd"
+	wsName := "empty-resolve-workspace"
+
+	wsPath := t.TempDir()
+	if err := registry.Register(wsID, wsPath); err != nil {
+		t.Fatalf("Register returned error: %v", err)
+	}
+
+	var innerCalled bool
+	innerDelete := func(name string) error {
+		innerCalled = true
+		return nil
+	}
+
+	// resolveID returns ("", nil) — empty string is not a valid UUID.
+	resolveID := func(name string) (string, error) {
+		return "", nil
+	}
+
+	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, nil, resolveID)
+	if err := wrapped(wsName); err != nil {
+		t.Fatalf("wrapped delete returned error: %v", err)
+	}
+
+	if !innerCalled {
+		t.Error("expected innerDelete to be called")
+	}
+
+	// Cleanup should be skipped — empty string is not a valid UUID.
+	if multiPool.PoolForWorkspace(wsID) == nil {
+		t.Error("expected pool to still be registered (cleanup skipped on empty resolve)")
+	}
+	if len(multiSub.WorkspaceIDs()) != 1 {
+		t.Error("expected subscriber to still have 1 workspace (cleanup skipped)")
+	}
+}
+
+func TestWrapWorkspaceDeleteFn_SkipsCleanupOnResolutionFailure(t *testing.T) {
+	registry, multiPool, multiSub := newTestRegistry(t)
+
+	wsID := "22222222-aaaa-bbbb-cccc-dddddddddddd"
+	wsName := "skip-cleanup-workspace"
+
+	wsPath := t.TempDir()
+	if err := registry.Register(wsID, wsPath); err != nil {
+		t.Fatalf("Register returned error: %v", err)
+	}
+
+	var innerCalledWith string
+	innerDelete := func(name string) error {
+		innerCalledWith = name
+		return nil
+	}
+
+	// resolveID fails.
+	resolveID := func(name string) (string, error) {
+		return "", fmt.Errorf("workspace config corrupted")
+	}
+
+	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, nil, resolveID)
+	err := wrapped(wsName)
+
+	// Function should return nil (delete succeeded, leak is logged not returned).
+	if err != nil {
+		t.Fatalf("expected nil error, got: %v", err)
+	}
+
+	// innerDelete should have been called with the workspace name.
+	if innerCalledWith != wsName {
+		t.Errorf("expected innerDelete called with %q, got %q", wsName, innerCalledWith)
+	}
+
+	// Pool should still be registered — cleanup was skipped.
+	if multiPool.PoolForWorkspace(wsID) == nil {
+		t.Error("expected pool to still be registered under UUID (cleanup skipped)")
+	}
+	subIDs := multiSub.WorkspaceIDs()
+	if len(subIDs) != 1 {
+		t.Errorf("expected 1 subscriber ID (cleanup skipped), got %d: %v", len(subIDs), subIDs)
 	}
 }
 

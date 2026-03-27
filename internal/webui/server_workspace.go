@@ -172,30 +172,38 @@ func wrapWorkspaceDeleteFn(
 	}
 	return func(name string) error {
 		// 1. Resolve UUID BEFORE deletion (config entry is removed by innerDelete).
-		wsID := name // fallback to name if resolution fails
+		var wsID string
+		var resolved bool
 		if resolveID != nil {
-			if resolved, err := resolveID(name); err == nil && resolved != "" {
-				wsID = resolved
-			} else {
-				slog.Warn("could not resolve workspace UUID for deletion cleanup, using name as fallback",
+			if id, err := resolveID(name); err != nil {
+				slog.Error("failed to resolve workspace UUID for deletion cleanup — pool and fleet store will leak until restart",
 					"workspace", name, "err", err)
+			} else if id == "" {
+				slog.Error("workspace ID resolver returned empty UUID for deletion cleanup — pool and fleet store will leak until restart",
+					"workspace", name)
+			} else {
+				wsID = id
+				resolved = true
 			}
+		} else {
+			slog.Error("no workspace ID resolver available — pool and fleet store will leak until restart",
+				"workspace", name)
 		}
 
-		// 2. Perform the config deletion (the critical path).
+		// 2. Perform the config deletion (the critical path — always proceed).
 		if err := innerDelete(name); err != nil {
 			return err
 		}
 
-		// 3. Clean up pool and subscriber state (best-effort, non-fatal).
-		if registry != nil {
+		// 3. Clean up pool and subscriber state (only if UUID was resolved).
+		if resolved && registry != nil {
 			registry.Deregister(wsID)
 			slog.Info("workspace pool and subscriber cleaned up after deletion",
 				"workspace", name, "id", wsID)
 		}
 
-		// 4. Clean up fleet state (best-effort, non-fatal).
-		if fleetRegistry != nil {
+		// 4. Clean up fleet state (only if UUID was resolved).
+		if resolved && fleetRegistry != nil {
 			fleetRegistry.Deregister(wsID)
 			slog.Info("workspace fleet store cleaned up after deletion",
 				"workspace", name, "id", wsID)
