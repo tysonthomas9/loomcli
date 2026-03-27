@@ -58,6 +58,11 @@ Below title: branch name | git stats (+N green / -N red)
 | **Overview** | Fixed | Epic summary, description, progress bar (N/M tasks done) |
 | **Tasks** | Fixed | List of all child tasks with status, assignee, priority. Click to open task detail. |
 | **Dependency Graph** | Fixed | XY Flow (React Flow) visualization of task dependencies within the epic |
+| **Sessions** | Fixed | Aggregated agent session logs across all tasks in this epic |
+| **Diff** | Fixed | Combined diff of all task branches vs main for this epic |
+| **Files** | Fixed | Aggregated file browser showing all files touched across epic tasks |
+| **[Claude]** | Dynamic | Terminal session scoped to this epic |
+| **[+]** | Action | Opens backend selector dropdown to create a new terminal tab |
 
 **Overview tab:**
 - Epic title, description (markdown)
