@@ -1799,7 +1799,7 @@ func TestSetupRoutes_LegacyFleetClaimInjectsWorkspaceContext(t *testing.T) {
 
 	mux := http.NewServeMux()
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
-	setupRoutes(mux, nil, multiPool, nil, nil, nil, nil, registry, nil, "", false, nil, nil, nil, true, false, "", "", nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, wsExistsFn, "test-ws")
+	setupRoutes(mux, nil, multiPool, nil, nil, nil, nil, registry, nil, "", false, nil, nil, nil, true, false, "", "", nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, wsExistsFn, "test-ws", nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/fleet/claim", nil)
 	rr := httptest.NewRecorder()
