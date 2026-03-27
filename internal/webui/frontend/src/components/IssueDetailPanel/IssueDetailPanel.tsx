@@ -24,9 +24,7 @@ import {
   LAYER_ISSUE_PANEL,
 } from "@/hooks";
 import { useAgentContext } from "@/hooks/useAgentContext";
-import { useWorkspace } from "@/hooks/useWorkspace";
 import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
-import { useWorkspaceRepos } from "@/hooks/useWorkspaceRepos";
 import { useIssueTabPersistence } from "@/hooks/useIssueTabPersistence";
 import type {
   Issue,
@@ -310,7 +308,7 @@ function DefaultContent({
   onCopyLink,
   onNavigateToIssue,
 }: DefaultContentProps): JSX.Element {
-  const { workspaceId } = useWorkspaceContext();
+  const { workspaceId, workspace, repos } = useWorkspaceContext();
   const [isSavingTitle, setIsSavingTitle] = useState(false);
   const [isSavingStatus, setIsSavingStatus] = useState(false);
   const [isSavingPriority, setIsSavingPriority] = useState(false);
@@ -332,13 +330,9 @@ function DefaultContent({
     useSplitRatio();
 
   // Workspace data for move dialog
-  const { workspace } = useWorkspace();
   const workspaces = workspace?.workspaces ?? [];
   const currentWorkspace = workspace?.name ?? "";
   const canMove = workspaces.length > 1 && issue?.status !== "closed";
-
-  // Workspace repos for repo assignment
-  const { repos } = useWorkspaceRepos();
 
   const currentRepo = useMemo(() => {
     const repoLabel = issue?.labels?.find((l) => l.startsWith("repo:"));

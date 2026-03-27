@@ -14,12 +14,18 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 )
 
+const testSHWSID = "test-ws-uuid"
+
 func setupSessionHistoryStore(t *testing.T) *sessionhistory.Store {
 	t.Helper()
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { rdb.Close() })
-	return sessionhistory.NewStore(rdb, "test-ws-uuid", nil)
+	return sessionhistory.NewStore(rdb, nil)
+}
+
+func withSHWSContext(r *http.Request, wsID string) *http.Request {
+	return r.WithContext(WithWorkspace(r.Context(), wsID))
 }
 
 func TestHandleListSessionHistory_ReturnsRecords(t *testing.T) {
@@ -36,14 +42,15 @@ func TestHandleListSessionHistory_ReturnsRecords(t *testing.T) {
 		Launcher:    "user",
 		StartedAt:   time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC),
 	}
-	if err := store.Add(ctx, record); err != nil {
+	if err := store.Add(ctx, testSHWSID, record); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 
 	handler := handleListSessionHistory(store)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/issues/proj.1/sessions", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testSHWSID+"/issues/proj.1/sessions", nil)
 	req.SetPathValue("issueId", "proj.1")
+	req = withSHWSContext(req, testSHWSID)
 	rr := httptest.NewRecorder()
 	handler(rr, req)
 
@@ -77,8 +84,9 @@ func TestHandleListSessionHistory_EmptyArrayForUnknownIssue(t *testing.T) {
 
 	handler := handleListSessionHistory(store)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/issues/unknown.99/sessions", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testSHWSID+"/issues/unknown.99/sessions", nil)
 	req.SetPathValue("issueId", "unknown.99")
+	req = withSHWSContext(req, testSHWSID)
 	rr := httptest.NewRecorder()
 	handler(rr, req)
 
@@ -107,8 +115,9 @@ func TestHandleListSessionHistory_EmptyArrayForUnknownIssue(t *testing.T) {
 func TestHandleListSessionHistory_NilStore(t *testing.T) {
 	handler := handleListSessionHistory(nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/issues/proj.1/sessions", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testSHWSID+"/issues/proj.1/sessions", nil)
 	req.SetPathValue("issueId", "proj.1")
+	req = withSHWSContext(req, testSHWSID)
 	rr := httptest.NewRecorder()
 	handler(rr, req)
 
@@ -129,7 +138,8 @@ func TestHandleListSessionHistory_InvalidIssueID(t *testing.T) {
 	store := setupSessionHistoryStore(t)
 	handler := handleListSessionHistory(store)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/issues//sessions", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testSHWSID+"/issues//sessions", nil)
+	req = withSHWSContext(req, testSHWSID)
 	// Do NOT set PathValue("issueId") to simulate empty issue ID.
 	rr := httptest.NewRecorder()
 	handler(rr, req)
@@ -142,9 +152,10 @@ func TestHandleListSessionHistory_InvalidIssueID(t *testing.T) {
 func TestHandleGetSessionScrollback_NilStore(t *testing.T) {
 	handler := handleGetSessionScrollback(nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/issues/proj.1/sessions/rec-1/scrollback", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testSHWSID+"/issues/proj.1/sessions/rec-1/scrollback", nil)
 	req.SetPathValue("issueId", "proj.1")
 	req.SetPathValue("recordId", "rec-1")
+	req = withSHWSContext(req, testSHWSID)
 	rr := httptest.NewRecorder()
 	handler(rr, req)
 
@@ -165,9 +176,10 @@ func TestHandleGetSessionScrollback_RecordNotFound(t *testing.T) {
 	store := setupSessionHistoryStore(t)
 	handler := handleGetSessionScrollback(store)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/issues/proj.1/sessions/nonexistent/scrollback", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testSHWSID+"/issues/proj.1/sessions/nonexistent/scrollback", nil)
 	req.SetPathValue("issueId", "proj.1")
 	req.SetPathValue("recordId", "nonexistent")
+	req = withSHWSContext(req, testSHWSID)
 	rr := httptest.NewRecorder()
 	handler(rr, req)
 
@@ -188,7 +200,8 @@ func TestHandleGetSessionScrollback_InvalidIssueID(t *testing.T) {
 	store := setupSessionHistoryStore(t)
 	handler := handleGetSessionScrollback(store)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/issues//sessions/rec-1/scrollback", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testSHWSID+"/issues//sessions/rec-1/scrollback", nil)
+	req = withSHWSContext(req, testSHWSID)
 	// Do NOT set PathValue("issueId") to simulate empty issue ID.
 	req.SetPathValue("recordId", "rec-1")
 	rr := httptest.NewRecorder()
@@ -203,8 +216,9 @@ func TestHandleGetSessionScrollback_EmptyRecordID(t *testing.T) {
 	store := setupSessionHistoryStore(t)
 	handler := handleGetSessionScrollback(store)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/issues/proj.1/sessions//scrollback", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testSHWSID+"/issues/proj.1/sessions//scrollback", nil)
 	req.SetPathValue("issueId", "proj.1")
+	req = withSHWSContext(req, testSHWSID)
 	// Do NOT set PathValue("recordId") to simulate empty record ID.
 	rr := httptest.NewRecorder()
 	handler(rr, req)
@@ -229,15 +243,16 @@ func TestHandleGetSessionScrollback_NoScrollbackAvailable(t *testing.T) {
 		StartedAt:   time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC),
 		// ScrollbackPath intentionally empty.
 	}
-	if err := store.Add(ctx, record); err != nil {
+	if err := store.Add(ctx, testSHWSID, record); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 
 	handler := handleGetSessionScrollback(store)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/issues/proj.1/sessions/issue-proj-1:1700000000/scrollback", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testSHWSID+"/issues/proj.1/sessions/issue-proj-1:1700000000/scrollback", nil)
 	req.SetPathValue("issueId", "proj.1")
 	req.SetPathValue("recordId", "issue-proj-1:1700000000")
+	req = withSHWSContext(req, testSHWSID)
 	rr := httptest.NewRecorder()
 	handler(rr, req)
 

@@ -16,6 +16,8 @@ vi.mock("../client", () => ({
   get: vi.fn(),
   put: vi.fn(),
   del: vi.fn(),
+  wsUrl: (workspaceId: string, path: string) =>
+    `/api/workspaces/${encodeURIComponent(workspaceId)}${path}`,
   ApiError: class ApiError extends Error {
     constructor(
       public status: number,
@@ -69,7 +71,9 @@ describe("issueTabs API", () => {
       const result = await fetchIssueTabState("test-ws-id", "PROJ-123");
 
       expect(result).toEqual(state);
-      expect(mockGet).toHaveBeenCalledWith("/api/issues/PROJ-123/tabs");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/issues/PROJ-123/tabs",
+      );
     });
 
     it("returns null on empty/null data", async () => {
@@ -81,7 +85,9 @@ describe("issueTabs API", () => {
       const result = await fetchIssueTabState("test-ws-id", "PROJ-456");
 
       expect(result).toBeNull();
-      expect(mockGet).toHaveBeenCalledWith("/api/issues/PROJ-456/tabs");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/issues/PROJ-456/tabs",
+      );
     });
 
     it("throws ApiError when response indicates failure", async () => {
@@ -107,7 +113,7 @@ describe("issueTabs API", () => {
       await fetchIssueTabState("test-ws-id", "issue with spaces");
 
       expect(mockGet).toHaveBeenCalledWith(
-        "/api/issues/issue%20with%20spaces/tabs",
+        "/api/workspaces/test-ws-id/issues/issue%20with%20spaces/tabs",
       );
     });
 
@@ -147,10 +153,13 @@ describe("issueTabs API", () => {
 
       await saveIssueTabState("test-ws-id", "PROJ-100", tabs, "details");
 
-      expect(mockPut).toHaveBeenCalledWith("/api/issues/PROJ-100/tabs", {
-        tabs,
-        active_tab_id: "details",
-      });
+      expect(mockPut).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/issues/PROJ-100/tabs",
+        {
+          tabs,
+          active_tab_id: "details",
+        },
+      );
     });
 
     it("sends multiple tabs with terminal session data", async () => {
@@ -173,10 +182,13 @@ describe("issueTabs API", () => {
 
       await saveIssueTabState("test-ws-id", "PROJ-200", tabs, "terminal-s1");
 
-      expect(mockPut).toHaveBeenCalledWith("/api/issues/PROJ-200/tabs", {
-        tabs,
-        active_tab_id: "terminal-s1",
-      });
+      expect(mockPut).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/issues/PROJ-200/tabs",
+        {
+          tabs,
+          active_tab_id: "terminal-s1",
+        },
+      );
     });
 
     it("URL-encodes the issue ID", async () => {
@@ -190,7 +202,7 @@ describe("issueTabs API", () => {
       );
 
       expect(mockPut).toHaveBeenCalledWith(
-        "/api/issues/issue%2Fwith%2Fslashes/tabs",
+        "/api/workspaces/test-ws-id/issues/issue%2Fwith%2Fslashes/tabs",
         { tabs: [], active_tab_id: "details" },
       );
     });
@@ -204,7 +216,9 @@ describe("issueTabs API", () => {
 
       await deleteIssueTabState("test-ws-id", "PROJ-300");
 
-      expect(mockDel).toHaveBeenCalledWith("/api/issues/PROJ-300/tabs");
+      expect(mockDel).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/issues/PROJ-300/tabs",
+      );
     });
 
     it("URL-encodes the issue ID", async () => {
@@ -213,7 +227,7 @@ describe("issueTabs API", () => {
       await deleteIssueTabState("test-ws-id", "issue with spaces");
 
       expect(mockDel).toHaveBeenCalledWith(
-        "/api/issues/issue%20with%20spaces/tabs",
+        "/api/workspaces/test-ws-id/issues/issue%20with%20spaces/tabs",
       );
     });
 

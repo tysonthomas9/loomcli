@@ -222,7 +222,7 @@ func TestHandleTerminalSpawn_InvalidBackend(t *testing.T) {
 }
 
 func TestHandleTerminalSpawn_NilManager(t *testing.T) {
-	handler := handleTerminalSpawn(nil, nil)
+	handler := handleTerminalSpawn(nil, nil, "")
 
 	body := `{"session_name":"my-session","backend":"claude"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/spawn", strings.NewReader(body))

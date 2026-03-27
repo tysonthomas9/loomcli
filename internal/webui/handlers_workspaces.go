@@ -78,9 +78,10 @@ func handleListWorkspaces(mp *daemon.MultiPool, configFn func() (*WorkspaceData,
 	}
 }
 
-// handleGetWorkspace returns GET /api/workspaces/{ws} — details for a single
-// workspace including its pool stats and config metadata.
-func handleGetWorkspace(mp *daemon.MultiPool, configFn func() (*WorkspaceData, error), wsExistsFn func(string) bool) http.HandlerFunc {
+// handleGetWorkspace returns GET /api/workspaces/{ws} — full WorkspaceData
+// (same shape as /api/workspaces/active) so the frontend uses the same
+// unwrap<WorkspaceData>() logic for both endpoints.
+func handleGetWorkspace(wsExistsFn func(string) bool, configByIDFn func(string) (*WorkspaceData, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := strings.TrimSpace(r.PathValue("ws"))
 		if wsID == "" {
@@ -88,46 +89,21 @@ func handleGetWorkspace(mp *daemon.MultiPool, configFn func() (*WorkspaceData, e
 			return
 		}
 
-		// Validate workspace existence via the injected function.
 		if !wsExistsFn(wsID) {
 			respondError(w, http.StatusNotFound, "workspace not found: "+wsID)
 			return
 		}
 
-		// Get pool for stats (may still be nil if pool was deregistered between check and here).
-		p := mp.PoolForWorkspace(wsID)
-
-		item := workspaceListItem{
-			ID:   wsID,
-			Name: wsID,
+		data, err := configByIDFn(wsID)
+		if err != nil || data == nil {
+			respondError(w, http.StatusInternalServerError, "failed to load workspace config")
+			return
 		}
 
-		if p != nil {
-			stats := p.Stats()
-			item.Pool = &stats
+		normalizeWorkspaceData(data)
+		for i := range data.Workspaces {
+			data.Workspaces[i].Active = data.Workspaces[i].ID == wsID
 		}
-
-		// Enrich with config metadata if available.
-		// Match by ID (UUID) or Name to handle both pre-T2 and post-T2 pool keys.
-		if configFn != nil {
-			if data, err := configFn(); err == nil && data != nil {
-				for _, ws := range data.Workspaces {
-					if ws.ID == wsID || ws.Name == wsID {
-						item.Name = ws.Name
-						if ws.ID != "" {
-							item.ID = ws.ID
-						}
-						item.Path = ws.Path
-						item.Active = ws.Active
-						break
-					}
-				}
-			}
-		}
-
-		respondJSON(w, http.StatusOK, map[string]interface{}{
-			"success":   true,
-			"workspace": item,
-		})
+		respondJSON(w, http.StatusOK, workspaceResponse{Success: true, Data: data})
 	}
 }
