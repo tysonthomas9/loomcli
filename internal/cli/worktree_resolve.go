@@ -221,6 +221,17 @@ func (r *Resolver) resolveWorkspacePath(name string) (string, error) {
 		}
 	}
 
+	// Check if the worktree exists on disk but isn't registered in config.
+	// Give an actionable error so the user can fix their config.
+	if ws.Path != "" {
+		candidate := filepath.Join(ws.Path, "worktrees", name)
+		gitFile := filepath.Join(candidate, ".git")
+		if _, err := os.Stat(gitFile); err == nil {
+			return "", fmt.Errorf("worktree '%s' exists on disk but is not registered in workspace %q.\n  Add it with: loom config add-repo %s --workspace %s --path %s",
+				name, r.workspace, name, r.workspace, candidate)
+		}
+	}
+
 	return "", fmt.Errorf("repo '%s' not found in workspace %q", name, r.workspace)
 }
 
