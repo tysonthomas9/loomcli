@@ -19,7 +19,7 @@ import {
 import { useState, useMemo, useCallback, useEffect } from "react";
 
 import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
-import { wsGet, wsSet, getLastWorkspaceId } from "@/utils/scopedStorage";
+import { wsGet, wsSet } from "@/utils/scopedStorage";
 import { DraggableIssueCard } from "@/components/DraggableIssueCard";
 import { EmptyWorkspaceBoard } from "@/components/EmptyWorkspaceBoard";
 import type { BlockedInfo } from "@/components/KanbanBoard";
@@ -238,7 +238,7 @@ function SwimLaneBoardContent({
   // When defaultCollapsed=false, this tracks lanes that were COLLAPSED (toggled to closed).
   // Initialize from scoped localStorage for persistence across page refreshes.
   const [toggledLanes, setToggledLanes] = useState<Set<string>>(() =>
-    loadCollapsedLanes(groupBy, getLastWorkspaceId()),
+    loadCollapsedLanes(groupBy, workspaceId),
   );
 
   // Persist toggledLanes to scoped localStorage when it changes

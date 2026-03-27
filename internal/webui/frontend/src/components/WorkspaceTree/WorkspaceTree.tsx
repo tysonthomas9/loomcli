@@ -36,7 +36,7 @@ import {
   useToast,
   useWorkspaceContext,
 } from "@/hooks";
-import { wsGet, wsSet, getLastWorkspaceId } from "@/utils/scopedStorage";
+import { wsGet, wsSet } from "@/utils/scopedStorage";
 import {
   computeRepoHealth,
   worstHealthColor,
@@ -111,19 +111,25 @@ export function WorkspaceTree({
   onFilterChange,
   workQueueCounts,
 }: WorkspaceTreeProps): JSX.Element {
+  const {
+    workspaceId,
+    activeWorkspaceName,
+    defaultWorkspaceName,
+    setDefaultWorkspace,
+    agents: workspaceConfigAgents,
+  } = useWorkspaceContext();
+
   // Load initial collapsed state from scoped localStorage
   const [isCollapsed, setIsCollapsed] = useState(() => {
-    const wsId = getLastWorkspaceId();
-    if (!wsId) return defaultCollapsed;
-    const stored = wsGet(wsId, SK_COLLAPSED);
+    if (!workspaceId) return defaultCollapsed;
+    const stored = wsGet(workspaceId, SK_COLLAPSED);
     return stored !== null ? stored === "true" : defaultCollapsed;
   });
 
   // Active/All filter state persisted to scoped localStorage
   const [activeFilter, setActiveFilter] = useState<ActiveFilter>(() => {
-    const wsId = getLastWorkspaceId();
-    if (!wsId) return "active";
-    const stored = wsGet(wsId, SK_ACTIVE_FILTER);
+    if (!workspaceId) return "active";
+    const stored = wsGet(workspaceId, SK_ACTIVE_FILTER);
     return stored === "all" ? "all" : "active";
   });
 
@@ -148,13 +154,17 @@ export function WorkspaceTree({
   const { agents: fleetAgents, agentTasks: contextAgentTasks } =
     useAgentContext();
   const { showToast } = useToast();
-  const {
-    workspaceId,
-    activeWorkspaceName,
-    defaultWorkspaceName,
-    setDefaultWorkspace,
-    agents: workspaceConfigAgents,
-  } = useWorkspaceContext();
+
+  // Re-read scoped state when workspace changes (SPA navigation)
+  useEffect(() => {
+    if (!workspaceId) return;
+    const storedCollapsed = wsGet(workspaceId, SK_COLLAPSED);
+    setIsCollapsed(
+      storedCollapsed !== null ? storedCollapsed === "true" : defaultCollapsed,
+    );
+    const storedFilter = wsGet(workspaceId, SK_ACTIVE_FILTER);
+    setActiveFilter(storedFilter === "all" ? "all" : "active");
+  }, [workspaceId, defaultCollapsed]);
 
   // Persist activeFilter state to scoped storage
   useEffect(() => {
@@ -475,9 +485,8 @@ export function WorkspaceTree({
   const [repoCollapseState, setRepoCollapseState] = useState<
     Record<string, boolean>
   >(() => {
-    const wsId = getLastWorkspaceId();
-    if (!wsId) return {};
-    const stored = wsGet(wsId, SK_REPO_COLLAPSED);
+    if (!workspaceId) return {};
+    const stored = wsGet(workspaceId, SK_REPO_COLLAPSED);
     if (!stored) return {};
     try {
       return JSON.parse(stored);
@@ -485,6 +494,21 @@ export function WorkspaceTree({
       return {};
     }
   });
+
+  // Re-read repo collapse state when workspace changes (SPA navigation)
+  useEffect(() => {
+    if (!workspaceId) return;
+    const stored = wsGet(workspaceId, SK_REPO_COLLAPSED);
+    if (!stored) {
+      setRepoCollapseState({});
+      return;
+    }
+    try {
+      setRepoCollapseState(JSON.parse(stored));
+    } catch {
+      setRepoCollapseState({});
+    }
+  }, [workspaceId]);
 
   const handleRepoToggle = useCallback(
     (repoName: string) => {

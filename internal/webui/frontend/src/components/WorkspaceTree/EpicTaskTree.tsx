@@ -4,7 +4,7 @@
  */
 
 import type React from "react";
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 
 import { updateIssue, closeIssue } from "@/api/issues";
 import { createWorkspaceEpic } from "@/api/workspace";
@@ -12,7 +12,7 @@ import { useWorkspaceTree } from "@/hooks/useWorkspaceTree";
 import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
 import { useToast } from "@/hooks/useToast";
 import { useInlineCreate } from "@/hooks/useInlineCreate";
-import { wsGet, wsSet, getLastWorkspaceId } from "@/utils/scopedStorage";
+import { wsGet, wsSet } from "@/utils/scopedStorage";
 
 import { TalkToLeadEntry } from "./TalkToLeadEntry";
 import { EpicRow } from "./EpicRow";
@@ -86,8 +86,13 @@ export function EpicTaskTree({
   const { showToast } = useToast();
 
   const [collapseState, setCollapseState] = useState<Record<string, boolean>>(
-    () => loadCollapseState(getLastWorkspaceId()),
+    () => loadCollapseState(workspaceId),
   );
+
+  // Re-read collapse state when workspace changes (SPA navigation)
+  useEffect(() => {
+    setCollapseState(loadCollapseState(workspaceId));
+  }, [workspaceId]);
 
   const handleToggle = useCallback(
     (epicId: string) => {

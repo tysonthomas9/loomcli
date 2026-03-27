@@ -7,7 +7,7 @@ import { useState, useCallback, useEffect } from "react";
 
 import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
 import type { LoomAgentStatus } from "@/types";
-import { wsGet, wsSet, getLastWorkspaceId } from "@/utils/scopedStorage";
+import { wsGet, wsSet } from "@/utils/scopedStorage";
 
 import { AgentCard } from "../AgentCard";
 import type { AgentTaskMap } from "./AgentsSidebar";
@@ -34,9 +34,8 @@ export function RepoGroupedList({
   const [collapsedGroups, setCollapsedGroups] = useState<
     Record<string, boolean>
   >(() => {
-    const wsId = getLastWorkspaceId();
-    if (!wsId) return {};
-    const stored = wsGet(wsId, SK_REPO_GROUPS_COLLAPSED);
+    if (!workspaceId) return {};
+    const stored = wsGet(workspaceId, SK_REPO_GROUPS_COLLAPSED);
     if (!stored) return {};
     try {
       return JSON.parse(stored);
@@ -44,6 +43,21 @@ export function RepoGroupedList({
       return {};
     }
   });
+
+  // Re-read scoped state when workspace changes (SPA navigation)
+  useEffect(() => {
+    if (!workspaceId) return;
+    const stored = wsGet(workspaceId, SK_REPO_GROUPS_COLLAPSED);
+    if (!stored) {
+      setCollapsedGroups({});
+      return;
+    }
+    try {
+      setCollapsedGroups(JSON.parse(stored));
+    } catch {
+      setCollapsedGroups({});
+    }
+  }, [workspaceId]);
 
   useEffect(() => {
     if (workspaceId)

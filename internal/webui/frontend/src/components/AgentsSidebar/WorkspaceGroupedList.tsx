@@ -3,11 +3,11 @@
  * Used by AgentsSidebar when multiple workspaces are present.
  */
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 
 import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
 import type { LoomAgentStatus } from "@/types";
-import { wsGet, wsSet, getLastWorkspaceId } from "@/utils/scopedStorage";
+import { wsGet, wsSet } from "@/utils/scopedStorage";
 
 import { AgentCard } from "../AgentCard";
 import type { AgentTaskMap } from "./AgentsSidebar";
@@ -55,9 +55,8 @@ export function WorkspaceGroupedList({
   const [collapsedWorkspaces, setCollapsedWorkspaces] = useState<
     Record<string, boolean>
   >(() => {
-    const wsId = getLastWorkspaceId();
-    if (!wsId) return {};
-    const stored = wsGet(wsId, SK_WS_COLLAPSED);
+    if (!workspaceId) return {};
+    const stored = wsGet(workspaceId, SK_WS_COLLAPSED);
     if (!stored) return {};
     try {
       const parsed = JSON.parse(stored);
@@ -68,6 +67,26 @@ export function WorkspaceGroupedList({
       return {};
     }
   });
+
+  // Re-read scoped state when workspace changes (SPA navigation)
+  useEffect(() => {
+    if (!workspaceId) return;
+    const stored = wsGet(workspaceId, SK_WS_COLLAPSED);
+    if (!stored) {
+      setCollapsedWorkspaces({});
+      return;
+    }
+    try {
+      const parsed = JSON.parse(stored);
+      setCollapsedWorkspaces(
+        parsed && typeof parsed === "object" && !Array.isArray(parsed)
+          ? (parsed as Record<string, boolean>)
+          : {},
+      );
+    } catch {
+      setCollapsedWorkspaces({});
+    }
+  }, [workspaceId]);
 
   const workspaceGroups = useWorkspaceGroups(agents);
 

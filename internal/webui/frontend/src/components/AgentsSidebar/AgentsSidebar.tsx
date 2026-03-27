@@ -8,7 +8,7 @@ import { ApiError } from "@/api/client";
 import { gitPush, gitPushAll } from "@/api/git";
 import { ConfirmDialog, ErrorDisplay, LoadingSkeleton } from "@/components";
 import { useAgentContext, useRepoFilter, useWorkspaceContext } from "@/hooks";
-import { wsGet, wsSet, getLastWorkspaceId } from "@/utils/scopedStorage";
+import { wsGet, wsSet } from "@/utils/scopedStorage";
 import type {
   LoomAgentStatus,
   LoomTaskInfo,
@@ -88,19 +88,28 @@ export function AgentsSidebar({
 
   // Load initial collapsed state from scoped localStorage
   const [isCollapsed, setIsCollapsed] = useState(() => {
-    const wsId = getLastWorkspaceId();
-    if (!wsId) return defaultCollapsed;
-    const stored = wsGet(wsId, SK_COLLAPSED);
+    if (!workspaceId) return defaultCollapsed;
+    const stored = wsGet(workspaceId, SK_COLLAPSED);
     return stored !== null ? stored === "true" : defaultCollapsed;
   });
 
   // Load work queue expanded state from scoped localStorage
   const [isWorkQueueExpanded, setIsWorkQueueExpanded] = useState(() => {
-    const wsId = getLastWorkspaceId();
-    if (!wsId) return true;
-    const stored = wsGet(wsId, SK_WORK_QUEUE);
+    if (!workspaceId) return true;
+    const stored = wsGet(workspaceId, SK_WORK_QUEUE);
     return stored !== null ? stored === "true" : true;
   });
+
+  // Re-read scoped state when workspace changes (SPA navigation)
+  useEffect(() => {
+    if (!workspaceId) return;
+    const storedCollapsed = wsGet(workspaceId, SK_COLLAPSED);
+    setIsCollapsed(
+      storedCollapsed !== null ? storedCollapsed === "true" : defaultCollapsed,
+    );
+    const storedWQ = wsGet(workspaceId, SK_WORK_QUEUE);
+    setIsWorkQueueExpanded(storedWQ !== null ? storedWQ === "true" : true);
+  }, [workspaceId, defaultCollapsed]);
 
   // Track which category drawer is open
   const [selectedCategory, setSelectedCategory] = useState<TaskCategory | null>(

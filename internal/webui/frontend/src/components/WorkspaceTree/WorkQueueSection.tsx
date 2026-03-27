@@ -7,7 +7,7 @@
 import { useState, useCallback, useEffect } from "react";
 
 import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
-import { wsGet, wsSet, getLastWorkspaceId } from "@/utils/scopedStorage";
+import { wsGet, wsSet } from "@/utils/scopedStorage";
 
 import styles from "./WorkQueueSection.module.css";
 
@@ -33,11 +33,17 @@ export function WorkQueueSection({
   const { workspaceId } = useWorkspaceContext();
 
   const [isExpanded, setIsExpanded] = useState(() => {
-    const wsId = getLastWorkspaceId();
-    if (!wsId) return true;
-    const stored = wsGet(wsId, SK_WORK_QUEUE_EXPANDED);
+    if (!workspaceId) return true;
+    const stored = wsGet(workspaceId, SK_WORK_QUEUE_EXPANDED);
     return stored !== null ? stored === "true" : true;
   });
+
+  // Re-read scoped state when workspace changes (SPA navigation)
+  useEffect(() => {
+    if (!workspaceId) return;
+    const stored = wsGet(workspaceId, SK_WORK_QUEUE_EXPANDED);
+    setIsExpanded(stored !== null ? stored === "true" : true);
+  }, [workspaceId]);
 
   useEffect(() => {
     if (workspaceId)
