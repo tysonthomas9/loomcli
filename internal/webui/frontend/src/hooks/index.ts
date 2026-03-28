@@ -285,6 +285,8 @@ export {
   KeyboardShortcutProvider,
   useKeyboardShortcuts,
   useRegisterEscapeLayer,
+  resetEscapeRegistry,
+  EscapeRegistryContext,
   LAYER_CONFIRM_DIALOG,
   LAYER_TOAST,
   LAYER_CHEATSHEET,
@@ -295,4 +297,7 @@ export {
   LAYER_ISSUE_PANEL,
   LAYER_TERMINAL_SEARCH,
 } from "./useKeyboardShortcuts";
-export type { KeyboardShortcutProviderProps } from "./useKeyboardShortcuts";
+export type {
+  KeyboardShortcutProviderProps,
+  EscapeRegistryAPI,
+} from "./useKeyboardShortcuts";

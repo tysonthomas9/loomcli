@@ -13,7 +13,13 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import "@testing-library/jest-dom";
 
-import { KeyboardShortcutProvider } from "../useKeyboardShortcuts";
+import {
+  KeyboardShortcutProvider,
+  useRegisterEscapeLayer,
+  resetEscapeRegistry,
+  LAYER_MODAL,
+  LAYER_ISSUE_PANEL,
+} from "../useKeyboardShortcuts";
 
 /**
  * Helper to render the provider with given props.
@@ -36,8 +42,7 @@ function renderProvider(
 
 describe("KeyboardShortcutProvider", () => {
   afterEach(() => {
-    // Clean up any lingering event listeners by unmounting
-    // (render's cleanup handles this via vitest's auto-cleanup)
+    resetEscapeRegistry();
   });
 
   describe("Cmd/Ctrl+K routing", () => {
@@ -278,5 +283,245 @@ describe("KeyboardShortcutProvider", () => {
       expect(onViewChange).not.toHaveBeenCalled();
       expect(onWorkspacePositionalSwitch).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Helper component for escape layer tests
+// ---------------------------------------------------------------------------
+function EscapeLayerTestComponent({
+  handler,
+  priority,
+  active = true,
+}: {
+  handler: () => void;
+  priority: number;
+  active?: boolean;
+}) {
+  useRegisterEscapeLayer(priority, handler, active);
+  return null;
+}
+
+describe("Escape layer registry isolation", () => {
+  afterEach(() => {
+    resetEscapeRegistry();
+  });
+
+  it("two independent providers have separate escape layer registries", () => {
+    const handler1 = vi.fn();
+    const handler2 = vi.fn();
+
+    // Provider 1 with a modal-level handler
+    render(
+      <KeyboardShortcutProvider>
+        <EscapeLayerTestComponent handler={handler1} priority={LAYER_MODAL} />
+      </KeyboardShortcutProvider>,
+    );
+
+    // Provider 2 with a panel-level handler
+    render(
+      <KeyboardShortcutProvider>
+        <EscapeLayerTestComponent
+          handler={handler2}
+          priority={LAYER_ISSUE_PANEL}
+        />
+      </KeyboardShortcutProvider>,
+    );
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    // Both fire independently — each provider has its own registry
+    expect(handler1).toHaveBeenCalledTimes(1);
+    expect(handler2).toHaveBeenCalledTimes(1);
+  });
+
+  it("unmounting a provider cleans up its escape listener", () => {
+    const handler = vi.fn();
+
+    const { unmount } = render(
+      <KeyboardShortcutProvider>
+        <EscapeLayerTestComponent handler={handler} priority={LAYER_MODAL} />
+      </KeyboardShortcutProvider>,
+    );
+
+    unmount();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("unmounting one provider does not affect another", () => {
+    const handler1 = vi.fn();
+    const handler2 = vi.fn();
+
+    const { unmount: unmount1 } = render(
+      <KeyboardShortcutProvider>
+        <EscapeLayerTestComponent handler={handler1} priority={LAYER_MODAL} />
+      </KeyboardShortcutProvider>,
+    );
+
+    render(
+      <KeyboardShortcutProvider>
+        <EscapeLayerTestComponent
+          handler={handler2}
+          priority={LAYER_ISSUE_PANEL}
+        />
+      </KeyboardShortcutProvider>,
+    );
+
+    // Unmount provider 1
+    unmount1();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    // Provider 1's handler should not fire (cleaned up)
+    expect(handler1).not.toHaveBeenCalled();
+    // Provider 2's handler should still fire
+    expect(handler2).toHaveBeenCalledTimes(1);
+  });
+
+  it("module-level fallback works for standalone useRegisterEscapeLayer", () => {
+    const handler = vi.fn();
+
+    // No provider wrapping — uses module-level fallback registry
+    const { unmount } = render(
+      <EscapeLayerTestComponent handler={handler} priority={LAYER_MODAL} />,
+    );
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(handler).toHaveBeenCalledTimes(1);
+
+    unmount();
+  });
+
+  it("resetEscapeRegistry clears the fallback registry between tests", () => {
+    const handler = vi.fn();
+
+    // Register a layer on the fallback (no provider)
+    const { unmount } = render(
+      <EscapeLayerTestComponent handler={handler} priority={LAYER_MODAL} />,
+    );
+
+    unmount();
+    // Simulate stale state: the layer is unregistered by unmount, but
+    // resetEscapeRegistry should still work for any lingering state
+    resetEscapeRegistry();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("priority chain works within a single provider", () => {
+    const lowHandler = vi.fn();
+    const highHandler = vi.fn();
+
+    render(
+      <KeyboardShortcutProvider>
+        <EscapeLayerTestComponent
+          handler={lowHandler}
+          priority={LAYER_ISSUE_PANEL}
+        />
+        <EscapeLayerTestComponent
+          handler={highHandler}
+          priority={LAYER_MODAL}
+        />
+      </KeyboardShortcutProvider>,
+    );
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    // Only the highest-priority layer fires
+    expect(highHandler).toHaveBeenCalledTimes(1);
+    expect(lowHandler).not.toHaveBeenCalled();
+  });
+
+  it("deactivating a layer removes it from the registry", () => {
+    const handler = vi.fn();
+
+    const { rerender } = render(
+      <KeyboardShortcutProvider>
+        <EscapeLayerTestComponent
+          handler={handler}
+          priority={LAYER_MODAL}
+          active={true}
+        />
+      </KeyboardShortcutProvider>,
+    );
+
+    // Layer is active — handler should fire
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(handler).toHaveBeenCalledTimes(1);
+
+    handler.mockClear();
+
+    // Re-render with active=false — layer should be removed
+    rerender(
+      <KeyboardShortcutProvider>
+        <EscapeLayerTestComponent
+          handler={handler}
+          priority={LAYER_MODAL}
+          active={false}
+        />
+      </KeyboardShortcutProvider>,
+    );
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("layer registered without provider does not leak into a provider", () => {
+    const handler1 = vi.fn();
+    const handler2 = vi.fn();
+
+    // Standalone layer (no provider) — uses fallback registry
+    const { unmount: unmountStandalone } = render(
+      <EscapeLayerTestComponent
+        handler={handler1}
+        priority={LAYER_ISSUE_PANEL}
+      />,
+    );
+
+    // Provider with its own layer — uses provider-scoped registry
+    render(
+      <KeyboardShortcutProvider>
+        <EscapeLayerTestComponent handler={handler2} priority={LAYER_MODAL} />
+      </KeyboardShortcutProvider>,
+    );
+
+    // Both registries are independent — both should fire
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(handler1).toHaveBeenCalledTimes(1);
+    expect(handler2).toHaveBeenCalledTimes(1);
+
+    handler1.mockClear();
+    handler2.mockClear();
+
+    // Unmount the standalone one — its fallback listener should be gone
+    unmountStandalone();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(handler1).not.toHaveBeenCalled();
+    expect(handler2).toHaveBeenCalledTimes(1);
+  });
+
+  it("rapid mount/unmount cycles do not leak layers", () => {
+    const handler = vi.fn();
+
+    // Mount and unmount a provider with an escape layer 5 times
+    for (let i = 0; i < 5; i++) {
+      const { unmount } = render(
+        <KeyboardShortcutProvider>
+          <EscapeLayerTestComponent handler={handler} priority={LAYER_MODAL} />
+        </KeyboardShortcutProvider>,
+      );
+      unmount();
+    }
+
+    // After all unmounts, no handler should fire
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(handler).not.toHaveBeenCalled();
   });
 });
