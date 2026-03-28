@@ -29,6 +29,7 @@ export interface UseDiffReturn {
   files: DiffFile[];
   isLoading: boolean;
   error: Error | null;
+  patchErrors: Map<string, Error>;
   viewedFiles: Set<string>;
   markViewed: (path: string) => void;
   patchCache: Map<string, DiffFilePatch>;
@@ -48,6 +49,7 @@ export function useDiff({
   const [patchCache, setPatchCache] = useState<Map<string, DiffFilePatch>>(
     new Map(),
   );
+  const [patchErrors, setPatchErrors] = useState<Map<string, Error>>(new Map());
 
   const mountedRef = useRef(true);
   const fetchInProgressRef = useRef(false);
@@ -67,6 +69,7 @@ export function useDiff({
   useEffect(() => {
     setFiles([]);
     setPatchCache(new Map());
+    setPatchErrors(new Map());
     setViewedFiles(new Set());
     setError(null);
     setIsLoading(false);
@@ -109,6 +112,12 @@ export function useDiff({
       if (inFlightPatchesRef.current.has(path)) return;
 
       inFlightPatchesRef.current.add(path);
+      setPatchErrors((prev) => {
+        if (!prev.has(path)) return prev;
+        const next = new Map(prev);
+        next.delete(path);
+        return next;
+      });
       try {
         const result = await fetchDiffFile(
           workspaceId,
@@ -121,7 +130,8 @@ export function useDiff({
         }
       } catch (err) {
         if (mountedRef.current) {
-          setError(err instanceof Error ? err : new Error(String(err)));
+          const error = err instanceof Error ? err : new Error(String(err));
+          setPatchErrors((prev) => new Map(prev).set(path, error));
         }
       } finally {
         inFlightPatchesRef.current.delete(path);
@@ -155,6 +165,7 @@ export function useDiff({
     files,
     isLoading,
     error,
+    patchErrors,
     viewedFiles,
     markViewed,
     patchCache,

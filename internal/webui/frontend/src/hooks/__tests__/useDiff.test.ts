@@ -234,7 +234,7 @@ describe("useDiff", () => {
       expect(mockFetchDiffFile).toHaveBeenCalledTimes(1);
     });
 
-    it("fetchPatch sets error on failure but does not cache", async () => {
+    it("fetchPatch sets per-file error on failure, not global error", async () => {
       mockFetchDiffFiles.mockResolvedValue([]);
       mockFetchDiffFile.mockRejectedValue(new Error("Patch failed"));
 
@@ -252,9 +252,77 @@ describe("useDiff", () => {
         await result.current.fetchPatch("src/main.ts");
       });
 
-      expect(result.current.error).toBeInstanceOf(Error);
-      expect(result.current.error!.message).toBe("Patch failed");
+      expect(result.current.error).toBeNull();
+      expect(result.current.patchErrors.get("src/main.ts")).toBeInstanceOf(
+        Error,
+      );
+      expect(result.current.patchErrors.get("src/main.ts")!.message).toBe(
+        "Patch failed",
+      );
       expect(result.current.patchCache.has("src/main.ts")).toBe(false);
+    });
+
+    it("fetchPatch error is isolated per file", async () => {
+      const mockPatch = createMockPatch();
+      mockFetchDiffFiles.mockResolvedValue([]);
+      mockFetchDiffFile
+        .mockRejectedValueOnce(new Error("File A failed"))
+        .mockResolvedValueOnce(mockPatch);
+
+      const { result } = renderHook(() =>
+        useDiff({
+          workspaceId: "test-ws-id",
+          agentName: "agent-1",
+          enabled: true,
+        }),
+      );
+
+      await flushPromises();
+
+      await act(async () => {
+        await result.current.fetchPatch("src/a.ts");
+      });
+      await act(async () => {
+        await result.current.fetchPatch("src/b.ts");
+      });
+
+      expect(result.current.patchErrors.has("src/a.ts")).toBe(true);
+      expect(result.current.patchErrors.has("src/b.ts")).toBe(false);
+      expect(result.current.patchCache.has("src/b.ts")).toBe(true);
+      expect(result.current.error).toBeNull();
+    });
+
+    it("successful retry clears per-file error", async () => {
+      const mockPatch = createMockPatch();
+      mockFetchDiffFiles.mockResolvedValue([]);
+      mockFetchDiffFile
+        .mockRejectedValueOnce(new Error("Temporary failure"))
+        .mockResolvedValueOnce(mockPatch);
+
+      const { result } = renderHook(() =>
+        useDiff({
+          workspaceId: "test-ws-id",
+          agentName: "agent-1",
+          enabled: true,
+        }),
+      );
+
+      await flushPromises();
+
+      await act(async () => {
+        await result.current.fetchPatch("src/a.ts");
+      });
+
+      expect(result.current.patchErrors.has("src/a.ts")).toBe(true);
+      expect(result.current.patchCache.has("src/a.ts")).toBe(false);
+
+      // Retry succeeds — path is not in cache, so fetchPatch will call API again
+      await act(async () => {
+        await result.current.fetchPatch("src/a.ts");
+      });
+
+      expect(result.current.patchErrors.has("src/a.ts")).toBe(false);
+      expect(result.current.patchCache.has("src/a.ts")).toBe(true);
     });
 
     it("fetchPatch does nothing when path is empty", async () => {
@@ -438,8 +506,34 @@ describe("useDiff", () => {
 
       expect(result.current.files).toEqual([]);
       expect(result.current.patchCache.size).toBe(0);
+      expect(result.current.patchErrors.size).toBe(0);
       expect(result.current.viewedFiles.size).toBe(0);
       expect(result.current.error).toBeNull();
+    });
+
+    it("resets patchErrors on agent change", async () => {
+      mockFetchDiffFiles.mockResolvedValue([]);
+      mockFetchDiffFile.mockRejectedValue(new Error("fail"));
+
+      const { result, rerender } = renderHook(
+        ({ agentName }: { agentName: string }) =>
+          useDiff({ workspaceId: "test-ws-id", agentName, enabled: true }),
+        { initialProps: { agentName: "agent-1" } },
+      );
+
+      await flushPromises();
+
+      await act(async () => {
+        await result.current.fetchPatch("src/file0.ts");
+      });
+
+      expect(result.current.patchErrors.size).toBe(1);
+
+      mockFetchDiffFiles.mockResolvedValue([]);
+      rerender({ agentName: "agent-2" });
+      await flushPromises();
+
+      expect(result.current.patchErrors.size).toBe(0);
     });
 
     it("fetches new file list after agent change", async () => {
