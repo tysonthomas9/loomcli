@@ -9,7 +9,12 @@
 import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { useFocusTrap } from "../useFocusTrap";
+import {
+  useFocusTrap,
+  registerFocusTrap,
+  unregisterFocusTrap,
+  resetFocusTrapRegistry,
+} from "../useFocusTrap";
 
 describe("useFocusTrap", () => {
   let container: HTMLDivElement;
@@ -17,6 +22,7 @@ describe("useFocusTrap", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
+    resetFocusTrapRegistry();
     container = document.createElement("div");
     container.tabIndex = -1;
     document.body.appendChild(container);
@@ -406,6 +412,220 @@ describe("useFocusTrap", () => {
       expect(() => {
         renderHook(() => useFocusTrap(containerRef, true));
       }).not.toThrow();
+    });
+  });
+
+  describe("concurrent traps", () => {
+    let container2: HTMLDivElement;
+
+    beforeEach(() => {
+      container2 = document.createElement("div");
+      container2.tabIndex = -1;
+      document.body.appendChild(container2);
+    });
+
+    afterEach(() => {
+      if (document.body.contains(container2)) {
+        document.body.removeChild(container2);
+      }
+    });
+
+    function setupContainer2(innerHTML: string) {
+      container2.innerHTML = innerHTML;
+      const allElements = container2.querySelectorAll("*");
+      allElements.forEach((el) => {
+        Object.defineProperty(el, "offsetParent", {
+          get: () => container2,
+          configurable: true,
+        });
+      });
+      return { current: container2 };
+    }
+
+    it("only the top trap handles Tab when two traps are active", () => {
+      const containerRef1 = setupContainer(
+        "<button>P1-First</button><button>P1-Last</button>",
+      );
+      const containerRef2 = setupContainer2(
+        "<button>P2-First</button><button>P2-Last</button>",
+      );
+
+      // Trap 1: lower priority (panel)
+      renderHook(() => useFocusTrap(containerRef1, true, { priority: 10 }));
+      // Trap 2: higher priority (modal)
+      renderHook(() => useFocusTrap(containerRef2, true, { priority: 40 }));
+
+      const buttons2 = container2.querySelectorAll("button");
+      const lastButton2 = buttons2[buttons2.length - 1]!;
+      lastButton2.focus();
+      expect(document.activeElement).toBe(lastButton2);
+
+      // Tab should wrap within trap 2 only
+      const tabEvent = new KeyboardEvent("keydown", {
+        key: "Tab",
+        bubbles: true,
+        cancelable: true,
+      });
+      document.dispatchEvent(tabEvent);
+
+      expect(document.activeElement).toBe(buttons2[0]);
+    });
+
+    it("deactivating top trap lets the remaining trap handle Tab", () => {
+      const containerRef1 = setupContainer(
+        "<button>P1-First</button><button>P1-Last</button>",
+      );
+      const containerRef2 = setupContainer2(
+        "<button>P2-First</button><button>P2-Last</button>",
+      );
+
+      // Trap 1: lower priority
+      renderHook(() => useFocusTrap(containerRef1, true, { priority: 10 }));
+      // Trap 2: higher priority, starts active then deactivates
+      const { rerender } = renderHook(
+        ({ isActive }) =>
+          useFocusTrap(containerRef2, isActive, { priority: 40 }),
+        { initialProps: { isActive: true } },
+      );
+
+      // Deactivate the top trap
+      rerender({ isActive: false });
+
+      // Focus within trap 1
+      const buttons1 = container.querySelectorAll("button");
+      const lastButton1 = buttons1[buttons1.length - 1]!;
+      lastButton1.focus();
+      expect(document.activeElement).toBe(lastButton1);
+
+      // Tab should now wrap within trap 1
+      const tabEvent = new KeyboardEvent("keydown", {
+        key: "Tab",
+        bubbles: true,
+        cancelable: true,
+      });
+      document.dispatchEvent(tabEvent);
+
+      expect(document.activeElement).toBe(buttons1[0]);
+    });
+
+    it("higher priority trap wins regardless of registration order", () => {
+      const containerRef1 = setupContainer(
+        "<button>High-First</button><button>High-Last</button>",
+      );
+      const containerRef2 = setupContainer2(
+        "<button>Low-First</button><button>Low-Last</button>",
+      );
+
+      // Register high priority first, then low priority
+      renderHook(() => useFocusTrap(containerRef1, true, { priority: 40 }));
+      renderHook(() => useFocusTrap(containerRef2, true, { priority: 10 }));
+
+      // Focus in trap 1 (high priority)
+      const buttons1 = container.querySelectorAll("button");
+      const lastButton1 = buttons1[buttons1.length - 1]!;
+      lastButton1.focus();
+      expect(document.activeElement).toBe(lastButton1);
+
+      const tabEvent = new KeyboardEvent("keydown", {
+        key: "Tab",
+        bubbles: true,
+        cancelable: true,
+      });
+      document.dispatchEvent(tabEvent);
+
+      // Should wrap within high-priority trap
+      expect(document.activeElement).toBe(buttons1[0]);
+    });
+
+    it("top trap does not steal focus from lower trap's container", () => {
+      const containerRef1 = setupContainer(
+        "<button>Low-First</button><button>Low-Last</button>",
+      );
+      const containerRef2 = setupContainer2(
+        "<button>High-First</button><button>High-Last</button>",
+      );
+
+      // Trap 1: lower priority
+      renderHook(() => useFocusTrap(containerRef1, true, { priority: 10 }));
+      // Trap 2: higher priority
+      renderHook(() => useFocusTrap(containerRef2, true, { priority: 40 }));
+
+      // Focus is in the LOWER priority trap's container
+      const buttons1 = container.querySelectorAll("button");
+      const lastButton1 = buttons1[buttons1.length - 1]!;
+      lastButton1.focus();
+      expect(document.activeElement).toBe(lastButton1);
+
+      const tabEvent = new KeyboardEvent("keydown", {
+        key: "Tab",
+        bubbles: true,
+        cancelable: true,
+      });
+      document.dispatchEvent(tabEvent);
+
+      // The lower trap should handle it since focus is in its container,
+      // not the higher-priority trap. The containment check ensures this.
+      // Focus wraps within trap 1
+      expect(document.activeElement).toBe(buttons1[0]);
+    });
+
+    it("equal priority traps resolve by registration order (last wins)", () => {
+      const containerRef1 = setupContainer(
+        "<button>First-First</button><button>First-Last</button>",
+      );
+      const containerRef2 = setupContainer2(
+        "<button>Second-First</button><button>Second-Last</button>",
+      );
+
+      // Both same priority, trap 2 registered later
+      renderHook(() => useFocusTrap(containerRef1, true, { priority: 0 }));
+      renderHook(() => useFocusTrap(containerRef2, true, { priority: 0 }));
+
+      // Focus in trap 2 (last registered)
+      const buttons2 = container2.querySelectorAll("button");
+      const lastButton2 = buttons2[buttons2.length - 1]!;
+      lastButton2.focus();
+
+      const tabEvent = new KeyboardEvent("keydown", {
+        key: "Tab",
+        bubbles: true,
+        cancelable: true,
+      });
+      document.dispatchEvent(tabEvent);
+
+      // Should wrap within trap 2
+      expect(document.activeElement).toBe(buttons2[0]);
+    });
+
+    it("focus outside all traps lets Tab propagate naturally", () => {
+      // Use the registry directly to avoid initial-focus side effects
+      const outsideButton = document.createElement("button");
+      outsideButton.textContent = "Outside";
+      document.body.appendChild(outsideButton);
+
+      const containerRef1 = setupContainer(
+        "<button>T1-First</button><button>T1-Last</button>",
+      );
+
+      const handler = vi.fn();
+      const id = registerFocusTrap(10, containerRef1, handler);
+
+      // Focus on element outside all traps
+      outsideButton.focus();
+      expect(document.activeElement).toBe(outsideButton);
+
+      const tabEvent = new KeyboardEvent("keydown", {
+        key: "Tab",
+        bubbles: true,
+        cancelable: true,
+      });
+      document.dispatchEvent(tabEvent);
+
+      // Handler should not be called
+      expect(handler).not.toHaveBeenCalled();
+
+      unregisterFocusTrap(id);
+      document.body.removeChild(outsideButton);
     });
   });
 });
