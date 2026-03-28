@@ -1919,3 +1919,115 @@ func TestSetupRoutes_TabMetadataReturns404WhenStoreNil(t *testing.T) {
 		t.Errorf("expected Content-Type 'application/json', got %q", ct)
 	}
 }
+
+// TestLegacyFlatAgentRoutesRemoved verifies that the legacy flat agent routes
+// (e.g. POST /api/agents/{name}/git/push) have been removed and return 404,
+// while the workspace-scoped equivalents (e.g.
+// POST /api/workspaces/{ws}/agents/{name}/git/push) still work.
+func TestLegacyFlatAgentRoutesRemoved(t *testing.T) {
+	// Set up a multiPool with a registered workspace so workspace-scoped routes
+	// are functional.
+	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 1)
+	_ = multiPool.Register("test-ws", &stubPool{})
+
+	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
+
+	gitOps := &mockGitOps{}
+	fileOps := &mockFileOps{}
+
+	mux := http.NewServeMux()
+	//                        mux  pool multiPool hub  getMut termMgr termAuth fleetReg tokenCfg apiKey authOn origins fleetRegCfg claimMetrics fleetOn devMode devDir loomURL  gitOps fileOps tabMeta issueTabs wsCfg  wsDel  setDef clrDef wsCreate bkOps  sessHist sessSt wsExists initWS wsCfgByID extAuth
+	setupRoutes(mux, nil, multiPool, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, false, false, "", "", gitOps, fileOps, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, wsExistsFn, "", nil, "")
+
+	// Legacy flat routes that should have been removed — each must return 404.
+	legacyRoutes := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodPost, "/api/git/push-all"},
+		{http.MethodPost, "/api/agents/alice/git/push"},
+		{http.MethodPost, "/api/agents/alice/git/pull"},
+		{http.MethodPost, "/api/agents/alice/git/sync"},
+		{http.MethodPost, "/api/agents/alice/git/pr"},
+		{http.MethodPost, "/api/agents/alice/git/reset"},
+		{http.MethodGet, "/api/agents/alice/git/status"},
+		{http.MethodPatch, "/api/agents/alice/git/target"},
+		{http.MethodGet, "/api/issues/ISSUE-1/git/diff-stat"},
+		{http.MethodGet, "/api/agents/alice/diff/commits"},
+		{http.MethodGet, "/api/agents/alice/diff/files"},
+		{http.MethodGet, "/api/agents/alice/diff/file"},
+		{http.MethodGet, "/api/agents/alice/files/tree"},
+		{http.MethodGet, "/api/agents/alice/files"},
+		{http.MethodPut, "/api/agents/alice/files"},
+	}
+
+	for _, tc := range legacyRoutes {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			rr := httptest.NewRecorder()
+			mux.ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusNotFound {
+				t.Errorf("legacy route %s %s: expected status %d, got %d",
+					tc.method, tc.path, http.StatusNotFound, rr.Code)
+			}
+
+			ct := rr.Header().Get("Content-Type")
+			if ct != "application/json" {
+				t.Errorf("legacy route %s %s: expected Content-Type 'application/json', got %q",
+					tc.method, tc.path, ct)
+			}
+		})
+	}
+
+	// Workspace-scoped equivalents should be handled by the wsMux routes.
+	// The mock ops return "not found" for agent resolution, so handlers may
+	// still return 404 with an agent-specific error. The key assertion is that
+	// the response body differs from the SPA catch-all's generic {"error":"not found"}.
+	// If the route were truly unregistered, the SPA catch-all would respond with
+	// exactly that generic message.
+	scopedRoutes := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodPost, "/api/workspaces/test-ws/git/push-all"},
+		{http.MethodPost, "/api/workspaces/test-ws/agents/alice/git/push"},
+		{http.MethodPost, "/api/workspaces/test-ws/agents/alice/git/pull"},
+		{http.MethodPost, "/api/workspaces/test-ws/agents/alice/git/sync"},
+		{http.MethodPost, "/api/workspaces/test-ws/agents/alice/git/pr"},
+		{http.MethodPost, "/api/workspaces/test-ws/agents/alice/git/reset"},
+		{http.MethodGet, "/api/workspaces/test-ws/agents/alice/git/status"},
+		{http.MethodPatch, "/api/workspaces/test-ws/agents/alice/git/target"},
+		{http.MethodGet, "/api/workspaces/test-ws/agents/alice/diff/commits"},
+		{http.MethodGet, "/api/workspaces/test-ws/agents/alice/diff/files"},
+		{http.MethodGet, "/api/workspaces/test-ws/agents/alice/diff/file"},
+		{http.MethodGet, "/api/workspaces/test-ws/agents/alice/files/tree"},
+		{http.MethodGet, "/api/workspaces/test-ws/agents/alice/files"},
+		{http.MethodPut, "/api/workspaces/test-ws/agents/alice/files"},
+	}
+
+	for _, tc := range scopedRoutes {
+		t.Run("scoped "+tc.method+" "+tc.path, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			rr := httptest.NewRecorder()
+			mux.ServeHTTP(rr, req)
+
+			// The SPA catch-all returns exactly {"error":"not found"} for
+			// unregistered /api/* paths. If the route is properly registered,
+			// the handler produces a different response (even if it is still
+			// a 404 with a more specific error message like "agent worktree
+			// \"alice\" not found").
+			var body map[string]interface{}
+			if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+				t.Fatalf("workspace-scoped route %s %s: failed to parse JSON body: %v",
+					tc.method, tc.path, err)
+			}
+
+			errMsg, _ := body["error"].(string)
+			if rr.Code == http.StatusNotFound && errMsg == "not found" {
+				t.Errorf("workspace-scoped route %s %s fell through to SPA catch-all (got generic 404 %q); route is not registered",
+					tc.method, tc.path, errMsg)
+			}
+		})
+	}
+}

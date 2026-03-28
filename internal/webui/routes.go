@@ -136,31 +136,6 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 	// Issue tab persistence and session history endpoints have moved to
 	// workspace-scoped routes in registerWorkspaceRoutes (T46).
 
-	// Git operation endpoints for worktrees
-	if gitOps != nil {
-		mux.HandleFunc("POST /api/git/push-all", handleGitPushAll(gitOps))
-		mux.HandleFunc("POST /api/agents/{name}/git/push", handleGitPush(gitOps))
-		mux.HandleFunc("POST /api/agents/{name}/git/pull", handleGitPull(gitOps))
-		mux.HandleFunc("POST /api/agents/{name}/git/sync", handleGitSync(gitOps))
-		mux.HandleFunc("POST /api/agents/{name}/git/pr", handleGitPR(gitOps))
-		mux.HandleFunc("POST /api/agents/{name}/git/reset", handleGitReset(gitOps))
-		mux.HandleFunc("GET /api/agents/{name}/git/status", handleGitStatus(gitOps))
-		mux.HandleFunc("PATCH /api/agents/{name}/git/target", handleGitTargetUpdate(gitOps))
-		mux.HandleFunc("GET /api/issues/{id}/git/diff-stat", handleGetIssueDiffStat(pool, gitOps))
-
-		// Diff endpoints for agent worktrees
-		mux.HandleFunc("GET /api/agents/{name}/diff/commits", handleDiffCommits(gitOps))
-		mux.HandleFunc("GET /api/agents/{name}/diff/files", handleDiffFiles(gitOps))
-		mux.HandleFunc("GET /api/agents/{name}/diff/file", handleDiffFile(gitOps))
-	}
-
-	// File operation endpoints for worktrees
-	if fileOps != nil {
-		mux.HandleFunc("GET /api/agents/{name}/files/tree", handleFileTree(fileOps))
-		mux.HandleFunc("GET /api/agents/{name}/files", handleFileRead(fileOps))
-		mux.HandleFunc("PUT /api/agents/{name}/files", handleFileWrite(fileOps))
-	}
-
 	// Editor endpoints for external editor detection and launch
 	editorCache := newDefaultEditorCache()
 	mux.HandleFunc("GET /api/editors", handleListEditors(editorCache))
