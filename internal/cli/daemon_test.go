@@ -1291,6 +1291,259 @@ func TestCheckAgentHealth_Watchdog(t *testing.T) {
 			t.Errorf("pid = %d, want 99999999 (should use lastStart, not stale log mtime)", pid)
 		}
 	})
+
+	t.Run("does not kill agent with fresh transcript", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		// Create transcript file with recent mtime (tier 1 — should take precedence)
+		txPath := filepath.Join(tmpDir, "transcript.jsonl")
+		if err := os.WriteFile(txPath, []byte("recent transcript\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+
+		// Create log file with OLD mtime (tier 2 — should be ignored because transcript is fresh)
+		logPath := filepath.Join(tmpDir, "task-test.log")
+		if err := os.WriteFile(logPath, []byte("old log output\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		oldTime := time.Now().Add(-20 * time.Minute)
+		if err := os.Chtimes(logPath, oldTime, oldTime); err != nil {
+			t.Fatal(err)
+		}
+
+		config := makeDaemonConfig(
+			[]AgentEntry{{Worktree: "test", Role: "task"}},
+			nil,
+		)
+		config.Daemon.RestartPolicy.OutputTimeout = intPtr(60) // 60 seconds
+
+		ap := &AgentProcess{
+			entry:          AgentEntry{Worktree: "test", Role: "task"},
+			pid:            99999999, // fake PID that won't exist
+			logFilePath:    logPath,
+			transcriptPath: txPath,
+			lastStart:      time.Now().Add(-30 * time.Second),
+		}
+
+		daemon := &Daemon{
+			config: config,
+			agents: []*AgentProcess{ap},
+		}
+
+		daemon.checkAgentHealth()
+
+		// Agent should still have its PID (transcript is fresh, takes precedence over stale log)
+		ap.mu.Lock()
+		pid := ap.pid
+		ap.mu.Unlock()
+		if pid != 99999999 {
+			t.Errorf("pid = %d, want 99999999 (fresh transcript should prevent kill)", pid)
+		}
+	})
+
+	t.Run("kills agent with stale transcript and stale log", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		oldTime := time.Now().Add(-20 * time.Minute)
+
+		// Create transcript file with OLD mtime
+		txPath := filepath.Join(tmpDir, "transcript.jsonl")
+		if err := os.WriteFile(txPath, []byte("stale transcript\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(txPath, oldTime, oldTime); err != nil {
+			t.Fatal(err)
+		}
+
+		// Create log file with OLD mtime
+		logPath := filepath.Join(tmpDir, "task-test.log")
+		if err := os.WriteFile(logPath, []byte("stale log\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(logPath, oldTime, oldTime); err != nil {
+			t.Fatal(err)
+		}
+
+		config := makeDaemonConfig(
+			[]AgentEntry{{Worktree: "test", Role: "task"}},
+			nil,
+		)
+		config.Daemon.RestartPolicy.OutputTimeout = intPtr(60) // 60 seconds
+
+		ap := &AgentProcess{
+			entry:          AgentEntry{Worktree: "test", Role: "task"},
+			pid:            99999999, // fake PID — stopAgent will fail gracefully
+			logFilePath:    logPath,
+			transcriptPath: txPath,
+			lastStart:      time.Now().Add(-25 * time.Minute),
+		}
+
+		daemon := &Daemon{
+			config: config,
+			agents: []*AgentProcess{ap},
+		}
+
+		// This will try to stop the agent (stopAgent handles non-existent PIDs gracefully).
+		// Both transcript and log are stale, so the watchdog should trigger.
+		daemon.checkAgentHealth()
+		// The code path executes stopAgent without panic — PID doesn't exist so it's a no-op.
+	})
+
+	t.Run("falls back to log when transcript path is empty", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		// Create log file with recent mtime
+		logPath := filepath.Join(tmpDir, "task-test.log")
+		if err := os.WriteFile(logPath, []byte("recent log output\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+
+		config := makeDaemonConfig(
+			[]AgentEntry{{Worktree: "test", Role: "task"}},
+			nil,
+		)
+		config.Daemon.RestartPolicy.OutputTimeout = intPtr(60) // 60 seconds
+
+		ap := &AgentProcess{
+			entry:          AgentEntry{Worktree: "test", Role: "task"},
+			pid:            99999999,
+			logFilePath:    logPath,
+			transcriptPath: "", // empty — should fall back to log
+			lastStart:      time.Now().Add(-30 * time.Second),
+		}
+
+		daemon := &Daemon{
+			config: config,
+			agents: []*AgentProcess{ap},
+		}
+
+		daemon.checkAgentHealth()
+
+		// Agent should NOT be killed — log is fresh and transcript path is empty (fallback works)
+		ap.mu.Lock()
+		pid := ap.pid
+		ap.mu.Unlock()
+		if pid != 99999999 {
+			t.Errorf("pid = %d, want 99999999 (fresh log fallback should prevent kill)", pid)
+		}
+	})
+
+	t.Run("falls back to log when transcript file does not exist", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		// Create log file with recent mtime
+		logPath := filepath.Join(tmpDir, "task-test.log")
+		if err := os.WriteFile(logPath, []byte("recent log output\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+
+		config := makeDaemonConfig(
+			[]AgentEntry{{Worktree: "test", Role: "task"}},
+			nil,
+		)
+		config.Daemon.RestartPolicy.OutputTimeout = intPtr(60) // 60 seconds
+
+		ap := &AgentProcess{
+			entry:          AgentEntry{Worktree: "test", Role: "task"},
+			pid:            99999999,
+			logFilePath:    logPath,
+			transcriptPath: filepath.Join(tmpDir, "nonexistent-transcript.jsonl"), // does not exist
+			lastStart:      time.Now().Add(-30 * time.Second),
+		}
+
+		daemon := &Daemon{
+			config: config,
+			agents: []*AgentProcess{ap},
+		}
+
+		daemon.checkAgentHealth()
+
+		// Agent should NOT be killed — transcript doesn't exist, falls back to fresh log
+		ap.mu.Lock()
+		pid := ap.pid
+		ap.mu.Unlock()
+		if pid != 99999999 {
+			t.Errorf("pid = %d, want 99999999 (nonexistent transcript should fall back to fresh log)", pid)
+		}
+	})
+
+	t.Run("does not kill when no activity sources exist", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		config := makeDaemonConfig(
+			[]AgentEntry{{Worktree: "test", Role: "task"}},
+			nil,
+		)
+		config.Daemon.RestartPolicy.OutputTimeout = intPtr(60) // 60 seconds
+
+		ap := &AgentProcess{
+			entry:          AgentEntry{Worktree: "test", Role: "task"},
+			pid:            99999999,
+			logFilePath:    filepath.Join(tmpDir, "nonexistent.log"),              // does not exist
+			transcriptPath: filepath.Join(tmpDir, "nonexistent-transcript.jsonl"), // does not exist
+			lastStart:      time.Now().Add(-30 * time.Second),
+		}
+
+		daemon := &Daemon{
+			config: config,
+			agents: []*AgentProcess{ap},
+		}
+
+		daemon.checkAgentHealth()
+
+		// Agent should NOT be killed — no activity sources exist, so watchdog has nothing to check
+		ap.mu.Lock()
+		pid := ap.pid
+		ap.mu.Unlock()
+		if pid != 99999999 {
+			t.Errorf("pid = %d, want 99999999 (no activity sources should not trigger kill)", pid)
+		}
+	})
+
+	t.Run("uses lastStart floor for transcript mtime", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		// Create transcript file with mtime BEFORE lastStart
+		txPath := filepath.Join(tmpDir, "transcript.jsonl")
+		if err := os.WriteFile(txPath, []byte("old transcript\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		// Set transcript mtime to 1 hour ago (well before lastStart)
+		oldTime := time.Now().Add(-1 * time.Hour)
+		if err := os.Chtimes(txPath, oldTime, oldTime); err != nil {
+			t.Fatal(err)
+		}
+
+		config := makeDaemonConfig(
+			[]AgentEntry{{Worktree: "test", Role: "task"}},
+			nil,
+		)
+		config.Daemon.RestartPolicy.OutputTimeout = intPtr(60) // 60 seconds
+
+		// lastStart is 30 seconds ago — within 60s timeout
+		// Transcript mtime is 1 hour ago, but lastStart floor should override
+		ap := &AgentProcess{
+			entry:          AgentEntry{Worktree: "test", Role: "task"},
+			pid:            99999999,
+			logFilePath:    "", // no log — only transcript tier
+			transcriptPath: txPath,
+			lastStart:      time.Now().Add(-30 * time.Second),
+		}
+
+		daemon := &Daemon{
+			config: config,
+			agents: []*AgentProcess{ap},
+		}
+
+		daemon.checkAgentHealth()
+
+		// Should NOT be killed — lastStart (30s ago) is used as floor and is within 60s timeout
+		ap.mu.Lock()
+		pid := ap.pid
+		ap.mu.Unlock()
+		if pid != 99999999 {
+			t.Errorf("pid = %d, want 99999999 (lastStart floor should prevent kill)", pid)
+		}
+	})
 }
 
 func TestGetRateLimitBackoff(t *testing.T) {

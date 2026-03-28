@@ -70,6 +70,50 @@ func (d *Daemon) stopAgent(ap *AgentProcess) {
 	}
 }
 
+// checkWatchdog checks transcript mtime first (more reliable — updated by hooks
+// on every turn), falls back to log file mtime (stdout output). Kills the agent
+// if no activity signal is newer than outputTimeout seconds.
+func (d *Daemon) checkWatchdog(ap *AgentProcess, outputTimeout int, logPath string, lastStart time.Time, worktreeName string) {
+	var lastActivity time.Time
+	activitySource := "none"
+
+	// Tier 1: Check session transcript (updated by hooks on every turn)
+	ap.mu.Lock()
+	txPath := ap.transcriptPath
+	ap.mu.Unlock()
+	if txPath != "" {
+		if info, err := os.Stat(txPath); err == nil {
+			lastActivity = info.ModTime()
+			activitySource = "transcript"
+		}
+		// If transcript doesn't exist yet (no hooks fired), fall through to log
+	}
+
+	// Tier 2: Fall back to log file mtime (stdout output)
+	if activitySource == "none" && logPath != "" {
+		if info, err := os.Stat(logPath); err == nil {
+			lastActivity = info.ModTime()
+			activitySource = "log"
+		}
+	}
+
+	// Apply timeout if we found any activity signal
+	if activitySource != "none" {
+		// Use lastStart if activity signal predates agent spawn
+		if lastActivity.Before(lastStart) {
+			lastActivity = lastStart
+		}
+		silent := time.Since(lastActivity)
+		threshold := time.Duration(outputTimeout) * time.Second
+		if silent > threshold {
+			slog.Error("killing hung process, no activity detected",
+				"worktree", worktreeName, "silent_duration", silent.Truncate(time.Second),
+				"threshold_sec", outputTimeout, "source", activitySource)
+			d.stopAgent(ap)
+		}
+	}
+}
+
 // healthChecker runs periodic health checks in a goroutine.
 func (d *Daemon) healthChecker() {
 	ticker := time.NewTicker(30 * time.Second)
@@ -124,22 +168,9 @@ func (d *Daemon) checkAgentHealth() {
 			slog.Warn("stale lock detected", "worktree", worktreeName)
 		}
 
-		// Watchdog: kill agent if no log output for outputTimeout seconds
-		if outputTimeout > 0 && logPath != "" {
-			if info, err := os.Stat(logPath); err == nil {
-				lastOutput := info.ModTime()
-				// Use lastStart if log hasn't been written yet (agent just spawned)
-				if lastOutput.Before(lastStart) {
-					lastOutput = lastStart
-				}
-				silent := time.Since(lastOutput)
-				threshold := time.Duration(outputTimeout) * time.Second
-				if silent > threshold {
-					slog.Error("killing hung process, no output detected",
-						"worktree", worktreeName, "silent_duration", silent.Truncate(time.Second), "threshold_sec", outputTimeout)
-					d.stopAgent(ap)
-				}
-			}
+		// Watchdog: kill agent if no activity for outputTimeout seconds.
+		if outputTimeout > 0 {
+			d.checkWatchdog(ap, outputTimeout, logPath, lastStart, worktreeName)
 		}
 	}
 
