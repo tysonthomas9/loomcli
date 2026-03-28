@@ -14,7 +14,11 @@ import (
 	"golang.org/x/time/rate"
 )
 
-const cspReportMaxBodyBytes = 10240 // 10KB
+const (
+	cspReportMaxBodyBytes    = 10240 // 10KB
+	cspReportMaxURILen       = 2048
+	cspReportMaxDirectiveLen = 512
+)
 
 // cspReport represents the fields in a CSP violation report sent by browsers.
 type cspReport struct {
@@ -143,6 +147,21 @@ func handleCSPReport(limiter *cspReportLimiter) http.HandlerFunc {
 		}
 
 		report := wrapper.Report
+
+		// Truncate fields to prevent oversized log entries
+		if len(report.DocumentURI) > cspReportMaxURILen {
+			report.DocumentURI = report.DocumentURI[:cspReportMaxURILen]
+		}
+		if len(report.ViolatedDirective) > cspReportMaxDirectiveLen {
+			report.ViolatedDirective = report.ViolatedDirective[:cspReportMaxDirectiveLen]
+		}
+		if len(report.BlockedURI) > cspReportMaxURILen {
+			report.BlockedURI = report.BlockedURI[:cspReportMaxURILen]
+		}
+		if len(report.SourceFile) > cspReportMaxURILen {
+			report.SourceFile = report.SourceFile[:cspReportMaxURILen]
+		}
+
 		slog.Warn("csp-violation",
 			"document_uri", report.DocumentURI,
 			"violated_directive", report.ViolatedDirective,
