@@ -159,11 +159,16 @@ func (d *Daemon) reloadAndReconcile() {
 	d.config = newConfig
 	d.configHash = newHash
 
-	// Release the lock before drain/add — these can block for a long time
-	// (drainAgent waits for superviseAgent goroutine to exit).
+	// Release reconcileMu before drain/add — drainAgent blocks on <-target.done,
+	// and superviseAgent calls configSnapshot() which acquires reconcileMu.RLock.
+	// Holding reconcileMu.Lock through drain would deadlock.
 	d.reconcileMu.Unlock()
 
 	slog.Info("config changed", "added", len(added), "removed", len(removed), "modified", len(modified))
+
+	// Serialize the drain/add phase to prevent concurrent reconciliations from
+	// racing on the same agent (e.g., double SIGTERM/SIGKILL, duplicate adds).
+	d.drainAddMu.Lock()
 
 	// Drain removed and modified agents
 	for _, entry := range removed {
@@ -188,6 +193,8 @@ func (d *Daemon) reloadAndReconcile() {
 			slog.Error("failed to re-add modified agent", "worktree", entry.Worktree, "err", err)
 		}
 	}
+
+	d.drainAddMu.Unlock()
 
 	if evt, err := events.NewEvent(events.ConfigReloaded, "", "", "", events.ConfigReloadedData{
 		Added:    len(added),
