@@ -342,7 +342,7 @@ describe("SlashCommandInterceptor", () => {
       (terminal.write as any).mockClear();
 
       // Send a full CSI escape sequence: ESC [ A (arrow up, 3 bytes)
-      // ESC sets escapeSeqRemaining=2, so '[' and 'A' are also consumed
+      // ESC transitions to 'escaped' state; '[' transitions to 'csi'; 'A' is the final byte
       interceptor.handleData("\x1b", sendToWs);
       interceptor.handleData("[", sendToWs);
       interceptor.handleData("A", sendToWs);
@@ -383,6 +383,123 @@ describe("SlashCommandInterceptor", () => {
 
       expect(terminal.write as any).not.toHaveBeenCalled();
       expect(sendToWs).not.toHaveBeenCalled();
+    });
+  });
+
+  // ============= Multi-byte CSI escape sequences =============
+
+  describe("multi-byte CSI escape sequences", () => {
+    it("ignores multi-byte CSI (Ctrl+Up: ESC[1;5A) and preserves buffer", async () => {
+      interceptor.handleData("/hel", sendToWs);
+      (terminal.write as any).mockClear();
+
+      // Send ESC[1;5A (Ctrl+Up) byte by byte
+      interceptor.handleData("\x1b", sendToWs);
+      interceptor.handleData("[", sendToWs);
+      interceptor.handleData("1", sendToWs);
+      interceptor.handleData(";", sendToWs);
+      interceptor.handleData("5", sendToWs);
+      interceptor.handleData("A", sendToWs);
+
+      // No escape bytes should be written or sent
+      expect(terminal.write as any).not.toHaveBeenCalled();
+      expect(sendToWs).not.toHaveBeenCalled();
+
+      // Continue typing — buffer should be '/help'
+      interceptor.handleData("p", sendToWs);
+      expect(terminal.write as any).toHaveBeenCalledWith("p");
+
+      interceptor.handleData("\r", sendToWs);
+
+      await vi.waitFor(() => {
+        expect(terminal.write as any).toHaveBeenCalledWith(
+          expect.stringContaining("[info] Available commands:"),
+        );
+      });
+    });
+
+    it("ignores 4-byte CSI (clear screen: ESC[2J)", () => {
+      interceptor.handleData("/ab", sendToWs);
+      (terminal.write as any).mockClear();
+
+      // Send ESC[2J byte by byte
+      interceptor.handleData("\x1b", sendToWs);
+      interceptor.handleData("[", sendToWs);
+      interceptor.handleData("2", sendToWs);
+      interceptor.handleData("J", sendToWs);
+
+      expect(terminal.write as any).not.toHaveBeenCalled();
+
+      // Continue typing — buffer should be '/abc'
+      interceptor.handleData("c", sendToWs);
+      expect(terminal.write as any).toHaveBeenCalledWith("c");
+    });
+
+    it("ignores long SGR sequence (ESC[1;2;3m)", () => {
+      interceptor.handleData("/x", sendToWs);
+      (terminal.write as any).mockClear();
+
+      // Send ESC[1;2;3m byte by byte
+      for (const ch of "\x1b[1;2;3m") {
+        interceptor.handleData(ch, sendToWs);
+      }
+
+      expect(terminal.write as any).not.toHaveBeenCalled();
+
+      // Continue typing — buffer should be '/xy'
+      interceptor.handleData("y", sendToWs);
+      expect(terminal.write as any).toHaveBeenCalledWith("y");
+    });
+
+    it("ignores SS3 sequence (ESC O P — F1 key)", () => {
+      interceptor.handleData("/ab", sendToWs);
+      (terminal.write as any).mockClear();
+
+      // Send ESC O P (SS3 F1) byte by byte
+      interceptor.handleData("\x1b", sendToWs);
+      interceptor.handleData("O", sendToWs);
+      interceptor.handleData("P", sendToWs);
+
+      expect(terminal.write as any).not.toHaveBeenCalled();
+
+      // Continue typing — buffer should be '/abc'
+      interceptor.handleData("c", sendToWs);
+      expect(terminal.write as any).toHaveBeenCalledWith("c");
+    });
+
+    it("handles batched multi-byte CSI in a single handleData call", () => {
+      interceptor.handleData("/ab", sendToWs);
+      (terminal.write as any).mockClear();
+
+      // Deliver entire escape sequence as a single string
+      interceptor.handleData("\x1b[1;5A", sendToWs);
+
+      expect(terminal.write as any).not.toHaveBeenCalled();
+      expect(sendToWs).not.toHaveBeenCalled();
+
+      // Continue typing normally
+      interceptor.handleData("c", sendToWs);
+      expect(terminal.write as any).toHaveBeenCalledWith("c");
+    });
+
+    it("handles batched escape sequence followed by normal character", async () => {
+      interceptor.handleData("/hel", sendToWs);
+      (terminal.write as any).mockClear();
+
+      // Deliver escape sequence + normal char in one call
+      interceptor.handleData("\x1b[Ap", sendToWs);
+
+      // Only 'p' should be echoed (not escape bytes)
+      expect(terminal.write as any).toHaveBeenCalledWith("p");
+      expect(terminal.write as any).toHaveBeenCalledTimes(1);
+
+      interceptor.handleData("\r", sendToWs);
+
+      await vi.waitFor(() => {
+        expect(terminal.write as any).toHaveBeenCalledWith(
+          expect.stringContaining("[info] Available commands:"),
+        );
+      });
     });
   });
 
