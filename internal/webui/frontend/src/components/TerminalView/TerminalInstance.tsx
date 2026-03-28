@@ -622,6 +622,13 @@ export const TerminalInstance = forwardRef<
 
     doConnect();
 
+    // Close WebSocket on sign-out to free resources
+    const handleSignOut = () => {
+      wsCleanupRef.current?.();
+      wsCleanupRef.current = null;
+    };
+    window.addEventListener("auth-sign-out", handleSignOut);
+
     // ResizeObserver with debounce
     let resizeTimer: ReturnType<typeof setTimeout>;
     const observer = new ResizeObserver(() => {
@@ -651,6 +658,7 @@ export const TerminalInstance = forwardRef<
         capture: true,
       });
       textarea?.removeEventListener("focus", focusHandler);
+      window.removeEventListener("auth-sign-out", handleSignOut);
       selectionDisposable.dispose();
       scrollDisposable.dispose();
       searchResultDisposable.dispose();

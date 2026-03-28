@@ -421,4 +421,52 @@ describe("TerminalInstance", () => {
     expect(shared.terminalInstance).toBe(termBefore);
     expect(shared.terminalInstance.options.fontSize).toBe(18);
   });
+
+  describe("auth-sign-out cleanup", () => {
+    it("auth-sign-out closes WebSocket", async () => {
+      render(<TerminalInstance sessionName="test-session" isActive={true} />);
+
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      const ws = lastMockWs;
+      expect(ws).not.toBeNull();
+
+      // Dispatch auth-sign-out event
+      act(() => {
+        window.dispatchEvent(new Event("auth-sign-out"));
+      });
+
+      // WebSocket should be closed
+      expect(ws!.close).toHaveBeenCalled();
+    });
+
+    it("auth-sign-out listener is cleaned up on unmount", async () => {
+      const { unmount } = render(
+        <TerminalInstance sessionName="test-session" isActive={true} />,
+      );
+
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      const firstWs = lastMockWs;
+      expect(firstWs).not.toBeNull();
+
+      // Unmount to trigger cleanup (removes auth-sign-out listener)
+      unmount();
+
+      // Reset close mock call count from unmount cleanup
+      firstWs!.close.mockClear();
+
+      // Dispatch auth-sign-out after unmount — the listener should have been removed
+      act(() => {
+        window.dispatchEvent(new Event("auth-sign-out"));
+      });
+
+      // The old WebSocket's close should NOT be called again since the listener was removed
+      expect(firstWs!.close).not.toHaveBeenCalled();
+    });
+  });
 });

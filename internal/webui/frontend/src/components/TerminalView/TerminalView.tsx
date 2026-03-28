@@ -334,12 +334,15 @@ export function TerminalView({
           if (seedCtx) {
             seededSessionsRef.current.add(tab.sessionName);
             pendingSeedRef.current.delete(tab.sessionName);
-            seedTerminalSession(workspaceIdRef.current, tab.sessionName, seedCtx).catch(
-              (err) =>
-                console.error(
-                  `Failed to seed terminal session ${tab.sessionName}:`,
-                  err,
-                ),
+            seedTerminalSession(
+              workspaceIdRef.current,
+              tab.sessionName,
+              seedCtx,
+            ).catch((err) =>
+              console.error(
+                `Failed to seed terminal session ${tab.sessionName}:`,
+                err,
+              ),
             );
           }
         }

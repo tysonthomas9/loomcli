@@ -3,7 +3,26 @@
  * Provides a simpler push model compared to WebSocket with built-in browser reconnection.
  */
 
-import { getAuthToken, wsUrl } from "./client";
+import { get, ApiError, wsUrl } from "./client";
+
+// SSE token exchange: fetch opaque token to avoid exposing JWT in URL
+type SseTokenResult =
+  | { kind: "token"; token: string }
+  | { kind: "disabled" }
+  | { kind: "error"; message: string };
+
+async function fetchSseToken(): Promise<SseTokenResult> {
+  try {
+    const resp = await get<{ token: string }>("/api/events/token");
+    return { kind: "token", token: resp.token };
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) {
+      return { kind: "disabled" };
+    }
+    const message = err instanceof Error ? err.message : "Unknown error";
+    return { kind: "error", message };
+  }
+}
 
 // Connection states for real-time event streaming
 export type ConnectionState =
@@ -70,6 +89,7 @@ export class BeadsSSEClient {
   private reconnectAttempts = 0;
   private lastEventId: number | undefined;
   private manualDisconnect = false;
+  private usesOpaqueToken = false;
   private currentSourceRepos?: string[] | undefined;
   private workspaceId: string;
 
@@ -105,9 +125,32 @@ export class BeadsSSEClient {
     this.manualDisconnect = false;
     this.setState("connecting");
 
+    // Fetch opaque SSE token (external auth mode)
+    const tokenResult = await fetchSseToken();
+
+    // Bail out if disconnected while awaiting token
+    if (this.manualDisconnect || this.state === "disconnected") {
+      return;
+    }
+
+    if (tokenResult.kind === "error") {
+      this.onError?.(`SSE auth failed: ${tokenResult.message}`);
+      this.setState("disconnected");
+      return;
+    }
+
+    const opaqueToken =
+      tokenResult.kind === "token" ? tokenResult.token : undefined;
+    this.usesOpaqueToken = tokenResult.kind === "token";
+
     // Use provided since value or fall back to last received event ID
     const sinceParam = since ?? this.lastEventId;
-    const url = getSSEUrl(this.workspaceId, sinceParam, sourceRepos);
+    const url = getSSEUrl(
+      this.workspaceId,
+      sinceParam,
+      sourceRepos,
+      opaqueToken,
+    );
 
     try {
       this.eventSource = new EventSource(url);
@@ -223,6 +266,26 @@ export class BeadsSSEClient {
       return;
     }
 
+    // When using opaque tokens, disable browser auto-reconnect.
+    // The browser would reuse the same URL, but opaque tokens are single-use.
+    // Close the EventSource, signal reconnecting, and schedule an automatic
+    // retry with backoff — the browser won't do it for us.
+    if (this.usesOpaqueToken && this.eventSource) {
+      this.eventSource.close();
+      this.eventSource = null;
+      this.reconnectAttempts++;
+      this.setState("reconnecting");
+      this.onReconnect?.(this.reconnectAttempts);
+      // Auto-retry with capped exponential backoff
+      const delay = Math.min(1000 * this.reconnectAttempts, 30000);
+      setTimeout(() => {
+        if (!this.manualDisconnect && this.state === "reconnecting") {
+          this.connect(undefined, this.currentSourceRepos);
+        }
+      }, delay);
+      return;
+    }
+
     // EventSource has three readyStates: CONNECTING(0), OPEN(1), CLOSED(2)
     // Browser automatically retries on error, so we track attempts
     if (
@@ -286,6 +349,7 @@ export function getSSEUrl(
   workspaceId: string,
   since?: number,
   sourceRepos?: string[],
+  opaqueToken?: string,
 ): string {
   const base = `${window.location.origin}${wsUrl(workspaceId, "/events")}`;
   const params = new URLSearchParams();
@@ -295,9 +359,8 @@ export function getSSEUrl(
   if (sourceRepos && sourceRepos.length > 0) {
     params.set("source_repos", sourceRepos.join(","));
   }
-  const token = getAuthToken();
-  if (token) {
-    params.set("token", token);
+  if (opaqueToken) {
+    params.set("token", opaqueToken);
   }
   const qs = params.toString();
   return qs ? `${base}?${qs}` : base;

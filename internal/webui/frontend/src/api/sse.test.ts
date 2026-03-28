@@ -3,8 +3,19 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+import { ApiError } from "./client";
 import { BeadsSSEClient, getSSEUrl } from "./sse";
 import type { MutationPayload } from "./sse";
+
+// Mock the get function from client.ts — default to 404 (open mode, no SSE token endpoint)
+const mockGet = vi.fn();
+vi.mock("./client", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("./client")>();
+  return {
+    ...mod,
+    get: (...args: unknown[]) => mockGet(...args),
+  };
+});
 
 // Mock EventSource class with static constants matching the real EventSource API
 class MockEventSource {
@@ -97,6 +108,8 @@ describe("BeadsSSEClient", () => {
     originalEventSource = global.EventSource;
     global.EventSource = MockEventSource as unknown as typeof EventSource;
     MockEventSource.reset();
+    // Default: 404 (open mode — no SSE token endpoint)
+    mockGet.mockRejectedValue(new ApiError(404, "Not Found"));
   });
 
   afterEach(() => {
@@ -130,10 +143,10 @@ describe("BeadsSSEClient", () => {
   });
 
   describe("Connection lifecycle", () => {
-    it("connect() creates EventSource", () => {
+    it("connect() creates EventSource", async () => {
       const client = new BeadsSSEClient("test-ws-id");
 
-      client.connect();
+      await client.connect();
 
       expect(MockEventSource.lastInstance).toBeDefined();
       expect(MockEventSource.lastInstance?.url).toContain(
@@ -141,23 +154,23 @@ describe("BeadsSSEClient", () => {
       );
     });
 
-    it("connect() with since parameter adds query string", () => {
+    it("connect() with since parameter adds query string", async () => {
       const client = new BeadsSSEClient("test-ws-id");
 
-      client.connect(1706011200000);
+      await client.connect(1706011200000);
 
       expect(MockEventSource.lastInstance?.url).toContain(
         "since=1706011200000",
       );
     });
 
-    it("state transitions from disconnected to connecting to connected", () => {
+    it("state transitions from disconnected to connecting to connected", async () => {
       const onStateChange = vi.fn();
       const client = new BeadsSSEClient("test-ws-id", { onStateChange });
 
       expect(client.getState()).toBe("disconnected");
 
-      client.connect();
+      await client.connect();
 
       expect(client.getState()).toBe("connecting");
       expect(onStateChange).toHaveBeenCalledWith("connecting");
@@ -168,11 +181,11 @@ describe("BeadsSSEClient", () => {
       expect(onStateChange).toHaveBeenCalledWith("connected");
     });
 
-    it("disconnect() closes EventSource and updates state", () => {
+    it("disconnect() closes EventSource and updates state", async () => {
       const onStateChange = vi.fn();
       const client = new BeadsSSEClient("test-ws-id", { onStateChange });
 
-      client.connect();
+      await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
       expect(client.getState()).toBe("connected");
@@ -186,20 +199,20 @@ describe("BeadsSSEClient", () => {
       expect(onStateChange).toHaveBeenCalledWith("disconnected");
     });
 
-    it("connect() when already connected does nothing", () => {
+    it("connect() when already connected does nothing", async () => {
       const client = new BeadsSSEClient("test-ws-id");
 
-      client.connect();
+      await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
       expect(MockEventSource.instances.length).toBe(1);
 
-      client.connect();
+      await client.connect();
 
       expect(MockEventSource.instances.length).toBe(1);
     });
 
-    it("handles EventSource constructor throwing", () => {
+    it("handles EventSource constructor throwing", async () => {
       const onStateChange = vi.fn();
       const onError = vi.fn();
       const consoleErrorSpy = vi
@@ -220,7 +233,7 @@ describe("BeadsSSEClient", () => {
         onStateChange,
         onError,
       });
-      client.connect();
+      await client.connect();
 
       // handleError is called but eventSource is null, so state stays 'connecting'
       expect(client.getState()).toBe("connecting");
@@ -263,26 +276,26 @@ describe("BeadsSSEClient", () => {
       consoleErrorSpy.mockRestore();
     });
 
-    it("connect() when connecting does nothing", () => {
+    it("connect() when connecting does nothing", async () => {
       const client = new BeadsSSEClient("test-ws-id");
 
-      client.connect();
+      await client.connect();
 
       expect(client.getState()).toBe("connecting");
       expect(MockEventSource.instances.length).toBe(1);
 
-      client.connect();
+      await client.connect();
 
       expect(MockEventSource.instances.length).toBe(1);
     });
   });
 
   describe("Message parsing and callback invocation", () => {
-    it("onMutation called with parsed payload", () => {
+    it("onMutation called with parsed payload", async () => {
       const onMutation = vi.fn();
       const client = new BeadsSSEClient("test-ws-id", { onMutation });
 
-      client.connect();
+      await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
       const mutation: MutationPayload = {
@@ -297,14 +310,14 @@ describe("BeadsSSEClient", () => {
       expect(onMutation).toHaveBeenCalledWith(mutation);
     });
 
-    it("malformed JSON is ignored with warning", () => {
+    it("malformed JSON is ignored with warning", async () => {
       const onMutation = vi.fn();
       const consoleWarnSpy = vi
         .spyOn(console, "warn")
         .mockImplementation(() => {});
       const client = new BeadsSSEClient("test-ws-id", { onMutation });
 
-      client.connect();
+      await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
       // Simulate invalid JSON by directly calling the listener with malformed data
@@ -325,7 +338,7 @@ describe("BeadsSSEClient", () => {
       consoleWarnSpy.mockRestore();
     });
 
-    it("connected event is handled", () => {
+    it("connected event is handled", async () => {
       const originalEnv = process.env.NODE_ENV;
       process.env.NODE_ENV = "development";
       const consoleDebugSpy = vi
@@ -334,7 +347,7 @@ describe("BeadsSSEClient", () => {
 
       const client = new BeadsSSEClient("test-ws-id");
 
-      client.connect();
+      await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
       MockEventSource.lastInstance?.simulateConnectedEvent();
 
@@ -348,7 +361,7 @@ describe("BeadsSSEClient", () => {
   });
 
   describe("Error handling and reconnect state tracking", () => {
-    it("error during connecting state triggers reconnecting", () => {
+    it("error during connecting state triggers reconnecting", async () => {
       const onStateChange = vi.fn();
       const onReconnect = vi.fn();
       const client = new BeadsSSEClient("test-ws-id", {
@@ -356,7 +369,7 @@ describe("BeadsSSEClient", () => {
         onReconnect,
       });
 
-      client.connect();
+      await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
       // Simulate error while browser is reconnecting
@@ -368,12 +381,12 @@ describe("BeadsSSEClient", () => {
       expect(onReconnect).toHaveBeenCalledWith(1);
     });
 
-    it("error during closed state triggers reconnecting and calls onError", () => {
+    it("error during closed state triggers reconnecting and calls onError", async () => {
       const onError = vi.fn();
       const onReconnect = vi.fn();
       const client = new BeadsSSEClient("test-ws-id", { onError, onReconnect });
 
-      client.connect();
+      await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
       // Simulate closed state error
@@ -385,11 +398,11 @@ describe("BeadsSSEClient", () => {
       expect(onReconnect).toHaveBeenCalledWith(1);
     });
 
-    it("reconnectAttempts increments on consecutive errors", () => {
+    it("reconnectAttempts increments on consecutive errors", async () => {
       const onReconnect = vi.fn();
       const client = new BeadsSSEClient("test-ws-id", { onReconnect });
 
-      client.connect();
+      await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
       MockEventSource.lastInstance?.simulateError(MockEventSource.CONNECTING);
@@ -402,11 +415,11 @@ describe("BeadsSSEClient", () => {
       expect(client.getReconnectAttempts()).toBe(3);
     });
 
-    it("reconnectAttempts resets to 0 on successful open", () => {
+    it("reconnectAttempts resets to 0 on successful open", async () => {
       const onReconnect = vi.fn();
       const client = new BeadsSSEClient("test-ws-id", { onReconnect });
 
-      client.connect();
+      await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
       // Simulate some errors
@@ -421,12 +434,12 @@ describe("BeadsSSEClient", () => {
       expect(onReconnect).toHaveBeenCalledWith(0);
     });
 
-    it("error after manual disconnect is ignored", () => {
+    it("error after manual disconnect is ignored", async () => {
       const onError = vi.fn();
       const onReconnect = vi.fn();
       const client = new BeadsSSEClient("test-ws-id", { onError, onReconnect });
 
-      client.connect();
+      await client.connect();
       const esInstance = MockEventSource.lastInstance;
       MockEventSource.lastInstance?.simulateOpen();
 
@@ -444,20 +457,20 @@ describe("BeadsSSEClient", () => {
       expect(client.getReconnectAttempts()).toBe(0);
     });
 
-    it("errors are processed again after disconnect then reconnect", () => {
+    it("errors are processed again after disconnect then reconnect", async () => {
       const onError = vi.fn();
       const onReconnect = vi.fn();
       const client = new BeadsSSEClient("test-ws-id", { onError, onReconnect });
 
       // First connection
-      client.connect();
+      await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
       // Disconnect (sets manualDisconnect = true)
       client.disconnect();
 
       // Reconnect (should reset manualDisconnect = false)
-      client.connect();
+      await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
       onError.mockClear();
@@ -472,13 +485,13 @@ describe("BeadsSSEClient", () => {
       expect(onReconnect).toHaveBeenCalledWith(1);
     });
 
-    it("logs warning after 5 connection failures", () => {
+    it("logs warning after 5 connection failures", async () => {
       const consoleWarnSpy = vi
         .spyOn(console, "warn")
         .mockImplementation(() => {});
       const client = new BeadsSSEClient("test-ws-id");
 
-      client.connect();
+      await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
       for (let i = 0; i < 5; i++) {
@@ -500,10 +513,10 @@ describe("BeadsSSEClient", () => {
       expect(client.getLastEventId()).toBeUndefined();
     });
 
-    it("getLastEventId returns the last event ID after receiving a mutation", () => {
+    it("getLastEventId returns the last event ID after receiving a mutation", async () => {
       const client = new BeadsSSEClient("test-ws-id");
 
-      client.connect();
+      await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
       const mutation: MutationPayload = {
@@ -519,10 +532,10 @@ describe("BeadsSSEClient", () => {
       expect(client.getLastEventId()).toBe(expectedTime);
     });
 
-    it("tracks last event ID from event.lastEventId", () => {
+    it("tracks last event ID from event.lastEventId", async () => {
       const client = new BeadsSSEClient("test-ws-id");
 
-      client.connect();
+      await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
       const mutation: MutationPayload = {
@@ -536,7 +549,7 @@ describe("BeadsSSEClient", () => {
 
       // Disconnect and reconnect - should use last event ID
       client.disconnect();
-      client.connect();
+      await client.connect();
 
       const expectedTime = Date.parse("2025-01-23T12:00:00Z");
       expect(MockEventSource.lastInstance?.url).toContain(
@@ -544,10 +557,10 @@ describe("BeadsSSEClient", () => {
       );
     });
 
-    it("uses latest event ID when receiving multiple mutations", () => {
+    it("uses latest event ID when receiving multiple mutations", async () => {
       const client = new BeadsSSEClient("test-ws-id");
 
-      client.connect();
+      await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
       const mutation1: MutationPayload = {
@@ -568,7 +581,7 @@ describe("BeadsSSEClient", () => {
       MockEventSource.lastInstance?.simulateMutation(mutation2);
 
       client.disconnect();
-      client.connect();
+      await client.connect();
 
       const expectedTime = Date.parse("2025-01-23T14:00:00Z");
       expect(MockEventSource.lastInstance?.url).toContain(
@@ -576,10 +589,10 @@ describe("BeadsSSEClient", () => {
       );
     });
 
-    it("connect with explicit since overrides last event ID", () => {
+    it("connect with explicit since overrides last event ID", async () => {
       const client = new BeadsSSEClient("test-ws-id");
 
-      client.connect();
+      await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
       const mutation: MutationPayload = {
@@ -592,17 +605,17 @@ describe("BeadsSSEClient", () => {
       MockEventSource.lastInstance?.simulateMutation(mutation);
 
       client.disconnect();
-      client.connect(1706100000000);
+      await client.connect(1706100000000);
 
       expect(MockEventSource.lastInstance?.url).toContain(
         "since=1706100000000",
       );
     });
 
-    it("ignores lastEventId of 0", () => {
+    it("ignores lastEventId of 0", async () => {
       const client = new BeadsSSEClient("test-ws-id");
 
-      client.connect();
+      await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
       const mutation: MutationPayload = {
@@ -617,10 +630,10 @@ describe("BeadsSSEClient", () => {
       expect(client.getLastEventId()).toBeUndefined();
     });
 
-    it("ignores negative lastEventId", () => {
+    it("ignores negative lastEventId", async () => {
       const client = new BeadsSSEClient("test-ws-id");
 
-      client.connect();
+      await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
       const mutation: MutationPayload = {
@@ -635,10 +648,10 @@ describe("BeadsSSEClient", () => {
       expect(client.getLastEventId()).toBeUndefined();
     });
 
-    it("ignores non-numeric lastEventId", () => {
+    it("ignores non-numeric lastEventId", async () => {
       const client = new BeadsSSEClient("test-ws-id");
 
-      client.connect();
+      await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
       const mutation: MutationPayload = {
@@ -653,10 +666,10 @@ describe("BeadsSSEClient", () => {
       expect(client.getLastEventId()).toBeUndefined();
     });
 
-    it("does not overwrite newer ID with older ID (out-of-order)", () => {
+    it("does not overwrite newer ID with older ID (out-of-order)", async () => {
       const client = new BeadsSSEClient("test-ws-id");
 
-      client.connect();
+      await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
       const mutation1: MutationPayload = {
@@ -679,10 +692,10 @@ describe("BeadsSSEClient", () => {
       expect(client.getLastEventId()).toBe(2000);
     });
 
-    it("handles empty lastEventId string", () => {
+    it("handles empty lastEventId string", async () => {
       const client = new BeadsSSEClient("test-ws-id");
 
-      client.connect();
+      await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
       const mutation: MutationPayload = {
@@ -697,11 +710,11 @@ describe("BeadsSSEClient", () => {
       expect(client.getLastEventId()).toBeUndefined();
     });
 
-    it("invalid timestamp in mutation is ignored for tracking", () => {
+    it("invalid timestamp in mutation is ignored for tracking", async () => {
       const onMutation = vi.fn();
       const client = new BeadsSSEClient("test-ws-id", { onMutation });
 
-      client.connect();
+      await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
       const mutation = {
@@ -717,7 +730,7 @@ describe("BeadsSSEClient", () => {
       expect(onMutation).toHaveBeenCalled();
 
       client.disconnect();
-      client.connect();
+      await client.connect();
 
       // Should not have a since parameter since timestamp was invalid
       expect(MockEventSource.lastInstance?.url).not.toContain("since=");
@@ -725,10 +738,10 @@ describe("BeadsSSEClient", () => {
   });
 
   describe("retryNow", () => {
-    it("only works when in reconnecting state", () => {
+    it("only works when in reconnecting state", async () => {
       const client = new BeadsSSEClient("test-ws-id");
 
-      client.connect();
+      await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
       expect(client.getState()).toBe("connected");
@@ -739,10 +752,10 @@ describe("BeadsSSEClient", () => {
       expect(MockEventSource.instances.length).toBe(1);
     });
 
-    it("creates new connection immediately when in reconnecting state", () => {
+    it("creates new connection immediately when in reconnecting state", async () => {
       const client = new BeadsSSEClient("test-ws-id");
 
-      client.connect();
+      await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
       // Trigger reconnecting state
@@ -751,16 +764,18 @@ describe("BeadsSSEClient", () => {
       expect(MockEventSource.instances.length).toBe(1);
 
       client.retryNow();
-
-      expect(MockEventSource.instances.length).toBe(2);
+      // retryNow calls connect() which is async — wait for microtasks
+      await vi.waitFor(() => {
+        expect(MockEventSource.instances.length).toBe(2);
+      });
       expect(client.getState()).toBe("connecting");
     });
 
-    it("resets reconnect counter on manual retry", () => {
+    it("resets reconnect counter on manual retry", async () => {
       const onReconnect = vi.fn();
       const client = new BeadsSSEClient("test-ws-id", { onReconnect });
 
-      client.connect();
+      await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
       // Trigger multiple errors
@@ -776,7 +791,7 @@ describe("BeadsSSEClient", () => {
   });
 
   describe("Cleanup on destroy", () => {
-    it("destroy() closes EventSource and clears callbacks", () => {
+    it("destroy() closes EventSource and clears callbacks", async () => {
       const onMutation = vi.fn();
       const onStateChange = vi.fn();
       const client = new BeadsSSEClient("test-ws-id", {
@@ -784,7 +799,7 @@ describe("BeadsSSEClient", () => {
         onStateChange,
       });
 
-      client.connect();
+      await client.connect();
       const esInstance = MockEventSource.lastInstance;
       MockEventSource.lastInstance?.simulateOpen();
 
@@ -810,10 +825,10 @@ describe("BeadsSSEClient", () => {
       expect(onMutation).not.toHaveBeenCalled();
     });
 
-    it("instance should not be reused after destroy", () => {
+    it("instance should not be reused after destroy", async () => {
       const client = new BeadsSSEClient("test-ws-id");
 
-      client.connect();
+      await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
       expect(client.getState()).toBe("connected");
 
@@ -822,6 +837,128 @@ describe("BeadsSSEClient", () => {
 
       // Note: The client doesn't prevent reuse, but callbacks are cleared
       // This documents the behavior - destroy() clears callbacks
+    });
+  });
+
+  describe("SSE token exchange", () => {
+    it("connect() with opaque token adds token to URL", async () => {
+      mockGet.mockResolvedValue({ token: "opaque-token-123" });
+
+      const client = new BeadsSSEClient("test-ws-id");
+      await client.connect();
+
+      expect(MockEventSource.lastInstance?.url).toContain(
+        "token=opaque-token-123",
+      );
+    });
+
+    it("connect() in open mode (404) creates EventSource without token", async () => {
+      mockGet.mockRejectedValue(new ApiError(404, "Not Found"));
+
+      const client = new BeadsSSEClient("test-ws-id");
+      await client.connect();
+
+      expect(MockEventSource.lastInstance?.url).not.toContain("token=");
+    });
+
+    it("connect() with token error emits onError and sets disconnected", async () => {
+      mockGet.mockRejectedValue(new ApiError(500, "Internal Server Error"));
+
+      const onError = vi.fn();
+      const client = new BeadsSSEClient("test-ws-id", { onError });
+      await client.connect();
+
+      expect(onError).toHaveBeenCalledWith(
+        expect.stringContaining("SSE auth failed"),
+      );
+      expect(client.getState()).toBe("disconnected");
+      expect(MockEventSource.lastInstance).toBeUndefined();
+    });
+
+    it("connect() bails out if disconnected during token fetch", async () => {
+      // Make fetchSseToken take a while by using a deferred promise
+      let resolveGet: (value: unknown) => void;
+      mockGet.mockReturnValue(
+        new Promise((resolve) => {
+          resolveGet = resolve;
+        }),
+      );
+
+      const client = new BeadsSSEClient("test-ws-id");
+      const connectPromise = client.connect();
+
+      // Disconnect while fetching token
+      client.disconnect();
+
+      // Resolve the get call
+      resolveGet!({ token: "opaque-123" });
+      await connectPromise;
+
+      // Should not have created an EventSource
+      expect(MockEventSource.lastInstance).toBeUndefined();
+      expect(client.getState()).toBe("disconnected");
+    });
+
+    it("handleError with opaque token closes EventSource", async () => {
+      mockGet.mockResolvedValue({ token: "opaque-token-123" });
+
+      const onReconnect = vi.fn();
+      const client = new BeadsSSEClient("test-ws-id", { onReconnect });
+      await client.connect();
+      MockEventSource.lastInstance?.simulateOpen();
+
+      const esInstance = MockEventSource.lastInstance;
+      esInstance?.simulateError(MockEventSource.CONNECTING);
+
+      // EventSource should be closed (not left for browser to auto-reconnect)
+      expect(esInstance?.readyState).toBe(MockEventSource.CLOSED);
+      expect(client.getState()).toBe("reconnecting");
+      expect(onReconnect).toHaveBeenCalledWith(1);
+    });
+
+    it("handleError without opaque token preserves browser auto-reconnect", async () => {
+      // Open mode — no opaque token
+      mockGet.mockRejectedValue(new ApiError(404, "Not Found"));
+
+      const client = new BeadsSSEClient("test-ws-id");
+      await client.connect();
+      MockEventSource.lastInstance?.simulateOpen();
+
+      const esInstance = MockEventSource.lastInstance;
+      esInstance?.simulateError(MockEventSource.CONNECTING);
+
+      // EventSource should NOT be closed — browser handles reconnect
+      expect(esInstance?.readyState).toBe(MockEventSource.CONNECTING);
+      expect(client.getState()).toBe("reconnecting");
+    });
+
+    it("retryNow() fetches fresh opaque token", async () => {
+      let callCount = 0;
+      mockGet.mockImplementation(() => {
+        callCount++;
+        return Promise.resolve({ token: `opaque-token-${callCount}` });
+      });
+
+      const client = new BeadsSSEClient("test-ws-id");
+      await client.connect();
+      MockEventSource.lastInstance?.simulateOpen();
+
+      expect(MockEventSource.lastInstance?.url).toContain(
+        "token=opaque-token-1",
+      );
+
+      // Trigger reconnecting state
+      MockEventSource.lastInstance?.simulateError(MockEventSource.CONNECTING);
+      expect(client.getState()).toBe("reconnecting");
+
+      // retryNow triggers a new connect with fresh token
+      client.retryNow();
+      await vi.waitFor(() => {
+        expect(MockEventSource.instances.length).toBe(2);
+      });
+      expect(MockEventSource.lastInstance?.url).toContain(
+        "token=opaque-token-2",
+      );
     });
   });
 });
@@ -875,6 +1012,18 @@ describe("getSSEUrl", () => {
     expect(url).toContain("since=1706011200000");
     expect(url).toContain("source_repos=repo-a");
   });
+
+  it("includes opaqueToken in URL when provided", () => {
+    const url = getSSEUrl("test-ws-id", undefined, undefined, "opaque-abc");
+
+    expect(url).toContain("token=opaque-abc");
+  });
+
+  it("omits token when opaqueToken is undefined", () => {
+    const url = getSSEUrl("test-ws-id", undefined, undefined, undefined);
+
+    expect(url).not.toContain("token=");
+  });
 });
 
 describe("BeadsSSEClient sourceRepos support", () => {
@@ -884,6 +1033,7 @@ describe("BeadsSSEClient sourceRepos support", () => {
     originalEventSource = global.EventSource;
     global.EventSource = MockEventSource as unknown as typeof EventSource;
     MockEventSource.reset();
+    mockGet.mockRejectedValue(new ApiError(404, "Not Found"));
   });
 
   afterEach(() => {
@@ -891,37 +1041,37 @@ describe("BeadsSSEClient sourceRepos support", () => {
     vi.restoreAllMocks();
   });
 
-  it("connect() passes sourceRepos to URL", () => {
+  it("connect() passes sourceRepos to URL", async () => {
     const client = new BeadsSSEClient("test-ws-id");
 
-    client.connect(undefined, ["repo-a", "repo-b"]);
+    await client.connect(undefined, ["repo-a", "repo-b"]);
 
     expect(MockEventSource.lastInstance?.url).toContain(
       "source_repos=repo-a%2Crepo-b",
     );
   });
 
-  it("connect() without sourceRepos omits source_repos from URL", () => {
+  it("connect() without sourceRepos omits source_repos from URL", async () => {
     const client = new BeadsSSEClient("test-ws-id");
 
-    client.connect();
+    await client.connect();
 
     expect(MockEventSource.lastInstance?.url).not.toContain("source_repos");
   });
 
-  it("connect() with both since and sourceRepos includes both in URL", () => {
+  it("connect() with both since and sourceRepos includes both in URL", async () => {
     const client = new BeadsSSEClient("test-ws-id");
 
-    client.connect(1706011200000, ["repo-x"]);
+    await client.connect(1706011200000, ["repo-x"]);
 
     expect(MockEventSource.lastInstance?.url).toContain("since=1706011200000");
     expect(MockEventSource.lastInstance?.url).toContain("source_repos=repo-x");
   });
 
-  it("retryNow() uses stored sourceRepos from last connect()", () => {
+  it("retryNow() uses stored sourceRepos from last connect()", async () => {
     const client = new BeadsSSEClient("test-ws-id");
 
-    client.connect(undefined, ["repo-a", "repo-b"]);
+    await client.connect(undefined, ["repo-a", "repo-b"]);
     MockEventSource.lastInstance?.simulateOpen();
 
     // Trigger reconnecting state
@@ -929,18 +1079,20 @@ describe("BeadsSSEClient sourceRepos support", () => {
     expect(client.getState()).toBe("reconnecting");
 
     client.retryNow();
+    await vi.waitFor(() => {
+      expect(MockEventSource.instances.length).toBe(2);
+    });
 
     // New connection should use stored sourceRepos
-    expect(MockEventSource.instances.length).toBe(2);
     expect(MockEventSource.lastInstance?.url).toContain(
       "source_repos=repo-a%2Crepo-b",
     );
   });
 
-  it("retryNow() without sourceRepos omits source_repos from URL", () => {
+  it("retryNow() without sourceRepos omits source_repos from URL", async () => {
     const client = new BeadsSSEClient("test-ws-id");
 
-    client.connect();
+    await client.connect();
     MockEventSource.lastInstance?.simulateOpen();
 
     // Trigger reconnecting state
@@ -948,8 +1100,10 @@ describe("BeadsSSEClient sourceRepos support", () => {
     expect(client.getState()).toBe("reconnecting");
 
     client.retryNow();
+    await vi.waitFor(() => {
+      expect(MockEventSource.instances.length).toBe(2);
+    });
 
-    expect(MockEventSource.instances.length).toBe(2);
     expect(MockEventSource.lastInstance?.url).not.toContain("source_repos");
   });
 });
