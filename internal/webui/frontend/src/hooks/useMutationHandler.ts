@@ -125,6 +125,19 @@ function applyUpdateToIssue(issue: Issue, mutation: MutationPayload): Issue {
     if (mutation.assignee != null) {
       draft.assignee = mutation.assignee;
     }
+    // Apply status from new_status (used by both MutationStatus and granular
+    // MutationUpdate events from external poll)
+    if (mutation.new_status != null) {
+      draft.status = mutation.new_status;
+    }
+    // Apply priority when present (granular MutationUpdate from external poll)
+    if (
+      mutation.priority != null &&
+      mutation.priority >= 0 &&
+      mutation.priority <= 4
+    ) {
+      draft.priority = mutation.priority as typeof draft.priority;
+    }
   });
 }
 

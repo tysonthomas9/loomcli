@@ -48,6 +48,10 @@ type DaemonSubscriber struct {
 	lastKnownCount   int64
 	lastPollTime     time.Time
 	countInitialized bool
+
+	// Tracks last-known state of issues for granular diff in pollDBChanges.
+	// Key: issue ID, Value: lightweight snapshot used to determine mutation type.
+	knownIssues map[string]knownIssueState
 }
 
 // NewDaemonSubscriber creates a new daemon subscriber.
@@ -303,6 +307,9 @@ func (s *DaemonSubscriber) externalChangeLoop() {
 
 // pollDBChanges checks the database for external changes by comparing issue counts
 // and checking for recently updated issues via the Count RPC.
+// When changes are detected, it emits granular per-issue mutations instead of a
+// blanket MutationRefresh, falling back to MutationRefresh only for deletions,
+// List RPC failures, or when too many issues changed at once.
 func (s *DaemonSubscriber) pollDBChanges() {
 	ctx, cancel := context.WithTimeout(context.Background(), subscriptionAcquireTimeout)
 	defer cancel()
@@ -341,14 +348,20 @@ func (s *DaemonSubscriber) pollDBChanges() {
 		s.lastPollTime = now
 		s.countInitialized = true
 		s.mu.Unlock()
+		// Build initial knownIssues snapshot (best-effort, non-blocking)
+		s.loadKnownIssues(client)
 		return
 	}
 
 	changeDetected := false
+	deletionDetected := false
 
 	// Check if total count changed (issue created or deleted externally)
 	if totalCount != s.lastKnownCount {
 		changeDetected = true
+		if totalCount < s.lastKnownCount {
+			deletionDetected = true
+		}
 	}
 
 	lastPollTime := s.lastPollTime
@@ -368,23 +381,39 @@ func (s *DaemonSubscriber) pollDBChanges() {
 		}
 	}
 
-	if changeDetected {
-		s.hub.Broadcast(&MutationPayload{
-			Type:        rpc.MutationRefresh,
-			IssueID:     "",
-			Timestamp:   now.UTC().Format(time.RFC3339),
-			WorkspaceID: s.workspaceID,
-		})
-		s.mu.Lock()
-		s.lastKnownCount = totalCount
-		s.lastPollTime = now
-		s.mu.Unlock()
-		log.Printf("External DB change detected, broadcast refresh to %d SSE clients", s.hub.ClientCount())
-	} else {
+	if !changeDetected {
 		s.mu.Lock()
 		s.lastPollTime = now
 		s.mu.Unlock()
+		return
 	}
+
+	// Deletion detected — fall back to MutationRefresh (tracking all IDs for
+	// granular delete detection adds memory/complexity not worth the trade-off).
+	if deletionDetected {
+		s.broadcastRefresh(now, totalCount)
+		// Rebuild knownIssues snapshot after refresh
+		s.loadKnownIssues(client)
+		return
+	}
+
+	// Try granular mutations: fetch changed issues via List RPC
+	changed := s.fetchChangedIssues(client, lastPollTime)
+	if changed == nil {
+		// List RPC failed — fall back to MutationRefresh
+		s.broadcastRefresh(now, totalCount)
+		return
+	}
+
+	if len(changed) > granularMutationThreshold {
+		// Too many changes — fall back to MutationRefresh to avoid SSE congestion
+		s.broadcastRefresh(now, totalCount)
+		s.loadKnownIssues(client)
+		return
+	}
+
+	// Emit granular mutations and update tracking state
+	s.emitGranularMutations(changed, now, totalCount)
 }
 
 // waitWithDone waits for the specified duration or until done is signaled.

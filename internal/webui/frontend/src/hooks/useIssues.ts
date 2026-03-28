@@ -95,6 +95,35 @@ export interface UseIssuesReturn {
 }
 
 /**
+ * Compares two issues for display-relevant equality.
+ * Used to preserve object references during refetch merge so that React.memo's
+ * shallow comparison can prevent unnecessary re-renders of unchanged cards.
+ * The updated_at timestamp acts as a catch-all — if any field changed server-side,
+ * the timestamp will differ.
+ */
+function issuesAreEqual(a: Issue, b: Issue): boolean {
+  if (a.id !== b.id) return false;
+  if (a.updated_at !== b.updated_at) return false;
+  if (a.title !== b.title) return false;
+  if (a.status !== b.status) return false;
+  if (a.priority !== b.priority) return false;
+  if (a.assignee !== b.assignee) return false;
+  if (a.issue_type !== b.issue_type) return false;
+  if (a.owner !== b.owner) return false;
+  // Shallow array comparison for labels
+  const aLabels = a.labels;
+  const bLabels = b.labels;
+  if (aLabels !== bLabels) {
+    if (!aLabels || !bLabels) return false;
+    if (aLabels.length !== bLabels.length) return false;
+    for (let i = 0; i < aLabels.length; i++) {
+      if (aLabels[i] !== bLabels[i]) return false;
+    }
+  }
+  return true;
+}
+
+/**
  * React hook for managing issue state with real-time updates.
  *
  * @example
@@ -151,11 +180,24 @@ export function useIssues(options: UseIssuesOptions): UseIssuesReturn {
   // Ref for refetch callback (needed because refetch is defined after useMutationHandler)
   const refetchRef = useRef<() => void>(() => {});
 
+  // Debounce timer for MutationRefresh events — collapses rapid successive
+  // refresh events (e.g., multiple external writes in a 3s poll window) into
+  // a single refetch after 1 second of quiet.
+  const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Mutation handler setup
   const { handleMutation, mutationCount } = useMutationHandler({
     issues: issuesMap,
     setIssues: setIssuesMap,
-    onRefreshRequired: () => refetchRef.current(),
+    onRefreshRequired: () => {
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current);
+      }
+      refreshTimeoutRef.current = setTimeout(() => {
+        refreshTimeoutRef.current = null;
+        refetchRef.current();
+      }, 1000);
+    },
     onIssueDeleted: (issueId) => {
       // Track deletions during fetch to prevent re-adding from stale API response
       if (fetchingRef.current) {
@@ -342,7 +384,14 @@ export function useIssues(options: UseIssuesOptions): UseIssuesReturn {
             if (deletedDuringFetch.has(issue.id)) {
               continue;
             }
-            mergedMap.set(issue.id, issue);
+            // Preserve object reference for unchanged issues so React.memo
+            // shallow comparison succeeds and avoids unnecessary re-renders
+            const currentIssue = currentMap.get(issue.id);
+            if (currentIssue && issuesAreEqual(currentIssue, issue)) {
+              mergedMap.set(issue.id, currentIssue);
+            } else {
+              mergedMap.set(issue.id, issue);
+            }
           }
 
           // Preserve fresher mutations from current state
@@ -498,6 +547,9 @@ export function useIssues(options: UseIssuesOptions): UseIssuesReturn {
       mountedRef.current = false;
       if (staleBannerTimerRef.current) {
         clearTimeout(staleBannerTimerRef.current);
+      }
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current);
       }
     };
   }, []);

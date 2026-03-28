@@ -5,6 +5,7 @@
  */
 
 import { useDraggable } from "@dnd-kit/core";
+import { memo } from "react";
 
 import { IssueCard, type IssueCardProps } from "../IssueCard";
 import styles from "./DraggableIssueCard.module.css";
@@ -57,7 +58,7 @@ export interface DraggableIssueCardProps extends IssueCardProps {
  * When rendered in overlay mode (isOverlay=true), it renders without drag
  * functionality for use in DragOverlay.
  */
-export function DraggableIssueCard({
+export const DraggableIssueCard = memo(function DraggableIssueCard({
   issue,
   onClick,
   className,
@@ -122,4 +123,4 @@ export function DraggableIssueCard({
       <IssueCard {...cardProps} />
     </div>
   );
-}
+});

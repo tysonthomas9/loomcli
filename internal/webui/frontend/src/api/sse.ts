@@ -41,6 +41,7 @@ export interface MutationPayload {
   new_status?: string;
   parent_id?: string;
   step_count?: number;
+  priority?: number;
   source_repo?: string;
   workspace_id?: string;
 }

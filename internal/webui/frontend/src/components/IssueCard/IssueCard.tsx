@@ -3,6 +3,8 @@
  * Displays a single issue as a card with title, ID, priority badge, and optional blocked indicator.
  */
 
+import { memo } from "react";
+
 import {
   getAvatarColor,
   getStatusDotColor,
@@ -98,7 +100,7 @@ function getPriorityLevel(priority: number | undefined): 0 | 1 | 2 | 3 | 4 {
  * IssueCard displays a single issue in the Kanban board.
  * Shows title, ID, priority badge, and optional blocked indicator.
  */
-export function IssueCard({
+export const IssueCard = memo(function IssueCard({
   issue,
   onClick,
   className,
@@ -301,4 +303,4 @@ export function IssueCard({
       )}
     </article>
   );
-}
+});

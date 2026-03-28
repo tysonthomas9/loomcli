@@ -45,6 +45,7 @@ type MutationPayload struct {
 	NewStatus   string `json:"new_status,omitempty"`   // For status events
 	ParentID    string `json:"parent_id,omitempty"`    // For bonded events
 	StepCount   int    `json:"step_count,omitempty"`   // For bonded events
+	Priority    *int   `json:"priority,omitempty"`     // Issue priority (for update events from external poll)
 	SourceRepo  string `json:"source_repo,omitempty"`  // Source repository for multi-repo filtering
 	WorkspaceID string `json:"workspace_id,omitempty"` // Workspace ID for multi-workspace filtering
 }
