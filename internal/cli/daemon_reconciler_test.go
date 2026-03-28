@@ -167,6 +167,144 @@ func TestDiffAgents_EmptyNew(t *testing.T) {
 	}
 }
 
+func TestDiffAgents_IgnoresSourceRepos(t *testing.T) {
+	old := []AgentEntry{
+		{Worktree: "agent1", Role: "task"},
+	}
+	new := []AgentEntry{
+		{Worktree: "agent1", Role: "task", SourceRepos: []string{"repo-a", "repo-b"}},
+	}
+	added, removed, modified := diffAgents(old, new)
+	if len(added) != 0 {
+		t.Errorf("expected 0 added, got %d", len(added))
+	}
+	if len(removed) != 0 {
+		t.Errorf("expected 0 removed, got %d", len(removed))
+	}
+	if len(modified) != 0 {
+		t.Errorf("expected 0 modified, got %d: SourceRepos should be ignored", len(modified))
+	}
+}
+
+func TestAgentEntry_Equal(t *testing.T) {
+	base := AgentEntry{
+		Worktree:         "w1",
+		Role:             "task",
+		Repo:             "backend",
+		Auto:             true,
+		Backend:          "anthropic",
+		FallbackBackends: []string{"openai"},
+		PathPatterns:     []string{"*.go"},
+		Repos:            []string{"r1"},
+		RepoGroups:       []string{"g1"},
+		CrossRepo:        true,
+		Parent:           "epic-1",
+	}
+
+	t.Run("identical", func(t *testing.T) {
+		other := base
+		if !base.Equal(other) {
+			t.Error("expected Equal to return true for identical entries")
+		}
+	})
+
+	t.Run("differs_only_in_SourceRepos", func(t *testing.T) {
+		other := base
+		other.SourceRepos = []string{"repo-a", "repo-b"}
+		if !base.Equal(other) {
+			t.Error("expected Equal to return true when only SourceRepos differs")
+		}
+	})
+
+	t.Run("differs_Worktree", func(t *testing.T) {
+		other := base
+		other.Worktree = "w2"
+		if base.Equal(other) {
+			t.Error("expected Equal to return false when Worktree differs")
+		}
+	})
+
+	t.Run("differs_Role", func(t *testing.T) {
+		other := base
+		other.Role = "plan"
+		if base.Equal(other) {
+			t.Error("expected Equal to return false when Role differs")
+		}
+	})
+
+	t.Run("differs_Repo", func(t *testing.T) {
+		other := base
+		other.Repo = "frontend"
+		if base.Equal(other) {
+			t.Error("expected Equal to return false when Repo differs")
+		}
+	})
+
+	t.Run("differs_Auto", func(t *testing.T) {
+		other := base
+		other.Auto = false
+		if base.Equal(other) {
+			t.Error("expected Equal to return false when Auto differs")
+		}
+	})
+
+	t.Run("differs_Backend", func(t *testing.T) {
+		other := base
+		other.Backend = "openai"
+		if base.Equal(other) {
+			t.Error("expected Equal to return false when Backend differs")
+		}
+	})
+
+	t.Run("differs_FallbackBackends", func(t *testing.T) {
+		other := base
+		other.FallbackBackends = []string{"openai", "azure"}
+		if base.Equal(other) {
+			t.Error("expected Equal to return false when FallbackBackends differs")
+		}
+	})
+
+	t.Run("differs_PathPatterns", func(t *testing.T) {
+		other := base
+		other.PathPatterns = []string{"*.ts"}
+		if base.Equal(other) {
+			t.Error("expected Equal to return false when PathPatterns differs")
+		}
+	})
+
+	t.Run("differs_Repos", func(t *testing.T) {
+		other := base
+		other.Repos = []string{"r1", "r2"}
+		if base.Equal(other) {
+			t.Error("expected Equal to return false when Repos differs")
+		}
+	})
+
+	t.Run("differs_RepoGroups", func(t *testing.T) {
+		other := base
+		other.RepoGroups = []string{"g2"}
+		if base.Equal(other) {
+			t.Error("expected Equal to return false when RepoGroups differs")
+		}
+	})
+
+	t.Run("differs_CrossRepo", func(t *testing.T) {
+		other := base
+		other.CrossRepo = false
+		if base.Equal(other) {
+			t.Error("expected Equal to return false when CrossRepo differs")
+		}
+	})
+
+	t.Run("differs_Parent", func(t *testing.T) {
+		other := base
+		other.Parent = "epic-2"
+		if base.Equal(other) {
+			t.Error("expected Equal to return false when Parent differs")
+		}
+	})
+}
+
 func TestComputeConfigHash_Deterministic(t *testing.T) {
 	dc := &DaemonConfig{
 		Backend: "anthropic",

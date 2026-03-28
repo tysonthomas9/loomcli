@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
-	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -220,7 +219,7 @@ func diffAgents(old, new []AgentEntry) (added, removed, modified []AgentEntry) {
 	for name, newEntry := range newMap {
 		if oldEntry, exists := oldMap[name]; !exists {
 			added = append(added, newEntry)
-		} else if !reflect.DeepEqual(oldEntry, newEntry) {
+		} else if !oldEntry.Equal(newEntry) {
 			modified = append(modified, newEntry)
 		}
 	}
