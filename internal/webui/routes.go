@@ -203,7 +203,7 @@ func registerWorkspaceRoutes(mux *http.ServeMux, multiPool *daemon.MultiPool, wo
 	// Daemon status and config
 	wsMux.HandleFunc("GET /api/workspaces/{ws}/daemon/status", handleDaemonStatus(multiPool))
 	wsMux.HandleFunc("GET /api/workspaces/{ws}/config/backend", handleGetBackendConfig(multiPool))
-	wsMux.HandleFunc("PATCH /api/workspaces/{ws}/config/backend", handlePatchBackendConfig(multiPool))
+	wsMux.HandleFunc("PATCH /api/workspaces/{ws}/config/backend", handleWorkspaceBackendPatch(workspaceConfigFn))
 
 	// Log streaming endpoints (workspace-scoped)
 	wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/logs", handleGetAgentLog())

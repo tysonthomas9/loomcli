@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -1454,6 +1455,66 @@ func TestSetupRoutes_SSEEndpointRegisteredOnWorkspaceScope(t *testing.T) {
 	ct := rr.Header().Get("Content-Type")
 	if ct == "text/html; charset=utf-8" {
 		t.Error("expected SSE route to be registered, but request fell through to frontend handler")
+	}
+}
+
+// TestSetupRoutes_WorkspaceBackendPatchEndpoint verifies that
+// PATCH /api/workspaces/{ws}/config/backend is handled by handleWorkspaceBackendPatch
+// (which returns workspaceResponse shape) rather than handlePatchBackendConfig.
+func TestSetupRoutes_WorkspaceBackendPatchEndpoint(t *testing.T) {
+	// Set up a temp config dir with a test workspace so the handler can load it
+	dir := t.TempDir()
+	setLoomConfigDir(t, dir)
+
+	writeTestBackendConfig(t, dir, &loomConfigForBackend{
+		Version: 1,
+		Backend: "claude",
+		Workspaces: map[string]loomWorkspaceForBackend{
+			"test-ws": {ID: "test-ws", Path: "/tmp/test", Backend: "claude"},
+		},
+	})
+
+	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 1)
+	_ = multiPool.Register("test-ws", &stubPool{})
+
+	mux := http.NewServeMux()
+	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
+	workspaceConfigFn := func() (*WorkspaceData, error) {
+		return &WorkspaceData{Name: "test-ws", Path: "/tmp/test"}, nil
+	}
+	setupRoutes(mux, nil, multiPool, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, workspaceConfigFn, nil, nil, nil, nil, nil, nil, nil, wsExistsFn, "", nil, "")
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/workspaces/test-ws/config/backend",
+		strings.NewReader(`{"backend":"codex"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	// The route must be registered (not fall through to SPA catch-all)
+	ct := rr.Header().Get("Content-Type")
+	if ct == "text/html; charset=utf-8" {
+		t.Fatal("expected workspace backend PATCH route to be registered, but request fell through to frontend handler")
+	}
+
+	// Response must be JSON with workspaceResponse shape (has "success" field)
+	var body map[string]interface{}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to parse response JSON: %v", err)
+	}
+
+	if _, ok := body["success"]; !ok {
+		t.Error("response missing 'success' field — expected workspaceResponse shape")
+	}
+
+	// Verify the handler returned data with WorkspaceData shape (has "name" field)
+	// which only handleWorkspaceBackendPatch provides, not handlePatchBackendConfig
+	if rr.Code == http.StatusOK {
+		data, ok := body["data"].(map[string]interface{})
+		if !ok {
+			t.Error("expected 'data' field in successful response")
+		} else if _, hasName := data["name"]; !hasName {
+			t.Error("expected 'name' field in data — handleWorkspaceBackendPatch returns WorkspaceData")
+		}
 	}
 }
 
