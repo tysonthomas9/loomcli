@@ -67,11 +67,12 @@ COPY e2e/stubs/codex /usr/local/bin/codex
 COPY e2e/stubs/opencode /usr/local/bin/opencode
 RUN chmod +x /usr/local/bin/claude /usr/local/bin/codex /usr/local/bin/opencode
 
-# Install smoke test and task template
+# Install smoke tests and task template
 COPY e2e/verify_todo.sh /usr/local/bin/verify_todo.sh
+COPY e2e/verify_list.sh /usr/local/bin/verify_list.sh
 RUN mkdir -p /etc/loom
 COPY e2e/task_template.txt /etc/loom/task_template.txt
-RUN chmod +x /usr/local/bin/verify_todo.sh
+RUN chmod +x /usr/local/bin/verify_todo.sh /usr/local/bin/verify_list.sh
 
 # Install test orchestrator
 COPY e2e/run_test.sh /usr/local/bin/run_test.sh

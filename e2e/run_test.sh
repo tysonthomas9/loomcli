@@ -193,6 +193,7 @@ phase_smoke() {
 
     _start=$(date +%s)
 
+    # Run verify_todo.sh
     if [ "$QUIET" -eq 1 ]; then
         verify_todo.sh -q
     elif [ "$VERBOSE" -eq 1 ]; then
@@ -200,17 +201,34 @@ phase_smoke() {
     else
         verify_todo.sh
     fi
-    _rc=$?
+    _todo_rc=$?
+
+    # Run verify_list.sh (optional — skip if not installed)
+    _list_rc=0
+    if command -v verify_list.sh >/dev/null 2>&1; then
+        if [ "$QUIET" -eq 1 ]; then
+            verify_list.sh -q
+        elif [ "$VERBOSE" -eq 1 ]; then
+            verify_list.sh -v
+        else
+            verify_list.sh
+        fi
+        _list_rc=$?
+    else
+        printf "Warning: verify_list.sh not found on PATH, skipping\n" >&2
+    fi
+
     _secs=$(elapsed "$_start")
 
-    if [ "$_rc" -eq 0 ]; then
-        add_result "Smoke Test" "PASS" "$_secs"
-        print_phase_result "Smoke Test" "PASS" "$_secs"
-        return 0
-    else
+    # Fail if either script failed
+    if [ "$_todo_rc" -ne 0 ] || [ "$_list_rc" -ne 0 ]; then
         add_result "Smoke Test" "FAIL" "$_secs"
         print_phase_result "Smoke Test" "FAIL" "$_secs"
         return 1
+    else
+        add_result "Smoke Test" "PASS" "$_secs"
+        print_phase_result "Smoke Test" "PASS" "$_secs"
+        return 0
     fi
 }
 
