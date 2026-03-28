@@ -3,6 +3,8 @@
  * Constants and helpers for tab naming, backend detection, and session naming.
  */
 
+import { KNOWN_BACKEND_DEFAULTS } from "@/components/BackendSelectorDropdown";
+
 import type { ConnectionState } from "./TerminalInstance";
 
 export const MAX_TABS = 8;
@@ -13,13 +15,11 @@ export const MAX_SPLIT_RATIO = 0.8;
 export const DEFAULT_SPLIT_RATIO = 0.5;
 export const MIN_SPLIT_WIDTH_PX = 900;
 
-/** Brand colors for each known backend. */
-export const BACKEND_BRAND_COLORS: Record<string, string> = {
-  claude: "#D97706",
-  codex: "#22c55e",
-  opencode: "#3B82F6",
-  shell: "#6b7280",
-};
+/** Brand colors for each known backend, derived from KNOWN_BACKEND_DEFAULTS. */
+export const BACKEND_BRAND_COLORS: Record<string, string> =
+  Object.fromEntries(
+    Object.entries(KNOWN_BACKEND_DEFAULTS).map(([k, v]) => [k, v.brandColor]),
+  );
 
 export interface TabState {
   id: string;

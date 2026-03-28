@@ -194,7 +194,7 @@ describe("getBackendFromSessionName (shell backend)", () => {
   });
 });
 
-describe("BACKEND_BRAND_COLORS (shell)", () => {
+describe("BACKEND_BRAND_COLORS", () => {
   it('includes "shell" with gray color', () => {
     expect(BACKEND_BRAND_COLORS).toHaveProperty("shell");
     expect(BACKEND_BRAND_COLORS.shell).toBe("#6b7280");
@@ -204,7 +204,29 @@ describe("BACKEND_BRAND_COLORS (shell)", () => {
     expect(BACKEND_BRAND_COLORS).toHaveProperty("claude");
     expect(BACKEND_BRAND_COLORS).toHaveProperty("codex");
     expect(BACKEND_BRAND_COLORS).toHaveProperty("opencode");
+    expect(BACKEND_BRAND_COLORS).toHaveProperty("gemini");
+    expect(BACKEND_BRAND_COLORS).toHaveProperty("cursor");
+    expect(BACKEND_BRAND_COLORS).toHaveProperty("browser");
     expect(BACKEND_BRAND_COLORS).toHaveProperty("shell");
+  });
+
+  it("has correct brand colors derived from KNOWN_BACKEND_DEFAULTS", () => {
+    expect(BACKEND_BRAND_COLORS.claude).toBe("#d4a574");
+    expect(BACKEND_BRAND_COLORS.codex).toBe("#10a37f");
+    expect(BACKEND_BRAND_COLORS.opencode).toBe("#6366f1");
+    expect(BACKEND_BRAND_COLORS.gemini).toBe("#8e24aa");
+    expect(BACKEND_BRAND_COLORS.cursor).toBe("#00e5ff");
+    expect(BACKEND_BRAND_COLORS.browser).toBe("#f59e0b");
+    expect(BACKEND_BRAND_COLORS.shell).toBe("#6b7280");
+  });
+
+  it("keys match KNOWN_BACKEND_DEFAULTS keys exactly", async () => {
+    const { KNOWN_BACKEND_DEFAULTS } = await import(
+      "@/components/BackendSelectorDropdown"
+    );
+    expect(Object.keys(BACKEND_BRAND_COLORS).sort()).toEqual(
+      Object.keys(KNOWN_BACKEND_DEFAULTS).sort(),
+    );
   });
 });
 

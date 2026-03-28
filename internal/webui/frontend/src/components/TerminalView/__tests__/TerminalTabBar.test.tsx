@@ -570,7 +570,7 @@ describe("TerminalTabBar", () => {
           id: "claude-1",
           label: "Claude 1",
           connectionState: "connected",
-          brandColor: "#D97706",
+          brandColor: "#d4a574",
         },
       ];
       render(
@@ -578,7 +578,7 @@ describe("TerminalTabBar", () => {
       );
 
       const dot = screen.getByTestId("terminal-tab-status-claude-1");
-      expect(dot).toHaveStyle({ "--brand-color": "#D97706" });
+      expect(dot).toHaveStyle({ "--brand-color": "#d4a574" });
     });
 
     it("status dot does not set inline style when brandColor is undefined", () => {
@@ -599,7 +599,7 @@ describe("TerminalTabBar", () => {
           id: "codex-1",
           label: "Codex 1",
           connectionState: "connected",
-          brandColor: "#22c55e",
+          brandColor: "#10a37f",
         },
       ];
       render(
@@ -607,7 +607,7 @@ describe("TerminalTabBar", () => {
       );
 
       const dot = screen.getByTestId("terminal-tab-status-codex-1");
-      expect(dot).toHaveStyle({ "--brand-color": "#22c55e" });
+      expect(dot).toHaveStyle({ "--brand-color": "#10a37f" });
       // CSS handles opacity via data-status; no inline opacity override
       expect(dot.style.opacity).toBe("");
     });
@@ -618,19 +618,19 @@ describe("TerminalTabBar", () => {
           id: "a",
           label: "A",
           connectionState: "connected",
-          brandColor: "#D97706",
+          brandColor: "#d4a574",
         },
         {
           id: "b",
           label: "B",
           connectionState: "connecting",
-          brandColor: "#22c55e",
+          brandColor: "#10a37f",
         },
         {
           id: "c",
           label: "C",
           connectionState: "disconnected",
-          brandColor: "#3B82F6",
+          brandColor: "#6366f1",
         },
       ];
       render(<TerminalTabBar {...defaultProps} tabs={tabs} activeTabId="a" />);

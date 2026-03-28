@@ -1088,7 +1088,7 @@ describe("TerminalView", () => {
   // ── Brand color mapping ─────────────────────────────────────────────────
 
   describe("brand color mapping", () => {
-    it("tabs with lead-claude-1 session get claude brand color (#D97706)", async () => {
+    it("tabs with lead-claude-1 session get claude brand color (#d4a574)", async () => {
       setMetadata([]);
       render(<TerminalView />);
 
@@ -1099,10 +1099,10 @@ describe("TerminalView", () => {
       const claudeTab = lastCallProps.tabs.find(
         (t: { id: string }) => t.id === "lead-claude-1",
       );
-      expect(claudeTab?.brandColor).toBe("#D97706");
+      expect(claudeTab?.brandColor).toBe("#d4a574");
     });
 
-    it("tabs with lead-codex-1 session get codex brand color (#22c55e)", async () => {
+    it("tabs with lead-codex-1 session get codex brand color (#10a37f)", async () => {
       // Use metadata to restore a codex tab (auto-creation only creates default backend)
       setMetadata([
         {
@@ -1123,7 +1123,7 @@ describe("TerminalView", () => {
       const codexTab = lastCallProps.tabs.find(
         (t: { id: string }) => t.id === "lead-codex-1",
       );
-      expect(codexTab?.brandColor).toBe("#22c55e");
+      expect(codexTab?.brandColor).toBe("#10a37f");
     });
 
     it("shows empty state when no backends are available", () => {
@@ -1139,9 +1139,7 @@ describe("TerminalView", () => {
       expect(screen.getByTestId("no-backends-empty-state")).toBeInTheDocument();
     });
 
-    it("unknown backend names get undefined brandColor (CSS fallbacks apply)", async () => {
-      // A session matching lead-{backend}-{n} with an unrecognized backend
-      // leaves brandColor undefined so CSS semantic fallbacks take over
+    it("gemini backend gets correct brand color (#8e24aa)", async () => {
       setMetadata([{ session_name: "lead-gemini-1", label: "lead-gemini-1" }]);
       render(<TerminalView />);
 
@@ -1152,7 +1150,21 @@ describe("TerminalView", () => {
       const geminiTab = lastCallProps.tabs.find(
         (t: { id: string }) => t.id === "lead-gemini-1",
       );
-      expect(geminiTab?.brandColor).toBeUndefined();
+      expect(geminiTab?.brandColor).toBe("#8e24aa");
+    });
+
+    it("unknown backend names get undefined brandColor (CSS fallbacks apply)", async () => {
+      setMetadata([{ session_name: "lead-foobar-1", label: "lead-foobar-1" }]);
+      render(<TerminalView />);
+
+      const { TerminalTabBar } = await import("../TerminalTabBar");
+      const mockTabBar = vi.mocked(TerminalTabBar);
+      const lastCallProps =
+        mockTabBar.mock.calls[mockTabBar.mock.calls.length - 1][0];
+      const foobarTab = lastCallProps.tabs.find(
+        (t: { id: string }) => t.id === "lead-foobar-1",
+      );
+      expect(foobarTab?.brandColor).toBeUndefined();
     });
   });
 

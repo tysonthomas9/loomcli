@@ -161,8 +161,8 @@ describe("SplitPaneSelector", () => {
   describe("brand colors", () => {
     it("renders tab labels correctly even when brandColor is provided", () => {
       const tabsWithColors = [
-        { id: "claude-1", label: "Claude", brandColor: "#D97706" },
-        { id: "codex-1", label: "Codex", brandColor: "#22c55e" },
+        { id: "claude-1", label: "Claude", brandColor: "#d4a574" },
+        { id: "codex-1", label: "Codex", brandColor: "#10a37f" },
         { id: "shell-1", label: "Shell", brandColor: "#6b7280" },
       ];
 
