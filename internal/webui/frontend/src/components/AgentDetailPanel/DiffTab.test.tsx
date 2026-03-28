@@ -82,6 +82,7 @@ vi.mock("./DiffFileViewer", () => ({
       data-testid="file-viewer"
       data-loading={props.isLoading}
       data-has-patch={props.patch !== null}
+      data-error={props.error ?? ""}
     />
   ),
 }));
@@ -116,6 +117,7 @@ function resetMocks() {
     files: [],
     isLoading: false,
     error: null,
+    patchErrors: new Map(),
     viewedFiles: new Set(),
     markViewed: mockMarkViewed,
     patchCache: new Map(),
@@ -404,6 +406,84 @@ describe("DiffTab", () => {
 
       // Expanded files should be reset — viewer should be gone
       expect(screen.queryByTestId("file-viewer")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("per-file patch errors", () => {
+    it("per-file patch error does not affect other expanded files", async () => {
+      mockUseDiffReturn.files = [
+        makeFile({ path: "a.go" }),
+        makeFile({ path: "b.go" }),
+      ];
+      mockUseDiffReturn.summaryStats = {
+        filesChanged: 2,
+        additions: 0,
+        deletions: 0,
+      };
+      mockUseDiffReturn.patchErrors = new Map([
+        ["a.go", new Error("fetch failed for a.go")],
+      ]);
+
+      await renderDiffTab(makeAgent());
+
+      // Expand both files
+      fireEvent.click(screen.getByTestId("expand-a.go"));
+      fireEvent.click(screen.getByTestId("expand-b.go"));
+
+      const viewers = screen.getAllByTestId("file-viewer");
+      // File A: has error, no cached patch
+      expect(viewers[0]).toHaveAttribute("data-error", "fetch failed for a.go");
+      expect(viewers[0]).toHaveAttribute("data-loading", "false");
+      // File B: no error, no cached patch — should show loading
+      expect(viewers[1]).toHaveAttribute("data-error", "");
+      expect(viewers[1]).toHaveAttribute("data-loading", "true");
+    });
+
+    it("expanded file with no patch and no error shows loading", async () => {
+      mockUseDiffReturn.files = [makeFile({ path: "a.go" })];
+      mockUseDiffReturn.summaryStats = {
+        filesChanged: 1,
+        additions: 0,
+        deletions: 0,
+      };
+
+      await renderDiffTab(makeAgent());
+
+      fireEvent.click(screen.getByTestId("expand-a.go"));
+
+      const viewer = screen.getByTestId("file-viewer");
+      expect(viewer).toHaveAttribute("data-loading", "true");
+      expect(viewer).toHaveAttribute("data-error", "");
+    });
+
+    it("file with cached patch shows patch, not error or loading", async () => {
+      mockUseDiffReturn.files = [makeFile({ path: "a.go" })];
+      mockUseDiffReturn.summaryStats = {
+        filesChanged: 1,
+        additions: 0,
+        deletions: 0,
+      };
+      mockUseDiffReturn.patchCache = new Map([
+        [
+          "a.go",
+          {
+            patch: "--- a/a.go\n+++ b/a.go",
+            is_binary: false,
+            is_too_large: false,
+            additions: 1,
+            deletions: 0,
+          },
+        ],
+      ]);
+
+      await renderDiffTab(makeAgent());
+
+      fireEvent.click(screen.getByTestId("expand-a.go"));
+
+      const viewer = screen.getByTestId("file-viewer");
+      expect(viewer).toHaveAttribute("data-has-patch", "true");
+      expect(viewer).toHaveAttribute("data-loading", "false");
+      expect(viewer).toHaveAttribute("data-error", "");
     });
   });
 

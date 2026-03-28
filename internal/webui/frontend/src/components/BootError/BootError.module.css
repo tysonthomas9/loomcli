@@ -1,0 +1,63 @@
+/**
+ * BootError styles.
+ * Full-page overlay for config fetch failures during boot.
+ * Same visual pattern as DaemonUnavailableOverlay.
+ */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  outline: none;
+}
+
+.content {
+  background: var(--color-panel-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 40px 32px;
+  max-width: 420px;
+  width: 90%;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.title {
+  font-weight: 600;
+  font-size: 18px;
+  margin: 0;
+  color: var(--color-text);
+}
+
+.errorDetail {
+  color: var(--color-text-muted);
+  font-size: 13px;
+  margin: 0;
+  line-height: 1.4;
+  max-width: 320px;
+  word-break: break-word;
+}
+
+.retryButton {
+  padding: 8px 20px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-primary);
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+  margin-top: 4px;
+}
+
+.retryButton:hover {
+  background: var(--color-primary-hover);
+}

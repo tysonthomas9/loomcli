@@ -1924,7 +1924,10 @@ func TestBuildCommand_UsesEffectiveBackend(t *testing.T) {
 			currentBackendIdx: 0,
 		}
 
-		cmd := daemon.buildCommand(ap)
+		cmd, err := daemon.buildCommand(ap)
+		if err != nil {
+			t.Fatalf("buildCommand error: %v", err)
+		}
 		args := strings.Join(cmd.Args, " ")
 		if !strings.Contains(args, "--backend claude") {
 			t.Errorf("buildCommand args = %q, want to contain '--backend claude'", args)
@@ -1938,7 +1941,10 @@ func TestBuildCommand_UsesEffectiveBackend(t *testing.T) {
 			currentBackendIdx: 1,
 		}
 
-		cmd := daemon.buildCommand(ap)
+		cmd, err := daemon.buildCommand(ap)
+		if err != nil {
+			t.Fatalf("buildCommand error: %v", err)
+		}
 		args := strings.Join(cmd.Args, " ")
 		if !strings.Contains(args, "--backend codex") {
 			t.Errorf("buildCommand args = %q, want to contain '--backend codex'", args)
@@ -1990,7 +1996,10 @@ func TestBuildCommand_BackendResolutionChain(t *testing.T) {
 			worktreePath: tmpDir,
 		}
 
-		cmd := d.buildCommand(ap)
+		cmd, err := d.buildCommand(ap)
+		if err != nil {
+			t.Fatalf("buildCommand error: %v", err)
+		}
 		foundBackend := ""
 		for i, arg := range cmd.Args {
 			if arg == "--backend" && i+1 < len(cmd.Args) {
@@ -2013,7 +2022,10 @@ func TestBuildCommand_BackendResolutionChain(t *testing.T) {
 			worktreePath: tmpDir,
 		}
 
-		cmd := d.buildCommand(ap)
+		cmd, err := d.buildCommand(ap)
+		if err != nil {
+			t.Fatalf("buildCommand error: %v", err)
+		}
 		foundBackend := ""
 		for i, arg := range cmd.Args {
 			if arg == "--backend" && i+1 < len(cmd.Args) {
@@ -2036,7 +2048,10 @@ func TestBuildCommand_BackendResolutionChain(t *testing.T) {
 			worktreePath: tmpDir,
 		}
 
-		cmd := d.buildCommand(ap)
+		cmd, err := d.buildCommand(ap)
+		if err != nil {
+			t.Fatalf("buildCommand error: %v", err)
+		}
 		foundBackend := ""
 		for i, arg := range cmd.Args {
 			if arg == "--backend" && i+1 < len(cmd.Args) {
@@ -2059,7 +2074,10 @@ func TestBuildCommand_BackendResolutionChain(t *testing.T) {
 			worktreePath: tmpDir,
 		}
 
-		cmd := d.buildCommand(ap)
+		cmd, err := d.buildCommand(ap)
+		if err != nil {
+			t.Fatalf("buildCommand error: %v", err)
+		}
 		for _, arg := range cmd.Args {
 			if arg == "--backend" {
 				t.Error("--backend should not be present when all levels are empty")
@@ -2084,7 +2102,10 @@ func TestBuildCommand_ToolConstraintEnvVars(t *testing.T) {
 			worktreePath: tmpDir,
 		}
 
-		cmd := d.buildCommand(ap)
+		cmd, err := d.buildCommand(ap)
+		if err != nil {
+			t.Fatalf("buildCommand error: %v", err)
+		}
 		found := false
 		for _, env := range cmd.Env {
 			if env == "LOOM_ALLOWED_TOOLS=read,grep,glob" {
@@ -2107,7 +2128,10 @@ func TestBuildCommand_ToolConstraintEnvVars(t *testing.T) {
 			worktreePath: tmpDir,
 		}
 
-		cmd := d.buildCommand(ap)
+		cmd, err := d.buildCommand(ap)
+		if err != nil {
+			t.Fatalf("buildCommand error: %v", err)
+		}
 		found := false
 		for _, env := range cmd.Env {
 			if env == "LOOM_DENIED_TOOLS=bash,write,edit" {
@@ -2130,7 +2154,10 @@ func TestBuildCommand_ToolConstraintEnvVars(t *testing.T) {
 			worktreePath: tmpDir,
 		}
 
-		cmd := d.buildCommand(ap)
+		cmd, err := d.buildCommand(ap)
+		if err != nil {
+			t.Fatalf("buildCommand error: %v", err)
+		}
 		found := false
 		for _, env := range cmd.Env {
 			if env == "LOOM_READ_ONLY=1" {
@@ -2158,7 +2185,10 @@ func TestBuildCommand_ToolConstraintEnvVars(t *testing.T) {
 			worktreePath: tmpDir,
 		}
 
-		cmd := d.buildCommand(ap)
+		cmd, err := d.buildCommand(ap)
+		if err != nil {
+			t.Fatalf("buildCommand error: %v", err)
+		}
 		foundAllowed, foundDenied, foundReadOnly := false, false, false
 		for _, env := range cmd.Env {
 			switch {
@@ -2204,7 +2234,10 @@ func TestBuildCommand_RoutingEnvVars(t *testing.T) {
 		worktreePath: tmpDir,
 	}
 
-	cmd := d.buildCommand(ap)
+	cmd, err := d.buildCommand(ap)
+	if err != nil {
+		t.Fatalf("buildCommand error: %v", err)
+	}
 	envMap := make(map[string]string)
 	for _, env := range cmd.Env {
 		if idx := strings.IndexByte(env, '='); idx >= 0 {
@@ -2247,7 +2280,10 @@ func TestBuildCommand_NoRoutingEnvVars(t *testing.T) {
 		worktreePath: tmpDir,
 	}
 
-	cmd := d.buildCommand(ap)
+	cmd, err := d.buildCommand(ap)
+	if err != nil {
+		t.Fatalf("buildCommand error: %v", err)
+	}
 	for _, env := range cmd.Env {
 		if strings.HasPrefix(env, "LOOM_ROLE_SKILLS=") {
 			t.Error("LOOM_ROLE_SKILLS should not be set when Skills is empty")
@@ -2299,7 +2335,10 @@ func TestBuildCommand_SourceReposInjected(t *testing.T) {
 		worktreePath: tmpDir,
 	}
 
-	cmd := d.buildCommand(ap)
+	cmd, err := d.buildCommand(ap)
+	if err != nil {
+		t.Fatalf("buildCommand error: %v", err)
+	}
 	envMap := make(map[string]string)
 	for _, env := range cmd.Env {
 		if idx := strings.IndexByte(env, '='); idx >= 0 {
@@ -2330,7 +2369,10 @@ func TestBuildCommand_SourceReposAbsentWhenEmpty(t *testing.T) {
 		worktreePath: tmpDir,
 	}
 
-	cmd := d.buildCommand(ap)
+	cmd, err := d.buildCommand(ap)
+	if err != nil {
+		t.Fatalf("buildCommand error: %v", err)
+	}
 	for _, env := range cmd.Env {
 		if strings.HasPrefix(env, "LOOM_SOURCE_REPOS=") {
 			t.Error("LOOM_SOURCE_REPOS should not be set when agent has no repo affinity")
@@ -2353,7 +2395,10 @@ func TestBuildCommand_NoConstraints_BackwardCompat(t *testing.T) {
 		worktreePath: tmpDir,
 	}
 
-	cmd := d.buildCommand(ap)
+	cmd, err := d.buildCommand(ap)
+	if err != nil {
+		t.Fatalf("buildCommand error: %v", err)
+	}
 	for _, env := range cmd.Env {
 		if strings.HasPrefix(env, "LOOM_ALLOWED_TOOLS=") {
 			t.Error("LOOM_ALLOWED_TOOLS should not be set when AllowedTools is empty")
@@ -2364,6 +2409,33 @@ func TestBuildCommand_NoConstraints_BackwardCompat(t *testing.T) {
 		if strings.HasPrefix(env, "LOOM_READ_ONLY=") {
 			t.Error("LOOM_READ_ONLY should not be set when ReadOnly is false")
 		}
+	}
+}
+
+// TestBuildCommand_ErrorOnUnresolvableRepos verifies buildCommand returns an error
+// when the agent declares repo affinity but all groups are unknown.
+func TestBuildCommand_ErrorOnUnresolvableRepos(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	d := &Daemon{
+		config:     &DaemonConfig{Daemon: DaemonSettings{}},
+		projectDir: tmpDir,
+		repos: []RepoConfig{
+			{Name: "backend", SourceRepoID: "src-backend", Groups: []string{"infra"}},
+		},
+	}
+	ap := &AgentProcess{
+		entry:        AgentEntry{Worktree: "falcon", Role: "task", RepoGroups: []string{"nonexistent"}},
+		roleConfig:   RoleConfig{Description: "Agent with bad group"},
+		worktreePath: tmpDir,
+	}
+
+	_, err := d.buildCommand(ap)
+	if err == nil {
+		t.Fatal("expected error from buildCommand when repo groups are unresolvable, got nil")
+	}
+	if !strings.Contains(err.Error(), "resolve agent repos") {
+		t.Errorf("error = %q, want it to contain 'resolve agent repos'", err.Error())
 	}
 }
 

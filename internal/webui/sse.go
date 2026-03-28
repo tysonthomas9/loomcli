@@ -98,7 +98,9 @@ func matchesWorkspaceFilter(clientWorkspaceID, mutationWorkspaceID string) bool 
 	return clientWorkspaceID != "" && mutationWorkspaceID != "" && clientWorkspaceID == mutationWorkspaceID
 }
 
-// matchesSourceRepoFilter returns true if the mutation passes the source repo filter.
+// matchesSourceRepoFilter returns true if the mutation should be delivered
+// to a client with the given sourceRepos filter. Empty sourceRepo → true
+// (intentional fan-out for events with unknown origin; client refetch is scoped).
 func matchesSourceRepoFilter(sourceRepos []string, sourceRepo string) bool {
 	if len(sourceRepos) == 0 || sourceRepo == "" {
 		return true
@@ -345,13 +347,18 @@ func (sw *SSEWriter) WriteComment(text string) error {
 }
 
 // SSEHandler is an http.Handler for the SSE endpoint with configurable heartbeat.
+// sseAuth is optional: when non-nil (external auth mode), each connection must
+// present a valid short-lived opaque token obtained from the /events/token exchange.
+// When nil (open mode), connections are allowed without authentication.
 type SSEHandler struct {
 	hub               *SSEHub
 	getMutationsSince func(wsID string, since int64) []rpc.MutationEvent
 	heartbeatInterval time.Duration
+	sseAuth           *sseTokenStore
 	clientIDCounter   atomic.Int64
 }
 
+// NewSSEHandler creates an SSEHandler in open mode (no auth required).
 func NewSSEHandler(hub *SSEHub, getMutationsSince func(wsID string, since int64) []rpc.MutationEvent) *SSEHandler {
 	return &SSEHandler{
 		hub:               hub,
@@ -360,7 +367,21 @@ func NewSSEHandler(hub *SSEHub, getMutationsSince func(wsID string, since int64)
 	}
 }
 
+// NewSSEHandlerWithAuth creates an SSEHandler in external auth mode.
+// Connections must present a valid opaque token from the /events/token exchange.
+func NewSSEHandlerWithAuth(hub *SSEHub, getMutationsSince func(wsID string, since int64) []rpc.MutationEvent, sseAuth *sseTokenStore) *SSEHandler {
+	h := NewSSEHandler(hub, getMutationsSince)
+	h.sseAuth = sseAuth
+	return h
+}
+
 func (h *SSEHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Handler-level auth: validate opaque token before streaming.
+	// Matches the terminalAuth pattern in handleTerminalWS.
+	if !validateSSEAuth(w, r, h.sseAuth) {
+		return
+	}
+
 	clientID := h.clientIDCounter.Add(1)
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")

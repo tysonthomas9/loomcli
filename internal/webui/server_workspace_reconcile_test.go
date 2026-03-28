@@ -136,7 +136,6 @@ func TestStartupReconciliation_SkipsInitialWorkspace(t *testing.T) {
 		PoolSize:        1,
 		ShutdownTimeout: 1 * time.Second,
 		MaxPortAttempts: 5,
-		AuthEnabled:     false,
 		WorkspaceListFn: func() (map[string]string, error) {
 			// "comet" will match the cwd basename in our worktree.
 			// We also include the literal "default" just in case.
@@ -197,7 +196,6 @@ func TestStartupReconciliation_NilWorkspaceListFn(t *testing.T) {
 		PoolSize:        1,
 		ShutdownTimeout: 1 * time.Second,
 		MaxPortAttempts: 5,
-		AuthEnabled:     false,
 		WorkspaceListFn: nil, // single-workspace mode
 	}
 
@@ -249,7 +247,6 @@ func TestStartupReconciliation_WorkspaceListFnReturnsError(t *testing.T) {
 		PoolSize:        1,
 		ShutdownTimeout: 1 * time.Second,
 		MaxPortAttempts: 5,
-		AuthEnabled:     false,
 		WorkspaceListFn: func() (map[string]string, error) {
 			return nil, fmt.Errorf("config file corrupt")
 		},
@@ -304,7 +301,6 @@ func TestStartupReconciliation_WorkspaceListFnReturnsEmptyMap(t *testing.T) {
 		PoolSize:        1,
 		ShutdownTimeout: 1 * time.Second,
 		MaxPortAttempts: 5,
-		AuthEnabled:     false,
 		WorkspaceListFn: func() (map[string]string, error) {
 			return map[string]string{}, nil
 		},

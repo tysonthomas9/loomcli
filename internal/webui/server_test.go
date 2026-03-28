@@ -224,7 +224,6 @@ func TestStartServer_WriteTimeout(t *testing.T) {
 		PoolSize:        1,
 		ShutdownTimeout: 1 * time.Second,
 		MaxPortAttempts: 5,
-		AuthEnabled:     false, // Disable auth to simplify test requests
 	}
 
 	// Start the server in a goroutine
@@ -342,10 +341,6 @@ func TestDefaultConfig(t *testing.T) {
 	if config.MaxPortAttempts != 10 {
 		t.Errorf("MaxPortAttempts = %d, want 10", config.MaxPortAttempts)
 	}
-	// Auth should be disabled by default
-	if config.AuthEnabled {
-		t.Error("AuthEnabled should be false by default")
-	}
 	// Socket path should be empty by default
 	if config.SocketPath != "" {
 		t.Errorf("SocketPath = %q, want empty", config.SocketPath)
@@ -368,7 +363,6 @@ func TestStartServer_WriteTimeout_NonStreamingEndpoint(t *testing.T) {
 		PoolSize:        1,
 		ShutdownTimeout: 1 * time.Second,
 		MaxPortAttempts: 5,
-		AuthEnabled:     false,
 	}
 
 	serverDone := make(chan error, 1)

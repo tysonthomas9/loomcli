@@ -104,51 +104,76 @@ function isInputFocused(event: KeyboardEvent): boolean {
 // ---------------------------------------------------------------------------
 // Self-contained Escape layer registry
 //
-// Manages its own document keydown listener for Escape. The listener is
-// attached when the first layer registers and detached when the last one
-// unregisters. This means useRegisterEscapeLayer works in any context
-// (with or without KeyboardShortcutProvider), including unit tests.
+// Each registry instance manages its own layers and document keydown listener.
+// The KeyboardShortcutProvider creates a context-scoped registry; a module-level
+// fallback exists for standalone usage (e.g., tests without a provider).
 // ---------------------------------------------------------------------------
-let layerIdCounter = 0;
-let escapeListenerAttached = false;
 
-const layers: Layer[] = [];
-
-function handleEscapeKeyDown(event: KeyboardEvent) {
-  if (event.key !== "Escape") return;
-  if (layers.length === 0) return;
-  event.preventDefault();
-  const top = layers[0];
-  if (top) top.handler();
+export interface EscapeRegistryAPI {
+  registerLayer: (priority: number, handler: () => void) => string;
+  unregisterLayer: (id: string) => void;
+  destroy: () => void;
 }
 
-function attachEscapeListener() {
-  if (!escapeListenerAttached) {
-    document.addEventListener("keydown", handleEscapeKeyDown);
-    escapeListenerAttached = true;
+function createEscapeRegistry(): EscapeRegistryAPI {
+  const state = {
+    layers: [] as Layer[],
+    idCounter: 0,
+    listenerAttached: false,
+  };
+
+  function handleEscapeKeyDown(event: KeyboardEvent) {
+    if (event.key !== "Escape") return;
+    if (state.layers.length === 0) return;
+    event.preventDefault();
+    const top = state.layers[0];
+    if (top) top.handler();
   }
+
+  return {
+    registerLayer(priority: number, handler: () => void): string {
+      const id = `layer-${++state.idCounter}`;
+      state.layers.push({ id, priority, handler });
+      state.layers.sort((a, b) => b.priority - a.priority);
+      if (!state.listenerAttached) {
+        document.addEventListener("keydown", handleEscapeKeyDown);
+        state.listenerAttached = true;
+      }
+      return id;
+    },
+    unregisterLayer(id: string): void {
+      const idx = state.layers.findIndex((l) => l.id === id);
+      if (idx !== -1) state.layers.splice(idx, 1);
+      if (state.listenerAttached && state.layers.length === 0) {
+        document.removeEventListener("keydown", handleEscapeKeyDown);
+        state.listenerAttached = false;
+      }
+    },
+    destroy(): void {
+      if (state.listenerAttached) {
+        document.removeEventListener("keydown", handleEscapeKeyDown);
+        state.listenerAttached = false;
+      }
+      state.layers.length = 0;
+      state.idCounter = 0;
+    },
+  };
 }
 
-function detachEscapeListener() {
-  if (escapeListenerAttached && layers.length === 0) {
-    document.removeEventListener("keydown", handleEscapeKeyDown);
-    escapeListenerAttached = false;
-  }
+// Module-level fallback for standalone usage (without provider)
+let defaultRegistry = createEscapeRegistry();
+
+/**
+ * Reset the module-level fallback escape registry. For test cleanup only.
+ */
+export function resetEscapeRegistry(): void {
+  defaultRegistry.destroy();
+  defaultRegistry = createEscapeRegistry();
 }
 
-function registerLayer(priority: number, handler: () => void): string {
-  const id = `layer-${++layerIdCounter}`;
-  layers.push({ id, priority, handler });
-  layers.sort((a, b) => b.priority - a.priority);
-  attachEscapeListener();
-  return id;
-}
-
-function unregisterLayer(id: string): void {
-  const idx = layers.findIndex((l) => l.id === id);
-  if (idx !== -1) layers.splice(idx, 1);
-  detachEscapeListener();
-}
+export const EscapeRegistryContext = createContext<EscapeRegistryAPI | null>(
+  null,
+);
 
 // ---------------------------------------------------------------------------
 // Provider props
@@ -188,6 +213,20 @@ export function KeyboardShortcutProvider({
   onWorkspaceSwitcherRef.current = onWorkspaceSwitcher;
   const onWorkspacePositionalSwitchRef = useRef(onWorkspacePositionalSwitch);
   onWorkspacePositionalSwitchRef.current = onWorkspacePositionalSwitch;
+
+  // Provider-scoped escape registry
+  const registryRef = useRef<EscapeRegistryAPI | null>(null);
+  if (!registryRef.current) {
+    registryRef.current = createEscapeRegistry();
+  }
+
+  // Clean up escape registry on unmount
+  useEffect(() => {
+    const registry = registryRef.current;
+    return () => {
+      registry?.destroy();
+    };
+  }, []);
 
   // Global keydown listener for non-Escape shortcuts
   useEffect(() => {
@@ -287,7 +326,9 @@ export function KeyboardShortcutProvider({
 
   return (
     <KeyboardShortcutContext.Provider value={contextValue}>
-      {children}
+      <EscapeRegistryContext.Provider value={registryRef.current}>
+        {children}
+      </EscapeRegistryContext.Provider>
     </KeyboardShortcutContext.Provider>
   );
 }
@@ -302,6 +343,9 @@ export function useRegisterEscapeLayer(
   handler: () => void,
   active: boolean,
 ): void {
+  const contextRegistry = useContext(EscapeRegistryContext);
+  const registry = contextRegistry ?? defaultRegistry;
+
   const layerIdRef = useRef<string | null>(null);
   const handlerRef = useRef(handler);
   handlerRef.current = handler;
@@ -309,7 +353,7 @@ export function useRegisterEscapeLayer(
   useEffect(() => {
     if (!active) {
       if (layerIdRef.current) {
-        unregisterLayer(layerIdRef.current);
+        registry.unregisterLayer(layerIdRef.current);
         layerIdRef.current = null;
       }
       return;
@@ -318,12 +362,12 @@ export function useRegisterEscapeLayer(
     // Register with a stable wrapper that reads the latest handler.
     // Capture the id locally so the cleanup closure always unregisters
     // the correct layer (not a newer one written to the ref).
-    const id = registerLayer(priority, () => handlerRef.current());
+    const id = registry.registerLayer(priority, () => handlerRef.current());
     layerIdRef.current = id;
 
     return () => {
-      unregisterLayer(id);
+      registry.unregisterLayer(id);
       if (layerIdRef.current === id) layerIdRef.current = null;
     };
-  }, [active, priority]);
+  }, [active, priority, registry]);
 }

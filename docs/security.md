@@ -47,5 +47,5 @@ Redis configuration changes require restarting `loom serve` — there is no hot-
 
 - Environment variables are visible to the same user via `/proc/<pid>/environ` but not to other users (requires root or same UID).
 - When binding `loom serve` to a non-localhost address (`--bind 0.0.0.0`), a warning is logged. Ensure this is intentional and that appropriate network controls are in place.
-- Use `--auth` with `--api-key` (or `LOOM_WEBUI_API_KEY` env var) to authenticate WebUI API access. Always enable `--auth` in production.
+- Use `--auth-url` to point at an external auth service for JWT-based authentication. Always enable external auth in production.
 - Use `--fleet-api-key` (or `LOOM_FLEET_API_KEY` env var) to authenticate fleet worker registration.

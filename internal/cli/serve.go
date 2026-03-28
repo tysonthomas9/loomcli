@@ -35,9 +35,7 @@ var (
 	serveNoDaemon          bool
 	serveRedisAddr         string
 	serveRedisPassword     string
-	serveAPIKey            string
 	serveFleetAPIKey       string
-	serveAuth              bool
 	serveHSTS              bool
 	serveAuthURL           string
 	serveAuthIssuer        string
@@ -111,13 +109,9 @@ func init() {
 	defaultRedisPassword := os.Getenv("LOOM_REDIS_PASSWORD")
 	serveCmd.Flags().StringVar(&serveRedisPassword, "redis-password", defaultRedisPassword, "Redis password (prefer LOOM_REDIS_PASSWORD env var to avoid leaking in process list)")
 
-	defaultAPIKey := os.Getenv("LOOM_WEBUI_API_KEY")
-	serveCmd.Flags().StringVar(&serveAPIKey, "api-key", defaultAPIKey, "API key for WebUI authentication (auto-generated if empty)")
-
 	defaultFleetAPIKey := os.Getenv("LOOM_FLEET_API_KEY")
 	serveCmd.Flags().StringVar(&serveFleetAPIKey, "fleet-api-key", defaultFleetAPIKey, "API key for fleet worker registration (required for fleet register endpoint)")
 
-	serveCmd.Flags().BoolVar(&serveAuth, "auth", false, "Enable WebUI API authentication")
 	serveCmd.Flags().BoolVar(&serveHSTS, "hsts", false, "Enable HSTS header (use when behind TLS-terminating proxy)")
 
 	defaultAuthURL := os.Getenv("LOOM_AUTH_URL")
@@ -190,9 +184,6 @@ func runServe(cmd *cobra.Command, args []string) {
 		if serveRedisAddr == "" && dc.Daemon.RedisURL != "" {
 			serveRedisAddr = dc.Daemon.RedisURL
 		}
-		if serveAPIKey == "" && dc.Daemon.APIKey != "" {
-			serveAPIKey = dc.Daemon.APIKey
-		}
 	}
 
 	// Provision shared JWT signing key from Redis (if configured) or environment
@@ -259,9 +250,6 @@ func runServe(cmd *cobra.Command, args []string) {
 	// Start webui server in goroutine (unless --no-webui)
 	webuiErr := make(chan error, 1)
 	if !serveNoWebUI {
-		if !serveAuth {
-			log.Printf("WebUI API authentication is disabled (enable with --auth)")
-		}
 		// Register the current project as a workspace in the config so it
 		// appears in the sidebar alongside workspaces created via the UI.
 		ensureCurrentProjectRegistered()
@@ -284,8 +272,6 @@ func runServe(cmd *cobra.Command, args []string) {
 				FleetRedis:              fleetRedisConfig,
 				FleetJWTKey:             fleetJWTKey,
 				FleetAPIKey:             serveFleetAPIKey,
-				APIKey:                  serveAPIKey,
-				AuthEnabled:             serveAuth,
 				HSTSEnabled:             serveHSTS,
 				ExtAuthURL:              serveAuthURL,
 				ExtAuthIssuer:           serveAuthIssuer,

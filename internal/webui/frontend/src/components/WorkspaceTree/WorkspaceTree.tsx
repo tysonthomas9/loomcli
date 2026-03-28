@@ -35,6 +35,7 @@ import {
   useAgentContext,
   useToast,
   useWorkspaceContext,
+  useDebouncedCallback,
 } from "@/hooks";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
 import {
@@ -250,50 +251,58 @@ export function WorkspaceTree({
     });
   }, []);
 
+  // Debounced server persist — coalesces rapid reorder operations into a single API call
+  const debouncedPersistOrder = useDebouncedCallback((order: string[]) => {
+    reorderWorkspaces(order).catch(rollbackOrder);
+  }, 300);
+
   // Drag-end handler: reorder and persist
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
       const { active, over } = event;
       if (!over || active.id === over.id) return;
 
+      let pendingOrder: string[] | null = null;
       setWorkspaceOrder((prev) => {
         const oldIndex = prev.indexOf(active.id as string);
         const newIndex = prev.indexOf(over.id as string);
         if (oldIndex < 0 || newIndex < 0) return prev;
-        const newOrder = arrayMove(prev, oldIndex, newIndex);
-        reorderWorkspaces(newOrder).catch(rollbackOrder);
-        return newOrder;
+        pendingOrder = arrayMove(prev, oldIndex, newIndex);
+        return pendingOrder;
       });
+      if (pendingOrder) debouncedPersistOrder(pendingOrder);
     },
-    [rollbackOrder],
+    [debouncedPersistOrder],
   );
 
   // Alt+Up keyboard reorder
   const handleMoveUp = useCallback(
     (name: string) => {
+      let pendingOrder: string[] | null = null;
       setWorkspaceOrder((prev) => {
         const idx = prev.indexOf(name);
         if (idx <= 0) return prev;
-        const newOrder = arrayMove(prev, idx, idx - 1);
-        reorderWorkspaces(newOrder).catch(rollbackOrder);
-        return newOrder;
+        pendingOrder = arrayMove(prev, idx, idx - 1);
+        return pendingOrder;
       });
+      if (pendingOrder) debouncedPersistOrder(pendingOrder);
     },
-    [rollbackOrder],
+    [debouncedPersistOrder],
   );
 
   // Alt+Down keyboard reorder
   const handleMoveDown = useCallback(
     (name: string) => {
+      let pendingOrder: string[] | null = null;
       setWorkspaceOrder((prev) => {
         const idx = prev.indexOf(name);
         if (idx < 0 || idx >= prev.length - 1) return prev;
-        const newOrder = arrayMove(prev, idx, idx + 1);
-        reorderWorkspaces(newOrder).catch(rollbackOrder);
-        return newOrder;
+        pendingOrder = arrayMove(prev, idx, idx + 1);
+        return pendingOrder;
       });
+      if (pendingOrder) debouncedPersistOrder(pendingOrder);
     },
-    [rollbackOrder],
+    [debouncedPersistOrder],
   );
 
   // Persist collapsed state to scoped storage

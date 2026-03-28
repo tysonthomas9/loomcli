@@ -105,9 +105,9 @@ export interface WorkspaceContextValue extends UseWorkspaceReturn {
   isMultiRepo: boolean;
 }
 
-const WorkspaceContext = createContext<WorkspaceContextValue | undefined>(
-  undefined,
-);
+export const WorkspaceContext = createContext<
+  WorkspaceContextValue | undefined
+>(undefined);
 
 /**
  * Props for WorkspaceProvider.
@@ -397,7 +397,7 @@ export function WorkspaceProvider({
 }
 
 /** Default no-op value returned when useWorkspaceContext is called outside a provider. */
-const NO_WORKSPACE_CONTEXT: WorkspaceContextValue = {
+export const NO_WORKSPACE_CONTEXT: WorkspaceContextValue = {
   workspace: null,
   repos: [],
   groups: [],

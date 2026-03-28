@@ -26,9 +26,7 @@ type DaemonSettings struct {
 	EventsDir      string            `yaml:"events_dir,omitempty"`
 	RestartPolicy  RestartPolicy     `yaml:"restart_policy,omitempty"`
 	MaxAgents      *int              `yaml:"max_agents,omitempty"`
-	RedisURL       string            `yaml:"redis_url,omitempty"`        // stale-detector/serve Redis — NOT used by fleet-db (see FleetDBSettings.RedisURL)
-	APIKey         string            `yaml:"api_key,omitempty" json:"-"` //nolint:gosec // config field, not a hardcoded credential
-	JWTKey         string            `yaml:"jwt_key,omitempty" json:"-"` //nolint:gosec // config field, not a hardcoded credential
+	RedisURL       string            `yaml:"redis_url,omitempty"` // stale-detector/serve Redis — NOT used by fleet-db (see FleetDBSettings.RedisURL)
 	OTel           *OTelDaemonConfig `yaml:"otel,omitempty"`
 	FleetDB        *FleetDBSettings  `yaml:"fleetdb,omitempty"`         // fleet-db backend config (separate from RedisURL above)
 	StartupTimeout *int              `yaml:"startup_timeout,omitempty"` // seconds; how long to wait for daemon readiness (default 30)
@@ -367,12 +365,6 @@ func overlayDaemonSettings(dst *DaemonSettings, src *DaemonSettings) {
 	}
 	if src.RedisURL != "" {
 		dst.RedisURL = src.RedisURL
-	}
-	if src.APIKey != "" {
-		dst.APIKey = src.APIKey
-	}
-	if src.JWTKey != "" {
-		dst.JWTKey = src.JWTKey
 	}
 	if src.OTel != nil {
 		if dst.OTel == nil {

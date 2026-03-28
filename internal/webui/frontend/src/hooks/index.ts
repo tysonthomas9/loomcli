@@ -7,6 +7,8 @@ export type { UseSSEOptions, UseSSEReturn } from "./useSSE";
 
 export { useDebounce } from "./useDebounce";
 
+export { useDebouncedCallback } from "./useDebouncedCallback";
+
 export { useSort } from "./useSort";
 export type {
   UseSortOptions,
@@ -105,7 +107,12 @@ export type {
 export { useAgents } from "./useAgents";
 export type { UseAgentsOptions, UseAgentsResult } from "./useAgents";
 
-export { AgentProvider, useAgentContext } from "./useAgentContext";
+export {
+  AgentProvider,
+  useAgentContext,
+  AgentContext,
+  NO_AGENT_CONTEXT,
+} from "./useAgentContext";
 export type { AgentContextValue, AgentProviderProps } from "./useAgentContext";
 
 export { useToast, ToastProvider } from "./useToast";
@@ -181,7 +188,12 @@ export type {
 export { useWorkspace } from "./useWorkspace";
 export type { UseWorkspaceOptions, UseWorkspaceReturn } from "./useWorkspace";
 
-export { WorkspaceProvider, useWorkspaceContext } from "./useWorkspaceContext";
+export {
+  WorkspaceProvider,
+  useWorkspaceContext,
+  WorkspaceContext,
+  NO_WORKSPACE_CONTEXT,
+} from "./useWorkspaceContext";
 export type {
   WorkspaceContextValue,
   WorkspaceProviderProps,
@@ -275,6 +287,8 @@ export {
   KeyboardShortcutProvider,
   useKeyboardShortcuts,
   useRegisterEscapeLayer,
+  resetEscapeRegistry,
+  EscapeRegistryContext,
   LAYER_CONFIRM_DIALOG,
   LAYER_TOAST,
   LAYER_CHEATSHEET,
@@ -285,4 +299,7 @@ export {
   LAYER_ISSUE_PANEL,
   LAYER_TERMINAL_SEARCH,
 } from "./useKeyboardShortcuts";
-export type { KeyboardShortcutProviderProps } from "./useKeyboardShortcuts";
+export type {
+  KeyboardShortcutProviderProps,
+  EscapeRegistryAPI,
+} from "./useKeyboardShortcuts";

@@ -5,9 +5,27 @@
  */
 
 import { IssueDetailPanel, ToastContainer } from "@/components";
-import { useToast } from "@/hooks";
-import type { IssueDetails, Priority } from "@/types";
+import { AgentsSidebar } from "@/components/AgentsSidebar";
+import { WorkspaceTree } from "@/components/WorkspaceTree";
+import { SplitDetailSummary } from "@/components/IssueDetailPanel/SplitDetailSummary";
+import { PasteConfirmDialog } from "@/components/TerminalView/PasteConfirmDialog";
+import { SessionNamePrompt } from "@/components/TerminalView/SessionNamePrompt";
+import { WelcomeBanner } from "@/components/TerminalView/WelcomeBanner";
+import { HelpPopover } from "@/components/TerminalView/HelpPopover";
+import { SearchBar } from "@/components/TerminalView/SearchBar";
+import {
+  useToast,
+  ToastProvider,
+  AgentContext,
+  NO_AGENT_CONTEXT,
+  WorkspaceContext,
+  NO_WORKSPACE_CONTEXT,
+} from "@/hooks";
+import type { AgentContextValue } from "@/hooks";
+import type { WorkspaceContextValue } from "@/hooks";
+import type { IssueDetails, Priority, Issue } from "@/types";
 import type { Status } from "@/types/status";
+import { useState, useCallback } from "react";
 
 /**
  * Valid priority values.
@@ -282,6 +300,342 @@ export function ToastTestFixture(): JSX.Element {
           Dismiss All
         </button>
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Fixture helper: read window.__fixtureData
+// ---------------------------------------------------------------------------
+declare global {
+  interface Window {
+    __fixtureData?: Record<string, unknown>;
+  }
+}
+
+function readFixtureData<T>(key: string, fallback: T): T {
+  const data = window.__fixtureData;
+  if (!data || !(key in data)) return fallback;
+  return data[key] as T;
+}
+
+const FIXTURE_ROOT_STYLE: React.CSSProperties = {
+  minHeight: "100vh",
+  background: "var(--bg-primary, #1a1a1a)",
+  color: "var(--text-primary, #fff)",
+};
+
+// ---------------------------------------------------------------------------
+// SessionNamePromptFixture
+// URL: /test/session-name-prompt?state=open|closed&existingNames=foo,bar
+// ---------------------------------------------------------------------------
+export function SessionNamePromptFixture(): JSX.Element {
+  const params = new URLSearchParams(window.location.search);
+  const isOpen = params.get("state") !== "closed";
+  const existingNames = (params.get("existingNames") ?? "")
+    .split(",")
+    .filter(Boolean);
+
+  const [confirmedNames, setConfirmedNames] = useState<string[]>([]);
+  const [cancelCount, setCancelCount] = useState(0);
+
+  return (
+    <div data-testid="fixture-root" style={FIXTURE_ROOT_STYLE}>
+      <SessionNamePrompt
+        isOpen={isOpen}
+        existingNames={existingNames}
+        onConfirm={(name) => setConfirmedNames((prev) => [...prev, name])}
+        onCancel={() => setCancelCount((c) => c + 1)}
+      />
+      <span data-testid="confirmed-names">{confirmedNames.join(",")}</span>
+      <span data-testid="cancel-count">{cancelCount}</span>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// WelcomeBannerFixture
+// URL: /test/welcome-banner?backend=claude|codex|opencode|unknown
+// ---------------------------------------------------------------------------
+export function WelcomeBannerFixture(): JSX.Element {
+  const params = new URLSearchParams(window.location.search);
+  const backend = params.get("backend") ?? "claude";
+
+  return (
+    <div data-testid="fixture-root" style={FIXTURE_ROOT_STYLE}>
+      <WelcomeBanner
+        backendName={backend}
+        isActive={true}
+        onDismiss={() => {}}
+        onExampleClick={() => {}}
+      />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// HelpPopoverFixture
+// URL: /test/help-popover (always open)
+// ---------------------------------------------------------------------------
+export function HelpPopoverFixture(): JSX.Element {
+  return (
+    <div
+      data-testid="fixture-root"
+      style={{ ...FIXTURE_ROOT_STYLE, position: "relative" }}
+    >
+      <HelpPopover isOpen={true} onClose={() => {}} />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SearchBarFixture
+// URL: /test/search-bar?value=&matchIndex=&matchCount=&case=false&regex=false
+// ---------------------------------------------------------------------------
+export function SearchBarFixture(): JSX.Element {
+  const params = new URLSearchParams(window.location.search);
+  const value = params.get("value") ?? "";
+  const matchIndex = params.has("matchIndex")
+    ? parseInt(params.get("matchIndex")!, 10)
+    : null;
+  const matchCount = params.has("matchCount")
+    ? parseInt(params.get("matchCount")!, 10)
+    : null;
+  const caseSensitive = params.get("case") === "true";
+  const regex = params.get("regex") === "true";
+
+  return (
+    <div data-testid="fixture-root" style={FIXTURE_ROOT_STYLE}>
+      <SearchBar
+        value={value}
+        onSearch={() => {}}
+        onFindNext={() => {}}
+        onFindPrevious={() => {}}
+        onClose={() => {}}
+        matchIndex={matchIndex}
+        matchCount={matchCount}
+        caseSensitive={caseSensitive}
+        regex={regex}
+        onToggleCaseSensitive={() => {}}
+        onToggleRegex={() => {}}
+      />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// AgentsSidebarFixture
+// URL: /test/agents-sidebar (uses window.__fixtureData for context)
+// ---------------------------------------------------------------------------
+export function AgentsSidebarFixture(): JSX.Element {
+  const agents = readFixtureData("agents", []);
+  const tasks = readFixtureData("tasks", NO_AGENT_CONTEXT.tasks);
+  const agentTasks = readFixtureData("agentTasks", {});
+  const taskLists = readFixtureData("taskLists", NO_AGENT_CONTEXT.taskLists);
+
+  const agentContextValue: AgentContextValue = {
+    ...NO_AGENT_CONTEXT,
+    agents,
+    tasks,
+    agentTasks,
+    taskLists,
+    isConnected: true,
+    connectionState: "connected",
+    wasEverConnected: true,
+    getAgentByName: (name: string) =>
+      agents.find((a: { name: string }) => a.name === name),
+  };
+
+  const wsContextValue: WorkspaceContextValue = {
+    ...NO_WORKSPACE_CONTEXT,
+    workspaceId: "fixture-workspace",
+  };
+
+  return (
+    <WorkspaceContext.Provider value={wsContextValue}>
+      <AgentContext.Provider value={agentContextValue}>
+        <div data-testid="fixture-root" style={FIXTURE_ROOT_STYLE}>
+          <AgentsSidebar />
+        </div>
+      </AgentContext.Provider>
+    </WorkspaceContext.Provider>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// WorkspaceTreeFixture
+// URL: /test/workspace-tree (uses window.__fixtureData for context)
+// ---------------------------------------------------------------------------
+export function WorkspaceTreeFixture(): JSX.Element {
+  const agents = readFixtureData("agents", []);
+  const tasks = readFixtureData("tasks", NO_AGENT_CONTEXT.tasks);
+  const agentTasks = readFixtureData("agentTasks", {});
+
+  const agentContextValue: AgentContextValue = {
+    ...NO_AGENT_CONTEXT,
+    agents,
+    tasks,
+    agentTasks,
+    isConnected: true,
+    connectionState: "connected",
+    wasEverConnected: true,
+    getAgentByName: (name: string) =>
+      agents.find((a: { name: string }) => a.name === name),
+  };
+
+  const repos = readFixtureData("repos", []);
+  const workspace = readFixtureData("workspace", null);
+  const wsAgents = readFixtureData("wsAgents", []);
+
+  const wsContextValue: WorkspaceContextValue = {
+    ...NO_WORKSPACE_CONTEXT,
+    workspaceId: "fixture-workspace",
+    repos,
+    workspace,
+    agents: wsAgents,
+    isMultiRepo: repos.length >= 2,
+    activeRepos: repos,
+    activeRepoNames: repos.map((r: { name: string }) => r.name),
+    isAllSelected: true,
+  };
+
+  return (
+    <ToastProvider>
+      <WorkspaceContext.Provider value={wsContextValue}>
+        <AgentContext.Provider value={agentContextValue}>
+          <div data-testid="fixture-root" style={FIXTURE_ROOT_STYLE}>
+            <WorkspaceTree />
+          </div>
+        </AgentContext.Provider>
+      </WorkspaceContext.Provider>
+    </ToastProvider>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SplitDetailSummaryFixture
+// URL: /test/split-detail-summary?id=&title=&priority=&hasDesign=true&...
+// ---------------------------------------------------------------------------
+export function SplitDetailSummaryFixture(): JSX.Element {
+  const params = new URLSearchParams(window.location.search);
+  const id = params.get("id") ?? "fixture-issue-1";
+  const title = params.get("title") ?? "Fixture Issue";
+  const priorityStr = params.get("priority") ?? "2";
+  const hasDesign = params.get("hasDesign") !== "false";
+  const description =
+    params.get("description") ?? "A test issue for visual regression.";
+  const issueType = params.get("issueType") ?? "task";
+  const assignee = params.get("assignee") ?? "";
+
+  const parsedPriority = parseInt(priorityStr, 10);
+  const priority = (isNaN(parsedPriority) ? 2 : parsedPriority) as Priority;
+
+  const issue: Issue = {
+    id,
+    title,
+    status: "open" as Status,
+    priority,
+    issue_type: issueType,
+    description,
+    created_at: "2026-01-15T10:00:00Z",
+    updated_at: "2026-01-15T10:00:00Z",
+    ...(assignee ? { assignee } : {}),
+    ...(hasDesign
+      ? {
+          design:
+            "## Summary\nThis is a sample design document for visual regression testing.\n\n## Technical Approach\nImplement feature using existing patterns.",
+        }
+      : {}),
+  };
+
+  const wsContextValue: WorkspaceContextValue = {
+    ...NO_WORKSPACE_CONTEXT,
+    workspaceId: "fixture-workspace",
+  };
+
+  return (
+    <WorkspaceContext.Provider value={wsContextValue}>
+      <div data-testid="fixture-root" style={FIXTURE_ROOT_STYLE}>
+        <SplitDetailSummary
+          issue={issue}
+          isSavingPriority={false}
+          isSavingType={false}
+          isSavingAssignee={false}
+          agents={[]}
+          agentTasks={{}}
+          onPrioritySave={async () => {}}
+          onTypeSave={async () => {}}
+          onAssigneeSave={async () => {}}
+        />
+      </div>
+    </WorkspaceContext.Provider>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// PasteConfirmDialogFixture
+// URL: /test/paste-confirm
+// ---------------------------------------------------------------------------
+
+function generateLines(count: number): string {
+  return (
+    Array.from({ length: count }, (_, i) => `line${i + 1}`).join("\n") + "\n"
+  );
+}
+
+export function PasteConfirmDialogFixture(): JSX.Element {
+  const [isOpen, setIsOpen] = useState(false);
+  const [text, setText] = useState("");
+  const [confirmCount, setConfirmCount] = useState(0);
+  const [cancelCount, setCancelCount] = useState(0);
+
+  const openWith = useCallback((lineCount: number) => {
+    setText(generateLines(lineCount));
+    setIsOpen(true);
+  }, []);
+
+  const handleConfirm = useCallback(() => {
+    setConfirmCount((c) => c + 1);
+    setIsOpen(false);
+  }, []);
+
+  const handleCancel = useCallback(() => {
+    setCancelCount((c) => c + 1);
+    setIsOpen(false);
+  }, []);
+
+  return (
+    <div data-testid="fixture-root" style={FIXTURE_ROOT_STYLE}>
+      <h1>Paste Confirm Dialog Test Fixture</h1>
+      <div style={{ display: "flex", gap: "8px", marginBottom: "1rem" }}>
+        <button data-testid="open-2-lines" onClick={() => openWith(2)}>
+          Open 2 Lines
+        </button>
+        <button data-testid="open-10-lines" onClick={() => openWith(10)}>
+          Open 10 Lines
+        </button>
+        <button data-testid="open-15-lines" onClick={() => openWith(15)}>
+          Open 15 Lines
+        </button>
+        <button data-testid="open-25-lines" onClick={() => openWith(25)}>
+          Open 25 Lines
+        </button>
+        <button data-testid="open-11-lines" onClick={() => openWith(11)}>
+          Open 11 Lines
+        </button>
+      </div>
+      <div style={{ marginBottom: "1rem" }}>
+        <span>Confirm count: </span>
+        <span data-testid="confirm-count">{confirmCount}</span>
+        <span style={{ marginLeft: "1rem" }}>Cancel count: </span>
+        <span data-testid="cancel-count">{cancelCount}</span>
+      </div>
+      <PasteConfirmDialog
+        isOpen={isOpen}
+        text={text}
+        onConfirm={handleConfirm}
+        onCancel={handleCancel}
+      />
     </div>
   );
 }

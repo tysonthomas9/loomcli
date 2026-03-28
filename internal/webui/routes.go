@@ -18,7 +18,7 @@ import (
 
 // setupRoutes configures all HTTP routes for the server.
 // allowedOrigins is the list of allowed CORS origins for WebSocket validation.
-func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPool, hub *SSEHub, getMutationsSince func(wsID string, since int64) []rpc.MutationEvent, termManager *TerminalManager, termAuth *terminalAuth, fleetRegistry *fleet.StoreRegistry, tokenCfg *TokenConfig, apiKey string, authEnabled bool, allowedOrigins []string, fleetRegCfg *FleetRegisterConfig, claimMetrics *fleet.ClaimMetrics, fleetEnabled bool, devMode bool, devFrontendDir string, loomServerURL string, gitOps GitOps, fileOps FileOps, tabMetaStore *tabmeta.Store, issueTabStore *issuetabs.Store, workspaceConfigFn func() (*WorkspaceData, error), workspaceDeleteFn func(string) error, setDefaultWsFn func(string) error, clearDefaultWsFn func() error, workspaceCreateFn WorkspaceCreateFn, backendOps BackendOps, sessionHistoryStore *sessionhistory.Store, sessStore *sessions.Store, wsExistsFn func(string) bool, initialWorkspaceID string, workspaceConfigByIDFn func(string) (*WorkspaceData, error), extAuthURL string) (*clientErrorLimiter, *cspReportLimiter, *authConfigLimiter) { //nolint:funlen // route registration function
+func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPool, hub *SSEHub, getMutationsSince func(wsID string, since int64) []rpc.MutationEvent, termManager *TerminalManager, termAuth *terminalAuth, fleetRegistry *fleet.StoreRegistry, tokenCfg *TokenConfig, allowedOrigins []string, fleetRegCfg *FleetRegisterConfig, claimMetrics *fleet.ClaimMetrics, fleetEnabled bool, devMode bool, devFrontendDir string, loomServerURL string, gitOps GitOps, fileOps FileOps, tabMetaStore *tabmeta.Store, issueTabStore *issuetabs.Store, workspaceConfigFn func() (*WorkspaceData, error), workspaceDeleteFn func(string) error, setDefaultWsFn func(string) error, clearDefaultWsFn func() error, workspaceCreateFn WorkspaceCreateFn, backendOps BackendOps, sessionHistoryStore *sessionhistory.Store, sessStore *sessions.Store, wsExistsFn func(string) bool, initialWorkspaceID string, workspaceConfigByIDFn func(string) (*WorkspaceData, error), extAuthURL string, sseTokens *sseTokenStore) (*clientErrorLimiter, *cspReportLimiter, *authConfigLimiter) { //nolint:funlen // route registration function
 	// Health check endpoint for load balancers and monitoring
 	mux.HandleFunc("GET /health", handleHealth(pool))
 
@@ -37,15 +37,6 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 	// extAuthURL is the Better Auth service base URL for OAuth redirects, not JWKS.
 	authCfgLimiter := newAuthConfigLimiter(rate.Limit(5), 10, 5*time.Minute, 10*time.Minute)
 	mux.HandleFunc("GET /api/config", handleAuthConfig(extAuthURL, authCfgLimiter))
-
-	// Auth token bootstrap endpoint (same-origin only)
-	// Always register this route so that when auth is disabled, the frontend
-	// gets an explicit 404 JSON response instead of a 200 HTML from the SPA catch-all.
-	if authEnabled {
-		mux.HandleFunc("GET /api/auth/token", handleAuthToken(apiKey))
-	} else {
-		mux.HandleFunc("GET /api/auth/token", handleAuthTokenDisabled())
-	}
 
 	// Stats endpoint for project statistics (workspace-aware when multiPool available)
 	mux.HandleFunc("GET /api/stats", handleStats(pool)) // Keep using main pool for now
@@ -138,7 +129,7 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 
 	// Workspace management and workspace-scoped API routes
 	if multiPool != nil {
-		registerWorkspaceRoutes(mux, multiPool, workspaceConfigFn, wsExistsFn, workspaceConfigByIDFn, tabMetaStore, issueTabStore, sessionHistoryStore, sessStore, termManager, termAuth, allowedOrigins, hub, getMutationsSince, fleetRegistry, tokenCfg, fleetRegCfg, claimMetrics, gitOps, fileOps, workspaceDeleteFn, setDefaultWsFn, clearDefaultWsFn, workspaceCreateFn)
+		registerWorkspaceRoutes(mux, multiPool, workspaceConfigFn, wsExistsFn, workspaceConfigByIDFn, tabMetaStore, issueTabStore, sessionHistoryStore, sessStore, termManager, termAuth, allowedOrigins, hub, getMutationsSince, fleetRegistry, tokenCfg, fleetRegCfg, claimMetrics, gitOps, fileOps, workspaceDeleteFn, setDefaultWsFn, clearDefaultWsFn, workspaceCreateFn, sseTokens)
 	}
 
 	// Static file serving with SPA routing (must be last - catches all paths)
@@ -152,7 +143,7 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 }
 
 // registerWorkspaceRoutes sets up workspace listing, CRUD, and workspace-scoped API routes.
-func registerWorkspaceRoutes(mux *http.ServeMux, multiPool *daemon.MultiPool, workspaceConfigFn func() (*WorkspaceData, error), wsExistsFn func(string) bool, workspaceConfigByIDFn func(string) (*WorkspaceData, error), tabMetaStore *tabmeta.Store, issueTabStore *issuetabs.Store, sessionHistoryStore *sessionhistory.Store, sessStore *sessions.Store, termManager *TerminalManager, termAuth *terminalAuth, allowedOrigins []string, hub *SSEHub, getMutationsSince func(wsID string, since int64) []rpc.MutationEvent, fleetRegistry *fleet.StoreRegistry, tokenCfg *TokenConfig, fleetRegCfg *FleetRegisterConfig, claimMetrics *fleet.ClaimMetrics, gitOps GitOps, fileOps FileOps, workspaceDeleteFn func(string) error, setDefaultWsFn func(string) error, clearDefaultWsFn func() error, workspaceCreateFn WorkspaceCreateFn) { //nolint:funlen // route registration function
+func registerWorkspaceRoutes(mux *http.ServeMux, multiPool *daemon.MultiPool, workspaceConfigFn func() (*WorkspaceData, error), wsExistsFn func(string) bool, workspaceConfigByIDFn func(string) (*WorkspaceData, error), tabMetaStore *tabmeta.Store, issueTabStore *issuetabs.Store, sessionHistoryStore *sessionhistory.Store, sessStore *sessions.Store, termManager *TerminalManager, termAuth *terminalAuth, allowedOrigins []string, hub *SSEHub, getMutationsSince func(wsID string, since int64) []rpc.MutationEvent, fleetRegistry *fleet.StoreRegistry, tokenCfg *TokenConfig, fleetRegCfg *FleetRegisterConfig, claimMetrics *fleet.ClaimMetrics, gitOps GitOps, fileOps FileOps, workspaceDeleteFn func(string) error, setDefaultWsFn func(string) error, clearDefaultWsFn func() error, workspaceCreateFn WorkspaceCreateFn, sseTokens *sseTokenStore) { //nolint:funlen // route registration function
 	// Active workspace endpoint — returns full topology for the default workspace
 	mux.HandleFunc("GET /api/workspaces/active", handleActiveWorkspace(workspaceConfigFn))
 
@@ -212,7 +203,18 @@ func registerWorkspaceRoutes(mux *http.ServeMux, multiPool *daemon.MultiPool, wo
 
 	// Server-Sent Events endpoint (workspace-scoped)
 	if hub != nil {
-		wsMux.Handle("GET /api/workspaces/{ws}/events", NewSSEHandler(hub, getMutationsSince))
+		var sseHandler http.Handler
+		if sseTokens != nil {
+			sseHandler = NewSSEHandlerWithAuth(hub, getMutationsSince, sseTokens)
+		} else {
+			sseHandler = NewSSEHandler(hub, getMutationsSince)
+		}
+		wsMux.Handle("GET /api/workspaces/{ws}/events", sseHandler)
+		// SSE token exchange: exchanges JWT for a short-lived opaque token.
+		// Protected by ExtAuth middleware (JWT required in external mode).
+		if sseTokens != nil {
+			wsMux.HandleFunc("GET /api/workspaces/{ws}/events/token", handleSSEToken(sseTokens))
+		}
 	}
 
 	// Terminal tab metadata endpoints (workspace-scoped, Redis-backed)

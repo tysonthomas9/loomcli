@@ -1651,3 +1651,413 @@ func TestDaemonSubscriber_PollDBChanges_UpdatedAfterNotSuccess(t *testing.T) {
 		// Good — no broadcast
 	}
 }
+
+// TestDaemonSubscriber_PollDBChanges_PerRepoRefresh verifies that when a filtered
+// client is connected (source_repos=[repo-a]) and the per-repo Count RPC detects
+// changes in repo-a, the client receives a refresh with SourceRepo=repo-a.
+func TestDaemonSubscriber_PollDBChanges_PerRepoRefresh(t *testing.T) {
+	socketPath := startSubscriptionMockServerRaw(t, func(req rpc.Request) rpc.Response {
+		switch req.Operation {
+		case "health":
+			hd, _ := json.Marshal(rpc.HealthResponse{Status: "healthy", Version: "0.0.0", Compatible: true})
+			return rpc.Response{Success: true, Data: hd}
+		case "ping":
+			return rpc.Response{Success: true}
+		case "count":
+			var countArgs rpc.CountArgs
+			if err := json.Unmarshal(req.Args, &countArgs); err == nil {
+				if len(countArgs.SourceRepos) > 0 {
+					// Per-repo count call — report 1 changed issue in repo-a
+					countData, _ := json.Marshal(struct {
+						Count int64 `json:"count"`
+					}{Count: 1})
+					return rpc.Response{Success: true, Data: countData}
+				}
+			}
+			// Global count call — return count of 5 (same as lastKnownCount, change via UpdatedAfter)
+			countData, _ := json.Marshal(struct {
+				Count int64 `json:"count"`
+			}{Count: 10})
+			return rpc.Response{Success: true, Data: countData}
+		default:
+			return rpc.Response{Success: false, Error: "unknown operation: " + req.Operation}
+		}
+	})
+
+	pool := newSubscriptionMockPool(socketPath)
+	defer pool.Close()
+
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	// Register a filtered client watching repo-a
+	client := &SSEClient{
+		id:          1,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		workspaceID: "test-ws",
+		sourceRepos: []string{"repo-a"},
+	}
+	hub.RegisterClient(client)
+	time.Sleep(50 * time.Millisecond)
+
+	subscriber := NewDaemonSubscriber(pool, hub)
+	subscriber.workspaceID = "test-ws"
+	subscriber.countInitialized = true
+	subscriber.lastKnownCount = 5 // Different from 10 to trigger change detection
+	subscriber.lastPollTime = time.Now().Add(-5 * time.Second)
+
+	subscriber.pollDBChanges()
+
+	// Should receive a per-repo refresh with SourceRepo=repo-a
+	select {
+	case received := <-client.send:
+		if received.Type != rpc.MutationRefresh {
+			t.Errorf("expected type %q, got %q", rpc.MutationRefresh, received.Type)
+		}
+		if received.SourceRepo != "repo-a" {
+			t.Errorf("expected SourceRepo %q, got %q", "repo-a", received.SourceRepo)
+		}
+		if received.WorkspaceID != "test-ws" {
+			t.Errorf("expected WorkspaceID %q, got %q", "test-ws", received.WorkspaceID)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Error("did not receive per-repo refresh broadcast")
+	}
+}
+
+// TestDaemonSubscriber_PollDBChanges_FilteredClientSkipsOtherRepo verifies that when
+// a filtered client watches [repo-a] but the per-repo Count for repo-a returns 0,
+// the client does NOT receive a per-repo refresh. Since the count changed globally,
+// a global refresh is emitted for unfiltered clients.
+func TestDaemonSubscriber_PollDBChanges_FilteredClientSkipsOtherRepo(t *testing.T) {
+	socketPath := startSubscriptionMockServerRaw(t, func(req rpc.Request) rpc.Response {
+		switch req.Operation {
+		case "health":
+			hd, _ := json.Marshal(rpc.HealthResponse{Status: "healthy", Version: "0.0.0", Compatible: true})
+			return rpc.Response{Success: true, Data: hd}
+		case "ping":
+			return rpc.Response{Success: true}
+		case "count":
+			var countArgs rpc.CountArgs
+			if err := json.Unmarshal(req.Args, &countArgs); err == nil {
+				if len(countArgs.SourceRepos) > 0 {
+					// Per-repo count for repo-a — no changes found
+					countData, _ := json.Marshal(struct {
+						Count int64 `json:"count"`
+					}{Count: 0})
+					return rpc.Response{Success: true, Data: countData}
+				}
+			}
+			// Global count — changed from 5 to 6 (triggers change detection)
+			countData, _ := json.Marshal(struct {
+				Count int64 `json:"count"`
+			}{Count: 6})
+			return rpc.Response{Success: true, Data: countData}
+		default:
+			return rpc.Response{Success: false, Error: "unknown operation: " + req.Operation}
+		}
+	})
+
+	pool := newSubscriptionMockPool(socketPath)
+	defer pool.Close()
+
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	// Filtered client watching repo-a
+	filteredClient := &SSEClient{
+		id:          1,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		workspaceID: "test-ws",
+		sourceRepos: []string{"repo-a"},
+	}
+	// Unfiltered client to receive the global fallback
+	unfilteredClient := &SSEClient{
+		id:          2,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		workspaceID: "test-ws",
+	}
+	hub.RegisterClient(filteredClient)
+	hub.RegisterClient(unfilteredClient)
+	time.Sleep(50 * time.Millisecond)
+
+	subscriber := NewDaemonSubscriber(pool, hub)
+	subscriber.workspaceID = "test-ws"
+	subscriber.countInitialized = true
+	subscriber.lastKnownCount = 5 // Different from 6, triggers count-changed path
+	subscriber.lastPollTime = time.Now().Add(-5 * time.Second)
+
+	subscriber.pollDBChanges()
+
+	// The global refresh (empty SourceRepo) is emitted because count changed
+	// but no per-repo updates matched. The unfiltered client should receive it.
+	select {
+	case received := <-unfilteredClient.send:
+		if received.Type != rpc.MutationRefresh {
+			t.Errorf("expected type %q, got %q", rpc.MutationRefresh, received.Type)
+		}
+		if received.SourceRepo != "" {
+			t.Errorf("expected empty SourceRepo for global refresh, got %q", received.SourceRepo)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Error("unfiltered client did not receive global refresh")
+	}
+
+	// The filtered client should also receive the global refresh (empty SourceRepo
+	// matches all clients via matchesSourceRepoFilter fan-out).
+	select {
+	case received := <-filteredClient.send:
+		if received.Type != rpc.MutationRefresh {
+			t.Errorf("expected type %q, got %q", rpc.MutationRefresh, received.Type)
+		}
+		if received.SourceRepo != "" {
+			t.Errorf("expected empty SourceRepo for global refresh, got %q", received.SourceRepo)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Error("filtered client did not receive global refresh (empty SourceRepo fans out to all)")
+	}
+}
+
+// TestDaemonSubscriber_PollDBChanges_NoFilteredClients_GlobalRefresh verifies that
+// when no connected clients have repo filters, pollDBChanges emits a global refresh
+// with empty SourceRepo (unchanged pre-existing behavior).
+func TestDaemonSubscriber_PollDBChanges_NoFilteredClients_GlobalRefresh(t *testing.T) {
+	socketPath := startSubscriptionMockServerRaw(t, func(req rpc.Request) rpc.Response {
+		switch req.Operation {
+		case "health":
+			hd, _ := json.Marshal(rpc.HealthResponse{Status: "healthy", Version: "0.0.0", Compatible: true})
+			return rpc.Response{Success: true, Data: hd}
+		case "ping":
+			return rpc.Response{Success: true}
+		case "count":
+			// Return count of 8 (different from lastKnownCount=5)
+			countData, _ := json.Marshal(struct {
+				Count int64 `json:"count"`
+			}{Count: 8})
+			return rpc.Response{Success: true, Data: countData}
+		default:
+			return rpc.Response{Success: false, Error: "unknown operation: " + req.Operation}
+		}
+	})
+
+	pool := newSubscriptionMockPool(socketPath)
+	defer pool.Close()
+
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	// Register an unfiltered client (no sourceRepos)
+	client := &SSEClient{
+		id:          1,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		workspaceID: "test-ws",
+	}
+	hub.RegisterClient(client)
+	time.Sleep(50 * time.Millisecond)
+
+	subscriber := NewDaemonSubscriber(pool, hub)
+	subscriber.workspaceID = "test-ws"
+	subscriber.countInitialized = true
+	subscriber.lastKnownCount = 5
+	subscriber.lastPollTime = time.Now().Add(-5 * time.Second)
+
+	subscriber.pollDBChanges()
+
+	// Should receive a global refresh with empty SourceRepo
+	select {
+	case received := <-client.send:
+		if received.Type != rpc.MutationRefresh {
+			t.Errorf("expected type %q, got %q", rpc.MutationRefresh, received.Type)
+		}
+		if received.SourceRepo != "" {
+			t.Errorf("expected empty SourceRepo for global refresh, got %q", received.SourceRepo)
+		}
+		if received.WorkspaceID != "test-ws" {
+			t.Errorf("expected WorkspaceID %q, got %q", "test-ws", received.WorkspaceID)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Error("did not receive global refresh broadcast")
+	}
+
+	// Verify lastKnownCount was updated
+	if subscriber.lastKnownCount != 8 {
+		t.Errorf("lastKnownCount = %d, want 8", subscriber.lastKnownCount)
+	}
+}
+
+// TestDaemonSubscriber_PollDBChanges_PerRepoCountFailure_FallbackGlobal verifies that
+// when the per-repo Count RPC returns an error, emitPerRepoRefreshes falls back to
+// emitting a global refresh.
+func TestDaemonSubscriber_PollDBChanges_PerRepoCountFailure_FallbackGlobal(t *testing.T) {
+	callCount := 0
+	socketPath := startSubscriptionMockServerRaw(t, func(req rpc.Request) rpc.Response {
+		switch req.Operation {
+		case "health":
+			hd, _ := json.Marshal(rpc.HealthResponse{Status: "healthy", Version: "0.0.0", Compatible: true})
+			return rpc.Response{Success: true, Data: hd}
+		case "ping":
+			return rpc.Response{Success: true}
+		case "count":
+			callCount++
+			var countArgs rpc.CountArgs
+			if err := json.Unmarshal(req.Args, &countArgs); err == nil {
+				if len(countArgs.SourceRepos) > 0 {
+					// Per-repo count call — return failure
+					return rpc.Response{Success: false, Error: "per-repo count not supported"}
+				}
+			}
+			// Global count — changed from 3 to 7
+			countData, _ := json.Marshal(struct {
+				Count int64 `json:"count"`
+			}{Count: 7})
+			return rpc.Response{Success: true, Data: countData}
+		default:
+			return rpc.Response{Success: false, Error: "unknown operation: " + req.Operation}
+		}
+	})
+
+	pool := newSubscriptionMockPool(socketPath)
+	defer pool.Close()
+
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	// Register a filtered client to trigger per-repo path
+	client := &SSEClient{
+		id:          1,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		workspaceID: "test-ws",
+		sourceRepos: []string{"repo-a"},
+	}
+	hub.RegisterClient(client)
+	time.Sleep(50 * time.Millisecond)
+
+	subscriber := NewDaemonSubscriber(pool, hub)
+	subscriber.workspaceID = "test-ws"
+	subscriber.countInitialized = true
+	subscriber.lastKnownCount = 3
+	subscriber.lastPollTime = time.Now().Add(-5 * time.Second)
+
+	subscriber.pollDBChanges()
+
+	// Should receive a global refresh as fallback (empty SourceRepo fans out to all)
+	select {
+	case received := <-client.send:
+		if received.Type != rpc.MutationRefresh {
+			t.Errorf("expected type %q, got %q", rpc.MutationRefresh, received.Type)
+		}
+		if received.SourceRepo != "" {
+			t.Errorf("expected empty SourceRepo for fallback global refresh, got %q", received.SourceRepo)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Error("did not receive fallback global refresh after per-repo count failure")
+	}
+}
+
+// TestDaemonSubscriber_PollDBChanges_UnwatchedRepoChange_GlobalRefresh verifies that
+// when the global count changed but no per-repo updates were found (change in an
+// unwatched repo), a global refresh is emitted for unfiltered clients.
+func TestDaemonSubscriber_PollDBChanges_UnwatchedRepoChange_GlobalRefresh(t *testing.T) {
+	socketPath := startSubscriptionMockServerRaw(t, func(req rpc.Request) rpc.Response {
+		switch req.Operation {
+		case "health":
+			hd, _ := json.Marshal(rpc.HealthResponse{Status: "healthy", Version: "0.0.0", Compatible: true})
+			return rpc.Response{Success: true, Data: hd}
+		case "ping":
+			return rpc.Response{Success: true}
+		case "count":
+			var countArgs rpc.CountArgs
+			if err := json.Unmarshal(req.Args, &countArgs); err == nil {
+				if len(countArgs.SourceRepos) > 0 {
+					// Per-repo count for watched repo — no changes
+					countData, _ := json.Marshal(struct {
+						Count int64 `json:"count"`
+					}{Count: 0})
+					return rpc.Response{Success: true, Data: countData}
+				}
+			}
+			// Global count changed from 10 to 12 (issues added in unwatched repo)
+			countData, _ := json.Marshal(struct {
+				Count int64 `json:"count"`
+			}{Count: 12})
+			return rpc.Response{Success: true, Data: countData}
+		default:
+			return rpc.Response{Success: false, Error: "unknown operation: " + req.Operation}
+		}
+	})
+
+	pool := newSubscriptionMockPool(socketPath)
+	defer pool.Close()
+
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	// Filtered client watching repo-a
+	filteredClient := &SSEClient{
+		id:          1,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		workspaceID: "test-ws",
+		sourceRepos: []string{"repo-a"},
+	}
+	// Unfiltered client to catch global refresh
+	unfilteredClient := &SSEClient{
+		id:          2,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		workspaceID: "test-ws",
+	}
+	hub.RegisterClient(filteredClient)
+	hub.RegisterClient(unfilteredClient)
+	time.Sleep(50 * time.Millisecond)
+
+	subscriber := NewDaemonSubscriber(pool, hub)
+	subscriber.workspaceID = "test-ws"
+	subscriber.countInitialized = true
+	subscriber.lastKnownCount = 10 // Different from 12
+	subscriber.lastPollTime = time.Now().Add(-5 * time.Second)
+
+	subscriber.pollDBChanges()
+
+	// Unfiltered client should receive the global refresh (empty SourceRepo)
+	select {
+	case received := <-unfilteredClient.send:
+		if received.Type != rpc.MutationRefresh {
+			t.Errorf("expected type %q, got %q", rpc.MutationRefresh, received.Type)
+		}
+		if received.SourceRepo != "" {
+			t.Errorf("expected empty SourceRepo for unwatched-repo global refresh, got %q", received.SourceRepo)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Error("unfiltered client did not receive global refresh for unwatched repo change")
+	}
+
+	// Filtered client also receives the global refresh because empty SourceRepo
+	// fans out to all clients via matchesSourceRepoFilter.
+	select {
+	case received := <-filteredClient.send:
+		if received.Type != rpc.MutationRefresh {
+			t.Errorf("expected type %q, got %q", rpc.MutationRefresh, received.Type)
+		}
+		if received.SourceRepo != "" {
+			t.Errorf("expected empty SourceRepo, got %q", received.SourceRepo)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Error("filtered client did not receive global refresh (empty SourceRepo fans out)")
+	}
+
+	// Verify lastKnownCount was updated to 12
+	if subscriber.lastKnownCount != 12 {
+		t.Errorf("lastKnownCount = %d, want 12", subscriber.lastKnownCount)
+	}
+}

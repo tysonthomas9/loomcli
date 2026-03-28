@@ -18,6 +18,7 @@ func TestResolveAgentRepos(t *testing.T) {
 		repos   []RepoConfig
 		want    []string // nil means expect nil
 		wantNil bool
+		wantErr bool
 	}{
 		{
 			name:    "empty repos and groups returns nil",
@@ -50,13 +51,13 @@ func TestResolveAgentRepos(t *testing.T) {
 			want:  []string{"api-server", "worker"},
 		},
 		{
-			name:  "unknown group returns empty slice",
-			agent: AgentEntry{RepoGroups: []string{"nonexistent"}},
-			repos: repos,
-			want:  []string(nil), // no matches but input was non-empty
+			name:    "all groups unknown returns error",
+			agent:   AgentEntry{RepoGroups: []string{"nonexistent"}},
+			repos:   repos,
+			wantErr: true,
 		},
 		{
-			name:  "unknown group with explicit repos",
+			name:  "unknown group with explicit repos still succeeds",
 			agent: AgentEntry{Repos: []string{"my-repo"}, RepoGroups: []string{"nonexistent"}},
 			repos: repos,
 			want:  []string{"my-repo"},
@@ -86,12 +87,12 @@ func TestResolveAgentRepos(t *testing.T) {
 			want:  []string{"deploy-scripts", "api-server", "worker"},
 		},
 		{
-			name:  "repo with empty SourceRepoID is skipped",
+			name:  "group matches only empty SourceRepoID repos returns error",
 			agent: AgentEntry{RepoGroups: []string{"empty-group"}},
 			repos: []RepoConfig{
 				{Name: "bad-repo", SourceRepoID: "", Groups: []string{"empty-group"}},
 			},
-			want: []string(nil),
+			wantErr: true,
 		},
 		{
 			name:  "explicit repo name resolved to SourceRepoID",
@@ -110,11 +111,26 @@ func TestResolveAgentRepos(t *testing.T) {
 			},
 			want: []string{"core/api", "core/worker"},
 		},
+		{
+			name:  "partial group failure with some results no error",
+			agent: AgentEntry{RepoGroups: []string{"backend", "nonexistent"}},
+			repos: repos,
+			want:  []string{"api-server", "worker"},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := resolveAgentRepos(tt.agent, tt.repos)
+			got, err := resolveAgentRepos(tt.agent, tt.repos)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("expected error, got nil (result=%v)", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
 			if tt.wantNil {
 				if got != nil {
 					t.Errorf("expected nil, got %v", got)

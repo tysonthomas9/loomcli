@@ -511,26 +511,3 @@ workspaces: {}
 		t.Errorf("got backend %q, want %q", cfg.Backend, "claude-code")
 	}
 }
-
-func TestLoadProjectFile_SecretResolution(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("LOOM_SECRET_API_KEY", "test-key-123")
-
-	content := `daemon:
-  api_key: $secret:api-key
-`
-	if err := os.WriteFile(filepath.Join(dir, "loom.yaml"), []byte(content), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	pf, err := LoadProjectFile(dir)
-	if err != nil {
-		t.Fatalf("LoadProjectFile error: %v", err)
-	}
-	if pf == nil {
-		t.Fatal("expected non-nil project file")
-	}
-	if pf.Daemon == nil || pf.Daemon.APIKey != "test-key-123" {
-		t.Errorf("got api_key %q, want %q", pf.Daemon.APIKey, "test-key-123")
-	}
-}

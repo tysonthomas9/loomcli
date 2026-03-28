@@ -17,7 +17,6 @@ func TestIsPublicRoute(t *testing.T) {
 		// Public GET routes
 		{"GET /health", http.MethodGet, "/health", true},
 		{"GET /api/health", http.MethodGet, "/api/health", true},
-		{"GET /api/auth/token", http.MethodGet, "/api/auth/token", true},
 		{"GET / (frontend root)", http.MethodGet, "/", true},
 		{"GET /assets/main.js (frontend asset)", http.MethodGet, "/assets/main.js", true},
 		{"GET /issues/123 (SPA route)", http.MethodGet, "/issues/123", true},
@@ -35,7 +34,6 @@ func TestIsPublicRoute(t *testing.T) {
 		// Non-GET methods on public paths should not be public
 		{"POST /health", http.MethodPost, "/health", false},
 		{"POST /api/health", http.MethodPost, "/api/health", false},
-		{"POST /api/auth/token", http.MethodPost, "/api/auth/token", false},
 		{"PUT /health", http.MethodPut, "/health", false},
 		{"DELETE /api/health", http.MethodDelete, "/api/health", false},
 		{"POST /", http.MethodPost, "/", false},
@@ -216,9 +214,8 @@ func TestIsPublicRoute_WorkspaceScoped(t *testing.T) {
 		{"ws issues GET", "GET", "/api/workspaces/ws1/issues", false},
 		{"ws stats GET", "GET", "/api/workspaces/ws1/stats", false},
 
-		// Workspace-scoped health and auth should be public via GET
+		// Workspace-scoped health should be public via GET
 		{"ws health GET", "GET", "/api/workspaces/ws1/health", true},
-		{"ws auth token GET", "GET", "/api/workspaces/ws1/auth/token", true},
 
 		// Workspace-scoped terminal ws should be public
 		{"ws terminal ws GET", "GET", "/api/workspaces/ws1/terminal/ws", true},
@@ -229,6 +226,9 @@ func TestIsPublicRoute_WorkspaceScoped(t *testing.T) {
 		// Workspace-scoped config and events should be public
 		{"ws config GET", "GET", "/api/workspaces/ws1/config", true},
 		{"ws events GET", "GET", "/api/workspaces/ws1/events", true},
+
+		// SSE token exchange must NOT be public — requires JWT auth from ExtAuth middleware
+		{"ws events token GET - requires auth", "GET", "/api/workspaces/ws1/events/token", false},
 	}
 
 	for _, tt := range tests {

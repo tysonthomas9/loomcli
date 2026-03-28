@@ -25,6 +25,14 @@ const devRoutes = import.meta.env.DEV
             IssueDetailPanelFixture,
             ErrorTriggerFixture,
             ToastTestFixture,
+            SessionNamePromptFixture,
+            WelcomeBannerFixture,
+            HelpPopoverFixture,
+            SearchBarFixture,
+            AgentsSidebarFixture,
+            WorkspaceTreeFixture,
+            SplitDetailSummaryFixture,
+            PasteConfirmDialogFixture,
           } = await import("@/TestFixtures");
           return {
             Component: () => {
@@ -34,6 +42,20 @@ const devRoutes = import.meta.env.DEV
               if (path === "/test/error-boundary")
                 return <ErrorTriggerFixture />;
               if (path === "/test/toast") return <ToastTestFixture />;
+              if (path === "/test/session-name-prompt")
+                return <SessionNamePromptFixture />;
+              if (path === "/test/welcome-banner")
+                return <WelcomeBannerFixture />;
+              if (path === "/test/help-popover") return <HelpPopoverFixture />;
+              if (path === "/test/search-bar") return <SearchBarFixture />;
+              if (path === "/test/agents-sidebar")
+                return <AgentsSidebarFixture />;
+              if (path === "/test/workspace-tree")
+                return <WorkspaceTreeFixture />;
+              if (path === "/test/split-detail-summary")
+                return <SplitDetailSummaryFixture />;
+              if (path === "/test/paste-confirm")
+                return <PasteConfirmDialogFixture />;
               return <NotFound />;
             },
           };

@@ -1306,7 +1306,10 @@ func TestBuildCommand_CustomRoleAllFlags(t *testing.T) {
 		assignedEpicID: "epic-42",
 	}
 
-	cmd := d.buildCommand(ap)
+	cmd, err := d.buildCommand(ap)
+	if err != nil {
+		t.Fatalf("buildCommand error: %v", err)
+	}
 
 	// Verify args: loom agent <path> --prompt <file> --auto --daemon-mode --task-filter <filter> --backend <backend> --parent <epic>
 	expectedArgs := []string{
@@ -1366,7 +1369,10 @@ func TestBuildCommand_CustomRoleMinimal(t *testing.T) {
 		worktreePath: tmpDir,
 	}
 
-	cmd := d.buildCommand(ap)
+	cmd, err := d.buildCommand(ap)
+	if err != nil {
+		t.Fatalf("buildCommand error: %v", err)
+	}
 
 	expectedArgs := []string{
 		"loom", "agent", tmpDir, "--prompt", promptFile, "--auto", "--daemon-mode",
@@ -1511,7 +1517,10 @@ func TestBuildCommand_BuiltInRoleWithBackendAndEpic(t *testing.T) {
 		assignedEpicID: "epic-99",
 	}
 
-	cmd := d.buildCommand(ap)
+	cmd, err := d.buildCommand(ap)
+	if err != nil {
+		t.Fatalf("buildCommand error: %v", err)
+	}
 
 	expectedArgs := []string{
 		"loom", "plan", tmpDir, "--auto", "--daemon-mode",
@@ -1730,7 +1739,10 @@ func TestBuildCommand_SessionEnvVars(t *testing.T) {
 			session:      sess,
 		}
 
-		cmd := d.buildCommand(ap)
+		cmd, err := d.buildCommand(ap)
+		if err != nil {
+			t.Fatalf("buildCommand: %v", err)
+		}
 
 		// Verify LOOM_SESSION_ID is present with correct value
 		wantSessionEnv := "LOOM_SESSION_ID=" + sess.SessionID()
@@ -1777,7 +1789,10 @@ func TestBuildCommand_SessionEnvVars(t *testing.T) {
 			session:      nil, // no session
 		}
 
-		cmd := d.buildCommand(ap)
+		cmd, err := d.buildCommand(ap)
+		if err != nil {
+			t.Fatalf("buildCommand: %v", err)
+		}
 
 		// Verify LOOM_SESSION_ID is NOT present
 		for _, env := range cmd.Env {

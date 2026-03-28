@@ -42,7 +42,7 @@ func TestTerminalStateRouteMigration_OldFlatRoutesReturn404(t *testing.T) {
 
 	mux := http.NewServeMux()
 	//                    mux  pool multiPool hub  getMut termMgr  termAuth fleetReg tokenCfg apiKey authOn origins fleetRegCfg claimMetrics fleetOn devMode devDir loomURL gitOps fileOps tabMeta issueTabs wsCfg  wsDel  setDef clrDef wsCreate bkOps sessHist sessSt wsExists   initWS  wsCfgByID extAuth
-	setupRoutes(mux, nil, multiPool, nil, nil, termMgr, nil, nil, nil, "", false, nil, nil, nil, false, false, "", "", nil, nil, tms, nil, nil, nil, nil, nil, nil, nil, nil, nil, wsExistsFn, "", nil, "")
+	setupRoutes(mux, nil, multiPool, nil, nil, termMgr, nil, nil, nil, nil, nil, nil, false, false, "", "", nil, nil, tms, nil, nil, nil, nil, nil, nil, nil, nil, nil, wsExistsFn, "", nil, "", nil)
 
 	// Old flat routes that should have been removed — each must return 404.
 	oldRoutes := []struct {
@@ -99,7 +99,7 @@ func TestTerminalStateRouteMigration_NewWorkspaceScopedRoutesRegistered(t *testi
 	t.Cleanup(func() { termMgr.Shutdown() })
 
 	mux := http.NewServeMux()
-	setupRoutes(mux, nil, multiPool, nil, nil, termMgr, nil, nil, nil, "", false, nil, nil, nil, false, false, "", "", nil, nil, tms, nil, nil, nil, nil, nil, nil, nil, nil, nil, wsExistsFn, "", nil, "")
+	setupRoutes(mux, nil, multiPool, nil, nil, termMgr, nil, nil, nil, nil, nil, nil, false, false, "", "", nil, nil, tms, nil, nil, nil, nil, nil, nil, nil, nil, nil, wsExistsFn, "", nil, "", nil)
 
 	// New workspace-scoped routes that should be registered.
 	scopedRoutes := []struct {
@@ -162,7 +162,7 @@ func TestTerminalStateRouteMigration_UnknownWorkspaceReturns404(t *testing.T) {
 	t.Cleanup(func() { termMgr.Shutdown() })
 
 	mux := http.NewServeMux()
-	setupRoutes(mux, nil, multiPool, nil, nil, termMgr, nil, nil, nil, "", false, nil, nil, nil, false, false, "", "", nil, nil, tms, nil, nil, nil, nil, nil, nil, nil, nil, nil, wsExistsFn, "", nil, "")
+	setupRoutes(mux, nil, multiPool, nil, nil, termMgr, nil, nil, nil, nil, nil, nil, false, false, "", "", nil, nil, tms, nil, nil, nil, nil, nil, nil, nil, nil, nil, wsExistsFn, "", nil, "", nil)
 
 	// Routes with a non-existent workspace should return 404 from WorkspaceMiddleware.
 	routes := []struct {
@@ -205,7 +205,7 @@ func TestTerminalStateRouteMigration_StateEndpointsReturnJSON(t *testing.T) {
 
 	mux := http.NewServeMux()
 	// termManager is nil here since state routes only need tabMetaStore.
-	setupRoutes(mux, nil, multiPool, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, false, false, "", "", nil, nil, tms, nil, nil, nil, nil, nil, nil, nil, nil, nil, wsExistsFn, "", nil, "")
+	setupRoutes(mux, nil, multiPool, nil, nil, nil, nil, nil, nil, nil, nil, nil, false, false, "", "", nil, nil, tms, nil, nil, nil, nil, nil, nil, nil, nil, nil, wsExistsFn, "", nil, "", nil)
 
 	// GET /api/workspaces/{ws}/terminal/state should return 200 with an
 	// active_tab field (empty when no state has been set).

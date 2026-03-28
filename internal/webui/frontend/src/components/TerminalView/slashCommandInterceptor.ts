@@ -23,7 +23,7 @@ export class SlashCommandInterceptor {
   private commandMode = false;
   private executing = false;
   private disposed = false;
-  private escapeSeqRemaining = 0;
+  private escapeState: "none" | "escaped" | "csi" | "consumeOne" = "none";
   private terminal: Terminal;
   private workspaceId: string;
 
@@ -74,17 +74,44 @@ export class SlashCommandInterceptor {
     ch: string,
     sendToWs: (data: string) => void,
   ): void {
-    // Skip remaining bytes of an escape sequence
-    if (this.escapeSeqRemaining > 0) {
-      this.escapeSeqRemaining--;
-      return;
+    // State-machine CSI parser: consume escape sequences of any length
+    if (this.escapeState !== "none") {
+      if (this.escapeState === "escaped") {
+        // Second byte after ESC
+        if (ch === "[") {
+          // CSI sequence: ESC [ <params> <final>
+          this.escapeState = "csi";
+        } else {
+          // SS3 (ESC O x) or other 2-byte (ESC x y): consume one more byte
+          this.escapeState = "consumeOne";
+        }
+        return;
+      }
+      if (this.escapeState === "csi") {
+        if (ch === "\x1b") {
+          // Abort current CSI, begin new escape sequence
+          this.escapeState = "escaped";
+          return;
+        }
+        const code = ch.charCodeAt(0);
+        if (code >= 0x40 && code <= 0x7e) {
+          // Final byte — sequence complete
+          this.escapeState = "none";
+        }
+        // Parameter bytes (0x30–0x3F) and intermediate bytes (0x20–0x2F)
+        // stay in 'csi' state.
+        return;
+      }
+      if (this.escapeState === "consumeOne") {
+        // Consume the last byte of a 3-byte sequence (e.g., SS3)
+        this.escapeState = "none";
+        return;
+      }
     }
 
-    // Detect escape sequence start and skip the full sequence
-    // CSI sequences: ESC [ ... <letter> (typically 2 more bytes, e.g. \x1b[A)
-    // SS3 sequences: ESC O <letter> (2 more bytes)
+    // Detect escape sequence start
     if (ch === "\x1b") {
-      this.escapeSeqRemaining = 2;
+      this.escapeState = "escaped";
       return;
     }
 
@@ -175,6 +202,7 @@ export class SlashCommandInterceptor {
   private exitCommandMode(): void {
     this.buffer = "";
     this.commandMode = false;
+    this.escapeState = "none";
   }
 
   /**
@@ -185,6 +213,6 @@ export class SlashCommandInterceptor {
     this.buffer = "";
     this.commandMode = false;
     this.executing = false;
-    this.escapeSeqRemaining = 0;
+    this.escapeState = "none";
   }
 }

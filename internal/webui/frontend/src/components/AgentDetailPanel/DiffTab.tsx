@@ -25,6 +25,7 @@ export function DiffTab({ agent, isActive }: DiffTabProps): JSX.Element {
     files,
     isLoading,
     error,
+    patchErrors,
     viewedFiles,
     markViewed,
     patchCache,
@@ -106,8 +107,8 @@ export function DiffTab({ agent, isActive }: DiffTabProps): JSX.Element {
               {isExpanded && (
                 <DiffFileViewer
                   patch={cachedPatch}
-                  isLoading={!cachedPatch && !error}
-                  error={!cachedPatch && error ? error.message : undefined}
+                  isLoading={!cachedPatch && !patchErrors.has(file.path)}
+                  error={patchErrors.get(file.path)?.message}
                 />
               )}
             </div>

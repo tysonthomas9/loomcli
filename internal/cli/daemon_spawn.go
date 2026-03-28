@@ -14,7 +14,7 @@ import (
 )
 
 // buildCommand constructs the exec.Cmd for spawning an agent subprocess (does not start it).
-func (d *Daemon) buildCommand(ap *AgentProcess) *exec.Cmd {
+func (d *Daemon) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 	cfg := d.configSnapshot() // snapshot config for consistent reads
 
 	ap.mu.Lock()
@@ -98,7 +98,11 @@ func (d *Daemon) buildCommand(ap *AgentProcess) *exec.Cmd {
 	}
 
 	// Propagate resolved source repos for repo affinity scoring
-	if sourceRepos := resolveAgentRepos(ap.entry, d.repos); len(sourceRepos) > 0 {
+	sourceRepos, err := resolveAgentRepos(ap.entry, d.repos)
+	if err != nil {
+		return nil, fmt.Errorf("resolve agent repos: %w", err)
+	}
+	if len(sourceRepos) > 0 {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_SOURCE_REPOS=%s", strings.Join(sourceRepos, ",")))
 	}
 
@@ -118,12 +122,15 @@ func (d *Daemon) buildCommand(ap *AgentProcess) *exec.Cmd {
 		)
 	}
 
-	return cmd
+	return cmd, nil
 }
 
 // spawnAgent starts the subprocess for an agent.
 func (d *Daemon) spawnAgent(ap *AgentProcess) error {
-	cmd := d.buildCommand(ap)
+	cmd, err := d.buildCommand(ap)
+	if err != nil {
+		return fmt.Errorf("build command: %w", err)
+	}
 
 	ap.mu.Lock()
 
