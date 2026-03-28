@@ -236,6 +236,66 @@ func TestHandleSaveIssueTabs_SavesAndReturnsSuccess(t *testing.T) {
 	}
 }
 
+func TestHandleSaveIssueTabs_BackendFieldPersists(t *testing.T) {
+	store, hub := setupIssueTabsTest(t)
+	handler := handleSaveIssueTabs(store, hub)
+
+	body := `{
+		"tabs": [
+			{"id": "details", "type": "details", "label": "Details", "sort_order": 0},
+			{"id": "terminal-s1", "type": "terminal", "label": "Terminal 1", "session_name": "lead-claude-1", "backend": "claude", "sort_order": 1}
+		],
+		"active_tab_id": "terminal-s1"
+	}`
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/"+testWSID+"/issues/BACKEND-SAVE/tabs", strings.NewReader(body))
+	req.SetPathValue("issueId", "BACKEND-SAVE")
+	req = withWSContext(req, testWSID)
+	rr := httptest.NewRecorder()
+	handler(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+
+	var resp struct {
+		Success bool                    `json:"success"`
+		Data    issuetabs.IssueTabState `json:"data"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.Success {
+		t.Error("expected success=true")
+	}
+
+	// Verify backend field in response
+	if len(resp.Data.Tabs) != 2 {
+		t.Fatalf("len(Tabs) = %d, want 2", len(resp.Data.Tabs))
+	}
+	if resp.Data.Tabs[1].Backend != "claude" {
+		t.Errorf("response Tabs[1].Backend = %q, want %q", resp.Data.Tabs[1].Backend, "claude")
+	}
+
+	// Verify backend was persisted in Redis
+	got, err := store.Get(context.Background(), testWSID, "BACKEND-SAVE")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected stored state, got nil")
+	}
+	if got.Tabs[1].Backend != "claude" {
+		t.Errorf("stored Tabs[1].Backend = %q, want %q", got.Tabs[1].Backend, "claude")
+	}
+	if got.Tabs[1].SessionName != "lead-claude-1" {
+		t.Errorf("stored Tabs[1].SessionName = %q, want %q", got.Tabs[1].SessionName, "lead-claude-1")
+	}
+	// Non-terminal tab should not have backend
+	if got.Tabs[0].Backend != "" {
+		t.Errorf("stored Tabs[0].Backend = %q, want empty for non-terminal tab", got.Tabs[0].Backend)
+	}
+}
+
 func TestHandleSaveIssueTabs_BroadcastsSSE(t *testing.T) {
 	store, hub := setupIssueTabsTest(t)
 

@@ -7,6 +7,7 @@ export interface IssueTab {
   type: "details" | "logs" | "terminal" | "sessions";
   label: string;
   session_name?: string;
+  backend?: string;
   sort_order: number;
 }
 

@@ -191,6 +191,67 @@ describe("issueTabs API", () => {
       );
     });
 
+    it("sends terminal tab with backend field", async () => {
+      mockPut.mockResolvedValue({
+        success: true,
+        data: {},
+      });
+
+      const tabs: IssueTab[] = [
+        { id: "details", type: "details", label: "Details", sort_order: 0 },
+        {
+          id: "terminal-s1",
+          type: "terminal",
+          label: "Terminal 1",
+          session_name: "lead-claude-1",
+          backend: "claude",
+          sort_order: 1,
+        },
+      ];
+
+      await saveIssueTabState(
+        "test-ws-id",
+        "PROJ-BACKEND",
+        tabs,
+        "terminal-s1",
+      );
+
+      expect(mockPut).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/issues/PROJ-BACKEND/tabs",
+        {
+          tabs,
+          active_tab_id: "terminal-s1",
+        },
+      );
+      // Verify backend is present in the sent tab data
+      const sentTabs = mockPut.mock.calls[0][1].tabs;
+      expect(sentTabs[1].backend).toBe("claude");
+    });
+
+    it("sends terminal tab without backend for legacy format", async () => {
+      mockPut.mockResolvedValue({
+        success: true,
+        data: {},
+      });
+
+      const tabs: IssueTab[] = [
+        { id: "details", type: "details", label: "Details", sort_order: 0 },
+        {
+          id: "terminal-s1",
+          type: "terminal",
+          label: "Terminal 1",
+          session_name: "lead-claude-1",
+          sort_order: 1,
+        },
+      ];
+
+      await saveIssueTabState("test-ws-id", "PROJ-LEGACY", tabs, "terminal-s1");
+
+      const sentTabs = mockPut.mock.calls[0][1].tabs;
+      expect(sentTabs[1].backend).toBeUndefined();
+      expect(sentTabs[1].session_name).toBe("lead-claude-1");
+    });
+
     it("URL-encodes the issue ID", async () => {
       mockPut.mockResolvedValue({ success: true, data: {} });
 

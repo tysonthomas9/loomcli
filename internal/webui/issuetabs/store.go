@@ -31,6 +31,7 @@ type IssueTab struct {
 	Type        string `json:"type"` // "details", "logs", "terminal"
 	Label       string `json:"label"`
 	SessionName string `json:"session_name,omitempty"` // for terminal tabs only
+	Backend     string `json:"backend,omitempty"`      // for terminal tabs only
 	SortOrder   int    `json:"sort_order"`
 }
 

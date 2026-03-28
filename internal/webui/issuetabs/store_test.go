@@ -70,6 +70,66 @@ func TestSaveAndGet_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestSaveAndGet_BackendRoundTrip(t *testing.T) {
+	store, _ := setupTest(t)
+	ctx := context.Background()
+
+	state := &IssueTabState{
+		IssueID: "BACKEND-1",
+		Tabs: []IssueTab{
+			{ID: "details", Type: "details", Label: "Details", SortOrder: 0},
+			{ID: "terminal-sess1", Type: "terminal", Label: "Terminal 1", SessionName: "lead-claude-1", Backend: "claude", SortOrder: 1},
+		},
+		ActiveTabID: "terminal-sess1",
+	}
+
+	if err := store.Save(ctx, testWorkspaceID, state); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	got, err := store.Get(ctx, testWorkspaceID, "BACKEND-1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected state, got nil")
+	}
+	if got.Tabs[1].Backend != "claude" {
+		t.Errorf("Tabs[1].Backend = %q, want %q", got.Tabs[1].Backend, "claude")
+	}
+	if got.Tabs[1].SessionName != "lead-claude-1" {
+		t.Errorf("Tabs[1].SessionName = %q, want %q", got.Tabs[1].SessionName, "lead-claude-1")
+	}
+	// Non-terminal tab should have empty backend
+	if got.Tabs[0].Backend != "" {
+		t.Errorf("Tabs[0].Backend = %q, want empty for non-terminal tab", got.Tabs[0].Backend)
+	}
+}
+
+func TestSaveAndGet_LegacyDataWithoutBackend(t *testing.T) {
+	store, mr := setupTest(t)
+	ctx := context.Background()
+
+	// Simulate legacy data saved without backend field
+	legacyJSON := `{"issue_id":"LEGACY-1","tabs":[{"id":"details","type":"details","label":"Details","sort_order":0},{"id":"terminal-s1","type":"terminal","label":"Term","session_name":"lead-claude-1","sort_order":1}],"active_tab_id":"terminal-s1","updated_at":"2025-01-15T10:00:00Z"}`
+	mr.Set(issueKey(testWorkspaceID, "LEGACY-1"), legacyJSON)
+
+	got, err := store.Get(ctx, testWorkspaceID, "LEGACY-1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected state, got nil")
+	}
+	// Backend should be zero value (empty string) for legacy data
+	if got.Tabs[1].Backend != "" {
+		t.Errorf("Tabs[1].Backend = %q, want empty for legacy data", got.Tabs[1].Backend)
+	}
+	if got.Tabs[1].SessionName != "lead-claude-1" {
+		t.Errorf("Tabs[1].SessionName = %q, want %q", got.Tabs[1].SessionName, "lead-claude-1")
+	}
+}
+
 func TestGet_NotFound(t *testing.T) {
 	store, _ := setupTest(t)
 	state, err := store.Get(context.Background(), testWorkspaceID, "nonexistent")

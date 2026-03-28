@@ -16,10 +16,9 @@ export const DEFAULT_SPLIT_RATIO = 0.5;
 export const MIN_SPLIT_WIDTH_PX = 900;
 
 /** Brand colors for each known backend, derived from KNOWN_BACKEND_DEFAULTS. */
-export const BACKEND_BRAND_COLORS: Record<string, string> =
-  Object.fromEntries(
-    Object.entries(KNOWN_BACKEND_DEFAULTS).map(([k, v]) => [k, v.brandColor]),
-  );
+export const BACKEND_BRAND_COLORS: Record<string, string> = Object.fromEntries(
+  Object.entries(KNOWN_BACKEND_DEFAULTS).map(([k, v]) => [k, v.brandColor]),
+);
 
 export interface TabState {
   id: string;

@@ -39,7 +39,10 @@ import type {
 import type { Status } from "@/types/status";
 import { getReviewType, isPRUrl } from "@/utils/issueCategory";
 
-import type { ConnectionState } from "@/components/TerminalView";
+import {
+  getBackendFromSessionName,
+  type ConnectionState,
+} from "@/components/TerminalView";
 
 import { ActivityLog } from "./ActivityLog";
 import { AgentStatusBadge } from "./AgentStatusBadge";
@@ -515,7 +518,14 @@ function DefaultContent({
         closable: t.type !== "details" && t.type !== "sessions",
         metadata:
           t.type === "terminal" && t.session_name
-            ? { sessionName: t.session_name }
+            ? (() => {
+                const derived = getBackendFromSessionName(t.session_name);
+                return {
+                  sessionName: t.session_name,
+                  backend:
+                    t.backend || (derived !== "unknown" ? derived : undefined),
+                };
+              })()
             : undefined,
         connectionState:
           t.type === "terminal"
@@ -570,6 +580,9 @@ function DefaultContent({
       };
       if (t.metadata?.sessionName) {
         tab.session_name = t.metadata.sessionName;
+      }
+      if (t.metadata?.backend) {
+        tab.backend = t.metadata.backend;
       }
       return tab;
     });
