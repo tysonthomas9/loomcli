@@ -32,6 +32,9 @@ export function SessionDetailView({
 }: SessionDetailViewProps): JSX.Element {
   const { workspaceId } = useWorkspaceContext();
   const [innerTab, setInnerTab] = useState<InnerTab>("transcript");
+  const [expandedInputs, setExpandedInputs] = useState<Set<number>>(
+    () => new Set(),
+  );
 
   const {
     entries,
@@ -151,7 +154,46 @@ export function SessionDetailView({
               )}
               {!entry.content && entry.tool_input && (
                 <div className={styles.transcriptContent}>
-                  {entry.tool_input}
+                  {entry.tool_input.length <= 2000 ||
+                  expandedInputs.has(entry.seq) ? (
+                    <>
+                      {entry.tool_input}
+                      {expandedInputs.has(entry.seq) && (
+                        <button
+                          type="button"
+                          className={styles.toolInputToggle}
+                          data-testid="show-less-input"
+                          onClick={() =>
+                            setExpandedInputs((prev) => {
+                              const next = new Set(prev);
+                              next.delete(entry.seq);
+                              return next;
+                            })
+                          }
+                        >
+                          Show less
+                        </button>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      {entry.tool_input.slice(0, 2000)}...
+                      <button
+                        type="button"
+                        className={styles.toolInputToggle}
+                        data-testid="show-full-input"
+                        onClick={() =>
+                          setExpandedInputs((prev) => {
+                            const next = new Set(prev);
+                            next.add(entry.seq);
+                            return next;
+                          })
+                        }
+                      >
+                        Show full input
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
             </div>
