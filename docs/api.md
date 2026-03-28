@@ -44,6 +44,8 @@ These routes do not require bearer token authentication:
 - `GET /api/health`
 - `GET /api/auth/token`
 - `GET /api/terminal/ws` (uses its own one-time token)
+- `POST /api/client-errors` (errors may occur before auth bootstrap)
+- `POST /api/csp-report` (browsers send CSP reports automatically without auth)
 - `POST/GET /api/fleet/*` (use fleet-specific auth)
 - Frontend static files (non-`/api/` paths)
 
@@ -2245,9 +2247,163 @@ Diff statistics (added/removed lines) for an issue's assigned agent worktree.
 
 Proxies requests to the loom agent status server (same-origin to avoid CORS/CSP issues). Only available when a loom server URL is configured.
 
+## Client Error & CSP Reporting
+
+Two public POST endpoints for frontend observability — they accept error payloads from the browser, validate and truncate fields, log the reports via `slog.Warn`, and return `204 No Content`. Both are unauthenticated (errors may occur before auth bootstrap) and excluded from the global rate limiter (each has its own dedicated per-IP limiter).
+
+### `POST /api/client-errors`
+
+Accept and log client-side JavaScript errors.
+
+- **Auth:** None (public — errors may occur before auth bootstrap)
+- **Content-Type:** `application/json`
+- **Rate Limit:** Dedicated per-IP — 10 requests/minute, burst 10 (excluded from global rate limiter)
+- **Max Body Size:** 16 KB (enforced via `http.MaxBytesReader`)
+
+**Request body:**
+
+```json
+{
+  "type": "global-error",
+  "message": "Uncaught TypeError: Cannot read properties of null",
+  "stack": "at foo (app.js:1:5)\nat bar (app.js:10:3)",
+  "url": "http://localhost:8080/",
+  "line": 1,
+  "col": 5,
+  "userAgent": "Mozilla/5.0 ...",
+  "timestamp": "2026-03-22T10:00:00.000Z"
+}
+```
+
+| Field | Type | Required | Max Length | Description |
+|-------|------|----------|-----------|-------------|
+| `type` | string | yes | 50 chars | Error category (e.g. `"global-error"`, `"unhandled-rejection"`, `"react-error"`, `"api-error"`) |
+| `message` | string | yes | 4096 chars | Error message text |
+| `stack` | string | no | 8192 chars (truncated) | Stack trace |
+| `url` | string | no | 2048 chars (truncated) | Page URL where the error occurred |
+| `line` | int | no | — | Line number of the error |
+| `col` | int | no | — | Column number of the error |
+| `userAgent` | string | no | 512 chars (truncated) | Browser user agent string |
+| `timestamp` | string | no | — | ISO 8601 timestamp from the client |
+
+**Validation:**
+
+- `type` is required and must not exceed 50 characters → 400
+- `message` is required and must not exceed 4096 characters → 400
+- Optional string fields (`stack`, `url`, `userAgent`) are silently truncated to their max lengths (not rejected)
+
+**Response 204:** No Content — error logged successfully (empty body)
+
+**Response 400:** Invalid JSON body, missing/empty `type`, missing/empty `message`, `type` too long, `message` too long
+
+```json
+{"error": "type is required"}
+```
+
+**Response 400 (oversized body):** Request body exceeds 16 KB — `http.MaxBytesReader` causes the JSON decode to fail, returning 400 `"invalid JSON body"` (same as other parse errors)
+
+**Response 429:** Per-IP rate limit exceeded
+
+```json
+{"error": "rate limit exceeded", "retry_after": 6}
+```
+
+Includes `Retry-After` header with seconds until next allowed request.
+
+**Frontend integration:**
+
+The frontend `errorReporter.ts` module automatically sends errors to this endpoint. It implements:
+
+- **Circuit breaker:** after 3 consecutive failures, stops reporting for 60 seconds
+- **Deduplication:** same type+message suppressed within 5-second window
+- **Timeout:** 5-second abort signal on each report
+- **Fire-and-forget:** errors are sent asynchronously, never blocking the UI
+- **Error types reported:** `global-error` (window.onerror), `unhandled-rejection` (unhandledrejection event), `react-error` (React error boundaries), `api-error` (fetchApi failures)
+
+---
+
+### `POST /api/csp-report`
+
+Accept and log browser Content-Security-Policy violation reports.
+
+- **Auth:** None (public — browsers send CSP reports automatically without auth headers)
+- **Content-Type:** `application/csp-report` or `application/json` (both accepted)
+- **Rate Limit:** Dedicated per-IP — 60 requests/minute (1/sec), burst 20 (excluded from global rate limiter)
+- **Max Body Size:** 10 KB (enforced via `io.LimitReader`)
+
+**Request body:** Standard browser CSP report format (envelope with `"csp-report"` key):
+
+```json
+{
+  "csp-report": {
+    "document-uri": "http://localhost:8080/",
+    "violated-directive": "script-src",
+    "effective-directive": "script-src",
+    "original-policy": "default-src 'self'; script-src 'self' 'sha256-...'",
+    "blocked-uri": "inline",
+    "status-code": 200,
+    "source-file": "http://localhost:8080/app.js",
+    "line-number": 42,
+    "column-number": 10
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `document-uri` | string | URI of the document where the violation occurred |
+| `violated-directive` | string | The policy directive that was violated |
+| `effective-directive` | string | The effective directive that caused the violation |
+| `original-policy` | string | The full CSP policy string |
+| `blocked-uri` | string | URI of the resource that was blocked |
+| `status-code` | int | HTTP status code of the document |
+| `source-file` | string | Source file where the violation occurred |
+| `line-number` | int | Line number in the source file |
+| `column-number` | int | Column number in the source file |
+
+All fields are optional — browsers may send partial reports. The server logs whichever fields are present. String fields (`document-uri`, `violated-directive`, `blocked-uri`, `source-file`) are silently truncated to prevent oversized log entries (URIs to 2048 chars, directives to 512 chars).
+
+**Response 204:** No Content — report logged successfully (empty body)
+
+**Response 400:** Failed to read body, invalid JSON body
+
+```json
+{"error": "invalid JSON body"}
+```
+
+**Response 415:** Unsupported Media Type — Content-Type is neither `application/csp-report` nor `application/json`
+
+```json
+{"error": "unsupported content type"}
+```
+
+**Response 429:** Per-IP rate limit exceeded
+
+```json
+{"error": "rate limit exceeded", "retry_after": 1}
+```
+
+Includes `Retry-After` header with seconds until next allowed request.
+
+**CSP header integration:**
+
+The server's `SecurityHeadersMiddleware` sets a `Content-Security-Policy` response header on all responses that includes `report-uri /api/csp-report`. This causes browsers to automatically POST violation reports to this endpoint when a CSP rule is violated.
+
+---
+
+### Notes
+
+- Both endpoints are public (no auth required) — this is intentional so errors during auth bootstrap and browser-initiated CSP reports are captured
+- Body size limits differ: client-errors uses 16 KB (via `MaxBytesReader` which causes decode errors), CSP reports use 10 KB (via `io.LimitReader` which silently truncates)
+- Client error validation rejects empty/missing required fields (`type`, `message`) with 400; CSP reports have no required fields (all optional per browser behavior)
+- CSP report Content-Type validation is strict: only `application/csp-report` and `application/json` are accepted (415 for anything else); client errors rely on JSON decode failing for non-JSON
+- Rate limiters are per-IP using `RemoteAddr` only (`X-Forwarded-For` not trusted to prevent spoofing)
+- Rate limiter entries are cleaned up in a background goroutine: stale entries (no requests for 10 minutes) evicted every 5 minutes
+- Different IPs get independent rate-limit buckets — one client being rate-limited does not affect others
+
 ## Rate Limiting
 
-Per-IP token bucket rate limiting applied to all API endpoints (except `/health` and `/api/health`).
+Per-IP token bucket rate limiting applied to all API endpoints (except `/health`, `/api/health`, `/api/client-errors`, and `/api/csp-report`).
 
 | Operation Type | Rate | Burst |
 |---------------|------|-------|
@@ -2256,6 +2412,7 @@ Per-IP token bucket rate limiting applied to all API endpoints (except `/health`
 
 - Stale entries evicted after 10 minutes of inactivity (cleanup every 5 minutes)
 - Returns `429 Too Many Requests` with `Retry-After` header
+- `/api/client-errors` and `/api/csp-report` are excluded from this global limiter — they use dedicated per-endpoint rate limiters (see [Client Error & CSP Reporting](#client-error--csp-reporting))
 
 ## Error Codes
 
