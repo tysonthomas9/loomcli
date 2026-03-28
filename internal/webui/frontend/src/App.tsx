@@ -51,6 +51,7 @@ import {
   WorkspaceSwitcher,
   CreateIssueModal,
   CreateWorkspaceModal,
+  UserMenu,
 } from "@/components";
 import { SearchTermProvider } from "@/contexts/SearchTermContext";
 import type { BlockedInfo } from "@/components/KanbanBoard";
@@ -934,6 +935,7 @@ function App() {
 
   const headerActions = (
     <div className={styles.headerActions}>
+      <UserMenu />
       <ThemeToggle theme={theme} onToggle={toggleTheme} />
       <ConnectionStatus
         state={connectionState}

@@ -175,6 +175,19 @@ vi.mock("@/api", async (importOriginal) => {
   };
 });
 
+// Mock AuthContext so UserMenu can call useAuth() outside of a provider
+vi.mock("@/contexts/AuthContext", () => ({
+  useAuth: vi.fn(() => ({
+    mode: "none" as const,
+    user: null,
+    isLoading: false,
+    isAuthenticated: true,
+    authServiceDown: false,
+    signIn: vi.fn(),
+    signOut: vi.fn(),
+  })),
+}));
+
 // Mock GraphView to avoid ResizeObserver issues in jsdom
 vi.mock("@/components/GraphView", () => ({
   GraphView: ({ issues }: { issues: unknown[] }) => (
