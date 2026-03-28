@@ -369,10 +369,16 @@ function App() {
     updateIssueDetails,
   } = useIssueDetail(workspaceId);
 
-  // Previous view state for issue-detail back navigation.
-  // When on the issue route, the query-param view is the "previous" view.
+  // Previous view state for back/escape navigation.
+  // Tracks the last "content" view (excludes issue-detail, terminal, settings)
+  // so that escape from terminal and back from issue-detail return to the right place.
   const previousViewRef = useRef<ViewMode>("kanban");
-  if (!routeIssueId && activeViewFromParams !== "issue-detail") {
+  if (
+    !routeIssueId &&
+    activeViewFromParams !== "issue-detail" &&
+    activeViewFromParams !== "terminal" &&
+    activeViewFromParams !== "settings"
+  ) {
     previousViewRef.current = activeViewFromParams;
   }
   const previousView = previousViewRef.current;
