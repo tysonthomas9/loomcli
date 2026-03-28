@@ -88,6 +88,104 @@ describe("ResizeDivider", () => {
     });
   });
 
+  describe("unmount during drag", () => {
+    it("releases pointer capture on unmount during active drag", () => {
+      const { unmount } = render(
+        <ResizeDivider
+          onDragDelta={vi.fn()}
+          onDoubleClick={vi.fn()}
+          ratio={0.5}
+        />,
+      );
+
+      const divider = screen.getByRole("separator");
+      const releasePointerCapture = vi.fn();
+      divider.releasePointerCapture = releasePointerCapture;
+      divider.setPointerCapture = vi.fn();
+
+      fireEvent.pointerDown(divider, { pointerId: 42, clientY: 100 });
+
+      unmount();
+
+      expect(releasePointerCapture).toHaveBeenCalledTimes(1);
+      expect(releasePointerCapture).toHaveBeenCalledWith(42);
+    });
+
+    it("does not release pointer capture on unmount when not dragging", () => {
+      const { unmount } = render(
+        <ResizeDivider
+          onDragDelta={vi.fn()}
+          onDoubleClick={vi.fn()}
+          ratio={0.5}
+        />,
+      );
+
+      const divider = screen.getByRole("separator");
+      const releasePointerCapture = vi.fn();
+      divider.releasePointerCapture = releasePointerCapture;
+
+      unmount();
+
+      expect(releasePointerCapture).not.toHaveBeenCalled();
+    });
+
+    it("clears pointer capture state after pointerUp so cleanup does not double-release", () => {
+      const { unmount } = render(
+        <ResizeDivider
+          onDragDelta={vi.fn()}
+          onDoubleClick={vi.fn()}
+          ratio={0.5}
+        />,
+      );
+
+      const divider = screen.getByRole("separator");
+      const releasePointerCapture = vi.fn();
+      divider.releasePointerCapture = releasePointerCapture;
+      divider.setPointerCapture = vi.fn();
+
+      fireEvent.pointerDown(divider, { pointerId: 42, clientY: 100 });
+      fireEvent.pointerUp(divider, { pointerId: 42, clientY: 120 });
+
+      expect(releasePointerCapture).toHaveBeenCalledTimes(1);
+
+      unmount();
+
+      // Should not have been called again during cleanup
+      expect(releasePointerCapture).toHaveBeenCalledTimes(1);
+    });
+
+    it("data-dragging attribute is false after unmount and remount", () => {
+      const { unmount } = render(
+        <ResizeDivider
+          onDragDelta={vi.fn()}
+          onDoubleClick={vi.fn()}
+          ratio={0.5}
+        />,
+      );
+
+      const divider = screen.getByRole("separator");
+      divider.setPointerCapture = vi.fn();
+      divider.releasePointerCapture = vi.fn();
+
+      fireEvent.pointerDown(divider, { pointerId: 42, clientY: 100 });
+      expect(divider).toHaveAttribute("data-dragging", "true");
+
+      unmount();
+
+      // Remount
+      render(
+        <ResizeDivider
+          onDragDelta={vi.fn()}
+          onDoubleClick={vi.fn()}
+          ratio={0.5}
+        />,
+      );
+
+      const newDivider = screen.getByRole("separator");
+      expect(newDivider).toHaveAttribute("data-dragging", "false");
+    });
+  });
+
   describe("keyboard support", () => {
     it("ArrowUp triggers onDragDelta(-20)", () => {
       const onDragDelta = vi.fn();
