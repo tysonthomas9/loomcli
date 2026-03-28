@@ -162,6 +162,7 @@ export interface WorkspaceListResponse {
     name: string;
     path: string;
     active: boolean;
+    pool?: { active: number; idle: number; total: number };
   }>;
 }
 
@@ -472,6 +473,137 @@ export async function closeTestIssueInWorkspace(
     if (!response.ok && response.status !== 404) {
       console.warn(
         `Failed to close issue ${id} in workspace ${workspaceId}: ${response.status}`,
+      );
+    }
+  } catch {
+    // Ignore network errors during cleanup
+  }
+}
+
+/**
+ * Create a test issue in a workspace with extended field support.
+ */
+export async function createWsIssue(
+  wsId: string,
+  title: string,
+  options?: {
+    priority?: number;
+    description?: string;
+    labels?: string[];
+    assignee?: string;
+    owner?: string;
+  },
+): Promise<string> {
+  const body: Record<string, unknown> = {
+    title,
+    issue_type: "task",
+    priority: options?.priority ?? 2,
+  };
+  if (options?.description) body.description = options.description;
+  if (options?.labels) body.labels = options.labels;
+  if (options?.assignee) body.assignee = options.assignee;
+  if (options?.owner) body.owner = options.owner;
+
+  const response = await fetch(
+    `${BASE_URL}/api/workspaces/${encodeURIComponent(wsId)}/issues`,
+    {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(body),
+    },
+  );
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(
+      `Failed to create issue in workspace ${wsId}: ${response.status} - ${text}`,
+    );
+  }
+
+  const result = await response.json();
+  if (!result.success) {
+    throw new Error(`API error creating issue: ${result.error}`);
+  }
+
+  return result.data.id;
+}
+
+/**
+ * Get an issue by ID in a workspace. Returns the full issue data.
+ */
+export async function getWsIssue(
+  wsId: string,
+  id: string,
+): Promise<Record<string, unknown>> {
+  const response = await fetch(
+    `${BASE_URL}/api/workspaces/${encodeURIComponent(wsId)}/issues/${encodeURIComponent(id)}`,
+    {
+      headers: authHeaders(),
+    },
+  );
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(
+      `Failed to get issue ${id} in workspace ${wsId}: ${response.status} - ${text}`,
+    );
+  }
+
+  const result = await response.json();
+  if (!result.success) {
+    throw new Error(`API error getting issue: ${result.error}`);
+  }
+
+  return result.data;
+}
+
+/**
+ * Move an issue to another workspace.
+ * Returns the full response body (does NOT throw on non-success — callers assert error cases).
+ */
+export async function moveWsIssue(
+  wsId: string,
+  id: string,
+  targetWorkspace: string,
+): Promise<{
+  status: number;
+  body: {
+    success: boolean;
+    data?: { source_id: string; target_id: string; warnings?: string[] };
+    error?: string;
+  };
+}> {
+  const response = await fetch(
+    `${BASE_URL}/api/workspaces/${encodeURIComponent(wsId)}/issues/${encodeURIComponent(id)}/move`,
+    {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ target_workspace: targetWorkspace }),
+    },
+  );
+
+  const body = await response.json();
+  return { status: response.status, body };
+}
+
+/**
+ * Delete an issue in a workspace. Swallows 404 errors for safe cleanup.
+ */
+export async function deleteWsIssue(
+  wsId: string,
+  id: string,
+): Promise<void> {
+  try {
+    const response = await fetch(
+      `${BASE_URL}/api/workspaces/${encodeURIComponent(wsId)}/issues/${encodeURIComponent(id)}`,
+      {
+        method: "DELETE",
+        headers: authHeaders(),
+      },
+    );
+    if (!response.ok && response.status !== 404) {
+      console.warn(
+        `Failed to delete issue ${id} in workspace ${wsId}: ${response.status}`,
       );
     }
   } catch {
