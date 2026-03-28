@@ -8,6 +8,7 @@ import { IssueDetailPanel, ToastContainer } from "@/components";
 import { AgentsSidebar } from "@/components/AgentsSidebar";
 import { WorkspaceTree } from "@/components/WorkspaceTree";
 import { SplitDetailSummary } from "@/components/IssueDetailPanel/SplitDetailSummary";
+import { PasteConfirmDialog } from "@/components/TerminalView/PasteConfirmDialog";
 import { SessionNamePrompt } from "@/components/TerminalView/SessionNamePrompt";
 import { WelcomeBanner } from "@/components/TerminalView/WelcomeBanner";
 import { HelpPopover } from "@/components/TerminalView/HelpPopover";
@@ -24,7 +25,7 @@ import type { AgentContextValue } from "@/hooks";
 import type { WorkspaceContextValue } from "@/hooks";
 import type { IssueDetails, Priority, Issue } from "@/types";
 import type { Status } from "@/types/status";
-import { useState } from "react";
+import { useState, useCallback } from "react";
 
 /**
  * Valid priority values.
@@ -568,5 +569,73 @@ export function SplitDetailSummaryFixture(): JSX.Element {
         />
       </div>
     </WorkspaceContext.Provider>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// PasteConfirmDialogFixture
+// URL: /test/paste-confirm
+// ---------------------------------------------------------------------------
+
+function generateLines(count: number): string {
+  return (
+    Array.from({ length: count }, (_, i) => `line${i + 1}`).join("\n") + "\n"
+  );
+}
+
+export function PasteConfirmDialogFixture(): JSX.Element {
+  const [isOpen, setIsOpen] = useState(false);
+  const [text, setText] = useState("");
+  const [confirmCount, setConfirmCount] = useState(0);
+  const [cancelCount, setCancelCount] = useState(0);
+
+  const openWith = useCallback((lineCount: number) => {
+    setText(generateLines(lineCount));
+    setIsOpen(true);
+  }, []);
+
+  const handleConfirm = useCallback(() => {
+    setConfirmCount((c) => c + 1);
+    setIsOpen(false);
+  }, []);
+
+  const handleCancel = useCallback(() => {
+    setCancelCount((c) => c + 1);
+    setIsOpen(false);
+  }, []);
+
+  return (
+    <div data-testid="fixture-root" style={FIXTURE_ROOT_STYLE}>
+      <h1>Paste Confirm Dialog Test Fixture</h1>
+      <div style={{ display: "flex", gap: "8px", marginBottom: "1rem" }}>
+        <button data-testid="open-2-lines" onClick={() => openWith(2)}>
+          Open 2 Lines
+        </button>
+        <button data-testid="open-10-lines" onClick={() => openWith(10)}>
+          Open 10 Lines
+        </button>
+        <button data-testid="open-15-lines" onClick={() => openWith(15)}>
+          Open 15 Lines
+        </button>
+        <button data-testid="open-25-lines" onClick={() => openWith(25)}>
+          Open 25 Lines
+        </button>
+        <button data-testid="open-11-lines" onClick={() => openWith(11)}>
+          Open 11 Lines
+        </button>
+      </div>
+      <div style={{ marginBottom: "1rem" }}>
+        <span>Confirm count: </span>
+        <span data-testid="confirm-count">{confirmCount}</span>
+        <span style={{ marginLeft: "1rem" }}>Cancel count: </span>
+        <span data-testid="cancel-count">{cancelCount}</span>
+      </div>
+      <PasteConfirmDialog
+        isOpen={isOpen}
+        text={text}
+        onConfirm={handleConfirm}
+        onCancel={handleCancel}
+      />
+    </div>
   );
 }

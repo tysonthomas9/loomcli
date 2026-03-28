@@ -32,6 +32,7 @@ const devRoutes = import.meta.env.DEV
             AgentsSidebarFixture,
             WorkspaceTreeFixture,
             SplitDetailSummaryFixture,
+            PasteConfirmDialogFixture,
           } = await import("@/TestFixtures");
           return {
             Component: () => {
@@ -53,6 +54,8 @@ const devRoutes = import.meta.env.DEV
                 return <WorkspaceTreeFixture />;
               if (path === "/test/split-detail-summary")
                 return <SplitDetailSummaryFixture />;
+              if (path === "/test/paste-confirm")
+                return <PasteConfirmDialogFixture />;
               return <NotFound />;
             },
           };

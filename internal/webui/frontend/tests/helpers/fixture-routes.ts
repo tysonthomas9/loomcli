@@ -54,6 +54,10 @@ export function workspaceTreeUrl(): string {
   return "/test/workspace-tree";
 }
 
+export function pasteConfirmUrl(): string {
+  return "/test/paste-confirm";
+}
+
 export function splitDetailSummaryUrl(opts: {
   id?: string;
   title?: string;
