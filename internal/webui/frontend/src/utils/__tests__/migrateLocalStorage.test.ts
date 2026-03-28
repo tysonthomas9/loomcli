@@ -186,6 +186,52 @@ describe("migrateLocalStorage", () => {
         expect.stringContaining("Quota exceeded"),
       );
     });
+
+    it("does not lose data when concurrent removal causes re-read to return null", () => {
+      localStorage.setItem("theme-preference", "dark");
+
+      const originalSetItem = Storage.prototype.setItem;
+      const originalGetItem = Storage.prototype.getItem;
+      let setCallCount = 0;
+      const getCallCounts: Record<string, number> = {};
+
+      vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (
+        this: Storage,
+        key: string,
+      ) {
+        getCallCounts[key] = (getCallCounts[key] || 0) + 1;
+        // On second getItem call for the V5 key, simulate concurrent removal
+        if (key === "theme-preference" && getCallCounts[key] > 1) {
+          return null;
+        }
+        return originalGetItem.call(this, key);
+      });
+
+      vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (
+        this: Storage,
+        key: string,
+        value: string,
+      ) {
+        setCallCount++;
+        // Fail on first setItem call (the migration write to V6 key)
+        if (setCallCount === 1) {
+          throw new DOMException(
+            "The quota has been exceeded.",
+            "QuotaExceededError",
+          );
+        }
+        originalSetItem.call(this, key, value);
+      });
+
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      migrateLocalStorage();
+
+      // Data must NOT be silently lost — V6 key should have the original value
+      expect(localStorage.getItem("cortex:theme")).toBe("dark");
+      // V5 key should be removed
+      expect(localStorage.getItem("theme-preference")).toBeNull();
+    });
   });
 
   describe("localStorage unavailable", () => {
