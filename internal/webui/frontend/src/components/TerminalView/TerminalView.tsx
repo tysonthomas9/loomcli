@@ -234,9 +234,12 @@ export function TerminalView({
     if (appliedRestoreRef.current || isRestoring || !restoredTabId) return;
     if (!initializedRef.current || tabs.length === 0) return;
     appliedRestoreRef.current = true;
+    // If useTabInit already set the correct tab (from sessionStorage), skip
+    // the redundant setActiveTabId to avoid a flicker-causing re-render.
+    if (restoredTabId === activeTabId) return;
     const match = tabs.find((t) => t.id === restoredTabId);
     if (match) setActiveTabId(restoredTabId);
-  }, [restoredTabId, isRestoring, tabs]);
+  }, [restoredTabId, isRestoring, tabs, activeTabId]);
 
   // Persist active tab to sessionStorage and server (debounced)
   const patchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
