@@ -927,6 +927,107 @@ func TestValidateProjectConfig_AgentRepoGroupsInvalidName(t *testing.T) {
 	}
 }
 
+func TestValidateProjectConfig_DuplicateParent(t *testing.T) {
+	dc := &DaemonConfig{
+		Roles: make(map[string]RoleConfig),
+		Agents: []AgentEntry{
+			{Worktree: "falcon", Role: "task", Parent: "loomcli-abc"},
+			{Worktree: "nova", Role: "task", Parent: "loomcli-abc"},
+		},
+	}
+
+	r := ValidateProjectConfig(dc, t.TempDir())
+	if !r.HasErrors() {
+		t.Error("expected error for duplicate parent")
+	}
+	found := false
+	for _, issue := range r.Issues {
+		if issue.Field == "agents[1].parent" &&
+			strings.Contains(issue.Message, "loomcli-abc") &&
+			strings.Contains(issue.Message, "falcon") &&
+			strings.Contains(issue.Message, "does not differentiate by role") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected duplicate parent error with worktree name and role explanation, got: %s", r.FormatIssues())
+	}
+}
+
+func TestValidateProjectConfig_DuplicateParentDifferentRoles(t *testing.T) {
+	dc := &DaemonConfig{
+		Roles: make(map[string]RoleConfig),
+		Agents: []AgentEntry{
+			{Worktree: "falcon", Role: "plan", Parent: "loomcli-abc"},
+			{Worktree: "nova", Role: "task", Parent: "loomcli-abc"},
+		},
+	}
+
+	r := ValidateProjectConfig(dc, t.TempDir())
+	if !r.HasErrors() {
+		t.Error("expected error for duplicate parent even with different roles")
+	}
+	found := false
+	for _, issue := range r.Issues {
+		if issue.Field == "agents[1].parent" && strings.Contains(issue.Message, "loomcli-abc") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected duplicate parent error, got: %s", r.FormatIssues())
+	}
+}
+
+func TestValidateProjectConfig_SameRoleDifferentParents(t *testing.T) {
+	dc := &DaemonConfig{
+		Roles: make(map[string]RoleConfig),
+		Agents: []AgentEntry{
+			{Worktree: "falcon", Role: "task", Parent: "loomcli-abc"},
+			{Worktree: "nova", Role: "task", Parent: "loomcli-xyz"},
+		},
+	}
+
+	r := ValidateProjectConfig(dc, t.TempDir())
+	for _, issue := range r.Issues {
+		if strings.Contains(issue.Field, ".parent") && issue.Severity == "error" {
+			t.Errorf("unexpected parent error for different parents: %s", issue.Message)
+		}
+	}
+}
+
+func TestValidateProjectConfig_EmptyParentNotDuplicate(t *testing.T) {
+	dc := &DaemonConfig{
+		Roles: make(map[string]RoleConfig),
+		Agents: []AgentEntry{
+			{Worktree: "falcon", Role: "plan"},
+			{Worktree: "nova", Role: "task"},
+		},
+	}
+
+	r := ValidateProjectConfig(dc, t.TempDir())
+	for _, issue := range r.Issues {
+		if strings.Contains(issue.Field, ".parent") && issue.Severity == "error" {
+			t.Errorf("unexpected parent error for empty parents: %s", issue.Message)
+		}
+	}
+}
+
+func TestValidateProjectConfig_SingleAgentWithParent(t *testing.T) {
+	dc := &DaemonConfig{
+		Roles: make(map[string]RoleConfig),
+		Agents: []AgentEntry{
+			{Worktree: "falcon", Role: "task", Parent: "loomcli-abc"},
+		},
+	}
+
+	r := ValidateProjectConfig(dc, t.TempDir())
+	for _, issue := range r.Issues {
+		if strings.Contains(issue.Field, ".parent") && issue.Severity == "error" {
+			t.Errorf("unexpected parent error for single agent: %s", issue.Message)
+		}
+	}
+}
+
 func TestIsValidGroupName(t *testing.T) {
 	tests := []struct {
 		name  string
