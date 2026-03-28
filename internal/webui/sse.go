@@ -331,10 +331,18 @@ func parseLastSince(r *http.Request) int64 {
 // handleSSE creates an HTTP handler for the SSE endpoint.
 // getMutationsSince takes a workspace ID and timestamp, returning mutations
 // only from that workspace's daemon for reconnection catch-up.
-func handleSSE(hub *SSEHub, getMutationsSince func(wsID string, since int64) []rpc.MutationEvent) http.HandlerFunc {
+// sseAuth validates opaque tokens when non-nil (external auth mode);
+// when nil (open mode), connections are allowed without authentication.
+func handleSSE(hub *SSEHub, getMutationsSince func(wsID string, since int64) []rpc.MutationEvent, sseAuth *sseTokenStore) http.HandlerFunc {
 	var clientIDCounter int64
 
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Handler-level auth: validate opaque token before streaming.
+		// Matches the terminalAuth pattern in handleTerminalWS.
+		if !validateSSEAuth(w, r, sseAuth) {
+			return
+		}
+
 		// Thread-safe client ID generation
 		clientID := atomic.AddInt64(&clientIDCounter, 1)
 		// Set SSE headers

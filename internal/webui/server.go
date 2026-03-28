@@ -238,6 +238,17 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		}
 	}
 
+	// Initialize SSE token exchange store (external auth mode only).
+	// When ExtAuthURL is set, SSE connections require opaque tokens instead of JWTs.
+	var sseTokens *sseTokenStore
+	if config.ExtAuthURL != "" {
+		var sseErr error
+		sseTokens, sseErr = newSSETokenStore()
+		if sseErr != nil {
+			slog.Warn("failed to initialize SSE token store", "err", sseErr)
+		}
+	}
+
 	// Fleet store registry and JWT config for worker registration.
 	var fleetRegistry *fleet.StoreRegistry
 	var tokenCfg *TokenConfig
@@ -361,7 +372,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 
 	// Create HTTP server and register routes (allowedOrigins: nil = same-origin only)
 	mux := http.NewServeMux()
-	clientErrLimiter, cspLimiter := setupRoutes(mux, pool, multiPool, hub, getMutationsSince, termMgr, termAuth, fleetRegistry, tokenCfg, corsConfig.AllowedOrigins, fleetRegCfg, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL, config.GitOps, config.FileOps, tabMetaStore, issueTabStore, config.WorkspaceConfigFn, wrappedDeleteFn, config.SetDefaultWorkspaceFn, config.ClearDefaultWorkspaceFn, wrappedCreateFn, config.BackendOps, sessionHistoryStore, config.SessionsStore, wsExistsFn, initialWorkspaceID, config.WorkspaceConfigByIDFn)
+	clientErrLimiter, cspLimiter := setupRoutes(mux, pool, multiPool, hub, getMutationsSince, termMgr, termAuth, fleetRegistry, tokenCfg, corsConfig.AllowedOrigins, fleetRegCfg, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL, config.GitOps, config.FileOps, tabMetaStore, issueTabStore, config.WorkspaceConfigFn, wrappedDeleteFn, config.SetDefaultWorkspaceFn, config.ClearDefaultWorkspaceFn, wrappedCreateFn, config.BackendOps, sessionHistoryStore, config.SessionsStore, wsExistsFn, initialWorkspaceID, config.WorkspaceConfigByIDFn, sseTokens)
 	defer clientErrLimiter.stop()
 	defer cspLimiter.stop()
 
@@ -438,6 +449,11 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	// Stop terminal auth cleanup goroutine
 	if termAuth != nil {
 		termAuth.Stop()
+	}
+
+	// Stop SSE token store cleanup goroutine
+	if sseTokens != nil {
+		sseTokens.Stop()
 	}
 
 	// Stop terminal manager (kill tmux sessions and close PTYs)

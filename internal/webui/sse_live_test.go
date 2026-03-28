@@ -192,7 +192,7 @@ func parseMutationPayload(data string) (*MutationPayload, error) {
 func newLiveSSEServer(t *testing.T, hub *SSEHub, getMutationsSince func(wsID string, since int64) []rpc.MutationEvent) *httptest.Server {
 	t.Helper()
 
-	handler := handleSSE(hub, getMutationsSince)
+	handler := handleSSE(hub, getMutationsSince, nil)
 	wsMux := http.NewServeMux()
 	wsMux.HandleFunc("GET /api/workspaces/{ws}/events", handler)
 	// Wrap with a simple workspace existence check that always passes in tests

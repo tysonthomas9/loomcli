@@ -315,7 +315,7 @@ func TestHandleSSE_Headers(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	handler := handleSSE(hub, nil)
+	handler := handleSSE(hub, nil, nil)
 
 	// Create a test request with cancelable context
 	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
@@ -404,7 +404,7 @@ func TestHandleSSE_ParsesLastEventID(t *testing.T) {
 				return nil
 			}
 
-			handler := handleSSE(hub, getMutations)
+			handler := handleSSE(hub, getMutations, nil)
 
 			url := "/api/workspaces/test-ws/events"
 			if tt.sinceParam != "" {
@@ -442,7 +442,7 @@ func TestHandleSSE_SendsConnectedEvent(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	handler := handleSSE(hub, nil)
+	handler := handleSSE(hub, nil, nil)
 
 	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil)
@@ -486,7 +486,7 @@ func TestHandleSSE_CatchUpEvents(t *testing.T) {
 		}
 	}
 
-	handler := handleSSE(hub, getMutations)
+	handler := handleSSE(hub, getMutations, nil)
 
 	// Connect with a since timestamp to trigger catch-up
 	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
@@ -1024,7 +1024,7 @@ func TestHandleSSE_SendsRetryField(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	handler := handleSSE(hub, nil)
+	handler := handleSSE(hub, nil, nil)
 
 	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil)
@@ -1064,7 +1064,7 @@ func TestHandleSSE_HeartbeatSent(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	handler := handleSSE(hub, nil)
+	handler := handleSSE(hub, nil, nil)
 
 	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil)
@@ -1228,7 +1228,7 @@ func TestHandleSSE_ClientDisconnectDuringCatchUp(t *testing.T) {
 		return events
 	}
 
-	handler := handleSSE(hub, getMutations)
+	handler := handleSSE(hub, getMutations, nil)
 
 	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events?since=1000", nil)
@@ -1268,7 +1268,7 @@ func TestHandleSSE_ContextAlreadyCancelled(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	handler := handleSSE(hub, nil)
+	handler := handleSSE(hub, nil, nil)
 
 	// Create request with already-cancelled context
 	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
@@ -1306,7 +1306,7 @@ func TestHandleSSE_NoCatchUpWhenGetMutationsSinceNil(t *testing.T) {
 	defer hub.Stop()
 
 	// Pass nil for getMutationsSince, but connect with since=1000
-	handler := handleSSE(hub, nil)
+	handler := handleSSE(hub, nil, nil)
 
 	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
 	req := httptest.NewRequest(http.MethodGet, "/api/events?since=1000", nil)
@@ -1344,7 +1344,7 @@ func TestHandleSSE_NoCatchUpWhenSinceZero(t *testing.T) {
 	}
 
 	// Connect WITHOUT Last-Event-ID and without since param
-	handler := handleSSE(hub, getMutations)
+	handler := handleSSE(hub, getMutations, nil)
 
 	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil)
@@ -1406,7 +1406,7 @@ func TestHandleSSE_WriteDeadlineDisabled(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	handler := handleSSE(hub, nil)
+	handler := handleSSE(hub, nil, nil)
 
 	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil)
@@ -1438,7 +1438,7 @@ func TestHandleSSE_StreamsMutationFromHub(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	handler := handleSSE(hub, nil)
+	handler := handleSSE(hub, nil, nil)
 
 	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil)
@@ -1492,7 +1492,7 @@ func TestHandleSSE_SendChannelClosed(t *testing.T) {
 	hub := NewSSEHub()
 	go hub.Run()
 
-	handler := handleSSE(hub, nil)
+	handler := handleSSE(hub, nil, nil)
 
 	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
 	defer cancel()
@@ -1765,7 +1765,7 @@ func TestHandleSSE_ParsesSourceReposParam(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	handler := handleSSE(hub, nil)
+	handler := handleSSE(hub, nil, nil)
 
 	// Connect with source_repos=repo-a,repo-b
 	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
@@ -1832,7 +1832,7 @@ func TestHandleSSE_SourceReposParamEmpty(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	handler := handleSSE(hub, nil)
+	handler := handleSSE(hub, nil, nil)
 
 	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
 	defer cancel()
@@ -1881,7 +1881,7 @@ func TestHandleSSE_SourceReposTrimsWhitespace(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	handler := handleSSE(hub, nil)
+	handler := handleSSE(hub, nil, nil)
 
 	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
 	defer cancel()
@@ -1944,7 +1944,7 @@ func TestHandleSSE_CatchUpFiltersSourceRepos(t *testing.T) {
 		}
 	}
 
-	handler := handleSSE(hub, getMutationsSince)
+	handler := handleSSE(hub, getMutationsSince, nil)
 
 	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
 	defer cancel()
@@ -2267,7 +2267,7 @@ func TestHandleSSE_EmptyWorkspaceLogsWarning(t *testing.T) {
 	log.SetOutput(syncWriter{&logBuf, &mu})
 	t.Cleanup(func() { log.SetOutput(origOutput) })
 
-	handler := handleSSE(hub, nil)
+	handler := handleSSE(hub, nil, nil)
 
 	// Use context with NO workspace (empty string from WorkspaceFromContext)
 	ctx, cancel := context.WithCancel(context.Background())

@@ -226,6 +226,9 @@ func TestIsPublicRoute_WorkspaceScoped(t *testing.T) {
 		// Workspace-scoped config and events should be public
 		{"ws config GET", "GET", "/api/workspaces/ws1/config", true},
 		{"ws events GET", "GET", "/api/workspaces/ws1/events", true},
+
+		// SSE token exchange must NOT be public — requires JWT auth from ExtAuth middleware
+		{"ws events token GET - requires auth", "GET", "/api/workspaces/ws1/events/token", false},
 	}
 
 	for _, tt := range tests {
