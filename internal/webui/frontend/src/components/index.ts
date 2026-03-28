@@ -65,6 +65,7 @@ export * from "./WorkspaceBreadcrumb";
 export * from "./WorkspaceSwitcher";
 export * from "./WorkspaceTree";
 export * from "./AuthGate";
+export * from "./BootError";
 export * from "./DaemonUnavailableOverlay";
 export * from "./KeyboardCheatsheet";
 export * from "./LoginPage";
