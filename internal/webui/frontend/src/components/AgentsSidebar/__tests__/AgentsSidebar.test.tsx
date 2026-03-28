@@ -323,7 +323,9 @@ describe("AgentsSidebar", () => {
       render(<AgentsSidebar />);
 
       fireEvent.click(screen.getByRole("button", { name: /push all/i }));
-      fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
+      });
 
       expect(mockGitPushAll).toHaveBeenCalled();
 
@@ -371,7 +373,9 @@ describe("AgentsSidebar", () => {
       fireEvent.click(screen.getByRole("button", { name: /push all/i }));
       expect(screen.getByText("Push all branches?")).toBeInTheDocument();
 
-      fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
+      });
       expect(screen.queryByText("Push all branches?")).not.toBeInTheDocument();
 
       mockGitPushAll.mockReset();

@@ -6,7 +6,13 @@
  * Unit tests for CreateIssueModal component.
  */
 
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  act,
+} from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
@@ -184,18 +190,20 @@ describe("CreateIssueModal", () => {
       fireEvent.change(screen.getByTestId("create-issue-title"), {
         target: { value: "My new issue" },
       });
-      fireEvent.click(screen.getByTestId("create-issue-submit"));
-
-      await waitFor(() => {
-        expect(screen.getByTestId("create-issue-submit")).toHaveTextContent(
-          "Creating...",
-        );
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("create-issue-submit"));
       });
+
+      expect(screen.getByTestId("create-issue-submit")).toHaveTextContent(
+        "Creating...",
+      );
 
       expect(screen.getByTestId("create-issue-submit")).toBeDisabled();
 
       // Clean up
-      resolvePromise(MOCK_ISSUE);
+      await act(async () => {
+        resolvePromise(MOCK_ISSUE);
+      });
     });
   });
 

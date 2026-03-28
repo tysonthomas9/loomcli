@@ -6,7 +6,13 @@
  * Unit tests for App component.
  */
 
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  act,
+} from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
@@ -165,6 +171,7 @@ vi.mock("@/api", async (importOriginal) => {
     updateIssue: mockUpdateIssue,
     addComment: mockAddComment,
     closeIssue: mockCloseIssue,
+    getIssueEvents: vi.fn().mockImplementation(() => new Promise(() => {})),
   };
 });
 
@@ -209,6 +216,22 @@ vi.mock("@/components/FileExplorer", () => ({
 // Mock WorkspaceView to avoid lazy-loading issues in jsdom
 vi.mock("@/components/WorkspaceView", () => ({
   WorkspaceView: () => <div data-testid="workspace-view">Workspace View</div>,
+}));
+
+// Mock terminal API and tab persistence to prevent async operations from DefaultContent
+vi.mock("@/api/terminal", () => ({
+  deleteTabMetadata: vi.fn().mockImplementation(() => new Promise(() => {})),
+  scheduleSessionKill: vi.fn().mockImplementation(() => new Promise(() => {})),
+  listIssueSessions: vi.fn().mockImplementation(() => new Promise(() => {})),
+}));
+
+vi.mock("@/hooks/useIssueTabPersistence", () => ({
+  useIssueTabPersistence: vi.fn(() => ({
+    savedState: null,
+    isLoading: false,
+    saveTabs: vi.fn(),
+    clearTabs: vi.fn(),
+  })),
 }));
 
 // Create hoisted mock for useViewState to allow per-test control
@@ -673,7 +696,7 @@ describe("App", () => {
   });
 
   describe("success state", () => {
-    it("renders KanbanBoard with issues when data is loaded", () => {
+    it("renders KanbanBoard with issues when data is loaded", async () => {
       const issues = [
         createMockIssue({
           id: "issue-1",
@@ -694,7 +717,9 @@ describe("App", () => {
       const mockReturn = createMockUseIssuesReturn({ issues });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
-      render(<App />);
+      await act(async () => {
+        render(<App />);
+      });
 
       // SwimLaneBoard should render with status columns
       expect(screen.getByRole("heading", { name: "Open" })).toBeInTheDocument();

@@ -42,39 +42,46 @@ describe("useIssueSearch", () => {
 
   async function setupHook(
     mockIssues: Issue[] = testIssues,
-    shouldReject = false,
+    { shouldReject = false, pending = false } = {},
   ) {
     // Re-import after module reset to get fresh state
     const apiModule = await import("@/api");
     const hookModule = await import("../useIssueSearch");
     const mockGetKanbanIssues = vi.mocked(apiModule.getKanbanIssues);
 
-    if (shouldReject) {
+    if (pending) {
+      mockGetKanbanIssues.mockImplementation(() => new Promise(() => {}));
+    } else if (shouldReject) {
       mockGetKanbanIssues.mockRejectedValue(new Error("Network error"));
     } else {
       mockGetKanbanIssues.mockResolvedValue(mockIssues);
     }
 
-    const hookResult = renderHook(() => hookModule.useIssueSearch());
-    return { ...hookResult, mockGetKanbanIssues };
+    let hookResult: ReturnType<
+      typeof renderHook<ReturnType<typeof hookModule.useIssueSearch>>
+    >;
+    await act(async () => {
+      hookResult = renderHook(() => hookModule.useIssueSearch());
+    });
+    return { ...hookResult!, mockGetKanbanIssues };
   }
 
   describe("initial state", () => {
     it("starts in loading state", async () => {
-      const { result } = await setupHook();
+      const { result } = await setupHook(testIssues, { pending: true });
 
       // Initial state is loading
       expect(result.current.isLoading).toBe(true);
     });
 
     it("returns empty results initially", async () => {
-      const { result } = await setupHook();
+      const { result } = await setupHook(testIssues, { pending: true });
 
       expect(result.current.results).toEqual([]);
     });
 
     it("has empty query initially", async () => {
-      const { result } = await setupHook();
+      const { result } = await setupHook(testIssues, { pending: true });
 
       expect(result.current.query).toBe("");
     });
@@ -98,7 +105,7 @@ describe("useIssueSearch", () => {
     });
 
     it("sets isLoading to false even on API error", async () => {
-      const { result } = await setupHook([], true);
+      const { result } = await setupHook([], { shouldReject: true });
 
       await waitFor(() => {
         expect(result.current.isLoading).toBe(false);
@@ -106,7 +113,7 @@ describe("useIssueSearch", () => {
     });
 
     it("returns empty results on API error", async () => {
-      const { result } = await setupHook([], true);
+      const { result } = await setupHook([], { shouldReject: true });
 
       await waitFor(() => {
         expect(result.current.isLoading).toBe(false);

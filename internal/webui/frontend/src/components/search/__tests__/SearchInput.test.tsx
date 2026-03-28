@@ -6,7 +6,7 @@
  * Unit tests for SearchInput component.
  */
 
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import { createRef } from "react";
 import { describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom";
@@ -307,7 +307,7 @@ describe("SearchInput", () => {
       expect(handleClear).not.toHaveBeenCalled();
     });
 
-    it("prevents default on Escape when value exists", () => {
+    it("prevents default on Escape when value exists", async () => {
       render(<SearchInput defaultValue="query" />);
 
       const input = screen.getByTestId("search-input-field");
@@ -318,7 +318,9 @@ describe("SearchInput", () => {
       });
 
       const preventDefaultSpy = vi.spyOn(event, "preventDefault");
-      input.dispatchEvent(event);
+      await act(async () => {
+        input.dispatchEvent(event);
+      });
 
       expect(preventDefaultSpy).toHaveBeenCalled();
     });

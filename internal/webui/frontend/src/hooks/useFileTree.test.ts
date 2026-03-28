@@ -243,7 +243,7 @@ describe("useFileTree", () => {
   describe("filterText", () => {
     it("updates filterText immediately", () => {
       vi.useFakeTimers();
-      // With fake timers, the root load promise won't resolve, but we don't need it for this test
+      mockListDir.mockImplementation(() => new Promise(() => {}));
       const { result } = renderHook(() => useFileTree("test-ws-id", "agent-1"));
 
       act(() => {
@@ -256,6 +256,7 @@ describe("useFileTree", () => {
 
     it("debouncedFilterText updates after delay", () => {
       vi.useFakeTimers();
+      mockListDir.mockImplementation(() => new Promise(() => {}));
 
       const { result } = renderHook(() => useFileTree("test-ws-id", "agent-1"));
 

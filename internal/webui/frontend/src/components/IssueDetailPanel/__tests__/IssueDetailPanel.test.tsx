@@ -76,14 +76,14 @@ vi.mock("@/api", () => ({
   updateIssue: vi.fn(),
   addDependency: vi.fn(),
   removeDependency: vi.fn(),
-  getIssueEvents: vi.fn().mockResolvedValue([]),
+  getIssueEvents: vi.fn().mockImplementation(() => new Promise(() => {})),
 }));
 
 // Mock terminal API for cleanup verification
 vi.mock("@/api/terminal", () => ({
   deleteTabMetadata: mockDeleteTabMetadata,
   scheduleSessionKill: mockScheduleSessionKill,
-  listIssueSessions: vi.fn().mockResolvedValue({}),
+  listIssueSessions: vi.fn().mockImplementation(() => new Promise(() => {})),
 }));
 
 // Mock tab persistence hook for terminal tab restoration tests

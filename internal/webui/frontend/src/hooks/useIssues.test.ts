@@ -95,7 +95,7 @@ describe("useIssues", () => {
   describe("Hook initialization", () => {
     it("returns expected shape with all properties", async () => {
       const { result } = renderHook(() =>
-        useIssues({ workspaceId: "test-ws-id" }),
+        useIssues({ workspaceId: "test-ws-id", autoFetch: false }),
       );
 
       expect(result.current).toHaveProperty("issues");
@@ -343,7 +343,11 @@ describe("useIssues", () => {
   describe("SSE integration", () => {
     it("passes autoConnect option to useSSE", () => {
       renderHook(() =>
-        useIssues({ workspaceId: "test-ws-id", autoConnect: false }),
+        useIssues({
+          workspaceId: "test-ws-id",
+          autoConnect: false,
+          autoFetch: false,
+        }),
       );
 
       expect(useSSEModule.useSSE).toHaveBeenCalledWith(
@@ -352,7 +356,9 @@ describe("useIssues", () => {
     });
 
     it("uses autoConnect=true by default", () => {
-      renderHook(() => useIssues({ workspaceId: "test-ws-id" }));
+      renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id", autoFetch: false }),
+      );
 
       expect(useSSEModule.useSSE).toHaveBeenCalledWith(
         expect.objectContaining({ autoConnect: true }),
@@ -711,6 +717,9 @@ describe("useIssues", () => {
 
   describe("Hook options", () => {
     it("respects all default options", () => {
+      vi.mocked(issuesApi.getReadyIssues).mockImplementation(
+        () => new Promise(() => {}),
+      );
       renderHook(() => useIssues({ workspaceId: "test-ws-id" }));
 
       // Should auto-fetch
@@ -1739,12 +1748,15 @@ describe("useIssues", () => {
           useIssues({
             workspaceId: "test-ws-id",
             sourceRepos: ["repo-a", "repo-b"],
+            autoFetch: false,
           }),
         );
 
-        await waitFor(() => {
-          expect(result.current.issues).toHaveLength(1);
+        await act(async () => {
+          await result.current.refetch();
         });
+
+        expect(result.current.issues).toHaveLength(1);
 
         // Send a mutation with a matching source_repo
         act(() => {
@@ -1808,12 +1820,18 @@ describe("useIssues", () => {
         vi.mocked(issuesApi.getReadyIssues).mockResolvedValue(mockIssues);
 
         const { result } = renderHook(() =>
-          useIssues({ workspaceId: "test-ws-id", sourceRepos: ["repo-a"] }),
+          useIssues({
+            workspaceId: "test-ws-id",
+            sourceRepos: ["repo-a"],
+            autoFetch: false,
+          }),
         );
 
-        await waitFor(() => {
-          expect(result.current.issues).toHaveLength(1);
+        await act(async () => {
+          await result.current.refetch();
         });
+
+        expect(result.current.issues).toHaveLength(1);
 
         // Send a mutation without source_repo (legacy/unknown origin)
         act(() => {
@@ -1843,12 +1861,18 @@ describe("useIssues", () => {
         vi.mocked(issuesApi.getReadyIssues).mockResolvedValue(mockIssues);
 
         const { result } = renderHook(() =>
-          useIssues({ workspaceId: "test-ws-id", sourceRepos: [] }),
+          useIssues({
+            workspaceId: "test-ws-id",
+            sourceRepos: [],
+            autoFetch: false,
+          }),
         );
 
-        await waitFor(() => {
-          expect(result.current.issues).toHaveLength(1);
+        await act(async () => {
+          await result.current.refetch();
         });
+
+        expect(result.current.issues).toHaveLength(1);
 
         // Send a mutation with any source_repo - should pass through since filter is empty
         act(() => {

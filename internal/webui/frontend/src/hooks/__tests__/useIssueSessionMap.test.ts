@@ -11,6 +11,10 @@ vi.mock("../../api/terminal", () => ({
   listSessionsByIssue: vi.fn(),
 }));
 
+vi.mock("../useSSE", () => ({
+  useSSE: vi.fn(),
+}));
+
 describe("useIssueSessionMap", () => {
   beforeEach(() => {
     vi.clearAllMocks();

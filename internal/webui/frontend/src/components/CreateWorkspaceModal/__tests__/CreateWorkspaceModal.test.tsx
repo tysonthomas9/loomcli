@@ -6,7 +6,13 @@
  * Unit tests for CreateWorkspaceModal component.
  */
 
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  act,
+} from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
@@ -431,13 +437,13 @@ describe("CreateWorkspaceModal", () => {
       fireEvent.change(screen.getByTestId("create-workspace-clone-url"), {
         target: { value: "https://github.com/example/repo" },
       });
-      fireEvent.click(screen.getByTestId("create-workspace-submit"));
-
-      await waitFor(() => {
-        expect(screen.getByTestId("create-workspace-submit")).toHaveTextContent(
-          "Creating...",
-        );
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("create-workspace-submit"));
       });
+
+      expect(screen.getByTestId("create-workspace-submit")).toHaveTextContent(
+        "Creating...",
+      );
 
       expect(screen.getByTestId("create-workspace-submit")).toBeDisabled();
       expect(
@@ -445,7 +451,9 @@ describe("CreateWorkspaceModal", () => {
       ).toBeInTheDocument();
 
       // Clean up
-      resolvePromise(MOCK_WORKSPACE_DATA);
+      await act(async () => {
+        resolvePromise(MOCK_WORKSPACE_DATA);
+      });
     });
 
     it("does not show spinner before submission", () => {
