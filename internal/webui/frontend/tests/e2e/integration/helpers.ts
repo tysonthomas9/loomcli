@@ -354,3 +354,127 @@ export async function updateWorkspaceBackend(
     },
   );
 }
+
+// ---------------------------------------------------------------------------
+// Workspace-scoped issue API helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the active workspace UUID for use in workspace-scoped API paths.
+ * Calls GET /api/workspaces/active and returns the workspace ID.
+ */
+export async function resolveWorkspaceId(): Promise<string> {
+  const response = await fetch(`${BASE_URL}/api/workspaces/active`, {
+    headers: authHeaders(),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(
+      `Could not resolve workspace ID — is loom serve running? ${response.status}: ${text}`,
+    );
+  }
+  const body: WorkspaceResponse = await response.json();
+  if (!body.success || !body.data) {
+    throw new Error(
+      `Could not resolve workspace ID — unexpected response: ${JSON.stringify(body)}`,
+    );
+  }
+
+  // Use the active workspace's ID directly from the workspaces array
+  const defaultName = body.data.default_workspace;
+  const ws = body.data.workspaces?.find(
+    (w) => w.is_default || w.name === defaultName,
+  );
+  if (ws?.id) return ws.id;
+
+  // Fallback: use first workspace
+  if (body.data.workspaces?.length) return body.data.workspaces[0].id;
+
+  throw new Error("Could not resolve workspace ID — no workspaces found");
+}
+
+/**
+ * Create a test issue via workspace-scoped API.
+ */
+export async function createTestIssueInWorkspace(
+  workspaceId: string,
+  title: string,
+  options?: { priority?: number },
+): Promise<string> {
+  const response = await fetch(
+    `${BASE_URL}/api/workspaces/${encodeURIComponent(workspaceId)}/issues`,
+    {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        title,
+        issue_type: "task",
+        priority: options?.priority ?? 2,
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(
+      `Failed to create issue in workspace ${workspaceId}: ${response.status} - ${text}`,
+    );
+  }
+
+  const result = await response.json();
+  if (!result.success) {
+    throw new Error(`API error creating issue: ${result.error}`);
+  }
+
+  return result.data.id;
+}
+
+/**
+ * Update issue status via workspace-scoped API.
+ */
+export async function updateIssueStatusInWorkspace(
+  workspaceId: string,
+  id: string,
+  status: string,
+): Promise<void> {
+  const response = await fetch(
+    `${BASE_URL}/api/workspaces/${encodeURIComponent(workspaceId)}/issues/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ status }),
+    },
+  );
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(
+      `Failed to update issue ${id} in workspace ${workspaceId}: ${response.status} - ${text}`,
+    );
+  }
+}
+
+/**
+ * Close an issue via workspace-scoped API. Swallows 404.
+ */
+export async function closeTestIssueInWorkspace(
+  workspaceId: string,
+  id: string,
+): Promise<void> {
+  try {
+    const response = await fetch(
+      `${BASE_URL}/api/workspaces/${encodeURIComponent(workspaceId)}/issues/${encodeURIComponent(id)}/close`,
+      {
+        method: "POST",
+        headers: authHeaders(),
+      },
+    );
+    if (!response.ok && response.status !== 404) {
+      console.warn(
+        `Failed to close issue ${id} in workspace ${workspaceId}: ${response.status}`,
+      );
+    }
+  } catch {
+    // Ignore network errors during cleanup
+  }
+}
