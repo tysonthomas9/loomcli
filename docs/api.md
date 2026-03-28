@@ -769,6 +769,179 @@ WebSocket endpoint for terminal relay (tmux-backed).
   - Read limit: 32 KB per message
   - Default size: 80x24
 
+## Issue Tabs
+
+Issue tab state persistence endpoints. These endpoints manage the tab layout (which tabs are open, their order, and which is active) for an issue's detail panel. Tab state is Redis-backed with a 24-hour TTL, includes terminal session liveness validation on read, and broadcasts SSE events on mutation.
+
+All 3 endpoints require Redis. When the issue tab store is not configured (no Redis), the routes are not registered and requests return `404`.
+
+### Data Model: IssueTabState
+
+```json
+{
+  "issue_id": "loomcli-abc",
+  "tabs": [
+    {
+      "id": "details",
+      "type": "details",
+      "label": "Details",
+      "sort_order": 0
+    },
+    {
+      "id": "terminal-s1",
+      "type": "terminal",
+      "label": "Terminal 1",
+      "session_name": "s1",
+      "sort_order": 1
+    }
+  ],
+  "active_tab_id": "details",
+  "updated_at": "2026-03-22T10:00:00Z"
+}
+```
+
+**Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `issue_id` | string | Issue ID (from path parameter) |
+| `tabs` | array | Array of tab objects |
+| `tabs[].id` | string | Unique tab identifier (e.g., `"details"`, `"logs"`, `"terminal-session1"`) |
+| `tabs[].type` | string | Tab type: `"details"`, `"logs"`, or `"terminal"` |
+| `tabs[].label` | string | Display name |
+| `tabs[].session_name` | string | Tmux session name (only for `type="terminal"`, omitted otherwise) |
+| `tabs[].sort_order` | int | Tab ordering (lower = first) |
+| `active_tab_id` | string | ID of the currently selected tab |
+| `updated_at` | string | RFC 3339 timestamp (set automatically on save) |
+
+**Redis key:** `ws:{workspaceID}:issue:tabs:{issueId}` — stores a single JSON blob. Atomic read/write of the entire state.
+
+**TTL:** 24 hours, refreshed on every PUT.
+
+**Issue ID validation:** All endpoints validate `issueId` against regex `^[a-zA-Z0-9._-]+$` (allows dots for sub-issue IDs like `"loomcli-abc.1"`). Empty IDs are rejected with `400`.
+
+### `GET /api/issues/{issueId}/tabs`
+
+Retrieve the persisted tab state for an issue.
+
+- **Auth:** Required
+- **Path Parameters:**
+
+  | Param | Type | Required | Description |
+  |-------|------|----------|-------------|
+  | `issueId` | string | yes | Issue ID (alphanumeric, hyphens, underscores, dots) |
+
+- **Terminal Session Filtering:** If a TerminalManager is available, terminal-type tabs are cross-referenced against active tmux sessions. Tabs whose tmux session no longer exists are filtered out. If the active tab was removed during filtering, `active_tab_id` falls back to `"details"`. The filtered state is transparently saved back to Redis if any tabs were removed or the active tab changed. If the TerminalManager is nil or listing sessions fails, no filtering occurs — all tabs are returned as-is.
+
+- **Response `200 OK`** (no saved state):
+
+```json
+{"success": true}
+```
+
+  No `data` field is present when no state has been saved for this issue.
+
+- **Response `200 OK`** (with saved state):
+
+```json
+{
+  "success": true,
+  "data": {
+    "issue_id": "loomcli-abc",
+    "tabs": [
+      {"id": "details", "type": "details", "label": "Details", "sort_order": 0},
+      {"id": "terminal-s1", "type": "terminal", "label": "Terminal 1", "session_name": "s1", "sort_order": 1}
+    ],
+    "active_tab_id": "details",
+    "updated_at": "2026-03-22T10:00:00Z"
+  }
+}
+```
+
+- **Response `400`:** Invalid issue ID (empty or contains disallowed characters)
+- **Response `500`:** Redis get failure
+
+### `PUT /api/issues/{issueId}/tabs`
+
+Save or replace the full tab state for an issue.
+
+- **Auth:** Required
+- **Path Parameters:**
+
+  | Param | Type | Required | Description |
+  |-------|------|----------|-------------|
+  | `issueId` | string | yes | Issue ID (alphanumeric, hyphens, underscores, dots) |
+
+- **Request Body:**
+
+```json
+{
+  "tabs": [
+    {
+      "id": "details",
+      "type": "details",
+      "label": "Details",
+      "sort_order": 0
+    },
+    {
+      "id": "terminal-s1",
+      "type": "terminal",
+      "label": "Terminal 1",
+      "session_name": "s1",
+      "sort_order": 1
+    }
+  ],
+  "active_tab_id": "details"
+}
+```
+
+  - `tabs`: array of tab objects (can be empty)
+  - `active_tab_id`: which tab is currently selected
+  - `issue_id` is taken from the path parameter, not the request body
+  - `updated_at` is set automatically to current UTC time
+  - Request body limit: 1 MB
+
+- **Behavior:** Saves the full tab state atomically (replaces any existing state). Sets a 24-hour TTL on the Redis key. Broadcasts an `issue_tabs` SSE event with the issue ID, workspace ID, and current timestamp.
+
+- **Response `200 OK`:**
+
+```json
+{
+  "success": true,
+  "data": {
+    "issue_id": "loomcli-abc",
+    "tabs": [...],
+    "active_tab_id": "details",
+    "updated_at": "2026-03-22T10:00:00Z"
+  }
+}
+```
+
+- **Response `400`:** Invalid issue ID, or invalid/malformed request body (including body exceeding 1 MB limit)
+- **Response `500`:** Redis save failure
+
+### `DELETE /api/issues/{issueId}/tabs`
+
+Remove the tab state for an issue.
+
+- **Auth:** Required
+- **Path Parameters:**
+
+  | Param | Type | Required | Description |
+  |-------|------|----------|-------------|
+  | `issueId` | string | yes | Issue ID (alphanumeric, hyphens, underscores, dots) |
+
+- **Behavior:** Removes the tab state for the given issue from Redis. Deleting a non-existent key is a no-op (returns `200` success, matching Redis DEL semantics). No SSE broadcast.
+
+- **Response `200 OK`:**
+
+```json
+{"success": true}
+```
+
+- **Response `400`:** Invalid issue ID (empty or contains disallowed characters)
+- **Response `500`:** Redis delete failure
+
 ## Loom Proxy
 
 ### `/api/loom/**`
