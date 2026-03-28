@@ -63,6 +63,7 @@ exponential backoff.
 Commands:
   loom daemon                      Start the supervisor in the foreground
   loom daemon status               Show daemon and agent status
+  loom daemon logs                 View agent logs
   loom daemon stop                 Stop the running daemon
   loom daemon stop <agent>         Stop a single agent
   loom daemon start <agent>        Start a previously stopped agent
@@ -127,6 +128,7 @@ func init() {
 	daemonCmd.Flags().BoolVar(&daemonDryRun, "dry-run", false,
 		"Validate config and print what would be started without actually starting")
 	daemonCmd.AddCommand(daemonStatusCmd)
+	daemonCmd.AddCommand(daemonLogsCmd)
 	daemonCmd.AddCommand(daemonStopCmd)
 	daemonCmd.AddCommand(daemonAgentStartCmd)
 	daemonCmd.AddCommand(daemonAgentRestartCmd)
