@@ -159,6 +159,8 @@ export function TerminalView({
   activeTabIdRef.current = activeTabId;
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
+  const workspaceIdRef = useRef(workspaceId);
+  workspaceIdRef.current = workspaceId;
 
   // ARIA live region for screen reader announcements (useRef avoids re-renders)
   const liveRegionRef = useRef<HTMLDivElement>(null);
@@ -326,13 +328,13 @@ export function TerminalView({
 
       // If this tab just connected and has pending seed data, seed it
       if (state === "connected") {
-        const tab = tabs.find((t) => t.id === tabId);
+        const tab = tabsRef.current.find((t) => t.id === tabId);
         if (tab && !seededSessionsRef.current.has(tab.sessionName)) {
           const seedCtx = pendingSeedRef.current.get(tab.sessionName);
           if (seedCtx) {
             seededSessionsRef.current.add(tab.sessionName);
             pendingSeedRef.current.delete(tab.sessionName);
-            seedTerminalSession(workspaceId, tab.sessionName, seedCtx).catch(
+            seedTerminalSession(workspaceIdRef.current, tab.sessionName, seedCtx).catch(
               (err) =>
                 console.error(
                   `Failed to seed terminal session ${tab.sessionName}:`,
@@ -343,7 +345,7 @@ export function TerminalView({
         }
       }
     },
-    [tabs],
+    [],
   );
 
   // Keyboard shortcuts (only when view is active)
