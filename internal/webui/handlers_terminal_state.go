@@ -11,7 +11,7 @@ import (
 const terminalUIStateKey = "terminal:ui-state"
 
 // handleGetTerminalState returns the persisted terminal UI state.
-// GET /api/terminal/state
+// GET /api/workspaces/{ws}/terminal/state
 func handleGetTerminalState(client *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		vals, err := client.HGetAll(r.Context(), terminalUIStateKey).Result()
@@ -30,7 +30,7 @@ func handleGetTerminalState(client *redis.Client) http.HandlerFunc {
 }
 
 // handlePatchTerminalState updates the persisted terminal UI state.
-// PATCH /api/terminal/state
+// PATCH /api/workspaces/{ws}/terminal/state
 func handlePatchTerminalState(client *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {

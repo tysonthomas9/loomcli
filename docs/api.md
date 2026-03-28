@@ -769,6 +769,159 @@ WebSocket endpoint for terminal relay (tmux-backed).
   - Read limit: 32 KB per message
   - Default size: 80x24
 
+### Scrollback Sources
+
+The terminal system has two independent scrollback mechanisms:
+
+1. **tmux capture-pane** (used by scrollback and export endpoints): runs `tmux capture-pane -p -S` on the live tmux session. Returns raw terminal output including ANSI escape codes.
+2. **In-memory ring buffer** (used by scrollback-info endpoint): a per-session `ScrollbackBuffer` that captures PTY relay output in real-time. Default capacity: 10,000 lines. Lost on server restart.
+
+### `GET /api/workspaces/{ws}/terminal/sessions/{session}/scrollback`
+
+Capture live scrollback from a tmux terminal session (up to 5,000 lines). Returns raw content with ANSI escape codes preserved.
+
+- **Auth:** Required (standard bearer token + WorkspaceMiddleware validation)
+- **Path Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| ws | string | yes | Workspace ID |
+| session | string | yes | Session name (`^[a-zA-Z0-9_-]+$`) |
+
+- **Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "content": "raw terminal output with ANSI codes...",
+    "lines": 42
+  }
+}
+```
+
+- **Errors:**
+  - `400` — empty workspace ID or empty session name
+  - `404` — workspace not found or session not found (tmux session does not exist)
+  - `500` — tmux capture-pane command failed
+
+### `GET /api/workspaces/{ws}/terminal/sessions/{session}/export`
+
+Download session transcript as a file. Captures full tmux history (not limited to 5,000 lines) and strips ANSI escape codes.
+
+- **Auth:** Required (standard bearer token + WorkspaceMiddleware validation)
+- **Path Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| ws | string | yes | Workspace ID |
+| session | string | yes | Session name (`^[a-zA-Z0-9_-]+$`) |
+
+- **Query Parameters:**
+
+| Param | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| format | string | no | "txt" | Export format: "txt" or "md" |
+
+- **Response:** `200 OK` — file download (not JSON)
+
+```
+Content-Type: text/plain; charset=utf-8
+Content-Disposition: attachment; filename="{session}-{YYYYMMDD-HHMMSS}.{format}"
+```
+
+- **Errors:**
+  - `400` — invalid session name or unsupported format value
+  - `404` — workspace not found or session not alive
+  - `500` — tmux capture-pane command failed
+
+### `GET /api/workspaces/{ws}/terminal/sessions/{session}/scrollback-info`
+
+Get in-memory scrollback buffer statistics for a terminal session. Returns zeroed stats if no buffer exists (session never had a WebSocket connection).
+
+- **Auth:** Required (standard bearer token + WorkspaceMiddleware validation)
+- **Path Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| ws | string | yes | Workspace ID |
+| session | string | yes | Session name (`^[a-zA-Z0-9_-]+$`) |
+
+- **Response:** `200 OK` (always succeeds for valid session name)
+
+```json
+{
+  "line_count": 42,
+  "max_lines": 10000,
+  "truncated_count": 0
+}
+```
+
+- **Errors:**
+  - `400` — invalid session name
+  - `404` — workspace not found
+
+### `GET /api/workspaces/{ws}/terminal/state`
+
+Get persisted terminal UI state (active tab selection). Redis-backed, survives server restarts. Returns empty state on Redis failure (never errors to client).
+
+- **Auth:** Required (standard bearer token + WorkspaceMiddleware validation)
+- **Path Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| ws | string | yes | Workspace ID |
+
+- **Response:** `200 OK` (always)
+
+```json
+{
+  "active_tab": "talk-to-lead"
+}
+```
+
+Returns `{"active_tab": ""}` if no state has been set or if Redis fails.
+
+- **Errors:**
+  - `400` — empty workspace ID
+  - `404` — workspace not found
+
+- **Note:** The Redis key (`terminal:ui-state`) is global, not workspace-partitioned. The workspace in the URL provides routing consistency and access control.
+
+### `PATCH /api/workspaces/{ws}/terminal/state`
+
+Update persisted terminal UI state (active tab selection).
+
+- **Auth:** Required (standard bearer token + WorkspaceMiddleware validation)
+- **Path Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| ws | string | yes | Workspace ID |
+
+- **Request Body:**
+
+```json
+{
+  "active_tab": "session-name"
+}
+```
+
+- **Response:** `200 OK`
+
+```json
+{
+  "active_tab": "session-name"
+}
+```
+
+- **Errors:**
+  - `400` — empty workspace ID or invalid request body (malformed JSON / body exceeds 1 MB)
+  - `404` — workspace not found
+  - `500` — Redis write failure
+
+- **Note:** Setting `active_tab` to `""` clears the selection. Does not broadcast SSE events.
+
 ## Loom Proxy
 
 ### `/api/loom/**`

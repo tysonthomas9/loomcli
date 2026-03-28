@@ -116,21 +116,11 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 		mux.HandleFunc("GET /api/terminal/session-status", handleTerminalSessionStatus(termManager, termAuth))
 		mux.HandleFunc("POST /api/terminal/spawn", handleTerminalSpawn(termManager, sessionHistoryStore, initialWorkspaceID))
 		mux.HandleFunc("POST /api/terminal/sessions/{name}/seed", handleSeedTerminalSession(termManager))
-		mux.HandleFunc("GET /api/terminal/sessions/{session}/scrollback", handleGetScrollback(termManager))
-		mux.HandleFunc("GET /api/terminal/sessions/{session}/export", handleExportSession(termManager))
-		mux.HandleFunc("GET /api/terminal/sessions/{session}/scrollback-info", handleScrollbackInfo(termManager))
 		mux.HandleFunc("POST /api/terminal/sessions/{session}/kill", handleScheduleSessionKill(termManager))
 		mux.HandleFunc("POST /api/terminal/sessions/close-all", handleCloseAllSessions(termManager, tabMetaStore, hub))
 
-		// Note: Terminal tab metadata endpoints have moved to workspace-scoped routes
-		// in registerWorkspaceRoutes. The by-issue endpoint is also workspace-scoped.
-
-		// Terminal UI state endpoints (Redis-backed active tab persistence)
-		if tabMetaStore != nil {
-			rc := tabMetaStore.RedisClient()
-			mux.HandleFunc("GET /api/terminal/state", handleGetTerminalState(rc))
-			mux.HandleFunc("PATCH /api/terminal/state", handlePatchTerminalState(rc))
-		}
+		// Note: Terminal tab metadata, scrollback/export, and UI state endpoints
+		// have moved to workspace-scoped routes in registerWorkspaceRoutes.
 	}
 
 	// Issue tab persistence and session history endpoints have moved to
@@ -241,6 +231,11 @@ func registerWorkspaceRoutes(mux *http.ServeMux, multiPool *daemon.MultiPool, wo
 		// Cross-workspace endpoint: the workspace in the URL is for auth context,
 		// but ListByIssue searches across all workspaces intentionally.
 		wsMux.HandleFunc("GET /api/workspaces/{ws}/terminal/sessions/by-issue", handleListSessionsByIssue(tabMetaStore))
+
+		// Terminal UI state endpoints (Redis-backed active tab persistence, workspace-scoped)
+		rc := tabMetaStore.RedisClient()
+		wsMux.HandleFunc("GET /api/workspaces/{ws}/terminal/state", handleGetTerminalState(rc))
+		wsMux.HandleFunc("PATCH /api/workspaces/{ws}/terminal/state", handlePatchTerminalState(rc))
 	}
 
 	// Issue tab persistence endpoints (Redis-backed, workspace-scoped)
@@ -263,6 +258,11 @@ func registerWorkspaceRoutes(mux *http.ServeMux, multiPool *daemon.MultiPool, wo
 			wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/terminal/token", handleGetAgentTerminalToken(termAuth))
 		}
 		wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/terminal/ws", handleAgentTerminalWS(termManager, termAuth, allowedOrigins))
+
+		// Terminal scrollback, export, and scrollback-info endpoints (workspace-scoped)
+		wsMux.HandleFunc("GET /api/workspaces/{ws}/terminal/sessions/{session}/scrollback", handleGetScrollback(termManager))
+		wsMux.HandleFunc("GET /api/workspaces/{ws}/terminal/sessions/{session}/export", handleExportSession(termManager))
+		wsMux.HandleFunc("GET /api/workspaces/{ws}/terminal/sessions/{session}/scrollback-info", handleScrollbackInfo(termManager))
 	}
 
 	// Workspace-scoped fleet routes. Claim uses multiPool (routes to correct

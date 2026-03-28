@@ -6,7 +6,7 @@ import (
 )
 
 // handleGetScrollback returns the scrollback buffer for a terminal session.
-// GET /api/terminal/sessions/{session}/scrollback
+// GET /api/workspaces/{ws}/terminal/sessions/{session}/scrollback
 func handleGetScrollback(termManager *TerminalManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		session := r.PathValue("session")

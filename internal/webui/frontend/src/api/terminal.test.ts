@@ -444,7 +444,7 @@ describe("terminal API", () => {
 
       expect(result).toEqual({ content: "line1\nline2\nline3", lines: 3 });
       expect(mockGet).toHaveBeenCalledWith(
-        "/api/terminal/sessions/my-session/scrollback",
+        "/api/workspaces/test-ws-id/terminal/sessions/my-session/scrollback",
       );
     });
 
@@ -457,7 +457,7 @@ describe("terminal API", () => {
       await fetchScrollback("test-ws-id", "session with spaces");
 
       expect(mockGet).toHaveBeenCalledWith(
-        "/api/terminal/sessions/session%20with%20spaces/scrollback",
+        "/api/workspaces/test-ws-id/terminal/sessions/session%20with%20spaces/scrollback",
       );
     });
 
@@ -493,7 +493,9 @@ describe("terminal API", () => {
       const result = await getTerminalState("test-ws-id");
 
       expect(result).toEqual({ active_tab: "session-abc" });
-      expect(mockGet).toHaveBeenCalledWith("/api/terminal/state");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/terminal/state",
+      );
     });
 
     it("returns empty active_tab when no state set", async () => {
@@ -521,9 +523,12 @@ describe("terminal API", () => {
 
       await patchTerminalState("test-ws-id", { active_tab: "session-xyz" });
 
-      expect(mockPatch).toHaveBeenCalledWith("/api/terminal/state", {
-        active_tab: "session-xyz",
-      });
+      expect(mockPatch).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/terminal/state",
+        {
+          active_tab: "session-xyz",
+        },
+      );
     });
 
     it("sends PATCH with empty active_tab to clear state", async () => {
@@ -531,9 +536,12 @@ describe("terminal API", () => {
 
       await patchTerminalState("test-ws-id", { active_tab: "" });
 
-      expect(mockPatch).toHaveBeenCalledWith("/api/terminal/state", {
-        active_tab: "",
-      });
+      expect(mockPatch).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/terminal/state",
+        {
+          active_tab: "",
+        },
+      );
     });
 
     it("propagates network errors from client", async () => {
