@@ -1,14 +1,19 @@
 package cli
 
-import "log"
+import (
+	"fmt"
+	"log"
+)
 
 // resolveAgentRepos expands an agent's declared repo affinity (explicit Repos
 // names + RepoGroups group bindings) into a deduplicated list of SourceRepoID
-// strings. Returns nil when both Repos and RepoGroups are empty, signaling
-// "all repos" to the caller.
-func resolveAgentRepos(agent AgentEntry, repos []RepoConfig) []string {
+// strings. Returns (nil, nil) when both Repos and RepoGroups are empty,
+// signaling "all repos" to the caller. Returns an error when the agent declares
+// repo affinity but resolution yields zero results, preventing the agent from
+// spawning in an unsafe unfiltered state.
+func resolveAgentRepos(agent AgentEntry, repos []RepoConfig) ([]string, error) {
 	if len(agent.Repos) == 0 && len(agent.RepoGroups) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	seen := make(map[string]bool)
@@ -48,7 +53,10 @@ func resolveAgentRepos(agent AgentEntry, repos []RepoConfig) []string {
 		}
 	}
 
-	return result
+	if len(result) == 0 {
+		return nil, fmt.Errorf("agent declared repo affinity but resolved to 0 repos: repos=%v repo_groups=%v", agent.Repos, agent.RepoGroups)
+	}
+	return result, nil
 }
 
 // expandRepoGroup finds repos belonging to the named group and adds their
