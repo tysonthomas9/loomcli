@@ -131,12 +131,6 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 	mux.HandleFunc("GET /api/editors", handleListEditors(editorCache))
 	mux.HandleFunc("POST /api/editors/open", handleOpenEditor(editorCache, editor.LaunchEditor))
 
-	// Session audit trail endpoints — registered unconditionally; handlers return 503 when sessStore is nil
-	mux.HandleFunc("GET /api/tasks/{taskId}/sessions", handleListTaskSessions(sessStore))
-	mux.HandleFunc("GET /api/tasks/{taskId}/sessions/{sessionId}", handleGetSession(sessStore))
-	mux.HandleFunc("GET /api/tasks/{taskId}/sessions/{sessionId}/transcript", handleGetSessionTranscript(sessStore))
-	mux.HandleFunc("GET /api/tasks/{taskId}/sessions/{sessionId}/diff", handleGetSessionDiff(sessStore))
-
 	// Session change notification endpoint for local agents to push SSE events
 	if hub != nil {
 		mux.HandleFunc("POST /api/sessions/notify", handleNotifySessionChange(hub))
