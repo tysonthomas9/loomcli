@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"os/exec"
 	"sync"
@@ -140,6 +141,23 @@ type Daemon struct {
 	// reconcileMu.RLock — holding reconcileMu.Lock through drain would deadlock.
 	// Lock ordering: reconcileMu (released) → drainAddMu → agentsMu.
 	drainAddMu sync.Mutex
+
+	// stoppedAgents tracks agents stopped via the control socket.
+	// The config reconciler checks this set and does NOT re-add stopped agents
+	// on config reload. Protected by agentsMu.
+	stoppedAgents map[string]struct{}
+
+	// controlListener is the Unix domain socket listener for the control server.
+	// Set by startControlServer, closed on Stop.
+	controlListener net.Listener
+}
+
+// isAgentStopped returns true if the named agent was stopped via the control socket.
+func (d *Daemon) isAgentStopped(name string) bool {
+	d.agentsMu.RLock()
+	_, stopped := d.stoppedAgents[name]
+	d.agentsMu.RUnlock()
+	return stopped
 }
 
 // configSnapshot returns a snapshot of the current config pointer under RLock.
@@ -197,11 +215,12 @@ func NewDaemon(config *DaemonConfig, projectDir string, eventBus events.Emitter)
 	}
 
 	d := &Daemon{
-		config:      config,
-		projectDir:  projectDir,
-		agents:      make([]*AgentProcess, 0, len(config.Agents)),
-		concurrency: NewConcurrencyTracker(config.Roles),
-		eventBus:    eventBus,
+		config:        config,
+		projectDir:    projectDir,
+		agents:        make([]*AgentProcess, 0, len(config.Agents)),
+		stoppedAgents: make(map[string]struct{}),
+		concurrency:   NewConcurrencyTracker(config.Roles),
+		eventBus:      eventBus,
 	}
 
 	// Load workspace repos and ID for source repo resolution and log namespacing (best-effort)

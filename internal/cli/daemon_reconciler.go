@@ -181,13 +181,23 @@ func (d *Daemon) reloadAndReconcile() {
 		}
 	}
 
-	// Add new and modified agents
+	// Add new and modified agents.
+	// Agents stopped via control socket are excluded from re-addition until
+	// explicitly started via "loom daemon start <agent>".
 	for _, entry := range added {
+		if d.isAgentStopped(entry.Worktree) {
+			slog.Info("skipping re-add of manually stopped agent", "worktree", entry.Worktree)
+			continue
+		}
 		if err := d.addAgent(entry); err != nil {
 			slog.Error("failed to add agent", "worktree", entry.Worktree, "err", err)
 		}
 	}
 	for _, entry := range modified {
+		if d.isAgentStopped(entry.Worktree) {
+			slog.Info("skipping re-add of manually stopped modified agent", "worktree", entry.Worktree)
+			continue
+		}
 		if err := d.addAgent(entry); err != nil {
 			slog.Error("failed to re-add modified agent", "worktree", entry.Worktree, "err", err)
 		}

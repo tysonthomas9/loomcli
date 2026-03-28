@@ -61,9 +61,12 @@ the configured agents, automatically restarting them on failure with
 exponential backoff.
 
 Commands:
-  loom daemon           Start the supervisor in the foreground
-  loom daemon status    Show daemon and agent status
-  loom daemon stop      Stop the running daemon
+  loom daemon                      Start the supervisor in the foreground
+  loom daemon status               Show daemon and agent status
+  loom daemon stop                 Stop the running daemon
+  loom daemon stop <agent>         Stop a single agent
+  loom daemon start <agent>        Start a previously stopped agent
+  loom daemon restart <agent>      Restart a single agent with fresh state
 
 Configuration is read from loom.yaml in the current directory:
   daemon:
@@ -92,11 +95,32 @@ var daemonStatusCmd = &cobra.Command{
 	Run:   runDaemonStatus,
 }
 
-// daemonStopCmd stops the running daemon
+// daemonStopCmd stops the running daemon or a single agent
 var daemonStopCmd = &cobra.Command{
-	Use:   "stop",
-	Short: "Stop the running daemon",
-	Run:   runDaemonStop,
+	Use:   "stop [agent-name]",
+	Short: "Stop the running daemon or a single agent",
+	Long: `Stop the running daemon (no arguments) or stop a single agent by name.
+
+Examples:
+  loom daemon stop          Stop the entire daemon
+  loom daemon stop falcon   Stop only the "falcon" agent`,
+	Run: runDaemonStop,
+}
+
+// daemonAgentStartCmd starts a previously stopped agent
+var daemonAgentStartCmd = &cobra.Command{
+	Use:   "start <agent-name>",
+	Short: "Start a previously stopped agent",
+	Args:  cobra.ExactArgs(1),
+	Run:   runDaemonAgentStart,
+}
+
+// daemonAgentRestartCmd restarts a single agent with fresh state
+var daemonAgentRestartCmd = &cobra.Command{
+	Use:   "restart <agent-name>",
+	Short: "Restart a single agent with fresh counters",
+	Args:  cobra.ExactArgs(1),
+	Run:   runDaemonAgentRestart,
 }
 
 func init() {
@@ -104,6 +128,8 @@ func init() {
 		"Validate config and print what would be started without actually starting")
 	daemonCmd.AddCommand(daemonStatusCmd)
 	daemonCmd.AddCommand(daemonStopCmd)
+	daemonCmd.AddCommand(daemonAgentStartCmd)
+	daemonCmd.AddCommand(daemonAgentRestartCmd)
 	rootCmd.AddCommand(daemonCmd)
 }
 
@@ -280,6 +306,14 @@ func runDaemon(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
+	// 12.5. Start control socket server for per-agent stop/start/restart
+	socketPath := resolveDaemonSocketPath(projectDir, config.Daemon.PIDFile)
+	if err := daemon.startControlServer(socketPath); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: control socket unavailable: %v\n", err)
+	} else {
+		defer os.Remove(socketPath)
+	}
+
 	// Start state file updater goroutine
 	stateUpdateDone := startStateUpdater(shutdown, stateFilePath, startedAt, daemon, maxRetries)
 
@@ -341,6 +375,12 @@ func statusToIcon(status string) string {
 }
 
 func runDaemonStop(cmd *cobra.Command, args []string) {
+	// If an agent name is provided, stop that single agent via control socket
+	if len(args) > 0 {
+		runDaemonAgentStop(args[0])
+		return
+	}
+
 	projectDir, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: cannot determine working directory: %v\n", err)

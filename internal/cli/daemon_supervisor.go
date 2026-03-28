@@ -98,6 +98,11 @@ func (d *Daemon) Stop() {
 		close(d.shutdown)
 	})
 
+	// Close the control socket listener (if running)
+	if d.controlListener != nil {
+		_ = d.controlListener.Close()
+	}
+
 	// Unblock any agents waiting for concurrency slots
 	d.concurrency.Close()
 
