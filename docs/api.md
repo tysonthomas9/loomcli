@@ -514,6 +514,439 @@ Remove a dependency.
 {"success": true, "data": null}
 ```
 
+## Workspace
+
+Workspace endpoints manage workspace lifecycle: creating (empty or clone), reading topology, renaming, deleting, reordering, setting defaults, and updating per-workspace backend configuration. All workspace config is YAML-backed (`~/.loom/config.yaml`) with atomic temp-file + rename writes.
+
+### Response Envelope
+
+All workspace CRUD endpoints use this envelope:
+
+```json
+{
+  "success": true,
+  "data": { /* WorkspaceData object */ },
+  "error": "message (only on failure)"
+}
+```
+
+Mutation endpoints (create, rename, delete, reorder, set/clear default) return refreshed workspace topology in the `data` field on success.
+
+### Data Models
+
+#### WorkspaceData
+
+Full workspace topology returned by `GET /api/workspaces/active` and `GET /api/workspaces/{ws}`.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Workspace UUID |
+| `name` | string | Workspace display name |
+| `path` | string | Absolute filesystem path |
+| `repos` | []WorkspaceRepo | Repositories in this workspace |
+| `groups` | []string | Defined repo groups |
+| `agents` | []WorkspaceAgentInfo | Agent assignments |
+| `workspaces` | []WorkspaceSummary | All configured workspaces |
+| `workspace_order` | []string | Custom display ordering (omitted if empty) |
+| `default_workspace` | string | Name of the default workspace |
+
+All array fields marshal as `[]` (never `null`).
+
+#### WorkspaceSummary
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Workspace UUID |
+| `name` | string | Workspace name |
+| `path` | string | Absolute filesystem path |
+| `active` | bool | Whether this is the currently selected workspace |
+| `repo_count` | int | Number of repositories |
+| `is_default` | bool | Whether this is the default workspace |
+| `backend` | string | AI backend override (omitted if not set) |
+
+#### WorkspaceRepo
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Repository name |
+| `path` | string | Absolute filesystem path |
+| `default_branch` | string | Default git branch |
+| `remote` | string | Git remote URL |
+| `source_repo_id` | string | Source repo identifier (omitted if empty) |
+| `groups` | []string | Group memberships |
+
+#### WorkspaceAgentInfo
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Agent name |
+| `repos` | []string | Assigned repository names |
+| `repo_groups` | []string | Assigned repo group names |
+| `cross_repo` | bool | Whether agent works across repos |
+
+### Validation Rules
+
+- **Workspace names:** alphanumeric, hyphens, underscores only; max 64 characters
+- **Clone URLs:** must start with `https://` or `git@`; no control characters (`\x00`, `\n`, `\r`); no path segments starting with `-` (flag injection prevention)
+- **Request body limit:** 1 MB (all endpoints)
+
+### `GET /api/workspaces/active`
+
+Returns the full workspace topology for the active (default) workspace.
+
+- **Auth:** Required
+- **Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": "abc-123",
+    "name": "my-workspace",
+    "path": "/home/user/workspace",
+    "repos": [
+      {
+        "name": "myrepo",
+        "path": "/home/user/workspace/myrepo",
+        "default_branch": "main",
+        "remote": "https://github.com/org/myrepo",
+        "groups": ["backend"]
+      }
+    ],
+    "groups": ["backend", "frontend"],
+    "agents": [
+      {
+        "name": "nova",
+        "repos": ["myrepo"],
+        "repo_groups": ["backend"],
+        "cross_repo": false
+      }
+    ],
+    "workspaces": [
+      {
+        "id": "abc-123",
+        "name": "my-workspace",
+        "path": "/home/user/workspace",
+        "active": true,
+        "repo_count": 1,
+        "is_default": true,
+        "backend": "claude"
+      }
+    ],
+    "workspace_order": ["my-workspace"],
+    "default_workspace": "my-workspace"
+  }
+}
+```
+
+- **Response (single-repo mode):** When `configFn` is nil, returns empty workspace with all arrays initialized to `[]`:
+  ```json
+  {"success": true, "data": {"repos": [], "groups": [], "agents": [], "workspaces": []}}
+  ```
+- **Errors:**
+  - `500` — failed to load workspace config
+
+### `POST /api/workspaces`
+
+Create a new workspace.
+
+- **Auth:** Required
+- **Request Body:**
+
+```json
+{
+  "name": "string (required)",
+  "type": "empty|clone|template (required)",
+  "repos": ["path/to/repo"],
+  "clone_url": "https://github.com/org/repo",
+  "clone_urls": ["https://github.com/org/repo1", "git@github.com:org/repo2"],
+  "branch": "string (optional)",
+  "path": "string (optional workspace directory)"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | yes | Workspace name (alphanumeric, hyphens, underscores; max 64 chars) |
+| `type` | string | yes | `"empty"`, `"clone"`, or `"template"` |
+| `repos` | []string | for empty | Repository paths (required when type is `"empty"`) |
+| `clone_url` | string | no | Single git URL (backward compat; merged into `clone_urls` if empty) |
+| `clone_urls` | []string | for clone | Git URLs to clone (at least one required when type is `"clone"`) |
+| `branch` | string | no | Branch name to check out after clone |
+| `path` | string | no | Custom workspace directory path |
+
+- **Timeout:** 60 seconds
+- **Response:** `201 Created`
+
+```json
+{
+  "success": true,
+  "data": { /* WorkspaceData */ }
+}
+```
+
+- **Errors:**
+  - `400` — invalid name, missing required fields, invalid clone URL
+  - `413` — request body too large (>1 MB)
+  - `501` — template type not supported, or workspace creation not available
+  - `504` — creation timed out (>60 seconds)
+  - `500` — creation failed
+
+### `PATCH /api/workspaces/{ws}/name`
+
+Rename a workspace. The workspace is identified by UUID via WorkspaceMiddleware.
+
+- **Auth:** Required
+- **Path Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| ws | string | yes | Workspace UUID |
+
+- **Request Body:**
+
+```json
+{
+  "new_name": "string (required)"
+}
+```
+
+- **Behavior:** Updates the workspace map key, `default_workspace` (if the renamed workspace was default), and `workspace_order`. No-op if `new_name` equals the current name (returns `200` with no `data` field). Atomic config write.
+- **Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": { /* WorkspaceData */ }
+}
+```
+
+- **Errors:**
+  - `400` — workspace ID required, empty name, name too long (>64 chars), invalid characters
+  - `404` — workspace not found, no config found
+  - `409` — workspace name already exists
+  - `413` — request body too large
+  - `500` — failed to load/save config
+
+### `DELETE /api/workspaces/{ws}`
+
+Remove a workspace from config. Does NOT delete worktrees or files from disk. Deregisters connection pool and fleet store.
+
+- **Auth:** Required
+- **Path Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| ws | string | yes | Workspace UUID |
+
+- **Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": { /* WorkspaceData */ }
+}
+```
+
+- **Errors:**
+  - `400` — workspace ID required
+  - `404` — workspace not found
+  - `409` — workspace has running agents
+  - `501` — workspace deletion not available
+  - `500` — failed to resolve or delete workspace
+
+### `PUT /api/workspaces/order`
+
+Persist custom workspace display order.
+
+- **Auth:** Required
+- **Request Body:**
+
+```json
+{
+  "order": ["workspace-a", "workspace-b", "uuid-c"]
+}
+```
+
+Accepts both workspace names and UUIDs. UUIDs are resolved to names internally. Unknown entries are silently filtered. Duplicates are deduplicated.
+
+- **Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": { /* WorkspaceData */ }
+}
+```
+
+- **Errors:**
+  - `400` — invalid JSON
+  - `404` — no config found
+  - `413` — request body too large
+  - `500` — failed to load/save config
+
+### `PUT /api/workspaces/default`
+
+Set the default workspace.
+
+- **Auth:** Required
+- **Request Body:**
+
+```json
+{
+  "name": "workspace-name (required)"
+}
+```
+
+- **Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": { /* WorkspaceData */ }
+}
+```
+
+- **Errors:**
+  - `400` — name is required
+  - `404` — workspace not found
+  - `501` — set default not available
+  - `500` — failed to save config
+
+### `DELETE /api/workspaces/default`
+
+Clear the default workspace, reverting to first-in-order behavior.
+
+- **Auth:** Required
+- **No request body**
+- **Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": { /* WorkspaceData */ }
+}
+```
+
+- **Errors:**
+  - `501` — clear default not available
+  - `500` — failed to save config
+
+### `PATCH /api/workspaces/{ws}/config/backend`
+
+Update a workspace's AI backend. Routes through the workspace's daemon connection pool to update the project-level backend in `loom.yaml`.
+
+- **Auth:** Required
+- **Path Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| ws | string | yes | Workspace UUID |
+
+- **Request Body:**
+
+```json
+{
+  "backend": "claude"
+}
+```
+
+Valid backends: `"claude"`, `"codex"`, `"opencode"`, `"gemini"`, `"cursor"`.
+
+- **Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "backend": "claude",
+    "source": "project",
+    "available": ["claude", "codex", "opencode", "gemini", "cursor", "shell"],
+    "agents": [
+      {"worktree": "nova", "role": "coder", "backend": "claude"}
+    ]
+  }
+}
+```
+
+- **Errors:**
+  - `400` — invalid backend value
+  - `413` — request body too large
+  - `500` — failed to parse/save config
+  - `503` — connection pool not initialized
+  - `504` — daemon not available (timeout)
+
+## Multi-Workspace
+
+These endpoints are only available when MultiPool is configured (multi-workspace mode). They provide workspace listing with per-workspace connection pool statistics.
+
+### `GET /api/workspaces`
+
+List all registered workspaces with pool stats.
+
+- **Auth:** Required
+- **Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "workspaces": [
+    {
+      "id": "abc-123",
+      "name": "my-workspace",
+      "path": "/home/user/workspace",
+      "active": true,
+      "pool": {
+        "size": 5,
+        "created": 5,
+        "active": 2,
+        "available": 3,
+        "closed": false
+      }
+    }
+  ]
+}
+```
+
+Note: This endpoint uses a `"workspaces"` key (not `"data"`). The `pool` field is omitted when pool stats are unavailable.
+
+#### PoolStats
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `size` | int | Configured pool size |
+| `created` | int | Total connections created |
+| `active` | int | Connections currently in use |
+| `available` | int | Connections available in pool |
+| `closed` | bool | Whether the pool is shut down |
+
+### `GET /api/workspaces/{ws}`
+
+Get a single workspace's full topology by ID. Returns the same `WorkspaceData` shape as `GET /api/workspaces/active`.
+
+- **Auth:** Required
+- **Path Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| ws | string | yes | Workspace UUID or name |
+
+- **Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": { /* WorkspaceData — same shape as /api/workspaces/active */ }
+}
+```
+
+The `active` flag in each `WorkspaceSummary` is set to `true` for the workspace matching the `ws` path parameter.
+
+- **Errors:**
+  - `400` — workspace ID is required (empty path param)
+  - `404` — workspace not found
+  - `500` — failed to load workspace config
+
 ## Real-time Events (SSE)
 
 ### `GET /api/events`
