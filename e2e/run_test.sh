@@ -218,10 +218,25 @@ phase_smoke() {
         printf "Warning: verify_list.sh not found on PATH, skipping\n" >&2
     fi
 
+    # Run verify_bd.sh (optional — skip if not installed)
+    _bd_rc=0
+    if command -v verify_bd.sh >/dev/null 2>&1; then
+        if [ "$QUIET" -eq 1 ]; then
+            verify_bd.sh -q
+        elif [ "$VERBOSE" -eq 1 ]; then
+            verify_bd.sh -v
+        else
+            verify_bd.sh
+        fi
+        _bd_rc=$?
+    else
+        printf "Warning: verify_bd.sh not found on PATH, skipping\n" >&2
+    fi
+
     _secs=$(elapsed "$_start")
 
-    # Fail if either script failed
-    if [ "$_todo_rc" -ne 0 ] || [ "$_list_rc" -ne 0 ]; then
+    # Fail if any script failed
+    if [ "$_todo_rc" -ne 0 ] || [ "$_list_rc" -ne 0 ] || [ "$_bd_rc" -ne 0 ]; then
         add_result "Smoke Test" "FAIL" "$_secs"
         print_phase_result "Smoke Test" "FAIL" "$_secs"
         return 1

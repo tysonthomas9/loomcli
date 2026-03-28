@@ -70,9 +70,10 @@ RUN chmod +x /usr/local/bin/claude /usr/local/bin/codex /usr/local/bin/opencode
 # Install smoke tests and task template
 COPY e2e/verify_todo.sh /usr/local/bin/verify_todo.sh
 COPY e2e/verify_list.sh /usr/local/bin/verify_list.sh
+COPY e2e/verify_bd.sh /usr/local/bin/verify_bd.sh
 RUN mkdir -p /etc/loom
 COPY e2e/task_template.txt /etc/loom/task_template.txt
-RUN chmod +x /usr/local/bin/verify_todo.sh /usr/local/bin/verify_list.sh
+RUN chmod +x /usr/local/bin/verify_todo.sh /usr/local/bin/verify_list.sh /usr/local/bin/verify_bd.sh
 
 # Install test orchestrator
 COPY e2e/run_test.sh /usr/local/bin/run_test.sh
