@@ -13,17 +13,11 @@ import {
   within,
   waitFor,
 } from "@testing-library/react";
-import {
-  describe,
-  it,
-  expect,
-  vi,
-  beforeEach as _beforeEach,
-  afterEach,
-} from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom";
 
 import type { Issue, IssueDetails, IssueWithDependencyMetadata } from "@/types";
+import { updateIssue } from "@/api";
 
 import { IssueDetailPanel } from "../IssueDetailPanel";
 
@@ -1177,6 +1171,102 @@ describe("IssueDetailPanel", () => {
         "href",
         "https://github.com/owner/repo/pulls/123",
       );
+    });
+  });
+
+  describe("handleTitleSave error handling", () => {
+    const mockUpdateIssue = updateIssue as ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      mockUpdateIssue.mockReset();
+    });
+
+    it("shows error toast when title save fails", async () => {
+      mockUpdateIssue.mockRejectedValueOnce(new Error("Network error"));
+
+      const mockIssue = createTestIssueDetails({ title: "Original Title" });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      // Click the title display to enter edit mode
+      const titleDisplay = screen.getByTestId("editable-title-display");
+      fireEvent.click(titleDisplay);
+
+      // Change the title and trigger save via Enter
+      const input = screen.getByTestId("editable-title-input");
+      fireEvent.change(input, { target: { value: "New Title" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      // Error toast should appear
+      await waitFor(() => {
+        expect(screen.getByTestId("title-error-toast")).toBeInTheDocument();
+      });
+      expect(screen.getByTestId("title-error-toast")).toHaveTextContent(
+        "Network error",
+      );
+    });
+
+    it("shows generic error message for non-Error exceptions", async () => {
+      mockUpdateIssue.mockRejectedValueOnce("string error");
+
+      const mockIssue = createTestIssueDetails({ title: "Original Title" });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      const titleDisplay = screen.getByTestId("editable-title-display");
+      fireEvent.click(titleDisplay);
+
+      const input = screen.getByTestId("editable-title-input");
+      fireEvent.change(input, { target: { value: "New Title" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("title-error-toast")).toBeInTheDocument();
+      });
+      expect(screen.getByTestId("title-error-toast")).toHaveTextContent(
+        "Failed to update title",
+      );
+    });
+
+    it("clears title error on next save attempt", async () => {
+      // First save fails
+      mockUpdateIssue.mockRejectedValueOnce(new Error("Network error"));
+
+      const mockIssue = createTestIssueDetails({ title: "Original Title" });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      // Enter edit mode and trigger failed save
+      const titleDisplay = screen.getByTestId("editable-title-display");
+      fireEvent.click(titleDisplay);
+
+      const input = screen.getByTestId("editable-title-input");
+      fireEvent.change(input, { target: { value: "New Title" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("title-error-toast")).toBeInTheDocument();
+      });
+
+      // Second save succeeds
+      mockUpdateIssue.mockResolvedValueOnce({
+        ...mockIssue,
+        title: "New Title",
+      });
+
+      // EditableTitle stays in edit mode after error, so input should still be there
+      const inputAfterError = screen.getByTestId("editable-title-input");
+      fireEvent.change(inputAfterError, { target: { value: "New Title" } });
+      fireEvent.keyDown(inputAfterError, { key: "Enter" });
+
+      await waitFor(() => {
+        expect(
+          screen.queryByTestId("title-error-toast"),
+        ).not.toBeInTheDocument();
+      });
     });
   });
 });
