@@ -89,6 +89,7 @@ let agentOverride: Partial<typeof defaultAgentContext> = {};
 const TEST_WS_ID = "test-ws-uuid-1234";
 
 vi.mock("@/hooks", () => ({
+  useDebouncedCallback: (fn: Function) => fn,
   useWorkspaceRepos: () => ({ ...defaultReposReturn, ...reposOverride }),
   useAgentContext: () => ({ ...defaultAgentContext, ...agentOverride }),
   useWorkspaceContext: () => ({
