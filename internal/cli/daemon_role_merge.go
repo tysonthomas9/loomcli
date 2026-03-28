@@ -2,44 +2,17 @@ package cli
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 )
 
 // resolveRoleConfig looks up a role by name, supporting both built-in and custom roles.
 // For built-in roles, merges any user-defined config (skills, path_patterns, etc.) on top of defaults.
+// Delegates to ResolveRoleConfigStatic (in daemon_queue.go) for the actual resolution.
 func (d *Daemon) resolveRoleConfig(roleName string, agentIndex int) (RoleConfig, error) {
 	cfg := d.configSnapshot()
-	if builtInRoles[roleName] {
-		rc := RoleConfig{Description: fmt.Sprintf("Built-in %s agent", roleName)}
-		// Merge user-defined config for built-in roles
-		if userRC, ok := cfg.ResolveRole(roleName); ok {
-			rc = mergeRoleConfig(rc, userRC)
-		}
-		return rc, nil
+	rc, err := ResolveRoleConfigStatic(roleName, cfg, d.projectDir)
+	if err != nil {
+		return RoleConfig{}, fmt.Errorf("agent[%d]: %w", agentIndex, err)
 	}
-
-	// Look up custom role in config
-	rc, ok := cfg.ResolveRole(roleName)
-	if !ok {
-		return RoleConfig{}, fmt.Errorf("agent[%d]: role %q not found (not a built-in role and not defined in config.Roles)", agentIndex, roleName)
-	}
-
-	// Custom roles require a prompt file
-	if rc.PromptFile == "" {
-		return RoleConfig{}, fmt.Errorf("agent[%d]: custom role %q missing prompt_file", agentIndex, roleName)
-	}
-
-	// Resolve prompt file path relative to project dir
-	promptPath := rc.PromptFile
-	if !filepath.IsAbs(promptPath) {
-		promptPath = filepath.Join(d.projectDir, promptPath)
-	}
-	if _, err := os.Stat(promptPath); err != nil {
-		return RoleConfig{}, fmt.Errorf("agent[%d]: prompt file %q not found: %w", agentIndex, promptPath, err)
-	}
-	rc.PromptFile = promptPath
-
 	return rc, nil
 }
 

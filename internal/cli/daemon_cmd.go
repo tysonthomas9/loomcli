@@ -68,6 +68,7 @@ Commands:
   loom daemon stop <agent>         Stop a single agent
   loom daemon start <agent>        Start a previously stopped agent
   loom daemon restart <agent>      Restart a single agent with fresh state
+  loom daemon queue <agent>        Preview an agent's filtered work queue
 
 Configuration is read from loom.yaml in the current directory:
   daemon:
@@ -132,6 +133,7 @@ func init() {
 	daemonCmd.AddCommand(daemonStopCmd)
 	daemonCmd.AddCommand(daemonAgentStartCmd)
 	daemonCmd.AddCommand(daemonAgentRestartCmd)
+	daemonCmd.AddCommand(daemonQueueCmd)
 	rootCmd.AddCommand(daemonCmd)
 }
 
