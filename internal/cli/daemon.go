@@ -37,8 +37,10 @@ type AgentProcess struct {
 	lastError      *agenterr.AgentError // classified error from most recent exit (nil on clean exit)
 	rateRetryCount int                  // consecutive rate-limit retries (separate from restartCount)
 	lastNoWork     bool                 // true if last exit was due to no claimable tasks
+	noWorkCount    int                  // consecutive NoWork exits (reset on non-NoWork exit)
 
-	currentBackendIdx int // 0=primary, 1+=fallback index into entry.FallbackBackends
+	currentBackendIdx int       // 0=primary, 1+=fallback index into entry.FallbackBackends
+	backoffUntil      time.Time // when current backoff sleep ends (zero if not in backoff)
 
 	stopCh   chan struct{} // closed to signal this specific agent to stop (created in Start/addAgent)
 	done     chan struct{} // closed when superviseAgent goroutine exits
@@ -104,6 +106,10 @@ type SupervisedAgentStatus struct {
 	AssignedEpicID string
 	CurrentBackend string     // effective backend (includes failover state)
 	StopReason     StopReason // why the agent stopped (empty while running)
+	LastErrorClass string     // string representation of last error class (e.g. "RateLimited")
+	NoWorkCount    int        // consecutive NoWork exits
+	BackoffUntil   time.Time  // when backoff sleep ends (zero if not in backoff)
+	RemoteBranch   string     // remote tracking ref (e.g. "origin/main")
 }
 
 // Daemon coordinates multiple supervised agents.

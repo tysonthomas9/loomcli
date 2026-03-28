@@ -1266,3 +1266,168 @@ func TestWriteStateFile_WithStopReason(t *testing.T) {
 		t.Error("star.StoppedAt should be zero for running agent")
 	}
 }
+
+// ============================================================================
+// formatDaemonDuration Tests
+// ============================================================================
+
+func TestFormatDaemonDuration(t *testing.T) {
+	tests := []struct {
+		name string
+		d    time.Duration
+		want string
+	}{
+		{"zero", 0, "<1s"},
+		{"negative", -5 * time.Second, "<1s"},
+		{"sub-second", 500 * time.Millisecond, "<1s"},
+		{"one second", time.Second, "1s"},
+		{"30 seconds", 30 * time.Second, "30s"},
+		{"59 seconds", 59 * time.Second, "59s"},
+		{"90 seconds", 90 * time.Second, "1m 30s"},
+		{"5 minutes", 5 * time.Minute, "5m 0s"},
+		{"5m30s", 5*time.Minute + 30*time.Second, "5m 30s"},
+		{"1 hour", time.Hour, "1h 0m"},
+		{"1h1m1s", time.Hour + time.Minute + time.Second, "1h 1m"},
+		{"2h30m", 2*time.Hour + 30*time.Minute, "2h 30m"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatDaemonDuration(tt.d)
+			if got != tt.want {
+				t.Errorf("formatDaemonDuration(%v) = %q, want %q", tt.d, got, tt.want)
+			}
+		})
+	}
+}
+
+// ============================================================================
+// DaemonAgentStatus JSON Tests — New Fields
+// ============================================================================
+
+func TestDaemonAgentStatus_NewFields_JSON(t *testing.T) {
+	backoffTime := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
+	status := DaemonAgentStatus{
+		Worktree:       "falcon",
+		Role:           "plan",
+		PID:            12345,
+		Status:         "running",
+		WorktreePath:   "/path/to/falcon",
+		LastErrorClass: "RateLimited",
+		NoWorkCount:    3,
+		BackoffUntil:   backoffTime,
+		RemoteBranch:   "origin/main",
+	}
+
+	data, err := json.Marshal(status)
+	if err != nil {
+		t.Fatalf("failed to marshal: %v", err)
+	}
+
+	var m map[string]interface{}
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	expectedKeys := []string{"worktree_path", "last_error_class", "no_work_count", "backoff_until", "remote_branch"}
+	for _, key := range expectedKeys {
+		if _, ok := m[key]; !ok {
+			t.Errorf("expected JSON key %q not found", key)
+		}
+	}
+
+	// Verify round-trip
+	var roundTrip DaemonAgentStatus
+	if err := json.Unmarshal(data, &roundTrip); err != nil {
+		t.Fatalf("failed to unmarshal into struct: %v", err)
+	}
+	if roundTrip.WorktreePath != "/path/to/falcon" {
+		t.Errorf("WorktreePath = %q, want %q", roundTrip.WorktreePath, "/path/to/falcon")
+	}
+	if roundTrip.LastErrorClass != "RateLimited" {
+		t.Errorf("LastErrorClass = %q, want %q", roundTrip.LastErrorClass, "RateLimited")
+	}
+	if roundTrip.NoWorkCount != 3 {
+		t.Errorf("NoWorkCount = %d, want 3", roundTrip.NoWorkCount)
+	}
+	if roundTrip.RemoteBranch != "origin/main" {
+		t.Errorf("RemoteBranch = %q, want %q", roundTrip.RemoteBranch, "origin/main")
+	}
+}
+
+func TestDaemonAgentStatus_NewFields_OmitEmpty(t *testing.T) {
+	status := DaemonAgentStatus{
+		Worktree: "falcon",
+		Role:     "plan",
+		Status:   "running",
+		// All new fields are zero/empty
+	}
+
+	data, err := json.Marshal(status)
+	if err != nil {
+		t.Fatalf("failed to marshal: %v", err)
+	}
+
+	var m map[string]interface{}
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	omittedKeys := []string{"worktree_path", "last_error_class", "no_work_count", "remote_branch"}
+	for _, key := range omittedKeys {
+		if _, ok := m[key]; ok {
+			t.Errorf("key %q should be omitted when zero/empty", key)
+		}
+	}
+}
+
+func TestWriteStateFile_NewFields_RoundTrip(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFilePath := filepath.Join(tmpDir, "daemon-agents.json")
+	startedAt := time.Date(2024, 6, 15, 10, 0, 0, 0, time.UTC)
+	backoffTime := time.Date(2024, 6, 15, 10, 5, 0, 0, time.UTC)
+
+	agents := []SupervisedAgentStatus{
+		{
+			Worktree:       "falcon",
+			Role:           "plan",
+			PID:            0,
+			WorktreePath:   "/path/to/falcon",
+			LastErrorClass: "Timeout",
+			NoWorkCount:    7,
+			BackoffUntil:   backoffTime,
+			RemoteBranch:   "origin/develop",
+		},
+	}
+
+	err := writeStateFile(stateFilePath, startedAt, agents, 3)
+	if err != nil {
+		t.Fatalf("writeStateFile() error = %v", err)
+	}
+
+	state, err := readStateFile(stateFilePath)
+	if err != nil {
+		t.Fatalf("readStateFile() error = %v", err)
+	}
+
+	if len(state.Agents) != 1 {
+		t.Fatalf("len(Agents) = %d, want 1", len(state.Agents))
+	}
+
+	a := state.Agents[0]
+	if a.WorktreePath != "/path/to/falcon" {
+		t.Errorf("WorktreePath = %q, want %q", a.WorktreePath, "/path/to/falcon")
+	}
+	if a.LastErrorClass != "Timeout" {
+		t.Errorf("LastErrorClass = %q, want %q", a.LastErrorClass, "Timeout")
+	}
+	if a.NoWorkCount != 7 {
+		t.Errorf("NoWorkCount = %d, want 7", a.NoWorkCount)
+	}
+	if !a.BackoffUntil.Equal(backoffTime) {
+		t.Errorf("BackoffUntil = %v, want %v", a.BackoffUntil, backoffTime)
+	}
+	if a.RemoteBranch != "origin/develop" {
+		t.Errorf("RemoteBranch = %q, want %q", a.RemoteBranch, "origin/develop")
+	}
+}

@@ -28,15 +28,26 @@ func (d *Daemon) handleRestartAfterError(ap *AgentProcess) bool {
 	log.Printf("[daemon] Agent %s: spawn failed, waiting %v before retry (attempt %d/%d)",
 		ap.entry.Worktree, backoff, count, maxRetries)
 
+	ap.mu.Lock()
+	ap.backoffUntil = time.Now().Add(backoff)
+	ap.mu.Unlock()
+
+	var shouldContinue bool
 	select {
 	case <-time.After(backoff):
-		return true
+		shouldContinue = true
 	case <-d.shutdown:
 		ap.mu.Lock()
 		ap.stopReason = StopReasonShutdown
 		ap.mu.Unlock()
-		return false
+		shouldContinue = false
 	}
+
+	ap.mu.Lock()
+	ap.backoffUntil = time.Time{}
+	ap.mu.Unlock()
+
+	return shouldContinue
 }
 
 // shouldRestart determines if agent should restart based on backoff policy
@@ -52,6 +63,7 @@ func (d *Daemon) shouldRestart(ap *AgentProcess) bool {
 	if ap.lastExitCode == 0 && ap.lastError == nil {
 		ap.restartCount = 0
 		ap.rateRetryCount = 0
+		ap.noWorkCount = 0
 		ap.stopReason = ""
 		if time.Since(ap.lastStart) > time.Minute {
 			ap.currentBackendIdx = 0 // reset to primary backend
@@ -65,6 +77,7 @@ func (d *Daemon) shouldRestart(ap *AgentProcess) bool {
 	if ap.lastError != nil && ap.lastError.Class == agenterr.NoWork {
 		ap.restartCount = 0
 		ap.rateRetryCount = 0
+		ap.noWorkCount++
 		ap.stopReason = ""
 		return true
 	}
@@ -73,6 +86,7 @@ func (d *Daemon) shouldRestart(ap *AgentProcess) bool {
 	if ap.lastError != nil && ap.lastError.IsFatal() {
 		log.Printf("[daemon] Agent %s: fatal error (%s), stopping supervisor",
 			ap.entry.Worktree, ap.lastError.Class)
+		ap.noWorkCount = 0
 		ap.stopReason = StopReasonFatalError
 		return false
 	}
@@ -80,6 +94,7 @@ func (d *Daemon) shouldRestart(ap *AgentProcess) bool {
 	// Rate-limited: unlimited retries (don't count toward max_retries)
 	if ap.lastError != nil && ap.lastError.Class == agenterr.RateLimited && d.getRateLimitNoCount() {
 		ap.rateRetryCount++
+		ap.noWorkCount = 0
 		ap.stopReason = ""
 		log.Printf("[daemon] Agent %s: rate limited (retry %d, not counted toward max_retries)",
 			ap.entry.Worktree, ap.rateRetryCount)
@@ -89,6 +104,7 @@ func (d *Daemon) shouldRestart(ap *AgentProcess) bool {
 	// All other errors: count toward max_retries
 	ap.restartCount++
 	ap.rateRetryCount = 0 // reset rate counter on non-rate error
+	ap.noWorkCount = 0
 	if ap.restartCount <= maxRetries {
 		ap.stopReason = ""
 		return true

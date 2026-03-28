@@ -32,6 +32,11 @@ type DaemonAgentStatus struct {
 	LastExitCode   int       `json:"last_exit_code,omitempty"`
 	StopReason     string    `json:"stop_reason,omitempty"`
 	StoppedAt      time.Time `json:"stopped_at,omitempty"`
+	WorktreePath   string    `json:"worktree_path,omitempty"`
+	LastErrorClass string    `json:"last_error_class,omitempty"`
+	NoWorkCount    int       `json:"no_work_count,omitempty"`
+	BackoffUntil   time.Time `json:"backoff_until,omitempty"`
+	RemoteBranch   string    `json:"remote_branch,omitempty"`
 }
 
 // DaemonState represents the complete daemon state in daemon-agents.json
@@ -316,27 +321,7 @@ func runDaemonStatus(cmd *cobra.Command, args []string) {
 
 	// Format agent table
 	for _, agent := range state.Agents {
-		statusIcon := statusToIcon(agent.Status)
-		fmt.Printf("  %s %s (%s)\n", statusIcon, agent.Worktree, agent.Role)
-		if agent.PID > 0 {
-			fmt.Printf("      PID: %d\n", agent.PID)
-		}
-		if agent.EpicID != "" {
-			fmt.Printf("      Epic: %s\n", agent.EpicID)
-		}
-		if agent.TaskID != "" {
-			fmt.Printf("      Task: %s\n", agent.TaskID)
-		}
-		if agent.RestartCount > 0 {
-			fmt.Printf("      Restarts: %d\n", agent.RestartCount)
-		}
-		if agent.StopReason != "" {
-			if agent.StopReason == string(StopReasonFatalError) && agent.LastExitCode != 0 {
-				fmt.Printf("      Stopped: %s (exit %d)\n", agent.StopReason, agent.LastExitCode)
-			} else {
-				fmt.Printf("      Stopped: %s\n", agent.StopReason)
-			}
-		}
+		printAgentStatus(agent)
 	}
 }
 

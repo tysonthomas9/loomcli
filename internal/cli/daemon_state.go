@@ -119,6 +119,11 @@ func writeStateFile(path string, startedAt time.Time, agents []SupervisedAgentSt
 			LastExit:       ap.LastExit,
 			LastExitCode:   ap.LastExitCode,
 			StopReason:     string(ap.StopReason),
+			WorktreePath:   ap.WorktreePath,
+			LastErrorClass: ap.LastErrorClass,
+			NoWorkCount:    ap.NoWorkCount,
+			BackoffUntil:   ap.BackoffUntil,
+			RemoteBranch:   ap.RemoteBranch,
 		}
 		// Set StoppedAt from LastExit when agent is stopped with a reason
 		if ap.StopReason != "" && ap.PID == 0 {

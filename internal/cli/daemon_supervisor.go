@@ -345,6 +345,7 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 		backoff := d.computeBackoff(ap)
 		ap.mu.Lock()
 		count := ap.restartCount
+		ap.backoffUntil = time.Now().Add(backoff)
 		ap.mu.Unlock()
 		slog.Info("waiting before restart", "worktree", ap.entry.Worktree, "backoff", backoff, "attempt", count)
 
@@ -353,16 +354,28 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 			d.emitEvent(evt)
 		}
 
+		var backoffAction string
 		select {
 		case <-time.After(backoff):
-			// Backoff complete, continue to next iteration
+			backoffAction = "continue"
 		case <-d.shutdown:
+			backoffAction = "shutdown"
+		case <-ap.stopCh:
+			backoffAction = "stop"
+		}
+
+		ap.mu.Lock()
+		ap.backoffUntil = time.Time{}
+		ap.mu.Unlock()
+
+		if backoffAction == "shutdown" {
 			slog.Info("shutdown during backoff", "worktree", ap.entry.Worktree)
 			ap.mu.Lock()
 			ap.stopReason = StopReasonShutdown
 			ap.mu.Unlock()
 			return
-		case <-ap.stopCh:
+		}
+		if backoffAction == "stop" {
 			slog.Info("stop signal during backoff", "worktree", ap.entry.Worktree)
 			ap.mu.Lock()
 			if ap.stopReason == "" {
@@ -405,10 +418,17 @@ func (d *Daemon) Agents() []SupervisedAgentStatus {
 			LastExitCode:   ap.lastExitCode,
 			AssignedEpicID: ap.assignedEpicID,
 			StopReason:     ap.stopReason,
+			NoWorkCount:    ap.noWorkCount,
+			BackoffUntil:   ap.backoffUntil,
+		}
+		if ap.lastError != nil {
+			result[i].LastErrorClass = ap.lastError.Class.String()
 		}
 		ap.mu.Unlock()
 		// Resolve backend name outside the lock (getEffectiveBackend acquires ap.mu)
 		result[i].CurrentBackend = d.getEffectiveBackend(ap)
+		// Resolve remote branch (reads immutable config, no mutex needed)
+		result[i].RemoteBranch = ap.resolveRemoteBranch()
 	}
 	return result
 }

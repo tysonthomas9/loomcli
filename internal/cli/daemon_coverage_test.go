@@ -3,6 +3,8 @@ package cli
 import (
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/agenterr"
 )
 
 func TestNewDaemon_NilConfig(t *testing.T) {
@@ -352,5 +354,139 @@ func TestDaemon_ResolveRoleConfig_UnknownRole(t *testing.T) {
 	_, err := d.resolveRoleConfig("nonexistent", 0)
 	if err == nil {
 		t.Error("expected error for unknown role, got nil")
+	}
+}
+
+func TestDaemon_ShouldRestart_NoWorkCount_Increments(t *testing.T) {
+	maxRetries := 3
+	d := &Daemon{
+		config: &DaemonConfig{
+			Daemon: DaemonSettings{
+				RestartPolicy: RestartPolicy{
+					MaxRetries: &maxRetries,
+				},
+			},
+		},
+	}
+
+	ap := &AgentProcess{
+		lastExitCode: 1,
+		lastStart:    time.Now(),
+		lastError:    &agenterr.AgentError{Class: agenterr.NoWork},
+	}
+
+	// Three consecutive NoWork exits
+	for i := 1; i <= 3; i++ {
+		if !d.shouldRestart(ap) {
+			t.Fatalf("shouldRestart should return true for NoWork (iteration %d)", i)
+		}
+		if ap.noWorkCount != i {
+			t.Errorf("noWorkCount = %d after %d NoWork exits, want %d", ap.noWorkCount, i, i)
+		}
+	}
+}
+
+func TestDaemon_ShouldRestart_NoWorkCount_ResetOnCleanSuccess(t *testing.T) {
+	maxRetries := 3
+	d := &Daemon{
+		config: &DaemonConfig{
+			Daemon: DaemonSettings{
+				RestartPolicy: RestartPolicy{
+					MaxRetries: &maxRetries,
+				},
+			},
+		},
+	}
+
+	ap := &AgentProcess{
+		lastExitCode: 1,
+		lastStart:    time.Now(),
+		lastError:    &agenterr.AgentError{Class: agenterr.NoWork},
+	}
+
+	// Two NoWork exits
+	d.shouldRestart(ap)
+	d.shouldRestart(ap)
+	if ap.noWorkCount != 2 {
+		t.Fatalf("noWorkCount = %d, want 2 after two NoWork exits", ap.noWorkCount)
+	}
+
+	// Clean success exit
+	ap.lastExitCode = 0
+	ap.lastError = nil
+	d.shouldRestart(ap)
+
+	if ap.noWorkCount != 0 {
+		t.Errorf("noWorkCount = %d, want 0 after clean success", ap.noWorkCount)
+	}
+}
+
+func TestDaemon_ShouldRestart_NoWorkCount_ResetOnError(t *testing.T) {
+	maxRetries := 10
+	d := &Daemon{
+		config: &DaemonConfig{
+			Daemon: DaemonSettings{
+				RestartPolicy: RestartPolicy{
+					MaxRetries: &maxRetries,
+				},
+			},
+		},
+	}
+
+	ap := &AgentProcess{
+		lastExitCode: 1,
+		lastStart:    time.Now(),
+		lastError:    &agenterr.AgentError{Class: agenterr.NoWork},
+	}
+
+	// Two NoWork exits
+	d.shouldRestart(ap)
+	d.shouldRestart(ap)
+	if ap.noWorkCount != 2 {
+		t.Fatalf("noWorkCount = %d, want 2 after two NoWork exits", ap.noWorkCount)
+	}
+
+	// Timeout error
+	ap.lastError = &agenterr.AgentError{Class: agenterr.Timeout}
+	d.shouldRestart(ap)
+
+	if ap.noWorkCount != 0 {
+		t.Errorf("noWorkCount = %d, want 0 after Timeout error", ap.noWorkCount)
+	}
+}
+
+func TestDaemon_Agents_Snapshot_NewFields(t *testing.T) {
+	backoffTime := time.Now().Add(30 * time.Second)
+	d := &Daemon{
+		agents: []*AgentProcess{
+			{
+				entry:        AgentEntry{Worktree: "alpha", Role: "plan"},
+				worktreePath: "/path/alpha",
+				pid:          12345,
+				noWorkCount:  5,
+				backoffUntil: backoffTime,
+				lastError:    &agenterr.AgentError{Class: agenterr.RateLimited},
+			},
+		},
+	}
+
+	statuses := d.Agents()
+
+	if len(statuses) != 1 {
+		t.Fatalf("len(Agents()) = %d, want 1", len(statuses))
+	}
+
+	s := statuses[0]
+	if s.NoWorkCount != 5 {
+		t.Errorf("NoWorkCount = %d, want 5", s.NoWorkCount)
+	}
+	if !s.BackoffUntil.Equal(backoffTime) {
+		t.Errorf("BackoffUntil = %v, want %v", s.BackoffUntil, backoffTime)
+	}
+	if s.LastErrorClass != "RateLimited" {
+		t.Errorf("LastErrorClass = %q, want %q", s.LastErrorClass, "RateLimited")
+	}
+	if s.RemoteBranch != "origin/main" {
+		t.Errorf("RemoteBranch = %q, want %q", s.RemoteBranch, "origin/main")
 	}
 }
