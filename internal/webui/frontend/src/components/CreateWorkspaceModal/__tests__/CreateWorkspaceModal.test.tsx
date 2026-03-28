@@ -229,7 +229,7 @@ describe("CreateWorkspaceModal", () => {
       expect(screen.getByTestId("create-workspace-submit")).toBeEnabled();
     });
 
-    it("shows 'Creating...' while submitting", async () => {
+    it("shows 'Creating...' and spinner while submitting", async () => {
       // Keep the promise pending so we can observe the submitting state
       let resolvePromise!: (value: WorkspaceData) => void;
       mockCreateWorkspace.mockImplementation(
@@ -263,9 +263,86 @@ describe("CreateWorkspaceModal", () => {
       });
 
       expect(screen.getByTestId("create-workspace-submit")).toBeDisabled();
+      expect(
+        screen.getByTestId("create-workspace-spinner"),
+      ).toBeInTheDocument();
 
       // Clean up
       resolvePromise(MOCK_WORKSPACE_DATA);
+    });
+
+    it("does not show spinner before submission", () => {
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      expect(
+        screen.queryByTestId("create-workspace-spinner"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("removes spinner after successful submission", async () => {
+      mockCreateWorkspace.mockResolvedValue(MOCK_WORKSPACE_DATA);
+
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      // Default type is clone, need name + URL to enable submit
+      fireEvent.change(screen.getByTestId("create-workspace-name"), {
+        target: { value: "my-workspace" },
+      });
+      fireEvent.change(screen.getByTestId("create-workspace-clone-url"), {
+        target: { value: "https://github.com/example/repo" },
+      });
+      fireEvent.click(screen.getByTestId("create-workspace-submit"));
+
+      await waitFor(() => {
+        expect(onSuccess).toHaveBeenCalled();
+      });
+
+      expect(
+        screen.queryByTestId("create-workspace-spinner"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("removes spinner after failed submission", async () => {
+      mockCreateWorkspace.mockRejectedValue(new Error("Network error"));
+
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      // Default type is clone, need name + URL to enable submit
+      fireEvent.change(screen.getByTestId("create-workspace-name"), {
+        target: { value: "my-workspace" },
+      });
+      fireEvent.change(screen.getByTestId("create-workspace-clone-url"), {
+        target: { value: "https://github.com/example/repo" },
+      });
+      fireEvent.click(screen.getByTestId("create-workspace-submit"));
+
+      await waitFor(() => {
+        expect(
+          screen.getByTestId("create-workspace-error"),
+        ).toBeInTheDocument();
+      });
+
+      expect(
+        screen.queryByTestId("create-workspace-spinner"),
+      ).not.toBeInTheDocument();
     });
   });
 

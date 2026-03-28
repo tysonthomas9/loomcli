@@ -404,10 +404,17 @@ export function CreateWorkspaceModal({
             </button>
             <button
               type="submit"
-              className={styles.submitButton}
+              className={`${styles.submitButton}${isSubmitting ? ` ${styles.submitting}` : ""}`}
               disabled={!canSubmit}
               data-testid="create-workspace-submit"
             >
+              {isSubmitting && (
+                <span
+                  className={styles.spinner}
+                  aria-hidden="true"
+                  data-testid="create-workspace-spinner"
+                />
+              )}
               {isSubmitting ? "Creating..." : "Create Workspace"}
             </button>
           </div>
