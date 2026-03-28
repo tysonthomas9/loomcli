@@ -30,6 +30,7 @@ export default defineConfig(({ mode }) => ({
         manualChunks: {
           react: ["react", "react-dom"],
           "react-flow": ["@xyflow/react"],
+          "better-auth": ["better-auth/react", "better-auth/client/plugins"],
           codemirror: [
             "@codemirror/state",
             "@codemirror/view",

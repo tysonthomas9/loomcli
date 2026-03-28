@@ -1,0 +1,91 @@
+/* Full-page overlay — mirrors DaemonUnavailableOverlay */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  outline: none;
+}
+
+.content {
+  background: var(--color-panel-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 40px 32px;
+  max-width: 420px;
+  width: 90%;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.title {
+  font-weight: 600;
+  font-size: 18px;
+  margin: 0 0 8px;
+  color: var(--color-text);
+}
+
+.errorMessage {
+  color: var(--color-danger);
+  font-size: 13px;
+  margin: 0;
+  line-height: 1.4;
+  max-width: 320px;
+}
+
+.warningMessage {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  margin: 0;
+  line-height: 1.4;
+}
+
+/* OAuth buttons — branded colors, NOT design tokens */
+.githubButton,
+.googleButton {
+  width: 100%;
+  max-width: 280px;
+  padding: 10px 20px;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity var(--transition-fast);
+}
+
+.githubButton {
+  background: #24292e;
+}
+
+.googleButton {
+  background: #4285f4;
+}
+
+.githubButton:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.googleButton:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.githubButton:disabled,
+.googleButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .githubButton,
+  .googleButton {
+    transition: none !important;
+  }
+}
