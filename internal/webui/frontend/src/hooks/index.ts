@@ -105,7 +105,12 @@ export type {
 export { useAgents } from "./useAgents";
 export type { UseAgentsOptions, UseAgentsResult } from "./useAgents";
 
-export { AgentProvider, useAgentContext } from "./useAgentContext";
+export {
+  AgentProvider,
+  useAgentContext,
+  AgentContext,
+  NO_AGENT_CONTEXT,
+} from "./useAgentContext";
 export type { AgentContextValue, AgentProviderProps } from "./useAgentContext";
 
 export { useToast, ToastProvider } from "./useToast";
@@ -181,7 +186,12 @@ export type {
 export { useWorkspace } from "./useWorkspace";
 export type { UseWorkspaceOptions, UseWorkspaceReturn } from "./useWorkspace";
 
-export { WorkspaceProvider, useWorkspaceContext } from "./useWorkspaceContext";
+export {
+  WorkspaceProvider,
+  useWorkspaceContext,
+  WorkspaceContext,
+  NO_WORKSPACE_CONTEXT,
+} from "./useWorkspaceContext";
 export type {
   WorkspaceContextValue,
   WorkspaceProviderProps,

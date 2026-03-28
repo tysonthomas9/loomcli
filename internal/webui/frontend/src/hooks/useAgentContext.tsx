@@ -19,7 +19,9 @@ export interface AgentContextValue extends UseAgentsResult {
   getAgentByName: (name: string) => LoomAgentStatus | undefined;
 }
 
-const AgentContext = createContext<AgentContextValue | undefined>(undefined);
+export const AgentContext = createContext<AgentContextValue | undefined>(
+  undefined,
+);
 
 /**
  * Props for AgentProvider.
@@ -53,7 +55,7 @@ export function AgentProvider({ children }: AgentProviderProps): JSX.Element {
 }
 
 /** Default no-op value returned when useAgentContext is called outside a provider. */
-const NO_AGENT_CONTEXT: AgentContextValue = {
+export const NO_AGENT_CONTEXT: AgentContextValue = {
   agents: [],
   tasks: {
     needs_planning: 0,
