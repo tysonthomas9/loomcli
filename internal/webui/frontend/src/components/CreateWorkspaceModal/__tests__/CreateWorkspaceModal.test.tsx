@@ -37,6 +37,7 @@ import type { WorkspaceData } from "@/api/workspace";
 const mockCreateWorkspace = vi.mocked(createWorkspace);
 
 const MOCK_WORKSPACE_DATA: WorkspaceData = {
+  id: "ws-test-id",
   name: "test-ws",
   path: "/home/user/.loom/workspaces/test-ws",
   repos: [],
@@ -506,6 +507,66 @@ describe("CreateWorkspaceModal", () => {
       expect(screen.getByTestId("create-workspace-error")).toHaveTextContent(
         "Workspace name already exists",
       );
+    });
+  });
+
+  describe("modal close on success", () => {
+    it("closes modal when onSuccess throws", async () => {
+      mockCreateWorkspace.mockResolvedValue(MOCK_WORKSPACE_DATA);
+      onSuccess.mockImplementation(() => {
+        throw new Error("navigation failed");
+      });
+
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      fireEvent.click(screen.getByLabelText("Local Repos"));
+      fireEvent.change(screen.getByTestId("create-workspace-name"), {
+        target: { value: "test-ws" },
+      });
+      fireEvent.change(screen.getByTestId("create-workspace-repo-path"), {
+        target: { value: "/path/to/repo" },
+      });
+      fireEvent.click(screen.getByTestId("create-workspace-submit"));
+
+      await waitFor(() => {
+        expect(onClose).toHaveBeenCalledTimes(1);
+      });
+      expect(onSuccess).toHaveBeenCalled();
+    });
+
+    it("does not close modal on API failure", async () => {
+      mockCreateWorkspace.mockRejectedValue(new Error("Network error"));
+
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      fireEvent.click(screen.getByLabelText("Local Repos"));
+      fireEvent.change(screen.getByTestId("create-workspace-name"), {
+        target: { value: "test-ws" },
+      });
+      fireEvent.change(screen.getByTestId("create-workspace-repo-path"), {
+        target: { value: "/path/to/repo" },
+      });
+      fireEvent.click(screen.getByTestId("create-workspace-submit"));
+
+      await waitFor(() => {
+        expect(
+          screen.getByTestId("create-workspace-error"),
+        ).toBeInTheDocument();
+      });
+      expect(onClose).not.toHaveBeenCalled();
+      expect(onSuccess).not.toHaveBeenCalled();
     });
   });
 

@@ -151,14 +151,13 @@ export function CreateWorkspaceModal({
         req.path = path.trim();
       }
 
+      let data: WorkspaceData;
       try {
-        const data = await createWorkspace(req);
-        onSuccess(data, req.name);
-        onClose();
+        data = await createWorkspace(req);
       } catch (err: unknown) {
+        // API failure — show error, keep modal open for retry
         const message =
           err instanceof Error ? err.message : "Failed to create workspace";
-        // Extract server error message from ApiError body
         if (
           typeof err === "object" &&
           err !== null &&
@@ -170,9 +169,18 @@ export function CreateWorkspaceModal({
         } else {
           setError(message);
         }
-      } finally {
         setIsSubmitting(false);
+        return;
       }
+
+      // API succeeded — always close modal, regardless of callback errors
+      setIsSubmitting(false);
+      try {
+        onSuccess(data, req.name);
+      } catch {
+        // onSuccess errors (e.g., navigation failure) must not block close
+      }
+      onClose();
     },
     [
       canSubmit,

@@ -1331,7 +1331,7 @@ function App() {
           setShowCreateWorkspace(false);
           // Navigate to the new workspace via SPA navigation.
           // Find the new workspace ID from the refreshed workspace list.
-          const newWs = data.workspaces.find((ws) => ws.name === createdName);
+          const newWs = data.workspaces?.find((ws) => ws.name === createdName);
           if (newWs) {
             navigate(`/ws/${newWs.id}/`);
           }
