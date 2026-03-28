@@ -355,6 +355,11 @@ function DefaultContent({
   const addTabRef = useRef<HTMLDivElement>(null);
   // Track whether we've already restored tabs from persistence for this issue
   const restoredIssueIdRef = useRef<string | null>(null);
+  // Ref mirroring tabs for cleanup effects (avoids adding tabs as dependency)
+  const tabsRef = useRef<DetailTab[]>(tabs);
+  useEffect(() => {
+    tabsRef.current = tabs;
+  }, [tabs]);
 
   const addTab = useCallback(
     (type: "logs" | "terminal", metadata?: DetailTabMetadata) => {
@@ -397,24 +402,28 @@ function DefaultContent({
     null,
   );
 
+  // Fire-and-forget cleanup for terminal tabs discarded implicitly (issue change, unmount)
+  const cleanupTerminalTabs = useCallback(
+    (tabList: DetailTab[]) => {
+      for (const tab of tabList) {
+        if (tab.type !== "terminal" || !tab.metadata?.sessionName) continue;
+        const sn = tab.metadata.sessionName;
+        if (workspace?.id) deleteTabMetadata(workspace.id, sn).catch(() => {});
+        scheduleSessionKill(workspaceId, sn).catch(() => {});
+      }
+    },
+    [workspace?.id, workspaceId],
+  );
+
   // Close a tab: remove from state, clean up backend resources
   const closeTab = useCallback(
     (id: string) => {
-      // Find the tab before updating state to extract metadata for cleanup
       const tab = tabs.find((t) => t.id === id);
-
-      // Fire-and-forget backend cleanup for terminal tabs
-      if (tab?.type === "terminal" && tab.metadata?.sessionName) {
-        const sessionName = tab.metadata.sessionName;
-        if (workspace?.id)
-          deleteTabMetadata(workspace.id, sessionName).catch(() => {});
-        scheduleSessionKill(workspaceId, sessionName).catch(() => {});
-      }
-
+      if (tab) cleanupTerminalTabs([tab]);
       setTabs((prev) => prev.filter((t) => t.id !== id));
       setActiveTabId((prev) => (prev === id ? "details" : prev));
     },
-    [tabs],
+    [tabs, cleanupTerminalTabs],
   );
 
   // Handle tab close: confirm if terminal has active connection
@@ -474,12 +483,15 @@ function DefaultContent({
     enabled: isOpen && activeTabId === "logs" && hasAgent,
   });
 
-  // Reset tabs when issue changes
+  // Reset tabs when issue changes — clean up orphaned terminal sessions first
   useEffect(() => {
+    cleanupTerminalTabs(tabsRef.current);
+    // Sync ref immediately so unmount cleanup won't re-clean the same tabs
+    tabsRef.current = [DETAILS_TAB, SESSIONS_TAB];
     restoredIssueIdRef.current = null;
     setTabs([DETAILS_TAB, SESSIONS_TAB]);
     setActiveTabId("details");
-  }, [issue?.id]);
+  }, [issue?.id, cleanupTerminalTabs]);
 
   // Restore tabs from persisted state once loaded
   useEffect(() => {
@@ -564,13 +576,27 @@ function DefaultContent({
     persistTabs(tabsToSave, activeTabId);
   }, [tabs, activeTabId, issue?.id, isLoadingPersistedTabs, persistTabs]);
 
-  // Reset to details when agent removed while on logs tab
+  // Reset to details when agent removed while on logs tab — clean up terminal sessions
   useEffect(() => {
     if (activeTabId === "logs" && !hasAgent) {
+      cleanupTerminalTabs(tabsRef.current);
+      tabsRef.current = [DETAILS_TAB, SESSIONS_TAB];
       setTabs([DETAILS_TAB, SESSIONS_TAB]);
       setActiveTabId("details");
     }
-  }, [activeTabId, hasAgent]);
+  }, [activeTabId, hasAgent, cleanupTerminalTabs]);
+
+  // Ref to cleanupTerminalTabs so unmount cleanup uses latest without re-registering
+  const cleanupRef = useRef(cleanupTerminalTabs);
+  useEffect(() => {
+    cleanupRef.current = cleanupTerminalTabs;
+  }, [cleanupTerminalTabs]);
+  useEffect(
+    () => () => {
+      cleanupRef.current(tabsRef.current);
+    },
+    [],
+  );
 
   // Close add-tab dropdown on outside click
   useEffect(() => {
