@@ -591,6 +591,99 @@ func TestLoadMetadata_PathTraversal(t *testing.T) {
 	}
 }
 
+func TestSaveMetadata_RoundTrip(t *testing.T) {
+	store := createTestStore(t)
+	sessionID := "test-save-meta-roundtrip"
+
+	// Create the session directory manually.
+	sessDir := filepath.Join(store.Dir(), sessionID)
+	if err := os.MkdirAll(sessDir, 0o755); err != nil {
+		t.Fatalf("create session dir: %v", err)
+	}
+
+	// Write initial metadata.
+	now := time.Now().UTC()
+	meta := &SessionMetadata{
+		SessionRecord: SessionRecord{
+			SchemaVersion:    CurrentSchemaVersion,
+			SessionID:        sessionID,
+			AgentName:        "nova",
+			Backend:          "claude",
+			Status:           StatusRunning,
+			StartedAt:        now,
+			InputTokens:      0,
+			OutputTokens:     0,
+			CacheReadTokens:  0,
+			CacheWriteTokens: 0,
+		},
+	}
+	if err := store.SaveMetadata(sessionID, meta); err != nil {
+		t.Fatalf("initial SaveMetadata: %v", err)
+	}
+
+	// Patch token usage fields and save again.
+	meta.InputTokens = 5000
+	meta.OutputTokens = 2000
+	meta.CacheReadTokens = 1000
+	meta.CacheWriteTokens = 500
+	meta.EstimatedCostUSD = 0.075
+	if err := store.SaveMetadata(sessionID, meta); err != nil {
+		t.Fatalf("patched SaveMetadata: %v", err)
+	}
+
+	// Load and verify round-trip.
+	loaded, err := store.LoadMetadata(sessionID)
+	if err != nil {
+		t.Fatalf("LoadMetadata: %v", err)
+	}
+	if loaded.SessionID != sessionID {
+		t.Errorf("SessionID = %q, want %q", loaded.SessionID, sessionID)
+	}
+	if loaded.AgentName != "nova" {
+		t.Errorf("AgentName = %q, want %q", loaded.AgentName, "nova")
+	}
+	if loaded.InputTokens != 5000 {
+		t.Errorf("InputTokens = %d, want 5000", loaded.InputTokens)
+	}
+	if loaded.OutputTokens != 2000 {
+		t.Errorf("OutputTokens = %d, want 2000", loaded.OutputTokens)
+	}
+	if loaded.CacheReadTokens != 1000 {
+		t.Errorf("CacheReadTokens = %d, want 1000", loaded.CacheReadTokens)
+	}
+	if loaded.CacheWriteTokens != 500 {
+		t.Errorf("CacheWriteTokens = %d, want 500", loaded.CacheWriteTokens)
+	}
+	if loaded.EstimatedCostUSD != 0.075 {
+		t.Errorf("EstimatedCostUSD = %f, want 0.075", loaded.EstimatedCostUSD)
+	}
+}
+
+func TestSaveMetadata_InvalidSessionID(t *testing.T) {
+	store := createTestStore(t)
+
+	meta := &SessionMetadata{
+		SessionRecord: SessionRecord{
+			SessionID: "valid-id",
+			Status:    StatusRunning,
+		},
+	}
+
+	invalidIDs := []string{
+		"../escape",
+		"a/b",
+		"a\\b",
+		"",
+	}
+
+	for _, id := range invalidIDs {
+		err := store.SaveMetadata(id, meta)
+		if err == nil {
+			t.Errorf("SaveMetadata(%q) should return error", id)
+		}
+	}
+}
+
 // rewriteIndex replaces the last line in index.jsonl with a modified record.
 // Used in tests to backdate EndedAt for purge testing.
 func rewriteIndex(t *testing.T, store *Store, rec SessionRecord) {

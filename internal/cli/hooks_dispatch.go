@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/sessions"
+	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
 // dispatchHookEvent maps a parsed HookEvent to a sessions.TranscriptEntry
@@ -46,7 +47,53 @@ func dispatchHookEvent(event *HookEvent, beadsDir, sessionID string) error { //n
 		return nil
 	}
 
+	// On SessionEnd, capture token usage from Claude's transcript and patch
+	// session metadata. This runs inside the hook process so errors are
+	// logged but never returned.
+	if event.Type == HookSessionEnd && event.SessionRef != "" {
+		captureTokenUsage(store, sessionID, event.SessionRef, event.Backend)
+	}
+
 	return nil
+}
+
+// captureTokenUsage reads the Claude transcript, sums token usage, and patches
+// the session metadata. All errors are logged to stderr and never propagated.
+func captureTokenUsage(store *sessions.Store, sessionID, transcriptPath, backend string) {
+	tok, err := sessions.SumTranscriptUsage(transcriptPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "loom hook: failed to sum transcript usage: %v\n", err)
+		return
+	}
+
+	// Nothing to write if there was no usage at all.
+	if tok.InputTokens == 0 && tok.OutputTokens == 0 &&
+		tok.CacheReadTokens == 0 && tok.CacheWriteTokens == 0 {
+		return
+	}
+
+	meta, err := store.LoadMetadata(sessionID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "loom hook: failed to load metadata for token capture: %v\n", err)
+		return
+	}
+
+	meta.InputTokens = tok.InputTokens
+	meta.OutputTokens = tok.OutputTokens
+	meta.CacheReadTokens = tok.CacheReadTokens
+	meta.CacheWriteTokens = tok.CacheWriteTokens
+
+	tier := usage.ResolvePricing(backend)
+	meta.EstimatedCostUSD = usage.EstimateCost(tier, usage.SessionUsage{
+		InputTokens:      tok.InputTokens,
+		OutputTokens:     tok.OutputTokens,
+		CacheReadTokens:  tok.CacheReadTokens,
+		CacheWriteTokens: tok.CacheWriteTokens,
+	})
+
+	if err := store.SaveMetadata(sessionID, meta); err != nil {
+		fmt.Fprintf(os.Stderr, "loom hook: failed to save metadata with token usage: %v\n", err)
+	}
 }
 
 // mapEventToEntry converts a backend-agnostic HookEvent into a TranscriptEntry.

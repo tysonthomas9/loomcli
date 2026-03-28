@@ -163,6 +163,17 @@ func readAndIncrementSeq(sessDir string) int {
 	return seq
 }
 
+// SaveMetadata writes the given SessionMetadata to disk atomically for the
+// specified session. This is used by hook handlers to patch metadata (e.g.,
+// token usage) outside of the normal Finalize flow.
+func (s *Store) SaveMetadata(sessionID string, meta *SessionMetadata) error {
+	if err := validateSessionID(sessionID); err != nil {
+		return err
+	}
+	sessDir := filepath.Join(s.dir, sessionID)
+	return writeMetadataAtomic(sessDir, *meta)
+}
+
 // writeMetadataAtomic writes metadata.json using temp file + rename
 // to prevent partial reads.
 func writeMetadataAtomic(sessDir string, meta SessionMetadata) error {
