@@ -9,7 +9,7 @@ import (
 func TestSumTranscriptUsage_EmptyFile(t *testing.T) {
 	dir := t.TempDir()
 	txPath := filepath.Join(dir, "transcript.jsonl")
-	if err := os.WriteFile(txPath, []byte(""), 0o644); err != nil {
+	if err := os.WriteFile(txPath, []byte(""), 0o600); err != nil {
 		t.Fatalf("write empty file: %v", err)
 	}
 
@@ -28,7 +28,7 @@ func TestSumTranscriptUsage_SingleAssistant(t *testing.T) {
 
 	line := `{"type":"assistant","message":{"id":"msg_001","role":"assistant","content":[],"usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":200,"cache_creation_input_tokens":300}}}` + "\n"
 
-	if err := os.WriteFile(txPath, []byte(line), 0o644); err != nil {
+	if err := os.WriteFile(txPath, []byte(line), 0o600); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
 
@@ -58,7 +58,7 @@ func TestSumTranscriptUsage_MultipleMessages(t *testing.T) {
 {"type":"assistant","message":{"id":"msg_002","role":"assistant","content":[],"usage":{"input_tokens":200,"output_tokens":80,"cache_read_input_tokens":30,"cache_creation_input_tokens":40}}}
 {"type":"assistant","message":{"id":"msg_003","role":"assistant","content":[],"usage":{"input_tokens":150,"output_tokens":60,"cache_read_input_tokens":5,"cache_creation_input_tokens":0}}}
 `
-	if err := os.WriteFile(txPath, []byte(lines), 0o644); err != nil {
+	if err := os.WriteFile(txPath, []byte(lines), 0o600); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
 
@@ -89,7 +89,7 @@ func TestSumTranscriptUsage_DuplicateMessageIDs(t *testing.T) {
 {"type":"assistant","message":{"id":"msg_002","role":"assistant","content":[],"usage":{"input_tokens":200,"output_tokens":80,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}
 {"type":"assistant","message":{"id":"msg_001","role":"assistant","content":[],"usage":{"input_tokens":500,"output_tokens":150,"cache_read_input_tokens":30,"cache_creation_input_tokens":40}}}
 `
-	if err := os.WriteFile(txPath, []byte(lines), 0o644); err != nil {
+	if err := os.WriteFile(txPath, []byte(lines), 0o600); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
 
@@ -124,7 +124,7 @@ func TestSumTranscriptUsage_NonAssistantSkipped(t *testing.T) {
 {"type":"tool","message":{"id":"msg_t01","role":"tool","content":[]}}
 {"type":"system","message":{"id":"msg_s01","content":[]}}
 `
-	if err := os.WriteFile(txPath, []byte(lines), 0o644); err != nil {
+	if err := os.WriteFile(txPath, []byte(lines), 0o600); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
 
@@ -156,7 +156,7 @@ func TestSumTranscriptUsage_CorruptLine(t *testing.T) {
 
 	// Entirely corrupt content — should return zero usage, nil error.
 	content := "this is not json at all\n{broken json!!\n"
-	if err := os.WriteFile(txPath, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(txPath, []byte(content), 0o600); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
 
@@ -179,7 +179,7 @@ this line is corrupt
 {also broken
 {"type":"assistant","message":{"id":"msg_003","role":"assistant","content":[],"usage":{"input_tokens":50,"output_tokens":20,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}
 `
-	if err := os.WriteFile(txPath, []byte(lines), 0o644); err != nil {
+	if err := os.WriteFile(txPath, []byte(lines), 0o600); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
 

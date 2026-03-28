@@ -96,8 +96,7 @@ func (s *Store) appendIndex(rec SessionRecord) error {
 	indexPath := filepath.Join(s.dir, "index.jsonl")
 
 	// #nosec G304 — controlled path from Store
-	// #nosec G302 — index data is not sensitive
-	f, err := os.OpenFile(indexPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(indexPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("open index file: %w", err)
 	}

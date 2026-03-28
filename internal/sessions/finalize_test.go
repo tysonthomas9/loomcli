@@ -172,6 +172,16 @@ func TestFinalize_IndexEntry(t *testing.T) {
 	if rec.EstimatedCostUSD != 0.12 {
 		t.Errorf("EstimatedCostUSD = %f, want 0.12", rec.EstimatedCostUSD)
 	}
+
+	// Verify index.jsonl permissions.
+	indexPath := filepath.Join(store.dir, "index.jsonl")
+	indexInfo, err := os.Stat(indexPath)
+	if err != nil {
+		t.Fatalf("stat index.jsonl: %v", err)
+	}
+	if got := indexInfo.Mode().Perm(); got != 0o600 {
+		t.Errorf("index.jsonl mode = %o, want %o", got, 0o600)
+	}
 }
 
 func TestFinalize_DiffStats(t *testing.T) {
@@ -230,6 +240,15 @@ func TestFinalize_DiffStats(t *testing.T) {
 	}
 	if string(data) != "diff --git a/x.go b/x.go\n+hello\n" {
 		t.Errorf("diff.patch content = %q", string(data))
+	}
+
+	// Verify diff.patch permissions.
+	diffInfo, err := os.Stat(diffPath)
+	if err != nil {
+		t.Fatalf("stat diff.patch: %v", err)
+	}
+	if got := diffInfo.Mode().Perm(); got != 0o600 {
+		t.Errorf("diff.patch mode = %o, want %o", got, 0o600)
 	}
 }
 
@@ -309,7 +328,7 @@ func TestQuery_CorruptLine(t *testing.T) {
 
 	// Inject a corrupt line into index.jsonl.
 	indexPath := filepath.Join(store.dir, "index.jsonl")
-	f, err := os.OpenFile(indexPath, os.O_APPEND|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(indexPath, os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		t.Fatalf("open index: %v", err)
 	}
@@ -597,7 +616,7 @@ func TestSaveMetadata_RoundTrip(t *testing.T) {
 
 	// Create the session directory manually.
 	sessDir := filepath.Join(store.Dir(), sessionID)
-	if err := os.MkdirAll(sessDir, 0o755); err != nil {
+	if err := os.MkdirAll(sessDir, 0o750); err != nil {
 		t.Fatalf("create session dir: %v", err)
 	}
 
@@ -899,7 +918,7 @@ func rewriteIndex(t *testing.T, store *Store, rec SessionRecord) {
 		out = append(out, line...)
 		out = append(out, '\n')
 	}
-	if err := os.WriteFile(indexPath, out, 0o644); err != nil {
+	if err := os.WriteFile(indexPath, out, 0o600); err != nil {
 		t.Fatalf("rewrite index: %v", err)
 	}
 }

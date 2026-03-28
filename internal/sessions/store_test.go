@@ -30,6 +30,9 @@ func TestNewStore(t *testing.T) {
 	if !info.IsDir() {
 		t.Fatalf("sessions/ is not a directory")
 	}
+	if got := info.Mode().Perm(); got != 0o750 {
+		t.Errorf("sessions/ dir mode = %o, want %o", got, 0o750)
+	}
 }
 
 func TestCreateSession(t *testing.T) {
@@ -68,6 +71,9 @@ func TestCreateSession(t *testing.T) {
 	if !info.IsDir() {
 		t.Fatalf("session path is not a directory")
 	}
+	if got := info.Mode().Perm(); got != 0o750 {
+		t.Errorf("session dir mode = %o, want %o", got, 0o750)
+	}
 
 	// Check prompt.txt exists with correct content.
 	promptData, err := os.ReadFile(filepath.Join(sessDir, "prompt.txt"))
@@ -76,6 +82,13 @@ func TestCreateSession(t *testing.T) {
 	}
 	if string(promptData) != "Implement the widget feature" {
 		t.Errorf("prompt.txt = %q, want %q", string(promptData), "Implement the widget feature")
+	}
+	promptInfo, err := os.Stat(filepath.Join(sessDir, "prompt.txt"))
+	if err != nil {
+		t.Fatalf("stat prompt.txt: %v", err)
+	}
+	if got := promptInfo.Mode().Perm(); got != 0o600 {
+		t.Errorf("prompt.txt mode = %o, want %o", got, 0o600)
 	}
 
 	// Check metadata.json exists and has status=running.

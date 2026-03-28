@@ -120,7 +120,7 @@ func TestLoadMetadata_NormalizesOnLoad(t *testing.T) {
 		t.Fatalf("marshal v0 metadata: %v", err)
 	}
 	metaPath := filepath.Join(store.dir, sid, "metadata.json")
-	if err := os.WriteFile(metaPath, v0Data, 0o644); err != nil {
+	if err := os.WriteFile(metaPath, v0Data, 0o600); err != nil {
 		t.Fatalf("write v0 metadata.json: %v", err)
 	}
 
@@ -162,7 +162,7 @@ func TestQuery_NormalizesRecords(t *testing.T) {
 		t.Fatalf("marshal v0 record: %v", err)
 	}
 	indexPath := filepath.Join(store.dir, "index.jsonl")
-	if err := os.WriteFile(indexPath, append(v0Line, '\n'), 0o644); err != nil {
+	if err := os.WriteFile(indexPath, append(v0Line, '\n'), 0o600); err != nil {
 		t.Fatalf("write v0 index.jsonl: %v", err)
 	}
 

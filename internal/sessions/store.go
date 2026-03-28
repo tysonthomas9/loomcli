@@ -26,7 +26,7 @@ func (s *Store) Dir() string { return s.dir }
 // It creates the sessions/ directory if it does not exist.
 func NewStore(beadsDir string) (*Store, error) {
 	dir := filepath.Join(beadsDir, "sessions")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, fmt.Errorf("create sessions dir: %w", err)
 	}
 	return &Store{dir: dir}, nil
@@ -45,14 +45,13 @@ func (s *Store) CreateSession(opts CreateOptions) (*Session, error) {
 	}
 
 	sessDir := filepath.Join(s.dir, sid)
-	if err := os.MkdirAll(sessDir, 0o755); err != nil {
+	if err := os.MkdirAll(sessDir, 0o750); err != nil {
 		return nil, fmt.Errorf("create session dir: %w", err)
 	}
 
 	// Write prompt.txt.
 	promptPath := filepath.Join(sessDir, "prompt.txt")
-	// #nosec G306 — prompt text is not sensitive
-	if err := os.WriteFile(promptPath, []byte(opts.Prompt), 0o644); err != nil {
+	if err := os.WriteFile(promptPath, []byte(opts.Prompt), 0o600); err != nil {
 		return nil, fmt.Errorf("write prompt.txt: %w", err)
 	}
 
@@ -158,8 +157,7 @@ func readAndIncrementSeq(sessDir string) int {
 		}
 	}
 
-	// #nosec G306 — seq file is not sensitive
-	_ = os.WriteFile(seqPath, []byte(strconv.Itoa(seq)), 0o644)
+	_ = os.WriteFile(seqPath, []byte(strconv.Itoa(seq)), 0o600)
 	return seq
 }
 
@@ -185,8 +183,7 @@ func writeMetadataAtomic(sessDir string, meta SessionMetadata) error {
 		return fmt.Errorf("marshal metadata: %w", err)
 	}
 
-	// #nosec G306 — metadata is not sensitive
-	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
+	if err := os.WriteFile(tmpPath, data, 0o600); err != nil {
 		return fmt.Errorf("write metadata tmp: %w", err)
 	}
 
