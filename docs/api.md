@@ -2534,9 +2534,9 @@ List commits between the merge-base (or explicit `from` ref) and HEAD in the age
 - **Errors:**
   - `400` — missing agent name: `{"error": "missing agent name"}` (no `success` field)
   - `400` — invalid agent name: `{"error": "invalid agent name: must match [a-zA-Z0-9_-]+"}` (no `success` field)
-  - `400` — invalid `from` ref (fails regex or contains `..`): `{"success": false, "error": "invalid from ref"}`
-  - `400` — invalid `limit` value: `{"success": false, "error": "invalid limit value: abc (must be an integer)"}`
   - `404` — agent worktree not found: `{"error": "agent worktree \"name\" not found"}` (no `success` field)
+  - `400` — invalid `limit` value: `{"success": false, "error": "invalid limit value: abc (must be an integer)"}`
+  - `400` — invalid `from` ref (fails regex or contains `..`): `{"success": false, "error": "invalid from ref"}`
   - `500` — merge-base resolution failed: `{"success": false, "error": "failed to resolve merge-base: ..."}`
   - `500` — git log operation failed: `{"success": false, "error": "failed to get diff commits: ..."}`
 
@@ -2595,10 +2595,10 @@ List changed files between two refs in the agent's worktree, with per-file statu
 - **Errors:**
   - `400` — missing agent name: `{"error": "missing agent name"}` (no `success` field)
   - `400` — invalid agent name: `{"error": "invalid agent name: must match [a-zA-Z0-9_-]+"}` (no `success` field)
+  - `404` — agent worktree not found: `{"error": "agent worktree \"name\" not found"}` (no `success` field)
   - `400` — missing `to` parameter: `{"success": false, "error": "missing required query parameter: to"}`
   - `400` — invalid `to` ref (fails regex or contains `..`): `{"success": false, "error": "invalid to ref"}`
   - `400` — invalid `from` ref (fails regex or contains `..`): `{"success": false, "error": "invalid from ref"}`
-  - `404` — agent worktree not found: `{"error": "agent worktree \"name\" not found"}` (no `success` field)
   - `500` — merge-base resolution failed: `{"success": false, "error": "failed to resolve merge-base: ..."}`
   - `500` — git diff operation failed: `{"success": false, "error": "failed to get diff files: ..."}`
 
@@ -2672,12 +2672,12 @@ Get the unified diff patch for a single file between two refs.
 - **Errors:**
   - `400` — missing agent name: `{"error": "missing agent name"}` (no `success` field)
   - `400` — invalid agent name: `{"error": "invalid agent name: must match [a-zA-Z0-9_-]+"}` (no `success` field)
+  - `404` — agent worktree not found: `{"error": "agent worktree \"name\" not found"}` (no `success` field)
   - `400` — missing `path` parameter: `{"success": false, "error": "missing required query parameter: path"}`
   - `400` — invalid path (absolute, empty, traversal): `{"success": false, "error": "invalid path: must be relative with no '..' traversal"}`
   - `400` — missing `to` parameter: `{"success": false, "error": "missing required query parameter: to"}`
   - `400` — invalid `to` ref (fails regex or contains `..`): `{"success": false, "error": "invalid to ref"}`
   - `400` — invalid `from` ref (fails regex or contains `..`): `{"success": false, "error": "invalid from ref"}`
-  - `404` — agent worktree not found: `{"error": "agent worktree \"name\" not found"}` (no `success` field)
   - `500` — merge-base resolution failed: `{"success": false, "error": "failed to resolve merge-base: ..."}`
   - `500` — git diff operation failed: `{"success": false, "error": "failed to get diff patch: ..."}`
 
