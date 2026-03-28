@@ -11,6 +11,7 @@
  */
 
 import { renderHook, act } from "@testing-library/react";
+import React from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { fetchWorkspace } from "@/api/workspace";
@@ -453,6 +454,65 @@ describe("useWorkspaceRepos", () => {
 
       // fetchWorkspace should not have been called again
       expect(mockFetchWorkspace.mock.calls.length).toBe(callCountBeforeUnmount);
+    });
+  });
+
+  describe("remount behavior (StrictMode compatibility)", () => {
+    // StrictMode double-invokes effects: mount → cleanup → remount.
+    // Without the fix, mountedRef.current stays false after cleanup,
+    // causing all state updates in fetchData to be silently dropped.
+    const strictWrapper = ({ children }: { children: React.ReactNode }) =>
+      React.createElement(React.StrictMode, null, children);
+
+    it("state updates work after StrictMode double-invoke cycle", async () => {
+      const data = createWorkspaceData();
+      // StrictMode causes two mount cycles — mock two successful responses
+      mockFetchWorkspace
+        .mockResolvedValueOnce(data)
+        .mockResolvedValueOnce(data);
+
+      const { result } = renderHook(() => useWorkspaceRepos(), {
+        wrapper: strictWrapper,
+      });
+
+      await flushPromises();
+
+      // After the double-invoke cycle, the hook should be connected
+      expect(result.current.connectionState).toBe("connected");
+      expect(result.current.workspace).toEqual(data);
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    it("auto-retry works after StrictMode double-invoke cycle", async () => {
+      mockCalculateBackoff.mockReturnValue(3000);
+
+      // StrictMode double-invoke causes two fetchData calls — both fail.
+      // Each failure schedules a retry timer, so multiple timers may fire.
+      // Use mockRejectedValue (not Once) to handle all initial calls,
+      // then switch to resolved for the retry.
+      mockFetchWorkspace.mockRejectedValue(new Error("fail"));
+
+      const { result } = renderHook(() => useWorkspaceRepos(), {
+        wrapper: strictWrapper,
+      });
+
+      await flushPromises();
+
+      // After double-invoke, should be in error state with retry scheduled
+      expect(result.current.connectionState).toBe("error_never_connected");
+      expect(result.current.retryCountdown).not.toBeNull();
+
+      // Switch mock to succeed for retries
+      const data = createWorkspaceData();
+      mockFetchWorkspace.mockResolvedValue(data);
+
+      await act(async () => {
+        vi.advanceTimersByTime(3000);
+      });
+      await flushPromises();
+
+      expect(result.current.connectionState).toBe("connected");
+      expect(result.current.workspace).toEqual(data);
     });
   });
 
