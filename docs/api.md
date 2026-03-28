@@ -1176,34 +1176,59 @@ data: {"type":"update","issue_id":"abc","title":"...","assignee":"user","actor":
 
 ## Fleet Coordination
 
-Fleet endpoints are only available when Redis is configured (`--fleet-redis`) and `--fleet-api-key` is set. Fleet endpoints use their own authentication (not the standard bearer token).
+Fleet endpoints enable multi-server coordination where remote workers register with a pre-shared API key, receive a JWT for subsequent authenticated requests, atomically claim tasks, report task completion, and send periodic heartbeats. Fleet endpoints use their own authentication flow separate from the standard bearer token auth.
 
-### `POST /api/fleet/register`
+Workspace-scoped variants of all fleet endpoints are also available at `/api/workspaces/{ws}/fleet/...` when multi-workspace mode is configured. These use `WorkspaceMiddleware` for routing and `StoreRegistry` for per-workspace fleet store resolution.
 
-Register a fleet worker and obtain a JWT.
+### Prerequisites
 
-- **Auth:** `X-Fleet-API-Key` header (constant-time validated)
-- **Rate Limit:** Per-IP rate limiting (when configured)
-- **Request Body:**
+Fleet endpoints are only registered when `fleetEnabled` is true — this requires Redis to be configured (`--fleet-redis`) and a fleet API key (`--fleet-api-key`). When these flags are not set, all fleet routes return `404` (not registered).
 
-```json
-{
-  "worker_id": "string (required, max 256 chars)",
-  "repos": ["repo-name"]
-}
-```
+### Authentication Model
 
-- **Response:** `201 Created`
+Fleet endpoints use a two-layer authentication model:
 
-```json
-{"success": true, "token": "<JWT>"}
-```
+1. **Registration auth (`X-Fleet-API-Key`):** The register endpoint validates a pre-shared API key via the `X-Fleet-API-Key` header using constant-time comparison (`crypto/subtle.ConstantTimeCompare`). This is the bootstrap mechanism.
+2. **JWT bearer auth (`Authorization: Bearer`):** After registration, the worker receives a JWT (HMAC-SHA256, default 1-hour expiry). The claim and heartbeat endpoints are protected by `FleetAuthMiddleware` which validates this JWT and injects `WorkerClaims` into the request context. The done endpoint has no JWT validation.
 
-- **Status Codes:** `400` (missing/invalid worker_id), `401` (invalid API key), `429` (rate limited), `503` (fleet not configured)
+The JWT signing key is managed in Redis via `SigningKeyManager` (supports key rotation with previous-version grace period). When no signing key is configured, the JWT middleware is not applied to claim and heartbeat routes.
 
-### JWT Claims
+### Data Models
 
-The JWT issued by registration contains:
+#### Worker
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `worker_id` | string | Unique worker identifier (max 256 chars) |
+| `repos` | []string | Repository names the worker handles |
+| `registered_at` | int64 | Unix timestamp of registration |
+
+Redis key: `fleet:workers:{workerID}`, TTL: 2 hours.
+
+#### ClaimResponse
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `task_id` | string | Claimed task identifier |
+| `success` | bool | Whether the claim succeeded |
+| `payload` | object | Task payload (raw JSON) |
+
+Redis key: `fleet:worker:claim:{workerID}`, TTL: 5 minutes.
+
+#### TaskResult
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `worker_id` | string | Worker that completed the task |
+| `task_id` | string | Task identifier |
+| `success` | bool | Whether the task succeeded |
+| `commit_sha` | string | Git commit SHA (optional, for successful tasks) |
+| `error` | string | Error message (optional, for failed tasks) |
+| `completed_at` | string | RFC 3339 timestamp |
+
+Redis key: `fleet:task:result:{taskID}`, TTL: 24 hours.
+
+#### JWT Claims
 
 ```json
 {
@@ -1216,55 +1241,126 @@ The JWT issued by registration contains:
 
 Algorithm: HMAC-SHA256. Default expiry: 1 hour.
 
+### `POST /api/fleet/register`
+
+Register a fleet worker and obtain a JWT for subsequent authenticated requests.
+
+- **Auth:** `X-Fleet-API-Key` header (constant-time validated against `--fleet-api-key`)
+- **Rate Limit:** Per-IP sliding window rate limiting (when Redis-based `FleetRateLimiter` is configured). Uses `RemoteAddr` only — `X-Forwarded-For` is not trusted. Fails open on Redis errors (availability over strictness).
+- **Request Body:**
+
+```json
+{
+  "worker_id": "string (required, max 256 chars)",
+  "repos": ["repo-name (optional)"]
+}
+```
+
+Worker IDs containing colons, newlines, tabs, or spaces are rejected by the store layer during registration (returns `500`, not `400`).
+
+- **Response:** `201 Created`
+
+```json
+{"success": true, "token": "<JWT>"}
+```
+
+Re-registration is idempotent — it updates the timestamp and repos, and issues a new JWT.
+
+- **Errors:**
+  - `400` — `worker_id` missing, empty, or exceeds 256 characters; invalid/malformed request body
+  - `401` — missing `X-Fleet-API-Key` header, or invalid API key
+  - `413` — request body too large (>1 MB)
+  - `429` — rate limit exceeded (per-IP)
+  - `500` — Redis registration failure, or JWT generation failure
+  - `503` — fleet store or token config is nil (`"fleet API not available"`), or API key not configured (`"fleet authentication not configured"`)
+
+- **Timeout:** 30-second context timeout on Redis registration
+
 ### `POST /api/fleet/claim`
 
 Atomically claim a task to work on.
 
-- **Auth:** JWT bearer token (from register)
-- **Request Body:** (optional)
+- **Auth:** JWT bearer token (from registration) — validated by `FleetAuthMiddleware` when signing key is configured; no auth when signing key is not configured
+- **Request Body:** (optional — can be empty or omitted entirely)
 
 ```json
 {
-  "issue_id": "specific-issue-id (optional)",
-  "status": "open (optional, default)",
-  "issue_type": "task (optional)",
+  "issue_id": "string (optional — claim a specific issue)",
+  "status": "string (accepted but not currently forwarded to the RPC layer — has no effect)",
+  "issue_type": "string (optional — filter by issue type)",
   "max_priority": 2
 }
 ```
 
-- **Response:**
-  - `200 OK` (task claimed):
-    ```json
-    {
-      "success": true,
-      "payload": {
-        "issue": { ... },
-        "labels": ["label"],
-        "dependencies": [],
-        "reason": "",
-        "deadline": null
-      }
-    }
-    ```
-  - `204 No Content` (no tasks available)
-  - `409 Conflict` (specific issue already claimed)
+If the body is empty or `Content-Length` is 0, the endpoint finds the highest-priority ready task automatically.
+
+- **Behavior:**
+  - **Specific issue (`issue_id` provided):** Attempts to atomically claim the specified issue via RPC Update with `Claim=true`, setting status to `"in_progress"`. Returns `409` if already claimed by another worker.
+  - **Auto-assignment (no `issue_id`):** Calls RPC Ready to fetch up to 10 candidate tasks (filtered by optional `issue_type`, `max_priority`), then iterates through them attempting to claim each one. Returns the first successfully claimed task. Returns `204` if no tasks are available or all candidates are already claimed.
+
+- **Response:** `200 OK` (task claimed)
+
+```json
+{
+  "success": true,
+  "payload": {
+    "issue": {
+      "id": "string",
+      "title": "string",
+      "status": "in_progress",
+      "labels": ["string"]
+    },
+    "labels": ["string"],
+    "dependencies": [],
+    "reason": "",
+    "deadline": null
+  }
+}
+```
+
+- **Errors:**
+  - `204` — no tasks available (no body returned)
+  - `400` — invalid/malformed request body
+  - `401` — missing/invalid JWT (when `FleetAuthMiddleware` is active)
+  - `404` — specific `issue_id` not found (response body `error` field reads `"internal server error"`)
+  - `409` — specific issue already claimed by another worker
+  - `413` — request body too large (>1 MB)
+  - `500` — RPC error, daemon error, or response parse failure
+  - `503` — connection pool not initialized
+  - `504` — timeout acquiring daemon connection (5-second deadline)
+
+- **Metrics:** Records claim outcomes (`success`, `collision`, `timeout`) via `ClaimMetrics`.
 
 ### `POST /api/fleet/done/{id}`
 
-Mark a task as complete. The `{id}` is the worker ID.
+Mark a task as complete. The `{id}` path parameter is the worker ID.
 
 - **Auth:** None (no JWT validation)
+- **Path Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | string | yes | Worker ID (from `r.PathValue("id")`) |
+
 - **Request Body:**
 
 ```json
 {
   "success": true,
-  "commit_sha": "abc123 (optional)",
-  "error": "failure reason (optional)"
+  "commit_sha": "abc123 (optional, for successful tasks)",
+  "error": "failure reason (optional, for failed tasks)"
 }
 ```
 
-- **Response:** `200 OK`
+- **Behavior:**
+  1. Validates worker exists in Redis (`GetWorker`)
+  2. Looks up worker's current claim (`GetWorkerClaim`)
+  3. If no active claim, returns success idempotently (no `task_id` in response)
+  4. Records task result in Redis (24-hour TTL) via `RecordTaskResult`
+  5. Releases the claim key via `ReleaseClaim`
+  6. Clears worker claim cache (best-effort, uses fresh 2-second context)
+
+- **Response:** `200 OK` (task completed)
 
 ```json
 {
@@ -1274,18 +1370,38 @@ Mark a task as complete. The `{id}` is the worker ID.
 }
 ```
 
-Idempotent: if the worker has no active claim, returns success without a task_id.
+- **Response:** `200 OK` (idempotent — no active claim)
+
+```json
+{
+  "success": true,
+  "worker_id": "worker-id"
+}
+```
+
+- **Errors:**
+  - `400` — missing worker ID in path, invalid/malformed request body
+  - `404` — worker not found in Redis
+  - `413` — request body too large (>1 MB)
+  - `500` — Redis lookup/write failure (get worker, get claim, record result, release claim)
+  - `503` — fleet store is nil (`"fleet API not available"`)
+
+- **Timeout:** 5-second context timeout for main operations; 2-second fresh context for claim cache cleanup
 
 ### `POST /api/fleet/heartbeat`
 
-Keep a worker alive and update its status.
+Refresh a worker's registration TTL to keep it alive.
 
-- **Auth:** JWT bearer token
+- **Auth:** JWT bearer token (from registration) — validated by `FleetAuthMiddleware` when signing key is configured
 - **Request Body:**
 
 ```json
-{"worker_id": "string (required)"}
+{
+  "worker_id": "string (required, max 256 chars)"
+}
 ```
+
+- **Behavior:** Refreshes the worker's registration TTL in Redis back to 2 hours. Uses `EXPIRE` (not `SET`), so it only succeeds if the worker registration key still exists. Without heartbeats, the registration expires after the initial 2-hour TTL.
 
 - **Response:** `200 OK`
 
@@ -1296,7 +1412,37 @@ Keep a worker alive and update its status.
 }
 ```
 
-- **Status Codes:** `404` (worker not found)
+- **Errors:**
+  - `400` — `worker_id` missing, empty, exceeds 256 characters, or invalid/malformed request body
+  - `404` — worker not found (registration expired or never registered)
+  - `413` — request body too large (>1 MB)
+  - `500` — Redis heartbeat failure
+  - `503` — fleet store is nil (`"fleet store not initialized"`)
+
+- **Timeout:** 2-second context timeout on Redis heartbeat update
+
+### Redis Key Reference
+
+All keys use the `fleet:` prefix. When workspace-scoped (`Store.workspaceID` is set), keys are prefixed with `fleet:{wsID}:` instead.
+
+| Key Pattern | TTL | Description |
+|-------------|-----|-------------|
+| `fleet:workers:{workerID}` | 2 hours | Worker registration data |
+| `fleet:tasks:claimed:{taskID}` | 5 minutes | Claimed task ownership |
+| `fleet:worker:claim:{workerID}` | 5 minutes | Cached claim response for worker |
+| `fleet:task:result:{taskID}` | 24 hours | Task completion result |
+| `fleet:ratelimit:{ip}` | sliding window | Per-IP rate limit tracking |
+
+### Timeout Enforcement
+
+`TimeoutEnforcer` runs a background loop (default: check every 1 minute, timeout after 30 minutes) that releases claims and invokes a callback for timed-out tasks. Claim TTL can be extended via `ExtendClaimTTL` after beads confirmation.
+
+| Endpoint | Timeout | Purpose |
+|----------|---------|---------|
+| Register | 30s | Worker registration to Redis |
+| Claim | 5s | Acquire daemon connection |
+| Done | 5s main, 2s cleanup | Record result and release claim |
+| Heartbeat | 2s | Update worker TTL in Redis |
 
 ## Log Streaming
 
@@ -1546,6 +1692,512 @@ Update persisted terminal UI state (active tab selection).
   - `500` — Redis write failure
 
 - **Note:** Setting `active_tab` to `""` clears the selection. Does not broadcast SSE events.
+
+## Git Operations
+
+Workspace-scoped REST API for git workflow operations on agent worktrees. These endpoints allow the frontend to push changes, pull updates, synchronize branches, create GitHub PRs, hard-reset worktrees, query git status, update target branches, push all worktrees, and retrieve issue-level diff statistics.
+
+All endpoints are registered on `wsMux` under `/api/workspaces/{ws}/...` behind `WorkspaceMiddleware`. They are **conditionally available** — when `gitOps` is nil (no worktree configuration), none of these endpoints exist and requests fall through to the SPA catch-all.
+
+**Note:** Diff/code-review endpoints (`/agents/{name}/diff/commits`, `/diff/files`, `/diff/file`) are covered separately by a dedicated spec.
+
+### Cross-Cutting: Workspace Routing
+
+All 9 endpoints are wrapped by `WorkspaceMiddleware`, which:
+
+1. Extracts `{ws}` from the URL path via `r.PathValue("ws")`
+2. Validates non-empty (returns `400` if empty)
+3. Validates workspace exists via `wsExists(wsID)` (returns `404` if not found)
+4. Injects workspace ID into request context via `WithWorkspace(ctx, wsID)`
+
+| Status | Condition | Body |
+|--------|-----------|------|
+| `400` | `{ws}` is empty or whitespace | `{"error": "workspace ID is required"}` |
+| `404` | `{ws}` does not match any registered workspace | `{"error": "workspace not found: {ws}"}` |
+
+Authentication (`401`) is enforced by a separate auth middleware applied at the server level, not by `WorkspaceMiddleware`.
+
+### Cross-Cutting: Agent Resolution
+
+7 of 9 endpoints use a shared `resolveAgent()` helper that:
+
+1. Extracts `{name}` from the URL path
+2. Validates against regex `^[a-zA-Z0-9_-]+$`
+3. Extracts workspace ID from context via `WorkspaceFromContext(r.Context())`
+4. Resolves via `GitOps.ResolveAgentWorktree(workspaceID, name)`
+
+| Status | Condition | Body |
+|--------|-----------|------|
+| `400` | Missing agent name | `{"error": "missing agent name"}` |
+| `400` | Invalid agent name format | `{"error": "invalid agent name: must match [a-zA-Z0-9_-]+"}` |
+| `404` | Agent worktree not found in this workspace | `{"error": "agent worktree \"name\" not found"}` |
+
+### Cross-Cutting: Git Ref Validation
+
+Branch and ref parameters are validated against regex `^[a-zA-Z0-9][a-zA-Z0-9_./-]*$` and must not contain `..` (path traversal prevention). Names starting with `-` are rejected (command injection prevention).
+
+### `POST /api/workspaces/{ws}/git/push-all`
+
+Push all agent worktree branches in this workspace to their target branches.
+
+- **Auth:** Required
+- **Path params:**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `ws` | string | Workspace ID (UUID) |
+
+- **Request Body:** None
+- **Response:** `200 OK`
+
+```json
+{
+  "results": [
+    {
+      "name": "drift",
+      "success": true,
+      "message": "pushed"
+    },
+    {
+      "name": "spark",
+      "success": true,
+      "message": "already up to date"
+    },
+    {
+      "name": "blaze",
+      "success": false,
+      "error": "merge conflict in file.go"
+    }
+  ],
+  "pushed": 1,
+  "failed": 1
+}
+```
+
+- Each result has `name` + (`success` + `message`) or (`error`). The `success` field defaults to false when `error` is present.
+- `"already up to date"` entries have `success: true` but do NOT increment the `pushed` counter.
+- `pushed`/`failed` counts reflect actual push successes and failures only.
+- Uses `wt.Remote` if set, falls back to `"origin"`.
+
+- **Errors:**
+  - `500` — listing worktrees failed (`{"error": "listing worktrees: ..."}`)
+
+- **Note:** Non-atomic — partial failures are reported per-worktree. Returns `200` with `{"results": [], "pushed": 0, "failed": 0}` if no worktrees exist.
+
+### `POST /api/workspaces/{ws}/agents/{name}/git/push`
+
+Merge the agent's worktree branch INTO the target branch (loom push semantics — not `git push`).
+
+- **Auth:** Required
+- **Path params:**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `ws` | string | Workspace ID (UUID) |
+| `name` | string | Agent name (validated: `^[a-zA-Z0-9_-]+$`) |
+
+- **Request Body** (optional):
+
+```json
+{
+  "target": "branch-name"
+}
+```
+
+`target` defaults to the worktree's `DefaultBranch` if empty or omitted. Validated against git ref regex.
+
+- **Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "message": "merged agent/drift into v2",
+  "already_up_to_date": false
+}
+```
+
+- **Response:** `409 Conflict` (merge conflicts)
+
+```json
+{
+  "success": false,
+  "message": "merge conflicts detected",
+  "already_up_to_date": false,
+  "conflicted_files": ["path/to/file.go"]
+}
+```
+
+- **Errors:**
+  - `400` — missing/invalid agent name, invalid target branch name
+  - `404` — agent worktree not found in this workspace
+  - `502` — git operation failed
+
+### `POST /api/workspaces/{ws}/agents/{name}/git/pull`
+
+Merge the source branch INTO the agent's current worktree branch.
+
+- **Auth:** Required
+- **Path params:**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `ws` | string | Workspace ID (UUID) |
+| `name` | string | Agent name (validated: `^[a-zA-Z0-9_-]+$`) |
+
+- **Request Body** (optional):
+
+```json
+{
+  "source": "branch-name"
+}
+```
+
+`source` defaults to the worktree's `DefaultBranch` if empty or omitted. Validated against git ref regex.
+
+- **Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "message": "merged v2 into agent/drift",
+  "already_up_to_date": false
+}
+```
+
+- **Response:** `409 Conflict` (merge conflicts)
+
+```json
+{
+  "success": false,
+  "message": "merge conflicts detected",
+  "already_up_to_date": false,
+  "conflicted_files": ["path/to/file.go"]
+}
+```
+
+- **Errors:**
+  - `400` — missing/invalid agent name, invalid source branch name
+  - `404` — agent worktree not found in this workspace
+  - `500` — getting current branch failed (`{"error": "getting current branch: ..."}`)
+  - `502` — git operation failed
+
+### `POST /api/workspaces/{ws}/agents/{name}/git/sync`
+
+Two-phase operation: first pushes worktree branch to default target, then pulls from target back into worktree. If push fails with conflicts, pull is NOT attempted.
+
+- **Auth:** Required
+- **Path params:**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `ws` | string | Workspace ID (UUID) |
+| `name` | string | Agent name (validated: `^[a-zA-Z0-9_-]+$`) |
+
+- **Request Body:** None
+- **Response:** `200 OK` (both succeed)
+
+```json
+{
+  "push_result": {
+    "success": true,
+    "message": "merged agent/drift into v2",
+    "already_up_to_date": false
+  },
+  "pull_result": {
+    "success": true,
+    "message": "merged v2 into agent/drift",
+    "already_up_to_date": false
+  }
+}
+```
+
+- **Response:** `409 Conflict` (push conflicts — pull not attempted)
+
+```json
+{
+  "push_result": {
+    "success": false,
+    "message": "merge conflicts detected",
+    "already_up_to_date": false,
+    "conflicted_files": ["file.go"]
+  },
+  "pull_result": null
+}
+```
+
+`pull_result` is null when push has conflicts.
+
+- **Response:** `409 Conflict` (push succeeds, pull conflicts)
+
+```json
+{
+  "push_result": {
+    "success": true,
+    "message": "merged agent/drift into v2",
+    "already_up_to_date": false
+  },
+  "pull_result": {
+    "success": false,
+    "message": "merge conflicts detected",
+    "already_up_to_date": false,
+    "conflicted_files": ["file.go"]
+  }
+}
+```
+
+- **Errors:**
+  - `400` — missing/invalid agent name
+  - `404` — agent worktree not found in this workspace
+  - `500` — getting current branch failed (`{"error": "getting current branch: ..."}`)
+  - `502` — push or pull git operation failed
+
+### `POST /api/workspaces/{ws}/agents/{name}/git/pr`
+
+Create a GitHub PR from the agent's worktree branch to the target branch using the `gh` CLI.
+
+- **Auth:** Required
+- **Path params:**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `ws` | string | Workspace ID (UUID) |
+| `name` | string | Agent name (validated: `^[a-zA-Z0-9_-]+$`) |
+
+- **Request Body** (optional):
+
+```json
+{
+  "target": "branch-name"
+}
+```
+
+`target` defaults to the worktree's `DefaultBranch` if empty or omitted. Validated against git ref regex.
+
+- **Pre-check:** Verifies `gh` CLI is installed via `CheckGhInstalled()`. Returns `503` immediately if not installed.
+
+- **Response:** `201 Created` (PR created)
+
+```json
+{
+  "url": "https://github.com/org/repo/pull/42",
+  "created": true,
+  "already_exists": false,
+  "no_commits": false
+}
+```
+
+- **Response:** `200 OK` (PR already exists)
+
+```json
+{
+  "url": "https://github.com/org/repo/pull/42",
+  "created": false,
+  "already_exists": true,
+  "no_commits": false
+}
+```
+
+- **Response:** `200 OK` (no commits to merge)
+
+```json
+{
+  "created": false,
+  "already_exists": false,
+  "no_commits": true
+}
+```
+
+- **Errors:**
+  - `400` — missing/invalid agent name, invalid target branch
+  - `404` — agent worktree not found in this workspace
+  - `502` — `gh` CLI PR creation failed
+  - `503` — `gh` CLI not installed (`{"error": "gh CLI not installed: install from https://cli.github.com/ and run 'gh auth login'"}`)
+
+### `POST /api/workspaces/{ws}/agents/{name}/git/reset`
+
+Hard reset the worktree to a specified branch.
+
+- **Auth:** Required
+- **Path params:**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `ws` | string | Workspace ID (UUID) |
+| `name` | string | Agent name (validated: `^[a-zA-Z0-9_-]+$`) |
+
+- **Request Body** (optional):
+
+```json
+{
+  "branch": "target-branch",
+  "force": false,
+  "push": false
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `branch` | string | worktree's `DefaultBranch` | Branch to reset to. Validated against git ref regex. |
+| `force` | bool | `false` | If true, bypasses agent lock check |
+| `push` | bool | `false` | If true, force-pushes the branch to origin after resetting |
+
+- **Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "message": "reset to v2",
+  "previous_branch": "agent/drift",
+  "pushed": false
+}
+```
+
+`previous_branch` is omitted when empty.
+
+- **Response:** `423 Locked` (agent locked — cannot reset without `force`)
+
+```json
+{
+  "error": "agent locked",
+  "lock_info": {
+    "agent": "drift",
+    "pid": 12345,
+    "duration": "2m30s",
+    "task_id": "loomcli-abc12"
+  }
+}
+```
+
+`task_id` is omitted when empty. Only returned when `force=false` and agent has an active lock.
+
+- **Errors:**
+  - `400` — missing/invalid agent name, invalid branch name
+  - `404` — agent worktree not found in this workspace
+  - `502` — git operation failed
+
+### `GET /api/workspaces/{ws}/agents/{name}/git/status`
+
+Detailed git status for the agent's worktree.
+
+- **Auth:** Required
+- **Path params:**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `ws` | string | Workspace ID (UUID) |
+| `name` | string | Agent name (validated: `^[a-zA-Z0-9_-]+$`) |
+
+- **Response:** `200 OK`
+
+```json
+{
+  "branch": "agent/drift",
+  "target_branch": "v2",
+  "is_clean": true,
+  "ahead": 3,
+  "behind": 0,
+  "changed_files": [],
+  "conflicted_files": [],
+  "has_conflicts": false,
+  "stash_count": 0
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `branch` | string | Current worktree branch |
+| `target_branch` | string | Target/integration branch |
+| `is_clean` | bool | True if no uncommitted changes |
+| `ahead` | int | Commits ahead of target branch (after fetch) |
+| `behind` | int | Commits behind target branch (after fetch) |
+| `changed_files` | []string | File paths with uncommitted changes |
+| `conflicted_files` | []string | File paths with merge conflicts |
+| `has_conflicts` | bool | True if merge conflicts exist |
+| `stash_count` | int | Number of stash entries |
+
+- **Errors:**
+  - `400` — missing/invalid agent name
+  - `404` — agent worktree not found in this workspace
+  - `500` — git status operation failed (`{"error": "getting git status: ..."}`)
+
+### `PATCH /api/workspaces/{ws}/agents/{name}/git/target`
+
+Change the target/integration branch for the repo associated with this worktree.
+
+- **Auth:** Required
+- **Path params:**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `ws` | string | Workspace ID (UUID) |
+| `name` | string | Agent name (validated: `^[a-zA-Z0-9_-]+$`) |
+
+- **Request Body** (required):
+
+```json
+{
+  "branch": "new-target-branch"
+}
+```
+
+`branch` is required and non-empty. Validated against git ref regex.
+
+- **Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "branch": "new-target-branch"
+}
+```
+
+- **Errors:**
+  - `400` — missing/invalid agent name
+  - `400` — `"branch is required"` (empty branch)
+  - `400` — `"invalid branch name"` (fails git ref regex or contains `..`)
+  - `400` — `"target branch update only supported in workspace mode"` (non-workspace worktree)
+  - `400` — `"invalid request body"` (malformed JSON)
+  - `404` — agent worktree not found in this workspace
+  - `500` — updating target branch failed (`{"error": "updating target branch: ..."}`)
+
+### `GET /api/workspaces/{ws}/issues/{id}/git/diff-stat`
+
+Diff statistics (added/removed lines) for an issue's assigned agent worktree.
+
+- **Auth:** Required
+- **Path params:**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `ws` | string | Workspace ID (UUID) |
+| `id` | string | Issue ID (e.g., `"loomcli-abc12"`) |
+
+- **Response:** `200 OK`
+
+```json
+{
+  "branch": "agent/drift",
+  "added": 142,
+  "removed": 37
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `branch` | string | Agent's worktree branch |
+| `added` | int | Lines added vs target branch |
+| `removed` | int | Lines removed vs target branch |
+
+- **Errors:**
+  - `400` — missing issue ID
+  - `404` — `"issue not found: {id}"` (daemon RPC lookup failed)
+  - `404` — `"issue has no assignee (no agent worktree)"` (no assignee field)
+  - `404` — `"agent worktree not found for {assignee}"` (worktree resolution failed in this workspace)
+  - `500` — `"internal server error"` (non-404 daemon RPC error)
+  - `500` — `"failed to parse issue data"` (issue JSON unmarshal failure)
+  - `503` — daemon not available (RPC pool connection failure, 5s timeout)
+
+- **Note:** Uses daemon RPC via `multiPool` (routed to workspace-specific pool) with a 5-second context timeout.
 
 ## Loom Proxy
 
