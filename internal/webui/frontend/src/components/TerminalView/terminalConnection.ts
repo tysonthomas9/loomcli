@@ -91,7 +91,17 @@ export function connectWebSocket(
       wsRef.current = ws;
       ws.binaryType = "arraybuffer";
 
+      // Defense-in-depth: if a future refactor introduces an async step
+      // between the check at line 88 and here, this guard prevents leaking
+      // the WebSocket.
+      if (cancelled) {
+        ws.close(1000);
+        wsRef.current = null;
+        return;
+      }
+
       ws.onopen = () => {
+        if (cancelled) return;
         setConnectionState("connected");
         fitAddon.fit();
         ws.send(encodeResize(terminal.cols, terminal.rows));
@@ -99,6 +109,7 @@ export function connectWebSocket(
       };
 
       ws.onmessage = (ev: MessageEvent) => {
+        if (cancelled) return;
         if (typeof ev.data === "string") {
           terminal.write(ev.data);
         } else if (ev.data instanceof ArrayBuffer) {
@@ -108,6 +119,7 @@ export function connectWebSocket(
       };
 
       ws.onclose = (event: CloseEvent) => {
+        if (cancelled) return;
         if (event.code === WS_CLOSE_BACKEND_EXITED) {
           // Backend process exited — show crash overlay, do NOT auto-reconnect
           setConnectionState("crashed");
@@ -119,6 +131,7 @@ export function connectWebSocket(
       };
 
       ws.onerror = () => {
+        if (cancelled) return;
         setConnectionState("disconnected");
       };
 
@@ -158,8 +171,20 @@ export function connectWebSocket(
   return () => {
     cancelled = true;
     if (wsCleanupInner) {
-      wsCleanupInner();
+      const fn = wsCleanupInner;
+      wsCleanupInner = null;
+      fn();
     } else {
+      // wsCleanupInner not yet assigned, but WebSocket may already exist
+      // via wsRef.current (assigned before handler setup).
+      const ws = wsRef.current;
+      if (
+        ws &&
+        (ws.readyState === WebSocket.OPEN ||
+          ws.readyState === WebSocket.CONNECTING)
+      ) {
+        ws.close(1000);
+      }
       wsRef.current = null;
     }
   };
