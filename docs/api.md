@@ -228,6 +228,93 @@ Fleet metric fields (prefixed with `loom_fleet_`) use JSON `omitempty` — they 
 - **Concurrency:** All underlying data sources (SSEHub counters, ClaimMetrics, TimeoutEnforcer) use atomic operations or RWMutex — safe for concurrent calls.
 - **No rate limiting** beyond the global rate limiter. The endpoint is lightweight (no I/O, no RPC calls).
 
+## Backends
+
+Endpoint for backend health discovery. Allows the frontend to query which AI backends (Claude, Codex, OpenCode, Gemini, Cursor, etc.) are registered, installed, configured, and healthy. Used by the UI to display backend availability status and inform backend selection.
+
+**Conditional Registration:** This endpoint is only registered when the `BackendOps` implementation is provided at server startup (`backendOps != nil`). If not registered, requests to `/api/backends` fall through to the SPA catch-all handler and return HTML, not a JSON 404.
+
+### Data Model: BackendHealth
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | always present | Machine-readable backend identifier (e.g. `"claude"`, `"codex"`, `"gemini"`). Used to reference the backend in config endpoints. |
+| `display_name` | string | always present | Human-readable label (e.g. `"Claude"`, `"Codex"`). May be empty string if backend lacks Meta capability. |
+| `available` | bool | always present | Composite availability flag — `true` only when the backend is considered healthy. |
+| `installed` | bool | always present | Whether the backend binary/tool exists on the system PATH. |
+| `api_key_set` | bool | always present | Whether required credentials (API keys, tokens) are configured. |
+| `version` | string | optional (`omitempty`) | Backend version when detectable. Omitted from JSON when empty. |
+| `message` | string | optional (`omitempty`) | Diagnostic message explaining unavailability (e.g. `"codex not found on PATH"`). Omitted from JSON when empty. |
+
+**Health check resolution order:**
+
+1. If the backend is registered but `GetBackendByName` returns false → all boolean flags are false, no version or message
+2. Otherwise, defaults to `available=true`, `installed=true`, `api_key_set=true`
+3. If backend has `HasHealthCheck` capability → overrides `installed`/`api_key_set`/`available` from `HealthCheck()` result; gets `version` and `message` from health check; gets `display_name` from `Meta().DisplayName` if `HasMeta`
+4. Else if backend only has `HasMeta` capability → uses `Meta()` for `display_name` and `version`; keeps all-true defaults
+5. If backend has neither capability → keeps all-true defaults; no `display_name` or `version`
+
+### `GET /api/backends`
+
+List all registered AI backends with their health and availability status.
+
+- **Auth:** Required (Bearer token)
+- **Query Parameters:** None
+- **Conditional Availability:** Only registered when `BackendOps` is provided at server startup. If not registered, requests fall through to the SPA catch-all handler (returns HTML, not JSON).
+- **Response `200 OK`:**
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "name": "claude",
+      "display_name": "Claude",
+      "available": true,
+      "installed": true,
+      "api_key_set": true,
+      "version": "1.0.0"
+    },
+    {
+      "name": "codex",
+      "display_name": "Codex",
+      "available": false,
+      "installed": false,
+      "api_key_set": false,
+      "message": "codex not found on PATH"
+    }
+  ]
+}
+```
+
+Notes:
+- `data` is always a JSON array, never `null` — nil results from `ListBackendsHealth` are normalized to `[]`
+- `version` and `message` fields are omitted when empty (Go `omitempty` tag)
+- Order matches backend registry iteration order
+- Empty array `[]` is returned when no backends are registered: `{"success": true, "data": []}`
+
+- **Response `401 Unauthorized`:**
+
+```json
+{
+  "success": false,
+  "error": "authentication required"
+}
+```
+
+Returned when auth is enabled and no valid Bearer token is provided.
+
+- **Response `500 Internal Server Error`:**
+
+```json
+{
+  "success": false,
+  "error": "failed to list backends"
+}
+```
+
+Returned when the `BackendOps` implementation encounters an internal error. Note: the current implementation always returns `(result, nil)` — individual backend inspection errors are absorbed, not propagated. A 500 would only occur if `ListBackendsHealth` is modified to return errors in the future.
+
 ## Backend Configuration
 
 Endpoints for reading and updating the AI backend configuration. Configuration exists at two levels:
@@ -1181,6 +1268,85 @@ The `active` flag in each `WorkspaceSummary` is set to `true` for the workspace 
   - `404` — workspace not found
   - `500` — failed to load workspace config
 
+## Issue Session History
+
+Workspace-scoped endpoints for querying session history records linked to issues. These are backed by Redis via `sessionhistory.Store` and track terminal sessions associated with specific issues (started by users or `start-work`).
+
+### `GET /api/workspaces/{ws}/issues/{issueId}/sessions`
+
+List all session history records for an issue.
+
+- **Auth:** Required (standard bearer token)
+- **Path Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| ws | string | yes | Workspace ID (UUID, validated by WorkspaceMiddleware) |
+| issueId | string | yes | Issue ID (validated: `^[a-zA-Z0-9._-]+$`) |
+
+- **Behavior:** Returns all session history records for the specified issue in the given workspace, sorted by `started_at` descending (most recent first). Returns empty array (not null) for unknown issues.
+- **Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "issue-proj-1:1700000000",
+      "session_name": "issue-proj-1",
+      "issue_id": "proj.1",
+      "backend": "claude",
+      "status": "active",
+      "launcher": "user",
+      "started_at": "2025-01-15T10:00:00Z"
+    }
+  ]
+}
+```
+
+- Completed sessions include `ended_at` and optionally `scrollback_path`
+- **Errors:**
+  - `400` — invalid workspace ID (empty) or invalid issue ID (empty or fails regex)
+  - `404` — workspace not found (from middleware)
+  - `500` — Redis list failure
+  - `503` — session history not available (no Redis)
+- **Conditional registration:** Only registered when `sessionHistoryStore != nil`
+
+### `GET /api/workspaces/{ws}/issues/{issueId}/sessions/{recordId}/scrollback`
+
+Retrieve terminal scrollback content for a completed session.
+
+- **Auth:** Required (standard bearer token)
+- **Path Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| ws | string | yes | Workspace ID (UUID) |
+| issueId | string | yes | Issue ID (validated: `^[a-zA-Z0-9._-]+$`) |
+| recordId | string | yes | Session record ID (must be non-empty) |
+
+- **Behavior:** Finds the record by ID within the issue's session history, reads the scrollback file from disk. Path-traversal protection: scrollback file must be under `~/.loom/session-scrollback/` after `filepath.Clean`.
+- **Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "content": "terminal output text...",
+    "lines": 42
+  }
+}
+```
+
+- `content`: full scrollback text as a single string
+- `lines`: line count (newline-delimited, +1 for non-empty content)
+- **Errors:**
+  - `400` — invalid issue ID, empty record ID, or invalid scrollback path (path traversal attempt)
+  - `404` — workspace not found (middleware), session record not found, no scrollback available (`scrollback_path` empty), or scrollback file not found on disk
+  - `500` — Redis get failure or file read failure
+  - `503` — session history not available (no Redis)
+- **Security:** Scrollback path cleaned via `filepath.Clean` and validated to start with `~/.loom/session-scrollback/` prefix. Paths outside this directory are rejected with `400`.
+
 ## Real-time Events (SSE)
 
 ### `GET /api/events`
@@ -1552,6 +1718,216 @@ Real-time task log streaming via SSE.
 - **Auth:** Required
 - **Query Parameters:** `since` — start from specific line number
 - **Event Format:** Same as agent log stream
+
+## Session Audit Trail
+
+Workspace-scoped endpoints for the file-backed session audit trail. These track per-task session metadata (tokens, cost, files changed) via `sessions.Store` and provide transcript and diff retrieval. The underlying store is global (not workspace-isolated), but routes are workspace-scoped for access control via WorkspaceMiddleware.
+
+### `GET /api/workspaces/{ws}/tasks/{taskId}/sessions`
+
+List all sessions for a task.
+
+- **Auth:** Required (standard bearer token)
+- **Path Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| ws | string | yes | Workspace ID (UUID, validated by WorkspaceMiddleware) |
+| taskId | string | yes | Task ID (validated: `^[a-zA-Z0-9._-]+$`, must be non-empty) |
+
+- **Behavior:** Lists all sessions for a task from the file-backed session index. For each session, computes `is_active`, `has_transcript`, and `has_diff` by checking status and probing file existence. Deduplicates by `session_id` (last-seen wins). Auto-heals stale running sessions (>2h old) by marking them as "aborted".
+- **Note:** The handler does not use workspace context internally — the file-based store is global. Workspace validation is handled by the middleware for URL consistency and access control.
+- **Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "task_id": "bd-xyz789",
+    "sessions": [
+      {
+        "session_id": "20260322-100000-spark-xyz78-a1b2c3d4",
+        "task_id": "bd-xyz789",
+        "agent_name": "spark",
+        "backend": "claude",
+        "model": "claude-sonnet-4-6",
+        "phase": "implementation",
+        "started_at": "2026-03-22T10:00:00Z",
+        "ended_at": "2026-03-22T10:15:00Z",
+        "duration_s": 900.0,
+        "status": "completed",
+        "exit_code": 0,
+        "input_tokens": 50000,
+        "output_tokens": 12000,
+        "estimated_cost_usd": 0.15,
+        "files_changed": 3,
+        "lines_added": 45,
+        "lines_removed": 12,
+        "is_active": false,
+        "has_transcript": true,
+        "has_diff": true
+      }
+    ]
+  }
+}
+```
+
+- `sessions` is always an empty array `[]` (never null)
+- `is_active` is `true` only when `status == "running"`
+- `has_transcript` is `true` when `transcript.jsonl` exists and has entries
+- `has_diff` is `true` when `diff.patch` exists and is non-empty
+- **Errors:**
+  - `400` — missing or invalid task ID, or empty workspace ID (middleware)
+  - `404` — workspace not found (middleware)
+  - `500` — failed to list sessions (index file read error)
+  - `503` — session store not available (`sessStore` is nil)
+- **Registration:** Unconditional on wsMux; handler returns 503 when `sessStore` is nil
+
+### `GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}`
+
+Get metadata for a single session.
+
+- **Auth:** Required (standard bearer token)
+- **Path Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| ws | string | yes | Workspace ID (UUID) |
+| taskId | string | yes | Task ID (validated: `^[a-zA-Z0-9._-]+$`) |
+| sessionId | string | yes | Session ID (validated: `^[a-zA-Z0-9._-]+$`, must be non-empty) |
+
+- **Behavior:** Returns full metadata for a single session. Enforces task ownership — `session.TaskID` must match `taskId`, otherwise returns 404 (prevents cross-task access).
+- **Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "session_id": "20260322-100000-spark-xyz78-a1b2c3d4",
+    "task_id": "bd-xyz789",
+    "agent_name": "spark",
+    "backend": "claude",
+    "status": "completed",
+    "exit_code": 0,
+    "is_active": false,
+    "last_error": ""
+  }
+}
+```
+
+- Includes all SessionRecord fields plus `is_active` (computed) and `last_error`
+- **Errors:**
+  - `400` — invalid task ID or invalid session ID
+  - `404` — workspace not found (middleware), session not found (`metadata.json` missing), or task ownership mismatch
+  - `500` — failed to load session (metadata read/parse error)
+  - `503` — session store not available
+
+### `GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/transcript`
+
+Get all transcript entries for a session.
+
+- **Auth:** Required (standard bearer token)
+- **Path Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| ws | string | yes | Workspace ID (UUID) |
+| taskId | string | yes | Task ID (validated) |
+| sessionId | string | yes | Session ID (validated) |
+
+- **Behavior:** Returns all transcript entries sorted by `seq` ascending. Enforces task ownership before returning data. Corrupt JSONL lines are silently skipped (logged server-side).
+- **Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "session_id": "20260322-100000-spark-xyz78-a1b2c3d4",
+    "entries": [
+      {
+        "seq": 1,
+        "ts": "2026-03-22T10:00:01Z",
+        "role": "user",
+        "type": "text",
+        "content": "Implement the feature..."
+      },
+      {
+        "seq": 2,
+        "ts": "2026-03-22T10:00:05Z",
+        "role": "assistant",
+        "type": "tool_use",
+        "tool_name": "Read",
+        "tool_input": "{\"file_path\": \"/path/to/file.go\"}"
+      }
+    ]
+  }
+}
+```
+
+- `entries` is always empty array `[]` (never null) when no transcript exists
+- Entries sorted by `seq` ascending
+- **Errors:**
+  - `400` — invalid task ID or invalid session ID
+  - `404` — workspace not found (middleware), session not found, or task ownership mismatch
+  - `500` — failed to load session or transcript
+  - `503` — session store not available
+
+### `GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/diff`
+
+Get the raw diff patch content for a session.
+
+- **Auth:** Required (standard bearer token)
+- **Path Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| ws | string | yes | Workspace ID (UUID) |
+| taskId | string | yes | Task ID (validated) |
+| sessionId | string | yes | Session ID (validated) |
+
+- **Behavior:** Returns raw `diff.patch` content as plain text (not JSON). Enforces task ownership.
+- **Response:** `200 OK`, Content-Type: `text/plain`, body: raw unified diff text
+- **Errors:**
+  - `400` — invalid task ID or invalid session ID (JSON error)
+  - `404` — workspace/session not found, task mismatch, or `diff.patch` not found (JSON error)
+  - `500` — failed to load session or read diff (JSON error)
+  - `503` — session store not available (JSON)
+- **Note:** Only endpoint returning plain text on success; all errors still use JSON envelope.
+
+### `POST /api/sessions/notify`
+
+Push a session status change as an SSE event. Loopback-only — **not workspace-scoped** (stays on the main mux).
+
+- **Auth:** Loopback-only — restricted to `127.0.0.1`/`::1` via `RemoteAddr` check. Returns `403` for non-loopback. No bearer token required.
+- **Request Body:**
+
+```json
+{
+  "task_id": "string (required)",
+  "session_id": "string (required)",
+  "status": "string (optional)",
+  "workspace_id": "string (optional, used for SSE broadcast scoping)"
+}
+```
+
+- **Behavior:** Broadcasts a `session_change` SSE event to connected web UI clients. Fire-and-forget. The `workspace_id` in the body is forwarded to the SSE broadcast payload for client-side filtering. If `workspace_id` is empty, a warning is logged but the broadcast still fires.
+- **SSE broadcast payload:**
+
+```json
+{
+  "type": "session_change",
+  "issue_id": "<task_id from request>",
+  "new_status": "<status from request>",
+  "timestamp": "RFC3339",
+  "workspace_id": "<workspace_id from request>"
+}
+```
+
+- **Response:** `204 No Content` (success)
+- **Errors:**
+  - `400` — malformed JSON or missing `task_id`/`session_id` (plain text error)
+  - `403` — non-loopback caller (plain text error)
+- **Registration:** Only when SSE hub is non-nil. Errors use plain text `http.Error`, not JSON envelope.
 
 ## Terminal Session Lifecycle
 
