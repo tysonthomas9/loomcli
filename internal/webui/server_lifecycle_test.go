@@ -41,7 +41,6 @@ func TestStartServer_GracefulShutdown_CompletesWithinTimeout(t *testing.T) {
 		PoolSize:        1,
 		ShutdownTimeout: 2 * time.Second,
 		MaxPortAttempts: 5,
-		AuthEnabled:     false,
 	}
 
 	serverDone := make(chan error, 1)
@@ -95,7 +94,6 @@ func TestStartServer_GracefulShutdown_AllPortsExhausted(t *testing.T) {
 		PoolSize:        1,
 		ShutdownTimeout: 1 * time.Second,
 		MaxPortAttempts: maxAttempts,
-		AuthEnabled:     false,
 	}
 
 	serverErr := StartServer(ctx, config)
@@ -116,10 +114,9 @@ func TestStartServer_DefaultsApplied(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Only set Port and AuthEnabled; leave everything else at zero values
+	// Only set Port; leave everything else at zero values
 	config := ServerConfig{
-		Port:        port,
-		AuthEnabled: false,
+		Port: port,
 	}
 
 	serverDone := make(chan error, 1)
@@ -168,9 +165,9 @@ func TestStartServer_DevMode_InvalidDirectory(t *testing.T) {
 		PoolSize:        1,
 		ShutdownTimeout: 1 * time.Second,
 		MaxPortAttempts: 5,
-		AuthEnabled:     false,
-		DevMode:         true,
-		DevFrontendDir:  "/nonexistent/frontend/dist",
+
+		DevMode:        true,
+		DevFrontendDir: "/nonexistent/frontend/dist",
 	}
 
 	serverDone := make(chan error, 1)
@@ -216,9 +213,9 @@ func TestStartServer_DevMode_EmptyDir(t *testing.T) {
 		PoolSize:        1,
 		ShutdownTimeout: 1 * time.Second,
 		MaxPortAttempts: 5,
-		AuthEnabled:     false,
-		DevMode:         true,
-		DevFrontendDir:  "", // empty: should default to internal/webui/frontend/dist
+
+		DevMode:        true,
+		DevFrontendDir: "", // empty: should default to internal/webui/frontend/dist
 	}
 
 	serverDone := make(chan error, 1)
@@ -255,9 +252,9 @@ func TestStartServer_FleetJWTKey_PreProvisioned(t *testing.T) {
 		PoolSize:        1,
 		ShutdownTimeout: 1 * time.Second,
 		MaxPortAttempts: 5,
-		AuthEnabled:     false,
-		FleetEnabled:    true,
-		FleetJWTKey:     []byte("test-jwt-signing-key-32-bytes!!"),
+
+		FleetEnabled: true,
+		FleetJWTKey:  []byte("test-jwt-signing-key-32-bytes!!"),
 	}
 
 	serverDone := make(chan error, 1)
@@ -294,7 +291,6 @@ func TestStartServer_ConcurrentRequests_DuringShutdown(t *testing.T) {
 		PoolSize:        1,
 		ShutdownTimeout: 3 * time.Second,
 		MaxPortAttempts: 5,
-		AuthEnabled:     false,
 	}
 
 	serverDone := make(chan error, 1)

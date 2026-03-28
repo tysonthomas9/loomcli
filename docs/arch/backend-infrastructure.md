@@ -152,8 +152,6 @@ type ServerConfig struct {
     FleetRedis              *fleet.RedisConfig
     FleetJWTKey             []byte
     FleetAPIKey             string
-    APIKey                  string
-    AuthEnabled             bool
     HSTSEnabled             bool
     LoomServerURL           string
     DevMode                 bool

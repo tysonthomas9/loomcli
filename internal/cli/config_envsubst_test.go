@@ -220,12 +220,10 @@ func TestExpandEnvVars_BareDollar(t *testing.T) {
 
 func TestExpandConfigBytes_FullYAML(t *testing.T) {
 	t.Setenv("TEST_REDIS", "redis://localhost:6379")
-	t.Setenv("TEST_KEY", "secret123")
 
 	input := []byte(`backend: claude
 daemon:
   redis_url: ${TEST_REDIS}
-  api_key: ${TEST_KEY}
   max_agents: 5
   log_dir: /var/log
 `)
@@ -238,9 +236,6 @@ daemon:
 	s := string(got)
 	if !strings.Contains(s, "redis://localhost:6379") {
 		t.Errorf("expected expanded redis URL in output:\n%s", s)
-	}
-	if !strings.Contains(s, "secret123") {
-		t.Errorf("expected expanded api key in output:\n%s", s)
 	}
 	// Verify non-string values preserved
 	if !strings.Contains(s, "5") {
@@ -344,36 +339,20 @@ func TestDaemonSettings_NewFields_Overlay(t *testing.T) {
 	dst := &DaemonSettings{}
 	src := &DaemonSettings{
 		RedisURL: "redis://host:6379",
-		APIKey:   "key123",
-		JWTKey:   "jwt456",
 	}
 	overlayDaemonSettings(dst, src)
 	if dst.RedisURL != "redis://host:6379" {
 		t.Errorf("RedisURL = %q, want %q", dst.RedisURL, "redis://host:6379")
-	}
-	if dst.APIKey != "key123" {
-		t.Errorf("APIKey = %q, want %q", dst.APIKey, "key123")
-	}
-	if dst.JWTKey != "jwt456" {
-		t.Errorf("JWTKey = %q, want %q", dst.JWTKey, "jwt456")
 	}
 }
 
 func TestDaemonSettings_NewFields_OverlayEmpty(t *testing.T) {
 	dst := &DaemonSettings{
 		RedisURL: "original",
-		APIKey:   "original",
-		JWTKey:   "original",
 	}
 	src := &DaemonSettings{} // empty should not override
 	overlayDaemonSettings(dst, src)
 	if dst.RedisURL != "original" {
 		t.Errorf("RedisURL = %q, want %q", dst.RedisURL, "original")
-	}
-	if dst.APIKey != "original" {
-		t.Errorf("APIKey = %q, want %q", dst.APIKey, "original")
-	}
-	if dst.JWTKey != "original" {
-		t.Errorf("JWTKey = %q, want %q", dst.JWTKey, "original")
 	}
 }

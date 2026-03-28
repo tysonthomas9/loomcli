@@ -72,7 +72,7 @@ func stopOTelExporter(exp *otelexport.Exporter) {
 }
 
 // printDryRunInfo displays what would happen in dry-run mode.
-// NOTE: If DaemonSettings gains secret fields (RedisURL, APIKey, JWTKey),
+// NOTE: If DaemonSettings gains secret fields (RedisURL),
 // their values should be masked via SecretResolver.MaskSecrets() before printing.
 func printDryRunInfo(config *DaemonConfig, pidFile, logDir, stateFile string) {
 	fmt.Println("DRY RUN - No daemon will be started")

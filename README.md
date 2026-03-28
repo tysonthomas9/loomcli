@@ -39,9 +39,9 @@ loom task falcon              # Implementation agent builds it
 `loom serve` starts a web UI for managing agents and tasks through your browser.
 
 ```bash
-loom serve                    # http://localhost:8080
-loom serve --auth             # Enable API authentication
-loom serve --bind 0.0.0.0    # All interfaces
+loom serve                                              # http://localhost:8080
+loom serve --auth-url https://auth.example.com          # Enable JWT auth
+loom serve --bind 0.0.0.0                               # All interfaces
 ```
 
 **Views:**
@@ -55,7 +55,7 @@ loom serve --bind 0.0.0.0    # All interfaces
 - **Talk to Lead** — built-in terminal running `loom lead` (xterm.js + tmux via WebSocket)
 - **Real-time updates** — SSE pushes mutations to all connected browsers
 - **Per-agent terminals** — attach to live agent tmux sessions
-- **Authentication** — auto-generated API key (enable with `--auth`)
+- **Authentication** — external auth via `--auth-url` (RS256 JWT verification)
 
 ## Commands
 
@@ -281,7 +281,6 @@ Use `make dev-loom` when validating the actual Loom-served UI on `http://localho
 | `LOOM_WORKTREES_DIR` | `./worktrees` | Worktrees directory |
 | `LOOM_SERVER_PORT` | `8081` | Loom API server port |
 | `LOOM_BIND_ADDR` | `127.0.0.1` | Server bind address |
-| `LOOM_WEBUI_API_KEY` | _(auto)_ | WebUI authentication API key |
 
 ## Credits
 
