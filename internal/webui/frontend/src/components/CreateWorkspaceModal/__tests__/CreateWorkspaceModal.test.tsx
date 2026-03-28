@@ -47,6 +47,11 @@ const MOCK_WORKSPACE_DATA: WorkspaceData = {
   default_workspace: "test-ws",
 };
 
+/** Helper to select a type card by clicking it */
+function selectTypeCard(type: "empty" | "clone" | "template") {
+  fireEvent.click(screen.getByTestId(`create-workspace-type-${type}`));
+}
+
 describe("CreateWorkspaceModal", () => {
   let onClose: ReturnType<typeof vi.fn>;
   let onSuccess: ReturnType<typeof vi.fn>;
@@ -83,8 +88,11 @@ describe("CreateWorkspaceModal", () => {
 
       // Title heading
       expect(
-        screen.getByRole("heading", { name: "Create Workspace" }),
+        screen.getByRole("heading", { name: "New Workspace" }),
       ).toBeInTheDocument();
+
+      // Close button
+      expect(screen.getByTestId("create-workspace-close")).toBeInTheDocument();
 
       // Name input
       expect(screen.getByTestId("create-workspace-name")).toBeInTheDocument();
@@ -94,10 +102,30 @@ describe("CreateWorkspaceModal", () => {
       expect(screen.getByTestId("create-workspace-path")).toBeInTheDocument();
       expect(screen.getByLabelText("Location")).toBeInTheDocument();
 
-      // Type radios (Empty is now "Local Repos")
-      expect(screen.getByLabelText("Local Repos")).toBeInTheDocument();
-      expect(screen.getByLabelText("Clone")).toBeInTheDocument();
-      expect(screen.getByLabelText("Template")).toBeInTheDocument();
+      // Browse button
+      expect(screen.getByTestId("create-workspace-browse")).toBeInTheDocument();
+
+      // Type cards (role="radio")
+      const radioCards = screen.getAllByRole("radio");
+      expect(radioCards).toHaveLength(3);
+      expect(
+        screen.getByTestId("create-workspace-type-empty"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByTestId("create-workspace-type-clone"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByTestId("create-workspace-type-template"),
+      ).toBeInTheDocument();
+
+      // Card descriptions
+      expect(
+        screen.getByText("New git repository from scratch"),
+      ).toBeInTheDocument();
+      expect(screen.getByText("Clone from a remote URL")).toBeInTheDocument();
+      expect(
+        screen.getByText("Start from a project template"),
+      ).toBeInTheDocument();
 
       // Buttons
       expect(screen.getByTestId("create-workspace-cancel")).toBeInTheDocument();
@@ -106,10 +134,16 @@ describe("CreateWorkspaceModal", () => {
       // Dialog role
       const dialog = screen.getByRole("dialog");
       expect(dialog).toHaveAttribute("aria-modal", "true");
-      expect(dialog).toHaveAttribute("aria-label", "Create Workspace");
+      expect(dialog).toHaveAttribute("aria-label", "New Workspace");
+
+      // Radiogroup
+      expect(screen.getByRole("radiogroup")).toHaveAttribute(
+        "aria-label",
+        "Workspace type",
+      );
     });
 
-    it("template type radio is disabled", () => {
+    it("clone card is selected by default", () => {
       render(
         <CreateWorkspaceModal
           isOpen={true}
@@ -118,15 +152,126 @@ describe("CreateWorkspaceModal", () => {
         />,
       );
 
-      const templateRadio = screen.getByTestId(
-        "create-workspace-template-radio",
+      const cloneCard = screen.getByTestId("create-workspace-type-clone");
+      expect(cloneCard).toHaveAttribute("aria-checked", "true");
+
+      const emptyCard = screen.getByTestId("create-workspace-type-empty");
+      expect(emptyCard).toHaveAttribute("aria-checked", "false");
+
+      const templateCard = screen.getByTestId("create-workspace-type-template");
+      expect(templateCard).toHaveAttribute("aria-checked", "false");
+    });
+
+    it("browse button is disabled with tooltip", () => {
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
       );
-      expect(templateRadio).toBeDisabled();
+
+      const browseBtn = screen.getByTestId("create-workspace-browse");
+      expect(browseBtn).toBeDisabled();
+      expect(browseBtn).toHaveAttribute(
+        "title",
+        "Filesystem browsing is not available in the browser",
+      );
+    });
+
+    it("template card is selectable and shows coming-soon placeholder", () => {
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      selectTypeCard("template");
+
+      const templateCard = screen.getByTestId("create-workspace-type-template");
+      expect(templateCard).toHaveAttribute("aria-checked", "true");
+
+      expect(
+        screen.getByTestId("create-workspace-template-placeholder"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          "Coming soon — template registry is not yet available",
+        ),
+      ).toBeInTheDocument();
+    });
+  });
+
+  describe("type selector", () => {
+    it("clicking Empty card selects it and hides clone URL field", () => {
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      // Clone is default — clone URL field visible
+      expect(
+        screen.getByTestId("create-workspace-clone-url"),
+      ).toBeInTheDocument();
+
+      selectTypeCard("empty");
+
+      expect(screen.getByTestId("create-workspace-type-empty")).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
+      expect(
+        screen.queryByTestId("create-workspace-clone-url"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("clicking Clone card after switching shows clone URL field", () => {
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      selectTypeCard("empty");
+      expect(
+        screen.queryByTestId("create-workspace-clone-url"),
+      ).not.toBeInTheDocument();
+
+      selectTypeCard("clone");
+      expect(
+        screen.getByTestId("create-workspace-clone-url"),
+      ).toBeInTheDocument();
+    });
+
+    it("clicking Template hides clone URL field and shows placeholder", () => {
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      selectTypeCard("template");
+
+      expect(
+        screen.queryByTestId("create-workspace-clone-url"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByTestId("create-workspace-template-placeholder"),
+      ).toBeInTheDocument();
     });
   });
 
   describe("clone URL field", () => {
-    it("does not show clone URL field when type is Local Repos", () => {
+    it("does not show clone URL field when type is Empty", () => {
       render(
         <CreateWorkspaceModal
           isOpen={true}
@@ -135,8 +280,7 @@ describe("CreateWorkspaceModal", () => {
         />,
       );
 
-      // Default type is "clone", switch to "Local Repos" (empty)
-      fireEvent.click(screen.getByLabelText("Local Repos"));
+      selectTypeCard("empty");
 
       expect(
         screen.queryByTestId("create-workspace-clone-url"),
@@ -156,7 +300,7 @@ describe("CreateWorkspaceModal", () => {
       expect(
         screen.getByTestId("create-workspace-clone-url"),
       ).toBeInTheDocument();
-      expect(screen.getByLabelText("Repository URLs")).toBeInTheDocument();
+      expect(screen.getByLabelText("Repository URL")).toBeInTheDocument();
     });
   });
 
@@ -205,7 +349,6 @@ describe("CreateWorkspaceModal", () => {
       fireEvent.change(screen.getByTestId("create-workspace-name"), {
         target: { value: "my-workspace" },
       });
-      fireEvent.click(screen.getByLabelText("Clone"));
 
       expect(screen.getByTestId("create-workspace-submit")).toBeDisabled();
     });
@@ -222,12 +365,45 @@ describe("CreateWorkspaceModal", () => {
       fireEvent.change(screen.getByTestId("create-workspace-name"), {
         target: { value: "my-workspace" },
       });
-      fireEvent.click(screen.getByLabelText("Clone"));
       fireEvent.change(screen.getByTestId("create-workspace-clone-url"), {
         target: { value: "https://github.com/example/repo" },
       });
 
       expect(screen.getByTestId("create-workspace-submit")).toBeEnabled();
+    });
+
+    it("submit button is enabled when type is empty and name is filled", () => {
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      selectTypeCard("empty");
+      fireEvent.change(screen.getByTestId("create-workspace-name"), {
+        target: { value: "my-workspace" },
+      });
+
+      expect(screen.getByTestId("create-workspace-submit")).toBeEnabled();
+    });
+
+    it("submit button is disabled when template is selected regardless of name", () => {
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      selectTypeCard("template");
+      fireEvent.change(screen.getByTestId("create-workspace-name"), {
+        target: { value: "my-workspace" },
+      });
+
+      expect(screen.getByTestId("create-workspace-submit")).toBeDisabled();
     });
 
     it("shows 'Creating...' and spinner while submitting", async () => {
@@ -348,7 +524,7 @@ describe("CreateWorkspaceModal", () => {
   });
 
   describe("form submission", () => {
-    it("calls onSuccess and onClose after successful API call", async () => {
+    it("calls onSuccess and onClose after successful empty type submission", async () => {
       mockCreateWorkspace.mockResolvedValue(MOCK_WORKSPACE_DATA);
 
       render(
@@ -359,14 +535,9 @@ describe("CreateWorkspaceModal", () => {
         />,
       );
 
-      // Switch to "Local Repos" (empty) type so name alone is sufficient
-      fireEvent.click(screen.getByLabelText("Local Repos"));
+      selectTypeCard("empty");
       fireEvent.change(screen.getByTestId("create-workspace-name"), {
         target: { value: "test-ws" },
-      });
-      // Need to add a repo path for empty type
-      fireEvent.change(screen.getByTestId("create-workspace-repo-path"), {
-        target: { value: "/path/to/repo" },
       });
       fireEvent.click(screen.getByTestId("create-workspace-submit"));
 
@@ -378,7 +549,6 @@ describe("CreateWorkspaceModal", () => {
       expect(mockCreateWorkspace).toHaveBeenCalledWith({
         name: "test-ws",
         type: "empty",
-        repos: ["/path/to/repo"],
       });
     });
 
@@ -442,6 +612,23 @@ describe("CreateWorkspaceModal", () => {
           path: "/custom/path",
         });
       });
+    });
+
+    it("template type cannot submit", () => {
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      selectTypeCard("template");
+      fireEvent.change(screen.getByTestId("create-workspace-name"), {
+        target: { value: "template-ws" },
+      });
+
+      expect(screen.getByTestId("create-workspace-submit")).toBeDisabled();
     });
 
     it("displays error message on API failure", async () => {
@@ -525,12 +712,9 @@ describe("CreateWorkspaceModal", () => {
         />,
       );
 
-      fireEvent.click(screen.getByLabelText("Local Repos"));
+      selectTypeCard("empty");
       fireEvent.change(screen.getByTestId("create-workspace-name"), {
         target: { value: "test-ws" },
-      });
-      fireEvent.change(screen.getByTestId("create-workspace-repo-path"), {
-        target: { value: "/path/to/repo" },
       });
       fireEvent.click(screen.getByTestId("create-workspace-submit"));
 
@@ -551,12 +735,9 @@ describe("CreateWorkspaceModal", () => {
         />,
       );
 
-      fireEvent.click(screen.getByLabelText("Local Repos"));
+      selectTypeCard("empty");
       fireEvent.change(screen.getByTestId("create-workspace-name"), {
         target: { value: "test-ws" },
-      });
-      fireEvent.change(screen.getByTestId("create-workspace-repo-path"), {
-        target: { value: "/path/to/repo" },
       });
       fireEvent.click(screen.getByTestId("create-workspace-submit"));
 
@@ -581,6 +762,19 @@ describe("CreateWorkspaceModal", () => {
       );
 
       fireEvent.click(screen.getByTestId("create-workspace-cancel"));
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it("close button calls onClose", () => {
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("create-workspace-close"));
       expect(onClose).toHaveBeenCalledTimes(1);
     });
 
@@ -629,8 +823,8 @@ describe("CreateWorkspaceModal", () => {
       fireEvent.change(screen.getByTestId("create-workspace-path"), {
         target: { value: "/some/path" },
       });
-      // Switch to Local Repos to test reset back to Clone
-      fireEvent.click(screen.getByLabelText("Local Repos"));
+      // Switch to Empty to test reset back to Clone
+      selectTypeCard("empty");
 
       // Close the modal
       rerender(
@@ -654,8 +848,14 @@ describe("CreateWorkspaceModal", () => {
       expect(screen.getByTestId("create-workspace-name")).toHaveValue("");
       expect(screen.getByTestId("create-workspace-path")).toHaveValue("");
       // Default type resets to "clone"
-      expect(screen.getByLabelText("Clone")).toBeChecked();
-      expect(screen.getByLabelText("Local Repos")).not.toBeChecked();
+      expect(screen.getByTestId("create-workspace-type-clone")).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
+      expect(screen.getByTestId("create-workspace-type-empty")).toHaveAttribute(
+        "aria-checked",
+        "false",
+      );
       // Clone URL field should be visible since type reset to "clone"
       expect(
         screen.getByTestId("create-workspace-clone-url"),

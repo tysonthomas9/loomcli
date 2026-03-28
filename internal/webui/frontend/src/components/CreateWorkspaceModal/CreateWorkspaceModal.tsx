@@ -1,6 +1,6 @@
 /**
  * CreateWorkspaceModal component.
- * Modal dialog for creating a new workspace (Empty or Clone).
+ * Modal dialog for creating a new workspace (Empty, Clone, or Template).
  * Renders via React portal above all other content.
  */
 
@@ -15,6 +15,104 @@ import { useFocusReturn } from "@/hooks/useFocusReturn";
 import styles from "./CreateWorkspaceModal.module.css";
 
 type WorkspaceType = "empty" | "clone" | "template";
+
+const TYPE_CARDS: {
+  type: WorkspaceType;
+  title: string;
+  desc: string;
+}[] = [
+  { type: "empty", title: "Empty", desc: "New git repository from scratch" },
+  { type: "clone", title: "Clone", desc: "Clone from a remote URL" },
+  {
+    type: "template",
+    title: "Template",
+    desc: "Start from a project template",
+  },
+];
+
+function EmptyIcon() {
+  return (
+    <svg
+      className={styles.typeCardIcon}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+      <line x1="12" y1="11" x2="12" y2="17" />
+      <line x1="9" y1="14" x2="15" y2="14" />
+    </svg>
+  );
+}
+
+function CloneIcon() {
+  return (
+    <svg
+      className={styles.typeCardIcon}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <line x1="6" y1="3" x2="6" y2="15" />
+      <circle cx="18" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <path d="M18 9a9 9 0 0 1-9 9" />
+    </svg>
+  );
+}
+
+function TemplateIcon() {
+  return (
+    <svg
+      className={styles.typeCardIcon}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <polyline points="14 2 14 8 20 8" />
+      <line x1="16" y1="13" x2="8" y2="13" />
+      <line x1="16" y1="17" x2="8" y2="17" />
+      <polyline points="10 9 9 9 8 9" />
+    </svg>
+  );
+}
+
+function FolderBrowseIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+    </svg>
+  );
+}
+
+const ICON_MAP: Record<WorkspaceType, () => JSX.Element> = {
+  empty: EmptyIcon,
+  clone: CloneIcon,
+  template: TemplateIcon,
+};
 
 export interface CreateWorkspaceModalProps {
   isOpen: boolean;
@@ -37,10 +135,6 @@ export function CreateWorkspaceModal({
   const [cloneUrls, setCloneUrls] = useState<string[]>([]);
   const [urlInput, setUrlInput] = useState("");
 
-  // Multi-path input for empty type
-  const [repos, setRepos] = useState<string[]>([]);
-  const [repoInput, setRepoInput] = useState("");
-
   const dialogRef = useRef<HTMLDivElement>(null);
   const nameRef = useRef<HTMLInputElement>(null);
 
@@ -54,8 +148,6 @@ export function CreateWorkspaceModal({
       setError("");
       setCloneUrls([]);
       setUrlInput("");
-      setRepos([]);
-      setRepoInput("");
     }
   }, [isOpen]);
 
@@ -87,26 +179,13 @@ export function CreateWorkspaceModal({
     setCloneUrls((prev) => prev.filter((u) => u !== url));
   };
 
-  const addRepo = () => {
-    const trimmed = repoInput.trim();
-    if (trimmed && !repos.includes(trimmed)) {
-      setRepos((prev) => [...prev, trimmed]);
-      setRepoInput("");
-    }
-  };
-
-  const removeRepo = (repo: string) => {
-    setRepos((prev) => prev.filter((r) => r !== repo));
-  };
-
   // Include pending input text in submit eligibility check
   const hasPendingUrl = type === "clone" && urlInput.trim() !== "";
-  const hasPendingRepo = type === "empty" && repoInput.trim() !== "";
   const canSubmit =
     name.trim() !== "" &&
     !isSubmitting &&
-    (type !== "clone" || cloneUrls.length > 0 || hasPendingUrl) &&
-    (type !== "empty" || repos.length > 0 || hasPendingRepo);
+    type !== "template" &&
+    (type !== "clone" || cloneUrls.length > 0 || hasPendingUrl);
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
@@ -116,7 +195,7 @@ export function CreateWorkspaceModal({
       setIsSubmitting(true);
       setError("");
 
-      // Auto-add any pending URL/repo input before submitting
+      // Auto-add any pending URL input before submitting
       let finalCloneUrls = cloneUrls;
       if (type === "clone" && urlInput.trim()) {
         const trimmed = urlInput.trim();
@@ -124,14 +203,6 @@ export function CreateWorkspaceModal({
           finalCloneUrls = [...cloneUrls, trimmed];
         }
         setUrlInput("");
-      }
-      let finalRepos = repos;
-      if (type === "empty" && repoInput.trim()) {
-        const trimmed = repoInput.trim();
-        if (!repos.includes(trimmed)) {
-          finalRepos = [...repos, trimmed];
-        }
-        setRepoInput("");
       }
 
       const req: CreateWorkspaceRequest = {
@@ -141,10 +212,6 @@ export function CreateWorkspaceModal({
 
       if (type === "clone") {
         req.clone_urls = finalCloneUrls;
-      }
-
-      if (type === "empty") {
-        req.repos = finalRepos;
       }
 
       if (path.trim()) {
@@ -182,19 +249,38 @@ export function CreateWorkspaceModal({
       }
       onClose();
     },
-    [
-      canSubmit,
-      name,
-      type,
-      cloneUrls,
-      urlInput,
-      repos,
-      repoInput,
-      path,
-      onSuccess,
-      onClose,
-    ],
+    [canSubmit, name, type, cloneUrls, urlInput, path, onSuccess, onClose],
   );
+
+  const handleCardKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const cards = TYPE_CARDS.map((c) => c.type);
+    const currentIndex = cards.indexOf(type);
+    let newIndex = currentIndex;
+
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+      e.preventDefault();
+      newIndex = (currentIndex + 1) % cards.length;
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+      e.preventDefault();
+      newIndex = (currentIndex - 1 + cards.length) % cards.length;
+    } else if (e.key === " " || e.key === "Enter") {
+      e.preventDefault();
+      // Already selected by focus movement, but ensure it's set
+      return;
+    } else {
+      return;
+    }
+
+    handleTypeChange(cards[newIndex]!);
+    // Focus the new card
+    const group = (e.currentTarget as HTMLElement).closest(
+      '[role="radiogroup"]',
+    );
+    if (group) {
+      const cardElements = group.querySelectorAll('[role="radio"]');
+      (cardElements[newIndex] as HTMLElement)?.focus();
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -209,10 +295,21 @@ export function CreateWorkspaceModal({
         className={styles.dialog}
         role="dialog"
         aria-modal="true"
-        aria-label="Create Workspace"
+        aria-label="New Workspace"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className={styles.title}>Create Workspace</h2>
+        <div className={styles.headerRow}>
+          <h2 className={styles.title}>New Workspace</h2>
+          <button
+            type="button"
+            className={styles.closeButton}
+            onClick={onClose}
+            aria-label="Close"
+            data-testid="create-workspace-close"
+          >
+            &times;
+          </button>
+        </div>
 
         <form onSubmit={handleSubmit}>
           <div className={styles.fieldGroup}>
@@ -236,66 +333,68 @@ export function CreateWorkspaceModal({
             <label className={styles.label} htmlFor="ws-path">
               Location
             </label>
-            <input
-              id="ws-path"
-              className={styles.input}
-              type="text"
-              value={path}
-              onChange={(e) => setPath(e.target.value)}
-              placeholder={
-                name.trim()
-                  ? `~/.loom/workspaces/${name.trim()}`
-                  : "~/.loom/workspaces/<name>"
-              }
-              disabled={isSubmitting}
-              data-testid="create-workspace-path"
-            />
+            <div className={styles.locationRow}>
+              <input
+                id="ws-path"
+                className={styles.input}
+                type="text"
+                value={path}
+                onChange={(e) => setPath(e.target.value)}
+                placeholder={
+                  name.trim()
+                    ? `~/.loom/workspaces/${name.trim()}`
+                    : "~/.loom/workspaces/<name>"
+                }
+                disabled={isSubmitting}
+                data-testid="create-workspace-path"
+              />
+              <button
+                type="button"
+                className={styles.browseButton}
+                disabled
+                title="Filesystem browsing is not available in the browser"
+                aria-label="Browse for folder"
+                data-testid="create-workspace-browse"
+              >
+                <FolderBrowseIcon />
+              </button>
+            </div>
           </div>
 
           <div className={styles.fieldGroup}>
             <span className={styles.label}>Type</span>
-            <div className={styles.typeSelector}>
-              <label className={styles.typeOption}>
-                <input
-                  type="radio"
-                  name="ws-type"
-                  value="clone"
-                  checked={type === "clone"}
-                  onChange={() => handleTypeChange("clone")}
-                  disabled={isSubmitting}
-                />
-                Clone
-              </label>
-              <label className={styles.typeOption}>
-                <input
-                  type="radio"
-                  name="ws-type"
-                  value="empty"
-                  checked={type === "empty"}
-                  onChange={() => handleTypeChange("empty")}
-                  disabled={isSubmitting}
-                />
-                Local Repos
-              </label>
-              <label
-                className={`${styles.typeOption} ${styles.typeOptionDisabled}`}
-              >
-                <input
-                  type="radio"
-                  name="ws-type"
-                  value="template"
-                  disabled
-                  data-testid="create-workspace-template-radio"
-                />
-                Template
-              </label>
+            <div
+              className={styles.typeSelector}
+              role="radiogroup"
+              aria-label="Workspace type"
+            >
+              {TYPE_CARDS.map((card) => {
+                const Icon = ICON_MAP[card.type];
+                const isSelected = type === card.type;
+                return (
+                  <div
+                    key={card.type}
+                    className={`${styles.typeCard}${isSelected ? ` ${styles.typeCardSelected}` : ""}`}
+                    role="radio"
+                    aria-checked={isSelected}
+                    tabIndex={isSelected ? 0 : -1}
+                    onClick={() => handleTypeChange(card.type)}
+                    onKeyDown={handleCardKeyDown}
+                    data-testid={`create-workspace-type-${card.type}`}
+                  >
+                    <Icon />
+                    <span className={styles.typeCardTitle}>{card.title}</span>
+                    <span className={styles.typeCardDesc}>{card.desc}</span>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
           {type === "clone" && (
             <div className={styles.fieldGroup}>
               <label className={styles.label} htmlFor="ws-clone-url">
-                Repository URLs
+                Repository URL
               </label>
               <div className={styles.addRow}>
                 <input
@@ -343,54 +442,12 @@ export function CreateWorkspaceModal({
             </div>
           )}
 
-          {type === "empty" && (
-            <div className={styles.fieldGroup}>
-              <label className={styles.label} htmlFor="ws-repo-path">
-                Repository Paths
-              </label>
-              <div className={styles.addRow}>
-                <input
-                  id="ws-repo-path"
-                  className={styles.input}
-                  type="text"
-                  value={repoInput}
-                  onChange={(e) => setRepoInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      addRepo();
-                    }
-                  }}
-                  placeholder="/path/to/existing/repo"
-                  disabled={isSubmitting}
-                  data-testid="create-workspace-repo-path"
-                />
-                <button
-                  type="button"
-                  className={styles.addButton}
-                  onClick={addRepo}
-                  disabled={isSubmitting || !repoInput.trim()}
-                >
-                  Add
-                </button>
-              </div>
-              {repos.length > 0 && (
-                <div className={styles.chipList}>
-                  {repos.map((repo) => (
-                    <span key={repo} className={styles.chip}>
-                      <span className={styles.chipText}>{repo}</span>
-                      <button
-                        type="button"
-                        className={styles.chipRemove}
-                        onClick={() => removeRepo(repo)}
-                        aria-label={`Remove ${repo}`}
-                      >
-                        &times;
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              )}
+          {type === "template" && (
+            <div
+              className={styles.comingSoon}
+              data-testid="create-workspace-template-placeholder"
+            >
+              Coming soon — template registry is not yet available
             </div>
           )}
 
