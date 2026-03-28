@@ -72,7 +72,9 @@ describe("sessions API", () => {
       const result = await getTaskSessions("test-ws-id", "bd-abc123");
 
       expect(result).toEqual(sessions);
-      expect(mockGet).toHaveBeenCalledWith("/api/tasks/bd-abc123/sessions");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/tasks/bd-abc123/sessions",
+      );
     });
 
     it("returns empty array when data is null", async () => {
@@ -123,7 +125,7 @@ describe("sessions API", () => {
       await getTaskSessions("test-ws-id", "task with spaces");
 
       expect(mockGet).toHaveBeenCalledWith(
-        "/api/tasks/task%20with%20spaces/sessions",
+        "/api/workspaces/test-ws-id/tasks/task%20with%20spaces/sessions",
       );
     });
   });
@@ -158,7 +160,9 @@ describe("sessions API", () => {
       const result = await getSession("test-ws-id", "bd-123", "s1");
 
       expect(result).toEqual(session);
-      expect(mockGet).toHaveBeenCalledWith("/api/tasks/bd-123/sessions/s1");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/tasks/bd-123/sessions/s1",
+      );
     });
 
     it("returns null when data is null", async () => {
@@ -191,7 +195,7 @@ describe("sessions API", () => {
       await getSession("test-ws-id", "task/id", "session/id");
 
       expect(mockGet).toHaveBeenCalledWith(
-        "/api/tasks/task%2Fid/sessions/session%2Fid",
+        "/api/workspaces/test-ws-id/tasks/task%2Fid/sessions/session%2Fid",
       );
     });
   });
@@ -225,7 +229,7 @@ describe("sessions API", () => {
 
       expect(result).toEqual(entries);
       expect(mockGet).toHaveBeenCalledWith(
-        "/api/tasks/bd-123/sessions/s1/transcript",
+        "/api/workspaces/test-ws-id/tasks/bd-123/sessions/s1/transcript",
       );
     });
 
@@ -273,7 +277,7 @@ describe("sessions API", () => {
       await getSessionTranscript("test-ws-id", "task id", "session id");
 
       expect(mockGet).toHaveBeenCalledWith(
-        "/api/tasks/task%20id/sessions/session%20id/transcript",
+        "/api/workspaces/test-ws-id/tasks/task%20id/sessions/session%20id/transcript",
       );
     });
   });
@@ -290,7 +294,7 @@ describe("sessions API", () => {
 
       expect(result).toBe("diff --git a/file.ts b/file.ts\n+added line\n");
       expect(mockGetText).toHaveBeenCalledWith(
-        "/api/tasks/bd-123/sessions/s1/diff",
+        "/api/workspaces/test-ws-id/tasks/bd-123/sessions/s1/diff",
       );
     });
 
@@ -326,7 +330,7 @@ describe("sessions API", () => {
       await getSessionDiff("test-ws-id", "task/id", "session/id");
 
       expect(mockGetText).toHaveBeenCalledWith(
-        "/api/tasks/task%2Fid/sessions/session%2Fid/diff",
+        "/api/workspaces/test-ws-id/tasks/task%2Fid/sessions/session%2Fid/diff",
       );
     });
   });

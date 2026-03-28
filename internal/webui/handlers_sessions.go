@@ -71,7 +71,7 @@ type TranscriptData struct {
 // --- Handlers ---
 
 // handleListTaskSessions returns all sessions for a given task.
-// GET /api/tasks/{taskId}/sessions
+// GET /api/workspaces/{ws}/tasks/{taskId}/sessions
 func handleListTaskSessions(sessStore *sessions.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if sessStore == nil {
@@ -137,7 +137,7 @@ func handleListTaskSessions(sessStore *sessions.Store) http.HandlerFunc {
 }
 
 // handleGetSession returns metadata for a single session.
-// GET /api/tasks/{taskId}/sessions/{sessionId}
+// GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}
 func handleGetSession(sessStore *sessions.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if sessStore == nil {
@@ -203,7 +203,7 @@ func handleGetSession(sessStore *sessions.Store) http.HandlerFunc {
 }
 
 // handleGetSessionTranscript returns the transcript entries for a session.
-// GET /api/tasks/{taskId}/sessions/{sessionId}/transcript
+// GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/transcript
 func handleGetSessionTranscript(sessStore *sessions.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if sessStore == nil {
@@ -335,7 +335,7 @@ func handleNotifySessionChange(hub *SSEHub) http.HandlerFunc {
 }
 
 // handleGetSessionDiff returns the diff.patch file for a session as plain text.
-// GET /api/tasks/{taskId}/sessions/{sessionId}/diff
+// GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/diff
 func handleGetSessionDiff(sessStore *sessions.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if sessStore == nil {

@@ -12,7 +12,7 @@ import (
 )
 
 // handleListSessionHistory returns session history records for an issue.
-// GET /api/issues/{issueId}/sessions
+// GET /api/workspaces/{ws}/issues/{issueId}/sessions
 func handleListSessionHistory(store *sessionhistory.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
@@ -85,7 +85,7 @@ func readScrollbackFile(path string) (string, int, int, string) {
 }
 
 // handleGetSessionScrollback returns the scrollback content for a completed session.
-// GET /api/issues/{issueId}/sessions/{recordId}/scrollback
+// GET /api/workspaces/{ws}/issues/{issueId}/sessions/{recordId}/scrollback
 func handleGetSessionScrollback(store *sessionhistory.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
