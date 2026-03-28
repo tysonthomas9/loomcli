@@ -20,29 +20,12 @@ Authorization: Bearer <token>
 
 For WebSocket and SSE connections (which cannot set custom headers from browsers), the token can be passed as a query parameter: `?token=<token>`.
 
-Token comparison uses constant-time comparison to prevent timing attacks.
-
-### Token Bootstrap
-
-**`GET /api/auth/token`** (public, same-origin only)
-
-Returns the API key for frontend authentication bootstrap.
-
-The `Sec-Fetch-Site` header is checked: browser requests must be same-origin. Non-browser clients (which don't send `Sec-Fetch-Site`) are allowed through.
-
-```json
-{"token": "<hex-encoded-64-char-string>"}
-```
-
-The API key is stored at `~/.loom/webui-api-key` (auto-generated if absent).
-
 ### Public Routes
 
 These routes do not require bearer token authentication:
 
 - `GET /health`
 - `GET /api/health`
-- `GET /api/auth/token`
 - `GET /api/terminal/ws` (uses its own one-time token)
 - `POST/GET /api/fleet/*` (use fleet-specific auth)
 - Frontend static files (non-`/api/` paths)

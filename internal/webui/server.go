@@ -80,7 +80,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	if config.HSTSEnabled {
 		slog.Info("HSTS enabled: ensure this server is behind a TLS-terminating proxy")
 	}
-	if config.ExtAuthURL == "" && !config.AuthEnabled && config.BindAddress != "127.0.0.1" && config.BindAddress != "::1" {
+	if config.ExtAuthURL == "" && config.BindAddress != "127.0.0.1" && config.BindAddress != "::1" {
 		slog.Warn("no authentication configured and server is exposed to network", "bind_address", config.BindAddress)
 	}
 	if config.DevMode {
@@ -346,29 +346,6 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		}
 	}
 
-	// Load or generate API key for authentication
-	var apiKey string
-	if config.AuthEnabled {
-		if config.APIKey != "" {
-			apiKey = config.APIKey
-		} else {
-			keyPath := DefaultAPIKeyPath()
-			if keyPath != "" {
-				var err error
-				apiKey, err = LoadOrCreateAPIKey(keyPath)
-				if err != nil {
-					slog.Warn("failed to load/create API key, authentication disabled", "component", "auth", "err", err)
-					config.AuthEnabled = false
-				} else {
-					slog.Info("API key loaded", "component", "auth", "path", keyPath)
-				}
-			} else {
-				slog.Warn("cannot determine API key path, authentication disabled", "component", "auth")
-				config.AuthEnabled = false
-			}
-		}
-	}
-
 	// Initialize external auth (JWKS cache + middleware)
 	extAuthMiddleware, jwksCleanup := initExtAuth(config)
 	if jwksCleanup != nil {
@@ -384,7 +361,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 
 	// Create HTTP server and register routes (allowedOrigins: nil = same-origin only)
 	mux := http.NewServeMux()
-	clientErrLimiter, cspLimiter := setupRoutes(mux, pool, multiPool, hub, getMutationsSince, termMgr, termAuth, fleetRegistry, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL, config.GitOps, config.FileOps, tabMetaStore, issueTabStore, config.WorkspaceConfigFn, wrappedDeleteFn, config.SetDefaultWorkspaceFn, config.ClearDefaultWorkspaceFn, wrappedCreateFn, config.BackendOps, sessionHistoryStore, config.SessionsStore, wsExistsFn, initialWorkspaceID, config.WorkspaceConfigByIDFn)
+	clientErrLimiter, cspLimiter := setupRoutes(mux, pool, multiPool, hub, getMutationsSince, termMgr, termAuth, fleetRegistry, tokenCfg, corsConfig.AllowedOrigins, fleetRegCfg, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL, config.GitOps, config.FileOps, tabMetaStore, issueTabStore, config.WorkspaceConfigFn, wrappedDeleteFn, config.SetDefaultWorkspaceFn, config.ClearDefaultWorkspaceFn, wrappedCreateFn, config.BackendOps, sessionHistoryStore, config.SessionsStore, wsExistsFn, initialWorkspaceID, config.WorkspaceConfigByIDFn)
 	defer clientErrLimiter.stop()
 	defer cspLimiter.stop()
 
@@ -392,9 +369,10 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 
 	// Middleware chain: rate-limit -> security -> auth -> CORS -> mux
 	corsMiddleware := NewCORSMiddleware(corsConfig)
-	authMW := NewAuthMiddleware(AuthConfig{APIKey: apiKey, Enabled: config.AuthEnabled})
-	if extAuthMiddleware != nil {
-		authMW = extAuthMiddleware
+	// When no external auth is configured (open mode), use a passthrough middleware.
+	authMW := extAuthMiddleware
+	if authMW == nil {
+		authMW = func(next http.Handler) http.Handler { return next }
 	}
 	securityMiddleware := NewSecurityHeadersMiddleware(SecurityConfig{
 		HSTSEnabled:   config.HSTSEnabled,

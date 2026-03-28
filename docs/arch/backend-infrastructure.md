@@ -186,13 +186,13 @@ type ServerConfig struct {
 ### Middleware Stack
 
 ```
-Request -> RequestLogMiddleware -> RateLimitMiddleware -> SecurityHeadersMiddleware -> AuthMiddleware -> CORSMiddleware -> Router
+Request -> RequestLogMiddleware -> RateLimitMiddleware -> SecurityHeadersMiddleware -> ExtAuthMiddleware -> CORSMiddleware -> Router
 ```
 
 - **RequestLogMiddleware**: structured logging with method, path, status, duration
 - **RateLimitMiddleware**: per-IP rate limiting for client error and CSP report endpoints
 - **SecurityHeadersMiddleware**: HSTS, CSP, X-Content-Type-Options headers
-- **AuthMiddleware**: API key validation from `X-API-Key` header or `?api_key` param. SSE and static file routes exempt.
+- **ExtAuthMiddleware**: RS256 JWT verification via JWKS cache when `--auth-url` is configured; passthrough in open mode. SSE, fleet, terminal, and static file routes exempt via `isPublicRoute()`.
 - **CORSMiddleware**: allowlist-based origin check, preflight handling
 
 ---
@@ -285,7 +285,6 @@ Request -> RequestLogMiddleware -> RateLimitMiddleware -> SecurityHeadersMiddlew
 | GET | `/api/backends` | `handleListBackends` |
 | GET | `/api/config/backend` | `handleGetBackendConfig` |
 | PATCH | `/api/config/backend` | `handlePatchBackendConfig` |
-| GET | `/api/auth/token` | `handleAuthToken` |
 | GET | `/api/daemon/status` | `handleDaemonStatus` |
 | POST | `/api/client-errors` | client error reporting (rate-limited) |
 | POST | `/api/csp-report` | CSP violation reporting (rate-limited) |
@@ -674,7 +673,9 @@ All handlers use:
 | `internal/webui/server_workspace.go` | `WorkspaceData`, `WorkspaceSummary`, workspace route registration |
 | `internal/webui/routes.go` | `setupRoutes`, all route registration |
 | `internal/webui/sse.go` | `SSEHub`, `SSEClient`, `MutationPayload`, `handleSSE` |
-| `internal/webui/auth.go` | `AuthMiddleware`, API key management |
+| `internal/webui/auth.go` | API key file management (`GenerateAPIKey`, `LoadOrCreateAPIKey`, `DefaultAPIKeyPath`) |
+| `internal/webui/auth_routes.go` | `isPublicRoute`, `extractToken`, `stripWorkspacePrefix` — shared auth infrastructure |
+| `internal/webui/ext_auth.go` | `ExtAuthMiddleware`, JWKS cache, JWT verification |
 | `internal/webui/cors.go` | `CORSMiddleware` |
 | `internal/webui/respond.go` | `respondJSON`, `respondError` |
 | `internal/webui/gitops.go` | `GitOps` interface |
