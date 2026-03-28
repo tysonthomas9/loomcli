@@ -37,8 +37,21 @@ func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigi
 			return
 		}
 
-		// Parse and validate session parameter
+		// Parse and validate session and workspace parameters.
+		// Extract workspace from query params before WebSocket upgrade
+		// (r.URL is still valid before hijack). Falls back to "default"
+		// for backward compatibility with old frontends.
 		session := r.URL.Query().Get("session")
+		workspace := r.URL.Query().Get("workspace")
+		if workspace == "" {
+			workspace = "default"
+		} else if !validWorkspaceName(workspace) {
+			respondJSON(w, http.StatusBadRequest, map[string]interface{}{
+				"success": false,
+				"error":   "invalid workspace name: must contain only alphanumeric, hyphen, or underscore",
+			})
+			return
+		}
 		if session == "" {
 			respondJSON(w, http.StatusBadRequest, map[string]interface{}{
 				"success": false,
@@ -128,7 +141,7 @@ func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigi
 		}
 
 		// Broadcast SSE event if this session is linked to an issue, so indicators update on connect.
-		broadcastSessionIssueEvent(tabMetaStore, hub, session)
+		broadcastSessionIssueEvent(tabMetaStore, hub, workspace, session)
 
 		// Create context for coordinating goroutines
 		ctx, cancel := context.WithCancel(r.Context())
@@ -283,27 +296,22 @@ func wsToPTY(ctx context.Context, conn *websocket.Conn, session *TerminalSession
 
 // broadcastSessionIssueEvent sends an SSE event if the given session is linked to an issue.
 // Uses a background context since the caller's request context may be invalid after WebSocket hijack.
-func broadcastSessionIssueEvent(tabMetaStore *tabmeta.Store, hub *SSEHub, session string) {
+func broadcastSessionIssueEvent(tabMetaStore *tabmeta.Store, hub *SSEHub, workspace, session string) {
 	if tabMetaStore == nil || hub == nil {
 		return
 	}
 	metaCtx, metaCancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer metaCancel()
-	allMeta, err := tabMetaStore.ListAll(metaCtx)
-	if err != nil {
+	meta, err := tabMetaStore.Get(metaCtx, workspace, session)
+	if err != nil || meta == nil || meta.IssueID == "" {
 		return
 	}
-	for _, meta := range allMeta {
-		if meta.SessionName == session && meta.IssueID != "" {
-			hub.Broadcast(&MutationPayload{
-				Type:        "terminal_session_change",
-				IssueID:     meta.IssueID,
-				Timestamp:   time.Now().UTC().Format(time.RFC3339),
-				WorkspaceID: meta.Workspace,
-			})
-			return
-		}
-	}
+	hub.Broadcast(&MutationPayload{
+		Type:        "terminal_session_change",
+		IssueID:     meta.IssueID,
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		WorkspaceID: meta.Workspace,
+	})
 }
 
 // injectTerminalContextBanner fetches project context from the loom server

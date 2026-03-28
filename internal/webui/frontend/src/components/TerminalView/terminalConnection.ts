@@ -31,7 +31,7 @@ async function fetchTerminalToken(
  * Build the WebSocket URL for the terminal relay endpoint.
  */
 function buildWsUrl(
-  _workspaceId: string,
+  workspaceId: string,
   sessionName: string,
   token: string | null,
 ): string {
@@ -39,6 +39,9 @@ function buildWsUrl(
   let url = `${proto}//${window.location.host}/api/terminal/ws?session=${encodeURIComponent(sessionName)}`; // allow-url
   if (token) {
     url += `&token=${encodeURIComponent(token)}`;
+  }
+  if (workspaceId) {
+    url += `&workspace=${encodeURIComponent(workspaceId)}`;
   }
   return url;
 }

@@ -68,7 +68,7 @@ export async function fetchTerminalToken(
  */
 // TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export function buildTerminalWsUrl(
-  _workspaceId: string,
+  workspaceId: string,
   sessionName: string,
   token: string | null,
 ): string {
@@ -81,6 +81,9 @@ export function buildTerminalWsUrl(
   let url = `${proto}//${host}/api/terminal/ws?session=${encodeURIComponent(sessionName)}`; // allow-url
   if (token) {
     url += `&token=${encodeURIComponent(token)}`;
+  }
+  if (workspaceId) {
+    url += `&workspace=${encodeURIComponent(workspaceId)}`;
   }
   return url;
 }
