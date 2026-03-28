@@ -684,6 +684,181 @@ func TestSaveMetadata_InvalidSessionID(t *testing.T) {
 	}
 }
 
+func TestFinalize_NonZeroOptsTokens(t *testing.T) {
+	store := createTestStore(t)
+	sess := createTestSession(t, store, "nova", "claude")
+
+	// Simulate hook-captured data already on disk via SaveMetadata.
+	sess.Meta.InputTokens = 1000
+	sess.Meta.OutputTokens = 500
+	sess.Meta.CacheReadTokens = 200
+	sess.Meta.CacheWriteTokens = 100
+	sess.Meta.EstimatedCostUSD = 0.01
+	if err := store.SaveMetadata(sess.SessionID(), &sess.Meta); err != nil {
+		t.Fatalf("SaveMetadata (hook sim): %v", err)
+	}
+
+	// Finalize with non-zero opts tokens — should use opts values, not disk.
+	err := sess.Finalize(FinalizeOptions{
+		TaskID:           "task-nonzero",
+		ExitCode:         0,
+		InputTokens:      8000,
+		OutputTokens:     3000,
+		CacheReadTokens:  6000,
+		CacheWriteTokens: 700,
+		EstimatedCostUSD: 0.09,
+	})
+	if err != nil {
+		t.Fatalf("Finalize error: %v", err)
+	}
+
+	// In-memory should reflect opts values.
+	if sess.Meta.InputTokens != 8000 {
+		t.Errorf("InputTokens = %d, want 8000", sess.Meta.InputTokens)
+	}
+	if sess.Meta.OutputTokens != 3000 {
+		t.Errorf("OutputTokens = %d, want 3000", sess.Meta.OutputTokens)
+	}
+	if sess.Meta.CacheReadTokens != 6000 {
+		t.Errorf("CacheReadTokens = %d, want 6000", sess.Meta.CacheReadTokens)
+	}
+	if sess.Meta.CacheWriteTokens != 700 {
+		t.Errorf("CacheWriteTokens = %d, want 700", sess.Meta.CacheWriteTokens)
+	}
+	if sess.Meta.EstimatedCostUSD != 0.09 {
+		t.Errorf("EstimatedCostUSD = %f, want 0.09", sess.Meta.EstimatedCostUSD)
+	}
+
+	// Verify on disk as well.
+	meta, err := store.LoadMetadata(sess.SessionID())
+	if err != nil {
+		t.Fatalf("LoadMetadata: %v", err)
+	}
+	if meta.InputTokens != 8000 {
+		t.Errorf("disk InputTokens = %d, want 8000", meta.InputTokens)
+	}
+	if meta.OutputTokens != 3000 {
+		t.Errorf("disk OutputTokens = %d, want 3000", meta.OutputTokens)
+	}
+}
+
+func TestFinalize_ZeroOptsPreservesHookData(t *testing.T) {
+	store := createTestStore(t)
+	sess := createTestSession(t, store, "nova", "claude")
+
+	// Simulate the SessionEnd hook writing token data to disk via SaveMetadata.
+	sess.Meta.InputTokens = 4200
+	sess.Meta.OutputTokens = 1800
+	sess.Meta.CacheReadTokens = 3000
+	sess.Meta.CacheWriteTokens = 600
+	sess.Meta.EstimatedCostUSD = 0.042
+	if err := store.SaveMetadata(sess.SessionID(), &sess.Meta); err != nil {
+		t.Fatalf("SaveMetadata (hook sim): %v", err)
+	}
+
+	// Reset in-memory token fields to zero to simulate a fresh Finalize call
+	// where the caller (e.g., auto-mode) has no collector data.
+	sess.Meta.InputTokens = 0
+	sess.Meta.OutputTokens = 0
+	sess.Meta.CacheReadTokens = 0
+	sess.Meta.CacheWriteTokens = 0
+	sess.Meta.EstimatedCostUSD = 0
+
+	// Finalize with zero token opts — should re-read hook data from disk.
+	err := sess.Finalize(FinalizeOptions{
+		TaskID:   "task-hook",
+		ExitCode: 0,
+		// All token fields intentionally zero (default).
+	})
+	if err != nil {
+		t.Fatalf("Finalize error: %v", err)
+	}
+
+	// In-memory should now have the hook-captured values from disk.
+	if sess.Meta.InputTokens != 4200 {
+		t.Errorf("InputTokens = %d, want 4200", sess.Meta.InputTokens)
+	}
+	if sess.Meta.OutputTokens != 1800 {
+		t.Errorf("OutputTokens = %d, want 1800", sess.Meta.OutputTokens)
+	}
+	if sess.Meta.CacheReadTokens != 3000 {
+		t.Errorf("CacheReadTokens = %d, want 3000", sess.Meta.CacheReadTokens)
+	}
+	if sess.Meta.CacheWriteTokens != 600 {
+		t.Errorf("CacheWriteTokens = %d, want 600", sess.Meta.CacheWriteTokens)
+	}
+	if sess.Meta.EstimatedCostUSD != 0.042 {
+		t.Errorf("EstimatedCostUSD = %f, want 0.042", sess.Meta.EstimatedCostUSD)
+	}
+
+	// Verify on disk.
+	meta, err := store.LoadMetadata(sess.SessionID())
+	if err != nil {
+		t.Fatalf("LoadMetadata: %v", err)
+	}
+	if meta.InputTokens != 4200 {
+		t.Errorf("disk InputTokens = %d, want 4200", meta.InputTokens)
+	}
+	if meta.OutputTokens != 1800 {
+		t.Errorf("disk OutputTokens = %d, want 1800", meta.OutputTokens)
+	}
+	if meta.CacheReadTokens != 3000 {
+		t.Errorf("disk CacheReadTokens = %d, want 3000", meta.CacheReadTokens)
+	}
+	if meta.CacheWriteTokens != 600 {
+		t.Errorf("disk CacheWriteTokens = %d, want 600", meta.CacheWriteTokens)
+	}
+	if meta.EstimatedCostUSD != 0.042 {
+		t.Errorf("disk EstimatedCostUSD = %f, want 0.042", meta.EstimatedCostUSD)
+	}
+}
+
+func TestFinalize_ZeroOptsMetadataReadFails(t *testing.T) {
+	store := createTestStore(t)
+	sess := createTestSession(t, store, "nova", "claude")
+
+	// Delete the metadata.json file on disk so LoadMetadata will fail.
+	metaPath := filepath.Join(store.Dir(), sess.SessionID(), "metadata.json")
+	if err := os.Remove(metaPath); err != nil {
+		t.Fatalf("remove metadata.json: %v", err)
+	}
+
+	// Finalize with zero token opts — LoadMetadata will fail, tokens stay zero.
+	err := sess.Finalize(FinalizeOptions{
+		TaskID:   "task-nometafile",
+		ExitCode: 0,
+		// All token fields intentionally zero.
+	})
+	if err != nil {
+		t.Fatalf("Finalize error: %v", err)
+	}
+
+	// Token fields should all be zero (graceful degradation).
+	if sess.Meta.InputTokens != 0 {
+		t.Errorf("InputTokens = %d, want 0", sess.Meta.InputTokens)
+	}
+	if sess.Meta.OutputTokens != 0 {
+		t.Errorf("OutputTokens = %d, want 0", sess.Meta.OutputTokens)
+	}
+	if sess.Meta.CacheReadTokens != 0 {
+		t.Errorf("CacheReadTokens = %d, want 0", sess.Meta.CacheReadTokens)
+	}
+	if sess.Meta.CacheWriteTokens != 0 {
+		t.Errorf("CacheWriteTokens = %d, want 0", sess.Meta.CacheWriteTokens)
+	}
+	if sess.Meta.EstimatedCostUSD != 0 {
+		t.Errorf("EstimatedCostUSD = %f, want 0", sess.Meta.EstimatedCostUSD)
+	}
+
+	// Non-token fields should still be set correctly.
+	if sess.Meta.TaskID != "task-nometafile" {
+		t.Errorf("TaskID = %q, want %q", sess.Meta.TaskID, "task-nometafile")
+	}
+	if sess.Meta.Status != StatusCompleted {
+		t.Errorf("Status = %q, want %q", sess.Meta.Status, StatusCompleted)
+	}
+}
+
 // rewriteIndex replaces the last line in index.jsonl with a modified record.
 // Used in tests to backdate EndedAt for purge testing.
 func rewriteIndex(t *testing.T, store *Store, rec SessionRecord) {
