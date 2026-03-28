@@ -95,8 +95,8 @@ func TestGeneratePlanningPrompt_WithParent(t *testing.T) {
 	prompt := GeneratePlanningPrompt("falcon", nil, "my-epic-abc")
 
 	wantParts := []string{
-		"bd ready --parent my-epic-abc --limit 50 --json",
-		"bd ready --parent my-epic-abc --limit 50",
+		"bd ready --parent my-epic-abc --limit 200 --json",
+		"bd ready --parent my-epic-abc --limit 200",
 		"Epic scope: my-epic-abc",
 		"MUST only select tasks from this epic",
 	}
@@ -116,8 +116,8 @@ func TestGenerateTaskPrompt_WithParent(t *testing.T) {
 	prompt := GenerateTaskPrompt("nova", nil, "proj-xyz", "claude")
 
 	wantParts := []string{
-		"bd ready --parent proj-xyz --limit 50 --json",
-		"bd ready --parent proj-xyz --limit 50",
+		"bd ready --parent proj-xyz --limit 200 --json",
+		"bd ready --parent proj-xyz --limit 200",
 		"Epic scope: proj-xyz",
 		"MUST only select tasks from this epic",
 	}
@@ -145,11 +145,11 @@ func TestGeneratePrompts_NoParent_NoEpicScope(t *testing.T) {
 	}
 
 	// Should contain unscoped bd ready
-	if !strings.Contains(planPrompt, "bd ready --limit 50 --json") {
-		t.Error("planning prompt without parentID should contain 'bd ready --limit 50 --json'")
+	if !strings.Contains(planPrompt, "bd ready --limit 200 --json") {
+		t.Error("planning prompt without parentID should contain 'bd ready --limit 200 --json'")
 	}
-	if !strings.Contains(taskPrompt, "bd ready --limit 50 --json") {
-		t.Error("task prompt without parentID should contain 'bd ready --limit 50 --json'")
+	if !strings.Contains(taskPrompt, "bd ready --limit 200 --json") {
+		t.Error("task prompt without parentID should contain 'bd ready --limit 200 --json'")
 	}
 }
 
@@ -996,8 +996,8 @@ func TestRenderPrompt_EmbeddedTemplate(t *testing.T) {
 		name string
 		data promptTemplateData
 	}{
-		{"planning", promptTemplateData{AgentName: "test", BdReadyJSON: "bd ready --limit 50 --json", BdReadyFallback: "bd ready --limit 50"}},
-		{"task", promptTemplateData{AgentName: "test", BdReadyJSON: "bd ready --limit 50 --json", BdReadyFallback: "bd ready --limit 50", TestStep: "test step", ReviewStep: "review step"}},
+		{"planning", promptTemplateData{AgentName: "test", BdReadyJSON: "bd ready --limit 200 --json", BdReadyFallback: "bd ready --limit 200"}},
+		{"task", promptTemplateData{AgentName: "test", BdReadyJSON: "bd ready --limit 200 --json", BdReadyFallback: "bd ready --limit 200", TestStep: "test step", ReviewStep: "review step"}},
 		{"fleet_planning", promptTemplateData{AgentName: "test", TaskID: "bd-test.1"}},
 		{"fleet_task", promptTemplateData{AgentName: "test", TaskID: "bd-test.1", TestStep: "test step", ReviewStep: "review step"}},
 		{"conflict_resolution", promptTemplateData{SourceBranch: "feature", TargetBranch: "main", ConflictList: "file.go", PushRef: "main"}},
@@ -1098,8 +1098,8 @@ func TestAllTemplatesRender(t *testing.T) {
 		WorkspaceBlock:  "workspace block content",
 		EpicScope:       "epic scope content",
 		SafetyBlock:     "safety block content",
-		BdReadyJSON:     "bd ready --parent epic-123 --limit 50 --json",
-		BdReadyFallback: "bd ready --parent epic-123 --limit 50",
+		BdReadyJSON:     "bd ready --parent epic-123 --limit 200 --json",
+		BdReadyFallback: "bd ready --parent epic-123 --limit 200",
 		TaskID:          "task-456",
 		TestStep:        "### Step 5: Write Tests\n- test content",
 		ReviewStep:      "### Step 6: Code Review\n- review content",
