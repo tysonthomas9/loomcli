@@ -124,6 +124,7 @@ func TestHandleGetAgentLog_MissingName(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents//logs", nil)
 	req.SetPathValue("name", "")
+	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -164,6 +165,7 @@ func TestHandleGetAgentLog_InvalidName(t *testing.T) {
 			// Use a clean URL path and set the path value directly
 			req := httptest.NewRequest(http.MethodGet, "/api/agents/invalid/logs", nil)
 			req.SetPathValue("name", tt.agentName)
+			req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 			w := httptest.NewRecorder()
 
 			handler.ServeHTTP(w, req)
@@ -194,6 +196,7 @@ func TestHandleGetAgentLog_FileNotFound(t *testing.T) {
 	// Use a valid but non-existent agent name
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/nonexistent-agent-xyz/logs", nil)
 	req.SetPathValue("name", "nonexistent-agent-xyz")
+	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -1069,6 +1072,7 @@ func TestHandleGetAgentLog_ContentType(t *testing.T) {
 	// Test with missing name
 	req := httptest.NewRequest(http.MethodGet, "/api/agents//logs", nil)
 	req.SetPathValue("name", "")
+	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)

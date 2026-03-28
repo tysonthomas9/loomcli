@@ -619,6 +619,7 @@ func TestHandleSeedTerminalSession_NilManager(t *testing.T) {
 	body := strings.NewReader(`{"issue_id":"X-1","title":"Test"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/sessions/{name}/seed", body)
 	req.SetPathValue("name", "test-session")
+	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -672,6 +673,7 @@ func TestHandleSeedTerminalSession_InvalidJSON(t *testing.T) {
 	body := strings.NewReader(`{invalid json}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/sessions/{name}/seed", body)
 	req.SetPathValue("name", "test-session")
+	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -711,6 +713,7 @@ func TestHandleSeedTerminalSession_MissingRequiredFields(t *testing.T) {
 			body := strings.NewReader(tt.body)
 			req := httptest.NewRequest(http.MethodPost, "/api/terminal/sessions/{name}/seed", body)
 			req.SetPathValue("name", "test-session")
+			req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 			w := httptest.NewRecorder()
 
 			handler.ServeHTTP(w, req)

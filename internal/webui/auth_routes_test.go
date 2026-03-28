@@ -50,8 +50,8 @@ func TestIsPublicRoute(t *testing.T) {
 		{"POST /api/fleet/done/worker-1", http.MethodPost, "/api/fleet/done/worker-1", true},
 		{"GET /api/fleet/register", http.MethodGet, "/api/fleet/register", true},
 
-		// Config endpoint is public (auth discovery bootstrap)
-		{"GET /api/config", http.MethodGet, "/api/config", true},
+		// /api/config has no handler — not public
+		{"GET /api/config (no handler)", http.MethodGet, "/api/config", false},
 
 		// Session notification uses its own auth
 		{"POST /api/sessions/notify", http.MethodPost, "/api/sessions/notify", true},
@@ -224,7 +224,7 @@ func TestIsPublicRoute_WorkspaceScoped(t *testing.T) {
 		{"ws agent terminal ws GET", "GET", "/api/workspaces/ws1/agents/a1/terminal/ws", true},
 
 		// Workspace-scoped config and events should be public
-		{"ws config GET", "GET", "/api/workspaces/ws1/config", true},
+		{"ws config GET", "GET", "/api/workspaces/ws1/config", false},
 		{"ws events GET", "GET", "/api/workspaces/ws1/events", true},
 
 		// SSE token exchange must NOT be public — requires JWT auth from ExtAuth middleware

@@ -34,6 +34,10 @@ func resolveAgent(w http.ResponseWriter, r *http.Request, ops AgentResolver) (*A
 	}
 
 	wsID := WorkspaceFromContext(r.Context())
+	if wsID == "" {
+		respondError(w, http.StatusBadRequest, "workspace ID required")
+		return nil, false
+	}
 	wt, err := ops.ResolveAgentWorktree(wsID, agentName)
 	if err != nil {
 		respondError(w, http.StatusNotFound, fmt.Sprintf("agent worktree %q not found", agentName))

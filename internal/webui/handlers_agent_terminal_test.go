@@ -25,6 +25,7 @@ func TestHandleGetAgentTerminalInfo_MissingName(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents//terminal/info", nil)
 	req.SetPathValue("name", "")
+	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -69,6 +70,7 @@ func TestHandleGetAgentTerminalInfo_InvalidName(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/api/agents/invalid/terminal/info", nil)
 			req.SetPathValue("name", tt.agentName)
+			req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 			w := httptest.NewRecorder()
 
 			handler.ServeHTTP(w, req)
@@ -93,6 +95,7 @@ func TestHandleGetAgentTerminalInfo_NilManager(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/ember/terminal/info", nil)
 	req.SetPathValue("name", "ember")
+	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -126,6 +129,7 @@ func TestHandleGetAgentTerminalInfo_ArchiveMode(t *testing.T) {
 	// Use a valid agent name that will not match any running tmux session
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/nonexistent-agent-xyz/terminal/info", nil)
 	req.SetPathValue("name", "nonexistent-agent-xyz")
+	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -171,6 +175,7 @@ func TestHandleGetAgentTerminalInfo_WorkspaceFromContext(t *testing.T) {
 	agentName := "context-agent"
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-workspace-id/agents/"+agentName+"/terminal/info", nil)
 	req.SetPathValue("name", agentName)
+	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 
 	// Inject workspace ID via context — the handler must use this, not query params.
 	ctx := WithWorkspace(req.Context(), "test-workspace-id")
@@ -217,6 +222,7 @@ func TestHandleGetAgentTerminalInfo_ResponseShape(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/spark/terminal/info", nil)
 	req.SetPathValue("name", "spark")
+	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -279,6 +285,7 @@ func TestHandleGetAgentTerminalInfo_ValidNames(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/api/agents/"+tt.agentName+"/terminal/info", nil)
 			req.SetPathValue("name", tt.agentName)
+			req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 			w := httptest.NewRecorder()
 
 			handler.ServeHTTP(w, req)
@@ -304,6 +311,7 @@ func TestHandleGetAgentTerminalToken_MissingName(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents//terminal/token", nil)
 	req.SetPathValue("name", "")
+	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -342,6 +350,7 @@ func TestHandleGetAgentTerminalToken_InvalidName(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/api/agents/invalid/terminal/token", nil)
 			req.SetPathValue("name", tt.agentName)
+			req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 			w := httptest.NewRecorder()
 
 			handler.ServeHTTP(w, req)
@@ -366,6 +375,7 @@ func TestHandleGetAgentTerminalToken_NilAuth(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/ember/terminal/token", nil)
 	req.SetPathValue("name", "ember")
+	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -391,6 +401,7 @@ func TestHandleGetAgentTerminalToken_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/ember/terminal/token", nil)
 	req.SetPathValue("name", "ember")
+	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -434,6 +445,7 @@ func TestHandleGetAgentTerminalToken_TokenIsValid(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/spark/terminal/token", nil)
 	req.SetPathValue("name", "spark")
+	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -468,6 +480,7 @@ func TestHandleGetAgentTerminalToken_TokenScopeIsolation(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/ember/terminal/token", nil)
 	req.SetPathValue("name", "ember")
+	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -500,6 +513,7 @@ func TestHandleGetAgentTerminalToken_UniqueTokensPerRequest(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		req := httptest.NewRequest(http.MethodGet, "/api/agents/ember/terminal/token", nil)
 		req.SetPathValue("name", "ember")
+		req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 		w := httptest.NewRecorder()
 
 		handler.ServeHTTP(w, req)
@@ -544,6 +558,7 @@ func TestHandleGetAgentTerminalToken_ValidNames(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/api/agents/"+tt.agentName+"/terminal/token", nil)
 			req.SetPathValue("name", tt.agentName)
+			req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 			w := httptest.NewRecorder()
 
 			handler.ServeHTTP(w, req)
@@ -575,6 +590,7 @@ func TestHandleAgentTerminalWS_MissingName(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents//terminal/ws", nil)
 	req.SetPathValue("name", "")
+	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -622,6 +638,7 @@ func TestHandleAgentTerminalWS_InvalidName(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/api/agents/invalid/terminal/ws", nil)
 			req.SetPathValue("name", tt.agentName)
+			req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 			w := httptest.NewRecorder()
 
 			handler.ServeHTTP(w, req)
@@ -642,6 +659,7 @@ func TestHandleAgentTerminalWS_NilManager(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/ember/terminal/ws", nil)
 	req.SetPathValue("name", "ember")
+	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -679,6 +697,7 @@ func TestHandleAgentTerminalWS_NilAuth(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/ember/terminal/ws", nil)
 	req.SetPathValue("name", "ember")
+	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -715,6 +734,7 @@ func TestHandleAgentTerminalWS_AuthNoToken(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/ember/terminal/ws", nil)
 	req.SetPathValue("name", "ember")
+	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -755,6 +775,7 @@ func TestHandleAgentTerminalWS_AuthInvalidToken(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/ember/terminal/ws?token=bogus.token", nil)
 	req.SetPathValue("name", "ember")
+	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -790,6 +811,7 @@ func TestHandleAgentTerminalWS_NoActiveSession(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/"+agentName+"/terminal/ws?token="+token, nil)
 	req.SetPathValue("name", agentName)
+	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -834,6 +856,7 @@ func TestHandleAgentTerminalWS_TokenScopeMismatch(t *testing.T) {
 	// Try to use it for "spark" — scope mismatch should fail auth
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/spark/terminal/ws?token="+token, nil)
 	req.SetPathValue("name", "spark")
+	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -887,6 +910,7 @@ func TestHandleAgentTerminalWS_NonWebSocketRequest(t *testing.T) {
 	// the WebSocket upgrade.
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/"+agentName+"/terminal/ws?token="+token, nil)
 	req.SetPathValue("name", agentName)
+	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -985,6 +1009,7 @@ func TestHandleAgentTerminalWS_ValidAuthNoSession_ResponseShape(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/"+agentName+"/terminal/ws?token="+token, nil)
 	req.SetPathValue("name", agentName)
+	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -1038,6 +1063,7 @@ func TestHandleAgentTerminalWS_ValidAuthMultipleAgents(t *testing.T) {
 
 			req := httptest.NewRequest(http.MethodGet, "/api/agents/"+agentName+"/terminal/ws?token="+token, nil)
 			req.SetPathValue("name", agentName)
+			req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 			w := httptest.NewRecorder()
 
 			handler.ServeHTTP(w, req)

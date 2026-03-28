@@ -47,17 +47,16 @@ func isPublicRoute(method, path string) bool {
 		return true
 	case normalizedPath == "/api/health":
 		return true
-	case normalizedPath == "/api/config":
-		// Auth discovery endpoint must be accessible without JWT (bootstrap)
-		return true
 	case normalizedPath == "/api/events":
-		// SSE endpoint uses its own auth (sseAuth middleware or token exchange)
+		// Workspace-scoped SSE endpoint (/api/workspaces/{ws}/events) uses its own auth
+		// (sseAuth middleware or token exchange). Matched via stripWorkspacePrefix normalization.
 		return true
 	case normalizedPath == "/api/terminal/ws":
 		// Terminal WebSocket uses its own one-time token auth (validated in handler)
 		return true
 	case strings.HasPrefix(normalizedPath, "/api/agents/") && strings.HasSuffix(normalizedPath, "/terminal/ws"):
-		// Agent terminal WebSocket uses one-time token auth (validated in handler)
+		// Workspace-scoped agent terminal WebSocket (/api/workspaces/{ws}/agents/{name}/terminal/ws)
+		// uses one-time token auth (validated in handler). Matched via stripWorkspacePrefix normalization.
 		return true
 	case !strings.HasPrefix(normalizedPath, "/api/"):
 		// Frontend static files and SPA routes
