@@ -172,6 +172,39 @@ func TestFleetDBBackend_Ready(t *testing.T) {
 	}
 }
 
+func TestFleetDBBackend_Ready_ForwardsLabelsAndSourceRepos(t *testing.T) {
+	mock := &mockFleetDBClient{
+		readyFn: func(args *rpc.ReadyArgs) (*rpc.Response, error) {
+			if args.Limit != 10 {
+				t.Errorf("expected limit 10, got %d", args.Limit)
+			}
+			if len(args.Labels) != 1 || args.Labels[0] != "repo:backend" {
+				t.Errorf("expected labels [repo:backend], got %v", args.Labels)
+			}
+			if len(args.SourceRepos) != 2 || args.SourceRepos[0] != "repo-a" || args.SourceRepos[1] != "repo-b" {
+				t.Errorf("expected source_repos [repo-a repo-b], got %v", args.SourceRepos)
+			}
+			issues := []*types.Issue{
+				{ID: "T-1", Title: "Task 1", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask},
+			}
+			return successResp(issues), nil
+		},
+	}
+
+	b := newFleetDBBackend(mock, "test")
+	got, err := b.Ready(context.Background(), ReadyOpts{
+		Limit:       10,
+		Labels:      []string{"repo:backend"},
+		SourceRepos: []string{"repo-a", "repo-b"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "T-1" {
+		t.Errorf("expected [T-1], got %v", got)
+	}
+}
+
 func TestFleetDBBackend_Ready_NoOpts(t *testing.T) {
 	mock := &mockFleetDBClient{
 		readyFn: func(args *rpc.ReadyArgs) (*rpc.Response, error) {
