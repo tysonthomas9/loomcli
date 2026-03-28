@@ -154,3 +154,10 @@ export {
 // File API functions (agent worktree file operations)
 export { listWorktreeDir, readWorktreeFile, writeWorktreeFile } from "./files";
 export type { FileEntry, DirListData, FileReadData } from "./files";
+
+// App config API (auth mode discovery)
+export { fetchAppConfig, AppConfigError } from "./appConfig";
+export type { AppConfig } from "./appConfig";
+
+// Auth client (Better Auth integration)
+export { initExternalAuth, getAuthClient } from "./authClient";
