@@ -53,6 +53,7 @@ export * from "./AgentCard";
 export * from "./AgentDetailPanel";
 export * from "./AgentsSidebar";
 export * from "./NavRail";
+export * from "./ViewSubSwitcher";
 export * from "./TaskDrawer";
 export * from "./Toast";
 export * from "./AssigneePrompt";

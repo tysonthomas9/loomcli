@@ -93,9 +93,8 @@ describe("KeyboardCheatsheet", () => {
     } as ReturnType<typeof useKeyboardShortcuts>);
 
     render(<KeyboardCheatsheet />);
-    expect(screen.getByText("Kanban board")).toBeInTheDocument();
-    expect(screen.getByText("Table view")).toBeInTheDocument();
-    expect(screen.getByText("Terminal")).toBeInTheDocument();
+    expect(screen.getByText("Workspaces")).toBeInTheDocument();
+    expect(screen.getByText("Monitor")).toBeInTheDocument();
     expect(screen.getByText("Observability")).toBeInTheDocument();
     expect(screen.getByText("Files")).toBeInTheDocument();
     expect(screen.getByText("Workspace")).toBeInTheDocument();

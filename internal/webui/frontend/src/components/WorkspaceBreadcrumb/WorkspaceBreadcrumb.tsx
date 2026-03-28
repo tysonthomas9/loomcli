@@ -15,7 +15,7 @@ const VIEW_LABELS: Record<ViewMode, string> = {
   graph: "Graph",
   monitor: "Monitor",
   observability: "Observability",
-  terminal: "Terminal",
+  terminal: "Monitor",
   workspace: "Workspace",
   settings: "Settings",
   files: "Files",

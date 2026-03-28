@@ -276,11 +276,10 @@ export function KeyboardShortcutProvider({
       ) {
         const viewMap: Record<string, ViewMode> = {
           "1": "kanban",
-          "2": "table",
-          "3": "terminal",
-          "4": "observability",
-          "5": "files",
-          "6": "workspace",
+          "2": "terminal",
+          "3": "observability",
+          "4": "files",
+          "5": "workspace",
           "0": "settings",
         };
         const view = viewMap[event.key];

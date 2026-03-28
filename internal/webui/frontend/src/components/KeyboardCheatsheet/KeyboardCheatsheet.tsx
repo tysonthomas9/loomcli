@@ -18,12 +18,11 @@ const SHORTCUT_SECTIONS = [
   {
     title: "Navigation",
     shortcuts: [
-      { key: "1", description: "Kanban board" },
-      { key: "2", description: "Table view" },
-      { key: "3", description: "Terminal" },
-      { key: "4", description: "Observability" },
-      { key: "5", description: "Files" },
-      { key: "6", description: "Workspace" },
+      { key: "1", description: "Workspaces" },
+      { key: "2", description: "Monitor" },
+      { key: "3", description: "Observability" },
+      { key: "4", description: "Files" },
+      { key: "5", description: "Workspace" },
       { key: "0", description: "Settings" },
     ],
   },

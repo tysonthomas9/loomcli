@@ -172,7 +172,7 @@ describe("WorkspaceBreadcrumb", () => {
       graph: "Graph",
       monitor: "Monitor",
       observability: "Observability",
-      terminal: "Terminal",
+      terminal: "Monitor",
       workspace: "Workspace",
       settings: "Settings",
       files: "Files",

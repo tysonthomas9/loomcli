@@ -15,12 +15,18 @@ export interface NavRailProps {
   badges?: Partial<Record<ViewMode, boolean>>;
 }
 
-type NavItem = { id: ViewMode; label: string; icon: JSX.Element };
+type NavItem = {
+  id: ViewMode;
+  label: string;
+  icon: JSX.Element;
+  activeForViews?: ViewMode[];
+};
 
 const TOP_ITEMS: NavItem[] = [
   {
     id: "kanban",
-    label: "Kanban",
+    label: "Workspaces",
+    activeForViews: ["kanban", "table"],
     icon: (
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <rect
@@ -62,53 +68,39 @@ const TOP_ITEMS: NavItem[] = [
           fill="none"
           stroke="currentColor"
           strokeWidth="2"
-        />
-      </svg>
-    ),
-  },
-  {
-    id: "table",
-    label: "List",
-    icon: (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path
-          d="M4 6h16M4 12h16M4 18h16"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
         />
       </svg>
     ),
   },
   {
     id: "terminal",
-    label: "Terminal",
+    label: "Monitor",
     icon: (
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <rect
           x="2"
           y="3"
           width="20"
-          height="18"
+          height="14"
           rx="2"
           fill="none"
           stroke="currentColor"
           strokeWidth="2"
         />
-        <polyline
-          points="6 9 10 12 6 15"
-          fill="none"
+        <line
+          x1="8"
+          y1="21"
+          x2="16"
+          y2="21"
           stroke="currentColor"
           strokeWidth="2"
           strokeLinecap="round"
-          strokeLinejoin="round"
         />
         <line
           x1="12"
-          y1="15"
-          x2="18"
-          y2="15"
+          y1="17"
+          x2="12"
+          y2="21"
           stroke="currentColor"
           strokeWidth="2"
           strokeLinecap="round"
@@ -155,7 +147,7 @@ export function NavRail({
   const rootClassName = [styles.navRail, className].filter(Boolean).join(" ");
 
   const renderButton = (item: NavItem) => {
-    const isActive = activeView === item.id;
+    const isActive = (item.activeForViews ?? [item.id]).includes(activeView);
     const showBadge =
       item.id === "terminal" && sessionCount != null && sessionCount > 0;
     const showUnread = !isActive && badges?.[item.id] === true;

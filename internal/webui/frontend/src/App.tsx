@@ -45,6 +45,7 @@ import {
   BulkActionToolbar,
   TalkToLeadButton,
   NavRail,
+  ViewSubSwitcher,
   ThemeToggle,
   KeyboardCheatsheet,
   WorkspaceSwitcher,
@@ -986,6 +987,7 @@ function App() {
           }
           sidebar={sidebarContent}
         >
+          <ViewSubSwitcher activeView={activeView} onChange={setActiveView} />
           {(showStaleBanner || isConnectionLost) &&
             staleBannerDisconnectedSince !== null && (
               <StaleDataBanner
@@ -1042,6 +1044,7 @@ function App() {
           }
           sidebar={sidebarContent}
         >
+          <ViewSubSwitcher activeView={activeView} onChange={setActiveView} />
           {(showStaleBanner || isConnectionLost) &&
             staleBannerDisconnectedSince !== null && (
               <StaleDataBanner
@@ -1093,6 +1096,7 @@ function App() {
           }
           sidebar={sidebarContent}
         >
+          <ViewSubSwitcher activeView={activeView} onChange={setActiveView} />
           <EmptyWorkspaceBoard isMultiRepo={isMultiRepo} />
         </AppLayout>
         {!isDaemonAvailable && (
@@ -1133,6 +1137,7 @@ function App() {
           }
           sidebar={sidebarContent}
         >
+          <ViewSubSwitcher activeView={activeView} onChange={setActiveView} />
           {activeView === "kanban" && (
             <ErrorBoundary resetOnChange={[activeView]}>
               <div className={styles.kanbanShell}>
