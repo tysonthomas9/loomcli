@@ -186,6 +186,198 @@ SSE hub and fleet coordination metrics.
 
 Fleet metrics fields are omitted when fleet coordination is not enabled.
 
+## Backend Configuration
+
+Endpoints for reading and updating the AI backend configuration. Configuration exists at two levels:
+
+- **Project-level** — stored in `loom.yaml` in the workspace directory (discovered via daemon status RPC)
+- **Per-workspace override** — stored in `~/.loom/config.yaml` (global config, addressed by workspace UUID)
+
+### Data Model: BackendConfigData
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `backend` | string | Current backend name (default: `"claude"`) |
+| `source` | string | `"project"` if explicitly set in loom.yaml, `"default"` if using fallback |
+| `available` | []string | All backends available for tab creation (includes `"shell"`) |
+| `agents` | []AgentBackendOverride | Per-agent backend overrides from loom.yaml |
+
+#### AgentBackendOverride
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `worktree` | string | Agent worktree name |
+| `role` | string | Agent role |
+| `backend` | string | Per-agent backend override (empty if using project default) |
+
+**Valid backends for PATCH:** `"claude"`, `"codex"`, `"opencode"`, `"gemini"`, `"cursor"`. The `"shell"` backend appears in the `available` list but cannot be set via PATCH endpoints.
+
+### `GET /api/config/backend`
+
+Read the project-level backend configuration from `loom.yaml`.
+
+- **Auth:** Required
+- **Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "backend": "claude",
+    "source": "default",
+    "available": ["claude", "codex", "opencode", "gemini", "cursor", "shell"],
+    "agents": []
+  }
+}
+```
+
+- `available` always contains the 5 AI backends plus `"shell"` (6 total)
+- `agents` contains per-agent overrides from loom.yaml; empty array if no agents defined
+- `source` is `"project"` when the backend field is explicitly set, `"default"` when using fallback
+
+- **Errors:**
+  - `500` — failed to parse config (loom.yaml YAML parse error)
+  - `503` — connection pool not initialized or daemon not available
+  - `504` — daemon not available (2s context timeout exceeded)
+
+### `PATCH /api/config/backend`
+
+Update the project-level backend in `loom.yaml`.
+
+- **Auth:** Required
+- **Request Body:**
+
+```json
+{
+  "backend": "codex"
+}
+```
+
+`backend` must be one of: `"claude"`, `"codex"`, `"opencode"`, `"gemini"`, `"cursor"`. The `"shell"` backend is rejected with `400`.
+
+- **Response:** `200 OK`
+
+Returns the full updated config in the same format as GET. `source` is always `"project"` after a successful PATCH.
+
+```json
+{
+  "success": true,
+  "data": {
+    "backend": "codex",
+    "source": "project",
+    "available": ["claude", "codex", "opencode", "gemini", "cursor", "shell"],
+    "agents": [
+      {"worktree": "falcon", "role": "plan", "backend": "codex"}
+    ]
+  }
+}
+```
+
+- **Errors:**
+  - `400` — invalid request body (malformed JSON) or invalid backend name
+  - `413` — request body too large (>1 MB)
+  - `500` — `"failed to parse config: ..."` (covers both read and YAML parse errors from loom.yaml) or `"failed to save config"` (write error)
+  - `503` — connection pool not initialized or daemon not available
+  - `504` — daemon not available (2s context timeout exceeded)
+
+- **Behavior Notes:**
+  - Reads existing `loom.yaml` (or creates empty if absent), updates the `backend` field while preserving all other fields (`agents`, `daemon`, `roles`), and writes back to disk
+  - Uses `yaml.Node` types for round-trip preservation of uninterpreted YAML fields
+
+### `GET /api/workspaces/{ws}/config/backend`
+
+Read backend configuration scoped to a specific workspace in multi-workspace mode. Behaves identically to `GET /api/config/backend` but routes the daemon connection through the workspace-specific pool via `WorkspaceMiddleware`.
+
+- **Auth:** Required
+- **Path Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| ws | string | yes | Workspace UUID |
+
+- **Response:** Same format and error codes as `GET /api/config/backend`
+- Only available when MultiPool is configured (multi-workspace mode)
+
+### `PATCH /api/workspaces/{ws}/config/backend`
+
+Update backend configuration scoped to a specific workspace in multi-workspace mode. Behaves identically to `PATCH /api/config/backend` but routes through the workspace-specific daemon pool.
+
+- **Auth:** Required
+- **Path Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| ws | string | yes | Workspace UUID |
+
+- **Request Body, Response, and Errors:** Same as `PATCH /api/config/backend`
+- Only available when MultiPool is configured (multi-workspace mode)
+
+### `PATCH /api/workspace/{name}/config/backend`
+
+Update a workspace's backend override in the global config (`~/.loom/config.yaml`). This is separate from the project-level endpoints — it sets a per-workspace backend preference in the multi-workspace configuration.
+
+- **Auth:** Required
+- **Path Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| name | string | yes | Workspace UUID (resolved to name via config lookup) |
+
+- **Request Body:**
+
+```json
+{
+  "backend": "codex"
+}
+```
+
+`backend` must be non-empty and one of: `"claude"`, `"codex"`, `"opencode"`, `"gemini"`, `"cursor"`.
+
+- **Response:** `200 OK` (with workspace config function)
+
+```json
+{
+  "success": true,
+  "data": {
+    "name": "my-workspace",
+    "path": "/home/user/projects/my-workspace",
+    "repos": [],
+    "groups": [],
+    "agents": [],
+    "workspaces": [
+      {
+        "name": "my-workspace",
+        "path": "/home/user/projects/my-workspace",
+        "active": true,
+        "repo_count": 3,
+        "is_default": false,
+        "backend": "codex"
+      }
+    ],
+    "default_workspace": ""
+  }
+}
+```
+
+The `data` field contains refreshed `WorkspaceData` (all slices normalized to non-nil). If no workspace config function is available, `data` is omitted:
+
+```json
+{
+  "success": true
+}
+```
+
+- **Errors:**
+  - `400` — workspace ID required (empty path param), invalid request body (malformed JSON), backend is required (empty field), invalid backend name
+  - `404` — no config found (`~/.loom/config.yaml` doesn't exist) or `"workspace with ID \"<id>\" not found"` (UUID not in workspaces map)
+  - `413` — request body too large (>1 MB)
+  - `500` — failed to load config (read/parse error) or failed to save config (write error)
+
+- **Behavior Notes:**
+  - Loads `~/.loom/config.yaml` using YAML round-trip preservation (updating one workspace's backend doesn't affect other workspaces, `workspace_order`, `default_workspace`, global `backend`, or `daemon` fields)
+  - Saves atomically via temp file + rename (cleaned up on error)
+  - Resolves the workspace by UUID from the path parameter, not by name
+
 ## Issues
 
 ### `GET /api/issues`
