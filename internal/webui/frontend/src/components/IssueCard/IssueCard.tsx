@@ -21,7 +21,7 @@ import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
 import type { BlockerRef, Issue } from "@/types";
 import { isKnownIssueType, parseLoomStatus } from "@/types";
 import { formatIssueId } from "@/utils/formatIssueId";
-import { getOpenStatus, getReviewType } from "@/utils/issueCategory";
+import { getOpenStatus, getReviewType, isPRUrl } from "@/utils/issueCategory";
 import type { OpenStatus, ReviewType } from "@/utils/issueCategory";
 
 import { AgentRow } from "./AgentRow";
@@ -213,18 +213,20 @@ export const IssueCard = memo(function IssueCard({
             {REVIEW_BADGE_CONFIG[reviewType].label}
           </span>
         )}
-        {reviewType === "code" && issue.external_ref && (
-          <a
-            className={styles.prLink}
-            href={issue.external_ref}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            aria-label="View pull request"
-          >
-            PR ↗
-          </a>
-        )}
+        {reviewType === "code" &&
+          issue.external_ref &&
+          isPRUrl(issue.external_ref) && (
+            <a
+              className={styles.prLink}
+              href={issue.external_ref}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              aria-label="View pull request"
+            >
+              PR ↗
+            </a>
+          )}
         {openStatus && (
           <span
             className={`${styles.openStatusBadge} ${OPEN_BADGE_CONFIG[openStatus].className}`}
