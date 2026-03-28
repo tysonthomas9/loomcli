@@ -88,6 +88,12 @@ export interface WorkspaceTreeProps {
   onFilterChange?: (filter: ActiveFilter) => void;
   /** Work Queue counts derived from workspace-scoped issues */
   workQueueCounts?: WorkQueueCounts;
+  /** Callback when Talk to Lead is clicked in the tree */
+  onTalkToLead?: (workspaceName: string) => void;
+  /** Callback when a task is selected in the tree */
+  onTreeSelect?: (issueId: string) => void;
+  /** Callback when a task with an active agent is clicked for terminal */
+  onTaskTerminalOpen?: (issueId: string, agentName: string) => void;
 }
 
 // Scoped key suffixes for workspace-specific tree state
@@ -110,6 +116,9 @@ export function WorkspaceTree({
   onRetryConnection,
   onFilterChange,
   workQueueCounts,
+  onTalkToLead,
+  onTreeSelect,
+  onTaskTerminalOpen,
 }: WorkspaceTreeProps): JSX.Element {
   const {
     workspaceId,
@@ -860,6 +869,9 @@ export function WorkspaceTree({
                   workspaceName={workspace.name}
                   activeFilter={activeFilter}
                   sourceRepos={repos.map((r) => r.name)}
+                  onTalkToLead={onTalkToLead}
+                  onSelect={onTreeSelect}
+                  onTaskTerminalOpen={onTaskTerminalOpen}
                 />
               )}
             </div>

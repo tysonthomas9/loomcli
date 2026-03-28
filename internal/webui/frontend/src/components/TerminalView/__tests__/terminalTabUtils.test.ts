@@ -9,6 +9,7 @@ import {
   generateTabName,
   getBackendFromSessionName,
   getNextDuplicateName,
+  sanitizeSessionName,
   BACKEND_BRAND_COLORS,
   MAX_TABS,
   type TabState,
@@ -204,5 +205,46 @@ describe("BACKEND_BRAND_COLORS (shell)", () => {
     expect(BACKEND_BRAND_COLORS).toHaveProperty("codex");
     expect(BACKEND_BRAND_COLORS).toHaveProperty("opencode");
     expect(BACKEND_BRAND_COLORS).toHaveProperty("shell");
+  });
+});
+
+describe("TabState agentName field", () => {
+  it("allows optional agentName on TabState", () => {
+    const tab: TabState = {
+      id: "agent-fox",
+      label: "agent-fox",
+      sessionName: "agent-fox",
+      connectionState: "connected",
+      backendName: "agent",
+      agentName: "fox",
+    };
+    expect(tab.agentName).toBe("fox");
+  });
+
+  it("agentName is undefined by default", () => {
+    const tab: TabState = makeTab({ label: "Normal Tab" });
+    expect(tab.agentName).toBeUndefined();
+  });
+});
+
+describe("sanitizeSessionName (agent names)", () => {
+  it("replaces dots with dashes", () => {
+    expect(sanitizeSessionName("agent.alpha")).toBe("agent-alpha");
+  });
+
+  it("strips special characters", () => {
+    expect(sanitizeSessionName("agent@123!")).toBe("agent123");
+  });
+
+  it("preserves hyphens and underscores", () => {
+    expect(sanitizeSessionName("agent-alpha_1")).toBe("agent-alpha_1");
+  });
+
+  it("handles multiple dots", () => {
+    expect(sanitizeSessionName("a.b.c.d")).toBe("a-b-c-d");
+  });
+
+  it("returns empty string for all-special input", () => {
+    expect(sanitizeSessionName("@#$!")).toBe("");
   });
 });

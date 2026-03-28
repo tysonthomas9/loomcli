@@ -35,6 +35,10 @@ export interface EpicTaskTreeProps {
   backend?: string | undefined;
   /** Callback when Talk to Lead is clicked. */
   onTalkToLead?: ((workspaceName: string) => void) | undefined;
+  /** Callback when a task with an active agent is clicked for terminal. */
+  onTaskTerminalOpen?:
+    | ((issueId: string, agentName: string) => void)
+    | undefined;
 }
 
 interface ContextMenuState {
@@ -74,6 +78,7 @@ export function EpicTaskTree({
   sourceRepos,
   backend,
   onTalkToLead,
+  onTaskTerminalOpen,
 }: EpicTaskTreeProps): JSX.Element {
   const { workspaceId } = useWorkspaceContext();
   const { epics, orphanTasks, isLoading, refetch } = useWorkspaceTree(
@@ -355,6 +360,7 @@ export function EpicTaskTree({
           taskRenameError={editingType === "task" ? renameError : undefined}
           taskIsSaving={editingType === "task" ? isSaving : undefined}
           onTaskCreated={refetch}
+          onTaskTerminalOpen={onTaskTerminalOpen}
         />
       ))}
 
@@ -430,6 +436,7 @@ export function EpicTaskTree({
                   isSelected={selectedId === task.id}
                   onSelect={onSelect}
                   onOverflowClick={handleTaskOverflowClick}
+                  onTaskTerminalOpen={onTaskTerminalOpen}
                   isEditing={editingId === task.id && editingType === "task"}
                   draftTitle={
                     editingId === task.id && editingType === "task"

@@ -46,6 +46,10 @@ export interface EpicRowProps {
   taskIsSaving?: boolean | undefined;
   /** Called after a task is successfully created inline. */
   onTaskCreated?: (() => void) | undefined;
+  /** Callback when a task with an active agent is clicked for terminal. */
+  onTaskTerminalOpen?:
+    | ((issueId: string, agentName: string) => void)
+    | undefined;
 }
 
 /** Map epic status to a CSS data-status value. */
@@ -88,6 +92,7 @@ export function EpicRow({
   isSaving,
   taskIsSaving,
   onTaskCreated,
+  onTaskTerminalOpen,
 }: EpicRowProps): JSX.Element {
   const { workspaceId } = useWorkspaceContext();
   const { showToast } = useToast();
@@ -137,6 +142,7 @@ export function EpicRow({
       renameInputRef: isTaskEditing ? taskRenameInputRef : undefined,
       renameError: isTaskEditing ? taskRenameError : undefined,
       isSaving: isTaskEditing ? taskIsSaving : undefined,
+      onTaskTerminalOpen,
     };
   };
 

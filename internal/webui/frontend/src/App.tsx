@@ -17,6 +17,7 @@ import { useParams, useNavigate } from "react-router-dom";
 
 import { updateIssue, addComment, closeIssue } from "@/api";
 import type { IssueContext } from "@/api/terminal";
+import { getAgentTerminalInfo } from "@/api/logs";
 import { buildShareUrl } from "@/utils/buildShareUrl";
 import { getReviewType } from "@/utils/issueCategory";
 import {
@@ -380,6 +381,11 @@ function App() {
   const [pendingIssueContext, setPendingIssueContext] = useState<
     IssueContext | undefined
   >(undefined);
+
+  // Pending agent name for opening agent terminal from workspace tree
+  const [pendingAgentName, setPendingAgentName] = useState<string | undefined>(
+    undefined,
+  );
 
   // Active terminal session count for badge display
   const [activeSessionCount, setActiveSessionCount] = useState(0);
@@ -776,6 +782,47 @@ function App() {
     setPendingIssueContext(undefined);
   }, []);
 
+  // Handle tree issue select (wraps handleIssueClick with minimal Issue shape)
+  const handleTreeIssueSelect = useCallback(
+    (issueId: string) => {
+      openPanel({ type: "issue", id: issueId });
+      fetchIssue(issueId);
+    },
+    [openPanel, fetchIssue],
+  );
+
+  // Handle Talk to Lead from workspace tree
+  const handleTreeTalkToLead = useCallback(
+    (_workspaceName: string) => {
+      setActiveView("terminal");
+    },
+    [setActiveView],
+  );
+
+  // Handle task terminal open from workspace tree (task with active agent)
+  const handleTreeTaskTerminalOpen = useCallback(
+    async (_issueId: string, agentName: string) => {
+      try {
+        const mode = await getAgentTerminalInfo(workspaceId, agentName);
+        if (mode === "tmux") {
+          setPendingAgentName(agentName);
+          setActiveView("terminal");
+        } else {
+          // Archive mode — open agent detail panel instead
+          openPanel({ type: "agent", name: agentName });
+        }
+      } catch {
+        // Network error — fall back to agent detail panel
+        openPanel({ type: "agent", name: agentName });
+      }
+    },
+    [workspaceId, setActiveView, openPanel],
+  );
+
+  const handleAgentNameConsumed = useCallback(() => {
+    setPendingAgentName(undefined);
+  }, []);
+
   // Focus search input (for Cmd/Ctrl+K shortcut in single-repo mode)
   const handleSearchFocus = useCallback(() => {
     searchInputRef.current?.focus();
@@ -908,6 +955,9 @@ function App() {
       disconnectedSince={staleBannerDisconnectedSince}
       onRetryConnection={staleBannerRetry}
       workQueueCounts={workQueueCounts}
+      onTalkToLead={handleTreeTalkToLead}
+      onTreeSelect={handleTreeIssueSelect}
+      onTaskTerminalOpen={handleTreeTaskTerminalOpen}
     />
   );
 
@@ -1226,6 +1276,8 @@ function App() {
                 isActive={activeView === "terminal"}
                 pendingIssueContext={pendingIssueContext}
                 onIssueContextConsumed={handleIssueContextConsumed}
+                pendingAgentName={pendingAgentName}
+                onAgentNameConsumed={handleAgentNameConsumed}
                 onActiveSessionCountChange={setActiveSessionCount}
                 onUnreadChange={setHasTerminalUnread}
                 onEscape={() => setActiveView(previousView || "kanban")}

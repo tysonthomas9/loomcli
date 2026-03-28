@@ -39,6 +39,40 @@ vi.mock("@/api/client", () => ({
   get: shared.getMock,
 }));
 
+// ── Mock @/api/logs (agent terminal endpoints) ──────────────────────────────
+
+const agentMocks = vi.hoisted(() => {
+  let _resolveAgentToken: ((v: string) => void) | null = null;
+  let _rejectAgentToken: ((e: Error) => void) | null = null;
+  const _getAgentTerminalToken = vi.fn(
+    () =>
+      new Promise<string>((resolve, reject) => {
+        _resolveAgentToken = resolve;
+        _rejectAgentToken = reject;
+      }),
+  );
+  const _getAgentTerminalWsUrl = vi.fn(
+    (_wsId: string, agentName: string, token: string) =>
+      `ws://localhost/api/ws/agents/${agentName}/terminal/ws?token=${token}`,
+  );
+
+  return {
+    getAgentTerminalToken: _getAgentTerminalToken,
+    getAgentTerminalWsUrl: _getAgentTerminalWsUrl,
+    get resolveAgentToken() {
+      return _resolveAgentToken;
+    },
+    get rejectAgentToken() {
+      return _rejectAgentToken;
+    },
+  };
+});
+
+vi.mock("@/api/logs", () => ({
+  getAgentTerminalToken: agentMocks.getAgentTerminalToken,
+  getAgentTerminalWsUrl: agentMocks.getAgentTerminalWsUrl,
+}));
+
 // ── MockWebSocket ────────────────────────────────────────────────────────────
 
 class MockWebSocket {
@@ -127,6 +161,8 @@ describe("connectWebSocket", () => {
     vi.resetModules();
     MockWebSocket.instances = [];
     shared.getMock.mockClear();
+    agentMocks.getAgentTerminalToken.mockClear();
+    agentMocks.getAgentTerminalWsUrl.mockClear();
     // Assign mock WebSocket globally
     (globalThis as any).WebSocket = MockWebSocket as any;
     // Dynamic import so mocks are applied
@@ -411,5 +447,140 @@ describe("connectWebSocket", () => {
     // Should NOT call setConnectionState after cleanup
     expect(m.setConnectionState).not.toHaveBeenCalled();
     expect(m.onDisconnected).not.toHaveBeenCalled();
+  });
+
+  // ── agentName parameter (V7 Terminal View) ──────────────────────────────
+
+  describe("agentName parameter", () => {
+    it("uses getAgentTerminalToken when agentName is provided", async () => {
+      const m = makeMocks();
+      connectWebSocket(
+        "ws1",
+        "session1",
+        m.terminal as any,
+        m.fitAddon as any,
+        m.wsRef,
+        m.setConnectionState,
+        m.onConnected,
+        m.onDisconnected,
+        undefined,
+        undefined,
+        undefined,
+        "agent-fox",
+      );
+
+      // Should call getAgentTerminalToken, not the regular get()
+      expect(agentMocks.getAgentTerminalToken).toHaveBeenCalledWith(
+        "ws1",
+        "agent-fox",
+      );
+      expect(shared.getMock).not.toHaveBeenCalled();
+    });
+
+    it("uses getAgentTerminalWsUrl when agentName token resolves", async () => {
+      const m = makeMocks();
+      connectWebSocket(
+        "ws1",
+        "session1",
+        m.terminal as any,
+        m.fitAddon as any,
+        m.wsRef,
+        m.setConnectionState,
+        m.onConnected,
+        m.onDisconnected,
+        undefined,
+        undefined,
+        undefined,
+        "agent-fox",
+      );
+
+      agentMocks.resolveAgentToken!("agent-tok-123");
+      await vi.waitFor(() => {
+        expect(MockWebSocket.instances).toHaveLength(1);
+      });
+
+      expect(agentMocks.getAgentTerminalWsUrl).toHaveBeenCalledWith(
+        "ws1",
+        "agent-fox",
+        "agent-tok-123",
+      );
+
+      const ws = MockWebSocket.instances[0];
+      expect(ws.url).toBe(
+        "ws://localhost/api/ws/agents/agent-fox/terminal/ws?token=agent-tok-123",
+      );
+    });
+
+    it("agent WebSocket follows normal lifecycle (connect, data, cleanup)", async () => {
+      const m = makeMocks();
+      const cleanup = connectWebSocket(
+        "ws1",
+        "session1",
+        m.terminal as any,
+        m.fitAddon as any,
+        m.wsRef,
+        m.setConnectionState,
+        m.onConnected,
+        m.onDisconnected,
+        m.onOutput,
+        undefined,
+        undefined,
+        "agent-fox",
+      );
+
+      expect(m.setConnectionState).toHaveBeenCalledWith("connecting");
+
+      agentMocks.resolveAgentToken!("tok");
+      await vi.waitFor(() => {
+        expect(MockWebSocket.instances).toHaveLength(1);
+      });
+
+      const ws = MockWebSocket.instances[0];
+      ws.simulateOpen();
+
+      expect(m.setConnectionState).toHaveBeenCalledWith("connected");
+      expect(m.onConnected).toHaveBeenCalled();
+
+      ws.simulateMessage("agent output");
+      expect(m.terminal.write).toHaveBeenCalledWith("agent output");
+      expect(m.onOutput).toHaveBeenCalled();
+
+      cleanup();
+      expect(ws.close).toHaveBeenCalledWith(1000);
+    });
+
+    it("falls back to regular buildWsUrl when agent token fetch fails", async () => {
+      // Clear mocks explicitly to ensure clean state
+      agentMocks.getAgentTerminalWsUrl.mockClear();
+      const m = makeMocks();
+      connectWebSocket(
+        "ws1",
+        "session1",
+        m.terminal as any,
+        m.fitAddon as any,
+        m.wsRef,
+        m.setConnectionState,
+        undefined,
+        m.onDisconnected,
+        undefined,
+        undefined,
+        undefined,
+        "agent-fox",
+      );
+
+      // Reject the agent token — the .catch(() => null) converts to null
+      agentMocks.rejectAgentToken!(new Error("auth failure"));
+      await vi.waitFor(() => {
+        expect(MockWebSocket.instances).toHaveLength(1);
+      });
+
+      // When agentName is set but token is null, falls back to buildWsUrl
+      // (agentName && token) is false, so buildWsUrl is used
+      const ws = MockWebSocket.instances[0];
+      expect(ws.url).toContain("session=session1");
+      // getAgentTerminalWsUrl should NOT have been called in THIS test
+      // (only getAgentTerminalToken was called, and it failed)
+      expect(ws.url).not.toContain("/agents/");
+    });
   });
 });

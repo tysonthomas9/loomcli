@@ -181,4 +181,95 @@ describe("TaskRow", () => {
     );
     expect(screen.getByTitle("My Important Task")).toBeInTheDocument();
   });
+
+  // ── onTaskTerminalOpen (V7 Terminal View) ─────────────────────────────────
+
+  describe("onTaskTerminalOpen", () => {
+    it("calls onTaskTerminalOpen with task id and assignee when task has assignee", () => {
+      const onTaskTerminalOpen = vi.fn();
+      const onSelect = vi.fn();
+      render(
+        <TaskRow
+          task={makeTask({ id: "task-99", assignee: "agent-fox" })}
+          isSelected={false}
+          onSelect={onSelect}
+          onTaskTerminalOpen={onTaskTerminalOpen}
+        />,
+      );
+      fireEvent.click(screen.getByText("Test Task"));
+      expect(onTaskTerminalOpen).toHaveBeenCalledWith("task-99", "agent-fox");
+      expect(onSelect).not.toHaveBeenCalled();
+    });
+
+    it("calls onSelect when task has no assignee even if onTaskTerminalOpen is provided", () => {
+      const onTaskTerminalOpen = vi.fn();
+      const onSelect = vi.fn();
+      render(
+        <TaskRow
+          task={makeTask({ id: "task-100" })}
+          isSelected={false}
+          onSelect={onSelect}
+          onTaskTerminalOpen={onTaskTerminalOpen}
+        />,
+      );
+      fireEvent.click(screen.getByText("Test Task"));
+      expect(onSelect).toHaveBeenCalledWith("task-100");
+      expect(onTaskTerminalOpen).not.toHaveBeenCalled();
+    });
+
+    it("calls onSelect when onTaskTerminalOpen is not provided even if task has assignee", () => {
+      const onSelect = vi.fn();
+      render(
+        <TaskRow
+          task={makeTask({ id: "task-101", assignee: "agent-fox" })}
+          isSelected={false}
+          onSelect={onSelect}
+        />,
+      );
+      fireEvent.click(screen.getByText("Test Task"));
+      expect(onSelect).toHaveBeenCalledWith("task-101");
+    });
+
+    it("renders terminal icon in assignee chip when onTaskTerminalOpen is provided", () => {
+      const { container } = render(
+        <TaskRow
+          task={makeTask({ assignee: "agent-fox" })}
+          isSelected={false}
+          onTaskTerminalOpen={vi.fn()}
+        />,
+      );
+      // The terminal icon is an SVG with a rect element (terminal window shape)
+      const branchChip =
+        container.querySelector("." + "branchChip") ??
+        screen.getByText("agent-fox").parentElement;
+      const svg = branchChip?.querySelector("svg");
+      expect(svg).toBeInTheDocument();
+    });
+
+    it("does not render terminal icon in assignee chip when onTaskTerminalOpen is not provided", () => {
+      render(
+        <TaskRow
+          task={makeTask({ assignee: "agent-fox" })}
+          isSelected={false}
+        />,
+      );
+      // The branchChip span contains assignee text. When onTaskTerminalOpen
+      // is NOT provided, the terminal icon SVG (viewBox 0 0 16 16) should be absent.
+      const chipEl = screen.getByText("agent-fox");
+      const terminalSvg = chipEl.querySelector('svg[viewBox="0 0 16 16"]');
+      expect(terminalSvg).toBeNull();
+    });
+
+    it("does not render terminal icon when task has no assignee", () => {
+      const { container } = render(
+        <TaskRow
+          task={makeTask()}
+          isSelected={false}
+          onTaskTerminalOpen={vi.fn()}
+        />,
+      );
+      // No assignee chip at all — no branchChip span
+      expect(container.querySelector("." + "branchChip")).toBeNull();
+    });
+  });
 });

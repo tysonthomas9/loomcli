@@ -87,6 +87,8 @@ export interface TerminalInstanceProps {
   onSearchResultChange?: (result: SearchResultInfo | null) => void;
   onBackendCrash?: (reason: string) => void;
   onTerminalFocus?: (() => void) | undefined;
+  /** When set, connects to agent terminal WebSocket instead of regular terminal. */
+  agentName?: string | undefined;
 }
 
 export interface TerminalInstanceHandle {
@@ -128,6 +130,7 @@ export const TerminalInstance = forwardRef<
     onSearchResultChange,
     onBackendCrash,
     onTerminalFocus,
+    agentName,
   },
   ref,
 ) {
@@ -246,6 +249,7 @@ export const TerminalInstance = forwardRef<
         handleWsOutput,
         (reason: string) => onBackendCrashRef.current?.(reason),
         (data, sendToWs) => interceptorRef.current?.handleData(data, sendToWs),
+        agentName,
       );
       wsCleanupRef.current = cleanupWs;
     };
@@ -600,6 +604,7 @@ export const TerminalInstance = forwardRef<
           (reason: string) => onBackendCrashRef.current?.(reason),
           (data, sendToWs) =>
             interceptorRef.current?.handleData(data, sendToWs),
+          agentName,
         );
         wsCleanupRef.current = cleanup;
       };

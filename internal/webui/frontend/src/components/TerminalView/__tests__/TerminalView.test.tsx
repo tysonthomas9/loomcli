@@ -959,6 +959,101 @@ describe("TerminalView", () => {
     });
   });
 
+  // ── pendingAgentName (V7 Terminal View) ───────────────────────────────────
+
+  describe("pendingAgentName", () => {
+    it("creates agent tab with correct session name pattern", () => {
+      setMetadata(DEFAULT_METADATA);
+      render(
+        <TerminalView pendingAgentName="fox" onAgentNameConsumed={vi.fn()} />,
+      );
+
+      // sanitizeSessionName("fox") => "fox"
+      // tab sessionName => "agent-fox"
+      expect(
+        screen.getByTestId("terminal-instance-agent-fox"),
+      ).toBeInTheDocument();
+    });
+
+    it("new agent tab becomes active", () => {
+      setMetadata(DEFAULT_METADATA);
+      render(
+        <TerminalView pendingAgentName="fox" onAgentNameConsumed={vi.fn()} />,
+      );
+
+      expect(screen.getByTestId("active-tab-id").textContent).toBe("agent-fox");
+    });
+
+    it("calls onAgentNameConsumed after creating agent tab", () => {
+      setMetadata(DEFAULT_METADATA);
+      const onConsumed = vi.fn();
+      render(
+        <TerminalView
+          pendingAgentName="fox"
+          onAgentNameConsumed={onConsumed}
+        />,
+      );
+
+      expect(onConsumed).toHaveBeenCalled();
+    });
+
+    it("switches to existing tab if agent tab already exists", () => {
+      setMetadata([
+        ...DEFAULT_METADATA,
+        { session_name: "agent-fox", label: "agent-fox" },
+      ]);
+      const onConsumed = vi.fn();
+      render(
+        <TerminalView
+          pendingAgentName="fox"
+          onAgentNameConsumed={onConsumed}
+        />,
+      );
+
+      // Should switch to existing tab, not create a new one
+      expect(screen.getByTestId("active-tab-id").textContent).toBe("agent-fox");
+      expect(onConsumed).toHaveBeenCalled();
+    });
+
+    it("persists tab metadata for new agent tab", () => {
+      setMetadata(DEFAULT_METADATA);
+      render(
+        <TerminalView pendingAgentName="fox" onAgentNameConsumed={vi.fn()} />,
+      );
+
+      expect(mockMetadataHook.createTab).toHaveBeenCalledWith(
+        "agent-fox",
+        "agent-fox",
+        expect.any(Number),
+      );
+    });
+
+    it("sanitizes agent name with dots in session name", () => {
+      setMetadata(DEFAULT_METADATA);
+      render(
+        <TerminalView
+          pendingAgentName="agent.alpha"
+          onAgentNameConsumed={vi.fn()}
+        />,
+      );
+
+      // sanitizeSessionName("agent.alpha") => "agent-alpha"
+      expect(
+        screen.getByTestId("terminal-instance-agent-agent-alpha"),
+      ).toBeInTheDocument();
+    });
+
+    it("does not create agent tab when no pendingAgentName is provided", () => {
+      setMetadata(DEFAULT_METADATA);
+      render(<TerminalView />);
+
+      // No agent tab should exist
+      expect(
+        screen.queryByTestId("terminal-instance-agent-fox"),
+      ).not.toBeInTheDocument();
+    });
+  });
+
   // ── Render tests ───────────────────────────────────────────────────────────
 
   describe("render tests", () => {

@@ -7,6 +7,7 @@ import type { FitAddon } from "@xterm/addon-fit";
 import type { Terminal } from "@xterm/xterm";
 
 import { get } from "@/api/client";
+import { getAgentTerminalToken, getAgentTerminalWsUrl } from "@/api/logs";
 
 import type { ConnectionState } from "./TerminalInstance";
 
@@ -81,16 +82,26 @@ export function connectWebSocket(
     sendToWs: (data: string) => void,
     terminal: Terminal,
   ) => void,
+  agentName?: string,
 ): () => void {
   setConnectionState("connecting");
 
   let cancelled = false;
 
-  fetchTerminalToken(workspaceId, sessionName)
+  // Use agent terminal endpoint when agentName is provided
+  const tokenPromise = agentName
+    ? getAgentTerminalToken(workspaceId, agentName).catch(() => null)
+    : fetchTerminalToken(workspaceId, sessionName);
+
+  tokenPromise
     .then((token) => {
       if (cancelled) return;
 
-      const ws = new WebSocket(buildWsUrl(workspaceId, sessionName, token));
+      const wsUrl =
+        agentName && token
+          ? getAgentTerminalWsUrl(workspaceId, agentName, token)
+          : buildWsUrl(workspaceId, sessionName, token);
+      const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
       ws.binaryType = "arraybuffer";
 

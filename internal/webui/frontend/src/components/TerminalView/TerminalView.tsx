@@ -68,6 +68,10 @@ interface TerminalViewProps {
   onEscape?: () => void;
   issueId?: string;
   onNavigateToSettings?: () => void;
+  /** When set, opens or focuses an agent's terminal tab. */
+  pendingAgentName?: string | undefined;
+  /** Called after pendingAgentName has been processed. */
+  onAgentNameConsumed?: (() => void) | undefined;
 }
 
 export function TerminalView({
@@ -79,6 +83,8 @@ export function TerminalView({
   onEscape,
   issueId,
   onNavigateToSettings,
+  pendingAgentName,
+  onAgentNameConsumed,
 }: TerminalViewProps): JSX.Element {
   const [tabs, setTabs] = useState<TabState[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>("");
@@ -310,6 +316,46 @@ export function TerminalView({
 
     onIssueContextConsumed?.();
   }, [pendingIssueContext, tabs, createTab, onIssueContextConsumed]);
+
+  // Handle pending agent name: create or switch to agent terminal tab
+  useEffect(() => {
+    if (!pendingAgentName || !initializedRef.current) return;
+
+    const sessionName = `agent-${sanitizeSessionName(pendingAgentName)}`;
+
+    // Check if tab already exists — switch to it
+    const existingTab = tabs.find((t) => t.sessionName === sessionName);
+    if (existingTab) {
+      setActiveTabId(existingTab.id);
+      onAgentNameConsumed?.();
+      return;
+    }
+
+    // Max tabs check
+    if (tabs.length >= MAX_TABS) {
+      onAgentNameConsumed?.();
+      return;
+    }
+
+    // Create new agent terminal tab
+    const newTab: TabState = {
+      id: sessionName,
+      label: `agent-${pendingAgentName}`,
+      sessionName,
+      connectionState: "disconnected" as ConnectionState,
+      backendName: "agent",
+      agentName: pendingAgentName,
+    };
+    setTabs((prev) => [...prev, newTab]);
+    setActiveTabId(sessionName);
+
+    // Persist tab metadata (fire-and-forget)
+    createTab(sessionName, newTab.label, tabs.length).catch((err) =>
+      console.error(`Failed to persist agent tab ${sessionName}:`, err),
+    );
+
+    onAgentNameConsumed?.();
+  }, [pendingAgentName, tabs, createTab, onAgentNameConsumed]);
 
   // Seed the session when it connects for the first time
   const handleConnectionStateChange = useCallback(
@@ -815,6 +861,7 @@ export function TerminalView({
                 ? setFocusedRight
                 : undefined
           }
+          agentName={tab.agentName}
         />
         {tab.crashReason != null ? (
           <CrashOverlay

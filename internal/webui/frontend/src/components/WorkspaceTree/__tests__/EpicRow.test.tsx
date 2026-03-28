@@ -255,4 +255,55 @@ describe("EpicRow", () => {
     fireEvent.click(taskTwoButton);
     expect(onSelect).toHaveBeenCalledWith("task-2");
   });
+
+  // ── onTaskTerminalOpen pass-through (V7 Terminal View) ──────────────────
+
+  describe("onTaskTerminalOpen", () => {
+    it("passes onTaskTerminalOpen to child TaskRows via buildTaskProps", () => {
+      const onTaskTerminalOpen = vi.fn();
+      const tasksWithAssignee = [
+        makeIssue({
+          id: "task-a",
+          title: "Assigned Task",
+          issue_type: "task",
+          status: "in_progress",
+          parent: "epic-1",
+          assignee: "agent-alpha",
+        }),
+      ];
+      render(
+        <EpicRow
+          epic={epic}
+          tasks={tasksWithAssignee}
+          isCollapsed={false}
+          onToggle={vi.fn()}
+          onTaskTerminalOpen={onTaskTerminalOpen}
+        />,
+      );
+
+      // Click on the assigned task — should trigger onTaskTerminalOpen
+      fireEvent.click(screen.getByTitle("Assigned Task"));
+      expect(onTaskTerminalOpen).toHaveBeenCalledWith("task-a", "agent-alpha");
+    });
+
+    it("falls back to onSelect when task has no assignee even with onTaskTerminalOpen", () => {
+      const onTaskTerminalOpen = vi.fn();
+      const onSelect = vi.fn();
+      render(
+        <EpicRow
+          epic={epic}
+          tasks={tasks}
+          isCollapsed={false}
+          onToggle={vi.fn()}
+          onSelect={onSelect}
+          onTaskTerminalOpen={onTaskTerminalOpen}
+        />,
+      );
+
+      // Tasks in `tasks` have no assignee, so clicking should call onSelect
+      fireEvent.click(screen.getByTitle("Task One"));
+      expect(onSelect).toHaveBeenCalledWith("task-1");
+      expect(onTaskTerminalOpen).not.toHaveBeenCalled();
+    });
+  });
 });
