@@ -154,8 +154,9 @@ type AgentRestartedData struct {
 }
 
 type AgentStoppedData struct {
-	PID      int `json:"pid"`
-	ExitCode int `json:"exit_code"`
+	PID        int    `json:"pid"`
+	ExitCode   int    `json:"exit_code"`
+	StopReason string `json:"stop_reason,omitempty"`
 }
 
 type EpicAssignedData struct {

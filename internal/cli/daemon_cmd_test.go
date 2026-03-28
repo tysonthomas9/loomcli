@@ -967,3 +967,302 @@ func TestValidateDaemonPaths_AbsolutePathOutsideBoundaries(t *testing.T) {
 		t.Errorf("expected warning to mention log_dir, got: %s", output)
 	}
 }
+
+// ============================================================================
+// computeAgentStatus Tests — StopReason integration
+// ============================================================================
+
+func TestComputeAgentStatus_FatalError(t *testing.T) {
+	ap := SupervisedAgentStatus{
+		PID:          0,
+		RestartCount: 0,
+		StopReason:   StopReasonFatalError,
+	}
+
+	status := computeAgentStatus(ap, 3)
+
+	if status != "failed" {
+		t.Errorf("computeAgentStatus() = %q, want %q for StopReasonFatalError with RestartCount=0", status, "failed")
+	}
+}
+
+func TestComputeAgentStatus_MaxRetries_StopReason(t *testing.T) {
+	ap := SupervisedAgentStatus{
+		PID:          0,
+		RestartCount: 4,
+		StopReason:   StopReasonMaxRetries,
+	}
+
+	status := computeAgentStatus(ap, 3)
+
+	if status != "failed" {
+		t.Errorf("computeAgentStatus() = %q, want %q for StopReasonMaxRetries", status, "failed")
+	}
+}
+
+func TestComputeAgentStatus_Shutdown(t *testing.T) {
+	ap := SupervisedAgentStatus{
+		PID:          0,
+		RestartCount: 0,
+		StopReason:   StopReasonShutdown,
+	}
+
+	status := computeAgentStatus(ap, 3)
+
+	if status != "stopped" {
+		t.Errorf("computeAgentStatus() = %q, want %q for StopReasonShutdown (should not be failed)", status, "stopped")
+	}
+}
+
+func TestComputeAgentStatus_ConfigRemoved(t *testing.T) {
+	ap := SupervisedAgentStatus{
+		PID:          0,
+		RestartCount: 0,
+		StopReason:   StopReasonConfigRemoved,
+	}
+
+	status := computeAgentStatus(ap, 3)
+
+	if status != "stopped" {
+		t.Errorf("computeAgentStatus() = %q, want %q for StopReasonConfigRemoved", status, "stopped")
+	}
+}
+
+func TestComputeAgentStatus_BackwardCompat(t *testing.T) {
+	// No StopReason set, but RestartCount exceeds maxRetries — old behavior should still work
+	ap := SupervisedAgentStatus{
+		PID:          0,
+		RestartCount: 5,
+		StopReason:   "", // empty — pre-StopReason agent
+	}
+
+	status := computeAgentStatus(ap, 3)
+
+	if status != "failed" {
+		t.Errorf("computeAgentStatus() = %q, want %q for backward-compat (empty StopReason, high RestartCount)", status, "failed")
+	}
+}
+
+// ============================================================================
+// DaemonAgentStatus JSON Tests — StopReason and StoppedAt
+// ============================================================================
+
+func TestDaemonAgentStatus_StopReasonJSON(t *testing.T) {
+	tests := []struct {
+		name       string
+		stopReason string
+		wantKey    bool
+	}{
+		{"present when set", "fatal_error", true},
+		{"omitted when empty", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			status := DaemonAgentStatus{
+				Worktree:   "falcon",
+				Role:       "plan",
+				Status:     "failed",
+				StopReason: tt.stopReason,
+			}
+
+			data, err := json.Marshal(status)
+			if err != nil {
+				t.Fatalf("failed to marshal: %v", err)
+			}
+
+			var m map[string]interface{}
+			if err := json.Unmarshal(data, &m); err != nil {
+				t.Fatalf("failed to unmarshal: %v", err)
+			}
+
+			_, ok := m["stop_reason"]
+			if ok != tt.wantKey {
+				t.Errorf("stop_reason present = %v, want %v (json: %s)", ok, tt.wantKey, string(data))
+			}
+		})
+	}
+}
+
+func TestDaemonAgentStatus_StoppedAtJSON(t *testing.T) {
+	// When StoppedAt is set, it should appear with the correct value.
+	// When StoppedAt is zero, it still appears in JSON (time.Time zero value
+	// is not suppressed by omitempty in encoding/json) but with the zero time.
+	t.Run("present with correct value when set", func(t *testing.T) {
+		ts := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
+		status := DaemonAgentStatus{
+			Worktree:  "falcon",
+			Role:      "plan",
+			Status:    "stopped",
+			StoppedAt: ts,
+		}
+
+		data, err := json.Marshal(status)
+		if err != nil {
+			t.Fatalf("failed to marshal: %v", err)
+		}
+
+		var m map[string]interface{}
+		if err := json.Unmarshal(data, &m); err != nil {
+			t.Fatalf("failed to unmarshal: %v", err)
+		}
+
+		raw, ok := m["stopped_at"]
+		if !ok {
+			t.Fatal("stopped_at key should be present when set")
+		}
+
+		// Verify the value round-trips correctly
+		var roundTrip DaemonAgentStatus
+		if err := json.Unmarshal(data, &roundTrip); err != nil {
+			t.Fatalf("failed to unmarshal into struct: %v", err)
+		}
+		if !roundTrip.StoppedAt.Equal(ts) {
+			t.Errorf("stopped_at round-trip = %v, want %v (raw: %v)", roundTrip.StoppedAt, ts, raw)
+		}
+	})
+
+	t.Run("zero value distinguishable from set value", func(t *testing.T) {
+		status := DaemonAgentStatus{
+			Worktree:  "falcon",
+			Role:      "plan",
+			Status:    "stopped",
+			StoppedAt: time.Time{}, // zero
+		}
+
+		data, err := json.Marshal(status)
+		if err != nil {
+			t.Fatalf("failed to marshal: %v", err)
+		}
+
+		var roundTrip DaemonAgentStatus
+		if err := json.Unmarshal(data, &roundTrip); err != nil {
+			t.Fatalf("failed to unmarshal: %v", err)
+		}
+
+		if !roundTrip.StoppedAt.IsZero() {
+			t.Errorf("stopped_at should be zero after round-trip, got %v", roundTrip.StoppedAt)
+		}
+	})
+}
+
+// ============================================================================
+// writeStateFile Tests — StopReason round-trip
+// ============================================================================
+
+func TestWriteStateFile_WithStopReason(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFilePath := filepath.Join(tmpDir, "daemon-agents.json")
+	startedAt := time.Date(2024, 6, 15, 10, 0, 0, 0, time.UTC)
+	lastExit := time.Date(2024, 6, 15, 11, 30, 0, 0, time.UTC)
+
+	agents := []SupervisedAgentStatus{
+		{
+			Worktree:     "falcon",
+			Role:         "plan",
+			PID:          0,
+			RestartCount: 0,
+			StopReason:   StopReasonFatalError,
+			LastExit:     lastExit,
+			LastExitCode: 1,
+		},
+		{
+			Worktree:     "nova",
+			Role:         "task",
+			PID:          0,
+			RestartCount: 4,
+			StopReason:   StopReasonMaxRetries,
+			LastExit:     lastExit,
+		},
+		{
+			Worktree:   "comet",
+			Role:       "plan",
+			PID:        0,
+			StopReason: StopReasonShutdown,
+			LastExit:   lastExit,
+		},
+		{
+			Worktree:   "orbit",
+			Role:       "task",
+			PID:        0,
+			StopReason: StopReasonConfigRemoved,
+			LastExit:   lastExit,
+		},
+		{
+			Worktree:     "star",
+			Role:         "task",
+			PID:          os.Getpid(), // running — should have no StoppedAt
+			RestartCount: 0,
+			StopReason:   "", // empty — running agent
+		},
+	}
+
+	err := writeStateFile(stateFilePath, startedAt, agents, 3)
+	if err != nil {
+		t.Fatalf("writeStateFile() error = %v", err)
+	}
+
+	// Read back
+	state, err := readStateFile(stateFilePath)
+	if err != nil {
+		t.Fatalf("readStateFile() error = %v", err)
+	}
+
+	if len(state.Agents) != 5 {
+		t.Fatalf("len(Agents) = %d, want 5", len(state.Agents))
+	}
+
+	// falcon: fatal_error → "failed", StopReason set, StoppedAt set
+	falcon := state.Agents[0]
+	if falcon.Status != "failed" {
+		t.Errorf("falcon.Status = %q, want %q", falcon.Status, "failed")
+	}
+	if falcon.StopReason != string(StopReasonFatalError) {
+		t.Errorf("falcon.StopReason = %q, want %q", falcon.StopReason, StopReasonFatalError)
+	}
+	if falcon.StoppedAt.IsZero() {
+		t.Error("falcon.StoppedAt should be set for stopped agent with StopReason")
+	}
+
+	// nova: max_retries → "failed", StopReason set
+	nova := state.Agents[1]
+	if nova.Status != "failed" {
+		t.Errorf("nova.Status = %q, want %q", nova.Status, "failed")
+	}
+	if nova.StopReason != string(StopReasonMaxRetries) {
+		t.Errorf("nova.StopReason = %q, want %q", nova.StopReason, StopReasonMaxRetries)
+	}
+	if nova.StoppedAt.IsZero() {
+		t.Error("nova.StoppedAt should be set for stopped agent with StopReason")
+	}
+
+	// comet: shutdown → "stopped" (not "failed")
+	comet := state.Agents[2]
+	if comet.Status != "stopped" {
+		t.Errorf("comet.Status = %q, want %q", comet.Status, "stopped")
+	}
+	if comet.StopReason != string(StopReasonShutdown) {
+		t.Errorf("comet.StopReason = %q, want %q", comet.StopReason, StopReasonShutdown)
+	}
+
+	// orbit: config_removed → "stopped"
+	orbit := state.Agents[3]
+	if orbit.Status != "stopped" {
+		t.Errorf("orbit.Status = %q, want %q", orbit.Status, "stopped")
+	}
+	if orbit.StopReason != string(StopReasonConfigRemoved) {
+		t.Errorf("orbit.StopReason = %q, want %q", orbit.StopReason, StopReasonConfigRemoved)
+	}
+
+	// star: running, no StopReason → "running", no StoppedAt
+	star := state.Agents[4]
+	if star.Status != "running" {
+		t.Errorf("star.Status = %q, want %q", star.Status, "running")
+	}
+	if star.StopReason != "" {
+		t.Errorf("star.StopReason = %q, want empty string", star.StopReason)
+	}
+	if !star.StoppedAt.IsZero() {
+		t.Error("star.StoppedAt should be zero for running agent")
+	}
+}

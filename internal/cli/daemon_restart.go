@@ -18,6 +18,9 @@ func (d *Daemon) handleRestartAfterError(ap *AgentProcess) bool {
 	maxRetries := d.getMaxRetries()
 	if count > maxRetries {
 		log.Printf("[daemon] Agent %s: max retries exceeded after spawn error", ap.entry.Worktree)
+		ap.mu.Lock()
+		ap.stopReason = StopReasonMaxRetries
+		ap.mu.Unlock()
 		return false
 	}
 
@@ -29,6 +32,9 @@ func (d *Daemon) handleRestartAfterError(ap *AgentProcess) bool {
 	case <-time.After(backoff):
 		return true
 	case <-d.shutdown:
+		ap.mu.Lock()
+		ap.stopReason = StopReasonShutdown
+		ap.mu.Unlock()
 		return false
 	}
 }
@@ -46,6 +52,7 @@ func (d *Daemon) shouldRestart(ap *AgentProcess) bool {
 	if ap.lastExitCode == 0 && ap.lastError == nil {
 		ap.restartCount = 0
 		ap.rateRetryCount = 0
+		ap.stopReason = ""
 		if time.Since(ap.lastStart) > time.Minute {
 			ap.currentBackendIdx = 0 // reset to primary backend
 		}
@@ -58,6 +65,7 @@ func (d *Daemon) shouldRestart(ap *AgentProcess) bool {
 	if ap.lastError != nil && ap.lastError.Class == agenterr.NoWork {
 		ap.restartCount = 0
 		ap.rateRetryCount = 0
+		ap.stopReason = ""
 		return true
 	}
 
@@ -65,12 +73,14 @@ func (d *Daemon) shouldRestart(ap *AgentProcess) bool {
 	if ap.lastError != nil && ap.lastError.IsFatal() {
 		log.Printf("[daemon] Agent %s: fatal error (%s), stopping supervisor",
 			ap.entry.Worktree, ap.lastError.Class)
+		ap.stopReason = StopReasonFatalError
 		return false
 	}
 
 	// Rate-limited: unlimited retries (don't count toward max_retries)
 	if ap.lastError != nil && ap.lastError.Class == agenterr.RateLimited && d.getRateLimitNoCount() {
 		ap.rateRetryCount++
+		ap.stopReason = ""
 		log.Printf("[daemon] Agent %s: rate limited (retry %d, not counted toward max_retries)",
 			ap.entry.Worktree, ap.rateRetryCount)
 		return true
@@ -79,7 +89,12 @@ func (d *Daemon) shouldRestart(ap *AgentProcess) bool {
 	// All other errors: count toward max_retries
 	ap.restartCount++
 	ap.rateRetryCount = 0 // reset rate counter on non-rate error
-	return ap.restartCount <= maxRetries
+	if ap.restartCount <= maxRetries {
+		ap.stopReason = ""
+		return true
+	}
+	ap.stopReason = StopReasonMaxRetries
+	return false
 }
 
 // computeBackoff returns the sleep duration before next restart.

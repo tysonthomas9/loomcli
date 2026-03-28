@@ -106,7 +106,7 @@ func writeStateFile(path string, startedAt time.Time, agents []SupervisedAgentSt
 	}
 
 	for i, ap := range agents {
-		state.Agents[i] = DaemonAgentStatus{
+		das := DaemonAgentStatus{
 			Worktree:       ap.Worktree,
 			Role:           ap.Role,
 			Repo:           ap.Repo,
@@ -118,7 +118,17 @@ func writeStateFile(path string, startedAt time.Time, agents []SupervisedAgentSt
 			LastStart:      ap.LastStart,
 			LastExit:       ap.LastExit,
 			LastExitCode:   ap.LastExitCode,
+			StopReason:     string(ap.StopReason),
 		}
+		// Set StoppedAt from LastExit when agent is stopped with a reason
+		if ap.StopReason != "" && ap.PID == 0 {
+			if !ap.LastExit.IsZero() {
+				das.StoppedAt = ap.LastExit
+			} else {
+				das.StoppedAt = time.Now()
+			}
+		}
+		state.Agents[i] = das
 	}
 
 	data, err := json.MarshalIndent(state, "", "  ")
@@ -143,7 +153,11 @@ func computeAgentStatus(ap SupervisedAgentStatus, maxRetries int) string {
 	if ap.PID > 0 && lockfile.IsProcessRunning(ap.PID) {
 		return "running"
 	}
-	// Not running - check if it failed
+	// Not running - check if it failed via stop reason or restart count
+	if ap.StopReason == StopReasonFatalError || ap.StopReason == StopReasonMaxRetries {
+		return "failed"
+	}
+	// Backward compatibility: high restart count without stop reason still means failed
 	if ap.RestartCount > maxRetries {
 		return "failed"
 	}

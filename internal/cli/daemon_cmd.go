@@ -30,6 +30,8 @@ type DaemonAgentStatus struct {
 	LastStart      time.Time `json:"last_start,omitempty"`
 	LastExit       time.Time `json:"last_exit,omitempty"`
 	LastExitCode   int       `json:"last_exit_code,omitempty"`
+	StopReason     string    `json:"stop_reason,omitempty"`
+	StoppedAt      time.Time `json:"stopped_at,omitempty"`
 }
 
 // DaemonState represents the complete daemon state in daemon-agents.json
@@ -327,6 +329,13 @@ func runDaemonStatus(cmd *cobra.Command, args []string) {
 		}
 		if agent.RestartCount > 0 {
 			fmt.Printf("      Restarts: %d\n", agent.RestartCount)
+		}
+		if agent.StopReason != "" {
+			if agent.StopReason == string(StopReasonFatalError) && agent.LastExitCode != 0 {
+				fmt.Printf("      Stopped: %s (exit %d)\n", agent.StopReason, agent.LastExitCode)
+			} else {
+				fmt.Printf("      Stopped: %s\n", agent.StopReason)
+			}
 		}
 	}
 }

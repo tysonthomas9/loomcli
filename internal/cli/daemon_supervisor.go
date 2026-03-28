@@ -124,9 +124,17 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 		select {
 		case <-d.shutdown:
 			slog.Info("shutdown signal received", "worktree", ap.entry.Worktree)
+			ap.mu.Lock()
+			ap.stopReason = StopReasonShutdown
+			ap.mu.Unlock()
 			return
 		case <-ap.stopCh:
 			slog.Info("stop signal received", "worktree", ap.entry.Worktree)
+			ap.mu.Lock()
+			if ap.stopReason == "" {
+				ap.stopReason = StopReasonConfigRemoved
+			}
+			ap.mu.Unlock()
 			return
 		default:
 		}
@@ -141,6 +149,9 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 		// Acquire concurrency slot for this role (blocks if at limit)
 		if !d.concurrency.Acquire(ap.entry.Role) {
 			slog.Info("concurrency tracker closed, exiting", "worktree", ap.entry.Worktree)
+			ap.mu.Lock()
+			ap.stopReason = StopReasonShutdown
+			ap.mu.Unlock()
 			return
 		}
 
@@ -303,9 +314,17 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 		select {
 		case <-d.shutdown:
 			slog.Info("shutdown signal received after exit", "worktree", ap.entry.Worktree)
+			ap.mu.Lock()
+			ap.stopReason = StopReasonShutdown
+			ap.mu.Unlock()
 			return
 		case <-ap.stopCh:
 			slog.Info("stop signal received after exit", "worktree", ap.entry.Worktree)
+			ap.mu.Lock()
+			if ap.stopReason == "" {
+				ap.stopReason = StopReasonConfigRemoved
+			}
+			ap.mu.Unlock()
 			return
 		default:
 		}
@@ -339,9 +358,17 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 			// Backoff complete, continue to next iteration
 		case <-d.shutdown:
 			slog.Info("shutdown during backoff", "worktree", ap.entry.Worktree)
+			ap.mu.Lock()
+			ap.stopReason = StopReasonShutdown
+			ap.mu.Unlock()
 			return
 		case <-ap.stopCh:
 			slog.Info("stop signal during backoff", "worktree", ap.entry.Worktree)
+			ap.mu.Lock()
+			if ap.stopReason == "" {
+				ap.stopReason = StopReasonConfigRemoved
+			}
+			ap.mu.Unlock()
 			return
 		}
 	}
@@ -377,6 +404,7 @@ func (d *Daemon) Agents() []SupervisedAgentStatus {
 			LastExit:       ap.lastExit,
 			LastExitCode:   ap.lastExitCode,
 			AssignedEpicID: ap.assignedEpicID,
+			StopReason:     ap.stopReason,
 		}
 		ap.mu.Unlock()
 		// Resolve backend name outside the lock (getEffectiveBackend acquires ap.mu)

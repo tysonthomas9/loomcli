@@ -24,6 +24,11 @@ func (d *Daemon) drainAgent(name string) error {
 	}
 	d.agentsMu.Unlock()
 
+	// Set stop reason before signaling (superviseAgent reads it after seeing stopCh closed)
+	target.mu.Lock()
+	target.stopReason = StopReasonConfigRemoved
+	target.mu.Unlock()
+
 	// Signal the agent to stop (safe against double-close)
 	target.stopOnce.Do(func() {
 		close(target.stopCh)

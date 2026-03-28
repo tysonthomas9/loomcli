@@ -44,8 +44,23 @@ type AgentProcess struct {
 	done     chan struct{} // closed when superviseAgent goroutine exits
 	stopOnce sync.Once     // prevents double-close of stopCh
 
-	mu sync.Mutex // protects cmd, pid, logFile, restart tracking, assignedEpicID, lastError, currentBackendIdx, session, transcriptPath, beforeRef
+	stopReason StopReason // why the agent was stopped (set at decision site, empty while running)
+
+	mu sync.Mutex // protects cmd, pid, logFile, restart tracking, assignedEpicID, lastError, currentBackendIdx, session, transcriptPath, beforeRef, stopReason
 }
+
+// StopReason identifies why an agent was stopped.
+type StopReason string
+
+const (
+	StopReasonNoWork        StopReason = "no_work"
+	StopReasonRateLimited   StopReason = "rate_limited"
+	StopReasonMaxRetries    StopReason = "max_retries"
+	StopReasonFatalError    StopReason = "fatal_error"
+	StopReasonManualStop    StopReason = "manual_stop"
+	StopReasonConfigRemoved StopReason = "config_removed"
+	StopReasonShutdown      StopReason = "shutdown"
+)
 
 // resolveRemote returns the git remote name for this agent.
 // Uses repoConfig.Remote if available, otherwise defaults to "origin".
@@ -87,7 +102,8 @@ type SupervisedAgentStatus struct {
 	LastExit       time.Time
 	LastExitCode   int
 	AssignedEpicID string
-	CurrentBackend string // effective backend (includes failover state)
+	CurrentBackend string     // effective backend (includes failover state)
+	StopReason     StopReason // why the agent stopped (empty while running)
 }
 
 // Daemon coordinates multiple supervised agents.

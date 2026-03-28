@@ -176,6 +176,7 @@ func (d *Daemon) spawnAgent(ap *AgentProcess) error {
 	ap.cmd = cmd
 	ap.pid = cmd.Process.Pid
 	ap.lastStart = time.Now()
+	ap.stopReason = "" // clear any stale stop reason from previous cycle
 
 	// Snapshot fields before releasing lock for event emission
 	pid := ap.pid
