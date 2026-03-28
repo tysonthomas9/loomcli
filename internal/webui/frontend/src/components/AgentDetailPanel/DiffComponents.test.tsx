@@ -197,6 +197,45 @@ describe("parsePatch", () => {
     expect(result.hunks[0].lines).toHaveLength(3);
   });
 
+  it("does not create a new hunk for embedded @@ in file content", () => {
+    const patch = [
+      "@@ -1,4 +1,4 @@",
+      " normal line",
+      "@@ embedded but not a hunk header @@",
+      "-old line",
+      "+new line",
+    ].join("\n");
+
+    const result = parsePatch(patch);
+    expect(result.hunks).toHaveLength(1);
+
+    const lines = result.hunks[0].lines;
+    expect(lines).toHaveLength(5);
+
+    expect(lines[1]).toMatchObject({ type: "context", oldNum: 1, newNum: 1 });
+    expect(lines[2]).toMatchObject({ type: "context", oldNum: 2, newNum: 2 });
+    expect(lines[3]).toMatchObject({ type: "del", oldNum: 3 });
+    expect(lines[4]).toMatchObject({ type: "add", newNum: 3 });
+  });
+
+  it("treats raw @@ at column 0 as context when it doesn't match hunk format", () => {
+    const patch = [
+      "@@ -1,3 +1,3 @@",
+      " first",
+      "@@ not a valid hunk header",
+      " last",
+    ].join("\n");
+
+    const result = parsePatch(patch);
+    expect(result.hunks).toHaveLength(1);
+
+    const lines = result.hunks[0].lines;
+    expect(lines).toHaveLength(4);
+    expect(lines[1]).toMatchObject({ type: "context", oldNum: 1, newNum: 1 });
+    expect(lines[2]).toMatchObject({ type: "context", oldNum: 2, newNum: 2 });
+    expect(lines[3]).toMatchObject({ type: "context", oldNum: 3, newNum: 3 });
+  });
+
   it("stores the full hunk header including trailing context", () => {
     const header = "@@ -100,6 +110,8 @@ func (s *Server) handleRequest()";
     const patch = `${header}\n context`;

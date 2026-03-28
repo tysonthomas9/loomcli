@@ -37,10 +37,18 @@ export function parsePatch(patchString: string): ParsedPatch {
       if (match?.[1] && match[2]) {
         oldNum = parseInt(match[1], 10);
         newNum = parseInt(match[2], 10);
+        currentHunk = { header: rawLine, lines: [] };
+        hunks.push(currentHunk);
+        currentHunk.lines.push({ type: "hunk", content: rawLine });
+      } else if (currentHunk) {
+        // Line starts with @@ but isn't a valid hunk header — treat as context
+        currentHunk.lines.push({
+          type: "context",
+          content: rawLine,
+          oldNum: oldNum++,
+          newNum: newNum++,
+        });
       }
-      currentHunk = { header: rawLine, lines: [] };
-      hunks.push(currentHunk);
-      currentHunk.lines.push({ type: "hunk", content: rawLine });
     } else if (currentHunk) {
       if (rawLine.startsWith("+")) {
         currentHunk.lines.push({
