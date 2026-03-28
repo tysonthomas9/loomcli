@@ -2326,3 +2326,153 @@ func (sw syncWriter) Write(p []byte) (int, error) {
 	defer sw.mu.Unlock()
 	return sw.w.Write(p)
 }
+
+// TestSSEHub_GetActiveSourceRepos_NoFilteredClients verifies that GetActiveSourceRepos
+// returns nil when no connected clients have a sourceRepos filter.
+func TestSSEHub_GetActiveSourceRepos_NoFilteredClients(t *testing.T) {
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	// Register clients without sourceRepos filters
+	client1 := &SSEClient{
+		id:          1,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		workspaceID: testWS,
+	}
+	client2 := &SSEClient{
+		id:          2,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		workspaceID: testWS,
+	}
+
+	hub.RegisterClient(client1)
+	hub.RegisterClient(client2)
+	time.Sleep(50 * time.Millisecond)
+
+	repos := hub.GetActiveSourceRepos()
+	if repos != nil {
+		t.Errorf("expected nil when no clients have sourceRepos, got %v", repos)
+	}
+}
+
+// TestSSEHub_GetActiveSourceRepos_DeduplicatesRepos verifies that GetActiveSourceRepos
+// returns a deduplicated list when multiple clients watch the same repos.
+func TestSSEHub_GetActiveSourceRepos_DeduplicatesRepos(t *testing.T) {
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	// Two clients watching overlapping repos
+	client1 := &SSEClient{
+		id:          1,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		workspaceID: testWS,
+		sourceRepos: []string{"repo-a", "repo-b"},
+	}
+	client2 := &SSEClient{
+		id:          2,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		workspaceID: testWS,
+		sourceRepos: []string{"repo-b", "repo-c"},
+	}
+
+	hub.RegisterClient(client1)
+	hub.RegisterClient(client2)
+	time.Sleep(50 * time.Millisecond)
+
+	repos := hub.GetActiveSourceRepos()
+	if repos == nil {
+		t.Fatal("expected non-nil repos")
+	}
+
+	// Should have exactly 3 unique repos: repo-a, repo-b, repo-c
+	if len(repos) != 3 {
+		t.Errorf("expected 3 deduplicated repos, got %d: %v", len(repos), repos)
+	}
+
+	// Verify each expected repo is present (order is non-deterministic from map iteration)
+	repoSet := make(map[string]bool)
+	for _, r := range repos {
+		repoSet[r] = true
+	}
+	for _, expected := range []string{"repo-a", "repo-b", "repo-c"} {
+		if !repoSet[expected] {
+			t.Errorf("expected %q in repos, got %v", expected, repos)
+		}
+	}
+}
+
+// TestSSEHub_GetActiveSourceRepos_MixedClients verifies that GetActiveSourceRepos
+// returns repos only from clients that have a filter, ignoring unfiltered clients.
+func TestSSEHub_GetActiveSourceRepos_MixedClients(t *testing.T) {
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	// One filtered client and one unfiltered client
+	filtered := &SSEClient{
+		id:          1,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		workspaceID: testWS,
+		sourceRepos: []string{"repo-x"},
+	}
+	unfiltered := &SSEClient{
+		id:          2,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		workspaceID: testWS,
+		// no sourceRepos — unfiltered
+	}
+
+	hub.RegisterClient(filtered)
+	hub.RegisterClient(unfiltered)
+	time.Sleep(50 * time.Millisecond)
+
+	repos := hub.GetActiveSourceRepos()
+	if repos == nil {
+		t.Fatal("expected non-nil repos from filtered client")
+	}
+	if len(repos) != 1 {
+		t.Errorf("expected 1 repo from filtered client only, got %d: %v", len(repos), repos)
+	}
+	if len(repos) == 1 && repos[0] != "repo-x" {
+		t.Errorf("expected repo %q, got %q", "repo-x", repos[0])
+	}
+}
+
+// TestMatchesSourceRepoFilter_EmptySourceRepo_FanOut documents that when the
+// mutation's sourceRepo is empty, matchesSourceRepoFilter returns true even for
+// filtered clients. This is intentional: unknown-origin events (e.g. external DB
+// poll) are delivered to all clients as a safety net.
+func TestMatchesSourceRepoFilter_EmptySourceRepo_FanOut(t *testing.T) {
+	// Filtered client with specific repos — empty sourceRepo should still match
+	if !matchesSourceRepoFilter([]string{"repo-a", "repo-b"}, "") {
+		t.Error("expected empty sourceRepo to match filtered client (fan-out safety net)")
+	}
+
+	// Unfiltered client (nil sourceRepos) — empty sourceRepo should match
+	if !matchesSourceRepoFilter(nil, "") {
+		t.Error("expected empty sourceRepo to match unfiltered client")
+	}
+
+	// Unfiltered client (empty slice) — empty sourceRepo should match
+	if !matchesSourceRepoFilter([]string{}, "") {
+		t.Error("expected empty sourceRepo to match client with empty sourceRepos slice")
+	}
+
+	// Filtered client — non-empty sourceRepo that matches should return true
+	if !matchesSourceRepoFilter([]string{"repo-a"}, "repo-a") {
+		t.Error("expected matching sourceRepo to return true")
+	}
+
+	// Filtered client — non-empty sourceRepo that does NOT match should return false
+	if matchesSourceRepoFilter([]string{"repo-a"}, "repo-b") {
+		t.Error("expected non-matching sourceRepo to return false")
+	}
+}

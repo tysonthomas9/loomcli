@@ -114,7 +114,8 @@ func matchesWorkspaceFilter(clientWorkspaceID, mutationWorkspaceID string) bool 
 }
 
 // matchesSourceRepoFilter returns true if the mutation should be delivered
-// to a client with the given sourceRepos filter.
+// to a client with the given sourceRepos filter. Empty sourceRepo → true
+// (intentional fan-out for events with unknown origin; client refetch is scoped).
 func matchesSourceRepoFilter(sourceRepos []string, sourceRepo string) bool {
 	if len(sourceRepos) == 0 || sourceRepo == "" {
 		return true
