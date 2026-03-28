@@ -367,12 +367,24 @@ export interface DaemonStatusResponse {
  *
  * All methods throw on non-2xx responses with descriptive error messages
  * including HTTP status and response body.
+ *
+ * When a workspaceId is provided, issue CRUD, dependency, ready, blocked,
+ * and graph methods route through workspace-scoped endpoints
+ * (/api/workspaces/{ws}/...).
  */
 export class LoomApiClient {
+  /** URL prefix for workspace-scoped endpoints (issues, deps, ready, blocked, graph). */
+  readonly wsPrefix: string
+
   constructor(
     private request: APIRequestContext,
-    private baseURL: string = ''
-  ) {}
+    private baseURL: string = '',
+    workspaceId?: string
+  ) {
+    this.wsPrefix = workspaceId
+      ? `${baseURL}/api/workspaces/${workspaceId}`
+      : `${baseURL}/api`
+  }
 
   // ===========================================================================
   // Health & Monitoring
@@ -424,10 +436,10 @@ export class LoomApiClient {
   // Issue CRUD
   // ===========================================================================
 
-  /** GET /api/issues - List issues with optional filters */
+  /** GET /api/workspaces/{ws}/issues - List issues with optional filters */
   async listIssues(params?: ListIssuesParams): Promise<IssueWithParent[]> {
     const queryParams = this.buildQueryParams(params)
-    const url = `${this.baseURL}/api/issues${queryParams}`
+    const url = `${this.wsPrefix}/issues${queryParams}`
     const response = await this.request.get(url)
     const result = await this.parseResponse<ApiResponse<IssueWithParent[]>>(response)
     if (!result.success) {
@@ -436,9 +448,9 @@ export class LoomApiClient {
     return result.data || []
   }
 
-  /** GET /api/issues/{id} - Get single issue with full details */
+  /** GET /api/workspaces/{ws}/issues/{id} - Get single issue with full details */
   async getIssue(id: string): Promise<IssueDetails> {
-    const response = await this.request.get(`${this.baseURL}/api/issues/${id}`)
+    const response = await this.request.get(`${this.wsPrefix}/issues/${id}`)
     const result = await this.parseResponse<ApiResponse<IssueDetails>>(response)
     if (!result.success || !result.data) {
       throw new Error(`Get issue failed: ${result.error}`)
@@ -446,10 +458,10 @@ export class LoomApiClient {
     return result.data
   }
 
-  /** POST /api/issues - Create new issue */
+  /** POST /api/workspaces/{ws}/issues - Create new issue */
   async createIssue(data: IssueCreateRequest): Promise<Issue> {
     return this.withRetry(async () => {
-      const response = await this.request.post(`${this.baseURL}/api/issues`, { data })
+      const response = await this.request.post(`${this.wsPrefix}/issues`, { data })
       const result = await this.parseResponse<ApiResponse<Issue>>(response)
       if (!result.success || !result.data) {
         throw new Error(`Create issue failed: ${result.error}`)
@@ -458,10 +470,10 @@ export class LoomApiClient {
     })
   }
 
-  /** PATCH /api/issues/{id} - Update issue (partial) */
+  /** PATCH /api/workspaces/{ws}/issues/{id} - Update issue (partial) */
   async updateIssue(id: string, data: IssuePatchRequest): Promise<{ id: string; status: string }> {
     return this.withRetry(async () => {
-      const response = await this.request.patch(`${this.baseURL}/api/issues/${id}`, { data })
+      const response = await this.request.patch(`${this.wsPrefix}/issues/${id}`, { data })
       const result = await this.parseResponse<ApiResponse<{ id: string; status: string }>>(response)
       if (!result.success || !result.data) {
         throw new Error(`Update issue failed: ${result.error}`)
@@ -470,10 +482,10 @@ export class LoomApiClient {
     })
   }
 
-  /** POST /api/issues/{id}/close - Close an issue */
+  /** POST /api/workspaces/{ws}/issues/{id}/close - Close an issue */
   async closeIssue(id: string, data?: CloseRequest): Promise<Issue> {
     return this.withRetry(async () => {
-      const response = await this.request.post(`${this.baseURL}/api/issues/${id}/close`, {
+      const response = await this.request.post(`${this.wsPrefix}/issues/${id}/close`, {
         data: data || {},
       })
       const result = await this.parseResponse<ApiResponse<Issue>>(response)
@@ -488,10 +500,10 @@ export class LoomApiClient {
   // Comments
   // ===========================================================================
 
-  /** POST /api/issues/{id}/comments - Add comment to issue */
+  /** POST /api/workspaces/{ws}/issues/{id}/comments - Add comment to issue */
   async addComment(id: string, data: AddCommentRequest): Promise<Comment> {
     return this.withRetry(async () => {
-      const response = await this.request.post(`${this.baseURL}/api/issues/${id}/comments`, { data })
+      const response = await this.request.post(`${this.wsPrefix}/issues/${id}/comments`, { data })
       const result = await this.parseResponse<ApiResponse<Comment>>(response)
       if (!result.success || !result.data) {
         throw new Error(`Add comment failed: ${result.error}`)
@@ -504,10 +516,10 @@ export class LoomApiClient {
   // Dependencies
   // ===========================================================================
 
-  /** POST /api/issues/{id}/dependencies - Add dependency */
+  /** POST /api/workspaces/{ws}/issues/{id}/dependencies - Add dependency */
   async addDependency(id: string, data: AddDependencyRequest): Promise<void> {
     return this.withRetry(async () => {
-      const response = await this.request.post(`${this.baseURL}/api/issues/${id}/dependencies`, { data })
+      const response = await this.request.post(`${this.wsPrefix}/issues/${id}/dependencies`, { data })
       const result = await this.parseResponse<ApiResponse<null>>(response)
       if (!result.success) {
         throw new Error(`Add dependency failed: ${result.error}`)
@@ -515,10 +527,10 @@ export class LoomApiClient {
     })
   }
 
-  /** DELETE /api/issues/{id}/dependencies/{depId} - Remove dependency */
+  /** DELETE /api/workspaces/{ws}/issues/{id}/dependencies/{depId} - Remove dependency */
   async removeDependency(id: string, depId: string): Promise<void> {
     return this.withRetry(async () => {
-      const response = await this.request.delete(`${this.baseURL}/api/issues/${id}/dependencies/${depId}`)
+      const response = await this.request.delete(`${this.wsPrefix}/issues/${id}/dependencies/${depId}`)
       const result = await this.parseResponse<ApiResponse<null>>(response)
       if (!result.success) {
         throw new Error(`Remove dependency failed: ${result.error}`)
@@ -530,10 +542,10 @@ export class LoomApiClient {
   // Work Queries
   // ===========================================================================
 
-  /** GET /api/ready - Get issues ready to work on */
+  /** GET /api/workspaces/{ws}/ready - Get issues ready to work on */
   async ready(params?: ReadyParams): Promise<Issue[]> {
     const queryParams = this.buildQueryParams(params)
-    const url = `${this.baseURL}/api/ready${queryParams}`
+    const url = `${this.wsPrefix}/ready${queryParams}`
     const response = await this.request.get(url)
     const result = await this.parseResponse<ApiResponse<Issue[]>>(response)
     if (!result.success) {
@@ -542,10 +554,10 @@ export class LoomApiClient {
     return result.data || []
   }
 
-  /** GET /api/blocked - Get blocked issues */
+  /** GET /api/workspaces/{ws}/blocked - Get blocked issues */
   async blocked(params?: BlockedParams): Promise<BlockedIssue[]> {
     const queryParams = this.buildQueryParams(params)
-    const url = `${this.baseURL}/api/blocked${queryParams}`
+    const url = `${this.wsPrefix}/blocked${queryParams}`
     const response = await this.request.get(url)
     const result = await this.parseResponse<ApiResponse<BlockedIssue[]>>(response)
     if (!result.success) {
@@ -554,10 +566,10 @@ export class LoomApiClient {
     return result.data || []
   }
 
-  /** GET /api/issues/graph - Get dependency graph data */
+  /** GET /api/workspaces/{ws}/issues/graph - Get dependency graph data */
   async graph(params?: GraphParams): Promise<GraphIssue[]> {
     const queryParams = this.buildQueryParams(params)
-    const url = `${this.baseURL}/api/issues/graph${queryParams}`
+    const url = `${this.wsPrefix}/issues/graph${queryParams}`
     const response = await this.request.get(url)
     const result = await this.parseResponse<GraphResponse>(response)
     if (!result.success) {
@@ -570,11 +582,9 @@ export class LoomApiClient {
   // Cleanup Helpers
   // ===========================================================================
 
-  /** DELETE /api/issues/{id} - Permanently delete an issue */
+  /** DELETE /api/workspaces/{ws}/issues/{id} - Permanently delete an issue */
   async deleteIssue(id: string): Promise<void> {
-    const response = await this.request.delete(`${this.baseURL}/api/issues/${id}`, {
-      headers: this.headers,
-    })
+    const response = await this.request.delete(`${this.wsPrefix}/issues/${id}`)
     await this.parseResponse(response)
   }
 
@@ -678,7 +688,23 @@ interface ApiFixtures {
 export const test = base.extend<ApiFixtures>({
   api: async ({ request, baseURL }, use) => {
     const url = baseURL || process.env.LOOM_BASE_URL || 'http://localhost:8080'
-    const api = new LoomApiClient(request, url)
+    // Resolve workspace ID for workspace-scoped routes.
+    // Prefer the active workspace to avoid picking up ephemeral test workspaces.
+    let workspaceId: string | undefined
+    try {
+      const wsResponse = await request.get(`${url}/api/workspaces`)
+      if (wsResponse.ok()) {
+        const body = await wsResponse.json() as { workspaces?: Array<{ id: string; active?: boolean; name?: string }> }
+        const workspaces = body?.workspaces ?? []
+        const active = workspaces.find(w => w.active)
+        workspaceId = active?.id ?? workspaces[0]?.id
+      } else {
+        console.warn(`[api-client] /api/workspaces returned ${wsResponse.status()} — falling back to /api prefix`)
+      }
+    } catch {
+      // Fall back to non-workspace-scoped routes
+    }
+    const api = new LoomApiClient(request, url, workspaceId)
     await use(api)
   },
 })
