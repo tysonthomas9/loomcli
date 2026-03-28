@@ -1179,4 +1179,121 @@ describe("IssueDetailPanel", () => {
       );
     });
   });
+
+  describe("tab reset on issue change", () => {
+    it("includes Sessions tab on initial render", () => {
+      const mockIssue = createTestIssue();
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+      expect(screen.getByRole("tab", { name: "Sessions" })).toBeInTheDocument();
+    });
+
+    it("includes Sessions tab after issue ID changes", () => {
+      const issueA = createTestIssue({ id: "issue-a" });
+      const issueB = createTestIssue({ id: "issue-b" });
+      const { rerender } = render(
+        <IssueDetailPanel isOpen={true} issue={issueA} onClose={() => {}} />,
+      );
+      rerender(
+        <IssueDetailPanel isOpen={true} issue={issueB} onClose={() => {}} />,
+      );
+      expect(screen.getByRole("tab", { name: "Sessions" })).toBeInTheDocument();
+    });
+
+    it("resets active tab to Details when issue changes", () => {
+      const issueA = createTestIssueDetails({ id: "issue-a" });
+      const issueB = createTestIssueDetails({ id: "issue-b" });
+      const { rerender } = render(
+        <IssueDetailPanel isOpen={true} issue={issueA} onClose={() => {}} />,
+      );
+
+      // Click Sessions tab
+      const sessionsTab = screen.getByRole("tab", { name: "Sessions" });
+      fireEvent.click(sessionsTab);
+      expect(sessionsTab).toHaveAttribute("aria-selected", "true");
+
+      // Rerender with different issue
+      rerender(
+        <IssueDetailPanel isOpen={true} issue={issueB} onClose={() => {}} />,
+      );
+
+      // Details tab should be active again, Sessions tab still present
+      expect(screen.getByRole("tab", { name: "Sessions" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Details" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+    });
+
+    it("preserves both tabs across multiple issue changes", () => {
+      const issueA = createTestIssue({ id: "issue-a" });
+      const issueB = createTestIssue({ id: "issue-b" });
+      const issueC = createTestIssue({ id: "issue-c" });
+      const { rerender } = render(
+        <IssueDetailPanel isOpen={true} issue={issueA} onClose={() => {}} />,
+      );
+      rerender(
+        <IssueDetailPanel isOpen={true} issue={issueB} onClose={() => {}} />,
+      );
+      rerender(
+        <IssueDetailPanel isOpen={true} issue={issueC} onClose={() => {}} />,
+      );
+      expect(screen.getByRole("tab", { name: "Details" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Sessions" })).toBeInTheDocument();
+    });
+
+    it("resets tabs to include Sessions when agent is removed while on Logs", () => {
+      const mockIssue = createTestIssueDetails({
+        assignee: "agent-1",
+      });
+
+      // Mock terminal logs to simulate having an agent
+      mockUseAgentTerminalLogs.mockReturnValue({
+        mode: "idle" as const,
+        chunks: [],
+        state: "disconnected" as const,
+        error: null,
+        resetVersion: 0,
+        refresh: vi.fn(),
+        resize: vi.fn(),
+        sendInput: vi.fn(),
+        loadOlderLogs: vi.fn(),
+        hasMoreLines: false,
+        isLoadingMore: false,
+      });
+
+      const { rerender } = render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      // Add Logs tab and switch to it
+      fireEvent.click(screen.getByTestId("add-tab-button"));
+      fireEvent.click(screen.getByTestId("add-tab-logs"));
+      expect(screen.getByRole("tab", { name: "Logs" })).toBeInTheDocument();
+
+      // Remove the agent (no assignee)
+      const issueNoAgent = createTestIssueDetails({
+        assignee: undefined,
+      });
+      rerender(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={issueNoAgent}
+          onClose={() => {}}
+        />,
+      );
+
+      // Logs tab should be removed, Sessions tab still present
+      expect(
+        screen.queryByRole("tab", { name: "Logs" }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Sessions" })).toBeInTheDocument();
+      // Details should be active
+      expect(screen.getByRole("tab", { name: "Details" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+    });
+  });
 });
