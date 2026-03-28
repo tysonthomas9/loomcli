@@ -42,6 +42,7 @@ func (s *Store) Query(f Filter) ([]SessionRecord, error) {
 			log.Printf("[sessions] skipping corrupt line %d: %v", lineNum, err)
 			continue
 		}
+		normalizeRecord(&rec)
 		if matchesSessionFilter(rec, f) {
 			records = append(records, rec)
 		}
@@ -129,6 +130,7 @@ func (s *Store) LoadMetadata(sessionID string) (*SessionMetadata, error) {
 	if err := json.Unmarshal(data, &meta); err != nil {
 		return nil, fmt.Errorf("unmarshal metadata: %w", err)
 	}
+	meta.NormalizeAfterLoad()
 	return &meta, nil
 }
 

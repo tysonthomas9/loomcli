@@ -60,14 +60,15 @@ func (s *Store) CreateSession(opts CreateOptions) (*Session, error) {
 	now := time.Now().UTC()
 	meta := SessionMetadata{
 		SessionRecord: SessionRecord{
-			SessionID:  sid,
-			EpicID:     opts.EpicID,
-			AgentName:  opts.AgentName,
-			Backend:    opts.Backend,
-			Phase:      opts.Phase,
-			StartedAt:  now,
-			Status:     StatusRunning,
-			AttemptNum: opts.AttemptNum,
+			SchemaVersion: CurrentSchemaVersion,
+			SessionID:     sid,
+			EpicID:        opts.EpicID,
+			AgentName:     opts.AgentName,
+			Backend:       opts.Backend,
+			Phase:         opts.Phase,
+			StartedAt:     now,
+			Status:        StatusRunning,
+			AttemptNum:    opts.AttemptNum,
 		},
 	}
 

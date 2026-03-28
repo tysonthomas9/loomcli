@@ -42,6 +42,9 @@ func (s *Session) Finalize(opts FinalizeOptions) error {
 	// Set error context.
 	s.Meta.ErrorClass = opts.ErrorClass
 
+	// Ensure schema version is current before writing to disk.
+	normalizeRecord(&s.Meta.SessionRecord)
+
 	// Write final metadata.json atomically.
 	sessDir := filepath.Join(s.store.dir, s.Meta.SessionID)
 	if err := writeMetadataAtomic(sessDir, s.Meta); err != nil {
