@@ -1336,6 +1336,117 @@ func TestMoveIssue_CrossWorkspace_TargetClientReturned(t *testing.T) {
 	}
 }
 
+// TestMoveIssue_CrossWorkspace_ClientsReturnedToCorrectPools verifies that
+// each client is returned to its issuing pool — sourceClient to sourcePool,
+// targetClient to targetPool. This catches pool ownership regressions where
+// a client could be returned to the wrong pool.
+func TestMoveIssue_CrossWorkspace_ClientsReturnedToCorrectPools(t *testing.T) {
+	sourceData := makeSourceIssueJSON("src-001", "Fix the bug", "open", "")
+	createdData := makeSourceIssueJSON("tgt-001", "Fix the bug", "open", "")
+
+	sourceClient := &mockMoveClient{
+		showFunc: func(args *rpc.ShowArgs) (*rpc.Response, error) {
+			return &rpc.Response{Success: true, Data: sourceData}, nil
+		},
+		addCommentFn: func(args *rpc.CommentAddArgs) (*rpc.Response, error) {
+			return &rpc.Response{Success: true}, nil
+		},
+		closeIssueFunc: func(args *rpc.CloseArgs) (*rpc.Response, error) {
+			return &rpc.Response{Success: true}, nil
+		},
+	}
+	targetClient := &mockMoveClient{
+		createFunc: func(args *rpc.CreateArgs) (*rpc.Response, error) {
+			return &rpc.Response{Success: true, Data: createdData}, nil
+		},
+	}
+
+	var sourcePutClient, targetPutClient issueMover
+	sourcePool := &mockMovePool{
+		getFunc: func(ctx context.Context) (issueMover, error) { return sourceClient, nil },
+		putFunc: func(c issueMover) { sourcePutClient = c },
+	}
+	targetPool := &mockMovePool{
+		getFunc: func(ctx context.Context) (issueMover, error) { return targetClient, nil },
+		putFunc: func(c issueMover) { targetPutClient = c },
+	}
+
+	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
+	handler := handleMoveIssueWithPool(sourcePool, targetPool, wsCfg)
+
+	body := `{"target_workspace":"beta"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/ws-alpha/issues/src-001/move", strings.NewReader(body))
+	req.SetPathValue("id", "src-001")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if sourcePutClient != sourceClient {
+		t.Error("sourcePool.Put was not called with sourceClient — client returned to wrong pool")
+	}
+	if targetPutClient != targetClient {
+		t.Error("targetPool.Put was not called with targetClient — client returned to wrong pool")
+	}
+	if sourcePutClient == targetClient {
+		t.Error("sourcePool received targetClient — ownership swapped")
+	}
+	if targetPutClient == sourceClient {
+		t.Error("targetPool received sourceClient — ownership swapped")
+	}
+}
+
+// TestMoveIssue_CrossWorkspace_TargetGetError_SourceReturned verifies that
+// when targetPool.Get fails, the sourceClient is still returned to the
+// sourcePool via Put (no leak).
+func TestMoveIssue_CrossWorkspace_TargetGetError_SourceReturned(t *testing.T) {
+	sourceData := makeSourceIssueJSON("src-001", "Fix the bug", "open", "")
+
+	sourceClient := &mockMoveClient{
+		showFunc: func(args *rpc.ShowArgs) (*rpc.Response, error) {
+			return &rpc.Response{Success: true, Data: sourceData}, nil
+		},
+	}
+
+	var sourcePutCalled bool
+	sourcePool := &mockMovePool{
+		getFunc: func(ctx context.Context) (issueMover, error) { return sourceClient, nil },
+		putFunc: func(c issueMover) {
+			sourcePutCalled = true
+			if c != sourceClient {
+				t.Error("sourcePool.Put received wrong client")
+			}
+		},
+	}
+	targetPool := &mockMovePool{
+		getFunc: func(ctx context.Context) (issueMover, error) {
+			return nil, errors.New("target daemon unreachable")
+		},
+		putFunc: func(c issueMover) {
+			t.Error("targetPool.Put should not be called when Get fails")
+		},
+	}
+
+	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
+	handler := handleMoveIssueWithPool(sourcePool, targetPool, wsCfg)
+
+	body := `{"target_workspace":"beta"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/ws-alpha/issues/src-001/move", strings.NewReader(body))
+	req.SetPathValue("id", "src-001")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !sourcePutCalled {
+		t.Error("sourcePool.Put was not called — source client leaked on target Get failure")
+	}
+}
+
 // --- resolveWorkspaceID tests ---
 
 func TestResolveWorkspaceID_WithID(t *testing.T) {
