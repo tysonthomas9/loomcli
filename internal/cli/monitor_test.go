@@ -1635,7 +1635,8 @@ func TestCollectAgentStatusOnlyExported(t *testing.T) {
 }
 
 // TestBacklogAccumulatesReadyWithBlockersAndBlocked verifies that summary.Backlog
-// includes both ready issues with unclosed blockers AND bd-blocked issues (the += fix).
+// counts bd-blocked issues. Issues returned by bd ready are trusted as unblocked
+// (no redundant HasUnclosedBlockers re-pass in the monitor).
 func TestBacklogAccumulatesReadyWithBlockersAndBlocked(t *testing.T) {
 	origDir, err := os.Getwd()
 	if err != nil {
@@ -1699,15 +1700,15 @@ func TestBacklogAccumulatesReadyWithBlockersAndBlocked(t *testing.T) {
 
 	data := collectMonitorData(100, "")
 
-	// T-BLOCKED-READY routed to backlog (1) + T-BD-BLOCKED from bd blocked (1) = 2
-	if data.Tasks.Backlog != 2 {
-		t.Errorf("expected Backlog=2 (1 ready-with-blockers + 1 bd-blocked), got %d", data.Tasks.Backlog)
+	// T-BD-BLOCKED from bd blocked = 1 (bd-ready issues are trusted, no re-pass)
+	if data.Tasks.Backlog != 1 {
+		t.Errorf("expected Backlog=1 (bd-blocked only), got %d", data.Tasks.Backlog)
 	}
-	// T-BLOCKER is unblocked ready-to-implement, T-NORMAL is unblocked ready-to-implement
-	if data.Tasks.ReadyToImplement != 2 {
-		t.Errorf("expected ReadyToImplement=2, got %d", data.Tasks.ReadyToImplement)
+	// All 3 bd-ready open issues trusted as ready-to-implement
+	if data.Tasks.ReadyToImplement != 3 {
+		t.Errorf("expected ReadyToImplement=3, got %d", data.Tasks.ReadyToImplement)
 	}
-	// Remaining = sum of work queue: Plan(0) + Impl(2) + Review(0) + Active(0) + Backlog(2) = 4
+	// Remaining = sum of work queue: Plan(0) + Impl(3) + Review(0) + Active(0) + Backlog(1) = 4
 	if data.Stats.Remaining != 4 {
 		t.Errorf("expected Remaining=4, got %d", data.Stats.Remaining)
 	}

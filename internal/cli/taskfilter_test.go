@@ -90,6 +90,38 @@ func TestHasNeedsRevision(t *testing.T) {
 	}
 }
 
+func TestIsNonWorkType(t *testing.T) {
+	tests := []struct {
+		name string
+		typ  string
+		want bool
+	}{
+		// Non-work types (should return true)
+		{"merge-request", "merge-request", true},
+		{"gate", "gate", true},
+		{"molecule", "molecule", true},
+		{"message", "message", true},
+		{"agent", "agent", true},
+		{"role", "role", true},
+		{"rig", "rig", true},
+		// Work types (should return false)
+		{"task", "task", false},
+		{"bug", "bug", false},
+		{"feature", "feature", false},
+		{"epic", "epic", false},
+		{"chore", "chore", false},
+		{"empty", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			issue := BdIssue{IssueType: tt.typ}
+			if got := IsNonWorkType(issue); got != tt.want {
+				t.Errorf("IsNonWorkType() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 // --- Level 2: Workflow predicates ---
 
 func TestNeedsPlan(t *testing.T) {
@@ -150,6 +182,13 @@ func TestIsWorkableTask(t *testing.T) {
 		{"open bug", "open", "bug", true},
 		{"open feature", "open", "feature", true},
 		{"open epic", "open", "epic", false},
+		{"open agent", "open", "agent", false},
+		{"open role", "open", "role", false},
+		{"open merge-request", "open", "merge-request", false},
+		{"open gate", "open", "gate", false},
+		{"open molecule", "open", "molecule", false},
+		{"open message", "open", "message", false},
+		{"open rig", "open", "rig", false},
 		{"in_progress task", "in_progress", "task", false},
 		{"closed task", "closed", "task", false},
 		{"review task", "review", "task", false},

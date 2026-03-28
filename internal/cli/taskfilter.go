@@ -15,6 +15,18 @@ func IsEpic(issue BdIssue) bool {
 	return issue.IssueType == "epic"
 }
 
+// IsNonWorkType returns true if the issue type is a non-work internal type that
+// agents should never pick up. These are workflow/infrastructure beads, not tasks.
+// SYNC: Must stay aligned with ready.go SQL exclusion list (sqlite/ready.go:48)
+// and memory storage (memory/memory.go:1174).
+func IsNonWorkType(issue BdIssue) bool {
+	switch issue.IssueType {
+	case "merge-request", "gate", "molecule", "message", "agent", "role", "rig":
+		return true
+	}
+	return false
+}
+
 // IsOpen returns true if the issue has status "open".
 func IsOpen(issue BdIssue) bool {
 	return issue.Status == "open"
@@ -52,9 +64,9 @@ func ReadyToImplement(issue BdIssue) bool {
 }
 
 // IsWorkableTask returns true if the issue can be picked up by an agent:
-// status is open and not an epic.
+// status is open, not an epic, and not a non-work type.
 func IsWorkableTask(issue BdIssue) bool {
-	return IsOpen(issue) && !IsEpic(issue)
+	return IsOpen(issue) && !IsEpic(issue) && !IsNonWorkType(issue)
 }
 
 // --- Level 3: Agent predicates (with context from unclosed issue set) ---

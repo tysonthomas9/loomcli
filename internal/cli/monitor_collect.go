@@ -236,10 +236,6 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 
 	wg.Wait()
 
-	// Build unclosed issue ID set from typed results for accurate blocker filtering.
-	// A blocker is only resolved when closed — not when it moves to in_progress/review.
-	unclosedIDs := buildUnclosedIDsFromIssues(readyIssues, inProgressIssues, reviewIssues, backlogIssues)
-
 	// Process ready tasks, split by workflow stage
 	// Note: bd ready returns tasks not blocked by dependencies (open, in_progress, review)
 	if readyErr == nil {
@@ -254,9 +250,7 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 				summary.Epics++
 				continue
 			}
-			if HasUnclosedBlockers(issue.Dependencies, unclosedIDs) {
-				// Count these in backlog — they have open deps
-				summary.Backlog++
+			if IsNonWorkType(issue) {
 				continue
 			}
 
@@ -455,6 +449,9 @@ func collectReadyTasksByPriority(readyLimit int) map[int]int {
 		if IsEpic(issue) {
 			continue
 		}
+		if IsNonWorkType(issue) {
+			continue
+		}
 		// Skip tasks with needs-revision label (these are being re-planned)
 		if HasNeedsRevision(issue) {
 			continue
@@ -467,31 +464,4 @@ func collectReadyTasksByPriority(readyLimit int) map[int]int {
 	}
 
 	return counts
-}
-
-// buildUnclosedIDsFromIssues builds a set of unclosed issue IDs from the
-// typed results already fetched by collectTaskStatus's parallel IssueTracker queries.
-// Issues from ready/in_progress/review are unclosed by definition; backlog issues need a status check.
-func buildUnclosedIDsFromIssues(ready, inProgress, review, backlog []BdIssue) map[string]bool {
-	unclosed := make(map[string]bool)
-
-	addAll := func(issues []BdIssue) {
-		for _, issue := range issues {
-			unclosed[issue.ID] = true
-		}
-	}
-
-	// Ready, in_progress, and review issues are all unclosed by definition
-	addAll(ready)
-	addAll(inProgress)
-	addAll(review)
-
-	// Backlog (blocked) issues need status filtering
-	for _, issue := range backlog {
-		if issue.Status != "closed" {
-			unclosed[issue.ID] = true
-		}
-	}
-
-	return unclosed
 }

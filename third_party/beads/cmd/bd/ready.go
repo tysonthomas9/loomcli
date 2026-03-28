@@ -21,6 +21,10 @@ var readyCmd = &cobra.Command{
 	Short: "Show ready work (no blockers, open or in_progress)",
 	Long: `Show ready work (issues with no blockers that are open or in_progress).
 
+This command shows a broader set of issues than what agents pick up. It includes
+all statuses (open, in_progress, review) and all work types. For the agent-visible
+subset (open only, excluding epics and non-work types), use 'loom monitor -n'.
+
 Use --mol to filter to a specific molecule's steps:
   bd ready --mol bd-patrol   # Show ready steps within molecule
 

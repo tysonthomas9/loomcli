@@ -68,6 +68,11 @@ func MatchTask(issue BdIssue, constraints RoleConstraints, unclosedIDs map[strin
 		return TaskMatch{Issue: issue, Score: 0, Reason: "epic"}
 	}
 
+	// Reject non-work types (infrastructure beads like merge-request, gate, etc.)
+	if IsNonWorkType(issue) {
+		return TaskMatch{Issue: issue, Score: 0, Reason: "non-work type"}
+	}
+
 	// Reject non-open
 	if !IsOpen(issue) {
 		return TaskMatch{Issue: issue, Score: 0, Reason: "not open"}

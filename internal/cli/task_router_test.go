@@ -138,6 +138,25 @@ func TestMatchTask_RejectEpic(t *testing.T) {
 	}
 }
 
+func TestMatchTask_RejectNonWorkType(t *testing.T) {
+	nonWorkTypes := []string{"merge-request", "gate", "molecule", "message", "agent", "role", "rig"}
+	for _, typ := range nonWorkTypes {
+		t.Run(typ, func(t *testing.T) {
+			issue := BdIssue{ID: "T-1", Status: "open", IssueType: typ}
+			c := RoleConstraints{}
+
+			got := MatchTask(issue, c, nil)
+
+			if got.Score != 0 {
+				t.Errorf("Score = %d, want 0", got.Score)
+			}
+			if got.Reason != "non-work type" {
+				t.Errorf("Reason = %q, want %q", got.Reason, "non-work type")
+			}
+		})
+	}
+}
+
 func TestMatchTask_RejectNonOpen(t *testing.T) {
 	issue := BdIssue{ID: "T-1", Status: "in_progress", IssueType: "task"}
 	c := RoleConstraints{}

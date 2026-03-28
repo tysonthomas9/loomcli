@@ -1170,9 +1170,9 @@ func (m *MemoryStorage) GetReadyWork(ctx context.Context, filter types.WorkFilte
 		} else {
 			// Exclude workflow types from ready work by default
 			// These are internal workflow items, not work for polecats to claim
-			// (Gas Town types - not built into beads core)
+			// SYNC: Must stay aligned with sqlite/ready.go:48 and cli/taskfilter.go IsNonWorkType()
 			switch issue.IssueType {
-			case "merge-request", "gate", "molecule", "message":
+			case "merge-request", "gate", "molecule", "message", "agent", "role", "rig":
 				continue
 			}
 		}
