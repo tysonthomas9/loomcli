@@ -104,6 +104,12 @@ vi.mock("@/hooks", () => ({
     error: null,
     refetch: vi.fn(),
   }),
+  useAgentDiffStat: () => ({
+    data: null,
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
   useRegisterEscapeLayer: vi.fn(),
   useKeyboardShortcuts: vi.fn(() => ({
     isCheatsheetOpen: false,

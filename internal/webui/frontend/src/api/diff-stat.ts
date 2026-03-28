@@ -29,3 +29,18 @@ export async function fetchIssueDiffStat(
   );
   return get<IssueDiffStat>(url);
 }
+
+/**
+ * Fetch diff statistics for an agent's worktree by agent name.
+ * GET /api/agents/{name}/git/diff-stat
+ */
+export async function fetchAgentDiffStat(
+  workspaceId: string,
+  agentName: string,
+): Promise<IssueDiffStat> {
+  const url = wsUrl(
+    workspaceId,
+    `/agents/${encodeURIComponent(agentName)}/git/diff-stat`,
+  );
+  return get<IssueDiffStat>(url);
+}

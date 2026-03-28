@@ -111,6 +111,12 @@ vi.mock("@/hooks", () => ({
     error: null,
     refetch: vi.fn(),
   }),
+  useAgentDiffStat: () => ({
+    data: null,
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
   useDebouncedCallback: (fn: (...args: unknown[]) => void, _delay: number) =>
     fn,
   useRegisterEscapeLayer: vi.fn(),

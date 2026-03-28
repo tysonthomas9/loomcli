@@ -97,7 +97,7 @@ export { fetchDiffCommits, fetchDiffFiles, fetchDiffFile } from "./diff";
 export type { DiffCommit, DiffFile, DiffFilePatch } from "./diff";
 
 // Issue diff stat API
-export { fetchIssueDiffStat } from "./diff-stat";
+export { fetchIssueDiffStat, fetchAgentDiffStat } from "./diff-stat";
 export type { IssueDiffStat } from "./diff-stat";
 
 // Git API functions

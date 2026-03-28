@@ -1,12 +1,14 @@
 /**
  * AgentCard component displays a single agent's status.
- * Compact single-row layout with circular avatar, status dot, and commit count.
+ * Compact single-row layout with circular avatar, status dot, and line diff stats.
  */
 
 import type { LoomAgentStatus, ParsedLoomStatus } from "@/types";
 import { parseLoomStatus } from "@/types";
 import { RepoBadge } from "@/components/RepoBadge";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
+import { useAgentDiffStat } from "@/hooks";
+import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
 
 import styles from "./AgentCard.module.css";
 
@@ -96,7 +98,12 @@ export function AgentCard({
   const roleLabel = agent.role
     ? agent.role.charAt(0).toUpperCase() + agent.role.slice(1)
     : "Agent";
-  const changeCount = agent.ahead + (agent.changes?.length ?? 0);
+  const { workspaceId } = useWorkspaceContext();
+  const { data: diffStat } = useAgentDiffStat({
+    workspaceId,
+    agentName: agent.name,
+    pollInterval: 60000,
+  });
 
   const rootClassName = [styles.card, className].filter(Boolean).join(" ");
 
@@ -154,32 +161,18 @@ export function AgentCard({
       </div>
 
       <div className={styles.meta}>
-        {(agent.ahead > 0 || agent.behind > 0) && (
+        {diffStat && (diffStat.added > 0 || diffStat.removed > 0) && (
           <div
-            className={styles.commitCounts}
-            title={
-              agent.ahead > 0 && agent.behind > 0
-                ? `${agent.ahead} commits ahead and ${agent.behind} commits behind`
-                : agent.ahead > 0
-                  ? `${agent.ahead} commits ahead`
-                  : `${agent.behind} commits behind`
-            }
+            className={styles.diffStats}
+            title={`${diffStat.added} lines added, ${diffStat.removed} lines removed`}
           >
-            {agent.ahead > 0 && (
-              <span className={styles.commitCount}>+{agent.ahead}</span>
+            {diffStat.added > 0 && (
+              <span className={styles.linesAdded}>+{diffStat.added}</span>
             )}
-            {agent.behind > 0 && (
-              <span className={styles.behindCount}>-{agent.behind}</span>
+            {diffStat.removed > 0 && (
+              <span className={styles.linesRemoved}>-{diffStat.removed}</span>
             )}
           </div>
-        )}
-        {changeCount > 0 && (
-          <span
-            className={styles.changeBadge}
-            title={`${changeCount} total pending changes`}
-          >
-            +{changeCount}
-          </span>
         )}
         <span
           className={styles.statusLine}

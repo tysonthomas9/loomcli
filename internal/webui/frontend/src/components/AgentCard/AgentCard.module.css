@@ -138,16 +138,16 @@
   color: var(--color-status-error, #ef4444);
 }
 
-/* Commit counts container */
-.commitCounts {
+/* Diff stats container */
+.diffStats {
   display: flex;
   flex-direction: row;
   gap: 0.4rem;
   align-items: center;
 }
 
-/* Commit count badge */
-.commitCount {
+/* Lines added badge */
+.linesAdded {
   font-size: 0.9rem;
   color: var(--color-success, #16a34a);
   font-variant-numeric: tabular-nums;
@@ -155,26 +155,11 @@
   flex-shrink: 0;
 }
 
-/* Behind count badge */
-.behindCount {
+/* Lines removed badge */
+.linesRemoved {
   font-size: 0.9rem;
-  color: var(--color-warning, #f59e0b);
+  color: var(--color-danger, #ef4444);
   font-variant-numeric: tabular-nums;
   font-family: var(--font-mono, ui-monospace, monospace);
   flex-shrink: 0;
-}
-
-.changeBadge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--color-success-bg, #dcfce7);
-  color: var(--color-success, #16a34a);
-  border-radius: 10px;
-  padding: 0 0.375rem;
-  font-size: 0.68rem;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  font-family: var(--font-mono, ui-monospace, monospace);
-  line-height: 1.4;
 }

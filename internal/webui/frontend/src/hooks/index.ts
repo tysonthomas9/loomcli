@@ -95,6 +95,12 @@ export type {
   UseIssueDiffStatReturn,
 } from "./useIssueDiffStat";
 
+export { useAgentDiffStat } from "./useAgentDiffStat";
+export type {
+  UseAgentDiffStatOptions,
+  UseAgentDiffStatReturn,
+} from "./useAgentDiffStat";
+
 export { useWorkspaceTree } from "./useWorkspaceTree";
 export type { EpicWithTasks, UseWorkspaceTreeReturn } from "./useWorkspaceTree";
 

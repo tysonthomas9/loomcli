@@ -12,6 +12,20 @@ import "@testing-library/jest-dom";
 
 import type { LoomAgentStatus } from "@/types";
 
+// Mock useAgentDiffStat and useWorkspaceContext
+const mockDiffStat = vi.fn().mockReturnValue({
+  data: null,
+  isLoading: false,
+  error: null,
+  refetch: vi.fn(),
+});
+vi.mock("@/hooks", () => ({
+  useAgentDiffStat: (...args: unknown[]) => mockDiffStat(...args),
+}));
+vi.mock("@/hooks/useWorkspaceContext", () => ({
+  useWorkspaceContext: () => ({ workspaceId: "ws-test-123" }),
+}));
+
 import { AgentCard } from "./AgentCard";
 
 /** Helper to build a minimal agent object. */
@@ -238,84 +252,115 @@ describe("AgentCard", () => {
     });
   });
 
-  describe("commit count", () => {
-    it("shows +N when agent.ahead > 0", () => {
-      const { container } = render(
-        <AgentCard agent={makeAgent({ ahead: 3 })} />,
-      );
+  describe("diff stats", () => {
+    it("shows +N when diffStat.added > 0", () => {
+      mockDiffStat.mockReturnValue({
+        data: { branch: "main", added: 366, removed: 0 },
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+      const { container } = render(<AgentCard agent={makeAgent()} />);
 
-      const commitCount = container.querySelector('[class*="commitCount"]');
-      expect(commitCount).toBeInTheDocument();
-      expect(commitCount).toHaveTextContent("+3");
+      const linesAdded = container.querySelector('[class*="linesAdded"]');
+      expect(linesAdded).toBeInTheDocument();
+      expect(linesAdded).toHaveTextContent("+366");
     });
 
-    it("shows correct title tooltip for commit count when only ahead", () => {
-      render(<AgentCard agent={makeAgent({ ahead: 5 })} />);
+    it("shows -N when diffStat.removed > 0", () => {
+      mockDiffStat.mockReturnValue({
+        data: { branch: "main", added: 0, removed: 42 },
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+      const { container } = render(<AgentCard agent={makeAgent()} />);
 
-      expect(screen.getByTitle("5 commits ahead")).toBeInTheDocument();
+      const linesRemoved = container.querySelector('[class*="linesRemoved"]');
+      expect(linesRemoved).toBeInTheDocument();
+      expect(linesRemoved).toHaveTextContent("-42");
     });
 
-    it("does not show commit count when ahead is 0", () => {
-      render(<AgentCard agent={makeAgent({ ahead: 0 })} />);
+    it("shows both added and removed when both > 0", () => {
+      mockDiffStat.mockReturnValue({
+        data: { branch: "main", added: 200, removed: 50 },
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+      const { container } = render(<AgentCard agent={makeAgent()} />);
 
-      expect(screen.queryByText(/^\+/)).not.toBeInTheDocument();
+      const linesAdded = container.querySelector('[class*="linesAdded"]');
+      const linesRemoved = container.querySelector('[class*="linesRemoved"]');
+      expect(linesAdded).toHaveTextContent("+200");
+      expect(linesRemoved).toHaveTextContent("-50");
     });
 
-    it("shows +1 for single commit ahead", () => {
-      const { container } = render(
-        <AgentCard agent={makeAgent({ ahead: 1 })} />,
-      );
-
-      const commitCount = container.querySelector('[class*="commitCount"]');
-      expect(commitCount).toBeInTheDocument();
-      expect(commitCount).toHaveTextContent("+1");
-      expect(screen.getByTitle("1 commits ahead")).toBeInTheDocument();
-    });
-  });
-
-  describe("behind count", () => {
-    it("shows -N when agent.behind > 0", () => {
-      render(<AgentCard agent={makeAgent({ behind: 3 })} />);
-
-      expect(screen.getByText("-3")).toBeInTheDocument();
-    });
-
-    it("shows correct title tooltip for behind count when only behind", () => {
-      render(<AgentCard agent={makeAgent({ behind: 5 })} />);
-
-      expect(screen.getByTitle("5 commits behind")).toBeInTheDocument();
-    });
-
-    it("does not show behind count when behind is 0", () => {
-      render(<AgentCard agent={makeAgent({ behind: 0 })} />);
-
-      expect(screen.queryByText(/^-\d+/)).not.toBeInTheDocument();
-    });
-
-    it("shows -1 for single commit behind", () => {
-      render(<AgentCard agent={makeAgent({ behind: 1 })} />);
-
-      expect(screen.getByText("-1")).toBeInTheDocument();
-      expect(screen.getByTitle("1 commits behind")).toBeInTheDocument();
-    });
-
-    it("shows both ahead and behind counts side by side when both > 0", () => {
-      const { container } = render(
-        <AgentCard agent={makeAgent({ ahead: 3, behind: 2 })} />,
-      );
-
-      const commitCount = container.querySelector('[class*="commitCount"]');
-      expect(commitCount).toBeInTheDocument();
-      expect(commitCount).toHaveTextContent("+3");
-      expect(screen.getByText("-2")).toBeInTheDocument();
-    });
-
-    it("shows combined tooltip when both ahead and behind", () => {
-      render(<AgentCard agent={makeAgent({ ahead: 4, behind: 7 })} />);
+    it("hidden when diffStat is null (loading)", () => {
+      mockDiffStat.mockReturnValue({
+        data: null,
+        isLoading: true,
+        error: null,
+        refetch: vi.fn(),
+      });
+      const { container } = render(<AgentCard agent={makeAgent()} />);
 
       expect(
-        screen.getByTitle("4 commits ahead and 7 commits behind"),
+        container.querySelector('[class*="diffStats"]'),
+      ).not.toBeInTheDocument();
+    });
+
+    it("hidden when both added and removed are 0", () => {
+      mockDiffStat.mockReturnValue({
+        data: { branch: "main", added: 0, removed: 0 },
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+      const { container } = render(<AgentCard agent={makeAgent()} />);
+
+      expect(
+        container.querySelector('[class*="diffStats"]'),
+      ).not.toBeInTheDocument();
+    });
+
+    it("shows correct tooltip text", () => {
+      mockDiffStat.mockReturnValue({
+        data: { branch: "main", added: 366, removed: 12 },
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+      render(<AgentCard agent={makeAgent()} />);
+
+      expect(
+        screen.getByTitle("366 lines added, 12 lines removed"),
       ).toBeInTheDocument();
+    });
+
+    it("passes correct options to useAgentDiffStat", () => {
+      mockDiffStat.mockReturnValue({
+        data: null,
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+      render(<AgentCard agent={makeAgent({ name: "nova" })} />);
+
+      expect(mockDiffStat).toHaveBeenCalledWith({
+        workspaceId: "ws-test-123",
+        agentName: "nova",
+        pollInterval: 60000,
+      });
+    });
+
+    afterEach(() => {
+      mockDiffStat.mockReturnValue({
+        data: null,
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
     });
   });
 
@@ -490,101 +535,6 @@ describe("AgentCard", () => {
     });
   });
 
-  describe("change badge", () => {
-    it("shows correct sum of ahead + changes.length", () => {
-      render(
-        <AgentCard
-          agent={makeAgent({
-            ahead: 3,
-            changes: [
-              { status: "M", path: "file1.ts" },
-              { status: "A", path: "file2.ts" },
-            ],
-          })}
-        />,
-      );
-
-      // changeCount = 3 + 2 = 5, badge shows "+5"
-      const badge = screen.getByTitle("5 total pending changes");
-      expect(badge).toBeInTheDocument();
-      expect(badge).toHaveTextContent("+5");
-    });
-
-    it("badge hidden when total is 0", () => {
-      render(<AgentCard agent={makeAgent({ ahead: 0, changes: [] })} />);
-
-      expect(
-        screen.queryByTitle(/total pending changes/),
-      ).not.toBeInTheDocument();
-    });
-
-    it("badge hidden when ahead is 0 and changes is undefined", () => {
-      render(<AgentCard agent={makeAgent({ ahead: 0 })} />);
-
-      expect(
-        screen.queryByTitle(/total pending changes/),
-      ).not.toBeInTheDocument();
-    });
-
-    it("shows only ahead count when no changes array", () => {
-      render(<AgentCard agent={makeAgent({ ahead: 4 })} />);
-
-      // changeCount = 4 + 0 = 4
-      const badge = screen.getByTitle("4 total pending changes");
-      expect(badge).toBeInTheDocument();
-      expect(badge).toHaveTextContent("+4");
-    });
-
-    it("shows only changes.length when ahead is 0", () => {
-      render(
-        <AgentCard
-          agent={makeAgent({
-            ahead: 0,
-            changes: [
-              { status: "M", path: "a.ts" },
-              { status: "D", path: "b.ts" },
-              { status: "??", path: "c.ts" },
-            ],
-          })}
-        />,
-      );
-
-      // changeCount = 0 + 3 = 3
-      const badge = screen.getByTitle("3 total pending changes");
-      expect(badge).toBeInTheDocument();
-      expect(badge).toHaveTextContent("+3");
-    });
-
-    it("badge renders with changeBadge CSS class", () => {
-      const { container } = render(
-        <AgentCard
-          agent={makeAgent({
-            ahead: 2,
-            changes: [{ status: "M", path: "x.ts" }],
-          })}
-        />,
-      );
-
-      const badge = container.querySelector('[class*="changeBadge"]');
-      expect(badge).toBeInTheDocument();
-      expect(badge).toHaveTextContent("+3");
-    });
-
-    it("badge shows +1 for single pending change", () => {
-      render(
-        <AgentCard
-          agent={makeAgent({
-            ahead: 1,
-            changes: [],
-          })}
-        />,
-      );
-
-      const badge = screen.getByTitle("1 total pending changes");
-      expect(badge).toHaveTextContent("+1");
-    });
-  });
-
   describe("edge cases", () => {
     it("handles empty name gracefully", () => {
       const { container } = render(
@@ -607,12 +557,24 @@ describe("AgentCard", () => {
       expect(screen.getByText("Ready")).toBeInTheDocument();
     });
 
-    it("handles large ahead count", () => {
-      render(<AgentCard agent={makeAgent({ ahead: 999 })} />);
+    it("handles large diff stat values", () => {
+      mockDiffStat.mockReturnValue({
+        data: { branch: "main", added: 100000, removed: 50000 },
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+      render(<AgentCard agent={makeAgent()} />);
 
-      // Both the commit count (+999) and change badge (+999) render
-      const allPlusTexts = screen.getAllByText("+999");
-      expect(allPlusTexts.length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByText("+100000")).toBeInTheDocument();
+      expect(screen.getByText("-50000")).toBeInTheDocument();
+
+      mockDiffStat.mockReturnValue({
+        data: null,
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
     });
   });
 });

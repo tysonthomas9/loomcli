@@ -424,6 +424,12 @@ vi.mock("@/hooks", () => ({
   LAYER_ISSUE_PANEL: 10,
   LAYER_TERMINAL_SEARCH: 5,
   useDebouncedCallback: (fn: (...args: unknown[]) => unknown) => fn,
+  useAgentDiffStat: () => ({
+    data: null,
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
 }));
 
 // Alias for convenience in tests (prefixed with _ to satisfy linter for unused vars)

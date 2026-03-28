@@ -65,6 +65,12 @@ vi.mock("@/hooks", () => ({
   useAgentContext: () => ({ ...defaultMockContext, ...mockContextOverride }),
   useRepoFilter: () => [mockSelectedRepos, vi.fn()],
   useWorkspaceContext: () => ({ workspaceId: TEST_WS_ID }),
+  useAgentDiffStat: () => ({
+    data: null,
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
   useFocusReturn: vi.fn(),
   useFocusTrap: vi.fn(),
   useRegisterEscapeLayer: vi.fn(),
