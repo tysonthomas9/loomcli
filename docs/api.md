@@ -1735,6 +1735,175 @@ Update persisted terminal UI state (active tab selection).
 
 - **Note:** Setting `active_tab` to `""` clears the selection. Does not broadcast SSE events.
 
+## Agent Terminal
+
+Workspace-scoped endpoints for agent terminal access: transport mode discovery, one-time token generation, and live WebSocket relay. These endpoints allow the frontend to determine whether an agent has a live tmux session or should fall back to archive logs, authenticate for WebSocket access, and stream the agent's terminal output in real time.
+
+### Workspace Scoping
+
+All three agent terminal endpoints are registered on the workspace-scoped mux under `/api/workspaces/{ws}/agents/{name}/terminal/...`. WorkspaceMiddleware validates the `{ws}` path parameter (400 if empty, 404 if workspace does not exist) and injects the workspace ID into the request context. Handlers retrieve it via `WorkspaceFromContext(r.Context())`.
+
+### Agent Name Validation
+
+All three endpoints validate the `{name}` path parameter against regex `^[a-zA-Z0-9_-]+$`. Empty names and names with special characters (path traversal, dots, spaces) are rejected with 400.
+
+### Session Resolution
+
+Agent terminal endpoints use `FindLatestAgentSession(workspaceID, agentName)` which scans all tmux sessions for the newest one matching the pattern `loom-<wsPrefix>-<role>-<agent>-<pid>` where `wsPrefix` is derived from the workspace ID. When `workspaceID` is empty, the function returns no match (fail-closed). Multiple sessions for the same agent are tie-broken by created timestamp (newest wins), then lexicographic name order.
+
+### Authentication Model
+
+- **`/terminal/info`** — standard bearer token auth (server-level middleware) + WorkspaceMiddleware validation
+- **`/terminal/token`** — standard bearer token auth + WorkspaceMiddleware; only registered when `termAuth` is initialized
+- **`/terminal/ws`** — public route (bypasses bearer auth via `isPublicRoute` which matches paths with prefix `/api/agents/` and suffix `/terminal/ws` after stripping the workspace prefix); uses one-time token via `?token=` query param. WorkspaceMiddleware still validates workspace existence.
+
+### Token Scoping
+
+Agent terminal tokens use a distinct scope format: `agent:<name>:logs`. This prevents token reuse across agents or between agent and main terminal endpoints.
+
+### `GET /api/workspaces/{ws}/agents/{name}/terminal/info`
+
+Check whether an agent has a live tmux session suitable for terminal streaming or should fall back to archive logs.
+
+- **Auth:** Required (standard bearer token + WorkspaceMiddleware)
+- **Path Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| ws | string | yes | Workspace ID (validated by WorkspaceMiddleware: 400 if empty, 404 if not found) |
+| name | string | yes | Agent name (validated: `^[a-zA-Z0-9_-]+$`) |
+
+- **Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "agent": "ember",
+    "mode": "tmux"
+  }
+}
+```
+
+The `mode` field is `"tmux"` if a matching live tmux session exists for the agent in the specified workspace, `"archive"` otherwise.
+
+- **Errors:**
+  - `400` — empty workspace ID (`"workspace ID is required"`), missing agent name, or invalid agent name
+  - `404` — workspace not found
+  - `500` — failed to inspect terminal sessions (tmux list-sessions failure)
+  - `503` — terminal manager not initialized (defensive; endpoint is not registered when manager is absent)
+
+### `GET /api/workspaces/{ws}/agents/{name}/terminal/token`
+
+Generate a one-time HMAC-SHA256 token scoped to an agent's terminal stream.
+
+- **Auth:** Required (standard bearer token + WorkspaceMiddleware)
+- **Path Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| ws | string | yes | Workspace ID (validated by WorkspaceMiddleware) |
+| name | string | yes | Agent name (validated: `^[a-zA-Z0-9_-]+$`) |
+
+- **Response Headers:** `Cache-Control: no-store`
+- **Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "token": "<base64url-encoded-one-time-token>"
+  }
+}
+```
+
+The token is single-use, expires in 60 seconds, and is scoped to `agent:<name>:logs`.
+
+- **Errors:**
+  - `400` — empty workspace ID, missing agent name, or invalid agent name
+  - `404` — workspace not found
+  - `500` — failed to generate token (HMAC generation failure)
+  - `503` — terminal authentication not initialized
+
+- **Note:** This endpoint is only registered when both `termManager` and `termAuth` are initialized at startup. If `termAuth` is nil, the route does not exist (404 from SPA catch-all).
+
+### `GET /api/workspaces/{ws}/agents/{name}/terminal/ws` (WebSocket)
+
+WebSocket endpoint for live agent terminal relay (tmux-backed). Supports bidirectional terminal I/O.
+
+- **Auth:** One-time token via `?token=` query param (public route — bypasses bearer auth middleware)
+- **Path Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| ws | string | yes | Workspace ID (validated by WorkspaceMiddleware) |
+| name | string | yes | Agent name (validated: `^[a-zA-Z0-9_-]+$`) |
+
+- **Query Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| token | string | yes | One-time terminal token (scoped to `agent:<name>:logs`) |
+
+- **Pre-Upgrade Validation (HTTP JSON before WebSocket upgrade):**
+  - `400` — empty workspace ID, missing agent name, or invalid agent name
+  - `401` — terminal authentication failed (invalid/expired/replayed token, or scope mismatch)
+  - `404` — workspace not found, or no active terminal session for agent
+  - `500` — failed to inspect terminal sessions
+  - `503` — terminal manager not initialized, terminal authentication not initialized, or maximum terminal sessions reached
+
+- **WebSocket Binary Protocol (identical to main terminal):**
+  - All frames are binary (`MessageBinary`)
+  - **Server → Client:** raw PTY output bytes (read buffer 4096 bytes)
+  - **Client → Server:** raw terminal input bytes OR resize message
+  - **Resize message format (in-band):** exactly 5 bytes: `[0x01, cols_hi, cols_lo, rows_hi, rows_lo]`
+    - Byte 0: `0x01` (resize marker)
+    - Bytes 1-2: cols as uint16 big-endian
+    - Bytes 3-4: rows as uint16 big-endian
+  - Max terminal size: 500 cols × 200 rows (values exceeding these are silently ignored)
+  - Zero values for cols or rows are silently ignored
+  - Read limit: 32 KB per WebSocket message
+  - Default terminal size: 80×24 (set on attach; frontend sends resize immediately after connect)
+  - Non-matching binary messages (wrong length or missing `0x01` marker) are treated as regular terminal input
+
+- **Close Codes:**
+
+| Code | Meaning | Frontend behavior |
+|------|---------|-------------------|
+| 1000 | Normal closure / session detached | Allow reconnect |
+| 4001 | Backend process exited (crash) | Show crash overlay, no auto-reconnect |
+
+- **Close reason on crash:** last 10 lines of PTY output (truncated to 123 bytes, UTF-8-safe)
+
+- **Origin Validation:** Uses `allowedOrigins` config for WebSocket upgrade acceptance.
+
+- **Session Attachment:** Uses `AttachExistingRaw(sessionName, 80, 24)` — attaches to an already-running tmux session without session creation. The session must already exist (discovered via `FindLatestAgentSession`).
+
+- **Differences from Main Terminal WebSocket (`GET /api/workspaces/{ws}/terminal/ws`):**
+  - No scrollback buffer capture (nil scrollback)
+  - No deferred kill cancellation on attach
+  - No SSE `terminal_session_change` broadcast
+  - No context banner injection
+  - Session is discovered by agent name within workspace (not provided directly by the client)
+  - Token scope is agent-specific (`agent:<name>:logs`), not session-based
+
+- **Note:** This endpoint is registered whenever `termManager` is initialized (regardless of `termAuth`). When `termAuth` is nil, the handler itself returns 503 rather than the route being absent.
+
+### Edge Cases
+
+- **Agent name with path traversal** (e.g., `../../../etc/passwd`): rejected by `validAgentName` regex with 400
+- **Empty workspace ID in context**: `FindLatestAgentSession` returns no match (fail-closed); info returns `archive` mode, ws returns 404
+- **No tmux server running**: `FindLatestAgentSession` returns no match; info returns `archive` mode, ws returns 404
+- **Multiple tmux sessions for same agent**: newest by created timestamp wins (tie-broken by lexicographic name order)
+- **Cross-workspace isolation**: sessions from workspace "alpha" are not visible when querying workspace "beta" (different `wsPrefix`)
+- **Token scope mismatch** (using ember's token for spark's ws): `ValidateToken` fails with 401
+- **Token replay** (reusing a consumed token): nonce already used, returns 401
+- **Token expired** (>60s): returns 401
+- **Session limit reached** (default 20): pre-upgrade check returns 503; race with `AttachExistingRaw` also handles gracefully
+- **Agent session disappears between discovery and attach**: `AttachExistingRaw` returns error, WS closes with reason
+- **Server restart**: new HMAC secret generated, all previously-issued tokens become invalid
+- **Concurrent connections to same agent session**: each gets its own PTY attach with unique connection ID
+
 ## Git Operations
 
 Workspace-scoped REST API for git workflow operations on agent worktrees. These endpoints allow the frontend to push changes, pull updates, synchronize branches, create GitHub PRs, hard-reset worktrees, query git status, update target branches, push all worktrees, and retrieve issue-level diff statistics.
@@ -2240,6 +2409,277 @@ Diff statistics (added/removed lines) for an issue's assigned agent worktree.
   - `503` — daemon not available (RPC pool connection failure, 5s timeout)
 
 - **Note:** Uses daemon RPC via `multiPool` (routed to workspace-specific pool) with a 5-second context timeout.
+
+## Agent Diff / Code Review
+
+Workspace-scoped REST API for agent worktree diff and code-review operations. These 3 endpoints allow the frontend to list commits in a diff range, list changed files between two refs, and retrieve a unified diff patch for a single file.
+
+All endpoints are registered on `wsMux` under `/api/workspaces/{ws}/...` behind `WorkspaceMiddleware`. They are **conditionally available** — when `gitOps` is nil (no worktree configuration), none of these endpoints exist and requests fall through to the SPA catch-all.
+
+**Note on legacy flat routes:** Legacy flat routes (`/api/agents/{name}/diff/...`) still exist on the main mux for backward compatibility but are slated for removal by loomcli-n28bt.41. This spec documents only the workspace-scoped routes, which are the authoritative API surface.
+
+**Note on response envelope:** Unlike the Git Operations endpoints above (which respond with raw structs), all diff endpoints use the `diffResponse` envelope: `{success: true, data: T}` on success or `{success: false, error: "msg"}` on error. This matches the frontend's `ApiResult<T>` pattern. The one exception is `resolveAgent()` errors, which use the raw `{"error": "msg"}` format (no `success` field) since they go through `respondError`, not `respondDiffError`.
+
+### Cross-Cutting: Workspace Routing
+
+All 3 endpoints are wrapped by `WorkspaceMiddleware`, which:
+
+1. Extracts `{ws}` from the URL path via `r.PathValue("ws")`
+2. Validates non-empty (returns `400` if empty)
+3. Validates workspace exists via `wsExists(wsID)` (returns `404` if not found)
+4. Injects workspace ID into request context via `WithWorkspace(ctx, wsID)`
+
+| Status | Condition | Body |
+|--------|-----------|------|
+| `400` | `{ws}` is empty or whitespace | `{"error": "workspace ID is required"}` |
+| `404` | `{ws}` does not match any registered workspace | `{"error": "workspace not found: {ws}"}` |
+
+Authentication (`401`) is enforced by a separate auth middleware applied at the server level, not by `WorkspaceMiddleware`.
+
+### Cross-Cutting: Merge-Base Resolution
+
+All 3 endpoints use `resolveMergeBaseDefault()` for the `from` ref:
+
+1. If `?from=` query param is provided and non-empty, validates against git ref regex `^[a-zA-Z0-9][a-zA-Z0-9_./-]*$` and rejects if it contains `..`
+2. If `?from=` is empty or omitted, calls `ops.ResolveMergeBase(wt.Path, wt.DefaultBranch)` to compute the merge-base automatically
+3. Returns `400` with `"invalid from ref"` if validation fails
+4. Returns `500` with `"failed to resolve merge-base: ..."` if merge-base computation fails
+
+### Data Models
+
+**DiffCommitResult:**
+
+```json
+{
+  "hash": "full SHA string",
+  "short_hash": "abbreviated SHA",
+  "subject": "commit message first line",
+  "author": "author name",
+  "email": "author email",
+  "date": "commit date string"
+}
+```
+
+**DiffFileResult:**
+
+```json
+{
+  "path": "relative file path",
+  "status": "M",
+  "old_path": "original path (only present for R or C status)",
+  "additions": 10,
+  "deletions": 5
+}
+```
+
+- `status` values: `M` (modified), `A` (added), `D` (deleted), `R` (renamed), `C` (copied)
+- `old_path` uses `omitempty` — only present for renamed or copied files
+
+**DiffFilePatchResult:**
+
+```json
+{
+  "patch": "unified diff string",
+  "is_binary": false,
+  "is_too_large": false,
+  "additions": 1,
+  "deletions": 0
+}
+```
+
+- When `is_binary` is true, `patch` is empty
+- When `is_too_large` is true, `patch` is empty (file exceeds diff size limit)
+
+### `GET /api/workspaces/{ws}/agents/{name}/diff/commits`
+
+List commits between the merge-base (or explicit `from` ref) and HEAD in the agent's worktree.
+
+- **Auth:** Required
+- **Path params:**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `ws` | string | Workspace ID (UUID) |
+| `name` | string | Agent name (validated: `^[a-zA-Z0-9_-]+$`) |
+
+- **Query params:**
+
+| Param | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `from` | string | no | merge-base of worktree's `DefaultBranch` | Start ref for commit range |
+| `limit` | int | no | `0` (unlimited) | Maximum number of commits to return |
+
+- **Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "commits": [
+      {
+        "hash": "aaa111222333...",
+        "short_hash": "aaa111",
+        "subject": "first commit",
+        "author": "Alice",
+        "email": "alice@example.com",
+        "date": "2026-01-01"
+      }
+    ]
+  }
+}
+```
+
+`commits` is always an array (never null) — nil slices are normalized to `[]`.
+
+- **Errors:**
+  - `400` — missing agent name: `{"error": "missing agent name"}` (no `success` field)
+  - `400` — invalid agent name: `{"error": "invalid agent name: must match [a-zA-Z0-9_-]+"}` (no `success` field)
+  - `400` — invalid `from` ref (fails regex or contains `..`): `{"success": false, "error": "invalid from ref"}`
+  - `400` — invalid `limit` value: `{"success": false, "error": "invalid limit value: abc (must be an integer)"}`
+  - `404` — agent worktree not found: `{"error": "agent worktree \"name\" not found"}` (no `success` field)
+  - `500` — merge-base resolution failed: `{"success": false, "error": "failed to resolve merge-base: ..."}`
+  - `500` — git log operation failed: `{"success": false, "error": "failed to get diff commits: ..."}`
+
+### `GET /api/workspaces/{ws}/agents/{name}/diff/files`
+
+List changed files between two refs in the agent's worktree, with per-file status and addition/deletion line counts.
+
+- **Auth:** Required
+- **Path params:**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `ws` | string | Workspace ID (UUID) |
+| `name` | string | Agent name (validated: `^[a-zA-Z0-9_-]+$`) |
+
+- **Query params:**
+
+| Param | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `to` | string | yes | — | End ref for diff (typically `"HEAD"` or a commit SHA) |
+| `from` | string | no | merge-base of worktree's `DefaultBranch` | Start ref for diff |
+
+- **Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "files": [
+      {
+        "path": "main.go",
+        "status": "M",
+        "additions": 10,
+        "deletions": 5
+      },
+      {
+        "path": "new.go",
+        "status": "A",
+        "additions": 20,
+        "deletions": 0
+      },
+      {
+        "path": "renamed.go",
+        "status": "R",
+        "old_path": "old_name.go",
+        "additions": 2,
+        "deletions": 1
+      }
+    ]
+  }
+}
+```
+
+`files` is always an array (never null) — nil slices are normalized to `[]`. `old_path` is only present for renamed (`R`) or copied (`C`) files.
+
+- **Errors:**
+  - `400` — missing agent name: `{"error": "missing agent name"}` (no `success` field)
+  - `400` — invalid agent name: `{"error": "invalid agent name: must match [a-zA-Z0-9_-]+"}` (no `success` field)
+  - `400` — missing `to` parameter: `{"success": false, "error": "missing required query parameter: to"}`
+  - `400` — invalid `to` ref (fails regex or contains `..`): `{"success": false, "error": "invalid to ref"}`
+  - `400` — invalid `from` ref (fails regex or contains `..`): `{"success": false, "error": "invalid from ref"}`
+  - `404` — agent worktree not found: `{"error": "agent worktree \"name\" not found"}` (no `success` field)
+  - `500` — merge-base resolution failed: `{"success": false, "error": "failed to resolve merge-base: ..."}`
+  - `500` — git diff operation failed: `{"success": false, "error": "failed to get diff files: ..."}`
+
+### `GET /api/workspaces/{ws}/agents/{name}/diff/file`
+
+Get the unified diff patch for a single file between two refs.
+
+- **Auth:** Required
+- **Path params:**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `ws` | string | Workspace ID (UUID) |
+| `name` | string | Agent name (validated: `^[a-zA-Z0-9_-]+$`) |
+
+- **Query params:**
+
+| Param | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `path` | string | yes | — | Relative file path within the worktree |
+| `to` | string | yes | — | End ref for diff (typically `"HEAD"` or a commit SHA) |
+| `from` | string | no | merge-base of worktree's `DefaultBranch` | Start ref for diff |
+
+- **Path validation:** The `path` parameter must be a relative path. Rejected if empty, starts with `/`, or resolves (after `path.Clean()`) to `.`, `..`, or any `../` prefix.
+
+- **Response:** `200 OK` (normal diff)
+
+```json
+{
+  "success": true,
+  "data": {
+    "patch": "--- a/main.go\n+++ b/main.go\n@@ -1,3 +1,4 @@\n+new line\n",
+    "is_binary": false,
+    "is_too_large": false,
+    "additions": 1,
+    "deletions": 0
+  }
+}
+```
+
+- **Response:** `200 OK` (binary file)
+
+```json
+{
+  "success": true,
+  "data": {
+    "patch": "",
+    "is_binary": true,
+    "is_too_large": false,
+    "additions": 0,
+    "deletions": 0
+  }
+}
+```
+
+- **Response:** `200 OK` (file too large)
+
+```json
+{
+  "success": true,
+  "data": {
+    "patch": "",
+    "is_binary": false,
+    "is_too_large": true,
+    "additions": 0,
+    "deletions": 0
+  }
+}
+```
+
+- **Errors:**
+  - `400` — missing agent name: `{"error": "missing agent name"}` (no `success` field)
+  - `400` — invalid agent name: `{"error": "invalid agent name: must match [a-zA-Z0-9_-]+"}` (no `success` field)
+  - `400` — missing `path` parameter: `{"success": false, "error": "missing required query parameter: path"}`
+  - `400` — invalid path (absolute, empty, traversal): `{"success": false, "error": "invalid path: must be relative with no '..' traversal"}`
+  - `400` — missing `to` parameter: `{"success": false, "error": "missing required query parameter: to"}`
+  - `400` — invalid `to` ref (fails regex or contains `..`): `{"success": false, "error": "invalid to ref"}`
+  - `400` — invalid `from` ref (fails regex or contains `..`): `{"success": false, "error": "invalid from ref"}`
+  - `404` — agent worktree not found: `{"error": "agent worktree \"name\" not found"}` (no `success` field)
+  - `500` — merge-base resolution failed: `{"success": false, "error": "failed to resolve merge-base: ..."}`
+  - `500` — git diff operation failed: `{"success": false, "error": "failed to get diff patch: ..."}`
 
 ## Loom Proxy
 
