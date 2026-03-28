@@ -218,7 +218,7 @@ func registerWorkspaceRoutes(mux *http.ServeMux, multiPool *daemon.MultiPool, wo
 
 	// Server-Sent Events endpoint (workspace-scoped)
 	if hub != nil {
-		wsMux.HandleFunc("GET /api/workspaces/{ws}/events", handleSSE(hub, getMutationsSince))
+		wsMux.Handle("GET /api/workspaces/{ws}/events", NewSSEHandler(hub, getMutationsSince))
 	}
 
 	// Terminal tab metadata endpoints (workspace-scoped, Redis-backed)

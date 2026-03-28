@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -315,7 +316,7 @@ func TestHandleSSE_Headers(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	handler := handleSSE(hub, nil)
+	handler := NewSSEHandler(hub, nil)
 
 	// Create a test request with cancelable context
 	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
@@ -404,7 +405,7 @@ func TestHandleSSE_ParsesLastEventID(t *testing.T) {
 				return nil
 			}
 
-			handler := handleSSE(hub, getMutations)
+			handler := NewSSEHandler(hub, getMutations)
 
 			url := "/api/workspaces/test-ws/events"
 			if tt.sinceParam != "" {
@@ -442,7 +443,7 @@ func TestHandleSSE_SendsConnectedEvent(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	handler := handleSSE(hub, nil)
+	handler := NewSSEHandler(hub, nil)
 
 	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil)
@@ -486,7 +487,7 @@ func TestHandleSSE_CatchUpEvents(t *testing.T) {
 		}
 	}
 
-	handler := handleSSE(hub, getMutations)
+	handler := NewSSEHandler(hub, getMutations)
 
 	// Connect with a since timestamp to trigger catch-up
 	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
@@ -550,7 +551,8 @@ func TestWriteSSEEvent_Format(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rr := httptest.NewRecorder()
-			writeSSEEvent(rr, tt.mutation)
+			sw, _ := newSSEWriter(rr)
+			writeSSEEvent(sw, tt.mutation)
 
 			output := rr.Body.String()
 
@@ -591,10 +593,12 @@ func TestWriteSSEEvent_MonotonicIDs(t *testing.T) {
 	}
 
 	rr1 := httptest.NewRecorder()
-	writeSSEEvent(rr1, mutation)
+	sw1, _ := newSSEWriter(rr1)
+	writeSSEEvent(sw1, mutation)
 
 	rr2 := httptest.NewRecorder()
-	writeSSEEvent(rr2, mutation)
+	sw2, _ := newSSEWriter(rr2)
+	writeSSEEvent(sw2, mutation)
 
 	output1 := rr1.Body.String()
 	output2 := rr2.Body.String()
@@ -617,7 +621,8 @@ func TestWriteSSEEvent_InvalidTimestampStillWorks(t *testing.T) {
 	}
 
 	rr := httptest.NewRecorder()
-	writeSSEEvent(rr, mutation)
+	sw, _ := newSSEWriter(rr)
+	writeSSEEvent(sw, mutation)
 
 	output := rr.Body.String()
 
@@ -1024,7 +1029,7 @@ func TestHandleSSE_SendsRetryField(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	handler := handleSSE(hub, nil)
+	handler := NewSSEHandler(hub, nil)
 
 	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil)
@@ -1064,7 +1069,7 @@ func TestHandleSSE_HeartbeatSent(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	handler := handleSSE(hub, nil)
+	handler := NewSSEHandler(hub, nil)
 
 	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil)
@@ -1108,7 +1113,8 @@ func TestWriteSSEEvent_ConcurrentMonotonicIDs(t *testing.T) {
 			localIDs := make([]int64, 0, eventsPerGoroutine)
 			for i := 0; i < eventsPerGoroutine; i++ {
 				rr := httptest.NewRecorder()
-				writeSSEEvent(rr, &MutationPayload{
+				sw, _ := newSSEWriter(rr)
+				writeSSEEvent(sw, &MutationPayload{
 					Type:      "create",
 					IssueID:   "bd-test",
 					Timestamp: "2025-01-23T12:00:00Z",
@@ -1228,7 +1234,7 @@ func TestHandleSSE_ClientDisconnectDuringCatchUp(t *testing.T) {
 		return events
 	}
 
-	handler := handleSSE(hub, getMutations)
+	handler := NewSSEHandler(hub, getMutations)
 
 	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events?since=1000", nil)
@@ -1268,7 +1274,7 @@ func TestHandleSSE_ContextAlreadyCancelled(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	handler := handleSSE(hub, nil)
+	handler := NewSSEHandler(hub, nil)
 
 	// Create request with already-cancelled context
 	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
@@ -1306,7 +1312,7 @@ func TestHandleSSE_NoCatchUpWhenGetMutationsSinceNil(t *testing.T) {
 	defer hub.Stop()
 
 	// Pass nil for getMutationsSince, but connect with since=1000
-	handler := handleSSE(hub, nil)
+	handler := NewSSEHandler(hub, nil)
 
 	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
 	req := httptest.NewRequest(http.MethodGet, "/api/events?since=1000", nil)
@@ -1344,7 +1350,7 @@ func TestHandleSSE_NoCatchUpWhenSinceZero(t *testing.T) {
 	}
 
 	// Connect WITHOUT Last-Event-ID and without since param
-	handler := handleSSE(hub, getMutations)
+	handler := NewSSEHandler(hub, getMutations)
 
 	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil)
@@ -1406,7 +1412,7 @@ func TestHandleSSE_WriteDeadlineDisabled(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	handler := handleSSE(hub, nil)
+	handler := NewSSEHandler(hub, nil)
 
 	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil)
@@ -1438,7 +1444,7 @@ func TestHandleSSE_StreamsMutationFromHub(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	handler := handleSSE(hub, nil)
+	handler := NewSSEHandler(hub, nil)
 
 	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil)
@@ -1492,7 +1498,7 @@ func TestHandleSSE_SendChannelClosed(t *testing.T) {
 	hub := NewSSEHub()
 	go hub.Run()
 
-	handler := handleSSE(hub, nil)
+	handler := NewSSEHandler(hub, nil)
 
 	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
 	defer cancel()
@@ -1597,26 +1603,26 @@ func TestMutationPayload_SourceRepoInJSON(t *testing.T) {
 	}
 }
 
-// TestContainsRepo tests the containsRepo helper function.
-func TestContainsRepo(t *testing.T) {
+// TestMatchesSourceRepoFilter_ContainsLogic tests the slices.Contains usage in matchesSourceRepoFilter.
+func TestMatchesSourceRepoFilter_ContainsLogic(t *testing.T) {
 	tests := []struct {
 		name   string
 		repos  []string
 		repo   string
 		expect bool
 	}{
-		{"empty slice", nil, "repo-a", false},
+		{"empty repos passes all", nil, "repo-a", true},
 		{"single match", []string{"repo-a"}, "repo-a", true},
 		{"single no match", []string{"repo-a"}, "repo-b", false},
 		{"multiple match", []string{"repo-a", "repo-b", "repo-c"}, "repo-b", true},
 		{"multiple no match", []string{"repo-a", "repo-b"}, "repo-c", false},
-		{"empty repo string", []string{"repo-a"}, "", false},
+		{"empty repo passes", []string{"repo-a"}, "", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := containsRepo(tt.repos, tt.repo)
+			got := matchesSourceRepoFilter(tt.repos, tt.repo)
 			if got != tt.expect {
-				t.Errorf("containsRepo(%v, %q) = %v, want %v", tt.repos, tt.repo, got, tt.expect)
+				t.Errorf("matchesSourceRepoFilter(%v, %q) = %v, want %v", tt.repos, tt.repo, got, tt.expect)
 			}
 		})
 	}
@@ -1765,7 +1771,7 @@ func TestHandleSSE_ParsesSourceReposParam(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	handler := handleSSE(hub, nil)
+	handler := NewSSEHandler(hub, nil)
 
 	// Connect with source_repos=repo-a,repo-b
 	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
@@ -1778,7 +1784,7 @@ func TestHandleSSE_ParsesSourceReposParam(t *testing.T) {
 	// Run handler in background
 	done := make(chan struct{})
 	go func() {
-		handler(rec, req)
+		handler.ServeHTTP(rec, req)
 		close(done)
 	}()
 
@@ -1832,7 +1838,7 @@ func TestHandleSSE_SourceReposParamEmpty(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	handler := handleSSE(hub, nil)
+	handler := NewSSEHandler(hub, nil)
 
 	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
 	defer cancel()
@@ -1843,7 +1849,7 @@ func TestHandleSSE_SourceReposParamEmpty(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		handler(rec, req)
+		handler.ServeHTTP(rec, req)
 		close(done)
 	}()
 
@@ -1881,7 +1887,7 @@ func TestHandleSSE_SourceReposTrimsWhitespace(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	handler := handleSSE(hub, nil)
+	handler := NewSSEHandler(hub, nil)
 
 	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
 	defer cancel()
@@ -1893,7 +1899,7 @@ func TestHandleSSE_SourceReposTrimsWhitespace(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		handler(rec, req)
+		handler.ServeHTTP(rec, req)
 		close(done)
 	}()
 
@@ -1944,7 +1950,7 @@ func TestHandleSSE_CatchUpFiltersSourceRepos(t *testing.T) {
 		}
 	}
 
-	handler := handleSSE(hub, getMutationsSince)
+	handler := NewSSEHandler(hub, getMutationsSince)
 
 	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
 	defer cancel()
@@ -1956,7 +1962,7 @@ func TestHandleSSE_CatchUpFiltersSourceRepos(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		handler(rec, req)
+		handler.ServeHTTP(rec, req)
 		close(done)
 	}()
 
@@ -2267,7 +2273,7 @@ func TestHandleSSE_EmptyWorkspaceLogsWarning(t *testing.T) {
 	log.SetOutput(syncWriter{&logBuf, &mu})
 	t.Cleanup(func() { log.SetOutput(origOutput) })
 
-	handler := handleSSE(hub, nil)
+	handler := NewSSEHandler(hub, nil)
 
 	// Use context with NO workspace (empty string from WorkspaceFromContext)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -2325,4 +2331,162 @@ func (sw syncWriter) Write(p []byte) (int, error) {
 	sw.mu.Lock()
 	defer sw.mu.Unlock()
 	return sw.w.Write(p)
+}
+
+// ---------------------------------------------------------------------------
+// SSEWriter unit tests
+// ---------------------------------------------------------------------------
+
+// TestSSEWriter_WriteRetry tests that WriteRetry produces the correct SSE wire format.
+func TestSSEWriter_WriteRetry(t *testing.T) {
+	rr := httptest.NewRecorder()
+	sw, err := newSSEWriter(rr)
+	if err != nil {
+		t.Fatalf("newSSEWriter: %v", err)
+	}
+	if err := sw.WriteRetry(5000); err != nil {
+		t.Fatalf("WriteRetry: %v", err)
+	}
+	got := rr.Body.String()
+	want := "retry: 5000\n\n"
+	if got != want {
+		t.Errorf("WriteRetry output = %q, want %q", got, want)
+	}
+}
+
+// TestSSEWriter_WriteEvent tests that WriteEvent produces the correct SSE wire format.
+func TestSSEWriter_WriteEvent(t *testing.T) {
+	rr := httptest.NewRecorder()
+	sw, err := newSSEWriter(rr)
+	if err != nil {
+		t.Fatalf("newSSEWriter: %v", err)
+	}
+	if err := sw.WriteEvent(123, "mutation", `{"type":"create"}`); err != nil {
+		t.Fatalf("WriteEvent: %v", err)
+	}
+	got := rr.Body.String()
+	want := "id: 123\nevent: mutation\ndata: {\"type\":\"create\"}\n\n"
+	if got != want {
+		t.Errorf("WriteEvent output = %q, want %q", got, want)
+	}
+}
+
+// TestSSEWriter_WriteComment tests that WriteComment produces the correct SSE wire format.
+func TestSSEWriter_WriteComment(t *testing.T) {
+	rr := httptest.NewRecorder()
+	sw, err := newSSEWriter(rr)
+	if err != nil {
+		t.Fatalf("newSSEWriter: %v", err)
+	}
+	if err := sw.WriteComment("heartbeat"); err != nil {
+		t.Fatalf("WriteComment: %v", err)
+	}
+	got := rr.Body.String()
+	want := ": heartbeat\n\n"
+	if got != want {
+		t.Errorf("WriteComment output = %q, want %q", got, want)
+	}
+}
+
+// failWriter is a mock http.ResponseWriter + http.Flusher that always returns
+// errors on Write. Used to test error propagation through SSEWriter methods.
+type failWriter struct {
+	header http.Header
+}
+
+func (fw *failWriter) Header() http.Header       { return fw.header }
+func (fw *failWriter) WriteHeader(int)           {}
+func (fw *failWriter) Write([]byte) (int, error) { return 0, errors.New("write failed") }
+func (fw *failWriter) Flush()                    {}
+
+// TestSSEWriter_ErrorPropagation tests that write errors from the underlying
+// writer are propagated by WriteRetry, WriteEvent, and WriteComment.
+func TestSSEWriter_ErrorPropagation(t *testing.T) {
+	fw := &failWriter{header: make(http.Header)}
+	sw, err := newSSEWriter(fw)
+	if err != nil {
+		t.Fatalf("newSSEWriter: %v", err)
+	}
+
+	if err := sw.WriteRetry(5000); err == nil {
+		t.Error("WriteRetry: expected error, got nil")
+	}
+	if err := sw.WriteEvent(1, "mutation", "{}"); err == nil {
+		t.Error("WriteEvent: expected error, got nil")
+	}
+	if err := sw.WriteComment("heartbeat"); err == nil {
+		t.Error("WriteComment: expected error, got nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SSEHandler unit tests
+// ---------------------------------------------------------------------------
+
+// TestSSEHandler_ConfigurableHeartbeat tests that a custom heartbeatInterval
+// causes heartbeat comments to appear in the response within that interval.
+func TestSSEHandler_ConfigurableHeartbeat(t *testing.T) {
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	handler := NewSSEHandler(hub, nil)
+	handler.heartbeatInterval = 50 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil)
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		handler.ServeHTTP(rr, req)
+		close(done)
+	}()
+
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+	<-done
+
+	body := rr.Body.String()
+	if !strings.Contains(body, ": heartbeat\n\n") {
+		t.Error("expected heartbeat comment in response with 50ms interval")
+	}
+}
+
+// TestSSEHandler_WriteErrorDuringCatchUp tests that the handler returns cleanly
+// (does not panic) when a write error occurs during catch-up event delivery.
+func TestSSEHandler_WriteErrorDuringCatchUp(t *testing.T) {
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	getMutations := func(wsID string, since int64) []rpc.MutationEvent {
+		return []rpc.MutationEvent{
+			{Type: "create", IssueID: "bd-catchup-1", Timestamp: time.Now().UTC()},
+			{Type: "create", IssueID: "bd-catchup-2", Timestamp: time.Now().UTC()},
+		}
+	}
+
+	handler := NewSSEHandler(hub, getMutations)
+
+	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
+	defer cancel()
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events?since=1000", nil)
+	req = req.WithContext(ctx)
+
+	fw := &failWriter{header: make(http.Header)}
+
+	handlerDone := make(chan struct{})
+	go func() {
+		defer close(handlerDone)
+		handler.ServeHTTP(fw, req)
+	}()
+
+	select {
+	case <-handlerDone:
+		// Good -- handler returned cleanly without panicking
+	case <-time.After(3 * time.Second):
+		t.Fatal("handler hung after write error during catch-up")
+	}
 }

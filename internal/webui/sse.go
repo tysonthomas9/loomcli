@@ -1,11 +1,13 @@
 package webui
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -74,16 +76,6 @@ type SSEClient struct {
 	workspaceID string   // workspace this client subscribed to; empty = no mutations (fail-closed)
 }
 
-// containsRepo returns true if repo is in the repos slice.
-func containsRepo(repos []string, repo string) bool {
-	for _, r := range repos {
-		if r == repo {
-			return true
-		}
-	}
-	return false
-}
-
 // parseSourceRepos parses a comma-separated source_repos query parameter,
 // trimming whitespace and skipping empty entries.
 func parseSourceRepos(param string) []string {
@@ -100,27 +92,18 @@ func parseSourceRepos(param string) []string {
 	return repos
 }
 
-// matchesWorkspaceFilter returns true if the mutation should be delivered
-// to a client based on workspace filtering. Both sides must be non-empty
-// and must match — fail-closed on both empty client workspace (no subscription)
-// and empty mutation workspace (untagged mutation).
+// matchesWorkspaceFilter returns true if the mutation should be delivered.
+// Fail-closed: empty client workspace or empty mutation workspace = no delivery.
 func matchesWorkspaceFilter(clientWorkspaceID, mutationWorkspaceID string) bool {
-	if clientWorkspaceID == "" {
-		return false // fail-closed: no workspace subscription = no mutations
-	}
-	if mutationWorkspaceID == "" {
-		return false // fail-closed: untagged mutations are never delivered
-	}
-	return clientWorkspaceID == mutationWorkspaceID
+	return clientWorkspaceID != "" && mutationWorkspaceID != "" && clientWorkspaceID == mutationWorkspaceID
 }
 
-// matchesSourceRepoFilter returns true if the mutation should be delivered
-// to a client with the given sourceRepos filter.
+// matchesSourceRepoFilter returns true if the mutation passes the source repo filter.
 func matchesSourceRepoFilter(sourceRepos []string, sourceRepo string) bool {
 	if len(sourceRepos) == 0 || sourceRepo == "" {
 		return true
 	}
-	return containsRepo(sourceRepos, sourceRepo)
+	return slices.Contains(sourceRepos, sourceRepo)
 }
 
 // NewSSEHub creates a new SSE hub.
@@ -329,144 +312,174 @@ func parseLastSince(r *http.Request) int64 {
 	return lastSince
 }
 
-// handleSSE creates an HTTP handler for the SSE endpoint.
-// getMutationsSince takes a workspace ID and timestamp, returning mutations
-// only from that workspace's daemon for reconnection catch-up.
-func handleSSE(hub *SSEHub, getMutationsSince func(wsID string, since int64) []rpc.MutationEvent) http.HandlerFunc {
-	var clientIDCounter int64
+// SSEWriter centralizes SSE wire-format concerns.
+type SSEWriter struct {
+	w       http.ResponseWriter
+	flusher http.Flusher
+}
 
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Thread-safe client ID generation
-		clientID := atomic.AddInt64(&clientIDCounter, 1)
-		// Set SSE headers
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
-		w.Header().Set("X-Accel-Buffering", "no") // Disable nginx buffering
+func newSSEWriter(w http.ResponseWriter) (*SSEWriter, error) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		return nil, fmt.Errorf("ResponseWriter does not implement http.Flusher")
+	}
+	return &SSEWriter{w: w, flusher: flusher}, nil
+}
 
-		// Get flusher for streaming
-		flusher, ok := w.(http.Flusher)
-		if !ok {
-			http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
-			return
+func (sw *SSEWriter) WriteRetry(ms int) error {
+	_, err := fmt.Fprintf(sw.w, "retry: %d\n\n", ms)
+	sw.flusher.Flush()
+	return err
+}
+
+func (sw *SSEWriter) WriteEvent(id int64, event, data string) error {
+	_, err := io.WriteString(sw.w, fmt.Sprintf("id: %d\nevent: %s\ndata: %s\n\n", id, event, data))
+	sw.flusher.Flush()
+	return err
+}
+
+func (sw *SSEWriter) WriteComment(text string) error {
+	_, err := fmt.Fprintf(sw.w, ": %s\n\n", text)
+	sw.flusher.Flush()
+	return err
+}
+
+// SSEHandler is an http.Handler for the SSE endpoint with configurable heartbeat.
+type SSEHandler struct {
+	hub               *SSEHub
+	getMutationsSince func(wsID string, since int64) []rpc.MutationEvent
+	heartbeatInterval time.Duration
+	clientIDCounter   atomic.Int64
+}
+
+func NewSSEHandler(hub *SSEHub, getMutationsSince func(wsID string, since int64) []rpc.MutationEvent) *SSEHandler {
+	return &SSEHandler{
+		hub:               hub,
+		getMutationsSince: getMutationsSince,
+		heartbeatInterval: sseHeartbeatInterval,
+	}
+}
+
+func (h *SSEHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	clientID := h.clientIDCounter.Add(1)
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	sw, err := newSSEWriter(w)
+	if err != nil {
+		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	rc := http.NewResponseController(w)
+	if err := rc.SetWriteDeadline(time.Time{}); err != nil {
+		log.Printf("SSE: failed to disable write deadline: %v", err)
+	}
+
+	lastSince := parseLastSince(r)
+	sourceRepos := parseSourceRepos(r.URL.Query().Get("source_repos"))
+	workspaceID := WorkspaceFromContext(r.Context())
+	if workspaceID == "" {
+		log.Printf("SSE: WARNING client %d from %s connected with empty workspaceID — will not receive mutations (fail-closed)", clientID, r.RemoteAddr)
+	}
+
+	client := &SSEClient{
+		id:          clientID,
+		send:        make(chan *MutationPayload, sseClientSendBuf),
+		done:        make(chan struct{}),
+		lastSince:   lastSince,
+		sourceRepos: sourceRepos,
+		workspaceID: workspaceID,
+	}
+
+	// Check if shutting down before registering
+	select {
+	case <-r.Context().Done():
+		return
+	default:
+	}
+
+	h.hub.RegisterClient(client)
+	defer func() {
+		h.hub.UnregisterClient(client)
+		close(client.done)
+	}()
+
+	log.Printf("SSE client %d connected from %s (since=%d, repos=%v, workspace=%s)", client.id, r.RemoteAddr, lastSince, sourceRepos, workspaceID)
+
+	if err := h.sendCatchUp(sw, lastSince, workspaceID, sourceRepos); err != nil {
+		log.Printf("SSE client %d catch-up write failed: %v", client.id, err)
+		return
+	}
+	if err := sw.WriteRetry(sseRetryMs); err != nil {
+		log.Printf("SSE client %d retry write failed: %v", client.id, err)
+		return
+	}
+	// Connected event has no id: field — it's a control event, not a mutation
+	connFrame := fmt.Sprintf("event: connected\ndata: {\"clientId\":%d}\n\n", client.id)
+	if _, err := io.WriteString(sw.w, connFrame); err != nil {
+		log.Printf("SSE client %d connected event write failed: %v", client.id, err)
+		return
+	}
+	sw.flusher.Flush()
+	h.streamLoop(sw, client, r.Context())
+}
+
+func (h *SSEHandler) sendCatchUp(sw *SSEWriter, since int64, workspaceID string, sourceRepos []string) error {
+	if since <= 0 || h.getMutationsSince == nil || workspaceID == "" {
+		return nil
+	}
+	for _, m := range h.getMutationsSince(workspaceID, since) {
+		payload := rpcMutationToPayload(m)
+		payload.WorkspaceID = workspaceID
+		if !matchesSourceRepoFilter(sourceRepos, payload.SourceRepo) {
+			continue
 		}
-
-		// Disable write timeout for this long-lived SSE connection
-		rc := http.NewResponseController(w)
-		if err := rc.SetWriteDeadline(time.Time{}); err != nil {
-			log.Printf("SSE: failed to disable write deadline: %v", err)
+		if err := writeSSEEvent(sw, payload); err != nil {
+			return err
 		}
+	}
+	return nil
+}
 
-		lastSince := parseLastSince(r)
-
-		// Parse source_repos filter (comma-separated repo names)
-		sourceRepos := parseSourceRepos(r.URL.Query().Get("source_repos"))
-
-		// Read workspace from context (injected by WorkspaceMiddleware)
-		workspaceID := WorkspaceFromContext(r.Context())
-		if workspaceID == "" {
-			log.Printf("SSE: WARNING client %d from %s connected with empty workspaceID — will not receive mutations (fail-closed)", clientID, r.RemoteAddr)
-		}
-
-		// Create client
-		client := &SSEClient{
-			id:          clientID,
-			send:        make(chan *MutationPayload, sseClientSendBuf),
-			done:        make(chan struct{}),
-			lastSince:   lastSince,
-			sourceRepos: sourceRepos,
-			workspaceID: workspaceID,
-		}
-
-		// Check if shutting down before registering (r.Context() derives from
-		// the server's BaseContext, which is canceled on shutdown signal).
+func (h *SSEHandler) streamLoop(sw *SSEWriter, client *SSEClient, ctx context.Context) {
+	interval := h.heartbeatInterval
+	if interval == 0 {
+		interval = sseHeartbeatInterval
+	}
+	heartbeatTicker := time.NewTicker(interval)
+	defer heartbeatTicker.Stop()
+	for {
 		select {
-		case <-r.Context().Done():
-			return
-		default:
-		}
-
-		// Register with hub
-		hub.RegisterClient(client)
-
-		// Ensure cleanup on disconnect
-		defer func() {
-			hub.UnregisterClient(client)
-			close(client.done)
-		}()
-
-		log.Printf("SSE client %d connected from %s (since=%d, repos=%v, workspace=%s)", client.id, r.RemoteAddr, lastSince, sourceRepos, workspaceID)
-
-		// Send catch-up events if reconnecting.
-		// getMutationsSince is already workspace-scoped (only returns events from this
-		// workspace's daemon), so no workspace filter is needed on catch-up events.
-		if lastSince > 0 && getMutationsSince != nil && workspaceID != "" {
-			catchUpMutations := getMutationsSince(workspaceID, lastSince)
-			for _, m := range catchUpMutations {
-				payload := rpcMutationToPayload(m)
-				payload.WorkspaceID = workspaceID // stamp workspace for payload consistency
-				if !matchesSourceRepoFilter(sourceRepos, payload.SourceRepo) {
-					continue
-				}
-				writeSSEEvent(w, payload)
-				flusher.Flush()
-			}
-		}
-
-		// Send retry interval first so client knows reconnection time from the start
-		_, _ = fmt.Fprintf(w, "retry: %d\n\n", sseRetryMs)
-		flusher.Flush()
-
-		// Send initial connection event
-		_, _ = fmt.Fprintf(w, "event: connected\ndata: {\"clientId\":%d}\n\n", client.id)
-		flusher.Flush()
-
-		// Start heartbeat ticker to keep connection alive through proxies
-		heartbeatTicker := time.NewTicker(sseHeartbeatInterval)
-		defer heartbeatTicker.Stop()
-
-		// Stream events
-		for {
-			select {
-			case mutation, ok := <-client.send:
-				if !ok {
-					// Channel closed
-					return
-				}
-				writeSSEEvent(w, mutation)
-				flusher.Flush()
-
-			case <-heartbeatTicker.C:
-				// Send SSE comment to keep connection alive
-				if _, err := fmt.Fprint(w, ": heartbeat\n\n"); err != nil {
-					log.Printf("SSE client %d heartbeat failed: %v", client.id, err)
-					return
-				}
-				flusher.Flush()
-
-			case <-r.Context().Done():
-				// Client disconnected
-				log.Printf("SSE client %d disconnected", client.id)
+		case mutation, ok := <-client.send:
+			if !ok {
 				return
 			}
+			if err := writeSSEEvent(sw, mutation); err != nil {
+				log.Printf("SSE client %d write failed: %v", client.id, err)
+				return
+			}
+		case <-heartbeatTicker.C:
+			if err := sw.WriteComment("heartbeat"); err != nil {
+				log.Printf("SSE client %d heartbeat failed: %v", client.id, err)
+				return
+			}
+		case <-ctx.Done():
+			log.Printf("SSE client %d disconnected", client.id)
+			return
 		}
 	}
 }
 
-// writeSSEEvent writes a mutation as an SSE event.
-func writeSSEEvent(w http.ResponseWriter, mutation *MutationPayload) {
-	eventID := sseEventIDCounter.Add(1)
-
+func writeSSEEvent(sw *SSEWriter, mutation *MutationPayload) error {
 	data, err := json.Marshal(mutation)
 	if err != nil {
 		log.Printf("SSE marshal error: %v", err)
-		return
+		return nil // marshal error is not a write error — skip this event
 	}
-
-	// Write SSE frame as a single formatted string.
-	// json.Marshal output is safe (no unescaped newlines).
-	frame := fmt.Sprintf("id: %d\nevent: mutation\ndata: %s\n\n", eventID, data)
-	_, _ = io.WriteString(w, frame)
+	return sw.WriteEvent(sseEventIDCounter.Add(1), "mutation", string(data))
 }
 
 // rpcMutationToPayload converts an RPC mutation event to a payload.
