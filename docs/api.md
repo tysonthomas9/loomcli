@@ -162,9 +162,16 @@ Project-level statistics.
 
 ### `GET /api/metrics`
 
-SSE hub and fleet coordination metrics.
+SSE hub runtime metrics and fleet coordination counters. This endpoint is not workspace-scoped — it returns server-wide metrics aggregated across all workspaces. Always registered regardless of fleet or Redis configuration.
 
-- **Auth:** Required
+- **Auth:** Required (standard bearer token, applied at server middleware level)
+- **Query Parameters:** None
+- **Request Body:** None
+
+All counters are monotonically increasing except `connected_clients` and `retry_queue_depth`, which are gauges.
+
+Fleet metric fields (prefixed with `loom_fleet_`) use JSON `omitempty` — they are entirely absent from the response when fleet coordination is not configured. Because `omitempty` on `int64` treats `0` as empty, a fleet-enabled deployment where all claim counters are zero will also omit those fields.
+
 - **Response:** `200 OK`
 
 ```json
@@ -184,7 +191,40 @@ SSE hub and fleet coordination metrics.
 }
 ```
 
-Fleet metrics fields are omitted when fleet coordination is not enabled.
+- **Response (fleet disabled — no Redis):** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "connected_clients": 1,
+    "dropped_mutations": 0,
+    "retry_queue_depth": 0,
+    "uptime_seconds": 120.3
+  }
+}
+```
+
+- **Field Descriptions:**
+
+| Field | Type | Gauge/Counter | Description |
+|-------|------|---------------|-------------|
+| `connected_clients` | int | gauge | Number of active SSE connections (browsers with `/api/events` open) |
+| `dropped_mutations` | int64 | counter | Cumulative mutations dropped because a client's send channel was full |
+| `retry_queue_depth` | int | gauge | Mutations currently queued for retry delivery to clients |
+| `uptime_seconds` | float64 | gauge | Seconds since the SSE hub was created (server start) |
+| `loom_fleet_timeouts_total` | int64 | counter | Fleet workers forcibly timed out by the TimeoutEnforcer. Omitted when fleet disabled |
+| `loom_fleet_claims_success` | int64 | counter | Successful fleet task claims. Omitted when fleet disabled |
+| `loom_fleet_claims_collision` | int64 | counter | Fleet claims that failed due to optimistic-lock collision. Omitted when fleet disabled |
+| `loom_fleet_claims_timeout` | int64 | counter | Fleet claims that timed out waiting for a task. Omitted when fleet disabled |
+| `loom_fleet_claims_total` | int64 | counter | Total fleet claim attempts (success + collision + timeout). Omitted when fleet disabled |
+
+- **Errors:**
+  - `401` — missing or invalid bearer token
+  - `503` — SSE hub not initialized (`{"success": false, "error": "SSE hub not initialized"}`)
+
+- **Concurrency:** All underlying data sources (SSEHub counters, ClaimMetrics, TimeoutEnforcer) use atomic operations or RWMutex — safe for concurrent calls.
+- **No rate limiting** beyond the global rate limiter. The endpoint is lightweight (no I/O, no RPC calls).
 
 ## Backend Configuration
 
