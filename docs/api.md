@@ -26,10 +26,10 @@ These routes do not require bearer token authentication:
 
 - `GET /health`
 - `GET /api/health`
-- `GET /api/terminal/ws` (uses its own one-time token)
+- `GET /api/workspaces/{ws}/terminal/ws` (uses its own one-time token)
 - `POST /api/client-errors` (errors may occur before auth bootstrap)
 - `POST /api/csp-report` (browsers send CSP reports automatically without auth)
-- `POST/GET /api/fleet/*` (use fleet-specific auth)
+- `POST/GET /api/workspaces/{ws}/fleet/*` (use fleet-specific auth)
 - Frontend static files (non-`/api/` paths)
 
 ## Response Format
@@ -1434,7 +1434,7 @@ Redis key: `fleet:task:result:{taskID}`, TTL: 24 hours.
 
 Algorithm: HMAC-SHA256. Default expiry: 1 hour.
 
-### `POST /api/fleet/register`
+### `POST /api/workspaces/{ws}/fleet/register`
 
 Register a fleet worker and obtain a JWT for subsequent authenticated requests.
 
@@ -1469,7 +1469,7 @@ Re-registration is idempotent — it updates the timestamp and repos, and issues
 
 - **Timeout:** 30-second context timeout on Redis registration
 
-### `POST /api/fleet/claim`
+### `POST /api/workspaces/{ws}/fleet/claim`
 
 Atomically claim a task to work on.
 
@@ -1524,7 +1524,7 @@ If the body is empty or `Content-Length` is 0, the endpoint finds the highest-pr
 
 - **Metrics:** Records claim outcomes (`success`, `collision`, `timeout`) via `ClaimMetrics`.
 
-### `POST /api/fleet/done/{id}`
+### `POST /api/workspaces/{ws}/fleet/done/{id}`
 
 Mark a task as complete. The `{id}` path parameter is the worker ID.
 
@@ -1581,7 +1581,7 @@ Mark a task as complete. The `{id}` path parameter is the worker ID.
 
 - **Timeout:** 5-second context timeout for main operations; 2-second fresh context for claim cache cleanup
 
-### `POST /api/fleet/heartbeat`
+### `POST /api/workspaces/{ws}/fleet/heartbeat`
 
 Refresh a worker's registration TTL to keep it alive.
 

@@ -1768,7 +1768,12 @@ func TestHandleTerminalWS_SSEBroadcastOnIssueSession(t *testing.T) {
 	// Give hub.Run() a moment to process registration.
 	time.Sleep(50 * time.Millisecond)
 
-	handler := handleTerminalWS(manager, nil, nil, "", nil, store, hub)
+	innerHandler := handleTerminalWS(manager, nil, nil, "", nil, store, hub)
+	// Inject workspace into context (WorkspaceMiddleware does this in production).
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := WithWorkspace(r.Context(), "default")
+		innerHandler.ServeHTTP(w, r.WithContext(ctx))
+	})
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
@@ -1842,7 +1847,11 @@ func TestHandleTerminalWS_NoSSEBroadcastWithoutIssueID(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	handler := handleTerminalWS(manager, nil, nil, "", nil, store, hub)
+	innerHandler := handleTerminalWS(manager, nil, nil, "", nil, store, hub)
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := WithWorkspace(r.Context(), "default")
+		innerHandler.ServeHTTP(w, r.WithContext(ctx))
+	})
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
@@ -1928,7 +1937,11 @@ func TestHandleTerminalWS_NoSSEBroadcastWhenMetadataNotFound(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	handler := handleTerminalWS(manager, nil, nil, "", nil, store, hub)
+	innerHandler := handleTerminalWS(manager, nil, nil, "", nil, store, hub)
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := WithWorkspace(r.Context(), "default")
+		innerHandler.ServeHTTP(w, r.WithContext(ctx))
+	})
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
@@ -1998,12 +2011,17 @@ func TestHandleTerminalWS_SSEBroadcastNonDefaultWorkspace(t *testing.T) {
 	// Give hub.Run() a moment to process registration.
 	time.Sleep(50 * time.Millisecond)
 
-	handler := handleTerminalWS(manager, nil, nil, "", nil, store, hub)
+	innerHandler := handleTerminalWS(manager, nil, nil, "", nil, store, hub)
+	// Inject workspace into context (WorkspaceMiddleware does this in production).
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := WithWorkspace(r.Context(), "myproject")
+		innerHandler.ServeHTTP(w, r.WithContext(ctx))
+	})
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	// Connect with explicit workspace parameter.
-	wsURL := "ws" + server.URL[4:] + "?session=issue-session&workspace=myproject"
+	// Connect to the workspace-scoped terminal WebSocket.
+	wsURL := "ws" + server.URL[4:] + "?session=issue-session"
 	dialCtx, dialCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer dialCancel()
 
@@ -2079,11 +2097,16 @@ func TestHandleTerminalWS_SSEBroadcastNoWorkspaceParamUsesDefault(t *testing.T) 
 	// Give hub.Run() a moment to process registration.
 	time.Sleep(50 * time.Millisecond)
 
-	handler := handleTerminalWS(manager, nil, nil, "", nil, store, hub)
+	innerHandler := handleTerminalWS(manager, nil, nil, "", nil, store, hub)
+	// Inject "default" workspace into context (WorkspaceMiddleware does this in production).
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := WithWorkspace(r.Context(), "default")
+		innerHandler.ServeHTTP(w, r.WithContext(ctx))
+	})
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	// Connect WITHOUT workspace param — should fall back to "default".
+	// Connect to workspace-scoped terminal WebSocket with "default" workspace.
 	wsURL := "ws" + server.URL[4:] + "?session=issue-DEFAULT-7"
 	dialCtx, dialCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer dialCancel()

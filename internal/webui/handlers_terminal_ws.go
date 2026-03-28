@@ -23,7 +23,7 @@ import (
 // whose host portions are used as OriginPatterns for the WebSocket upgrade.
 // When nil or empty, only same-origin and non-browser (no Origin header)
 // connections are accepted.
-func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigins []string, loomServerURL string, workspaceConfigFn func() (*WorkspaceData, error), tabMetaStore *tabmeta.Store, hub *SSEHub) http.HandlerFunc {
+func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigins []string, loomServerURL string, workspaceConfigByIDFn func(string) (*WorkspaceData, error), tabMetaStore *tabmeta.Store, hub *SSEHub) http.HandlerFunc {
 	// Compute origin host patterns once at construction time.
 	patterns := originHosts(allowedOrigins)
 
@@ -37,21 +37,10 @@ func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigi
 			return
 		}
 
-		// Parse and validate session and workspace parameters.
-		// Extract workspace from query params before WebSocket upgrade
-		// (r.URL is still valid before hijack). Falls back to "default"
-		// for backward compatibility with old frontends.
+		// Parse session parameter. Workspace is derived from the URL path
+		// via WorkspaceMiddleware (injected into context).
 		session := r.URL.Query().Get("session")
-		workspace := r.URL.Query().Get("workspace")
-		if workspace == "" {
-			workspace = "default"
-		} else if !validWorkspaceName(workspace) {
-			respondJSON(w, http.StatusBadRequest, map[string]interface{}{
-				"success": false,
-				"error":   "invalid workspace name: must contain only alphanumeric, hyphen, or underscore",
-			})
-			return
-		}
+		workspace := WorkspaceFromContext(r.Context())
 		if session == "" {
 			respondJSON(w, http.StatusBadRequest, map[string]interface{}{
 				"success": false,
@@ -137,7 +126,9 @@ func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigi
 
 		// Inject project context banner into freshly created talk-to-lead sessions.
 		if isNewSession && loomServerURL != "" {
-			injectTerminalContextBanner(termSession, loomServerURL, workspaceConfigFn)
+			wsID := WorkspaceFromContext(r.Context())
+			wsConfigFn := func() (*WorkspaceData, error) { return workspaceConfigByIDFn(wsID) }
+			injectTerminalContextBanner(termSession, loomServerURL, wsConfigFn)
 		}
 
 		// Broadcast SSE event if this session is linked to an issue, so indicators update on connect.

@@ -66,7 +66,9 @@ describe("terminal API", () => {
       const result = await listTerminalSessions("test-ws-id");
 
       expect(result).toEqual(sessions);
-      expect(mockGet).toHaveBeenCalledWith("/api/terminal/sessions");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/terminal/sessions",
+      );
     });
 
     it("returns empty array when server returns no sessions", async () => {
@@ -113,7 +115,7 @@ describe("terminal API", () => {
 
       expect(token).toBe("abc123");
       expect(mockGet).toHaveBeenCalledWith(
-        "/api/terminal/token?session=my-session",
+        "/api/workspaces/test-ws-id/terminal/token?session=my-session",
       );
     });
 
@@ -123,7 +125,7 @@ describe("terminal API", () => {
       await fetchTerminalToken("test-ws-id", "session with spaces");
 
       expect(mockGet).toHaveBeenCalledWith(
-        "/api/terminal/token?session=session%20with%20spaces",
+        "/api/workspaces/test-ws-id/terminal/token?session=session%20with%20spaces",
       );
     });
 
@@ -310,7 +312,7 @@ describe("terminal API", () => {
       await seedTerminalSession("test-ws-id", "my-session", context);
 
       expect(mockPost).toHaveBeenCalledWith(
-        "/api/terminal/sessions/my-session/seed",
+        "/api/workspaces/test-ws-id/terminal/sessions/my-session/seed",
         context,
       );
     });
@@ -324,7 +326,7 @@ describe("terminal API", () => {
       });
 
       expect(mockPost).toHaveBeenCalledWith(
-        "/api/terminal/sessions/session%20with%20spaces/seed",
+        "/api/workspaces/test-ws-id/terminal/sessions/session%20with%20spaces/seed",
         { issue_id: "X-1", title: "Test" },
       );
     });
@@ -340,7 +342,7 @@ describe("terminal API", () => {
       await seedTerminalSession("test-ws-id", "test-session", context);
 
       expect(mockPost).toHaveBeenCalledWith(
-        "/api/terminal/sessions/test-session/seed",
+        "/api/workspaces/test-ws-id/terminal/sessions/test-session/seed",
         context,
       );
     });
@@ -382,7 +384,7 @@ describe("terminal API", () => {
       const url = buildTerminalWsUrl("test-ws-id", "my-session", "tok123");
 
       expect(url).toBe(
-        "ws://localhost:8080/api/terminal/ws?session=my-session&token=tok123&workspace=test-ws-id",
+        "ws://localhost:8080/api/workspaces/test-ws-id/terminal/ws?session=my-session&token=tok123",
       );
     });
 
@@ -395,7 +397,7 @@ describe("terminal API", () => {
       const url = buildTerminalWsUrl("test-ws-id", "my-session", "tok123");
 
       expect(url).toBe(
-        "wss://example.com/api/terminal/ws?session=my-session&token=tok123&workspace=test-ws-id",
+        "wss://example.com/api/workspaces/test-ws-id/terminal/ws?session=my-session&token=tok123",
       );
     });
 
@@ -408,12 +410,12 @@ describe("terminal API", () => {
       const url = buildTerminalWsUrl("test-ws-id", "my-session", null);
 
       expect(url).toBe(
-        "ws://localhost:3000/api/terminal/ws?session=my-session&workspace=test-ws-id",
+        "ws://localhost:3000/api/workspaces/test-ws-id/terminal/ws?session=my-session",
       );
       expect(url).not.toContain("token=");
     });
 
-    it("URL-encodes session name and token", () => {
+    it("URL-encodes session name, token, and workspace", () => {
       Object.defineProperty(window, "location", {
         value: { protocol: "http:", host: "localhost:8080" },
         writable: true,
@@ -426,11 +428,11 @@ describe("terminal API", () => {
       );
 
       expect(url).toBe(
-        "ws://localhost:8080/api/terminal/ws?session=session%20with%20spaces&token=tok%26en%3Dval&workspace=test-ws-id",
+        "ws://localhost:8080/api/workspaces/test-ws-id/terminal/ws?session=session%20with%20spaces&token=tok%26en%3Dval",
       );
     });
 
-    it("omits workspace parameter when workspaceId is empty", () => {
+    it("includes empty workspace in URL path when workspaceId is empty", () => {
       Object.defineProperty(window, "location", {
         value: { protocol: "http:", host: "localhost:8080" },
         writable: true,
@@ -439,9 +441,8 @@ describe("terminal API", () => {
       const url = buildTerminalWsUrl("", "my-session", "tok123");
 
       expect(url).toBe(
-        "ws://localhost:8080/api/terminal/ws?session=my-session&token=tok123",
+        "ws://localhost:8080/api/workspaces//terminal/ws?session=my-session&token=tok123",
       );
-      expect(url).not.toContain("workspace=");
     });
   });
 

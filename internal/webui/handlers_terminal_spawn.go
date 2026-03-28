@@ -53,7 +53,7 @@ func extractIssueID(sessionName string) string {
 }
 
 // handleTerminalSpawn returns a handler that creates a tmux session for a given issue and backend.
-func handleTerminalSpawn(manager *TerminalManager, sessionHistoryStore *sessionhistory.Store, initialWorkspaceID string) http.HandlerFunc {
+func handleTerminalSpawn(manager *TerminalManager, sessionHistoryStore *sessionhistory.Store) http.HandlerFunc {
 	if manager == nil {
 		return func(w http.ResponseWriter, r *http.Request) {
 			respondJSON(w, http.StatusServiceUnavailable, terminalSpawnResponse{
@@ -61,11 +61,11 @@ func handleTerminalSpawn(manager *TerminalManager, sessionHistoryStore *sessionh
 			})
 		}
 	}
-	return handleTerminalSpawnImplWithHistory(manager, sessionHistoryStore, initialWorkspaceID)
+	return handleTerminalSpawnImplWithHistory(manager, sessionHistoryStore)
 }
 
 // handleTerminalSpawnImplWithHistory is the implementation that accepts an interface and optional session history store.
-func handleTerminalSpawnImplWithHistory(manager terminalSpawner, sessionHistoryStore *sessionhistory.Store, initialWorkspaceID string) http.HandlerFunc {
+func handleTerminalSpawnImplWithHistory(manager terminalSpawner, sessionHistoryStore *sessionhistory.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
 
@@ -141,8 +141,8 @@ func handleTerminalSpawnImplWithHistory(manager terminalSpawner, sessionHistoryS
 					Launcher:    "user",
 					StartedAt:   now,
 				}
-				// TODO(T41): derive workspace from request context when terminal spawn moves to wsMux
-				if err := sessionHistoryStore.Add(r.Context(), initialWorkspaceID, record); err != nil {
+				wsID := WorkspaceFromContext(r.Context())
+				if err := sessionHistoryStore.Add(r.Context(), wsID, record); err != nil {
 					log.Printf("Warning: failed to record session history for %s: %v", sanitizedName, err)
 				}
 			}
@@ -162,5 +162,5 @@ func handleTerminalSpawnImplWithHistory(manager terminalSpawner, sessionHistoryS
 
 // handleTerminalSpawnImpl is the internal testable implementation that accepts an interface (no session history).
 func handleTerminalSpawnImpl(manager terminalSpawner) http.HandlerFunc {
-	return handleTerminalSpawnImplWithHistory(manager, nil, "")
+	return handleTerminalSpawnImplWithHistory(manager, nil)
 }
