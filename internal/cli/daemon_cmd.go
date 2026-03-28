@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
@@ -125,6 +126,18 @@ var daemonAgentRestartCmd = &cobra.Command{
 	Run:   runDaemonAgentRestart,
 }
 
+// daemonConfigCmd shows the effective resolved daemon configuration
+var daemonConfigCmd = &cobra.Command{
+	Use:   "config",
+	Short: "Show effective running configuration",
+	Long: `Display the fully resolved daemon configuration as YAML.
+
+Shows the merged result of global (~/.loom/config.yaml) and local (loom.yaml)
+configuration with all defaults filled in. Sensitive values (Redis URLs) are
+masked. The command works whether or not the daemon is running.`,
+	Run: runDaemonConfig,
+}
+
 func init() {
 	daemonCmd.Flags().BoolVar(&daemonDryRun, "dry-run", false,
 		"Validate config and print what would be started without actually starting")
@@ -134,6 +147,7 @@ func init() {
 	daemonCmd.AddCommand(daemonAgentStartCmd)
 	daemonCmd.AddCommand(daemonAgentRestartCmd)
 	daemonCmd.AddCommand(daemonQueueCmd)
+	daemonCmd.AddCommand(daemonConfigCmd)
 	rootCmd.AddCommand(daemonCmd)
 }
 
@@ -427,4 +441,28 @@ func runDaemonStop(cmd *cobra.Command, args []string) {
 	fmt.Fprintf(os.Stderr, "Warning: daemon did not stop within 30 seconds\n")
 	fmt.Fprintf(os.Stderr, "You may need to kill it manually: kill -9 %d\n", rt.PID)
 	os.Exit(1)
+}
+
+func runDaemonConfig(cmd *cobra.Command, args []string) {
+	projectDir, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: cannot determine working directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	config, err := LoadDaemonConfig(projectDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: loading config: %v\n", err)
+		os.Exit(1)
+	}
+
+	display := resolvedConfigForDisplay(config)
+
+	data, err := yaml.Marshal(display)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: marshaling config: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Print(string(data))
 }

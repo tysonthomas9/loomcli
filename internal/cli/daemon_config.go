@@ -125,10 +125,10 @@ type ProjectFile struct {
 
 // DaemonConfig is the merged, resolved configuration used by callers.
 type DaemonConfig struct {
-	Backend string
-	Daemon  DaemonSettings
-	Roles   map[string]RoleConfig
-	Agents  []AgentEntry
+	Backend string                `yaml:"backend,omitempty"`
+	Daemon  DaemonSettings        `yaml:"daemon,omitempty"`
+	Roles   map[string]RoleConfig `yaml:"roles,omitempty"`
+	Agents  []AgentEntry          `yaml:"agents,omitempty"`
 }
 
 // PromptData is the template context for custom prompt files.
