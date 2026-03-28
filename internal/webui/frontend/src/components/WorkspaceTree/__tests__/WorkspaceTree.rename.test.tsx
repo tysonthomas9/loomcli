@@ -100,7 +100,7 @@ let reposOverride: Partial<typeof defaultReposReturn> = {};
 let agentOverride: Partial<typeof defaultAgentContext> = {};
 
 vi.mock("@/hooks", () => ({
-  useDebouncedCallback: (fn: Function) => fn,
+  useDebouncedCallback: (fn: (...args: unknown[]) => unknown) => fn,
   useWorkspaceRepos: () => ({ ...defaultReposReturn, ...reposOverride }),
   useAgentContext: () => ({ ...defaultAgentContext, ...agentOverride }),
   useWorkspaceContext: () => ({

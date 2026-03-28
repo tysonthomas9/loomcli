@@ -37,9 +37,7 @@ describe("BootError", () => {
   it("renders retry button", () => {
     render(<BootError error={new Error("fail")} onRetry={vi.fn()} />);
 
-    expect(
-      screen.getByRole("button", { name: "Retry" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 
   it("calls onRetry when retry button is clicked", () => {
@@ -60,8 +58,6 @@ describe("BootError", () => {
   it("renders the heading", () => {
     render(<BootError error={new Error("fail")} onRetry={vi.fn()} />);
 
-    expect(
-      screen.getByText("Unable to start application"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Unable to start application")).toBeInTheDocument();
   });
 });

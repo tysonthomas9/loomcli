@@ -11,10 +11,7 @@ import { ToastProvider } from "@/hooks";
 import { router } from "@/router";
 import { fetchAppConfig, type AppConfig } from "@/api/appConfig";
 import { initExternalAuth } from "@/api/authClient";
-import {
-  ExternalAuthProvider,
-  NoAuthProvider,
-} from "@/contexts/AuthContext";
+import { ExternalAuthProvider, NoAuthProvider } from "@/contexts/AuthContext";
 import { AuthGate } from "@/components/AuthGate";
 
 // Run localStorage migration before anything reads storage.

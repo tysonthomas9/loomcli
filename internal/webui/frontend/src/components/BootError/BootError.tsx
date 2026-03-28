@@ -19,7 +19,13 @@ export function BootError({ error, onRetry }: BootErrorProps): JSX.Element {
       <div className={styles.content}>
         <h2 className={styles.title}>Unable to start application</h2>
         <p className={styles.errorDetail}>{getErrorMessage(error)}</p>
-        <button className={styles.retryButton} onClick={() => { void onRetry(); }} type="button">
+        <button
+          className={styles.retryButton}
+          onClick={() => {
+            void onRetry();
+          }}
+          type="button"
+        >
           Retry
         </button>
       </div>

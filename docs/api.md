@@ -171,6 +171,8 @@ Fleet metrics fields are omitted when fleet coordination is not enabled.
 
 ## Issues
 
+> **Note:** All `/api/issues/...` routes documented below have been superseded by workspace-scoped equivalents at `/api/workspaces/{ws}/issues/...`. See [Multi-Workspace Endpoints](#multi-workspace-endpoints) for the workspace-scoped versions, which use identical request/response shapes but route through `WorkspaceMiddleware` for per-workspace isolation.
+
 ### `GET /api/issues`
 
 List issues with filtering, pagination, and optional Kanban enrichment.
@@ -930,6 +932,425 @@ Remove the tab state for an issue.
 ### `/api/loom/**`
 
 Proxies requests to the loom agent status server (same-origin to avoid CORS/CSP issues). Only available when a loom server URL is configured.
+
+## Multi-Workspace Endpoints
+
+All endpoints in this section are registered on the workspace sub-mux (`wsMux`) behind `WorkspaceMiddleware`. The middleware:
+
+1. Extracts the `{ws}` path parameter from the URL
+2. Trims whitespace and validates it is non-empty (returns `400` if empty)
+3. Validates the workspace exists via `wsExists(wsID)` (returns `404` if not found)
+4. Injects the workspace ID into the request context
+5. Routes to the correct per-workspace daemon connection pool via `MultiPool.Get(ctx)`
+
+**Common error responses (all 16 endpoints):**
+
+| Status | Condition |
+|--------|-----------|
+| `400` | Workspace ID is empty: `{"success": false, "error": "workspace ID is required"}` |
+| `404` | Workspace not found: `{"success": false, "error": "workspace not found: {ws}"}` |
+| `503` | Per-workspace daemon pool unavailable |
+| `504` | Handler timeout (context deadline exceeded) |
+
+### Issue Management
+
+These 11 endpoints handle issue lifecycle under `/api/workspaces/{ws}/issues/...`. Request and response shapes are identical to the non-workspace-scoped equivalents documented in the [Issues](#issues) section, with the addition of workspace routing.
+
+#### `GET /api/workspaces/{ws}/issues`
+
+List issues with filtering, pagination, and optional Kanban enrichment.
+
+- **Auth:** Required
+- **Timeout:** 2 seconds
+- **Query Parameters:**
+  | Parameter | Type | Description |
+  |-----------|------|-------------|
+  | `status` | string | Filter by status |
+  | `type` | string | Filter by issue type |
+  | `assignee` | string | Filter by assignee |
+  | `q` | string | Search query |
+  | `priority` | int (0-4) | Filter by priority |
+  | `labels` | string | Comma-separated labels (all must match) |
+  | `limit` | int | Max results (max 1000) |
+  | `title_contains` | string | Substring match on title |
+  | `description_contains` | string | Substring match on description |
+  | `notes_contains` | string | Substring match on notes |
+  | `created_after` | string | RFC3339 or YYYY-MM-DD |
+  | `created_before` | string | RFC3339 or YYYY-MM-DD |
+  | `updated_after` | string | RFC3339 or YYYY-MM-DD |
+  | `updated_before` | string | RFC3339 or YYYY-MM-DD |
+  | `empty_description` | bool | Only issues with empty description |
+  | `no_assignee` | bool | Only unassigned issues |
+  | `no_labels` | bool | Only issues without labels |
+  | `pinned` | bool | Filter by pinned status |
+  | `exclude_status` | string | Comma-separated statuses to exclude |
+  | `include_blocked` | bool | Include blocked dependency info |
+  | `source_repos` | string | Comma-separated repo names to filter by |
+  | `parent_id` | string | Filter by parent issue ID |
+
+- **Response `200`:**
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "issue": { "id": "abc", "title": "...", ... },
+      "comment_count": 2,
+      "dependency_count": 1,
+      "parent": "parent-id",
+      "parent_title": "Parent Issue Title"
+    }
+  ]
+}
+```
+
+With `include_blocked=true`, each entry also includes `blocked_by_ids` and `blocked_by_titles` arrays.
+
+- **Errors:** `400` (invalid params), `503` (pool unavailable), `504` (timeout)
+
+#### `GET /api/workspaces/{ws}/issues/{id}`
+
+Get a single issue by ID.
+
+- **Auth:** Required
+- **Timeout:** 2 seconds
+- **Path params:** `id` — issue ID
+- **Response `200`:**
+
+```json
+{
+  "success": true,
+  "data": { "id": "abc", "title": "...", ... }
+}
+```
+
+- **Errors:** `400` (missing ID), `404` (not found), `503` (pool unavailable), `504` (timeout)
+
+#### `POST /api/workspaces/{ws}/issues`
+
+Create a new issue.
+
+- **Auth:** Required
+- **Timeout:** 30 seconds
+- **Request Body:**
+
+```json
+{
+  "title": "string (required)",
+  "issue_type": "bug|feature|task|epic|chore (required)",
+  "priority": 0,
+  "id": "string (optional, auto-generated if empty)",
+  "parent": "parent-issue-id (optional)",
+  "description": "string (optional)",
+  "design": "string (optional)",
+  "acceptance_criteria": "string (optional)",
+  "notes": "string (optional)",
+  "assignee": "string (optional)",
+  "owner": "string (optional)",
+  "created_by": "string (optional)",
+  "external_ref": "string (optional)",
+  "estimated_minutes": 480,
+  "labels": ["label1", "label2"],
+  "dependencies": ["dep-id-1"],
+  "due_at": "2024-12-31T23:59:59Z",
+  "defer_until": "2024-12-25T00:00:00Z"
+}
+```
+
+- **Validation:** Title required, issue_type required and must be valid, priority 0-4, max 50 labels, max 100 dependencies
+- **Response `201`:** `{"success": true, "data": {...created issue...}}`
+- **Errors:** `400` (validation), `413` (body too large), `503` (pool unavailable), `504` (timeout)
+
+#### `PATCH /api/workspaces/{ws}/issues/{id}`
+
+Partially update an issue. All fields are optional.
+
+- **Auth:** Required
+- **Timeout:** 2 seconds
+- **Path params:** `id` — issue ID
+- **Request Body:**
+
+```json
+{
+  "title": "string",
+  "status": "open|in_progress|review|closed",
+  "priority": 0,
+  "assignee": "string",
+  "description": "string",
+  "add_labels": ["new-label"],
+  "remove_labels": ["old-label"],
+  "set_labels": ["label1", "label2"]
+}
+```
+
+- **Response `200`:** `{"success": true, "data": {...updated issue...}}`
+- **Errors:** `400` (missing ID, invalid body), `404` (not found), `413` (body too large), `503` (pool unavailable), `504` (timeout)
+
+#### `POST /api/workspaces/{ws}/issues/{id}/close`
+
+Close an issue.
+
+- **Auth:** Required
+- **Timeout:** 5 seconds
+- **Path params:** `id` — issue ID
+- **Request Body:** (optional)
+
+```json
+{
+  "reason": "string (optional)",
+  "session": "session-id (optional)",
+  "suggest_next": false,
+  "force": false
+}
+```
+
+When `force=false` and the issue has open blockers, returns `409 Conflict`.
+
+- **Response `200`:** `{"success": true, "data": {...closed issue...}}`
+- **Errors:** `400` (missing ID, invalid body), `404` (not found), `409` (open blockers when `force=false`), `413` (body too large), `503` (pool unavailable), `504` (timeout)
+
+#### `POST /api/workspaces/{ws}/issues/{id}/move`
+
+Move an issue to a different workspace.
+
+- **Auth:** Required
+- **Timeout:** 30 seconds
+- **Path params:** `id` — issue ID
+- **Request Body:**
+
+```json
+{
+  "target_workspace": "workspace-name (required)"
+}
+```
+
+**Behavior:**
+
+1. Validates source issue exists and is not closed
+2. Validates target workspace exists and differs from source
+3. Resolves workspace name to stable UUID (backward compat with pre-UUID names)
+4. Creates copy in target workspace (title, description, priority, type, labels, design, acceptance_criteria, notes, assignee, owner, external_ref, estimated_minutes, due_at, defer_until) with "(Moved from {source-id})" appended to description
+5. Adds comment on source: "Moved to {target-id} in workspace '{target-name}'"
+6. Closes source issue with `force=true`
+7. Returns warnings if comment/close fails or if source has an active assignee
+
+Dependencies are NOT moved.
+
+- **Response `200`:**
+
+```json
+{
+  "success": true,
+  "data": {
+    "source_id": "original-id",
+    "target_id": "new-id",
+    "warnings": ["Active agent \"spark\" assigned to this issue. Moving will not stop the agent."]
+  }
+}
+```
+
+- **Errors:**
+  - `400` — missing ID, missing target_workspace, target workspace not found, same workspace, closed issue, multi-workspace mode required, workspace config unavailable, target workspace not registered
+  - `404` — source issue not found
+  - `413` — body too large
+  - `502` — target workspace daemon unavailable
+  - `503` — source pool unavailable
+  - `504` — timeout
+
+#### `DELETE /api/workspaces/{ws}/issues/{id}`
+
+Permanently delete an issue. Internally uses `force=true` — no confirmation prompt.
+
+- **Auth:** Required
+- **Timeout:** 5 seconds
+- **Path params:** `id` — issue ID
+- **No request body**
+- **Response `200`:** `{"success": true, "data": ...}`
+- **Errors:** `400` (missing ID), `404` (not found), `503` (pool unavailable), `504` (timeout)
+
+#### `POST /api/workspaces/{ws}/issues/{id}/comments`
+
+Add a comment to an issue.
+
+- **Auth:** Required
+- **Timeout:** 5 seconds
+- **Path params:** `id` — issue ID
+- **Request Body:**
+
+```json
+{
+  "text": "Comment text (required, max 64 KB)"
+}
+```
+
+Text is trimmed; empty text after trimming returns `400`.
+
+- **Response `201`:**
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": "comment-id",
+    "text": "Comment text",
+    "author": "web-ui",
+    "created_at": "2024-01-15T12:00:00Z"
+  }
+}
+```
+
+- **Errors:** `400` (missing ID, empty text, text exceeds 64 KB), `404` (not found), `413` (body too large), `503` (pool unavailable), `504` (timeout)
+
+#### `GET /api/workspaces/{ws}/issues/{id}/events`
+
+List events for an issue.
+
+- **Auth:** Required
+- **Timeout:** 5 seconds
+- **Path params:** `id` — issue ID
+- **Query Parameters:**
+  | Parameter | Type | Default | Description |
+  |-----------|------|---------|-------------|
+  | `limit` | int | 100 | Max events to return (max 500) |
+
+Invalid or negative `limit` silently defaults to 100; values above 500 are clamped to 500.
+
+- **Response `200`:**
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "event-id",
+      "issue_id": "abc",
+      "type": "status_change",
+      "actor": "web-ui",
+      "data": {},
+      "created_at": "2024-01-15T12:00:00Z"
+    }
+  ]
+}
+```
+
+Empty events list is returned as `[]` (not null).
+
+- **Errors:** `400` (missing ID), `404` (not found), `503` (pool unavailable), `504` (timeout)
+
+#### `POST /api/workspaces/{ws}/issues/{id}/dependencies`
+
+Add a dependency (make `{id}` depend on another issue).
+
+- **Auth:** Required
+- **Timeout:** 5 seconds
+- **Path params:** `id` — issue ID
+- **Request Body:**
+
+```json
+{
+  "depends_on_id": "other-issue-id (required)",
+  "dep_type": "blocks (optional, defaults to \"blocks\")"
+}
+```
+
+- **Response `200`:** `{"success": true, "data": ...}`
+- **Errors:** `400` (self-dependency, missing depends_on_id, duplicate dependency), `404` (issue or target not found), `409` (circular dependency), `413` (body too large), `503` (pool unavailable), `504` (timeout)
+
+#### `DELETE /api/workspaces/{ws}/issues/{id}/dependencies/{depId}`
+
+Remove a dependency from an issue.
+
+- **Auth:** Required
+- **Timeout:** 5 seconds
+- **Path params:** `id` — issue ID, `depId` — dependency issue ID to remove
+- **No request body**
+- **Response `200`:** `{"success": true, "data": ...}`
+- **Errors:** `400` (missing IDs), `404` (issue or dependency not found), `503` (pool unavailable), `504` (timeout)
+
+### Workspace Views
+
+These 4 endpoints provide aggregate workspace-wide data. They are NOT issue-specific CRUD operations — they compute dashboard/overview state across all issues in the workspace.
+
+#### `GET /api/workspaces/{ws}/stats`
+
+Get workspace issue statistics.
+
+- **Auth:** Required
+- **Timeout:** 2 seconds
+- **No query params**
+- Same response shape as `GET /api/stats` documented in [Health & Status](#health--status)
+- **Errors:** `503` (pool unavailable), `504` (timeout)
+
+#### `GET /api/workspaces/{ws}/ready`
+
+Get issues ready to work on (unblocked, open).
+
+- **Auth:** Required
+- **Timeout:** 5 seconds
+- **Query Parameters:**
+  | Parameter | Type | Description |
+  |-----------|------|-------------|
+  | `assignee` | string | Filter by assignee |
+  | `type` | string | Filter by issue type |
+  | `parent_id` | string | Filter by parent issue ID |
+  | `priority` | int (0-4) | Filter by priority |
+  | `labels` | string | Comma-separated labels (all must match) |
+  | `limit` | int | Max results |
+  | `unassigned` | bool | Only unassigned issues |
+  | `include_deferred` | bool | Include deferred issues |
+  | `source_repos` | string | Comma-separated repo names to filter by |
+
+- Same response shape as `GET /api/ready` documented in [Issues](#issues)
+- **Errors:** `400` (invalid params), `503` (pool unavailable), `504` (timeout)
+
+#### `GET /api/workspaces/{ws}/blocked`
+
+Get blocked issues.
+
+- **Auth:** Required
+- **Timeout:** 5 seconds
+- **Query Parameters:**
+  | Parameter | Type | Description |
+  |-----------|------|-------------|
+  | `parent_id` | string | Filter by parent issue ID |
+  | `assignee` | string | Filter by assignee |
+  | `type` | string | Filter by issue type |
+  | `priority` | int (0-4) | Filter by priority |
+  | `limit` | int | Max results |
+
+- Same response shape as `GET /api/blocked` documented in [Issues](#issues)
+- **Errors:** `400` (invalid params), `503` (pool unavailable), `504` (timeout)
+
+#### `GET /api/workspaces/{ws}/issues/graph`
+
+Get the dependency graph for visualization.
+
+- **Auth:** Required
+- **Timeout:** 10 seconds
+- **Query Parameters:**
+  | Parameter | Type | Default | Description |
+  |-----------|------|---------|-------------|
+  | `status` | string | `all` | Filter: all, open, closed |
+  | `include_closed` | bool | `true` | Include closed issues (only applies when status=all) |
+  | `source_repos` | string | | Comma-separated repo names to filter by |
+
+> **Note:** This endpoint lives under `/issues/graph` despite being a view endpoint, following the existing route pattern.
+
+- Same response shape as `GET /api/issues/graph` documented in [Issues](#issues)
+- **Errors:** `400` (invalid params), `503` (pool unavailable), `504` (timeout)
+
+### Daemon Status
+
+#### `GET /api/workspaces/{ws}/daemon/status`
+
+Get daemon runtime status for the workspace.
+
+- **Auth:** Required
+- **Timeout:** 2 seconds
+- **No query params**
+- Same response shape as `GET /api/daemon/status` documented in [Health & Status](#health--status)
+- **Errors:** `503` (pool unavailable), `504` (timeout)
 
 ## Rate Limiting
 
