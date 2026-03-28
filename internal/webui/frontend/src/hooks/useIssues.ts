@@ -568,15 +568,21 @@ export function useIssues(options: UseIssuesOptions): UseIssuesReturn {
         throw new Error(`Issue ${issueId} already has a pending update`);
       }
 
-      // Optimistic update — apply new status immediately
-      const optimisticIssue: Issue = {
-        ...existingIssue,
-        status: newStatus,
-        updated_at: new Date().toISOString(),
-      };
-      const newMap = new Map(issuesMap);
-      newMap.set(issueId, optimisticIssue);
-      setIssuesMap(newMap);
+      // Optimistic update — functional form to avoid stale closure when
+      // concurrent updates to different issues fire in the same render cycle.
+      // NOTE: startOptimistic() above MUST stay before this call (arms SSE mutation gate).
+      setIssuesMap((current) => {
+        const currentIssue = current.get(issueId);
+        if (!currentIssue) return current;
+        const optimisticIssue: Issue = {
+          ...currentIssue,
+          status: newStatus,
+          updated_at: new Date().toISOString(),
+        };
+        const newMap = new Map(current);
+        newMap.set(issueId, optimisticIssue);
+        return newMap;
+      });
 
       try {
         await apiUpdateIssue(workspaceId, issueId, { status: newStatus });

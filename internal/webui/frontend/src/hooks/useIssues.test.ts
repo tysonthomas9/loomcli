@@ -1500,6 +1500,31 @@ describe("useIssues", () => {
       expect(result.current.getIssue("issue-2")?.status).toBe("closed");
     });
 
+    it("same-render-cycle updates to different issues do not clobber each other", async () => {
+      const issue1 = createTestIssue({ id: "issue-1", status: "open" });
+      const issue2 = createTestIssue({ id: "issue-2", status: "open" });
+      vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([issue1, issue2]);
+
+      // API calls that never resolve (we only care about optimistic state)
+      vi.mocked(issuesApi.updateIssue).mockReturnValue(new Promise(() => {}));
+
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id" }),
+      );
+
+      await waitFor(() => expect(result.current.issues).toHaveLength(2));
+
+      // Fire two updates in the SAME act() — same render cycle, stale closure scenario
+      await act(async () => {
+        result.current.updateIssueStatus("issue-1", "in_progress");
+        result.current.updateIssueStatus("issue-2", "closed");
+      });
+
+      // BOTH optimistic changes must be visible — not just the second one
+      expect(result.current.getIssue("issue-1")?.status).toBe("in_progress");
+      expect(result.current.getIssue("issue-2")?.status).toBe("closed");
+    });
+
     it("rollback of one issue does not clobber a concurrent update to another issue", async () => {
       const issue1 = createTestIssue({ id: "issue-1", status: "open" });
       const issue2 = createTestIssue({ id: "issue-2", status: "open" });
