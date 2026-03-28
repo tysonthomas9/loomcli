@@ -1553,34 +1553,424 @@ Real-time task log streaming via SSE.
 - **Query Parameters:** `since` — start from specific line number
 - **Event Format:** Same as agent log stream
 
-## Terminal
+## Terminal Session Lifecycle
 
-### `GET /api/terminal/token`
+REST + WebSocket API for terminal session lifecycle management, using workspace-scoped routes. These endpoints govern creating, connecting to, monitoring, restarting, killing, and seeding terminal sessions backed by tmux.
 
-Generate a one-time terminal authentication token.
+### Workspace Scoping
+
+All session lifecycle endpoints use the `/api/workspaces/{ws}/terminal/...` prefix. The `{ws}` path parameter is the workspace identifier (UUID). WorkspaceMiddleware validates the workspace exists and injects the ID into the request context.
+
+| Status | Condition | Body |
+|--------|-----------|------|
+| `400` | `{ws}` is empty or whitespace | `{"error": "workspace ID is required"}` |
+| `404` | `{ws}` does not match any registered workspace | `{"error": "workspace not found: {ws}"}` |
+
+### Cross-Cutting Validation
+
+- **Session names**: regex `^[a-zA-Z0-9_-]+$` — enforced on all endpoints that accept session names. Dots in session names (from issue IDs) are sanitized to dashes before validation.
+- **Request body limit**: 1 MB (standard `maxRequestBody`)
+
+### Authentication: One-Time Tokens
+
+- **Standard endpoints**: Bearer token via Authorization header, plus WorkspaceMiddleware validation
+- **Token endpoint** (`GET .../terminal/token`): requires standard bearer auth, returns a one-time terminal token
+- **WebSocket endpoint** (`GET .../terminal/ws`): uses one-time token via `?token=` query param. Standard bearer auth is not required for the WebSocket upgrade — the one-time token carries session identity and authorization.
+- **Restart/Kill/Session-status**: require both bearer auth AND one-time terminal token via `?token=` query param
+- **Token format**: `base64url(JSON{session, exp, nonce}).base64url(HMAC-SHA256-signature)`
+- **Token lifetime**: 60 seconds, single-use (nonce tracked server-side in memory)
+- **Server restart**: generates new HMAC secret, all old tokens become invalid (by design)
+
+### `GET /api/workspaces/{ws}/terminal/token`
+
+Generate a one-time HMAC-SHA256 terminal authentication token.
 
 - **Auth:** Required (standard bearer token)
-- **Query Parameters:** `session` — session name (required)
+- **Path Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| ws | string | yes | Workspace ID (validated by WorkspaceMiddleware) |
+
+- **Query Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| session | string | yes | Session name (validated against session name regex) |
+
+- **Response Headers:** `Cache-Control: no-store`
 - **Response:** `200 OK`
 
 ```json
 {"token": "<one-time-use-token>"}
 ```
 
-### `GET /api/terminal/ws`
+- **Errors:**
+  - `400` — missing or invalid session name
+  - `404` — workspace not found
+  - `500` — HMAC generation failure
 
-WebSocket endpoint for terminal relay (tmux-backed).
+### `GET /api/workspaces/{ws}/terminal/ws` (WebSocket)
 
-- **Auth:** One-time token via `?token=` query param
+WebSocket endpoint for live terminal relay (tmux-backed). Supports bidirectional terminal I/O.
+
+- **Auth:** One-time token via `?token=` query param (not bearer auth — token carries session identity and authorization)
+- **Path Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| ws | string | yes | Workspace ID (validated by WorkspaceMiddleware) |
+
 - **Query Parameters:**
-  - `session` — session name (required, alphanumeric + hyphens/underscores)
-  - `token` — one-time terminal token (required when auth enabled)
-- **Protocol:**
-  - Binary frames for terminal I/O
-  - In-band resize: marker byte `0x01` + 4 bytes big-endian uint32 (`rows << 16 | cols`)
-  - Max terminal size: 500 cols x 200 rows
-  - Read limit: 32 KB per message
-  - Default size: 80x24
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| session | string | yes | tmux session name |
+| token | string | yes* | One-time terminal token (*when auth enabled) |
+
+- **Pre-Upgrade Validation (HTTP JSON before WebSocket upgrade):**
+  - `400` — missing session, invalid session name
+  - `401` — terminal authentication failed (invalid/expired/replayed token)
+  - `404` — workspace not found
+  - `503` — terminal manager not initialized, or maximum terminal sessions reached (default 20)
+
+- **WebSocket Binary Protocol:**
+  - All frames are binary (`MessageBinary`)
+  - **Server → Client:** raw PTY output bytes (read buffer 4096 bytes)
+  - **Client → Server:** raw terminal input bytes OR resize message
+  - **Resize message format (in-band): exactly 5 bytes**
+    - Byte 0: `0x01` (resize marker)
+    - Bytes 1-2: cols as uint16 big-endian
+    - Bytes 3-4: rows as uint16 big-endian
+    - Example: 80×24 = `[0x01, 0x00, 0x50, 0x00, 0x18]`
+  - Max terminal size: 500 cols × 200 rows (values exceeding these are silently ignored)
+  - Zero values for cols or rows: silently ignored (no resize performed)
+  - Read limit: 32 KB per WebSocket message
+  - Default terminal size: 80×24 (frontend sends resize immediately after connect)
+  - Non-matching binary messages (wrong length or missing `0x01` marker): treated as regular terminal input, written to PTY
+
+- **Close Codes:**
+
+| Code | Meaning | Frontend behavior |
+|------|---------|-------------------|
+| 1000 | Normal closure / session detached | Allow reconnect |
+| 4001 | Backend process exited (crash) | Show CrashOverlay, no auto-reconnect |
+
+- **Close reason on crash:** last 10 lines of PTY output (truncated to 123 bytes, UTF-8-safe)
+
+- **Session Creation:** if tmux session does not exist, `Attach()` creates it with the default command. Session is workspace-scoped (prefixed by workspace ID).
+- **Deferred Kill Cancellation:** if a pending scheduled kill exists for this session, `CancelPendingKill()` is called on attach.
+- **SSE Broadcast:** if session is linked to an issue (via tab metadata), broadcasts `terminal_session_change` event on connect.
+- **Concurrent Connections:** each WebSocket connection to the same session gets its own PTY attach with a unique connection ID.
+
+### `POST /api/workspaces/{ws}/terminal/spawn`
+
+Pre-create a tmux session for a specific backend.
+
+- **Auth:** Required (standard bearer token)
+- **Path Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| ws | string | yes | Workspace ID |
+
+- **Request Body:**
+
+```json
+{
+  "session_name": "string (required)",
+  "backend": "string (required — claude|codex|shell|gemini|etc.)"
+}
+```
+
+- **Session name sanitization:** dots replaced with dashes before validation.
+- **Shell backend:** uses default shell command instead of loom lead.
+- **Default terminal size:** 120×40.
+
+- **Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "session_name": "sanitized-name",
+    "backend": "claude",
+    "command": "claude",
+    "created": true
+  }
+}
+```
+
+`created` is `false` if the tmux session already existed (idempotent).
+
+- **Errors:**
+  - `400` — missing session_name, missing backend, invalid session name, invalid backend
+  - `404` — workspace not found
+  - `413` — request body too large (>1 MB)
+  - `500` — tmux spawn failure
+  - `503` — terminal manager not initialized
+
+- **Side Effect:** for issue-linked sessions (matching pattern `issue-{project}-{number}`), records session in session history store with workspace ID.
+
+### `POST /api/workspaces/{ws}/terminal/restart`
+
+Kill existing tmux session and prepare for re-creation with current backend.
+
+- **Auth:** Required (standard bearer + one-time terminal token)
+- **Path Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| ws | string | yes | Workspace ID |
+
+- **Query Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| session | string | yes | Session name |
+| token | string | yes* | One-time terminal token (*when auth enabled) |
+
+- **Behavior:** kills existing tmux session, reads current backend from loom.yaml via daemon, updates default command, returns new backend name.
+- **Shell tab special case:** sessions starting with `lead-shell-` are killed without changing `defaultCommand`; returns `{"success": true, "backend": "shell"}`.
+
+- **Response:** `200 OK`
+
+```json
+{"success": true, "backend": "claude"}
+```
+
+- **Errors:**
+  - `400` — missing session, invalid session name, invalid backend in loom.yaml
+  - `401` — terminal authentication failed
+  - `404` — workspace not found
+  - `405` — method not allowed (non-POST)
+  - `503` — terminal manager not initialized
+
+- **Note:** does NOT create the new session — the frontend reconnects via WebSocket which triggers `Attach()`.
+
+### `POST /api/workspaces/{ws}/terminal/kill`
+
+Forcibly kill a terminal session (immediate, no grace period).
+
+- **Auth:** Required (standard bearer + one-time terminal token)
+- **Path Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| ws | string | yes | Workspace ID |
+
+- **Query Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| session | string | yes | Session name |
+| token | string | yes* | One-time terminal token (*when auth enabled) |
+
+- **Response:** `200 OK`
+
+```json
+{"success": true}
+```
+
+- **Errors:**
+  - `400` — invalid session name
+  - `401` — terminal authentication failed
+  - `404` — workspace not found
+  - `405` — method not allowed (non-POST)
+  - `503` — terminal manager not initialized
+
+### `GET /api/workspaces/{ws}/terminal/session-status`
+
+Check whether a terminal session is alive.
+
+- **Auth:** Required (standard bearer + one-time terminal token)
+- **Path Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| ws | string | yes | Workspace ID |
+
+- **Query Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| session | string | yes | Session name |
+| token | string | yes* | One-time terminal token (*when auth enabled) |
+
+- **Response:** `200 OK`
+
+Alive:
+```json
+{"alive": true}
+```
+
+Dead (session gone or pane process exited):
+```json
+{
+  "alive": false,
+  "exit_reason": "last 10 lines of terminal output"
+}
+```
+
+`exit_reason` is only present if capture succeeds. Checks both tmux session existence AND pane liveness (process may have exited but tmux session lingers).
+
+- **Errors:**
+  - `400` — invalid session name
+  - `401` — terminal authentication failed
+  - `404` — workspace not found
+  - `503` — terminal manager not initialized
+
+### `GET /api/workspaces/{ws}/terminal/sessions`
+
+List all active terminal sessions in a workspace.
+
+- **Auth:** Required (standard bearer token)
+- **Path Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| ws | string | yes | Workspace ID |
+
+- **Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "sessions": [
+      {
+        "name": "talk-to-lead",
+        "label": "talk-to-lead",
+        "created": 1711108800
+      }
+    ]
+  }
+}
+```
+
+- `"talk-to-lead"` is always included (`created` = 0 if not yet spawned)
+- Sessions are filtered by server's `sessionPrefix` (workspace-scoped isolation)
+- `created`: Unix timestamp, 0 if session not yet created in tmux
+- **Note:** The `terminalSessionInfo` struct declares `issue_id` with `json:"issue_id,omitempty"` but the handler never populates it — it is always omitted from the JSON response. Issue-to-session mapping is served by `GET /api/workspaces/{ws}/terminal/sessions/by-issue` (documented in the tab metadata spec, loomcli-wit5o).
+
+- **Errors:**
+  - `404` — workspace not found
+  - `500` — tmux list-sessions failure
+  - `503` — terminal manager not initialized
+
+### `POST /api/workspaces/{ws}/terminal/sessions/{name}/seed`
+
+Inject issue context into a running terminal session via tmux send-keys.
+
+- **Auth:** Required (standard bearer token)
+- **Path Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| ws | string | yes | Workspace ID |
+| name | string | yes | Session name |
+
+- **Request Body:**
+
+```json
+{
+  "issue_id": "string (required)",
+  "title": "string (required)",
+  "description": "string (optional, truncated to 800 chars)",
+  "design": "string (optional, truncated to 500 chars)",
+  "blockers": [
+    {"id": "string", "title": "string"}
+  ]
+}
+```
+
+`blockers`: max 5 included in the injected prompt.
+
+- **Behavior:** formats a context prompt from the fields and injects it into the running tmux session via tmux send-keys.
+
+- **Response:** `200 OK`
+
+```json
+{"success": true}
+```
+
+- **Errors:**
+  - `400` — missing session name, invalid JSON, missing issue_id or title
+  - `404` — workspace not found; or session not found (tmux session does not exist): `{"success": false, "error": "session not found: {name}"}`
+  - `500` — tmux send-keys failure
+  - `503` — terminal manager not initialized
+
+### `POST /api/workspaces/{ws}/terminal/sessions/{session}/kill` (Deferred)
+
+Schedule a terminal session kill after a 30-second grace period. Cancelled if the user re-attaches via WebSocket before the timeout fires.
+
+- **Auth:** Required (standard bearer token)
+- **Path Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| ws | string | yes | Workspace ID |
+| session | string | yes | Session name (validated via `tabmeta.ValidateSessionName`) |
+
+- **Response:** `200 OK`
+
+```json
+{"success": true}
+```
+
+- **Errors:**
+  - `400` — invalid session name
+  - `404` — workspace not found
+  - `503` — terminal manager not initialized
+
+- **Note:** The race between scheduled kill and re-attach is safe — `CancelPendingKill()` is called in `Attach()`, so re-attach always wins.
+
+### `POST /api/workspaces/{ws}/terminal/sessions/close-all`
+
+Kill all terminal sessions in a workspace and clean up associated metadata.
+
+- **Auth:** Required (standard bearer token)
+- **Path Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| ws | string | yes | Workspace ID |
+
+- **Behavior:**
+  1. Kill all tmux sessions (by workspace-scoped prefix)
+  2. Delete all tab metadata for this workspace (Redis cleanup)
+  3. Broadcast SSE `terminal_session_change` event
+
+- **Response:** `200 OK`
+
+Clean:
+```json
+{"success": true}
+```
+
+Partial (tmux killed but metadata cleanup failed):
+```json
+{"success": true, "warning": "sessions killed but metadata cleanup incomplete"}
+```
+
+- **Errors:**
+  - `404` — workspace not found
+  - `500` — tmux kill failure
+  - `503` — terminal manager not initialized
+
+### Edge Cases
+
+- **Session name with dots** (from issue IDs): sanitized to dashes by spawn handler before validation
+- **Session limit reached** (default 20): rejected pre-WebSocket-upgrade with 503 and message "maximum terminal sessions reached"
+- **Token replay**: nonce tracked in memory map, rejected with 401 on second use
+- **Token expired** (>60s): rejected with 401
+- **Race between scheduled kill and re-attach**: `CancelPendingKill()` called in `Attach()`, so re-attach always wins
+- **Server restart**: generates new HMAC secret, all old tokens become invalid (by design)
+- **tmux binary not found**: `TerminalManager` creation fails at startup, all terminal endpoints return 503
+- **close-all with Redis down**: tmux sessions killed but metadata cleanup fails; returns 200 with warning string, not 500
+- **Concurrent WebSocket connections to same session**: each gets its own PTY attach with unique connection ID
+- **Non-matching binary WebSocket messages** (wrong length or missing `0x01` marker): treated as terminal input bytes, written to PTY — no error returned
+- **Cross-workspace session isolation**: tmux sessions prefixed by workspace ID, so identically-named sessions in different workspaces never collide
 
 ### Scrollback Sources
 
