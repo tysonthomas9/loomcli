@@ -574,6 +574,203 @@ describe("useDiff", () => {
     });
   });
 
+  describe("Cache invalidation on commitSignal change", () => {
+    it("clears patchCache and re-fetches file list when commitSignal changes", async () => {
+      const files1 = createMockFiles(2);
+      const files2 = createMockFiles(3);
+      const mockPatch = createMockPatch();
+      mockFetchDiffFiles.mockResolvedValueOnce(files1);
+      mockFetchDiffFile.mockResolvedValue(mockPatch);
+
+      const { result, rerender } = renderHook(
+        ({ commitSignal }: { commitSignal: number }) =>
+          useDiff({
+            workspaceId: "test-ws-id",
+            agentName: "agent-1",
+            enabled: true,
+            commitSignal,
+          }),
+        { initialProps: { commitSignal: 1 } },
+      );
+
+      await flushPromises();
+      expect(result.current.files).toEqual(files1);
+
+      // Populate patchCache
+      await act(async () => {
+        await result.current.fetchPatch("src/file0.ts");
+      });
+      expect(result.current.patchCache.size).toBe(1);
+
+      // Change commitSignal
+      mockFetchDiffFiles.mockResolvedValueOnce(files2);
+      rerender({ commitSignal: 2 });
+      await flushPromises();
+
+      expect(result.current.patchCache.size).toBe(0);
+      expect(mockFetchDiffFiles).toHaveBeenCalledTimes(2);
+      expect(result.current.files).toEqual(files2);
+    });
+
+    it("previously-cached paths can be re-fetched after commitSignal change", async () => {
+      const mockPatch1 = createMockPatch({ additions: 5 });
+      const mockPatch2 = createMockPatch({ additions: 10 });
+      mockFetchDiffFiles.mockResolvedValue(createMockFiles(1));
+
+      const { result, rerender } = renderHook(
+        ({ commitSignal }: { commitSignal: number }) =>
+          useDiff({
+            workspaceId: "test-ws-id",
+            agentName: "agent-1",
+            enabled: true,
+            commitSignal,
+          }),
+        { initialProps: { commitSignal: 1 } },
+      );
+
+      await flushPromises();
+
+      // Fetch and cache a patch
+      mockFetchDiffFile.mockResolvedValueOnce(mockPatch1);
+      await act(async () => {
+        await result.current.fetchPatch("src/main.ts");
+      });
+      expect(mockFetchDiffFile).toHaveBeenCalledTimes(1);
+
+      // Change commitSignal — cache clears
+      rerender({ commitSignal: 2 });
+      await flushPromises();
+
+      // Re-fetch same path — should make a new network call
+      mockFetchDiffFile.mockResolvedValueOnce(mockPatch2);
+      await act(async () => {
+        await result.current.fetchPatch("src/main.ts");
+      });
+      expect(mockFetchDiffFile).toHaveBeenCalledTimes(2);
+    });
+
+    it("clears viewedFiles when commitSignal changes", async () => {
+      mockFetchDiffFiles.mockResolvedValue(createMockFiles(1));
+
+      const { result, rerender } = renderHook(
+        ({ commitSignal }: { commitSignal: number }) =>
+          useDiff({
+            workspaceId: "test-ws-id",
+            agentName: "agent-1",
+            enabled: true,
+            commitSignal,
+          }),
+        { initialProps: { commitSignal: 1 } },
+      );
+
+      await flushPromises();
+
+      act(() => {
+        result.current.markViewed("src/file0.ts");
+      });
+      expect(result.current.viewedFiles.size).toBe(1);
+
+      // Change commitSignal
+      rerender({ commitSignal: 2 });
+      await flushPromises();
+
+      expect(result.current.viewedFiles.size).toBe(0);
+    });
+
+    it("does not re-fetch when commitSignal is unchanged on rerender", async () => {
+      mockFetchDiffFiles.mockResolvedValue(createMockFiles(1));
+
+      const { rerender } = renderHook(
+        ({ commitSignal }: { commitSignal: number }) =>
+          useDiff({
+            workspaceId: "test-ws-id",
+            agentName: "agent-1",
+            enabled: true,
+            commitSignal,
+          }),
+        { initialProps: { commitSignal: 3 } },
+      );
+
+      await flushPromises();
+      expect(mockFetchDiffFiles).toHaveBeenCalledTimes(1);
+
+      // Rerender with same commitSignal
+      rerender({ commitSignal: 3 });
+      await flushPromises();
+
+      expect(mockFetchDiffFiles).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("enabled transition resets fetchInProgressRef", () => {
+    it("re-fetches file list when disabled then re-enabled", async () => {
+      const files1 = createMockFiles(2);
+      const files2 = createMockFiles(3);
+
+      // First fetch resolves slowly
+      let resolveFirst: (value: DiffFile[]) => void;
+      const slowPromise = new Promise<DiffFile[]>((resolve) => {
+        resolveFirst = resolve;
+      });
+      mockFetchDiffFiles.mockReturnValueOnce(slowPromise);
+
+      const { rerender } = renderHook(
+        ({ enabled }: { enabled: boolean }) =>
+          useDiff({
+            workspaceId: "test-ws-id",
+            agentName: "agent-1",
+            enabled,
+          }),
+        { initialProps: { enabled: true } },
+      );
+
+      // Disable while fetch is in-flight
+      rerender({ enabled: false });
+
+      // Re-enable — fetchInProgressRef should have been reset
+      mockFetchDiffFiles.mockResolvedValueOnce(files2);
+      rerender({ enabled: true });
+
+      // Resolve original slow fetch
+      await act(async () => {
+        resolveFirst!(files1);
+      });
+      await flushPromises();
+
+      // Should have called fetchDiffFiles at least twice
+      expect(mockFetchDiffFiles).toHaveBeenCalledTimes(2);
+    });
+
+    it("disabled then re-enabled with same agent triggers fresh file list fetch", async () => {
+      const files1 = createMockFiles(1);
+      const files2 = createMockFiles(3);
+      mockFetchDiffFiles.mockResolvedValueOnce(files1);
+
+      const { result, rerender } = renderHook(
+        ({ enabled }: { enabled: boolean }) =>
+          useDiff({
+            workspaceId: "test-ws-id",
+            agentName: "agent-1",
+            enabled,
+          }),
+        { initialProps: { enabled: true } },
+      );
+
+      await flushPromises();
+      expect(result.current.files).toEqual(files1);
+      expect(mockFetchDiffFiles).toHaveBeenCalledTimes(1);
+
+      // Disable then re-enable
+      rerender({ enabled: false });
+      mockFetchDiffFiles.mockResolvedValueOnce(files2);
+      rerender({ enabled: true });
+      await flushPromises();
+
+      expect(mockFetchDiffFiles).toHaveBeenCalledTimes(2);
+      expect(result.current.files).toEqual(files2);
+    });
+  });
+
   describe("Concurrent fetch guard", () => {
     it("does not fire duplicate requests for the same file", async () => {
       mockFetchDiffFiles.mockResolvedValue([]);

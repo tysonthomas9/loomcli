@@ -20,14 +20,22 @@ import { DiffTab } from "./DiffTab";
 
 // ============= Mocks =============
 
-let lastUseDiffOptions: { agentName: string | null; enabled: boolean };
+let lastUseDiffOptions: {
+  agentName: string | null;
+  enabled: boolean;
+  commitSignal?: number;
+};
 let mockUseDiffReturn: UseDiffReturn;
 
 const mockFetchPatch = vi.fn();
 const mockMarkViewed = vi.fn();
 
 vi.mock("@/hooks/useDiff", () => ({
-  useDiff: (opts: { agentName: string | null; enabled: boolean }) => {
+  useDiff: (opts: {
+    agentName: string | null;
+    enabled: boolean;
+    commitSignal?: number;
+  }) => {
     lastUseDiffOptions = opts;
     return mockUseDiffReturn;
   },
@@ -369,12 +377,54 @@ describe("DiffTab", () => {
     });
   });
 
+  describe("expanded files reset on commitSignal change", () => {
+    it("collapses expanded files when agent.ahead changes", async () => {
+      mockUseDiffReturn.files = [makeFile({ path: "a.go" })];
+      mockUseDiffReturn.summaryStats = {
+        filesChanged: 1,
+        additions: 10,
+        deletions: 5,
+      };
+
+      const agent = makeAgent({ name: "nova", ahead: 1 });
+      let result: ReturnType<typeof render>;
+      await act(async () => {
+        result = render(<DiffTab agent={agent} isActive={true} />);
+      });
+
+      // Expand a file
+      fireEvent.click(screen.getByTestId("expand-a.go"));
+      expect(screen.getByTestId("file-viewer")).toBeInTheDocument();
+
+      // Re-render with new ahead count (simulating a new commit)
+      const updatedAgent = makeAgent({ name: "nova", ahead: 2 });
+      await act(async () => {
+        result!.rerender(<DiffTab agent={updatedAgent} isActive={true} />);
+      });
+
+      // Expanded files should be reset — viewer should be gone
+      expect(screen.queryByTestId("file-viewer")).not.toBeInTheDocument();
+    });
+  });
+
   describe("hook invocation", () => {
     it("passes correct agentName and enabled to useDiff", async () => {
       await renderDiffTab(makeAgent({ name: "nova" }), true);
 
       expect(lastUseDiffOptions.agentName).toBe("nova");
       expect(lastUseDiffOptions.enabled).toBe(true);
+    });
+
+    it("passes agent.ahead as commitSignal to useDiff", async () => {
+      await renderDiffTab(makeAgent({ name: "nova", ahead: 5 }), true);
+
+      expect(lastUseDiffOptions.commitSignal).toBe(5);
+    });
+
+    it("passes commitSignal=0 when agent.ahead is 0", async () => {
+      await renderDiffTab(makeAgent({ name: "nova", ahead: 0 }), true);
+
+      expect(lastUseDiffOptions.commitSignal).toBe(0);
     });
   });
 });

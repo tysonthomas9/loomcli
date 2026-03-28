@@ -17,6 +17,7 @@ export interface UseDiffOptions {
   workspaceId: string;
   agentName: string | null;
   enabled: boolean;
+  commitSignal?: number;
 }
 
 export interface SummaryStats {
@@ -40,6 +41,7 @@ export function useDiff({
   workspaceId,
   agentName,
   enabled,
+  commitSignal,
 }: UseDiffOptions): UseDiffReturn {
   const [files, setFiles] = useState<DiffFile[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -72,7 +74,14 @@ export function useDiff({
     setIsLoading(false);
     fetchInProgressRef.current = false;
     inFlightPatchesRef.current.clear();
-  }, [agentName]);
+  }, [agentName, commitSignal]);
+
+  // Allow fresh fetch when re-enabled after being disabled while fetch was in-flight
+  useEffect(() => {
+    if (!enabled) {
+      fetchInProgressRef.current = false;
+    }
+  }, [enabled]);
 
   // Fetch file list when enabled with valid agent
   useEffect(() => {
@@ -100,7 +109,7 @@ export function useDiff({
           setIsLoading(false);
         }
       });
-  }, [enabled, agentName]);
+  }, [enabled, agentName, commitSignal]);
 
   const fetchPatch = useCallback(
     async (path: string): Promise<void> => {
