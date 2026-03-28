@@ -550,13 +550,23 @@ func TestFleetDBBackend_GetIssue_ServerError(t *testing.T) {
 }
 
 func TestFleetDBBackend_GetIssueText(t *testing.T) {
+	details := types.IssueDetails{
+		Issue: types.Issue{
+			Title:       "Fix login bug",
+			Status:      "in_progress",
+			Priority:    2,
+			IssueType:   "bug",
+			Description: "Login fails with invalid token",
+		},
+	}
+	detailsJSON, _ := json.Marshal(details)
+
 	mock := &mockFleetDBClient{
 		showFn: func(args *rpc.ShowArgs) (*rpc.Response, error) {
 			if args.ID != "T-5" {
 				t.Errorf("expected ID 'T-5', got %q", args.ID)
 			}
-			// GetIssueText returns raw resp.Data as string
-			return &rpc.Response{Success: true, Data: json.RawMessage(`"Human-readable output"`)}, nil
+			return &rpc.Response{Success: true, Data: json.RawMessage(detailsJSON)}, nil
 		},
 	}
 
@@ -565,8 +575,18 @@ func TestFleetDBBackend_GetIssueText(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got != `"Human-readable output"` {
-		t.Errorf("got %q", got)
+	// Must be human-readable, not raw JSON
+	if strings.HasPrefix(got, "{") {
+		t.Errorf("output should not be raw JSON, got %q", got)
+	}
+	if !strings.Contains(got, "Fix login bug") {
+		t.Errorf("output should contain title, got %q", got)
+	}
+	if !strings.Contains(got, "in_progress") {
+		t.Errorf("output should contain status, got %q", got)
+	}
+	if !strings.Contains(got, "P2") {
+		t.Errorf("output should contain priority, got %q", got)
 	}
 }
 
@@ -601,6 +621,154 @@ func TestFleetDBBackend_GetIssueText_ServerError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "not found") {
 		t.Errorf("error = %q", err.Error())
+	}
+}
+
+func TestFleetDBBackend_GetIssueText_Format(t *testing.T) {
+	tests := []struct {
+		name     string
+		details  types.IssueDetails
+		contains []string
+		excludes []string
+	}{
+		{
+			name: "all fields",
+			details: types.IssueDetails{
+				Issue: types.Issue{
+					Title:       "Implement feature X",
+					Status:      "open",
+					Priority:    1,
+					IssueType:   "task",
+					Description: "Add the new feature",
+					Design:      "Use pattern Y",
+				},
+			},
+			contains: []string{"Title: Implement feature X", "Status: open", "Priority: P1", "Type: task", "Description:", "Add the new feature", "Design:", "Use pattern Y"},
+		},
+		{
+			name: "empty description",
+			details: types.IssueDetails{
+				Issue: types.Issue{
+					Title:    "Minimal task",
+					Status:   "open",
+					Priority: 0,
+				},
+			},
+			contains: []string{"Title: Minimal task", "Priority: P0"},
+			excludes: []string{"Description:"},
+		},
+		{
+			name: "long description truncated",
+			details: types.IssueDetails{
+				Issue: types.Issue{
+					Title:       "Long desc",
+					Priority:    3,
+					Description: strings.Repeat("x", 3000),
+				},
+			},
+			contains: []string{"Title: Long desc", "..."},
+		},
+		{
+			name: "long design truncated",
+			details: types.IssueDetails{
+				Issue: types.Issue{
+					Title:    "Long design",
+					Priority: 3,
+					Design:   strings.Repeat("d", 1500),
+				},
+			},
+			contains: []string{"Design:", "..."},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := formatIssueDetailsText(&tc.details)
+			if strings.HasPrefix(got, "{") {
+				t.Errorf("output should not be raw JSON: %q", got)
+			}
+			for _, s := range tc.contains {
+				if !strings.Contains(got, s) {
+					t.Errorf("expected output to contain %q, got:\n%s", s, got)
+				}
+			}
+			for _, s := range tc.excludes {
+				if strings.Contains(got, s) {
+					t.Errorf("expected output NOT to contain %q, got:\n%s", s, got)
+				}
+			}
+		})
+	}
+}
+
+func TestFleetDBBackend_GetIssueText_UnmarshalError(t *testing.T) {
+	mock := &mockFleetDBClient{
+		showFn: func(_ *rpc.ShowArgs) (*rpc.Response, error) {
+			return &rpc.Response{Success: true, Data: json.RawMessage(`not valid json`)}, nil
+		},
+	}
+
+	b := newFleetDBBackend(mock, "test")
+	_, err := b.GetIssueText(context.Background(), "X")
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+	if !strings.Contains(err.Error(), "unmarshal") {
+		t.Errorf("expected unmarshal error, got %q", err.Error())
+	}
+}
+
+func TestGetIssueText_FormatParity(t *testing.T) {
+	// bdBackend returns human-readable text from `bd show`
+	bdMockOutput := "Title: Fix login bug\nStatus: in_progress\nPriority: P2\nType: bug\nDescription:\nLogin fails\n"
+	bdBack := newBdBackend(&MockBDRunner{
+		RunFunc: func(_ string, _ ...string) CommandResult {
+			return CommandResult{Stdout: bdMockOutput}
+		},
+	}, "/tmp")
+
+	// fleetDBBackend returns IssueDetails JSON
+	details := types.IssueDetails{
+		Issue: types.Issue{
+			Title:       "Fix login bug",
+			Status:      "in_progress",
+			Priority:    2,
+			IssueType:   "bug",
+			Description: "Login fails",
+		},
+	}
+	detailsJSON, _ := json.Marshal(details)
+	fleetMock := &mockFleetDBClient{
+		showFn: func(_ *rpc.ShowArgs) (*rpc.Response, error) {
+			return &rpc.Response{Success: true, Data: json.RawMessage(detailsJSON)}, nil
+		},
+	}
+	fleetBack := newFleetDBBackend(fleetMock, "test")
+
+	bdText, err := bdBack.GetIssueText(context.Background(), "T-1")
+	if err != nil {
+		t.Fatalf("bdBackend error: %v", err)
+	}
+	fleetText, err := fleetBack.GetIssueText(context.Background(), "T-1")
+	if err != nil {
+		t.Fatalf("fleetDBBackend error: %v", err)
+	}
+
+	// Both should be non-empty, human-readable (not JSON), and contain the title
+	if bdText == "" {
+		t.Error("bdBackend returned empty text")
+	}
+	if fleetText == "" {
+		t.Error("fleetDBBackend returned empty text")
+	}
+	if strings.HasPrefix(fleetText, "{") {
+		t.Error("fleetDBBackend output should not be raw JSON")
+	}
+	if !strings.Contains(bdText, "Fix login bug") {
+		t.Errorf("bdBackend output should contain title, got %q", bdText)
+	}
+	if !strings.Contains(fleetText, "Fix login bug") {
+		t.Errorf("fleetDBBackend output should contain title, got %q", fleetText)
 	}
 }
 

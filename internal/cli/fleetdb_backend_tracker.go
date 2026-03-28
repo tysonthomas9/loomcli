@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
@@ -103,7 +104,60 @@ func (b *fleetDBBackend) GetIssueText(_ context.Context, id string) (string, err
 	if !resp.Success {
 		return "", fmt.Errorf("show: %s", resp.Error)
 	}
-	return string(resp.Data), nil
+	var details types.IssueDetails
+	if err := json.Unmarshal(resp.Data, &details); err != nil {
+		return "", fmt.Errorf("show: unmarshal: %w", err)
+	}
+	return formatIssueDetailsText(&details), nil
+}
+
+// formatIssueDetailsText formats IssueDetails as concise human-readable text
+// for LLM consumption (used by recover_helpers.go completion analysis).
+func formatIssueDetailsText(d *types.IssueDetails) string {
+	var b strings.Builder
+	b.WriteString("Title: ")
+	b.WriteString(d.Title)
+	b.WriteByte('\n')
+
+	if d.Status != "" {
+		b.WriteString("Status: ")
+		b.WriteString(string(d.Status))
+		b.WriteByte('\n')
+	}
+
+	b.WriteString("Priority: P")
+	b.WriteString(fmt.Sprintf("%d", d.Priority))
+	b.WriteByte('\n')
+
+	if d.IssueType != "" {
+		b.WriteString("Type: ")
+		b.WriteString(string(d.IssueType))
+		b.WriteByte('\n')
+	}
+
+	if d.Description != "" {
+		desc := d.Description
+		const maxDesc = 2000
+		if len(desc) > maxDesc {
+			desc = desc[:maxDesc] + "..."
+		}
+		b.WriteString("Description:\n")
+		b.WriteString(desc)
+		b.WriteByte('\n')
+	}
+
+	if d.Design != "" {
+		design := d.Design
+		const maxDesign = 1000
+		if len(design) > maxDesign {
+			design = design[:maxDesign] + "..."
+		}
+		b.WriteString("Design:\n")
+		b.WriteString(design)
+		b.WriteByte('\n')
+	}
+
+	return b.String()
 }
 
 func (b *fleetDBBackend) UpdateIssue(_ context.Context, id string, opts UpdateOpts) error {
