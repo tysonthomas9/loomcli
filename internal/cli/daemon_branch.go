@@ -72,30 +72,20 @@ func EnsureWorktreeBranch(worktreePath, targetBranch, remote, fallbackRef string
 	return nil
 }
 
-// discardDirtyState stashes all changes (including untracked files) and
-// immediately drops the stash. The dirty state in daemon worktrees is
-// ephemeral (lock files, beads state) and should not be preserved across
-// branch switches.
+// discardDirtyState resets tracked changes and removes non-protected untracked
+// files. Protected runtime paths (.beads/, .loom/, sessions/, loom.yaml,
+// AGENTS.md) are preserved so daemon/session state survives branch switches.
 func discardDirtyState(worktreePath string) error {
-	// Stash everything including untracked files
-	stashed, err := gitStashIncludeUntracked(worktreePath)
-	if err != nil {
-		return fmt.Errorf("git stash failed: %w", err)
-	}
-	if !stashed {
-		// Nothing was actually stashed (e.g., only ignored files)
-		return nil
+	// Reset tracked changes (staged + unstaged modifications)
+	if _, err := RunGitCommand(worktreePath, "checkout", "--", "."); err != nil {
+		slog.Warn("git checkout -- . failed (may have no tracked changes)", "worktree", worktreePath, "err", err)
 	}
 
-	// Log what we're discarding
-	if show, err := RunGitCommand(worktreePath, "stash", "show", "stash@{0}"); err == nil {
-		slog.Info("discarding dirty state before branch switch", "worktree", worktreePath, "files", show)
+	// Remove only non-protected untracked files
+	if err := GitCleanExclude(worktreePath, protectedRuntimePaths); err != nil {
+		return fmt.Errorf("selective git clean failed: %w", err)
 	}
 
-	// Drop the stash — we don't need this state on the new branch
-	if err := gitStashDrop(worktreePath); err != nil {
-		slog.Warn("stash drop failed (benign)", "worktree", worktreePath, "err", err)
-	}
 	return nil
 }
 
