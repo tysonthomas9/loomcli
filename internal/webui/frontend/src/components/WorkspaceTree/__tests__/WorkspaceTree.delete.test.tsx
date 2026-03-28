@@ -111,6 +111,8 @@ vi.mock("@/hooks", () => ({
     error: null,
     refetch: vi.fn(),
   }),
+  useDebouncedCallback: (fn: (...args: unknown[]) => void, _delay: number) =>
+    fn,
   useRegisterEscapeLayer: vi.fn(),
   useKeyboardShortcuts: vi.fn(() => ({
     isCheatsheetOpen: false,

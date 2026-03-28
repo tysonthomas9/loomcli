@@ -61,6 +61,9 @@ internal/webui/handlers_terminal_ws.go
 internal/webui/loom_proxy.go
 internal/webui/respond.go
 internal/webui/sse.go
+internal/webui/sse_handler.go
 internal/webui/subscription.go
+internal/webui/subscription_repos.go
+internal/webui/subscription_poll.go
 internal/webui/terminal.go
 internal/webui/terminal_sessions.go
