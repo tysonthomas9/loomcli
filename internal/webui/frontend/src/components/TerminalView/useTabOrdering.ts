@@ -44,9 +44,9 @@ export function useTabOrdering({
 
   const handleCloseOthers = useCallback(
     (tabId: string) => {
-      const others = tabs.filter((t) => t.id !== tabId);
+      const others = tabs.filter((t) => t.id !== tabId && !t.pinned);
       if (others.length === 0) return;
-      setTabs((prev) => prev.filter((t) => t.id === tabId));
+      setTabs((prev) => prev.filter((t) => t.id === tabId || t.pinned));
       setActiveTabId(tabId);
       for (const t of others) {
         deleteTab(t.sessionName);
