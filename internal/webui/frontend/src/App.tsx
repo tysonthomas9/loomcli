@@ -189,6 +189,11 @@ function App() {
   // Issue-detail is now detected via route params (routeIssueId).
   const { view: activeViewFromParams, setView: setActiveView } = useViewState();
 
+  // Alias for NavRail/keyboard — setActiveView now uses flushSync internally
+  // via useViewState to force synchronous commit (bypasses React Router v7's
+  // startTransition which gets deferred by terminal WebSocket state updates).
+  const handleNavChange = setActiveView;
+
   // If on the issue-detail route, override the view mode
   const activeView: ViewMode = routeIssueId
     ? "issue-detail"
@@ -979,7 +984,7 @@ function App() {
           navRail={
             <NavRail
               activeView={activeView}
-              onChange={setActiveView}
+              onChange={handleNavChange}
               sessionCount={activeSessionCount}
               badges={{ terminal: hasTerminalUnread }}
             />
@@ -1035,7 +1040,7 @@ function App() {
           navRail={
             <NavRail
               activeView={activeView}
-              onChange={setActiveView}
+              onChange={handleNavChange}
               sessionCount={activeSessionCount}
               badges={{ terminal: hasTerminalUnread }}
             />
@@ -1086,7 +1091,7 @@ function App() {
           navRail={
             <NavRail
               activeView={activeView}
-              onChange={setActiveView}
+              onChange={handleNavChange}
               sessionCount={activeSessionCount}
               badges={{ terminal: hasTerminalUnread }}
             />
@@ -1111,7 +1116,7 @@ function App() {
   // Success state: show view based on activeView with filtered issues
   return (
     <KeyboardShortcutProvider
-      onViewChange={setActiveView}
+      onViewChange={handleNavChange}
       onSearchFocus={handleSearchFocus}
       {...(isMultiRepo && {
         onWorkspaceSwitcher: handleWorkspaceSwitcherToggle,
@@ -1126,7 +1131,7 @@ function App() {
           navRail={
             <NavRail
               activeView={activeView}
-              onChange={setActiveView}
+              onChange={handleNavChange}
               sessionCount={activeSessionCount}
               badges={{ terminal: hasTerminalUnread }}
             />
@@ -1193,7 +1198,7 @@ function App() {
             <ErrorBoundary resetOnChange={[activeView]}>
               <Suspense fallback={<LoadingSkeleton.Monitor />}>
                 <MonitorDashboard
-                  onViewChange={setActiveView}
+                  onViewChange={handleNavChange}
                   onIssueClick={handleIssueClick}
                   onAgentClick={handleAgentClick}
                 />
