@@ -117,7 +117,11 @@ const ICON_MAP: Record<WorkspaceType, () => JSX.Element> = {
 export interface CreateWorkspaceModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: (data: WorkspaceData, createdName: string) => void;
+  onSuccess: (
+    data: WorkspaceData,
+    createdName: string,
+    warnings?: string[],
+  ) => void;
 }
 
 export function CreateWorkspaceModal({
@@ -219,8 +223,11 @@ export function CreateWorkspaceModal({
       }
 
       let data: WorkspaceData;
+      let warnings: string[] | undefined;
       try {
-        data = await createWorkspace(req);
+        const result = await createWorkspace(req);
+        data = result.data;
+        warnings = result.warnings;
       } catch (err: unknown) {
         // API failure — show error, keep modal open for retry
         const message =
@@ -243,7 +250,7 @@ export function CreateWorkspaceModal({
       // API succeeded — always close modal, regardless of callback errors
       setIsSubmitting(false);
       try {
-        onSuccess(data, req.name);
+        onSuccess(data, req.name, warnings);
       } catch {
         // onSuccess errors (e.g., navigation failure) must not block close
       }

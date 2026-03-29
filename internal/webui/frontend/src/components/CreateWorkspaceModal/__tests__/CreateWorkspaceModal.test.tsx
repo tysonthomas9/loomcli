@@ -38,7 +38,7 @@ vi.mock("@/hooks/useFocusReturn", () => ({
 }));
 
 import { createWorkspace } from "@/api/workspace";
-import type { WorkspaceData } from "@/api/workspace";
+import type { WorkspaceData, CreateWorkspaceResult } from "@/api/workspace";
 
 const mockCreateWorkspace = vi.mocked(createWorkspace);
 
@@ -51,6 +51,17 @@ const MOCK_WORKSPACE_DATA: WorkspaceData = {
   agents: [],
   workspaces: [],
   default_workspace: "test-ws",
+};
+
+const MOCK_CREATE_RESULT: CreateWorkspaceResult = {
+  data: MOCK_WORKSPACE_DATA,
+};
+
+const MOCK_CREATE_RESULT_WITH_WARNINGS: CreateWorkspaceResult = {
+  data: MOCK_WORKSPACE_DATA,
+  warnings: [
+    "Could not register workspace with daemon — workspace may not auto-connect until restart",
+  ],
 };
 
 /** Helper to select a type card by clicking it */
@@ -414,10 +425,10 @@ describe("CreateWorkspaceModal", () => {
 
     it("shows 'Creating...' and spinner while submitting", async () => {
       // Keep the promise pending so we can observe the submitting state
-      let resolvePromise!: (value: WorkspaceData) => void;
+      let resolvePromise!: (value: CreateWorkspaceResult) => void;
       mockCreateWorkspace.mockImplementation(
         () =>
-          new Promise<WorkspaceData>((resolve) => {
+          new Promise<CreateWorkspaceResult>((resolve) => {
             resolvePromise = resolve;
           }),
       );
@@ -452,7 +463,7 @@ describe("CreateWorkspaceModal", () => {
 
       // Clean up
       await act(async () => {
-        resolvePromise(MOCK_WORKSPACE_DATA);
+        resolvePromise(MOCK_CREATE_RESULT);
       });
     });
 
@@ -471,7 +482,7 @@ describe("CreateWorkspaceModal", () => {
     });
 
     it("removes spinner after successful submission", async () => {
-      mockCreateWorkspace.mockResolvedValue(MOCK_WORKSPACE_DATA);
+      mockCreateWorkspace.mockResolvedValue(MOCK_CREATE_RESULT);
 
       render(
         <CreateWorkspaceModal
@@ -533,7 +544,7 @@ describe("CreateWorkspaceModal", () => {
 
   describe("form submission", () => {
     it("calls onSuccess and onClose after successful empty type submission", async () => {
-      mockCreateWorkspace.mockResolvedValue(MOCK_WORKSPACE_DATA);
+      mockCreateWorkspace.mockResolvedValue(MOCK_CREATE_RESULT);
 
       render(
         <CreateWorkspaceModal
@@ -550,7 +561,11 @@ describe("CreateWorkspaceModal", () => {
       fireEvent.click(screen.getByTestId("create-workspace-submit"));
 
       await waitFor(() => {
-        expect(onSuccess).toHaveBeenCalledWith(MOCK_WORKSPACE_DATA, "test-ws");
+        expect(onSuccess).toHaveBeenCalledWith(
+          MOCK_WORKSPACE_DATA,
+          "test-ws",
+          undefined,
+        );
       });
       expect(onClose).toHaveBeenCalledTimes(1);
 
@@ -561,7 +576,7 @@ describe("CreateWorkspaceModal", () => {
     });
 
     it("sends clone_urls when type is clone", async () => {
-      mockCreateWorkspace.mockResolvedValue(MOCK_WORKSPACE_DATA);
+      mockCreateWorkspace.mockResolvedValue(MOCK_CREATE_RESULT);
 
       render(
         <CreateWorkspaceModal
@@ -590,7 +605,7 @@ describe("CreateWorkspaceModal", () => {
     });
 
     it("sends path when provided", async () => {
-      mockCreateWorkspace.mockResolvedValue(MOCK_WORKSPACE_DATA);
+      mockCreateWorkspace.mockResolvedValue(MOCK_CREATE_RESULT);
 
       render(
         <CreateWorkspaceModal
@@ -707,7 +722,7 @@ describe("CreateWorkspaceModal", () => {
 
   describe("modal close on success", () => {
     it("closes modal when onSuccess throws", async () => {
-      mockCreateWorkspace.mockResolvedValue(MOCK_WORKSPACE_DATA);
+      mockCreateWorkspace.mockResolvedValue(MOCK_CREATE_RESULT);
       onSuccess.mockImplementation(() => {
         throw new Error("navigation failed");
       });
@@ -868,6 +883,62 @@ describe("CreateWorkspaceModal", () => {
       expect(
         screen.getByTestId("create-workspace-clone-url"),
       ).toBeInTheDocument();
+    });
+  });
+
+  describe("warnings passthrough", () => {
+    it("passes warnings to onSuccess when present in API response", async () => {
+      mockCreateWorkspace.mockResolvedValue(MOCK_CREATE_RESULT_WITH_WARNINGS);
+
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      selectTypeCard("empty");
+      fireEvent.change(screen.getByTestId("create-workspace-name"), {
+        target: { value: "warn-ws" },
+      });
+      fireEvent.click(screen.getByTestId("create-workspace-submit"));
+
+      await waitFor(() => {
+        expect(onSuccess).toHaveBeenCalledWith(
+          MOCK_WORKSPACE_DATA,
+          "warn-ws",
+          MOCK_CREATE_RESULT_WITH_WARNINGS.warnings,
+        );
+      });
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it("passes undefined warnings to onSuccess when no warnings in API response", async () => {
+      mockCreateWorkspace.mockResolvedValue(MOCK_CREATE_RESULT);
+
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      selectTypeCard("empty");
+      fireEvent.change(screen.getByTestId("create-workspace-name"), {
+        target: { value: "no-warn-ws" },
+      });
+      fireEvent.click(screen.getByTestId("create-workspace-submit"));
+
+      await waitFor(() => {
+        expect(onSuccess).toHaveBeenCalledWith(
+          MOCK_WORKSPACE_DATA,
+          "no-warn-ws",
+          undefined,
+        );
+      });
+      expect(onClose).toHaveBeenCalledTimes(1);
     });
   });
 });

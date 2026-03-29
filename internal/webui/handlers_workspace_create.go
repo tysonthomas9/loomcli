@@ -131,6 +131,7 @@ func handleWorkspaceCreate(createFn WorkspaceCreateFn, workspaceConfigFn func() 
 
 		ctx, cancel := context.WithTimeout(r.Context(), workspaceCreateTimeout)
 		defer cancel()
+		ctx = WithCreateWarnings(ctx)
 
 		if err := createFn(ctx, req); err != nil {
 			if ctx.Err() == context.DeadlineExceeded {
@@ -149,15 +150,18 @@ func handleWorkspaceCreate(createFn WorkspaceCreateFn, workspaceConfigFn func() 
 		}
 
 		// Return refreshed workspace data
+		var data *WorkspaceData
 		if workspaceConfigFn != nil {
-			data, err := workspaceConfigFn()
-			if err == nil && data != nil {
-				normalizeWorkspaceData(data)
+			d, err := workspaceConfigFn()
+			if err == nil && d != nil {
+				normalizeWorkspaceData(d)
+				data = d
 			}
-			respondJSON(w, http.StatusCreated, workspaceResponse{Success: true, Data: data})
-			return
 		}
-
-		respondJSON(w, http.StatusCreated, workspaceResponse{Success: true})
+		resp := workspaceResponse{Success: true, Data: data}
+		if warnings := GetCreateWarnings(ctx); len(warnings) > 0 {
+			resp.Warnings = warnings
+		}
+		respondJSON(w, http.StatusCreated, resp)
 	}
 }

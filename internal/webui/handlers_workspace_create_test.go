@@ -592,6 +592,77 @@ func TestHandleWorkspaceCreate_ContextTimeout(t *testing.T) {
 	}
 }
 
+func TestHandleWorkspaceCreate_SuccessWithWarnings(t *testing.T) {
+	createFn := func(ctx context.Context, req WorkspaceCreateRequest) error {
+		AddCreateWarning(ctx, "test warning")
+		return nil
+	}
+
+	handler := handleWorkspaceCreate(createFn, mockWorkspaceConfigFn)
+
+	body := strings.NewReader(`{"name":"ws","type":"empty","repos":["/a"]}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp workspaceResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !resp.Success {
+		t.Fatalf("expected success, got error: %s", resp.Error)
+	}
+	if len(resp.Warnings) != 1 {
+		t.Fatalf("expected 1 warning, got %d: %v", len(resp.Warnings), resp.Warnings)
+	}
+	if resp.Warnings[0] != "test warning" {
+		t.Errorf("expected warning %q, got %q", "test warning", resp.Warnings[0])
+	}
+}
+
+func TestHandleWorkspaceCreate_SuccessNoWarnings(t *testing.T) {
+	createFn := func(ctx context.Context, req WorkspaceCreateRequest) error {
+		// No warnings added
+		return nil
+	}
+
+	handler := handleWorkspaceCreate(createFn, mockWorkspaceConfigFn)
+
+	body := strings.NewReader(`{"name":"ws","type":"empty","repos":["/a"]}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Parse the raw JSON to verify warnings field is absent (omitempty)
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("unmarshal raw response: %v", err)
+	}
+	if _, exists := raw["warnings"]; exists {
+		t.Error("expected warnings field to be absent (omitempty), but it was present")
+	}
+
+	// Also verify the typed response
+	var resp workspaceResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !resp.Success {
+		t.Fatalf("expected success, got error: %s", resp.Error)
+	}
+	if resp.Warnings != nil {
+		t.Errorf("expected nil warnings, got %v", resp.Warnings)
+	}
+}
+
 func TestValidateWorkspaceCreateRequest(t *testing.T) {
 	tests := []struct {
 		name       string

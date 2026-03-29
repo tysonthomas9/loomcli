@@ -52,6 +52,7 @@ export interface WorkspaceData {
 interface ApiSuccess<T> {
   success: true;
   data: T;
+  warnings?: string[];
 }
 
 interface ApiFailure {
@@ -262,20 +263,35 @@ export interface CreateWorkspaceRequest {
   path?: string;
 }
 
+export interface CreateWorkspaceResult {
+  data: WorkspaceData;
+  warnings?: string[];
+}
+
 /**
  * Create a new workspace. On success, invalidates the cache and returns refreshed data.
  */
 export async function createWorkspace(
   req: CreateWorkspaceRequest,
-): Promise<WorkspaceData> {
+): Promise<CreateWorkspaceResult> {
   const response = await post<ApiResult<WorkspaceData>>("/api/workspaces", req);
-  const data = unwrap(response);
+  if (!response.success) {
+    throw new ApiError(0, response.error);
+  }
+  const data = response.data;
+  const warnings = response.warnings;
   cacheGeneration++;
   if (data) {
     workspaceCache = data;
   }
   fetchPromise = null;
-  return workspaceCache ?? (await refreshWorkspace());
+  const result: CreateWorkspaceResult = {
+    data: workspaceCache ?? (await refreshWorkspace()),
+  };
+  if (warnings && warnings.length > 0) {
+    result.warnings = warnings;
+  }
+  return result;
 }
 
 /**

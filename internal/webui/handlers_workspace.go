@@ -5,9 +5,10 @@ import (
 )
 
 type workspaceResponse struct {
-	Success bool           `json:"success"`
-	Data    *WorkspaceData `json:"data,omitempty"`
-	Error   string         `json:"error,omitempty"`
+	Success  bool           `json:"success"`
+	Data     *WorkspaceData `json:"data,omitempty"`
+	Error    string         `json:"error,omitempty"`
+	Warnings []string       `json:"warnings,omitempty"`
 }
 
 // handleActiveWorkspace returns the active workspace topology.

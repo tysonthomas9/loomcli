@@ -1334,13 +1334,19 @@ function App() {
       <CreateWorkspaceModal
         isOpen={showCreateWorkspace}
         onClose={() => setShowCreateWorkspace(false)}
-        onSuccess={(data, createdName) => {
+        onSuccess={(data, createdName, warnings) => {
           setShowCreateWorkspace(false);
           // Navigate to the new workspace via SPA navigation.
           // Find the new workspace ID from the refreshed workspace list.
           const newWs = data.workspaces?.find((ws) => ws.name === createdName);
           if (newWs) {
             navigate(`/ws/${newWs.id}/`);
+          }
+          if (warnings && warnings.length > 0) {
+            showToast(
+              `Workspace "${createdName}" created, but: ${warnings.join("; ")}`,
+              { type: "warning" },
+            );
           }
         }}
       />

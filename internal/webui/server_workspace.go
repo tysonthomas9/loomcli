@@ -54,6 +54,30 @@ type WorkspaceAgentInfo struct {
 	CrossRepo  bool     `json:"cross_repo"`
 }
 
+type createWarningsKey struct{}
+
+// WithCreateWarnings returns a child context carrying an empty warnings collector.
+func WithCreateWarnings(ctx context.Context) context.Context {
+	w := &[]string{}
+	return context.WithValue(ctx, createWarningsKey{}, w)
+}
+
+// AddCreateWarning appends a non-fatal warning to the context's collector.
+// No-op if the context has no collector.
+func AddCreateWarning(ctx context.Context, msg string) {
+	if w, ok := ctx.Value(createWarningsKey{}).(*[]string); ok {
+		*w = append(*w, msg)
+	}
+}
+
+// GetCreateWarnings returns collected warnings, or nil.
+func GetCreateWarnings(ctx context.Context) []string {
+	if w, ok := ctx.Value(createWarningsKey{}).(*[]string); ok && len(*w) > 0 {
+		return *w
+	}
+	return nil
+}
+
 // reconcileConfigWorkspaces registers all configured workspaces via the
 // WorkspaceRegistry at startup. Skips the initial workspace if it was already
 // registered with a custom pool. Connection pools are lazy-connecting, so
@@ -110,17 +134,20 @@ func wrapWorkspaceCreateFn(
 		if resolveID == nil {
 			slog.Warn("no workspace ID resolver available, skipping runtime registration",
 				"workspace", req.Name)
+			AddCreateWarning(ctx, "Could not register workspace with daemon — workspace may not auto-connect until restart")
 			return nil
 		}
 		wsID, err := resolveID(req.Name)
 		if err != nil {
 			slog.Error("failed to resolve workspace UUID after creation — skipping runtime registration",
 				"workspace", req.Name, "err", err)
+			AddCreateWarning(ctx, "Could not register workspace with daemon — workspace may not auto-connect until restart")
 			return nil
 		}
 		if wsID == "" {
 			slog.Error("resolved workspace ID is empty — skipping runtime registration",
 				"workspace", req.Name)
+			AddCreateWarning(ctx, "Could not register workspace with daemon — workspace may not auto-connect until restart")
 			return nil
 		}
 
@@ -139,6 +166,7 @@ func wrapWorkspaceCreateFn(
 		}
 		if wsDir == "" {
 			slog.Warn("cannot determine workspace dir for pool registration", "workspace", req.Name)
+			AddCreateWarning(ctx, "Could not determine workspace directory for daemon registration")
 			return nil
 		}
 		wsDir = filepath.Clean(wsDir)
@@ -150,6 +178,7 @@ func wrapWorkspaceCreateFn(
 			if err := fleetRegistry.Register(wsID); err != nil {
 				slog.Warn("failed to register workspace in fleet registry",
 					"workspace", wsID, "err", err)
+				AddCreateWarning(ctx, "Workspace created but fleet store registration failed")
 			}
 		}
 

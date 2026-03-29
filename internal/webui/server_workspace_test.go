@@ -10,6 +10,93 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 )
 
+func TestCreateWarnings_ContextHelpers(t *testing.T) {
+	t.Run("full lifecycle", func(t *testing.T) {
+		ctx := context.Background()
+		ctx = WithCreateWarnings(ctx)
+
+		// Initially no warnings
+		if w := GetCreateWarnings(ctx); w != nil {
+			t.Fatalf("expected nil warnings initially, got %v", w)
+		}
+
+		// Add a warning
+		AddCreateWarning(ctx, "warning one")
+		warnings := GetCreateWarnings(ctx)
+		if len(warnings) != 1 {
+			t.Fatalf("expected 1 warning, got %d: %v", len(warnings), warnings)
+		}
+		if warnings[0] != "warning one" {
+			t.Errorf("expected %q, got %q", "warning one", warnings[0])
+		}
+
+		// Add another warning
+		AddCreateWarning(ctx, "warning two")
+		warnings = GetCreateWarnings(ctx)
+		if len(warnings) != 2 {
+			t.Fatalf("expected 2 warnings, got %d: %v", len(warnings), warnings)
+		}
+		if warnings[1] != "warning two" {
+			t.Errorf("expected %q, got %q", "warning two", warnings[1])
+		}
+	})
+
+	t.Run("AddCreateWarning is no-op on plain context", func(t *testing.T) {
+		ctx := context.Background()
+		// Should not panic
+		AddCreateWarning(ctx, "should be ignored")
+
+		// GetCreateWarnings returns nil on plain context
+		if w := GetCreateWarnings(ctx); w != nil {
+			t.Errorf("expected nil from plain context, got %v", w)
+		}
+	})
+
+	t.Run("GetCreateWarnings returns nil on plain context", func(t *testing.T) {
+		ctx := context.Background()
+		if w := GetCreateWarnings(ctx); w != nil {
+			t.Errorf("expected nil from plain context, got %v", w)
+		}
+	})
+}
+
+func TestWrapWorkspaceCreateFn_CollectsWarnings(t *testing.T) {
+	registry, _, _ := newTestRegistry(t)
+
+	innerCreate := func(ctx context.Context, req WorkspaceCreateRequest) error {
+		return nil
+	}
+
+	// nil resolveID triggers a warning in the wrapped function
+	wrapped := wrapWorkspaceCreateFn(innerCreate, registry, nil, nil)
+	if wrapped == nil {
+		t.Fatal("expected non-nil wrapper")
+	}
+
+	ctx := WithCreateWarnings(context.Background())
+	err := wrapped(ctx, WorkspaceCreateRequest{Name: "my-ws"})
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+
+	warnings := GetCreateWarnings(ctx)
+	if len(warnings) == 0 {
+		t.Fatal("expected at least one warning from nil resolveID path")
+	}
+
+	// Verify the warning mentions daemon/registration
+	found := false
+	for _, w := range warnings {
+		if w == "Could not register workspace with daemon — workspace may not auto-connect until restart" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected daemon registration warning, got: %v", warnings)
+	}
+}
+
 func TestWrapWorkspaceCreateFn_NilInner(t *testing.T) {
 	registry, _, _ := newTestRegistry(t)
 
