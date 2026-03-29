@@ -59,3 +59,18 @@ export function setLastWorkspaceId(id: string): void {
     /* ignore */
   }
 }
+
+/** Clear the last workspace ID if it matches the given stale ID (or unconditionally if no ID provided). */
+export function clearLastWorkspaceId(staleId?: string): void {
+  try {
+    if (staleId) {
+      if (localStorage.getItem(LAST_WORKSPACE_KEY) === staleId) {
+        localStorage.removeItem(LAST_WORKSPACE_KEY);
+      }
+    } else {
+      localStorage.removeItem(LAST_WORKSPACE_KEY);
+    }
+  } catch {
+    /* ignore */
+  }
+}

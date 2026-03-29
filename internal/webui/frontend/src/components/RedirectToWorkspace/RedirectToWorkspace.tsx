@@ -8,7 +8,10 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { getLastWorkspaceId } from "@/utils/scopedStorage";
+import {
+  getLastWorkspaceId,
+  clearLastWorkspaceId,
+} from "@/utils/scopedStorage";
 import { fetchWorkspace } from "@/api/workspace";
 
 export function RedirectToWorkspace() {
@@ -18,22 +21,27 @@ export function RedirectToWorkspace() {
   useEffect(() => {
     let cancelled = false;
 
-    // Try localStorage first for instant redirect
     const lastId = getLastWorkspaceId();
-    if (lastId) {
-      navigate(`/ws/${lastId}/`, { replace: true });
-      return;
-    }
 
-    // Fallback: fetch workspace list and use first/default
+    // Fetch workspace list — validates lastId and provides fallback
     fetchWorkspace()
       .then((data) => {
         if (cancelled) return;
         const workspaces = data.workspaces;
         if (workspaces.length === 0) {
+          if (lastId) clearLastWorkspaceId(lastId);
           setResolving(false);
           return;
         }
+
+        // If localStorage has a valid workspace, use it
+        if (lastId && workspaces.some((ws) => ws.id === lastId)) {
+          navigate(`/ws/${lastId}/`, { replace: true });
+          return;
+        }
+
+        // Stale or missing — clear and use default
+        if (lastId) clearLastWorkspaceId(lastId);
         const defaultWs =
           workspaces.find((ws) => ws.is_default) ?? workspaces[0];
         if (defaultWs) {
@@ -44,6 +52,11 @@ export function RedirectToWorkspace() {
       })
       .catch(() => {
         if (cancelled) return;
+        // Network error — try localStorage as best-effort if available
+        if (lastId) {
+          navigate(`/ws/${lastId}/`, { replace: true });
+          return;
+        }
         setResolving(false);
       });
 

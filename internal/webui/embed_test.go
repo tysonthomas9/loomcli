@@ -195,11 +195,11 @@ func TestFrontendHandler(t *testing.T) {
 			wantBodyContains: "", // don't check body for assets
 		},
 		{
-			name:             "non-existent asset serves index.html (SPA routing)",
+			name:             "non-existent JS asset returns 404 (not SPA fallback)",
 			path:             "/assets/nonexistent.js",
-			wantStatus:       http.StatusOK,
-			wantCacheControl: "no-cache, no-store, must-revalidate",
-			wantBodyContains: "<!DOCTYPE html>",
+			wantStatus:       http.StatusNotFound,
+			wantCacheControl: "",
+			wantBodyContains: "",
 		},
 	}
 

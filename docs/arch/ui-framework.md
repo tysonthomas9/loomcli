@@ -477,10 +477,10 @@ All navigation state encoded in `window.location.search`. No React Router — di
 
 ### `useViewState`
 
-- `setView()`: `replaceState` (no history entry)
-- `navigateToView()`: `pushState` (enables browser back)
-- `urlIssueId` extracted from `?issue=` param
-- `popstate` listener for browser back/forward
+- `setView()`: `navigate()` with `{ replace: true, flushSync: true }` (no history entry)
+- `navigateToView()`: `navigate()` with `{ replace: false, flushSync: true }` (enables browser back)
+- `buildViewUrl()`: constructs URL with updated `?view=` param, preserving other search params
+- Uses `flushSync` to force synchronous React commit — required because React Router v7 wraps navigation in `startTransition`, which gets indefinitely deferred when the terminal streams WebSocket state updates
 
 ### `usePanelManager`
 
@@ -516,6 +516,14 @@ Runs synchronously at app boot before React renders. Idempotent via version stam
 | `terminal-font-size` | `cortex:terminal-font-size` |
 
 All V6 keys use the `cortex:` namespace prefix. Handles `QuotaExceededError`.
+
+### Workspace-Scoped Storage
+
+**File**: `utils/scopedStorage.ts`
+
+- `wsKey(wsId, key)` — builds `loom:{wsId}:keyname` keys for workspace isolation
+- `getLastWorkspaceId()` / `setLastWorkspaceId(id)` — global key `loom:last-workspace-id` tracking the most recently active workspace
+- `clearLastWorkspaceId(staleId?)` — clears the stored workspace ID if it matches `staleId`, or unconditionally if no argument. Called by `WorkspaceLayout` on 404 and `RedirectToWorkspace` when the stored ID is not found in the workspace list, preventing stale workspace redirect loops.
 
 ---
 

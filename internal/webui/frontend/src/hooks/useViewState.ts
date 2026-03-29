@@ -4,7 +4,7 @@
  */
 
 import { useCallback, useMemo } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useLocation, useNavigate } from "react-router-dom";
 
 import { type ViewMode, DEFAULT_VIEW } from "@/components/ViewSwitcher";
 
@@ -64,7 +64,9 @@ function isValidViewMode(value: string | null): value is ViewMode {
 export function useViewState(
   _options: UseViewStateOptions = {},
 ): UseViewStateReturn {
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
+  const location = useLocation();
+  const navigate = useNavigate();
 
   // Read current view from search params
   const view = useMemo((): ViewMode => {
@@ -72,42 +74,38 @@ export function useViewState(
     return isValidViewMode(raw) ? raw : DEFAULT_VIEW;
   }, [searchParams]);
 
-  // Set view with replace semantics (no history entry)
+  // Build a URL with updated view param, preserving other search params
+  const buildViewUrl = useCallback(
+    (newView: ViewMode) => {
+      const next = new URLSearchParams(searchParams);
+      if (newView === DEFAULT_VIEW) {
+        next.delete(VIEW_PARAM);
+      } else {
+        next.set(VIEW_PARAM, newView);
+      }
+      const qs = next.toString();
+      return `${location.pathname}${qs ? `?${qs}` : ""}`;
+    },
+    [searchParams, location.pathname],
+  );
+
+  // Set view with replace semantics (no history entry).
+  // Uses navigate() with flushSync to force synchronous commit.
+  // React Router v7 wraps setSearchParams in startTransition, which gets
+  // indefinitely deferred when the terminal streams WebSocket data.
   const setView = useCallback(
     (newView: ViewMode) => {
-      setSearchParams(
-        (prev) => {
-          const next = new URLSearchParams(prev);
-          if (newView === DEFAULT_VIEW) {
-            next.delete(VIEW_PARAM);
-          } else {
-            next.set(VIEW_PARAM, newView);
-          }
-          return next;
-        },
-        { replace: true },
-      );
+      navigate(buildViewUrl(newView), { replace: true, flushSync: true });
     },
-    [setSearchParams],
+    [navigate, buildViewUrl],
   );
 
   // Navigate to a view with push semantics (creates history entry)
   const navigateToView = useCallback(
     (newView: ViewMode, _state?: Record<string, unknown>) => {
-      setSearchParams(
-        (prev) => {
-          const next = new URLSearchParams(prev);
-          if (newView === DEFAULT_VIEW) {
-            next.delete(VIEW_PARAM);
-          } else {
-            next.set(VIEW_PARAM, newView);
-          }
-          return next;
-        },
-        { replace: false },
-      );
+      navigate(buildViewUrl(newView), { replace: false, flushSync: true });
     },
-    [setSearchParams],
+    [navigate, buildViewUrl],
   );
 
   return { view, setView, navigateToView };

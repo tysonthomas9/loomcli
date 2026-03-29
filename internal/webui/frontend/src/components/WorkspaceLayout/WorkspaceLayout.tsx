@@ -15,6 +15,7 @@ import {
 } from "@/hooks";
 import { IssueSessionProvider } from "@/contexts/IssueSessionContext";
 import { fetchWorkspace } from "@/api/workspace";
+import { clearLastWorkspaceId } from "@/utils/scopedStorage";
 
 function IssueSessionWrapper({ children }: { children: React.ReactNode }) {
   const { workspace } = useWorkspaceContext();
@@ -52,13 +53,14 @@ export function WorkspaceLayout() {
       })
       .catch((err) => {
         if (cancelled) return;
-        // 404 means workspace doesn't exist — redirect to root
+        // 404 means workspace doesn't exist — clear stale localStorage and redirect
         if (
           err &&
           typeof err === "object" &&
           "status" in err &&
           err.status === 404
         ) {
+          clearLastWorkspaceId(workspaceId);
           navigate("/", { replace: true });
           setValidating(false);
           return;
