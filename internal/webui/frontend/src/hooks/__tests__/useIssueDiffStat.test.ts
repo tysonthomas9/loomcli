@@ -54,12 +54,16 @@ describe("useIssueDiffStat", () => {
       mockFetch.mockResolvedValueOnce(diffStat);
 
       const { result } = renderHook(() =>
-        useIssueDiffStat({ issueId: "issue-123", enabled: true }),
+        useIssueDiffStat({
+          workspaceId: "test-ws-id",
+          issueId: "issue-123",
+          enabled: true,
+        }),
       );
 
       await flushPromises();
 
-      expect(mockFetch).toHaveBeenCalledWith("issue-123");
+      expect(mockFetch).toHaveBeenCalledWith("test-ws-id", "issue-123");
       expect(result.current.data).toEqual(diffStat);
       expect(result.current.isLoading).toBe(false);
       expect(result.current.error).toBeNull();
@@ -69,7 +73,11 @@ describe("useIssueDiffStat", () => {
   describe("no fetch when disabled", () => {
     it("does not fetch when enabled is false", async () => {
       const { result } = renderHook(() =>
-        useIssueDiffStat({ issueId: "issue-123", enabled: false }),
+        useIssueDiffStat({
+          workspaceId: "test-ws-id",
+          issueId: "issue-123",
+          enabled: false,
+        }),
       );
 
       await flushPromises();
@@ -84,7 +92,11 @@ describe("useIssueDiffStat", () => {
   describe("no fetch when issueId is null", () => {
     it("does not fetch when issueId is null", async () => {
       const { result } = renderHook(() =>
-        useIssueDiffStat({ issueId: null, enabled: true }),
+        useIssueDiffStat({
+          workspaceId: "test-ws-id",
+          issueId: null,
+          enabled: true,
+        }),
       );
 
       await flushPromises();
@@ -102,7 +114,11 @@ describe("useIssueDiffStat", () => {
       mockFetch.mockResolvedValueOnce(diffStat1);
 
       const { result } = renderHook(() =>
-        useIssueDiffStat({ issueId: "issue-123", enabled: true }),
+        useIssueDiffStat({
+          workspaceId: "test-ws-id",
+          issueId: "issue-123",
+          enabled: true,
+        }),
       );
 
       // Initial fetch
@@ -126,7 +142,11 @@ describe("useIssueDiffStat", () => {
       mockFetch.mockResolvedValueOnce(createMockDiffStat());
 
       renderHook(() =>
-        useIssueDiffStat({ issueId: "issue-123", enabled: true }),
+        useIssueDiffStat({
+          workspaceId: "test-ws-id",
+          issueId: "issue-123",
+          enabled: true,
+        }),
       );
 
       await flushPromises();
@@ -195,7 +215,11 @@ describe("useIssueDiffStat", () => {
       mockFetch.mockResolvedValueOnce(createMockDiffStat());
 
       const { unmount } = renderHook(() =>
-        useIssueDiffStat({ issueId: "issue-123", enabled: true }),
+        useIssueDiffStat({
+          workspaceId: "test-ws-id",
+          issueId: "issue-123",
+          enabled: true,
+        }),
       );
 
       await flushPromises();
@@ -219,7 +243,11 @@ describe("useIssueDiffStat", () => {
       );
 
       const { result, unmount } = renderHook(() =>
-        useIssueDiffStat({ issueId: "issue-123", enabled: true }),
+        useIssueDiffStat({
+          workspaceId: "test-ws-id",
+          issueId: "issue-123",
+          enabled: true,
+        }),
       );
 
       // Unmount before fetch resolves
@@ -240,7 +268,11 @@ describe("useIssueDiffStat", () => {
       mockFetch.mockRejectedValueOnce(new Error("Network error"));
 
       const { result } = renderHook(() =>
-        useIssueDiffStat({ issueId: "issue-123", enabled: true }),
+        useIssueDiffStat({
+          workspaceId: "test-ws-id",
+          issueId: "issue-123",
+          enabled: true,
+        }),
       );
 
       await flushPromises();
@@ -254,7 +286,11 @@ describe("useIssueDiffStat", () => {
       mockFetch.mockRejectedValueOnce("string error");
 
       const { result } = renderHook(() =>
-        useIssueDiffStat({ issueId: "issue-123", enabled: true }),
+        useIssueDiffStat({
+          workspaceId: "test-ws-id",
+          issueId: "issue-123",
+          enabled: true,
+        }),
       );
 
       await flushPromises();
@@ -268,7 +304,11 @@ describe("useIssueDiffStat", () => {
       mockFetch.mockRejectedValueOnce(new Error("Network error"));
 
       const { result } = renderHook(() =>
-        useIssueDiffStat({ issueId: "issue-123", enabled: true }),
+        useIssueDiffStat({
+          workspaceId: "test-ws-id",
+          issueId: "issue-123",
+          enabled: true,
+        }),
       );
 
       await flushPromises();
@@ -292,7 +332,11 @@ describe("useIssueDiffStat", () => {
       mockFetch.mockResolvedValueOnce(createMockDiffStat({ added: 1 }));
 
       const { result } = renderHook(() =>
-        useIssueDiffStat({ issueId: "issue-123", enabled: true }),
+        useIssueDiffStat({
+          workspaceId: "test-ws-id",
+          issueId: "issue-123",
+          enabled: true,
+        }),
       );
 
       await flushPromises();

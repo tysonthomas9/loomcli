@@ -3,22 +3,7 @@
  * Provides a simpler push model compared to WebSocket with built-in browser reconnection.
  */
 
-import {
-  getAuthToken,
-  getAuthState,
-  getActiveWorkspace,
-  initAuth,
-} from "./client";
-
-// Track page unload to suppress false-positive SSE errors during workspace switching.
-// Without this, rapid page navigation causes the EventSource to fire error events
-// that trigger stale data banners and reconnection UI.
-let isPageUnloading = false;
-if (typeof window !== "undefined") {
-  window.addEventListener("beforeunload", () => {
-    isPageUnloading = true;
-  });
-}
+import { getAuthToken, wsUrl } from "./client";
 
 // Connection states for real-time event streaming
 export type ConnectionState =
@@ -85,13 +70,15 @@ export class BeadsSSEClient {
   private lastEventId: number | undefined;
   private manualDisconnect = false;
   private currentSourceRepos?: string[] | undefined;
+  private workspaceId: string;
 
   private onMutation: ((mutation: MutationPayload) => void) | undefined;
   private onError: ((error: string) => void) | undefined;
   private onStateChange: ((state: ConnectionState) => void) | undefined;
   private onReconnect: ((attempt: number) => void) | undefined;
 
-  constructor(options: SSEClientOptions = {}) {
+  constructor(workspaceId: string, options: SSEClientOptions = {}) {
+    this.workspaceId = workspaceId;
     this.onMutation = options.onMutation;
     this.onError = options.onError;
     this.onStateChange = options.onStateChange;
@@ -100,7 +87,6 @@ export class BeadsSSEClient {
 
   /**
    * Connect to the SSE endpoint.
-   * If auth state is 'failed', attempts token re-acquisition before connecting.
    * @param since Optional timestamp (ms) to receive events since that time
    * @param sourceRepos Optional repo filter for server-side event filtering
    */
@@ -118,16 +104,9 @@ export class BeadsSSEClient {
     this.manualDisconnect = false;
     this.setState("connecting");
 
-    // If auth previously failed, try re-acquiring token before connecting
-    if (getAuthToken() === null && getAuthState() === "failed") {
-      await initAuth({ maxRetries: 0 }).catch(() => {
-        // Best-effort; proceed even if re-auth fails (auth may be disabled)
-      });
-    }
-
     // Use provided since value or fall back to last received event ID
     const sinceParam = since ?? this.lastEventId;
-    const url = getSSEUrl(sinceParam, sourceRepos);
+    const url = getSSEUrl(this.workspaceId, sinceParam, sourceRepos);
 
     try {
       this.eventSource = new EventSource(url);
@@ -243,13 +222,6 @@ export class BeadsSSEClient {
       return;
     }
 
-    // Suppress errors during page navigation — in-flight EventSource
-    // connections are aborted by the browser, firing spurious error events
-    // that would otherwise trigger false reconnect attempts and stale banners.
-    if (isPageUnloading) {
-      return;
-    }
-
     // EventSource has three readyStates: CONNECTING(0), OPEN(1), CLOSED(2)
     // Browser automatically retries on error, so we track attempts
     if (
@@ -306,10 +278,15 @@ export class BeadsSSEClient {
 
 /**
  * Get the SSE URL for the events endpoint.
+ * @param workspaceId Workspace UUID for path-based routing
  * @param since Optional timestamp (ms) for catch-up events
  */
-export function getSSEUrl(since?: number, sourceRepos?: string[]): string {
-  const base = `${window.location.origin}/api/events`;
+export function getSSEUrl(
+  workspaceId: string,
+  since?: number,
+  sourceRepos?: string[],
+): string {
+  const base = `${window.location.origin}${wsUrl(workspaceId, "/events")}`;
   const params = new URLSearchParams();
   if (since !== undefined) {
     params.set("since", String(since));
@@ -320,11 +297,6 @@ export function getSSEUrl(since?: number, sourceRepos?: string[]): string {
   const token = getAuthToken();
   if (token) {
     params.set("token", token);
-  }
-  // EventSource doesn't support custom headers, so pass workspace as query param
-  const workspace = getActiveWorkspace();
-  if (workspace) {
-    params.set("workspace", workspace);
   }
   const qs = params.toString();
   return qs ? `${base}?${qs}` : base;

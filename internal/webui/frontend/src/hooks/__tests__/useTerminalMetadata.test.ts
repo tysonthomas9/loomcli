@@ -68,7 +68,7 @@ describe("useTerminalMetadata", () => {
     it("starts with loading true and empty tabs", async () => {
       mockList.mockResolvedValueOnce([]);
 
-      const { result } = renderHook(() => useTerminalMetadata());
+      const { result } = renderHook(() => useTerminalMetadata("test-ws"));
 
       expect(result.current.isLoading).toBe(true);
       expect(result.current.tabs).toEqual([]);
@@ -88,11 +88,11 @@ describe("useTerminalMetadata", () => {
       ];
       mockList.mockResolvedValueOnce(tabs);
 
-      const { result } = renderHook(() => useTerminalMetadata());
+      const { result } = renderHook(() => useTerminalMetadata("test-ws"));
 
       await flushPromises();
 
-      expect(mockList).toHaveBeenCalledWith(undefined);
+      expect(mockList).toHaveBeenCalledWith("test-ws");
       expect(result.current.tabs).toEqual(tabs);
       expect(result.current.isLoading).toBe(false);
       expect(result.current.error).toBeNull();
@@ -111,7 +111,7 @@ describe("useTerminalMetadata", () => {
     it("sets error on fetch failure", async () => {
       mockList.mockRejectedValueOnce(new Error("Network error"));
 
-      const { result } = renderHook(() => useTerminalMetadata());
+      const { result } = renderHook(() => useTerminalMetadata("test-ws"));
 
       await flushPromises();
 
@@ -123,7 +123,7 @@ describe("useTerminalMetadata", () => {
     it("wraps non-Error thrown values", async () => {
       mockList.mockRejectedValueOnce("string error");
 
-      const { result } = renderHook(() => useTerminalMetadata());
+      const { result } = renderHook(() => useTerminalMetadata("test-ws"));
 
       await flushPromises();
 
@@ -139,18 +139,17 @@ describe("useTerminalMetadata", () => {
         createMockTab({ session_name: "new-sess" }),
       );
 
-      const { result } = renderHook(() => useTerminalMetadata());
+      const { result } = renderHook(() => useTerminalMetadata("test-ws"));
       await flushPromises();
 
       await act(async () => {
         await result.current.createTab("new-sess", "New Tab", 0);
       });
 
-      expect(mockPut).toHaveBeenCalledWith(
-        "new-sess",
-        { label: "New Tab", sort_order: 0 },
-        undefined,
-      );
+      expect(mockPut).toHaveBeenCalledWith("test-ws", "new-sess", {
+        label: "New Tab",
+        sort_order: 0,
+      });
       expect(result.current.tabs).toHaveLength(1);
       expect(result.current.tabs[0].session_name).toBe("new-sess");
     });
@@ -159,7 +158,7 @@ describe("useTerminalMetadata", () => {
       mockList.mockResolvedValueOnce([]);
       mockPut.mockRejectedValueOnce(new Error("Create failed"));
 
-      const { result } = renderHook(() => useTerminalMetadata());
+      const { result } = renderHook(() => useTerminalMetadata("test-ws"));
       await flushPromises();
 
       await act(async () => {
@@ -177,7 +176,7 @@ describe("useTerminalMetadata", () => {
       mockList.mockResolvedValueOnce([tab]);
       mockPatch.mockResolvedValueOnce(createMockTab({ label: "Renamed" }));
 
-      const { result } = renderHook(() => useTerminalMetadata());
+      const { result } = renderHook(() => useTerminalMetadata("test-ws"));
       await flushPromises();
 
       await act(async () => {
@@ -185,11 +184,9 @@ describe("useTerminalMetadata", () => {
       });
 
       expect(result.current.tabs[0].label).toBe("Renamed");
-      expect(mockPatch).toHaveBeenCalledWith(
-        "sess-1",
-        { label: "Renamed" },
-        undefined,
-      );
+      expect(mockPatch).toHaveBeenCalledWith("test-ws", "sess-1", {
+        label: "Renamed",
+      });
     });
 
     it("rolls back label on error and sets error state", async () => {
@@ -197,7 +194,7 @@ describe("useTerminalMetadata", () => {
       mockList.mockResolvedValueOnce([tab]);
       mockPatch.mockRejectedValueOnce(new Error("Patch failed"));
 
-      const { result } = renderHook(() => useTerminalMetadata());
+      const { result } = renderHook(() => useTerminalMetadata("test-ws"));
       await flushPromises();
 
       expect(result.current.tabs).toHaveLength(1);
@@ -208,11 +205,9 @@ describe("useTerminalMetadata", () => {
 
       // Verify error was set and API was called
       expect(result.current.error?.message).toBe("Patch failed");
-      expect(mockPatch).toHaveBeenCalledWith(
-        "sess-1",
-        { label: "Renamed" },
-        undefined,
-      );
+      expect(mockPatch).toHaveBeenCalledWith("test-ws", "sess-1", {
+        label: "Renamed",
+      });
     });
   });
 
@@ -221,7 +216,7 @@ describe("useTerminalMetadata", () => {
       mockList.mockResolvedValueOnce([createMockTab()]);
       mockPatch.mockResolvedValueOnce(createMockTab({ notes: "my notes" }));
 
-      const { result } = renderHook(() => useTerminalMetadata());
+      const { result } = renderHook(() => useTerminalMetadata("test-ws"));
       await flushPromises();
 
       await act(async () => {
@@ -229,11 +224,9 @@ describe("useTerminalMetadata", () => {
       });
 
       expect(result.current.tabs[0].notes).toBe("my notes");
-      expect(mockPatch).toHaveBeenCalledWith(
-        "sess-1",
-        { notes: "my notes" },
-        undefined,
-      );
+      expect(mockPatch).toHaveBeenCalledWith("test-ws", "sess-1", {
+        notes: "my notes",
+      });
     });
   });
 
@@ -242,7 +235,7 @@ describe("useTerminalMetadata", () => {
       mockList.mockResolvedValueOnce([createMockTab({ pinned: false })]);
       mockPatch.mockResolvedValueOnce(createMockTab({ pinned: true }));
 
-      const { result } = renderHook(() => useTerminalMetadata());
+      const { result } = renderHook(() => useTerminalMetadata("test-ws"));
       await flushPromises();
 
       await act(async () => {
@@ -250,11 +243,9 @@ describe("useTerminalMetadata", () => {
       });
 
       expect(result.current.tabs[0].pinned).toBe(true);
-      expect(mockPatch).toHaveBeenCalledWith(
-        "sess-1",
-        { pinned: true },
-        undefined,
-      );
+      expect(mockPatch).toHaveBeenCalledWith("test-ws", "sess-1", {
+        pinned: true,
+      });
     });
   });
 
@@ -267,7 +258,7 @@ describe("useTerminalMetadata", () => {
       mockList.mockResolvedValueOnce(tabs);
       mockPatch.mockResolvedValue(createMockTab());
 
-      const { result } = renderHook(() => useTerminalMetadata());
+      const { result } = renderHook(() => useTerminalMetadata("test-ws"));
       await flushPromises();
 
       await act(async () => {
@@ -289,7 +280,7 @@ describe("useTerminalMetadata", () => {
       mockList.mockResolvedValueOnce(tabs);
       mockPatch.mockRejectedValueOnce(new Error("Reorder failed"));
 
-      const { result } = renderHook(() => useTerminalMetadata());
+      const { result } = renderHook(() => useTerminalMetadata("test-ws"));
       await flushPromises();
 
       expect(result.current.tabs).toHaveLength(2);
@@ -312,7 +303,7 @@ describe("useTerminalMetadata", () => {
       mockList.mockResolvedValueOnce(tabs);
       mockDelete.mockResolvedValueOnce(undefined);
 
-      const { result } = renderHook(() => useTerminalMetadata());
+      const { result } = renderHook(() => useTerminalMetadata("test-ws"));
       await flushPromises();
 
       await act(async () => {
@@ -321,14 +312,14 @@ describe("useTerminalMetadata", () => {
 
       expect(result.current.tabs).toHaveLength(1);
       expect(result.current.tabs[0].session_name).toBe("b");
-      expect(mockDelete).toHaveBeenCalledWith("a", undefined);
+      expect(mockDelete).toHaveBeenCalledWith("test-ws", "a");
     });
 
     it("sets error on delete failure", async () => {
       mockList.mockResolvedValueOnce([createMockTab()]);
       mockDelete.mockRejectedValueOnce(new Error("Delete failed"));
 
-      const { result } = renderHook(() => useTerminalMetadata());
+      const { result } = renderHook(() => useTerminalMetadata("test-ws"));
       await flushPromises();
 
       expect(result.current.tabs).toHaveLength(1);
@@ -338,7 +329,7 @@ describe("useTerminalMetadata", () => {
       });
 
       expect(result.current.error?.message).toBe("Delete failed");
-      expect(mockDelete).toHaveBeenCalledWith("sess-1", undefined);
+      expect(mockDelete).toHaveBeenCalledWith("test-ws", "sess-1");
     });
   });
 
@@ -347,7 +338,7 @@ describe("useTerminalMetadata", () => {
       mockList.mockResolvedValueOnce([createMockTab()]);
       mockPatch.mockResolvedValueOnce(createMockTab({ issue_id: "PROJ-1" }));
 
-      const { result } = renderHook(() => useTerminalMetadata());
+      const { result } = renderHook(() => useTerminalMetadata("test-ws"));
       await flushPromises();
 
       await act(async () => {
@@ -355,18 +346,16 @@ describe("useTerminalMetadata", () => {
       });
 
       expect(result.current.tabs[0].issue_id).toBe("PROJ-1");
-      expect(mockPatch).toHaveBeenCalledWith(
-        "sess-1",
-        { issue_id: "PROJ-1" },
-        undefined,
-      );
+      expect(mockPatch).toHaveBeenCalledWith("test-ws", "sess-1", {
+        issue_id: "PROJ-1",
+      });
     });
 
     it("optimistically removes issue_id on unlink", async () => {
       mockList.mockResolvedValueOnce([createMockTab({ issue_id: "PROJ-1" })]);
       mockPatch.mockResolvedValueOnce(createMockTab());
 
-      const { result } = renderHook(() => useTerminalMetadata());
+      const { result } = renderHook(() => useTerminalMetadata("test-ws"));
       await flushPromises();
 
       await act(async () => {
@@ -374,11 +363,9 @@ describe("useTerminalMetadata", () => {
       });
 
       expect(result.current.tabs[0].issue_id).toBeUndefined();
-      expect(mockPatch).toHaveBeenCalledWith(
-        "sess-1",
-        { issue_id: "" },
-        undefined,
-      );
+      expect(mockPatch).toHaveBeenCalledWith("test-ws", "sess-1", {
+        issue_id: "",
+      });
     });
   });
 
@@ -386,7 +373,7 @@ describe("useTerminalMetadata", () => {
     it("ignores mutations with wrong type", async () => {
       mockList.mockResolvedValueOnce([]);
 
-      const { result } = renderHook(() => useTerminalMetadata());
+      const { result } = renderHook(() => useTerminalMetadata("test-ws"));
       await flushPromises();
 
       const callCount = mockList.mock.calls.length;
@@ -409,7 +396,7 @@ describe("useTerminalMetadata", () => {
     it("triggers debounced refetch for terminal_metadata mutations", async () => {
       mockList.mockResolvedValueOnce([]);
 
-      const { result } = renderHook(() => useTerminalMetadata());
+      const { result } = renderHook(() => useTerminalMetadata("test-ws"));
       await flushPromises();
 
       const callCount = mockList.mock.calls.length;
@@ -438,7 +425,7 @@ describe("useTerminalMetadata", () => {
     it("debounces multiple rapid mutations into single refetch", async () => {
       mockList.mockResolvedValueOnce([]);
 
-      const { result } = renderHook(() => useTerminalMetadata());
+      const { result } = renderHook(() => useTerminalMetadata("test-ws"));
       await flushPromises();
 
       const callCount = mockList.mock.calls.length;
@@ -476,7 +463,7 @@ describe("useTerminalMetadata", () => {
     it("can manually trigger refetch", async () => {
       mockList.mockResolvedValueOnce([]);
 
-      const { result } = renderHook(() => useTerminalMetadata());
+      const { result } = renderHook(() => useTerminalMetadata("test-ws"));
       await flushPromises();
 
       const updatedTabs = [createMockTab({ label: "Updated" })];
@@ -500,7 +487,9 @@ describe("useTerminalMetadata", () => {
           }),
       );
 
-      const { result, unmount } = renderHook(() => useTerminalMetadata());
+      const { result, unmount } = renderHook(() =>
+        useTerminalMetadata("test-ws"),
+      );
 
       unmount();
 
@@ -515,7 +504,9 @@ describe("useTerminalMetadata", () => {
     it("clears debounce timer on unmount", async () => {
       mockList.mockResolvedValueOnce([]);
 
-      const { result, unmount } = renderHook(() => useTerminalMetadata());
+      const { result, unmount } = renderHook(() =>
+        useTerminalMetadata("test-ws"),
+      );
       await flushPromises();
 
       act(() => {

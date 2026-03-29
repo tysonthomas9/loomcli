@@ -1,7 +1,7 @@
 // Package sessionhistory provides Redis-backed persistence for terminal session audit records.
 //
-// Each issue gets a Redis key at "issue:sessions:{issueId}" storing a JSON-encoded
-// SessionHistory blob. No TTL — session history persists indefinitely.
+// Each issue gets a Redis key at "ws:{workspaceID}:issue:sessions:{issueId}" storing
+// a JSON-encoded SessionHistory blob. No TTL — session history persists indefinitely.
 package sessionhistory
 
 import (
@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"regexp"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -41,6 +42,8 @@ type SessionHistory struct {
 }
 
 // Store provides Redis-backed persistence for session history.
+// Workspace identity is passed per-operation (matching the tabmeta pattern),
+// not embedded in the struct. One Store instance serves all workspaces.
 type Store struct {
 	client *redis.Client
 	logger *slog.Logger
@@ -59,8 +62,8 @@ func (s *Store) Close() error {
 	return s.client.Close()
 }
 
-func issueKey(issueID string) string {
-	return keyPrefix + issueID
+func issueKey(workspaceID, issueID string) string {
+	return "ws:" + workspaceID + ":" + keyPrefix + issueID
 }
 
 // ValidateIssueID returns an error if the issue ID is invalid.
@@ -75,12 +78,12 @@ func ValidateIssueID(id string) error {
 }
 
 // Add appends a session record to the history for an issue.
-func (s *Store) Add(ctx context.Context, record SessionRecord) error {
+func (s *Store) Add(ctx context.Context, workspaceID string, record SessionRecord) error {
 	if err := ValidateIssueID(record.IssueID); err != nil {
 		return err
 	}
 
-	key := issueKey(record.IssueID)
+	key := issueKey(workspaceID, record.IssueID)
 	history, err := s.getHistory(ctx, key)
 	if err != nil {
 		return fmt.Errorf("get history for add: %w", err)
@@ -94,12 +97,12 @@ func (s *Store) Add(ctx context.Context, record SessionRecord) error {
 
 // List returns all session records for an issue, sorted by StartedAt descending.
 // Returns an empty slice (not nil) for unknown issues.
-func (s *Store) List(ctx context.Context, issueID string) ([]SessionRecord, error) {
+func (s *Store) List(ctx context.Context, workspaceID, issueID string) ([]SessionRecord, error) {
 	if err := ValidateIssueID(issueID); err != nil {
 		return nil, err
 	}
 
-	history, err := s.getHistory(ctx, issueKey(issueID))
+	history, err := s.getHistory(ctx, issueKey(workspaceID, issueID))
 	if err != nil {
 		return nil, fmt.Errorf("get history for list: %w", err)
 	}
@@ -118,12 +121,12 @@ func (s *Store) List(ctx context.Context, issueID string) ([]SessionRecord, erro
 }
 
 // Complete marks an active session as completed, setting EndedAt and ScrollbackPath.
-func (s *Store) Complete(ctx context.Context, issueID, sessionName, scrollbackPath string) error {
+func (s *Store) Complete(ctx context.Context, workspaceID, issueID, sessionName, scrollbackPath string) error {
 	if err := ValidateIssueID(issueID); err != nil {
 		return err
 	}
 
-	key := issueKey(issueID)
+	key := issueKey(workspaceID, issueID)
 	history, err := s.getHistory(ctx, key)
 	if err != nil {
 		return fmt.Errorf("get history for complete: %w", err)
@@ -162,6 +165,46 @@ func (s *Store) getHistory(ctx context.Context, key string) (*SessionHistory, er
 		return nil, fmt.Errorf("unmarshal: %w", err)
 	}
 	return &history, nil
+}
+
+// MigrateLegacyKeys scans for keys in the old format (issue:sessions:{issueID})
+// and renames them to the workspace-namespaced format (ws:{workspaceID}:issue:sessions:{issueID}).
+// Returns the count of migrated keys. Idempotent — skips keys already namespaced.
+func (s *Store) MigrateLegacyKeys(ctx context.Context, targetWorkspaceID string) (int, error) {
+	var cursor uint64
+	migrated := 0
+
+	for {
+		keys, nextCursor, err := s.client.Scan(ctx, cursor, keyPrefix+"*", 100).Result()
+		if err != nil {
+			return migrated, fmt.Errorf("scan legacy keys: %w", err)
+		}
+
+		for _, key := range keys {
+			// Skip keys that already have the workspace prefix.
+			if strings.HasPrefix(key, "ws:") {
+				continue
+			}
+
+			// Extract issueID from "issue:sessions:{issueID}".
+			id := strings.TrimPrefix(key, keyPrefix)
+			newKey := issueKey(targetWorkspaceID, id)
+
+			if err := s.client.Rename(ctx, key, newKey).Err(); err != nil {
+				// Key may have been renamed by a concurrent process — skip.
+				s.logger.Warn("failed to rename legacy key", "key", key, "err", err)
+				continue
+			}
+			migrated++
+		}
+
+		cursor = nextCursor
+		if cursor == 0 {
+			break
+		}
+	}
+
+	return migrated, nil
 }
 
 func (s *Store) saveHistory(ctx context.Context, key string, history *SessionHistory) error {

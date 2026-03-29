@@ -15,6 +15,7 @@ import { getReviewType } from "@/utils/issueCategory";
 import { StatusDropdown } from "@/components/StatusDropdown";
 import { ErrorToast } from "@/components/ErrorToast";
 import { updateIssue } from "@/api";
+import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
 
 import styles from "./IssueDetailView.module.css";
 
@@ -169,6 +170,7 @@ export function IssueDetailView({
   onNavigateToIssue,
   onIssueUpdate,
 }: IssueDetailViewProps): JSX.Element {
+  const { workspaceId } = useWorkspaceContext();
   const [showRejectForm, setShowRejectForm] = useState(false);
   const [rejectComment, setRejectComment] = useState("");
   const [isApproving, setIsApproving] = useState(false);
@@ -225,7 +227,9 @@ export function IssueDetailView({
       setIsSavingStatus(true);
       setStatusError(null);
       try {
-        const updatedIssue = await updateIssue(issue.id, { status: newStatus });
+        const updatedIssue = await updateIssue(workspaceId, issue.id, {
+          status: newStatus,
+        });
         onIssueUpdate?.(updatedIssue);
       } catch (err) {
         const message =

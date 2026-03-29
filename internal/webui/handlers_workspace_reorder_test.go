@@ -25,7 +25,7 @@ func TestWorkspaceReorder_ValidNames(t *testing.T) {
 	handler := handleWorkspaceReorder(mockWorkspaceConfigFn)
 
 	body := strings.NewReader(`{"order":["gamma","alpha","beta"]}`)
-	req := httptest.NewRequest(http.MethodPut, "/api/workspace/order", body)
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/order", body)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -76,7 +76,7 @@ func TestWorkspaceReorder_FiltersUnknownNames(t *testing.T) {
 
 	// Include unknown names that should be filtered out
 	body := strings.NewReader(`{"order":["beta","nonexistent","alpha","also-unknown"]}`)
-	req := httptest.NewRequest(http.MethodPut, "/api/workspace/order", body)
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/order", body)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -106,7 +106,7 @@ func TestWorkspaceReorder_FiltersUnknownNames(t *testing.T) {
 func TestWorkspaceReorder_EmptyBody(t *testing.T) {
 	handler := handleWorkspaceReorder(nil)
 
-	req := httptest.NewRequest(http.MethodPut, "/api/workspace/order", strings.NewReader(""))
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/order", strings.NewReader(""))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -140,7 +140,7 @@ func TestWorkspaceReorder_EmptyOrderArray(t *testing.T) {
 	handler := handleWorkspaceReorder(nil)
 
 	body := strings.NewReader(`{"order":[]}`)
-	req := httptest.NewRequest(http.MethodPut, "/api/workspace/order", body)
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/order", body)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -169,7 +169,7 @@ func TestWorkspaceReorder_NoConfigFound(t *testing.T) {
 	handler := handleWorkspaceReorder(nil)
 
 	body := strings.NewReader(`{"order":["alpha"]}`)
-	req := httptest.NewRequest(http.MethodPut, "/api/workspace/order", body)
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/order", body)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -210,7 +210,7 @@ func TestWorkspaceReorder_ConfigSaveFails(t *testing.T) {
 	})
 
 	body := strings.NewReader(`{"order":["alpha"]}`)
-	req := httptest.NewRequest(http.MethodPut, "/api/workspace/order", body)
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/order", body)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -233,7 +233,7 @@ func TestWorkspaceReorder_RequestBodyTooLarge(t *testing.T) {
 
 	// Create a JSON body larger than 1MB (maxRequestBody)
 	largeBody := `{"order":["` + strings.Repeat("a", 1<<20+1) + `"]}`
-	req := httptest.NewRequest(http.MethodPut, "/api/workspace/order", strings.NewReader(largeBody))
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/order", strings.NewReader(largeBody))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -266,7 +266,7 @@ func TestWorkspaceReorder_NilWorkspaceConfigFn(t *testing.T) {
 	handler := handleWorkspaceReorder(nil)
 
 	body := strings.NewReader(`{"order":["beta","alpha"]}`)
-	req := httptest.NewRequest(http.MethodPut, "/api/workspace/order", body)
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/order", body)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -294,7 +294,7 @@ func TestWorkspaceReorder_InvalidJSON(t *testing.T) {
 	handler := handleWorkspaceReorder(nil)
 
 	body := strings.NewReader(`{invalid json}`)
-	req := httptest.NewRequest(http.MethodPut, "/api/workspace/order", body)
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/order", body)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -309,5 +309,146 @@ func TestWorkspaceReorder_InvalidJSON(t *testing.T) {
 	}
 	if !strings.Contains(resp.Error, "invalid request body") {
 		t.Errorf("expected 'invalid request body' in error, got: %s", resp.Error)
+	}
+}
+
+func TestWorkspaceReorder_ResolvesUUIDs(t *testing.T) {
+	dir := t.TempDir()
+	setLoomConfigDir(t, dir)
+
+	writeTestLoomConfig(t, dir, &loomConfigForRename{
+		Version: 1,
+		Workspaces: map[string]loomWorkspaceForRename{
+			"alpha": {ID: "uuid-1", Path: "/a"},
+			"beta":  {ID: "uuid-2", Path: "/b"},
+		},
+	})
+
+	handler := handleWorkspaceReorder(nil)
+
+	body := strings.NewReader(`{"order":["uuid-2","uuid-1"]}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/order", body)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp workspaceResponse
+	json.NewDecoder(rec.Body).Decode(&resp)
+	if !resp.Success {
+		t.Fatalf("expected success, got error: %s", resp.Error)
+	}
+
+	cfg := readTestLoomConfig(t, dir)
+	if len(cfg.WorkspaceOrder) != 2 {
+		t.Fatalf("expected 2 items in workspace_order, got %d: %v", len(cfg.WorkspaceOrder), cfg.WorkspaceOrder)
+	}
+	if cfg.WorkspaceOrder[0] != "beta" {
+		t.Errorf("workspace_order[0] = %q, want %q", cfg.WorkspaceOrder[0], "beta")
+	}
+	if cfg.WorkspaceOrder[1] != "alpha" {
+		t.Errorf("workspace_order[1] = %q, want %q", cfg.WorkspaceOrder[1], "alpha")
+	}
+}
+
+func TestWorkspaceReorder_MixedNamesAndUUIDs(t *testing.T) {
+	dir := t.TempDir()
+	setLoomConfigDir(t, dir)
+
+	writeTestLoomConfig(t, dir, &loomConfigForRename{
+		Version: 1,
+		Workspaces: map[string]loomWorkspaceForRename{
+			"alpha": {ID: "uuid-1", Path: "/a"},
+			"beta":  {ID: "uuid-2", Path: "/b"},
+			"gamma": {ID: "uuid-3", Path: "/c"},
+		},
+	})
+
+	handler := handleWorkspaceReorder(nil)
+
+	body := strings.NewReader(`{"order":["gamma","uuid-1","beta"]}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/order", body)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	cfg := readTestLoomConfig(t, dir)
+	if len(cfg.WorkspaceOrder) != 3 {
+		t.Fatalf("expected 3 items in workspace_order, got %d: %v", len(cfg.WorkspaceOrder), cfg.WorkspaceOrder)
+	}
+	expected := []string{"gamma", "alpha", "beta"}
+	for i, name := range expected {
+		if cfg.WorkspaceOrder[i] != name {
+			t.Errorf("workspace_order[%d] = %q, want %q", i, cfg.WorkspaceOrder[i], name)
+		}
+	}
+}
+
+func TestWorkspaceReorder_DeduplicatesUUIDAndName(t *testing.T) {
+	dir := t.TempDir()
+	setLoomConfigDir(t, dir)
+
+	writeTestLoomConfig(t, dir, &loomConfigForRename{
+		Version: 1,
+		Workspaces: map[string]loomWorkspaceForRename{
+			"alpha": {ID: "uuid-1", Path: "/a"},
+			"beta":  {ID: "uuid-2", Path: "/b"},
+		},
+	})
+
+	handler := handleWorkspaceReorder(nil)
+
+	// uuid-1 resolves to "alpha", which also appears later — should be deduped
+	body := strings.NewReader(`{"order":["uuid-1","beta","alpha"]}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/order", body)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	cfg := readTestLoomConfig(t, dir)
+	if len(cfg.WorkspaceOrder) != 2 {
+		t.Fatalf("expected 2 items in workspace_order, got %d: %v", len(cfg.WorkspaceOrder), cfg.WorkspaceOrder)
+	}
+	if cfg.WorkspaceOrder[0] != "alpha" {
+		t.Errorf("workspace_order[0] = %q, want %q", cfg.WorkspaceOrder[0], "alpha")
+	}
+	if cfg.WorkspaceOrder[1] != "beta" {
+		t.Errorf("workspace_order[1] = %q, want %q", cfg.WorkspaceOrder[1], "beta")
+	}
+}
+
+func TestWorkspaceReorder_AllUUIDsUnknown(t *testing.T) {
+	dir := t.TempDir()
+	setLoomConfigDir(t, dir)
+
+	writeTestLoomConfig(t, dir, &loomConfigForRename{
+		Version: 1,
+		Workspaces: map[string]loomWorkspaceForRename{
+			"alpha": {ID: "uuid-1", Path: "/a"},
+		},
+	})
+
+	handler := handleWorkspaceReorder(nil)
+
+	body := strings.NewReader(`{"order":["unknown-uuid-1","unknown-uuid-2"]}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/order", body)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	cfg := readTestLoomConfig(t, dir)
+	if len(cfg.WorkspaceOrder) != 0 {
+		t.Errorf("expected empty workspace_order, got %v", cfg.WorkspaceOrder)
 	}
 }

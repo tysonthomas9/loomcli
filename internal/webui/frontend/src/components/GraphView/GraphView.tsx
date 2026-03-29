@@ -15,6 +15,8 @@ import {
 import { useState, useMemo, useCallback, useEffect } from "react";
 
 import "@xyflow/react/dist/style.css";
+import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
+import { wsGet, wsSet } from "@/utils/scopedStorage";
 import {
   IssueNode,
   DependencyEdge,
@@ -39,9 +41,10 @@ import type { Status } from "@/types/status";
 
 import styles from "./GraphView.module.css";
 
-const STORAGE_KEY_SHOW_CLOSED = "graph-show-closed";
-const STORAGE_KEY_STATUS_FILTER = "graph-status-filter";
-const STORAGE_KEY_DEP_TYPE_FILTER = "graph-dep-type-filter";
+// Scoped key suffixes for graph view state
+const SK_SHOW_CLOSED = "graph-show-closed";
+const SK_STATUS_FILTER = "graph-status-filter";
+const SK_DEP_TYPE_FILTER = "graph-dep-type-filter";
 
 /**
  * Dependency types for each filter group.
@@ -186,92 +189,108 @@ export function GraphView({
   showControls = true,
   className,
 }: GraphViewProps): JSX.Element {
+  const { workspaceId } = useWorkspaceContext();
   const [highlightReady, setHighlightReady] = useState(false);
   const [showBlockedOnly, setShowBlockedOnly] = useState(false);
   const [legendCollapsed, setLegendCollapsed] = useState(true);
 
-  // Initialize showClosed from localStorage, default to true
+  // Initialize showClosed from scoped localStorage, default to true
   const [showClosed, setShowClosed] = useState(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY_SHOW_CLOSED);
-      return stored === null ? true : stored === "true";
-    } catch {
-      // Silently fail if localStorage is unavailable (private browsing, quota exceeded)
-      return true;
-    }
+    if (!workspaceId) return true;
+    const stored = wsGet(workspaceId, SK_SHOW_CLOSED);
+    return stored === null ? true : stored === "true";
   });
 
-  // Persist showClosed preference to localStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY_SHOW_CLOSED, String(showClosed));
-    } catch {
-      // Silently fail if localStorage is unavailable (private browsing, quota exceeded)
-    }
-  }, [showClosed]);
-
-  // Initialize statusFilter from localStorage, default to 'all'
+  // Initialize statusFilter from scoped localStorage, default to 'all'
   const [statusFilter, setStatusFilter] = useState<Status | "all">(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY_STATUS_FILTER);
-      // Validate stored value is a valid status filter
-      if (stored && VALID_STATUS_FILTERS.includes(stored as Status | "all")) {
-        return stored as Status | "all";
-      }
-      return "all";
-    } catch {
-      // Silently fail if localStorage is unavailable (private browsing, quota exceeded)
-      return "all";
+    if (!workspaceId) return "all";
+    const stored = wsGet(workspaceId, SK_STATUS_FILTER);
+    if (stored && VALID_STATUS_FILTERS.includes(stored as Status | "all")) {
+      return stored as Status | "all";
     }
+    return "all";
   });
 
-  // Persist statusFilter preference to localStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY_STATUS_FILTER, statusFilter);
-    } catch {
-      // Silently fail if localStorage is unavailable (private browsing, quota exceeded)
-    }
-  }, [statusFilter]);
-
-  // Initialize dependencyTypeFilter from localStorage, default to blocking + parent-child
+  // Initialize dependencyTypeFilter from scoped localStorage, default to blocking + parent-child
   const [dependencyTypeFilter, setDependencyTypeFilter] = useState<
     Set<DependencyTypeGroup>
   >(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY_DEP_TYPE_FILTER);
-      if (stored) {
+    if (!workspaceId) return DEFAULT_DEP_TYPE_FILTER;
+    const stored = wsGet(workspaceId, SK_DEP_TYPE_FILTER);
+    if (stored) {
+      try {
         const parsed = JSON.parse(stored);
-        // Validate parsed is an array
-        if (!Array.isArray(parsed)) {
-          return DEFAULT_DEP_TYPE_FILTER;
-        }
-        // Validate all values are strings and valid groups
+        if (!Array.isArray(parsed)) return DEFAULT_DEP_TYPE_FILTER;
         const validGroups = parsed.filter(
           (g): g is DependencyTypeGroup =>
             typeof g === "string" &&
             VALID_DEP_TYPE_GROUPS.includes(g as DependencyTypeGroup),
         );
         return new Set(validGroups);
+      } catch {
+        return DEFAULT_DEP_TYPE_FILTER;
       }
-      return DEFAULT_DEP_TYPE_FILTER;
-    } catch {
-      // Silently fail if localStorage is unavailable or invalid JSON
-      return DEFAULT_DEP_TYPE_FILTER;
     }
+    return DEFAULT_DEP_TYPE_FILTER;
   });
 
-  // Persist dependencyTypeFilter preference to localStorage
+  // Re-read scoped state when workspace changes (SPA navigation)
   useEffect(() => {
-    try {
-      localStorage.setItem(
-        STORAGE_KEY_DEP_TYPE_FILTER,
+    if (!workspaceId) return;
+    const storedClosed = wsGet(workspaceId, SK_SHOW_CLOSED);
+    setShowClosed(storedClosed === null ? true : storedClosed === "true");
+
+    const storedStatus = wsGet(workspaceId, SK_STATUS_FILTER);
+    if (
+      storedStatus &&
+      VALID_STATUS_FILTERS.includes(storedStatus as Status | "all")
+    ) {
+      setStatusFilter(storedStatus as Status | "all");
+    } else {
+      setStatusFilter("all");
+    }
+
+    const storedDep = wsGet(workspaceId, SK_DEP_TYPE_FILTER);
+    if (storedDep) {
+      try {
+        const parsed = JSON.parse(storedDep);
+        if (Array.isArray(parsed)) {
+          const validGroups = parsed.filter(
+            (g): g is DependencyTypeGroup =>
+              typeof g === "string" &&
+              VALID_DEP_TYPE_GROUPS.includes(g as DependencyTypeGroup),
+          );
+          setDependencyTypeFilter(new Set(validGroups));
+        } else {
+          setDependencyTypeFilter(DEFAULT_DEP_TYPE_FILTER);
+        }
+      } catch {
+        setDependencyTypeFilter(DEFAULT_DEP_TYPE_FILTER);
+      }
+    } else {
+      setDependencyTypeFilter(DEFAULT_DEP_TYPE_FILTER);
+    }
+  }, [workspaceId]);
+
+  // Persist showClosed preference to scoped localStorage
+  useEffect(() => {
+    if (workspaceId) wsSet(workspaceId, SK_SHOW_CLOSED, String(showClosed));
+  }, [showClosed, workspaceId]);
+
+  // Persist statusFilter preference to scoped localStorage
+  useEffect(() => {
+    if (workspaceId) wsSet(workspaceId, SK_STATUS_FILTER, statusFilter);
+  }, [statusFilter, workspaceId]);
+
+  // Persist dependencyTypeFilter preference to scoped localStorage
+  useEffect(() => {
+    if (workspaceId)
+      wsSet(
+        workspaceId,
+        SK_DEP_TYPE_FILTER,
         JSON.stringify([...dependencyTypeFilter]),
       );
-    } catch {
-      // Silently fail if localStorage is unavailable (private browsing, quota exceeded)
-    }
-  }, [dependencyTypeFilter]);
+  }, [dependencyTypeFilter, workspaceId]);
 
   // Convert dependency type filter groups to DependencyType array for useGraphData
   const includeDependencyTypes = useMemo(
@@ -285,7 +304,10 @@ export function GraphView({
     useState<TooltipPosition | null>(null);
 
   // Fetch blocked issues for ready state calculation
-  const { data: blockedIssues } = useBlockedIssues({ enabled: true });
+  const { data: blockedIssues } = useBlockedIssues({
+    workspaceId,
+    enabled: true,
+  });
   const blockedIssueIds = useMemo(() => {
     if (!blockedIssues) return new Set<string>();
     return new Set(blockedIssues.map((bi) => bi.id));

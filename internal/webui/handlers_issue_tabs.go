@@ -28,6 +28,7 @@ func handleGetIssueTabs(store *issuetabs.Store, manager *TerminalManager) http.H
 			return
 		}
 
+		wsID := WorkspaceFromContext(r.Context())
 		issueID := r.PathValue("issueId")
 		if err := issuetabs.ValidateIssueID(issueID); err != nil {
 			respondJSON(w, http.StatusBadRequest, issueTabResponse{
@@ -37,7 +38,7 @@ func handleGetIssueTabs(store *issuetabs.Store, manager *TerminalManager) http.H
 			return
 		}
 
-		state, err := store.Get(r.Context(), issueID)
+		state, err := store.Get(r.Context(), wsID, issueID)
 		if err != nil {
 			log.Printf("Failed to get issue tab state for %s: %v", issueID, err)
 			respondJSON(w, http.StatusInternalServerError, issueTabResponse{
@@ -72,7 +73,7 @@ func handleGetIssueTabs(store *issuetabs.Store, manager *TerminalManager) http.H
 
 		// Save back filtered state if tabs were removed or active tab changed
 		if len(filtered.Tabs) != len(state.Tabs) || filtered.ActiveTabID != state.ActiveTabID {
-			if err := store.Save(r.Context(), filtered); err != nil {
+			if err := store.Save(r.Context(), wsID, filtered); err != nil {
 				log.Printf("Failed to save filtered issue tab state for %s: %v", issueID, err)
 			}
 		}
@@ -101,6 +102,7 @@ func handleSaveIssueTabs(store *issuetabs.Store, hub *SSEHub) http.HandlerFunc {
 			return
 		}
 
+		wsID := WorkspaceFromContext(r.Context())
 		issueID := r.PathValue("issueId")
 		if err := issuetabs.ValidateIssueID(issueID); err != nil {
 			respondJSON(w, http.StatusBadRequest, issueTabResponse{
@@ -126,7 +128,7 @@ func handleSaveIssueTabs(store *issuetabs.Store, hub *SSEHub) http.HandlerFunc {
 			ActiveTabID: req.ActiveTabID,
 		}
 
-		if err := store.Save(r.Context(), state); err != nil {
+		if err := store.Save(r.Context(), wsID, state); err != nil {
 			log.Printf("Failed to save issue tab state for %s: %v", issueID, err)
 			respondJSON(w, http.StatusInternalServerError, issueTabResponse{
 				Success: false,
@@ -135,12 +137,13 @@ func handleSaveIssueTabs(store *issuetabs.Store, hub *SSEHub) http.HandlerFunc {
 			return
 		}
 
-		// Broadcast SSE event for real-time sync
+		// Broadcast SSE event for real-time sync — workspace derived from middleware context.
 		if hub != nil {
 			hub.Broadcast(&MutationPayload{
-				Type:      "issue_tabs",
-				IssueID:   issueID,
-				Timestamp: time.Now().UTC().Format(time.RFC3339),
+				Type:        "issue_tabs",
+				IssueID:     issueID,
+				Timestamp:   time.Now().UTC().Format(time.RFC3339),
+				WorkspaceID: wsID,
 			})
 		}
 
@@ -162,6 +165,7 @@ func handleDeleteIssueTabs(store *issuetabs.Store) http.HandlerFunc {
 			return
 		}
 
+		wsID := WorkspaceFromContext(r.Context())
 		issueID := r.PathValue("issueId")
 		if err := issuetabs.ValidateIssueID(issueID); err != nil {
 			respondJSON(w, http.StatusBadRequest, issueTabResponse{
@@ -171,7 +175,7 @@ func handleDeleteIssueTabs(store *issuetabs.Store) http.HandlerFunc {
 			return
 		}
 
-		if err := store.Delete(r.Context(), issueID); err != nil {
+		if err := store.Delete(r.Context(), wsID, issueID); err != nil {
 			log.Printf("Failed to delete issue tab state for %s: %v", issueID, err)
 			respondJSON(w, http.StatusInternalServerError, issueTabResponse{
 				Success: false,

@@ -12,6 +12,7 @@ import {
 } from "react";
 
 import { useDebounce, useIssueSearch } from "@/hooks";
+import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
 
 import styles from "./DependencySearchPicker.module.css";
 
@@ -35,13 +36,14 @@ export function DependencySearchPicker({
   onCancel,
   isSaving = false,
 }: DependencySearchPickerProps): JSX.Element {
+  const { workspaceId } = useWorkspaceContext();
   const [inputValue, setInputValue] = useState("");
   const [focusedIndex, setFocusedIndex] = useState(-1);
   const [showDropdown, setShowDropdown] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLUListElement>(null);
 
-  const { results, isLoading, search } = useIssueSearch();
+  const { results, isLoading, search } = useIssueSearch(workspaceId);
   const debouncedQuery = useDebounce(inputValue, 200);
 
   // Trigger search when debounced query changes

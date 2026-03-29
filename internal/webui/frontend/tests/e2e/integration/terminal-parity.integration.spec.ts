@@ -222,7 +222,7 @@ test.describe('Deterministic Terminal Parity', () => {
     await cleanupSessionsMatching(new RegExp(`^loom-[a-zA-Z0-9_-]+-${PARITY_AGENT}-[0-9]+$`));
     await mockLoomEndpoints(page);
 
-    await page.route(`**/api/agents/${PARITY_AGENT}/terminal/info`, async (route) => {
+    await page.route(`**/agents/${PARITY_AGENT}/terminal/info`, async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',

@@ -10,5 +10,6 @@ package webui
 type FileOps interface {
 	// ResolveAgentWorktree resolves an agent name to its worktree info.
 	// Reuses the same AgentWorktree type from gitops.go.
-	ResolveAgentWorktree(name string) (*AgentWorktree, error)
+	// workspaceID scopes discovery to a specific workspace (empty = default).
+	ResolveAgentWorktree(workspaceID, name string) (*AgentWorktree, error)
 }

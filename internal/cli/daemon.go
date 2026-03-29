@@ -103,6 +103,7 @@ type Daemon struct {
 	concurrency *ConcurrencyTracker // enforces per-role concurrency limits
 	eventBus    events.Emitter      // event emission for observability (nil-safe via NopBus default)
 	repos       []RepoConfig        // workspace repos for resolveAgentRepos; nil outside workspace mode
+	workspaceID string              // stable workspace UUID for log namespacing; empty outside workspace mode
 
 	configHash  string       // SHA-256 hash of current running config for no-op detection
 	reconcileMu sync.RWMutex // serializes config writes; readers hold RLock when accessing d.config
@@ -170,9 +171,10 @@ func NewDaemon(config *DaemonConfig, projectDir string, eventBus events.Emitter)
 		eventBus:    eventBus,
 	}
 
-	// Load workspace repos for source repo resolution (best-effort)
+	// Load workspace repos and ID for source repo resolution and log namespacing (best-effort)
 	if ws, err := ResolveActiveWorkspace(); err == nil && ws != nil {
 		d.repos = ws.Repos
+		d.workspaceID = ws.ID
 	}
 
 	for i, entry := range config.Agents {

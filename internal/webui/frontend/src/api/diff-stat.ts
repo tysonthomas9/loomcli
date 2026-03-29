@@ -3,7 +3,7 @@
  * Interfaces with GET /api/issues/{id}/git/diff-stat.
  */
 
-import { get } from "./client";
+import { get, wsUrl } from "./client";
 
 // ============= Types =============
 
@@ -20,8 +20,12 @@ export interface IssueDiffStat {
  * GET /api/issues/{id}/git/diff-stat
  */
 export async function fetchIssueDiffStat(
+  workspaceId: string,
   issueId: string,
 ): Promise<IssueDiffStat> {
-  const url = `/api/issues/${encodeURIComponent(issueId)}/git/diff-stat`;
+  const url = wsUrl(
+    workspaceId,
+    `/issues/${encodeURIComponent(issueId)}/git/diff-stat`,
+  );
   return get<IssueDiffStat>(url);
 }

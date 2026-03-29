@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/workspace"
 )
 
 // IsTmuxAvailable checks if tmux is installed and available.
@@ -27,8 +29,12 @@ func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
 		}
 	}
 
-	// Include PID to prevent session name collisions
-	sessionName := fmt.Sprintf("loom-%s-%s-%d", opts.AgentType, opts.AgentName, os.Getpid())
+	// Resolve workspace ID for session naming and log isolation.
+	wsID := workspace.ResolveWorkspaceID(opts.WorkspaceID)
+	wsPrefix := workspace.ShortWorkspaceID(wsID)
+
+	// Include workspace prefix and PID to prevent session name collisions
+	sessionName := fmt.Sprintf("loom-%s-%s-%s-%d", wsPrefix, opts.AgentType, opts.AgentName, os.Getpid())
 
 	// Setup log file — store outside worktree to avoid polluting git status
 	homeDir, err := os.UserHomeDir()
@@ -36,7 +42,13 @@ func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
 		fmt.Printf("[auto] Warning: could not get home directory: %v\n", err)
 		homeDir = os.TempDir()
 	}
-	logDir := filepath.Join(homeDir, ".loom", "logs")
+	// Namespace log directory by workspace ID to prevent collisions between
+	// same-named agents in different workspaces.
+	workspaceID := wsID
+	if workspaceID == "" {
+		workspaceID = "_default"
+	}
+	logDir := filepath.Join(homeDir, ".loom", "logs", workspaceID)
 	agentLogDir := filepath.Join(logDir, "agents")
 	if err := os.MkdirAll(agentLogDir, 0700); err != nil {
 		fmt.Printf("[auto] Warning: could not create log directory: %v\n", err)
@@ -97,7 +109,11 @@ func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
 		available, err := hasAvailableTasks()
 		if err != nil {
 			fmt.Printf("[auto] Error checking tasks: %v\n", err)
-			time.Sleep(5 * time.Second)
+			if interruptibleSleep(5*time.Second, shutdown) {
+				cleanupTmuxSession(sessionName)
+				printTmuxSummary(taskCount)
+				return
+			}
 			continue
 		}
 		if !available {
@@ -132,7 +148,11 @@ func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
 
 		if err := startTmuxSession(sessionName, opts, logFile); err != nil {
 			fmt.Printf("[auto] Failed to start session: %v\n", err)
-			time.Sleep(5 * time.Second)
+			if interruptibleSleep(5*time.Second, shutdown) {
+				cleanupTmuxSession(sessionName)
+				printTmuxSummary(taskCount)
+				return
+			}
 			continue
 		}
 

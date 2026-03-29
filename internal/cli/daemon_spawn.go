@@ -102,6 +102,11 @@ func (d *Daemon) buildCommand(ap *AgentProcess) *exec.Cmd {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_SOURCE_REPOS=%s", strings.Join(sourceRepos, ",")))
 	}
 
+	// Propagate workspace ID so subprocess can namespace logs
+	if d.workspaceID != "" {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_WORKSPACE_ID=%s", d.workspaceID))
+	}
+
 	return cmd
 }
 
@@ -117,6 +122,10 @@ func (d *Daemon) spawnAgent(ap *AgentProcess) error {
 		logDir := cfg.Daemon.LogDir
 		if !filepath.IsAbs(logDir) {
 			logDir = filepath.Join(d.projectDir, logDir)
+		}
+		// Namespace log directory by workspace ID to isolate logs per workspace
+		if d.workspaceID != "" {
+			logDir = filepath.Join(logDir, d.workspaceID)
 		}
 		if err := os.MkdirAll(logDir, 0700); err != nil {
 			log.Printf("[daemon] Agent %s: failed to create log directory: %v", ap.entry.Worktree, err)

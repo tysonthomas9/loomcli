@@ -5,6 +5,7 @@ import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import type { Priority } from "@/types";
+import { RouterWrapper } from "@/test-utils/router-wrapper";
 
 import {
   useFilterState,
@@ -16,46 +17,44 @@ import {
 } from "../useFilterState";
 
 /**
- * Mock window.location and window.history for URL sync tests.
+ * Mock window.location for parseFromUrl tests (legacy helper that reads window.location).
  */
 function mockWindowLocation(search = ""): void {
   Object.defineProperty(window, "location", {
     value: {
-      pathname: "/issues",
+      pathname: "/app",
       search,
-      href: `http://localhost:3000/issues${search}`,
+      href: `http://localhost:3000/app${search}`,
     },
     writable: true,
     configurable: true,
   });
 }
 
-function mockWindowHistory(): { replaceState: ReturnType<typeof vi.fn> } {
-  const replaceState = vi.fn();
+/**
+ * Mock window.history so jsdom doesn't break when Router tries to use it.
+ */
+function mockWindowHistory(): void {
   Object.defineProperty(window, "history", {
     value: {
-      replaceState,
+      replaceState: vi.fn(),
       pushState: vi.fn(),
     },
     writable: true,
     configurable: true,
   });
-  return { replaceState };
 }
 
 describe("useFilterState", () => {
-  beforeEach(() => {
-    mockWindowLocation();
-    mockWindowHistory();
-  });
-
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
   describe("initial state", () => {
     it("has all fields undefined by default", () => {
-      const { result } = renderHook(() => useFilterState());
+      const { result } = renderHook(() => useFilterState(), {
+        wrapper: RouterWrapper,
+      });
 
       const [state] = result.current;
       expect(state.priority).toBeUndefined();
@@ -65,26 +64,20 @@ describe("useFilterState", () => {
     });
 
     it("returns empty object when no URL params present", () => {
-      mockWindowLocation("");
-      const { result } = renderHook(() => useFilterState());
+      const { result } = renderHook(() => useFilterState(), {
+        wrapper: RouterWrapper,
+      });
 
       const [state] = result.current;
       expect(Object.keys(state)).toHaveLength(0);
-    });
-
-    it("does not read URL when syncUrl is false", () => {
-      mockWindowLocation("?priority=2&type=bug");
-      const { result } = renderHook(() => useFilterState({ syncUrl: false }));
-
-      const [state] = result.current;
-      expect(state.priority).toBeUndefined();
-      expect(state.type).toBeUndefined();
     });
   });
 
   describe("setPriority", () => {
     it("updates state with valid priority", () => {
-      const { result } = renderHook(() => useFilterState({ syncUrl: false }));
+      const { result } = renderHook(() => useFilterState(), {
+        wrapper: RouterWrapper,
+      });
 
       act(() => {
         result.current[1].setPriority(2 as Priority);
@@ -94,7 +87,9 @@ describe("useFilterState", () => {
     });
 
     it("handles P0 (critical) priority correctly", () => {
-      const { result } = renderHook(() => useFilterState({ syncUrl: false }));
+      const { result } = renderHook(() => useFilterState(), {
+        wrapper: RouterWrapper,
+      });
 
       act(() => {
         result.current[1].setPriority(0 as Priority);
@@ -104,7 +99,9 @@ describe("useFilterState", () => {
     });
 
     it("handles P4 (backlog) priority correctly", () => {
-      const { result } = renderHook(() => useFilterState({ syncUrl: false }));
+      const { result } = renderHook(() => useFilterState(), {
+        wrapper: RouterWrapper,
+      });
 
       act(() => {
         result.current[1].setPriority(4 as Priority);
@@ -114,7 +111,9 @@ describe("useFilterState", () => {
     });
 
     it("clears priority when set to undefined", () => {
-      const { result } = renderHook(() => useFilterState({ syncUrl: false }));
+      const { result } = renderHook(() => useFilterState(), {
+        wrapper: RouterWrapper,
+      });
 
       act(() => {
         result.current[1].setPriority(2 as Priority);
@@ -130,7 +129,9 @@ describe("useFilterState", () => {
 
   describe("setType", () => {
     it("updates state with bug type", () => {
-      const { result } = renderHook(() => useFilterState({ syncUrl: false }));
+      const { result } = renderHook(() => useFilterState(), {
+        wrapper: RouterWrapper,
+      });
 
       act(() => {
         result.current[1].setType("bug");
@@ -141,7 +142,9 @@ describe("useFilterState", () => {
 
     it("handles all known issue types", () => {
       const types = ["bug", "feature", "task", "epic", "chore"] as const;
-      const { result } = renderHook(() => useFilterState({ syncUrl: false }));
+      const { result } = renderHook(() => useFilterState(), {
+        wrapper: RouterWrapper,
+      });
 
       for (const type of types) {
         act(() => {
@@ -152,7 +155,9 @@ describe("useFilterState", () => {
     });
 
     it("handles custom issue types", () => {
-      const { result } = renderHook(() => useFilterState({ syncUrl: false }));
+      const { result } = renderHook(() => useFilterState(), {
+        wrapper: RouterWrapper,
+      });
 
       act(() => {
         result.current[1].setType("custom-type");
@@ -162,7 +167,9 @@ describe("useFilterState", () => {
     });
 
     it("clears type when set to undefined", () => {
-      const { result } = renderHook(() => useFilterState({ syncUrl: false }));
+      const { result } = renderHook(() => useFilterState(), {
+        wrapper: RouterWrapper,
+      });
 
       act(() => {
         result.current[1].setType("bug");
@@ -178,7 +185,9 @@ describe("useFilterState", () => {
 
   describe("setLabels", () => {
     it("updates state with single label", () => {
-      const { result } = renderHook(() => useFilterState({ syncUrl: false }));
+      const { result } = renderHook(() => useFilterState(), {
+        wrapper: RouterWrapper,
+      });
 
       act(() => {
         result.current[1].setLabels(["phase-1"]);
@@ -188,7 +197,9 @@ describe("useFilterState", () => {
     });
 
     it("updates state with multiple labels", () => {
-      const { result } = renderHook(() => useFilterState({ syncUrl: false }));
+      const { result } = renderHook(() => useFilterState(), {
+        wrapper: RouterWrapper,
+      });
 
       act(() => {
         result.current[1].setLabels(["phase-1", "frontend"]);
@@ -197,8 +208,10 @@ describe("useFilterState", () => {
       expect(result.current[0].labels).toEqual(["phase-1", "frontend"]);
     });
 
-    it("handles empty array", () => {
-      const { result } = renderHook(() => useFilterState({ syncUrl: false }));
+    it("clears labels when set to empty array", () => {
+      const { result } = renderHook(() => useFilterState(), {
+        wrapper: RouterWrapper,
+      });
 
       act(() => {
         result.current[1].setLabels(["phase-1"]);
@@ -208,12 +221,14 @@ describe("useFilterState", () => {
       act(() => {
         result.current[1].setLabels([]);
       });
-      // Empty array is set directly (not converted to undefined by setLabels)
-      expect(result.current[0].labels).toEqual([]);
+      // Empty array removes the param, so labels becomes undefined
+      expect(result.current[0].labels).toBeUndefined();
     });
 
     it("clears labels when set to undefined", () => {
-      const { result } = renderHook(() => useFilterState({ syncUrl: false }));
+      const { result } = renderHook(() => useFilterState(), {
+        wrapper: RouterWrapper,
+      });
 
       act(() => {
         result.current[1].setLabels(["phase-1"]);
@@ -229,7 +244,9 @@ describe("useFilterState", () => {
 
   describe("setSearch", () => {
     it("updates state with search text", () => {
-      const { result } = renderHook(() => useFilterState({ syncUrl: false }));
+      const { result } = renderHook(() => useFilterState(), {
+        wrapper: RouterWrapper,
+      });
 
       act(() => {
         result.current[1].setSearch("authentication");
@@ -239,7 +256,9 @@ describe("useFilterState", () => {
     });
 
     it("handles search with special characters", () => {
-      const { result } = renderHook(() => useFilterState({ syncUrl: false }));
+      const { result } = renderHook(() => useFilterState(), {
+        wrapper: RouterWrapper,
+      });
 
       act(() => {
         result.current[1].setSearch("bug & feature");
@@ -248,8 +267,10 @@ describe("useFilterState", () => {
       expect(result.current[0].search).toBe("bug & feature");
     });
 
-    it("handles empty string search", () => {
-      const { result } = renderHook(() => useFilterState({ syncUrl: false }));
+    it("clears search when set to empty string", () => {
+      const { result } = renderHook(() => useFilterState(), {
+        wrapper: RouterWrapper,
+      });
 
       act(() => {
         result.current[1].setSearch("test");
@@ -258,12 +279,14 @@ describe("useFilterState", () => {
         result.current[1].setSearch("");
       });
 
-      // Empty string is set directly (not converted to undefined by setSearch)
-      expect(result.current[0].search).toBe("");
+      // Empty string removes the param via updateParam("search", undefined)
+      expect(result.current[0].search).toBeUndefined();
     });
 
     it("clears search when set to undefined", () => {
-      const { result } = renderHook(() => useFilterState({ syncUrl: false }));
+      const { result } = renderHook(() => useFilterState(), {
+        wrapper: RouterWrapper,
+      });
 
       act(() => {
         result.current[1].setSearch("test");
@@ -278,12 +301,18 @@ describe("useFilterState", () => {
 
   describe("clearFilter", () => {
     it("clears only priority when specified", () => {
-      const { result } = renderHook(() => useFilterState({ syncUrl: false }));
+      const { result } = renderHook(() => useFilterState(), {
+        wrapper: RouterWrapper,
+      });
 
       // Set multiple filters
       act(() => {
         result.current[1].setPriority(2 as Priority);
+      });
+      act(() => {
         result.current[1].setType("bug");
+      });
+      act(() => {
         result.current[1].setSearch("test");
       });
 
@@ -298,10 +327,14 @@ describe("useFilterState", () => {
     });
 
     it("clears only type when specified", () => {
-      const { result } = renderHook(() => useFilterState({ syncUrl: false }));
+      const { result } = renderHook(() => useFilterState(), {
+        wrapper: RouterWrapper,
+      });
 
       act(() => {
         result.current[1].setPriority(1 as Priority);
+      });
+      act(() => {
         result.current[1].setType("feature");
       });
 
@@ -314,10 +347,14 @@ describe("useFilterState", () => {
     });
 
     it("clears only labels when specified", () => {
-      const { result } = renderHook(() => useFilterState({ syncUrl: false }));
+      const { result } = renderHook(() => useFilterState(), {
+        wrapper: RouterWrapper,
+      });
 
       act(() => {
         result.current[1].setLabels(["phase-1", "frontend"]);
+      });
+      act(() => {
         result.current[1].setSearch("test");
       });
 
@@ -330,10 +367,14 @@ describe("useFilterState", () => {
     });
 
     it("clears only search when specified", () => {
-      const { result } = renderHook(() => useFilterState({ syncUrl: false }));
+      const { result } = renderHook(() => useFilterState(), {
+        wrapper: RouterWrapper,
+      });
 
       act(() => {
         result.current[1].setSearch("authentication");
+      });
+      act(() => {
         result.current[1].setType("bug");
       });
 
@@ -348,13 +389,21 @@ describe("useFilterState", () => {
 
   describe("clearAll", () => {
     it("resets all filters to empty state", () => {
-      const { result } = renderHook(() => useFilterState({ syncUrl: false }));
+      const { result } = renderHook(() => useFilterState(), {
+        wrapper: RouterWrapper,
+      });
 
       // Set all filters
       act(() => {
         result.current[1].setPriority(2 as Priority);
+      });
+      act(() => {
         result.current[1].setType("bug");
+      });
+      act(() => {
         result.current[1].setLabels(["phase-1", "frontend"]);
+      });
+      act(() => {
         result.current[1].setSearch("authentication");
       });
 
@@ -377,7 +426,9 @@ describe("useFilterState", () => {
     });
 
     it("returns empty object after clearAll", () => {
-      const { result } = renderHook(() => useFilterState({ syncUrl: false }));
+      const { result } = renderHook(() => useFilterState(), {
+        wrapper: RouterWrapper,
+      });
 
       act(() => {
         result.current[1].setPriority(1 as Priority);
@@ -391,10 +442,14 @@ describe("useFilterState", () => {
     });
 
     it("clears groupBy along with other filters", () => {
-      const { result } = renderHook(() => useFilterState({ syncUrl: false }));
+      const { result } = renderHook(() => useFilterState(), {
+        wrapper: RouterWrapper,
+      });
 
       act(() => {
         result.current[1].setGroupBy("epic");
+      });
+      act(() => {
         result.current[1].setPriority(2 as Priority);
       });
 
@@ -412,7 +467,9 @@ describe("useFilterState", () => {
 
   describe("setGroupBy", () => {
     it("updates state with valid groupBy option", () => {
-      const { result } = renderHook(() => useFilterState({ syncUrl: false }));
+      const { result } = renderHook(() => useFilterState(), {
+        wrapper: RouterWrapper,
+      });
 
       act(() => {
         result.current[1].setGroupBy("epic");
@@ -422,26 +479,36 @@ describe("useFilterState", () => {
     });
 
     it("handles all known groupBy options", () => {
-      const options: GroupByOption[] = [
-        "none",
+      // "none" is the default and is not stored in URL, so setGroupBy("none") clears it
+      const storedOptions: GroupByOption[] = [
         "epic",
         "assignee",
         "priority",
         "type",
         "label",
       ];
-      const { result } = renderHook(() => useFilterState({ syncUrl: false }));
+      const { result } = renderHook(() => useFilterState(), {
+        wrapper: RouterWrapper,
+      });
 
-      for (const option of options) {
+      for (const option of storedOptions) {
         act(() => {
           result.current[1].setGroupBy(option);
         });
         expect(result.current[0].groupBy).toBe(option);
       }
+
+      // "none" clears the groupBy param (becomes undefined)
+      act(() => {
+        result.current[1].setGroupBy("none");
+      });
+      expect(result.current[0].groupBy).toBeUndefined();
     });
 
     it("clears groupBy when set to undefined", () => {
-      const { result } = renderHook(() => useFilterState({ syncUrl: false }));
+      const { result } = renderHook(() => useFilterState(), {
+        wrapper: RouterWrapper,
+      });
 
       act(() => {
         result.current[1].setGroupBy("epic");
@@ -457,10 +524,14 @@ describe("useFilterState", () => {
 
   describe("clearFilter for groupBy", () => {
     it("clears only groupBy when specified", () => {
-      const { result } = renderHook(() => useFilterState({ syncUrl: false }));
+      const { result } = renderHook(() => useFilterState(), {
+        wrapper: RouterWrapper,
+      });
 
       act(() => {
         result.current[1].setGroupBy("assignee");
+      });
+      act(() => {
         result.current[1].setType("bug");
       });
 
@@ -475,7 +546,9 @@ describe("useFilterState", () => {
 
   describe("toggling filters", () => {
     it("setting then clearing priority works correctly", () => {
-      const { result } = renderHook(() => useFilterState({ syncUrl: false }));
+      const { result } = renderHook(() => useFilterState(), {
+        wrapper: RouterWrapper,
+      });
 
       // Set priority
       act(() => {
@@ -497,7 +570,9 @@ describe("useFilterState", () => {
     });
 
     it("changing type multiple times works correctly", () => {
-      const { result } = renderHook(() => useFilterState({ syncUrl: false }));
+      const { result } = renderHook(() => useFilterState(), {
+        wrapper: RouterWrapper,
+      });
 
       act(() => {
         result.current[1].setType("bug");
@@ -516,7 +591,9 @@ describe("useFilterState", () => {
     });
 
     it("adding and removing labels works correctly", () => {
-      const { result } = renderHook(() => useFilterState({ syncUrl: false }));
+      const { result } = renderHook(() => useFilterState(), {
+        wrapper: RouterWrapper,
+      });
 
       // Add initial labels
       act(() => {
@@ -876,287 +953,11 @@ describe("isEmptyFilter", () => {
   });
 });
 
-describe("URL synchronization", () => {
-  let historyMock: { replaceState: ReturnType<typeof vi.fn> };
-
-  beforeEach(() => {
-    mockWindowLocation("");
-    historyMock = mockWindowHistory();
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it("updates URL when filter state changes", () => {
-    const { result } = renderHook(() => useFilterState());
-
-    act(() => {
-      result.current[1].setPriority(2 as Priority);
-    });
-
-    expect(historyMock.replaceState).toHaveBeenCalledWith(
-      null,
-      "",
-      "/issues?priority=2",
-    );
-  });
-
-  it("removes query string when all filters cleared", () => {
-    const { result } = renderHook(() => useFilterState());
-
-    act(() => {
-      result.current[1].setPriority(1 as Priority);
-    });
-
-    act(() => {
-      result.current[1].clearAll();
-    });
-
-    // Last call should be to pathname only (no query string)
-    const lastCall = historyMock.replaceState.mock.calls.at(-1);
-    expect(lastCall?.[2]).toBe("/issues");
-  });
-
-  it("preserves pathname when updating URL", () => {
-    mockWindowLocation("");
-    Object.defineProperty(window.location, "pathname", {
-      value: "/board",
-      configurable: true,
-    });
-
-    const { result } = renderHook(() => useFilterState());
-
-    act(() => {
-      result.current[1].setType("bug");
-    });
-
-    expect(historyMock.replaceState).toHaveBeenCalledWith(
-      null,
-      "",
-      "/board?type=bug",
-    );
-  });
-
-  it("initializes from URL params on mount", () => {
-    mockWindowLocation("?priority=3&type=feature");
-
-    const { result } = renderHook(() => useFilterState());
-
-    expect(result.current[0].priority).toBe(3);
-    expect(result.current[0].type).toBe("feature");
-  });
-
-  it("does not sync URL when syncUrl is false", () => {
-    const { result } = renderHook(() => useFilterState({ syncUrl: false }));
-
-    act(() => {
-      result.current[1].setPriority(2 as Priority);
-    });
-
-    // replaceState should not be called for filter changes
-    // (it may be called initially, so we check specifically for our change)
-    const calls = historyMock.replaceState.mock.calls;
-    const priorityCall = calls.find((call) => call[2]?.includes("priority=2"));
-    expect(priorityCall).toBeUndefined();
-  });
-
-  it("updates URL when groupBy changes", () => {
-    const { result } = renderHook(() => useFilterState());
-
-    act(() => {
-      result.current[1].setGroupBy("assignee");
-    });
-
-    expect(historyMock.replaceState).toHaveBeenCalledWith(
-      null,
-      "",
-      "/issues?groupBy=assignee",
-    );
-  });
-
-  it("adds groupBy=epic to URL (epic is no longer default)", () => {
-    const { result } = renderHook(() => useFilterState());
-
-    act(() => {
-      result.current[1].setGroupBy("epic");
-    });
-
-    const lastCall = historyMock.replaceState.mock.calls.at(-1);
-    expect(lastCall?.[2]).toBe("/issues?groupBy=epic");
-  });
-
-  it("initializes groupBy from URL params on mount", () => {
-    mockWindowLocation("?groupBy=priority");
-
-    const { result } = renderHook(() => useFilterState());
-
-    expect(result.current[0].groupBy).toBe("priority");
-  });
-
-  it("does not add groupBy=none to URL", () => {
-    const { result } = renderHook(() => useFilterState());
-
-    act(() => {
-      result.current[1].setGroupBy("none");
-    });
-
-    // When groupBy is 'none', the URL should not include it (it's the default)
-    const lastCall = historyMock.replaceState.mock.calls.at(-1);
-    expect(lastCall?.[2]).toBe("/issues");
-  });
-});
-
-describe("popstate handling", () => {
-  beforeEach(() => {
-    mockWindowLocation("");
-    mockWindowHistory();
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it("updates state on browser back/forward navigation", () => {
-    mockWindowLocation("?priority=1");
-    const { result } = renderHook(() => useFilterState());
-
-    expect(result.current[0].priority).toBe(1);
-
-    // Simulate browser navigation (change URL and fire popstate)
-    act(() => {
-      mockWindowLocation("?priority=3&type=bug");
-      window.dispatchEvent(new PopStateEvent("popstate"));
-    });
-
-    expect(result.current[0].priority).toBe(3);
-    expect(result.current[0].type).toBe("bug");
-  });
-
-  it("cleans up popstate listener on unmount", () => {
-    const removeEventListenerSpy = vi.spyOn(window, "removeEventListener");
-
-    const { unmount } = renderHook(() => useFilterState());
-
-    unmount();
-
-    expect(removeEventListenerSpy).toHaveBeenCalledWith(
-      "popstate",
-      expect.any(Function),
-    );
-  });
-
-  it("does not add popstate listener when syncUrl is false", () => {
-    const addEventListenerSpy = vi.spyOn(window, "addEventListener");
-
-    renderHook(() => useFilterState({ syncUrl: false }));
-
-    const popstateCall = addEventListenerSpy.mock.calls.find(
-      (call) => call[0] === "popstate",
-    );
-    expect(popstateCall).toBeUndefined();
-  });
-});
-
-describe("preserving non-filter URL params", () => {
-  let historyMock: { replaceState: ReturnType<typeof vi.fn> };
-
-  beforeEach(() => {
-    historyMock = mockWindowHistory();
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it("preserves view, repos, and workspace params when setting a filter", () => {
-    mockWindowLocation("?view=table&repos=api&workspace=myproject");
-    historyMock = mockWindowHistory();
-    const { result } = renderHook(() => useFilterState());
-
-    act(() => {
-      result.current[1].setPriority(2 as Priority);
-    });
-
-    const lastCall = historyMock.replaceState.mock.calls.at(-1)?.[2] as string;
-    expect(lastCall).toContain("view=table");
-    expect(lastCall).toContain("repos=api");
-    expect(lastCall).toContain("workspace=myproject");
-    expect(lastCall).toContain("priority=2");
-  });
-
-  it("preserves non-filter params when clearing all filters", () => {
-    mockWindowLocation(
-      "?view=table&repos=api&workspace=myproject&priority=2&type=bug",
-    );
-    historyMock = mockWindowHistory();
-    const { result } = renderHook(() => useFilterState());
-
-    act(() => {
-      result.current[1].clearAll();
-    });
-
-    const lastCall = historyMock.replaceState.mock.calls.at(-1)?.[2] as string;
-    expect(lastCall).toContain("view=table");
-    expect(lastCall).toContain("repos=api");
-    expect(lastCall).toContain("workspace=myproject");
-    // Filter params should be removed
-    expect(lastCall).not.toContain("priority=");
-    expect(lastCall).not.toContain("type=");
-  });
-
-  it("preserves issue param when updating filters", () => {
-    mockWindowLocation("?view=issue-detail&issue=abc-123&priority=1");
-    historyMock = mockWindowHistory();
-    const { result } = renderHook(() => useFilterState());
-
-    act(() => {
-      result.current[1].setType("bug");
-    });
-
-    const lastCall = historyMock.replaceState.mock.calls.at(-1)?.[2] as string;
-    expect(lastCall).toContain("view=issue-detail");
-    expect(lastCall).toContain("issue=abc-123");
-    expect(lastCall).toContain("type=bug");
-  });
-
-  it("preserves non-filter params when changing labels", () => {
-    mockWindowLocation("?view=kanban&workspace=dev");
-    historyMock = mockWindowHistory();
-    const { result } = renderHook(() => useFilterState());
-
-    act(() => {
-      result.current[1].setLabels(["phase-1", "frontend"]);
-    });
-
-    const lastCall = historyMock.replaceState.mock.calls.at(-1)?.[2] as string;
-    expect(lastCall).toContain("view=kanban");
-    expect(lastCall).toContain("workspace=dev");
-    expect(lastCall).toContain("labels=");
-  });
-
-  it("preserves non-filter params when clearing a single filter", () => {
-    mockWindowLocation("?view=table&workspace=prod&priority=2&type=bug");
-    historyMock = mockWindowHistory();
-    const { result } = renderHook(() => useFilterState());
-
-    act(() => {
-      result.current[1].clearFilter("priority");
-    });
-
-    const lastCall = historyMock.replaceState.mock.calls.at(-1)?.[2] as string;
-    expect(lastCall).toContain("view=table");
-    expect(lastCall).toContain("workspace=prod");
-    expect(lastCall).toContain("type=bug");
-    expect(lastCall).not.toContain("priority=");
-  });
-});
-
 describe("action reference stability", () => {
   it("actions object is stable across re-renders", () => {
-    const { result, rerender } = renderHook(() =>
-      useFilterState({ syncUrl: false }),
-    );
+    const { result, rerender } = renderHook(() => useFilterState(), {
+      wrapper: RouterWrapper,
+    });
 
     const actions1 = result.current[1];
 
@@ -1168,9 +969,9 @@ describe("action reference stability", () => {
   });
 
   it("individual action functions are stable", () => {
-    const { result, rerender } = renderHook(() =>
-      useFilterState({ syncUrl: false }),
-    );
+    const { result, rerender } = renderHook(() => useFilterState(), {
+      wrapper: RouterWrapper,
+    });
 
     const setPriority1 = result.current[1].setPriority;
     const setType1 = result.current[1].setType;
@@ -1181,5 +982,34 @@ describe("action reference stability", () => {
     expect(result.current[1].setPriority).toBe(setPriority1);
     expect(result.current[1].setType).toBe(setType1);
     expect(result.current[1].clearAll).toBe(clearAll1);
+  });
+});
+
+describe("SSR/non-browser environment", () => {
+  let originalWindow: typeof globalThis.window;
+
+  beforeEach(() => {
+    originalWindow = globalThis.window;
+  });
+
+  afterEach(() => {
+    globalThis.window = originalWindow;
+    vi.restoreAllMocks();
+  });
+
+  it("parseFromUrl returns empty state when window is undefined", () => {
+    // @ts-expect-error - intentionally setting window to undefined for SSR test
+    delete globalThis.window;
+
+    const result = parseFromUrl();
+    expect(Object.keys(result)).toHaveLength(0);
+  });
+
+  it("parseFromUrl returns empty state when location is undefined", () => {
+    // @ts-expect-error - intentionally creating partial window for SSR test
+    globalThis.window = {};
+
+    const result = parseFromUrl();
+    expect(Object.keys(result)).toHaveLength(0);
   });
 });

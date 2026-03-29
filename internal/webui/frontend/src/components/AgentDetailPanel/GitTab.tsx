@@ -10,6 +10,7 @@ import { fetchDiffCommits } from "@/api/diff";
 import type { DiffCommit } from "@/api/diff";
 import { useGitStatus } from "@/hooks/useGitStatus";
 import { useGitActions } from "@/hooks/useGitActions";
+import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
 import type { LoomAgentStatus } from "@/types";
 import { parseLoomStatus } from "@/types";
 
@@ -41,16 +42,19 @@ function relativeTime(iso: string): string {
 }
 
 export function GitTab({ agent, isActive }: GitTabProps): JSX.Element {
+  const { workspaceId } = useWorkspaceContext();
   const {
     status: gitStatus,
     error: gitError,
     refetch,
   } = useGitStatus({
+    workspaceId,
     agentName: agent.name,
     enabled: isActive ?? true,
   });
 
   const actions = useGitActions({
+    workspaceId,
     agentName: agent.name,
     onStatusChange: refetch,
   });
@@ -67,7 +71,7 @@ export function GitTab({ agent, isActive }: GitTabProps): JSX.Element {
     setDiffCommits(null);
     setShowAllCommits(false);
 
-    fetchDiffCommits(agent.name)
+    fetchDiffCommits(workspaceId, agent.name)
       .then((commits) => {
         if (!cancelled) setDiffCommits(commits);
       })

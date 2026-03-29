@@ -76,6 +76,12 @@ func frontendHandler() http.Handler {
 		_, err := fs.Stat(distFS, filePath)
 
 		if err != nil {
+			// Static assets (JS, CSS, images, fonts) should 404, not get SPA fallback.
+			// SPA routing only applies to extensionless paths (e.g. /ws/abc/settings).
+			if isStaticAsset(urlPath) {
+				http.NotFound(w, r)
+				return
+			}
 			// File doesn't exist - serve index.html for SPA routing
 			r.URL.Path = "/"
 			setCacheHeaders(w, false)
@@ -101,6 +107,20 @@ func setCacheHeaders(w http.ResponseWriter, cache bool) {
 		w.Header().Set("Pragma", "no-cache")
 		w.Header().Set("Expires", "0")
 	}
+}
+
+// isStaticAsset returns true if the URL path looks like a static asset
+// (JS, CSS, image, font, etc.) that should 404 rather than get SPA fallback.
+func isStaticAsset(urlPath string) bool {
+	ext := path.Ext(urlPath)
+	switch ext {
+	case ".js", ".css", ".map",
+		".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webp", ".avif",
+		".woff", ".woff2", ".ttf", ".eot",
+		".json", ".xml", ".txt", ".webmanifest":
+		return true
+	}
+	return false
 }
 
 // shouldCache returns true if the file should have long cache headers.
@@ -170,6 +190,10 @@ func devFrontendHandler(dir string) http.Handler {
 		cleanFile := filepath.Clean(filePath)
 		_, err = os.Stat(cleanFile)
 		if err != nil {
+			if isStaticAsset(urlPath) {
+				http.NotFound(w, r)
+				return
+			}
 			// File doesn't exist - serve index.html for SPA routing
 			r.URL.Path = "/"
 			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")

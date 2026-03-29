@@ -70,6 +70,8 @@ func TestRunPlan_SingleTask_Success(t *testing.T) {
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
 		{Name: "bd", Args: []string{"list", "--json", "--limit", "500"}, Stdout: taskJSON},
+		{Name: "git", Args: []string{"rev-parse", "HEAD"}, Stdout: "abc123\n"},
+		{Name: "git", Args: []string{"diff", "--numstat", "abc123..HEAD"}, Stdout: ""},
 	})
 	mock.Install()
 

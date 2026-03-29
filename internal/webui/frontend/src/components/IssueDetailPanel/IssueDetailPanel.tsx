@@ -24,8 +24,7 @@ import {
   LAYER_ISSUE_PANEL,
 } from "@/hooks";
 import { useAgentContext } from "@/hooks/useAgentContext";
-import { useWorkspace } from "@/hooks/useWorkspace";
-import { useWorkspaceRepos } from "@/hooks/useWorkspaceRepos";
+import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
 import { useIssueTabPersistence } from "@/hooks/useIssueTabPersistence";
 import type {
   Issue,
@@ -309,6 +308,7 @@ function DefaultContent({
   onCopyLink,
   onNavigateToIssue,
 }: DefaultContentProps): JSX.Element {
+  const { workspaceId, workspace, repos } = useWorkspaceContext();
   const [isSavingTitle, setIsSavingTitle] = useState(false);
   const [isSavingStatus, setIsSavingStatus] = useState(false);
   const [isSavingPriority, setIsSavingPriority] = useState(false);
@@ -330,13 +330,9 @@ function DefaultContent({
     useSplitRatio();
 
   // Workspace data for move dialog
-  const { workspace } = useWorkspace();
   const workspaces = workspace?.workspaces ?? [];
   const currentWorkspace = workspace?.name ?? "";
   const canMove = workspaces.length > 1 && issue?.status !== "closed";
-
-  // Workspace repos for repo assignment
-  const { repos } = useWorkspaceRepos();
 
   const currentRepo = useMemo(() => {
     const repoLabel = issue?.labels?.find((l) => l.startsWith("repo:"));
@@ -349,7 +345,7 @@ function DefaultContent({
     savedState: persistedTabState,
     isLoading: isLoadingPersistedTabs,
     saveTabs: persistTabs,
-  } = useIssueTabPersistence(issueId);
+  } = useIssueTabPersistence(workspaceId, issueId);
 
   // Tab state - managed tab array with dynamic add/remove
   const [tabs, setTabs] = useState<DetailTab[]>([DETAILS_TAB, SESSIONS_TAB]);
@@ -409,8 +405,9 @@ function DefaultContent({
       // Fire-and-forget backend cleanup for terminal tabs
       if (tab?.type === "terminal" && tab.metadata?.sessionName) {
         const sessionName = tab.metadata.sessionName;
-        deleteTabMetadata(sessionName).catch(() => {});
-        scheduleSessionKill(sessionName).catch(() => {});
+        if (workspace?.id)
+          deleteTabMetadata(workspace.id, sessionName).catch(() => {});
+        scheduleSessionKill(workspaceId, sessionName).catch(() => {});
       }
 
       setTabs((prev) => prev.filter((t) => t.id !== id));
@@ -471,6 +468,7 @@ function DefaultContent({
     hasMoreLines,
     isLoadingMore,
   } = useAgentTerminalLogs({
+    workspaceId,
     agentName,
     enabled: isOpen && activeTabId === "logs" && hasAgent,
   });
@@ -621,7 +619,7 @@ function DefaultContent({
       return;
     }
     let cancelled = false;
-    getIssueEvents(eventIssueId).then(
+    getIssueEvents(workspaceId, eventIssueId).then(
       (data) => {
         if (!cancelled) setEvents(data ?? []);
       },
@@ -648,7 +646,9 @@ function DefaultContent({
 
       setIsSavingTitle(true);
       try {
-        const updatedIssue = await updateIssue(issue.id, { title: newTitle });
+        const updatedIssue = await updateIssue(workspaceId, issue.id, {
+          title: newTitle,
+        });
         onIssueUpdate?.(updatedIssue);
       } finally {
         setIsSavingTitle(false);
@@ -664,7 +664,9 @@ function DefaultContent({
       setIsSavingStatus(true);
       setStatusError(null);
       try {
-        const updatedIssue = await updateIssue(issue.id, { status: newStatus });
+        const updatedIssue = await updateIssue(workspaceId, issue.id, {
+          status: newStatus,
+        });
         onIssueUpdate?.(updatedIssue);
       } catch (err) {
         const message =
@@ -683,7 +685,7 @@ function DefaultContent({
 
       setIsSavingPriority(true);
       try {
-        const updatedIssue = await updateIssue(issue.id, {
+        const updatedIssue = await updateIssue(workspaceId, issue.id, {
           priority: newPriority,
         });
         onIssueUpdate?.(updatedIssue);
@@ -700,7 +702,7 @@ function DefaultContent({
 
       setIsSavingType(true);
       try {
-        const updatedIssue = await updateIssue(issue.id, {
+        const updatedIssue = await updateIssue(workspaceId, issue.id, {
           issue_type: newType,
         });
         onIssueUpdate?.(updatedIssue);
@@ -717,7 +719,7 @@ function DefaultContent({
 
       setIsSavingAssignee(true);
       try {
-        const updatedIssue = await updateIssue(issue.id, {
+        const updatedIssue = await updateIssue(workspaceId, issue.id, {
           assignee: newAssignee,
         });
         onIssueUpdate?.(updatedIssue);
@@ -734,7 +736,7 @@ function DefaultContent({
 
       setIsSavingOwner(true);
       try {
-        const updatedIssue = await updateIssue(issue.id, {
+        const updatedIssue = await updateIssue(workspaceId, issue.id, {
           owner: newOwner,
         });
         onIssueUpdate?.(updatedIssue);
@@ -755,7 +757,7 @@ function DefaultContent({
         const repoLabelsToRemove = currentLabels.filter((l) =>
           l.startsWith("repo:"),
         );
-        const updatedIssue = await updateIssue(issue.id, {
+        const updatedIssue = await updateIssue(workspaceId, issue.id, {
           ...(repoLabelsToRemove.length > 0
             ? { remove_labels: repoLabelsToRemove }
             : {}),
@@ -773,7 +775,7 @@ function DefaultContent({
     async (agentName: string) => {
       if (!issue) return;
 
-      const updatedIssue = await updateIssue(issue.id, {
+      const updatedIssue = await updateIssue(workspaceId, issue.id, {
         assignee: agentName,
         status: "in_progress",
       });
@@ -785,7 +787,7 @@ function DefaultContent({
   const handleAddDependency = useCallback(
     async (dependsOnId: string, type: DependencyType) => {
       if (!issue) return;
-      await addDependency(issue.id, dependsOnId, type);
+      await addDependency(workspaceId, issue.id, dependsOnId, type);
       // The parent component should refresh issue details via SSE or manual refetch
     },
     [issue],
@@ -794,7 +796,7 @@ function DefaultContent({
   const handleRemoveDependency = useCallback(
     async (dependsOnId: string) => {
       if (!issue) return;
-      await removeDependency(issue.id, dependsOnId);
+      await removeDependency(workspaceId, issue.id, dependsOnId);
       // The parent component should refresh issue details via SSE or manual refetch
     },
     [issue],
@@ -803,7 +805,7 @@ function DefaultContent({
   const handleAddLabel = useCallback(
     async (label: string) => {
       if (!issue) return;
-      const updatedIssue = await updateIssue(issue.id, {
+      const updatedIssue = await updateIssue(workspaceId, issue.id, {
         add_labels: [label],
       });
       onIssueUpdate?.(updatedIssue);
@@ -814,7 +816,7 @@ function DefaultContent({
   const handleRemoveLabel = useCallback(
     async (label: string) => {
       if (!issue) return;
-      const updatedIssue = await updateIssue(issue.id, {
+      const updatedIssue = await updateIssue(workspaceId, issue.id, {
         remove_labels: [label],
       });
       onIssueUpdate?.(updatedIssue);
@@ -870,7 +872,7 @@ function DefaultContent({
       if (!issue) return;
       setMoveError(null);
       try {
-        await moveIssue(issue.id, targetWorkspace);
+        await moveIssue(workspaceId, issue.id, targetWorkspace);
         setShowMoveDialog(false);
         onClose();
       } catch (err) {
@@ -1312,9 +1314,13 @@ function DefaultContent({
                     description={issue.description}
                     isEditable={true}
                     onSave={async (newDescription) => {
-                      const updatedIssue = await updateIssue(issue.id, {
-                        description: newDescription,
-                      });
+                      const updatedIssue = await updateIssue(
+                        workspaceId,
+                        issue.id,
+                        {
+                          description: newDescription,
+                        },
+                      );
                       onIssueUpdate?.(updatedIssue);
                     }}
                   />

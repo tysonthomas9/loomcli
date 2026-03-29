@@ -151,6 +151,56 @@ func TestHandleGetAgentTerminalInfo_ArchiveMode(t *testing.T) {
 	}
 }
 
+// TestHandleGetAgentTerminalInfo_WorkspaceFromContext verifies that the handler
+// reads the workspace ID from the request context (via WithWorkspace) rather
+// than from a query parameter. With a valid workspace injected via context,
+// the handler should still return 200 OK with archive mode since no matching
+// tmux session will exist for the workspace+agent combination.
+func TestHandleGetAgentTerminalInfo_WorkspaceFromContext(t *testing.T) {
+	manager, err := NewTerminalManager("", "", 0)
+	if err == ErrTmuxNotFound {
+		t.Skip("tmux not installed, skipping test")
+	}
+	if err != nil {
+		t.Fatalf("failed to create terminal manager: %v", err)
+	}
+	defer manager.Shutdown()
+
+	handler := handleGetAgentTerminalInfo(manager)
+
+	agentName := "context-agent"
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-workspace-id/agents/"+agentName+"/terminal/info", nil)
+	req.SetPathValue("name", agentName)
+
+	// Inject workspace ID via context — the handler must use this, not query params.
+	ctx := WithWorkspace(req.Context(), "test-workspace-id")
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body = %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	body := assertJSONResponse(t, w)
+	assertEnvelopeSuccess(t, body)
+
+	data, ok := body["data"].(map[string]interface{})
+	if !ok {
+		t.Fatal("missing or invalid 'data' field in response")
+	}
+
+	if agent, _ := data["agent"].(string); agent != agentName {
+		t.Errorf("data.agent = %q, want %q", agent, agentName)
+	}
+
+	// No matching tmux session exists for this workspace+agent, so mode should be archive.
+	if mode, _ := data["mode"].(string); mode != agentTerminalModeArchive {
+		t.Errorf("data.mode = %q, want %q", mode, agentTerminalModeArchive)
+	}
+}
+
 // TestHandleGetAgentTerminalInfo_ResponseShape verifies the complete JSON envelope shape
 // for a successful response.
 func TestHandleGetAgentTerminalInfo_ResponseShape(t *testing.T) {

@@ -43,55 +43,61 @@ describe("files API", () => {
       };
       mockGet.mockResolvedValue(data);
 
-      const result = await listWorktreeDir("ember");
+      const result = await listWorktreeDir("test-ws-id", "ember");
 
       expect(result).toEqual(data);
-      expect(mockGet).toHaveBeenCalledWith("/api/agents/ember/files/tree");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/agents/ember/files/tree",
+      );
     });
 
     it("passes path query param when provided", async () => {
       mockGet.mockResolvedValue({ path: "src", entries: [] });
 
-      await listWorktreeDir("ember", "src");
+      await listWorktreeDir("test-ws-id", "ember", "src");
 
       expect(mockGet).toHaveBeenCalledWith(
-        "/api/agents/ember/files/tree?path=src",
+        "/api/workspaces/test-ws-id/agents/ember/files/tree?path=src",
       );
     });
 
     it("omits path param when not provided", async () => {
       mockGet.mockResolvedValue({ path: ".", entries: [] });
 
-      await listWorktreeDir("ember");
+      await listWorktreeDir("test-ws-id", "ember");
 
-      expect(mockGet).toHaveBeenCalledWith("/api/agents/ember/files/tree");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/agents/ember/files/tree",
+      );
     });
 
     it("omits path param when empty string", async () => {
       mockGet.mockResolvedValue({ path: ".", entries: [] });
 
-      await listWorktreeDir("ember", "");
+      await listWorktreeDir("test-ws-id", "ember", "");
 
-      expect(mockGet).toHaveBeenCalledWith("/api/agents/ember/files/tree");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/agents/ember/files/tree",
+      );
     });
 
     it("encodes agent name with special characters", async () => {
       mockGet.mockResolvedValue({ path: ".", entries: [] });
 
-      await listWorktreeDir("agent/with spaces");
+      await listWorktreeDir("test-ws-id", "agent/with spaces");
 
       expect(mockGet).toHaveBeenCalledWith(
-        "/api/agents/agent%2Fwith%20spaces/files/tree",
+        "/api/workspaces/test-ws-id/agents/agent%2Fwith%20spaces/files/tree",
       );
     });
 
     it("encodes path with special characters", async () => {
       mockGet.mockResolvedValue({ path: "src/my dir", entries: [] });
 
-      await listWorktreeDir("ember", "src/my dir");
+      await listWorktreeDir("test-ws-id", "ember", "src/my dir");
 
       expect(mockGet).toHaveBeenCalledWith(
-        "/api/agents/ember/files/tree?path=src%2Fmy%20dir",
+        "/api/workspaces/test-ws-id/agents/ember/files/tree?path=src%2Fmy%20dir",
       );
     });
 
@@ -114,11 +120,11 @@ describe("files API", () => {
       };
       mockGet.mockResolvedValue(data);
 
-      const result = await readWorktreeFile("ember", "main.go");
+      const result = await readWorktreeFile("test-ws-id", "ember", "main.go");
 
       expect(result).toEqual(data);
       expect(mockGet).toHaveBeenCalledWith(
-        "/api/agents/ember/files?path=main.go",
+        "/api/workspaces/test-ws-id/agents/ember/files?path=main.go",
       );
     });
 
@@ -130,7 +136,7 @@ describe("files API", () => {
       };
       mockGet.mockResolvedValue(data);
 
-      const result = await readWorktreeFile("ember", "image.png");
+      const result = await readWorktreeFile("test-ws-id", "ember", "image.png");
 
       expect(result.binary).toBe(true);
       expect(result.content).toBeUndefined();
@@ -144,10 +150,10 @@ describe("files API", () => {
         binary: false,
       });
 
-      await readWorktreeFile("ember", "src/my file.go");
+      await readWorktreeFile("test-ws-id", "ember", "src/my file.go");
 
       expect(mockGet).toHaveBeenCalledWith(
-        "/api/agents/ember/files?path=src%2Fmy%20file.go",
+        "/api/workspaces/test-ws-id/agents/ember/files?path=src%2Fmy%20file.go",
       );
     });
 
@@ -159,10 +165,10 @@ describe("files API", () => {
         binary: false,
       });
 
-      await readWorktreeFile("agent/special", "main.go");
+      await readWorktreeFile("test-ws-id", "agent/special", "main.go");
 
       expect(mockGet).toHaveBeenCalledWith(
-        "/api/agents/agent%2Fspecial/files?path=main.go",
+        "/api/workspaces/test-ws-id/agents/agent%2Fspecial/files?path=main.go",
       );
     });
 
@@ -181,10 +187,15 @@ describe("files API", () => {
     it("calls put with correct URL and JSON body", async () => {
       mockPut.mockResolvedValue({ success: true });
 
-      await writeWorktreeFile("ember", "main.go", "package main\n");
+      await writeWorktreeFile(
+        "test-ws-id",
+        "ember",
+        "main.go",
+        "package main\n",
+      );
 
       expect(mockPut).toHaveBeenCalledWith(
-        "/api/agents/ember/files?path=main.go",
+        "/api/workspaces/test-ws-id/agents/ember/files?path=main.go",
         { content: "package main\n" },
       );
     });
@@ -192,7 +203,12 @@ describe("files API", () => {
     it("returns void on success", async () => {
       mockPut.mockResolvedValue({ success: true });
 
-      const result = await writeWorktreeFile("ember", "test.txt", "hello");
+      const result = await writeWorktreeFile(
+        "test-ws-id",
+        "ember",
+        "test.txt",
+        "hello",
+      );
 
       expect(result).toBeUndefined();
     });
@@ -208,10 +224,15 @@ describe("files API", () => {
     it("encodes agent name and path in URL", async () => {
       mockPut.mockResolvedValue({ success: true });
 
-      await writeWorktreeFile("agent/special", "src/my file.ts", "content");
+      await writeWorktreeFile(
+        "test-ws-id",
+        "agent/special",
+        "src/my file.ts",
+        "content",
+      );
 
       expect(mockPut).toHaveBeenCalledWith(
-        "/api/agents/agent%2Fspecial/files?path=src%2Fmy%20file.ts",
+        "/api/workspaces/test-ws-id/agents/agent%2Fspecial/files?path=src%2Fmy%20file.ts",
         { content: "content" },
       );
     });

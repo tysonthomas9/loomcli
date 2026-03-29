@@ -69,10 +69,10 @@ func TestHandleListSessionsByIssue_ReturnsGroupedSessions(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 
 	sessions := []tabmeta.TabMetadata{
-		{SessionName: "s1", Workspace: DefaultWorkspace, Label: "s1", SortOrder: 1, IssueID: "PROJ-1", CreatedAt: now, UpdatedAt: now},
-		{SessionName: "s2", Workspace: DefaultWorkspace, Label: "s2", SortOrder: 2, IssueID: "PROJ-1", CreatedAt: now, UpdatedAt: now},
-		{SessionName: "s3", Workspace: DefaultWorkspace, Label: "s3", SortOrder: 3, IssueID: "PROJ-2", CreatedAt: now, UpdatedAt: now},
-		{SessionName: "s4", Workspace: DefaultWorkspace, Label: "s4", SortOrder: 4, IssueID: "", CreatedAt: now, UpdatedAt: now},
+		{SessionName: "s1", Workspace: "default", Label: "s1", SortOrder: 1, IssueID: "PROJ-1", CreatedAt: now, UpdatedAt: now},
+		{SessionName: "s2", Workspace: "default", Label: "s2", SortOrder: 2, IssueID: "PROJ-1", CreatedAt: now, UpdatedAt: now},
+		{SessionName: "s3", Workspace: "default", Label: "s3", SortOrder: 3, IssueID: "PROJ-2", CreatedAt: now, UpdatedAt: now},
+		{SessionName: "s4", Workspace: "default", Label: "s4", SortOrder: 4, IssueID: "", CreatedAt: now, UpdatedAt: now},
 	}
 	for _, s := range sessions {
 		s := s
@@ -154,7 +154,7 @@ func TestHandleCloseAllSessions_NilManager(t *testing.T) {
 func TestHandleCloseAllSessions_DeletesTabMetadata(t *testing.T) {
 	skipIfNoTmux(t)
 
-	mgr, err := NewTerminalManager("", "testcloseall", 0)
+	mgr, err := NewTerminalManager("", testRunPrefix+"-testcloseall", 0)
 	if err != nil {
 		t.Fatalf("NewTerminalManager: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestHandleCloseAllSessions_DeletesTabMetadata(t *testing.T) {
 	for _, name := range []string{"session-a", "session-b"} {
 		if err := store.Set(ctx, &tabmeta.TabMetadata{
 			SessionName: name,
-			Workspace:   DefaultWorkspace,
+			Workspace:   "default",
 			Label:       name,
 			SortOrder:   1,
 			IssueID:     "PROJ-1",
@@ -218,7 +218,7 @@ func TestHandleCloseAllSessions_DeletesTabMetadata(t *testing.T) {
 func TestHandleCloseAllSessions_WorksWithNilStore(t *testing.T) {
 	skipIfNoTmux(t)
 
-	mgr, err := NewTerminalManager("", "testclosenil", 0)
+	mgr, err := NewTerminalManager("", testRunPrefix+"-testclosenil", 0)
 	if err != nil {
 		t.Fatalf("NewTerminalManager: %v", err)
 	}

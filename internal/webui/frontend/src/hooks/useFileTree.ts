@@ -34,7 +34,10 @@ export interface UseFileTreeReturn {
   setFilterText: (text: string) => void;
 }
 
-export function useFileTree(agentName: string): UseFileTreeReturn {
+export function useFileTree(
+  workspaceId: string,
+  agentName: string,
+): UseFileTreeReturn {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [treeData, setTreeData] = useState<Map<string, FileEntry[]>>(new Map());
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -63,7 +66,11 @@ export function useFileTree(agentName: string): UseFileTreeReturn {
     async (dirPath: string): Promise<void> => {
       if (!agentName) return;
       try {
-        const result = await listWorktreeDir(agentName, dirPath || undefined);
+        const result = await listWorktreeDir(
+          workspaceId,
+          agentName,
+          dirPath || undefined,
+        );
         if (mountedRef.current) {
           setTreeData((prev) => {
             const next = new Map(prev);
@@ -78,7 +85,7 @@ export function useFileTree(agentName: string): UseFileTreeReturn {
         }
       }
     },
-    [agentName],
+    [workspaceId, agentName],
   );
 
   const toggle = useCallback(
@@ -117,7 +124,7 @@ export function useFileTree(agentName: string): UseFileTreeReturn {
     setSelectedPath(null);
     setError(null);
 
-    listWorktreeDir(agentName)
+    listWorktreeDir(workspaceId, agentName)
       .then((result) => {
         if (requestId === rootRequestIdRef.current && mountedRef.current) {
           setTreeData(new Map([["", result.entries]]));

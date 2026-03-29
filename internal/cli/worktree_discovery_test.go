@@ -328,6 +328,7 @@ func TestDiscoverLegacy_NonDirEntry(t *testing.T) {
 }
 
 func TestDiscoverLegacy_BranchErrorFallback(t *testing.T) {
+	clearGitEnvVars(t)
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 
 	old := defaultResolver
@@ -451,6 +452,7 @@ func TestDiscoverWorkspace_WorkspaceNotFound(t *testing.T) {
 }
 
 func TestDiscoverWorkspace_BranchErrorFallback(t *testing.T) {
+	clearGitEnvVars(t)
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
 

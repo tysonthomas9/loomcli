@@ -12,6 +12,7 @@ import { lazy, Suspense } from "react";
 import { LoadingSkeleton } from "@/components";
 import type { ViewMode } from "@/components/ViewSwitcher";
 import { useAgents, useBlockedIssues } from "@/hooks";
+import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
 import type { Issue } from "@/types";
 
 import { AgentActivityPanel } from "./AgentActivityPanel";
@@ -47,6 +48,7 @@ export function MonitorDashboard({
   onIssueClick,
   onAgentClick,
 }: MonitorDashboardProps): JSX.Element {
+  const { workspaceId } = useWorkspaceContext();
   // Fetch agent status and stats
   const {
     agents,
@@ -66,6 +68,7 @@ export function MonitorDashboard({
 
   // Fetch blocked issues for bottleneck detection
   const { data: blockedIssues, loading: isLoadingBlocked } = useBlockedIssues({
+    workspaceId,
     pollInterval: 30000,
   });
 

@@ -16,7 +16,7 @@ type mockFileOps struct {
 	resolveFunc func(name string) (*AgentWorktree, error)
 }
 
-func (m *mockFileOps) ResolveAgentWorktree(name string) (*AgentWorktree, error) {
+func (m *mockFileOps) ResolveAgentWorktree(workspaceID, name string) (*AgentWorktree, error) {
 	if m.resolveFunc != nil {
 		return m.resolveFunc(name)
 	}

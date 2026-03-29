@@ -25,6 +25,7 @@ const SAVE_DEBOUNCE_MS = 300;
 const REFETCH_DEBOUNCE_MS = 100;
 
 export function useIssueTabPersistence(
+  workspaceId: string,
   issueId: string,
 ): UseIssueTabPersistenceReturn {
   const [savedState, setSavedState] = useState<IssueTabState | null>(null);
@@ -56,7 +57,7 @@ export function useIssueTabPersistence(
     if (!issueId) return;
     setIsLoading(true);
     try {
-      const state = await fetchIssueTabState(issueId);
+      const state = await fetchIssueTabState(workspaceId, issueId);
       if (mountedRef.current && issueIdRef.current === issueId) {
         setSavedState(state);
       }
@@ -70,7 +71,7 @@ export function useIssueTabPersistence(
         setIsLoading(false);
       }
     }
-  }, [issueId]);
+  }, [workspaceId, issueId]);
 
   // Fetch on mount or issueId change
   useEffect(() => {
@@ -79,28 +80,33 @@ export function useIssueTabPersistence(
     fetchState();
   }, [fetchState]);
 
-  const saveTabs = useCallback((tabs: IssueTab[], activeTabId: string) => {
-    if (saveDebounceRef.current) {
-      clearTimeout(saveDebounceRef.current);
-    }
-    saveDebounceRef.current = setTimeout(() => {
-      if (!mountedRef.current) return;
-      const currentIssueId = issueIdRef.current;
-      if (!currentIssueId) return;
-      saveIssueTabState(currentIssueId, tabs, activeTabId).catch(() => {
-        // Silently fail - persistence is best-effort
-      });
-    }, SAVE_DEBOUNCE_MS);
-  }, []);
+  const saveTabs = useCallback(
+    (tabs: IssueTab[], activeTabId: string) => {
+      if (saveDebounceRef.current) {
+        clearTimeout(saveDebounceRef.current);
+      }
+      saveDebounceRef.current = setTimeout(() => {
+        if (!mountedRef.current) return;
+        const currentIssueId = issueIdRef.current;
+        if (!currentIssueId) return;
+        saveIssueTabState(workspaceId, currentIssueId, tabs, activeTabId).catch(
+          () => {
+            // Silently fail - persistence is best-effort
+          },
+        );
+      }, SAVE_DEBOUNCE_MS);
+    },
+    [workspaceId],
+  );
 
   const clearTabs = useCallback(() => {
     const currentIssueId = issueIdRef.current;
     if (!currentIssueId) return;
-    deleteIssueTabState(currentIssueId).catch(() => {
+    deleteIssueTabState(workspaceId, currentIssueId).catch(() => {
       // Silently fail - cleanup is best-effort
     });
     setSavedState(null);
-  }, []);
+  }, [workspaceId]);
 
   const handleMutation = useCallback(
     (mutation: MutationPayload) => {

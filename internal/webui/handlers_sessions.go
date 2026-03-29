@@ -284,9 +284,10 @@ func handleGetSessionTranscript(sessStore *sessions.Store) http.HandlerFunc {
 
 // sessionNotifyRequest is the JSON body expected by handleNotifySessionChange.
 type sessionNotifyRequest struct {
-	TaskID    string `json:"task_id"`
-	SessionID string `json:"session_id"`
-	Status    string `json:"status"`
+	TaskID      string `json:"task_id"`
+	SessionID   string `json:"session_id"`
+	Status      string `json:"status"`
+	WorkspaceID string `json:"workspace_id"`
 }
 
 // handleNotifySessionChange receives fire-and-forget notifications from local
@@ -318,11 +319,15 @@ func handleNotifySessionChange(hub *SSEHub) http.HandlerFunc {
 			return
 		}
 
+		if req.WorkspaceID == "" {
+			slog.Warn("session notify missing workspace_id, mutation will be dropped", "task_id", req.TaskID)
+		}
 		hub.Broadcast(&MutationPayload{
-			Type:      rpc.MutationSessionChange,
-			IssueID:   req.TaskID,
-			NewStatus: req.Status,
-			Timestamp: time.Now().UTC().Format(time.RFC3339),
+			Type:        rpc.MutationSessionChange,
+			IssueID:     req.TaskID,
+			NewStatus:   req.Status,
+			Timestamp:   time.Now().UTC().Format(time.RFC3339),
+			WorkspaceID: req.WorkspaceID,
 		})
 
 		w.WriteHeader(http.StatusNoContent)

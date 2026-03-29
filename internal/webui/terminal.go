@@ -15,6 +15,8 @@ import (
 	"sync/atomic"
 
 	"github.com/creack/pty"
+
+	"github.com/tysonthomas9/loomcli/internal/workspace"
 )
 
 // ErrTmuxNotFound is returned when tmux binary is not in PATH.
@@ -345,8 +347,10 @@ func (m *TerminalManager) listTmuxSessions() ([]tmuxSessionMeta, error) {
 }
 
 // FindLatestAgentSession returns the newest tmux session matching the auto-mode
-// naming convention for an agent: loom-<role>-<agent>-<pid>.
-func (m *TerminalManager) FindLatestAgentSession(agentName string) (string, bool, error) {
+// naming convention for an agent: loom-<wsPrefix>-<role>-<agent>-<pid>.
+// When workspaceID is non-empty, only sessions for that workspace are matched.
+// When workspaceID is empty, returns no match (fail-closed).
+func (m *TerminalManager) FindLatestAgentSession(workspaceID, agentName string) (string, bool, error) {
 	if !validSessionName.MatchString(agentName) {
 		return "", false, fmt.Errorf("invalid agent name %q", agentName)
 	}
@@ -355,7 +359,13 @@ func (m *TerminalManager) FindLatestAgentSession(agentName string) (string, bool
 	if err != nil {
 		return "", false, err
 	}
-	pattern := regexp.MustCompile(fmt.Sprintf(`^loom-[a-zA-Z0-9_-]+-%s-[0-9]+$`, regexp.QuoteMeta(agentName)))
+
+	// When workspace ID is empty, fail closed — no match rather than match-all.
+	if workspaceID == "" {
+		return "", false, nil
+	}
+	wsPrefix := workspace.ShortWorkspaceID(workspaceID)
+	pattern := regexp.MustCompile(fmt.Sprintf(`^loom-%s-[a-zA-Z0-9_-]+-%s-[0-9]+$`, regexp.QuoteMeta(wsPrefix), regexp.QuoteMeta(agentName)))
 
 	var bestName string
 	var bestCreated int64

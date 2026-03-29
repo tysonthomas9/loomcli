@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"os/exec"
 	"strconv"
 	"strings"
 )
@@ -20,15 +19,12 @@ func ComputeDiffStats(worktreePath, fromRef string) DiffStats {
 		return DiffStats{}
 	}
 
-	// #nosec G204 - fromRef is from git rev-parse HEAD, not user input
-	cmd := exec.Command("git", "diff", "--numstat", fromRef+"..HEAD")
-	cmd.Dir = worktreePath
-	out, err := cmd.Output()
+	out, err := RunGitCommand(worktreePath, "diff", "--numstat", fromRef+"..HEAD")
 	if err != nil {
 		return DiffStats{}
 	}
 
-	return parseDiffNumstat(string(out))
+	return parseDiffNumstat(out)
 }
 
 // parseDiffNumstat parses the output of `git diff --numstat`.

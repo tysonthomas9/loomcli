@@ -185,6 +185,8 @@ func TestResolveWorktreePathRelative(t *testing.T) {
 func setupTestRepo(t *testing.T, branches []struct{ name, parent string }) string {
 	t.Helper()
 
+	clearGitEnvVars(t)
+
 	tmpDir := t.TempDir()
 	originPath := filepath.Join(tmpDir, "origin.git")
 	clonePath := filepath.Join(tmpDir, "clone")
@@ -307,6 +309,8 @@ func TestDetectIntegrationBranch_OnlyMain(t *testing.T) {
 }
 
 func TestDetectIntegrationBranch_DetectedFartherThanMain(t *testing.T) {
+	clearGitEnvVars(t)
+
 	// Topology:
 	//   main -> feature/old (with extra commits after branching falcon/nova)
 	//        -> falcon (directly off main)

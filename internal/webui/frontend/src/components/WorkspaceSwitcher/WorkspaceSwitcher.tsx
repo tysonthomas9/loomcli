@@ -6,7 +6,7 @@
  * - Arrow Up/Down keyboard navigation
  * - Enter to select, Escape to close (via escape layer)
  * - Positional shortcut hints (Cmd/Ctrl+Shift+1-9)
- * - Active workspace indicator
+ * - Active workspace indicator (by ID)
  */
 
 import { useState, useRef, useCallback, useEffect } from "react";
@@ -26,8 +26,10 @@ import styles from "./WorkspaceSwitcher.module.css";
 export interface WorkspaceSwitcherProps {
   isOpen: boolean;
   workspaces: WorkspaceSummary[];
-  activeWorkspaceName: string | null;
-  onSelect: (name: string) => void;
+  /** Active workspace UUID for indicator */
+  activeWorkspaceId: string;
+  /** Called with workspace ID on selection */
+  onSelect: (id: string) => void;
   onClose: () => void;
 }
 
@@ -39,7 +41,7 @@ const shiftSymbol = isMac ? "\u21e7" : "Shift+";
 export function WorkspaceSwitcher({
   isOpen,
   workspaces,
-  activeWorkspaceName,
+  activeWorkspaceId,
   onSelect,
   onClose,
 }: WorkspaceSwitcherProps) {
@@ -92,8 +94,8 @@ export function WorkspaceSwitcher({
   }, [highlightIndex]);
 
   const handleSelect = useCallback(
-    (name: string) => {
-      onSelect(name);
+    (id: string) => {
+      onSelect(id);
       onClose();
     },
     [onSelect, onClose],
@@ -114,7 +116,7 @@ export function WorkspaceSwitcher({
       } else if (event.key === "Enter") {
         event.preventDefault();
         const ws = filtered[highlightIndex];
-        if (ws) handleSelect(ws.name);
+        if (ws) handleSelect(ws.id);
       }
     },
     [filtered, highlightIndex, handleSelect],
@@ -152,11 +154,11 @@ export function WorkspaceSwitcher({
             <div className={styles.emptyState}>No workspaces found</div>
           ) : (
             filtered.map((ws, index) => {
-              const isActive = ws.name === activeWorkspaceName;
+              const isActive = ws.id === activeWorkspaceId;
               const originalIndex = workspaces.indexOf(ws);
               return (
                 <button
-                  key={ws.name}
+                  key={ws.id}
                   data-workspace-item
                   className={[
                     styles.item,
@@ -165,7 +167,7 @@ export function WorkspaceSwitcher({
                   ]
                     .filter(Boolean)
                     .join(" ")}
-                  onClick={() => handleSelect(ws.name)}
+                  onClick={() => handleSelect(ws.id)}
                   onMouseEnter={() => setHighlightIndex(index)}
                 >
                   {isActive && (

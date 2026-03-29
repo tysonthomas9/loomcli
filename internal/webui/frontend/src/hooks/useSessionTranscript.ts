@@ -22,6 +22,7 @@ export interface UseSessionTranscriptResult {
 const POLL_INTERVAL_ACTIVE = 3_000;
 
 export function useSessionTranscript(
+  workspaceId: string,
   taskId: string | null,
   sessionId: string | null,
   isActive: boolean,
@@ -46,7 +47,11 @@ export function useSessionTranscript(
     const fetchTranscript = async () => {
       setIsLoading(true);
       try {
-        const result = await getSessionTranscript(taskId, sessionId);
+        const result = await getSessionTranscript(
+          workspaceId,
+          taskId,
+          sessionId,
+        );
         if (mountedRef.current) {
           setEntries(result);
           setError(null);
@@ -75,7 +80,7 @@ export function useSessionTranscript(
       mountedRef.current = false;
       if (timer) clearInterval(timer);
     };
-  }, [taskId, sessionId, isActive]);
+  }, [workspaceId, taskId, sessionId, isActive]);
 
   return { entries, isLoading, error };
 }

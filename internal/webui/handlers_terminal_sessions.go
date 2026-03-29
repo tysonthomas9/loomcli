@@ -246,8 +246,10 @@ func handleCloseAllSessions(manager *TerminalManager, tabMetaStore *tabmeta.Stor
 			return
 		}
 
-		// Delete all tab metadata (across all workspaces)
+		// Delete all tab metadata (across all workspaces), collecting workspace IDs
+		// for SSE broadcast.
 		metaCleanupFailed := false
+		affectedWorkspaces := make(map[string]bool)
 		if tabMetaStore != nil {
 			allTabs, err := tabMetaStore.ListAll(r.Context())
 			if err != nil {
@@ -255,6 +257,9 @@ func handleCloseAllSessions(manager *TerminalManager, tabMetaStore *tabmeta.Stor
 				metaCleanupFailed = true
 			} else {
 				for _, tab := range allTabs {
+					if tab.Workspace != "" {
+						affectedWorkspaces[tab.Workspace] = true
+					}
 					if err := tabMetaStore.Delete(r.Context(), tab.Workspace, tab.SessionName); err != nil {
 						log.Printf("Failed to delete tab metadata for %s: %v", tab.SessionName, err)
 						metaCleanupFailed = true
@@ -263,12 +268,16 @@ func handleCloseAllSessions(manager *TerminalManager, tabMetaStore *tabmeta.Stor
 			}
 		}
 
-		// Broadcast SSE event
+		// Broadcast SSE event per affected workspace so each workspace's clients update.
 		if hub != nil {
-			hub.Broadcast(&MutationPayload{
-				Type:      "terminal_session_change",
-				Timestamp: time.Now().UTC().Format(time.RFC3339),
-			})
+			now := time.Now().UTC().Format(time.RFC3339)
+			for ws := range affectedWorkspaces {
+				hub.Broadcast(&MutationPayload{
+					Type:        "terminal_session_change",
+					Timestamp:   now,
+					WorkspaceID: ws,
+				})
+			}
 		}
 
 		if metaCleanupFailed {

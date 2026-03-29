@@ -5,6 +5,7 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom";
+import { MemoryRouter } from "react-router-dom";
 
 import type { BackendInfo } from "./backendDefaults";
 import { BackendSelectorDropdown } from "./BackendSelectorDropdown";
@@ -36,10 +37,14 @@ const defaultBackends: BackendInfo[] = [
   }),
 ];
 
+function renderWithRouter(ui: React.ReactElement) {
+  return render(<MemoryRouter>{ui}</MemoryRouter>);
+}
+
 describe("BackendSelectorDropdown", () => {
   describe("trigger rendering", () => {
     it("renders trigger with selected backend display name", () => {
-      render(
+      renderWithRouter(
         <BackendSelectorDropdown
           backends={defaultBackends}
           selectedBackend="claude"
@@ -52,7 +57,7 @@ describe("BackendSelectorDropdown", () => {
     });
 
     it("renders brand-colored dot in trigger", () => {
-      const { container } = render(
+      const { container } = renderWithRouter(
         <BackendSelectorDropdown
           backends={defaultBackends}
           selectedBackend="claude"
@@ -64,7 +69,7 @@ describe("BackendSelectorDropdown", () => {
     });
 
     it("renders placeholder when selected backend is not in list", () => {
-      render(
+      renderWithRouter(
         <BackendSelectorDropdown
           backends={defaultBackends}
           selectedBackend="unknown-backend"
@@ -80,7 +85,7 @@ describe("BackendSelectorDropdown", () => {
 
   describe("dropdown open/close", () => {
     it("opens dropdown on click", () => {
-      render(
+      renderWithRouter(
         <BackendSelectorDropdown
           backends={defaultBackends}
           selectedBackend="claude"
@@ -92,7 +97,7 @@ describe("BackendSelectorDropdown", () => {
     });
 
     it("closes dropdown on second click", () => {
-      render(
+      renderWithRouter(
         <BackendSelectorDropdown
           backends={defaultBackends}
           selectedBackend="claude"
@@ -109,7 +114,7 @@ describe("BackendSelectorDropdown", () => {
     });
 
     it("closes dropdown on click outside", () => {
-      render(
+      renderWithRouter(
         <BackendSelectorDropdown
           backends={defaultBackends}
           selectedBackend="claude"
@@ -125,7 +130,7 @@ describe("BackendSelectorDropdown", () => {
     });
 
     it("closes dropdown on Escape", () => {
-      render(
+      renderWithRouter(
         <BackendSelectorDropdown
           backends={defaultBackends}
           selectedBackend="claude"
@@ -142,7 +147,7 @@ describe("BackendSelectorDropdown", () => {
     });
 
     it("does not open when disabled", () => {
-      render(
+      renderWithRouter(
         <BackendSelectorDropdown
           backends={defaultBackends}
           selectedBackend="claude"
@@ -157,7 +162,7 @@ describe("BackendSelectorDropdown", () => {
     });
 
     it("does not open when saving", () => {
-      render(
+      renderWithRouter(
         <BackendSelectorDropdown
           backends={defaultBackends}
           selectedBackend="claude"
@@ -174,7 +179,7 @@ describe("BackendSelectorDropdown", () => {
 
   describe("backend options", () => {
     it("renders all backend options", () => {
-      render(
+      renderWithRouter(
         <BackendSelectorDropdown
           backends={defaultBackends}
           selectedBackend="claude"
@@ -188,7 +193,7 @@ describe("BackendSelectorDropdown", () => {
     });
 
     it("marks selected backend with checkmark", () => {
-      render(
+      renderWithRouter(
         <BackendSelectorDropdown
           backends={defaultBackends}
           selectedBackend="claude"
@@ -202,7 +207,7 @@ describe("BackendSelectorDropdown", () => {
     });
 
     it("shows display name and provider for each option", () => {
-      render(
+      renderWithRouter(
         <BackendSelectorDropdown
           backends={defaultBackends}
           selectedBackend="claude"
@@ -219,7 +224,7 @@ describe("BackendSelectorDropdown", () => {
   describe("selection", () => {
     it("calls onSelect with backend name when clicked", async () => {
       const onSelect = vi.fn().mockResolvedValue(undefined);
-      render(
+      renderWithRouter(
         <BackendSelectorDropdown
           backends={defaultBackends}
           selectedBackend="claude"
@@ -233,7 +238,7 @@ describe("BackendSelectorDropdown", () => {
 
     it("does not call onSelect when clicking already selected backend", () => {
       const onSelect = vi.fn();
-      render(
+      renderWithRouter(
         <BackendSelectorDropdown
           backends={defaultBackends}
           selectedBackend="claude"
@@ -247,7 +252,7 @@ describe("BackendSelectorDropdown", () => {
 
     it("shows error and rolls back on failed selection", async () => {
       const onSelect = vi.fn().mockRejectedValue(new Error("Network error"));
-      render(
+      renderWithRouter(
         <BackendSelectorDropdown
           backends={defaultBackends}
           selectedBackend="claude"
@@ -280,7 +285,7 @@ describe("BackendSelectorDropdown", () => {
           available: false,
         }),
       ];
-      render(
+      renderWithRouter(
         <BackendSelectorDropdown
           backends={backends}
           selectedBackend="claude"
@@ -300,7 +305,7 @@ describe("BackendSelectorDropdown", () => {
         makeBackend(),
         makeBackend({ name: "codex", available: false }),
       ];
-      render(
+      renderWithRouter(
         <BackendSelectorDropdown
           backends={backends}
           selectedBackend="claude"
@@ -317,7 +322,7 @@ describe("BackendSelectorDropdown", () => {
         makeBackend(),
         makeBackend({ name: "codex", available: false }),
       ];
-      render(
+      renderWithRouter(
         <BackendSelectorDropdown
           backends={backends}
           selectedBackend="claude"
@@ -333,7 +338,7 @@ describe("BackendSelectorDropdown", () => {
 
   describe("search filtering", () => {
     it("filters backends by display name", () => {
-      render(
+      renderWithRouter(
         <BackendSelectorDropdown
           backends={defaultBackends}
           selectedBackend="claude"
@@ -351,7 +356,7 @@ describe("BackendSelectorDropdown", () => {
     });
 
     it("filters backends by provider", () => {
-      render(
+      renderWithRouter(
         <BackendSelectorDropdown
           backends={defaultBackends}
           selectedBackend="claude"
@@ -368,7 +373,7 @@ describe("BackendSelectorDropdown", () => {
     });
 
     it("shows no matching backends message", () => {
-      render(
+      renderWithRouter(
         <BackendSelectorDropdown
           backends={defaultBackends}
           selectedBackend="claude"
@@ -386,7 +391,7 @@ describe("BackendSelectorDropdown", () => {
 
   describe("empty state", () => {
     it("shows no backends configured when list is empty", () => {
-      render(
+      renderWithRouter(
         <BackendSelectorDropdown
           backends={[]}
           selectedBackend=""
@@ -402,7 +407,7 @@ describe("BackendSelectorDropdown", () => {
 
   describe("saving state", () => {
     it("shows saving indicator when isSaving is true", () => {
-      render(
+      renderWithRouter(
         <BackendSelectorDropdown
           backends={defaultBackends}
           selectedBackend="claude"
@@ -414,7 +419,7 @@ describe("BackendSelectorDropdown", () => {
     });
 
     it("sets data-saving on trigger when saving", () => {
-      render(
+      renderWithRouter(
         <BackendSelectorDropdown
           backends={defaultBackends}
           selectedBackend="claude"
@@ -431,7 +436,7 @@ describe("BackendSelectorDropdown", () => {
 
   describe("accessibility", () => {
     it("has correct aria attributes on trigger", () => {
-      render(
+      renderWithRouter(
         <BackendSelectorDropdown
           backends={defaultBackends}
           selectedBackend="claude"
@@ -447,7 +452,7 @@ describe("BackendSelectorDropdown", () => {
     });
 
     it("has correct aria attributes on options", () => {
-      render(
+      renderWithRouter(
         <BackendSelectorDropdown
           backends={defaultBackends}
           selectedBackend="claude"
@@ -462,7 +467,7 @@ describe("BackendSelectorDropdown", () => {
 
     it("sets aria-disabled on unavailable backends", () => {
       const backends = [makeBackend({ name: "codex", available: false })];
-      render(
+      renderWithRouter(
         <BackendSelectorDropdown
           backends={backends}
           selectedBackend=""

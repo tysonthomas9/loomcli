@@ -302,6 +302,8 @@ func TestAutoModeOptions(t *testing.T) {
 		AgentType:    "plan",
 		AgentName:    "falcon",
 		WorktreePath: "/path/to/worktree",
+		BackoffBase:  10 * time.Millisecond,
+		TaskPause:    10 * time.Millisecond,
 	}
 
 	if opts.Interval != 60 {
@@ -660,8 +662,8 @@ func TestCleanupTmuxSession_SendsCtrlC(t *testing.T) {
 	// Call cleanupTmuxSession - should send Ctrl+C then kill
 	cleanupTmuxSession(sessionName)
 
-	// Wait for signal file with timeout (more robust than fixed sleep)
-	if !waitForFile(signalFile, 1*time.Second) {
+	// Wait for signal file with generous timeout to handle CPU pressure from parallel runs
+	if !waitForFile(signalFile, 10*time.Second) {
 		t.Fatal("Timeout waiting for SIGINT signal file - Ctrl+C was not sent before kill")
 	}
 
@@ -679,12 +681,14 @@ func TestRunAutoModeTmux_MaxTasksZero(t *testing.T) {
 	close(shutdown) // Signal shutdown immediately
 
 	opts := AutoModeOptions{
-		Interval:     1,
+		Interval:     0,
 		MaxTasks:     0, // unlimited
 		IdleTimeout:  0,
 		AgentType:    "plan",
 		AgentName:    "test",
 		WorktreePath: t.TempDir(),
+		BackoffBase:  10 * time.Millisecond,
+		TaskPause:    10 * time.Millisecond,
 	}
 
 	// Should return immediately due to shutdown
@@ -1467,12 +1471,14 @@ func TestRunAutoModeLoop_ShutdownImmediately(t *testing.T) {
 	close(shutdown) // Close immediately
 
 	opts := AutoModeOptions{
-		Interval:     1,
+		Interval:     0,
 		MaxTasks:     0,
 		IdleTimeout:  0,
 		AgentType:    "task",
 		AgentName:    "test",
 		WorktreePath: tmpDir,
+		BackoffBase:  10 * time.Millisecond,
+		TaskPause:    10 * time.Millisecond,
 	}
 
 	// Run loop - should exit immediately due to shutdown
@@ -1526,12 +1532,14 @@ func TestRunAutoModeLoop_MaxTasksLimit(t *testing.T) {
 
 	shutdown := make(chan struct{})
 	opts := AutoModeOptions{
-		Interval:     1,
+		Interval:     0,
 		MaxTasks:     3, // Limit to 3 tasks
 		IdleTimeout:  0,
 		AgentType:    "task",
 		AgentName:    "test",
 		WorktreePath: tmpDir,
+		BackoffBase:  10 * time.Millisecond,
+		TaskPause:    10 * time.Millisecond,
 	}
 
 	done := make(chan struct{})
@@ -1590,12 +1598,14 @@ func TestRunAutoModeLoop_WithoutTmux(t *testing.T) {
 
 	shutdown := make(chan struct{})
 	opts := AutoModeOptions{
-		Interval:     1,
+		Interval:     0,
 		MaxTasks:     2,
 		IdleTimeout:  0,
 		AgentType:    "task",
 		AgentName:    "test",
 		WorktreePath: tmpDir,
+		BackoffBase:  10 * time.Millisecond,
+		TaskPause:    10 * time.Millisecond,
 	}
 
 	done := make(chan struct{})
@@ -1644,12 +1654,14 @@ func TestRunAutoModeLoop_GracefulShutdownNoTasks(t *testing.T) {
 
 	shutdown := make(chan struct{})
 	opts := AutoModeOptions{
-		Interval:     1,
+		Interval:     0,
 		MaxTasks:     0,
 		IdleTimeout:  1, // Set but won't be reached - we'll shutdown first
 		AgentType:    "task",
 		AgentName:    "test",
 		WorktreePath: tmpDir,
+		BackoffBase:  10 * time.Millisecond,
+		TaskPause:    10 * time.Millisecond,
 	}
 
 	go func() {
@@ -1707,12 +1719,14 @@ func TestRunAutoModeLoop_NoTasks(t *testing.T) {
 	}()
 
 	opts := AutoModeOptions{
-		Interval:     1, // Will be interrupted by shutdown
+		Interval:     0, // Will be interrupted by shutdown
 		MaxTasks:     0,
 		IdleTimeout:  0,
 		AgentType:    "task",
 		AgentName:    "test",
 		WorktreePath: tmpDir,
+		BackoffBase:  10 * time.Millisecond,
+		TaskPause:    10 * time.Millisecond,
 	}
 
 	done := make(chan struct{})
@@ -1777,12 +1791,14 @@ func TestRunAutoModeLoop_TaskExecution(t *testing.T) {
 	}()
 
 	opts := AutoModeOptions{
-		Interval:     1,
+		Interval:     0,
 		MaxTasks:     1, // Only run 1 task
 		IdleTimeout:  0,
 		AgentType:    "task",
 		AgentName:    "test-agent",
 		WorktreePath: tmpDir,
+		BackoffBase:  10 * time.Millisecond,
+		TaskPause:    10 * time.Millisecond,
 	}
 
 	done := make(chan struct{})
@@ -1832,12 +1848,14 @@ func TestRunAutoModeLoop_ConsecutiveErrors(t *testing.T) {
 
 	shutdown := make(chan struct{})
 	opts := AutoModeOptions{
-		Interval:     1, // Short interval for test
+		Interval:     0, // Short interval for test
 		MaxTasks:     0,
 		IdleTimeout:  0,
 		AgentType:    "task",
 		AgentName:    "test",
 		WorktreePath: tmpDir,
+		BackoffBase:  10 * time.Millisecond,
+		TaskPause:    10 * time.Millisecond,
 	}
 
 	done := make(chan struct{})
@@ -1890,12 +1908,14 @@ func TestRunAutoModeLoop_PlanAgentType(t *testing.T) {
 
 	shutdown := make(chan struct{})
 	opts := AutoModeOptions{
-		Interval:     1,
+		Interval:     0,
 		MaxTasks:     1,
 		IdleTimeout:  0,
 		AgentType:    "plan", // Plan agent
 		AgentName:    "planner",
 		WorktreePath: tmpDir,
+		BackoffBase:  10 * time.Millisecond,
+		TaskPause:    10 * time.Millisecond,
 	}
 
 	done := make(chan struct{})
@@ -1948,12 +1968,14 @@ func TestRunAutoModeLoop_TaskAgentType(t *testing.T) {
 
 	shutdown := make(chan struct{})
 	opts := AutoModeOptions{
-		Interval:     1,
+		Interval:     0,
 		MaxTasks:     1,
 		IdleTimeout:  0,
 		AgentType:    "task", // Task agent
 		AgentName:    "worker",
 		WorktreePath: tmpDir,
+		BackoffBase:  10 * time.Millisecond,
+		TaskPause:    10 * time.Millisecond,
 	}
 
 	done := make(chan struct{})
@@ -2012,12 +2034,14 @@ func TestRunAutoModeLoop_ErrorRecovery(t *testing.T) {
 
 	shutdown := make(chan struct{})
 	opts := AutoModeOptions{
-		Interval:     1,
+		Interval:     0,
 		MaxTasks:     0,
 		IdleTimeout:  0,
 		AgentType:    "task",
 		AgentName:    "test",
 		WorktreePath: tmpDir,
+		BackoffBase:  10 * time.Millisecond,
+		TaskPause:    10 * time.Millisecond,
 	}
 
 	done := make(chan struct{})
@@ -2070,12 +2094,14 @@ func TestRunAutoModeLoop_BdCommandError(t *testing.T) {
 	}()
 
 	opts := AutoModeOptions{
-		Interval:     1,
+		Interval:     0,
 		MaxTasks:     0,
 		IdleTimeout:  0,
 		AgentType:    "task",
 		AgentName:    "test",
 		WorktreePath: tmpDir,
+		BackoffBase:  10 * time.Millisecond,
+		TaskPause:    10 * time.Millisecond,
 	}
 
 	done := make(chan struct{})
@@ -2142,6 +2168,8 @@ func TestRunAutoModeLoop_ShutdownDuringBackoff(t *testing.T) {
 		AgentType:    "task",
 		AgentName:    "test",
 		WorktreePath: tmpDir,
+		BackoffBase:  10 * time.Millisecond,
+		TaskPause:    10 * time.Millisecond,
 	}
 
 	start := time.Now()
@@ -2220,6 +2248,8 @@ func TestStartTmuxSession_Success(t *testing.T) {
 		AgentType:    "task",
 		AgentName:    "test",
 		WorktreePath: tmpDir,
+		BackoffBase:  10 * time.Millisecond,
+		TaskPause:    10 * time.Millisecond,
 	}
 
 	// remain-on-exit keeps the pane alive even when loom exits (not installed in CI)
@@ -2272,6 +2302,8 @@ func TestStartTmuxSession_KillsExisting(t *testing.T) {
 		AgentType:    "task",
 		AgentName:    "test",
 		WorktreePath: tmpDir,
+		BackoffBase:  10 * time.Millisecond,
+		TaskPause:    10 * time.Millisecond,
 	}
 
 	// Start new session - should kill and replace the existing one
@@ -2309,6 +2341,8 @@ func TestStartTmuxSession_QuotesShellMetachars(t *testing.T) {
 		AgentType:    "task",
 		AgentName:    "test",
 		WorktreePath: metaDir,
+		BackoffBase:  10 * time.Millisecond,
+		TaskPause:    10 * time.Millisecond,
 	}
 
 	t.Cleanup(func() {
@@ -2496,6 +2530,8 @@ func TestAutoModeOptions_CustomFields(t *testing.T) {
 		AgentType:    "task",
 		AgentName:    "falcon",
 		WorktreePath: "/path/to/worktree",
+		BackoffBase:  10 * time.Millisecond,
+		TaskPause:    10 * time.Millisecond,
 		CustomPromptGen: func(agentName string, ws *WorkspaceConfig) string {
 			promptCalled = true
 			return "custom prompt for " + agentName
@@ -2558,12 +2594,14 @@ func TestRunAutoModeLoop_CustomPromptGen(t *testing.T) {
 
 	shutdown := make(chan struct{})
 	opts := AutoModeOptions{
-		Interval:     1,
+		Interval:     0,
 		MaxTasks:     1,
 		IdleTimeout:  0,
 		AgentType:    "task",
 		AgentName:    "custom-agent",
 		WorktreePath: tmpDir,
+		BackoffBase:  10 * time.Millisecond,
+		TaskPause:    10 * time.Millisecond,
 		CustomPromptGen: func(agentName string, ws *WorkspaceConfig) string {
 			return "custom prompt for " + agentName
 		},
@@ -2628,12 +2666,14 @@ func TestRunAutoModeLoop_CustomFieldsFallback(t *testing.T) {
 
 	shutdown := make(chan struct{})
 	opts := AutoModeOptions{
-		Interval:     1,
+		Interval:     0,
 		MaxTasks:     1,
 		IdleTimeout:  0,
 		AgentType:    "task",
 		AgentName:    "fallback-agent",
 		WorktreePath: tmpDir,
+		BackoffBase:  10 * time.Millisecond,
+		TaskPause:    10 * time.Millisecond,
 		// Only set CustomPromptGen, NOT CustomTaskCheck — CustomPromptGen works independently
 		CustomPromptGen: func(agentName string, ws *WorkspaceConfig) string {
 			return "custom prompt for " + agentName
@@ -2692,12 +2732,14 @@ func TestRunAutoModeLoop_CustomTaskCheckOnlyFallback(t *testing.T) {
 
 	shutdown := make(chan struct{})
 	opts := AutoModeOptions{
-		Interval:     1,
+		Interval:     0,
 		MaxTasks:     1,
 		IdleTimeout:  0,
 		AgentType:    "task",
 		AgentName:    "taskcheck-agent",
 		WorktreePath: tmpDir,
+		BackoffBase:  10 * time.Millisecond,
+		TaskPause:    10 * time.Millisecond,
 		// Only set CustomTaskCheck, NOT CustomPromptGen — should fall back to AgentType
 		CustomTaskCheck: func() (bool, error) {
 			return true, nil
@@ -3254,12 +3296,14 @@ func TestRunAutoModeLoop_CodexPlanAgentType(t *testing.T) {
 
 	shutdown := make(chan struct{})
 	opts := AutoModeOptions{
-		Interval:     1,
+		Interval:     0,
 		MaxTasks:     1,
 		IdleTimeout:  0,
 		AgentType:    "plan",
 		AgentName:    "codex-planner",
 		WorktreePath: tmpDir,
+		BackoffBase:  10 * time.Millisecond,
+		TaskPause:    10 * time.Millisecond,
 	}
 
 	done := make(chan struct{})
@@ -3335,12 +3379,14 @@ func TestRunAutoModeLoop_CodexMaxTasks(t *testing.T) {
 
 	shutdown := make(chan struct{})
 	opts := AutoModeOptions{
-		Interval:     1,
+		Interval:     0,
 		MaxTasks:     3,
 		IdleTimeout:  0,
 		AgentType:    "task",
 		AgentName:    "codex-worker",
 		WorktreePath: tmpDir,
+		BackoffBase:  10 * time.Millisecond,
+		TaskPause:    10 * time.Millisecond,
 	}
 
 	done := make(chan struct{})
@@ -3404,12 +3450,14 @@ func TestRunAutoModeLoop_CodexConsecutiveErrors(t *testing.T) {
 
 	shutdown := make(chan struct{})
 	opts := AutoModeOptions{
-		Interval:     1,
+		Interval:     0,
 		MaxTasks:     0,
 		IdleTimeout:  0,
 		AgentType:    "task",
 		AgentName:    "codex-worker",
 		WorktreePath: tmpDir,
+		BackoffBase:  10 * time.Millisecond,
+		TaskPause:    10 * time.Millisecond,
 	}
 
 	done := make(chan struct{})
@@ -3478,12 +3526,14 @@ func TestRunAutoModeLoop_CodexErrorRecovery(t *testing.T) {
 
 	shutdown := make(chan struct{})
 	opts := AutoModeOptions{
-		Interval:     1,
+		Interval:     0,
 		MaxTasks:     0,
 		IdleTimeout:  0,
 		AgentType:    "task",
 		AgentName:    "codex-worker",
 		WorktreePath: tmpDir,
+		BackoffBase:  10 * time.Millisecond,
+		TaskPause:    10 * time.Millisecond,
 	}
 
 	done := make(chan struct{})
@@ -3532,6 +3582,8 @@ func TestStartTmuxSession_CodexBackend_NoTermDumb(t *testing.T) {
 		AgentType:    "plan",
 		AgentName:    "codex-test",
 		WorktreePath: tmpDir,
+		BackoffBase:  10 * time.Millisecond,
+		TaskPause:    10 * time.Millisecond,
 	}
 
 	setTmuxRemainOnExit(t)
@@ -3588,6 +3640,8 @@ func TestStartTmuxSession_ClaudeBackend_HasTermDumb(t *testing.T) {
 		AgentType:    "plan",
 		AgentName:    "claude-test",
 		WorktreePath: tmpDir,
+		BackoffBase:  10 * time.Millisecond,
+		TaskPause:    10 * time.Millisecond,
 	}
 
 	setTmuxRemainOnExit(t)
@@ -3963,6 +4017,8 @@ func TestStartTmuxSession_WithParentID(t *testing.T) {
 				AgentName:    "test-agent",
 				WorktreePath: tmpDir,
 				ParentID:     tt.parentID,
+				BackoffBase:  10 * time.Millisecond,
+				TaskPause:    10 * time.Millisecond,
 			}
 
 			setTmuxRemainOnExit(t)
@@ -4327,12 +4383,14 @@ func TestRunAutoModeLoop_ConsecutiveNoProgress(t *testing.T) {
 	}
 
 	opts := AutoModeOptions{
-		Interval:     1,
+		Interval:     0,
 		MaxTasks:     0,
 		IdleTimeout:  0,
 		AgentType:    "task",
 		AgentName:    "test",
 		WorktreePath: tmpDir,
+		BackoffBase:  500 * time.Millisecond, // Long enough for 100ms shutdown to arrive during backoff
+		TaskPause:    10 * time.Millisecond,
 	}
 
 	done := make(chan struct{})
@@ -4381,7 +4439,6 @@ func TestRunAutoModeLoop_NoProgressCounterResetOnSuccess(t *testing.T) {
 		callNum++
 		if callNum == 1 {
 			// First call: no progress (don't claim)
-			// Shutdown will interrupt the 30s backoff — but we close it only on call 3
 			return nil
 		}
 		if callNum == 2 {
@@ -4389,21 +4446,20 @@ func TestRunAutoModeLoop_NoProgressCounterResetOnSuccess(t *testing.T) {
 			UpdateLockTask(workDir, "mock-progress", "Mock Task")
 			return nil
 		}
-		// Third call: no progress again, then shutdown during backoff
-		go func() {
-			time.Sleep(100 * time.Millisecond)
-			close(shutdown)
-		}()
+		// Third call: no progress again, signal shutdown so backoff is interrupted
+		close(shutdown)
 		return nil
 	}
 
 	opts := AutoModeOptions{
-		Interval:     1,
+		Interval:     0,
 		MaxTasks:     0,
 		IdleTimeout:  0,
 		AgentType:    "task",
 		AgentName:    "test",
 		WorktreePath: tmpDir,
+		BackoffBase:  10 * time.Millisecond,
+		TaskPause:    10 * time.Millisecond,
 	}
 
 	done := make(chan struct{})
@@ -4414,12 +4470,11 @@ func TestRunAutoModeLoop_NoProgressCounterResetOnSuccess(t *testing.T) {
 
 	select {
 	case <-done:
-	case <-time.After(120 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("RunAutoModeLoop did not exit")
 	}
 
-	// Should have been called 3 times: no-progress(30s backoff) → claim(2s pause) → no-progress(shutdown)
-	// Note: the 30s backoff on first no-progress makes this test take ~32s
+	// Should have been called 3 times: no-progress(backoff) → claim(pause) → no-progress(shutdown)
 	if callNum != 3 {
 		t.Errorf("Expected 3 Claude invocations, got %d", callNum)
 	}
@@ -4704,12 +4759,14 @@ func TestRunAutoModeTmux_NoTasks(t *testing.T) {
 	shutdown := make(chan struct{})
 
 	opts := AutoModeOptions{
-		Interval:     1,
+		Interval:     0,
 		MaxTasks:     0,
 		IdleTimeout:  0,
 		AgentType:    "task",
 		AgentName:    "test-no-tasks",
 		WorktreePath: tmpDir,
+		BackoffBase:  10 * time.Millisecond,
+		TaskPause:    10 * time.Millisecond,
 		CustomTaskCheck: func() (bool, error) {
 			return false, nil // No tasks
 		},
@@ -4744,21 +4801,23 @@ func TestRunAutoModeTmux_TaskCheckError(t *testing.T) {
 	shutdown := make(chan struct{})
 
 	opts := AutoModeOptions{
-		Interval:     1,
+		Interval:     0,
 		MaxTasks:     0,
 		IdleTimeout:  0,
 		AgentType:    "task",
 		AgentName:    "test-err",
 		WorktreePath: tmpDir,
+		BackoffBase:  10 * time.Millisecond,
+		TaskPause:    10 * time.Millisecond,
 		CustomTaskCheck: func() (bool, error) {
 			return false, fmt.Errorf("simulated task check error")
 		},
 	}
 
-	// The error path in RunAutoModeTmux uses time.Sleep(5s) which is not interruptible.
-	// Send shutdown after >5s so the loop cycles back to the shutdown check.
+	// The error path in RunAutoModeTmux uses interruptibleSleep, so shutdown
+	// will be honored immediately without waiting for the full 5s backoff.
 	go func() {
-		time.Sleep(6 * time.Second)
+		time.Sleep(100 * time.Millisecond)
 		close(shutdown)
 	}()
 
@@ -4771,7 +4830,7 @@ func TestRunAutoModeTmux_TaskCheckError(t *testing.T) {
 	select {
 	case <-done:
 		// Good - handled error and exited
-	case <-time.After(15 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Error("RunAutoModeTmux did not exit after task check error")
 	}
 }
@@ -4818,12 +4877,14 @@ func TestRunAutoModeLoop_LockStateTransitions(t *testing.T) {
 
 	shutdown := make(chan struct{})
 	opts := AutoModeOptions{
-		Interval:     1,
+		Interval:     0,
 		MaxTasks:     1,
 		IdleTimeout:  0,
 		AgentType:    "task",
 		AgentName:    "test",
 		WorktreePath: tmpDir,
+		BackoffBase:  10 * time.Millisecond,
+		TaskPause:    10 * time.Millisecond,
 	}
 
 	done := make(chan struct{})
@@ -4897,12 +4958,14 @@ func TestRunAutoModeLoop_ClearsTaskIDBeforeEachSession(t *testing.T) {
 
 	shutdown := make(chan struct{})
 	opts := AutoModeOptions{
-		Interval:     1,
+		Interval:     0,
 		MaxTasks:     2,
 		IdleTimeout:  0,
 		AgentType:    "task",
 		AgentName:    "test",
 		WorktreePath: tmpDir,
+		BackoffBase:  10 * time.Millisecond,
+		TaskPause:    10 * time.Millisecond,
 	}
 
 	done := make(chan struct{})
@@ -4954,6 +5017,8 @@ func TestStartTmuxSession_PassesTerminalDimensions(t *testing.T) {
 		AgentType:    "task",
 		AgentName:    "test",
 		WorktreePath: tmpDir,
+		BackoffBase:  10 * time.Millisecond,
+		TaskPause:    10 * time.Millisecond,
 	}
 
 	err := startTmuxSession(sessionName, opts, logFile)
@@ -5017,6 +5082,8 @@ func TestStartTmuxSession_PipePaneAndFocusEvents(t *testing.T) {
 		AgentType:    "task",
 		AgentName:    "test",
 		WorktreePath: tmpDir,
+		BackoffBase:  10 * time.Millisecond,
+		TaskPause:    10 * time.Millisecond,
 	}
 
 	err := startTmuxSession(sessionName, opts, logFile)
@@ -5147,13 +5214,14 @@ func TestRunAutoModeLoop_ThreeConsecutiveNoProgressExits(t *testing.T) {
 
 	shutdown := make(chan struct{})
 	opts := AutoModeOptions{
-		Interval:     1,
+		Interval:     0,
 		MaxTasks:     0,
 		IdleTimeout:  0,
 		AgentType:    "task",
 		AgentName:    "test",
 		WorktreePath: tmpDir,
 		BackoffBase:  10 * time.Millisecond,
+		TaskPause:    10 * time.Millisecond,
 	}
 
 	done := make(chan struct{})

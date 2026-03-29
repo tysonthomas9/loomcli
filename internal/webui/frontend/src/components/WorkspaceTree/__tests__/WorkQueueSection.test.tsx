@@ -15,7 +15,13 @@ import "@testing-library/jest-dom";
 import type { WorkQueueCounts } from "../WorkQueueSection";
 import { WorkQueueSection } from "../WorkQueueSection";
 
-const STORAGE_KEY = "workspace-tree-work-queue-expanded";
+const TEST_WS_ID = "test-ws-uuid-1234";
+
+vi.mock("@/hooks/useWorkspaceContext", () => ({
+  useWorkspaceContext: () => ({ workspaceId: TEST_WS_ID }),
+}));
+
+const STORAGE_KEY = `loom:${TEST_WS_ID}:work-queue-expanded`;
 
 function makeCounts(overrides: Partial<WorkQueueCounts> = {}): WorkQueueCounts {
   return {
@@ -33,6 +39,7 @@ describe("WorkQueueSection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    localStorage.setItem("loom:last-workspace-id", TEST_WS_ID);
   });
 
   describe("basic rendering", () => {

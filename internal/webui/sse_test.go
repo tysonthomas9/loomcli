@@ -1,9 +1,11 @@
 package webui
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -46,9 +48,10 @@ func TestSSEHub_RegisterClient(t *testing.T) {
 	defer hub.Stop()
 
 	client := &SSEClient{
-		id:   1,
-		send: make(chan *MutationPayload, 64),
-		done: make(chan struct{}),
+		id:          1,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		workspaceID: testWS,
 	}
 
 	hub.RegisterClient(client)
@@ -69,9 +72,10 @@ func TestSSEHub_UnregisterClient(t *testing.T) {
 	defer hub.Stop()
 
 	client := &SSEClient{
-		id:   1,
-		send: make(chan *MutationPayload, 64),
-		done: make(chan struct{}),
+		id:          1,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		workspaceID: testWS,
 	}
 
 	hub.RegisterClient(client)
@@ -93,9 +97,10 @@ func TestSSEHub_UnregisterClosesChannel(t *testing.T) {
 	defer hub.Stop()
 
 	client := &SSEClient{
-		id:   1,
-		send: make(chan *MutationPayload, 64),
-		done: make(chan struct{}),
+		id:          1,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		workspaceID: testWS,
 	}
 
 	hub.RegisterClient(client)
@@ -124,9 +129,10 @@ func TestSSEHub_MultipleClients(t *testing.T) {
 	clients := make([]*SSEClient, 5)
 	for i := 0; i < 5; i++ {
 		clients[i] = &SSEClient{
-			id:   int64(i + 1),
-			send: make(chan *MutationPayload, 64),
-			done: make(chan struct{}),
+			id:          int64(i + 1),
+			send:        make(chan *MutationPayload, 64),
+			done:        make(chan struct{}),
+			workspaceID: testWS,
 		}
 		hub.RegisterClient(clients[i])
 	}
@@ -157,14 +163,16 @@ func TestSSEHub_Broadcast(t *testing.T) {
 
 	// Register two clients
 	client1 := &SSEClient{
-		id:   1,
-		send: make(chan *MutationPayload, 64),
-		done: make(chan struct{}),
+		id:          1,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		workspaceID: testWS,
 	}
 	client2 := &SSEClient{
-		id:   2,
-		send: make(chan *MutationPayload, 64),
-		done: make(chan struct{}),
+		id:          2,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		workspaceID: testWS,
 	}
 
 	hub.RegisterClient(client1)
@@ -173,10 +181,11 @@ func TestSSEHub_Broadcast(t *testing.T) {
 
 	// Broadcast a mutation
 	mutation := &MutationPayload{
-		Type:      "create",
-		IssueID:   "bd-123",
-		Title:     "Test Issue",
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Type:        "create",
+		IssueID:     "bd-123",
+		Title:       "Test Issue",
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		WorkspaceID: testWS,
 	}
 	hub.Broadcast(mutation)
 
@@ -210,21 +219,22 @@ func TestSSEHub_BroadcastSkipsFullBuffer(t *testing.T) {
 
 	// Create client with tiny buffer
 	client := &SSEClient{
-		id:   1,
-		send: make(chan *MutationPayload, 1), // Buffer of 1
-		done: make(chan struct{}),
+		id:          1,
+		send:        make(chan *MutationPayload, 1), // Buffer of 1
+		done:        make(chan struct{}),
+		workspaceID: testWS,
 	}
 
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
 	// Fill the buffer
-	mutation1 := &MutationPayload{Type: "create", IssueID: "bd-1"}
+	mutation1 := &MutationPayload{Type: "create", IssueID: "bd-1", WorkspaceID: testWS}
 	hub.Broadcast(mutation1)
 	time.Sleep(50 * time.Millisecond)
 
 	// This should be skipped (buffer full)
-	mutation2 := &MutationPayload{Type: "create", IssueID: "bd-2"}
+	mutation2 := &MutationPayload{Type: "create", IssueID: "bd-2", WorkspaceID: testWS}
 	hub.Broadcast(mutation2)
 	time.Sleep(50 * time.Millisecond)
 
@@ -253,9 +263,10 @@ func TestSSEHub_Stop(t *testing.T) {
 	go hub.Run()
 
 	client := &SSEClient{
-		id:   1,
-		send: make(chan *MutationPayload, 64),
-		done: make(chan struct{}),
+		id:          1,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		workspaceID: testWS,
 	}
 
 	hub.RegisterClient(client)
@@ -307,8 +318,8 @@ func TestHandleSSE_Headers(t *testing.T) {
 	handler := handleSSE(hub, nil)
 
 	// Create a test request with cancelable context
-	ctx, cancel := context.WithCancel(context.Background())
-	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil)
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
 
@@ -388,18 +399,18 @@ func TestHandleSSE_ParsesLastEventID(t *testing.T) {
 			defer hub.Stop()
 
 			var capturedSince int64
-			getMutations := func(since int64) []rpc.MutationEvent {
+			getMutations := func(wsID string, since int64) []rpc.MutationEvent {
 				capturedSince = since
 				return nil
 			}
 
 			handler := handleSSE(hub, getMutations)
 
-			url := "/api/events"
+			url := "/api/workspaces/test-ws/events"
 			if tt.sinceParam != "" {
 				url += "?since=" + tt.sinceParam
 			}
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
 			req := httptest.NewRequest(http.MethodGet, url, nil)
 			req = req.WithContext(ctx)
 			if tt.lastEventID != "" {
@@ -433,8 +444,8 @@ func TestHandleSSE_SendsConnectedEvent(t *testing.T) {
 
 	handler := handleSSE(hub, nil)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil)
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
 
@@ -464,7 +475,7 @@ func TestHandleSSE_CatchUpEvents(t *testing.T) {
 	defer hub.Stop()
 
 	// Create getMutationsSince that returns catch-up events
-	getMutations := func(since int64) []rpc.MutationEvent {
+	getMutations := func(wsID string, since int64) []rpc.MutationEvent {
 		return []rpc.MutationEvent{
 			{
 				Type:      "create",
@@ -478,8 +489,8 @@ func TestHandleSSE_CatchUpEvents(t *testing.T) {
 	handler := handleSSE(hub, getMutations)
 
 	// Connect with a since timestamp to trigger catch-up
-	ctx, cancel := context.WithCancel(context.Background())
-	req := httptest.NewRequest(http.MethodGet, "/api/events?since=1000", nil)
+	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events?since=1000", nil)
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
 
@@ -643,12 +654,12 @@ func TestSSEHub_BroadcastQueuesToRetryQueue(t *testing.T) {
 
 	// Fill the broadcast channel (capacity 256)
 	for i := 0; i < 256; i++ {
-		hub.Broadcast(&MutationPayload{Type: "create", IssueID: "bd-fill"})
+		hub.Broadcast(&MutationPayload{Type: "create", IssueID: "bd-fill", WorkspaceID: testWS})
 	}
 
 	// Now broadcast should queue to retry queue
-	hub.Broadcast(&MutationPayload{Type: "create", IssueID: "bd-retry1"})
-	hub.Broadcast(&MutationPayload{Type: "create", IssueID: "bd-retry2"})
+	hub.Broadcast(&MutationPayload{Type: "create", IssueID: "bd-retry1", WorkspaceID: testWS})
+	hub.Broadcast(&MutationPayload{Type: "create", IssueID: "bd-retry2", WorkspaceID: testWS})
 
 	hub.retryMu.Lock()
 	queueLen := len(hub.retryQueue)
@@ -666,12 +677,12 @@ func TestSSEHub_BroadcastDropsWhenRetryQueueFull(t *testing.T) {
 
 	// Fill the broadcast channel (capacity 256)
 	for i := 0; i < 256; i++ {
-		hub.Broadcast(&MutationPayload{Type: "create", IssueID: "bd-fill"})
+		hub.Broadcast(&MutationPayload{Type: "create", IssueID: "bd-fill", WorkspaceID: testWS})
 	}
 
 	// Fill the retry queue (capacity 1024)
 	for i := 0; i < 1024; i++ {
-		hub.Broadcast(&MutationPayload{Type: "create", IssueID: "bd-retry"})
+		hub.Broadcast(&MutationPayload{Type: "create", IssueID: "bd-retry", WorkspaceID: testWS})
 	}
 
 	hub.retryMu.Lock()
@@ -688,8 +699,8 @@ func TestSSEHub_BroadcastDropsWhenRetryQueueFull(t *testing.T) {
 	}
 
 	// This mutation should be dropped
-	hub.Broadcast(&MutationPayload{Type: "create", IssueID: "bd-dropped1"})
-	hub.Broadcast(&MutationPayload{Type: "create", IssueID: "bd-dropped2"})
+	hub.Broadcast(&MutationPayload{Type: "create", IssueID: "bd-dropped1", WorkspaceID: testWS})
+	hub.Broadcast(&MutationPayload{Type: "create", IssueID: "bd-dropped2", WorkspaceID: testWS})
 
 	droppedCount := hub.GetDroppedCount()
 	if droppedCount != 2 {
@@ -717,17 +728,17 @@ func TestSSEHub_GetDroppedCount(t *testing.T) {
 
 	// Fill broadcast channel
 	for i := 0; i < 256; i++ {
-		hub.Broadcast(&MutationPayload{Type: "create", IssueID: "bd-fill"})
+		hub.Broadcast(&MutationPayload{Type: "create", IssueID: "bd-fill", WorkspaceID: testWS})
 	}
 
 	// Fill retry queue
 	for i := 0; i < 1024; i++ {
-		hub.Broadcast(&MutationPayload{Type: "create", IssueID: "bd-retry"})
+		hub.Broadcast(&MutationPayload{Type: "create", IssueID: "bd-retry", WorkspaceID: testWS})
 	}
 
 	// Drop 5 mutations
 	for i := 0; i < 5; i++ {
-		hub.Broadcast(&MutationPayload{Type: "create", IssueID: "bd-dropped"})
+		hub.Broadcast(&MutationPayload{Type: "create", IssueID: "bd-dropped", WorkspaceID: testWS})
 	}
 
 	if count := hub.GetDroppedCount(); count != 5 {
@@ -787,7 +798,7 @@ func TestSSEHub_DrainRetryQueuePreservesRemaining(t *testing.T) {
 
 	// Fill broadcast channel almost completely (leave room for just 2 more)
 	for i := 0; i < 254; i++ {
-		hub.broadcast <- &MutationPayload{Type: "create", IssueID: "bd-fill"}
+		hub.broadcast <- &MutationPayload{Type: "create", IssueID: "bd-fill", WorkspaceID: testWS}
 	}
 
 	// Add 5 items to retry queue
@@ -856,9 +867,10 @@ func TestSSEHub_RetryQueueDrainedByTicker(t *testing.T) {
 
 	// Register a client with large buffer to consume all broadcasts
 	client := &SSEClient{
-		id:   1,
-		send: make(chan *MutationPayload, 512), // Large buffer to avoid blocking
-		done: make(chan struct{}),
+		id:          1,
+		send:        make(chan *MutationPayload, 512), // Large buffer to avoid blocking
+		done:        make(chan struct{}),
+		workspaceID: testWS,
 	}
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
@@ -866,8 +878,8 @@ func TestSSEHub_RetryQueueDrainedByTicker(t *testing.T) {
 	// Manually add items to retry queue (simulating queued mutations)
 	hub.retryMu.Lock()
 	hub.retryQueue = []*MutationPayload{
-		{Type: "create", IssueID: "bd-retry-1"},
-		{Type: "create", IssueID: "bd-retry-2"},
+		{Type: "create", IssueID: "bd-retry-1", WorkspaceID: testWS},
+		{Type: "create", IssueID: "bd-retry-2", WorkspaceID: testWS},
 	}
 	hub.retryMu.Unlock()
 
@@ -1014,8 +1026,8 @@ func TestHandleSSE_SendsRetryField(t *testing.T) {
 
 	handler := handleSSE(hub, nil)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil)
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
 
@@ -1054,8 +1066,8 @@ func TestHandleSSE_HeartbeatSent(t *testing.T) {
 
 	handler := handleSSE(hub, nil)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil)
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
 
@@ -1202,7 +1214,7 @@ func TestHandleSSE_ClientDisconnectDuringCatchUp(t *testing.T) {
 	// Gate channel blocks after delivering a few events
 	gate := make(chan struct{})
 
-	getMutations := func(since int64) []rpc.MutationEvent {
+	getMutations := func(wsID string, since int64) []rpc.MutationEvent {
 		events := make([]rpc.MutationEvent, 50)
 		for i := range events {
 			events[i] = rpc.MutationEvent{
@@ -1218,8 +1230,8 @@ func TestHandleSSE_ClientDisconnectDuringCatchUp(t *testing.T) {
 
 	handler := handleSSE(hub, getMutations)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	req := httptest.NewRequest(http.MethodGet, "/api/events?since=1000", nil)
+	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events?since=1000", nil)
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
 
@@ -1259,10 +1271,10 @@ func TestHandleSSE_ContextAlreadyCancelled(t *testing.T) {
 	handler := handleSSE(hub, nil)
 
 	// Create request with already-cancelled context
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
 	cancel() // Cancel before calling handler
 
-	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil)
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
 
@@ -1296,7 +1308,7 @@ func TestHandleSSE_NoCatchUpWhenGetMutationsSinceNil(t *testing.T) {
 	// Pass nil for getMutationsSince, but connect with since=1000
 	handler := handleSSE(hub, nil)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
 	req := httptest.NewRequest(http.MethodGet, "/api/events?since=1000", nil)
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
@@ -1326,7 +1338,7 @@ func TestHandleSSE_NoCatchUpWhenSinceZero(t *testing.T) {
 	defer hub.Stop()
 
 	called := false
-	getMutations := func(since int64) []rpc.MutationEvent {
+	getMutations := func(wsID string, since int64) []rpc.MutationEvent {
 		called = true
 		return nil
 	}
@@ -1334,8 +1346,8 @@ func TestHandleSSE_NoCatchUpWhenSinceZero(t *testing.T) {
 	// Connect WITHOUT Last-Event-ID and without since param
 	handler := handleSSE(hub, getMutations)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil)
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
 
@@ -1396,8 +1408,8 @@ func TestHandleSSE_WriteDeadlineDisabled(t *testing.T) {
 
 	handler := handleSSE(hub, nil)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil)
 	req = req.WithContext(ctx)
 	rr := &writeDeadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
 
@@ -1428,8 +1440,8 @@ func TestHandleSSE_StreamsMutationFromHub(t *testing.T) {
 
 	handler := handleSSE(hub, nil)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil)
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
 
@@ -1450,10 +1462,11 @@ func TestHandleSSE_StreamsMutationFromHub(t *testing.T) {
 
 	// Broadcast a mutation
 	hub.Broadcast(&MutationPayload{
-		Type:      "create",
-		IssueID:   "bd-stream-test",
-		Title:     "Stream Test",
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Type:        "create",
+		IssueID:     "bd-stream-test",
+		Title:       "Stream Test",
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		WorkspaceID: testWS,
 	})
 
 	// Give the handler time to write the mutation
@@ -1481,9 +1494,9 @@ func TestHandleSSE_SendChannelClosed(t *testing.T) {
 
 	handler := handleSSE(hub, nil)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
 	defer cancel()
-	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil)
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
 
@@ -1620,12 +1633,14 @@ func TestSSEHub_BroadcastFiltersSourceRepo(t *testing.T) {
 		send:        make(chan *MutationPayload, 64),
 		done:        make(chan struct{}),
 		sourceRepos: []string{"repo-a"},
+		workspaceID: testWS,
 	}
 	clientB := &SSEClient{
 		id:          2,
 		send:        make(chan *MutationPayload, 64),
 		done:        make(chan struct{}),
 		sourceRepos: []string{"repo-b"},
+		workspaceID: testWS,
 	}
 
 	hub.RegisterClient(clientA)
@@ -1634,9 +1649,10 @@ func TestSSEHub_BroadcastFiltersSourceRepo(t *testing.T) {
 
 	// Broadcast mutation for repo-a
 	hub.Broadcast(&MutationPayload{
-		Type:       "update",
-		IssueID:    "issue-1",
-		SourceRepo: "repo-a",
+		Type:        "update",
+		IssueID:     "issue-1",
+		SourceRepo:  "repo-a",
+		WorkspaceID: testWS,
 	})
 
 	time.Sleep(50 * time.Millisecond)
@@ -1667,9 +1683,10 @@ func TestSSEHub_BroadcastNoFilterPassesAll(t *testing.T) {
 	defer hub.Stop()
 
 	client := &SSEClient{
-		id:   1,
-		send: make(chan *MutationPayload, 64),
-		done: make(chan struct{}),
+		id:          1,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		workspaceID: testWS,
 		// sourceRepos is nil — should receive all
 	}
 
@@ -1679,9 +1696,10 @@ func TestSSEHub_BroadcastNoFilterPassesAll(t *testing.T) {
 	repos := []string{"repo-a", "repo-b", ""}
 	for _, repo := range repos {
 		hub.Broadcast(&MutationPayload{
-			Type:       "update",
-			IssueID:    "issue-" + repo,
-			SourceRepo: repo,
+			Type:        "update",
+			IssueID:     "issue-" + repo,
+			SourceRepo:  repo,
+			WorkspaceID: testWS,
 		})
 	}
 
@@ -1714,6 +1732,7 @@ func TestSSEHub_BroadcastEmptySourceRepoPassesAll(t *testing.T) {
 		send:        make(chan *MutationPayload, 64),
 		done:        make(chan struct{}),
 		sourceRepos: []string{"repo-a"},
+		workspaceID: testWS,
 	}
 
 	hub.RegisterClient(client)
@@ -1721,9 +1740,10 @@ func TestSSEHub_BroadcastEmptySourceRepoPassesAll(t *testing.T) {
 
 	// Mutation with empty SourceRepo should pass through
 	hub.Broadcast(&MutationPayload{
-		Type:       "update",
-		IssueID:    "issue-1",
-		SourceRepo: "",
+		Type:        "update",
+		IssueID:     "issue-1",
+		SourceRepo:  "",
+		WorkspaceID: testWS,
 	})
 
 	time.Sleep(50 * time.Millisecond)
@@ -1748,7 +1768,7 @@ func TestHandleSSE_ParsesSourceReposParam(t *testing.T) {
 	handler := handleSSE(hub, nil)
 
 	// Connect with source_repos=repo-a,repo-b
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
 	defer cancel()
 
 	req := httptest.NewRequest("GET", "/api/events?source_repos=repo-a,repo-b", nil)
@@ -1767,23 +1787,26 @@ func TestHandleSSE_ParsesSourceReposParam(t *testing.T) {
 
 	// Broadcast mutation for repo-a (should pass)
 	hub.Broadcast(&MutationPayload{
-		Type:       "update",
-		IssueID:    "issue-a",
-		SourceRepo: "repo-a",
+		Type:        "update",
+		IssueID:     "issue-a",
+		SourceRepo:  "repo-a",
+		WorkspaceID: "test-ws",
 	})
 
 	// Broadcast mutation for repo-c (should be filtered)
 	hub.Broadcast(&MutationPayload{
-		Type:       "update",
-		IssueID:    "issue-c",
-		SourceRepo: "repo-c",
+		Type:        "update",
+		IssueID:     "issue-c",
+		SourceRepo:  "repo-c",
+		WorkspaceID: "test-ws",
 	})
 
 	// Broadcast mutation for repo-b (should pass)
 	hub.Broadcast(&MutationPayload{
-		Type:       "update",
-		IssueID:    "issue-b",
-		SourceRepo: "repo-b",
+		Type:        "update",
+		IssueID:     "issue-b",
+		SourceRepo:  "repo-b",
+		WorkspaceID: "test-ws",
 	})
 
 	time.Sleep(200 * time.Millisecond)
@@ -1811,10 +1834,10 @@ func TestHandleSSE_SourceReposParamEmpty(t *testing.T) {
 
 	handler := handleSSE(hub, nil)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
 	defer cancel()
 
-	req := httptest.NewRequest("GET", "/api/events", nil)
+	req := httptest.NewRequest("GET", "/api/workspaces/test-ws/events", nil)
 	req = req.WithContext(ctx)
 	rec := httptest.NewRecorder()
 
@@ -1827,14 +1850,16 @@ func TestHandleSSE_SourceReposParamEmpty(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	hub.Broadcast(&MutationPayload{
-		Type:       "update",
-		IssueID:    "issue-x",
-		SourceRepo: "repo-x",
+		Type:        "update",
+		IssueID:     "issue-x",
+		SourceRepo:  "repo-x",
+		WorkspaceID: "test-ws",
 	})
 	hub.Broadcast(&MutationPayload{
-		Type:       "update",
-		IssueID:    "issue-y",
-		SourceRepo: "repo-y",
+		Type:        "update",
+		IssueID:     "issue-y",
+		SourceRepo:  "repo-y",
+		WorkspaceID: "test-ws",
 	})
 
 	time.Sleep(200 * time.Millisecond)
@@ -1858,7 +1883,7 @@ func TestHandleSSE_SourceReposTrimsWhitespace(t *testing.T) {
 
 	handler := handleSSE(hub, nil)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
 	defer cancel()
 
 	// Spaces around repo names and an empty segment
@@ -1876,16 +1901,18 @@ func TestHandleSSE_SourceReposTrimsWhitespace(t *testing.T) {
 
 	// repo-b should match (whitespace trimmed)
 	hub.Broadcast(&MutationPayload{
-		Type:       "update",
-		IssueID:    "issue-b",
-		SourceRepo: "repo-b",
+		Type:        "update",
+		IssueID:     "issue-b",
+		SourceRepo:  "repo-b",
+		WorkspaceID: "test-ws",
 	})
 
 	// repo-d should be filtered
 	hub.Broadcast(&MutationPayload{
-		Type:       "update",
-		IssueID:    "issue-d",
-		SourceRepo: "repo-d",
+		Type:        "update",
+		IssueID:     "issue-d",
+		SourceRepo:  "repo-d",
+		WorkspaceID: "test-ws",
 	})
 
 	time.Sleep(200 * time.Millisecond)
@@ -1909,7 +1936,7 @@ func TestHandleSSE_CatchUpFiltersSourceRepos(t *testing.T) {
 	defer hub.Stop()
 
 	// Provide a getMutationsSince that returns events for multiple repos
-	getMutationsSince := func(since int64) []rpc.MutationEvent {
+	getMutationsSince := func(wsID string, since int64) []rpc.MutationEvent {
 		return []rpc.MutationEvent{
 			{Type: "update", IssueID: "issue-a", SourceRepo: "repo-a", Timestamp: time.Now()},
 			{Type: "update", IssueID: "issue-b", SourceRepo: "repo-b", Timestamp: time.Now()},
@@ -1919,11 +1946,11 @@ func TestHandleSSE_CatchUpFiltersSourceRepos(t *testing.T) {
 
 	handler := handleSSE(hub, getMutationsSince)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
 	defer cancel()
 
 	// Connect with source_repos=repo-a and a since value to trigger catch-up
-	req := httptest.NewRequest("GET", "/api/events?source_repos=repo-a&since=1000", nil)
+	req := httptest.NewRequest("GET", "/api/workspaces/test-ws/events?source_repos=repo-a&since=1000", nil)
 	req = req.WithContext(ctx)
 	rec := httptest.NewRecorder()
 
@@ -1951,4 +1978,351 @@ func TestHandleSSE_CatchUpFiltersSourceRepos(t *testing.T) {
 	if !strings.Contains(body, "issue-c") {
 		t.Error("expected issue-c (empty SourceRepo) in catch-up events")
 	}
+}
+
+// TestMatchesWorkspaceFilter tests the workspace filter matching logic.
+func TestMatchesWorkspaceFilter(t *testing.T) {
+	tests := []struct {
+		name                string
+		clientWorkspaceID   string
+		mutationWorkspaceID string
+		want                bool
+	}{
+		{
+			name:                "match: same workspace",
+			clientWorkspaceID:   "ws-1",
+			mutationWorkspaceID: "ws-1",
+			want:                true,
+		},
+		{
+			name:                "mismatch: different workspace",
+			clientWorkspaceID:   "ws-1",
+			mutationWorkspaceID: "ws-2",
+			want:                false,
+		},
+		{
+			name:                "fail-closed: no subscription (empty client workspace)",
+			clientWorkspaceID:   "",
+			mutationWorkspaceID: "ws-1",
+			want:                false,
+		},
+		{
+			name:                "fail-closed: untagged mutation (empty mutation workspace)",
+			clientWorkspaceID:   "ws-1",
+			mutationWorkspaceID: "",
+			want:                false,
+		},
+		{
+			name:                "fail-closed: both empty",
+			clientWorkspaceID:   "",
+			mutationWorkspaceID: "",
+			want:                false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := matchesWorkspaceFilter(tt.clientWorkspaceID, tt.mutationWorkspaceID)
+			if got != tt.want {
+				t.Errorf("matchesWorkspaceFilter(%q, %q) = %v, want %v",
+					tt.clientWorkspaceID, tt.mutationWorkspaceID, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestParseLastSince tests the parseLastSince function for extracting
+// reconnection catch-up timestamps from requests.
+func TestParseLastSince(t *testing.T) {
+	tests := []struct {
+		name        string
+		lastEventID string // Last-Event-ID header value; empty = no header
+		sinceParam  string // ?since query param value; empty = no param
+		want        int64
+	}{
+		{
+			name: "no header no param",
+			want: 0,
+		},
+		{
+			name:        "Last-Event-ID header only",
+			lastEventID: "5000",
+			want:        5000,
+		},
+		{
+			name:       "since query param only",
+			sinceParam: "3000",
+			want:       3000,
+		},
+		{
+			name:        "both present, header larger",
+			lastEventID: "9000",
+			sinceParam:  "4000",
+			want:        9000,
+		},
+		{
+			name:        "both present, param larger",
+			lastEventID: "2000",
+			sinceParam:  "7000",
+			want:        7000,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			url := "/api/workspaces/test-ws/events"
+			if tt.sinceParam != "" {
+				url += "?since=" + tt.sinceParam
+			}
+			req := httptest.NewRequest(http.MethodGet, url, nil)
+			if tt.lastEventID != "" {
+				req.Header.Set("Last-Event-ID", tt.lastEventID)
+			}
+
+			got := parseLastSince(req)
+			if got != tt.want {
+				t.Errorf("parseLastSince() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestSSEHub_BroadcastDropsEmptyWorkspaceID verifies that a mutation with an
+// empty WorkspaceID is silently dropped — no client receives it.
+func TestSSEHub_BroadcastDropsEmptyWorkspaceID(t *testing.T) {
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	client := &SSEClient{
+		id:          1,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		workspaceID: testWS,
+	}
+	hub.RegisterClient(client)
+	time.Sleep(50 * time.Millisecond)
+
+	// Broadcast mutation with empty WorkspaceID — should be dropped
+	hub.Broadcast(&MutationPayload{
+		Type:        "create",
+		IssueID:     "bd-dropped",
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		WorkspaceID: "", // empty
+	})
+
+	// Give the hub time to process the broadcast
+	time.Sleep(100 * time.Millisecond)
+
+	select {
+	case received := <-client.send:
+		t.Errorf("expected no mutation, but received: %+v", received)
+	default:
+		// Good — nothing delivered
+	}
+}
+
+// TestSSEHub_BroadcastFiltersWorkspace verifies that two clients with different
+// workspaceIDs each only receive mutations matching their workspace.
+func TestSSEHub_BroadcastFiltersWorkspace(t *testing.T) {
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	clientA := &SSEClient{
+		id:          1,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		workspaceID: "ws-alpha",
+	}
+	clientB := &SSEClient{
+		id:          2,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		workspaceID: "ws-beta",
+	}
+
+	hub.RegisterClient(clientA)
+	hub.RegisterClient(clientB)
+	time.Sleep(50 * time.Millisecond)
+
+	// Broadcast a mutation for ws-alpha
+	hub.Broadcast(&MutationPayload{
+		Type:        "create",
+		IssueID:     "bd-alpha",
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		WorkspaceID: "ws-alpha",
+	})
+
+	// Broadcast a mutation for ws-beta
+	hub.Broadcast(&MutationPayload{
+		Type:        "update",
+		IssueID:     "bd-beta",
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		WorkspaceID: "ws-beta",
+	})
+
+	time.Sleep(100 * time.Millisecond)
+
+	// clientA should receive only ws-alpha mutation
+	select {
+	case received := <-clientA.send:
+		if received.IssueID != "bd-alpha" {
+			t.Errorf("clientA: expected bd-alpha, got %s", received.IssueID)
+		}
+	default:
+		t.Error("clientA: expected to receive ws-alpha mutation")
+	}
+	select {
+	case received := <-clientA.send:
+		t.Errorf("clientA: expected no more mutations, got %s", received.IssueID)
+	default:
+		// Good — nothing else
+	}
+
+	// clientB should receive only ws-beta mutation
+	select {
+	case received := <-clientB.send:
+		if received.IssueID != "bd-beta" {
+			t.Errorf("clientB: expected bd-beta, got %s", received.IssueID)
+		}
+	default:
+		t.Error("clientB: expected to receive ws-beta mutation")
+	}
+	select {
+	case received := <-clientB.send:
+		t.Errorf("clientB: expected no more mutations, got %s", received.IssueID)
+	default:
+		// Good — nothing else
+	}
+}
+
+// TestSSEHub_BroadcastFailClosedNoWorkspace verifies that a client with an
+// empty workspaceID receives no mutations at all (fail-closed behavior).
+func TestSSEHub_BroadcastFailClosedNoWorkspace(t *testing.T) {
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	// Client with empty workspaceID
+	emptyClient := &SSEClient{
+		id:          1,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		workspaceID: "", // no workspace
+	}
+
+	// Client with a workspace (control group)
+	normalClient := &SSEClient{
+		id:          2,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		workspaceID: testWS,
+	}
+
+	hub.RegisterClient(emptyClient)
+	hub.RegisterClient(normalClient)
+	time.Sleep(50 * time.Millisecond)
+
+	hub.Broadcast(&MutationPayload{
+		Type:        "create",
+		IssueID:     "bd-test",
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		WorkspaceID: testWS,
+	})
+
+	time.Sleep(100 * time.Millisecond)
+
+	// emptyClient should receive nothing
+	select {
+	case received := <-emptyClient.send:
+		t.Errorf("empty-workspace client should receive nothing, got: %+v", received)
+	default:
+		// Good — fail-closed
+	}
+
+	// normalClient should receive the mutation (control)
+	select {
+	case received := <-normalClient.send:
+		if received.IssueID != "bd-test" {
+			t.Errorf("normalClient: expected bd-test, got %s", received.IssueID)
+		}
+	default:
+		t.Error("normalClient: expected to receive mutation")
+	}
+}
+
+// TestHandleSSE_EmptyWorkspaceLogsWarning tests that an empty workspaceID
+// still connects (fail-closed: no mutations delivered).
+func TestHandleSSE_EmptyWorkspaceLogsWarning(t *testing.T) {
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	// Capture log output — use a synchronized writer to avoid races with
+	// parallel tests that also write to the global logger.
+	var logBuf bytes.Buffer
+	var mu sync.Mutex
+	origOutput := log.Writer()
+	log.SetOutput(syncWriter{&logBuf, &mu})
+	t.Cleanup(func() { log.SetOutput(origOutput) })
+
+	handler := handleSSE(hub, nil)
+
+	// Use context with NO workspace (empty string from WorkspaceFromContext)
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces//events", nil)
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		handler.ServeHTTP(rr, req)
+		close(done)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Broadcast a mutation — should NOT be delivered to this client
+	hub.Broadcast(&MutationPayload{
+		Type:        "create",
+		IssueID:     "bd-ghost",
+		WorkspaceID: "some-ws",
+	})
+
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	<-done
+
+	body := rr.Body.String()
+
+	// Client still receives the connected event (connection is not rejected)
+	if !strings.Contains(body, "event: connected") {
+		t.Error("expected connected event even with empty workspaceID")
+	}
+
+	// No mutation should be delivered (fail-closed)
+	if strings.Contains(body, "bd-ghost") {
+		t.Error("expected no mutations delivered to empty-workspace client")
+	}
+
+	// Warning should appear in logs
+	mu.Lock()
+	logOutput := logBuf.String()
+	mu.Unlock()
+	if !strings.Contains(logOutput, "WARNING") || !strings.Contains(logOutput, "empty workspaceID") {
+		t.Errorf("expected warning about empty workspaceID in logs, got: %s", logOutput)
+	}
+}
+
+// syncWriter wraps a writer with a mutex for thread-safe log capture in tests.
+type syncWriter struct {
+	w  *bytes.Buffer
+	mu *sync.Mutex
+}
+
+func (sw syncWriter) Write(p []byte) (int, error) {
+	sw.mu.Lock()
+	defer sw.mu.Unlock()
+	return sw.w.Write(p)
 }

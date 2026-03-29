@@ -1,219 +1,148 @@
 /**
- * useWorkspaceState - Saves and restores per-workspace UI state on switch.
- * State is stored in-memory only (resets on page reload).
- * Captures: active view, filters, search, selected issue, scroll position.
- * On switch: closes panels, restores saved state (or defaults), updates URL.
+ * useWorkspaceState - Saves and restores per-workspace ephemeral UI state on switch.
+ * State is stored in a module-level Map (survives remounts, resets on page reload).
+ * Captures: scroll position and active panel state.
+ *
+ * URL-owned state (view mode, filters, search, selected issue) is NOT stored —
+ * the URL is the single source of truth for those (per T12's URL/State Contract).
+ *
+ * T24: Rewritten for path-based routing. Module-level Map survives WorkspaceLayout
+ * remounts. Accepts workspaceId as prop, returns void.
  */
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 
-import type { ViewMode } from "@/components/ViewSwitcher";
-import type { FilterState, FilterActions } from "./useFilterState";
+import type { PanelState } from "./usePanelManager";
+
+// Module-level storage survives component remounts within the same session.
+const workspaceSnapshots = new Map<string, WorkspaceSnapshot>();
 
 /**
- * Per-workspace snapshot of UI state.
+ * Clear all stored workspace snapshots (useful for testing).
+ */
+export function clearWorkspaceSnapshots(): void {
+  workspaceSnapshots.clear();
+}
+
+/**
+ * Per-workspace snapshot of ephemeral UI state.
+ * Only stores state that is NOT URL-owned.
  */
 export interface WorkspaceSnapshot {
-  view: ViewMode;
-  filters: FilterState;
-  searchValue: string;
-  selectedIssueId: string | null;
   scrollTop: number;
+  activePanel: PanelState;
 }
 
 /**
  * Parameters for useWorkspaceState hook.
  */
 export interface UseWorkspaceStateParams {
-  /** Ref tracking latest state values (avoids stale closures) */
-  stateRef: React.RefObject<{
-    view: ViewMode;
-    filters: FilterState;
-    searchValue: string;
-    selectedIssueId: string | null;
-  }>;
-  /** Set the active view (clears issue ID when not issue-detail) */
-  setView: (view: ViewMode) => void;
-  filterActions: FilterActions;
-  setSearchValue: (value: string) => void;
+  /** The current workspace ID from the route (useParams) */
+  workspaceId: string;
+  /** Ref to the main scrollable container element */
+  scrollContainerRef: RefObject<HTMLElement | null>;
+  /** Current active panel state from usePanelManager */
+  activePanel: PanelState;
+  /** Callback to restore a panel state (openPanel from usePanelManager) */
+  restorePanel: (panel: NonNullable<PanelState>) => void;
   /** Synchronously close all panels without animation */
   closeAllPanels: () => void;
 }
 
-/**
- * Return type for useWorkspaceState hook.
- */
-export interface UseWorkspaceStateReturn {
-  currentWorkspaceId: string | null;
-  switchWorkspace: (newId: string | null) => void;
-}
+export function useWorkspaceState(params: UseWorkspaceStateParams): void {
+  const {
+    workspaceId,
+    scrollContainerRef,
+    activePanel,
+    restorePanel,
+    closeAllPanels,
+  } = params;
 
-const WORKSPACE_PARAM = "workspace";
-
-/**
- * Read workspace param from current URL.
- */
-function parseWorkspaceFromUrl(): string | null {
-  if (typeof window === "undefined") return null;
-  const params = new URLSearchParams(window.location.search);
-  return params.get(WORKSPACE_PARAM);
-}
-
-/**
- * Update workspace param in URL via replaceState.
- */
-function updateWorkspaceUrl(workspaceId: string | null): void {
-  if (typeof window === "undefined") return;
-  const params = new URLSearchParams(window.location.search);
-  if (workspaceId) {
-    params.set(WORKSPACE_PARAM, workspaceId);
-  } else {
-    params.delete(WORKSPACE_PARAM);
-  }
-  const queryString = params.toString();
-  const newUrl = queryString
-    ? `${window.location.pathname}?${queryString}`
-    : window.location.pathname;
-  window.history.replaceState(null, "", newUrl);
-}
-
-export function useWorkspaceState(
-  params: UseWorkspaceStateParams,
-): UseWorkspaceStateReturn {
-  const { stateRef, setView, filterActions, setSearchValue, closeAllPanels } =
-    params;
-
-  const [currentWorkspaceId, setCurrentWorkspaceId] = useState<string | null>(
-    () => parseWorkspaceFromUrl(),
-  );
-
-  // Ref mirrors currentWorkspaceId to keep switchWorkspace stable across renders
-  const currentWorkspaceIdRef = useRef(currentWorkspaceId);
-  useEffect(() => {
-    currentWorkspaceIdRef.current = currentWorkspaceId;
-  });
-
-  const snapshotsRef = useRef<Map<string, WorkspaceSnapshot>>(new Map());
   const rafIdRef = useRef<number | null>(null);
+  const prevWorkspaceIdRef = useRef<string>(workspaceId);
 
-  // Capture snapshot from current state
-  const captureSnapshot = useCallback((): WorkspaceSnapshot => {
-    const current = stateRef.current!;
-    const mainEl = document.getElementById("main-content");
-    return {
-      view: current.view,
-      filters: { ...current.filters },
-      searchValue: current.searchValue,
-      selectedIssueId: current.selectedIssueId,
-      scrollTop: mainEl?.scrollTop ?? 0,
+  // Panel ref: updated in an effect (not during render) so that the
+  // workspaceId-change effect — which runs first — still sees the
+  // PREVIOUS render's panel value when capturing the old workspace.
+  const activePanelRef = useRef<PanelState>(activePanel);
+
+  const restorePanelRef = useRef(restorePanel);
+  restorePanelRef.current = restorePanel;
+
+  const closeAllPanelsRef = useRef(closeAllPanels);
+  closeAllPanelsRef.current = closeAllPanels;
+
+  // Capture snapshot for a workspace
+  const captureSnapshot = (wsId: string): void => {
+    const snapshot: WorkspaceSnapshot = {
+      scrollTop: scrollContainerRef.current?.scrollTop ?? 0,
+      activePanel: activePanelRef.current,
     };
-  }, [stateRef]);
+    workspaceSnapshots.set(wsId, snapshot);
+  };
 
-  // Restore snapshot or apply defaults
-  const restoreSnapshot = useCallback(
-    (snapshot: WorkspaceSnapshot | undefined) => {
-      if (snapshot) {
-        // setView clears issue ID when view !== "issue-detail"
-        setView(snapshot.view);
-        filterActions.clearAll();
-        if (snapshot.filters.priority !== undefined)
-          filterActions.setPriority(snapshot.filters.priority);
-        if (snapshot.filters.type !== undefined)
-          filterActions.setType(snapshot.filters.type);
-        if (snapshot.filters.labels !== undefined)
-          filterActions.setLabels(snapshot.filters.labels);
-        if (snapshot.filters.search !== undefined)
-          filterActions.setSearch(snapshot.filters.search);
-        if (snapshot.filters.showBlocked !== undefined)
-          filterActions.setShowBlocked(snapshot.filters.showBlocked);
-        if (snapshot.filters.groupBy !== undefined)
-          filterActions.setGroupBy(snapshot.filters.groupBy);
-        setSearchValue(snapshot.searchValue);
-      } else {
-        // First visit defaults
-        setView("kanban");
-        filterActions.clearAll();
-        setSearchValue("");
+  // Restore snapshot for a workspace (scroll via rAF, panel immediately)
+  const restoreFromSnapshot = (wsId: string): void => {
+    const snapshot = workspaceSnapshots.get(wsId);
+    if (!snapshot) return;
+
+    // Restore panel state
+    if (snapshot.activePanel !== null) {
+      restorePanelRef.current(snapshot.activePanel);
+    }
+
+    // Restore scroll position via rAF to let DOM settle
+    rafIdRef.current = requestAnimationFrame(() => {
+      const container = scrollContainerRef.current;
+      if (container) {
+        container.scrollTop = snapshot.scrollTop;
       }
+      rafIdRef.current = null;
+    });
+  };
 
-      // Schedule scroll restore via rAF
-      const scrollTarget = snapshot?.scrollTop ?? 0;
-      rafIdRef.current = requestAnimationFrame(() => {
-        const mainEl = document.getElementById("main-content");
-        if (mainEl) {
-          mainEl.scrollTop = scrollTarget;
-        }
-        rafIdRef.current = null;
-      });
-    },
-    [setView, filterActions, setSearchValue],
-  );
-
-  // switchWorkspace uses ref for currentWorkspaceId so the callback is stable
-  // and the popstate effect doesn't re-register on every workspace change.
-  // Accepts skipUrlUpdate to avoid redundant replaceState during popstate.
-  const switchWorkspaceInternal = useCallback(
-    (newId: string | null, skipUrlUpdate: boolean) => {
-      const prevId = currentWorkspaceIdRef.current;
-
-      // Capture current workspace state before switching
-      if (prevId !== null) {
-        const snapshot = captureSnapshot();
-        snapshotsRef.current.set(prevId, snapshot);
-      }
-
-      // Cancel any pending scroll restore from prior switch
-      if (rafIdRef.current !== null) {
-        cancelAnimationFrame(rafIdRef.current);
-        rafIdRef.current = null;
-      }
-
-      // Close all panels synchronously
-      closeAllPanels();
-
-      // Look up and restore snapshot for new workspace
-      const savedSnapshot =
-        newId !== null ? snapshotsRef.current.get(newId) : undefined;
-      restoreSnapshot(savedSnapshot);
-
-      // Update URL workspace param (skip during popstate — URL already correct)
-      if (!skipUrlUpdate) {
-        updateWorkspaceUrl(newId);
-      }
-
-      // Update current workspace
-      currentWorkspaceIdRef.current = newId;
-      setCurrentWorkspaceId(newId);
-    },
-    [captureSnapshot, closeAllPanels, restoreSnapshot],
-  );
-
-  const switchWorkspace = useCallback(
-    (newId: string | null) => switchWorkspaceInternal(newId, false),
-    [switchWorkspaceInternal],
-  );
-
-  // Handle popstate for browser back/forward
+  // React to workspaceId changes (defense-in-depth for non-remount transitions)
   useEffect(() => {
-    const handlePopState = () => {
-      const urlWorkspace = parseWorkspaceFromUrl();
-      if (urlWorkspace !== currentWorkspaceIdRef.current) {
-        switchWorkspaceInternal(urlWorkspace, true);
-      }
-    };
+    const prevId = prevWorkspaceIdRef.current;
+    if (prevId === workspaceId) return;
 
-    window.addEventListener("popstate", handlePopState);
-    return () => window.removeEventListener("popstate", handlePopState);
-  }, [switchWorkspaceInternal]);
+    // Capture snapshot for previous workspace
+    captureSnapshot(prevId);
 
-  // Cleanup pending rAF on unmount
+    // Cancel pending scroll restore
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
+
+    // Close all panels before restoring new workspace state
+    closeAllPanelsRef.current();
+
+    // Restore snapshot for new workspace
+    restoreFromSnapshot(workspaceId);
+
+    prevWorkspaceIdRef.current = workspaceId;
+  }, [workspaceId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // On mount: restore snapshot if available
   useEffect(() => {
+    restoreFromSnapshot(workspaceId);
+
+    // On unmount: capture snapshot for current workspace
     return () => {
+      captureSnapshot(prevWorkspaceIdRef.current);
+
+      // Cancel pending rAF
       if (rafIdRef.current !== null) {
         cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
       }
     };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { currentWorkspaceId, switchWorkspace };
+  // Sync activePanelRef LAST — after the workspaceId effect has had a
+  // chance to capture the old panel value for the previous workspace.
+  useEffect(() => {
+    activePanelRef.current = activePanel;
+  });
 }

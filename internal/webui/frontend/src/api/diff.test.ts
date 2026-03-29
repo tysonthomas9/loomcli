@@ -35,10 +35,12 @@ describe("diff API", () => {
         data: { commits },
       });
 
-      const result = await fetchDiffCommits("ember");
+      const result = await fetchDiffCommits("test-ws-id", "ember");
 
       expect(result).toEqual(commits);
-      expect(mockGet).toHaveBeenCalledWith("/api/agents/ember/diff/commits");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/agents/ember/diff/commits",
+      );
     });
 
     it("passes limit query param when provided", async () => {
@@ -47,10 +49,10 @@ describe("diff API", () => {
         data: { commits: [] },
       });
 
-      await fetchDiffCommits("ember", 10);
+      await fetchDiffCommits("test-ws-id", "ember", 10);
 
       expect(mockGet).toHaveBeenCalledWith(
-        "/api/agents/ember/diff/commits?limit=10",
+        "/api/workspaces/test-ws-id/agents/ember/diff/commits?limit=10",
       );
     });
 
@@ -60,9 +62,11 @@ describe("diff API", () => {
         data: { commits: [] },
       });
 
-      await fetchDiffCommits("ember");
+      await fetchDiffCommits("test-ws-id", "ember");
 
-      expect(mockGet).toHaveBeenCalledWith("/api/agents/ember/diff/commits");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/agents/ember/diff/commits",
+      );
     });
 
     it("throws on API failure response", async () => {
@@ -83,10 +87,10 @@ describe("diff API", () => {
         data: { commits: [] },
       });
 
-      await fetchDiffCommits("agent/with spaces");
+      await fetchDiffCommits("test-ws-id", "agent/with spaces");
 
       expect(mockGet).toHaveBeenCalledWith(
-        "/api/agents/agent%2Fwith%20spaces/diff/commits",
+        "/api/workspaces/test-ws-id/agents/agent%2Fwith%20spaces/diff/commits",
       );
     });
   });
@@ -109,11 +113,16 @@ describe("diff API", () => {
         data: { files },
       });
 
-      const result = await fetchDiffFiles("ember", "def456", "abc123");
+      const result = await fetchDiffFiles(
+        "test-ws-id",
+        "ember",
+        "def456",
+        "abc123",
+      );
 
       expect(result).toEqual(files);
       expect(mockGet).toHaveBeenCalledWith(
-        "/api/agents/ember/diff/files?to=def456&from=abc123",
+        "/api/workspaces/test-ws-id/agents/ember/diff/files?to=def456&from=abc123",
       );
     });
 
@@ -123,10 +132,10 @@ describe("diff API", () => {
         data: { files: [] },
       });
 
-      await fetchDiffFiles("ember", "def456");
+      await fetchDiffFiles("test-ws-id", "ember", "def456");
 
       expect(mockGet).toHaveBeenCalledWith(
-        "/api/agents/ember/diff/files?to=def456",
+        "/api/workspaces/test-ws-id/agents/ember/diff/files?to=def456",
       );
     });
 
@@ -136,10 +145,10 @@ describe("diff API", () => {
         data: { files: [] },
       });
 
-      await fetchDiffFiles("agent/special", "def", "abc");
+      await fetchDiffFiles("test-ws-id", "agent/special", "def", "abc");
 
       expect(mockGet).toHaveBeenCalledWith(
-        "/api/agents/agent%2Fspecial/diff/files?to=def&from=abc",
+        "/api/workspaces/test-ws-id/agents/agent%2Fspecial/diff/files?to=def&from=abc",
       );
     });
 
@@ -149,10 +158,15 @@ describe("diff API", () => {
         data: { files: [] },
       });
 
-      await fetchDiffFiles("ember", "other&ref", "ref/with spaces");
+      await fetchDiffFiles(
+        "test-ws-id",
+        "ember",
+        "other&ref",
+        "ref/with spaces",
+      );
 
       expect(mockGet).toHaveBeenCalledWith(
-        "/api/agents/ember/diff/files?to=other%26ref&from=ref%2Fwith%20spaces",
+        "/api/workspaces/test-ws-id/agents/ember/diff/files?to=other%26ref&from=ref%2Fwith%20spaces",
       );
     });
 
@@ -183,6 +197,7 @@ describe("diff API", () => {
       });
 
       const result = await fetchDiffFile(
+        "test-ws-id",
         "ember",
         "main.go",
         "def456",
@@ -191,7 +206,7 @@ describe("diff API", () => {
 
       expect(result).toEqual(patch);
       expect(mockGet).toHaveBeenCalledWith(
-        "/api/agents/ember/diff/file?path=main.go&to=def456&from=abc123",
+        "/api/workspaces/test-ws-id/agents/ember/diff/file?path=main.go&to=def456&from=abc123",
       );
     });
 
@@ -207,10 +222,10 @@ describe("diff API", () => {
         },
       });
 
-      await fetchDiffFile("ember", "main.go", "def456");
+      await fetchDiffFile("test-ws-id", "ember", "main.go", "def456");
 
       expect(mockGet).toHaveBeenCalledWith(
-        "/api/agents/ember/diff/file?path=main.go&to=def456",
+        "/api/workspaces/test-ws-id/agents/ember/diff/file?path=main.go&to=def456",
       );
     });
 
@@ -227,6 +242,7 @@ describe("diff API", () => {
       });
 
       await fetchDiffFile(
+        "test-ws-id",
         "ember",
         "src/path with spaces/file.go",
         "def=456",
@@ -234,7 +250,7 @@ describe("diff API", () => {
       );
 
       expect(mockGet).toHaveBeenCalledWith(
-        "/api/agents/ember/diff/file?path=src%2Fpath%20with%20spaces%2Ffile.go&to=def%3D456&from=abc%26123",
+        "/api/workspaces/test-ws-id/agents/ember/diff/file?path=src%2Fpath%20with%20spaces%2Ffile.go&to=def%3D456&from=abc%26123",
       );
     });
 
@@ -250,7 +266,13 @@ describe("diff API", () => {
         },
       });
 
-      const result = await fetchDiffFile("ember", "image.png", "def", "abc");
+      const result = await fetchDiffFile(
+        "test-ws-id",
+        "ember",
+        "image.png",
+        "def",
+        "abc",
+      );
 
       expect(result.is_binary).toBe(true);
       expect(result.patch).toBe("");
@@ -268,7 +290,13 @@ describe("diff API", () => {
         },
       });
 
-      const result = await fetchDiffFile("ember", "huge.sql", "def", "abc");
+      const result = await fetchDiffFile(
+        "test-ws-id",
+        "ember",
+        "huge.sql",
+        "def",
+        "abc",
+      );
 
       expect(result.is_too_large).toBe(true);
     });

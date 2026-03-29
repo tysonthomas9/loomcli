@@ -78,7 +78,9 @@ describe("useBlockedIssues", () => {
     it("returns expected shape with all properties", async () => {
       mockGetBlockedIssues.mockResolvedValue([]);
 
-      const { result } = renderHook(() => useBlockedIssues());
+      const { result } = renderHook(() =>
+        useBlockedIssues({ workspaceId: "test-ws-id" }),
+      );
 
       expect(result.current).toHaveProperty("data");
       expect(result.current).toHaveProperty("loading");
@@ -98,7 +100,9 @@ describe("useBlockedIssues", () => {
         () => new Promise(() => {}), // Never resolves
       );
 
-      const { result } = renderHook(() => useBlockedIssues());
+      const { result } = renderHook(() =>
+        useBlockedIssues({ workspaceId: "test-ws-id" }),
+      );
 
       expect(result.current.loading).toBe(true);
       expect(result.current.data).toBeNull();
@@ -106,7 +110,9 @@ describe("useBlockedIssues", () => {
     });
 
     it("starts with loading=false when enabled=false", () => {
-      const { result } = renderHook(() => useBlockedIssues({ enabled: false }));
+      const { result } = renderHook(() =>
+        useBlockedIssues({ workspaceId: "test-ws-id", enabled: false }),
+      );
 
       expect(result.current.loading).toBe(false);
       expect(result.current.data).toBeNull();
@@ -119,7 +125,9 @@ describe("useBlockedIssues", () => {
       const testIssues = createTestBlockedIssues();
       mockGetBlockedIssues.mockResolvedValue(testIssues);
 
-      const { result } = renderHook(() => useBlockedIssues());
+      const { result } = renderHook(() =>
+        useBlockedIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => {
         expect(result.current.loading).toBe(false);
@@ -128,13 +136,15 @@ describe("useBlockedIssues", () => {
       expect(result.current.data).toEqual(testIssues);
       expect(result.current.error).toBeNull();
       expect(mockGetBlockedIssues).toHaveBeenCalledTimes(1);
-      expect(mockGetBlockedIssues).toHaveBeenCalledWith({});
+      expect(mockGetBlockedIssues).toHaveBeenCalledWith("test-ws-id", {});
     });
 
     it("sets loading to false after successful fetch", async () => {
       mockGetBlockedIssues.mockResolvedValue([]);
 
-      const { result } = renderHook(() => useBlockedIssues());
+      const { result } = renderHook(() =>
+        useBlockedIssues({ workspaceId: "test-ws-id" }),
+      );
 
       expect(result.current.loading).toBe(true);
 
@@ -149,7 +159,9 @@ describe("useBlockedIssues", () => {
       // First call fails
       mockGetBlockedIssues.mockRejectedValueOnce(new Error("Network error"));
 
-      const { result } = renderHook(() => useBlockedIssues());
+      const { result } = renderHook(() =>
+        useBlockedIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => {
         expect(result.current.error).not.toBeNull();
@@ -171,7 +183,9 @@ describe("useBlockedIssues", () => {
       const testError = new Error("Network error");
       mockGetBlockedIssues.mockRejectedValue(testError);
 
-      const { result } = renderHook(() => useBlockedIssues());
+      const { result } = renderHook(() =>
+        useBlockedIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => {
         expect(result.current.loading).toBe(false);
@@ -184,7 +198,9 @@ describe("useBlockedIssues", () => {
     it("converts non-Error thrown values to Error", async () => {
       mockGetBlockedIssues.mockRejectedValue("string error");
 
-      const { result } = renderHook(() => useBlockedIssues());
+      const { result } = renderHook(() =>
+        useBlockedIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => {
         expect(result.current.loading).toBe(false);
@@ -198,7 +214,9 @@ describe("useBlockedIssues", () => {
       const testIssues = createTestBlockedIssues();
       mockGetBlockedIssues.mockResolvedValueOnce(testIssues);
 
-      const { result } = renderHook(() => useBlockedIssues());
+      const { result } = renderHook(() =>
+        useBlockedIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => {
         expect(result.current.data).toEqual(testIssues);
@@ -221,7 +239,9 @@ describe("useBlockedIssues", () => {
     it("refetch() triggers new fetch", async () => {
       mockGetBlockedIssues.mockResolvedValue([]);
 
-      const { result } = renderHook(() => useBlockedIssues());
+      const { result } = renderHook(() =>
+        useBlockedIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => {
         expect(result.current.loading).toBe(false);
@@ -245,7 +265,9 @@ describe("useBlockedIssues", () => {
 
       mockGetBlockedIssues.mockResolvedValueOnce(initialIssues);
 
-      const { result } = renderHook(() => useBlockedIssues());
+      const { result } = renderHook(() =>
+        useBlockedIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => {
         expect(result.current.data).toEqual(initialIssues);
@@ -263,7 +285,9 @@ describe("useBlockedIssues", () => {
     it("refetch is stable across renders", async () => {
       mockGetBlockedIssues.mockResolvedValue([]);
 
-      const { result, rerender } = renderHook(() => useBlockedIssues());
+      const { result, rerender } = renderHook(() =>
+        useBlockedIssues({ workspaceId: "test-ws-id" }),
+      );
 
       const initialRefetch = result.current.refetch;
 
@@ -290,7 +314,9 @@ describe("useBlockedIssues", () => {
     it("polls at specified interval", async () => {
       mockGetBlockedIssues.mockResolvedValue([]);
 
-      renderHook(() => useBlockedIssues({ pollInterval: 5000 }));
+      renderHook(() =>
+        useBlockedIssues({ workspaceId: "test-ws-id", pollInterval: 5000 }),
+      );
 
       // Initial fetch
       expect(mockGetBlockedIssues).toHaveBeenCalledTimes(1);
@@ -318,7 +344,7 @@ describe("useBlockedIssues", () => {
     it("does not poll when pollInterval is not set", async () => {
       mockGetBlockedIssues.mockResolvedValue([]);
 
-      renderHook(() => useBlockedIssues());
+      renderHook(() => useBlockedIssues({ workspaceId: "test-ws-id" }));
 
       expect(mockGetBlockedIssues).toHaveBeenCalledTimes(1);
       await flushPromises();
@@ -336,7 +362,9 @@ describe("useBlockedIssues", () => {
     it("does not poll when pollInterval is 0", async () => {
       mockGetBlockedIssues.mockResolvedValue([]);
 
-      renderHook(() => useBlockedIssues({ pollInterval: 0 }));
+      renderHook(() =>
+        useBlockedIssues({ workspaceId: "test-ws-id", pollInterval: 0 }),
+      );
 
       expect(mockGetBlockedIssues).toHaveBeenCalledTimes(1);
       await flushPromises();
@@ -353,7 +381,11 @@ describe("useBlockedIssues", () => {
       mockGetBlockedIssues.mockResolvedValue([]);
 
       renderHook(() =>
-        useBlockedIssues({ pollInterval: 1000, enabled: false }),
+        useBlockedIssues({
+          workspaceId: "test-ws-id",
+          pollInterval: 1000,
+          enabled: false,
+        }),
       );
 
       // No initial fetch
@@ -377,7 +409,9 @@ describe("useBlockedIssues", () => {
       mockGetBlockedIssues.mockReturnValueOnce(firstPromise);
       mockGetBlockedIssues.mockResolvedValue([]);
 
-      renderHook(() => useBlockedIssues({ pollInterval: 1000 }));
+      renderHook(() =>
+        useBlockedIssues({ workspaceId: "test-ws-id", pollInterval: 1000 }),
+      );
 
       // Initial fetch starts
       expect(mockGetBlockedIssues).toHaveBeenCalledTimes(1);
@@ -411,14 +445,14 @@ describe("useBlockedIssues", () => {
       mockGetBlockedIssues.mockResolvedValue([]);
 
       const { result } = renderHook(() =>
-        useBlockedIssues({ parentId: "epic-123" }),
+        useBlockedIssues({ workspaceId: "test-ws-id", parentId: "epic-123" }),
       );
 
       await waitFor(() => {
         expect(result.current.loading).toBe(false);
       });
 
-      expect(mockGetBlockedIssues).toHaveBeenCalledWith({
+      expect(mockGetBlockedIssues).toHaveBeenCalledWith("test-ws-id", {
         parent_id: "epic-123",
       });
     });
@@ -426,20 +460,23 @@ describe("useBlockedIssues", () => {
     it("omits parent_id when parentId is undefined", async () => {
       mockGetBlockedIssues.mockResolvedValue([]);
 
-      const { result } = renderHook(() => useBlockedIssues());
+      const { result } = renderHook(() =>
+        useBlockedIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => {
         expect(result.current.loading).toBe(false);
       });
 
-      expect(mockGetBlockedIssues).toHaveBeenCalledWith({});
+      expect(mockGetBlockedIssues).toHaveBeenCalledWith("test-ws-id", {});
     });
 
     it("refetches when parentId changes", async () => {
       mockGetBlockedIssues.mockResolvedValue([]);
 
       const { result, rerender } = renderHook(
-        ({ parentId }) => useBlockedIssues({ parentId }),
+        ({ parentId }) =>
+          useBlockedIssues({ workspaceId: "test-ws-id", parentId }),
         {
           initialProps: { parentId: "epic-1" },
         },
@@ -449,14 +486,14 @@ describe("useBlockedIssues", () => {
         expect(result.current.loading).toBe(false);
       });
 
-      expect(mockGetBlockedIssues).toHaveBeenCalledWith({
+      expect(mockGetBlockedIssues).toHaveBeenCalledWith("test-ws-id", {
         parent_id: "epic-1",
       });
 
       rerender({ parentId: "epic-2" });
 
       await waitFor(() => {
-        expect(mockGetBlockedIssues).toHaveBeenCalledWith({
+        expect(mockGetBlockedIssues).toHaveBeenCalledWith("test-ws-id", {
           parent_id: "epic-2",
         });
       });
@@ -467,7 +504,9 @@ describe("useBlockedIssues", () => {
     it("does not fetch when enabled=false", () => {
       mockGetBlockedIssues.mockResolvedValue([]);
 
-      renderHook(() => useBlockedIssues({ enabled: false }));
+      renderHook(() =>
+        useBlockedIssues({ workspaceId: "test-ws-id", enabled: false }),
+      );
 
       expect(mockGetBlockedIssues).not.toHaveBeenCalled();
     });
@@ -476,7 +515,8 @@ describe("useBlockedIssues", () => {
       mockGetBlockedIssues.mockResolvedValue([]);
 
       const { result, rerender } = renderHook(
-        ({ enabled }) => useBlockedIssues({ enabled }),
+        ({ enabled }) =>
+          useBlockedIssues({ workspaceId: "test-ws-id", enabled }),
         {
           initialProps: { enabled: false },
         },
@@ -499,7 +539,12 @@ describe("useBlockedIssues", () => {
       mockGetBlockedIssues.mockResolvedValue([]);
 
       const { rerender } = renderHook(
-        ({ enabled }) => useBlockedIssues({ enabled, pollInterval: 1000 }),
+        ({ enabled }) =>
+          useBlockedIssues({
+            workspaceId: "test-ws-id",
+            enabled,
+            pollInterval: 1000,
+          }),
         { initialProps: { enabled: true } },
       );
 
@@ -524,7 +569,9 @@ describe("useBlockedIssues", () => {
     it("defaults enabled to true", async () => {
       mockGetBlockedIssues.mockResolvedValue([]);
 
-      const { result } = renderHook(() => useBlockedIssues());
+      const { result } = renderHook(() =>
+        useBlockedIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => {
         expect(result.current.loading).toBe(false);
@@ -541,7 +588,7 @@ describe("useBlockedIssues", () => {
       mockGetBlockedIssues.mockResolvedValue([]);
 
       const { unmount } = renderHook(() =>
-        useBlockedIssues({ pollInterval: 1000 }),
+        useBlockedIssues({ workspaceId: "test-ws-id", pollInterval: 1000 }),
       );
 
       expect(mockGetBlockedIssues).toHaveBeenCalledTimes(1);
@@ -568,7 +615,9 @@ describe("useBlockedIssues", () => {
       });
       mockGetBlockedIssues.mockReturnValue(slowPromise);
 
-      const { result, unmount } = renderHook(() => useBlockedIssues());
+      const { result, unmount } = renderHook(() =>
+        useBlockedIssues({ workspaceId: "test-ws-id" }),
+      );
 
       expect(result.current.loading).toBe(true);
 
@@ -586,7 +635,9 @@ describe("useBlockedIssues", () => {
     it("sets mountedRef to false on unmount", async () => {
       mockGetBlockedIssues.mockResolvedValue([]);
 
-      const { result, unmount } = renderHook(() => useBlockedIssues());
+      const { result, unmount } = renderHook(() =>
+        useBlockedIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => {
         expect(result.current.loading).toBe(false);
@@ -604,7 +655,8 @@ describe("useBlockedIssues", () => {
       mockGetBlockedIssues.mockResolvedValue([]);
 
       const { result, rerender } = renderHook(
-        ({ parentId }) => useBlockedIssues({ parentId }),
+        ({ parentId }) =>
+          useBlockedIssues({ workspaceId: "test-ws-id", parentId }),
         {
           initialProps: { parentId: undefined as string | undefined },
         },
@@ -614,12 +666,12 @@ describe("useBlockedIssues", () => {
         expect(result.current.loading).toBe(false);
       });
 
-      expect(mockGetBlockedIssues).toHaveBeenCalledWith({});
+      expect(mockGetBlockedIssues).toHaveBeenCalledWith("test-ws-id", {});
 
       rerender({ parentId: "new-parent" });
 
       await waitFor(() => {
-        expect(mockGetBlockedIssues).toHaveBeenCalledWith({
+        expect(mockGetBlockedIssues).toHaveBeenCalledWith("test-ws-id", {
           parent_id: "new-parent",
         });
       });
@@ -639,7 +691,12 @@ describe("useBlockedIssues", () => {
       mockGetBlockedIssues.mockResolvedValue([]);
 
       const { rerender } = renderHook(
-        ({ parentId }) => useBlockedIssues({ parentId, pollInterval: 5000 }),
+        ({ parentId }) =>
+          useBlockedIssues({
+            workspaceId: "test-ws-id",
+            parentId,
+            pollInterval: 5000,
+          }),
         { initialProps: { parentId: "epic-1" } },
       );
 
@@ -661,7 +718,7 @@ describe("useBlockedIssues", () => {
       await flushPromises();
 
       expect(mockGetBlockedIssues).toHaveBeenCalledTimes(1);
-      expect(mockGetBlockedIssues).toHaveBeenCalledWith({
+      expect(mockGetBlockedIssues).toHaveBeenCalledWith("test-ws-id", {
         parent_id: "epic-3",
       });
     });
@@ -671,7 +728,9 @@ describe("useBlockedIssues", () => {
     it("handles empty response array", async () => {
       mockGetBlockedIssues.mockResolvedValue([]);
 
-      const { result } = renderHook(() => useBlockedIssues());
+      const { result } = renderHook(() =>
+        useBlockedIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => {
         expect(result.current.loading).toBe(false);
@@ -690,19 +749,21 @@ describe("useBlockedIssues", () => {
         expect(result.current.loading).toBe(false);
       });
 
-      expect(mockGetBlockedIssues).toHaveBeenCalledWith({});
+      expect(mockGetBlockedIssues).toHaveBeenCalledWith("", {});
     });
 
     it("handles empty options object", async () => {
       mockGetBlockedIssues.mockResolvedValue([]);
 
-      const { result } = renderHook(() => useBlockedIssues({}));
+      const { result } = renderHook(() =>
+        useBlockedIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => {
         expect(result.current.loading).toBe(false);
       });
 
-      expect(mockGetBlockedIssues).toHaveBeenCalledWith({});
+      expect(mockGetBlockedIssues).toHaveBeenCalledWith("test-ws-id", {});
     });
   });
 });

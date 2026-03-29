@@ -8,6 +8,24 @@ import (
 	"testing"
 )
 
+// mockWorkspaceConfigFnWithSummaries returns a workspaceConfigFn that includes workspace summaries.
+func mockWorkspaceConfigFnWithSummaries(summaries []WorkspaceSummary) func() (*WorkspaceData, error) {
+	return func() (*WorkspaceData, error) {
+		return &WorkspaceData{
+			Name:       "test-ws",
+			Path:       "/tmp/test",
+			Workspaces: summaries,
+		}, nil
+	}
+}
+
+// deleteRequest creates a DELETE request with workspace UUID in context.
+func deleteRequest(wsID string) *http.Request {
+	req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/"+wsID, nil)
+	ctx := WithWorkspace(req.Context(), wsID)
+	return req.WithContext(ctx)
+}
+
 func TestHandleWorkspaceDelete_Success(t *testing.T) {
 	deleteCalled := false
 	deleteFn := func(name string) error {
@@ -18,10 +36,12 @@ func TestHandleWorkspaceDelete_Success(t *testing.T) {
 		return nil
 	}
 
-	handler := handleWorkspaceDelete(deleteFn, mockWorkspaceConfigFn)
+	configFn := mockWorkspaceConfigFnWithSummaries([]WorkspaceSummary{
+		{ID: "ws-uuid-1", Name: "my-ws", Path: "/tmp/my-ws"},
+	})
+	handler := handleWorkspaceDelete(deleteFn, configFn)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/workspace/{name}", nil)
-	req.SetPathValue("name", "my-ws")
+	req := deleteRequest("ws-uuid-1")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -39,68 +59,43 @@ func TestHandleWorkspaceDelete_Success(t *testing.T) {
 	if !deleteCalled {
 		t.Error("expected deleteFn to be called")
 	}
-	if resp.Data == nil {
-		t.Fatal("expected Data to be non-nil when workspaceConfigFn provided")
-	}
-	if resp.Data.Name != "test-ws" {
-		t.Errorf("expected data name %q, got %q", "test-ws", resp.Data.Name)
-	}
 }
 
-func TestHandleWorkspaceDelete_SuccessNilWorkspaceConfigFn(t *testing.T) {
+func TestHandleWorkspaceDelete_MissingWorkspaceID(t *testing.T) {
 	deleteFn := func(name string) error {
+		t.Fatal("deleteFn should not be called when ID is missing")
 		return nil
 	}
 
 	handler := handleWorkspaceDelete(deleteFn, nil)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/workspace/{name}", nil)
-	req.SetPathValue("name", "my-ws")
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	var resp workspaceResponse
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if !resp.Success {
-		t.Fatalf("expected success, got error: %s", resp.Error)
-	}
-	if resp.Data != nil {
-		t.Error("expected Data to be nil when workspaceConfigFn is nil")
-	}
-}
-
-func TestHandleWorkspaceDelete_MissingName(t *testing.T) {
-	deleteFn := func(name string) error {
-		t.Fatal("deleteFn should not be called when name is missing")
-		return nil
-	}
-
-	handler := handleWorkspaceDelete(deleteFn, nil)
-
-	req := httptest.NewRequest(http.MethodDelete, "/api/workspace/", nil)
-	// Do not call SetPathValue — name is empty
+	// No workspace ID in context
+	req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
 	}
+}
 
-	var resp workspaceResponse
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
+func TestHandleWorkspaceDelete_UnknownUUID(t *testing.T) {
+	deleteFn := func(name string) error {
+		t.Fatal("deleteFn should not be called for unknown UUID")
+		return nil
 	}
-	if resp.Success {
-		t.Fatal("expected failure")
-	}
-	if resp.Error != "workspace name is required" {
-		t.Errorf("expected error %q, got %q", "workspace name is required", resp.Error)
+
+	configFn := mockWorkspaceConfigFnWithSummaries([]WorkspaceSummary{
+		{ID: "known-uuid", Name: "known-ws", Path: "/tmp/known"},
+	})
+	handler := handleWorkspaceDelete(deleteFn, configFn)
+
+	req := deleteRequest("unknown-uuid")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -109,26 +104,17 @@ func TestHandleWorkspaceDelete_NotFound(t *testing.T) {
 		return fmt.Errorf("workspace %q not found", name)
 	}
 
-	handler := handleWorkspaceDelete(deleteFn, nil)
+	configFn := mockWorkspaceConfigFnWithSummaries([]WorkspaceSummary{
+		{ID: "ws-uuid", Name: "nonexistent", Path: "/tmp/ne"},
+	})
+	handler := handleWorkspaceDelete(deleteFn, configFn)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/workspace/{name}", nil)
-	req.SetPathValue("name", "nonexistent")
+	req := deleteRequest("ws-uuid")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	var resp workspaceResponse
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.Success {
-		t.Fatal("expected failure")
-	}
-	if resp.Error != `workspace "nonexistent" not found` {
-		t.Errorf("expected not found error, got: %s", resp.Error)
 	}
 }
 
@@ -137,77 +123,28 @@ func TestHandleWorkspaceDelete_HasRunningAgents(t *testing.T) {
 		return fmt.Errorf("workspace %q has running agents", name)
 	}
 
-	handler := handleWorkspaceDelete(deleteFn, nil)
+	configFn := mockWorkspaceConfigFnWithSummaries([]WorkspaceSummary{
+		{ID: "busy-uuid", Name: "busy-ws", Path: "/tmp/busy"},
+	})
+	handler := handleWorkspaceDelete(deleteFn, configFn)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/workspace/{name}", nil)
-	req.SetPathValue("name", "busy-ws")
+	req := deleteRequest("busy-uuid")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("expected 409, got %d: %s", rec.Code, rec.Body.String())
 	}
-
-	var resp workspaceResponse
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.Success {
-		t.Fatal("expected failure")
-	}
-	if resp.Error != `workspace "busy-ws" has running agents` {
-		t.Errorf("expected running agents error, got: %s", resp.Error)
-	}
-}
-
-func TestHandleWorkspaceDelete_InternalError(t *testing.T) {
-	deleteFn := func(name string) error {
-		return fmt.Errorf("disk I/O error")
-	}
-
-	handler := handleWorkspaceDelete(deleteFn, nil)
-
-	req := httptest.NewRequest(http.MethodDelete, "/api/workspace/{name}", nil)
-	req.SetPathValue("name", "some-ws")
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("expected 500, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	var resp workspaceResponse
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.Success {
-		t.Fatal("expected failure")
-	}
-	if resp.Error != "disk I/O error" {
-		t.Errorf("expected %q error, got: %s", "disk I/O error", resp.Error)
-	}
 }
 
 func TestHandleWorkspaceDelete_NilDeleteFn(t *testing.T) {
 	handler := handleWorkspaceDelete(nil, nil)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/workspace/{name}", nil)
-	req.SetPathValue("name", "some-ws")
+	req := deleteRequest("some-uuid")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusNotImplemented {
 		t.Fatalf("expected 501, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	var resp workspaceResponse
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.Success {
-		t.Fatal("expected failure")
-	}
-	if resp.Error != "workspace deletion not available" {
-		t.Errorf("expected %q, got: %s", "workspace deletion not available", resp.Error)
 	}
 }

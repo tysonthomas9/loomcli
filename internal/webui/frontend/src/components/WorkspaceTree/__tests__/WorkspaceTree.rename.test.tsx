@@ -146,8 +146,20 @@ vi.mock("@/hooks/useWorkspaceTree", () => ({
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 const twoWorkspaces: WorkspaceSummary[] = [
-  { name: "workspace-a", path: "/ws/a", active: true, repo_count: 3 },
-  { name: "workspace-b", path: "/ws/b", active: false, repo_count: 2 },
+  {
+    id: "uuid-ws-a",
+    name: "workspace-a",
+    path: "/ws/a",
+    active: true,
+    repo_count: 3,
+  },
+  {
+    id: "uuid-ws-b",
+    name: "workspace-b",
+    path: "/ws/b",
+    active: false,
+    repo_count: 2,
+  },
 ];
 
 const twoRepos = [
@@ -358,7 +370,7 @@ describe("WorkspaceTree – workspace entries and rename", () => {
       await waitFor(() => {
         expect(mockRenameWorkspace).toHaveBeenCalledTimes(1);
         expect(mockRenameWorkspace).toHaveBeenCalledWith(
-          "workspace-a",
+          "uuid-ws-a",
           "new-name",
         );
       });
@@ -527,7 +539,7 @@ describe("WorkspaceTree – workspace entries and rename", () => {
 
       await waitFor(() => {
         expect(mockRenameWorkspace).toHaveBeenCalledWith(
-          "workspace-a",
+          "uuid-ws-a",
           "blurred-name",
         );
       });

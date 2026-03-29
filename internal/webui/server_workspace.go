@@ -8,15 +8,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/circuitbreaker"
-	"github.com/tysonthomas9/loomcli/internal/rpc"
-	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 )
 
 // WorkspaceData represents the full workspace topology returned by the API.
 type WorkspaceData struct {
+	ID               string               `json:"id"`
 	Name             string               `json:"name"`
 	Path             string               `json:"path"`
 	Repos            []WorkspaceRepo      `json:"repos"`
@@ -29,6 +27,7 @@ type WorkspaceData struct {
 
 // WorkspaceSummary provides a lightweight summary of a configured workspace.
 type WorkspaceSummary struct {
+	ID        string `json:"id"`
 	Name      string `json:"name"`
 	Path      string `json:"path"`
 	Active    bool   `json:"active"`
@@ -55,11 +54,47 @@ type WorkspaceAgentInfo struct {
 	CrossRepo  bool     `json:"cross_repo"`
 }
 
+// reconcileConfigWorkspaces registers all configured workspaces via the
+// WorkspaceRegistry at startup. Skips the initial workspace if it was already
+// registered with a custom pool. Connection pools are lazy-connecting, so
+// workspaces whose daemons are not running will connect on first request.
+func reconcileConfigWorkspaces(
+	listFn func() (map[string]string, error),
+	initialID string,
+	initialRegistered bool,
+	registry *WorkspaceRegistry,
+	fleetRegistry *fleet.StoreRegistry,
+) {
+	if listFn == nil {
+		return
+	}
+	workspaces, err := listFn()
+	if err != nil {
+		slog.Warn("failed to load workspace list for startup reconciliation", "err", err)
+		return
+	}
+	for wsID, wsPath := range workspaces {
+		if initialRegistered && wsID == initialID {
+			continue
+		}
+		_ = registry.Register(wsID, wsPath)
+		if fleetRegistry != nil {
+			if err := fleetRegistry.Register(wsID); err != nil {
+				slog.Warn("failed to register workspace in fleet registry",
+					"workspace", wsID, "err", err)
+			}
+		}
+	}
+	slog.Info("startup reconciliation complete",
+		"total_workspaces", len(workspaces),
+		"registered", len(registry.WorkspaceIDs()))
+}
+
 func wrapWorkspaceCreateFn(
 	innerCreate WorkspaceCreateFn,
-	multiPool *daemon.MultiPool,
-	multiSub *MultiWorkspaceSubscriber,
-	poolSize int,
+	registry *WorkspaceRegistry,
+	resolveID WorkspaceIDResolverFn,
+	fleetRegistry *fleet.StoreRegistry,
 ) WorkspaceCreateFn {
 	if innerCreate == nil {
 		return nil
@@ -67,6 +102,26 @@ func wrapWorkspaceCreateFn(
 	return func(ctx context.Context, req WorkspaceCreateRequest) error {
 		if err := innerCreate(ctx, req); err != nil {
 			return err
+		}
+
+		// Resolve UUID — config was just saved by innerCreate, so resolution should succeed.
+		// If resolution fails, abort registration rather than registering under a name key
+		// in a UUID-keyed registry. Startup reconciliation will register it on next restart.
+		if resolveID == nil {
+			slog.Warn("no workspace ID resolver available, skipping runtime registration",
+				"workspace", req.Name)
+			return nil
+		}
+		wsID, err := resolveID(req.Name)
+		if err != nil {
+			slog.Error("failed to resolve workspace UUID after creation — skipping runtime registration",
+				"workspace", req.Name, "err", err)
+			return nil
+		}
+		if wsID == "" {
+			slog.Error("resolved workspace ID is empty — skipping runtime registration",
+				"workspace", req.Name)
+			return nil
 		}
 
 		// Determine the workspace directory (mirrors GetWorkspaceDir logic in cli/config.go)
@@ -88,38 +143,119 @@ func wrapWorkspaceCreateFn(
 		}
 		wsDir = filepath.Clean(wsDir)
 
-		// Compute the daemon socket path and create a connection pool with circuit breaker
-		socketPath := rpc.ShortSocketPath(wsDir)
-		newRawPool, err := daemon.NewConnectionPool(socketPath, poolSize)
-		if err != nil {
-			slog.Warn("failed to create connection pool for new workspace",
-				"workspace", req.Name, "socket", socketPath, "err", err)
-			return nil // non-fatal: workspace was created successfully
-		}
-		breaker := circuitbreaker.NewBreaker("ws-"+req.Name, circuitbreaker.Config{
-			FailureThreshold: 5,
-			OpenTimeout:      30 * time.Second,
-		})
-		newPool := daemon.NewProtectedPool(newRawPool, breaker)
+		_ = registry.Register(wsID, wsDir)
 
-		if err := multiPool.Register(req.Name, newPool); err != nil {
-			slog.Warn("failed to register pool for new workspace",
-				"workspace", req.Name, "err", err)
-			return nil
-		}
-		slog.Info("registered connection pool for new workspace",
-			"workspace", req.Name, "socket", socketPath)
-
-		// Start a DaemonSubscriber for the new workspace
-		if err := multiSub.AddWorkspace(req.Name); err != nil {
-			slog.Warn("failed to start subscriber for new workspace",
-				"workspace", req.Name, "err", err)
-		} else {
-			slog.Info("started subscriber for new workspace", "workspace", req.Name)
+		// Register workspace in fleet store registry (non-fatal on error).
+		if fleetRegistry != nil {
+			if err := fleetRegistry.Register(wsID); err != nil {
+				slog.Warn("failed to register workspace in fleet registry",
+					"workspace", wsID, "err", err)
+			}
 		}
 
 		return nil
 	}
+}
+
+// wrapWorkspaceDeleteFn wraps a workspace deletion function with post-deletion
+// cleanup. After the inner delete succeeds, it deregisters the workspace from
+// the WorkspaceRegistry (closing pools and stopping subscribers) and the
+// FleetStoreRegistry (stopping fleet Store and TimeoutEnforcer).
+func wrapWorkspaceDeleteFn(
+	innerDelete func(name string) error,
+	registry *WorkspaceRegistry,
+	fleetRegistry *fleet.StoreRegistry,
+	resolveID WorkspaceIDResolverFn,
+) func(name string) error {
+	if innerDelete == nil {
+		return nil
+	}
+	return func(name string) error {
+		// 1. Resolve UUID BEFORE deletion (config entry is removed by innerDelete).
+		var wsID string
+		var resolved bool
+		if resolveID != nil {
+			if id, err := resolveID(name); err != nil {
+				slog.Error("failed to resolve workspace UUID for deletion cleanup — pool and fleet store will leak until restart",
+					"workspace", name, "err", err)
+			} else if id == "" {
+				slog.Error("workspace ID resolver returned empty UUID for deletion cleanup — pool and fleet store will leak until restart",
+					"workspace", name)
+			} else {
+				wsID = id
+				resolved = true
+			}
+		} else {
+			slog.Error("no workspace ID resolver available — pool and fleet store will leak until restart",
+				"workspace", name)
+		}
+
+		// 2. Perform the config deletion (the critical path — always proceed).
+		if err := innerDelete(name); err != nil {
+			return err
+		}
+
+		// 3. Clean up pool and subscriber state (only if UUID was resolved).
+		if resolved && registry != nil {
+			registry.Deregister(wsID)
+			slog.Info("workspace pool and subscriber cleaned up after deletion",
+				"workspace", name, "id", wsID)
+		}
+
+		// 4. Clean up fleet state (only if UUID was resolved).
+		if resolved && fleetRegistry != nil {
+			fleetRegistry.Deregister(wsID)
+			slog.Info("workspace fleet store cleaned up after deletion",
+				"workspace", name, "id", wsID)
+		}
+
+		return nil
+	}
+}
+
+// findWorkspacePathByID scans workspace summaries for a matching UUID and
+// returns its filesystem path. Returns empty string if not found.
+func findWorkspacePathByID(wsData *WorkspaceData, id string) string {
+	if wsData == nil {
+		return ""
+	}
+	for _, ws := range wsData.Workspaces {
+		if ws.ID == id {
+			return ws.Path
+		}
+	}
+	return ""
+}
+
+// resolveWorkspacePath loads config and resolves a workspace UUID to its
+// filesystem path. Returns empty string on any failure.
+func resolveWorkspacePath(configFn func() (*WorkspaceData, error), workspaceID string) string {
+	if configFn == nil {
+		return ""
+	}
+	wsData, err := configFn()
+	if err != nil || wsData == nil {
+		return ""
+	}
+	return findWorkspacePathByID(wsData, workspaceID)
+}
+
+// safeLogPath builds a log file path for an agent, guarding against path traversal.
+func safeLogPath(basePath, agent string) string {
+	logsDir := filepath.Join(basePath, ".loom", "logs")
+	candidate := filepath.Clean(filepath.Join(logsDir, fmt.Sprintf("task-%s.log", agent)))
+	absLogs, err := filepath.Abs(logsDir)
+	if err != nil {
+		return ""
+	}
+	absCandidate, err := filepath.Abs(candidate)
+	if err != nil {
+		return ""
+	}
+	if !strings.HasPrefix(absCandidate, absLogs+string(filepath.Separator)) {
+		return "" // agent name escapes log dir
+	}
+	return candidate
 }
 
 func registerWorkerAPIRoutes(mux *http.ServeMux, workspaceConfigFn func() (*WorkspaceData, error)) {
@@ -127,42 +263,30 @@ func registerWorkerAPIRoutes(mux *http.ServeMux, workspaceConfigFn func() (*Work
 	if workerToken == "" {
 		return
 	}
+
+	validateWorkspace := func(id string) bool {
+		if workspaceConfigFn == nil {
+			return false
+		}
+		wsData, err := workspaceConfigFn()
+		if err != nil {
+			slog.Warn("workspace validation failed due to config error", "workspace_id", id, "err", err)
+			return false
+		}
+		if wsData == nil {
+			return false
+		}
+		return findWorkspacePathByID(wsData, id) != ""
+	}
+
 	SetupWorkerAPIRoutes(mux, workerToken,
-		// resolveWorktreePath: map (workspace, agent) to filesystem path
 		func(workspace, agent string) string {
-			if workspaceConfigFn == nil {
+			wsPath := resolveWorkspacePath(workspaceConfigFn, workspace)
+			if wsPath == "" || agent == "" {
 				return ""
 			}
-			wsData, err := workspaceConfigFn()
-			if err != nil || wsData == nil {
-				return ""
-			}
-			// Use the workspace path as the worktree base
-			return wsData.Path
-		},
-		// resolveEventsDir: map workspace to events directory
-		func(workspace string) string {
-			if workspaceConfigFn == nil {
-				return ""
-			}
-			wsData, err := workspaceConfigFn()
-			if err != nil || wsData == nil {
-				return ""
-			}
-			return filepath.Join(wsData.Path, ".loom", "events")
-		},
-		// resolveLogPath: map (workspace, agent) to log file path
-		func(workspace, agent string) string {
-			if workspaceConfigFn == nil {
-				return ""
-			}
-			wsData, err := workspaceConfigFn()
-			if err != nil || wsData == nil {
-				return ""
-			}
-			logsDir := filepath.Join(wsData.Path, ".loom", "logs")
-			candidate := filepath.Clean(filepath.Join(logsDir, fmt.Sprintf("task-%s.log", agent)))
-			absLogs, err := filepath.Abs(logsDir)
+			candidate := filepath.Clean(filepath.Join(wsPath, "worktrees", agent))
+			absBase, err := filepath.Abs(wsPath)
 			if err != nil {
 				return ""
 			}
@@ -170,11 +294,29 @@ func registerWorkerAPIRoutes(mux *http.ServeMux, workspaceConfigFn func() (*Work
 			if err != nil {
 				return ""
 			}
-			if !strings.HasPrefix(absCandidate, absLogs+string(filepath.Separator)) {
-				return "" // agent name escapes log dir
+			if !strings.HasPrefix(absCandidate, absBase+string(filepath.Separator)) {
+				return "" // agent name escapes workspace dir
+			}
+			if err := os.MkdirAll(candidate, 0700); err != nil {
+				return ""
 			}
 			return candidate
 		},
+		func(workspace string) string {
+			path := resolveWorkspacePath(workspaceConfigFn, workspace)
+			if path == "" {
+				return ""
+			}
+			return filepath.Join(path, ".loom", "events")
+		},
+		func(workspace, agent string) string {
+			path := resolveWorkspacePath(workspaceConfigFn, workspace)
+			if path == "" {
+				return ""
+			}
+			return safeLogPath(path, agent)
+		},
+		validateWorkspace,
 	)
 	slog.Info("worker API routes registered", "component", "worker")
 }

@@ -12,6 +12,8 @@ import type { BlockedIssue } from "@/types";
  * Options for the useBlockedIssues hook.
  */
 export interface UseBlockedIssuesOptions {
+  /** Workspace ID for scoped API calls. */
+  workspaceId: string;
   /** Optional: filter to descendants of this issue/epic */
   parentId?: string;
   /** Optional: filter by priority (0-4) */
@@ -71,6 +73,7 @@ export function useBlockedIssues(
   options?: UseBlockedIssuesOptions,
 ): UseBlockedIssuesResult {
   const {
+    workspaceId,
     parentId,
     priority,
     type,
@@ -78,7 +81,7 @@ export function useBlockedIssues(
     limit,
     pollInterval,
     enabled = true,
-  } = options ?? {};
+  } = options ?? { workspaceId: "" };
 
   const [data, setData] = useState<BlockedIssue[] | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
@@ -118,7 +121,7 @@ export function useBlockedIssues(
         filter.limit = limit;
       }
 
-      const result = await getBlockedIssues(filter);
+      const result = await getBlockedIssues(workspaceId, filter);
 
       // Only update state if still mounted
       if (mountedRef.current) {
@@ -137,7 +140,7 @@ export function useBlockedIssues(
       }
       fetchInProgressRef.current = false;
     }
-  }, [parentId, priority, type, assignee, limit]);
+  }, [workspaceId, parentId, priority, type, assignee, limit]);
 
   // Refetch function exposed to consumers
   const refetch = useCallback(async () => {
@@ -175,7 +178,16 @@ export function useBlockedIssues(
     // fetchData excluded: it has fetchInProgressRef guard preventing overlapping requests,
     // and including it causes interval stacking when parentId changes (fetchData recreated → effect reruns)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, pollInterval, parentId, priority, type, assignee, limit]);
+  }, [
+    enabled,
+    pollInterval,
+    workspaceId,
+    parentId,
+    priority,
+    type,
+    assignee,
+    limit,
+  ]);
 
   return {
     data,

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
 )
 
@@ -23,10 +24,15 @@ type LoomConfig struct {
 	Backend          string                     `yaml:"backend,omitempty"`
 	Workspaces       map[string]WorkspaceConfig `yaml:"workspaces"`
 	Daemon           *DaemonSettings            `yaml:"daemon,omitempty"`
+
+	// DefaultWorkspaceID is the UUID of the default workspace, resolved at load time.
+	// Not serialized to YAML.
+	DefaultWorkspaceID string `yaml:"-" json:"-"`
 }
 
 // WorkspaceConfig defines a named workspace containing multiple repos
 type WorkspaceConfig struct {
+	ID      string       `yaml:"id,omitempty" json:"id,omitempty"`           // Stable UUID, generated at creation, never changes
 	Path    string       `yaml:"path" json:"path"`                           // Directory path for this workspace
 	Backend string       `yaml:"backend,omitempty" json:"backend,omitempty"` // AI backend override for this workspace
 	Repos   []RepoConfig `yaml:"repos" json:"repos"`                         // Repositories in this workspace
@@ -70,6 +76,26 @@ func ValidateRemoteName(name string) error {
 		}
 	}
 	return nil
+}
+
+// NewWorkspaceID generates a new UUID v4 for a workspace.
+func NewWorkspaceID() string {
+	return uuid.New().String()
+}
+
+// WorkspaceByID finds a workspace by its stable UUID.
+// Returns the workspace name, config, and true if found; empty name, nil, false otherwise.
+func WorkspaceByID(cfg *LoomConfig, id string) (string, *WorkspaceConfig, bool) {
+	if cfg == nil || id == "" {
+		return "", nil, false
+	}
+	for name, ws := range cfg.Workspaces {
+		if ws.ID == id {
+			wsCopy := ws
+			return name, &wsCopy, true
+		}
+	}
+	return "", nil, false
 }
 
 // GetConfigDir returns the loom config directory path.
@@ -135,6 +161,13 @@ func LoadConfig() (*LoomConfig, error) {
 		configVersionWarnOnce.Do(func() {
 			fmt.Fprintf(os.Stderr, "Warning: config %s is version %d (current: %d). Run 'loom config migrate' to upgrade.\n", path, cfg.Version, CurrentConfigVersion)
 		})
+	}
+
+	// Resolve DefaultWorkspaceID from the default workspace name
+	if cfg.DefaultWorkspace != "" {
+		if ws, ok := cfg.Workspaces[cfg.DefaultWorkspace]; ok {
+			cfg.DefaultWorkspaceID = ws.ID
+		}
 	}
 
 	// Run comprehensive validation (warnings only — don't block on path checks)

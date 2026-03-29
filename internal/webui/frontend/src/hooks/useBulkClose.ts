@@ -12,6 +12,8 @@ import type { BulkAction } from "@/components/BulkActionToolbar";
  * Options for the useBulkClose hook.
  */
 export interface UseBulkCloseOptions {
+  /** Workspace ID for scoped API calls. */
+  workspaceId: string;
   /** Callback after all issues are successfully closed */
   onSuccess?: (closedIds: string[]) => void;
   /** Callback after partial success (some issues failed to close) */
@@ -52,10 +54,9 @@ export interface UseBulkCloseReturn {
  * })
  * ```
  */
-export function useBulkClose(
-  options: UseBulkCloseOptions = {},
-): UseBulkCloseReturn {
-  const { onSuccess, onPartialSuccess, onError, closeReason } = options;
+export function useBulkClose(options: UseBulkCloseOptions): UseBulkCloseReturn {
+  const { workspaceId, onSuccess, onPartialSuccess, onError, closeReason } =
+    options;
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -105,7 +106,7 @@ export function useBulkClose(
       try {
         // Close all issues in parallel
         const results = await Promise.allSettled(
-          ids.map((id) => closeIssue(id, closeReason)),
+          ids.map((id) => closeIssue(workspaceId, id, closeReason)),
         );
 
         // Guard against unmount
@@ -166,7 +167,7 @@ export function useBulkClose(
       }
     },
     // Only closeReason is a dependency; callbacks use refs to avoid stale closures
-    [closeReason],
+    [workspaceId, closeReason],
   );
 
   /**

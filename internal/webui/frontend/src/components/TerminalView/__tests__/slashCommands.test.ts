@@ -148,9 +148,9 @@ describe("/create-issue handler", () => {
       updated_at: "",
     });
 
-    const result = await execute("Fix login");
+    const result = await execute("Fix login", "test-ws-id");
 
-    expect(mockedCreateIssue).toHaveBeenCalledWith({
+    expect(mockedCreateIssue).toHaveBeenCalledWith("test-ws-id", {
       title: "Fix login",
       priority: 3,
       issue_type: "task",
@@ -170,9 +170,9 @@ describe("/create-issue handler", () => {
       updated_at: "",
     });
 
-    await execute("Critical bug --priority 0");
+    await execute("Critical bug --priority 0", "test-ws-id");
 
-    expect(mockedCreateIssue).toHaveBeenCalledWith({
+    expect(mockedCreateIssue).toHaveBeenCalledWith("test-ws-id", {
       title: "Critical bug",
       priority: 0,
       issue_type: "task",
@@ -189,9 +189,9 @@ describe("/create-issue handler", () => {
       updated_at: "",
     });
 
-    await execute("Login broken --type bug");
+    await execute("Login broken --type bug", "test-ws-id");
 
-    expect(mockedCreateIssue).toHaveBeenCalledWith({
+    expect(mockedCreateIssue).toHaveBeenCalledWith("test-ws-id", {
       title: "Login broken",
       priority: 3,
       issue_type: "bug",
@@ -208,9 +208,9 @@ describe("/create-issue handler", () => {
       updated_at: "",
     });
 
-    await execute("Plan release --priority 1 --type epic");
+    await execute("Plan release --priority 1 --type epic", "test-ws-id");
 
-    expect(mockedCreateIssue).toHaveBeenCalledWith({
+    expect(mockedCreateIssue).toHaveBeenCalledWith("test-ws-id", {
       title: "Plan release",
       priority: 1,
       issue_type: "epic",
@@ -218,21 +218,21 @@ describe("/create-issue handler", () => {
   });
 
   it("returns usage info when called with no args", async () => {
-    const result = await execute("");
+    const result = await execute("", "test-ws-id");
     expect(result).toContain("Usage");
     expect(result).toContain("/create-issue");
     expect(mockedCreateIssue).not.toHaveBeenCalled();
   });
 
   it("returns error for invalid priority", async () => {
-    const result = await execute("Title --priority 9");
+    const result = await execute("Title --priority 9", "test-ws-id");
     expect(result).toContain("Invalid priority");
     expect(result).toContain("\x1b[31m"); // red
     expect(mockedCreateIssue).not.toHaveBeenCalled();
   });
 
   it("returns error for invalid type", async () => {
-    const result = await execute("Title --type story");
+    const result = await execute("Title --type story", "test-ws-id");
     expect(result).toContain("Invalid type");
     expect(result).toContain("\x1b[31m"); // red
     expect(mockedCreateIssue).not.toHaveBeenCalled();
@@ -259,9 +259,9 @@ describe("/assign handler", () => {
       updated_at: "",
     });
 
-    const result = await execute("ISSUE-5 alice");
+    const result = await execute("ISSUE-5 alice", "test-ws-id");
 
-    expect(mockedUpdateIssue).toHaveBeenCalledWith("ISSUE-5", {
+    expect(mockedUpdateIssue).toHaveBeenCalledWith("test-ws-id", "ISSUE-5", {
       assignee: "alice",
     });
     expect(result).toContain("Assigned");
@@ -270,14 +270,14 @@ describe("/assign handler", () => {
   });
 
   it("returns usage info when called with insufficient args", async () => {
-    const result = await execute("ISSUE-5");
+    const result = await execute("ISSUE-5", "test-ws-id");
     expect(result).toContain("Usage");
     expect(result).toContain("/assign");
     expect(mockedUpdateIssue).not.toHaveBeenCalled();
   });
 
   it("returns usage info when called with no args", async () => {
-    const result = await execute("");
+    const result = await execute("", "test-ws-id");
     expect(result).toContain("Usage");
     expect(mockedUpdateIssue).not.toHaveBeenCalled();
   });
@@ -306,7 +306,7 @@ describe("/status handler", () => {
       average_lead_time_hours: 0,
     });
 
-    const result = await execute("");
+    const result = await execute("", "test-ws-id");
 
     expect(mockedGetStats).toHaveBeenCalled();
     expect(mockedGetIssue).not.toHaveBeenCalled();
@@ -328,9 +328,9 @@ describe("/status handler", () => {
       updated_at: "",
     } as any);
 
-    const result = await execute("ISSUE-7");
+    const result = await execute("ISSUE-7", "test-ws-id");
 
-    expect(mockedGetIssue).toHaveBeenCalledWith("ISSUE-7");
+    expect(mockedGetIssue).toHaveBeenCalledWith("test-ws-id", "ISSUE-7");
     expect(mockedGetStats).not.toHaveBeenCalled();
     expect(result).toContain("ISSUE-7");
     expect(result).toContain("Implement login");
@@ -353,7 +353,7 @@ describe("/help handler", () => {
   const execute = COMMAND_REGISTRY.get("help")!.execute;
 
   it("lists all available commands when called with no args", async () => {
-    const result = await execute("");
+    const result = await execute("", "test-ws-id");
     expect(result).toContain("Available commands:");
     expect(result).toContain("/create-issue");
     expect(result).toContain("/assign");
@@ -363,20 +363,20 @@ describe("/help handler", () => {
   });
 
   it("shows specific usage for /help create-issue", async () => {
-    const result = await execute("create-issue");
+    const result = await execute("create-issue", "test-ws-id");
     expect(result).toContain("/create-issue");
     expect(result).toContain("Create a new issue");
     expect(result).toContain("Usage:");
   });
 
   it("shows specific usage for /help assign", async () => {
-    const result = await execute("assign");
+    const result = await execute("assign", "test-ws-id");
     expect(result).toContain("/assign");
     expect(result).toContain("Assign an issue to someone");
   });
 
   it("shows error for unknown command name", async () => {
-    const result = await execute("nonexistent");
+    const result = await execute("nonexistent", "test-ws-id");
     expect(result).toContain("Unknown command");
     expect(result).toContain("\x1b[31m"); // red
   });

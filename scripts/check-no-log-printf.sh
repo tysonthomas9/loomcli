@@ -12,16 +12,13 @@ BASELINE="$SCRIPT_DIR/log-printf-baseline.txt"
 
 cd "$REPO_ROOT"
 
-# Load baseline into associative array.
-declare -A allowed
-if [ -f "$BASELINE" ]; then
-    while IFS= read -r line; do
-        # Skip comments and blank lines.
-        [[ "$line" =~ ^[[:space:]]*# ]] && continue
-        [[ -z "${line// /}" ]] && continue
-        allowed["$line"]=1
-    done < "$BASELINE"
-fi
+# is_allowed checks if a path is in the baseline file.
+is_allowed() {
+    if [ ! -f "$BASELINE" ]; then
+        return 1
+    fi
+    grep -qxF "$1" "$BASELINE"
+}
 
 violations=0
 output=""
@@ -31,7 +28,7 @@ while IFS= read -r -d '' file; do
     rel_path="${file#"$REPO_ROOT/"}"
 
     # Skip if file is in the baseline.
-    if [[ -n "${allowed[$rel_path]+x}" ]]; then
+    if is_allowed "$rel_path"; then
         continue
     fi
 

@@ -15,6 +15,12 @@ import "@testing-library/jest-dom";
 import type { LoomAgentStatus } from "@/types";
 import { RepoGroupedList } from "../RepoGroupedList";
 
+const TEST_WS_ID = "test-ws-uuid-1234";
+
+vi.mock("@/hooks/useWorkspaceContext", () => ({
+  useWorkspaceContext: () => ({ workspaceId: TEST_WS_ID }),
+}));
+
 // Mock AgentCard to simplify assertions
 vi.mock("../../AgentCard", () => ({
   AgentCard: ({
@@ -58,7 +64,7 @@ vi.mock("../AgentsSidebar", () => ({
   },
 }));
 
-const REPO_GROUPS_STORAGE_KEY = "agents-sidebar-repo-groups-collapsed";
+const REPO_GROUPS_STORAGE_KEY = `loom:${TEST_WS_ID}:agents-sidebar-repo-groups-collapsed`;
 
 function makeAgent(
   name: string,
@@ -78,6 +84,7 @@ describe("RepoGroupedList", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    localStorage.setItem("loom:last-workspace-id", TEST_WS_ID);
   });
 
   describe("basic rendering", () => {

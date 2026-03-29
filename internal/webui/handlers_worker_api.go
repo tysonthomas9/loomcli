@@ -19,7 +19,7 @@ import (
 // WorkerInfo tracks a registered remote worker.
 type WorkerInfo struct {
 	ID        string    `json:"worker_id"`
-	Workspace string    `json:"workspace"`
+	Workspace string    `json:"workspace"` // Stable workspace UUID (not name)
 	Agent     string    `json:"agent"`
 	Backend   string    `json:"backend"`
 	StartedAt time.Time `json:"started_at"`
@@ -99,7 +99,8 @@ type workerRegisterResponse struct {
 }
 
 // handleWorkerRegister registers a new remote worker.
-func handleWorkerRegister(registry *WorkerRegistry) http.HandlerFunc {
+// If validateWorkspace is non-nil, the workspace UUID is validated at registration time.
+func handleWorkerRegister(registry *WorkerRegistry, validateWorkspace func(id string) bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req workerRegisterRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -109,6 +110,12 @@ func handleWorkerRegister(registry *WorkerRegistry) http.HandlerFunc {
 
 		if req.Workspace == "" || req.Agent == "" {
 			respondError(w, http.StatusBadRequest, "workspace and agent are required")
+			return
+		}
+
+		if validateWorkspace != nil && !validateWorkspace(req.Workspace) {
+			respondError(w, http.StatusBadRequest,
+				fmt.Sprintf("unknown workspace ID: %s", req.Workspace))
 			return
 		}
 
@@ -422,21 +429,23 @@ func appendToLogFile(logPath string, data []byte) error {
 // SetupWorkerAPIRoutes registers the internal worker API endpoints on the given mux.
 // These endpoints are called by remote workers, not by the browser.
 // workerToken is the shared secret from LOOM_WORKER_TOKEN.
-// resolveWorktreePath maps (workspace, agent) to a filesystem path.
-// resolveEventsDir maps workspace to its events directory.
-// resolveLogPath maps (workspace, agent) to the agent's log file path.
+// resolveWorktreePath maps (workspace UUID, agent) to a filesystem path.
+// resolveEventsDir maps workspace UUID to its events directory.
+// resolveLogPath maps (workspace UUID, agent) to the agent's log file path.
+// validateWorkspace checks whether a workspace UUID is known; nil skips validation.
 func SetupWorkerAPIRoutes(
 	mux *http.ServeMux,
 	workerToken string,
 	resolveWorktreePath func(workspace, agent string) string,
 	resolveEventsDir func(workspace string) string,
 	resolveLogPath func(workspace, agent string) string,
+	validateWorkspace func(id string) bool,
 ) *WorkerRegistry {
 	registry := NewWorkerRegistry()
 
 	// Create an inner mux for worker API routes
 	workerMux := http.NewServeMux()
-	workerMux.HandleFunc("POST /api/internal/workers/register", handleWorkerRegister(registry))
+	workerMux.HandleFunc("POST /api/internal/workers/register", handleWorkerRegister(registry, validateWorkspace))
 	workerMux.HandleFunc("DELETE /api/internal/workers/{id}", handleWorkerDeregister(registry))
 	workerMux.HandleFunc("POST /api/internal/workers/{id}/state", handleWorkerState(registry, resolveWorktreePath))
 	workerMux.HandleFunc("POST /api/internal/workers/{id}/events", handleWorkerEvents(registry, resolveEventsDir))

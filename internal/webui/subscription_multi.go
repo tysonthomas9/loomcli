@@ -137,3 +137,17 @@ func (m *MultiWorkspaceSubscriber) GetMutationsSince(since int64) []rpc.Mutation
 	}
 	return all
 }
+
+// GetMutationsSinceForWorkspace retrieves mutations since the given timestamp
+// from a specific workspace's subscriber only. Returns nil if the workspace
+// has no active subscriber. This is used by the SSE handler for workspace-scoped
+// reconnection catch-up.
+func (m *MultiWorkspaceSubscriber) GetMutationsSinceForWorkspace(wsID string, since int64) []rpc.MutationEvent {
+	m.mu.Lock()
+	sub, ok := m.subscribers[wsID]
+	m.mu.Unlock()
+	if !ok {
+		return nil
+	}
+	return sub.GetMutationsSince(since)
+}

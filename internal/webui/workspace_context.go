@@ -23,48 +23,23 @@ func WithWorkspace(ctx context.Context, wsID string) context.Context {
 	return context.WithValue(ctx, workspaceContextKey{}, wsID)
 }
 
-// WorkspaceMiddleware extracts a workspace ID from the request and injects it
-// into the context. It checks (in order):
-//
-//  1. The "Workspace" request header.
-//  2. The {ws} path parameter (Go 1.22+ ServeMux pattern matching).
-//
-// If a workspace ID is found, it is injected via WithWorkspace and the next
-// handler is called. If not found, the middleware returns 400 Bad Request.
-func WorkspaceMiddleware(next http.Handler) http.Handler {
+// WorkspaceMiddleware extracts the {ws} path parameter, validates that the
+// workspace exists via wsExists, and injects it into the context. If the path
+// param is empty it returns 400; if the workspace is not found it returns 404.
+func WorkspaceMiddleware(wsExists func(id string) bool, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		wsID := r.Header.Get("Workspace")
+		wsID := strings.TrimSpace(r.PathValue("ws"))
 		if wsID == "" {
-			wsID = r.PathValue("ws")
+			respondError(w, http.StatusBadRequest, "workspace ID is required")
+			return
 		}
 
-		wsID = strings.TrimSpace(wsID)
-		if wsID == "" {
-			respondError(w, http.StatusBadRequest, "workspace ID is required: set the Workspace header or use a workspace-scoped URL")
+		if !wsExists(wsID) {
+			respondError(w, http.StatusNotFound, "workspace not found: "+wsID)
 			return
 		}
 
 		ctx := WithWorkspace(r.Context(), wsID)
 		next.ServeHTTP(w, r.WithContext(ctx))
-	})
-}
-
-// OptionalWorkspaceMiddleware reads the Workspace header and injects it into
-// the context. If the header is missing, it calls defaultWSFn to resolve the
-// current default workspace dynamically. This ensures that changes to the
-// default workspace (via PUT /api/workspace/default) take effect immediately
-// without requiring a server restart.
-func OptionalWorkspaceMiddleware(defaultWSFn func() string, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		wsID := strings.TrimSpace(r.Header.Get("Workspace"))
-		if wsID == "" {
-			wsID = defaultWSFn()
-		}
-		if wsID != "" {
-			ctx := WithWorkspace(r.Context(), wsID)
-			next.ServeHTTP(w, r.WithContext(ctx))
-			return
-		}
-		next.ServeHTTP(w, r)
 	})
 }

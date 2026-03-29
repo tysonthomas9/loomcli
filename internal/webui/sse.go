@@ -70,6 +70,7 @@ type SSEClient struct {
 	done        chan struct{}
 	lastSince   int64
 	sourceRepos []string // repos this client wants; empty = all
+	workspaceID string   // workspace this client subscribed to; empty = no mutations (fail-closed)
 }
 
 // containsRepo returns true if repo is in the repos slice.
@@ -96,6 +97,20 @@ func parseSourceRepos(param string) []string {
 		}
 	}
 	return repos
+}
+
+// matchesWorkspaceFilter returns true if the mutation should be delivered
+// to a client based on workspace filtering. Both sides must be non-empty
+// and must match — fail-closed on both empty client workspace (no subscription)
+// and empty mutation workspace (untagged mutation).
+func matchesWorkspaceFilter(clientWorkspaceID, mutationWorkspaceID string) bool {
+	if clientWorkspaceID == "" {
+		return false // fail-closed: no workspace subscription = no mutations
+	}
+	if mutationWorkspaceID == "" {
+		return false // fail-closed: untagged mutations are never delivered
+	}
+	return clientWorkspaceID == mutationWorkspaceID
 }
 
 // matchesSourceRepoFilter returns true if the mutation should be delivered
@@ -142,8 +157,15 @@ func (h *SSEHub) Run() {
 			log.Printf("SSE client %d unregistered (total: %d)", client.id, len(h.clients))
 
 		case mutation := <-h.broadcast:
+			if mutation.WorkspaceID == "" {
+				log.Printf("SSE: dropping mutation with empty WorkspaceID (type=%s, issue=%s)", mutation.Type, mutation.IssueID)
+				break
+			}
 			h.mu.RLock()
 			for client := range h.clients {
+				if !matchesWorkspaceFilter(client.workspaceID, mutation.WorkspaceID) {
+					continue
+				}
 				if !matchesSourceRepoFilter(client.sourceRepos, mutation.SourceRepo) {
 					continue
 				}
@@ -289,8 +311,27 @@ func (h *SSEHub) drainRetryQueue() {
 	}
 }
 
+// parseLastSince extracts the reconnection catch-up timestamp from the request,
+// preferring the larger of Last-Event-ID header and ?since query parameter.
+func parseLastSince(r *http.Request) int64 {
+	var lastSince int64
+	if lastEventID := r.Header.Get("Last-Event-ID"); lastEventID != "" {
+		if ts, err := strconv.ParseInt(lastEventID, 10, 64); err == nil {
+			lastSince = ts
+		}
+	}
+	if since := r.URL.Query().Get("since"); since != "" {
+		if ts, err := strconv.ParseInt(since, 10, 64); err == nil && ts > lastSince {
+			lastSince = ts
+		}
+	}
+	return lastSince
+}
+
 // handleSSE creates an HTTP handler for the SSE endpoint.
-func handleSSE(hub *SSEHub, getMutationsSince func(since int64) []rpc.MutationEvent) http.HandlerFunc {
+// getMutationsSince takes a workspace ID and timestamp, returning mutations
+// only from that workspace's daemon for reconnection catch-up.
+func handleSSE(hub *SSEHub, getMutationsSince func(wsID string, since int64) []rpc.MutationEvent) http.HandlerFunc {
 	var clientIDCounter int64
 
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -315,23 +356,16 @@ func handleSSE(hub *SSEHub, getMutationsSince func(since int64) []rpc.MutationEv
 			log.Printf("SSE: failed to disable write deadline: %v", err)
 		}
 
-		// Parse Last-Event-ID header for reconnection catch-up
-		var lastSince int64
-		if lastEventID := r.Header.Get("Last-Event-ID"); lastEventID != "" {
-			if ts, err := strconv.ParseInt(lastEventID, 10, 64); err == nil {
-				lastSince = ts
-			}
-		}
-
-		// Also accept ?since query parameter
-		if since := r.URL.Query().Get("since"); since != "" {
-			if ts, err := strconv.ParseInt(since, 10, 64); err == nil && ts > lastSince {
-				lastSince = ts
-			}
-		}
+		lastSince := parseLastSince(r)
 
 		// Parse source_repos filter (comma-separated repo names)
 		sourceRepos := parseSourceRepos(r.URL.Query().Get("source_repos"))
+
+		// Read workspace from context (injected by WorkspaceMiddleware)
+		workspaceID := WorkspaceFromContext(r.Context())
+		if workspaceID == "" {
+			log.Printf("SSE: WARNING client %d from %s connected with empty workspaceID — will not receive mutations (fail-closed)", clientID, r.RemoteAddr)
+		}
 
 		// Create client
 		client := &SSEClient{
@@ -340,6 +374,7 @@ func handleSSE(hub *SSEHub, getMutationsSince func(since int64) []rpc.MutationEv
 			done:        make(chan struct{}),
 			lastSince:   lastSince,
 			sourceRepos: sourceRepos,
+			workspaceID: workspaceID,
 		}
 
 		// Check if shutting down before registering (r.Context() derives from
@@ -359,13 +394,16 @@ func handleSSE(hub *SSEHub, getMutationsSince func(since int64) []rpc.MutationEv
 			close(client.done)
 		}()
 
-		log.Printf("SSE client %d connected from %s (since=%d, repos=%v)", client.id, r.RemoteAddr, lastSince, sourceRepos)
+		log.Printf("SSE client %d connected from %s (since=%d, repos=%v, workspace=%s)", client.id, r.RemoteAddr, lastSince, sourceRepos, workspaceID)
 
-		// Send catch-up events if reconnecting
-		if lastSince > 0 && getMutationsSince != nil {
-			catchUpMutations := getMutationsSince(lastSince)
+		// Send catch-up events if reconnecting.
+		// getMutationsSince is already workspace-scoped (only returns events from this
+		// workspace's daemon), so no workspace filter is needed on catch-up events.
+		if lastSince > 0 && getMutationsSince != nil && workspaceID != "" {
+			catchUpMutations := getMutationsSince(workspaceID, lastSince)
 			for _, m := range catchUpMutations {
 				payload := rpcMutationToPayload(m)
+				payload.WorkspaceID = workspaceID // stamp workspace for payload consistency
 				if !matchesSourceRepoFilter(sourceRepos, payload.SourceRepo) {
 					continue
 				}

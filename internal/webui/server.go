@@ -1,5 +1,4 @@
-// Package webui provides the web UI server for loomcli, embedding the React frontend
-// at compile time and serving it along with API endpoints for the loomcli daemon.
+// Package webui provides the web UI server for loomcli, embedding the React frontend and serving API endpoints.
 package webui
 
 import (
@@ -25,6 +24,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
+	"github.com/tysonthomas9/loomcli/internal/workspace"
 )
 
 // StartServer starts the web UI server with the given configuration.
@@ -61,6 +61,12 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		}
 	}
 
+	// Auto-add auth service origin to CORS when external auth is configured
+	if authOrigin := extractOrigin(config.ExtAuthURL); authOrigin != "" {
+		corsConfig.Enabled = true
+		corsConfig.AllowedOrigins = append(corsConfig.AllowedOrigins, authOrigin)
+	}
+
 	// Log configuration
 	slog.Info("starting web UI server", "port", config.Port, "pool_size", config.PoolSize, "bind_address", config.BindAddress)
 	if config.SocketPath != "" {
@@ -73,6 +79,9 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	}
 	if config.HSTSEnabled {
 		slog.Info("HSTS enabled: ensure this server is behind a TLS-terminating proxy")
+	}
+	if config.ExtAuthURL == "" && !config.AuthEnabled && config.BindAddress != "127.0.0.1" && config.BindAddress != "::1" {
+		slog.Warn("no authentication configured and server is exposed to network", "bind_address", config.BindAddress)
 	}
 	if config.DevMode {
 		dir := config.DevFrontendDir
@@ -96,19 +105,16 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		slog.Info("configured port in use, using fallback", "requested_port", config.Port, "actual_port", actualPort)
 	}
 
-	// Initialize MultiPool for workspace-aware connection routing.
-	// The MultiPool implements daemon.Pool and dispatches Get calls to the
-	// correct per-workspace ConnectionPool based on the workspace ID in context.
+	// MultiPool for workspace-aware connection routing.
 	multiPool := daemon.NewMultiPool(WorkspaceFromContext, config.PoolSize)
 
-	// Initialize the initial workspace connection pool (current project).
-	// The workspace ID must match the current working directory's name because
-	// the daemon pool connects to the local daemon socket. Using the default
-	// workspace from config here would be wrong when a different workspace is
-	// the default (e.g., after creating a second workspace).
-	initialWorkspaceID := "default"
-	if cwd, err := os.Getwd(); err == nil {
-		initialWorkspaceID = filepath.Base(cwd)
+	// Initialize the initial workspace connection pool (stable UUID or CWD basename).
+	initialWorkspaceID := config.InitialWorkspaceID
+	if initialWorkspaceID == "" {
+		initialWorkspaceID = "default"
+		if cwd, err := os.Getwd(); err == nil {
+			initialWorkspaceID = filepath.Base(cwd)
+		}
 	}
 	var rawPool *daemon.ConnectionPool
 	var pool daemon.Pool // may be ProtectedPool or raw ConnectionPool
@@ -144,13 +150,6 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		pool = daemon.NewProtectedPool(rawPool, breaker)
 		slog.Info("daemon connection pool initialized with circuit breaker")
 
-		// Register the initial workspace in the MultiPool
-		if err := multiPool.Register(initialWorkspaceID, pool); err != nil {
-			slog.Warn("failed to register initial workspace in MultiPool", "err", err)
-		} else {
-			slog.Info("registered initial workspace in MultiPool", "workspace", initialWorkspaceID)
-		}
-
 		// Test the connection
 		func() {
 			testCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -170,24 +169,23 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	hub := NewSSEHub()
 	go hub.Run()
 
-	// Create multi-workspace subscriber to bridge mutations from per-workspace
-	// daemons to SSE clients. Each workspace gets its own DaemonSubscriber
-	// goroutine that tags mutations with the workspace ID.
+	// Bridge per-workspace daemon mutations to SSE clients.
 	multiSub := NewMultiWorkspaceSubscriber(hub, multiPool, config.Logger)
-	var getMutationsSince func(since int64) []rpc.MutationEvent
+	var getMutationsSince func(wsID string, since int64) []rpc.MutationEvent
+
+	// Create central WorkspaceRegistry to coordinate all workspace lifecycle.
+	registry := NewWorkspaceRegistry(multiPool, multiSub, config.PoolSize, config.Logger)
 	if pool != nil {
-		if err := multiSub.AddWorkspace(initialWorkspaceID); err != nil {
-			slog.Warn("failed to add initial workspace subscriber", "workspace", initialWorkspaceID, "err", err)
-		} else {
-			slog.Info("workspace subscriber started", "workspace", initialWorkspaceID)
+		if err := registry.RegisterPool(initialWorkspaceID, pool); err != nil {
+			slog.Warn("failed to register initial workspace", "err", err)
 		}
-		getMutationsSince = multiSub.GetMutationsSince
+		getMutationsSince = multiSub.GetMutationsSinceForWorkspace
 	}
 
-	// Initialize terminal manager for WebSocket terminal sessions.
-	// Include the workspace ID in the session prefix to prevent same-name agents
-	// across workspaces from sharing tmux sessions.
-	termSessionPrefix := fmt.Sprintf("%d-%s", actualPort, initialWorkspaceID)
+	// NOTE: reconcileConfigWorkspaces called below after fleet registry init.
+
+	// Terminal manager for WebSocket sessions (workspace-scoped prefix prevents collisions).
+	termSessionPrefix := fmt.Sprintf("%d-%s", actualPort, workspace.ShortWorkspaceID(initialWorkspaceID))
 	var termMgr *TerminalManager
 	if termMgr, err = NewTerminalManager(config.TerminalCmd, termSessionPrefix, config.MaxTerminalSessions); err != nil {
 		if errors.Is(err, ErrTmuxNotFound) {
@@ -202,10 +200,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		slog.Info("terminal manager initialized", "component", "terminal", "default_command", config.TerminalCmd)
 	}
 
-	// Wire session history callback (deferred until sessionHistoryStore is initialized below).
-	// We use a closure that captures a pointer so it can reference sessionHistoryStore
-	// which is initialized later. The callback is only invoked after server startup,
-	// by which point sessionHistoryStore is set.
+	// Wire session history callback (closure captures pointer, set after store init below).
 	var sessionHistoryStoreRef *sessionhistory.Store
 	if termMgr != nil {
 		termMgr.SetOnSessionKilled(func(sessionName string) {
@@ -226,7 +221,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 			if _, err := os.Stat(scrollbackPath); err != nil {
 				scrollbackPath = ""
 			}
-			if err := store.Complete(context.Background(), issueID, sessionName, scrollbackPath); err != nil {
+			if err := store.Complete(context.Background(), initialWorkspaceID, issueID, sessionName, scrollbackPath); err != nil { // TODO(T41): derive workspace from session metadata
 				slog.Warn("failed to complete session history", "session", sessionName, "err", err)
 			}
 		})
@@ -243,15 +238,20 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		}
 	}
 
-	// Initialize fleet store and JWT config for worker registration
-	var fleetStore *fleet.Store
+	// Fleet store registry and JWT config for worker registration.
+	var fleetRegistry *fleet.StoreRegistry
 	var tokenCfg *TokenConfig
 	if config.FleetRedis != nil {
 		var err error
-		fleetStore, err = fleet.NewStoreForWorkspace(*config.FleetRedis, initialWorkspaceID, nil)
+		fleetRegistry, err = fleet.NewStoreRegistry(*config.FleetRedis, fleet.DefaultTimeoutConfig(), nil)
 		if err != nil {
-			slog.Warn("failed to initialize fleet store", "component", "fleet", "err", err)
+			slog.Warn("failed to initialize fleet store registry", "component", "fleet", "err", err)
 		} else {
+			if regErr := fleetRegistry.Register(initialWorkspaceID); regErr != nil {
+				slog.Warn("failed to register initial workspace in fleet registry",
+					"workspace", initialWorkspaceID, "err", regErr)
+			}
+
 			// Use pre-provisioned key if available, otherwise generate ephemeral key
 			var jwtKey []byte
 			if len(config.FleetJWTKey) > 0 {
@@ -261,40 +261,36 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 				jwtKey = make([]byte, 32)
 				if _, err := rand.Read(jwtKey); err != nil {
 					slog.Warn("failed to generate JWT signing key", "component", "fleet", "err", err)
-					_ = fleetStore.Close()
-					fleetStore = nil
+					_ = fleetRegistry.Close()
+					fleetRegistry = nil
 				}
 			}
-			if fleetStore != nil {
+			if fleetRegistry != nil {
 				tokenCfg = &TokenConfig{
 					SigningKey: jwtKey,
 					Expiry:     time.Hour,
 				}
-				slog.Info("fleet store initialized", "component", "fleet", "redis_address", config.FleetRedis.Address)
+				slog.Info("fleet store registry initialized", "component", "fleet", "redis_address", config.FleetRedis.Address)
 			}
 		}
 	}
-	if fleetStore != nil {
-		defer func() { _ = fleetStore.Close() }()
-	}
-
-	// Initialize fleet timeout enforcer
-	var timeoutEnforcer *fleet.TimeoutEnforcer
-	if fleetStore != nil {
-		timeoutEnforcer = fleet.NewTimeoutEnforcer(fleetStore, fleet.DefaultTimeoutConfig(), nil)
-		timeoutEnforcer.Start()
-		slog.Info("fleet timeout enforcer started", "component", "fleet", "task_timeout", "30m")
+	if fleetRegistry != nil {
+		defer func() { _ = fleetRegistry.Close() }()
 	}
 
 	// Initialize fleet claim metrics
 	var claimMetrics *fleet.ClaimMetrics
-	if fleetStore != nil {
+	if fleetRegistry != nil {
 		claimMetrics = fleet.NewClaimMetrics()
 	}
 
+	// Reconcile all config workspaces (deferred until after fleet registry init
+	// so that other workspaces are also registered in the fleet).
+	reconcileConfigWorkspaces(config.WorkspaceListFn, initialWorkspaceID, pool != nil, registry, fleetRegistry)
+
 	// Build fleet registration config (API key + rate limiter)
 	var fleetRegCfg *FleetRegisterConfig
-	if config.FleetAPIKey != "" && fleetStore != nil {
+	if config.FleetAPIKey != "" && fleetRegistry != nil {
 		fleetRegCfg = &FleetRegisterConfig{
 			APIKey: config.FleetAPIKey,
 		}
@@ -305,7 +301,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 			defer func() { _ = fleetRegCfg.RateLimiter.Close() }()
 		}
 		slog.Info("fleet API key authentication enabled", "component", "fleet")
-	} else if fleetStore != nil && config.FleetAPIKey == "" {
+	} else if fleetRegistry != nil && config.FleetAPIKey == "" {
 		slog.Warn("fleet store configured but no fleet API key set", "component", "fleet", "env_var", "LOOM_FLEET_API_KEY")
 		slog.Warn("fleet registration endpoint will return 503 until fleet API key is configured", "component", "fleet")
 	}
@@ -316,19 +312,28 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		tabMetaStore = tabmeta.NewStore(tmClient, nil)
 		defer func() { _ = tabMetaStore.Close() }()
 		slog.Info("tab metadata store initialized", "redis_address", config.FleetRedis.Address)
-		_ = tabMetaStore.MigrateLegacyKeys(ctx, DefaultWorkspace) // best-effort migration
+		_ = tabMetaStore.MigrateLegacyKeys(ctx, "default")
+		if config.WorkspaceConfigFn != nil { // best-effort: migrate name-keyed → UUID-keyed entries
+			if wsData, err := config.WorkspaceConfigFn(); err == nil && wsData != nil {
+				nameToID := make(map[string]string, len(wsData.Workspaces))
+				for _, ws := range wsData.Workspaces {
+					if ws.Name != "" && ws.ID != "" {
+						nameToID[ws.Name] = ws.ID
+					}
+				}
+				_ = tabMetaStore.MigrateNamedKeys(ctx, nameToID)
+			}
+		}
 	}
 
-	// Initialize issue tab state store for tab persistence across navigation
 	var issueTabStore *issuetabs.Store
 	if config.FleetRedis != nil {
 		itClient := fleet.NewRedisClient(config.FleetRedis.Address, config.FleetRedis.Password, 0)
 		issueTabStore = issuetabs.NewStore(itClient, nil)
 		defer func() { _ = issueTabStore.Close() }()
 		slog.Info("issue tab store initialized", "redis_address", config.FleetRedis.Address)
+		_, _ = issueTabStore.MigrateLegacyKeys(ctx, initialWorkspaceID)
 	}
-
-	// Initialize session history store for terminal session audit trail
 	var sessionHistoryStore *sessionhistory.Store
 	if config.FleetRedis != nil {
 		shClient := fleet.NewRedisClient(config.FleetRedis.Address, config.FleetRedis.Password, 0)
@@ -336,6 +341,9 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		defer func() { _ = sessionHistoryStore.Close() }()
 		sessionHistoryStoreRef = sessionHistoryStore
 		slog.Info("session history store initialized", "redis_address", config.FleetRedis.Address)
+		if n, err := sessionHistoryStore.MigrateLegacyKeys(ctx, initialWorkspaceID); err == nil && n > 0 {
+			slog.Info("session history legacy keys migrated", "count", n)
+		}
 	}
 
 	// Load or generate API key for authentication
@@ -361,30 +369,41 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		}
 	}
 
-	wrappedCreateFn := wrapWorkspaceCreateFn(config.WorkspaceCreateFn, multiPool, multiSub, config.PoolSize)
+	// Initialize external auth (JWKS cache + middleware)
+	extAuthMiddleware, jwksCleanup := initExtAuth(config)
+	if jwksCleanup != nil {
+		defer jwksCleanup()
+	}
+
+	wrappedCreateFn := wrapWorkspaceCreateFn(config.WorkspaceCreateFn, registry, config.WorkspaceIDResolverFn, fleetRegistry)
+	wrappedDeleteFn := wrapWorkspaceDeleteFn(config.WorkspaceDeleteFn, registry, fleetRegistry, config.WorkspaceIDResolverFn)
+	// Workspace-existence checker for WorkspaceMiddleware (MultiPool is authoritative registry).
+	wsExistsFn := func(id string) bool {
+		return multiPool.PoolForWorkspace(id) != nil
+	}
 
 	// Create HTTP server and register routes (allowedOrigins: nil = same-origin only)
 	mux := http.NewServeMux()
-	clientErrLimiter, cspLimiter := setupRoutes(mux, pool, multiPool, hub, getMutationsSince, termMgr, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, timeoutEnforcer, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL, config.GitOps, config.FileOps, tabMetaStore, issueTabStore, config.WorkspaceConfigFn, config.WorkspaceDeleteFn, config.SetDefaultWorkspaceFn, config.ClearDefaultWorkspaceFn, wrappedCreateFn, config.BackendOps, sessionHistoryStore, config.SessionsStore)
+	clientErrLimiter, cspLimiter := setupRoutes(mux, pool, multiPool, hub, getMutationsSince, termMgr, termAuth, fleetRegistry, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL, config.GitOps, config.FileOps, tabMetaStore, issueTabStore, config.WorkspaceConfigFn, wrappedDeleteFn, config.SetDefaultWorkspaceFn, config.ClearDefaultWorkspaceFn, wrappedCreateFn, config.BackendOps, sessionHistoryStore, config.SessionsStore, wsExistsFn, initialWorkspaceID, config.WorkspaceConfigByIDFn)
 	defer clientErrLimiter.stop()
 	defer cspLimiter.stop()
 
 	registerWorkerAPIRoutes(mux, config.WorkspaceConfigFn)
 
-	// Wrap with middleware chain: rate-limit -> security -> auth -> CORS -> mux
-	// Rate limiting is outermost to reject floods before spending CPU on other middleware.
-	// Auth sits between security headers and CORS so that:
-	// - CORS preflight OPTIONS pass through without auth
-	// - Security headers apply to all responses including 401s
+	// Middleware chain: rate-limit -> security -> auth -> CORS -> mux
 	corsMiddleware := NewCORSMiddleware(corsConfig)
-	authMiddleware := NewAuthMiddleware(AuthConfig{APIKey: apiKey, Enabled: config.AuthEnabled})
-	securityMiddleware := NewSecurityHeadersMiddleware(SecurityConfig{HSTSEnabled: config.HSTSEnabled})
+	authMW := NewAuthMiddleware(AuthConfig{APIKey: apiKey, Enabled: config.AuthEnabled})
+	if extAuthMiddleware != nil {
+		authMW = extAuthMiddleware
+	}
+	securityMiddleware := NewSecurityHeadersMiddleware(SecurityConfig{
+		HSTSEnabled:   config.HSTSEnabled,
+		ExtAuthOrigin: extractOrigin(config.ExtAuthURL),
+	})
 	rl, rateLimitMiddleware := NewRateLimitMiddleware(DefaultRateLimitConfig())
-	handler := h2c.NewHandler(NewRequestLogMiddleware(config.Logger)(rateLimitMiddleware(securityMiddleware(authMiddleware(corsMiddleware(mux))))), &http2.Server{})
+	handler := h2c.NewHandler(NewRequestLogMiddleware(config.Logger)(rateLimitMiddleware(securityMiddleware(authMW(corsMiddleware(mux))))), &http2.Server{})
 
-	// Create a shutdown context that all request contexts will derive from.
-	// When canceled, in-flight handlers' r.Context().Done() fires, causing
-	// them to abort quickly rather than waiting the full drain timeout.
+	// Shutdown context: when canceled, in-flight handlers abort quickly.
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	defer shutdownCancel()
 
@@ -421,12 +440,10 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 
 	slog.Info("shutting down server")
 
-	// Cancel the server-wide shutdown context so in-flight handlers' r.Context().Done()
-	// fires immediately, causing them to abort quickly (e.g., pool.Get(r.Context()) fails fast).
+	// Cancel server-wide context so in-flight handlers abort quickly.
 	shutdownCancel()
 
-	// Drain in-flight HTTP requests first (up to ShutdownTimeout, but most abort quickly due to canceled context).
-	// This ensures no handlers are running when we stop components below.
+	// Drain in-flight requests (most abort quickly due to canceled context).
 	drainCtx, drainCancel := context.WithTimeout(context.Background(), config.ShutdownTimeout)
 	defer drainCancel()
 
@@ -435,13 +452,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	}
 	slog.Info("server stopped")
 
-	// Stop components in reverse-initialization order now that no handlers are running.
-
-	// Stop fleet timeout enforcer
-	if timeoutEnforcer != nil {
-		timeoutEnforcer.Stop()
-		slog.Info("fleet timeout enforcer stopped", "component", "fleet")
-	}
+	// Stop components in reverse-initialization order.
 
 	// Stop rate limiter cleanup goroutine
 	rl.Stop()
@@ -459,6 +470,8 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 			slog.Info("terminal manager stopped", "component", "terminal")
 		}
 	}
+
+	_ = registry.Close() // prevent new registrations during shutdown
 
 	// Stop multi-workspace subscriber (no more handlers need it)
 	if multiSub != nil {

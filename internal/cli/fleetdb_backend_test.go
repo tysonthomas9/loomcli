@@ -241,6 +241,9 @@ func TestFleetDBBackend_List(t *testing.T) {
 			if args.IssueType != "task" {
 				t.Errorf("expected type 'task', got %q", args.IssueType)
 			}
+			if args.ParentID != "epic-1" {
+				t.Errorf("expected parent_id 'epic-1', got %q", args.ParentID)
+			}
 			if args.Limit != 5 {
 				t.Errorf("expected limit 5, got %d", args.Limit)
 			}
@@ -252,7 +255,7 @@ func TestFleetDBBackend_List(t *testing.T) {
 	}
 
 	b := newFleetDBBackend(mock, "test")
-	got, err := b.List(context.Background(), ListOpts{Status: "in_progress", Assignee: "bot", Type: "task", Limit: 5})
+	got, err := b.List(context.Background(), ListOpts{Status: "in_progress", Assignee: "bot", Type: "task", ParentID: "epic-1", Limit: 5})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

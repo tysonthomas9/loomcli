@@ -28,6 +28,12 @@ func setupTabMetaTest(t *testing.T) (*tabmeta.Store, *SSEHub) {
 	return tabmeta.NewStore(rdb, nil), hub
 }
 
+// withWorkspaceCtx injects a workspace ID into the request context,
+// simulating what WorkspaceMiddleware does for workspace-scoped routes.
+func withWorkspaceCtx(r *http.Request, ws string) *http.Request {
+	return r.WithContext(WithWorkspace(r.Context(), ws))
+}
+
 func TestHandleListTerminalTabs_NilStore(t *testing.T) {
 	handler := handleListTerminalTabs(nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/tabs", nil)
@@ -43,7 +49,7 @@ func TestHandleListTerminalTabs_Empty(t *testing.T) {
 	store, _ := setupTabMetaTest(t)
 	handler := handleListTerminalTabs(store, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/terminal/tabs", nil)
+	req := withWorkspaceCtx(httptest.NewRequest(http.MethodGet, "/api/terminal/tabs", nil), "default")
 	rr := httptest.NewRecorder()
 	handler(rr, req)
 
@@ -64,7 +70,7 @@ func TestHandleGetTerminalTab_NotFound(t *testing.T) {
 	store, _ := setupTabMetaTest(t)
 	handler := handleGetTerminalTab(store)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/terminal/tabs/nonexistent", nil)
+	req := withWorkspaceCtx(httptest.NewRequest(http.MethodGet, "/api/terminal/tabs/nonexistent", nil), "default")
 	req.SetPathValue("session", "nonexistent")
 	rr := httptest.NewRecorder()
 	handler(rr, req)
@@ -78,7 +84,7 @@ func TestHandleGetTerminalTab_InvalidName(t *testing.T) {
 	store, _ := setupTabMetaTest(t)
 	handler := handleGetTerminalTab(store)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/terminal/tabs/invalid%20name", nil)
+	req := withWorkspaceCtx(httptest.NewRequest(http.MethodGet, "/api/terminal/tabs/invalid%20name", nil), "default")
 	req.SetPathValue("session", "invalid name")
 	rr := httptest.NewRecorder()
 	handler(rr, req)
@@ -95,7 +101,7 @@ func TestHandleGetTerminalTab_Found(t *testing.T) {
 
 	if err := store.Set(ctx, &tabmeta.TabMetadata{
 		SessionName: "test-session",
-		Workspace:   DefaultWorkspace,
+		Workspace:   "default",
 		Label:       "Test Label",
 		Notes:       "Test Notes",
 		SortOrder:   1,
@@ -106,7 +112,7 @@ func TestHandleGetTerminalTab_Found(t *testing.T) {
 	}
 
 	handler := handleGetTerminalTab(store)
-	req := httptest.NewRequest(http.MethodGet, "/api/terminal/tabs/test-session", nil)
+	req := withWorkspaceCtx(httptest.NewRequest(http.MethodGet, "/api/terminal/tabs/test-session", nil), "default")
 	req.SetPathValue("session", "test-session")
 	rr := httptest.NewRecorder()
 	handler(rr, req)
@@ -134,7 +140,7 @@ func TestHandlePatchTerminalTab(t *testing.T) {
 
 	if err := store.Set(ctx, &tabmeta.TabMetadata{
 		SessionName: "patch-test",
-		Workspace:   DefaultWorkspace,
+		Workspace:   "default",
 		Label:       "Original",
 		SortOrder:   1,
 		CreatedAt:   now,
@@ -145,7 +151,7 @@ func TestHandlePatchTerminalTab(t *testing.T) {
 
 	handler := handlePatchTerminalTab(store, hub)
 	body := `{"label": "Updated Label"}`
-	req := httptest.NewRequest(http.MethodPatch, "/api/terminal/tabs/patch-test", strings.NewReader(body))
+	req := withWorkspaceCtx(httptest.NewRequest(http.MethodPatch, "/api/terminal/tabs/patch-test", strings.NewReader(body)), "default")
 	req.SetPathValue("session", "patch-test")
 	rr := httptest.NewRecorder()
 	handler(rr, req)
@@ -171,7 +177,7 @@ func TestHandlePatchTerminalTab_NotFound(t *testing.T) {
 	handler := handlePatchTerminalTab(store, hub)
 
 	body := `{"label": "New Label"}`
-	req := httptest.NewRequest(http.MethodPatch, "/api/terminal/tabs/nonexistent", strings.NewReader(body))
+	req := withWorkspaceCtx(httptest.NewRequest(http.MethodPatch, "/api/terminal/tabs/nonexistent", strings.NewReader(body)), "default")
 	req.SetPathValue("session", "nonexistent")
 	rr := httptest.NewRecorder()
 	handler(rr, req)
@@ -188,7 +194,7 @@ func TestHandlePatchTerminalTab_EmptyBody(t *testing.T) {
 
 	if err := store.Set(ctx, &tabmeta.TabMetadata{
 		SessionName: "empty-patch",
-		Workspace:   DefaultWorkspace,
+		Workspace:   "default",
 		Label:       "Label",
 		SortOrder:   1,
 		CreatedAt:   now,
@@ -199,7 +205,7 @@ func TestHandlePatchTerminalTab_EmptyBody(t *testing.T) {
 
 	handler := handlePatchTerminalTab(store, hub)
 	body := `{}`
-	req := httptest.NewRequest(http.MethodPatch, "/api/terminal/tabs/empty-patch", strings.NewReader(body))
+	req := withWorkspaceCtx(httptest.NewRequest(http.MethodPatch, "/api/terminal/tabs/empty-patch", strings.NewReader(body)), "default")
 	req.SetPathValue("session", "empty-patch")
 	rr := httptest.NewRecorder()
 	handler(rr, req)
@@ -216,7 +222,7 @@ func TestHandleDeleteTerminalTab(t *testing.T) {
 
 	if err := store.Set(ctx, &tabmeta.TabMetadata{
 		SessionName: "delete-test",
-		Workspace:   DefaultWorkspace,
+		Workspace:   "default",
 		Label:       "To Delete",
 		SortOrder:   1,
 		CreatedAt:   now,
@@ -226,7 +232,7 @@ func TestHandleDeleteTerminalTab(t *testing.T) {
 	}
 
 	handler := handleDeleteTerminalTab(store, hub)
-	req := httptest.NewRequest(http.MethodDelete, "/api/terminal/tabs/delete-test", nil)
+	req := withWorkspaceCtx(httptest.NewRequest(http.MethodDelete, "/api/terminal/tabs/delete-test", nil), "default")
 	req.SetPathValue("session", "delete-test")
 	rr := httptest.NewRecorder()
 	handler(rr, req)
@@ -236,7 +242,7 @@ func TestHandleDeleteTerminalTab(t *testing.T) {
 	}
 
 	// Verify it's gone
-	got, err := store.Get(ctx, DefaultWorkspace, "delete-test")
+	got, err := store.Get(ctx, "default", "delete-test")
 	if err != nil {
 		t.Fatalf("Get after delete: %v", err)
 	}
@@ -252,7 +258,7 @@ func TestHandlePutTerminalTab_CreatesNew(t *testing.T) {
 	handler := handlePutTerminalTab(store, hub)
 
 	body := `{"label": "lead-claude-1", "sort_order": 0}`
-	req := httptest.NewRequest(http.MethodPut, "/api/terminal/tabs/lead-claude-1", strings.NewReader(body))
+	req := withWorkspaceCtx(httptest.NewRequest(http.MethodPut, "/api/terminal/tabs/lead-claude-1", strings.NewReader(body)), "default")
 	req.SetPathValue("session", "lead-claude-1")
 	rr := httptest.NewRecorder()
 	handler(rr, req)
@@ -276,7 +282,7 @@ func TestHandlePutTerminalTab_CreatesNew(t *testing.T) {
 	}
 
 	// Verify stored in Redis
-	meta, err := store.Get(context.Background(), DefaultWorkspace, "lead-claude-1")
+	meta, err := store.Get(context.Background(), "default", "lead-claude-1")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -293,7 +299,7 @@ func TestHandlePutTerminalTab_InvalidSession(t *testing.T) {
 	handler := handlePutTerminalTab(store, hub)
 
 	body := `{"label": "test"}`
-	req := httptest.NewRequest(http.MethodPut, "/api/terminal/tabs/invalid%20name", strings.NewReader(body))
+	req := withWorkspaceCtx(httptest.NewRequest(http.MethodPut, "/api/terminal/tabs/invalid%20name", strings.NewReader(body)), "default")
 	req.SetPathValue("session", "invalid name")
 	rr := httptest.NewRecorder()
 	handler(rr, req)
@@ -308,7 +314,7 @@ func TestHandlePutTerminalTab_EmptyLabel(t *testing.T) {
 	handler := handlePutTerminalTab(store, hub)
 
 	body := `{"label": "", "sort_order": 0}`
-	req := httptest.NewRequest(http.MethodPut, "/api/terminal/tabs/test-session", strings.NewReader(body))
+	req := withWorkspaceCtx(httptest.NewRequest(http.MethodPut, "/api/terminal/tabs/test-session", strings.NewReader(body)), "default")
 	req.SetPathValue("session", "test-session")
 	rr := httptest.NewRecorder()
 	handler(rr, req)
@@ -325,7 +331,7 @@ func TestHandlePutTerminalTab_Idempotent(t *testing.T) {
 	body := `{"label": "lead-claude-1", "sort_order": 0}`
 
 	// First PUT
-	req1 := httptest.NewRequest(http.MethodPut, "/api/terminal/tabs/lead-claude-1", strings.NewReader(body))
+	req1 := withWorkspaceCtx(httptest.NewRequest(http.MethodPut, "/api/terminal/tabs/lead-claude-1", strings.NewReader(body)), "default")
 	req1.SetPathValue("session", "lead-claude-1")
 	rr1 := httptest.NewRecorder()
 	handler(rr1, req1)
@@ -335,7 +341,7 @@ func TestHandlePutTerminalTab_Idempotent(t *testing.T) {
 	}
 
 	// Second PUT (same data)
-	req2 := httptest.NewRequest(http.MethodPut, "/api/terminal/tabs/lead-claude-1", strings.NewReader(body))
+	req2 := withWorkspaceCtx(httptest.NewRequest(http.MethodPut, "/api/terminal/tabs/lead-claude-1", strings.NewReader(body)), "default")
 	req2.SetPathValue("session", "lead-claude-1")
 	rr2 := httptest.NewRecorder()
 	handler(rr2, req2)
@@ -364,7 +370,7 @@ func TestHandlePutTerminalTab_WithNotes(t *testing.T) {
 	handler := handlePutTerminalTab(store, hub)
 
 	body := `{"label": "lead-claude-1", "sort_order": 2, "notes": "some notes"}`
-	req := httptest.NewRequest(http.MethodPut, "/api/terminal/tabs/lead-claude-1", strings.NewReader(body))
+	req := withWorkspaceCtx(httptest.NewRequest(http.MethodPut, "/api/terminal/tabs/lead-claude-1", strings.NewReader(body)), "default")
 	req.SetPathValue("session", "lead-claude-1")
 	rr := httptest.NewRecorder()
 	handler(rr, req)
@@ -373,7 +379,7 @@ func TestHandlePutTerminalTab_WithNotes(t *testing.T) {
 		t.Fatalf("status = %d, want %d, body: %s", rr.Code, http.StatusOK, rr.Body.String())
 	}
 
-	meta, err := store.Get(context.Background(), DefaultWorkspace, "lead-claude-1")
+	meta, err := store.Get(context.Background(), "default", "lead-claude-1")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -389,7 +395,7 @@ func TestHandleDeleteTerminalTab_InvalidName(t *testing.T) {
 	store, hub := setupTabMetaTest(t)
 	handler := handleDeleteTerminalTab(store, hub)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/terminal/tabs/bad%20name", nil)
+	req := withWorkspaceCtx(httptest.NewRequest(http.MethodDelete, "/api/terminal/tabs/bad%20name", nil), "default")
 	req.SetPathValue("session", "bad name")
 	rr := httptest.NewRecorder()
 	handler(rr, req)
@@ -399,7 +405,7 @@ func TestHandleDeleteTerminalTab_InvalidName(t *testing.T) {
 	}
 }
 
-func TestHandleListTerminalTabs_WithWorkspaceParam(t *testing.T) {
+func TestHandleListTerminalTabs_WithWorkspaceContext(t *testing.T) {
 	store, _ := setupTabMetaTest(t)
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
@@ -430,8 +436,8 @@ func TestHandleListTerminalTabs_WithWorkspaceParam(t *testing.T) {
 
 	handler := handleListTerminalTabs(store, nil)
 
-	// List tabs for ws-a — should only see tab-a
-	req := httptest.NewRequest(http.MethodGet, "/api/terminal/tabs?workspace=ws-a", nil)
+	// List tabs for ws-a via context — should only see tab-a
+	req := withWorkspaceCtx(httptest.NewRequest(http.MethodGet, "/api/workspaces/ws-a/terminal/tabs", nil), "ws-a")
 	rr := httptest.NewRecorder()
 	handler(rr, req)
 

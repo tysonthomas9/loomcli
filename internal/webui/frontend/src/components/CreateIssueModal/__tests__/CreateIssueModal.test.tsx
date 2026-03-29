@@ -31,6 +31,10 @@ vi.mock("@/hooks/useFocusReturn", () => ({
   useFocusReturn: vi.fn(),
 }));
 
+vi.mock("@/hooks/useWorkspaceContext", () => ({
+  useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
+}));
+
 import { createIssue } from "@/api/issues";
 import type { Issue } from "@/types";
 
@@ -222,7 +226,7 @@ describe("CreateIssueModal", () => {
       fireEvent.click(screen.getByTestId("create-issue-submit"));
 
       await waitFor(() => {
-        expect(mockCreateIssue).toHaveBeenCalledWith({
+        expect(mockCreateIssue).toHaveBeenCalledWith("test-ws-id", {
           title: "Fix login bug",
           issue_type: "bug",
           priority: 1,
@@ -297,7 +301,7 @@ describe("CreateIssueModal", () => {
       fireEvent.click(screen.getByTestId("create-issue-submit"));
 
       await waitFor(() => {
-        expect(mockCreateIssue).toHaveBeenCalledWith({
+        expect(mockCreateIssue).toHaveBeenCalledWith("test-ws-id", {
           title: "No description issue",
           issue_type: "task",
           priority: 2,
@@ -305,7 +309,7 @@ describe("CreateIssueModal", () => {
       });
 
       // description key should not be present in the request
-      const callArgs = mockCreateIssue.mock.calls[0][0];
+      const callArgs = mockCreateIssue.mock.calls[0][1];
       expect(callArgs).not.toHaveProperty("description");
     });
   });

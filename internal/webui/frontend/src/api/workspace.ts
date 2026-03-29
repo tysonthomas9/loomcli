@@ -1,6 +1,6 @@
 /**
- * API client for workspace endpoint with module-level caching.
- * Interfaces with GET /api/workspace endpoint.
+ * API client for workspace endpoints with module-level caching.
+ * Interfaces with GET /api/workspaces/active and /api/workspaces/ CRUD endpoints.
  */
 
 import { get, post, patch, put, del, ApiError } from "./client";
@@ -26,6 +26,7 @@ export interface WorkspaceAgentInfo {
 }
 
 export interface WorkspaceSummary {
+  id: string;
   name: string;
   path: string;
   active: boolean;
@@ -35,6 +36,7 @@ export interface WorkspaceSummary {
 }
 
 export interface WorkspaceData {
+  id: string;
   name: string;
   path: string;
   repos: RepoInfo[];
@@ -64,6 +66,7 @@ type ApiResult<T> = ApiSuccess<T> | ApiFailure;
 let workspaceCache: WorkspaceData | null = null;
 let fetchPromise: Promise<WorkspaceData> | null = null;
 let cacheGeneration = 0; // incremented on refresh to discard stale in-flight responses
+let cachedWorkspaceId: string | null = null; // tracks which workspace the cache holds
 
 // ============= Helpers =============
 
@@ -80,7 +83,18 @@ function unwrap<T>(response: ApiResult<T>): T {
  * Fetch workspace data. Returns cached data if available.
  * Deduplicates concurrent in-flight requests.
  */
-export async function fetchWorkspace(): Promise<WorkspaceData> {
+export async function fetchWorkspace(
+  workspaceId?: string,
+): Promise<WorkspaceData> {
+  const requestedId = workspaceId ?? null;
+
+  // Invalidate cache if the requested workspace differs from what's cached
+  if (requestedId !== cachedWorkspaceId) {
+    workspaceCache = null;
+    fetchPromise = null;
+    cachedWorkspaceId = requestedId;
+  }
+
   if (workspaceCache !== null) {
     return workspaceCache;
   }
@@ -88,13 +102,17 @@ export async function fetchWorkspace(): Promise<WorkspaceData> {
     return fetchPromise;
   }
   const gen = cacheGeneration;
-  fetchPromise = get<ApiResult<WorkspaceData>>("/api/workspace").then(
+  const path = workspaceId
+    ? `/api/workspaces/${encodeURIComponent(workspaceId)}`
+    : "/api/workspaces/active";
+  fetchPromise = get<ApiResult<WorkspaceData>>(path).then(
     (response) => {
       // Discard stale response if a refresh happened while we were in-flight
       if (gen !== cacheGeneration) {
-        return fetchWorkspace();
+        return fetchWorkspace(workspaceId);
       }
       workspaceCache = unwrap(response);
+      cachedWorkspaceId = requestedId;
       fetchPromise = null;
       return workspaceCache;
     },
@@ -109,25 +127,40 @@ export async function fetchWorkspace(): Promise<WorkspaceData> {
 }
 
 /**
- * Invalidate the cache and re-fetch workspace data from the backend.
+ * Invalidate the workspace cache without triggering a refetch.
+ * Call during workspace switch to prevent stale data from the old workspace
+ * being served to the new workspace's components on mount.
  */
-export async function refreshWorkspace(): Promise<WorkspaceData> {
-  cacheGeneration++; // Invalidate any in-flight fetch from prior generation
+export function invalidateWorkspaceCache(): void {
+  cacheGeneration++;
   workspaceCache = null;
   fetchPromise = null;
-  return fetchWorkspace();
+  cachedWorkspaceId = null;
 }
 
 /**
- * Rename a workspace. On success, invalidates the cache and returns refreshed data.
+ * Invalidate the cache and re-fetch workspace data from the backend.
+ */
+export async function refreshWorkspace(
+  workspaceId?: string,
+): Promise<WorkspaceData> {
+  cacheGeneration++; // Invalidate any in-flight fetch from prior generation
+  workspaceCache = null;
+  fetchPromise = null;
+  cachedWorkspaceId = workspaceId ?? null;
+  return fetchWorkspace(workspaceId);
+}
+
+/**
+ * Rename a workspace by ID. On success, invalidates the cache and returns refreshed data.
  */
 export async function renameWorkspace(
-  oldName: string,
+  workspaceId: string,
   newName: string,
 ): Promise<WorkspaceData> {
   const response = await patch<ApiResult<WorkspaceData>>(
-    "/api/workspace/rename",
-    { old_name: oldName, new_name: newName },
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/name`,
+    { new_name: newName },
   );
   const data = unwrap(response);
   if (data == null) {
@@ -142,13 +175,13 @@ export async function renameWorkspace(
 }
 
 /**
- * Delete a workspace by name. On success, invalidates the cache and returns refreshed data.
+ * Delete a workspace by ID. On success, invalidates the cache and returns refreshed data.
  */
 export async function deleteWorkspace(
-  name: string,
+  workspaceId: string,
 ): Promise<WorkspaceData | null> {
   const response = await del<ApiResult<WorkspaceData>>(
-    `/api/workspace/${encodeURIComponent(name)}`,
+    `/api/workspaces/${encodeURIComponent(workspaceId)}`,
   );
   if (!response.success) {
     throw new ApiError(0, response.error);
@@ -166,9 +199,12 @@ export async function deleteWorkspace(
 export async function reorderWorkspaces(
   order: string[],
 ): Promise<WorkspaceData> {
-  const response = await put<ApiResult<WorkspaceData>>("/api/workspace/order", {
-    order,
-  });
+  const response = await put<ApiResult<WorkspaceData>>(
+    "/api/workspaces/order",
+    {
+      order,
+    },
+  );
   const data = unwrap(response);
   // Refresh cache with the returned data
   cacheGeneration++;
@@ -184,7 +220,7 @@ export async function setDefaultWorkspace(
   name: string,
 ): Promise<WorkspaceData> {
   const response = await put<ApiResult<WorkspaceData>>(
-    "/api/workspace/default",
+    "/api/workspaces/default",
     { name },
   );
   const data = unwrap(response);
@@ -201,7 +237,7 @@ export async function setDefaultWorkspace(
  */
 export async function clearDefaultWorkspace(): Promise<WorkspaceData> {
   const response = await del<ApiResult<WorkspaceData>>(
-    "/api/workspace/default",
+    "/api/workspaces/default",
   );
   if (!response.success) {
     throw new ApiError(0, response.error);
@@ -232,10 +268,7 @@ export interface CreateWorkspaceRequest {
 export async function createWorkspace(
   req: CreateWorkspaceRequest,
 ): Promise<WorkspaceData> {
-  const response = await post<ApiResult<WorkspaceData>>(
-    "/api/workspace/create",
-    req,
-  );
+  const response = await post<ApiResult<WorkspaceData>>("/api/workspaces", req);
   const data = unwrap(response);
   cacheGeneration++;
   if (data) {
@@ -259,10 +292,11 @@ export function getCachedWorkspace(): WorkspaceData | null {
  * Create a task under an epic with sensible defaults.
  */
 export async function createWorkspaceTask(
+  workspaceId: string,
   epicId: string,
   title: string,
 ): Promise<Issue> {
-  return createIssue({
+  return createIssue(workspaceId, {
     title,
     issue_type: "task",
     priority: 3,
@@ -275,10 +309,10 @@ export async function createWorkspaceTask(
  * Note: workspace association via source_repos is handled at the backend level.
  */
 export async function createWorkspaceEpic(
-  _workspaceName: string,
+  workspaceId: string,
   title: string,
 ): Promise<Issue> {
-  return createIssue({
+  return createIssue(workspaceId, {
     title,
     issue_type: "epic",
     priority: 2,

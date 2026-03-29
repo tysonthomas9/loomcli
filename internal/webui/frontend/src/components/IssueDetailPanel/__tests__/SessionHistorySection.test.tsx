@@ -24,6 +24,10 @@ vi.mock("@/api/sessionHistory", () => ({
   getSessionScrollback: vi.fn(),
 }));
 
+vi.mock("@/hooks/useWorkspaceContext", () => ({
+  useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
+}));
+
 import { listSessionHistory, getSessionScrollback } from "@/api/sessionHistory";
 
 const mockListSessionHistory = vi.mocked(listSessionHistory);
@@ -400,7 +404,10 @@ describe("SessionHistorySection", () => {
       mockListSessionHistory.mockResolvedValue([]);
       const { rerender } = render(<SessionHistorySection issueId="issue-1" />);
       await waitFor(() => {
-        expect(mockListSessionHistory).toHaveBeenCalledWith("issue-1");
+        expect(mockListSessionHistory).toHaveBeenCalledWith(
+          "test-ws-id",
+          "issue-1",
+        );
       });
 
       mockListSessionHistory.mockResolvedValue([
@@ -408,7 +415,10 @@ describe("SessionHistorySection", () => {
       ]);
       rerender(<SessionHistorySection issueId="issue-2" />);
       await waitFor(() => {
-        expect(mockListSessionHistory).toHaveBeenCalledWith("issue-2");
+        expect(mockListSessionHistory).toHaveBeenCalledWith(
+          "test-ws-id",
+          "issue-2",
+        );
       });
     });
   });

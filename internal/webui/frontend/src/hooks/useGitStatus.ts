@@ -11,6 +11,7 @@ import { fetchGitStatus } from "@/api/git";
 const POLL_INTERVAL = 5000; // 5 seconds
 
 export interface UseGitStatusOptions {
+  workspaceId: string;
   agentName: string | null;
   enabled: boolean;
 }
@@ -23,6 +24,7 @@ export interface UseGitStatusReturn {
 }
 
 export function useGitStatus({
+  workspaceId,
   agentName,
   enabled,
 }: UseGitStatusOptions): UseGitStatusReturn {
@@ -46,7 +48,7 @@ export function useGitStatus({
     setLoading((prev) => (prev ? prev : true));
 
     try {
-      const result = await fetchGitStatus(agentName);
+      const result = await fetchGitStatus(workspaceId, agentName);
       if (mountedRef.current) {
         setStatus(result);
         setError(null);
@@ -61,7 +63,7 @@ export function useGitStatus({
         setLoading(false);
       }
     }
-  }, [agentName]);
+  }, [workspaceId, agentName]);
 
   useEffect(() => {
     mountedRef.current = true;

@@ -23,6 +23,7 @@ func handleListSessionHistory(store *sessionhistory.Store) http.HandlerFunc {
 			return
 		}
 
+		wsID := WorkspaceFromContext(r.Context())
 		issueID := r.PathValue("issueId")
 		if err := sessionhistory.ValidateIssueID(issueID); err != nil {
 			respondJSON(w, http.StatusBadRequest, map[string]interface{}{
@@ -32,7 +33,7 @@ func handleListSessionHistory(store *sessionhistory.Store) http.HandlerFunc {
 			return
 		}
 
-		records, err := store.List(r.Context(), issueID)
+		records, err := store.List(r.Context(), wsID, issueID)
 		if err != nil {
 			log.Printf("Failed to list session history for %s: %v", issueID, err)
 			respondJSON(w, http.StatusInternalServerError, map[string]interface{}{
@@ -95,6 +96,7 @@ func handleGetSessionScrollback(store *sessionhistory.Store) http.HandlerFunc {
 			return
 		}
 
+		wsID := WorkspaceFromContext(r.Context())
 		issueID := r.PathValue("issueId")
 		if err := sessionhistory.ValidateIssueID(issueID); err != nil {
 			respondJSON(w, http.StatusBadRequest, map[string]interface{}{
@@ -113,7 +115,7 @@ func handleGetSessionScrollback(store *sessionhistory.Store) http.HandlerFunc {
 			return
 		}
 
-		records, err := store.List(r.Context(), issueID)
+		records, err := store.List(r.Context(), wsID, issueID)
 		if err != nil {
 			log.Printf("Failed to get session history for scrollback %s: %v", issueID, err)
 			respondJSON(w, http.StatusInternalServerError, map[string]interface{}{

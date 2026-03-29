@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"log/slog"
 	"path/filepath"
 	"sort"
@@ -94,6 +95,7 @@ func buildWorkspaceInfoForName(targetName string) (*webui.WorkspaceData, error) 
 	summaries := make([]webui.WorkspaceSummary, 0, len(cfg.Workspaces))
 	for name, w := range cfg.Workspaces {
 		summaries = append(summaries, webui.WorkspaceSummary{
+			ID:        w.ID,
 			Name:      name,
 			Path:      w.Path,
 			Active:    name == wsName,
@@ -105,6 +107,7 @@ func buildWorkspaceInfoForName(targetName string) (*webui.WorkspaceData, error) 
 	sortWorkspaceSummaries(summaries, cfg.WorkspaceOrder)
 
 	return &webui.WorkspaceData{
+		ID:               ws.ID,
 		Name:             wsName,
 		Path:             ws.Path,
 		Repos:            repos,
@@ -114,6 +117,25 @@ func buildWorkspaceInfoForName(targetName string) (*webui.WorkspaceData, error) 
 		WorkspaceOrder:   cfg.WorkspaceOrder,
 		DefaultWorkspace: cfg.DefaultWorkspace,
 	}, nil
+}
+
+// buildWorkspaceInfoForID loads workspace topology for a specific workspace UUID.
+// Resolves the UUID to a config name, then delegates to buildWorkspaceInfoForName.
+func buildWorkspaceInfoForID(targetID string) (*webui.WorkspaceData, error) {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return nil, err
+	}
+	if cfg == nil || len(cfg.Workspaces) == 0 {
+		return nil, fmt.Errorf("workspace not found: %s", targetID)
+	}
+
+	for name, ws := range cfg.Workspaces {
+		if ws.ID == targetID {
+			return buildWorkspaceInfoForName(name)
+		}
+	}
+	return nil, fmt.Errorf("workspace not found: %s", targetID)
 }
 
 // sortWorkspaceSummaries sorts workspace summaries using custom order if provided.

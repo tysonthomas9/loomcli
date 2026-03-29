@@ -2,6 +2,7 @@ package webui
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 )
@@ -22,13 +23,19 @@ func handleListWorkspaces(mp *daemon.MultiPool, configFn func() (*WorkspaceData,
 		// Get registered workspace IDs from the MultiPool.
 		ids := mp.WorkspaceIDs()
 
-		// Build workspace metadata map from config if available.
-		var wsMeta map[string]WorkspaceSummary
+		// Build workspace metadata maps from config if available.
+		// Two maps allow enrichment whether MultiPool is keyed by name (pre-T2) or UUID (post-T2).
+		var wsMetaByName map[string]WorkspaceSummary
+		var wsMetaByID map[string]WorkspaceSummary
 		if configFn != nil {
 			if data, err := configFn(); err == nil && data != nil {
-				wsMeta = make(map[string]WorkspaceSummary, len(data.Workspaces))
+				wsMetaByName = make(map[string]WorkspaceSummary, len(data.Workspaces))
+				wsMetaByID = make(map[string]WorkspaceSummary, len(data.Workspaces))
 				for _, ws := range data.Workspaces {
-					wsMeta[ws.Name] = ws
+					wsMetaByName[ws.Name] = ws
+					if ws.ID != "" {
+						wsMetaByID[ws.ID] = ws
+					}
 				}
 			}
 		}
@@ -41,7 +48,16 @@ func handleListWorkspaces(mp *daemon.MultiPool, configFn func() (*WorkspaceData,
 			}
 
 			// Enrich with config metadata if available.
-			if meta, ok := wsMeta[id]; ok {
+			// Try UUID-keyed lookup first (post-T2), then fall back to name-keyed (pre-T2).
+			if meta, ok := wsMetaByID[id]; ok {
+				item.Name = meta.Name
+				item.ID = meta.ID
+				item.Path = meta.Path
+				item.Active = meta.Active
+			} else if meta, ok := wsMetaByName[id]; ok {
+				if meta.ID != "" {
+					item.ID = meta.ID
+				}
 				item.Path = meta.Path
 				item.Active = meta.Active
 			}
@@ -62,47 +78,32 @@ func handleListWorkspaces(mp *daemon.MultiPool, configFn func() (*WorkspaceData,
 	}
 }
 
-// handleGetWorkspace returns GET /api/workspaces/{ws} — details for a single
-// workspace including its pool stats and config metadata.
-func handleGetWorkspace(mp *daemon.MultiPool, configFn func() (*WorkspaceData, error)) http.HandlerFunc {
+// handleGetWorkspace returns GET /api/workspaces/{ws} — full WorkspaceData
+// (same shape as /api/workspaces/active) so the frontend uses the same
+// unwrap<WorkspaceData>() logic for both endpoints.
+func handleGetWorkspace(wsExistsFn func(string) bool, configByIDFn func(string) (*WorkspaceData, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		wsID := r.PathValue("ws")
+		wsID := strings.TrimSpace(r.PathValue("ws"))
 		if wsID == "" {
 			respondError(w, http.StatusBadRequest, "workspace ID is required")
 			return
 		}
 
-		// Check if the workspace is registered.
-		p := mp.PoolForWorkspace(wsID)
-		if p == nil {
-			respondError(w, http.StatusNotFound, "workspace not found")
+		if !wsExistsFn(wsID) {
+			respondError(w, http.StatusNotFound, "workspace not found: "+wsID)
 			return
 		}
 
-		item := workspaceListItem{
-			ID:   wsID,
-			Name: wsID,
+		data, err := configByIDFn(wsID)
+		if err != nil || data == nil {
+			respondError(w, http.StatusInternalServerError, "failed to load workspace config")
+			return
 		}
 
-		stats := p.Stats()
-		item.Pool = &stats
-
-		// Enrich with config metadata if available.
-		if configFn != nil {
-			if data, err := configFn(); err == nil && data != nil {
-				for _, ws := range data.Workspaces {
-					if ws.Name == wsID {
-						item.Path = ws.Path
-						item.Active = ws.Active
-						break
-					}
-				}
-			}
+		normalizeWorkspaceData(data)
+		for i := range data.Workspaces {
+			data.Workspaces[i].Active = data.Workspaces[i].ID == wsID
 		}
-
-		respondJSON(w, http.StatusOK, map[string]interface{}{
-			"success":   true,
-			"workspace": item,
-		})
+		respondJSON(w, http.StatusOK, workspaceResponse{Success: true, Data: data})
 	}
 }

@@ -3,7 +3,7 @@
  * Interfaces with GET /api/agents/{name}/diff/* endpoints.
  */
 
-import { get, ApiError } from "./client";
+import { get, ApiError, wsUrl } from "./client";
 
 // ============= Types =============
 
@@ -62,10 +62,14 @@ function unwrap<T>(response: ApiResult<T>): T {
  * GET /api/agents/{name}/diff/commits?limit=N
  */
 export async function fetchDiffCommits(
+  workspaceId: string,
   agentName: string,
   limit?: number,
 ): Promise<DiffCommit[]> {
-  let url = `/api/agents/${encodeURIComponent(agentName)}/diff/commits`;
+  let url = wsUrl(
+    workspaceId,
+    `/agents/${encodeURIComponent(agentName)}/diff/commits`,
+  );
   if (limit !== undefined) {
     url += `?limit=${limit}`;
   }
@@ -78,11 +82,15 @@ export async function fetchDiffCommits(
  * GET /api/agents/{name}/diff/files?to=Y or ?from=X&to=Y
  */
 export async function fetchDiffFiles(
+  workspaceId: string,
   agentName: string,
   to: string,
   from?: string,
 ): Promise<DiffFile[]> {
-  let url = `/api/agents/${encodeURIComponent(agentName)}/diff/files?to=${encodeURIComponent(to)}`;
+  let url = wsUrl(
+    workspaceId,
+    `/agents/${encodeURIComponent(agentName)}/diff/files?to=${encodeURIComponent(to)}`,
+  );
   if (from !== undefined) {
     url += `&from=${encodeURIComponent(from)}`;
   }
@@ -95,12 +103,16 @@ export async function fetchDiffFiles(
  * GET /api/agents/{name}/diff/file?path=X&to=Z or ?path=X&from=Y&to=Z
  */
 export async function fetchDiffFile(
+  workspaceId: string,
   agentName: string,
   path: string,
   to: string,
   from?: string,
 ): Promise<DiffFilePatch> {
-  let url = `/api/agents/${encodeURIComponent(agentName)}/diff/file?path=${encodeURIComponent(path)}&to=${encodeURIComponent(to)}`;
+  let url = wsUrl(
+    workspaceId,
+    `/agents/${encodeURIComponent(agentName)}/diff/file?path=${encodeURIComponent(path)}&to=${encodeURIComponent(to)}`,
+  );
   if (from !== undefined) {
     url += `&from=${encodeURIComponent(from)}`;
   }

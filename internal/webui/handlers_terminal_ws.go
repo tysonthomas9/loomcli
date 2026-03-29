@@ -128,18 +128,7 @@ func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigi
 		}
 
 		// Broadcast SSE event if this session is linked to an issue, so indicators update on connect.
-		// Use background context since r.Context() may be invalid after WebSocket hijack.
-		if tabMetaStore != nil && hub != nil {
-			metaCtx, metaCancel := context.WithTimeout(context.Background(), 2*time.Second)
-			if meta, err := tabMetaStore.Get(metaCtx, DefaultWorkspace, session); err == nil && meta != nil && meta.IssueID != "" {
-				hub.Broadcast(&MutationPayload{
-					Type:      "terminal_session_change",
-					IssueID:   meta.IssueID,
-					Timestamp: time.Now().UTC().Format(time.RFC3339),
-				})
-			}
-			metaCancel()
-		}
+		broadcastSessionIssueEvent(tabMetaStore, hub, session)
 
 		// Create context for coordinating goroutines
 		ctx, cancel := context.WithCancel(r.Context())
@@ -287,6 +276,31 @@ func wsToPTY(ctx context.Context, conn *websocket.Conn, session *TerminalSession
 		// Text and non-resize binary data - write to PTY
 		if _, err := session.PTY.Write(data); err != nil {
 			// PTY write failed
+			return
+		}
+	}
+}
+
+// broadcastSessionIssueEvent sends an SSE event if the given session is linked to an issue.
+// Uses a background context since the caller's request context may be invalid after WebSocket hijack.
+func broadcastSessionIssueEvent(tabMetaStore *tabmeta.Store, hub *SSEHub, session string) {
+	if tabMetaStore == nil || hub == nil {
+		return
+	}
+	metaCtx, metaCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer metaCancel()
+	allMeta, err := tabMetaStore.ListAll(metaCtx)
+	if err != nil {
+		return
+	}
+	for _, meta := range allMeta {
+		if meta.SessionName == session && meta.IssueID != "" {
+			hub.Broadcast(&MutationPayload{
+				Type:        "terminal_session_change",
+				IssueID:     meta.IssueID,
+				Timestamp:   time.Now().UTC().Format(time.RFC3339),
+				WorkspaceID: meta.Workspace,
+			})
 			return
 		}
 	}

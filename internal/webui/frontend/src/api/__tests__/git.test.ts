@@ -39,10 +39,12 @@ describe("fetchGitStatus", () => {
     };
     mockGet.mockResolvedValue(gitStatus);
 
-    const result = await fetchGitStatus("ember");
+    const result = await fetchGitStatus("test-ws-id", "ember");
 
     expect(result).toEqual(gitStatus);
-    expect(mockGet).toHaveBeenCalledWith("/api/agents/ember/git/status");
+    expect(mockGet).toHaveBeenCalledWith(
+      "/api/workspaces/test-ws-id/agents/ember/git/status",
+    );
   });
 
   it("encodes agent name with special characters in URL", async () => {
@@ -58,10 +60,10 @@ describe("fetchGitStatus", () => {
       stash_count: 0,
     });
 
-    await fetchGitStatus("agent/with spaces");
+    await fetchGitStatus("test-ws-id", "agent/with spaces");
 
     expect(mockGet).toHaveBeenCalledWith(
-      "/api/agents/agent%2Fwith%20spaces/git/status",
+      "/api/workspaces/test-ws-id/agents/agent%2Fwith%20spaces/git/status",
     );
   });
 
@@ -79,7 +81,7 @@ describe("fetchGitStatus", () => {
     };
     mockGet.mockResolvedValue(gitStatus);
 
-    const result = await fetchGitStatus("nova");
+    const result = await fetchGitStatus("test-ws-id", "nova");
 
     expect(result.branch).toBe("feature-branch");
     expect(result.target_branch).toBe("main");

@@ -25,14 +25,15 @@ type AutoModeOptions struct {
 	AgentType       string // "plan" or "task"
 	AgentName       string
 	WorktreePath    string
+	WorkspaceID     string                                // Stable workspace UUID (falls back to LOOM_WORKSPACE_ID env)
 	ParentID        string                                // Epic ID to scope task discovery to (empty = all tasks)
 	CustomPromptGen func(string, *WorkspaceConfig) string // Custom prompt generator (overrides AgentType selection)
 	CustomTaskCheck func() (bool, error)                  // Custom task availability check (overrides AgentType selection)
 	BackoffBase     time.Duration                         // Base backoff duration for no-progress retries (default 30s)
+	TaskPause       time.Duration                         // Pause after task completion before checking for next (default 2s)
 	EventBus        events.Emitter                        // Event emission for observability (nil = no events)
 
-	// Interface abstractions for remote agent support.
-	// When nil, local filesystem implementations are used (existing behavior).
+	// Interface abstractions for remote agent support (nil = local filesystem).
 	LockBridge   LockBridge
 	EventEmitter EventEmitter
 }
@@ -101,6 +102,9 @@ func agentClaimedTask(worktreePath, agentName string, bridge LockBridge) bool {
 func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 	if opts.BackoffBase == 0 {
 		opts.BackoffBase = 30 * time.Second
+	}
+	if opts.TaskPause == 0 {
+		opts.TaskPause = 2 * time.Second
 	}
 	if opts.EventBus == nil {
 		opts.EventBus = events.NopBus{}
@@ -386,7 +390,7 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 			fmt.Println("")
 
 			// Brief pause before checking for next task
-			if interruptibleSleep(2*time.Second, shutdown) {
+			if interruptibleSleep(opts.TaskPause, shutdown) {
 				state.ShouldExit = true
 				state.ExitReason = "shutdown signal received"
 				break
@@ -434,7 +438,6 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 	fmt.Println("=========================================")
 }
 
-// formatLimit formats the max tasks limit for display
 func formatLimit(limit int) string {
 	if limit <= 0 {
 		return "unlimited"
@@ -442,7 +445,6 @@ func formatLimit(limit int) string {
 	return fmt.Sprintf("%d", limit)
 }
 
-// formatTimeout formats the idle timeout for display
 func formatTimeout(timeout int) string {
 	if timeout <= 0 {
 		return "none"
@@ -487,14 +489,11 @@ func recordSessionUsage(store *usage.Store, collector *usage.Collector, worktree
 	}
 }
 
-// captureHEADRef returns the current HEAD ref for the worktree.
-// Returns empty string on error (ComputeDiffStats handles this gracefully).
+// captureHEADRef returns the current HEAD ref for the worktree (empty on error).
 func captureHEADRef(worktreePath string) string {
-	cmd := exec.Command("git", "rev-parse", "HEAD")
-	cmd.Dir = worktreePath
-	out, err := cmd.Output()
+	out, err := RunGitCommand(worktreePath, "rev-parse", "HEAD")
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(out))
+	return strings.TrimSpace(out)
 }

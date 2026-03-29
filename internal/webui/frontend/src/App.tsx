@@ -13,6 +13,7 @@ import {
   Suspense,
   type RefObject,
 } from "react";
+import { useParams, useNavigate } from "react-router-dom";
 
 import { updateIssue, addComment, closeIssue } from "@/api";
 import type { IssueContext } from "@/api/terminal";
@@ -68,7 +69,7 @@ import {
   useTheme,
   useWorkspaceContext,
   useWorkspaceState,
-  useWorkspaceParam,
+  useRepoFilterParam,
   useSearchScope,
   useDaemonHealth,
   usePanelManager,
@@ -126,6 +127,13 @@ const FileExplorer = lazy(() =>
 );
 
 function App() {
+  // Route params: workspaceId always present, issueId present on /ws/:id/issues/:issueId
+  const { workspaceId = "", issueId: routeIssueId } = useParams<{
+    workspaceId: string;
+    issueId: string;
+  }>();
+  const navigate = useNavigate();
+
   // Daemon health monitoring
   const {
     isDaemonAvailable,
@@ -151,8 +159,8 @@ function App() {
     sourceReposFilter,
   } = useWorkspaceContext();
 
-  // Workspace URL param sync (deep linking for workspace selection)
-  const [workspaceParam, setWorkspaceParam] = useWorkspaceParam();
+  // Repo filter URL param sync (deep linking for repo selection)
+  const [repoFilterParam, setRepoFilterParam] = useRepoFilterParam();
 
   // Available repo names for repo selector
   const availableRepoNames = useMemo(
@@ -176,21 +184,20 @@ function App() {
   // Search input ref for Cmd/Ctrl+K shortcut
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // View state must be read before useIssues to determine fetch mode
-  const {
-    view: activeView,
-    setView: setActiveView,
-    navigateToView,
-    urlIssueId: selectedIssueId,
-  } = useViewState({
-    onPopState: useCallback((state: Record<string, unknown> | null) => {
-      // Restore previousView from history state on browser back/forward
-      // so the back button label is correct when navigating forward into issue-detail
-      if (state?.previousView && typeof state.previousView === "string") {
-        setPreviousView(state.previousView as ViewMode);
-      }
-    }, []),
-  });
+  // View state must be read before useIssues to determine fetch mode.
+  // Issue-detail is now detected via route params (routeIssueId).
+  const { view: activeViewFromParams, setView: setActiveView } = useViewState();
+
+  // Alias for NavRail/keyboard — setActiveView now uses flushSync internally
+  // via useViewState to force synchronous commit (bypasses React Router v7's
+  // startTransition which gets deferred by terminal WebSocket state updates).
+  const handleNavChange = setActiveView;
+
+  // If on the issue-detail route, override the view mode
+  const activeView: ViewMode = routeIssueId
+    ? "issue-detail"
+    : activeViewFromParams;
+  const selectedIssueId: string | null = routeIssueId ?? null;
 
   const {
     issues,
@@ -213,7 +220,7 @@ function App() {
           ? "kanban"
           : "ready",
     sourceRepos: sourceReposFilter,
-    workspaceName: activeWorkspaceName,
+    workspaceId,
   });
 
   // Filter state with URL synchronization
@@ -250,6 +257,7 @@ function App() {
 
   // Only fetch blocked issues separately when NOT in kanban mode (kanban mode includes it inline)
   const { data: blockedIssuesData } = useBlockedIssues({
+    workspaceId,
     enabled: activeView !== "kanban",
   });
 
@@ -341,10 +349,13 @@ function App() {
         ? pendingPanel.name
         : null;
 
-  // Workspace snapshot ref — updated synchronously during render (not in an effect)
-  const wsState = { view: activeView, filters, searchValue, selectedIssueId };
-  const latestStateRef = useRef(wsState);
-  latestStateRef.current = wsState;
+  // Ref to main scrollable container for workspace state snapshot.
+  // NOTE: Must be declared BEFORE useWorkspaceState below — React runs effects
+  // top-to-bottom, and the hook's mount effect needs this ref populated first.
+  const mainContentRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    mainContentRef.current = document.getElementById("main-content");
+  }, []);
 
   // Bulk selection state for Table view
   const {
@@ -360,10 +371,15 @@ function App() {
     fetchIssue,
     clearIssue,
     updateIssueDetails,
-  } = useIssueDetail();
+  } = useIssueDetail(workspaceId);
 
-  // Previous view state for issue-detail back navigation
-  const [previousView, setPreviousView] = useState<ViewMode>("kanban");
+  // Previous view state for issue-detail back navigation.
+  // When on the issue route, the query-param view is the "previous" view.
+  const previousViewRef = useRef<ViewMode>("kanban");
+  if (!routeIssueId && activeViewFromParams !== "issue-detail") {
+    previousViewRef.current = activeViewFromParams;
+  }
+  const previousView = previousViewRef.current;
 
   // Pending issue context for terminal seeding
   const [pendingIssueContext, setPendingIssueContext] = useState<
@@ -440,8 +456,8 @@ function App() {
 
   // Sync workspace URL param → repo selection (mount deep-link + popstate back/forward)
   useEffect(() => {
-    if (workspaceParam === null) {
-      // null means "all workspaces" — only call selectAll if currently filtered
+    if (repoFilterParam === null) {
+      // null means "all repos" — only call selectAll if currently filtered
       if (
         selectedRepoNames.size !== workspaceRepos.length &&
         workspaceRepos.length > 0
@@ -451,11 +467,11 @@ function App() {
       return;
     }
     if (
-      !(selectedRepoNames.size === 1 && selectedRepoNames.has(workspaceParam))
+      !(selectedRepoNames.size === 1 && selectedRepoNames.has(repoFilterParam))
     ) {
-      selectRepos([workspaceParam]);
+      selectRepos([repoFilterParam]);
     }
-  }, [workspaceParam]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [repoFilterParam]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Deep-link: auto-fetch issue from URL; handle back/forward via popstate → useViewState
   useEffect(() => {
@@ -533,7 +549,10 @@ function App() {
 
       try {
         // Update both status and assignee
-        await updateIssue(issueId, { status: newStatus, assignee });
+        await updateIssue(workspaceId, issueId, {
+          status: newStatus,
+          assignee,
+        });
       } catch (err) {
         if (!mountedRef.current) return;
         const message =
@@ -571,10 +590,7 @@ function App() {
       if (activeView === "issue-detail") {
         // Already in full-page detail — navigate to different issue within the view
         if (issue.id === selectedIssueId) return;
-        navigateToView("issue-detail", {
-          previousView,
-          issueId: issue.id,
-        });
+        navigate(`/ws/${workspaceId}/issues/${issue.id}`);
         fetchIssue(issue.id);
         return;
       }
@@ -584,14 +600,7 @@ function App() {
       openPanel({ type: "issue", id: issue.id });
       fetchIssue(issue.id);
     },
-    [
-      activeView,
-      selectedIssueId,
-      previousView,
-      navigateToView,
-      fetchIssue,
-      openPanel,
-    ],
+    [activeView, selectedIssueId, workspaceId, navigate, fetchIssue, openPanel],
   );
 
   // Handle panel close
@@ -604,11 +613,11 @@ function App() {
     }, 300);
   }, [closePanel, clearIssue]);
 
-  // Handle back from issue detail view — use history.back() so browser
-  // history is naturally traversed (popstate handler restores the previous view)
+  // Handle back from issue detail view — navigate back to workspace root.
+  // React Router handles browser history traversal.
   const handleBackFromDetail = useCallback(() => {
-    window.history.back();
-  }, []);
+    navigate(`/ws/${workspaceId}/`);
+  }, [navigate, workspaceId]);
 
   // Handle approve button click on review cards
   const handleApprove = useCallback(
@@ -618,7 +627,11 @@ function App() {
 
         if (reviewType === "code") {
           // Code review: Close the issue (PR was reviewed and approved)
-          await closeIssue(issue.id, "PR approved after code review");
+          await closeIssue(
+            workspaceId,
+            issue.id,
+            "PR approved after code review",
+          );
           await refetch();
         } else if (reviewType === "plan") {
           // Plan review: Move to open (ready for implementation)
@@ -653,10 +666,10 @@ function App() {
 
         // Add feedback comment
         const prefix = reviewType === "code" ? "CODE REVIEW" : "FEEDBACK";
-        await addComment(issue.id, `${prefix}: ${comment}`);
+        await addComment(workspaceId, issue.id, `${prefix}: ${comment}`);
 
         // Add needs-revision label and set status to open
-        await updateIssue(issue.id, {
+        await updateIssue(workspaceId, issue.id, {
           status: "open",
           add_labels: ["needs-revision"],
         });
@@ -707,12 +720,12 @@ function App() {
     clearIssue();
   }, [closePanel, clearIssue]);
 
-  // Workspace state preservation: save/restore per-workspace UI state on switch
-  const { switchWorkspace } = useWorkspaceState({
-    stateRef: latestStateRef,
-    setView: setActiveView,
-    filterActions,
-    setSearchValue,
+  // Workspace state preservation: save/restore ephemeral per-workspace UI state on switch
+  useWorkspaceState({
+    workspaceId,
+    scrollContainerRef: mainContentRef,
+    activePanel,
+    restorePanel: openPanel,
     closeAllPanels,
   });
 
@@ -721,8 +734,6 @@ function App() {
     (repoName: string | null) => {
       // Skip if same workspace
       if (repoName === activeRepoName) return;
-      // Save/restore workspace state
-      switchWorkspace(repoName);
       // Update repo filter
       if (repoName === null) {
         selectAll();
@@ -730,25 +741,17 @@ function App() {
         selectRepos([repoName]);
       }
       // Sync workspace URL param
-      setWorkspaceParam(repoName);
+      setRepoFilterParam(repoName);
     },
-    [
-      activeRepoName,
-      switchWorkspace,
-      selectAll,
-      selectRepos,
-      setWorkspaceParam,
-    ],
+    [activeRepoName, selectAll, selectRepos, setRepoFilterParam],
   );
 
   // Handle workspace entry click to switch to a different workspace.
-  // Updates the active workspace (header, cache, re-fetch) and re-fetches issues.
+  // SPA navigation via React Router — no page reload.
   const handleWorkspaceSwitch = useCallback(
     (workspaceName: string) => {
       if (workspaceName === activeWorkspaceName) return;
-      // Close any open panels
       closeAllPanels();
-      // Update the active workspace (triggers page reload with new workspace)
       setActiveWorkspace(workspaceName);
     },
     [activeWorkspaceName, closeAllPanels, setActiveWorkspace],
@@ -788,16 +791,27 @@ function App() {
     setIsWorkspaceSwitcherOpen((prev) => !prev);
   }, []);
 
+  // Handle workspace switcher selection (receives workspace ID, navigates to it)
+  const handleWorkspaceSwitcherSelect = useCallback(
+    (wsId: string) => {
+      if (wsId === workspaceId) return;
+      closeAllPanels();
+      navigate(`/ws/${wsId}/`);
+    },
+    [workspaceId, closeAllPanels, navigate],
+  );
+
   // Direct workspace switching via Cmd/Ctrl+Shift+1-9
   const handleWorkspacePositionalSwitch = useCallback(
     (index: number) => {
       const workspaces = workspace?.workspaces ?? [];
       const ws = workspaces[index];
-      if (ws) {
-        handleWorkspaceSelect(ws.name);
+      if (ws && ws.id !== workspaceId) {
+        closeAllPanels();
+        navigate(`/ws/${ws.id}/`);
       }
     },
-    [workspace, handleWorkspaceSelect],
+    [workspace, workspaceId, closeAllPanels, navigate],
   );
 
   // Handle task click from agent panel (opens issue panel overlay)
@@ -914,7 +928,7 @@ function App() {
           navRail={
             <NavRail
               activeView={activeView}
-              onChange={setActiveView}
+              onChange={handleNavChange}
               sessionCount={activeSessionCount}
               badges={{ terminal: hasTerminalUnread }}
             />
@@ -970,7 +984,7 @@ function App() {
           navRail={
             <NavRail
               activeView={activeView}
-              onChange={setActiveView}
+              onChange={handleNavChange}
               sessionCount={activeSessionCount}
               badges={{ terminal: hasTerminalUnread }}
             />
@@ -1021,7 +1035,7 @@ function App() {
           navRail={
             <NavRail
               activeView={activeView}
-              onChange={setActiveView}
+              onChange={handleNavChange}
               sessionCount={activeSessionCount}
               badges={{ terminal: hasTerminalUnread }}
             />
@@ -1046,7 +1060,7 @@ function App() {
   // Success state: show view based on activeView with filtered issues
   return (
     <KeyboardShortcutProvider
-      onViewChange={setActiveView}
+      onViewChange={handleNavChange}
       onSearchFocus={handleSearchFocus}
       {...(isMultiRepo && {
         onWorkspaceSwitcher: handleWorkspaceSwitcherToggle,
@@ -1061,7 +1075,7 @@ function App() {
           navRail={
             <NavRail
               activeView={activeView}
-              onChange={setActiveView}
+              onChange={handleNavChange}
               sessionCount={activeSessionCount}
               badges={{ terminal: hasTerminalUnread }}
             />
@@ -1128,7 +1142,7 @@ function App() {
             <ErrorBoundary resetOnChange={[activeView]}>
               <Suspense fallback={<LoadingSkeleton.Monitor />}>
                 <MonitorDashboard
-                  onViewChange={setActiveView}
+                  onViewChange={handleNavChange}
                   onIssueClick={handleIssueClick}
                   onAgentClick={handleAgentClick}
                 />
@@ -1252,30 +1266,22 @@ function App() {
         <WorkspaceSwitcher
           isOpen={isWorkspaceSwitcherOpen}
           workspaces={workspace?.workspaces ?? []}
-          activeWorkspaceName={workspace?.name ?? null}
-          onSelect={handleWorkspaceSelect}
+          activeWorkspaceId={workspaceId}
+          onSelect={handleWorkspaceSwitcherSelect}
           onClose={() => setIsWorkspaceSwitcherOpen(false)}
         />
       )}
       <CreateWorkspaceModal
         isOpen={showCreateWorkspace}
         onClose={() => setShowCreateWorkspace(false)}
-        onSuccess={(_data, createdName) => {
+        onSuccess={(data, createdName) => {
           setShowCreateWorkspace(false);
-          // Navigate directly to the new workspace's Kanban view.
-          // Bypass setActiveWorkspace's setTimeout(0) to avoid a race
-          // where React effects re-sync a stale view param into the URL
-          // before the delayed window.location.replace() fires.
-          try {
-            localStorage.setItem("loom-active-workspace", createdName);
-          } catch {
-            /* ignore */
+          // Navigate to the new workspace via SPA navigation.
+          // Find the new workspace ID from the refreshed workspace list.
+          const newWs = data.workspaces.find((ws) => ws.name === createdName);
+          if (newWs) {
+            navigate(`/ws/${newWs.id}/`);
           }
-          const url = new URL(
-            window.location.origin + window.location.pathname,
-          );
-          url.searchParams.set("_ws", createdName);
-          window.location.replace(url.toString());
         }}
       />
       <CreateIssueModal

@@ -19,14 +19,18 @@ type testSSEClient struct {
 	closed bool
 }
 
+// testWS is the default workspace ID used in SSE unit tests.
+const testWS = "test-ws"
+
 // newTestSSEClient creates a test SSE client connected to the hub.
 func newTestSSEClient(t *testing.T, hub *SSEHub, id int64) *testSSEClient {
 	t.Helper()
 
 	client := &SSEClient{
-		id:   id,
-		send: make(chan *MutationPayload, 64),
-		done: make(chan struct{}),
+		id:          id,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		workspaceID: testWS,
 	}
 
 	hub.RegisterClient(client)

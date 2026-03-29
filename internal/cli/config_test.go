@@ -1,11 +1,14 @@
 package cli
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 func TestGetConfigDir(t *testing.T) {
@@ -397,7 +400,7 @@ func TestLoadConfig_VersionWarningDedup(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", dir)
 
 	// Write a version-0 config (version field omitted defaults to 0,
-	// which is below CurrentConfigVersion=1).
+	// which is below CurrentConfigVersion).
 	yamlData := `workspaces:
   ws:
     path: /tmp/ws
@@ -452,5 +455,107 @@ func TestLoadConfig_VersionWarningDedup(t *testing.T) {
 	})
 	if count := strings.Count(stderr3, warnSubstr); count != 1 {
 		t.Errorf("after reset, LoadConfig(): want exactly 1 warning, got %d; stderr = %q", count, stderr3)
+	}
+}
+
+func TestWorkspaceByID(t *testing.T) {
+	id1 := "11111111-1111-1111-1111-111111111111"
+	id2 := "22222222-2222-2222-2222-222222222222"
+	id3 := "33333333-3333-3333-3333-333333333333"
+	cfg := &LoomConfig{
+		Workspaces: map[string]WorkspaceConfig{
+			"alpha": {ID: id1, Path: "/tmp/alpha"},
+			"beta":  {ID: id2, Path: "/tmp/beta"},
+			"gamma": {ID: id3, Path: "/tmp/gamma"},
+		},
+	}
+
+	// Found by known ID
+	name, ws, ok := WorkspaceByID(cfg, id2)
+	if !ok {
+		t.Fatal("WorkspaceByID() returned false for known ID")
+	}
+	if name != "beta" {
+		t.Errorf("name = %q, want %q", name, "beta")
+	}
+	if ws.Path != "/tmp/beta" {
+		t.Errorf("ws.Path = %q, want %q", ws.Path, "/tmp/beta")
+	}
+
+	// Unknown UUID
+	_, _, ok = WorkspaceByID(cfg, "99999999-9999-9999-9999-999999999999")
+	if ok {
+		t.Error("WorkspaceByID() returned true for unknown ID")
+	}
+
+	// Empty ID
+	_, _, ok = WorkspaceByID(cfg, "")
+	if ok {
+		t.Error("WorkspaceByID() returned true for empty ID")
+	}
+
+	// Nil config
+	_, _, ok = WorkspaceByID(nil, id1)
+	if ok {
+		t.Error("WorkspaceByID() returned true for nil config")
+	}
+}
+
+func TestLoadConfig_ResolvesDefaultWorkspaceID(t *testing.T) {
+	resetConfigVersionWarnOnce()
+	t.Cleanup(resetConfigVersionWarnOnce)
+
+	dir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", dir)
+
+	wsID := uuid.New().String()
+	yamlData := fmt.Sprintf(`version: %d
+default_workspace: myws
+workspaces:
+  myws:
+    id: %s
+    path: /tmp/myws
+    repos:
+      - name: repo1
+        path: /tmp/myws/repo1
+  other:
+    id: %s
+    path: /tmp/other
+    repos:
+      - name: repo2
+        path: /tmp/other/repo2
+`, CurrentConfigVersion, wsID, uuid.New().String())
+
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yamlData), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("LoadConfig() returned nil")
+	}
+	if cfg.DefaultWorkspaceID != wsID {
+		t.Errorf("DefaultWorkspaceID = %q, want %q", cfg.DefaultWorkspaceID, wsID)
+	}
+}
+
+func TestNewWorkspaceID(t *testing.T) {
+	id1 := NewWorkspaceID()
+	id2 := NewWorkspaceID()
+
+	// Both should be valid UUIDs
+	if _, err := uuid.Parse(id1); err != nil {
+		t.Errorf("NewWorkspaceID() #1 = %q, not a valid UUID: %v", id1, err)
+	}
+	if _, err := uuid.Parse(id2); err != nil {
+		t.Errorf("NewWorkspaceID() #2 = %q, not a valid UUID: %v", id2, err)
+	}
+
+	// Should be different
+	if id1 == id2 {
+		t.Errorf("NewWorkspaceID() returned same ID twice: %s", id1)
 	}
 }

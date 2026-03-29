@@ -20,6 +20,12 @@ import type { GraphViewProps } from "../GraphView";
 
 // Import mocks after vi.mock calls
 
+const TEST_WS_ID = "test-ws-uuid-1234";
+
+vi.mock("@/hooks/useWorkspaceContext", () => ({
+  useWorkspaceContext: () => ({ workspaceId: TEST_WS_ID }),
+}));
+
 // Mock the hooks
 vi.mock("@/hooks/useGraphData", () => ({
   useGraphData: vi.fn(),
@@ -297,6 +303,8 @@ function setupMocks(
 describe("GraphView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
+    localStorage.setItem("loom:last-workspace-id", TEST_WS_ID);
     setupMocks();
   });
 
@@ -432,6 +440,7 @@ describe("GraphView", () => {
     beforeEach(() => {
       // Clear localStorage before each test
       localStorage.clear();
+      localStorage.setItem("loom:last-workspace-id", TEST_WS_ID);
     });
 
     it("passes all issues to useGraphData when showClosed is true", () => {
@@ -466,7 +475,7 @@ describe("GraphView", () => {
 
     it("filters out closed issues when showClosed is false", () => {
       // Set localStorage to false before rendering
-      localStorage.setItem("graph-show-closed", "false");
+      localStorage.setItem(`loom:${TEST_WS_ID}:graph-show-closed`, "false");
 
       const issues = [
         createTestIssue({
@@ -573,18 +582,22 @@ describe("GraphView", () => {
       render(<GraphView {...props} />);
 
       // Default should be true
-      expect(localStorage.getItem("graph-show-closed")).toBe("true");
+      expect(localStorage.getItem(`loom:${TEST_WS_ID}:graph-show-closed`)).toBe(
+        "true",
+      );
 
       // Toggle to false
       const checkbox = screen.getByTestId("show-closed-checkbox");
       fireEvent.click(checkbox);
 
-      expect(localStorage.getItem("graph-show-closed")).toBe("false");
+      expect(localStorage.getItem(`loom:${TEST_WS_ID}:graph-show-closed`)).toBe(
+        "false",
+      );
     });
 
     it("loads showClosed preference from localStorage on mount", () => {
       // Set localStorage to false before rendering
-      localStorage.setItem("graph-show-closed", "false");
+      localStorage.setItem(`loom:${TEST_WS_ID}:graph-show-closed`, "false");
 
       const props = createTestProps();
       render(<GraphView {...props} />);
@@ -752,7 +765,10 @@ describe("GraphView", () => {
       const props = createTestProps();
       render(<GraphView {...props} />);
 
-      expect(useBlockedIssues).toHaveBeenCalledWith({ enabled: true });
+      expect(useBlockedIssues).toHaveBeenCalledWith({
+        workspaceId: TEST_WS_ID,
+        enabled: true,
+      });
     });
 
     it("passes blocked issue IDs to useGraphData options", () => {
@@ -950,6 +966,7 @@ describe("GraphView", () => {
     beforeEach(() => {
       // Clear localStorage before each test
       localStorage.clear();
+      localStorage.setItem("loom:last-workspace-id", TEST_WS_ID);
     });
 
     it("passes all issues to useGraphData when showClosed is true", () => {
@@ -964,6 +981,7 @@ describe("GraphView", () => {
 
       // Ensure showClosed defaults to true
       localStorage.clear();
+      localStorage.setItem("loom:last-workspace-id", TEST_WS_ID);
 
       const props = createTestProps({ issues });
       render(<GraphView {...props} />);
@@ -994,7 +1012,7 @@ describe("GraphView", () => {
       ];
 
       // Set localStorage to false before rendering
-      localStorage.setItem("graph-show-closed", "false");
+      localStorage.setItem(`loom:${TEST_WS_ID}:graph-show-closed`, "false");
 
       const props = createTestProps({ issues });
       render(<GraphView {...props} />);
@@ -1019,7 +1037,7 @@ describe("GraphView", () => {
 
     it("initializes showClosed from localStorage", () => {
       // Set localStorage to false before rendering
-      localStorage.setItem("graph-show-closed", "false");
+      localStorage.setItem(`loom:${TEST_WS_ID}:graph-show-closed`, "false");
 
       const props = createTestProps();
       render(<GraphView {...props} />);
@@ -1031,23 +1049,29 @@ describe("GraphView", () => {
 
     it("persists showClosed changes to localStorage", () => {
       localStorage.clear();
+      localStorage.setItem("loom:last-workspace-id", TEST_WS_ID);
 
       const props = createTestProps();
       render(<GraphView {...props} />);
 
       // Initially should be true (default)
-      expect(localStorage.getItem("graph-show-closed")).toBe("true");
+      expect(localStorage.getItem(`loom:${TEST_WS_ID}:graph-show-closed`)).toBe(
+        "true",
+      );
 
       // Toggle to false
       const checkbox = screen.getByTestId("show-closed-checkbox");
       fireEvent.click(checkbox);
 
       // Should persist the new value
-      expect(localStorage.getItem("graph-show-closed")).toBe("false");
+      expect(localStorage.getItem(`loom:${TEST_WS_ID}:graph-show-closed`)).toBe(
+        "false",
+      );
     });
 
     it("defaults showClosed to true when localStorage is empty", () => {
       localStorage.clear();
+      localStorage.setItem("loom:last-workspace-id", TEST_WS_ID);
 
       const props = createTestProps();
       render(<GraphView {...props} />);
@@ -1058,7 +1082,7 @@ describe("GraphView", () => {
     });
 
     it("passes showClosed state to GraphControls", () => {
-      localStorage.setItem("graph-show-closed", "true");
+      localStorage.setItem(`loom:${TEST_WS_ID}:graph-show-closed`, "true");
 
       const props = createTestProps();
       render(<GraphView {...props} />);
@@ -1084,7 +1108,7 @@ describe("GraphView", () => {
       ];
 
       // Start with showClosed true
-      localStorage.setItem("graph-show-closed", "true");
+      localStorage.setItem(`loom:${TEST_WS_ID}:graph-show-closed`, "true");
 
       const props = createTestProps({ issues });
       render(<GraphView {...props} />);
@@ -1112,6 +1136,7 @@ describe("GraphView", () => {
   describe("closed issue node data", () => {
     beforeEach(() => {
       localStorage.clear();
+      localStorage.setItem("loom:last-workspace-id", TEST_WS_ID);
     });
 
     it("passes isClosed: true to node data for closed issues", () => {
@@ -1153,7 +1178,7 @@ describe("GraphView", () => {
     });
 
     it('sets data-show-closed="false" when showClosed is false', () => {
-      localStorage.setItem("graph-show-closed", "false");
+      localStorage.setItem(`loom:${TEST_WS_ID}:graph-show-closed`, "false");
 
       const props = createTestProps();
       render(<GraphView {...props} />);
@@ -1166,6 +1191,7 @@ describe("GraphView", () => {
   describe("status filter integration", () => {
     beforeEach(() => {
       localStorage.clear();
+      localStorage.setItem("loom:last-workspace-id", TEST_WS_ID);
     });
 
     it("sets data-status-filter attribute on container", () => {
@@ -1177,7 +1203,7 @@ describe("GraphView", () => {
     });
 
     it('filters to only open issues when statusFilter is "open"', () => {
-      localStorage.setItem("graph-status-filter", "open");
+      localStorage.setItem(`loom:${TEST_WS_ID}:graph-status-filter`, "open");
 
       const issues = [
         createTestIssue({ id: "open-1", status: "open" }),
@@ -1195,7 +1221,7 @@ describe("GraphView", () => {
     });
 
     it('filters to only closed issues when statusFilter is "closed"', () => {
-      localStorage.setItem("graph-status-filter", "closed");
+      localStorage.setItem(`loom:${TEST_WS_ID}:graph-status-filter`, "closed");
 
       const issues = [
         createTestIssue({ id: "open-1", status: "open" }),
@@ -1215,8 +1241,8 @@ describe("GraphView", () => {
     });
 
     it('shows all issues when statusFilter is "all" and showClosed is true', () => {
-      localStorage.setItem("graph-status-filter", "all");
-      localStorage.setItem("graph-show-closed", "true");
+      localStorage.setItem(`loom:${TEST_WS_ID}:graph-status-filter`, "all");
+      localStorage.setItem(`loom:${TEST_WS_ID}:graph-show-closed`, "true");
 
       const issues = [
         createTestIssue({ id: "open-1", status: "open" }),
@@ -1235,8 +1261,8 @@ describe("GraphView", () => {
     it('statusFilter "closed" takes precedence over showClosed toggle', () => {
       // Set statusFilter to "closed" but showClosed to false
       // statusFilter should take precedence and show closed issues
-      localStorage.setItem("graph-status-filter", "closed");
-      localStorage.setItem("graph-show-closed", "false");
+      localStorage.setItem(`loom:${TEST_WS_ID}:graph-status-filter`, "closed");
+      localStorage.setItem(`loom:${TEST_WS_ID}:graph-show-closed`, "false");
 
       const issues = [
         createTestIssue({ id: "open-1", status: "open" }),
@@ -1258,17 +1284,24 @@ describe("GraphView", () => {
       render(<GraphView {...props} />);
 
       // Default should be 'all'
-      expect(localStorage.getItem("graph-status-filter")).toBe("all");
+      expect(
+        localStorage.getItem(`loom:${TEST_WS_ID}:graph-status-filter`),
+      ).toBe("all");
 
       // Change status filter using the select
       const select = screen.getByTestId("status-filter-select");
       fireEvent.change(select, { target: { value: "open" } });
 
-      expect(localStorage.getItem("graph-status-filter")).toBe("open");
+      expect(
+        localStorage.getItem(`loom:${TEST_WS_ID}:graph-status-filter`),
+      ).toBe("open");
     });
 
     it("loads statusFilter from localStorage on mount", () => {
-      localStorage.setItem("graph-status-filter", "in_progress");
+      localStorage.setItem(
+        `loom:${TEST_WS_ID}:graph-status-filter`,
+        "in_progress",
+      );
 
       const props = createTestProps();
       render(<GraphView {...props} />);
@@ -1278,7 +1311,10 @@ describe("GraphView", () => {
     });
 
     it("ignores invalid statusFilter values in localStorage", () => {
-      localStorage.setItem("graph-status-filter", "invalid_status");
+      localStorage.setItem(
+        `loom:${TEST_WS_ID}:graph-status-filter`,
+        "invalid_status",
+      );
 
       const props = createTestProps();
       render(<GraphView {...props} />);
@@ -1292,6 +1328,7 @@ describe("GraphView", () => {
   describe("dependency type filter integration", () => {
     beforeEach(() => {
       localStorage.clear();
+      localStorage.setItem("loom:last-workspace-id", TEST_WS_ID);
     });
 
     it("passes dependency type filter to GraphControls", () => {
@@ -1317,7 +1354,7 @@ describe("GraphView", () => {
 
     it("loads dependency type filter from localStorage on mount", () => {
       localStorage.setItem(
-        "graph-dep-type-filter",
+        `loom:${TEST_WS_ID}:graph-dep-type-filter`,
         JSON.stringify(["blocking", "non-blocking"]),
       );
 
@@ -1339,7 +1376,8 @@ describe("GraphView", () => {
 
       // Default should be blocking + parent-child
       const storedDefault = JSON.parse(
-        localStorage.getItem("graph-dep-type-filter") || "[]",
+        localStorage.getItem(`loom:${TEST_WS_ID}:graph-dep-type-filter`) ||
+          "[]",
       );
       expect(storedDefault).toContain("blocking");
       expect(storedDefault).toContain("parent-child");
@@ -1351,7 +1389,8 @@ describe("GraphView", () => {
       fireEvent.click(nonBlockingCheckbox);
 
       const storedAfterChange = JSON.parse(
-        localStorage.getItem("graph-dep-type-filter") || "[]",
+        localStorage.getItem(`loom:${TEST_WS_ID}:graph-dep-type-filter`) ||
+          "[]",
       );
       expect(storedAfterChange).toContain("blocking");
       expect(storedAfterChange).toContain("parent-child");
@@ -1360,7 +1399,7 @@ describe("GraphView", () => {
 
     it("ignores invalid dependency type groups in localStorage", () => {
       localStorage.setItem(
-        "graph-dep-type-filter",
+        `loom:${TEST_WS_ID}:graph-dep-type-filter`,
         JSON.stringify(["blocking", "invalid-type", "parent-child"]),
       );
 
@@ -1378,7 +1417,10 @@ describe("GraphView", () => {
     });
 
     it("handles malformed JSON in localStorage gracefully", () => {
-      localStorage.setItem("graph-dep-type-filter", "not-valid-json");
+      localStorage.setItem(
+        `loom:${TEST_WS_ID}:graph-dep-type-filter`,
+        "not-valid-json",
+      );
 
       const props = createTestProps();
       render(<GraphView {...props} />);
@@ -1394,7 +1436,7 @@ describe("GraphView", () => {
 
     it("passes includeDependencyTypes to useGraphData when filter has groups", () => {
       localStorage.setItem(
-        "graph-dep-type-filter",
+        `loom:${TEST_WS_ID}:graph-dep-type-filter`,
         JSON.stringify(["blocking"]),
       );
 
@@ -1416,7 +1458,7 @@ describe("GraphView", () => {
 
     it("passes includeDependencyTypes with parent-child types when parent-child is selected", () => {
       localStorage.setItem(
-        "graph-dep-type-filter",
+        `loom:${TEST_WS_ID}:graph-dep-type-filter`,
         JSON.stringify(["parent-child"]),
       );
 
@@ -1433,7 +1475,7 @@ describe("GraphView", () => {
 
     it("passes includeDependencyTypes with non-blocking types when non-blocking is selected", () => {
       localStorage.setItem(
-        "graph-dep-type-filter",
+        `loom:${TEST_WS_ID}:graph-dep-type-filter`,
         JSON.stringify(["non-blocking"]),
       );
 
@@ -1453,7 +1495,10 @@ describe("GraphView", () => {
     });
 
     it("passes undefined includeDependencyTypes when filter is empty (all groups unchecked)", () => {
-      localStorage.setItem("graph-dep-type-filter", JSON.stringify([]));
+      localStorage.setItem(
+        `loom:${TEST_WS_ID}:graph-dep-type-filter`,
+        JSON.stringify([]),
+      );
 
       const props = createTestProps();
       render(<GraphView {...props} />);
@@ -1466,7 +1511,7 @@ describe("GraphView", () => {
 
     it("combines dependency types from multiple selected groups", () => {
       localStorage.setItem(
-        "graph-dep-type-filter",
+        `loom:${TEST_WS_ID}:graph-dep-type-filter`,
         JSON.stringify(["blocking", "parent-child"]),
       );
 
@@ -1489,7 +1534,7 @@ describe("GraphView", () => {
     it("updates includeDependencyTypes when filter is toggled", () => {
       // Start with blocking only
       localStorage.setItem(
-        "graph-dep-type-filter",
+        `loom:${TEST_WS_ID}:graph-dep-type-filter`,
         JSON.stringify(["blocking"]),
       );
 
@@ -1528,7 +1573,7 @@ describe("GraphView", () => {
     it("removes dependency types from filter when group is unchecked", () => {
       // Start with blocking + parent-child
       localStorage.setItem(
-        "graph-dep-type-filter",
+        `loom:${TEST_WS_ID}:graph-dep-type-filter`,
         JSON.stringify(["blocking", "parent-child"]),
       );
 
@@ -1555,7 +1600,7 @@ describe("GraphView", () => {
 
     it("checkbox reflects correct checked state for blocking", () => {
       localStorage.setItem(
-        "graph-dep-type-filter",
+        `loom:${TEST_WS_ID}:graph-dep-type-filter`,
         JSON.stringify(["blocking"]),
       );
 
@@ -1573,7 +1618,7 @@ describe("GraphView", () => {
 
     it("checkbox reflects correct checked state for all groups selected", () => {
       localStorage.setItem(
-        "graph-dep-type-filter",
+        `loom:${TEST_WS_ID}:graph-dep-type-filter`,
         JSON.stringify(["blocking", "parent-child", "non-blocking"]),
       );
 
@@ -1590,7 +1635,10 @@ describe("GraphView", () => {
     });
 
     it("checkbox reflects correct checked state when none selected", () => {
-      localStorage.setItem("graph-dep-type-filter", JSON.stringify([]));
+      localStorage.setItem(
+        `loom:${TEST_WS_ID}:graph-dep-type-filter`,
+        JSON.stringify([]),
+      );
 
       const props = createTestProps();
       render(<GraphView {...props} />);

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
 )
 
@@ -186,6 +187,34 @@ func TestConfigInitAlreadyExists(t *testing.T) {
 	}
 	if cfg.DefaultWorkspace != "second" {
 		t.Errorf("DefaultWorkspace = %q, want %q after force overwrite", cfg.DefaultWorkspace, "second")
+	}
+}
+
+func TestConfigInit_WorkspaceHasUUID(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", dir)
+
+	configInitForce = false
+	configInitWorkspace = "uuidws"
+
+	runConfigInit(nil, nil)
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("LoadConfig() returned nil after config init")
+	}
+	ws, ok := cfg.Workspaces["uuidws"]
+	if !ok {
+		t.Fatal("workspace 'uuidws' not found")
+	}
+	if ws.ID == "" {
+		t.Fatal("workspace ID is empty; config init should generate a UUID")
+	}
+	if _, err := uuid.Parse(ws.ID); err != nil {
+		t.Errorf("workspace ID %q is not a valid UUID: %v", ws.ID, err)
 	}
 }
 

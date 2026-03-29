@@ -5,14 +5,16 @@
 
 import { useState, useCallback, useEffect } from "react";
 
+import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
 import type { LoomAgentStatus } from "@/types";
+import { wsGet, wsSet } from "@/utils/scopedStorage";
 
 import { AgentCard } from "../AgentCard";
 import type { AgentTaskMap } from "./AgentsSidebar";
 import styles from "./AgentsSidebar.module.css";
 import { groupAgentsByRepo } from "./AgentsSidebar";
 
-const REPO_GROUPS_STORAGE_KEY = "agents-sidebar-repo-groups-collapsed";
+const SK_REPO_GROUPS_COLLAPSED = "agents-sidebar-repo-groups-collapsed";
 
 export interface RepoGroupedListProps {
   agents: LoomAgentStatus[];
@@ -27,27 +29,44 @@ export function RepoGroupedList({
   agentTasks,
   onAgentClick,
 }: RepoGroupedListProps): JSX.Element {
+  const { workspaceId } = useWorkspaceContext();
+
   const [collapsedGroups, setCollapsedGroups] = useState<
     Record<string, boolean>
   >(() => {
+    if (!workspaceId) return {};
+    const stored = wsGet(workspaceId, SK_REPO_GROUPS_COLLAPSED);
+    if (!stored) return {};
     try {
-      const stored = localStorage.getItem(REPO_GROUPS_STORAGE_KEY);
-      return stored ? JSON.parse(stored) : {};
+      return JSON.parse(stored);
     } catch {
       return {};
     }
   });
 
+  // Re-read scoped state when workspace changes (SPA navigation)
   useEffect(() => {
+    if (!workspaceId) return;
+    const stored = wsGet(workspaceId, SK_REPO_GROUPS_COLLAPSED);
+    if (!stored) {
+      setCollapsedGroups({});
+      return;
+    }
     try {
-      localStorage.setItem(
-        REPO_GROUPS_STORAGE_KEY,
+      setCollapsedGroups(JSON.parse(stored));
+    } catch {
+      setCollapsedGroups({});
+    }
+  }, [workspaceId]);
+
+  useEffect(() => {
+    if (workspaceId)
+      wsSet(
+        workspaceId,
+        SK_REPO_GROUPS_COLLAPSED,
         JSON.stringify(collapsedGroups),
       );
-    } catch {
-      /* ignore */
-    }
-  }, [collapsedGroups]);
+  }, [collapsedGroups, workspaceId]);
 
   const handleGroupToggle = useCallback((repo: string) => {
     setCollapsedGroups((prev) => ({ ...prev, [repo]: !prev[repo] }));

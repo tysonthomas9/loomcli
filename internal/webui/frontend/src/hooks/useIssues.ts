@@ -50,8 +50,8 @@ export interface UseIssuesOptions {
   subscribeOnConnect?: boolean;
   /** Source repo filter — when set, refetch uses source_repos and SSE reconnects with updated URL */
   sourceRepos?: string[] | undefined;
-  /** Active workspace name — triggers re-fetch when workspace changes (header set automatically by fetchApi) */
-  workspaceName?: string | null;
+  /** Workspace UUID — required for workspace-scoped API calls */
+  workspaceId: string;
 }
 
 /**
@@ -123,7 +123,7 @@ export interface UseIssuesReturn {
  * }
  * ```
  */
-export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
+export function useIssues(options: UseIssuesOptions): UseIssuesReturn {
   const {
     filter,
     mode = "ready",
@@ -131,7 +131,7 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
     autoFetch = true,
     autoConnect = true,
     sourceRepos,
-    workspaceName,
+    workspaceId,
     // Note: subscribeOnConnect is deprecated with SSE - connection equals subscription
   } = options;
 
@@ -204,10 +204,10 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
   }, [sourceRepos]);
 
   // Track active workspace for workspace-level SSE filtering
-  const workspaceNameRef = useRef(workspaceName);
+  const workspaceIdRef = useRef(workspaceId);
   useEffect(() => {
-    workspaceNameRef.current = workspaceName;
-  }, [workspaceName]);
+    workspaceIdRef.current = workspaceId;
+  }, [workspaceId]);
 
   const gatedHandleMutation = useCallback(
     (mutation: MutationPayload) => {
@@ -218,7 +218,7 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
 
       // Gate: only process mutations for the active workspace
       // Allow mutations without workspace_id (legacy/single-workspace mode)
-      const activeWs = workspaceNameRef.current;
+      const activeWs = workspaceIdRef.current;
       if (
         activeWs &&
         mutation.workspace_id &&
@@ -271,6 +271,7 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
     lastEventId,
     retryNow,
   } = useSSE({
+    workspaceId,
     autoConnect,
     since:
       fetchTimestampRef.current > 0 ? fetchTimestampRef.current : undefined,
@@ -283,111 +284,126 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
   const maxReconnectAttemptsRef = useRef<number>(0);
 
   // Fetch issues from API
-  const refetch = useCallback(async () => {
-    if (!mountedRef.current) return;
-
-    setIsLoading(true);
-    setError(null);
-    fetchTimestampRef.current = Date.now();
-    fetchingRef.current = true;
-    deletedDuringFetchRef.current.clear();
-
-    try {
-      // Build effective filters with source_repos when active
-      const effectiveFilter: WorkFilter | undefined = sourceRepos?.length
-        ? { ...filter, source_repos: sourceRepos }
-        : filter;
-      const effectiveGraphFilter: GraphFilter | undefined = sourceRepos?.length
-        ? { ...graphFilter, source_repos: sourceRepos }
-        : graphFilter;
-
-      let data: Issue[];
-      if (mode === "kanban") {
-        data = await getKanbanIssues(effectiveFilter);
-      } else if (mode === "graph") {
-        data = await fetchGraphIssues(effectiveGraphFilter);
-      } else {
-        data = await getReadyIssues(effectiveFilter);
-      }
+  const refetch = useCallback(
+    async (signal?: AbortSignal) => {
       if (!mountedRef.current) return;
 
-      // Capture deleted IDs before merge to avoid race condition with finally block clear()
-      const deletedDuringFetch = new Set(deletedDuringFetchRef.current);
+      setIsLoading(true);
+      setError(null);
+      fetchTimestampRef.current = Date.now();
+      fetchingRef.current = true;
+      deletedDuringFetchRef.current.clear();
 
-      // Merge API data with current state, preserving SSE mutations received during fetch
-      setIssuesMap((currentMap) => {
-        const mergedMap = new Map<string, Issue>();
+      try {
+        // Build effective filters with source_repos when active
+        const effectiveFilter: WorkFilter | undefined = sourceRepos?.length
+          ? { ...filter, source_repos: sourceRepos }
+          : filter;
+        const effectiveGraphFilter: GraphFilter | undefined =
+          sourceRepos?.length
+            ? { ...graphFilter, source_repos: sourceRepos }
+            : graphFilter;
 
-        // Start with API data (authoritative for which issues should exist)
-        for (const issue of data) {
-          // Skip issues with empty IDs (defensive: backend should always provide IDs)
-          if (!issue.id) {
-            if (process.env.NODE_ENV === "development") {
-              console.warn(
-                "[useIssues] Skipping API issue with empty id:",
-                issue.title,
-              );
-            }
-            continue;
-          }
-          // Skip if deleted during fetch window by SSE mutation
-          if (deletedDuringFetch.has(issue.id)) {
-            continue;
-          }
-          mergedMap.set(issue.id, issue);
+        const reqOpts = signal ? { signal } : undefined;
+        let data: Issue[];
+        if (mode === "kanban") {
+          data = await getKanbanIssues(workspaceId, effectiveFilter, reqOpts);
+        } else if (mode === "graph") {
+          data = await fetchGraphIssues(
+            workspaceId,
+            effectiveGraphFilter,
+            reqOpts,
+          );
+        } else {
+          data = await getReadyIssues(workspaceId, effectiveFilter, reqOpts);
         }
+        if (!mountedRef.current) return;
 
-        // Preserve fresher mutations from current state
-        for (const [id, currentIssue] of currentMap) {
-          const apiIssue = mergedMap.get(id);
+        // Capture deleted IDs before merge to avoid race condition with finally block clear()
+        const deletedDuringFetch = new Set(deletedDuringFetchRef.current);
 
-          if (!apiIssue) {
-            // Keep if created during fetch (SSE create mutation)
-            const createdTime = Date.parse(currentIssue.created_at);
+        // Merge API data with current state, preserving SSE mutations received during fetch
+        setIssuesMap((currentMap) => {
+          const mergedMap = new Map<string, Issue>();
+
+          // Start with API data (authoritative for which issues should exist)
+          for (const issue of data) {
+            // Skip issues with empty IDs (defensive: backend should always provide IDs)
+            if (!issue.id) {
+              if (process.env.NODE_ENV === "development") {
+                console.warn(
+                  "[useIssues] Skipping API issue with empty id:",
+                  issue.title,
+                );
+              }
+              continue;
+            }
+            // Skip if deleted during fetch window by SSE mutation
+            if (deletedDuringFetch.has(issue.id)) {
+              continue;
+            }
+            mergedMap.set(issue.id, issue);
+          }
+
+          // Preserve fresher mutations from current state
+          for (const [id, currentIssue] of currentMap) {
+            const apiIssue = mergedMap.get(id);
+
+            if (!apiIssue) {
+              // Keep if created during fetch (SSE create mutation)
+              const createdTime = Date.parse(currentIssue.created_at);
+              if (
+                !isNaN(createdTime) &&
+                createdTime >= fetchTimestampRef.current
+              ) {
+                mergedMap.set(id, currentIssue);
+              }
+              continue;
+            }
+
+            // Keep current if newer (SSE mutation during fetch)
+            const currentTime = Date.parse(currentIssue.updated_at);
+            const apiTime = Date.parse(apiIssue.updated_at);
             if (
-              !isNaN(createdTime) &&
-              createdTime >= fetchTimestampRef.current
+              !isNaN(currentTime) &&
+              !isNaN(apiTime) &&
+              currentTime > apiTime
             ) {
               mergedMap.set(id, currentIssue);
             }
-            continue;
           }
 
-          // Keep current if newer (SSE mutation during fetch)
-          const currentTime = Date.parse(currentIssue.updated_at);
-          const apiTime = Date.parse(apiIssue.updated_at);
-          if (!isNaN(currentTime) && !isNaN(apiTime) && currentTime > apiTime) {
-            mergedMap.set(id, currentIssue);
-          }
+          return mergedMap;
+        });
+      } catch (err) {
+        if (!mountedRef.current) return;
+        // Suppress AbortError — expected during workspace switch or unmount
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        const message =
+          err instanceof Error ? err.message : "Failed to fetch issues";
+        setError(message);
+      } finally {
+        if (mountedRef.current) {
+          setIsLoading(false);
         }
-
-        return mergedMap;
-      });
-    } catch (err) {
-      if (!mountedRef.current) return;
-      const message =
-        err instanceof Error ? err.message : "Failed to fetch issues";
-      setError(message);
-    } finally {
-      if (mountedRef.current) {
-        setIsLoading(false);
+        fetchingRef.current = false;
+        deletedDuringFetchRef.current.clear();
       }
-      fetchingRef.current = false;
-      deletedDuringFetchRef.current.clear();
-    }
-    // workspaceName is intentionally in deps: triggers re-fetch when workspace changes
-    // (the Workspace header is set at module level, not used directly in the callback)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filter, mode, graphFilter, sourceRepos, workspaceName]);
+    },
+    [filter, mode, graphFilter, sourceRepos, workspaceId],
+  );
 
   // Keep refetchRef in sync with the latest refetch callback
   refetchRef.current = refetch;
 
-  // Auto-fetch on mount
+  // Auto-fetch on mount (AbortController cancels in-flight fetch on unmount or dep change)
   useEffect(() => {
-    if (autoFetch) {
-      void refetch();
-    }
+    if (!autoFetch) return;
+    const controller = new AbortController();
+    void refetch(controller.signal);
+    return () => {
+      controller.abort();
+    };
   }, [autoFetch, refetch]);
 
   // Track max reconnect attempts to detect prolonged disconnection
@@ -511,7 +527,7 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
       setIssuesMap(newMap);
 
       try {
-        await apiUpdateIssue(issueId, { status: newStatus });
+        await apiUpdateIssue(workspaceId, issueId, { status: newStatus });
         // Confirm: clear optimistic state, flush buffered SSE mutations
         handle.confirm();
       } catch (err) {

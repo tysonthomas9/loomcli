@@ -28,7 +28,10 @@ const POLL_INTERVAL_NORMAL = 10_000;
 /** Fast polling interval when any session is active (ms). */
 const POLL_INTERVAL_ACTIVE = 3_000;
 
-export function useTaskSessions(taskId: string | null): UseTaskSessionsResult {
+export function useTaskSessions(
+  workspaceId: string,
+  taskId: string | null,
+): UseTaskSessionsResult {
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -45,7 +48,7 @@ export function useTaskSessions(taskId: string | null): UseTaskSessionsResult {
     setIsLoading(true);
 
     try {
-      const result = await getTaskSessions(taskId);
+      const result = await getTaskSessions(workspaceId, taskId);
       if (mountedRef.current) {
         setSessions(result);
         setError(null);
@@ -60,7 +63,7 @@ export function useTaskSessions(taskId: string | null): UseTaskSessionsResult {
       }
       fetchInProgressRef.current = false;
     }
-  }, [taskId]);
+  }, [workspaceId, taskId]);
 
   const refetch = useCallback(() => {
     void fetchData();
@@ -78,7 +81,7 @@ export function useTaskSessions(taskId: string | null): UseTaskSessionsResult {
     [taskId, fetchData],
   );
 
-  useSSE({ onMutation: handleMutation });
+  useSSE({ workspaceId, onMutation: handleMutation });
 
   useEffect(() => {
     mountedRef.current = true;
@@ -113,7 +116,7 @@ export function useTaskSessions(taskId: string | null): UseTaskSessionsResult {
       if (timer) clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [taskId, fetchData]);
+  }, [workspaceId, taskId, fetchData]);
 
   return { sessions, isLoading, error, refetch };
 }

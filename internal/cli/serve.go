@@ -26,21 +26,25 @@ import (
 )
 
 var (
-	servePort          int
-	serveBindAddr      string
-	serveCorsOrigin    string
-	serveWebUIPort     int
-	serveWebUISocket   string
-	serveNoWebUI       bool
-	serveNoDaemon      bool
-	serveRedisAddr     string
-	serveRedisPassword string
-	serveAPIKey        string
-	serveFleetAPIKey   string
-	serveAuth          bool
-	serveHSTS          bool
-	serveDev           bool
-	serveDevFrontDir   string
+	servePort              int
+	serveBindAddr          string
+	serveCorsOrigin        string
+	serveWebUIPort         int
+	serveWebUISocket       string
+	serveNoWebUI           bool
+	serveNoDaemon          bool
+	serveRedisAddr         string
+	serveRedisPassword     string
+	serveAPIKey            string
+	serveFleetAPIKey       string
+	serveAuth              bool
+	serveHSTS              bool
+	serveAuthURL           string
+	serveAuthIssuer        string
+	serveAuthAudience      string
+	serveAuthAllowInsecure bool
+	serveDev               bool
+	serveDevFrontDir       string
 
 	// collectDataFunc is the function used to collect monitor data.
 	// This is a package-level variable to allow tests to inject mock data.
@@ -56,45 +60,23 @@ var (
 var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start HTTP server for agent status API",
-	Long: `Start an HTTP server that exposes agent status via REST API.
+	Long: `Start an HTTP server that exposes agent status via REST API and web UI.
 
-This server is designed to be consumed by web UIs (like beads-web-ui)
-that want to display agent status and task information.
-
-The server automatically starts the bd daemon if it's not running.
-Use --no-daemon to disable this behavior.
-
-ENDPOINTS
-  GET /health          Health check
-  GET /metrics         Prometheus metrics for KEDA scaling
-  GET /api/status      Full dashboard data (agents, tasks, stats, sync)
-  GET /api/agents      Just agent status
-  GET /api/tasks       Task queue and lists
-  GET /api/stats       Statistics (open/closed/completion)
-  GET /api/sync        Sync status
-  GET /api/usage       Token usage and cost data (filterable)
-  GET /api/workspaces  Workspace configuration (workspace mode only)
-  GET /api/observability/{metrics,events}  Observability data
+Auto-starts the bd daemon if not running (disable with --no-daemon).
 
 ENVIRONMENT VARIABLES
-  LOOM_SERVER_PORT    Server port (default: 8081)
-  LOOM_BIND_ADDR      Bind address (default: 127.0.0.1)
-  LOOM_CORS_ORIGIN    CORS allowed origin (default: http://localhost:<webui-port>)
-  LOOM_REDIS_PASSWORD Redis password (avoids exposure in process list)
-
-DEVELOPMENT MODE
-  Use --dev to serve the frontend from disk instead of the embedded filesystem.
-  This allows iterating on the frontend without recompiling the Go binary.
-  CORS is automatically enabled for the Vite dev server origin.
-  WARNING: Dev mode is for local development only. Do not use in production.
+  LOOM_SERVER_PORT     Server port (default: 8081)
+  LOOM_BIND_ADDR       Bind address (default: 127.0.0.1)
+  LOOM_CORS_ORIGIN     CORS allowed origin
+  LOOM_REDIS_PASSWORD  Redis password (avoids exposure in process list)
+  LOOM_AUTH_URL         External auth service base URL (enables JWT auth)
+  LOOM_AUTH_ISSUER      Expected JWT issuer (defaults to LOOM_AUTH_URL)
+  LOOM_AUTH_AUDIENCE    Expected JWT audience (defaults to "loom")
 
 EXAMPLES
-  loom serve                          # Start on default port 8081
-  loom serve --port 9000              # Start on port 9000
-  loom serve --bind 0.0.0.0           # Listen on all interfaces
-  loom serve --cors http://localhost:8080   # Allow specific origin
-  loom serve --dev                    # Dev mode: serve frontend from disk
-  loom serve --dev --dev-frontend-dir ./my-frontend/dist  # Custom frontend dir`,
+  loom serve                                              # Default port 8081
+  loom serve --bind 0.0.0.0 --auth-url https://auth.co   # Exposed with JWT auth
+  loom serve --dev                                        # Frontend from disk`,
 	Args: cobra.NoArgs,
 	Run:  runServe,
 }
@@ -137,6 +119,18 @@ func init() {
 
 	serveCmd.Flags().BoolVar(&serveAuth, "auth", false, "Enable WebUI API authentication")
 	serveCmd.Flags().BoolVar(&serveHSTS, "hsts", false, "Enable HSTS header (use when behind TLS-terminating proxy)")
+
+	defaultAuthURL := os.Getenv("LOOM_AUTH_URL")
+	serveCmd.Flags().StringVar(&serveAuthURL, "auth-url", defaultAuthURL, "External auth service base URL (enables JWT auth)")
+
+	defaultAuthIssuer := os.Getenv("LOOM_AUTH_ISSUER")
+	serveCmd.Flags().StringVar(&serveAuthIssuer, "auth-issuer", defaultAuthIssuer, "Expected JWT issuer (defaults to --auth-url)")
+
+	defaultAuthAudience := os.Getenv("LOOM_AUTH_AUDIENCE")
+	serveCmd.Flags().StringVar(&serveAuthAudience, "auth-audience", defaultAuthAudience, "Expected JWT audience (defaults to \"loom\")")
+
+	serveCmd.Flags().BoolVar(&serveAuthAllowInsecure, "auth-allow-insecure", false, "Allow HTTP for non-loopback --auth-url (INSECURE, for Docker internal networks only)")
+
 	serveCmd.Flags().BoolVar(&serveDev, "dev", false, "Development mode: serve frontend from disk, enable CORS for Vite dev server")
 	serveCmd.Flags().StringVar(&serveDevFrontDir, "dev-frontend-dir", "", "Frontend directory to serve in dev mode (default: internal/webui/frontend/dist)")
 
@@ -237,6 +231,17 @@ func runServe(cmd *cobra.Command, args []string) {
 		log.Printf("Using JWT signing key from LOOM_FLEET_JWT_KEY environment variable")
 	}
 
+	// Validate --auth-url and apply issuer/audience defaults
+	if serveAuthURL != "" {
+		validateAuthURL(serveAuthURL, serveAuthAllowInsecure)
+		if serveAuthIssuer == "" {
+			serveAuthIssuer = serveAuthURL
+		}
+		if serveAuthAudience == "" {
+			serveAuthAudience = "loom"
+		}
+	}
+
 	// Warn if binding to non-localhost address
 	if serveBindAddr != "127.0.0.1" && serveBindAddr != "::1" {
 		log.Printf("WARNING: Server bound to %s — exposed to network. Ensure this is intentional.", serveBindAddr)
@@ -282,18 +287,46 @@ func runServe(cmd *cobra.Command, args []string) {
 				APIKey:                  serveAPIKey,
 				AuthEnabled:             serveAuth,
 				HSTSEnabled:             serveHSTS,
+				ExtAuthURL:              serveAuthURL,
+				ExtAuthIssuer:           serveAuthIssuer,
+				ExtAuthAudience:         serveAuthAudience,
+				ExtAuthAllowInsecure:    serveAuthAllowInsecure,
 				DevMode:                 serveDev,
 				DevFrontendDir:          serveDevFrontDir,
 				GitOps:                  gitOps,
 				FileOps:                 gitOps, // GitOpsImpl satisfies FileOps (same ResolveAgentWorktree)
 				WorkspaceConfigFn:       buildWorkspaceInfo,
+				WorkspaceConfigByIDFn:   buildWorkspaceInfoForID,
 				WorkspaceDeleteFn:       deleteWorkspace,
 				SetDefaultWorkspaceFn:   setDefaultWorkspace,
 				ClearDefaultWorkspaceFn: clearDefaultWorkspace,
 				WorkspaceCreateFn:       createWorkspace,
-				BackendOps:              backendOps,
-				SessionsStore:           sessStore,
-				Logger:                  slog.Default(),
+				WorkspaceListFn: func() (map[string]string, error) {
+					cfg, err := LoadConfig()
+					if err != nil {
+						return nil, err
+					}
+					if cfg == nil || len(cfg.Workspaces) == 0 {
+						return nil, nil
+					}
+					result := make(map[string]string, len(cfg.Workspaces))
+					for name, ws := range cfg.Workspaces {
+						// Use stable UUID as map key so MultiPool is keyed
+						// by UUID (matches InitialWorkspaceID). Fall back to
+						// config name for pre-migration workspaces.
+						key := name
+						if ws.ID != "" {
+							key = ws.ID
+						}
+						result[key] = ws.Path
+					}
+					return result, nil
+				},
+				InitialWorkspaceID:    resolveInitialWorkspaceID(),
+				WorkspaceIDResolverFn: resolveWorkspaceID,
+				BackendOps:            backendOps,
+				SessionsStore:         sessStore,
+				Logger:                slog.Default(),
 			}
 			if serveCorsOrigin != "" {
 				cfg.CORSEnabled = true

@@ -16,6 +16,7 @@ import type { LogChunk, LogStreamState } from "./logTypes";
 export type AgentLogTransportMode = "idle" | "loading" | "tmux" | "archive";
 
 export interface UseAgentTerminalLogsOptions {
+  workspaceId: string;
   agentName: string | null;
   enabled: boolean;
   archiveLines?: number;
@@ -54,6 +55,7 @@ function buildResizeFrame(cols: number, rows: number): ArrayBuffer {
 const ARCHIVE_RECHECK_INTERVAL_MS = 5000;
 
 export function useAgentTerminalLogs({
+  workspaceId,
   agentName,
   enabled,
   archiveLines = 500,
@@ -132,6 +134,7 @@ export function useAgentTerminalLogs({
     setIsLoadingMore(true);
     try {
       const archive = await getAgentLogArchive(
+        workspaceId,
         currentAgent,
         archiveLines,
         oldestLineRef.current,
@@ -183,7 +186,7 @@ export function useAgentTerminalLogs({
       isLoadingMoreRef.current = false;
       setIsLoadingMore(false);
     }
-  }, [archiveLines]);
+  }, [workspaceId, archiveLines]);
 
   useEffect(() => {
     runIdRef.current += 1;
@@ -241,10 +244,12 @@ export function useAgentTerminalLogs({
       setState("connecting");
 
       try {
-        const token = await getAgentTerminalToken(agentName);
+        const token = await getAgentTerminalToken(workspaceId, agentName);
         if (!isCurrentRun()) return;
 
-        const ws = new WebSocket(getAgentTerminalWsUrl(agentName, token));
+        const ws = new WebSocket(
+          getAgentTerminalWsUrl(workspaceId, agentName, token),
+        );
         ws.binaryType = "arraybuffer";
         wsRef.current = ws;
 
@@ -296,11 +301,15 @@ export function useAgentTerminalLogs({
             reconnectAttemptRef.current = 0;
             void (async () => {
               try {
-                const transport = await getAgentTerminalInfo(agentName);
+                const transport = await getAgentTerminalInfo(
+                  workspaceId,
+                  agentName,
+                );
                 if (!isCurrentRun()) return;
 
                 if (transport === "archive") {
                   const archive = await getAgentLogArchive(
+                    workspaceId,
                     agentName,
                     archiveLines,
                   );
@@ -338,8 +347,10 @@ export function useAgentTerminalLogs({
                         return;
                       archiveProbeInFlightRef.current = true;
                       try {
-                        const probeTransport =
-                          await getAgentTerminalInfo(agentName);
+                        const probeTransport = await getAgentTerminalInfo(
+                          workspaceId,
+                          agentName,
+                        );
                         if (!isCurrentRun()) return;
                         if (probeTransport === "tmux") {
                           stopArchiveProbe();
@@ -432,11 +443,15 @@ export function useAgentTerminalLogs({
       setResetVersion((prev) => prev + 1);
 
       try {
-        const transport = await getAgentTerminalInfo(agentName);
+        const transport = await getAgentTerminalInfo(workspaceId, agentName);
         if (!isCurrentRun()) return;
 
         if (transport === "archive") {
-          const archive = await getAgentLogArchive(agentName, archiveLines);
+          const archive = await getAgentLogArchive(
+            workspaceId,
+            agentName,
+            archiveLines,
+          );
           if (!isCurrentRun()) return;
 
           // Store lines for infinite scroll
@@ -467,7 +482,10 @@ export function useAgentTerminalLogs({
               if (!isCurrentRun() || archiveProbeInFlightRef.current) return;
               archiveProbeInFlightRef.current = true;
               try {
-                const probeTransport = await getAgentTerminalInfo(agentName);
+                const probeTransport = await getAgentTerminalInfo(
+                  workspaceId,
+                  agentName,
+                );
                 if (!isCurrentRun()) return;
                 if (probeTransport === "tmux") {
                   stopArchiveProbe();
@@ -504,7 +522,7 @@ export function useAgentTerminalLogs({
       stopArchiveProbe();
       closeSocket();
     };
-  }, [agentName, archiveLines, enabled, reloadKey]);
+  }, [workspaceId, agentName, archiveLines, enabled, reloadKey]);
 
   return {
     mode,

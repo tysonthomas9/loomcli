@@ -33,7 +33,7 @@ export interface UseTerminalMetadataReturn {
 const DEBOUNCE_MS = 100;
 
 export function useTerminalMetadata(
-  workspace?: string,
+  workspace: string,
 ): UseTerminalMetadataReturn {
   const [tabs, setTabs] = useState<TabMetadata[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -52,6 +52,10 @@ export function useTerminalMetadata(
   }, []);
 
   const fetchTabs = useCallback(async () => {
+    if (!workspace) {
+      setIsLoading(false);
+      return; // Wait until workspace ID is known
+    }
     setIsLoading(true);
     setError(null);
     try {
@@ -95,11 +99,10 @@ export function useTerminalMetadata(
         return [...current, optimistic];
       });
       try {
-        await putTabMetadata(
-          session,
-          { label, sort_order: sortOrder },
-          workspace,
-        );
+        await putTabMetadata(workspace, session, {
+          label,
+          sort_order: sortOrder,
+        });
       } catch (err) {
         if (mountedRef.current) {
           setTabs(prev);
@@ -120,7 +123,7 @@ export function useTerminalMetadata(
         );
       });
       try {
-        await patchTabMetadata(session, { label }, workspace);
+        await patchTabMetadata(workspace, session, { label });
       } catch (err) {
         if (mountedRef.current) {
           setTabs(prev);
@@ -141,7 +144,7 @@ export function useTerminalMetadata(
         );
       });
       try {
-        await patchTabMetadata(session, { notes }, workspace);
+        await patchTabMetadata(workspace, session, { notes });
       } catch (err) {
         if (mountedRef.current) {
           setTabs(prev);
@@ -162,7 +165,7 @@ export function useTerminalMetadata(
         );
       });
       try {
-        await patchTabMetadata(session, { pinned }, workspace);
+        await patchTabMetadata(workspace, session, { pinned });
       } catch (err) {
         if (mountedRef.current) {
           setTabs(prev);
@@ -191,7 +194,7 @@ export function useTerminalMetadata(
       try {
         await Promise.all(
           orderedSessionNames.map((name, i) =>
-            patchTabMetadata(name, { sort_order: i }, workspace),
+            patchTabMetadata(workspace, name, { sort_order: i }),
           ),
         );
       } catch (err) {
@@ -212,7 +215,7 @@ export function useTerminalMetadata(
         return current.filter((t) => t.session_name !== session);
       });
       try {
-        await deleteTabMetadata(session, workspace);
+        await deleteTabMetadata(workspace, session);
       } catch (err) {
         if (mountedRef.current) {
           setTabs(prev);
@@ -233,7 +236,7 @@ export function useTerminalMetadata(
         );
       });
       try {
-        await patchTabMetadata(session, { issue_id: issueId }, workspace);
+        await patchTabMetadata(workspace, session, { issue_id: issueId });
       } catch (err) {
         if (mountedRef.current) {
           setTabs(prev);
@@ -256,7 +259,7 @@ export function useTerminalMetadata(
         });
       });
       try {
-        await patchTabMetadata(session, { issue_id: "" }, workspace);
+        await patchTabMetadata(workspace, session, { issue_id: "" });
       } catch (err) {
         if (mountedRef.current) {
           setTabs(prev);

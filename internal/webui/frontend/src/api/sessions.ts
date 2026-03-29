@@ -10,14 +10,16 @@ import type {
   TranscriptResponse,
 } from "../types/session";
 
-import { ApiError, get, getAuthToken } from "./client";
+import { ApiError, get, getText } from "./client";
 
 /**
  * Fetch all sessions for a task.
  * @param taskId The task ID (e.g., "bd-abc123")
  * @returns Array of session records, newest first.
  */
+// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export async function getTaskSessions(
+  _workspaceId: string,
   taskId: string,
 ): Promise<SessionRecord[]> {
   try {
@@ -37,7 +39,9 @@ export async function getTaskSessions(
  * Fetch a single session's metadata.
  * @returns The session record, or null if not found.
  */
+// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export async function getSession(
+  _workspaceId: string,
   taskId: string,
   sessionId: string,
 ): Promise<SessionRecord | null> {
@@ -58,7 +62,9 @@ export async function getSession(
  * Fetch the transcript for a session.
  * @returns Array of transcript entries, or empty array if not found.
  */
+// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export async function getSessionTranscript(
+  _workspaceId: string,
   taskId: string,
   sessionId: string,
 ): Promise<TranscriptEntry[]> {
@@ -80,27 +86,20 @@ export async function getSessionTranscript(
  * The diff endpoint returns raw text (Content-Type: text/plain).
  * @returns The diff string, or null if not found.
  */
+// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export async function getSessionDiff(
+  _workspaceId: string,
   taskId: string,
   sessionId: string,
 ): Promise<string | null> {
-  const headers: Record<string, string> = {};
-  const token = getAuthToken();
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
-
-  const response = await fetch(
-    `/api/tasks/${encodeURIComponent(taskId)}/sessions/${encodeURIComponent(sessionId)}/diff`,
-    { headers },
-  );
-
-  if (!response.ok) {
-    if (response.status === 404) {
+  try {
+    return await getText(
+      `/api/tasks/${encodeURIComponent(taskId)}/sessions/${encodeURIComponent(sessionId)}/diff`,
+    );
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) {
       return null;
     }
-    throw new ApiError(response.status, response.statusText);
+    throw err;
   }
-
-  return response.text();
 }

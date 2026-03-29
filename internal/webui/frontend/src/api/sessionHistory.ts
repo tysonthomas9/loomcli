@@ -1,4 +1,4 @@
-import { get, ApiError } from "./client";
+import { get, ApiError, wsUrl } from "./client";
 
 // ============= Types =============
 
@@ -42,10 +42,11 @@ function unwrap<T>(response: ApiResult<T>): T {
  * Returns records sorted by most recent first.
  */
 export async function listSessionHistory(
+  workspaceId: string,
   issueId: string,
 ): Promise<SessionRecord[]> {
   const response = await get<ApiResult<SessionRecord[]>>(
-    `/api/issues/${encodeURIComponent(issueId)}/sessions`,
+    wsUrl(workspaceId, `/issues/${encodeURIComponent(issueId)}/sessions`),
   );
   return unwrap(response);
 }
@@ -54,11 +55,15 @@ export async function listSessionHistory(
  * Get scrollback content for a completed session.
  */
 export async function getSessionScrollback(
+  workspaceId: string,
   issueId: string,
   recordId: string,
 ): Promise<{ content: string; lines: number }> {
   const response = await get<ApiResult<{ content: string; lines: number }>>(
-    `/api/issues/${encodeURIComponent(issueId)}/sessions/${encodeURIComponent(recordId)}/scrollback`,
+    wsUrl(
+      workspaceId,
+      `/issues/${encodeURIComponent(issueId)}/sessions/${encodeURIComponent(recordId)}/scrollback`,
+    ),
   );
   return unwrap(response);
 }

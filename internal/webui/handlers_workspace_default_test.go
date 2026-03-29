@@ -22,7 +22,7 @@ func TestHandleSetDefaultWorkspace_Success(t *testing.T) {
 	handler := handleSetDefaultWorkspace(setFn, mockWorkspaceConfigFn)
 
 	body := strings.NewReader(`{"name":"my-ws"}`)
-	req := httptest.NewRequest(http.MethodPut, "/api/workspace/default", body)
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/default", body)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -56,7 +56,7 @@ func TestHandleSetDefaultWorkspace_EmptyBody(t *testing.T) {
 
 	handler := handleSetDefaultWorkspace(setFn, nil)
 
-	req := httptest.NewRequest(http.MethodPut, "/api/workspace/default", strings.NewReader(""))
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/default", strings.NewReader(""))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -85,7 +85,7 @@ func TestHandleSetDefaultWorkspace_EmptyName(t *testing.T) {
 	handler := handleSetDefaultWorkspace(setFn, nil)
 
 	body := strings.NewReader(`{"name":""}`)
-	req := httptest.NewRequest(http.MethodPut, "/api/workspace/default", body)
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/default", body)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -109,7 +109,7 @@ func TestHandleSetDefaultWorkspace_NilSetFn(t *testing.T) {
 	handler := handleSetDefaultWorkspace(nil, nil)
 
 	body := strings.NewReader(`{"name":"my-ws"}`)
-	req := httptest.NewRequest(http.MethodPut, "/api/workspace/default", body)
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/default", body)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -137,7 +137,7 @@ func TestHandleSetDefaultWorkspace_NotFound(t *testing.T) {
 	handler := handleSetDefaultWorkspace(setFn, nil)
 
 	body := strings.NewReader(`{"name":"nonexistent"}`)
-	req := httptest.NewRequest(http.MethodPut, "/api/workspace/default", body)
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/default", body)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -165,7 +165,7 @@ func TestHandleSetDefaultWorkspace_InternalError(t *testing.T) {
 	handler := handleSetDefaultWorkspace(setFn, nil)
 
 	body := strings.NewReader(`{"name":"my-ws"}`)
-	req := httptest.NewRequest(http.MethodPut, "/api/workspace/default", body)
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/default", body)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -194,7 +194,7 @@ func TestHandleClearDefaultWorkspace_Success(t *testing.T) {
 
 	handler := handleClearDefaultWorkspace(clearFn, mockWorkspaceConfigFn)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/workspace/default", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/default", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -223,7 +223,7 @@ func TestHandleClearDefaultWorkspace_Success(t *testing.T) {
 func TestHandleClearDefaultWorkspace_NilClearFn(t *testing.T) {
 	handler := handleClearDefaultWorkspace(nil, nil)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/workspace/default", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/default", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -250,7 +250,7 @@ func TestHandleClearDefaultWorkspace_Error(t *testing.T) {
 
 	handler := handleClearDefaultWorkspace(clearFn, nil)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/workspace/default", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/default", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 

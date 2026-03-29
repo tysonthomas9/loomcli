@@ -261,6 +261,7 @@ func runWorkspaceCreate(cmd *cobra.Command, args []string) {
 
 	// Save config
 	ws := WorkspaceConfig{
+		ID:    NewWorkspaceID(),
 		Path:  wsDir,
 		Repos: repos,
 	}

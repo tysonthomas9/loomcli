@@ -6,13 +6,14 @@ import (
 	"net/http"
 )
 
-// workspaceOrderRequest is the JSON body for PUT /api/workspace/order.
+// workspaceOrderRequest is the JSON body for PUT /api/workspaces/order.
 type workspaceOrderRequest struct {
 	Order []string `json:"order"`
 }
 
 // handleWorkspaceReorder returns a handler that persists a custom workspace display order.
-// It validates that names exist in the config, filters out unknown names, and saves the order.
+// It accepts both workspace names and UUIDs, resolves UUIDs to names, filters unknown entries,
+// deduplicates, and saves the order.
 func handleWorkspaceReorder(workspaceConfigFn func() (*WorkspaceData, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
@@ -38,11 +39,22 @@ func handleWorkspaceReorder(workspaceConfigFn func() (*WorkspaceData, error)) ht
 			return
 		}
 
-		// Validate: only keep names that exist in cfg.Workspaces
+		// Validate: resolve UUIDs to names and filter unknown entries.
+		// Deduplicate to prevent double-entries when both UUID and name appear.
 		validOrder := make([]string, 0, len(req.Order))
-		for _, name := range req.Order {
-			if _, ok := cfg.Workspaces[name]; ok {
+		seen := make(map[string]bool, len(req.Order))
+		for _, entry := range req.Order {
+			var name string
+			if _, ok := cfg.Workspaces[entry]; ok {
+				// Direct name match
+				name = entry
+			} else if resolved, _, found := resolveWorkspaceNameByID(cfg, entry); found {
+				// UUID resolved to workspace name
+				name = resolved
+			}
+			if name != "" && !seen[name] {
 				validOrder = append(validOrder, name)
+				seen[name] = true
 			}
 		}
 		cfg.WorkspaceOrder = validOrder

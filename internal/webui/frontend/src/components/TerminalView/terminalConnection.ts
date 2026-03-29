@@ -13,7 +13,10 @@ import type { ConnectionState } from "./TerminalInstance";
 /**
  * Fetch a one-time terminal auth token from the server.
  */
-async function fetchTerminalToken(sessionName: string): Promise<string | null> {
+async function fetchTerminalToken(
+  _workspaceId: string,
+  sessionName: string,
+): Promise<string | null> {
   try {
     const resp = await get<{ token: string }>(
       `/api/terminal/token?session=${encodeURIComponent(sessionName)}`, // allow-url
@@ -27,7 +30,11 @@ async function fetchTerminalToken(sessionName: string): Promise<string | null> {
 /**
  * Build the WebSocket URL for the terminal relay endpoint.
  */
-function buildWsUrl(sessionName: string, token: string | null): string {
+function buildWsUrl(
+  _workspaceId: string,
+  sessionName: string,
+  token: string | null,
+): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
   let url = `${proto}//${window.location.host}/api/terminal/ws?session=${encodeURIComponent(sessionName)}`; // allow-url
   if (token) {
@@ -56,6 +63,7 @@ const WS_CLOSE_BACKEND_EXITED = 4001;
  * Connect a Terminal instance to a WebSocket, returning a cleanup function.
  */
 export function connectWebSocket(
+  workspaceId: string,
   sessionName: string,
   terminal: Terminal,
   fitAddon: FitAddon,
@@ -75,11 +83,11 @@ export function connectWebSocket(
 
   let cancelled = false;
 
-  fetchTerminalToken(sessionName)
+  fetchTerminalToken(workspaceId, sessionName)
     .then((token) => {
       if (cancelled) return;
 
-      const ws = new WebSocket(buildWsUrl(sessionName, token));
+      const ws = new WebSocket(buildWsUrl(workspaceId, sessionName, token));
       wsRef.current = ws;
       ws.binaryType = "arraybuffer";
 

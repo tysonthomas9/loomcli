@@ -1150,7 +1150,8 @@ func TestHandleGetAgentLog_Success(t *testing.T) {
 	}
 	t.Setenv("HOME", tmpHome)
 
-	agentLogDir := filepath.Join(tmpHome, ".loom", "logs", "agents")
+	wsID := "test-ws-success"
+	agentLogDir := filepath.Join(tmpHome, ".loom", "logs", wsID, "agents")
 	if err := os.MkdirAll(agentLogDir, 0o755); err != nil {
 		t.Fatalf("failed to create agent log dir: %v", err)
 	}
@@ -1166,9 +1167,10 @@ func TestHandleGetAgentLog_Success(t *testing.T) {
 
 	// Use the mux to route properly with path params
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/agents/{name}/logs", handler)
+	mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/logs", handler)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/agents/"+testAgentName+"/logs", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+wsID+"/agents/"+testAgentName+"/logs", nil)
+	req = req.WithContext(WithWorkspace(req.Context(), wsID))
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
@@ -1199,7 +1201,8 @@ func TestHandleGetAgentLog_LinesParam(t *testing.T) {
 	}
 	t.Setenv("HOME", tmpHome)
 
-	agentLogDir := filepath.Join(tmpHome, ".loom", "logs", "agents")
+	wsID := "test-ws-lines"
+	agentLogDir := filepath.Join(tmpHome, ".loom", "logs", wsID, "agents")
 	if err := os.MkdirAll(agentLogDir, 0o755); err != nil {
 		t.Fatalf("failed to create agent log dir: %v", err)
 	}
@@ -1216,10 +1219,11 @@ func TestHandleGetAgentLog_LinesParam(t *testing.T) {
 
 	handler := handleGetAgentLog()
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/agents/{name}/logs", handler)
+	mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/logs", handler)
 
 	// Request only 5 lines
-	req := httptest.NewRequest(http.MethodGet, "/api/agents/"+testAgentName+"/logs?lines=5", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+wsID+"/agents/"+testAgentName+"/logs?lines=5", nil)
+	req = req.WithContext(WithWorkspace(req.Context(), wsID))
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
@@ -1247,8 +1251,9 @@ func TestHandleListTaskPhases_Success(t *testing.T) {
 	}
 	t.Setenv("HOME", tmpHome)
 
+	wsID := "test-ws-phases"
 	taskID := "testcoveragetask123"
-	taskDir := filepath.Join(tmpHome, ".loom", "logs", "tasks", taskID)
+	taskDir := filepath.Join(tmpHome, ".loom", "logs", wsID, "tasks", taskID)
 	if err := os.MkdirAll(taskDir, 0o755); err != nil {
 		t.Fatalf("failed to create task log dir: %v", err)
 	}
@@ -1263,9 +1268,10 @@ func TestHandleListTaskPhases_Success(t *testing.T) {
 
 	handler := handleListTaskPhases()
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/tasks/{id}/logs", handler)
+	mux.HandleFunc("GET /api/workspaces/{ws}/tasks/{id}/logs", handler)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/tasks/"+taskID+"/logs", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+wsID+"/tasks/"+taskID+"/logs", nil)
+	req = req.WithContext(WithWorkspace(req.Context(), wsID))
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
@@ -1296,8 +1302,9 @@ func TestHandleGetTaskLog_Success(t *testing.T) {
 	}
 	t.Setenv("HOME", tmpHome)
 
+	wsID := "test-ws-tasklog"
 	taskID := "testcoveragetasklog"
-	taskDir := filepath.Join(tmpHome, ".loom", "logs", "tasks", taskID)
+	taskDir := filepath.Join(tmpHome, ".loom", "logs", wsID, "tasks", taskID)
 	if err := os.MkdirAll(taskDir, 0o755); err != nil {
 		t.Fatalf("failed to create task log dir: %v", err)
 	}
@@ -1309,9 +1316,10 @@ func TestHandleGetTaskLog_Success(t *testing.T) {
 
 	handler := handleGetTaskLog()
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/tasks/{id}/logs/{phase}", handler)
+	mux.HandleFunc("GET /api/workspaces/{ws}/tasks/{id}/logs/{phase}", handler)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/tasks/"+taskID+"/logs/planning", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+wsID+"/tasks/"+taskID+"/logs/planning", nil)
+	req = req.WithContext(WithWorkspace(req.Context(), wsID))
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
@@ -1562,7 +1570,8 @@ func TestHandleGetAgentLog_StartLineInResponse(t *testing.T) {
 	}
 	t.Setenv("HOME", tmpHome)
 
-	agentLogDir := filepath.Join(tmpHome, ".loom", "logs", "agents")
+	wsID := "test-ws-startline"
+	agentLogDir := filepath.Join(tmpHome, ".loom", "logs", wsID, "agents")
 	if err := os.MkdirAll(agentLogDir, 0o755); err != nil {
 		t.Fatalf("failed to create agent log dir: %v", err)
 	}
@@ -1579,10 +1588,11 @@ func TestHandleGetAgentLog_StartLineInResponse(t *testing.T) {
 
 	handler := handleGetAgentLog()
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/agents/{name}/logs", handler)
+	mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/logs", handler)
 
 	// Request last 10 lines (no before_line)
-	req := httptest.NewRequest(http.MethodGet, "/api/agents/"+testAgentName+"/logs?lines=10", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+wsID+"/agents/"+testAgentName+"/logs?lines=10", nil)
+	req = req.WithContext(WithWorkspace(req.Context(), wsID))
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
@@ -1613,7 +1623,8 @@ func TestHandleGetAgentLog_BeforeLine(t *testing.T) {
 	}
 	t.Setenv("HOME", tmpHome)
 
-	agentLogDir := filepath.Join(tmpHome, ".loom", "logs", "agents")
+	wsID := "test-ws-beforeline"
+	agentLogDir := filepath.Join(tmpHome, ".loom", "logs", wsID, "agents")
 	if err := os.MkdirAll(agentLogDir, 0o755); err != nil {
 		t.Fatalf("failed to create agent log dir: %v", err)
 	}
@@ -1630,10 +1641,11 @@ func TestHandleGetAgentLog_BeforeLine(t *testing.T) {
 
 	handler := handleGetAgentLog()
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/agents/{name}/logs", handler)
+	mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/logs", handler)
 
 	// Request 20 lines before line 50 -> should get lines 30-49
-	req := httptest.NewRequest(http.MethodGet, "/api/agents/"+testAgentName+"/logs?lines=20&before_line=50", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+wsID+"/agents/"+testAgentName+"/logs?lines=20&before_line=50", nil)
+	req = req.WithContext(WithWorkspace(req.Context(), wsID))
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
@@ -1673,8 +1685,9 @@ func TestHandleGetTaskLog_BeforeLine(t *testing.T) {
 	}
 	t.Setenv("HOME", tmpHome)
 
+	wsID := "test-ws-taskbeforeline"
 	taskID := "testtaskbeforeline"
-	taskDir := filepath.Join(tmpHome, ".loom", "logs", "tasks", taskID)
+	taskDir := filepath.Join(tmpHome, ".loom", "logs", wsID, "tasks", taskID)
 	if err := os.MkdirAll(taskDir, 0o755); err != nil {
 		t.Fatalf("failed to create task log dir: %v", err)
 	}
@@ -1690,10 +1703,11 @@ func TestHandleGetTaskLog_BeforeLine(t *testing.T) {
 
 	handler := handleGetTaskLog()
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/tasks/{id}/logs/{phase}", handler)
+	mux.HandleFunc("GET /api/workspaces/{ws}/tasks/{id}/logs/{phase}", handler)
 
 	// Request 10 lines before line 20 -> should get lines 10-19
-	req := httptest.NewRequest(http.MethodGet, "/api/tasks/"+taskID+"/logs/planning?lines=10&before_line=20", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+wsID+"/tasks/"+taskID+"/logs/planning?lines=10&before_line=20", nil)
+	req = req.WithContext(WithWorkspace(req.Context(), wsID))
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
@@ -1716,5 +1730,140 @@ func TestHandleGetTaskLog_BeforeLine(t *testing.T) {
 	}
 	if len(resp.Data.Lines) >= 1 && resp.Data.Lines[0] != "plan step 10" {
 		t.Errorf("Lines[0] = %q, want %q", resp.Data.Lines[0], "plan step 10")
+	}
+}
+
+// --- Workspace-scoped handler tests ---
+
+// TestHandleGetAgentLog_WorkspaceScoped verifies that the handler reads from the
+// workspace-scoped log directory when a workspace ID is present in context.
+func TestHandleGetAgentLog_WorkspaceScoped(t *testing.T) {
+	tmpHome, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("failed to resolve temp dir: %v", err)
+	}
+	t.Setenv("HOME", tmpHome)
+
+	wsID := "test-ws-id"
+	agentName := "scopedagent"
+
+	// Create workspace-scoped agent log directory and file
+	wsAgentDir := filepath.Join(tmpHome, ".loom", "logs", wsID, "agents")
+	if err := os.MkdirAll(wsAgentDir, 0o755); err != nil {
+		t.Fatalf("failed to create workspace agent log dir: %v", err)
+	}
+
+	logContent := "ws-line 1: agent started\nws-line 2: processing\nws-line 3: done\n"
+	logPath := filepath.Join(wsAgentDir, agentName+".log")
+	if err := os.WriteFile(logPath, []byte(logContent), 0o644); err != nil {
+		t.Fatalf("failed to write test log: %v", err)
+	}
+
+	handler := handleGetAgentLog()
+
+	// Create request with workspace in context
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+wsID+"/agents/"+agentName+"/logs", nil)
+	req.SetPathValue("name", agentName)
+	ctx := WithWorkspace(req.Context(), wsID)
+	req = req.WithContext(ctx)
+
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+
+	var resp LogContentResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if !resp.Success {
+		t.Errorf("expected Success=true, error: %s", resp.Error)
+	}
+	if resp.Data == nil {
+		t.Fatal("expected Data to be non-nil")
+	}
+	if len(resp.Data.Lines) != 3 {
+		t.Errorf("expected 3 lines, got %d", len(resp.Data.Lines))
+	}
+	if len(resp.Data.Lines) >= 1 && resp.Data.Lines[0] != "ws-line 1: agent started" {
+		t.Errorf("Lines[0] = %q, want %q", resp.Data.Lines[0], "ws-line 1: agent started")
+	}
+}
+
+// TestHandleGetAgentLog_DifferentWorkspaces verifies that two requests with different
+// workspace IDs read from their respective directories and do not cross-contaminate.
+func TestHandleGetAgentLog_DifferentWorkspaces(t *testing.T) {
+	tmpHome, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("failed to resolve temp dir: %v", err)
+	}
+	t.Setenv("HOME", tmpHome)
+
+	agentName := "sharedagent"
+	wsA := "workspace-aaa"
+	wsB := "workspace-bbb"
+
+	// Create workspace A log
+	dirA := filepath.Join(tmpHome, ".loom", "logs", wsA, "agents")
+	if err := os.MkdirAll(dirA, 0o755); err != nil {
+		t.Fatalf("failed to create dir A: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dirA, agentName+".log"), []byte("from workspace A\n"), 0o644); err != nil {
+		t.Fatalf("failed to write log A: %v", err)
+	}
+
+	// Create workspace B log
+	dirB := filepath.Join(tmpHome, ".loom", "logs", wsB, "agents")
+	if err := os.MkdirAll(dirB, 0o755); err != nil {
+		t.Fatalf("failed to create dir B: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dirB, agentName+".log"), []byte("from workspace B\n"), 0o644); err != nil {
+		t.Fatalf("failed to write log B: %v", err)
+	}
+
+	handler := handleGetAgentLog()
+
+	// Request from workspace A
+	reqA := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+wsA+"/agents/"+agentName+"/logs", nil)
+	reqA.SetPathValue("name", agentName)
+	reqA = reqA.WithContext(WithWorkspace(reqA.Context(), wsA))
+	rrA := httptest.NewRecorder()
+	handler.ServeHTTP(rrA, reqA)
+
+	if rrA.Code != http.StatusOK {
+		t.Fatalf("workspace A: status = %d, want %d; body: %s", rrA.Code, http.StatusOK, rrA.Body.String())
+	}
+	var respA LogContentResponse
+	if err := json.Unmarshal(rrA.Body.Bytes(), &respA); err != nil {
+		t.Fatalf("failed to parse response A: %v", err)
+	}
+	if !respA.Success || respA.Data == nil {
+		t.Fatalf("workspace A: expected success with data, got success=%v error=%q", respA.Success, respA.Error)
+	}
+	if len(respA.Data.Lines) != 1 || respA.Data.Lines[0] != "from workspace A" {
+		t.Errorf("workspace A: Lines = %v, want [\"from workspace A\"]", respA.Data.Lines)
+	}
+
+	// Request from workspace B
+	reqB := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+wsB+"/agents/"+agentName+"/logs", nil)
+	reqB.SetPathValue("name", agentName)
+	reqB = reqB.WithContext(WithWorkspace(reqB.Context(), wsB))
+	rrB := httptest.NewRecorder()
+	handler.ServeHTTP(rrB, reqB)
+
+	if rrB.Code != http.StatusOK {
+		t.Fatalf("workspace B: status = %d, want %d; body: %s", rrB.Code, http.StatusOK, rrB.Body.String())
+	}
+	var respB LogContentResponse
+	if err := json.Unmarshal(rrB.Body.Bytes(), &respB); err != nil {
+		t.Fatalf("failed to parse response B: %v", err)
+	}
+	if !respB.Success || respB.Data == nil {
+		t.Fatalf("workspace B: expected success with data, got success=%v error=%q", respB.Success, respB.Error)
+	}
+	if len(respB.Data.Lines) != 1 || respB.Data.Lines[0] != "from workspace B" {
+		t.Errorf("workspace B: Lines = %v, want [\"from workspace B\"]", respB.Data.Lines)
 	}
 }

@@ -159,7 +159,7 @@ func TestHandleWorkerRegister(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			reg := NewWorkerRegistry()
-			handler := handleWorkerRegister(reg)
+			handler := handleWorkerRegister(reg, nil)
 
 			req := httptest.NewRequest(http.MethodPost, "/api/internal/workers/register", strings.NewReader(tt.body))
 			w := httptest.NewRecorder()
@@ -241,14 +241,20 @@ func TestHandleWorkerDeregister(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestHandleWorkerState(t *testing.T) {
-	// Create a temp worktree dir with a lock file.
+	// Create a temp worktree dir with agent-scoped lock file.
 	tmpDir := t.TempDir()
+	agentDir := filepath.Join(tmpDir, "worktrees", "a1")
+	if err := os.MkdirAll(agentDir, 0700); err != nil {
+		t.Fatal(err)
+	}
 	lockData := `{"state":"idle","pid":12345}`
-	if err := os.WriteFile(filepath.Join(tmpDir, ".agent.lock"), []byte(lockData), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(agentDir, ".agent.lock"), []byte(lockData), 0600); err != nil {
 		t.Fatal(err)
 	}
 
-	resolveWT := func(workspace, agent string) string { return tmpDir }
+	resolveWT := func(workspace, agent string) string {
+		return filepath.Join(tmpDir, "worktrees", agent)
+	}
 
 	reg := NewWorkerRegistry()
 	reg.Register(&WorkerInfo{ID: "w1", Workspace: "ws", Agent: "a1"})
@@ -332,6 +338,238 @@ func TestHandleWorkerState_EmptyWorktreePath(t *testing.T) {
 
 	if w.Code != http.StatusInternalServerError {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestResolveWorktreePath_AgentIsolation(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Simulate the resolveWorktreePath closure with agent incorporation
+	resolveWT := func(workspace, agent string) string {
+		if agent == "" {
+			return ""
+		}
+		candidate := filepath.Clean(filepath.Join(tmpDir, "worktrees", agent))
+		absBase, _ := filepath.Abs(tmpDir)
+		absCandidate, _ := filepath.Abs(candidate)
+		if !strings.HasPrefix(absCandidate, absBase+string(filepath.Separator)) {
+			return ""
+		}
+		os.MkdirAll(candidate, 0700)
+		return candidate
+	}
+
+	// Different agents get different paths
+	pathA := resolveWT("ws1", "falcon")
+	pathB := resolveWT("ws1", "nova")
+	if pathA == pathB {
+		t.Errorf("agents falcon and nova resolved to same path: %s", pathA)
+	}
+	if pathA == "" || pathB == "" {
+		t.Fatal("resolved path should not be empty")
+	}
+	// Paths contain agent names
+	if !strings.Contains(pathA, "falcon") {
+		t.Errorf("path %q does not contain agent name 'falcon'", pathA)
+	}
+	if !strings.Contains(pathB, "nova") {
+		t.Errorf("path %q does not contain agent name 'nova'", pathB)
+	}
+	// Directory should exist
+	if _, err := os.Stat(pathA); err != nil {
+		t.Errorf("agent directory not created: %v", err)
+	}
+}
+
+func TestResolveWorktreePath_TraversalBlocked(t *testing.T) {
+	tmpDir := t.TempDir()
+	resolveWT := func(workspace, agent string) string {
+		if agent == "" {
+			return ""
+		}
+		candidate := filepath.Clean(filepath.Join(tmpDir, "worktrees", agent))
+		absBase, _ := filepath.Abs(tmpDir)
+		absCandidate, _ := filepath.Abs(candidate)
+		if !strings.HasPrefix(absCandidate, absBase+string(filepath.Separator)) {
+			return ""
+		}
+		return candidate
+	}
+
+	tests := []struct {
+		agent string
+		want  string // empty = should be rejected
+	}{
+		{"../../etc/passwd", ""},   // escapes workspace root
+		{"../../../tmp/evil", ""},  // escapes workspace root
+		{"../escape", "non-empty"}, // stays under workspace root (benign)
+		{"valid-agent", "non-empty"},
+		{"agent_123", "non-empty"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		got := resolveWT("ws1", tt.agent)
+		if tt.want == "" && got != "" {
+			t.Errorf("agent %q should be rejected but got path %q", tt.agent, got)
+		}
+		if tt.want != "" && got == "" {
+			t.Errorf("agent %q should be accepted but was rejected", tt.agent)
+		}
+	}
+}
+
+func TestHandleWorkerState_AgentIsolatedLockFiles(t *testing.T) {
+	// Verify that two agents writing state through the handler produce
+	// independent lock files under worktrees/<agent>/.agent.lock.
+	tmpDir := t.TempDir()
+
+	resolveWT := func(workspace, agent string) string {
+		if agent == "" {
+			return ""
+		}
+		candidate := filepath.Clean(filepath.Join(tmpDir, "worktrees", agent))
+		absBase, _ := filepath.Abs(tmpDir)
+		absCandidate, _ := filepath.Abs(candidate)
+		if !strings.HasPrefix(absCandidate, absBase+string(filepath.Separator)) {
+			return ""
+		}
+		os.MkdirAll(candidate, 0700)
+		return candidate
+	}
+
+	// Pre-create lock files for both agents.
+	agent1Dir := filepath.Join(tmpDir, "worktrees", "agent1")
+	agent2Dir := filepath.Join(tmpDir, "worktrees", "agent2")
+	os.MkdirAll(agent1Dir, 0700)
+	os.MkdirAll(agent2Dir, 0700)
+	os.WriteFile(filepath.Join(agent1Dir, ".agent.lock"), []byte(`{"state":"idle"}`), 0600)
+	os.WriteFile(filepath.Join(agent2Dir, ".agent.lock"), []byte(`{"state":"idle"}`), 0600)
+
+	reg := NewWorkerRegistry()
+	reg.Register(&WorkerInfo{ID: "w1", Workspace: "ws", Agent: "agent1"})
+	reg.Register(&WorkerInfo{ID: "w2", Workspace: "ws", Agent: "agent2"})
+
+	handler := handleWorkerState(reg, resolveWT)
+
+	// Update agent1 state to "building".
+	req1 := httptest.NewRequest(http.MethodPost, "/api/internal/workers/w1/state",
+		strings.NewReader(`{"action":"update_state","state":"building"}`))
+	req1.SetPathValue("id", "w1")
+	rec1 := httptest.NewRecorder()
+	handler.ServeHTTP(rec1, req1)
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("agent1 update: status = %d, want %d; body = %s", rec1.Code, http.StatusOK, rec1.Body.String())
+	}
+
+	// Update agent2 state to "testing".
+	req2 := httptest.NewRequest(http.MethodPost, "/api/internal/workers/w2/state",
+		strings.NewReader(`{"action":"update_state","state":"testing"}`))
+	req2.SetPathValue("id", "w2")
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("agent2 update: status = %d, want %d; body = %s", rec2.Code, http.StatusOK, rec2.Body.String())
+	}
+
+	// Verify each agent's lock file has its own state.
+	info1, err := readWorkerLock(agent1Dir)
+	if err != nil {
+		t.Fatalf("readWorkerLock agent1: %v", err)
+	}
+	if info1["state"] != "building" {
+		t.Errorf("agent1 state = %v, want %q", info1["state"], "building")
+	}
+
+	info2, err := readWorkerLock(agent2Dir)
+	if err != nil {
+		t.Fatalf("readWorkerLock agent2: %v", err)
+	}
+	if info2["state"] != "testing" {
+		t.Errorf("agent2 state = %v, want %q", info2["state"], "testing")
+	}
+}
+
+func TestResolveWorktreePath_EmptyAgent(t *testing.T) {
+	// The closure should return "" when agent is empty, even if workspace resolves.
+	tmpDir := t.TempDir()
+
+	resolveWT := func(workspace, agent string) string {
+		if workspace == "" || agent == "" {
+			return ""
+		}
+		candidate := filepath.Clean(filepath.Join(tmpDir, "worktrees", agent))
+		absBase, _ := filepath.Abs(tmpDir)
+		absCandidate, _ := filepath.Abs(candidate)
+		if !strings.HasPrefix(absCandidate, absBase+string(filepath.Separator)) {
+			return ""
+		}
+		os.MkdirAll(candidate, 0700)
+		return candidate
+	}
+
+	// Both empty.
+	if got := resolveWT("", ""); got != "" {
+		t.Errorf("both empty: got %q, want empty", got)
+	}
+	// Workspace empty, agent present.
+	if got := resolveWT("", "agent1"); got != "" {
+		t.Errorf("workspace empty: got %q, want empty", got)
+	}
+	// Workspace present, agent empty.
+	if got := resolveWT("ws1", ""); got != "" {
+		t.Errorf("agent empty: got %q, want empty", got)
+	}
+	// Both present — should succeed.
+	if got := resolveWT("ws1", "agent1"); got == "" {
+		t.Error("both present: got empty, want non-empty path")
+	}
+}
+
+func TestResolveWorktreePath_DirectoryCreation(t *testing.T) {
+	// Verify that MkdirAll creates the full worktrees/<agent> hierarchy.
+	tmpDir := t.TempDir()
+
+	resolveWT := func(workspace, agent string) string {
+		if agent == "" {
+			return ""
+		}
+		candidate := filepath.Clean(filepath.Join(tmpDir, "worktrees", agent))
+		absBase, _ := filepath.Abs(tmpDir)
+		absCandidate, _ := filepath.Abs(candidate)
+		if !strings.HasPrefix(absCandidate, absBase+string(filepath.Separator)) {
+			return ""
+		}
+		os.MkdirAll(candidate, 0700)
+		return candidate
+	}
+
+	// worktrees/ does not exist yet.
+	wtDir := filepath.Join(tmpDir, "worktrees")
+	if _, err := os.Stat(wtDir); err == nil {
+		t.Fatal("worktrees dir should not exist before resolve")
+	}
+
+	path := resolveWT("ws1", "deep-agent")
+	if path == "" {
+		t.Fatal("expected non-empty path")
+	}
+
+	// Both the worktrees parent and the agent subdir should exist.
+	if fi, err := os.Stat(wtDir); err != nil {
+		t.Errorf("worktrees dir not created: %v", err)
+	} else if !fi.IsDir() {
+		t.Error("worktrees is not a directory")
+	}
+	if fi, err := os.Stat(path); err != nil {
+		t.Errorf("agent dir not created: %v", err)
+	} else if !fi.IsDir() {
+		t.Error("agent path is not a directory")
+	}
+
+	// Verify returned path matches expected.
+	expected := filepath.Join(tmpDir, "worktrees", "deep-agent")
+	if path != expected {
+		t.Errorf("path = %q, want %q", path, expected)
 	}
 }
 
@@ -768,7 +1006,7 @@ func TestSetupWorkerAPIRoutes(t *testing.T) {
 	resolveEvt := func(ws string) string { return tmpDir }
 	resolveLog := func(ws, ag string) string { return filepath.Join(tmpDir, "agent.log") }
 
-	reg := SetupWorkerAPIRoutes(mux, "test-token", resolveWT, resolveEvt, resolveLog)
+	reg := SetupWorkerAPIRoutes(mux, "test-token", resolveWT, resolveEvt, resolveLog, nil)
 	if reg == nil {
 		t.Fatal("SetupWorkerAPIRoutes returned nil registry")
 	}
@@ -814,7 +1052,7 @@ func TestSetupWorkerAPIRoutes(t *testing.T) {
 func TestSetupWorkerAPIRoutes_RejectsWithoutAuth(t *testing.T) {
 	mux := http.NewServeMux()
 	tmpDir := t.TempDir()
-	SetupWorkerAPIRoutes(mux, "secret", func(_, _ string) string { return tmpDir }, func(_ string) string { return tmpDir }, func(_, _ string) string { return filepath.Join(tmpDir, "a.log") })
+	SetupWorkerAPIRoutes(mux, "secret", func(_, _ string) string { return tmpDir }, func(_ string) string { return tmpDir }, func(_, _ string) string { return filepath.Join(tmpDir, "a.log") }, nil)
 
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
@@ -837,7 +1075,7 @@ func TestSetupWorkerAPIRoutes_RejectsWithoutAuth(t *testing.T) {
 
 func TestHandleWorkerRegister_EmptyBody(t *testing.T) {
 	reg := NewWorkerRegistry()
-	handler := handleWorkerRegister(reg)
+	handler := handleWorkerRegister(reg, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/internal/workers/register", strings.NewReader(""))
 	w := httptest.NewRecorder()
@@ -850,7 +1088,7 @@ func TestHandleWorkerRegister_EmptyBody(t *testing.T) {
 
 func TestHandleWorkerRegister_BothFieldsEmpty(t *testing.T) {
 	reg := NewWorkerRegistry()
-	handler := handleWorkerRegister(reg)
+	handler := handleWorkerRegister(reg, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/internal/workers/register", strings.NewReader(`{"workspace":"","agent":""}`))
 	w := httptest.NewRecorder()
@@ -863,7 +1101,7 @@ func TestHandleWorkerRegister_BothFieldsEmpty(t *testing.T) {
 
 func TestHandleWorkerRegister_NoBackend(t *testing.T) {
 	reg := NewWorkerRegistry()
-	handler := handleWorkerRegister(reg)
+	handler := handleWorkerRegister(reg, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/internal/workers/register", strings.NewReader(`{"workspace":"ws","agent":"a1"}`))
 	w := httptest.NewRecorder()
@@ -1589,5 +1827,295 @@ func TestAppendToLogFile_ReadOnlyParent(t *testing.T) {
 	err := appendToLogFile(logPath, []byte("data"))
 	if err == nil {
 		t.Error("expected error writing to read-only parent")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// findWorkspacePathByID tests (loomcli-n28bt.10)
+// ---------------------------------------------------------------------------
+
+func TestFindWorkspacePathByID(t *testing.T) {
+	wsData := &WorkspaceData{
+		Path: "/default/path",
+		Workspaces: []WorkspaceSummary{
+			{ID: "uuid-aaa", Name: "alpha", Path: "/ws/alpha"},
+			{ID: "uuid-bbb", Name: "beta", Path: "/ws/beta"},
+		},
+	}
+
+	tests := []struct {
+		name   string
+		wsData *WorkspaceData
+		id     string
+		want   string
+	}{
+		{
+			name:   "found first workspace",
+			wsData: wsData,
+			id:     "uuid-aaa",
+			want:   "/ws/alpha",
+		},
+		{
+			name:   "found second workspace",
+			wsData: wsData,
+			id:     "uuid-bbb",
+			want:   "/ws/beta",
+		},
+		{
+			name:   "unknown ID returns empty",
+			wsData: wsData,
+			id:     "uuid-zzz",
+			want:   "",
+		},
+		{
+			name:   "nil wsData returns empty",
+			wsData: nil,
+			id:     "uuid-aaa",
+			want:   "",
+		},
+		{
+			name: "empty ID in summary is skipped",
+			wsData: &WorkspaceData{
+				Workspaces: []WorkspaceSummary{
+					{ID: "", Name: "no-id", Path: "/ws/no-id"},
+					{ID: "uuid-ccc", Name: "gamma", Path: "/ws/gamma"},
+				},
+			},
+			id:   "uuid-ccc",
+			want: "/ws/gamma",
+		},
+		{
+			name: "lookup with empty ID returns empty",
+			wsData: &WorkspaceData{
+				Workspaces: []WorkspaceSummary{
+					{ID: "uuid-aaa", Name: "alpha", Path: "/ws/alpha"},
+				},
+			},
+			id:   "",
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := findWorkspacePathByID(tt.wsData, tt.id)
+			if got != tt.want {
+				t.Errorf("findWorkspacePathByID() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// handleWorkerRegister — workspace UUID validation (loomcli-n28bt.10)
+// ---------------------------------------------------------------------------
+
+func TestHandleWorkerRegister_ValidatesWorkspaceUUID(t *testing.T) {
+	knownUUID := "550e8400-e29b-41d4-a716-446655440000"
+	unknownUUID := "00000000-0000-0000-0000-000000000000"
+
+	validator := func(id string) bool {
+		return id == knownUUID
+	}
+
+	tests := []struct {
+		name     string
+		body     string
+		wantCode int
+		wantErr  string
+	}{
+		{
+			name:     "known workspace UUID succeeds",
+			body:     `{"workspace":"` + knownUUID + `","agent":"a1","backend":"local"}`,
+			wantCode: http.StatusCreated,
+		},
+		{
+			name:     "unknown workspace UUID returns 400",
+			body:     `{"workspace":"` + unknownUUID + `","agent":"a1","backend":"local"}`,
+			wantCode: http.StatusBadRequest,
+			wantErr:  "unknown workspace ID",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reg := NewWorkerRegistry()
+			handler := handleWorkerRegister(reg, validator)
+
+			req := httptest.NewRequest(http.MethodPost, "/api/internal/workers/register", strings.NewReader(tt.body))
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+
+			if w.Code != tt.wantCode {
+				t.Fatalf("status = %d, want %d; body = %s", w.Code, tt.wantCode, w.Body.String())
+			}
+			if tt.wantErr != "" && !strings.Contains(w.Body.String(), tt.wantErr) {
+				t.Errorf("body = %q, want to contain %q", w.Body.String(), tt.wantErr)
+			}
+			if tt.wantCode == http.StatusCreated {
+				var resp workerRegisterResponse
+				if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+					t.Fatalf("decode error: %v", err)
+				}
+				if resp.WorkerID == "" {
+					t.Error("WorkerID is empty")
+				}
+				if reg.Get(resp.WorkerID) == nil {
+					t.Error("worker not found in registry after register")
+				}
+			}
+		})
+	}
+}
+
+func TestHandleWorkerRegister_NilValidator(t *testing.T) {
+	// nil validateWorkspace means no validation — registration succeeds
+	// regardless of workspace value (existing behavior preserved).
+	reg := NewWorkerRegistry()
+	handler := handleWorkerRegister(reg, nil)
+
+	body := `{"workspace":"any-arbitrary-string","agent":"a1"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/internal/workers/register", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body = %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+
+	var resp workerRegisterResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if resp.WorkerID == "" {
+		t.Error("WorkerID is empty")
+	}
+	if reg.Get(resp.WorkerID) == nil {
+		t.Error("worker not found in registry after register with nil validator")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Resolver closures use workspace UUID via findWorkspacePathByID (loomcli-n28bt.10)
+// ---------------------------------------------------------------------------
+
+func TestResolveWorktreePath_UsesWorkspaceUUID(t *testing.T) {
+	// Set up two workspaces with distinct paths and lock files.
+	tmpDir := t.TempDir()
+	wsAPath := filepath.Join(tmpDir, "ws-alpha")
+	wsBPath := filepath.Join(tmpDir, "ws-beta")
+	os.MkdirAll(wsAPath, 0700)
+	os.MkdirAll(wsBPath, 0700)
+
+	uuidA := "aaaa1111-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+	uuidB := "bbbb2222-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+
+	// Pre-create lock files in each workspace.
+	os.WriteFile(filepath.Join(wsAPath, ".agent.lock"), []byte(`{"state":"idle"}`), 0600)
+	os.WriteFile(filepath.Join(wsBPath, ".agent.lock"), []byte(`{"state":"idle"}`), 0600)
+
+	wsData := &WorkspaceData{
+		Path: tmpDir,
+		Workspaces: []WorkspaceSummary{
+			{ID: uuidA, Name: "alpha", Path: wsAPath},
+			{ID: uuidB, Name: "beta", Path: wsBPath},
+		},
+	}
+
+	resolveWT := func(workspace, agent string) string {
+		return findWorkspacePathByID(wsData, workspace)
+	}
+	resolveEvt := func(workspace string) string {
+		path := findWorkspacePathByID(wsData, workspace)
+		if path == "" {
+			return ""
+		}
+		return filepath.Join(path, ".loom", "events")
+	}
+	resolveLog := func(workspace, agent string) string {
+		path := findWorkspacePathByID(wsData, workspace)
+		if path == "" {
+			return ""
+		}
+		return filepath.Join(path, ".loom", "logs", "task-"+agent+".log")
+	}
+	validator := func(id string) bool {
+		return findWorkspacePathByID(wsData, id) != ""
+	}
+
+	mux := http.NewServeMux()
+	SetupWorkerAPIRoutes(mux, "test-token", resolveWT, resolveEvt, resolveLog, validator)
+
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	// Helper to do an authed request.
+	doReq := func(method, path, body string) *http.Response {
+		t.Helper()
+		req, err := http.NewRequest(method, ts.URL+path, strings.NewReader(body))
+		if err != nil {
+			t.Fatalf("create request: %v", err)
+		}
+		req.Header.Set("Authorization", "Bearer test-token")
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("request error: %v", err)
+		}
+		return resp
+	}
+
+	// Register worker A with workspace UUID A.
+	respA := doReq("POST", "/api/internal/workers/register",
+		`{"workspace":"`+uuidA+`","agent":"agent1","backend":"test"}`)
+	defer respA.Body.Close()
+	if respA.StatusCode != http.StatusCreated {
+		t.Fatalf("register A: status = %d, want %d", respA.StatusCode, http.StatusCreated)
+	}
+	var regA workerRegisterResponse
+	json.NewDecoder(respA.Body).Decode(&regA)
+
+	// Register worker B with workspace UUID B.
+	respB := doReq("POST", "/api/internal/workers/register",
+		`{"workspace":"`+uuidB+`","agent":"agent2","backend":"test"}`)
+	defer respB.Body.Close()
+	if respB.StatusCode != http.StatusCreated {
+		t.Fatalf("register B: status = %d, want %d", respB.StatusCode, http.StatusCreated)
+	}
+	var regB workerRegisterResponse
+	json.NewDecoder(respB.Body).Decode(&regB)
+
+	// Update state for worker A — should write to wsAPath.
+	stateRespA := doReq("POST", "/api/internal/workers/"+regA.WorkerID+"/state",
+		`{"action":"update_state","state":"running-alpha"}`)
+	defer stateRespA.Body.Close()
+	if stateRespA.StatusCode != http.StatusOK {
+		t.Fatalf("state A: status = %d, want %d", stateRespA.StatusCode, http.StatusOK)
+	}
+
+	// Update state for worker B — should write to wsBPath.
+	stateRespB := doReq("POST", "/api/internal/workers/"+regB.WorkerID+"/state",
+		`{"action":"update_state","state":"running-beta"}`)
+	defer stateRespB.Body.Close()
+	if stateRespB.StatusCode != http.StatusOK {
+		t.Fatalf("state B: status = %d, want %d", stateRespB.StatusCode, http.StatusOK)
+	}
+
+	// Verify workspace A's lock file has the correct state.
+	infoA, err := readWorkerLock(wsAPath)
+	if err != nil {
+		t.Fatalf("readWorkerLock A: %v", err)
+	}
+	if infoA["state"] != "running-alpha" {
+		t.Errorf("workspace A state = %v, want %q", infoA["state"], "running-alpha")
+	}
+
+	// Verify workspace B's lock file has the correct state.
+	infoB, err := readWorkerLock(wsBPath)
+	if err != nil {
+		t.Fatalf("readWorkerLock B: %v", err)
+	}
+	if infoB["state"] != "running-beta" {
+		t.Errorf("workspace B state = %v, want %q", infoB["state"], "running-beta")
 	}
 }

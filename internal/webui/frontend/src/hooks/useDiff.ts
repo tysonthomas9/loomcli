@@ -14,6 +14,7 @@ import { fetchDiffFiles, fetchDiffFile } from "@/api/diff";
 import type { DiffFile, DiffFilePatch } from "@/api/diff";
 
 export interface UseDiffOptions {
+  workspaceId: string;
   agentName: string | null;
   enabled: boolean;
 }
@@ -35,7 +36,11 @@ export interface UseDiffReturn {
   summaryStats: SummaryStats;
 }
 
-export function useDiff({ agentName, enabled }: UseDiffOptions): UseDiffReturn {
+export function useDiff({
+  workspaceId,
+  agentName,
+  enabled,
+}: UseDiffOptions): UseDiffReturn {
   const [files, setFiles] = useState<DiffFile[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -77,7 +82,7 @@ export function useDiff({ agentName, enabled }: UseDiffOptions): UseDiffReturn {
     fetchInProgressRef.current = true;
     setIsLoading(true);
 
-    fetchDiffFiles(agentName, "HEAD")
+    fetchDiffFiles(workspaceId, agentName, "HEAD")
       .then((result) => {
         if (mountedRef.current) {
           setFiles(result);
@@ -105,7 +110,12 @@ export function useDiff({ agentName, enabled }: UseDiffOptions): UseDiffReturn {
 
       inFlightPatchesRef.current.add(path);
       try {
-        const result = await fetchDiffFile(agentName, path, "HEAD");
+        const result = await fetchDiffFile(
+          workspaceId,
+          agentName,
+          path,
+          "HEAD",
+        );
         if (mountedRef.current) {
           setPatchCache((prev) => new Map(prev).set(path, result));
         }
@@ -117,7 +127,7 @@ export function useDiff({ agentName, enabled }: UseDiffOptions): UseDiffReturn {
         inFlightPatchesRef.current.delete(path);
       }
     },
-    [agentName],
+    [workspaceId, agentName],
   );
 
   const markViewed = useCallback((path: string): void => {

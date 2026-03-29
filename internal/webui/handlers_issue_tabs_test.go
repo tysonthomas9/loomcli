@@ -14,6 +14,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
 )
 
+const testWSID = "test-ws-uuid"
+
 func setupIssueTabsTest(t *testing.T) (*issuetabs.Store, *SSEHub) {
 	t.Helper()
 	mr := miniredis.RunT(t)
@@ -27,12 +29,18 @@ func setupIssueTabsTest(t *testing.T) (*issuetabs.Store, *SSEHub) {
 	return issuetabs.NewStore(rdb, nil), hub
 }
 
+// withWSContext adds workspace context to a request (simulating WorkspaceMiddleware).
+func withWSContext(r *http.Request, wsID string) *http.Request {
+	return r.WithContext(WithWorkspace(r.Context(), wsID))
+}
+
 // ── GET handler tests ─────────────────────────────────────────────────────────
 
 func TestHandleGetIssueTabs_NilStore(t *testing.T) {
 	handler := handleGetIssueTabs(nil, nil)
-	req := httptest.NewRequest(http.MethodGet, "/api/issues/PROJ-1/tabs", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testWSID+"/issues/PROJ-1/tabs", nil)
 	req.SetPathValue("issueId", "PROJ-1")
+	req = withWSContext(req, testWSID)
 	rr := httptest.NewRecorder()
 	handler(rr, req)
 
@@ -45,7 +53,8 @@ func TestHandleGetIssueTabs_MissingIssueID(t *testing.T) {
 	store, _ := setupIssueTabsTest(t)
 	handler := handleGetIssueTabs(store, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/issues//tabs", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testWSID+"/issues//tabs", nil)
+	req = withWSContext(req, testWSID)
 	// Don't set path value to simulate missing issueId
 	rr := httptest.NewRecorder()
 	handler(rr, req)
@@ -59,8 +68,9 @@ func TestHandleGetIssueTabs_NoSavedState(t *testing.T) {
 	store, _ := setupIssueTabsTest(t)
 	handler := handleGetIssueTabs(store, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/issues/PROJ-1/tabs", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testWSID+"/issues/PROJ-1/tabs", nil)
 	req.SetPathValue("issueId", "PROJ-1")
+	req = withWSContext(req, testWSID)
 	rr := httptest.NewRecorder()
 	handler(rr, req)
 
@@ -93,14 +103,15 @@ func TestHandleGetIssueTabs_ReturnsSavedState(t *testing.T) {
 		},
 		ActiveTabID: "details",
 	}
-	if err := store.Save(ctx, state); err != nil {
+	if err := store.Save(ctx, testWSID, state); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
 	// No terminal manager means no session filtering
 	handler := handleGetIssueTabs(store, nil)
-	req := httptest.NewRequest(http.MethodGet, "/api/issues/PROJ-2/tabs", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testWSID+"/issues/PROJ-2/tabs", nil)
 	req.SetPathValue("issueId", "PROJ-2")
+	req = withWSContext(req, testWSID)
 	rr := httptest.NewRecorder()
 	handler(rr, req)
 
@@ -132,8 +143,9 @@ func TestHandleSaveIssueTabs_NilStore(t *testing.T) {
 	handler := handleSaveIssueTabs(nil, nil)
 
 	body := `{"tabs":[],"active_tab_id":"details"}`
-	req := httptest.NewRequest(http.MethodPut, "/api/issues/PROJ-1/tabs", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/"+testWSID+"/issues/PROJ-1/tabs", strings.NewReader(body))
 	req.SetPathValue("issueId", "PROJ-1")
+	req = withWSContext(req, testWSID)
 	rr := httptest.NewRecorder()
 	handler(rr, req)
 
@@ -147,7 +159,8 @@ func TestHandleSaveIssueTabs_MissingIssueID(t *testing.T) {
 	handler := handleSaveIssueTabs(store, hub)
 
 	body := `{"tabs":[],"active_tab_id":"details"}`
-	req := httptest.NewRequest(http.MethodPut, "/api/issues//tabs", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/"+testWSID+"/issues//tabs", strings.NewReader(body))
+	req = withWSContext(req, testWSID)
 	// Don't set path value to simulate missing issueId
 	rr := httptest.NewRecorder()
 	handler(rr, req)
@@ -161,8 +174,9 @@ func TestHandleSaveIssueTabs_InvalidBody(t *testing.T) {
 	store, hub := setupIssueTabsTest(t)
 	handler := handleSaveIssueTabs(store, hub)
 
-	req := httptest.NewRequest(http.MethodPut, "/api/issues/PROJ-1/tabs", strings.NewReader("not json"))
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/"+testWSID+"/issues/PROJ-1/tabs", strings.NewReader("not json"))
 	req.SetPathValue("issueId", "PROJ-1")
+	req = withWSContext(req, testWSID)
 	rr := httptest.NewRecorder()
 	handler(rr, req)
 
@@ -182,8 +196,9 @@ func TestHandleSaveIssueTabs_SavesAndReturnsSuccess(t *testing.T) {
 		],
 		"active_tab_id": "terminal-s1"
 	}`
-	req := httptest.NewRequest(http.MethodPut, "/api/issues/PROJ-3/tabs", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/"+testWSID+"/issues/PROJ-3/tabs", strings.NewReader(body))
 	req.SetPathValue("issueId", "PROJ-3")
+	req = withWSContext(req, testWSID)
 	rr := httptest.NewRecorder()
 	handler(rr, req)
 
@@ -209,7 +224,7 @@ func TestHandleSaveIssueTabs_SavesAndReturnsSuccess(t *testing.T) {
 	}
 
 	// Verify it was persisted in Redis
-	got, err := store.Get(context.Background(), "PROJ-3")
+	got, err := store.Get(context.Background(), testWSID, "PROJ-3")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -235,8 +250,9 @@ func TestHandleSaveIssueTabs_BroadcastsSSE(t *testing.T) {
 	handler := handleSaveIssueTabs(store, hub)
 
 	body := `{"tabs":[{"id":"details","type":"details","label":"Details","sort_order":0}],"active_tab_id":"details"}`
-	req := httptest.NewRequest(http.MethodPut, "/api/issues/PROJ-SSE/tabs", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/"+testWSID+"/issues/PROJ-SSE/tabs", strings.NewReader(body))
 	req.SetPathValue("issueId", "PROJ-SSE")
+	req = withWSContext(req, testWSID)
 	rr := httptest.NewRecorder()
 	handler(rr, req)
 
@@ -254,8 +270,9 @@ func TestHandleSaveIssueTabs_BroadcastsSSE(t *testing.T) {
 func TestHandleDeleteIssueTabs_NilStore(t *testing.T) {
 	handler := handleDeleteIssueTabs(nil)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/issues/PROJ-1/tabs", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/"+testWSID+"/issues/PROJ-1/tabs", nil)
 	req.SetPathValue("issueId", "PROJ-1")
+	req = withWSContext(req, testWSID)
 	rr := httptest.NewRecorder()
 	handler(rr, req)
 
@@ -268,7 +285,8 @@ func TestHandleDeleteIssueTabs_MissingIssueID(t *testing.T) {
 	store, _ := setupIssueTabsTest(t)
 	handler := handleDeleteIssueTabs(store)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/issues//tabs", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/"+testWSID+"/issues//tabs", nil)
+	req = withWSContext(req, testWSID)
 	// Don't set path value to simulate missing issueId
 	rr := httptest.NewRecorder()
 	handler(rr, req)
@@ -288,13 +306,14 @@ func TestHandleDeleteIssueTabs_RemovesState(t *testing.T) {
 		Tabs:        []issuetabs.IssueTab{{ID: "details", Type: "details", Label: "Details", SortOrder: 0}},
 		ActiveTabID: "details",
 	}
-	if err := store.Save(ctx, state); err != nil {
+	if err := store.Save(ctx, testWSID, state); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
 	handler := handleDeleteIssueTabs(store)
-	req := httptest.NewRequest(http.MethodDelete, "/api/issues/DEL-ISSUE/tabs", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/"+testWSID+"/issues/DEL-ISSUE/tabs", nil)
 	req.SetPathValue("issueId", "DEL-ISSUE")
+	req = withWSContext(req, testWSID)
 	rr := httptest.NewRecorder()
 	handler(rr, req)
 
@@ -311,7 +330,7 @@ func TestHandleDeleteIssueTabs_RemovesState(t *testing.T) {
 	}
 
 	// Verify it's gone from Redis
-	got, err := store.Get(ctx, "DEL-ISSUE")
+	got, err := store.Get(ctx, testWSID, "DEL-ISSUE")
 	if err != nil {
 		t.Fatalf("Get after delete: %v", err)
 	}
@@ -324,8 +343,9 @@ func TestHandleDeleteIssueTabs_NonExistentIssue(t *testing.T) {
 	store, _ := setupIssueTabsTest(t)
 	handler := handleDeleteIssueTabs(store)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/issues/NONEXISTENT/tabs", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/"+testWSID+"/issues/NONEXISTENT/tabs", nil)
 	req.SetPathValue("issueId", "NONEXISTENT")
+	req = withWSContext(req, testWSID)
 	rr := httptest.NewRecorder()
 	handler(rr, req)
 
@@ -342,8 +362,9 @@ func TestHandleGetIssueTabs_InvalidIssueID(t *testing.T) {
 	handler := handleGetIssueTabs(store, nil)
 
 	// Issue ID with invalid characters should fail validation
-	req := httptest.NewRequest(http.MethodGet, "/api/issues/PROJ@!#/tabs", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testWSID+"/issues/PROJ@!#/tabs", nil)
 	req.SetPathValue("issueId", "PROJ@!#")
+	req = withWSContext(req, testWSID)
 	rr := httptest.NewRecorder()
 	handler(rr, req)
 
@@ -367,8 +388,9 @@ func TestHandleGetIssueTabs_EmptyIssueID(t *testing.T) {
 	store, _ := setupIssueTabsTest(t)
 	handler := handleGetIssueTabs(store, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/issues//tabs", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testWSID+"/issues//tabs", nil)
 	req.SetPathValue("issueId", "")
+	req = withWSContext(req, testWSID)
 	rr := httptest.NewRecorder()
 	handler(rr, req)
 
@@ -388,8 +410,9 @@ func TestHandleGetIssueTabs_PoolError(t *testing.T) {
 
 	handler := handleGetIssueTabs(store, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/issues/POOL-ERR/tabs", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testWSID+"/issues/POOL-ERR/tabs", nil)
 	req.SetPathValue("issueId", "POOL-ERR")
+	req = withWSContext(req, testWSID)
 	rr := httptest.NewRecorder()
 	handler(rr, req)
 
@@ -421,13 +444,14 @@ func TestHandleGetIssueTabs_EmptyTabs(t *testing.T) {
 		Tabs:        []issuetabs.IssueTab{},
 		ActiveTabID: "",
 	}
-	if err := store.Save(ctx, state); err != nil {
+	if err := store.Save(ctx, testWSID, state); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
 	handler := handleGetIssueTabs(store, nil)
-	req := httptest.NewRequest(http.MethodGet, "/api/issues/EMPTY-TABS/tabs", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testWSID+"/issues/EMPTY-TABS/tabs", nil)
 	req.SetPathValue("issueId", "EMPTY-TABS")
+	req = withWSContext(req, testWSID)
 	rr := httptest.NewRecorder()
 	handler(rr, req)
 
@@ -461,8 +485,9 @@ func TestHandleDeleteIssueTabs_PoolTimeout(t *testing.T) {
 
 	handler := handleDeleteIssueTabs(store)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/issues/TIMEOUT-DEL/tabs", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/"+testWSID+"/issues/TIMEOUT-DEL/tabs", nil)
 	req.SetPathValue("issueId", "TIMEOUT-DEL")
+	req = withWSContext(req, testWSID)
 	rr := httptest.NewRecorder()
 	handler(rr, req)
 
@@ -488,8 +513,9 @@ func TestHandleDeleteIssueTabs_InvalidIssueID(t *testing.T) {
 	store, _ := setupIssueTabsTest(t)
 	handler := handleDeleteIssueTabs(store)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/issues/BAD@ID/tabs", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/"+testWSID+"/issues/BAD@ID/tabs", nil)
 	req.SetPathValue("issueId", "BAD@ID")
+	req = withWSContext(req, testWSID)
 	rr := httptest.NewRecorder()
 	handler(rr, req)
 
@@ -502,8 +528,9 @@ func TestHandleDeleteIssueTabs_EmptyIssueID(t *testing.T) {
 	store, _ := setupIssueTabsTest(t)
 	handler := handleDeleteIssueTabs(store)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/issues//tabs", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/"+testWSID+"/issues//tabs", nil)
 	req.SetPathValue("issueId", "")
+	req = withWSContext(req, testWSID)
 	rr := httptest.NewRecorder()
 	handler(rr, req)
 

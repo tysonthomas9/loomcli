@@ -5,7 +5,8 @@ package webui
 // The cli package provides the concrete implementation.
 type GitOps interface {
 	// ResolveAgentWorktree resolves an agent name to its worktree info.
-	ResolveAgentWorktree(name string) (*AgentWorktree, error)
+	// workspaceID scopes discovery to a specific workspace (empty = default).
+	ResolveAgentWorktree(workspaceID, name string) (*AgentWorktree, error)
 
 	// Push merges the source branch into the target branch (loom push semantics).
 	Push(worktreePath, sourceBranch, targetBranch, remote string) (*GitPushResult, error)
@@ -30,10 +31,12 @@ type GitOps interface {
 	CheckGhInstalled() error
 
 	// SetRepoDefaultBranch updates the target branch for a named repo.
-	SetRepoDefaultBranch(repoName, branch string) error
+	// workspaceID scopes resolution to a specific workspace (empty = default).
+	SetRepoDefaultBranch(workspaceID, repoName, branch string) error
 
 	// ListAgentWorktrees returns all agent worktrees.
-	ListAgentWorktrees() ([]AgentWorktree, error)
+	// workspaceID scopes discovery to a specific workspace (empty = default).
+	ListAgentWorktrees(workspaceID string) ([]AgentWorktree, error)
 
 	// DiffStat returns line-level diff statistics for a worktree vs a base ref.
 	DiffStat(worktreePath, fromRef string) DiffStatResult

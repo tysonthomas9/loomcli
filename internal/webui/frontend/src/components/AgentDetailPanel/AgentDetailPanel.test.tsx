@@ -93,6 +93,11 @@ vi.mock("@/components/FileEditorPanel", () => ({
   ),
 }));
 
+// Mock useWorkspaceContext
+vi.mock("@/hooks/useWorkspaceContext", () => ({
+  useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
+}));
+
 // Mock fetchDiffCommits from @/api for "Show all commits" tests
 const mockFetchDiffCommits = vi.fn();
 vi.mock("@/api", async (importOriginal) => {
@@ -519,7 +524,10 @@ describe("AgentDetailPanel", () => {
       fireEvent.click(screen.getByText("Show all 15 commits"));
 
       await waitFor(() => {
-        expect(mockFetchDiffCommits).toHaveBeenCalledWith("falcon");
+        expect(mockFetchDiffCommits).toHaveBeenCalledWith(
+          "test-ws-id",
+          "falcon",
+        );
       });
     });
 

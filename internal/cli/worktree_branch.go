@@ -93,7 +93,7 @@ func DetectIntegrationBranch(worktrees []WorktreeInfo) string {
 		}
 	}
 
-	repoPath := worktrees[0].Path
+	repoPath := worktrees[0].Path //nolint:gosec // safe: len(worktrees) == 0 is checked above
 
 	// Get all remote branches as candidates
 	output, err := RunGitCommand(repoPath, "branch", "-r", "--format=%(refname:short)")

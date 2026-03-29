@@ -196,10 +196,11 @@ Icon-only vertical navigation rail. Pure presentation component driven by App.ts
 **File:** `frontend/src/hooks/useViewState.ts`
 
 Bidirectional URL sync for `?view=`:
-- `setView()` uses `replaceState` (no history entry)
-- `navigateToView()` uses `pushState` (history entry for back/forward)
-- `urlIssueId` extracted from `?issue=` param
-- `popstate` listener for browser back/forward
+- `setView()` uses `navigate()` with `{ replace: true, flushSync: true }` (no history entry)
+- `navigateToView()` uses `navigate()` with `{ replace: false, flushSync: true }` (history entry for back/forward)
+- `buildViewUrl()` helper reconstructs URL preserving other search params
+
+**Why `navigate()` with `flushSync` instead of `setSearchParams`:** React Router v7 wraps `setSearchParams` updates in `React.startTransition()`, making them low-priority and interruptible. When the terminal view is actively streaming WebSocket data, those normal-priority state updates continuously interrupt the pending transition, causing the view switch to be indefinitely deferred. Using `navigate()` with `{ flushSync: true }` forces synchronous commit, ensuring immediate view switching even with active WebSocket streams.
 
 ---
 
@@ -373,6 +374,8 @@ These routes use `WorkspaceMiddleware` (extracts `{ws}` from path) instead of `O
 - **WorkspaceProvider as single source of truth.** All workspace-aware components consume `useWorkspaceContext()`.
 - **Module-level workspace cache.** Deduplicates concurrent requests, generation tracking prevents stale responses.
 - **Optimistic UI for CRUD.** Default, reorder, rename use optimistic updates with rollback. Delete uses delayed execution with undo toast.
+- **Stale workspace ID recovery.** `RedirectToWorkspace` validates `localStorage["loom:last-workspace-id"]` against the fetched workspace list before navigating. If the stored ID is stale (workspace deleted or migrated), it is cleared and the user is redirected to the default workspace. `WorkspaceLayout` also clears the stale ID on 404 to prevent redirect loops.
+- **`flushSync` for view switching.** `useViewState.setView()` uses `navigate()` with `{ flushSync: true }` to bypass React Router v7's `startTransition` deferral, ensuring immediate view switches even when the terminal streams continuous WebSocket data.
 
 ---
 

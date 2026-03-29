@@ -11,11 +11,25 @@ import (
 	"time"
 )
 
+// grabEphemeralPort asks the OS to assign a free port, then releases it and
+// returns the port number. The caller rebinds immediately in the same goroutine,
+// so the race window is vanishingly small compared to hardcoded-port collisions
+// across parallel worktree runs.
+func grabEphemeralPort(t *testing.T) int {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to grab ephemeral port: %v", err)
+	}
+	port := l.Addr().(*net.TCPAddr).Port
+	l.Close()
+	return port
+}
+
 // TestFindAvailablePort_FirstPortFree tests that findAvailablePort returns the first port
 // when it is available.
 func TestFindAvailablePort_FirstPortFree(t *testing.T) {
-	// Use a high port number to avoid conflicts with common services
-	startPort := 59100
+	startPort := grabEphemeralPort(t)
 
 	listener, port, err := findAvailablePort("127.0.0.1", startPort, 5)
 	if err != nil {
@@ -31,49 +45,45 @@ func TestFindAvailablePort_FirstPortFree(t *testing.T) {
 // TestFindAvailablePort_FallbackToNextPort tests that findAvailablePort falls back
 // to the next port when the first one is in use.
 func TestFindAvailablePort_FallbackToNextPort(t *testing.T) {
-	// Use a high port number to avoid conflicts
-	startPort := 59200
-
-	// Occupy the first port
-	addr := fmt.Sprintf("127.0.0.1:%d", startPort)
-	occupier, err := net.Listen("tcp", addr)
+	// Bind port 0 and keep it open as the occupier
+	occupier, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		t.Fatalf("failed to occupy port %d: %v", startPort, err)
+		t.Fatalf("failed to occupy ephemeral port: %v", err)
 	}
 	defer occupier.Close()
+	startPort := occupier.Addr().(*net.TCPAddr).Port
 
-	// Now findAvailablePort should return the next port
+	// findAvailablePort should skip the occupied startPort
 	listener, port, err := findAvailablePort("127.0.0.1", startPort, 5)
 	if err != nil {
 		t.Fatalf("findAvailablePort(%d, 5) failed: %v", startPort, err)
 	}
 	defer listener.Close()
 
-	want := startPort + 1
-	if port != want {
-		t.Errorf("findAvailablePort(%d, 5) = %d, want %d (first port is occupied)", startPort, port, want)
+	if port == startPort {
+		t.Errorf("findAvailablePort(%d, 5) returned the occupied port", startPort)
+	}
+	if port < startPort || port > startPort+4 {
+		t.Errorf("findAvailablePort(%d, 5) = %d, want port in range [%d, %d]", startPort, port, startPort+1, startPort+4)
 	}
 }
 
 // TestFindAvailablePort_FallbackMultiplePorts tests that findAvailablePort correctly
 // skips multiple occupied ports.
 func TestFindAvailablePort_FallbackMultiplePorts(t *testing.T) {
-	// Use a high port number to avoid conflicts
-	startPort := 59300
-
-	// Occupy the first three ports
+	// Bind 3 ephemeral ports and keep them open
 	var occupiers []net.Listener
+	occupiedSet := make(map[int]bool)
 	for i := 0; i < 3; i++ {
-		addr := fmt.Sprintf("127.0.0.1:%d", startPort+i)
-		occupier, err := net.Listen("tcp", addr)
+		l, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
-			// Clean up already created listeners
-			for _, l := range occupiers {
-				l.Close()
+			for _, o := range occupiers {
+				o.Close()
 			}
-			t.Fatalf("failed to occupy port %d: %v", startPort+i, err)
+			t.Fatalf("failed to grab ephemeral port: %v", err)
 		}
-		occupiers = append(occupiers, occupier)
+		occupiers = append(occupiers, l)
+		occupiedSet[l.Addr().(*net.TCPAddr).Port] = true
 	}
 	defer func() {
 		for _, l := range occupiers {
@@ -81,47 +91,47 @@ func TestFindAvailablePort_FallbackMultiplePorts(t *testing.T) {
 		}
 	}()
 
-	// Now findAvailablePort should return the fourth port
-	listener, port, err := findAvailablePort("127.0.0.1", startPort, 5)
+	// Use the lowest occupied port as startPort with enough attempts to scan past all
+	startPort := occupiers[0].Addr().(*net.TCPAddr).Port
+	for p := range occupiedSet {
+		if p < startPort {
+			startPort = p
+		}
+	}
+	maxPort := startPort
+	for p := range occupiedSet {
+		if p > maxPort {
+			maxPort = p
+		}
+	}
+	// Scan range must cover all occupied ports plus at least one more
+	maxAttempts := maxPort - startPort + 2
+
+	listener, port, err := findAvailablePort("127.0.0.1", startPort, maxAttempts)
 	if err != nil {
-		t.Fatalf("findAvailablePort(%d, 5) failed: %v", startPort, err)
+		t.Fatalf("findAvailablePort(%d, %d) failed: %v", startPort, maxAttempts, err)
 	}
 	defer listener.Close()
 
-	want := startPort + 3
-	if port != want {
-		t.Errorf("findAvailablePort(%d, 5) = %d, want %d (first 3 ports are occupied)", startPort, port, want)
+	if occupiedSet[port] {
+		t.Errorf("findAvailablePort returned an occupied port %d", port)
 	}
 }
 
 // TestFindAvailablePort_AllPortsInUse tests that findAvailablePort returns an error
 // when all ports in the range are occupied.
 func TestFindAvailablePort_AllPortsInUse(t *testing.T) {
-	// Use a high port number to avoid conflicts
-	startPort := 59400
-	maxAttempts := 3
-
-	// Occupy all ports in the range
-	var occupiers []net.Listener
-	for i := 0; i < maxAttempts; i++ {
-		addr := fmt.Sprintf("127.0.0.1:%d", startPort+i)
-		occupier, err := net.Listen("tcp", addr)
-		if err != nil {
-			// Clean up already created listeners
-			for _, l := range occupiers {
-				l.Close()
-			}
-			t.Fatalf("failed to occupy port %d: %v", startPort+i, err)
-		}
-		occupiers = append(occupiers, occupier)
+	// Bind a single port with :0 and keep it open, then use maxAttempts=1
+	// so findAvailablePort only tries that one port.
+	occupier, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to grab ephemeral port: %v", err)
 	}
-	defer func() {
-		for _, l := range occupiers {
-			l.Close()
-		}
-	}()
+	defer occupier.Close()
+	startPort := occupier.Addr().(*net.TCPAddr).Port
+	maxAttempts := 1
 
-	// Now findAvailablePort should return an error
+	// findAvailablePort should return an error
 	listener, port, err := findAvailablePort("127.0.0.1", startPort, maxAttempts)
 	if err == nil {
 		listener.Close()
@@ -137,37 +147,37 @@ func TestFindAvailablePort_AllPortsInUse(t *testing.T) {
 
 // TestFindAvailablePort_SingleAttempt tests findAvailablePort with maxAttempts=1.
 func TestFindAvailablePort_SingleAttempt(t *testing.T) {
-	// Use a high port number to avoid conflicts
-	startPort := 59500
-
-	// Test 1: Port is free
+	// Test 1: Port is free — use grabEphemeralPort (release-then-bind is fine
+	// because findAvailablePort will be the one binding it)
+	startPort := grabEphemeralPort(t)
 	listener, port, err := findAvailablePort("127.0.0.1", startPort, 1)
 	if err != nil {
 		t.Fatalf("findAvailablePort(%d, 1) failed: %v", startPort, err)
 	}
-	listener.Close() // Close immediately to reuse port in next test
+	listener.Close()
 
 	if port != startPort {
 		t.Errorf("findAvailablePort(%d, 1) = %d, want %d", startPort, port, startPort)
 	}
 
 	// Test 2: Port is occupied - should fail immediately
-	occupier, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", startPort))
+	occupier, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		t.Fatalf("failed to occupy port %d: %v", startPort, err)
+		t.Fatalf("failed to grab ephemeral port: %v", err)
 	}
 	defer occupier.Close()
+	occupiedPort := occupier.Addr().(*net.TCPAddr).Port
 
-	listener, port, err = findAvailablePort("127.0.0.1", startPort, 1)
+	listener, port, err = findAvailablePort("127.0.0.1", occupiedPort, 1)
 	if err == nil {
 		listener.Close()
-		t.Errorf("findAvailablePort(%d, 1) = %d, want error (port occupied with single attempt)", startPort, port)
+		t.Errorf("findAvailablePort(%d, 1) = %d, want error (port occupied with single attempt)", occupiedPort, port)
 	}
 }
 
 // TestFindAvailablePort_ZeroAttempts tests findAvailablePort with maxAttempts=0.
 func TestFindAvailablePort_ZeroAttempts(t *testing.T) {
-	startPort := 59600
+	startPort := grabEphemeralPort(t)
 
 	// With zero attempts, should immediately return error
 	listener, port, err := findAvailablePort("127.0.0.1", startPort, 0)
@@ -180,7 +190,7 @@ func TestFindAvailablePort_ZeroAttempts(t *testing.T) {
 // TestFindAvailablePort_ListenerIsUsable tests that the returned listener is actually
 // usable and the port remains bound.
 func TestFindAvailablePort_ListenerIsUsable(t *testing.T) {
-	startPort := 59700
+	startPort := grabEphemeralPort(t)
 
 	listener, port, err := findAvailablePort("127.0.0.1", startPort, 5)
 	if err != nil {
@@ -203,8 +213,7 @@ func TestFindAvailablePort_ListenerIsUsable(t *testing.T) {
 // confirm the server is functioning correctly with the timeout configuration.
 // The health endpoint is used because it does not require a daemon connection pool.
 func TestStartServer_WriteTimeout(t *testing.T) {
-	// Use a high port to avoid conflicts
-	port := 59800
+	port := grabEphemeralPort(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -290,6 +299,30 @@ func TestStartServer_WriteTimeout(t *testing.T) {
 	}
 }
 
+// TestExtractOrigin verifies extractOrigin returns scheme://host for valid URLs.
+func TestExtractOrigin(t *testing.T) {
+	tests := []struct {
+		name   string
+		rawURL string
+		want   string
+	}{
+		{"https without path", "https://auth.example.com", "https://auth.example.com"},
+		{"https with port and path", "https://auth.example.com:8443/path", "https://auth.example.com:8443"},
+		{"http localhost with port", "http://localhost:3000", "http://localhost:3000"},
+		{"empty string", "", ""},
+		{"not a url", "not-a-url", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractOrigin(tt.rawURL)
+			if got != tt.want {
+				t.Errorf("extractOrigin(%q) = %q, want %q", tt.rawURL, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestDefaultConfig tests that DefaultConfig returns sensible defaults.
 func TestDefaultConfig(t *testing.T) {
 	config := DefaultConfig()
@@ -324,7 +357,7 @@ func TestDefaultConfig(t *testing.T) {
 // opposite concern from streaming handlers: non-streaming handlers must complete
 // within the WriteTimeout, which they easily do for well-behaved requests.
 func TestStartServer_WriteTimeout_NonStreamingEndpoint(t *testing.T) {
-	port := 59810
+	port := grabEphemeralPort(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

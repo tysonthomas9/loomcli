@@ -20,6 +20,7 @@ import {
 } from "react";
 
 import { fetchScrollback } from "@/api/terminal";
+import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
 import { stripAnsi } from "@/utils/stripAnsi";
 import {
   startAutoReconnect,
@@ -130,6 +131,7 @@ export const TerminalInstance = forwardRef<
   },
   ref,
 ) {
+  const { workspaceId } = useWorkspaceContext();
   const termRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -208,6 +210,7 @@ export const TerminalInstance = forwardRef<
 
     const doWsConnect = () => {
       const cleanupWs = connectWebSocket(
+        workspaceId,
         sessionName,
         terminal,
         fitAddon,
@@ -248,7 +251,7 @@ export const TerminalInstance = forwardRef<
     };
 
     if (hasConnectedRef.current) {
-      fetchScrollback(sessionName)
+      fetchScrollback(workspaceId, sessionName)
         .then(({ content }) => {
           if (content) {
             terminal.clear();
@@ -398,7 +401,7 @@ export const TerminalInstance = forwardRef<
     searchAddonRef.current = searchAddon;
 
     // Create slash command interceptor for this terminal instance
-    const interceptor = new SlashCommandInterceptor(terminal);
+    const interceptor = new SlashCommandInterceptor(terminal, workspaceId);
     interceptorRef.current = interceptor;
 
     // Forward search result changes (N of M counter)
@@ -540,6 +543,7 @@ export const TerminalInstance = forwardRef<
       wsCleanupRef.current?.();
       const startWs = () => {
         const cleanup = connectWebSocket(
+          workspaceId,
           sessionName,
           terminal,
           fitAddon,
@@ -600,7 +604,7 @@ export const TerminalInstance = forwardRef<
         wsCleanupRef.current = cleanup;
       };
       if (withScrollback && hasConnectedRef.current) {
-        fetchScrollback(sessionName)
+        fetchScrollback(workspaceId, sessionName)
           .then(({ content }) => {
             if (mounted && content) {
               terminal.clear();

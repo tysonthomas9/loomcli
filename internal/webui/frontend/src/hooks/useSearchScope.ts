@@ -7,7 +7,7 @@
 import { useMemo, useCallback } from "react";
 
 import { useWorkspaceContext } from "./useWorkspaceContext";
-import { useWorkspaceParam } from "./useWorkspaceParam";
+import { useRepoFilterParam } from "./useRepoFilterParam";
 
 export interface UseSearchScopeReturn {
   /** Display name for the active scope. Undefined when showing all repos. */
@@ -29,7 +29,7 @@ export function useSearchScope(): UseSearchScopeReturn {
     selectAll,
   } = useWorkspaceContext();
 
-  const [, setWorkspaceParam] = useWorkspaceParam();
+  const [, setRepoFilterParam] = useRepoFilterParam();
 
   const scopeName = useMemo(() => {
     if (isAllSelected || selectedRepoNames.size === 0) return undefined;
@@ -51,8 +51,8 @@ export function useSearchScope(): UseSearchScopeReturn {
 
   const clearScope = useCallback(() => {
     selectAll();
-    setWorkspaceParam(null);
-  }, [selectAll, setWorkspaceParam]);
+    setRepoFilterParam(null);
+  }, [selectAll, setRepoFilterParam]);
 
   return { scopeName, clearScope };
 }

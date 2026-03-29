@@ -29,7 +29,7 @@ func TestNewTerminalManager_NoTmux(t *testing.T) {
 	}
 	t.Cleanup(func() { lookPathTmux = orig })
 
-	_, err := NewTerminalManager("bash", "test", 0)
+	_, err := NewTerminalManager("bash", testRunPrefix+"-test", 0)
 	if !errors.Is(err, ErrTmuxNotFound) {
 		t.Errorf("expected ErrTmuxNotFound, got: %v", err)
 	}
@@ -1246,9 +1246,9 @@ drainLoop:
 		t.Fatalf("failed to send text command: %v", err)
 	}
 
-	// Read output and look for our marker
+	// Read output and look for our marker (15s to handle CPU pressure from parallel runs)
 	found := false
-	deadline := time.After(5 * time.Second)
+	deadline := time.After(15 * time.Second)
 textLoop:
 	for {
 		select {
@@ -1273,7 +1273,7 @@ textLoop:
 	}
 
 	foundBinary := false
-	deadline2 := time.After(5 * time.Second)
+	deadline2 := time.After(15 * time.Second)
 binaryLoop:
 	for {
 		select {
@@ -1406,7 +1406,7 @@ func TestHandleTerminalWS_MaxSessionsReached(t *testing.T) {
 		t.Fatalf("failed to create terminal manager: %v", err)
 	}
 
-	name := "test-" + t.Name()
+	name := testSessionName(t)
 	t.Cleanup(func() {
 		manager.Shutdown()
 		killTmuxSession(t, name)
@@ -1744,7 +1744,7 @@ func TestHandleTerminalWS_SSEBroadcastOnIssueSession(t *testing.T) {
 	now := time.Now().UTC()
 	err = store.Set(ctx, &tabmeta.TabMetadata{
 		SessionName: "issue-PROJ-42",
-		Workspace:   DefaultWorkspace,
+		Workspace:   "default",
 		Label:       "issue-PROJ-42",
 		IssueID:     "PROJ-42",
 		CreatedAt:   now,
@@ -1755,10 +1755,12 @@ func TestHandleTerminalWS_SSEBroadcastOnIssueSession(t *testing.T) {
 	}
 
 	// Register an SSE client on the hub to capture broadcast events.
+	// WorkspaceID must match the workspace in the tab metadata ("default").
 	client := &SSEClient{
-		id:   1,
-		send: make(chan *MutationPayload, 64),
-		done: make(chan struct{}),
+		id:          1,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		workspaceID: "default",
 	}
 	hub.RegisterClient(client)
 	defer hub.UnregisterClient(client)
@@ -1820,7 +1822,7 @@ func TestHandleTerminalWS_NoSSEBroadcastWithoutIssueID(t *testing.T) {
 	now := time.Now().UTC()
 	err = store.Set(ctx, &tabmeta.TabMetadata{
 		SessionName: "plain-session",
-		Workspace:   DefaultWorkspace,
+		Workspace:   "default",
 		Label:       "plain-session",
 		IssueID:     "",
 		CreatedAt:   now,

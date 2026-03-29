@@ -190,18 +190,23 @@ export type {
 export { useTheme } from "./useTheme";
 export type { Theme, UseThemeReturn } from "./useTheme";
 
-export { useWorkspaceState } from "./useWorkspaceState";
+export {
+  useWorkspaceState,
+  clearWorkspaceSnapshots,
+} from "./useWorkspaceState";
 export type {
   WorkspaceSnapshot,
   UseWorkspaceStateParams,
-  UseWorkspaceStateReturn,
 } from "./useWorkspaceState";
 
-export { useWorkspaceParam, parseWorkspaceFromUrl } from "./useWorkspaceParam";
+export {
+  useRepoFilterParam,
+  parseRepoFilterFromUrl,
+} from "./useRepoFilterParam";
 export type {
-  UseWorkspaceParamOptions,
-  UseWorkspaceParamReturn,
-} from "./useWorkspaceParam";
+  UseRepoFilterParamOptions,
+  UseRepoFilterParamReturn,
+} from "./useRepoFilterParam";
 
 export { useSearchScope } from "./useSearchScope";
 export type { UseSearchScopeReturn } from "./useSearchScope";

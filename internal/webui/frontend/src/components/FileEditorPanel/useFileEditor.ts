@@ -60,11 +60,12 @@ export interface UseFileEditorReturn {
 }
 
 export function useFileEditor(
+  workspaceId: string,
   agentName: string,
   isActive: boolean,
 ): UseFileEditorReturn {
-  const tree = useFileTree(agentName);
-  const fileContent = useFileContent(agentName);
+  const tree = useFileTree(workspaceId, agentName);
+  const fileContent = useFileContent(workspaceId, agentName);
   const { showToast } = useToast();
 
   const [content, setContent] = useState<string>("");
@@ -133,7 +134,12 @@ export function useFileEditor(
 
     setIsSaving(true);
     try {
-      await writeWorktreeFile(agentName, tree.selectedPath, content);
+      await writeWorktreeFile(
+        workspaceId,
+        agentName,
+        tree.selectedPath,
+        content,
+      );
       if (mountedRef.current) {
         savedContentRef.current = content;
         showToast("File saved", { type: "success" });
@@ -150,7 +156,15 @@ export function useFileEditor(
         setIsSaving(false);
       }
     }
-  }, [agentName, tree.selectedPath, content, isDirty, isSaving, showToast]);
+  }, [
+    workspaceId,
+    agentName,
+    tree.selectedPath,
+    content,
+    isDirty,
+    isSaving,
+    showToast,
+  ]);
 
   const confirmDiscard = useCallback(() => {
     if (!pendingAction) return;

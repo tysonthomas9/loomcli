@@ -1,9 +1,10 @@
 /**
  * useRepoFilter - React hook for managing repo selection with URL synchronization.
- * Follows useViewState pattern: URL-synced state via replaceState + popstate.
+ * Uses React Router's useSearchParams instead of manual pushState/replaceState.
  */
 
-import { useState, useCallback, useEffect } from "react";
+import { useCallback, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 
 const REPOS_PARAM = "repos";
 
@@ -21,26 +22,11 @@ export interface UseRepoFilterOptions {
 export type UseRepoFilterReturn = [string[], (repos: string[]) => void];
 
 /**
- * Check if running in browser environment.
+ * Parse repos from URLSearchParams.
  */
-function isBrowser(): boolean {
-  return (
-    typeof window !== "undefined" && typeof window.location !== "undefined"
-  );
-}
-
-/**
- * Parse repos from URL search parameters.
- * Returns empty array for missing or empty param (meaning "all repos").
- */
-export function parseReposFromUrl(): string[] {
-  if (!isBrowser()) return [];
-
-  const params = new URLSearchParams(window.location.search);
+function parseReposFromSearchParams(params: URLSearchParams): string[] {
   const raw = params.get(REPOS_PARAM);
-
   if (!raw) return [];
-
   return raw
     .split(",")
     .map((s) => s.trim())
@@ -48,26 +34,13 @@ export function parseReposFromUrl(): string[] {
 }
 
 /**
- * Update URL with repos param without triggering navigation.
- * Removes the param when repos is empty (all repos) for clean URLs.
+ * Parse repos from URL search parameters (legacy compat).
  */
-function updateReposUrl(repos: string[]): void {
-  if (!isBrowser()) return;
-
-  const params = new URLSearchParams(window.location.search);
-
-  if (repos.length === 0) {
-    params.delete(REPOS_PARAM);
-  } else {
-    params.set(REPOS_PARAM, repos.join(","));
-  }
-
-  const queryString = params.toString();
-  const newUrl = queryString
-    ? `${window.location.pathname}?${queryString}`
-    : window.location.pathname;
-
-  window.history.replaceState(null, "", newUrl);
+export function parseReposFromUrl(): string[] {
+  if (typeof window === "undefined" || !window.location) return [];
+  return parseReposFromSearchParams(
+    new URLSearchParams(window.location.search),
+  );
 }
 
 /**
@@ -75,40 +48,32 @@ function updateReposUrl(repos: string[]): void {
  * Empty array means "all repos" (no filtering).
  */
 export function useRepoFilter(
-  options: UseRepoFilterOptions = {},
+  _options: UseRepoFilterOptions = {},
 ): UseRepoFilterReturn {
-  const { syncUrl = true } = options;
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  const [repos, setReposState] = useState<string[]>(() => {
-    if (syncUrl) {
-      return parseReposFromUrl();
-    }
-    return [];
-  });
+  const repos = useMemo(
+    () => parseReposFromSearchParams(searchParams),
+    [searchParams],
+  );
 
-  // Sync URL when state changes
-  useEffect(() => {
-    if (syncUrl && isBrowser()) {
-      updateReposUrl(repos);
-    }
-  }, [repos, syncUrl]);
-
-  // Handle browser back/forward navigation
-  useEffect(() => {
-    if (!syncUrl || !isBrowser()) return;
-
-    const handlePopState = () => {
-      setReposState(parseReposFromUrl());
-    };
-
-    window.addEventListener("popstate", handlePopState);
-    return () => window.removeEventListener("popstate", handlePopState);
-  }, [syncUrl]);
-
-  // Memoized setter
-  const setRepos = useCallback((newRepos: string[]) => {
-    setReposState(newRepos);
-  }, []);
+  const setRepos = useCallback(
+    (newRepos: string[]) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (newRepos.length === 0) {
+            next.delete(REPOS_PARAM);
+          } else {
+            next.set(REPOS_PARAM, newRepos.join(","));
+          }
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
 
   return [repos, setRepos];
 }

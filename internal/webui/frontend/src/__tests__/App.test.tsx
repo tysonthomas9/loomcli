@@ -23,6 +23,14 @@ import type { Issue, Status } from "@/types";
 
 import App from "../App";
 
+// Mock react-router-dom
+const mockNavigate = vi.fn();
+vi.mock("react-router-dom", () => ({
+  useParams: vi.fn(() => ({ workspaceId: "test-ws-id" })),
+  useNavigate: vi.fn(() => mockNavigate),
+  useSearchParams: vi.fn(() => [new URLSearchParams(), vi.fn()]),
+}));
+
 // Create hoisted mocks for @/api functions used by handleApprove/handleReject
 const { mockCloseIssue, mockUpdateIssue, mockAddComment } = vi.hoisted(() => ({
   mockCloseIssue: vi.fn(),
@@ -207,22 +215,20 @@ const { mockUseViewState, mockSetActiveView, mockNavigateToView } = vi.hoisted(
 
 /**
  * Helper to create a useViewState return value (object shape).
+ * After T12 migration: no urlIssueId (removed from hook).
  */
 function createViewStateReturn(
   view: string,
   setter = mockSetActiveView,
-  issueId: string | null = null,
 ): {
   view: string;
   setView: typeof mockSetActiveView;
   navigateToView: typeof mockNavigateToView;
-  urlIssueId: string | null;
 } {
   return {
     view,
     setView: setter,
     navigateToView: mockNavigateToView,
-    urlIssueId: issueId,
   };
 }
 
@@ -352,13 +358,10 @@ vi.mock("@/hooks", () => ({
     sourceReposFilter: undefined,
     isMultiRepo: false,
   })),
-  useWorkspaceState: vi.fn(() => ({
-    currentWorkspaceId: null,
-    switchWorkspace: vi.fn(),
-  })),
+  useWorkspaceState: vi.fn(),
   useFocusReturn: vi.fn(),
   useFocusTrap: vi.fn(),
-  useWorkspaceParam: vi.fn(() => [null, vi.fn()]),
+  useRepoFilterParam: vi.fn(() => [null, vi.fn()]),
   useSearchScope: vi.fn(() => ({
     scopeName: undefined,
     clearScope: vi.fn(),
@@ -1512,7 +1515,7 @@ describe("App", () => {
       expect(fetchIssue).toHaveBeenCalledWith("issue-123");
     });
 
-    it("back button from issue-detail view restores previous view", () => {
+    it("back button from issue-detail view navigates via React Router", () => {
       const clearIssue = vi.fn();
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
@@ -1537,19 +1540,12 @@ describe("App", () => {
 
       render(<App />);
 
-      // Mock history.back
-      const historyBackSpy = vi
-        .spyOn(window.history, "back")
-        .mockImplementation(() => {});
-
       // Click the back button in IssueDetailView
       const backButton = screen.getByTestId("detail-back-button");
       fireEvent.click(backButton);
 
-      // Should call history.back() for proper browser navigation
-      expect(historyBackSpy).toHaveBeenCalled();
-
-      historyBackSpy.mockRestore();
+      // Should call navigate() via React Router (instead of window.history.back)
+      expect(mockNavigate).toHaveBeenCalled();
     });
 
     it("does not re-fetch when clicking the same issue that is already selected in detail view", () => {
@@ -1732,10 +1728,12 @@ describe("App", () => {
 
       render(<App />);
 
-      expect(useIssues).toHaveBeenCalledWith({
-        mode: "kanban",
-        workspaceName: null,
-      });
+      expect(useIssues).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mode: "kanban",
+          workspaceId: "test-ws-id",
+        }),
+      );
     });
 
     it('calls useIssues with mode: "ready" when activeView is "table"', () => {
@@ -1745,10 +1743,12 @@ describe("App", () => {
 
       render(<App />);
 
-      expect(useIssues).toHaveBeenCalledWith({
-        mode: "ready",
-        workspaceName: null,
-      });
+      expect(useIssues).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mode: "ready",
+          workspaceId: "test-ws-id",
+        }),
+      );
     });
 
     it('calls useIssues with mode: "graph" when activeView is "graph"', () => {
@@ -1758,10 +1758,12 @@ describe("App", () => {
 
       render(<App />);
 
-      expect(useIssues).toHaveBeenCalledWith({
-        mode: "graph",
-        workspaceName: null,
-      });
+      expect(useIssues).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mode: "graph",
+          workspaceId: "test-ws-id",
+        }),
+      );
     });
 
     it("refetches issues when view changes from kanban to graph", () => {
@@ -1777,7 +1779,7 @@ describe("App", () => {
       // Verify initial call with mode: 'kanban'
       expect(useIssues).toHaveBeenLastCalledWith({
         mode: "kanban",
-        workspaceName: null,
+        workspaceId: "test-ws-id",
       });
 
       // Clear mock to track the next call
@@ -1791,7 +1793,7 @@ describe("App", () => {
       // Verify useIssues is called with mode: 'graph' after view change
       expect(useIssues).toHaveBeenLastCalledWith({
         mode: "graph",
-        workspaceName: null,
+        workspaceId: "test-ws-id",
       });
     });
 
@@ -1808,7 +1810,7 @@ describe("App", () => {
       // Verify initial call with mode: 'graph'
       expect(useIssues).toHaveBeenLastCalledWith({
         mode: "graph",
-        workspaceName: null,
+        workspaceId: "test-ws-id",
       });
 
       // Clear mock to track the next call
@@ -1822,7 +1824,7 @@ describe("App", () => {
       // Verify useIssues is called with mode: 'kanban' after view change
       expect(useIssues).toHaveBeenLastCalledWith({
         mode: "kanban",
-        workspaceName: null,
+        workspaceId: "test-ws-id",
       });
     });
 
@@ -1839,7 +1841,7 @@ describe("App", () => {
       // Verify initial call with mode: 'graph'
       expect(useIssues).toHaveBeenLastCalledWith({
         mode: "graph",
-        workspaceName: null,
+        workspaceId: "test-ws-id",
       });
 
       // Clear mock to track the next call
@@ -1853,7 +1855,7 @@ describe("App", () => {
       // Verify useIssues is called with mode: 'ready' after view change
       expect(useIssues).toHaveBeenLastCalledWith({
         mode: "ready",
-        workspaceName: null,
+        workspaceId: "test-ws-id",
       });
     });
 
@@ -1870,7 +1872,7 @@ describe("App", () => {
       // Verify initial call with mode: 'kanban'
       expect(useIssues).toHaveBeenLastCalledWith({
         mode: "kanban",
-        workspaceName: null,
+        workspaceId: "test-ws-id",
       });
 
       // Clear mock to track the next call
@@ -1884,7 +1886,7 @@ describe("App", () => {
       // Verify useIssues is still called with mode: 'ready'
       expect(useIssues).toHaveBeenLastCalledWith({
         mode: "ready",
-        workspaceName: null,
+        workspaceId: "test-ws-id",
       });
     });
 
@@ -1920,10 +1922,12 @@ describe("App", () => {
 
       render(<App />);
 
-      expect(useIssues).toHaveBeenCalledWith({
-        mode: "ready",
-        workspaceName: null,
-      });
+      expect(useIssues).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mode: "ready",
+          workspaceId: "test-ws-id",
+        }),
+      );
     });
   });
 
@@ -2374,7 +2378,7 @@ describe("App", () => {
       ];
       // Set view to issue-detail with a different issue
       mockUseViewState.mockReturnValue(
-        createViewStateReturn("issue-detail", mockSetActiveView, "other-issue"),
+        createViewStateReturn("issue-detail", mockSetActiveView),
       );
       const mockReturn = createMockUseIssuesReturn({ issues });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
@@ -2734,6 +2738,7 @@ describe("App", () => {
       await waitFor(() => {
         expect(mockCloseIssue).toHaveBeenCalledTimes(1);
         expect(mockCloseIssue).toHaveBeenCalledWith(
+          "test-ws-id",
           "code-issue",
           "PR approved after code review",
         );
@@ -2791,6 +2796,7 @@ describe("App", () => {
       await waitFor(() => {
         expect(mockAddComment).toHaveBeenCalledTimes(1);
         expect(mockAddComment).toHaveBeenCalledWith(
+          "test-ws-id",
           "reject-issue",
           "FEEDBACK: Needs more work on the design",
         );
@@ -2798,10 +2804,14 @@ describe("App", () => {
 
       await waitFor(() => {
         expect(mockUpdateIssue).toHaveBeenCalledTimes(1);
-        expect(mockUpdateIssue).toHaveBeenCalledWith("reject-issue", {
-          status: "open",
-          add_labels: ["needs-revision"],
-        });
+        expect(mockUpdateIssue).toHaveBeenCalledWith(
+          "test-ws-id",
+          "reject-issue",
+          {
+            status: "open",
+            add_labels: ["needs-revision"],
+          },
+        );
       });
 
       await waitFor(() => {
@@ -2853,6 +2863,7 @@ describe("App", () => {
       await waitFor(() => {
         expect(mockAddComment).toHaveBeenCalledTimes(1);
         expect(mockAddComment).toHaveBeenCalledWith(
+          "test-ws-id",
           "code-reject-issue",
           "CODE REVIEW: Fix the lint errors",
         );

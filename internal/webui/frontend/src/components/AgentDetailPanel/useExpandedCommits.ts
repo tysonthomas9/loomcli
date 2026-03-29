@@ -9,7 +9,10 @@ import type { LoomCommitDetail } from "@/types/agent";
  * Returns expanded commits (or null if not expanded), loading state,
  * and handlers to show all / show less.
  */
-export function useExpandedCommits(agentName: string | null) {
+export function useExpandedCommits(
+  workspaceId: string,
+  agentName: string | null,
+) {
   const [expandedCommits, setExpandedCommits] = useState<
     LoomCommitDetail[] | null
   >(null);
@@ -29,7 +32,7 @@ export function useExpandedCommits(agentName: string | null) {
     if (!name) return;
     setLoadingCommits(true);
     try {
-      const allCommits = await fetchDiffCommits(name);
+      const allCommits = await fetchDiffCommits(workspaceId, name);
       if (agentNameRef.current !== name) return;
       setExpandedCommits(
         allCommits.map((c: DiffCommit) => ({
@@ -44,7 +47,7 @@ export function useExpandedCommits(agentName: string | null) {
         setLoadingCommits(false);
       }
     }
-  }, []);
+  }, [workspaceId]);
 
   const handleShowLess = useCallback(() => {
     setExpandedCommits(null);

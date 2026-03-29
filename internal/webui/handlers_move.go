@@ -61,24 +61,34 @@ func (p *movePoolAdapter) Get(ctx context.Context) (issueMover, error) {
 func (p *movePoolAdapter) Put(client issueMover) {
 	if c, ok := client.(*rpc.Client); ok {
 		p.pool.Put(c)
+	} else if client != nil {
+		log.Printf("movePoolAdapter.Put: unexpected client type %T — connection leaked", client)
 	}
 }
 
 // handleMoveIssue returns a handler that moves an issue to a different workspace.
-func handleMoveIssue(pool daemon.Pool, workspaceConfigFn func() (*WorkspaceData, error)) http.HandlerFunc {
-	if pool == nil {
-		return handleMoveIssueWithPool(nil, workspaceConfigFn)
+// multiPool, when non-nil, is used to acquire a connection to the target workspace
+// so that Create routes to the correct daemon. When nil, cross-workspace moves
+// are rejected with 400.
+func handleMoveIssue(pool daemon.Pool, multiPool *daemon.MultiPool, workspaceConfigFn func() (*WorkspaceData, error)) http.HandlerFunc {
+	var sourcePool moveConnectionGetter
+	if pool != nil {
+		sourcePool = &movePoolAdapter{pool: pool}
 	}
-	return handleMoveIssueWithPool(&movePoolAdapter{pool: pool}, workspaceConfigFn)
+	var targetPool moveConnectionGetter
+	if multiPool != nil {
+		targetPool = &movePoolAdapter{pool: multiPool}
+	}
+	return handleMoveIssueWithPool(sourcePool, targetPool, workspaceConfigFn)
 }
 
 // validateMoveRequest parses and validates the move request.
-// Returns the issue ID, target workspace, and whether validation passed.
-func validateMoveRequest(w http.ResponseWriter, r *http.Request, workspaceConfigFn func() (*WorkspaceData, error)) (string, string, bool) {
+// Returns the issue ID, target workspace, workspace data, and whether validation passed.
+func validateMoveRequest(w http.ResponseWriter, r *http.Request, workspaceConfigFn func() (*WorkspaceData, error)) (string, string, *WorkspaceData, bool) {
 	issueID := r.PathValue("id")
 	if issueID == "" {
 		respondJSON(w, http.StatusBadRequest, MoveIssueResponse{Success: false, Error: "missing issue ID in path"})
-		return "", "", false
+		return "", "", nil, false
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
@@ -87,40 +97,40 @@ func validateMoveRequest(w http.ResponseWriter, r *http.Request, workspaceConfig
 		var maxBytesErr *http.MaxBytesError
 		if errors.As(err, &maxBytesErr) {
 			respondJSON(w, http.StatusRequestEntityTooLarge, MoveIssueResponse{Success: false, Error: "request body too large (max 1MB)"})
-			return "", "", false
+			return "", "", nil, false
 		}
 		respondJSON(w, http.StatusBadRequest, MoveIssueResponse{Success: false, Error: "invalid request body"})
-		return "", "", false
+		return "", "", nil, false
 	}
 
 	targetWorkspace := strings.TrimSpace(req.TargetWorkspace)
 	if targetWorkspace == "" {
 		respondJSON(w, http.StatusBadRequest, MoveIssueResponse{Success: false, Error: "target_workspace is required"})
-		return "", "", false
+		return "", "", nil, false
 	}
 
 	if workspaceConfigFn == nil {
 		respondJSON(w, http.StatusBadRequest, MoveIssueResponse{Success: false, Error: "workspace configuration not available"})
-		return "", "", false
+		return "", "", nil, false
 	}
 
 	wsData, err := workspaceConfigFn()
 	if err != nil {
 		respondJSON(w, http.StatusInternalServerError, MoveIssueResponse{Success: false, Error: "failed to load workspace config"})
-		return "", "", false
+		return "", "", nil, false
 	}
 
 	if !workspaceExists(wsData.Workspaces, targetWorkspace) {
 		respondJSON(w, http.StatusBadRequest, MoveIssueResponse{Success: false, Error: fmt.Sprintf("workspace %q not found", targetWorkspace)})
-		return "", "", false
+		return "", "", nil, false
 	}
 
 	if wsData.Name == targetWorkspace {
 		respondJSON(w, http.StatusBadRequest, MoveIssueResponse{Success: false, Error: "cannot move issue to the same workspace"})
-		return "", "", false
+		return "", "", nil, false
 	}
 
-	return issueID, targetWorkspace, true
+	return issueID, targetWorkspace, wsData, true
 }
 
 // workspaceExists checks if a workspace name exists in the list.
@@ -131,6 +141,21 @@ func workspaceExists(workspaces []WorkspaceSummary, name string) bool {
 		}
 	}
 	return false
+}
+
+// resolveWorkspaceID maps a workspace name to its stable UUID.
+// Returns the UUID from WorkspaceSummary.ID when available, otherwise
+// falls back to the name (pre-UUID migration compatibility).
+func resolveWorkspaceID(wsData *WorkspaceData, name string) string {
+	for _, ws := range wsData.Workspaces {
+		if ws.Name == name {
+			if ws.ID != "" {
+				return ws.ID
+			}
+			return ws.Name
+		}
+	}
+	return name
 }
 
 // fetchSourceIssue retrieves and validates the source issue via RPC.
@@ -201,22 +226,70 @@ func buildCreateArgs(source *types.Issue, issueID string) *rpc.CreateArgs {
 	}
 }
 
+// createIssueInTarget acquires a client from the target pool and creates the
+// issue there. On error it writes the HTTP response and returns an error.
+// On success it returns the new issue ID.
+func createIssueInTarget(w http.ResponseWriter, targetPool moveConnectionGetter, targetCtx context.Context, targetWorkspace string, sourceIssue *types.Issue, sourceID string) (string, error) {
+	targetClient, err := targetPool.Get(targetCtx)
+	if err != nil {
+		if errors.Is(err, daemon.ErrWorkspaceNotRegistered) {
+			respondJSON(w, http.StatusBadRequest, MoveIssueResponse{Success: false, Error: fmt.Sprintf("target workspace %q not registered", targetWorkspace)})
+			return "", err
+		}
+		log.Printf("Target pool error in handleMoveIssue for workspace %q: %v", targetWorkspace, err)
+		respondJSON(w, http.StatusBadGateway, MoveIssueResponse{Success: false, Error: "target workspace daemon not available"})
+		return "", err
+	}
+	defer targetPool.Put(targetClient)
+
+	createResp, err := targetClient.Create(buildCreateArgs(sourceIssue, sourceID))
+	if err != nil {
+		log.Printf("RPC Create error in handleMoveIssue: %v", err)
+		respondJSON(w, http.StatusInternalServerError, MoveIssueResponse{Success: false, Error: "failed to create issue in target workspace"})
+		return "", err
+	}
+	if !createResp.Success {
+		respondJSON(w, http.StatusInternalServerError, MoveIssueResponse{Success: false, Error: fmt.Sprintf("failed to create issue: %s", createResp.Error)})
+		return "", fmt.Errorf("create failed: %s", createResp.Error)
+	}
+
+	var createdIssue types.Issue
+	if err := json.Unmarshal(createResp.Data, &createdIssue); err != nil {
+		log.Printf("Failed to parse created issue in handleMoveIssue: %v", err)
+		respondJSON(w, http.StatusInternalServerError, MoveIssueResponse{Success: false, Error: "issue created but failed to parse response"})
+		return "", err
+	}
+
+	return createdIssue.ID, nil
+}
+
 // handleMoveIssueWithPool is the internal implementation that accepts interfaces for testing.
-func handleMoveIssueWithPool(pool moveConnectionGetter, workspaceConfigFn func() (*WorkspaceData, error)) http.HandlerFunc {
+// targetPool is used to acquire a connection to the target workspace for Create.
+// When targetPool is nil, cross-workspace moves are rejected.
+func handleMoveIssueWithPool(pool moveConnectionGetter, targetPool moveConnectionGetter, workspaceConfigFn func() (*WorkspaceData, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if pool == nil {
 			respondJSON(w, http.StatusServiceUnavailable, MoveIssueResponse{Success: false, Error: "connection pool not initialized"})
 			return
 		}
 
-		issueID, targetWorkspace, ok := validateMoveRequest(w, r, workspaceConfigFn)
+		issueID, targetWorkspace, wsData, ok := validateMoveRequest(w, r, workspaceConfigFn)
 		if !ok {
 			return
 		}
 
+		if targetPool == nil {
+			respondJSON(w, http.StatusBadRequest, MoveIssueResponse{Success: false, Error: "cross-workspace move requires multi-workspace mode"})
+			return
+		}
+
+		// Resolve target workspace name → ID before any RPC calls.
+		targetWsID := resolveWorkspaceID(wsData, targetWorkspace)
+
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancel()
 
+		// Source client — used for Show, AddComment, CloseIssue
 		client, err := pool.Get(ctx)
 		if err != nil {
 			status := http.StatusServiceUnavailable
@@ -239,35 +312,21 @@ func handleMoveIssueWithPool(pool moveConnectionGetter, workspaceConfigFn func()
 			warnings = append(warnings, fmt.Sprintf("Active agent %q assigned to this issue. Moving will not stop the agent.", sourceIssue.Assignee))
 		}
 
-		// Create new issue in target workspace
-		createResp, err := client.Create(buildCreateArgs(sourceIssue, issueID))
+		// Create issue in target workspace via the target pool.
+		targetCtx := WithWorkspace(ctx, targetWsID)
+		newID, err := createIssueInTarget(w, targetPool, targetCtx, targetWorkspace, sourceIssue, issueID)
 		if err != nil {
-			log.Printf("RPC Create error in handleMoveIssue: %v", err)
-			respondJSON(w, http.StatusInternalServerError, MoveIssueResponse{Success: false, Error: "failed to create issue in target workspace"})
-			return
-		}
-		if !createResp.Success {
-			respondJSON(w, http.StatusInternalServerError, MoveIssueResponse{Success: false, Error: fmt.Sprintf("failed to create issue: %s", createResp.Error)})
-			return
+			return // createIssueInTarget already wrote the HTTP response
 		}
 
-		var createdIssue types.Issue
-		if err := json.Unmarshal(createResp.Data, &createdIssue); err != nil {
-			log.Printf("Failed to parse created issue in handleMoveIssue: %v", err)
-			respondJSON(w, http.StatusInternalServerError, MoveIssueResponse{Success: false, Error: "issue created but failed to parse response"})
-			return
-		}
-
-		newID := createdIssue.ID
-
-		// Add comment on source issue noting the move
+		// Add comment on source issue noting the move (via source client)
 		commentText := fmt.Sprintf("Moved to %s in workspace %q", newID, targetWorkspace)
 		if _, err := client.AddComment(&rpc.CommentAddArgs{ID: issueID, Author: "web-ui", Text: commentText}); err != nil {
 			log.Printf("Failed to add move comment on source %s: %v", issueID, err)
 			warnings = append(warnings, "Failed to add comment on source issue")
 		}
 
-		// Close the source issue
+		// Close the source issue (via source client)
 		closeResp, closeErr := client.CloseIssue(&rpc.CloseArgs{ID: issueID, Reason: fmt.Sprintf("Moved to %s", newID), Force: true})
 		if closeErr != nil {
 			log.Printf("Failed to close source %s: %v", issueID, closeErr)

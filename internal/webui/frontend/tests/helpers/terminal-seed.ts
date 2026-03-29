@@ -107,10 +107,10 @@ export async function seedParitySessions(
   agentName = 'ember'
 ): Promise<{ talkSession: string; agentSession: string }> {
   const talkSession = `${prefix}-talk-to-lead`;
-  const agentSession = `loom-plan0-${agentName}-12345`;
+  const agentSession = `loom-default-plan0-${agentName}-12345`;
 
   // Remove competing agent sessions so server discovery picks the seeded session.
-  await cleanupSessionsMatching(new RegExp(`^loom-[a-zA-Z0-9_-]+-${agentName}-[0-9]+$`));
+  await cleanupSessionsMatching(new RegExp(`^loom-[a-zA-Z0-9_-]+-[a-zA-Z0-9_-]+-${agentName}-[0-9]+$`));
 
   await seedDeterministicSession(talkSession);
   await seedDeterministicSession(agentSession);

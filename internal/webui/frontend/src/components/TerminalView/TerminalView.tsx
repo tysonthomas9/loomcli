@@ -83,7 +83,7 @@ export function TerminalView({
   const [tabs, setTabs] = useState<TabState[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>("");
   const initializedRef = useRef(false);
-  const workspace = useWorkspaceTabState({
+  const { name: workspace, id: workspaceId } = useWorkspaceTabState({
     tabs,
     activeTabId,
     setTabs,
@@ -100,9 +100,10 @@ export function TerminalView({
     linkToIssue,
     reorderTabs: reorderTabMeta,
     isLoading: metaLoading,
-  } = useTerminalMetadata(workspace);
+  } = useTerminalMetadata(workspaceId);
   const { config, isLoading: configLoading } = useBackendConfig();
-  const { activeTabId: restoredTabId, isRestoring } = useSessionRestore();
+  const { activeTabId: restoredTabId, isRestoring } =
+    useSessionRestore(workspaceId);
 
   const [isFullHeight, setIsFullHeight] = useState(false);
   const {
@@ -242,7 +243,9 @@ export function TerminalView({
     sessionStorage.setItem("terminal-active-tab", activeTabId);
     if (patchDebounceRef.current) clearTimeout(patchDebounceRef.current);
     patchDebounceRef.current = setTimeout(() => {
-      patchTerminalState({ active_tab: activeTabId }).catch(() => {});
+      patchTerminalState(workspaceId, { active_tab: activeTabId }).catch(
+        () => {},
+      );
     }, 300);
     return () => {
       if (patchDebounceRef.current) clearTimeout(patchDebounceRef.current);
@@ -329,11 +332,12 @@ export function TerminalView({
           if (seedCtx) {
             seededSessionsRef.current.add(tab.sessionName);
             pendingSeedRef.current.delete(tab.sessionName);
-            seedTerminalSession(tab.sessionName, seedCtx).catch((err) =>
-              console.error(
-                `Failed to seed terminal session ${tab.sessionName}:`,
-                err,
-              ),
+            seedTerminalSession(workspaceId, tab.sessionName, seedCtx).catch(
+              (err) =>
+                console.error(
+                  `Failed to seed terminal session ${tab.sessionName}:`,
+                  err,
+                ),
             );
           }
         }
@@ -520,16 +524,18 @@ export function TerminalView({
       setTabs((prev) =>
         prev.map((t) => (t.id === tabId ? { ...t, crashReason: null } : t)),
       );
-      fetchTerminalToken(sessionName)
+      fetchTerminalToken(workspaceId, sessionName)
         .then((token) => {
           if (!token) {
             // Token fetch failed — skip restart, just reconnect (creates new session)
             instanceRefs.current.get(tabId)?.reconnect();
             return;
           }
-          return restartTerminalSession(sessionName, token).then(() => {
-            instanceRefs.current.get(tabId)?.reconnect();
-          });
+          return restartTerminalSession(workspaceId, sessionName, token).then(
+            () => {
+              instanceRefs.current.get(tabId)?.reconnect();
+            },
+          );
         })
         .catch((err) => {
           console.error(`Failed to restart session ${sessionName}:`, err);
@@ -592,7 +598,7 @@ export function TerminalView({
       const { sessionName, label } = generateTabName(backend, tabs, workspace);
       // Pre-create tmux session for shell tabs (WS handler also detects lead-shell-* as fallback)
       if (backend === "shell")
-        spawnTerminalSession(sessionName, backend).catch(() => {});
+        spawnTerminalSession(workspaceId, sessionName, backend).catch(() => {});
       setTabs((prev) => [
         ...prev,
         {
@@ -709,6 +715,7 @@ export function TerminalView({
   }, [activeTabId]);
 
   const handleCloseAll = useSessionManagement({
+    workspaceId,
     setTabs,
     setActiveTabId,
     instanceRefs,
@@ -923,7 +930,11 @@ export function TerminalView({
             onExport={() => {
               const t = tabs.find((x) => x.id === activeTabId);
               if (t)
-                window.open(getExportUrl(t.sessionName), "_blank", "noopener");
+                window.open(
+                  getExportUrl(workspaceId, t.sessionName),
+                  "_blank",
+                  "noopener",
+                );
             }}
             onHelpClick={handleToggleHelp}
           />

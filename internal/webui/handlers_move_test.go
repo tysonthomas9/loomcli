@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
+	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 )
 
 // mockMoveClient implements issueMover for testing
@@ -143,7 +145,7 @@ func TestHandleMoveIssue_Success(t *testing.T) {
 	}
 
 	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
-	handler := handleMoveIssueWithPool(pool, wsCfg)
+	handler := handleMoveIssueWithPool(pool, pool, wsCfg)
 
 	body := `{"target_workspace":"beta"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/src-001/move", strings.NewReader(body))
@@ -186,7 +188,7 @@ func TestHandleMoveIssue_MissingIssueID(t *testing.T) {
 	}
 
 	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
-	handler := handleMoveIssueWithPool(pool, wsCfg)
+	handler := handleMoveIssueWithPool(pool, pool, wsCfg)
 
 	body := `{"target_workspace":"beta"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/issues//move", strings.NewReader(body))
@@ -214,7 +216,7 @@ func TestHandleMoveIssue_MissingTargetWorkspace(t *testing.T) {
 	}
 
 	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
-	handler := handleMoveIssueWithPool(pool, wsCfg)
+	handler := handleMoveIssueWithPool(pool, pool, wsCfg)
 
 	body := `{"target_workspace":""}`
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/src-001/move", strings.NewReader(body))
@@ -242,7 +244,7 @@ func TestHandleMoveIssue_TargetWorkspaceNotFound(t *testing.T) {
 	}
 
 	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
-	handler := handleMoveIssueWithPool(pool, wsCfg)
+	handler := handleMoveIssueWithPool(pool, pool, wsCfg)
 
 	body := `{"target_workspace":"nonexistent"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/src-001/move", strings.NewReader(body))
@@ -270,7 +272,7 @@ func TestHandleMoveIssue_SameWorkspaceRejected(t *testing.T) {
 	}
 
 	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
-	handler := handleMoveIssueWithPool(pool, wsCfg)
+	handler := handleMoveIssueWithPool(pool, pool, wsCfg)
 
 	body := `{"target_workspace":"alpha"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/src-001/move", strings.NewReader(body))
@@ -304,7 +306,7 @@ func TestHandleMoveIssue_SourceIssueNotFound(t *testing.T) {
 	}
 
 	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
-	handler := handleMoveIssueWithPool(pool, wsCfg)
+	handler := handleMoveIssueWithPool(pool, pool, wsCfg)
 
 	body := `{"target_workspace":"beta"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/src-999/move", strings.NewReader(body))
@@ -339,7 +341,7 @@ func TestHandleMoveIssue_SourceIssueNotFound_ResponseError(t *testing.T) {
 	}
 
 	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
-	handler := handleMoveIssueWithPool(pool, wsCfg)
+	handler := handleMoveIssueWithPool(pool, pool, wsCfg)
 
 	body := `{"target_workspace":"beta"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/src-999/move", strings.NewReader(body))
@@ -369,7 +371,7 @@ func TestHandleMoveIssue_SourceIssueClosed(t *testing.T) {
 	}
 
 	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
-	handler := handleMoveIssueWithPool(pool, wsCfg)
+	handler := handleMoveIssueWithPool(pool, pool, wsCfg)
 
 	body := `{"target_workspace":"beta"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/src-001/move", strings.NewReader(body))
@@ -392,7 +394,7 @@ func TestHandleMoveIssue_SourceIssueClosed(t *testing.T) {
 // TestHandleMoveIssue_PoolNotInitialized verifies 503 when pool is nil.
 func TestHandleMoveIssue_PoolNotInitialized(t *testing.T) {
 	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
-	handler := handleMoveIssueWithPool(nil, wsCfg)
+	handler := handleMoveIssueWithPool(nil, nil, wsCfg)
 
 	body := `{"target_workspace":"beta"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/src-001/move", strings.NewReader(body))
@@ -439,7 +441,7 @@ func TestHandleMoveIssue_PartialFailure_CloseFails(t *testing.T) {
 	}
 
 	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
-	handler := handleMoveIssueWithPool(pool, wsCfg)
+	handler := handleMoveIssueWithPool(pool, pool, wsCfg)
 
 	body := `{"target_workspace":"beta"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/src-001/move", strings.NewReader(body))
@@ -508,7 +510,7 @@ func TestHandleMoveIssue_PartialFailure_CloseResponseFails(t *testing.T) {
 	}
 
 	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
-	handler := handleMoveIssueWithPool(pool, wsCfg)
+	handler := handleMoveIssueWithPool(pool, pool, wsCfg)
 
 	body := `{"target_workspace":"beta"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/src-001/move", strings.NewReader(body))
@@ -548,7 +550,7 @@ func TestHandleMoveIssue_PoolTimeout(t *testing.T) {
 	}
 
 	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
-	handler := handleMoveIssueWithPool(pool, wsCfg)
+	handler := handleMoveIssueWithPool(pool, pool, wsCfg)
 
 	body := `{"target_workspace":"beta"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/src-001/move", strings.NewReader(body))
@@ -576,7 +578,7 @@ func TestHandleMoveIssue_WorkspaceConfigNotAvailable(t *testing.T) {
 		putFunc: func(c issueMover) {},
 	}
 
-	handler := handleMoveIssueWithPool(pool, nil)
+	handler := handleMoveIssueWithPool(pool, pool, nil)
 
 	body := `{"target_workspace":"beta"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/src-001/move", strings.NewReader(body))
@@ -615,7 +617,7 @@ func TestHandleMoveIssue_CreateFails(t *testing.T) {
 	}
 
 	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
-	handler := handleMoveIssueWithPool(pool, wsCfg)
+	handler := handleMoveIssueWithPool(pool, pool, wsCfg)
 
 	body := `{"target_workspace":"beta"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/src-001/move", strings.NewReader(body))
@@ -655,7 +657,7 @@ func TestHandleMoveIssue_CreateResponseFails(t *testing.T) {
 	}
 
 	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
-	handler := handleMoveIssueWithPool(pool, wsCfg)
+	handler := handleMoveIssueWithPool(pool, pool, wsCfg)
 
 	body := `{"target_workspace":"beta"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/src-001/move", strings.NewReader(body))
@@ -702,7 +704,7 @@ func TestHandleMoveIssue_AssigneeWarning(t *testing.T) {
 	}
 
 	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
-	handler := handleMoveIssueWithPool(pool, wsCfg)
+	handler := handleMoveIssueWithPool(pool, pool, wsCfg)
 
 	body := `{"target_workspace":"beta"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/src-001/move", strings.NewReader(body))
@@ -742,7 +744,7 @@ func TestHandleMoveIssue_InvalidRequestBody(t *testing.T) {
 	}
 
 	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
-	handler := handleMoveIssueWithPool(pool, wsCfg)
+	handler := handleMoveIssueWithPool(pool, pool, wsCfg)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/src-001/move", strings.NewReader(`{not json`))
 	req.SetPathValue("id", "src-001")
@@ -789,7 +791,7 @@ func TestHandleMoveIssue_ClientReturnedToPool(t *testing.T) {
 	}
 
 	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
-	handler := handleMoveIssueWithPool(pool, wsCfg)
+	handler := handleMoveIssueWithPool(pool, pool, wsCfg)
 
 	body := `{"target_workspace":"beta"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/src-001/move", strings.NewReader(body))
@@ -813,7 +815,7 @@ func TestHandleMoveIssue_PoolConnectionError(t *testing.T) {
 	}
 
 	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
-	handler := handleMoveIssueWithPool(pool, wsCfg)
+	handler := handleMoveIssueWithPool(pool, pool, wsCfg)
 
 	body := `{"target_workspace":"beta"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/src-001/move", strings.NewReader(body))
@@ -854,7 +856,7 @@ func TestHandleMoveIssue_AddCommentFails_StillSucceeds(t *testing.T) {
 	}
 
 	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
-	handler := handleMoveIssueWithPool(pool, wsCfg)
+	handler := handleMoveIssueWithPool(pool, pool, wsCfg)
 
 	body := `{"target_workspace":"beta"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/src-001/move", strings.NewReader(body))
@@ -897,7 +899,7 @@ func TestHandleMoveIssue_WorkspaceConfigError(t *testing.T) {
 	errCfg := func() (*WorkspaceData, error) {
 		return nil, errors.New("config file not found")
 	}
-	handler := handleMoveIssueWithPool(pool, errCfg)
+	handler := handleMoveIssueWithPool(pool, pool, errCfg)
 
 	body := `{"target_workspace":"beta"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/src-001/move", strings.NewReader(body))
@@ -931,7 +933,7 @@ func TestHandleMoveIssue_ShowGenericError(t *testing.T) {
 	}
 
 	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
-	handler := handleMoveIssueWithPool(pool, wsCfg)
+	handler := handleMoveIssueWithPool(pool, pool, wsCfg)
 
 	body := `{"target_workspace":"beta"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/src-001/move", strings.NewReader(body))
@@ -965,7 +967,7 @@ func TestHandleMoveIssue_CreateResponseUnmarshalError(t *testing.T) {
 	}
 
 	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
-	handler := handleMoveIssueWithPool(pool, wsCfg)
+	handler := handleMoveIssueWithPool(pool, pool, wsCfg)
 
 	body := `{"target_workspace":"beta"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/src-001/move", strings.NewReader(body))
@@ -1000,7 +1002,7 @@ func TestHandleMoveIssue_ShowResponseUnmarshalError(t *testing.T) {
 	}
 
 	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
-	handler := handleMoveIssueWithPool(pool, wsCfg)
+	handler := handleMoveIssueWithPool(pool, pool, wsCfg)
 
 	body := `{"target_workspace":"beta"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/src-001/move", strings.NewReader(body))
@@ -1024,7 +1026,7 @@ func TestHandleMoveIssue_ShowResponseUnmarshalError(t *testing.T) {
 // have Content-Type: application/json.
 func TestHandleMoveIssue_ResponseHasJSONContentType(t *testing.T) {
 	// Test the pool-nil case
-	handler := handleMoveIssueWithPool(nil, testWorkspaceConfigFn("alpha", defaultWorkspaces()))
+	handler := handleMoveIssueWithPool(nil, nil, testWorkspaceConfigFn("alpha", defaultWorkspaces()))
 
 	body := `{"target_workspace":"beta"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/src-001/move", strings.NewReader(body))
@@ -1036,5 +1038,366 @@ func TestHandleMoveIssue_ResponseHasJSONContentType(t *testing.T) {
 	ct := rec.Header().Get("Content-Type")
 	if ct != "application/json" {
 		t.Errorf("Content-Type=%q, want %q", ct, "application/json")
+	}
+}
+
+// --- Cross-workspace move tests ---
+
+// TestMoveIssue_CrossWorkspace_Success verifies that Create goes through the
+// target pool while Show/AddComment/CloseIssue go through the source pool.
+func TestMoveIssue_CrossWorkspace_Success(t *testing.T) {
+	sourceData := makeSourceIssueJSON("src-001", "Fix the bug", "open", "")
+	createdData := makeSourceIssueJSON("tgt-001", "Fix the bug", "open", "")
+
+	var sourceCreateCalled, targetCreateCalled bool
+
+	sourceClient := &mockMoveClient{
+		showFunc: func(args *rpc.ShowArgs) (*rpc.Response, error) {
+			return &rpc.Response{Success: true, Data: sourceData}, nil
+		},
+		createFunc: func(args *rpc.CreateArgs) (*rpc.Response, error) {
+			sourceCreateCalled = true
+			return &rpc.Response{Success: true, Data: createdData}, nil
+		},
+		addCommentFn: func(args *rpc.CommentAddArgs) (*rpc.Response, error) {
+			return &rpc.Response{Success: true}, nil
+		},
+		closeIssueFunc: func(args *rpc.CloseArgs) (*rpc.Response, error) {
+			return &rpc.Response{Success: true}, nil
+		},
+	}
+
+	targetClient := &mockMoveClient{
+		createFunc: func(args *rpc.CreateArgs) (*rpc.Response, error) {
+			targetCreateCalled = true
+			if args.Title != "Fix the bug" {
+				t.Errorf("target Create Title=%q, want %q", args.Title, "Fix the bug")
+			}
+			return &rpc.Response{Success: true, Data: createdData}, nil
+		},
+	}
+
+	sourcePool := &mockMovePool{
+		getFunc: func(ctx context.Context) (issueMover, error) { return sourceClient, nil },
+		putFunc: func(c issueMover) {},
+	}
+	targetPool := &mockMovePool{
+		getFunc: func(ctx context.Context) (issueMover, error) { return targetClient, nil },
+		putFunc: func(c issueMover) {},
+	}
+
+	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
+	handler := handleMoveIssueWithPool(sourcePool, targetPool, wsCfg)
+
+	body := `{"target_workspace":"beta"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/ws-alpha/issues/src-001/move", strings.NewReader(body))
+	req.SetPathValue("id", "src-001")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	if sourceCreateCalled {
+		t.Error("Create was called on the source client — should use target")
+	}
+	if !targetCreateCalled {
+		t.Error("Create was NOT called on the target client")
+	}
+
+	var resp MoveIssueResponse
+	json.NewDecoder(rec.Body).Decode(&resp)
+	if !resp.Success {
+		t.Errorf("expected success=true, got false: %s", resp.Error)
+	}
+	if resp.Data.SourceID != "src-001" {
+		t.Errorf("SourceID=%q, want %q", resp.Data.SourceID, "src-001")
+	}
+	if resp.Data.TargetID != "tgt-001" {
+		t.Errorf("TargetID=%q, want %q", resp.Data.TargetID, "tgt-001")
+	}
+}
+
+// TestMoveIssue_CrossWorkspace_TargetPoolNil verifies 400 when targetPool is nil.
+func TestMoveIssue_CrossWorkspace_TargetPoolNil(t *testing.T) {
+	sourcePool := &mockMovePool{
+		getFunc: func(ctx context.Context) (issueMover, error) { return &mockMoveClient{}, nil },
+		putFunc: func(c issueMover) {},
+	}
+
+	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
+	handler := handleMoveIssueWithPool(sourcePool, nil, wsCfg)
+
+	body := `{"target_workspace":"beta"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/ws-alpha/issues/src-001/move", strings.NewReader(body))
+	req.SetPathValue("id", "src-001")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp MoveIssueResponse
+	json.NewDecoder(rec.Body).Decode(&resp)
+	if resp.Error != "cross-workspace move requires multi-workspace mode" {
+		t.Errorf("error=%q, want %q", resp.Error, "cross-workspace move requires multi-workspace mode")
+	}
+}
+
+// TestMoveIssue_CrossWorkspace_TargetNotRegistered verifies 400 when the
+// target pool returns ErrWorkspaceNotRegistered.
+func TestMoveIssue_CrossWorkspace_TargetNotRegistered(t *testing.T) {
+	sourceData := makeSourceIssueJSON("src-001", "Fix the bug", "open", "")
+
+	sourcePool := &mockMovePool{
+		getFunc: func(ctx context.Context) (issueMover, error) {
+			return &mockMoveClient{
+				showFunc: func(args *rpc.ShowArgs) (*rpc.Response, error) {
+					return &rpc.Response{Success: true, Data: sourceData}, nil
+				},
+			}, nil
+		},
+		putFunc: func(c issueMover) {},
+	}
+	targetPool := &mockMovePool{
+		getFunc: func(ctx context.Context) (issueMover, error) {
+			return nil, fmt.Errorf("%w: %q", daemon.ErrWorkspaceNotRegistered, "beta-uuid")
+		},
+		putFunc: func(c issueMover) {},
+	}
+
+	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
+	handler := handleMoveIssueWithPool(sourcePool, targetPool, wsCfg)
+
+	body := `{"target_workspace":"beta"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/ws-alpha/issues/src-001/move", strings.NewReader(body))
+	req.SetPathValue("id", "src-001")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp MoveIssueResponse
+	json.NewDecoder(rec.Body).Decode(&resp)
+	if !strings.Contains(resp.Error, "not registered") {
+		t.Errorf("error=%q, want it to contain %q", resp.Error, "not registered")
+	}
+}
+
+// TestMoveIssue_CrossWorkspace_TargetConnectionError verifies 502 when the
+// target pool returns a connection error.
+func TestMoveIssue_CrossWorkspace_TargetConnectionError(t *testing.T) {
+	sourceData := makeSourceIssueJSON("src-001", "Fix the bug", "open", "")
+
+	sourcePool := &mockMovePool{
+		getFunc: func(ctx context.Context) (issueMover, error) {
+			return &mockMoveClient{
+				showFunc: func(args *rpc.ShowArgs) (*rpc.Response, error) {
+					return &rpc.Response{Success: true, Data: sourceData}, nil
+				},
+			}, nil
+		},
+		putFunc: func(c issueMover) {},
+	}
+	targetPool := &mockMovePool{
+		getFunc: func(ctx context.Context) (issueMover, error) {
+			return nil, errors.New("connection refused")
+		},
+		putFunc: func(c issueMover) {},
+	}
+
+	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
+	handler := handleMoveIssueWithPool(sourcePool, targetPool, wsCfg)
+
+	body := `{"target_workspace":"beta"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/ws-alpha/issues/src-001/move", strings.NewReader(body))
+	req.SetPathValue("id", "src-001")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp MoveIssueResponse
+	json.NewDecoder(rec.Body).Decode(&resp)
+	if resp.Error != "target workspace daemon not available" {
+		t.Errorf("error=%q, want %q", resp.Error, "target workspace daemon not available")
+	}
+}
+
+// TestMoveIssue_CrossWorkspace_CreateFailsOnTarget verifies that when Create
+// fails on the target, the source issue is NOT closed.
+func TestMoveIssue_CrossWorkspace_CreateFailsOnTarget(t *testing.T) {
+	sourceData := makeSourceIssueJSON("src-001", "Fix the bug", "open", "")
+	var sourceClosed bool
+
+	sourcePool := &mockMovePool{
+		getFunc: func(ctx context.Context) (issueMover, error) {
+			return &mockMoveClient{
+				showFunc: func(args *rpc.ShowArgs) (*rpc.Response, error) {
+					return &rpc.Response{Success: true, Data: sourceData}, nil
+				},
+				closeIssueFunc: func(args *rpc.CloseArgs) (*rpc.Response, error) {
+					sourceClosed = true
+					return &rpc.Response{Success: true}, nil
+				},
+			}, nil
+		},
+		putFunc: func(c issueMover) {},
+	}
+	targetPool := &mockMovePool{
+		getFunc: func(ctx context.Context) (issueMover, error) {
+			return &mockMoveClient{
+				createFunc: func(args *rpc.CreateArgs) (*rpc.Response, error) {
+					return nil, errors.New("target daemon crashed")
+				},
+			}, nil
+		},
+		putFunc: func(c issueMover) {},
+	}
+
+	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
+	handler := handleMoveIssueWithPool(sourcePool, targetPool, wsCfg)
+
+	body := `{"target_workspace":"beta"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/ws-alpha/issues/src-001/move", strings.NewReader(body))
+	req.SetPathValue("id", "src-001")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	if sourceClosed {
+		t.Error("source issue should NOT be closed when target Create fails")
+	}
+}
+
+// TestMoveIssue_CrossWorkspace_TargetClientReturned verifies the target client
+// is always returned to the target pool via Put.
+func TestMoveIssue_CrossWorkspace_TargetClientReturned(t *testing.T) {
+	sourceData := makeSourceIssueJSON("src-001", "Fix the bug", "open", "")
+	createdData := makeSourceIssueJSON("tgt-001", "Fix the bug", "open", "")
+	var targetPutCalled bool
+
+	sourcePool := &mockMovePool{
+		getFunc: func(ctx context.Context) (issueMover, error) {
+			return &mockMoveClient{
+				showFunc: func(args *rpc.ShowArgs) (*rpc.Response, error) {
+					return &rpc.Response{Success: true, Data: sourceData}, nil
+				},
+				addCommentFn: func(args *rpc.CommentAddArgs) (*rpc.Response, error) {
+					return &rpc.Response{Success: true}, nil
+				},
+				closeIssueFunc: func(args *rpc.CloseArgs) (*rpc.Response, error) {
+					return &rpc.Response{Success: true}, nil
+				},
+			}, nil
+		},
+		putFunc: func(c issueMover) {},
+	}
+	targetPool := &mockMovePool{
+		getFunc: func(ctx context.Context) (issueMover, error) {
+			return &mockMoveClient{
+				createFunc: func(args *rpc.CreateArgs) (*rpc.Response, error) {
+					return &rpc.Response{Success: true, Data: createdData}, nil
+				},
+			}, nil
+		},
+		putFunc: func(c issueMover) { targetPutCalled = true },
+	}
+
+	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
+	handler := handleMoveIssueWithPool(sourcePool, targetPool, wsCfg)
+
+	body := `{"target_workspace":"beta"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/ws-alpha/issues/src-001/move", strings.NewReader(body))
+	req.SetPathValue("id", "src-001")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !targetPutCalled {
+		t.Error("target pool Put() was not called — target client leaked")
+	}
+}
+
+// --- resolveWorkspaceID tests ---
+
+func TestResolveWorkspaceID_WithID(t *testing.T) {
+	wsData := &WorkspaceData{
+		Workspaces: []WorkspaceSummary{
+			{ID: "uuid-beta", Name: "beta"},
+		},
+	}
+	got := resolveWorkspaceID(wsData, "beta")
+	if got != "uuid-beta" {
+		t.Errorf("resolveWorkspaceID()=%q, want %q", got, "uuid-beta")
+	}
+}
+
+func TestResolveWorkspaceID_WithoutID(t *testing.T) {
+	wsData := &WorkspaceData{
+		Workspaces: []WorkspaceSummary{
+			{Name: "beta"},
+		},
+	}
+	got := resolveWorkspaceID(wsData, "beta")
+	if got != "beta" {
+		t.Errorf("resolveWorkspaceID()=%q, want %q", got, "beta")
+	}
+}
+
+func TestResolveWorkspaceID_NotFound(t *testing.T) {
+	wsData := &WorkspaceData{
+		Workspaces: []WorkspaceSummary{
+			{Name: "alpha"},
+		},
+	}
+	got := resolveWorkspaceID(wsData, "nonexistent")
+	if got != "nonexistent" {
+		t.Errorf("resolveWorkspaceID()=%q, want %q", got, "nonexistent")
+	}
+}
+
+// TestValidateMoveRequest_ReturnsWsData verifies that validateMoveRequest
+// returns workspace data on success.
+func TestValidateMoveRequest_ReturnsWsData(t *testing.T) {
+	wsCfg := testWorkspaceConfigFn("alpha", defaultWorkspaces())
+
+	body := `{"target_workspace":"beta"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/issues/src-001/move", strings.NewReader(body))
+	req.SetPathValue("id", "src-001")
+	rec := httptest.NewRecorder()
+
+	issueID, target, wsData, ok := validateMoveRequest(rec, req, wsCfg)
+	if !ok {
+		t.Fatalf("expected ok=true, got false: %s", rec.Body.String())
+	}
+	if issueID != "src-001" {
+		t.Errorf("issueID=%q, want %q", issueID, "src-001")
+	}
+	if target != "beta" {
+		t.Errorf("target=%q, want %q", target, "beta")
+	}
+	if wsData == nil {
+		t.Fatal("expected wsData to be non-nil")
+	}
+	if wsData.Name != "alpha" {
+		t.Errorf("wsData.Name=%q, want %q", wsData.Name, "alpha")
 	}
 }

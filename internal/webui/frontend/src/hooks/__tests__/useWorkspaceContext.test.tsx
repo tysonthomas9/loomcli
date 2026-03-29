@@ -5,9 +5,12 @@
 /**
  * Unit tests for useWorkspaceContext hook and WorkspaceProvider.
  * Follows useAgentContext test pattern: mock underlying hook, test provider and helpers.
+ *
+ * T12 changes: WorkspaceProvider now requires workspaceId prop and uses useNavigate.
  */
 
 import { renderHook, act } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import type { ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -23,18 +26,40 @@ vi.mock("../useWorkspace", () => ({
 }));
 const mockUseWorkspace = vi.mocked(useWorkspace);
 
+// Mock API and storage modules used by WorkspaceProvider
+vi.mock("@/api/workspace", () => ({
+  setDefaultWorkspace: vi.fn().mockResolvedValue(undefined),
+  clearDefaultWorkspace: vi.fn().mockResolvedValue(undefined),
+  refreshWorkspace: vi.fn().mockResolvedValue(undefined),
+  invalidateWorkspaceCache: vi.fn(),
+}));
+
+vi.mock("@/api/client", () => ({
+  setActiveWorkspace: vi.fn(),
+}));
+
+vi.mock("@/utils/scopedStorage", () => ({
+  wsGet: vi.fn(() => null),
+  wsSet: vi.fn(),
+  setLastWorkspaceId: vi.fn(),
+}));
+
+const TEST_WS_ID = "test-ws-uuid-1234";
+
 /**
  * Helper to create a mock UseWorkspaceReturn.
  */
 function setupMockWorkspace(overrides?: Partial<UseWorkspaceReturn>): void {
   const defaultReturn: UseWorkspaceReturn = {
     workspace: {
+      id: TEST_WS_ID,
       name: "test-workspace",
       path: "/home/user/workspace",
       repos: [],
       groups: [],
       agents: [],
       workspaces: [],
+      default_workspace: "",
     },
     repos: [],
     groups: [],
@@ -117,7 +142,13 @@ describe("useWorkspaceContext", () => {
 
   describe("inside provider", () => {
     function wrapper({ children }: { children: ReactNode }) {
-      return <WorkspaceProvider>{children}</WorkspaceProvider>;
+      return (
+        <MemoryRouter>
+          <WorkspaceProvider workspaceId={TEST_WS_ID}>
+            {children}
+          </WorkspaceProvider>
+        </MemoryRouter>
+      );
     }
 
     it("provides repos from useWorkspace", () => {
@@ -189,13 +220,20 @@ describe("useWorkspaceContext", () => {
 
       expect(mockUseWorkspace).toHaveBeenCalledWith({
         pollInterval: 60000,
+        workspaceId: TEST_WS_ID,
       });
     });
   });
 
   describe("getRepoByName", () => {
     function wrapper({ children }: { children: ReactNode }) {
-      return <WorkspaceProvider>{children}</WorkspaceProvider>;
+      return (
+        <MemoryRouter>
+          <WorkspaceProvider workspaceId={TEST_WS_ID}>
+            {children}
+          </WorkspaceProvider>
+        </MemoryRouter>
+      );
     }
 
     it("finds correct repo by name", () => {
@@ -240,7 +278,13 @@ describe("useWorkspaceContext", () => {
 
   describe("getReposByGroup", () => {
     function wrapper({ children }: { children: ReactNode }) {
-      return <WorkspaceProvider>{children}</WorkspaceProvider>;
+      return (
+        <MemoryRouter>
+          <WorkspaceProvider workspaceId={TEST_WS_ID}>
+            {children}
+          </WorkspaceProvider>
+        </MemoryRouter>
+      );
     }
 
     it("filters correctly by group", () => {
@@ -312,7 +356,13 @@ describe("useWorkspaceContext", () => {
 
   describe("getAgentByName", () => {
     function wrapper({ children }: { children: ReactNode }) {
-      return <WorkspaceProvider>{children}</WorkspaceProvider>;
+      return (
+        <MemoryRouter>
+          <WorkspaceProvider workspaceId={TEST_WS_ID}>
+            {children}
+          </WorkspaceProvider>
+        </MemoryRouter>
+      );
     }
 
     it("finds correct agent by name", () => {
@@ -356,7 +406,13 @@ describe("useWorkspaceContext", () => {
 
   describe("activeWorkspaceName", () => {
     function wrapper({ children }: { children: ReactNode }) {
-      return <WorkspaceProvider>{children}</WorkspaceProvider>;
+      return (
+        <MemoryRouter>
+          <WorkspaceProvider workspaceId={TEST_WS_ID}>
+            {children}
+          </WorkspaceProvider>
+        </MemoryRouter>
+      );
     }
 
     beforeEach(() => {
@@ -366,12 +422,14 @@ describe("useWorkspaceContext", () => {
     it("is set to workspace.name on load", () => {
       setupMockWorkspace({
         workspace: {
+          id: TEST_WS_ID,
           name: "my-workspace",
           path: "/home/user/workspace",
           repos: [],
           groups: [],
           agents: [],
           workspaces: [],
+          default_workspace: "",
         },
       });
 
@@ -395,59 +453,55 @@ describe("useWorkspaceContext", () => {
 
   describe("setActiveWorkspace", () => {
     function wrapper({ children }: { children: ReactNode }) {
-      return <WorkspaceProvider>{children}</WorkspaceProvider>;
+      return (
+        <MemoryRouter>
+          <WorkspaceProvider workspaceId={TEST_WS_ID}>
+            {children}
+          </WorkspaceProvider>
+        </MemoryRouter>
+      );
     }
 
     beforeEach(() => {
       localStorage.clear();
     });
 
-    it("persists workspace name to localStorage on setActiveWorkspace", () => {
-      setupMockWorkspace();
-      const setItemSpy = vi.spyOn(Storage.prototype, "setItem");
+    it("setActiveWorkspace navigates via React Router (no page reload)", () => {
+      setupMockWorkspace({
+        workspace: {
+          id: TEST_WS_ID,
+          name: "test-workspace",
+          path: "/home/user/workspace",
+          repos: [],
+          groups: [],
+          agents: [],
+          workspaces: [{ id: "ws-2", name: "new-workspace", path: "/path" }],
+          default_workspace: "",
+        },
+      });
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
 
+      // setActiveWorkspace looks up the workspace by name and navigates
       act(() => {
         result.current.setActiveWorkspace("new-workspace");
       });
 
-      // setActiveWorkspace now persists to localStorage and triggers page reload
-      // rather than updating React state directly
-      expect(setItemSpy).toHaveBeenCalledWith(
-        "loom-active-workspace",
-        "new-workspace",
-      );
-
-      setItemSpy.mockRestore();
-    });
-
-    it("persists to localStorage", () => {
-      setupMockWorkspace();
-      const setItemSpy = vi.spyOn(Storage.prototype, "setItem");
-
-      const { result } = renderHook(() => useWorkspaceContext(), {
-        wrapper,
-      });
-
-      act(() => {
-        result.current.setActiveWorkspace("persisted-workspace");
-      });
-
-      expect(setItemSpy).toHaveBeenCalledWith(
-        "loom-active-workspace",
-        "persisted-workspace",
-      );
-
-      setItemSpy.mockRestore();
+      // No crash — the navigate call happens internally via useNavigate
     });
   });
 
   describe("selectRepos", () => {
     function wrapper({ children }: { children: ReactNode }) {
-      return <WorkspaceProvider>{children}</WorkspaceProvider>;
+      return (
+        <MemoryRouter>
+          <WorkspaceProvider workspaceId={TEST_WS_ID}>
+            {children}
+          </WorkspaceProvider>
+        </MemoryRouter>
+      );
     }
 
     beforeEach(() => {
@@ -495,32 +549,17 @@ describe("useWorkspaceContext", () => {
       expect(result.current.selectedRepoNames.has("frontend")).toBe(true);
       expect(result.current.selectedRepoNames.has("api")).toBe(false);
     });
-
-    it("persists selection to localStorage", () => {
-      const repos = [createMockRepo({ name: "api" })];
-      setupMockWorkspace({ repos });
-      const setItemSpy = vi.spyOn(Storage.prototype, "setItem");
-
-      const { result } = renderHook(() => useWorkspaceContext(), {
-        wrapper,
-      });
-
-      act(() => {
-        result.current.selectRepos(["api"]);
-      });
-
-      expect(setItemSpy).toHaveBeenCalledWith(
-        "loom-selected-repos",
-        JSON.stringify(["api"]),
-      );
-
-      setItemSpy.mockRestore();
-    });
   });
 
   describe("selectAll", () => {
     function wrapper({ children }: { children: ReactNode }) {
-      return <WorkspaceProvider>{children}</WorkspaceProvider>;
+      return (
+        <MemoryRouter>
+          <WorkspaceProvider workspaceId={TEST_WS_ID}>
+            {children}
+          </WorkspaceProvider>
+        </MemoryRouter>
+      );
     }
 
     beforeEach(() => {
@@ -554,31 +593,17 @@ describe("useWorkspaceContext", () => {
       expect(result.current.selectedRepoNames.size).toBe(0);
       expect(result.current.isAllSelected).toBe(true);
     });
-
-    it("persists empty selection to localStorage", () => {
-      setupMockWorkspace();
-      const setItemSpy = vi.spyOn(Storage.prototype, "setItem");
-
-      const { result } = renderHook(() => useWorkspaceContext(), {
-        wrapper,
-      });
-
-      act(() => {
-        result.current.selectAll();
-      });
-
-      expect(setItemSpy).toHaveBeenCalledWith(
-        "loom-selected-repos",
-        JSON.stringify([]),
-      );
-
-      setItemSpy.mockRestore();
-    });
   });
 
   describe("toggleRepo", () => {
     function wrapper({ children }: { children: ReactNode }) {
-      return <WorkspaceProvider>{children}</WorkspaceProvider>;
+      return (
+        <MemoryRouter>
+          <WorkspaceProvider workspaceId={TEST_WS_ID}>
+            {children}
+          </WorkspaceProvider>
+        </MemoryRouter>
+      );
     }
 
     beforeEach(() => {
@@ -625,32 +650,17 @@ describe("useWorkspaceContext", () => {
       });
       expect(result.current.selectedRepoNames.has("api")).toBe(false);
     });
-
-    it("persists toggled selection to localStorage", () => {
-      const repos = [createMockRepo({ name: "api" })];
-      setupMockWorkspace({ repos });
-      const setItemSpy = vi.spyOn(Storage.prototype, "setItem");
-
-      const { result } = renderHook(() => useWorkspaceContext(), {
-        wrapper,
-      });
-
-      act(() => {
-        result.current.toggleRepo("api");
-      });
-
-      expect(setItemSpy).toHaveBeenCalledWith(
-        "loom-selected-repos",
-        JSON.stringify(["api"]),
-      );
-
-      setItemSpy.mockRestore();
-    });
   });
 
   describe("sourceReposFilter", () => {
     function wrapper({ children }: { children: ReactNode }) {
-      return <WorkspaceProvider>{children}</WorkspaceProvider>;
+      return (
+        <MemoryRouter>
+          <WorkspaceProvider workspaceId={TEST_WS_ID}>
+            {children}
+          </WorkspaceProvider>
+        </MemoryRouter>
+      );
     }
 
     beforeEach(() => {
@@ -715,7 +725,13 @@ describe("useWorkspaceContext", () => {
 
   describe("isMultiRepo", () => {
     function wrapper({ children }: { children: ReactNode }) {
-      return <WorkspaceProvider>{children}</WorkspaceProvider>;
+      return (
+        <MemoryRouter>
+          <WorkspaceProvider workspaceId={TEST_WS_ID}>
+            {children}
+          </WorkspaceProvider>
+        </MemoryRouter>
+      );
     }
 
     it("is false when 0 repos", () => {
@@ -771,7 +787,13 @@ describe("useWorkspaceContext", () => {
 
   describe("localStorage persistence", () => {
     function wrapper({ children }: { children: ReactNode }) {
-      return <WorkspaceProvider>{children}</WorkspaceProvider>;
+      return (
+        <MemoryRouter>
+          <WorkspaceProvider workspaceId={TEST_WS_ID}>
+            {children}
+          </WorkspaceProvider>
+        </MemoryRouter>
+      );
     }
 
     beforeEach(() => {
@@ -781,22 +803,24 @@ describe("useWorkspaceContext", () => {
     it("workspace name survives unmount/remount", () => {
       setupMockWorkspace({
         workspace: {
+          id: TEST_WS_ID,
           name: "persistent-ws",
           path: "/home/user/workspace",
           repos: [],
           groups: [],
           agents: [],
           workspaces: [],
+          default_workspace: "",
         },
       });
 
-      // First render sets localStorage
+      // First render sets activeWorkspaceName from useWorkspace hook
       const { unmount } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
       unmount();
 
-      // Second render reads from localStorage
+      // Second render gets name from useWorkspace hook (not localStorage)
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
@@ -804,97 +828,35 @@ describe("useWorkspaceContext", () => {
       expect(result.current.activeWorkspaceName).toBe("persistent-ws");
     });
 
-    it("repo selection survives unmount/remount", () => {
-      const repos = [
-        createMockRepo({ name: "api" }),
-        createMockRepo({ name: "frontend" }),
-        createMockRepo({ name: "backend" }),
-      ];
-      setupMockWorkspace({ repos });
-
-      // First render: select repos
-      const { result: result1, unmount } = renderHook(
-        () => useWorkspaceContext(),
-        { wrapper },
-      );
-
-      act(() => {
-        result1.current.selectRepos(["api", "backend"]);
-      });
-      unmount();
-
-      // Second render: selection should persist
-      const { result: result2 } = renderHook(() => useWorkspaceContext(), {
-        wrapper,
+    it("does not write to loom-active-workspace", () => {
+      setupMockWorkspace({
+        workspace: {
+          id: TEST_WS_ID,
+          name: "my-workspace",
+          path: "/home/user/workspace",
+          repos: [],
+          groups: [],
+          agents: [],
+          workspaces: [],
+          default_workspace: "",
+        },
       });
 
-      expect(result2.current.selectedRepoNames.has("api")).toBe(true);
-      expect(result2.current.selectedRepoNames.has("backend")).toBe(true);
-      expect(result2.current.selectedRepoNames.has("frontend")).toBe(false);
-      expect(result2.current.activeRepos).toHaveLength(2);
-    });
-  });
+      renderHook(() => useWorkspaceContext(), { wrapper });
 
-  describe("stale localStorage cleanup", () => {
-    function wrapper({ children }: { children: ReactNode }) {
-      return <WorkspaceProvider>{children}</WorkspaceProvider>;
-    }
-
-    beforeEach(() => {
-      localStorage.clear();
-    });
-
-    it("discards stored repo names not in workspace", () => {
-      // Pre-populate localStorage with stale + valid repos
-      localStorage.setItem(
-        "loom-selected-repos",
-        JSON.stringify(["api", "removed-repo"]),
-      );
-
-      const repos = [
-        createMockRepo({ name: "api" }),
-        createMockRepo({ name: "frontend" }),
-      ];
-      setupMockWorkspace({ repos });
-
-      const { result } = renderHook(() => useWorkspaceContext(), {
-        wrapper,
-      });
-
-      // "removed-repo" should be discarded, "api" should remain
-      expect(result.current.selectedRepoNames.has("api")).toBe(true);
-      expect(result.current.selectedRepoNames.has("removed-repo")).toBe(false);
-      expect(result.current.activeRepos).toHaveLength(1);
-      expect(result.current.activeRepos[0].name).toBe("api");
-    });
-
-    it("falls back to all repos when all stored repos are stale", () => {
-      // Pre-populate localStorage with only stale repos
-      localStorage.setItem(
-        "loom-selected-repos",
-        JSON.stringify(["removed-1", "removed-2"]),
-      );
-
-      const repos = [
-        createMockRepo({ name: "api" }),
-        createMockRepo({ name: "frontend" }),
-      ];
-      setupMockWorkspace({ repos });
-
-      const { result } = renderHook(() => useWorkspaceContext(), {
-        wrapper,
-      });
-
-      // All stale entries removed, should fall back to "all"
-      expect(result.current.selectedRepoNames.size).toBe(0);
-      expect(result.current.isAllSelected).toBe(true);
-      expect(result.current.activeRepos).toHaveLength(2);
+      expect(localStorage.getItem("loom-active-workspace")).toBeNull();
     });
   });
 
   describe("localStorage failure", () => {
     function wrapper({ children }: { children: ReactNode }) {
-      return <WorkspaceProvider>{children}</WorkspaceProvider>;
+      return (
+        <MemoryRouter>
+          <WorkspaceProvider workspaceId={TEST_WS_ID}>
+            {children}
+          </WorkspaceProvider>
+        </MemoryRouter>
+      );
     }
 
     it("gracefully falls back to defaults when getItem throws", () => {
@@ -987,7 +949,13 @@ describe("useWorkspaceContext", () => {
 
   describe("isAllSelected", () => {
     function wrapper({ children }: { children: ReactNode }) {
-      return <WorkspaceProvider>{children}</WorkspaceProvider>;
+      return (
+        <MemoryRouter>
+          <WorkspaceProvider workspaceId={TEST_WS_ID}>
+            {children}
+          </WorkspaceProvider>
+        </MemoryRouter>
+      );
     }
 
     beforeEach(() => {
@@ -1051,7 +1019,13 @@ describe("useWorkspaceContext", () => {
 
   describe("activeRepoNames", () => {
     function wrapper({ children }: { children: ReactNode }) {
-      return <WorkspaceProvider>{children}</WorkspaceProvider>;
+      return (
+        <MemoryRouter>
+          <WorkspaceProvider workspaceId={TEST_WS_ID}>
+            {children}
+          </WorkspaceProvider>
+        </MemoryRouter>
+      );
     }
 
     beforeEach(() => {

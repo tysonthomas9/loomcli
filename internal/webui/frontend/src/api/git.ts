@@ -3,7 +3,7 @@
  * Interfaces with /api/agents/{name}/git/* endpoints.
  */
 
-import { get, post, patch } from "./client";
+import { get, post, patch, wsUrl } from "./client";
 
 // ============= Types =============
 
@@ -71,22 +71,33 @@ export interface GitTargetResult {
 
 const GIT_ACTION_TIMEOUT = 60000;
 
-function agentGitUrl(agentName: string, action: string): string {
-  return `/api/agents/${encodeURIComponent(agentName)}/git/${action}`;
+function agentGitUrl(
+  workspaceId: string,
+  agentName: string,
+  action: string,
+): string {
+  return wsUrl(
+    workspaceId,
+    `/agents/${encodeURIComponent(agentName)}/git/${action}`,
+  );
 }
 
-/** GET /api/agents/{name}/git/status */
-export async function fetchGitStatus(agentName: string): Promise<GitStatus> {
-  return get<GitStatus>(agentGitUrl(agentName, "status"));
+/** GET /api/workspaces/{ws}/agents/{name}/git/status */
+export async function fetchGitStatus(
+  workspaceId: string,
+  agentName: string,
+): Promise<GitStatus> {
+  return get<GitStatus>(agentGitUrl(workspaceId, agentName, "status"));
 }
 
-/** POST /api/agents/{name}/git/push */
+/** POST /api/workspaces/{ws}/agents/{name}/git/push */
 export async function gitPush(
+  workspaceId: string,
   agentName: string,
   target?: string,
 ): Promise<GitPushResult> {
   return post<GitPushResult>(
-    agentGitUrl(agentName, "push"),
+    agentGitUrl(workspaceId, agentName, "push"),
     { target },
     {
       timeout: GIT_ACTION_TIMEOUT,
@@ -94,13 +105,14 @@ export async function gitPush(
   );
 }
 
-/** POST /api/agents/{name}/git/pull */
+/** POST /api/workspaces/{ws}/agents/{name}/git/pull */
 export async function gitPull(
+  workspaceId: string,
   agentName: string,
   source?: string,
 ): Promise<GitPullResult> {
   return post<GitPullResult>(
-    agentGitUrl(agentName, "pull"),
+    agentGitUrl(workspaceId, agentName, "pull"),
     { source },
     {
       timeout: GIT_ACTION_TIMEOUT,
@@ -108,10 +120,13 @@ export async function gitPull(
   );
 }
 
-/** POST /api/agents/{name}/git/sync */
-export async function gitSync(agentName: string): Promise<GitSyncResult> {
+/** POST /api/workspaces/{ws}/agents/{name}/git/sync */
+export async function gitSync(
+  workspaceId: string,
+  agentName: string,
+): Promise<GitSyncResult> {
   return post<GitSyncResult>(
-    agentGitUrl(agentName, "sync"),
+    agentGitUrl(workspaceId, agentName, "sync"),
     {},
     {
       timeout: GIT_ACTION_TIMEOUT,
@@ -119,13 +134,14 @@ export async function gitSync(agentName: string): Promise<GitSyncResult> {
   );
 }
 
-/** POST /api/agents/{name}/git/pr */
+/** POST /api/workspaces/{ws}/agents/{name}/git/pr */
 export async function gitCreatePR(
+  workspaceId: string,
   agentName: string,
   target?: string,
 ): Promise<GitPRResult> {
   return post<GitPRResult>(
-    agentGitUrl(agentName, "pr"),
+    agentGitUrl(workspaceId, agentName, "pr"),
     { target },
     {
       timeout: GIT_ACTION_TIMEOUT,
@@ -133,15 +149,16 @@ export async function gitCreatePR(
   );
 }
 
-/** POST /api/agents/{name}/git/reset */
+/** POST /api/workspaces/{ws}/agents/{name}/git/reset */
 export async function gitReset(
+  workspaceId: string,
   agentName: string,
   branch?: string,
   force?: boolean,
   push?: boolean,
 ): Promise<GitResetResult> {
   return post<GitResetResult>(
-    agentGitUrl(agentName, "reset"),
+    agentGitUrl(workspaceId, agentName, "reset"),
     { branch, force, push },
     {
       timeout: GIT_ACTION_TIMEOUT,
@@ -149,19 +166,24 @@ export async function gitReset(
   );
 }
 
-/** POST /api/git/push-all — push all worktrees */
+/** POST /api/workspaces/{ws}/git/push-all — push all worktrees */
 export interface GitPushAllResult {
   failed: number;
   results: { name: string; success: boolean }[];
 }
-export async function gitPushAll(): Promise<GitPushAllResult> {
-  return post<GitPushAllResult>("/api/git/push-all", {}); // allow-url
+export async function gitPushAll(
+  workspaceId: string,
+): Promise<GitPushAllResult> {
+  return post<GitPushAllResult>(wsUrl(workspaceId, "/git/push-all"), {});
 }
 
-/** PATCH /api/agents/{name}/git/target */
+/** PATCH /api/workspaces/{ws}/agents/{name}/git/target */
 export async function gitUpdateTarget(
+  workspaceId: string,
   agentName: string,
   branch: string,
 ): Promise<GitTargetResult> {
-  return patch<GitTargetResult>(agentGitUrl(agentName, "target"), { branch });
+  return patch<GitTargetResult>(agentGitUrl(workspaceId, agentName, "target"), {
+    branch,
+  });
 }

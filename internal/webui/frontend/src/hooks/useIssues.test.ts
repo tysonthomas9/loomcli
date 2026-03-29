@@ -94,7 +94,9 @@ describe("useIssues", () => {
 
   describe("Hook initialization", () => {
     it("returns expected shape with all properties", async () => {
-      const { result } = renderHook(() => useIssues());
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id" }),
+      );
 
       expect(result.current).toHaveProperty("issues");
       expect(result.current).toHaveProperty("issuesMap");
@@ -116,14 +118,18 @@ describe("useIssues", () => {
     });
 
     it("initial state has empty issues and Map", () => {
-      const { result } = renderHook(() => useIssues({ autoFetch: false }));
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id", autoFetch: false }),
+      );
 
       expect(result.current.issues).toEqual([]);
       expect(result.current.issuesMap.size).toBe(0);
     });
 
     it("initial state has no loading or error", () => {
-      const { result } = renderHook(() => useIssues({ autoFetch: false }));
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id", autoFetch: false }),
+      );
 
       expect(result.current.isLoading).toBe(false);
       expect(result.current.error).toBeNull();
@@ -138,7 +144,9 @@ describe("useIssues", () => {
       ];
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValue(mockIssues);
 
-      const { result } = renderHook(() => useIssues());
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id" }),
+      );
 
       // Should start loading
       expect(result.current.isLoading).toBe(true);
@@ -153,7 +161,9 @@ describe("useIssues", () => {
     });
 
     it("does not fetch on mount when autoFetch is false", async () => {
-      const { result } = renderHook(() => useIssues({ autoFetch: false }));
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id", autoFetch: false }),
+      );
 
       // Give time for potential fetch
       await vi.waitFor(() => {
@@ -168,10 +178,14 @@ describe("useIssues", () => {
       const filter = { priority: 1, assignee: "user@example.com" };
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([]);
 
-      renderHook(() => useIssues({ filter }));
+      renderHook(() => useIssues({ workspaceId: "test-ws-id", filter }));
 
       await waitFor(() => {
-        expect(issuesApi.getReadyIssues).toHaveBeenCalledWith(filter);
+        expect(issuesApi.getReadyIssues).toHaveBeenCalledWith(
+          "test-ws-id",
+          filter,
+          expect.anything(),
+        );
       });
     });
   });
@@ -183,7 +197,9 @@ describe("useIssues", () => {
         new Error(errorMessage),
       );
 
-      const { result } = renderHook(() => useIssues());
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => {
         expect(result.current.isLoading).toBe(false);
@@ -199,7 +215,9 @@ describe("useIssues", () => {
         new Error("Network error"),
       );
 
-      const { result } = renderHook(() => useIssues());
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => {
         expect(result.current.error).toBe("Network error");
@@ -225,7 +243,9 @@ describe("useIssues", () => {
       ];
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValueOnce(initialIssues);
 
-      const { result } = renderHook(() => useIssues());
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => {
         expect(result.current.issues).toHaveLength(1);
@@ -253,7 +273,9 @@ describe("useIssues", () => {
     it("refetch sets loading state correctly", async () => {
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([]);
 
-      const { result } = renderHook(() => useIssues({ autoFetch: false }));
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id", autoFetch: false }),
+      );
 
       expect(result.current.isLoading).toBe(false);
 
@@ -280,7 +302,9 @@ describe("useIssues", () => {
       ];
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValue(mockIssues);
 
-      const { result } = renderHook(() => useIssues());
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => {
         expect(result.current.issues).toHaveLength(2);
@@ -302,7 +326,9 @@ describe("useIssues", () => {
       ];
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValue(mockIssues);
 
-      const { result } = renderHook(() => useIssues());
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => {
         expect(result.current.issues).toHaveLength(2);
@@ -316,7 +342,9 @@ describe("useIssues", () => {
 
   describe("SSE integration", () => {
     it("passes autoConnect option to useSSE", () => {
-      renderHook(() => useIssues({ autoConnect: false }));
+      renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id", autoConnect: false }),
+      );
 
       expect(useSSEModule.useSSE).toHaveBeenCalledWith(
         expect.objectContaining({ autoConnect: false }),
@@ -324,7 +352,7 @@ describe("useIssues", () => {
     });
 
     it("uses autoConnect=true by default", () => {
-      renderHook(() => useIssues());
+      renderHook(() => useIssues({ workspaceId: "test-ws-id" }));
 
       expect(useSSEModule.useSSE).toHaveBeenCalledWith(
         expect.objectContaining({ autoConnect: true }),
@@ -339,7 +367,9 @@ describe("useIssues", () => {
       });
       vi.mocked(useSSEModule.useSSE).mockReturnValue(mockSSE);
 
-      const { result } = renderHook(() => useIssues({ autoFetch: false }));
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id", autoFetch: false }),
+      );
 
       expect(result.current.connectionState).toBe("connected");
       expect(result.current.isConnected).toBe(true);
@@ -354,7 +384,9 @@ describe("useIssues", () => {
       });
       vi.mocked(useSSEModule.useSSE).mockReturnValue(mockSSE);
 
-      const { result } = renderHook(() => useIssues({ autoFetch: false }));
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id", autoFetch: false }),
+      );
 
       expect(result.current.connectionState).toBe("reconnecting");
       expect(result.current.reconnectAttempts).toBe(3);
@@ -365,7 +397,9 @@ describe("useIssues", () => {
       mockSSE = createMockSSE({ retryNow });
       vi.mocked(useSSEModule.useSSE).mockReturnValue(mockSSE);
 
-      const { result } = renderHook(() => useIssues({ autoFetch: false }));
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id", autoFetch: false }),
+      );
 
       act(() => {
         result.current.retryConnection();
@@ -383,7 +417,9 @@ describe("useIssues", () => {
       const mockIssues = [createTestIssue({ id: "existing" })];
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValue(mockIssues);
 
-      const { result } = renderHook(() => useIssues());
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => {
         expect(result.current.issues).toHaveLength(1);
@@ -415,7 +451,9 @@ describe("useIssues", () => {
       ];
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValue(mockIssues);
 
-      const { result } = renderHook(() => useIssues());
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => {
         expect(result.current.issues).toHaveLength(1);
@@ -441,7 +479,9 @@ describe("useIssues", () => {
       ];
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValue(mockIssues);
 
-      const { result } = renderHook(() => useIssues());
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => {
         expect(result.current.issues).toHaveLength(2);
@@ -467,7 +507,9 @@ describe("useIssues", () => {
       ];
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValue(mockIssues);
 
-      const { result } = renderHook(() => useIssues());
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => {
         expect(result.current.issues).toHaveLength(1);
@@ -505,7 +547,9 @@ describe("useIssues", () => {
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValue(mockIssues);
       vi.mocked(issuesApi.updateIssue).mockResolvedValue(mockIssues[0]);
 
-      const { result } = renderHook(() => useIssues());
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => {
         expect(result.current.issues).toHaveLength(1);
@@ -528,9 +572,13 @@ describe("useIssues", () => {
       });
 
       // API should have been called
-      expect(issuesApi.updateIssue).toHaveBeenCalledWith("issue-1", {
-        status: "in_progress",
-      });
+      expect(issuesApi.updateIssue).toHaveBeenCalledWith(
+        "test-ws-id",
+        "issue-1",
+        {
+          status: "in_progress",
+        },
+      );
     });
 
     it("rolls back on API failure", async () => {
@@ -540,7 +588,9 @@ describe("useIssues", () => {
         new Error("API error"),
       );
 
-      const { result } = renderHook(() => useIssues());
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => {
         expect(result.current.issues).toHaveLength(1);
@@ -560,7 +610,9 @@ describe("useIssues", () => {
     it("throws error when issue not found", async () => {
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([]);
 
-      const { result } = renderHook(() => useIssues());
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => {
         expect(result.current.isLoading).toBe(false);
@@ -594,7 +646,9 @@ describe("useIssues", () => {
         new Error("API error"),
       );
 
-      const { result } = renderHook(() => useIssues());
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id" }),
+      );
       await waitFor(() => expect(result.current.issues).toHaveLength(1));
 
       // Verify rollback still works correctly after code change
@@ -623,7 +677,9 @@ describe("useIssues", () => {
       });
       vi.mocked(useSSEModule.useSSE).mockReturnValue(mockSSE);
 
-      const { result } = renderHook(() => useIssues());
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => {
         expect(result.current.isLoading).toBe(false);
@@ -641,7 +697,9 @@ describe("useIssues", () => {
       });
       vi.mocked(useSSEModule.useSSE).mockReturnValue(mockSSE);
 
-      const { result } = renderHook(() => useIssues());
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => {
         expect(result.current.isLoading).toBe(false);
@@ -653,7 +711,7 @@ describe("useIssues", () => {
 
   describe("Hook options", () => {
     it("respects all default options", () => {
-      renderHook(() => useIssues());
+      renderHook(() => useIssues({ workspaceId: "test-ws-id" }));
 
       // Should auto-fetch
       expect(issuesApi.getReadyIssues).toHaveBeenCalled();
@@ -667,6 +725,7 @@ describe("useIssues", () => {
     it("can disable auto-fetch and auto-connect", () => {
       renderHook(() =>
         useIssues({
+          workspaceId: "test-ws-id",
           autoFetch: false,
           autoConnect: false,
         }),
@@ -682,7 +741,7 @@ describe("useIssues", () => {
   describe("Method stability", () => {
     it("refetch is stable across renders", async () => {
       const { result, rerender } = renderHook(() =>
-        useIssues({ autoFetch: false }),
+        useIssues({ workspaceId: "test-ws-id", autoFetch: false }),
       );
 
       const initialRefetch = result.current.refetch;
@@ -694,7 +753,7 @@ describe("useIssues", () => {
 
     it("getIssue is stable when issuesMap does not change", async () => {
       const { result, rerender } = renderHook(() =>
-        useIssues({ autoFetch: false }),
+        useIssues({ workspaceId: "test-ws-id", autoFetch: false }),
       );
 
       const initialGetIssue = result.current.getIssue;
@@ -706,7 +765,7 @@ describe("useIssues", () => {
 
     it("retryConnection is stable across renders", async () => {
       const { result, rerender } = renderHook(() =>
-        useIssues({ autoFetch: false }),
+        useIssues({ workspaceId: "test-ws-id", autoFetch: false }),
       );
 
       const initialRetryConnection = result.current.retryConnection;
@@ -726,7 +785,9 @@ describe("useIssues", () => {
       const mockGraphIssues = [createTestIssue({ id: "graph-1" })];
       vi.mocked(issuesApi.fetchGraphIssues).mockResolvedValue(mockGraphIssues);
 
-      const { result } = renderHook(() => useIssues({ mode: "graph" }));
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id", mode: "graph" }),
+      );
 
       await waitFor(() => expect(result.current.isLoading).toBe(false));
 
@@ -738,16 +799,22 @@ describe("useIssues", () => {
     it("passes graphFilter options to fetchGraphIssues", async () => {
       const graphFilter = { status: "open" as const, includeClosed: false };
       const { result } = renderHook(() =>
-        useIssues({ mode: "graph", graphFilter }),
+        useIssues({ workspaceId: "test-ws-id", mode: "graph", graphFilter }),
       );
 
       await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-      expect(issuesApi.fetchGraphIssues).toHaveBeenCalledWith(graphFilter);
+      expect(issuesApi.fetchGraphIssues).toHaveBeenCalledWith(
+        "test-ws-id",
+        graphFilter,
+        expect.anything(),
+      );
     });
 
     it("uses ready mode by default", async () => {
-      const { result } = renderHook(() => useIssues());
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => expect(result.current.isLoading).toBe(false));
 
@@ -759,7 +826,11 @@ describe("useIssues", () => {
       vi.mocked(issuesApi.fetchGraphIssues).mockResolvedValue([]);
 
       const { result } = renderHook(() =>
-        useIssues({ mode: "graph", autoFetch: false }),
+        useIssues({
+          workspaceId: "test-ws-id",
+          mode: "graph",
+          autoFetch: false,
+        }),
       );
 
       await act(async () => {
@@ -776,7 +847,9 @@ describe("useIssues", () => {
         new Error(errorMessage),
       );
 
-      const { result } = renderHook(() => useIssues({ mode: "graph" }));
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id", mode: "graph" }),
+      );
 
       await waitFor(() => expect(result.current.isLoading).toBe(false));
 
@@ -801,7 +874,9 @@ describe("useIssues", () => {
       ];
       vi.mocked(issuesApi.fetchGraphIssues).mockResolvedValue(mockGraphIssues);
 
-      const { result } = renderHook(() => useIssues({ mode: "graph" }));
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id", mode: "graph" }),
+      );
 
       await waitFor(() => expect(result.current.isLoading).toBe(false));
 
@@ -819,7 +894,9 @@ describe("useIssues", () => {
       vi.mocked(useSSEModule.useSSE).mockReturnValue(mockSSE);
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([]);
 
-      const { result } = renderHook(() => useIssues());
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => expect(result.current.isLoading).toBe(false));
 
@@ -831,7 +908,9 @@ describe("useIssues", () => {
       vi.mocked(useSSEModule.useSSE).mockReturnValue(mockSSE);
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([]);
 
-      const { result } = renderHook(() => useIssues());
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => expect(result.current.isLoading).toBe(false));
 
@@ -849,7 +928,9 @@ describe("useIssues", () => {
       });
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValueOnce([initialIssue]);
 
-      const { result } = renderHook(() => useIssues());
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => {
         expect(result.current.issues).toHaveLength(1);
@@ -910,7 +991,9 @@ describe("useIssues", () => {
       });
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValueOnce([initialIssue]);
 
-      const { result } = renderHook(() => useIssues());
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => {
         expect(result.current.issues).toHaveLength(1);
@@ -977,7 +1060,9 @@ describe("useIssues", () => {
         issue2,
       ]);
 
-      const { result } = renderHook(() => useIssues());
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => {
         expect(result.current.issues).toHaveLength(2);
@@ -1030,7 +1115,9 @@ describe("useIssues", () => {
       });
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValueOnce([oldIssue]);
 
-      const { result } = renderHook(() => useIssues());
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => {
         expect(result.current.issues).toHaveLength(1);
@@ -1069,7 +1156,9 @@ describe("useIssues", () => {
       const mockIssues = [createTestIssue({ id: "kanban-1" })];
       vi.mocked(issuesApi.getKanbanIssues).mockResolvedValue(mockIssues);
 
-      const { result } = renderHook(() => useIssues({ mode: "kanban" }));
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id", mode: "kanban" }),
+      );
 
       await waitFor(() => expect(result.current.isLoading).toBe(false));
 
@@ -1082,10 +1171,16 @@ describe("useIssues", () => {
       const filter = { priority: 1, assignee: "dev@example.com" };
       vi.mocked(issuesApi.getKanbanIssues).mockResolvedValue([]);
 
-      renderHook(() => useIssues({ mode: "kanban", filter }));
+      renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id", mode: "kanban", filter }),
+      );
 
       await waitFor(() => {
-        expect(issuesApi.getKanbanIssues).toHaveBeenCalledWith(filter);
+        expect(issuesApi.getKanbanIssues).toHaveBeenCalledWith(
+          "test-ws-id",
+          filter,
+          expect.anything(),
+        );
       });
     });
 
@@ -1100,7 +1195,9 @@ describe("useIssues", () => {
       ];
       vi.mocked(issuesApi.getKanbanIssues).mockResolvedValue(mockIssues);
 
-      const { result } = renderHook(() => useIssues({ mode: "kanban" }));
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id", mode: "kanban" }),
+      );
 
       await waitFor(() => expect(result.current.issues).toHaveLength(1));
 
@@ -1114,7 +1211,11 @@ describe("useIssues", () => {
       vi.mocked(issuesApi.getKanbanIssues).mockResolvedValue([]);
 
       const { result } = renderHook(() =>
-        useIssues({ mode: "kanban", autoFetch: false }),
+        useIssues({
+          workspaceId: "test-ws-id",
+          mode: "kanban",
+          autoFetch: false,
+        }),
       );
 
       await act(async () => {
@@ -1131,7 +1232,9 @@ describe("useIssues", () => {
         new Error(errorMessage),
       );
 
-      const { result } = renderHook(() => useIssues({ mode: "kanban" }));
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id", mode: "kanban" }),
+      );
 
       await waitFor(() => expect(result.current.isLoading).toBe(false));
 
@@ -1157,7 +1260,9 @@ describe("useIssues", () => {
         return currentMockSSE;
       });
 
-      const { result, rerender } = renderHook(() => useIssues());
+      const { result, rerender } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => expect(result.current.isLoading).toBe(false));
 
@@ -1211,7 +1316,9 @@ describe("useIssues", () => {
         return currentMockSSE;
       });
 
-      const { result, rerender } = renderHook(() => useIssues());
+      const { result, rerender } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => expect(result.current.isLoading).toBe(false));
 
@@ -1255,7 +1362,9 @@ describe("useIssues", () => {
         return currentMockSSE;
       });
 
-      const { result, rerender } = renderHook(() => useIssues());
+      const { result, rerender } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => expect(result.current.isLoading).toBe(false));
 
@@ -1321,7 +1430,9 @@ describe("useIssues", () => {
         validIssue,
       ]);
 
-      const { result } = renderHook(() => useIssues());
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => expect(result.current.isLoading).toBe(false));
 
@@ -1354,7 +1465,9 @@ describe("useIssues", () => {
             }),
         );
 
-      const { result } = renderHook(() => useIssues());
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => expect(result.current.issues).toHaveLength(2));
 
@@ -1409,7 +1522,9 @@ describe("useIssues", () => {
             }),
         );
 
-      const { result } = renderHook(() => useIssues());
+      const { result } = renderHook(() =>
+        useIssues({ workspaceId: "test-ws-id" }),
+      );
 
       await waitFor(() => expect(result.current.issues).toHaveLength(2));
 
@@ -1454,6 +1569,7 @@ describe("useIssues", () => {
 
         const { result } = renderHook(() =>
           useIssues({
+            workspaceId: "test-ws-id",
             mode: "ready",
             filter,
             sourceRepos: ["repo-a", "repo-b"],
@@ -1465,10 +1581,14 @@ describe("useIssues", () => {
           await result.current.refetch();
         });
 
-        expect(issuesApi.getReadyIssues).toHaveBeenCalledWith({
-          priority: 1,
-          source_repos: ["repo-a", "repo-b"],
-        });
+        expect(issuesApi.getReadyIssues).toHaveBeenCalledWith(
+          "test-ws-id",
+          {
+            priority: 1,
+            source_repos: ["repo-a", "repo-b"],
+          },
+          undefined,
+        );
       });
 
       it("builds WorkFilter with source_repos for kanban mode", async () => {
@@ -1477,6 +1597,7 @@ describe("useIssues", () => {
 
         const { result } = renderHook(() =>
           useIssues({
+            workspaceId: "test-ws-id",
             mode: "kanban",
             filter,
             sourceRepos: ["repo-c"],
@@ -1488,10 +1609,14 @@ describe("useIssues", () => {
           await result.current.refetch();
         });
 
-        expect(issuesApi.getKanbanIssues).toHaveBeenCalledWith({
-          assignee: "dev@example.com",
-          source_repos: ["repo-c"],
-        });
+        expect(issuesApi.getKanbanIssues).toHaveBeenCalledWith(
+          "test-ws-id",
+          {
+            assignee: "dev@example.com",
+            source_repos: ["repo-c"],
+          },
+          undefined,
+        );
       });
 
       it("builds GraphFilter with source_repos for graph mode", async () => {
@@ -1500,6 +1625,7 @@ describe("useIssues", () => {
 
         const { result } = renderHook(() =>
           useIssues({
+            workspaceId: "test-ws-id",
             mode: "graph",
             graphFilter,
             sourceRepos: ["repo-d"],
@@ -1511,11 +1637,15 @@ describe("useIssues", () => {
           await result.current.refetch();
         });
 
-        expect(issuesApi.fetchGraphIssues).toHaveBeenCalledWith({
-          status: "open",
-          includeClosed: false,
-          source_repos: ["repo-d"],
-        });
+        expect(issuesApi.fetchGraphIssues).toHaveBeenCalledWith(
+          "test-ws-id",
+          {
+            status: "open",
+            includeClosed: false,
+            source_repos: ["repo-d"],
+          },
+          undefined,
+        );
       });
 
       it("does not add source_repos when sourceRepos is undefined", async () => {
@@ -1524,6 +1654,7 @@ describe("useIssues", () => {
 
         const { result } = renderHook(() =>
           useIssues({
+            workspaceId: "test-ws-id",
             mode: "ready",
             filter,
             sourceRepos: undefined,
@@ -1535,7 +1666,13 @@ describe("useIssues", () => {
           await result.current.refetch();
         });
 
-        expect(issuesApi.getReadyIssues).toHaveBeenCalledWith({ priority: 1 });
+        expect(issuesApi.getReadyIssues).toHaveBeenCalledWith(
+          "test-ws-id",
+          {
+            priority: 1,
+          },
+          undefined,
+        );
       });
 
       it("does not add source_repos when sourceRepos is empty", async () => {
@@ -1543,6 +1680,7 @@ describe("useIssues", () => {
 
         const { result } = renderHook(() =>
           useIssues({
+            workspaceId: "test-ws-id",
             mode: "ready",
             sourceRepos: [],
             autoFetch: false,
@@ -1553,7 +1691,11 @@ describe("useIssues", () => {
           await result.current.refetch();
         });
 
-        expect(issuesApi.getReadyIssues).toHaveBeenCalledWith(undefined);
+        expect(issuesApi.getReadyIssues).toHaveBeenCalledWith(
+          "test-ws-id",
+          undefined,
+          undefined,
+        );
       });
     });
 
@@ -1569,7 +1711,10 @@ describe("useIssues", () => {
         vi.mocked(issuesApi.getReadyIssues).mockResolvedValue(mockIssues);
 
         const { result } = renderHook(() =>
-          useIssues({ sourceRepos: ["repo-a", "repo-b"] }),
+          useIssues({
+            workspaceId: "test-ws-id",
+            sourceRepos: ["repo-a", "repo-b"],
+          }),
         );
 
         await waitFor(() => {
@@ -1604,7 +1749,7 @@ describe("useIssues", () => {
         vi.mocked(issuesApi.getReadyIssues).mockResolvedValue(mockIssues);
 
         const { result } = renderHook(() =>
-          useIssues({ sourceRepos: ["repo-a"] }),
+          useIssues({ workspaceId: "test-ws-id", sourceRepos: ["repo-a"] }),
         );
 
         await waitFor(() => {
@@ -1638,7 +1783,7 @@ describe("useIssues", () => {
         vi.mocked(issuesApi.getReadyIssues).mockResolvedValue(mockIssues);
 
         const { result } = renderHook(() =>
-          useIssues({ sourceRepos: ["repo-a"] }),
+          useIssues({ workspaceId: "test-ws-id", sourceRepos: ["repo-a"] }),
         );
 
         await waitFor(() => {
@@ -1672,7 +1817,9 @@ describe("useIssues", () => {
         ];
         vi.mocked(issuesApi.getReadyIssues).mockResolvedValue(mockIssues);
 
-        const { result } = renderHook(() => useIssues({ sourceRepos: [] }));
+        const { result } = renderHook(() =>
+          useIssues({ workspaceId: "test-ws-id", sourceRepos: [] }),
+        );
 
         await waitFor(() => {
           expect(result.current.issues).toHaveLength(1);
@@ -1706,7 +1853,7 @@ describe("useIssues", () => {
         vi.mocked(issuesApi.getReadyIssues).mockResolvedValue(mockIssues);
 
         const { result } = renderHook(() =>
-          useIssues({ sourceRepos: undefined }),
+          useIssues({ workspaceId: "test-ws-id", sourceRepos: undefined }),
         );
 
         await waitFor(() => {
@@ -1734,6 +1881,7 @@ describe("useIssues", () => {
       it("passes sourceRepos option to useSSE", () => {
         renderHook(() =>
           useIssues({
+            workspaceId: "test-ws-id",
             autoFetch: false,
             sourceRepos: ["repo-a", "repo-b"],
           }),
@@ -1748,9 +1896,7 @@ describe("useIssues", () => {
 
       it("passes undefined sourceRepos to useSSE when not set", () => {
         renderHook(() =>
-          useIssues({
-            autoFetch: false,
-          }),
+          useIssues({ workspaceId: "test-ws-id", autoFetch: false }),
         );
 
         expect(useSSEModule.useSSE).toHaveBeenCalledWith(

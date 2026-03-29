@@ -4,13 +4,15 @@
  */
 
 import type React from "react";
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 
 import { updateIssue, closeIssue } from "@/api/issues";
 import { createWorkspaceEpic } from "@/api/workspace";
 import { useWorkspaceTree } from "@/hooks/useWorkspaceTree";
+import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
 import { useToast } from "@/hooks/useToast";
 import { useInlineCreate } from "@/hooks/useInlineCreate";
+import { wsGet, wsSet } from "@/utils/scopedStorage";
 
 import { TalkToLeadEntry } from "./TalkToLeadEntry";
 import { EpicRow } from "./EpicRow";
@@ -20,7 +22,8 @@ import { TaskContextMenu } from "./TaskContextMenu";
 import { InlineAddInput } from "./InlineAddInput";
 import styles from "./EpicTaskTree.module.css";
 
-const COLLAPSE_STORAGE_PREFIX = "workspace-tree-epic-collapsed";
+// Scoped key suffix for epic collapse state
+const SK_EPIC_COLLAPSED = "tree-epic-collapsed";
 
 export interface EpicTaskTreeProps {
   workspaceName: string;
@@ -42,28 +45,25 @@ interface ContextMenuState {
   y: number;
 }
 
-/** Build storage key namespaced by workspace. */
-function collapseKey(ws: string): string {
-  return `${COLLAPSE_STORAGE_PREFIX}:${ws}`;
-}
-
-/** Load collapse state from localStorage. */
-function loadCollapseState(ws: string): Record<string, boolean> {
+/** Load collapse state from scoped localStorage. */
+function loadCollapseState(wsId: string | null): Record<string, boolean> {
+  if (!wsId) return {};
+  const stored = wsGet(wsId, SK_EPIC_COLLAPSED);
+  if (!stored) return {};
   try {
-    const stored = localStorage.getItem(collapseKey(ws));
-    return stored ? JSON.parse(stored) : {};
+    return JSON.parse(stored);
   } catch {
     return {};
   }
 }
 
-/** Save collapse state to localStorage. */
-function saveCollapseState(ws: string, state: Record<string, boolean>): void {
-  try {
-    localStorage.setItem(collapseKey(ws), JSON.stringify(state));
-  } catch {
-    // Ignore — private browsing or storage full
-  }
+/** Save collapse state to scoped localStorage. */
+function saveCollapseState(
+  wsId: string | null,
+  state: Record<string, boolean>,
+): void {
+  if (!wsId) return;
+  wsSet(wsId, SK_EPIC_COLLAPSED, JSON.stringify(state));
 }
 
 export function EpicTaskTree({
@@ -75,27 +75,34 @@ export function EpicTaskTree({
   backend,
   onTalkToLead,
 }: EpicTaskTreeProps): JSX.Element {
+  const { workspaceId } = useWorkspaceContext();
   const { epics, orphanTasks, isLoading, refetch } = useWorkspaceTree(
     workspaceName,
     activeFilter,
     sourceRepos,
+    workspaceId,
   );
 
   const { showToast } = useToast();
 
   const [collapseState, setCollapseState] = useState<Record<string, boolean>>(
-    () => loadCollapseState(workspaceName),
+    () => loadCollapseState(workspaceId),
   );
+
+  // Re-read collapse state when workspace changes (SPA navigation)
+  useEffect(() => {
+    setCollapseState(loadCollapseState(workspaceId));
+  }, [workspaceId]);
 
   const handleToggle = useCallback(
     (epicId: string) => {
       setCollapseState((prev) => {
         const next = { ...prev, [epicId]: !prev[epicId] };
-        saveCollapseState(workspaceName, next);
+        saveCollapseState(workspaceId, next);
         return next;
       });
     },
-    [workspaceName],
+    [workspaceId],
   );
 
   // Show orphan tasks in an "Ungrouped" collapsible section
@@ -113,8 +120,8 @@ export function EpicTaskTree({
   const renameInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleCreateEpic = useCallback(
-    (title: string) => createWorkspaceEpic(workspaceName, title),
-    [workspaceName],
+    (title: string) => createWorkspaceEpic(workspaceId, title),
+    [workspaceId],
   );
 
   const addEpic = useInlineCreate({
@@ -217,7 +224,7 @@ export function EpicTaskTree({
 
     setIsSaving(true);
     try {
-      await updateIssue(editingId, { title: trimmed });
+      await updateIssue(workspaceId, editingId, { title: trimmed });
       setEditingId(null);
       setEditingType(null);
       setDraftTitle("");
@@ -253,7 +260,7 @@ export function EpicTaskTree({
     if (!contextMenu) return;
     const { id, type } = contextMenu;
     try {
-      await closeIssue(id);
+      await closeIssue(workspaceId, id);
       await refetch();
       showToast(`${type === "epic" ? "Epic" : "Task"} marked as done`, {
         type: "success",
@@ -267,7 +274,7 @@ export function EpicTaskTree({
     if (!contextMenu) return;
     const { id, type } = contextMenu;
     try {
-      await updateIssue(id, { status: "tombstone" });
+      await updateIssue(workspaceId, id, { status: "tombstone" });
       await refetch();
       showToast(`${type === "epic" ? "Epic" : "Task"} archived`, {
         type: "success",

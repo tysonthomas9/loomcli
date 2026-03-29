@@ -49,7 +49,9 @@ func startTmuxSession(sessionName string, opts AutoModeOptions, logFile string) 
 
 	// Setup logging via loom log-router for intelligent log routing
 	// log-router writes to agent log always, and task log when a task is claimed
-	// logFile is ~/.loom/logs/agents/{agentName}.log, so logDir is two levels up
+	// logFile is ~/.loom/logs/{workspaceID}/agents/{agentName}.log, so
+	// filepath.Dir twice gives ~/.loom/logs/{workspaceID} which is already
+	// workspace-scoped. We pass this directly as --base-dir.
 	logDir := filepath.Dir(filepath.Dir(logFile))
 	lockPath := filepath.Join(ResolveLockDir(opts.WorktreePath), LockFileName)
 	routerCmd := fmt.Sprintf("loom log-router --agent %s --base-dir %s --lock-path %s --max-log-size 50",

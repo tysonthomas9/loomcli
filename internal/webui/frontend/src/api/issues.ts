@@ -16,7 +16,15 @@ import type {
   Comment,
 } from "@/types";
 
-import { get, post, patch, del, ApiError } from "./client";
+import {
+  get,
+  post,
+  patch,
+  del,
+  ApiError,
+  wsUrl,
+  type RequestOptions,
+} from "./client";
 
 // ============= Response Types =============
 
@@ -100,9 +108,12 @@ function mapWorkFilterToQueryParams(
 /**
  * Get a single issue by ID with full details.
  */
-export async function getIssue(id: string): Promise<IssueDetails> {
+export async function getIssue(
+  workspaceId: string,
+  id: string,
+): Promise<IssueDetails> {
   const response = await get<ApiResult<IssueDetails>>(
-    `/api/issues/${encodeURIComponent(id)}`,
+    wsUrl(workspaceId, `/issues/${encodeURIComponent(id)}`),
   );
   return unwrap(response);
 }
@@ -110,17 +121,26 @@ export async function getIssue(id: string): Promise<IssueDetails> {
 /**
  * Get issues ready for work (no blocking dependencies).
  */
-export async function getReadyIssues(options?: WorkFilter): Promise<Issue[]> {
+export async function getReadyIssues(
+  workspaceId: string,
+  options?: WorkFilter,
+  requestOptions?: Pick<RequestOptions, "signal">,
+): Promise<Issue[]> {
   const query = buildQueryString(mapWorkFilterToQueryParams(options ?? {}));
-  const response = await get<ApiResult<Issue[]>>(`/api/ready${query}`);
+  const url = wsUrl(workspaceId, `/ready${query}`);
+  const response = requestOptions
+    ? await get<ApiResult<Issue[]>>(url, requestOptions)
+    : await get<ApiResult<Issue[]>>(url);
   return unwrap(response);
 }
 
 /**
  * Get project statistics.
  */
-export async function getStats(): Promise<Statistics> {
-  const response = await get<ApiResult<Statistics>>("/api/stats");
+export async function getStats(workspaceId: string): Promise<Statistics> {
+  const response = await get<ApiResult<Statistics>>(
+    wsUrl(workspaceId, "/stats"),
+  );
   return unwrap(response);
 }
 
@@ -144,6 +164,7 @@ export interface BlockedFilter {
  * Get issues that have blocking dependencies (waiting on other issues).
  */
 export async function getBlockedIssues(
+  workspaceId: string,
   options?: BlockedFilter,
 ): Promise<BlockedIssue[]> {
   const params: Record<string, unknown> = {};
@@ -163,7 +184,9 @@ export async function getBlockedIssues(
     params.limit = options.limit;
   }
   const query = buildQueryString(params);
-  const response = await get<ApiResult<BlockedIssue[]>>(`/api/blocked${query}`);
+  const response = await get<ApiResult<BlockedIssue[]>>(
+    wsUrl(workspaceId, `/blocked${query}`),
+  );
   return unwrap(response);
 }
 
@@ -172,7 +195,11 @@ export async function getBlockedIssues(
  * Excludes tombstone issues and includes blocked dependency info.
  * Returns issues enriched with is_blocked, blocked_by_count, blocked_by fields.
  */
-export async function getKanbanIssues(options?: WorkFilter): Promise<Issue[]> {
+export async function getKanbanIssues(
+  workspaceId: string,
+  options?: WorkFilter,
+  requestOptions?: Pick<RequestOptions, "signal">,
+): Promise<Issue[]> {
   const params: Record<string, unknown> = {
     exclude_status: "tombstone",
     include_blocked: "true",
@@ -182,7 +209,10 @@ export async function getKanbanIssues(options?: WorkFilter): Promise<Issue[]> {
     Object.assign(params, mapped);
   }
   const query = buildQueryString(params);
-  const response = await get<ApiResult<Issue[]>>(`/api/issues${query}`);
+  const url = wsUrl(workspaceId, `/issues${query}`);
+  const response = requestOptions
+    ? await get<ApiResult<Issue[]>>(url, requestOptions)
+    : await get<ApiResult<Issue[]>>(url);
   return unwrap(response);
 }
 
@@ -234,7 +264,9 @@ interface GraphApiIssue {
  * issue_type, labels, dependencies). Missing Issue fields are set to defaults.
  */
 export async function fetchGraphIssues(
+  workspaceId: string,
   options?: GraphFilter,
+  requestOptions?: Pick<RequestOptions, "signal">,
 ): Promise<Issue[]> {
   const params: Record<string, unknown> = {};
   if (options?.status) {
@@ -247,7 +279,10 @@ export async function fetchGraphIssues(
     params.source_repos = options.source_repos;
   }
   const query = buildQueryString(params);
-  const response = await get<GraphApiResponse>(`/api/issues/graph${query}`);
+  const url = wsUrl(workspaceId, `/issues/graph${query}`);
+  const response = requestOptions
+    ? await get<GraphApiResponse>(url, requestOptions)
+    : await get<GraphApiResponse>(url);
 
   if (!response.success) {
     throw new ApiError(0, response.error || "Unknown error");
@@ -338,8 +373,14 @@ export interface UpdateIssueRequest {
 /**
  * Create a new issue.
  */
-export async function createIssue(data: CreateIssueRequest): Promise<Issue> {
-  const response = await post<ApiResult<Issue>>("/api/issues", data);
+export async function createIssue(
+  workspaceId: string,
+  data: CreateIssueRequest,
+): Promise<Issue> {
+  const response = await post<ApiResult<Issue>>(
+    wsUrl(workspaceId, "/issues"),
+    data,
+  );
   return unwrap(response);
 }
 
@@ -347,11 +388,12 @@ export async function createIssue(data: CreateIssueRequest): Promise<Issue> {
  * Update an existing issue.
  */
 export async function updateIssue(
+  workspaceId: string,
   id: string,
   data: UpdateIssueRequest,
 ): Promise<Issue> {
   const response = await patch<ApiResult<Issue>>(
-    `/api/issues/${encodeURIComponent(id)}`,
+    wsUrl(workspaceId, `/issues/${encodeURIComponent(id)}`),
     data,
   );
   return unwrap(response);
@@ -360,9 +402,13 @@ export async function updateIssue(
 /**
  * Close an issue with optional reason.
  */
-export async function closeIssue(id: string, reason?: string): Promise<void> {
+export async function closeIssue(
+  workspaceId: string,
+  id: string,
+  reason?: string,
+): Promise<void> {
   const response = await post<ApiResult<null>>(
-    `/api/issues/${encodeURIComponent(id)}/close`,
+    wsUrl(workspaceId, `/issues/${encodeURIComponent(id)}/close`),
     reason ? { reason } : {},
   );
   unwrap(response);
@@ -377,12 +423,13 @@ export async function closeIssue(id: string, reason?: string): Promise<void> {
  * @param depType - Type of dependency (defaults to "blocks")
  */
 export async function addDependency(
+  workspaceId: string,
   issueId: string,
   dependsOnId: string,
   depType: DependencyType = "blocks",
 ): Promise<void> {
   const response = await post<ApiResult<null>>(
-    `/api/issues/${encodeURIComponent(issueId)}/dependencies`,
+    wsUrl(workspaceId, `/issues/${encodeURIComponent(issueId)}/dependencies`),
     { depends_on_id: dependsOnId, dep_type: depType },
   );
   unwrap(response);
@@ -394,11 +441,15 @@ export async function addDependency(
  * @param dependsOnId - The issue that was being depended on
  */
 export async function removeDependency(
+  workspaceId: string,
   issueId: string,
   dependsOnId: string,
 ): Promise<void> {
   const response = await del<ApiResult<null>>(
-    `/api/issues/${encodeURIComponent(issueId)}/dependencies/${encodeURIComponent(dependsOnId)}`,
+    wsUrl(
+      workspaceId,
+      `/issues/${encodeURIComponent(issueId)}/dependencies/${encodeURIComponent(dependsOnId)}`,
+    ),
   );
   unwrap(response);
 }
@@ -419,11 +470,12 @@ export interface MoveIssueResult {
  * Creates a copy in the target workspace and closes the source.
  */
 export async function moveIssue(
+  workspaceId: string,
   id: string,
   targetWorkspace: string,
 ): Promise<MoveIssueResult> {
   const response = await post<ApiResult<MoveIssueResult>>(
-    `/api/issues/${encodeURIComponent(id)}/move`,
+    wsUrl(workspaceId, `/issues/${encodeURIComponent(id)}/move`),
     { target_workspace: targetWorkspace },
   );
   return unwrap(response);
@@ -442,11 +494,12 @@ export interface AddCommentRequest {
  * Add a comment to an issue.
  */
 export async function addComment(
+  workspaceId: string,
   issueId: string,
   text: string,
 ): Promise<Comment> {
   const response = await post<ApiResult<Comment>>(
-    `/api/issues/${encodeURIComponent(issueId)}/comments`,
+    wsUrl(workspaceId, `/issues/${encodeURIComponent(issueId)}/comments`),
     { text },
   );
   return unwrap(response);

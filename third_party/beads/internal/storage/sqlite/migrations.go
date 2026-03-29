@@ -58,6 +58,7 @@ var migrationsList = []Migration{
 	{"source_system_column", migrations.MigrateSourceSystemColumn},
 	{"quality_score_column", migrations.MigrateQualityScoreColumn},
 	{"status_source_repo_index", migrations.MigrateStatusSourceRepoIndex},
+	{"comment_improvements", migrations.MigrateCommentImprovements},
 }
 
 // MigrationInfo contains metadata about a migration for inspection
@@ -123,6 +124,7 @@ func getMigrationDescription(name string) string {
 		"source_system_column":       "Adds source_system column for federation adapter tracking",
 		"quality_score_column":       "Adds quality_score column for aggregate quality (0.0-1.0) set by Refineries",
 		"status_source_repo_index":   "Adds composite partial index on (status, source_repo) for multi-repo filtering",
+		"comment_improvements":       "Adds comment threading (parent_id), soft-delete (deleted_at), and creates comment_reactions + comment_edits tables",
 	}
 
 	if desc, ok := descriptions[name]; ok {

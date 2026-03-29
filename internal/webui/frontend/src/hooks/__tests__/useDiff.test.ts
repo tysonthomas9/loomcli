@@ -58,7 +58,11 @@ describe("useDiff", () => {
   describe("Initial state", () => {
     it("returns empty files, not loading, no error when disabled", () => {
       const { result } = renderHook(() =>
-        useDiff({ agentName: "agent-1", enabled: false }),
+        useDiff({
+          workspaceId: "test-ws-id",
+          agentName: "agent-1",
+          enabled: false,
+        }),
       );
 
       expect(result.current.files).toEqual([]);
@@ -68,7 +72,7 @@ describe("useDiff", () => {
 
     it("returns empty files when agentName is null", () => {
       const { result } = renderHook(() =>
-        useDiff({ agentName: null, enabled: true }),
+        useDiff({ workspaceId: "test-ws-id", agentName: null, enabled: true }),
       );
 
       expect(result.current.files).toEqual([]);
@@ -78,7 +82,11 @@ describe("useDiff", () => {
 
     it("returns empty viewedFiles Set and patchCache Map", () => {
       const { result } = renderHook(() =>
-        useDiff({ agentName: "agent-1", enabled: false }),
+        useDiff({
+          workspaceId: "test-ws-id",
+          agentName: "agent-1",
+          enabled: false,
+        }),
       );
 
       expect(result.current.viewedFiles).toBeInstanceOf(Set);
@@ -94,24 +102,40 @@ describe("useDiff", () => {
       mockFetchDiffFiles.mockResolvedValue(mockFiles);
 
       const { result } = renderHook(() =>
-        useDiff({ agentName: "agent-1", enabled: true }),
+        useDiff({
+          workspaceId: "test-ws-id",
+          agentName: "agent-1",
+          enabled: true,
+        }),
       );
 
       await flushPromises();
 
-      expect(mockFetchDiffFiles).toHaveBeenCalledWith("agent-1", "HEAD");
+      expect(mockFetchDiffFiles).toHaveBeenCalledWith(
+        "test-ws-id",
+        "agent-1",
+        "HEAD",
+      );
       expect(result.current.files).toEqual(mockFiles);
       expect(result.current.isLoading).toBe(false);
     });
 
     it("does not fetch when disabled", () => {
-      renderHook(() => useDiff({ agentName: "agent-1", enabled: false }));
+      renderHook(() =>
+        useDiff({
+          workspaceId: "test-ws-id",
+          agentName: "agent-1",
+          enabled: false,
+        }),
+      );
 
       expect(mockFetchDiffFiles).not.toHaveBeenCalled();
     });
 
     it("does not fetch when agentName is null", () => {
-      renderHook(() => useDiff({ agentName: null, enabled: true }));
+      renderHook(() =>
+        useDiff({ workspaceId: "test-ws-id", agentName: null, enabled: true }),
+      );
 
       expect(mockFetchDiffFiles).not.toHaveBeenCalled();
     });
@@ -120,7 +144,11 @@ describe("useDiff", () => {
       mockFetchDiffFiles.mockRejectedValue(new Error("Network error"));
 
       const { result } = renderHook(() =>
-        useDiff({ agentName: "agent-1", enabled: true }),
+        useDiff({
+          workspaceId: "test-ws-id",
+          agentName: "agent-1",
+          enabled: true,
+        }),
       );
 
       await flushPromises();
@@ -134,7 +162,11 @@ describe("useDiff", () => {
       mockFetchDiffFiles.mockRejectedValue("string error");
 
       const { result } = renderHook(() =>
-        useDiff({ agentName: "agent-1", enabled: true }),
+        useDiff({
+          workspaceId: "test-ws-id",
+          agentName: "agent-1",
+          enabled: true,
+        }),
       );
 
       await flushPromises();
@@ -151,7 +183,11 @@ describe("useDiff", () => {
       mockFetchDiffFile.mockResolvedValue(mockPatch);
 
       const { result } = renderHook(() =>
-        useDiff({ agentName: "agent-1", enabled: true }),
+        useDiff({
+          workspaceId: "test-ws-id",
+          agentName: "agent-1",
+          enabled: true,
+        }),
       );
 
       await flushPromises();
@@ -161,6 +197,7 @@ describe("useDiff", () => {
       });
 
       expect(mockFetchDiffFile).toHaveBeenCalledWith(
+        "test-ws-id",
         "agent-1",
         "src/main.ts",
         "HEAD",
@@ -174,7 +211,11 @@ describe("useDiff", () => {
       mockFetchDiffFile.mockResolvedValue(mockPatch);
 
       const { result } = renderHook(() =>
-        useDiff({ agentName: "agent-1", enabled: true }),
+        useDiff({
+          workspaceId: "test-ws-id",
+          agentName: "agent-1",
+          enabled: true,
+        }),
       );
 
       await flushPromises();
@@ -198,7 +239,11 @@ describe("useDiff", () => {
       mockFetchDiffFile.mockRejectedValue(new Error("Patch failed"));
 
       const { result } = renderHook(() =>
-        useDiff({ agentName: "agent-1", enabled: true }),
+        useDiff({
+          workspaceId: "test-ws-id",
+          agentName: "agent-1",
+          enabled: true,
+        }),
       );
 
       await flushPromises();
@@ -216,7 +261,11 @@ describe("useDiff", () => {
       mockFetchDiffFiles.mockResolvedValue([]);
 
       const { result } = renderHook(() =>
-        useDiff({ agentName: "agent-1", enabled: true }),
+        useDiff({
+          workspaceId: "test-ws-id",
+          agentName: "agent-1",
+          enabled: true,
+        }),
       );
 
       await flushPromises();
@@ -230,7 +279,7 @@ describe("useDiff", () => {
 
     it("fetchPatch does nothing when agentName is null", async () => {
       const { result } = renderHook(() =>
-        useDiff({ agentName: null, enabled: false }),
+        useDiff({ workspaceId: "test-ws-id", agentName: null, enabled: false }),
       );
 
       await act(async () => {
@@ -244,7 +293,11 @@ describe("useDiff", () => {
   describe("Viewed files", () => {
     it("markViewed adds file path to viewedFiles Set", () => {
       const { result } = renderHook(() =>
-        useDiff({ agentName: "agent-1", enabled: false }),
+        useDiff({
+          workspaceId: "test-ws-id",
+          agentName: "agent-1",
+          enabled: false,
+        }),
       );
 
       act(() => {
@@ -256,7 +309,11 @@ describe("useDiff", () => {
 
     it("markViewed toggles — calling twice removes the path", () => {
       const { result } = renderHook(() =>
-        useDiff({ agentName: "agent-1", enabled: false }),
+        useDiff({
+          workspaceId: "test-ws-id",
+          agentName: "agent-1",
+          enabled: false,
+        }),
       );
 
       act(() => {
@@ -274,7 +331,11 @@ describe("useDiff", () => {
 
     it("viewedFiles starts empty", () => {
       const { result } = renderHook(() =>
-        useDiff({ agentName: "agent-1", enabled: false }),
+        useDiff({
+          workspaceId: "test-ws-id",
+          agentName: "agent-1",
+          enabled: false,
+        }),
       );
 
       expect(result.current.viewedFiles.size).toBe(0);
@@ -287,7 +348,11 @@ describe("useDiff", () => {
       mockFetchDiffFiles.mockResolvedValue(mockFiles);
 
       const { result } = renderHook(() =>
-        useDiff({ agentName: "agent-1", enabled: true }),
+        useDiff({
+          workspaceId: "test-ws-id",
+          agentName: "agent-1",
+          enabled: true,
+        }),
       );
 
       await flushPromises();
@@ -301,7 +366,11 @@ describe("useDiff", () => {
 
     it("returns zeros when files array is empty", () => {
       const { result } = renderHook(() =>
-        useDiff({ agentName: "agent-1", enabled: false }),
+        useDiff({
+          workspaceId: "test-ws-id",
+          agentName: "agent-1",
+          enabled: false,
+        }),
       );
 
       expect(result.current.summaryStats).toEqual({
@@ -319,7 +388,7 @@ describe("useDiff", () => {
 
       const { result, rerender } = renderHook(
         ({ agentName }: { agentName: string }) =>
-          useDiff({ agentName, enabled: true }),
+          useDiff({ workspaceId: "test-ws-id", agentName, enabled: true }),
         { initialProps: { agentName: "agent-1" } },
       );
 
@@ -344,7 +413,7 @@ describe("useDiff", () => {
 
       const { result, rerender } = renderHook(
         ({ agentName }: { agentName: string }) =>
-          useDiff({ agentName, enabled: true }),
+          useDiff({ workspaceId: "test-ws-id", agentName, enabled: true }),
         { initialProps: { agentName: "agent-1" } },
       );
 
@@ -381,20 +450,28 @@ describe("useDiff", () => {
 
       const { result, rerender } = renderHook(
         ({ agentName }: { agentName: string }) =>
-          useDiff({ agentName, enabled: true }),
+          useDiff({ workspaceId: "test-ws-id", agentName, enabled: true }),
         { initialProps: { agentName: "agent-1" } },
       );
 
       await flushPromises();
 
-      expect(mockFetchDiffFiles).toHaveBeenCalledWith("agent-1", "HEAD");
+      expect(mockFetchDiffFiles).toHaveBeenCalledWith(
+        "test-ws-id",
+        "agent-1",
+        "HEAD",
+      );
       expect(result.current.files).toEqual(files1);
 
       mockFetchDiffFiles.mockResolvedValueOnce(files2);
       rerender({ agentName: "agent-2" });
       await flushPromises();
 
-      expect(mockFetchDiffFiles).toHaveBeenCalledWith("agent-2", "HEAD");
+      expect(mockFetchDiffFiles).toHaveBeenCalledWith(
+        "test-ws-id",
+        "agent-2",
+        "HEAD",
+      );
       expect(result.current.files).toEqual(files2);
     });
   });
@@ -408,7 +485,11 @@ describe("useDiff", () => {
       mockFetchDiffFiles.mockReturnValue(slowPromise);
 
       const { result, unmount } = renderHook(() =>
-        useDiff({ agentName: "agent-1", enabled: true }),
+        useDiff({
+          workspaceId: "test-ws-id",
+          agentName: "agent-1",
+          enabled: true,
+        }),
       );
 
       expect(result.current.isLoading).toBe(true);
@@ -431,7 +512,11 @@ describe("useDiff", () => {
       mockFetchDiffFile.mockReturnValue(slowPromise);
 
       const { result, unmount } = renderHook(() =>
-        useDiff({ agentName: "agent-1", enabled: true }),
+        useDiff({
+          workspaceId: "test-ws-id",
+          agentName: "agent-1",
+          enabled: true,
+        }),
       );
 
       await flushPromises();
@@ -452,7 +537,11 @@ describe("useDiff", () => {
   describe("Callback stability", () => {
     it("markViewed is stable across renders", () => {
       const { result, rerender } = renderHook(() =>
-        useDiff({ agentName: "agent-1", enabled: false }),
+        useDiff({
+          workspaceId: "test-ws-id",
+          agentName: "agent-1",
+          enabled: false,
+        }),
       );
 
       const initial = result.current.markViewed;
@@ -465,7 +554,11 @@ describe("useDiff", () => {
       mockFetchDiffFile.mockResolvedValue(createMockPatch());
 
       const { result } = renderHook(() =>
-        useDiff({ agentName: "agent-1", enabled: true }),
+        useDiff({
+          workspaceId: "test-ws-id",
+          agentName: "agent-1",
+          enabled: true,
+        }),
       );
 
       await flushPromises();
@@ -492,7 +585,11 @@ describe("useDiff", () => {
       mockFetchDiffFile.mockReturnValue(slowPromise);
 
       const { result } = renderHook(() =>
-        useDiff({ agentName: "agent-1", enabled: true }),
+        useDiff({
+          workspaceId: "test-ws-id",
+          agentName: "agent-1",
+          enabled: true,
+        }),
       );
 
       await flushPromises();

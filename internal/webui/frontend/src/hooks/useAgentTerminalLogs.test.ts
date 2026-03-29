@@ -132,6 +132,7 @@ describe("useAgentTerminalLogs", () => {
 
     const { result } = renderHook(() =>
       useAgentTerminalLogs({
+        workspaceId: "test-ws-id",
         agentName: "ember",
         enabled: true,
       }),
@@ -178,7 +179,11 @@ describe("useAgentTerminalLogs", () => {
     expect(result.current.state).toBe("connected");
 
     expect(mockGetAgentTerminalInfo).toHaveBeenCalledTimes(2);
-    expect(mockGetAgentLogArchive).toHaveBeenCalledWith("ember", 500);
+    expect(mockGetAgentLogArchive).toHaveBeenCalledWith(
+      "test-ws-id",
+      "ember",
+      500,
+    );
     expect(decodeChunks(result.current.chunks)).toContain("archive line");
   });
 
@@ -195,6 +200,7 @@ describe("useAgentTerminalLogs", () => {
 
     const { result } = renderHook(() =>
       useAgentTerminalLogs({
+        workspaceId: "test-ws-id",
         agentName: "ember",
         enabled: true,
       }),
@@ -243,6 +249,7 @@ describe("useAgentTerminalLogs", () => {
 
     const { result } = renderHook(() =>
       useAgentTerminalLogs({
+        workspaceId: "test-ws-id",
         agentName: "ember",
         enabled: true,
       }),
@@ -262,6 +269,7 @@ describe("useAgentTerminalLogs", () => {
     expect(mockGetAgentLogArchive).toHaveBeenCalledTimes(2);
     expect(mockGetAgentLogArchive).toHaveBeenNthCalledWith(
       2,
+      "test-ws-id",
       "ember",
       500,
       200,
@@ -287,6 +295,7 @@ describe("useAgentTerminalLogs", () => {
     expect(mockGetAgentLogArchive).toHaveBeenCalledTimes(3);
     expect(mockGetAgentLogArchive).toHaveBeenNthCalledWith(
       3,
+      "test-ws-id",
       "ember",
       500,
       198,

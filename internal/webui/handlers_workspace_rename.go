@@ -11,9 +11,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// WorkspaceRenameRequest is the JSON body for PATCH /api/workspace/rename.
+// WorkspaceRenameRequest is the JSON body for PATCH /api/workspaces/{ws}/name.
 type WorkspaceRenameRequest struct {
-	OldName string `json:"old_name"`
 	NewName string `json:"new_name"`
 }
 
@@ -44,6 +43,7 @@ type loomConfigForRename struct {
 
 // loomWorkspaceForRename preserves all workspace fields via yaml.Node round-trip.
 type loomWorkspaceForRename struct {
+	ID    string    `yaml:"id,omitempty"`
 	Path  string    `yaml:"path"`
 	Repos yaml.Node `yaml:"repos,omitempty"`
 }
@@ -141,10 +141,28 @@ func applyWorkspaceRename(cfg *loomConfigForRename, oldName, newName string, ws 
 	}
 }
 
+// resolveWorkspaceNameByID looks up a workspace name from the config by matching the UUID.
+// Returns the name and workspace entry, or empty string if not found.
+func resolveWorkspaceNameByID(cfg *loomConfigForRename, wsID string) (string, loomWorkspaceForRename, bool) {
+	for name, ws := range cfg.Workspaces {
+		if ws.ID == wsID {
+			return name, ws, true
+		}
+	}
+	return "", loomWorkspaceForRename{}, false
+}
+
 // handleWorkspaceRename returns a handler that renames a workspace in the global config.
+// The workspace is identified by UUID from WorkspaceMiddleware context.
 // After renaming, it calls workspaceConfigFn to return refreshed workspace data.
 func handleWorkspaceRename(workspaceConfigFn func() (*WorkspaceData, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		wsID := WorkspaceFromContext(r.Context())
+		if wsID == "" {
+			respondJSON(w, http.StatusBadRequest, workspaceResponse{Success: false, Error: "workspace ID is required"})
+			return
+		}
+
 		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
 
 		var req WorkspaceRenameRequest
@@ -173,13 +191,13 @@ func handleWorkspaceRename(workspaceConfigFn func() (*WorkspaceData, error)) htt
 			return
 		}
 
-		ws, ok := cfg.Workspaces[req.OldName]
-		if !ok {
-			respondJSON(w, http.StatusNotFound, workspaceResponse{Success: false, Error: fmt.Sprintf("workspace %q not found", req.OldName)})
+		oldName, ws, found := resolveWorkspaceNameByID(cfg, wsID)
+		if !found {
+			respondJSON(w, http.StatusNotFound, workspaceResponse{Success: false, Error: fmt.Sprintf("workspace with ID %q not found", wsID)})
 			return
 		}
 
-		if req.OldName == req.NewName {
+		if oldName == req.NewName {
 			respondJSON(w, http.StatusOK, workspaceResponse{Success: true})
 			return
 		}
@@ -189,7 +207,7 @@ func handleWorkspaceRename(workspaceConfigFn func() (*WorkspaceData, error)) htt
 			return
 		}
 
-		applyWorkspaceRename(cfg, req.OldName, req.NewName, ws)
+		applyWorkspaceRename(cfg, oldName, req.NewName, ws)
 
 		if err := saveLoomConfig(cfg); err != nil {
 			respondJSON(w, http.StatusInternalServerError, workspaceResponse{Success: false, Error: "failed to save config"})

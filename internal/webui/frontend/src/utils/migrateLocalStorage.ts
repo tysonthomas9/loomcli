@@ -1,10 +1,10 @@
 /**
- * localStorage migration from V5 to V6 key naming convention.
+ * localStorage migration (V5→V6→V7 key naming conventions).
  * Runs once at app boot before React renders.
  * Idempotent: safe to run multiple times.
  */
 
-export const CURRENT_VERSION = "6";
+export const CURRENT_VERSION = "7";
 export const VERSION_KEY = "cortex-version";
 
 /** V5 key → V6 key mapping */
@@ -78,7 +78,145 @@ function migrateV5toV6(): void {
     }
   }
 
-  // Stamp version as the LAST step
+  // Stamp version 6 (not CURRENT_VERSION — further migrations may follow)
+  try {
+    localStorage.setItem(VERSION_KEY, "6");
+  } catch {
+    console.warn("[Migration] Could not stamp version");
+  }
+}
+
+/** V6 global key → V7 scoped key suffix mapping for workspace-scoped keys. */
+export const V6_TO_V7_SCOPED_KEYS: Record<string, string> = {
+  "workspace-tree-collapsed": "tree-collapsed",
+  "workspace-tree-active-filter": "tree-active-filter",
+  "workspace-tree-repo-collapsed": "tree-repo-collapsed",
+  "workspace-tree-work-queue-expanded": "work-queue-expanded",
+  "agents-sidebar-collapsed": "agents-sidebar-collapsed",
+  "agents-sidebar-work-queue-expanded": "agents-sidebar-work-queue-expanded",
+  "agents-sidebar-repo-groups-collapsed":
+    "agents-sidebar-repo-groups-collapsed",
+  "agents-sidebar-ws-collapsed": "agents-sidebar-ws-collapsed",
+  "graph-show-closed": "graph-show-closed",
+  "graph-status-filter": "graph-status-filter",
+  "graph-dep-type-filter": "graph-dep-type-filter",
+  "loom-selected-repos": "selected-repos",
+};
+
+/**
+ * Attempt to resolve workspace name → UUID from cached backend config.
+ * Returns null if resolution is unavailable.
+ */
+function resolveWorkspaceUUID(workspaceName: string): string | null {
+  try {
+    const configRaw = localStorage.getItem("cortex:config:backend");
+    if (!configRaw) return null;
+    const config = JSON.parse(configRaw);
+    // Config may store workspace list in various shapes.
+    // WorkspaceData has { id, name, workspaces: WorkspaceSummary[] }
+    if (config && typeof config === "object") {
+      // Direct match on the workspace data itself
+      if (config.name === workspaceName && config.id) {
+        return config.id;
+      }
+      // Search the workspaces array
+      if (Array.isArray(config.workspaces)) {
+        for (const ws of config.workspaces) {
+          if (ws && ws.name === workspaceName && ws.id) {
+            return ws.id;
+          }
+        }
+      }
+    }
+  } catch {
+    // Corrupted or missing cache — fall through
+  }
+  return null;
+}
+
+/**
+ * Resolve a workspace name to UUID, searching all workspaces in cached config.
+ */
+function resolveAnyWorkspaceUUID(workspaceName: string): string | null {
+  return resolveWorkspaceUUID(workspaceName);
+}
+
+function migrateV6toV7(): void {
+  // 1. Determine current workspace and resolve to UUID
+  const activeWorkspaceName = localStorage.getItem("loom-active-workspace");
+  let wsUUID: string | null = null;
+
+  if (activeWorkspaceName) {
+    wsUUID = resolveWorkspaceUUID(activeWorkspaceName);
+  }
+
+  // 2. Move workspace-scoped keys to loom:{uuid}:* namespace
+  if (wsUUID) {
+    for (const [globalKey, scopedSuffix] of Object.entries(
+      V6_TO_V7_SCOPED_KEYS,
+    )) {
+      try {
+        const value = localStorage.getItem(globalKey);
+        if (value === null) continue;
+        const scopedKey = `loom:${wsUUID}:${scopedSuffix}`;
+        // Only write if scoped key doesn't already exist (partial migration recovery)
+        if (localStorage.getItem(scopedKey) === null) {
+          localStorage.setItem(scopedKey, value);
+        }
+        localStorage.removeItem(globalKey);
+      } catch {
+        // Continue with other keys
+      }
+    }
+  } else {
+    // No UUID resolution — just remove old global keys
+    for (const globalKey of Object.keys(V6_TO_V7_SCOPED_KEYS)) {
+      try {
+        localStorage.removeItem(globalKey);
+      } catch {
+        // Ignore
+      }
+    }
+  }
+
+  // 3. Handle workspace-tree-epic-collapsed:{workspaceName} keys
+  try {
+    const keysToProcess: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith("workspace-tree-epic-collapsed:")) {
+        keysToProcess.push(key);
+      }
+    }
+    for (const key of keysToProcess) {
+      const wsName = key.slice("workspace-tree-epic-collapsed:".length);
+      const uuid = resolveAnyWorkspaceUUID(wsName);
+      if (uuid) {
+        const value = localStorage.getItem(key);
+        if (value !== null) {
+          const scopedKey = `loom:${uuid}:tree-epic-collapsed`;
+          if (localStorage.getItem(scopedKey) === null) {
+            localStorage.setItem(scopedKey, value);
+          }
+        }
+      }
+      localStorage.removeItem(key);
+    }
+  } catch {
+    // Ignore
+  }
+
+  // 4. Rename loom-active-workspace → loom:last-workspace-id (storing UUID)
+  try {
+    if (wsUUID) {
+      localStorage.setItem("loom:last-workspace-id", wsUUID);
+    }
+    localStorage.removeItem("loom-active-workspace");
+  } catch {
+    // Ignore
+  }
+
+  // 5. Stamp version
   try {
     localStorage.setItem(VERSION_KEY, CURRENT_VERSION);
   } catch {
@@ -104,8 +242,19 @@ export function migrateLocalStorage(): void {
     )
       return;
 
-    // No version or version < 6 — run migration
-    migrateV5toV6();
+    const versionNum = version ? parseInt(version, 10) : 0;
+
+    // Run V5→V6 if needed
+    if (versionNum < 6) {
+      migrateV5toV6();
+    }
+
+    // Run V6→V7 if needed (migrateV5toV6 stamps "6", so check actual storage version again)
+    const postV6Version = getStorageVersion();
+    const postV6Num = postV6Version ? parseInt(postV6Version, 10) : 0;
+    if (postV6Num < 7) {
+      migrateV6toV7();
+    }
   } catch {
     // localStorage completely unavailable — log and continue
     console.warn("[Migration] localStorage unavailable, skipping migration");

@@ -12,6 +12,7 @@ import {
 } from "react";
 
 import { addComment } from "@/api";
+import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
 import type { Comment } from "@/types";
 
 import styles from "./CommentForm.module.css";
@@ -41,6 +42,7 @@ export function CommentForm({
   onCommentAdded,
   className,
 }: CommentFormProps): JSX.Element {
+  const { workspaceId } = useWorkspaceContext();
   const [text, setText] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -57,7 +59,7 @@ export function CommentForm({
       setIsSubmitting(true);
 
       try {
-        const newComment = await addComment(issueId, trimmedText);
+        const newComment = await addComment(workspaceId, issueId, trimmedText);
         setText("");
         onCommentAdded(newComment);
         // Keep focus in textarea for follow-up comments
@@ -70,7 +72,7 @@ export function CommentForm({
         setIsSubmitting(false);
       }
     },
-    [text, isSubmitting, issueId, onCommentAdded],
+    [text, isSubmitting, workspaceId, issueId, onCommentAdded],
   );
 
   const handleKeyDown = useCallback(

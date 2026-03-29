@@ -56,7 +56,11 @@ describe("useGitStatus", () => {
   describe("initial state", () => {
     it("returns null status, no loading, no error when disabled", () => {
       const { result } = renderHook(() =>
-        useGitStatus({ agentName: "ember", enabled: false }),
+        useGitStatus({
+          workspaceId: "test-ws-id",
+          agentName: "ember",
+          enabled: false,
+        }),
       );
 
       expect(result.current.status).toBeNull();
@@ -66,7 +70,11 @@ describe("useGitStatus", () => {
 
     it("returns null status when agentName is null", () => {
       const { result } = renderHook(() =>
-        useGitStatus({ agentName: null, enabled: true }),
+        useGitStatus({
+          workspaceId: "test-ws-id",
+          agentName: null,
+          enabled: true,
+        }),
       );
 
       expect(result.current.status).toBeNull();
@@ -81,12 +89,16 @@ describe("useGitStatus", () => {
       mockFetchGitStatus.mockResolvedValueOnce(gitStatus);
 
       const { result } = renderHook(() =>
-        useGitStatus({ agentName: "ember", enabled: true }),
+        useGitStatus({
+          workspaceId: "test-ws-id",
+          agentName: "ember",
+          enabled: true,
+        }),
       );
 
       await flushPromises();
 
-      expect(mockFetchGitStatus).toHaveBeenCalledWith("ember");
+      expect(mockFetchGitStatus).toHaveBeenCalledWith("test-ws-id", "ember");
       expect(result.current.status).toEqual(gitStatus);
       expect(result.current.loading).toBe(false);
       expect(result.current.error).toBeNull();
@@ -94,7 +106,11 @@ describe("useGitStatus", () => {
 
     it("does not fetch when disabled", async () => {
       const { result } = renderHook(() =>
-        useGitStatus({ agentName: "ember", enabled: false }),
+        useGitStatus({
+          workspaceId: "test-ws-id",
+          agentName: "ember",
+          enabled: false,
+        }),
       );
 
       await flushPromises();
@@ -104,7 +120,13 @@ describe("useGitStatus", () => {
     });
 
     it("does not fetch when agentName is null", async () => {
-      renderHook(() => useGitStatus({ agentName: null, enabled: true }));
+      renderHook(() =>
+        useGitStatus({
+          workspaceId: "test-ws-id",
+          agentName: null,
+          enabled: true,
+        }),
+      );
 
       await flushPromises();
 
@@ -120,7 +142,11 @@ describe("useGitStatus", () => {
       mockFetchGitStatus.mockResolvedValueOnce(gitStatus1);
 
       const { result } = renderHook(() =>
-        useGitStatus({ agentName: "ember", enabled: true }),
+        useGitStatus({
+          workspaceId: "test-ws-id",
+          agentName: "ember",
+          enabled: true,
+        }),
       );
 
       // Initial fetch
@@ -143,7 +169,13 @@ describe("useGitStatus", () => {
     it("does not poll before 5 seconds", async () => {
       mockFetchGitStatus.mockResolvedValueOnce(createMockGitStatus());
 
-      renderHook(() => useGitStatus({ agentName: "ember", enabled: true }));
+      renderHook(() =>
+        useGitStatus({
+          workspaceId: "test-ws-id",
+          agentName: "ember",
+          enabled: true,
+        }),
+      );
 
       await flushPromises();
       expect(mockFetchGitStatus).toHaveBeenCalledTimes(1);
@@ -162,7 +194,11 @@ describe("useGitStatus", () => {
       mockFetchGitStatus.mockRejectedValueOnce(new Error("Network error"));
 
       const { result } = renderHook(() =>
-        useGitStatus({ agentName: "ember", enabled: true }),
+        useGitStatus({
+          workspaceId: "test-ws-id",
+          agentName: "ember",
+          enabled: true,
+        }),
       );
 
       await flushPromises();
@@ -176,7 +212,11 @@ describe("useGitStatus", () => {
       mockFetchGitStatus.mockRejectedValueOnce("string error");
 
       const { result } = renderHook(() =>
-        useGitStatus({ agentName: "ember", enabled: true }),
+        useGitStatus({
+          workspaceId: "test-ws-id",
+          agentName: "ember",
+          enabled: true,
+        }),
       );
 
       await flushPromises();
@@ -190,7 +230,11 @@ describe("useGitStatus", () => {
       mockFetchGitStatus.mockRejectedValueOnce(new Error("Network error"));
 
       const { result } = renderHook(() =>
-        useGitStatus({ agentName: "ember", enabled: true }),
+        useGitStatus({
+          workspaceId: "test-ws-id",
+          agentName: "ember",
+          enabled: true,
+        }),
       );
 
       await flushPromises();
@@ -216,7 +260,7 @@ describe("useGitStatus", () => {
 
       const { result, rerender } = renderHook(
         ({ agentName }: { agentName: string }) =>
-          useGitStatus({ agentName, enabled: true }),
+          useGitStatus({ workspaceId: "test-ws-id", agentName, enabled: true }),
         { initialProps: { agentName: "ember" } },
       );
 
@@ -231,7 +275,7 @@ describe("useGitStatus", () => {
       rerender({ agentName: "nova" });
       await flushPromises();
 
-      expect(mockFetchGitStatus).toHaveBeenLastCalledWith("nova");
+      expect(mockFetchGitStatus).toHaveBeenLastCalledWith("test-ws-id", "nova");
     });
   });
 
@@ -242,7 +286,11 @@ describe("useGitStatus", () => {
       mockFetchGitStatus.mockResolvedValueOnce(createMockGitStatus());
 
       const { unmount } = renderHook(() =>
-        useGitStatus({ agentName: "ember", enabled: true }),
+        useGitStatus({
+          workspaceId: "test-ws-id",
+          agentName: "ember",
+          enabled: true,
+        }),
       );
 
       await flushPromises();
@@ -267,7 +315,11 @@ describe("useGitStatus", () => {
       );
 
       const { result, unmount } = renderHook(() =>
-        useGitStatus({ agentName: "ember", enabled: true }),
+        useGitStatus({
+          workspaceId: "test-ws-id",
+          agentName: "ember",
+          enabled: true,
+        }),
       );
 
       // Unmount before fetch resolves

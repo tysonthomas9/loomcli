@@ -13,13 +13,13 @@ import (
 func TestHandleExportSession_Success(t *testing.T) {
 	skipIfNoTmux(t)
 
-	mgr, err := NewTerminalManager("bash", "testexport", 0)
+	mgr, err := NewTerminalManager("bash", testRunPrefix+"-testexport", 0)
 	if err != nil {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
 	t.Cleanup(func() {
 		mgr.Shutdown()
-		killTmuxSession(t, "testexport-export-ok")
+		killTmuxSession(t, testRunPrefix+"-testexport-export-ok")
 	})
 
 	session, err := mgr.Attach("export-ok", "", 80, 24)
@@ -59,13 +59,13 @@ func TestHandleExportSession_Success(t *testing.T) {
 func TestHandleExportSession_MarkdownFormat(t *testing.T) {
 	skipIfNoTmux(t)
 
-	mgr, err := NewTerminalManager("bash", "testexportmd", 0)
+	mgr, err := NewTerminalManager("bash", testRunPrefix+"-testexportmd", 0)
 	if err != nil {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
 	t.Cleanup(func() {
 		mgr.Shutdown()
-		killTmuxSession(t, "testexportmd-export-md")
+		killTmuxSession(t, testRunPrefix+"-testexportmd-export-md")
 	})
 
 	session, err := mgr.Attach("export-md", "", 80, 24)
@@ -104,7 +104,7 @@ func TestHandleExportSession_MarkdownFormat(t *testing.T) {
 func TestHandleExportSession_SessionNotFound(t *testing.T) {
 	skipIfNoTmux(t)
 
-	mgr, err := NewTerminalManager("bash", "testexport404", 0)
+	mgr, err := NewTerminalManager("bash", testRunPrefix+"-testexport404", 0)
 	if err != nil {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestHandleExportSession_SessionNotFound(t *testing.T) {
 func TestHandleExportSession_InvalidFormat(t *testing.T) {
 	skipIfNoTmux(t)
 
-	mgr, err := NewTerminalManager("bash", "testexportfmt", 0)
+	mgr, err := NewTerminalManager("bash", testRunPrefix+"-testexportfmt", 0)
 	if err != nil {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestHandleExportSession_InvalidFormat(t *testing.T) {
 func TestHandleExportSession_InvalidSessionName(t *testing.T) {
 	skipIfNoTmux(t)
 
-	mgr, err := NewTerminalManager("bash", "testexportinv", 0)
+	mgr, err := NewTerminalManager("bash", testRunPrefix+"-testexportinv", 0)
 	if err != nil {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestHandleExportSession_InvalidSessionName(t *testing.T) {
 func TestHandleScrollbackInfo_WithBuffer(t *testing.T) {
 	skipIfNoTmux(t)
 
-	mgr, err := NewTerminalManager("bash", "testsbinfo", 0)
+	mgr, err := NewTerminalManager("bash", testRunPrefix+"-testsbinfo", 0)
 	if err != nil {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestHandleScrollbackInfo_WithBuffer(t *testing.T) {
 func TestHandleScrollbackInfo_NoBuffer(t *testing.T) {
 	skipIfNoTmux(t)
 
-	mgr, err := NewTerminalManager("bash", "testsbinfonb", 0)
+	mgr, err := NewTerminalManager("bash", testRunPrefix+"-testsbinfonb", 0)
 	if err != nil {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}

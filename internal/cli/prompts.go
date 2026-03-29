@@ -185,12 +185,12 @@ func buildReviewStep(backendName string) string {
 //
 //	planning: design empty OR has "needs-revision" label
 func GeneratePlanningPrompt(agentName string, workspace *WorkspaceConfig, parentID string) string {
-	bdReadyJSON := "bd ready --limit 50 --json"
-	bdReadyFallback := "bd ready --limit 50"
+	bdReadyJSON := "bd ready --limit 200 --json"
+	bdReadyFallback := "bd ready --limit 200"
 	epicScope := ""
 	if parentID != "" {
-		bdReadyJSON = fmt.Sprintf("bd ready --parent %s --limit 50 --json", parentID)
-		bdReadyFallback = fmt.Sprintf("bd ready --parent %s --limit 50", parentID)
+		bdReadyJSON = fmt.Sprintf("bd ready --parent %s --limit 200 --json", parentID)
+		bdReadyFallback = fmt.Sprintf("bd ready --parent %s --limit 200", parentID)
 		epicScope = fmt.Sprintf("\n**Epic scope: %s** — You MUST only select tasks from this epic. Do not work on tasks from other epics.\n", parentID)
 	}
 
@@ -220,12 +220,12 @@ func GeneratePlanningPrompt(agentName string, workspace *WorkspaceConfig, parent
 //
 //	implementation: design non-empty AND no "needs-revision" label
 func GenerateTaskPrompt(agentName string, workspace *WorkspaceConfig, parentID string, backendName string) string {
-	bdReadyJSON := "bd ready --limit 50 --json"
-	bdReadyFallback := "bd ready --limit 50"
+	bdReadyJSON := "bd ready --limit 200 --json"
+	bdReadyFallback := "bd ready --limit 200"
 	epicScope := ""
 	if parentID != "" {
-		bdReadyJSON = fmt.Sprintf("bd ready --parent %s --limit 50 --json", parentID)
-		bdReadyFallback = fmt.Sprintf("bd ready --parent %s --limit 50", parentID)
+		bdReadyJSON = fmt.Sprintf("bd ready --parent %s --limit 200 --json", parentID)
+		bdReadyFallback = fmt.Sprintf("bd ready --parent %s --limit 200", parentID)
 		epicScope = fmt.Sprintf("\n**Epic scope: %s** — You MUST only select tasks from this epic. Do not work on tasks from other epics.\n", parentID)
 	}
 

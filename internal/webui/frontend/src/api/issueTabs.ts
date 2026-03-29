@@ -1,4 +1,4 @@
-import { get, put, del, ApiError } from "./client";
+import { get, put, del, ApiError, wsUrl } from "./client";
 
 // ============= Types =============
 
@@ -45,10 +45,11 @@ function unwrap<T>(response: ApiResult<T>): T {
  * Returns null if no saved state exists.
  */
 export async function fetchIssueTabState(
+  workspaceId: string,
   issueId: string,
 ): Promise<IssueTabState | null> {
   const response = await get<ApiResult<IssueTabState | null>>(
-    `/api/issues/${encodeURIComponent(issueId)}/tabs`,
+    wsUrl(workspaceId, `/issues/${encodeURIComponent(issueId)}/tabs`),
   );
   return unwrap(response);
 }
@@ -57,12 +58,13 @@ export async function fetchIssueTabState(
  * Save full tab state for an issue via PUT.
  */
 export async function saveIssueTabState(
+  workspaceId: string,
   issueId: string,
   tabs: IssueTab[],
   activeTabId: string,
 ): Promise<void> {
   await put<ApiResult<IssueTabState>>(
-    `/api/issues/${encodeURIComponent(issueId)}/tabs`,
+    wsUrl(workspaceId, `/issues/${encodeURIComponent(issueId)}/tabs`),
     { tabs, active_tab_id: activeTabId },
   );
 }
@@ -70,8 +72,11 @@ export async function saveIssueTabState(
 /**
  * Delete persisted tab state for an issue.
  */
-export async function deleteIssueTabState(issueId: string): Promise<void> {
+export async function deleteIssueTabState(
+  workspaceId: string,
+  issueId: string,
+): Promise<void> {
   await del<ApiResult<undefined>>(
-    `/api/issues/${encodeURIComponent(issueId)}/tabs`,
+    wsUrl(workspaceId, `/issues/${encodeURIComponent(issueId)}/tabs`),
   );
 }

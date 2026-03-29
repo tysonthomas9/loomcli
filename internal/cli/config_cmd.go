@@ -131,6 +131,7 @@ func runConfigInit(cmd *cobra.Command, args []string) {
 		DefaultWorkspace: wsName,
 		Workspaces: map[string]WorkspaceConfig{
 			wsName: {
+				ID:    NewWorkspaceID(),
 				Path:  cwd,
 				Repos: []RepoConfig{},
 			},
