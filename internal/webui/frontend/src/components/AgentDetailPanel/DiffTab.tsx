@@ -34,14 +34,15 @@ export function DiffTab({ agent, isActive }: DiffTabProps): JSX.Element {
     workspaceId,
     agentName: agent.name,
     enabled: isActive ?? true,
+    commitSignal: agent.ahead,
   });
 
   const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
 
-  // Reset expanded files when agent changes
+  // Reset expanded files when agent or commit count changes
   useEffect(() => {
     setExpandedFiles(new Set());
-  }, [agent.name]);
+  }, [agent.name, agent.ahead]);
 
   function handleToggleExpand(path: string) {
     setExpandedFiles((prev) => {

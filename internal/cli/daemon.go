@@ -10,6 +10,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/events"
+	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
 // AgentProcess tracks a single supervised agent subprocess.
@@ -19,10 +20,13 @@ type AgentProcess struct {
 	worktreePath string      // resolved worktree path
 	repoConfig   *RepoConfig // per-repo config (nil in non-workspace mode)
 
-	cmd         *exec.Cmd // current subprocess (nil when not running)
-	pid         int       // PID of current subprocess (0 when not running)
-	logFile     *os.File  // log file handle for subprocess output (nil if not logging)
-	logFilePath string    // path to agent log file for watchdog stat checks
+	cmd            *exec.Cmd         // current subprocess (nil when not running)
+	pid            int               // PID of current subprocess (0 when not running)
+	logFile        *os.File          // log file handle for subprocess output (nil if not logging)
+	logFilePath    string            // path to agent log file for watchdog stat checks
+	transcriptPath string            // path to session transcript.jsonl for watchdog liveness (set by superviseAgent)
+	session        *sessions.Session // daemon-created session handle (nil when no session active)
+	beforeRef      string            // git HEAD ref before spawn (for diff stats at finalization)
 
 	restartCount   int       // consecutive restart attempts
 	lastStart      time.Time // when subprocess was last spawned
@@ -40,7 +44,7 @@ type AgentProcess struct {
 	done     chan struct{} // closed when superviseAgent goroutine exits
 	stopOnce sync.Once     // prevents double-close of stopCh
 
-	mu sync.Mutex // protects cmd, pid, logFile, restart tracking, assignedEpicID, lastError, currentBackendIdx
+	mu sync.Mutex // protects cmd, pid, logFile, restart tracking, assignedEpicID, lastError, currentBackendIdx, session, transcriptPath, beforeRef
 }
 
 // resolveRemote returns the git remote name for this agent.
@@ -107,6 +111,13 @@ type Daemon struct {
 
 	configHash  string       // SHA-256 hash of current running config for no-op detection
 	reconcileMu sync.RWMutex // serializes config writes; readers hold RLock when accessing d.config
+
+	// drainAddMu serializes the drain/add phase of reconciliation.
+	// Separate from reconcileMu because drainAgent blocks on <-target.done,
+	// which requires superviseAgent to call configSnapshot() under
+	// reconcileMu.RLock — holding reconcileMu.Lock through drain would deadlock.
+	// Lock ordering: reconcileMu (released) → drainAddMu → agentsMu.
+	drainAddMu sync.Mutex
 }
 
 // configSnapshot returns a snapshot of the current config pointer under RLock.

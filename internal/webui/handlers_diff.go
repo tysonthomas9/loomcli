@@ -2,7 +2,7 @@ package webui
 
 import (
 	"net/http"
-	"path"
+	"path/filepath"
 	"strings"
 )
 
@@ -49,7 +49,7 @@ func validateDiffPath(p string) bool {
 	if strings.HasPrefix(p, "/") {
 		return false
 	}
-	cleaned := path.Clean(p)
+	cleaned := filepath.Clean(p)
 	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
 		return false
 	}

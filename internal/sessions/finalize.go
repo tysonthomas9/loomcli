@@ -32,15 +32,34 @@ func (s *Session) Finalize(opts FinalizeOptions) error {
 	s.Meta.LinesRemoved = opts.DiffStats.LinesRemoved
 	s.Meta.FilesTouched = opts.FilesTouched
 
-	// Set token usage fields from opts if provided.
-	s.Meta.InputTokens = opts.InputTokens
-	s.Meta.OutputTokens = opts.OutputTokens
-	s.Meta.CacheReadTokens = opts.CacheReadTokens
-	s.Meta.CacheWriteTokens = opts.CacheWriteTokens
-	s.Meta.EstimatedCostUSD = opts.EstimatedCostUSD
+	// Set token usage fields: prefer opts (collector data) when non-zero,
+	// otherwise re-read from disk to preserve hook-captured values.
+	if opts.InputTokens > 0 || opts.OutputTokens > 0 ||
+		opts.CacheReadTokens > 0 || opts.CacheWriteTokens > 0 ||
+		opts.EstimatedCostUSD > 0 {
+		s.Meta.InputTokens = opts.InputTokens
+		s.Meta.OutputTokens = opts.OutputTokens
+		s.Meta.CacheReadTokens = opts.CacheReadTokens
+		s.Meta.CacheWriteTokens = opts.CacheWriteTokens
+		s.Meta.EstimatedCostUSD = opts.EstimatedCostUSD
+	} else {
+		diskMeta, err := s.store.LoadMetadata(s.Meta.SessionID)
+		if err == nil {
+			s.Meta.InputTokens = diskMeta.InputTokens
+			s.Meta.OutputTokens = diskMeta.OutputTokens
+			s.Meta.CacheReadTokens = diskMeta.CacheReadTokens
+			s.Meta.CacheWriteTokens = diskMeta.CacheWriteTokens
+			s.Meta.EstimatedCostUSD = diskMeta.EstimatedCostUSD
+		} else {
+			fmt.Fprintf(os.Stderr, "sessions: failed to load metadata for token preservation: %v\n", err)
+		}
+	}
 
 	// Set error context.
 	s.Meta.ErrorClass = opts.ErrorClass
+
+	// Ensure schema version is current before writing to disk.
+	normalizeRecord(&s.Meta.SessionRecord)
 
 	// Write final metadata.json atomically.
 	sessDir := filepath.Join(s.store.dir, s.Meta.SessionID)

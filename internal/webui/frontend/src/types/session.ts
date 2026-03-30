@@ -46,7 +46,7 @@ export interface TranscriptEntry {
   raw?: string;
 }
 
-/** Response from GET /api/tasks/{taskId}/sessions */
+/** Response from GET /api/workspaces/{ws}/tasks/{taskId}/sessions */
 export interface SessionListResponse {
   success: boolean;
   data: {
@@ -55,13 +55,13 @@ export interface SessionListResponse {
   };
 }
 
-/** Response from GET /api/tasks/{taskId}/sessions/{sessionId} */
+/** Response from GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId} */
 export interface SessionDetailResponse {
   success: boolean;
   data: SessionRecord;
 }
 
-/** Response from GET /api/tasks/{taskId}/sessions/{sessionId}/transcript */
+/** Response from GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/transcript */
 export interface TranscriptResponse {
   success: boolean;
   data: {

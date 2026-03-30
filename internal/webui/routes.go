@@ -18,7 +18,7 @@ import (
 
 // setupRoutes configures all HTTP routes for the server.
 // allowedOrigins is the list of allowed CORS origins for WebSocket validation.
-func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPool, hub *SSEHub, getMutationsSince func(wsID string, since int64) []rpc.MutationEvent, termManager *TerminalManager, termAuth *terminalAuth, fleetRegistry *fleet.StoreRegistry, tokenCfg *TokenConfig, apiKey string, authEnabled bool, allowedOrigins []string, fleetRegCfg *FleetRegisterConfig, claimMetrics *fleet.ClaimMetrics, fleetEnabled bool, devMode bool, devFrontendDir string, loomServerURL string, gitOps GitOps, fileOps FileOps, tabMetaStore *tabmeta.Store, issueTabStore *issuetabs.Store, workspaceConfigFn func() (*WorkspaceData, error), workspaceDeleteFn func(string) error, setDefaultWsFn func(string) error, clearDefaultWsFn func() error, workspaceCreateFn WorkspaceCreateFn, backendOps BackendOps, sessionHistoryStore *sessionhistory.Store, sessStore *sessions.Store, wsExistsFn func(string) bool, initialWorkspaceID string, workspaceConfigByIDFn func(string) (*WorkspaceData, error)) (*clientErrorLimiter, *cspReportLimiter) { //nolint:funlen // route registration function
+func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPool, hub *SSEHub, getMutationsSince func(wsID string, since int64) []rpc.MutationEvent, termManager *TerminalManager, termAuth *terminalAuth, fleetRegistry *fleet.StoreRegistry, tokenCfg *TokenConfig, apiKey string, authEnabled bool, allowedOrigins []string, fleetRegCfg *FleetRegisterConfig, claimMetrics *fleet.ClaimMetrics, fleetEnabled bool, devMode bool, devFrontendDir string, loomServerURL string, gitOps GitOps, fileOps FileOps, tabMetaStore *tabmeta.Store, issueTabStore *issuetabs.Store, workspaceConfigFn func() (*WorkspaceData, error), workspaceDeleteFn func(string) error, setDefaultWsFn func(string) error, clearDefaultWsFn func() error, workspaceCreateFn WorkspaceCreateFn, backendOps BackendOps, sessionHistoryStore *sessionhistory.Store, sessStore *sessions.Store, wsExistsFn func(string) bool, initialWorkspaceID string, workspaceConfigByIDFn func(string) (*WorkspaceData, error), extAuthURL string, jobStore *WorkspaceJobStore) (*clientErrorLimiter, *cspReportLimiter, *authConfigLimiter) { //nolint:funlen // route registration function
 	// Health check endpoint for load balancers and monitoring
 	mux.HandleFunc("GET /health", handleHealth(pool))
 
@@ -32,6 +32,11 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 	// CSP violation reporting endpoint (has its own per-IP rate limiter, 60 req/min/IP)
 	cspLimiter := newCSPReportLimiter(rate.Limit(1.0), 20, 5*time.Minute, 10*time.Minute)
 	mux.HandleFunc("POST /api/csp-report", handleCSPReport(cspLimiter))
+
+	// Auth mode discovery endpoint (public, rate-limited — called once per page load).
+	// extAuthURL is the Better Auth service base URL for OAuth redirects, not JWKS.
+	authCfgLimiter := newAuthConfigLimiter(rate.Limit(5), 10, 5*time.Minute, 10*time.Minute)
+	mux.HandleFunc("GET /api/config", handleAuthConfig(extAuthURL, authCfgLimiter))
 
 	// Auth token bootstrap endpoint (same-origin only)
 	// Always register this route so that when auth is disabled, the frontend
@@ -111,61 +116,20 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 		mux.HandleFunc("GET /api/terminal/session-status", handleTerminalSessionStatus(termManager, termAuth))
 		mux.HandleFunc("POST /api/terminal/spawn", handleTerminalSpawn(termManager, sessionHistoryStore, initialWorkspaceID))
 		mux.HandleFunc("POST /api/terminal/sessions/{name}/seed", handleSeedTerminalSession(termManager))
-		mux.HandleFunc("GET /api/terminal/sessions/{session}/scrollback", handleGetScrollback(termManager))
-		mux.HandleFunc("GET /api/terminal/sessions/{session}/export", handleExportSession(termManager))
-		mux.HandleFunc("GET /api/terminal/sessions/{session}/scrollback-info", handleScrollbackInfo(termManager))
 		mux.HandleFunc("POST /api/terminal/sessions/{session}/kill", handleScheduleSessionKill(termManager))
 		mux.HandleFunc("POST /api/terminal/sessions/close-all", handleCloseAllSessions(termManager, tabMetaStore, hub))
 
-		// Note: Terminal tab metadata endpoints have moved to workspace-scoped routes
-		// in registerWorkspaceRoutes. The by-issue endpoint is also workspace-scoped.
-
-		// Terminal UI state endpoints (Redis-backed active tab persistence)
-		if tabMetaStore != nil {
-			rc := tabMetaStore.RedisClient()
-			mux.HandleFunc("GET /api/terminal/state", handleGetTerminalState(rc))
-			mux.HandleFunc("PATCH /api/terminal/state", handlePatchTerminalState(rc))
-		}
+		// Note: Terminal tab metadata, scrollback/export, and UI state endpoints
+		// have moved to workspace-scoped routes in registerWorkspaceRoutes.
 	}
 
 	// Issue tab persistence and session history endpoints have moved to
 	// workspace-scoped routes in registerWorkspaceRoutes (T46).
 
-	// Git operation endpoints for worktrees
-	if gitOps != nil {
-		mux.HandleFunc("POST /api/git/push-all", handleGitPushAll(gitOps))
-		mux.HandleFunc("POST /api/agents/{name}/git/push", handleGitPush(gitOps))
-		mux.HandleFunc("POST /api/agents/{name}/git/pull", handleGitPull(gitOps))
-		mux.HandleFunc("POST /api/agents/{name}/git/sync", handleGitSync(gitOps))
-		mux.HandleFunc("POST /api/agents/{name}/git/pr", handleGitPR(gitOps))
-		mux.HandleFunc("POST /api/agents/{name}/git/reset", handleGitReset(gitOps))
-		mux.HandleFunc("GET /api/agents/{name}/git/status", handleGitStatus(gitOps))
-		mux.HandleFunc("PATCH /api/agents/{name}/git/target", handleGitTargetUpdate(gitOps))
-		mux.HandleFunc("GET /api/issues/{id}/git/diff-stat", handleGetIssueDiffStat(pool, gitOps))
-
-		// Diff endpoints for agent worktrees
-		mux.HandleFunc("GET /api/agents/{name}/diff/commits", handleDiffCommits(gitOps))
-		mux.HandleFunc("GET /api/agents/{name}/diff/files", handleDiffFiles(gitOps))
-		mux.HandleFunc("GET /api/agents/{name}/diff/file", handleDiffFile(gitOps))
-	}
-
-	// File operation endpoints for worktrees
-	if fileOps != nil {
-		mux.HandleFunc("GET /api/agents/{name}/files/tree", handleFileTree(fileOps))
-		mux.HandleFunc("GET /api/agents/{name}/files", handleFileRead(fileOps))
-		mux.HandleFunc("PUT /api/agents/{name}/files", handleFileWrite(fileOps))
-	}
-
 	// Editor endpoints for external editor detection and launch
 	editorCache := newDefaultEditorCache()
 	mux.HandleFunc("GET /api/editors", handleListEditors(editorCache))
 	mux.HandleFunc("POST /api/editors/open", handleOpenEditor(editorCache, editor.LaunchEditor))
-
-	// Session audit trail endpoints — registered unconditionally; handlers return 503 when sessStore is nil
-	mux.HandleFunc("GET /api/tasks/{taskId}/sessions", handleListTaskSessions(sessStore))
-	mux.HandleFunc("GET /api/tasks/{taskId}/sessions/{sessionId}", handleGetSession(sessStore))
-	mux.HandleFunc("GET /api/tasks/{taskId}/sessions/{sessionId}/transcript", handleGetSessionTranscript(sessStore))
-	mux.HandleFunc("GET /api/tasks/{taskId}/sessions/{sessionId}/diff", handleGetSessionDiff(sessStore))
 
 	// Session change notification endpoint for local agents to push SSE events
 	if hub != nil {
@@ -174,7 +138,7 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 
 	// Workspace management and workspace-scoped API routes
 	if multiPool != nil {
-		registerWorkspaceRoutes(mux, multiPool, workspaceConfigFn, wsExistsFn, workspaceConfigByIDFn, tabMetaStore, issueTabStore, sessionHistoryStore, termManager, termAuth, allowedOrigins, hub, getMutationsSince, fleetRegistry, tokenCfg, fleetRegCfg, claimMetrics, gitOps, fileOps, workspaceDeleteFn, setDefaultWsFn, clearDefaultWsFn, workspaceCreateFn)
+		registerWorkspaceRoutes(mux, multiPool, workspaceConfigFn, wsExistsFn, workspaceConfigByIDFn, tabMetaStore, issueTabStore, sessionHistoryStore, sessStore, termManager, termAuth, allowedOrigins, hub, getMutationsSince, fleetRegistry, tokenCfg, fleetRegCfg, claimMetrics, gitOps, fileOps, workspaceDeleteFn, setDefaultWsFn, clearDefaultWsFn, workspaceCreateFn, jobStore)
 	}
 
 	// Static file serving with SPA routing (must be last - catches all paths)
@@ -184,11 +148,11 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 		mux.Handle("/", frontendHandler())
 	}
 
-	return clientErrLimiter, cspLimiter
+	return clientErrLimiter, cspLimiter, authCfgLimiter
 }
 
 // registerWorkspaceRoutes sets up workspace listing, CRUD, and workspace-scoped API routes.
-func registerWorkspaceRoutes(mux *http.ServeMux, multiPool *daemon.MultiPool, workspaceConfigFn func() (*WorkspaceData, error), wsExistsFn func(string) bool, workspaceConfigByIDFn func(string) (*WorkspaceData, error), tabMetaStore *tabmeta.Store, issueTabStore *issuetabs.Store, sessionHistoryStore *sessionhistory.Store, termManager *TerminalManager, termAuth *terminalAuth, allowedOrigins []string, hub *SSEHub, getMutationsSince func(wsID string, since int64) []rpc.MutationEvent, fleetRegistry *fleet.StoreRegistry, tokenCfg *TokenConfig, fleetRegCfg *FleetRegisterConfig, claimMetrics *fleet.ClaimMetrics, gitOps GitOps, fileOps FileOps, workspaceDeleteFn func(string) error, setDefaultWsFn func(string) error, clearDefaultWsFn func() error, workspaceCreateFn WorkspaceCreateFn) { //nolint:funlen // route registration function
+func registerWorkspaceRoutes(mux *http.ServeMux, multiPool *daemon.MultiPool, workspaceConfigFn func() (*WorkspaceData, error), wsExistsFn func(string) bool, workspaceConfigByIDFn func(string) (*WorkspaceData, error), tabMetaStore *tabmeta.Store, issueTabStore *issuetabs.Store, sessionHistoryStore *sessionhistory.Store, sessStore *sessions.Store, termManager *TerminalManager, termAuth *terminalAuth, allowedOrigins []string, hub *SSEHub, getMutationsSince func(wsID string, since int64) []rpc.MutationEvent, fleetRegistry *fleet.StoreRegistry, tokenCfg *TokenConfig, fleetRegCfg *FleetRegisterConfig, claimMetrics *fleet.ClaimMetrics, gitOps GitOps, fileOps FileOps, workspaceDeleteFn func(string) error, setDefaultWsFn func(string) error, clearDefaultWsFn func() error, workspaceCreateFn WorkspaceCreateFn, jobStore *WorkspaceJobStore) { //nolint:funlen // route registration function
 	// Active workspace endpoint — returns full topology for the default workspace
 	mux.HandleFunc("GET /api/workspaces/active", handleActiveWorkspace(workspaceConfigFn))
 
@@ -197,7 +161,10 @@ func registerWorkspaceRoutes(mux *http.ServeMux, multiPool *daemon.MultiPool, wo
 	mux.HandleFunc("GET /api/workspaces/{ws}", handleGetWorkspace(wsExistsFn, workspaceConfigByIDFn))
 
 	// Global workspace CRUD operations (no WorkspaceMiddleware)
-	mux.HandleFunc("POST /api/workspaces", handleWorkspaceCreate(workspaceCreateFn, workspaceConfigFn))
+	mux.HandleFunc("POST /api/workspaces", handleWorkspaceCreate(workspaceCreateFn, workspaceConfigFn, jobStore))
+
+	// Workspace job polling endpoint (literal "jobs" segment wins over {ws} wildcard)
+	mux.HandleFunc("GET /api/workspaces/jobs/{id}", handleGetWorkspaceJob(jobStore))
 	mux.HandleFunc("PUT /api/workspaces/order", handleWorkspaceReorder(workspaceConfigFn))
 	mux.HandleFunc("PUT /api/workspaces/default", handleSetDefaultWorkspace(setDefaultWsFn, workspaceConfigFn))
 	mux.HandleFunc("DELETE /api/workspaces/default", handleClearDefaultWorkspace(clearDefaultWsFn, workspaceConfigFn))
@@ -239,7 +206,7 @@ func registerWorkspaceRoutes(mux *http.ServeMux, multiPool *daemon.MultiPool, wo
 	// Daemon status and config
 	wsMux.HandleFunc("GET /api/workspaces/{ws}/daemon/status", handleDaemonStatus(multiPool))
 	wsMux.HandleFunc("GET /api/workspaces/{ws}/config/backend", handleGetBackendConfig(multiPool))
-	wsMux.HandleFunc("PATCH /api/workspaces/{ws}/config/backend", handlePatchBackendConfig(multiPool))
+	wsMux.HandleFunc("PATCH /api/workspaces/{ws}/config/backend", handleWorkspaceBackendPatch(workspaceConfigFn))
 
 	// Log streaming endpoints (workspace-scoped)
 	wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/logs", handleGetAgentLog())
@@ -248,7 +215,7 @@ func registerWorkspaceRoutes(mux *http.ServeMux, multiPool *daemon.MultiPool, wo
 
 	// Server-Sent Events endpoint (workspace-scoped)
 	if hub != nil {
-		wsMux.HandleFunc("GET /api/workspaces/{ws}/events", handleSSE(hub, getMutationsSince))
+		wsMux.Handle("GET /api/workspaces/{ws}/events", NewSSEHandler(hub, getMutationsSince))
 	}
 
 	// Terminal tab metadata endpoints (workspace-scoped, Redis-backed)
@@ -261,6 +228,11 @@ func registerWorkspaceRoutes(mux *http.ServeMux, multiPool *daemon.MultiPool, wo
 		// Cross-workspace endpoint: the workspace in the URL is for auth context,
 		// but ListByIssue searches across all workspaces intentionally.
 		wsMux.HandleFunc("GET /api/workspaces/{ws}/terminal/sessions/by-issue", handleListSessionsByIssue(tabMetaStore))
+
+		// Terminal UI state endpoints (Redis-backed active tab persistence, workspace-scoped)
+		rc := tabMetaStore.RedisClient()
+		wsMux.HandleFunc("GET /api/workspaces/{ws}/terminal/state", handleGetTerminalState(rc))
+		wsMux.HandleFunc("PATCH /api/workspaces/{ws}/terminal/state", handlePatchTerminalState(rc))
 	}
 
 	// Issue tab persistence endpoints (Redis-backed, workspace-scoped)
@@ -276,6 +248,12 @@ func registerWorkspaceRoutes(mux *http.ServeMux, multiPool *daemon.MultiPool, wo
 		wsMux.HandleFunc("GET /api/workspaces/{ws}/issues/{issueId}/sessions/{recordId}/scrollback", handleGetSessionScrollback(sessionHistoryStore))
 	}
 
+	// Session audit trail endpoints (workspace-scoped)
+	wsMux.HandleFunc("GET /api/workspaces/{ws}/tasks/{taskId}/sessions", handleListTaskSessions(sessStore))
+	wsMux.HandleFunc("GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}", handleGetSession(sessStore))
+	wsMux.HandleFunc("GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/transcript", handleGetSessionTranscript(sessStore))
+	wsMux.HandleFunc("GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/diff", handleGetSessionDiff(sessStore))
+
 	// Agent terminal endpoints (workspace-scoped)
 	if termManager != nil {
 		wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/terminal/info", handleGetAgentTerminalInfo(termManager))
@@ -283,6 +261,11 @@ func registerWorkspaceRoutes(mux *http.ServeMux, multiPool *daemon.MultiPool, wo
 			wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/terminal/token", handleGetAgentTerminalToken(termAuth))
 		}
 		wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/terminal/ws", handleAgentTerminalWS(termManager, termAuth, allowedOrigins))
+
+		// Terminal scrollback, export, and scrollback-info endpoints (workspace-scoped)
+		wsMux.HandleFunc("GET /api/workspaces/{ws}/terminal/sessions/{session}/scrollback", handleGetScrollback(termManager))
+		wsMux.HandleFunc("GET /api/workspaces/{ws}/terminal/sessions/{session}/export", handleExportSession(termManager))
+		wsMux.HandleFunc("GET /api/workspaces/{ws}/terminal/sessions/{session}/scrollback-info", handleScrollbackInfo(termManager))
 	}
 
 	// Workspace-scoped fleet routes. Claim uses multiPool (routes to correct

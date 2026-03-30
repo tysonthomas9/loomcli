@@ -207,6 +207,8 @@ func confirmKill(pid int) bool {
 
 // cleanUntrackedFiles checks for and optionally removes untracked files.
 // In workspace mode, it iterates over all repos in the workspace.
+// Protected runtime paths (.beads/, .loom/, sessions/, loom.yaml, AGENTS.md)
+// are always excluded from cleanup to prevent destroying live daemon state.
 func cleanUntrackedFiles(worktreePath string, force bool) {
 	// Collect paths to clean. In workspace mode, clean all repos.
 	type cleanTarget struct {
@@ -232,7 +234,7 @@ func cleanUntrackedFiles(worktreePath string, force bool) {
 	// Check for untracked files across all targets, track which ones need cleaning
 	var dirtyTargets []cleanTarget
 	for _, t := range targets {
-		output, err := GitCleanDryRun(t.path)
+		output, err := GitCleanDryRunExclude(t.path, protectedRuntimePaths)
 		if err != nil {
 			fmt.Printf("Warning: could not check for untracked files in %s: %v\n", t.path, err)
 			continue
@@ -265,7 +267,7 @@ func cleanUntrackedFiles(worktreePath string, force bool) {
 
 	cleaned := 0
 	for _, t := range dirtyTargets {
-		if err := GitClean(t.path); err != nil {
+		if err := GitCleanExclude(t.path, protectedRuntimePaths); err != nil {
 			label := t.path
 			if t.name != "" {
 				label = t.name

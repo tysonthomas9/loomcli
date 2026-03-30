@@ -130,31 +130,25 @@ func TestEnsureWorktreeBranch_CreateFromFallback(t *testing.T) {
 	}
 }
 
-func TestEnsureWorktreeBranch_DirtyTree_StashesAndDiscards(t *testing.T) {
+func TestEnsureWorktreeBranch_DirtyTree_ResetsAndCleans(t *testing.T) {
 	// Call sequence:
 	// 1. GetCurrentBranch → "falcon" (CommandMock)
 	// 2. IsCleanWorkingTree → dirty (CommandMock)
-	// 3. discardDirtyState: getStashCount before → 0 (CommandMock)
-	// 4. discardDirtyState: git stash --include-untracked (CommandMock)
-	// 5. discardDirtyState: getStashCount after → 1 (CommandMock)
-	// 6. discardDirtyState: git stash show (CommandMock)
-	// 7. discardDirtyState: git stash drop (CommandMock)
-	// 8. GitFetch → ok (OutputCommandMock)
-	// 9. BranchExistsLocally → ok (CommandMock)
-	// 10. GitCheckout → ok (OutputCommandMock)
+	// 3. discardDirtyState: git checkout -- . (CommandMock)
+	// 4. discardDirtyState: GitCleanExclude → ok (OutputCommandMock)
+	// 5. GitFetch → ok (OutputCommandMock)
+	// 6. BranchExistsLocally → ok (CommandMock)
+	// 7. GitCheckout → ok (OutputCommandMock)
 	cmdMock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "falcon\n"},
 		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: " M file.go\n"},
-		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
-		{Name: "git", Args: []string{"stash", "--include-untracked"}, Stdout: "Saved working directory\n"},
-		{Name: "git", Args: []string{"stash", "list"}, Stdout: "stash@{0}: WIP on falcon\n"},
-		{Name: "git", Args: []string{"stash", "show", "stash@{0}"}, Stdout: " file.go | 1 +\n"},
-		{Name: "git", Args: []string{"stash", "drop", "stash@{0}"}, Stdout: "Dropped stash@{0}\n"},
+		{Name: "git", Args: []string{"checkout", "--", "."}, Stdout: ""},
 		{Name: "git", Args: []string{"rev-parse", "--verify", "refs/heads/epic/bd-spq5"}, Stdout: "abc123\n"},
 	})
 	cmdMock.Install()
 
 	outMock := NewOutputCommandMock(t, []OutputCommandStub{
+		{Args: []string{"clean", "-fd", "--exclude=.beads", "--exclude=.loom", "--exclude=sessions", "--exclude=loom.yaml", "--exclude=AGENTS.md"}, Err: nil},
 		{Args: []string{"fetch", "origin"}, Err: nil},
 		{Args: []string{"checkout", "epic/bd-spq5"}, Err: nil},
 	})
@@ -194,17 +188,18 @@ func TestEnsureWorktreeBranch_FetchFailsNonFatal(t *testing.T) {
 	}
 }
 
-func TestEnsureWorktreeBranch_DirtyTree_StashFails(t *testing.T) {
-	// When stash fails, EnsureWorktreeBranch should return an error
+func TestEnsureWorktreeBranch_DirtyTree_CleanFails(t *testing.T) {
+	// When selective clean fails, EnsureWorktreeBranch should return an error
 	cmdMock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "falcon\n"},
 		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: " M file.go\n"},
-		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
-		{Name: "git", Args: []string{"stash", "--include-untracked"}, Err: errors.New("stash failed")},
+		{Name: "git", Args: []string{"checkout", "--", "."}, Stdout: ""},
 	})
 	cmdMock.Install()
 
-	outMock := NewOutputCommandMock(t, []OutputCommandStub{})
+	outMock := NewOutputCommandMock(t, []OutputCommandStub{
+		{Args: []string{"clean", "-fd", "--exclude=.beads", "--exclude=.loom", "--exclude=sessions", "--exclude=loom.yaml", "--exclude=AGENTS.md"}, Err: errors.New("clean failed")},
+	})
 	outMock.Install()
 
 	err := EnsureWorktreeBranch("/repo", "epic/bd-spq5", "origin", "origin/main")
@@ -217,19 +212,18 @@ func TestEnsureWorktreeBranch_DirtyTree_StashFails(t *testing.T) {
 	}
 }
 
-func TestEnsureWorktreeBranch_DirtyTree_NothingStashed(t *testing.T) {
-	// When stash count doesn't increase (e.g. only ignored files), proceed normally
+func TestEnsureWorktreeBranch_DirtyTree_CheckoutFailsNonFatal(t *testing.T) {
+	// When git checkout -- . fails (e.g. no tracked changes), proceed normally
 	cmdMock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "falcon\n"},
-		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: " M file.go\n"},
-		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
-		{Name: "git", Args: []string{"stash", "--include-untracked"}, Stdout: "No local changes to save\n"},
-		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
+		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: "?? untracked.txt\n"},
+		{Name: "git", Args: []string{"checkout", "--", "."}, Err: errors.New("pathspec '.' did not match")},
 		{Name: "git", Args: []string{"rev-parse", "--verify", "refs/heads/epic/bd-spq5"}, Stdout: "abc123\n"},
 	})
 	cmdMock.Install()
 
 	outMock := NewOutputCommandMock(t, []OutputCommandStub{
+		{Args: []string{"clean", "-fd", "--exclude=.beads", "--exclude=.loom", "--exclude=sessions", "--exclude=loom.yaml", "--exclude=AGENTS.md"}, Err: nil},
 		{Args: []string{"fetch", "origin"}, Err: nil},
 		{Args: []string{"checkout", "epic/bd-spq5"}, Err: nil},
 	})

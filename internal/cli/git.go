@@ -125,6 +125,27 @@ func GitCleanDryRun(dir string) (string, error) {
 	return RunGitCommand(dir, "clean", "-fdn")
 }
 
+// GitCleanExclude removes untracked files and directories, excluding paths
+// that match any of the given exclude patterns (passed as --exclude flags).
+func GitCleanExclude(dir string, excludes []string) error {
+	args := []string{"clean", "-fd"}
+	for _, ex := range excludes {
+		args = append(args, "--exclude="+ex)
+	}
+	fmt.Println("Cleaning untracked files (preserving runtime state)...")
+	return RunGitCommandWithOutput(dir, args...)
+}
+
+// GitCleanDryRunExclude returns the list of untracked files that would be
+// removed by git clean, excluding paths matching the given patterns.
+func GitCleanDryRunExclude(dir string, excludes []string) (string, error) {
+	args := []string{"clean", "-fdn"}
+	for _, ex := range excludes {
+		args = append(args, "--exclude="+ex)
+	}
+	return RunGitCommand(dir, args...)
+}
+
 // GetConflictedFiles returns a list of files with merge conflicts
 func GetConflictedFiles(dir string) ([]string, error) {
 	output, err := RunGitCommand(dir, "diff", "--name-only", "--diff-filter=U")

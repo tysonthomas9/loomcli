@@ -186,15 +186,15 @@ func parseMutationPayload(data string) (*MutationPayload, error) {
 	return &p, nil
 }
 
-// newLiveSSEServer creates an httptest.NewServer wired to handleSSE with the
+// newLiveSSEServer creates an httptest.NewServer wired to NewSSEHandler with the
 // given hub and getMutationsSince callback. The caller must call server.Close()
 // and hub.Stop() when done (use t.Cleanup).
 func newLiveSSEServer(t *testing.T, hub *SSEHub, getMutationsSince func(wsID string, since int64) []rpc.MutationEvent) *httptest.Server {
 	t.Helper()
 
-	handler := handleSSE(hub, getMutationsSince)
+	handler := NewSSEHandler(hub, getMutationsSince)
 	wsMux := http.NewServeMux()
-	wsMux.HandleFunc("GET /api/workspaces/{ws}/events", handler)
+	wsMux.Handle("GET /api/workspaces/{ws}/events", handler)
 	// Wrap with a simple workspace existence check that always passes in tests
 	mux := http.NewServeMux()
 	mux.Handle("/api/workspaces/{ws}/", WorkspaceMiddleware(func(string) bool { return true }, wsMux))

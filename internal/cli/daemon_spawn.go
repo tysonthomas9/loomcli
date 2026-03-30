@@ -107,6 +107,17 @@ func (d *Daemon) buildCommand(ap *AgentProcess) *exec.Cmd {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_WORKSPACE_ID=%s", d.workspaceID))
 	}
 
+	// Propagate session env vars for transcript-based liveness tracking
+	ap.mu.Lock()
+	sess := ap.session
+	ap.mu.Unlock()
+	if sess != nil {
+		cmd.Env = append(cmd.Env,
+			fmt.Sprintf("LOOM_SESSION_ID=%s", sess.SessionID()),
+			fmt.Sprintf("LOOM_BEADS_DIR=%s", GetBeadsDir()),
+		)
+	}
+
 	return cmd
 }
 

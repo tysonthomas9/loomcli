@@ -2,9 +2,11 @@ package cli
 
 import (
 	"log/slog"
+	"path/filepath"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/events"
+	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
 // resetWorktreeBranches moves all worktrees back to their default
@@ -129,6 +131,13 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 		default:
 		}
 
+		// Clear session state from previous iteration
+		ap.mu.Lock()
+		ap.session = nil
+		ap.transcriptPath = ""
+		ap.beforeRef = ""
+		ap.mu.Unlock()
+
 		// Acquire concurrency slot for this role (blocks if at limit)
 		if !d.concurrency.Acquire(ap.entry.Role) {
 			slog.Info("concurrency tracker closed, exiting", "worktree", ap.entry.Worktree)
@@ -173,9 +182,50 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 			continue
 		}
 
+		// 2.5. Create session for liveness tracking + capture git state for finalization
+		beadsDir := GetBeadsDir()
+		if sessStore, err := sessions.NewStore(beadsDir); err == nil {
+			phase := "implementation"
+			if ap.entry.Role == "plan" {
+				phase = "planning"
+			}
+			ap.mu.Lock()
+			restartCount := ap.restartCount
+			ap.mu.Unlock()
+
+			sess, err := sessStore.CreateSession(sessions.CreateOptions{
+				AgentName:  ap.entry.Worktree,
+				Backend:    d.getEffectiveBackend(ap),
+				EpicID:     epicID,
+				Phase:      phase,
+				AttemptNum: restartCount,
+			})
+			if err == nil {
+				txPath := filepath.Join(beadsDir, "sessions", sess.SessionID(), "transcript.jsonl")
+				bRef := captureHEADRef(ap.worktreePath)
+				ap.mu.Lock()
+				ap.session = sess
+				ap.transcriptPath = txPath
+				ap.beforeRef = bRef
+				ap.mu.Unlock()
+			} else {
+				slog.Warn("session creation failed, watchdog will use log file", "worktree", ap.entry.Worktree, "err", err)
+			}
+		} else {
+			slog.Warn("session store unavailable, watchdog will use log file", "worktree", ap.entry.Worktree, "err", err)
+		}
+
 		// 3. Spawn subprocess
 		if err := d.spawnAgent(ap); err != nil {
 			slog.Warn("spawn failed", "worktree", ap.entry.Worktree, "err", err)
+			// Finalize orphaned session from step 2.5 (would stay in "running" forever)
+			ap.mu.Lock()
+			orphanSess := ap.session
+			ap.session = nil
+			ap.mu.Unlock()
+			if orphanSess != nil {
+				_ = orphanSess.Finalize(sessions.FinalizeOptions{ExitCode: -1, ErrorClass: "spawn_failure"})
+			}
 			d.concurrency.Release(ap.entry.Role)
 			if !d.handleRestartAfterError(ap) {
 				return
@@ -188,6 +238,40 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 
 		// 4.5. Classify error and detect NoWork (before recovery clears lock file)
 		d.classifyAgentExit(ap, exitCode)
+
+		// 4.6. Finalize daemon-created session
+		ap.mu.Lock()
+		sess := ap.session
+		bRef := ap.beforeRef
+		ap.session = nil // prevent double finalization on shutdown
+		ap.mu.Unlock()
+		if sess != nil {
+			taskID := ""
+			if info, lockErr := ReadLockFile(ap.worktreePath); lockErr == nil {
+				taskID = info.TaskID
+			}
+			diffStats := ComputeDiffStats(ap.worktreePath, bRef)
+
+			ap.mu.Lock()
+			errClass := ""
+			if ap.lastError != nil {
+				errClass = ap.lastError.Class.String()
+			}
+			ap.mu.Unlock()
+
+			if err := sess.Finalize(sessions.FinalizeOptions{
+				TaskID:     taskID,
+				ExitCode:   exitCode,
+				ErrorClass: errClass,
+				DiffStats: sessions.DiffStats{
+					FilesChanged: diffStats.FilesChanged,
+					LinesAdded:   diffStats.LinesAdded,
+					LinesRemoved: diffStats.LinesRemoved,
+				},
+			}); err != nil {
+				slog.Warn("session finalization failed", "worktree", ap.entry.Worktree, "err", err)
+			}
+		}
 
 		// 4.7. Checkpoint management (save on error, clear on success)
 		d.handleAgentCheckpoint(ap, exitCode)

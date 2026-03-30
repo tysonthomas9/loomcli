@@ -1951,6 +1951,169 @@ func TestHandleTerminalWS_NoSSEBroadcastWhenMetadataNotFound(t *testing.T) {
 	}
 }
 
+// TestHandleTerminalWS_SSEBroadcastNonDefaultWorkspace verifies that when a
+// WebSocket connects with a non-default workspace parameter, the handler looks
+// up metadata in that workspace (not scanning all workspaces) and broadcasts
+// an SSE event with the correct WorkspaceID.
+func TestHandleTerminalWS_SSEBroadcastNonDefaultWorkspace(t *testing.T) {
+	if os.Getenv("CI") != "" {
+		t.Skip("skipping in CI: tmux PTY lifecycle is unreliable in GitHub Actions")
+	}
+	manager, err := NewTerminalManager("bash", "", 0)
+	if err == ErrTmuxNotFound {
+		t.Skip("tmux not installed, skipping test")
+	}
+	if err != nil {
+		t.Fatalf("failed to create terminal manager: %v", err)
+	}
+	defer manager.Shutdown()
+
+	store, hub := setupTabMetaTest(t)
+
+	// Pre-populate metadata in workspace "myproject" (NOT "default") with an issue_id.
+	ctx := context.Background()
+	now := time.Now().UTC()
+	err = store.Set(ctx, &tabmeta.TabMetadata{
+		SessionName: "issue-session",
+		Workspace:   "myproject",
+		Label:       "issue-session",
+		IssueID:     "PROJ-99",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
+	if err != nil {
+		t.Fatalf("failed to set tab metadata: %v", err)
+	}
+
+	// Register an SSE client on the hub subscribed to workspace "myproject".
+	client := &SSEClient{
+		id:          1,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		workspaceID: "myproject",
+	}
+	hub.RegisterClient(client)
+	defer hub.UnregisterClient(client)
+
+	// Give hub.Run() a moment to process registration.
+	time.Sleep(50 * time.Millisecond)
+
+	handler := handleTerminalWS(manager, nil, nil, "", nil, store, hub)
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	// Connect with explicit workspace parameter.
+	wsURL := "ws" + server.URL[4:] + "?session=issue-session&workspace=myproject"
+	dialCtx, dialCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer dialCancel()
+
+	conn, _, err := websocket.Dial(dialCtx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("failed to dial WebSocket: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "test done")
+
+	// Wait for the SSE broadcast to arrive.
+	select {
+	case mutation := <-client.send:
+		if mutation.Type != "terminal_session_change" {
+			t.Errorf("expected type %q, got %q", "terminal_session_change", mutation.Type)
+		}
+		if mutation.IssueID != "PROJ-99" {
+			t.Errorf("expected issue_id %q, got %q", "PROJ-99", mutation.IssueID)
+		}
+		if mutation.WorkspaceID != "myproject" {
+			t.Errorf("expected workspace_id %q, got %q", "myproject", mutation.WorkspaceID)
+		}
+		if mutation.Timestamp == "" {
+			t.Error("expected non-empty timestamp")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for SSE broadcast")
+	}
+}
+
+// TestHandleTerminalWS_SSEBroadcastNoWorkspaceParamUsesDefault verifies backward
+// compatibility: when a WebSocket connects WITHOUT a workspace query parameter,
+// the handler falls back to "default" and still broadcasts the SSE event.
+func TestHandleTerminalWS_SSEBroadcastNoWorkspaceParamUsesDefault(t *testing.T) {
+	if os.Getenv("CI") != "" {
+		t.Skip("skipping in CI: tmux PTY lifecycle is unreliable in GitHub Actions")
+	}
+	manager, err := NewTerminalManager("bash", "", 0)
+	if err == ErrTmuxNotFound {
+		t.Skip("tmux not installed, skipping test")
+	}
+	if err != nil {
+		t.Fatalf("failed to create terminal manager: %v", err)
+	}
+	defer manager.Shutdown()
+
+	store, hub := setupTabMetaTest(t)
+
+	// Pre-populate metadata in the "default" workspace with an issue_id.
+	ctx := context.Background()
+	now := time.Now().UTC()
+	err = store.Set(ctx, &tabmeta.TabMetadata{
+		SessionName: "issue-DEFAULT-7",
+		Workspace:   "default",
+		Label:       "issue-DEFAULT-7",
+		IssueID:     "DEFAULT-7",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
+	if err != nil {
+		t.Fatalf("failed to set tab metadata: %v", err)
+	}
+
+	// Register an SSE client subscribed to workspace "default".
+	client := &SSEClient{
+		id:          1,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		workspaceID: "default",
+	}
+	hub.RegisterClient(client)
+	defer hub.UnregisterClient(client)
+
+	// Give hub.Run() a moment to process registration.
+	time.Sleep(50 * time.Millisecond)
+
+	handler := handleTerminalWS(manager, nil, nil, "", nil, store, hub)
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	// Connect WITHOUT workspace param — should fall back to "default".
+	wsURL := "ws" + server.URL[4:] + "?session=issue-DEFAULT-7"
+	dialCtx, dialCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer dialCancel()
+
+	conn, _, err := websocket.Dial(dialCtx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("failed to dial WebSocket: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "test done")
+
+	// Wait for the SSE broadcast to arrive.
+	select {
+	case mutation := <-client.send:
+		if mutation.Type != "terminal_session_change" {
+			t.Errorf("expected type %q, got %q", "terminal_session_change", mutation.Type)
+		}
+		if mutation.IssueID != "DEFAULT-7" {
+			t.Errorf("expected issue_id %q, got %q", "DEFAULT-7", mutation.IssueID)
+		}
+		if mutation.WorkspaceID != "default" {
+			t.Errorf("expected workspace_id %q, got %q", "default", mutation.WorkspaceID)
+		}
+		if mutation.Timestamp == "" {
+			t.Error("expected non-empty timestamp")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for SSE broadcast")
+	}
+}
+
 // TestHandleTerminalWS_OriginValidation tests WebSocket origin validation
 // using OriginPatterns set by the allowedOrigins parameter.
 func TestHandleTerminalWS_OriginValidation(t *testing.T) {

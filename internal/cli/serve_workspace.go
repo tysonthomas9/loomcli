@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/webui"
+	"github.com/tysonthomas9/loomcli/internal/workspaceerrors"
 )
 
 // deleteWorkspace removes a workspace from config without deleting git worktrees.
@@ -119,11 +120,11 @@ func clearDefaultWorkspace() error {
 
 // createWorkspace creates a new workspace from the API request.
 // Supports "empty" (git worktree from existing repos) and "clone" (git clone first) types.
-func createWorkspace(ctx context.Context, req webui.WorkspaceCreateRequest) error {
+func createWorkspace(ctx context.Context, req webui.WorkspaceCreateRequest) (webui.WorkspaceCreateResult, error) {
 	// Load or create config
 	cfg, err := LoadConfig()
 	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
+		return webui.WorkspaceCreateResult{}, fmt.Errorf("failed to load config: %w", err)
 	}
 	if cfg == nil {
 		cfg = &LoomConfig{Workspaces: make(map[string]WorkspaceConfig)}
@@ -133,7 +134,7 @@ func createWorkspace(ctx context.Context, req webui.WorkspaceCreateRequest) erro
 	}
 
 	if _, exists := cfg.Workspaces[req.Name]; exists {
-		return fmt.Errorf("workspace %q already exists", req.Name)
+		return webui.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.AlreadyExists, fmt.Sprintf("workspace %q already exists", req.Name), nil)
 	}
 
 	// Determine workspace directory
@@ -146,11 +147,11 @@ func createWorkspace(ctx context.Context, req webui.WorkspaceCreateRequest) erro
 	// Security: ensure path is under allowed base directory
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return fmt.Errorf("cannot determine home directory: %w", err)
+		return webui.WorkspaceCreateResult{}, fmt.Errorf("cannot determine home directory: %w", err)
 	}
 	allowedBase := filepath.Join(homeDir, ".loom", "workspaces")
 	if !strings.HasPrefix(wsDir, allowedBase+string(filepath.Separator)) && wsDir != allowedBase {
-		return fmt.Errorf("workspace path must be under %s", allowedBase)
+		return webui.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.SecurityViolation, fmt.Sprintf("workspace path must be under %s", allowedBase), nil)
 	}
 
 	branch := req.Branch
@@ -169,7 +170,7 @@ func createWorkspace(ctx context.Context, req webui.WorkspaceCreateRequest) erro
 		}
 		return createCloneWorkspace(ctx, cfg, req.Name, wsDir, cloneURLs)
 	default:
-		return fmt.Errorf("unsupported workspace type: %s", req.Type)
+		return webui.WorkspaceCreateResult{}, fmt.Errorf("unsupported workspace type: %s", req.Type)
 	}
 }
 
@@ -192,55 +193,55 @@ func resolveRepoPaths(repoPaths []string) ([]resolvedRepo, error) {
 
 		absPath, err := filepath.Abs(rp)
 		if err != nil {
-			return nil, fmt.Errorf("cannot resolve path %q: %w", rp, err)
+			return nil, workspaceerrors.New(workspaceerrors.PathNotFound, fmt.Sprintf("cannot resolve path %q", rp), err)
 		}
 
 		info, err := os.Stat(absPath)
 		if err != nil {
-			return nil, fmt.Errorf("repo path does not exist: %s", absPath)
+			return nil, workspaceerrors.New(workspaceerrors.PathNotFound, fmt.Sprintf("repo path does not exist: %s", absPath), err)
 		}
 		if !info.IsDir() {
-			return nil, fmt.Errorf("repo path is not a directory: %s", absPath)
+			return nil, workspaceerrors.New(workspaceerrors.PathNotFound, fmt.Sprintf("repo path is not a directory: %s", absPath), nil)
 		}
 
 		gitDir := filepath.Join(absPath, ".git")
 		if _, err := os.Stat(gitDir); err != nil {
-			return nil, fmt.Errorf("not a git repository: %s", absPath)
+			return nil, workspaceerrors.New(workspaceerrors.NotGitRepo, fmt.Sprintf("not a git repository: %s", absPath), err)
 		}
 
 		baseName := filepath.Base(absPath)
 		if prev, exists := seenNames[baseName]; exists {
-			return nil, fmt.Errorf("duplicate repo name %q from paths %s and %s", baseName, prev, absPath)
+			return nil, workspaceerrors.New(workspaceerrors.PathNotFound, fmt.Sprintf("duplicate repo name %q from paths %s and %s", baseName, prev, absPath), nil)
 		}
 		seenNames[baseName] = absPath
 		resolved = append(resolved, resolvedRepo{path: absPath, name: baseName})
 	}
 
 	if len(resolved) == 0 {
-		return nil, fmt.Errorf("no valid repos specified")
+		return nil, workspaceerrors.New(workspaceerrors.PathNotFound, "no valid repos specified", nil)
 	}
 	return resolved, nil
 }
 
 // createEmptyWorkspace creates worktrees from existing repos.
-func createEmptyWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir, branch string, repoPaths []string) error {
+func createEmptyWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir, branch string, repoPaths []string) (webui.WorkspaceCreateResult, error) {
 	// Security: ensure path is under allowed base directory
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return fmt.Errorf("cannot determine home directory: %w", err)
+		return webui.WorkspaceCreateResult{}, fmt.Errorf("cannot determine home directory: %w", err)
 	}
 	allowedBase := filepath.Join(homeDir, ".loom", "workspaces")
 	if !strings.HasPrefix(wsDir, allowedBase+string(filepath.Separator)) && wsDir != allowedBase {
-		return fmt.Errorf("workspace path must be under %s", allowedBase)
+		return webui.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.SecurityViolation, fmt.Sprintf("workspace path must be under %s", allowedBase), nil)
 	}
 
 	resolved, err := resolveRepoPaths(repoPaths)
 	if err != nil {
-		return err
+		return webui.WorkspaceCreateResult{}, err
 	}
 
 	if err := os.MkdirAll(wsDir, 0755); err != nil {
-		return fmt.Errorf("cannot create workspace directory: %w", err)
+		return webui.WorkspaceCreateResult{}, fmt.Errorf("cannot create workspace directory: %w", err)
 	}
 
 	type createdWorktree struct {
@@ -260,13 +261,13 @@ func createEmptyWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir, b
 	for _, repo := range resolved {
 		if ctx.Err() != nil {
 			cleanup()
-			return ctx.Err()
+			return webui.WorkspaceCreateResult{}, ctx.Err()
 		}
 
 		worktreePath := filepath.Join(wsDir, repo.name)
 		if _, err := RunGitCommand(repo.path, "worktree", "add", worktreePath, "-b", branch); err != nil {
 			cleanup()
-			return fmt.Errorf("git worktree add failed for %s: %w", repo.name, err)
+			return webui.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.GitFailed, fmt.Sprintf("git worktree add failed for %s", repo.name), err)
 		}
 
 		created = append(created, createdWorktree{origRepoPath: repo.path, worktreePath: worktreePath})
@@ -281,22 +282,27 @@ func createEmptyWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir, b
 		slog.Warn("failed to write loom.yaml for workspace", "workspace", wsName, "err", err)
 	}
 
-	// Start bd daemon for the workspace (best-effort; non-fatal)
-	timeout := cfg.Daemon.GetStartupTimeout(defaultDaemonStartupTimeout)
-	if err := ensureDaemonForWorkspace(ctx, wsDir, timeout); err != nil {
-		slog.Warn("failed to start daemon for workspace", "workspace", wsName, "err", err)
-	}
-
-	cfg.Workspaces[wsName] = WorkspaceConfig{ID: NewWorkspaceID(), Path: wsDir, Repos: repos}
+	wsID := NewWorkspaceID()
+	cfg.Workspaces[wsName] = WorkspaceConfig{ID: wsID, Path: wsDir, Repos: repos}
 	if len(cfg.Workspaces) == 1 {
 		cfg.DefaultWorkspace = wsName
 	}
 
 	if err := SaveConfig(cfg); err != nil {
 		cleanup()
-		return fmt.Errorf("failed to save config: %w", err)
+		return webui.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.ConfigFailed, "failed to save config", err)
 	}
-	return nil
+
+	// Start bd daemon for the workspace asynchronously (best-effort; non-fatal).
+	// Uses context.Background() because the request context is cancelled when the handler returns.
+	timeout := cfg.Daemon.GetStartupTimeout(defaultDaemonStartupTimeout)
+	go func() {
+		if err := ensureDaemonForWorkspace(context.Background(), wsDir, timeout); err != nil {
+			slog.Warn("failed to start daemon for workspace", "workspace", wsName, "err", err)
+		}
+	}()
+
+	return webui.WorkspaceCreateResult{WorkspaceID: wsID, WorkspacePath: wsDir}, nil
 }
 
 // repoNameFromURL derives a directory name from a git clone URL.
@@ -321,19 +327,19 @@ func repoNameFromURL(cloneURL string) string {
 }
 
 // createCloneWorkspace clones one or more repos and creates a workspace from them.
-func createCloneWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir string, cloneURLs []string) error {
+func createCloneWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir string, cloneURLs []string) (webui.WorkspaceCreateResult, error) {
 	// Security: ensure path is under allowed base directory
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return fmt.Errorf("cannot determine home directory: %w", err)
+		return webui.WorkspaceCreateResult{}, fmt.Errorf("cannot determine home directory: %w", err)
 	}
 	allowedBase := filepath.Join(homeDir, ".loom", "workspaces")
 	if !strings.HasPrefix(wsDir, allowedBase+string(filepath.Separator)) && wsDir != allowedBase {
-		return fmt.Errorf("workspace path must be under %s", allowedBase)
+		return webui.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.SecurityViolation, fmt.Sprintf("workspace path must be under %s", allowedBase), nil)
 	}
 
 	if err := os.MkdirAll(wsDir, 0755); err != nil {
-		return fmt.Errorf("cannot create workspace directory: %w", err)
+		return webui.WorkspaceCreateResult{}, fmt.Errorf("cannot create workspace directory: %w", err)
 	}
 
 	cleanupDir := func() { _ = os.RemoveAll(wsDir) }
@@ -344,7 +350,7 @@ func createCloneWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir st
 	for _, cloneURL := range cloneURLs {
 		if ctx.Err() != nil {
 			cleanupDir()
-			return ctx.Err()
+			return webui.WorkspaceCreateResult{}, ctx.Err()
 		}
 
 		repoName := repoNameFromURL(cloneURL)
@@ -364,7 +370,7 @@ func createCloneWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir st
 		cmd := exec.CommandContext(ctx, "git", "clone", cloneURL, clonePath) //nolint:gosec // URL validated: prefix (https://|git@), no control chars, no dash-prefixed path segments
 		if output, err := cmd.CombinedOutput(); err != nil {
 			cleanupDir()
-			return fmt.Errorf("git clone failed for %s: %s", cloneURL, strings.TrimSpace(string(output)))
+			return webui.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.GitFailed, fmt.Sprintf("git clone failed for %s: %s", cloneURL, strings.TrimSpace(string(output))), err)
 		}
 
 		repos = append(repos, RepoConfig{Name: repoName, Path: clonePath})
@@ -378,22 +384,27 @@ func createCloneWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir st
 		slog.Warn("failed to write loom.yaml for workspace", "workspace", wsName, "err", err)
 	}
 
-	// Start bd daemon for the workspace (best-effort; non-fatal)
-	timeout := cfg.Daemon.GetStartupTimeout(defaultDaemonStartupTimeout)
-	if err := ensureDaemonForWorkspace(ctx, wsDir, timeout); err != nil {
-		slog.Warn("failed to start daemon for workspace", "workspace", wsName, "err", err)
-	}
-
-	cfg.Workspaces[wsName] = WorkspaceConfig{ID: NewWorkspaceID(), Path: wsDir, Repos: repos}
+	wsID := NewWorkspaceID()
+	cfg.Workspaces[wsName] = WorkspaceConfig{ID: wsID, Path: wsDir, Repos: repos}
 	if len(cfg.Workspaces) == 1 {
 		cfg.DefaultWorkspace = wsName
 	}
 
 	if err := SaveConfig(cfg); err != nil {
 		cleanupDir()
-		return fmt.Errorf("failed to save config: %w", err)
+		return webui.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.ConfigFailed, "failed to save config", err)
 	}
-	return nil
+
+	// Start bd daemon for the workspace asynchronously (best-effort; non-fatal).
+	// Uses context.Background() because the request context is cancelled when the handler returns.
+	timeout := cfg.Daemon.GetStartupTimeout(defaultDaemonStartupTimeout)
+	go func() {
+		if err := ensureDaemonForWorkspace(context.Background(), wsDir, timeout); err != nil {
+			slog.Warn("failed to start daemon for workspace", "workspace", wsName, "err", err)
+		}
+	}()
+
+	return webui.WorkspaceCreateResult{WorkspaceID: wsID, WorkspacePath: wsDir}, nil
 }
 
 // resolveInitialWorkspaceID returns the stable UUID for the current working

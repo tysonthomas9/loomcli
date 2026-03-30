@@ -290,30 +290,18 @@ func runDaemonStatus(cmd *cobra.Command, args []string) {
 		fmt.Fprintf(os.Stderr, "Error: cannot determine working directory: %v\n", err)
 		os.Exit(1)
 	}
-	config, err := LoadDaemonConfig(projectDir)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not load config: %v\n", err)
-		// Continue anyway to check PID file with defaults
-		config = &DaemonConfig{
-			Daemon: DaemonSettings{
-				PIDFile: ".loom/daemon.pid",
-			},
-		}
-	}
 
-	pidFilePath := resolveDaemonPath(projectDir, config.Daemon.PIDFile)
-	stateFilePath := ResolveDaemonStatePath(projectDir)
-
-	// Check if daemon is running
-	pid, running := isLoomDaemonRunning(pidFilePath)
-	if !running {
+	// Use shared runtime detection (lockfile → state → PID fallback)
+	rt := DetectDaemonRuntime(projectDir)
+	if !rt.Running {
 		fmt.Println("Daemon: not running")
 		return
 	}
 
-	fmt.Printf("Daemon: running (PID %d)\n", pid)
+	fmt.Printf("Daemon: running (PID %d)\n", rt.PID)
 
 	// Read and display agent status
+	stateFilePath := ResolveDaemonStatePath(projectDir)
 	state, err := readStateFile(stateFilePath)
 	if err != nil {
 		fmt.Printf("  (no agent status available: %v)\n", err)
@@ -364,27 +352,26 @@ func runDaemonStop(cmd *cobra.Command, args []string) {
 		fmt.Fprintf(os.Stderr, "Error: cannot determine working directory: %v\n", err)
 		os.Exit(1)
 	}
-	config, _ := LoadDaemonConfig(projectDir)
-	if config == nil {
-		config = &DaemonConfig{
-			Daemon: DaemonSettings{
-				PIDFile: ".loom/daemon.pid",
-			},
-		}
-	}
 
-	pidFilePath := resolveDaemonPath(projectDir, config.Daemon.PIDFile)
-
-	pid, running := isLoomDaemonRunning(pidFilePath)
-	if !running {
+	// Use shared runtime detection (lockfile → state → PID fallback)
+	rt := DetectDaemonRuntime(projectDir)
+	if !rt.Running {
 		fmt.Println("Daemon is not running.")
 		return
 	}
 
-	fmt.Printf("Stopping daemon (PID %d)...\n", pid)
+	if rt.PID == 0 {
+		fmt.Fprintf(os.Stderr, "Error: daemon appears to be running (detected via %s) but PID could not be determined.\n", rt.Source)
+		fmt.Fprintf(os.Stderr, "To recover, inspect or remove .loom/daemon.lock and retry:\n")
+		fmt.Fprintf(os.Stderr, "  cat .loom/daemon.lock        # check daemon metadata\n")
+		fmt.Fprintf(os.Stderr, "  rm .loom/daemon.lock          # force-clear stale lock\n")
+		os.Exit(1)
+	}
+
+	fmt.Printf("Stopping daemon (PID %d)...\n", rt.PID)
 
 	// Send SIGTERM for graceful shutdown
-	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+	if err := syscall.Kill(rt.PID, syscall.SIGTERM); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: sending SIGTERM: %v\n", err)
 		os.Exit(1)
 	}
@@ -392,7 +379,7 @@ func runDaemonStop(cmd *cobra.Command, args []string) {
 	// Wait for daemon to exit (up to 30 seconds)
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
-		if !lockfile.IsProcessRunning(pid) {
+		if !lockfile.IsProcessRunning(rt.PID) {
 			fmt.Println("Daemon stopped.")
 			return
 		}
@@ -400,6 +387,6 @@ func runDaemonStop(cmd *cobra.Command, args []string) {
 	}
 
 	fmt.Fprintf(os.Stderr, "Warning: daemon did not stop within 30 seconds\n")
-	fmt.Fprintf(os.Stderr, "You may need to kill it manually: kill -9 %d\n", pid)
+	fmt.Fprintf(os.Stderr, "You may need to kill it manually: kill -9 %d\n", rt.PID)
 	os.Exit(1)
 }

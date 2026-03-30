@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -165,6 +167,144 @@ func TestDiffAgents_EmptyNew(t *testing.T) {
 	}
 }
 
+func TestDiffAgents_IgnoresSourceRepos(t *testing.T) {
+	old := []AgentEntry{
+		{Worktree: "agent1", Role: "task"},
+	}
+	new := []AgentEntry{
+		{Worktree: "agent1", Role: "task", SourceRepos: []string{"repo-a", "repo-b"}},
+	}
+	added, removed, modified := diffAgents(old, new)
+	if len(added) != 0 {
+		t.Errorf("expected 0 added, got %d", len(added))
+	}
+	if len(removed) != 0 {
+		t.Errorf("expected 0 removed, got %d", len(removed))
+	}
+	if len(modified) != 0 {
+		t.Errorf("expected 0 modified, got %d: SourceRepos should be ignored", len(modified))
+	}
+}
+
+func TestAgentEntry_Equal(t *testing.T) {
+	base := AgentEntry{
+		Worktree:         "w1",
+		Role:             "task",
+		Repo:             "backend",
+		Auto:             true,
+		Backend:          "anthropic",
+		FallbackBackends: []string{"openai"},
+		PathPatterns:     []string{"*.go"},
+		Repos:            []string{"r1"},
+		RepoGroups:       []string{"g1"},
+		CrossRepo:        true,
+		Parent:           "epic-1",
+	}
+
+	t.Run("identical", func(t *testing.T) {
+		other := base
+		if !base.Equal(other) {
+			t.Error("expected Equal to return true for identical entries")
+		}
+	})
+
+	t.Run("differs_only_in_SourceRepos", func(t *testing.T) {
+		other := base
+		other.SourceRepos = []string{"repo-a", "repo-b"}
+		if !base.Equal(other) {
+			t.Error("expected Equal to return true when only SourceRepos differs")
+		}
+	})
+
+	t.Run("differs_Worktree", func(t *testing.T) {
+		other := base
+		other.Worktree = "w2"
+		if base.Equal(other) {
+			t.Error("expected Equal to return false when Worktree differs")
+		}
+	})
+
+	t.Run("differs_Role", func(t *testing.T) {
+		other := base
+		other.Role = "plan"
+		if base.Equal(other) {
+			t.Error("expected Equal to return false when Role differs")
+		}
+	})
+
+	t.Run("differs_Repo", func(t *testing.T) {
+		other := base
+		other.Repo = "frontend"
+		if base.Equal(other) {
+			t.Error("expected Equal to return false when Repo differs")
+		}
+	})
+
+	t.Run("differs_Auto", func(t *testing.T) {
+		other := base
+		other.Auto = false
+		if base.Equal(other) {
+			t.Error("expected Equal to return false when Auto differs")
+		}
+	})
+
+	t.Run("differs_Backend", func(t *testing.T) {
+		other := base
+		other.Backend = "openai"
+		if base.Equal(other) {
+			t.Error("expected Equal to return false when Backend differs")
+		}
+	})
+
+	t.Run("differs_FallbackBackends", func(t *testing.T) {
+		other := base
+		other.FallbackBackends = []string{"openai", "azure"}
+		if base.Equal(other) {
+			t.Error("expected Equal to return false when FallbackBackends differs")
+		}
+	})
+
+	t.Run("differs_PathPatterns", func(t *testing.T) {
+		other := base
+		other.PathPatterns = []string{"*.ts"}
+		if base.Equal(other) {
+			t.Error("expected Equal to return false when PathPatterns differs")
+		}
+	})
+
+	t.Run("differs_Repos", func(t *testing.T) {
+		other := base
+		other.Repos = []string{"r1", "r2"}
+		if base.Equal(other) {
+			t.Error("expected Equal to return false when Repos differs")
+		}
+	})
+
+	t.Run("differs_RepoGroups", func(t *testing.T) {
+		other := base
+		other.RepoGroups = []string{"g2"}
+		if base.Equal(other) {
+			t.Error("expected Equal to return false when RepoGroups differs")
+		}
+	})
+
+	t.Run("differs_CrossRepo", func(t *testing.T) {
+		other := base
+		other.CrossRepo = false
+		if base.Equal(other) {
+			t.Error("expected Equal to return false when CrossRepo differs")
+		}
+	})
+
+	t.Run("differs_Parent", func(t *testing.T) {
+		other := base
+		other.Parent = "epic-2"
+		if base.Equal(other) {
+			t.Error("expected Equal to return false when Parent differs")
+		}
+	})
+}
+
 func TestComputeConfigHash_Deterministic(t *testing.T) {
 	dc := &DaemonConfig{
 		Backend: "anthropic",
@@ -218,5 +358,144 @@ func TestComputeConfigHash_AgentChanges(t *testing.T) {
 	h2 := computeConfigHash(dc2)
 	if h1 == h2 {
 		t.Error("expected different hashes when agents differ")
+	}
+}
+
+// TestConcurrentDrainAdd_Serialized verifies that the drainAddMu mutex
+// serializes concurrent drainAgent calls, preventing double SIGTERM/SIGKILL
+// races against the same agent process. Without serialization, two concurrent
+// reloadAndReconcile calls could both find the same agent and drain it
+// simultaneously (the bug described in loomcli-5y1sd.9).
+func TestConcurrentDrainAdd_Serialized(t *testing.T) {
+	d := &Daemon{
+		agents:   make([]*AgentProcess, 0),
+		shutdown: make(chan struct{}),
+		config:   &DaemonConfig{},
+	}
+
+	stopCh := make(chan struct{})
+	done := make(chan struct{})
+
+	ap := &AgentProcess{
+		entry:  AgentEntry{Worktree: "agent-X", Role: "task"},
+		stopCh: stopCh,
+		done:   done,
+	}
+	d.agents = append(d.agents, ap)
+
+	// Simulate superviseAgent goroutine: close done shortly after stopCh is signaled.
+	go func() {
+		<-stopCh
+		close(done)
+	}()
+
+	var successCount atomic.Int32
+	var notFoundCount atomic.Int32
+	var wg sync.WaitGroup
+
+	const goroutines = 10
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// Simulate what reloadAndReconcile does: acquire drainAddMu around drain
+			d.drainAddMu.Lock()
+			err := d.drainAgent("agent-X")
+			d.drainAddMu.Unlock()
+			if err == nil {
+				successCount.Add(1)
+			} else {
+				notFoundCount.Add(1)
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	if got := successCount.Load(); got != 1 {
+		t.Errorf("expected exactly 1 successful drain, got %d", got)
+	}
+	if got := notFoundCount.Load(); got != goroutines-1 {
+		t.Errorf("expected %d not-found errors, got %d", goroutines-1, got)
+	}
+
+	d.agentsMu.RLock()
+	agentCount := len(d.agents)
+	d.agentsMu.RUnlock()
+	if agentCount != 0 {
+		t.Errorf("expected 0 agents after drain, got %d", agentCount)
+	}
+}
+
+// TestConcurrentDrainAdd_AddNoDuplicate verifies the drainAddMu + agentsMu
+// locking pattern that reloadAndReconcile uses during agent addition.
+// It exercises the check+insert logic in isolation (not the full addAgent,
+// which requires filesystem I/O via ResolveAgentTarget) to confirm that
+// serialization via drainAddMu prevents duplicate agent entries.
+func TestConcurrentDrainAdd_AddNoDuplicate(t *testing.T) {
+	d := &Daemon{
+		agents:   make([]*AgentProcess, 0),
+		shutdown: make(chan struct{}),
+		config: &DaemonConfig{
+			Roles: map[string]RoleConfig{
+				"task": {Description: "test role"},
+			},
+		},
+	}
+
+	// addAgent calls ResolveAgentTarget which needs real filesystem,
+	// so we test the duplicate-prevention logic directly by pre-building
+	// AgentProcess entries and racing the agent-slice insertion.
+	entry := AgentEntry{Worktree: "agent-Y", Role: "task"}
+
+	var successCount atomic.Int32
+	var dupCount atomic.Int32
+	var wg sync.WaitGroup
+
+	const goroutines = 10
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			d.drainAddMu.Lock()
+			// Simulate addAgent's critical section: check+insert under agentsMu
+			d.agentsMu.Lock()
+			duplicate := false
+			for _, existing := range d.agents {
+				if existing.entry.Worktree == entry.Worktree {
+					duplicate = true
+					break
+				}
+			}
+			if !duplicate {
+				ap := &AgentProcess{
+					entry:  entry,
+					stopCh: make(chan struct{}),
+					done:   make(chan struct{}),
+				}
+				d.agents = append(d.agents, ap)
+				successCount.Add(1)
+			} else {
+				dupCount.Add(1)
+			}
+			d.agentsMu.Unlock()
+			d.drainAddMu.Unlock()
+		}()
+	}
+
+	wg.Wait()
+
+	if got := successCount.Load(); got != 1 {
+		t.Errorf("expected exactly 1 successful add, got %d", got)
+	}
+	if got := dupCount.Load(); got != goroutines-1 {
+		t.Errorf("expected %d duplicate errors, got %d", goroutines-1, got)
+	}
+
+	d.agentsMu.RLock()
+	agentCount := len(d.agents)
+	d.agentsMu.RUnlock()
+	if agentCount != 1 {
+		t.Errorf("expected 1 agent, got %d", agentCount)
 	}
 }

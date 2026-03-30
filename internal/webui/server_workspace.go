@@ -93,55 +93,32 @@ func reconcileConfigWorkspaces(
 func wrapWorkspaceCreateFn(
 	innerCreate WorkspaceCreateFn,
 	registry *WorkspaceRegistry,
-	resolveID WorkspaceIDResolverFn,
 	fleetRegistry *fleet.StoreRegistry,
 ) WorkspaceCreateFn {
 	if innerCreate == nil {
 		return nil
 	}
-	return func(ctx context.Context, req WorkspaceCreateRequest) error {
-		if err := innerCreate(ctx, req); err != nil {
-			return err
-		}
-
-		// Resolve UUID — config was just saved by innerCreate, so resolution should succeed.
-		// If resolution fails, abort registration rather than registering under a name key
-		// in a UUID-keyed registry. Startup reconciliation will register it on next restart.
-		if resolveID == nil {
-			slog.Warn("no workspace ID resolver available, skipping runtime registration",
-				"workspace", req.Name)
-			return nil
-		}
-		wsID, err := resolveID(req.Name)
+	return func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
+		result, err := innerCreate(ctx, req)
 		if err != nil {
-			slog.Error("failed to resolve workspace UUID after creation — skipping runtime registration",
-				"workspace", req.Name, "err", err)
-			return nil
-		}
-		if wsID == "" {
-			slog.Error("resolved workspace ID is empty — skipping runtime registration",
-				"workspace", req.Name)
-			return nil
+			return result, err
 		}
 
-		// Determine the workspace directory (mirrors GetWorkspaceDir logic in cli/config.go)
-		wsDir := req.Path
-		if wsDir == "" {
-			configDir := os.Getenv("LOOM_CONFIG_DIR")
-			if configDir == "" {
-				if homeDir, err := os.UserHomeDir(); err == nil {
-					configDir = filepath.Join(homeDir, ".loom")
-				}
-			}
-			if configDir != "" {
-				wsDir = filepath.Join(configDir, "workspaces", req.Name)
-			}
+		// Use the workspace ID returned by innerCreate directly,
+		// eliminating the need for a post-creation config re-read.
+		wsID := result.WorkspaceID
+		if wsID == "" {
+			slog.Error("workspace creation returned empty WorkspaceID — skipping runtime registration",
+				"workspace", req.Name)
+			return result, nil
 		}
+
+		wsDir := result.WorkspacePath
 		if wsDir == "" {
-			slog.Warn("cannot determine workspace dir for pool registration", "workspace", req.Name)
-			return nil
+			slog.Warn("workspace creation returned empty WorkspacePath — skipping runtime registration",
+				"workspace", req.Name)
+			return result, nil
 		}
-		wsDir = filepath.Clean(wsDir)
 
 		_ = registry.Register(wsID, wsDir)
 
@@ -153,7 +130,7 @@ func wrapWorkspaceCreateFn(
 			}
 		}
 
-		return nil
+		return result, nil
 	}
 }
 

@@ -1917,3 +1917,151 @@ func TestGitRefInjectionRejected(t *testing.T) {
 		}
 	})
 }
+
+// ---------- GitCleanExclude / GitCleanDryRunExclude ----------
+
+func TestGitCleanExclude(t *testing.T) {
+	tests := []struct {
+		name     string
+		dir      string
+		excludes []string
+		wantArgs []string
+		mockErr  error
+		wantErr  bool
+	}{
+		{
+			name:     "with_excludes",
+			dir:      "/repo",
+			excludes: []string{".beads", ".loom", "sessions"},
+			wantArgs: []string{"clean", "-fd", "--exclude=.beads", "--exclude=.loom", "--exclude=sessions"},
+			mockErr:  nil,
+			wantErr:  false,
+		},
+		{
+			name:     "empty_excludes",
+			dir:      "/repo",
+			excludes: []string{},
+			wantArgs: []string{"clean", "-fd"},
+			mockErr:  nil,
+			wantErr:  false,
+		},
+		{
+			name:     "nil_excludes",
+			dir:      "/repo",
+			excludes: nil,
+			wantArgs: []string{"clean", "-fd"},
+			mockErr:  nil,
+			wantErr:  false,
+		},
+		{
+			name:     "single_exclude",
+			dir:      "/repo",
+			excludes: []string{"loom.yaml"},
+			wantArgs: []string{"clean", "-fd", "--exclude=loom.yaml"},
+			mockErr:  nil,
+			wantErr:  false,
+		},
+		{
+			name:     "error_propagated",
+			dir:      "/repo",
+			excludes: []string{".loom"},
+			wantArgs: []string{"clean", "-fd", "--exclude=.loom"},
+			mockErr:  errors.New("git clean failed"),
+			wantErr:  true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := NewOutputCommandMock(t, []OutputCommandStub{{
+				Dir:  tc.dir,
+				Args: tc.wantArgs,
+				Err:  tc.mockErr,
+			}})
+			mock.Install()
+
+			err := GitCleanExclude(tc.dir, tc.excludes)
+
+			if tc.wantErr && err == nil {
+				t.Error("expected error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestGitCleanDryRunExclude(t *testing.T) {
+	tests := []struct {
+		name       string
+		dir        string
+		excludes   []string
+		wantArgs   []string
+		mockStdout string
+		mockErr    error
+		wantOutput string
+		wantErr    bool
+	}{
+		{
+			name:       "with_excludes",
+			dir:        "/repo",
+			excludes:   []string{".beads", ".loom"},
+			wantArgs:   []string{"clean", "-fdn", "--exclude=.beads", "--exclude=.loom"},
+			mockStdout: "Would remove leftover.txt\n",
+			wantOutput: "Would remove leftover.txt\n",
+			wantErr:    false,
+		},
+		{
+			name:       "empty_excludes",
+			dir:        "/repo",
+			excludes:   []string{},
+			wantArgs:   []string{"clean", "-fdn"},
+			mockStdout: "Would remove foo.txt\nWould remove bar.txt\n",
+			wantOutput: "Would remove foo.txt\nWould remove bar.txt\n",
+			wantErr:    false,
+		},
+		{
+			name:       "no_files_to_clean",
+			dir:        "/repo",
+			excludes:   []string{"sessions"},
+			wantArgs:   []string{"clean", "-fdn", "--exclude=sessions"},
+			mockStdout: "",
+			wantOutput: "",
+			wantErr:    false,
+		},
+		{
+			name:     "error_propagated",
+			dir:      "/repo",
+			excludes: []string{".loom"},
+			wantArgs: []string{"clean", "-fdn", "--exclude=.loom"},
+			mockErr:  errors.New("not a git repository"),
+			wantErr:  true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := NewCommandMock(t, []CommandStub{{
+				Dir:    tc.dir,
+				Name:   "git",
+				Args:   tc.wantArgs,
+				Stdout: tc.mockStdout,
+				Err:    tc.mockErr,
+			}})
+			mock.Install()
+
+			output, err := GitCleanDryRunExclude(tc.dir, tc.excludes)
+
+			if tc.wantErr && err == nil {
+				t.Error("expected error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+			if !tc.wantErr && output != tc.wantOutput {
+				t.Errorf("output = %q, want %q", output, tc.wantOutput)
+			}
+		})
+	}
+}

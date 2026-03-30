@@ -60,14 +60,15 @@ func (s *Store) CreateSession(opts CreateOptions) (*Session, error) {
 	now := time.Now().UTC()
 	meta := SessionMetadata{
 		SessionRecord: SessionRecord{
-			SessionID:  sid,
-			EpicID:     opts.EpicID,
-			AgentName:  opts.AgentName,
-			Backend:    opts.Backend,
-			Phase:      opts.Phase,
-			StartedAt:  now,
-			Status:     StatusRunning,
-			AttemptNum: opts.AttemptNum,
+			SchemaVersion: CurrentSchemaVersion,
+			SessionID:     sid,
+			EpicID:        opts.EpicID,
+			AgentName:     opts.AgentName,
+			Backend:       opts.Backend,
+			Phase:         opts.Phase,
+			StartedAt:     now,
+			Status:        StatusRunning,
+			AttemptNum:    opts.AttemptNum,
 		},
 	}
 
@@ -160,6 +161,17 @@ func readAndIncrementSeq(sessDir string) int {
 	// #nosec G306 — seq file is not sensitive
 	_ = os.WriteFile(seqPath, []byte(strconv.Itoa(seq)), 0o644)
 	return seq
+}
+
+// SaveMetadata writes the given SessionMetadata to disk atomically for the
+// specified session. This is used by hook handlers to patch metadata (e.g.,
+// token usage) outside of the normal Finalize flow.
+func (s *Store) SaveMetadata(sessionID string, meta *SessionMetadata) error {
+	if err := validateSessionID(sessionID); err != nil {
+		return err
+	}
+	sessDir := filepath.Join(s.dir, sessionID)
+	return writeMetadataAtomic(sessDir, *meta)
 }
 
 // writeMetadataAtomic writes metadata.json using temp file + rename

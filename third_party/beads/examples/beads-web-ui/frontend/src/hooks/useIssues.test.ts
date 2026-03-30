@@ -546,6 +546,33 @@ describe('useIssues', () => {
       ).rejects.toThrow('Issue nonexistent not found');
     });
 
+    it('concurrent optimistic updates to different issues do not clobber each other', async () => {
+      const mockIssues = [
+        createTestIssue({ id: 'issue-1', status: 'open' }),
+        createTestIssue({ id: 'issue-2', status: 'open' }),
+      ];
+      vi.mocked(issuesApi.getReadyIssues).mockResolvedValue(mockIssues);
+
+      // API calls that never resolve (we only care about optimistic state)
+      vi.mocked(issuesApi.updateIssue).mockReturnValue(new Promise(() => {}));
+
+      const { result } = renderHook(() => useIssues());
+
+      await waitFor(() => {
+        expect(result.current.issues).toHaveLength(2);
+      });
+
+      // Fire two updates in the SAME act() — same render cycle, stale closure scenario
+      await act(async () => {
+        result.current.updateIssueStatus('issue-1', 'in_progress');
+        result.current.updateIssueStatus('issue-2', 'closed');
+      });
+
+      // BOTH optimistic changes must be visible — not just the second one
+      expect(result.current.getIssue('issue-1')?.status).toBe('in_progress');
+      expect(result.current.getIssue('issue-2')?.status).toBe('closed');
+    });
+
     it('uses functional update for rollback to preserve concurrent mutations', async () => {
       // This test verifies that the rollback uses a functional update pattern
       // rather than restoring a full map snapshot. The functional update approach

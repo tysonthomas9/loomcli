@@ -4,7 +4,7 @@
  * Uses pointer events with setPointerCapture for cross-browser support.
  */
 
-import { useRef, useCallback, useEffect } from "react";
+import { useRef, useCallback, useEffect, useLayoutEffect } from "react";
 
 import styles from "./ResizeDivider.module.css";
 
@@ -23,11 +23,22 @@ export function ResizeDivider({
   const lastYRef = useRef(0);
   const rafRef = useRef(0);
   const dividerRef = useRef<HTMLDivElement>(null);
+  const pointerIdRef = useRef<number | null>(null);
 
-  // Cancel any pending RAF on unmount to avoid state updates after unmount
+  // Cancel any pending RAF on unmount
   useEffect(() => {
     return () => {
       cancelAnimationFrame(rafRef.current);
+    };
+  }, []);
+
+  // Release pointer capture on unmount during active drag.
+  // useLayoutEffect so dividerRef.current is still valid (runs before ref detachment).
+  useLayoutEffect(() => {
+    return () => {
+      if (isDraggingRef.current && pointerIdRef.current !== null && dividerRef.current) {
+        dividerRef.current.releasePointerCapture(pointerIdRef.current);
+      }
     };
   }, []);
 
@@ -36,6 +47,7 @@ export function ResizeDivider({
       e.preventDefault();
       isDraggingRef.current = true;
       lastYRef.current = e.clientY;
+      pointerIdRef.current = e.pointerId;
       e.currentTarget.setPointerCapture(e.pointerId);
       dividerRef.current?.setAttribute("data-dragging", "true");
     },
@@ -60,6 +72,7 @@ export function ResizeDivider({
     (e: React.PointerEvent<HTMLDivElement>) => {
       if (!isDraggingRef.current) return;
       isDraggingRef.current = false;
+      pointerIdRef.current = null;
       e.currentTarget.releasePointerCapture(e.pointerId);
       dividerRef.current?.setAttribute("data-dragging", "false");
       cancelAnimationFrame(rafRef.current);
@@ -70,6 +83,7 @@ export function ResizeDivider({
   const handleLostCapture = useCallback(() => {
     if (!isDraggingRef.current) return;
     isDraggingRef.current = false;
+    pointerIdRef.current = null;
     dividerRef.current?.setAttribute("data-dragging", "false");
     cancelAnimationFrame(rafRef.current);
   }, []);

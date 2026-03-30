@@ -68,7 +68,7 @@ export async function fetchTerminalToken(
  */
 // TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export function buildTerminalWsUrl(
-  _workspaceId: string,
+  workspaceId: string,
   sessionName: string,
   token: string | null,
 ): string {
@@ -81,6 +81,9 @@ export function buildTerminalWsUrl(
   let url = `${proto}//${host}/api/terminal/ws?session=${encodeURIComponent(sessionName)}`; // allow-url
   if (token) {
     url += `&token=${encodeURIComponent(token)}`;
+  }
+  if (workspaceId) {
+    url += `&workspace=${encodeURIComponent(workspaceId)}`;
   }
   return url;
 }
@@ -335,15 +338,17 @@ export async function closeAllSessions(_workspaceId: string): Promise<void> {
 
 /**
  * Fetch scrollback content for a terminal session.
- * GET /api/terminal/sessions/{session}/scrollback
+ * GET /api/workspaces/{ws}/terminal/sessions/{session}/scrollback
  */
-// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export async function fetchScrollback(
-  _workspaceId: string,
+  workspaceId: string,
   sessionName: string,
 ): Promise<{ content: string; lines: number }> {
   const response = await get<ApiResult<{ content: string; lines: number }>>(
-    `/api/terminal/sessions/${encodeURIComponent(sessionName)}/scrollback`,
+    wsUrl(
+      workspaceId,
+      `/terminal/sessions/${encodeURIComponent(sessionName)}/scrollback`,
+    ),
   );
   return unwrap(response);
 }
@@ -358,15 +363,17 @@ export interface ScrollbackInfo {
 
 /**
  * Get scrollback buffer info for a terminal session.
- * GET /api/terminal/sessions/{session}/scrollback-info
+ * GET /api/workspaces/{ws}/terminal/sessions/{session}/scrollback-info
  */
-// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export async function getScrollbackInfo(
-  _workspaceId: string,
+  workspaceId: string,
   sessionName: string,
 ): Promise<ScrollbackInfo> {
   return get<ScrollbackInfo>(
-    `/api/terminal/sessions/${encodeURIComponent(sessionName)}/scrollback-info`,
+    wsUrl(
+      workspaceId,
+      `/terminal/sessions/${encodeURIComponent(sessionName)}/scrollback-info`,
+    ),
   );
 }
 
@@ -374,38 +381,41 @@ export async function getScrollbackInfo(
  * Export session scrollback as a downloadable file.
  * Returns the URL for direct browser download.
  */
-// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export function getExportUrl(
-  _workspaceId: string,
+  workspaceId: string,
   sessionName: string,
   format: "txt" | "md" = "txt",
 ): string {
-  return `/api/terminal/sessions/${encodeURIComponent(sessionName)}/export?format=${format}`;
+  return wsUrl(
+    workspaceId,
+    `/terminal/sessions/${encodeURIComponent(sessionName)}/export?format=${format}`,
+  );
 }
 
 // ============= Terminal UI State =============
 
 /**
  * Get persisted terminal UI state (active tab).
- * GET /api/terminal/state
+ * GET /api/workspaces/{ws}/terminal/state
  */
-// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export async function getTerminalState(
-  _workspaceId: string,
+  workspaceId: string,
 ): Promise<{ active_tab: string }> {
-  return get<{ active_tab: string }>("/api/terminal/state");
+  return get<{ active_tab: string }>(wsUrl(workspaceId, "/terminal/state"));
 }
 
 /**
  * Persist terminal UI state (active tab).
- * PATCH /api/terminal/state
+ * PATCH /api/workspaces/{ws}/terminal/state
  */
-// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export async function patchTerminalState(
-  _workspaceId: string,
+  workspaceId: string,
   state: {
     active_tab: string;
   },
 ): Promise<void> {
-  await patch<{ active_tab: string }>("/api/terminal/state", state);
+  await patch<{ active_tab: string }>(
+    wsUrl(workspaceId, "/terminal/state"),
+    state,
+  );
 }

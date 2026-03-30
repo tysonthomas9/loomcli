@@ -382,7 +382,7 @@ describe("terminal API", () => {
       const url = buildTerminalWsUrl("test-ws-id", "my-session", "tok123");
 
       expect(url).toBe(
-        "ws://localhost:8080/api/terminal/ws?session=my-session&token=tok123",
+        "ws://localhost:8080/api/terminal/ws?session=my-session&token=tok123&workspace=test-ws-id",
       );
     });
 
@@ -395,7 +395,7 @@ describe("terminal API", () => {
       const url = buildTerminalWsUrl("test-ws-id", "my-session", "tok123");
 
       expect(url).toBe(
-        "wss://example.com/api/terminal/ws?session=my-session&token=tok123",
+        "wss://example.com/api/terminal/ws?session=my-session&token=tok123&workspace=test-ws-id",
       );
     });
 
@@ -408,7 +408,7 @@ describe("terminal API", () => {
       const url = buildTerminalWsUrl("test-ws-id", "my-session", null);
 
       expect(url).toBe(
-        "ws://localhost:3000/api/terminal/ws?session=my-session",
+        "ws://localhost:3000/api/terminal/ws?session=my-session&workspace=test-ws-id",
       );
       expect(url).not.toContain("token=");
     });
@@ -426,8 +426,22 @@ describe("terminal API", () => {
       );
 
       expect(url).toBe(
-        "ws://localhost:8080/api/terminal/ws?session=session%20with%20spaces&token=tok%26en%3Dval",
+        "ws://localhost:8080/api/terminal/ws?session=session%20with%20spaces&token=tok%26en%3Dval&workspace=test-ws-id",
       );
+    });
+
+    it("omits workspace parameter when workspaceId is empty", () => {
+      Object.defineProperty(window, "location", {
+        value: { protocol: "http:", host: "localhost:8080" },
+        writable: true,
+      });
+
+      const url = buildTerminalWsUrl("", "my-session", "tok123");
+
+      expect(url).toBe(
+        "ws://localhost:8080/api/terminal/ws?session=my-session&token=tok123",
+      );
+      expect(url).not.toContain("workspace=");
     });
   });
 
@@ -444,7 +458,7 @@ describe("terminal API", () => {
 
       expect(result).toEqual({ content: "line1\nline2\nline3", lines: 3 });
       expect(mockGet).toHaveBeenCalledWith(
-        "/api/terminal/sessions/my-session/scrollback",
+        "/api/workspaces/test-ws-id/terminal/sessions/my-session/scrollback",
       );
     });
 
@@ -457,7 +471,7 @@ describe("terminal API", () => {
       await fetchScrollback("test-ws-id", "session with spaces");
 
       expect(mockGet).toHaveBeenCalledWith(
-        "/api/terminal/sessions/session%20with%20spaces/scrollback",
+        "/api/workspaces/test-ws-id/terminal/sessions/session%20with%20spaces/scrollback",
       );
     });
 
@@ -493,7 +507,9 @@ describe("terminal API", () => {
       const result = await getTerminalState("test-ws-id");
 
       expect(result).toEqual({ active_tab: "session-abc" });
-      expect(mockGet).toHaveBeenCalledWith("/api/terminal/state");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/terminal/state",
+      );
     });
 
     it("returns empty active_tab when no state set", async () => {
@@ -521,9 +537,12 @@ describe("terminal API", () => {
 
       await patchTerminalState("test-ws-id", { active_tab: "session-xyz" });
 
-      expect(mockPatch).toHaveBeenCalledWith("/api/terminal/state", {
-        active_tab: "session-xyz",
-      });
+      expect(mockPatch).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/terminal/state",
+        {
+          active_tab: "session-xyz",
+        },
+      );
     });
 
     it("sends PATCH with empty active_tab to clear state", async () => {
@@ -531,9 +550,12 @@ describe("terminal API", () => {
 
       await patchTerminalState("test-ws-id", { active_tab: "" });
 
-      expect(mockPatch).toHaveBeenCalledWith("/api/terminal/state", {
-        active_tab: "",
-      });
+      expect(mockPatch).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/terminal/state",
+        {
+          active_tab: "",
+        },
+      );
     });
 
     it("propagates network errors from client", async () => {

@@ -76,6 +76,57 @@ describe("isPRUrl", () => {
   it("returns false for empty string", () => {
     expect(isPRUrl("")).toBe(false);
   });
+
+  // Scheme validation tests (XSS prevention)
+  it("returns false for javascript: URL containing /pull/", () => {
+    expect(isPRUrl("javascript:alert(1)//github.com/x/y/pull/1")).toBe(false);
+  });
+
+  it("returns false for javascript: URL with encoded payload", () => {
+    expect(isPRUrl("javascript:void(0)//github.com/org/repo/pull/99")).toBe(
+      false,
+    );
+  });
+
+  it("returns false for data: URL containing /pull/", () => {
+    expect(isPRUrl("data:text/html,<script>alert(1)</script>//pull/1")).toBe(
+      false,
+    );
+  });
+
+  it("returns false for vbscript: URL containing /pull/", () => {
+    expect(isPRUrl("vbscript:msgbox//github.com/x/y/pull/1")).toBe(false);
+  });
+
+  it("returns false for relative path containing /pull/", () => {
+    expect(isPRUrl("/pull/42")).toBe(false);
+  });
+
+  it("returns false for malformed URL", () => {
+    expect(isPRUrl("not a url at all /pull/1")).toBe(false);
+  });
+
+  it("returns false when /pull/ appears only in query string, not pathname", () => {
+    expect(isPRUrl("https://example.com/issues?ref=/pull/42")).toBe(false);
+  });
+
+  it("returns false for mixed-case JavaScript: scheme", () => {
+    expect(isPRUrl("JavaScript:alert(1)//github.com/x/y/pull/1")).toBe(false);
+  });
+
+  it("returns true for URL with authentication credentials", () => {
+    expect(isPRUrl("https://user:pass@github.com/owner/repo/pull/1")).toBe(
+      true,
+    );
+  });
+
+  it("returns false for ftp: scheme URL containing /pull/", () => {
+    expect(isPRUrl("ftp://files.example.com/repo/pull/42")).toBe(false);
+  });
+
+  it("returns false for file: scheme URL containing /pull/", () => {
+    expect(isPRUrl("file:///home/user/repo/pull/1")).toBe(false);
+  });
 });
 
 // --- getOpenStatus ---

@@ -64,6 +64,15 @@ vi.mock("@/hooks/useBackendConfig", () => ({
   useBackendConfig: () => mockBackendConfigHook,
 }));
 
+const mockSessionRestoreHook = vi.hoisted(() => ({
+  activeTabId: null as string | null,
+  isRestoring: true,
+}));
+
+vi.mock("@/hooks/useSessionRestore", () => ({
+  useSessionRestore: () => mockSessionRestoreHook,
+}));
+
 // ── Mock sibling components ──────────────────────────────────────────────────
 
 vi.mock("../TerminalInstance", () => ({
@@ -231,6 +240,8 @@ describe("TerminalView", () => {
       available: ["claude", "codex", "opencode"],
       agents: [],
     };
+    mockSessionRestoreHook.activeTabId = null;
+    mockSessionRestoreHook.isRestoring = true;
   });
 
   // ── Session initialization ───────────────────────────────────────────────
@@ -435,6 +446,48 @@ describe("TerminalView", () => {
       render(<TerminalView />);
 
       expect(screen.getByTestId("active-tab-id").textContent).toBe("session-b");
+    });
+
+    it("does not flicker when server restore matches sessionStorage", () => {
+      sessionStorage.setItem("terminal-active-tab", "session-2");
+      setMetadata(DEFAULT_METADATA);
+
+      // Start with server still restoring
+      mockSessionRestoreHook.isRestoring = true;
+      mockSessionRestoreHook.activeTabId = null;
+      const { rerender } = render(<TerminalView />);
+
+      // useTabInit sets session-2 from sessionStorage
+      expect(screen.getByTestId("active-tab-id").textContent).toBe("session-2");
+
+      // Server restore completes with same tab ID
+      mockSessionRestoreHook.isRestoring = false;
+      mockSessionRestoreHook.activeTabId = "session-2";
+      rerender(<TerminalView />);
+
+      // Active tab should still be session-2 (no flicker)
+      expect(screen.getByTestId("active-tab-id").textContent).toBe("session-2");
+    });
+
+    it("server restore wins when it differs from sessionStorage", () => {
+      sessionStorage.setItem("terminal-active-tab", "session-1");
+      setMetadata(DEFAULT_METADATA);
+
+      // Start with server still restoring
+      mockSessionRestoreHook.isRestoring = true;
+      mockSessionRestoreHook.activeTabId = null;
+      const { rerender } = render(<TerminalView />);
+
+      // useTabInit sets session-1 from sessionStorage
+      expect(screen.getByTestId("active-tab-id").textContent).toBe("session-1");
+
+      // Server restore completes with different tab ID
+      mockSessionRestoreHook.isRestoring = false;
+      mockSessionRestoreHook.activeTabId = "session-2";
+      rerender(<TerminalView />);
+
+      // Server value should win
+      expect(screen.getByTestId("active-tab-id").textContent).toBe("session-2");
     });
   });
 
@@ -903,6 +956,101 @@ describe("TerminalView", () => {
         "issue-PROJ-99",
         expect.any(Number),
       );
+    });
+  });
+
+  // ── pendingAgentName (V7 Terminal View) ───────────────────────────────────
+
+  describe("pendingAgentName", () => {
+    it("creates agent tab with correct session name pattern", () => {
+      setMetadata(DEFAULT_METADATA);
+      render(
+        <TerminalView pendingAgentName="fox" onAgentNameConsumed={vi.fn()} />,
+      );
+
+      // sanitizeSessionName("fox") => "fox"
+      // tab sessionName => "agent-fox"
+      expect(
+        screen.getByTestId("terminal-instance-agent-fox"),
+      ).toBeInTheDocument();
+    });
+
+    it("new agent tab becomes active", () => {
+      setMetadata(DEFAULT_METADATA);
+      render(
+        <TerminalView pendingAgentName="fox" onAgentNameConsumed={vi.fn()} />,
+      );
+
+      expect(screen.getByTestId("active-tab-id").textContent).toBe("agent-fox");
+    });
+
+    it("calls onAgentNameConsumed after creating agent tab", () => {
+      setMetadata(DEFAULT_METADATA);
+      const onConsumed = vi.fn();
+      render(
+        <TerminalView
+          pendingAgentName="fox"
+          onAgentNameConsumed={onConsumed}
+        />,
+      );
+
+      expect(onConsumed).toHaveBeenCalled();
+    });
+
+    it("switches to existing tab if agent tab already exists", () => {
+      setMetadata([
+        ...DEFAULT_METADATA,
+        { session_name: "agent-fox", label: "agent-fox" },
+      ]);
+      const onConsumed = vi.fn();
+      render(
+        <TerminalView
+          pendingAgentName="fox"
+          onAgentNameConsumed={onConsumed}
+        />,
+      );
+
+      // Should switch to existing tab, not create a new one
+      expect(screen.getByTestId("active-tab-id").textContent).toBe("agent-fox");
+      expect(onConsumed).toHaveBeenCalled();
+    });
+
+    it("persists tab metadata for new agent tab", () => {
+      setMetadata(DEFAULT_METADATA);
+      render(
+        <TerminalView pendingAgentName="fox" onAgentNameConsumed={vi.fn()} />,
+      );
+
+      expect(mockMetadataHook.createTab).toHaveBeenCalledWith(
+        "agent-fox",
+        "agent-fox",
+        expect.any(Number),
+      );
+    });
+
+    it("sanitizes agent name with dots in session name", () => {
+      setMetadata(DEFAULT_METADATA);
+      render(
+        <TerminalView
+          pendingAgentName="agent.alpha"
+          onAgentNameConsumed={vi.fn()}
+        />,
+      );
+
+      // sanitizeSessionName("agent.alpha") => "agent-alpha"
+      expect(
+        screen.getByTestId("terminal-instance-agent-agent-alpha"),
+      ).toBeInTheDocument();
+    });
+
+    it("does not create agent tab when no pendingAgentName is provided", () => {
+      setMetadata(DEFAULT_METADATA);
+      render(<TerminalView />);
+
+      // No agent tab should exist
+      expect(
+        screen.queryByTestId("terminal-instance-agent-fox"),
+      ).not.toBeInTheDocument();
     });
   });
 

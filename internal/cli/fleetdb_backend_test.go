@@ -41,7 +41,7 @@ func (m *mockFleetDBClient) Show(args *rpc.ShowArgs) (*rpc.Response, error) {
 	if m.showFn != nil {
 		return m.showFn(args)
 	}
-	return nil, nil
+	return &rpc.Response{Success: true, Data: json.RawMessage("null")}, nil
 }
 
 func (m *mockFleetDBClient) Blocked(args *rpc.BlockedArgs) (*rpc.Response, error) {
@@ -55,27 +55,96 @@ func (m *mockFleetDBClient) Stats() (*rpc.Response, error) {
 	if m.statsFn != nil {
 		return m.statsFn()
 	}
-	return nil, nil
+	return &rpc.Response{Success: true, Data: json.RawMessage("null")}, nil
 }
 
 func (m *mockFleetDBClient) Update(args *rpc.UpdateArgs) (*rpc.Response, error) {
 	if m.updateFn != nil {
 		return m.updateFn(args)
 	}
-	return nil, nil
+	return &rpc.Response{Success: true, Data: json.RawMessage("null")}, nil
 }
 
 func (m *mockFleetDBClient) CloseIssue(args *rpc.CloseArgs) (*rpc.Response, error) {
 	if m.closeFn != nil {
 		return m.closeFn(args)
 	}
-	return nil, nil
+	return &rpc.Response{Success: true, Data: json.RawMessage("null")}, nil
 }
 
 // helper: marshal data into a successful Response
 func successResp(data interface{}) *rpc.Response {
 	raw, _ := json.Marshal(data)
 	return &rpc.Response{Success: true, Data: raw}
+}
+
+func TestMockFleetDBClient_DefaultsDoNotPanic(t *testing.T) {
+	mock := &mockFleetDBClient{} // no fn callbacks set
+	b := newFleetDBBackend(mock, "test")
+
+	t.Run("Ready", func(t *testing.T) {
+		got, err := b.Ready(context.Background(), ReadyOpts{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got == nil {
+			t.Fatal("expected non-nil result")
+		}
+	})
+
+	t.Run("List", func(t *testing.T) {
+		got, err := b.List(context.Background(), ListOpts{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got == nil {
+			t.Fatal("expected non-nil result")
+		}
+	})
+
+	t.Run("Show", func(t *testing.T) {
+		got, err := b.GetIssue(context.Background(), "X")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got == nil {
+			t.Fatal("expected non-nil result")
+		}
+	})
+
+	t.Run("Blocked", func(t *testing.T) {
+		got, err := b.Blocked(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got == nil {
+			t.Fatal("expected non-nil result")
+		}
+	})
+
+	t.Run("Stats", func(t *testing.T) {
+		got, err := b.Stats(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got == nil {
+			t.Fatal("expected non-nil result")
+		}
+	})
+
+	t.Run("Update", func(t *testing.T) {
+		err := b.UpdateIssue(context.Background(), "X", UpdateOpts{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("CloseIssue", func(t *testing.T) {
+		err := b.CloseIssue(context.Background(), "X", "done")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
 }
 
 // (RunCommand dispatch tests removed — RunCommand and dispatch table no longer exist.
@@ -169,6 +238,39 @@ func TestFleetDBBackend_Ready(t *testing.T) {
 	}
 	if got[1].ID != "T-2" {
 		t.Errorf("got[1].ID = %q, want T-2", got[1].ID)
+	}
+}
+
+func TestFleetDBBackend_Ready_ForwardsLabelsAndSourceRepos(t *testing.T) {
+	mock := &mockFleetDBClient{
+		readyFn: func(args *rpc.ReadyArgs) (*rpc.Response, error) {
+			if args.Limit != 10 {
+				t.Errorf("expected limit 10, got %d", args.Limit)
+			}
+			if len(args.Labels) != 1 || args.Labels[0] != "repo:backend" {
+				t.Errorf("expected labels [repo:backend], got %v", args.Labels)
+			}
+			if len(args.SourceRepos) != 2 || args.SourceRepos[0] != "repo-a" || args.SourceRepos[1] != "repo-b" {
+				t.Errorf("expected source_repos [repo-a repo-b], got %v", args.SourceRepos)
+			}
+			issues := []*types.Issue{
+				{ID: "T-1", Title: "Task 1", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask},
+			}
+			return successResp(issues), nil
+		},
+	}
+
+	b := newFleetDBBackend(mock, "test")
+	got, err := b.Ready(context.Background(), ReadyOpts{
+		Limit:       10,
+		Labels:      []string{"repo:backend"},
+		SourceRepos: []string{"repo-a", "repo-b"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "T-1" {
+		t.Errorf("expected [T-1], got %v", got)
 	}
 }
 

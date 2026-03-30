@@ -405,6 +405,143 @@ describe("SessionDetailView", () => {
     });
   });
 
+  describe("tool_input truncation", () => {
+    it("truncates tool_input longer than 2000 chars", () => {
+      const longInput = "x".repeat(10000);
+      const entries = [
+        createTranscriptEntry({
+          seq: 1,
+          role: "assistant",
+          type: "tool_use",
+          tool_name: "Read",
+          content: undefined,
+          tool_input: longInput,
+        }),
+      ];
+      mockUseSessionTranscript.mockReturnValue({
+        entries,
+        isLoading: false,
+        error: null,
+      });
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
+      // Full text should NOT be present
+      expect(screen.queryByText(longInput)).not.toBeInTheDocument();
+      // Show full input button should be present
+      expect(screen.getByTestId("show-full-input")).toBeInTheDocument();
+    });
+
+    it("does not truncate tool_input under 2000 chars", () => {
+      const shortInput = "y".repeat(500);
+      const entries = [
+        createTranscriptEntry({
+          seq: 1,
+          role: "assistant",
+          type: "tool_use",
+          tool_name: "Read",
+          content: undefined,
+          tool_input: shortInput,
+        }),
+      ];
+      mockUseSessionTranscript.mockReturnValue({
+        entries,
+        isLoading: false,
+        error: null,
+      });
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
+      expect(screen.getByText(shortInput)).toBeInTheDocument();
+      expect(screen.queryByTestId("show-full-input")).not.toBeInTheDocument();
+    });
+
+    it("does not truncate tool_input of exactly 2000 chars", () => {
+      const exactInput = "z".repeat(2000);
+      const entries = [
+        createTranscriptEntry({
+          seq: 1,
+          role: "assistant",
+          type: "tool_use",
+          tool_name: "Read",
+          content: undefined,
+          tool_input: exactInput,
+        }),
+      ];
+      mockUseSessionTranscript.mockReturnValue({
+        entries,
+        isLoading: false,
+        error: null,
+      });
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
+      expect(screen.getByText(exactInput)).toBeInTheDocument();
+      expect(screen.queryByTestId("show-full-input")).not.toBeInTheDocument();
+    });
+
+    it("expands tool_input on 'Show full input' click", () => {
+      const longInput = "a".repeat(10000);
+      const entries = [
+        createTranscriptEntry({
+          seq: 1,
+          role: "assistant",
+          type: "tool_use",
+          tool_name: "Read",
+          content: undefined,
+          tool_input: longInput,
+        }),
+      ];
+      mockUseSessionTranscript.mockReturnValue({
+        entries,
+        isLoading: false,
+        error: null,
+      });
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
+      fireEvent.click(screen.getByTestId("show-full-input"));
+      expect(screen.getByText(longInput)).toBeInTheDocument();
+      expect(screen.getByTestId("show-less-input")).toBeInTheDocument();
+      expect(screen.queryByTestId("show-full-input")).not.toBeInTheDocument();
+    });
+
+    it("collapses tool_input on 'Show less' click", () => {
+      const longInput = "b".repeat(10000);
+      const entries = [
+        createTranscriptEntry({
+          seq: 1,
+          role: "assistant",
+          type: "tool_use",
+          tool_name: "Read",
+          content: undefined,
+          tool_input: longInput,
+        }),
+      ];
+      mockUseSessionTranscript.mockReturnValue({
+        entries,
+        isLoading: false,
+        error: null,
+      });
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
+      fireEvent.click(screen.getByTestId("show-full-input"));
+      fireEvent.click(screen.getByTestId("show-less-input"));
+      expect(screen.queryByText(longInput)).not.toBeInTheDocument();
+      expect(screen.getByTestId("show-full-input")).toBeInTheDocument();
+    });
+
+    it("does not truncate entry.content (only tool_input)", () => {
+      const longContent = "c".repeat(10000);
+      const entries = [
+        createTranscriptEntry({
+          seq: 1,
+          role: "assistant",
+          content: longContent,
+        }),
+      ];
+      mockUseSessionTranscript.mockReturnValue({
+        entries,
+        isLoading: false,
+        error: null,
+      });
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
+      expect(screen.getByText(longContent)).toBeInTheDocument();
+      expect(screen.queryByTestId("show-full-input")).not.toBeInTheDocument();
+    });
+  });
+
   describe("hook invocations", () => {
     it("passes correct args to useSessionTranscript", () => {
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);

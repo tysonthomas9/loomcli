@@ -7,6 +7,7 @@ import type { FitAddon } from "@xterm/addon-fit";
 import type { Terminal } from "@xterm/xterm";
 
 import { get } from "@/api/client";
+import { getAgentTerminalToken, getAgentTerminalWsUrl } from "@/api/logs";
 
 import type { ConnectionState } from "./TerminalInstance";
 
@@ -31,7 +32,7 @@ async function fetchTerminalToken(
  * Build the WebSocket URL for the terminal relay endpoint.
  */
 function buildWsUrl(
-  _workspaceId: string,
+  workspaceId: string,
   sessionName: string,
   token: string | null,
 ): string {
@@ -39,6 +40,9 @@ function buildWsUrl(
   let url = `${proto}//${window.location.host}/api/terminal/ws?session=${encodeURIComponent(sessionName)}`; // allow-url
   if (token) {
     url += `&token=${encodeURIComponent(token)}`;
+  }
+  if (workspaceId) {
+    url += `&workspace=${encodeURIComponent(workspaceId)}`;
   }
   return url;
 }
@@ -78,20 +82,40 @@ export function connectWebSocket(
     sendToWs: (data: string) => void,
     terminal: Terminal,
   ) => void,
+  agentName?: string,
 ): () => void {
   setConnectionState("connecting");
 
   let cancelled = false;
 
-  fetchTerminalToken(workspaceId, sessionName)
+  // Use agent terminal endpoint when agentName is provided
+  const tokenPromise = agentName
+    ? getAgentTerminalToken(workspaceId, agentName).catch(() => null)
+    : fetchTerminalToken(workspaceId, sessionName);
+
+  tokenPromise
     .then((token) => {
       if (cancelled) return;
 
-      const ws = new WebSocket(buildWsUrl(workspaceId, sessionName, token));
+      const wsUrl =
+        agentName && token
+          ? getAgentTerminalWsUrl(workspaceId, agentName, token)
+          : buildWsUrl(workspaceId, sessionName, token);
+      const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
       ws.binaryType = "arraybuffer";
 
+      // Defense-in-depth: if a future refactor introduces an async step
+      // between the check at line 88 and here, this guard prevents leaking
+      // the WebSocket.
+      if (cancelled) {
+        ws.close(1000);
+        wsRef.current = null;
+        return;
+      }
+
       ws.onopen = () => {
+        if (cancelled) return;
         setConnectionState("connected");
         fitAddon.fit();
         ws.send(encodeResize(terminal.cols, terminal.rows));
@@ -99,6 +123,7 @@ export function connectWebSocket(
       };
 
       ws.onmessage = (ev: MessageEvent) => {
+        if (cancelled) return;
         if (typeof ev.data === "string") {
           terminal.write(ev.data);
         } else if (ev.data instanceof ArrayBuffer) {
@@ -108,6 +133,7 @@ export function connectWebSocket(
       };
 
       ws.onclose = (event: CloseEvent) => {
+        if (cancelled) return;
         if (event.code === WS_CLOSE_BACKEND_EXITED) {
           // Backend process exited — show crash overlay, do NOT auto-reconnect
           setConnectionState("crashed");
@@ -119,6 +145,7 @@ export function connectWebSocket(
       };
 
       ws.onerror = () => {
+        if (cancelled) return;
         setConnectionState("disconnected");
       };
 
@@ -158,8 +185,20 @@ export function connectWebSocket(
   return () => {
     cancelled = true;
     if (wsCleanupInner) {
-      wsCleanupInner();
+      const fn = wsCleanupInner;
+      wsCleanupInner = null;
+      fn();
     } else {
+      // wsCleanupInner not yet assigned, but WebSocket may already exist
+      // via wsRef.current (assigned before handler setup).
+      const ws = wsRef.current;
+      if (
+        ws &&
+        (ws.readyState === WebSocket.OPEN ||
+          ws.readyState === WebSocket.CONNECTING)
+      ) {
+        ws.close(1000);
+      }
       wsRef.current = null;
     }
   };

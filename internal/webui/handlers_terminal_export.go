@@ -12,7 +12,7 @@ import (
 // terminal session as a downloadable .txt or .md file. The content is
 // captured via tmux capture-pane and ANSI escape codes are stripped.
 //
-// GET /api/terminal/sessions/{session}/export?format=txt|md
+// GET /api/workspaces/{ws}/terminal/sessions/{session}/export?format=txt|md
 func handleExportSession(manager *TerminalManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		session := r.PathValue("session")
@@ -65,7 +65,7 @@ func handleExportSession(manager *TerminalManager) http.HandlerFunc {
 // handleScrollbackInfo returns a handler that reports scrollback buffer
 // statistics for a terminal session (line count, max lines, truncated count).
 //
-// GET /api/terminal/sessions/{session}/scrollback-info
+// GET /api/workspaces/{ws}/terminal/sessions/{session}/scrollback-info
 func handleScrollbackInfo(manager *TerminalManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		session := r.PathValue("session")

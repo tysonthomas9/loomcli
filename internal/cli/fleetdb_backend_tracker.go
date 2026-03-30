@@ -17,7 +17,7 @@ var _ IssueTracker = (*fleetDBBackend)(nil)
 func (b *fleetDBBackend) BackendName() string { return "fleet-db" }
 
 func (b *fleetDBBackend) Ready(_ context.Context, opts ReadyOpts) ([]BdIssue, error) {
-	rpcArgs := &rpc.ReadyArgs{Limit: opts.Limit, ParentID: opts.ParentID}
+	rpcArgs := &rpc.ReadyArgs{Limit: opts.Limit, ParentID: opts.ParentID, Labels: opts.Labels, SourceRepos: opts.SourceRepos}
 	resp, err := b.client.Ready(rpcArgs)
 	if err != nil {
 		return nil, fmt.Errorf("ready: %w", err)

@@ -88,6 +88,12 @@ export interface WorkspaceTreeProps {
   onFilterChange?: (filter: ActiveFilter) => void;
   /** Work Queue counts derived from workspace-scoped issues */
   workQueueCounts?: WorkQueueCounts;
+  /** Callback when Talk to Lead is clicked in the tree */
+  onTalkToLead?: (workspaceName: string) => void;
+  /** Callback when a task is selected in the tree */
+  onTreeSelect?: (issueId: string) => void;
+  /** Callback when a task with an active agent is clicked for terminal */
+  onTaskTerminalOpen?: (issueId: string, agentName: string) => void;
 }
 
 // Scoped key suffixes for workspace-specific tree state
@@ -110,6 +116,9 @@ export function WorkspaceTree({
   onRetryConnection,
   onFilterChange,
   workQueueCounts,
+  onTalkToLead,
+  onTreeSelect,
+  onTaskTerminalOpen,
 }: WorkspaceTreeProps): JSX.Element {
   const {
     workspaceId,
@@ -409,17 +418,18 @@ export function WorkspaceTree({
 
   const handleConfirmDelete = useCallback(() => {
     if (!pendingDeleteName) return;
+    if (deletionPendingRef.current) return;
     const nameToDelete = pendingDeleteName;
     const idToDelete = wsIdByName(pendingDeleteName);
     setConfirmDeleteOpen(false);
     setPendingDeleteName(null);
 
-    // Show undo toast with 5-second duration
-    deletionPendingRef.current = false;
+    // Mark deletion as pending (undo window open)
+    deletionPendingRef.current = true;
 
     // Start delayed deletion
     deleteTimerRef.current = setTimeout(async () => {
-      deletionPendingRef.current = true;
+      deleteTimerRef.current = null;
       try {
         await deleteWorkspace(idToDelete);
         refetch();
@@ -428,6 +438,8 @@ export function WorkspaceTree({
           err instanceof Error ? err.message : "Failed to remove workspace";
         showToast(message, { type: "error" });
         refetch();
+      } finally {
+        deletionPendingRef.current = false;
       }
     }, 5000);
 
@@ -435,17 +447,17 @@ export function WorkspaceTree({
       type: "success",
       duration: 5000,
       onUndo: () => {
-        // Cancel the pending deletion
         if (deleteTimerRef.current) {
+          // Timer hasn't fired yet — cancel it
           clearTimeout(deleteTimerRef.current);
           deleteTimerRef.current = null;
-        }
-        if (deletionPendingRef.current) {
-          showToast("Deletion already in progress", { type: "info" });
+          deletionPendingRef.current = false;
+          showToast(`Workspace "${nameToDelete}" restored`, { type: "info" });
+          refetch();
           return;
         }
-        showToast(`Workspace "${nameToDelete}" restored`, { type: "info" });
-        refetch();
+        // Timer already fired — deletion in progress or done
+        showToast("Deletion already in progress", { type: "info" });
       },
     });
   }, [pendingDeleteName, refetch, showToast, wsIdByName]);
@@ -857,6 +869,9 @@ export function WorkspaceTree({
                   workspaceName={workspace.name}
                   activeFilter={activeFilter}
                   sourceRepos={repos.map((r) => r.name)}
+                  onTalkToLead={onTalkToLead}
+                  onSelect={onTreeSelect}
+                  onTaskTerminalOpen={onTaskTerminalOpen}
                 />
               )}
             </div>

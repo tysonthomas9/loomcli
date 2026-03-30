@@ -1,8 +1,12 @@
 package webui
 
 import (
+	"bytes"
 	"context"
+	"log"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -394,6 +398,90 @@ func TestSafeDialContext_BlocksPrivateIPs(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNewLoomProxy_DebugLogDoesNotLeakToken(t *testing.T) {
+	// Capture log output for the duration of this test.
+	// Do NOT run sub-tests in parallel — log.SetOutput is global.
+	var buf bytes.Buffer
+	origWriter := log.Writer()
+	origFlags := log.Flags()
+	log.SetOutput(&buf)
+	log.SetFlags(0) // strip timestamps for easier assertions
+	defer func() {
+		log.SetOutput(origWriter)
+		log.SetFlags(origFlags)
+	}()
+
+	const secretToken = "supersecretvalue42"
+
+	t.Run("Director log omits token", func(t *testing.T) {
+		buf.Reset()
+
+		// Start a dummy backend so the proxy can connect.
+		backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer backend.Close()
+
+		cleanup := setEnvCleanup(map[string]string{
+			"LOOM_SERVER_URL":          backend.URL,
+			"LOOM_PROXY_DEBUG":         "1",
+			"LOOM_PROXY_ALLOWED_HOSTS": "",
+		})
+		defer cleanup()
+
+		proxy := newLoomProxy("")
+		if proxy == nil {
+			t.Fatal("newLoomProxy returned nil")
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/api/loom/some/path?token="+secretToken, nil)
+		rec := httptest.NewRecorder()
+		proxy.ServeHTTP(rec, req)
+
+		logOutput := buf.String()
+		if strings.Contains(logOutput, secretToken) {
+			t.Errorf("Director log leaked token: %s", logOutput)
+		}
+		if !strings.Contains(logOutput, "/some/path") {
+			t.Errorf("Director log missing path, got: %s", logOutput)
+		}
+	})
+
+	t.Run("ErrorHandler log omits token", func(t *testing.T) {
+		buf.Reset()
+
+		// Use an unreachable backend to trigger the ErrorHandler.
+		cleanup := setEnvCleanup(map[string]string{
+			"LOOM_SERVER_URL":          "http://127.0.0.1:19999",
+			"LOOM_PROXY_DEBUG":         "1",
+			"LOOM_PROXY_ALLOWED_HOSTS": "",
+		})
+		defer cleanup()
+
+		proxy := newLoomProxy("")
+		if proxy == nil {
+			t.Fatal("newLoomProxy returned nil")
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/api/loom/other/endpoint?token="+secretToken, nil)
+		rec := httptest.NewRecorder()
+		proxy.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadGateway {
+			t.Errorf("expected 502, got %d", rec.Code)
+		}
+
+		logOutput := buf.String()
+		if strings.Contains(logOutput, secretToken) {
+			t.Errorf("ErrorHandler log leaked token: %s", logOutput)
+		}
+		// The Director runs before ErrorHandler, so the path is already stripped.
+		if !strings.Contains(logOutput, "/other/endpoint") {
+			t.Errorf("ErrorHandler log missing path, got: %s", logOutput)
+		}
+	})
 }
 
 func TestNewLoomProxy_DefaultURLParameter(t *testing.T) {

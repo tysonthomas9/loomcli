@@ -151,35 +151,7 @@ func collectDaemonStatus() DaemonInfo {
 	if err != nil {
 		return DaemonInfo{}
 	}
-
-	config, err := LoadDaemonConfig(projectDir)
-	if err != nil {
-		config = &DaemonConfig{
-			Daemon: DaemonSettings{
-				PIDFile: ".loom/daemon.pid",
-			},
-		}
-	}
-
-	pidFilePath := resolveDaemonPath(projectDir, config.Daemon.PIDFile)
-	pid, running := isLoomDaemonRunning(pidFilePath)
-
-	if running {
-		info := DaemonInfo{Running: true, PID: pid}
-		// Try to get uptime from state file
-		stateFilePath := ResolveDaemonStatePath(projectDir)
-		if state, err := readStateFile(stateFilePath); err == nil && state != nil {
-			info.Uptime = formatDuration(time.Since(state.StartedAt))
-		}
-		return info
-	}
-
-	// Check for stale PID file (file exists but process not running)
-	if _, err := os.Stat(pidFilePath); err == nil {
-		return DaemonInfo{StalePID: true}
-	}
-
-	return DaemonInfo{}
+	return collectDaemonStatusForDir(projectDir)
 }
 
 func buildStatusData(daemon DaemonInfo, mon *MonitorData) StatusData {
@@ -423,6 +395,18 @@ func formatDuration(d time.Duration) string {
 
 // collectDaemonStatusForDir is an internal helper for testing with a custom project dir.
 func collectDaemonStatusForDir(projectDir string) DaemonInfo {
+	rt := DetectDaemonRuntime(projectDir)
+
+	if rt.Running {
+		info := DaemonInfo{Running: true, PID: rt.PID}
+		stateFilePath := ResolveDaemonStatePath(projectDir)
+		if state, err := readStateFile(stateFilePath); err == nil && state != nil {
+			info.Uptime = formatDuration(time.Since(state.StartedAt))
+		}
+		return info
+	}
+
+	// Check for stale PID file (file exists but process not running)
 	config, err := LoadDaemonConfig(projectDir)
 	if err != nil {
 		config = &DaemonConfig{
@@ -431,19 +415,7 @@ func collectDaemonStatusForDir(projectDir string) DaemonInfo {
 			},
 		}
 	}
-
 	pidFilePath := resolveDaemonPath(projectDir, config.Daemon.PIDFile)
-	pid, running := isLoomDaemonRunning(pidFilePath)
-
-	if running {
-		info := DaemonInfo{Running: true, PID: pid}
-		stateFilePath := ResolveDaemonStatePath(projectDir)
-		if state, err := readStateFile(stateFilePath); err == nil && state != nil {
-			info.Uptime = formatDuration(time.Since(state.StartedAt))
-		}
-		return info
-	}
-
 	if _, err := os.Stat(pidFilePath); err == nil {
 		return DaemonInfo{StalePID: true}
 	}

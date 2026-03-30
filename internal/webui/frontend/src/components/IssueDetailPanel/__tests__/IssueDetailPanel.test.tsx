@@ -13,39 +13,63 @@ import {
   within,
   waitFor,
 } from "@testing-library/react";
-import {
-  describe,
-  it,
-  expect,
-  vi,
-  beforeEach as _beforeEach,
-  afterEach,
-} from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom";
 
 import type { Issue, IssueDetails, IssueWithDependencyMetadata } from "@/types";
+import { updateIssue } from "@/api";
 
 import { IssueDetailPanel } from "../IssueDetailPanel";
 
 // Create hoisted mocks
-const { mockUseAgentTerminalLogs, mockUseRegisterEscapeLayer } = vi.hoisted(
-  () => ({
-    mockUseAgentTerminalLogs: vi.fn(() => ({
-      mode: "idle" as const,
-      chunks: [],
-      state: "disconnected" as const,
-      error: null,
-      resetVersion: 0,
-      refresh: vi.fn(),
-      resize: vi.fn(),
-      sendInput: vi.fn(),
-      loadOlderLogs: vi.fn(),
-      hasMoreLines: false,
-      isLoadingMore: false,
-    })),
-    mockUseRegisterEscapeLayer: vi.fn(),
-  }),
-);
+const {
+  mockUseAgentTerminalLogs,
+  mockUseRegisterEscapeLayer,
+  mockDeleteTabMetadata,
+  mockScheduleSessionKill,
+  mockUseIssueTabPersistence,
+  mockUseWorkspaceContext,
+} = vi.hoisted(() => ({
+  mockUseAgentTerminalLogs: vi.fn(() => ({
+    mode: "idle" as const,
+    chunks: [],
+    state: "disconnected" as const,
+    error: null,
+    resetVersion: 0,
+    refresh: vi.fn(),
+    resize: vi.fn(),
+    sendInput: vi.fn(),
+    loadOlderLogs: vi.fn(),
+    hasMoreLines: false,
+    isLoadingMore: false,
+  })),
+  mockUseRegisterEscapeLayer: vi.fn(),
+  mockDeleteTabMetadata: vi.fn(() => Promise.resolve()),
+  mockScheduleSessionKill: vi.fn(() => Promise.resolve()),
+  mockUseIssueTabPersistence: vi.fn(() => ({
+    savedState: null,
+    isLoading: true,
+    saveTabs: vi.fn(),
+    clearTabs: vi.fn(),
+  })),
+  mockUseWorkspaceContext: vi.fn(() => ({
+    workspace: null,
+    repos: [],
+    groups: [],
+    agents: [],
+    isLoading: false,
+    error: null,
+    refetch: () => {},
+    getRepoByName: () => undefined,
+    getReposByGroup: () => [],
+    getAgentByName: () => undefined,
+    workspaceId: "",
+    activeWorkspaceName: null,
+    setActiveWorkspace: () => {},
+    defaultWorkspaceName: null,
+    setDefaultWorkspace: () => Promise.resolve(),
+  })),
+}));
 
 // Mock the API module
 vi.mock("@/api", () => ({
@@ -53,6 +77,23 @@ vi.mock("@/api", () => ({
   addDependency: vi.fn(),
   removeDependency: vi.fn(),
   getIssueEvents: vi.fn().mockResolvedValue([]),
+}));
+
+// Mock terminal API for cleanup verification
+vi.mock("@/api/terminal", () => ({
+  deleteTabMetadata: mockDeleteTabMetadata,
+  scheduleSessionKill: mockScheduleSessionKill,
+  listIssueSessions: vi.fn().mockResolvedValue({}),
+}));
+
+// Mock tab persistence hook for terminal tab restoration tests
+vi.mock("@/hooks/useIssueTabPersistence", () => ({
+  useIssueTabPersistence: mockUseIssueTabPersistence,
+}));
+
+// Mock workspace context for cleanup tests needing workspace ID
+vi.mock("@/hooks/useWorkspaceContext", () => ({
+  useWorkspaceContext: mockUseWorkspaceContext,
 }));
 
 // Mock the agent terminal logs hook
@@ -1177,6 +1218,411 @@ describe("IssueDetailPanel", () => {
         "href",
         "https://github.com/owner/repo/pulls/123",
       );
+    });
+  });
+
+  describe("handleTitleSave error handling", () => {
+    const mockUpdateIssue = updateIssue as ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      mockUpdateIssue.mockReset();
+    });
+
+    it("shows error toast when title save fails", async () => {
+      mockUpdateIssue.mockRejectedValueOnce(new Error("Network error"));
+
+      const mockIssue = createTestIssueDetails({ title: "Original Title" });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      // Click the title display to enter edit mode
+      const titleDisplay = screen.getByTestId("editable-title-display");
+      fireEvent.click(titleDisplay);
+
+      // Change the title and trigger save via Enter
+      const input = screen.getByTestId("editable-title-input");
+      fireEvent.change(input, { target: { value: "New Title" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      // Error toast should appear
+      await waitFor(() => {
+        expect(screen.getByTestId("title-error-toast")).toBeInTheDocument();
+      });
+      expect(screen.getByTestId("title-error-toast")).toHaveTextContent(
+        "Network error",
+      );
+    });
+
+    it("shows generic error message for non-Error exceptions", async () => {
+      mockUpdateIssue.mockRejectedValueOnce("string error");
+
+      const mockIssue = createTestIssueDetails({ title: "Original Title" });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      const titleDisplay = screen.getByTestId("editable-title-display");
+      fireEvent.click(titleDisplay);
+
+      const input = screen.getByTestId("editable-title-input");
+      fireEvent.change(input, { target: { value: "New Title" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("title-error-toast")).toBeInTheDocument();
+      });
+      expect(screen.getByTestId("title-error-toast")).toHaveTextContent(
+        "Failed to update title",
+      );
+    });
+
+    it("clears title error on next save attempt", async () => {
+      // First save fails
+      mockUpdateIssue.mockRejectedValueOnce(new Error("Network error"));
+
+      const mockIssue = createTestIssueDetails({ title: "Original Title" });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      // Enter edit mode and trigger failed save
+      const titleDisplay = screen.getByTestId("editable-title-display");
+      fireEvent.click(titleDisplay);
+
+      const input = screen.getByTestId("editable-title-input");
+      fireEvent.change(input, { target: { value: "New Title" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("title-error-toast")).toBeInTheDocument();
+      });
+
+      // Second save succeeds
+      mockUpdateIssue.mockResolvedValueOnce({
+        ...mockIssue,
+        title: "New Title",
+      });
+
+      // EditableTitle stays in edit mode after error, so input should still be there
+      const inputAfterError = screen.getByTestId("editable-title-input");
+      fireEvent.change(inputAfterError, { target: { value: "New Title" } });
+      fireEvent.keyDown(inputAfterError, { key: "Enter" });
+
+      await waitFor(() => {
+        expect(
+          screen.queryByTestId("title-error-toast"),
+        ).not.toBeInTheDocument();
+      });
+    });
+  });
+
+  describe("terminal session cleanup on implicit tab discard", () => {
+    const TERMINAL_TABS_PERSISTED = {
+      savedState: {
+        issue_id: "test-123",
+        tabs: [
+          {
+            id: "details",
+            type: "details" as const,
+            label: "Details",
+            sort_order: 0,
+          },
+          {
+            id: "sessions",
+            type: "sessions" as const,
+            label: "Sessions",
+            sort_order: 1,
+          },
+          {
+            id: "terminal-sess-1",
+            type: "terminal" as const,
+            label: "Terminal (shell)",
+            session_name: "sess-1",
+            sort_order: 2,
+          },
+        ],
+        active_tab_id: "terminal-sess-1",
+        updated_at: "2026-01-23T00:00:00Z",
+      },
+      isLoading: false,
+      saveTabs: vi.fn(),
+      clearTabs: vi.fn(),
+    };
+
+    beforeEach(() => {
+      mockDeleteTabMetadata.mockClear();
+      mockScheduleSessionKill.mockClear();
+      // Provide workspace ID so deleteTabMetadata is called
+      mockUseWorkspaceContext.mockReturnValue({
+        workspace: { id: "ws-1", name: "default" },
+        repos: [],
+        groups: [],
+        agents: [],
+        isLoading: false,
+        error: null,
+        refetch: () => {},
+        getRepoByName: () => undefined,
+        getReposByGroup: () => [],
+        getAgentByName: () => undefined,
+        workspaceId: "ws-1",
+        activeWorkspaceName: "default",
+        setActiveWorkspace: () => {},
+        defaultWorkspaceName: "default",
+        setDefaultWorkspace: () => Promise.resolve(),
+      });
+    });
+
+    afterEach(() => {
+      // Reset to defaults
+      mockUseIssueTabPersistence.mockReturnValue({
+        savedState: null,
+        isLoading: true,
+        saveTabs: vi.fn(),
+        clearTabs: vi.fn(),
+      });
+      mockUseWorkspaceContext.mockReturnValue({
+        workspace: null,
+        repos: [],
+        groups: [],
+        agents: [],
+        isLoading: false,
+        error: null,
+        refetch: () => {},
+        getRepoByName: () => undefined,
+        getReposByGroup: () => [],
+        getAgentByName: () => undefined,
+        workspaceId: "",
+        activeWorkspaceName: null,
+        setActiveWorkspace: () => {},
+        defaultWorkspaceName: null,
+        setDefaultWorkspace: () => Promise.resolve(),
+      });
+    });
+
+    it("cleans up terminal sessions when issue ID changes", async () => {
+      // Return persisted state with a terminal tab for issue A
+      mockUseIssueTabPersistence.mockReturnValue(TERMINAL_TABS_PERSISTED);
+
+      const issueA = createTestIssue({ id: "issue-a" });
+      const { rerender } = render(
+        <IssueDetailPanel isOpen={true} issue={issueA} onClose={() => {}} />,
+      );
+
+      // Wait for terminal tab to be restored
+      await waitFor(() => {
+        expect(
+          screen.getByRole("tab", { name: /Terminal/ }),
+        ).toBeInTheDocument();
+      });
+
+      // Clear mocks from initial render (cleanup fires on first mount too)
+      mockDeleteTabMetadata.mockClear();
+      mockScheduleSessionKill.mockClear();
+
+      // Change issue — should trigger cleanup of terminal tabs
+      const issueB = createTestIssue({ id: "issue-b" });
+      rerender(
+        <IssueDetailPanel isOpen={true} issue={issueB} onClose={() => {}} />,
+      );
+
+      await waitFor(() => {
+        expect(mockDeleteTabMetadata).toHaveBeenCalledWith("ws-1", "sess-1");
+        expect(mockScheduleSessionKill).toHaveBeenCalledWith("ws-1", "sess-1");
+      });
+    });
+
+    it("cleans up terminal sessions on component unmount", async () => {
+      mockUseIssueTabPersistence.mockReturnValue(TERMINAL_TABS_PERSISTED);
+
+      const issue = createTestIssue({ id: "test-123" });
+      const { unmount } = render(
+        <IssueDetailPanel isOpen={true} issue={issue} onClose={() => {}} />,
+      );
+
+      // Wait for terminal tab to be restored
+      await waitFor(() => {
+        expect(
+          screen.getByRole("tab", { name: /Terminal/ }),
+        ).toBeInTheDocument();
+      });
+
+      mockDeleteTabMetadata.mockClear();
+      mockScheduleSessionKill.mockClear();
+
+      unmount();
+
+      expect(mockDeleteTabMetadata).toHaveBeenCalledWith("ws-1", "sess-1");
+      expect(mockScheduleSessionKill).toHaveBeenCalledWith("ws-1", "sess-1");
+    });
+
+    it("does not call cleanup when no terminal tabs exist", () => {
+      // Default persistence: no saved state, no terminal tabs
+      mockUseIssueTabPersistence.mockReturnValue({
+        savedState: null,
+        isLoading: false,
+        saveTabs: vi.fn(),
+        clearTabs: vi.fn(),
+      });
+
+      const issueA = createTestIssue({ id: "issue-a" });
+      const { rerender } = render(
+        <IssueDetailPanel isOpen={true} issue={issueA} onClose={() => {}} />,
+      );
+
+      mockDeleteTabMetadata.mockClear();
+      mockScheduleSessionKill.mockClear();
+
+      const issueB = createTestIssue({ id: "issue-b" });
+      rerender(
+        <IssueDetailPanel isOpen={true} issue={issueB} onClose={() => {}} />,
+      );
+
+      expect(mockDeleteTabMetadata).not.toHaveBeenCalled();
+      expect(mockScheduleSessionKill).not.toHaveBeenCalled();
+    });
+
+    it("cleans up terminal sessions when agent is removed while on logs tab", async () => {
+      // Persisted state: terminal tab + logs tab active
+      const logsAndTerminal = {
+        savedState: {
+          issue_id: "test-123",
+          tabs: [
+            {
+              id: "details",
+              type: "details" as const,
+              label: "Details",
+              sort_order: 0,
+            },
+            {
+              id: "sessions",
+              type: "sessions" as const,
+              label: "Sessions",
+              sort_order: 1,
+            },
+            { id: "logs", type: "logs" as const, label: "Logs", sort_order: 2 },
+            {
+              id: "terminal-sess-1",
+              type: "terminal" as const,
+              label: "Terminal (shell)",
+              session_name: "sess-1",
+              sort_order: 3,
+            },
+          ],
+          active_tab_id: "logs",
+          updated_at: "2026-01-23T00:00:00Z",
+        },
+        isLoading: false,
+        saveTabs: vi.fn(),
+        clearTabs: vi.fn(),
+      };
+      mockUseIssueTabPersistence.mockReturnValue(logsAndTerminal);
+
+      // Issue with an assignee (hasAgent = true)
+      const issueWithAgent = createTestIssue({
+        id: "test-123",
+        assignee: "agent-1",
+      });
+      const { rerender } = render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={issueWithAgent}
+          onClose={() => {}}
+        />,
+      );
+
+      // Wait for tabs to be restored
+      await waitFor(() => {
+        expect(
+          screen.getByRole("tab", { name: /Terminal/ }),
+        ).toBeInTheDocument();
+      });
+
+      mockDeleteTabMetadata.mockClear();
+      mockScheduleSessionKill.mockClear();
+
+      // Remove the agent — triggers the agent-removed effect
+      const issueWithoutAgent = createTestIssue({
+        id: "test-123",
+        assignee: undefined,
+      });
+      rerender(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={issueWithoutAgent}
+          onClose={() => {}}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(mockScheduleSessionKill).toHaveBeenCalledWith("ws-1", "sess-1");
+      });
+    });
+
+    it("cleans up multiple terminal tabs on issue change", async () => {
+      const multiTerminalPersisted = {
+        ...TERMINAL_TABS_PERSISTED,
+        savedState: {
+          issue_id: "test-123",
+          tabs: [
+            {
+              id: "details",
+              type: "details" as const,
+              label: "Details",
+              sort_order: 0,
+            },
+            {
+              id: "sessions",
+              type: "sessions" as const,
+              label: "Sessions",
+              sort_order: 1,
+            },
+            {
+              id: "terminal-sess-1",
+              type: "terminal" as const,
+              label: "Terminal (shell)",
+              session_name: "sess-1",
+              sort_order: 2,
+            },
+            {
+              id: "terminal-sess-2",
+              type: "terminal" as const,
+              label: "Terminal (shell)",
+              session_name: "sess-2",
+              sort_order: 3,
+            },
+          ],
+          active_tab_id: "terminal-sess-1",
+          updated_at: "2026-01-23T00:00:00Z",
+        },
+      };
+      mockUseIssueTabPersistence.mockReturnValue(multiTerminalPersisted);
+
+      const issueA = createTestIssue({ id: "issue-a" });
+      const { rerender } = render(
+        <IssueDetailPanel isOpen={true} issue={issueA} onClose={() => {}} />,
+      );
+
+      // Wait for terminal tabs to be restored
+      await waitFor(() => {
+        const terminalTabs = screen.getAllByRole("tab", { name: /Terminal/ });
+        expect(terminalTabs).toHaveLength(2);
+      });
+
+      mockDeleteTabMetadata.mockClear();
+      mockScheduleSessionKill.mockClear();
+
+      const issueB = createTestIssue({ id: "issue-b" });
+      rerender(
+        <IssueDetailPanel isOpen={true} issue={issueB} onClose={() => {}} />,
+      );
+
+      await waitFor(() => {
+        expect(mockDeleteTabMetadata).toHaveBeenCalledWith("ws-1", "sess-1");
+        expect(mockDeleteTabMetadata).toHaveBeenCalledWith("ws-1", "sess-2");
+        expect(mockScheduleSessionKill).toHaveBeenCalledWith("ws-1", "sess-1");
+        expect(mockScheduleSessionKill).toHaveBeenCalledWith("ws-1", "sess-2");
+      });
     });
   });
 });

@@ -123,6 +123,17 @@ func runAgent(cmd *cobra.Command, args []string) {
 		if err := UpdateLockState(worktreePath, StateActive); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: could not update lock state: %v\n", err)
 		}
+
+		// Adopt parent-created session env vars for transcript tracking
+		if inheritedSID := os.Getenv("LOOM_SESSION_ID"); inheritedSID != "" {
+			inheritedBeads := os.Getenv("LOOM_BEADS_DIR")
+			if inheritedBeads == "" {
+				inheritedBeads = GetBeadsDir()
+			}
+			SetActiveSessionEnv(inheritedBeads, inheritedSID)
+			defer ClearActiveSessionEnv()
+		}
+
 		workspace, _ := ResolveActiveWorkspace()
 		prompt := promptGen(agentName, workspace)
 		if err := InvokeAgent(worktreePath, prompt, agentName); err != nil {

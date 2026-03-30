@@ -24,6 +24,10 @@ export interface TaskRowProps {
   renameInputRef?: React.RefObject<HTMLInputElement | null> | undefined;
   renameError?: string | null | undefined;
   isSaving?: boolean | undefined;
+  /** Callback when a task with an active agent is clicked for terminal. */
+  onTaskTerminalOpen?:
+    | ((issueId: string, agentName: string) => void)
+    | undefined;
 }
 
 /** Map task status to a CSS data-status value for dot coloring. */
@@ -57,6 +61,7 @@ export function TaskRow({
   renameInputRef,
   renameError,
   isSaving,
+  onTaskTerminalOpen,
 }: TaskRowProps): JSX.Element {
   const { workspaceId } = useWorkspaceContext();
   const { data: diffStat } = useIssueDiffStat({
@@ -88,7 +93,13 @@ export function TaskRow({
       <button
         type="button"
         className={styles.taskRowButton}
-        onClick={() => onSelect?.(task.id)}
+        onClick={() => {
+          if (task.assignee && onTaskTerminalOpen) {
+            onTaskTerminalOpen(task.id, task.assignee);
+          } else {
+            onSelect?.(task.id);
+          }
+        }}
         title={task.title}
       >
         {/* Task circle icon */}
@@ -149,7 +160,49 @@ export function TaskRow({
           <span className={styles.titleText}>{task.title}</span>
         )}
         {task.assignee && (
-          <span className={styles.branchChip}>{task.assignee}</span>
+          <span className={styles.branchChip}>
+            {onTaskTerminalOpen && (
+              <svg
+                width="10"
+                height="10"
+                viewBox="0 0 16 16"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+                style={{
+                  marginRight: 3,
+                  verticalAlign: "middle",
+                  opacity: 0.7,
+                }}
+              >
+                <rect
+                  x="1"
+                  y="2"
+                  width="14"
+                  height="12"
+                  rx="2"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                />
+                <path
+                  d="M4 7l2.5 2L4 11"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <line
+                  x1="8"
+                  y1="11"
+                  x2="12"
+                  y2="11"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
+              </svg>
+            )}
+            {task.assignee}
+          </span>
         )}
         {diffStat && (diffStat.added > 0 || diffStat.removed > 0) && (
           <span className={styles.diffStats}>

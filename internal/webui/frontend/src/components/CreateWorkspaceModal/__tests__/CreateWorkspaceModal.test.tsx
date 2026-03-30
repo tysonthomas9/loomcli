@@ -6,8 +6,14 @@
  * Unit tests for CreateWorkspaceModal component.
  */
 
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  act,
+} from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom";
 
 import { CreateWorkspaceModal } from "../CreateWorkspaceModal";
@@ -16,12 +22,22 @@ import { CreateWorkspaceModal } from "../CreateWorkspaceModal";
 
 vi.mock("@/api/workspace", () => ({
   createWorkspace: vi.fn(),
+  pollWorkspaceJob: vi.fn(),
+  refreshWorkspace: vi.fn(),
 }));
 
-vi.mock("@/hooks", () => ({
-  useRegisterEscapeLayer: vi.fn(),
-  LAYER_MODAL: "modal",
+vi.mock("@/hooks/useElapsedTime", () => ({
+  useElapsedTime: vi.fn(() => "5s"),
 }));
+
+vi.mock("@/hooks", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks")>();
+  return {
+    ...actual,
+    useRegisterEscapeLayer: vi.fn(),
+    LAYER_MODAL: "modal",
+  };
+});
 
 vi.mock("@/hooks/useFocusTrap", () => ({
   useFocusTrap: vi.fn(),
@@ -31,12 +47,23 @@ vi.mock("@/hooks/useFocusReturn", () => ({
   useFocusReturn: vi.fn(),
 }));
 
-import { createWorkspace } from "@/api/workspace";
-import type { WorkspaceData } from "@/api/workspace";
+import {
+  createWorkspace,
+  pollWorkspaceJob,
+  refreshWorkspace,
+} from "@/api/workspace";
+import type {
+  WorkspaceData,
+  WorkspaceCreateResult,
+  WorkspaceJobState,
+} from "@/api/workspace";
 
 const mockCreateWorkspace = vi.mocked(createWorkspace);
+const mockPollWorkspaceJob = vi.mocked(pollWorkspaceJob);
+const mockRefreshWorkspace = vi.mocked(refreshWorkspace);
 
 const MOCK_WORKSPACE_DATA: WorkspaceData = {
+  id: "ws-test-id",
   name: "test-ws",
   path: "/home/user/.loom/workspaces/test-ws",
   repos: [],
@@ -46,6 +73,11 @@ const MOCK_WORKSPACE_DATA: WorkspaceData = {
   default_workspace: "test-ws",
 };
 
+/** Helper: return a sync WorkspaceCreateResult wrapping the given data. */
+function syncResult(data: WorkspaceData): WorkspaceCreateResult {
+  return { kind: "sync", data };
+}
+
 describe("CreateWorkspaceModal", () => {
   let onClose: ReturnType<typeof vi.fn>;
   let onSuccess: ReturnType<typeof vi.fn>;
@@ -54,6 +86,8 @@ describe("CreateWorkspaceModal", () => {
     onClose = vi.fn();
     onSuccess = vi.fn();
     mockCreateWorkspace.mockReset();
+    mockPollWorkspaceJob.mockReset();
+    mockRefreshWorkspace.mockReset();
   });
 
   describe("rendering", () => {
@@ -231,10 +265,10 @@ describe("CreateWorkspaceModal", () => {
 
     it("shows 'Creating...' while submitting", async () => {
       // Keep the promise pending so we can observe the submitting state
-      let resolvePromise!: (value: WorkspaceData) => void;
+      let resolvePromise!: (value: WorkspaceCreateResult) => void;
       mockCreateWorkspace.mockImplementation(
         () =>
-          new Promise<WorkspaceData>((resolve) => {
+          new Promise<WorkspaceCreateResult>((resolve) => {
             resolvePromise = resolve;
           }),
       );
@@ -265,13 +299,15 @@ describe("CreateWorkspaceModal", () => {
       expect(screen.getByTestId("create-workspace-submit")).toBeDisabled();
 
       // Clean up
-      resolvePromise(MOCK_WORKSPACE_DATA);
+      await act(async () => {
+        resolvePromise(syncResult(MOCK_WORKSPACE_DATA));
+      });
     });
   });
 
   describe("form submission", () => {
-    it("calls onSuccess and onClose after successful API call", async () => {
-      mockCreateWorkspace.mockResolvedValue(MOCK_WORKSPACE_DATA);
+    it("calls onSuccess and onClose after successful sync API call", async () => {
+      mockCreateWorkspace.mockResolvedValue(syncResult(MOCK_WORKSPACE_DATA));
 
       render(
         <CreateWorkspaceModal
@@ -305,7 +341,7 @@ describe("CreateWorkspaceModal", () => {
     });
 
     it("sends clone_urls when type is clone", async () => {
-      mockCreateWorkspace.mockResolvedValue(MOCK_WORKSPACE_DATA);
+      mockCreateWorkspace.mockResolvedValue(syncResult(MOCK_WORKSPACE_DATA));
 
       render(
         <CreateWorkspaceModal
@@ -334,7 +370,7 @@ describe("CreateWorkspaceModal", () => {
     });
 
     it("sends path when provided", async () => {
-      mockCreateWorkspace.mockResolvedValue(MOCK_WORKSPACE_DATA);
+      mockCreateWorkspace.mockResolvedValue(syncResult(MOCK_WORKSPACE_DATA));
 
       render(
         <CreateWorkspaceModal
@@ -429,6 +465,234 @@ describe("CreateWorkspaceModal", () => {
       expect(screen.getByTestId("create-workspace-error")).toHaveTextContent(
         "Workspace name already exists",
       );
+    });
+  });
+
+  describe("async clone flow", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    /** Submit the clone form and flush microtasks so the async result is processed. */
+    async function submitCloneForm(name: string, url: string) {
+      fireEvent.change(screen.getByTestId("create-workspace-name"), {
+        target: { value: name },
+      });
+      fireEvent.change(screen.getByTestId("create-workspace-clone-url"), {
+        target: { value: url },
+      });
+
+      // eslint-disable-next-line @typescript-eslint/require-await
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("create-workspace-submit"));
+      });
+    }
+
+    it("shows progress UI when createWorkspace returns async result", async () => {
+      mockCreateWorkspace.mockResolvedValue({
+        kind: "async",
+        jobId: "test-job-123",
+      });
+
+      // Keep pollWorkspaceJob pending indefinitely for this test
+      mockPollWorkspaceJob.mockImplementation(
+        () => new Promise<WorkspaceJobState>(() => {}),
+      );
+
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      await submitCloneForm("clone-ws", "https://github.com/example/repo");
+
+      // Progress UI should be visible
+      expect(
+        screen.getByTestId("create-workspace-progress"),
+      ).toBeInTheDocument();
+
+      // Title should change
+      expect(
+        screen.getByRole("heading", { name: "Creating Workspace" }),
+      ).toBeInTheDocument();
+
+      // Progress message and elapsed time should be visible
+      expect(screen.getByText("Cloning repositories...")).toBeInTheDocument();
+      expect(screen.getByText("5s")).toBeInTheDocument();
+    });
+
+    it("polls and navigates on job completion", async () => {
+      mockCreateWorkspace.mockResolvedValue({
+        kind: "async",
+        jobId: "test-job-456",
+      });
+
+      // First poll: running with progress
+      // Second poll: done with workspace_id
+      let pollCount = 0;
+      mockPollWorkspaceJob.mockImplementation(async () => {
+        pollCount++;
+        if (pollCount === 1) {
+          return {
+            status: "running" as const,
+            progress: "Cloning repo 1/2...",
+          };
+        }
+        return {
+          status: "done" as const,
+          workspace_id: "ws-new-id",
+        };
+      });
+
+      mockRefreshWorkspace.mockResolvedValue(MOCK_WORKSPACE_DATA);
+
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      await submitCloneForm("clone-ws", "https://github.com/example/repo");
+
+      // Progress UI should be visible
+      expect(
+        screen.getByTestId("create-workspace-progress"),
+      ).toBeInTheDocument();
+
+      // Advance past the initial 1000ms delay to trigger first poll
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+
+      // First poll returns "running" — progress message should update
+      expect(screen.getByText("Cloning repo 1/2...")).toBeInTheDocument();
+
+      // Advance past the 2000ms poll interval to trigger second poll
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+
+      // Second poll returns "done" — should call refreshWorkspace and then onSuccess
+      expect(mockRefreshWorkspace).toHaveBeenCalledWith("ws-new-id");
+      expect(onSuccess).toHaveBeenCalledWith(MOCK_WORKSPACE_DATA, "clone-ws");
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it("shows error when async job fails", async () => {
+      mockCreateWorkspace.mockResolvedValue({
+        kind: "async",
+        jobId: "test-job-fail",
+      });
+
+      mockPollWorkspaceJob.mockResolvedValue({
+        status: "failed",
+        error: "Clone failed: repository not found",
+      });
+
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      await submitCloneForm(
+        "fail-clone-ws",
+        "https://github.com/example/nonexistent",
+      );
+
+      // Progress UI should be visible
+      expect(
+        screen.getByTestId("create-workspace-progress"),
+      ).toBeInTheDocument();
+
+      // Advance past the initial 1000ms delay to trigger poll
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+
+      // Poll returns "failed" — should show error and go back to form
+      expect(screen.getByTestId("create-workspace-error")).toBeInTheDocument();
+      expect(screen.getByTestId("create-workspace-error")).toHaveTextContent(
+        "Clone failed: repository not found",
+      );
+      expect(onSuccess).not.toHaveBeenCalled();
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("shows error when poll connection is lost", async () => {
+      mockCreateWorkspace.mockResolvedValue({
+        kind: "async",
+        jobId: "test-job-disconnect",
+      });
+
+      mockPollWorkspaceJob.mockRejectedValue(new Error("fetch failed"));
+
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      await submitCloneForm("lost-ws", "https://github.com/example/repo");
+
+      // Progress UI should be visible
+      expect(
+        screen.getByTestId("create-workspace-progress"),
+      ).toBeInTheDocument();
+
+      // Advance past the initial 1000ms delay to trigger poll
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+
+      // Poll throws — should show connection-lost error
+      expect(screen.getByTestId("create-workspace-error")).toBeInTheDocument();
+      expect(screen.getByTestId("create-workspace-error")).toHaveTextContent(
+        "Lost connection while creating workspace",
+      );
+    });
+
+    it("overlay click is disabled during async clone progress", async () => {
+      mockCreateWorkspace.mockResolvedValue({
+        kind: "async",
+        jobId: "test-job-overlay",
+      });
+
+      mockPollWorkspaceJob.mockImplementation(
+        () => new Promise<WorkspaceJobState>(() => {}),
+      );
+
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      await submitCloneForm("overlay-ws", "https://github.com/example/repo");
+
+      // Progress UI should be visible
+      expect(
+        screen.getByTestId("create-workspace-progress"),
+      ).toBeInTheDocument();
+
+      // Clicking overlay should NOT close the modal during progress
+      fireEvent.click(screen.getByTestId("create-workspace-overlay"));
+      expect(onClose).not.toHaveBeenCalled();
     });
   });
 

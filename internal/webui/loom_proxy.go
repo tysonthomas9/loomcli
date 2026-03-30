@@ -129,7 +129,7 @@ func newLoomProxy(defaultURL string) http.Handler {
 
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 		if debug {
-			log.Printf("loom proxy error %s %s: %v", r.Method, r.URL.String(), err)
+			log.Printf("loom proxy error %s %s: %v", r.Method, r.URL.Path, err)
 		}
 		w.WriteHeader(http.StatusBadGateway)
 	}
@@ -142,7 +142,7 @@ func newLoomProxy(defaultURL string) http.Handler {
 		}
 		req.Host = target.Host
 		if debug {
-			log.Printf("loom proxy %s %s", req.Method, req.URL.String())
+			log.Printf("loom proxy %s %s", req.Method, req.URL.Path)
 		}
 	}
 

@@ -29,6 +29,8 @@ export interface TabState {
   backendName: string;
   pinned?: boolean;
   crashReason?: string | null;
+  /** When set, this tab observes an agent's terminal via the agent WebSocket endpoint. */
+  agentName?: string;
 }
 
 /**

@@ -146,6 +146,30 @@ func validateAgentEntries(r *ValidationResult, agents []AgentEntry, roles map[st
 			}
 		}
 	}
+	validateDuplicateParents(r, agents)
+}
+
+// validateDuplicateParents rejects configs where multiple agents share the same
+// epic parent. Key is parent alone (NOT parent+role) because epicBranchName()
+// returns "epic/<parentID>" with no role differentiation — two agents on the
+// same epic compute the same target branch and deadlock at EnsureWorktreeBranch.
+func validateDuplicateParents(r *ValidationResult, agents []AgentEntry) {
+	seen := make(map[string]int) // parent epic ID -> first agent index
+	for i, a := range agents {
+		if a.Parent == "" {
+			continue
+		}
+		if prevIdx, ok := seen[a.Parent]; ok {
+			r.addError(fmt.Sprintf("agents[%d].parent", i), fmt.Sprintf(
+				"%q is already assigned to agents[%d] (%s); "+
+					"only one agent per epic parent is allowed because branch naming "+
+					"(epic/<parent-id>) does not differentiate by role — "+
+					"role-scoped branches (epic/<id>/<role>) would relax this constraint",
+				a.Parent, prevIdx, agents[prevIdx].Worktree))
+		} else {
+			seen[a.Parent] = i
+		}
+	}
 }
 
 // validateRoles checks role configs for valid prompt files and task filters.

@@ -175,10 +175,20 @@ export function useSSE(options: UseSSEOptions): UseSSEReturn {
       client.connect(sinceRef.current, sourceReposRef.current);
     }
 
+    // Destroy SSE client on sign-out to prevent stale connections.
+    // Using destroy() (not disconnect()) makes the client permanently inert,
+    // preventing any subsequent connect() calls from re-establishing a connection
+    // (e.g. from the sourceRepos change effect during teardown).
+    const handleSignOut = () => {
+      client.destroy();
+    };
+    window.addEventListener("auth-sign-out", handleSignOut);
+
     // Cleanup on unmount or workspaceId change
     return () => {
       mountedRef.current = false;
       prevSourceReposRef.current = undefined;
+      window.removeEventListener("auth-sign-out", handleSignOut);
       client.destroy();
       clientRef.current = null;
     };

@@ -531,7 +531,7 @@ func TestCleanUntrackedFiles_NoFiles(t *testing.T) {
 	mock := NewCommandMock(t, []CommandStub{{
 		Dir:    "/test/worktree",
 		Name:   "git",
-		Args:   []string{"clean", "-fdn"},
+		Args:   []string{"clean", "-fdn", "--exclude=.beads", "--exclude=.loom", "--exclude=sessions", "--exclude=loom.yaml", "--exclude=AGENTS.md"},
 		Stdout: "",
 		Err:    nil,
 	}})
@@ -546,7 +546,7 @@ func TestCleanUntrackedFiles_WithForce(t *testing.T) {
 	mock := NewCommandMock(t, []CommandStub{{
 		Dir:    "/test/worktree",
 		Name:   "git",
-		Args:   []string{"clean", "-fdn"},
+		Args:   []string{"clean", "-fdn", "--exclude=.beads", "--exclude=.loom", "--exclude=sessions", "--exclude=loom.yaml", "--exclude=AGENTS.md"},
 		Stdout: "Would remove test.txt\nWould remove screenshots/\n",
 		Err:    nil,
 	}})
@@ -554,7 +554,7 @@ func TestCleanUntrackedFiles_WithForce(t *testing.T) {
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{{
 		Dir:  "/test/worktree",
-		Args: []string{"clean", "-fd"},
+		Args: []string{"clean", "-fd", "--exclude=.beads", "--exclude=.loom", "--exclude=sessions", "--exclude=loom.yaml", "--exclude=AGENTS.md"},
 		Err:  nil,
 	}})
 	outputMock.Install()
@@ -567,7 +567,7 @@ func TestCleanUntrackedFiles_DryRunFails(t *testing.T) {
 	mock := NewCommandMock(t, []CommandStub{{
 		Dir:    "/test/worktree",
 		Name:   "git",
-		Args:   []string{"clean", "-fdn"},
+		Args:   []string{"clean", "-fdn", "--exclude=.beads", "--exclude=.loom", "--exclude=sessions", "--exclude=loom.yaml", "--exclude=AGENTS.md"},
 		Stdout: "",
 		Stderr: "error: not a git repo\n",
 		Err:    errors.New("exit status 128"),
@@ -582,7 +582,7 @@ func TestCleanUntrackedFiles_CleanFails(t *testing.T) {
 	mock := NewCommandMock(t, []CommandStub{{
 		Dir:    "/test/worktree",
 		Name:   "git",
-		Args:   []string{"clean", "-fdn"},
+		Args:   []string{"clean", "-fdn", "--exclude=.beads", "--exclude=.loom", "--exclude=sessions", "--exclude=loom.yaml", "--exclude=AGENTS.md"},
 		Stdout: "Would remove test.txt\n",
 		Err:    nil,
 	}})
@@ -590,7 +590,7 @@ func TestCleanUntrackedFiles_CleanFails(t *testing.T) {
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{{
 		Dir:  "/test/worktree",
-		Args: []string{"clean", "-fd"},
+		Args: []string{"clean", "-fd", "--exclude=.beads", "--exclude=.loom", "--exclude=sessions", "--exclude=loom.yaml", "--exclude=AGENTS.md"},
 		Err:  errors.New("Permission denied"),
 	}})
 	outputMock.Install()
@@ -805,7 +805,7 @@ func TestRecoverWorktree_NoLock(t *testing.T) {
 		{
 			Dir:    tmpDir,
 			Name:   "git",
-			Args:   []string{"clean", "-fdn"},
+			Args:   []string{"clean", "-fdn", "--exclude=.beads", "--exclude=.loom", "--exclude=sessions", "--exclude=loom.yaml", "--exclude=AGENTS.md"},
 			Stdout: "",
 			Err:    nil,
 		},
@@ -845,7 +845,7 @@ func TestRecoverWorktree_StaleLock(t *testing.T) {
 		{
 			Dir:    tmpDir,
 			Name:   "git",
-			Args:   []string{"clean", "-fdn"},
+			Args:   []string{"clean", "-fdn", "--exclude=.beads", "--exclude=.loom", "--exclude=sessions", "--exclude=loom.yaml", "--exclude=AGENTS.md"},
 			Stdout: "",
 			Err:    nil,
 		},
@@ -893,7 +893,7 @@ func TestRecoverWorktree_EmptyAgentName(t *testing.T) {
 		{
 			Dir:    tmpDir,
 			Name:   "git",
-			Args:   []string{"clean", "-fdn"},
+			Args:   []string{"clean", "-fdn", "--exclude=.beads", "--exclude=.loom", "--exclude=sessions", "--exclude=loom.yaml", "--exclude=AGENTS.md"},
 			Stdout: "",
 			Err:    nil,
 		},
@@ -1224,15 +1224,15 @@ func TestCleanUntrackedFiles_WorkspaceMode(t *testing.T) {
 		// DiscoverWorktrees: GetCurrentBranch
 		{Dir: repo1Path, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "main\n"},
 		{Dir: repo2Path, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "main\n"},
-		// GitCleanDryRun for each repo
-		{Dir: repo1Path, Name: "git", Args: []string{"clean", "-fdn"}, Stdout: "Would remove file1.txt\n"},
-		{Dir: repo2Path, Name: "git", Args: []string{"clean", "-fdn"}, Stdout: "Would remove file2.txt\n"},
+		// GitCleanDryRunExclude for each repo
+		{Dir: repo1Path, Name: "git", Args: []string{"clean", "-fdn", "--exclude=.beads", "--exclude=.loom", "--exclude=sessions", "--exclude=loom.yaml", "--exclude=AGENTS.md"}, Stdout: "Would remove file1.txt\n"},
+		{Dir: repo2Path, Name: "git", Args: []string{"clean", "-fdn", "--exclude=.beads", "--exclude=.loom", "--exclude=sessions", "--exclude=loom.yaml", "--exclude=AGENTS.md"}, Stdout: "Would remove file2.txt\n"},
 	})
 	mock.Install()
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
-		{Dir: repo1Path, Args: []string{"clean", "-fd"}},
-		{Dir: repo2Path, Args: []string{"clean", "-fd"}},
+		{Dir: repo1Path, Args: []string{"clean", "-fd", "--exclude=.beads", "--exclude=.loom", "--exclude=sessions", "--exclude=loom.yaml", "--exclude=AGENTS.md"}},
+		{Dir: repo2Path, Args: []string{"clean", "-fd", "--exclude=.beads", "--exclude=.loom", "--exclude=sessions", "--exclude=loom.yaml", "--exclude=AGENTS.md"}},
 	})
 	outputMock.Install()
 
@@ -1271,9 +1271,9 @@ func TestCleanUntrackedFiles_WorkspaceMode_NoUntrackedInAnyRepo(t *testing.T) {
 		// DiscoverWorktrees: GetCurrentBranch
 		{Dir: repo1Path, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "main\n"},
 		{Dir: repo2Path, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "main\n"},
-		// GitCleanDryRun returns empty for both
-		{Dir: repo1Path, Name: "git", Args: []string{"clean", "-fdn"}, Stdout: ""},
-		{Dir: repo2Path, Name: "git", Args: []string{"clean", "-fdn"}, Stdout: ""},
+		// GitCleanDryRunExclude returns empty for both
+		{Dir: repo1Path, Name: "git", Args: []string{"clean", "-fdn", "--exclude=.beads", "--exclude=.loom", "--exclude=sessions", "--exclude=loom.yaml", "--exclude=AGENTS.md"}, Stdout: ""},
+		{Dir: repo2Path, Name: "git", Args: []string{"clean", "-fdn", "--exclude=.beads", "--exclude=.loom", "--exclude=sessions", "--exclude=loom.yaml", "--exclude=AGENTS.md"}, Stdout: ""},
 	})
 	mock.Install()
 
@@ -1316,15 +1316,15 @@ func TestCleanUntrackedFiles_WorkspaceMode_PartialUntracked(t *testing.T) {
 		// DiscoverWorktrees: GetCurrentBranch
 		{Dir: repo1Path, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "main\n"},
 		{Dir: repo2Path, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "main\n"},
-		// GitCleanDryRun: repo1 has files, repo2 also has files
-		{Dir: repo1Path, Name: "git", Args: []string{"clean", "-fdn"}, Stdout: "Would remove leftover.txt\n"},
-		{Dir: repo2Path, Name: "git", Args: []string{"clean", "-fdn"}, Stdout: "Would remove other.txt\n"},
+		// GitCleanDryRunExclude: repo1 has files, repo2 also has files
+		{Dir: repo1Path, Name: "git", Args: []string{"clean", "-fdn", "--exclude=.beads", "--exclude=.loom", "--exclude=sessions", "--exclude=loom.yaml", "--exclude=AGENTS.md"}, Stdout: "Would remove leftover.txt\n"},
+		{Dir: repo2Path, Name: "git", Args: []string{"clean", "-fdn", "--exclude=.beads", "--exclude=.loom", "--exclude=sessions", "--exclude=loom.yaml", "--exclude=AGENTS.md"}, Stdout: "Would remove other.txt\n"},
 	})
 	mock.Install()
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
-		{Dir: repo1Path, Args: []string{"clean", "-fd"}},
-		{Dir: repo2Path, Args: []string{"clean", "-fd"}},
+		{Dir: repo1Path, Args: []string{"clean", "-fd", "--exclude=.beads", "--exclude=.loom", "--exclude=sessions", "--exclude=loom.yaml", "--exclude=AGENTS.md"}},
+		{Dir: repo2Path, Args: []string{"clean", "-fd", "--exclude=.beads", "--exclude=.loom", "--exclude=sessions", "--exclude=loom.yaml", "--exclude=AGENTS.md"}},
 	})
 	outputMock.Install()
 
@@ -1373,8 +1373,8 @@ func TestRecoverWorktree_WorkspaceStaleLock(t *testing.T) {
 	mock := NewCommandMock(t, []CommandStub{
 		// cleanUntrackedFiles: DiscoverWorktrees calls GetCurrentBranch
 		{Dir: repoDir, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "main\n"},
-		// cleanUntrackedFiles: GitCleanDryRun
-		{Dir: repoDir, Name: "git", Args: []string{"clean", "-fdn"}, Stdout: ""},
+		// cleanUntrackedFiles: GitCleanDryRunExclude
+		{Dir: repoDir, Name: "git", Args: []string{"clean", "-fdn", "--exclude=.beads", "--exclude=.loom", "--exclude=sessions", "--exclude=loom.yaml", "--exclude=AGENTS.md"}, Stdout: ""},
 	})
 	mock.Install()
 

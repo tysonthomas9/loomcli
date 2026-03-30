@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
-	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -159,11 +158,16 @@ func (d *Daemon) reloadAndReconcile() {
 	d.config = newConfig
 	d.configHash = newHash
 
-	// Release the lock before drain/add — these can block for a long time
-	// (drainAgent waits for superviseAgent goroutine to exit).
+	// Release reconcileMu before drain/add — drainAgent blocks on <-target.done,
+	// and superviseAgent calls configSnapshot() which acquires reconcileMu.RLock.
+	// Holding reconcileMu.Lock through drain would deadlock.
 	d.reconcileMu.Unlock()
 
 	slog.Info("config changed", "added", len(added), "removed", len(removed), "modified", len(modified))
+
+	// Serialize the drain/add phase to prevent concurrent reconciliations from
+	// racing on the same agent (e.g., double SIGTERM/SIGKILL, duplicate adds).
+	d.drainAddMu.Lock()
 
 	// Drain removed and modified agents
 	for _, entry := range removed {
@@ -189,6 +193,8 @@ func (d *Daemon) reloadAndReconcile() {
 		}
 	}
 
+	d.drainAddMu.Unlock()
+
 	if evt, err := events.NewEvent(events.ConfigReloaded, "", "", "", events.ConfigReloadedData{
 		Added:    len(added),
 		Removed:  len(removed),
@@ -213,7 +219,7 @@ func diffAgents(old, new []AgentEntry) (added, removed, modified []AgentEntry) {
 	for name, newEntry := range newMap {
 		if oldEntry, exists := oldMap[name]; !exists {
 			added = append(added, newEntry)
-		} else if !reflect.DeepEqual(oldEntry, newEntry) {
+		} else if !oldEntry.Equal(newEntry) {
 			modified = append(modified, newEntry)
 		}
 	}

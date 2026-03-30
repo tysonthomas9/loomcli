@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
+	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
 // TestComputeBackoff_OverflowProtection tests that computeBackoff handles
@@ -1697,6 +1698,99 @@ func TestAddAgent_DuplicateName(t *testing.T) {
 
 // TestAgentsMu_ConcurrentAccess verifies that Agents() and AgentCount() can be
 // called concurrently without data races. Run with `go test -race` to detect races.
+// TestBuildCommand_SessionEnvVars verifies that LOOM_SESSION_ID and LOOM_BEADS_DIR
+// are included in cmd.Env when ap.session is set, and omitted when nil.
+func TestBuildCommand_SessionEnvVars(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	t.Run("session set propagates env vars", func(t *testing.T) {
+		// Create a real session via sessions.NewStore + CreateSession
+		beadsDir := filepath.Join(tmpDir, "beads-set")
+		store, err := sessions.NewStore(beadsDir)
+		if err != nil {
+			t.Fatalf("NewStore error: %v", err)
+		}
+		sess, err := store.CreateSession(sessions.CreateOptions{
+			AgentName: "falcon",
+			Backend:   "claude",
+			Prompt:    "test session env propagation",
+		})
+		if err != nil {
+			t.Fatalf("CreateSession error: %v", err)
+		}
+
+		d := &Daemon{
+			config:     &DaemonConfig{Daemon: DaemonSettings{}},
+			projectDir: tmpDir,
+		}
+		ap := &AgentProcess{
+			entry:        AgentEntry{Worktree: "falcon", Role: "plan"},
+			roleConfig:   RoleConfig{Description: "Built-in plan agent"},
+			worktreePath: tmpDir,
+			session:      sess,
+		}
+
+		cmd := d.buildCommand(ap)
+
+		// Verify LOOM_SESSION_ID is present with correct value
+		wantSessionEnv := "LOOM_SESSION_ID=" + sess.SessionID()
+		foundSession := false
+		for _, env := range cmd.Env {
+			if env == wantSessionEnv {
+				foundSession = true
+			}
+		}
+		if !foundSession {
+			t.Errorf("%s not found in cmd.Env", wantSessionEnv)
+		}
+
+		// Verify LOOM_BEADS_DIR is present
+		foundBeads := false
+		for _, env := range cmd.Env {
+			if len(env) > len("LOOM_BEADS_DIR=") && env[:len("LOOM_BEADS_DIR=")] == "LOOM_BEADS_DIR=" {
+				foundBeads = true
+			}
+		}
+		if !foundBeads {
+			t.Error("LOOM_BEADS_DIR not found in cmd.Env")
+		}
+	})
+
+	t.Run("nil session omits env vars", func(t *testing.T) {
+		// Clear any LOOM_SESSION_ID / LOOM_BEADS_DIR from the parent process
+		// environment so FilteredEnv() does not leak them into the test.
+		// t.Setenv handles restore-on-cleanup; Unsetenv removes them for the
+		// duration of this subtest.
+		for _, key := range []string{"LOOM_SESSION_ID", "LOOM_BEADS_DIR"} {
+			t.Setenv(key, "") // registers cleanup to restore original value
+			os.Unsetenv(key)  // actually remove from os.Environ()
+		}
+
+		d := &Daemon{
+			config:     &DaemonConfig{Daemon: DaemonSettings{}},
+			projectDir: tmpDir,
+		}
+		ap := &AgentProcess{
+			entry:        AgentEntry{Worktree: "hawk", Role: "task"},
+			roleConfig:   RoleConfig{Description: "Built-in task agent"},
+			worktreePath: tmpDir,
+			session:      nil, // no session
+		}
+
+		cmd := d.buildCommand(ap)
+
+		// Verify LOOM_SESSION_ID is NOT present
+		for _, env := range cmd.Env {
+			if len(env) >= len("LOOM_SESSION_ID=") && env[:len("LOOM_SESSION_ID=")] == "LOOM_SESSION_ID=" {
+				t.Errorf("LOOM_SESSION_ID should not be in cmd.Env when session is nil, got %q", env)
+			}
+			if len(env) >= len("LOOM_BEADS_DIR=") && env[:len("LOOM_BEADS_DIR=")] == "LOOM_BEADS_DIR=" {
+				t.Errorf("LOOM_BEADS_DIR should not be in cmd.Env when session is nil, got %q", env)
+			}
+		}
+	})
+}
+
 func TestAgentsMu_ConcurrentAccess(t *testing.T) {
 	d := &Daemon{
 		config: &DaemonConfig{},

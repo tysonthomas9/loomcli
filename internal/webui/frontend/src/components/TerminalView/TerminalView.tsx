@@ -68,6 +68,10 @@ interface TerminalViewProps {
   onEscape?: () => void;
   issueId?: string;
   onNavigateToSettings?: () => void;
+  /** When set, opens or focuses an agent's terminal tab. */
+  pendingAgentName?: string | undefined;
+  /** Called after pendingAgentName has been processed. */
+  onAgentNameConsumed?: (() => void) | undefined;
 }
 
 export function TerminalView({
@@ -79,6 +83,8 @@ export function TerminalView({
   onEscape,
   issueId,
   onNavigateToSettings,
+  pendingAgentName,
+  onAgentNameConsumed,
 }: TerminalViewProps): JSX.Element {
   const [tabs, setTabs] = useState<TabState[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>("");
@@ -159,6 +165,8 @@ export function TerminalView({
   activeTabIdRef.current = activeTabId;
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
+  const workspaceIdRef = useRef(workspaceId);
+  workspaceIdRef.current = workspaceId;
 
   // ARIA live region for screen reader announcements (useRef avoids re-renders)
   const liveRegionRef = useRef<HTMLDivElement>(null);
@@ -232,9 +240,12 @@ export function TerminalView({
     if (appliedRestoreRef.current || isRestoring || !restoredTabId) return;
     if (!initializedRef.current || tabs.length === 0) return;
     appliedRestoreRef.current = true;
+    // If useTabInit already set the correct tab (from sessionStorage), skip
+    // the redundant setActiveTabId to avoid a flicker-causing re-render.
+    if (restoredTabId === activeTabId) return;
     const match = tabs.find((t) => t.id === restoredTabId);
     if (match) setActiveTabId(restoredTabId);
-  }, [restoredTabId, isRestoring, tabs]);
+  }, [restoredTabId, isRestoring, tabs, activeTabId]);
 
   // Persist active tab to sessionStorage and server (debounced)
   const patchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -306,6 +317,46 @@ export function TerminalView({
     onIssueContextConsumed?.();
   }, [pendingIssueContext, tabs, createTab, onIssueContextConsumed]);
 
+  // Handle pending agent name: create or switch to agent terminal tab
+  useEffect(() => {
+    if (!pendingAgentName || !initializedRef.current) return;
+
+    const sessionName = `agent-${sanitizeSessionName(pendingAgentName)}`;
+
+    // Check if tab already exists — switch to it
+    const existingTab = tabs.find((t) => t.sessionName === sessionName);
+    if (existingTab) {
+      setActiveTabId(existingTab.id);
+      onAgentNameConsumed?.();
+      return;
+    }
+
+    // Max tabs check
+    if (tabs.length >= MAX_TABS) {
+      onAgentNameConsumed?.();
+      return;
+    }
+
+    // Create new agent terminal tab
+    const newTab: TabState = {
+      id: sessionName,
+      label: `agent-${pendingAgentName}`,
+      sessionName,
+      connectionState: "disconnected" as ConnectionState,
+      backendName: "agent",
+      agentName: pendingAgentName,
+    };
+    setTabs((prev) => [...prev, newTab]);
+    setActiveTabId(sessionName);
+
+    // Persist tab metadata (fire-and-forget)
+    createTab(sessionName, newTab.label, tabs.length).catch((err) =>
+      console.error(`Failed to persist agent tab ${sessionName}:`, err),
+    );
+
+    onAgentNameConsumed?.();
+  }, [pendingAgentName, tabs, createTab, onAgentNameConsumed]);
+
   // Seed the session when it connects for the first time
   const handleConnectionStateChange = useCallback(
     (tabId: string, state: ConnectionState, hasConnected: boolean) => {
@@ -326,24 +377,27 @@ export function TerminalView({
 
       // If this tab just connected and has pending seed data, seed it
       if (state === "connected") {
-        const tab = tabs.find((t) => t.id === tabId);
+        const tab = tabsRef.current.find((t) => t.id === tabId);
         if (tab && !seededSessionsRef.current.has(tab.sessionName)) {
           const seedCtx = pendingSeedRef.current.get(tab.sessionName);
           if (seedCtx) {
             seededSessionsRef.current.add(tab.sessionName);
             pendingSeedRef.current.delete(tab.sessionName);
-            seedTerminalSession(workspaceId, tab.sessionName, seedCtx).catch(
-              (err) =>
-                console.error(
-                  `Failed to seed terminal session ${tab.sessionName}:`,
-                  err,
-                ),
+            seedTerminalSession(
+              workspaceIdRef.current,
+              tab.sessionName,
+              seedCtx,
+            ).catch((err) =>
+              console.error(
+                `Failed to seed terminal session ${tab.sessionName}:`,
+                err,
+              ),
             );
           }
         }
       }
     },
-    [tabs],
+    [],
   );
 
   // Keyboard shortcuts (only when view is active)
@@ -807,6 +861,7 @@ export function TerminalView({
                 ? setFocusedRight
                 : undefined
           }
+          agentName={tab.agentName}
         />
         {tab.crashReason != null ? (
           <CrashOverlay

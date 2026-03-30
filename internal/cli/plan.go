@@ -100,29 +100,40 @@ func runPlan(cmd *cobra.Command, args []string) {
 		workspace, _ := ResolveActiveWorkspace()
 		prompt := GeneratePlanningPrompt(agentName, workspace, planParentID)
 
-		// Create session before invocation (non-fatal if store init fails)
-		sessStore, sessErr := sessions.NewStore(GetBeadsDir())
-		if sessErr != nil {
-			log.Printf("[plan] Warning: session store unavailable: %v", sessErr)
-		}
+		// Session: adopt parent-created session if available, else create our own
 		var sess *sessions.Session
-		if sessStore != nil {
-			sess, _ = sessStore.CreateSession(sessions.CreateOptions{
-				AgentName: agentName,
-				Backend:   ResolveBackendName(),
-				EpicID:    planParentID,
-				Prompt:    prompt,
-				Phase:     "planning",
-			})
-			if sess != nil {
-				SetActiveSessionEnv(GetBeadsDir(), sess.SessionID())
+		if inheritedSID := os.Getenv("LOOM_SESSION_ID"); inheritedSID != "" {
+			// Daemon parent created session — just set env for hook propagation.
+			// Daemon handles finalization after subprocess exits.
+			inheritedBeads := os.Getenv("LOOM_BEADS_DIR")
+			if inheritedBeads == "" {
+				inheritedBeads = GetBeadsDir()
+			}
+			SetActiveSessionEnv(inheritedBeads, inheritedSID)
+		} else {
+			// Standalone run (no daemon parent) — create our own session
+			sessStore, sessErr := sessions.NewStore(GetBeadsDir())
+			if sessErr != nil {
+				log.Printf("[plan] Warning: session store unavailable: %v", sessErr)
+			}
+			if sessStore != nil {
+				sess, _ = sessStore.CreateSession(sessions.CreateOptions{
+					AgentName: agentName,
+					Backend:   ResolveBackendName(),
+					EpicID:    planParentID,
+					Prompt:    prompt,
+					Phase:     "planning",
+				})
+				if sess != nil {
+					SetActiveSessionEnv(GetBeadsDir(), sess.SessionID())
+				}
 			}
 		}
 
 		beforeRef := captureHEADRef(worktreePath)
 		invokeErr := InvokeAgent(worktreePath, prompt, agentName) // Interactive mode, nice output
 
-		// Finalize session after invocation
+		// Finalize session after invocation (only in standalone mode)
 		if sess != nil {
 			exitCode := 0
 			if invokeErr != nil {

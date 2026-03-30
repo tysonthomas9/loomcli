@@ -876,3 +876,39 @@ func TestResolveMergeBaseDefault_FromWithTraversal(t *testing.T) {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
 	}
 }
+
+func TestValidateDiffPath_Table(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want bool
+	}{
+		// Valid paths
+		{"simple file", "main.go", true},
+		{"nested path", "subdir/file.go", true},
+		{"deeply nested", "a/b/c.txt", true},
+
+		// Reject empty
+		{"empty string", "", false},
+
+		// Reject absolute paths
+		{"absolute unix", "/etc/passwd", false},
+
+		// Reject traversal
+		{"dotdot only", "..", false},
+		{"dotdot prefix", "../secret", false},
+		{"deep traversal", "subdir/../../../etc/passwd", false},
+
+		// Reject dot path (current directory)
+		{"dot path", ".", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := validateDiffPath(tt.path)
+			if got != tt.want {
+				t.Errorf("validateDiffPath(%q) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+}

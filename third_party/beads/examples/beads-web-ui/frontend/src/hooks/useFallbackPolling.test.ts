@@ -154,7 +154,7 @@ describe('useFallbackPolling', () => {
       expect(result.current.isActive).toBe(true);
     });
 
-    it('isActive becomes false when wsState becomes connected', () => {
+    it('isActive becomes false when wsState becomes connected after grace period', () => {
       const onPoll = vi.fn();
       const { result, rerender } = renderHook(
         ({ wsState }) =>
@@ -162,6 +162,7 @@ describe('useFallbackPolling', () => {
             wsState,
             onPoll,
             activationThreshold: 1000,
+            recoveryGracePeriod: 1000,
           }),
         { initialProps: { wsState: 'reconnecting' as ConnectionState } }
       );
@@ -175,6 +176,14 @@ describe('useFallbackPolling', () => {
 
       // WebSocket reconnects
       rerender({ wsState: 'connected' });
+
+      // Still active during grace period
+      expect(result.current.isActive).toBe(true);
+
+      // Advance past grace period — sustained recovery deactivates polling
+      act(() => {
+        vi.advanceTimersByTime(1100);
+      });
 
       expect(result.current.isActive).toBe(false);
     });
@@ -845,7 +854,7 @@ describe('useFallbackPolling', () => {
       expect(result.current.timeUntilActive).toBe(5000);
     });
 
-    it('wsState flicker between states does not cause issues', () => {
+    it('wsState flicker between states resumes countdown from accumulated time', () => {
       const onPoll = vi.fn();
       const { result, rerender } = renderHook(
         ({ wsState }) =>
@@ -853,32 +862,66 @@ describe('useFallbackPolling', () => {
             wsState,
             onPoll,
             activationThreshold: 5000,
+            recoveryGracePeriod: 2000,
           }),
         { initialProps: { wsState: 'reconnecting' as ConnectionState } }
       );
 
-      // Start countdown
+      // Start countdown — accumulate 2000ms of degraded time
       act(() => {
         vi.advanceTimersByTime(2000);
       });
 
-      // Brief recovery
+      // Brief recovery (shorter than grace period)
       rerender({ wsState: 'connected' });
-      expect(result.current.timeUntilActive).toBeNull();
 
-      // Immediately back to reconnecting
+      // Immediately back to reconnecting (within grace period)
       rerender({ wsState: 'reconnecting' });
-      expect(result.current.timeUntilActive).toBe(5000);
 
-      // Full countdown should be required
+      // Should only need remaining 3000ms, not a full 5000ms restart
       act(() => {
-        vi.advanceTimersByTime(4000);
+        vi.advanceTimersByTime(3100);
+      });
+
+      expect(result.current.isActive).toBe(true);
+    });
+
+    it('recoveryGracePeriod=0 resets immediately on connected (backward compat)', () => {
+      const onPoll = vi.fn();
+      const { result, rerender } = renderHook(
+        ({ wsState }) =>
+          useFallbackPolling({
+            wsState,
+            onPoll,
+            activationThreshold: 5000,
+            recoveryGracePeriod: 0,
+          }),
+        { initialProps: { wsState: 'reconnecting' as ConnectionState } }
+      );
+
+      // Accumulate 3000ms degraded time
+      act(() => {
+        vi.advanceTimersByTime(3000);
+      });
+
+      // Brief connected — with grace=0, should fully reset
+      rerender({ wsState: 'connected' });
+
+      act(() => {
+        vi.advanceTimersByTime(0);
+      });
+
+      rerender({ wsState: 'reconnecting' });
+
+      // Should need full 5000ms again
+      act(() => {
+        vi.advanceTimersByTime(4900);
       });
 
       expect(result.current.isActive).toBe(false);
 
       act(() => {
-        vi.advanceTimersByTime(1100);
+        vi.advanceTimersByTime(200);
       });
 
       expect(result.current.isActive).toBe(true);
@@ -927,6 +970,203 @@ describe('useFallbackPolling', () => {
       });
 
       expect(onPoll).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // ============ Flapping connection tests ============
+
+  describe('flapping connection', () => {
+    it('polling activates despite rapid connected→reconnecting oscillation within threshold period', () => {
+      const onPoll = vi.fn();
+      const { result, rerender } = renderHook(
+        ({ wsState }) =>
+          useFallbackPolling({
+            wsState,
+            onPoll,
+            activationThreshold: 5000,
+            recoveryGracePeriod: 2000,
+          }),
+        { initialProps: { wsState: 'reconnecting' as ConnectionState } }
+      );
+
+      // Accumulate 1500ms of degraded time
+      act(() => {
+        vi.advanceTimersByTime(1500);
+      });
+
+      // Brief connected blip (< recoveryGracePeriod)
+      rerender({ wsState: 'connected' });
+      rerender({ wsState: 'reconnecting' });
+
+      // Need ~3500ms more to reach 5000ms total degraded time
+      act(() => {
+        vi.advanceTimersByTime(3600);
+      });
+
+      expect(result.current.isActive).toBe(true);
+      expect(onPoll).toHaveBeenCalled();
+    });
+
+    it('accumulated degraded time persists across brief connected blips', () => {
+      const onPoll = vi.fn();
+      const { result, rerender } = renderHook(
+        ({ wsState }) =>
+          useFallbackPolling({
+            wsState,
+            onPoll,
+            activationThreshold: 10000,
+            recoveryGracePeriod: 3000,
+          }),
+        { initialProps: { wsState: 'reconnecting' as ConnectionState } }
+      );
+
+      // First degraded period: 4000ms
+      act(() => {
+        vi.advanceTimersByTime(4000);
+      });
+
+      // Brief connected blip (500ms < 3000ms grace)
+      rerender({ wsState: 'connected' });
+      act(() => {
+        vi.advanceTimersByTime(500);
+      });
+      rerender({ wsState: 'reconnecting' });
+
+      // Second degraded period: 4000ms (total ~8500ms)
+      act(() => {
+        vi.advanceTimersByTime(4000);
+      });
+
+      // Brief connected blip (500ms < 3000ms grace)
+      rerender({ wsState: 'connected' });
+      act(() => {
+        vi.advanceTimersByTime(500);
+      });
+      rerender({ wsState: 'reconnecting' });
+
+      // Third degraded period: 2500ms (total ~11000ms, exceeds 10000ms threshold)
+      act(() => {
+        vi.advanceTimersByTime(2500);
+      });
+
+      expect(result.current.isActive).toBe(true);
+    });
+
+    it('sustained connected state (beyond grace period) fully resets degraded tracking', () => {
+      const onPoll = vi.fn();
+      const { result, rerender } = renderHook(
+        ({ wsState }) =>
+          useFallbackPolling({
+            wsState,
+            onPoll,
+            activationThreshold: 5000,
+            recoveryGracePeriod: 2000,
+          }),
+        { initialProps: { wsState: 'reconnecting' as ConnectionState } }
+      );
+
+      // Accumulate 3000ms degraded time
+      act(() => {
+        vi.advanceTimersByTime(3000);
+      });
+
+      // Sustained connected for 2500ms (exceeds 2000ms grace period)
+      rerender({ wsState: 'connected' });
+      act(() => {
+        vi.advanceTimersByTime(2500);
+      });
+
+      // Back to reconnecting — should be a fresh countdown
+      rerender({ wsState: 'reconnecting' });
+
+      // 4000ms — less than 5000ms threshold (fresh countdown)
+      act(() => {
+        vi.advanceTimersByTime(4000);
+      });
+
+      expect(result.current.isActive).toBe(false);
+
+      // 1100ms more — now exceeds fresh 5000ms threshold
+      act(() => {
+        vi.advanceTimersByTime(1100);
+      });
+
+      expect(result.current.isActive).toBe(true);
+    });
+
+    it('polling continues uninterrupted through brief connected blips when already active', async () => {
+      const onPoll = vi.fn().mockResolvedValue(undefined);
+      const { result, rerender } = renderHook(
+        ({ wsState }) =>
+          useFallbackPolling({
+            wsState,
+            onPoll,
+            activationThreshold: 1000,
+            pollInterval: 2000,
+            recoveryGracePeriod: 3000,
+          }),
+        { initialProps: { wsState: 'reconnecting' as ConnectionState } }
+      );
+
+      // Activate polling
+      await act(async () => {
+        vi.advanceTimersByTime(1100);
+        await Promise.resolve();
+      });
+
+      expect(result.current.isActive).toBe(true);
+      expect(onPoll).toHaveBeenCalledTimes(1);
+
+      // Brief connected blip (500ms < 3000ms grace)
+      rerender({ wsState: 'connected' });
+      await act(async () => {
+        vi.advanceTimersByTime(500);
+        await Promise.resolve();
+      });
+      rerender({ wsState: 'reconnecting' });
+
+      // Advance past poll interval — polling should continue
+      await act(async () => {
+        vi.advanceTimersByTime(2000);
+        await Promise.resolve();
+      });
+
+      expect(onPoll).toHaveBeenCalledTimes(2);
+    });
+
+    it('recovery grace period default is 5000ms', () => {
+      const onPoll = vi.fn();
+      const { result, rerender } = renderHook(
+        ({ wsState }) =>
+          useFallbackPolling({
+            wsState,
+            onPoll,
+            activationThreshold: 10000,
+            // no recoveryGracePeriod — should default to 5000ms
+          }),
+        { initialProps: { wsState: 'reconnecting' as ConnectionState } }
+      );
+
+      // Accumulate 6000ms degraded time
+      act(() => {
+        vi.advanceTimersByTime(6000);
+      });
+
+      // Connected for 4500ms (under default 5000ms grace)
+      rerender({ wsState: 'connected' });
+      act(() => {
+        vi.advanceTimersByTime(4500);
+      });
+
+      // Back to reconnecting
+      rerender({ wsState: 'reconnecting' });
+
+      // 4500ms more (total degraded ~10500ms, exceeds 10000ms threshold)
+      act(() => {
+        vi.advanceTimersByTime(4500);
+      });
+
+      expect(result.current.isActive).toBe(true);
     });
   });
 });

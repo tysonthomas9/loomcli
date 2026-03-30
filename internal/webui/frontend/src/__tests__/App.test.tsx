@@ -186,10 +186,17 @@ vi.mock("@/components/MonitorDashboard", () => ({
 
 // Mock TerminalView to avoid xterm.js browser dependencies in jsdom
 vi.mock("@/components/TerminalView", () => ({
-  TerminalView: ({ isActive }: { isActive?: boolean }) => (
+  TerminalView: ({
+    isActive,
+    onEscape,
+  }: {
+    isActive?: boolean;
+    onEscape?: () => void;
+  }) => (
     <div
       data-testid="terminal-view"
       data-active={isActive ? "true" : undefined}
+      onClick={onEscape}
     />
   ),
 }));
@@ -359,6 +366,15 @@ vi.mock("@/hooks", () => ({
     isMultiRepo: false,
   })),
   useWorkspaceState: vi.fn(),
+  useElapsedTime: vi.fn(() => "0s"),
+  useJobPolling: vi.fn(() => ({
+    isPolling: false,
+    progress: "",
+    elapsed: "0s",
+    error: "",
+    startJob: vi.fn(),
+    reset: vi.fn(),
+  })),
   useFocusReturn: vi.fn(),
   useFocusTrap: vi.fn(),
   useRepoFilterParam: vi.fn(() => [null, vi.fn()]),
@@ -2267,6 +2283,71 @@ describe("App", () => {
 
       const terminalView = screen.getByTestId("terminal-view");
       expect(terminalView).not.toHaveAttribute("data-active");
+    });
+
+    describe("previousView tracking", () => {
+      it("escape from terminal returns to kanban", () => {
+        const mockReturn = createMockUseIssuesReturn({});
+        vi.mocked(useIssues).mockReturnValue(mockReturn);
+        mockUseViewState.mockReturnValue(createViewStateReturn("kanban"));
+
+        const { rerender } = render(<App />);
+
+        mockUseViewState.mockReturnValue(createViewStateReturn("terminal"));
+        rerender(<App />);
+
+        fireEvent.click(screen.getByTestId("terminal-view"));
+        expect(mockSetActiveView).toHaveBeenCalledWith("kanban");
+      });
+
+      it("escape from terminal returns to table when entered from table", () => {
+        const mockReturn = createMockUseIssuesReturn({});
+        vi.mocked(useIssues).mockReturnValue(mockReturn);
+        mockUseViewState.mockReturnValue(createViewStateReturn("table"));
+
+        const { rerender } = render(<App />);
+
+        mockUseViewState.mockReturnValue(createViewStateReturn("terminal"));
+        rerender(<App />);
+
+        fireEvent.click(screen.getByTestId("terminal-view"));
+        expect(mockSetActiveView).toHaveBeenCalledWith("table");
+      });
+
+      it("re-render on terminal does not change previousView", () => {
+        const mockReturn = createMockUseIssuesReturn({});
+        vi.mocked(useIssues).mockReturnValue(mockReturn);
+        mockUseViewState.mockReturnValue(createViewStateReturn("kanban"));
+
+        const { rerender } = render(<App />);
+
+        mockUseViewState.mockReturnValue(createViewStateReturn("terminal"));
+        rerender(<App />);
+        rerender(<App />);
+
+        fireEvent.click(screen.getByTestId("terminal-view"));
+        expect(mockSetActiveView).toHaveBeenCalledWith("kanban");
+      });
+
+      it("settings does not overwrite previousView", () => {
+        const mockReturn = createMockUseIssuesReturn({});
+        vi.mocked(useIssues).mockReturnValue(mockReturn);
+        mockUseViewState.mockReturnValue(createViewStateReturn("kanban"));
+
+        const { rerender } = render(<App />);
+
+        mockUseViewState.mockReturnValue(createViewStateReturn("terminal"));
+        rerender(<App />);
+
+        mockUseViewState.mockReturnValue(createViewStateReturn("settings"));
+        rerender(<App />);
+
+        mockUseViewState.mockReturnValue(createViewStateReturn("terminal"));
+        rerender(<App />);
+
+        fireEvent.click(screen.getByTestId("terminal-view"));
+        expect(mockSetActiveView).toHaveBeenCalledWith("kanban");
+      });
     });
   });
 

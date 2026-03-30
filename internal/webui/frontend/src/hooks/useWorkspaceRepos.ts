@@ -67,8 +67,9 @@ export function useWorkspaceRepos(): UseWorkspaceReposReturn {
   const nextRetryAtRef = useRef<number | null>(null);
   const fetchDataRef = useRef<() => Promise<void>>(async () => {});
 
-  // Unmount guard — ref starts true, set false on cleanup
+  // Unmount guard — reset true on (re)mount, false on cleanup
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
       mountedRef.current = false;
     };
