@@ -8,11 +8,13 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/workspaceerrors"
 )
 
 func TestHandleWorkspaceCreate_EmptyType_Success(t *testing.T) {
 	createCalled := false
-	createFn := func(ctx context.Context, req WorkspaceCreateRequest) error {
+	createFn := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
 		createCalled = true
 		if req.Name != "my-ws" {
 			t.Errorf("expected name %q, got %q", "my-ws", req.Name)
@@ -23,10 +25,10 @@ func TestHandleWorkspaceCreate_EmptyType_Success(t *testing.T) {
 		if len(req.Repos) != 1 || req.Repos[0] != "/home/user/repo" {
 			t.Errorf("expected repos [/home/user/repo], got %v", req.Repos)
 		}
-		return nil
+		return WorkspaceCreateResult{}, nil
 	}
 
-	handler := handleWorkspaceCreate(createFn, mockWorkspaceConfigFn)
+	handler := handleWorkspaceCreate(createFn, mockWorkspaceConfigFn, nil)
 
 	body := strings.NewReader(`{"name":"my-ws","type":"empty","repos":["/home/user/repo"]}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
@@ -57,7 +59,7 @@ func TestHandleWorkspaceCreate_EmptyType_Success(t *testing.T) {
 
 func TestHandleWorkspaceCreate_CloneType_Success(t *testing.T) {
 	createCalled := false
-	createFn := func(ctx context.Context, req WorkspaceCreateRequest) error {
+	createFn := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
 		createCalled = true
 		if req.Name != "cloned-ws" {
 			t.Errorf("expected name %q, got %q", "cloned-ws", req.Name)
@@ -71,10 +73,10 @@ func TestHandleWorkspaceCreate_CloneType_Success(t *testing.T) {
 		if req.Branch != "main" {
 			t.Errorf("expected branch %q, got %q", "main", req.Branch)
 		}
-		return nil
+		return WorkspaceCreateResult{}, nil
 	}
 
-	handler := handleWorkspaceCreate(createFn, mockWorkspaceConfigFn)
+	handler := handleWorkspaceCreate(createFn, mockWorkspaceConfigFn, nil)
 
 	body := strings.NewReader(`{"name":"cloned-ws","type":"clone","clone_url":"https://github.com/user/repo.git","branch":"main"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
@@ -98,14 +100,14 @@ func TestHandleWorkspaceCreate_CloneType_Success(t *testing.T) {
 }
 
 func TestHandleWorkspaceCreate_CloneType_GitAtURL(t *testing.T) {
-	createFn := func(ctx context.Context, req WorkspaceCreateRequest) error {
+	createFn := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
 		if req.CloneURL != "git@github.com:user/repo.git" {
 			t.Errorf("expected clone_url %q, got %q", "git@github.com:user/repo.git", req.CloneURL)
 		}
-		return nil
+		return WorkspaceCreateResult{}, nil
 	}
 
-	handler := handleWorkspaceCreate(createFn, nil)
+	handler := handleWorkspaceCreate(createFn, nil, nil)
 
 	body := strings.NewReader(`{"name":"ssh-ws","type":"clone","clone_url":"git@github.com:user/repo.git"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
@@ -118,12 +120,12 @@ func TestHandleWorkspaceCreate_CloneType_GitAtURL(t *testing.T) {
 }
 
 func TestHandleWorkspaceCreate_TemplateType_NotImplemented(t *testing.T) {
-	createFn := func(ctx context.Context, req WorkspaceCreateRequest) error {
+	createFn := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
 		t.Fatal("createFn should not be called for template type")
-		return nil
+		return WorkspaceCreateResult{}, nil
 	}
 
-	handler := handleWorkspaceCreate(createFn, nil)
+	handler := handleWorkspaceCreate(createFn, nil, nil)
 
 	body := strings.NewReader(`{"name":"tpl-ws","type":"template"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
@@ -145,12 +147,12 @@ func TestHandleWorkspaceCreate_TemplateType_NotImplemented(t *testing.T) {
 }
 
 func TestHandleWorkspaceCreate_NameValidation(t *testing.T) {
-	createFn := func(ctx context.Context, req WorkspaceCreateRequest) error {
+	createFn := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
 		t.Fatal("createFn should not be called for invalid name")
-		return nil
+		return WorkspaceCreateResult{}, nil
 	}
 
-	handler := handleWorkspaceCreate(createFn, nil)
+	handler := handleWorkspaceCreate(createFn, nil, nil)
 
 	tests := []struct {
 		name       string
@@ -197,15 +199,15 @@ func TestHandleWorkspaceCreate_NameValidation(t *testing.T) {
 	}
 
 	// Override createFn for the 64-char success case
-	successCreateFn := func(ctx context.Context, req WorkspaceCreateRequest) error {
-		return nil
+	successCreateFn := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
+		return WorkspaceCreateResult{}, nil
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var h http.HandlerFunc
 			if tt.wantStatus == http.StatusCreated {
-				h = handleWorkspaceCreate(successCreateFn, nil)
+				h = handleWorkspaceCreate(successCreateFn, nil, nil)
 			} else {
 				h = handler
 			}
@@ -233,12 +235,12 @@ func TestHandleWorkspaceCreate_NameValidation(t *testing.T) {
 }
 
 func TestHandleWorkspaceCreate_URLValidation(t *testing.T) {
-	createFn := func(ctx context.Context, req WorkspaceCreateRequest) error {
+	createFn := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
 		t.Fatal("createFn should not be called for invalid URL")
-		return nil
+		return WorkspaceCreateResult{}, nil
 	}
 
-	handler := handleWorkspaceCreate(createFn, nil)
+	handler := handleWorkspaceCreate(createFn, nil, nil)
 
 	tests := []struct {
 		name     string
@@ -275,12 +277,12 @@ func TestHandleWorkspaceCreate_URLValidation(t *testing.T) {
 }
 
 func TestHandleWorkspaceCreate_MissingRequiredFields(t *testing.T) {
-	createFn := func(ctx context.Context, req WorkspaceCreateRequest) error {
+	createFn := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
 		t.Fatal("createFn should not be called for missing required fields")
-		return nil
+		return WorkspaceCreateResult{}, nil
 	}
 
-	handler := handleWorkspaceCreate(createFn, nil)
+	handler := handleWorkspaceCreate(createFn, nil, nil)
 
 	tests := []struct {
 		name      string
@@ -332,11 +334,11 @@ func TestHandleWorkspaceCreate_MissingRequiredFields(t *testing.T) {
 }
 
 func TestHandleWorkspaceCreate_CreateFnError(t *testing.T) {
-	createFn := func(ctx context.Context, req WorkspaceCreateRequest) error {
-		return fmt.Errorf("disk full")
+	createFn := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
+		return WorkspaceCreateResult{}, fmt.Errorf("disk full")
 	}
 
-	handler := handleWorkspaceCreate(createFn, nil)
+	handler := handleWorkspaceCreate(createFn, nil, nil)
 
 	body := strings.NewReader(`{"name":"ws","type":"empty","repos":["/a"]}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
@@ -360,7 +362,7 @@ func TestHandleWorkspaceCreate_CreateFnError(t *testing.T) {
 }
 
 func TestHandleWorkspaceCreate_NilCreateFn(t *testing.T) {
-	handler := handleWorkspaceCreate(nil, nil)
+	handler := handleWorkspaceCreate(nil, nil, nil)
 
 	body := strings.NewReader(`{"name":"ws","type":"empty","repos":["/a"]}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
@@ -384,12 +386,12 @@ func TestHandleWorkspaceCreate_NilCreateFn(t *testing.T) {
 }
 
 func TestHandleWorkspaceCreate_RequestBodyTooLarge(t *testing.T) {
-	createFn := func(ctx context.Context, req WorkspaceCreateRequest) error {
+	createFn := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
 		t.Fatal("createFn should not be called for oversized body")
-		return nil
+		return WorkspaceCreateResult{}, nil
 	}
 
-	handler := handleWorkspaceCreate(createFn, nil)
+	handler := handleWorkspaceCreate(createFn, nil, nil)
 
 	// Create a JSON body larger than 1MB (maxRequestBody)
 	largeBody := `{"name":"` + strings.Repeat("a", 1<<20+1) + `"}`
@@ -412,12 +414,12 @@ func TestHandleWorkspaceCreate_RequestBodyTooLarge(t *testing.T) {
 }
 
 func TestHandleWorkspaceCreate_InvalidJSON(t *testing.T) {
-	createFn := func(ctx context.Context, req WorkspaceCreateRequest) error {
+	createFn := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
 		t.Fatal("createFn should not be called for invalid JSON")
-		return nil
+		return WorkspaceCreateResult{}, nil
 	}
 
-	handler := handleWorkspaceCreate(createFn, nil)
+	handler := handleWorkspaceCreate(createFn, nil, nil)
 
 	body := strings.NewReader(`{invalid json}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
@@ -439,12 +441,12 @@ func TestHandleWorkspaceCreate_InvalidJSON(t *testing.T) {
 }
 
 func TestHandleWorkspaceCreate_MissingType(t *testing.T) {
-	createFn := func(ctx context.Context, req WorkspaceCreateRequest) error {
+	createFn := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
 		t.Fatal("createFn should not be called for missing type")
-		return nil
+		return WorkspaceCreateResult{}, nil
 	}
 
-	handler := handleWorkspaceCreate(createFn, nil)
+	handler := handleWorkspaceCreate(createFn, nil, nil)
 
 	body := strings.NewReader(`{"name":"ws"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
@@ -466,12 +468,12 @@ func TestHandleWorkspaceCreate_MissingType(t *testing.T) {
 }
 
 func TestHandleWorkspaceCreate_InvalidType(t *testing.T) {
-	createFn := func(ctx context.Context, req WorkspaceCreateRequest) error {
+	createFn := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
 		t.Fatal("createFn should not be called for invalid type")
-		return nil
+		return WorkspaceCreateResult{}, nil
 	}
 
-	handler := handleWorkspaceCreate(createFn, nil)
+	handler := handleWorkspaceCreate(createFn, nil, nil)
 
 	body := strings.NewReader(`{"name":"ws","type":"foobar"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
@@ -493,11 +495,11 @@ func TestHandleWorkspaceCreate_InvalidType(t *testing.T) {
 }
 
 func TestHandleWorkspaceCreate_SuccessWithWorkspaceConfigFn(t *testing.T) {
-	createFn := func(ctx context.Context, req WorkspaceCreateRequest) error {
-		return nil
+	createFn := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
+		return WorkspaceCreateResult{}, nil
 	}
 
-	handler := handleWorkspaceCreate(createFn, mockWorkspaceConfigFn)
+	handler := handleWorkspaceCreate(createFn, mockWorkspaceConfigFn, nil)
 
 	body := strings.NewReader(`{"name":"ws","type":"empty","repos":["/a"]}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
@@ -524,11 +526,11 @@ func TestHandleWorkspaceCreate_SuccessWithWorkspaceConfigFn(t *testing.T) {
 }
 
 func TestHandleWorkspaceCreate_SuccessNilWorkspaceConfigFn(t *testing.T) {
-	createFn := func(ctx context.Context, req WorkspaceCreateRequest) error {
-		return nil
+	createFn := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
+		return WorkspaceCreateResult{}, nil
 	}
 
-	handler := handleWorkspaceCreate(createFn, nil)
+	handler := handleWorkspaceCreate(createFn, nil, nil)
 
 	body := strings.NewReader(`{"name":"ws","type":"empty","repos":["/a"]}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
@@ -552,15 +554,15 @@ func TestHandleWorkspaceCreate_SuccessNilWorkspaceConfigFn(t *testing.T) {
 }
 
 func TestHandleWorkspaceCreate_ContextTimeout(t *testing.T) {
-	createFn := func(ctx context.Context, req WorkspaceCreateRequest) error {
+	createFn := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
 		// Simulate a timeout by canceling the context before returning
 		// The handler wraps r.Context() with workspaceCreateTimeout,
 		// so we simulate the createFn detecting a cancelled context.
 		<-ctx.Done()
-		return ctx.Err()
+		return WorkspaceCreateResult{}, ctx.Err()
 	}
 
-	handler := handleWorkspaceCreate(createFn, nil)
+	handler := handleWorkspaceCreate(createFn, nil, nil)
 
 	body := strings.NewReader(`{"name":"ws","type":"empty","repos":["/a"]}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
@@ -684,6 +686,145 @@ func TestValidateWorkspaceCreateRequest(t *testing.T) {
 			}
 			if tt.wantError != "" && !strings.Contains(msg, tt.wantError) {
 				t.Errorf("expected %q in error, got: %s", tt.wantError, msg)
+			}
+		})
+	}
+}
+
+func TestClassifyWorkspaceCreateError(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantMsg    string
+	}{
+		{
+			name:       "AlreadyExists returns 409",
+			err:        workspaceerrors.New(workspaceerrors.AlreadyExists, "workspace already exists at /tmp/ws", nil),
+			wantStatus: http.StatusConflict,
+			wantMsg:    "workspace already exists at /tmp/ws",
+		},
+		{
+			name:       "PathNotFound returns 422",
+			err:        workspaceerrors.New(workspaceerrors.PathNotFound, "parent directory does not exist", nil),
+			wantStatus: http.StatusUnprocessableEntity,
+			wantMsg:    "parent directory does not exist",
+		},
+		{
+			name:       "NotGitRepo returns 422",
+			err:        workspaceerrors.New(workspaceerrors.NotGitRepo, "not a git repository", nil),
+			wantStatus: http.StatusUnprocessableEntity,
+			wantMsg:    "not a git repository",
+		},
+		{
+			name:       "GitFailed returns 422",
+			err:        workspaceerrors.New(workspaceerrors.GitFailed, "git clone failed", fmt.Errorf("exit status 128")),
+			wantStatus: http.StatusUnprocessableEntity,
+			wantMsg:    "git clone failed",
+		},
+		{
+			name:       "SecurityViolation returns 403",
+			err:        workspaceerrors.New(workspaceerrors.SecurityViolation, "path traversal detected", nil),
+			wantStatus: http.StatusForbidden,
+			wantMsg:    "path traversal detected",
+		},
+		{
+			name:       "ConfigFailed returns 500 with specific message",
+			err:        workspaceerrors.New(workspaceerrors.ConfigFailed, "failed to write config", fmt.Errorf("permission denied")),
+			wantStatus: http.StatusInternalServerError,
+			wantMsg:    "failed to write config",
+		},
+		{
+			name:       "unknown error returns 500 generic",
+			err:        fmt.Errorf("disk full"),
+			wantStatus: http.StatusInternalServerError,
+			wantMsg:    "failed to create workspace",
+		},
+		{
+			name:       "wrapped CreateError unwraps correctly",
+			err:        fmt.Errorf("outer: %w", workspaceerrors.New(workspaceerrors.AlreadyExists, "workspace exists", nil)),
+			wantStatus: http.StatusConflict,
+			wantMsg:    "workspace exists",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			status, msg := classifyWorkspaceCreateError(tt.err)
+			if status != tt.wantStatus {
+				t.Errorf("expected status %d, got %d", tt.wantStatus, status)
+			}
+			if msg != tt.wantMsg {
+				t.Errorf("expected message %q, got %q", tt.wantMsg, msg)
+			}
+		})
+	}
+}
+
+func TestHandleWorkspaceCreate_ClassifiedErrors(t *testing.T) {
+	tests := []struct {
+		name       string
+		createErr  error
+		wantStatus int
+		wantError  string
+	}{
+		{
+			name:       "AlreadyExists returns 409",
+			createErr:  workspaceerrors.New(workspaceerrors.AlreadyExists, "workspace already exists", nil),
+			wantStatus: http.StatusConflict,
+			wantError:  "workspace already exists",
+		},
+		{
+			name:       "PathNotFound returns 422",
+			createErr:  workspaceerrors.New(workspaceerrors.PathNotFound, "parent dir missing", nil),
+			wantStatus: http.StatusUnprocessableEntity,
+			wantError:  "parent dir missing",
+		},
+		{
+			name:       "SecurityViolation returns 403",
+			createErr:  workspaceerrors.New(workspaceerrors.SecurityViolation, "path escapes root", nil),
+			wantStatus: http.StatusForbidden,
+			wantError:  "path escapes root",
+		},
+		{
+			name:       "ConfigFailed returns 500 with message",
+			createErr:  workspaceerrors.New(workspaceerrors.ConfigFailed, "config write error", nil),
+			wantStatus: http.StatusInternalServerError,
+			wantError:  "config write error",
+		},
+		{
+			name:       "unknown error returns 500 generic",
+			createErr:  fmt.Errorf("unexpected failure"),
+			wantStatus: http.StatusInternalServerError,
+			wantError:  "failed to create workspace",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			createFn := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
+				return WorkspaceCreateResult{}, tt.createErr
+			}
+			handler := handleWorkspaceCreate(createFn, nil, nil)
+
+			body := strings.NewReader(`{"name":"ws","type":"empty","repos":["/a"]}`)
+			req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("expected %d, got %d: %s", tt.wantStatus, rec.Code, rec.Body.String())
+			}
+
+			var resp workspaceResponse
+			if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if resp.Success {
+				t.Fatal("expected failure")
+			}
+			if resp.Error != tt.wantError {
+				t.Errorf("expected error %q, got %q", tt.wantError, resp.Error)
 			}
 		})
 	}

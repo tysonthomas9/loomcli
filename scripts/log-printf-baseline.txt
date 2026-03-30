@@ -64,3 +64,4 @@ internal/webui/sse.go
 internal/webui/subscription.go
 internal/webui/terminal.go
 internal/webui/terminal_sessions.go
+internal/webui/subscription_poll.go

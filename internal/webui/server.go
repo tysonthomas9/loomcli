@@ -375,8 +375,12 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		defer jwksCleanup()
 	}
 
-	wrappedCreateFn := wrapWorkspaceCreateFn(config.WorkspaceCreateFn, registry, config.WorkspaceIDResolverFn, fleetRegistry)
+	wrappedCreateFn := wrapWorkspaceCreateFn(config.WorkspaceCreateFn, registry, fleetRegistry)
 	wrappedDeleteFn := wrapWorkspaceDeleteFn(config.WorkspaceDeleteFn, registry, fleetRegistry, config.WorkspaceIDResolverFn)
+
+	// Async job store for clone workspace creation (202 + polling).
+	jobStore := NewWorkspaceJobStore()
+	defer jobStore.Stop()
 	// Workspace-existence checker for WorkspaceMiddleware (MultiPool is authoritative registry).
 	wsExistsFn := func(id string) bool {
 		return multiPool.PoolForWorkspace(id) != nil
@@ -384,7 +388,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 
 	// Create HTTP server and register routes (allowedOrigins: nil = same-origin only)
 	mux := http.NewServeMux()
-	clientErrLimiter, cspLimiter, authCfgLimiter := setupRoutes(mux, pool, multiPool, hub, getMutationsSince, termMgr, termAuth, fleetRegistry, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL, config.GitOps, config.FileOps, tabMetaStore, issueTabStore, config.WorkspaceConfigFn, wrappedDeleteFn, config.SetDefaultWorkspaceFn, config.ClearDefaultWorkspaceFn, wrappedCreateFn, config.BackendOps, sessionHistoryStore, config.SessionsStore, wsExistsFn, initialWorkspaceID, config.WorkspaceConfigByIDFn, config.ExtAuthURL)
+	clientErrLimiter, cspLimiter, authCfgLimiter := setupRoutes(mux, pool, multiPool, hub, getMutationsSince, termMgr, termAuth, fleetRegistry, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL, config.GitOps, config.FileOps, tabMetaStore, issueTabStore, config.WorkspaceConfigFn, wrappedDeleteFn, config.SetDefaultWorkspaceFn, config.ClearDefaultWorkspaceFn, wrappedCreateFn, config.BackendOps, sessionHistoryStore, config.SessionsStore, wsExistsFn, initialWorkspaceID, config.WorkspaceConfigByIDFn, config.ExtAuthURL, jobStore)
 	defer clientErrLimiter.stop()
 	defer cspLimiter.stop()
 	defer authCfgLimiter.stop()
