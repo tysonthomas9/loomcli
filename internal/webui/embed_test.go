@@ -195,11 +195,11 @@ func TestFrontendHandler(t *testing.T) {
 			wantBodyContains: "", // don't check body for assets
 		},
 		{
-			name:             "non-existent asset serves index.html (SPA routing)",
+			name:             "non-existent JS asset returns 404 (not SPA fallback)",
 			path:             "/assets/nonexistent.js",
-			wantStatus:       http.StatusOK,
-			wantCacheControl: "no-cache, no-store, must-revalidate",
-			wantBodyContains: "<!DOCTYPE html>",
+			wantStatus:       http.StatusNotFound,
+			wantCacheControl: "",
+			wantBodyContains: "",
 		},
 	}
 
@@ -318,7 +318,7 @@ func TestHandleHealth(t *testing.T) {
 
 func TestSetupRoutes(t *testing.T) {
 	mux := http.NewServeMux()
-	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, false, "", "", nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, "", nil) // nil pool, hub, getMutationsSince, termManager for basic routing tests
+	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, false, "", "", nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, "", nil, nil) // nil pool, hub, getMutationsSince, termManager for basic routing tests
 
 	tests := []struct {
 		name       string
@@ -362,7 +362,7 @@ func TestSetupRoutes(t *testing.T) {
 
 func TestHealthEndpointJSON(t *testing.T) {
 	mux := http.NewServeMux()
-	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, false, "", "", nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, "", nil) // nil pool, hub, getMutationsSince, termManager for basic health tests
+	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, false, "", "", nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, "", nil, nil) // nil pool, hub, getMutationsSince, termManager for basic health tests
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	w := httptest.NewRecorder()
@@ -597,7 +597,7 @@ func TestSetupRoutes_DevMode(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, true, dir, "", nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, "", nil)
+	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, true, dir, "", nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, "", nil, nil)
 
 	tests := []struct {
 		name             string

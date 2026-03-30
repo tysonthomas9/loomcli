@@ -289,7 +289,20 @@ Request -> RequestLogMiddleware -> RateLimitMiddleware -> SecurityHeadersMiddlew
 | GET | `/api/editors` | `handleListEditors` |
 | POST | `/api/editors/open` | `handleOpenEditor` |
 | GET/POST | `/api/loom/...` | `newLoomProxy(loomServerURL)` |
-| `*` | `/` | SPA catch-all (embedded FS or disk in dev mode) |
+| `*` | `/` | SPA catch-all (embedded FS or disk in dev mode) — see Static Asset Handling below |
+
+#### Static Asset Handling in SPA Routing
+
+**File:** `internal/webui/embed.go`
+
+The `frontendHandler()` (production) and `devFrontendHandler()` (development) implement SPA routing with a critical distinction between static assets and client-side routes:
+
+- **Extensionless paths** (e.g., `/ws/abc/settings`, `/dashboard`) — served `index.html` for React Router SPA routing
+- **Static assets** (`.js`, `.css`, `.map`, images, fonts, `.json`, `.xml`, `.txt`, `.webmanifest`) — return **404 if not found**, not SPA fallback
+
+The `isStaticAsset(urlPath)` function checks file extensions to make this distinction. This prevents `ERR_CONTENT_LENGTH_MISMATCH` errors when the browser has a cached `index.html` referencing old Vite-hashed asset filenames after a rebuild — the old `.js` files correctly 404 instead of receiving HTML as JavaScript.
+
+Cache headers: `index.html` uses `no-cache, no-store, must-revalidate`; files under `/assets/` use `public, max-age=31536000, immutable` (Vite content-hashes guarantee uniqueness).
 
 ---
 

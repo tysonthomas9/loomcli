@@ -179,6 +179,12 @@ export type {
 
 export { useElapsedTime } from "./useElapsedTime";
 
+export { useJobPolling } from "./useJobPolling";
+export type {
+  UseJobPollingCallbacks,
+  UseJobPollingReturn,
+} from "./useJobPolling";
+
 export { useWorkspaceRepos } from "./useWorkspaceRepos";
 export type {
   UseWorkspaceReposReturn,

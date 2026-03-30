@@ -63,25 +63,25 @@ func TestCreateWarnings_ContextHelpers(t *testing.T) {
 func TestWrapWorkspaceCreateFn_CollectsWarnings(t *testing.T) {
 	registry, _, _ := newTestRegistry(t)
 
-	innerCreate := func(ctx context.Context, req WorkspaceCreateRequest) error {
-		return nil
+	innerCreate := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
+		return WorkspaceCreateResult{}, nil
 	}
 
-	// nil resolveID triggers a warning in the wrapped function
-	wrapped := wrapWorkspaceCreateFn(innerCreate, registry, nil, nil)
+	// Empty WorkspaceID triggers a warning in the wrapped function
+	wrapped := wrapWorkspaceCreateFn(innerCreate, registry, nil)
 	if wrapped == nil {
 		t.Fatal("expected non-nil wrapper")
 	}
 
 	ctx := WithCreateWarnings(context.Background())
-	err := wrapped(ctx, WorkspaceCreateRequest{Name: "my-ws"})
+	_, err := wrapped(ctx, WorkspaceCreateRequest{Name: "my-ws"})
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
 
 	warnings := GetCreateWarnings(ctx)
 	if len(warnings) == 0 {
-		t.Fatal("expected at least one warning from nil resolveID path")
+		t.Fatal("expected at least one warning from empty WorkspaceID path")
 	}
 
 	// Verify the warning mentions daemon/registration
@@ -100,27 +100,27 @@ func TestWrapWorkspaceCreateFn_CollectsWarnings(t *testing.T) {
 func TestWrapWorkspaceCreateFn_NilInner(t *testing.T) {
 	registry, _, _ := newTestRegistry(t)
 
-	wrapped := wrapWorkspaceCreateFn(nil, registry, nil, nil)
+	wrapped := wrapWorkspaceCreateFn(nil, registry, nil)
 	if wrapped != nil {
 		t.Fatal("expected nil wrapper when innerCreate is nil")
 	}
 }
 
-func TestWrapWorkspaceCreateFn_ResolveIDNil_AbortsRegistration(t *testing.T) {
+func TestWrapWorkspaceCreateFn_EmptyWorkspaceID_AbortsRegistration(t *testing.T) {
 	registry, multiPool, _ := newTestRegistry(t)
 
 	var innerCalled bool
-	innerCreate := func(ctx context.Context, req WorkspaceCreateRequest) error {
+	innerCreate := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
 		innerCalled = true
-		return nil
+		return WorkspaceCreateResult{}, nil // empty WorkspaceID
 	}
 
-	wrapped := wrapWorkspaceCreateFn(innerCreate, registry, nil, nil)
+	wrapped := wrapWorkspaceCreateFn(innerCreate, registry, nil)
 	if wrapped == nil {
 		t.Fatal("expected non-nil wrapper")
 	}
 
-	err := wrapped(context.Background(), WorkspaceCreateRequest{Name: "my-ws"})
+	_, err := wrapped(context.Background(), WorkspaceCreateRequest{Name: "my-ws"})
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
@@ -134,21 +134,17 @@ func TestWrapWorkspaceCreateFn_ResolveIDNil_AbortsRegistration(t *testing.T) {
 	}
 }
 
-func TestWrapWorkspaceCreateFn_ResolveIDFails_AbortsRegistration(t *testing.T) {
+func TestWrapWorkspaceCreateFn_EmptyWorkspaceID_NoError_AbortsRegistration(t *testing.T) {
 	registry, multiPool, _ := newTestRegistry(t)
 
 	var innerCalled bool
-	innerCreate := func(ctx context.Context, req WorkspaceCreateRequest) error {
+	innerCreate := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
 		innerCalled = true
-		return nil
+		return WorkspaceCreateResult{WorkspaceID: ""}, nil // empty ID, no error
 	}
 
-	resolveID := func(name string) (string, error) {
-		return "", fmt.Errorf("config not readable")
-	}
-
-	wrapped := wrapWorkspaceCreateFn(innerCreate, registry, resolveID, nil)
-	err := wrapped(context.Background(), WorkspaceCreateRequest{Name: "my-ws"})
+	wrapped := wrapWorkspaceCreateFn(innerCreate, registry, nil)
+	_, err := wrapped(context.Background(), WorkspaceCreateRequest{Name: "my-ws"})
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
@@ -162,19 +158,15 @@ func TestWrapWorkspaceCreateFn_ResolveIDFails_AbortsRegistration(t *testing.T) {
 	}
 }
 
-func TestWrapWorkspaceCreateFn_ResolveIDEmpty_AbortsRegistration(t *testing.T) {
+func TestWrapWorkspaceCreateFn_ZeroResult_AbortsRegistration(t *testing.T) {
 	registry, multiPool, _ := newTestRegistry(t)
 
-	innerCreate := func(ctx context.Context, req WorkspaceCreateRequest) error {
-		return nil
+	innerCreate := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
+		return WorkspaceCreateResult{}, nil // zero-value result
 	}
 
-	resolveID := func(name string) (string, error) {
-		return "", nil // empty string, no error
-	}
-
-	wrapped := wrapWorkspaceCreateFn(innerCreate, registry, resolveID, nil)
-	err := wrapped(context.Background(), WorkspaceCreateRequest{Name: "my-ws"})
+	wrapped := wrapWorkspaceCreateFn(innerCreate, registry, nil)
+	_, err := wrapped(context.Background(), WorkspaceCreateRequest{Name: "my-ws"})
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
@@ -185,26 +177,19 @@ func TestWrapWorkspaceCreateFn_ResolveIDEmpty_AbortsRegistration(t *testing.T) {
 	}
 }
 
-func TestWrapWorkspaceCreateFn_ResolveIDSucceeds_RegistersByUUID(t *testing.T) {
+func TestWrapWorkspaceCreateFn_ResultWithID_RegistersByUUID(t *testing.T) {
 	registry, multiPool, multiSub := newTestRegistry(t)
 
 	wsUUID := "eeeeeeee-1111-2222-3333-444444444444"
 	wsName := "new-workspace"
 	wsPath := t.TempDir()
 
-	innerCreate := func(ctx context.Context, req WorkspaceCreateRequest) error {
-		return nil
+	innerCreate := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
+		return WorkspaceCreateResult{WorkspaceID: wsUUID, WorkspacePath: wsPath}, nil
 	}
 
-	resolveID := func(name string) (string, error) {
-		if name == wsName {
-			return wsUUID, nil
-		}
-		return "", fmt.Errorf("unknown workspace %q", name)
-	}
-
-	wrapped := wrapWorkspaceCreateFn(innerCreate, registry, resolveID, nil)
-	err := wrapped(context.Background(), WorkspaceCreateRequest{Name: wsName, Path: wsPath})
+	wrapped := wrapWorkspaceCreateFn(innerCreate, registry, nil)
+	_, err := wrapped(context.Background(), WorkspaceCreateRequest{Name: wsName, Path: wsPath})
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
@@ -237,17 +222,12 @@ func TestWrapWorkspaceCreateFn_InnerCreateFails_NoRegistration(t *testing.T) {
 	registry, multiPool, _ := newTestRegistry(t)
 
 	createErr := fmt.Errorf("disk full")
-	innerCreate := func(ctx context.Context, req WorkspaceCreateRequest) error {
-		return createErr
+	innerCreate := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
+		return WorkspaceCreateResult{}, createErr
 	}
 
-	resolveID := func(name string) (string, error) {
-		t.Error("resolveID should not be called when innerCreate fails")
-		return "some-uuid", nil
-	}
-
-	wrapped := wrapWorkspaceCreateFn(innerCreate, registry, resolveID, nil)
-	err := wrapped(context.Background(), WorkspaceCreateRequest{Name: "my-ws"})
+	wrapped := wrapWorkspaceCreateFn(innerCreate, registry, nil)
+	_, err := wrapped(context.Background(), WorkspaceCreateRequest{Name: "my-ws"})
 	if err != createErr {
 		t.Fatalf("expected createErr, got %v", err)
 	}

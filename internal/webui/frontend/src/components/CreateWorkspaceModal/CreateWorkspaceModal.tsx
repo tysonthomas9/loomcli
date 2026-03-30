@@ -9,7 +9,7 @@ import { createPortal } from "react-dom";
 
 import { createWorkspace } from "@/api/workspace";
 import type { CreateWorkspaceRequest, WorkspaceData } from "@/api/workspace";
-import { useRegisterEscapeLayer, LAYER_MODAL } from "@/hooks";
+import { useRegisterEscapeLayer, LAYER_MODAL, useJobPolling } from "@/hooks";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
 import { useFocusReturn } from "@/hooks/useFocusReturn";
 import styles from "./CreateWorkspaceModal.module.css";
@@ -139,6 +139,17 @@ export function CreateWorkspaceModal({
   const [cloneUrls, setCloneUrls] = useState<string[]>([]);
   const [urlInput, setUrlInput] = useState("");
 
+  // Multi-path input for empty type
+  const [repos, setRepos] = useState<string[]>([]);
+  const [repoInput, setRepoInput] = useState("");
+
+  // Async clone job polling
+  const job = useJobPolling(name, {
+    onSuccess,
+    onClose,
+    onFinish: () => setIsSubmitting(false),
+  });
+
   const dialogRef = useRef<HTMLDivElement>(null);
   const nameRef = useRef<HTMLInputElement>(null);
 
@@ -152,8 +163,11 @@ export function CreateWorkspaceModal({
       setError("");
       setCloneUrls([]);
       setUrlInput("");
+      setRepos([]);
+      setRepoInput("");
+      job.reset();
     }
-  }, [isOpen]);
+  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps -- job.reset is stable
 
   // Auto-focus name input on open
   useEffect(() => {
@@ -162,7 +176,7 @@ export function CreateWorkspaceModal({
     }
   }, [isOpen]);
 
-  useRegisterEscapeLayer(LAYER_MODAL, onClose, isOpen);
+  useRegisterEscapeLayer(LAYER_MODAL, onClose, isOpen && !job.isPolling);
   useFocusTrap(dialogRef, isOpen, { initialFocus: nameRef });
   useFocusReturn(isOpen);
 
@@ -181,6 +195,18 @@ export function CreateWorkspaceModal({
 
   const removeCloneUrl = (url: string) => {
     setCloneUrls((prev) => prev.filter((u) => u !== url));
+  };
+
+  const addRepo = () => {
+    const trimmed = repoInput.trim();
+    if (trimmed && !repos.includes(trimmed)) {
+      setRepos((prev) => [...prev, trimmed]);
+      setRepoInput("");
+    }
+  };
+
+  const removeRepo = (repo: string) => {
+    setRepos((prev) => prev.filter((r) => r !== repo));
   };
 
   // Include pending input text in submit eligibility check
@@ -222,14 +248,25 @@ export function CreateWorkspaceModal({
         req.path = path.trim();
       }
 
-      let data: WorkspaceData;
-      let warnings: string[] | undefined;
       try {
         const result = await createWorkspace(req);
-        data = result.data;
-        warnings = result.warnings;
+        if (result.kind === "async") {
+          // Clone job started: switch to progress state and begin polling.
+          // Keep isSubmitting true so the form stays disabled during polling.
+          job.startJob(result.jobId);
+          return;
+        }
+        // Sync path: workspace created immediately
+        const warnings = result.warnings;
+        setIsSubmitting(false);
+        try {
+          onSuccess(result.data, req.name, warnings);
+        } catch {
+          // onSuccess errors (e.g., navigation failure) must not block close
+        }
+        onClose();
       } catch (err: unknown) {
-        // API failure — show error, keep modal open for retry
+        setIsSubmitting(false);
         const message =
           err instanceof Error ? err.message : "Failed to create workspace";
         if (
@@ -243,20 +280,21 @@ export function CreateWorkspaceModal({
         } else {
           setError(message);
         }
-        setIsSubmitting(false);
-        return;
       }
-
-      // API succeeded — always close modal, regardless of callback errors
-      setIsSubmitting(false);
-      try {
-        onSuccess(data, req.name, warnings);
-      } catch {
-        // onSuccess errors (e.g., navigation failure) must not block close
-      }
-      onClose();
     },
-    [canSubmit, name, type, cloneUrls, urlInput, path, onSuccess, onClose],
+    [
+      canSubmit,
+      name,
+      type,
+      cloneUrls,
+      urlInput,
+      repos,
+      repoInput,
+      path,
+      onSuccess,
+      onClose,
+      job.startJob,
+    ],
   );
 
   const handleCardKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -294,7 +332,7 @@ export function CreateWorkspaceModal({
   return createPortal(
     <div
       className={styles.overlay}
-      onClick={onClose}
+      onClick={job.isPolling ? undefined : onClose}
       data-testid="create-workspace-overlay"
     >
       <div
@@ -306,191 +344,257 @@ export function CreateWorkspaceModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className={styles.headerRow}>
-          <h2 className={styles.title}>New Workspace</h2>
-          <button
-            type="button"
-            className={styles.closeButton}
-            onClick={onClose}
-            aria-label="Close"
-            data-testid="create-workspace-close"
-          >
-            &times;
-          </button>
+          <h2 className={styles.title}>
+            {job.isPolling ? "Creating Workspace" : "New Workspace"}
+          </h2>
+          {!job.isPolling && (
+            <button
+              type="button"
+              className={styles.closeButton}
+              onClick={onClose}
+              aria-label="Close"
+              data-testid="create-workspace-close"
+            >
+              &times;
+            </button>
+          )}
         </div>
 
-        <form onSubmit={handleSubmit}>
-          <div className={styles.fieldGroup}>
-            <label className={styles.label} htmlFor="ws-name">
-              Name
-            </label>
-            <input
-              ref={nameRef}
-              id="ws-name"
-              className={styles.input}
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="my-workspace"
-              disabled={isSubmitting}
-              data-testid="create-workspace-name"
-            />
+        {job.isPolling ? (
+          <div
+            className={styles.progressContainer}
+            data-testid="create-workspace-progress"
+          >
+            <div className={styles.progressSpinner} aria-hidden="true" />
+            <p className={styles.progressMessage}>{job.progress}</p>
+            <p className={styles.progressElapsed}>{job.elapsed}</p>
           </div>
-
-          <div className={styles.fieldGroup}>
-            <label className={styles.label} htmlFor="ws-path">
-              Location
-            </label>
-            <div className={styles.locationRow}>
+        ) : (
+          <form onSubmit={handleSubmit}>
+            <div className={styles.fieldGroup}>
+              <label className={styles.label} htmlFor="ws-name">
+                Name
+              </label>
               <input
-                id="ws-path"
+                ref={nameRef}
+                id="ws-name"
                 className={styles.input}
                 type="text"
-                value={path}
-                onChange={(e) => setPath(e.target.value)}
-                placeholder={
-                  name.trim()
-                    ? `~/.loom/workspaces/${name.trim()}`
-                    : "~/.loom/workspaces/<name>"
-                }
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="my-workspace"
                 disabled={isSubmitting}
-                data-testid="create-workspace-path"
+                data-testid="create-workspace-name"
               />
-              <button
-                type="button"
-                className={styles.browseButton}
-                disabled
-                title="Filesystem browsing is not available in the browser"
-                aria-label="Browse for folder"
-                data-testid="create-workspace-browse"
-              >
-                <FolderBrowseIcon />
-              </button>
             </div>
-          </div>
 
-          <div className={styles.fieldGroup}>
-            <span className={styles.label}>Type</span>
-            <div
-              className={styles.typeSelector}
-              role="radiogroup"
-              aria-label="Workspace type"
-            >
-              {TYPE_CARDS.map((card) => {
-                const Icon = ICON_MAP[card.type];
-                const isSelected = type === card.type;
-                return (
-                  <div
-                    key={card.type}
-                    className={`${styles.typeCard}${isSelected ? ` ${styles.typeCardSelected}` : ""}`}
-                    role="radio"
-                    aria-checked={isSelected}
-                    tabIndex={isSelected ? 0 : -1}
-                    onClick={() => handleTypeChange(card.type)}
-                    onKeyDown={handleCardKeyDown}
-                    data-testid={`create-workspace-type-${card.type}`}
-                  >
-                    <Icon />
-                    <span className={styles.typeCardTitle}>{card.title}</span>
-                    <span className={styles.typeCardDesc}>{card.desc}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {type === "clone" && (
             <div className={styles.fieldGroup}>
-              <label className={styles.label} htmlFor="ws-clone-url">
-                Repository URL
+              <label className={styles.label} htmlFor="ws-path">
+                Location
               </label>
-              <div className={styles.addRow}>
+              <div className={styles.locationRow}>
                 <input
-                  id="ws-clone-url"
+                  id="ws-path"
                   className={styles.input}
                   type="text"
-                  value={urlInput}
-                  onChange={(e) => setUrlInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      addCloneUrl();
-                    }
-                  }}
-                  placeholder="https://github.com/... or git@..."
+                  value={path}
+                  onChange={(e) => setPath(e.target.value)}
+                  placeholder={
+                    name.trim()
+                      ? `~/.loom/workspaces/${name.trim()}`
+                      : "~/.loom/workspaces/<name>"
+                  }
                   disabled={isSubmitting}
-                  data-testid="create-workspace-clone-url"
+                  data-testid="create-workspace-path"
                 />
                 <button
                   type="button"
-                  className={styles.addButton}
-                  onClick={addCloneUrl}
-                  disabled={isSubmitting || !urlInput.trim()}
+                  className={styles.browseButton}
+                  disabled
+                  title="Filesystem browsing is not available in the browser"
+                  aria-label="Browse for folder"
+                  data-testid="create-workspace-browse"
                 >
-                  Add
+                  <FolderBrowseIcon />
                 </button>
               </div>
-              {cloneUrls.length > 0 && (
-                <div className={styles.chipList}>
-                  {cloneUrls.map((url) => (
-                    <span key={url} className={styles.chip}>
-                      <span className={styles.chipText}>{url}</span>
-                      <button
-                        type="button"
-                        className={styles.chipRemove}
-                        onClick={() => removeCloneUrl(url)}
-                        aria-label={`Remove ${url}`}
-                      >
-                        &times;
-                      </button>
-                    </span>
-                  ))}
+            </div>
+
+            <div className={styles.fieldGroup}>
+              <span className={styles.label}>Type</span>
+              <div
+                className={styles.typeSelector}
+                role="radiogroup"
+                aria-label="Workspace type"
+              >
+                {TYPE_CARDS.map((card) => {
+                  const Icon = ICON_MAP[card.type];
+                  const isSelected = type === card.type;
+                  return (
+                    <div
+                      key={card.type}
+                      className={`${styles.typeCard}${isSelected ? ` ${styles.typeCardSelected}` : ""}`}
+                      role="radio"
+                      aria-checked={isSelected}
+                      tabIndex={isSelected ? 0 : -1}
+                      onClick={() => handleTypeChange(card.type)}
+                      onKeyDown={handleCardKeyDown}
+                      data-testid={`create-workspace-type-${card.type}`}
+                    >
+                      <Icon />
+                      <span className={styles.typeCardTitle}>{card.title}</span>
+                      <span className={styles.typeCardDesc}>{card.desc}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {type === "clone" && (
+              <div className={styles.fieldGroup}>
+                <label className={styles.label} htmlFor="ws-clone-url">
+                  Repository URL
+                </label>
+                <div className={styles.addRow}>
+                  <input
+                    id="ws-clone-url"
+                    className={styles.input}
+                    type="text"
+                    value={urlInput}
+                    onChange={(e) => setUrlInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addCloneUrl();
+                      }
+                    }}
+                    placeholder="https://github.com/... or git@..."
+                    disabled={isSubmitting}
+                    data-testid="create-workspace-clone-url"
+                  />
+                  <button
+                    type="button"
+                    className={styles.addButton}
+                    onClick={addCloneUrl}
+                    disabled={isSubmitting || !urlInput.trim()}
+                  >
+                    Add
+                  </button>
                 </div>
-              )}
+                {cloneUrls.length > 0 && (
+                  <div className={styles.chipList}>
+                    {cloneUrls.map((url) => (
+                      <span key={url} className={styles.chip}>
+                        <span className={styles.chipText}>{url}</span>
+                        <button
+                          type="button"
+                          className={styles.chipRemove}
+                          onClick={() => removeCloneUrl(url)}
+                          aria-label={`Remove ${url}`}
+                        >
+                          &times;
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {type === "empty" && (
+              <div className={styles.fieldGroup}>
+                <label className={styles.label} htmlFor="ws-repo-path">
+                  Repository Paths
+                </label>
+                <div className={styles.addRow}>
+                  <input
+                    id="ws-repo-path"
+                    className={styles.input}
+                    type="text"
+                    value={repoInput}
+                    onChange={(e) => setRepoInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addRepo();
+                      }
+                    }}
+                    placeholder="/path/to/existing/repo"
+                    disabled={isSubmitting}
+                    data-testid="create-workspace-repo-path"
+                  />
+                  <button
+                    type="button"
+                    className={styles.addButton}
+                    onClick={addRepo}
+                    disabled={isSubmitting || !repoInput.trim()}
+                  >
+                    Add
+                  </button>
+                </div>
+                {repos.length > 0 && (
+                  <div className={styles.chipList}>
+                    {repos.map((repo) => (
+                      <span key={repo} className={styles.chip}>
+                        <span className={styles.chipText}>{repo}</span>
+                        <button
+                          type="button"
+                          className={styles.chipRemove}
+                          onClick={() => removeRepo(repo)}
+                          aria-label={`Remove ${repo}`}
+                        >
+                          &times;
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {type === "template" && (
+              <div
+                className={styles.comingSoon}
+                data-testid="create-workspace-template-placeholder"
+              >
+                Coming soon — template registry is not yet available
+              </div>
+            )}
+
+            {(error || job.error) && (
+              <p className={styles.error} data-testid="create-workspace-error">
+                {error || job.error}
+              </p>
+            )}
+
+            <div className={styles.actions}>
+              <button
+                type="button"
+                className={styles.cancelButton}
+                onClick={onClose}
+                disabled={isSubmitting}
+                data-testid="create-workspace-cancel"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className={`${styles.submitButton}${isSubmitting ? ` ${styles.submitting}` : ""}`}
+                disabled={!canSubmit}
+                data-testid="create-workspace-submit"
+              >
+                {isSubmitting && (
+                  <span
+                    className={styles.spinner}
+                    aria-hidden="true"
+                    data-testid="create-workspace-spinner"
+                  />
+                )}
+                {isSubmitting ? "Creating..." : "Create Workspace"}
+              </button>
             </div>
-          )}
-
-          {type === "template" && (
-            <div
-              className={styles.comingSoon}
-              data-testid="create-workspace-template-placeholder"
-            >
-              Coming soon — template registry is not yet available
-            </div>
-          )}
-
-          {error && (
-            <p className={styles.error} data-testid="create-workspace-error">
-              {error}
-            </p>
-          )}
-
-          <div className={styles.actions}>
-            <button
-              type="button"
-              className={styles.cancelButton}
-              onClick={onClose}
-              disabled={isSubmitting}
-              data-testid="create-workspace-cancel"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className={`${styles.submitButton}${isSubmitting ? ` ${styles.submitting}` : ""}`}
-              disabled={!canSubmit}
-              data-testid="create-workspace-submit"
-            >
-              {isSubmitting && (
-                <span
-                  className={styles.spinner}
-                  aria-hidden="true"
-                  data-testid="create-workspace-spinner"
-                />
-              )}
-              {isSubmitting ? "Creating..." : "Create Workspace"}
-            </button>
-          </div>
-        </form>
+          </form>
+        )}
       </div>
     </div>,
     document.body,

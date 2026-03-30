@@ -263,35 +263,97 @@ export interface CreateWorkspaceRequest {
   path?: string;
 }
 
-export interface CreateWorkspaceResult {
+/** 201 sync result: workspace was created immediately. */
+export interface WorkspaceCreateSync {
+  kind: "sync";
   data: WorkspaceData;
   warnings?: string[];
 }
 
+/** 202 async result: clone job was started, poll for progress. */
+export interface WorkspaceCreateAsync {
+  kind: "async";
+  jobId: string;
+}
+
+export type WorkspaceCreateResult = WorkspaceCreateSync | WorkspaceCreateAsync;
+
+/** Shape returned by the backend for 202 Accepted (async clone). */
+interface WorkspaceJobAcceptedResponse {
+  success: boolean;
+  job_id: string;
+}
+
+/** Timeout for clone requests (5 minutes) to cover the initial POST. */
+const CLONE_CREATE_TIMEOUT = 300_000;
+
 /**
- * Create a new workspace. On success, invalidates the cache and returns refreshed data.
+ * Create a new workspace.
+ *
+ * Returns a discriminated union:
+ *  - `{ kind: "sync", data }` for 201 (empty workspaces) — cache is updated.
+ *  - `{ kind: "async", jobId }` for 202 (clone workspaces) — caller should poll.
  */
 export async function createWorkspace(
   req: CreateWorkspaceRequest,
-): Promise<CreateWorkspaceResult> {
-  const response = await post<ApiResult<WorkspaceData>>("/api/workspaces", req);
-  if (!response.success) {
-    throw new ApiError(0, response.error);
+): Promise<WorkspaceCreateResult> {
+  // Clone requests go through the async path; use a longer timeout since the
+  // backend returns 202 quickly, but we still want a generous client timeout.
+  const options = req.type === "clone" ? { timeout: CLONE_CREATE_TIMEOUT } : {};
+
+  const response = await post<
+    ApiResult<WorkspaceData> | WorkspaceJobAcceptedResponse
+  >("/api/workspaces", req, options);
+
+  // Async path: backend returned 202 with { success, job_id }.
+  if ("job_id" in response && typeof response.job_id === "string") {
+    return { kind: "async", jobId: response.job_id };
   }
-  const data = response.data;
-  const warnings = response.warnings;
+
+  // Sync path: backend returned 201 with { success, data }.
+  const syncResponse = response as ApiResult<WorkspaceData>;
+  const data = unwrap(syncResponse);
+  const warnings = syncResponse.success ? syncResponse.warnings : undefined;
   cacheGeneration++;
   if (data) {
     workspaceCache = data;
   }
   fetchPromise = null;
-  const result: CreateWorkspaceResult = {
-    data: workspaceCache ?? (await refreshWorkspace()),
+  const result: WorkspaceCreateSync = {
+    kind: "sync",
+    data: data ?? (await refreshWorkspace()),
   };
   if (warnings && warnings.length > 0) {
     result.warnings = warnings;
   }
   return result;
+}
+
+// ============= Workspace Job Polling =============
+
+/** Status values for an async workspace creation job. */
+export type WorkspaceJobStatus = "running" | "done" | "failed";
+
+/** Response shape from GET /api/workspaces/jobs/:id. */
+export interface WorkspaceJobState {
+  status: WorkspaceJobStatus;
+  progress?: string;
+  workspace_id?: string;
+  error?: string;
+}
+
+/**
+ * Poll the status of an async workspace creation job.
+ *
+ * Calls GET /api/workspaces/jobs/{jobId} and returns the current state.
+ * Throws ApiError on network/HTTP errors (including 404 for expired jobs).
+ */
+export async function pollWorkspaceJob(
+  jobId: string,
+): Promise<WorkspaceJobState> {
+  return get<WorkspaceJobState>(
+    `/api/workspaces/jobs/${encodeURIComponent(jobId)}`,
+  );
 }
 
 /**
