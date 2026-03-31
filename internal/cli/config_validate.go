@@ -118,6 +118,12 @@ func validateAgentEntries(r *ValidationResult, agents []AgentEntry, roles map[st
 			}
 		}
 
+		// Role name character validation (defense in depth against path traversal)
+		if a.Role != "" && !isValidRoleName(a.Role) {
+			r.addError(field+".role", fmt.Sprintf(
+				"%q contains invalid characters; use only alphanumeric, hyphens, and underscores", a.Role))
+		}
+
 		// Role must be built-in or defined in Roles
 		if a.Role != "" && !builtInRoles[a.Role] {
 			if _, ok := roles[a.Role]; !ok {
@@ -182,6 +188,12 @@ func validateRoles(r *ValidationResult, roles map[string]RoleConfig, projectDir 
 	for _, name := range roleNames {
 		rc := roles[name]
 		field := fmt.Sprintf("roles.%s", name)
+
+		// Role name character validation (defense in depth against path traversal)
+		if !isValidRoleName(name) {
+			r.addError(field, fmt.Sprintf(
+				"role name %q contains invalid characters; use only alphanumeric, hyphens, and underscores", name))
+		}
 
 		// Prompt file existence (warning, not error)
 		if rc.PromptFile != "" {
@@ -339,6 +351,22 @@ func isValidGroupName(name string) bool {
 	}
 	for _, c := range name {
 		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+// isValidRoleName checks that a role name contains only safe characters.
+// Same rules as worktree names: alphanumeric, hyphens, underscores.
+// Unlike isValidWorktreeName, empty is rejected here because role names
+// are never structurally optional — an empty role is always a mistake.
+func isValidRoleName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, c := range name {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_') {
 			return false
 		}
 	}

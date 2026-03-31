@@ -148,9 +148,14 @@ func (d *Daemon) spawnAgent(ap *AgentProcess) error {
 		if err := os.MkdirAll(logDir, 0700); err != nil {
 			log.Printf("[daemon] Agent %s: failed to create log directory: %v", ap.entry.Worktree, err)
 		} else {
-			// Sanitize worktree name to prevent path traversal in log filename
+			// Sanitize worktree and role names to prevent path traversal in log filename
 			safeWorktree := filepath.Base(ap.entry.Worktree)
-			logFilePath := filepath.Join(logDir, fmt.Sprintf("%s-%s.log", ap.entry.Role, safeWorktree))
+			safeRole := filepath.Base(ap.entry.Role)
+			if safeRole != ap.entry.Role {
+				log.Printf("[daemon] Agent %s: role name %q sanitized to %q for log path",
+					ap.entry.Worktree, ap.entry.Role, safeRole)
+			}
+			logFilePath := filepath.Join(logDir, fmt.Sprintf("%s-%s.log", safeRole, safeWorktree))
 			ap.logFilePath = logFilePath // store for watchdog stat checks
 			f, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 			if err != nil {

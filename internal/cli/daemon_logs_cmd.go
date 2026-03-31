@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -165,7 +166,11 @@ func resolveAgentLogPath(projectDir string, config *DaemonConfig, role, worktree
 	}
 
 	safeWorktree := filepath.Base(worktree)
-	return filepath.Join(logDir, fmt.Sprintf("%s-%s.log", role, safeWorktree))
+	safeRole := filepath.Base(role)
+	if safeRole != role {
+		slog.Warn("role name sanitized for log path lookup", "raw", role, "safe", safeRole)
+	}
+	return filepath.Join(logDir, fmt.Sprintf("%s-%s.log", safeRole, safeWorktree))
 }
 
 // followLogFile watches a log file for changes and writes new bytes to stdout.

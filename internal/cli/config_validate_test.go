@@ -606,6 +606,81 @@ func TestIsValidWorktreeName(t *testing.T) {
 	}
 }
 
+func TestIsValidRoleName(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{"simple", "plan", true},
+		{"with hyphen", "my-role", true},
+		{"with underscore", "code_123", true},
+		{"uppercase", "Task", true},
+		{"path traversal", "../evil", false},
+		{"with slash", "a/b", false},
+		{"empty", "", false},
+		{"dot", ".", false},
+		{"dotdot", "..", false},
+		{"with space", "role name", false},
+		{"with dot", "role.name", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isValidRoleName(tt.input); got != tt.want {
+				t.Errorf("isValidRoleName(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidateProjectConfig_MaliciousRole(t *testing.T) {
+	dc := &DaemonConfig{
+		Roles: make(map[string]RoleConfig),
+		Agents: []AgentEntry{
+			{Worktree: "falcon", Role: "../../../etc/evil"},
+		},
+	}
+
+	r := ValidateProjectConfig(dc, t.TempDir())
+	if !r.HasErrors() {
+		t.Error("expected error for malicious role in agent entry")
+	}
+	found := false
+	for _, issue := range r.Issues {
+		if strings.Contains(issue.Message, "invalid characters") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected 'invalid characters' error for malicious role, got: %s", r.FormatIssues())
+	}
+}
+
+func TestValidateProjectConfig_MaliciousRoleKey(t *testing.T) {
+	dc := &DaemonConfig{
+		Roles: map[string]RoleConfig{
+			"../evil": {Description: "malicious role key"},
+		},
+		Agents: []AgentEntry{
+			{Worktree: "falcon", Role: "plan"},
+		},
+	}
+
+	r := ValidateProjectConfig(dc, t.TempDir())
+	if !r.HasErrors() {
+		t.Error("expected error for malicious role key in roles map")
+	}
+	found := false
+	for _, issue := range r.Issues {
+		if strings.Contains(issue.Message, "invalid characters") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected 'invalid characters' error for malicious role key, got: %s", r.FormatIssues())
+	}
+}
+
 func TestValidateProjectConfig_AgentBackendOverride(t *testing.T) {
 	// Only meaningful if backends are registered
 	if len(ListBackends()) == 0 {

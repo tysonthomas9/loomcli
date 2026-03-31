@@ -83,6 +83,24 @@ func TestResolveAgentLogPath_PathTraversal(t *testing.T) {
 	}
 }
 
+func TestResolveAgentLogPath_RolePathTraversal(t *testing.T) {
+	projectDir := "/tmp/test-project"
+	config := &DaemonConfig{
+		Daemon: DaemonSettings{
+			LogDir: ".loom/logs",
+		},
+	}
+
+	// filepath.Base should strip path traversal from role name
+	got := resolveAgentLogPath(projectDir, config, "../../../etc/cron.d/evil", "falcon")
+	if strings.Contains(got, "..") {
+		t.Errorf("role path traversal not sanitized: %s", got)
+	}
+	if !strings.HasSuffix(got, "evil-falcon.log") {
+		t.Errorf("expected sanitized path to end with evil-falcon.log, got %s", got)
+	}
+}
+
 func TestRunDaemonLogs_NoArgs_ListsAgents(t *testing.T) {
 	// Set up a temp project directory with state file and config
 	projectDir := t.TempDir()
