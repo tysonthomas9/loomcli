@@ -3,6 +3,7 @@ package webui
 import (
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -159,6 +160,21 @@ func findDetectedEditor(editorID string, detected []editor.DetectedEditor) (*edi
 // It validates the request, looks up the editor, and launches it.
 func handleOpenEditor(cache *editorCache, launch editorLaunchFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Restrict to loopback only — editor launch is a local-only operation.
+		host, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			respondError(w, http.StatusForbidden, "forbidden")
+			return
+		}
+		if i := strings.IndexByte(host, '%'); i >= 0 {
+			host = host[:i]
+		}
+		ip := net.ParseIP(host)
+		if ip == nil || !ip.IsLoopback() {
+			respondError(w, http.StatusForbidden, "editor launch restricted to localhost")
+			return
+		}
+
 		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
 
 		var req EditorOpenRequest

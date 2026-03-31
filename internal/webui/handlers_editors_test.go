@@ -140,6 +140,7 @@ func TestHandleOpenEditor_OversizedBody(t *testing.T) {
 	// Create a JSON body larger than 1MB (maxRequestBody).
 	big := `{"editor_id":"` + strings.Repeat("x", 1<<20+1) + `"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/editors/open", strings.NewReader(big))
+	req.RemoteAddr = "127.0.0.1:12345"
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -154,6 +155,7 @@ func TestHandleOpenEditor_EmptyBody(t *testing.T) {
 	handler := handleOpenEditor(cache, launch)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/editors/open", strings.NewReader(""))
+	req.RemoteAddr = "127.0.0.1:12345"
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -169,6 +171,7 @@ func TestHandleOpenEditor_MissingEditorID(t *testing.T) {
 
 	body := `{"path":"/tmp/test"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/editors/open", strings.NewReader(body))
+	req.RemoteAddr = "127.0.0.1:12345"
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -184,6 +187,7 @@ func TestHandleOpenEditor_InvalidEditorIDFormat(t *testing.T) {
 
 	body := `{"editor_id":"VS Code!","path":"/tmp/test"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/editors/open", strings.NewReader(body))
+	req.RemoteAddr = "127.0.0.1:12345"
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -199,6 +203,7 @@ func TestHandleOpenEditor_MissingPath(t *testing.T) {
 
 	body := `{"editor_id":"vscode"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/editors/open", strings.NewReader(body))
+	req.RemoteAddr = "127.0.0.1:12345"
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -214,6 +219,7 @@ func TestHandleOpenEditor_RelativePath(t *testing.T) {
 
 	body := `{"editor_id":"vscode","path":"relative/path"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/editors/open", strings.NewReader(body))
+	req.RemoteAddr = "127.0.0.1:12345"
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -230,6 +236,7 @@ func TestHandleOpenEditor_PathTraversal(t *testing.T) {
 
 	body := `{"editor_id":"vscode","path":"/tmp/../etc/passwd"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/editors/open", strings.NewReader(body))
+	req.RemoteAddr = "127.0.0.1:12345"
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -245,6 +252,7 @@ func TestHandleOpenEditor_NonexistentPath(t *testing.T) {
 
 	body := `{"editor_id":"vscode","path":"/nonexistent/path/xyz"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/editors/open", strings.NewReader(body))
+	req.RemoteAddr = "127.0.0.1:12345"
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -263,6 +271,7 @@ func TestHandleOpenEditor_UnknownEditorID(t *testing.T) {
 	dir := t.TempDir()
 	body := fmt.Sprintf(`{"editor_id":"nonexistent-editor","path":%q}`, dir)
 	req := httptest.NewRequest(http.MethodPost, "/api/editors/open", strings.NewReader(body))
+	req.RemoteAddr = "127.0.0.1:12345"
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -281,6 +290,7 @@ func TestHandleOpenEditor_EditorNotDetected(t *testing.T) {
 	dir := t.TempDir()
 	body := fmt.Sprintf(`{"editor_id":"vscode","path":%q}`, dir)
 	req := httptest.NewRequest(http.MethodPost, "/api/editors/open", strings.NewReader(body))
+	req.RemoteAddr = "127.0.0.1:12345"
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -303,6 +313,7 @@ func TestHandleOpenEditor_Success(t *testing.T) {
 	dir := t.TempDir()
 	body := fmt.Sprintf(`{"editor_id":"vscode","path":%q}`, dir)
 	req := httptest.NewRequest(http.MethodPost, "/api/editors/open", strings.NewReader(body))
+	req.RemoteAddr = "127.0.0.1:12345"
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -330,6 +341,7 @@ func TestHandleOpenEditor_LaunchFailure(t *testing.T) {
 	dir := t.TempDir()
 	body := fmt.Sprintf(`{"editor_id":"vscode","path":%q}`, dir)
 	req := httptest.NewRequest(http.MethodPost, "/api/editors/open", strings.NewReader(body))
+	req.RemoteAddr = "127.0.0.1:12345"
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -354,11 +366,105 @@ func TestHandleOpenEditor_FilePathInsteadOfDir(t *testing.T) {
 
 	body := fmt.Sprintf(`{"editor_id":"vscode","path":%q}`, file)
 	req := httptest.NewRequest(http.MethodPost, "/api/editors/open", strings.NewReader(body))
+	req.RemoteAddr = "127.0.0.1:12345"
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// --- POST /api/editors/open loopback guard tests ---
+
+func TestHandleOpenEditor_NonLoopbackRejected(t *testing.T) {
+	detected := []editor.DetectedEditor{
+		{Editor: editor.Editor{ID: "vscode"}, ResolvedPath: "/usr/bin/code", Method: "cli"},
+	}
+	cache := newEditorCache(time.Minute, fakeDetectedEditors(detected))
+	launch, calledDE, _ := fakeLauncher(nil)
+	handler := handleOpenEditor(cache, launch)
+
+	dir := t.TempDir()
+	body := fmt.Sprintf(`{"editor_id":"vscode","path":%q}`, dir)
+	req := httptest.NewRequest(http.MethodPost, "/api/editors/open", strings.NewReader(body))
+	req.RemoteAddr = "10.0.0.5:9999"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+	assertErrorContains(t, rec, "localhost")
+
+	if calledDE.ID != "" {
+		t.Error("expected launch function NOT to be called")
+	}
+}
+
+func TestHandleOpenEditor_IPv6LoopbackAllowed(t *testing.T) {
+	detected := []editor.DetectedEditor{
+		{Editor: editor.Editor{ID: "vscode"}, ResolvedPath: "/usr/bin/code", Method: "cli"},
+	}
+	cache := newEditorCache(time.Minute, fakeDetectedEditors(detected))
+	launch, calledDE, _ := fakeLauncher(nil)
+	handler := handleOpenEditor(cache, launch)
+
+	dir := t.TempDir()
+	body := fmt.Sprintf(`{"editor_id":"vscode","path":%q}`, dir)
+	req := httptest.NewRequest(http.MethodPost, "/api/editors/open", strings.NewReader(body))
+	req.RemoteAddr = "[::1]:9999"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	if calledDE.ID != "vscode" {
+		t.Errorf("expected launch called with vscode, got %s", calledDE.ID)
+	}
+}
+
+func TestHandleOpenEditor_MalformedRemoteAddr(t *testing.T) {
+	cache := newEditorCache(time.Minute, fakeDetectedEditors(nil))
+	launch, calledDE, _ := fakeLauncher(nil)
+	handler := handleOpenEditor(cache, launch)
+
+	body := `{"editor_id":"vscode","path":"/tmp"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/editors/open", strings.NewReader(body))
+	req.RemoteAddr = "127.0.0.1" // no port
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+	assertErrorContains(t, rec, "forbidden")
+
+	if calledDE.ID != "" {
+		t.Error("expected launch function NOT to be called")
+	}
+}
+
+func TestHandleOpenEditor_IPv6LinkLocalWithZoneRejected(t *testing.T) {
+	cache := newEditorCache(time.Minute, fakeDetectedEditors(nil))
+	launch, calledDE, _ := fakeLauncher(nil)
+	handler := handleOpenEditor(cache, launch)
+
+	body := `{"editor_id":"vscode","path":"/tmp"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/editors/open", strings.NewReader(body))
+	req.RemoteAddr = "[fe80::1%25lo0]:9999"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+	assertErrorContains(t, rec, "localhost")
+
+	if calledDE.ID != "" {
+		t.Error("expected launch function NOT to be called")
 	}
 }
 
