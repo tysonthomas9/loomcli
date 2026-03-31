@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
 
+	"github.com/tysonthomas9/loomcli/internal/atomicfile"
 	"github.com/tysonthomas9/loomcli/internal/configlock"
 )
 
@@ -215,7 +216,7 @@ func SaveConfig(cfg *LoomConfig) error {
 	}
 	defer unlock()
 	path := GetConfigPath()
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	if err := atomicfile.WriteFile(path, data, 0644); err != nil {
 		return fmt.Errorf("writing config %s: %w", path, err)
 	}
 	return nil

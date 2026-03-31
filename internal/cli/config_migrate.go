@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
 
+	"github.com/tysonthomas9/loomcli/internal/atomicfile"
 	"github.com/tysonthomas9/loomcli/internal/configlock"
 )
 
@@ -122,7 +123,7 @@ func MigrateConfigFile(path string) (oldVersion int, backupPath string, err erro
 		return oldVersion, backupPath, fmt.Errorf("marshaling migrated config: %w", err)
 	}
 
-	if err := os.WriteFile(path, out, 0644); err != nil {
+	if err := atomicfile.WriteFile(path, out, 0644); err != nil {
 		return oldVersion, backupPath, fmt.Errorf("writing migrated config: %w", err)
 	}
 
