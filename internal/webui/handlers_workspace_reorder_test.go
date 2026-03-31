@@ -200,8 +200,15 @@ func TestWorkspaceReorder_ConfigSaveFails(t *testing.T) {
 
 	handler := handleWorkspaceReorder(nil)
 
-	// Remove the directory's write permission to prevent creating temp files
-	// (saveLoomConfig uses os.CreateTemp in the config dir)
+	// Pre-create the config.lock file so ConfigLock can open it after chmod.
+	// Then remove the directory's write permission to prevent creating temp files
+	// (saveLoomConfig uses os.CreateTemp in the config dir).
+	lockFile, err := os.Create(dir + "/config.lock")
+	if err != nil {
+		t.Fatalf("creating lock file: %v", err)
+	}
+	lockFile.Close()
+
 	if err := os.Chmod(dir, 0555); err != nil {
 		t.Fatalf("chmod: %v", err)
 	}

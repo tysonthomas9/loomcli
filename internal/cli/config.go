@@ -8,6 +8,8 @@ import (
 
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
+
+	"github.com/tysonthomas9/loomcli/internal/configlock"
 )
 
 var configVersionWarnOnce sync.Once
@@ -120,6 +122,16 @@ func GetConfigPath() string {
 // Returns (nil, nil) if the config file does not exist.
 // Returns (nil, error) on read or parse errors.
 func LoadConfig() (*LoomConfig, error) {
+	dir := GetConfigDir()
+	if dir == "" {
+		return nil, fmt.Errorf("cannot determine config directory for lock")
+	}
+	unlock, err := configlock.ConfigLock(dir)
+	if err != nil {
+		return nil, fmt.Errorf("config lock: %w", err)
+	}
+	defer unlock()
+
 	path := GetConfigPath()
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -197,6 +209,11 @@ func SaveConfig(cfg *LoomConfig) error {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("creating config dir %s: %w", dir, err)
 	}
+	unlock, err := configlock.ConfigLock(dir)
+	if err != nil {
+		return fmt.Errorf("config lock: %w", err)
+	}
+	defer unlock()
 	path := GetConfigPath()
 	if err := os.WriteFile(path, data, 0644); err != nil {
 		return fmt.Errorf("writing config %s: %w", path, err)

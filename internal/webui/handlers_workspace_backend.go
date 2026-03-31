@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/tysonthomas9/loomcli/internal/configlock"
 )
 
 // WorkspaceBackendPatchRequest is the JSON body for PATCH /api/workspaces/{ws}/config/backend.
@@ -39,7 +41,14 @@ type loomWorkspaceForBackend struct {
 
 // loadLoomConfigForBackend reads and parses ~/.loom/config.yaml for backend operations.
 func loadLoomConfigForBackend() (*loomConfigForBackend, error) {
-	path := filepath.Join(loomConfigDir(), "config.yaml")
+	dir := loomConfigDir()
+	unlock, err := configlock.ConfigLock(dir)
+	if err != nil {
+		return nil, fmt.Errorf("config lock: %w", err)
+	}
+	defer unlock()
+
+	path := filepath.Join(dir, "config.yaml")
 	data, err := os.ReadFile(path) //nolint:gosec // path constructed from known config dir + fixed filename
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -60,6 +69,12 @@ func saveLoomConfigForBackend(cfg *loomConfigForBackend) error {
 	if dir == "" {
 		return fmt.Errorf("cannot determine config directory")
 	}
+	unlock, err := configlock.ConfigLock(dir)
+	if err != nil {
+		return fmt.Errorf("config lock: %w", err)
+	}
+	defer unlock()
+
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("marshaling config: %w", err)

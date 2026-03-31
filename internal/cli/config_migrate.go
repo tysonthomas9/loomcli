@@ -4,10 +4,13 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
+
+	"github.com/tysonthomas9/loomcli/internal/configlock"
 )
 
 // CurrentConfigVersion is the latest config schema version.
@@ -80,6 +83,12 @@ func BackupConfig(path string) (string, error) {
 // Creates a timestamped backup before modifying. Returns the old version
 // and backup path. If already at the current version, no backup is created.
 func MigrateConfigFile(path string) (oldVersion int, backupPath string, err error) {
+	unlock, lockErr := configlock.ConfigLock(filepath.Dir(path))
+	if lockErr != nil {
+		return 0, "", fmt.Errorf("config lock: %w", lockErr)
+	}
+	defer unlock()
+
 	content, err := os.ReadFile(path) //nolint:gosec // path is from CLI arg or resolved config path
 	if err != nil {
 		return 0, "", fmt.Errorf("reading config: %w", err)
