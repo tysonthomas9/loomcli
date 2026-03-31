@@ -44,7 +44,7 @@ func TestSSETokenStore_GenerateAndValidate(t *testing.T) {
 		t.Fatalf("token should have format payload.signature, got %d parts", len(parts))
 	}
 
-	userID, err := store.Validate(token)
+	userID, err := store.Validate(token, "ws-1")
 	if err != nil {
 		t.Errorf("Validate() error = %v, want nil", err)
 	}
@@ -65,12 +65,12 @@ func TestSSETokenStore_SingleUse(t *testing.T) {
 	}
 
 	// First use: success
-	if _, err := store.Validate(token); err != nil {
+	if _, err := store.Validate(token, "ws-1"); err != nil {
 		t.Fatalf("first Validate() error = %v, want nil", err)
 	}
 
 	// Second use: must fail
-	_, err = store.Validate(token)
+	_, err = store.Validate(token, "ws-1")
 	if err == nil {
 		t.Fatal("second Validate() error = nil, want 'token already used'")
 	}
@@ -107,7 +107,7 @@ func TestSSETokenStore_Expired(t *testing.T) {
 
 	token := payloadB64 + "." + sig
 
-	_, err = store.Validate(token)
+	_, err = store.Validate(token, "ws-1")
 	if err == nil {
 		t.Fatal("Validate() error = nil for expired token, want error")
 	}
@@ -162,7 +162,7 @@ func TestSSETokenStore_MalformedToken(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := store.Validate(tt.token)
+			_, err := store.Validate(tt.token, "any")
 			if err == nil {
 				t.Errorf("Validate(%q) = nil, want error", tt.token)
 			} else if tt.want != "" && !strings.Contains(err.Error(), tt.want) {
@@ -209,7 +209,7 @@ func TestSSETokenStore_TamperedPayload(t *testing.T) {
 	modifiedB64 := base64.RawURLEncoding.EncodeToString(modifiedBytes)
 	tampered := modifiedB64 + "." + parts[1]
 
-	_, err = store.Validate(tampered)
+	_, err = store.Validate(tampered, "ws-1")
 	if err == nil {
 		t.Fatal("Validate() error = nil for tampered payload, want error")
 	}
@@ -237,7 +237,7 @@ func TestSSETokenStore_TamperedSignature(t *testing.T) {
 	// Flip characters in the signature to tamper with it
 	tampered := parts[0] + "." + "AAAA" + parts[1][4:]
 
-	_, err = store.Validate(tampered)
+	_, err = store.Validate(tampered, "ws-1")
 	if err == nil {
 		t.Fatal("Validate() error = nil for tampered signature, want error")
 	}
@@ -282,12 +282,66 @@ func TestSSETokenStore_EmptyUserID(t *testing.T) {
 
 	token := payloadB64 + "." + sig
 
-	_, err = store.Validate(token)
+	_, err = store.Validate(token, "ws-1")
 	if err == nil {
 		t.Fatal("Validate() error = nil for empty user ID, want error")
 	}
 	if !strings.Contains(err.Error(), "missing user identity") {
 		t.Errorf("Validate() error = %q, want error containing 'missing user identity'", err)
+	}
+}
+
+// TestSSETokenStore_WorkspaceMismatch tests that a token generated for one
+// workspace is rejected when validated against a different workspace, and that
+// the nonce is NOT consumed (so the token is still valid for the correct workspace).
+func TestSSETokenStore_WorkspaceMismatch(t *testing.T) {
+	store := newTestSSETokenStore()
+	defer store.Stop()
+
+	// Generate token for workspace "ws-alpha"
+	token, err := store.Generate("user-123", "ws-alpha")
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	// Validate against a DIFFERENT workspace — must fail
+	_, err = store.Validate(token, "ws-beta")
+	if err == nil {
+		t.Fatal("Validate() error = nil for workspace mismatch, want error")
+	}
+	if !strings.Contains(err.Error(), "workspace mismatch") {
+		t.Errorf("Validate() error = %q, want error containing 'workspace mismatch'", err)
+	}
+
+	// The nonce must NOT be consumed — retrying with the correct workspace must succeed
+	userID, err := store.Validate(token, "ws-alpha")
+	if err != nil {
+		t.Errorf("Validate() with correct workspace error = %v, want nil", err)
+	}
+	if userID != "user-123" {
+		t.Errorf("Validate() returned userID = %q, want %q", userID, "user-123")
+	}
+}
+
+// TestSSETokenStore_EmptyWorkspace tests that a token generated with a workspace
+// is rejected when validated with an empty expected workspace.
+func TestSSETokenStore_EmptyWorkspace(t *testing.T) {
+	store := newTestSSETokenStore()
+	defer store.Stop()
+
+	// Generate token with a workspace
+	token, err := store.Generate("user-123", "ws-1")
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	// Validate with empty expected workspace — must fail
+	_, err = store.Validate(token, "")
+	if err == nil {
+		t.Fatal("Validate() error = nil for empty expected workspace, want error")
+	}
+	if !strings.Contains(err.Error(), "workspace mismatch") {
+		t.Errorf("Validate() error = %q, want error containing 'workspace mismatch'", err)
 	}
 }
 
@@ -371,7 +425,7 @@ func TestSSETokenStore_ReturnedUserID(t *testing.T) {
 				t.Fatalf("Generate() error = %v", err)
 			}
 
-			gotUserID, err := store.Validate(token)
+			gotUserID, err := store.Validate(token, "ws-1")
 			if err != nil {
 				t.Fatalf("Validate() error = %v", err)
 			}
@@ -482,7 +536,7 @@ func TestHandleSSEToken_GeneratedTokenIsValid(t *testing.T) {
 	token := resp["token"]
 
 	// The returned token should be valid and return the correct user ID
-	userID, err := store.Validate(token)
+	userID, err := store.Validate(token, "ws-2")
 	if err != nil {
 		t.Errorf("returned token should be valid: %v", err)
 	}
@@ -503,7 +557,7 @@ func TestSSE_OpaqueTokenAuth(t *testing.T) {
 	store := newTestSSETokenStore()
 	defer store.Stop()
 
-	token, err := store.Generate("user-123", "ws-1")
+	token, err := store.Generate("user-123", "test-ws")
 	if err != nil {
 		t.Fatalf("Generate() error = %v", err)
 	}
@@ -640,5 +694,36 @@ func TestSSE_NoTokenOpenMode(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "event: connected") {
 		t.Error("expected connected event in response")
+	}
+}
+
+// TestSSE_CrossWorkspaceTokenRejected tests that a token generated for one
+// workspace is rejected when used to connect to a different workspace's SSE endpoint.
+func TestSSE_CrossWorkspaceTokenRejected(t *testing.T) {
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	store := newTestSSETokenStore()
+	defer store.Stop()
+
+	// Generate token for workspace "ws-alpha"
+	token, err := store.Generate("user-123", "ws-alpha")
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	handler := NewSSEHandlerWithAuth(hub, nil, store)
+
+	// Connect to workspace "ws-beta" with a token for "ws-alpha" — must be rejected
+	ctx := WithWorkspace(context.Background(), "ws-beta")
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/ws-beta/events?token="+token, nil)
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusUnauthorized)
 	}
 }

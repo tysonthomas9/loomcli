@@ -87,9 +87,10 @@ func (s *sseTokenStore) Generate(userID, workspaceID string) (string, error) {
 	return payloadB64 + "." + sig, nil
 }
 
-// Validate checks the token signature, expiry, nonce single-use, and non-empty user ID.
-// Returns the embedded user ID on success.
-func (s *sseTokenStore) Validate(token string) (string, error) {
+// Validate checks the token signature, expiry, workspace binding, nonce single-use,
+// and non-empty user ID. Returns the embedded user ID on success.
+// The expectedWorkspaceID must match the workspace embedded in the token.
+func (s *sseTokenStore) Validate(token, expectedWorkspaceID string) (string, error) {
 	parts := strings.SplitN(token, ".", 2)
 	if len(parts) != 2 {
 		return "", fmt.Errorf("malformed token")
@@ -130,6 +131,11 @@ func (s *sseTokenStore) Validate(token string) (string, error) {
 	// Check identity binding
 	if payload.UserID == "" {
 		return "", fmt.Errorf("invalid token: missing user identity")
+	}
+
+	// Check workspace binding (before nonce consumption so a mismatch doesn't burn the nonce)
+	if payload.WorkspaceID != expectedWorkspaceID {
+		return "", fmt.Errorf("workspace mismatch")
 	}
 
 	// Check single-use
@@ -190,7 +196,8 @@ func validateSSEAuth(w http.ResponseWriter, r *http.Request, sseAuth *sseTokenSt
 		respondError(w, http.StatusUnauthorized, "authentication required")
 		return false
 	}
-	if _, err := sseAuth.Validate(token); err != nil {
+	expectedWS := WorkspaceFromContext(r.Context())
+	if _, err := sseAuth.Validate(token, expectedWS); err != nil {
 		respondError(w, http.StatusUnauthorized, "invalid or expired token")
 		return false
 	}
