@@ -72,11 +72,7 @@ export { fetchUsage } from "./usage";
 export { fetchObservabilityMetrics } from "./observability";
 
 // Workspace API functions
-export {
-  fetchWorkspace,
-  refreshWorkspace,
-  getCachedWorkspace,
-} from "./workspace";
+export { fetchWorkspaceApi } from "./workspace";
 export type {
   WorkspaceData,
   RepoInfo,

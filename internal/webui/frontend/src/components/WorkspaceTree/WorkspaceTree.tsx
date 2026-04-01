@@ -25,7 +25,6 @@ import {
   renameWorkspace,
   deleteWorkspace,
   reorderWorkspaces,
-  refreshWorkspace,
 } from "@/api/workspace";
 import type { WorkspaceSummary } from "@/api/workspace";
 import type { ConnectionState } from "@/api/sse";
@@ -127,6 +126,7 @@ export function WorkspaceTree({
     defaultWorkspaceName,
     setDefaultWorkspace,
     agents: workspaceConfigAgents,
+    refetch: contextRefetch,
   } = useWorkspaceContext();
 
   // Load initial collapsed state from scoped localStorage
@@ -242,14 +242,10 @@ export function WorkspaceTree({
     useSensor(KeyboardSensor),
   );
 
-  // Re-fetch order from server on error (safe under rapid sequential reorders)
+  // Re-fetch order from server on error (triggers context refetch which updates workspace data)
   const rollbackOrder = useCallback(() => {
-    refreshWorkspace().then((data) => {
-      if (data?.workspaces) {
-        setWorkspaceOrder(data.workspaces.map((w) => w.name));
-      }
-    });
-  }, []);
+    contextRefetch();
+  }, [contextRefetch]);
 
   // Debounced server persist — coalesces rapid reorder operations into a single API call
   const debouncedPersistOrder = useDebouncedCallback((order: string[]) => {

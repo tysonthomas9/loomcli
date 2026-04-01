@@ -1,5 +1,6 @@
 /**
- * API client for workspace endpoints with module-level caching.
+ * API client for workspace endpoints.
+ * Stateless — no module-level caches. Caching belongs in React hooks/context.
  * Interfaces with GET /api/workspaces/active and /api/workspaces/ CRUD endpoints.
  */
 
@@ -62,13 +63,6 @@ interface ApiFailure {
 
 type ApiResult<T> = ApiSuccess<T> | ApiFailure;
 
-// ============= Module-level Cache =============
-
-let workspaceCache: WorkspaceData | null = null;
-let fetchPromise: Promise<WorkspaceData> | null = null;
-let cacheGeneration = 0; // incremented on refresh to discard stale in-flight responses
-let cachedWorkspaceId: string | null = null; // tracks which workspace the cache holds
-
 // ============= Helpers =============
 
 function unwrap<T>(response: ApiResult<T>): T {
@@ -81,79 +75,21 @@ function unwrap<T>(response: ApiResult<T>): T {
 // ============= API Functions =============
 
 /**
- * Fetch workspace data. Returns cached data if available.
- * Deduplicates concurrent in-flight requests.
+ * Fetch workspace data from the API. Always hits the network.
+ * Callers are responsible for caching/deduplication (via useWorkspace hook).
  */
-export async function fetchWorkspace(
+export async function fetchWorkspaceApi(
   workspaceId?: string,
 ): Promise<WorkspaceData> {
-  const requestedId = workspaceId ?? null;
-
-  // Invalidate cache if the requested workspace differs from what's cached
-  if (requestedId !== cachedWorkspaceId) {
-    workspaceCache = null;
-    fetchPromise = null;
-    cachedWorkspaceId = requestedId;
-  }
-
-  if (workspaceCache !== null) {
-    return workspaceCache;
-  }
-  if (fetchPromise !== null) {
-    return fetchPromise;
-  }
-  const gen = cacheGeneration;
   const path = workspaceId
     ? `/api/workspaces/${encodeURIComponent(workspaceId)}`
     : "/api/workspaces/active";
-  fetchPromise = get<ApiResult<WorkspaceData>>(path).then(
-    (response) => {
-      // Discard stale response if a refresh happened while we were in-flight
-      if (gen !== cacheGeneration) {
-        return fetchWorkspace(workspaceId);
-      }
-      workspaceCache = unwrap(response);
-      cachedWorkspaceId = requestedId;
-      fetchPromise = null;
-      return workspaceCache;
-    },
-    (err) => {
-      if (gen === cacheGeneration) {
-        fetchPromise = null;
-      }
-      throw err;
-    },
-  );
-  return fetchPromise;
+  const response = await get<ApiResult<WorkspaceData>>(path);
+  return unwrap(response);
 }
 
 /**
- * Invalidate the workspace cache without triggering a refetch.
- * Call during workspace switch to prevent stale data from the old workspace
- * being served to the new workspace's components on mount.
- */
-export function invalidateWorkspaceCache(): void {
-  cacheGeneration++;
-  workspaceCache = null;
-  fetchPromise = null;
-  cachedWorkspaceId = null;
-}
-
-/**
- * Invalidate the cache and re-fetch workspace data from the backend.
- */
-export async function refreshWorkspace(
-  workspaceId?: string,
-): Promise<WorkspaceData> {
-  cacheGeneration++; // Invalidate any in-flight fetch from prior generation
-  workspaceCache = null;
-  fetchPromise = null;
-  cachedWorkspaceId = workspaceId ?? null;
-  return fetchWorkspace(workspaceId);
-}
-
-/**
- * Rename a workspace by ID. On success, invalidates the cache and returns refreshed data.
+ * Rename a workspace by ID. Returns the updated workspace data.
  */
 export async function renameWorkspace(
   workspaceId: string,
@@ -165,18 +101,13 @@ export async function renameWorkspace(
   );
   const data = unwrap(response);
   if (data == null) {
-    // Same-name no-op: return current cache or re-fetch
-    return workspaceCache ?? (await refreshWorkspace());
+    return await fetchWorkspaceApi(workspaceId);
   }
-  // Refresh cache with the returned data
-  cacheGeneration++;
-  workspaceCache = data;
-  fetchPromise = null;
   return data;
 }
 
 /**
- * Delete a workspace by ID. On success, invalidates the cache and returns refreshed data.
+ * Delete a workspace by ID. Returns the updated workspace data.
  */
 export async function deleteWorkspace(
   workspaceId: string,
@@ -187,15 +118,11 @@ export async function deleteWorkspace(
   if (!response.success) {
     throw new ApiError(0, response.error);
   }
-  // Refresh cache with the returned data
-  cacheGeneration++;
-  workspaceCache = response.data ?? null;
-  fetchPromise = null;
-  return workspaceCache;
+  return response.data;
 }
 
 /**
- * Reorder workspaces. On success, invalidates the cache and returns refreshed data.
+ * Reorder workspaces. Returns the updated workspace data.
  */
 export async function reorderWorkspaces(
   order: string[],
@@ -206,16 +133,11 @@ export async function reorderWorkspaces(
       order,
     },
   );
-  const data = unwrap(response);
-  // Refresh cache with the returned data
-  cacheGeneration++;
-  workspaceCache = data;
-  fetchPromise = null;
-  return data;
+  return unwrap(response);
 }
 
 /**
- * Set the default workspace. On success, invalidates cache and returns refreshed data.
+ * Set the default workspace. Returns the updated workspace data.
  */
 export async function setDefaultWorkspace(
   name: string,
@@ -224,31 +146,17 @@ export async function setDefaultWorkspace(
     "/api/workspaces/default",
     { name },
   );
-  const data = unwrap(response);
-  cacheGeneration++;
-  if (data) {
-    workspaceCache = data;
-  }
-  fetchPromise = null;
-  return workspaceCache ?? (await refreshWorkspace());
+  return unwrap(response);
 }
 
 /**
- * Clear the default workspace. On success, invalidates cache and returns refreshed data.
+ * Clear the default workspace. Returns the updated workspace data.
  */
 export async function clearDefaultWorkspace(): Promise<WorkspaceData> {
   const response = await del<ApiResult<WorkspaceData>>(
     "/api/workspaces/default",
   );
-  if (!response.success) {
-    throw new ApiError(0, response.error);
-  }
-  cacheGeneration++;
-  if (response.data) {
-    workspaceCache = response.data;
-  }
-  fetchPromise = null;
-  return workspaceCache ?? (await refreshWorkspace());
+  return unwrap(response);
 }
 
 // ============= Workspace Creation =============
@@ -314,14 +222,9 @@ export async function createWorkspace(
   const syncResponse = response as ApiResult<WorkspaceData>;
   const data = unwrap(syncResponse);
   const warnings = syncResponse.success ? syncResponse.warnings : undefined;
-  cacheGeneration++;
-  if (data) {
-    workspaceCache = data;
-  }
-  fetchPromise = null;
   const result: WorkspaceCreateSync = {
     kind: "sync",
-    data: data ?? (await refreshWorkspace()),
+    data,
   };
   if (warnings && warnings.length > 0) {
     result.warnings = warnings;
@@ -354,14 +257,6 @@ export async function pollWorkspaceJob(
   return get<WorkspaceJobState>(
     `/api/workspaces/jobs/${encodeURIComponent(jobId)}`,
   );
-}
-
-/**
- * Synchronous getter for current cache state.
- * Returns null if not yet fetched, or the cached workspace data.
- */
-export function getCachedWorkspace(): WorkspaceData | null {
-  return workspaceCache;
 }
 
 // ============= Workspace Issue Helpers =============

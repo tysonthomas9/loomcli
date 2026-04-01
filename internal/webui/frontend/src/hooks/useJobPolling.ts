@@ -7,7 +7,7 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 
-import { pollWorkspaceJob, refreshWorkspace } from "@/api/workspace";
+import { pollWorkspaceJob, fetchWorkspaceApi } from "@/api/workspace";
 import type { WorkspaceData } from "@/api/workspace";
 import { useElapsedTime } from "./useElapsedTime";
 
@@ -101,7 +101,7 @@ export function useJobPolling(
 
         if (state.status === "done") {
           try {
-            const data = await refreshWorkspace(state.workspace_id);
+            const data = await fetchWorkspaceApi(state.workspace_id);
             if (cancelled) return;
             setJobId(null);
             setStartTime(null);

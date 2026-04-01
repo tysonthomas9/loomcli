@@ -23,8 +23,6 @@ import type { RepoInfo, WorkspaceAgentInfo } from "@/api/workspace";
 import {
   setDefaultWorkspace as setDefaultWorkspaceApi,
   clearDefaultWorkspace as clearDefaultWorkspaceApi,
-  refreshWorkspace,
-  invalidateWorkspaceCache,
 } from "@/api/workspace";
 import { wsGet, wsSet, setLastWorkspaceId } from "@/utils/scopedStorage";
 
@@ -227,16 +225,15 @@ export function WorkspaceProvider({
     }
   }, [workspaceResult.workspace]);
 
-  // Workspace switch — SPA navigation via React Router (no page reload)
+  // Workspace switch — SPA navigation via React Router (no page reload).
+  // No cache invalidation needed: navigating to a new route mounts a new
+  // WorkspaceProvider with a different workspaceId, and useWorkspace's
+  // generation counter naturally discards stale data.
   const setActiveWorkspace = useCallback(
     (name: string) => {
-      // Find the workspace ID for the given name from the workspace list
       const workspaces = workspaceResult.workspace?.workspaces ?? [];
       const target = workspaces.find((ws) => ws.name === name);
       if (target) {
-        // Invalidate cached workspace data before navigating to prevent
-        // stale data from the old workspace being served to new components
-        invalidateWorkspaceCache();
         navigate(`/ws/${target.id}/`);
       }
     },
@@ -255,14 +252,14 @@ export function WorkspaceProvider({
         } else {
           await clearDefaultWorkspaceApi();
         }
-        await refreshWorkspace();
+        workspaceResult.refetch();
       } catch (err) {
         setDefaultWorkspaceNameRaw(previous);
         lsSet(LS_DEFAULT_WORKSPACE, previous ?? "");
         throw err;
       }
     },
-    [defaultWorkspaceName],
+    [defaultWorkspaceName, workspaceResult.refetch],
   );
 
   // Repo selection actions — use workspace-scoped storage

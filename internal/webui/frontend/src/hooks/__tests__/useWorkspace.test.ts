@@ -10,18 +10,16 @@
 import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { fetchWorkspace, refreshWorkspace } from "@/api/workspace";
+import { fetchWorkspaceApi } from "@/api/workspace";
 import type { WorkspaceData } from "@/api/workspace";
 
 import { useWorkspace } from "../useWorkspace";
 
 // Mock the workspace API functions
 vi.mock("@/api/workspace", () => ({
-  fetchWorkspace: vi.fn(),
-  refreshWorkspace: vi.fn(),
+  fetchWorkspaceApi: vi.fn(),
 }));
-const mockFetchWorkspace = vi.mocked(fetchWorkspace);
-const mockRefreshWorkspace = vi.mocked(refreshWorkspace);
+const mockFetchWorkspaceApi = vi.mocked(fetchWorkspaceApi);
 
 /**
  * Helper to create a mock WorkspaceData.
@@ -89,8 +87,8 @@ async function flushPromises(): Promise<void> {
 describe("useWorkspace", () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    mockFetchWorkspace.mockReset();
-    mockRefreshWorkspace.mockReset();
+    mockFetchWorkspaceApi.mockReset();
+    mockFetchWorkspaceApi.mockReset();
   });
 
   afterEach(() => {
@@ -101,7 +99,7 @@ describe("useWorkspace", () => {
   describe("initial fetch", () => {
     it("returns repos/groups/agents on successful fetch", async () => {
       const workspace = createMockWorkspace();
-      mockFetchWorkspace.mockResolvedValueOnce(workspace);
+      mockFetchWorkspaceApi.mockResolvedValueOnce(workspace);
 
       const { result } = renderHook(() => useWorkspace({ pollInterval: 0 }));
 
@@ -119,7 +117,7 @@ describe("useWorkspace", () => {
     });
 
     it("sets isLoading during initial fetch", async () => {
-      mockFetchWorkspace.mockImplementation(() => new Promise(() => {}));
+      mockFetchWorkspaceApi.mockImplementation(() => new Promise(() => {}));
 
       const { result } = renderHook(() => useWorkspace({ pollInterval: 0 }));
 
@@ -133,7 +131,7 @@ describe("useWorkspace", () => {
 
     it("sets isLoading to false after fetch resolves", async () => {
       const workspace = createMockWorkspace();
-      mockFetchWorkspace.mockResolvedValueOnce(workspace);
+      mockFetchWorkspaceApi.mockResolvedValueOnce(workspace);
 
       const { result } = renderHook(() => useWorkspace({ pollInterval: 0 }));
 
@@ -143,7 +141,7 @@ describe("useWorkspace", () => {
     });
 
     it("sets isLoading to false after fetch rejects", async () => {
-      mockFetchWorkspace.mockRejectedValueOnce(new Error("Network error"));
+      mockFetchWorkspaceApi.mockRejectedValueOnce(new Error("Network error"));
 
       const { result } = renderHook(() => useWorkspace({ pollInterval: 0 }));
 
@@ -154,7 +152,9 @@ describe("useWorkspace", () => {
     });
 
     it("sets error message from Error instance", async () => {
-      mockFetchWorkspace.mockRejectedValueOnce(new Error("Failed to connect"));
+      mockFetchWorkspaceApi.mockRejectedValueOnce(
+        new Error("Failed to connect"),
+      );
 
       const { result } = renderHook(() => useWorkspace({ pollInterval: 0 }));
 
@@ -164,7 +164,7 @@ describe("useWorkspace", () => {
     });
 
     it("sets default error message for non-Error exceptions", async () => {
-      mockFetchWorkspace.mockRejectedValueOnce("some string error");
+      mockFetchWorkspaceApi.mockRejectedValueOnce("some string error");
 
       const { result } = renderHook(() => useWorkspace({ pollInterval: 0 }));
 
@@ -177,7 +177,7 @@ describe("useWorkspace", () => {
   describe("stale data on error", () => {
     it("keeps stale data on subsequent fetch errors", async () => {
       const workspace = createMockWorkspace();
-      mockFetchWorkspace.mockResolvedValueOnce(workspace);
+      mockFetchWorkspaceApi.mockResolvedValueOnce(workspace);
 
       const { result } = renderHook(() => useWorkspace({ pollInterval: 5000 }));
 
@@ -187,7 +187,7 @@ describe("useWorkspace", () => {
       expect(result.current.repos).toHaveLength(2);
 
       // Next poll fails
-      mockRefreshWorkspace.mockRejectedValueOnce(
+      mockFetchWorkspaceApi.mockRejectedValueOnce(
         new Error("Server unavailable"),
       );
 
@@ -206,36 +206,37 @@ describe("useWorkspace", () => {
   describe("polling", () => {
     it("calls refetch on interval", async () => {
       const workspace = createMockWorkspace();
-      mockFetchWorkspace.mockResolvedValueOnce(workspace);
+      mockFetchWorkspaceApi.mockResolvedValueOnce(workspace);
 
       renderHook(() => useWorkspace({ pollInterval: 10000 }));
 
       // Initial fetch
       await flushPromises();
-      expect(mockFetchWorkspace).toHaveBeenCalledTimes(1);
+      expect(mockFetchWorkspaceApi).toHaveBeenCalledTimes(1);
 
-      // Subsequent polls use refreshWorkspace (invalidateCache=true)
+      // Subsequent polls call fetchWorkspaceApi again
       const updatedWorkspace = createMockWorkspace({
         name: "updated-workspace",
       });
-      mockRefreshWorkspace.mockResolvedValueOnce(updatedWorkspace);
+      mockFetchWorkspaceApi.mockResolvedValueOnce(updatedWorkspace);
 
       await act(async () => {
         vi.advanceTimersByTime(10000);
       });
       await flushPromises();
 
-      expect(mockRefreshWorkspace).toHaveBeenCalledTimes(1);
+      // 1 initial + 1 poll = 2 total
+      expect(mockFetchWorkspaceApi).toHaveBeenCalledTimes(2);
     });
 
     it("does not poll when pollInterval is 0", async () => {
       const workspace = createMockWorkspace();
-      mockFetchWorkspace.mockResolvedValueOnce(workspace);
+      mockFetchWorkspaceApi.mockResolvedValueOnce(workspace);
 
       renderHook(() => useWorkspace({ pollInterval: 0 }));
 
       await flushPromises();
-      expect(mockFetchWorkspace).toHaveBeenCalledTimes(1);
+      expect(mockFetchWorkspaceApi).toHaveBeenCalledTimes(1);
 
       // Advance time - should not trigger additional fetches
       await act(async () => {
@@ -243,21 +244,23 @@ describe("useWorkspace", () => {
       });
       await flushPromises();
 
-      expect(mockRefreshWorkspace).not.toHaveBeenCalled();
+      // Still only the initial call
+      expect(mockFetchWorkspaceApi).toHaveBeenCalledTimes(1);
     });
 
     it("uses default poll interval of 60000ms", async () => {
       const workspace = createMockWorkspace();
-      mockFetchWorkspace.mockResolvedValueOnce(workspace);
+      mockFetchWorkspaceApi.mockResolvedValueOnce(workspace);
 
       renderHook(() => useWorkspace());
 
       await flushPromises();
+      expect(mockFetchWorkspaceApi).toHaveBeenCalledTimes(1);
 
       const updatedWorkspace = createMockWorkspace({
         name: "updated",
       });
-      mockRefreshWorkspace.mockResolvedValueOnce(updatedWorkspace);
+      mockFetchWorkspaceApi.mockResolvedValueOnce(updatedWorkspace);
 
       // Advance 59 seconds - should not poll yet
       await act(async () => {
@@ -265,7 +268,7 @@ describe("useWorkspace", () => {
       });
       await flushPromises();
 
-      expect(mockRefreshWorkspace).not.toHaveBeenCalled();
+      expect(mockFetchWorkspaceApi).toHaveBeenCalledTimes(1);
 
       // Advance 1 more second (total 60s) - should poll
       await act(async () => {
@@ -273,7 +276,7 @@ describe("useWorkspace", () => {
       });
       await flushPromises();
 
-      expect(mockRefreshWorkspace).toHaveBeenCalledTimes(1);
+      expect(mockFetchWorkspaceApi).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -281,7 +284,7 @@ describe("useWorkspace", () => {
     it("cleans up interval on unmount", async () => {
       const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval");
       const workspace = createMockWorkspace();
-      mockFetchWorkspace.mockResolvedValueOnce(workspace);
+      mockFetchWorkspaceApi.mockResolvedValueOnce(workspace);
 
       const { unmount } = renderHook(() =>
         useWorkspace({ pollInterval: 10000 }),
@@ -303,7 +306,7 @@ describe("useWorkspace", () => {
       const pendingPromise = new Promise<WorkspaceData>((resolve) => {
         resolvePromise = resolve;
       });
-      mockFetchWorkspace.mockReturnValueOnce(pendingPromise);
+      mockFetchWorkspaceApi.mockReturnValueOnce(pendingPromise);
 
       const { result, unmount } = renderHook(() =>
         useWorkspace({ pollInterval: 0 }),
@@ -325,9 +328,9 @@ describe("useWorkspace", () => {
   });
 
   describe("refetch", () => {
-    it("refetch calls refreshWorkspace (invalidates cache)", async () => {
+    it("refetch calls fetchWorkspaceApi (fresh network request)", async () => {
       const workspace = createMockWorkspace();
-      mockFetchWorkspace.mockResolvedValueOnce(workspace);
+      mockFetchWorkspaceApi.mockResolvedValueOnce(workspace);
 
       const { result } = renderHook(() => useWorkspace({ pollInterval: 0 }));
 
@@ -336,19 +339,20 @@ describe("useWorkspace", () => {
       const updatedWorkspace = createMockWorkspace({
         name: "refreshed-workspace",
       });
-      mockRefreshWorkspace.mockResolvedValueOnce(updatedWorkspace);
+      mockFetchWorkspaceApi.mockResolvedValueOnce(updatedWorkspace);
 
       await act(async () => {
         result.current.refetch();
       });
       await flushPromises();
 
-      expect(mockRefreshWorkspace).toHaveBeenCalledTimes(1);
+      // 1 initial + 1 refetch = 2 total
+      expect(mockFetchWorkspaceApi).toHaveBeenCalledTimes(2);
       expect(result.current.workspace?.name).toBe("refreshed-workspace");
     });
 
     it("clears error on successful refetch", async () => {
-      mockFetchWorkspace.mockRejectedValueOnce(new Error("Initial error"));
+      mockFetchWorkspaceApi.mockRejectedValueOnce(new Error("Initial error"));
 
       const { result } = renderHook(() => useWorkspace({ pollInterval: 0 }));
 
@@ -356,7 +360,7 @@ describe("useWorkspace", () => {
       expect(result.current.error).toBe("Initial error");
 
       const workspace = createMockWorkspace();
-      mockRefreshWorkspace.mockResolvedValueOnce(workspace);
+      mockFetchWorkspaceApi.mockResolvedValueOnce(workspace);
 
       await act(async () => {
         result.current.refetch();
@@ -370,7 +374,7 @@ describe("useWorkspace", () => {
 
   describe("convenience aliases", () => {
     it("repos returns empty array when workspace is null", () => {
-      mockFetchWorkspace.mockImplementation(() => new Promise(() => {}));
+      mockFetchWorkspaceApi.mockImplementation(() => new Promise(() => {}));
 
       const { result } = renderHook(() => useWorkspace({ pollInterval: 0 }));
 
@@ -378,7 +382,7 @@ describe("useWorkspace", () => {
     });
 
     it("groups returns empty array when workspace is null", () => {
-      mockFetchWorkspace.mockImplementation(() => new Promise(() => {}));
+      mockFetchWorkspaceApi.mockImplementation(() => new Promise(() => {}));
 
       const { result } = renderHook(() => useWorkspace({ pollInterval: 0 }));
 
@@ -386,7 +390,7 @@ describe("useWorkspace", () => {
     });
 
     it("agents returns empty array when workspace is null", () => {
-      mockFetchWorkspace.mockImplementation(() => new Promise(() => {}));
+      mockFetchWorkspaceApi.mockImplementation(() => new Promise(() => {}));
 
       const { result } = renderHook(() => useWorkspace({ pollInterval: 0 }));
 
@@ -395,7 +399,7 @@ describe("useWorkspace", () => {
 
     it("groups returns empty array when workspace.groups is undefined", async () => {
       const workspace = createMockWorkspace({ groups: undefined });
-      mockFetchWorkspace.mockResolvedValueOnce(workspace);
+      mockFetchWorkspaceApi.mockResolvedValueOnce(workspace);
 
       const { result } = renderHook(() => useWorkspace({ pollInterval: 0 }));
 
@@ -406,7 +410,7 @@ describe("useWorkspace", () => {
 
     it("agents returns empty array when workspace.agents is undefined", async () => {
       const workspace = createMockWorkspace({ agents: undefined });
-      mockFetchWorkspace.mockResolvedValueOnce(workspace);
+      mockFetchWorkspaceApi.mockResolvedValueOnce(workspace);
 
       const { result } = renderHook(() => useWorkspace({ pollInterval: 0 }));
 

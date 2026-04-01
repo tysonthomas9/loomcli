@@ -6,7 +6,7 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 
-import { fetchWorkspace } from "@/api/workspace";
+import { fetchWorkspaceApi } from "@/api/workspace";
 import type { WorkspaceData, RepoInfo } from "@/api/workspace";
 import { calculateBackoffDelay } from "@/utils/reconnectBackoff";
 
@@ -133,7 +133,7 @@ export function useWorkspaceRepos(): UseWorkspaceReposReturn {
     setError(null);
 
     try {
-      const data = await fetchWorkspace();
+      const data = await fetchWorkspaceApi();
       if (mountedRef.current) {
         setWorkspace(data);
         hasConnectedRef.current = true;

@@ -4,7 +4,7 @@
  */
 
 import { patch, ApiError, wsUrl } from "./client";
-import { refreshWorkspace, type WorkspaceData } from "./workspace";
+import type { WorkspaceData } from "./workspace";
 
 interface ApiSuccess<T> {
   success: true;
@@ -19,8 +19,8 @@ interface ApiFailure {
 type ApiResult<T> = ApiSuccess<T> | ApiFailure;
 
 /**
- * Update a workspace's AI backend. On success, invalidates the workspace cache
- * and returns refreshed workspace data.
+ * Update a workspace's AI backend. Returns the updated workspace data.
+ * Callers are responsible for triggering a refetch on the workspace context.
  */
 export async function updateWorkspaceBackend(
   workspaceId: string,
@@ -33,6 +33,5 @@ export async function updateWorkspaceBackend(
   if (!response.success) {
     throw new ApiError(0, response.error);
   }
-  // Refresh cache so subsequent reads pick up the new backend
-  return refreshWorkspace();
+  return response.data;
 }

@@ -12,7 +12,7 @@ import {
   getLastWorkspaceId,
   clearLastWorkspaceId,
 } from "@/utils/scopedStorage";
-import { fetchWorkspace } from "@/api/workspace";
+import { fetchWorkspaceApi } from "@/api/workspace";
 
 export function RedirectToWorkspace() {
   const navigate = useNavigate();
@@ -27,7 +27,7 @@ export function RedirectToWorkspace() {
       ?.failedWorkspaceId;
 
     // Fetch workspace list — validates lastId and provides fallback
-    fetchWorkspace()
+    fetchWorkspaceApi()
       .then((data) => {
         if (cancelled) return;
         const workspaces = data.workspaces.filter((ws) => ws.id !== failedId);

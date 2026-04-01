@@ -23,7 +23,7 @@ import { CreateWorkspaceModal } from "../CreateWorkspaceModal";
 vi.mock("@/api/workspace", () => ({
   createWorkspace: vi.fn(),
   pollWorkspaceJob: vi.fn(),
-  refreshWorkspace: vi.fn(),
+  fetchWorkspaceApi: vi.fn(),
 }));
 
 vi.mock("@/hooks/useElapsedTime", () => ({
@@ -50,7 +50,7 @@ vi.mock("@/hooks/useFocusReturn", () => ({
 import {
   createWorkspace,
   pollWorkspaceJob,
-  refreshWorkspace,
+  fetchWorkspaceApi,
 } from "@/api/workspace";
 import type {
   WorkspaceData,
@@ -60,7 +60,7 @@ import type {
 
 const mockCreateWorkspace = vi.mocked(createWorkspace);
 const mockPollWorkspaceJob = vi.mocked(pollWorkspaceJob);
-const mockRefreshWorkspace = vi.mocked(refreshWorkspace);
+const mockFetchWorkspaceApi = vi.mocked(fetchWorkspaceApi);
 
 const MOCK_WORKSPACE_DATA: WorkspaceData = {
   id: "ws-test-id",
@@ -101,7 +101,7 @@ describe("CreateWorkspaceModal", () => {
     onSuccess = vi.fn();
     mockCreateWorkspace.mockReset();
     mockPollWorkspaceJob.mockReset();
-    mockRefreshWorkspace.mockReset();
+    mockFetchWorkspaceApi.mockReset();
   });
 
   describe("rendering", () => {
@@ -882,7 +882,7 @@ describe("CreateWorkspaceModal", () => {
         };
       });
 
-      mockRefreshWorkspace.mockResolvedValue(MOCK_WORKSPACE_DATA);
+      mockFetchWorkspaceApi.mockResolvedValue(MOCK_WORKSPACE_DATA);
 
       render(
         <CreateWorkspaceModal
@@ -912,8 +912,8 @@ describe("CreateWorkspaceModal", () => {
         await vi.advanceTimersByTimeAsync(2000);
       });
 
-      // Second poll returns "done" — should call refreshWorkspace and then onSuccess
-      expect(mockRefreshWorkspace).toHaveBeenCalledWith("ws-new-id");
+      // Second poll returns "done" — should call fetchWorkspaceApi and then onSuccess
+      expect(mockFetchWorkspaceApi).toHaveBeenCalledWith("ws-new-id");
       expect(onSuccess).toHaveBeenCalledWith(MOCK_WORKSPACE_DATA, "clone-ws");
       expect(onClose).toHaveBeenCalledTimes(1);
     });

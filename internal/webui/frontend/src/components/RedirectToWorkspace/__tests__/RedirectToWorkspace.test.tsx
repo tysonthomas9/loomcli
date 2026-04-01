@@ -37,7 +37,7 @@ const { mockFetchWorkspace } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/api/workspace", () => ({
-  fetchWorkspace: mockFetchWorkspace,
+  fetchWorkspaceApi: mockFetchWorkspace,
 }));
 
 const { mockGetLastWorkspaceId, mockClearLastWorkspaceId } = vi.hoisted(() => ({

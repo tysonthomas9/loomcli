@@ -14,7 +14,7 @@ import { renderHook, act } from "@testing-library/react";
 import React from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { fetchWorkspace } from "@/api/workspace";
+import { fetchWorkspaceApi } from "@/api/workspace";
 import type { WorkspaceData } from "@/api/workspace";
 import { calculateBackoffDelay } from "@/utils/reconnectBackoff";
 
@@ -22,7 +22,7 @@ import { useWorkspaceRepos } from "../useWorkspaceRepos";
 
 // Mock the workspace API
 vi.mock("@/api/workspace", () => ({
-  fetchWorkspace: vi.fn(),
+  fetchWorkspaceApi: vi.fn(),
 }));
 
 // Mock calculateBackoffDelay so delays are deterministic
@@ -30,7 +30,7 @@ vi.mock("@/utils/reconnectBackoff", () => ({
   calculateBackoffDelay: vi.fn(),
 }));
 
-const mockFetchWorkspace = vi.mocked(fetchWorkspace);
+const mockFetchWorkspace = vi.mocked(fetchWorkspaceApi);
 const mockCalculateBackoff = vi.mocked(calculateBackoffDelay);
 
 /** Helper to create a mock WorkspaceData. */

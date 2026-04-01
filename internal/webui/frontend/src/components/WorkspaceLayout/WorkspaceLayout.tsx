@@ -14,7 +14,7 @@ import {
   useWorkspaceContext,
 } from "@/hooks";
 import { IssueSessionProvider } from "@/contexts/IssueSessionContext";
-import { fetchWorkspace } from "@/api/workspace";
+import { fetchWorkspaceApi } from "@/api/workspace";
 import { clearLastWorkspaceId } from "@/utils/scopedStorage";
 
 function IssueSessionWrapper({ children }: { children: React.ReactNode }) {
@@ -41,7 +41,7 @@ export function WorkspaceLayout() {
 
     // Validate workspace ID exists by fetching it directly
     let cancelled = false;
-    fetchWorkspace(workspaceId)
+    fetchWorkspaceApi(workspaceId)
       .then((data) => {
         if (cancelled) return;
         if (data && data.id) {
