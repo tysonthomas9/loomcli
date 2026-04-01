@@ -6,24 +6,18 @@ import (
 
 	"golang.org/x/time/rate"
 
-	"github.com/tysonthomas9/loomcli/internal/rpc"
-	"github.com/tysonthomas9/loomcli/internal/sessions"
-	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/editor"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
-	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
-	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
-	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
 // setupRoutes configures all HTTP routes for the server.
-// allowedOrigins is the list of allowed CORS origins for WebSocket validation.
-func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPool, hub *SSEHub, getMutationsSince func(wsID string, since int64) []rpc.MutationEvent, termManager *TerminalManager, termAuth *terminalAuth, fleetRegistry *fleet.StoreRegistry, tokenCfg *TokenConfig, allowedOrigins []string, fleetRegCfg *FleetRegisterConfig, claimMetrics *fleet.ClaimMetrics, devMode bool, devFrontendDir string, loomServerURL string, gitOps GitOps, fileOps FileOps, tabMetaStore *tabmeta.Store, issueTabStore *issuetabs.Store, workspaceConfigFn func() (*WorkspaceData, error), workspaceDeleteFn func(string) error, setDefaultWsFn func(string) error, clearDefaultWsFn func() error, workspaceCreateFn WorkspaceCreateFn, backendOps BackendOps, sessionHistoryStore *sessionhistory.Store, sessStore *sessions.Store, wsExistsFn func(string) bool, workspaceConfigByIDFn func(string) (*WorkspaceData, error), extAuthURL string, sseTokens *sseTokenStore, jobStore *WorkspaceJobStore, notifyToken string) (*clientErrorLimiter, *cspReportLimiter, *authConfigLimiter) { //nolint:funlen // route registration function
+// Dependencies are read from serverApp fields.
+func (app *serverApp) setupRoutes(mux *http.ServeMux) (*clientErrorLimiter, *cspReportLimiter, *authConfigLimiter) {
 	// Health check endpoint for load balancers and monitoring
-	mux.HandleFunc("GET /health", handleHealth(pool))
+	mux.HandleFunc("GET /health", handleHealth(app.pool))
 
 	// API health endpoint that reports daemon connection status
-	mux.HandleFunc("GET /api/health", handleAPIHealth(pool))
+	mux.HandleFunc("GET /api/health", handleAPIHealth(app.pool))
 
 	// Client-side error reporting endpoint (has its own per-IP rate limiter, 10 req/min/IP)
 	clientErrLimiter := newClientErrorLimiter(rate.Limit(10.0/60.0), 10, 5*time.Minute, 10*time.Minute)
@@ -36,30 +30,30 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 	// Auth mode discovery endpoint (public, rate-limited — called once per page load).
 	// extAuthURL is the Better Auth service base URL for OAuth redirects, not JWKS.
 	authCfgLimiter := newAuthConfigLimiter(rate.Limit(5), 10, 5*time.Minute, 10*time.Minute)
-	mux.HandleFunc("GET /api/config", handleAuthConfig(extAuthURL, authCfgLimiter))
+	mux.HandleFunc("GET /api/config", handleAuthConfig(app.config.ExtAuthURL, authCfgLimiter))
 
 	// Stats endpoint for project statistics (workspace-aware when multiPool available)
-	mux.HandleFunc("GET /api/stats", handleStats(pool)) // Keep using main pool for now
+	mux.HandleFunc("GET /api/stats", handleStats(app.pool)) // Keep using main pool for now
 
 	// SSE hub metrics endpoint
 	var getFleetTimeouts func() int64
-	if fleetRegistry != nil {
-		getFleetTimeouts = fleetRegistry.GetTotalTimeoutCount
+	if app.fleetRegistry != nil {
+		getFleetTimeouts = app.fleetRegistry.GetTotalTimeoutCount
 	}
-	mux.HandleFunc("GET /api/metrics", handleMetrics(hub, getFleetTimeouts, claimMetrics))
+	mux.HandleFunc("GET /api/metrics", handleMetrics(app.hub, getFleetTimeouts, app.claimMetrics))
 
 	// Daemon status endpoint - exposes daemon configuration (auto-commit, auto-push, etc.)
-	mux.HandleFunc("GET /api/daemon/status", handleDaemonStatus(pool))
+	mux.HandleFunc("GET /api/daemon/status", handleDaemonStatus(app.pool))
 
 	// Backend configuration endpoints
-	mux.HandleFunc("GET /api/config/backend", handleGetBackendConfig(pool))
-	mux.HandleFunc("PATCH /api/config/backend", handlePatchBackendConfig(pool))
+	mux.HandleFunc("GET /api/config/backend", handleGetBackendConfig(app.pool))
+	mux.HandleFunc("PATCH /api/config/backend", handlePatchBackendConfig(app.pool))
 
 	// Workspace CRUD endpoints are registered in registerWorkspaceRoutes below.
 
 	// Backend health endpoint
-	if backendOps != nil {
-		mux.HandleFunc("GET /api/backends", handleGetBackendsHealth(backendOps))
+	if app.config.BackendOps != nil {
+		mux.HandleFunc("GET /api/backends", handleGetBackendsHealth(app.config.BackendOps))
 	}
 
 	// Fleet endpoints: workspace-scoped routes only (flat routes removed).
@@ -68,7 +62,7 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 	// Legacy SSE endpoint removed — SSE is now workspace-scoped at /api/workspaces/{ws}/events
 
 	// Loom proxy for agent status endpoints (same-origin to avoid CORS/CSP issues)
-	if loomProxy := newLoomProxy(loomServerURL); loomProxy != nil {
+	if loomProxy := newLoomProxy(app.config.LoomServerURL); loomProxy != nil {
 		mux.Handle("/api/loom/", loomProxy)
 	}
 
@@ -81,18 +75,18 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 	mux.HandleFunc("POST /api/editors/open", handleOpenEditor(editorCache, editor.LaunchEditor))
 
 	// Session change notification endpoint for local agents to push SSE events
-	if hub != nil {
-		mux.HandleFunc("POST /api/sessions/notify", handleNotifySessionChange(hub, notifyToken))
+	if app.hub != nil {
+		mux.HandleFunc("POST /api/sessions/notify", handleNotifySessionChange(app.hub, app.notifyToken))
 	}
 
 	// Workspace management and workspace-scoped API routes
-	if multiPool != nil {
-		registerWorkspaceRoutes(mux, multiPool, workspaceConfigFn, wsExistsFn, workspaceConfigByIDFn, tabMetaStore, issueTabStore, sessionHistoryStore, sessStore, termManager, termAuth, allowedOrigins, hub, getMutationsSince, fleetRegistry, tokenCfg, fleetRegCfg, claimMetrics, gitOps, fileOps, workspaceDeleteFn, setDefaultWsFn, clearDefaultWsFn, workspaceCreateFn, loomServerURL, sseTokens, jobStore)
+	if app.multiPool != nil {
+		app.registerWorkspaceRoutes(mux)
 	}
 
 	// Static file serving with SPA routing (must be last - catches all paths)
-	if devMode {
-		mux.Handle("/", devFrontendHandler(devFrontendDir))
+	if app.config.DevMode {
+		mux.Handle("/", devFrontendHandler(app.config.DevFrontendDir))
 	} else {
 		mux.Handle("/", frontendHandler())
 	}
@@ -101,27 +95,30 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 }
 
 // registerWorkspaceRoutes sets up workspace listing, CRUD, and workspace-scoped API routes.
-func registerWorkspaceRoutes(mux *http.ServeMux, multiPool *daemon.MultiPool, workspaceConfigFn func() (*WorkspaceData, error), wsExistsFn func(string) bool, workspaceConfigByIDFn func(string) (*WorkspaceData, error), tabMetaStore *tabmeta.Store, issueTabStore *issuetabs.Store, sessionHistoryStore *sessionhistory.Store, sessStore *sessions.Store, termManager *TerminalManager, termAuth *terminalAuth, allowedOrigins []string, hub *SSEHub, getMutationsSince func(wsID string, since int64) []rpc.MutationEvent, fleetRegistry *fleet.StoreRegistry, tokenCfg *TokenConfig, fleetRegCfg *FleetRegisterConfig, claimMetrics *fleet.ClaimMetrics, gitOps GitOps, fileOps FileOps, workspaceDeleteFn func(string) error, setDefaultWsFn func(string) error, clearDefaultWsFn func() error, workspaceCreateFn WorkspaceCreateFn, loomServerURL string, sseTokens *sseTokenStore, jobStore *WorkspaceJobStore) { //nolint:funlen // route registration function
+func (app *serverApp) registerWorkspaceRoutes(mux *http.ServeMux) { //nolint:funlen // route registration function
+	workspaceConfigFn := app.config.WorkspaceConfigFn
+	workspaceConfigByIDFn := app.config.WorkspaceConfigByIDFn
+
 	// Active workspace endpoint — returns full topology for the default workspace
 	mux.HandleFunc("GET /api/workspaces/active", handleActiveWorkspace(workspaceConfigFn))
 
 	// Workspace listing (not workspace-scoped themselves)
-	mux.HandleFunc("GET /api/workspaces", handleListWorkspaces(multiPool, workspaceConfigFn))
-	mux.HandleFunc("GET /api/workspaces/{ws}", handleGetWorkspace(wsExistsFn, workspaceConfigByIDFn))
+	mux.HandleFunc("GET /api/workspaces", handleListWorkspaces(app.multiPool, workspaceConfigFn))
+	mux.HandleFunc("GET /api/workspaces/{ws}", handleGetWorkspace(app.wsExistsFn, workspaceConfigByIDFn))
 
 	// Global workspace CRUD operations (no WorkspaceMiddleware)
-	mux.HandleFunc("POST /api/workspaces", handleWorkspaceCreate(workspaceCreateFn, workspaceConfigFn, jobStore))
+	mux.HandleFunc("POST /api/workspaces", handleWorkspaceCreate(app.wrappedCreateFn, workspaceConfigFn, app.jobStore))
 
 	// Workspace job polling endpoint (literal "jobs" segment wins over {ws} wildcard)
-	mux.HandleFunc("GET /api/workspaces/jobs/{id}", handleGetWorkspaceJob(jobStore))
+	mux.HandleFunc("GET /api/workspaces/jobs/{id}", handleGetWorkspaceJob(app.jobStore))
 	mux.HandleFunc("PUT /api/workspaces/order", handleWorkspaceReorder(workspaceConfigFn))
-	mux.HandleFunc("PUT /api/workspaces/default", handleSetDefaultWorkspace(setDefaultWsFn, workspaceConfigFn))
-	mux.HandleFunc("DELETE /api/workspaces/default", handleClearDefaultWorkspace(clearDefaultWsFn, workspaceConfigFn))
+	mux.HandleFunc("PUT /api/workspaces/default", handleSetDefaultWorkspace(app.config.SetDefaultWorkspaceFn, workspaceConfigFn))
+	mux.HandleFunc("DELETE /api/workspaces/default", handleClearDefaultWorkspace(app.config.ClearDefaultWorkspaceFn, workspaceConfigFn))
 
 	// Per-workspace DELETE — registered on main mux with manual middleware wrapping
 	// because DELETE /api/workspaces/{ws} (no trailing slash) won't match the
 	// wsMux prefix handler at /api/workspaces/{ws}/.
-	mux.Handle("DELETE /api/workspaces/{ws}", WorkspaceMiddleware(wsExistsFn, handleWorkspaceDelete(workspaceDeleteFn, workspaceConfigFn)))
+	mux.Handle("DELETE /api/workspaces/{ws}", WorkspaceMiddleware(app.wsExistsFn, handleWorkspaceDelete(app.wrappedDeleteFn, workspaceConfigFn)))
 
 	// Workspace-scoped API routes via a sub-mux with WorkspaceMiddleware.
 	// The middleware injects the workspace ID into the context so that
@@ -132,29 +129,29 @@ func registerWorkspaceRoutes(mux *http.ServeMux, multiPool *daemon.MultiPool, wo
 	wsMux.HandleFunc("PATCH /api/workspaces/{ws}/name", handleWorkspaceRename(workspaceConfigFn))
 
 	// Issue endpoints
-	wsMux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}", handleGetIssue(multiPool))
-	wsMux.HandleFunc("GET /api/workspaces/{ws}/issues", handleListIssues(multiPool))
-	wsMux.HandleFunc("POST /api/workspaces/{ws}/issues", handleCreateIssue(multiPool))
-	wsMux.HandleFunc("PATCH /api/workspaces/{ws}/issues/{id}", handlePatchIssue(multiPool))
-	wsMux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/close", handleCloseIssue(multiPool))
-	wsMux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/move", handleMoveIssue(multiPool, multiPool, workspaceConfigFn))
-	wsMux.HandleFunc("DELETE /api/workspaces/{ws}/issues/{id}", handleDeleteIssue(multiPool))
-	wsMux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/comments", handleAddComment(multiPool))
-	wsMux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/events", handleGetIssueEvents(multiPool))
+	wsMux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}", handleGetIssue(app.multiPool))
+	wsMux.HandleFunc("GET /api/workspaces/{ws}/issues", handleListIssues(app.multiPool))
+	wsMux.HandleFunc("POST /api/workspaces/{ws}/issues", handleCreateIssue(app.multiPool))
+	wsMux.HandleFunc("PATCH /api/workspaces/{ws}/issues/{id}", handlePatchIssue(app.multiPool))
+	wsMux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/close", handleCloseIssue(app.multiPool))
+	wsMux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/move", handleMoveIssue(app.multiPool, app.multiPool, workspaceConfigFn))
+	wsMux.HandleFunc("DELETE /api/workspaces/{ws}/issues/{id}", handleDeleteIssue(app.multiPool))
+	wsMux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/comments", handleAddComment(app.multiPool))
+	wsMux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/events", handleGetIssueEvents(app.multiPool))
 
 	// Dependency management
-	wsMux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/dependencies", handleAddDependency(multiPool))
-	wsMux.HandleFunc("DELETE /api/workspaces/{ws}/issues/{id}/dependencies/{depId}", handleRemoveDependency(multiPool))
+	wsMux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/dependencies", handleAddDependency(app.multiPool))
+	wsMux.HandleFunc("DELETE /api/workspaces/{ws}/issues/{id}/dependencies/{depId}", handleRemoveDependency(app.multiPool))
 
 	// Stats, ready, blocked, graph
-	wsMux.HandleFunc("GET /api/workspaces/{ws}/stats", handleStats(multiPool))
-	wsMux.HandleFunc("GET /api/workspaces/{ws}/ready", handleReady(multiPool))
-	wsMux.HandleFunc("GET /api/workspaces/{ws}/blocked", handleBlocked(multiPool))
-	wsMux.HandleFunc("GET /api/workspaces/{ws}/issues/graph", handleGraph(multiPool))
+	wsMux.HandleFunc("GET /api/workspaces/{ws}/stats", handleStats(app.multiPool))
+	wsMux.HandleFunc("GET /api/workspaces/{ws}/ready", handleReady(app.multiPool))
+	wsMux.HandleFunc("GET /api/workspaces/{ws}/blocked", handleBlocked(app.multiPool))
+	wsMux.HandleFunc("GET /api/workspaces/{ws}/issues/graph", handleGraph(app.multiPool))
 
 	// Daemon status and config
-	wsMux.HandleFunc("GET /api/workspaces/{ws}/daemon/status", handleDaemonStatus(multiPool))
-	wsMux.HandleFunc("GET /api/workspaces/{ws}/config/backend", handleGetBackendConfig(multiPool))
+	wsMux.HandleFunc("GET /api/workspaces/{ws}/daemon/status", handleDaemonStatus(app.multiPool))
+	wsMux.HandleFunc("GET /api/workspaces/{ws}/config/backend", handleGetBackendConfig(app.multiPool))
 	wsMux.HandleFunc("PATCH /api/workspaces/{ws}/config/backend", handleWorkspaceBackendPatch(workspaceConfigFn))
 
 	// Log streaming endpoints (workspace-scoped)
@@ -163,149 +160,149 @@ func registerWorkspaceRoutes(mux *http.ServeMux, multiPool *daemon.MultiPool, wo
 	wsMux.HandleFunc("GET /api/workspaces/{ws}/tasks/{id}/logs/{phase}", handleGetTaskLog())
 
 	// Server-Sent Events endpoint (workspace-scoped)
-	if hub != nil {
+	if app.hub != nil {
 		var sseHandler http.Handler
-		if sseTokens != nil {
-			sseHandler = NewSSEHandlerWithAuth(hub, getMutationsSince, sseTokens)
+		if app.sseTokens != nil {
+			sseHandler = NewSSEHandlerWithAuth(app.hub, app.getMutationsSince, app.sseTokens)
 		} else {
-			sseHandler = NewSSEHandler(hub, getMutationsSince)
+			sseHandler = NewSSEHandler(app.hub, app.getMutationsSince)
 		}
 		wsMux.Handle("GET /api/workspaces/{ws}/events", sseHandler)
 		// SSE token exchange: exchanges JWT for a short-lived opaque token.
 		// Protected by ExtAuth middleware (JWT required in external mode).
-		if sseTokens != nil {
-			wsMux.HandleFunc("GET /api/workspaces/{ws}/events/token", handleSSEToken(sseTokens))
+		if app.sseTokens != nil {
+			wsMux.HandleFunc("GET /api/workspaces/{ws}/events/token", handleSSEToken(app.sseTokens))
 		}
 	}
 
 	// Terminal tab metadata endpoints (workspace-scoped, Redis-backed)
-	if tabMetaStore != nil {
-		wsMux.HandleFunc("GET /api/workspaces/{ws}/terminal/tabs", handleListTerminalTabs(tabMetaStore, termManager))
-		wsMux.HandleFunc("GET /api/workspaces/{ws}/terminal/tabs/{session}", handleGetTerminalTab(tabMetaStore))
-		wsMux.HandleFunc("PUT /api/workspaces/{ws}/terminal/tabs/{session}", handlePutTerminalTab(tabMetaStore, hub))
-		wsMux.HandleFunc("PATCH /api/workspaces/{ws}/terminal/tabs/{session}", handlePatchTerminalTab(tabMetaStore, hub))
-		wsMux.HandleFunc("DELETE /api/workspaces/{ws}/terminal/tabs/{session}", handleDeleteTerminalTab(tabMetaStore, hub))
+	if app.tabMetaStore != nil {
+		wsMux.HandleFunc("GET /api/workspaces/{ws}/terminal/tabs", handleListTerminalTabs(app.tabMetaStore, app.termMgr))
+		wsMux.HandleFunc("GET /api/workspaces/{ws}/terminal/tabs/{session}", handleGetTerminalTab(app.tabMetaStore))
+		wsMux.HandleFunc("PUT /api/workspaces/{ws}/terminal/tabs/{session}", handlePutTerminalTab(app.tabMetaStore, app.hub))
+		wsMux.HandleFunc("PATCH /api/workspaces/{ws}/terminal/tabs/{session}", handlePatchTerminalTab(app.tabMetaStore, app.hub))
+		wsMux.HandleFunc("DELETE /api/workspaces/{ws}/terminal/tabs/{session}", handleDeleteTerminalTab(app.tabMetaStore, app.hub))
 		// Cross-workspace endpoint: the workspace in the URL is for auth context,
 		// but ListByIssue searches across all workspaces intentionally.
-		wsMux.HandleFunc("GET /api/workspaces/{ws}/terminal/sessions/by-issue", handleListSessionsByIssue(tabMetaStore))
+		wsMux.HandleFunc("GET /api/workspaces/{ws}/terminal/sessions/by-issue", handleListSessionsByIssue(app.tabMetaStore))
 
 		// Terminal UI state endpoints (Redis-backed active tab persistence, workspace-scoped)
-		rc := tabMetaStore.RedisClient()
+		rc := app.tabMetaStore.RedisClient()
 		wsMux.HandleFunc("GET /api/workspaces/{ws}/terminal/state", handleGetTerminalState(rc))
 		wsMux.HandleFunc("PATCH /api/workspaces/{ws}/terminal/state", handlePatchTerminalState(rc))
 	}
 
 	// Issue tab persistence endpoints (Redis-backed, workspace-scoped)
-	if issueTabStore != nil {
-		wsMux.HandleFunc("GET /api/workspaces/{ws}/issues/{issueId}/tabs", handleGetIssueTabs(issueTabStore, termManager))
-		wsMux.HandleFunc("PUT /api/workspaces/{ws}/issues/{issueId}/tabs", handleSaveIssueTabs(issueTabStore, hub))
-		wsMux.HandleFunc("DELETE /api/workspaces/{ws}/issues/{issueId}/tabs", handleDeleteIssueTabs(issueTabStore))
+	if app.issueTabStore != nil {
+		wsMux.HandleFunc("GET /api/workspaces/{ws}/issues/{issueId}/tabs", handleGetIssueTabs(app.issueTabStore, app.termMgr))
+		wsMux.HandleFunc("PUT /api/workspaces/{ws}/issues/{issueId}/tabs", handleSaveIssueTabs(app.issueTabStore, app.hub))
+		wsMux.HandleFunc("DELETE /api/workspaces/{ws}/issues/{issueId}/tabs", handleDeleteIssueTabs(app.issueTabStore))
 	}
 
 	// Session history endpoints (Redis-backed audit trail, workspace-scoped)
-	if sessionHistoryStore != nil {
-		wsMux.HandleFunc("GET /api/workspaces/{ws}/issues/{issueId}/sessions", handleListSessionHistory(sessionHistoryStore))
-		wsMux.HandleFunc("GET /api/workspaces/{ws}/issues/{issueId}/sessions/{recordId}/scrollback", handleGetSessionScrollback(sessionHistoryStore))
+	if app.sessionHistoryStore != nil {
+		wsMux.HandleFunc("GET /api/workspaces/{ws}/issues/{issueId}/sessions", handleListSessionHistory(app.sessionHistoryStore))
+		wsMux.HandleFunc("GET /api/workspaces/{ws}/issues/{issueId}/sessions/{recordId}/scrollback", handleGetSessionScrollback(app.sessionHistoryStore))
 	}
 
 	// Session audit trail endpoints (workspace-scoped)
-	wsMux.HandleFunc("GET /api/workspaces/{ws}/tasks/{taskId}/sessions", handleListTaskSessions(sessStore))
-	wsMux.HandleFunc("GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}", handleGetSession(sessStore))
-	wsMux.HandleFunc("GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/transcript", handleGetSessionTranscript(sessStore))
-	wsMux.HandleFunc("GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/diff", handleGetSessionDiff(sessStore))
+	wsMux.HandleFunc("GET /api/workspaces/{ws}/tasks/{taskId}/sessions", handleListTaskSessions(app.config.SessionsStore))
+	wsMux.HandleFunc("GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}", handleGetSession(app.config.SessionsStore))
+	wsMux.HandleFunc("GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/transcript", handleGetSessionTranscript(app.config.SessionsStore))
+	wsMux.HandleFunc("GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/diff", handleGetSessionDiff(app.config.SessionsStore))
 
 	// Terminal endpoints (workspace-scoped) — agent, core session, and scrollback/export
-	if termManager != nil {
+	if app.termMgr != nil {
 		// Agent terminal endpoints
-		wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/terminal/info", handleGetAgentTerminalInfo(termManager))
-		if termAuth != nil {
-			wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/terminal/token", handleGetAgentTerminalToken(termAuth))
+		wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/terminal/info", handleGetAgentTerminalInfo(app.termMgr))
+		if app.termAuth != nil {
+			wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/terminal/token", handleGetAgentTerminalToken(app.termAuth))
 		}
-		wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/terminal/ws", handleAgentTerminalWS(termManager, termAuth, allowedOrigins))
+		wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/terminal/ws", handleAgentTerminalWS(app.termMgr, app.termAuth, app.corsConfig.AllowedOrigins))
 
 		// Core terminal session management endpoints
-		wsMux.HandleFunc("GET /api/workspaces/{ws}/terminal/sessions", handleListTerminalSessions(termManager))
-		if termAuth != nil {
-			wsMux.HandleFunc("GET /api/workspaces/{ws}/terminal/token", handleTerminalToken(termAuth))
+		wsMux.HandleFunc("GET /api/workspaces/{ws}/terminal/sessions", handleListTerminalSessions(app.termMgr))
+		if app.termAuth != nil {
+			wsMux.HandleFunc("GET /api/workspaces/{ws}/terminal/token", handleTerminalToken(app.termAuth))
 		}
-		wsMux.HandleFunc("GET /api/workspaces/{ws}/terminal/ws", handleTerminalWS(termManager, termAuth, allowedOrigins, loomServerURL, workspaceConfigByIDFn, tabMetaStore, hub))
-		wsMux.HandleFunc("POST /api/workspaces/{ws}/terminal/restart", handleTerminalRestart(termManager, multiPool, termAuth))
-		wsMux.HandleFunc("POST /api/workspaces/{ws}/terminal/kill", handleTerminalKill(termManager, termAuth))
-		wsMux.HandleFunc("GET /api/workspaces/{ws}/terminal/session-status", handleTerminalSessionStatus(termManager, termAuth))
-		wsMux.HandleFunc("POST /api/workspaces/{ws}/terminal/spawn", handleTerminalSpawn(termManager, sessionHistoryStore))
-		wsMux.HandleFunc("POST /api/workspaces/{ws}/terminal/sessions/{name}/seed", handleSeedTerminalSession(termManager))
-		wsMux.HandleFunc("POST /api/workspaces/{ws}/terminal/sessions/{session}/kill", handleScheduleSessionKill(termManager))
+		wsMux.HandleFunc("GET /api/workspaces/{ws}/terminal/ws", handleTerminalWS(app.termMgr, app.termAuth, app.corsConfig.AllowedOrigins, app.config.LoomServerURL, workspaceConfigByIDFn, app.tabMetaStore, app.hub))
+		wsMux.HandleFunc("POST /api/workspaces/{ws}/terminal/restart", handleTerminalRestart(app.termMgr, app.multiPool, app.termAuth))
+		wsMux.HandleFunc("POST /api/workspaces/{ws}/terminal/kill", handleTerminalKill(app.termMgr, app.termAuth))
+		wsMux.HandleFunc("GET /api/workspaces/{ws}/terminal/session-status", handleTerminalSessionStatus(app.termMgr, app.termAuth))
+		wsMux.HandleFunc("POST /api/workspaces/{ws}/terminal/spawn", handleTerminalSpawn(app.termMgr, app.sessionHistoryStore))
+		wsMux.HandleFunc("POST /api/workspaces/{ws}/terminal/sessions/{name}/seed", handleSeedTerminalSession(app.termMgr))
+		wsMux.HandleFunc("POST /api/workspaces/{ws}/terminal/sessions/{session}/kill", handleScheduleSessionKill(app.termMgr))
 		// Note: closeAllSessions operates globally (kills all tmux sessions) regardless of
 		// the workspace in the URL. The workspace provides auth context only.
-		wsMux.HandleFunc("POST /api/workspaces/{ws}/terminal/sessions/close-all", handleCloseAllSessions(termManager, tabMetaStore, hub))
+		wsMux.HandleFunc("POST /api/workspaces/{ws}/terminal/sessions/close-all", handleCloseAllSessions(app.termMgr, app.tabMetaStore, app.hub))
 
 		// Terminal scrollback, export, and scrollback-info endpoints
-		wsMux.HandleFunc("GET /api/workspaces/{ws}/terminal/sessions/{session}/scrollback", handleGetScrollback(termManager))
-		wsMux.HandleFunc("GET /api/workspaces/{ws}/terminal/sessions/{session}/export", handleExportSession(termManager))
-		wsMux.HandleFunc("GET /api/workspaces/{ws}/terminal/sessions/{session}/scrollback-info", handleScrollbackInfo(termManager))
+		wsMux.HandleFunc("GET /api/workspaces/{ws}/terminal/sessions/{session}/scrollback", handleGetScrollback(app.termMgr))
+		wsMux.HandleFunc("GET /api/workspaces/{ws}/terminal/sessions/{session}/export", handleExportSession(app.termMgr))
+		wsMux.HandleFunc("GET /api/workspaces/{ws}/terminal/sessions/{session}/scrollback-info", handleScrollbackInfo(app.termMgr))
 	}
 
 	// Workspace-scoped fleet routes. Claim uses multiPool (routes to correct
 	// workspace daemon); register/done/heartbeat resolve the Store per-request.
-	if fleetRegistry != nil {
+	if app.fleetRegistry != nil {
 		wsMux.HandleFunc("POST /api/workspaces/{ws}/fleet/register",
-			fleetWSHandler(fleetRegistry, func(s *fleet.Store) http.HandlerFunc {
-				return handleFleetRegister(s, tokenCfg, fleetRegCfg)
+			fleetWSHandler(app.fleetRegistry, func(s *fleet.Store) http.HandlerFunc {
+				return handleFleetRegister(s, app.tokenCfg, app.fleetRegCfg)
 			}))
-		if tokenCfg != nil && len(tokenCfg.SigningKey) > 0 {
-			fleetAuth := NewFleetAuthMiddleware(tokenCfg.SigningKey)
+		if app.tokenCfg != nil && len(app.tokenCfg.SigningKey) > 0 {
+			fleetAuth := NewFleetAuthMiddleware(app.tokenCfg.SigningKey)
 			wsMux.Handle("POST /api/workspaces/{ws}/fleet/claim",
-				fleetAuth(handleFleetClaim(multiPool, claimMetrics)))
+				fleetAuth(handleFleetClaim(app.multiPool, app.claimMetrics)))
 		} else {
 			wsMux.HandleFunc("POST /api/workspaces/{ws}/fleet/claim",
-				handleFleetClaim(multiPool, claimMetrics))
+				handleFleetClaim(app.multiPool, app.claimMetrics))
 		}
-		if tokenCfg != nil && len(tokenCfg.SigningKey) > 0 {
-			fleetAuthDone := NewFleetAuthMiddleware(tokenCfg.SigningKey)
+		if app.tokenCfg != nil && len(app.tokenCfg.SigningKey) > 0 {
+			fleetAuthDone := NewFleetAuthMiddleware(app.tokenCfg.SigningKey)
 			wsMux.Handle("POST /api/workspaces/{ws}/fleet/done/{id}",
-				fleetAuthDone(fleetWSHandler(fleetRegistry, handleFleetDone)))
+				fleetAuthDone(fleetWSHandler(app.fleetRegistry, handleFleetDone)))
 		} else {
 			wsMux.HandleFunc("POST /api/workspaces/{ws}/fleet/done/{id}",
-				fleetWSHandler(fleetRegistry, handleFleetDone))
+				fleetWSHandler(app.fleetRegistry, handleFleetDone))
 		}
-		if tokenCfg != nil && len(tokenCfg.SigningKey) > 0 {
-			fleetAuth := NewFleetAuthMiddleware(tokenCfg.SigningKey)
+		if app.tokenCfg != nil && len(app.tokenCfg.SigningKey) > 0 {
+			fleetAuth := NewFleetAuthMiddleware(app.tokenCfg.SigningKey)
 			wsMux.Handle("POST /api/workspaces/{ws}/fleet/heartbeat",
-				fleetAuth(fleetWSHandler(fleetRegistry, handleFleetHeartbeat)))
+				fleetAuth(fleetWSHandler(app.fleetRegistry, handleFleetHeartbeat)))
 		} else {
 			wsMux.HandleFunc("POST /api/workspaces/{ws}/fleet/heartbeat",
-				fleetWSHandler(fleetRegistry, handleFleetHeartbeat))
+				fleetWSHandler(app.fleetRegistry, handleFleetHeartbeat))
 		}
 	}
 
 	// Git operations (workspace-scoped)
-	if gitOps != nil {
-		wsMux.HandleFunc("POST /api/workspaces/{ws}/git/push-all", handleGitPushAll(gitOps))
-		wsMux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/git/push", handleGitPush(gitOps))
-		wsMux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/git/pull", handleGitPull(gitOps))
-		wsMux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/git/sync", handleGitSync(gitOps))
-		wsMux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/git/pr", handleGitPR(gitOps))
-		wsMux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/git/reset", handleGitReset(gitOps))
-		wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/git/status", handleGitStatus(gitOps))
-		wsMux.HandleFunc("PATCH /api/workspaces/{ws}/agents/{name}/git/target", handleGitTargetUpdate(gitOps))
-		wsMux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/git/diff-stat", handleGetIssueDiffStat(multiPool, gitOps))
-		wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/git/diff-stat", handleAgentDiffStat(gitOps))
+	if app.config.GitOps != nil {
+		wsMux.HandleFunc("POST /api/workspaces/{ws}/git/push-all", handleGitPushAll(app.config.GitOps))
+		wsMux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/git/push", handleGitPush(app.config.GitOps))
+		wsMux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/git/pull", handleGitPull(app.config.GitOps))
+		wsMux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/git/sync", handleGitSync(app.config.GitOps))
+		wsMux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/git/pr", handleGitPR(app.config.GitOps))
+		wsMux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/git/reset", handleGitReset(app.config.GitOps))
+		wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/git/status", handleGitStatus(app.config.GitOps))
+		wsMux.HandleFunc("PATCH /api/workspaces/{ws}/agents/{name}/git/target", handleGitTargetUpdate(app.config.GitOps))
+		wsMux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/git/diff-stat", handleGetIssueDiffStat(app.multiPool, app.config.GitOps))
+		wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/git/diff-stat", handleAgentDiffStat(app.config.GitOps))
 
 		// Diff endpoints (workspace-scoped)
-		wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/diff/commits", handleDiffCommits(gitOps))
-		wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/diff/files", handleDiffFiles(gitOps))
-		wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/diff/file", handleDiffFile(gitOps))
+		wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/diff/commits", handleDiffCommits(app.config.GitOps))
+		wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/diff/files", handleDiffFiles(app.config.GitOps))
+		wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/diff/file", handleDiffFile(app.config.GitOps))
 	}
 
 	// File operations (workspace-scoped)
-	if fileOps != nil {
-		wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/files/tree", handleFileTree(fileOps))
-		wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/files", handleFileRead(fileOps))
-		wsMux.HandleFunc("PUT /api/workspaces/{ws}/agents/{name}/files", handleFileWrite(fileOps))
+	if app.config.FileOps != nil {
+		wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/files/tree", handleFileTree(app.config.FileOps))
+		wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/files", handleFileRead(app.config.FileOps))
+		wsMux.HandleFunc("PUT /api/workspaces/{ws}/agents/{name}/files", handleFileWrite(app.config.FileOps))
 	}
 
 	// Apply WorkspaceMiddleware to all workspace-scoped routes
-	mux.Handle("/api/workspaces/{ws}/", WorkspaceMiddleware(wsExistsFn, wsMux))
+	mux.Handle("/api/workspaces/{ws}/", WorkspaceMiddleware(app.wsExistsFn, wsMux))
 }
 
 // fleetWSHandler resolves a per-workspace fleet Store from the registry and
