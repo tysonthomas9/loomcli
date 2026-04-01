@@ -11,6 +11,18 @@ import (
 	"time"
 )
 
+// shortSocketDir creates a short temp directory suitable for Unix socket paths,
+// which are limited to 104 bytes on macOS. t.TempDir() paths can exceed this.
+func shortSocketDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "loom-sock-")
+	if err != nil {
+		t.Fatalf("creating short socket dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	return dir
+}
+
 // newTestDaemonWithAgents constructs a Daemon for control-socket tests with
 // the given agents already in the agents slice. Each AgentProcess has a
 // goroutine that closes done when stopCh is closed, simulating a real
@@ -327,7 +339,7 @@ func TestControlServer_ReconcilerRespectsStoppedAgents(t *testing.T) {
 }
 
 func TestControlServer_SocketCleanup(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir := shortSocketDir(t)
 	socketPath := filepath.Join(tmpDir, "daemon.sock")
 
 	d := &Daemon{
@@ -364,7 +376,7 @@ func TestControlServer_SocketCleanup(t *testing.T) {
 }
 
 func TestControlServer_StaleSocketCleanup(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir := shortSocketDir(t)
 	socketPath := filepath.Join(tmpDir, "daemon.sock")
 
 	// Create a stale socket file (just a regular file pretending to be a socket)
@@ -479,7 +491,7 @@ func TestControlServer_AgentList(t *testing.T) {
 }
 
 func TestControlServer_SocketRoundTrip(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir := shortSocketDir(t)
 	socketPath := filepath.Join(tmpDir, "daemon.sock")
 
 	d := newTestDaemonWithAgents([]AgentEntry{
