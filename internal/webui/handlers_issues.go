@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -193,7 +193,7 @@ func handleGetIssueWithPool(pool connectionGetter) http.HandlerFunc {
 				respondError(w, http.StatusNotFound, fmt.Sprintf("issue not found: %s", issueID))
 				return
 			}
-			log.Printf("RPC error in handleGetIssue for %s: %v", issueID, err)
+			slog.Error("RPC error in handleGetIssue", "issue_id", issueID, "err", err)
 			respondError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
@@ -242,7 +242,7 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 				code = "CONNECTION_TIMEOUT"
 				message = "timeout connecting to daemon"
 			}
-			log.Printf("Connection pool error: %v", err)
+			slog.Error("connection pool error", "err", err)
 			writeIssuesError(w, status, message, code)
 			return
 		}
@@ -251,7 +251,7 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 		// Execute List RPC call
 		resp, err := client.List(args)
 		if err != nil {
-			log.Printf("RPC error: %v", err)
+			slog.Error("RPC error", "err", err)
 			writeIssuesError(w, http.StatusInternalServerError, "failed to list issues", "RPC_ERROR")
 			return
 		}
@@ -264,7 +264,7 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 		// Parse IssueWithCounts from response to extract issue IDs
 		var issuesWithCounts []*types.IssueWithCounts
 		if err := json.Unmarshal(resp.Data, &issuesWithCounts); err != nil {
-			log.Printf("Failed to parse issues: %v", err)
+			slog.Error("failed to parse issues", "err", err)
 			writeIssuesError(w, http.StatusInternalServerError, "failed to parse issues", "PARSE_ERROR")
 			return
 		}
@@ -293,7 +293,7 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 				data, err = json.Marshal([]*IssueWithParent{})
 			}
 			if err != nil {
-				log.Printf("Failed to marshal empty response: %v", err)
+				slog.Error("failed to marshal empty response", "err", err)
 				writeIssuesError(w, http.StatusInternalServerError, "failed to encode response", "ENCODE_ERROR")
 				return
 			}
@@ -320,7 +320,7 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 			}
 			batch, err := client.GetParentIDs(&rpc.GetParentIDsArgs{IssueIDs: issueIDs[i:end]})
 			if err != nil {
-				log.Printf("Failed to get parent IDs (batch %d-%d): %v", i, end, err)
+				slog.Error("failed to get parent IDs", "batch_start", i, "batch_end", end, "err", err)
 				continue
 			}
 			for k, v := range batch.Parents {
@@ -334,11 +334,11 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 			blockedResp, blockedErr := client.Blocked(&rpc.BlockedArgs{})
 			if blockedErr != nil {
 				// Non-fatal: log and continue without blocked info
-				log.Printf("Failed to get blocked issues: %v", blockedErr)
+				slog.Error("failed to get blocked issues", "err", blockedErr)
 			} else if blockedResp.Success {
 				var blockedIssues []*types.BlockedIssue
 				if jsonErr := json.Unmarshal(blockedResp.Data, &blockedIssues); jsonErr != nil {
-					log.Printf("Failed to parse blocked issues: %v", jsonErr)
+					slog.Error("failed to parse blocked issues", "err", jsonErr)
 				} else {
 					for _, bi := range blockedIssues {
 						blockedMap[bi.Issue.ID] = bi
@@ -385,7 +385,7 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 
 			data, err := json.Marshal(kanbanIssues)
 			if err != nil {
-				log.Printf("Failed to marshal kanban issues: %v", err)
+				slog.Error("failed to marshal kanban issues", "err", err)
 				writeIssuesError(w, http.StatusInternalServerError, "failed to encode response", "ENCODE_ERROR")
 				return
 			}
@@ -414,7 +414,7 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 
 		data, err := json.Marshal(issuesWithParent)
 		if err != nil {
-			log.Printf("Failed to marshal issues: %v", err)
+			slog.Error("failed to marshal issues", "err", err)
 			writeIssuesError(w, http.StatusInternalServerError, "failed to encode response", "ENCODE_ERROR")
 			return
 		}

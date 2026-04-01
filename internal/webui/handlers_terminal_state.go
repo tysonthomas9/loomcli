@@ -2,7 +2,7 @@ package webui
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/redis/go-redis/v9"
@@ -16,7 +16,7 @@ func handleGetTerminalState(client *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		vals, err := client.HGetAll(r.Context(), terminalUIStateKey).Result()
 		if err != nil {
-			log.Printf("Warning: failed to get terminal state: %v", err)
+			slog.Warn("failed to get terminal state", "err", err)
 			respondJSON(w, http.StatusOK, map[string]interface{}{
 				"active_tab": "",
 			})
@@ -46,7 +46,7 @@ func handlePatchTerminalState(client *redis.Client) http.HandlerFunc {
 		}
 
 		if err := client.HSet(r.Context(), terminalUIStateKey, fields).Err(); err != nil {
-			log.Printf("Warning: failed to set terminal state: %v", err)
+			slog.Warn("failed to set terminal state", "err", err)
 			respondError(w, http.StatusInternalServerError, "failed to save terminal state")
 			return
 		}

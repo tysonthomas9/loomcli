@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -585,7 +585,7 @@ func testWsToPTY(ctx context.Context, conn wsConn, session *TerminalSession, man
 
 				if cols > 0 && rows > 0 && cols <= maxTerminalCols && rows <= maxTerminalRows {
 					if err := manager.Resize(connID, cols, rows); err != nil {
-						log.Printf("Failed to resize terminal connection %q: %v", connID, err)
+						slog.Error("failed to resize terminal connection", "conn_id", connID, "err", err)
 					}
 				}
 				continue

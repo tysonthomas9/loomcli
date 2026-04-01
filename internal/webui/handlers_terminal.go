@@ -2,7 +2,7 @@ package webui
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -35,7 +35,7 @@ func originHosts(origins []string) []string {
 	for _, o := range origins {
 		u, err := url.Parse(o)
 		if err != nil || u.Host == "" {
-			log.Printf("Warning: skipping malformed origin %q: %v", o, err)
+			slog.Warn("skipping malformed origin", "origin", o, "err", err)
 			continue
 		}
 		hosts = append(hosts, u.Host)
@@ -63,7 +63,7 @@ func handleTerminalToken(auth *terminalAuth) http.HandlerFunc {
 
 		token, err := auth.GenerateToken(session, userID)
 		if err != nil {
-			log.Printf("Failed to generate terminal token: %v", err)
+			slog.Error("failed to generate terminal token", "err", err)
 			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to generate token"})
 			return
 		}

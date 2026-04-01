@@ -3,7 +3,7 @@ package webui
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -73,7 +73,7 @@ func (s *DaemonSubscriber) Start() {
 	s.wg.Add(2)
 	go s.subscriptionLoop()
 	go s.externalChangeLoop()
-	log.Printf("Daemon subscription started")
+	slog.Info("daemon subscription started")
 }
 
 // Stop gracefully stops the subscription loop.
@@ -82,7 +82,7 @@ func (s *DaemonSubscriber) Stop() {
 	s.stopOnce.Do(func() {
 		close(s.done)
 		s.wg.Wait()
-		log.Printf("Daemon subscription stopped")
+		slog.Info("daemon subscription stopped")
 	})
 }
 
@@ -98,25 +98,25 @@ func (s *DaemonSubscriber) GetMutationsSince(since int64) []rpc.MutationEvent {
 
 	client, err := s.pool.Get(ctx)
 	if err != nil {
-		log.Printf("GetMutationsSince: failed to get connection: %v", err)
+		slog.Error("failed to get connection", "op", "GetMutationsSince", "err", err)
 		return nil
 	}
 	defer s.pool.Put(client)
 
 	resp, err := client.GetMutations(&rpc.GetMutationsArgs{Since: since})
 	if err != nil {
-		log.Printf("GetMutationsSince: RPC error: %v", err)
+		slog.Error("RPC error", "op", "GetMutationsSince", "err", err)
 		return nil
 	}
 
 	if !resp.Success {
-		log.Printf("GetMutationsSince: RPC failed: %s", resp.Error)
+		slog.Error("RPC failed", "op", "GetMutationsSince", "err", resp.Error)
 		return nil
 	}
 
 	var mutations []rpc.MutationEvent
 	if err := json.Unmarshal(resp.Data, &mutations); err != nil {
-		log.Printf("GetMutationsSince: parse error: %v", err)
+		slog.Error("parse error", "op", "GetMutationsSince", "err", err)
 		return nil
 	}
 
@@ -184,14 +184,14 @@ func (s *DaemonSubscriber) waitForMutations() {
 		// Check if this is an "unknown operation" error indicating the daemon
 		// doesn't support wait_for_mutations
 		if isUnknownOperationError(err) {
-			log.Printf("Daemon does not support wait_for_mutations, falling back to polling")
+			slog.Warn("daemon does not support wait_for_mutations, falling back to polling")
 			s.mu.Lock()
 			s.useFallback = true
 			s.mu.Unlock()
 			return
 		}
 
-		log.Printf("WaitForMutations error: %v", err)
+		slog.Error("wait for mutations error", "err", err)
 		s.waitWithDone(subscriptionRetryDelay)
 		return
 	}
@@ -200,7 +200,7 @@ func (s *DaemonSubscriber) waitForMutations() {
 	s.pool.Put(client)
 
 	if !resp.Success {
-		log.Printf("WaitForMutations failed: %s", resp.Error)
+		slog.Error("wait for mutations failed", "err", resp.Error)
 		s.waitWithDone(subscriptionRetryDelay)
 		return
 	}
@@ -226,7 +226,7 @@ func (s *DaemonSubscriber) pollMutations() {
 
 	resp, err := client.GetMutations(&rpc.GetMutationsArgs{Since: since})
 	if err != nil {
-		log.Printf("GetMutations error: %v", err)
+		slog.Error("get mutations error", "err", err)
 		s.waitWithDone(subscriptionRetryDelay)
 		return
 	}
@@ -246,7 +246,7 @@ func (s *DaemonSubscriber) pollMutations() {
 func (s *DaemonSubscriber) processMutationResponse(resp *rpc.Response) {
 	var mutations []rpc.MutationEvent
 	if err := json.Unmarshal(resp.Data, &mutations); err != nil {
-		log.Printf("Failed to parse mutations: %v", err)
+		slog.Error("failed to parse mutations", "err", err)
 		return
 	}
 
@@ -282,7 +282,7 @@ func (s *DaemonSubscriber) processMutationResponse(resp *rpc.Response) {
 		s.hub.Broadcast(payload)
 	}
 
-	log.Printf("Broadcast %d mutations to %d SSE clients", len(mutations), s.hub.ClientCount())
+	slog.Info("broadcast mutations to SSE clients", "count", len(mutations), "clients", s.hub.ClientCount())
 }
 
 // externalChangeLoop periodically polls the database for changes made outside
@@ -323,7 +323,7 @@ func (s *DaemonSubscriber) pollDBChanges() {
 	// Get total issue count
 	resp, err := client.Count(&rpc.CountArgs{})
 	if err != nil {
-		log.Printf("External poll: count error: %v", err)
+		slog.Error("external poll: count error", "err", err)
 		return
 	}
 	if !resp.Success {
@@ -334,7 +334,7 @@ func (s *DaemonSubscriber) pollDBChanges() {
 		Count int64 `json:"count"`
 	}
 	if err := json.Unmarshal(resp.Data, &countResult); err != nil {
-		log.Printf("External poll: parse count error: %v", err)
+		slog.Error("external poll: parse count error", "err", err)
 		return
 	}
 	totalCount := countResult.Count

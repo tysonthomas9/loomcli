@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -2265,13 +2265,13 @@ func TestHandleSSE_EmptyWorkspaceLogsWarning(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	// Capture log output — use a synchronized writer to avoid races with
-	// parallel tests that also write to the global logger.
+	// Capture slog output — install a text handler so we can assert on messages.
 	var logBuf bytes.Buffer
 	var mu sync.Mutex
-	origOutput := log.Writer()
-	log.SetOutput(syncWriter{&logBuf, &mu})
-	t.Cleanup(func() { log.SetOutput(origOutput) })
+	origLogger := slog.Default()
+	logHandler := slog.NewTextHandler(syncWriter{&logBuf, &mu}, nil)
+	slog.SetDefault(slog.New(logHandler))
+	t.Cleanup(func() { slog.SetDefault(origLogger) })
 
 	handler := NewSSEHandler(hub, nil)
 
@@ -2316,8 +2316,8 @@ func TestHandleSSE_EmptyWorkspaceLogsWarning(t *testing.T) {
 	mu.Lock()
 	logOutput := logBuf.String()
 	mu.Unlock()
-	if !strings.Contains(logOutput, "WARNING") || !strings.Contains(logOutput, "empty workspaceID") {
-		t.Errorf("expected warning about empty workspaceID in logs, got: %s", logOutput)
+	if !strings.Contains(logOutput, "WARN") || !strings.Contains(logOutput, "empty workspace_id") {
+		t.Errorf("expected warning about empty workspace_id in logs, got: %s", logOutput)
 	}
 }
 

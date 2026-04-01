@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -99,7 +99,7 @@ func handleAddDependencyWithPool(pool dependencyConnectionGetter) http.HandlerFu
 				})
 				return
 			}
-			log.Printf("Invalid request body in handleAddDependency: %v", err)
+			slog.Warn("invalid request body in handleAddDependency", "err", err)
 			respondJSON(w, http.StatusBadRequest, DependencyResponse{
 				Success: false,
 				Error:   "invalid request body",
@@ -166,7 +166,7 @@ func handleAddDependencyWithPool(pool dependencyConnectionGetter) http.HandlerFu
 			} else if strings.Contains(err.Error(), "already exists") {
 				status = http.StatusConflict
 			}
-			log.Printf("RPC error in handleAddDependency: %v", err)
+			slog.Error("RPC error in handleAddDependency", "err", err)
 			respondJSON(w, status, DependencyResponse{
 				Success: false,
 				Error:   "internal server error",
@@ -266,7 +266,7 @@ func handleRemoveDependencyWithPool(pool dependencyConnectionGetter) http.Handle
 			if strings.Contains(err.Error(), "not found") {
 				status = http.StatusNotFound
 			}
-			log.Printf("RPC error in handleRemoveDependency: %v", err)
+			slog.Error("RPC error in handleRemoveDependency", "err", err)
 			respondJSON(w, status, DependencyResponse{
 				Success: false,
 				Error:   "internal server error",

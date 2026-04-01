@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"strings"
@@ -143,7 +143,7 @@ func handleTerminalSpawnImplWithHistory(manager terminalSpawner, sessionHistoryS
 				}
 				wsID := WorkspaceFromContext(r.Context())
 				if err := sessionHistoryStore.Add(r.Context(), wsID, record); err != nil {
-					log.Printf("Warning: failed to record session history for %s: %v", sanitizedName, err)
+					slog.Warn("failed to record session history", "session", sanitizedName, "err", err)
 				}
 			}
 		}

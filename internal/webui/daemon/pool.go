@@ -300,7 +300,7 @@ func (p *ConnectionPool) validateConnection(client *rpc.Client) bool {
 
 	// Try a ping to validate the connection
 	if err := client.Ping(); err != nil {
-		slog.Warn("pool: connection validation failed", "error", err)
+		slog.Warn("pool: connection validation failed", "err", err)
 		return false
 	}
 	return true

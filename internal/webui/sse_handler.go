@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"sync/atomic"
 	"time"
@@ -95,14 +95,14 @@ func (h *SSEHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	rc := http.NewResponseController(w)
 	if err := rc.SetWriteDeadline(time.Time{}); err != nil {
-		log.Printf("SSE: failed to disable write deadline: %v", err)
+		slog.Error("SSE: failed to disable write deadline", "err", err)
 	}
 
 	lastSince := parseLastSince(r)
 	sourceRepos := parseSourceRepos(r.URL.Query().Get("source_repos"))
 	workspaceID := WorkspaceFromContext(r.Context())
 	if workspaceID == "" {
-		log.Printf("SSE: WARNING client %d from %s connected with empty workspaceID — will not receive mutations (fail-closed)", clientID, r.RemoteAddr)
+		slog.Warn("SSE client connected with empty workspace_id — will not receive mutations (fail-closed)", "client_id", clientID, "remote_addr", r.RemoteAddr)
 	}
 
 	client := &SSEClient{
@@ -127,20 +127,20 @@ func (h *SSEHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		close(client.done)
 	}()
 
-	log.Printf("SSE client %d connected from %s (since=%d, repos=%v, workspace=%s)", client.id, r.RemoteAddr, lastSince, sourceRepos, workspaceID)
+	slog.Info("SSE client connected", "client_id", client.id, "remote_addr", r.RemoteAddr, "since", lastSince, "repos", sourceRepos, "workspace_id", workspaceID)
 
 	if err := h.sendCatchUp(sw, lastSince, workspaceID, sourceRepos); err != nil {
-		log.Printf("SSE client %d catch-up write failed: %v", client.id, err)
+		slog.Error("SSE client catch-up write failed", "client_id", client.id, "err", err)
 		return
 	}
 	if err := sw.WriteRetry(sseRetryMs); err != nil {
-		log.Printf("SSE client %d retry write failed: %v", client.id, err)
+		slog.Error("SSE client retry write failed", "client_id", client.id, "err", err)
 		return
 	}
 	// Connected event has no id: field — it's a control event, not a mutation
 	connFrame := fmt.Sprintf("event: connected\ndata: {\"clientId\":%d}\n\n", client.id)
 	if _, err := io.WriteString(sw.w, connFrame); err != nil {
-		log.Printf("SSE client %d connected event write failed: %v", client.id, err)
+		slog.Error("SSE client connected event write failed", "client_id", client.id, "err", err)
 		return
 	}
 	sw.flusher.Flush()
@@ -178,16 +178,16 @@ func (h *SSEHandler) streamLoop(sw *SSEWriter, client *SSEClient, ctx context.Co
 				return
 			}
 			if err := writeSSEEvent(sw, mutation); err != nil {
-				log.Printf("SSE client %d write failed: %v", client.id, err)
+				slog.Error("SSE client write failed", "client_id", client.id, "err", err)
 				return
 			}
 		case <-heartbeatTicker.C:
 			if err := sw.WriteComment("heartbeat"); err != nil {
-				log.Printf("SSE client %d heartbeat failed: %v", client.id, err)
+				slog.Error("SSE client heartbeat failed", "client_id", client.id, "err", err)
 				return
 			}
 		case <-ctx.Done():
-			log.Printf("SSE client %d disconnected", client.id)
+			slog.Info("SSE client disconnected", "client_id", client.id)
 			return
 		}
 	}
@@ -196,7 +196,7 @@ func (h *SSEHandler) streamLoop(sw *SSEWriter, client *SSEClient, ctx context.Co
 func writeSSEEvent(sw *SSEWriter, mutation *MutationPayload) error {
 	data, err := json.Marshal(mutation)
 	if err != nil {
-		log.Printf("SSE marshal error: %v", err)
+		slog.Error("SSE marshal error", "err", err)
 		return nil // marshal error is not a write error — skip this event
 	}
 	return sw.WriteEvent(sseEventIDCounter.Add(1), "mutation", string(data))

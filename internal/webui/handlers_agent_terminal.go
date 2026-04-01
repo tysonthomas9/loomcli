@@ -3,7 +3,7 @@ package webui
 import (
 	"context"
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -71,7 +71,7 @@ func handleGetAgentTerminalInfo(manager *TerminalManager) http.HandlerFunc {
 
 		mode := agentTerminalModeArchive
 		if _, found, err := manager.FindLatestAgentSession(wsID, agentName); err != nil {
-			log.Printf("Failed to resolve agent tmux session for %q: %v", agentName, err)
+			slog.Error("failed to resolve agent tmux session", "agent", agentName, "err", err)
 			respondJSON(w, http.StatusInternalServerError, agentTerminalInfoResponse{
 				Success: false,
 				Error:   "failed to inspect terminal sessions",
@@ -124,7 +124,7 @@ func handleGetAgentTerminalToken(auth *terminalAuth) http.HandlerFunc {
 
 		token, err := auth.GenerateToken(agentLogTokenScope(agentName), userID)
 		if err != nil {
-			log.Printf("Failed to generate agent terminal token for %q: %v", agentName, err)
+			slog.Error("failed to generate agent terminal token", "agent", agentName, "err", err)
 			respondJSON(w, http.StatusInternalServerError, agentTerminalTokenResponse{
 				Success: false,
 				Error:   "failed to generate token",
@@ -184,11 +184,11 @@ func handleAgentTerminalWS(manager *TerminalManager, auth *terminalAuth, allowed
 				"success": false,
 				"error":   "terminal authentication failed",
 			})
-			log.Printf("Agent terminal auth failed for %q: %v", agentName, err)
+			slog.Warn("agent terminal auth failed", "agent", agentName, "err", err)
 			return
 		}
 		if userID != "" {
-			log.Printf("Agent terminal %q: authenticated user %q", agentName, userID)
+			slog.Info("agent terminal authenticated", "agent", agentName, "user_id", userID)
 		}
 
 		wsID := WorkspaceFromContext(r.Context())
@@ -219,14 +219,14 @@ func handleAgentTerminalWS(manager *TerminalManager, auth *terminalAuth, allowed
 
 		rc := http.NewResponseController(w)
 		if err := rc.SetWriteDeadline(time.Time{}); err != nil {
-			log.Printf("Agent terminal WS: failed to disable write deadline: %v", err)
+			slog.Warn("agent terminal ws: failed to disable write deadline", "err", err)
 		}
 
 		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 			OriginPatterns: patterns,
 		})
 		if err != nil {
-			log.Printf("Failed to accept agent terminal WebSocket: %v", err)
+			slog.Error("failed to accept agent terminal websocket", "err", err)
 			return
 		}
 		conn.SetReadLimit(wsReadLimit)
@@ -240,9 +240,9 @@ func handleAgentTerminalWS(manager *TerminalManager, auth *terminalAuth, allowed
 		termSession, err := manager.AttachExistingRaw(sessionName, 80, 24)
 		if err != nil {
 			if errors.Is(err, ErrMaxSessionsReached) {
-				log.Printf("Agent terminal session limit reached for %q", agentName)
+				slog.Info("agent terminal session limit reached", "agent", agentName)
 			} else {
-				log.Printf("Failed to attach agent terminal session %q (%q): %v", agentName, sessionName, err)
+				slog.Error("failed to attach agent terminal session", "agent", agentName, "session", sessionName, "err", err)
 			}
 			closeReason = err.Error()
 			return
@@ -261,7 +261,7 @@ func handleAgentTerminalWS(manager *TerminalManager, auth *terminalAuth, allowed
 		wsToPTY(ctx, conn, termSession, manager, connID)
 
 		if err := manager.Detach(connID); err != nil {
-			log.Printf("Failed to detach agent terminal connection %q: %v", connID, err)
+			slog.Error("failed to detach agent terminal connection", "conn_id", connID, "err", err)
 		}
 
 		closeStatus, closeReason = (<-crashCh).wsClose()

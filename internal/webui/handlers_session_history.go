@@ -2,7 +2,7 @@ package webui
 
 import (
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -35,7 +35,7 @@ func handleListSessionHistory(store *sessionhistory.Store) http.HandlerFunc {
 
 		records, err := store.List(r.Context(), wsID, issueID)
 		if err != nil {
-			log.Printf("Failed to list session history for %s: %v", issueID, err)
+			slog.Error("failed to list session history", "issue_id", issueID, "err", err)
 			respondJSON(w, http.StatusInternalServerError, map[string]interface{}{
 				"success": false,
 				"error":   "failed to list session history",
@@ -65,14 +65,14 @@ func readScrollbackFile(path string) (string, int, int, string) {
 		if os.IsNotExist(err) {
 			return "", 0, http.StatusNotFound, "scrollback file not found"
 		}
-		log.Printf("Failed to open scrollback file %s: %v", path, err)
+		slog.Error("failed to open scrollback file", "path", path, "err", err)
 		return "", 0, http.StatusInternalServerError, "failed to read scrollback"
 	}
 	defer f.Close()
 
 	content, err := io.ReadAll(f)
 	if err != nil {
-		log.Printf("Failed to read scrollback file %s: %v", path, err)
+		slog.Error("failed to read scrollback file", "path", path, "err", err)
 		return "", 0, http.StatusInternalServerError, "failed to read scrollback"
 	}
 
@@ -117,7 +117,7 @@ func handleGetSessionScrollback(store *sessionhistory.Store) http.HandlerFunc {
 
 		records, err := store.List(r.Context(), wsID, issueID)
 		if err != nil {
-			log.Printf("Failed to get session history for scrollback %s: %v", issueID, err)
+			slog.Error("failed to get session history for scrollback", "issue_id", issueID, "err", err)
 			respondJSON(w, http.StatusInternalServerError, map[string]interface{}{
 				"success": false,
 				"error":   "failed to get session history",

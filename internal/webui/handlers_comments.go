@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -89,7 +89,7 @@ func handleAddCommentWithPool(pool commentConnectionGetter) http.HandlerFunc {
 		// Parse request body
 		var req CommentRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			log.Printf("Invalid request body in handleAddComment: %v", err)
+			slog.Warn("invalid request body in handleAddComment", "err", err)
 			respondJSON(w, http.StatusBadRequest, CommentResponse{
 				Success: false,
 				Error:   "invalid request body",
@@ -126,7 +126,7 @@ func handleAddCommentWithPool(pool commentConnectionGetter) http.HandlerFunc {
 			if errors.Is(err, context.DeadlineExceeded) {
 				status = http.StatusGatewayTimeout
 			}
-			log.Printf("Pool error in handleAddComment: %v", err)
+			slog.Error("pool error in handleAddComment", "err", err)
 			respondJSON(w, status, CommentResponse{
 				Success: false,
 				Error:   "daemon not available",
@@ -149,7 +149,7 @@ func handleAddCommentWithPool(pool commentConnectionGetter) http.HandlerFunc {
 			if strings.Contains(errMsg, "not found") {
 				status = http.StatusNotFound
 			}
-			log.Printf("RPC error in handleAddComment: %v", err)
+			slog.Error("RPC error in handleAddComment", "err", err)
 			respondJSON(w, status, CommentResponse{
 				Success: false,
 				Error:   "internal server error",

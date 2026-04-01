@@ -1,7 +1,7 @@
 package webui
 
 import (
-	"log"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strconv"
@@ -125,7 +125,7 @@ func (h *SSEHub) Run() {
 			h.mu.Lock()
 			h.clients[client] = true
 			h.mu.Unlock()
-			log.Printf("SSE client %d registered (total: %d)", client.id, len(h.clients))
+			slog.Info("SSE client registered", "client_id", client.id, "count", len(h.clients))
 
 		case client := <-h.unregister:
 			h.mu.Lock()
@@ -134,11 +134,11 @@ func (h *SSEHub) Run() {
 				close(client.send)
 			}
 			h.mu.Unlock()
-			log.Printf("SSE client %d unregistered (total: %d)", client.id, len(h.clients))
+			slog.Info("SSE client unregistered", "client_id", client.id, "count", len(h.clients))
 
 		case mutation := <-h.broadcast:
 			if mutation.WorkspaceID == "" {
-				log.Printf("SSE: dropping mutation with empty WorkspaceID (type=%s, issue=%s)", mutation.Type, mutation.IssueID)
+				slog.Warn("SSE: dropping mutation with empty workspace_id", "type", mutation.Type, "issue_id", mutation.IssueID)
 				break
 			}
 			h.mu.RLock()
@@ -153,7 +153,7 @@ func (h *SSEHub) Run() {
 				case client.send <- mutation:
 				default:
 					// Client buffer full, skip this mutation
-					log.Printf("SSE client %d buffer full, skipping mutation", client.id)
+					slog.Warn("SSE client buffer full, skipping mutation", "client_id", client.id)
 				}
 			}
 			h.mu.RUnlock()
@@ -219,10 +219,10 @@ func (h *SSEHub) Broadcast(mutation *MutationPayload) {
 		h.retryMu.Lock()
 		if len(h.retryQueue) < 1024 {
 			h.retryQueue = append(h.retryQueue, mutation)
-			log.Printf("SSE broadcast channel full, queued mutation (queue size: %d)", len(h.retryQueue))
+			slog.Warn("SSE broadcast channel full, queued mutation", "queue_size", len(h.retryQueue))
 		} else {
 			atomic.AddInt64(&h.droppedCount, 1)
-			log.Printf("SSE retry queue full, dropped mutation (total dropped: %d)", atomic.LoadInt64(&h.droppedCount))
+			slog.Warn("SSE retry queue full, dropped mutation", "total_dropped", atomic.LoadInt64(&h.droppedCount))
 		}
 		h.retryMu.Unlock()
 	}
@@ -275,7 +275,7 @@ func (h *SSEHub) drainRetryQueue() {
 			}
 			h.retryQueue = h.retryQueue[i:]
 			if sent > 0 {
-				log.Printf("SSE retry queue drained %d mutations, %d remaining", sent, len(h.retryQueue))
+				slog.Info("SSE retry queue partially drained", "sent", sent, "remaining", len(h.retryQueue))
 			}
 			return
 		}
@@ -287,7 +287,7 @@ func (h *SSEHub) drainRetryQueue() {
 	}
 	h.retryQueue = h.retryQueue[:0]
 	if sent > 0 {
-		log.Printf("SSE retry queue fully drained %d mutations", sent)
+		slog.Info("SSE retry queue fully drained", "sent", sent)
 	}
 }
 

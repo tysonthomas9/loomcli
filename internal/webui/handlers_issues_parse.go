@@ -3,7 +3,7 @@ package webui
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
@@ -110,17 +110,17 @@ func parseKanbanParams(r *http.Request) (*kanbanParams, error) {
 func fetchUnclosedIDSetAndMap(client *rpc.Client) (map[string]bool, map[string]*types.IssueWithCounts) {
 	resp, err := client.List(&rpc.ListArgs{Limit: MaxListLimit})
 	if err != nil {
-		log.Printf("Failed to fetch issues for blocker detection: %v", err)
+		slog.Error("failed to fetch issues for blocker detection", "err", err)
 		return nil, nil
 	}
 	if !resp.Success {
-		log.Printf("List RPC failed for blocker detection: %s", resp.Error)
+		slog.Error("list RPC failed for blocker detection", "err", resp.Error)
 		return nil, nil
 	}
 
 	var allIssues []*types.IssueWithCounts
 	if err := json.Unmarshal(resp.Data, &allIssues); err != nil {
-		log.Printf("Failed to parse issues for blocker detection: %v", err)
+		slog.Error("failed to parse issues for blocker detection", "err", err)
 		return nil, nil
 	}
 

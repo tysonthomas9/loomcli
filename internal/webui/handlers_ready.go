@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -108,7 +108,7 @@ func buildReadyResponse(client readyClient, issues []*types.Issue) []*ReadyIssue
 
 	parentResp, err := client.GetParentIDs(&rpc.GetParentIDsArgs{IssueIDs: issueIDs})
 	if err != nil {
-		log.Printf("Failed to get parent IDs for ready issues: %v", err)
+		slog.Error("failed to get parent IDs for ready issues", "err", err)
 		parentResp = &rpc.GetParentIDsResponse{Parents: make(map[string]*rpc.ParentInfo)}
 	}
 
@@ -152,7 +152,7 @@ func handleReadyWithPool(pool readyConnectionGetter) http.HandlerFunc {
 
 		client, issues, status, err := executeReadyRPC(ctx, pool, args)
 		if err != nil {
-			log.Printf("handleReady error: %v", err)
+			slog.Error("handleReady error", "err", err)
 			respondJSON(w, status, ReadyResponse{
 				Success: false,
 				Error:   err.Error(),
@@ -182,17 +182,17 @@ func handleReadyWithPool(pool readyConnectionGetter) http.HandlerFunc {
 func filterUnclosedBlockers(client readyClient, issues []*types.Issue) []*types.Issue {
 	listResp, err := client.List(&rpc.ListArgs{Limit: 500})
 	if err != nil {
-		log.Printf("Failed to fetch issue list for blocker filtering: %v", err)
+		slog.Error("failed to fetch issue list for blocker filtering", "err", err)
 		return issues
 	}
 	if !listResp.Success {
-		log.Printf("List RPC failed for blocker filtering: %s", listResp.Error)
+		slog.Error("list RPC failed for blocker filtering", "err", listResp.Error)
 		return issues
 	}
 
 	var allIssues []*types.Issue
 	if err := json.Unmarshal(listResp.Data, &allIssues); err != nil {
-		log.Printf("Failed to parse issue list for blocker filtering: %v", err)
+		slog.Error("failed to parse issue list for blocker filtering", "err", err)
 		return issues
 	}
 

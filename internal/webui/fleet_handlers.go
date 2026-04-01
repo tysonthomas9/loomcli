@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"time"
@@ -109,7 +109,7 @@ func handleFleetRegisterWithStore(store workerRegistrar, tokenCfg *TokenConfig, 
 				})
 				return
 			}
-			log.Printf("Invalid request body in handleFleetRegister: %v", err)
+			slog.Warn("invalid request body", "handler", "handleFleetRegister", "err", err)
 			respondJSON(w, http.StatusBadRequest, FleetRegisterResponse{
 				Success: false,
 				Error:   "invalid request body",
@@ -145,7 +145,7 @@ func handleFleetRegisterWithStore(store workerRegistrar, tokenCfg *TokenConfig, 
 		}
 
 		if err := store.RegisterWorker(ctx, worker); err != nil {
-			log.Printf("Failed to register worker %s: %v", req.WorkerID, err)
+			slog.Error("failed to register worker", "worker_id", req.WorkerID, "err", err)
 			respondJSON(w, http.StatusInternalServerError, FleetRegisterResponse{
 				Success: false,
 				Error:   "failed to register worker",
@@ -156,7 +156,7 @@ func handleFleetRegisterWithStore(store workerRegistrar, tokenCfg *TokenConfig, 
 		// Generate JWT token
 		token, err := GenerateWorkerToken(req.WorkerID, req.Repos, tokenCfg.SigningKey, tokenCfg.Expiry)
 		if err != nil {
-			log.Printf("Failed to generate token for worker %s: %v", req.WorkerID, err)
+			slog.Error("failed to generate token", "worker_id", req.WorkerID, "err", err)
 			respondJSON(w, http.StatusInternalServerError, FleetRegisterResponse{
 				Success: false,
 				Error:   "failed to generate token",
@@ -164,7 +164,7 @@ func handleFleetRegisterWithStore(store workerRegistrar, tokenCfg *TokenConfig, 
 			return
 		}
 
-		log.Printf("Worker registered: %s", req.WorkerID)
+		slog.Info("worker registered", "worker_id", req.WorkerID)
 		respondJSON(w, http.StatusCreated, FleetRegisterResponse{
 			Success: true,
 			Token:   token,

@@ -1,7 +1,7 @@
 package webui
 
 import (
-	"log"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -69,7 +69,7 @@ func handleGetAgentLog() http.HandlerFunc {
 		// Get log file path (workspace-scoped)
 		logPath, err := getAgentLogPath(wsID, agentName)
 		if err != nil {
-			log.Printf("Agent log path error for %s: %v", agentName, err)
+			slog.Error("agent log path error", "agent", agentName, "err", err)
 			respondJSON(w, http.StatusInternalServerError, LogContentResponse{
 				Success: false,
 				Error:   "failed to resolve log path",
@@ -92,7 +92,7 @@ func handleGetAgentLog() http.HandlerFunc {
 		// Read log content
 		content, startLine, err := readFileLastLines(logPath, lines, beforeLine)
 		if err != nil {
-			log.Printf("Failed to read agent log for %s: %v", agentName, err)
+			slog.Error("failed to read agent log", "agent", agentName, "err", err)
 			respondJSON(w, http.StatusInternalServerError, LogContentResponse{
 				Success: false,
 				Error:   "failed to read log file",
@@ -141,7 +141,7 @@ func handleListTaskPhases() http.HandlerFunc {
 		// List available phases (workspace-scoped)
 		phases, err := listTaskPhases(wsID, taskID)
 		if err != nil {
-			log.Printf("Failed to list task phases for %s: %v", taskID, err)
+			slog.Error("failed to list task phases", "task_id", taskID, "err", err)
 			respondJSON(w, http.StatusInternalServerError, TaskPhasesResponse{
 				Success: false,
 				Error:   "failed to list task phases",
@@ -219,7 +219,7 @@ func handleGetTaskLog() http.HandlerFunc {
 		// Get log file path (workspace-scoped)
 		logPath, err := getTaskLogPath(wsID, taskID, phase)
 		if err != nil {
-			log.Printf("Task log path error for %s/%s: %v", taskID, phase, err)
+			slog.Error("task log path error", "task_id", taskID, "phase", phase, "err", err)
 			respondJSON(w, http.StatusInternalServerError, LogContentResponse{
 				Success: false,
 				Error:   "failed to resolve log path",
@@ -242,7 +242,7 @@ func handleGetTaskLog() http.HandlerFunc {
 		// Read log content
 		content, startLine, err := readFileLastLines(logPath, lines, beforeLine)
 		if err != nil {
-			log.Printf("Failed to read task log for %s/%s: %v", taskID, phase, err)
+			slog.Error("failed to read task log", "task_id", taskID, "phase", phase, "err", err)
 			respondJSON(w, http.StatusInternalServerError, LogContentResponse{
 				Success: false,
 				Error:   "failed to read log file",

@@ -2,7 +2,7 @@ package webui
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
@@ -96,7 +96,7 @@ func (s *DaemonSubscriber) emitGranularMutations(changed []changedIssue, now tim
 	s.mu.Unlock()
 
 	if mutationCount > 0 {
-		log.Printf("External DB change: broadcast %d granular mutations to %d SSE clients", mutationCount, s.hub.ClientCount())
+		slog.Info("external DB change: broadcast granular mutations", "count", mutationCount, "clients", s.hub.ClientCount())
 	}
 }
 
@@ -107,11 +107,11 @@ func (s *DaemonSubscriber) fetchChangedIssues(client *rpc.Client, since time.Tim
 		UpdatedAfter: since.UTC().Format(time.RFC3339),
 	})
 	if err != nil {
-		log.Printf("External poll: list changed issues error: %v", err)
+		slog.Error("external poll: list changed issues error", "err", err)
 		return nil
 	}
 	if !resp.Success {
-		log.Printf("External poll: list changed issues failed: %s", resp.Error)
+		slog.Error("external poll: list changed issues failed", "err", resp.Error)
 		return nil
 	}
 
@@ -130,7 +130,7 @@ func parseChangedIssues(data json.RawMessage) []changedIssue {
 		SourceRepo string `json:"source_repo"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
-		log.Printf("External poll: parse changed issues error: %v", err)
+		slog.Error("external poll: parse changed issues error", "err", err)
 		return nil
 	}
 	result := make([]changedIssue, 0, len(raw))
@@ -159,7 +159,7 @@ func (s *DaemonSubscriber) broadcastRefresh(now time.Time, totalCount int64) {
 	s.lastKnownCount = totalCount
 	s.lastPollTime = now
 	s.mu.Unlock()
-	log.Printf("External DB change detected, broadcast refresh to %d SSE clients", s.hub.ClientCount())
+	slog.Info("external DB change detected, broadcast refresh", "clients", s.hub.ClientCount())
 }
 
 // loadKnownIssues builds or rebuilds the knownIssues map from the current database state.

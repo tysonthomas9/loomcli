@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -62,7 +62,7 @@ func (p *movePoolAdapter) Put(client issueMover) {
 	if c, ok := client.(*rpc.Client); ok {
 		p.pool.Put(c)
 	} else if client != nil {
-		log.Printf("movePoolAdapter.Put: unexpected client type %T — connection leaked", client)
+		slog.Warn("movePoolAdapter.Put: unexpected client type — connection leaked", "client_type", fmt.Sprintf("%T", client))
 	}
 }
 
@@ -166,7 +166,7 @@ func fetchSourceIssue(w http.ResponseWriter, client issueMover, issueID string) 
 			respondJSON(w, http.StatusNotFound, MoveIssueResponse{Success: false, Error: fmt.Sprintf("issue not found: %s", issueID)})
 			return nil, false
 		}
-		log.Printf("RPC Show error in handleMoveIssue: %v", err)
+		slog.Error("RPC show error in handleMoveIssue", "err", err)
 		respondJSON(w, http.StatusInternalServerError, MoveIssueResponse{Success: false, Error: "failed to get source issue"})
 		return nil, false
 	}
@@ -181,7 +181,7 @@ func fetchSourceIssue(w http.ResponseWriter, client issueMover, issueID string) 
 
 	var sourceIssue types.Issue
 	if err := json.Unmarshal(showResp.Data, &sourceIssue); err != nil {
-		log.Printf("Failed to parse source issue in handleMoveIssue: %v", err)
+		slog.Error("failed to parse source issue in handleMoveIssue", "err", err)
 		respondJSON(w, http.StatusInternalServerError, MoveIssueResponse{Success: false, Error: "failed to parse source issue"})
 		return nil, false
 	}
@@ -236,7 +236,7 @@ func createIssueInTarget(w http.ResponseWriter, targetPool moveConnectionGetter,
 			respondJSON(w, http.StatusBadRequest, MoveIssueResponse{Success: false, Error: fmt.Sprintf("target workspace %q not registered", targetWorkspace)})
 			return "", err
 		}
-		log.Printf("Target pool error in handleMoveIssue for workspace %q: %v", targetWorkspace, err)
+		slog.Error("target pool error in handleMoveIssue", "workspace", targetWorkspace, "err", err)
 		respondJSON(w, http.StatusBadGateway, MoveIssueResponse{Success: false, Error: "target workspace daemon not available"})
 		return "", err
 	}
@@ -244,7 +244,7 @@ func createIssueInTarget(w http.ResponseWriter, targetPool moveConnectionGetter,
 
 	createResp, err := targetClient.Create(buildCreateArgs(sourceIssue, sourceID))
 	if err != nil {
-		log.Printf("RPC Create error in handleMoveIssue: %v", err)
+		slog.Error("RPC create error in handleMoveIssue", "err", err)
 		respondJSON(w, http.StatusInternalServerError, MoveIssueResponse{Success: false, Error: "failed to create issue in target workspace"})
 		return "", err
 	}
@@ -255,7 +255,7 @@ func createIssueInTarget(w http.ResponseWriter, targetPool moveConnectionGetter,
 
 	var createdIssue types.Issue
 	if err := json.Unmarshal(createResp.Data, &createdIssue); err != nil {
-		log.Printf("Failed to parse created issue in handleMoveIssue: %v", err)
+		slog.Error("failed to parse created issue in handleMoveIssue", "err", err)
 		respondJSON(w, http.StatusInternalServerError, MoveIssueResponse{Success: false, Error: "issue created but failed to parse response"})
 		return "", err
 	}
@@ -296,7 +296,7 @@ func handleMoveIssueWithPool(pool moveConnectionGetter, targetPool moveConnectio
 			if errors.Is(err, context.DeadlineExceeded) {
 				status = http.StatusGatewayTimeout
 			}
-			log.Printf("Pool error in handleMoveIssue: %v", err)
+			slog.Error("pool error in handleMoveIssue", "err", err)
 			respondJSON(w, status, MoveIssueResponse{Success: false, Error: "daemon not available"})
 			return
 		}
@@ -322,17 +322,17 @@ func handleMoveIssueWithPool(pool moveConnectionGetter, targetPool moveConnectio
 		// Add comment on source issue noting the move (via source client)
 		commentText := fmt.Sprintf("Moved to %s in workspace %q", newID, targetWorkspace)
 		if _, err := client.AddComment(&rpc.CommentAddArgs{ID: issueID, Author: "web-ui", Text: commentText}); err != nil {
-			log.Printf("Failed to add move comment on source %s: %v", issueID, err)
+			slog.Error("failed to add move comment on source", "issue_id", issueID, "err", err)
 			warnings = append(warnings, "Failed to add comment on source issue")
 		}
 
 		// Close the source issue (via source client)
 		closeResp, closeErr := client.CloseIssue(&rpc.CloseArgs{ID: issueID, Reason: fmt.Sprintf("Moved to %s", newID), Force: true})
 		if closeErr != nil {
-			log.Printf("Failed to close source %s: %v", issueID, closeErr)
+			slog.Error("failed to close source", "issue_id", issueID, "err", closeErr)
 			warnings = append(warnings, "Source issue could not be closed")
 		} else if !closeResp.Success {
-			log.Printf("Close failed for source %s: %s", issueID, closeResp.Error)
+			slog.Error("close failed for source", "issue_id", issueID, "err", closeResp.Error)
 			warnings = append(warnings, "Source issue could not be closed")
 		}
 

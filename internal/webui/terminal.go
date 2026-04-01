@@ -5,7 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"regexp"
@@ -162,7 +162,7 @@ func (m *TerminalManager) tmuxNewSession(name, command string, cols, rows uint16
 	} {
 		c := exec.Command(m.tmuxPath, "set-option", "-t", name, opt[0], opt[1])
 		if err := c.Run(); err != nil {
-			log.Printf("Warning: failed to set %s for session %q: %v", opt[0], name, err)
+			slog.Warn("failed to set tmux option", "option", opt[0], "session", name, "err", err)
 		}
 	}
 	return nil
@@ -281,7 +281,7 @@ func (m *TerminalManager) AttachExistingRaw(tmuxSessionName string, cols, rows u
 	// Mirror Talk-to-Lead behavior so wheel/input interactions are consistent.
 	mouseCmd := exec.Command(m.tmuxPath, "set-option", "-t", tmuxSessionName, "mouse", "on")
 	if err := mouseCmd.Run(); err != nil {
-		log.Printf("Warning: failed to enable mouse mode for session %q: %v", tmuxSessionName, err)
+		slog.Warn("failed to enable mouse mode for session", "session", tmuxSessionName, "err", err)
 	}
 
 	cmd, ptmx, err := m.tmuxAttach(tmuxSessionName)

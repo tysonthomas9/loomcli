@@ -3,7 +3,7 @@ package webui
 import (
 	"bytes"
 	"context"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -401,17 +401,13 @@ func TestSafeDialContext_BlocksPrivateIPs(t *testing.T) {
 }
 
 func TestNewLoomProxy_DebugLogDoesNotLeakToken(t *testing.T) {
-	// Capture log output for the duration of this test.
-	// Do NOT run sub-tests in parallel — log.SetOutput is global.
+	// Capture slog output for the duration of this test.
+	// Do NOT run sub-tests in parallel — slog.SetDefault is global.
 	var buf bytes.Buffer
-	origWriter := log.Writer()
-	origFlags := log.Flags()
-	log.SetOutput(&buf)
-	log.SetFlags(0) // strip timestamps for easier assertions
-	defer func() {
-		log.SetOutput(origWriter)
-		log.SetFlags(origFlags)
-	}()
+	origLogger := slog.Default()
+	handler := slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})
+	slog.SetDefault(slog.New(handler))
+	defer slog.SetDefault(origLogger)
 
 	const secretToken = "supersecretvalue42"
 

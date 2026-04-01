@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -58,7 +58,7 @@ func handleFleetHeartbeatWithStore(store heartbeatStore) http.HandlerFunc {
 				})
 				return
 			}
-			log.Printf("Invalid request body in handleFleetHeartbeat: %v", err)
+			slog.Warn("invalid request body", "handler", "handleFleetHeartbeat", "err", err)
 			respondJSON(w, http.StatusBadRequest, HeartbeatResponse{
 				Success: false,
 				Error:   "invalid request body",
@@ -96,7 +96,7 @@ func handleFleetHeartbeatWithStore(store heartbeatStore) http.HandlerFunc {
 				})
 				return
 			}
-			log.Printf("Failed to update heartbeat for worker %s: %v", req.WorkerID, err)
+			slog.Error("failed to update heartbeat", "worker_id", req.WorkerID, "err", err)
 			respondJSON(w, http.StatusInternalServerError, HeartbeatResponse{
 				Success: false,
 				Error:   "failed to update heartbeat",

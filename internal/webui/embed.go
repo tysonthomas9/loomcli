@@ -4,7 +4,6 @@ import (
 	"embed"
 	"encoding/json"
 	"io/fs"
-	"log"
 	"log/slog"
 	"net/http"
 	"os"
@@ -30,7 +29,7 @@ func logFrontendBuildMeta() {
 		GitHash string `json:"git_hash"`
 	}
 	if err := json.Unmarshal(data, &meta); err != nil {
-		slog.Warn("failed to parse frontend build metadata", "error", err)
+		slog.Warn("failed to parse frontend build metadata", "err", err)
 		return
 	}
 	slog.Info("embedded frontend", "built_at", meta.BuiltAt, "git_hash", meta.GitHash)
@@ -149,13 +148,13 @@ func devFrontendHandler(dir string) http.Handler {
 	// Resolve to absolute path for path traversal validation
 	absDir, err := filepath.Abs(dir)
 	if err != nil {
-		log.Printf("Warning: failed to resolve dev frontend directory: %v", err)
+		slog.Warn("failed to resolve dev frontend directory", "err", err)
 		absDir = dir
 	}
 
 	// Warn if the directory doesn't exist at startup
 	if _, err := os.Stat(absDir); err != nil {
-		log.Printf("Warning: dev frontend directory not found: %s (run 'npm run build' first)", absDir)
+		slog.Warn("dev frontend directory not found (run 'npm run build' first)", "dir", absDir)
 	}
 
 	fileServer := http.FileServer(http.Dir(absDir))

@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -113,7 +113,7 @@ func handleGetIssueEventsWithPool(pool eventConnectionGetter) http.HandlerFunc {
 			if errors.Is(err, context.DeadlineExceeded) {
 				status = http.StatusGatewayTimeout
 			}
-			log.Printf("Pool error in handleGetIssueEvents: %v", err)
+			slog.Error("pool error in handleGetIssueEvents", "err", err)
 			respondJSON(w, status, EventListResponse{
 				Success: false,
 				Error:   "daemon not available",
@@ -127,7 +127,7 @@ func handleGetIssueEventsWithPool(pool eventConnectionGetter) http.HandlerFunc {
 			Limit: parseEventLimit(r),
 		})
 		if err != nil {
-			log.Printf("RPC error in handleGetIssueEvents: %v", err)
+			slog.Error("RPC error in handleGetIssueEvents", "err", err)
 			respondJSON(w, httpStatusForError(err.Error()), EventListResponse{
 				Success: false,
 				Error:   "internal server error",

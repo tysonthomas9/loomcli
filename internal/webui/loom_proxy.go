@@ -3,7 +3,7 @@ package webui
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -86,7 +86,7 @@ func newLoomProxy(defaultURL string) http.Handler {
 
 	target, err := url.Parse(loomURL)
 	if err != nil || target.Scheme == "" || target.Host == "" {
-		log.Printf("loom proxy disabled: invalid LOOM_SERVER_URL=%q", loomURL)
+		slog.Warn("loom proxy disabled: invalid LOOM_SERVER_URL", "url", loomURL)
 		return nil
 	}
 
@@ -107,12 +107,12 @@ func newLoomProxy(defaultURL string) http.Handler {
 
 	// SECURITY: Only allow proxying to localhost OR explicitly allowed hosts.
 	if target.Scheme != "http" && target.Scheme != "https" {
-		log.Printf("loom proxy disabled: invalid scheme %q (only http/https allowed)", target.Scheme)
+		slog.Warn("loom proxy disabled: invalid scheme (only http/https allowed)", "scheme", target.Scheme)
 		return nil
 	}
 	host := target.Hostname()
 	if host != "localhost" && host != "127.0.0.1" && host != "::1" && !allowedHostsMap[host] {
-		log.Printf("loom proxy disabled: host %q not allowed", host)
+		slog.Warn("loom proxy disabled: host not allowed", "host", host)
 		return nil
 	}
 
@@ -129,7 +129,7 @@ func newLoomProxy(defaultURL string) http.Handler {
 
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 		if debug {
-			log.Printf("loom proxy error %s %s: %v", r.Method, r.URL.Path, err)
+			slog.Debug("loom proxy error", "method", r.Method, "path", r.URL.Path, "err", err)
 		}
 		w.WriteHeader(http.StatusBadGateway)
 	}
@@ -142,7 +142,7 @@ func newLoomProxy(defaultURL string) http.Handler {
 		}
 		req.Host = target.Host
 		if debug {
-			log.Printf("loom proxy %s %s", req.Method, req.URL.Path)
+			slog.Debug("loom proxy request", "method", req.Method, "path", req.URL.Path)
 		}
 	}
 

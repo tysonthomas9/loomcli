@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -66,11 +66,11 @@ func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigi
 					"success": false,
 					"error":   "terminal authentication failed",
 				})
-				log.Printf("Terminal auth failed for session %q: %v", session, err)
+				slog.Warn("terminal auth failed", "session", session, "err", err)
 				return
 			}
 			if userID != "" {
-				log.Printf("Terminal session %q: authenticated user %q", session, userID)
+				slog.Info("terminal session authenticated", "session", session, "user_id", userID)
 			}
 		}
 
@@ -87,7 +87,7 @@ func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigi
 		// Must be called before websocket.Accept which hijacks the connection.
 		rc := http.NewResponseController(w)
 		if err := rc.SetWriteDeadline(time.Time{}); err != nil {
-			log.Printf("Terminal WS: failed to disable write deadline: %v", err)
+			slog.Warn("terminal ws: failed to disable write deadline", "err", err)
 		}
 
 		// Accept WebSocket upgrade with origin validation.
@@ -98,7 +98,7 @@ func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigi
 			OriginPatterns: patterns,
 		})
 		if err != nil {
-			log.Printf("Failed to accept WebSocket: %v", err)
+			slog.Error("failed to accept websocket", "err", err)
 			return
 		}
 		conn.SetReadLimit(wsReadLimit)
@@ -119,9 +119,9 @@ func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigi
 		termSession, err := manager.Attach(session, attachCommandForSession(session), 80, 24)
 		if err != nil {
 			if errors.Is(err, ErrMaxSessionsReached) {
-				log.Printf("Terminal session limit reached for %q", session)
+				slog.Info("terminal session limit reached", "session", session)
 			} else {
-				log.Printf("Failed to attach terminal session %q: %v", session, err)
+				slog.Error("failed to attach terminal session", "session", session, "err", err)
 			}
 			closeReason = err.Error()
 			return
@@ -158,7 +158,7 @@ func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigi
 		// WebSocket closed - detach connection to close PTY and unblock ptyToWS
 		// (Detach closes the PTY, causing the Read in ptyToWS to return an error)
 		if err := manager.Detach(connID); err != nil {
-			log.Printf("Failed to detach terminal connection %q: %v", connID, err)
+			slog.Error("failed to detach terminal connection", "conn_id", connID, "err", err)
 		}
 
 		// Wait for PTY reader to finish and check for backend crash
@@ -274,7 +274,7 @@ func wsToPTY(ctx context.Context, conn *websocket.Conn, session *TerminalSession
 
 				if cols > 0 && rows > 0 && cols <= maxTerminalCols && rows <= maxTerminalRows {
 					if err := manager.Resize(connID, cols, rows); err != nil {
-						log.Printf("Failed to resize terminal session %q: %v", connID, err)
+						slog.Error("failed to resize terminal session", "conn_id", connID, "err", err)
 					}
 				}
 				continue
@@ -314,7 +314,7 @@ func broadcastSessionIssueEvent(tabMetaStore *tabmeta.Store, hub *SSEHub, worksp
 func injectTerminalContextBanner(session *TerminalSession, loomServerURL string, workspaceConfigFn func() (*WorkspaceData, error)) {
 	tc, err := FetchTerminalContext(loomServerURL)
 	if err != nil {
-		log.Printf("Terminal context fetch failed (skipping banner): %v", err)
+		slog.Error("terminal context fetch failed, skipping banner", "err", err)
 		return
 	}
 
@@ -323,12 +323,12 @@ func injectTerminalContextBanner(session *TerminalSession, loomServerURL string,
 		if wsData, wsErr := workspaceConfigFn(); wsErr == nil && wsData != nil {
 			wsName = wsData.Name
 		} else if wsErr != nil {
-			log.Printf("Warning: workspace config unavailable for terminal context: %v", wsErr)
+			slog.Warn("workspace config unavailable for terminal context", "err", wsErr)
 		}
 	}
 
 	banner := FormatContextBanner(tc, wsName)
 	if _, writeErr := session.PTY.Write([]byte(banner)); writeErr != nil {
-		log.Printf("Warning: failed to write context banner to PTY: %v", writeErr)
+		slog.Warn("failed to write context banner to pty", "err", writeErr)
 	}
 }

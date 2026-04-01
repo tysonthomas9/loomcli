@@ -3,7 +3,7 @@ package webui
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -89,7 +89,7 @@ func handleListTerminalSessions(manager *TerminalManager) http.HandlerFunc {
 
 		sessions, err := manager.ListActiveSessions()
 		if err != nil {
-			log.Printf("Failed to list terminal sessions: %v", err)
+			slog.Error("failed to list terminal sessions", "err", err)
 			respondJSON(w, http.StatusInternalServerError, terminalSessionsResponse{
 				Success: false,
 				Error:   "failed to list terminal sessions",
@@ -209,7 +209,7 @@ func handleListSessionsByIssue(tabMetaStore *tabmeta.Store) http.HandlerFunc {
 
 		sessionMap, err := tabMetaStore.ListIssueSessionMap(r.Context())
 		if err != nil {
-			log.Printf("Failed to list sessions by issue: %v", err)
+			slog.Error("failed to list sessions by issue", "err", err)
 			respondJSON(w, http.StatusInternalServerError, map[string]interface{}{
 				"success": false,
 				"error":   "failed to list sessions by issue",
@@ -238,7 +238,7 @@ func handleCloseAllSessions(manager *TerminalManager, tabMetaStore *tabmeta.Stor
 
 		// Kill all tmux sessions
 		if err := manager.KillAllSessions(); err != nil {
-			log.Printf("Failed to kill all sessions: %v", err)
+			slog.Error("failed to kill all sessions", "err", err)
 			respondJSON(w, http.StatusInternalServerError, map[string]interface{}{
 				"success": false,
 				"error":   "failed to kill all sessions",
@@ -253,7 +253,7 @@ func handleCloseAllSessions(manager *TerminalManager, tabMetaStore *tabmeta.Stor
 		if tabMetaStore != nil {
 			allTabs, err := tabMetaStore.ListAll(r.Context())
 			if err != nil {
-				log.Printf("Failed to list tab metadata for cleanup: %v", err)
+				slog.Error("failed to list tab metadata for cleanup", "err", err)
 				metaCleanupFailed = true
 			} else {
 				for _, tab := range allTabs {
@@ -261,7 +261,7 @@ func handleCloseAllSessions(manager *TerminalManager, tabMetaStore *tabmeta.Stor
 						affectedWorkspaces[tab.Workspace] = true
 					}
 					if err := tabMetaStore.Delete(r.Context(), tab.Workspace, tab.SessionName); err != nil {
-						log.Printf("Failed to delete tab metadata for %s: %v", tab.SessionName, err)
+						slog.Error("failed to delete tab metadata", "session", tab.SessionName, "err", err)
 						metaCleanupFailed = true
 					}
 				}
@@ -341,7 +341,7 @@ func handleSeedTerminalSession(manager *TerminalManager) http.HandlerFunc {
 				})
 				return
 			}
-			log.Printf("Failed to seed terminal session %q: %v", sessionName, err)
+			slog.Error("failed to seed terminal session", "session", sessionName, "err", err)
 			respondJSON(w, http.StatusInternalServerError, map[string]interface{}{
 				"success": false,
 				"error":   "failed to seed terminal session",

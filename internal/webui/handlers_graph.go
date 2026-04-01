@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -141,7 +141,7 @@ func handleBlockedWithPool(pool blockedConnectionGetter) http.HandlerFunc {
 			if errors.Is(err, context.DeadlineExceeded) {
 				status = http.StatusGatewayTimeout
 			}
-			log.Printf("Pool error in handleBlocked: %v", err)
+			slog.Error("pool error in handleBlocked", "err", err)
 			respondJSON(w, status, BlockedResponse{
 				Success: false,
 				Error:   "daemon not available",
@@ -153,7 +153,7 @@ func handleBlockedWithPool(pool blockedConnectionGetter) http.HandlerFunc {
 		// Execute Blocked RPC call
 		resp, err := client.Blocked(args)
 		if err != nil {
-			log.Printf("RPC error in handleBlocked: %v", err)
+			slog.Error("RPC error in handleBlocked", "err", err)
 			respondJSON(w, http.StatusInternalServerError, BlockedResponse{
 				Success: false,
 				Error:   "internal server error",
@@ -228,7 +228,7 @@ func handleGraphWithPool(pool graphConnectionGetter) http.HandlerFunc {
 			if errors.Is(err, context.DeadlineExceeded) {
 				httpStatus = http.StatusGatewayTimeout
 			}
-			log.Printf("Pool error in handleGraph: %v", err)
+			slog.Error("pool error in handleGraph", "err", err)
 			respondJSON(w, httpStatus, GraphResponse{
 				Success: false,
 				Error:   "daemon not available",
@@ -256,7 +256,7 @@ func handleGraphWithPool(pool graphConnectionGetter) http.HandlerFunc {
 		// Single RPC call replaces List + N×Show
 		result, err := client.GetGraphData(graphArgs)
 		if err != nil {
-			log.Printf("RPC error in handleGraph: %v", err)
+			slog.Error("RPC error in handleGraph", "err", err)
 			respondJSON(w, http.StatusInternalServerError, GraphResponse{
 				Success: false,
 				Error:   "internal server error",

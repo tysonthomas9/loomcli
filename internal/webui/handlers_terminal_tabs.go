@@ -3,7 +3,7 @@ package webui
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -37,7 +37,7 @@ func handleListTerminalTabs(store *tabmeta.Store, manager *TerminalManager) http
 		if manager != nil {
 			sessions, err := manager.ListActiveSessions()
 			if err != nil {
-				log.Printf("Failed to list active sessions for tab metadata: %v", err)
+				slog.Error("failed to list active sessions for tab metadata", "err", err)
 			} else {
 				for _, s := range sessions {
 					activeNames = append(activeNames, s.Name)
@@ -47,7 +47,7 @@ func handleListTerminalTabs(store *tabmeta.Store, manager *TerminalManager) http
 
 		tabs, err := store.EnsureDefaults(r.Context(), workspace, activeNames)
 		if err != nil {
-			log.Printf("Failed to list tab metadata: %v", err)
+			slog.Error("failed to list tab metadata", "err", err)
 			respondJSON(w, http.StatusInternalServerError, tabMetadataResponse{
 				Success: false,
 				Error:   "failed to list tab metadata",
@@ -86,7 +86,7 @@ func handleGetTerminalTab(store *tabmeta.Store) http.HandlerFunc {
 
 		meta, err := store.Get(r.Context(), workspace, session)
 		if err != nil {
-			log.Printf("Failed to get tab metadata for %s: %v", session, err)
+			slog.Error("failed to get tab metadata", "session", session, "err", err)
 			respondJSON(w, http.StatusInternalServerError, tabMetadataResponse{
 				Success: false,
 				Error:   "failed to get tab metadata",
@@ -183,7 +183,7 @@ func handlePatchTerminalTab(store *tabmeta.Store, hub *SSEHub) http.HandlerFunc 
 
 		meta, err := store.Patch(r.Context(), workspace, session, fields)
 		if err != nil {
-			log.Printf("Failed to patch tab metadata for %s: %v", session, err)
+			slog.Error("failed to patch tab metadata", "session", session, "err", err)
 			status := http.StatusInternalServerError
 			if strings.Contains(err.Error(), "not found") {
 				status = http.StatusNotFound
@@ -281,7 +281,7 @@ func handlePutTerminalTab(store *tabmeta.Store, hub *SSEHub) http.HandlerFunc {
 		}
 
 		if err := store.Set(r.Context(), meta); err != nil {
-			log.Printf("Failed to put tab metadata for %s: %v", session, err)
+			slog.Error("failed to put tab metadata", "session", session, "err", err)
 			respondJSON(w, http.StatusInternalServerError, tabMetadataResponse{
 				Success: false,
 				Error:   "failed to create/replace tab metadata",
@@ -328,7 +328,7 @@ func handleDeleteTerminalTab(store *tabmeta.Store, hub *SSEHub) http.HandlerFunc
 		}
 
 		if err := store.Delete(r.Context(), workspace, session); err != nil {
-			log.Printf("Failed to delete tab metadata for %s: %v", session, err)
+			slog.Error("failed to delete tab metadata", "session", session, "err", err)
 			respondJSON(w, http.StatusInternalServerError, tabMetadataResponse{
 				Success: false,
 				Error:   "failed to delete tab metadata",
