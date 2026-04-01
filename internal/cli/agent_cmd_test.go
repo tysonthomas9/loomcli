@@ -145,13 +145,9 @@ func TestMapTaskFilter_WithParentID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Save and restore execCommand
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
 			var capturedArgs []string
 			callCount := 0
-			execCommand = func(dir, name string, args ...string) CommandResult {
+			installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 				callCount++
 				// Capture only the first call (bd ready) args for parentID verification
 				if callCount == 1 {
@@ -167,7 +163,7 @@ func TestMapTaskFilter_WithParentID(t *testing.T) {
 					mockIssue = BdIssue{ID: "T-3", Title: "Any task", Status: "open", Design: ""}
 				}
 				return CommandResult{Stdout: mustJSON([]BdIssue{mockIssue})}
-			}
+			}})
 
 			// Get the function from mapTaskFilter
 			taskCheckFn, err := mapTaskFilter(tt.filter, tt.parentID)
@@ -209,13 +205,9 @@ func TestMapTaskFilter_WithParentID(t *testing.T) {
 // TestMapTaskFilter_ParentIDCapturedInClosure verifies that the parentID is properly
 // captured in the closure and persists across multiple calls to the returned function.
 func TestMapTaskFilter_ParentIDCapturedInClosure(t *testing.T) {
-	// Save and restore execCommand
-	oldExec := execCommand
-	defer func() { execCommand = oldExec }()
-
 	var readyCapturedArgs [][]string
 
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		fullArgs := append([]string{name}, args...)
 		// Only capture bd ready calls (not bd list calls used for unclosed issue checking)
 		if len(args) > 0 && args[0] == "ready" {
@@ -226,7 +218,7 @@ func TestMapTaskFilter_ParentIDCapturedInClosure(t *testing.T) {
 				{ID: "T-1", Title: "Task", Status: "open", Design: ""},
 			}),
 		}
-	}
+	}})
 
 	// Create a closure with a specific parentID
 	parentID := "EPIC-555"

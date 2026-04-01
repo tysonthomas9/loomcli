@@ -37,10 +37,7 @@ func TestServeFlags_NoDaemon_Default(t *testing.T) {
 }
 
 func TestServeEnsureDaemon_AlreadyRunning(t *testing.T) {
-	oldExec := execCommand
-	defer func() { execCommand = oldExec }()
-
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		if len(args) >= 2 && args[1] == "status" {
 			return CommandResult{
 				Stdout: `{"status":"running","pid":1234}`,
@@ -48,7 +45,7 @@ func TestServeEnsureDaemon_AlreadyRunning(t *testing.T) {
 		}
 		t.Fatalf("unexpected command: %s %v", name, args)
 		return CommandResult{}
-	}
+	}})
 
 	started, err := EnsureBdDaemonRunning(100 * time.Millisecond)
 	if err != nil {
@@ -60,12 +57,9 @@ func TestServeEnsureDaemon_AlreadyRunning(t *testing.T) {
 }
 
 func TestServeEnsureDaemon_NotRunning_StartSucceeds(t *testing.T) {
-	oldExec := execCommand
-	defer func() { execCommand = oldExec }()
-
 	var statusCalls atomic.Int32
 
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		if len(args) >= 2 && args[1] == "status" {
 			n := statusCalls.Add(1)
 			if n <= 1 {
@@ -82,7 +76,7 @@ func TestServeEnsureDaemon_NotRunning_StartSucceeds(t *testing.T) {
 		}
 		t.Fatalf("unexpected command: %s %v", name, args)
 		return CommandResult{}
-	}
+	}})
 
 	started, err := EnsureBdDaemonRunning(2 * time.Second)
 	if err != nil {
@@ -94,10 +88,7 @@ func TestServeEnsureDaemon_NotRunning_StartSucceeds(t *testing.T) {
 }
 
 func TestServeEnsureDaemon_Timeout(t *testing.T) {
-	oldExec := execCommand
-	defer func() { execCommand = oldExec }()
-
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		if len(args) >= 2 && args[1] == "status" {
 			return CommandResult{Err: fmt.Errorf("not running")}
 		}
@@ -106,7 +97,7 @@ func TestServeEnsureDaemon_Timeout(t *testing.T) {
 		}
 		t.Fatalf("unexpected command: %s %v", name, args)
 		return CommandResult{}
-	}
+	}})
 
 	started, err := EnsureBdDaemonRunning(300 * time.Millisecond)
 	if err == nil {
@@ -160,12 +151,9 @@ func TestServeIsDaemonRunning(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
-			execCommand = func(dir, name string, args ...string) CommandResult {
+			installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 				return tt.result
-			}
+			}})
 
 			got := isDaemonRunning()
 			if got != tt.want {
@@ -176,10 +164,7 @@ func TestServeIsDaemonRunning(t *testing.T) {
 }
 
 func TestServeEnsureDaemon_StartFails(t *testing.T) {
-	oldExec := execCommand
-	defer func() { execCommand = oldExec }()
-
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		if len(args) >= 2 && args[1] == "status" {
 			return CommandResult{Err: fmt.Errorf("not running")}
 		}
@@ -191,7 +176,7 @@ func TestServeEnsureDaemon_StartFails(t *testing.T) {
 		}
 		t.Fatalf("unexpected command: %s %v", name, args)
 		return CommandResult{}
-	}
+	}})
 
 	started, err := EnsureBdDaemonRunning(100 * time.Millisecond)
 	if err == nil {
@@ -206,19 +191,16 @@ func TestServeEnsureDaemon_StartFails(t *testing.T) {
 }
 
 func TestServeEnsureDaemon_StatusCallsExpectedCommand(t *testing.T) {
-	oldExec := execCommand
-	defer func() { execCommand = oldExec }()
-
 	var capturedName string
 	var capturedArgs []string
 
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		capturedName = name
 		capturedArgs = args
 		return CommandResult{
 			Stdout: `{"status":"running","pid":999}`,
 		}
-	}
+	}})
 
 	_, _ = EnsureBdDaemonRunning(100 * time.Millisecond)
 
@@ -238,11 +220,8 @@ func TestServeEnsureDaemon_StatusCallsExpectedCommand(t *testing.T) {
 }
 
 func TestServeEnsureDaemon_InvalidJSON_TriggersStart(t *testing.T) {
-	oldExec := execCommand
-	defer func() { execCommand = oldExec }()
-
 	var startCalled atomic.Bool
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		if len(args) >= 2 && args[1] == "status" {
 			return CommandResult{Stdout: "invalid json response"}
 		}
@@ -251,7 +230,7 @@ func TestServeEnsureDaemon_InvalidJSON_TriggersStart(t *testing.T) {
 			return CommandResult{Err: fmt.Errorf("fail")}
 		}
 		return CommandResult{}
-	}
+	}})
 
 	_, err := EnsureBdDaemonRunning(100 * time.Millisecond)
 	if err == nil {

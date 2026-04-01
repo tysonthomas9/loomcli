@@ -13,11 +13,8 @@ import (
 )
 
 func TestEnsureDaemonForWorkspace_ContextCancelled(t *testing.T) {
-	oldExec := execCommand
-	defer func() { execCommand = oldExec }()
-
 	// Mock: daemon start succeeds but status never reports running.
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		if len(args) >= 2 && args[1] == "start" {
 			return CommandResult{}
 		}
@@ -25,7 +22,7 @@ func TestEnsureDaemonForWorkspace_ContextCancelled(t *testing.T) {
 			return CommandResult{Err: fmt.Errorf("not running")}
 		}
 		return CommandResult{}
-	}
+	}})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately
@@ -43,11 +40,8 @@ func TestEnsureDaemonForWorkspace_ContextCancelled(t *testing.T) {
 }
 
 func TestEnsureDaemonForWorkspace_ContextDeadlineExceeded(t *testing.T) {
-	oldExec := execCommand
-	defer func() { execCommand = oldExec }()
-
 	// Mock: daemon start succeeds but status never reports running.
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		if len(args) >= 2 && args[1] == "start" {
 			return CommandResult{}
 		}
@@ -55,7 +49,7 @@ func TestEnsureDaemonForWorkspace_ContextDeadlineExceeded(t *testing.T) {
 			return CommandResult{Err: fmt.Errorf("not running")}
 		}
 		return CommandResult{}
-	}
+	}})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
 	defer cancel()
@@ -72,11 +66,8 @@ func TestEnsureDaemonForWorkspace_ContextDeadlineExceeded(t *testing.T) {
 }
 
 func TestEnsureDaemonForWorkspace_TimeoutFallback(t *testing.T) {
-	oldExec := execCommand
-	defer func() { execCommand = oldExec }()
-
 	// Mock: daemon start succeeds but status never reports running.
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		if len(args) >= 2 && args[1] == "start" {
 			return CommandResult{}
 		}
@@ -84,7 +75,7 @@ func TestEnsureDaemonForWorkspace_TimeoutFallback(t *testing.T) {
 			return CommandResult{Err: fmt.Errorf("not running")}
 		}
 		return CommandResult{}
-	}
+	}})
 
 	err := ensureDaemonForWorkspace(context.Background(), t.TempDir(), 200*time.Millisecond)
 	if err == nil {
@@ -232,17 +223,14 @@ func TestEnsureCurrentProjectRegistered_RefusesToSaveOnParseError(t *testing.T) 
 }
 
 func TestStopDaemonForWorkspace_CallsBdDaemonStop(t *testing.T) {
-	oldExec := execCommand
-	defer func() { execCommand = oldExec }()
-
 	var calledDir, calledName string
 	var calledArgs []string
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		calledDir = dir
 		calledName = name
 		calledArgs = args
 		return CommandResult{}
-	}
+	}})
 
 	wsDir := t.TempDir()
 	stopDaemonForWorkspace(wsDir)
@@ -260,26 +248,20 @@ func TestStopDaemonForWorkspace_CallsBdDaemonStop(t *testing.T) {
 }
 
 func TestStopDaemonForWorkspace_ErrorIsNonFatal(t *testing.T) {
-	oldExec := execCommand
-	defer func() { execCommand = oldExec }()
-
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{Err: fmt.Errorf("daemon not running")}
-	}
+	}})
 
 	// Should not panic or crash
 	stopDaemonForWorkspace(t.TempDir())
 }
 
 func TestStopDaemonForWorkspace_EmptyDir(t *testing.T) {
-	oldExec := execCommand
-	defer func() { execCommand = oldExec }()
-
 	called := false
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		called = true
 		return CommandResult{}
-	}
+	}})
 
 	stopDaemonForWorkspace("")
 

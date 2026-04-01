@@ -34,14 +34,12 @@ func TestSetup_DetectBackends_YesUsesFirstAvailable(t *testing.T) {
 	setupYes = true
 
 	// Mock lookPath so that only "codex" is found
-	origLookPath := lookPath
-	defer func() { lookPath = origLookPath }()
-	lookPath = func(file string) (string, error) {
+	installLookPathMock(t, func(file string) (string, error) {
 		if file == "codex" {
 			return "/usr/bin/codex", nil
 		}
 		return "", exec.ErrNotFound
-	}
+	})
 
 	got := stepDetectBackends()
 	if got != "codex" {
@@ -57,11 +55,9 @@ func TestSetup_DetectBackends_YesDefaultsToClaudeWhenNoneFound(t *testing.T) {
 	setupYes = true
 
 	// Mock lookPath so nothing is found
-	origLookPath := lookPath
-	defer func() { lookPath = origLookPath }()
-	lookPath = func(file string) (string, error) {
+	installLookPathMock(t, func(file string) (string, error) {
 		return "", exec.ErrNotFound
-	}
+	})
 
 	got := stepDetectBackends()
 	if got != "claude" {
@@ -77,14 +73,12 @@ func TestSetup_DetectBackends_InteractivePrompt(t *testing.T) {
 	setupYes = false
 
 	// Mock lookPath — claude available
-	origLookPath := lookPath
-	defer func() { lookPath = origLookPath }()
-	lookPath = func(file string) (string, error) {
+	installLookPathMock(t, func(file string) (string, error) {
 		if file == "claude" {
 			return "/usr/bin/claude", nil
 		}
 		return "", exec.ErrNotFound
-	}
+	})
 
 	// User types "opencode"
 	MockStdin(t, "opencode\n")
@@ -103,14 +97,12 @@ func TestSetup_DetectBackends_InteractiveEmpty(t *testing.T) {
 	setupYes = false
 
 	// Mock lookPath — opencode is first found
-	origLookPath := lookPath
-	defer func() { lookPath = origLookPath }()
-	lookPath = func(file string) (string, error) {
+	installLookPathMock(t, func(file string) (string, error) {
 		if file == "opencode" {
 			return "/usr/bin/opencode", nil
 		}
 		return "", exec.ErrNotFound
-	}
+	})
 
 	// User presses enter (empty) — should get default (opencode, first available)
 	MockStdin(t, "\n")

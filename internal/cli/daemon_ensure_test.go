@@ -10,10 +10,7 @@ import (
 
 func TestEnsureBdDaemonRunning(t *testing.T) {
 	t.Run("daemon already running", func(t *testing.T) {
-		oldExec := execCommand
-		defer func() { execCommand = oldExec }()
-
-		execCommand = func(dir, name string, args ...string) CommandResult {
+		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			if len(args) >= 2 && args[1] == "status" {
 				return CommandResult{
 					Stdout: `{"status":"running","pid":1234}`,
@@ -21,7 +18,7 @@ func TestEnsureBdDaemonRunning(t *testing.T) {
 			}
 			t.Fatalf("unexpected command: %s %v", name, args)
 			return CommandResult{}
-		}
+		}})
 
 		started, err := EnsureBdDaemonRunning(100 * time.Millisecond)
 		if err != nil {
@@ -33,12 +30,9 @@ func TestEnsureBdDaemonRunning(t *testing.T) {
 	})
 
 	t.Run("daemon not running, start succeeds, becomes ready", func(t *testing.T) {
-		oldExec := execCommand
-		defer func() { execCommand = oldExec }()
-
 		var statusCalls atomic.Int32
 
-		execCommand = func(dir, name string, args ...string) CommandResult {
+		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			if len(args) >= 2 && args[1] == "status" {
 				n := statusCalls.Add(1)
 				if n <= 1 {
@@ -53,7 +47,7 @@ func TestEnsureBdDaemonRunning(t *testing.T) {
 			}
 			t.Fatalf("unexpected command: %s %v", name, args)
 			return CommandResult{}
-		}
+		}})
 
 		started, err := EnsureBdDaemonRunning(2 * time.Second)
 		if err != nil {
@@ -65,10 +59,7 @@ func TestEnsureBdDaemonRunning(t *testing.T) {
 	})
 
 	t.Run("daemon not running, start fails", func(t *testing.T) {
-		oldExec := execCommand
-		defer func() { execCommand = oldExec }()
-
-		execCommand = func(dir, name string, args ...string) CommandResult {
+		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			if len(args) >= 2 && args[1] == "status" {
 				return CommandResult{Err: fmt.Errorf("not running")}
 			}
@@ -80,7 +71,7 @@ func TestEnsureBdDaemonRunning(t *testing.T) {
 			}
 			t.Fatalf("unexpected command: %s %v", name, args)
 			return CommandResult{}
-		}
+		}})
 
 		started, err := EnsureBdDaemonRunning(100 * time.Millisecond)
 		if err == nil {
@@ -95,10 +86,7 @@ func TestEnsureBdDaemonRunning(t *testing.T) {
 	})
 
 	t.Run("daemon not running, start succeeds, never becomes ready", func(t *testing.T) {
-		oldExec := execCommand
-		defer func() { execCommand = oldExec }()
-
-		execCommand = func(dir, name string, args ...string) CommandResult {
+		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			if len(args) >= 2 && args[1] == "status" {
 				return CommandResult{Err: fmt.Errorf("not running")}
 			}
@@ -107,7 +95,7 @@ func TestEnsureBdDaemonRunning(t *testing.T) {
 			}
 			t.Fatalf("unexpected command: %s %v", name, args)
 			return CommandResult{}
-		}
+		}})
 
 		started, err := EnsureBdDaemonRunning(300 * time.Millisecond)
 		if err == nil {
@@ -122,11 +110,8 @@ func TestEnsureBdDaemonRunning(t *testing.T) {
 	})
 
 	t.Run("status returns invalid JSON", func(t *testing.T) {
-		oldExec := execCommand
-		defer func() { execCommand = oldExec }()
-
 		var startCalled atomic.Bool
-		execCommand = func(dir, name string, args ...string) CommandResult {
+		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			if len(args) >= 2 && args[1] == "status" {
 				return CommandResult{Stdout: "not json"}
 			}
@@ -135,7 +120,7 @@ func TestEnsureBdDaemonRunning(t *testing.T) {
 				return CommandResult{Err: fmt.Errorf("fail")}
 			}
 			return CommandResult{}
-		}
+		}})
 
 		_, err := EnsureBdDaemonRunning(100 * time.Millisecond)
 		if err == nil {
@@ -182,12 +167,9 @@ func TestIsDaemonRunning(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
-			execCommand = func(dir, name string, args ...string) CommandResult {
+			installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 				return tt.result
-			}
+			}})
 
 			got := isDaemonRunning()
 			if got != tt.want {
@@ -213,13 +195,10 @@ func TestEnsureIssueBackendRunning(t *testing.T) {
 	t.Run("fleetdb does not call execCommand", func(t *testing.T) {
 		t.Setenv("LOOM_FLEETDB_ENABLED", "true")
 
-		oldExec := execCommand
-		defer func() { execCommand = oldExec }()
-
-		execCommand = func(dir, name string, args ...string) CommandResult {
+		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			t.Fatalf("execCommand should not be called for fleet-db backend: %s %v", name, args)
 			return CommandResult{}
-		}
+		}})
 
 		_, err := EnsureIssueBackendRunning(100 * time.Millisecond)
 		if err != nil {
@@ -230,11 +209,8 @@ func TestEnsureIssueBackendRunning(t *testing.T) {
 	t.Run("beads delegates to EnsureBdDaemonRunning", func(t *testing.T) {
 		t.Setenv("LOOM_FLEETDB_ENABLED", "false")
 
-		oldExec := execCommand
-		defer func() { execCommand = oldExec }()
-
 		// Mock: daemon already running
-		execCommand = func(dir, name string, args ...string) CommandResult {
+		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			if len(args) >= 2 && args[1] == "status" {
 				return CommandResult{
 					Stdout: `{"status":"running","pid":9876}`,
@@ -242,7 +218,7 @@ func TestEnsureIssueBackendRunning(t *testing.T) {
 			}
 			t.Fatalf("unexpected command: %s %v", name, args)
 			return CommandResult{}
-		}
+		}})
 
 		started, err := EnsureIssueBackendRunning(100 * time.Millisecond)
 		if err != nil {
@@ -256,11 +232,8 @@ func TestEnsureIssueBackendRunning(t *testing.T) {
 	t.Run("beads with daemon not running delegates start", func(t *testing.T) {
 		t.Setenv("LOOM_FLEETDB_ENABLED", "false")
 
-		oldExec := execCommand
-		defer func() { execCommand = oldExec }()
-
 		var statusCalls atomic.Int32
-		execCommand = func(dir, name string, args ...string) CommandResult {
+		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			if len(args) >= 2 && args[1] == "status" {
 				n := statusCalls.Add(1)
 				if n <= 1 {
@@ -275,7 +248,7 @@ func TestEnsureIssueBackendRunning(t *testing.T) {
 			}
 			t.Fatalf("unexpected command: %s %v", name, args)
 			return CommandResult{}
-		}
+		}})
 
 		started, err := EnsureIssueBackendRunning(2 * time.Second)
 		if err != nil {
