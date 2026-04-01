@@ -366,8 +366,9 @@ func TestValidWorkspaceName(t *testing.T) {
 
 func TestLoomWorkspaceForRename_RoundTrip(t *testing.T) {
 	ws := loomWorkspaceForRename{
-		ID:   "test-uuid-abc-123",
-		Path: "/home/user/projects/myws",
+		ID:      "test-uuid-abc-123",
+		Path:    "/home/user/projects/myws",
+		Backend: "codex",
 	}
 
 	data, err := yaml.Marshal(ws)
@@ -385,6 +386,9 @@ func TestLoomWorkspaceForRename_RoundTrip(t *testing.T) {
 	}
 	if got.Path != ws.Path {
 		t.Errorf("Path = %q, want %q", got.Path, ws.Path)
+	}
+	if got.Backend != ws.Backend {
+		t.Errorf("Backend = %q, want %q", got.Backend, ws.Backend)
 	}
 }
 
@@ -440,5 +444,50 @@ func TestResolveWorkspaceNameByID(t *testing.T) {
 	_, _, found = resolveWorkspaceNameByID(cfg, "nonexistent")
 	if found {
 		t.Error("expected not found for unknown UUID")
+	}
+}
+
+func TestRenamePreservesWorkspaceBackend(t *testing.T) {
+	dir := t.TempDir()
+	setLoomConfigDir(t, dir)
+
+	writeTestLoomConfig(t, dir, &loomConfigForRename{
+		Version: 1,
+		Workspaces: map[string]loomWorkspaceForRename{
+			"my-ws": {ID: "uuid-backend", Path: "/home/user/projects/myws", Backend: "codex"},
+		},
+	})
+
+	handler := handleWorkspaceRename(mockWorkspaceConfigFn)
+
+	req := renameRequest("uuid-backend", "renamed-ws")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp workspaceResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !resp.Success {
+		t.Fatalf("expected success, got error: %s", resp.Error)
+	}
+
+	cfg := readTestLoomConfig(t, dir)
+	ws, ok := cfg.Workspaces["renamed-ws"]
+	if !ok {
+		t.Fatal("workspace 'renamed-ws' should exist in config")
+	}
+	if ws.Backend != "codex" {
+		t.Errorf("Backend = %q, want %q; workspace backend was not preserved through rename", ws.Backend, "codex")
+	}
+	if ws.ID != "uuid-backend" {
+		t.Errorf("ID = %q, want %q", ws.ID, "uuid-backend")
+	}
+	if ws.Path != "/home/user/projects/myws" {
+		t.Errorf("Path = %q, want %q", ws.Path, "/home/user/projects/myws")
 	}
 }

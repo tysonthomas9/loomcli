@@ -432,6 +432,52 @@ func TestWorkspaceReorder_DeduplicatesUUIDAndName(t *testing.T) {
 	}
 }
 
+func TestReorderPreservesWorkspaceBackend(t *testing.T) {
+	dir := t.TempDir()
+	setLoomConfigDir(t, dir)
+
+	writeTestLoomConfig(t, dir, &loomConfigForRename{
+		Version: 1,
+		Workspaces: map[string]loomWorkspaceForRename{
+			"ws-name": {ID: "uuid-ws", Path: "/home/user/projects/ws", Backend: "codex"},
+		},
+	})
+
+	handler := handleWorkspaceReorder(nil)
+
+	body := strings.NewReader(`{"order":["ws-name"]}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/order", body)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp workspaceResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !resp.Success {
+		t.Fatalf("expected success, got error: %s", resp.Error)
+	}
+
+	cfg := readTestLoomConfig(t, dir)
+	ws, ok := cfg.Workspaces["ws-name"]
+	if !ok {
+		t.Fatal("workspace 'ws-name' should exist in config")
+	}
+	if ws.Backend != "codex" {
+		t.Errorf("Backend = %q, want %q; workspace backend was not preserved through reorder", ws.Backend, "codex")
+	}
+	if ws.ID != "uuid-ws" {
+		t.Errorf("ID = %q, want %q", ws.ID, "uuid-ws")
+	}
+	if ws.Path != "/home/user/projects/ws" {
+		t.Errorf("Path = %q, want %q", ws.Path, "/home/user/projects/ws")
+	}
+}
+
 func TestWorkspaceReorder_AllUUIDsUnknown(t *testing.T) {
 	dir := t.TempDir()
 	setLoomConfigDir(t, dir)

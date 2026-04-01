@@ -45,9 +45,10 @@ type loomConfigForRename struct {
 
 // loomWorkspaceForRename preserves all workspace fields via yaml.Node round-trip.
 type loomWorkspaceForRename struct {
-	ID    string    `yaml:"id,omitempty"`
-	Path  string    `yaml:"path"`
-	Repos yaml.Node `yaml:"repos,omitempty"`
+	ID      string    `yaml:"id,omitempty"`
+	Path    string    `yaml:"path"`
+	Backend string    `yaml:"backend,omitempty"`
+	Repos   yaml.Node `yaml:"repos,omitempty"`
 }
 
 // loomConfigDir returns the loom config directory path (~/.loom or LOOM_CONFIG_DIR).
