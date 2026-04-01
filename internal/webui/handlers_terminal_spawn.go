@@ -128,24 +128,8 @@ func handleTerminalSpawnImplWithHistory(manager terminalSpawner, sessionHistoryS
 			return
 		}
 
-		// Record session creation in session history (only for issue-linked sessions).
-		if created && sessionHistoryStore != nil {
-			if issueID := extractIssueID(sanitizedName); issueID != "" {
-				now := time.Now().UTC()
-				record := sessionhistory.SessionRecord{
-					ID:          fmt.Sprintf("%s:%d", sanitizedName, now.Unix()),
-					SessionName: sanitizedName,
-					IssueID:     issueID,
-					Backend:     req.Backend,
-					Status:      "active",
-					Launcher:    "user",
-					StartedAt:   now,
-				}
-				wsID := WorkspaceFromContext(r.Context())
-				if err := sessionHistoryStore.Add(r.Context(), wsID, record); err != nil {
-					slog.Warn("failed to record session history", "session", sanitizedName, "err", err)
-				}
-			}
+		if created {
+			recordSpawnOwnershipAndHistory(r, manager, sessionHistoryStore, sanitizedName, req.Backend)
 		}
 
 		respondJSON(w, http.StatusOK, terminalSpawnResponse{
@@ -157,6 +141,42 @@ func handleTerminalSpawnImplWithHistory(manager terminalSpawner, sessionHistoryS
 				Created:     created,
 			},
 		})
+	}
+}
+
+// recordSpawnOwnershipAndHistory records workspace ownership and session history
+// for a newly created terminal session.
+func recordSpawnOwnershipAndHistory(r *http.Request, manager terminalSpawner, sessionHistoryStore *sessionhistory.Store, sessionName, backend string) {
+	wsID := WorkspaceFromContext(r.Context())
+
+	// Record workspace ownership immediately (before WebSocket attach).
+	if wsID != "" {
+		type ownerSetter interface{ SetSessionOwner(string, string) }
+		if os, ok := manager.(ownerSetter); ok {
+			os.SetSessionOwner(sessionName, wsID)
+		}
+	}
+
+	// Record session creation in session history (only for issue-linked sessions).
+	if sessionHistoryStore == nil {
+		return
+	}
+	issueID := extractIssueID(sessionName)
+	if issueID == "" {
+		return
+	}
+	now := time.Now().UTC()
+	record := sessionhistory.SessionRecord{
+		ID:          fmt.Sprintf("%s:%d", sessionName, now.Unix()),
+		SessionName: sessionName,
+		IssueID:     issueID,
+		Backend:     backend,
+		Status:      "active",
+		Launcher:    "user",
+		StartedAt:   now,
+	}
+	if err := sessionHistoryStore.Add(r.Context(), wsID, record); err != nil {
+		slog.Warn("failed to record session history", "session", sessionName, "err", err)
 	}
 }
 

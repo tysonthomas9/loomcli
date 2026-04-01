@@ -87,7 +87,8 @@ func handleListTerminalSessions(manager *TerminalManager) http.HandlerFunc {
 			return
 		}
 
-		sessions, err := manager.ListActiveSessions()
+		workspace := WorkspaceFromContext(r.Context())
+		sessions, err := manager.ListActiveSessionsForWorkspace(workspace)
 		if err != nil {
 			slog.Error("failed to list terminal sessions", "err", err)
 			respondJSON(w, http.StatusInternalServerError, terminalSessionsResponse{

@@ -23,6 +23,7 @@ func (m *TerminalManager) Shutdown() error {
 	}
 	m.sessions = make(map[string]*TerminalSession)
 	m.scrollbackBuffers = make(map[string]*ScrollbackBuffer)
+	m.sessionOwners = make(map[string]string)
 	m.mu.Unlock()
 
 	// Close all PTYs first.
@@ -92,9 +93,10 @@ func (m *TerminalManager) KillSessionByName(name string) error {
 	cmd := exec.Command(m.tmuxPath, "kill-session", "-t", internalName) //nolint:gosec // tmuxPath validated at init; internalName is prefixed internal name
 	_ = cmd.Run()
 
-	// Clean up the scrollback buffer for this session.
+	// Clean up the scrollback buffer and ownership entry for this session.
 	m.mu.Lock()
 	delete(m.scrollbackBuffers, internalName)
+	delete(m.sessionOwners, name)
 	m.mu.Unlock()
 
 	// Invoke the session-killed callback (for session history recording).

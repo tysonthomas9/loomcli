@@ -128,6 +128,11 @@ func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigi
 		}
 		connID := termSession.ConnID
 
+		// Record workspace ownership (first-write-wins — no-op if already set by spawn handler).
+		if workspace != "" {
+			manager.SetSessionOwner(session, workspace)
+		}
+
 		// Inject project context banner into freshly created talk-to-lead sessions.
 		if isNewSession && loomServerURL != "" {
 			wsID := WorkspaceFromContext(r.Context())

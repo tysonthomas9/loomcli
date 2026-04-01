@@ -71,6 +71,7 @@ func (m *TerminalManager) KillAllSessions() error {
 	}
 	m.sessions = make(map[string]*TerminalSession)
 	m.scrollbackBuffers = make(map[string]*ScrollbackBuffer)
+	m.sessionOwners = make(map[string]string)
 	m.mu.Unlock()
 
 	// Close all PTYs.

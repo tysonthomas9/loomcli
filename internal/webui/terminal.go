@@ -79,6 +79,7 @@ type TerminalManager struct {
 	sessions           map[string]*TerminalSession   // keyed by connection ID
 	pendingKills       map[string]context.CancelFunc // deferred session kills, guarded by mu
 	scrollbackBuffers  map[string]*ScrollbackBuffer  // keyed by tmux session name (internal)
+	sessionOwners      map[string]string             // user-facing session name -> workspace ID, guarded by mu
 	mu                 sync.RWMutex
 	tmuxPath           string
 	sessionPrefix      string // prepended to tmux session names for isolation between server instances
@@ -108,6 +109,7 @@ func NewTerminalManager(defaultCommand, sessionPrefix string, maxSessions int) (
 		sessions:           make(map[string]*TerminalSession),
 		pendingKills:       make(map[string]context.CancelFunc),
 		scrollbackBuffers:  make(map[string]*ScrollbackBuffer),
+		sessionOwners:      make(map[string]string),
 		tmuxPath:           tmuxPath,
 		sessionPrefix:      sessionPrefix,
 		defaultCommand:     defaultCommand,
@@ -130,6 +132,49 @@ func (m *TerminalManager) tmuxName(name string) string {
 // The session prefix is applied automatically.
 func (m *TerminalManager) SessionExists(name string) bool {
 	return m.tmuxHasSession(m.tmuxName(name))
+}
+
+// SetSessionOwner records which workspace owns a session.
+// Uses first-write-wins: if ownership is already recorded, subsequent calls are no-ops.
+// name is the user-facing session name (not the tmux-internal prefixed name).
+func (m *TerminalManager) SetSessionOwner(name, workspaceID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, exists := m.sessionOwners[name]; !exists {
+		m.sessionOwners[name] = workspaceID
+	}
+}
+
+// SessionOwner returns the workspace ID that owns the given session.
+// Returns empty string and false if no owner is recorded.
+func (m *TerminalManager) SessionOwner(name string) (string, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	ws, ok := m.sessionOwners[name]
+	return ws, ok
+}
+
+// ListActiveSessionsForWorkspace returns active sessions filtered by workspace ownership.
+// Sessions owned by the specified workspace are included.
+// Sessions with no recorded owner are also included (backward compatibility).
+// Sessions owned by a different workspace are excluded.
+func (m *TerminalManager) ListActiveSessionsForWorkspace(workspaceID string) ([]terminalSessionInfo, error) {
+	all, err := m.ListActiveSessions()
+	if err != nil {
+		return nil, err
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var result []terminalSessionInfo
+	for _, s := range all {
+		owner, hasOwner := m.sessionOwners[s.Name]
+		if !hasOwner || owner == workspaceID {
+			result = append(result, s)
+		}
+	}
+	return result, nil
 }
 
 // tmuxHasSession checks whether a tmux session with the given name exists.

@@ -70,6 +70,7 @@ func TestHandleListTerminalSessions_Success(t *testing.T) {
 	handler := handleListTerminalSessions(manager)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/sessions", nil)
+	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -138,6 +139,7 @@ func TestHandleListTerminalSessions_AlwaysIncludesTalkToLead(t *testing.T) {
 	handler := handleListTerminalSessions(manager)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/sessions", nil)
+	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -217,6 +219,7 @@ func TestHandleListTerminalSessions_FiltersOtherSessions(t *testing.T) {
 	handler := handleListTerminalSessions(manager)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/sessions", nil)
+	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
