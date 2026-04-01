@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/tysonthomas9/loomcli/internal/configlock"
 )
 
 var (
@@ -134,8 +136,22 @@ func runWorkspaceCreate(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	// Load or create config
-	cfg, err := LoadConfig()
+	// Acquire config lock for the entire load-check-create-save sequence.
+	// The lock is released by defer on normal exit, or by the kernel on os.Exit.
+	configDir := GetConfigDir()
+	if configDir == "" {
+		fmt.Fprintf(os.Stderr, "Error: cannot determine config directory\n")
+		os.Exit(1)
+	}
+	unlock, err := configlock.ConfigLock(configDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	defer unlock()
+
+	// Load or create config (unlocked — we hold the lock above)
+	cfg, err := loadConfigUnlocked()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -271,7 +287,7 @@ func runWorkspaceCreate(cmd *cobra.Command, args []string) {
 		cfg.DefaultWorkspace = wsName
 	}
 
-	if err := SaveConfig(cfg); err != nil {
+	if err := saveConfigUnlocked(cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
@@ -327,7 +343,20 @@ func runWorkspaceList(cmd *cobra.Command, args []string) {
 func runWorkspaceRemove(cmd *cobra.Command, args []string) {
 	wsName := args[0]
 
-	cfg, err := LoadConfig()
+	// Acquire config lock for the entire load-mutate-save sequence.
+	configDir := GetConfigDir()
+	if configDir == "" {
+		fmt.Fprintf(os.Stderr, "Error: cannot determine config directory\n")
+		os.Exit(1)
+	}
+	unlock, err := configlock.ConfigLock(configDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	defer unlock()
+
+	cfg, err := loadConfigUnlocked()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -422,7 +451,7 @@ func runWorkspaceRemove(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	if err := SaveConfig(cfg); err != nil {
+	if err := saveConfigUnlocked(cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}

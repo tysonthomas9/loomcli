@@ -17,161 +17,175 @@ import (
 // deleteWorkspace removes a workspace from config without deleting git worktrees.
 // Returns an error if the workspace is not found or has running agents.
 func deleteWorkspace(name string) error {
-	cfg, err := LoadConfig()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-	if cfg == nil || len(cfg.Workspaces) == 0 {
-		return fmt.Errorf("workspace %q not found", name)
-	}
-
-	ws, ok := cfg.Workspaces[name]
-	if !ok {
-		return fmt.Errorf("workspace %q not found", name)
-	}
-
-	// Check for running agents (lock files)
-	for _, repo := range ws.Repos {
-		repoPath := repo.Path
-		if !filepath.IsAbs(repoPath) {
-			repoPath = filepath.Join(ws.Path, repoPath)
+	return WithConfigLock(func() error {
+		cfg, err := loadConfigUnlocked()
+		if err != nil {
+			return fmt.Errorf("failed to load config: %w", err)
 		}
-		lockPath := filepath.Join(repoPath, LockFileName)
-		if _, err := os.Stat(lockPath); err == nil {
-			return fmt.Errorf("workspace %q has running agents", name)
+		if cfg == nil || len(cfg.Workspaces) == 0 {
+			return fmt.Errorf("workspace %q not found", name)
 		}
-	}
 
-	// Remove from config
-	delete(cfg.Workspaces, name)
-
-	// Remove from workspace order
-	filtered := cfg.WorkspaceOrder[:0]
-	for _, n := range cfg.WorkspaceOrder {
-		if n != name {
-			filtered = append(filtered, n)
+		ws, ok := cfg.Workspaces[name]
+		if !ok {
+			return fmt.Errorf("workspace %q not found", name)
 		}
-	}
-	cfg.WorkspaceOrder = filtered
 
-	// Update default workspace if needed
-	if cfg.DefaultWorkspace == name {
-		cfg.DefaultWorkspace = ""
-		names := make([]string, 0, len(cfg.Workspaces))
-		for n := range cfg.Workspaces {
-			names = append(names, n)
+		// Check for running agents (lock files)
+		for _, repo := range ws.Repos {
+			repoPath := repo.Path
+			if !filepath.IsAbs(repoPath) {
+				repoPath = filepath.Join(ws.Path, repoPath)
+			}
+			lockPath := filepath.Join(repoPath, LockFileName)
+			if _, err := os.Stat(lockPath); err == nil {
+				return fmt.Errorf("workspace %q has running agents", name)
+			}
 		}
-		if len(names) > 0 {
-			sort.Strings(names)
-			cfg.DefaultWorkspace = names[0]
+
+		// Remove from config
+		delete(cfg.Workspaces, name)
+
+		// Remove from workspace order
+		filtered := cfg.WorkspaceOrder[:0]
+		for _, n := range cfg.WorkspaceOrder {
+			if n != name {
+				filtered = append(filtered, n)
+			}
 		}
-	}
+		cfg.WorkspaceOrder = filtered
 
-	if err := SaveConfig(cfg); err != nil {
-		return fmt.Errorf("failed to save config: %w", err)
-	}
+		// Update default workspace if needed
+		if cfg.DefaultWorkspace == name {
+			cfg.DefaultWorkspace = ""
+			names := make([]string, 0, len(cfg.Workspaces))
+			for n := range cfg.Workspaces {
+				names = append(names, n)
+			}
+			if len(names) > 0 {
+				sort.Strings(names)
+				cfg.DefaultWorkspace = names[0]
+			}
+		}
 
-	return nil
+		if err := saveConfigUnlocked(cfg); err != nil {
+			return fmt.Errorf("failed to save config: %w", err)
+		}
+
+		return nil
+	})
 }
 
 // setDefaultWorkspace sets the default workspace in config.
 // Returns an error if the workspace is not found.
 func setDefaultWorkspace(name string) error {
-	cfg, err := LoadConfig()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-	if cfg == nil || len(cfg.Workspaces) == 0 {
-		return fmt.Errorf("workspace %q not found", name)
-	}
-	if _, ok := cfg.Workspaces[name]; !ok {
-		return fmt.Errorf("workspace %q not found", name)
-	}
-	cfg.DefaultWorkspace = name
-	if err := SaveConfig(cfg); err != nil {
-		return fmt.Errorf("failed to save config: %w", err)
-	}
-	return nil
+	return WithConfigLock(func() error {
+		cfg, err := loadConfigUnlocked()
+		if err != nil {
+			return fmt.Errorf("failed to load config: %w", err)
+		}
+		if cfg == nil || len(cfg.Workspaces) == 0 {
+			return fmt.Errorf("workspace %q not found", name)
+		}
+		if _, ok := cfg.Workspaces[name]; !ok {
+			return fmt.Errorf("workspace %q not found", name)
+		}
+		cfg.DefaultWorkspace = name
+		if err := saveConfigUnlocked(cfg); err != nil {
+			return fmt.Errorf("failed to save config: %w", err)
+		}
+		return nil
+	})
 }
 
 // clearDefaultWorkspace clears the default workspace, reverting to first-workspace behavior.
 func clearDefaultWorkspace() error {
-	cfg, err := LoadConfig()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-	if cfg == nil {
-		return nil
-	}
-	cfg.DefaultWorkspace = ""
-	if len(cfg.Workspaces) > 0 {
-		names := make([]string, 0, len(cfg.Workspaces))
-		for n := range cfg.Workspaces {
-			names = append(names, n)
+	return WithConfigLock(func() error {
+		cfg, err := loadConfigUnlocked()
+		if err != nil {
+			return fmt.Errorf("failed to load config: %w", err)
 		}
-		sort.Strings(names)
-		cfg.DefaultWorkspace = names[0]
-	}
-	if err := SaveConfig(cfg); err != nil {
-		return fmt.Errorf("failed to save config: %w", err)
-	}
-	return nil
+		if cfg == nil {
+			return nil
+		}
+		cfg.DefaultWorkspace = ""
+		if len(cfg.Workspaces) > 0 {
+			names := make([]string, 0, len(cfg.Workspaces))
+			for n := range cfg.Workspaces {
+				names = append(names, n)
+			}
+			sort.Strings(names)
+			cfg.DefaultWorkspace = names[0]
+		}
+		if err := saveConfigUnlocked(cfg); err != nil {
+			return fmt.Errorf("failed to save config: %w", err)
+		}
+		return nil
+	})
 }
 
 // createWorkspace creates a new workspace from the API request.
 // Supports "empty" (git worktree from existing repos) and "clone" (git clone first) types.
+// The entire load-check-create-save sequence is serialized under the config lock
+// to prevent concurrent creates from clobbering each other.
 func createWorkspace(ctx context.Context, req webui.WorkspaceCreateRequest) (webui.WorkspaceCreateResult, error) {
-	// Load or create config
-	cfg, err := LoadConfig()
-	if err != nil {
-		return webui.WorkspaceCreateResult{}, fmt.Errorf("failed to load config: %w", err)
-	}
-	if cfg == nil {
-		cfg = &LoomConfig{Workspaces: make(map[string]WorkspaceConfig)}
-	}
-	if cfg.Workspaces == nil {
-		cfg.Workspaces = make(map[string]WorkspaceConfig)
-	}
-
-	if _, exists := cfg.Workspaces[req.Name]; exists {
-		return webui.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.AlreadyExists, fmt.Sprintf("workspace %q already exists", req.Name), nil)
-	}
-
-	// Determine workspace directory
-	wsDir := req.Path
-	if wsDir == "" {
-		wsDir = GetWorkspaceDir(req.Name)
-	}
-	wsDir = filepath.Clean(wsDir)
-
-	// Security: ensure path is under allowed base directory
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return webui.WorkspaceCreateResult{}, fmt.Errorf("cannot determine home directory: %w", err)
-	}
-	allowedBase := filepath.Join(homeDir, ".loom", "workspaces")
-	if !strings.HasPrefix(wsDir, allowedBase+string(filepath.Separator)) && wsDir != allowedBase {
-		return webui.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.SecurityViolation, fmt.Sprintf("workspace path must be under %s", allowedBase), nil)
-	}
-
-	branch := req.Branch
-	if branch == "" {
-		branch = req.Name
-	}
-
-	switch req.Type {
-	case "empty":
-		return createEmptyWorkspace(ctx, cfg, req.Name, wsDir, branch, req.Repos)
-	case "clone":
-		// Normalize: merge single clone_url into clone_urls
-		cloneURLs := req.CloneURLs
-		if len(cloneURLs) == 0 && req.CloneURL != "" {
-			cloneURLs = []string{req.CloneURL}
+	var result webui.WorkspaceCreateResult
+	err := WithConfigLock(func() error {
+		// Load or create config
+		cfg, err := loadConfigUnlocked()
+		if err != nil {
+			return fmt.Errorf("failed to load config: %w", err)
 		}
-		return createCloneWorkspace(ctx, cfg, req.Name, wsDir, cloneURLs)
-	default:
-		return webui.WorkspaceCreateResult{}, fmt.Errorf("unsupported workspace type: %s", req.Type)
-	}
+		if cfg == nil {
+			cfg = &LoomConfig{Workspaces: make(map[string]WorkspaceConfig)}
+		}
+		if cfg.Workspaces == nil {
+			cfg.Workspaces = make(map[string]WorkspaceConfig)
+		}
+
+		if _, exists := cfg.Workspaces[req.Name]; exists {
+			return workspaceerrors.New(workspaceerrors.AlreadyExists, fmt.Sprintf("workspace %q already exists", req.Name), nil)
+		}
+
+		// Determine workspace directory
+		wsDir := req.Path
+		if wsDir == "" {
+			wsDir = GetWorkspaceDir(req.Name)
+		}
+		wsDir = filepath.Clean(wsDir)
+
+		// Security: ensure path is under allowed base directory
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("cannot determine home directory: %w", err)
+		}
+		allowedBase := filepath.Join(homeDir, ".loom", "workspaces")
+		if !strings.HasPrefix(wsDir, allowedBase+string(filepath.Separator)) && wsDir != allowedBase {
+			return workspaceerrors.New(workspaceerrors.SecurityViolation, fmt.Sprintf("workspace path must be under %s", allowedBase), nil)
+		}
+
+		branch := req.Branch
+		if branch == "" {
+			branch = req.Name
+		}
+
+		switch req.Type {
+		case "empty":
+			result, err = createEmptyWorkspace(ctx, cfg, req.Name, wsDir, branch, req.Repos, saveConfigUnlocked)
+			return err
+		case "clone":
+			// Normalize: merge single clone_url into clone_urls
+			cloneURLs := req.CloneURLs
+			if len(cloneURLs) == 0 && req.CloneURL != "" {
+				cloneURLs = []string{req.CloneURL}
+			}
+			result, err = createCloneWorkspace(ctx, cfg, req.Name, wsDir, cloneURLs, saveConfigUnlocked)
+			return err
+		default:
+			return fmt.Errorf("unsupported workspace type: %s", req.Type)
+		}
+	})
+	return result, err
 }
 
 type resolvedRepo struct {
@@ -224,7 +238,9 @@ func resolveRepoPaths(repoPaths []string) ([]resolvedRepo, error) {
 }
 
 // createEmptyWorkspace creates worktrees from existing repos.
-func createEmptyWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir, branch string, repoPaths []string) (webui.WorkspaceCreateResult, error) {
+// The save parameter is the config save function to use (locked or unlocked,
+// depending on whether the caller already holds the config lock).
+func createEmptyWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir, branch string, repoPaths []string, save func(*LoomConfig) error) (webui.WorkspaceCreateResult, error) {
 	// Security: ensure path is under allowed base directory
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -288,7 +304,7 @@ func createEmptyWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir, b
 		cfg.DefaultWorkspace = wsName
 	}
 
-	if err := SaveConfig(cfg); err != nil {
+	if err := save(cfg); err != nil {
 		cleanup()
 		return webui.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.ConfigFailed, "failed to save config", err)
 	}
@@ -327,7 +343,9 @@ func repoNameFromURL(cloneURL string) string {
 }
 
 // createCloneWorkspace clones one or more repos and creates a workspace from them.
-func createCloneWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir string, cloneURLs []string) (webui.WorkspaceCreateResult, error) {
+// The save parameter is the config save function to use (locked or unlocked,
+// depending on whether the caller already holds the config lock).
+func createCloneWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir string, cloneURLs []string, save func(*LoomConfig) error) (webui.WorkspaceCreateResult, error) {
 	// Security: ensure path is under allowed base directory
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -390,7 +408,7 @@ func createCloneWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir st
 		cfg.DefaultWorkspace = wsName
 	}
 
-	if err := SaveConfig(cfg); err != nil {
+	if err := save(cfg); err != nil {
 		cleanupDir()
 		return webui.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.ConfigFailed, "failed to save config", err)
 	}

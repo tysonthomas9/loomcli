@@ -62,15 +62,10 @@ func loomConfigDir() string {
 	return filepath.Join(home, ".loom")
 }
 
-// loadLoomConfig reads and parses ~/.loom/config.yaml for rename operations.
-func loadLoomConfig() (*loomConfigForRename, error) {
+// loadLoomConfigUnlocked reads and parses ~/.loom/config.yaml for rename operations.
+// Must be called while the config lock is held.
+func loadLoomConfigUnlocked() (*loomConfigForRename, error) {
 	dir := loomConfigDir()
-	unlock, err := configlock.ConfigLock(dir)
-	if err != nil {
-		return nil, fmt.Errorf("config lock: %w", err)
-	}
-	defer unlock()
-
 	path := filepath.Join(dir, "config.yaml")
 	data, err := os.ReadFile(path) //nolint:gosec // path constructed from known config dir + fixed filename
 	if err != nil {
@@ -86,19 +81,13 @@ func loadLoomConfig() (*loomConfigForRename, error) {
 	return &cfg, nil
 }
 
-// saveLoomConfig writes the config back to ~/.loom/config.yaml using atomic write
-// (write to temp file, then rename) to prevent corruption on crash or concurrent access.
-func saveLoomConfig(cfg *loomConfigForRename) error {
+// saveLoomConfigUnlocked writes the config back to ~/.loom/config.yaml using atomic write
+// (write to temp file, then rename). Must be called while the config lock is held.
+func saveLoomConfigUnlocked(cfg *loomConfigForRename) error {
 	dir := loomConfigDir()
 	if dir == "" {
 		return fmt.Errorf("cannot determine config directory")
 	}
-	unlock, err := configlock.ConfigLock(dir)
-	if err != nil {
-		return fmt.Errorf("config lock: %w", err)
-	}
-	defer unlock()
-
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("marshaling config: %w", err)
@@ -196,7 +185,16 @@ func handleWorkspaceRename(workspaceConfigFn func() (*WorkspaceData, error)) htt
 			return
 		}
 
-		cfg, err := loadLoomConfig()
+		// Acquire config lock for the entire load-mutate-save sequence.
+		dir := loomConfigDir()
+		unlock, lockErr := configlock.ConfigLock(dir)
+		if lockErr != nil {
+			respondJSON(w, http.StatusInternalServerError, workspaceResponse{Success: false, Error: "failed to acquire config lock"})
+			return
+		}
+		defer unlock()
+
+		cfg, err := loadLoomConfigUnlocked()
 		if err != nil {
 			respondJSON(w, http.StatusInternalServerError, workspaceResponse{Success: false, Error: "failed to load config"})
 			return
@@ -224,7 +222,7 @@ func handleWorkspaceRename(workspaceConfigFn func() (*WorkspaceData, error)) htt
 
 		applyWorkspaceRename(cfg, oldName, req.NewName, ws)
 
-		if err := saveLoomConfig(cfg); err != nil {
+		if err := saveLoomConfigUnlocked(cfg); err != nil {
 			respondJSON(w, http.StatusInternalServerError, workspaceResponse{Success: false, Error: "failed to save config"})
 			return
 		}

@@ -11,6 +11,18 @@ import (
 // ConfigLockFileName is the name of the advisory lock file placed alongside config.yaml.
 const ConfigLockFileName = "config.lock"
 
+// WithLock acquires the config lock for the given directory, runs fn, then
+// releases the lock. Use this to wrap load-mutate-save sequences so that
+// concurrent processes cannot interleave and clobber each other's writes.
+func WithLock(configDir string, fn func() error) error {
+	unlock, err := ConfigLock(configDir)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return fn()
+}
+
 // ConfigLock acquires an exclusive advisory lock on the config lock file
 // in the given directory. Returns an unlock function that must be called
 // (typically via defer) to release the lock. The lock file and directory

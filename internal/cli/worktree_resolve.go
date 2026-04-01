@@ -269,27 +269,37 @@ func (r *Resolver) GetDefaultBranch() string {
 
 // SetRepoDefaultBranch updates the default branch for a named repo in the config.
 // Only works in workspace mode with a persisted config.
+// Reloads config inside the lock to avoid stale-read races.
 func (r *Resolver) SetRepoDefaultBranch(repoName, branch string) error {
 	if r.mode != ModeWorkspace || r.config == nil {
 		return fmt.Errorf("target branch update only supported in workspace mode")
 	}
-	ws, ok := r.config.Workspaces[r.workspace]
-	if !ok {
-		return fmt.Errorf("workspace %q not found", r.workspace)
-	}
-	found := false
-	for i, repo := range ws.Repos {
-		if repo.Name == repoName {
-			ws.Repos[i].DefaultBranch = branch
-			found = true
-			break
+	return WithConfigLock(func() error {
+		cfg, err := loadConfigUnlocked()
+		if err != nil {
+			return err
 		}
-	}
-	if !found {
-		return fmt.Errorf("repo %q not found in workspace %q", repoName, r.workspace)
-	}
-	r.config.Workspaces[r.workspace] = ws
-	return SaveConfig(r.config)
+		if cfg == nil {
+			return fmt.Errorf("no config found")
+		}
+		ws, ok := cfg.Workspaces[r.workspace]
+		if !ok {
+			return fmt.Errorf("workspace %q not found", r.workspace)
+		}
+		found := false
+		for i, repo := range ws.Repos {
+			if repo.Name == repoName {
+				ws.Repos[i].DefaultBranch = branch
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("repo %q not found in workspace %q", repoName, r.workspace)
+		}
+		cfg.Workspaces[r.workspace] = ws
+		return saveConfigUnlocked(cfg)
+	})
 }
 
 // GetBeadsDir returns the directory where .beads/ lives.

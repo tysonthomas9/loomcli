@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+
+	"github.com/tysonthomas9/loomcli/internal/configlock"
 )
 
 // workspaceOrderRequest is the JSON body for PUT /api/workspaces/order.
@@ -29,7 +31,16 @@ func handleWorkspaceReorder(workspaceConfigFn func() (*WorkspaceData, error)) ht
 			return
 		}
 
-		cfg, err := loadLoomConfig()
+		// Acquire config lock for the entire load-mutate-save sequence.
+		dir := loomConfigDir()
+		unlock, lockErr := configlock.ConfigLock(dir)
+		if lockErr != nil {
+			respondJSON(w, http.StatusInternalServerError, workspaceResponse{Success: false, Error: "failed to acquire config lock"})
+			return
+		}
+		defer unlock()
+
+		cfg, err := loadLoomConfigUnlocked()
 		if err != nil {
 			respondJSON(w, http.StatusInternalServerError, workspaceResponse{Success: false, Error: "failed to load config"})
 			return
@@ -59,7 +70,7 @@ func handleWorkspaceReorder(workspaceConfigFn func() (*WorkspaceData, error)) ht
 		}
 		cfg.WorkspaceOrder = validOrder
 
-		if err := saveLoomConfig(cfg); err != nil {
+		if err := saveLoomConfigUnlocked(cfg); err != nil {
 			respondJSON(w, http.StatusInternalServerError, workspaceResponse{Success: false, Error: "failed to save config"})
 			return
 		}

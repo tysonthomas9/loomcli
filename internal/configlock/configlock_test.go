@@ -1,6 +1,7 @@
 package configlock
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -121,5 +122,65 @@ func TestConfigLock_ConcurrentAccess(t *testing.T) {
 
 	if counter != 10 {
 		t.Fatalf("expected counter=10, got %d", counter)
+	}
+}
+
+func TestWithLock_ReturnsError(t *testing.T) {
+	dir := t.TempDir()
+	sentinel := fmt.Errorf("intentional error from fn")
+
+	err := WithLock(dir, func() error {
+		return sentinel
+	})
+	if err != sentinel {
+		t.Fatalf("WithLock returned %v, want %v", err, sentinel)
+	}
+}
+
+func TestWithLock_CreatesLockFile(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, ConfigLockFileName)
+
+	// Lock file should not exist yet.
+	if _, err := os.Stat(lockPath); err == nil {
+		t.Fatal("lock file should not exist before WithLock")
+	}
+
+	err := WithLock(dir, func() error {
+		// Inside fn, the lock file should exist.
+		if _, statErr := os.Stat(lockPath); statErr != nil {
+			t.Errorf("lock file should exist inside fn: %v", statErr)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("WithLock: %v", err)
+	}
+}
+
+func TestWithLock_ReleasesAfterFn(t *testing.T) {
+	dir := t.TempDir()
+
+	// First call should succeed.
+	err := WithLock(dir, func() error { return nil })
+	if err != nil {
+		t.Fatalf("first WithLock: %v", err)
+	}
+
+	// Second call should succeed because the lock was released.
+	acquired := make(chan struct{})
+	go func() {
+		err := WithLock(dir, func() error { return nil })
+		if err != nil {
+			t.Errorf("second WithLock: %v", err)
+		}
+		close(acquired)
+	}()
+
+	select {
+	case <-acquired:
+		// success — lock was released
+	case <-time.After(2 * time.Second):
+		t.Fatal("second WithLock did not complete; lock was not released")
 	}
 }

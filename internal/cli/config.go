@@ -119,20 +119,29 @@ func GetConfigPath() string {
 	return filepath.Join(GetConfigDir(), "config.yaml")
 }
 
-// LoadConfig reads and parses the loom config file.
-// Returns (nil, nil) if the config file does not exist.
-// Returns (nil, error) on read or parse errors.
-func LoadConfig() (*LoomConfig, error) {
+// WithConfigLock acquires an exclusive file lock on the config lock file,
+// runs fn, then releases the lock. Use this to wrap load-mutate-save
+// sequences to prevent concurrent config mutations from clobbering each other.
+//
+// Within fn, use loadConfigUnlocked and saveConfigUnlocked instead of
+// LoadConfig and SaveConfig to avoid deadlock from nested lock acquisition
+// (POSIX flock does NOT allow re-locking from the same process via a
+// different file descriptor).
+//
+// WithConfigLock is NOT reentrant — do not call from within an already-locked
+// section.
+func WithConfigLock(fn func() error) error {
 	dir := GetConfigDir()
 	if dir == "" {
-		return nil, fmt.Errorf("cannot determine config directory for lock")
+		return fmt.Errorf("cannot determine config directory for lock")
 	}
-	unlock, err := configlock.ConfigLock(dir)
-	if err != nil {
-		return nil, fmt.Errorf("config lock: %w", err)
-	}
-	defer unlock()
+	return configlock.WithLock(dir, fn)
+}
 
+// loadConfigUnlocked reads and parses the config file without acquiring
+// the config lock. Must only be called while the lock is held (e.g., within
+// WithConfigLock) or by LoadConfig which acquires its own lock.
+func loadConfigUnlocked() (*LoomConfig, error) {
 	path := GetConfigPath()
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -191,14 +200,32 @@ func LoadConfig() (*LoomConfig, error) {
 	return &cfg, nil
 }
 
+// LoadConfig reads and parses the loom config file.
+// Returns (nil, nil) if the config file does not exist.
+// Returns (nil, error) on read or parse errors.
+func LoadConfig() (*LoomConfig, error) {
+	dir := GetConfigDir()
+	if dir == "" {
+		return nil, fmt.Errorf("cannot determine config directory for lock")
+	}
+	unlock, err := configlock.ConfigLock(dir)
+	if err != nil {
+		return nil, fmt.Errorf("config lock: %w", err)
+	}
+	defer unlock()
+
+	return loadConfigUnlocked()
+}
+
 // GetWorkspaceDir returns the directory path for a named workspace.
 func GetWorkspaceDir(name string) string {
 	return filepath.Join(GetConfigDir(), "workspaces", name)
 }
 
-// SaveConfig writes the loom config to the config file.
-// Creates the config directory if it doesn't exist.
-func SaveConfig(cfg *LoomConfig) error {
+// saveConfigUnlocked writes the config file without acquiring the config lock.
+// Must only be called while the lock is held (e.g., within WithConfigLock)
+// or by SaveConfig which acquires its own lock.
+func saveConfigUnlocked(cfg *LoomConfig) error {
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("marshaling config: %w", err)
@@ -210,16 +237,26 @@ func SaveConfig(cfg *LoomConfig) error {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("creating config dir %s: %w", dir, err)
 	}
-	unlock, err := configlock.ConfigLock(dir)
-	if err != nil {
-		return fmt.Errorf("config lock: %w", err)
-	}
-	defer unlock()
 	path := GetConfigPath()
 	if err := atomicfile.WriteFile(path, data, 0644); err != nil {
 		return fmt.Errorf("writing config %s: %w", path, err)
 	}
 	return nil
+}
+
+// SaveConfig writes the loom config to the config file.
+// Creates the config directory if it doesn't exist.
+func SaveConfig(cfg *LoomConfig) error {
+	dir := GetConfigDir()
+	if dir == "" {
+		return fmt.Errorf("cannot determine config directory")
+	}
+	unlock, err := configlock.ConfigLock(dir)
+	if err != nil {
+		return fmt.Errorf("config lock: %w", err)
+	}
+	defer unlock()
+	return saveConfigUnlocked(cfg)
 }
 
 // IsWorkspaceMode returns true if a config file exists with at least one workspace defined.

@@ -115,13 +115,6 @@ func init() {
 func runConfigInit(cmd *cobra.Command, args []string) {
 	configPath := GetConfigPath()
 
-	if !configInitForce {
-		if _, err := os.Stat(configPath); err == nil {
-			fmt.Fprintf(os.Stderr, "Config already exists at %s. Use --force to overwrite.\n", configPath)
-			os.Exit(1)
-		}
-	}
-
 	cwd, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: cannot determine current directory: %v\n", err)
@@ -145,7 +138,16 @@ func runConfigInit(cmd *cobra.Command, args []string) {
 		},
 	}
 
-	if err := SaveConfig(cfg); err != nil {
+	// Existence check + save inside the lock to prevent TOCTOU race
+	// between concurrent init and create.
+	if err := WithConfigLock(func() error {
+		if !configInitForce {
+			if _, err := os.Stat(configPath); err == nil {
+				return fmt.Errorf("config already exists at %s; use --force to overwrite", configPath)
+			}
+		}
+		return saveConfigUnlocked(cfg)
+	}); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
@@ -171,48 +173,46 @@ func runConfigAddRepo(cmd *cobra.Command, args []string) {
 	wsName := args[0]
 	repoName := args[1]
 
-	cfg, err := LoadConfig()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-	if cfg == nil {
-		fmt.Fprintf(os.Stderr, "No config found. Run 'loom config init' first.\n")
-		os.Exit(1)
-	}
-
-	ws, ok := cfg.Workspaces[wsName]
-	if !ok {
-		available := make([]string, 0, len(cfg.Workspaces))
-		for name := range cfg.Workspaces {
-			available = append(available, name)
-		}
-		sort.Strings(available)
-		fmt.Fprintf(os.Stderr, "Workspace %q not found. Available: %s\n", wsName, strings.Join(available, ", "))
-		os.Exit(1)
-	}
-
-	for _, r := range ws.Repos {
-		if r.Name == repoName {
-			fmt.Fprintf(os.Stderr, "Repo %q already exists in workspace %q. Remove it first or use a different name.\n", repoName, wsName)
-			os.Exit(1)
-		}
-	}
-
 	if err := ValidateRemoteName(configAddRepoRemote); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	ws.Repos = append(ws.Repos, RepoConfig{
-		Name:          repoName,
-		Path:          configAddRepoPath,
-		DefaultBranch: configAddRepoBranch,
-		Remote:        configAddRepoRemote,
-	})
-	cfg.Workspaces[wsName] = ws
+	if err := WithConfigLock(func() error {
+		cfg, err := loadConfigUnlocked()
+		if err != nil {
+			return err
+		}
+		if cfg == nil {
+			return fmt.Errorf("no config found. Run 'loom config init' first")
+		}
 
-	if err := SaveConfig(cfg); err != nil {
+		ws, ok := cfg.Workspaces[wsName]
+		if !ok {
+			available := make([]string, 0, len(cfg.Workspaces))
+			for name := range cfg.Workspaces {
+				available = append(available, name)
+			}
+			sort.Strings(available)
+			return fmt.Errorf("workspace %q not found. Available: %s", wsName, strings.Join(available, ", "))
+		}
+
+		for _, r := range ws.Repos {
+			if r.Name == repoName {
+				return fmt.Errorf("repo %q already exists in workspace %q. Remove it first or use a different name", repoName, wsName)
+			}
+		}
+
+		ws.Repos = append(ws.Repos, RepoConfig{
+			Name:          repoName,
+			Path:          configAddRepoPath,
+			DefaultBranch: configAddRepoBranch,
+			Remote:        configAddRepoRemote,
+		})
+		cfg.Workspaces[wsName] = ws
+
+		return saveConfigUnlocked(cfg)
+	}); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
@@ -312,44 +312,42 @@ func runConfigRemoveRepo(cmd *cobra.Command, args []string) {
 	wsName := args[0]
 	repoName := args[1]
 
-	cfg, err := LoadConfig()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-	if cfg == nil {
-		fmt.Fprintf(os.Stderr, "No config found. Run 'loom config init' first.\n")
-		os.Exit(1)
-	}
-
-	ws, ok := cfg.Workspaces[wsName]
-	if !ok {
-		available := make([]string, 0, len(cfg.Workspaces))
-		for name := range cfg.Workspaces {
-			available = append(available, name)
+	if err := WithConfigLock(func() error {
+		cfg, err := loadConfigUnlocked()
+		if err != nil {
+			return err
 		}
-		sort.Strings(available)
-		fmt.Fprintf(os.Stderr, "Workspace %q not found. Available: %s\n", wsName, strings.Join(available, ", "))
-		os.Exit(1)
-	}
-
-	found := false
-	for i, r := range ws.Repos {
-		if r.Name == repoName {
-			ws.Repos = append(ws.Repos[:i], ws.Repos[i+1:]...)
-			found = true
-			break
+		if cfg == nil {
+			return fmt.Errorf("no config found. Run 'loom config init' first")
 		}
-	}
 
-	if !found {
-		fmt.Fprintf(os.Stderr, "Repo %q not found in workspace %q.\n", repoName, wsName)
-		os.Exit(1)
-	}
+		ws, ok := cfg.Workspaces[wsName]
+		if !ok {
+			available := make([]string, 0, len(cfg.Workspaces))
+			for name := range cfg.Workspaces {
+				available = append(available, name)
+			}
+			sort.Strings(available)
+			return fmt.Errorf("workspace %q not found. Available: %s", wsName, strings.Join(available, ", "))
+		}
 
-	cfg.Workspaces[wsName] = ws
+		found := false
+		for i, r := range ws.Repos {
+			if r.Name == repoName {
+				ws.Repos = append(ws.Repos[:i], ws.Repos[i+1:]...)
+				found = true
+				break
+			}
+		}
 
-	if err := SaveConfig(cfg); err != nil {
+		if !found {
+			return fmt.Errorf("repo %q not found in workspace %q", repoName, wsName)
+		}
+
+		cfg.Workspaces[wsName] = ws
+
+		return saveConfigUnlocked(cfg)
+	}); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}

@@ -115,45 +115,46 @@ func ensureCurrentProjectRegistered() {
 	}
 	wsName := filepath.Base(cwd)
 
-	cfg, err := LoadConfig()
-	if err != nil {
-		slog.Warn("cannot register current project: config load failed", "err", err)
-		return
-	}
-	if cfg == nil {
-		cfg = &LoomConfig{Workspaces: make(map[string]WorkspaceConfig)}
-	}
-	if cfg.Workspaces == nil {
-		cfg.Workspaces = make(map[string]WorkspaceConfig)
-	}
-
-	// Check if already registered by path
-	for _, ws := range cfg.Workspaces {
-		if ws.Path == cwd {
-			return
+	if err := WithConfigLock(func() error {
+		cfg, err := loadConfigUnlocked()
+		if err != nil {
+			return fmt.Errorf("config load failed: %w", err)
 		}
-	}
-	if _, exists := cfg.Workspaces[wsName]; exists {
-		return
-	}
-
-	repos := []RepoConfig{{Name: wsName, Path: cwd}}
-	cfg.Workspaces[wsName] = WorkspaceConfig{ID: NewWorkspaceID(), Path: cwd, Repos: repos}
-	if cfg.DefaultWorkspace == "" {
-		cfg.DefaultWorkspace = wsName
-	}
-	found := false
-	for _, n := range cfg.WorkspaceOrder {
-		if n == wsName {
-			found = true
-			break
+		if cfg == nil {
+			cfg = &LoomConfig{Workspaces: make(map[string]WorkspaceConfig)}
 		}
-	}
-	if !found {
-		cfg.WorkspaceOrder = append([]string{wsName}, cfg.WorkspaceOrder...)
-	}
+		if cfg.Workspaces == nil {
+			cfg.Workspaces = make(map[string]WorkspaceConfig)
+		}
 
-	if err := SaveConfig(cfg); err != nil {
+		// Check if already registered by path
+		for _, ws := range cfg.Workspaces {
+			if ws.Path == cwd {
+				return nil
+			}
+		}
+		if _, exists := cfg.Workspaces[wsName]; exists {
+			return nil
+		}
+
+		repos := []RepoConfig{{Name: wsName, Path: cwd}}
+		cfg.Workspaces[wsName] = WorkspaceConfig{ID: NewWorkspaceID(), Path: cwd, Repos: repos}
+		if cfg.DefaultWorkspace == "" {
+			cfg.DefaultWorkspace = wsName
+		}
+		found := false
+		for _, n := range cfg.WorkspaceOrder {
+			if n == wsName {
+				found = true
+				break
+			}
+		}
+		if !found {
+			cfg.WorkspaceOrder = append([]string{wsName}, cfg.WorkspaceOrder...)
+		}
+
+		return saveConfigUnlocked(cfg)
+	}); err != nil {
 		slog.Warn("failed to register current project as workspace", "err", err)
 	}
 }

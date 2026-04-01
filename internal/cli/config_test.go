@@ -6,10 +6,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
+
+	"github.com/tysonthomas9/loomcli/internal/configlock"
 )
 
 func TestGetConfigDir(t *testing.T) {
@@ -640,5 +643,115 @@ func TestNewWorkspaceID(t *testing.T) {
 	// Should be different
 	if id1 == id2 {
 		t.Errorf("NewWorkspaceID() returned same ID twice: %s", id1)
+	}
+}
+
+func TestWithConfigLock_Serializes(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", dir)
+
+	// Seed an empty config with version set so auto-migration doesn't run.
+	seed := fmt.Sprintf("version: %d\nworkspaces: {}\n", CurrentConfigVersion)
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(seed), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	errs := make([]error, 10)
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			errs[idx] = WithConfigLock(func() error {
+				cfg, err := loadConfigUnlocked()
+				if err != nil {
+					return err
+				}
+				if cfg == nil {
+					cfg = &LoomConfig{
+						Version:    CurrentConfigVersion,
+						Workspaces: map[string]WorkspaceConfig{},
+					}
+				}
+				if cfg.Workspaces == nil {
+					cfg.Workspaces = map[string]WorkspaceConfig{}
+				}
+				name := fmt.Sprintf("ws-%d", idx)
+				cfg.Workspaces[name] = WorkspaceConfig{
+					ID:   NewWorkspaceID(),
+					Path: filepath.Join("/tmp", name),
+				}
+				return saveConfigUnlocked(cfg)
+			})
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("goroutine %d: %v", i, err)
+		}
+	}
+
+	// Verify all 10 workspaces are present (no lost updates).
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("LoadConfig returned nil")
+	}
+	if len(cfg.Workspaces) != 10 {
+		t.Errorf("expected 10 workspaces, got %d", len(cfg.Workspaces))
+		for name := range cfg.Workspaces {
+			t.Logf("  workspace: %s", name)
+		}
+	}
+}
+
+func TestWithConfigLock_ErrorPropagation(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", dir)
+
+	sentinel := fmt.Errorf("deliberate error")
+	err := WithConfigLock(func() error {
+		return sentinel
+	})
+	if err == nil || err.Error() != sentinel.Error() {
+		t.Fatalf("WithConfigLock returned %v, want %v", err, sentinel)
+	}
+
+	// Lock should be released — a subsequent call must succeed.
+	err = WithConfigLock(func() error { return nil })
+	if err != nil {
+		t.Fatalf("subsequent WithConfigLock failed (lock not released?): %v", err)
+	}
+}
+
+func TestWithConfigLock_CreatesLockFile(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", dir)
+
+	lockPath := filepath.Join(dir, configlock.ConfigLockFileName)
+
+	// Lock file should not exist yet.
+	if _, err := os.Stat(lockPath); err == nil {
+		t.Fatal("lock file should not exist before WithConfigLock")
+	}
+
+	err := WithConfigLock(func() error {
+		// Inside fn, the lock file should exist.
+		if _, statErr := os.Stat(lockPath); statErr != nil {
+			t.Errorf("lock file should exist inside fn: %v", statErr)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("WithConfigLock: %v", err)
+	}
+
+	// Lock file should still exist on disk after release (flock doesn't delete it).
+	if _, err := os.Stat(lockPath); err != nil {
+		t.Errorf("lock file should persist on disk after WithConfigLock: %v", err)
 	}
 }
