@@ -587,6 +587,33 @@ export async function moveWsIssue(
 }
 
 /**
+ * General-purpose PATCH for an issue in a workspace.
+ * Use for updating any combination of fields (title, description, priority,
+ * assignee, status, add_labels, remove_labels, etc.).
+ */
+export async function patchWsIssue(
+  wsId: string,
+  id: string,
+  body: Record<string, unknown>,
+): Promise<void> {
+  const response = await fetch(
+    `${BASE_URL}/api/workspaces/${encodeURIComponent(wsId)}/issues/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(body),
+    },
+  );
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(
+      `Failed to patch issue ${id} in workspace ${wsId}: ${response.status} - ${text}`,
+    );
+  }
+}
+
+/**
  * Delete an issue in a workspace. Swallows 404 errors for safe cleanup.
  */
 export async function deleteWsIssue(
