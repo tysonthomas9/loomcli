@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom";
 
 import { LoginPage } from "../LoginPage";
+import { createDefaultAuth } from "@/test-utils/mockAuthContext";
 
 // Mock useAuth from AuthContext
 const mockSignIn = vi.fn();
@@ -36,24 +37,11 @@ vi.mock("@/hooks", () => ({
   LAYER_TERMINAL_SEARCH: 5,
 }));
 
-function defaultAuth(overrides: Record<string, unknown> = {}) {
-  return {
-    mode: "oidc" as const,
-    isLoading: false,
-    isAuthenticated: false,
-    authServiceDown: false,
-    user: null,
-    signIn: mockSignIn,
-    signOut: vi.fn(),
-    ...overrides,
-  };
-}
-
 describe("LoginPage", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     mockSignIn.mockResolvedValue(undefined);
-    mockUseAuth.mockReturnValue(defaultAuth());
+    mockUseAuth.mockReturnValue(createDefaultAuth({ signIn: mockSignIn }));
   });
 
   afterEach(() => {
@@ -205,7 +193,9 @@ describe("LoginPage", () => {
     });
 
     it("shows auth service down message", () => {
-      mockUseAuth.mockReturnValue(defaultAuth({ authServiceDown: true }));
+      mockUseAuth.mockReturnValue(
+        createDefaultAuth({ signIn: mockSignIn, authServiceDown: true }),
+      );
       render(<LoginPage error={null} onErrorClear={vi.fn()} />);
       expect(
         screen.getByText(/Authentication service is currently unavailable/),
@@ -213,7 +203,9 @@ describe("LoginPage", () => {
     });
 
     it("hides OAuth buttons when auth service down", () => {
-      mockUseAuth.mockReturnValue(defaultAuth({ authServiceDown: true }));
+      mockUseAuth.mockReturnValue(
+        createDefaultAuth({ signIn: mockSignIn, authServiceDown: true }),
+      );
       render(<LoginPage error={null} onErrorClear={vi.fn()} />);
       expect(
         screen.queryByRole("button", { name: /Continue with/ }),
@@ -221,7 +213,9 @@ describe("LoginPage", () => {
     });
 
     it("does not show OAuth error when auth service is down", () => {
-      mockUseAuth.mockReturnValue(defaultAuth({ authServiceDown: true }));
+      mockUseAuth.mockReturnValue(
+        createDefaultAuth({ signIn: mockSignIn, authServiceDown: true }),
+      );
       render(<LoginPage error="access_denied" onErrorClear={vi.fn()} />);
       expect(screen.queryByText(/access_denied/)).not.toBeInTheDocument();
     });

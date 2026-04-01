@@ -4,10 +4,15 @@
  * Each mock returns a call tracker so tests can assert on request bodies/params.
  */
 
-import type { Page, Request } from '@playwright/test';
-import type { Issue, IssueDetails, BlockedIssue, GraphIssue } from '../../src/types/issue';
-import type { Statistics } from '../../src/types/statistics';
-import { createIssue, createStats, createBlockedIssue } from './test-data';
+import type { Page, Request } from "@playwright/test";
+import type {
+  Issue,
+  IssueDetails,
+  BlockedIssue,
+  GraphIssue,
+} from "../../src/types/issue";
+import type { Statistics } from "../../src/types/statistics";
+import { createIssue, createStats, createBlockedIssue } from "./test-data";
 
 export interface RequestInfo {
   url: string;
@@ -42,8 +47,16 @@ export interface ApiMockHandler {
   mockCreateIssue(response: Issue): Promise<MockTracker>;
   mockUpdateIssue(id: string, response: Issue): Promise<MockTracker>;
   mockCloseIssue(id: string): Promise<MockTracker>;
-  mockHealth(status?: 'ok' | 'degraded'): Promise<MockTracker>;
+  mockHealth(status?: "ok" | "degraded"): Promise<MockTracker>;
   mockAuth(token?: string): Promise<MockTracker>;
+  mockConfig(config?: {
+    mode: string;
+    auth_url?: string;
+  }): Promise<MockTracker>;
+  mockSession(
+    session: { session: object | null; user: object | null } | null,
+  ): Promise<MockTracker>;
+  mockSseToken(token: string | null): Promise<MockTracker>;
   mockAll(options?: MockAllOptions): Promise<MockAllTrackers>;
 }
 
@@ -51,8 +64,10 @@ export interface MockAllOptions {
   issues?: Issue[];
   stats?: Statistics;
   blocked?: BlockedIssue[];
-  healthStatus?: 'ok' | 'degraded';
+  healthStatus?: "ok" | "degraded";
   authToken?: string;
+  config?: { mode: string; auth_url?: string };
+  sseToken?: string | null;
 }
 
 export interface MockAllTrackers {
@@ -61,17 +76,19 @@ export interface MockAllTrackers {
   blocked: MockTracker;
   health: MockTracker;
   auth: MockTracker;
+  config: MockTracker;
+  sseToken: MockTracker;
 }
 
 export function createApiMockHandler(page: Page): ApiMockHandler {
   return {
     async mockReady(issues: Issue[]): Promise<MockTracker> {
       const tracker: MockTracker = { calls: [] };
-      await page.route('**/api/ready', async (route) => {
+      await page.route("**/api/ready", async (route) => {
         tracker.calls.push(trackRequest(route.request()));
         await route.fulfill({
           status: 200,
-          contentType: 'application/json',
+          contentType: "application/json",
           body: apiResponse(issues),
         });
       });
@@ -80,11 +97,11 @@ export function createApiMockHandler(page: Page): ApiMockHandler {
 
     async mockStats(stats: Statistics): Promise<MockTracker> {
       const tracker: MockTracker = { calls: [] };
-      await page.route('**/api/stats', async (route) => {
+      await page.route("**/api/stats", async (route) => {
         tracker.calls.push(trackRequest(route.request()));
         await route.fulfill({
           status: 200,
-          contentType: 'application/json',
+          contentType: "application/json",
           body: apiResponse(stats),
         });
       });
@@ -94,11 +111,11 @@ export function createApiMockHandler(page: Page): ApiMockHandler {
     async mockIssue(id: string, details: IssueDetails): Promise<MockTracker> {
       const tracker: MockTracker = { calls: [] };
       await page.route(`**/api/issues/${id}`, async (route) => {
-        if (route.request().method() === 'GET') {
+        if (route.request().method() === "GET") {
           tracker.calls.push(trackRequest(route.request()));
           await route.fulfill({
             status: 200,
-            contentType: 'application/json',
+            contentType: "application/json",
             body: apiResponse(details),
           });
         } else {
@@ -110,11 +127,11 @@ export function createApiMockHandler(page: Page): ApiMockHandler {
 
     async mockBlocked(issues: BlockedIssue[]): Promise<MockTracker> {
       const tracker: MockTracker = { calls: [] };
-      await page.route('**/api/blocked', async (route) => {
+      await page.route("**/api/blocked", async (route) => {
         tracker.calls.push(trackRequest(route.request()));
         await route.fulfill({
           status: 200,
-          contentType: 'application/json',
+          contentType: "application/json",
           body: apiResponse(issues),
         });
       });
@@ -123,11 +140,11 @@ export function createApiMockHandler(page: Page): ApiMockHandler {
 
     async mockGraph(issues: GraphIssue[]): Promise<MockTracker> {
       const tracker: MockTracker = { calls: [] };
-      await page.route('**/api/issues/graph', async (route) => {
+      await page.route("**/api/issues/graph", async (route) => {
         tracker.calls.push(trackRequest(route.request()));
         await route.fulfill({
           status: 200,
-          contentType: 'application/json',
+          contentType: "application/json",
           body: apiResponse(issues),
         });
       });
@@ -136,12 +153,12 @@ export function createApiMockHandler(page: Page): ApiMockHandler {
 
     async mockCreateIssue(response: Issue): Promise<MockTracker> {
       const tracker: MockTracker = { calls: [] };
-      await page.route('**/api/issues', async (route) => {
-        if (route.request().method() === 'POST') {
+      await page.route("**/api/issues", async (route) => {
+        if (route.request().method() === "POST") {
           tracker.calls.push(trackRequest(route.request()));
           await route.fulfill({
             status: 201,
-            contentType: 'application/json',
+            contentType: "application/json",
             body: apiResponse(response),
           });
         } else {
@@ -154,11 +171,11 @@ export function createApiMockHandler(page: Page): ApiMockHandler {
     async mockUpdateIssue(id: string, response: Issue): Promise<MockTracker> {
       const tracker: MockTracker = { calls: [] };
       await page.route(`**/api/issues/${id}`, async (route) => {
-        if (route.request().method() === 'PATCH') {
+        if (route.request().method() === "PATCH") {
           tracker.calls.push(trackRequest(route.request()));
           await route.fulfill({
             status: 200,
-            contentType: 'application/json',
+            contentType: "application/json",
             body: apiResponse(response),
           });
         } else {
@@ -174,59 +191,137 @@ export function createApiMockHandler(page: Page): ApiMockHandler {
         tracker.calls.push(trackRequest(route.request()));
         await route.fulfill({
           status: 200,
-          contentType: 'application/json',
-          body: apiResponse({ id, status: 'closed' }),
+          contentType: "application/json",
+          body: apiResponse({ id, status: "closed" }),
         });
       });
       return tracker;
     },
 
-    async mockHealth(status: 'ok' | 'degraded' = 'ok'): Promise<MockTracker> {
+    async mockHealth(status: "ok" | "degraded" = "ok"): Promise<MockTracker> {
       const tracker: MockTracker = { calls: [] };
-      const body = JSON.stringify({ status, daemon: status === 'ok' });
-      await page.route('**/api/health', async (route) => {
+      const body = JSON.stringify({ status, daemon: status === "ok" });
+      await page.route("**/api/health", async (route) => {
         tracker.calls.push(trackRequest(route.request()));
-        await route.fulfill({ status: 200, contentType: 'application/json', body });
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body,
+        });
       });
-      await page.route('**/health', async (route) => {
-        if (route.request().url().includes('/api/')) {
+      await page.route("**/health", async (route) => {
+        if (route.request().url().includes("/api/")) {
           await route.fallback();
           return;
         }
         tracker.calls.push(trackRequest(route.request()));
-        await route.fulfill({ status: 200, contentType: 'application/json', body });
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body,
+        });
       });
       return tracker;
     },
 
-    async mockAuth(token: string = 'test-token-e2e'): Promise<MockTracker> {
+    async mockAuth(token: string = "test-token-e2e"): Promise<MockTracker> {
       const tracker: MockTracker = { calls: [] };
-      await page.route('**/api/auth/token', async (route) => {
+      await page.route("**/api/auth/token", async (route) => {
         tracker.calls.push(trackRequest(route.request()));
         await route.fulfill({
           status: 200,
-          contentType: 'application/json',
+          contentType: "application/json",
           body: JSON.stringify({ token }),
         });
       });
       return tracker;
     },
 
+    async mockConfig(
+      config: { mode: string; auth_url?: string } = { mode: "open" },
+    ): Promise<MockTracker> {
+      const tracker: MockTracker = { calls: [] };
+      await page.route("**/api/config", async (route) => {
+        // Only intercept GET requests to /api/config (not /api/config/backend etc.)
+        const url = new URL(route.request().url());
+        if (url.pathname !== "/api/config") {
+          await route.fallback();
+          return;
+        }
+        tracker.calls.push(trackRequest(route.request()));
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(config),
+        });
+      });
+      return tracker;
+    },
+
+    async mockSession(
+      session: { session: object | null; user: object | null } | null,
+    ): Promise<MockTracker> {
+      const tracker: MockTracker = { calls: [] };
+      const body = JSON.stringify(session ?? { session: null, user: null });
+      await page.route("**/api/auth/get-session", async (route) => {
+        tracker.calls.push(trackRequest(route.request()));
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body,
+        });
+      });
+      return tracker;
+    },
+
+    async mockSseToken(token: string | null): Promise<MockTracker> {
+      const tracker: MockTracker = { calls: [] };
+      await page.route("**/api/events/token", async (route) => {
+        tracker.calls.push(trackRequest(route.request()));
+        if (token === null) {
+          await route.fulfill({ status: 404, body: "Not Found" });
+        } else {
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({ token }),
+          });
+        }
+      });
+      return tracker;
+    },
+
     async mockAll(options: MockAllOptions = {}): Promise<MockAllTrackers> {
       const {
-        issues = [createIssue(), createIssue({ status: 'in_progress' }), createIssue({ status: 'closed' })],
+        issues = [
+          createIssue(),
+          createIssue({ status: "in_progress" }),
+          createIssue({ status: "closed" }),
+        ],
         stats = createStats(),
         blocked = [createBlockedIssue()],
-        healthStatus = 'ok',
-        authToken = 'test-token-e2e',
+        healthStatus = "ok",
+        authToken = "test-token-e2e",
+        config = { mode: "open" },
+        sseToken = null,
       } = options;
 
-      const [ready, statsTracker, blockedTracker, health, auth] = await Promise.all([
+      const [
+        ready,
+        statsTracker,
+        blockedTracker,
+        health,
+        auth,
+        configTracker,
+        sseTokenTracker,
+      ] = await Promise.all([
         this.mockReady(issues),
         this.mockStats(stats),
         this.mockBlocked(blocked),
         this.mockHealth(healthStatus),
         this.mockAuth(authToken),
+        this.mockConfig(config),
+        this.mockSseToken(sseToken),
       ]);
 
       return {
@@ -235,6 +330,8 @@ export function createApiMockHandler(page: Page): ApiMockHandler {
         blocked: blockedTracker,
         health,
         auth,
+        config: configTracker,
+        sseToken: sseTokenTracker,
       };
     },
   };

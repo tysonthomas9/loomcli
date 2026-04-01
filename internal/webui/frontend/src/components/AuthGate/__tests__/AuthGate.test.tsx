@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom";
 
 import { AuthGate } from "../AuthGate";
+import { createDefaultAuth } from "@/test-utils/mockAuthContext";
 
 // Mock useAuth from AuthContext
 const mockUseAuth = vi.fn();
@@ -29,19 +30,6 @@ vi.mock("@/components/LoginPage", () => ({
   ),
 }));
 
-function defaultAuth(overrides: Record<string, unknown> = {}) {
-  return {
-    mode: "oidc" as const,
-    isLoading: false,
-    isAuthenticated: false,
-    authServiceDown: false,
-    user: null,
-    signIn: vi.fn(),
-    signOut: vi.fn(),
-    ...overrides,
-  };
-}
-
 describe("AuthGate", () => {
   let replaceStateSpy: ReturnType<typeof vi.spyOn>;
 
@@ -61,7 +49,7 @@ describe("AuthGate", () => {
 
   describe("rendering decisions", () => {
     it("returns null when isLoading is true", () => {
-      mockUseAuth.mockReturnValue(defaultAuth({ isLoading: true }));
+      mockUseAuth.mockReturnValue(createDefaultAuth({ isLoading: true }));
       const { container } = render(
         <AuthGate>
           <div>app content</div>
@@ -72,7 +60,7 @@ describe("AuthGate", () => {
 
     it("renders LoginPage when mode=oidc and not authenticated", () => {
       mockUseAuth.mockReturnValue(
-        defaultAuth({ mode: "oidc", isAuthenticated: false }),
+        createDefaultAuth({ mode: "oidc", isAuthenticated: false }),
       );
       render(
         <AuthGate>
@@ -85,7 +73,7 @@ describe("AuthGate", () => {
 
     it("renders children when authenticated", () => {
       mockUseAuth.mockReturnValue(
-        defaultAuth({ mode: "oidc", isAuthenticated: true }),
+        createDefaultAuth({ mode: "oidc", isAuthenticated: true }),
       );
       render(
         <AuthGate>
@@ -98,7 +86,7 @@ describe("AuthGate", () => {
 
     it("renders children when mode=open regardless of auth state", () => {
       mockUseAuth.mockReturnValue(
-        defaultAuth({ mode: "open", isAuthenticated: false }),
+        createDefaultAuth({ mode: "open", isAuthenticated: false }),
       );
       render(
         <AuthGate>
@@ -115,7 +103,7 @@ describe("AuthGate", () => {
     it("extracts error from URL query params and passes to LoginPage", () => {
       window.history.replaceState({}, "", "/?error=access_denied");
       mockUseAuth.mockReturnValue(
-        defaultAuth({ mode: "oidc", isAuthenticated: false }),
+        createDefaultAuth({ mode: "oidc", isAuthenticated: false }),
       );
       render(
         <AuthGate>
@@ -129,7 +117,7 @@ describe("AuthGate", () => {
     it("cleans error from URL after extraction", () => {
       window.history.replaceState({}, "", "/app?error=denied");
       mockUseAuth.mockReturnValue(
-        defaultAuth({ mode: "oidc", isAuthenticated: false }),
+        createDefaultAuth({ mode: "oidc", isAuthenticated: false }),
       );
       render(
         <AuthGate>
@@ -142,7 +130,7 @@ describe("AuthGate", () => {
     it("handles missing error param gracefully", () => {
       window.history.replaceState({}, "", "/");
       mockUseAuth.mockReturnValue(
-        defaultAuth({ mode: "oidc", isAuthenticated: false }),
+        createDefaultAuth({ mode: "oidc", isAuthenticated: false }),
       );
       render(
         <AuthGate>
@@ -160,7 +148,7 @@ describe("AuthGate", () => {
     it("restores valid returnTo path after login", () => {
       sessionStorage.setItem("loom-auth-return-to", "/issues/123");
       mockUseAuth.mockReturnValue(
-        defaultAuth({ mode: "oidc", isAuthenticated: true }),
+        createDefaultAuth({ mode: "oidc", isAuthenticated: true }),
       );
       render(
         <AuthGate>
@@ -176,7 +164,7 @@ describe("AuthGate", () => {
         "https://evil.com/redirect",
       );
       mockUseAuth.mockReturnValue(
-        defaultAuth({ mode: "oidc", isAuthenticated: true }),
+        createDefaultAuth({ mode: "oidc", isAuthenticated: true }),
       );
       render(
         <AuthGate>
@@ -192,7 +180,7 @@ describe("AuthGate", () => {
     it("rejects returnTo not starting with /", () => {
       sessionStorage.setItem("loom-auth-return-to", "evil.com/path");
       mockUseAuth.mockReturnValue(
-        defaultAuth({ mode: "oidc", isAuthenticated: true }),
+        createDefaultAuth({ mode: "oidc", isAuthenticated: true }),
       );
       render(
         <AuthGate>
@@ -207,7 +195,7 @@ describe("AuthGate", () => {
     it("clears sessionStorage entry after reading", () => {
       sessionStorage.setItem("loom-auth-return-to", "/dashboard");
       mockUseAuth.mockReturnValue(
-        defaultAuth({ mode: "oidc", isAuthenticated: true }),
+        createDefaultAuth({ mode: "oidc", isAuthenticated: true }),
       );
       render(
         <AuthGate>
@@ -224,7 +212,7 @@ describe("AuthGate", () => {
           throw new Error("SecurityError");
         });
       mockUseAuth.mockReturnValue(
-        defaultAuth({ mode: "oidc", isAuthenticated: true }),
+        createDefaultAuth({ mode: "oidc", isAuthenticated: true }),
       );
 
       // Should not throw
@@ -242,7 +230,7 @@ describe("AuthGate", () => {
     it("processes returnTo only once on re-render", () => {
       sessionStorage.setItem("loom-auth-return-to", "/settings");
       mockUseAuth.mockReturnValue(
-        defaultAuth({ mode: "oidc", isAuthenticated: true }),
+        createDefaultAuth({ mode: "oidc", isAuthenticated: true }),
       );
       const { rerender } = render(
         <AuthGate>

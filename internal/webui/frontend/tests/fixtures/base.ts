@@ -3,9 +3,9 @@
  * Provides pre-configured fixtures for mocking APIs, SSE, and navigation.
  */
 
-import { test as base, expect, type Page } from '@playwright/test';
-import { createApiMockHandler, type ApiMockHandler } from '../helpers/api-mock';
-import { createSSEMock, type SSEMockController } from '../helpers/sse-mock';
+import { test as base, expect, type Page } from "@playwright/test";
+import { createApiMockHandler, type ApiMockHandler } from "../helpers/api-mock";
+import { createSSEMock, type SSEMockController } from "../helpers/sse-mock";
 
 /**
  * Extended test fixtures available to all E2E tests.
@@ -43,15 +43,19 @@ export const test = base.extend<TestFixtures>({
     controller.close();
   },
 
-  // Provide a fully set up page: auth mocked, SSE intercepted, navigated to app
+  // Provide a fully set up page: config + auth mocked, SSE intercepted, navigated to app
   appPage: async ({ page, mockApi, mockSSE }, use) => {
+    // Mock /api/config first — fetchAppConfig() runs before anything else on boot
+    await mockApi.mockConfig({ mode: "open" });
     // Set up auth mock before navigation (initAuth fires on app mount)
     await mockApi.mockAuth();
     // Set up SSE intercept so the app doesn't hang waiting for a real server
     await mockSSE.connect();
+    // Intercept /api/events/token before the SSE mock's broader glob catches it
+    await mockApi.mockSseToken(null);
     // Navigate to the app
-    await page.goto('/');
-    await page.waitForLoadState('domcontentloaded');
+    await page.goto("/");
+    await page.waitForLoadState("domcontentloaded");
     // Send the SSE connected event
     mockSSE.sendConnected();
     await use(page);
