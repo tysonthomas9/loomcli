@@ -159,3 +159,11 @@ func (r *Repo) EffectiveSourceRepoID() string {
 	}
 	return r.Name
 }
+
+// WorkspaceConfig holds per-workspace configuration and preferences,
+// separate from Workspace identity and topology. This struct is intentionally
+// minimal; fields will be added as V2 settings grow (daemon config, branch
+// strategy, security policies, etc.).
+type WorkspaceConfig struct {
+	Backend string `json:"backend,omitempty"`
+}

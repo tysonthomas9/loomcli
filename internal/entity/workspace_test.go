@@ -440,3 +440,19 @@ func TestWorkspace_GroupNames(t *testing.T) {
 		}
 	})
 }
+
+func TestWorkspaceConfig(t *testing.T) {
+	t.Run("zero value is valid", func(t *testing.T) {
+		cfg := WorkspaceConfig{}
+		if cfg.Backend != "" {
+			t.Errorf("expected empty Backend, got %q", cfg.Backend)
+		}
+	})
+
+	t.Run("stores backend override", func(t *testing.T) {
+		cfg := WorkspaceConfig{Backend: "claude"}
+		if cfg.Backend != "claude" {
+			t.Errorf("expected Backend = %q, got %q", "claude", cfg.Backend)
+		}
+	})
+}
