@@ -142,6 +142,12 @@ func LoadConfig() (*LoomConfig, error) {
 		return nil, fmt.Errorf("reading config %s: %w", path, err)
 	}
 
+	// Auto-migrate non-destructive config changes before parsing
+	data, err = autoMigrateFile(path, data)
+	if err != nil {
+		return nil, err
+	}
+
 	data, err = ExpandConfigBytes(data)
 	if err != nil {
 		return nil, fmt.Errorf("expanding env vars in %s: %w", path, err)
@@ -168,12 +174,6 @@ func LoadConfig() (*LoomConfig, error) {
 			}
 		}
 		cfg.Workspaces[wsName] = ws
-	}
-
-	if cfg.Version < CurrentConfigVersion {
-		configVersionWarnOnce.Do(func() {
-			fmt.Fprintf(os.Stderr, "Warning: config %s is version %d (current: %d). Run 'loom config migrate' to upgrade.\n", path, cfg.Version, CurrentConfigVersion)
-		})
 	}
 
 	// Resolve DefaultWorkspaceID from the default workspace name

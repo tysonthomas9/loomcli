@@ -324,6 +324,163 @@ func TestMigrationChain_V0ToV2(t *testing.T) {
 	}
 }
 
+func TestAutoMigrateConfigData_AllNonDestructive(t *testing.T) {
+	data := map[string]interface{}{
+		"default_workspace": "myws",
+		"backend":           "claude",
+		"workspaces": map[string]interface{}{
+			"ws1": map[string]interface{}{
+				"path": "/tmp/ws1",
+			},
+		},
+	}
+	result, reachedVersion, err := AutoMigrateConfigData(data)
+	if err != nil {
+		t.Fatalf("AutoMigrateConfigData() error = %v", err)
+	}
+	if reachedVersion != CurrentConfigVersion {
+		t.Errorf("reachedVersion = %d, want %d", reachedVersion, CurrentConfigVersion)
+	}
+	if v := getConfigVersion(result); v != CurrentConfigVersion {
+		t.Errorf("data version = %d, want %d", v, CurrentConfigVersion)
+	}
+	if result["default_workspace"] != "myws" {
+		t.Error("existing fields should be preserved")
+	}
+	// Check UUID was added
+	workspaces := result["workspaces"].(map[string]interface{})
+	ws := workspaces["ws1"].(map[string]interface{})
+	if _, ok := ws["id"]; !ok {
+		t.Error("workspace ws1 should have an id after auto-migration")
+	}
+}
+
+func TestAutoMigrateConfigData_AlreadyCurrent(t *testing.T) {
+	data := map[string]interface{}{
+		"version": CurrentConfigVersion,
+		"backend": "claude",
+	}
+	result, reachedVersion, err := AutoMigrateConfigData(data)
+	if err != nil {
+		t.Fatalf("AutoMigrateConfigData() error = %v", err)
+	}
+	if reachedVersion != CurrentConfigVersion {
+		t.Errorf("reachedVersion = %d, want %d", reachedVersion, CurrentConfigVersion)
+	}
+	if result["backend"] != "claude" {
+		t.Error("data should be unchanged")
+	}
+}
+
+func TestAutoMigrateConfigData_FutureVersion(t *testing.T) {
+	data := map[string]interface{}{
+		"version": 99,
+		"backend": "claude",
+	}
+	result, reachedVersion, err := AutoMigrateConfigData(data)
+	if err != nil {
+		t.Fatalf("AutoMigrateConfigData() error = %v", err)
+	}
+	if reachedVersion != 99 {
+		t.Errorf("reachedVersion = %d, want 99", reachedVersion)
+	}
+	if result["backend"] != "claude" {
+		t.Error("data should be unchanged")
+	}
+}
+
+func TestAutoMigrateConfigData_StopsAtDestructive(t *testing.T) {
+	// Save and restore the original migrations map
+	origMigrations := migrations
+	defer func() { migrations = origMigrations }()
+
+	// Set up: v0→v1 is non-destructive, v1→v2 is destructive
+	migrations = map[int]Migration{
+		0: {Fn: migrateV0ToV1, Destructive: false},
+		1: {Fn: migrateV1ToV2, Destructive: true},
+	}
+
+	data := map[string]interface{}{
+		"default_workspace": "myws",
+		"backend":           "claude",
+	}
+	result, reachedVersion, err := AutoMigrateConfigData(data)
+	if err != nil {
+		t.Fatalf("AutoMigrateConfigData() error = %v", err)
+	}
+	if reachedVersion != 1 {
+		t.Errorf("reachedVersion = %d, want 1 (should stop before destructive v1→v2)", reachedVersion)
+	}
+	if getConfigVersion(result) != 1 {
+		t.Errorf("data version = %d, want 1", getConfigVersion(result))
+	}
+}
+
+func TestAutoMigrateConfigData_FirstMigrationDestructive(t *testing.T) {
+	origMigrations := migrations
+	defer func() { migrations = origMigrations }()
+
+	// Both migrations destructive
+	migrations = map[int]Migration{
+		0: {Fn: migrateV0ToV1, Destructive: true},
+		1: {Fn: migrateV1ToV2, Destructive: true},
+	}
+
+	data := map[string]interface{}{
+		"backend": "claude",
+	}
+	result, reachedVersion, err := AutoMigrateConfigData(data)
+	if err != nil {
+		t.Fatalf("AutoMigrateConfigData() error = %v", err)
+	}
+	if reachedVersion != 0 {
+		t.Errorf("reachedVersion = %d, want 0 (no migrations applied)", reachedVersion)
+	}
+	if getConfigVersion(result) != 0 {
+		t.Errorf("data version = %d, want 0", getConfigVersion(result))
+	}
+}
+
+func TestAutoMigrateConfigData_NilMap(t *testing.T) {
+	// nil data should be handled gracefully
+	data := map[string]interface{}(nil)
+	if data == nil {
+		data = make(map[string]interface{})
+	}
+	result, reachedVersion, err := AutoMigrateConfigData(data)
+	if err != nil {
+		t.Fatalf("AutoMigrateConfigData() error = %v", err)
+	}
+	if reachedVersion != CurrentConfigVersion {
+		t.Errorf("reachedVersion = %d, want %d", reachedVersion, CurrentConfigVersion)
+	}
+	if getConfigVersion(result) != CurrentConfigVersion {
+		t.Errorf("data version = %d, want %d", getConfigVersion(result), CurrentConfigVersion)
+	}
+}
+
+func TestMigrateConfigData_UnchangedBehavior(t *testing.T) {
+	// Verify MigrateConfigData still applies all migrations (including destructive)
+	origMigrations := migrations
+	defer func() { migrations = origMigrations }()
+
+	migrations = map[int]Migration{
+		0: {Fn: migrateV0ToV1, Destructive: false},
+		1: {Fn: migrateV1ToV2, Destructive: true}, // destructive but MigrateConfigData should apply it
+	}
+
+	data := map[string]interface{}{
+		"backend": "claude",
+	}
+	result, err := MigrateConfigData(data)
+	if err != nil {
+		t.Fatalf("MigrateConfigData() error = %v", err)
+	}
+	if v := getConfigVersion(result); v != CurrentConfigVersion {
+		t.Errorf("version = %d, want %d (MigrateConfigData should apply all, including destructive)", v, CurrentConfigVersion)
+	}
+}
+
 func TestMigrationChain_Idempotent(t *testing.T) {
 	data := map[string]interface{}{"backend": "claude"}
 	first, err := MigrateConfigData(data)

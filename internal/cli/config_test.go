@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"gopkg.in/yaml.v3"
 )
 
 func TestGetConfigDir(t *testing.T) {
@@ -391,16 +392,14 @@ func captureStderr(t *testing.T, fn func()) string {
 	return string(out)
 }
 
-func TestLoadConfig_VersionWarningDedup(t *testing.T) {
-	// Reset the once guard so this test starts clean.
+func TestLoadConfig_AutoMigration(t *testing.T) {
 	resetConfigVersionWarnOnce()
 	t.Cleanup(resetConfigVersionWarnOnce)
 
 	dir := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", dir)
 
-	// Write a version-0 config (version field omitted defaults to 0,
-	// which is below CurrentConfigVersion).
+	// Write a version-0 config (version field omitted defaults to 0)
 	yamlData := `workspaces:
   ws:
     path: /tmp/ws
@@ -408,53 +407,137 @@ func TestLoadConfig_VersionWarningDedup(t *testing.T) {
       - name: myrepo
         path: /tmp/ws/myrepo
 `
-	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yamlData), 0644); err != nil {
+	configPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(configPath, []byte(yamlData), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	const warnSubstr = "Run 'loom config migrate' to upgrade"
-
-	// First call: warning should appear.
-	stderr1 := captureStderr(t, func() {
+	// LoadConfig should auto-migrate without warnings
+	stderr := captureStderr(t, func() {
 		cfg, err := LoadConfig()
 		if err != nil {
-			t.Fatalf("LoadConfig() #1 error = %v", err)
+			t.Fatalf("LoadConfig() error = %v", err)
 		}
 		if cfg == nil {
-			t.Fatal("LoadConfig() #1 returned nil")
+			t.Fatal("LoadConfig() returned nil")
+		}
+		if cfg.Version != CurrentConfigVersion {
+			t.Errorf("cfg.Version = %d, want %d", cfg.Version, CurrentConfigVersion)
+		}
+		// Verify workspace data preserved
+		ws, ok := cfg.Workspaces["ws"]
+		if !ok {
+			t.Fatal("workspace 'ws' not found after auto-migration")
+		}
+		if ws.ID == "" {
+			t.Error("workspace 'ws' should have a UUID after auto-migration")
 		}
 	})
-	if count := strings.Count(stderr1, warnSubstr); count != 1 {
-		t.Errorf("first LoadConfig(): want exactly 1 warning, got %d; stderr = %q", count, stderr1)
+	if strings.Contains(stderr, "loom config migrate") {
+		t.Errorf("auto-migration should not produce a warning, got stderr = %q", stderr)
 	}
 
-	// Second call: warning should be suppressed by sync.Once.
-	stderr2 := captureStderr(t, func() {
-		cfg, err := LoadConfig()
-		if err != nil {
-			t.Fatalf("LoadConfig() #2 error = %v", err)
-		}
-		if cfg == nil {
-			t.Fatal("LoadConfig() #2 returned nil")
-		}
-	})
-	if strings.Contains(stderr2, warnSubstr) {
-		t.Errorf("second LoadConfig(): want no warning, got stderr = %q", stderr2)
+	// Verify file was updated on disk
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var diskMap map[string]interface{}
+	if err := yaml.Unmarshal(raw, &diskMap); err != nil {
+		t.Fatal(err)
+	}
+	if v := getConfigVersion(diskMap); v != CurrentConfigVersion {
+		t.Errorf("on-disk version = %d, want %d", v, CurrentConfigVersion)
 	}
 
-	// Reset the guard and call again: warning should reappear.
+	// Verify backup was created
+	matches, _ := filepath.Glob(filepath.Join(dir, "config.yaml.bak.*"))
+	if len(matches) == 0 {
+		t.Error("expected a backup file to be created during auto-migration")
+	}
+
+	// Second call should not create another backup (file is already current)
+	cfg2, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() #2 error = %v", err)
+	}
+	if cfg2.Version != CurrentConfigVersion {
+		t.Errorf("cfg2.Version = %d, want %d", cfg2.Version, CurrentConfigVersion)
+	}
+	matches2, _ := filepath.Glob(filepath.Join(dir, "config.yaml.bak.*"))
+	if len(matches2) != len(matches) {
+		t.Errorf("second LoadConfig created additional backup: %d vs %d files", len(matches2), len(matches))
+	}
+}
+
+func TestLoadConfig_AutoMigration_CurrentVersion(t *testing.T) {
 	resetConfigVersionWarnOnce()
-	stderr3 := captureStderr(t, func() {
+	t.Cleanup(resetConfigVersionWarnOnce)
+
+	dir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", dir)
+
+	yamlData := fmt.Sprintf("version: %d\nbackend: claude\n", CurrentConfigVersion)
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yamlData), 0644); err != nil {
+		t.Fatal(err)
+	}
+	stderr := captureStderr(t, func() {
 		cfg, err := LoadConfig()
 		if err != nil {
-			t.Fatalf("LoadConfig() #3 error = %v", err)
+			t.Fatalf("LoadConfig() error = %v", err)
 		}
 		if cfg == nil {
-			t.Fatal("LoadConfig() #3 returned nil")
+			t.Fatal("returned nil")
 		}
 	})
-	if count := strings.Count(stderr3, warnSubstr); count != 1 {
-		t.Errorf("after reset, LoadConfig(): want exactly 1 warning, got %d; stderr = %q", count, stderr3)
+	if strings.Contains(stderr, "loom config migrate") {
+		t.Errorf("current version config should not warn, got stderr = %q", stderr)
+	}
+
+	// No backup should be created
+	matches, _ := filepath.Glob(filepath.Join(dir, "config.yaml.bak.*"))
+	if len(matches) != 0 {
+		t.Errorf("no backup expected for current-version config, got %d files", len(matches))
+	}
+}
+
+func TestLoadConfig_AutoMigration_PreservesEnvVars(t *testing.T) {
+	resetConfigVersionWarnOnce()
+	t.Cleanup(resetConfigVersionWarnOnce)
+
+	dir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", dir)
+	t.Setenv("MY_BACKEND", "claude")
+
+	// v0 config with an env var template
+	yamlData := `backend: ${MY_BACKEND}
+workspaces:
+  ws:
+    path: /tmp/ws
+    repos:
+      - name: myrepo
+        path: /tmp/ws/myrepo
+`
+	configPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(configPath, []byte(yamlData), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	if cfg.Backend != "claude" {
+		t.Errorf("cfg.Backend = %q, want %q", cfg.Backend, "claude")
+	}
+
+	// Verify the file on disk still has the env var template (not expanded)
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "${MY_BACKEND}") {
+		t.Errorf("env var template should be preserved in migrated file, got:\n%s", raw)
 	}
 }
 
