@@ -20,7 +20,7 @@ import type { ConnectionState } from "@/api/sse";
 import {
   useFilterState,
   useIssueDetail,
-  useViewState,
+  useRouteView,
   useAgentContext,
   useWorkspaceContext,
 } from "@/hooks";
@@ -35,6 +35,14 @@ vi.mock("react-router-dom", () => ({
   useParams: vi.fn(() => ({ workspaceId: "test-ws-id" })),
   useNavigate: vi.fn(() => mockNavigate),
   useSearchParams: vi.fn(() => [new URLSearchParams(), vi.fn()]),
+  useLocation: vi.fn(() => ({
+    pathname: "/ws/test-ws-id/kanban",
+    search: "",
+    hash: "",
+    state: null,
+    key: "default",
+  })),
+  Outlet: () => null,
 }));
 
 // Create hoisted mocks for @/api functions used by handleApprove/handleReject
@@ -178,7 +186,7 @@ vi.mock("@/api", async (importOriginal) => {
 // Mock AuthContext so UserMenu can call useAuth() outside of a provider
 vi.mock("@/contexts/AuthContext", () => ({
   useAuth: vi.fn(() => ({
-    mode: "none" as const,
+    mode: "open" as const,
     user: null,
     isLoading: false,
     isAuthenticated: true,
@@ -247,18 +255,17 @@ vi.mock("@/hooks/useIssueTabPersistence", () => ({
   })),
 }));
 
-// Create hoisted mock for useViewState to allow per-test control
-const { mockUseViewState, mockSetActiveView, mockNavigateToView } = vi.hoisted(
+// Create hoisted mock for useRouteView to allow per-test control
+const { mockUseRouteView, mockSetActiveView, mockNavigateToView } = vi.hoisted(
   () => ({
-    mockUseViewState: vi.fn(),
+    mockUseRouteView: vi.fn(),
     mockSetActiveView: vi.fn(),
     mockNavigateToView: vi.fn(),
   }),
 );
 
 /**
- * Helper to create a useViewState return value (object shape).
- * After T12 migration: no urlIssueId (removed from hook).
+ * Helper to create a useRouteView return value (object shape).
  */
 function createViewStateReturn(
   view: string,
@@ -280,7 +287,7 @@ vi.mock("@/hooks", () => ({
   useIssues: mockUseIssues,
   useIssueDetail: mockUseIssueDetail,
   useToast: mockUseToast,
-  useViewState: mockUseViewState,
+  useRouteView: mockUseRouteView,
   DEFAULT_GROUP_BY: "none",
   useFilterState: vi.fn(() => [
     {}, // FilterState - empty means App.tsx will apply DEFAULT_GROUP_BY fallback
@@ -456,7 +463,7 @@ vi.mock("@/hooks", () => ({
 
 // Alias for convenience in tests (prefixed with _ to satisfy linter for unused vars)
 const _useIssuesMock = mockUseIssues;
-const _useViewStateMock = mockUseViewState;
+const _useRouteViewMock = mockUseRouteView;
 
 /**
  * Create a mock issue for testing.
@@ -549,8 +556,8 @@ function createMockUseIssueDetailReturn(
 describe("App", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Set up default useViewState mock (kanban is the default view)
-    mockUseViewState.mockReturnValue(createViewStateReturn("kanban"));
+    // Set up default useRouteView mock (kanban is the default view)
+    mockUseRouteView.mockReturnValue(createViewStateReturn("kanban"));
     // Set up default useIssueDetail mock
     mockUseIssueDetail.mockReturnValue(createMockUseIssueDetailReturn());
     // Set up default usePanelManager mock
@@ -1595,7 +1602,7 @@ describe("App", () => {
         }),
       );
       // Render in issue-detail view
-      vi.mocked(useViewState).mockReturnValue(
+      vi.mocked(useRouteView).mockReturnValue(
         createViewStateReturn("issue-detail"),
       );
 
@@ -1605,8 +1612,15 @@ describe("App", () => {
       const backButton = screen.getByTestId("detail-back-button");
       fireEvent.click(backButton);
 
-      // Should call navigate() via React Router (instead of window.history.back)
-      expect(mockNavigate).toHaveBeenCalled();
+      // Should navigate back via browser history or fallback to kanban
+      // (uses navigate(-1) when history > 1, or navigateToView("kanban") otherwise)
+      const usedHistory = mockNavigate.mock.calls.some(
+        (call: unknown[]) => call[0] === -1,
+      );
+      const usedFallback = mockNavigateToView.mock.calls.some(
+        (call: unknown[]) => call[0] === "kanban",
+      );
+      expect(usedHistory || usedFallback).toBe(true);
     });
 
     it("does not re-fetch when clicking the same issue that is already selected in detail view", () => {
@@ -1635,7 +1649,7 @@ describe("App", () => {
       expect(fetchIssue).toHaveBeenCalledTimes(1);
 
       // Re-render in issue-detail view (simulating the view switch)
-      vi.mocked(useViewState).mockReturnValue(
+      vi.mocked(useRouteView).mockReturnValue(
         createViewStateReturn("issue-detail"),
       );
 
@@ -1785,7 +1799,7 @@ describe("App", () => {
     it('calls useIssues with mode: "kanban" when activeView is "kanban"', () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
-      vi.mocked(useViewState).mockReturnValue(createViewStateReturn("kanban"));
+      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("kanban"));
 
       render(<App />);
 
@@ -1800,7 +1814,7 @@ describe("App", () => {
     it('calls useIssues with mode: "ready" when activeView is "table"', () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
-      vi.mocked(useViewState).mockReturnValue(createViewStateReturn("table"));
+      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("table"));
 
       render(<App />);
 
@@ -1815,7 +1829,7 @@ describe("App", () => {
     it('calls useIssues with mode: "graph" when activeView is "graph"', () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
-      vi.mocked(useViewState).mockReturnValue(createViewStateReturn("graph"));
+      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("graph"));
 
       render(<App />);
 
@@ -1833,7 +1847,7 @@ describe("App", () => {
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       // Start with kanban view
-      vi.mocked(useViewState).mockReturnValue(createViewStateReturn("kanban"));
+      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("kanban"));
 
       const { rerender } = render(<App />);
 
@@ -1847,7 +1861,7 @@ describe("App", () => {
       vi.mocked(useIssues).mockClear();
 
       // Switch to graph view
-      vi.mocked(useViewState).mockReturnValue(createViewStateReturn("graph"));
+      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("graph"));
 
       rerender(<App />);
 
@@ -1864,7 +1878,7 @@ describe("App", () => {
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       // Start with graph view
-      vi.mocked(useViewState).mockReturnValue(createViewStateReturn("graph"));
+      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("graph"));
 
       const { rerender } = render(<App />);
 
@@ -1878,7 +1892,7 @@ describe("App", () => {
       vi.mocked(useIssues).mockClear();
 
       // Switch to kanban view
-      vi.mocked(useViewState).mockReturnValue(createViewStateReturn("kanban"));
+      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("kanban"));
 
       rerender(<App />);
 
@@ -1895,7 +1909,7 @@ describe("App", () => {
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       // Start with graph view
-      vi.mocked(useViewState).mockReturnValue(createViewStateReturn("graph"));
+      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("graph"));
 
       const { rerender } = render(<App />);
 
@@ -1909,7 +1923,7 @@ describe("App", () => {
       vi.mocked(useIssues).mockClear();
 
       // Switch to table view
-      vi.mocked(useViewState).mockReturnValue(createViewStateReturn("table"));
+      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("table"));
 
       rerender(<App />);
 
@@ -1926,7 +1940,7 @@ describe("App", () => {
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       // Start with kanban view
-      vi.mocked(useViewState).mockReturnValue(createViewStateReturn("kanban"));
+      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("kanban"));
 
       const { rerender } = render(<App />);
 
@@ -1940,7 +1954,7 @@ describe("App", () => {
       vi.mocked(useIssues).mockClear();
 
       // Switch to table view
-      vi.mocked(useViewState).mockReturnValue(createViewStateReturn("table"));
+      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("table"));
 
       rerender(<App />);
 
@@ -1951,14 +1965,14 @@ describe("App", () => {
       });
     });
 
-    it("useViewState is called before useIssues to determine fetch mode", () => {
+    it("useRouteView is called before useIssues to determine fetch mode", () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       // Track call order
       const callOrder: string[] = [];
-      vi.mocked(useViewState).mockImplementation(() => {
-        callOrder.push("useViewState");
+      vi.mocked(useRouteView).mockImplementation(() => {
+        callOrder.push("useRouteView");
         return createViewStateReturn("graph");
       });
       vi.mocked(useIssues).mockImplementation(() => {
@@ -1968,8 +1982,8 @@ describe("App", () => {
 
       render(<App />);
 
-      // Verify useViewState is called before useIssues
-      const viewStateIndex = callOrder.indexOf("useViewState");
+      // Verify useRouteView is called before useIssues
+      const viewStateIndex = callOrder.indexOf("useRouteView");
       const issuesIndex = callOrder.indexOf("useIssues");
       expect(viewStateIndex).toBeLessThan(issuesIndex);
       expect(viewStateIndex).toBeGreaterThanOrEqual(0);
@@ -1979,7 +1993,7 @@ describe("App", () => {
     it('calls useIssues with mode: "ready" when activeView is "monitor"', () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
-      vi.mocked(useViewState).mockReturnValue(createViewStateReturn("monitor"));
+      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("monitor"));
 
       render(<App />);
 
@@ -1996,7 +2010,7 @@ describe("App", () => {
     it('renders MonitorDashboard when activeView is "monitor"', async () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
-      vi.mocked(useViewState).mockReturnValue(createViewStateReturn("monitor"));
+      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("monitor"));
 
       render(<App />);
 
@@ -2009,7 +2023,7 @@ describe("App", () => {
     it("shows LoadingSkeleton.Monitor as fallback during lazy load", async () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
-      vi.mocked(useViewState).mockReturnValue(createViewStateReturn("monitor"));
+      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("monitor"));
 
       render(<App />);
 
@@ -2023,7 +2037,7 @@ describe("App", () => {
     it('does not render MonitorDashboard when activeView is "kanban"', () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
-      vi.mocked(useViewState).mockReturnValue(createViewStateReturn("kanban"));
+      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("kanban"));
 
       render(<App />);
 
@@ -2036,7 +2050,7 @@ describe("App", () => {
     it('does not render MonitorDashboard when activeView is "table"', () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
-      vi.mocked(useViewState).mockReturnValue(createViewStateReturn("table"));
+      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("table"));
 
       render(<App />);
 
@@ -2047,7 +2061,7 @@ describe("App", () => {
     it('does not render MonitorDashboard when activeView is "graph"', async () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
-      vi.mocked(useViewState).mockReturnValue(createViewStateReturn("graph"));
+      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("graph"));
 
       render(<App />);
 
@@ -2065,7 +2079,7 @@ describe("App", () => {
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       // Start with kanban view
-      vi.mocked(useViewState).mockReturnValue(createViewStateReturn("kanban"));
+      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("kanban"));
 
       const { rerender } = render(<App />);
 
@@ -2074,7 +2088,7 @@ describe("App", () => {
       expect(screen.queryByTestId("monitor-dashboard")).not.toBeInTheDocument();
 
       // Switch to monitor view
-      vi.mocked(useViewState).mockReturnValue(createViewStateReturn("monitor"));
+      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("monitor"));
 
       rerender(<App />);
 
@@ -2094,7 +2108,7 @@ describe("App", () => {
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       // Start with monitor view
-      vi.mocked(useViewState).mockReturnValue(createViewStateReturn("monitor"));
+      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("monitor"));
 
       const { rerender } = render(<App />);
 
@@ -2104,7 +2118,7 @@ describe("App", () => {
       });
 
       // Switch to kanban view
-      vi.mocked(useViewState).mockReturnValue(createViewStateReturn("kanban"));
+      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("kanban"));
 
       rerender(<App />);
 
@@ -2118,7 +2132,7 @@ describe("App", () => {
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       // Start with graph view
-      vi.mocked(useViewState).mockReturnValue(createViewStateReturn("graph"));
+      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("graph"));
 
       const { rerender } = render(<App />);
 
@@ -2128,7 +2142,7 @@ describe("App", () => {
       });
 
       // Switch to monitor view
-      vi.mocked(useViewState).mockReturnValue(createViewStateReturn("monitor"));
+      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("monitor"));
 
       rerender(<App />);
 
@@ -2146,7 +2160,7 @@ describe("App", () => {
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       // Start with monitor view
-      vi.mocked(useViewState).mockReturnValue(createViewStateReturn("monitor"));
+      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("monitor"));
 
       const { rerender } = render(<App />);
 
@@ -2156,7 +2170,7 @@ describe("App", () => {
       });
 
       // Switch to graph view
-      vi.mocked(useViewState).mockReturnValue(createViewStateReturn("graph"));
+      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("graph"));
 
       rerender(<App />);
 
@@ -2182,7 +2196,7 @@ describe("App", () => {
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       // Start with table view
-      vi.mocked(useViewState).mockReturnValue(createViewStateReturn("table"));
+      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("table"));
 
       const { rerender } = render(<App />);
 
@@ -2190,7 +2204,7 @@ describe("App", () => {
       expect(screen.queryByTestId("monitor-dashboard")).not.toBeInTheDocument();
 
       // Switch to monitor view
-      vi.mocked(useViewState).mockReturnValue(createViewStateReturn("monitor"));
+      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("monitor"));
 
       rerender(<App />);
 
@@ -2205,7 +2219,7 @@ describe("App", () => {
     it('renders FileExplorer when activeView is "files"', async () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
-      vi.mocked(useViewState).mockReturnValue(createViewStateReturn("files"));
+      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("files"));
 
       render(<App />);
 
@@ -2217,7 +2231,7 @@ describe("App", () => {
     it('does not render FileExplorer when activeView is "kanban"', () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
-      vi.mocked(useViewState).mockReturnValue(createViewStateReturn("kanban"));
+      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("kanban"));
 
       render(<App />);
 
@@ -2246,7 +2260,7 @@ describe("App", () => {
       expect(button).toHaveAttribute("aria-pressed", "false");
     });
 
-    it("TalkToLeadButton click calls setActiveView with terminal", () => {
+    it("TalkToLeadButton click calls navigateToView with terminal", () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
@@ -2255,13 +2269,13 @@ describe("App", () => {
       const button = screen.getByTestId("talk-to-lead-button");
       fireEvent.click(button);
 
-      expect(mockSetActiveView).toHaveBeenCalledWith("terminal");
+      expect(mockNavigateToView).toHaveBeenCalledWith("terminal");
     });
 
     it("TalkToLeadButton shows active when view is terminal", () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
-      vi.mocked(useViewState).mockReturnValue(
+      vi.mocked(useRouteView).mockReturnValue(
         createViewStateReturn("terminal"),
       );
 
@@ -2296,7 +2310,7 @@ describe("App", () => {
     it("TerminalView wrapper has display:contents when view is terminal", () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
-      vi.mocked(useViewState).mockReturnValue(
+      vi.mocked(useRouteView).mockReturnValue(
         createViewStateReturn("terminal"),
       );
 
@@ -2310,7 +2324,7 @@ describe("App", () => {
     it("TerminalView receives isActive=true when view is terminal", () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
-      vi.mocked(useViewState).mockReturnValue(
+      vi.mocked(useRouteView).mockReturnValue(
         createViewStateReturn("terminal"),
       );
 
@@ -2330,68 +2344,48 @@ describe("App", () => {
       expect(terminalView).not.toHaveAttribute("data-active");
     });
 
-    describe("previousView tracking", () => {
-      it("escape from terminal returns to kanban", () => {
+    describe("terminal escape uses browser history", () => {
+      it("escape from terminal calls navigate(-1) when history is available", () => {
         const mockReturn = createMockUseIssuesReturn({});
         vi.mocked(useIssues).mockReturnValue(mockReturn);
-        mockUseViewState.mockReturnValue(createViewStateReturn("kanban"));
+        mockUseRouteView.mockReturnValue(createViewStateReturn("terminal"));
 
-        const { rerender } = render(<App />);
+        // Simulate browser with history entries
+        Object.defineProperty(window, "history", {
+          value: { length: 3 },
+          writable: true,
+          configurable: true,
+        });
 
-        mockUseViewState.mockReturnValue(createViewStateReturn("terminal"));
-        rerender(<App />);
+        render(<App />);
 
         fireEvent.click(screen.getByTestId("terminal-view"));
-        expect(mockSetActiveView).toHaveBeenCalledWith("kanban");
+        expect(mockNavigate).toHaveBeenCalledWith(-1);
+
+        // Restore
+        Object.defineProperty(window, "history", {
+          value: { length: 1 },
+          writable: true,
+          configurable: true,
+        });
       });
 
-      it("escape from terminal returns to table when entered from table", () => {
+      it("escape from terminal navigates to kanban when no history", () => {
         const mockReturn = createMockUseIssuesReturn({});
         vi.mocked(useIssues).mockReturnValue(mockReturn);
-        mockUseViewState.mockReturnValue(createViewStateReturn("table"));
+        mockUseRouteView.mockReturnValue(createViewStateReturn("terminal"));
 
-        const { rerender } = render(<App />);
+        // history.length <= 1 means no back entry
+        Object.defineProperty(window, "history", {
+          value: { length: 1 },
+          writable: true,
+          configurable: true,
+        });
 
-        mockUseViewState.mockReturnValue(createViewStateReturn("terminal"));
-        rerender(<App />);
-
-        fireEvent.click(screen.getByTestId("terminal-view"));
-        expect(mockSetActiveView).toHaveBeenCalledWith("table");
-      });
-
-      it("re-render on terminal does not change previousView", () => {
-        const mockReturn = createMockUseIssuesReturn({});
-        vi.mocked(useIssues).mockReturnValue(mockReturn);
-        mockUseViewState.mockReturnValue(createViewStateReturn("kanban"));
-
-        const { rerender } = render(<App />);
-
-        mockUseViewState.mockReturnValue(createViewStateReturn("terminal"));
-        rerender(<App />);
-        rerender(<App />);
+        render(<App />);
 
         fireEvent.click(screen.getByTestId("terminal-view"));
-        expect(mockSetActiveView).toHaveBeenCalledWith("kanban");
-      });
-
-      it("settings does not overwrite previousView", () => {
-        const mockReturn = createMockUseIssuesReturn({});
-        vi.mocked(useIssues).mockReturnValue(mockReturn);
-        mockUseViewState.mockReturnValue(createViewStateReturn("kanban"));
-
-        const { rerender } = render(<App />);
-
-        mockUseViewState.mockReturnValue(createViewStateReturn("terminal"));
-        rerender(<App />);
-
-        mockUseViewState.mockReturnValue(createViewStateReturn("settings"));
-        rerender(<App />);
-
-        mockUseViewState.mockReturnValue(createViewStateReturn("terminal"));
-        rerender(<App />);
-
-        fireEvent.click(screen.getByTestId("terminal-view"));
-        expect(mockSetActiveView).toHaveBeenCalledWith("kanban");
+        expect(mockNavigateToView).toHaveBeenCalledWith("kanban");
       });
     });
   });
@@ -2503,7 +2497,7 @@ describe("App", () => {
         createMockIssue({ id: "issue-1", title: "Test Issue", status: "open" }),
       ];
       // Set view to issue-detail with a different issue
-      mockUseViewState.mockReturnValue(
+      mockUseRouteView.mockReturnValue(
         createViewStateReturn("issue-detail", mockSetActiveView),
       );
       const mockReturn = createMockUseIssuesReturn({ issues });
@@ -2766,7 +2760,7 @@ describe("App", () => {
         }),
       );
       // Render in issue-detail view
-      vi.mocked(useViewState).mockReturnValue(
+      vi.mocked(useRouteView).mockReturnValue(
         createViewStateReturn("issue-detail"),
       );
 
@@ -2807,7 +2801,7 @@ describe("App", () => {
         }),
       );
       // Render in issue-detail view
-      vi.mocked(useViewState).mockReturnValue(
+      vi.mocked(useRouteView).mockReturnValue(
         createViewStateReturn("issue-detail"),
       );
 
@@ -2851,7 +2845,7 @@ describe("App", () => {
         }),
       );
       // Render in issue-detail view
-      vi.mocked(useViewState).mockReturnValue(
+      vi.mocked(useRouteView).mockReturnValue(
         createViewStateReturn("issue-detail"),
       );
 
@@ -2899,7 +2893,7 @@ describe("App", () => {
         }),
       );
       // Render in issue-detail view
-      vi.mocked(useViewState).mockReturnValue(
+      vi.mocked(useRouteView).mockReturnValue(
         createViewStateReturn("issue-detail"),
       );
 
@@ -2968,7 +2962,7 @@ describe("App", () => {
         }),
       );
       // Render in issue-detail view
-      vi.mocked(useViewState).mockReturnValue(
+      vi.mocked(useRouteView).mockReturnValue(
         createViewStateReturn("issue-detail"),
       );
 
@@ -3024,7 +3018,7 @@ describe("App", () => {
         }),
       );
       // Render in issue-detail view
-      vi.mocked(useViewState).mockReturnValue(
+      vi.mocked(useRouteView).mockReturnValue(
         createViewStateReturn("issue-detail"),
       );
 
@@ -3071,7 +3065,7 @@ describe("App", () => {
         }),
       );
       // Render in issue-detail view
-      vi.mocked(useViewState).mockReturnValue(
+      vi.mocked(useRouteView).mockReturnValue(
         createViewStateReturn("issue-detail"),
       );
 
@@ -3118,7 +3112,7 @@ describe("App", () => {
         sourceReposFilter: undefined,
         isMultiRepo: false,
       });
-      mockUseViewState.mockReturnValue(createViewStateReturn("workspace"));
+      mockUseRouteView.mockReturnValue(createViewStateReturn("workspace"));
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
@@ -3154,7 +3148,7 @@ describe("App", () => {
         sourceReposFilter: undefined,
         isMultiRepo: true,
       });
-      mockUseViewState.mockReturnValue(createViewStateReturn("workspace"));
+      mockUseRouteView.mockReturnValue(createViewStateReturn("workspace"));
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
@@ -3190,7 +3184,7 @@ describe("App", () => {
         sourceReposFilter: undefined,
         isMultiRepo: true,
       });
-      mockUseViewState.mockReturnValue(createViewStateReturn("kanban"));
+      mockUseRouteView.mockReturnValue(createViewStateReturn("kanban"));
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
@@ -3226,7 +3220,7 @@ describe("App", () => {
         sourceReposFilter: undefined,
         isMultiRepo: false,
       });
-      mockUseViewState.mockReturnValue(createViewStateReturn("workspace"));
+      mockUseRouteView.mockReturnValue(createViewStateReturn("workspace"));
       const mockReturn = createMockUseIssuesReturn({ isLoading: true });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
@@ -3260,7 +3254,7 @@ describe("App", () => {
         sourceReposFilter: undefined,
         isMultiRepo: true,
       });
-      mockUseViewState.mockReturnValue(createViewStateReturn("workspace"));
+      mockUseRouteView.mockReturnValue(createViewStateReturn("workspace"));
       const mockReturn = createMockUseIssuesReturn({ isLoading: true });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
@@ -3296,7 +3290,7 @@ describe("App", () => {
         sourceReposFilter: undefined,
         isMultiRepo: false,
       });
-      mockUseViewState.mockReturnValue(createViewStateReturn("workspace"));
+      mockUseRouteView.mockReturnValue(createViewStateReturn("workspace"));
       const mockReturn = createMockUseIssuesReturn({
         error: "Something went wrong",
         isLoading: false,
@@ -3335,7 +3329,7 @@ describe("App", () => {
         sourceReposFilter: undefined,
         isMultiRepo: false,
       });
-      mockUseViewState.mockReturnValue(createViewStateReturn("kanban"));
+      mockUseRouteView.mockReturnValue(createViewStateReturn("kanban"));
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
@@ -3373,7 +3367,7 @@ describe("App", () => {
         sourceReposFilter: undefined,
         isMultiRepo: true,
       });
-      mockUseViewState.mockReturnValue(createViewStateReturn("kanban"));
+      mockUseRouteView.mockReturnValue(createViewStateReturn("kanban"));
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
@@ -3414,7 +3408,7 @@ describe("App", () => {
         sourceReposFilter,
         isMultiRepo: true,
       });
-      mockUseViewState.mockReturnValue(createViewStateReturn("kanban"));
+      mockUseRouteView.mockReturnValue(createViewStateReturn("kanban"));
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
@@ -3452,7 +3446,7 @@ describe("App", () => {
         sourceReposFilter: undefined,
         isMultiRepo: true,
       });
-      mockUseViewState.mockReturnValue(createViewStateReturn("kanban"));
+      mockUseRouteView.mockReturnValue(createViewStateReturn("kanban"));
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
@@ -3491,7 +3485,7 @@ describe("App", () => {
         sourceReposFilter: ["repo-a", "repo-c"],
         isMultiRepo: true,
       });
-      mockUseViewState.mockReturnValue(createViewStateReturn("kanban"));
+      mockUseRouteView.mockReturnValue(createViewStateReturn("kanban"));
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 

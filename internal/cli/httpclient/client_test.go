@@ -12,13 +12,13 @@ import (
 	"time"
 )
 
-func TestDiscoverAuthMode_None(t *testing.T) {
+func TestDiscoverAuthMode_Open(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/config" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(AuthMode{Mode: "none"})
+		json.NewEncoder(w).Encode(AuthMode{Mode: "open"})
 	}))
 	defer srv.Close()
 
@@ -32,15 +32,15 @@ func TestDiscoverAuthMode_None(t *testing.T) {
 	}
 	defer c.Close()
 
-	if c.authMode.Mode != "none" {
-		t.Errorf("expected mode 'none', got %q", c.authMode.Mode)
+	if c.authMode.Mode != "open" {
+		t.Errorf("expected mode 'open', got %q", c.authMode.Mode)
 	}
 	if c.authMode.AuthURL != "" {
 		t.Errorf("expected empty auth_url, got %q", c.authMode.AuthURL)
 	}
 }
 
-func TestDiscoverAuthMode_External(t *testing.T) {
+func TestDiscoverAuthMode_OIDC(t *testing.T) {
 	// Auth service mock — must be created first so its URL can be embedded in /api/config.
 	authSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -70,7 +70,7 @@ func TestDiscoverAuthMode_External(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/config" {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(AuthMode{Mode: "external", AuthURL: authSrv.URL})
+			json.NewEncoder(w).Encode(AuthMode{Mode: "oidc", AuthURL: authSrv.URL})
 			return
 		}
 		t.Errorf("unexpected server path: %s", r.URL.Path)
@@ -89,8 +89,8 @@ func TestDiscoverAuthMode_External(t *testing.T) {
 	}
 	defer c.Close()
 
-	if c.authMode.Mode != "external" {
-		t.Errorf("expected mode 'external', got %q", c.authMode.Mode)
+	if c.authMode.Mode != "oidc" {
+		t.Errorf("expected mode 'oidc', got %q", c.authMode.Mode)
 	}
 	if c.authMode.AuthURL != authSrv.URL {
 		t.Errorf("expected auth_url %q, got %q", authSrv.URL, c.authMode.AuthURL)
@@ -142,7 +142,7 @@ func TestDoInjectsAuthHeader(t *testing.T) {
 
 	c := &Client{
 		serverURL:   backend.URL,
-		authMode:    &AuthMode{Mode: "external", AuthURL: "https://auth.example.com"},
+		authMode:    &AuthMode{Mode: "oidc", AuthURL: "https://auth.example.com"},
 		token:       "my-test-jwt",
 		tokenExpiry: time.Now().Add(10 * time.Minute),
 		httpClient:  http.DefaultClient,
@@ -160,7 +160,7 @@ func TestDoInjectsAuthHeader(t *testing.T) {
 	}
 }
 
-func TestDoNoAuthWhenModeNone(t *testing.T) {
+func TestDoNoAuthWhenModeOpen(t *testing.T) {
 	var gotAuth string
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
@@ -170,7 +170,7 @@ func TestDoNoAuthWhenModeNone(t *testing.T) {
 
 	c := &Client{
 		serverURL:  backend.URL,
-		authMode:   &AuthMode{Mode: "none"},
+		authMode:   &AuthMode{Mode: "open"},
 		httpClient: http.DefaultClient,
 	}
 
@@ -345,7 +345,7 @@ func TestDo401Retry(t *testing.T) {
 
 	c := &Client{
 		serverURL:   backend.URL,
-		authMode:    &AuthMode{Mode: "external", AuthURL: authSrv.URL},
+		authMode:    &AuthMode{Mode: "oidc", AuthURL: authSrv.URL},
 		token:       "stale-token",
 		tokenExpiry: time.Now().Add(10 * time.Minute),
 		httpClient:  http.DefaultClient,

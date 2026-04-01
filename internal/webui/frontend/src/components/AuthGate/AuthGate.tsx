@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 
 import { useAuth } from "@/contexts/AuthContext";
+import { AUTH_MODE_OIDC } from "@/api/appConfig";
 import { LoginPage } from "@/components/LoginPage";
 
 export function AuthGate({
@@ -41,7 +42,7 @@ export function AuthGate({
 
   if (isLoading) return null;
 
-  if (mode === "external" && !isAuthenticated) {
+  if (mode === AUTH_MODE_OIDC && !isAuthenticated) {
     return (
       <LoginPage error={oauthError} onErrorClear={() => setOauthError(null)} />
     );

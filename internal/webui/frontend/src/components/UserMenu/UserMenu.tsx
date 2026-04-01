@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 
 import { useAuth } from "@/contexts/AuthContext";
+import { AUTH_MODE_OIDC } from "@/api/appConfig";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 
 import styles from "./UserMenu.module.css";
@@ -65,7 +66,7 @@ export function UserMenu(): JSX.Element | null {
   }, [signOut]);
 
   // Self-gate: only render when mode=external and authenticated
-  if (mode !== "external" || !isAuthenticated || !user) {
+  if (mode !== AUTH_MODE_OIDC || !isAuthenticated || !user) {
     return null;
   }
 

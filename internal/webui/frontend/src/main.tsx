@@ -12,6 +12,7 @@ import { router } from "@/router";
 import {
   fetchAppConfig,
   AppConfigError,
+  AUTH_MODE_OIDC,
   type AppConfig,
 } from "@/api/appConfig";
 import { initExternalAuth } from "@/api/authClient";
@@ -49,7 +50,7 @@ function renderApp(config: AppConfig): void {
   const routerElement = <RouterProvider router={router} />;
 
   const authWrapped =
-    config.mode === "external" ? (
+    config.mode === AUTH_MODE_OIDC ? (
       <ExternalAuthProvider>
         <AuthGate>{routerElement}</AuthGate>
       </ExternalAuthProvider>
@@ -77,7 +78,7 @@ const BOOT_TIMEOUT_MS = 10_000;
 async function doBootAndRender(): Promise<void> {
   const config = await fetchAppConfig();
 
-  if (config.mode === "external") {
+  if (config.mode === AUTH_MODE_OIDC) {
     initExternalAuth(config.auth_url);
   }
 

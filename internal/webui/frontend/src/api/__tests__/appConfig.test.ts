@@ -45,18 +45,18 @@ describe("appConfig", () => {
     vi.restoreAllMocks();
   });
 
-  it("returns {mode:'none'} for none response", async () => {
-    global.fetch = vi.fn().mockResolvedValue(jsonResponse({ mode: "none" }));
+  it("returns {mode:'open'} for open response", async () => {
+    global.fetch = vi.fn().mockResolvedValue(jsonResponse({ mode: "open" }));
 
     const config = await fetchAppConfig();
 
-    expect(config).toEqual({ mode: "none" });
+    expect(config).toEqual({ mode: "open" });
   });
 
-  it("returns {mode:'external', auth_url} for external response", async () => {
+  it("returns {mode:'oidc', auth_url} for oidc response", async () => {
     global.fetch = vi.fn().mockResolvedValue(
       jsonResponse({
-        mode: "external",
+        mode: "oidc",
         auth_url: "https://auth.example.com",
       }),
     );
@@ -64,13 +64,13 @@ describe("appConfig", () => {
     const config = await fetchAppConfig();
 
     expect(config).toEqual({
-      mode: "external",
+      mode: "oidc",
       auth_url: "https://auth.example.com",
     });
   });
 
   it("caches result on success (fetch called once)", async () => {
-    global.fetch = vi.fn().mockResolvedValue(jsonResponse({ mode: "none" }));
+    global.fetch = vi.fn().mockResolvedValue(jsonResponse({ mode: "open" }));
 
     await fetchAppConfig();
     await fetchAppConfig();
@@ -85,20 +85,20 @@ describe("appConfig", () => {
     mockFetch.mockRejectedValueOnce(new TypeError("Network error"));
     await expect(fetchAppConfig()).rejects.toThrow(AppConfigError);
 
-    mockFetch.mockResolvedValueOnce(jsonResponse({ mode: "none" }));
+    mockFetch.mockResolvedValueOnce(jsonResponse({ mode: "open" }));
     const config = await fetchAppConfig();
 
-    expect(config).toEqual({ mode: "none" });
+    expect(config).toEqual({ mode: "open" });
     expect(mockFetch).toHaveBeenCalledTimes(2);
   });
 
   it("deduplicates concurrent calls", async () => {
-    global.fetch = vi.fn().mockResolvedValue(jsonResponse({ mode: "none" }));
+    global.fetch = vi.fn().mockResolvedValue(jsonResponse({ mode: "open" }));
 
     const [a, b] = await Promise.all([fetchAppConfig(), fetchAppConfig()]);
 
-    expect(a).toEqual({ mode: "none" });
-    expect(b).toEqual({ mode: "none" });
+    expect(a).toEqual({ mode: "open" });
+    expect(b).toEqual({ mode: "open" });
     expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
@@ -210,10 +210,8 @@ describe("appConfig", () => {
     ).rejects.toThrow("Unknown auth mode: magic");
   });
 
-  it("throws AppConfigError when external mode missing auth_url", async () => {
-    global.fetch = vi
-      .fn()
-      .mockResolvedValue(jsonResponse({ mode: "external" }));
+  it("throws AppConfigError when oidc mode missing auth_url", async () => {
+    global.fetch = vi.fn().mockResolvedValue(jsonResponse({ mode: "oidc" }));
 
     await expect(fetchAppConfig()).rejects.toThrow(AppConfigError);
     await expect(
@@ -222,20 +220,20 @@ describe("appConfig", () => {
         const mod = await import("../appConfig");
         global.fetch = vi
           .fn()
-          .mockResolvedValue(jsonResponse({ mode: "external" }));
+          .mockResolvedValue(jsonResponse({ mode: "oidc" }));
         return mod.fetchAppConfig();
       })(),
-    ).rejects.toThrow("External auth mode missing auth_url");
+    ).rejects.toThrow("OIDC auth mode missing auth_url");
   });
 
-  it("strips unexpected fields from none response", async () => {
+  it("strips unexpected fields from open response", async () => {
     global.fetch = vi
       .fn()
-      .mockResolvedValue(jsonResponse({ mode: "none", extra: "field" }));
+      .mockResolvedValue(jsonResponse({ mode: "open", extra: "field" }));
 
     const config = await fetchAppConfig();
 
-    expect(config).toEqual({ mode: "none" });
+    expect(config).toEqual({ mode: "open" });
     expect(config).not.toHaveProperty("extra");
   });
 });

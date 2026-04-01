@@ -29,8 +29,8 @@ func TestHandleAuthConfig_ExternalMode(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-	if resp.Mode != "external" {
-		t.Errorf("expected mode 'external', got %q", resp.Mode)
+	if resp.Mode != "oidc" {
+		t.Errorf("expected mode 'oidc', got %q", resp.Mode)
 	}
 	if resp.AuthURL != "https://auth.example.com" {
 		t.Errorf("expected auth_url 'https://auth.example.com', got %q", resp.AuthURL)
@@ -56,8 +56,8 @@ func TestHandleAuthConfig_NoneMode(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-	if resp.Mode != "none" {
-		t.Errorf("expected mode 'none', got %q", resp.Mode)
+	if resp.Mode != "open" {
+		t.Errorf("expected mode 'open', got %q", resp.Mode)
 	}
 }
 

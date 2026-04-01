@@ -9,13 +9,15 @@ import (
 	"time"
 
 	"golang.org/x/time/rate"
+
+	"github.com/tysonthomas9/loomcli/internal/authmode"
 )
 
 // authConfigResponse is the JSON response for GET /api/config.
 // It tells clients which authentication mode the server is running.
 type authConfigResponse struct {
-	Mode    string `json:"mode"`               // "none" or "external"
-	AuthURL string `json:"auth_url,omitempty"` // Better Auth service base URL for OAuth redirects (only when mode is "external")
+	Mode    string `json:"mode"`               // "open" or "oidc"
+	AuthURL string `json:"auth_url,omitempty"` // Better Auth service base URL for OAuth redirects (only when mode is "oidc")
 }
 
 // authConfigLimiter is a per-IP token bucket rate limiter for GET /api/config.
@@ -106,12 +108,12 @@ func handleAuthConfig(extAuthURL string, limiter *authConfigLimiter) http.Handle
 	var resp authConfigResponse
 	if extAuthURL != "" {
 		resp = authConfigResponse{
-			Mode:    "external",
+			Mode:    authmode.ModeOIDC,
 			AuthURL: extAuthURL,
 		}
 	} else {
 		resp = authConfigResponse{
-			Mode: "none",
+			Mode: authmode.ModeOpen,
 		}
 	}
 
@@ -128,7 +130,7 @@ func handleAuthConfig(extAuthURL string, limiter *authConfigLimiter) http.Handle
 		}
 
 		// SECURITY: no-store prevents caching that could enable downgrade attacks.
-		// An attacker who poisons a cached response with mode:"none" would bypass
+		// An attacker who poisons a cached response with mode:"open" would bypass
 		// auth for the cache lifetime. no-store ensures every page load fetches fresh.
 		w.Header().Set("Cache-Control", "no-store")
 		respondJSON(w, http.StatusOK, resp)

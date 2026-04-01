@@ -31,7 +31,7 @@ vi.mock("@/components/LoginPage", () => ({
 
 function defaultAuth(overrides: Record<string, unknown> = {}) {
   return {
-    mode: "external" as const,
+    mode: "oidc" as const,
     isLoading: false,
     isAuthenticated: false,
     authServiceDown: false,
@@ -70,9 +70,9 @@ describe("AuthGate", () => {
       expect(container.innerHTML).toBe("");
     });
 
-    it("renders LoginPage when mode=external and not authenticated", () => {
+    it("renders LoginPage when mode=oidc and not authenticated", () => {
       mockUseAuth.mockReturnValue(
-        defaultAuth({ mode: "external", isAuthenticated: false }),
+        defaultAuth({ mode: "oidc", isAuthenticated: false }),
       );
       render(
         <AuthGate>
@@ -85,7 +85,7 @@ describe("AuthGate", () => {
 
     it("renders children when authenticated", () => {
       mockUseAuth.mockReturnValue(
-        defaultAuth({ mode: "external", isAuthenticated: true }),
+        defaultAuth({ mode: "oidc", isAuthenticated: true }),
       );
       render(
         <AuthGate>
@@ -96,9 +96,9 @@ describe("AuthGate", () => {
       expect(screen.queryByTestId("login-page")).not.toBeInTheDocument();
     });
 
-    it("renders children when mode=none regardless of auth state", () => {
+    it("renders children when mode=open regardless of auth state", () => {
       mockUseAuth.mockReturnValue(
-        defaultAuth({ mode: "none", isAuthenticated: false }),
+        defaultAuth({ mode: "open", isAuthenticated: false }),
       );
       render(
         <AuthGate>
@@ -115,7 +115,7 @@ describe("AuthGate", () => {
     it("extracts error from URL query params and passes to LoginPage", () => {
       window.history.replaceState({}, "", "/?error=access_denied");
       mockUseAuth.mockReturnValue(
-        defaultAuth({ mode: "external", isAuthenticated: false }),
+        defaultAuth({ mode: "oidc", isAuthenticated: false }),
       );
       render(
         <AuthGate>
@@ -129,7 +129,7 @@ describe("AuthGate", () => {
     it("cleans error from URL after extraction", () => {
       window.history.replaceState({}, "", "/app?error=denied");
       mockUseAuth.mockReturnValue(
-        defaultAuth({ mode: "external", isAuthenticated: false }),
+        defaultAuth({ mode: "oidc", isAuthenticated: false }),
       );
       render(
         <AuthGate>
@@ -142,7 +142,7 @@ describe("AuthGate", () => {
     it("handles missing error param gracefully", () => {
       window.history.replaceState({}, "", "/");
       mockUseAuth.mockReturnValue(
-        defaultAuth({ mode: "external", isAuthenticated: false }),
+        defaultAuth({ mode: "oidc", isAuthenticated: false }),
       );
       render(
         <AuthGate>
@@ -160,7 +160,7 @@ describe("AuthGate", () => {
     it("restores valid returnTo path after login", () => {
       sessionStorage.setItem("loom-auth-return-to", "/issues/123");
       mockUseAuth.mockReturnValue(
-        defaultAuth({ mode: "external", isAuthenticated: true }),
+        defaultAuth({ mode: "oidc", isAuthenticated: true }),
       );
       render(
         <AuthGate>
@@ -176,7 +176,7 @@ describe("AuthGate", () => {
         "https://evil.com/redirect",
       );
       mockUseAuth.mockReturnValue(
-        defaultAuth({ mode: "external", isAuthenticated: true }),
+        defaultAuth({ mode: "oidc", isAuthenticated: true }),
       );
       render(
         <AuthGate>
@@ -192,7 +192,7 @@ describe("AuthGate", () => {
     it("rejects returnTo not starting with /", () => {
       sessionStorage.setItem("loom-auth-return-to", "evil.com/path");
       mockUseAuth.mockReturnValue(
-        defaultAuth({ mode: "external", isAuthenticated: true }),
+        defaultAuth({ mode: "oidc", isAuthenticated: true }),
       );
       render(
         <AuthGate>
@@ -207,7 +207,7 @@ describe("AuthGate", () => {
     it("clears sessionStorage entry after reading", () => {
       sessionStorage.setItem("loom-auth-return-to", "/dashboard");
       mockUseAuth.mockReturnValue(
-        defaultAuth({ mode: "external", isAuthenticated: true }),
+        defaultAuth({ mode: "oidc", isAuthenticated: true }),
       );
       render(
         <AuthGate>
@@ -224,7 +224,7 @@ describe("AuthGate", () => {
           throw new Error("SecurityError");
         });
       mockUseAuth.mockReturnValue(
-        defaultAuth({ mode: "external", isAuthenticated: true }),
+        defaultAuth({ mode: "oidc", isAuthenticated: true }),
       );
 
       // Should not throw
@@ -242,7 +242,7 @@ describe("AuthGate", () => {
     it("processes returnTo only once on re-render", () => {
       sessionStorage.setItem("loom-auth-return-to", "/settings");
       mockUseAuth.mockReturnValue(
-        defaultAuth({ mode: "external", isAuthenticated: true }),
+        defaultAuth({ mode: "oidc", isAuthenticated: true }),
       );
       const { rerender } = render(
         <AuthGate>

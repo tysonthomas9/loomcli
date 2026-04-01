@@ -365,7 +365,7 @@ describe("AuthContext", () => {
 
       const { result } = renderHook(() => mod.useAuth(), { wrapper });
 
-      expect(result.current.mode).toBe("none");
+      expect(result.current.mode).toBe("open");
       expect(result.current.user).toBeNull();
       expect(result.current.isLoading).toBe(false);
       expect(result.current.isAuthenticated).toBe(true);

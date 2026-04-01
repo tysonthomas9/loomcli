@@ -43,7 +43,7 @@ const mockUseAuth = vi.mocked(useAuth);
 // Helpers
 // ---------------------------------------------------------------------------
 
-type AuthMode = "none" | "external";
+type AuthMode = "open" | "oidc";
 
 interface MockUser {
   id: string;
@@ -59,7 +59,7 @@ function buildAuthState(overrides?: {
   signOut?: () => Promise<void>;
 }) {
   return {
-    mode: overrides?.mode ?? "external",
+    mode: overrides?.mode ?? "oidc",
     user:
       overrides?.user !== undefined
         ? overrides.user
@@ -95,7 +95,7 @@ beforeEach(() => {
 
 describe("UserMenu — self-gating (returns null)", () => {
   it("returns null when mode is 'none'", () => {
-    mockUseAuth.mockReturnValue(buildAuthState({ mode: "none" }));
+    mockUseAuth.mockReturnValue(buildAuthState({ mode: "open" }));
     const { container } = render(<UserMenu />);
     expect(container.firstChild).toBeNull();
   });

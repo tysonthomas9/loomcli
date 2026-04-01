@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/authmode"
 )
 
 // Config holds the parameters needed to create an authenticated client.
@@ -20,8 +22,8 @@ type Config struct {
 
 // AuthMode represents the server's authentication configuration.
 type AuthMode struct {
-	Mode    string `json:"mode"`               // "none" or "external"
-	AuthURL string `json:"auth_url,omitempty"` // Better Auth service URL (when mode is "external")
+	Mode    string `json:"mode"`               // "open" or "oidc"
+	AuthURL string `json:"auth_url,omitempty"` // Better Auth service URL (when mode is "oidc")
 }
 
 // Client wraps http.Client with automatic auth discovery and token injection.
@@ -51,7 +53,7 @@ func New(cfg Config) (*Client, error) {
 	}
 	c.authMode = authMode
 
-	if authMode.Mode == "external" {
+	if authMode.Mode == authmode.ModeOIDC {
 		if err := c.ensureToken(); err != nil {
 			return nil, err
 		}
@@ -65,7 +67,7 @@ func New(cfg Config) (*Client, error) {
 // On 401 response, it clears the cached token, re-authenticates, and retries once.
 func (c *Client) Do(req *http.Request) (*http.Response, error) {
 	c.mu.Lock()
-	if c.authMode.Mode == "external" {
+	if c.authMode.Mode == authmode.ModeOIDC {
 		if err := c.ensureToken(); err != nil {
 			c.mu.Unlock()
 			return nil, err
@@ -80,7 +82,7 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 	}
 
 	// On 401, clear cache and retry once.
-	if resp.StatusCode == http.StatusUnauthorized && c.authMode.Mode == "external" {
+	if resp.StatusCode == http.StatusUnauthorized && c.authMode.Mode == authmode.ModeOIDC {
 		resp.Body.Close()
 
 		// Reset request body for retry. If the original request had a body
@@ -143,7 +145,7 @@ func (c *Client) discoverAuthMode() (*AuthMode, error) {
 		return nil, fmt.Errorf("parsing /api/config response: %w", err)
 	}
 
-	if mode.Mode != "none" && mode.Mode != "external" {
+	if !authmode.Valid(mode.Mode) {
 		return nil, fmt.Errorf("unsupported auth mode %q from server (client may need updating)", mode.Mode)
 	}
 

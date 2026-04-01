@@ -38,7 +38,7 @@ vi.mock("@/hooks", () => ({
 
 function defaultAuth(overrides: Record<string, unknown> = {}) {
   return {
-    mode: "external" as const,
+    mode: "oidc" as const,
     isLoading: false,
     isAuthenticated: false,
     authServiceDown: false,

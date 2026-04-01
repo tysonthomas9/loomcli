@@ -10,6 +10,7 @@ import {
 
 import { getAuthClient } from "@/api/authClient";
 import { setAuthToken, setAuthState } from "@/api";
+import { AUTH_MODE_OPEN, AUTH_MODE_OIDC, type AuthMode } from "@/api/appConfig";
 
 // ============= Types =============
 
@@ -22,7 +23,7 @@ type AuthUser = {
 
 type AuthContextValue = {
   /** Auth mode from server config */
-  mode: "none" | "external";
+  mode: AuthMode;
   /** Authenticated user, null if not logged in or mode='none' */
   user: AuthUser | null;
   /** True while session is being determined (initial load or refresh) */
@@ -180,7 +181,7 @@ export function ExternalAuthProvider({
   }, []);
 
   const value: AuthContextValue = {
-    mode: "external",
+    mode: AUTH_MODE_OIDC,
     user,
     isLoading: isPending,
     isAuthenticated: !!session?.user,
@@ -195,7 +196,7 @@ export function ExternalAuthProvider({
 // ============= NoAuthProvider =============
 
 const NO_AUTH_VALUE: AuthContextValue = {
-  mode: "none",
+  mode: AUTH_MODE_OPEN,
   user: null,
   isLoading: false,
   isAuthenticated: true,

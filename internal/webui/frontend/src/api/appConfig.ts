@@ -7,11 +7,18 @@
  * The check-no-raw-fetch linter excludes src/api/ via EXCLUDE_DIRS.
  */
 
+// ============= Constants =============
+
+export const AUTH_MODE_OPEN = "open" as const;
+export const AUTH_MODE_OIDC = "oidc" as const;
+
+export type AuthMode = typeof AUTH_MODE_OPEN | typeof AUTH_MODE_OIDC;
+
 // ============= Types =============
 
 export type AppConfig =
-  | { mode: "none" }
-  | { mode: "external"; auth_url: string };
+  | { mode: typeof AUTH_MODE_OPEN }
+  | { mode: typeof AUTH_MODE_OIDC; auth_url: string };
 
 export class AppConfigError extends Error {
   constructor(
@@ -60,16 +67,16 @@ async function doFetch(): Promise<AppConfig> {
 
     const { mode } = data;
 
-    if (mode === "none") {
-      return { mode: "none" };
+    if (mode === AUTH_MODE_OPEN) {
+      return { mode: AUTH_MODE_OPEN };
     }
 
-    if (mode === "external") {
+    if (mode === AUTH_MODE_OIDC) {
       const authUrl = data.auth_url;
       if (typeof authUrl !== "string" || authUrl === "") {
-        throw new AppConfigError("External auth mode missing auth_url");
+        throw new AppConfigError("OIDC auth mode missing auth_url");
       }
-      return { mode: "external", auth_url: authUrl };
+      return { mode: AUTH_MODE_OIDC, auth_url: authUrl };
     }
 
     throw new AppConfigError(`Unknown auth mode: ${mode}`);
@@ -97,7 +104,7 @@ async function doFetch(): Promise<AppConfig> {
  * calls. Resets cache on failure so retry is possible on refresh.
  *
  * SECURITY: Fails closed — errors throw AppConfigError, never default to
- * {mode:'none'}. The caller must catch and show an error page.
+ * {mode:'open'}. The caller must catch and show an error page.
  */
 export async function fetchAppConfig(): Promise<AppConfig> {
   if (configPromise) return configPromise;
