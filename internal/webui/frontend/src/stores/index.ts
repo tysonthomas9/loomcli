@@ -11,3 +11,15 @@ export type {
   IssueStoreConfig,
   SubscribeFn,
 } from "./issueStore";
+
+export {
+  createAgentStore,
+  INITIAL_STATE as AGENT_INITIAL_STATE,
+} from "./agentStore";
+export type {
+  AgentStoreState,
+  AgentStoreActions,
+  AgentStore,
+  AgentStoreConfig,
+  PollingOptions,
+} from "./agentStore";
