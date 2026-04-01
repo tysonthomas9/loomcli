@@ -187,7 +187,18 @@ func handleScheduleSessionKill(manager *TerminalManager) http.HandlerFunc {
 			return
 		}
 
-		manager.ScheduleKill(session, sessionKillGracePeriod)
+		if r.URL.Query().Get("force") == "true" {
+			// Force kill: close all connections and destroy the tmux session immediately.
+			if err := manager.KillSessionByName(session); err != nil {
+				respondJSON(w, http.StatusInternalServerError, map[string]interface{}{
+					"success": false,
+					"error":   err.Error(),
+				})
+				return
+			}
+		} else {
+			manager.ScheduleKill(session, sessionKillGracePeriod)
+		}
 
 		respondJSON(w, http.StatusOK, map[string]interface{}{
 			"success": true,

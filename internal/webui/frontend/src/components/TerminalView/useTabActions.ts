@@ -10,6 +10,8 @@ import {
   type MutableRefObject,
 } from "react";
 
+import { scheduleSessionKill } from "@/api/terminal";
+
 import type {
   ConnectionState,
   TerminalInstanceHandle,
@@ -52,6 +54,11 @@ export function useTabActions({
       const sourceTab = tabs.find((t) => t.id === tabId);
       if (!sourceTab || tabs.length <= 1) return;
       const sessionNameToDelete = sourceTab.sessionName;
+
+      // Get handle before removing from refs — we need it for disconnect().
+      const handle = instanceRefs.current.get(tabId);
+
+      // Immediately update UI — tab disappears.
       setTabs((prev) => {
         if (prev.length <= 1) return prev;
         const idx = prev.findIndex((t) => t.id === tabId);
@@ -69,12 +76,32 @@ export function useTabActions({
         return next;
       });
       instanceRefs.current.delete(tabId);
+
+      // Delete tab metadata from Redis.
       deleteTab(sessionNameToDelete).catch((err) =>
         console.error(
           `Failed to delete tab metadata ${sessionNameToDelete}:`,
           err,
         ),
       );
+
+      // Gracefully disconnect WS, then kill the tmux session.
+      // disconnect() sets beingKilledRef to block reconnect, closes the WS,
+      // and resolves when ws.onclose fires (or after 2s timeout).
+      // The backend tombstone (killingSet) prevents any stray reconnect from
+      // recreating the session.
+      const doKill = () =>
+        scheduleSessionKill("", sessionNameToDelete, true).catch((err) =>
+          console.error(
+            `Failed to kill session ${sessionNameToDelete}:`,
+            err,
+          ),
+        );
+      if (handle?.disconnect) {
+        handle.disconnect().then(doKill);
+      } else {
+        doKill();
+      }
     },
     [deleteTab, tabs, setTabs, setActiveTabId, activeTabIdRef, instanceRefs],
   );

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/creack/pty"
 
@@ -37,9 +38,10 @@ var validSessionName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 type TerminalSession struct {
 	ConnID  string   // unique connection ID (e.g., "talk-to-lead:1")
 	Name    string   // tmux session name (e.g., "talk-to-lead")
-	Command string   // command running in the session
-	PTY     *os.File // PTY master fd from creack/pty
+	Command string        // command running in the session
+	PTY     *os.File      // PTY master fd from creack/pty
 	cmd     *exec.Cmd
+	killCh  chan struct{}  // closed by KillSessionByName to signal WS handlers
 	mu      sync.Mutex
 	closed  bool
 }
@@ -72,12 +74,16 @@ func (s *TerminalSession) Close() error {
 // connections when no explicit limit is configured.
 const defaultMaxTerminalSessions = 20
 
+// ErrSessionBeingKilled is returned by Attach when a session is in the killing set.
+var ErrSessionBeingKilled = errors.New("session is being killed")
+
 // TerminalManager manages tmux session lifecycles.
 // Multiple WebSocket connections can attach to the same tmux session simultaneously,
 // each tracked by a unique connection ID.
 type TerminalManager struct {
 	sessions           map[string]*TerminalSession   // keyed by connection ID
 	pendingKills       map[string]context.CancelFunc // deferred session kills, guarded by mu
+	killingSet         map[string]time.Time          // sessions being killed (user-initiated), tombstone with timestamp
 	scrollbackBuffers  map[string]*ScrollbackBuffer  // keyed by tmux session name (internal)
 	mu                 sync.RWMutex
 	tmuxPath           string
@@ -107,6 +113,7 @@ func NewTerminalManager(defaultCommand, sessionPrefix string, maxSessions int) (
 	return &TerminalManager{
 		sessions:           make(map[string]*TerminalSession),
 		pendingKills:       make(map[string]context.CancelFunc),
+		killingSet:         make(map[string]time.Time),
 		scrollbackBuffers:  make(map[string]*ScrollbackBuffer),
 		tmuxPath:           tmuxPath,
 		sessionPrefix:      sessionPrefix,
@@ -171,11 +178,10 @@ func (m *TerminalManager) tmuxNewSession(name, command string, cols, rows uint16
 // tmuxAttach spawns a tmux attach-session process with a PTY.
 func (m *TerminalManager) tmuxAttach(name string) (*exec.Cmd, *os.File, error) {
 	cmd := exec.Command(m.tmuxPath, "attach-session", "-t", name)
-	// Ensure TERM is set to a capable terminal type so tmux can operate.
-	// With TERM unset or set to "dumb", tmux 3.6+ exits immediately with status 1.
-	if term := os.Getenv("TERM"); term == "" || term == "dumb" {
-		cmd.Env = append(os.Environ(), "TERM=xterm-256color")
-	}
+	// Always set TERM to a capable terminal type for the subprocess.
+	// tmux 3.6+ exits immediately with "open terminal failed" when TERM is
+	// unset, "dumb", "unknown", or any other value it doesn't recognise.
+	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
 		return nil, nil, fmt.Errorf("pty.Start tmux attach: %w", err)
@@ -215,6 +221,14 @@ func (m *TerminalManager) Attach(name, command string, cols, rows uint16) (*Term
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// Reject attach if session is being killed (tombstone, 30s TTL).
+	if killTime, beingKilled := m.killingSet[name]; beingKilled {
+		if time.Since(killTime) < 30*time.Second {
+			return nil, ErrSessionBeingKilled
+		}
+		delete(m.killingSet, name)
+	}
+
 	// Enforce concurrent session limit.
 	if m.maxSessions > 0 && len(m.sessions) >= m.maxSessions {
 		return nil, ErrMaxSessionsReached
@@ -246,6 +260,7 @@ func (m *TerminalManager) Attach(name, command string, cols, rows uint16) (*Term
 		Command: command,
 		PTY:     ptmx,
 		cmd:     cmd,
+		killCh:  make(chan struct{}),
 	}
 	m.sessions[connID] = session
 	return session, nil
@@ -269,6 +284,15 @@ func (m *TerminalManager) AttachExistingRaw(tmuxSessionName string, cols, rows u
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// Reject attach if session is being killed (tombstone).
+	// AttachExistingRaw uses raw names, so check both with and without prefix.
+	if killTime, beingKilled := m.killingSet[tmuxSessionName]; beingKilled {
+		if time.Since(killTime) < 30*time.Second {
+			return nil, ErrSessionBeingKilled
+		}
+		delete(m.killingSet, tmuxSessionName)
+	}
 
 	if m.maxSessions > 0 && len(m.sessions) >= m.maxSessions {
 		return nil, ErrMaxSessionsReached
@@ -300,6 +324,7 @@ func (m *TerminalManager) AttachExistingRaw(tmuxSessionName string, cols, rows u
 		Name:   tmuxSessionName,
 		PTY:    ptmx,
 		cmd:    cmd,
+		killCh: make(chan struct{}),
 	}
 	m.sessions[connID] = session
 	return session, nil

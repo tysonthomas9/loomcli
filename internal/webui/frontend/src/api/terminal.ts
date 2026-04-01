@@ -287,14 +287,17 @@ export async function deleteTabMetadata(
 /**
  * Schedule a deferred tmux session kill with grace period.
  * POST /api/terminal/sessions/{session}/kill
+ * Pass force=true to kill immediately (for explicit user close).
  */
 // TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export async function scheduleSessionKill(
   _workspaceId: string,
   sessionName: string,
+  force = false,
 ): Promise<void> {
+  const qs = force ? "?force=true" : "";
   await post<{ success: boolean }>(
-    `/api/terminal/sessions/${encodeURIComponent(sessionName)}/kill`,
+    `/api/terminal/sessions/${encodeURIComponent(sessionName)}/kill${qs}`, // allow-url
     {},
   );
 }

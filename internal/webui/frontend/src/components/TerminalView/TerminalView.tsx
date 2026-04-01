@@ -795,10 +795,10 @@ export function TerminalView({
   // This prevents the popup from blocking the terminal on first visit when
   // sessions are already running from a previous page load.
   useEffect(() => {
-    if (!dismissedWelcome && !metaLoading && tabMetadata.length > 0) {
+    if (!dismissedWelcome && !metaLoading && tabMetadata && tabMetadata.length > 0) {
       handleDismissWelcome();
     }
-  }, [dismissedWelcome, metaLoading, tabMetadata.length, handleDismissWelcome]);
+  }, [dismissedWelcome, metaLoading, tabMetadata?.length, handleDismissWelcome]);
 
   const handleToggleHelp = useCallback(() => {
     setIsHelpOpen((prev) => !prev);
@@ -1008,20 +1008,27 @@ export function TerminalView({
                 data-testid="split-container"
               >
                 <div className={styles.splitPaneLeft}>
-                  {tabs.map((tab) => (
+                  {tabs.map((tab) => {
+                    const active = tab.id === activeTabId;
+                    return (
                     <div
                       key={tab.id}
                       className={styles.terminalPaneSplit}
                       style={{
-                        display: tab.id === activeTabId ? "flex" : "none",
+                        visibility: active ? "visible" : "hidden",
+                        position: active ? "relative" : "absolute",
+                        inset: active ? undefined : 0,
                       }}
                       role="tabpanel"
+                      aria-hidden={!active}
+                      {...(!active && { inert: "" })}
                       id={`terminal-panel-${tab.id}`}
                       aria-labelledby={`terminal-tab-${tab.id}`}
                     >
                       {renderTerminalPane(tab, "left")}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
                 <SplitDivider
                   onRatioChange={handleSplitRatioChange}
@@ -1038,36 +1045,50 @@ export function TerminalView({
                     rightPaneTabId={rightPaneTabId}
                     onTabChange={handleRightPaneTabChange}
                   />
-                  {tabs.map((tab) => (
+                  {tabs.map((tab) => {
+                    const active = tab.id === rightPaneTabId;
+                    return (
                     <div
                       key={tab.id}
                       className={styles.terminalPaneSplit}
                       style={{
-                        display: tab.id === rightPaneTabId ? "flex" : "none",
+                        visibility: active ? "visible" : "hidden",
+                        position: active ? "relative" : "absolute",
+                        inset: active ? undefined : 0,
                       }}
                       role="tabpanel"
+                      aria-hidden={!active}
+                      {...(!active && { inert: "" })}
                       id={`terminal-panel-right-${tab.id}`}
                     >
                       {renderTerminalPane(tab, "right")}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             ) : (
-              tabs.map((tab) => (
-                <div
-                  key={tab.id}
-                  className={styles.terminalPane}
-                  style={{
-                    display: tab.id === activeTabId ? "flex" : "none",
-                  }}
-                  role="tabpanel"
-                  id={`terminal-panel-${tab.id}`}
-                  aria-labelledby={`terminal-tab-${tab.id}`}
-                >
-                  {renderTerminalPane(tab, null)}
-                </div>
-              ))
+              tabs.map((tab) => {
+                const active = tab.id === activeTabId;
+                return (
+                  <div
+                    key={tab.id}
+                    className={styles.terminalPane}
+                    style={{
+                      visibility: active ? "visible" : "hidden",
+                      position: active ? "relative" : "absolute",
+                      inset: active ? undefined : 0,
+                    }}
+                    role="tabpanel"
+                    aria-hidden={!active}
+                    {...(!active && { inert: "" })}
+                    id={`terminal-panel-${tab.id}`}
+                    aria-labelledby={`terminal-tab-${tab.id}`}
+                  >
+                    {renderTerminalPane(tab, null)}
+                  </div>
+                );
+              })
             )}
           </div>
           {isSearchOpen && (

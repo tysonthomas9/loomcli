@@ -55,6 +55,10 @@ func handleListTerminalTabs(store *tabmeta.Store, manager *TerminalManager) http
 			return
 		}
 
+		// Ensure non-nil slice so JSON serializes as [] not null.
+		if tabs == nil {
+			tabs = []tabmeta.TabMetadata{}
+		}
 		respondJSON(w, http.StatusOK, tabMetadataResponse{
 			Success: true,
 			Data:    tabs,

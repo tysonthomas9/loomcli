@@ -25,11 +25,32 @@ func shellCommand() string {
 	return "/bin/bash"
 }
 
-// attachCommandForSession returns the shell command for plain terminal tabs,
-// or empty string (use manager's defaultCommand) for AI backend sessions.
+// attachCommandForSession returns the command for a terminal session based on
+// its name. Session names encode the backend: "lead-{backend}-{n}".
+// Returns empty string to use the manager's defaultCommand only if no backend
+// can be extracted from the session name.
 func attachCommandForSession(session string) string {
 	if strings.HasPrefix(session, "lead-shell-") {
 		return shellCommand()
+	}
+	// Extract backend from "lead-{backend}-{n}" pattern.
+	// Session names may have a workspace prefix: "ws--lead-{backend}-{n}".
+	name := session
+	if idx := strings.LastIndex(name, "--lead-"); idx >= 0 {
+		name = name[idx+2:] // strip workspace prefix, keep "lead-..."
+	}
+	if strings.HasPrefix(name, "lead-") {
+		// "lead-codex-1" → "codex"
+		rest := strings.TrimPrefix(name, "lead-")
+		// Strip trailing "-{n}" (the counter)
+		if dashIdx := strings.LastIndex(rest, "-"); dashIdx > 0 {
+			backend := rest[:dashIdx]
+			for _, valid := range validBackends {
+				if backend == valid {
+					return fmt.Sprintf("loom lead --backend %s", backend)
+				}
+			}
+		}
 	}
 	return ""
 }

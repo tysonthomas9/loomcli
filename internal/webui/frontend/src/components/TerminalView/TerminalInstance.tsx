@@ -92,6 +92,8 @@ export interface TerminalInstanceProps {
 }
 
 export interface TerminalInstanceHandle {
+  /** Gracefully disconnect the WebSocket and cancel reconnect. Returns when WS is closed. */
+  disconnect: () => Promise<void>;
   search: (
     term: string,
     options?: {
@@ -142,6 +144,7 @@ export const TerminalInstance = forwardRef<
   const wsRef = useRef<WebSocket | null>(null);
   const wsCleanupRef = useRef<(() => void) | null>(null);
   const reconnectCancelRef = useRef<(() => void) | null>(null);
+  const beingKilledRef = useRef(false);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -225,6 +228,7 @@ export const TerminalInstance = forwardRef<
           clearReconnectState();
         },
         () => {
+          if (beingKilledRef.current) return; // user closed tab — don't reconnect
           if (reconnectCancelRef.current) return;
           const reconnectConfig = hasConnectedRef.current
             ? undefined
@@ -250,6 +254,7 @@ export const TerminalInstance = forwardRef<
         (reason: string) => onBackendCrashRef.current?.(reason),
         (data, sendToWs) => interceptorRef.current?.handleData(data, sendToWs),
         agentName,
+        () => { beingKilledRef.current = true; }, // onSessionKilled (code 4002)
       );
       wsCleanupRef.current = cleanupWs;
     };
@@ -273,6 +278,23 @@ export const TerminalInstance = forwardRef<
   useImperativeHandle(
     ref,
     () => ({
+      disconnect() {
+        beingKilledRef.current = true;
+        reconnectCancelRef.current?.();
+        reconnectCancelRef.current = null;
+        const ws = wsRef.current;
+        if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+          return new Promise<void>((resolve) => {
+            const timeout = setTimeout(resolve, 2000); // fallback if close hangs
+            ws.addEventListener("close", () => { clearTimeout(timeout); resolve(); }, { once: true });
+            wsCleanupRef.current?.();
+            wsCleanupRef.current = null;
+          });
+        }
+        wsCleanupRef.current?.();
+        wsCleanupRef.current = null;
+        return Promise.resolve();
+      },
       search(term, options) {
         const addon = searchAddonRef.current;
         if (!addon) return false;
@@ -415,6 +437,28 @@ export const TerminalInstance = forwardRef<
       },
     );
 
+    // Clipboard helper: async API with execCommand fallback for HTTP contexts.
+    // Resolves to true if copy succeeded, false otherwise.
+    function writeToClipboard(text: string): Promise<boolean> {
+      if (navigator.clipboard?.writeText) {
+        return navigator.clipboard.writeText(text).then(() => true).catch(() => execCommandCopy(text));
+      }
+      return Promise.resolve(execCommandCopy(text));
+    }
+    function execCommandCopy(text: string): boolean {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      try {
+        ta.select();
+        return document.execCommand("copy");
+      } finally {
+        document.body.removeChild(ta);
+      }
+    }
+
     // Copy-on-select: strip ANSI codes and write clean text to clipboard
     let copyDebounce: ReturnType<typeof setTimeout> | undefined;
     let suppressCopyOnSelect = false;
@@ -428,10 +472,7 @@ export const TerminalInstance = forwardRef<
       const clean = stripAnsi(text);
       clearTimeout(copyDebounce);
       copyDebounce = setTimeout(() => {
-        navigator.clipboard
-          .writeText(clean)
-          .then(() => onCopyNotifyRef.current?.())
-          .catch(() => {});
+        writeToClipboard(clean).then((ok) => { if (ok) onCopyNotifyRef.current?.(); });
       }, 100);
     });
 
@@ -450,10 +491,7 @@ export const TerminalInstance = forwardRef<
         if (terminal.hasSelection()) {
           clearTimeout(copyDebounce); // cancel pending copy-on-select debounce
           const clean = stripAnsi(terminal.getSelection());
-          navigator.clipboard
-            .writeText(clean)
-            .then(() => onCopyNotifyRef.current?.())
-            .catch(() => {});
+          writeToClipboard(clean).then((ok) => { if (ok) onCopyNotifyRef.current?.(); });
           terminal.clearSelection();
           return false; // suppress SIGINT
         }
@@ -468,9 +506,13 @@ export const TerminalInstance = forwardRef<
         !e.metaKey &&
         e.key === "v"
       ) {
-        e.preventDefault();
-        onPasteRequestRef.current?.();
-        return false;
+        if (window.isSecureContext) {
+          e.preventDefault();
+          onPasteRequestRef.current?.();
+          return false;
+        }
+        // Non-secure context (HTTP) — let xterm send \x16 to PTY
+        return true;
       }
 
       // Ctrl+Shift+V — request paste from parent (legacy)
@@ -538,7 +580,8 @@ export const TerminalInstance = forwardRef<
       }
     });
 
-    // Initial fit
+    // Initial fit — container always has real dimensions (hidden tabs use
+    // visibility:hidden instead of display:none so layout is preserved).
     fitAddon.fit();
 
     const RECONNECT_TIMEOUT = 30_000;
@@ -563,6 +606,7 @@ export const TerminalInstance = forwardRef<
           () => {
             reconnectResolveRef.current?.(false);
             reconnectResolveRef.current = null;
+            if (beingKilledRef.current) return; // user closed tab — don't reconnect
             if (!mounted || reconnectCancelRef.current) return;
             onReconnectStateChangeRef.current?.("reconnecting");
             // Only start the wall-clock timeout for mid-session disconnects.
@@ -605,6 +649,7 @@ export const TerminalInstance = forwardRef<
           (data, sendToWs) =>
             interceptorRef.current?.handleData(data, sendToWs),
           agentName,
+          () => { beingKilledRef.current = true; }, // onSessionKilled (code 4002)
         );
         wsCleanupRef.current = cleanup;
       };
@@ -694,25 +739,20 @@ export const TerminalInstance = forwardRef<
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fontSize/fontFamily handled by separate sync effect
   }, [sessionName]);
 
-  // Re-fit when tab becomes active (xterm can't measure when hidden)
+  // Re-fit when tab becomes active — send the current size to the backend
+  // so tmux adjusts. No layout recalc needed since hidden tabs use
+  // visibility:hidden (container always has correct dimensions).
   useEffect(() => {
     if (!isActive) return;
-    const frame = requestAnimationFrame(() => {
-      if (fitAddonRef.current) {
-        fitAddonRef.current.fit();
-        const currentWs = wsRef.current;
-        if (
-          currentWs &&
-          currentWs.readyState === WebSocket.OPEN &&
-          terminalRef.current
-        ) {
-          currentWs.send(
-            encodeResize(terminalRef.current.cols, terminalRef.current.rows),
-          );
-        }
+    if (fitAddonRef.current && terminalRef.current) {
+      fitAddonRef.current.fit();
+      const currentWs = wsRef.current;
+      if (currentWs && currentWs.readyState === WebSocket.OPEN) {
+        currentWs.send(
+          encodeResize(terminalRef.current.cols, terminalRef.current.rows),
+        );
       }
-    });
-    return () => cancelAnimationFrame(frame);
+    }
   }, [isActive]);
 
   // Dynamic font changes without terminal recreation

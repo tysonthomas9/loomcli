@@ -81,6 +81,15 @@ func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigi
 			}
 		}
 
+		// Pre-upgrade check: reject if session is being killed (tombstone).
+		if manager.SessionIsBeingKilled(session) {
+			respondJSON(w, http.StatusConflict, map[string]interface{}{
+				"success": false,
+				"error":   "session is being killed",
+			})
+			return
+		}
+
 		// Pre-upgrade check: reject before WebSocket upgrade if at session limit.
 		if manager.SessionCount() >= manager.MaxSessions() {
 			respondJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
@@ -125,12 +134,16 @@ func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigi
 		// (frontend sends resize immediately after connect)
 		termSession, err := manager.Attach(session, attachCommandForSession(session), 80, 24)
 		if err != nil {
-			if errors.Is(err, ErrMaxSessionsReached) {
+			if errors.Is(err, ErrSessionBeingKilled) {
+				closeStatus = websocket.StatusCode(wsCloseSessionKilled)
+				closeReason = "session is being killed"
+			} else if errors.Is(err, ErrMaxSessionsReached) {
 				log.Printf("Terminal session limit reached for %q", session)
+				closeReason = err.Error()
 			} else {
 				log.Printf("Failed to attach terminal session %q: %v", session, err)
+				closeReason = err.Error()
 			}
-			closeReason = err.Error()
 			return
 		}
 		connID := termSession.ConnID
@@ -149,6 +162,16 @@ func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigi
 
 		// Channel to signal when PTY reader finishes and communicate crash state
 		crashCh := make(chan crashInfo, 1)
+
+		// Watch for server-initiated kill (user closed the tab).
+		go func() {
+			select {
+			case <-termSession.killCh:
+				_ = conn.Close(websocket.StatusCode(wsCloseSessionKilled), "session killed")
+				cancel()
+			case <-ctx.Done():
+			}
+		}()
 
 		// Start PTY -> WebSocket goroutine (with scrollback capture)
 		scrollback := manager.GetScrollbackBuffer(session)
@@ -171,7 +194,8 @@ func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigi
 	}
 }
 
-const wsCloseBackendExited = 4001 // WebSocket close code for backend process exit (4000-4999 range)
+const wsCloseBackendExited = 4001  // WebSocket close code for backend process exit (4000-4999 range)
+const wsCloseSessionKilled = 4002 // WebSocket close code for user-initiated session kill
 
 // crashInfo communicates crash state from ptyToWS so the handler sets the right close code.
 type crashInfo struct {
