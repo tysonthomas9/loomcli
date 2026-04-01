@@ -501,6 +501,89 @@ func TestMigrationChain_Idempotent(t *testing.T) {
 	}
 }
 
+func TestPendingMigrations_FromV0(t *testing.T) {
+	pending := PendingMigrations(0)
+	if len(pending) != 2 {
+		t.Fatalf("PendingMigrations(0) returned %d entries, want 2", len(pending))
+	}
+
+	// First: v0 → v1
+	if pending[0].FromVersion != 0 || pending[0].ToVersion != 1 {
+		t.Errorf("pending[0] = v%d→v%d, want v0→v1", pending[0].FromVersion, pending[0].ToVersion)
+	}
+	if pending[0].Description == "" {
+		t.Error("pending[0].Description should not be empty")
+	}
+	if pending[0].Destructive {
+		t.Error("pending[0] should not be destructive")
+	}
+
+	// Second: v1 → v2
+	if pending[1].FromVersion != 1 || pending[1].ToVersion != 2 {
+		t.Errorf("pending[1] = v%d→v%d, want v1→v2", pending[1].FromVersion, pending[1].ToVersion)
+	}
+	if pending[1].Description == "" {
+		t.Error("pending[1].Description should not be empty")
+	}
+	if pending[1].Destructive {
+		t.Error("pending[1] should not be destructive")
+	}
+}
+
+func TestPendingMigrations_AlreadyCurrent(t *testing.T) {
+	pending := PendingMigrations(CurrentConfigVersion)
+	if len(pending) != 0 {
+		t.Errorf("PendingMigrations(CurrentConfigVersion) returned %d entries, want 0", len(pending))
+	}
+}
+
+func TestPendingMigrations_FutureVersion(t *testing.T) {
+	pending := PendingMigrations(CurrentConfigVersion + 5)
+	if len(pending) != 0 {
+		t.Errorf("PendingMigrations(CurrentConfigVersion+5) returned %d entries, want 0", len(pending))
+	}
+}
+
+func TestPendingMigrations_Partial(t *testing.T) {
+	pending := PendingMigrations(1)
+	if len(pending) != 1 {
+		t.Fatalf("PendingMigrations(1) returned %d entries, want 1", len(pending))
+	}
+	if pending[0].FromVersion != 1 || pending[0].ToVersion != 2 {
+		t.Errorf("pending[0] = v%d→v%d, want v1→v2", pending[0].FromVersion, pending[0].ToVersion)
+	}
+}
+
+func TestPendingMigrations_DestructiveFlag(t *testing.T) {
+	// Save and restore the original migrations map
+	origMigrations := migrations
+	defer func() { migrations = origMigrations }()
+
+	migrations = map[int]Migration{
+		0: {Fn: migrateV0ToV1, Destructive: false, Description: "step one"},
+		1: {Fn: migrateV1ToV2, Destructive: true, Description: "step two"},
+	}
+
+	pending := PendingMigrations(0)
+	if len(pending) != 2 {
+		t.Fatalf("PendingMigrations(0) returned %d entries, want 2", len(pending))
+	}
+	if pending[0].Destructive {
+		t.Error("pending[0] should not be destructive")
+	}
+	if !pending[1].Destructive {
+		t.Error("pending[1] should be destructive")
+	}
+}
+
+func TestMigrationDescriptions_NotEmpty(t *testing.T) {
+	for version, m := range migrations {
+		if m.Description == "" {
+			t.Errorf("migration v%d→v%d has empty Description", version, version+1)
+		}
+	}
+}
+
 func TestMigrateConfigFile_EmptyFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")

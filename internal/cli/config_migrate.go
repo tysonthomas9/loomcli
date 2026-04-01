@@ -24,13 +24,14 @@ type MigrationFunc func(data map[string]interface{}) (map[string]interface{}, er
 // Migration describes a single version migration step.
 type Migration struct {
 	Fn          MigrationFunc
-	Destructive bool // If true, requires explicit 'loom config migrate' — not auto-applied by LoadConfig
+	Destructive bool   // If true, requires explicit 'loom config migrate' — not auto-applied by LoadConfig
+	Description string // Human-readable summary shown in `loom config migrate` output
 }
 
 // migrations maps source version to the function that migrates it to source+1.
 var migrations = map[int]Migration{
-	0: {Fn: migrateV0ToV1}, // adds version field — non-destructive
-	1: {Fn: migrateV1ToV2}, // adds workspace UUIDs — non-destructive
+	0: {Fn: migrateV0ToV1, Description: "Add schema version field"},
+	1: {Fn: migrateV1ToV2, Description: "Add stable UUIDs to workspace entries"},
 }
 
 // getConfigVersion reads the version field from raw config data.
@@ -97,6 +98,33 @@ func AutoMigrateConfigData(data map[string]interface{}) (map[string]interface{},
 		version = getConfigVersion(data)
 	}
 	return data, version, nil
+}
+
+// PendingMigration describes a migration that would be applied to reach CurrentConfigVersion.
+type PendingMigration struct {
+	FromVersion int
+	ToVersion   int
+	Description string
+	Destructive bool
+}
+
+// PendingMigrations returns the ordered list of migrations needed to go from
+// currentVersion to CurrentConfigVersion. Returns nil if already current or ahead.
+func PendingMigrations(currentVersion int) []PendingMigration {
+	var pending []PendingMigration
+	for v := currentVersion; v < CurrentConfigVersion; v++ {
+		m, ok := migrations[v]
+		if !ok {
+			break // gap in migration chain — stop here
+		}
+		pending = append(pending, PendingMigration{
+			FromVersion: v,
+			ToVersion:   v + 1,
+			Description: m.Description,
+			Destructive: m.Destructive,
+		})
+	}
+	return pending
 }
 
 // autoMigrateFile checks if the config at path (with rawBytes content) needs non-destructive

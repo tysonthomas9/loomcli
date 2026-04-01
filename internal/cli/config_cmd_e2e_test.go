@@ -426,6 +426,93 @@ func TestE2E_ConfigMigrate_ProjectFlag(t *testing.T) {
 	}
 }
 
+func TestE2E_ConfigMigrate_DryRun(t *testing.T) {
+	t.Parallel()
+	dir := configTestDir(t)
+
+	// Create a valid current-version config so startup auto-migration doesn't fail.
+	runLoomConfig(t, dir, "init", "--workspace", "ws1")
+
+	// Write a v0 config to a SEPARATE file (not config.yaml).
+	v0Path := filepath.Join(dir, "v0.yaml")
+	v0Content := "default_workspace: myws\nbackend: claude\n"
+	if err := os.WriteFile(v0Path, []byte(v0Content), 0644); err != nil {
+		t.Fatalf("writing v0 config: %v", err)
+	}
+
+	stdout, _, exitCode := runLoomConfig(t, dir, "migrate", "--dry-run", v0Path)
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d; stdout: %s", exitCode, stdout)
+	}
+	if !strings.Contains(strings.ToLower(stdout), "dry run") {
+		t.Errorf("expected stdout to contain 'dry run', got: %s", stdout)
+	}
+	// Should list the version migration path
+	if !strings.Contains(stdout, "v0") {
+		t.Errorf("expected stdout to mention v0, got: %s", stdout)
+	}
+
+	// Verify the file was NOT modified.
+	after, err := os.ReadFile(v0Path)
+	if err != nil {
+		t.Fatalf("reading v0 config after dry-run: %v", err)
+	}
+	if string(after) != v0Content {
+		t.Errorf("v0 config was modified during dry-run.\nbefore: %s\nafter:  %s", v0Content, string(after))
+	}
+}
+
+func TestE2E_ConfigMigrate_ShowsMigrationListing(t *testing.T) {
+	t.Parallel()
+	dir := configTestDir(t)
+
+	// Create a valid current-version config so startup auto-migration doesn't fail.
+	runLoomConfig(t, dir, "init", "--workspace", "ws1")
+
+	// Write a v0 config to a separate file.
+	v0Path := filepath.Join(dir, "v0_apply.yaml")
+	v0Content := "default_workspace: myws\nbackend: claude\n"
+	if err := os.WriteFile(v0Path, []byte(v0Content), 0644); err != nil {
+		t.Fatalf("writing v0 config: %v", err)
+	}
+
+	stdout, _, exitCode := runLoomConfig(t, dir, "migrate", v0Path)
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d; stdout: %s", exitCode, stdout)
+	}
+	if !strings.Contains(stdout, "Migrations to apply:") {
+		t.Errorf("expected stdout to contain 'Migrations to apply:', got: %s", stdout)
+	}
+	if !strings.Contains(stdout, "Migrated from version") {
+		t.Errorf("expected stdout to contain 'Migrated from version', got: %s", stdout)
+	}
+	if !strings.Contains(stdout, "Backup saved to") {
+		t.Errorf("expected stdout to contain 'Backup saved to', got: %s", stdout)
+	}
+}
+
+func TestE2E_ConfigMigrate_FutureVersion(t *testing.T) {
+	t.Parallel()
+	dir := configTestDir(t)
+
+	// Create a valid current-version config so startup auto-migration doesn't fail.
+	runLoomConfig(t, dir, "init", "--workspace", "ws1")
+
+	// Write a future-version config to a separate file.
+	futurePath := filepath.Join(dir, "future.yaml")
+	if err := os.WriteFile(futurePath, []byte("version: 99\n"), 0644); err != nil {
+		t.Fatalf("writing future config: %v", err)
+	}
+
+	_, stderr, exitCode := runLoomConfig(t, dir, "migrate", futurePath)
+	if exitCode != 1 {
+		t.Errorf("expected exit 1 for future version, got %d", exitCode)
+	}
+	if !strings.Contains(stderr, "newer than supported") {
+		t.Errorf("expected stderr to contain 'newer than supported', got: %s", stderr)
+	}
+}
+
 // --- argument validation tests ---
 
 func TestE2E_ConfigAddRepo_InvalidRemoteFails(t *testing.T) {

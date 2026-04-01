@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -38,7 +39,8 @@ Examples:
   loom config add-repo default myrepo --path /tmp/r   # Add a repo
   loom config remove-repo default myrepo              # Remove a repo
   loom config migrate                                 # Migrate global config
-  loom config migrate --project                       # Migrate project config`,
+  loom config migrate --project                       # Migrate project config
+  loom config migrate --dry-run                       # Preview without applying`,
 }
 
 var configInitCmd = &cobra.Command{
@@ -73,14 +75,18 @@ var configRemoveRepoCmd = &cobra.Command{
 	Run:   runConfigRemoveRepo,
 }
 
-var configMigrateProject bool
+var (
+	configMigrateProject bool
+	configMigrateDryRun  bool
+)
 
 var configMigrateCmd = &cobra.Command{
 	Use:   "migrate [path]",
 	Short: "Migrate config files to the current version",
 	Long: `Upgrades config files to the current schema version. Creates a timestamped
 backup before modifying. If no path is given, migrates ~/.loom/config.yaml.
-Use --project to migrate the project-local loom.yaml instead.`,
+Use --project to migrate the project-local loom.yaml instead.
+Use --dry-run to preview migrations without applying.`,
 	Args: cobra.MaximumNArgs(1),
 	Run:  runConfigMigrate,
 }
@@ -95,6 +101,7 @@ func init() {
 	configAddRepoCmd.Flags().StringVar(&configAddRepoRemote, "remote", "", "Git remote name")
 
 	configMigrateCmd.Flags().BoolVar(&configMigrateProject, "project", false, "Migrate project-local loom.yaml instead of global config")
+	configMigrateCmd.Flags().BoolVar(&configMigrateDryRun, "dry-run", false, "Preview migrations without applying changes")
 
 	configCmd.AddCommand(configInitCmd)
 	configCmd.AddCommand(configShowCmd)
@@ -223,6 +230,69 @@ func runConfigMigrate(cmd *cobra.Command, args []string) {
 		path = GetConfigPath()
 	}
 
+	// Read and parse to determine current version for the listing.
+	content, err := os.ReadFile(path) //nolint:gosec // path from CLI arg or config
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	var data map[string]interface{}
+	if err := yaml.Unmarshal(content, &data); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: parsing config: %v\n", err)
+		os.Exit(1)
+	}
+	if data == nil {
+		data = make(map[string]interface{})
+	}
+
+	currentVersion := getConfigVersion(data)
+
+	if currentVersion == CurrentConfigVersion {
+		fmt.Printf("Config is already at version %d, no migration needed.\n", CurrentConfigVersion)
+		return
+	}
+
+	if currentVersion > CurrentConfigVersion {
+		fmt.Fprintf(os.Stderr, "Error: config version %d is newer than supported version %d; please upgrade loom.\n",
+			currentVersion, CurrentConfigVersion)
+		os.Exit(1)
+	}
+
+	// List pending migrations.
+	pending := PendingMigrations(currentVersion)
+	hasDestructive := false
+	for _, m := range pending {
+		if m.Destructive {
+			hasDestructive = true
+			break
+		}
+	}
+
+	fmt.Printf("Config at version %d, target version %d.\n\n", currentVersion, CurrentConfigVersion)
+
+	if configMigrateDryRun {
+		fmt.Println("Migrations that would be applied:")
+	} else {
+		fmt.Println("Migrations to apply:")
+	}
+	for _, m := range pending {
+		label := ""
+		if m.Destructive {
+			label = " [DESTRUCTIVE]"
+		}
+		fmt.Printf("  v%d → v%d:%s %s\n", m.FromVersion, m.ToVersion, label, m.Description)
+	}
+
+	if configMigrateDryRun {
+		fmt.Println("\nNo changes made (dry run).")
+		return
+	}
+
+	if hasDestructive {
+		fmt.Fprintf(os.Stderr, "\nWarning: destructive migrations may be incompatible with older versions of loom.\n")
+	}
+
 	oldVersion, backupPath, err := MigrateConfigFile(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -230,11 +300,12 @@ func runConfigMigrate(cmd *cobra.Command, args []string) {
 	}
 
 	if oldVersion == CurrentConfigVersion {
-		fmt.Printf("Config is already at version %d, no migration needed.\n", CurrentConfigVersion)
-		return
+		// File was migrated between our pre-read and MigrateConfigFile (e.g. by auto-migration).
+		fmt.Printf("\nConfig was already at version %d, no changes made.\n", CurrentConfigVersion)
+	} else {
+		fmt.Printf("\nMigrated from version %d to %d. Backup saved to %s.\n",
+			oldVersion, CurrentConfigVersion, backupPath)
 	}
-
-	fmt.Printf("Migrated from version %d to %d. Backup saved to %s.\n", oldVersion, CurrentConfigVersion, backupPath)
 }
 
 func runConfigRemoveRepo(cmd *cobra.Command, args []string) {
