@@ -98,8 +98,7 @@ export function TerminalView({
     isLoading: metaLoading,
   } = useTerminalMetadata(workspaceId);
   const { config, isLoading: configLoading } = useBackendConfig();
-  const { activeTabId: restoredTabId, isRestoring } =
-    useSessionRestore(workspaceId);
+  const { activeTabId: restoredTabId, isRestoring } = useSessionRestore();
 
   const [isFullHeight, setIsFullHeight] = useState(false);
   const {

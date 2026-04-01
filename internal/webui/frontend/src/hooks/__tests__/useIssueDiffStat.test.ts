@@ -20,6 +20,10 @@ vi.mock("@/api/diff-stat", () => ({
   fetchIssueDiffStat: vi.fn(),
 }));
 
+vi.mock("../useWorkspaceContext", () => ({
+  useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
+}));
+
 const mockFetch = vi.mocked(fetchIssueDiffStat);
 
 function createMockDiffStat(overrides?: Partial<IssueDiffStat>): IssueDiffStat {
@@ -55,7 +59,6 @@ describe("useIssueDiffStat", () => {
 
       const { result } = renderHook(() =>
         useIssueDiffStat({
-          workspaceId: "test-ws-id",
           issueId: "issue-123",
           enabled: true,
         }),
@@ -74,7 +77,6 @@ describe("useIssueDiffStat", () => {
     it("does not fetch when enabled is false", async () => {
       const { result } = renderHook(() =>
         useIssueDiffStat({
-          workspaceId: "test-ws-id",
           issueId: "issue-123",
           enabled: false,
         }),
@@ -93,7 +95,6 @@ describe("useIssueDiffStat", () => {
     it("does not fetch when issueId is null", async () => {
       const { result } = renderHook(() =>
         useIssueDiffStat({
-          workspaceId: "test-ws-id",
           issueId: null,
           enabled: true,
         }),
@@ -115,7 +116,6 @@ describe("useIssueDiffStat", () => {
 
       const { result } = renderHook(() =>
         useIssueDiffStat({
-          workspaceId: "test-ws-id",
           issueId: "issue-123",
           enabled: true,
         }),
@@ -143,7 +143,6 @@ describe("useIssueDiffStat", () => {
 
       renderHook(() =>
         useIssueDiffStat({
-          workspaceId: "test-ws-id",
           issueId: "issue-123",
           enabled: true,
         }),
@@ -216,7 +215,6 @@ describe("useIssueDiffStat", () => {
 
       const { unmount } = renderHook(() =>
         useIssueDiffStat({
-          workspaceId: "test-ws-id",
           issueId: "issue-123",
           enabled: true,
         }),
@@ -244,7 +242,6 @@ describe("useIssueDiffStat", () => {
 
       const { result, unmount } = renderHook(() =>
         useIssueDiffStat({
-          workspaceId: "test-ws-id",
           issueId: "issue-123",
           enabled: true,
         }),
@@ -269,7 +266,6 @@ describe("useIssueDiffStat", () => {
 
       const { result } = renderHook(() =>
         useIssueDiffStat({
-          workspaceId: "test-ws-id",
           issueId: "issue-123",
           enabled: true,
         }),
@@ -287,7 +283,6 @@ describe("useIssueDiffStat", () => {
 
       const { result } = renderHook(() =>
         useIssueDiffStat({
-          workspaceId: "test-ws-id",
           issueId: "issue-123",
           enabled: true,
         }),
@@ -305,7 +300,6 @@ describe("useIssueDiffStat", () => {
 
       const { result } = renderHook(() =>
         useIssueDiffStat({
-          workspaceId: "test-ws-id",
           issueId: "issue-123",
           enabled: true,
         }),
@@ -333,7 +327,6 @@ describe("useIssueDiffStat", () => {
 
       const { result } = renderHook(() =>
         useIssueDiffStat({
-          workspaceId: "test-ws-id",
           issueId: "issue-123",
           enabled: true,
         }),

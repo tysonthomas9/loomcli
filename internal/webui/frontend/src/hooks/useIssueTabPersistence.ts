@@ -8,6 +8,8 @@ import {
 import type { IssueTabState, IssueTab } from "@/api/issueTabs";
 import type { MutationPayload } from "@/api/sse";
 
+import { useWorkspaceContext } from "./useWorkspaceContext";
+
 export interface UseIssueTabPersistenceReturn {
   /** Loaded state from Redis (null if none saved or still loading) */
   savedState: IssueTabState | null;
@@ -25,9 +27,9 @@ const SAVE_DEBOUNCE_MS = 300;
 const REFETCH_DEBOUNCE_MS = 100;
 
 export function useIssueTabPersistence(
-  workspaceId: string,
   issueId: string,
 ): UseIssueTabPersistenceReturn {
+  const { workspaceId } = useWorkspaceContext();
   const [savedState, setSavedState] = useState<IssueTabState | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const mountedRef = useRef(true);

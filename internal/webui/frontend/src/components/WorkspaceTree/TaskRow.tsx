@@ -7,7 +7,6 @@ import type React from "react";
 
 import type { Issue } from "@/types";
 import { useIssueDiffStat } from "@/hooks";
-import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
 
 import styles from "./EpicTaskTree.module.css";
 
@@ -63,9 +62,7 @@ export function TaskRow({
   isSaving,
   onTaskTerminalOpen,
 }: TaskRowProps): JSX.Element {
-  const { workspaceId } = useWorkspaceContext();
   const { data: diffStat } = useIssueDiffStat({
-    workspaceId,
     issueId: task.id,
     enabled: task.assignee !== undefined,
     pollInterval: 60000,

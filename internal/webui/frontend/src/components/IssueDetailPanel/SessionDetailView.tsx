@@ -8,7 +8,6 @@ import { useState } from "react";
 import { CodeMirrorEditor } from "@/components/CodeMirrorEditor";
 import { useSessionTranscript } from "@/hooks/useSessionTranscript";
 import { useSessionDiff } from "@/hooks/useSessionDiff";
-import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
 import type { SessionRecord } from "@/types/session";
 
 import styles from "./SessionsTab.module.css";
@@ -30,7 +29,6 @@ export function SessionDetailView({
   taskId,
   session,
 }: SessionDetailViewProps): JSX.Element {
-  const { workspaceId } = useWorkspaceContext();
   const [innerTab, setInnerTab] = useState<InnerTab>("transcript");
   const [expandedInputs, setExpandedInputs] = useState<Set<number>>(
     () => new Set(),
@@ -40,14 +38,13 @@ export function SessionDetailView({
     entries,
     isLoading: transcriptLoading,
     error: transcriptError,
-  } = useSessionTranscript(workspaceId, taskId, session.id, session.is_active);
+  } = useSessionTranscript(taskId, session.id, session.is_active);
 
   const {
     diff,
     isLoading: diffLoading,
     error: diffError,
   } = useSessionDiff(
-    workspaceId,
     taskId,
     session.id,
     innerTab === "diff" && session.has_diff,

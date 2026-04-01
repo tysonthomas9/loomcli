@@ -9,10 +9,10 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { fetchAgentDiffStat } from "@/api";
 import type { IssueDiffStat } from "@/api";
 
+import { useWorkspaceContext } from "./useWorkspaceContext";
+
 /** Options for the useAgentDiffStat hook. */
 export interface UseAgentDiffStatOptions {
-  /** Workspace ID for scoped API calls. */
-  workspaceId: string;
   /** Agent name to fetch diff stats for. Empty string skips fetching. */
   agentName: string;
   /** Whether to fetch (default: true). */
@@ -36,12 +36,8 @@ export interface UseAgentDiffStatReturn {
 export function useAgentDiffStat(
   options: UseAgentDiffStatOptions,
 ): UseAgentDiffStatReturn {
-  const {
-    workspaceId,
-    agentName,
-    enabled = true,
-    pollInterval = 60000,
-  } = options;
+  const { workspaceId } = useWorkspaceContext();
+  const { agentName, enabled = true, pollInterval = 60000 } = options;
 
   const [data, setData] = useState<IssueDiffStat | null>(null);
   const [isLoading, setIsLoading] = useState(false);

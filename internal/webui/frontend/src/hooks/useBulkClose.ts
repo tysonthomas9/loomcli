@@ -8,12 +8,12 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { closeIssue } from "@/api";
 import type { BulkAction } from "@/components/BulkActionToolbar";
 
+import { useWorkspaceContext } from "./useWorkspaceContext";
+
 /**
  * Options for the useBulkClose hook.
  */
 export interface UseBulkCloseOptions {
-  /** Workspace ID for scoped API calls. */
-  workspaceId: string;
   /** Callback after all issues are successfully closed */
   onSuccess?: (closedIds: string[]) => void;
   /** Callback after partial success (some issues failed to close) */
@@ -55,8 +55,8 @@ export interface UseBulkCloseReturn {
  * ```
  */
 export function useBulkClose(options: UseBulkCloseOptions): UseBulkCloseReturn {
-  const { workspaceId, onSuccess, onPartialSuccess, onError, closeReason } =
-    options;
+  const { workspaceId } = useWorkspaceContext();
+  const { onSuccess, onPartialSuccess, onError, closeReason } = options;
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

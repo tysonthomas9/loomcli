@@ -11,12 +11,13 @@ import {
   DEFAULT_RECONNECT_CONFIG,
 } from "@/utils/reconnectBackoff";
 
+import { useWorkspaceContext } from "./useWorkspaceContext";
+
 import type { LogChunk, LogStreamState } from "./logTypes";
 
 export type AgentLogTransportMode = "idle" | "loading" | "tmux" | "archive";
 
 export interface UseAgentTerminalLogsOptions {
-  workspaceId: string;
   agentName: string | null;
   enabled: boolean;
   archiveLines?: number;
@@ -55,11 +56,11 @@ function buildResizeFrame(cols: number, rows: number): ArrayBuffer {
 const ARCHIVE_RECHECK_INTERVAL_MS = 5000;
 
 export function useAgentTerminalLogs({
-  workspaceId,
   agentName,
   enabled,
   archiveLines = 500,
 }: UseAgentTerminalLogsOptions): UseAgentTerminalLogsReturn {
+  const { workspaceId } = useWorkspaceContext();
   const [mode, setMode] = useState<AgentLogTransportMode>("idle");
   const [chunks, setChunks] = useState<LogChunk[]>([]);
   const [state, setState] = useState<LogStreamState>("disconnected");

@@ -21,6 +21,7 @@ import { useMutationHandler } from "./useMutationHandler";
 import { useOptimisticUpdate } from "./useOptimisticUpdate";
 import { useSSE } from "./useSSE";
 import { useToast } from "./useToast";
+import { useWorkspaceContext } from "./useWorkspaceContext";
 
 // Threshold for triggering a full refetch after reconnection
 // If we had this many consecutive reconnect attempts, assume we may have missed events
@@ -50,8 +51,6 @@ export interface UseIssuesOptions {
   subscribeOnConnect?: boolean;
   /** Source repo filter — when set, refetch uses source_repos and SSE reconnects with updated URL */
   sourceRepos?: string[] | undefined;
-  /** Workspace UUID — required for workspace-scoped API calls */
-  workspaceId: string;
 }
 
 /**
@@ -153,6 +152,7 @@ function issuesAreEqual(a: Issue, b: Issue): boolean {
  * ```
  */
 export function useIssues(options: UseIssuesOptions): UseIssuesReturn {
+  const { workspaceId } = useWorkspaceContext();
   const {
     filter,
     mode = "ready",
@@ -160,7 +160,6 @@ export function useIssues(options: UseIssuesOptions): UseIssuesReturn {
     autoFetch = true,
     autoConnect = true,
     sourceRepos,
-    workspaceId,
     // Note: subscribeOnConnect is deprecated with SSE - connection equals subscription
   } = options;
 
@@ -313,7 +312,6 @@ export function useIssues(options: UseIssuesOptions): UseIssuesReturn {
     lastEventId,
     retryNow,
   } = useSSE({
-    workspaceId,
     autoConnect,
     since:
       fetchTimestampRef.current > 0 ? fetchTimestampRef.current : undefined,

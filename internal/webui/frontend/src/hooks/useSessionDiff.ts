@@ -6,6 +6,7 @@
 import { useState, useEffect } from "react";
 
 import { getSessionDiff } from "../api/sessions";
+import { useWorkspaceContext } from "./useWorkspaceContext";
 
 /** Return type for the useSessionDiff hook. */
 export interface UseSessionDiffResult {
@@ -18,11 +19,11 @@ export interface UseSessionDiffResult {
 }
 
 export function useSessionDiff(
-  workspaceId: string,
   taskId: string | null,
   sessionId: string | null,
   enabled: boolean,
 ): UseSessionDiffResult {
+  const { workspaceId } = useWorkspaceContext();
   const [diff, setDiff] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);

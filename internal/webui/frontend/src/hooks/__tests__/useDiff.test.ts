@@ -14,6 +14,10 @@ vi.mock("@/api/diff", () => ({
   fetchDiffFile: vi.fn(),
 }));
 
+vi.mock("../useWorkspaceContext", () => ({
+  useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
+}));
+
 const mockFetchDiffFiles = vi.mocked(fetchDiffFiles);
 const mockFetchDiffFile = vi.mocked(fetchDiffFile);
 
@@ -59,7 +63,6 @@ describe("useDiff", () => {
     it("returns empty files, not loading, no error when disabled", () => {
       const { result } = renderHook(() =>
         useDiff({
-          workspaceId: "test-ws-id",
           agentName: "agent-1",
           enabled: false,
         }),
@@ -72,7 +75,7 @@ describe("useDiff", () => {
 
     it("returns empty files when agentName is null", () => {
       const { result } = renderHook(() =>
-        useDiff({ workspaceId: "test-ws-id", agentName: null, enabled: true }),
+        useDiff({ agentName: null, enabled: true }),
       );
 
       expect(result.current.files).toEqual([]);
@@ -83,7 +86,6 @@ describe("useDiff", () => {
     it("returns empty viewedFiles Set and patchCache Map", () => {
       const { result } = renderHook(() =>
         useDiff({
-          workspaceId: "test-ws-id",
           agentName: "agent-1",
           enabled: false,
         }),
@@ -103,7 +105,6 @@ describe("useDiff", () => {
 
       const { result } = renderHook(() =>
         useDiff({
-          workspaceId: "test-ws-id",
           agentName: "agent-1",
           enabled: true,
         }),
@@ -123,7 +124,6 @@ describe("useDiff", () => {
     it("does not fetch when disabled", () => {
       renderHook(() =>
         useDiff({
-          workspaceId: "test-ws-id",
           agentName: "agent-1",
           enabled: false,
         }),
@@ -133,9 +133,7 @@ describe("useDiff", () => {
     });
 
     it("does not fetch when agentName is null", () => {
-      renderHook(() =>
-        useDiff({ workspaceId: "test-ws-id", agentName: null, enabled: true }),
-      );
+      renderHook(() => useDiff({ agentName: null, enabled: true }));
 
       expect(mockFetchDiffFiles).not.toHaveBeenCalled();
     });
@@ -145,7 +143,6 @@ describe("useDiff", () => {
 
       const { result } = renderHook(() =>
         useDiff({
-          workspaceId: "test-ws-id",
           agentName: "agent-1",
           enabled: true,
         }),
@@ -163,7 +160,6 @@ describe("useDiff", () => {
 
       const { result } = renderHook(() =>
         useDiff({
-          workspaceId: "test-ws-id",
           agentName: "agent-1",
           enabled: true,
         }),
@@ -184,7 +180,6 @@ describe("useDiff", () => {
 
       const { result } = renderHook(() =>
         useDiff({
-          workspaceId: "test-ws-id",
           agentName: "agent-1",
           enabled: true,
         }),
@@ -212,7 +207,6 @@ describe("useDiff", () => {
 
       const { result } = renderHook(() =>
         useDiff({
-          workspaceId: "test-ws-id",
           agentName: "agent-1",
           enabled: true,
         }),
@@ -240,7 +234,6 @@ describe("useDiff", () => {
 
       const { result } = renderHook(() =>
         useDiff({
-          workspaceId: "test-ws-id",
           agentName: "agent-1",
           enabled: true,
         }),
@@ -271,7 +264,6 @@ describe("useDiff", () => {
 
       const { result } = renderHook(() =>
         useDiff({
-          workspaceId: "test-ws-id",
           agentName: "agent-1",
           enabled: true,
         }),
@@ -301,7 +293,6 @@ describe("useDiff", () => {
 
       const { result } = renderHook(() =>
         useDiff({
-          workspaceId: "test-ws-id",
           agentName: "agent-1",
           enabled: true,
         }),
@@ -330,7 +321,6 @@ describe("useDiff", () => {
 
       const { result } = renderHook(() =>
         useDiff({
-          workspaceId: "test-ws-id",
           agentName: "agent-1",
           enabled: true,
         }),
@@ -347,7 +337,7 @@ describe("useDiff", () => {
 
     it("fetchPatch does nothing when agentName is null", async () => {
       const { result } = renderHook(() =>
-        useDiff({ workspaceId: "test-ws-id", agentName: null, enabled: false }),
+        useDiff({ agentName: null, enabled: false }),
       );
 
       await act(async () => {
@@ -362,7 +352,6 @@ describe("useDiff", () => {
     it("markViewed adds file path to viewedFiles Set", () => {
       const { result } = renderHook(() =>
         useDiff({
-          workspaceId: "test-ws-id",
           agentName: "agent-1",
           enabled: false,
         }),
@@ -378,7 +367,6 @@ describe("useDiff", () => {
     it("markViewed toggles — calling twice removes the path", () => {
       const { result } = renderHook(() =>
         useDiff({
-          workspaceId: "test-ws-id",
           agentName: "agent-1",
           enabled: false,
         }),
@@ -400,7 +388,6 @@ describe("useDiff", () => {
     it("viewedFiles starts empty", () => {
       const { result } = renderHook(() =>
         useDiff({
-          workspaceId: "test-ws-id",
           agentName: "agent-1",
           enabled: false,
         }),
@@ -417,7 +404,6 @@ describe("useDiff", () => {
 
       const { result } = renderHook(() =>
         useDiff({
-          workspaceId: "test-ws-id",
           agentName: "agent-1",
           enabled: true,
         }),
@@ -435,7 +421,6 @@ describe("useDiff", () => {
     it("returns zeros when files array is empty", () => {
       const { result } = renderHook(() =>
         useDiff({
-          workspaceId: "test-ws-id",
           agentName: "agent-1",
           enabled: false,
         }),
@@ -456,7 +441,7 @@ describe("useDiff", () => {
 
       const { result, rerender } = renderHook(
         ({ agentName }: { agentName: string }) =>
-          useDiff({ workspaceId: "test-ws-id", agentName, enabled: true }),
+          useDiff({ agentName, enabled: true }),
         { initialProps: { agentName: "agent-1" } },
       );
 
@@ -481,7 +466,7 @@ describe("useDiff", () => {
 
       const { result, rerender } = renderHook(
         ({ agentName }: { agentName: string }) =>
-          useDiff({ workspaceId: "test-ws-id", agentName, enabled: true }),
+          useDiff({ agentName, enabled: true }),
         { initialProps: { agentName: "agent-1" } },
       );
 
@@ -517,7 +502,7 @@ describe("useDiff", () => {
 
       const { result, rerender } = renderHook(
         ({ agentName }: { agentName: string }) =>
-          useDiff({ workspaceId: "test-ws-id", agentName, enabled: true }),
+          useDiff({ agentName, enabled: true }),
         { initialProps: { agentName: "agent-1" } },
       );
 
@@ -544,7 +529,7 @@ describe("useDiff", () => {
 
       const { result, rerender } = renderHook(
         ({ agentName }: { agentName: string }) =>
-          useDiff({ workspaceId: "test-ws-id", agentName, enabled: true }),
+          useDiff({ agentName, enabled: true }),
         { initialProps: { agentName: "agent-1" } },
       );
 
@@ -580,7 +565,6 @@ describe("useDiff", () => {
 
       const { result, unmount } = renderHook(() =>
         useDiff({
-          workspaceId: "test-ws-id",
           agentName: "agent-1",
           enabled: true,
         }),
@@ -607,7 +591,6 @@ describe("useDiff", () => {
 
       const { result, unmount } = renderHook(() =>
         useDiff({
-          workspaceId: "test-ws-id",
           agentName: "agent-1",
           enabled: true,
         }),
@@ -632,7 +615,6 @@ describe("useDiff", () => {
     it("markViewed is stable across renders", () => {
       const { result, rerender } = renderHook(() =>
         useDiff({
-          workspaceId: "test-ws-id",
           agentName: "agent-1",
           enabled: false,
         }),
@@ -649,7 +631,6 @@ describe("useDiff", () => {
 
       const { result } = renderHook(() =>
         useDiff({
-          workspaceId: "test-ws-id",
           agentName: "agent-1",
           enabled: true,
         }),
@@ -679,7 +660,6 @@ describe("useDiff", () => {
       const { result, rerender } = renderHook(
         ({ commitSignal }: { commitSignal: number }) =>
           useDiff({
-            workspaceId: "test-ws-id",
             agentName: "agent-1",
             enabled: true,
             commitSignal,
@@ -714,7 +694,6 @@ describe("useDiff", () => {
       const { result, rerender } = renderHook(
         ({ commitSignal }: { commitSignal: number }) =>
           useDiff({
-            workspaceId: "test-ws-id",
             agentName: "agent-1",
             enabled: true,
             commitSignal,
@@ -749,7 +728,6 @@ describe("useDiff", () => {
       const { result, rerender } = renderHook(
         ({ commitSignal }: { commitSignal: number }) =>
           useDiff({
-            workspaceId: "test-ws-id",
             agentName: "agent-1",
             enabled: true,
             commitSignal,
@@ -777,7 +755,6 @@ describe("useDiff", () => {
       const { rerender } = renderHook(
         ({ commitSignal }: { commitSignal: number }) =>
           useDiff({
-            workspaceId: "test-ws-id",
             agentName: "agent-1",
             enabled: true,
             commitSignal,
@@ -811,7 +788,6 @@ describe("useDiff", () => {
       const { rerender } = renderHook(
         ({ enabled }: { enabled: boolean }) =>
           useDiff({
-            workspaceId: "test-ws-id",
             agentName: "agent-1",
             enabled,
           }),
@@ -843,7 +819,6 @@ describe("useDiff", () => {
       const { result, rerender } = renderHook(
         ({ enabled }: { enabled: boolean }) =>
           useDiff({
-            workspaceId: "test-ws-id",
             agentName: "agent-1",
             enabled,
           }),
@@ -877,7 +852,6 @@ describe("useDiff", () => {
 
       const { result } = renderHook(() =>
         useDiff({
-          workspaceId: "test-ws-id",
           agentName: "agent-1",
           enabled: true,
         }),

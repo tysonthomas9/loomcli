@@ -8,6 +8,8 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { getIssue } from "@/api/issues";
 import type { Issue, IssueDetails } from "@/types";
 
+import { useWorkspaceContext } from "./useWorkspaceContext";
+
 /**
  * Return type for the useIssueDetail hook.
  */
@@ -55,7 +57,8 @@ export interface UseIssueDetailReturn {
  * }
  * ```
  */
-export function useIssueDetail(workspaceId: string): UseIssueDetailReturn {
+export function useIssueDetail(): UseIssueDetailReturn {
+  const { workspaceId } = useWorkspaceContext();
   const [issueDetails, setIssueDetails] = useState<IssueDetails | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);

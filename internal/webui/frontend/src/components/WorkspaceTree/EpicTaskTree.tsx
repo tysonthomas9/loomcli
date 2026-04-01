@@ -85,7 +85,6 @@ export function EpicTaskTree({
     workspaceName,
     activeFilter,
     sourceRepos,
-    workspaceId,
   );
 
   const { showToast } = useToast();

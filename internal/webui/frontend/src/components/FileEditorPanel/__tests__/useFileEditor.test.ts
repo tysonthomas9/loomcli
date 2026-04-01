@@ -10,6 +10,7 @@ vi.mock("@/hooks", () => ({
   useFileTree: vi.fn(),
   useFileContent: vi.fn(),
   useToast: vi.fn(),
+  useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
   useRegisterEscapeLayer: vi.fn(),
   useKeyboardShortcuts: vi.fn(() => ({
     isCheatsheetOpen: false,
@@ -111,9 +112,7 @@ describe("useFileEditor", () => {
 
   describe("initial state", () => {
     it("returns empty content, not dirty, not saving, no pending action", () => {
-      const { result } = renderHook(() =>
-        useFileEditor("test-ws-id", "agent-1", true),
-      );
+      const { result } = renderHook(() => useFileEditor("agent-1", true));
 
       expect(result.current.content).toBe("");
       expect(result.current.isDirty).toBe(false);
@@ -123,9 +122,7 @@ describe("useFileEditor", () => {
     });
 
     it("passes through tree and fileContent from hooks", () => {
-      const { result } = renderHook(() =>
-        useFileEditor("test-ws-id", "agent-1", true),
-      );
+      const { result } = renderHook(() => useFileEditor("agent-1", true));
 
       expect(result.current.tree).toBe(mockTree);
       expect(result.current.fileContent).toBe(mockContent);
@@ -134,9 +131,7 @@ describe("useFileEditor", () => {
 
   describe("file selection (clean state)", () => {
     it("calls tree.selectFile and fileContent.fetchFile on select", () => {
-      const { result } = renderHook(() =>
-        useFileEditor("test-ws-id", "agent-1", true),
-      );
+      const { result } = renderHook(() => useFileEditor("agent-1", true));
 
       act(() => {
         result.current.handleFileSelect("src/main.go");
@@ -148,7 +143,7 @@ describe("useFileEditor", () => {
 
     it("updates content when fileContent.fileData changes", async () => {
       const { result, rerender } = renderHook(() =>
-        useFileEditor("test-ws-id", "agent-1", true),
+        useFileEditor("agent-1", true),
       );
 
       // Simulate file data arriving
@@ -178,9 +173,7 @@ describe("useFileEditor", () => {
       mockContent = createMockFileContent({ fileData });
       mockUseFileContent.mockReturnValue(mockContent);
 
-      const { result } = renderHook(() =>
-        useFileEditor("test-ws-id", "agent-1", true),
-      );
+      const { result } = renderHook(() => useFileEditor("agent-1", true));
 
       expect(result.current.content).toBe("");
     });
@@ -198,9 +191,7 @@ describe("useFileEditor", () => {
       mockTree = createMockTree({ selectedPath: path });
       mockUseFileTree.mockReturnValue(mockTree);
 
-      const { result } = renderHook(() =>
-        useFileEditor("test-ws-id", "agent-1", true),
-      );
+      const { result } = renderHook(() => useFileEditor("agent-1", true));
 
       expect(result.current.language).toBe(expectedLang);
     });
@@ -211,18 +202,14 @@ describe("useFileEditor", () => {
         mockTree = createMockTree({ selectedPath: path });
         mockUseFileTree.mockReturnValue(mockTree);
 
-        const { result } = renderHook(() =>
-          useFileEditor("test-ws-id", "agent-1", true),
-        );
+        const { result } = renderHook(() => useFileEditor("agent-1", true));
 
         expect(result.current.language).toBeUndefined();
       },
     );
 
     it("returns undefined when no file is selected", () => {
-      const { result } = renderHook(() =>
-        useFileEditor("test-ws-id", "agent-1", true),
-      );
+      const { result } = renderHook(() => useFileEditor("agent-1", true));
 
       expect(result.current.language).toBeUndefined();
     });
@@ -230,9 +217,7 @@ describe("useFileEditor", () => {
 
   describe("editing", () => {
     it("handleContentChange updates content", () => {
-      const { result } = renderHook(() =>
-        useFileEditor("test-ws-id", "agent-1", true),
-      );
+      const { result } = renderHook(() => useFileEditor("agent-1", true));
 
       act(() => {
         result.current.handleContentChange("new content");
@@ -251,9 +236,7 @@ describe("useFileEditor", () => {
       mockContent = createMockFileContent({ fileData });
       mockUseFileContent.mockReturnValue(mockContent);
 
-      const { result } = renderHook(() =>
-        useFileEditor("test-ws-id", "agent-1", true),
-      );
+      const { result } = renderHook(() => useFileEditor("agent-1", true));
 
       expect(result.current.isDirty).toBe(false);
 
@@ -266,7 +249,7 @@ describe("useFileEditor", () => {
 
     it("isDirty becomes false when content matches saved", async () => {
       const { result, rerender } = renderHook(() =>
-        useFileEditor("test-ws-id", "agent-1", true),
+        useFileEditor("agent-1", true),
       );
 
       // Simulate file data arriving
@@ -302,7 +285,7 @@ describe("useFileEditor", () => {
       mockWriteWorktreeFile.mockResolvedValue(undefined);
 
       const { result, rerender } = renderHook(() =>
-        useFileEditor("test-ws-id", "agent-1", true),
+        useFileEditor("agent-1", true),
       );
 
       // Type content (savedContentRef starts at "", so any text is dirty)
@@ -346,9 +329,7 @@ describe("useFileEditor", () => {
         new Error("Permission denied"),
       );
 
-      const { result } = renderHook(() =>
-        useFileEditor("test-ws-id", "agent-1", true),
-      );
+      const { result } = renderHook(() => useFileEditor("agent-1", true));
 
       act(() => {
         result.current.handleContentChange("changed");
@@ -370,9 +351,7 @@ describe("useFileEditor", () => {
       mockTree = createMockTree({ selectedPath: "f.go" });
       mockUseFileTree.mockReturnValue(mockTree);
 
-      const { result } = renderHook(() =>
-        useFileEditor("test-ws-id", "agent-1", true),
-      );
+      const { result } = renderHook(() => useFileEditor("agent-1", true));
 
       await act(async () => {
         await result.current.save();
@@ -382,9 +361,7 @@ describe("useFileEditor", () => {
     });
 
     it("is a no-op when no file selected", async () => {
-      const { result } = renderHook(() =>
-        useFileEditor("test-ws-id", "agent-1", true),
-      );
+      const { result } = renderHook(() => useFileEditor("agent-1", true));
 
       act(() => {
         result.current.handleContentChange("something");
@@ -409,9 +386,7 @@ describe("useFileEditor", () => {
       mockContent = createMockFileContent({ fileData });
       mockUseFileContent.mockReturnValue(mockContent);
 
-      const { result } = renderHook(() =>
-        useFileEditor("test-ws-id", "agent-1", true),
-      );
+      const { result } = renderHook(() => useFileEditor("agent-1", true));
 
       // Make dirty
       act(() => {
@@ -442,9 +417,7 @@ describe("useFileEditor", () => {
       mockContent = createMockFileContent({ fileData });
       mockUseFileContent.mockReturnValue(mockContent);
 
-      const { result } = renderHook(() =>
-        useFileEditor("test-ws-id", "agent-1", true),
-      );
+      const { result } = renderHook(() => useFileEditor("agent-1", true));
 
       act(() => {
         result.current.handleContentChange("modified");
@@ -474,9 +447,7 @@ describe("useFileEditor", () => {
       mockContent = createMockFileContent({ fileData });
       mockUseFileContent.mockReturnValue(mockContent);
 
-      const { result } = renderHook(() =>
-        useFileEditor("test-ws-id", "agent-1", true),
-      );
+      const { result } = renderHook(() => useFileEditor("agent-1", true));
 
       act(() => {
         result.current.handleContentChange("modified");
@@ -507,7 +478,7 @@ describe("useFileEditor", () => {
       mockUseFileContent.mockReturnValue(mockContent);
 
       const { result, rerender } = renderHook(
-        ({ agent }) => useFileEditor("test-ws-id", agent, true),
+        ({ agent }) => useFileEditor(agent, true),
         { initialProps: { agent: "agent-1" } },
       );
 
@@ -537,9 +508,7 @@ describe("useFileEditor", () => {
       mockUseFileContent.mockReturnValue(mockContent);
       mockWriteWorktreeFile.mockResolvedValueOnce(undefined);
 
-      const { result } = renderHook(() =>
-        useFileEditor("test-ws-id", "agent-1", true),
-      );
+      const { result } = renderHook(() => useFileEditor("agent-1", true));
 
       act(() => {
         result.current.handleContentChange("new");
@@ -570,9 +539,7 @@ describe("useFileEditor", () => {
       mockContent = createMockFileContent({ fileData });
       mockUseFileContent.mockReturnValue(mockContent);
 
-      const { result } = renderHook(() =>
-        useFileEditor("test-ws-id", "agent-1", false),
-      );
+      const { result } = renderHook(() => useFileEditor("agent-1", false));
 
       act(() => {
         result.current.handleContentChange("new");
@@ -593,9 +560,7 @@ describe("useFileEditor", () => {
     it("cleans up keydown listener on unmount", () => {
       const removeSpy = vi.spyOn(document, "removeEventListener");
 
-      const { unmount } = renderHook(() =>
-        useFileEditor("test-ws-id", "agent-1", true),
-      );
+      const { unmount } = renderHook(() => useFileEditor("agent-1", true));
 
       unmount();
 

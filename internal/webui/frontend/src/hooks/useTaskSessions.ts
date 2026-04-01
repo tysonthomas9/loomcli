@@ -10,6 +10,7 @@ import { getTaskSessions } from "../api/sessions";
 import type { MutationPayload } from "../api/sse";
 import type { SessionRecord } from "../types/session";
 import { useSSE } from "./useSSE";
+import { useWorkspaceContext } from "./useWorkspaceContext";
 
 /** Return type for the useTaskSessions hook. */
 export interface UseTaskSessionsResult {
@@ -28,10 +29,8 @@ const POLL_INTERVAL_NORMAL = 10_000;
 /** Fast polling interval when any session is active (ms). */
 const POLL_INTERVAL_ACTIVE = 3_000;
 
-export function useTaskSessions(
-  workspaceId: string,
-  taskId: string | null,
-): UseTaskSessionsResult {
+export function useTaskSessions(taskId: string | null): UseTaskSessionsResult {
+  const { workspaceId } = useWorkspaceContext();
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -81,7 +80,7 @@ export function useTaskSessions(
     [taskId, fetchData],
   );
 
-  useSSE({ workspaceId, onMutation: handleMutation });
+  useSSE({ onMutation: handleMutation });
 
   useEffect(() => {
     mountedRef.current = true;

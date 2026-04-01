@@ -22,6 +22,11 @@ import {
   type UseWorkspaceStateParams,
 } from "../useWorkspaceState";
 
+let mockWorkspaceId = "ws-1";
+vi.mock("../useWorkspaceContext", () => ({
+  useWorkspaceContext: () => ({ workspaceId: mockWorkspaceId }),
+}));
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -50,7 +55,6 @@ function createParams(overrides?: Partial<UseWorkspaceStateParams>) {
   const { ref } = createScrollContainer(0);
 
   const params: UseWorkspaceStateParams = {
-    workspaceId: "ws-1",
     scrollContainerRef: ref,
     activePanel: null,
     restorePanel: vi.fn(),
@@ -71,6 +75,7 @@ describe("useWorkspaceState", () => {
 
   beforeEach(() => {
     clearWorkspaceSnapshots();
+    mockWorkspaceId = "ws-1";
 
     // Mock requestAnimationFrame / cancelAnimationFrame
     rafCallbacks = new Map();
@@ -151,7 +156,6 @@ describe("useWorkspaceState", () => {
       const restorePanel = vi.fn();
       const panel: PanelState = { type: "issue", id: "abc-123" };
       const { params } = createParams({
-        workspaceId: "ws-1",
         scrollContainerRef: ref,
         activePanel: panel,
         restorePanel,
@@ -186,7 +190,6 @@ describe("useWorkspaceState", () => {
     it("restores scroll position via requestAnimationFrame", () => {
       const { ref, element } = createScrollContainer(0);
       const { params } = createParams({
-        workspaceId: "ws-1",
         scrollContainerRef: ref,
       });
 
@@ -217,7 +220,6 @@ describe("useWorkspaceState", () => {
       const panel: PanelState = { type: "issue", id: "issue-42" };
       const restorePanel = vi.fn();
       const { params } = createParams({
-        workspaceId: "ws-1",
         scrollContainerRef: ref,
         activePanel: panel,
         restorePanel,
@@ -239,7 +241,6 @@ describe("useWorkspaceState", () => {
       const panel: PanelState = { type: "agent", name: "falcon" };
       const restorePanel = vi.fn();
       const { params } = createParams({
-        workspaceId: "ws-1",
         scrollContainerRef: ref,
         activePanel: panel,
         restorePanel,
@@ -260,7 +261,6 @@ describe("useWorkspaceState", () => {
       const { ref } = createScrollContainer(0);
       const restorePanel = vi.fn();
       const { params } = createParams({
-        workspaceId: "ws-1",
         scrollContainerRef: ref,
         activePanel: null,
         restorePanel,
@@ -286,22 +286,21 @@ describe("useWorkspaceState", () => {
       const restorePanel = vi.fn();
       const panelA: PanelState = { type: "issue", id: "a-1" };
 
+      mockWorkspaceId = "A";
       const { params } = createParams({
-        workspaceId: "A",
         scrollContainerRef: ref,
         activePanel: panelA,
         restorePanel,
       });
 
       const { rerender } = renderHook(
-        (props: { wsId: string; panel: PanelState }) =>
+        (props: { panel: PanelState }) =>
           useWorkspaceState({
             ...params,
-            workspaceId: props.wsId,
             activePanel: props.panel,
             restorePanel,
           }),
-        { initialProps: { wsId: "A", panel: panelA } },
+        { initialProps: { panel: panelA } },
       );
 
       // Scroll on workspace A
@@ -309,7 +308,8 @@ describe("useWorkspaceState", () => {
 
       // Switch to workspace B (first visit)
       restorePanel.mockClear();
-      rerender({ wsId: "B", panel: null });
+      mockWorkspaceId = "B";
+      rerender({ panel: null });
 
       // closeAllPanels called on switch
       expect(params.closeAllPanels).toHaveBeenCalledTimes(1);
@@ -318,7 +318,8 @@ describe("useWorkspaceState", () => {
 
       // Switch back to A
       restorePanel.mockClear();
-      rerender({ wsId: "A", panel: null });
+      mockWorkspaceId = "A";
+      rerender({ panel: null });
 
       // A's panel should be restored
       expect(restorePanel).toHaveBeenCalledWith(panelA);
@@ -329,18 +330,17 @@ describe("useWorkspaceState", () => {
     });
 
     it("calls closeAllPanels on every workspace switch", () => {
-      const { params } = createParams({ workspaceId: "A" });
+      mockWorkspaceId = "A";
+      const { params } = createParams();
 
-      const { rerender } = renderHook(
-        (props: { wsId: string }) =>
-          useWorkspaceState({ ...params, workspaceId: props.wsId }),
-        { initialProps: { wsId: "A" } },
-      );
+      const { rerender } = renderHook(() => useWorkspaceState(params));
 
-      rerender({ wsId: "B" });
+      mockWorkspaceId = "B";
+      rerender();
       expect(params.closeAllPanels).toHaveBeenCalledTimes(1);
 
-      rerender({ wsId: "C" });
+      mockWorkspaceId = "C";
+      rerender();
       expect(params.closeAllPanels).toHaveBeenCalledTimes(2);
     });
   });
@@ -356,36 +356,38 @@ describe("useWorkspaceState", () => {
       const panelA: PanelState = { type: "issue", id: "a-1" };
       const panelB: PanelState = { type: "agent", name: "hawk" };
 
+      mockWorkspaceId = "A";
       const { params } = createParams({
-        workspaceId: "A",
         scrollContainerRef: ref,
         activePanel: panelA,
         restorePanel,
       });
 
       const { rerender } = renderHook(
-        (props: { wsId: string; panel: PanelState }) =>
+        (props: { panel: PanelState }) =>
           useWorkspaceState({
             ...params,
-            workspaceId: props.wsId,
             activePanel: props.panel,
             restorePanel,
           }),
-        { initialProps: { wsId: "A", panel: panelA } },
+        { initialProps: { panel: panelA } },
       );
 
       element.scrollTop = 100;
 
       // Switch to B
-      rerender({ wsId: "B", panel: panelB });
+      mockWorkspaceId = "B";
+      rerender({ panel: panelB });
       element.scrollTop = 300;
 
       // Switch to C (first visit)
-      rerender({ wsId: "C", panel: null });
+      mockWorkspaceId = "C";
+      rerender({ panel: null });
 
       // Switch back to A
       restorePanel.mockClear();
-      rerender({ wsId: "A", panel: null });
+      mockWorkspaceId = "A";
+      rerender({ panel: null });
 
       expect(restorePanel).toHaveBeenCalledWith(panelA);
       flushRaf();
@@ -401,33 +403,30 @@ describe("useWorkspaceState", () => {
     it("cancels pending rAF when switching rapidly", () => {
       const { ref, element } = createScrollContainer(0);
       const { params } = createParams({
-        workspaceId: "A",
         scrollContainerRef: ref,
       });
 
       // First: create a snapshot for B by mounting/unmounting with B
-      const { unmount: setup } = renderHook(() =>
-        useWorkspaceState({ ...params, workspaceId: "B" }),
-      );
+      mockWorkspaceId = "B";
+      const { unmount: setup } = renderHook(() => useWorkspaceState(params));
       element.scrollTop = 200;
       setup();
 
       // Now mount with A
+      mockWorkspaceId = "A";
       element.scrollTop = 0;
-      const { rerender } = renderHook(
-        (props: { wsId: string }) =>
-          useWorkspaceState({ ...params, workspaceId: props.wsId }),
-        { initialProps: { wsId: "A" } },
-      );
+      const { rerender } = renderHook(() => useWorkspaceState(params));
 
       element.scrollTop = 100;
 
       // Switch to B — B has a snapshot, so restoreFromSnapshot schedules rAF
-      rerender({ wsId: "B" });
+      mockWorkspaceId = "B";
+      rerender();
       expect(rafCallbacks.size).toBeGreaterThan(0);
 
       // Switch to C rapidly without flushing rAF — should cancel
-      rerender({ wsId: "C" });
+      mockWorkspaceId = "C";
+      rerender();
 
       expect(cancelAnimationFrame).toHaveBeenCalled();
     });
@@ -441,7 +440,6 @@ describe("useWorkspaceState", () => {
     it("cancels pending rAF on unmount", () => {
       const { ref, element } = createScrollContainer(0);
       const { params } = createParams({
-        workspaceId: "ws-1",
         scrollContainerRef: ref,
       });
 
@@ -471,7 +469,6 @@ describe("useWorkspaceState", () => {
       const restorePanel = vi.fn();
       const panel: PanelState = { type: "issue", id: "xyz" };
       const { params } = createParams({
-        workspaceId: "ws-1",
         scrollContainerRef: ref,
         activePanel: panel,
         restorePanel,
@@ -512,7 +509,6 @@ describe("useWorkspaceState", () => {
       } as React.RefObject<HTMLElement | null>;
 
       const { params } = createParams({
-        workspaceId: "ws-1",
         scrollContainerRef: nullRef,
         activePanel: null,
         restorePanel,
@@ -549,7 +545,6 @@ describe("useWorkspaceState", () => {
         "closeAllPanels",
         "restorePanel",
         "scrollContainerRef",
-        "workspaceId",
       ]);
     });
   });

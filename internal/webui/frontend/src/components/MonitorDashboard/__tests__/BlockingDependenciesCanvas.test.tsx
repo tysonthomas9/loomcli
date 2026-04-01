@@ -344,7 +344,6 @@ describe("BlockingDependenciesCanvas", () => {
       render(<BlockingDependenciesCanvas issues={[]} />);
 
       expect(useBlockedIssues).toHaveBeenCalledWith({
-        workspaceId: "test-ws-id",
         enabled: true,
       });
     });

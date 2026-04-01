@@ -41,12 +41,10 @@ export function useWorkspaceTree(
   _workspaceName: string,
   activeFilter: "active" | "all",
   sourceRepos?: string[],
-  workspaceId?: string,
 ): UseWorkspaceTreeReturn {
   const { issues, isLoading, error, refetch } = useIssues({
     mode: "kanban",
     sourceRepos,
-    workspaceId: workspaceId ?? "",
     autoFetch: sourceRepos !== undefined && sourceRepos.length > 0,
     autoConnect: false, // sidebar tree uses parent's SSE connection, no redundant EventSource
   });

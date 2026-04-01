@@ -13,6 +13,10 @@ vi.mock("@/api/files", () => ({
   readWorktreeFile: vi.fn(),
 }));
 
+vi.mock("./useWorkspaceContext", () => ({
+  useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
+}));
+
 const mockReadFile = vi.mocked(readWorktreeFile);
 
 function createFileData(overrides: Partial<FileReadData> = {}): FileReadData {
@@ -36,9 +40,7 @@ describe("useFileContent", () => {
 
   describe("Initial state", () => {
     it("returns expected shape with all properties", () => {
-      const { result } = renderHook(() =>
-        useFileContent("test-ws-id", "agent-1"),
-      );
+      const { result } = renderHook(() => useFileContent("agent-1"));
 
       expect(result.current).toHaveProperty("fileData");
       expect(result.current).toHaveProperty("isLoading");
@@ -51,9 +53,7 @@ describe("useFileContent", () => {
     });
 
     it("starts with null fileData, not loading, no error", () => {
-      const { result } = renderHook(() =>
-        useFileContent("test-ws-id", "agent-1"),
-      );
+      const { result } = renderHook(() => useFileContent("agent-1"));
 
       expect(result.current.fileData).toBeNull();
       expect(result.current.isLoading).toBe(false);
@@ -66,9 +66,7 @@ describe("useFileContent", () => {
       const testFile = createFileData({ path: "src/app.ts" });
       mockReadFile.mockResolvedValue(testFile);
 
-      const { result } = renderHook(() =>
-        useFileContent("test-ws-id", "agent-1"),
-      );
+      const { result } = renderHook(() => useFileContent("agent-1"));
 
       await act(async () => {
         await result.current.fetchFile("src/app.ts");
@@ -92,9 +90,7 @@ describe("useFileContent", () => {
       });
       mockReadFile.mockReturnValue(slowPromise);
 
-      const { result } = renderHook(() =>
-        useFileContent("test-ws-id", "agent-1"),
-      );
+      const { result } = renderHook(() => useFileContent("agent-1"));
 
       act(() => {
         result.current.fetchFile("src/main.ts");
@@ -112,9 +108,7 @@ describe("useFileContent", () => {
     it("clears previous error on new fetch", async () => {
       mockReadFile.mockRejectedValueOnce(new Error("Not found"));
 
-      const { result } = renderHook(() =>
-        useFileContent("test-ws-id", "agent-1"),
-      );
+      const { result } = renderHook(() => useFileContent("agent-1"));
 
       await act(async () => {
         await result.current.fetchFile("bad-path");
@@ -134,9 +128,7 @@ describe("useFileContent", () => {
 
   describe("Validation", () => {
     it("does not fetch when path is empty", async () => {
-      const { result } = renderHook(() =>
-        useFileContent("test-ws-id", "agent-1"),
-      );
+      const { result } = renderHook(() => useFileContent("agent-1"));
 
       await act(async () => {
         await result.current.fetchFile("");
@@ -147,7 +139,7 @@ describe("useFileContent", () => {
     });
 
     it("does not fetch when agentName is empty", async () => {
-      const { result } = renderHook(() => useFileContent("test-ws-id", ""));
+      const { result } = renderHook(() => useFileContent(""));
 
       await act(async () => {
         await result.current.fetchFile("src/main.ts");
@@ -162,9 +154,7 @@ describe("useFileContent", () => {
     it("sets error on fetch failure with Error object", async () => {
       mockReadFile.mockRejectedValue(new Error("Network error"));
 
-      const { result } = renderHook(() =>
-        useFileContent("test-ws-id", "agent-1"),
-      );
+      const { result } = renderHook(() => useFileContent("agent-1"));
 
       await act(async () => {
         await result.current.fetchFile("src/main.ts");
@@ -177,9 +167,7 @@ describe("useFileContent", () => {
     it("converts non-Error thrown values to string", async () => {
       mockReadFile.mockRejectedValue("string error");
 
-      const { result } = renderHook(() =>
-        useFileContent("test-ws-id", "agent-1"),
-      );
+      const { result } = renderHook(() => useFileContent("agent-1"));
 
       await act(async () => {
         await result.current.fetchFile("src/main.ts");
@@ -192,9 +180,7 @@ describe("useFileContent", () => {
       const testFile = createFileData({ path: "src/app.ts" });
       mockReadFile.mockResolvedValueOnce(testFile);
 
-      const { result } = renderHook(() =>
-        useFileContent("test-ws-id", "agent-1"),
-      );
+      const { result } = renderHook(() => useFileContent("agent-1"));
 
       await act(async () => {
         await result.current.fetchFile("src/app.ts");
@@ -218,9 +204,7 @@ describe("useFileContent", () => {
       const testFile = createFileData();
       mockReadFile.mockResolvedValueOnce(testFile);
 
-      const { result } = renderHook(() =>
-        useFileContent("test-ws-id", "agent-1"),
-      );
+      const { result } = renderHook(() => useFileContent("agent-1"));
 
       await act(async () => {
         await result.current.fetchFile("src/main.ts");
@@ -244,9 +228,7 @@ describe("useFileContent", () => {
       });
       mockReadFile.mockReturnValue(slowPromise);
 
-      const { result } = renderHook(() =>
-        useFileContent("test-ws-id", "agent-1"),
-      );
+      const { result } = renderHook(() => useFileContent("agent-1"));
 
       act(() => {
         result.current.fetchFile("src/main.ts");
@@ -296,9 +278,7 @@ describe("useFileContent", () => {
         .mockReturnValueOnce(firstPromise)
         .mockReturnValueOnce(secondPromise);
 
-      const { result } = renderHook(() =>
-        useFileContent("test-ws-id", "agent-1"),
-      );
+      const { result } = renderHook(() => useFileContent("agent-1"));
 
       act(() => {
         result.current.fetchFile("first.ts");
@@ -337,9 +317,7 @@ describe("useFileContent", () => {
         .mockReturnValueOnce(firstPromise)
         .mockReturnValueOnce(secondPromise);
 
-      const { result } = renderHook(() =>
-        useFileContent("test-ws-id", "agent-1"),
-      );
+      const { result } = renderHook(() => useFileContent("agent-1"));
 
       act(() => {
         result.current.fetchFile("first.ts");
@@ -374,9 +352,7 @@ describe("useFileContent", () => {
       });
       mockReadFile.mockReturnValue(slowPromise);
 
-      const { result, unmount } = renderHook(() =>
-        useFileContent("test-ws-id", "agent-1"),
-      );
+      const { result, unmount } = renderHook(() => useFileContent("agent-1"));
 
       act(() => {
         result.current.fetchFile("src/main.ts");
@@ -398,9 +374,7 @@ describe("useFileContent", () => {
       });
       mockReadFile.mockReturnValue(slowPromise);
 
-      const { result, unmount } = renderHook(() =>
-        useFileContent("test-ws-id", "agent-1"),
-      );
+      const { result, unmount } = renderHook(() => useFileContent("agent-1"));
 
       act(() => {
         result.current.fetchFile("src/main.ts");
@@ -416,9 +390,7 @@ describe("useFileContent", () => {
 
   describe("Callback stability", () => {
     it("fetchFile is stable across renders", () => {
-      const { result, rerender } = renderHook(() =>
-        useFileContent("test-ws-id", "agent-1"),
-      );
+      const { result, rerender } = renderHook(() => useFileContent("agent-1"));
 
       const initialFetchFile = result.current.fetchFile;
       rerender();
@@ -426,9 +398,7 @@ describe("useFileContent", () => {
     });
 
     it("clearFile is stable across renders", () => {
-      const { result, rerender } = renderHook(() =>
-        useFileContent("test-ws-id", "agent-1"),
-      );
+      const { result, rerender } = renderHook(() => useFileContent("agent-1"));
 
       const initialClearFile = result.current.clearFile;
       rerender();

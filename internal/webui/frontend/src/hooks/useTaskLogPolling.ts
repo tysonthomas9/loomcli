@@ -2,10 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { getTaskLogContent } from "@/api";
 
+import { useWorkspaceContext } from "./useWorkspaceContext";
+
 import type { LogChunk, LogStreamState } from "./logTypes";
 
 export interface UseTaskLogPollingOptions {
-  workspaceId: string;
   taskId: string | null;
   phase: "planning" | "implementation" | null;
   enabled: boolean;
@@ -22,13 +23,13 @@ export interface UseTaskLogPollingReturn {
 }
 
 export function useTaskLogPolling({
-  workspaceId,
   taskId,
   phase,
   enabled,
   lines = 500,
   pollIntervalMs = 2000,
 }: UseTaskLogPollingOptions): UseTaskLogPollingReturn {
+  const { workspaceId } = useWorkspaceContext();
   const [chunks, setChunks] = useState<LogChunk[]>([]);
   const [state, setState] = useState<LogStreamState>("disconnected");
   const [error, setError] = useState<string | null>(null);

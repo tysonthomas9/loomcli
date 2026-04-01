@@ -233,7 +233,7 @@ describe("SessionsTab", () => {
         refetch: vi.fn(),
       });
       render(<SessionsTab taskId="task-42" />);
-      expect(mockUseTaskSessions).toHaveBeenCalledWith("test-ws-id", "task-42");
+      expect(mockUseTaskSessions).toHaveBeenCalledWith("task-42");
     });
   });
 });

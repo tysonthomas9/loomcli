@@ -386,6 +386,7 @@ vi.mock("@/hooks", () => ({
     refetch: vi.fn(),
   })),
   useWorkspaceContext: vi.fn(() => ({
+    workspaceId: "test-ws-id",
     workspace: null,
     repos: [],
     groups: [],
@@ -1806,7 +1807,6 @@ describe("App", () => {
       expect(useIssues).toHaveBeenCalledWith(
         expect.objectContaining({
           mode: "kanban",
-          workspaceId: "test-ws-id",
         }),
       );
     });
@@ -1821,7 +1821,6 @@ describe("App", () => {
       expect(useIssues).toHaveBeenCalledWith(
         expect.objectContaining({
           mode: "ready",
-          workspaceId: "test-ws-id",
         }),
       );
     });
@@ -1836,7 +1835,6 @@ describe("App", () => {
       expect(useIssues).toHaveBeenCalledWith(
         expect.objectContaining({
           mode: "graph",
-          workspaceId: "test-ws-id",
         }),
       );
     });
@@ -1854,7 +1852,6 @@ describe("App", () => {
       // Verify initial call with mode: 'kanban'
       expect(useIssues).toHaveBeenLastCalledWith({
         mode: "kanban",
-        workspaceId: "test-ws-id",
       });
 
       // Clear mock to track the next call
@@ -1868,7 +1865,6 @@ describe("App", () => {
       // Verify useIssues is called with mode: 'graph' after view change
       expect(useIssues).toHaveBeenLastCalledWith({
         mode: "graph",
-        workspaceId: "test-ws-id",
       });
     });
 
@@ -1885,7 +1881,6 @@ describe("App", () => {
       // Verify initial call with mode: 'graph'
       expect(useIssues).toHaveBeenLastCalledWith({
         mode: "graph",
-        workspaceId: "test-ws-id",
       });
 
       // Clear mock to track the next call
@@ -1899,7 +1894,6 @@ describe("App", () => {
       // Verify useIssues is called with mode: 'kanban' after view change
       expect(useIssues).toHaveBeenLastCalledWith({
         mode: "kanban",
-        workspaceId: "test-ws-id",
       });
     });
 
@@ -1916,7 +1910,6 @@ describe("App", () => {
       // Verify initial call with mode: 'graph'
       expect(useIssues).toHaveBeenLastCalledWith({
         mode: "graph",
-        workspaceId: "test-ws-id",
       });
 
       // Clear mock to track the next call
@@ -1930,7 +1923,6 @@ describe("App", () => {
       // Verify useIssues is called with mode: 'ready' after view change
       expect(useIssues).toHaveBeenLastCalledWith({
         mode: "ready",
-        workspaceId: "test-ws-id",
       });
     });
 
@@ -1947,7 +1939,6 @@ describe("App", () => {
       // Verify initial call with mode: 'kanban'
       expect(useIssues).toHaveBeenLastCalledWith({
         mode: "kanban",
-        workspaceId: "test-ws-id",
       });
 
       // Clear mock to track the next call
@@ -1961,7 +1952,6 @@ describe("App", () => {
       // Verify useIssues is still called with mode: 'ready'
       expect(useIssues).toHaveBeenLastCalledWith({
         mode: "ready",
-        workspaceId: "test-ws-id",
       });
     });
 
@@ -2000,7 +1990,6 @@ describe("App", () => {
       expect(useIssues).toHaveBeenCalledWith(
         expect.objectContaining({
           mode: "ready",
-          workspaceId: "test-ws-id",
         }),
       );
     });

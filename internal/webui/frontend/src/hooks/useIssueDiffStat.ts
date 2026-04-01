@@ -9,10 +9,10 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { fetchIssueDiffStat } from "@/api";
 import type { IssueDiffStat } from "@/api";
 
+import { useWorkspaceContext } from "./useWorkspaceContext";
+
 /** Options for the useIssueDiffStat hook. */
 export interface UseIssueDiffStatOptions {
-  /** Workspace ID for scoped API calls. */
-  workspaceId: string;
   /** Issue ID to fetch diff stats for. Null skips fetching. */
   issueId: string | null;
   /** Whether to fetch (default: true). */
@@ -36,12 +36,8 @@ export interface UseIssueDiffStatReturn {
 export function useIssueDiffStat(
   options: UseIssueDiffStatOptions,
 ): UseIssueDiffStatReturn {
-  const {
-    workspaceId,
-    issueId,
-    enabled = true,
-    pollInterval = 30000,
-  } = options;
+  const { workspaceId } = useWorkspaceContext();
+  const { issueId, enabled = true, pollInterval = 30000 } = options;
 
   const [data, setData] = useState<IssueDiffStat | null>(null);
   const [isLoading, setIsLoading] = useState(false);

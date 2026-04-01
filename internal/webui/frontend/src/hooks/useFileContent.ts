@@ -6,6 +6,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { readWorktreeFile } from "@/api/files";
 import type { FileReadData } from "@/api/files";
+import { useWorkspaceContext } from "./useWorkspaceContext";
 
 export interface UseFileContentReturn {
   /** File content data, null if not loaded */
@@ -20,10 +21,8 @@ export interface UseFileContentReturn {
   clearFile: () => void;
 }
 
-export function useFileContent(
-  workspaceId: string,
-  agentName: string,
-): UseFileContentReturn {
+export function useFileContent(agentName: string): UseFileContentReturn {
+  const { workspaceId } = useWorkspaceContext();
   const [fileData, setFileData] = useState<FileReadData | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);

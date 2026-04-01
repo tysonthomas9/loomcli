@@ -9,6 +9,8 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { getKanbanIssues } from "@/api";
 import type { Issue } from "@/types";
 
+import { useWorkspaceContext } from "./useWorkspaceContext";
+
 // Module-level cache shared across all hook instances
 let cachedIssues: Issue[] | null = null;
 let fetchPromise: Promise<Issue[]> | null = null;
@@ -24,7 +26,8 @@ export interface UseIssueSearchReturn {
   query: string;
 }
 
-export function useIssueSearch(workspaceId: string): UseIssueSearchReturn {
+export function useIssueSearch(): UseIssueSearchReturn {
+  const { workspaceId } = useWorkspaceContext();
   const [allIssues, setAllIssues] = useState<Issue[]>(cachedIssues ?? []);
   const [isLoading, setIsLoading] = useState(cachedIssues === null);
   const [query, setQuery] = useState("");

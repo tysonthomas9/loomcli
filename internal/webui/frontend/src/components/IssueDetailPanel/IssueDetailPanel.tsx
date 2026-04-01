@@ -349,7 +349,7 @@ function DefaultContent({
     savedState: persistedTabState,
     isLoading: isLoadingPersistedTabs,
     saveTabs: persistTabs,
-  } = useIssueTabPersistence(workspaceId, issueId);
+  } = useIssueTabPersistence(issueId);
 
   // Tab state - managed tab array with dynamic add/remove
   const [tabs, setTabs] = useState<DetailTab[]>([DETAILS_TAB, SESSIONS_TAB]);
@@ -481,7 +481,6 @@ function DefaultContent({
     hasMoreLines,
     isLoadingMore,
   } = useAgentTerminalLogs({
-    workspaceId,
     agentName,
     enabled: isOpen && activeTabId === "logs" && hasAgent,
   });

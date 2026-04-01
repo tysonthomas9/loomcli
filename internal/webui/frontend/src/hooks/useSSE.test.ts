@@ -16,6 +16,11 @@ vi.mock("../api/client", async (importOriginal) => {
   };
 });
 
+let mockWorkspaceId = "test-ws-id";
+vi.mock("./useWorkspaceContext", () => ({
+  useWorkspaceContext: () => ({ workspaceId: mockWorkspaceId }),
+}));
+
 // Mock EventSource class with static constants matching the real EventSource API
 class MockEventSource {
   // EventSource readyState constants
@@ -104,6 +109,7 @@ describe("useSSE", () => {
   let originalEventSource: typeof EventSource;
 
   beforeEach(() => {
+    mockWorkspaceId = "test-ws-id";
     originalEventSource = global.EventSource;
     global.EventSource = MockEventSource as unknown as typeof EventSource;
     MockEventSource.reset();
@@ -116,9 +122,7 @@ describe("useSSE", () => {
 
   describe("Initialization", () => {
     it("returns expected shape with all methods and state", () => {
-      const { result } = renderHook(() =>
-        useSSE({ workspaceId: "test-ws-id", autoConnect: false }),
-      );
+      const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
       expect(result.current).toHaveProperty("state");
       expect(result.current).toHaveProperty("lastError");
@@ -135,9 +139,7 @@ describe("useSSE", () => {
     });
 
     it("initial state is disconnected", () => {
-      const { result } = renderHook(() =>
-        useSSE({ workspaceId: "test-ws-id", autoConnect: false }),
-      );
+      const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
       expect(result.current.state).toBe("disconnected");
       expect(result.current.isConnected).toBe(false);
@@ -149,9 +151,7 @@ describe("useSSE", () => {
 
   describe("Auto-connect option", () => {
     it("when true connects on mount", async () => {
-      renderHook(() =>
-        useSSE({ workspaceId: "test-ws-id", autoConnect: true }),
-      );
+      renderHook(() => useSSE({ autoConnect: true }));
       await flushConnect();
 
       // EventSource should be created automatically
@@ -162,9 +162,7 @@ describe("useSSE", () => {
     });
 
     it("when false does not connect on mount", () => {
-      const { result } = renderHook(() =>
-        useSSE({ workspaceId: "test-ws-id", autoConnect: false }),
-      );
+      const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
       // No EventSource should be created
       expect(MockEventSource.instances.length).toBe(0);
@@ -172,7 +170,7 @@ describe("useSSE", () => {
     });
 
     it("defaults to true", async () => {
-      renderHook(() => useSSE({ workspaceId: "test-ws-id" }));
+      renderHook(() => useSSE({}));
       await flushConnect();
 
       // EventSource should be created automatically (default autoConnect: true)
@@ -182,9 +180,7 @@ describe("useSSE", () => {
 
   describe("Connection lifecycle", () => {
     it("connect() creates EventSource", async () => {
-      const { result } = renderHook(() =>
-        useSSE({ workspaceId: "test-ws-id", autoConnect: false }),
-      );
+      const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
       act(() => {
         result.current.connect();
@@ -198,9 +194,7 @@ describe("useSSE", () => {
     });
 
     it("state transitions from disconnected to connecting to connected", async () => {
-      const { result } = renderHook(() =>
-        useSSE({ workspaceId: "test-ws-id", autoConnect: false }),
-      );
+      const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
       expect(result.current.state).toBe("disconnected");
 
@@ -220,9 +214,7 @@ describe("useSSE", () => {
     });
 
     it("disconnect() closes EventSource and updates state", async () => {
-      const { result } = renderHook(() =>
-        useSSE({ workspaceId: "test-ws-id", autoConnect: false }),
-      );
+      const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
       act(() => {
         result.current.connect();
@@ -245,7 +237,7 @@ describe("useSSE", () => {
 
     it("component unmount calls destroy and cleans up", async () => {
       const { result, unmount } = renderHook(() =>
-        useSSE({ workspaceId: "test-ws-id", autoConnect: false }),
+        useSSE({ autoConnect: false }),
       );
 
       act(() => {
@@ -271,7 +263,7 @@ describe("useSSE", () => {
       const renderCount = { count: 0 };
       const { result } = renderHook(() => {
         renderCount.count++;
-        return useSSE({ workspaceId: "test-ws-id", autoConnect: false });
+        return useSSE({ autoConnect: false });
       });
 
       const initialCount = renderCount.count;
@@ -293,9 +285,7 @@ describe("useSSE", () => {
     });
 
     it("isConnected computed correctly based on state", async () => {
-      const { result } = renderHook(() =>
-        useSSE({ workspaceId: "test-ws-id", autoConnect: false }),
-      );
+      const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
       expect(result.current.isConnected).toBe(false);
       expect(result.current.state).toBe("disconnected");
@@ -317,9 +307,7 @@ describe("useSSE", () => {
     });
 
     it("lastError updates on errors", async () => {
-      const { result } = renderHook(() =>
-        useSSE({ workspaceId: "test-ws-id", autoConnect: false }),
-      );
+      const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
       act(() => {
         result.current.connect();
@@ -338,9 +326,7 @@ describe("useSSE", () => {
     });
 
     it("lastError is cleared on successful connection", async () => {
-      const { result } = renderHook(() =>
-        useSSE({ workspaceId: "test-ws-id", autoConnect: false }),
-      );
+      const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
       act(() => {
         result.current.connect();
@@ -367,9 +353,7 @@ describe("useSSE", () => {
     });
 
     it("reconnectAttempts updates reactively", async () => {
-      const { result } = renderHook(() =>
-        useSSE({ workspaceId: "test-ws-id", autoConnect: false }),
-      );
+      const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
       act(() => {
         result.current.connect();
@@ -396,9 +380,7 @@ describe("useSSE", () => {
     });
 
     it("reconnectAttempts resets to 0 on successful connection", async () => {
-      const { result } = renderHook(() =>
-        useSSE({ workspaceId: "test-ws-id", autoConnect: false }),
-      );
+      const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
       act(() => {
         result.current.connect();
@@ -429,7 +411,7 @@ describe("useSSE", () => {
     it("onMutation called with payload", async () => {
       const onMutation = vi.fn();
       const { result } = renderHook(() =>
-        useSSE({ workspaceId: "test-ws-id", autoConnect: false, onMutation }),
+        useSSE({ autoConnect: false, onMutation }),
       );
 
       act(() => {
@@ -456,9 +438,7 @@ describe("useSSE", () => {
     });
 
     it("lastEventId is updated when mutation is received", async () => {
-      const { result } = renderHook(() =>
-        useSSE({ workspaceId: "test-ws-id", autoConnect: false }),
-      );
+      const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
       // Initially undefined
       expect(result.current.lastEventId).toBeUndefined();
@@ -492,7 +472,7 @@ describe("useSSE", () => {
     it("onError called with error message", async () => {
       const onError = vi.fn();
       const { result } = renderHook(() =>
-        useSSE({ workspaceId: "test-ws-id", autoConnect: false, onError }),
+        useSSE({ autoConnect: false, onError }),
       );
 
       act(() => {
@@ -515,7 +495,6 @@ describe("useSSE", () => {
       const onStateChange = vi.fn();
       const { result } = renderHook(() =>
         useSSE({
-          workspaceId: "test-ws-id",
           autoConnect: false,
           onStateChange,
         }),
@@ -544,7 +523,7 @@ describe("useSSE", () => {
     it("callbacks are not called after unmount", async () => {
       const onMutation = vi.fn();
       const { result, unmount } = renderHook(() =>
-        useSSE({ workspaceId: "test-ws-id", autoConnect: false, onMutation }),
+        useSSE({ autoConnect: false, onMutation }),
       );
 
       act(() => {
@@ -579,7 +558,6 @@ describe("useSSE", () => {
     it("passes since parameter to client on auto-connect", async () => {
       renderHook(() =>
         useSSE({
-          workspaceId: "test-ws-id",
           autoConnect: true,
           since: 1706011200000,
         }),
@@ -594,7 +572,6 @@ describe("useSSE", () => {
     it("passes since parameter to client on manual connect", async () => {
       const { result } = renderHook(() =>
         useSSE({
-          workspaceId: "test-ws-id",
           autoConnect: false,
           since: 1706011200000,
         }),
@@ -613,7 +590,7 @@ describe("useSSE", () => {
     it("uses updated since value when it changes", async () => {
       const { rerender, result } = renderHook(
         ({ since }: { since: number | undefined }) =>
-          useSSE({ workspaceId: "test-ws-id", autoConnect: false, since }),
+          useSSE({ autoConnect: false, since }),
         { initialProps: { since: 1706011200000 } },
       );
 
@@ -647,7 +624,7 @@ describe("useSSE", () => {
   describe("Methods stability", () => {
     it("methods are stable across renders", () => {
       const { result, rerender } = renderHook(() =>
-        useSSE({ workspaceId: "test-ws-id", autoConnect: false }),
+        useSSE({ autoConnect: false }),
       );
 
       const initialConnect = result.current.connect;
@@ -664,9 +641,7 @@ describe("useSSE", () => {
 
   describe("retryNow", () => {
     it("triggers immediate reconnection when in reconnecting state", async () => {
-      const { result } = renderHook(() =>
-        useSSE({ workspaceId: "test-ws-id", autoConnect: false }),
-      );
+      const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
       act(() => {
         result.current.connect();
@@ -697,9 +672,7 @@ describe("useSSE", () => {
     });
 
     it("resets reconnectAttempts to 0", async () => {
-      const { result } = renderHook(() =>
-        useSSE({ workspaceId: "test-ws-id", autoConnect: false }),
-      );
+      const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
       act(() => {
         result.current.connect();
@@ -732,9 +705,7 @@ describe("useSSE", () => {
 
   describe("SSR compatibility", () => {
     it("works when autoConnect is false (SSR-safe pattern)", () => {
-      const { result } = renderHook(() =>
-        useSSE({ workspaceId: "test-ws-id", autoConnect: false }),
-      );
+      const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
       // Should have initial state and no EventSource created
       expect(result.current.state).toBe("disconnected");
@@ -748,9 +719,7 @@ describe("useSSE", () => {
     });
 
     it("manual connect works after mount (typical SSR hydration pattern)", async () => {
-      const { result } = renderHook(() =>
-        useSSE({ workspaceId: "test-ws-id", autoConnect: false }),
-      );
+      const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
       expect(result.current.state).toBe("disconnected");
       expect(MockEventSource.instances.length).toBe(0);
@@ -769,7 +738,7 @@ describe("useSSE", () => {
   describe("Cleanup on unmount", () => {
     it("destroys client on unmount", async () => {
       const { result, unmount } = renderHook(() =>
-        useSSE({ workspaceId: "test-ws-id", autoConnect: false }),
+        useSSE({ autoConnect: false }),
       );
 
       act(() => {
@@ -794,7 +763,6 @@ describe("useSSE", () => {
       const onStateChange = vi.fn();
       const { result, unmount } = renderHook(() =>
         useSSE({
-          workspaceId: "test-ws-id",
           autoConnect: false,
           onStateChange,
         }),
@@ -828,7 +796,7 @@ describe("useSSE", () => {
   describe("Unmount during connecting state", () => {
     it("cleans up EventSource when unmounted during connecting state", async () => {
       const { result, unmount } = renderHook(() =>
-        useSSE({ workspaceId: "test-ws-id", autoConnect: false }),
+        useSSE({ autoConnect: false }),
       );
 
       act(() => {
@@ -853,7 +821,6 @@ describe("useSSE", () => {
       const onMutation = vi.fn();
       const { result, unmount } = renderHook(() =>
         useSSE({
-          workspaceId: "test-ws-id",
           autoConnect: false,
           onStateChange,
           onMutation,
@@ -886,9 +853,7 @@ describe("useSSE", () => {
 
   describe("Rapid connect/disconnect cycles", () => {
     it("handles rapid connect→disconnect→connect cycle", async () => {
-      const { result } = renderHook(() =>
-        useSSE({ workspaceId: "test-ws-id", autoConnect: false }),
-      );
+      const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
       act(() => {
         result.current.connect();
@@ -916,9 +881,7 @@ describe("useSSE", () => {
     });
 
     it("handles rapid connect→disconnect→connect→open cycle", async () => {
-      const { result } = renderHook(() =>
-        useSSE({ workspaceId: "test-ws-id", autoConnect: false }),
-      );
+      const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
       act(() => {
         result.current.connect();
@@ -948,9 +911,7 @@ describe("useSSE", () => {
     });
 
     it("five rapid connect/disconnect cycles produce clean state", async () => {
-      const { result } = renderHook(() =>
-        useSSE({ workspaceId: "test-ws-id", autoConnect: false }),
-      );
+      const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
       for (let i = 0; i < 5; i++) {
         act(() => {
@@ -977,7 +938,6 @@ describe("useSSE", () => {
     it("passes sourceRepos to client.connect() on auto-connect", async () => {
       renderHook(() =>
         useSSE({
-          workspaceId: "test-ws-id",
           autoConnect: true,
           sourceRepos: ["repo-a", "repo-b"],
         }),
@@ -992,7 +952,6 @@ describe("useSSE", () => {
     it("passes sourceRepos to client on manual connect", async () => {
       const { result } = renderHook(() =>
         useSSE({
-          workspaceId: "test-ws-id",
           autoConnect: false,
           sourceRepos: ["repo-x"],
         }),
@@ -1011,7 +970,7 @@ describe("useSSE", () => {
     it("changing sourceRepos triggers disconnect + reconnect", async () => {
       const { rerender } = renderHook(
         ({ sourceRepos }: { sourceRepos: string[] | undefined }) =>
-          useSSE({ workspaceId: "test-ws-id", autoConnect: true, sourceRepos }),
+          useSSE({ autoConnect: true, sourceRepos }),
         { initialProps: { sourceRepos: ["repo-a"] as string[] | undefined } },
       );
       await flushConnect();
@@ -1035,7 +994,7 @@ describe("useSSE", () => {
     it("identical sourceRepos (reordered) does NOT trigger reconnect", async () => {
       const { rerender } = renderHook(
         ({ sourceRepos }: { sourceRepos: string[] | undefined }) =>
-          useSSE({ workspaceId: "test-ws-id", autoConnect: true, sourceRepos }),
+          useSSE({ autoConnect: true, sourceRepos }),
         {
           initialProps: {
             sourceRepos: ["repo-a", "repo-b"] as string[] | undefined,
@@ -1063,7 +1022,6 @@ describe("useSSE", () => {
           since: number | undefined;
         }) =>
           useSSE({
-            workspaceId: "test-ws-id",
             autoConnect: true,
             sourceRepos,
             since,
@@ -1099,7 +1057,7 @@ describe("useSSE", () => {
     it("switching from sourceRepos to undefined triggers reconnect", async () => {
       const { rerender } = renderHook(
         ({ sourceRepos }: { sourceRepos: string[] | undefined }) =>
-          useSSE({ workspaceId: "test-ws-id", autoConnect: true, sourceRepos }),
+          useSSE({ autoConnect: true, sourceRepos }),
         { initialProps: { sourceRepos: ["repo-a"] as string[] | undefined } },
       );
       await flushConnect();
@@ -1116,17 +1074,12 @@ describe("useSSE", () => {
     });
 
     it("workspace switch with different sourceRepos does NOT trigger double connect", async () => {
+      mockWorkspaceId = "ws-a";
       const { rerender } = renderHook(
-        ({
-          workspaceId,
-          sourceRepos,
-        }: {
-          workspaceId: string;
-          sourceRepos: string[];
-        }) => useSSE({ workspaceId, autoConnect: true, sourceRepos }),
+        ({ sourceRepos }: { sourceRepos: string[] }) =>
+          useSSE({ autoConnect: true, sourceRepos }),
         {
           initialProps: {
-            workspaceId: "ws-a",
             sourceRepos: ["repo-a"],
           },
         },
@@ -1138,7 +1091,8 @@ describe("useSSE", () => {
       expect(MockEventSource.instances[0].url).toContain("source_repos=repo-a");
 
       // Switch workspace AND sourceRepos at the same time
-      rerender({ workspaceId: "ws-b", sourceRepos: ["repo-b"] });
+      mockWorkspaceId = "ws-b";
+      rerender({ sourceRepos: ["repo-b"] });
       await flushConnect();
 
       // Should be exactly 2 instances: one destroyed for ws-a, one new for ws-b
@@ -1152,17 +1106,12 @@ describe("useSSE", () => {
     });
 
     it("workspace switch with same sourceRepos does NOT trigger reconnect", async () => {
+      mockWorkspaceId = "ws-a";
       const { rerender } = renderHook(
-        ({
-          workspaceId,
-          sourceRepos,
-        }: {
-          workspaceId: string;
-          sourceRepos: string[];
-        }) => useSSE({ workspaceId, autoConnect: true, sourceRepos }),
+        ({ sourceRepos }: { sourceRepos: string[] }) =>
+          useSSE({ autoConnect: true, sourceRepos }),
         {
           initialProps: {
-            workspaceId: "ws-a",
             sourceRepos: ["repo-a"],
           },
         },
@@ -1172,7 +1121,8 @@ describe("useSSE", () => {
       expect(MockEventSource.instances.length).toBe(1);
 
       // Switch workspace but keep same sourceRepos
-      rerender({ workspaceId: "ws-b", sourceRepos: ["repo-a"] });
+      mockWorkspaceId = "ws-b";
+      rerender({ sourceRepos: ["repo-a"] });
       await flushConnect();
 
       // Should be exactly 2 instances (old destroyed, new created by Effect A)
@@ -1188,9 +1138,7 @@ describe("useSSE", () => {
 
   describe("auth-sign-out cleanup", () => {
     it("auth-sign-out event disconnects SSE", async () => {
-      const { result } = renderHook(() =>
-        useSSE({ workspaceId: "test-ws-id", autoConnect: false }),
-      );
+      const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
       act(() => {
         result.current.connect();
@@ -1218,7 +1166,7 @@ describe("useSSE", () => {
 
     it("auth-sign-out listener is cleaned up on unmount", async () => {
       const { result, unmount } = renderHook(() =>
-        useSSE({ workspaceId: "test-ws-id", autoConnect: false }),
+        useSSE({ autoConnect: false }),
       );
 
       act(() => {
@@ -1234,8 +1182,9 @@ describe("useSSE", () => {
       unmount();
 
       // Create a new hook to verify the old listener is no longer active
+      mockWorkspaceId = "test-ws-id-2";
       const { result: result2 } = renderHook(() =>
-        useSSE({ workspaceId: "test-ws-id-2", autoConnect: false }),
+        useSSE({ autoConnect: false }),
       );
 
       act(() => {

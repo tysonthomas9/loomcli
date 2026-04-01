@@ -99,7 +99,6 @@ export function AgentDetailPanel({
     hasMoreLines,
     isLoadingMore,
   } = useAgentTerminalLogs({
-    workspaceId,
     agentName,
     enabled: isOpen && activeTab === "logs" && agentName !== null,
   });

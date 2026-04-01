@@ -16,13 +16,12 @@ import {
   type ConnectionState,
   type MutationPayload,
 } from "../api/sse";
+import { useWorkspaceContext } from "./useWorkspaceContext";
 
 /**
  * Options for the useSSE hook.
  */
 export interface UseSSEOptions {
-  /** Workspace UUID for path-based SSE routing */
-  workspaceId: string;
   /** Called when a mutation event is received */
   onMutation?: (mutation: MutationPayload) => void;
   /** Called when an error occurs */
@@ -79,8 +78,8 @@ export interface UseSSEReturn {
  * ```
  */
 export function useSSE(options: UseSSEOptions): UseSSEReturn {
+  const { workspaceId } = useWorkspaceContext();
   const {
-    workspaceId,
     autoConnect = true,
     since,
     onMutation,

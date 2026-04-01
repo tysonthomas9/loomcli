@@ -766,7 +766,6 @@ describe("GraphView", () => {
       render(<GraphView {...props} />);
 
       expect(useBlockedIssues).toHaveBeenCalledWith({
-        workspaceId: TEST_WS_ID,
         enabled: true,
       });
     });

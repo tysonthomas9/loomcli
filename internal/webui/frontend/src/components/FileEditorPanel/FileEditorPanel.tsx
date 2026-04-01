@@ -5,7 +5,6 @@
 
 import type { FileEntry } from "@/api/files";
 import type { UseFileTreeReturn } from "@/hooks";
-import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
 import { CodeMirrorEditor } from "@/components/CodeMirrorEditor";
 import { useFileEditor } from "./useFileEditor";
 import type { UseFileEditorReturn } from "./useFileEditor";
@@ -121,12 +120,7 @@ export function FileEditorPanel({
   agentName,
   isActive,
 }: FileEditorPanelProps): JSX.Element {
-  const { workspaceId } = useWorkspaceContext();
-  const editor: UseFileEditorReturn = useFileEditor(
-    workspaceId,
-    agentName,
-    isActive,
-  );
+  const editor: UseFileEditorReturn = useFileEditor(agentName, isActive);
   const {
     tree,
     fileContent,

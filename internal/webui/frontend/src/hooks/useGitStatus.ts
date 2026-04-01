@@ -8,10 +8,11 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import type { GitStatus } from "@/api/git";
 import { fetchGitStatus } from "@/api/git";
 
+import { useWorkspaceContext } from "./useWorkspaceContext";
+
 const POLL_INTERVAL = 5000; // 5 seconds
 
 export interface UseGitStatusOptions {
-  workspaceId: string;
   agentName: string | null;
   enabled: boolean;
 }
@@ -24,10 +25,10 @@ export interface UseGitStatusReturn {
 }
 
 export function useGitStatus({
-  workspaceId,
   agentName,
   enabled,
 }: UseGitStatusOptions): UseGitStatusReturn {
+  const { workspaceId } = useWorkspaceContext();
   const [status, setStatus] = useState<GitStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);

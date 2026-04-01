@@ -19,6 +19,10 @@ vi.mock("@/api/git", () => ({
   fetchGitStatus: vi.fn(),
 }));
 
+vi.mock("../useWorkspaceContext", () => ({
+  useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
+}));
+
 const mockFetchGitStatus = vi.mocked(fetchGitStatus);
 
 function createMockGitStatus(overrides?: Partial<GitStatus>): GitStatus {
@@ -57,7 +61,6 @@ describe("useGitStatus", () => {
     it("returns null status, no loading, no error when disabled", () => {
       const { result } = renderHook(() =>
         useGitStatus({
-          workspaceId: "test-ws-id",
           agentName: "ember",
           enabled: false,
         }),
@@ -71,7 +74,6 @@ describe("useGitStatus", () => {
     it("returns null status when agentName is null", () => {
       const { result } = renderHook(() =>
         useGitStatus({
-          workspaceId: "test-ws-id",
           agentName: null,
           enabled: true,
         }),
@@ -90,7 +92,6 @@ describe("useGitStatus", () => {
 
       const { result } = renderHook(() =>
         useGitStatus({
-          workspaceId: "test-ws-id",
           agentName: "ember",
           enabled: true,
         }),
@@ -107,7 +108,6 @@ describe("useGitStatus", () => {
     it("does not fetch when disabled", async () => {
       const { result } = renderHook(() =>
         useGitStatus({
-          workspaceId: "test-ws-id",
           agentName: "ember",
           enabled: false,
         }),
@@ -122,7 +122,6 @@ describe("useGitStatus", () => {
     it("does not fetch when agentName is null", async () => {
       renderHook(() =>
         useGitStatus({
-          workspaceId: "test-ws-id",
           agentName: null,
           enabled: true,
         }),
@@ -143,7 +142,6 @@ describe("useGitStatus", () => {
 
       const { result } = renderHook(() =>
         useGitStatus({
-          workspaceId: "test-ws-id",
           agentName: "ember",
           enabled: true,
         }),
@@ -171,7 +169,6 @@ describe("useGitStatus", () => {
 
       renderHook(() =>
         useGitStatus({
-          workspaceId: "test-ws-id",
           agentName: "ember",
           enabled: true,
         }),
@@ -195,7 +192,6 @@ describe("useGitStatus", () => {
 
       const { result } = renderHook(() =>
         useGitStatus({
-          workspaceId: "test-ws-id",
           agentName: "ember",
           enabled: true,
         }),
@@ -213,7 +209,6 @@ describe("useGitStatus", () => {
 
       const { result } = renderHook(() =>
         useGitStatus({
-          workspaceId: "test-ws-id",
           agentName: "ember",
           enabled: true,
         }),
@@ -231,7 +226,6 @@ describe("useGitStatus", () => {
 
       const { result } = renderHook(() =>
         useGitStatus({
-          workspaceId: "test-ws-id",
           agentName: "ember",
           enabled: true,
         }),
@@ -260,7 +254,7 @@ describe("useGitStatus", () => {
 
       const { result, rerender } = renderHook(
         ({ agentName }: { agentName: string }) =>
-          useGitStatus({ workspaceId: "test-ws-id", agentName, enabled: true }),
+          useGitStatus({ agentName, enabled: true }),
         { initialProps: { agentName: "ember" } },
       );
 
@@ -287,7 +281,6 @@ describe("useGitStatus", () => {
 
       const { unmount } = renderHook(() =>
         useGitStatus({
-          workspaceId: "test-ws-id",
           agentName: "ember",
           enabled: true,
         }),
@@ -316,7 +309,6 @@ describe("useGitStatus", () => {
 
       const { result, unmount } = renderHook(() =>
         useGitStatus({
-          workspaceId: "test-ws-id",
           agentName: "ember",
           enabled: true,
         }),

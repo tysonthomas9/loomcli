@@ -19,6 +19,10 @@ vi.mock("@/api/sessions", () => ({
   getTaskSessions: vi.fn(),
 }));
 
+vi.mock("../useWorkspaceContext", () => ({
+  useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
+}));
+
 const mockGetSessions = vi.mocked(getTaskSessions);
 
 function createMockSession(overrides?: Partial<SessionRecord>): SessionRecord {
@@ -64,7 +68,7 @@ describe("useTaskSessions", () => {
 
   describe("initial state", () => {
     it("returns empty sessions when taskId is null", async () => {
-      const { result } = renderHook(() => useTaskSessions("test-ws-id", null));
+      const { result } = renderHook(() => useTaskSessions(null));
 
       expect(result.current.sessions).toEqual([]);
       expect(result.current.isLoading).toBe(false);
@@ -84,9 +88,7 @@ describe("useTaskSessions", () => {
       ];
       mockGetSessions.mockResolvedValueOnce(sessions);
 
-      const { result } = renderHook(() =>
-        useTaskSessions("test-ws-id", "task-1"),
-      );
+      const { result } = renderHook(() => useTaskSessions("task-1"));
 
       await flushPromises();
 
@@ -100,8 +102,7 @@ describe("useTaskSessions", () => {
       mockGetSessions.mockResolvedValueOnce([createMockSession({ id: "s1" })]);
 
       const { result, rerender } = renderHook(
-        ({ taskId }: { taskId: string | null }) =>
-          useTaskSessions("test-ws-id", taskId),
+        ({ taskId }: { taskId: string | null }) => useTaskSessions(taskId),
         { initialProps: { taskId: "task-1" } },
       );
 
@@ -123,8 +124,7 @@ describe("useTaskSessions", () => {
       mockGetSessions.mockResolvedValueOnce([createMockSession({ id: "s1" })]);
 
       const { result, rerender } = renderHook(
-        ({ taskId }: { taskId: string | null }) =>
-          useTaskSessions("test-ws-id", taskId),
+        ({ taskId }: { taskId: string | null }) => useTaskSessions(taskId),
         { initialProps: { taskId: "task-1" as string | null } },
       );
 
@@ -142,7 +142,7 @@ describe("useTaskSessions", () => {
     it("polls after initial fetch", async () => {
       mockGetSessions.mockResolvedValueOnce([createMockSession()]);
 
-      renderHook(() => useTaskSessions("test-ws-id", "task-1"));
+      renderHook(() => useTaskSessions("task-1"));
 
       await flushPromises();
       expect(mockGetSessions).toHaveBeenCalledTimes(1);
@@ -163,9 +163,7 @@ describe("useTaskSessions", () => {
     it("sets error on fetch failure", async () => {
       mockGetSessions.mockRejectedValueOnce(new Error("Fetch failed"));
 
-      const { result } = renderHook(() =>
-        useTaskSessions("test-ws-id", "task-1"),
-      );
+      const { result } = renderHook(() => useTaskSessions("task-1"));
 
       await flushPromises();
 
@@ -177,9 +175,7 @@ describe("useTaskSessions", () => {
     it("wraps non-Error thrown values", async () => {
       mockGetSessions.mockRejectedValueOnce("string error");
 
-      const { result } = renderHook(() =>
-        useTaskSessions("test-ws-id", "task-1"),
-      );
+      const { result } = renderHook(() => useTaskSessions("task-1"));
 
       await flushPromises();
 
@@ -190,9 +186,7 @@ describe("useTaskSessions", () => {
     it("clears error on successful subsequent fetch", async () => {
       mockGetSessions.mockRejectedValueOnce(new Error("Failed"));
 
-      const { result } = renderHook(() =>
-        useTaskSessions("test-ws-id", "task-1"),
-      );
+      const { result } = renderHook(() => useTaskSessions("task-1"));
 
       await flushPromises();
       expect(result.current.error).not.toBeNull();
@@ -212,9 +206,7 @@ describe("useTaskSessions", () => {
     it("manually triggers a refetch", async () => {
       mockGetSessions.mockResolvedValueOnce([createMockSession({ id: "s1" })]);
 
-      const { result } = renderHook(() =>
-        useTaskSessions("test-ws-id", "task-1"),
-      );
+      const { result } = renderHook(() => useTaskSessions("task-1"));
 
       await flushPromises();
 
@@ -236,9 +228,7 @@ describe("useTaskSessions", () => {
     it("stops polling on unmount", async () => {
       mockGetSessions.mockResolvedValueOnce([createMockSession()]);
 
-      const { unmount } = renderHook(() =>
-        useTaskSessions("test-ws-id", "task-1"),
-      );
+      const { unmount } = renderHook(() => useTaskSessions("task-1"));
 
       await flushPromises();
 
@@ -262,9 +252,7 @@ describe("useTaskSessions", () => {
           }),
       );
 
-      const { result, unmount } = renderHook(() =>
-        useTaskSessions("test-ws-id", "task-1"),
-      );
+      const { result, unmount } = renderHook(() => useTaskSessions("task-1"));
 
       unmount();
 

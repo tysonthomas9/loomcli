@@ -14,6 +14,10 @@ vi.mock("@/api", () => ({
   closeIssue: vi.fn(),
 }));
 
+vi.mock("./useWorkspaceContext", () => ({
+  useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
+}));
+
 const mockCloseIssue = vi.mocked(api.closeIssue);
 
 describe("useBulkClose", () => {
@@ -24,39 +28,29 @@ describe("useBulkClose", () => {
 
   describe("initial state", () => {
     it("starts with isLoading false", () => {
-      const { result } = renderHook(() =>
-        useBulkClose({ workspaceId: "test-ws-id" }),
-      );
+      const { result } = renderHook(() => useBulkClose({}));
       expect(result.current.isLoading).toBe(false);
     });
 
     it("starts with error null", () => {
-      const { result } = renderHook(() =>
-        useBulkClose({ workspaceId: "test-ws-id" }),
-      );
+      const { result } = renderHook(() => useBulkClose({}));
       expect(result.current.error).toBeNull();
     });
 
     it("starts with empty failedIds", () => {
-      const { result } = renderHook(() =>
-        useBulkClose({ workspaceId: "test-ws-id" }),
-      );
+      const { result } = renderHook(() => useBulkClose({}));
       expect(result.current.failedIds.size).toBe(0);
     });
 
     it("starts with successCount 0", () => {
-      const { result } = renderHook(() =>
-        useBulkClose({ workspaceId: "test-ws-id" }),
-      );
+      const { result } = renderHook(() => useBulkClose({}));
       expect(result.current.successCount).toBe(0);
     });
   });
 
   describe("bulkClose", () => {
     it("sets isLoading to true during operation", async () => {
-      const { result } = renderHook(() =>
-        useBulkClose({ workspaceId: "test-ws-id" }),
-      );
+      const { result } = renderHook(() => useBulkClose({}));
 
       let resolveClose: () => void;
       mockCloseIssue.mockImplementation(
@@ -80,9 +74,7 @@ describe("useBulkClose", () => {
     });
 
     it("accepts Set of IDs", async () => {
-      const { result } = renderHook(() =>
-        useBulkClose({ workspaceId: "test-ws-id" }),
-      );
+      const { result } = renderHook(() => useBulkClose({}));
 
       await act(async () => {
         await result.current.bulkClose(new Set(["id-1", "id-2"]));
@@ -92,9 +84,7 @@ describe("useBulkClose", () => {
     });
 
     it("accepts array of IDs", async () => {
-      const { result } = renderHook(() =>
-        useBulkClose({ workspaceId: "test-ws-id" }),
-      );
+      const { result } = renderHook(() => useBulkClose({}));
 
       await act(async () => {
         await result.current.bulkClose(["id-1", "id-2", "id-3"]);
@@ -104,9 +94,7 @@ describe("useBulkClose", () => {
     });
 
     it("does nothing for empty set", async () => {
-      const { result } = renderHook(() =>
-        useBulkClose({ workspaceId: "test-ws-id" }),
-      );
+      const { result } = renderHook(() => useBulkClose({}));
 
       await act(async () => {
         await result.current.bulkClose(new Set());
@@ -116,9 +104,7 @@ describe("useBulkClose", () => {
     });
 
     it("does nothing for empty array", async () => {
-      const { result } = renderHook(() =>
-        useBulkClose({ workspaceId: "test-ws-id" }),
-      );
+      const { result } = renderHook(() => useBulkClose({}));
 
       await act(async () => {
         await result.current.bulkClose([]);
@@ -130,7 +116,6 @@ describe("useBulkClose", () => {
     it("passes closeReason to API", async () => {
       const { result } = renderHook(() =>
         useBulkClose({
-          workspaceId: "test-ws-id",
           closeReason: "Batch cleanup",
         }),
       );
@@ -150,9 +135,7 @@ describe("useBulkClose", () => {
   describe("success callback", () => {
     it("calls onSuccess when all issues close successfully", async () => {
       const onSuccess = vi.fn();
-      const { result } = renderHook(() =>
-        useBulkClose({ workspaceId: "test-ws-id", onSuccess }),
-      );
+      const { result } = renderHook(() => useBulkClose({ onSuccess }));
 
       await act(async () => {
         await result.current.bulkClose(["id-1", "id-2"]);
@@ -162,9 +145,7 @@ describe("useBulkClose", () => {
     });
 
     it("sets successCount correctly", async () => {
-      const { result } = renderHook(() =>
-        useBulkClose({ workspaceId: "test-ws-id" }),
-      );
+      const { result } = renderHook(() => useBulkClose({}));
 
       await act(async () => {
         await result.current.bulkClose(["id-1", "id-2", "id-3"]);
@@ -174,9 +155,7 @@ describe("useBulkClose", () => {
     });
 
     it("clears error on success", async () => {
-      const { result } = renderHook(() =>
-        useBulkClose({ workspaceId: "test-ws-id" }),
-      );
+      const { result } = renderHook(() => useBulkClose({}));
 
       // First, simulate a failure
       mockCloseIssue.mockRejectedValueOnce(new Error("Failed"));
@@ -197,9 +176,7 @@ describe("useBulkClose", () => {
   describe("partial success callback", () => {
     it("calls onPartialSuccess when some issues fail", async () => {
       const onPartialSuccess = vi.fn();
-      const { result } = renderHook(() =>
-        useBulkClose({ workspaceId: "test-ws-id", onPartialSuccess }),
-      );
+      const { result } = renderHook(() => useBulkClose({ onPartialSuccess }));
 
       mockCloseIssue
         .mockResolvedValueOnce(undefined)
@@ -213,9 +190,7 @@ describe("useBulkClose", () => {
     });
 
     it("sets error message for partial success", async () => {
-      const { result } = renderHook(() =>
-        useBulkClose({ workspaceId: "test-ws-id" }),
-      );
+      const { result } = renderHook(() => useBulkClose({}));
 
       mockCloseIssue
         .mockResolvedValueOnce(undefined)
@@ -229,9 +204,7 @@ describe("useBulkClose", () => {
     });
 
     it("tracks failed IDs", async () => {
-      const { result } = renderHook(() =>
-        useBulkClose({ workspaceId: "test-ws-id" }),
-      );
+      const { result } = renderHook(() => useBulkClose({}));
 
       mockCloseIssue
         .mockResolvedValueOnce(undefined)
@@ -246,9 +219,7 @@ describe("useBulkClose", () => {
     });
 
     it("sets correct successCount for partial success", async () => {
-      const { result } = renderHook(() =>
-        useBulkClose({ workspaceId: "test-ws-id" }),
-      );
+      const { result } = renderHook(() => useBulkClose({}));
 
       mockCloseIssue
         .mockResolvedValueOnce(undefined)
@@ -267,9 +238,7 @@ describe("useBulkClose", () => {
   describe("error callback", () => {
     it("calls onError when all issues fail", async () => {
       const onError = vi.fn();
-      const { result } = renderHook(() =>
-        useBulkClose({ workspaceId: "test-ws-id", onError }),
-      );
+      const { result } = renderHook(() => useBulkClose({ onError }));
 
       mockCloseIssue.mockRejectedValue(new Error("Network error"));
 
@@ -283,9 +252,7 @@ describe("useBulkClose", () => {
     });
 
     it("sets error message from first failure", async () => {
-      const { result } = renderHook(() =>
-        useBulkClose({ workspaceId: "test-ws-id" }),
-      );
+      const { result } = renderHook(() => useBulkClose({}));
 
       mockCloseIssue.mockRejectedValue(new Error("Network error"));
 
@@ -297,9 +264,7 @@ describe("useBulkClose", () => {
     });
 
     it("sets all IDs as failed when all fail", async () => {
-      const { result } = renderHook(() =>
-        useBulkClose({ workspaceId: "test-ws-id" }),
-      );
+      const { result } = renderHook(() => useBulkClose({}));
 
       mockCloseIssue.mockRejectedValue(new Error("Network error"));
 
@@ -314,9 +279,7 @@ describe("useBulkClose", () => {
     });
 
     it("sets successCount to 0 when all fail", async () => {
-      const { result } = renderHook(() =>
-        useBulkClose({ workspaceId: "test-ws-id" }),
-      );
+      const { result } = renderHook(() => useBulkClose({}));
 
       mockCloseIssue.mockRejectedValue(new Error("Network error"));
 
@@ -330,9 +293,7 @@ describe("useBulkClose", () => {
 
   describe("createBulkAction", () => {
     it("creates a valid BulkAction object", () => {
-      const { result } = renderHook(() =>
-        useBulkClose({ workspaceId: "test-ws-id" }),
-      );
+      const { result } = renderHook(() => useBulkClose({}));
 
       const action = result.current.createBulkAction();
 
@@ -343,9 +304,7 @@ describe("useBulkClose", () => {
     });
 
     it("uses custom label", () => {
-      const { result } = renderHook(() =>
-        useBulkClose({ workspaceId: "test-ws-id" }),
-      );
+      const { result } = renderHook(() => useBulkClose({}));
 
       const action = result.current.createBulkAction({ label: "Archive" });
 
@@ -353,9 +312,7 @@ describe("useBulkClose", () => {
     });
 
     it("reflects loading state", async () => {
-      const { result } = renderHook(() =>
-        useBulkClose({ workspaceId: "test-ws-id" }),
-      );
+      const { result } = renderHook(() => useBulkClose({}));
 
       let resolveClose: () => void;
       mockCloseIssue.mockImplementation(
@@ -383,9 +340,7 @@ describe("useBulkClose", () => {
     });
 
     it("onClick calls bulkClose with selectedIds", async () => {
-      const { result } = renderHook(() =>
-        useBulkClose({ workspaceId: "test-ws-id" }),
-      );
+      const { result } = renderHook(() => useBulkClose({}));
 
       const action = result.current.createBulkAction();
       const selectedIds = new Set(["id-1", "id-2"]);
@@ -400,9 +355,7 @@ describe("useBulkClose", () => {
 
   describe("reset", () => {
     it("clears error state", async () => {
-      const { result } = renderHook(() =>
-        useBulkClose({ workspaceId: "test-ws-id" }),
-      );
+      const { result } = renderHook(() => useBulkClose({}));
 
       mockCloseIssue.mockRejectedValue(new Error("Failed"));
       await act(async () => {
@@ -418,9 +371,7 @@ describe("useBulkClose", () => {
     });
 
     it("clears failedIds", async () => {
-      const { result } = renderHook(() =>
-        useBulkClose({ workspaceId: "test-ws-id" }),
-      );
+      const { result } = renderHook(() => useBulkClose({}));
 
       mockCloseIssue.mockRejectedValue(new Error("Failed"));
       await act(async () => {
@@ -436,9 +387,7 @@ describe("useBulkClose", () => {
     });
 
     it("resets successCount", async () => {
-      const { result } = renderHook(() =>
-        useBulkClose({ workspaceId: "test-ws-id" }),
-      );
+      const { result } = renderHook(() => useBulkClose({}));
 
       await act(async () => {
         await result.current.bulkClose(["id-1"]);
@@ -459,8 +408,7 @@ describe("useBulkClose", () => {
       const onSuccess2 = vi.fn();
 
       const { result, rerender } = renderHook(
-        ({ onSuccess }) =>
-          useBulkClose({ workspaceId: "test-ws-id", onSuccess }),
+        ({ onSuccess }) => useBulkClose({ onSuccess }),
         {
           initialProps: { onSuccess: onSuccess1 },
         },
@@ -482,9 +430,7 @@ describe("useBulkClose", () => {
 
   describe("unmount safety", () => {
     it("does not update state after unmount", async () => {
-      const { result, unmount } = renderHook(() =>
-        useBulkClose({ workspaceId: "test-ws-id" }),
-      );
+      const { result, unmount } = renderHook(() => useBulkClose({}));
 
       let resolveClose: () => void;
       mockCloseIssue.mockImplementation(
@@ -514,9 +460,7 @@ describe("useBulkClose", () => {
 
   describe("concurrent operations", () => {
     it("resets state at the start of each operation", async () => {
-      const { result } = renderHook(() =>
-        useBulkClose({ workspaceId: "test-ws-id" }),
-      );
+      const { result } = renderHook(() => useBulkClose({}));
 
       // First operation - failure
       mockCloseIssue.mockRejectedValueOnce(new Error("Failed"));

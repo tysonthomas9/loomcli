@@ -3,6 +3,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { listSessionsByIssue } from "@/api/terminal";
 import type { MutationPayload } from "@/api/sse";
 import { useSSE } from "@/hooks/useSSE";
+import { useWorkspaceContext } from "./useWorkspaceContext";
 
 export interface UseIssueSessionMapReturn {
   /** Map of issue_id to session_name[] */
@@ -17,9 +18,8 @@ export interface UseIssueSessionMapReturn {
 
 const DEBOUNCE_MS = 200;
 
-export function useIssueSessionMap(
-  workspace: string,
-): UseIssueSessionMapReturn {
+export function useIssueSessionMap(): UseIssueSessionMapReturn {
+  const { workspaceId: workspace } = useWorkspaceContext();
   const [issueSessionMap, setIssueSessionMap] = useState<
     Record<string, string[]>
   >({});
@@ -77,7 +77,7 @@ export function useIssueSessionMap(
     [fetchMap],
   );
 
-  useSSE({ workspaceId: workspace, onMutation: handleMutation });
+  useSSE({ onMutation: handleMutation });
 
   return {
     issueSessionMap,

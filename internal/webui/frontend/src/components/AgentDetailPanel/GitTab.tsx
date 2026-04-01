@@ -48,13 +48,11 @@ export function GitTab({ agent, isActive }: GitTabProps): JSX.Element {
     error: gitError,
     refetch,
   } = useGitStatus({
-    workspaceId,
     agentName: agent.name,
     enabled: isActive ?? true,
   });
 
   const actions = useGitActions({
-    workspaceId,
     agentName: agent.name,
     onStatusChange: refetch,
   });

@@ -98,8 +98,8 @@ const TerminalView = lazy(() =>
 );
 
 function App() {
-  // Route params: workspaceId always present, issueId present on /ws/:id/issues/:issueId
-  const { workspaceId = "", issueId: routeIssueId } = useParams<{
+  // Route params: issueId present on /ws/:id/issues/:issueId
+  const { issueId: routeIssueId } = useParams<{
     workspaceId: string;
     issueId: string;
   }>();
@@ -120,6 +120,7 @@ function App() {
 
   // Workspace context for breadcrumb, single-repo guard, and workspace selection
   const {
+    workspaceId,
     workspace,
     activeWorkspaceName,
     setActiveWorkspace,
@@ -190,7 +191,6 @@ function App() {
           ? "kanban"
           : "ready",
     sourceRepos: sourceReposFilter,
-    workspaceId,
   });
 
   // Filter state with URL synchronization
@@ -227,7 +227,6 @@ function App() {
 
   // Only fetch blocked issues separately when NOT in kanban mode (kanban mode includes it inline)
   const { data: blockedIssuesData } = useBlockedIssues({
-    workspaceId,
     enabled: activeView !== "kanban",
   });
 
@@ -341,7 +340,7 @@ function App() {
     fetchIssue,
     clearIssue,
     updateIssueDetails,
-  } = useIssueDetail(workspaceId);
+  } = useIssueDetail();
 
   // Previous view for issue-detail back navigation.
   // Tracks the last "content" view (excludes issue-detail, terminal, settings).
@@ -720,7 +719,6 @@ function App() {
 
   // Workspace state preservation: save/restore ephemeral per-workspace UI state on switch
   useWorkspaceState({
-    workspaceId,
     scrollContainerRef: mainContentRef,
     activePanel,
     restorePanel: openPanel,

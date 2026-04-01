@@ -3,13 +3,11 @@ import { ErrorDisplay, LoadingSkeleton } from "@/components";
 import { useAgentContext } from "@/hooks";
 import { useFileTree } from "@/hooks/useFileTree";
 import { useFileContent } from "@/hooks/useFileContent";
-import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
 import { FileTree } from "./FileTree";
 import { FileViewer } from "./FileViewer";
 import styles from "./FileExplorer.module.css";
 
 export function FileExplorer() {
-  const { workspaceId } = useWorkspaceContext();
   const { agents } = useAgentContext();
   const [selectedAgent, setSelectedAgent] = useState<string>("");
 
@@ -32,7 +30,7 @@ export function FileExplorer() {
     toggle,
     selectFile,
     setFilterText,
-  } = useFileTree(workspaceId, selectedAgent);
+  } = useFileTree(selectedAgent);
 
   const {
     fileData,
@@ -40,7 +38,7 @@ export function FileExplorer() {
     error: fileError,
     fetchFile,
     clearFile,
-  } = useFileContent(workspaceId, selectedAgent);
+  } = useFileContent(selectedAgent);
 
   // Fetch file content when a file is selected
   useEffect(() => {

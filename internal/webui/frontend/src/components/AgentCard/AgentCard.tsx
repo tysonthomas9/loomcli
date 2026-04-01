@@ -8,7 +8,6 @@ import { parseLoomStatus } from "@/types";
 import { RepoBadge } from "@/components/RepoBadge";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 import { useAgentDiffStat } from "@/hooks";
-import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
 
 import styles from "./AgentCard.module.css";
 
@@ -98,9 +97,7 @@ export function AgentCard({
   const roleLabel = agent.role
     ? agent.role.charAt(0).toUpperCase() + agent.role.slice(1)
     : "Agent";
-  const { workspaceId } = useWorkspaceContext();
   const { data: diffStat } = useAgentDiffStat({
-    workspaceId,
     agentName: agent.name,
     pollInterval: 60000,
   });

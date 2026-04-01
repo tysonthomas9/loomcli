@@ -305,7 +305,6 @@ export function GraphView({
 
   // Fetch blocked issues for ready state calculation
   const { data: blockedIssues } = useBlockedIssues({
-    workspaceId,
     enabled: true,
   });
   const blockedIssueIds = useMemo(() => {

@@ -348,7 +348,6 @@ describe("AgentCard", () => {
       render(<AgentCard agent={makeAgent({ name: "nova" })} />);
 
       expect(mockDiffStat).toHaveBeenCalledWith({
-        workspaceId: "ws-test-123",
         agentName: "nova",
         pollInterval: 60000,
       });

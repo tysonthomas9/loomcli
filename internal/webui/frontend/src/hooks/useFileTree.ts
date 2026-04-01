@@ -8,6 +8,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { listWorktreeDir } from "@/api/files";
 import type { FileEntry } from "@/api/files";
 import { useDebounce } from "./useDebounce";
+import { useWorkspaceContext } from "./useWorkspaceContext";
 
 export interface UseFileTreeReturn {
   /** Set of expanded directory paths */
@@ -34,10 +35,8 @@ export interface UseFileTreeReturn {
   setFilterText: (text: string) => void;
 }
 
-export function useFileTree(
-  workspaceId: string,
-  agentName: string,
-): UseFileTreeReturn {
+export function useFileTree(agentName: string): UseFileTreeReturn {
+  const { workspaceId } = useWorkspaceContext();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [treeData, setTreeData] = useState<Map<string, FileEntry[]>>(new Map());
   const [selectedPath, setSelectedPath] = useState<string | null>(null);

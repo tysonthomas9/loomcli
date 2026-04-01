@@ -8,12 +8,12 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { getBlockedIssues, type BlockedFilter } from "@/api/issues";
 import type { BlockedIssue } from "@/types";
 
+import { useWorkspaceContext } from "./useWorkspaceContext";
+
 /**
  * Options for the useBlockedIssues hook.
  */
 export interface UseBlockedIssuesOptions {
-  /** Workspace ID for scoped API calls. */
-  workspaceId: string;
   /** Optional: filter to descendants of this issue/epic */
   parentId?: string;
   /** Optional: filter by priority (0-4) */
@@ -72,8 +72,8 @@ export interface UseBlockedIssuesResult {
 export function useBlockedIssues(
   options?: UseBlockedIssuesOptions,
 ): UseBlockedIssuesResult {
+  const { workspaceId } = useWorkspaceContext();
   const {
-    workspaceId,
     parentId,
     priority,
     type,
@@ -81,7 +81,7 @@ export function useBlockedIssues(
     limit,
     pollInterval,
     enabled = true,
-  } = options ?? { workspaceId: "" };
+  } = options ?? {};
 
   const [data, setData] = useState<BlockedIssue[] | null>(null);
   const [loading, setLoading] = useState<boolean>(false);

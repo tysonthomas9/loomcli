@@ -7,19 +7,13 @@
 import { useParams, useNavigate, Outlet } from "react-router-dom";
 import { useEffect, useState } from "react";
 
-import {
-  WorkspaceProvider,
-  AgentProvider,
-  useIssueSessionMap,
-  useWorkspaceContext,
-} from "@/hooks";
+import { WorkspaceProvider, AgentProvider, useIssueSessionMap } from "@/hooks";
 import { IssueSessionProvider } from "@/contexts/IssueSessionContext";
 import { fetchWorkspaceApi } from "@/api/workspace";
 import { clearLastWorkspaceId } from "@/utils/scopedStorage";
 
 function IssueSessionWrapper({ children }: { children: React.ReactNode }) {
-  const { workspace } = useWorkspaceContext();
-  const issueSessionMap = useIssueSessionMap(workspace?.id ?? "");
+  const issueSessionMap = useIssueSessionMap();
   return (
     <IssueSessionProvider value={issueSessionMap}>
       {children}

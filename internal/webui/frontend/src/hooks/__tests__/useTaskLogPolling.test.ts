@@ -18,6 +18,10 @@ vi.mock("@/api", () => ({
   getTaskLogContent: vi.fn(),
 }));
 
+vi.mock("../useWorkspaceContext", () => ({
+  useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
+}));
+
 const mockGetLog = vi.mocked(getTaskLogContent);
 
 async function flushPromises(): Promise<void> {
@@ -41,7 +45,6 @@ describe("useTaskLogPolling", () => {
     it("returns disconnected state when not enabled", () => {
       const { result } = renderHook(() =>
         useTaskLogPolling({
-          workspaceId: "test-ws-id",
           taskId: "task-1",
           phase: "planning",
           enabled: false,
@@ -56,7 +59,6 @@ describe("useTaskLogPolling", () => {
     it("returns disconnected state when taskId is null", () => {
       const { result } = renderHook(() =>
         useTaskLogPolling({
-          workspaceId: "test-ws-id",
           taskId: null,
           phase: "planning",
           enabled: true,
@@ -70,7 +72,6 @@ describe("useTaskLogPolling", () => {
     it("returns disconnected state when phase is null", () => {
       const { result } = renderHook(() =>
         useTaskLogPolling({
-          workspaceId: "test-ws-id",
           taskId: "task-1",
           phase: null,
           enabled: true,
@@ -83,7 +84,6 @@ describe("useTaskLogPolling", () => {
     it("does not call API when disabled", async () => {
       renderHook(() =>
         useTaskLogPolling({
-          workspaceId: "test-ws-id",
           taskId: "task-1",
           phase: "planning",
           enabled: false,
@@ -105,7 +105,6 @@ describe("useTaskLogPolling", () => {
 
       const { result } = renderHook(() =>
         useTaskLogPolling({
-          workspaceId: "test-ws-id",
           taskId: "task-1",
           phase: "implementation",
           enabled: true,
@@ -130,7 +129,6 @@ describe("useTaskLogPolling", () => {
 
       renderHook(() =>
         useTaskLogPolling({
-          workspaceId: "test-ws-id",
           taskId: "task-1",
           phase: "planning",
           enabled: true,
@@ -158,7 +156,6 @@ describe("useTaskLogPolling", () => {
 
       renderHook(() =>
         useTaskLogPolling({
-          workspaceId: "test-ws-id",
           taskId: "task-1",
           phase: "planning",
           enabled: true,
@@ -190,7 +187,6 @@ describe("useTaskLogPolling", () => {
 
       const { result } = renderHook(() =>
         useTaskLogPolling({
-          workspaceId: "test-ws-id",
           taskId: "task-1",
           phase: "planning",
           enabled: true,
@@ -220,7 +216,6 @@ describe("useTaskLogPolling", () => {
 
       const { result } = renderHook(() =>
         useTaskLogPolling({
-          workspaceId: "test-ws-id",
           taskId: "task-1",
           phase: "planning",
           enabled: true,
@@ -251,7 +246,6 @@ describe("useTaskLogPolling", () => {
 
       const { result } = renderHook(() =>
         useTaskLogPolling({
-          workspaceId: "test-ws-id",
           taskId: "task-1",
           phase: "planning",
           enabled: true,
@@ -269,7 +263,6 @@ describe("useTaskLogPolling", () => {
 
       const { result } = renderHook(() =>
         useTaskLogPolling({
-          workspaceId: "test-ws-id",
           taskId: "task-1",
           phase: "planning",
           enabled: true,
@@ -296,7 +289,6 @@ describe("useTaskLogPolling", () => {
 
       const { result } = renderHook(() =>
         useTaskLogPolling({
-          workspaceId: "test-ws-id",
           taskId: "task-1",
           phase: "planning",
           enabled: true,
@@ -313,7 +305,6 @@ describe("useTaskLogPolling", () => {
 
       const { result } = renderHook(() =>
         useTaskLogPolling({
-          workspaceId: "test-ws-id",
           taskId: "task-1",
           phase: "planning",
           enabled: true,
@@ -342,7 +333,6 @@ describe("useTaskLogPolling", () => {
 
       const { result } = renderHook(() =>
         useTaskLogPolling({
-          workspaceId: "test-ws-id",
           taskId: "task-1",
           phase: "planning",
           enabled: true,
@@ -369,7 +359,6 @@ describe("useTaskLogPolling", () => {
 
       const { unmount } = renderHook(() =>
         useTaskLogPolling({
-          workspaceId: "test-ws-id",
           taskId: "task-1",
           phase: "planning",
           enabled: true,
@@ -396,7 +385,6 @@ describe("useTaskLogPolling", () => {
       const { result, rerender } = renderHook(
         ({ enabled }: { enabled: boolean }) =>
           useTaskLogPolling({
-            workspaceId: "test-ws-id",
             taskId: "task-1",
             phase: "planning",
             enabled,

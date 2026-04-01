@@ -13,6 +13,10 @@ vi.mock("@/api/files", () => ({
   listWorktreeDir: vi.fn(),
 }));
 
+vi.mock("./useWorkspaceContext", () => ({
+  useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
+}));
+
 const mockListDir = vi.mocked(listWorktreeDir);
 
 function createEntry(overrides: Partial<FileEntry> = {}): FileEntry {
@@ -42,7 +46,7 @@ const srcEntries: FileEntry[] = [
 /** Helper to render the hook and wait for the initial root load to complete. */
 async function renderAndWaitForRoot(agentName = "agent-1") {
   const hookResult = renderHook(
-    ({ agent }: { agent: string }) => useFileTree("test-ws-id", agent),
+    ({ agent }: { agent: string }) => useFileTree(agent),
     { initialProps: { agent: agentName } },
   );
 
@@ -66,7 +70,7 @@ describe("useFileTree", () => {
 
   describe("Initial state and root auto-load", () => {
     it("starts loading and auto-loads root directory", async () => {
-      const { result } = renderHook(() => useFileTree("test-ws-id", "agent-1"));
+      const { result } = renderHook(() => useFileTree("agent-1"));
 
       // Initially loading
       expect(result.current.isLoading).toBe(true);
@@ -85,7 +89,7 @@ describe("useFileTree", () => {
     });
 
     it("does not load when agentName is empty", () => {
-      const { result } = renderHook(() => useFileTree("test-ws-id", ""));
+      const { result } = renderHook(() => useFileTree(""));
 
       expect(result.current.isLoading).toBe(false);
       expect(mockListDir).not.toHaveBeenCalled();
@@ -196,7 +200,7 @@ describe("useFileTree", () => {
       mockListDir.mockReset();
       mockListDir.mockRejectedValueOnce(new Error("fail"));
 
-      const { result } = renderHook(() => useFileTree("test-ws-id", "agent-1"));
+      const { result } = renderHook(() => useFileTree("agent-1"));
 
       await waitFor(() => {
         expect(result.current.isLoading).toBe(false);
@@ -244,7 +248,7 @@ describe("useFileTree", () => {
     it("updates filterText immediately", () => {
       vi.useFakeTimers();
       mockListDir.mockImplementation(() => new Promise(() => {}));
-      const { result } = renderHook(() => useFileTree("test-ws-id", "agent-1"));
+      const { result } = renderHook(() => useFileTree("agent-1"));
 
       act(() => {
         result.current.setFilterText("main");
@@ -258,7 +262,7 @@ describe("useFileTree", () => {
       vi.useFakeTimers();
       mockListDir.mockImplementation(() => new Promise(() => {}));
 
-      const { result } = renderHook(() => useFileTree("test-ws-id", "agent-1"));
+      const { result } = renderHook(() => useFileTree("agent-1"));
 
       act(() => {
         result.current.setFilterText("main");
@@ -282,7 +286,7 @@ describe("useFileTree", () => {
       mockListDir.mockReset();
       mockListDir.mockRejectedValueOnce(new Error("Connection refused"));
 
-      const { result } = renderHook(() => useFileTree("test-ws-id", "agent-1"));
+      const { result } = renderHook(() => useFileTree("agent-1"));
 
       await waitFor(() => {
         expect(result.current.isLoading).toBe(false);
@@ -307,7 +311,7 @@ describe("useFileTree", () => {
       mockListDir.mockReset();
       mockListDir.mockRejectedValueOnce("string error");
 
-      const { result } = renderHook(() => useFileTree("test-ws-id", "agent-1"));
+      const { result } = renderHook(() => useFileTree("agent-1"));
 
       await waitFor(() => {
         expect(result.current.isLoading).toBe(false);
@@ -325,9 +329,7 @@ describe("useFileTree", () => {
       });
       mockListDir.mockReturnValue(slowPromise);
 
-      const { result, unmount } = renderHook(() =>
-        useFileTree("test-ws-id", "agent-1"),
-      );
+      const { result, unmount } = renderHook(() => useFileTree("agent-1"));
 
       expect(result.current.isLoading).toBe(true);
 

@@ -8,7 +8,7 @@
 import { forwardRef, useState, useCallback, useRef } from "react";
 
 import { useGitActions } from "@/hooks/useGitActions";
-import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
+
 import {
   TerminalInstance,
   type ConnectionState,
@@ -132,8 +132,7 @@ export const EmbeddedTerminal = forwardRef<
     setContextMenu(null);
   }, [sessionName]);
 
-  const { workspaceId } = useWorkspaceContext();
-  const gitActions = useGitActions({ workspaceId, agentName });
+  const gitActions = useGitActions({ agentName });
 
   return (
     <div className={styles.container} data-testid="embedded-terminal">

@@ -5,7 +5,12 @@
  */
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import { useFileTree, useFileContent, useToast } from "@/hooks";
+import {
+  useFileTree,
+  useFileContent,
+  useToast,
+  useWorkspaceContext,
+} from "@/hooks";
 import type { UseFileTreeReturn, UseFileContentReturn } from "@/hooks";
 import { writeWorktreeFile } from "@/api/files";
 
@@ -60,12 +65,12 @@ export interface UseFileEditorReturn {
 }
 
 export function useFileEditor(
-  workspaceId: string,
   agentName: string,
   isActive: boolean,
 ): UseFileEditorReturn {
-  const tree = useFileTree(workspaceId, agentName);
-  const fileContent = useFileContent(workspaceId, agentName);
+  const { workspaceId } = useWorkspaceContext();
+  const tree = useFileTree(agentName);
+  const fileContent = useFileContent(agentName);
   const { showToast } = useToast();
 
   const [content, setContent] = useState<string>("");

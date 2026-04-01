@@ -546,7 +546,6 @@ describe("SessionDetailView", () => {
     it("passes correct args to useSessionTranscript", () => {
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
       expect(mockUseSessionTranscript).toHaveBeenCalledWith(
-        "test-ws-id",
         "task-1",
         "sess-1",
         false,
@@ -557,7 +556,6 @@ describe("SessionDetailView", () => {
       const session = createSession({ is_active: true });
       render(<SessionDetailView taskId="task-1" session={session} />);
       expect(mockUseSessionTranscript).toHaveBeenCalledWith(
-        "test-ws-id",
         "task-1",
         "sess-1",
         true,
@@ -569,7 +567,6 @@ describe("SessionDetailView", () => {
       // On transcript tab, diff should NOT be fetched (enabled = innerTab === "diff" && has_diff)
       // Since innerTab defaults to "transcript", enabled should be false
       expect(mockUseSessionDiff).toHaveBeenCalledWith(
-        "test-ws-id",
         "task-1",
         "sess-1",
         false,

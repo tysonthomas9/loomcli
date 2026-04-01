@@ -35,6 +35,10 @@ vi.mock("@/api/git", () => ({
   gitUpdateTarget: (...args: unknown[]) => mockGitUpdateTarget(...args),
 }));
 
+vi.mock("./useWorkspaceContext", () => ({
+  useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
+}));
+
 // Mock useToast to track showToast calls
 const mockShowToast = vi.fn();
 
@@ -64,7 +68,7 @@ describe("useGitActions", () => {
   describe("initial state", () => {
     it("returns all states as not loading with no errors", () => {
       const { result } = renderHook(
-        () => useGitActions({ workspaceId: "test-ws-id", agentName: "nova" }),
+        () => useGitActions({ agentName: "nova" }),
         { wrapper },
       );
 
@@ -104,7 +108,7 @@ describe("useGitActions", () => {
       });
 
       const { result } = renderHook(
-        () => useGitActions({ workspaceId: "test-ws-id", agentName: "nova" }),
+        () => useGitActions({ agentName: "nova" }),
         { wrapper },
       );
 
@@ -126,7 +130,7 @@ describe("useGitActions", () => {
       mockGitPush.mockResolvedValue({ success: true, message: "" });
 
       const { result } = renderHook(
-        () => useGitActions({ workspaceId: "test-ws-id", agentName: "nova" }),
+        () => useGitActions({ agentName: "nova" }),
         { wrapper },
       );
 
@@ -140,12 +144,9 @@ describe("useGitActions", () => {
     });
 
     it("does nothing when agentName is null", async () => {
-      const { result } = renderHook(
-        () => useGitActions({ workspaceId: "test-ws-id", agentName: null }),
-        {
-          wrapper,
-        },
-      );
+      const { result } = renderHook(() => useGitActions({ agentName: null }), {
+        wrapper,
+      });
 
       await act(async () => {
         await result.current.push();
@@ -161,7 +162,6 @@ describe("useGitActions", () => {
       const { result } = renderHook(
         () =>
           useGitActions({
-            workspaceId: "test-ws-id",
             agentName: "nova",
             onStatusChange,
           }),
@@ -182,7 +182,6 @@ describe("useGitActions", () => {
       const { result } = renderHook(
         () =>
           useGitActions({
-            workspaceId: "test-ws-id",
             agentName: "nova",
             onStatusChange,
           }),
@@ -205,7 +204,7 @@ describe("useGitActions", () => {
       });
 
       const { result } = renderHook(
-        () => useGitActions({ workspaceId: "test-ws-id", agentName: "falcon" }),
+        () => useGitActions({ agentName: "falcon" }),
         { wrapper },
       );
 
@@ -227,7 +226,7 @@ describe("useGitActions", () => {
       mockGitPull.mockResolvedValue({ success: true, message: "" });
 
       const { result } = renderHook(
-        () => useGitActions({ workspaceId: "test-ws-id", agentName: "falcon" }),
+        () => useGitActions({ agentName: "falcon" }),
         { wrapper },
       );
 
@@ -249,7 +248,7 @@ describe("useGitActions", () => {
       });
 
       const { result } = renderHook(
-        () => useGitActions({ workspaceId: "test-ws-id", agentName: "ember" }),
+        () => useGitActions({ agentName: "ember" }),
         { wrapper },
       );
 
@@ -270,7 +269,6 @@ describe("useGitActions", () => {
       const { result } = renderHook(
         () =>
           useGitActions({
-            workspaceId: "test-ws-id",
             agentName: "ember",
             onStatusChange,
           }),
@@ -295,7 +293,7 @@ describe("useGitActions", () => {
       });
 
       const { result } = renderHook(
-        () => useGitActions({ workspaceId: "test-ws-id", agentName: "nova" }),
+        () => useGitActions({ agentName: "nova" }),
         { wrapper },
       );
 
@@ -322,7 +320,7 @@ describe("useGitActions", () => {
       });
 
       const { result } = renderHook(
-        () => useGitActions({ workspaceId: "test-ws-id", agentName: "nova" }),
+        () => useGitActions({ agentName: "nova" }),
         { wrapper },
       );
 
@@ -344,7 +342,7 @@ describe("useGitActions", () => {
       });
 
       const { result } = renderHook(
-        () => useGitActions({ workspaceId: "test-ws-id", agentName: "nova" }),
+        () => useGitActions({ agentName: "nova" }),
         { wrapper },
       );
 
@@ -366,7 +364,7 @@ describe("useGitActions", () => {
       });
 
       const { result } = renderHook(
-        () => useGitActions({ workspaceId: "test-ws-id", agentName: "nova" }),
+        () => useGitActions({ agentName: "nova" }),
         { wrapper },
       );
 
@@ -387,7 +385,7 @@ describe("useGitActions", () => {
       });
 
       const { result } = renderHook(
-        () => useGitActions({ workspaceId: "test-ws-id", agentName: "nova" }),
+        () => useGitActions({ agentName: "nova" }),
         { wrapper },
       );
 
@@ -410,7 +408,7 @@ describe("useGitActions", () => {
       });
 
       const { result } = renderHook(
-        () => useGitActions({ workspaceId: "test-ws-id", agentName: "nova" }),
+        () => useGitActions({ agentName: "nova" }),
         { wrapper },
       );
 
@@ -433,7 +431,7 @@ describe("useGitActions", () => {
       mockGitReset.mockResolvedValue({ success: true, message: "" });
 
       const { result } = renderHook(
-        () => useGitActions({ workspaceId: "test-ws-id", agentName: "nova" }),
+        () => useGitActions({ agentName: "nova" }),
         { wrapper },
       );
 
@@ -455,7 +453,7 @@ describe("useGitActions", () => {
       });
 
       const { result } = renderHook(
-        () => useGitActions({ workspaceId: "test-ws-id", agentName: "nova" }),
+        () => useGitActions({ agentName: "nova" }),
         { wrapper },
       );
 
@@ -475,12 +473,9 @@ describe("useGitActions", () => {
     });
 
     it("does nothing when agentName is null", async () => {
-      const { result } = renderHook(
-        () => useGitActions({ workspaceId: "test-ws-id", agentName: null }),
-        {
-          wrapper,
-        },
-      );
+      const { result } = renderHook(() => useGitActions({ agentName: null }), {
+        wrapper,
+      });
 
       await act(async () => {
         await result.current.updateTarget("main");
@@ -499,7 +494,7 @@ describe("useGitActions", () => {
         mockGitPush.mockRejectedValue(error);
 
         const { result } = renderHook(
-          () => useGitActions({ workspaceId: "test-ws-id", agentName: "nova" }),
+          () => useGitActions({ agentName: "nova" }),
           { wrapper },
         );
 
@@ -523,7 +518,7 @@ describe("useGitActions", () => {
         mockGitPull.mockRejectedValue(error);
 
         const { result } = renderHook(
-          () => useGitActions({ workspaceId: "test-ws-id", agentName: "nova" }),
+          () => useGitActions({ agentName: "nova" }),
           { wrapper },
         );
 
@@ -542,7 +537,7 @@ describe("useGitActions", () => {
         mockGitSync.mockRejectedValue(error);
 
         const { result } = renderHook(
-          () => useGitActions({ workspaceId: "test-ws-id", agentName: "nova" }),
+          () => useGitActions({ agentName: "nova" }),
           { wrapper },
         );
 
@@ -570,7 +565,7 @@ describe("useGitActions", () => {
         mockGitReset.mockRejectedValue(error);
 
         const { result } = renderHook(
-          () => useGitActions({ workspaceId: "test-ws-id", agentName: "nova" }),
+          () => useGitActions({ agentName: "nova" }),
           { wrapper },
         );
 
@@ -592,7 +587,7 @@ describe("useGitActions", () => {
         mockGitPush.mockRejectedValue(error);
 
         const { result } = renderHook(
-          () => useGitActions({ workspaceId: "test-ws-id", agentName: "nova" }),
+          () => useGitActions({ agentName: "nova" }),
           { wrapper },
         );
 
@@ -614,7 +609,7 @@ describe("useGitActions", () => {
         mockGitCreatePR.mockRejectedValue(error);
 
         const { result } = renderHook(
-          () => useGitActions({ workspaceId: "test-ws-id", agentName: "nova" }),
+          () => useGitActions({ agentName: "nova" }),
           { wrapper },
         );
 
@@ -634,7 +629,7 @@ describe("useGitActions", () => {
         mockGitPush.mockRejectedValue(new Error("network timeout"));
 
         const { result } = renderHook(
-          () => useGitActions({ workspaceId: "test-ws-id", agentName: "nova" }),
+          () => useGitActions({ agentName: "nova" }),
           { wrapper },
         );
 
@@ -654,7 +649,7 @@ describe("useGitActions", () => {
         mockGitPull.mockRejectedValue(error);
 
         const { result } = renderHook(
-          () => useGitActions({ workspaceId: "test-ws-id", agentName: "nova" }),
+          () => useGitActions({ agentName: "nova" }),
           { wrapper },
         );
 
@@ -672,7 +667,7 @@ describe("useGitActions", () => {
         mockGitSync.mockRejectedValue(error);
 
         const { result } = renderHook(
-          () => useGitActions({ workspaceId: "test-ws-id", agentName: "nova" }),
+          () => useGitActions({ agentName: "nova" }),
           { wrapper },
         );
 
@@ -690,7 +685,7 @@ describe("useGitActions", () => {
         mockGitPush.mockRejectedValue("some string error");
 
         const { result } = renderHook(
-          () => useGitActions({ workspaceId: "test-ws-id", agentName: "nova" }),
+          () => useGitActions({ agentName: "nova" }),
           { wrapper },
         );
 
@@ -715,7 +710,7 @@ describe("useGitActions", () => {
       mockGitPush.mockReturnValue(pendingPromise);
 
       const { result } = renderHook(
-        () => useGitActions({ workspaceId: "test-ws-id", agentName: "nova" }),
+        () => useGitActions({ agentName: "nova" }),
         { wrapper },
       );
 

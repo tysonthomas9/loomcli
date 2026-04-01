@@ -7,6 +7,7 @@ import { useState, useEffect, useRef } from "react";
 
 import { getSessionTranscript } from "../api/sessions";
 import type { TranscriptEntry } from "../types/session";
+import { useWorkspaceContext } from "./useWorkspaceContext";
 
 /** Return type for the useSessionTranscript hook. */
 export interface UseSessionTranscriptResult {
@@ -22,11 +23,11 @@ export interface UseSessionTranscriptResult {
 const POLL_INTERVAL_ACTIVE = 3_000;
 
 export function useSessionTranscript(
-  workspaceId: string,
   taskId: string | null,
   sessionId: string | null,
   isActive: boolean,
 ): UseSessionTranscriptResult {
+  const { workspaceId } = useWorkspaceContext();
   const [entries, setEntries] = useState<TranscriptEntry[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);

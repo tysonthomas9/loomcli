@@ -16,9 +16,9 @@ import {
 } from "@/api/git";
 import type { GitResetLockedResponse } from "@/api/git";
 import { useToast } from "./useToast";
+import { useWorkspaceContext } from "./useWorkspaceContext";
 
 export interface UseGitActionsOptions {
-  workspaceId: string;
   agentName: string | null;
   onStatusChange?: () => void;
 }
@@ -63,10 +63,10 @@ function extractErrorMessage(err: unknown): string {
 }
 
 export function useGitActions({
-  workspaceId,
   agentName,
   onStatusChange,
 }: UseGitActionsOptions): UseGitActionsReturn {
+  const { workspaceId } = useWorkspaceContext();
   const { showToast } = useToast();
   const mountedRef = useRef(true);
   const onStatusChangeRef = useRef(onStatusChange);

@@ -18,6 +18,9 @@ vi.mock("@/api", () => ({
   getAgentTerminalToken: vi.fn(),
   getAgentTerminalWsUrl: vi.fn(),
 }));
+vi.mock("./useWorkspaceContext", () => ({
+  useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
+}));
 vi.mock("@/utils/reconnectBackoff", () => ({
   calculateBackoffDelay: vi.fn(() => 1),
   DEFAULT_RECONNECT_CONFIG: {
@@ -132,7 +135,6 @@ describe("useAgentTerminalLogs", () => {
 
     const { result } = renderHook(() =>
       useAgentTerminalLogs({
-        workspaceId: "test-ws-id",
         agentName: "ember",
         enabled: true,
       }),
@@ -200,7 +202,6 @@ describe("useAgentTerminalLogs", () => {
 
     const { result } = renderHook(() =>
       useAgentTerminalLogs({
-        workspaceId: "test-ws-id",
         agentName: "ember",
         enabled: true,
       }),
@@ -249,7 +250,6 @@ describe("useAgentTerminalLogs", () => {
 
     const { result } = renderHook(() =>
       useAgentTerminalLogs({
-        workspaceId: "test-ws-id",
         agentName: "ember",
         enabled: true,
       }),

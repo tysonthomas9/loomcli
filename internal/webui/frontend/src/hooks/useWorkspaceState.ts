@@ -13,6 +13,7 @@
 import { useEffect, useRef, type RefObject } from "react";
 
 import type { PanelState } from "./usePanelManager";
+import { useWorkspaceContext } from "./useWorkspaceContext";
 
 // Module-level storage survives component remounts within the same session.
 const workspaceSnapshots = new Map<string, WorkspaceSnapshot>();
@@ -37,8 +38,6 @@ export interface WorkspaceSnapshot {
  * Parameters for useWorkspaceState hook.
  */
 export interface UseWorkspaceStateParams {
-  /** The current workspace ID from the route (useParams) */
-  workspaceId: string;
   /** Ref to the main scrollable container element */
   scrollContainerRef: RefObject<HTMLElement | null>;
   /** Current active panel state from usePanelManager */
@@ -50,13 +49,9 @@ export interface UseWorkspaceStateParams {
 }
 
 export function useWorkspaceState(params: UseWorkspaceStateParams): void {
-  const {
-    workspaceId,
-    scrollContainerRef,
-    activePanel,
-    restorePanel,
-    closeAllPanels,
-  } = params;
+  const { workspaceId } = useWorkspaceContext();
+  const { scrollContainerRef, activePanel, restorePanel, closeAllPanels } =
+    params;
 
   const rafIdRef = useRef<number | null>(null);
   const prevWorkspaceIdRef = useRef<string>(workspaceId);

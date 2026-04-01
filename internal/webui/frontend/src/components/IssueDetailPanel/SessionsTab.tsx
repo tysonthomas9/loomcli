@@ -7,7 +7,7 @@
 import { useMemo, useState } from "react";
 
 import { useTaskSessions } from "@/hooks/useTaskSessions";
-import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
+
 import type { SessionRecord } from "@/types/session";
 
 import { SessionTimeline } from "./SessionTimeline";
@@ -19,8 +19,7 @@ export interface SessionsTabProps {
 }
 
 export function SessionsTab({ taskId }: SessionsTabProps): JSX.Element {
-  const { workspaceId } = useWorkspaceContext();
-  const { sessions, isLoading, error } = useTaskSessions(workspaceId, taskId);
+  const { sessions, isLoading, error } = useTaskSessions(taskId);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
     null,
   );

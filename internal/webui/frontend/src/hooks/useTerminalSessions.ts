@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 
 import { listTerminalSessions } from "@/api/terminal";
 import type { TerminalSessionInfo } from "@/api/terminal";
+import { useWorkspaceContext } from "./useWorkspaceContext";
 
 const DEFAULT_SESSIONS: TerminalSessionInfo[] = [
   { name: "talk-to-lead", label: "talk-to-lead", created: 0 },
@@ -14,9 +15,8 @@ export interface UseTerminalSessionsReturn {
   refetch: () => Promise<void>;
 }
 
-export function useTerminalSessions(
-  workspaceId: string,
-): UseTerminalSessionsReturn {
+export function useTerminalSessions(): UseTerminalSessionsReturn {
+  const { workspaceId } = useWorkspaceContext();
   const [sessions, setSessions] =
     useState<TerminalSessionInfo[]>(DEFAULT_SESSIONS);
   const [isLoading, setIsLoading] = useState(true);

@@ -26,6 +26,10 @@ vi.mock("@/api/issueTabs", () => ({
   deleteIssueTabState: vi.fn(),
 }));
 
+vi.mock("../useWorkspaceContext", () => ({
+  useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
+}));
+
 const mockFetch = vi.mocked(fetchIssueTabState);
 const mockSave = vi.mocked(saveIssueTabState);
 const mockDeleteState = vi.mocked(deleteIssueTabState);
@@ -61,9 +65,7 @@ describe("useIssueTabPersistence", () => {
     it("starts with isLoading true and null savedState", async () => {
       mockFetch.mockResolvedValueOnce(null);
 
-      const { result } = renderHook(() =>
-        useIssueTabPersistence("test-ws-id", "PROJ-1"),
-      );
+      const { result } = renderHook(() => useIssueTabPersistence("PROJ-1"));
 
       expect(result.current.isLoading).toBe(true);
       expect(result.current.savedState).toBeNull();
@@ -77,9 +79,7 @@ describe("useIssueTabPersistence", () => {
       const state = createMockState();
       mockFetch.mockResolvedValueOnce(state);
 
-      const { result } = renderHook(() =>
-        useIssueTabPersistence("test-ws-id", "PROJ-1"),
-      );
+      const { result } = renderHook(() => useIssueTabPersistence("PROJ-1"));
 
       await flushPromises();
 
@@ -91,9 +91,7 @@ describe("useIssueTabPersistence", () => {
     it("sets savedState to null on fetch error (silent fail)", async () => {
       mockFetch.mockRejectedValueOnce(new Error("Network error"));
 
-      const { result } = renderHook(() =>
-        useIssueTabPersistence("test-ws-id", "PROJ-1"),
-      );
+      const { result } = renderHook(() => useIssueTabPersistence("PROJ-1"));
 
       await flushPromises();
 
@@ -105,7 +103,7 @@ describe("useIssueTabPersistence", () => {
       mockFetch.mockResolvedValueOnce(createMockState({ issue_id: "PROJ-1" }));
 
       const { result, rerender } = renderHook(
-        ({ id }: { id: string }) => useIssueTabPersistence("test-ws-id", id),
+        ({ id }: { id: string }) => useIssueTabPersistence(id),
         { initialProps: { id: "PROJ-1" } },
       );
 
@@ -121,9 +119,7 @@ describe("useIssueTabPersistence", () => {
     });
 
     it("does not fetch when issueId is empty", async () => {
-      const { result } = renderHook(() =>
-        useIssueTabPersistence("test-ws-id", ""),
-      );
+      const { result } = renderHook(() => useIssueTabPersistence(""));
 
       await flushPromises();
 
@@ -137,9 +133,7 @@ describe("useIssueTabPersistence", () => {
       mockFetch.mockResolvedValueOnce(null);
       mockSave.mockResolvedValue(undefined);
 
-      const { result } = renderHook(() =>
-        useIssueTabPersistence("test-ws-id", "PROJ-1"),
-      );
+      const { result } = renderHook(() => useIssueTabPersistence("PROJ-1"));
 
       await flushPromises();
 
@@ -170,9 +164,7 @@ describe("useIssueTabPersistence", () => {
       mockFetch.mockResolvedValueOnce(null);
       mockSave.mockResolvedValue(undefined);
 
-      const { result } = renderHook(() =>
-        useIssueTabPersistence("test-ws-id", "PROJ-1"),
-      );
+      const { result } = renderHook(() => useIssueTabPersistence("PROJ-1"));
 
       await flushPromises();
 
@@ -216,9 +208,7 @@ describe("useIssueTabPersistence", () => {
       mockFetch.mockResolvedValueOnce(createMockState());
       mockDeleteState.mockResolvedValue(undefined);
 
-      const { result } = renderHook(() =>
-        useIssueTabPersistence("test-ws-id", "PROJ-1"),
-      );
+      const { result } = renderHook(() => useIssueTabPersistence("PROJ-1"));
 
       await flushPromises();
       expect(result.current.savedState).not.toBeNull();
@@ -234,9 +224,7 @@ describe("useIssueTabPersistence", () => {
     it("does nothing when issueId is empty", async () => {
       mockFetch.mockResolvedValueOnce(null);
 
-      const { result } = renderHook(() =>
-        useIssueTabPersistence("test-ws-id", ""),
-      );
+      const { result } = renderHook(() => useIssueTabPersistence(""));
 
       await flushPromises();
 
@@ -252,9 +240,7 @@ describe("useIssueTabPersistence", () => {
     it("ignores mutations with wrong type", async () => {
       mockFetch.mockResolvedValueOnce(null);
 
-      const { result } = renderHook(() =>
-        useIssueTabPersistence("test-ws-id", "PROJ-1"),
-      );
+      const { result } = renderHook(() => useIssueTabPersistence("PROJ-1"));
 
       await flushPromises();
 
@@ -278,9 +264,7 @@ describe("useIssueTabPersistence", () => {
     it("ignores issue_tabs mutations for different issueId", async () => {
       mockFetch.mockResolvedValueOnce(null);
 
-      const { result } = renderHook(() =>
-        useIssueTabPersistence("test-ws-id", "PROJ-1"),
-      );
+      const { result } = renderHook(() => useIssueTabPersistence("PROJ-1"));
 
       await flushPromises();
 
@@ -304,9 +288,7 @@ describe("useIssueTabPersistence", () => {
     it("triggers debounced refetch for matching issue_tabs mutation", async () => {
       mockFetch.mockResolvedValueOnce(null);
 
-      const { result } = renderHook(() =>
-        useIssueTabPersistence("test-ws-id", "PROJ-1"),
-      );
+      const { result } = renderHook(() => useIssueTabPersistence("PROJ-1"));
 
       await flushPromises();
 
@@ -338,7 +320,7 @@ describe("useIssueTabPersistence", () => {
       mockFetch.mockResolvedValueOnce(createMockState());
 
       const { result, unmount } = renderHook(() =>
-        useIssueTabPersistence("test-ws-id", "PROJ-1"),
+        useIssueTabPersistence("PROJ-1"),
       );
 
       await flushPromises();
@@ -357,7 +339,7 @@ describe("useIssueTabPersistence", () => {
       mockSave.mockResolvedValue(undefined);
 
       const { result, unmount } = renderHook(() =>
-        useIssueTabPersistence("test-ws-id", "PROJ-1"),
+        useIssueTabPersistence("PROJ-1"),
       );
 
       await flushPromises();

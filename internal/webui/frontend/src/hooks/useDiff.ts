@@ -13,8 +13,9 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { fetchDiffFiles, fetchDiffFile } from "@/api/diff";
 import type { DiffFile, DiffFilePatch } from "@/api/diff";
 
+import { useWorkspaceContext } from "./useWorkspaceContext";
+
 export interface UseDiffOptions {
-  workspaceId: string;
   agentName: string | null;
   enabled: boolean;
   commitSignal?: number;
@@ -39,11 +40,11 @@ export interface UseDiffReturn {
 }
 
 export function useDiff({
-  workspaceId,
   agentName,
   enabled,
   commitSignal,
 }: UseDiffOptions): UseDiffReturn {
+  const { workspaceId } = useWorkspaceContext();
   const [files, setFiles] = useState<DiffFile[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);

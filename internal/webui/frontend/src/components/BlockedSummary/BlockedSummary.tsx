@@ -6,7 +6,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
 import { useBlockedIssues } from "@/hooks";
-import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
 import type { Priority } from "@/types";
 
 import styles from "./BlockedSummary.module.css";
@@ -46,7 +45,6 @@ export function BlockedSummary({
   className,
   maxDisplayed = 10,
 }: BlockedSummaryProps): JSX.Element {
-  const { workspaceId } = useWorkspaceContext();
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -55,7 +53,6 @@ export function BlockedSummary({
     loading,
     error,
   } = useBlockedIssues({
-    workspaceId,
     pollInterval: 30000, // Poll every 30 seconds
   });
 
