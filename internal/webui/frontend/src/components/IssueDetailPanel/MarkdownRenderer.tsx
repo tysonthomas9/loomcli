@@ -6,6 +6,7 @@
 import Markdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 
+import { sanitizeHtml } from "../../utils/sanitizeHtml";
 import styles from "./MarkdownRenderer.module.css";
 
 export interface MarkdownRendererProps {
@@ -33,9 +34,11 @@ export function MarkdownRenderer({
     );
   }
 
+  const sanitizedContent = sanitizeHtml(content);
+
   return (
     <div className={rootClassName} data-testid="markdown-content">
-      <Markdown rehypePlugins={[rehypeSanitize]}>{content}</Markdown>
+      <Markdown rehypePlugins={[rehypeSanitize]}>{sanitizedContent}</Markdown>
     </div>
   );
 }

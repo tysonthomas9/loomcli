@@ -52,4 +52,41 @@ describe("MarkdownRenderer XSS sanitization", () => {
     expect(screen.getByTestId("markdown-empty")).toBeInTheDocument();
     expect(screen.getByText("No content")).toBeInTheDocument();
   });
+
+  it("strips event handler injection via img tag", () => {
+    render(<MarkdownRenderer content="<img src=x onerror=alert(1)>" />);
+    const container = screen.getByTestId("markdown-content");
+    expect(container.innerHTML).not.toContain("onerror");
+  });
+
+  it("strips javascript: URI in links", () => {
+    render(<MarkdownRenderer content="[click](javascript:alert(1))" />);
+    const container = screen.getByTestId("markdown-content");
+    const links = container.querySelectorAll("a");
+    links.forEach((link) => {
+      expect(link.getAttribute("href") ?? "").not.toContain("javascript:");
+    });
+  });
+
+  it("strips iframe injection", () => {
+    render(<MarkdownRenderer content='<iframe src="evil.com"></iframe>' />);
+    const container = screen.getByTestId("markdown-content");
+    expect(container.querySelector("iframe")).toBeNull();
+  });
+
+  it("strips mXSS via math/table nesting", () => {
+    const mxss =
+      "<math><mtext><table><mglyph><style><!--</style><img src=x onerror=alert(1)>-->";
+    render(<MarkdownRenderer content={mxss} />);
+    const container = screen.getByTestId("markdown-content");
+    expect(container.innerHTML).not.toContain("onerror");
+  });
+
+  it("strips onmouseover handler on div", () => {
+    render(
+      <MarkdownRenderer content='<div onmouseover="alert(1)">hover</div>' />,
+    );
+    const container = screen.getByTestId("markdown-content");
+    expect(container.innerHTML).not.toContain("onmouseover");
+  });
 });
