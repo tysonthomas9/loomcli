@@ -11,35 +11,23 @@ import {
 } from "@/api/terminal";
 import { LoadingSkeleton } from "@/components";
 import { useBackendConfig } from "@/hooks/useBackendConfig";
-import {
-  useRegisterEscapeLayer,
-  LAYER_TERMINAL_SEARCH,
-} from "@/hooks/useKeyboardShortcuts";
 import { useSessionRestore } from "@/hooks/useSessionRestore";
 import { useTerminalMetadata } from "@/hooks/useTerminalMetadata";
 
 import { BackendPickerPrompt } from "./BackendPickerPrompt";
 import { HelpPopover } from "./HelpPopover";
 import { NoBackendsEmptyState } from "./NoBackendsEmptyState";
-import { WelcomeBanner } from "./WelcomeBanner";
 import { CopyToast } from "./CopyToast";
-import { CrashOverlay } from "./CrashOverlay";
-import { NotesBar } from "./NotesBar";
 import { PasteConfirmDialog } from "./PasteConfirmDialog";
-import {
-  ReconnectingOverlay,
-  type ReconnectOverlayState,
-} from "./ReconnectingOverlay";
+import type { ReconnectOverlayState } from "./ReconnectingOverlay";
 import { SearchBar } from "./SearchBar";
-import { TerminalConnectionOverlay } from "./TerminalConnectionOverlay";
 import { TerminalContextMenu } from "./TerminalContextMenu";
 import type {
   ConnectionState,
   ContextMenuEvent,
-  SearchResultInfo,
   TerminalInstanceHandle,
 } from "./TerminalInstance";
-import { TerminalInstance } from "./TerminalInstance";
+import { TerminalPane } from "./TerminalPane";
 import { TerminalTabBar } from "./TerminalTabBar";
 import { SplitDivider } from "./SplitDivider";
 import { SplitPaneSelector } from "./SplitPaneSelector";
@@ -56,6 +44,8 @@ import { useSessionManagement } from "./useCloseAllSessions";
 import { useSplitView } from "./useSplitView";
 import { useTabActions } from "./useTabActions";
 import { useTabInit } from "./useTabInit";
+import { useTerminalKeyboardShortcuts } from "./useTerminalKeyboardShortcuts";
+import { useTerminalSearch } from "./useTerminalSearch";
 import { useWorkspaceTabState } from "./useWorkspaceTabState";
 import styles from "./TerminalView.module.css";
 
@@ -124,13 +114,6 @@ export function TerminalView({
     handleRightPaneTabChange,
   } = useSplitView({ tabs, activeTabId });
   const splitContainerRef = useRef<HTMLDivElement>(null);
-  const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [caseSensitive, setCaseSensitive] = useState(false);
-  const [useRegex, setUseRegex] = useState(false);
-  const [searchResult, setSearchResult] = useState<SearchResultInfo | null>(
-    null,
-  );
   const [isSessionPromptOpen, setIsSessionPromptOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<ContextMenuEvent | null>(null);
   const [tabHasConnected, setTabHasConnected] = useState<Map<string, boolean>>(
@@ -182,6 +165,29 @@ export function TerminalView({
     handlePasteConfirm,
     handlePasteCancel,
   } = useClipboard(instanceRefs, activeTabIdRef);
+
+  const {
+    isSearchOpen,
+    searchTerm,
+    caseSensitive,
+    useRegex,
+    searchResult,
+    handleSearch,
+    handleFindNext,
+    handleFindPrevious,
+    handleSearchClose,
+    handleToggleCaseSensitive,
+    handleToggleRegex,
+    handleSearchResultChange,
+    handleSearchRequest,
+  } = useTerminalSearch({
+    instanceRefs,
+    activeTabId,
+    isSplitView,
+    focusedPane,
+    rightPaneTabId,
+    isActive,
+  });
 
   const handleOutput = useCallback((tabId: string) => {
     if (tabId !== activeTabIdRef.current) {
@@ -400,147 +406,6 @@ export function TerminalView({
     [],
   );
 
-  // Keyboard shortcuts (only when view is active)
-  useEffect(() => {
-    if (!isActive) return;
-    const handler = (e: KeyboardEvent) => {
-      // Ctrl+Tab / Ctrl+Shift+Tab: cycle tabs
-      // Alt+ArrowRight / Alt+ArrowLeft: Firefox-compatible fallback
-      if (
-        (e.ctrlKey && e.key === "Tab") ||
-        (e.altKey && (e.key === "ArrowRight" || e.key === "ArrowLeft"))
-      ) {
-        e.preventDefault();
-        const currentTabs = tabsRef.current;
-        if (currentTabs.length <= 1) return;
-        const goForward =
-          e.key === "Tab" ? !e.shiftKey : e.key === "ArrowRight";
-        const currentIdx = currentTabs.findIndex(
-          (t) => t.id === activeTabIdRef.current,
-        );
-        const nextIdx = goForward
-          ? currentIdx < currentTabs.length - 1
-            ? currentIdx + 1
-            : 0
-          : currentIdx > 0
-            ? currentIdx - 1
-            : currentTabs.length - 1;
-        const nextTab = currentTabs[nextIdx];
-        if (nextTab) setActiveTabId(nextTab.id);
-        return;
-      }
-
-      // Escape: return to previous view when nothing else to dismiss
-      if (
-        e.key === "Escape" &&
-        !isSearchOpen &&
-        !isSessionPromptOpen &&
-        pendingPasteText === null &&
-        dismissedWelcome
-      ) {
-        e.preventDefault();
-        onEscape?.();
-        return;
-      }
-
-      // Cmd/Ctrl+1-9: switch tabs by index
-      if (
-        (e.metaKey || e.ctrlKey) &&
-        !e.shiftKey &&
-        !e.altKey &&
-        e.key >= "1" &&
-        e.key <= "9"
-      ) {
-        e.preventDefault();
-        const index = parseInt(e.key) - 1;
-        const currentTabs = tabsRef.current;
-        const targetTab = currentTabs[index];
-        if (targetTab) {
-          handleTabChangeRef.current(targetTab.id);
-          announce(`Switched to tab ${targetTab.label}`);
-        }
-        return;
-      }
-
-      // Cmd/Ctrl+T: new tab
-      if (
-        (e.metaKey || e.ctrlKey) &&
-        !e.shiftKey &&
-        !e.altKey &&
-        e.key === "t"
-      ) {
-        e.preventDefault();
-        if (tabsRef.current.length < MAX_TABS) {
-          setIsSessionPromptOpen(true);
-        }
-        return;
-      }
-
-      // Cmd/Ctrl+W: close active tab
-      if (
-        (e.metaKey || e.ctrlKey) &&
-        !e.shiftKey &&
-        !e.altKey &&
-        e.key === "w"
-      ) {
-        e.preventDefault();
-        const currentTabs = tabsRef.current;
-        if (currentTabs.length > 1) {
-          const closedTab = currentTabs.find(
-            (t) => t.id === activeTabIdRef.current,
-          );
-          handleTabCloseRef.current(activeTabIdRef.current);
-          if (closedTab) announce(`Tab ${closedTab.label} closed`);
-        }
-        return;
-      }
-
-      // Cmd+F / Ctrl+F: toggle search
-      if ((e.metaKey || e.ctrlKey) && e.key === "f") {
-        e.preventDefault();
-        setIsSearchOpen((prev) => !prev);
-      }
-    };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [
-    isActive,
-    isSearchOpen,
-    isSessionPromptOpen,
-    pendingPasteText,
-    onEscape,
-    announce,
-    dismissedWelcome,
-  ]);
-
-  // The tab targeted by search: in split mode, use the focused pane's tab
-  const searchTargetTabId =
-    isSplitView && focusedPane === "right" ? rightPaneTabId : activeTabId;
-  const searchTargetTabIdRef = useRef(searchTargetTabId);
-  searchTargetTabIdRef.current = searchTargetTabId;
-
-  const closeTerminalSearch = useCallback(() => {
-    setIsSearchOpen(false);
-    instanceRefs.current.get(searchTargetTabId)?.clearSearch();
-    setSearchTerm("");
-    setSearchResult(null);
-  }, [searchTargetTabId]);
-
-  useRegisterEscapeLayer(
-    LAYER_TERMINAL_SEARCH,
-    closeTerminalSearch,
-    isActive && isSearchOpen,
-  );
-
-  // Re-run search on tab switch while search is open
-  useEffect(() => {
-    if (isSearchOpen && searchTerm) {
-      instanceRefs.current
-        .get(searchTargetTabId)
-        ?.search(searchTerm, { caseSensitive, regex: useRegex });
-    }
-  }, [searchTargetTabId, isSearchOpen, searchTerm, caseSensitive, useRegex]);
-
   // Body scroll lock for full-height mode
   useEffect(() => {
     if (isFullHeight) document.body.style.overflow = "hidden";
@@ -609,9 +474,6 @@ export function TerminalView({
       return next;
     });
   }, []);
-  // Stable ref for handleTabChange — avoids forward-reference issue in keydown effect
-  const handleTabChangeRef = useRef(handleTabChange);
-  handleTabChangeRef.current = handleTabChange;
 
   const { handleTabClose, handleDuplicateTab, handleTabRename } = useTabActions(
     {
@@ -625,9 +487,6 @@ export function TerminalView({
       deleteTab,
     },
   );
-  // Stable ref for handleTabClose — avoids adding it to keydown effect deps
-  const handleTabCloseRef = useRef(handleTabClose);
-  handleTabCloseRef.current = handleTabClose;
 
   const { handleTabPin, handleCloseOthers, handleReorderTabs } = useTabOrdering(
     {
@@ -645,6 +504,57 @@ export function TerminalView({
     if (tabs.length >= MAX_TABS) return;
     setIsSessionPromptOpen(true);
   }, [tabs.length]);
+
+  const handleCycleTab = useCallback(
+    (direction: "forward" | "backward") => {
+      const currentTabs = tabsRef.current;
+      if (currentTabs.length <= 1) return;
+      const currentIdx = currentTabs.findIndex(
+        (t) => t.id === activeTabIdRef.current,
+      );
+      const nextIdx =
+        direction === "forward"
+          ? currentIdx < currentTabs.length - 1
+            ? currentIdx + 1
+            : 0
+          : currentIdx > 0
+            ? currentIdx - 1
+            : currentTabs.length - 1;
+      const nextTab = currentTabs[nextIdx];
+      if (nextTab) setActiveTabId(nextTab.id);
+    },
+    [tabsRef, activeTabIdRef],
+  );
+
+  const handleSwitchTabByIndex = useCallback(
+    (index: number) => {
+      const currentTabs = tabsRef.current;
+      const targetTab = currentTabs[index];
+      if (targetTab) handleTabChange(targetTab.id);
+    },
+    [tabsRef, handleTabChange],
+  );
+
+  const handleCloseActiveTab = useCallback(() => {
+    handleTabClose(activeTabIdRef.current);
+  }, [handleTabClose, activeTabIdRef]);
+
+  useTerminalKeyboardShortcuts({
+    isActive,
+    tabsRef,
+    activeTabIdRef,
+    isSearchOpen,
+    isSessionPromptOpen,
+    pendingPasteText,
+    dismissedWelcome,
+    onCycleTab: handleCycleTab,
+    onSwitchTabByIndex: handleSwitchTabByIndex,
+    onNewTab: handleNewTabClick,
+    onCloseTab: handleCloseActiveTab,
+    onToggleSearch: handleSearchRequest,
+    onEscape,
+    announce,
+  });
 
   const handleBackendSelect = useCallback(
     (backend: string) => {
@@ -671,67 +581,6 @@ export function TerminalView({
 
   const handleSessionPromptCancel = useCallback(() => {
     setIsSessionPromptOpen(false);
-  }, []);
-
-  // Search handlers
-  const handleSearch = useCallback(
-    (term: string) => {
-      setSearchTerm(term);
-      instanceRefs.current
-        .get(searchTargetTabId)
-        ?.search(term, { caseSensitive, regex: useRegex });
-    },
-    [searchTargetTabId, caseSensitive, useRegex],
-  );
-
-  const handleFindNext = useCallback(() => {
-    instanceRefs.current.get(searchTargetTabId)?.findNext();
-  }, [searchTargetTabId]);
-
-  const handleFindPrevious = useCallback(() => {
-    instanceRefs.current.get(searchTargetTabId)?.findPrevious();
-  }, [searchTargetTabId]);
-
-  const handleSearchClose = useCallback(() => {
-    setIsSearchOpen(false);
-    instanceRefs.current.get(searchTargetTabId)?.clearSearch();
-    setSearchTerm("");
-    setSearchResult(null);
-  }, [searchTargetTabId]);
-
-  const handleToggleCaseSensitive = useCallback(() => {
-    const next = !caseSensitive;
-    setCaseSensitive(next);
-    if (searchTerm) {
-      instanceRefs.current
-        .get(searchTargetTabId)
-        ?.search(searchTerm, { caseSensitive: next, regex: useRegex });
-    }
-  }, [searchTargetTabId, searchTerm, caseSensitive, useRegex]);
-
-  const handleToggleRegex = useCallback(() => {
-    const next = !useRegex;
-    setUseRegex(next);
-    if (searchTerm) {
-      instanceRefs.current
-        .get(searchTargetTabId)
-        ?.search(searchTerm, { caseSensitive, regex: next });
-    }
-  }, [searchTargetTabId, searchTerm, caseSensitive, useRegex]);
-
-  // Only process search result changes from the search-targeted tab
-  const handleSearchResultChange = useCallback(
-    (tabId: string, result: SearchResultInfo | null) => {
-      if (tabId === searchTargetTabIdRef.current) {
-        setSearchResult(result);
-      }
-    },
-    [],
-  );
-
-  // Search request from terminal (Ctrl+Shift+F)
-  const handleSearchRequest = useCallback(() => {
-    setIsSearchOpen((prev) => !prev);
   }, []);
 
   // Context menu handlers
@@ -829,16 +678,14 @@ export function TerminalView({
   );
 
   const renderTerminalPane = useCallback(
-    (tab: TabState, pane: "left" | "right" | null) => (
-      <>
-        <TerminalInstance
-          ref={setInstanceRef(tab.id)}
-          sessionName={tab.sessionName}
-          isActive={
-            pane === "right"
-              ? tab.id === rightPaneTabId
-              : tab.id === activeTabId
-          }
+    (tab: TabState, pane: "left" | "right" | null) => {
+      const paneIsActive =
+        pane === "right" ? tab.id === rightPaneTabId : tab.id === activeTabId;
+      return (
+        <TerminalPane
+          tab={tab}
+          isActive={paneIsActive}
+          instanceRef={setInstanceRef(tab.id)}
           onConnectionStateChange={(state, hasConnected) =>
             handleConnectionStateChange(tab.id, state, hasConnected)
           }
@@ -854,6 +701,9 @@ export function TerminalView({
             handleSearchResultChange(tab.id, result)
           }
           onBackendCrash={(reason) => handleBackendCrash(tab.id, reason)}
+          onCrashRestart={() => handleCrashRestart(tab.id, tab.sessionName)}
+          onCloseTab={() => handleTabClose(tab.id)}
+          onReconnect={() => handleReconnect(tab.id)}
           onTerminalFocus={
             pane === "left"
               ? setFocusedLeft
@@ -861,52 +711,23 @@ export function TerminalView({
                 ? setFocusedRight
                 : undefined
           }
-          agentName={tab.agentName}
-        />
-        {tab.crashReason != null ? (
-          <CrashOverlay
-            reason={tab.crashReason}
-            onRestart={() => handleCrashRestart(tab.id, tab.sessionName)}
-            onCloseTab={() => handleTabClose(tab.id)}
-          />
-        ) : (
-          <>
-            <TerminalConnectionOverlay
-              connectionState={tab.connectionState}
-              hasConnected={tabHasConnected.get(tab.id) ?? false}
-              onReconnect={() => handleReconnect(tab.id)}
-            />
-            <ReconnectingOverlay
-              state={tabReconnectState.get(tab.id) ?? null}
-              onReconnect={() => handleReconnect(tab.id)}
-            />
-          </>
-        )}
-        {tabHasConnected.get(tab.id) && !dismissedWelcome && (
-          <WelcomeBanner
-            backendName={tab.backendName}
-            isActive={
-              pane === "right"
-                ? tab.id === rightPaneTabId
-                : tab.id === activeTabId
-            }
-            onDismiss={handleDismissWelcome}
-            onExampleClick={(text) => {
-              instanceRefs.current.get(tab.id)?.pasteText(text);
-              handleDismissWelcome();
-            }}
-          />
-        )}
-        <NotesBar
+          hasConnected={tabHasConnected.get(tab.id) ?? false}
+          reconnectState={tabReconnectState.get(tab.id) ?? null}
+          dismissedWelcome={dismissedWelcome}
+          onDismissWelcome={handleDismissWelcome}
+          onExampleClick={(text) => {
+            instanceRefs.current.get(tab.id)?.pasteText(text);
+            handleDismissWelcome();
+          }}
           notes={
             tabMetadata.find((m) => m.session_name === tab.sessionName)
               ?.notes ?? ""
           }
-          onSave={(text) => updateNotes(tab.sessionName, text)}
-          isLoading={metaLoading}
+          onSaveNotes={(text) => updateNotes(tab.sessionName, text)}
+          isMetaLoading={metaLoading}
         />
-      </>
-    ),
+      );
+    },
     [
       activeTabId,
       rightPaneTabId,
