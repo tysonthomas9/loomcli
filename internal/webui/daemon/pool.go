@@ -10,6 +10,15 @@ import (
 )
 
 const (
+	// DefaultDialTimeout is the default timeout for establishing connections.
+	DefaultDialTimeout = 2 * time.Second
+
+	// DefaultRequestTimeout is the default timeout for RPC requests.
+	DefaultRequestTimeout = 30 * time.Second
+
+	// HealthCheckInterval is how often to check connection health.
+	HealthCheckInterval = 5 * time.Second
+
 	// DefaultPoolSize is the default number of connections in the pool.
 	// Set to 100 to support concurrent fleet worker requests.
 	DefaultPoolSize = 100
