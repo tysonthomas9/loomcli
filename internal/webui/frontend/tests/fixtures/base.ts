@@ -51,7 +51,7 @@ export const test = base.extend<TestFixtures>({
     await mockApi.mockAuth();
     // Set up SSE intercept so the app doesn't hang waiting for a real server
     await mockSSE.connect();
-    // Intercept /api/events/token before the SSE mock's broader glob catches it
+    // Intercept /api/workspaces/*/events/token before the SSE mock's broader glob catches it
     await mockApi.mockSseToken(null);
     // Navigate to the app
     await page.goto("/");

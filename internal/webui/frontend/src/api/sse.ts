@@ -11,9 +11,11 @@ type SseTokenResult =
   | { kind: "disabled" }
   | { kind: "error"; message: string };
 
-async function fetchSseToken(): Promise<SseTokenResult> {
+async function fetchSseToken(workspaceId: string): Promise<SseTokenResult> {
   try {
-    const resp = await get<{ token: string }>("/api/events/token");
+    const resp = await get<{ token: string }>(
+      wsUrl(workspaceId, "/events/token"),
+    );
     return { kind: "token", token: resp.token };
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) {
@@ -126,7 +128,7 @@ export class BeadsSSEClient {
     this.setState("connecting");
 
     // Fetch opaque SSE token (external auth mode)
-    const tokenResult = await fetchSseToken();
+    const tokenResult = await fetchSseToken(this.workspaceId);
 
     // Bail out if disconnected while awaiting token
     if (this.manualDisconnect || this.state === "disconnected") {

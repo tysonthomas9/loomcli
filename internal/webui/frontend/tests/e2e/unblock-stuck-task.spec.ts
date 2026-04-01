@@ -205,7 +205,7 @@ async function installDataInterceptor(page: Page) {
 }
 
 async function setupInfrastructureMocks(page: Page) {
-  await page.route("**/api/events/token", async (route) => {
+  await page.route("**/api/workspaces/*/events/token", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",

@@ -847,6 +847,9 @@ describe("BeadsSSEClient", () => {
       const client = new BeadsSSEClient("test-ws-id");
       await client.connect();
 
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/events/token",
+      );
       expect(MockEventSource.lastInstance?.url).toContain(
         "token=opaque-token-123",
       );
@@ -858,6 +861,9 @@ describe("BeadsSSEClient", () => {
       const client = new BeadsSSEClient("test-ws-id");
       await client.connect();
 
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/events/token",
+      );
       expect(MockEventSource.lastInstance?.url).not.toContain("token=");
     });
 
@@ -868,6 +874,9 @@ describe("BeadsSSEClient", () => {
       const client = new BeadsSSEClient("test-ws-id", { onError });
       await client.connect();
 
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/events/token",
+      );
       expect(onError).toHaveBeenCalledWith(
         expect.stringContaining("SSE auth failed"),
       );

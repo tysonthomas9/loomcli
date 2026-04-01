@@ -276,7 +276,7 @@ export function createApiMockHandler(page: Page): ApiMockHandler {
 
     async mockSseToken(token: string | null): Promise<MockTracker> {
       const tracker: MockTracker = { calls: [] };
-      await page.route("**/api/events/token", async (route) => {
+      await page.route("**/api/workspaces/*/events/token", async (route) => {
         tracker.calls.push(trackRequest(route.request()));
         if (token === null) {
           await route.fulfill({ status: 404, body: "Not Found" });

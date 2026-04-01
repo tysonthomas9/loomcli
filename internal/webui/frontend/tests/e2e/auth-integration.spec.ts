@@ -71,7 +71,7 @@ test.describe("Auth Integration", () => {
         timeout: 10_000,
       });
 
-      // /api/events/token should have been called but returned 404
+      // /api/workspaces/{ws}/events/token should have been called but returned 404
       // The SSE client handles 404 by connecting without token
       expect(sseTracker.calls.length).toBeGreaterThanOrEqual(1);
     });
@@ -316,8 +316,8 @@ test.describe("Auth Integration", () => {
       // Track SSE connection URLs
       await page.route("**/api/events", async (route) => {
         const url = route.request().url();
-        // Only track the main SSE endpoint, not /api/events/token
-        if (!url.includes("/api/events/token")) {
+        // Only track the main SSE endpoint, not /events/token
+        if (!url.includes("/events/token")) {
           sseRequests.push(url);
         }
         await route.fulfill({
@@ -358,7 +358,7 @@ test.describe("Auth Integration", () => {
       // Track SSE connection URLs
       await page.route("**/api/events", async (route) => {
         const url = route.request().url();
-        if (!url.includes("/api/events/token")) {
+        if (!url.includes("/events/token")) {
           sseRequests.push(url);
         }
         await route.fulfill({
@@ -413,7 +413,7 @@ test.describe("Auth Integration", () => {
           });
         });
         await page.route("**/api/events**", async (route) => {
-          if (route.request().url().includes("/api/events/token")) {
+          if (route.request().url().includes("/events/token")) {
             await route.fallback();
             return;
           }
