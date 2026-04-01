@@ -127,6 +127,87 @@ func TestHandleListSessionsByIssue_ReturnsGroupedSessions(t *testing.T) {
 	}
 }
 
+func TestHandleListSessionsByIssue_CrossWorkspace(t *testing.T) {
+	store, _ := setupTabMetaTest(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	sessions := []tabmeta.TabMetadata{
+		// Two sessions in workspace "alpha" for PROJ-1
+		{SessionName: "alpha-s1", Workspace: "alpha", Label: "alpha-s1", SortOrder: 1, IssueID: "PROJ-1", CreatedAt: now, UpdatedAt: now},
+		// One session in workspace "beta" for PROJ-1
+		{SessionName: "beta-s1", Workspace: "beta", Label: "beta-s1", SortOrder: 1, IssueID: "PROJ-1", CreatedAt: now, UpdatedAt: now},
+		// One session in workspace "gamma" for a different issue
+		{SessionName: "gamma-s1", Workspace: "gamma", Label: "gamma-s1", SortOrder: 1, IssueID: "PROJ-2", CreatedAt: now, UpdatedAt: now},
+	}
+	for _, s := range sessions {
+		s := s
+		if err := store.Set(ctx, &s); err != nil {
+			t.Fatalf("Set %s: %v", s.SessionName, err)
+		}
+	}
+
+	handler := handleListSessionsByIssue(store)
+	req := httptest.NewRequest(http.MethodGet, "/api/terminal/sessions/by-issue", nil)
+	rr := httptest.NewRecorder()
+	handler(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["success"] != true {
+		t.Errorf("expected success=true, got %v", resp["success"])
+	}
+
+	data, ok := resp["data"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected data to be a map, got %T", resp["data"])
+	}
+
+	// PROJ-1 should have 2 sessions from alpha and beta workspaces
+	proj1, ok := data["PROJ-1"].([]interface{})
+	if !ok {
+		t.Fatalf("PROJ-1 not found or wrong type: %v", data["PROJ-1"])
+	}
+	if len(proj1) != 2 {
+		t.Errorf("PROJ-1: expected 2 sessions (from alpha and beta), got %d: %v", len(proj1), proj1)
+	}
+
+	// Verify both session names are present
+	proj1Names := make(map[string]bool)
+	for _, v := range proj1 {
+		proj1Names[v.(string)] = true
+	}
+	if !proj1Names["alpha-s1"] {
+		t.Error("PROJ-1: expected alpha-s1 session from workspace alpha")
+	}
+	if !proj1Names["beta-s1"] {
+		t.Error("PROJ-1: expected beta-s1 session from workspace beta")
+	}
+
+	// PROJ-2 should have 1 session from gamma workspace
+	proj2, ok := data["PROJ-2"].([]interface{})
+	if !ok {
+		t.Fatalf("PROJ-2 not found or wrong type: %v", data["PROJ-2"])
+	}
+	if len(proj2) != 1 {
+		t.Errorf("PROJ-2: expected 1 session, got %d", len(proj2))
+	}
+	if proj2[0].(string) != "gamma-s1" {
+		t.Errorf("PROJ-2: expected gamma-s1, got %s", proj2[0])
+	}
+
+	// Should only have 2 issue keys total
+	if len(data) != 2 {
+		t.Errorf("expected 2 issue keys, got %d: %v", len(data), data)
+	}
+}
+
 // ── handleCloseAllSessions tests ────────────────────────────────────────────────
 
 func TestHandleCloseAllSessions_NilManager(t *testing.T) {
