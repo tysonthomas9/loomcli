@@ -57,10 +57,7 @@ if (env.NODE_ENV === "production") {
 app.use(
   "/api/*",
   cors({
-    origin:
-      env.TRUSTED_ORIGINS.length > 0
-        ? env.TRUSTED_ORIGINS
-        : [new URL(env.BETTER_AUTH_URL).origin],
+    origin: env.TRUSTED_ORIGINS,
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
     credentials: true,
