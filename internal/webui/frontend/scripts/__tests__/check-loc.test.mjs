@@ -318,111 +318,111 @@ describe("checkLoc", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  it("passes for files under 500 LOC", () => {
+  it("passes for files under 2000 LOC", () => {
     writeFile(srcDir, "small.ts", 100);
     const result = checkLoc(root, srcDir, new Map());
     expect(result.violations).toEqual([]);
     expect(result.allowlistedCount).toBe(0);
   });
 
-  it("passes for a file at exactly 500 LOC", () => {
-    writeFile(srcDir, "exact.ts", 500);
+  it("passes for a file at exactly 2000 LOC", () => {
+    writeFile(srcDir, "exact.ts", 2000);
     const result = checkLoc(root, srcDir, new Map());
     expect(result.violations).toEqual([]);
   });
 
-  it("fails for files over 500 LOC without allowlist", () => {
-    writeFile(srcDir, "big.ts", 501);
+  it("fails for files over 2000 LOC without allowlist", () => {
+    writeFile(srcDir, "big.ts", 2001);
     const result = checkLoc(root, srcDir, new Map());
     expect(result.violations).toHaveLength(1);
     expect(result.violations[0]).toMatchObject({
       relPath: "src/big.ts",
-      loc: 501,
+      loc: 2001,
       ceiling: null,
     });
   });
 
   it("passes for allowlisted file at its ceiling", () => {
-    writeFile(srcDir, "large.tsx", 600);
-    const allowlist = new Map([["src/large.tsx", 600]]);
+    writeFile(srcDir, "large.tsx", 1500);
+    const allowlist = new Map([["src/large.tsx", 1500]]);
     const result = checkLoc(root, srcDir, allowlist);
     expect(result.violations).toEqual([]);
     expect(result.allowlistedCount).toBe(1);
   });
 
   it("passes for allowlisted file under its ceiling", () => {
-    writeFile(srcDir, "large.tsx", 500);
-    const allowlist = new Map([["src/large.tsx", 700]]);
+    writeFile(srcDir, "large.tsx", 1500);
+    const allowlist = new Map([["src/large.tsx", 1800]]);
     const result = checkLoc(root, srcDir, allowlist);
     expect(result.violations).toEqual([]);
     expect(result.allowlistedCount).toBe(1);
   });
 
   it("fails for allowlisted file over its ceiling", () => {
-    writeFile(srcDir, "large.tsx", 701);
-    const allowlist = new Map([["src/large.tsx", 700]]);
+    writeFile(srcDir, "large.tsx", 1801);
+    const allowlist = new Map([["src/large.tsx", 1800]]);
     const result = checkLoc(root, srcDir, allowlist);
     expect(result.violations).toHaveLength(1);
     expect(result.violations[0]).toMatchObject({
       relPath: "src/large.tsx",
-      loc: 701,
-      ceiling: 700,
+      loc: 1801,
+      ceiling: 1800,
     });
   });
 
   it("skips test files", () => {
-    writeFile(srcDir, "util.test.ts", 600);
-    writeFile(srcDir, "Component.test.tsx", 600);
+    writeFile(srcDir, "util.test.ts", 2500);
+    writeFile(srcDir, "Component.test.tsx", 2500);
     const result = checkLoc(root, srcDir, new Map());
     expect(result.violations).toEqual([]);
   });
 
   it("skips spec files", () => {
-    writeFile(srcDir, "util.spec.ts", 600);
-    writeFile(srcDir, "Component.spec.tsx", 600);
+    writeFile(srcDir, "util.spec.ts", 2500);
+    writeFile(srcDir, "Component.spec.tsx", 2500);
     const result = checkLoc(root, srcDir, new Map());
     expect(result.violations).toEqual([]);
   });
 
   it("skips .d.ts files", () => {
-    writeFile(srcDir, "global.d.ts", 600);
+    writeFile(srcDir, "global.d.ts", 2500);
     const result = checkLoc(root, srcDir, new Map());
     expect(result.violations).toEqual([]);
   });
 
   it("skips __tests__ directory", () => {
-    writeFile(srcDir, "components/__tests__/Big.tsx", 600);
+    writeFile(srcDir, "components/__tests__/Big.tsx", 2500);
     const result = checkLoc(root, srcDir, new Map());
     expect(result.violations).toEqual([]);
   });
 
   it("skips test-utils directory", () => {
-    writeFile(srcDir, "test-utils/render.ts", 600);
+    writeFile(srcDir, "test-utils/render.ts", 2500);
     const result = checkLoc(root, srcDir, new Map());
     expect(result.violations).toEqual([]);
   });
 
   it("skips TestFixtures.tsx", () => {
-    writeFile(srcDir, "components/TestFixtures.tsx", 600);
+    writeFile(srcDir, "components/TestFixtures.tsx", 2500);
     const result = checkLoc(root, srcDir, new Map());
     expect(result.violations).toEqual([]);
   });
 
   it("skips vite-env files", () => {
-    writeFile(srcDir, "vite-env.d.ts", 600);
+    writeFile(srcDir, "vite-env.d.ts", 2500);
     const result = checkLoc(root, srcDir, new Map());
     expect(result.violations).toEqual([]);
   });
 
   it("sorts violations by LOC descending", () => {
-    writeFile(srcDir, "a.ts", 510);
-    writeFile(srcDir, "b.ts", 700);
-    writeFile(srcDir, "c.ts", 600);
+    writeFile(srcDir, "a.ts", 2100);
+    writeFile(srcDir, "b.ts", 2500);
+    writeFile(srcDir, "c.ts", 2300);
     const result = checkLoc(root, srcDir, new Map());
     expect(result.violations).toHaveLength(3);
-    expect(result.violations[0].loc).toBe(700);
-    expect(result.violations[1].loc).toBe(600);
-    expect(result.violations[2].loc).toBe(510);
+    expect(result.violations[0].loc).toBe(2500);
+    expect(result.violations[1].loc).toBe(2300);
+    expect(result.violations[2].loc).toBe(2100);
   });
 
   it("returns error when src directory does not exist", () => {
@@ -433,35 +433,35 @@ describe("checkLoc", () => {
   });
 
   it("respects custom threshold as a single number", () => {
-    writeFile(srcDir, "medium.ts", 250);
+    writeFile(srcDir, "medium.ts", 2500);
     const result = checkLoc(root, srcDir, new Map(), 200);
     expect(result.violations).toHaveLength(1);
-    expect(result.violations[0].loc).toBe(250);
+    expect(result.violations[0].loc).toBe(2500);
   });
 
-  it("applies 300-line threshold to .tsx files and 500 to .ts files", () => {
-    writeFile(srcDir, "large-component.tsx", 350);
-    writeFile(srcDir, "large-util.ts", 350);
+  it("applies 2000-line threshold to both .tsx and .ts files", () => {
+    writeFile(srcDir, "large-component.tsx", 2001);
+    writeFile(srcDir, "large-util.ts", 1500);
     const result = checkLoc(root, srcDir, new Map());
     expect(result.violations).toHaveLength(1);
     expect(result.violations[0].relPath).toContain(".tsx");
   });
 
   it("passes .tsx file at exactly 300 lines", () => {
-    writeFile(srcDir, "exact.tsx", 300);
+    writeFile(srcDir, "exact.tsx", 2000);
     const result = checkLoc(root, srcDir, new Map());
     expect(result.violations).toEqual([]);
   });
 
-  it("fails .tsx file at 301 lines", () => {
-    writeFile(srcDir, "over.tsx", 301);
+  it("fails .tsx file at 2001 lines", () => {
+    writeFile(srcDir, "over.tsx", 2001);
     const result = checkLoc(root, srcDir, new Map());
     expect(result.violations).toHaveLength(1);
     expect(result.violations[0].relPath).toBe("src/over.tsx");
   });
 
-  it("passes .ts file at 400 lines (under 500 threshold)", () => {
-    writeFile(srcDir, "util.ts", 400);
+  it("passes .ts file at 1500 lines (under 2000 threshold)", () => {
+    writeFile(srcDir, "util.ts", 1500);
     const result = checkLoc(root, srcDir, new Map());
     expect(result.violations).toEqual([]);
   });
@@ -485,19 +485,17 @@ describe("checkLoc", () => {
 // ---------------------------------------------------------------------------
 
 describe("constants", () => {
-  it("THRESHOLD_TS is 500", () => {
-    expect(THRESHOLD_TS).toBe(500);
+  it("THRESHOLD_TS is 2000", () => {
+    expect(THRESHOLD_TS).toBe(2000);
   });
 
-  it("THRESHOLD_TSX is 300", () => {
-    expect(THRESHOLD_TSX).toBe(300);
+  it("THRESHOLD_TSX is 2000", () => {
+    expect(THRESHOLD_TSX).toBe(2000);
   });
 
-  it("ALLOWLIST is a Map with known entries", () => {
+  it("ALLOWLIST is a Map (empty under global 2000-line ceiling)", () => {
     expect(ALLOWLIST).toBeInstanceOf(Map);
-    expect(ALLOWLIST.size).toBeGreaterThan(0);
-    expect(ALLOWLIST.has("src/App.tsx")).toBe(true);
-    expect(typeof ALLOWLIST.get("src/App.tsx")).toBe("number");
+    expect(ALLOWLIST.size).toBe(0);
   });
 });
 
@@ -528,32 +526,32 @@ describe("check-loc subprocess", () => {
   });
 
   it("exits 1 and prints violation details for oversized files", () => {
-    writeFile(srcDir, "big.ts", 501);
+    writeFile(srcDir, "big.ts", 2001);
     const result = runScript(root);
     expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("501");
+    expect(result.stderr).toContain("2001");
     expect(result.stderr).toContain("src/big.ts");
-    expect(result.stderr).toContain("1 file(s) exceed LOC limits (300 .tsx / 500 .ts)");
+    expect(result.stderr).toContain("1 file(s) exceed LOC limits (2000 .tsx / 2000 .ts)");
   });
 
   it("prints ceiling in output for allowlisted violations", () => {
-    writeFile(srcDir, "big.tsx", 800);
-    const result = runScriptWithAllowlist(root, [["src/big.tsx", 700]]);
+    writeFile(srcDir, "big.tsx", 2100);
+    const result = runScriptWithAllowlist(root, [["src/big.tsx", 1800]]);
     expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("(ceiling: 700)");
+    expect(result.stderr).toContain("(ceiling: 1800)");
   });
 
   it("does not print ceiling for non-allowlisted violations", () => {
-    writeFile(srcDir, "big.ts", 550);
+    writeFile(srcDir, "big.ts", 2100);
     const result = runScript(root);
     expect(result.exitCode).toBe(1);
     expect(result.stderr).not.toContain("(ceiling:");
   });
 
   it("sorts violations by LOC descending in output", () => {
-    writeFile(srcDir, "a.ts", 510);
-    writeFile(srcDir, "b.ts", 700);
-    writeFile(srcDir, "c.ts", 600);
+    writeFile(srcDir, "a.ts", 2100);
+    writeFile(srcDir, "b.ts", 2500);
+    writeFile(srcDir, "c.ts", 2300);
     const result = runScript(root);
     expect(result.exitCode).toBe(1);
 
@@ -561,21 +559,21 @@ describe("check-loc subprocess", () => {
     expect(lines).toHaveLength(3);
     // Verify descending order by extracting LOC values
     const locs = lines.map((l) => parseInt(l.trim().split("\t")[0], 10));
-    expect(locs).toEqual([700, 600, 510]);
+    expect(locs).toEqual([2500, 2300, 2100]);
   });
 
   it("reports correct file count in summary", () => {
-    writeFile(srcDir, "a.ts", 600);
-    writeFile(srcDir, "b.ts", 700);
+    writeFile(srcDir, "a.ts", 2200);
+    writeFile(srcDir, "b.ts", 2500);
     const result = runScript(root);
     expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("2 file(s) exceed LOC limits (300 .tsx / 500 .ts)");
+    expect(result.stderr).toContain("2 file(s) exceed LOC limits (2000 .tsx / 2000 .ts)");
   });
 
   it("counts allowlisted files in success message", () => {
     writeFile(srcDir, "ok.ts", 100);
-    writeFile(srcDir, "large.tsx", 600);
-    const result = runScriptWithAllowlist(root, [["src/large.tsx", 700]]);
+    writeFile(srcDir, "large.tsx", 1500);
+    const result = runScriptWithAllowlist(root, [["src/large.tsx", 1800]]);
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("1 allowlisted");
   });

@@ -87,11 +87,11 @@ describe("TerminalPaneArea", () => {
 
     // Active tab panel should be visible (display: flex)
     const activePanel = container.querySelector("#terminal-panel-tab-1");
-    expect(activePanel).toHaveStyle({ display: "flex" });
+    expect(activePanel).toHaveStyle({ visibility: "visible" });
 
     // Inactive tab panel should be hidden (display: none)
     const inactivePanel = container.querySelector("#terminal-panel-tab-2");
-    expect(inactivePanel).toHaveStyle({ display: "none" });
+    expect(inactivePanel).toHaveStyle({ visibility: "hidden" });
   });
 
   // 2. Non-split: calls renderPane with (tab, null)
@@ -143,21 +143,21 @@ describe("TerminalPaneArea", () => {
 
     // Left pane: active tab (tab-1) visible, tab-2 hidden
     const leftActivePanel = container.querySelector("#terminal-panel-tab-1");
-    expect(leftActivePanel).toHaveStyle({ display: "flex" });
+    expect(leftActivePanel).toHaveStyle({ visibility: "visible" });
 
     const leftInactivePanel = container.querySelector("#terminal-panel-tab-2");
-    expect(leftInactivePanel).toHaveStyle({ display: "none" });
+    expect(leftInactivePanel).toHaveStyle({ visibility: "hidden" });
 
     // Right pane: tab-2 visible, tab-1 hidden
     const rightActivePanel = container.querySelector(
       "#terminal-panel-right-tab-2",
     );
-    expect(rightActivePanel).toHaveStyle({ display: "flex" });
+    expect(rightActivePanel).toHaveStyle({ visibility: "visible" });
 
     const rightInactivePanel = container.querySelector(
       "#terminal-panel-right-tab-1",
     );
-    expect(rightInactivePanel).toHaveStyle({ display: "none" });
+    expect(rightInactivePanel).toHaveStyle({ visibility: "hidden" });
   });
 
   it("split: calls renderPane with left and right pane arguments", () => {

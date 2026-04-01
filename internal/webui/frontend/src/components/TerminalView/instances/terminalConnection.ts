@@ -65,6 +65,8 @@ export function encodeResize(cols: number, rows: number): ArrayBuffer {
 
 /** WebSocket close code sent by the backend when the process exits. */
 const WS_CLOSE_BACKEND_EXITED = 4001;
+/** WebSocket close code sent by the backend when user kills the session. */
+const WS_CLOSE_SESSION_KILLED = 4002;
 
 /**
  * Connect a Terminal instance to a WebSocket, returning a cleanup function.
@@ -86,6 +88,7 @@ export function connectWebSocket(
     terminal: Terminal,
   ) => void,
   agentName?: string,
+  onSessionKilled?: () => void,
 ): () => void {
   setConnectionState("connecting");
 
@@ -141,6 +144,12 @@ export function connectWebSocket(
           // Backend process exited — show crash overlay, do NOT auto-reconnect
           setConnectionState("crashed");
           onBackendCrash?.(event.reason || "backend process exited");
+          return;
+        }
+        if (event.code === WS_CLOSE_SESSION_KILLED) {
+          // User killed the session — do NOT auto-reconnect
+          setConnectionState("disconnected");
+          onSessionKilled?.();
           return;
         }
         setConnectionState("disconnected");

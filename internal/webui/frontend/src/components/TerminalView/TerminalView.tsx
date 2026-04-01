@@ -435,10 +435,20 @@ export function TerminalView({
   // This prevents the popup from blocking the terminal on first visit when
   // sessions are already running from a previous page load.
   useEffect(() => {
-    if (!dismissedWelcome && !metaLoading && tabMetadata.length > 0) {
+    if (
+      !dismissedWelcome &&
+      !metaLoading &&
+      tabMetadata &&
+      tabMetadata.length > 0
+    ) {
       handleDismissWelcome();
     }
-  }, [dismissedWelcome, metaLoading, tabMetadata.length, handleDismissWelcome]);
+  }, [
+    dismissedWelcome,
+    metaLoading,
+    tabMetadata?.length,
+    handleDismissWelcome,
+  ]);
 
   const handleToggleHelp = useCallback(() => {
     setIsHelpOpen((prev) => !prev);
@@ -620,6 +630,7 @@ export function TerminalView({
             onRightPaneTabChange={handleRightPaneTabChange}
             renderPane={renderTerminalPane}
           />
+
           {isSearchOpen && (
             <SearchBar
               value={searchTerm}

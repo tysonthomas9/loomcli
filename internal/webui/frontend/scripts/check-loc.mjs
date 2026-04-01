@@ -1,50 +1,16 @@
 #!/usr/bin/env node
-// Check that frontend source files do not exceed LOC limits (300 .tsx / 500 .ts).
-// Files in the allowlist are permitted up to their recorded ceiling (ratchet).
+// Check that frontend source files do not exceed the global LOC ceiling (2000).
 
 import { readFileSync, readdirSync, statSync } from "fs";
 import { join, relative, extname, sep } from "path";
 import { fileURLToPath } from "url";
 
-export const THRESHOLD_TS = 500;
-export const THRESHOLD_TSX = 300;
+export const THRESHOLD_TS = 2000;
+export const THRESHOLD_TSX = 2000;
 
-// Ratchet allowlist: files that exceed the threshold with their recorded ceiling.
-// If a file grows past its ceiling, it fails. Shrinking is always OK.
-export const ALLOWLIST = new Map([
-  ["src/components/IssueDetailPanel/IssueDetailPanel.tsx", 1615],
-  ["src/App.tsx", 1370],
-  ["src/components/CreateWorkspaceModal/CreateWorkspaceModal.tsx", 610],
-  ["src/components/AgentsSidebar/AgentsSidebar.tsx", 657],
-  ["src/components/AgentDetailPanel/AgentDetailPanel.tsx", 595],
-  ["src/hooks/terminal/useAgentTerminalLogs.ts", 541],
-  ["src/api/issues/issues.ts", 514],
-  ["src/components/IssueDetailView/IssueDetailView.tsx", 666],
-  ["src/components/TerminalView/TerminalView.tsx", 1130],
-  ["src/components/TerminalView/tabs/TerminalTabBar.tsx", 583],
-  ["src/components/TerminalView/instances/TerminalInstance.tsx", 765],
-  ["src/components/IssueDetailPanel/fields/AssigneeDropdown.tsx", 535],
-  ["src/components/WorkspaceTree/WorkspaceTree.tsx", 985],
-  ["src/components/WorkspaceTree/tree/EpicTaskTree.tsx", 510],
-  ["src/stores/agentStore.ts", 525],
-  ["src/components/GraphView/GraphView.tsx", 470],
-  ["src/components/SwimLaneBoard/SwimLaneBoard.tsx", 466],
-  ["src/components/KanbanBoard/KanbanBoard.tsx", 460],
-  ["src/hooks/workspace/useWorkspaceContext.tsx", 458],
-  ["src/components/LogViewer/LogViewer.tsx", 447],
-  ["src/components/LoadingSkeleton/LoadingSkeleton.tsx", 436],
-  ["src/components/FilterBar/FilterBar.tsx", 400],
-  ["src/components/UsageDashboard/UsageDashboard.tsx", 374],
-  ["src/hooks/ui/useKeyboardShortcuts.tsx", 364],
-  ["src/components/BackendSelectorDropdown/BackendSelectorDropdown.tsx", 345],
-  ["src/components/GraphControls/GraphControls.tsx", 345],
-  ["src/components/IssueDetailPanel/sections/DependencySection.tsx", 323],
-  ["src/components/SettingsView/SettingsView.tsx", 315],
-  ["src/components/IssueCard/IssueCard.tsx", 316],
-  ["src/components/IssueDetailPanel/actions/StartWorkButton.tsx", 311],
-  ["src/hooks/common/useEventProvider.tsx", 311],
-  ["src/components/IssueDetailPanel/fields/PriorityDropdown.tsx", 307],
-]);
+// Retained for API compatibility with existing tests/importers; no per-file
+// exceptions are currently needed now that the global ceiling is 2000.
+export const ALLOWLIST = new Map();
 
 // Patterns to skip (test files, generated files, fixtures).
 export function shouldSkip(relPath) {

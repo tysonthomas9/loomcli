@@ -17,9 +17,13 @@ type TerminalSession struct {
 	Command string   // command running in the session
 	PTY     *os.File // PTY master fd from creack/pty
 	cmd     *exec.Cmd
+	killCh  chan struct{} // closed by KillSessionByName to signal WS handlers
 	mu      sync.Mutex
 	closed  bool
 }
+
+// KillCh returns a channel closed when the session is killed by KillSessionByName.
+func (s *TerminalSession) KillCh() <-chan struct{} { return s.killCh }
 
 // Close closes the PTY and waits for the tmux attach process to exit.
 // It is safe to call multiple times.

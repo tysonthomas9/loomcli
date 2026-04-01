@@ -33,6 +33,10 @@ export function useClipboard(
 
   const handlePasteRequest = useCallback(() => {
     if (pendingPasteText !== null) return;
+    if (!navigator.clipboard?.readText) {
+      console.warn("Clipboard API unavailable (requires HTTPS or localhost)");
+      return;
+    }
     navigator.clipboard
       .readText()
       .then((text) => {
@@ -43,7 +47,9 @@ export function useClipboard(
           instanceRefs.current.get(activeTabIdRef.current)?.pasteText(text);
         }
       })
-      .catch(() => {});
+      .catch((err) => {
+        console.warn("Clipboard read failed:", err.message);
+      });
   }, [pendingPasteText, instanceRefs, activeTabIdRef]);
 
   const handlePasteConfirm = useCallback(() => {

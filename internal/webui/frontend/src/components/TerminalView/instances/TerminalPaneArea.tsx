@@ -45,20 +45,27 @@ export function TerminalPaneArea({
           data-testid="split-container"
         >
           <div className={styles.splitPaneLeft}>
-            {tabs.map((tab) => (
-              <div
-                key={tab.id}
-                className={styles.terminalPaneSplit}
-                style={{
-                  display: tab.id === activeTabId ? "flex" : "none",
-                }}
-                role="tabpanel"
-                id={`terminal-panel-${tab.id}`}
-                aria-labelledby={`terminal-tab-${tab.id}`}
-              >
-                {renderPane(tab, "left")}
-              </div>
-            ))}
+            {tabs.map((tab) => {
+              const active = tab.id === activeTabId;
+              return (
+                <div
+                  key={tab.id}
+                  className={styles.terminalPaneSplit}
+                  style={{
+                    visibility: active ? "visible" : "hidden",
+                    position: active ? "relative" : "absolute",
+                    inset: active ? undefined : 0,
+                  }}
+                  role="tabpanel"
+                  aria-hidden={!active}
+                  {...(!active && { inert: "" })}
+                  id={`terminal-panel-${tab.id}`}
+                  aria-labelledby={`terminal-tab-${tab.id}`}
+                >
+                  {renderPane(tab, "left")}
+                </div>
+              );
+            })}
           </div>
           <SplitDivider
             onRatioChange={onSplitRatioChange}
@@ -75,36 +82,50 @@ export function TerminalPaneArea({
               rightPaneTabId={rightPaneTabId}
               onTabChange={onRightPaneTabChange}
             />
-            {tabs.map((tab) => (
-              <div
-                key={tab.id}
-                className={styles.terminalPaneSplit}
-                style={{
-                  display: tab.id === rightPaneTabId ? "flex" : "none",
-                }}
-                role="tabpanel"
-                id={`terminal-panel-right-${tab.id}`}
-              >
-                {renderPane(tab, "right")}
-              </div>
-            ))}
+            {tabs.map((tab) => {
+              const active = tab.id === rightPaneTabId;
+              return (
+                <div
+                  key={tab.id}
+                  className={styles.terminalPaneSplit}
+                  style={{
+                    visibility: active ? "visible" : "hidden",
+                    position: active ? "relative" : "absolute",
+                    inset: active ? undefined : 0,
+                  }}
+                  role="tabpanel"
+                  aria-hidden={!active}
+                  {...(!active && { inert: "" })}
+                  id={`terminal-panel-right-${tab.id}`}
+                >
+                  {renderPane(tab, "right")}
+                </div>
+              );
+            })}
           </div>
         </div>
       ) : (
-        tabs.map((tab) => (
-          <div
-            key={tab.id}
-            className={styles.terminalPane}
-            style={{
-              display: tab.id === activeTabId ? "flex" : "none",
-            }}
-            role="tabpanel"
-            id={`terminal-panel-${tab.id}`}
-            aria-labelledby={`terminal-tab-${tab.id}`}
-          >
-            {renderPane(tab, null)}
-          </div>
-        ))
+        tabs.map((tab) => {
+          const active = tab.id === activeTabId;
+          return (
+            <div
+              key={tab.id}
+              className={styles.terminalPane}
+              style={{
+                visibility: active ? "visible" : "hidden",
+                position: active ? "relative" : "absolute",
+                inset: active ? undefined : 0,
+              }}
+              role="tabpanel"
+              aria-hidden={!active}
+              {...(!active && { inert: "" })}
+              id={`terminal-panel-${tab.id}`}
+              aria-labelledby={`terminal-tab-${tab.id}`}
+            >
+              {renderPane(tab, null)}
+            </div>
+          );
+        })
       )}
     </div>
   );

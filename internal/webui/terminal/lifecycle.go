@@ -63,9 +63,28 @@ func (m *TerminalManager) DefaultCommand() string {
 	return m.defaultCommand
 }
 
+// MarkKilling adds a session to the killing tombstone set, preventing Attach
+// from recreating it for 30 seconds.
+func (m *TerminalManager) MarkKilling(name string) {
+	m.mu.Lock()
+	m.killingSet[name] = time.Now()
+	m.mu.Unlock()
+}
+
+// SessionIsBeingKilled reports whether a session is in the killing tombstone set.
+func (m *TerminalManager) SessionIsBeingKilled(name string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	killTime, ok := m.killingSet[name]
+	return ok && time.Since(killTime) < 30*time.Second
+}
+
 // KillSessionByName closes all connections to the named session and kills the tmux session.
 // Returns nil if the session doesn't exist.
 func (m *TerminalManager) KillSessionByName(name string) error {
+	// Mark as killing so Attach rejects reconnect attempts.
+	m.MarkKilling(name)
+
 	internalName := m.tmuxName(name)
 
 	// Collect connections matching this session name under write lock.
@@ -79,8 +98,9 @@ func (m *TerminalManager) KillSessionByName(name string) error {
 	}
 	m.mu.Unlock()
 
-	// Close collected sessions outside the lock.
+	// Signal kill to WS handlers, then close PTYs.
 	for _, session := range toClose {
+		close(session.killCh)
 		if err := session.Close(); err != nil {
 			slog.Warn("error closing connection for session", "session", internalName, "err", err)
 		}

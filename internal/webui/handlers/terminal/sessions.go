@@ -102,10 +102,19 @@ func formatSeedPrompt(req *seedRequest) string {
 const sessionKillGracePeriod = 30 * time.Second
 
 // HandleScheduleSessionKill schedules a deferred tmux session kill with a grace period.
+// Pass ?force=true to kill immediately (for explicit user close).
 func HandleScheduleSessionKill(svc service.TerminalService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		session := r.PathValue("session")
-		if err := svc.ScheduleKill(r.Context(), session); err != nil {
+		force := r.URL.Query().Get("force") == "true"
+
+		var err error
+		if force {
+			err = svc.KillSession(r.Context(), session)
+		} else {
+			err = svc.ScheduleKill(r.Context(), session)
+		}
+		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
 		}

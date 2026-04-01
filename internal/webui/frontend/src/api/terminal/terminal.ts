@@ -320,16 +320,26 @@ export async function deleteTabMetadata(
 /**
  * Schedule a deferred tmux session kill with grace period.
  * POST /api/workspaces/{ws}/terminal/sessions/{session}/kill
+ * Pass force=true to kill immediately (for explicit user close).
  */
 export async function scheduleSessionKill(
   workspaceId: string,
   sessionName: string,
+  force = false,
 ): Promise<void> {
+  const params: {
+    path: { ws: string; session: string };
+    query?: { force?: string };
+  } = {
+    path: { ws: workspaceId, session: sessionName },
+  };
+  if (force) {
+    params.query = { force: "true" };
+  }
   const { error, response } = await api.POST(
     "/api/workspaces/{ws}/terminal/sessions/{session}/kill",
-    {
-      params: { path: { ws: workspaceId, session: sessionName } },
-    },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    { params: params as any },
   );
   if (error) throw apiErrorFromResponse(error, response);
 }

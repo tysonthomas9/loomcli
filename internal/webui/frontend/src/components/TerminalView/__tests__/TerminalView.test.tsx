@@ -1019,7 +1019,7 @@ describe("TerminalView", () => {
       const pane1 = screen
         .getByTestId("terminal-instance-session-1")
         .closest('[role="tabpanel"]')!;
-      expect(pane1).toHaveStyle({ display: "flex" });
+      expect(pane1).toHaveStyle({ visibility: "visible" });
     });
 
     it("inactive tab panes have display:none", () => {
@@ -1029,7 +1029,7 @@ describe("TerminalView", () => {
       const pane2 = screen
         .getByTestId("terminal-instance-session-2")
         .closest('[role="tabpanel"]')!;
-      expect(pane2).toHaveStyle({ display: "none" });
+      expect(pane2).toHaveStyle({ visibility: "hidden" });
     });
 
     it('data-testid="terminal-view" present on container', () => {

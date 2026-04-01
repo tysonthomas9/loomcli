@@ -32,6 +32,9 @@ func (s *terminalServiceImpl) ListTabs(ctx context.Context, wsID string) ([]tabm
 	if err != nil {
 		return nil, service.ErrInternal("failed to list tab metadata", err)
 	}
+	if tabs == nil {
+		tabs = []tabmeta.TabMetadata{}
+	}
 	return tabs, nil
 }
 

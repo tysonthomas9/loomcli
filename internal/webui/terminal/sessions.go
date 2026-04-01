@@ -74,6 +74,20 @@ func (m *TerminalManager) KillAllSessions() error {
 	m.sessionOwners = make(map[string]string)
 	m.mu.Unlock()
 
+	// Mark all sessions as killing and signal WS handlers before closing PTYs.
+	markedNames := make(map[string]bool)
+	for _, session := range sessions {
+		if !markedNames[session.Name] {
+			markedNames[session.Name] = true
+			userFacing := session.Name
+			if prefix := m.sessionPrefix + "-"; m.sessionPrefix != "" && strings.HasPrefix(session.Name, prefix) {
+				userFacing = strings.TrimPrefix(session.Name, prefix)
+			}
+			m.MarkKilling(userFacing)
+		}
+		close(session.killCh)
+	}
+
 	// Close all PTYs.
 	for connID, session := range sessions {
 		if err := session.Close(); err != nil {

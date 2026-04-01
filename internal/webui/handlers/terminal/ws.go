@@ -131,6 +131,13 @@ func validateTerminalWSRequest(w http.ResponseWriter, r *http.Request, manager *
 		return "", "", false
 	}
 
+	if manager.SessionIsBeingKilled(session) {
+		handler.WriteJSON(w, http.StatusConflict, map[string]interface{}{
+			"success": false, "error": "session is being killed",
+		})
+		return "", "", false
+	}
+
 	if manager.SessionCount() >= manager.MaxSessions() {
 		handler.WriteJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
 			"success": false, "error": "maximum terminal sessions reached",
@@ -187,6 +194,9 @@ func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalW
 
 	termSession, err := p.manager.Attach(session, attachCommandForSession(session), 80, 24)
 	if err != nil {
+		if errors.Is(err, webuterminal.ErrSessionBeingKilled) {
+			return websocket.StatusCode(wsCloseSessionKilled), "session is being killed" //nolint:staticcheck // SA1019: websocket migration tracked separately
+		}
 		if errors.Is(err, webuterminal.ErrMaxSessionsReached) {
 			slog.Info("terminal session limit reached", "session", session)
 		} else {
@@ -211,6 +221,8 @@ func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalW
 	ctx, cancel := context.WithCancel(reqCtx)
 	defer cancel()
 
+	watchSessionKill(ctx, cancel, conn, termSession)
+
 	crashCh := make(chan realtime.CrashInfo, 1)
 	scrollback := p.manager.GetScrollbackBuffer(session)
 	monitor := &terminalMonitor{mgr: p.manager}
@@ -226,6 +238,21 @@ func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalW
 	}
 
 	return (<-crashCh).WSClose()
+}
+
+// wsCloseSessionKilled is the WebSocket close code for a user-initiated session kill.
+const wsCloseSessionKilled = 4002
+
+// watchSessionKill closes the WebSocket when the tmux session is killed server-side.
+func watchSessionKill(ctx context.Context, cancel context.CancelFunc, conn *websocket.Conn, termSession *webuterminal.TerminalSession) { //nolint:staticcheck // SA1019: websocket migration tracked separately
+	go func() {
+		select {
+		case <-termSession.KillCh():
+			_ = conn.Close(websocket.StatusCode(wsCloseSessionKilled), "session killed") //nolint:staticcheck // SA1019: websocket migration tracked separately
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
 }
 
 // injectTerminalContextBanner fetches project context from the loom server
