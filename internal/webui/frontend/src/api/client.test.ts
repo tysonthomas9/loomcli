@@ -12,6 +12,8 @@ import {
   setAuthToken,
   setAuthState,
   wsUrl,
+  onAuthTokenExpired,
+  onDaemonUnavailable,
 } from "./client";
 
 describe("API Client", () => {
@@ -562,7 +564,7 @@ describe("API Client", () => {
       expect(options.headers["Authorization"]).toBe("Bearer custom");
     });
 
-    it("401 response dispatches auth-token-expired event", async () => {
+    it("401 response notifies auth-token-expired listeners", async () => {
       setAuthToken("my-jwt");
 
       global.fetch = vi.fn().mockResolvedValue({
@@ -572,20 +574,18 @@ describe("API Client", () => {
         text: () => Promise.resolve("unauthorized"),
       });
 
-      const dispatchEvent = vi.fn();
-      vi.stubGlobal("window", { dispatchEvent });
+      const cb = vi.fn();
+      const unsub = onAuthTokenExpired(cb);
 
       try {
         await expect(get("/api/test")).rejects.toThrow(ApiError);
-        expect(dispatchEvent).toHaveBeenCalledTimes(1);
-        expect(dispatchEvent.mock.calls[0][0]).toBeInstanceOf(CustomEvent);
-        expect(dispatchEvent.mock.calls[0][0].type).toBe("auth-token-expired");
+        expect(cb).toHaveBeenCalledTimes(1);
       } finally {
-        vi.unstubAllGlobals();
+        unsub();
       }
     });
 
-    it("401 response does NOT dispatch event when token is null", async () => {
+    it("401 response does NOT notify when token is null", async () => {
       setAuthToken(null);
 
       global.fetch = vi.fn().mockResolvedValue({
@@ -595,14 +595,14 @@ describe("API Client", () => {
         text: () => Promise.resolve("unauthorized"),
       });
 
-      const dispatchEvent = vi.fn();
-      vi.stubGlobal("window", { dispatchEvent });
+      const cb = vi.fn();
+      const unsub = onAuthTokenExpired(cb);
 
       try {
         await expect(get("/api/test")).rejects.toThrow(ApiError);
-        expect(dispatchEvent).not.toHaveBeenCalled();
+        expect(cb).not.toHaveBeenCalled();
       } finally {
-        vi.unstubAllGlobals();
+        unsub();
       }
     });
 
@@ -660,6 +660,73 @@ describe("API Client", () => {
         expect(callback).toHaveBeenCalledTimes(2);
       } finally {
         unsubscribe();
+      }
+    });
+
+    it("onDaemonUnavailable unsubscribe prevents further callbacks", async () => {
+      const cb = vi.fn();
+      const unsub = onDaemonUnavailable(cb);
+      unsub();
+
+      setAuthToken(null);
+      global.fetch = vi
+        .fn()
+        .mockRejectedValue(new TypeError("Failed to fetch"));
+
+      await expect(get("/api/test")).rejects.toThrow(ApiError);
+      expect(cb).not.toHaveBeenCalled();
+    });
+
+    it("onAuthTokenExpired unsubscribe prevents further callbacks", async () => {
+      setAuthToken("my-jwt");
+
+      const cb = vi.fn();
+      const unsub = onAuthTokenExpired(cb);
+      unsub();
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        statusText: "Unauthorized",
+        text: () => Promise.resolve("unauthorized"),
+      });
+
+      await expect(get("/api/test")).rejects.toThrow(ApiError);
+      expect(cb).not.toHaveBeenCalled();
+    });
+
+    it("503 response notifies daemon-unavailable listeners", async () => {
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 503,
+        statusText: "Service Unavailable",
+        text: () => Promise.resolve("unavailable"),
+      });
+
+      const cb = vi.fn();
+      const unsub = onDaemonUnavailable(cb);
+
+      try {
+        await expect(get("/api/test")).rejects.toThrow(ApiError);
+        expect(cb).toHaveBeenCalledTimes(1);
+      } finally {
+        unsub();
+      }
+    });
+
+    it("network error notifies daemon-unavailable listeners", async () => {
+      global.fetch = vi
+        .fn()
+        .mockRejectedValue(new TypeError("Failed to fetch"));
+
+      const cb = vi.fn();
+      const unsub = onDaemonUnavailable(cb);
+
+      try {
+        await expect(get("/api/test")).rejects.toThrow(ApiError);
+        expect(cb).toHaveBeenCalledTimes(1);
+      } finally {
+        unsub();
       }
     });
   });

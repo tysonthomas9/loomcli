@@ -23,6 +23,7 @@ const mockSetAuthState = vi.fn();
 vi.mock("@/api", () => ({
   setAuthToken: (...args: unknown[]) => mockSetAuthToken(...args),
   setAuthState: (...args: unknown[]) => mockSetAuthState(...args),
+  onAuthTokenExpired: () => () => {},
 }));
 
 // ---------------------------------------------------------------------------

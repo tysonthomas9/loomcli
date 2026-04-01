@@ -9,7 +9,7 @@ import {
 } from "react";
 
 import { getAuthClient } from "@/api/authClient";
-import { setAuthToken, setAuthState } from "@/api";
+import { setAuthToken, setAuthState, onAuthTokenExpired } from "@/api";
 import { AUTH_MODE_OPEN, AUTH_MODE_OIDC, type AuthMode } from "@/api/appConfig";
 
 // ============= Types =============
@@ -139,15 +139,13 @@ export function ExternalAuthProvider({
     }
   }, [session, isPending, error]);
 
-  // Listen for 'auth-token-expired' from fetchApi's 401 handler
+  // Listen for auth-token-expired notifications from fetchApi's 401 handler
   useEffect(() => {
     function handleTokenExpired() {
       tokenFetchedForSession.current = null;
       refreshJwt();
     }
-    window.addEventListener("auth-token-expired", handleTokenExpired);
-    return () =>
-      window.removeEventListener("auth-token-expired", handleTokenExpired);
+    return onAuthTokenExpired(handleTokenExpired);
   }, []);
 
   const user: AuthUser | null = session?.user

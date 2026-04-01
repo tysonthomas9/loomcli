@@ -72,6 +72,42 @@ export function onAuthStateChange(
   };
 }
 
+// Daemon-unavailable listeners
+type DaemonUnavailableListener = { callback: () => void; active: boolean };
+const daemonUnavailableListeners: DaemonUnavailableListener[] = [];
+
+export function onDaemonUnavailable(callback: () => void): () => void {
+  const listener: DaemonUnavailableListener = { callback, active: true };
+  daemonUnavailableListeners.push(listener);
+  return () => {
+    listener.active = false;
+  };
+}
+
+export function notifyDaemonUnavailable(): void {
+  for (const listener of daemonUnavailableListeners) {
+    if (listener.active) listener.callback();
+  }
+}
+
+// Auth-token-expired listeners
+type AuthTokenExpiredListener = { callback: () => void; active: boolean };
+const authTokenExpiredListeners: AuthTokenExpiredListener[] = [];
+
+export function onAuthTokenExpired(callback: () => void): () => void {
+  const listener: AuthTokenExpiredListener = { callback, active: true };
+  authTokenExpiredListeners.push(listener);
+  return () => {
+    listener.active = false;
+  };
+}
+
+export function notifyAuthTokenExpired(): void {
+  for (const listener of authTokenExpiredListeners) {
+    if (listener.active) listener.callback();
+  }
+}
+
 /**
  * Set the auth token externally (called by AuthContext).
  * When token is non-null, transitions to 'authenticated'.
@@ -137,12 +173,10 @@ async function fetchApi<T>(
     clearTimeoutCleanup();
 
     if (!response.ok) {
-      // 401 interceptor: clear token and notify AuthContext via event
+      // 401 interceptor: clear token and notify AuthContext
       if (response.status === 401 && authToken !== null) {
         setAuthToken(null);
-        if (typeof window !== "undefined") {
-          window.dispatchEvent(new CustomEvent("auth-token-expired"));
-        }
+        notifyAuthTokenExpired();
       }
 
       // Report 5xx errors (but not errors about the error endpoint itself)
@@ -182,9 +216,9 @@ async function fetchApi<T>(
   } catch (error) {
     clearTimeoutCleanup();
     if (error instanceof ApiError) {
-      // Dispatch daemon-unavailable for 503 (Service Unavailable)
-      if (error.status === 503 && typeof window !== "undefined") {
-        window.dispatchEvent(new CustomEvent("daemon-unavailable"));
+      // Notify daemon-unavailable for 503 (Service Unavailable)
+      if (error.status === 503) {
+        notifyDaemonUnavailable();
       }
       throw error;
     }
@@ -196,9 +230,7 @@ async function fetchApi<T>(
       throw error;
     }
     // Network error (status 0) — daemon likely unreachable.
-    if (typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent("daemon-unavailable"));
-    }
+    notifyDaemonUnavailable();
     throw new ApiError(0, "Network error", error);
   }
 }

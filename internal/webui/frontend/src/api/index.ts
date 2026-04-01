@@ -12,6 +12,10 @@ export {
   getAuthToken,
   getAuthState,
   onAuthStateChange,
+  onDaemonUnavailable,
+  notifyDaemonUnavailable,
+  onAuthTokenExpired,
+  notifyAuthTokenExpired,
 } from "./client";
 export type { RequestOptions, AuthState } from "./client";
 

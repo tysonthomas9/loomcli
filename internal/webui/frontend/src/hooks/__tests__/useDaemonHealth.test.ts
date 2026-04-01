@@ -13,6 +13,7 @@
 import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+import { notifyDaemonUnavailable } from "@/api/client";
 import { checkDaemonHealth } from "@/api/health";
 
 import { useDaemonHealth } from "../useDaemonHealth";
@@ -157,7 +158,7 @@ describe("useDaemonHealth", () => {
 
       // Dispatch daemon-unavailable event to trigger a re-check
       await act(async () => {
-        window.dispatchEvent(new Event("daemon-unavailable"));
+        notifyDaemonUnavailable();
       });
       await flushPromises();
 
@@ -188,7 +189,7 @@ describe("useDaemonHealth", () => {
       mockGet.mockRejectedValueOnce(new Error("Daemon stopped"));
 
       await act(async () => {
-        window.dispatchEvent(new Event("daemon-unavailable"));
+        notifyDaemonUnavailable();
       });
       await flushPromises();
 
@@ -456,7 +457,7 @@ describe("useDaemonHealth", () => {
       mockGet.mockResolvedValueOnce(healthOk());
 
       await act(async () => {
-        window.dispatchEvent(new Event("daemon-unavailable"));
+        notifyDaemonUnavailable();
       });
       await flushPromises();
 
@@ -475,7 +476,7 @@ describe("useDaemonHealth", () => {
 
       // Dispatch daemon-unavailable event while already unavailable
       await act(async () => {
-        window.dispatchEvent(new Event("daemon-unavailable"));
+        notifyDaemonUnavailable();
       });
       await flushPromises();
 
@@ -511,7 +512,7 @@ describe("useDaemonHealth", () => {
       mockGet.mockRejectedValueOnce(new Error("Blip"));
 
       await act(async () => {
-        window.dispatchEvent(new Event("daemon-unavailable"));
+        notifyDaemonUnavailable();
       });
       await flushPromises();
 

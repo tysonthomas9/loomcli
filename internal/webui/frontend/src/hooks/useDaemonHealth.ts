@@ -7,6 +7,7 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 
+import { onDaemonUnavailable } from "@/api/client";
 import { checkDaemonHealth } from "@/api/health";
 
 import { usePollingWithBackoff } from "./usePollingWithBackoff";
@@ -172,7 +173,7 @@ export function useDaemonHealth(): UseDaemonHealthReturn {
     checkHealth();
   }, [checkHealth]);
 
-  // Listen for daemon-unavailable events from fetchApi
+  // Listen for daemon-unavailable notifications from fetchApi
   useEffect(() => {
     const handler = () => {
       // Only trigger if currently marked available — avoids redundant checks
@@ -180,8 +181,7 @@ export function useDaemonHealth(): UseDaemonHealthReturn {
         checkHealth();
       }
     };
-    window.addEventListener("daemon-unavailable", handler);
-    return () => window.removeEventListener("daemon-unavailable", handler);
+    return onDaemonUnavailable(handler);
   }, [isDaemonAvailable, isChecking, checkHealth]);
 
   // Re-poll immediately when tab becomes visible
