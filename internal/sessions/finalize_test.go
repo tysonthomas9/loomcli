@@ -616,7 +616,7 @@ func TestSaveMetadata_RoundTrip(t *testing.T) {
 
 	// Create the session directory manually.
 	sessDir := filepath.Join(store.Dir(), sessionID)
-	if err := os.MkdirAll(sessDir, 0o750); err != nil {
+	if err := os.MkdirAll(sessDir, 0o700); err != nil {
 		t.Fatalf("create session dir: %v", err)
 	}
 

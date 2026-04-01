@@ -30,8 +30,8 @@ func TestNewStore(t *testing.T) {
 	if !info.IsDir() {
 		t.Fatalf("sessions/ is not a directory")
 	}
-	if got := info.Mode().Perm(); got != 0o750 {
-		t.Errorf("sessions/ dir mode = %o, want %o", got, 0o750)
+	if got := info.Mode().Perm(); got != 0o700 {
+		t.Errorf("sessions/ dir mode = %o, want %o", got, 0o700)
 	}
 }
 
@@ -71,8 +71,8 @@ func TestCreateSession(t *testing.T) {
 	if !info.IsDir() {
 		t.Fatalf("session path is not a directory")
 	}
-	if got := info.Mode().Perm(); got != 0o750 {
-		t.Errorf("session dir mode = %o, want %o", got, 0o750)
+	if got := info.Mode().Perm(); got != 0o700 {
+		t.Errorf("session dir mode = %o, want %o", got, 0o700)
 	}
 
 	// Check prompt.txt exists with correct content.
@@ -102,6 +102,14 @@ func TestCreateSession(t *testing.T) {
 	}
 	if meta.Status != StatusRunning {
 		t.Errorf("metadata status = %q, want %q", meta.Status, StatusRunning)
+	}
+
+	metaInfo, err := os.Stat(filepath.Join(sessDir, "metadata.json"))
+	if err != nil {
+		t.Fatalf("stat metadata.json: %v", err)
+	}
+	if got := metaInfo.Mode().Perm(); got != 0o600 {
+		t.Errorf("metadata.json mode = %o, want %o", got, 0o600)
 	}
 }
 
@@ -235,6 +243,22 @@ func TestAppendTranscript(t *testing.T) {
 		if e.ToolName != entries[i].ToolName {
 			t.Errorf("entry[%d].ToolName = %q, want %q", i, e.ToolName, entries[i].ToolName)
 		}
+	}
+
+	txInfo, err := os.Stat(txPath)
+	if err != nil {
+		t.Fatalf("stat transcript.jsonl: %v", err)
+	}
+	if got := txInfo.Mode().Perm(); got != 0o600 {
+		t.Errorf("transcript.jsonl mode = %o, want %o", got, 0o600)
+	}
+
+	seqInfo, err := os.Stat(filepath.Join(dir, "sessions", sid, "seq"))
+	if err != nil {
+		t.Fatalf("stat seq: %v", err)
+	}
+	if got := seqInfo.Mode().Perm(); got != 0o600 {
+		t.Errorf("seq mode = %o, want %o", got, 0o600)
 	}
 }
 

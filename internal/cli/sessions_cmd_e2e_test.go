@@ -44,7 +44,7 @@ func seedSession(t *testing.T, baseDir string, sid string, status string, endedA
 	t.Helper()
 
 	sessDir := filepath.Join(baseDir, "sessions", sid)
-	if err := os.MkdirAll(sessDir, 0o750); err != nil {
+	if err := os.MkdirAll(sessDir, 0o700); err != nil {
 		t.Fatalf("create session dir %s: %v", sessDir, err)
 	}
 

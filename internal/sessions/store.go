@@ -12,6 +12,11 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
+const (
+	sessDirPerm  = 0o700
+	sessFilePerm = 0o600
+)
+
 // Store provides session storage under a beadsDir/sessions/ directory.
 // Each session gets its own subdirectory containing metadata.json,
 // transcript.jsonl, and prompt.txt.
@@ -26,7 +31,7 @@ func (s *Store) Dir() string { return s.dir }
 // It creates the sessions/ directory if it does not exist.
 func NewStore(beadsDir string) (*Store, error) {
 	dir := filepath.Join(beadsDir, "sessions")
-	if err := os.MkdirAll(dir, 0o750); err != nil {
+	if err := os.MkdirAll(dir, sessDirPerm); err != nil {
 		return nil, fmt.Errorf("create sessions dir: %w", err)
 	}
 	return &Store{dir: dir}, nil
@@ -45,13 +50,13 @@ func (s *Store) CreateSession(opts CreateOptions) (*Session, error) {
 	}
 
 	sessDir := filepath.Join(s.dir, sid)
-	if err := os.MkdirAll(sessDir, 0o750); err != nil {
+	if err := os.MkdirAll(sessDir, sessDirPerm); err != nil {
 		return nil, fmt.Errorf("create session dir: %w", err)
 	}
 
 	// Write prompt.txt.
 	promptPath := filepath.Join(sessDir, "prompt.txt")
-	if err := os.WriteFile(promptPath, []byte(opts.Prompt), 0o600); err != nil {
+	if err := os.WriteFile(promptPath, []byte(opts.Prompt), sessFilePerm); err != nil {
 		return nil, fmt.Errorf("write prompt.txt: %w", err)
 	}
 
@@ -114,7 +119,7 @@ func (s *Store) AppendTranscript(sessionID string, entry TranscriptEntry) error 
 	txPath := filepath.Join(sessDir, "transcript.jsonl")
 
 	// #nosec G304 — path constructed from trusted store directory
-	f, err := os.OpenFile(txPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	f, err := os.OpenFile(txPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, sessFilePerm)
 	if err != nil {
 		return fmt.Errorf("open transcript file: %w", err)
 	}
@@ -157,7 +162,7 @@ func readAndIncrementSeq(sessDir string) int {
 		}
 	}
 
-	_ = os.WriteFile(seqPath, []byte(strconv.Itoa(seq)), 0o600)
+	_ = os.WriteFile(seqPath, []byte(strconv.Itoa(seq)), sessFilePerm)
 	return seq
 }
 
@@ -183,7 +188,7 @@ func writeMetadataAtomic(sessDir string, meta SessionMetadata) error {
 		return fmt.Errorf("marshal metadata: %w", err)
 	}
 
-	if err := os.WriteFile(tmpPath, data, 0o600); err != nil {
+	if err := os.WriteFile(tmpPath, data, sessFilePerm); err != nil {
 		return fmt.Errorf("write metadata tmp: %w", err)
 	}
 

@@ -49,7 +49,7 @@ func TestDispatchHookEvent_TurnStart(t *testing.T) {
 
 	// Create the session directory so AppendTranscript can find it.
 	sessDir := filepath.Join(beadsDir, "sessions", sessionID)
-	if err := os.MkdirAll(sessDir, 0o755); err != nil {
+	if err := os.MkdirAll(sessDir, 0o700); err != nil {
 		t.Fatalf("create session dir: %v", err)
 	}
 
@@ -81,7 +81,7 @@ func TestDispatchHookEvent_TurnEnd(t *testing.T) {
 	sessionID := "test-session-turn-end"
 
 	sessDir := filepath.Join(beadsDir, "sessions", sessionID)
-	if err := os.MkdirAll(sessDir, 0o755); err != nil {
+	if err := os.MkdirAll(sessDir, 0o700); err != nil {
 		t.Fatalf("create session dir: %v", err)
 	}
 
@@ -112,7 +112,7 @@ func TestDispatchHookEvent_SessionStart(t *testing.T) {
 	sessionID := "test-session-start"
 
 	sessDir := filepath.Join(beadsDir, "sessions", sessionID)
-	if err := os.MkdirAll(sessDir, 0o755); err != nil {
+	if err := os.MkdirAll(sessDir, 0o700); err != nil {
 		t.Fatalf("create session dir: %v", err)
 	}
 
@@ -144,7 +144,7 @@ func TestDispatchHookEvent_SessionEnd(t *testing.T) {
 	sessionID := "test-session-end"
 
 	sessDir := filepath.Join(beadsDir, "sessions", sessionID)
-	if err := os.MkdirAll(sessDir, 0o755); err != nil {
+	if err := os.MkdirAll(sessDir, 0o700); err != nil {
 		t.Fatalf("create session dir: %v", err)
 	}
 
@@ -177,7 +177,7 @@ func TestDispatchHookEvent_StoreError(t *testing.T) {
 	beadsDir := t.TempDir()
 
 	// Create the sessions/ directory (NewStore needs it) but NOT the session subdirectory.
-	if err := os.MkdirAll(filepath.Join(beadsDir, "sessions"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(beadsDir, "sessions"), 0o700); err != nil {
 		t.Fatalf("create sessions dir: %v", err)
 	}
 
@@ -219,7 +219,7 @@ func TestDispatchHookEvent_SessionEndCapturesTokenUsage(t *testing.T) {
 	sessionID := "test-session-token-capture"
 
 	sessDir := filepath.Join(beadsDir, "sessions", sessionID)
-	if err := os.MkdirAll(sessDir, 0o755); err != nil {
+	if err := os.MkdirAll(sessDir, 0o700); err != nil {
 		t.Fatalf("create session dir: %v", err)
 	}
 
@@ -236,7 +236,7 @@ func TestDispatchHookEvent_SessionEndCapturesTokenUsage(t *testing.T) {
 		"output_tokens":  0,
 	}
 	metaBytes, _ := json.MarshalIndent(meta, "", "  ")
-	if err := os.WriteFile(filepath.Join(sessDir, "metadata.json"), metaBytes, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(sessDir, "metadata.json"), metaBytes, 0o600); err != nil {
 		t.Fatalf("write metadata.json: %v", err)
 	}
 
@@ -246,7 +246,7 @@ func TestDispatchHookEvent_SessionEndCapturesTokenUsage(t *testing.T) {
 	txLines := `{"type":"assistant","message":{"id":"msg_001","role":"assistant","content":[],"usage":{"input_tokens":1000,"output_tokens":500,"cache_read_input_tokens":200,"cache_creation_input_tokens":100}}}
 {"type":"assistant","message":{"id":"msg_002","role":"assistant","content":[],"usage":{"input_tokens":2000,"output_tokens":800,"cache_read_input_tokens":300,"cache_creation_input_tokens":50}}}
 `
-	if err := os.WriteFile(txPath, []byte(txLines), 0o644); err != nil {
+	if err := os.WriteFile(txPath, []byte(txLines), 0o600); err != nil {
 		t.Fatalf("write transcript: %v", err)
 	}
 
@@ -294,7 +294,7 @@ func TestDispatchHookEvent_SessionEndMissingTranscript(t *testing.T) {
 	sessionID := "test-session-missing-tx"
 
 	sessDir := filepath.Join(beadsDir, "sessions", sessionID)
-	if err := os.MkdirAll(sessDir, 0o755); err != nil {
+	if err := os.MkdirAll(sessDir, 0o700); err != nil {
 		t.Fatalf("create session dir: %v", err)
 	}
 
@@ -311,7 +311,7 @@ func TestDispatchHookEvent_SessionEndMissingTranscript(t *testing.T) {
 		"output_tokens":  0,
 	}
 	metaBytes, _ := json.MarshalIndent(meta, "", "  ")
-	if err := os.WriteFile(filepath.Join(sessDir, "metadata.json"), metaBytes, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(sessDir, "metadata.json"), metaBytes, 0o600); err != nil {
 		t.Fatalf("write metadata.json: %v", err)
 	}
 
@@ -350,7 +350,7 @@ func TestDispatchHookEvent_SessionEndEmptySessionRef(t *testing.T) {
 	sessionID := "test-session-empty-ref"
 
 	sessDir := filepath.Join(beadsDir, "sessions", sessionID)
-	if err := os.MkdirAll(sessDir, 0o755); err != nil {
+	if err := os.MkdirAll(sessDir, 0o700); err != nil {
 		t.Fatalf("create session dir: %v", err)
 	}
 
@@ -367,7 +367,7 @@ func TestDispatchHookEvent_SessionEndEmptySessionRef(t *testing.T) {
 		"output_tokens":  0,
 	}
 	metaBytes, _ := json.MarshalIndent(meta, "", "  ")
-	if err := os.WriteFile(filepath.Join(sessDir, "metadata.json"), metaBytes, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(sessDir, "metadata.json"), metaBytes, 0o600); err != nil {
 		t.Fatalf("write metadata.json: %v", err)
 	}
 

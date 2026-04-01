@@ -68,7 +68,7 @@ func (s *Session) Finalize(opts FinalizeOptions) error {
 	// Write diff.patch if diff data provided.
 	if opts.DiffPatch != "" {
 		diffPath := filepath.Join(sessDir, "diff.patch")
-		if err := os.WriteFile(diffPath, []byte(opts.DiffPatch), 0o600); err != nil {
+		if err := os.WriteFile(diffPath, []byte(opts.DiffPatch), sessFilePerm); err != nil {
 			return fmt.Errorf("write diff.patch: %w", err)
 		}
 	}
@@ -94,7 +94,7 @@ func (s *Store) appendIndex(rec SessionRecord) error {
 	indexPath := filepath.Join(s.dir, "index.jsonl")
 
 	// #nosec G304 — controlled path from Store
-	f, err := os.OpenFile(indexPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	f, err := os.OpenFile(indexPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, sessFilePerm)
 	if err != nil {
 		return fmt.Errorf("open index file: %w", err)
 	}

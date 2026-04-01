@@ -59,7 +59,7 @@ func setupHookBeadsDir(t *testing.T, sessionID string) string {
 	t.Helper()
 	beadsDir := t.TempDir()
 	sessDir := filepath.Join(beadsDir, "sessions", sessionID)
-	if err := os.MkdirAll(sessDir, 0o750); err != nil {
+	if err := os.MkdirAll(sessDir, 0o700); err != nil {
 		t.Fatalf("create session dir: %v", err)
 	}
 	return beadsDir
