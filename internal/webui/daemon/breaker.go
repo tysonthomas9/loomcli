@@ -33,6 +33,11 @@ func (p *ProtectedPool) Put(client *rpc.Client) {
 	p.pool.Put(client)
 }
 
+// PutAfterError validates a connection before deciding to return it or discard it.
+func (p *ProtectedPool) PutAfterError(client *rpc.Client) {
+	p.pool.PutAfterError(client)
+}
+
 // Discard closes a connection without returning it to the pool.
 // Use this instead of Put when the connection is known to be in a bad state.
 func (p *ProtectedPool) Discard(client *rpc.Client) {

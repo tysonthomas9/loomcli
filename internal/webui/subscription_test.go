@@ -521,6 +521,8 @@ func (p *subscriptionMockPool) Put(client *rpc.Client) {
 	}
 }
 
+func (p *subscriptionMockPool) PutAfterError(client *rpc.Client) { p.Put(client) }
+
 func (p *subscriptionMockPool) Discard(client *rpc.Client) {
 	if client != nil {
 		client.Close()

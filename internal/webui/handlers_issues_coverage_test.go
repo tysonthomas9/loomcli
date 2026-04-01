@@ -96,6 +96,8 @@ func (p *issuesCovDaemonPool) Put(client *rpc.Client) {
 	}
 }
 
+func (p *issuesCovDaemonPool) PutAfterError(client *rpc.Client) { p.Put(client) }
+
 func (p *issuesCovDaemonPool) Discard(client *rpc.Client) {
 	if client != nil {
 		_ = client.Close()

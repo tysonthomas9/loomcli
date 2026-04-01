@@ -210,6 +210,34 @@ func TestProtectedPool_Discard(t *testing.T) {
 	}
 }
 
+func TestProtectedPool_PutAfterError(t *testing.T) {
+	socketPath := startMockDaemonServer(t)
+	pool, err := NewConnectionPool(socketPath, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+
+	breaker := circuitbreaker.NewBreaker("daemon", circuitbreaker.Config{
+		ShouldTrip: DaemonShouldTrip,
+	})
+	pp := NewProtectedPool(pool, breaker)
+
+	ctx := context.Background()
+	client, err := pp.Get(ctx)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+
+	// Mock daemon responds to Ping, so the connection should be returned to pool
+	pp.PutAfterError(client)
+
+	stats := pp.Stats()
+	if stats.Available != 1 {
+		t.Errorf("stats.Available = %v after PutAfterError, want 1", stats.Available)
+	}
+}
+
 func TestProtectedPool_Close(t *testing.T) {
 	socketPath := startMockDaemonServer(t)
 	pool, err := NewConnectionPool(socketPath, 5)

@@ -133,6 +133,24 @@ func (mp *MultiPool) Put(client *rpc.Client) {
 	}
 }
 
+// PutAfterError validates a client before returning it to the pool that issued it.
+func (mp *MultiPool) PutAfterError(client *rpc.Client) {
+	if client == nil {
+		return
+	}
+
+	mp.mu.Lock()
+	p, ok := mp.clientOwner[client]
+	if ok {
+		delete(mp.clientOwner, client)
+	}
+	mp.mu.Unlock()
+
+	if ok {
+		p.PutAfterError(client)
+	}
+}
+
 // Discard discards a bad client, returning it to the pool that issued it.
 func (mp *MultiPool) Discard(client *rpc.Client) {
 	if client == nil {

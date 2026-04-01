@@ -41,7 +41,8 @@ func (p *trackingMockPool) Put(_ *rpc.Client) {
 	p.putCalls++
 }
 
-func (p *trackingMockPool) Discard(_ *rpc.Client) {}
+func (p *trackingMockPool) PutAfterError(_ *rpc.Client) {}
+func (p *trackingMockPool) Discard(_ *rpc.Client)       {}
 
 func (p *trackingMockPool) Stats() daemon.PoolStats {
 	return daemon.PoolStats{Size: 10, Created: 1}

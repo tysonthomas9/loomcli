@@ -471,7 +471,7 @@ func TestConnectionPool_GetPutGet_Reuse(t *testing.T) {
 	// Put it back
 	pool.Put(client1)
 
-	// Get again - should reuse the pooled connection (validates validateConnection)
+	// Get again - should reuse the pooled connection without validation
 	client2, err := pool.Get(ctx)
 	if err != nil {
 		t.Fatalf("second Get() error = %v", err)
@@ -541,4 +541,96 @@ func TestConnectionPool_ConcurrentGetPut(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func TestConnectionPool_PutAfterError_Healthy(t *testing.T) {
+	socketPath := startMockDaemonServer(t)
+	pool, err := NewConnectionPool(socketPath, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+
+	ctx := context.Background()
+	client, err := pool.Get(ctx)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+
+	// Mock daemon responds to Ping, so the connection should be returned to pool
+	pool.PutAfterError(client)
+
+	stats := pool.Stats()
+	if stats.Available != 1 {
+		t.Errorf("stats.Available = %v after PutAfterError, want 1", stats.Available)
+	}
+	if stats.Active != 0 {
+		t.Errorf("stats.Active = %v after PutAfterError, want 0", stats.Active)
+	}
+}
+
+func TestConnectionPool_PutAfterError_Nil(t *testing.T) {
+	pool, err := NewConnectionPool("/tmp/test.sock", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+
+	// PutAfterError(nil) should be safe (no panic)
+	pool.PutAfterError(nil)
+
+	stats := pool.Stats()
+	if stats.Active != 0 {
+		t.Errorf("stats.Active = %v after PutAfterError(nil), want 0", stats.Active)
+	}
+	if stats.Available != 0 {
+		t.Errorf("stats.Available = %v after PutAfterError(nil), want 0", stats.Available)
+	}
+}
+
+func TestConnectionPool_PutAfterError_ClosedPool(t *testing.T) {
+	socketPath := startMockDaemonServer(t)
+	pool, err := NewConnectionPool(socketPath, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	client, err := pool.Get(ctx)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+
+	// Close pool, then PutAfterError - should not panic
+	pool.Close()
+	pool.PutAfterError(client)
+}
+
+func TestConnectionPool_PutAfterError_Unhealthy(t *testing.T) {
+	socketPath := startMockDaemonServer(t)
+	pool, err := NewConnectionPool(socketPath, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+
+	ctx := context.Background()
+	client, err := pool.Get(ctx)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+
+	// Close the client's underlying connection to make Ping fail
+	_ = client.Close()
+
+	// PutAfterError should discard the dead connection
+	pool.PutAfterError(client)
+
+	stats := pool.Stats()
+	if stats.Available != 0 {
+		t.Errorf("stats.Available = %v after PutAfterError on dead connection, want 0", stats.Available)
+	}
+	if stats.Created != 0 {
+		t.Errorf("stats.Created = %v after PutAfterError on dead connection, want 0", stats.Created)
+	}
 }

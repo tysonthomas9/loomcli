@@ -34,7 +34,8 @@ func (m *mockPool) Put(_ *rpc.Client) {
 	m.putCalls++
 }
 
-func (m *mockPool) Discard(_ *rpc.Client) {}
+func (m *mockPool) PutAfterError(c *rpc.Client) { m.Put(c) }
+func (m *mockPool) Discard(_ *rpc.Client)       {}
 
 func (m *mockPool) Stats() PoolStats {
 	return PoolStats{Size: 10, Created: 1}
@@ -255,6 +256,38 @@ func TestMultiPool_PoolForWorkspace(t *testing.T) {
 	if got != nil {
 		t.Error("expected nil for nonexistent workspace")
 	}
+}
+
+func TestMultiPool_PutAfterError(t *testing.T) {
+	mp := NewMultiPool(extractWS, 10)
+
+	p := &mockPool{}
+	if err := mp.Register("ws", p); err != nil {
+		t.Fatal(err)
+	}
+
+	client, err := mp.Get(ctxWithWS("ws"))
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+
+	mp.PutAfterError(client)
+
+	p.mu.Lock()
+	puts := p.putCalls
+	p.mu.Unlock()
+
+	if puts != 1 {
+		t.Errorf("expected putCalls=1 (routed via PutAfterError), got %d", puts)
+	}
+}
+
+func TestMultiPool_PutAfterError_Nil(t *testing.T) {
+	mp := NewMultiPool(extractWS, 10)
+	_ = mp.Register("ws", &mockPool{})
+
+	// PutAfterError(nil) should be safe (no panic)
+	mp.PutAfterError(nil)
 }
 
 func TestMultiPool_ConcurrentAccess(t *testing.T) {
