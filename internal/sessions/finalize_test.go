@@ -878,6 +878,154 @@ func TestFinalize_ZeroOptsMetadataReadFails(t *testing.T) {
 	}
 }
 
+func TestFinalize_PartialOptsPreservesDiskValues(t *testing.T) {
+	store := createTestStore(t)
+	sess := createTestSession(t, store, "nova", "claude")
+
+	// Simulate hook-captured data on disk.
+	sess.Meta.InputTokens = 5000
+	sess.Meta.OutputTokens = 2000
+	sess.Meta.CacheReadTokens = 3000
+	sess.Meta.CacheWriteTokens = 600
+	sess.Meta.EstimatedCostUSD = 0.05
+	if err := store.SaveMetadata(sess.SessionID(), &sess.Meta); err != nil {
+		t.Fatalf("SaveMetadata (hook sim): %v", err)
+	}
+
+	// Reset in-memory to zero before Finalize.
+	sess.Meta.InputTokens = 0
+	sess.Meta.OutputTokens = 0
+	sess.Meta.CacheReadTokens = 0
+	sess.Meta.CacheWriteTokens = 0
+	sess.Meta.EstimatedCostUSD = 0
+
+	// Finalize with partial opts: some non-zero, some zero.
+	err := sess.Finalize(FinalizeOptions{
+		TaskID:           "task-partial",
+		ExitCode:         0,
+		InputTokens:      8000, // non-zero → opts wins
+		OutputTokens:     0,    // zero → disk preserved (2000)
+		CacheReadTokens:  0,    // zero → disk preserved (3000)
+		CacheWriteTokens: 700,  // non-zero → opts wins
+		EstimatedCostUSD: 0,    // zero → disk preserved (0.05)
+	})
+	if err != nil {
+		t.Fatalf("Finalize error: %v", err)
+	}
+
+	// Verify in-memory: per-field merge.
+	if sess.Meta.InputTokens != 8000 {
+		t.Errorf("InputTokens = %d, want 8000", sess.Meta.InputTokens)
+	}
+	if sess.Meta.OutputTokens != 2000 {
+		t.Errorf("OutputTokens = %d, want 2000", sess.Meta.OutputTokens)
+	}
+	if sess.Meta.CacheReadTokens != 3000 {
+		t.Errorf("CacheReadTokens = %d, want 3000", sess.Meta.CacheReadTokens)
+	}
+	if sess.Meta.CacheWriteTokens != 700 {
+		t.Errorf("CacheWriteTokens = %d, want 700", sess.Meta.CacheWriteTokens)
+	}
+	if sess.Meta.EstimatedCostUSD != 0.05 {
+		t.Errorf("EstimatedCostUSD = %f, want 0.05", sess.Meta.EstimatedCostUSD)
+	}
+
+	// Verify on disk.
+	meta, err := store.LoadMetadata(sess.SessionID())
+	if err != nil {
+		t.Fatalf("LoadMetadata: %v", err)
+	}
+	if meta.InputTokens != 8000 {
+		t.Errorf("disk InputTokens = %d, want 8000", meta.InputTokens)
+	}
+	if meta.OutputTokens != 2000 {
+		t.Errorf("disk OutputTokens = %d, want 2000", meta.OutputTokens)
+	}
+	if meta.CacheReadTokens != 3000 {
+		t.Errorf("disk CacheReadTokens = %d, want 3000", meta.CacheReadTokens)
+	}
+	if meta.CacheWriteTokens != 700 {
+		t.Errorf("disk CacheWriteTokens = %d, want 700", meta.CacheWriteTokens)
+	}
+	if meta.EstimatedCostUSD != 0.05 {
+		t.Errorf("disk EstimatedCostUSD = %f, want 0.05", meta.EstimatedCostUSD)
+	}
+}
+
+func TestFinalize_PartialDiskPreservesOptsValues(t *testing.T) {
+	store := createTestStore(t)
+	sess := createTestSession(t, store, "nova", "claude")
+
+	// Simulate hook-captured data on disk — partial (only OutputTokens non-zero).
+	sess.Meta.InputTokens = 0
+	sess.Meta.OutputTokens = 2000
+	sess.Meta.CacheReadTokens = 0
+	sess.Meta.CacheWriteTokens = 0
+	sess.Meta.EstimatedCostUSD = 0
+	if err := store.SaveMetadata(sess.SessionID(), &sess.Meta); err != nil {
+		t.Fatalf("SaveMetadata (hook sim): %v", err)
+	}
+
+	// Reset in-memory to zero before Finalize.
+	sess.Meta.InputTokens = 0
+	sess.Meta.OutputTokens = 0
+	sess.Meta.CacheReadTokens = 0
+	sess.Meta.CacheWriteTokens = 0
+	sess.Meta.EstimatedCostUSD = 0
+
+	// Finalize with opts providing different fields.
+	err := sess.Finalize(FinalizeOptions{
+		TaskID:           "task-partial2",
+		ExitCode:         0,
+		InputTokens:      8000, // opts
+		OutputTokens:     0,    // zero → disk preserved (2000)
+		CacheReadTokens:  1000, // opts
+		CacheWriteTokens: 0,    // both zero → 0
+		EstimatedCostUSD: 0.09, // opts
+	})
+	if err != nil {
+		t.Fatalf("Finalize error: %v", err)
+	}
+
+	// Verify in-memory.
+	if sess.Meta.InputTokens != 8000 {
+		t.Errorf("InputTokens = %d, want 8000", sess.Meta.InputTokens)
+	}
+	if sess.Meta.OutputTokens != 2000 {
+		t.Errorf("OutputTokens = %d, want 2000", sess.Meta.OutputTokens)
+	}
+	if sess.Meta.CacheReadTokens != 1000 {
+		t.Errorf("CacheReadTokens = %d, want 1000", sess.Meta.CacheReadTokens)
+	}
+	if sess.Meta.CacheWriteTokens != 0 {
+		t.Errorf("CacheWriteTokens = %d, want 0", sess.Meta.CacheWriteTokens)
+	}
+	if sess.Meta.EstimatedCostUSD != 0.09 {
+		t.Errorf("EstimatedCostUSD = %f, want 0.09", sess.Meta.EstimatedCostUSD)
+	}
+
+	// Verify on disk.
+	meta, err := store.LoadMetadata(sess.SessionID())
+	if err != nil {
+		t.Fatalf("LoadMetadata: %v", err)
+	}
+	if meta.InputTokens != 8000 {
+		t.Errorf("disk InputTokens = %d, want 8000", meta.InputTokens)
+	}
+	if meta.OutputTokens != 2000 {
+		t.Errorf("disk OutputTokens = %d, want 2000", meta.OutputTokens)
+	}
+	if meta.CacheReadTokens != 1000 {
+		t.Errorf("disk CacheReadTokens = %d, want 1000", meta.CacheReadTokens)
+	}
+	if meta.CacheWriteTokens != 0 {
+		t.Errorf("disk CacheWriteTokens = %d, want 0", meta.CacheWriteTokens)
+	}
+	if meta.EstimatedCostUSD != 0.09 {
+		t.Errorf("disk EstimatedCostUSD = %f, want 0.09", meta.EstimatedCostUSD)
+	}
+}
+
 // rewriteIndex replaces the last line in index.jsonl with a modified record.
 // Used in tests to backdate EndedAt for purge testing.
 func rewriteIndex(t *testing.T, store *Store, rec SessionRecord) {

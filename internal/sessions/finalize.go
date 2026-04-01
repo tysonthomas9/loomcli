@@ -32,28 +32,26 @@ func (s *Session) Finalize(opts FinalizeOptions) error {
 	s.Meta.LinesRemoved = opts.DiffStats.LinesRemoved
 	s.Meta.FilesTouched = opts.FilesTouched
 
-	// Set token usage fields: prefer opts (collector data) when non-zero,
-	// otherwise re-read from disk to preserve hook-captured values.
-	if opts.InputTokens > 0 || opts.OutputTokens > 0 ||
-		opts.CacheReadTokens > 0 || opts.CacheWriteTokens > 0 ||
-		opts.EstimatedCostUSD > 0 {
-		s.Meta.InputTokens = opts.InputTokens
-		s.Meta.OutputTokens = opts.OutputTokens
-		s.Meta.CacheReadTokens = opts.CacheReadTokens
-		s.Meta.CacheWriteTokens = opts.CacheWriteTokens
-		s.Meta.EstimatedCostUSD = opts.EstimatedCostUSD
+	// Per-field token merge: for each field, use opts value when non-zero,
+	// otherwise preserve the existing disk value (hook-captured data).
+	var diskInputTokens, diskOutputTokens, diskCacheRead, diskCacheWrite int64
+	var diskCost float64
+	diskMeta, err := s.store.LoadMetadata(s.Meta.SessionID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "sessions: failed to load metadata for token preservation: %v\n", err)
+		// disk* vars remain zero — merge will use opts values
 	} else {
-		diskMeta, err := s.store.LoadMetadata(s.Meta.SessionID)
-		if err == nil {
-			s.Meta.InputTokens = diskMeta.InputTokens
-			s.Meta.OutputTokens = diskMeta.OutputTokens
-			s.Meta.CacheReadTokens = diskMeta.CacheReadTokens
-			s.Meta.CacheWriteTokens = diskMeta.CacheWriteTokens
-			s.Meta.EstimatedCostUSD = diskMeta.EstimatedCostUSD
-		} else {
-			fmt.Fprintf(os.Stderr, "sessions: failed to load metadata for token preservation: %v\n", err)
-		}
+		diskInputTokens = diskMeta.InputTokens
+		diskOutputTokens = diskMeta.OutputTokens
+		diskCacheRead = diskMeta.CacheReadTokens
+		diskCacheWrite = diskMeta.CacheWriteTokens
+		diskCost = diskMeta.EstimatedCostUSD
 	}
+	s.Meta.InputTokens = mergeTokenVal(opts.InputTokens, diskInputTokens)
+	s.Meta.OutputTokens = mergeTokenVal(opts.OutputTokens, diskOutputTokens)
+	s.Meta.CacheReadTokens = mergeTokenVal(opts.CacheReadTokens, diskCacheRead)
+	s.Meta.CacheWriteTokens = mergeTokenVal(opts.CacheWriteTokens, diskCacheWrite)
+	s.Meta.EstimatedCostUSD = mergeTokenCost(opts.EstimatedCostUSD, diskCost)
 
 	// Set error context.
 	s.Meta.ErrorClass = opts.ErrorClass
@@ -111,4 +109,20 @@ func (s *Store) appendIndex(rec SessionRecord) error {
 		return fmt.Errorf("write index entry: %w", err)
 	}
 	return nil
+}
+
+// mergeTokenVal returns opts if non-zero, otherwise disk.
+func mergeTokenVal(opts, disk int64) int64 {
+	if opts != 0 {
+		return opts
+	}
+	return disk
+}
+
+// mergeTokenCost returns opts if non-zero, otherwise disk.
+func mergeTokenCost(opts, disk float64) float64 {
+	if opts != 0 {
+		return opts
+	}
+	return disk
 }
