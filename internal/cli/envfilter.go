@@ -33,6 +33,39 @@ var envAllowlistExact = map[string]bool{
 	"EDITOR": true, "VISUAL": true,
 }
 
+// envBlocklistExact contains environment variable names that are NEVER
+// passed to subprocesses, even if they match the allowlist. Defense-in-depth
+// against git-redirection and code-execution attacks.
+var envBlocklistExact = map[string]bool{
+	// Git redirection — can make git operate on wrong repo/worktree
+	"GIT_DIR":                          true,
+	"GIT_WORK_TREE":                    true,
+	"GIT_INDEX_FILE":                   true,
+	"GIT_OBJECT_DIRECTORY":             true,
+	"GIT_ALTERNATE_OBJECT_DIRECTORIES": true,
+	"GIT_CEILING_DIRECTORIES":          true,
+	"GIT_COMMON_DIR":                   true,
+	// Code execution — can run arbitrary commands via git
+	"GIT_EXEC_PATH":    true,
+	"GIT_TEMPLATE_DIR": true,
+	"GIT_ASKPASS":      true,
+	// Hook redirection — can run hooks from attacker-controlled directory
+	"GIT_HOOKS_PATH": true,
+	// Config injection — can set arbitrary git config including hooks
+	"GIT_CONFIG":        true,
+	"GIT_CONFIG_GLOBAL": true,
+	"GIT_CONFIG_SYSTEM": true,
+	"GIT_CONFIG_COUNT":  true, // env-based config injection (Git 2.31+)
+}
+
+// envBlocklistPrefixes contains prefixes that are NEVER passed to
+// subprocesses. Needed for indexed env vars like GIT_CONFIG_KEY_0,
+// GIT_CONFIG_VALUE_0 (Git 2.31+ env-based config injection).
+var envBlocklistPrefixes = []string{
+	"GIT_CONFIG_KEY_",
+	"GIT_CONFIG_VALUE_",
+}
+
 // envAllowlistPrefixes contains prefixes for environment variable names
 // that are allowed to be passed to spawned agent subprocesses.
 var envAllowlistPrefixes = []string{
@@ -58,6 +91,20 @@ func FilterEnv(env []string) []string {
 			continue
 		}
 		name := entry[:idx]
+		// Blocklist takes precedence over allowlist (defense-in-depth)
+		if envBlocklistExact[name] {
+			continue
+		}
+		blocked := false
+		for _, prefix := range envBlocklistPrefixes {
+			if strings.HasPrefix(name, prefix) {
+				blocked = true
+				break
+			}
+		}
+		if blocked {
+			continue
+		}
 		if envAllowlistExact[name] {
 			result = append(result, entry)
 			continue
