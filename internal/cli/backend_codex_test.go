@@ -32,14 +32,12 @@ func TestCodexBackendRegistered(t *testing.T) {
 
 func TestCodexInvokeInteractive_MockInvoker(t *testing.T) {
 	var gotWorkDir, gotPrompt, gotAgentName string
-	orig := codexInvoker
-	codexInvoker = func(workDir, prompt, agentName string) error {
+	installCodexInvokerMock(t, func(workDir, prompt, agentName string) error {
 		gotWorkDir = workDir
 		gotPrompt = prompt
 		gotAgentName = agentName
 		return nil
-	}
-	t.Cleanup(func() { codexInvoker = orig })
+	})
 
 	b := &CodexBackend{}
 	err := b.InvokeInteractive("/test/dir", "do stuff", "agent1")
@@ -59,11 +57,9 @@ func TestCodexInvokeInteractive_MockInvoker(t *testing.T) {
 
 func TestCodexInvokeInteractive_MockInvokerError(t *testing.T) {
 	expectedErr := errors.New("codex invocation failed")
-	orig := codexInvoker
-	codexInvoker = func(workDir, prompt, agentName string) error {
+	installCodexInvokerMock(t, func(workDir, prompt, agentName string) error {
 		return expectedErr
-	}
-	t.Cleanup(func() { codexInvoker = orig })
+	})
 
 	b := &CodexBackend{}
 	err := b.InvokeInteractive("/test/dir", "prompt", "")
@@ -75,15 +71,13 @@ func TestCodexInvokeInteractive_MockInvokerError(t *testing.T) {
 func TestCodexInvokeNonInteractive_MockInvoker(t *testing.T) {
 	var gotWorkDir, gotPrompt, gotAgentName string
 	var gotShutdown <-chan struct{}
-	orig := codexNonInteractiveInvoker
-	codexNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
+	installCodexNonInteractiveMock(t, func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		gotWorkDir = workDir
 		gotPrompt = prompt
 		gotAgentName = agentName
 		gotShutdown = shutdown
 		return nil
-	}
-	t.Cleanup(func() { codexNonInteractiveInvoker = orig })
+	})
 
 	shutdown := make(chan struct{})
 	b := &CodexBackend{}
@@ -107,11 +101,9 @@ func TestCodexInvokeNonInteractive_MockInvoker(t *testing.T) {
 
 func TestCodexInvokeNonInteractive_MockInvokerError(t *testing.T) {
 	expectedErr := errors.New("codex non-interactive failed")
-	orig := codexNonInteractiveInvoker
-	codexNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
+	installCodexNonInteractiveMock(t, func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		return expectedErr
-	}
-	t.Cleanup(func() { codexNonInteractiveInvoker = orig })
+	})
 
 	b := &CodexBackend{}
 	err := b.InvokeNonInteractive("/work", "prompt", "", make(chan struct{}), nil)
@@ -124,8 +116,7 @@ func TestCodexInvokeInteractive_EnvVars(t *testing.T) {
 	// Verify that the default invoker sets LOOM_WORKTREE_PATH and BD_ACTOR.
 	// We mock at the codexInvoker level and check the env vars that would be set.
 	var capturedEnv []string
-	orig := codexInvoker
-	codexInvoker = func(workDir, prompt, agentName string) error {
+	installCodexInvokerMock(t, func(workDir, prompt, agentName string) error {
 		// Simulate what defaultCodexInvoker does: build the env
 		env := append(FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 		if agentName != "" {
@@ -133,8 +124,7 @@ func TestCodexInvokeInteractive_EnvVars(t *testing.T) {
 		}
 		capturedEnv = env
 		return nil
-	}
-	t.Cleanup(func() { codexInvoker = orig })
+	})
 
 	b := &CodexBackend{}
 	err := b.InvokeInteractive("/my/work", "prompt", "test-agent")
@@ -162,16 +152,14 @@ func TestCodexInvokeInteractive_NoAgentName(t *testing.T) {
 	})
 
 	var capturedEnv []string
-	orig := codexInvoker
-	codexInvoker = func(workDir, prompt, agentName string) error {
+	installCodexInvokerMock(t, func(workDir, prompt, agentName string) error {
 		env := append(FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 		if agentName != "" {
 			env = append(env, "BD_ACTOR="+agentName)
 		}
 		capturedEnv = env
 		return nil
-	}
-	t.Cleanup(func() { codexInvoker = orig })
+	})
 
 	b := &CodexBackend{}
 	err := b.InvokeInteractive("/my/work", "prompt", "")
@@ -186,12 +174,10 @@ func TestCodexInvokeInteractive_NoAgentName(t *testing.T) {
 
 func TestCodexBackendInvokeInteractive(t *testing.T) {
 	var called bool
-	orig := codexInvoker
-	codexInvoker = func(workDir, prompt, agentName string) error {
+	installCodexInvokerMock(t, func(workDir, prompt, agentName string) error {
 		called = true
 		return nil
-	}
-	t.Cleanup(func() { codexInvoker = orig })
+	})
 
 	b := &CodexBackend{}
 	err := b.InvokeInteractive("/work", "do stuff", "agent1")
@@ -206,13 +192,11 @@ func TestCodexBackendInvokeInteractive(t *testing.T) {
 func TestCodexBackendInvokeNonInteractive(t *testing.T) {
 	var called bool
 	var gotShutdown <-chan struct{}
-	orig := codexNonInteractiveInvoker
-	codexNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
+	installCodexNonInteractiveMock(t, func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		called = true
 		gotShutdown = shutdown
 		return nil
-	}
-	t.Cleanup(func() { codexNonInteractiveInvoker = orig })
+	})
 
 	shutdown := make(chan struct{})
 	b := &CodexBackend{}
@@ -237,18 +221,15 @@ func TestCodexBackend_DispatchViaNonInteractive(t *testing.T) {
 	}
 
 	// Mock the codex invoker to capture arguments
-	oldCodex := codexNonInteractiveInvoker
-	t.Cleanup(func() { codexNonInteractiveInvoker = oldCodex })
-
 	var gotWorkDir, gotPrompt, gotAgentName string
 	var gotShutdown <-chan struct{}
-	codexNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
+	installCodexNonInteractiveMock(t, func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		gotWorkDir = workDir
 		gotPrompt = prompt
 		gotAgentName = agentName
 		gotShutdown = shutdown
 		return nil
-	}
+	})
 
 	shutdown := make(chan struct{})
 	err := InvokeAgentNonInteractive("/dispatch/test", "codex dispatch prompt", "dispatch-agent", shutdown, nil)

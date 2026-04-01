@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/testutil"
+	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
 // CommandStub represents an expected command call and its response
@@ -313,9 +314,8 @@ type MockAgentInvokerRecorder struct {
 func SetupMockAgentInvoker(t *testing.T, returnErr error) *MockAgentInvokerRecorder {
 	t.Helper()
 	recorder := &MockAgentInvokerRecorder{ReturnErr: returnErr}
-	orig := claudeInvoker
 
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		recorder.mu.Lock()
 		recorder.Invocations = append(recorder.Invocations, struct {
 			WorkDir   string
@@ -324,10 +324,6 @@ func SetupMockAgentInvoker(t *testing.T, returnErr error) *MockAgentInvokerRecor
 		}{workDir, prompt, agentName})
 		recorder.mu.Unlock()
 		return recorder.ReturnErr
-	}
-
-	t.Cleanup(func() {
-		claudeInvoker = orig
 	})
 
 	return recorder
@@ -377,6 +373,54 @@ func installExecContextMock(t *testing.T, fn func(context.Context, string, strin
 	orig := execCommandContext
 	execCommandContext = fn
 	t.Cleanup(func() { execCommandContext = orig })
+}
+
+// installClaudeInvokerMock installs a mock claudeInvoker and registers cleanup.
+func installClaudeInvokerMock(t *testing.T, fn func(workDir, prompt, agentName string) error) {
+	t.Helper()
+	orig := claudeInvoker
+	claudeInvoker = fn
+	t.Cleanup(func() { claudeInvoker = orig })
+}
+
+// installClaudeNonInteractiveMock installs a mock claudeNonInteractiveInvoker and registers cleanup.
+func installClaudeNonInteractiveMock(t *testing.T, fn func(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error) {
+	t.Helper()
+	orig := claudeNonInteractiveInvoker
+	claudeNonInteractiveInvoker = fn
+	t.Cleanup(func() { claudeNonInteractiveInvoker = orig })
+}
+
+// installCodexInvokerMock installs a mock codexInvoker and registers cleanup.
+func installCodexInvokerMock(t *testing.T, fn func(workDir, prompt, agentName string) error) {
+	t.Helper()
+	orig := codexInvoker
+	codexInvoker = fn
+	t.Cleanup(func() { codexInvoker = orig })
+}
+
+// installCodexNonInteractiveMock installs a mock codexNonInteractiveInvoker and registers cleanup.
+func installCodexNonInteractiveMock(t *testing.T, fn func(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error) {
+	t.Helper()
+	orig := codexNonInteractiveInvoker
+	codexNonInteractiveInvoker = fn
+	t.Cleanup(func() { codexNonInteractiveInvoker = orig })
+}
+
+// installOpenCodeInvokerMock installs a mock openCodeInvoker and registers cleanup.
+func installOpenCodeInvokerMock(t *testing.T, fn func(workDir, prompt, agentName string) error) {
+	t.Helper()
+	orig := openCodeInvoker
+	openCodeInvoker = fn
+	t.Cleanup(func() { openCodeInvoker = orig })
+}
+
+// installOpenCodeNonInteractiveMock installs a mock openCodeNonInteractiveInvoker and registers cleanup.
+func installOpenCodeNonInteractiveMock(t *testing.T, fn func(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error) {
+	t.Helper()
+	orig := openCodeNonInteractiveInvoker
+	openCodeNonInteractiveInvoker = fn
+	t.Cleanup(func() { openCodeNonInteractiveInvoker = orig })
 }
 
 // OutputCommandStub represents an expected output command call and its response

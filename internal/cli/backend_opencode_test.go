@@ -32,14 +32,12 @@ func TestOpenCodeBackendRegistered(t *testing.T) {
 
 func TestOpenCodeInvokeInteractive_MockInvoker(t *testing.T) {
 	var gotWorkDir, gotPrompt, gotAgentName string
-	orig := openCodeInvoker
-	openCodeInvoker = func(workDir, prompt, agentName string) error {
+	installOpenCodeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		gotWorkDir = workDir
 		gotPrompt = prompt
 		gotAgentName = agentName
 		return nil
-	}
-	t.Cleanup(func() { openCodeInvoker = orig })
+	})
 
 	b := &OpenCodeBackend{}
 	err := b.InvokeInteractive("/test/dir", "do stuff", "agent1")
@@ -59,11 +57,9 @@ func TestOpenCodeInvokeInteractive_MockInvoker(t *testing.T) {
 
 func TestOpenCodeInvokeInteractive_MockInvokerError(t *testing.T) {
 	expectedErr := errors.New("opencode invocation failed")
-	orig := openCodeInvoker
-	openCodeInvoker = func(workDir, prompt, agentName string) error {
+	installOpenCodeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		return expectedErr
-	}
-	t.Cleanup(func() { openCodeInvoker = orig })
+	})
 
 	b := &OpenCodeBackend{}
 	err := b.InvokeInteractive("/test/dir", "prompt", "")
@@ -75,15 +71,13 @@ func TestOpenCodeInvokeInteractive_MockInvokerError(t *testing.T) {
 func TestOpenCodeInvokeNonInteractive_MockInvoker(t *testing.T) {
 	var gotWorkDir, gotPrompt, gotAgentName string
 	var gotShutdown <-chan struct{}
-	orig := openCodeNonInteractiveInvoker
-	openCodeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
+	installOpenCodeNonInteractiveMock(t, func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		gotWorkDir = workDir
 		gotPrompt = prompt
 		gotAgentName = agentName
 		gotShutdown = shutdown
 		return nil
-	}
-	t.Cleanup(func() { openCodeNonInteractiveInvoker = orig })
+	})
 
 	shutdown := make(chan struct{})
 	b := &OpenCodeBackend{}
@@ -107,11 +101,9 @@ func TestOpenCodeInvokeNonInteractive_MockInvoker(t *testing.T) {
 
 func TestOpenCodeInvokeNonInteractive_MockInvokerError(t *testing.T) {
 	expectedErr := errors.New("opencode non-interactive failed")
-	orig := openCodeNonInteractiveInvoker
-	openCodeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
+	installOpenCodeNonInteractiveMock(t, func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		return expectedErr
-	}
-	t.Cleanup(func() { openCodeNonInteractiveInvoker = orig })
+	})
 
 	b := &OpenCodeBackend{}
 	err := b.InvokeNonInteractive("/work", "prompt", "", make(chan struct{}), nil)
@@ -122,16 +114,14 @@ func TestOpenCodeInvokeNonInteractive_MockInvokerError(t *testing.T) {
 
 func TestOpenCodeInvokeInteractive_EnvVars(t *testing.T) {
 	var capturedEnv []string
-	orig := openCodeInvoker
-	openCodeInvoker = func(workDir, prompt, agentName string) error {
+	installOpenCodeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		env := append(FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 		if agentName != "" {
 			env = append(env, "BD_ACTOR="+agentName)
 		}
 		capturedEnv = env
 		return nil
-	}
-	t.Cleanup(func() { openCodeInvoker = orig })
+	})
 
 	b := &OpenCodeBackend{}
 	err := b.InvokeInteractive("/my/work", "prompt", "test-agent")
@@ -158,16 +148,14 @@ func TestOpenCodeInvokeInteractive_NoAgentName(t *testing.T) {
 	})
 
 	var capturedEnv []string
-	orig := openCodeInvoker
-	openCodeInvoker = func(workDir, prompt, agentName string) error {
+	installOpenCodeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		env := append(FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 		if agentName != "" {
 			env = append(env, "BD_ACTOR="+agentName)
 		}
 		capturedEnv = env
 		return nil
-	}
-	t.Cleanup(func() { openCodeInvoker = orig })
+	})
 
 	b := &OpenCodeBackend{}
 	err := b.InvokeInteractive("/my/work", "prompt", "")
@@ -182,12 +170,10 @@ func TestOpenCodeInvokeInteractive_NoAgentName(t *testing.T) {
 
 func TestOpenCodeBackendInvokeInteractive(t *testing.T) {
 	var called bool
-	orig := openCodeInvoker
-	openCodeInvoker = func(workDir, prompt, agentName string) error {
+	installOpenCodeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		called = true
 		return nil
-	}
-	t.Cleanup(func() { openCodeInvoker = orig })
+	})
 
 	b := &OpenCodeBackend{}
 	err := b.InvokeInteractive("/work", "do stuff", "agent1")
@@ -202,13 +188,11 @@ func TestOpenCodeBackendInvokeInteractive(t *testing.T) {
 func TestOpenCodeBackendInvokeNonInteractive(t *testing.T) {
 	var called bool
 	var gotShutdown <-chan struct{}
-	orig := openCodeNonInteractiveInvoker
-	openCodeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
+	installOpenCodeNonInteractiveMock(t, func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		called = true
 		gotShutdown = shutdown
 		return nil
-	}
-	t.Cleanup(func() { openCodeNonInteractiveInvoker = orig })
+	})
 
 	shutdown := make(chan struct{})
 	b := &OpenCodeBackend{}

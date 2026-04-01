@@ -139,12 +139,10 @@ func TestCreatePR_Success(t *testing.T) {
 	cmdMock.Install()
 
 	// Mock claude invoker (should NOT be called)
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	url, err := createPR("/repo", "feature", "main", "")
 	if err != nil {
@@ -173,12 +171,10 @@ func TestCreatePR_NoCommits(t *testing.T) {
 	cmdMock.Install()
 
 	// Mock claude invoker (should NOT be called)
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	url, err := createPR("/repo", "feature", "main", "")
 	if err != nil {
@@ -214,12 +210,10 @@ func TestCreatePR_PRAlreadyExists(t *testing.T) {
 	cmdMock.Install()
 
 	// Mock claude invoker (should NOT be called)
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	url, err := createPR("/repo", "feature", "main", "")
 	if err != nil {
@@ -248,12 +242,10 @@ func TestCreatePR_PushFails(t *testing.T) {
 	cmdMock.Install()
 
 	// Mock claude invoker (should NOT be called)
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	_, err := createPR("/repo", "feature", "main", "")
 	if err == nil {
@@ -287,12 +279,10 @@ func TestCreatePRLegacy_Success(t *testing.T) {
 	cmdMock.Install()
 
 	// Mock claude invoker (should NOT be called)
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	url, err := createPRLegacy("/repo", "feature", "main")
 	if err != nil {
@@ -320,12 +310,10 @@ func TestCreatePRLegacy_NoCommits(t *testing.T) {
 	cmdMock.Install()
 
 	// Mock claude invoker (should NOT be called)
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	url, err := createPRLegacy("/repo", "feature", "main")
 	if err != nil {
@@ -382,12 +370,10 @@ func TestPrWorkspaceWorktrees_IteratesAllRepos(t *testing.T) {
 	cmdMock.Install()
 
 	// Mock claude invoker (should NOT be called)
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	// sourceBranch="" means use wt.Branch for each; targetBranch="main" is explicit
 	prWorkspaceWorktrees(worktrees, "", "main")
@@ -430,12 +416,10 @@ func TestPrWorkspaceWorktrees_SkipsNilRepo(t *testing.T) {
 	cmdMock.Install()
 
 	// Mock claude invoker (should NOT be called)
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	prWorkspaceWorktrees(worktrees, "", "main")
 }
@@ -486,12 +470,10 @@ func TestPrWorkspaceWorktrees_UsesPerRepoDefaultBranch(t *testing.T) {
 	cmdMock.Install()
 
 	// Mock claude invoker (should NOT be called)
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	// targetBranch="" means use per-repo DefaultBranch
 	prWorkspaceWorktrees(worktrees, "", "")

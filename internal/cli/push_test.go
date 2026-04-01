@@ -285,12 +285,10 @@ func TestPushBranch(t *testing.T) {
 
 			// Mock claude invoker
 			claudeCalled := false
-			origClaude := claudeInvoker
-			claudeInvoker = func(workDir, prompt, agentName string) error {
+			installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 				claudeCalled = true
 				return tc.claudeErr
-			}
-			t.Cleanup(func() { claudeInvoker = origClaude })
+			})
 
 			// Call the function under test
 			pushBranch(tc.sourceBranch, tc.targetBranch)
@@ -390,12 +388,10 @@ func TestPushAllWorktrees(t *testing.T) {
 			cmdMock.Install()
 
 			// Mock claude (shouldn't be called in this test)
-			origClaude := claudeInvoker
-			claudeInvoker = func(workDir, prompt, agentName string) error {
+			installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 				t.Error("unexpected claude invocation")
 				return nil
-			}
-			t.Cleanup(func() { claudeInvoker = origClaude })
+			})
 
 			pushAllWorktrees(tc.targetBranch)
 		})
@@ -476,12 +472,10 @@ func TestPushWorkspaceWorktrees_IteratesAllRepos(t *testing.T) {
 	cmdMock := NewCommandMock(t, commandStubs)
 	cmdMock.Install()
 
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	// sourceBranch="" means use wt.Branch for each; targetBranch="main" is explicit
 	pushWorkspaceWorktrees(worktrees, "", "main")
@@ -538,12 +532,10 @@ func TestPushWorkspaceWorktrees_UsesPerRepoDefaultBranch(t *testing.T) {
 	cmdMock := NewCommandMock(t, commandStubs)
 	cmdMock.Install()
 
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	// targetBranch="" means use per-repo DefaultBranch
 	pushWorkspaceWorktrees(worktrees, "", "")
@@ -582,12 +574,10 @@ func TestPushWorkspaceWorktrees_CLIArgOverridesConfig(t *testing.T) {
 	cmdMock := NewCommandMock(t, commandStubs)
 	cmdMock.Install()
 
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	pushWorkspaceWorktrees(worktrees, "", "release")
 }
@@ -624,12 +614,10 @@ func TestPushWorkspaceWorktrees_CustomRemote(t *testing.T) {
 	cmdMock := NewCommandMock(t, commandStubs)
 	cmdMock.Install()
 
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	pushWorkspaceWorktrees(worktrees, "", "main")
 }
@@ -661,12 +649,10 @@ func TestRunPush_LegacyMode(t *testing.T) {
 	cmdMock := NewCommandMock(t, commandStubs)
 	cmdMock.Install()
 
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	pushBranch("feature/test", "main")
 }
@@ -710,12 +696,10 @@ func TestPushWorkspaceWorktrees_SkipsNilRepo(t *testing.T) {
 	cmdMock := NewCommandMock(t, commandStubs)
 	cmdMock.Install()
 
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	pushWorkspaceWorktrees(worktrees, "", "main")
 }
@@ -746,12 +730,10 @@ func TestPushBranch_DirtyWorkingTree_StashesAndPops(t *testing.T) {
 	cmdMock := NewCommandMock(t, commandStubs)
 	cmdMock.Install()
 
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	pushBranch("feature/test", "main")
 }
@@ -783,12 +765,10 @@ func TestPushBranch_StashPopConflicts_WarnsButSucceeds(t *testing.T) {
 	cmdMock := NewCommandMock(t, commandStubs)
 	cmdMock.Install()
 
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	// pushBranch doesn't return an error, it just prints to stderr
 	// The test verifies the correct sequence of commands is called
@@ -813,12 +793,10 @@ func TestPushBranch_StashFails_ReturnsEarly(t *testing.T) {
 	cmdMock := NewCommandMock(t, commandStubs)
 	cmdMock.Install()
 
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	// pushBranch prints error and returns early - no panic
 	pushBranch("feature/test", "main")
@@ -849,12 +827,10 @@ func TestPushBranchInRepo_DirtyWorkingTree_StashesAndPops(t *testing.T) {
 	cmdMock := NewCommandMock(t, commandStubs)
 	cmdMock.Install()
 
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	err := pushBranchInRepo("/repo", "feature", "main", "")
 	if err != nil {
@@ -879,12 +855,10 @@ func TestPushBranchInRepo_StashFails_ReturnsError(t *testing.T) {
 	cmdMock := NewCommandMock(t, commandStubs)
 	cmdMock.Install()
 
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	err := pushBranchInRepo("/repo", "feature", "main", "")
 	if err == nil {
@@ -921,12 +895,10 @@ func TestPushBranchInRepo_StashPopConflicts_WarnsButSucceeds(t *testing.T) {
 	cmdMock := NewCommandMock(t, commandStubs)
 	cmdMock.Install()
 
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	// Should succeed despite stash pop conflict
 	err := pushBranchInRepo("/repo", "feature", "main", "")
@@ -959,12 +931,10 @@ func TestPushBranchInRepo_CleanWorkingTree_NoStash(t *testing.T) {
 	cmdMock := NewCommandMock(t, commandStubs)
 	cmdMock.Install()
 
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	err := pushBranchInRepo("/repo", "feature", "main", "")
 	if err != nil {
@@ -1051,12 +1021,10 @@ func TestPushWorkspaceWorktrees_EmptyList(t *testing.T) {
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{})
 	outputMock.Install()
 
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	// Should not panic or call any commands
 	pushWorkspaceWorktrees(worktrees, "", "main")
@@ -1090,12 +1058,10 @@ func TestPushBranchInRepo_WorktreeConflict_UsesDetached(t *testing.T) {
 	cmdMock := NewCommandMock(t, commandStubs)
 	cmdMock.Install()
 
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	err := pushBranchInRepo("/repo", "feature", "main", "")
 	if err != nil {
@@ -1124,12 +1090,10 @@ func TestPushBranchInRepoDetached_Success(t *testing.T) {
 	cmdMock := NewCommandMock(t, commandStubs)
 	cmdMock.Install()
 
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	err := pushBranchInRepoDetached("/repo", "feature", "main", "")
 	if err != nil {
@@ -1155,12 +1119,10 @@ func TestPushBranchInRepoDetached_AlreadyUpToDate(t *testing.T) {
 	cmdMock := NewCommandMock(t, commandStubs)
 	cmdMock.Install()
 
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	err := pushBranchInRepoDetached("/repo", "feature", "main", "")
 	if err != nil {
@@ -1192,13 +1154,11 @@ func TestPushBranchInRepoDetached_MergeConflicts_InvokesClaude(t *testing.T) {
 
 	claudeCalled := false
 	var capturedPrompt string
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		claudeCalled = true
 		capturedPrompt = prompt
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	err := pushBranchInRepoDetached("/repo", "feature", "main", "")
 	if err != nil {
@@ -1223,12 +1183,10 @@ func TestPushBranchInRepoDetached_CheckoutDetachedFails(t *testing.T) {
 	outputMock := NewOutputCommandMock(t, outputStubs)
 	outputMock.Install()
 
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	err := pushBranchInRepoDetached("/repo", "feature", "main", "")
 	if err == nil {
@@ -1259,12 +1217,10 @@ func TestPushBranchInRepoDetached_CustomRemote(t *testing.T) {
 	cmdMock := NewCommandMock(t, commandStubs)
 	cmdMock.Install()
 
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	err := pushBranchInRepoDetached("/repo", "feature", "main", "upstream")
 	if err != nil {
@@ -1301,12 +1257,10 @@ func TestPushBranch_WorktreeConflict_UsesDetached(t *testing.T) {
 	cmdMock := NewCommandMock(t, commandStubs)
 	cmdMock.Install()
 
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	// pushBranch doesn't return an error - it prints to stderr
 	pushBranch("feature/test", "main")
@@ -1330,12 +1284,10 @@ func TestPushBranchDetached_AlreadyUpToDate(t *testing.T) {
 	cmdMock := NewCommandMock(t, commandStubs)
 	cmdMock.Install()
 
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	err := pushBranchDetached("/tmp/test-dir", "feature", "main")
 	if err != nil {
@@ -1363,12 +1315,10 @@ func TestPushBranchDetached_Success(t *testing.T) {
 	cmdMock := NewCommandMock(t, commandStubs)
 	cmdMock.Install()
 
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	err := pushBranchDetached("/tmp/test-dir", "feature", "main")
 	if err != nil {
@@ -1400,13 +1350,11 @@ func TestPushBranchDetached_MergeConflicts_InvokesClaude(t *testing.T) {
 
 	claudeCalled := false
 	var capturedPrompt string
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		claudeCalled = true
 		capturedPrompt = prompt
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	err := pushBranchDetached("/tmp/test-dir", "feature", "main")
 	if err != nil {
@@ -1449,12 +1397,10 @@ func TestPushBranchInRepo_CheckoutAlreadyCheckedOut_UsesDetached(t *testing.T) {
 	cmdMock := NewCommandMock(t, commandStubs)
 	cmdMock.Install()
 
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	err := pushBranchInRepo("/repo", "feature", "main", "")
 	if err != nil {
@@ -1491,12 +1437,10 @@ func TestPushBranch_CheckoutAlreadyCheckedOut_UsesDetached(t *testing.T) {
 	cmdMock := NewCommandMock(t, commandStubs)
 	cmdMock.Install()
 
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	// pushBranch doesn't return an error - it prints to stderr
 	pushBranch("feature/test", "main")

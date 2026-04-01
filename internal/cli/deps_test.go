@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
 // --- Mock implementations ---
@@ -93,6 +95,43 @@ func (m *MockExecContextRunner) Run(ctx context.Context, dir, name string, args 
 	return m.Result
 }
 
+// MockAgentInvoker records agent invocations for tests.
+type MockAgentInvoker struct {
+	mu                  sync.Mutex
+	InteractiveFunc     func(workDir, prompt, agentName string) error
+	NonInteractiveFunc  func(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error
+	InteractiveErr      error
+	NonInteractiveErr   error
+	InteractiveCalls    []mockAgentCall
+	NonInteractiveCalls []mockAgentCall
+}
+
+type mockAgentCall struct {
+	WorkDir   string
+	Prompt    string
+	AgentName string
+}
+
+func (m *MockAgentInvoker) InvokeInteractive(workDir, prompt, agentName string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.InteractiveCalls = append(m.InteractiveCalls, mockAgentCall{WorkDir: workDir, Prompt: prompt, AgentName: agentName})
+	if m.InteractiveFunc != nil {
+		return m.InteractiveFunc(workDir, prompt, agentName)
+	}
+	return m.InteractiveErr
+}
+
+func (m *MockAgentInvoker) InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.NonInteractiveCalls = append(m.NonInteractiveCalls, mockAgentCall{WorkDir: workDir, Prompt: prompt, AgentName: agentName})
+	if m.NonInteractiveFunc != nil {
+		return m.NonInteractiveFunc(workDir, prompt, agentName, shutdown, collector)
+	}
+	return m.NonInteractiveErr
+}
+
 // MockFileSystem is an in-memory filesystem for tests.
 type MockFileSystem struct {
 	mu    sync.Mutex
@@ -170,6 +209,7 @@ func NewTestDeps(t *testing.T) (*Deps, *MockGitRunner, *MockExecRunner, *MockFil
 		Clock:    func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) },
 		LookPath: func(file string) (string, error) { return "/usr/bin/" + file, nil },
 		ExecCtx:  &MockExecContextRunner{},
+		Agent:    &MockAgentInvoker{},
 	}
 	return deps, git, execR, fs, tracker
 }
@@ -204,6 +244,9 @@ func TestDefaultDeps_NonNilFields(t *testing.T) {
 	}
 	if d.ExecCtx == nil {
 		t.Error("ExecCtx is nil")
+	}
+	if d.Agent == nil {
+		t.Error("Agent is nil")
 	}
 }
 
@@ -486,13 +529,13 @@ func TestNewTestDeps_Returns5Tuple(t *testing.T) {
 }
 
 func TestDefaultDeps_NoBDField(t *testing.T) {
-	// Verify the Deps struct has exactly 8 fields: Git, Exec, FS, Logger, Clock, Tracker, LookPath, ExecCtx.
+	// Verify the Deps struct has exactly 9 fields: Git, Exec, FS, Logger, Clock, Tracker, LookPath, ExecCtx, Agent.
 	// This serves as a regression check that BD was removed and no new
 	// unexpected field was added. We verify by checking all fields are non-nil
 	// (which covers every field in the struct).
 	d := DefaultDeps()
 
-	// All 8 fields must be non-nil.
+	// All 9 fields must be non-nil.
 	fields := []struct {
 		name  string
 		isNil bool
@@ -505,6 +548,7 @@ func TestDefaultDeps_NoBDField(t *testing.T) {
 		{"Tracker", d.Tracker == nil},
 		{"LookPath", d.LookPath == nil},
 		{"ExecCtx", d.ExecCtx == nil},
+		{"Agent", d.Agent == nil},
 	}
 	for _, f := range fields {
 		if f.isNil {

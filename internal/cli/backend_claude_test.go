@@ -265,18 +265,15 @@ func TestClaudeBackendInvokeInteractive(t *testing.T) {
 }
 
 func TestClaudeBackendInvokeNonInteractive(t *testing.T) {
-	// Save and restore the non-interactive invoker
-	orig := claudeNonInteractiveInvoker
 	var called bool
 	var gotWorkDir, gotPrompt, gotAgent string
-	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
+	installClaudeNonInteractiveMock(t, func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		called = true
 		gotWorkDir = workDir
 		gotPrompt = prompt
 		gotAgent = agentName
 		return nil
-	}
-	t.Cleanup(func() { claudeNonInteractiveInvoker = orig })
+	})
 
 	b := &ClaudeBackend{}
 	shutdown := make(chan struct{})

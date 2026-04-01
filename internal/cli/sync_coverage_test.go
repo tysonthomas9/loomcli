@@ -64,12 +64,10 @@ func TestSyncSingleWorkspace_PushAndPull(t *testing.T) {
 	})
 	cmdMock.Install()
 
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	resolver, err := NewResolver()
 	if err != nil {
@@ -135,12 +133,10 @@ func TestSyncSingleWorkspace_PushOnly(t *testing.T) {
 	})
 	cmdMock.Install()
 
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	resolver, err := NewResolver()
 	if err != nil {
@@ -198,12 +194,10 @@ func TestSyncSingleWorkspace_PullOnly(t *testing.T) {
 	})
 	cmdMock.Install()
 
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	resolver, err := NewResolver()
 	if err != nil {

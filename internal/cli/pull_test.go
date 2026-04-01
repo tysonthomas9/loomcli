@@ -209,12 +209,10 @@ func TestPullWorktree(t *testing.T) {
 
 			// Mock claude invoker
 			claudeCalled := false
-			origClaude := claudeInvoker
-			claudeInvoker = func(workDir, prompt, agentName string) error {
+			installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 				claudeCalled = true
 				return tc.claudeErr
-			}
-			t.Cleanup(func() { claudeInvoker = origClaude })
+			})
 
 			pullWorktree(tc.worktreeName, tc.sourceBranch)
 
@@ -302,12 +300,10 @@ func TestPullAllWorktrees(t *testing.T) {
 			cmdMock.Install()
 
 			// Mock claude
-			origClaude := claudeInvoker
-			claudeInvoker = func(workDir, prompt, agentName string) error {
+			installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 				t.Error("unexpected claude invocation")
 				return nil
-			}
-			t.Cleanup(func() { claudeInvoker = origClaude })
+			})
 
 			pullAllWorktrees(tc.sourceBranch)
 		})
@@ -384,12 +380,10 @@ func TestPullWorkspaceWorktrees_IteratesAllRepos(t *testing.T) {
 	outputMock := NewOutputCommandMock(t, outputStubs)
 	outputMock.Install()
 
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	pullWorkspaceWorktrees(worktrees, "main")
 }
@@ -424,12 +418,10 @@ func TestPullWorkspaceWorktrees_UsesPerRepoDefaultBranch(t *testing.T) {
 	outputMock := NewOutputCommandMock(t, outputStubs)
 	outputMock.Install()
 
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	// sourceBranch="" means use per-repo DefaultBranch
 	pullWorkspaceWorktrees(worktrees, "")
@@ -445,12 +437,10 @@ func TestPullRepoWorktree_CustomRemote(t *testing.T) {
 	outputMock := NewOutputCommandMock(t, outputStubs)
 	outputMock.Install()
 
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	err := pullRepoWorktree("/ws/repo-a", "feat-a", "main", "upstream")
 	if err != nil {
@@ -468,12 +458,10 @@ func TestPullRepoWorktree_EmptyRemoteDefaultsToOrigin(t *testing.T) {
 	outputMock := NewOutputCommandMock(t, outputStubs)
 	outputMock.Install()
 
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	err := pullRepoWorktree("/ws/repo-a", "feat-a", "main", "")
 	if err != nil {
@@ -508,12 +496,10 @@ func TestRunPull_LegacyMode(t *testing.T) {
 	cmdMock := NewCommandMock(t, commandStubs)
 	cmdMock.Install()
 
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	pullWorktree("falcon", "main")
 }
@@ -544,12 +530,10 @@ func TestPullWorkspaceWorktrees_SkipsNilRepo(t *testing.T) {
 	outputMock := NewOutputCommandMock(t, outputStubs)
 	outputMock.Install()
 
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	pullWorkspaceWorktrees(worktrees, "main")
 }
@@ -574,12 +558,10 @@ func TestPullWorkspaceWorktrees_CLIArgOverridesConfig(t *testing.T) {
 	outputMock := NewOutputCommandMock(t, outputStubs)
 	outputMock.Install()
 
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	pullWorkspaceWorktrees(worktrees, "release")
 }
@@ -617,12 +599,10 @@ func TestPullWorkspaceWorktrees_EmptyList(t *testing.T) {
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{})
 	outputMock.Install()
 
-	origClaude := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origClaude })
+	})
 
 	// Should not panic or call any commands
 	pullWorkspaceWorktrees(worktrees, "main")

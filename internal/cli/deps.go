@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
 // GitRunner wraps git command execution.
@@ -33,6 +35,12 @@ type BDRunner interface {
 	Run(dir string, args ...string) CommandResult
 }
 
+// AgentInvoker wraps agent invocation (interactive and non-interactive).
+type AgentInvoker interface {
+	InvokeInteractive(workDir, prompt, agentName string) error
+	InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error
+}
+
 // FileSystem wraps file operations.
 type FileSystem interface {
 	ReadFile(path string) ([]byte, error)
@@ -53,6 +61,7 @@ type Deps struct {
 	Tracker  IssueTracker
 	LookPath func(file string) (string, error)
 	ExecCtx  ExecContextRunner
+	Agent    AgentInvoker
 }
 
 // --- default implementations ---
@@ -95,6 +104,17 @@ func (defaultFileSystem) Remove(path string) error {
 	return os.Remove(path)
 }
 
+// registryAgentInvoker delegates to InvokeAgent/InvokeAgentNonInteractive (backend registry).
+type registryAgentInvoker struct{}
+
+func (registryAgentInvoker) InvokeInteractive(workDir, prompt, agentName string) error {
+	return InvokeAgent(workDir, prompt, agentName)
+}
+
+func (registryAgentInvoker) InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
+	return InvokeAgentNonInteractive(workDir, prompt, agentName, shutdown, collector)
+}
+
 type defaultExecContextRunner struct{}
 
 func (defaultExecContextRunner) Run(ctx context.Context, dir, name string, args ...string) CommandResult {
@@ -113,6 +133,7 @@ func DefaultDeps() *Deps {
 		Tracker:  newBdBackend(bdRunner, GetBeadsDir()),
 		LookPath: exec.LookPath,
 		ExecCtx:  defaultExecContextRunner{},
+		Agent:    registryAgentInvoker{},
 	}
 }
 
