@@ -832,6 +832,189 @@ func TestClassifyWorkspaceCreateError(t *testing.T) {
 	}
 }
 
+func TestIsBlockedCloneHost(t *testing.T) {
+	tests := []struct {
+		host    string
+		blocked bool
+	}{
+		{"127.0.0.1", true},
+		{"::1", true},
+		{"localhost", true},
+		{"LOCALHOST", true},
+		{"localhost.localdomain", true},
+		{"10.0.0.1", true},
+		{"172.16.0.1", true},
+		{"172.31.255.255", true},
+		{"192.168.0.1", true},
+		{"169.254.169.254", true},
+		{"0.0.0.0", true},
+		{"::", true},
+		{"metadata.google.internal", true},
+		{"metadata.internal", true},
+		{"fe80::1", true},
+		{"fd00::1", true},
+		// Trailing dot (FQDN)
+		{"localhost.", true},
+		// With port
+		{"127.0.0.1:8080", true},
+		{"localhost:3000", true},
+		// CGNAT (RFC 6598)
+		{"100.64.0.1", true},
+		{"100.127.255.254", true},
+		// Allowed
+		{"100.63.255.255", false},
+		{"100.128.0.0", false},
+		{"github.com", false},
+		{"203.0.113.1", false},
+		{"172.32.0.1", false},
+		{"8.8.8.8", false},
+		{"gitlab.com", false},
+		{"git.example.com", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.host, func(t *testing.T) {
+			got := isBlockedCloneHost(tt.host)
+			if got != tt.blocked {
+				t.Errorf("isBlockedCloneHost(%q) = %v, want %v", tt.host, got, tt.blocked)
+			}
+		})
+	}
+}
+
+func TestExtractCloneHost(t *testing.T) {
+	tests := []struct {
+		url      string
+		wantHost string
+		wantErr  bool
+	}{
+		{"https://github.com/user/repo.git", "github.com", false},
+		{"https://10.0.0.1/repo.git", "10.0.0.1", false},
+		{"https://[::1]/repo.git", "::1", false},
+		{"https://git.example.com:8443/repo.git", "git.example.com", false},
+		{"git@github.com:user/repo.git", "github.com", false},
+		{"git@10.0.0.1:repo.git", "10.0.0.1", false},
+		{"git@[::1]:repo.git", "::1", false},
+		// Error cases
+		{"https:///repo.git", "", true},
+		{"git@:repo.git", "", true},
+		{"ftp://example.com/repo", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.url, func(t *testing.T) {
+			host, err := extractCloneHost(tt.url)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("extractCloneHost(%q) = %q, nil; want error", tt.url, host)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("extractCloneHost(%q) error: %v", tt.url, err)
+				return
+			}
+			if host != tt.wantHost {
+				t.Errorf("extractCloneHost(%q) = %q, want %q", tt.url, host, tt.wantHost)
+			}
+		})
+	}
+}
+
+func TestValidateCloneURL_SSRFBlocked(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+	}{
+		{"IPv4 loopback", "https://127.0.0.1/repo.git"},
+		{"IPv4 loopback alt", "https://127.0.0.2/repo.git"},
+		{"IPv6 loopback", "https://[::1]/repo.git"},
+		{"localhost", "https://localhost/repo.git"},
+		{"localhost.localdomain", "https://localhost.localdomain/repo.git"},
+		{"Private 10.x", "https://10.0.0.1/repo.git"},
+		{"Private 172.16.x", "https://172.16.0.1/repo.git"},
+		{"Private 192.168.x", "https://192.168.1.1/repo.git"},
+		{"Link-local / cloud metadata", "https://169.254.169.254/repo.git"},
+		{"Metadata hostname", "https://metadata.google.internal/repo.git"},
+		{"metadata.internal", "https://metadata.internal/repo.git"},
+		{"Unspecified 0.0.0.0", "https://0.0.0.0/repo.git"},
+		{"git@ loopback", "git@127.0.0.1:repo.git"},
+		{"git@ localhost", "git@localhost:repo.git"},
+		{"git@ private", "git@10.0.0.1:repo.git"},
+		{"Loopback with port", "https://127.0.0.1:8080/repo.git"},
+		{"localhost with port", "https://localhost:3000/repo.git"},
+		{"Uppercase LOCALHOST", "https://LOCALHOST/repo.git"},
+		{"CGNAT range", "https://100.64.0.1/repo.git"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateCloneURL(tt.url)
+			if err == nil {
+				t.Fatalf("validateCloneURL(%q) = nil, want error containing 'blocked host'", tt.url)
+			}
+			if !strings.Contains(err.Error(), "blocked host") {
+				t.Errorf("validateCloneURL(%q) error = %q, want 'blocked host'", tt.url, err.Error())
+			}
+		})
+	}
+}
+
+func TestValidateCloneURL_SSRFAllowed(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+	}{
+		{"GitHub HTTPS", "https://github.com/user/repo.git"},
+		{"GitLab HTTPS", "https://gitlab.com/user/repo.git"},
+		{"Custom domain", "https://git.example.com/repo.git"},
+		{"GitHub SSH", "git@github.com:user/repo.git"},
+		{"GitLab SSH", "git@gitlab.com:user/repo.git"},
+		{"Public IP", "https://203.0.113.1/repo.git"},
+		{"URL with port", "https://git.example.com:443/repo.git"},
+		{"Just outside private 172.32", "https://172.32.0.1/repo.git"},
+		{"URL with userinfo", "https://user:pass@github.com/repo.git"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateCloneURL(tt.url)
+			if err != nil {
+				t.Errorf("validateCloneURL(%q) = %v, want nil", tt.url, err)
+			}
+		})
+	}
+}
+
+func TestHandleWorkspaceCreate_SSRFBlocked(t *testing.T) {
+	createFn := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
+		t.Fatal("createFn should not be called for SSRF-blocked URLs")
+		return WorkspaceCreateResult{}, nil
+	}
+
+	handler := handleWorkspaceCreate(createFn, nil, nil)
+
+	body := strings.NewReader(`{"name":"ws","type":"clone","clone_url":"https://127.0.0.1/repo.git"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp workspaceResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Success {
+		t.Fatal("expected failure")
+	}
+	if !strings.Contains(resp.Error, "blocked host") {
+		t.Errorf("expected 'blocked host' in error, got: %s", resp.Error)
+	}
+}
+
 func TestHandleWorkspaceCreate_ClassifiedErrors(t *testing.T) {
 	tests := []struct {
 		name       string

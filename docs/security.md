@@ -49,3 +49,27 @@ Redis configuration changes require restarting `loom serve` — there is no hot-
 - When binding `loom serve` to a non-localhost address (`--bind 0.0.0.0`), a warning is logged. Ensure this is intentional and that appropriate network controls are in place.
 - Use `--auth-url` to point at an external auth service for JWT-based authentication. Always enable external auth in production.
 - Use `--fleet-api-key` (or `LOOM_FLEET_API_KEY` env var) to authenticate fleet worker registration.
+
+## Workspace Clone Security
+
+Loom's workspace creation accepts git clone URLs via the API. If the API is exposed to untrusted users, an attacker with API access could trigger the server to make outbound `git clone` connections to internal services (SSRF).
+
+### Mitigations in place
+
+- **Protocol restriction**: only `https://` and `git@` URL schemes are allowed (prefix check rejects `http://`, `ftp://`, `file://`, etc.)
+- **Control character filtering**: null bytes, newlines, and carriage returns are rejected
+- **Git flag injection prevention**: path segments starting with `-` are rejected
+- **SSRF hostname blocklist**: loopback addresses (127.0.0.0/8, ::1), private IP ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16), CGNAT shared addresses (100.64.0.0/10, RFC 6598), link-local addresses (169.254.0.0/16, fe80::/10), unspecified addresses (0.0.0.0, ::), and cloud metadata IPs (169.254.169.254) are rejected
+- **SSRF known-hostname blocklist**: `localhost`, `localhost.localdomain`, `metadata.google.internal`, and `metadata.internal` are rejected
+- **Path traversal prevention**: cloned repos are confined to `~/.loom/workspaces/`
+- **Request timeout**: 60-second deadline on clone operations
+
+### Limitations
+
+- **DNS rebinding**: a public hostname that resolves to an internal IP at clone time is not blocked, because `git clone` uses its own network stack and we cannot inject Go's dialer. Mitigate with egress firewall rules or DNS pinning at the network level.
+- **Internal hostnames**: custom internal git hosts (e.g., `git.corp.example.com`) are not blocked by the hostname blocklist. Mitigate with network-level egress controls or a future admin-configurable allowlist.
+- **Credential forwarding**: git may send stored credentials (from credential helpers) to the target host. This is standard git behavior and is not blocked.
+
+### Recommendation
+
+When exposing the Loom API to untrusted users, use `--auth-url` for authentication and configure network egress rules to restrict outbound git connections to approved hosts.

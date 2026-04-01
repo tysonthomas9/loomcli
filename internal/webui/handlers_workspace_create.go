@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -88,20 +90,114 @@ func validateWorkspaceCreateRequest(req *WorkspaceCreateRequest) (int, string) {
 	return 0, ""
 }
 
-// validateCloneURL rejects clone URLs that could inject git flags or contain
-// control characters. The prefix check (https:// or git@) is done separately.
+// SECURITY: Clone URL validation defends against:
+//  1. Arbitrary protocol injection — only https:// and git@ allowed (prefix check)
+//  2. Git flag injection — no path segments starting with "-"
+//  3. Control character injection — no null bytes, newlines, carriage returns
+//  4. SSRF via IP literals — blocks loopback, private, CGNAT, link-local, metadata IPs
+//  5. SSRF via known hostnames — blocks localhost, cloud metadata hostnames
+//
+// NOT mitigated (requires network-level controls):
+//   - DNS rebinding: public hostname that resolves to internal IP at clone time
+//   - Internal hostnames: e.g., git@internal-gitlab.corp:repo
+//   - Credential leakage: git may send stored credentials to the target host
 func validateCloneURL(u string) error {
 	if strings.ContainsAny(u, "\x00\n\r") {
-		return fmt.Errorf("clone URL contains control characters: %s", u)
+		return fmt.Errorf("clone URL contains invalid characters")
 	}
 	// After the scheme, check for path segments starting with "-" which git
 	// may interpret as flags (e.g. --upload-pack, --config).
 	for _, seg := range strings.Split(u, "/") {
 		if strings.HasPrefix(seg, "-") {
-			return fmt.Errorf("clone URL contains suspicious path segment %q: %s", seg, u)
+			return fmt.Errorf("clone URL contains suspicious path segment starting with '-'")
 		}
 	}
+
+	host, err := extractCloneHost(u)
+	if err != nil {
+		return fmt.Errorf("cannot parse clone URL host")
+	}
+	if isBlockedCloneHost(host) {
+		return fmt.Errorf("clone URL targets a blocked host (private/internal network)")
+	}
 	return nil
+}
+
+// extractCloneHost returns the hostname (without port) from a clone URL.
+// Handles both https://HOST/path and git@HOST:path formats.
+func extractCloneHost(cloneURL string) (string, error) {
+	if strings.HasPrefix(cloneURL, "https://") {
+		u, err := url.Parse(cloneURL)
+		if err != nil {
+			return "", err
+		}
+		host := u.Hostname()
+		if host == "" {
+			return "", fmt.Errorf("empty host in URL")
+		}
+		return host, nil
+	}
+	if strings.HasPrefix(cloneURL, "git@") {
+		// git@HOST:path format
+		rest := cloneURL[len("git@"):]
+		// Handle bracketed IPv6: git@[::1]:repo
+		if strings.HasPrefix(rest, "[") {
+			closeBracket := strings.Index(rest, "]")
+			if closeBracket < 0 {
+				return "", fmt.Errorf("unclosed bracket in git@ URL")
+			}
+			host := rest[1:closeBracket]
+			if host == "" {
+				return "", fmt.Errorf("empty host in git@ URL")
+			}
+			return host, nil
+		}
+		colonIdx := strings.Index(rest, ":")
+		if colonIdx <= 0 {
+			return "", fmt.Errorf("cannot find host in git@ URL")
+		}
+		return rest[:colonIdx], nil
+	}
+	return "", fmt.Errorf("unsupported URL scheme")
+}
+
+// cgnatBlock is the Carrier-Grade NAT shared address space (RFC 6598).
+// net.IP.IsPrivate() does not cover this range, but it is commonly used
+// for internal services in cloud environments.
+var cgnatBlock = func() *net.IPNet {
+	_, n, _ := net.ParseCIDR("100.64.0.0/10")
+	return n
+}()
+
+// isBlockedCloneHost reports whether host is a loopback, private, link-local,
+// or cloud-metadata address that should not be used as a git clone target.
+//
+// SECURITY: This blocks SSRF via IP literals and well-known internal hostnames.
+// It does NOT protect against DNS-rebinding (where a public hostname resolves
+// to an internal IP). DNS-rebinding mitigation requires network-level controls
+// (egress firewall, DNS pinning) because git clone uses its own network stack.
+func isBlockedCloneHost(host string) bool {
+	// Strip port if present.
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	// Normalize: strip trailing dot (FQDN), lowercase.
+	host = strings.TrimSuffix(strings.ToLower(host), ".")
+
+	// Check known-dangerous hostnames.
+	switch host {
+	case "localhost", "localhost.localdomain",
+		"metadata.google.internal", "metadata.internal":
+		return true
+	}
+
+	// Check IP literals.
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false // Not an IP — only the hostname checks above apply.
+	}
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() || ip.IsUnspecified() || cgnatBlock.Contains(ip)
 }
 
 // handleWorkspaceCreate returns a handler that creates a new workspace.
