@@ -298,7 +298,7 @@ func createPR(repoPath, sourceBranch, targetBranch, remote string) (string, erro
 	title, body := generatePRInfo(repoPath, r, targetBranch, sourceBranch)
 
 	// Create PR using gh CLI
-	result := execCommand(repoPath, "gh", "pr", "create",
+	result := defaultDeps.Exec.Run(repoPath, "gh", "pr", "create",
 		"--base", targetBranch,
 		"--head", sourceBranch,
 		"--title", title,
@@ -352,7 +352,7 @@ func createPRLegacy(repoPath, sourceBranch, targetBranch string) (string, error)
 	title, body := generatePRInfo(repoPath, "origin", targetBranch, sourceBranch)
 
 	// Create PR using gh CLI
-	result := execCommand(repoPath, "gh", "pr", "create",
+	result := defaultDeps.Exec.Run(repoPath, "gh", "pr", "create",
 		"--base", targetBranch,
 		"--head", sourceBranch,
 		"--title", title,
@@ -464,7 +464,7 @@ func getExistingPRURL(repoPath, sourceBranch string) (string, error) {
 	if err := validateGitRef(sourceBranch); err != nil {
 		return "", err
 	}
-	result := execCommand(repoPath, "gh", "pr", "view", sourceBranch, "--json", "url", "-q", ".url")
+	result := defaultDeps.Exec.Run(repoPath, "gh", "pr", "view", sourceBranch, "--json", "url", "-q", ".url")
 	if result.Err != nil {
 		return "", fmt.Errorf("getting existing PR URL: %s", strings.TrimSpace(result.Stderr))
 	}
@@ -474,7 +474,7 @@ func getExistingPRURL(repoPath, sourceBranch string) (string, error) {
 }
 
 func checkGhInstalled() error {
-	result := execCommand(".", "gh", "--version")
+	result := defaultDeps.Exec.Run(".", "gh", "--version")
 	if result.Err != nil {
 		return fmt.Errorf("'gh' CLI not found. Install it from https://cli.github.com/ and run 'gh auth login'")
 	}

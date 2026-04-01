@@ -357,7 +357,7 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 // Uses execCommand directly since sync is an infrastructure operation, not an issue query.
 func collectSyncBdStatus() SyncInfo {
 	var info SyncInfo
-	result := execCommand(GetBeadsDir(), "bd", "sync", "--status")
+	result := defaultDeps.Exec.Run(GetBeadsDir(), "bd", "sync", "--status")
 	if result.Err == nil {
 		info.DBSynced = !strings.Contains(result.Stdout, "error") && !strings.Contains(result.Stdout, "failed")
 		info.DBLastSync = "recently"

@@ -172,7 +172,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	if daemonWeStarted {
 		defer func() {
 			log.Printf("Stopping issue backend daemon...")
-			result := execCommand(GetBeadsDir(), "bd", "daemon", "stop")
+			result := defaultDeps.Exec.Run(GetBeadsDir(), "bd", "daemon", "stop")
 			if result.Err != nil {
 				log.Printf("Warning: failed to stop issue backend daemon: %v", result.Err)
 			}

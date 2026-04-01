@@ -75,7 +75,7 @@ func emitTaskClaimedEvent(taskID, taskTitle string) {
 	eventsDir := os.Getenv("LOOM_EVENTS_DIR")
 	if eventsDir == "" {
 		// Fall back to .loom/events relative to git toplevel
-		cmd := execCommand("", "git", "rev-parse", "--show-toplevel")
+		cmd := defaultDeps.Exec.Run("", "git", "rev-parse", "--show-toplevel")
 		if cmd.Err != nil {
 			return
 		}

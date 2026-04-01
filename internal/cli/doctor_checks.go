@@ -22,7 +22,7 @@ import (
 var versionRegex = regexp.MustCompile(`(\d+)\.(\d+)`)
 
 func checkGit() CheckResult {
-	result := execCommand(".", "git", "--version")
+	result := defaultDeps.Exec.Run(".", "git", "--version")
 	if result.Err != nil {
 		return CheckResult{
 			Name:    "git",
@@ -61,7 +61,7 @@ func checkGit() CheckResult {
 }
 
 func checkGitRepo() CheckResult {
-	result := execCommand(".", "git", "rev-parse", "--is-inside-work-tree")
+	result := defaultDeps.Exec.Run(".", "git", "rev-parse", "--is-inside-work-tree")
 	if result.Err != nil {
 		return CheckResult{
 			Name:    "git_repo",
@@ -72,8 +72,8 @@ func checkGitRepo() CheckResult {
 	}
 
 	// Check if inside a worktree (not the main working tree)
-	mainResult := execCommand(".", "git", "rev-parse", "--git-common-dir")
-	gitDirResult := execCommand(".", "git", "rev-parse", "--git-dir")
+	mainResult := defaultDeps.Exec.Run(".", "git", "rev-parse", "--git-common-dir")
+	gitDirResult := defaultDeps.Exec.Run(".", "git", "rev-parse", "--git-dir")
 	if mainResult.Err == nil && gitDirResult.Err == nil {
 		commonDir := strings.TrimSpace(mainResult.Stdout)
 		gitDir := strings.TrimSpace(gitDirResult.Stdout)
@@ -105,7 +105,7 @@ func checkTmux() CheckResult {
 		}
 	}
 
-	result := execCommand(".", "tmux", "-V")
+	result := defaultDeps.Exec.Run(".", "tmux", "-V")
 	versionStr := strings.TrimSpace(result.Stdout)
 	matches := versionRegex.FindStringSubmatch(versionStr)
 	if len(matches) >= 3 {
@@ -134,7 +134,7 @@ func checkBdCLI() CheckResult {
 		}
 	}
 
-	result := execCommand(".", "bd", "--version")
+	result := defaultDeps.Exec.Run(".", "bd", "--version")
 	versionStr := strings.TrimSpace(result.Stdout)
 	if versionStr != "" {
 		return CheckResult{
@@ -152,7 +152,7 @@ func checkBdCLI() CheckResult {
 }
 
 func checkBdDaemon() CheckResult {
-	if _, err := lookPath("bd"); err != nil {
+	if _, err := defaultDeps.LookPath("bd"); err != nil {
 		return CheckResult{
 			Name:    "bd_daemon",
 			Status:  StatusFail,
@@ -161,7 +161,7 @@ func checkBdDaemon() CheckResult {
 		}
 	}
 
-	result := execCommand(GetBeadsDir(), "bd", "daemon", "status", "--json")
+	result := defaultDeps.Exec.Run(GetBeadsDir(), "bd", "daemon", "status", "--json")
 	if result.Err != nil {
 		return CheckResult{
 			Name:    "bd_daemon",

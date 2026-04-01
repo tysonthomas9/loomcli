@@ -85,14 +85,19 @@ func (m *CommandMock) Verify() {
 	}
 }
 
+// Run implements ExecRunner, delegating to Exec.
+func (m *CommandMock) Run(dir, name string, args ...string) CommandResult {
+	return m.Exec(dir, name, args...)
+}
+
 // Install installs the mock and registers cleanup with t.Cleanup().
-// WARNING: This modifies global state (execCommand). Tests using this mock
+// WARNING: This modifies global state (defaultDeps.Exec). Tests using this mock
 // MUST NOT use t.Parallel() as it would cause race conditions.
 func (m *CommandMock) Install() {
-	orig := execCommand
-	execCommand = m.Exec
+	orig := defaultDeps.Exec
+	defaultDeps.Exec = m
 	m.t.Cleanup(func() {
-		execCommand = orig
+		defaultDeps.Exec = orig
 		m.Verify()
 	})
 }
@@ -238,14 +243,19 @@ func (m *FlexibleCommandMock) Verify() {
 	}
 }
 
+// Run implements ExecRunner, delegating to Exec.
+func (m *FlexibleCommandMock) Run(dir, name string, args ...string) CommandResult {
+	return m.Exec(dir, name, args...)
+}
+
 // Install installs the mock and registers cleanup with t.Cleanup().
-// WARNING: This modifies global state (execCommand). Tests using this mock
+// WARNING: This modifies global state (defaultDeps.Exec). Tests using this mock
 // MUST NOT use t.Parallel() as it would cause race conditions.
 func (m *FlexibleCommandMock) Install() {
-	orig := execCommand
-	execCommand = m.Exec
+	orig := defaultDeps.Exec
+	defaultDeps.Exec = m
 	m.t.Cleanup(func() {
-		execCommand = orig
+		defaultDeps.Exec = orig
 		m.Verify()
 	})
 }
@@ -337,42 +347,66 @@ func SetupMockClaudeInvoker(t *testing.T, returnErr error) *MockAgentInvokerReco
 	return SetupMockAgentInvoker(t, returnErr)
 }
 
-// installExecMock installs a MockExecRunner as the global execCommand and
-// registers cleanup. Bridge pattern: sets the global for production code
-// that calls execCommand directly.
+// installExecMock installs a MockExecRunner as defaultDeps.Exec and
+// registers cleanup. Bridge pattern: sets the Deps field for production code
+// that calls defaultDeps.Exec.Run() directly.
 func installExecMock(t *testing.T, m *MockExecRunner) {
 	t.Helper()
-	orig := execCommand
-	execCommand = m.Run
-	t.Cleanup(func() { execCommand = orig })
+	orig := defaultDeps.Exec
+	defaultDeps.Exec = m
+	t.Cleanup(func() { defaultDeps.Exec = orig })
 }
 
-// installGitOutputMock installs an OutputCommandMock as the global
-// runGitWithOutputFunc and registers cleanup with verification.
+// gitOutputMockRunner wraps an OutputCommandMock to implement GitRunner.
+// Run() delegates to defaultDeps.Exec (so CommandMock intercepts git Run calls),
+// RunWithOutput() delegates to the OutputCommandMock.
+type gitOutputMockRunner struct {
+	outputFn func(dir string, args ...string) error
+}
+
+func (g *gitOutputMockRunner) Run(dir string, args ...string) CommandResult {
+	return defaultDeps.Exec.Run(dir, "git", args...)
+}
+
+func (g *gitOutputMockRunner) RunWithOutput(dir string, args ...string) error {
+	return g.outputFn(dir, args...)
+}
+
+// installGitOutputMock installs an OutputCommandMock as defaultDeps.Git
+// and registers cleanup with verification.
 func installGitOutputMock(t *testing.T, m *OutputCommandMock) {
 	t.Helper()
-	orig := runGitWithOutputFunc
-	runGitWithOutputFunc = m.Exec
+	origGit := defaultDeps.Git
+	defaultDeps.Git = &gitOutputMockRunner{outputFn: m.Exec}
 	t.Cleanup(func() {
-		runGitWithOutputFunc = orig
+		defaultDeps.Git = origGit
 		m.Verify()
 	})
 }
 
-// installLookPathMock installs a mock lookPath function and registers cleanup.
+// installLookPathMock installs a mock LookPath function on defaultDeps and registers cleanup.
 func installLookPathMock(t *testing.T, fn func(string) (string, error)) {
 	t.Helper()
-	orig := lookPath
-	lookPath = fn
-	t.Cleanup(func() { lookPath = orig })
+	orig := defaultDeps.LookPath
+	defaultDeps.LookPath = fn
+	t.Cleanup(func() { defaultDeps.LookPath = orig })
 }
 
-// installExecContextMock installs a mock execCommandContext function and registers cleanup.
+// funcExecContextRunner wraps a function as an ExecContextRunner.
+type funcExecContextRunner struct {
+	fn func(context.Context, string, string, ...string) CommandResult
+}
+
+func (f *funcExecContextRunner) Run(ctx context.Context, dir, name string, args ...string) CommandResult {
+	return f.fn(ctx, dir, name, args...)
+}
+
+// installExecContextMock installs a mock ExecContextRunner on defaultDeps and registers cleanup.
 func installExecContextMock(t *testing.T, fn func(context.Context, string, string, ...string) CommandResult) {
 	t.Helper()
-	orig := execCommandContext
-	execCommandContext = fn
-	t.Cleanup(func() { execCommandContext = orig })
+	orig := defaultDeps.ExecCtx
+	defaultDeps.ExecCtx = &funcExecContextRunner{fn: fn}
+	t.Cleanup(func() { defaultDeps.ExecCtx = orig })
 }
 
 // installClaudeInvokerMock installs a mock claudeInvoker and registers cleanup.

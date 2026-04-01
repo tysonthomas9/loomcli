@@ -54,7 +54,7 @@ func analyzeTaskCompletion(worktreePath, taskID string) (completed bool, reason 
 			searchedWorkspace = true
 			var parts []string
 			for _, wt := range worktrees {
-				result := execCommand(wt.Path, "git", "log", "--oneline", "-20", "--all", "--grep", taskID)
+				result := defaultDeps.Exec.Run(wt.Path, "git", "log", "--oneline", "-20", "--all", "--grep", taskID)
 				output := strings.TrimSpace(result.Stdout)
 				if output != "" {
 					parts = append(parts, fmt.Sprintf("[%s]\n%s", wt.Name, output))
@@ -65,7 +65,7 @@ func analyzeTaskCompletion(worktreePath, taskID string) (completed bool, reason 
 	}
 	if !searchedWorkspace {
 		// Legacy mode or workspace discovery failed: search single repo
-		gitResult := execCommand(worktreePath, "git", "log", "--oneline", "-20", "--all", "--grep", taskID)
+		gitResult := defaultDeps.Exec.Run(worktreePath, "git", "log", "--oneline", "-20", "--all", "--grep", taskID)
 		gitOutput = gitResult.Stdout
 	}
 
@@ -100,7 +100,7 @@ INCOMPLETE: <brief reason>
 `, taskID, taskDetails, gitOutput)
 
 	// Run claude -p with the prompt
-	claudeResult := execCommand(worktreePath, "claude", "-p", "--output-format", "text", prompt)
+	claudeResult := defaultDeps.Exec.Run(worktreePath, "claude", "-p", "--output-format", "text", prompt)
 	if claudeResult.Err != nil {
 		return false, fmt.Sprintf("Claude analysis failed: %v", claudeResult.Err)
 	}

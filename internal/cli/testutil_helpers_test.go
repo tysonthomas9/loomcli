@@ -8,9 +8,9 @@ import (
 
 // --- installExecMock tests ---
 
-func TestInstallExecMock_SetsGlobal(t *testing.T) {
-	origExecCommand := execCommand
-	t.Cleanup(func() { execCommand = origExecCommand })
+func TestInstallExecMock_SwapsDepsExec(t *testing.T) {
+	origExec := defaultDeps.Exec
+	t.Cleanup(func() { defaultDeps.Exec = origExec })
 
 	mock := &MockExecRunner{
 		Result: CommandResult{Stdout: "mocked"},
@@ -21,10 +21,10 @@ func TestInstallExecMock_SetsGlobal(t *testing.T) {
 	t.Run("subtest", func(t *testing.T) {
 		installExecMock(t, mock)
 
-		// The global execCommand should now route through the mock.
-		result := execCommand(".", "echo", "hello")
+		// defaultDeps.Exec should now route through the mock.
+		result := defaultDeps.Exec.Run(".", "echo", "hello")
 		if result.Stdout != "mocked" {
-			t.Errorf("execCommand stdout = %q, want %q", result.Stdout, "mocked")
+			t.Errorf("defaultDeps.Exec.Run stdout = %q, want %q", result.Stdout, "mocked")
 		}
 		if len(mock.Calls) != 1 {
 			t.Fatalf("expected 1 call, got %d", len(mock.Calls))
@@ -39,21 +39,20 @@ func TestInstallExecMock_SetsGlobal(t *testing.T) {
 		t.Fatal("subtest did not run")
 	}
 
-	// After the sub-test's cleanup, execCommand should be restored.
-	// We can't easily test the exact function pointer, but we can verify
-	// the mock is no longer called.
+	// After the sub-test's cleanup, defaultDeps.Exec should be restored.
+	// Verify the mock is no longer called.
 	mock.Calls = nil
-	_ = execCommand(".", "true")
+	_ = defaultDeps.Exec.Run(".", "true")
 	if len(mock.Calls) != 0 {
-		t.Error("execCommand still routes to mock after cleanup")
+		t.Error("defaultDeps.Exec still routes to mock after cleanup")
 	}
 }
 
 // --- installLookPathMock tests ---
 
-func TestInstallLookPathMock_SetsGlobal(t *testing.T) {
-	origLookPath := lookPath
-	t.Cleanup(func() { lookPath = origLookPath })
+func TestInstallLookPathMock_SwapsDepsLookPath(t *testing.T) {
+	origLookPath := defaultDeps.LookPath
+	t.Cleanup(func() { defaultDeps.LookPath = origLookPath })
 
 	called := false
 	mockFn := func(file string) (string, error) {
@@ -64,29 +63,29 @@ func TestInstallLookPathMock_SetsGlobal(t *testing.T) {
 	t.Run("subtest", func(t *testing.T) {
 		installLookPathMock(t, mockFn)
 
-		path, err := lookPath("git")
+		path, err := defaultDeps.LookPath("git")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if path != "/mock/bin/git" {
-			t.Errorf("lookPath = %q, want %q", path, "/mock/bin/git")
+			t.Errorf("defaultDeps.LookPath = %q, want %q", path, "/mock/bin/git")
 		}
 		if !called {
 			t.Error("mock function was not called")
 		}
 	})
 
-	// After cleanup, lookPath should be restored to original.
+	// After cleanup, defaultDeps.LookPath should be restored to original.
 	called = false
-	_, _ = lookPath("git")
+	_, _ = defaultDeps.LookPath("git")
 	if called {
-		t.Error("lookPath still routes to mock after cleanup")
+		t.Error("defaultDeps.LookPath still routes to mock after cleanup")
 	}
 }
 
 func TestInstallLookPathMock_ErrorCase(t *testing.T) {
-	origLookPath := lookPath
-	t.Cleanup(func() { lookPath = origLookPath })
+	origLookPath := defaultDeps.LookPath
+	t.Cleanup(func() { defaultDeps.LookPath = origLookPath })
 
 	wantErr := fmt.Errorf("not found")
 	mockFn := func(file string) (string, error) {
@@ -95,17 +94,17 @@ func TestInstallLookPathMock_ErrorCase(t *testing.T) {
 
 	installLookPathMock(t, mockFn)
 
-	_, err := lookPath("nonexistent")
+	_, err := defaultDeps.LookPath("nonexistent")
 	if err != wantErr {
-		t.Errorf("lookPath error = %v, want %v", err, wantErr)
+		t.Errorf("defaultDeps.LookPath error = %v, want %v", err, wantErr)
 	}
 }
 
 // --- installExecContextMock tests ---
 
-func TestInstallExecContextMock_SetsGlobal(t *testing.T) {
-	origExecCommandContext := execCommandContext
-	t.Cleanup(func() { execCommandContext = origExecCommandContext })
+func TestInstallExecContextMock_SwapsDepsExecCtx(t *testing.T) {
+	origExecCtx := defaultDeps.ExecCtx
+	t.Cleanup(func() { defaultDeps.ExecCtx = origExecCtx })
 
 	called := false
 	mockFn := func(ctx context.Context, dir, name string, args ...string) CommandResult {
@@ -116,28 +115,26 @@ func TestInstallExecContextMock_SetsGlobal(t *testing.T) {
 	t.Run("subtest", func(t *testing.T) {
 		installExecContextMock(t, mockFn)
 
-		result := execCommandContext(context.Background(), ".", "op", "read", "foo")
+		result := defaultDeps.ExecCtx.Run(context.Background(), ".", "op", "read", "foo")
 		if result.Stdout != "ctx-mocked" {
-			t.Errorf("execCommandContext stdout = %q, want %q", result.Stdout, "ctx-mocked")
+			t.Errorf("defaultDeps.ExecCtx.Run stdout = %q, want %q", result.Stdout, "ctx-mocked")
 		}
 		if !called {
 			t.Error("mock function was not called")
 		}
 	})
 
-	// After cleanup, the global should be restored.
+	// After cleanup, the ExecCtx should be restored.
 	called = false
-	// We can't actually call the original (it runs a real command),
-	// so just verify the function pointer changed.
-	_ = execCommandContext
+	_ = defaultDeps.ExecCtx
 	if called {
-		t.Error("execCommandContext still routes to mock after cleanup")
+		t.Error("defaultDeps.ExecCtx still routes to mock after cleanup")
 	}
 }
 
 func TestInstallExecContextMock_ReceivesArgs(t *testing.T) {
-	origExecCommandContext := execCommandContext
-	t.Cleanup(func() { execCommandContext = origExecCommandContext })
+	origExecCtx := defaultDeps.ExecCtx
+	t.Cleanup(func() { defaultDeps.ExecCtx = origExecCtx })
 
 	var capturedDir, capturedName string
 	var capturedArgs []string
@@ -154,7 +151,7 @@ func TestInstallExecContextMock_ReceivesArgs(t *testing.T) {
 	installExecContextMock(t, mockFn)
 
 	ctx := context.WithValue(context.Background(), depsKey, "test-marker")
-	execCommandContext(ctx, "/some/dir", "op", "read", "secret-name")
+	defaultDeps.ExecCtx.Run(ctx, "/some/dir", "op", "read", "secret-name")
 
 	if capturedCtx != ctx {
 		t.Error("context was not passed through")
@@ -251,6 +248,270 @@ func TestDefaultExecContextRunner_ImplementsInterface(t *testing.T) {
 	var _ ExecContextRunner = defaultExecContextRunner{}
 }
 
+// --- CommandMock.Run() implements ExecRunner ---
+
+func TestCommandMock_Run_ImplementsExecRunner(t *testing.T) {
+	// Compile-time check that *CommandMock satisfies ExecRunner.
+	var _ ExecRunner = (*CommandMock)(nil)
+}
+
+func TestCommandMock_Run_DelegatesToExec(t *testing.T) {
+	mock := NewCommandMock(t, []CommandStub{
+		{Name: "echo", Stdout: "hello"},
+	})
+
+	result := mock.Run("/tmp", "echo", "hello")
+
+	if result.Stdout != "hello" {
+		t.Errorf("Run stdout = %q, want %q", result.Stdout, "hello")
+	}
+	calls := mock.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(calls))
+	}
+	if calls[0].Name != "echo" {
+		t.Errorf("call name = %q, want %q", calls[0].Name, "echo")
+	}
+	if calls[0].Dir != "/tmp" {
+		t.Errorf("call dir = %q, want %q", calls[0].Dir, "/tmp")
+	}
+}
+
+// --- FlexibleCommandMock.Run() implements ExecRunner ---
+
+func TestFlexibleCommandMock_Run_ImplementsExecRunner(t *testing.T) {
+	// Compile-time check that *FlexibleCommandMock satisfies ExecRunner.
+	var _ ExecRunner = (*FlexibleCommandMock)(nil)
+}
+
+func TestFlexibleCommandMock_Run_DelegatesToExec(t *testing.T) {
+	mock := NewFlexibleCommandMock(t)
+	mock.AddStub("git", []string{"status"}, CommandResult{Stdout: "clean"})
+
+	result := mock.Run("/repo", "git", "status")
+
+	if result.Stdout != "clean" {
+		t.Errorf("Run stdout = %q, want %q", result.Stdout, "clean")
+	}
+	calls := mock.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(calls))
+	}
+	if calls[0].Name != "git" {
+		t.Errorf("call name = %q, want %q", calls[0].Name, "git")
+	}
+}
+
+// --- CommandMock.Install() swaps defaultDeps.Exec ---
+
+func TestCommandMock_Install_SwapsDefaultDepsExec(t *testing.T) {
+	origExec := defaultDeps.Exec
+	t.Cleanup(func() { defaultDeps.Exec = origExec })
+
+	var calledDuringSubtest bool
+	t.Run("subtest", func(t *testing.T) {
+		mock := NewCommandMock(t, []CommandStub{
+			{Name: "echo", Stdout: "from-mock"},
+		})
+		mock.Install()
+
+		// defaultDeps.Exec should now be the CommandMock.
+		result := defaultDeps.Exec.Run(".", "echo", "hi")
+		if result.Stdout != "from-mock" {
+			t.Errorf("defaultDeps.Exec.Run stdout = %q, want %q", result.Stdout, "from-mock")
+		}
+		calledDuringSubtest = true
+	})
+
+	if !calledDuringSubtest {
+		t.Fatal("subtest did not run")
+	}
+
+	// After subtest cleanup, defaultDeps.Exec should be restored.
+	if defaultDeps.Exec == nil {
+		t.Fatal("defaultDeps.Exec is nil after cleanup")
+	}
+}
+
+// --- FlexibleCommandMock.Install() swaps defaultDeps.Exec ---
+
+func TestFlexibleCommandMock_Install_SwapsDefaultDepsExec(t *testing.T) {
+	origExec := defaultDeps.Exec
+	t.Cleanup(func() { defaultDeps.Exec = origExec })
+
+	var calledDuringSubtest bool
+	t.Run("subtest", func(t *testing.T) {
+		mock := NewFlexibleCommandMock(t)
+		mock.AddStub("ls", nil, CommandResult{Stdout: "file.txt"})
+		mock.Install()
+
+		// defaultDeps.Exec should now be the FlexibleCommandMock.
+		result := defaultDeps.Exec.Run(".", "ls", "-la")
+		if result.Stdout != "file.txt" {
+			t.Errorf("defaultDeps.Exec.Run stdout = %q, want %q", result.Stdout, "file.txt")
+		}
+		calledDuringSubtest = true
+	})
+
+	if !calledDuringSubtest {
+		t.Fatal("subtest did not run")
+	}
+}
+
+// --- defaultGitRunner.Run() delegates to defaultDeps.Exec.Run() ---
+
+func TestDefaultGitRunner_Run_DelegatesToDefaultDepsExec(t *testing.T) {
+	origExec := defaultDeps.Exec
+	t.Cleanup(func() { defaultDeps.Exec = origExec })
+
+	mock := &MockExecRunner{
+		Result: CommandResult{Stdout: "abc123\n"},
+	}
+	defaultDeps.Exec = mock
+
+	runner := defaultGitRunner{}
+	result := runner.Run("/repo", "rev-parse", "HEAD")
+
+	if result.Stdout != "abc123\n" {
+		t.Errorf("stdout = %q, want %q", result.Stdout, "abc123\n")
+	}
+	if len(mock.Calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(mock.Calls))
+	}
+	// defaultGitRunner.Run() should prepend "git" as the command name.
+	if mock.Calls[0].Name != "git" {
+		t.Errorf("call name = %q, want %q", mock.Calls[0].Name, "git")
+	}
+	if mock.Calls[0].Dir != "/repo" {
+		t.Errorf("call dir = %q, want %q", mock.Calls[0].Dir, "/repo")
+	}
+	if !slicesEqual(mock.Calls[0].Args, []string{"rev-parse", "HEAD"}) {
+		t.Errorf("call args = %v, want [rev-parse HEAD]", mock.Calls[0].Args)
+	}
+}
+
+// --- defaultBDRunnerImpl.Run() delegates to defaultDeps.Exec.Run() ---
+
+func TestDefaultBDRunnerImpl_Run_DelegatesToDefaultDepsExec(t *testing.T) {
+	origExec := defaultDeps.Exec
+	t.Cleanup(func() { defaultDeps.Exec = origExec })
+
+	mock := &MockExecRunner{
+		Result: CommandResult{Stdout: "bd-output"},
+	}
+	defaultDeps.Exec = mock
+
+	runner := defaultBDRunnerImpl{}
+	result := runner.Run("/work", "list", "--json")
+
+	if result.Stdout != "bd-output" {
+		t.Errorf("stdout = %q, want %q", result.Stdout, "bd-output")
+	}
+	if len(mock.Calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(mock.Calls))
+	}
+	// defaultBDRunnerImpl.Run() should prepend "bd" as the command name.
+	if mock.Calls[0].Name != "bd" {
+		t.Errorf("call name = %q, want %q", mock.Calls[0].Name, "bd")
+	}
+	if mock.Calls[0].Dir != "/work" {
+		t.Errorf("call dir = %q, want %q", mock.Calls[0].Dir, "/work")
+	}
+	if !slicesEqual(mock.Calls[0].Args, []string{"list", "--json"}) {
+		t.Errorf("call args = %v, want [list --json]", mock.Calls[0].Args)
+	}
+}
+
+// --- GetDeps(nil) returns the defaultDeps singleton (not a fresh DefaultDeps()) ---
+
+func TestGetDeps_NilCmd_ReturnsSingleton(t *testing.T) {
+	// GetDeps(nil) must return the exact same pointer as the package-level
+	// defaultDeps, so that test-time swaps (e.g., installExecMock) are visible.
+	got := GetDeps(nil)
+	if got != defaultDeps {
+		t.Error("GetDeps(nil) did not return the defaultDeps singleton pointer")
+	}
+}
+
+// --- gitOutputMockRunner.Run() delegates to defaultDeps.Exec ---
+
+func TestGitOutputMockRunner_Run_DelegatesToDefaultDepsExec(t *testing.T) {
+	origExec := defaultDeps.Exec
+	t.Cleanup(func() { defaultDeps.Exec = origExec })
+
+	execMock := &MockExecRunner{
+		Result: CommandResult{Stdout: "mock-git-output"},
+	}
+	defaultDeps.Exec = execMock
+
+	runner := &gitOutputMockRunner{
+		outputFn: func(dir string, args ...string) error { return nil },
+	}
+
+	result := runner.Run("/repo", "log", "--oneline")
+
+	if result.Stdout != "mock-git-output" {
+		t.Errorf("stdout = %q, want %q", result.Stdout, "mock-git-output")
+	}
+	if len(execMock.Calls) != 1 {
+		t.Fatalf("expected 1 call to defaultDeps.Exec, got %d", len(execMock.Calls))
+	}
+	if execMock.Calls[0].Name != "git" {
+		t.Errorf("call name = %q, want %q", execMock.Calls[0].Name, "git")
+	}
+	if !slicesEqual(execMock.Calls[0].Args, []string{"log", "--oneline"}) {
+		t.Errorf("call args = %v, want [log --oneline]", execMock.Calls[0].Args)
+	}
+}
+
+// --- defaultExecRunner does not recurse through defaultDeps ---
+
+func TestDefaultExecRunner_ImplementsExecRunner(t *testing.T) {
+	// Compile-time check that defaultExecRunner satisfies ExecRunner.
+	var _ ExecRunner = defaultExecRunner{}
+}
+
+// --- funcExecContextRunner correctly delegates ---
+
+func TestFuncExecContextRunner_DelegatesToFunction(t *testing.T) {
+	var capturedCtx context.Context
+	var capturedDir, capturedName string
+	var capturedArgs []string
+
+	fn := func(ctx context.Context, dir, name string, args ...string) CommandResult {
+		capturedCtx = ctx
+		capturedDir = dir
+		capturedName = name
+		capturedArgs = args
+		return CommandResult{Stdout: "func-result"}
+	}
+
+	runner := &funcExecContextRunner{fn: fn}
+	ctx := context.WithValue(context.Background(), depsKey, "marker")
+	result := runner.Run(ctx, "/dir", "op", "read", "secret")
+
+	if result.Stdout != "func-result" {
+		t.Errorf("stdout = %q, want %q", result.Stdout, "func-result")
+	}
+	if capturedCtx != ctx {
+		t.Error("context was not passed through")
+	}
+	if capturedDir != "/dir" {
+		t.Errorf("dir = %q, want %q", capturedDir, "/dir")
+	}
+	if capturedName != "op" {
+		t.Errorf("name = %q, want %q", capturedName, "op")
+	}
+	if !slicesEqual(capturedArgs, []string{"read", "secret"}) {
+		t.Errorf("args = %v, want [read secret]", capturedArgs)
+	}
+}
+
+func TestFuncExecContextRunner_ImplementsExecContextRunner(t *testing.T) {
+	// Compile-time check that *funcExecContextRunner satisfies ExecContextRunner.
+	var _ ExecContextRunner = (*funcExecContextRunner)(nil)
+}
+
 // --- NewTestDeps wiring for new fields ---
 
 func TestNewTestDeps_LookPathField(t *testing.T) {
@@ -295,9 +556,9 @@ func TestNewTestDeps_ExecCtxField(t *testing.T) {
 
 // --- installGitOutputMock tests ---
 
-func TestInstallGitOutputMock_SetsGlobalAndVerifies(t *testing.T) {
-	origRunGitWithOutput := runGitWithOutputFunc
-	t.Cleanup(func() { runGitWithOutputFunc = origRunGitWithOutput })
+func TestInstallGitOutputMock_SwapsDepsGitAndVerifies(t *testing.T) {
+	origGit := defaultDeps.Git
+	t.Cleanup(func() { defaultDeps.Git = origGit })
 
 	stubs := []OutputCommandStub{
 		{Args: []string{"fetch", "origin"}, Err: nil},
@@ -307,12 +568,12 @@ func TestInstallGitOutputMock_SetsGlobalAndVerifies(t *testing.T) {
 	t.Run("subtest", func(t *testing.T) {
 		installGitOutputMock(t, mock)
 
-		err := runGitWithOutputFunc("/repo", "fetch", "origin")
+		err := defaultDeps.Git.RunWithOutput("/repo", "fetch", "origin")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
 
-	// After the subtest, the global should be restored and Verify should have run.
+	// After the subtest, defaultDeps.Git should be restored and Verify should have run.
 	// The mock consumed exactly 1 of 1 stubs, so Verify passes silently.
 }

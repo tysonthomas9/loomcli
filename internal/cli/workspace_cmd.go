@@ -270,7 +270,7 @@ func runWorkspaceCreate(cmd *cobra.Command, args []string) {
 	}
 
 	// Run bd init in workspace directory (best-effort)
-	bdResult := execCommand(wsDir, "bd", "init")
+	bdResult := defaultDeps.Exec.Run(wsDir, "bd", "init")
 	if bdResult.Err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: bd init failed in workspace (non-fatal): %s\n", bdResult.Stderr)
 	}

@@ -159,7 +159,7 @@ func runInitWorkspace(_ *cobra.Command, _ []string) {
 
 func initBeadsInWorkspace(wsPath string) {
 	fmt.Printf("→ Initializing beads in %s...\n", wsPath)
-	result := execCommand(wsPath, "bd", "init")
+	result := defaultDeps.Exec.Run(wsPath, "bd", "init")
 	if result.Err != nil {
 		fmt.Fprintf(os.Stderr, "✗ Failed to initialize beads: %s\n", result.Stderr)
 		return

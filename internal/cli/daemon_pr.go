@@ -22,7 +22,7 @@ var (
 
 func defaultGhAvailable() bool {
 	ghOnce.Do(func() {
-		result := execCommand("", "gh", "--version")
+		result := defaultDeps.Exec.Run("", "gh", "--version")
 		ghInstalled = result.Err == nil
 	})
 	return ghInstalled
@@ -38,7 +38,7 @@ func resetGhAvailableCache() {
 // remoteBranchPushed checks if a branch exists on the remote by querying
 // the remote directly (not local refs). Returns true if the branch has been pushed.
 func remoteBranchPushed(dir, branch string) bool {
-	result := execCommand(dir, "git", "ls-remote", "--heads", "origin", branch)
+	result := defaultDeps.Exec.Run(dir, "git", "ls-remote", "--heads", "origin", branch)
 	if result.Err != nil {
 		return false
 	}
@@ -48,7 +48,7 @@ func remoteBranchPushed(dir, branch string) bool {
 // getOpenPRForBranch checks if an open PR exists for the given branch.
 // Returns the PR URL if found, empty string if no open PR exists.
 func getOpenPRForBranch(dir, branch string) (string, error) {
-	result := execCommand(dir, "gh", "pr", "list", "--head", branch, "--state", "open", "--json", "url", "--limit", "1")
+	result := defaultDeps.Exec.Run(dir, "gh", "pr", "list", "--head", branch, "--state", "open", "--json", "url", "--limit", "1")
 	if result.Err != nil {
 		return "", fmt.Errorf("gh pr list failed: %w", result.Err)
 	}
@@ -142,7 +142,7 @@ func createEpicPR(dir, epicID, branch string, info *epicPRInfo) (string, error) 
 	title := fmt.Sprintf("%s (%s)", info.Title, epicID)
 	body := buildPRBody(info)
 
-	result := execCommand(dir, "gh", "pr", "create",
+	result := defaultDeps.Exec.Run(dir, "gh", "pr", "create",
 		"--base", GetDefaultBranch(),
 		"--head", branch,
 		"--title", title,

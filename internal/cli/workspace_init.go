@@ -76,7 +76,7 @@ func ensureDaemonForWorkspace(ctx context.Context, wsDir string, timeout time.Du
 	if _, err := os.Stat(filepath.Join(wsDir, ".git")); err != nil {
 		args = append(args, "--local")
 	}
-	result := execCommand(wsDir, "bd", args...)
+	result := defaultDeps.Exec.Run(wsDir, "bd", args...)
 	if result.Err != nil {
 		// bd daemon start returns non-zero when already running — proceed to poll anyway
 		slog.Warn("bd daemon start returned error, will poll for readiness",
@@ -95,7 +95,7 @@ func ensureDaemonForWorkspace(ctx context.Context, wsDir string, timeout time.Du
 		case <-deadlineTimer.C:
 			return fmt.Errorf("daemon in %s did not become ready within %s", wsDir, timeout)
 		case <-ticker.C:
-			check := execCommand(wsDir, "bd", "daemon", "status", "--json")
+			check := defaultDeps.Exec.Run(wsDir, "bd", "daemon", "status", "--json")
 			if check.Err == nil && strings.Contains(check.Stdout, `"status":"running"`) {
 				slog.Info("bd daemon started for workspace", "path", wsDir)
 				return nil
@@ -112,7 +112,7 @@ func stopDaemonForWorkspace(wsDir string) {
 	if wsDir == "" {
 		return
 	}
-	result := execCommand(wsDir, "bd", "daemon", "stop")
+	result := defaultDeps.Exec.Run(wsDir, "bd", "daemon", "stop")
 	if result.Err != nil {
 		slog.Debug("stopDaemonForWorkspace: bd daemon stop returned error (expected if not running)",
 			"path", wsDir, "err", result.Err)

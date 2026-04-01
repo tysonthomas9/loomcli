@@ -140,15 +140,12 @@ func (b *OnePasswordBackend) Resolve(name string) (string, bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	result := execCommandContext(ctx, "", "op", "read", name)
+	result := defaultDeps.ExecCtx.Run(ctx, "", "op", "read", name)
 	if result.Err != nil {
 		return "", false, fmt.Errorf("op read %s: %s", redactOpURI(name), strings.TrimSpace(result.Stderr))
 	}
 	return strings.TrimSpace(result.Stdout), true, nil
 }
-
-// execCommandContext executes a command with context support (swappable for tests).
-var execCommandContext = defaultExecCommandContext
 
 func defaultExecCommandContext(ctx context.Context, dir, name string, args ...string) CommandResult {
 	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec // G204 — caller controls command name

@@ -40,12 +40,6 @@ func RunGitCommand(dir string, args ...string) (string, error) {
 	return result.Stdout, nil
 }
 
-// outputCommandExecutor is the function type for executing commands with streaming output
-type outputCommandExecutor func(dir string, args ...string) error
-
-// runGitWithOutputFunc is the package-level executor (swappable for tests)
-var runGitWithOutputFunc outputCommandExecutor = defaultRunGitWithOutput
-
 func defaultRunGitWithOutput(dir string, args ...string) error {
 	cmd := exec.Command("git", args...) //nolint:gosec // G204 — args from internal callers
 	cmd.Dir = dir

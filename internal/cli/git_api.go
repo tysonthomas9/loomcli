@@ -230,7 +230,7 @@ func CreatePRResult(repoPath, sourceBranch, targetBranch, remote string) (*PRRes
 
 	title, body := generatePRInfo(repoPath, r, targetBranch, sourceBranch)
 
-	result := execCommand(repoPath, "gh", "pr", "create",
+	result := defaultDeps.Exec.Run(repoPath, "gh", "pr", "create",
 		"--base", targetBranch,
 		"--head", sourceBranch,
 		"--title", title,

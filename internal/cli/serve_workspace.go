@@ -292,7 +292,7 @@ func createEmptyWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir, b
 	}
 
 	// bd init (best-effort)
-	_ = execCommand(wsDir, "bd", "init")
+	_ = defaultDeps.Exec.Run(wsDir, "bd", "init")
 
 	// Write default loom.yaml with agents (best-effort; non-fatal)
 	if err := writeLoomYaml(wsDir); err != nil {
@@ -313,7 +313,7 @@ func createEmptyWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir, b
 	// Start bd daemon for the workspace asynchronously (best-effort; non-fatal).
 	// Uses context.Background() because the request context is cancelled when the handler returns.
 	timeout := cfg.Daemon.GetStartupTimeout(defaultDaemonStartupTimeout)
-	go func() {
+	go func() { //nolint:gosec // G118 — intentional: daemon outlives request
 		if err := ensureDaemonForWorkspace(context.Background(), wsDir, timeout); err != nil {
 			slog.Warn("failed to start daemon for workspace", "workspace", wsName, "err", err)
 		}
@@ -399,7 +399,7 @@ func createCloneWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir st
 	}
 
 	// bd init (best-effort)
-	_ = execCommand(wsDir, "bd", "init")
+	_ = defaultDeps.Exec.Run(wsDir, "bd", "init")
 
 	// Write default loom.yaml with agents (best-effort; non-fatal)
 	if err := writeLoomYaml(wsDir); err != nil {
@@ -420,7 +420,7 @@ func createCloneWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir st
 	// Start bd daemon for the workspace asynchronously (best-effort; non-fatal).
 	// Uses context.Background() because the request context is cancelled when the handler returns.
 	timeout := cfg.Daemon.GetStartupTimeout(defaultDaemonStartupTimeout)
-	go func() {
+	go func() { //nolint:gosec // G118 — intentional: daemon outlives request
 		if err := ensureDaemonForWorkspace(context.Background(), wsDir, timeout); err != nil {
 			slog.Warn("failed to start daemon for workspace", "workspace", wsName, "err", err)
 		}

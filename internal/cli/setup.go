@@ -117,7 +117,7 @@ func stepDetectBackends() string {
 	// Detect available backends
 	var available []string
 	for _, name := range knownBackends {
-		if _, err := lookPath(name); err == nil {
+		if _, err := defaultDeps.LookPath(name); err == nil {
 			available = append(available, name)
 			fmt.Printf("  [available] %s\n", name)
 		} else {

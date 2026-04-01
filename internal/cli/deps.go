@@ -69,17 +69,17 @@ type Deps struct {
 type defaultGitRunner struct{}
 
 func (defaultGitRunner) Run(dir string, args ...string) CommandResult {
-	return execCommand(dir, "git", args...)
+	return defaultDeps.Exec.Run(dir, "git", args...)
 }
 
 func (defaultGitRunner) RunWithOutput(dir string, args ...string) error {
-	return runGitWithOutputFunc(dir, args...)
+	return defaultRunGitWithOutput(dir, args...)
 }
 
 type defaultExecRunner struct{}
 
 func (defaultExecRunner) Run(dir, name string, args ...string) CommandResult {
-	return execCommand(dir, name, args...)
+	return defaultExecCommand(dir, name, args...)
 }
 
 type defaultFileSystem struct{}
@@ -118,7 +118,7 @@ func (registryAgentInvoker) InvokeNonInteractive(workDir, prompt, agentName stri
 type defaultExecContextRunner struct{}
 
 func (defaultExecContextRunner) Run(ctx context.Context, dir, name string, args ...string) CommandResult {
-	return execCommandContext(ctx, dir, name, args...)
+	return defaultExecCommandContext(ctx, dir, name, args...)
 }
 
 // DefaultDeps returns a Deps populated with real (production) implementations.
@@ -142,7 +142,7 @@ func DefaultDeps() *Deps {
 type defaultBDRunnerImpl struct{}
 
 func (defaultBDRunnerImpl) Run(dir string, args ...string) CommandResult {
-	return execCommand(dir, "bd", args...)
+	return defaultDeps.Exec.Run(dir, "bd", args...)
 }
 
 // defaultDeps is the package-level Deps instance used by backward-compatible
@@ -162,17 +162,18 @@ func WithDeps(ctx context.Context, d *Deps) context.Context {
 }
 
 // GetDeps extracts the *Deps from a cobra command's context.
-// If none is set, it returns DefaultDeps() so callers never receive nil.
+// If none is set, it returns defaultDeps (the package singleton) so that
+// test-time swaps via installExecMock/etc. are visible to all callers.
 func GetDeps(cmd *cobra.Command) *Deps {
 	if cmd == nil {
-		return DefaultDeps()
+		return defaultDeps
 	}
 	ctx := cmd.Context()
 	if ctx == nil {
-		return DefaultDeps()
+		return defaultDeps
 	}
 	if d, ok := ctx.Value(depsKey).(*Deps); ok && d != nil {
 		return d
 	}
-	return DefaultDeps()
+	return defaultDeps
 }
