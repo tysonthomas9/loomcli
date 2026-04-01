@@ -10,6 +10,8 @@
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist",
     "generate-secret": "node --input-type=commonjs -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"",
+    "test": "node --experimental-test-module-mocks --import tsx --test 'src/**/*.test.ts'",
+    "test:security": "node --experimental-test-module-mocks --import tsx --test 'src/__tests__/security-e2e.test.ts'",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio"

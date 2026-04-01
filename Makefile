@@ -97,6 +97,16 @@ test-e2e-integration:
 	@echo "Running Playwright integration e2e tests..."
 	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 LOOM_LOCAL_SERVER=1 npx playwright test --project=integration
 
+# Run auth service unit + security tests
+test-auth-service:
+	@echo "Running auth service tests..."
+	@cd services/auth && node --experimental-test-module-mocks --import tsx --test 'src/**/*.test.ts'
+
+# Run full-stack auth E2E smoke test (requires docker)
+test-auth-e2e:
+	@echo "Running full-stack auth E2E smoke test..."
+	@bash e2e/auth/run_test.sh
+
 # Install loom to GOPATH/bin
 install: frontend
 	@echo "Installing loom to $$(go env GOPATH)/bin..."
