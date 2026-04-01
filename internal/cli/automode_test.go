@@ -1440,10 +1440,8 @@ func setupLockFile(t *testing.T, dir string) {
 
 func TestRunAutoModeLoop_ShutdownImmediately(t *testing.T) {
 	// Save and restore mocks
-	oldExec := execCommand
 	oldClaude := claudeNonInteractiveInvoker
 	t.Cleanup(func() {
-		execCommand = oldExec
 		claudeNonInteractiveInvoker = oldClaude
 	})
 
@@ -1452,13 +1450,13 @@ func TestRunAutoModeLoop_ShutdownImmediately(t *testing.T) {
 	setupLockFile(t, tmpDir)
 
 	// Mock bd ready to return tasks (so loop would continue without shutdown)
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{
 			Stdout: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Available task", Status: "open", Design: "Has design"},
 			}),
 		}
-	}
+	}})
 
 	// Track if Claude was invoked
 	claudeInvoked := false
@@ -1502,10 +1500,8 @@ func TestRunAutoModeLoop_ShutdownImmediately(t *testing.T) {
 }
 
 func TestRunAutoModeLoop_MaxTasksLimit(t *testing.T) {
-	oldExec := execCommand
 	oldClaude := claudeNonInteractiveInvoker
 	t.Cleanup(func() {
-		execCommand = oldExec
 		claudeNonInteractiveInvoker = oldClaude
 	})
 
@@ -1513,13 +1509,13 @@ func TestRunAutoModeLoop_MaxTasksLimit(t *testing.T) {
 	setupLockFile(t, tmpDir)
 
 	// Mock bd ready to always return tasks
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{
 			Stdout: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
 			}),
 		}
-	}
+	}})
 
 	// Track Claude invocations
 	claudeInvocations := 0
@@ -1571,23 +1567,21 @@ func TestRunAutoModeLoop_WithoutTmux(t *testing.T) {
 		t.Fatal("IsTmuxAvailable should be false")
 	}
 
-	oldExec := execCommand
 	oldClaude := claudeNonInteractiveInvoker
 	t.Cleanup(func() {
-		execCommand = oldExec
 		claudeNonInteractiveInvoker = oldClaude
 	})
 
 	tmpDir := t.TempDir()
 	setupLockFile(t, tmpDir)
 
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{
 			Stdout: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
 			}),
 		}
-	}
+	}})
 
 	claudeInvocations := 0
 	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
@@ -1631,10 +1625,8 @@ func TestRunAutoModeLoop_GracefulShutdownNoTasks(t *testing.T) {
 	// This test verifies graceful shutdown when no tasks are available.
 	// Note: Testing actual IdleTimeout would require waiting 1+ minutes,
 	// so we test the shutdown-during-idle path instead.
-	oldExec := execCommand
 	oldClaude := claudeNonInteractiveInvoker
 	t.Cleanup(func() {
-		execCommand = oldExec
 		claudeNonInteractiveInvoker = oldClaude
 	})
 
@@ -1642,9 +1634,9 @@ func TestRunAutoModeLoop_GracefulShutdownNoTasks(t *testing.T) {
 	setupLockFile(t, tmpDir)
 
 	// Mock bd ready to return NO tasks
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{Stdout: "[]"}
-	}
+	}})
 
 	claudeInvoked := false
 	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
@@ -1688,10 +1680,8 @@ func TestRunAutoModeLoop_GracefulShutdownNoTasks(t *testing.T) {
 }
 
 func TestRunAutoModeLoop_NoTasks(t *testing.T) {
-	oldExec := execCommand
 	oldClaude := claudeNonInteractiveInvoker
 	t.Cleanup(func() {
-		execCommand = oldExec
 		claudeNonInteractiveInvoker = oldClaude
 	})
 
@@ -1699,10 +1689,10 @@ func TestRunAutoModeLoop_NoTasks(t *testing.T) {
 	setupLockFile(t, tmpDir)
 
 	checkCount := 0
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		checkCount++
 		return CommandResult{Stdout: "[]"} // No tasks
-	}
+	}})
 
 	claudeInvoked := false
 	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
@@ -1754,10 +1744,8 @@ func TestRunAutoModeLoop_NoTasks(t *testing.T) {
 }
 
 func TestRunAutoModeLoop_TaskExecution(t *testing.T) {
-	oldExec := execCommand
 	oldClaude := claudeNonInteractiveInvoker
 	t.Cleanup(func() {
-		execCommand = oldExec
 		claudeNonInteractiveInvoker = oldClaude
 	})
 
@@ -1766,7 +1754,7 @@ func TestRunAutoModeLoop_TaskExecution(t *testing.T) {
 
 	// Return tasks initially, then no tasks to stop
 	callCount := 0
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		callCount++
 		if callCount <= 2 { // First two calls return task
 			return CommandResult{
@@ -1776,7 +1764,7 @@ func TestRunAutoModeLoop_TaskExecution(t *testing.T) {
 			}
 		}
 		return CommandResult{Stdout: "[]"} // No more tasks
-	}
+	}})
 
 	promptsReceived := []string{}
 	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
@@ -1820,10 +1808,8 @@ func TestRunAutoModeLoop_TaskExecution(t *testing.T) {
 }
 
 func TestRunAutoModeLoop_ConsecutiveErrors(t *testing.T) {
-	oldExec := execCommand
 	oldClaude := claudeNonInteractiveInvoker
 	t.Cleanup(func() {
-		execCommand = oldExec
 		claudeNonInteractiveInvoker = oldClaude
 	})
 
@@ -1831,13 +1817,13 @@ func TestRunAutoModeLoop_ConsecutiveErrors(t *testing.T) {
 	setupLockFile(t, tmpDir)
 
 	// Always return tasks
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{
 			Stdout: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
 			}),
 		}
-	}
+	}})
 
 	// Always return error
 	errorCount := 0
@@ -1879,10 +1865,8 @@ func TestRunAutoModeLoop_ConsecutiveErrors(t *testing.T) {
 }
 
 func TestRunAutoModeLoop_PlanAgentType(t *testing.T) {
-	oldExec := execCommand
 	oldClaude := claudeNonInteractiveInvoker
 	t.Cleanup(func() {
-		execCommand = oldExec
 		claudeNonInteractiveInvoker = oldClaude
 	})
 
@@ -1890,13 +1874,13 @@ func TestRunAutoModeLoop_PlanAgentType(t *testing.T) {
 	setupLockFile(t, tmpDir)
 
 	// Return a task WITHOUT design (needs planning)
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{
 			Stdout: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Needs planning", Status: "open", Design: ""},
 			}),
 		}
-	}
+	}})
 
 	var receivedPrompt string
 	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
@@ -1939,10 +1923,8 @@ func TestRunAutoModeLoop_PlanAgentType(t *testing.T) {
 }
 
 func TestRunAutoModeLoop_TaskAgentType(t *testing.T) {
-	oldExec := execCommand
 	oldClaude := claudeNonInteractiveInvoker
 	t.Cleanup(func() {
-		execCommand = oldExec
 		claudeNonInteractiveInvoker = oldClaude
 	})
 
@@ -1950,13 +1932,13 @@ func TestRunAutoModeLoop_TaskAgentType(t *testing.T) {
 	setupLockFile(t, tmpDir)
 
 	// Return a task WITH design (ready for implementation)
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{
 			Stdout: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Ready to implement", Status: "open", Design: "Design here"},
 			}),
 		}
-	}
+	}})
 
 	var receivedPrompt string
 	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
@@ -2000,23 +1982,21 @@ func TestRunAutoModeLoop_TaskAgentType(t *testing.T) {
 
 func TestRunAutoModeLoop_ErrorRecovery(t *testing.T) {
 	// Test that a successful task resets the error counter
-	oldExec := execCommand
 	oldClaude := claudeNonInteractiveInvoker
 	t.Cleanup(func() {
-		execCommand = oldExec
 		claudeNonInteractiveInvoker = oldClaude
 	})
 
 	tmpDir := t.TempDir()
 	setupLockFile(t, tmpDir)
 
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{
 			Stdout: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
 			}),
 		}
-	}
+	}})
 
 	// Pattern: error, error, success, error, error, error (should exit on 6th)
 	callNum := 0
@@ -2064,10 +2044,8 @@ func TestRunAutoModeLoop_ErrorRecovery(t *testing.T) {
 }
 
 func TestRunAutoModeLoop_BdCommandError(t *testing.T) {
-	oldExec := execCommand
 	oldClaude := claudeNonInteractiveInvoker
 	t.Cleanup(func() {
-		execCommand = oldExec
 		claudeNonInteractiveInvoker = oldClaude
 	})
 
@@ -2076,10 +2054,10 @@ func TestRunAutoModeLoop_BdCommandError(t *testing.T) {
 
 	// bd ready returns an error
 	bdErrorCount := 0
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		bdErrorCount++
 		return CommandResult{Err: fmt.Errorf("bd error")}
-	}
+	}})
 
 	claudeInvoked := false
 	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
@@ -2129,23 +2107,21 @@ func TestRunAutoModeLoop_BdCommandError(t *testing.T) {
 
 func TestRunAutoModeLoop_ShutdownDuringBackoff(t *testing.T) {
 	// Test that shutdown is respected during the error backoff sleep
-	oldExec := execCommand
 	oldClaude := claudeNonInteractiveInvoker
 	t.Cleanup(func() {
-		execCommand = oldExec
 		claudeNonInteractiveInvoker = oldClaude
 	})
 
 	tmpDir := t.TempDir()
 	setupLockFile(t, tmpDir)
 
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{
 			Stdout: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
 			}),
 		}
-	}
+	}})
 
 	claudeInvocations := 0
 	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
@@ -2477,13 +2453,9 @@ func TestHasAnyAvailableTasks(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Save and restore execCommand
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
-			execCommand = func(dir, name string, args ...string) CommandResult {
+			installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 				return CommandResult{Stdout: tt.bdOutput, Err: tt.bdErr}
-			}
+			}})
 
 			got, err := HasAnyAvailableTasks("", "")
 			if (err != nil) != tt.wantErr {
@@ -2569,10 +2541,8 @@ func TestAutoModeOptions_CustomFields(t *testing.T) {
 // ============================================================================
 
 func TestRunAutoModeLoop_CustomPromptGen(t *testing.T) {
-	oldExec := execCommand
 	oldClaude := claudeNonInteractiveInvoker
 	t.Cleanup(func() {
-		execCommand = oldExec
 		claudeNonInteractiveInvoker = oldClaude
 	})
 
@@ -2580,9 +2550,9 @@ func TestRunAutoModeLoop_CustomPromptGen(t *testing.T) {
 	setupLockFile(t, tmpDir)
 
 	// execCommand should NOT be called for task checks when CustomTaskCheck is set
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{Stdout: "[]"}
-	}
+	}})
 
 	var receivedPrompt string
 	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
@@ -2637,10 +2607,8 @@ func TestRunAutoModeLoop_CustomPromptGen(t *testing.T) {
 }
 
 func TestRunAutoModeLoop_CustomFieldsFallback(t *testing.T) {
-	oldExec := execCommand
 	oldClaude := claudeNonInteractiveInvoker
 	t.Cleanup(func() {
-		execCommand = oldExec
 		claudeNonInteractiveInvoker = oldClaude
 	})
 
@@ -2648,13 +2616,13 @@ func TestRunAutoModeLoop_CustomFieldsFallback(t *testing.T) {
 	setupLockFile(t, tmpDir)
 
 	// Return a task WITH design (ready for implementation via default task check)
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{
 			Stdout: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Ready to implement", Status: "open", Design: "Design here"},
 			}),
 		}
-	}
+	}})
 
 	var receivedPrompt string
 	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
@@ -2704,10 +2672,8 @@ func TestRunAutoModeLoop_CustomFieldsFallback(t *testing.T) {
 func TestRunAutoModeLoop_CustomTaskCheckOnlyFallback(t *testing.T) {
 	// When only CustomTaskCheck is set (not CustomPromptGen), CustomTaskCheck is used
 	// for task availability, and the default AgentType-based prompt gen is used.
-	oldExec := execCommand
 	oldClaude := claudeNonInteractiveInvoker
 	t.Cleanup(func() {
-		execCommand = oldExec
 		claudeNonInteractiveInvoker = oldClaude
 	})
 
@@ -2715,13 +2681,13 @@ func TestRunAutoModeLoop_CustomTaskCheckOnlyFallback(t *testing.T) {
 	setupLockFile(t, tmpDir)
 
 	// Return tasks (needed for default HasAvailableImplementationTasks fallback)
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{
 			Stdout: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
 			}),
 		}
-	}
+	}})
 
 	var receivedPrompt string
 	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
@@ -3281,15 +3247,13 @@ func TestRunAutoModeLoop_CodexPlanAgentType(t *testing.T) {
 	}
 
 	// Mock execCommand for bd ready (return task needing planning)
-	oldExec := execCommand
-	t.Cleanup(func() { execCommand = oldExec })
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{
 			Stdout: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Needs planning", Status: "open", Design: ""},
 			}),
 		}
-	}
+	}})
 
 	tmpDir := t.TempDir()
 	setupLockFile(t, tmpDir)
@@ -3364,15 +3328,13 @@ func TestRunAutoModeLoop_CodexMaxTasks(t *testing.T) {
 		return nil
 	}
 
-	oldExec := execCommand
-	t.Cleanup(func() { execCommand = oldExec })
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{
 			Stdout: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
 			}),
 		}
-	}
+	}})
 
 	tmpDir := t.TempDir()
 	setupLockFile(t, tmpDir)
@@ -3435,15 +3397,13 @@ func TestRunAutoModeLoop_CodexConsecutiveErrors(t *testing.T) {
 		return fmt.Errorf("codex simulated error %d", errorCount)
 	}
 
-	oldExec := execCommand
-	t.Cleanup(func() { execCommand = oldExec })
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{
 			Stdout: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
 			}),
 		}
-	}
+	}})
 
 	tmpDir := t.TempDir()
 	setupLockFile(t, tmpDir)
@@ -3511,15 +3471,13 @@ func TestRunAutoModeLoop_CodexErrorRecovery(t *testing.T) {
 		return fmt.Errorf("codex error %d", callNum)
 	}
 
-	oldExec := execCommand
-	t.Cleanup(func() { execCommand = oldExec })
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{
 			Stdout: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
 			}),
 		}
-	}
+	}})
 
 	tmpDir := t.TempDir()
 	setupLockFile(t, tmpDir)
@@ -4349,10 +4307,8 @@ func TestRunAutoModeLoop_ConsecutiveNoProgress(t *testing.T) {
 	// Test that the no-progress path is entered when agent exits without claiming a task.
 	// The no-progress backoff is 30s/60s/120s which makes testing 3 full iterations slow,
 	// so we verify one iteration and then shutdown during the backoff.
-	oldExec := execCommand
 	oldClaude := claudeNonInteractiveInvoker
 	t.Cleanup(func() {
-		execCommand = oldExec
 		claudeNonInteractiveInvoker = oldClaude
 	})
 
@@ -4360,13 +4316,13 @@ func TestRunAutoModeLoop_ConsecutiveNoProgress(t *testing.T) {
 	setupLockFile(t, tmpDir)
 
 	// Always return tasks
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{
 			Stdout: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
 			}),
 		}
-	}
+	}})
 
 	// Agent succeeds but does NOT claim a task (no UpdateLockTask call)
 	shutdown := make(chan struct{})
@@ -4415,23 +4371,21 @@ func TestRunAutoModeLoop_ConsecutiveNoProgress(t *testing.T) {
 func TestRunAutoModeLoop_NoProgressCounterResetOnSuccess(t *testing.T) {
 	// Verify that claiming a task after no-progress resets the counter.
 	// We test: no-progress → success (claim) → shutdown during next no-progress backoff.
-	oldExec := execCommand
 	oldClaude := claudeNonInteractiveInvoker
 	t.Cleanup(func() {
-		execCommand = oldExec
 		claudeNonInteractiveInvoker = oldClaude
 	})
 
 	tmpDir := t.TempDir()
 	setupLockFile(t, tmpDir)
 
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{
 			Stdout: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
 			}),
 		}
-	}
+	}})
 
 	shutdown := make(chan struct{})
 	callNum := 0
@@ -4842,10 +4796,8 @@ func TestRunAutoModeTmux_TaskCheckError(t *testing.T) {
 func TestRunAutoModeLoop_LockStateTransitions(t *testing.T) {
 	// Verify UpdateLockState is called with StateIdle at loop start, StateActive
 	// before agent invocation, and StateIdle after agent completes.
-	oldExec := execCommand
 	oldClaude := claudeNonInteractiveInvoker
 	t.Cleanup(func() {
-		execCommand = oldExec
 		claudeNonInteractiveInvoker = oldClaude
 	})
 
@@ -4853,13 +4805,13 @@ func TestRunAutoModeLoop_LockStateTransitions(t *testing.T) {
 	setupLockFile(t, tmpDir)
 
 	// Always return tasks
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{
 			Stdout: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
 			}),
 		}
-	}
+	}})
 
 	// In the mock invoker: read lock file and verify State == StateActive
 	var stateBeforeAgent string
@@ -4922,23 +4874,21 @@ func TestRunAutoModeLoop_LockStateTransitions(t *testing.T) {
 func TestRunAutoModeLoop_ClearsTaskIDBeforeEachSession(t *testing.T) {
 	// Verify ClearLockTaskID is called before each agent invocation, so
 	// leftover task IDs from previous sessions don't cause false progress.
-	oldExec := execCommand
 	oldClaude := claudeNonInteractiveInvoker
 	t.Cleanup(func() {
-		execCommand = oldExec
 		claudeNonInteractiveInvoker = oldClaude
 	})
 
 	tmpDir := t.TempDir()
 	setupLockFile(t, tmpDir)
 
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{
 			Stdout: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
 			}),
 		}
-	}
+	}})
 
 	callNum := 0
 	taskIDOnEntry := make([]string, 0, 2)
@@ -5185,10 +5135,8 @@ func TestRunAutoModeLoop_ThreeConsecutiveNoProgressExits(t *testing.T) {
 		t.Skip("skipping slow test in short mode (requires ~90s for backoff waits)")
 	}
 
-	oldExec := execCommand
 	oldClaude := claudeNonInteractiveInvoker
 	t.Cleanup(func() {
-		execCommand = oldExec
 		claudeNonInteractiveInvoker = oldClaude
 	})
 
@@ -5196,13 +5144,13 @@ func TestRunAutoModeLoop_ThreeConsecutiveNoProgressExits(t *testing.T) {
 	setupLockFile(t, tmpDir)
 
 	// Always return tasks
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{
 			Stdout: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
 			}),
 		}
-	}
+	}})
 
 	// Agent succeeds but does NOT claim a task (no UpdateLockTask call)
 	claudeInvocations := 0

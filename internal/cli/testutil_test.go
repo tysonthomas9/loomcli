@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -338,6 +339,104 @@ type MockClaudeInvokerRecorder = MockAgentInvokerRecorder
 // SetupMockClaudeInvoker is a backwards-compatible alias for SetupMockAgentInvoker.
 func SetupMockClaudeInvoker(t *testing.T, returnErr error) *MockAgentInvokerRecorder {
 	return SetupMockAgentInvoker(t, returnErr)
+}
+
+// installExecMock installs a MockExecRunner as the global execCommand and
+// registers cleanup. Bridge pattern: sets the global for production code
+// that calls execCommand directly.
+func installExecMock(t *testing.T, m *MockExecRunner) {
+	t.Helper()
+	orig := execCommand
+	execCommand = m.Run
+	t.Cleanup(func() { execCommand = orig })
+}
+
+// installGitOutputMock installs an OutputCommandMock as the global
+// runGitWithOutputFunc and registers cleanup with verification.
+func installGitOutputMock(t *testing.T, m *OutputCommandMock) {
+	t.Helper()
+	orig := runGitWithOutputFunc
+	runGitWithOutputFunc = m.Exec
+	t.Cleanup(func() {
+		runGitWithOutputFunc = orig
+		m.Verify()
+	})
+}
+
+// installLookPathMock installs a mock lookPath function and registers cleanup.
+func installLookPathMock(t *testing.T, fn func(string) (string, error)) {
+	t.Helper()
+	orig := lookPath
+	lookPath = fn
+	t.Cleanup(func() { lookPath = orig })
+}
+
+// installExecContextMock installs a mock execCommandContext function and registers cleanup.
+func installExecContextMock(t *testing.T, fn func(context.Context, string, string, ...string) CommandResult) {
+	t.Helper()
+	orig := execCommandContext
+	execCommandContext = fn
+	t.Cleanup(func() { execCommandContext = orig })
+}
+
+// OutputCommandStub represents an expected output command call and its response
+type OutputCommandStub struct {
+	Dir  string   // expected directory (empty = any)
+	Args []string // expected arguments (nil = any)
+	Err  error    // response error
+}
+
+// OutputCommandMock provides a mock for output-streaming git commands
+type OutputCommandMock struct {
+	t     *testing.T
+	stubs []OutputCommandStub
+	calls []OutputCommandStub
+	idx   int
+}
+
+// NewOutputCommandMock creates a new output command mock with expected stubs
+func NewOutputCommandMock(t *testing.T, stubs []OutputCommandStub) *OutputCommandMock {
+	return &OutputCommandMock{t: t, stubs: stubs}
+}
+
+// Exec implements the outputCommandExecutor interface
+func (m *OutputCommandMock) Exec(dir string, args ...string) error {
+	call := OutputCommandStub{Dir: dir, Args: args}
+	m.calls = append(m.calls, call)
+
+	if m.idx >= len(m.stubs) {
+		m.t.Fatalf("unexpected output command call #%d: git %v in %s", m.idx+1, args, dir)
+	}
+
+	stub := m.stubs[m.idx]
+	m.idx++
+
+	// Validate command matches expectations (empty = any)
+	if stub.Dir != "" && stub.Dir != dir {
+		m.t.Errorf("call #%d: expected dir %q, got %q", m.idx, stub.Dir, dir)
+	}
+	if stub.Args != nil && !slicesEqual(stub.Args, args) {
+		m.t.Errorf("call #%d: expected args %v, got %v", m.idx, stub.Args, args)
+	}
+
+	return stub.Err
+}
+
+// Verify ensures all expected calls were made
+func (m *OutputCommandMock) Verify() {
+	if m.idx != len(m.stubs) {
+		m.t.Errorf("expected %d output command calls, got %d", len(m.stubs), m.idx)
+	}
+}
+
+// Install installs the mock and registers cleanup with t.Cleanup()
+func (m *OutputCommandMock) Install() {
+	installGitOutputMock(m.t, m)
+}
+
+// Calls returns the actual calls made to the mock
+func (m *OutputCommandMock) Calls() []OutputCommandStub {
+	return m.calls
 }
 
 // containsSubstring checks if any element in the slice contains the substring.

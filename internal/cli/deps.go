@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"os/exec"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -20,6 +21,11 @@ type GitRunner interface {
 // ExecRunner wraps arbitrary command execution.
 type ExecRunner interface {
 	Run(dir, name string, args ...string) CommandResult
+}
+
+// ExecContextRunner wraps context-aware command execution.
+type ExecContextRunner interface {
+	Run(ctx context.Context, dir, name string, args ...string) CommandResult
 }
 
 // BDRunner wraps bd (beads) CLI calls.
@@ -39,12 +45,14 @@ type FileSystem interface {
 // Deps is the central dependency-injection container for CLI commands.
 // It holds all external dependencies so they can be swapped for testing.
 type Deps struct {
-	Git     GitRunner
-	Exec    ExecRunner
-	FS      FileSystem
-	Logger  *slog.Logger
-	Clock   func() time.Time
-	Tracker IssueTracker
+	Git      GitRunner
+	Exec     ExecRunner
+	FS       FileSystem
+	Logger   *slog.Logger
+	Clock    func() time.Time
+	Tracker  IssueTracker
+	LookPath func(file string) (string, error)
+	ExecCtx  ExecContextRunner
 }
 
 // --- default implementations ---
@@ -87,16 +95,24 @@ func (defaultFileSystem) Remove(path string) error {
 	return os.Remove(path)
 }
 
+type defaultExecContextRunner struct{}
+
+func (defaultExecContextRunner) Run(ctx context.Context, dir, name string, args ...string) CommandResult {
+	return execCommandContext(ctx, dir, name, args...)
+}
+
 // DefaultDeps returns a Deps populated with real (production) implementations.
 func DefaultDeps() *Deps {
 	bdRunner := defaultBDRunnerImpl{}
 	return &Deps{
-		Git:     defaultGitRunner{},
-		Exec:    defaultExecRunner{},
-		FS:      defaultFileSystem{},
-		Logger:  slog.Default(),
-		Clock:   time.Now,
-		Tracker: newBdBackend(bdRunner, GetBeadsDir()),
+		Git:      defaultGitRunner{},
+		Exec:     defaultExecRunner{},
+		FS:       defaultFileSystem{},
+		Logger:   slog.Default(),
+		Clock:    time.Now,
+		Tracker:  newBdBackend(bdRunner, GetBeadsDir()),
+		LookPath: exec.LookPath,
+		ExecCtx:  defaultExecContextRunner{},
 	}
 }
 

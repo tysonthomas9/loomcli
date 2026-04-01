@@ -1188,10 +1188,7 @@ func TestCollectAgentStatus(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		oldExec := execCommand
-		t.Cleanup(func() { execCommand = oldExec })
-
-		execCommand = func(dir, name string, args ...string) CommandResult {
+		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			// git branch --show-current
 			if name == "git" && len(args) > 0 && args[0] == "branch" {
 				return CommandResult{Stdout: "falcon"}
@@ -1205,7 +1202,7 @@ func TestCollectAgentStatus(t *testing.T) {
 				return CommandResult{Stdout: "0\t0"}
 			}
 			return CommandResult{}
-		}
+		}})
 
 		agents, _ := collectAgentStatus(nil, "")
 
@@ -1238,10 +1235,7 @@ func TestCollectAgentStatus(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		oldExec := execCommand
-		t.Cleanup(func() { execCommand = oldExec })
-
-		execCommand = func(dir, name string, args ...string) CommandResult {
+		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			if name == "git" && len(args) > 0 && args[0] == "branch" {
 				return CommandResult{Stdout: "nova"}
 			}
@@ -1253,7 +1247,7 @@ func TestCollectAgentStatus(t *testing.T) {
 				return CommandResult{Stdout: "0\t0"}
 			}
 			return CommandResult{}
-		}
+		}})
 
 		agents, _ := collectAgentStatus(nil, "")
 
@@ -1286,10 +1280,7 @@ func TestCollectAgentStatus(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		oldExec := execCommand
-		t.Cleanup(func() { execCommand = oldExec })
-
-		execCommand = func(dir, name string, args ...string) CommandResult {
+		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			if name == "git" && len(args) > 0 && args[0] == "branch" {
 				return CommandResult{Stdout: "spark"}
 			}
@@ -1300,7 +1291,7 @@ func TestCollectAgentStatus(t *testing.T) {
 				return CommandResult{Stdout: "0\t0"}
 			}
 			return CommandResult{}
-		}
+		}})
 
 		agentTasks := map[string]TaskInfo{
 			"spark": {ID: "T-123", Status: "in_progress"},
@@ -1337,10 +1328,7 @@ func TestCollectAgentStatus(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		oldExec := execCommand
-		t.Cleanup(func() { execCommand = oldExec })
-
-		execCommand = func(dir, name string, args ...string) CommandResult {
+		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			if name == "git" && len(args) > 0 && args[0] == "branch" {
 				return CommandResult{Stdout: "flux"}
 			}
@@ -1352,7 +1340,7 @@ func TestCollectAgentStatus(t *testing.T) {
 				return CommandResult{Stdout: "3\t5"} // 3 behind, 5 ahead
 			}
 			return CommandResult{}
-		}
+		}})
 
 		agents, _ := collectAgentStatus(nil, "")
 
@@ -1400,10 +1388,7 @@ func TestCollectAgentStatus(t *testing.T) {
 			os.WriteFile(filepath.Join(wtDir, ".agent.lock"), lockData, 0644)
 		}
 
-		oldExec := execCommand
-		t.Cleanup(func() { execCommand = oldExec })
-
-		execCommand = func(dir, name string, args ...string) CommandResult {
+		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			if name == "git" && len(args) > 0 && args[0] == "branch" {
 				return CommandResult{Stdout: "test-branch"}
 			}
@@ -1418,7 +1403,7 @@ func TestCollectAgentStatus(t *testing.T) {
 				return CommandResult{Stdout: `[{"title":"Test Task","status":"in_progress"}]`}
 			}
 			return CommandResult{}
-		}
+		}})
 
 		_, taskIDToAgents := collectAgentStatus(nil, "")
 
@@ -1449,10 +1434,7 @@ func TestCollectMonitorData(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldExec := execCommand
-	t.Cleanup(func() { execCommand = oldExec })
-
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		if name == "git" && len(args) > 0 && args[0] == "branch" {
 			return CommandResult{Stdout: "test-agent"}
 		}
@@ -1463,7 +1445,7 @@ func TestCollectMonitorData(t *testing.T) {
 			return CommandResult{Stdout: "0\t0"}
 		}
 		return CommandResult{}
-	}
+	}})
 
 	mock := NewMockTracker()
 	mock.ReadyResult = []BdIssue{
@@ -1542,10 +1524,7 @@ func TestCollectMonitorDataExported(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldExec := execCommand
-	t.Cleanup(func() { execCommand = oldExec })
-
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		if name == "git" && len(args) > 0 && args[0] == "branch" {
 			return CommandResult{Stdout: "test-agent"}
 		}
@@ -1556,7 +1535,7 @@ func TestCollectMonitorDataExported(t *testing.T) {
 			return CommandResult{Stdout: "0\t0"}
 		}
 		return CommandResult{}
-	}
+	}})
 
 	mock := NewMockTracker()
 	mock.StatsResult = &BdStats{Summary: struct {
@@ -1606,10 +1585,7 @@ func TestCollectAgentStatusOnlyExported(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldExec := execCommand
-	t.Cleanup(func() { execCommand = oldExec })
-
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		if name == "git" && len(args) > 0 && args[0] == "branch" {
 			return CommandResult{Stdout: "solo"}
 		}
@@ -1620,7 +1596,7 @@ func TestCollectAgentStatusOnlyExported(t *testing.T) {
 			return CommandResult{Stdout: "0\t0"}
 		}
 		return CommandResult{}
-	}
+	}})
 
 	agents := CollectAgentStatusOnly("")
 	if len(agents) != 1 {
@@ -1656,10 +1632,7 @@ func TestBacklogAccumulatesReadyWithBlockersAndBlocked(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldExec := execCommand
-	t.Cleanup(func() { execCommand = oldExec })
-
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		if name == "git" && len(args) > 0 && args[0] == "branch" {
 			return CommandResult{Stdout: "agent1"}
 		}
@@ -1670,7 +1643,7 @@ func TestBacklogAccumulatesReadyWithBlockersAndBlocked(t *testing.T) {
 			return CommandResult{Stdout: "0\t0"}
 		}
 		return CommandResult{}
-	}
+	}})
 
 	// T-BLOCKER is unclosed (in ready output), so T-BLOCKED-READY has an unclosed blocker.
 	// T-BD-BLOCKED comes from bd blocked output.
@@ -1739,10 +1712,7 @@ func TestEpicsExcludedFromWorkQueueAndStats(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldExec := execCommand
-	t.Cleanup(func() { execCommand = oldExec })
-
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		if name == "git" && len(args) > 0 && args[0] == "branch" {
 			return CommandResult{Stdout: "agent1"}
 		}
@@ -1753,7 +1723,7 @@ func TestEpicsExcludedFromWorkQueueAndStats(t *testing.T) {
 			return CommandResult{Stdout: "0\t0"}
 		}
 		return CommandResult{}
-	}
+	}})
 
 	mock := NewMockTracker()
 	mock.ReadyResult = []BdIssue{
@@ -1820,10 +1790,7 @@ func TestRemainingDerivedFromWorkQueue(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldExec := execCommand
-	t.Cleanup(func() { execCommand = oldExec })
-
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		if name == "git" && len(args) > 0 && args[0] == "branch" {
 			return CommandResult{Stdout: "agent1"}
 		}
@@ -1834,7 +1801,7 @@ func TestRemainingDerivedFromWorkQueue(t *testing.T) {
 			return CommandResult{Stdout: "0\t0"}
 		}
 		return CommandResult{}
-	}
+	}})
 
 	mock := NewMockTracker()
 	mock.ReadyResult = []BdIssue{
@@ -1928,10 +1895,7 @@ func TestRunMonitorOneShot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldExec := execCommand
-	t.Cleanup(func() { execCommand = oldExec })
-
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		if name == "git" && len(args) > 0 && args[0] == "branch" {
 			return CommandResult{Stdout: "oneshot"}
 		}
@@ -1942,7 +1906,7 @@ func TestRunMonitorOneShot(t *testing.T) {
 			return CommandResult{Stdout: "0\t0"}
 		}
 		return CommandResult{}
-	}
+	}})
 
 	mock := NewMockTracker()
 	setDefaultTracker(mock)
@@ -2221,12 +2185,9 @@ func TestRenderAgentLineAlignment(t *testing.T) {
 }
 
 func TestGetWorktreeGitSyncStatusError(t *testing.T) {
-	oldExec := execCommand
-	t.Cleanup(func() { execCommand = oldExec })
-
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{Err: fmt.Errorf("git failed")}
-	}
+	}})
 
 	ahead, behind := getWorktreeGitSyncStatus("/fake/path", "main", "")
 	if ahead != 0 || behind != 0 {
@@ -2235,12 +2196,9 @@ func TestGetWorktreeGitSyncStatusError(t *testing.T) {
 }
 
 func TestGetWorktreeGitSyncStatusMalformed(t *testing.T) {
-	oldExec := execCommand
-	t.Cleanup(func() { execCommand = oldExec })
-
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{Stdout: "not-a-number"}
-	}
+	}})
 
 	ahead, behind := getWorktreeGitSyncStatus("/fake/path", "main", "")
 	if ahead != 0 || behind != 0 {
@@ -2249,14 +2207,11 @@ func TestGetWorktreeGitSyncStatusMalformed(t *testing.T) {
 }
 
 func TestGetWorktreeGitSyncStatusCustomBranch(t *testing.T) {
-	oldExec := execCommand
-	t.Cleanup(func() { execCommand = oldExec })
-
 	var capturedArgs []string
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		capturedArgs = args
 		return CommandResult{Stdout: "2\t4"}
-	}
+	}})
 
 	ahead, behind := getWorktreeGitSyncStatus("/fake/path", "main", "develop")
 	if ahead != 4 || behind != 2 {
@@ -2356,10 +2311,7 @@ func TestCollectAgentStatusLockFallback(t *testing.T) {
 			setDefaultTracker(mockTracker)
 			t.Cleanup(func() { setDefaultTracker(nil) })
 
-			oldExec := execCommand
-			t.Cleanup(func() { execCommand = oldExec })
-
-			execCommand = func(dir, name string, args ...string) CommandResult {
+			installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 				if name == "git" && len(args) > 0 && args[0] == "branch" {
 					return CommandResult{Stdout: "alpha"}
 				}
@@ -2370,7 +2322,7 @@ func TestCollectAgentStatusLockFallback(t *testing.T) {
 					return CommandResult{Stdout: "0\t0"}
 				}
 				return CommandResult{}
-			}
+			}})
 
 			agentTasks := map[string]TaskInfo{
 				"alpha": {ID: "T-999", Title: "Test Task", Priority: 2, Status: "in_progress"},

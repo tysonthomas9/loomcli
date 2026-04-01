@@ -171,12 +171,9 @@ func TestOnePasswordBackend_NonOpURI(t *testing.T) {
 }
 
 func TestOnePasswordBackend_Success(t *testing.T) {
-	orig := execCommandContext
-	defer func() { execCommandContext = orig }()
-
-	execCommandContext = func(_ context.Context, dir, name string, args ...string) CommandResult {
+	installExecContextMock(t, func(_ context.Context, dir, name string, args ...string) CommandResult {
 		return CommandResult{Stdout: "op-secret-value\n", Stderr: "", Err: nil}
-	}
+	})
 
 	b := &OnePasswordBackend{opAvailable: true}
 	val, found, err := b.Resolve("op://vault/item/field")
@@ -189,12 +186,9 @@ func TestOnePasswordBackend_Success(t *testing.T) {
 }
 
 func TestOnePasswordBackend_Error(t *testing.T) {
-	orig := execCommandContext
-	defer func() { execCommandContext = orig }()
-
-	execCommandContext = func(_ context.Context, dir, name string, args ...string) CommandResult {
+	installExecContextMock(t, func(_ context.Context, dir, name string, args ...string) CommandResult {
 		return CommandResult{Stdout: "", Stderr: "not signed in\n", Err: os.ErrPermission}
-	}
+	})
 
 	b := &OnePasswordBackend{opAvailable: true}
 	_, _, err := b.Resolve("op://vault/item/field")

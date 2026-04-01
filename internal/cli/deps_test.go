@@ -69,6 +69,30 @@ func (m *MockExecRunner) Run(dir, name string, args ...string) CommandResult {
 	return m.Result
 }
 
+// MockExecContextRunner records calls and returns configurable results.
+type MockExecContextRunner struct {
+	mu      sync.Mutex
+	Calls   []mockExecContextCall
+	Result  CommandResult
+	RunFunc func(ctx context.Context, dir, name string, args ...string) CommandResult
+}
+
+type mockExecContextCall struct {
+	Dir  string
+	Name string
+	Args []string
+}
+
+func (m *MockExecContextRunner) Run(ctx context.Context, dir, name string, args ...string) CommandResult {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.Calls = append(m.Calls, mockExecContextCall{Dir: dir, Name: name, Args: args})
+	if m.RunFunc != nil {
+		return m.RunFunc(ctx, dir, name, args...)
+	}
+	return m.Result
+}
+
 // MockFileSystem is an in-memory filesystem for tests.
 type MockFileSystem struct {
 	mu    sync.Mutex
@@ -138,12 +162,14 @@ func NewTestDeps(t *testing.T) (*Deps, *MockGitRunner, *MockExecRunner, *MockFil
 	fs := NewMockFileSystem()
 	tracker := NewMockTracker()
 	deps := &Deps{
-		Git:     git,
-		Exec:    execR,
-		FS:      fs,
-		Logger:  slog.Default(),
-		Tracker: tracker,
-		Clock:   func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) },
+		Git:      git,
+		Exec:     execR,
+		FS:       fs,
+		Logger:   slog.Default(),
+		Tracker:  tracker,
+		Clock:    func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) },
+		LookPath: func(file string) (string, error) { return "/usr/bin/" + file, nil },
+		ExecCtx:  &MockExecContextRunner{},
 	}
 	return deps, git, execR, fs, tracker
 }
@@ -172,6 +198,12 @@ func TestDefaultDeps_NonNilFields(t *testing.T) {
 	}
 	if d.Tracker.BackendName() != "beads" {
 		t.Errorf("Tracker.BackendName() = %q, want beads", d.Tracker.BackendName())
+	}
+	if d.LookPath == nil {
+		t.Error("LookPath is nil")
+	}
+	if d.ExecCtx == nil {
+		t.Error("ExecCtx is nil")
 	}
 }
 
@@ -454,13 +486,13 @@ func TestNewTestDeps_Returns5Tuple(t *testing.T) {
 }
 
 func TestDefaultDeps_NoBDField(t *testing.T) {
-	// Verify the Deps struct has exactly 6 fields: Git, Exec, FS, Logger, Clock, Tracker.
+	// Verify the Deps struct has exactly 8 fields: Git, Exec, FS, Logger, Clock, Tracker, LookPath, ExecCtx.
 	// This serves as a regression check that BD was removed and no new
 	// unexpected field was added. We verify by checking all fields are non-nil
 	// (which covers every field in the struct).
 	d := DefaultDeps()
 
-	// All 6 fields must be non-nil.
+	// All 8 fields must be non-nil.
 	fields := []struct {
 		name  string
 		isNil bool
@@ -471,6 +503,8 @@ func TestDefaultDeps_NoBDField(t *testing.T) {
 		{"Logger", d.Logger == nil},
 		{"Clock", d.Clock == nil},
 		{"Tracker", d.Tracker == nil},
+		{"LookPath", d.LookPath == nil},
+		{"ExecCtx", d.ExecCtx == nil},
 	}
 	for _, f := range fields {
 		if f.isNil {

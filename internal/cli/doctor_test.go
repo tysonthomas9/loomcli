@@ -13,15 +13,12 @@ import (
 
 func TestCheckGit(t *testing.T) {
 	t.Run("git found with good version", func(t *testing.T) {
-		oldExec := execCommand
-		defer func() { execCommand = oldExec }()
-
-		execCommand = func(dir, name string, args ...string) CommandResult {
+		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			if name == "git" && len(args) > 0 && args[0] == "--version" {
 				return CommandResult{Stdout: "git version 2.44.0\n"}
 			}
 			return CommandResult{Err: fmt.Errorf("unexpected: %s %v", name, args)}
-		}
+		}})
 
 		result := checkGit()
 		if result.Status != StatusPass {
@@ -33,12 +30,9 @@ func TestCheckGit(t *testing.T) {
 	})
 
 	t.Run("git not found", func(t *testing.T) {
-		oldExec := execCommand
-		defer func() { execCommand = oldExec }()
-
-		execCommand = func(dir, name string, args ...string) CommandResult {
+		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			return CommandResult{Err: fmt.Errorf("exec: not found")}
-		}
+		}})
 
 		result := checkGit()
 		if result.Status != StatusFail {
@@ -47,12 +41,9 @@ func TestCheckGit(t *testing.T) {
 	})
 
 	t.Run("git version too old", func(t *testing.T) {
-		oldExec := execCommand
-		defer func() { execCommand = oldExec }()
-
-		execCommand = func(dir, name string, args ...string) CommandResult {
+		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			return CommandResult{Stdout: "git version 2.19.3\n"}
-		}
+		}})
 
 		result := checkGit()
 		if result.Status != StatusFail {
@@ -61,12 +52,9 @@ func TestCheckGit(t *testing.T) {
 	})
 
 	t.Run("apple git version suffix", func(t *testing.T) {
-		oldExec := execCommand
-		defer func() { execCommand = oldExec }()
-
-		execCommand = func(dir, name string, args ...string) CommandResult {
+		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			return CommandResult{Stdout: "git version 2.39.3 (Apple Git-146)\n"}
-		}
+		}})
 
 		result := checkGit()
 		if result.Status != StatusPass {
@@ -75,12 +63,9 @@ func TestCheckGit(t *testing.T) {
 	})
 
 	t.Run("unparseable version", func(t *testing.T) {
-		oldExec := execCommand
-		defer func() { execCommand = oldExec }()
-
-		execCommand = func(dir, name string, args ...string) CommandResult {
+		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			return CommandResult{Stdout: "git version unknown\n"}
-		}
+		}})
 
 		result := checkGit()
 		if result.Status != StatusWarn {
@@ -91,10 +76,7 @@ func TestCheckGit(t *testing.T) {
 
 func TestCheckGitRepo(t *testing.T) {
 	t.Run("inside git repo", func(t *testing.T) {
-		oldExec := execCommand
-		defer func() { execCommand = oldExec }()
-
-		execCommand = func(dir, name string, args ...string) CommandResult {
+		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			if name == "git" && len(args) > 0 {
 				switch args[0] {
 				case "rev-parse":
@@ -111,7 +93,7 @@ func TestCheckGitRepo(t *testing.T) {
 				}
 			}
 			return CommandResult{Err: fmt.Errorf("unexpected")}
-		}
+		}})
 
 		result := checkGitRepo()
 		if result.Status != StatusPass {
@@ -120,12 +102,9 @@ func TestCheckGitRepo(t *testing.T) {
 	})
 
 	t.Run("not in git repo", func(t *testing.T) {
-		oldExec := execCommand
-		defer func() { execCommand = oldExec }()
-
-		execCommand = func(dir, name string, args ...string) CommandResult {
+		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			return CommandResult{Err: fmt.Errorf("not a git repository")}
-		}
+		}})
 
 		result := checkGitRepo()
 		if result.Status != StatusWarn {
@@ -134,10 +113,7 @@ func TestCheckGitRepo(t *testing.T) {
 	})
 
 	t.Run("inside worktree", func(t *testing.T) {
-		oldExec := execCommand
-		defer func() { execCommand = oldExec }()
-
-		execCommand = func(dir, name string, args ...string) CommandResult {
+		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			if name == "git" && len(args) > 1 {
 				switch args[1] {
 				case "--is-inside-work-tree":
@@ -149,7 +125,7 @@ func TestCheckGitRepo(t *testing.T) {
 				}
 			}
 			return CommandResult{Err: fmt.Errorf("unexpected")}
-		}
+		}})
 
 		result := checkGitRepo()
 		if result.Status != StatusWarn {
@@ -160,12 +136,9 @@ func TestCheckGitRepo(t *testing.T) {
 
 func TestCheckBdDaemon(t *testing.T) {
 	t.Run("bd not on PATH", func(t *testing.T) {
-		oldLookPath := lookPath
-		defer func() { lookPath = oldLookPath }()
-
-		lookPath = func(string) (string, error) {
+		installLookPathMock(t, func(string) (string, error) {
 			return "", exec.ErrNotFound
-		}
+		})
 
 		result := checkBdDaemon()
 		if result.Status != StatusFail {
@@ -177,18 +150,15 @@ func TestCheckBdDaemon(t *testing.T) {
 	})
 
 	t.Run("daemon running", func(t *testing.T) {
-		oldExec := execCommand
-		oldLookPath := lookPath
-		defer func() { execCommand = oldExec; lookPath = oldLookPath }()
 		defer ResetBeadsDirCache()
 
-		lookPath = func(string) (string, error) { return "/usr/bin/bd", nil }
-		execCommand = func(dir, name string, args ...string) CommandResult {
+		installLookPathMock(t, func(string) (string, error) { return "/usr/bin/bd", nil })
+		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			if name == "bd" && len(args) >= 2 && args[1] == "status" {
 				return CommandResult{Stdout: `{"status":"running","pid":1234}`}
 			}
 			return CommandResult{Err: fmt.Errorf("unexpected")}
-		}
+		}})
 
 		result := checkBdDaemon()
 		if result.Status != StatusPass {
@@ -197,15 +167,12 @@ func TestCheckBdDaemon(t *testing.T) {
 	})
 
 	t.Run("daemon not running", func(t *testing.T) {
-		oldExec := execCommand
-		oldLookPath := lookPath
-		defer func() { execCommand = oldExec; lookPath = oldLookPath }()
 		defer ResetBeadsDirCache()
 
-		lookPath = func(string) (string, error) { return "/usr/bin/bd", nil }
-		execCommand = func(dir, name string, args ...string) CommandResult {
+		installLookPathMock(t, func(string) (string, error) { return "/usr/bin/bd", nil })
+		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			return CommandResult{Err: fmt.Errorf("not running")}
-		}
+		}})
 
 		result := checkBdDaemon()
 		if result.Status != StatusWarn {
@@ -339,14 +306,12 @@ func TestCheckStaleLocks(t *testing.T) {
 		}
 
 		// Mock execCommand for worktree discovery
-		oldExec := execCommand
-		defer func() { execCommand = oldExec }()
-		execCommand = func(d, name string, args ...string) CommandResult {
+		installExecMock(t, &MockExecRunner{RunFunc: func(d, name string, args ...string) CommandResult {
 			if name == "git" && len(args) > 0 && args[0] == "branch" {
 				return CommandResult{Stdout: "* falcon\n"}
 			}
 			return CommandResult{Stdout: ""}
-		}
+		}})
 
 		result := checkStaleLocks()
 		if result.Name == "" {
