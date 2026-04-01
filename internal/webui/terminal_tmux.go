@@ -5,9 +5,43 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"sync"
 
 	"github.com/creack/pty"
 )
+
+// TerminalSession represents an active tmux attach process with its PTY.
+type TerminalSession struct {
+	ConnID  string   // unique connection ID (e.g., "talk-to-lead:1")
+	Name    string   // tmux session name (e.g., "talk-to-lead")
+	Command string   // command running in the session
+	PTY     *os.File // PTY master fd from creack/pty
+	cmd     *exec.Cmd
+	mu      sync.Mutex
+	closed  bool
+}
+
+// Close closes the PTY and waits for the tmux attach process to exit.
+// It is safe to call multiple times.
+func (s *TerminalSession) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil
+	}
+	s.closed = true
+
+	var firstErr error
+	if s.PTY != nil {
+		if err := s.PTY.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	if s.cmd != nil && s.cmd.Process != nil {
+		_ = s.cmd.Wait()
+	}
+	return firstErr
+}
 
 // tmuxHasSession checks whether a tmux session with the given name exists.
 func (m *TerminalManager) tmuxHasSession(name string) bool {
