@@ -1,7 +1,8 @@
 /**
  * Hook to manage workspace-scoped tab state.
  * Resolves the active workspace from WorkspaceContext, saves/restores tab sets
- * when switching workspaces, and returns the resolved workspace name.
+ * when switching workspaces (keyed by stable workspace UUID), and returns
+ * the resolved workspace name and ID.
  */
 
 import { useEffect, useRef, type MutableRefObject } from "react";
@@ -36,17 +37,22 @@ export function useWorkspaceTabState(
   const stateMapRef = useRef<
     Map<string, { tabs: TabState[]; activeTabId: string }>
   >(new Map());
-  const prevWorkspaceRef = useRef(workspace);
+  const cacheKey = workspaceId || "__unresolved__";
+  const prevWorkspaceIdRef = useRef(cacheKey);
 
   useEffect(() => {
-    if (prevWorkspaceRef.current === workspace) return;
-    if (prevWorkspaceRef.current && tabs.length > 0) {
-      stateMapRef.current.set(prevWorkspaceRef.current, {
+    if (prevWorkspaceIdRef.current === cacheKey) return;
+    if (
+      prevWorkspaceIdRef.current &&
+      prevWorkspaceIdRef.current !== "__unresolved__" &&
+      tabs.length > 0
+    ) {
+      stateMapRef.current.set(prevWorkspaceIdRef.current, {
         tabs: [...tabs],
         activeTabId,
       });
     }
-    const saved = stateMapRef.current.get(workspace);
+    const saved = stateMapRef.current.get(cacheKey);
     if (saved) {
       setTabs(saved.tabs);
       setActiveTabId(saved.activeTabId);
@@ -55,8 +61,8 @@ export function useWorkspaceTabState(
       setActiveTabId("");
     }
     initializedRef.current = false;
-    prevWorkspaceRef.current = workspace;
-  }, [workspace]); // eslint-disable-line react-hooks/exhaustive-deps
+    prevWorkspaceIdRef.current = cacheKey;
+  }, [cacheKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return { name: workspace, id: workspaceId };
 }
