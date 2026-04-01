@@ -309,8 +309,9 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 			}
 			diffStats := ComputeDiffStats(opts.WorktreePath, beforeRef)
 			_ = sess.Finalize(sessions.FinalizeOptions{
-				TaskID:   taskID,
-				ExitCode: exitCode,
+				TaskID:       taskID,
+				ExitCode:     exitCode,
+				FilesTouched: diffStats.FilesTouched,
 				DiffStats: sessions.DiffStats{
 					FilesChanged: diffStats.FilesChanged,
 					LinesAdded:   diffStats.LinesAdded,

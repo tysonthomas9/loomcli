@@ -20,6 +20,9 @@ func TestParseDiffNumstat_WithChanges(t *testing.T) {
 	if stats.LinesRemoved != 3 {
 		t.Errorf("LinesRemoved = %d, want 3", stats.LinesRemoved)
 	}
+	if len(stats.FilesTouched) != 2 || stats.FilesTouched[0] != "file1.go" || stats.FilesTouched[1] != "file2.go" {
+		t.Errorf("FilesTouched = %v, want [file1.go file2.go]", stats.FilesTouched)
+	}
 }
 
 func TestParseDiffNumstat_BinaryFiles(t *testing.T) {
@@ -35,12 +38,18 @@ func TestParseDiffNumstat_BinaryFiles(t *testing.T) {
 	if stats.LinesRemoved != 3 {
 		t.Errorf("LinesRemoved = %d, want 3 (binary excluded)", stats.LinesRemoved)
 	}
+	if len(stats.FilesTouched) != 2 || stats.FilesTouched[0] != "file1.go" || stats.FilesTouched[1] != "image.png" {
+		t.Errorf("FilesTouched = %v, want [file1.go image.png]", stats.FilesTouched)
+	}
 }
 
 func TestParseDiffNumstat_EmptyOutput(t *testing.T) {
 	stats := parseDiffNumstat("")
 	if stats.FilesChanged != 0 || stats.LinesAdded != 0 || stats.LinesRemoved != 0 {
 		t.Errorf("expected zero stats for empty output, got %+v", stats)
+	}
+	if len(stats.FilesTouched) != 0 {
+		t.Errorf("FilesTouched = %v, want empty", stats.FilesTouched)
 	}
 }
 
@@ -52,10 +61,27 @@ func TestParseDiffNumstat_MalformedLine(t *testing.T) {
 	}
 }
 
+func TestParseDiffNumstat_Renames(t *testing.T) {
+	output := "10\t5\told.go => new.go\n3\t1\t{src/old => src/new}/main.go\n"
+	stats := parseDiffNumstat(output)
+	if len(stats.FilesTouched) != 2 {
+		t.Fatalf("FilesTouched len = %d, want 2", len(stats.FilesTouched))
+	}
+	if stats.FilesTouched[0] != "new.go" {
+		t.Errorf("FilesTouched[0] = %q, want %q", stats.FilesTouched[0], "new.go")
+	}
+	if stats.FilesTouched[1] != "src/new/main.go" {
+		t.Errorf("FilesTouched[1] = %q, want %q", stats.FilesTouched[1], "src/new/main.go")
+	}
+}
+
 func TestComputeDiffStats_EmptyRef(t *testing.T) {
 	stats := ComputeDiffStats("/tmp", "")
 	if stats.FilesChanged != 0 || stats.LinesAdded != 0 || stats.LinesRemoved != 0 {
 		t.Errorf("expected zero stats for empty ref, got %+v", stats)
+	}
+	if len(stats.FilesTouched) != 0 {
+		t.Errorf("FilesTouched = %v, want empty", stats.FilesTouched)
 	}
 }
 
@@ -114,6 +140,9 @@ func TestComputeDiffStats_WithRealRepo(t *testing.T) {
 	if stats.LinesAdded < 3 {
 		t.Errorf("LinesAdded = %d, want >= 3", stats.LinesAdded)
 	}
+	if len(stats.FilesTouched) != 2 {
+		t.Errorf("FilesTouched len = %d, want 2", len(stats.FilesTouched))
+	}
 }
 
 func TestComputeDiffStats_NoChanges(t *testing.T) {
@@ -153,6 +182,9 @@ func TestComputeDiffStats_NoChanges(t *testing.T) {
 	if stats.FilesChanged != 0 || stats.LinesAdded != 0 || stats.LinesRemoved != 0 {
 		t.Errorf("expected zero stats for same ref, got %+v", stats)
 	}
+	if len(stats.FilesTouched) != 0 {
+		t.Errorf("FilesTouched = %v, want empty", stats.FilesTouched)
+	}
 }
 
 func TestComputeDiffStats_InvalidRef(t *testing.T) {
@@ -167,5 +199,8 @@ func TestComputeDiffStats_InvalidRef(t *testing.T) {
 	stats := ComputeDiffStats(dir, "nonexistent-ref")
 	if stats.FilesChanged != 0 || stats.LinesAdded != 0 || stats.LinesRemoved != 0 {
 		t.Errorf("expected zero stats for invalid ref, got %+v", stats)
+	}
+	if len(stats.FilesTouched) != 0 {
+		t.Errorf("FilesTouched = %v, want empty", stats.FilesTouched)
 	}
 }

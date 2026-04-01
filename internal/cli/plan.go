@@ -149,8 +149,9 @@ func runPlan(cmd *cobra.Command, args []string) {
 			}
 			diffStats := ComputeDiffStats(worktreePath, beforeRef)
 			_ = sess.Finalize(sessions.FinalizeOptions{
-				TaskID:   taskID,
-				ExitCode: exitCode,
+				TaskID:       taskID,
+				ExitCode:     exitCode,
+				FilesTouched: diffStats.FilesTouched,
 				DiffStats: sessions.DiffStats{
 					FilesChanged: diffStats.FilesChanged,
 					LinesAdded:   diffStats.LinesAdded,
@@ -275,8 +276,9 @@ func runPlan(cmd *cobra.Command, args []string) {
 		}
 		diffStats := ComputeDiffStats(worktreePath, beforeRef)
 		_ = sess.Finalize(sessions.FinalizeOptions{
-			TaskID:   taskID,
-			ExitCode: exitCode,
+			TaskID:       taskID,
+			ExitCode:     exitCode,
+			FilesTouched: diffStats.FilesTouched,
 			DiffStats: sessions.DiffStats{
 				FilesChanged: diffStats.FilesChanged,
 				LinesAdded:   diffStats.LinesAdded,

@@ -276,9 +276,10 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 			ap.mu.Unlock()
 
 			if err := sess.Finalize(sessions.FinalizeOptions{
-				TaskID:     taskID,
-				ExitCode:   exitCode,
-				ErrorClass: errClass,
+				TaskID:       taskID,
+				ExitCode:     exitCode,
+				ErrorClass:   errClass,
+				FilesTouched: diffStats.FilesTouched,
 				DiffStats: sessions.DiffStats{
 					FilesChanged: diffStats.FilesChanged,
 					LinesAdded:   diffStats.LinesAdded,

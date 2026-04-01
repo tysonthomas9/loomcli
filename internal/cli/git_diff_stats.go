@@ -10,6 +10,7 @@ type DiffStats struct {
 	FilesChanged int
 	LinesAdded   int
 	LinesRemoved int
+	FilesTouched []string
 }
 
 // ComputeDiffStats runs `git diff --numstat fromRef..HEAD` in worktreePath
@@ -40,9 +41,17 @@ func parseDiffNumstat(output string) DiffStats {
 		if len(fields) < 3 {
 			continue
 		}
-		// Skip binary files (shown as - - filename)
+
+		// Normalize rename paths to the new name.
+		path := fields[2]
+		if strings.Contains(path, " => ") {
+			path = parseNumstatRenamePath(path)
+		}
+
+		// Binary files (shown as - - filename): count but skip line stats.
 		if fields[0] == "-" || fields[1] == "-" {
 			stats.FilesChanged++
+			stats.FilesTouched = append(stats.FilesTouched, path)
 			continue
 		}
 		added, err1 := strconv.Atoi(fields[0])
@@ -53,6 +62,7 @@ func parseDiffNumstat(output string) DiffStats {
 		stats.FilesChanged++
 		stats.LinesAdded += added
 		stats.LinesRemoved += removed
+		stats.FilesTouched = append(stats.FilesTouched, path)
 	}
 	return stats
 }
