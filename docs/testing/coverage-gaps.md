@@ -195,6 +195,7 @@ Three functions with no test coverage:
 | `handleFleetClaim()` | Timeout (claim takes >5s) | Medium |
 | `handleFleetRegister()` | Rate limiter exhaustion | Medium |
 | `handleFleetDone()` | Invalid task ID | Low |
+| `handleFleetDone()` | Auth middleware coverage (resolved — `FleetAuthMiddleware` now wraps done endpoint) | ~~Medium~~ Resolved |
 
 #### Terminal (terminal.go)
 

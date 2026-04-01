@@ -286,3 +286,60 @@ func TestFleetAuth_DoesNotSetContentTypeOnSuccess(t *testing.T) {
 		t.Errorf("Content-Type = %q, want %q", ct, "text/plain")
 	}
 }
+
+func TestFleetDone_WithAuth_MissingHeader_Returns401(t *testing.T) {
+	middleware := NewFleetAuthMiddleware(fleetAuthTestKey)
+	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/test-ws/fleet/done/worker-1", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusUnauthorized)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeError(t, result, "payload")
+}
+
+func TestFleetDone_WithAuth_ValidToken_PassesThrough(t *testing.T) {
+	middleware := NewFleetAuthMiddleware(fleetAuthTestKey)
+	handler := middleware(echoClaimsHandler())
+
+	token := newTestToken(t, "worker-1", time.Hour)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/test-ws/fleet/done/worker-1", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if w.Body.String() != "worker-1" {
+		t.Errorf("body = %q, want %q", w.Body.String(), "worker-1")
+	}
+}
+
+func TestFleetDone_WithAuth_ExpiredToken_Returns401(t *testing.T) {
+	middleware := NewFleetAuthMiddleware(fleetAuthTestKey)
+	handler := middleware(echoClaimsHandler())
+
+	token := newTestToken(t, "worker-1", -1*time.Second)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/test-ws/fleet/done/worker-1", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusUnauthorized)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeError(t, result, "payload")
+}

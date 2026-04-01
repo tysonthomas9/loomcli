@@ -260,8 +260,14 @@ func registerWorkspaceRoutes(mux *http.ServeMux, multiPool *daemon.MultiPool, wo
 			wsMux.HandleFunc("POST /api/workspaces/{ws}/fleet/claim",
 				handleFleetClaim(multiPool, claimMetrics))
 		}
-		wsMux.HandleFunc("POST /api/workspaces/{ws}/fleet/done/{id}",
-			fleetWSHandler(fleetRegistry, handleFleetDone))
+		if tokenCfg != nil && len(tokenCfg.SigningKey) > 0 {
+			fleetAuthDone := NewFleetAuthMiddleware(tokenCfg.SigningKey)
+			wsMux.Handle("POST /api/workspaces/{ws}/fleet/done/{id}",
+				fleetAuthDone(fleetWSHandler(fleetRegistry, handleFleetDone)))
+		} else {
+			wsMux.HandleFunc("POST /api/workspaces/{ws}/fleet/done/{id}",
+				fleetWSHandler(fleetRegistry, handleFleetDone))
+		}
 		if tokenCfg != nil && len(tokenCfg.SigningKey) > 0 {
 			fleetAuth := NewFleetAuthMiddleware(tokenCfg.SigningKey)
 			wsMux.Handle("POST /api/workspaces/{ws}/fleet/heartbeat",

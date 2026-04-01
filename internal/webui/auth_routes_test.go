@@ -43,7 +43,7 @@ func TestIsPublicRoute(t *testing.T) {
 		{"PATCH /api/issues/123", http.MethodPatch, "/api/issues/123", false},
 		{"DELETE /api/issues/123", http.MethodDelete, "/api/issues/123", false},
 
-		// Fleet routes are public (they use their own auth: API key for register, JWT for claim/heartbeat)
+		// Fleet routes are public (they use their own auth: API key for register, JWT for claim/done/heartbeat)
 		{"POST /api/fleet/register", http.MethodPost, "/api/fleet/register", true},
 		{"POST /api/fleet/claim", http.MethodPost, "/api/fleet/claim", true},
 		{"POST /api/fleet/heartbeat", http.MethodPost, "/api/fleet/heartbeat", true},

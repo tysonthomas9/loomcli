@@ -13,7 +13,7 @@ func isPublicRoute(method, path string) bool {
 	// e.g. /api/workspaces/my-ws/fleet/... → /api/fleet/...
 	normalizedPath := stripWorkspacePrefix(path)
 
-	// Fleet endpoints use their own authentication (API key for register, JWT for claim/heartbeat)
+	// Fleet endpoints use their own authentication (API key for register, JWT for claim/done/heartbeat)
 	if strings.HasPrefix(normalizedPath, "/api/fleet/") {
 		return true
 	}

@@ -1382,7 +1382,7 @@ Fleet endpoints are only registered when `fleetEnabled` is true — this require
 Fleet endpoints use a two-layer authentication model:
 
 1. **Registration auth (`X-Fleet-API-Key`):** The register endpoint validates a pre-shared API key via the `X-Fleet-API-Key` header using constant-time comparison (`crypto/subtle.ConstantTimeCompare`). This is the bootstrap mechanism.
-2. **JWT bearer auth (`Authorization: Bearer`):** After registration, the worker receives a JWT (HMAC-SHA256, default 1-hour expiry). The claim and heartbeat endpoints are protected by `FleetAuthMiddleware` which validates this JWT and injects `WorkerClaims` into the request context. The done endpoint has no JWT validation.
+2. **JWT bearer auth (`Authorization: Bearer`):** After registration, the worker receives a JWT (HMAC-SHA256, default 1-hour expiry). The claim, heartbeat, and done endpoints are protected by `FleetAuthMiddleware` which validates this JWT and injects `WorkerClaims` into the request context.
 
 The JWT signing key is managed in Redis via `SigningKeyManager` (supports key rotation with previous-version grace period). When no signing key is configured, the JWT middleware is not applied to claim and heartbeat routes.
 
@@ -1528,7 +1528,7 @@ If the body is empty or `Content-Length` is 0, the endpoint finds the highest-pr
 
 Mark a task as complete. The `{id}` path parameter is the worker ID.
 
-- **Auth:** None (no JWT validation)
+- **Auth:** JWT bearer token (from registration) — validated by `FleetAuthMiddleware` when signing key is configured; no auth when signing key is not configured
 - **Path Parameters:**
 
 | Param | Type | Required | Description |
@@ -1573,6 +1573,7 @@ Mark a task as complete. The `{id}` path parameter is the worker ID.
 ```
 
 - **Errors:**
+  - `401` — missing/invalid JWT (when `FleetAuthMiddleware` is active)
   - `400` — missing worker ID in path, invalid/malformed request body
   - `404` — worker not found in Redis
   - `413` — request body too large (>1 MB)
