@@ -9,6 +9,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/circuitbreaker"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 )
 
 // Sentinel errors for WorkspaceRegistry operations.
@@ -30,13 +31,14 @@ type WorkspaceIDResolverFn func(name string) (string, error)
 // The id parameter is always the workspace UUID. Callers resolve UUID before
 // calling. The registry never switches keys.
 type WorkspaceRegistry struct {
-	mu          sync.RWMutex
-	multiPool   *daemon.MultiPool
-	multiSub    *MultiWorkspaceSubscriber
-	poolSize    int
-	logger      *slog.Logger
-	closed      bool
-	poolFactory func(socketPath string, poolSize int) (*daemon.ConnectionPool, error)
+	mu            sync.RWMutex
+	multiPool     *daemon.MultiPool
+	multiSub      *MultiWorkspaceSubscriber
+	fleetRegistry *fleet.StoreRegistry // nil when fleet is disabled
+	poolSize      int
+	logger        *slog.Logger
+	closed        bool
+	poolFactory   func(socketPath string, poolSize int) (*daemon.ConnectionPool, error)
 }
 
 // NewWorkspaceRegistry creates a new WorkspaceRegistry.
@@ -116,6 +118,14 @@ func (r *WorkspaceRegistry) Register(id, path string) error {
 		r.logger.Info("started subscriber for workspace", "workspace", id)
 	}
 
+	// Register in fleet store registry (non-fatal on error).
+	if r.fleetRegistry != nil {
+		if err := r.fleetRegistry.Register(id); err != nil {
+			r.logger.Warn("failed to register workspace in fleet registry",
+				"workspace", id, "err", err)
+		}
+	}
+
 	return nil
 }
 
@@ -151,21 +161,38 @@ func (r *WorkspaceRegistry) RegisterPool(id string, pool daemon.Pool) error {
 			"workspace", id)
 	}
 
+	// Register in fleet store registry (non-fatal on error).
+	if r.fleetRegistry != nil {
+		if err := r.fleetRegistry.Register(id); err != nil {
+			r.logger.Warn("failed to register workspace in fleet registry",
+				"workspace", id, "err", err)
+		}
+	}
+
 	return nil
 }
 
-// Deregister removes the pool and subscriber for the workspace. No-op if the
-// workspace is not registered. Subscriber is stopped before pool is closed
-// (stop polling before closing connections).
+// Deregister removes the pool, subscriber, and fleet store for the workspace.
+// No-op if the workspace is not registered. All three subsystems are
+// deregistered atomically under the registry mutex to prevent concurrent
+// requests from seeing partially-torn state.
 func (r *WorkspaceRegistry) Deregister(id string) {
 	if id == "" {
 		return
 	}
 
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	r.logger.Info("deregistering workspace", "workspace", id)
 
 	// Stop subscriber first (stop polling before closing pool).
 	r.multiSub.RemoveWorkspace(id)
+
+	// Deregister fleet store (stop timeout enforcer).
+	if r.fleetRegistry != nil {
+		r.fleetRegistry.Deregister(id)
+	}
 
 	// Close pool (closes connections, removes from dispatch).
 	r.multiPool.Deregister(id)
@@ -176,13 +203,51 @@ func (r *WorkspaceRegistry) WorkspaceIDs() []string {
 	return r.multiPool.WorkspaceIDs()
 }
 
-// Close prevents new registrations. Does NOT close MultiPool or
-// MultiWorkspaceSubscriber (they have their own lifecycle managed by
-// server.go shutdown).
+// SetFleetRegistry sets the optional fleet store registry. This is called after
+// the fleet registry is initialized (which happens after the workspace registry
+// is created, due to init ordering in server_app.go). Workspaces registered
+// before this call are NOT retroactively registered in fleet — the caller must
+// handle pre-existing workspaces explicitly.
+func (r *WorkspaceRegistry) SetFleetRegistry(fr *fleet.StoreRegistry) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.fleetRegistry = fr
+}
+
+// FleetStore returns the fleet Store for a workspace. Returns (nil, false) if
+// fleet is disabled or the workspace is not registered in fleet.
+func (r *WorkspaceRegistry) FleetStore(wsID string) (*fleet.Store, bool) {
+	r.mu.RLock()
+	fr := r.fleetRegistry
+	r.mu.RUnlock()
+	if fr == nil {
+		return nil, false
+	}
+	return fr.Get(wsID)
+}
+
+// FleetTimeoutCount returns the total timeout count across all fleet enforcers.
+// Returns 0 if fleet is disabled.
+func (r *WorkspaceRegistry) FleetTimeoutCount() int64 {
+	r.mu.RLock()
+	fr := r.fleetRegistry
+	r.mu.RUnlock()
+	if fr == nil {
+		return 0
+	}
+	return fr.GetTotalTimeoutCount()
+}
+
+// Close prevents new registrations and closes the fleet registry (if set).
+// Does NOT close MultiPool or MultiWorkspaceSubscriber (they have their own
+// lifecycle managed by server.go shutdown).
 func (r *WorkspaceRegistry) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.closed = true
+	if r.fleetRegistry != nil {
+		return r.fleetRegistry.Close()
+	}
 	return nil
 }
 

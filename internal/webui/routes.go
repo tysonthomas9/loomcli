@@ -38,7 +38,7 @@ func (app *serverApp) setupRoutes(mux *http.ServeMux) (*clientErrorLimiter, *csp
 	// SSE hub metrics endpoint
 	var getFleetTimeouts func() int64
 	if app.fleetRegistry != nil {
-		getFleetTimeouts = app.fleetRegistry.GetTotalTimeoutCount
+		getFleetTimeouts = app.registry.FleetTimeoutCount
 	}
 	mux.HandleFunc("GET /api/metrics", handleMetrics(app.hub, getFleetTimeouts, app.claimMetrics))
 
@@ -245,8 +245,9 @@ func (app *serverApp) registerWorkspaceRoutes(mux *http.ServeMux) { //nolint:fun
 	// Workspace-scoped fleet routes. Claim uses multiPool (routes to correct
 	// workspace daemon); register/done/heartbeat resolve the Store per-request.
 	if app.fleetRegistry != nil {
+		fleetStoreFn := app.registry.FleetStore
 		wsMux.HandleFunc("POST /api/workspaces/{ws}/fleet/register",
-			fleetWSHandler(app.fleetRegistry, func(s *fleet.Store) http.HandlerFunc {
+			fleetWSHandler(fleetStoreFn, func(s *fleet.Store) http.HandlerFunc {
 				return handleFleetRegister(s, app.tokenCfg, app.fleetRegCfg)
 			}))
 		if app.tokenCfg != nil && len(app.tokenCfg.SigningKey) > 0 {
@@ -260,18 +261,18 @@ func (app *serverApp) registerWorkspaceRoutes(mux *http.ServeMux) { //nolint:fun
 		if app.tokenCfg != nil && len(app.tokenCfg.SigningKey) > 0 {
 			fleetAuthDone := NewFleetAuthMiddleware(app.tokenCfg.SigningKey)
 			wsMux.Handle("POST /api/workspaces/{ws}/fleet/done/{id}",
-				fleetAuthDone(fleetWSHandler(app.fleetRegistry, handleFleetDone)))
+				fleetAuthDone(fleetWSHandler(fleetStoreFn, handleFleetDone)))
 		} else {
 			wsMux.HandleFunc("POST /api/workspaces/{ws}/fleet/done/{id}",
-				fleetWSHandler(app.fleetRegistry, handleFleetDone))
+				fleetWSHandler(fleetStoreFn, handleFleetDone))
 		}
 		if app.tokenCfg != nil && len(app.tokenCfg.SigningKey) > 0 {
 			fleetAuth := NewFleetAuthMiddleware(app.tokenCfg.SigningKey)
 			wsMux.Handle("POST /api/workspaces/{ws}/fleet/heartbeat",
-				fleetAuth(fleetWSHandler(app.fleetRegistry, handleFleetHeartbeat)))
+				fleetAuth(fleetWSHandler(fleetStoreFn, handleFleetHeartbeat)))
 		} else {
 			wsMux.HandleFunc("POST /api/workspaces/{ws}/fleet/heartbeat",
-				fleetWSHandler(app.fleetRegistry, handleFleetHeartbeat))
+				fleetWSHandler(fleetStoreFn, handleFleetHeartbeat))
 		}
 	}
 
@@ -305,13 +306,13 @@ func (app *serverApp) registerWorkspaceRoutes(mux *http.ServeMux) { //nolint:fun
 	mux.Handle("/api/workspaces/{ws}/", WorkspaceMiddleware(app.wsExistsFn, wsMux))
 }
 
-// fleetWSHandler resolves a per-workspace fleet Store from the registry and
-// delegates to the given handler factory. Returns 404 if the workspace is not
-// found in the fleet registry.
-func fleetWSHandler(registry *fleet.StoreRegistry, makeHandler func(*fleet.Store) http.HandlerFunc) http.HandlerFunc {
+// fleetWSHandler resolves a per-workspace fleet Store via the provided lookup
+// function and delegates to the given handler factory. Returns 503 if the
+// workspace is not found in the fleet registry.
+func fleetWSHandler(getStore func(string) (*fleet.Store, bool), makeHandler func(*fleet.Store) http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := WorkspaceFromContext(r.Context())
-		store, ok := registry.Get(wsID)
+		store, ok := getStore(wsID)
 		if !ok {
 			respondJSON(w, http.StatusServiceUnavailable, map[string]any{
 				"success": false,

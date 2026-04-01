@@ -33,7 +33,7 @@ func TestFleetWSHandler_ResolvesStore(t *testing.T) {
 	}
 
 	var receivedStore *fleet.Store
-	handler := fleetWSHandler(reg, func(s *fleet.Store) http.HandlerFunc {
+	handler := fleetWSHandler(reg.Get, func(s *fleet.Store) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			receivedStore = s
 			w.WriteHeader(http.StatusOK)
@@ -82,7 +82,7 @@ func TestFleetWSHandler_WorkspaceNotFound(t *testing.T) {
 
 	// Do NOT register any workspace — the lookup should fail
 	handlerCalled := false
-	handler := fleetWSHandler(reg, func(s *fleet.Store) http.HandlerFunc {
+	handler := fleetWSHandler(reg.Get, func(s *fleet.Store) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			handlerCalled = true
 			w.WriteHeader(http.StatusOK)

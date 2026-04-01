@@ -9,9 +9,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
+
 	"github.com/tysonthomas9/loomcli/internal/circuitbreaker"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 )
 
 // newTestRegistry creates a WorkspaceRegistry with all supporting infrastructure
@@ -515,5 +518,178 @@ func TestRegistry_WorkspaceIDs_ReturnsRegisteredUUIDs(t *testing.T) {
 		if got[i] != want {
 			t.Errorf("WorkspaceIDs[%d] = %q, want %q", i, got[i], want)
 		}
+	}
+}
+
+// newTestFleetRegistry creates a fleet.StoreRegistry backed by miniredis for
+// testing. Returns the registry and the miniredis instance (for lifecycle).
+func newTestFleetRegistry(t *testing.T) *fleet.StoreRegistry {
+	t.Helper()
+	mr := miniredis.RunT(t)
+	fleetReg, err := fleet.NewStoreRegistry(
+		fleet.RedisConfig{Address: mr.Addr()},
+		fleet.TimeoutConfig{TaskTimeout: 30 * time.Minute, CheckInterval: 1 * time.Minute},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("NewStoreRegistry failed: %v", err)
+	}
+	return fleetReg
+}
+
+func TestRegistry_Register_WithFleet(t *testing.T) {
+	registry, _, _ := newTestRegistry(t)
+	fleetReg := newTestFleetRegistry(t)
+	defer fleetReg.Close()
+
+	registry.SetFleetRegistry(fleetReg)
+
+	wsID := "fleet-register-uuid"
+	wsPath := t.TempDir()
+
+	if err := registry.Register(wsID, wsPath); err != nil {
+		t.Fatalf("Register returned error: %v", err)
+	}
+
+	store, ok := registry.FleetStore(wsID)
+	if !ok {
+		t.Fatal("expected FleetStore to return (store, true) after Register")
+	}
+	if store == nil {
+		t.Fatal("expected FleetStore to return non-nil store")
+	}
+}
+
+func TestRegistry_Deregister_WithFleet(t *testing.T) {
+	registry, _, _ := newTestRegistry(t)
+	fleetReg := newTestFleetRegistry(t)
+	defer fleetReg.Close()
+
+	registry.SetFleetRegistry(fleetReg)
+
+	wsID := "fleet-deregister-uuid"
+	wsPath := t.TempDir()
+
+	if err := registry.Register(wsID, wsPath); err != nil {
+		t.Fatalf("Register returned error: %v", err)
+	}
+
+	// Sanity check: store exists.
+	if _, ok := registry.FleetStore(wsID); !ok {
+		t.Fatal("expected FleetStore to return true before Deregister")
+	}
+
+	registry.Deregister(wsID)
+
+	store, ok := registry.FleetStore(wsID)
+	if ok {
+		t.Error("expected FleetStore to return false after Deregister")
+	}
+	if store != nil {
+		t.Error("expected FleetStore to return nil after Deregister")
+	}
+}
+
+func TestRegistry_FleetNil_NoOp(t *testing.T) {
+	registry, _, _ := newTestRegistry(t)
+
+	// No fleet registry set — Register and Deregister should not panic.
+	wsID := "no-fleet-uuid"
+	wsPath := t.TempDir()
+
+	if err := registry.Register(wsID, wsPath); err != nil {
+		t.Fatalf("Register returned error: %v", err)
+	}
+
+	// Deregister should also not panic.
+	registry.Deregister(wsID)
+}
+
+func TestRegistry_SetFleetRegistry(t *testing.T) {
+	registry, _, _ := newTestRegistry(t)
+
+	// Register a workspace BEFORE fleet is set.
+	wsID1 := "pre-fleet-uuid"
+	wsPath1 := t.TempDir()
+	if err := registry.Register(wsID1, wsPath1); err != nil {
+		t.Fatalf("Register returned error: %v", err)
+	}
+
+	// FleetStore should return (nil, false) since fleet is not set.
+	if _, ok := registry.FleetStore(wsID1); ok {
+		t.Error("expected FleetStore to return false before fleet is set")
+	}
+
+	// Now set fleet registry.
+	fleetReg := newTestFleetRegistry(t)
+	defer fleetReg.Close()
+	registry.SetFleetRegistry(fleetReg)
+
+	// Register a second workspace AFTER fleet is set.
+	wsID2 := "post-fleet-uuid"
+	wsPath2 := t.TempDir()
+	if err := registry.Register(wsID2, wsPath2); err != nil {
+		t.Fatalf("Register returned error: %v", err)
+	}
+
+	// The second workspace should have a fleet store.
+	store, ok := registry.FleetStore(wsID2)
+	if !ok {
+		t.Fatal("expected FleetStore to return true for workspace registered after SetFleetRegistry")
+	}
+	if store == nil {
+		t.Fatal("expected non-nil store for workspace registered after SetFleetRegistry")
+	}
+
+	// The first workspace was NOT retroactively registered.
+	if _, ok := registry.FleetStore(wsID1); ok {
+		t.Error("expected FleetStore to return false for workspace registered before SetFleetRegistry")
+	}
+}
+
+func TestRegistry_Close_ClosesFleet(t *testing.T) {
+	registry, _, _ := newTestRegistry(t)
+	fleetReg := newTestFleetRegistry(t)
+
+	registry.SetFleetRegistry(fleetReg)
+
+	wsID := "close-fleet-uuid"
+	wsPath := t.TempDir()
+	if err := registry.Register(wsID, wsPath); err != nil {
+		t.Fatalf("Register returned error: %v", err)
+	}
+
+	// Close the workspace registry, which should close the fleet registry.
+	if err := registry.Close(); err != nil {
+		t.Fatalf("Close returned error: %v", err)
+	}
+
+	// Subsequent Register on fleet registry should fail because it is closed.
+	err := fleetReg.Register("after-close-uuid")
+	if err == nil {
+		t.Fatal("expected fleet Register to fail after workspace registry Close")
+	}
+}
+
+func TestRegistry_FleetStore_NilRegistry(t *testing.T) {
+	registry, _, _ := newTestRegistry(t)
+
+	// No fleet registry set.
+	store, ok := registry.FleetStore("any-workspace-id")
+	if ok {
+		t.Error("expected FleetStore to return false when fleet registry is nil")
+	}
+	if store != nil {
+		t.Error("expected FleetStore to return nil when fleet registry is nil")
+	}
+}
+
+func TestRegistry_FleetTimeoutCount_NilRegistry(t *testing.T) {
+	registry, _, _ := newTestRegistry(t)
+
+	// No fleet registry set.
+	count := registry.FleetTimeoutCount()
+	if count != 0 {
+		t.Errorf("expected FleetTimeoutCount to return 0 when fleet is nil, got %d", count)
 	}
 }

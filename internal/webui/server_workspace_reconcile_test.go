@@ -520,7 +520,7 @@ func TestReconcileConfigWorkspaces_UUIDKeys(t *testing.T) {
 		}, nil
 	}
 
-	reconcileConfigWorkspaces(listFn, initialUUID, true, registry, nil)
+	reconcileConfigWorkspaces(listFn, initialUUID, true, registry)
 
 	// Verify: initial workspace not double-registered, extra workspace added
 	ids := multiPool.WorkspaceIDs()
@@ -563,7 +563,7 @@ func TestReconcileConfigWorkspaces_PreMigrationNameKeys(t *testing.T) {
 		}, nil
 	}
 
-	reconcileConfigWorkspaces(listFn, initialName, true, registry, nil)
+	reconcileConfigWorkspaces(listFn, initialName, true, registry)
 
 	ids := multiPool.WorkspaceIDs()
 	sort.Strings(ids)
@@ -609,7 +609,7 @@ func TestReconcileConfigWorkspaces_UUIDSkipMatchesInitialID(t *testing.T) {
 			initialUUID: initialPath,
 		}, nil
 	}
-	reconcileConfigWorkspaces(listFn, initialUUID, true, registry, nil)
+	reconcileConfigWorkspaces(listFn, initialUUID, true, registry)
 
 	// The pool should NOT have been replaced (skip logic worked)
 	poolAfter := multiPool.PoolForWorkspace(initialUUID)

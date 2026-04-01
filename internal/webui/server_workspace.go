@@ -8,8 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 )
 
 // WorkspaceData represents the full workspace topology returned by the API.
@@ -87,7 +85,6 @@ func reconcileConfigWorkspaces(
 	initialID string,
 	initialRegistered bool,
 	registry *WorkspaceRegistry,
-	fleetRegistry *fleet.StoreRegistry,
 ) {
 	if listFn == nil {
 		return
@@ -102,12 +99,6 @@ func reconcileConfigWorkspaces(
 			continue
 		}
 		_ = registry.Register(wsID, wsPath)
-		if fleetRegistry != nil {
-			if err := fleetRegistry.Register(wsID); err != nil {
-				slog.Warn("failed to register workspace in fleet registry",
-					"workspace", wsID, "err", err)
-			}
-		}
 	}
 	slog.Info("startup reconciliation complete",
 		"total_workspaces", len(workspaces),
@@ -117,7 +108,6 @@ func reconcileConfigWorkspaces(
 func wrapWorkspaceCreateFn(
 	innerCreate WorkspaceCreateFn,
 	registry *WorkspaceRegistry,
-	fleetRegistry *fleet.StoreRegistry,
 ) WorkspaceCreateFn {
 	if innerCreate == nil {
 		return nil
@@ -148,15 +138,6 @@ func wrapWorkspaceCreateFn(
 
 		_ = registry.Register(wsID, wsDir)
 
-		// Register workspace in fleet store registry (non-fatal on error).
-		if fleetRegistry != nil {
-			if err := fleetRegistry.Register(wsID); err != nil {
-				slog.Warn("failed to register workspace in fleet registry",
-					"workspace", wsID, "err", err)
-				AddCreateWarning(ctx, "Workspace created but fleet store registration failed")
-			}
-		}
-
 		return result, nil
 	}
 }
@@ -168,7 +149,6 @@ func wrapWorkspaceCreateFn(
 func wrapWorkspaceDeleteFn(
 	innerDelete func(name string) error,
 	registry *WorkspaceRegistry,
-	fleetRegistry *fleet.StoreRegistry,
 	resolveID WorkspaceIDResolverFn,
 ) func(name string) error {
 	if innerDelete == nil {
@@ -199,17 +179,10 @@ func wrapWorkspaceDeleteFn(
 			return err
 		}
 
-		// 3. Clean up pool and subscriber state (only if UUID was resolved).
+		// 3. Clean up pool, subscriber, and fleet state atomically (only if UUID was resolved).
 		if resolved && registry != nil {
 			registry.Deregister(wsID)
-			slog.Info("workspace pool and subscriber cleaned up after deletion",
-				"workspace", name, "id", wsID)
-		}
-
-		// 4. Clean up fleet state (only if UUID was resolved).
-		if resolved && fleetRegistry != nil {
-			fleetRegistry.Deregister(wsID)
-			slog.Info("workspace fleet store cleaned up after deletion",
+			slog.Info("workspace cleaned up after deletion",
 				"workspace", name, "id", wsID)
 		}
 

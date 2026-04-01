@@ -68,7 +68,7 @@ func TestWrapWorkspaceCreateFn_CollectsWarnings(t *testing.T) {
 	}
 
 	// Empty WorkspaceID triggers a warning in the wrapped function
-	wrapped := wrapWorkspaceCreateFn(innerCreate, registry, nil)
+	wrapped := wrapWorkspaceCreateFn(innerCreate, registry)
 	if wrapped == nil {
 		t.Fatal("expected non-nil wrapper")
 	}
@@ -100,7 +100,7 @@ func TestWrapWorkspaceCreateFn_CollectsWarnings(t *testing.T) {
 func TestWrapWorkspaceCreateFn_NilInner(t *testing.T) {
 	registry, _, _ := newTestRegistry(t)
 
-	wrapped := wrapWorkspaceCreateFn(nil, registry, nil)
+	wrapped := wrapWorkspaceCreateFn(nil, registry)
 	if wrapped != nil {
 		t.Fatal("expected nil wrapper when innerCreate is nil")
 	}
@@ -115,7 +115,7 @@ func TestWrapWorkspaceCreateFn_EmptyWorkspaceID_AbortsRegistration(t *testing.T)
 		return WorkspaceCreateResult{}, nil // empty WorkspaceID
 	}
 
-	wrapped := wrapWorkspaceCreateFn(innerCreate, registry, nil)
+	wrapped := wrapWorkspaceCreateFn(innerCreate, registry)
 	if wrapped == nil {
 		t.Fatal("expected non-nil wrapper")
 	}
@@ -143,7 +143,7 @@ func TestWrapWorkspaceCreateFn_EmptyWorkspaceID_NoError_AbortsRegistration(t *te
 		return WorkspaceCreateResult{WorkspaceID: ""}, nil // empty ID, no error
 	}
 
-	wrapped := wrapWorkspaceCreateFn(innerCreate, registry, nil)
+	wrapped := wrapWorkspaceCreateFn(innerCreate, registry)
 	_, err := wrapped(context.Background(), WorkspaceCreateRequest{Name: "my-ws"})
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
@@ -165,7 +165,7 @@ func TestWrapWorkspaceCreateFn_ZeroResult_AbortsRegistration(t *testing.T) {
 		return WorkspaceCreateResult{}, nil // zero-value result
 	}
 
-	wrapped := wrapWorkspaceCreateFn(innerCreate, registry, nil)
+	wrapped := wrapWorkspaceCreateFn(innerCreate, registry)
 	_, err := wrapped(context.Background(), WorkspaceCreateRequest{Name: "my-ws"})
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
@@ -188,7 +188,7 @@ func TestWrapWorkspaceCreateFn_ResultWithID_RegistersByUUID(t *testing.T) {
 		return WorkspaceCreateResult{WorkspaceID: wsUUID, WorkspacePath: wsPath}, nil
 	}
 
-	wrapped := wrapWorkspaceCreateFn(innerCreate, registry, nil)
+	wrapped := wrapWorkspaceCreateFn(innerCreate, registry)
 	_, err := wrapped(context.Background(), WorkspaceCreateRequest{Name: wsName, Path: wsPath})
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
@@ -226,7 +226,7 @@ func TestWrapWorkspaceCreateFn_InnerCreateFails_NoRegistration(t *testing.T) {
 		return WorkspaceCreateResult{}, createErr
 	}
 
-	wrapped := wrapWorkspaceCreateFn(innerCreate, registry, nil)
+	wrapped := wrapWorkspaceCreateFn(innerCreate, registry)
 	_, err := wrapped(context.Background(), WorkspaceCreateRequest{Name: "my-ws"})
 	if err != createErr {
 		t.Fatalf("expected createErr, got %v", err)
@@ -240,7 +240,7 @@ func TestWrapWorkspaceCreateFn_InnerCreateFails_NoRegistration(t *testing.T) {
 func TestWrapWorkspaceDeleteFn_NilInner(t *testing.T) {
 	registry, _, _ := newTestRegistry(t)
 
-	wrapped := wrapWorkspaceDeleteFn(nil, registry, nil, nil)
+	wrapped := wrapWorkspaceDeleteFn(nil, registry, nil)
 	if wrapped != nil {
 		t.Fatal("expected nil wrapper when innerDelete is nil")
 	}
@@ -281,7 +281,7 @@ func TestWrapWorkspaceDeleteFn_Success(t *testing.T) {
 		return "", fmt.Errorf("unknown workspace %q", name)
 	}
 
-	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, nil, resolveID)
+	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, resolveID)
 	if wrapped == nil {
 		t.Fatal("expected non-nil wrapper")
 	}
@@ -323,7 +323,7 @@ func TestWrapWorkspaceDeleteFn_InnerFailSkipsCleanup(t *testing.T) {
 		return wsID, nil
 	}
 
-	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, nil, resolveID)
+	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, resolveID)
 	err := wrapped(wsName)
 	if err == nil {
 		t.Fatal("expected error from wrapped delete")
@@ -350,7 +350,7 @@ func TestWrapWorkspaceDeleteFn_NilRegistry(t *testing.T) {
 	}
 
 	// Both registry and fleetRegistry are nil. Should not panic.
-	wrapped := wrapWorkspaceDeleteFn(innerDelete, nil, nil, nil)
+	wrapped := wrapWorkspaceDeleteFn(innerDelete, nil, nil)
 	if wrapped == nil {
 		t.Fatal("expected non-nil wrapper")
 	}
@@ -383,7 +383,7 @@ func TestWrapWorkspaceDeleteFn_NilFleetRegistry(t *testing.T) {
 	}
 
 	// Valid registry, nil fleetRegistry. Should clean up pool but not panic on nil fleet.
-	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, nil, resolveID)
+	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, resolveID)
 	if err := wrapped(wsName); err != nil {
 		t.Fatalf("wrapped delete returned error: %v", err)
 	}
@@ -421,7 +421,7 @@ func TestWrapWorkspaceDeleteFn_UUIDResolutionFails(t *testing.T) {
 		return "", fmt.Errorf("config not found")
 	}
 
-	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, nil, resolveID)
+	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, resolveID)
 	if err := wrapped(wsName); err != nil {
 		t.Fatalf("wrapped delete returned error: %v", err)
 	}
@@ -458,7 +458,7 @@ func TestWrapWorkspaceDeleteFn_NilResolveID(t *testing.T) {
 	}
 
 	// Pass nil resolveID. Cleanup should be skipped entirely.
-	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, nil, nil)
+	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, nil)
 	if err := wrapped(wsName); err != nil {
 		t.Fatalf("wrapped delete returned error: %v", err)
 	}
@@ -498,7 +498,7 @@ func TestWrapWorkspaceDeleteFn_ResolveIDEmptyString(t *testing.T) {
 		return "", nil
 	}
 
-	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, nil, resolveID)
+	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, resolveID)
 	if err := wrapped(wsName); err != nil {
 		t.Fatalf("wrapped delete returned error: %v", err)
 	}
@@ -538,7 +538,7 @@ func TestWrapWorkspaceDeleteFn_SkipsCleanupOnResolutionFailure(t *testing.T) {
 		return "", fmt.Errorf("workspace config corrupted")
 	}
 
-	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, nil, resolveID)
+	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, resolveID)
 	err := wrapped(wsName)
 
 	// Function should return nil (delete succeeded, leak is logged not returned).
@@ -596,7 +596,7 @@ func TestWrapWorkspaceDeleteFn_UUIDResolvedBeforeDelete(t *testing.T) {
 		return nil
 	}
 
-	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, nil, resolveID)
+	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, resolveID)
 	if err := wrapped(wsName); err != nil {
 		t.Fatalf("wrapped delete returned error: %v", err)
 	}

@@ -344,7 +344,7 @@ func newServerApp(ctx context.Context, config ServerConfig) (_ *serverApp, retEr
 					SigningKey: jwtKey,
 					Expiry:     time.Hour,
 				}
-				cleanups = append(cleanups, func() { _ = app.fleetRegistry.Close() })
+				// fleetRegistry cleanup is handled by registry.Close() via SetFleetRegistry.
 				slog.Info("fleet store registry initialized", "component", "fleet", "redis_address", config.FleetRedis.Address)
 			}
 		}
@@ -355,9 +355,15 @@ func newServerApp(ctx context.Context, config ServerConfig) (_ *serverApp, retEr
 		app.claimMetrics = fleet.NewClaimMetrics()
 	}
 
+	// Wire fleet registry into WorkspaceRegistry so Register/Deregister
+	// atomically manage all three subsystems (pool, subscriber, fleet).
+	if app.fleetRegistry != nil {
+		app.registry.SetFleetRegistry(app.fleetRegistry)
+	}
+
 	// Reconcile all config workspaces (deferred until after fleet registry init
 	// so that other workspaces are also registered in the fleet).
-	reconcileConfigWorkspaces(config.WorkspaceListFn, app.initialWorkspaceID, app.pool != nil, app.registry, app.fleetRegistry)
+	reconcileConfigWorkspaces(config.WorkspaceListFn, app.initialWorkspaceID, app.pool != nil, app.registry)
 
 	// Build fleet registration config (API key + rate limiter)
 	if config.FleetAPIKey != "" && app.fleetRegistry != nil {
@@ -418,8 +424,8 @@ func newServerApp(ctx context.Context, config ServerConfig) (_ *serverApp, retEr
 		cleanups = append(cleanups, app.jwksCleanup)
 	}
 
-	app.wrappedCreateFn = wrapWorkspaceCreateFn(config.WorkspaceCreateFn, app.registry, app.fleetRegistry)
-	app.wrappedDeleteFn = wrapWorkspaceDeleteFn(config.WorkspaceDeleteFn, app.registry, app.fleetRegistry, config.WorkspaceIDResolverFn)
+	app.wrappedCreateFn = wrapWorkspaceCreateFn(config.WorkspaceCreateFn, app.registry)
+	app.wrappedDeleteFn = wrapWorkspaceDeleteFn(config.WorkspaceDeleteFn, app.registry, config.WorkspaceIDResolverFn)
 
 	// Async job store for clone workspace creation (202 + polling).
 	app.jobStore = NewWorkspaceJobStore()

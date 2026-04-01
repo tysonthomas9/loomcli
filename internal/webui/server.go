@@ -51,9 +51,7 @@ func (app *serverApp) Close() {
 	if app.fleetRegCfg != nil && app.fleetRegCfg.RateLimiter != nil {
 		_ = app.fleetRegCfg.RateLimiter.Close()
 	}
-	if app.fleetRegistry != nil {
-		_ = app.fleetRegistry.Close()
-	}
+	// fleetRegistry is closed by registry.Close() — no separate close needed.
 }
 
 // run starts the HTTP server and blocks until the context is canceled or the
