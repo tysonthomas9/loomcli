@@ -194,3 +194,86 @@ func TestEnsureCurrentProjectRegistered_SkipsExistingByPath(t *testing.T) {
 		t.Errorf("ID = %q, want %q (should preserve existing)", ws.ID, existingID)
 	}
 }
+
+func TestEnsureCurrentProjectRegistered_RefusesToSaveOnParseError(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", configDir)
+
+	// Write invalid YAML to the config path.
+	configPath := filepath.Join(configDir, "config.yaml")
+	invalidContent := []byte("{{{broken yaml")
+	if err := os.WriteFile(configPath, invalidContent, 0644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	wsDir := filepath.Join(t.TempDir(), "testproject")
+	if err := os.MkdirAll(wsDir, 0755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	if err := os.Chdir(wsDir); err != nil {
+		t.Fatalf("Chdir() error = %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	ensureCurrentProjectRegistered()
+
+	// The config file must still contain the original invalid content (not overwritten).
+	got, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if string(got) != string(invalidContent) {
+		t.Errorf("config file was overwritten; got %q, want %q", string(got), string(invalidContent))
+	}
+}
+
+func TestEnsureCurrentProjectRegistered_RefusesToSaveOnReadError(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("skipping: root can read anything")
+	}
+
+	configDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", configDir)
+
+	// Create a config file and make it unreadable.
+	configPath := filepath.Join(configDir, "config.yaml")
+	originalContent := []byte("default_workspace: myws\n")
+	if err := os.WriteFile(configPath, originalContent, 0644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.Chmod(configPath, 0000); err != nil {
+		t.Fatalf("Chmod() error = %v", err)
+	}
+	t.Cleanup(func() { os.Chmod(configPath, 0644) })
+
+	wsDir := filepath.Join(t.TempDir(), "testproject2")
+	if err := os.MkdirAll(wsDir, 0755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	if err := os.Chdir(wsDir); err != nil {
+		t.Fatalf("Chdir() error = %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	ensureCurrentProjectRegistered()
+
+	// Restore permissions and verify content unchanged.
+	if err := os.Chmod(configPath, 0644); err != nil {
+		t.Fatalf("Chmod() error = %v", err)
+	}
+	got, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if string(got) != string(originalContent) {
+		t.Errorf("config file was overwritten; got %q, want %q", string(got), string(originalContent))
+	}
+}

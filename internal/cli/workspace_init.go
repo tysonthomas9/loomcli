@@ -116,7 +116,11 @@ func ensureCurrentProjectRegistered() {
 	wsName := filepath.Base(cwd)
 
 	cfg, err := LoadConfig()
-	if err != nil || cfg == nil {
+	if err != nil {
+		slog.Warn("cannot register current project: config load failed", "err", err)
+		return
+	}
+	if cfg == nil {
 		cfg = &LoomConfig{Workspaces: make(map[string]WorkspaceConfig)}
 	}
 	if cfg.Workspaces == nil {
