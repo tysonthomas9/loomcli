@@ -25,7 +25,7 @@ import {
   FilesPage,
   IssueDetailPage,
 } from "@/views";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation, Outlet } from "react-router-dom";
 
 import { updateIssue, addComment, closeIssue } from "@/api";
 import type { IssueContext } from "@/api/terminal";
@@ -65,7 +65,7 @@ import type { BlockedInfo } from "@/components/KanbanBoard";
 import type { ViewMode } from "@/components/ViewSwitcher";
 import {
   useIssues,
-  useViewState,
+  useRouteView,
   useFilterState,
   DEFAULT_GROUP_BY,
   useIssueFilter,
@@ -104,6 +104,7 @@ function App() {
     issueId: string;
   }>();
   const navigate = useNavigate();
+  const location = useLocation();
 
   // Daemon health monitoring
   const {
@@ -155,19 +156,17 @@ function App() {
   // Search input ref for Cmd/Ctrl+K shortcut
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // View state must be read before useIssues to determine fetch mode.
-  // Issue-detail is now detected via route params (routeIssueId).
-  const { view: activeViewFromParams, setView: setActiveView } = useViewState();
+  // View state derived from route path (e.g. /ws/:id/kanban → "kanban").
+  // Issue-detail is detected via the issues/:issueId route segment.
+  const {
+    view: activeView,
+    setView: setActiveView,
+    navigateToView,
+  } = useRouteView();
 
-  // Alias for NavRail/keyboard — setActiveView now uses flushSync internally
-  // via useViewState to force synchronous commit (bypasses React Router v7's
-  // startTransition which gets deferred by terminal WebSocket state updates).
-  const handleNavChange = setActiveView;
+  // Alias for NavRail/keyboard — navigateToView uses push semantics (creates history entry)
+  const handleNavChange = navigateToView;
 
-  // If on the issue-detail route, override the view mode
-  const activeView: ViewMode = routeIssueId
-    ? "issue-detail"
-    : activeViewFromParams;
   const selectedIssueId: string | null = routeIssueId ?? null;
 
   const {
@@ -344,17 +343,15 @@ function App() {
     updateIssueDetails,
   } = useIssueDetail(workspaceId);
 
-  // Previous view state for back/escape navigation.
-  // Tracks the last "content" view (excludes issue-detail, terminal, settings)
-  // so that escape from terminal and back from issue-detail return to the right place.
+  // Previous view for issue-detail back navigation.
+  // Tracks the last "content" view (excludes issue-detail, terminal, settings).
   const previousViewRef = useRef<ViewMode>("kanban");
   if (
-    !routeIssueId &&
-    activeViewFromParams !== "issue-detail" &&
-    activeViewFromParams !== "terminal" &&
-    activeViewFromParams !== "settings"
+    activeView !== "issue-detail" &&
+    activeView !== "terminal" &&
+    activeView !== "settings"
   ) {
-    previousViewRef.current = activeViewFromParams;
+    previousViewRef.current = activeView;
   }
   const previousView = previousViewRef.current;
 
@@ -426,6 +423,22 @@ function App() {
       setHasTerminalUnread(false);
     }
   }, [activeView]);
+
+  // Legacy ?view= migration: redirect old-format URLs to route segments.
+  // E.g. /ws/abc/?view=terminal → /ws/abc/terminal
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const legacyView = params.get("view");
+    if (legacyView) {
+      params.delete("view");
+      const remaining = params.toString();
+      const segment = legacyView === "issue-detail" ? "" : legacyView;
+      navigate(
+        `/ws/${workspaceId}/${segment}${remaining ? `?${remaining}` : ""}`,
+        { replace: true },
+      );
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Redirect away from workspace view in single-repo mode (e.g. stale URL bookmark)
   // Note: In multi-repo mode, the sidebar always shows the workspace tree,
@@ -595,11 +608,14 @@ function App() {
     }, 300);
   }, [closePanel, clearIssue]);
 
-  // Handle back from issue detail view — navigate back to workspace root.
-  // React Router handles browser history traversal.
+  // Handle back from issue detail view — use browser history for natural back nav.
   const handleBackFromDetail = useCallback(() => {
-    navigate(`/ws/${workspaceId}/`);
-  }, [navigate, workspaceId]);
+    if (window.history.length > 1) {
+      navigate(-1);
+    } else {
+      navigateToView("kanban");
+    }
+  }, [navigate, navigateToView]);
 
   // Handle approve button click on review cards
   const handleApprove = useCallback(
@@ -741,8 +757,8 @@ function App() {
 
   // Handle Talk to Lead button click
   const handleTalkToLeadClick = useCallback(() => {
-    setActiveView("terminal");
-  }, [setActiveView]);
+    navigateToView("terminal");
+  }, [navigateToView]);
 
   // Handle "Open in Terminal" from issue detail view
   const handleOpenIssueInTerminal = useCallback(
@@ -754,9 +770,9 @@ function App() {
       if (issue.description) context.description = issue.description;
       if (issue.design) context.design = issue.design;
       setPendingIssueContext(context);
-      setActiveView("terminal");
+      navigateToView("terminal");
     },
-    [setActiveView],
+    [navigateToView],
   );
 
   const handleIssueContextConsumed = useCallback(() => {
@@ -775,9 +791,9 @@ function App() {
   // Handle Talk to Lead from workspace tree
   const handleTreeTalkToLead = useCallback(
     (_workspaceName: string) => {
-      setActiveView("terminal");
+      navigateToView("terminal");
     },
-    [setActiveView],
+    [navigateToView],
   );
 
   // Handle task terminal open from workspace tree (task with active agent)
@@ -787,7 +803,7 @@ function App() {
         const mode = await getAgentTerminalInfo(workspaceId, agentName);
         if (mode === "tmux") {
           setPendingAgentName(agentName);
-          setActiveView("terminal");
+          navigateToView("terminal");
         } else {
           // Archive mode — open agent detail panel instead
           openPanel({ type: "agent", name: agentName });
@@ -797,7 +813,7 @@ function App() {
         openPanel({ type: "agent", name: agentName });
       }
     },
-    [workspaceId, setActiveView, openPanel],
+    [workspaceId, navigateToView, openPanel],
   );
 
   const handleAgentNameConsumed = useCallback(() => {
@@ -1047,7 +1063,7 @@ function App() {
         return <ObservabilityPage activeView={activeView} />;
       case "settings":
         return (
-          <SettingsPage onNavigate={setActiveView} activeView={activeView} />
+          <SettingsPage onNavigate={navigateToView} activeView={activeView} />
         );
       case "workspace":
         return (
@@ -1101,7 +1117,7 @@ function App() {
           }
           sidebar={sidebarContent}
         >
-          <ViewSubSwitcher activeView={activeView} onChange={setActiveView} />
+          <ViewSubSwitcher activeView={activeView} onChange={navigateToView} />
           {(showStaleBanner || isConnectionLost) &&
             staleBannerDisconnectedSince !== null &&
             !(
@@ -1117,6 +1133,8 @@ function App() {
               />
             )}
           {renderViewContent()}
+          {/* Outlet required for nested route matching; child elements are empty */}
+          <Outlet />
           <ToastContainer toasts={toasts} onDismiss={dismissToast} />
           <IssueDetailPanel
             isOpen={isPanelOpen}
@@ -1150,8 +1168,14 @@ function App() {
                 onAgentNameConsumed={handleAgentNameConsumed}
                 onActiveSessionCountChange={setActiveSessionCount}
                 onUnreadChange={setHasTerminalUnread}
-                onEscape={() => setActiveView(previousView || "kanban")}
-                onNavigateToSettings={() => setActiveView("settings")}
+                onEscape={() => {
+                  if (window.history.length > 1) {
+                    navigate(-1);
+                  } else {
+                    navigateToView("kanban");
+                  }
+                }}
+                onNavigateToSettings={() => navigateToView("settings")}
                 {...(selectedIssueId != null && { issueId: selectedIssueId })}
               />
             </Suspense>
@@ -1174,7 +1198,7 @@ function App() {
             retryCountdown={retryCountdown}
             lastError={lastError}
             onRetry={daemonRetryNow}
-            onSettingsClick={() => setActiveView("settings")}
+            onSettingsClick={() => navigateToView("settings")}
           />
         )}
       </SearchTermProvider>

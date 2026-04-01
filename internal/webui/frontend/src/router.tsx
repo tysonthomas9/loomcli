@@ -2,14 +2,23 @@
  * React Router configuration — single source of truth for all routes.
  *
  * Route tree:
- *   /                                → RedirectToWorkspace (resolve last-used or default)
- *   /ws/:workspaceId/                → WorkspaceLayout → App (default view = kanban)
- *   /ws/:workspaceId/issues/:issueId → WorkspaceLayout → App (issue-detail view)
- *   /test/*                          → TestFixtures (dev only, preserved)
- *   *                                → NotFound (404 page)
+ *   /                                      → RedirectToWorkspace (resolve last-used or default)
+ *   /ws/:workspaceId/                      → WorkspaceLayout → App (shell/layout)
+ *     /kanban                              → KanbanPage (via App switch)
+ *     /table                               → TablePage
+ *     /graph                               → GraphPage
+ *     /monitor                             → MonitorPage
+ *     /observability                       → ObservabilityPage
+ *     /terminal                            → TerminalView (always-mounted in shell)
+ *     /settings                            → SettingsPage
+ *     /workspace                           → WorkspacePage
+ *     /files                               → FilesPage
+ *     /issues/:issueId                     → IssueDetailPage
+ *   /test/*                                → TestFixtures (dev only, preserved)
+ *   *                                      → NotFound (404 page)
  */
 
-import { createBrowserRouter } from "react-router-dom";
+import { createBrowserRouter, Navigate } from "react-router-dom";
 
 import App from "@/App";
 import { WorkspaceLayout } from "@/components/WorkspaceLayout";
@@ -64,6 +73,27 @@ const devRoutes = import.meta.env.DEV
     ]
   : [];
 
+/**
+ * View route children under /ws/:workspaceId.
+ * App acts as the layout shell (pathless route); child routes provide URL
+ * segments for matching. App derives the active view from the route path
+ * and renders the corresponding view component.
+ */
+const viewRoutes = [
+  { index: true, element: <Navigate to="kanban" replace /> },
+  { path: "kanban" },
+  { path: "table" },
+  { path: "graph" },
+  { path: "monitor" },
+  { path: "observability" },
+  { path: "terminal" },
+  { path: "settings" },
+  { path: "workspace" },
+  { path: "files" },
+  { path: "issues/:issueId" },
+  { path: "*", element: <Navigate to="kanban" replace /> },
+];
+
 export const router = createBrowserRouter([
   {
     path: "/",
@@ -74,12 +104,8 @@ export const router = createBrowserRouter([
     element: <WorkspaceLayout />,
     children: [
       {
-        index: true,
         element: <App />,
-      },
-      {
-        path: "issues/:issueId",
-        element: <App />,
+        children: viewRoutes,
       },
     ],
   },

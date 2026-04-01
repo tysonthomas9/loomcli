@@ -83,6 +83,9 @@ export type {
 export { useViewState } from "./useViewState";
 export type { UseViewStateOptions, UseViewStateReturn } from "./useViewState";
 
+export { useRouteView } from "./useRouteView";
+export type { UseRouteViewReturn } from "./useRouteView";
+
 export { useIssueDetail } from "./useIssueDetail";
 export type { UseIssueDetailReturn } from "./useIssueDetail";
 

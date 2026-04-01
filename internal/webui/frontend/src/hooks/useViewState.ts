@@ -1,12 +1,14 @@
 /**
- * useViewState - React hook for managing view mode state with URL synchronization.
- * Uses React Router's useSearchParams instead of manual pushState/replaceState.
+ * useViewState — thin wrapper around useRouteView for backwards compatibility.
+ *
+ * Previously managed view state via ?view= query params. Now delegates to
+ * useRouteView which derives the active view from route segments
+ * (e.g. /ws/:id/kanban instead of /ws/:id/?view=kanban).
  */
 
-import { useCallback, useMemo } from "react";
-import { useSearchParams, useLocation, useNavigate } from "react-router-dom";
+import type { ViewMode } from "@/components/ViewSwitcher";
 
-import { type ViewMode, DEFAULT_VIEW } from "@/components/ViewSwitcher";
+import { useRouteView } from "./useRouteView";
 
 /**
  * Valid view modes for validation.
@@ -25,15 +27,10 @@ const VALID_VIEWS: ViewMode[] = [
 ];
 
 /**
- * URL parameter name for view.
- */
-const VIEW_PARAM = "view";
-
-/**
- * Options for useViewState hook.
+ * Options for useViewState hook (kept for interface compatibility).
  */
 export interface UseViewStateOptions {
-  /** Callback invoked when the user navigates back/forward (React Router handles this) */
+  /** Callback invoked when the user navigates back/forward (handled by React Router) */
   onPopState?: (state: Record<string, unknown> | null) => void;
 }
 
@@ -57,56 +54,12 @@ function isValidViewMode(value: string | null): value is ViewMode {
 }
 
 /**
- * React hook for managing view mode state with URL synchronization.
- * Uses React Router's useSearchParams for URL sync — no manual
- * pushState/replaceState or popstate listeners needed.
+ * React hook for managing view mode state — delegates to useRouteView.
  */
 export function useViewState(
   _options: UseViewStateOptions = {},
 ): UseViewStateReturn {
-  const [searchParams] = useSearchParams();
-  const location = useLocation();
-  const navigate = useNavigate();
-
-  // Read current view from search params
-  const view = useMemo((): ViewMode => {
-    const raw = searchParams.get(VIEW_PARAM);
-    return isValidViewMode(raw) ? raw : DEFAULT_VIEW;
-  }, [searchParams]);
-
-  // Build a URL with updated view param, preserving other search params
-  const buildViewUrl = useCallback(
-    (newView: ViewMode) => {
-      const next = new URLSearchParams(searchParams);
-      if (newView === DEFAULT_VIEW) {
-        next.delete(VIEW_PARAM);
-      } else {
-        next.set(VIEW_PARAM, newView);
-      }
-      const qs = next.toString();
-      return `${location.pathname}${qs ? `?${qs}` : ""}`;
-    },
-    [searchParams, location.pathname],
-  );
-
-  // Set view with replace semantics (no history entry).
-  // Uses navigate() with flushSync to force synchronous commit.
-  // React Router v7 wraps setSearchParams in startTransition, which gets
-  // indefinitely deferred when the terminal streams WebSocket data.
-  const setView = useCallback(
-    (newView: ViewMode) => {
-      navigate(buildViewUrl(newView), { replace: true, flushSync: true });
-    },
-    [navigate, buildViewUrl],
-  );
-
-  // Navigate to a view with push semantics (creates history entry)
-  const navigateToView = useCallback(
-    (newView: ViewMode, _state?: Record<string, unknown>) => {
-      navigate(buildViewUrl(newView), { replace: false, flushSync: true });
-    },
-    [navigate, buildViewUrl],
-  );
+  const { view, setView, navigateToView } = useRouteView();
 
   return { view, setView, navigateToView };
 }
