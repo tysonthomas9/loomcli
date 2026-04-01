@@ -1384,7 +1384,7 @@ Fleet endpoints use a two-layer authentication model:
 1. **Registration auth (`X-Fleet-API-Key`):** The register endpoint validates a pre-shared API key via the `X-Fleet-API-Key` header using constant-time comparison (`crypto/subtle.ConstantTimeCompare`). This is the bootstrap mechanism.
 2. **JWT bearer auth (`Authorization: Bearer`):** After registration, the worker receives a JWT (HMAC-SHA256, default 1-hour expiry). The claim, heartbeat, and done endpoints are protected by `FleetAuthMiddleware` which validates this JWT and injects `WorkerClaims` into the request context.
 
-The JWT signing key is managed in Redis via `SigningKeyManager` (supports key rotation with previous-version grace period). When no signing key is configured, the JWT middleware is not applied to claim and heartbeat routes.
+The JWT signing key is managed in Redis via `SigningKeyManager` (supports key rotation with previous-version grace period). When no signing key is configured, the JWT middleware is not applied to claim, heartbeat, or done routes.
 
 ### Data Models
 
