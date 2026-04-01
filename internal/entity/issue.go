@@ -49,6 +49,7 @@ type Issue struct {
 	// ===== Relational Data =====
 	Labels       []string      `json:"labels,omitempty"`
 	Dependencies []*Dependency `json:"dependencies,omitempty"`
+	Comments     []*Comment    `json:"comments,omitempty"`
 
 	// ===== Tombstone Fields =====
 	DeletedAt    *time.Time `json:"deleted_at,omitempty"`
