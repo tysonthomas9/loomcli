@@ -120,6 +120,8 @@ Also check these universal edge cases where applicable:
 
 {{ .ReviewStep }}
 
+{{ .InspectReviewStep }}
+
 ### Step 7: Fix Review Issues
 - Address ALL issues identified in code review
 - Re-run tests after making fixes

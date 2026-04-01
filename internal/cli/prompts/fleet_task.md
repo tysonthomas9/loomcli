@@ -43,6 +43,8 @@ Before writing any code:
 
 {{ .ReviewStep }}
 
+{{ .InspectReviewStep }}
+
 ### Step 7: Fix Review Issues
 - Address ALL issues identified in code review
 - Re-run tests after making fixes

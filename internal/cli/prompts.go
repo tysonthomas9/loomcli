@@ -18,19 +18,20 @@ var promptFS embed.FS
 
 // promptTemplateData holds all template context fields for prompt rendering.
 type promptTemplateData struct {
-	AgentName       string
-	WorkspaceBlock  string
-	EpicScope       string
-	SafetyBlock     string
-	BdReadyJSON     string
-	BdReadyFallback string
-	TaskID          string
-	TestStep        string
-	ReviewStep      string
-	SourceBranch    string
-	TargetBranch    string
-	ConflictList    string
-	PushRef         string
+	AgentName         string
+	WorkspaceBlock    string
+	EpicScope         string
+	SafetyBlock       string
+	BdReadyJSON       string
+	BdReadyFallback   string
+	TaskID            string
+	TestStep          string
+	ReviewStep        string
+	InspectReviewStep string
+	SourceBranch      string
+	TargetBranch      string
+	ConflictList      string
+	PushRef           string
 }
 
 // renderPrompt loads a template by name, checks for per-project override,
@@ -178,6 +179,17 @@ func buildReviewStep(backendName string) string {
 - Document and fix all issues found`
 }
 
+// buildInspectReviewStep returns the inspect-reviewer step for Claude backends.
+func buildInspectReviewStep(backendName string) string {
+	if backendName == "claude" {
+		return `### Step 6b: Inspect Review (spawn agent)
+- Use the Agent tool with subagent_type='inspect-reviewer'
+- Prompt: 'Review the latest commit on the current branch. Check for bugs, logic errors, security vulnerabilities, and code quality issues.'
+- Document all issues found`
+	}
+	return ""
+}
+
 // GeneratePlanningPrompt creates the prompt for the planning agent.
 // If workspace is non-nil, workspace context is injected into the prompt.
 // If parentID is non-empty, the prompt scopes task discovery to that epic.
@@ -230,14 +242,15 @@ func GenerateTaskPrompt(agentName string, workspace *WorkspaceConfig, parentID s
 	}
 
 	prompt := renderPrompt("task", promptTemplateData{
-		AgentName:       agentName,
-		WorkspaceBlock:  buildWorkspaceContextBlock(workspace),
-		EpicScope:       epicScope,
-		SafetyBlock:     buildSafetyGuardrailsBlock(),
-		BdReadyJSON:     bdReadyJSON,
-		BdReadyFallback: bdReadyFallback,
-		TestStep:        buildTestStep(backendName),
-		ReviewStep:      buildReviewStep(backendName),
+		AgentName:         agentName,
+		WorkspaceBlock:    buildWorkspaceContextBlock(workspace),
+		EpicScope:         epicScope,
+		SafetyBlock:       buildSafetyGuardrailsBlock(),
+		BdReadyJSON:       bdReadyJSON,
+		BdReadyFallback:   bdReadyFallback,
+		TestStep:          buildTestStep(backendName),
+		ReviewStep:        buildReviewStep(backendName),
+		InspectReviewStep: buildInspectReviewStep(backendName),
 	})
 
 	// Inject checkpoint context if available
@@ -265,12 +278,13 @@ func GenerateFleetPlanningPrompt(agentName, taskID string, workspace *WorkspaceC
 // Fleet workers receive their task from the Fleet API and skip task selection/claiming.
 func GenerateFleetTaskPrompt(agentName, taskID string, workspace *WorkspaceConfig, backendName string) string {
 	return renderPrompt("fleet_task", promptTemplateData{
-		AgentName:      agentName,
-		WorkspaceBlock: buildWorkspaceContextBlock(workspace),
-		SafetyBlock:    buildSafetyGuardrailsBlock(),
-		TaskID:         taskID,
-		TestStep:       buildTestStep(backendName),
-		ReviewStep:     buildReviewStep(backendName),
+		AgentName:         agentName,
+		WorkspaceBlock:    buildWorkspaceContextBlock(workspace),
+		SafetyBlock:       buildSafetyGuardrailsBlock(),
+		TaskID:            taskID,
+		TestStep:          buildTestStep(backendName),
+		ReviewStep:        buildReviewStep(backendName),
+		InspectReviewStep: buildInspectReviewStep(backendName),
 	})
 }
 
