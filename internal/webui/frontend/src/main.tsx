@@ -9,7 +9,11 @@ import { BootError } from "@/components/BootError";
 import { initErrorReporter, reportError } from "@/api/errorReporter";
 import { ToastProvider } from "@/hooks";
 import { router } from "@/router";
-import { fetchAppConfig, type AppConfig } from "@/api/appConfig";
+import {
+  fetchAppConfig,
+  AppConfigError,
+  type AppConfig,
+} from "@/api/appConfig";
 import { initExternalAuth } from "@/api/authClient";
 import { ExternalAuthProvider, NoAuthProvider } from "@/contexts/AuthContext";
 import { AuthGate } from "@/components/AuthGate";
@@ -68,20 +72,35 @@ function renderApp(config: AppConfig): void {
   );
 }
 
-async function bootAndRender(): Promise<void> {
-  let config: AppConfig;
-  try {
-    config = await fetchAppConfig();
-  } catch (error) {
-    renderBootError(error);
-    return;
-  }
+const BOOT_TIMEOUT_MS = 10_000;
+
+async function doBootAndRender(): Promise<void> {
+  const config = await fetchAppConfig();
 
   if (config.mode === "external") {
     initExternalAuth(config.auth_url);
   }
 
   renderApp(config);
+}
+
+async function bootAndRender(): Promise<void> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    await Promise.race([
+      doBootAndRender(),
+      new Promise<never>((_resolve, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new AppConfigError("Application boot timed out"));
+        }, BOOT_TIMEOUT_MS);
+      }),
+    ]);
+  } catch (error) {
+    renderBootError(error);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
 }
 
 bootAndRender().catch((error) => {
