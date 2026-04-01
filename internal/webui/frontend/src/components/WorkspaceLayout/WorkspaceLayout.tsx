@@ -47,7 +47,11 @@ export function WorkspaceLayout() {
         if (data && data.id) {
           setValid(true);
         } else {
-          navigate("/", { replace: true });
+          clearLastWorkspaceId(workspaceId);
+          navigate("/", {
+            replace: true,
+            state: { failedWorkspaceId: workspaceId },
+          });
         }
         setValidating(false);
       })
@@ -61,7 +65,10 @@ export function WorkspaceLayout() {
           err.status === 404
         ) {
           clearLastWorkspaceId(workspaceId);
-          navigate("/", { replace: true });
+          navigate("/", {
+            replace: true,
+            state: { failedWorkspaceId: workspaceId },
+          });
           setValidating(false);
           return;
         }

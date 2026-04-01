@@ -6,7 +6,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 
 import {
   getLastWorkspaceId,
@@ -16,18 +16,21 @@ import { fetchWorkspace } from "@/api/workspace";
 
 export function RedirectToWorkspace() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [resolving, setResolving] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
 
     const lastId = getLastWorkspaceId();
+    const failedId = (location.state as { failedWorkspaceId?: string } | null)
+      ?.failedWorkspaceId;
 
     // Fetch workspace list — validates lastId and provides fallback
     fetchWorkspace()
       .then((data) => {
         if (cancelled) return;
-        const workspaces = data.workspaces;
+        const workspaces = data.workspaces.filter((ws) => ws.id !== failedId);
         if (workspaces.length === 0) {
           if (lastId) clearLastWorkspaceId(lastId);
           setResolving(false);
@@ -52,18 +55,16 @@ export function RedirectToWorkspace() {
       })
       .catch(() => {
         if (cancelled) return;
-        // Network error — try localStorage as best-effort if available
-        if (lastId) {
-          navigate(`/ws/${lastId}/`, { replace: true });
-          return;
-        }
+        // API unreachable — show empty state. Do NOT blindly redirect to
+        // a potentially stale lastId; WorkspaceLayout will just 404 and
+        // redirect back, creating a loop.
         setResolving(false);
       });
 
     return () => {
       cancelled = true;
     };
-  }, [navigate]);
+  }, [navigate, location.state]);
 
   if (!resolving) {
     return (
