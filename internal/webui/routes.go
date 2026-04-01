@@ -18,7 +18,7 @@ import (
 
 // setupRoutes configures all HTTP routes for the server.
 // allowedOrigins is the list of allowed CORS origins for WebSocket validation.
-func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPool, hub *SSEHub, getMutationsSince func(wsID string, since int64) []rpc.MutationEvent, termManager *TerminalManager, termAuth *terminalAuth, fleetRegistry *fleet.StoreRegistry, tokenCfg *TokenConfig, allowedOrigins []string, fleetRegCfg *FleetRegisterConfig, claimMetrics *fleet.ClaimMetrics, devMode bool, devFrontendDir string, loomServerURL string, gitOps GitOps, fileOps FileOps, tabMetaStore *tabmeta.Store, issueTabStore *issuetabs.Store, workspaceConfigFn func() (*WorkspaceData, error), workspaceDeleteFn func(string) error, setDefaultWsFn func(string) error, clearDefaultWsFn func() error, workspaceCreateFn WorkspaceCreateFn, backendOps BackendOps, sessionHistoryStore *sessionhistory.Store, sessStore *sessions.Store, wsExistsFn func(string) bool, workspaceConfigByIDFn func(string) (*WorkspaceData, error), extAuthURL string, sseTokens *sseTokenStore, jobStore *WorkspaceJobStore) (*clientErrorLimiter, *cspReportLimiter, *authConfigLimiter) { //nolint:funlen // route registration function
+func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPool, hub *SSEHub, getMutationsSince func(wsID string, since int64) []rpc.MutationEvent, termManager *TerminalManager, termAuth *terminalAuth, fleetRegistry *fleet.StoreRegistry, tokenCfg *TokenConfig, allowedOrigins []string, fleetRegCfg *FleetRegisterConfig, claimMetrics *fleet.ClaimMetrics, devMode bool, devFrontendDir string, loomServerURL string, gitOps GitOps, fileOps FileOps, tabMetaStore *tabmeta.Store, issueTabStore *issuetabs.Store, workspaceConfigFn func() (*WorkspaceData, error), workspaceDeleteFn func(string) error, setDefaultWsFn func(string) error, clearDefaultWsFn func() error, workspaceCreateFn WorkspaceCreateFn, backendOps BackendOps, sessionHistoryStore *sessionhistory.Store, sessStore *sessions.Store, wsExistsFn func(string) bool, workspaceConfigByIDFn func(string) (*WorkspaceData, error), extAuthURL string, sseTokens *sseTokenStore, jobStore *WorkspaceJobStore, notifyToken string) (*clientErrorLimiter, *cspReportLimiter, *authConfigLimiter) { //nolint:funlen // route registration function
 	// Health check endpoint for load balancers and monitoring
 	mux.HandleFunc("GET /health", handleHealth(pool))
 
@@ -82,7 +82,7 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 
 	// Session change notification endpoint for local agents to push SSE events
 	if hub != nil {
-		mux.HandleFunc("POST /api/sessions/notify", handleNotifySessionChange(hub))
+		mux.HandleFunc("POST /api/sessions/notify", handleNotifySessionChange(hub, notifyToken))
 	}
 
 	// Workspace management and workspace-scoped API routes

@@ -57,6 +57,7 @@ type ServerConfig struct {
 	BackendOps              BackendOps                           // Backend health operations interface (optional; nil disables backend health endpoint)
 	ScrollbackMaxLines      int                                  // Maximum lines per scrollback buffer (0 = default 10000)
 	SessionsStore           *sessions.Store                      // File-based session audit trail store (optional; nil disables session endpoints)
+	NotifyTokenDir          string                               // Directory to write notify.token (typically beads dir); empty = token file not written
 	Logger                  *slog.Logger                         // Structured logger (optional; nil falls back to slog.Default())
 }
 

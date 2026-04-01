@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 	"testing"
@@ -127,4 +129,63 @@ func TestActiveSessionEnvVars_Concurrent(t *testing.T) {
 	}
 
 	wg.Wait()
+}
+
+// --- resolveNotifyToken tests ---
+
+func TestResolveNotifyToken_EnvVar(t *testing.T) {
+	t.Setenv("LOOM_NOTIFY_TOKEN", "token-from-env")
+
+	got := resolveNotifyToken()
+	if got != "token-from-env" {
+		t.Errorf("resolveNotifyToken() = %q, want %q", got, "token-from-env")
+	}
+}
+
+func TestResolveNotifyToken_FileOnDisk(t *testing.T) {
+	// Ensure LOOM_NOTIFY_TOKEN env var is not set.
+	t.Setenv("LOOM_NOTIFY_TOKEN", "")
+
+	// Set up a workspace config so GetBeadsDir() returns a known temp dir.
+	ResetBeadsDirCache()
+	beadsDir := t.TempDir()
+	cfg := &LoomConfig{
+		DefaultWorkspace: "test",
+		Workspaces: map[string]WorkspaceConfig{
+			"test": {Path: beadsDir},
+		},
+	}
+	setupWorkspaceConfig(t, cfg)
+
+	// Write the notify.token file.
+	tokenContent := "token-from-file"
+	if err := os.WriteFile(filepath.Join(beadsDir, "notify.token"), []byte(tokenContent), 0o600); err != nil {
+		t.Fatalf("write notify.token: %v", err)
+	}
+
+	got := resolveNotifyToken()
+	if got != tokenContent {
+		t.Errorf("resolveNotifyToken() = %q, want %q", got, tokenContent)
+	}
+}
+
+func TestResolveNotifyToken_BothFail(t *testing.T) {
+	// No env var.
+	t.Setenv("LOOM_NOTIFY_TOKEN", "")
+
+	// Set up workspace config pointing to a temp dir without notify.token.
+	ResetBeadsDirCache()
+	beadsDir := t.TempDir()
+	cfg := &LoomConfig{
+		DefaultWorkspace: "test",
+		Workspaces: map[string]WorkspaceConfig{
+			"test": {Path: beadsDir},
+		},
+	}
+	setupWorkspaceConfig(t, cfg)
+
+	got := resolveNotifyToken()
+	if got != "" {
+		t.Errorf("resolveNotifyToken() = %q, want empty string", got)
+	}
 }

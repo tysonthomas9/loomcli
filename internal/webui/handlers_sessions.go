@@ -1,13 +1,14 @@
 package webui
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"net"
 	"net/http"
 	"os"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
@@ -294,16 +295,21 @@ type sessionNotifyRequest struct {
 // agent processes when a session status changes, and broadcasts a session_change
 // SSE event to all connected web UI clients.
 // POST /api/sessions/notify
-func handleNotifySessionChange(hub *SSEHub) http.HandlerFunc {
+func handleNotifySessionChange(hub *SSEHub, notifyToken string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Restrict to loopback only — this endpoint is for local agents, not external callers.
-		host, _, err := net.SplitHostPort(r.RemoteAddr)
-		if err != nil {
+		// Validate bearer token — fail-closed if server token is empty.
+		if notifyToken == "" {
 			http.Error(w, "Forbidden", http.StatusForbidden)
 			return
 		}
-		ip := net.ParseIP(host)
-		if ip == nil || !ip.IsLoopback() {
+		authHeader := r.Header.Get("Authorization")
+		const prefix = "Bearer "
+		if !strings.HasPrefix(authHeader, prefix) {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
+		token := authHeader[len(prefix):]
+		if subtle.ConstantTimeCompare([]byte(token), []byte(notifyToken)) != 1 {
 			http.Error(w, "Forbidden", http.StatusForbidden)
 			return
 		}

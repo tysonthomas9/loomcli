@@ -2,6 +2,8 @@ package cli
 
 import (
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -62,4 +64,23 @@ func resolveWebUIURL() string {
 		return url
 	}
 	return "http://127.0.0.1:8080"
+}
+
+// resolveNotifyToken returns the bearer token for authenticating to the
+// POST /api/sessions/notify endpoint. Checks LOOM_NOTIFY_TOKEN env var first,
+// then falls back to reading <beads_dir>/notify.token from disk.
+// Returns empty string if both fail (server will reject with 403).
+func resolveNotifyToken() string {
+	if token := os.Getenv("LOOM_NOTIFY_TOKEN"); token != "" {
+		return token
+	}
+	beadsDir := GetBeadsDir()
+	if beadsDir == "" {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(beadsDir, "notify.token")) //nolint:gosec // beadsDir from GetBeadsDir(), filename is constant
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }

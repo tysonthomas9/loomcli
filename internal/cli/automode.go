@@ -280,7 +280,7 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 			})
 			if sess != nil {
 				SetActiveSessionEnv(GetBeadsDir(), sess.SessionID())
-				go sessions.NotifyWebUI(context.Background(), resolveWebUIURL(), "", sess.SessionID(), sessions.StatusRunning)
+				go sessions.NotifyWebUI(context.Background(), resolveWebUIURL(), "", sess.SessionID(), sessions.StatusRunning, resolveNotifyToken())
 			}
 		}
 
@@ -318,7 +318,7 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 				},
 			})
 			ClearActiveSessionEnv()
-			go sessions.NotifyWebUI(context.Background(), resolveWebUIURL(), taskID, sess.SessionID(), sess.Meta.Status)
+			go sessions.NotifyWebUI(context.Background(), resolveWebUIURL(), taskID, sess.SessionID(), sess.Meta.Status, resolveNotifyToken())
 		}
 
 		// Return to idle state after agent finishes

@@ -20,7 +20,8 @@ type sessionNotifyPayload struct {
 // NotifyWebUI sends a fire-and-forget POST to the web UI so it can broadcast
 // a session_change SSE event to connected clients. If serverURL is empty the
 // call is a no-op. Errors are logged to stderr but never returned.
-func NotifyWebUI(ctx context.Context, serverURL, taskID, sessionID string, status SessionStatus) {
+// notifyToken is included as a Bearer token in the Authorization header when non-empty.
+func NotifyWebUI(ctx context.Context, serverURL, taskID, sessionID string, status SessionStatus, notifyToken string) {
 	if serverURL == "" {
 		return
 	}
@@ -47,6 +48,9 @@ func NotifyWebUI(ctx context.Context, serverURL, taskID, sessionID string, statu
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if notifyToken != "" {
+		req.Header.Set("Authorization", "Bearer "+notifyToken)
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

@@ -312,6 +312,7 @@ func runServe(cmd *cobra.Command, args []string) {
 				WorkspaceIDResolverFn: resolveWorkspaceID,
 				BackendOps:            backendOps,
 				SessionsStore:         sessStore,
+				NotifyTokenDir:        GetBeadsDir(),
 				Logger:                slog.Default(),
 			}
 			if serveCorsOrigin != "" {

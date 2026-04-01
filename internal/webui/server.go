@@ -374,9 +374,15 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		return multiPool.PoolForWorkspace(id) != nil
 	}
 
+	// Generate and persist notify token for session change endpoint auth.
+	notifyToken, notifyTokenFile := generateNotifyToken(config.NotifyTokenDir)
+	if notifyTokenFile != "" {
+		defer func() { _ = os.Remove(notifyTokenFile) }()
+	}
+
 	// Create HTTP server and register routes (allowedOrigins: nil = same-origin only)
 	mux := http.NewServeMux()
-	clientErrLimiter, cspLimiter, authCfgLimiter := setupRoutes(mux, pool, multiPool, hub, getMutationsSince, termMgr, termAuth, fleetRegistry, tokenCfg, corsConfig.AllowedOrigins, fleetRegCfg, claimMetrics, config.DevMode, config.DevFrontendDir, config.LoomServerURL, config.GitOps, config.FileOps, tabMetaStore, issueTabStore, config.WorkspaceConfigFn, wrappedDeleteFn, config.SetDefaultWorkspaceFn, config.ClearDefaultWorkspaceFn, wrappedCreateFn, config.BackendOps, sessionHistoryStore, config.SessionsStore, wsExistsFn, config.WorkspaceConfigByIDFn, config.ExtAuthURL, sseTokens, jobStore)
+	clientErrLimiter, cspLimiter, authCfgLimiter := setupRoutes(mux, pool, multiPool, hub, getMutationsSince, termMgr, termAuth, fleetRegistry, tokenCfg, corsConfig.AllowedOrigins, fleetRegCfg, claimMetrics, config.DevMode, config.DevFrontendDir, config.LoomServerURL, config.GitOps, config.FileOps, tabMetaStore, issueTabStore, config.WorkspaceConfigFn, wrappedDeleteFn, config.SetDefaultWorkspaceFn, config.ClearDefaultWorkspaceFn, wrappedCreateFn, config.BackendOps, sessionHistoryStore, config.SessionsStore, wsExistsFn, config.WorkspaceConfigByIDFn, config.ExtAuthURL, sseTokens, jobStore, notifyToken)
 	defer clientErrLimiter.stop()
 	defer cspLimiter.stop()
 	defer authCfgLimiter.stop()
