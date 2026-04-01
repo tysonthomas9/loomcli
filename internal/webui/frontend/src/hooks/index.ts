@@ -124,6 +124,19 @@ export {
 } from "./useAgentContext";
 export type { AgentContextValue, AgentProviderProps } from "./useAgentContext";
 
+export {
+  EventProvider,
+  useEventContext,
+  useEventSubscription,
+  EventContext,
+  NO_EVENT_CONTEXT,
+} from "./useEventProvider";
+export type {
+  EventContextValue,
+  EventProviderProps,
+  SubscriptionOptions,
+} from "./useEventProvider";
+
 export { useToast, ToastProvider } from "./useToast";
 export type {
   ToastType,
