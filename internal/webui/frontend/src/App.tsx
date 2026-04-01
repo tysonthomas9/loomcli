@@ -13,6 +13,18 @@ import {
   Suspense,
   type RefObject,
 } from "react";
+
+import {
+  KanbanPage,
+  TablePage,
+  GraphPage,
+  MonitorPage,
+  ObservabilityPage,
+  SettingsPage,
+  WorkspacePage,
+  FilesPage,
+  IssueDetailPage,
+} from "@/views";
 import { useParams, useNavigate } from "react-router-dom";
 
 import { updateIssue, addComment, closeIssue } from "@/api";
@@ -23,12 +35,9 @@ import { getReviewType } from "@/utils/issueCategory";
 import {
   AppLayout,
   WorkspaceBreadcrumb,
-  SwimLaneBoard,
-  IssueTable,
   LoadingSkeleton,
   EmptyWorkspaceBoard,
   ErrorDisplay,
-  ErrorBoundary,
   ConnectionStatus,
   StaleDataBanner,
   DaemonUnavailableOverlay,
@@ -38,11 +47,9 @@ import {
   SearchInput,
   SearchScopeIndicator,
   IssueDetailPanel,
-  IssueDetailView,
   AgentDetailPanel,
   WorkspaceTree,
   AssigneePrompt,
-  BulkActionToolbar,
   TalkToLeadButton,
   NavRail,
   ViewSubSwitcher,
@@ -82,50 +89,11 @@ import type { Issue, IssueDetails, Status } from "@/types";
 
 import styles from "./App.module.css";
 
-// Lazy load GraphView (React Flow ~100KB)
-const GraphView = lazy(() =>
-  import("@/components/GraphView").then((m) => ({ default: m.GraphView })),
-);
-
-// Lazy load MonitorDashboard (multi-agent operator view)
-const MonitorDashboard = lazy(() =>
-  import("@/components/MonitorDashboard").then((m) => ({
-    default: m.MonitorDashboard,
-  })),
-);
-
-// Lazy load SettingsView (backend config settings)
-const SettingsView = lazy(() =>
-  import("@/components/SettingsView").then((m) => ({
-    default: m.SettingsView,
-  })),
-);
-
-// Lazy load ObservabilityDashboard (observability metrics view)
-const ObservabilityDashboard = lazy(() =>
-  import("@/components/ObservabilityDashboard").then((m) => ({
-    default: m.ObservabilityDashboard,
-  })),
-);
-
-// Lazy load TerminalView (xterm.js ~100KB)
+// Lazy load TerminalView (xterm.js ~100KB) — stays in App.tsx because terminal
+// is always-mounted in the shell to preserve WebSocket connections across views.
 const TerminalView = lazy(() =>
   import("@/components/TerminalView").then((m) => ({
     default: m.TerminalView,
-  })),
-);
-
-// Lazy load WorkspaceView (multi-repo workspace)
-const WorkspaceView = lazy(() =>
-  import("@/components/WorkspaceView").then((m) => ({
-    default: m.WorkspaceView,
-  })),
-);
-
-// Lazy load FileExplorer (CodeMirror 6 ~100KB)
-const FileExplorer = lazy(() =>
-  import("@/components/FileExplorer").then((m) => ({
-    default: m.FileExplorer,
   })),
 );
 
@@ -975,151 +943,140 @@ function App() {
     />
   );
 
-  // Loading state: show skeleton columns (only for issue-based views;
-  // terminal and other independent views render without waiting for issues)
-  if (isLoading && activeView !== "terminal" && activeView !== "settings") {
-    return (
-      <>
-        <AppLayout
-          title={headerTitle}
-          navigation={headerNavigation}
-          actions={headerActions}
-          navRail={
-            <NavRail
-              activeView={activeView}
-              onChange={handleNavChange}
-              sessionCount={activeSessionCount}
-              badges={{ terminal: hasTerminalUnread }}
-            />
-          }
-          sidebar={sidebarContent}
-        >
-          <ViewSubSwitcher activeView={activeView} onChange={setActiveView} />
-          {(showStaleBanner || isConnectionLost) &&
-            staleBannerDisconnectedSince !== null && (
-              <StaleDataBanner
-                disconnectedSince={staleBannerDisconnectedSince}
-                onRetry={staleBannerRetry}
-                connectionLost={isConnectionLost}
-              />
-            )}
-          <div
-            className={styles.loadingContainer}
-            data-testid="loading-container"
-          >
-            {activeView === "table" ? (
-              <LoadingSkeleton.Table />
-            ) : (
-              <>
-                <LoadingSkeleton.Column />
-                <LoadingSkeleton.Column />
-                <LoadingSkeleton.Column />
-              </>
-            )}
-          </div>
-        </AppLayout>
-        {!isDaemonAvailable && (
-          <DaemonUnavailableOverlay
-            mode={connectionMode}
-            retryCountdown={retryCountdown}
-            lastError={lastError}
-            onRetry={daemonRetryNow}
-            onSettingsClick={() => setActiveView("settings")}
-          />
-        )}
-      </>
-    );
-  }
+  // Whether the current view depends on issue data (loading/error/empty guards)
+  const isIssueBasedView =
+    activeView === "kanban" ||
+    activeView === "table" ||
+    activeView === "graph" ||
+    activeView === "issue-detail";
 
-  // Error state: show error display with retry (only for issue-based views;
-  // terminal, settings, and other independent views should still render)
-  const issueBasedViews = new Set(["kanban", "table", "graph", "issue-detail"]);
-  if (error && !isLoading && issueBasedViews.has(activeView)) {
-    return (
-      <>
-        <AppLayout
-          title={headerTitle}
-          navigation={headerNavigation}
-          actions={headerActions}
-          navRail={
-            <NavRail
-              activeView={activeView}
-              onChange={handleNavChange}
-              sessionCount={activeSessionCount}
-              badges={{ terminal: hasTerminalUnread }}
-            />
-          }
-          sidebar={sidebarContent}
+  // Inline content guard: renders loading/error/empty for issue-based views,
+  // or the actual view component for all views including independent ones.
+  const renderViewContent = () => {
+    // Issue-based views: show loading skeleton while fetching
+    if (isLoading && isIssueBasedView) {
+      return (
+        <div
+          className={styles.loadingContainer}
+          data-testid="loading-container"
         >
-          <ViewSubSwitcher activeView={activeView} onChange={setActiveView} />
-          {(showStaleBanner || isConnectionLost) &&
-            staleBannerDisconnectedSince !== null && (
-              <StaleDataBanner
-                disconnectedSince={staleBannerDisconnectedSince}
-                onRetry={staleBannerRetry}
-                connectionLost={isConnectionLost}
-              />
-            )}
-          <ErrorDisplay
-            variant="fetch-error"
-            error={new Error(error)}
-            showDetails
-            onRetry={refetch}
-          />
-        </AppLayout>
-        {!isDaemonAvailable && (
-          <DaemonUnavailableOverlay
-            mode={connectionMode}
-            retryCountdown={retryCountdown}
-            lastError={lastError}
-            onRetry={daemonRetryNow}
-            onSettingsClick={() => setActiveView("settings")}
-          />
-        )}
-      </>
-    );
-  }
+          {activeView === "table" ? (
+            <LoadingSkeleton.Table />
+          ) : (
+            <>
+              <LoadingSkeleton.Column />
+              <LoadingSkeleton.Column />
+              <LoadingSkeleton.Column />
+            </>
+          )}
+        </div>
+      );
+    }
 
-  // Empty state: no issues across issue-based views
-  if (
-    issues.length === 0 &&
-    (activeView === "kanban" ||
-      activeView === "table" ||
-      activeView === "graph")
-  ) {
-    return (
-      <>
-        <AppLayout
-          title={headerTitle}
-          navigation={headerNavigation}
-          actions={headerActions}
-          navRail={
-            <NavRail
-              activeView={activeView}
-              onChange={handleNavChange}
-              sessionCount={activeSessionCount}
-              badges={{ terminal: hasTerminalUnread }}
-            />
-          }
-          sidebar={sidebarContent}
-        >
-          <ViewSubSwitcher activeView={activeView} onChange={setActiveView} />
-          <EmptyWorkspaceBoard isMultiRepo={isMultiRepo} />
-        </AppLayout>
-        {!isDaemonAvailable && (
-          <DaemonUnavailableOverlay
-            mode={connectionMode}
-            retryCountdown={retryCountdown}
-            lastError={lastError}
-            onRetry={daemonRetryNow}
-            onSettingsClick={() => setActiveView("settings")}
-          />
-        )}
-      </>
-    );
-  }
+    // Issue-based views: show error display with retry
+    if (error && !isLoading && isIssueBasedView) {
+      return (
+        <ErrorDisplay
+          variant="fetch-error"
+          error={new Error(error)}
+          showDetails
+          onRetry={refetch}
+        />
+      );
+    }
 
-  // Success state: show view based on activeView with filtered issues
+    // Issue-based views (except issue-detail): show empty state
+    if (
+      issues.length === 0 &&
+      (activeView === "kanban" ||
+        activeView === "table" ||
+        activeView === "graph")
+    ) {
+      return <EmptyWorkspaceBoard isMultiRepo={isMultiRepo} />;
+    }
+
+    // Render the active view
+    switch (activeView) {
+      case "kanban":
+        return (
+          <KanbanPage
+            filteredIssues={filteredIssues}
+            groupBy={filters.groupBy ?? DEFAULT_GROUP_BY}
+            onDragEnd={handleDragEnd}
+            onIssueClick={handleIssueClick}
+            isMultiRepo={isMultiRepo}
+            activeView={activeView}
+            blockedIssuesMap={blockedIssuesMap}
+            showBlocked={filters.showBlocked}
+            pendingIds={pendingIds}
+          />
+        );
+      case "table":
+        return (
+          <TablePage
+            filteredIssues={filteredIssues}
+            selectedIds={selectedIds}
+            onSelectionChange={toggleSelection}
+            onClearSelection={clearSelection}
+            onIssueClick={handleIssueClick}
+            searchTerm={debouncedSearch}
+            activeView={activeView}
+            selectedIssueId={selectedIssueId}
+            blockedIssuesMap={blockedIssuesMap}
+            showBlocked={filters.showBlocked}
+          />
+        );
+      case "graph":
+        return (
+          <GraphPage
+            filteredIssues={filteredIssues}
+            onNodeClick={handleIssueClick}
+            activeView={activeView}
+          />
+        );
+      case "monitor":
+        return (
+          <MonitorPage
+            onViewChange={handleNavChange}
+            onIssueClick={handleIssueClick}
+            onAgentClick={handleAgentClick}
+            activeView={activeView}
+          />
+        );
+      case "observability":
+        return <ObservabilityPage activeView={activeView} />;
+      case "settings":
+        return (
+          <SettingsPage onNavigate={setActiveView} activeView={activeView} />
+        );
+      case "workspace":
+        return (
+          <WorkspacePage isMultiRepo={isMultiRepo} activeView={activeView} />
+        );
+      case "files":
+        return <FilesPage activeView={activeView} />;
+      case "issue-detail":
+        return (
+          <IssueDetailPage
+            issueDetails={issueDetails}
+            isLoading={isLoadingDetails}
+            error={detailError}
+            previousView={previousView}
+            selectedIssueId={selectedIssueId}
+            onBack={handleBackFromDetail}
+            onApprove={handleApprove}
+            onReject={handleReject}
+            onOpenInTerminal={handleOpenIssueInTerminal}
+            onCopyLink={handleCopyLink}
+            onNavigateToIssue={handleIssueClick}
+            onIssueUpdate={updateIssueDetails}
+          />
+        );
+      default:
+        return null;
+    }
+  };
+
   return (
     <KeyboardShortcutProvider
       onViewChange={handleNavChange}
@@ -1145,126 +1102,21 @@ function App() {
           sidebar={sidebarContent}
         >
           <ViewSubSwitcher activeView={activeView} onChange={setActiveView} />
-          {activeView === "kanban" && (
-            <ErrorBoundary resetOnChange={[activeView]}>
-              <div className={styles.kanbanShell}>
-                <SwimLaneBoard
-                  issues={filteredIssues}
-                  groupBy={filters.groupBy ?? DEFAULT_GROUP_BY}
-                  onDragEnd={handleDragEnd}
-                  onIssueClick={handleIssueClick}
-                  isMultiRepo={isMultiRepo}
-                  {...(blockedIssuesMap !== undefined && {
-                    blockedIssues: blockedIssuesMap,
-                  })}
-                  {...(filters.showBlocked !== undefined && {
-                    showBlocked: filters.showBlocked,
-                  })}
-                  {...(pendingIds.size > 0 && { pendingIds })}
-                />
-              </div>
-            </ErrorBoundary>
-          )}
-          {activeView === "table" && (
-            <ErrorBoundary resetOnChange={[activeView]}>
-              <IssueTable
-                issues={filteredIssues}
-                sortable
-                showCheckbox
-                selectedIds={selectedIds}
-                onSelectionChange={toggleSelection}
-                onRowClick={handleIssueClick}
-                searchTerm={debouncedSearch}
-                {...(selectedIssueId !== null && {
-                  selectedId: selectedIssueId,
-                })}
-                {...(blockedIssuesMap !== undefined && {
-                  blockedIssues: blockedIssuesMap,
-                })}
-                {...(filters.showBlocked !== undefined && {
-                  showBlocked: filters.showBlocked,
-                })}
-              />
-              <BulkActionToolbar
-                selectedIds={selectedIds}
-                onClearSelection={clearSelection}
-              />
-            </ErrorBoundary>
-          )}
-          {activeView === "graph" && (
-            <ErrorBoundary resetOnChange={[activeView]}>
-              <Suspense fallback={<LoadingSkeleton.Graph />}>
-                <GraphView
-                  issues={filteredIssues}
-                  onNodeClick={handleIssueClick}
-                />
-              </Suspense>
-            </ErrorBoundary>
-          )}
-          {activeView === "monitor" && (
-            <ErrorBoundary resetOnChange={[activeView]}>
-              <Suspense fallback={<LoadingSkeleton.Monitor />}>
-                <MonitorDashboard
-                  onViewChange={handleNavChange}
-                  onIssueClick={handleIssueClick}
-                  onAgentClick={handleAgentClick}
-                />
-              </Suspense>
-            </ErrorBoundary>
-          )}
-          {activeView === "observability" && (
-            <ErrorBoundary resetOnChange={[activeView]}>
-              <Suspense fallback={<LoadingSkeleton.Observability />}>
-                <ObservabilityDashboard />
-              </Suspense>
-            </ErrorBoundary>
-          )}
-          {activeView === "settings" && (
-            <ErrorBoundary resetOnChange={[activeView]}>
-              <Suspense fallback={<LoadingSkeleton.Column />}>
-                <SettingsView onNavigate={setActiveView} />
-              </Suspense>
-            </ErrorBoundary>
-          )}
-          {activeView === "workspace" && isMultiRepo && (
-            <ErrorBoundary resetOnChange={[activeView]}>
-              <Suspense fallback={<LoadingSkeleton.Column />}>
-                <WorkspaceView />
-              </Suspense>
-            </ErrorBoundary>
-          )}
-          {activeView === "files" && (
-            <ErrorBoundary resetOnChange={[activeView]}>
-              <Suspense fallback={<LoadingSkeleton.FileExplorer />}>
-                <FileExplorer />
-              </Suspense>
-            </ErrorBoundary>
-          )}
-          {activeView === "issue-detail" && (
-            <ErrorBoundary resetOnChange={[selectedIssueId]}>
-              <IssueDetailView
-                issue={issueDetails}
-                isLoading={isLoadingDetails}
-                error={detailError}
-                previousView={previousView}
-                onBack={handleBackFromDetail}
-                onApprove={handleApprove}
-                onReject={handleReject}
-                onOpenInTerminal={handleOpenIssueInTerminal}
-                onCopyLink={handleCopyLink}
-                onNavigateToIssue={handleIssueClick}
-                onIssueUpdate={updateIssueDetails}
-              />
-            </ErrorBoundary>
-          )}
           {(showStaleBanner || isConnectionLost) &&
-            staleBannerDisconnectedSince !== null && (
+            staleBannerDisconnectedSince !== null &&
+            !(
+              issues.length === 0 &&
+              !isLoading &&
+              !error &&
+              isIssueBasedView
+            ) && (
               <StaleDataBanner
                 disconnectedSince={staleBannerDisconnectedSince}
                 onRetry={staleBannerRetry}
                 connectionLost={isConnectionLost}
               />
             )}
+          {renderViewContent()}
           <ToastContainer toasts={toasts} onDismiss={dismissToast} />
           <IssueDetailPanel
             isOpen={isPanelOpen}
@@ -1341,8 +1193,6 @@ function App() {
         onClose={() => setShowCreateWorkspace(false)}
         onSuccess={(data, createdName, warnings) => {
           setShowCreateWorkspace(false);
-          // Navigate to the new workspace via SPA navigation.
-          // Find the new workspace ID from the refreshed workspace list.
           const newWs = data.workspaces?.find((ws) => ws.name === createdName);
           if (newWs) {
             navigate(`/ws/${newWs.id}/`);

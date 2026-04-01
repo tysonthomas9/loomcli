@@ -1,0 +1,7 @@
+.kanbanShell {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0; /* Fill available space to constrain column height */
+  min-height: 0; /* Allow flex item to shrink below content height */
+  overflow: hidden; /* Columns handle their own scrolling */
+}
