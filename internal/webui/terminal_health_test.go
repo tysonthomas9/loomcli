@@ -197,7 +197,7 @@ func TestHandleTerminalKill_AuthWithValidToken(t *testing.T) {
 	}
 	defer auth.Stop()
 
-	token, err := auth.GenerateToken("test-session")
+	token, err := auth.GenerateToken("test-session", "")
 	if err != nil {
 		t.Fatalf("failed to generate token: %v", err)
 	}

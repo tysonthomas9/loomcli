@@ -54,7 +54,14 @@ func handleTerminalToken(auth *terminalAuth) http.HandlerFunc {
 			return
 		}
 
-		token, err := auth.GenerateToken(session)
+		// Extract user identity when available (OIDC mode).
+		// In open mode, UserIdentityFromContext returns false and userID stays empty.
+		var userID string
+		if identity, ok := UserIdentityFromContext(r.Context()); ok {
+			userID = identity.UserID
+		}
+
+		token, err := auth.GenerateToken(session, userID)
 		if err != nil {
 			log.Printf("Failed to generate terminal token: %v", err)
 			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to generate token"})
@@ -100,7 +107,7 @@ func handleTerminalRestartWithPool(manager *TerminalManager, configPool configCo
 		// Validate terminal token
 		if auth != nil {
 			token := r.URL.Query().Get("token")
-			if err := auth.ValidateToken(token, session); err != nil {
+			if _, err := auth.ValidateToken(token, session); err != nil {
 				respondJSON(w, http.StatusUnauthorized, map[string]interface{}{"success": false, "error": "terminal authentication failed"})
 				return
 			}
@@ -169,7 +176,7 @@ func handleTerminalKill(manager *TerminalManager, auth *terminalAuth) http.Handl
 
 		if auth != nil {
 			token := r.URL.Query().Get("token")
-			if err := auth.ValidateToken(token, session); err != nil {
+			if _, err := auth.ValidateToken(token, session); err != nil {
 				respondJSON(w, http.StatusUnauthorized, map[string]interface{}{"success": false, "error": "terminal authentication failed"})
 				return
 			}
@@ -197,7 +204,7 @@ func handleTerminalSessionStatus(manager *TerminalManager, auth *terminalAuth) h
 
 		if auth != nil {
 			token := r.URL.Query().Get("token")
-			if err := auth.ValidateToken(token, session); err != nil {
+			if _, err := auth.ValidateToken(token, session); err != nil {
 				respondJSON(w, http.StatusUnauthorized, map[string]interface{}{"error": "terminal authentication failed"})
 				return
 			}

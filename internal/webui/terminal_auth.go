@@ -24,6 +24,7 @@ const (
 // terminalTokenPayload is the JSON structure signed in a terminal auth token.
 type terminalTokenPayload struct {
 	Session string `json:"session"`
+	UserID  string `json:"uid,omitempty"`
 	Exp     int64  `json:"exp"`
 	Nonce   string `json:"nonce"`
 }
@@ -53,7 +54,8 @@ func newTerminalAuth() (*terminalAuth, error) {
 }
 
 // GenerateToken creates a signed, time-limited token for the given session.
-func (ta *terminalAuth) GenerateToken(session string) (string, error) {
+// userID is embedded for audit logging; pass "" in open mode (no auth).
+func (ta *terminalAuth) GenerateToken(session, userID string) (string, error) {
 	nonce := make([]byte, terminalNonceBytes)
 	if _, err := rand.Read(nonce); err != nil {
 		return "", fmt.Errorf("failed to generate nonce: %w", err)
@@ -61,6 +63,7 @@ func (ta *terminalAuth) GenerateToken(session string) (string, error) {
 
 	payload := terminalTokenPayload{
 		Session: session,
+		UserID:  userID,
 		Exp:     time.Now().Add(terminalTokenExpiry).Unix(),
 		Nonce:   hex.EncodeToString(nonce),
 	}
@@ -80,18 +83,18 @@ func (ta *terminalAuth) GenerateToken(session string) (string, error) {
 }
 
 // ValidateToken checks the token signature, expiry, session match, and single-use.
-// Returns nil if valid, error describing the failure otherwise.
-func (ta *terminalAuth) ValidateToken(token, session string) error {
+// Returns the embedded userID (may be empty in open mode) and nil error if valid.
+func (ta *terminalAuth) ValidateToken(token, session string) (string, error) {
 	parts := strings.SplitN(token, ".", 2)
 	if len(parts) != 2 {
-		return fmt.Errorf("malformed token")
+		return "", fmt.Errorf("malformed token")
 	}
 
 	payloadB64, sigB64 := parts[0], parts[1]
 
 	payloadBytes, err := base64.RawURLEncoding.DecodeString(payloadB64)
 	if err != nil {
-		return fmt.Errorf("invalid payload encoding")
+		return "", fmt.Errorf("invalid payload encoding")
 	}
 
 	// Verify signature
@@ -101,27 +104,27 @@ func (ta *terminalAuth) ValidateToken(token, session string) error {
 
 	sig, err := base64.RawURLEncoding.DecodeString(sigB64)
 	if err != nil {
-		return fmt.Errorf("invalid signature encoding")
+		return "", fmt.Errorf("invalid signature encoding")
 	}
 
 	if !hmac.Equal(sig, expectedSig) {
-		return fmt.Errorf("invalid signature")
+		return "", fmt.Errorf("invalid signature")
 	}
 
 	// Parse payload
 	var payload terminalTokenPayload
 	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
-		return fmt.Errorf("invalid payload")
+		return "", fmt.Errorf("invalid payload")
 	}
 
 	// Check expiry
 	if time.Now().Unix() > payload.Exp {
-		return fmt.Errorf("token expired")
+		return "", fmt.Errorf("token expired")
 	}
 
 	// Check session match
 	if payload.Session != session {
-		return fmt.Errorf("session mismatch")
+		return "", fmt.Errorf("session mismatch")
 	}
 
 	// Check single-use
@@ -129,11 +132,11 @@ func (ta *terminalAuth) ValidateToken(token, session string) error {
 	defer ta.mu.Unlock()
 
 	if _, exists := ta.used[payload.Nonce]; exists {
-		return fmt.Errorf("token already used")
+		return "", fmt.Errorf("token already used")
 	}
 	ta.used[payload.Nonce] = time.Now()
 
-	return nil
+	return payload.UserID, nil
 }
 
 // Stop stops the cleanup goroutine. Safe to call multiple times.

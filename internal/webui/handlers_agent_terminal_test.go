@@ -465,7 +465,7 @@ func TestHandleGetAgentTerminalToken_TokenIsValid(t *testing.T) {
 
 	// The token should validate against the agent's scoped session
 	scope := agentLogTokenScope("spark")
-	if err := ta.ValidateToken(resp.Data.Token, scope); err != nil {
+	if _, err := ta.ValidateToken(resp.Data.Token, scope); err != nil {
 		t.Errorf("returned token should be valid for scope %q: %v", scope, err)
 	}
 }
@@ -496,7 +496,7 @@ func TestHandleGetAgentTerminalToken_TokenScopeIsolation(t *testing.T) {
 
 	// Token for "ember" should NOT validate against "spark" scope
 	wrongScope := agentLogTokenScope("spark")
-	if err := ta.ValidateToken(resp.Data.Token, wrongScope); err == nil {
+	if _, err := ta.ValidateToken(resp.Data.Token, wrongScope); err == nil {
 		t.Error("token for 'ember' should not validate against 'spark' scope")
 	}
 }
@@ -804,7 +804,7 @@ func TestHandleAgentTerminalWS_NoActiveSession(t *testing.T) {
 
 	agentName := "nonexistent-agent-xyz"
 	scope := agentLogTokenScope(agentName)
-	token, err := ta.GenerateToken(scope)
+	token, err := ta.GenerateToken(scope, "")
 	if err != nil {
 		t.Fatalf("GenerateToken() error = %v", err)
 	}
@@ -848,7 +848,7 @@ func TestHandleAgentTerminalWS_TokenScopeMismatch(t *testing.T) {
 	handler := handleAgentTerminalWS(manager, ta, nil)
 
 	// Generate a token scoped to "ember"
-	token, err := ta.GenerateToken(agentLogTokenScope("ember"))
+	token, err := ta.GenerateToken(agentLogTokenScope("ember"), "")
 	if err != nil {
 		t.Fatalf("GenerateToken() error = %v", err)
 	}
@@ -900,7 +900,7 @@ func TestHandleAgentTerminalWS_NonWebSocketRequest(t *testing.T) {
 	handler := handleAgentTerminalWS(manager, ta, nil)
 
 	agentName := "nonexistent-agent-ws"
-	token, err := ta.GenerateToken(agentLogTokenScope(agentName))
+	token, err := ta.GenerateToken(agentLogTokenScope(agentName), "")
 	if err != nil {
 		t.Fatalf("GenerateToken() error = %v", err)
 	}
@@ -953,7 +953,7 @@ func TestHandleAgentTerminalWS_ReusedTokenFails(t *testing.T) {
 	handler := handleAgentTerminalWS(manager, ta, nil)
 
 	agentName := "reuse-agent"
-	token, err := ta.GenerateToken(agentLogTokenScope(agentName))
+	token, err := ta.GenerateToken(agentLogTokenScope(agentName), "")
 	if err != nil {
 		t.Fatalf("GenerateToken() error = %v", err)
 	}
@@ -1002,7 +1002,7 @@ func TestHandleAgentTerminalWS_ValidAuthNoSession_ResponseShape(t *testing.T) {
 	handler := handleAgentTerminalWS(manager, ta, nil)
 
 	agentName := "shape-test-agent"
-	token, err := ta.GenerateToken(agentLogTokenScope(agentName))
+	token, err := ta.GenerateToken(agentLogTokenScope(agentName), "")
 	if err != nil {
 		t.Fatalf("GenerateToken() error = %v", err)
 	}
@@ -1056,7 +1056,7 @@ func TestHandleAgentTerminalWS_ValidAuthMultipleAgents(t *testing.T) {
 	agents := []string{"alpha", "beta", "gamma"}
 	for _, agentName := range agents {
 		t.Run(agentName, func(t *testing.T) {
-			token, err := ta.GenerateToken(agentLogTokenScope(agentName))
+			token, err := ta.GenerateToken(agentLogTokenScope(agentName), "")
 			if err != nil {
 				t.Fatalf("GenerateToken() error = %v", err)
 			}
@@ -1102,7 +1102,7 @@ func TestHandleAgentTerminalWS_ExpiredTokenFails(t *testing.T) {
 	handler := handleAgentTerminalWS(manager, ta, nil)
 
 	agentName := "expire-test"
-	token, err := ta.GenerateToken(agentLogTokenScope(agentName))
+	token, err := ta.GenerateToken(agentLogTokenScope(agentName), "")
 	if err != nil {
 		t.Fatalf("GenerateToken() error = %v", err)
 	}

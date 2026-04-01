@@ -117,7 +117,12 @@ func handleGetAgentTerminalToken(auth *terminalAuth) http.HandlerFunc {
 			return
 		}
 
-		token, err := auth.GenerateToken(agentLogTokenScope(agentName))
+		var userID string
+		if identity, ok := UserIdentityFromContext(r.Context()); ok {
+			userID = identity.UserID
+		}
+
+		token, err := auth.GenerateToken(agentLogTokenScope(agentName), userID)
 		if err != nil {
 			log.Printf("Failed to generate agent terminal token for %q: %v", agentName, err)
 			respondJSON(w, http.StatusInternalServerError, agentTerminalTokenResponse{
@@ -173,13 +178,17 @@ func handleAgentTerminalWS(manager *TerminalManager, auth *terminalAuth, allowed
 		}
 
 		token := r.URL.Query().Get("token")
-		if err := auth.ValidateToken(token, agentLogTokenScope(agentName)); err != nil {
+		userID, err := auth.ValidateToken(token, agentLogTokenScope(agentName))
+		if err != nil {
 			respondJSON(w, http.StatusUnauthorized, map[string]interface{}{
 				"success": false,
 				"error":   "terminal authentication failed",
 			})
 			log.Printf("Agent terminal auth failed for %q: %v", agentName, err)
 			return
+		}
+		if userID != "" {
+			log.Printf("Agent terminal %q: authenticated user %q", agentName, userID)
 		}
 
 		wsID := WorkspaceFromContext(r.Context())

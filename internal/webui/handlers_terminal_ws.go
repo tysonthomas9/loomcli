@@ -60,13 +60,17 @@ func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigi
 		// Validate one-time terminal token before WebSocket upgrade
 		if auth != nil {
 			token := r.URL.Query().Get("token")
-			if err := auth.ValidateToken(token, session); err != nil {
+			userID, err := auth.ValidateToken(token, session)
+			if err != nil {
 				respondJSON(w, http.StatusUnauthorized, map[string]interface{}{
 					"success": false,
 					"error":   "terminal authentication failed",
 				})
 				log.Printf("Terminal auth failed for session %q: %v", session, err)
 				return
+			}
+			if userID != "" {
+				log.Printf("Terminal session %q: authenticated user %q", session, userID)
 			}
 		}
 
