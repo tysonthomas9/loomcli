@@ -16,6 +16,8 @@ import type {
   LoomConnectionState,
 } from "@/types";
 
+import { usePollingWithBackoff } from "./usePollingWithBackoff";
+
 /**
  * Options for the useAgents hook.
  */
@@ -131,17 +133,7 @@ const DEFAULT_TASK_LISTS: LoomTaskLists = {
   done: [],
 };
 
-// Retry backoff configuration
-const INITIAL_RETRY_DELAY = 5; // seconds
-const MAX_RETRY_DELAY = 60; // seconds
-const BACKOFF_MULTIPLIER = 2;
 const LOOM_FETCH_TIMEOUT_MS = 15000;
-
-// Stale banner delay (ms) — show banner when disconnected >5s
-const STALE_BANNER_DELAY_MS = 5000;
-
-// Max consecutive failures at MAX_RETRY_DELAY before declaring connection lost
-const MAX_FAILURES_AT_CEILING = 5;
 
 async function withTimeout<T>(
   promise: Promise<T>,
@@ -178,22 +170,8 @@ export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
   const [stats, setStats] = useState<LoomStats>(DEFAULT_STATS);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isConnected, setIsConnected] = useState<boolean>(false);
-  const [wasEverConnected, setWasEverConnected] = useState<boolean>(false);
-  const [retryCountdown, setRetryCountdown] = useState<number>(0);
   const [error, setError] = useState<Error | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-
-  // Stale data banner state
-  const [showStaleBanner, setShowStaleBanner] = useState(false);
-  const [connectionLost, setConnectionLost] = useState(false);
-  const [disconnectedSince, setDisconnectedSince] = useState<number | null>(
-    null,
-  );
-  const staleBannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
-  const consecutiveFailuresAtCeilingRef = useRef(0);
-  const disconnectedSinceRef = useRef<number | null>(null);
 
   // Track if a fetch is in progress to prevent overlapping requests
   const fetchInProgressRef = useRef<boolean>(false);
@@ -204,39 +182,24 @@ export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
   // Track if the component is mounted for cleanup
   const mountedRef = useRef<boolean>(true);
 
-  // Track retry state
-  const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const retryIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const currentRetryDelayRef = useRef<number>(INITIAL_RETRY_DELAY);
-  const wasEverConnectedRef = useRef<boolean>(false);
+  // Backoff hook — delegates retry scheduling, countdown, and stale-banner state
+  const backoff = usePollingWithBackoff({
+    onRetry: () => {
+      void fetchData();
+    },
+    enabled,
+    staleBannerDelayMs: 5000,
+    maxFailuresAtCeiling: 5,
+    repollOnVisibilityChange: false, // useAgents manages its own visibility handler
+  });
 
-  // Keep ref in sync with state
-  wasEverConnectedRef.current = wasEverConnected;
-
-  // Compute connection state from other state values
-  const connectionState: LoomConnectionState = (() => {
-    if (isConnected) return "connected";
-    if (isLoading && !wasEverConnected) return "never_connected";
-    if (retryCountdown > 0) return "reconnecting";
-    if (!wasEverConnected) return "never_connected";
-    return "disconnected";
-  })();
-
-  // Clear any pending retry timers
-  const clearRetryTimers = useCallback(() => {
-    if (retryTimeoutRef.current) {
-      clearTimeout(retryTimeoutRef.current);
-      retryTimeoutRef.current = null;
-    }
-    if (retryIntervalRef.current) {
-      clearInterval(retryIntervalRef.current);
-      retryIntervalRef.current = null;
-    }
-    setRetryCountdown(0);
-  }, []);
+  // Store backoff functions in refs to avoid fetchData dependency changes
+  const reportSuccessRef = useRef(backoff.reportSuccess);
+  const reportFailureRef = useRef(backoff.reportFailure);
+  reportSuccessRef.current = backoff.reportSuccess;
+  reportFailureRef.current = backoff.reportFailure;
 
   // Stable fetch function using useCallback
-  // Note: scheduleRetry is defined after but uses fetchDataRef to avoid circular deps
   const fetchData = useCallback(async () => {
     // Skip if already fetching
     if (fetchInProgressRef.current) {
@@ -246,7 +209,6 @@ export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
     fetchInProgressRef.current = true;
     fetchStartTimeRef.current = Date.now();
     setIsLoading(true);
-    clearRetryTimers();
 
     try {
       const agentsResult = await withTimeout(
@@ -258,23 +220,10 @@ export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
       // Only update state if still mounted
       if (mountedRef.current) {
         setAgents(agentsResult);
-        // Connected if we successfully got a response (no error thrown)
         setIsConnected(true);
-        setWasEverConnected(true);
-        // Reset retry delay on successful connection
-        currentRetryDelayRef.current = INITIAL_RETRY_DELAY;
-        consecutiveFailuresAtCeilingRef.current = 0;
         setError(null);
         setLastUpdated(new Date());
-        // Clear stale banner on successful connection
-        if (staleBannerTimerRef.current) {
-          clearTimeout(staleBannerTimerRef.current);
-          staleBannerTimerRef.current = null;
-        }
-        setShowStaleBanner(false);
-        setConnectionLost(false);
-        disconnectedSinceRef.current = null;
-        setDisconnectedSince(null);
+        reportSuccessRef.current();
       }
 
       void (async () => {
@@ -322,28 +271,7 @@ export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
       if (mountedRef.current) {
         setError(err instanceof Error ? err : new Error(String(err)));
         setIsConnected(false);
-        // Start stale banner timer on first disconnect
-        if (
-          wasEverConnectedRef.current &&
-          disconnectedSinceRef.current === null &&
-          !staleBannerTimerRef.current
-        ) {
-          const now = Date.now();
-          disconnectedSinceRef.current = now;
-          setDisconnectedSince(now);
-          staleBannerTimerRef.current = setTimeout(() => {
-            setShowStaleBanner(true);
-          }, STALE_BANNER_DELAY_MS);
-        }
-        // Track consecutive failures at max delay to detect connection lost
-        if (currentRetryDelayRef.current >= MAX_RETRY_DELAY) {
-          consecutiveFailuresAtCeilingRef.current += 1;
-          if (
-            consecutiveFailuresAtCeilingRef.current >= MAX_FAILURES_AT_CEILING
-          ) {
-            setConnectionLost(true);
-          }
-        }
+        reportFailureRef.current();
       }
     } finally {
       if (mountedRef.current) {
@@ -351,89 +279,26 @@ export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
       }
       fetchInProgressRef.current = false;
     }
-  }, [clearRetryTimers]);
+  }, []);
 
-  // Schedule retry when disconnected after being connected
-  useEffect(() => {
-    // Only schedule retry if we were connected and now have an error, and no retry is in progress
-    if (
-      !error ||
-      !wasEverConnected ||
-      isConnected ||
-      fetchInProgressRef.current
-    ) {
-      return;
-    }
-
-    // Don't schedule if timers are already set (retryCountdown > 0 means we already scheduled)
-    if (retryTimeoutRef.current || retryIntervalRef.current) {
-      return;
-    }
-
-    const delay = currentRetryDelayRef.current;
-    setRetryCountdown(delay);
-
-    // Create both timers
-    const intervalId = setInterval(() => {
-      if (!mountedRef.current) {
-        clearInterval(intervalId);
-        return;
-      }
-      setRetryCountdown((prev) => {
-        if (prev <= 1) {
-          clearInterval(intervalId);
-          if (retryIntervalRef.current === intervalId) {
-            retryIntervalRef.current = null;
-          }
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    const timeoutId = setTimeout(() => {
-      if (!mountedRef.current) return;
-      clearRetryTimers();
-      // Increase delay for next retry (exponential backoff)
-      currentRetryDelayRef.current = Math.min(
-        currentRetryDelayRef.current * BACKOFF_MULTIPLIER,
-        MAX_RETRY_DELAY,
-      );
-      void fetchData();
-    }, delay * 1000);
-
-    // Set refs IMMEDIATELY after timer creation (same sync block)
-    // Prevents race where second effect invocation passes the ref check
-    // before first invocation has set its refs
-    retryIntervalRef.current = intervalId;
-    retryTimeoutRef.current = timeoutId;
-
-    // Cleanup: clear timers if effect dependencies change or component unmounts
-    return () => {
-      clearInterval(intervalId);
-      clearTimeout(timeoutId);
-      if (retryIntervalRef.current === intervalId) {
-        retryIntervalRef.current = null;
-      }
-      if (retryTimeoutRef.current === timeoutId) {
-        retryTimeoutRef.current = null;
-      }
-    };
-  }, [error, wasEverConnected, isConnected, clearRetryTimers, fetchData]);
+  // Compute connection state from other state values
+  const connectionState: LoomConnectionState = (() => {
+    if (isConnected) return "connected";
+    if (isLoading && !backoff.wasEverConnected) return "never_connected";
+    if (backoff.retryCountdown > 0) return "reconnecting";
+    if (!backoff.wasEverConnected) return "never_connected";
+    return "disconnected";
+  })();
 
   // Refetch function exposed to consumers
   const refetch = useCallback(async () => {
     await fetchData();
   }, [fetchData]);
 
-  // Retry immediately (skips countdown)
+  // Retry immediately (skips countdown) — delegates to backoff hook
   const retryNow = useCallback(() => {
-    clearRetryTimers();
-    // Reset retry delay and failure counter when user manually retries
-    currentRetryDelayRef.current = INITIAL_RETRY_DELAY;
-    consecutiveFailuresAtCeilingRef.current = 0;
-    setConnectionLost(false);
-    void fetchData();
-  }, [clearRetryTimers, fetchData]);
+    backoff.retryNow();
+  }, [backoff.retryNow]);
 
   // Initial fetch and polling setup
   useEffect(() => {
@@ -479,17 +344,6 @@ export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
         clearInterval(intervalId);
       }
       document.removeEventListener("visibilitychange", handleVisibilityChange);
-      // Clear retry timers on unmount
-      if (retryTimeoutRef.current) {
-        clearTimeout(retryTimeoutRef.current);
-      }
-      if (retryIntervalRef.current) {
-        clearInterval(retryIntervalRef.current);
-      }
-      // Clear stale banner timer on unmount
-      if (staleBannerTimerRef.current) {
-        clearTimeout(staleBannerTimerRef.current);
-      }
     };
   }, [enabled, pollInterval, fetchData]);
 
@@ -503,14 +357,14 @@ export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
     isLoading,
     isConnected,
     connectionState,
-    wasEverConnected,
-    retryCountdown,
+    wasEverConnected: backoff.wasEverConnected,
+    retryCountdown: backoff.retryCountdown,
     error,
     lastUpdated,
     refetch,
     retryNow,
-    showStaleBanner,
-    connectionLost,
-    disconnectedSince,
+    showStaleBanner: backoff.showStaleBanner,
+    connectionLost: backoff.connectionLost,
+    disconnectedSince: backoff.disconnectedSince,
   };
 }

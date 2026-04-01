@@ -148,6 +148,12 @@ export type {
   UseDaemonHealthReturn,
 } from "./useDaemonHealth";
 
+export { usePollingWithBackoff } from "./usePollingWithBackoff";
+export type {
+  UsePollingWithBackoffOptions,
+  UsePollingWithBackoffResult,
+} from "./usePollingWithBackoff";
+
 export { useTaskLogPolling } from "./useTaskLogPolling";
 export type {
   UseTaskLogPollingOptions,
