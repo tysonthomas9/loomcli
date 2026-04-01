@@ -144,6 +144,149 @@ func TestQuery_StaleFilterInteraction(t *testing.T) {
 	}
 }
 
+func TestSweepOrphans_NoSessions(t *testing.T) {
+	store := createTestStore(t)
+	count, err := store.SweepOrphans()
+	if err != nil {
+		t.Fatalf("SweepOrphans error: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("SweepOrphans = %d, want 0", count)
+	}
+}
+
+func TestSweepOrphans_NoStale(t *testing.T) {
+	store := createTestStore(t)
+	sess := createTestSession(t, store, "nova", "claude")
+	// Session started just now — not stale.
+	count, err := store.SweepOrphans()
+	if err != nil {
+		t.Fatalf("SweepOrphans error: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("SweepOrphans = %d, want 0", count)
+	}
+	// Verify session is still running.
+	recs, _ := store.Query(Filter{})
+	if len(recs) != 1 || recs[0].Status != StatusRunning {
+		t.Errorf("session should still be running, got %v", recs)
+	}
+	_ = sess
+}
+
+func TestSweepOrphans_HealsStale(t *testing.T) {
+	store := createTestStore(t)
+
+	sess := createTestSession(t, store, "nova", "claude")
+	sid := sess.SessionID()
+
+	// Backdate to 5 hours ago.
+	fiveHoursAgo := time.Now().UTC().Add(-5 * time.Hour)
+	sess.Meta.StartedAt = fiveHoursAgo
+	sessDir := filepath.Join(store.dir, sid)
+	if err := writeMetadataAtomic(sessDir, sess.Meta); err != nil {
+		t.Fatalf("rewrite metadata: %v", err)
+	}
+	rewriteIndex(t, store, sess.Meta.SessionRecord)
+
+	// SweepOrphans should heal exactly 1 session.
+	count, err := store.SweepOrphans()
+	if err != nil {
+		t.Fatalf("SweepOrphans error: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("SweepOrphans = %d, want 1", count)
+	}
+
+	// Verify metadata.json on disk has status=aborted.
+	meta, err := store.LoadMetadata(sid)
+	if err != nil {
+		t.Fatalf("LoadMetadata error: %v", err)
+	}
+	if meta.Status != StatusAborted {
+		t.Errorf("disk metadata Status = %q, want %q", meta.Status, StatusAborted)
+	}
+	if meta.EndedAt == nil {
+		t.Fatal("EndedAt should be set")
+	}
+
+	// A subsequent Query returns the session as aborted.
+	recs, _ := store.Query(Filter{})
+	if len(recs) != 1 || recs[0].Status != StatusAborted {
+		t.Errorf("Query after sweep: got %v", recs)
+	}
+
+	// A subsequent SweepOrphans returns 0 (no re-healing).
+	count2, err := store.SweepOrphans()
+	if err != nil {
+		t.Fatalf("SweepOrphans2 error: %v", err)
+	}
+	if count2 != 0 {
+		t.Errorf("SweepOrphans2 = %d, want 0 (no re-healing)", count2)
+	}
+}
+
+func TestSweepOrphans_MultipleStale(t *testing.T) {
+	store := createTestStore(t)
+
+	fiveHoursAgo := time.Now().UTC().Add(-5 * time.Hour)
+
+	// Create 3 sessions: backdate 2 of them.
+	for i, name := range []string{"alpha", "beta", "gamma"} {
+		sess := createTestSession(t, store, name, "claude")
+		if i < 2 { // backdate alpha and beta
+			sess.Meta.StartedAt = fiveHoursAgo
+			sessDir := filepath.Join(store.dir, sess.SessionID())
+			if err := writeMetadataAtomic(sessDir, sess.Meta); err != nil {
+				t.Fatalf("rewrite metadata %s: %v", name, err)
+			}
+			rewriteIndex(t, store, sess.Meta.SessionRecord)
+		}
+	}
+
+	count, err := store.SweepOrphans()
+	if err != nil {
+		t.Fatalf("SweepOrphans error: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("SweepOrphans = %d, want 2", count)
+	}
+
+	// Verify the fresh session remains running.
+	recs, _ := store.Query(Filter{Status: StatusRunning})
+	if len(recs) != 1 {
+		t.Errorf("expected 1 running session, got %d", len(recs))
+	}
+}
+
+func TestSweepOrphans_SkipsCompleted(t *testing.T) {
+	store := createTestStore(t)
+
+	sess := createTestSession(t, store, "nova", "claude")
+
+	// Finalize the session as completed.
+	if err := sess.Finalize(FinalizeOptions{ExitCode: 0}); err != nil {
+		t.Fatalf("Finalize error: %v", err)
+	}
+
+	// Backdate StartedAt (completed sessions should not be swept regardless).
+	sid := sess.SessionID()
+	meta, _ := store.LoadMetadata(sid)
+	meta.StartedAt = time.Now().UTC().Add(-5 * time.Hour)
+	sessDir := filepath.Join(store.dir, sid)
+	if err := writeMetadataAtomic(sessDir, *meta); err != nil {
+		t.Fatalf("rewrite metadata: %v", err)
+	}
+
+	count, err := store.SweepOrphans()
+	if err != nil {
+		t.Fatalf("SweepOrphans error: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("SweepOrphans = %d, want 0 (completed sessions are not stale)", count)
+	}
+}
+
 func TestPurgeOlderThan_PurgesHealed(t *testing.T) {
 	store := createTestStore(t)
 

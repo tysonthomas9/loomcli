@@ -11,10 +11,9 @@ import (
 	"strings"
 )
 
-// Query reads index.jsonl and returns all SessionRecords matching the filter.
-// If the index file does not exist, it returns an empty slice (not an error).
-// Corrupt lines are skipped with a log warning.
-func (s *Store) Query(f Filter) ([]SessionRecord, error) {
+// readDedupedIndex reads index.jsonl, applies the filter, and deduplicates
+// by SessionID (last-seen record wins). Returns the deduplicated slice.
+func (s *Store) readDedupedIndex(f Filter) ([]SessionRecord, error) {
 	indexPath := filepath.Join(s.dir, "index.jsonl")
 
 	// #nosec G304 — controlled path from Store
@@ -63,18 +62,20 @@ func (s *Store) Query(f Filter) ([]SessionRecord, error) {
 			deduped = append(deduped, rec)
 		}
 	}
-	// Staleness detection pass: auto-heal orphaned running sessions.
-	for i, rec := range deduped {
-		if !isStale(rec) {
-			continue
-		}
-		ended := rec.StartedAt.Add(StaleSessionThreshold)
-		rec.Status = StatusAborted
-		rec.EndedAt = &ended
-		rec.DurationS = ended.Sub(rec.StartedAt).Seconds()
-		deduped[i] = rec
-		s.healStaleSession(rec)
+	return deduped, nil
+}
+
+// Query reads index.jsonl and returns all SessionRecords matching the filter.
+// If the index file does not exist, it returns an empty slice (not an error).
+// Corrupt lines are skipped with a log warning.
+func (s *Store) Query(f Filter) ([]SessionRecord, error) {
+	deduped, err := s.readDedupedIndex(f)
+	if err != nil {
+		return deduped, err
 	}
+
+	// Staleness detection pass: auto-heal orphaned running sessions.
+	deduped, _ = s.healStaleRecords(deduped)
 
 	// Re-filter if a status filter was set, because healed records
 	// may no longer match (e.g., filter for "running" but record is now "aborted").

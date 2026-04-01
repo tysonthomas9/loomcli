@@ -384,6 +384,12 @@ func runServe(cmd *cobra.Command, args []string) {
 		if err != nil {
 			return
 		}
+		// Sweep orphaned sessions first, then purge old ones.
+		if healed, err := sessStore.SweepOrphans(); err != nil {
+			log.Printf("[serve] session orphan sweep error: %v", err)
+		} else if healed > 0 {
+			log.Printf("[serve] healed %d orphaned sessions on startup", healed)
+		}
 		count, err := sessStore.PurgeOlderThan(30 * 24 * time.Hour)
 		if err != nil {
 			log.Printf("[serve] session purge error: %v", err)

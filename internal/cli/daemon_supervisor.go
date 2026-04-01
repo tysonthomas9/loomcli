@@ -51,6 +51,17 @@ func (d *Daemon) Start() error {
 	// cross-checkout conflicts from prior daemon runs.
 	d.resetWorktreeBranches()
 
+	// Sweep orphaned sessions from prior daemon runs before launching agents.
+	if sessStore, err := sessions.NewStore(GetBeadsDir()); err != nil {
+		slog.Warn("session store unavailable, skipping orphan sweep", "err", err)
+	} else {
+		if healed, err := sessStore.SweepOrphans(); err != nil {
+			slog.Warn("session orphan sweep failed", "err", err)
+		} else if healed > 0 {
+			slog.Info("healed orphaned sessions on startup", "count", healed)
+		}
+	}
+
 	// Compute initial config hash for reconciler no-op detection.
 	// Take reconcileMu to stay consistent with reloadAndReconcile's write pattern.
 	d.reconcileMu.Lock()
