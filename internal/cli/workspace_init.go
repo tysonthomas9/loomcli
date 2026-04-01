@@ -104,6 +104,21 @@ func ensureDaemonForWorkspace(ctx context.Context, wsDir string, timeout time.Du
 	}
 }
 
+// stopDaemonForWorkspace is the cleanup counterpart to ensureDaemonForWorkspace.
+// It runs `bd daemon stop` in wsDir on a best-effort basis: errors are logged at
+// debug level but never returned, so callers can safely use it in cleanup paths
+// without aborting other cleanup steps.
+func stopDaemonForWorkspace(wsDir string) {
+	if wsDir == "" {
+		return
+	}
+	result := execCommand(wsDir, "bd", "daemon", "stop")
+	if result.Err != nil {
+		slog.Debug("stopDaemonForWorkspace: bd daemon stop returned error (expected if not running)",
+			"path", wsDir, "err", result.Err)
+	}
+}
+
 // ensureCurrentProjectRegistered registers the current working directory as a workspace
 // in ~/.loom/config.yaml (if not already registered). This ensures
 // the project that `loom serve` is running from always appears in the workspace

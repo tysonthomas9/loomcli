@@ -268,6 +268,7 @@ func createEmptyWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir, b
 	var repos []RepoConfig
 
 	cleanup := func() {
+		stopDaemonForWorkspace(wsDir)
 		for _, c := range created {
 			_, _ = RunGitCommand(c.origRepoPath, "worktree", "remove", c.worktreePath)
 		}
@@ -360,7 +361,10 @@ func createCloneWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir st
 		return webui.WorkspaceCreateResult{}, fmt.Errorf("cannot create workspace directory: %w", err)
 	}
 
-	cleanupDir := func() { _ = os.RemoveAll(wsDir) }
+	cleanupDir := func() {
+		stopDaemonForWorkspace(wsDir)
+		_ = os.RemoveAll(wsDir)
+	}
 
 	var repos []RepoConfig
 	seenNames := make(map[string]bool)

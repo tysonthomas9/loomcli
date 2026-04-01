@@ -231,6 +231,63 @@ func TestEnsureCurrentProjectRegistered_RefusesToSaveOnParseError(t *testing.T) 
 	}
 }
 
+func TestStopDaemonForWorkspace_CallsBdDaemonStop(t *testing.T) {
+	oldExec := execCommand
+	defer func() { execCommand = oldExec }()
+
+	var calledDir, calledName string
+	var calledArgs []string
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		calledDir = dir
+		calledName = name
+		calledArgs = args
+		return CommandResult{}
+	}
+
+	wsDir := t.TempDir()
+	stopDaemonForWorkspace(wsDir)
+
+	if calledDir != wsDir {
+		t.Errorf("dir = %q, want %q", calledDir, wsDir)
+	}
+	if calledName != "bd" {
+		t.Errorf("name = %q, want %q", calledName, "bd")
+	}
+	wantArgs := []string{"daemon", "stop"}
+	if len(calledArgs) != len(wantArgs) || calledArgs[0] != wantArgs[0] || calledArgs[1] != wantArgs[1] {
+		t.Errorf("args = %v, want %v", calledArgs, wantArgs)
+	}
+}
+
+func TestStopDaemonForWorkspace_ErrorIsNonFatal(t *testing.T) {
+	oldExec := execCommand
+	defer func() { execCommand = oldExec }()
+
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		return CommandResult{Err: fmt.Errorf("daemon not running")}
+	}
+
+	// Should not panic or crash
+	stopDaemonForWorkspace(t.TempDir())
+}
+
+func TestStopDaemonForWorkspace_EmptyDir(t *testing.T) {
+	oldExec := execCommand
+	defer func() { execCommand = oldExec }()
+
+	called := false
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		called = true
+		return CommandResult{}
+	}
+
+	stopDaemonForWorkspace("")
+
+	if called {
+		t.Error("execCommand should not be called with empty dir")
+	}
+}
+
 func TestEnsureCurrentProjectRegistered_RefusesToSaveOnReadError(t *testing.T) {
 	if os.Getuid() == 0 {
 		t.Skip("skipping: root can read anything")
