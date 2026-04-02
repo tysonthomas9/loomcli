@@ -1012,24 +1012,27 @@ describe("TerminalView", () => {
   // ── Render tests ───────────────────────────────────────────────────────────
 
   describe("render tests", () => {
-    it("only active tab terminal pane is visible (display:flex)", () => {
+    it("only active tab terminal pane is visible", () => {
       setMetadata(DEFAULT_METADATA);
       render(<TerminalView />);
 
       const pane1 = screen
         .getByTestId("terminal-instance-session-1")
         .closest('[role="tabpanel"]')!;
-      expect(pane1).toHaveStyle({ visibility: "visible" });
+      expect(pane1).toHaveStyle({
+        visibility: "visible",
+        position: "relative",
+      });
     });
 
-    it("inactive tab panes have display:none", () => {
+    it("inactive tab panes are hidden", () => {
       setMetadata(DEFAULT_METADATA);
       render(<TerminalView />);
 
       const pane2 = screen
         .getByTestId("terminal-instance-session-2")
         .closest('[role="tabpanel"]')!;
-      expect(pane2).toHaveStyle({ visibility: "hidden" });
+      expect(pane2).toHaveStyle({ visibility: "hidden", position: "absolute" });
     });
 
     it('data-testid="terminal-view" present on container', () => {
