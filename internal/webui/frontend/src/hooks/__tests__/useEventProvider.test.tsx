@@ -211,7 +211,7 @@ describe("useEventProvider", () => {
       expect(result.current.reconnectAttempts).toBe(1);
     });
 
-    it("exposes lastError and clears on connection", async () => {
+    it("lastError stays null on transient errors (unified reconnect)", async () => {
       const { result } = renderHook(() => useEventContext(), { wrapper });
       await flushConnect();
 
@@ -223,13 +223,9 @@ describe("useEventProvider", () => {
         MockEventSource.lastInstance?.simulateError(MockEventSource.CLOSED);
       });
 
-      expect(result.current.lastError).toBe("Connection closed");
-
-      act(() => {
-        MockEventSource.lastInstance?.simulateOpen();
-      });
-
+      // Unified reconnect: transient errors enter reconnecting, no onError
       expect(result.current.lastError).toBeNull();
+      expect(result.current.state).toBe("reconnecting");
     });
   });
 

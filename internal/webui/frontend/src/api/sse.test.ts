@@ -4,8 +4,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { ApiError } from "./client";
-import { BeadsSSEClient, getSSEUrl } from "./sse";
-import type { MutationPayload } from "./sse";
+import { BeadsSSEClient, getSSEUrl, fetchSseToken } from "./sse";
+import type { MutationPayload, SseTokenResult } from "./sse";
 
 // Mock the get function from client.ts — default to 404 (open mode, no SSE token endpoint)
 const mockGet = vi.fn();
@@ -66,8 +66,7 @@ class MockEventSource {
     this.onopen?.();
   }
 
-  simulateError(readyState: number = MockEventSource.CONNECTING): void {
-    this.readyState = readyState;
+  simulateError(): void {
     this.onerror?.();
   }
 
@@ -105,6 +104,7 @@ describe("BeadsSSEClient", () => {
   let originalEventSource: typeof EventSource;
 
   beforeEach(() => {
+    vi.useFakeTimers();
     originalEventSource = global.EventSource;
     global.EventSource = MockEventSource as unknown as typeof EventSource;
     MockEventSource.reset();
@@ -113,6 +113,7 @@ describe("BeadsSSEClient", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     global.EventSource = originalEventSource;
     vi.restoreAllMocks();
   });
@@ -212,9 +213,8 @@ describe("BeadsSSEClient", () => {
       expect(MockEventSource.instances.length).toBe(1);
     });
 
-    it("handles EventSource constructor throwing", async () => {
-      const onStateChange = vi.fn();
-      const onError = vi.fn();
+    it("handles EventSource constructor throwing with reconnect", async () => {
+      const onReconnect = vi.fn();
       const consoleErrorSpy = vi
         .spyOn(console, "error")
         .mockImplementation(() => {});
@@ -230,26 +230,26 @@ describe("BeadsSSEClient", () => {
       global.EventSource = ThrowingEventSource;
 
       const client = new BeadsSSEClient("test-ws-id", {
-        onStateChange,
-        onError,
+        onReconnect,
+        initialReconnectDelay: 100,
       });
       await client.connect();
 
-      // handleError is called but eventSource is null, so state stays 'connecting'
-      expect(client.getState()).toBe("connecting");
+      // Should enter reconnecting state (EventSource constructor failure is transient)
+      expect(client.getState()).toBe("reconnecting");
+      expect(client.getReconnectAttempts()).toBe(1);
+      expect(onReconnect).toHaveBeenCalledWith(1);
       expect(consoleErrorSpy).toHaveBeenCalledWith(
         "[SSE] Failed to create EventSource:",
         expect.any(Error),
       );
-      // onError is NOT called because handleError requires non-null eventSource
-      expect(onError).not.toHaveBeenCalled();
 
       consoleErrorSpy.mockRestore();
       // Restore MockEventSource for subsequent tests
       global.EventSource = MockEventSource as unknown as typeof EventSource;
     });
 
-    it("eventSource remains null after constructor failure and disconnect works", async () => {
+    it("disconnect works after EventSource constructor failure", async () => {
       const consoleErrorSpy = vi
         .spyOn(console, "error")
         .mockImplementation(() => {});
@@ -266,10 +266,10 @@ describe("BeadsSSEClient", () => {
       const client = new BeadsSSEClient("test-ws-id");
       await client.connect();
 
-      // Verify no active connection
-      expect(client.getState()).toBe("connecting");
+      // In reconnecting state after constructor failure
+      expect(client.getState()).toBe("reconnecting");
 
-      // disconnect() should work without error even though eventSource is null
+      // disconnect() should work without error
       client.disconnect();
       expect(client.getState()).toBe("disconnected");
 
@@ -338,30 +338,20 @@ describe("BeadsSSEClient", () => {
       consoleWarnSpy.mockRestore();
     });
 
-    it("connected event is handled", async () => {
-      const originalEnv = process.env.NODE_ENV;
-      process.env.NODE_ENV = "development";
-      const consoleDebugSpy = vi
-        .spyOn(console, "debug")
-        .mockImplementation(() => {});
-
-      const client = new BeadsSSEClient("test-ws-id");
+    it("onConnected callback fires on connected SSE event", async () => {
+      const onConnected = vi.fn();
+      const client = new BeadsSSEClient("test-ws-id", { onConnected });
 
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
       MockEventSource.lastInstance?.simulateConnectedEvent();
 
-      expect(consoleDebugSpy).toHaveBeenCalledWith(
-        "[SSE] Received connected event",
-      );
-
-      consoleDebugSpy.mockRestore();
-      process.env.NODE_ENV = originalEnv;
+      expect(onConnected).toHaveBeenCalledTimes(1);
     });
   });
 
   describe("Error handling and reconnect state tracking", () => {
-    it("error during connecting state triggers reconnecting", async () => {
+    it("error triggers reconnecting with unified manual reconnect", async () => {
       const onStateChange = vi.fn();
       const onReconnect = vi.fn();
       const client = new BeadsSSEClient("test-ws-id", {
@@ -372,60 +362,59 @@ describe("BeadsSSEClient", () => {
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
-      // Simulate error while browser is reconnecting
-      MockEventSource.lastInstance?.simulateError(MockEventSource.CONNECTING);
+      const esInstance = MockEventSource.lastInstance;
 
+      // Simulate error — EventSource should be closed (manual reconnect)
+      esInstance?.simulateError();
+
+      expect(esInstance?.readyState).toBe(MockEventSource.CLOSED);
       expect(client.getState()).toBe("reconnecting");
       expect(client.getReconnectAttempts()).toBe(1);
       expect(onStateChange).toHaveBeenCalledWith("reconnecting");
       expect(onReconnect).toHaveBeenCalledWith(1);
     });
 
-    it("error during closed state triggers reconnecting and calls onError", async () => {
-      const onError = vi.fn();
+    it("reconnectAttempts increments on consecutive errors without successful open", async () => {
       const onReconnect = vi.fn();
-      const client = new BeadsSSEClient("test-ws-id", { onError, onReconnect });
+      const client = new BeadsSSEClient("test-ws-id", {
+        onReconnect,
+        initialReconnectDelay: 100,
+      });
 
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
-      // Simulate closed state error
-      MockEventSource.lastInstance?.simulateError(MockEventSource.CLOSED);
-
-      expect(client.getState()).toBe("reconnecting");
-      expect(client.getReconnectAttempts()).toBe(1);
-      expect(onError).toHaveBeenCalledWith("Connection closed");
-      expect(onReconnect).toHaveBeenCalledWith(1);
-    });
-
-    it("reconnectAttempts increments on consecutive errors", async () => {
-      const onReconnect = vi.fn();
-      const client = new BeadsSSEClient("test-ws-id", { onReconnect });
-
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-
-      MockEventSource.lastInstance?.simulateError(MockEventSource.CONNECTING);
+      // Consecutive errors without successful opens — attempts accumulate
+      MockEventSource.lastInstance?.simulateError();
       expect(client.getReconnectAttempts()).toBe(1);
 
-      MockEventSource.lastInstance?.simulateError(MockEventSource.CONNECTING);
+      // Advance timer to trigger reconnect, then error again immediately
+      await vi.advanceTimersByTimeAsync(100);
+      MockEventSource.lastInstance?.simulateError();
       expect(client.getReconnectAttempts()).toBe(2);
 
-      MockEventSource.lastInstance?.simulateError(MockEventSource.CONNECTING);
+      // Advance timer (200ms = 100 * 2^1)
+      await vi.advanceTimersByTimeAsync(200);
+      MockEventSource.lastInstance?.simulateError();
       expect(client.getReconnectAttempts()).toBe(3);
     });
 
     it("reconnectAttempts resets to 0 on successful open", async () => {
       const onReconnect = vi.fn();
-      const client = new BeadsSSEClient("test-ws-id", { onReconnect });
+      const client = new BeadsSSEClient("test-ws-id", {
+        onReconnect,
+        initialReconnectDelay: 100,
+      });
 
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
-      // Simulate some errors
-      MockEventSource.lastInstance?.simulateError(MockEventSource.CONNECTING);
-      MockEventSource.lastInstance?.simulateError(MockEventSource.CONNECTING);
-      expect(client.getReconnectAttempts()).toBe(2);
+      // Simulate error
+      MockEventSource.lastInstance?.simulateError();
+      expect(client.getReconnectAttempts()).toBe(1);
+
+      // Advance timer to trigger reconnect
+      await vi.advanceTimersByTimeAsync(100);
 
       // Simulate successful reconnection
       MockEventSource.lastInstance?.simulateOpen();
@@ -443,14 +432,14 @@ describe("BeadsSSEClient", () => {
       const esInstance = MockEventSource.lastInstance;
       MockEventSource.lastInstance?.simulateOpen();
 
-      // Clear mocks after open (open triggers onReconnect(0))
+      // Clear mocks after open
       onError.mockClear();
       onReconnect.mockClear();
 
       client.disconnect();
 
       // Simulate error after disconnect
-      esInstance?.simulateError(MockEventSource.CLOSED);
+      esInstance?.simulateError();
 
       expect(onError).not.toHaveBeenCalled();
       expect(onReconnect).not.toHaveBeenCalled();
@@ -458,9 +447,8 @@ describe("BeadsSSEClient", () => {
     });
 
     it("errors are processed again after disconnect then reconnect", async () => {
-      const onError = vi.fn();
       const onReconnect = vi.fn();
-      const client = new BeadsSSEClient("test-ws-id", { onError, onReconnect });
+      const client = new BeadsSSEClient("test-ws-id", { onReconnect });
 
       // First connection
       await client.connect();
@@ -473,15 +461,13 @@ describe("BeadsSSEClient", () => {
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
-      onError.mockClear();
       onReconnect.mockClear();
 
       // Error on the new connection should be processed, not suppressed
-      MockEventSource.lastInstance?.simulateError(MockEventSource.CLOSED);
+      MockEventSource.lastInstance?.simulateError();
 
       expect(client.getState()).toBe("reconnecting");
       expect(client.getReconnectAttempts()).toBe(1);
-      expect(onError).toHaveBeenCalledWith("Connection closed");
       expect(onReconnect).toHaveBeenCalledWith(1);
     });
 
@@ -489,13 +475,22 @@ describe("BeadsSSEClient", () => {
       const consoleWarnSpy = vi
         .spyOn(console, "warn")
         .mockImplementation(() => {});
-      const client = new BeadsSSEClient("test-ws-id");
+      const client = new BeadsSSEClient("test-ws-id", {
+        initialReconnectDelay: 10,
+        maxReconnectDelay: 1000,
+      });
 
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
+      // Consecutive errors without successful opens accumulate attempts
       for (let i = 0; i < 5; i++) {
-        MockEventSource.lastInstance?.simulateError(MockEventSource.CONNECTING);
+        MockEventSource.lastInstance?.simulateError();
+        // Advance timer to trigger reconnect: delay = 10 * 2^i
+        const delay = Math.min(10 * Math.pow(2, i), 1000);
+        await vi.advanceTimersByTimeAsync(delay);
+        // connect() creates a new EventSource, but we immediately error again
+        // (no simulateOpen — the next iteration's simulateError hits the new instance)
       }
 
       expect(consoleWarnSpy).toHaveBeenCalledWith(
@@ -759,7 +754,7 @@ describe("BeadsSSEClient", () => {
       MockEventSource.lastInstance?.simulateOpen();
 
       // Trigger reconnecting state
-      MockEventSource.lastInstance?.simulateError(MockEventSource.CONNECTING);
+      MockEventSource.lastInstance?.simulateError();
       expect(client.getState()).toBe("reconnecting");
       expect(MockEventSource.instances.length).toBe(1);
 
@@ -773,20 +768,45 @@ describe("BeadsSSEClient", () => {
 
     it("resets reconnect counter on manual retry", async () => {
       const onReconnect = vi.fn();
-      const client = new BeadsSSEClient("test-ws-id", { onReconnect });
+      const client = new BeadsSSEClient("test-ws-id", {
+        onReconnect,
+        initialReconnectDelay: 100,
+      });
 
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
-      // Trigger multiple errors
-      MockEventSource.lastInstance?.simulateError(MockEventSource.CONNECTING);
-      MockEventSource.lastInstance?.simulateError(MockEventSource.CONNECTING);
-      expect(client.getReconnectAttempts()).toBe(2);
+      // Trigger error
+      MockEventSource.lastInstance?.simulateError();
+      expect(client.getReconnectAttempts()).toBe(1);
 
       client.retryNow();
 
       expect(client.getReconnectAttempts()).toBe(0);
       expect(onReconnect).toHaveBeenCalledWith(0);
+    });
+
+    it("clears pending retry timer", async () => {
+      const client = new BeadsSSEClient("test-ws-id", {
+        initialReconnectDelay: 5000,
+      });
+
+      await client.connect();
+      MockEventSource.lastInstance?.simulateOpen();
+
+      // Trigger error — starts a 5s retry timer
+      MockEventSource.lastInstance?.simulateError();
+      expect(client.getState()).toBe("reconnecting");
+
+      // retryNow should clear the timer and connect immediately
+      client.retryNow();
+      await vi.waitFor(() => {
+        expect(MockEventSource.instances.length).toBe(2);
+      });
+
+      // Advance past original timer — should NOT create a third connection
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(MockEventSource.instances.length).toBe(2);
     });
   });
 
@@ -806,7 +826,6 @@ describe("BeadsSSEClient", () => {
       client.destroy();
 
       expect(esInstance?.readyState).toBe(MockEventSource.CLOSED);
-      expect(client.getState()).toBe("disconnected");
 
       // Callbacks should not be called after destroy
       onStateChange.mockClear();
@@ -825,7 +844,51 @@ describe("BeadsSSEClient", () => {
       expect(onMutation).not.toHaveBeenCalled();
     });
 
-    it("instance should not be reused after destroy", async () => {
+    it("connect() is a no-op after destroy", async () => {
+      const client = new BeadsSSEClient("test-ws-id");
+
+      await client.connect();
+      MockEventSource.lastInstance?.simulateOpen();
+
+      client.destroy();
+
+      // Try to connect again
+      await client.connect();
+
+      // Should not have created a new EventSource
+      expect(MockEventSource.instances.length).toBe(1);
+    });
+
+    it("retryNow() is a no-op after destroy", async () => {
+      const client = new BeadsSSEClient("test-ws-id");
+
+      await client.connect();
+      MockEventSource.lastInstance?.simulateOpen();
+
+      // Put in reconnecting state
+      MockEventSource.lastInstance?.simulateError();
+      expect(client.getState()).toBe("reconnecting");
+
+      client.destroy();
+
+      client.retryNow();
+      // Should not create a new EventSource
+      expect(MockEventSource.instances.length).toBe(1);
+    });
+
+    it("disconnect() is a no-op after destroy", async () => {
+      const client = new BeadsSSEClient("test-ws-id");
+
+      await client.connect();
+      MockEventSource.lastInstance?.simulateOpen();
+
+      client.destroy();
+
+      // Should not throw
+      client.disconnect();
+    });
+
+    it("getState() returns last known state after destroy", async () => {
       const client = new BeadsSSEClient("test-ws-id");
 
       await client.connect();
@@ -833,10 +896,267 @@ describe("BeadsSSEClient", () => {
       expect(client.getState()).toBe("connected");
 
       client.destroy();
-      expect(client.getState()).toBe("disconnected");
 
-      // Note: The client doesn't prevent reuse, but callbacks are cleared
-      // This documents the behavior - destroy() clears callbacks
+      // State is preserved (callbacks cleared, not state)
+      expect(client.getState()).toBe("connected");
+    });
+
+    it("destroy() clears pending retry timer", async () => {
+      const client = new BeadsSSEClient("test-ws-id", {
+        initialReconnectDelay: 5000,
+      });
+
+      await client.connect();
+      MockEventSource.lastInstance?.simulateOpen();
+
+      // Trigger error — starts a retry timer
+      MockEventSource.lastInstance?.simulateError();
+
+      client.destroy();
+
+      // Advance past timer — should NOT create a new EventSource
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(MockEventSource.instances.length).toBe(1);
+    });
+  });
+
+  describe("Injectable fetchToken", () => {
+    it("uses custom fetchToken instead of default", async () => {
+      const customFetchToken = vi
+        .fn()
+        .mockResolvedValue({ kind: "token", token: "custom-token-abc" });
+
+      // Clear mock call history so we can verify no default token fetch occurs
+      mockGet.mockClear();
+
+      const client = new BeadsSSEClient("test-ws-id", {
+        fetchToken: customFetchToken,
+      });
+      await client.connect();
+
+      expect(customFetchToken).toHaveBeenCalledTimes(1);
+      // Default fetchSseToken should NOT have been called
+      expect(mockGet).not.toHaveBeenCalled();
+      expect(MockEventSource.lastInstance?.url).toContain(
+        "token=custom-token-abc",
+      );
+    });
+
+    it("custom fetchToken returning disabled works like open mode", async () => {
+      const customFetchToken = vi
+        .fn()
+        .mockResolvedValue({ kind: "disabled" } as SseTokenResult);
+
+      const client = new BeadsSSEClient("test-ws-id", {
+        fetchToken: customFetchToken,
+      });
+      await client.connect();
+
+      expect(MockEventSource.lastInstance?.url).not.toContain("token=");
+    });
+
+    it("custom fetchToken that throws is handled gracefully", async () => {
+      const onError = vi.fn();
+      const customFetchToken = vi
+        .fn()
+        .mockRejectedValue(new Error("Token service down"));
+
+      const client = new BeadsSSEClient("test-ws-id", {
+        fetchToken: customFetchToken,
+        onError,
+      });
+      await client.connect();
+
+      expect(onError).toHaveBeenCalledWith(
+        "SSE auth failed: Token service down",
+      );
+      expect(client.getState()).toBe("disconnected");
+      expect(MockEventSource.lastInstance).toBeUndefined();
+    });
+  });
+
+  describe("AbortController cancellation", () => {
+    it("disconnect during token fetch aborts cleanly", async () => {
+      // Make fetchToken take a while by using a deferred promise
+      let resolveToken: (value: SseTokenResult) => void;
+      const customFetchToken = vi.fn().mockReturnValue(
+        new Promise<SseTokenResult>((resolve) => {
+          resolveToken = resolve;
+        }),
+      );
+
+      const client = new BeadsSSEClient("test-ws-id", {
+        fetchToken: customFetchToken,
+      });
+      const connectPromise = client.connect();
+
+      // Disconnect while fetching token
+      client.disconnect();
+
+      // Resolve the token call
+      resolveToken!({ kind: "token", token: "opaque-123" });
+      await connectPromise;
+
+      // Should not have created an EventSource
+      expect(MockEventSource.lastInstance).toBeUndefined();
+      expect(client.getState()).toBe("disconnected");
+    });
+
+    it("destroy during token fetch aborts cleanly", async () => {
+      let resolveToken: (value: SseTokenResult) => void;
+      const customFetchToken = vi.fn().mockReturnValue(
+        new Promise<SseTokenResult>((resolve) => {
+          resolveToken = resolve;
+        }),
+      );
+
+      const client = new BeadsSSEClient("test-ws-id", {
+        fetchToken: customFetchToken,
+      });
+      const connectPromise = client.connect();
+
+      // Destroy while fetching token
+      client.destroy();
+
+      // Resolve the token call
+      resolveToken!({ kind: "token", token: "opaque-123" });
+      await connectPromise;
+
+      // Should not have created an EventSource
+      expect(MockEventSource.lastInstance).toBeUndefined();
+    });
+  });
+
+  describe("Unified reconnect (manual for all modes)", () => {
+    it("open mode uses manual reconnect (EventSource closed on error)", async () => {
+      // Open mode — no opaque token
+      mockGet.mockRejectedValue(new ApiError(404, "Not Found"));
+
+      const client = new BeadsSSEClient("test-ws-id");
+      await client.connect();
+      MockEventSource.lastInstance?.simulateOpen();
+
+      const esInstance = MockEventSource.lastInstance;
+      esInstance?.simulateError();
+
+      // EventSource should be closed — no browser auto-reconnect
+      expect(esInstance?.readyState).toBe(MockEventSource.CLOSED);
+      expect(client.getState()).toBe("reconnecting");
+    });
+
+    it("token mode uses same manual reconnect path", async () => {
+      mockGet.mockResolvedValue({ token: "opaque-token-123" });
+
+      const onReconnect = vi.fn();
+      const client = new BeadsSSEClient("test-ws-id", { onReconnect });
+      await client.connect();
+      MockEventSource.lastInstance?.simulateOpen();
+
+      const esInstance = MockEventSource.lastInstance;
+      esInstance?.simulateError();
+
+      // EventSource should be closed
+      expect(esInstance?.readyState).toBe(MockEventSource.CLOSED);
+      expect(client.getState()).toBe("reconnecting");
+      expect(onReconnect).toHaveBeenCalledWith(1);
+    });
+
+    it("fresh token fetched on each reconnect", async () => {
+      let callCount = 0;
+      mockGet.mockImplementation(() => {
+        callCount++;
+        return Promise.resolve({ token: `opaque-token-${callCount}` });
+      });
+
+      const client = new BeadsSSEClient("test-ws-id", {
+        initialReconnectDelay: 100,
+      });
+      await client.connect();
+      MockEventSource.lastInstance?.simulateOpen();
+
+      expect(MockEventSource.lastInstance?.url).toContain(
+        "token=opaque-token-1",
+      );
+
+      // Trigger error → reconnecting
+      MockEventSource.lastInstance?.simulateError();
+      expect(client.getState()).toBe("reconnecting");
+
+      // Advance timer to trigger reconnect
+      await vi.advanceTimersByTimeAsync(100);
+
+      // New connection should use fresh token
+      expect(MockEventSource.instances.length).toBe(2);
+      expect(MockEventSource.lastInstance?.url).toContain(
+        "token=opaque-token-2",
+      );
+    });
+  });
+
+  describe("Configurable backoff", () => {
+    it("uses default delays (1000ms initial, 30000ms max)", async () => {
+      const client = new BeadsSSEClient("test-ws-id");
+      await client.connect();
+      MockEventSource.lastInstance?.simulateOpen();
+
+      // First error: 1000ms delay
+      MockEventSource.lastInstance?.simulateError();
+      expect(client.getState()).toBe("reconnecting");
+
+      // Before 1000ms: still reconnecting
+      await vi.advanceTimersByTimeAsync(999);
+      expect(MockEventSource.instances.length).toBe(1);
+
+      // At 1000ms: reconnect fires
+      await vi.advanceTimersByTimeAsync(1);
+      expect(MockEventSource.instances.length).toBe(2);
+    });
+
+    it("respects custom initialReconnectDelay and maxReconnectDelay", async () => {
+      const client = new BeadsSSEClient("test-ws-id", {
+        initialReconnectDelay: 500,
+        maxReconnectDelay: 2000,
+      });
+      await client.connect();
+      MockEventSource.lastInstance?.simulateOpen();
+
+      // Consecutive errors without opens — backoff escalates:
+      // attempt 1: 500 * 2^0 = 500ms
+      // attempt 2: 500 * 2^1 = 1000ms
+      // attempt 3: 500 * 2^2 = 2000ms (capped)
+      // attempt 4: 500 * 2^3 = 4000ms → capped at 2000ms
+
+      // 1st error → attempt 1 → 500ms delay
+      MockEventSource.lastInstance?.simulateError();
+      expect(client.getReconnectAttempts()).toBe(1);
+      await vi.advanceTimersByTimeAsync(499);
+      expect(MockEventSource.instances.length).toBe(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(MockEventSource.instances.length).toBe(2);
+
+      // 2nd error → attempt 2 → 1000ms delay
+      MockEventSource.lastInstance?.simulateError();
+      expect(client.getReconnectAttempts()).toBe(2);
+      await vi.advanceTimersByTimeAsync(999);
+      expect(MockEventSource.instances.length).toBe(2);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(MockEventSource.instances.length).toBe(3);
+
+      // 3rd error → attempt 3 → 2000ms delay (capped)
+      MockEventSource.lastInstance?.simulateError();
+      expect(client.getReconnectAttempts()).toBe(3);
+      await vi.advanceTimersByTimeAsync(1999);
+      expect(MockEventSource.instances.length).toBe(3);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(MockEventSource.instances.length).toBe(4);
+
+      // 4th error → attempt 4 → 2000ms delay (still capped)
+      MockEventSource.lastInstance?.simulateError();
+      expect(client.getReconnectAttempts()).toBe(4);
+      await vi.advanceTimersByTimeAsync(1999);
+      expect(MockEventSource.instances.length).toBe(4);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(MockEventSource.instances.length).toBe(5);
     });
   });
 
@@ -908,39 +1228,6 @@ describe("BeadsSSEClient", () => {
       expect(client.getState()).toBe("disconnected");
     });
 
-    it("handleError with opaque token closes EventSource", async () => {
-      mockGet.mockResolvedValue({ token: "opaque-token-123" });
-
-      const onReconnect = vi.fn();
-      const client = new BeadsSSEClient("test-ws-id", { onReconnect });
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-
-      const esInstance = MockEventSource.lastInstance;
-      esInstance?.simulateError(MockEventSource.CONNECTING);
-
-      // EventSource should be closed (not left for browser to auto-reconnect)
-      expect(esInstance?.readyState).toBe(MockEventSource.CLOSED);
-      expect(client.getState()).toBe("reconnecting");
-      expect(onReconnect).toHaveBeenCalledWith(1);
-    });
-
-    it("handleError without opaque token preserves browser auto-reconnect", async () => {
-      // Open mode — no opaque token
-      mockGet.mockRejectedValue(new ApiError(404, "Not Found"));
-
-      const client = new BeadsSSEClient("test-ws-id");
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-
-      const esInstance = MockEventSource.lastInstance;
-      esInstance?.simulateError(MockEventSource.CONNECTING);
-
-      // EventSource should NOT be closed — browser handles reconnect
-      expect(esInstance?.readyState).toBe(MockEventSource.CONNECTING);
-      expect(client.getState()).toBe("reconnecting");
-    });
-
     it("retryNow() fetches fresh opaque token", async () => {
       let callCount = 0;
       mockGet.mockImplementation(() => {
@@ -957,7 +1244,7 @@ describe("BeadsSSEClient", () => {
       );
 
       // Trigger reconnecting state
-      MockEventSource.lastInstance?.simulateError(MockEventSource.CONNECTING);
+      MockEventSource.lastInstance?.simulateError();
       expect(client.getState()).toBe("reconnecting");
 
       // retryNow triggers a new connect with fresh token
@@ -969,6 +1256,73 @@ describe("BeadsSSEClient", () => {
         "token=opaque-token-2",
       );
     });
+
+    it("token fetch failure (kind: error) does NOT enter reconnect loop", async () => {
+      mockGet.mockRejectedValue(new ApiError(500, "Internal Server Error"));
+
+      const onError = vi.fn();
+      const onReconnect = vi.fn();
+      const client = new BeadsSSEClient("test-ws-id", {
+        onError,
+        onReconnect,
+      });
+      await client.connect();
+
+      expect(client.getState()).toBe("disconnected");
+      expect(onReconnect).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("Retry timer cleanup", () => {
+    it("disconnect clears pending retry timer", async () => {
+      const client = new BeadsSSEClient("test-ws-id", {
+        initialReconnectDelay: 5000,
+      });
+
+      await client.connect();
+      MockEventSource.lastInstance?.simulateOpen();
+
+      // Trigger error → starts retry timer
+      MockEventSource.lastInstance?.simulateError();
+      expect(client.getState()).toBe("reconnecting");
+
+      // Disconnect before timer fires
+      client.disconnect();
+
+      // Advance past timer — no new EventSource should be created
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(MockEventSource.instances.length).toBe(1);
+    });
+
+    it("retryNow clears timer then connects immediately", async () => {
+      const client = new BeadsSSEClient("test-ws-id", {
+        initialReconnectDelay: 5000,
+      });
+
+      await client.connect();
+      MockEventSource.lastInstance?.simulateOpen();
+
+      // Trigger error → starts retry timer
+      MockEventSource.lastInstance?.simulateError();
+
+      // retryNow should clear timer and connect immediately
+      client.retryNow();
+      await vi.waitFor(() => {
+        expect(MockEventSource.instances.length).toBe(2);
+      });
+
+      expect(client.getReconnectAttempts()).toBe(0);
+
+      // Advance past original timer — should NOT create another connection
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(MockEventSource.instances.length).toBe(2);
+    });
+  });
+});
+
+describe("fetchSseToken", () => {
+  it("is exported and callable", () => {
+    expect(typeof fetchSseToken).toBe("function");
   });
 });
 
@@ -1039,6 +1393,7 @@ describe("BeadsSSEClient sourceRepos support", () => {
   let originalEventSource: typeof EventSource;
 
   beforeEach(() => {
+    vi.useFakeTimers();
     originalEventSource = global.EventSource;
     global.EventSource = MockEventSource as unknown as typeof EventSource;
     MockEventSource.reset();
@@ -1046,6 +1401,7 @@ describe("BeadsSSEClient sourceRepos support", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     global.EventSource = originalEventSource;
     vi.restoreAllMocks();
   });
@@ -1084,7 +1440,7 @@ describe("BeadsSSEClient sourceRepos support", () => {
     MockEventSource.lastInstance?.simulateOpen();
 
     // Trigger reconnecting state
-    MockEventSource.lastInstance?.simulateError(MockEventSource.CONNECTING);
+    MockEventSource.lastInstance?.simulateError();
     expect(client.getState()).toBe("reconnecting");
 
     client.retryNow();
@@ -1105,7 +1461,7 @@ describe("BeadsSSEClient sourceRepos support", () => {
     MockEventSource.lastInstance?.simulateOpen();
 
     // Trigger reconnecting state
-    MockEventSource.lastInstance?.simulateError(MockEventSource.CONNECTING);
+    MockEventSource.lastInstance?.simulateError();
     expect(client.getState()).toBe("reconnecting");
 
     client.retryNow();
