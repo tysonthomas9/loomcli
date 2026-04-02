@@ -24,7 +24,6 @@ import {
   useAgentContext,
   useWorkspaceContext,
 } from "@/hooks";
-import { useIssues } from "@/hooks/useIssues";
 import type { Issue, Status } from "@/types";
 
 import App from "../App";
@@ -62,113 +61,118 @@ const { mockOpenPanel, mockClosePanel, mockIsOpen, mockUsePanelManager } =
   }));
 
 // Create hoisted mocks that can be shared across mock definitions
-const {
-  mockUseIssues,
-  mockUseIssueDetail,
-  mockUseToast,
-  mockUseAgents,
-  mockUseAgentContext,
-} = vi.hoisted(() => ({
-  mockUseIssues: vi.fn(),
-  mockUseIssueDetail: vi.fn(),
-  mockUseToast: vi.fn(() => ({
-    toasts: [],
-    showToast: vi.fn(),
-    dismissToast: vi.fn(),
-    dismissAll: vi.fn(),
-  })),
-  mockUseAgents: vi.fn(() => ({
-    agents: [],
-    tasks: {
-      needs_planning: 0,
-      ready_to_implement: 0,
-      in_progress: 0,
-      need_review: 0,
-      blocked: 0,
-    },
-    taskLists: {
-      needsPlanning: [],
-      readyToImplement: [],
-      needsReview: [],
-      inProgress: [],
-      blocked: [],
-    },
-    agentTasks: {},
-    sync: {
-      db_synced: true,
-      db_last_sync: "",
-      git_needs_push: 0,
-      git_needs_pull: 0,
-    },
-    stats: {
-      open: 0,
-      closed: 0,
-      total: 0,
-      completion: 0,
-      remaining: 0,
-      in_progress: 0,
-      review: 0,
-      blocked: 0,
-    },
-    isLoading: false,
-    isConnected: true,
-    connectionState: "connected",
-    wasEverConnected: true,
-    retryCountdown: 0,
-    error: null,
-    lastUpdated: null,
-    refetch: vi.fn(),
-    retryNow: vi.fn(),
-  })),
-  mockUseAgentContext: vi.fn(() => ({
-    agents: [],
-    tasks: {
-      needs_planning: 0,
-      ready_to_implement: 0,
-      in_progress: 0,
-      need_review: 0,
-      blocked: 0,
-    },
-    taskLists: {
-      needsPlanning: [],
-      readyToImplement: [],
-      needsReview: [],
-      inProgress: [],
-      blocked: [],
-    },
-    agentTasks: {},
-    sync: {
-      db_synced: true,
-      db_last_sync: "",
-      git_needs_push: 0,
-      git_needs_pull: 0,
-    },
-    stats: {
-      open: 0,
-      closed: 0,
-      total: 0,
-      completion: 0,
-      remaining: 0,
-      in_progress: 0,
-      review: 0,
-      blocked: 0,
-    },
-    isLoading: false,
-    isConnected: true,
-    connectionState: "connected",
-    wasEverConnected: true,
-    retryCountdown: 0,
-    error: null,
-    lastUpdated: null,
-    refetch: vi.fn(),
-    retryNow: vi.fn(),
-    getAgentByName: vi.fn(() => undefined),
-  })),
-}));
+const { mockUseIssueDetail, mockUseToast, mockUseAgents, mockUseAgentContext } =
+  vi.hoisted(() => ({
+    mockUseIssueDetail: vi.fn(),
+    mockUseToast: vi.fn(() => ({
+      toasts: [],
+      showToast: vi.fn(),
+      dismissToast: vi.fn(),
+      dismissAll: vi.fn(),
+    })),
+    mockUseAgents: vi.fn(() => ({
+      agents: [],
+      tasks: {
+        needs_planning: 0,
+        ready_to_implement: 0,
+        in_progress: 0,
+        need_review: 0,
+        blocked: 0,
+      },
+      taskLists: {
+        needsPlanning: [],
+        readyToImplement: [],
+        needsReview: [],
+        inProgress: [],
+        blocked: [],
+      },
+      agentTasks: {},
+      sync: {
+        db_synced: true,
+        db_last_sync: "",
+        git_needs_push: 0,
+        git_needs_pull: 0,
+      },
+      stats: {
+        open: 0,
+        closed: 0,
+        total: 0,
+        completion: 0,
+        remaining: 0,
+        in_progress: 0,
+        review: 0,
+        blocked: 0,
+      },
+      isLoading: false,
+      isConnected: true,
+      connectionState: "connected",
+      wasEverConnected: true,
+      retryCountdown: 0,
+      error: null,
+      lastUpdated: null,
+      refetch: vi.fn(),
+      retryNow: vi.fn(),
+    })),
+    mockUseAgentContext: vi.fn(() => ({
+      agents: [],
+      tasks: {
+        needs_planning: 0,
+        ready_to_implement: 0,
+        in_progress: 0,
+        need_review: 0,
+        blocked: 0,
+      },
+      taskLists: {
+        needsPlanning: [],
+        readyToImplement: [],
+        needsReview: [],
+        inProgress: [],
+        blocked: [],
+      },
+      agentTasks: {},
+      sync: {
+        db_synced: true,
+        db_last_sync: "",
+        git_needs_push: 0,
+        git_needs_pull: 0,
+      },
+      stats: {
+        open: 0,
+        closed: 0,
+        total: 0,
+        completion: 0,
+        remaining: 0,
+        in_progress: 0,
+        review: 0,
+        blocked: 0,
+      },
+      isLoading: false,
+      isConnected: true,
+      connectionState: "connected",
+      wasEverConnected: true,
+      retryCountdown: 0,
+      error: null,
+      lastUpdated: null,
+      refetch: vi.fn(),
+      retryNow: vi.fn(),
+      getAgentByName: vi.fn(() => undefined),
+    })),
+  }));
 
-// Mock the useIssues hook from its direct module
-vi.mock("@/hooks/useIssues", () => ({
-  useIssues: mockUseIssues,
+// Mock zustand's useStore — forward selector calls to mutable mockStoreState
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let mockStoreState: any;
+const mockIssueStore = {
+  getState: () => mockStoreState,
+  setState: vi.fn(),
+  subscribe: vi.fn(() => vi.fn()),
+  destroy: vi.fn(),
+};
+
+vi.mock("zustand", () => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  useStore: (_store: unknown, selector: (s: any) => unknown) =>
+    selector(mockStoreState),
 }));
 
 // Mock @/api functions used by handleApprove and handleReject
@@ -284,7 +288,7 @@ function createViewStateReturn(
 
 // Mock the hooks barrel file that App.tsx imports from
 vi.mock("@/hooks", () => ({
-  useIssues: mockUseIssues,
+  useIssueStoreInstance: () => mockIssueStore,
   useIssueDetail: mockUseIssueDetail,
   useToast: mockUseToast,
   useRouteView: mockUseRouteView,
@@ -463,7 +467,6 @@ vi.mock("@/hooks", () => ({
 }));
 
 // Alias for convenience in tests (prefixed with _ to satisfy linter for unused vars)
-const _useIssuesMock = mockUseIssues;
 const _useRouteViewMock = mockUseRouteView;
 
 /**
@@ -483,22 +486,30 @@ function createMockIssue(overrides: Partial<Issue> = {}): Issue {
 }
 
 /**
- * Create mock useIssues return value.
+ * Create mock store state (replaces old createMockUseIssuesReturn).
+ * Accepts `issues` for convenience — internally creates `issuesMap`.
+ * The store's updateIssueStatus takes 3 args (issueId, newStatus, workspaceId);
+ * App.tsx wraps it to bind workspaceId.
  */
-interface MockUseIssuesReturn {
+interface MockStoreStateOverrides {
   issues: Issue[];
   issuesMap: Map<string, Issue>;
   isLoading: boolean;
   error: string | null;
   connectionState: ConnectionState;
-  isConnected: boolean;
   reconnectAttempts: number;
   refetch: () => Promise<void>;
-  updateIssueStatus: (issueId: string, newStatus: Status) => Promise<void>;
-  getIssue: (id: string) => Issue | undefined;
-  mutationCount: number;
+  updateIssueStatus: (
+    issueId: string,
+    newStatus: Status,
+    workspaceId: string,
+  ) => Promise<void>;
   retryConnection: () => void;
   pendingIds: Set<string>;
+  fetchIssues: () => Promise<void>;
+  showStaleBanner: boolean;
+  connectionLost: boolean;
+  disconnectedSince: number | null;
 }
 
 const DEFAULT_MOCK_ISSUE = createMockIssue({
@@ -508,26 +519,37 @@ const DEFAULT_MOCK_ISSUE = createMockIssue({
 });
 
 function createMockUseIssuesReturn(
-  overrides: Partial<MockUseIssuesReturn> = {},
-): MockUseIssuesReturn {
+  overrides: Partial<MockStoreStateOverrides> = {},
+) {
   const issues = overrides.issues ?? [DEFAULT_MOCK_ISSUE];
   const issuesMap =
     overrides.issuesMap ?? new Map(issues.map((issue) => [issue.id, issue]));
 
   return {
-    issues,
     issuesMap,
     isLoading: false,
     error: null,
-    connectionState: "connected",
-    isConnected: true,
+    connectionState: "connected" as ConnectionState,
     reconnectAttempts: 0,
+    lastEventId: undefined,
+    showStaleBanner: false,
+    connectionLost: false,
+    disconnectedSince: null,
+    pendingIds: new Set<string>(),
+    mutationCount: 0,
+    // Actions
+    fetchIssues: vi.fn().mockResolvedValue(undefined),
     refetch: vi.fn().mockResolvedValue(undefined),
     updateIssueStatus: vi.fn().mockResolvedValue(undefined),
-    getIssue: (id: string) => issuesMap.get(id),
-    mutationCount: 0,
     retryConnection: vi.fn(),
-    pendingIds: new Set<string>(),
+    connectToEvents: vi.fn(() => vi.fn()),
+    applyMutation: vi.fn(),
+    setConnectionState: vi.fn(),
+    setReconnectAttempts: vi.fn(),
+    setLastEventId: vi.fn(),
+    getIssue: (id: string) => issuesMap.get(id),
+    reset: vi.fn(),
+    configure: vi.fn(),
     ...overrides,
   };
 }
@@ -557,6 +579,8 @@ function createMockUseIssueDetailReturn(
 describe("App", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Set up default store state for issue store selectors
+    mockStoreState = createMockUseIssuesReturn({});
     // Set up default useRouteView mock (kanban is the default view)
     mockUseRouteView.mockReturnValue(createViewStateReturn("kanban"));
     // Set up default useIssueDetail mock
@@ -577,7 +601,7 @@ describe("App", () => {
   describe("loading state", () => {
     it("renders LoadingSkeleton columns when isLoading is true", () => {
       const mockReturn = createMockUseIssuesReturn({ isLoading: true });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       const { container } = render(<App />);
 
@@ -599,7 +623,7 @@ describe("App", () => {
 
     it("renders three LoadingSkeleton.Column components when loading", () => {
       const mockReturn = createMockUseIssuesReturn({ isLoading: true });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       const { container } = render(<App />);
 
@@ -620,7 +644,7 @@ describe("App", () => {
         isLoading: true,
         connectionState: "connecting",
       });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       const { container } = render(<App />);
 
@@ -636,7 +660,7 @@ describe("App", () => {
         error: "Failed to fetch issues",
         isLoading: false,
       });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -649,7 +673,7 @@ describe("App", () => {
         error: "Network error",
         isLoading: false,
       });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -666,7 +690,7 @@ describe("App", () => {
         isLoading: false,
         refetch,
       });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -682,7 +706,7 @@ describe("App", () => {
         error: "Specific error message",
         isLoading: false,
       });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -700,7 +724,7 @@ describe("App", () => {
         reconnectAttempts: 2,
         retryConnection,
       });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       const { container } = render(<App />);
 
@@ -714,7 +738,7 @@ describe("App", () => {
         error: "Error occurred",
         isLoading: false,
       });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -751,7 +775,7 @@ describe("App", () => {
         }),
       ];
       const mockReturn = createMockUseIssuesReturn({ issues });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       await act(async () => {
         render(<App />);
@@ -774,7 +798,7 @@ describe("App", () => {
       const mockReturn = createMockUseIssuesReturn({
         connectionState: "connected",
       });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       const { container } = render(<App />);
 
@@ -785,7 +809,7 @@ describe("App", () => {
 
     it("does not render ErrorDisplay when no error", () => {
       const mockReturn = createMockUseIssuesReturn({ error: null });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -794,7 +818,7 @@ describe("App", () => {
 
     it("does not render LoadingSkeleton when not loading", () => {
       const mockReturn = createMockUseIssuesReturn({ isLoading: false });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       const { container: _container } = render(<App />);
 
@@ -804,7 +828,7 @@ describe("App", () => {
 
     it("renders EmptyState when issues array is empty", () => {
       const mockReturn = createMockUseIssuesReturn({ issues: [] });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -827,7 +851,7 @@ describe("App", () => {
         issues,
         updateIssueStatus,
       });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -849,7 +873,7 @@ describe("App", () => {
         issues,
         updateIssueStatus,
       });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -876,7 +900,7 @@ describe("App", () => {
         issues,
         updateIssueStatus,
       });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -893,7 +917,7 @@ describe("App", () => {
       const mockReturn = createMockUseIssuesReturn({
         issues: [createMockIssue()],
       });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -914,7 +938,7 @@ describe("App", () => {
         issues,
         updateIssueStatus,
       });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -929,7 +953,7 @@ describe("App", () => {
         connectionState: "connected",
         isConnected: true,
       });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       const { container } = render(<App />);
 
@@ -943,7 +967,7 @@ describe("App", () => {
         connectionState: "disconnected",
         isConnected: false,
       });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       const { container } = render(<App />);
 
@@ -957,7 +981,7 @@ describe("App", () => {
         isConnected: false,
         reconnectAttempts: 3,
       });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       const { container } = render(<App />);
 
@@ -970,7 +994,7 @@ describe("App", () => {
         connectionState: "connecting",
         isConnected: false,
       });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       const { container } = render(<App />);
 
@@ -985,7 +1009,7 @@ describe("App", () => {
         reconnectAttempts: 1,
         retryConnection,
       });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       const { container } = render(<App />);
 
@@ -999,7 +1023,7 @@ describe("App", () => {
   describe("AppLayout integration", () => {
     it("renders with Cortex title in header", () => {
       const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -1010,7 +1034,7 @@ describe("App", () => {
 
     it("renders header with banner role", () => {
       const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       const { container } = render(<App />);
 
@@ -1021,7 +1045,7 @@ describe("App", () => {
 
     it("renders main content area", () => {
       const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -1029,30 +1053,29 @@ describe("App", () => {
     });
   });
 
-  describe("useIssues hook integration", () => {
-    it("calls useIssues hook on mount", () => {
-      const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+  describe("issueStore integration", () => {
+    it("reads issue state from store on mount", () => {
+      mockStoreState = createMockUseIssuesReturn({});
 
       render(<App />);
 
-      expect(useIssues).toHaveBeenCalled();
+      // Store state is read via useStore selectors — verify rendering succeeds
+      expect(screen.getByRole("main")).toBeInTheDocument();
     });
 
-    it("uses all expected properties from useIssues return", () => {
-      const mockReturn = createMockUseIssuesReturn({
+    it("uses all expected properties from issueStore", () => {
+      mockStoreState = createMockUseIssuesReturn({
         issues: [createMockIssue()],
         isLoading: false,
         error: null,
         connectionState: "connected",
         reconnectAttempts: 0,
       });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       const { container } = render(<App />);
 
       // Verify the component renders without errors, indicating
-      // it correctly uses all the hook's return values
+      // it correctly uses all the store's state values
       const banner = container.querySelector('header[role="banner"]');
       expect(banner).toBeInTheDocument();
       expect(screen.getByRole("main")).toBeInTheDocument();
@@ -1062,7 +1085,7 @@ describe("App", () => {
   describe("state transitions", () => {
     it("transitions from loading to success", () => {
       const mockLoadingReturn = createMockUseIssuesReturn({ isLoading: true });
-      vi.mocked(useIssues).mockReturnValue(mockLoadingReturn);
+      mockStoreState = mockLoadingReturn;
 
       const { rerender } = render(<App />);
 
@@ -1079,7 +1102,7 @@ describe("App", () => {
         isLoading: false,
         issues,
       });
-      vi.mocked(useIssues).mockReturnValue(mockSuccessReturn);
+      mockStoreState = mockSuccessReturn;
 
       rerender(<App />);
 
@@ -1090,7 +1113,7 @@ describe("App", () => {
 
     it("transitions from loading to error", () => {
       const mockLoadingReturn = createMockUseIssuesReturn({ isLoading: true });
-      vi.mocked(useIssues).mockReturnValue(mockLoadingReturn);
+      mockStoreState = mockLoadingReturn;
 
       const { rerender } = render(<App />);
 
@@ -1102,7 +1125,7 @@ describe("App", () => {
         isLoading: false,
         error: "Network error occurred",
       });
-      vi.mocked(useIssues).mockReturnValue(mockErrorReturn);
+      mockStoreState = mockErrorReturn;
 
       rerender(<App />);
 
@@ -1115,7 +1138,7 @@ describe("App", () => {
         isLoading: false,
         error: "Initial error",
       });
-      vi.mocked(useIssues).mockReturnValue(mockErrorReturn);
+      mockStoreState = mockErrorReturn;
 
       const { rerender } = render(<App />);
 
@@ -1131,7 +1154,7 @@ describe("App", () => {
         error: null,
         issues,
       });
-      vi.mocked(useIssues).mockReturnValue(mockSuccessReturn);
+      mockStoreState = mockSuccessReturn;
 
       rerender(<App />);
 
@@ -1146,7 +1169,7 @@ describe("App", () => {
       const mockReturn = createMockUseIssuesReturn({
         issues: [createMockIssue()],
       });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -1161,7 +1184,7 @@ describe("App", () => {
       const mockReturn = createMockUseIssuesReturn({
         issues: [createMockIssue()],
       });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -1176,7 +1199,7 @@ describe("App", () => {
       const mockReturn = createMockUseIssuesReturn({
         isLoading: true,
       });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -1190,7 +1213,7 @@ describe("App", () => {
         isLoading: false,
         error: "Network error",
       });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -1213,7 +1236,7 @@ describe("App", () => {
         }),
       ];
       const mockReturn = createMockUseIssuesReturn({ issues });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -1228,7 +1251,7 @@ describe("App", () => {
         createMockIssue({ id: "issue-1", title: "Test Issue", status: "open" }),
       ];
       const mockReturn = createMockUseIssuesReturn({ issues });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       const filterActions = {
         setPriority: vi.fn(),
@@ -1278,7 +1301,7 @@ describe("App", () => {
         }),
       ];
       const mockReturn = createMockUseIssuesReturn({ issues });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -1296,7 +1319,7 @@ describe("App", () => {
     it("passes groupBy prop to SwimLaneBoard with default value of epic", () => {
       const issues = [createMockIssue()];
       const mockReturn = createMockUseIssuesReturn({ issues });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       // Mock FilterState with no groupBy (App.tsx applies DEFAULT_GROUP_BY = 'none')
       vi.mocked(useFilterState).mockReturnValue([
@@ -1322,7 +1345,7 @@ describe("App", () => {
     it("passes groupBy prop to SwimLaneBoard with epic grouping", () => {
       const issues = [createMockIssue()];
       const mockReturn = createMockUseIssuesReturn({ issues });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       // Mock FilterState with groupBy: 'epic'
       vi.mocked(useFilterState).mockReturnValue([
@@ -1348,7 +1371,7 @@ describe("App", () => {
     it("FilterBar receives groupBy and onGroupByChange props", () => {
       const issues = [createMockIssue()];
       const mockReturn = createMockUseIssuesReturn({ issues });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       const setGroupBy = vi.fn();
       vi.mocked(useFilterState).mockReturnValue([
@@ -1374,7 +1397,7 @@ describe("App", () => {
     it("updates SwimLaneBoard groupBy when FilterBar groupBy changes", () => {
       const issues = [createMockIssue()];
       const mockReturn = createMockUseIssuesReturn({ issues });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       let currentGroupBy = "none";
       const setGroupBy = vi.fn((value: string) => {
@@ -1425,7 +1448,7 @@ describe("App", () => {
         issues,
         updateIssueStatus,
       });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -1450,7 +1473,7 @@ describe("App", () => {
         }),
       ];
       const mockReturn = createMockUseIssuesReturn({ issues });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -1468,7 +1491,7 @@ describe("App", () => {
         }),
       ];
       const mockReturn = createMockUseIssuesReturn({ issues });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -1486,7 +1509,7 @@ describe("App", () => {
         }),
       ];
       const mockReturn = createMockUseIssuesReturn({ issues });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       // Mock FilterState with showBlocked: true
       vi.mocked(useFilterState).mockReturnValue([
@@ -1513,7 +1536,7 @@ describe("App", () => {
   describe("IssueDetailPanel integration", () => {
     it("renders IssueDetailPanel in closed state by default", () => {
       const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       const { container } = render(<App />);
 
@@ -1535,7 +1558,7 @@ describe("App", () => {
         }),
       ];
       const mockReturn = createMockUseIssuesReturn({ issues });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
           fetchIssue,
@@ -1566,7 +1589,7 @@ describe("App", () => {
         }),
       ];
       const mockReturn = createMockUseIssuesReturn({ issues });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
           fetchIssue,
@@ -1587,7 +1610,7 @@ describe("App", () => {
     it("back button from issue-detail view navigates via React Router", () => {
       const clearIssue = vi.fn();
       const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
           issueDetails: {
@@ -1634,7 +1657,7 @@ describe("App", () => {
         }),
       ];
       const mockReturn = createMockUseIssuesReturn({ issues });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
           fetchIssue,
@@ -1668,7 +1691,7 @@ describe("App", () => {
         }),
       ];
       const mockReturn = createMockUseIssuesReturn({ issues });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
           isLoading: true,
@@ -1698,7 +1721,7 @@ describe("App", () => {
         }),
       ];
       const mockReturn = createMockUseIssuesReturn({ issues });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
           issueDetails: {
@@ -1734,7 +1757,7 @@ describe("App", () => {
         }),
       ];
       const mockReturn = createMockUseIssuesReturn({ issues });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
           error: "Failed to fetch issue details",
@@ -1770,7 +1793,7 @@ describe("App", () => {
         }),
       ];
       const mockReturn = createMockUseIssuesReturn({ issues });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
           fetchIssue,
@@ -1796,201 +1819,116 @@ describe("App", () => {
     });
   });
 
-  describe("useIssues mode parameter based on activeView", () => {
-    it('calls useIssues with mode: "kanban" when activeView is "kanban"', () => {
-      const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+  describe("fetchIssues mode parameter based on activeView", () => {
+    it('calls fetchIssues with mode: "kanban" when activeView is "kanban"', () => {
+      mockStoreState = createMockUseIssuesReturn({});
       vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("kanban"));
 
       render(<App />);
 
-      expect(useIssues).toHaveBeenCalledWith(
-        expect.objectContaining({
-          mode: "kanban",
-        }),
+      expect(mockStoreState.fetchIssues).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: "kanban" }),
       );
     });
 
-    it('calls useIssues with mode: "ready" when activeView is "table"', () => {
-      const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+    it('calls fetchIssues with mode: "ready" when activeView is "table"', () => {
+      mockStoreState = createMockUseIssuesReturn({});
       vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("table"));
 
       render(<App />);
 
-      expect(useIssues).toHaveBeenCalledWith(
-        expect.objectContaining({
-          mode: "ready",
-        }),
+      expect(mockStoreState.fetchIssues).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: "ready" }),
       );
     });
 
-    it('calls useIssues with mode: "graph" when activeView is "graph"', () => {
-      const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+    it('calls fetchIssues with mode: "graph" when activeView is "graph"', () => {
+      mockStoreState = createMockUseIssuesReturn({});
       vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("graph"));
 
       render(<App />);
 
-      expect(useIssues).toHaveBeenCalledWith(
-        expect.objectContaining({
-          mode: "graph",
-        }),
+      expect(mockStoreState.fetchIssues).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: "graph" }),
       );
     });
 
     it("refetches issues when view changes from kanban to graph", () => {
-      const refetch = vi.fn().mockResolvedValue(undefined);
-      const mockReturn = createMockUseIssuesReturn({ refetch });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
-
-      // Start with kanban view
+      mockStoreState = createMockUseIssuesReturn({});
       vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("kanban"));
 
       const { rerender } = render(<App />);
 
-      // Verify initial call with mode: 'kanban'
-      expect(useIssues).toHaveBeenLastCalledWith({
-        mode: "kanban",
-      });
+      expect(mockStoreState.fetchIssues).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: "kanban" }),
+      );
 
-      // Clear mock to track the next call
-      vi.mocked(useIssues).mockClear();
-
-      // Switch to graph view
+      mockStoreState.fetchIssues.mockClear();
       vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("graph"));
-
       rerender(<App />);
 
-      // Verify useIssues is called with mode: 'graph' after view change
-      expect(useIssues).toHaveBeenLastCalledWith({
-        mode: "graph",
-      });
+      expect(mockStoreState.fetchIssues).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: "graph" }),
+      );
     });
 
     it("refetches issues when view changes from graph to kanban", () => {
-      const refetch = vi.fn().mockResolvedValue(undefined);
-      const mockReturn = createMockUseIssuesReturn({ refetch });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
-
-      // Start with graph view
+      mockStoreState = createMockUseIssuesReturn({});
       vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("graph"));
 
       const { rerender } = render(<App />);
 
-      // Verify initial call with mode: 'graph'
-      expect(useIssues).toHaveBeenLastCalledWith({
-        mode: "graph",
-      });
+      expect(mockStoreState.fetchIssues).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: "graph" }),
+      );
 
-      // Clear mock to track the next call
-      vi.mocked(useIssues).mockClear();
-
-      // Switch to kanban view
+      mockStoreState.fetchIssues.mockClear();
       vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("kanban"));
-
       rerender(<App />);
 
-      // Verify useIssues is called with mode: 'kanban' after view change
-      expect(useIssues).toHaveBeenLastCalledWith({
-        mode: "kanban",
-      });
+      expect(mockStoreState.fetchIssues).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: "kanban" }),
+      );
     });
 
     it("refetches issues when view changes from graph to table", () => {
-      const refetch = vi.fn().mockResolvedValue(undefined);
-      const mockReturn = createMockUseIssuesReturn({ refetch });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
-
-      // Start with graph view
+      mockStoreState = createMockUseIssuesReturn({});
       vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("graph"));
 
       const { rerender } = render(<App />);
 
-      // Verify initial call with mode: 'graph'
-      expect(useIssues).toHaveBeenLastCalledWith({
-        mode: "graph",
-      });
-
-      // Clear mock to track the next call
-      vi.mocked(useIssues).mockClear();
-
-      // Switch to table view
+      mockStoreState.fetchIssues.mockClear();
       vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("table"));
-
       rerender(<App />);
 
-      // Verify useIssues is called with mode: 'ready' after view change
-      expect(useIssues).toHaveBeenLastCalledWith({
-        mode: "ready",
-      });
+      expect(mockStoreState.fetchIssues).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: "ready" }),
+      );
     });
 
     it("switches from kanban mode to ready mode when view changes from kanban to table", () => {
-      const refetch = vi.fn().mockResolvedValue(undefined);
-      const mockReturn = createMockUseIssuesReturn({ refetch });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
-
-      // Start with kanban view
+      mockStoreState = createMockUseIssuesReturn({});
       vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("kanban"));
 
       const { rerender } = render(<App />);
 
-      // Verify initial call with mode: 'kanban'
-      expect(useIssues).toHaveBeenLastCalledWith({
-        mode: "kanban",
-      });
-
-      // Clear mock to track the next call
-      vi.mocked(useIssues).mockClear();
-
-      // Switch to table view
+      mockStoreState.fetchIssues.mockClear();
       vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("table"));
-
       rerender(<App />);
 
-      // Verify useIssues is still called with mode: 'ready'
-      expect(useIssues).toHaveBeenLastCalledWith({
-        mode: "ready",
-      });
+      expect(mockStoreState.fetchIssues).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: "ready" }),
+      );
     });
 
-    it("useRouteView is called before useIssues to determine fetch mode", () => {
-      const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
-
-      // Track call order
-      const callOrder: string[] = [];
-      vi.mocked(useRouteView).mockImplementation(() => {
-        callOrder.push("useRouteView");
-        return createViewStateReturn("graph");
-      });
-      vi.mocked(useIssues).mockImplementation(() => {
-        callOrder.push("useIssues");
-        return mockReturn;
-      });
-
-      render(<App />);
-
-      // Verify useRouteView is called before useIssues
-      const viewStateIndex = callOrder.indexOf("useRouteView");
-      const issuesIndex = callOrder.indexOf("useIssues");
-      expect(viewStateIndex).toBeLessThan(issuesIndex);
-      expect(viewStateIndex).toBeGreaterThanOrEqual(0);
-      expect(issuesIndex).toBeGreaterThanOrEqual(0);
-    });
-
-    it('calls useIssues with mode: "ready" when activeView is "monitor"', () => {
-      const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+    it('calls fetchIssues with mode: "ready" when activeView is "monitor"', () => {
+      mockStoreState = createMockUseIssuesReturn({});
       vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("monitor"));
 
       render(<App />);
 
-      expect(useIssues).toHaveBeenCalledWith(
-        expect.objectContaining({
-          mode: "ready",
-        }),
+      expect(mockStoreState.fetchIssues).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: "ready" }),
       );
     });
   });
@@ -1998,7 +1936,7 @@ describe("App", () => {
   describe("MonitorDashboard lazy loading integration", () => {
     it('renders MonitorDashboard when activeView is "monitor"', async () => {
       const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
       vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("monitor"));
 
       render(<App />);
@@ -2011,7 +1949,7 @@ describe("App", () => {
 
     it("shows LoadingSkeleton.Monitor as fallback during lazy load", async () => {
       const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
       vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("monitor"));
 
       render(<App />);
@@ -2025,7 +1963,7 @@ describe("App", () => {
 
     it('does not render MonitorDashboard when activeView is "kanban"', () => {
       const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
       vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("kanban"));
 
       render(<App />);
@@ -2038,7 +1976,7 @@ describe("App", () => {
 
     it('does not render MonitorDashboard when activeView is "table"', () => {
       const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
       vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("table"));
 
       render(<App />);
@@ -2049,7 +1987,7 @@ describe("App", () => {
 
     it('does not render MonitorDashboard when activeView is "graph"', async () => {
       const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
       vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("graph"));
 
       render(<App />);
@@ -2065,7 +2003,7 @@ describe("App", () => {
 
     it("transitions from kanban to monitor view correctly", async () => {
       const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       // Start with kanban view
       vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("kanban"));
@@ -2094,7 +2032,7 @@ describe("App", () => {
 
     it("transitions from monitor to kanban view correctly", async () => {
       const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       // Start with monitor view
       vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("monitor"));
@@ -2118,7 +2056,7 @@ describe("App", () => {
 
     it("transitions from graph to monitor view correctly", async () => {
       const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       // Start with graph view
       vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("graph"));
@@ -2146,7 +2084,7 @@ describe("App", () => {
 
     it("transitions from monitor to graph view correctly", async () => {
       const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       // Start with monitor view
       vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("monitor"));
@@ -2182,7 +2120,7 @@ describe("App", () => {
           }),
         ],
       });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       // Start with table view
       vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("table"));
@@ -2207,7 +2145,7 @@ describe("App", () => {
   describe("FileExplorer lazy loading integration", () => {
     it('renders FileExplorer when activeView is "files"', async () => {
       const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
       vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("files"));
 
       render(<App />);
@@ -2219,7 +2157,7 @@ describe("App", () => {
 
     it('does not render FileExplorer when activeView is "kanban"', () => {
       const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
       vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("kanban"));
 
       render(<App />);
@@ -2231,7 +2169,7 @@ describe("App", () => {
   describe("TerminalView integration", () => {
     it("renders TalkToLeadButton in the app", () => {
       const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -2240,7 +2178,7 @@ describe("App", () => {
 
     it("TalkToLeadButton has isActive=false when view is not terminal", () => {
       const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -2251,7 +2189,7 @@ describe("App", () => {
 
     it("TalkToLeadButton click calls navigateToView with terminal", () => {
       const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -2263,7 +2201,7 @@ describe("App", () => {
 
     it("TalkToLeadButton shows active when view is terminal", () => {
       const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
       vi.mocked(useRouteView).mockReturnValue(
         createViewStateReturn("terminal"),
       );
@@ -2277,7 +2215,7 @@ describe("App", () => {
 
     it("TerminalView is always mounted in the DOM", () => {
       const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -2287,7 +2225,7 @@ describe("App", () => {
 
     it("TerminalView wrapper has display:none when view is not terminal", () => {
       const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -2298,7 +2236,7 @@ describe("App", () => {
 
     it("TerminalView wrapper has display:contents when view is terminal", () => {
       const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
       vi.mocked(useRouteView).mockReturnValue(
         createViewStateReturn("terminal"),
       );
@@ -2312,7 +2250,7 @@ describe("App", () => {
 
     it("TerminalView receives isActive=true when view is terminal", () => {
       const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
       vi.mocked(useRouteView).mockReturnValue(
         createViewStateReturn("terminal"),
       );
@@ -2325,7 +2263,7 @@ describe("App", () => {
 
     it("TerminalView receives isActive=false when view is kanban", () => {
       const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -2336,7 +2274,7 @@ describe("App", () => {
     describe("terminal escape uses browser history", () => {
       it("escape from terminal calls navigate(-1) when history is available", () => {
         const mockReturn = createMockUseIssuesReturn({});
-        vi.mocked(useIssues).mockReturnValue(mockReturn);
+        mockStoreState = mockReturn;
         mockUseRouteView.mockReturnValue(createViewStateReturn("terminal"));
 
         // Simulate browser with history entries
@@ -2361,7 +2299,7 @@ describe("App", () => {
 
       it("escape from terminal navigates to kanban when no history", () => {
         const mockReturn = createMockUseIssuesReturn({});
-        vi.mocked(useIssues).mockReturnValue(mockReturn);
+        mockStoreState = mockReturn;
         mockUseRouteView.mockReturnValue(createViewStateReturn("terminal"));
 
         // history.length <= 1 means no back entry
@@ -2395,7 +2333,7 @@ describe("App", () => {
         }),
       ];
       const mockReturn = createMockUseIssuesReturn({ issues });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
           fetchIssue,
@@ -2437,7 +2375,7 @@ describe("App", () => {
         }),
       ];
       const mockReturn = createMockUseIssuesReturn({ issues });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
           fetchIssue,
@@ -2462,7 +2400,7 @@ describe("App", () => {
         createMockIssue({ id: "issue-1", title: "Test Issue", status: "open" }),
       ];
       const mockReturn = createMockUseIssuesReturn({ issues });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
           fetchIssue,
@@ -2490,7 +2428,7 @@ describe("App", () => {
         createViewStateReturn("issue-detail", mockSetActiveView),
       );
       const mockReturn = createMockUseIssuesReturn({ issues });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
           fetchIssue,
@@ -2514,7 +2452,7 @@ describe("App", () => {
         createMockIssue({ id: "issue-1", title: "Test Issue", status: "open" }),
       ];
       const mockReturn = createMockUseIssuesReturn({ issues });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
           fetchIssue,
@@ -2542,7 +2480,7 @@ describe("App", () => {
         }),
       ];
       const mockReturn = createMockUseIssuesReturn({ issues });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
           fetchIssue,
@@ -2564,7 +2502,7 @@ describe("App", () => {
 
     it("clicking agent calls openPanel with agent type", () => {
       const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       // Mock agents for the sidebar with two agents
       vi.mocked(useAgentContext).mockReturnValue({
@@ -2646,7 +2584,7 @@ describe("App", () => {
 
     it("agent panel close calls closePanel", () => {
       const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       // Mock agents and set panel state to show agent panel
       vi.mocked(useAgentContext).mockReturnValue({
@@ -2734,7 +2672,7 @@ describe("App", () => {
         updateIssueStatus,
         refetch,
       });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
           issueDetails: {
@@ -2761,7 +2699,11 @@ describe("App", () => {
 
       await waitFor(() => {
         expect(updateIssueStatus).toHaveBeenCalledTimes(1);
-        expect(updateIssueStatus).toHaveBeenCalledWith("plan-issue", "open");
+        expect(updateIssueStatus).toHaveBeenCalledWith(
+          "plan-issue",
+          "open",
+          "test-ws-id",
+        );
       });
 
       expect(mockCloseIssue).not.toHaveBeenCalled();
@@ -2774,7 +2716,7 @@ describe("App", () => {
         updateIssueStatus,
         refetch,
       });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
           issueDetails: {
@@ -2805,6 +2747,7 @@ describe("App", () => {
         expect(updateIssueStatus).toHaveBeenCalledWith(
           "help-issue",
           "in_progress",
+          "test-ws-id",
         );
       });
 
@@ -2818,7 +2761,7 @@ describe("App", () => {
         updateIssueStatus,
         refetch,
       });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
           issueDetails: {
@@ -2867,7 +2810,7 @@ describe("App", () => {
         updateIssueStatus,
         refetch,
       });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
           issueDetails: {
@@ -2935,7 +2878,7 @@ describe("App", () => {
         updateIssueStatus,
         refetch,
       });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
           issueDetails: {
@@ -2991,7 +2934,7 @@ describe("App", () => {
         dismissAll: vi.fn(),
       });
       const mockReturn = createMockUseIssuesReturn();
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
           issueDetails: {
@@ -3039,7 +2982,7 @@ describe("App", () => {
       const mockReturn = createMockUseIssuesReturn({
         updateIssueStatus,
       });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
           issueDetails: {
@@ -3103,7 +3046,7 @@ describe("App", () => {
       });
       mockUseRouteView.mockReturnValue(createViewStateReturn("workspace"));
       const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -3139,7 +3082,7 @@ describe("App", () => {
       });
       mockUseRouteView.mockReturnValue(createViewStateReturn("workspace"));
       const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -3175,7 +3118,7 @@ describe("App", () => {
       });
       mockUseRouteView.mockReturnValue(createViewStateReturn("kanban"));
       const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -3211,7 +3154,7 @@ describe("App", () => {
       });
       mockUseRouteView.mockReturnValue(createViewStateReturn("workspace"));
       const mockReturn = createMockUseIssuesReturn({ isLoading: true });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -3245,7 +3188,7 @@ describe("App", () => {
       });
       mockUseRouteView.mockReturnValue(createViewStateReturn("workspace"));
       const mockReturn = createMockUseIssuesReturn({ isLoading: true });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -3284,7 +3227,7 @@ describe("App", () => {
         error: "Something went wrong",
         isLoading: false,
       });
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -3320,7 +3263,7 @@ describe("App", () => {
       });
       mockUseRouteView.mockReturnValue(createViewStateReturn("kanban"));
       const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -3358,7 +3301,7 @@ describe("App", () => {
       });
       mockUseRouteView.mockReturnValue(createViewStateReturn("kanban"));
       const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -3368,7 +3311,7 @@ describe("App", () => {
   });
 
   describe("workspace-driven repo filtering", () => {
-    it("passes sourceReposFilter from workspace context to useIssues", () => {
+    it("passes sourceReposFilter from workspace context to fetchIssues", () => {
       const sourceReposFilter = ["repo-alpha", "repo-beta"];
       vi.mocked(useWorkspaceContext).mockReturnValue({
         workspace: { name: "filtered-workspace" },
@@ -3398,20 +3341,19 @@ describe("App", () => {
         isMultiRepo: true,
       });
       mockUseRouteView.mockReturnValue(createViewStateReturn("kanban"));
-      const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = createMockUseIssuesReturn({});
 
       render(<App />);
 
-      // useIssues should have been called with sourceRepos from workspace context
-      expect(useIssues).toHaveBeenCalledWith(
+      // fetchIssues should have been called with sourceRepos from workspace context
+      expect(mockStoreState.fetchIssues).toHaveBeenCalledWith(
         expect.objectContaining({
           sourceRepos: sourceReposFilter,
         }),
       );
     });
 
-    it("passes undefined sourceRepos when all repos selected", () => {
+    it("does not pass sourceRepos when all repos selected", () => {
       vi.mocked(useWorkspaceContext).mockReturnValue({
         workspace: { name: "my-workspace" },
         repos: [{ name: "repo-a" }, { name: "repo-b" }],
@@ -3436,15 +3378,14 @@ describe("App", () => {
         isMultiRepo: true,
       });
       mockUseRouteView.mockReturnValue(createViewStateReturn("kanban"));
-      const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = createMockUseIssuesReturn({});
 
       render(<App />);
 
-      // useIssues should have been called with sourceRepos: undefined (no filtering)
-      expect(useIssues).toHaveBeenCalledWith(
-        expect.objectContaining({
-          sourceRepos: undefined,
+      // fetchIssues should have been called without sourceRepos (no filtering)
+      expect(mockStoreState.fetchIssues).toHaveBeenCalledWith(
+        expect.not.objectContaining({
+          sourceRepos: expect.anything(),
         }),
       );
     });
@@ -3476,7 +3417,7 @@ describe("App", () => {
       });
       mockUseRouteView.mockReturnValue(createViewStateReturn("kanban"));
       const mockReturn = createMockUseIssuesReturn({});
-      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      mockStoreState = mockReturn;
 
       render(<App />);
 

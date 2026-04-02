@@ -14,6 +14,8 @@ import {
   type RefObject,
 } from "react";
 
+import { useStore } from "zustand";
+
 import {
   KanbanPage,
   TablePage,
@@ -66,7 +68,7 @@ import {
 import type { BlockedInfo } from "@/components/KanbanBoard";
 import type { ViewMode } from "@/components/ViewSwitcher";
 import {
-  useIssues,
+  useIssueStoreInstance,
   useRouteView,
   useFilterState,
   DEFAULT_GROUP_BY,
@@ -85,7 +87,7 @@ import {
   usePanelManager,
   KeyboardShortcutProvider,
 } from "@/hooks";
-import type { Issue } from "@/types";
+import type { Issue, Status } from "@/types";
 
 import styles from "./App.module.css";
 
@@ -170,28 +172,55 @@ function App() {
 
   const selectedIssueId: string | null = routeIssueId ?? null;
 
-  const {
-    issues,
-    isLoading,
-    error,
-    connectionState,
-    reconnectAttempts,
-    refetch,
-    updateIssueStatus,
-    retryConnection,
-    showStaleBanner: sseShowStaleBanner,
-    connectionLost: sseConnectionLost,
-    disconnectedSince: sseDisconnectedSince,
-    pendingIds,
-  } = useIssues({
-    mode:
-      activeView === "graph"
-        ? "graph"
-        : activeView === "kanban"
-          ? "kanban"
-          : "ready",
-    sourceRepos: sourceReposFilter,
-  });
+  // Issue state from Zustand store (replaces useIssues hook)
+  const issueStore = useIssueStoreInstance();
+
+  const issuesMap = useStore(issueStore, (s) => s.issuesMap);
+  const issues = useMemo(() => [...issuesMap.values()], [issuesMap]);
+  const isLoading = useStore(issueStore, (s) => s.isLoading);
+  const error = useStore(issueStore, (s) => s.error);
+  const pendingIds = useStore(issueStore, (s) => s.pendingIds);
+
+  const connectionState = useStore(issueStore, (s) => s.connectionState);
+  const reconnectAttempts = useStore(issueStore, (s) => s.reconnectAttempts);
+  const sseShowStaleBanner = useStore(issueStore, (s) => s.showStaleBanner);
+  const sseConnectionLost = useStore(issueStore, (s) => s.connectionLost);
+  const sseDisconnectedSince = useStore(issueStore, (s) => s.disconnectedSince);
+
+  const refetch = useStore(issueStore, (s) => s.refetch);
+  const storeUpdateIssueStatus = useStore(
+    issueStore,
+    (s) => s.updateIssueStatus,
+  );
+  const retryConnection = useStore(issueStore, (s) => s.retryConnection);
+  const fetchIssues = useStore(issueStore, (s) => s.fetchIssues);
+
+  // Wrap store's 3-arg updateIssueStatus to bind workspaceId (views expect 2-arg signature)
+  const updateIssueStatus = useCallback(
+    (issueId: string, newStatus: Status) =>
+      storeUpdateIssueStatus(issueId, newStatus, workspaceId),
+    [storeUpdateIssueStatus, workspaceId],
+  );
+
+  // Drive issue fetching based on active view mode, workspace, and source repos
+  const issueMode =
+    activeView === "graph"
+      ? "graph"
+      : activeView === "kanban"
+        ? "kanban"
+        : ("ready" as const);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const params: Parameters<typeof fetchIssues>[0] = {
+      workspaceId,
+      mode: issueMode,
+      signal: controller.signal,
+    };
+    if (sourceReposFilter) params.sourceRepos = sourceReposFilter;
+    fetchIssues(params);
+    return () => controller.abort();
+  }, [fetchIssues, workspaceId, issueMode, sourceReposFilter]);
 
   // Filter state with URL synchronization
   const [filters, filterActions] = useFilterState();

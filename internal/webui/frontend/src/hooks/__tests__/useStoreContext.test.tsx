@@ -346,30 +346,13 @@ describe("useStoreContext", () => {
   // 7. Initial fetchIssues
   // -----------------------------------------------------------------------
 
-  describe("Initial fetch", () => {
-    it("calls fetchIssues with workspaceId and mode kanban", () => {
+  describe("Initial reset (issue fetching delegated to App.tsx)", () => {
+    it("resets issueStore on mount (does not call fetchIssues — App.tsx drives that)", () => {
       renderHook(() => useIssueStoreInstance(), { wrapper });
 
-      expect(issueMethodsRef.current.fetchIssues).toHaveBeenCalledWith(
-        expect.objectContaining({
-          workspaceId: "test-ws-id",
-          mode: "kanban",
-        }),
-      );
-    });
-
-    it("includes sourceRepos when sourceReposFilter is set", () => {
-      mockWorkspace.sourceReposFilter = ["repo-x"];
-
-      renderHook(() => useIssueStoreInstance(), { wrapper });
-
-      expect(issueMethodsRef.current.fetchIssues).toHaveBeenCalledWith(
-        expect.objectContaining({
-          workspaceId: "test-ws-id",
-          mode: "kanban",
-          sourceRepos: ["repo-x"],
-        }),
-      );
+      expect(issueMethodsRef.current.reset).toHaveBeenCalled();
+      // fetchIssues is NOT called by StoreWiring — App.tsx drives mode-based fetching
+      expect(issueMethodsRef.current.fetchIssues).not.toHaveBeenCalled();
     });
   });
 
@@ -392,14 +375,13 @@ describe("useStoreContext", () => {
   // -----------------------------------------------------------------------
 
   describe("Workspace change", () => {
-    it("resets both stores and re-fetches on workspace change", () => {
+    it("resets both stores and re-starts agent polling on workspace change", () => {
       const { rerender } = renderHook(() => useIssueStoreInstance(), {
         wrapper,
       });
 
       // Clear initial calls
       issueMethodsRef.current.reset.mockClear();
-      issueMethodsRef.current.fetchIssues.mockClear();
       agentMethodsRef.current.reset.mockClear();
       agentMethodsRef.current.startPolling.mockClear();
       agentMethodsRef.current.stopPolling.mockClear();
@@ -411,9 +393,8 @@ describe("useStoreContext", () => {
       expect(agentMethodsRef.current.stopPolling).toHaveBeenCalled();
       expect(issueMethodsRef.current.reset).toHaveBeenCalled();
       expect(agentMethodsRef.current.reset).toHaveBeenCalled();
-      expect(issueMethodsRef.current.fetchIssues).toHaveBeenCalledWith(
-        expect.objectContaining({ workspaceId: "new-ws-id" }),
-      );
+      // fetchIssues is NOT called by StoreWiring — App.tsx drives mode-based fetching
+      expect(issueMethodsRef.current.fetchIssues).not.toHaveBeenCalled();
       expect(agentMethodsRef.current.startPolling).toHaveBeenCalledWith({
         pollInterval: 5000,
       });
@@ -425,7 +406,7 @@ describe("useStoreContext", () => {
   // -----------------------------------------------------------------------
 
   describe("sourceRepos change", () => {
-    it("re-fetches issues when sourceRepos changes", () => {
+    it("does NOT re-fetch issues from StoreWiring (App.tsx handles sourceRepos refetch)", () => {
       mockWorkspace.sourceReposFilter = ["repo-a"];
 
       const { rerender } = renderHook(() => useIssueStoreInstance(), {
@@ -437,12 +418,8 @@ describe("useStoreContext", () => {
       mockWorkspace.sourceReposFilter = ["repo-b"];
       rerender();
 
-      expect(issueMethodsRef.current.fetchIssues).toHaveBeenCalledWith(
-        expect.objectContaining({
-          workspaceId: "test-ws-id",
-          sourceRepos: ["repo-b"],
-        }),
-      );
+      // fetchIssues is NOT called by StoreWiring — App.tsx drives sourceRepos-based fetching
+      expect(issueMethodsRef.current.fetchIssues).not.toHaveBeenCalled();
     });
   });
 

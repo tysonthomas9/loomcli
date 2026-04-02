@@ -76,10 +76,8 @@ function StoreWiring({
   retryNowRef,
   children,
 }: StoreWiringProps): JSX.Element {
-  const { workspaceId, sourceReposFilter } = useWorkspaceContext();
+  const { workspaceId } = useWorkspaceContext();
   const eventContext = useEventContext();
-  const lastModeRef = useRef<"ready" | "graph" | "kanban">("kanban");
-  const initialFetchDone = useRef(false);
 
   // 1. Wire retryNow ref
   retryNowRef.current = eventContext.retryNow;
@@ -101,16 +99,10 @@ function StoreWiring({
     issueStore.getState().setReconnectAttempts(eventContext.reconnectAttempts);
   }, [issueStore, eventContext.reconnectAttempts]);
 
-  // 4. Initial fetch + workspace change handling
+  // 4. Reset stores on workspace change + start agent polling.
+  // Issue fetching is driven by App.tsx (mode-aware), not here.
   useEffect(() => {
     issueStore.getState().reset();
-    const fetchParams: Parameters<IssueStore["fetchIssues"]>[0] = {
-      workspaceId,
-      mode: lastModeRef.current,
-    };
-    if (sourceReposFilter) fetchParams.sourceRepos = sourceReposFilter;
-    issueStore.getState().fetchIssues(fetchParams);
-    initialFetchDone.current = true;
 
     agentStore.getState().reset();
     agentStore.getState().startPolling({ pollInterval: 5000 });
@@ -120,27 +112,7 @@ function StoreWiring({
     };
   }, [workspaceId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 5. Re-fetch issues on sourceRepos change (skip initial mount)
-  const sourceReposKey = useMemo(
-    () => (sourceReposFilter ? [...sourceReposFilter].sort().join(",") : ""),
-    [sourceReposFilter],
-  );
-  const prevSourceReposKey = useRef(sourceReposKey);
-
-  useEffect(() => {
-    if (prevSourceReposKey.current === sourceReposKey) return;
-    prevSourceReposKey.current = sourceReposKey;
-
-    if (!initialFetchDone.current) return;
-    const refetchParams: Parameters<IssueStore["fetchIssues"]>[0] = {
-      workspaceId,
-      mode: lastModeRef.current,
-    };
-    if (sourceReposFilter) refetchParams.sourceRepos = sourceReposFilter;
-    issueStore.getState().fetchIssues(refetchParams);
-  }, [sourceReposKey, workspaceId, sourceReposFilter, issueStore]);
-
-  // 6. Cleanup on unmount
+  // 5. Cleanup on unmount
   useEffect(() => {
     return () => {
       issueStore.getState().reset();
