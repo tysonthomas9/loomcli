@@ -47,16 +47,13 @@ vi.mock("@/utils/scopedStorage", () => ({
   clearLastWorkspaceId: mockClearLastWorkspaceId,
 }));
 
-// Mock @/hooks to avoid rendering WorkspaceProvider / AgentProvider internals
+// Mock @/hooks to avoid rendering WorkspaceProvider / StoreProvider internals
 vi.mock("@/hooks", () => ({
   WorkspaceProvider: ({ children }: { children: React.ReactNode }) => (
     <div data-testid="workspace-provider">{children}</div>
   ),
   StoreProvider: ({ children }: { children: React.ReactNode }) => (
     <div data-testid="store-provider">{children}</div>
-  ),
-  AgentProvider: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="agent-provider">{children}</div>
   ),
   useIssueSessionMap: vi.fn(() => ({})),
   useWorkspaceContext: vi.fn(() => ({ workspace: { id: "ws-1" } })),
@@ -269,7 +266,7 @@ describe("WorkspaceLayout", () => {
   });
 
   describe("StoreProvider in provider tree", () => {
-    it("renders StoreProvider between WorkspaceProvider and AgentProvider", async () => {
+    it("renders StoreProvider inside WorkspaceProvider", async () => {
       mockFetchWorkspace.mockResolvedValueOnce(makeWorkspaceData("ws-1"));
       renderWithWorkspaceId("ws-1");
       await waitFor(() => {
@@ -278,10 +275,10 @@ describe("WorkspaceLayout", () => {
       // StoreProvider should be inside WorkspaceProvider
       const wsProvider = screen.getByTestId("workspace-provider");
       expect(wsProvider).toContainElement(screen.getByTestId("store-provider"));
-      // AgentProvider should be inside StoreProvider
+      // IssueSessionProvider should be inside StoreProvider
       const storeProvider = screen.getByTestId("store-provider");
       expect(storeProvider).toContainElement(
-        screen.getByTestId("agent-provider"),
+        screen.getByTestId("issue-session-provider"),
       );
     });
   });

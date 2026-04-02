@@ -14,50 +14,59 @@ import { MonitorDashboard } from "../MonitorDashboard";
 const mockSetActiveView = vi.fn();
 let mockBlockedIssuesData: unknown[] = [];
 
+// Mock zustand's useStore — apply selector to the mock agent store state
+const mockAgentStoreState = {
+  stats: {
+    open: 10,
+    closed: 5,
+    total: 15,
+    completion: 33.3,
+    remaining: 10,
+    in_progress: 0,
+    review: 0,
+    blocked: 0,
+  },
+  agents: [],
+  tasks: {
+    needs_planning: 0,
+    ready_to_implement: 0,
+    in_progress: 0,
+    need_review: 0,
+    backlog: 0,
+  },
+  taskLists: {
+    needsPlanning: [],
+    readyToImplement: [],
+    needsReview: [],
+    inProgress: [],
+    backlog: [],
+    done: [],
+  },
+  agentTasks: {},
+  sync: {
+    db_synced: true,
+    db_last_sync: "",
+    git_needs_push: 0,
+    git_needs_pull: 0,
+  },
+  isLoading: false,
+  isConnected: true,
+  connectionState: "connected",
+  wasEverConnected: true,
+  retryCountdown: 0,
+  error: null,
+  lastUpdated: Date.now(), // epoch ms — component converts to Date via selector
+  retryNow: vi.fn(),
+};
+
+vi.mock("zustand", () => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  useStore: (_store: unknown, selector: (s: any) => unknown) =>
+    selector(mockAgentStoreState),
+}));
+
 vi.mock("@/hooks", () => ({
-  useAgents: () => ({
-    stats: {
-      open: 10,
-      closed: 5,
-      total: 15,
-      completion: 33.3,
-      remaining: 10,
-      in_progress: 0,
-      review: 0,
-      blocked: 0,
-    },
-    agents: [],
-    tasks: {
-      needs_planning: 0,
-      ready_to_implement: 0,
-      in_progress: 0,
-      need_review: 0,
-      blocked: 0,
-    },
-    taskLists: {
-      needsPlanning: [],
-      readyToImplement: [],
-      needsReview: [],
-      inProgress: [],
-      blocked: [],
-    },
-    agentTasks: {},
-    sync: {
-      db_synced: true,
-      db_last_sync: "",
-      git_needs_push: 0,
-      git_needs_pull: 0,
-    },
-    isLoading: false,
-    isConnected: true,
-    connectionState: "connected",
-    wasEverConnected: true,
-    retryCountdown: 0,
-    error: null,
-    lastUpdated: new Date(),
-    refetch: vi.fn(),
-    retryNow: vi.fn(),
-  }),
+  useAgentStoreInstance: () => ({}),
   useBlockedIssues: () => ({
     data: mockBlockedIssuesData,
     loading: false,

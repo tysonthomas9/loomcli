@@ -1,6 +1,8 @@
 import { useState, useCallback, useEffect } from "react";
 import { ErrorDisplay, LoadingSkeleton } from "@/components";
-import { useAgentContext } from "@/hooks";
+import { useStore } from "zustand";
+
+import { useAgentStoreInstance } from "@/hooks";
 import { useFileTree } from "@/hooks/useFileTree";
 import { useFileContent } from "@/hooks/useFileContent";
 import { FileTree } from "./FileTree";
@@ -8,7 +10,8 @@ import { FileViewer } from "./FileViewer";
 import styles from "./FileExplorer.module.css";
 
 export function FileExplorer() {
-  const { agents } = useAgentContext();
+  const agentStore = useAgentStoreInstance();
+  const agents = useStore(agentStore, (s) => s.agents);
   const [selectedAgent, setSelectedAgent] = useState<string>("");
 
   // Auto-select first agent when agents load

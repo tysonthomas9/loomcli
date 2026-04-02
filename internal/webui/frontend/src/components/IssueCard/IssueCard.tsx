@@ -16,7 +16,9 @@ import { RepoBadge } from "@/components/RepoBadge";
 import { TypeIcon } from "@/components/TypeIcon";
 import { useHasActiveSession } from "@/contexts/IssueSessionContext";
 import { useSearchTerm } from "@/contexts/SearchTermContext";
-import { useAgentContext } from "@/hooks";
+import { useStore } from "zustand";
+
+import { useAgentStoreInstance } from "@/hooks";
 import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
 import type { BlockerRef, Issue } from "@/types";
 import { isKnownIssueType, parseLoomStatus } from "@/types";
@@ -111,7 +113,8 @@ export const IssueCard = memo(function IssueCard({
   columnId,
   hasActiveSession,
 }: IssueCardProps): JSX.Element {
-  const { getAgentByName } = useAgentContext();
+  const agentStore = useAgentStoreInstance();
+  const agents = useStore(agentStore, (s) => s.agents);
   const { isMultiRepo, isAllSelected } = useWorkspaceContext();
   const searchTerm = useSearchTerm();
   const checkActiveSession = useHasActiveSession();
@@ -132,7 +135,7 @@ export const IssueCard = memo(function IssueCard({
     (columnId === "in_progress" || columnId === "review") && !!issue.assignee;
   const isReviewColumn = columnId === "review";
   const assignedAgent = issue.assignee
-    ? getAgentByName(issue.assignee)
+    ? agents.find((a) => a.name === issue.assignee)
     : undefined;
   const agentParsedStatus = assignedAgent
     ? parseLoomStatus(assignedAgent.status)

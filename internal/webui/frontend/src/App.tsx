@@ -69,6 +69,7 @@ import type { BlockedInfo } from "@/components/KanbanBoard";
 import type { ViewMode } from "@/components/ViewSwitcher";
 import {
   useIssueStoreInstance,
+  useAgentStoreInstance,
   useRouteView,
   useFilterState,
   DEFAULT_GROUP_BY,
@@ -77,7 +78,6 @@ import {
   useBlockedIssues,
   useIssueDetail,
   useToast,
-  useAgentContext,
   useTheme,
   useWorkspaceContext,
   useWorkspaceState,
@@ -392,15 +392,17 @@ function App() {
   // Terminal unread output indicator
   const [hasTerminalUnread, setHasTerminalUnread] = useState(false);
 
-  // Agent data (shared via AgentProvider — single polling loop)
-  const {
-    agents,
-    agentTasks,
-    showStaleBanner: agentShowStaleBanner,
-    connectionLost: agentConnectionLost,
-    disconnectedSince: agentDisconnectedSince,
-    retryNow: agentRetryNow,
-  } = useAgentContext();
+  // Agent data (shared via agentStore — single polling loop)
+  const agentStore = useAgentStoreInstance();
+  const agents = useStore(agentStore, (s) => s.agents);
+  const agentTasks = useStore(agentStore, (s) => s.agentTasks);
+  const agentShowStaleBanner = useStore(agentStore, (s) => s.showStaleBanner);
+  const agentConnectionLost = useStore(agentStore, (s) => s.connectionLost);
+  const agentDisconnectedSince = useStore(
+    agentStore,
+    (s) => s.disconnectedSince,
+  );
+  const agentRetryNow = useStore(agentStore, (s) => s.retryNow);
 
   // Combine SSE and agent stale data states (show banner if either is stale)
   const showStaleBanner = sseShowStaleBanner || agentShowStaleBanner;

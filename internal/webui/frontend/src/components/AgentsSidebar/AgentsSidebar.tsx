@@ -7,7 +7,13 @@ import { useState, useCallback, useEffect } from "react";
 import { ApiError } from "@/api/client";
 import { gitPush, gitPushAll } from "@/api/git";
 import { ConfirmDialog, ErrorDisplay, LoadingSkeleton } from "@/components";
-import { useAgentContext, useRepoFilter, useWorkspaceContext } from "@/hooks";
+import { useStore } from "zustand";
+
+import {
+  useAgentStoreInstance,
+  useRepoFilter,
+  useWorkspaceContext,
+} from "@/hooks";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
 import type {
   LoomAgentStatus,
@@ -130,18 +136,19 @@ export function AgentsSidebar({
     Record<string, string>
   >({});
 
-  const {
-    agents,
-    tasks,
-    taskLists,
-    agentTasks,
-    sync,
-    stats,
-    isLoading,
-    isConnected,
-    wasEverConnected,
-    lastUpdated,
-  } = useAgentContext();
+  const agentStore = useAgentStoreInstance();
+  const agents = useStore(agentStore, (s) => s.agents);
+  const tasks = useStore(agentStore, (s) => s.tasks);
+  const taskLists = useStore(agentStore, (s) => s.taskLists);
+  const agentTasks = useStore(agentStore, (s) => s.agentTasks);
+  const sync = useStore(agentStore, (s) => s.sync);
+  const stats = useStore(agentStore, (s) => s.stats);
+  const isLoading = useStore(agentStore, (s) => s.isLoading);
+  const isConnected = useStore(agentStore, (s) => s.isConnected);
+  const wasEverConnected = useStore(agentStore, (s) => s.wasEverConnected);
+  const lastUpdated = useStore(agentStore, (s) =>
+    s.lastUpdated !== null ? new Date(s.lastUpdated) : null,
+  );
 
   const [selectedRepos] = useRepoFilter();
   const isGrouped = selectedRepos.length > 0;

@@ -78,10 +78,17 @@ const defaultAgentContext = {
 let reposOverride: Partial<typeof defaultReposReturn> = {};
 let agentOverride: Partial<typeof defaultAgentContext> = {};
 
+// Mock zustand's useStore — apply selector to the merged agent context
+vi.mock("zustand", () => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  useStore: (_store: unknown, selector: (s: any) => unknown) =>
+    selector({ ...defaultAgentContext, ...agentOverride }),
+}));
+
 vi.mock("@/hooks", () => ({
   useDebouncedCallback: (fn: (...args: unknown[]) => unknown) => fn,
   useWorkspaceRepos: () => ({ ...defaultReposReturn, ...reposOverride }),
-  useAgentContext: () => ({ ...defaultAgentContext, ...agentOverride }),
+  useAgentStoreInstance: () => ({}),
   useWorkspaceContext: () => ({
     activeWorkspaceName: null,
     defaultWorkspaceName: null,

@@ -7,7 +7,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
 import { fetchGitStatus } from "@/api/git";
-import { useAgentContext } from "@/hooks/useAgentContext";
+import { useStore } from "zustand";
+
+import { useAgentStoreInstance } from "@/hooks/useStoreContext";
 import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
 import { parseLoomStatus } from "@/types";
 import { getStatusDotColor, getStatusLabel } from "@/components/AgentCard";
@@ -29,20 +31,21 @@ const PR_POLL_INTERVAL = 30_000;
 
 /**
  * AgentStatusBadge renders a pill-shaped badge with the agent's real-time status.
- * Status updates come from useAgentContext (5s polling).
+ * Status updates come from agentStore (5s polling).
  * PR link is fetched separately on a 30s interval.
  */
 export function AgentStatusBadge({
   agentName,
   onOpenTerminal,
 }: AgentStatusBadgeProps): JSX.Element | null {
-  const { getAgentByName } = useAgentContext();
+  const agentStore = useAgentStoreInstance();
+  const agents = useStore(agentStore, (s) => s.agents);
   const { workspaceId } = useWorkspaceContext();
   const [prBranch, setPrBranch] = useState<string | null>(null);
   const mountedRef = useRef(true);
 
   // Look up agent by name (returns new ref each poll, so derive a stable boolean)
-  const agent = getAgentByName(agentName);
+  const agent = agents.find((a) => a.name === agentName);
   const agentExists = !!agent;
 
   // Reset PR state when agent changes

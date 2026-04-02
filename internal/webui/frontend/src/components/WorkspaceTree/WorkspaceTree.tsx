@@ -29,9 +29,11 @@ import {
 import type { WorkspaceSummary } from "@/api/workspace";
 import type { ConnectionState } from "@/api/sse";
 import type { LoomAgentStatus } from "@/types";
+import { useStore } from "zustand";
+
 import {
   useWorkspaceRepos,
-  useAgentContext,
+  useAgentStoreInstance,
   useToast,
   useWorkspaceContext,
   useDebouncedCallback,
@@ -161,8 +163,9 @@ export function WorkspaceTree({
     retryCountdown,
     retryNow,
   } = useWorkspaceRepos();
-  const { agents: fleetAgents, agentTasks: contextAgentTasks } =
-    useAgentContext();
+  const agentStore = useAgentStoreInstance();
+  const fleetAgents = useStore(agentStore, (s) => s.agents);
+  const contextAgentTasks = useStore(agentStore, (s) => s.agentTasks);
   const { showToast } = useToast();
 
   // Re-read scoped state when workspace changes (SPA navigation)

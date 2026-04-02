@@ -12,60 +12,29 @@ import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom";
 
-import { useAgentContext } from "@/hooks";
 import type { Issue, LoomAgentStatus } from "@/types";
 
 import { IssueCard } from "../IssueCard";
 
-// Mock useAgentContext to control agent data
+// Mutable mock state for agent store — tests update via setupAgentContext
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let mockAgentStoreState: any = {
+  agents: [] as LoomAgentStatus[],
+};
+
+// Mock zustand's useStore — apply selector to the mock agent store state
+vi.mock("zustand", () => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  useStore: (_store: unknown, selector: (s: any) => unknown) =>
+    selector(mockAgentStoreState),
+}));
+
+// Mock hooks — replace useAgentStoreInstance with dummy
 vi.mock("@/hooks", async (importOriginal) => {
   const orig = await importOriginal<typeof import("@/hooks")>();
   return {
     ...orig,
-    useAgentContext: vi.fn(() => ({
-      agents: [],
-      tasks: {
-        needs_planning: 0,
-        ready_to_implement: 0,
-        in_progress: 0,
-        need_review: 0,
-        blocked: 0,
-      },
-      taskLists: {
-        needsPlanning: [],
-        readyToImplement: [],
-        needsReview: [],
-        inProgress: [],
-        blocked: [],
-      },
-      agentTasks: {},
-      sync: {
-        db_synced: true,
-        db_last_sync: "",
-        git_needs_push: 0,
-        git_needs_pull: 0,
-      },
-      stats: {
-        open: 0,
-        closed: 0,
-        total: 0,
-        completion: 0,
-        remaining: 0,
-        in_progress: 0,
-        review: 0,
-        blocked: 0,
-      },
-      isLoading: false,
-      isConnected: false,
-      connectionState: "never_connected" as const,
-      wasEverConnected: false,
-      retryCountdown: 0,
-      error: null,
-      lastUpdated: null,
-      refetch: async () => {},
-      retryNow: () => {},
-      getAgentByName: () => undefined as LoomAgentStatus | undefined,
-    })),
+    useAgentStoreInstance: () => ({}),
     useRegisterEscapeLayer: vi.fn(),
     useKeyboardShortcuts: vi.fn(() => ({
       isCheatsheetOpen: false,
@@ -91,8 +60,6 @@ vi.mock("@/components/AgentCard", () => ({
   getStatusDotColor: vi.fn(() => "#22c55e"),
   getStatusLabel: vi.fn(() => "Working"),
 }));
-
-const mockUseAgentContext = vi.mocked(useAgentContext);
 
 /**
  * Create a minimal test issue with required fields.
@@ -125,54 +92,12 @@ function createMockAgent(
 }
 
 /**
- * Helper to configure mockUseAgentContext to return a specific agent.
+ * Helper to configure the mock agent store state with a specific agent.
  */
 function setupAgentContext(agent: LoomAgentStatus | undefined) {
-  mockUseAgentContext.mockReturnValue({
+  mockAgentStoreState = {
     agents: agent ? [agent] : [],
-    tasks: {
-      needs_planning: 0,
-      ready_to_implement: 0,
-      in_progress: 0,
-      need_review: 0,
-      blocked: 0,
-    },
-    taskLists: {
-      needsPlanning: [],
-      readyToImplement: [],
-      needsReview: [],
-      inProgress: [],
-      blocked: [],
-    },
-    agentTasks: {},
-    sync: {
-      db_synced: true,
-      db_last_sync: "",
-      git_needs_push: 0,
-      git_needs_pull: 0,
-    },
-    stats: {
-      open: 0,
-      closed: 0,
-      total: 0,
-      completion: 0,
-      remaining: 0,
-      in_progress: 0,
-      review: 0,
-      blocked: 0,
-    },
-    isLoading: false,
-    isConnected: true,
-    connectionState: "connected" as const,
-    wasEverConnected: true,
-    retryCountdown: 0,
-    error: null,
-    lastUpdated: null,
-    refetch: async () => {},
-    retryNow: () => {},
-    getAgentByName: (name: string) =>
-      agent && agent.name === name ? agent : undefined,
-  });
+  };
 }
 
 describe("IssueCard AgentRow integration", () => {
