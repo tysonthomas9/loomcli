@@ -21,7 +21,6 @@ import {
   useFilterState,
   useIssueDetail,
   useRouteView,
-  useAgentContext,
   useWorkspaceContext,
 } from "@/hooks";
 import type { Issue, Status } from "@/types";
@@ -61,103 +60,15 @@ const { mockOpenPanel, mockClosePanel, mockIsOpen, mockUsePanelManager } =
   }));
 
 // Create hoisted mocks that can be shared across mock definitions
-const { mockUseIssueDetail, mockUseToast, mockUseAgents, mockUseAgentContext } =
-  vi.hoisted(() => ({
-    mockUseIssueDetail: vi.fn(),
-    mockUseToast: vi.fn(() => ({
-      toasts: [],
-      showToast: vi.fn(),
-      dismissToast: vi.fn(),
-      dismissAll: vi.fn(),
-    })),
-    mockUseAgents: vi.fn(() => ({
-      agents: [],
-      tasks: {
-        needs_planning: 0,
-        ready_to_implement: 0,
-        in_progress: 0,
-        need_review: 0,
-        blocked: 0,
-      },
-      taskLists: {
-        needsPlanning: [],
-        readyToImplement: [],
-        needsReview: [],
-        inProgress: [],
-        blocked: [],
-      },
-      agentTasks: {},
-      sync: {
-        db_synced: true,
-        db_last_sync: "",
-        git_needs_push: 0,
-        git_needs_pull: 0,
-      },
-      stats: {
-        open: 0,
-        closed: 0,
-        total: 0,
-        completion: 0,
-        remaining: 0,
-        in_progress: 0,
-        review: 0,
-        blocked: 0,
-      },
-      isLoading: false,
-      isConnected: true,
-      connectionState: "connected",
-      wasEverConnected: true,
-      retryCountdown: 0,
-      error: null,
-      lastUpdated: null,
-      refetch: vi.fn(),
-      retryNow: vi.fn(),
-    })),
-    mockUseAgentContext: vi.fn(() => ({
-      agents: [],
-      tasks: {
-        needs_planning: 0,
-        ready_to_implement: 0,
-        in_progress: 0,
-        need_review: 0,
-        blocked: 0,
-      },
-      taskLists: {
-        needsPlanning: [],
-        readyToImplement: [],
-        needsReview: [],
-        inProgress: [],
-        blocked: [],
-      },
-      agentTasks: {},
-      sync: {
-        db_synced: true,
-        db_last_sync: "",
-        git_needs_push: 0,
-        git_needs_pull: 0,
-      },
-      stats: {
-        open: 0,
-        closed: 0,
-        total: 0,
-        completion: 0,
-        remaining: 0,
-        in_progress: 0,
-        review: 0,
-        blocked: 0,
-      },
-      isLoading: false,
-      isConnected: true,
-      connectionState: "connected",
-      wasEverConnected: true,
-      retryCountdown: 0,
-      error: null,
-      lastUpdated: null,
-      refetch: vi.fn(),
-      retryNow: vi.fn(),
-      getAgentByName: vi.fn(() => undefined),
-    })),
-  }));
+const { mockUseIssueDetail, mockUseToast } = vi.hoisted(() => ({
+  mockUseIssueDetail: vi.fn(),
+  mockUseToast: vi.fn(() => ({
+    toasts: [],
+    showToast: vi.fn(),
+    dismissToast: vi.fn(),
+    dismissAll: vi.fn(),
+  })),
+}));
 
 // Mock zustand's useStore — forward selector calls to mutable mockStoreState
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -352,9 +263,7 @@ vi.mock("@/hooks", () => ({
     isLayouting: false,
     triggerLayout: vi.fn(),
   })),
-  useAgents: mockUseAgents,
-  useAgentContext: mockUseAgentContext,
-  AgentProvider: ({ children }: { children: React.ReactNode }) => children,
+  useAgentStoreInstance: () => mockIssueStore, // same mock store — useStore ignores store arg
   useRecentAssignees: vi.fn(() => ({
     recentAssignees: [],
     addRecentAssignee: vi.fn(),
@@ -510,6 +419,12 @@ interface MockStoreStateOverrides {
   showStaleBanner: boolean;
   connectionLost: boolean;
   disconnectedSince: number | null;
+  // Agent store fields (shared via mockStoreState)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  agents: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  agentTasks: Record<string, any>;
+  retryNow: () => void;
 }
 
 const DEFAULT_MOCK_ISSUE = createMockIssue({
@@ -537,7 +452,7 @@ function createMockUseIssuesReturn(
     disconnectedSince: null,
     pendingIds: new Set<string>(),
     mutationCount: 0,
-    // Actions
+    // Issue store actions
     fetchIssues: vi.fn().mockResolvedValue(undefined),
     refetch: vi.fn().mockResolvedValue(undefined),
     updateIssueStatus: vi.fn().mockResolvedValue(undefined),
@@ -550,6 +465,10 @@ function createMockUseIssuesReturn(
     getIssue: (id: string) => issuesMap.get(id),
     reset: vi.fn(),
     configure: vi.fn(),
+    // Agent store fields (shared mockStoreState — useStore ignores store arg)
+    agents: [],
+    agentTasks: {},
+    retryNow: vi.fn(),
     ...overrides,
   };
 }
@@ -2501,11 +2420,7 @@ describe("App", () => {
     });
 
     it("clicking agent calls openPanel with agent type", () => {
-      const mockReturn = createMockUseIssuesReturn({});
-      mockStoreState = mockReturn;
-
-      // Mock agents for the sidebar with two agents
-      vi.mocked(useAgentContext).mockReturnValue({
+      const mockReturn = createMockUseIssuesReturn({
         agents: [
           {
             name: "agent-1",
@@ -2522,48 +2437,8 @@ describe("App", () => {
             started_at: "2024-01-01T00:00:00Z",
           },
         ],
-        agentTasks: {},
-        tasks: {
-          needs_planning: 0,
-          ready_to_implement: 0,
-          in_progress: 0,
-          need_review: 0,
-          blocked: 0,
-        },
-        taskLists: {
-          needsPlanning: [],
-          readyToImplement: [],
-          needsReview: [],
-          inProgress: [],
-          blocked: [],
-        },
-        sync: {
-          db_synced: true,
-          db_last_sync: "",
-          git_needs_push: 0,
-          git_needs_pull: 0,
-        },
-        stats: {
-          open: 0,
-          closed: 0,
-          total: 0,
-          completion: 0,
-          remaining: 0,
-          in_progress: 0,
-          review: 0,
-          blocked: 0,
-        },
-        isLoading: false,
-        isConnected: true,
-        connectionState: "connected",
-        wasEverConnected: true,
-        retryCountdown: 0,
-        error: null,
-        lastUpdated: null,
-        refetch: vi.fn(),
-        retryNow: vi.fn(),
-        getAgentByName: vi.fn(() => undefined),
       });
+      mockStoreState = mockReturn;
 
       render(<App />);
 
@@ -2583,11 +2458,7 @@ describe("App", () => {
     });
 
     it("agent panel close calls closePanel", () => {
-      const mockReturn = createMockUseIssuesReturn({});
-      mockStoreState = mockReturn;
-
-      // Mock agents and set panel state to show agent panel
-      vi.mocked(useAgentContext).mockReturnValue({
+      const mockReturn = createMockUseIssuesReturn({
         agents: [
           {
             name: "agent-1",
@@ -2597,48 +2468,8 @@ describe("App", () => {
             started_at: "2024-01-01T00:00:00Z",
           },
         ],
-        agentTasks: {},
-        tasks: {
-          needs_planning: 0,
-          ready_to_implement: 0,
-          in_progress: 0,
-          need_review: 0,
-          blocked: 0,
-        },
-        taskLists: {
-          needsPlanning: [],
-          readyToImplement: [],
-          needsReview: [],
-          inProgress: [],
-          blocked: [],
-        },
-        sync: {
-          db_synced: true,
-          db_last_sync: "",
-          git_needs_push: 0,
-          git_needs_pull: 0,
-        },
-        stats: {
-          open: 0,
-          closed: 0,
-          total: 0,
-          completion: 0,
-          remaining: 0,
-          in_progress: 0,
-          review: 0,
-          blocked: 0,
-        },
-        isLoading: false,
-        isConnected: true,
-        connectionState: "connected",
-        wasEverConnected: true,
-        retryCountdown: 0,
-        error: null,
-        lastUpdated: null,
-        refetch: vi.fn(),
-        retryNow: vi.fn(),
-        getAgentByName: vi.fn(() => undefined),
       });
+      mockStoreState = mockReturn;
 
       // Set panel to open state so close button is visible
       mockUsePanelManager.mockReturnValue({

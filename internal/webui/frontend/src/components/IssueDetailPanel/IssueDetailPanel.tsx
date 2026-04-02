@@ -23,7 +23,9 @@ import {
   useRegisterEscapeLayer,
   LAYER_ISSUE_PANEL,
 } from "@/hooks";
-import { useAgentContext } from "@/hooks/useAgentContext";
+import { useStore } from "zustand";
+
+import { useAgentStoreInstance } from "@/hooks/useStoreContext";
 import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
 import { useIssueTabPersistence } from "@/hooks/useIssueTabPersistence";
 import type {
@@ -457,12 +459,11 @@ function DefaultContent({
     [],
   );
 
-  // Agent data for StartWorkButton (shared context, no duplicate polling)
-  const {
-    agents,
-    agentTasks,
-    isConnected: isLoomConnected,
-  } = useAgentContext();
+  // Agent data for StartWorkButton (shared store, no duplicate polling)
+  const agentStore = useAgentStoreInstance();
+  const agents = useStore(agentStore, (s) => s.agents);
+  const agentTasks = useStore(agentStore, (s) => s.agentTasks);
+  const isLoomConnected = useStore(agentStore, (s) => s.isConnected);
 
   // Agent-based log connection
   const agentName = issue?.assignee || null;

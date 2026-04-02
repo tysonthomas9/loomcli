@@ -14,58 +14,26 @@ import "@testing-library/jest-dom";
 import { AgentStatusBadge } from "../AgentStatusBadge";
 import type { LoomAgentStatus } from "@/types";
 
-// Mock useAgentContext
-const mockGetAgentByName =
-  vi.fn<(name: string) => LoomAgentStatus | undefined>();
-const mockIsConnected = vi.fn<() => boolean>().mockReturnValue(true);
+// Mutable mock agents array — tests configure via mockGetAgentByName helper
+let mockAgents: LoomAgentStatus[] = [];
 
-vi.mock("@/hooks/useAgentContext", () => ({
-  useAgentContext: () => ({
-    getAgentByName: mockGetAgentByName,
-    isConnected: mockIsConnected(),
-    agents: [],
-    tasks: {
-      needs_planning: 0,
-      ready_to_implement: 0,
-      in_progress: 0,
-      need_review: 0,
-      backlog: 0,
-    },
-    taskLists: {
-      needsPlanning: [],
-      readyToImplement: [],
-      needsReview: [],
-      inProgress: [],
-      backlog: [],
-      done: [],
-    },
-    agentTasks: {},
-    sync: {
-      db_synced: true,
-      db_last_sync: "",
-      git_needs_push: 0,
-      git_needs_pull: 0,
-    },
-    stats: {
-      open: 0,
-      closed: 0,
-      total: 0,
-      completion: 0,
-      remaining: 0,
-      in_progress: 0,
-      review: 0,
-      blocked: 0,
-    },
-    isLoading: false,
-    connectionState: "connected",
-    wasEverConnected: true,
-    retryCountdown: 0,
-    error: null,
-    lastUpdated: null,
-    refetch: async () => {},
-    retryNow: () => {},
-  }),
+// Mock zustand's useStore — apply selector to mock agent store state
+vi.mock("zustand", () => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  useStore: (_store: unknown, selector: (s: any) => unknown) =>
+    selector({ agents: mockAgents }),
 }));
+
+vi.mock("@/hooks/useStoreContext", () => ({
+  useAgentStoreInstance: () => ({}),
+}));
+
+// Compatibility helper — tests call mockGetAgentByName.mockReturnValue(agent)
+const mockGetAgentByName = {
+  mockReturnValue(agent: LoomAgentStatus | undefined) {
+    mockAgents = agent ? [agent] : [];
+  },
+};
 
 // Mock fetchGitStatus
 vi.mock("@/api/git", () => ({
@@ -88,7 +56,7 @@ function makeAgent(name: string, status: string): LoomAgentStatus {
 describe("AgentStatusBadge", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockIsConnected.mockReturnValue(true);
+    mockAgents = [];
   });
 
   describe("rendering", () => {
@@ -183,7 +151,6 @@ describe("AgentStatusBadge", () => {
 
     it("does not render when loom server disconnected and agent not found", () => {
       mockGetAgentByName.mockReturnValue(undefined);
-      mockIsConnected.mockReturnValue(false);
 
       const { container } = render(<AgentStatusBadge agentName="nova" />);
 

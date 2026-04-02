@@ -95,9 +95,16 @@ const defaultAgentContext = {
 
 let reposOverride: Partial<typeof defaultReposReturn> = {};
 
+// Mock zustand's useStore — apply selector to the agent context
+vi.mock("zustand", () => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  useStore: (_store: unknown, selector: (s: any) => unknown) =>
+    selector({ ...defaultAgentContext }),
+}));
+
 vi.mock("@/hooks", () => ({
   useWorkspaceRepos: () => ({ ...defaultReposReturn, ...reposOverride }),
-  useAgentContext: () => ({ ...defaultAgentContext }),
+  useAgentStoreInstance: () => ({}),
   useWorkspaceContext: () => ({
     activeWorkspaceName: null,
     defaultWorkspaceName: null,

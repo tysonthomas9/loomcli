@@ -51,18 +51,26 @@ const defaultMockContext = {
   },
   isLoading: false,
   isConnected: true,
+  wasEverConnected: true,
   lastUpdated: new Date(),
 };
 
 // Mutable override – tests can replace this before rendering
 let mockContextOverride: Partial<typeof defaultMockContext> = {};
 
+// Mock zustand's useStore — apply selector to the merged mock context
+vi.mock("zustand", () => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  useStore: (_store: unknown, selector: (s: any) => unknown) =>
+    selector({ ...defaultMockContext, ...mockContextOverride }),
+}));
+
 // Mock the hooks to prevent API calls in tests
 let mockSelectedRepos: string[] = [];
 const TEST_WS_ID = "test-ws-uuid-1234";
 
 vi.mock("@/hooks", () => ({
-  useAgentContext: () => ({ ...defaultMockContext, ...mockContextOverride }),
+  useAgentStoreInstance: () => ({}), // dummy — useStore mock ignores store arg
   useRepoFilter: () => [mockSelectedRepos, vi.fn()],
   useWorkspaceContext: () => ({ workspaceId: TEST_WS_ID }),
   useAgentDiffStat: () => ({

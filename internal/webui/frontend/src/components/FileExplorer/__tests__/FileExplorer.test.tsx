@@ -15,8 +15,19 @@ import { FileViewer } from "../FileViewer";
 
 // ---- Mocks ----
 
+// Mutable mock state for agent store
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let mockAgentStoreState: any = {};
+
+// Mock zustand's useStore — apply selector to the mock agent store state
+vi.mock("zustand", () => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  useStore: (_store: unknown, selector: (s: any) => unknown) =>
+    selector(mockAgentStoreState),
+}));
+
 vi.mock("@/hooks", () => ({
-  useAgentContext: vi.fn(),
+  useAgentStoreInstance: () => ({}),
   useRegisterEscapeLayer: vi.fn(),
   useKeyboardShortcuts: vi.fn(() => ({
     isCheatsheetOpen: false,
@@ -57,11 +68,9 @@ vi.mock("@/components/CodeMirrorEditor", () => ({
   ),
 }));
 
-import { useAgentContext } from "@/hooks";
 import { useFileTree } from "@/hooks/useFileTree";
 import { useFileContent } from "@/hooks/useFileContent";
 
-const mockUseAgents = vi.mocked(useAgentContext);
 const mockUseFileTree = vi.mocked(useFileTree);
 const mockUseFileContent = vi.mocked(useFileContent);
 
@@ -121,9 +130,7 @@ function defaultAgentsReturn() {
 describe("FileExplorer", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockUseAgents.mockReturnValue(
-      defaultAgentsReturn() as ReturnType<typeof useAgentContext>,
-    );
+    mockAgentStoreState = defaultAgentsReturn();
     mockUseFileTree.mockReturnValue(defaultFileTreeReturn());
     mockUseFileContent.mockReturnValue(defaultFileContentReturn());
   });
@@ -167,10 +174,7 @@ describe("FileExplorer", () => {
   });
 
   it('shows "No agents running" when agents array is empty', () => {
-    mockUseAgents.mockReturnValue({
-      ...defaultAgentsReturn(),
-      agents: [],
-    } as ReturnType<typeof useAgents>);
+    mockAgentStoreState = { ...defaultAgentsReturn(), agents: [] };
     render(<FileExplorer />);
     expect(screen.getByText("No agents running")).toBeInTheDocument();
   });

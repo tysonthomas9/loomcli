@@ -1,18 +1,13 @@
 /**
  * WorkspaceLayout — route layout component for workspace-scoped pages.
- * Reads :workspaceId from the URL, passes it to WorkspaceProvider and AgentProvider,
+ * Reads :workspaceId from the URL, passes it to WorkspaceProvider and StoreProvider,
  * and renders child routes via <Outlet />.
  */
 
 import { useParams, useNavigate, Outlet } from "react-router-dom";
 import { useEffect, useState } from "react";
 
-import {
-  WorkspaceProvider,
-  StoreProvider,
-  AgentProvider,
-  useIssueSessionMap,
-} from "@/hooks";
+import { WorkspaceProvider, StoreProvider, useIssueSessionMap } from "@/hooks";
 import { IssueSessionProvider } from "@/contexts/IssueSessionContext";
 import { fetchWorkspaceApi } from "@/api/workspace";
 import { clearLastWorkspaceId } from "@/utils/scopedStorage";
@@ -89,11 +84,9 @@ export function WorkspaceLayout() {
   return (
     <WorkspaceProvider workspaceId={workspaceId}>
       <StoreProvider>
-        <AgentProvider>
-          <IssueSessionWrapper>
-            <Outlet />
-          </IssueSessionWrapper>
-        </AgentProvider>
+        <IssueSessionWrapper>
+          <Outlet />
+        </IssueSessionWrapper>
       </StoreProvider>
     </WorkspaceProvider>
   );
