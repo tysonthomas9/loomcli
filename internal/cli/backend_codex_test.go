@@ -10,6 +10,7 @@ import (
 )
 
 func TestCodexBackendName(t *testing.T) {
+	t.Parallel()
 	b := &CodexBackend{}
 	if got := b.Name(); got != "codex" {
 		t.Errorf("expected 'codex', got %q", got)
@@ -17,6 +18,7 @@ func TestCodexBackendName(t *testing.T) {
 }
 
 func TestCodexBackendRegistered(t *testing.T) {
+	t.Parallel()
 	// After init(), the Codex backend should be registered
 	backendMu.RLock()
 	b, ok := backends["codex"]
@@ -31,6 +33,7 @@ func TestCodexBackendRegistered(t *testing.T) {
 }
 
 func TestCodexInvokeInteractive_MockInvoker(t *testing.T) {
+	// Not parallel: mutates global codexInvoker.
 	var gotWorkDir, gotPrompt, gotAgentName string
 	installCodexInvokerMock(t, func(workDir, prompt, agentName string) error {
 		gotWorkDir = workDir
@@ -56,6 +59,7 @@ func TestCodexInvokeInteractive_MockInvoker(t *testing.T) {
 }
 
 func TestCodexInvokeInteractive_MockInvokerError(t *testing.T) {
+	// Not parallel: mutates global codexInvoker.
 	expectedErr := errors.New("codex invocation failed")
 	installCodexInvokerMock(t, func(workDir, prompt, agentName string) error {
 		return expectedErr
@@ -69,6 +73,7 @@ func TestCodexInvokeInteractive_MockInvokerError(t *testing.T) {
 }
 
 func TestCodexInvokeNonInteractive_MockInvoker(t *testing.T) {
+	// Not parallel: mutates global codexNonInteractiveInvoker.
 	var gotWorkDir, gotPrompt, gotAgentName string
 	var gotShutdown <-chan struct{}
 	installCodexNonInteractiveMock(t, func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
@@ -100,6 +105,7 @@ func TestCodexInvokeNonInteractive_MockInvoker(t *testing.T) {
 }
 
 func TestCodexInvokeNonInteractive_MockInvokerError(t *testing.T) {
+	// Not parallel: mutates global codexNonInteractiveInvoker.
 	expectedErr := errors.New("codex non-interactive failed")
 	installCodexNonInteractiveMock(t, func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		return expectedErr
@@ -113,6 +119,7 @@ func TestCodexInvokeNonInteractive_MockInvokerError(t *testing.T) {
 }
 
 func TestCodexInvokeInteractive_EnvVars(t *testing.T) {
+	// Not parallel: mutates global codexInvoker.
 	// Verify that the default invoker sets LOOM_WORKTREE_PATH and BD_ACTOR.
 	// We mock at the codexInvoker level and check the env vars that would be set.
 	var capturedEnv []string
@@ -141,6 +148,7 @@ func TestCodexInvokeInteractive_EnvVars(t *testing.T) {
 }
 
 func TestCodexInvokeInteractive_NoAgentName(t *testing.T) {
+	// Not parallel: mutates global codexInvoker and env vars.
 	// Verify BD_ACTOR is NOT added when agentName is empty.
 	// Clear any existing BD_ACTOR from the environment first.
 	origBDActor, hadBDActor := os.LookupEnv("BD_ACTOR")
@@ -173,6 +181,7 @@ func TestCodexInvokeInteractive_NoAgentName(t *testing.T) {
 }
 
 func TestCodexBackendInvokeInteractive(t *testing.T) {
+	// Not parallel: mutates global codexInvoker.
 	var called bool
 	installCodexInvokerMock(t, func(workDir, prompt, agentName string) error {
 		called = true
@@ -190,6 +199,7 @@ func TestCodexBackendInvokeInteractive(t *testing.T) {
 }
 
 func TestCodexBackendInvokeNonInteractive(t *testing.T) {
+	// Not parallel: mutates global codexNonInteractiveInvoker.
 	var called bool
 	var gotShutdown <-chan struct{}
 	installCodexNonInteractiveMock(t, func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
@@ -213,7 +223,8 @@ func TestCodexBackendInvokeNonInteractive(t *testing.T) {
 }
 
 func TestCodexBackend_DispatchViaNonInteractive(t *testing.T) {
-	// Tests the full dispatch chain: InvokeAgentNonInteractive → CodexBackend.InvokeNonInteractive → codexNonInteractiveInvoker
+	// Not parallel: mutates global backend state and codexNonInteractiveInvoker.
+	// Tests the full dispatch chain: InvokeAgentNonInteractive -> CodexBackend.InvokeNonInteractive -> codexNonInteractiveInvoker
 	resetBackendState(t)
 	RegisterBackend(&CodexBackend{})
 	if err := SetBackend("codex"); err != nil {
@@ -252,6 +263,7 @@ func TestCodexBackend_DispatchViaNonInteractive(t *testing.T) {
 }
 
 func TestCollectCodexStreamUsage_TurnCompleted(t *testing.T) {
+	t.Parallel()
 	c := usage.NewCollector("codex", "test")
 
 	line := `{"type":"turn.completed","usage":{"input_tokens":1000,"output_tokens":500}}`
@@ -267,6 +279,7 @@ func TestCollectCodexStreamUsage_TurnCompleted(t *testing.T) {
 }
 
 func TestCollectCodexStreamUsage_NoUsage(t *testing.T) {
+	t.Parallel()
 	c := usage.NewCollector("codex", "test")
 
 	line := `{"type":"message","content":"hello"}`
@@ -279,6 +292,7 @@ func TestCollectCodexStreamUsage_NoUsage(t *testing.T) {
 }
 
 func TestCollectCodexStreamUsage_InvalidJSON(t *testing.T) {
+	t.Parallel()
 	c := usage.NewCollector("codex", "test")
 	collectCodexStreamUsage("not json", c)
 

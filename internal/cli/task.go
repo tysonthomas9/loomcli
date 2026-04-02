@@ -68,6 +68,8 @@ func init() {
 }
 
 func runTask(cmd *cobra.Command, args []string) {
+	deps := GetDeps(cmd)
+
 	// Resolve worktree/workspace path
 	var argName string
 	if len(args) > 0 {
@@ -131,7 +133,7 @@ func runTask(cmd *cobra.Command, args []string) {
 		}
 
 		beforeRef := captureHEADRef(worktreePath)
-		invokeErr := InvokeAgent(worktreePath, prompt, agentName) // Interactive mode, nice output
+		invokeErr := deps.Agent.InvokeInteractive(worktreePath, prompt, agentName) // Interactive mode, nice output
 
 		// Finalize session after invocation (only in standalone mode)
 		if sess != nil {
@@ -208,6 +210,7 @@ func runTask(cmd *cobra.Command, args []string) {
 			WorktreePath:    worktreePath,
 			ParentID:        taskParentID,
 			CustomTaskCheck: routerCheck,
+			Deps:            deps,
 		}, shutdown)
 		return
 	}
@@ -260,7 +263,7 @@ func runTask(cmd *cobra.Command, args []string) {
 	}
 
 	beforeRef := captureHEADRef(worktreePath)
-	invokeErr := InvokeAgent(worktreePath, prompt, agentName)
+	invokeErr := deps.Agent.InvokeInteractive(worktreePath, prompt, agentName)
 
 	// Finalize session after invocation
 	if sess != nil {

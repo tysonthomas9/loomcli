@@ -62,6 +62,8 @@ func runInit(cmd *cobra.Command, args []string) {
 		return
 	}
 
+	deps := GetDeps(cmd)
+
 	fmt.Println("")
 	fmt.Println("🔧 Loom Setup Wizard")
 	fmt.Println("====================")
@@ -69,14 +71,14 @@ func runInit(cmd *cobra.Command, args []string) {
 
 	// Step 1: Check prerequisites
 	fmt.Println("Step 1: Prerequisites")
-	if !checkPrerequisites() {
+	if !checkPrerequisites(deps) {
 		os.Exit(1)
 	}
 	fmt.Println("")
 
 	// Step 2: Initialize beads
 	fmt.Println("Step 2: Initialize beads")
-	if !initBeads() {
+	if !initBeads(deps) {
 		os.Exit(1)
 	}
 	fmt.Println("")
@@ -91,14 +93,16 @@ func runInit(cmd *cobra.Command, args []string) {
 
 	// Step 4: Create worktrees
 	fmt.Println("Step 4: Create agent worktrees")
-	names := createWorktrees(worktreesDir)
+	names := createWorktrees(deps, worktreesDir)
 	fmt.Println("")
 
 	// Step 5: Show summary
 	showSummary(worktreesDir, names)
 }
 
-func runInitWorkspace(_ *cobra.Command, _ []string) {
+func runInitWorkspace(cmd *cobra.Command, _ []string) {
+	deps := GetDeps(cmd)
+
 	fmt.Println("")
 	fmt.Println("🔧 Loom Workspace Setup")
 	fmt.Println("=========================")
@@ -106,7 +110,7 @@ func runInitWorkspace(_ *cobra.Command, _ []string) {
 
 	// Step 1: Check prerequisites
 	fmt.Println("Step 1: Prerequisites")
-	if !checkPrerequisites() {
+	if !checkPrerequisites(deps) {
 		os.Exit(1)
 	}
 	fmt.Println("")
@@ -147,7 +151,7 @@ func runInitWorkspace(_ *cobra.Command, _ []string) {
 	} else if _, statErr := os.Stat(filepath.Join(ws.Path, ".beads")); statErr == nil {
 		fmt.Println("✓ beads already initialized in workspace")
 	} else if initYes || promptYesNo("Initialize beads in workspace root?", true) {
-		initBeadsInWorkspace(ws.Path)
+		initBeadsInWorkspace(deps, ws.Path)
 	} else {
 		fmt.Println("→ Skipping beads initialization")
 	}
@@ -157,9 +161,9 @@ func runInitWorkspace(_ *cobra.Command, _ []string) {
 	showWorkspaceSummary(ws)
 }
 
-func initBeadsInWorkspace(wsPath string) {
+func initBeadsInWorkspace(deps *Deps, wsPath string) {
 	fmt.Printf("→ Initializing beads in %s...\n", wsPath)
-	result := defaultDeps.Exec.Run(wsPath, "bd", "init")
+	result := deps.Exec.Run(wsPath, "bd", "init")
 	if result.Err != nil {
 		fmt.Fprintf(os.Stderr, "✗ Failed to initialize beads: %s\n", result.Stderr)
 		return

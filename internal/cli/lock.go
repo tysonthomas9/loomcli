@@ -377,7 +377,13 @@ func GetLockStatus(worktreePath string) string {
 // getTaskStatus returns the status of a beads task
 // Returns "needs_review", "closed", "in_progress", "open", or ""
 func getTaskStatus(taskID string) string {
-	issue, err := defaultTracker().GetIssue(context.Background(), taskID)
+	d := *defaultDeps
+	d.Tracker = defaultTracker()
+	return getTaskStatusDeps(&d, taskID)
+}
+
+func getTaskStatusDeps(deps *Deps, taskID string) string {
+	issue, err := deps.Tracker.GetIssue(context.Background(), taskID)
 	if err != nil || issue == nil {
 		return ""
 	}

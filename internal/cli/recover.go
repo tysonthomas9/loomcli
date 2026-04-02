@@ -59,6 +59,7 @@ func init() {
 }
 
 func runRecover(cmd *cobra.Command, args []string) {
+	deps := GetDeps(cmd)
 	worktreeName := args[0]
 
 	// 1. Resolve worktree path
@@ -82,7 +83,7 @@ func runRecover(cmd *cobra.Command, args []string) {
 
 	if lockInfo == nil {
 		fmt.Println("No lock file found - checking for orphaned tasks...")
-		resetOrphanedAgentTasks(worktreePath, worktreeName, "", !recoverNoAnalyze)
+		resetOrphanedAgentTasks(deps, worktreePath, worktreeName, "", !recoverNoAnalyze)
 		fmt.Println("Agent is ready for new work.")
 		return
 	}
@@ -117,14 +118,14 @@ func runRecover(cmd *cobra.Command, args []string) {
 
 	// 4. Handle orphaned task if there was one
 	if lockInfo.TaskID != "" {
-		handleOrphanedTask(worktreePath, lockInfo.TaskID, !recoverNoAnalyze)
+		handleOrphanedTask(deps, worktreePath, lockInfo.TaskID, !recoverNoAnalyze)
 	}
 
 	// 5. Find and reset any additional orphaned tasks assigned to this agent
-	resetOrphanedAgentTasks(worktreePath, lockInfo.AgentName, lockInfo.TaskID, !recoverNoAnalyze)
+	resetOrphanedAgentTasks(deps, worktreePath, lockInfo.AgentName, lockInfo.TaskID, !recoverNoAnalyze)
 
 	// 6. Clean up untracked files left by the crashed agent
-	cleanUntrackedFiles(worktreePath, recoverForce)
+	cleanUntrackedFiles(deps, worktreePath, recoverForce)
 
 	fmt.Println("")
 	fmt.Println("=========================================")
@@ -136,6 +137,10 @@ func runRecover(cmd *cobra.Command, args []string) {
 // force-release locks, kill processes, reset orphaned tasks, clean files.
 // On clean exit (code 0) trusts agent's task status; on non-zero resets tasks.
 func RecoverWorktree(worktreePath, agentName string, exitCode int) error {
+	deps := &Deps{}
+	*deps = *defaultDeps
+	deps.Tracker = defaultTracker()
+
 	// 1. Check lock status
 	lockInfo, isRunning, err := CheckLock(worktreePath)
 	if err != nil {
@@ -165,7 +170,7 @@ func RecoverWorktree(worktreePath, agentName string, exitCode int) error {
 			} else {
 				fmt.Printf("[recover] Agent %s exited with code %d, resetting task %s\n",
 					agentName, exitCode, lockInfo.TaskID)
-				resetTask(lockInfo.TaskID)
+				resetTask(deps, lockInfo.TaskID)
 			}
 		}
 	}
@@ -175,10 +180,10 @@ func RecoverWorktree(worktreePath, agentName string, exitCode int) error {
 	if lockInfo != nil {
 		lockTaskID = lockInfo.TaskID
 	}
-	resetOrphanedAgentTasks(worktreePath, agentName, lockTaskID, false)
+	resetOrphanedAgentTasks(deps, worktreePath, agentName, lockTaskID, false)
 
 	// 6. Clean untracked files (force=true, no prompting)
-	cleanUntrackedFiles(worktreePath, true)
+	cleanUntrackedFiles(deps, worktreePath, true)
 
 	return nil
 }

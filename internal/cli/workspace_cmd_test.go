@@ -1,11 +1,14 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
 // resetWorkspaceFlags resets all workspace command flag variables to their zero values.
@@ -57,6 +60,7 @@ func TestWorkspaceCreate_HappyPath(t *testing.T) {
 	wsCreateDefault = true
 	wsCreateBranch = "feat-branch"
 
+	deps, _, _, _, _ := NewTestDeps(t)
 	// Mock execCommand to intercept git worktree add and bd init calls
 	mock := NewCommandMock(t, []CommandStub{
 		// git worktree add for frontend
@@ -66,9 +70,11 @@ func TestWorkspaceCreate_HappyPath(t *testing.T) {
 		// bd init in workspace dir
 		{Name: "bd", Args: []string{"init"}, Stdout: ""},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	runWorkspaceCreate(nil, []string{"myws"})
+	cmd := &cobra.Command{}
+	cmd.SetContext(WithDeps(context.Background(), deps))
+	runWorkspaceCreate(cmd, []string{"myws"})
 
 	// Verify config was saved correctly
 	cfg, err := LoadConfig()
@@ -118,14 +124,17 @@ func TestWorkspaceCreate_DefaultBranchIsName(t *testing.T) {
 	wsCreatePath = wsDir
 	wsCreateBranch = "" // Should default to workspace name
 
+	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewCommandMock(t, []CommandStub{
 		// branch should default to workspace name "feature-x"
 		{Name: "git", Args: []string{"worktree", "add", filepath.Join(wsDir, "svc"), "-b", "feature-x"}, Stdout: ""},
 		{Name: "bd", Args: []string{"init"}, Stdout: ""},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	runWorkspaceCreate(nil, []string{"feature-x"})
+	cmd := &cobra.Command{}
+	cmd.SetContext(WithDeps(context.Background(), deps))
+	runWorkspaceCreate(cmd, []string{"feature-x"})
 
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -156,13 +165,16 @@ func TestWorkspaceCreate_DefaultWorkspacePath(t *testing.T) {
 
 	expectedDir := GetWorkspaceDir("ws1")
 
+	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"worktree", "add", filepath.Join(expectedDir, "app"), "-b", "ws1"}, Stdout: ""},
 		{Name: "bd", Args: []string{"init"}, Stdout: ""},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	runWorkspaceCreate(nil, []string{"ws1"})
+	cmd := &cobra.Command{}
+	cmd.SetContext(WithDeps(context.Background(), deps))
+	runWorkspaceCreate(cmd, []string{"ws1"})
 
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -259,6 +271,8 @@ func TestWorkspaceCreate_EmptyRepos(t *testing.T) {
 }
 
 func TestWorkspaceCreate_InvalidBranch(t *testing.T) {
+	t.Parallel()
+
 	resetWorkspaceFlags(t)
 
 	// Combined validation: isValidWorkspaceName(branch) && !strings.HasPrefix(branch, "-")
@@ -476,16 +490,19 @@ func TestWorkspaceRemove_HappyPath(t *testing.T) {
 		t.Fatalf("SaveConfig() error = %v", err)
 	}
 
+	deps, _, _, _, _ := NewTestDeps(t)
 	// Mock git worktree remove call
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"worktree", "remove", repoWT}, Stdout: ""},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
 	wsRemoveForce = false
 	wsRemoveKeepWorktrees = false
 
-	runWorkspaceRemove(nil, []string{"myws"})
+	cmd := &cobra.Command{}
+	cmd.SetContext(WithDeps(context.Background(), deps))
+	runWorkspaceRemove(cmd, []string{"myws"})
 
 	// Verify workspace was removed from config
 	loaded, err := LoadConfig()
@@ -557,14 +574,17 @@ func TestWorkspaceRemove_KeepWorktrees(t *testing.T) {
 		t.Fatalf("SaveConfig() error = %v", err)
 	}
 
+	deps, _, _, _, _ := NewTestDeps(t)
 	// With --keep-worktrees, no git commands should be called
 	mock := NewCommandMock(t, []CommandStub{})
-	mock.Install()
+	mock.InstallOn(deps)
 
 	wsRemoveForce = false
 	wsRemoveKeepWorktrees = true
 
-	runWorkspaceRemove(nil, []string{"myws"})
+	cmd := &cobra.Command{}
+	cmd.SetContext(WithDeps(context.Background(), deps))
+	runWorkspaceRemove(cmd, []string{"myws"})
 
 	// Verify workspace was removed from config
 	loaded, err := LoadConfig()
@@ -608,15 +628,18 @@ func TestWorkspaceRemove_UpdatesDefaultWorkspace(t *testing.T) {
 		t.Fatalf("SaveConfig() error = %v", err)
 	}
 
+	deps, _, _, _, _ := NewTestDeps(t)
 	// No git commands needed since repos have no .git files
 	mock := NewCommandMock(t, []CommandStub{})
-	mock.Install()
+	mock.InstallOn(deps)
 
 	wsRemoveForce = false
 	wsRemoveKeepWorktrees = false
 
 	// Remove the default workspace
-	runWorkspaceRemove(nil, []string{"alpha"})
+	cmd := &cobra.Command{}
+	cmd.SetContext(WithDeps(context.Background(), deps))
+	runWorkspaceRemove(cmd, []string{"alpha"})
 
 	loaded, err := LoadConfig()
 	if err != nil {
@@ -675,6 +698,8 @@ func TestWorkspaceRemove_LockedAgent(t *testing.T) {
 }
 
 func TestFindMainRepoPath(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 
 	// Create a fake worktree .git file
@@ -701,6 +726,8 @@ func TestFindMainRepoPath(t *testing.T) {
 }
 
 func TestFindMainRepoPath_NoGitFile(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 
 	result := findMainRepoPath(tmpDir)
@@ -710,6 +737,8 @@ func TestFindMainRepoPath_NoGitFile(t *testing.T) {
 }
 
 func TestFindMainRepoPath_NotAWorktree(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 
 	// Write a .git file without the gitdir: prefix
@@ -741,14 +770,17 @@ func TestWorkspaceCreate_MultipleReposWithSpaces(t *testing.T) {
 	wsCreatePath = wsDir
 	wsCreateBranch = "dev"
 
+	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"worktree", "add", filepath.Join(wsDir, "svc1"), "-b", "dev"}, Stdout: ""},
 		{Name: "git", Args: []string{"worktree", "add", filepath.Join(wsDir, "svc2"), "-b", "dev"}, Stdout: ""},
 		{Name: "bd", Args: []string{"init"}, Stdout: ""},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	runWorkspaceCreate(nil, []string{"ws"})
+	cmd := &cobra.Command{}
+	cmd.SetContext(WithDeps(context.Background(), deps))
+	runWorkspaceCreate(cmd, []string{"ws"})
 
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -776,13 +808,16 @@ func TestWorkspaceCreate_SingleRepo(t *testing.T) {
 	wsCreateBranch = "solo"
 	wsCreateDefault = false
 
+	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"worktree", "add", filepath.Join(wsDir, "mono"), "-b", "solo"}, Stdout: ""},
 		{Name: "bd", Args: []string{"init"}, Stdout: ""},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	runWorkspaceCreate(nil, []string{"solo"})
+	cmd := &cobra.Command{}
+	cmd.SetContext(WithDeps(context.Background(), deps))
+	runWorkspaceCreate(cmd, []string{"solo"})
 
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -818,14 +853,17 @@ func TestWorkspaceRemove_MultipleWorkspaces(t *testing.T) {
 		t.Fatalf("SaveConfig() error = %v", err)
 	}
 
+	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewCommandMock(t, []CommandStub{})
-	mock.Install()
+	mock.InstallOn(deps)
 
 	wsRemoveForce = false
 	wsRemoveKeepWorktrees = false
 
 	// Remove non-default workspace
-	runWorkspaceRemove(nil, []string{"ws1"})
+	cmd := &cobra.Command{}
+	cmd.SetContext(WithDeps(context.Background(), deps))
+	runWorkspaceRemove(cmd, []string{"ws1"})
 
 	loaded, err := LoadConfig()
 	if err != nil {

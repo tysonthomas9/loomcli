@@ -187,6 +187,9 @@ func TestPullWorktree(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			// Uses SetupTestEnv (env mutation) - no t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
+
 			// Create a temp dir with the worktree
 			tmpDir := t.TempDir()
 			wtPath := tmpDir + "/" + tc.worktreeName
@@ -199,22 +202,22 @@ func TestPullWorktree(t *testing.T) {
 				"LOOM_WORKTREES_DIR": tmpDir,
 			})
 
+			// Install command mock (before output mock)
+			cmdMock := NewCommandMock(t, tc.commandStubs)
+			cmdMock.InstallOn(deps)
+
 			// Install output command mock
 			outputMock := NewOutputCommandMock(t, tc.outputStubs)
-			outputMock.Install()
-
-			// Install command mock
-			cmdMock := NewCommandMock(t, tc.commandStubs)
-			cmdMock.Install()
+			outputMock.InstallOn(deps)
 
 			// Mock claude invoker
 			claudeCalled := false
-			installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
+			deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
 				claudeCalled = true
 				return tc.claudeErr
-			})
+			}}
 
-			pullWorktree(tc.worktreeName, tc.sourceBranch)
+			pullWorktree(deps, tc.worktreeName, tc.sourceBranch)
 
 			if tc.claudeCalled && !claudeCalled {
 				t.Error("expected claude to be invoked, but it was not")
@@ -227,6 +230,9 @@ func TestPullWorktree(t *testing.T) {
 }
 
 func TestPullWorktree_NotFound(t *testing.T) {
+	// Uses SetupTestEnv (env mutation) - no t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// Set LOOM_WORKTREES_DIR to a temp dir without the worktree
 	tmpDir := t.TempDir()
 	SetupTestEnv(t, map[string]string{
@@ -234,11 +240,13 @@ func TestPullWorktree_NotFound(t *testing.T) {
 	})
 
 	// No mocks needed - should return before any git operations
+	cmdMock := NewCommandMock(t, []CommandStub{})
+	cmdMock.InstallOn(deps)
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{})
-	outputMock.Install()
+	outputMock.InstallOn(deps)
 
 	// Should handle error gracefully
-	pullWorktree("nonexistent", "main")
+	pullWorktree(deps, "nonexistent", "main")
 }
 
 func TestPullAllWorktrees(t *testing.T) {
@@ -280,6 +288,8 @@ func TestPullAllWorktrees(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			// Uses SetupTestEnv + DiscoverWorktrees (global) - no t.Parallel()
+
 			tmpDir := t.TempDir()
 
 			// Create worktree directories
@@ -293,11 +303,12 @@ func TestPullAllWorktrees(t *testing.T) {
 				"LOOM_WORKTREES_DIR": tmpDir,
 			})
 
-			outputMock := NewOutputCommandMock(t, tc.outputStubs)
-			outputMock.Install()
-
+			// Install globally — DiscoverWorktrees uses global state
 			cmdMock := NewCommandMock(t, tc.commandStubs)
 			cmdMock.Install()
+
+			outputMock := NewOutputCommandMock(t, tc.outputStubs)
+			outputMock.Install()
 
 			// Mock claude
 			installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
@@ -305,12 +316,14 @@ func TestPullAllWorktrees(t *testing.T) {
 				return nil
 			})
 
-			pullAllWorktrees(tc.sourceBranch)
+			pullAllWorktrees(defaultDeps, tc.sourceBranch)
 		})
 	}
 }
 
 func TestPullAllWorktrees_NoWorktrees(t *testing.T) {
+	// Uses SetupTestEnv + DiscoverWorktrees (global) - no t.Parallel()
+
 	tmpDir := t.TempDir()
 
 	// Create the worktrees dir but leave it empty
@@ -323,13 +336,16 @@ func TestPullAllWorktrees_NoWorktrees(t *testing.T) {
 	})
 
 	// No mocks needed - should return early
+	cmdMock := NewCommandMock(t, []CommandStub{})
+	cmdMock.Install()
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{})
 	outputMock.Install()
 
-	pullAllWorktrees("main")
+	pullAllWorktrees(defaultDeps, "main")
 }
 
 func TestSourceBranchDisplay(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		input  string
@@ -351,6 +367,9 @@ func TestSourceBranchDisplay(t *testing.T) {
 }
 
 func TestPullWorkspaceWorktrees_IteratesAllRepos(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	worktrees := []WorktreeInfo{
 		{
 			Name:   "repo-a",
@@ -377,18 +396,23 @@ func TestPullWorkspaceWorktrees_IteratesAllRepos(t *testing.T) {
 		{Args: []string{"push", "origin", "feat-b"}, Err: nil},
 	}
 
+	cmdMock := NewCommandMock(t, []CommandStub{})
+	cmdMock.InstallOn(deps)
 	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.Install()
+	outputMock.InstallOn(deps)
 
-	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	})
+	}}
 
-	pullWorkspaceWorktrees(worktrees, "main")
+	pullWorkspaceWorktrees(deps, worktrees, "main")
 }
 
 func TestPullWorkspaceWorktrees_UsesPerRepoDefaultBranch(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	worktrees := []WorktreeInfo{
 		{
 			Name:   "repo-a",
@@ -415,61 +439,76 @@ func TestPullWorkspaceWorktrees_UsesPerRepoDefaultBranch(t *testing.T) {
 		{Args: []string{"push", "origin", "feat-b"}, Err: nil},
 	}
 
+	cmdMock := NewCommandMock(t, []CommandStub{})
+	cmdMock.InstallOn(deps)
 	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.Install()
+	outputMock.InstallOn(deps)
 
-	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	})
+	}}
 
 	// sourceBranch="" means use per-repo DefaultBranch
-	pullWorkspaceWorktrees(worktrees, "")
+	pullWorkspaceWorktrees(deps, worktrees, "")
 }
 
 func TestPullRepoWorktree_CustomRemote(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	outputStubs := []OutputCommandStub{
 		{Args: []string{"fetch", "upstream"}, Err: nil},
 		{Args: []string{"merge", "upstream/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
 		{Args: []string{"push", "upstream", "feat-a"}, Err: nil},
 	}
 
+	cmdMock := NewCommandMock(t, []CommandStub{})
+	cmdMock.InstallOn(deps)
 	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.Install()
+	outputMock.InstallOn(deps)
 
-	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	})
+	}}
 
-	err := pullRepoWorktree("/ws/repo-a", "feat-a", "main", "upstream")
+	err := pullRepoWorktree(deps, "/ws/repo-a", "feat-a", "main", "upstream")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
 
 func TestPullRepoWorktree_EmptyRemoteDefaultsToOrigin(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	outputStubs := []OutputCommandStub{
 		{Args: []string{"fetch", "origin"}, Err: nil},
 		{Args: []string{"merge", "origin/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
 		{Args: []string{"push", "origin", "feat-a"}, Err: nil},
 	}
 
+	cmdMock := NewCommandMock(t, []CommandStub{})
+	cmdMock.InstallOn(deps)
 	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.Install()
+	outputMock.InstallOn(deps)
 
-	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	})
+	}}
 
-	err := pullRepoWorktree("/ws/repo-a", "feat-a", "main", "")
+	err := pullRepoWorktree(deps, "/ws/repo-a", "feat-a", "main", "")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
 
 func TestRunPull_LegacyMode(t *testing.T) {
+	// Uses SetupTestEnv (env mutation) - no t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// Test legacy pullWorktree path - same as existing TestPullWorktree "successful pull" case
 	tmpDir := t.TempDir()
 	wtPath := tmpDir + "/falcon"
@@ -491,20 +530,23 @@ func TestRunPull_LegacyMode(t *testing.T) {
 		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "falcon-branch\n"},
 	}
 
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.Install()
 	cmdMock := NewCommandMock(t, commandStubs)
-	cmdMock.Install()
+	cmdMock.InstallOn(deps)
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.InstallOn(deps)
 
-	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	})
+	}}
 
-	pullWorktree("falcon", "main")
+	pullWorktree(deps, "falcon", "main")
 }
 
 func TestPullWorkspaceWorktrees_SkipsNilRepo(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	worktrees := []WorktreeInfo{
 		{
 			Name:   "repo-a",
@@ -527,18 +569,23 @@ func TestPullWorkspaceWorktrees_SkipsNilRepo(t *testing.T) {
 		{Args: []string{"push", "origin", "feat-b"}, Err: nil},
 	}
 
+	cmdMock := NewCommandMock(t, []CommandStub{})
+	cmdMock.InstallOn(deps)
 	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.Install()
+	outputMock.InstallOn(deps)
 
-	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	})
+	}}
 
-	pullWorkspaceWorktrees(worktrees, "main")
+	pullWorkspaceWorktrees(deps, worktrees, "main")
 }
 
 func TestPullWorkspaceWorktrees_CLIArgOverridesConfig(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	worktrees := []WorktreeInfo{
 		{
 			Name:   "repo-a",
@@ -555,18 +602,21 @@ func TestPullWorkspaceWorktrees_CLIArgOverridesConfig(t *testing.T) {
 		{Args: []string{"push", "origin", "feat-a"}, Err: nil},
 	}
 
+	cmdMock := NewCommandMock(t, []CommandStub{})
+	cmdMock.InstallOn(deps)
 	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.Install()
+	outputMock.InstallOn(deps)
 
-	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	})
+	}}
 
-	pullWorkspaceWorktrees(worktrees, "release")
+	pullWorkspaceWorktrees(deps, worktrees, "release")
 }
 
 func TestPullCmd_GroupID(t *testing.T) {
+	t.Parallel()
 	// Verify command is in the "git" group
 	if pullCmd.GroupID != "git" {
 		t.Errorf("expected pull command to be in 'git' group, got %q", pullCmd.GroupID)
@@ -574,6 +624,7 @@ func TestPullCmd_GroupID(t *testing.T) {
 }
 
 func TestPullCmd_Flags(t *testing.T) {
+	t.Parallel()
 	// Verify flags are registered
 	if allFlag := pullCmd.Flags().Lookup("all"); allFlag == nil {
 		t.Error("expected --all flag to be registered")
@@ -592,20 +643,25 @@ func TestPullCmd_Flags(t *testing.T) {
 }
 
 func TestPullWorkspaceWorktrees_EmptyList(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// Empty worktree list should produce no errors and no git commands
 	worktrees := []WorktreeInfo{}
 
 	// No output stubs - no commands should be called
+	cmdMock := NewCommandMock(t, []CommandStub{})
+	cmdMock.InstallOn(deps)
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{})
-	outputMock.Install()
+	outputMock.InstallOn(deps)
 
-	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	})
+	}}
 
 	// Should not panic or call any commands
-	pullWorkspaceWorktrees(worktrees, "main")
+	pullWorkspaceWorktrees(deps, worktrees, "main")
 }
 
 func TestPullCmd_WorkspaceModeArgsValidation(t *testing.T) {

@@ -60,7 +60,9 @@ var backendAPIKeys = map[string]struct {
 	"opencode": {envVar: "OPENAI_API_KEY", secretName: "openai-api-key"},       //nolint:gosec // G101 — env var name, not a credential
 }
 
-func runSetup(_ *cobra.Command, _ []string) {
+func runSetup(cmd *cobra.Command, _ []string) {
+	deps := GetDeps(cmd)
+
 	fmt.Println("")
 	fmt.Println("Loom Setup Wizard")
 	fmt.Println("=================")
@@ -68,7 +70,7 @@ func runSetup(_ *cobra.Command, _ []string) {
 
 	// Step 1: Prerequisites
 	fmt.Println("Step 1: Prerequisites")
-	if !checkPrerequisites() {
+	if !checkPrerequisites(deps) {
 		os.Exit(1)
 	}
 	fmt.Println("")
@@ -89,7 +91,7 @@ func runSetup(_ *cobra.Command, _ []string) {
 	origInitYes := initYes
 	initYes = setupYes
 	defer func() { initYes = origInitYes }()
-	names := createWorktrees(worktreesDir)
+	names := createWorktrees(deps, worktreesDir)
 	fmt.Println("")
 
 	// Step 4: Generate loom.yaml
@@ -108,16 +110,21 @@ func runSetup(_ *cobra.Command, _ []string) {
 
 // stepDetectBackends scans PATH for known backend CLIs and prompts for selection.
 func stepDetectBackends() string {
+	return stepDetectBackendsWithDeps(defaultDeps, setupBackend, setupYes)
+}
+
+// stepDetectBackendsWithDeps is the testable core of stepDetectBackends.
+func stepDetectBackendsWithDeps(deps *Deps, backend string, yes bool) string {
 	// If --backend flag was provided, use it directly
-	if setupBackend != "" {
-		fmt.Printf("-> Using pre-selected backend: %s\n", setupBackend)
-		return setupBackend
+	if backend != "" {
+		fmt.Printf("-> Using pre-selected backend: %s\n", backend)
+		return backend
 	}
 
 	// Detect available backends
 	var available []string
 	for _, name := range knownBackends {
-		if _, err := defaultDeps.LookPath(name); err == nil {
+		if _, err := deps.LookPath(name); err == nil {
 			available = append(available, name)
 			fmt.Printf("  [available] %s\n", name)
 		} else {
@@ -135,7 +142,7 @@ func stepDetectBackends() string {
 		defaultBackend = available[0]
 	}
 
-	if setupYes {
+	if yes {
 		fmt.Printf("-> Using default backend: %s\n", defaultBackend)
 		return defaultBackend
 	}

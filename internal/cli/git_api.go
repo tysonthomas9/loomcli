@@ -228,7 +228,7 @@ func CreatePRResult(repoPath, sourceBranch, targetBranch, remote string) (*PRRes
 		return nil, fmt.Errorf("pushing branch: %v", err)
 	}
 
-	title, body := generatePRInfo(repoPath, r, targetBranch, sourceBranch)
+	title, body := generatePRInfo(defaultDeps, repoPath, r, targetBranch, sourceBranch)
 
 	result := defaultDeps.Exec.Run(repoPath, "gh", "pr", "create",
 		"--base", targetBranch,
@@ -239,7 +239,7 @@ func CreatePRResult(repoPath, sourceBranch, targetBranch, remote string) (*PRRes
 	if result.Err != nil {
 		errMsg := result.Stderr + result.Stdout
 		if strings.Contains(errMsg, "already exists") {
-			url, urlErr := getExistingPRURL(repoPath, sourceBranch)
+			url, urlErr := getExistingPRURL(defaultDeps, repoPath, sourceBranch)
 			if urlErr != nil {
 				return nil, urlErr
 			}
@@ -361,7 +361,7 @@ func GetGitStatusSummary(worktreePath, targetBranch string) (*GitStatusSummary, 
 
 // CheckGhInstalled checks if the gh CLI is available.
 func CheckGhInstalled() error {
-	return checkGhInstalled()
+	return checkGhInstalled(defaultDeps)
 }
 
 // getChangedFiles returns a list of changed files using git status --porcelain.

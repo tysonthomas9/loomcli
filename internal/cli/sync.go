@@ -35,7 +35,7 @@ Examples:
   loom sync --pull-only          # Only pull latest (same as pull --all)
   loom sync -W myworkspace       # Sync specific workspace`,
 	Args: cobra.NoArgs,
-	Run:  runFullSync,
+	RunE: runFullSync,
 }
 
 func init() {
@@ -45,21 +45,27 @@ func init() {
 	rootCmd.AddCommand(syncCmd)
 }
 
-func runFullSync(cmd *cobra.Command, args []string) {
-	if syncPushOnly && syncPullOnly {
+func runFullSync(cmd *cobra.Command, args []string) error {
+	deps := GetDeps(cmd)
+	pushOnly, _ := cmd.Flags().GetBool("push-only")
+	pullOnly, _ := cmd.Flags().GetBool("pull-only")
+	ws, _ := cmd.Flags().GetString("workspace")
+
+	if pushOnly && pullOnly {
 		fmt.Fprintln(os.Stderr, "Error: --push-only and --pull-only are mutually exclusive")
 		os.Exit(1)
 	}
 
 	if IsWorkspaceMode() {
-		runWorkspaceSync()
-		return
+		runWorkspaceSync(deps, pushOnly, pullOnly, ws)
+		return nil
 	}
 
-	runLegacySync()
+	runLegacySync(deps, pushOnly, pullOnly)
+	return nil
 }
 
-func runWorkspaceSync() {
+func runWorkspaceSync(deps *Deps, pushOnly, pullOnly bool, ws string) {
 	resolver, err := NewResolver()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating resolver: %v\n", err)
@@ -67,13 +73,13 @@ func runWorkspaceSync() {
 	}
 
 	// If workspace flag specified, operate on just that workspace
-	if syncWorkspaceFlag != "" {
-		if err := resolver.SetWorkspace(syncWorkspaceFlag); err != nil {
+	if ws != "" {
+		if err := resolver.SetWorkspace(ws); err != nil {
 			available := resolver.WorkspaceNames()
-			fmt.Fprintf(os.Stderr, "Error: workspace %q not found. Available: %v\n", syncWorkspaceFlag, available)
+			fmt.Fprintf(os.Stderr, "Error: workspace %q not found. Available: %v\n", ws, available)
 			os.Exit(1)
 		}
-		syncSingleWorkspace(resolver)
+		syncSingleWorkspace(deps, resolver, pushOnly, pullOnly)
 		return
 	}
 
@@ -95,7 +101,7 @@ func runWorkspaceSync() {
 			fmt.Fprintf(os.Stderr, "Error setting workspace %s: %v\n", wsName, err)
 			continue
 		}
-		syncSingleWorkspace(resolver)
+		syncSingleWorkspace(deps, resolver, pushOnly, pullOnly)
 		fmt.Println("")
 	}
 
@@ -104,7 +110,7 @@ func runWorkspaceSync() {
 	fmt.Println("=========================================")
 }
 
-func syncSingleWorkspace(resolver *Resolver) {
+func syncSingleWorkspace(deps *Deps, resolver *Resolver, pushOnly, pullOnly bool) {
 	worktrees, err := resolver.DiscoverWorktrees()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error discovering repos: %v\n", err)
@@ -117,21 +123,21 @@ func syncSingleWorkspace(resolver *Resolver) {
 	}
 
 	// Phase 1: Push (unless pull-only)
-	if !syncPullOnly {
+	if !pullOnly {
 		fmt.Println("")
 		fmt.Println("--- Phase 1: Push ---")
-		pushWorkspaceWorktrees(worktrees, "", "")
+		pushWorkspaceWorktrees(deps, worktrees, "", "")
 	}
 
 	// Phase 2: Pull (unless push-only)
-	if !syncPushOnly {
+	if !pushOnly {
 		fmt.Println("")
 		fmt.Println("--- Phase 2: Pull ---")
-		pullWorkspaceWorktrees(worktrees, "")
+		pullWorkspaceWorktrees(deps, worktrees, "")
 	}
 }
 
-func runLegacySync() {
+func runLegacySync(deps *Deps, pushOnly, pullOnly bool) {
 	fmt.Println("=========================================")
 	fmt.Println("Full Sync: All Worktrees")
 	fmt.Println("=========================================")
@@ -152,25 +158,25 @@ func runLegacySync() {
 	defaultBranch := GetDefaultBranch()
 
 	// Phase 1: Push all worktrees (unless pull-only)
-	if !syncPullOnly {
+	if !pullOnly {
 		fmt.Println("--- Phase 1: Push ---")
 		fmt.Printf("Pushing all worktrees -> %s\n", defaultBranch)
 		fmt.Println("")
 
 		for _, wt := range worktrees {
-			pushBranch(wt.Branch, defaultBranch)
+			pushBranch(deps, wt.Branch, defaultBranch)
 			fmt.Println("")
 		}
 	}
 
 	// Phase 2: Pull into all worktrees (unless push-only)
-	if !syncPushOnly {
+	if !pushOnly {
 		fmt.Println("--- Phase 2: Pull ---")
 		fmt.Printf("Pulling %s -> all worktrees\n", defaultBranch)
 		fmt.Println("")
 
 		for _, wt := range worktrees {
-			pullWorktree(wt.Name, defaultBranch)
+			pullWorktree(deps, wt.Name, defaultBranch)
 			fmt.Println("")
 		}
 	}

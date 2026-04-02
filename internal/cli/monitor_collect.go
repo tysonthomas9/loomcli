@@ -10,6 +10,14 @@ import (
 )
 
 func collectMonitorData(readyLimit int, branch string) *MonitorData {
+	// Copy defaultDeps and override Tracker with the global tracker
+	// (respects setDefaultTracker used by tests).
+	d := *defaultDeps
+	d.Tracker = defaultTracker()
+	return collectMonitorDataDeps(&d, readyLimit, branch)
+}
+
+func collectMonitorDataDeps(deps *Deps, readyLimit int, branch string) *MonitorData {
 	data := &MonitorData{Timestamp: time.Now()}
 
 	// Start stats and sync bd call in parallel with task collection
@@ -23,20 +31,20 @@ func collectMonitorData(readyLimit int, branch string) *MonitorData {
 
 	go func() {
 		defer wg.Done()
-		stats = collectStatistics()
+		stats = collectStatisticsDeps(deps)
 	}()
 
 	go func() {
 		defer wg.Done()
-		syncBdInfo = collectSyncBdStatus()
+		syncBdInfo = collectSyncBdStatusDeps(deps)
 	}()
 
 	// Collect tasks (internally parallel) to get agent-task mapping
-	data.Tasks, data.NeedsPlanningTasks, data.ReadyToImplement, data.ReviewTasks, data.InProgressTasks, data.BacklogTasks, data.ClosedTasks, data.AgentTasks = collectTaskStatus(readyLimit)
+	data.Tasks, data.NeedsPlanningTasks, data.ReadyToImplement, data.ReviewTasks, data.InProgressTasks, data.BacklogTasks, data.ClosedTasks, data.AgentTasks = collectTaskStatusDeps(deps, readyLimit)
 
 	// Collect agents, passing the task map for fallback lookup
 	var taskIDToAgents map[string][]string
-	data.Agents, taskIDToAgents = collectAgentStatus(data.AgentTasks, branch)
+	data.Agents, taskIDToAgents = collectAgentStatusDeps(deps, data.AgentTasks, branch)
 
 	// Detect task conflicts (multiple agents claiming same task)
 	data.TaskConflicts = make(map[string][]string)
@@ -69,6 +77,12 @@ func collectMonitorData(readyLimit int, branch string) *MonitorData {
 }
 
 func collectAgentStatus(agentTasks map[string]TaskInfo, branch string) ([]AgentStatus, map[string][]string) {
+	d := *defaultDeps
+	d.Tracker = defaultTracker()
+	return collectAgentStatusDeps(&d, agentTasks, branch)
+}
+
+func collectAgentStatusDeps(deps *Deps, agentTasks map[string]TaskInfo, branch string) ([]AgentStatus, map[string][]string) {
 	worktrees, err := DiscoverWorktrees()
 	if err != nil {
 		return nil, nil
@@ -88,7 +102,7 @@ func collectAgentStatus(agentTasks map[string]TaskInfo, branch string) ([]AgentS
 	globalDefaultBranch := GetDefaultBranchForWorktrees(worktrees)
 	githubURL := ""
 	if len(worktrees) > 0 && worktrees[0].Repo == nil {
-		githubURL = getGitHubRemoteURL(worktrees[0].Path)
+		githubURL = getGitHubRemoteURLDeps(deps, worktrees[0].Path)
 	}
 
 	for _, wt := range worktrees {
@@ -115,7 +129,7 @@ func collectAgentStatus(agentTasks map[string]TaskInfo, branch string) ([]AgentS
 			if strings.Contains(lockStatus, "...") {
 				if task, ok := agentTasks[wt.Name]; ok {
 					// Get actual task status to determine correct state
-					taskStatus := getTaskStatus(task.ID)
+					taskStatus := getTaskStatusDeps(deps, task.ID)
 					// Extract duration part (e.g., " (2m8s)")
 					durationIdx := strings.Index(lockStatus, " (")
 					durationPart := ""
@@ -147,11 +161,11 @@ func collectAgentStatus(agentTasks map[string]TaskInfo, branch string) ([]AgentS
 		} else {
 			// No lock and no in_progress task - check git status
 			// (closed tasks don't trigger "done" fallback - "done" only shows while agent is running)
-			clean, _ := IsCleanWorkingTree(wt.Path)
+			clean, _ := isCleanWorkingTreeDeps(deps, wt.Path)
 			if clean {
 				agent.Status = "ready"
 			} else {
-				changes := getUncommittedChangesCount(wt.Path)
+				changes := getUncommittedChangesCountDeps(deps, wt.Path)
 				if changes > 0 {
 					agent.Status = fmt.Sprintf("%d changes", changes)
 				} else {
@@ -167,19 +181,19 @@ func collectAgentStatus(agentTasks map[string]TaskInfo, branch string) ([]AgentS
 		}
 
 		// Check ahead/behind integration branch
-		agent.Ahead, agent.Behind = getWorktreeGitSyncStatus(wt.Path, wtDefaultBranch, branch)
+		agent.Ahead, agent.Behind = getWorktreeGitSyncStatusDeps(deps, wt.Path, wtDefaultBranch, branch)
 
 		// Populate commit details when ahead > 0
 		if agent.Ahead > 0 {
 			wtGithubURL := githubURL
 			if wt.Repo != nil {
-				wtGithubURL = getGitHubRemoteURL(wt.Path)
+				wtGithubURL = getGitHubRemoteURLDeps(deps, wt.Path)
 			}
-			agent.Commits = getWorktreeCommitDetails(wt.Path, wtDefaultBranch, 10, wtGithubURL, branch)
+			agent.Commits = getWorktreeCommitDetailsDeps(deps, wt.Path, wtDefaultBranch, 10, wtGithubURL, branch)
 		}
 
 		// Populate file changes (returns nil for clean trees)
-		agent.Changes = getWorktreeFileChanges(wt.Path)
+		agent.Changes = getWorktreeFileChangesDeps(deps, wt.Path)
 
 		agents = append(agents, agent)
 	}
@@ -188,6 +202,12 @@ func collectAgentStatus(agentTasks map[string]TaskInfo, branch string) ([]AgentS
 }
 
 func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, map[string]TaskInfo) {
+	d := *defaultDeps
+	d.Tracker = defaultTracker()
+	return collectTaskStatusDeps(&d, readyLimit)
+}
+
+func collectTaskStatusDeps(deps *Deps, readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, map[string]TaskInfo) {
 	var summary TaskSummary
 	var needsPlanningTasks []TaskInfo
 	var readyToImplementTasks []TaskInfo
@@ -204,7 +224,7 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 		wg                                                                       sync.WaitGroup
 	)
 
-	tracker := defaultTracker()
+	tracker := deps.Tracker
 	ctx := context.Background()
 
 	wg.Add(5)
@@ -356,8 +376,12 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 // collectSyncBdStatus runs the bd sync --status command (safe to call concurrently).
 // Uses execCommand directly since sync is an infrastructure operation, not an issue query.
 func collectSyncBdStatus() SyncInfo {
+	return collectSyncBdStatusDeps(defaultDeps)
+}
+
+func collectSyncBdStatusDeps(deps *Deps) SyncInfo {
 	var info SyncInfo
-	result := defaultDeps.Exec.Run(GetBeadsDir(), "bd", "sync", "--status")
+	result := deps.Exec.Run(GetBeadsDir(), "bd", "sync", "--status")
 	if result.Err == nil {
 		info.DBSynced = !strings.Contains(result.Stdout, "error") && !strings.Contains(result.Stdout, "failed")
 		info.DBLastSync = "recently"
@@ -395,9 +419,15 @@ func collectSyncStatus(agents []AgentStatus) SyncInfo {
 }
 
 func collectStatistics() MonitorStats {
+	d := *defaultDeps
+	d.Tracker = defaultTracker()
+	return collectStatisticsDeps(&d)
+}
+
+func collectStatisticsDeps(deps *Deps) MonitorStats {
 	var stats MonitorStats
 
-	bdStats, err := defaultTracker().Stats(context.Background())
+	bdStats, err := deps.Tracker.Stats(context.Background())
 	if err == nil && bdStats != nil {
 		stats.Open = bdStats.Summary.OpenIssues
 		stats.Closed = bdStats.Summary.ClosedIssues

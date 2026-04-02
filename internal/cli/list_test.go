@@ -11,6 +11,8 @@ import (
 )
 
 func TestGetUncommittedChangesCount(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name     string
 		stdout   string
@@ -63,6 +65,8 @@ func TestGetUncommittedChangesCount(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
 			mock := NewCommandMock(t, []CommandStub{
 				{
 					Name:   "git",
@@ -71,11 +75,11 @@ func TestGetUncommittedChangesCount(t *testing.T) {
 					Err:    tc.err,
 				},
 			})
-			mock.Install()
+			mock.InstallOn(deps)
 
-			got := getUncommittedChangesCount("/some/path")
+			got := getUncommittedChangesCountDeps(deps, "/some/path")
 			if got != tc.expected {
-				t.Errorf("getUncommittedChangesCount() = %d, want %d", got, tc.expected)
+				t.Errorf("getUncommittedChangesCountDeps() = %d, want %d", got, tc.expected)
 			}
 		})
 	}
@@ -383,6 +387,8 @@ func TestRunListSkipsNonGitDirectories(t *testing.T) {
 }
 
 func TestGetWorktreeListStatus(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name           string
 		lockRunning    bool   // whether to create a running lock file
@@ -420,6 +426,9 @@ func TestGetWorktreeListStatus(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
+
 			tmpDir := t.TempDir()
 			wtPath := filepath.Join(tmpDir, "test-wt")
 			if err := os.MkdirAll(wtPath, 0755); err != nil {
@@ -459,7 +468,7 @@ func TestGetWorktreeListStatus(t *testing.T) {
 			}
 
 			mock := NewCommandMock(t, stubs)
-			mock.Install()
+			mock.InstallOn(deps)
 
 			wt := WorktreeInfo{
 				Name:   "test",
@@ -467,7 +476,7 @@ func TestGetWorktreeListStatus(t *testing.T) {
 				Branch: "test-branch",
 			}
 
-			status := getWorktreeListStatus(wt)
+			status := getWorktreeListStatusDeps(deps, wt)
 
 			if tc.lockRunning {
 				// Just verify it starts with the lock icon
@@ -475,7 +484,7 @@ func TestGetWorktreeListStatus(t *testing.T) {
 					t.Errorf("expected status to start with '●', got %q", status)
 				}
 			} else if status != tc.expectedStatus {
-				t.Errorf("getWorktreeListStatus() = %q, want %q", status, tc.expectedStatus)
+				t.Errorf("getWorktreeListStatusDeps() = %q, want %q", status, tc.expectedStatus)
 			}
 		})
 	}
@@ -483,6 +492,9 @@ func TestGetWorktreeListStatus(t *testing.T) {
 	// Test the "dirty" path separately: IsCleanWorkingTree returns false (non-empty porcelain)
 	// but getUncommittedChangesCount returns 0 (empty after trim).
 	t.Run("dirty_worktree_no_counted_changes", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
+
 		tmpDir := t.TempDir()
 		wtPath := filepath.Join(tmpDir, "test-wt")
 		if err := os.MkdirAll(wtPath, 0755); err != nil {
@@ -496,14 +508,14 @@ func TestGetWorktreeListStatus(t *testing.T) {
 			{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
 		}
 		mock := NewCommandMock(t, stubs)
-		mock.Install()
+		mock.InstallOn(deps)
 
 		wt := WorktreeInfo{Name: "test", Path: wtPath, Branch: "test-branch"}
-		status := getWorktreeListStatus(wt)
+		status := getWorktreeListStatusDeps(deps, wt)
 
 		// With clean=false and changes=0, status should be "● dirty"
 		if status != "● dirty" {
-			t.Errorf("getWorktreeListStatus() = %q, want %q", status, "● dirty")
+			t.Errorf("getWorktreeListStatusDeps() = %q, want %q", status, "● dirty")
 		}
 	})
 }

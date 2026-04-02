@@ -273,25 +273,28 @@ func TestPushBranch(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			// Install output command mock (streaming git commands)
-			outputMock := NewOutputCommandMock(t, tc.outputStubs)
-			outputMock.Install()
+			t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
 
-			// Install command mock (captured git commands)
+			// Install command mock (captured git commands) - must be before output mock
 			if len(tc.commandStubs) > 0 {
 				cmdMock := NewCommandMock(t, tc.commandStubs)
-				cmdMock.Install()
+				cmdMock.InstallOn(deps)
 			}
+
+			// Install output command mock (streaming git commands)
+			outputMock := NewOutputCommandMock(t, tc.outputStubs)
+			outputMock.InstallOn(deps)
 
 			// Mock claude invoker
 			claudeCalled := false
-			installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
+			deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
 				claudeCalled = true
 				return tc.claudeErr
-			})
+			}}
 
 			// Call the function under test
-			pushBranch(tc.sourceBranch, tc.targetBranch)
+			pushBranch(deps, tc.sourceBranch, tc.targetBranch)
 
 			if tc.claudeCalled && !claudeCalled {
 				t.Error("expected claude to be invoked, but it was not")
@@ -351,6 +354,8 @@ func TestPushAllWorktrees(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			// Uses SetupTestEnv + DiscoverWorktrees (global) - no t.Parallel()
+
 			// Set up a temp dir with worktree directories
 			tmpDir := t.TempDir()
 
@@ -367,12 +372,7 @@ func TestPushAllWorktrees(t *testing.T) {
 				"LOOM_WORKTREES_DIR": tmpDir + "/worktrees",
 			})
 
-			// Install output command mock
-			outputMock := NewOutputCommandMock(t, tc.outputStubs)
-			outputMock.Install()
-
-			// Install command mock - DiscoverWorktrees calls GetCurrentBranch for all,
-			// then pushBranch calls HasCommitsBetween for each
+			// Install command mock globally - DiscoverWorktrees uses global state
 			var allCmdStubs []CommandStub
 			// First: GetCurrentBranch for each worktree (during DiscoverWorktrees)
 			for _, wt := range tc.worktrees {
@@ -387,18 +387,23 @@ func TestPushAllWorktrees(t *testing.T) {
 			cmdMock := NewCommandMock(t, allCmdStubs)
 			cmdMock.Install()
 
-			// Mock claude (shouldn't be called in this test)
+			// Install output command mock globally
+			outputMock := NewOutputCommandMock(t, tc.outputStubs)
+			outputMock.Install()
+
+			// Mock claude invoker
 			installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 				t.Error("unexpected claude invocation")
 				return nil
 			})
 
-			pushAllWorktrees(tc.targetBranch)
+			pushAllWorktrees(defaultDeps, tc.targetBranch)
 		})
 	}
 }
 
 func TestTargetBranchDisplay(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		input  string
@@ -420,6 +425,9 @@ func TestTargetBranchDisplay(t *testing.T) {
 }
 
 func TestPushWorkspaceWorktrees_IteratesAllRepos(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	worktrees := []WorktreeInfo{
 		{
 			Name:   "repo-a",
@@ -467,21 +475,24 @@ func TestPushWorkspaceWorktrees_IteratesAllRepos(t *testing.T) {
 		{Name: "git", Args: []string{"log", "origin/main..feat-b", "--oneline"}, Stdout: "def commit\n"},
 	}
 
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.Install()
 	cmdMock := NewCommandMock(t, commandStubs)
-	cmdMock.Install()
+	cmdMock.InstallOn(deps)
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.InstallOn(deps)
 
-	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	})
+	}}
 
 	// sourceBranch="" means use wt.Branch for each; targetBranch="main" is explicit
-	pushWorkspaceWorktrees(worktrees, "", "main")
+	pushWorkspaceWorktrees(deps, worktrees, "", "main")
 }
 
 func TestPushWorkspaceWorktrees_UsesPerRepoDefaultBranch(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	worktrees := []WorktreeInfo{
 		{
 			Name:   "repo-a",
@@ -527,21 +538,24 @@ func TestPushWorkspaceWorktrees_UsesPerRepoDefaultBranch(t *testing.T) {
 		{Name: "git", Args: []string{"log", "origin/staging..feat-b", "--oneline"}, Stdout: "def commit\n"},
 	}
 
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.Install()
 	cmdMock := NewCommandMock(t, commandStubs)
-	cmdMock.Install()
+	cmdMock.InstallOn(deps)
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.InstallOn(deps)
 
-	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	})
+	}}
 
 	// targetBranch="" means use per-repo DefaultBranch
-	pushWorkspaceWorktrees(worktrees, "", "")
+	pushWorkspaceWorktrees(deps, worktrees, "", "")
 }
 
 func TestPushWorkspaceWorktrees_CLIArgOverridesConfig(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	worktrees := []WorktreeInfo{
 		{
 			Name:   "repo-a",
@@ -569,20 +583,23 @@ func TestPushWorkspaceWorktrees_CLIArgOverridesConfig(t *testing.T) {
 		{Name: "git", Args: []string{"log", "origin/release..feat-a", "--oneline"}, Stdout: "abc commit\n"},
 	}
 
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.Install()
 	cmdMock := NewCommandMock(t, commandStubs)
-	cmdMock.Install()
+	cmdMock.InstallOn(deps)
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.InstallOn(deps)
 
-	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	})
+	}}
 
-	pushWorkspaceWorktrees(worktrees, "", "release")
+	pushWorkspaceWorktrees(deps, worktrees, "", "release")
 }
 
 func TestPushWorkspaceWorktrees_CustomRemote(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	worktrees := []WorktreeInfo{
 		{
 			Name:   "repo-a",
@@ -609,20 +626,23 @@ func TestPushWorkspaceWorktrees_CustomRemote(t *testing.T) {
 		{Name: "git", Args: []string{"log", "upstream/main..feat-a", "--oneline"}, Stdout: "abc commit\n"},
 	}
 
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.Install()
 	cmdMock := NewCommandMock(t, commandStubs)
-	cmdMock.Install()
+	cmdMock.InstallOn(deps)
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.InstallOn(deps)
 
-	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	})
+	}}
 
-	pushWorkspaceWorktrees(worktrees, "", "main")
+	pushWorkspaceWorktrees(deps, worktrees, "", "main")
 }
 
 func TestRunPush_LegacyMode(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// When no workspace config exists, runPush falls through to legacy pushBranch.
 	// We test the legacy path by calling pushBranch directly.
 	// This test verifies the same git command sequence with hardcoded "origin".
@@ -644,20 +664,23 @@ func TestRunPush_LegacyMode(t *testing.T) {
 		{Name: "git", Args: []string{"log", "main..feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 	}
 
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.Install()
 	cmdMock := NewCommandMock(t, commandStubs)
-	cmdMock.Install()
+	cmdMock.InstallOn(deps)
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.InstallOn(deps)
 
-	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	})
+	}}
 
-	pushBranch("feature/test", "main")
+	pushBranch(deps, "feature/test", "main")
 }
 
 func TestPushWorkspaceWorktrees_SkipsNilRepo(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	worktrees := []WorktreeInfo{
 		{
 			Name:   "repo-a",
@@ -691,20 +714,23 @@ func TestPushWorkspaceWorktrees_SkipsNilRepo(t *testing.T) {
 		{Name: "git", Args: []string{"log", "origin/main..feat-b", "--oneline"}, Stdout: "def commit\n"},
 	}
 
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.Install()
 	cmdMock := NewCommandMock(t, commandStubs)
-	cmdMock.Install()
+	cmdMock.InstallOn(deps)
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.InstallOn(deps)
 
-	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	})
+	}}
 
-	pushWorkspaceWorktrees(worktrees, "", "main")
+	pushWorkspaceWorktrees(deps, worktrees, "", "main")
 }
 
 func TestPushBranch_DirtyWorkingTree_StashesAndPops(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// Test that when working tree is dirty, pushBranch stashes before checkout
 	// and pops stash after merge completes successfully
 	outputStubs := []OutputCommandStub{
@@ -725,20 +751,23 @@ func TestPushBranch_DirtyWorkingTree_StashesAndPops(t *testing.T) {
 		{Name: "git", Args: []string{"log", "main..feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 	}
 
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.Install()
 	cmdMock := NewCommandMock(t, commandStubs)
-	cmdMock.Install()
+	cmdMock.InstallOn(deps)
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.InstallOn(deps)
 
-	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	})
+	}}
 
-	pushBranch("feature/test", "main")
+	pushBranch(deps, "feature/test", "main")
 }
 
 func TestPushBranch_StashPopConflicts_WarnsButSucceeds(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// Test that when stash pop fails due to conflicts, a warning is printed
 	// but the merge itself succeeds (no error returned to caller)
 	outputStubs := []OutputCommandStub{
@@ -760,22 +789,25 @@ func TestPushBranch_StashPopConflicts_WarnsButSucceeds(t *testing.T) {
 		{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "dirty.go\n"}, // HasUnmergedFiles returns true
 	}
 
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.Install()
 	cmdMock := NewCommandMock(t, commandStubs)
-	cmdMock.Install()
+	cmdMock.InstallOn(deps)
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.InstallOn(deps)
 
-	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	})
+	}}
 
 	// pushBranch doesn't return an error, it just prints to stderr
 	// The test verifies the correct sequence of commands is called
-	pushBranch("feature/test", "main")
+	pushBranch(deps, "feature/test", "main")
 }
 
 func TestPushBranch_StashFails_ReturnsEarly(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// Test that when GitStash fails, pushBranch returns early without proceeding to checkout
 	outputStubs := []OutputCommandStub{
 		{Args: []string{"fetch", "origin"}, Err: nil},
@@ -788,21 +820,24 @@ func TestPushBranch_StashFails_ReturnsEarly(t *testing.T) {
 		// No second stash list - git stash command fails before it
 	}
 
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.Install()
 	cmdMock := NewCommandMock(t, commandStubs)
-	cmdMock.Install()
+	cmdMock.InstallOn(deps)
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.InstallOn(deps)
 
-	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	})
+	}}
 
 	// pushBranch prints error and returns early - no panic
-	pushBranch("feature/test", "main")
+	pushBranch(deps, "feature/test", "main")
 }
 
 func TestPushBranchInRepo_DirtyWorkingTree_StashesAndPops(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// Test that pushBranchInRepo stashes dirty changes and pops after merge
 	outputStubs := []OutputCommandStub{
 		{Args: []string{"fetch", "origin"}, Err: nil},
@@ -822,23 +857,26 @@ func TestPushBranchInRepo_DirtyWorkingTree_StashesAndPops(t *testing.T) {
 		{Name: "git", Args: []string{"log", "origin/main..feature", "--oneline"}, Stdout: "abc commit\n"},
 	}
 
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.Install()
 	cmdMock := NewCommandMock(t, commandStubs)
-	cmdMock.Install()
+	cmdMock.InstallOn(deps)
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.InstallOn(deps)
 
-	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	})
+	}}
 
-	err := pushBranchInRepo("/repo", "feature", "main", "")
+	err := pushBranchInRepo(deps, "/repo", "feature", "main", "")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
 
 func TestPushBranchInRepo_StashFails_ReturnsError(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// Test that when GitStash fails, pushBranchInRepo returns the error
 	outputStubs := []OutputCommandStub{
 		{Args: []string{"fetch", "origin"}, Err: nil},
@@ -850,17 +888,17 @@ func TestPushBranchInRepo_StashFails_ReturnsError(t *testing.T) {
 		// No second stash list - git stash command fails
 	}
 
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.Install()
 	cmdMock := NewCommandMock(t, commandStubs)
-	cmdMock.Install()
+	cmdMock.InstallOn(deps)
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.InstallOn(deps)
 
-	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	})
+	}}
 
-	err := pushBranchInRepo("/repo", "feature", "main", "")
+	err := pushBranchInRepo(deps, "/repo", "feature", "main", "")
 	if err == nil {
 		t.Error("expected error, got nil")
 	}
@@ -870,6 +908,9 @@ func TestPushBranchInRepo_StashFails_ReturnsError(t *testing.T) {
 }
 
 func TestPushBranchInRepo_StashPopConflicts_WarnsButSucceeds(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// Test that stash pop conflicts produce warning but don't fail the merge
 	outputStubs := []OutputCommandStub{
 		{Args: []string{"fetch", "origin"}, Err: nil},
@@ -890,24 +931,27 @@ func TestPushBranchInRepo_StashPopConflicts_WarnsButSucceeds(t *testing.T) {
 		{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "file.go\n"}, // HasUnmergedFiles
 	}
 
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.Install()
 	cmdMock := NewCommandMock(t, commandStubs)
-	cmdMock.Install()
+	cmdMock.InstallOn(deps)
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.InstallOn(deps)
 
-	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	})
+	}}
 
 	// Should succeed despite stash pop conflict
-	err := pushBranchInRepo("/repo", "feature", "main", "")
+	err := pushBranchInRepo(deps, "/repo", "feature", "main", "")
 	if err != nil {
 		t.Errorf("expected success despite stash pop conflict, got: %v", err)
 	}
 }
 
 func TestPushBranchInRepo_CleanWorkingTree_NoStash(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// Test that clean working tree skips stash pop (stash count unchanged)
 	outputStubs := []OutputCommandStub{
 		{Args: []string{"fetch", "origin"}, Err: nil},
@@ -926,23 +970,24 @@ func TestPushBranchInRepo_CleanWorkingTree_NoStash(t *testing.T) {
 		{Name: "git", Args: []string{"log", "origin/main..feature", "--oneline"}, Stdout: "abc commit\n"},
 	}
 
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.Install()
 	cmdMock := NewCommandMock(t, commandStubs)
-	cmdMock.Install()
+	cmdMock.InstallOn(deps)
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.InstallOn(deps)
 
-	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	})
+	}}
 
-	err := pushBranchInRepo("/repo", "feature", "main", "")
+	err := pushBranchInRepo(deps, "/repo", "feature", "main", "")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
 
 func TestPushCmd_MergeAlias(t *testing.T) {
+	t.Parallel()
 	// Test that "merge" is listed as an alias for the push command
 	aliases := pushCmd.Aliases
 	found := false
@@ -958,6 +1003,7 @@ func TestPushCmd_MergeAlias(t *testing.T) {
 }
 
 func TestPushCmd_MergeAliasIsFirst(t *testing.T) {
+	t.Parallel()
 	// Test that "merge" alias is the first (primary) alias
 	aliases := pushCmd.Aliases
 	if len(aliases) == 0 {
@@ -969,6 +1015,7 @@ func TestPushCmd_MergeAliasIsFirst(t *testing.T) {
 }
 
 func TestPushCmd_GroupID(t *testing.T) {
+	t.Parallel()
 	// Verify command is in the "git" group
 	if pushCmd.GroupID != "git" {
 		t.Errorf("expected push command to be in 'git' group, got %q", pushCmd.GroupID)
@@ -976,6 +1023,7 @@ func TestPushCmd_GroupID(t *testing.T) {
 }
 
 func TestPushCmd_Flags(t *testing.T) {
+	t.Parallel()
 	// Verify flags are registered
 	if allFlag := pushCmd.Flags().Lookup("all"); allFlag == nil {
 		t.Error("expected --all flag to be registered")
@@ -994,6 +1042,9 @@ func TestPushCmd_Flags(t *testing.T) {
 }
 
 func TestPushAllWorktrees_EmptyList(t *testing.T) {
+	// Uses SetupTestEnv (env mutation) - no t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	tmpDir := t.TempDir()
 
 	// Create empty worktrees directory
@@ -1007,30 +1058,40 @@ func TestPushAllWorktrees_EmptyList(t *testing.T) {
 
 	// No mocks needed - should return early when no worktrees found
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{})
-	outputMock.Install()
+	cmdMock := NewCommandMock(t, []CommandStub{})
+	cmdMock.InstallOn(deps)
+	outputMock.InstallOn(deps)
 
 	// Should not panic when no worktrees
-	pushAllWorktrees("main")
+	pushAllWorktrees(deps, "main")
 }
 
 func TestPushWorkspaceWorktrees_EmptyList(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// Empty worktree list should produce no errors and no git commands
 	worktrees := []WorktreeInfo{}
 
 	// No output stubs - no commands should be called
+	cmdMock := NewCommandMock(t, []CommandStub{})
+	cmdMock.InstallOn(deps)
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{})
-	outputMock.Install()
+	outputMock.InstallOn(deps)
 
-	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	})
+	}}
 
 	// Should not panic or call any commands
-	pushWorkspaceWorktrees(worktrees, "", "main")
+	pushWorkspaceWorktrees(deps, worktrees, "", "main")
 }
 
 func TestPushBranchInRepo_WorktreeConflict_UsesDetached(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// When checkout fails because the target branch is checked out in another
 	// worktree, pushBranchInRepo should fall back to the detached HEAD approach.
 	outputStubs := []OutputCommandStub{
@@ -1053,23 +1114,26 @@ func TestPushBranchInRepo_WorktreeConflict_UsesDetached(t *testing.T) {
 		{Name: "git", Args: []string{"log", "origin/main..feature", "--oneline"}, Stdout: "abc commit\n"}, // HasCommitsBetweenRemote
 	}
 
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.Install()
 	cmdMock := NewCommandMock(t, commandStubs)
-	cmdMock.Install()
+	cmdMock.InstallOn(deps)
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.InstallOn(deps)
 
-	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	})
+	}}
 
-	err := pushBranchInRepo("/repo", "feature", "main", "")
+	err := pushBranchInRepo(deps, "/repo", "feature", "main", "")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
 
 func TestPushBranchInRepoDetached_Success(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// Test the full detached push flow:
 	// checkout detached -> create temp branch -> merge -> push refspec -> cleanup
 	outputStubs := []OutputCommandStub{
@@ -1085,23 +1149,26 @@ func TestPushBranchInRepoDetached_Success(t *testing.T) {
 		{Name: "git", Args: []string{"log", "origin/main..feature", "--oneline"}, Stdout: "abc commit\n"}, // HasCommitsBetweenRemote
 	}
 
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.Install()
 	cmdMock := NewCommandMock(t, commandStubs)
-	cmdMock.Install()
+	cmdMock.InstallOn(deps)
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.InstallOn(deps)
 
-	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	})
+	}}
 
-	err := pushBranchInRepoDetached("/repo", "feature", "main", "")
+	err := pushBranchInRepoDetached(deps, "/repo", "feature", "main", "")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
 
 func TestPushBranchInRepoDetached_AlreadyUpToDate(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// When HasCommitsBetweenRemote returns false, the detached flow should
 	// return early before creating the temp branch, without merging or pushing.
 	outputStubs := []OutputCommandStub{
@@ -1114,23 +1181,26 @@ func TestPushBranchInRepoDetached_AlreadyUpToDate(t *testing.T) {
 		{Name: "git", Args: []string{"log", "origin/main..feature", "--oneline"}, Stdout: ""}, // no commits
 	}
 
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.Install()
 	cmdMock := NewCommandMock(t, commandStubs)
-	cmdMock.Install()
+	cmdMock.InstallOn(deps)
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.InstallOn(deps)
 
-	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	})
+	}}
 
-	err := pushBranchInRepoDetached("/repo", "feature", "main", "")
+	err := pushBranchInRepoDetached(deps, "/repo", "feature", "main", "")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
 
 func TestPushBranchInRepoDetached_MergeConflicts_InvokesClaude(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// When merge fails with conflicts in the detached flow, Claude should be
 	// invoked with a custom pushRef (HEAD:<targetBranch>).
 	outputStubs := []OutputCommandStub{
@@ -1147,20 +1217,20 @@ func TestPushBranchInRepoDetached_MergeConflicts_InvokesClaude(t *testing.T) {
 		{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "file1.go\nfile2.go\n"}, // GetConflictedFiles
 	}
 
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.Install()
 	cmdMock := NewCommandMock(t, commandStubs)
-	cmdMock.Install()
+	cmdMock.InstallOn(deps)
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.InstallOn(deps)
 
 	claudeCalled := false
 	var capturedPrompt string
-	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
 		claudeCalled = true
 		capturedPrompt = prompt
 		return nil
-	})
+	}}
 
-	err := pushBranchInRepoDetached("/repo", "feature", "main", "")
+	err := pushBranchInRepoDetached(deps, "/repo", "feature", "main", "")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -1174,21 +1244,26 @@ func TestPushBranchInRepoDetached_MergeConflicts_InvokesClaude(t *testing.T) {
 }
 
 func TestPushBranchInRepoDetached_CheckoutDetachedFails(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// When GitCheckoutDetached fails, the function should return an error
 	// No cleanup needed since temp branch was never created
 	outputStubs := []OutputCommandStub{
 		{Args: nil, Err: errors.New("checkout failed")}, // GitCheckoutDetached fails
 	}
 
+	cmdMock := NewCommandMock(t, []CommandStub{})
+	cmdMock.InstallOn(deps)
 	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.Install()
+	outputMock.InstallOn(deps)
 
-	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	})
+	}}
 
-	err := pushBranchInRepoDetached("/repo", "feature", "main", "")
+	err := pushBranchInRepoDetached(deps, "/repo", "feature", "main", "")
 	if err == nil {
 		t.Error("expected error, got nil")
 	}
@@ -1198,6 +1273,9 @@ func TestPushBranchInRepoDetached_CheckoutDetachedFails(t *testing.T) {
 }
 
 func TestPushBranchInRepoDetached_CustomRemote(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// Test that custom remote is passed through to all git commands
 	outputStubs := []OutputCommandStub{
 		{Args: nil, Err: nil}, // GitCheckoutDetached (upstream/main)
@@ -1212,23 +1290,26 @@ func TestPushBranchInRepoDetached_CustomRemote(t *testing.T) {
 		{Name: "git", Args: []string{"log", "upstream/main..feature", "--oneline"}, Stdout: "abc commit\n"}, // HasCommitsBetweenRemote
 	}
 
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.Install()
 	cmdMock := NewCommandMock(t, commandStubs)
-	cmdMock.Install()
+	cmdMock.InstallOn(deps)
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.InstallOn(deps)
 
-	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	})
+	}}
 
-	err := pushBranchInRepoDetached("/repo", "feature", "main", "upstream")
+	err := pushBranchInRepoDetached(deps, "/repo", "feature", "main", "upstream")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
 
 func TestPushBranch_WorktreeConflict_UsesDetached(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// When checkout fails because the target branch is checked out in another
 	// worktree, pushBranch should fall back to pushBranchDetached.
 	outputStubs := []OutputCommandStub{
@@ -1252,21 +1333,24 @@ func TestPushBranch_WorktreeConflict_UsesDetached(t *testing.T) {
 		{Name: "git", Args: []string{"log", "main..feature/test", "--oneline"}, Stdout: "abc123 commit\n"}, // HasCommitsBetween
 	}
 
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.Install()
 	cmdMock := NewCommandMock(t, commandStubs)
-	cmdMock.Install()
+	cmdMock.InstallOn(deps)
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.InstallOn(deps)
 
-	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	})
+	}}
 
 	// pushBranch doesn't return an error - it prints to stderr
-	pushBranch("feature/test", "main")
+	pushBranch(deps, "feature/test", "main")
 }
 
 func TestPushBranchDetached_AlreadyUpToDate(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// Legacy pushBranchDetached should return early when no commits to merge
 	// No temp branch is created when already up to date
 	outputStubs := []OutputCommandStub{
@@ -1279,23 +1363,26 @@ func TestPushBranchDetached_AlreadyUpToDate(t *testing.T) {
 		{Name: "git", Args: []string{"log", "main..feature", "--oneline"}, Stdout: ""}, // HasCommitsBetween - no commits
 	}
 
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.Install()
 	cmdMock := NewCommandMock(t, commandStubs)
-	cmdMock.Install()
+	cmdMock.InstallOn(deps)
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.InstallOn(deps)
 
-	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	})
+	}}
 
-	err := pushBranchDetached("/tmp/test-dir", "feature", "main")
+	err := pushBranchDetached(deps, "/tmp/test-dir", "feature", "main")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
 
 func TestPushBranchDetached_Success(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// Full detached push flow in legacy mode (uses origin, HasCommitsBetween, GitMerge)
 	outputStubs := []OutputCommandStub{
 		{Args: nil, Err: nil}, // GitCheckoutDetached (origin/main)
@@ -1310,23 +1397,26 @@ func TestPushBranchDetached_Success(t *testing.T) {
 		{Name: "git", Args: []string{"log", "main..feature", "--oneline"}, Stdout: "abc commit\n"}, // HasCommitsBetween
 	}
 
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.Install()
 	cmdMock := NewCommandMock(t, commandStubs)
-	cmdMock.Install()
+	cmdMock.InstallOn(deps)
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.InstallOn(deps)
 
-	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	})
+	}}
 
-	err := pushBranchDetached("/tmp/test-dir", "feature", "main")
+	err := pushBranchDetached(deps, "/tmp/test-dir", "feature", "main")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
 
 func TestPushBranchDetached_MergeConflicts_InvokesClaude(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// When merge fails with conflicts in the legacy detached flow,
 	// Claude should be invoked with HEAD:<targetBranch> push ref
 	outputStubs := []OutputCommandStub{
@@ -1343,20 +1433,20 @@ func TestPushBranchDetached_MergeConflicts_InvokesClaude(t *testing.T) {
 		{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "file1.go\nfile2.go\n"}, // GetConflictedFiles
 	}
 
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.Install()
 	cmdMock := NewCommandMock(t, commandStubs)
-	cmdMock.Install()
+	cmdMock.InstallOn(deps)
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.InstallOn(deps)
 
 	claudeCalled := false
 	var capturedPrompt string
-	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
 		claudeCalled = true
 		capturedPrompt = prompt
 		return nil
-	})
+	}}
 
-	err := pushBranchDetached("/tmp/test-dir", "feature", "main")
+	err := pushBranchDetached(deps, "/tmp/test-dir", "feature", "main")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -1369,6 +1459,9 @@ func TestPushBranchDetached_MergeConflicts_InvokesClaude(t *testing.T) {
 }
 
 func TestPushBranchInRepo_CheckoutAlreadyCheckedOut_UsesDetached(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// When checkout fails with the alternate "already checked out" message
 	// (instead of "already used by worktree"), pushBranchInRepo should still
 	// fall back to the detached HEAD approach.
@@ -1392,23 +1485,26 @@ func TestPushBranchInRepo_CheckoutAlreadyCheckedOut_UsesDetached(t *testing.T) {
 		{Name: "git", Args: []string{"log", "origin/main..feature", "--oneline"}, Stdout: "abc commit\n"}, // HasCommitsBetweenRemote
 	}
 
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.Install()
 	cmdMock := NewCommandMock(t, commandStubs)
-	cmdMock.Install()
+	cmdMock.InstallOn(deps)
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.InstallOn(deps)
 
-	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	})
+	}}
 
-	err := pushBranchInRepo("/repo", "feature", "main", "")
+	err := pushBranchInRepo(deps, "/repo", "feature", "main", "")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
 
 func TestPushBranch_CheckoutAlreadyCheckedOut_UsesDetached(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// When checkout fails with the alternate "already checked out" message,
 	// pushBranch should fall back to pushBranchDetached.
 	outputStubs := []OutputCommandStub{
@@ -1432,18 +1528,18 @@ func TestPushBranch_CheckoutAlreadyCheckedOut_UsesDetached(t *testing.T) {
 		{Name: "git", Args: []string{"log", "main..feature/test", "--oneline"}, Stdout: "abc123 commit\n"}, // HasCommitsBetween
 	}
 
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.Install()
 	cmdMock := NewCommandMock(t, commandStubs)
-	cmdMock.Install()
+	cmdMock.InstallOn(deps)
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.InstallOn(deps)
 
-	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
 		t.Error("unexpected claude invocation")
 		return nil
-	})
+	}}
 
 	// pushBranch doesn't return an error - it prints to stderr
-	pushBranch("feature/test", "main")
+	pushBranch(deps, "feature/test", "main")
 }
 
 func TestPushCmd_WorkspaceModeArgsValidation(t *testing.T) {

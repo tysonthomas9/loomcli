@@ -21,24 +21,7 @@ func TestRunLegacySync_WithWorktrees(t *testing.T) {
 	defaultResolver = nil
 	t.Cleanup(func() { defaultResolver = origResolver })
 
-	origPushOnly := syncPushOnly
-	origPullOnly := syncPullOnly
-	t.Cleanup(func() {
-		syncPushOnly = origPushOnly
-		syncPullOnly = origPullOnly
-	})
-	syncPushOnly = false
-	syncPullOnly = false
-
-	SetupMockAgentInvoker(t, nil)
-
-	// CommandMock stubs (execCommand):
-	// 1. DiscoverWorktrees: GetCurrentBranch
-	// 2. GetDefaultBranch -> DiscoverWorktrees again: GetCurrentBranch
-	// 3-4. Push phase: stash list x2
-	// 5. Push phase: checkoutTarget -> GetCurrentBranch
-	// 6. Push phase: HasCommitsBetween
-	// 7. Pull phase: GetCurrentBranch
+	// CommandMock stubs:
 	cmdMock := NewCommandMock(t, []CommandStub{
 		// DiscoverWorktrees -> GetCurrentBranch
 		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature-x\n"},
@@ -50,16 +33,14 @@ func TestRunLegacySync_WithWorktrees(t *testing.T) {
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
 		// Push: checkoutTarget -> GetCurrentBranch
 		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature-x\n"},
-		// Push: HasCommitsBetween (legacy uses main..feature-x, not origin/main)
+		// Push: HasCommitsBetween
 		{Name: "git", Args: []string{"log", "main..feature-x", "--oneline"}, Stdout: "abc123 some commit\n"},
 		// Pull: GetCurrentBranch
 		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature-x\n"},
 	})
 	cmdMock.Install()
 
-	// OutputCommandMock stubs (runGitWithOutputFunc):
-	// Push phase: fetch, stash, checkout main, pull, merge, push, checkout feature-x (restore)
-	// Pull phase: fetch, merge origin/main, push
+	// OutputCommandMock stubs:
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
 		// Push: fetch
 		{Args: []string{"fetch", "origin"}, Err: nil},
@@ -84,7 +65,16 @@ func TestRunLegacySync_WithWorktrees(t *testing.T) {
 	})
 	outputMock.Install()
 
-	runLegacySync()
+	origAgent := defaultDeps.Agent
+	defaultDeps.Agent = &MockAgentInvoker{
+		InteractiveFunc: func(workDir, prompt, agentName string) error {
+			t.Error("unexpected claude invocation")
+			return nil
+		},
+	}
+	t.Cleanup(func() { defaultDeps.Agent = origAgent })
+
+	runLegacySync(defaultDeps, false, false)
 }
 
 func TestRunWorkspaceSync_MultipleWorkspaces(t *testing.T) {
@@ -124,45 +114,32 @@ func TestRunWorkspaceSync_MultipleWorkspaces(t *testing.T) {
 	defaultResolver = nil
 	t.Cleanup(func() { defaultResolver = origResolver })
 
-	origPushOnly := syncPushOnly
-	origPullOnly := syncPullOnly
-	origWsFlag := syncWorkspaceFlag
-	t.Cleanup(func() {
-		syncPushOnly = origPushOnly
-		syncPullOnly = origPullOnly
-		syncWorkspaceFlag = origWsFlag
-	})
-	syncPushOnly = false
-	syncPullOnly = true // pull-only to simplify stubs
-	syncWorkspaceFlag = ""
-
-	SetupMockAgentInvoker(t, nil)
-
 	// FlexibleCommandMock for GetCurrentBranch calls (one per repo during discovery)
 	flexMock := NewFlexibleCommandMock(t)
 	flexMock.AddStub("git", []string{"branch", "--show-current"}, CommandResult{Stdout: "dev-branch\n"}).WithMinCalls(2)
 	flexMock.Install()
 
-	// OutputCommandMock for pull phase of both workspaces:
-	// ws-a: fetch, merge, push
-	// ws-b: fetch, merge, push
+	// OutputCommandMock for pull phase of both workspaces
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
-		// ws-a pull: fetch
 		{Args: []string{"fetch", "origin"}, Err: nil},
-		// ws-a pull: merge
 		{Args: []string{"merge", "origin/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
-		// ws-a pull: push
 		{Args: []string{"push", "origin", "dev-branch"}, Err: nil},
-		// ws-b pull: fetch
 		{Args: []string{"fetch", "origin"}, Err: nil},
-		// ws-b pull: merge
 		{Args: []string{"merge", "origin/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
-		// ws-b pull: push
 		{Args: []string{"push", "origin", "dev-branch"}, Err: nil},
 	})
 	outputMock.Install()
 
-	runWorkspaceSync()
+	origAgent := defaultDeps.Agent
+	defaultDeps.Agent = &MockAgentInvoker{
+		InteractiveFunc: func(workDir, prompt, agentName string) error {
+			t.Error("unexpected claude invocation")
+			return nil
+		},
+	}
+	t.Cleanup(func() { defaultDeps.Agent = origAgent })
+
+	runWorkspaceSync(defaultDeps, false, true, "")
 }
 
 func TestRunWorkspaceSync_SpecificWorkspaceFlag(t *testing.T) {
@@ -202,27 +179,12 @@ func TestRunWorkspaceSync_SpecificWorkspaceFlag(t *testing.T) {
 	defaultResolver = nil
 	t.Cleanup(func() { defaultResolver = origResolver })
 
-	origPushOnly := syncPushOnly
-	origPullOnly := syncPullOnly
-	origWsFlag := syncWorkspaceFlag
-	t.Cleanup(func() {
-		syncPushOnly = origPushOnly
-		syncPullOnly = origPullOnly
-		syncWorkspaceFlag = origWsFlag
-	})
-	syncPushOnly = false
-	syncPullOnly = true
-	syncWorkspaceFlag = "ws-a"
-
-	SetupMockAgentInvoker(t, nil)
-
-	// Only ws-a should be processed, so only one GetCurrentBranch call
+	// Only ws-a should be processed
 	cmdMock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature-a\n"},
 	})
 	cmdMock.Install()
 
-	// Only ws-a pull stubs: fetch, merge, push
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
 		{Args: []string{"fetch", "origin"}, Err: nil},
 		{Args: []string{"merge", "origin/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
@@ -230,20 +192,28 @@ func TestRunWorkspaceSync_SpecificWorkspaceFlag(t *testing.T) {
 	})
 	outputMock.Install()
 
-	runWorkspaceSync()
+	origAgent := defaultDeps.Agent
+	defaultDeps.Agent = &MockAgentInvoker{
+		InteractiveFunc: func(workDir, prompt, agentName string) error {
+			t.Error("unexpected claude invocation")
+			return nil
+		},
+	}
+	t.Cleanup(func() { defaultDeps.Agent = origAgent })
+
+	runWorkspaceSync(defaultDeps, false, true, "ws-a")
 }
 
 func TestRunWorkspaceSync_UnknownWorkspace(t *testing.T) {
-	// Use subprocess pattern to test os.Exit(1) path
+	t.Parallel()
 	if os.Getenv("TEST_SUBPROCESS") == "1" {
 		tmpDir := os.Getenv("TEST_TMPDIR")
 		configDir := tmpDir + "/.loom"
 
 		os.Setenv("LOOM_CONFIG_DIR", configDir)
 		defaultResolver = nil
-		syncWorkspaceFlag = "nonexistent"
 
-		runWorkspaceSync()
+		runWorkspaceSync(defaultDeps, false, false, "nonexistent")
 		return
 	}
 
@@ -309,20 +279,6 @@ func TestRunFullSync_DispatchesToWorkspaceMode(t *testing.T) {
 	defaultResolver = nil
 	t.Cleanup(func() { defaultResolver = origResolver })
 
-	origPushOnly := syncPushOnly
-	origPullOnly := syncPullOnly
-	origWsFlag := syncWorkspaceFlag
-	t.Cleanup(func() {
-		syncPushOnly = origPushOnly
-		syncPullOnly = origPullOnly
-		syncWorkspaceFlag = origWsFlag
-	})
-	syncPushOnly = false
-	syncPullOnly = true // pull-only to simplify stubs
-	syncWorkspaceFlag = ""
-
-	SetupMockAgentInvoker(t, nil)
-
 	// Workspace discovery: GetCurrentBranch for the repo
 	cmdMock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "api-branch\n"},
@@ -337,6 +293,15 @@ func TestRunFullSync_DispatchesToWorkspaceMode(t *testing.T) {
 	})
 	outputMock.Install()
 
-	// Call runFullSync - should dispatch to workspace mode since config exists
-	runFullSync(syncCmd, []string{})
+	origAgent := defaultDeps.Agent
+	defaultDeps.Agent = &MockAgentInvoker{
+		InteractiveFunc: func(workDir, prompt, agentName string) error {
+			t.Error("unexpected claude invocation")
+			return nil
+		},
+	}
+	t.Cleanup(func() { defaultDeps.Agent = origAgent })
+
+	// Call runWorkspaceSync - should dispatch to workspace mode since config exists
+	runWorkspaceSync(defaultDeps, false, true, "")
 }

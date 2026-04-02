@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -100,6 +101,15 @@ func (m *CommandMock) Install() {
 		defaultDeps.Exec = orig
 		m.Verify()
 	})
+}
+
+// InstallOn installs the mock on the given per-test Deps (no global mutation).
+// Safe for use with t.Parallel(). Also sets deps.Git to delegate Run through
+// the mock so runGit(deps, ...) works correctly.
+func (m *CommandMock) InstallOn(deps *Deps) {
+	deps.Exec = m
+	deps.Git = &execBridgeGitRunner{exec: m}
+	m.t.Cleanup(func() { m.Verify() })
 }
 
 // Calls returns the actual calls made to the mock
@@ -260,6 +270,15 @@ func (m *FlexibleCommandMock) Install() {
 	})
 }
 
+// InstallOn installs the mock on the given per-test Deps (no global mutation).
+// Safe for use with t.Parallel(). Also sets deps.Git to delegate Run through
+// the mock so runGit(deps, ...) works correctly.
+func (m *FlexibleCommandMock) InstallOn(deps *Deps) {
+	deps.Exec = m
+	deps.Git = &execBridgeGitRunner{exec: m}
+	m.t.Cleanup(func() { m.Verify() })
+}
+
 // Calls returns the actual calls made to the mock
 func (m *FlexibleCommandMock) Calls() []CommandStub {
 	m.mu.Lock()
@@ -336,6 +355,26 @@ func SetupMockAgentInvoker(t *testing.T, returnErr error) *MockAgentInvokerRecor
 		return recorder.ReturnErr
 	})
 
+	return recorder
+}
+
+// SetupMockAgentInvokerOn installs a mock agent invoker on the given per-test Deps.
+// Safe for use with t.Parallel().
+func SetupMockAgentInvokerOn(t *testing.T, deps *Deps, returnErr error) *MockAgentInvokerRecorder {
+	t.Helper()
+	recorder := &MockAgentInvokerRecorder{ReturnErr: returnErr}
+	deps.Agent = &MockAgentInvoker{
+		InteractiveFunc: func(workDir, prompt, agentName string) error {
+			recorder.mu.Lock()
+			recorder.Invocations = append(recorder.Invocations, struct {
+				WorkDir   string
+				Prompt    string
+				AgentName string
+			}{workDir, prompt, agentName})
+			recorder.mu.Unlock()
+			return recorder.ReturnErr
+		},
+	}
 	return recorder
 }
 
@@ -510,6 +549,45 @@ func (m *OutputCommandMock) Verify() {
 // Install installs the mock and registers cleanup with t.Cleanup()
 func (m *OutputCommandMock) Install() {
 	installGitOutputMock(m.t, m)
+}
+
+// execBridgeGitRunner implements GitRunner by delegating Run() through an ExecRunner.
+// Used by CommandMock.InstallOn so that runGit(deps, ...) routes through the mock.
+// RunWithOutput is not supported — use OutputCommandMock.InstallOn when needed.
+type execBridgeGitRunner struct {
+	exec ExecRunner
+}
+
+func (g *execBridgeGitRunner) Run(dir string, args ...string) CommandResult {
+	return g.exec.Run(dir, "git", args...)
+}
+
+func (g *execBridgeGitRunner) RunWithOutput(dir string, args ...string) error {
+	return fmt.Errorf("RunWithOutput not mocked: use OutputCommandMock.InstallOn")
+}
+
+// compositeGitRunner delegates Run to deps.Exec and RunWithOutput to the mock.
+// Install CommandMock BEFORE OutputCommandMock so compositeGitRunner captures
+// the CommandMock as deps.Exec.
+type compositeGitRunner struct {
+	exec ExecRunner
+	out  func(dir string, args ...string) error
+}
+
+func (c *compositeGitRunner) Run(dir string, args ...string) CommandResult {
+	return c.exec.Run(dir, "git", args...)
+}
+
+func (c *compositeGitRunner) RunWithOutput(dir string, args ...string) error {
+	return c.out(dir, args...)
+}
+
+// InstallOn installs the mock on the given per-test Deps (no global mutation).
+// IMPORTANT: Call CommandMock.InstallOn(deps) BEFORE this method so that
+// deps.Exec is the CommandMock when compositeGitRunner captures it.
+func (m *OutputCommandMock) InstallOn(deps *Deps) {
+	deps.Git = &compositeGitRunner{exec: deps.Exec, out: m.Exec}
+	m.t.Cleanup(func() { m.Verify() })
 }
 
 // Calls returns the actual calls made to the mock

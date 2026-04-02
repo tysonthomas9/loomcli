@@ -9,6 +9,7 @@ import (
 )
 
 func TestServeFlags_NoDaemon(t *testing.T) {
+	t.Parallel()
 	f := serveCmd.Flags().Lookup("no-daemon")
 	if f == nil {
 		t.Fatal("no-daemon flag not registered on serveCmd")
@@ -24,6 +25,7 @@ func TestServeFlags_NoDaemon(t *testing.T) {
 }
 
 func TestServeFlags_NoDaemon_Default(t *testing.T) {
+	t.Parallel()
 	// Verify the no-daemon flag has the correct default via the Flags() API
 	f := serveCmd.Flags()
 
@@ -37,7 +39,9 @@ func TestServeFlags_NoDaemon_Default(t *testing.T) {
 }
 
 func TestServeEnsureDaemon_AlreadyRunning(t *testing.T) {
-	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+	t.Parallel()
+	deps, _, execR, _, _ := NewTestDeps(t)
+	execR.RunFunc = func(dir, name string, args ...string) CommandResult {
 		if len(args) >= 2 && args[1] == "status" {
 			return CommandResult{
 				Stdout: `{"status":"running","pid":1234}`,
@@ -45,9 +49,9 @@ func TestServeEnsureDaemon_AlreadyRunning(t *testing.T) {
 		}
 		t.Fatalf("unexpected command: %s %v", name, args)
 		return CommandResult{}
-	}})
+	}
 
-	started, err := EnsureBdDaemonRunning(100 * time.Millisecond)
+	started, err := EnsureBdDaemonRunning(deps, 100*time.Millisecond)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -57,9 +61,11 @@ func TestServeEnsureDaemon_AlreadyRunning(t *testing.T) {
 }
 
 func TestServeEnsureDaemon_NotRunning_StartSucceeds(t *testing.T) {
+	t.Parallel()
+	deps, _, execR, _, _ := NewTestDeps(t)
 	var statusCalls atomic.Int32
 
-	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+	execR.RunFunc = func(dir, name string, args ...string) CommandResult {
 		if len(args) >= 2 && args[1] == "status" {
 			n := statusCalls.Add(1)
 			if n <= 1 {
@@ -76,9 +82,9 @@ func TestServeEnsureDaemon_NotRunning_StartSucceeds(t *testing.T) {
 		}
 		t.Fatalf("unexpected command: %s %v", name, args)
 		return CommandResult{}
-	}})
+	}
 
-	started, err := EnsureBdDaemonRunning(2 * time.Second)
+	started, err := EnsureBdDaemonRunning(deps, 2*time.Second)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -88,7 +94,9 @@ func TestServeEnsureDaemon_NotRunning_StartSucceeds(t *testing.T) {
 }
 
 func TestServeEnsureDaemon_Timeout(t *testing.T) {
-	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+	t.Parallel()
+	deps, _, execR, _, _ := NewTestDeps(t)
+	execR.RunFunc = func(dir, name string, args ...string) CommandResult {
 		if len(args) >= 2 && args[1] == "status" {
 			return CommandResult{Err: fmt.Errorf("not running")}
 		}
@@ -97,9 +105,9 @@ func TestServeEnsureDaemon_Timeout(t *testing.T) {
 		}
 		t.Fatalf("unexpected command: %s %v", name, args)
 		return CommandResult{}
-	}})
+	}
 
-	started, err := EnsureBdDaemonRunning(300 * time.Millisecond)
+	started, err := EnsureBdDaemonRunning(deps, 300*time.Millisecond)
 	if err == nil {
 		t.Fatal("expected timeout error")
 	}
@@ -112,6 +120,8 @@ func TestServeEnsureDaemon_Timeout(t *testing.T) {
 }
 
 func TestServeIsDaemonRunning(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name   string
 		result CommandResult
@@ -151,11 +161,13 @@ func TestServeIsDaemonRunning(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+			t.Parallel()
+			deps, _, execR, _, _ := NewTestDeps(t)
+			execR.RunFunc = func(dir, name string, args ...string) CommandResult {
 				return tt.result
-			}})
+			}
 
-			got := isDaemonRunning()
+			got := isDaemonRunning(deps)
 			if got != tt.want {
 				t.Errorf("isDaemonRunning() = %v, want %v", got, tt.want)
 			}
@@ -164,7 +176,9 @@ func TestServeIsDaemonRunning(t *testing.T) {
 }
 
 func TestServeEnsureDaemon_StartFails(t *testing.T) {
-	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+	t.Parallel()
+	deps, _, execR, _, _ := NewTestDeps(t)
+	execR.RunFunc = func(dir, name string, args ...string) CommandResult {
 		if len(args) >= 2 && args[1] == "status" {
 			return CommandResult{Err: fmt.Errorf("not running")}
 		}
@@ -176,9 +190,9 @@ func TestServeEnsureDaemon_StartFails(t *testing.T) {
 		}
 		t.Fatalf("unexpected command: %s %v", name, args)
 		return CommandResult{}
-	}})
+	}
 
-	started, err := EnsureBdDaemonRunning(100 * time.Millisecond)
+	started, err := EnsureBdDaemonRunning(deps, 100*time.Millisecond)
 	if err == nil {
 		t.Fatal("expected error when start fails")
 	}
@@ -191,18 +205,20 @@ func TestServeEnsureDaemon_StartFails(t *testing.T) {
 }
 
 func TestServeEnsureDaemon_StatusCallsExpectedCommand(t *testing.T) {
+	t.Parallel()
+	deps, _, execR, _, _ := NewTestDeps(t)
 	var capturedName string
 	var capturedArgs []string
 
-	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+	execR.RunFunc = func(dir, name string, args ...string) CommandResult {
 		capturedName = name
 		capturedArgs = args
 		return CommandResult{
 			Stdout: `{"status":"running","pid":999}`,
 		}
-	}})
+	}
 
-	_, _ = EnsureBdDaemonRunning(100 * time.Millisecond)
+	_, _ = EnsureBdDaemonRunning(deps, 100*time.Millisecond)
 
 	// isDaemonRunning should call "bd daemon status --json"
 	if capturedName != "bd" {
@@ -220,8 +236,10 @@ func TestServeEnsureDaemon_StatusCallsExpectedCommand(t *testing.T) {
 }
 
 func TestServeEnsureDaemon_InvalidJSON_TriggersStart(t *testing.T) {
+	t.Parallel()
+	deps, _, execR, _, _ := NewTestDeps(t)
 	var startCalled atomic.Bool
-	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+	execR.RunFunc = func(dir, name string, args ...string) CommandResult {
 		if len(args) >= 2 && args[1] == "status" {
 			return CommandResult{Stdout: "invalid json response"}
 		}
@@ -230,9 +248,9 @@ func TestServeEnsureDaemon_InvalidJSON_TriggersStart(t *testing.T) {
 			return CommandResult{Err: fmt.Errorf("fail")}
 		}
 		return CommandResult{}
-	}})
+	}
 
-	_, err := EnsureBdDaemonRunning(100 * time.Millisecond)
+	_, err := EnsureBdDaemonRunning(deps, 100*time.Millisecond)
 	if err == nil {
 		t.Fatal("expected error when start fails")
 	}

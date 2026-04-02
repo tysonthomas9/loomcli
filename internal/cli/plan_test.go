@@ -2,41 +2,56 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
+// newPlanCmd creates a fresh cobra.Command wired to runPlan with given deps.
+func newPlanCmd(deps *Deps) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:  "plan [worktree|workspace]",
+		Args: cobra.MaximumNArgs(1),
+		Run:  runPlan,
+	}
+	cmd.SetContext(WithDeps(context.Background(), deps))
+	return cmd
+}
+
+// setupPlanTracker configures deps.Tracker with the given issues and installs
+// it as the global default tracker. Cleanup restores the original tracker.
+func setupPlanTracker(t *testing.T, deps *Deps, issues []BdIssue) {
+	t.Helper()
+	tracker := deps.Tracker.(*MockIssueTracker)
+	tracker.ReadyResult = issues
+	tracker.ListResult = issues
+	resetDefaultTracker()
+	setDefaultTracker(tracker)
+	t.Cleanup(resetDefaultTracker)
+}
+
 func TestRunPlan_SingleTask_NoTasksAvailable(t *testing.T) {
-	// Setup temp worktree directory
+	// not parallel: uses global default tracker, os.Stdout capture
+
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
-	origDir, _ := os.Getwd()
-	os.Chdir(tmpDir)
-	t.Cleanup(func() { os.Chdir(origDir) })
-
-	// Create .git directory to mark as git repo
 	os.MkdirAll(filepath.Join(tmpDir, ".git"), 0755)
 
-	// Reset flags
-	planAutoMode = false
-	planDaemonMode = false
-
-	// Mock bd ready returning empty array (no tasks)
-	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: "[]"},
-		{Name: "bd", Args: []string{"list", "--json", "--limit", "500"}, Stdout: "[]"},
-	})
-	mock.Install()
+	deps, _, _, _, _ := NewTestDeps(t)
+	setupPlanTracker(t, deps, nil)
 
 	// Capture stdout
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	runPlan(nil, nil)
+	cmd := newPlanCmd(deps)
+	cmd.Run(cmd, []string{tmpDir})
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -44,46 +59,32 @@ func TestRunPlan_SingleTask_NoTasksAvailable(t *testing.T) {
 	buf.ReadFrom(r)
 	output := buf.String()
 
-	// Verify "no tasks available" message
 	if !strings.Contains(output, "No tasks available for planning") {
 		t.Errorf("expected 'No tasks available for planning' in output, got: %s", output)
 	}
 }
 
 func TestRunPlan_SingleTask_Success(t *testing.T) {
-	// Setup temp worktree directory
+	// not parallel: uses global default tracker, os.Stdout capture
+
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
-	origDir, _ := os.Getwd()
-	os.Chdir(tmpDir)
-	t.Cleanup(func() { os.Chdir(origDir) })
-
-	// Create .git directory
 	os.MkdirAll(filepath.Join(tmpDir, ".git"), 0755)
 
-	// Reset flags
-	planAutoMode = false
-	planDaemonMode = false
-
-	// Mock bd ready with available task (status=open, no design)
-	taskJSON := `[{"id":"bd-123","status":"open","issue_type":"task","title":"Test task"}]`
-	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
-		{Name: "bd", Args: []string{"list", "--json", "--limit", "500"}, Stdout: taskJSON},
-		{Name: "git", Args: []string{"rev-parse", "HEAD"}, Stdout: "abc123\n"},
-		{Name: "git", Args: []string{"diff", "--numstat", "abc123..HEAD"}, Stdout: ""},
+	deps, _, _, _, _ := NewTestDeps(t)
+	setupPlanTracker(t, deps, []BdIssue{
+		{ID: "bd-123", Status: "open", IssueType: "task", Title: "Test task"},
 	})
-	mock.Install()
 
-	// Mock Claude invoker
-	recorder := SetupMockClaudeInvoker(t, nil)
+	recorder := SetupMockAgentInvokerOn(t, deps, nil)
 
 	// Capture stdout
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	runPlan(nil, nil)
+	cmd := newPlanCmd(deps)
+	cmd.Run(cmd, []string{tmpDir})
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -91,17 +92,13 @@ func TestRunPlan_SingleTask_Success(t *testing.T) {
 	buf.ReadFrom(r)
 	output := buf.String()
 
-	// Verify banner was printed
 	if !strings.Contains(output, "Running PLANNING agent") {
 		t.Errorf("expected 'Running PLANNING agent' banner in output, got: %s", output)
 	}
-
-	// Verify Claude was invoked
 	if len(recorder.Invocations) != 1 {
-		t.Fatalf("expected 1 Claude invocation, got %d", len(recorder.Invocations))
+		t.Fatalf("expected 1 agent invocation, got %d", len(recorder.Invocations))
 	}
 
-	// Verify lock was created and released
 	_, err := os.Stat(filepath.Join(tmpDir, LockFileName))
 	if err == nil {
 		t.Error("lock file should be released after runPlan completes")
@@ -109,42 +106,39 @@ func TestRunPlan_SingleTask_Success(t *testing.T) {
 }
 
 func TestRunPlan_DaemonMode_AcquiresLock(t *testing.T) {
-	// Setup temp worktree directory
+	// not parallel: mutates global planDaemonMode, os.Chdir, os.Stdout capture
+
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
 	origDir, _ := os.Getwd()
 	os.Chdir(tmpDir)
 	t.Cleanup(func() { os.Chdir(origDir) })
 
-	// Create .git directory
 	os.MkdirAll(filepath.Join(tmpDir, ".git"), 0755)
 
-	// Set daemon mode
-	planAutoMode = false
-	planDaemonMode = true
-	defer func() { planDaemonMode = false }()
+	deps, _, _, _, _ := NewTestDeps(t)
+	recorder := SetupMockAgentInvokerOn(t, deps, nil)
 
-	// Mock Claude invoker
-	recorder := SetupMockClaudeInvoker(t, nil)
-
-	// Capture stdout
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	runPlan(nil, nil)
+	origDaemon := planDaemonMode
+	planDaemonMode = true
+	t.Cleanup(func() { planDaemonMode = origDaemon })
+
+	cmd := newPlanCmd(deps)
+	cmd.Run(cmd, nil)
 
 	w.Close()
 	os.Stdout = oldStdout
 	var buf bytes.Buffer
 	buf.ReadFrom(r)
 
-	// Verify Claude was invoked
 	if len(recorder.Invocations) != 1 {
-		t.Fatalf("expected 1 Claude invocation in daemon mode, got %d", len(recorder.Invocations))
+		t.Fatalf("expected 1 agent invocation in daemon mode, got %d", len(recorder.Invocations))
 	}
 
-	// In daemon mode, lock is intentionally NOT released (for parent to read)
 	lockPath := filepath.Join(tmpDir, LockFileName)
 	data, err := os.ReadFile(lockPath)
 	if err != nil {
@@ -161,34 +155,23 @@ func TestRunPlan_DaemonMode_AcquiresLock(t *testing.T) {
 }
 
 func TestRunPlan_SkipsEpics(t *testing.T) {
-	// Setup temp worktree directory
+	// not parallel: uses global default tracker, os.Stdout capture
+
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
-	origDir, _ := os.Getwd()
-	os.Chdir(tmpDir)
-	t.Cleanup(func() { os.Chdir(origDir) })
-
-	// Create .git directory
 	os.MkdirAll(filepath.Join(tmpDir, ".git"), 0755)
 
-	// Reset flags
-	planAutoMode = false
-	planDaemonMode = false
-
-	// Mock bd ready with only an epic (should be skipped)
-	taskJSON := `[{"id":"bd-123","status":"open","issue_type":"epic","title":"Test epic"}]`
-	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
-		{Name: "bd", Args: []string{"list", "--json", "--limit", "500"}, Stdout: taskJSON},
+	deps, _, _, _, _ := NewTestDeps(t)
+	setupPlanTracker(t, deps, []BdIssue{
+		{ID: "bd-123", Status: "open", IssueType: "epic", Title: "Test epic"},
 	})
-	mock.Install()
 
-	// Capture stdout
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	runPlan(nil, nil)
+	cmd := newPlanCmd(deps)
+	cmd.Run(cmd, []string{tmpDir})
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -196,41 +179,29 @@ func TestRunPlan_SkipsEpics(t *testing.T) {
 	buf.ReadFrom(r)
 	output := buf.String()
 
-	// Should say no tasks available because epics are skipped
 	if !strings.Contains(output, "No tasks available for planning") {
 		t.Errorf("expected 'No tasks available for planning' when only epics exist, got: %s", output)
 	}
 }
 
 func TestRunPlan_SkipsInProgress(t *testing.T) {
-	// Setup temp worktree directory
+	// not parallel: uses global default tracker, os.Stdout capture
+
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
-	origDir, _ := os.Getwd()
-	os.Chdir(tmpDir)
-	t.Cleanup(func() { os.Chdir(origDir) })
-
-	// Create .git directory
 	os.MkdirAll(filepath.Join(tmpDir, ".git"), 0755)
 
-	// Reset flags
-	planAutoMode = false
-	planDaemonMode = false
-
-	// Mock bd ready with only in_progress task (should be skipped)
-	taskJSON := `[{"id":"bd-123","status":"in_progress","issue_type":"task","title":"Test task"}]`
-	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
-		{Name: "bd", Args: []string{"list", "--json", "--limit", "500"}, Stdout: taskJSON},
+	deps, _, _, _, _ := NewTestDeps(t)
+	setupPlanTracker(t, deps, []BdIssue{
+		{ID: "bd-123", Status: "in_progress", IssueType: "task", Title: "Test task"},
 	})
-	mock.Install()
 
-	// Capture stdout
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	runPlan(nil, nil)
+	cmd := newPlanCmd(deps)
+	cmd.Run(cmd, []string{tmpDir})
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -238,14 +209,13 @@ func TestRunPlan_SkipsInProgress(t *testing.T) {
 	buf.ReadFrom(r)
 	output := buf.String()
 
-	// Should say no tasks available because in_progress are skipped
 	if !strings.Contains(output, "No tasks available for planning") {
 		t.Errorf("expected 'No tasks available for planning' when all tasks in_progress, got: %s", output)
 	}
 }
 
 func TestHasAvailablePlanningTasks_Success(t *testing.T) {
-	// Task with no design and open status is available for planning
+	// not parallel: uses mock.Install() which mutates global defaultDeps.Exec
 	taskJSON := `[{"id":"bd-1","status":"open","issue_type":"task","design":""}]`
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
@@ -263,7 +233,7 @@ func TestHasAvailablePlanningTasks_Success(t *testing.T) {
 }
 
 func TestHasAvailablePlanningTasks_SkipsTasksWithDesign(t *testing.T) {
-	// Task with existing design should be skipped
+	// not parallel: uses mock.Install() which mutates global defaultDeps.Exec
 	taskJSON := `[{"id":"bd-1","status":"open","issue_type":"task","design":"Some plan here"}]`
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
@@ -281,6 +251,7 @@ func TestHasAvailablePlanningTasks_SkipsTasksWithDesign(t *testing.T) {
 }
 
 func TestHasAvailablePlanningTasks_BdError(t *testing.T) {
+	// not parallel: uses mock.Install() which mutates global defaultDeps.Exec
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Err: os.ErrNotExist},
 	})
@@ -297,6 +268,7 @@ func TestHasAvailablePlanningTasks_BdError(t *testing.T) {
 // ============================================================================
 
 func TestGetAvailablePlanningTasks_Success(t *testing.T) {
+	// not parallel: uses mock.Install() which mutates global defaultDeps.Exec
 	taskJSON := `[{"id":"bd-1","status":"open","issue_type":"task","design":""}]`
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
@@ -317,6 +289,7 @@ func TestGetAvailablePlanningTasks_Success(t *testing.T) {
 }
 
 func TestGetAvailablePlanningTasks_ReturnsEmpty(t *testing.T) {
+	// not parallel: uses mock.Install() which mutates global defaultDeps.Exec
 	taskJSON := `[{"id":"bd-1","status":"open","issue_type":"task","design":"Some plan here"}]`
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
@@ -334,6 +307,7 @@ func TestGetAvailablePlanningTasks_ReturnsEmpty(t *testing.T) {
 }
 
 func TestGetAvailablePlanningTasks_BdError(t *testing.T) {
+	// not parallel: uses mock.Install() which mutates global defaultDeps.Exec
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Err: os.ErrNotExist},
 	})

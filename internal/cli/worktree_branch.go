@@ -66,7 +66,7 @@ func GetDefaultBranchForWorktrees(worktrees []WorktreeInfo) string {
 	integrationBranchMu.Unlock()
 
 	result := "main"
-	if detected := DetectIntegrationBranch(worktrees); detected != "" {
+	if detected := detectIntegrationBranchDeps(defaultDeps, worktrees); detected != "" {
 		result = detected
 	}
 
@@ -78,9 +78,8 @@ func GetDefaultBranchForWorktrees(worktrees []WorktreeInfo) string {
 	return result
 }
 
-// DetectIntegrationBranch analyzes worktree branches to find a common integration
-// branch that is closer than main. Returns empty string if no such branch is found.
-func DetectIntegrationBranch(worktrees []WorktreeInfo) string {
+// detectIntegrationBranchDeps is the deps-aware implementation of DetectIntegrationBranch.
+func detectIntegrationBranchDeps(deps *Deps, worktrees []WorktreeInfo) string {
 	if len(worktrees) < 2 {
 		return ""
 	}
@@ -96,7 +95,7 @@ func DetectIntegrationBranch(worktrees []WorktreeInfo) string {
 	repoPath := worktrees[0].Path //nolint:gosec // safe: len(worktrees) == 0 is checked above
 
 	// Get all remote branches as candidates
-	output, err := RunGitCommand(repoPath, "branch", "-r", "--format=%(refname:short)")
+	output, err := runGit(deps, repoPath, "branch", "-r", "--format=%(refname:short)")
 	if err != nil {
 		return ""
 	}
@@ -130,14 +129,14 @@ func DetectIntegrationBranch(worktrees []WorktreeInfo) string {
 
 		for _, wt := range worktrees {
 			// Check if candidate is ancestor of worktree branch
-			_, err := RunGitCommand(repoPath, "merge-base", "--is-ancestor", candidate, "origin/"+wt.Branch)
+			_, err := runGit(deps, repoPath, "merge-base", "--is-ancestor", candidate, "origin/"+wt.Branch)
 			if err != nil {
 				isAncestorOfAll = false
 				break
 			}
 
 			// Get distance (commits between candidate and worktree branch)
-			distOutput, err := RunGitCommand(repoPath, "rev-list", "--count", candidate+"..origin/"+wt.Branch)
+			distOutput, err := runGit(deps, repoPath, "rev-list", "--count", candidate+"..origin/"+wt.Branch)
 			if err != nil {
 				isAncestorOfAll = false
 				break
@@ -166,8 +165,8 @@ func DetectIntegrationBranch(worktrees []WorktreeInfo) string {
 	// Only use detected branch if it's actually closer than main/master
 	// Try origin/main first, fall back to origin/master
 	mainRef := "origin/main"
-	if _, err := RunGitCommand(repoPath, "rev-parse", "--verify", "origin/main"); err != nil {
-		if _, err := RunGitCommand(repoPath, "rev-parse", "--verify", "origin/master"); err != nil {
+	if _, err := runGit(deps, repoPath, "rev-parse", "--verify", "origin/main"); err != nil {
+		if _, err := runGit(deps, repoPath, "rev-parse", "--verify", "origin/master"); err != nil {
 			// Neither main nor master exists as remote branch; can't compare
 			return ""
 		}
@@ -175,7 +174,7 @@ func DetectIntegrationBranch(worktrees []WorktreeInfo) string {
 	}
 	mainMaxDist := 0
 	for _, wt := range worktrees {
-		distOutput, err := RunGitCommand(repoPath, "rev-list", "--count", mainRef+"..origin/"+wt.Branch)
+		distOutput, err := runGit(deps, repoPath, "rev-list", "--count", mainRef+"..origin/"+wt.Branch)
 		if err != nil {
 			return ""
 		}
@@ -189,4 +188,10 @@ func DetectIntegrationBranch(worktrees []WorktreeInfo) string {
 	}
 
 	return strings.TrimPrefix(bestBranch, "origin/")
+}
+
+// DetectIntegrationBranch analyzes worktree branches to find a common integration
+// branch that is closer than main. Returns empty string if no such branch is found.
+func DetectIntegrationBranch(worktrees []WorktreeInfo) string {
+	return detectIntegrationBranchDeps(defaultDeps, worktrees)
 }

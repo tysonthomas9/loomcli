@@ -16,100 +16,77 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestSetup_DetectBackends_FlagPreSelected(t *testing.T) {
-	orig := setupBackend
-	defer func() { setupBackend = orig }()
-	setupBackend = "codex"
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
 
-	got := stepDetectBackends()
+	got := stepDetectBackendsWithDeps(deps, "codex", false)
 	if got != "codex" {
-		t.Errorf("stepDetectBackends() = %q, want %q", got, "codex")
+		t.Errorf("stepDetectBackendsWithDeps() = %q, want %q", got, "codex")
 	}
 }
 
 func TestSetup_DetectBackends_YesUsesFirstAvailable(t *testing.T) {
-	origBackend := setupBackend
-	origYes := setupYes
-	defer func() { setupBackend = origBackend; setupYes = origYes }()
-	setupBackend = ""
-	setupYes = true
-
-	// Mock lookPath so that only "codex" is found
-	installLookPathMock(t, func(file string) (string, error) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+	deps.LookPath = func(file string) (string, error) {
 		if file == "codex" {
 			return "/usr/bin/codex", nil
 		}
 		return "", exec.ErrNotFound
-	})
+	}
 
-	got := stepDetectBackends()
+	got := stepDetectBackendsWithDeps(deps, "", true)
 	if got != "codex" {
-		t.Errorf("stepDetectBackends() = %q, want %q (first available)", got, "codex")
+		t.Errorf("stepDetectBackendsWithDeps() = %q, want %q (first available)", got, "codex")
 	}
 }
 
 func TestSetup_DetectBackends_YesDefaultsToClaudeWhenNoneFound(t *testing.T) {
-	origBackend := setupBackend
-	origYes := setupYes
-	defer func() { setupBackend = origBackend; setupYes = origYes }()
-	setupBackend = ""
-	setupYes = true
-
-	// Mock lookPath so nothing is found
-	installLookPathMock(t, func(file string) (string, error) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+	deps.LookPath = func(file string) (string, error) {
 		return "", exec.ErrNotFound
-	})
+	}
 
-	got := stepDetectBackends()
+	got := stepDetectBackendsWithDeps(deps, "", true)
 	if got != "claude" {
-		t.Errorf("stepDetectBackends() = %q, want %q (default when none found)", got, "claude")
+		t.Errorf("stepDetectBackendsWithDeps() = %q, want %q (default when none found)", got, "claude")
 	}
 }
 
 func TestSetup_DetectBackends_InteractivePrompt(t *testing.T) {
-	origBackend := setupBackend
-	origYes := setupYes
-	defer func() { setupBackend = origBackend; setupYes = origYes }()
-	setupBackend = ""
-	setupYes = false
-
-	// Mock lookPath — claude available
-	installLookPathMock(t, func(file string) (string, error) {
+	deps, _, _, _, _ := NewTestDeps(t)
+	deps.LookPath = func(file string) (string, error) {
 		if file == "claude" {
 			return "/usr/bin/claude", nil
 		}
 		return "", exec.ErrNotFound
-	})
+	}
 
 	// User types "opencode"
 	MockStdin(t, "opencode\n")
 
-	got := stepDetectBackends()
+	got := stepDetectBackendsWithDeps(deps, "", false)
 	if got != "opencode" {
-		t.Errorf("stepDetectBackends() = %q, want %q", got, "opencode")
+		t.Errorf("stepDetectBackendsWithDeps() = %q, want %q", got, "opencode")
 	}
 }
 
 func TestSetup_DetectBackends_InteractiveEmpty(t *testing.T) {
-	origBackend := setupBackend
-	origYes := setupYes
-	defer func() { setupBackend = origBackend; setupYes = origYes }()
-	setupBackend = ""
-	setupYes = false
-
-	// Mock lookPath — opencode is first found
-	installLookPathMock(t, func(file string) (string, error) {
+	deps, _, _, _, _ := NewTestDeps(t)
+	deps.LookPath = func(file string) (string, error) {
 		if file == "opencode" {
 			return "/usr/bin/opencode", nil
 		}
 		return "", exec.ErrNotFound
-	})
+	}
 
 	// User presses enter (empty) — should get default (opencode, first available)
 	MockStdin(t, "\n")
 
-	got := stepDetectBackends()
+	got := stepDetectBackendsWithDeps(deps, "", false)
 	if got != "opencode" {
-		t.Errorf("stepDetectBackends() = %q, want %q (default from available)", got, "opencode")
+		t.Errorf("stepDetectBackendsWithDeps() = %q, want %q (default from available)", got, "opencode")
 	}
 }
 
@@ -545,6 +522,7 @@ func TestSetup_ConfigureSecrets_CodexBackend(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestSetup_AgentEntryExists(t *testing.T) {
+	t.Parallel()
 	agents := []AgentEntry{
 		{Worktree: "falcon", Role: "task"},
 		{Worktree: "nova", Role: "plan"},
@@ -565,6 +543,7 @@ func TestSetup_AgentEntryExists(t *testing.T) {
 }
 
 func TestSetup_IsKnownBackend(t *testing.T) {
+	t.Parallel()
 	if !isKnownBackend("claude") {
 		t.Error("claude should be known")
 	}

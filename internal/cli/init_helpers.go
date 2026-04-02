@@ -10,9 +10,9 @@ import (
 )
 
 // checkPrerequisites verifies bd and git are available and we're in a git repo
-func checkPrerequisites() bool {
+func checkPrerequisites(deps *Deps) bool {
 	// Check if we're in a git repository
-	result := defaultDeps.Exec.Run(".", "git", "rev-parse", "--is-inside-work-tree")
+	result := deps.Exec.Run(".", "git", "rev-parse", "--is-inside-work-tree")
 	if result.Err != nil {
 		fmt.Println("✗ Not a git repository")
 		fmt.Println("")
@@ -23,10 +23,10 @@ func checkPrerequisites() bool {
 	fmt.Println("✓ git repository detected")
 
 	// Check if we're in the main worktree (not inside a worktree)
-	result = defaultDeps.Exec.Run(".", "git", "rev-parse", "--git-common-dir")
+	result = deps.Exec.Run(".", "git", "rev-parse", "--git-common-dir")
 	if result.Err == nil {
 		gitCommonDir := strings.TrimSpace(result.Stdout)
-		result2 := defaultDeps.Exec.Run(".", "git", "rev-parse", "--git-dir")
+		result2 := deps.Exec.Run(".", "git", "rev-parse", "--git-dir")
 		if result2.Err == nil {
 			gitDir := strings.TrimSpace(result2.Stdout)
 			// If git-dir and git-common-dir differ, we're in a worktree
@@ -40,7 +40,7 @@ func checkPrerequisites() bool {
 	// Check if bd (beads) CLI is available (skip when fleet-db is active)
 	if isFleetDBActive() {
 		fmt.Println("✓ fleet-db backend active (bd CLI not required)")
-	} else if result = defaultDeps.Exec.Run(".", "bd", "--version"); result.Err != nil {
+	} else if result = deps.Exec.Run(".", "bd", "--version"); result.Err != nil {
 		fmt.Println("✗ bd (beads CLI) not found")
 		fmt.Println("\n  Please install beads CLI from the vendored source:")
 		fmt.Println("    make install-bd")
@@ -53,7 +53,7 @@ func checkPrerequisites() bool {
 }
 
 // initBeads initializes beads if not already done
-func initBeads() bool {
+func initBeads(deps *Deps) bool {
 	if isFleetDBActive() {
 		fmt.Println("→ Skipping beads init (fleet-db backend active)")
 		return true
@@ -71,7 +71,7 @@ func initBeads() bool {
 	}
 
 	fmt.Println("→ Creating .beads/ directory...")
-	result := defaultDeps.Exec.Run(GetBeadsDir(), "bd", "init")
+	result := deps.Exec.Run(GetBeadsDir(), "bd", "init")
 	if result.Err != nil {
 		fmt.Fprintf(os.Stderr, "✗ Failed to initialize beads: %s\n", result.Stderr)
 		return false
@@ -117,7 +117,7 @@ func createWorktreesDir(dir string) bool {
 }
 
 // createWorktrees handles the interactive worktree creation
-func createWorktrees(worktreesDir string) []string {
+func createWorktrees(deps *Deps, worktreesDir string) []string {
 	// Check for existing worktrees
 	existingWorktrees := listExistingWorktrees(worktreesDir)
 	if len(existingWorktrees) > 0 {
@@ -159,7 +159,7 @@ func createWorktrees(worktreesDir string) []string {
 	// Create each worktree
 	createdNames := []string{}
 	for _, name := range namesToCreate {
-		if createSingleWorktree(worktreesDir, name) {
+		if createSingleWorktree(deps, worktreesDir, name) {
 			createdNames = append(createdNames, name)
 		}
 	}
@@ -296,7 +296,7 @@ func promptForWorktreeNames(existing []string) []string {
 }
 
 // createSingleWorktree creates one worktree
-func createSingleWorktree(worktreesDir, name string) bool {
+func createSingleWorktree(deps *Deps, worktreesDir, name string) bool {
 	if err := validateNewWorktreeName(name); err != nil {
 		fmt.Fprintf(os.Stderr, "  ✗ Skipping worktree: %v\n", err)
 		return false
@@ -307,13 +307,13 @@ func createSingleWorktree(worktreesDir, name string) bool {
 
 	// Let git worktree add fail naturally if the path or branch already exists,
 	// avoiding a TOCTOU race between an os.Stat check and the git command.
-	result := defaultDeps.Exec.Run(".", "git", "worktree", "add", worktreePath, "-b", name)
+	result := deps.Exec.Run(".", "git", "worktree", "add", worktreePath, "-b", name)
 	if result.Err != nil {
 		stderr := result.Stderr
 		if strings.Contains(stderr, "already exists") ||
 			strings.Contains(stderr, "already a worktree") {
 			// Branch or path already exists — try without -b (use existing branch)
-			result = defaultDeps.Exec.Run(".", "git", "worktree", "add", worktreePath, name)
+			result = deps.Exec.Run(".", "git", "worktree", "add", worktreePath, name)
 			if result.Err != nil {
 				if strings.Contains(result.Stderr, "already exists") ||
 					strings.Contains(result.Stderr, "already a worktree") ||

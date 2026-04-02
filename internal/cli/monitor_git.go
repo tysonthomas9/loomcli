@@ -7,6 +7,10 @@ import (
 )
 
 func getWorktreeGitSyncStatus(path, defaultBranch string, overrideBranch string) (ahead, behind int) {
+	return getWorktreeGitSyncStatusDeps(defaultDeps, path, defaultBranch, overrideBranch)
+}
+
+func getWorktreeGitSyncStatusDeps(deps *Deps, path, defaultBranch string, overrideBranch string) (ahead, behind int) {
 	branch := overrideBranch
 	if branch == "" {
 		branch = defaultBranch
@@ -14,7 +18,7 @@ func getWorktreeGitSyncStatus(path, defaultBranch string, overrideBranch string)
 
 	// Count commits ahead/behind integration branch
 	// Format: "behind\tahead" (from HEAD's perspective)
-	output, err := RunGitCommand(path, "rev-list", "--left-right", "--count",
+	output, err := runGit(deps, path, "rev-list", "--left-right", "--count",
 		fmt.Sprintf("origin/%s...HEAD", branch))
 	if err != nil {
 		return 0, 0
@@ -32,7 +36,11 @@ func getWorktreeGitSyncStatus(path, defaultBranch string, overrideBranch string)
 // getGitHubRemoteURL returns the GitHub HTTPS URL for the origin remote.
 // Returns empty string if not a GitHub remote or on error.
 func getGitHubRemoteURL(path string) string {
-	output, err := RunGitCommand(path, "remote", "get-url", "origin")
+	return getGitHubRemoteURLDeps(defaultDeps, path)
+}
+
+func getGitHubRemoteURLDeps(deps *Deps, path string) string {
+	output, err := runGit(deps, path, "remote", "get-url", "origin")
 	if err != nil {
 		return ""
 	}
@@ -56,12 +64,16 @@ func getGitHubRemoteURL(path string) string {
 
 // getWorktreeCommitDetails returns the recent commits ahead of the integration branch.
 func getWorktreeCommitDetails(path, defaultBranch string, limit int, githubURL string, overrideBranch string) []CommitDetail {
+	return getWorktreeCommitDetailsDeps(defaultDeps, path, defaultBranch, limit, githubURL, overrideBranch)
+}
+
+func getWorktreeCommitDetailsDeps(deps *Deps, path, defaultBranch string, limit int, githubURL string, overrideBranch string) []CommitDetail {
 	branch := overrideBranch
 	if branch == "" {
 		branch = defaultBranch
 	}
 
-	output, err := RunGitCommand(path, "log",
+	output, err := runGit(deps, path, "log",
 		fmt.Sprintf("origin/%s..HEAD", branch),
 		fmt.Sprintf("--format=%%h|%%s"),
 		"-n", strconv.Itoa(limit))
@@ -95,7 +107,11 @@ func getWorktreeCommitDetails(path, defaultBranch string, limit int, githubURL s
 
 // getWorktreeFileChanges returns uncommitted file changes from git status.
 func getWorktreeFileChanges(path string) []FileChange {
-	output, err := RunGitCommand(path, "status", "--porcelain")
+	return getWorktreeFileChangesDeps(defaultDeps, path)
+}
+
+func getWorktreeFileChangesDeps(deps *Deps, path string) []FileChange {
+	output, err := runGit(deps, path, "status", "--porcelain")
 	if err != nil {
 		return nil
 	}

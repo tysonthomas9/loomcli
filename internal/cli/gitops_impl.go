@@ -170,7 +170,7 @@ func (g *GitOpsImpl) GetCurrentBranch(worktreePath string) (string, error) {
 }
 
 func (g *GitOpsImpl) CheckGhInstalled() error {
-	return checkGhInstalled()
+	return checkGhInstalled(defaultDeps)
 }
 
 func (g *GitOpsImpl) SetRepoDefaultBranch(workspaceID, repoName, branch string) error {

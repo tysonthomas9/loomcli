@@ -36,6 +36,7 @@ type AutoModeOptions struct {
 	// Interface abstractions for remote agent support (nil = local filesystem).
 	LockBridge   LockBridge
 	EventEmitter EventEmitter
+	Deps         *Deps // Optional deps for testability (nil = defaultDeps).
 }
 
 // AutoModeState tracks the current state of auto mode execution
@@ -98,8 +99,12 @@ func agentClaimedTask(worktreePath, agentName string, bridge LockBridge) bool {
 	return info.TaskID != ""
 }
 
-// RunAutoModeLoop runs the auto mode loop for either plan or task agents
+// RunAutoModeLoop runs the auto mode loop for either plan or task agents.
 func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
+	d := opts.Deps
+	if d == nil {
+		d = defaultDeps
+	}
 	if opts.BackoffBase == 0 {
 		opts.BackoffBase = 30 * time.Second
 	}
@@ -289,7 +294,7 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 		collector := usage.NewCollector(backendName, opts.AgentName)
 		startedAt := time.Now()
 
-		err = InvokeAgentNonInteractive(opts.WorktreePath, prompt, opts.AgentName, shutdown, collector)
+		err = d.Agent.InvokeNonInteractive(opts.WorktreePath, prompt, opts.AgentName, shutdown, collector)
 
 		endedAt := time.Now()
 		recordSessionUsage(usageStore, collector, opts.WorktreePath, opts.AgentName, opts.ParentID, startedAt, endedAt, err, opts.LockBridge)
@@ -451,50 +456,4 @@ func formatTimeout(timeout int) string {
 		return "none"
 	}
 	return fmt.Sprintf("%dm", timeout)
-}
-
-// recordSessionUsage finalizes the usage collector and appends the record to the store.
-// Failures are logged but do not interrupt the auto mode loop.
-// When bridge is non-nil, reads the lock via the bridge; otherwise uses the local filesystem.
-func recordSessionUsage(store *usage.Store, collector *usage.Collector, worktreePath, agentName, parentID string, startedAt, endedAt time.Time, invokeErr error, bridge LockBridge) {
-	if store == nil || collector == nil {
-		return
-	}
-
-	// Derive exit code from error
-	exitCode := 0
-	if invokeErr != nil {
-		exitCode = 1
-		var exitErr *exec.ExitError
-		if errors.As(invokeErr, &exitErr) {
-			exitCode = exitErr.ExitCode()
-		}
-	}
-
-	// Read task/epic context from lock file
-	var taskID, epicID string
-	if bridge != nil {
-		if info, err := bridge.ReadLock(agentName); err == nil && info != nil {
-			taskID = info.TaskID
-		}
-	} else {
-		if info, err := ReadLockFile(worktreePath); err == nil && info != nil {
-			taskID = info.TaskID
-		}
-	}
-	epicID = parentID
-
-	record := collector.Finalize(taskID, epicID, startedAt, endedAt, exitCode)
-	if err := store.Append(record); err != nil {
-		log.Printf("[auto] Warning: failed to record usage: %v", err)
-	}
-}
-
-// captureHEADRef returns the current HEAD ref for the worktree (empty on error).
-func captureHEADRef(worktreePath string) string {
-	out, err := RunGitCommand(worktreePath, "rev-parse", "HEAD")
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(out)
 }

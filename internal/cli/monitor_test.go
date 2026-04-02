@@ -12,6 +12,7 @@ import (
 )
 
 func TestDisplayWidth(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		input    string
@@ -38,6 +39,7 @@ func TestDisplayWidth(t *testing.T) {
 }
 
 func TestTruncateToWidth(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		input    string
@@ -69,6 +71,7 @@ func TestTruncateToWidth(t *testing.T) {
 }
 
 func TestPadRight(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		input    string
@@ -95,6 +98,7 @@ func TestPadRight(t *testing.T) {
 }
 
 func TestRenderBoxTop(t *testing.T) {
+	t.Parallel()
 	// Uses dashboardWidth (70) constant
 	result := renderBoxTop()
 	expected := "╔" + strings.Repeat("═", dashboardWidth-2) + "╗\n"
@@ -104,6 +108,7 @@ func TestRenderBoxTop(t *testing.T) {
 }
 
 func TestRenderBoxBottom(t *testing.T) {
+	t.Parallel()
 	// Uses dashboardWidth (70) constant
 	result := renderBoxBottom()
 	expected := "╚" + strings.Repeat("═", dashboardWidth-2) + "╝\n"
@@ -113,6 +118,7 @@ func TestRenderBoxBottom(t *testing.T) {
 }
 
 func TestRenderBoxSeparator(t *testing.T) {
+	t.Parallel()
 	// Uses dashboardWidth (70) constant
 	result := renderBoxSeparator()
 	expected := "╠" + strings.Repeat("═", dashboardWidth-2) + "╣\n"
@@ -122,6 +128,7 @@ func TestRenderBoxSeparator(t *testing.T) {
 }
 
 func TestCenterText(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		text     string
@@ -147,6 +154,7 @@ func TestCenterText(t *testing.T) {
 
 // Test state determination logic
 func TestAgentStatusStates(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name           string
 		lockStatus     string
@@ -213,6 +221,7 @@ func TestAgentStatusStates(t *testing.T) {
 
 // Test fallback logic for replacing "..." with task ID
 func TestFallbackLogic(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		lockStatus string
@@ -306,6 +315,7 @@ func simulateFallback(lockStatus, taskID, taskStatus string) string {
 
 // Test task conflict detection
 func TestTaskConflictDetection(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name            string
 		taskIDToAgents  map[string][]string
@@ -367,6 +377,7 @@ func TestTaskConflictDetection(t *testing.T) {
 
 // Test that conflict warning renders correctly
 func TestRenderConflictWarning(t *testing.T) {
+	t.Parallel()
 	conflicts := map[string][]string{
 		"bd-123": {"cobalt", "nova"},
 	}
@@ -394,6 +405,7 @@ func TestRenderConflictWarning(t *testing.T) {
 
 // Test MonitorData struct initialization
 func TestMonitorDataStruct(t *testing.T) {
+	t.Parallel()
 	data := &MonitorData{
 		TaskConflicts: make(map[string][]string),
 		AgentTasks:    make(map[string]TaskInfo),
@@ -420,6 +432,7 @@ func TestMonitorDataStruct(t *testing.T) {
 // When no lock file exists, only in_progress tasks trigger "error" state
 // Closed tasks without a lock show "ready" (not "done") to avoid stale state
 func TestTaskInfoStatus(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		taskStatus  string
@@ -464,6 +477,7 @@ func TestTaskInfoStatus(t *testing.T) {
 // TestNoClosedTaskFallback verifies that closed tasks don't cause "done" status
 // when there's no lock file. This prevents stale "done" states from old tasks.
 func TestNoClosedTaskFallback(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name           string
 		hasLock        bool
@@ -541,6 +555,7 @@ func TestNoClosedTaskFallback(t *testing.T) {
 
 // TestAgentStatusStateMachine tests the complete state machine for agent status
 func TestAgentStatusStateMachine(t *testing.T) {
+	t.Parallel()
 	// State transitions:
 	// 1. Agent starts (loom task) -> lock created -> "working: ..."
 	// 2. Agent claims task -> lock updated -> "working: bd-123"
@@ -643,6 +658,7 @@ func TestAgentStatusStateMachine(t *testing.T) {
 // When an agent that previously completed a task starts a new one,
 // the old closed task should not cause "done" to appear
 func TestClosedTaskDoesNotOverrideNewTask(t *testing.T) {
+	t.Parallel()
 	// Scenario:
 	// 1. Agent "alpha" completed task "bd-old" (status=closed, assignee=alpha)
 	// 2. Agent "alpha" starts new task with "loom task"
@@ -699,6 +715,7 @@ func TestClosedTaskDoesNotOverrideNewTask(t *testing.T) {
 // TestRunBdCommand removed: runBdCommand was deleted as part of typed IssueTracker migration.
 
 func TestCollectStatistics(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name           string
 		statsResult    *BdStats
@@ -833,13 +850,14 @@ func TestCollectStatistics(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
 			mock := NewMockTracker()
 			mock.StatsResult = tt.statsResult
 			mock.StatsErr = tt.statsErr
-			setDefaultTracker(mock)
-			defer resetDefaultTracker()
+			deps.Tracker = mock
 
-			stats := collectStatistics()
+			stats := collectStatisticsDeps(deps)
 
 			if stats.Open != tt.wantOpen {
 				t.Errorf("Open = %d, want %d", stats.Open, tt.wantOpen)
@@ -870,6 +888,7 @@ func TestCollectStatistics(t *testing.T) {
 }
 
 func TestCollectSyncStatus(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		agents        []AgentStatus
@@ -930,6 +949,7 @@ func TestCollectSyncStatus(t *testing.T) {
 }
 
 func TestCollectTaskStatus(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name                    string
 		readyIssues             []BdIssue
@@ -1080,6 +1100,8 @@ func TestCollectTaskStatus(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
 			mock := NewMockTracker()
 			mock.ReadyResult = tt.readyIssues
 			mock.ReadyErr = tt.readyErr
@@ -1096,10 +1118,9 @@ func TestCollectTaskStatus(t *testing.T) {
 			}
 			mock.BlockedResult = tt.backlogIssues
 			mock.BlockedErr = tt.backlogErr
-			setDefaultTracker(mock)
-			defer resetDefaultTracker()
+			deps.Tracker = mock
 
-			summary, needsPlanningTasks, readyToImplementTasks, reviewTasks, inProgressTasks, backlogTasks, closedTasks, agentTasks := collectTaskStatus(100)
+			summary, needsPlanningTasks, readyToImplementTasks, reviewTasks, inProgressTasks, backlogTasks, closedTasks, agentTasks := collectTaskStatusDeps(deps, 100)
 
 			if summary.NeedsPlanning != tt.wantNeedsPlanning {
 				t.Errorf("NeedsPlanning = %d, want %d", summary.NeedsPlanning, tt.wantNeedsPlanning)
@@ -1142,7 +1163,9 @@ func TestCollectTaskStatus(t *testing.T) {
 }
 
 func TestCollectTaskStatusReadyCommandArgs(t *testing.T) {
+	t.Parallel()
 	// This test verifies that Ready() is called with the passed readyLimit
+	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewMockTracker()
 	var capturedOpts ReadyOpts
 	mock.ReadyFunc = func(_ context.Context, opts ReadyOpts) ([]BdIssue, error) {
@@ -1152,10 +1175,9 @@ func TestCollectTaskStatusReadyCommandArgs(t *testing.T) {
 	mock.ListFunc = func(_ context.Context, opts ListOpts) ([]BdIssue, error) {
 		return nil, nil
 	}
-	setDefaultTracker(mock)
-	defer resetDefaultTracker()
+	deps.Tracker = mock
 
-	collectTaskStatus(100)
+	collectTaskStatusDeps(deps, 100)
 
 	if !mock.Called("Ready") {
 		t.Fatal("Ready() was not called")
@@ -1166,7 +1188,9 @@ func TestCollectTaskStatusReadyCommandArgs(t *testing.T) {
 }
 
 func TestCollectAgentStatus(t *testing.T) {
+	// not parallel: subtests use os.Chdir, defaultResolver global
 	t.Run("no lock clean worktree shows ready", func(t *testing.T) {
+		deps, _, _, _, _ := NewTestDeps(t)
 		// Save and restore working directory
 		origDir, err := os.Getwd()
 		if err != nil {
@@ -1188,7 +1212,7 @@ func TestCollectAgentStatus(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+		deps.Exec = &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			// git branch --show-current
 			if name == "git" && len(args) > 0 && args[0] == "branch" {
 				return CommandResult{Stdout: "falcon"}
@@ -1202,9 +1226,10 @@ func TestCollectAgentStatus(t *testing.T) {
 				return CommandResult{Stdout: "0\t0"}
 			}
 			return CommandResult{}
-		}})
+		}}
+		deps.Git = &execBridgeGitRunner{exec: deps.Exec}
 
-		agents, _ := collectAgentStatus(nil, "")
+		agents, _ := collectAgentStatusDeps(deps, nil, "")
 
 		if len(agents) != 1 {
 			t.Fatalf("expected 1 agent, got %d", len(agents))
@@ -1215,6 +1240,7 @@ func TestCollectAgentStatus(t *testing.T) {
 	})
 
 	t.Run("no lock dirty worktree shows changes", func(t *testing.T) {
+		deps, _, _, _, _ := NewTestDeps(t)
 		// Save and restore working directory
 		origDir, err := os.Getwd()
 		if err != nil {
@@ -1235,7 +1261,7 @@ func TestCollectAgentStatus(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+		deps.Exec = &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			if name == "git" && len(args) > 0 && args[0] == "branch" {
 				return CommandResult{Stdout: "nova"}
 			}
@@ -1247,9 +1273,10 @@ func TestCollectAgentStatus(t *testing.T) {
 				return CommandResult{Stdout: "0\t0"}
 			}
 			return CommandResult{}
-		}})
+		}}
+		deps.Git = &execBridgeGitRunner{exec: deps.Exec}
 
-		agents, _ := collectAgentStatus(nil, "")
+		agents, _ := collectAgentStatusDeps(deps, nil, "")
 
 		if len(agents) != 1 {
 			t.Fatalf("expected 1 agent, got %d", len(agents))
@@ -1260,6 +1287,7 @@ func TestCollectAgentStatus(t *testing.T) {
 	})
 
 	t.Run("in_progress task but no lock shows error", func(t *testing.T) {
+		deps, _, _, _, _ := NewTestDeps(t)
 		// Save and restore working directory
 		origDir, err := os.Getwd()
 		if err != nil {
@@ -1280,7 +1308,7 @@ func TestCollectAgentStatus(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+		deps.Exec = &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			if name == "git" && len(args) > 0 && args[0] == "branch" {
 				return CommandResult{Stdout: "spark"}
 			}
@@ -1291,13 +1319,14 @@ func TestCollectAgentStatus(t *testing.T) {
 				return CommandResult{Stdout: "0\t0"}
 			}
 			return CommandResult{}
-		}})
+		}}
+		deps.Git = &execBridgeGitRunner{exec: deps.Exec}
 
 		agentTasks := map[string]TaskInfo{
 			"spark": {ID: "T-123", Status: "in_progress"},
 		}
 
-		agents, _ := collectAgentStatus(agentTasks, "")
+		agents, _ := collectAgentStatusDeps(deps, agentTasks, "")
 
 		if len(agents) != 1 {
 			t.Fatalf("expected 1 agent, got %d", len(agents))
@@ -1308,6 +1337,7 @@ func TestCollectAgentStatus(t *testing.T) {
 	})
 
 	t.Run("ahead/behind counts from git", func(t *testing.T) {
+		deps, _, _, _, _ := NewTestDeps(t)
 		// Save and restore working directory
 		origDir, err := os.Getwd()
 		if err != nil {
@@ -1328,7 +1358,7 @@ func TestCollectAgentStatus(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+		deps.Exec = &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			if name == "git" && len(args) > 0 && args[0] == "branch" {
 				return CommandResult{Stdout: "flux"}
 			}
@@ -1340,9 +1370,10 @@ func TestCollectAgentStatus(t *testing.T) {
 				return CommandResult{Stdout: "3\t5"} // 3 behind, 5 ahead
 			}
 			return CommandResult{}
-		}})
+		}}
+		deps.Git = &execBridgeGitRunner{exec: deps.Exec}
 
-		agents, _ := collectAgentStatus(nil, "")
+		agents, _ := collectAgentStatusDeps(deps, nil, "")
 
 		if len(agents) != 1 {
 			t.Fatalf("expected 1 agent, got %d", len(agents))
@@ -1356,6 +1387,7 @@ func TestCollectAgentStatus(t *testing.T) {
 	})
 
 	t.Run("task conflict detection", func(t *testing.T) {
+		deps, _, _, _, _ := NewTestDeps(t)
 		// Save and restore working directory
 		origDir, err := os.Getwd()
 		if err != nil {
@@ -1388,7 +1420,7 @@ func TestCollectAgentStatus(t *testing.T) {
 			os.WriteFile(filepath.Join(wtDir, ".agent.lock"), lockData, 0644)
 		}
 
-		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+		deps.Exec = &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			if name == "git" && len(args) > 0 && args[0] == "branch" {
 				return CommandResult{Stdout: "test-branch"}
 			}
@@ -1403,9 +1435,10 @@ func TestCollectAgentStatus(t *testing.T) {
 				return CommandResult{Stdout: `[{"title":"Test Task","status":"in_progress"}]`}
 			}
 			return CommandResult{}
-		}})
+		}}
+		deps.Git = &execBridgeGitRunner{exec: deps.Exec}
 
-		_, taskIDToAgents := collectAgentStatus(nil, "")
+		_, taskIDToAgents := collectAgentStatusDeps(deps, nil, "")
 
 		if len(taskIDToAgents["T-conflict"]) != 2 {
 			t.Errorf("expected 2 agents claiming same task, got %d", len(taskIDToAgents["T-conflict"]))
@@ -1414,6 +1447,8 @@ func TestCollectAgentStatus(t *testing.T) {
 }
 
 func TestCollectMonitorData(t *testing.T) {
+	// not parallel: uses os.Chdir, defaultResolver global
+	deps, _, _, _, _ := NewTestDeps(t)
 	// Save and restore working directory
 	origDir, err := os.Getwd()
 	if err != nil {
@@ -1434,7 +1469,7 @@ func TestCollectMonitorData(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+	deps.Exec = &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		if name == "git" && len(args) > 0 && args[0] == "branch" {
 			return CommandResult{Stdout: "test-agent"}
 		}
@@ -1445,7 +1480,8 @@ func TestCollectMonitorData(t *testing.T) {
 			return CommandResult{Stdout: "0\t0"}
 		}
 		return CommandResult{}
-	}})
+	}}
+	deps.Git = &execBridgeGitRunner{exec: deps.Exec}
 
 	mock := NewMockTracker()
 	mock.ReadyResult = []BdIssue{
@@ -1462,10 +1498,9 @@ func TestCollectMonitorData(t *testing.T) {
 		TombstoneIssues  int `json:"tombstone_issues"`
 		PinnedIssues     int `json:"pinned_issues"`
 	}{TotalIssues: 10, OpenIssues: 3, ClosedIssues: 7}}
-	setDefaultTracker(mock)
-	t.Cleanup(func() { resetDefaultTracker() })
+	deps.Tracker = mock
 
-	data := collectMonitorData(100, "")
+	data := collectMonitorDataDeps(deps, 100, "")
 
 	// Verify all sections populated
 	if data.Timestamp.IsZero() {
@@ -1505,6 +1540,7 @@ func TestCollectMonitorData(t *testing.T) {
 // ===========================================================================
 
 func TestCollectMonitorDataExported(t *testing.T) {
+	// not parallel: uses os.Chdir, defaultResolver, installExecMock, setDefaultTracker
 	origDir, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -1566,6 +1602,7 @@ func TestCollectMonitorDataExported(t *testing.T) {
 }
 
 func TestCollectAgentStatusOnlyExported(t *testing.T) {
+	// not parallel: uses os.Chdir, defaultResolver, installExecMock
 	origDir, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -1614,6 +1651,7 @@ func TestCollectAgentStatusOnlyExported(t *testing.T) {
 // counts bd-blocked issues. Issues returned by bd ready are trusted as unblocked
 // (no redundant HasUnclosedBlockers re-pass in the monitor).
 func TestBacklogAccumulatesReadyWithBlockersAndBlocked(t *testing.T) {
+	// not parallel: uses os.Chdir, defaultResolver, installExecMock, setDefaultTracker
 	origDir, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -1694,6 +1732,7 @@ func TestBacklogAccumulatesReadyWithBlockersAndBlocked(t *testing.T) {
 // TestEpicsExcludedFromWorkQueueAndStats verifies that epic issues from bd ready
 // are counted separately and excluded from both work queue categories and Remaining/Total.
 func TestEpicsExcludedFromWorkQueueAndStats(t *testing.T) {
+	// not parallel: uses os.Chdir, defaultResolver, installExecMock, setDefaultTracker
 	origDir, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -1772,6 +1811,7 @@ func TestEpicsExcludedFromWorkQueueAndStats(t *testing.T) {
 // work queue categories (NeedsPlanning + ReadyToImplement + NeedReview +
 // InProgress + Backlog), not the bd stats subtraction.
 func TestRemainingDerivedFromWorkQueue(t *testing.T) {
+	// not parallel: uses os.Chdir, defaultResolver, installExecMock, setDefaultTracker
 	origDir, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -1876,6 +1916,7 @@ func TestRemainingDerivedFromWorkQueue(t *testing.T) {
 }
 
 func TestRunMonitorOneShot(t *testing.T) {
+	// not parallel: uses os.Chdir, defaultResolver, installExecMock, setDefaultTracker, monitorNoWatch global, os.Stdout capture
 	origDir, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -1940,6 +1981,7 @@ func TestRunMonitorOneShot(t *testing.T) {
 }
 
 func TestRenderDashboardEmptyData(t *testing.T) {
+	t.Parallel()
 	data := &MonitorData{
 		Timestamp:     fixedTime(),
 		Agents:        nil,
@@ -1970,6 +2012,7 @@ func TestRenderDashboardEmptyData(t *testing.T) {
 }
 
 func TestRenderDashboardWithData(t *testing.T) {
+	t.Parallel()
 	data := &MonitorData{
 		Timestamp: fixedTime(),
 		Agents: []AgentStatus{
@@ -2085,6 +2128,7 @@ func TestRenderDashboardWithData(t *testing.T) {
 }
 
 func TestRenderBoxLineLongContent(t *testing.T) {
+	t.Parallel()
 	// Content longer than dashboardWidth - 4 should not cause negative padding
 	longContent := strings.Repeat("x", dashboardWidth+10)
 	result := renderBoxLine(longContent)
@@ -2102,6 +2146,7 @@ func TestRenderBoxLineLongContent(t *testing.T) {
 }
 
 func TestRenderBoxLineEmptyContent(t *testing.T) {
+	t.Parallel()
 	result := renderBoxLine("")
 
 	if !strings.HasPrefix(result, "║ ") {
@@ -2116,6 +2161,7 @@ func TestRenderBoxLineEmptyContent(t *testing.T) {
 }
 
 func TestRenderTaskLineAlignment(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		task TaskInfo
@@ -2163,6 +2209,7 @@ func TestRenderTaskLineAlignment(t *testing.T) {
 }
 
 func TestRenderAgentLineAlignment(t *testing.T) {
+	t.Parallel()
 	agents := []AgentStatus{
 		{Name: "comet", Branch: "comet", Status: "● 1 changes"},
 		{Name: "spark", Branch: "spark", Status: "ready", Ahead: 2, Behind: 1},
@@ -2185,6 +2232,7 @@ func TestRenderAgentLineAlignment(t *testing.T) {
 }
 
 func TestGetWorktreeGitSyncStatusError(t *testing.T) {
+	// not parallel: uses installExecMock
 	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{Err: fmt.Errorf("git failed")}
 	}})
@@ -2196,6 +2244,7 @@ func TestGetWorktreeGitSyncStatusError(t *testing.T) {
 }
 
 func TestGetWorktreeGitSyncStatusMalformed(t *testing.T) {
+	// not parallel: uses installExecMock
 	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{Stdout: "not-a-number"}
 	}})
@@ -2207,6 +2256,7 @@ func TestGetWorktreeGitSyncStatusMalformed(t *testing.T) {
 }
 
 func TestGetWorktreeGitSyncStatusCustomBranch(t *testing.T) {
+	// not parallel: uses installExecMock
 	var capturedArgs []string
 	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		capturedArgs = args
@@ -2232,6 +2282,7 @@ func TestGetWorktreeGitSyncStatusCustomBranch(t *testing.T) {
 }
 
 func TestCollectAgentStatusLockFallback(t *testing.T) {
+	// not parallel: subtests use os.Chdir, defaultResolver, installExecMock, setDefaultTracker
 	tests := []struct {
 		name         string
 		lockCommand  string // "plan" or "task"
@@ -2341,6 +2392,7 @@ func TestCollectAgentStatusLockFallback(t *testing.T) {
 }
 
 func TestRenderDashboardSyncGitPushOnly(t *testing.T) {
+	t.Parallel()
 	data := &MonitorData{
 		Timestamp:     fixedTime(),
 		AgentTasks:    make(map[string]TaskInfo),
@@ -2362,6 +2414,7 @@ func TestRenderDashboardSyncGitPushOnly(t *testing.T) {
 }
 
 func TestRenderDashboardSyncGitPullOnly(t *testing.T) {
+	t.Parallel()
 	data := &MonitorData{
 		Timestamp:     fixedTime(),
 		AgentTasks:    make(map[string]TaskInfo),
@@ -2383,6 +2436,7 @@ func TestRenderDashboardSyncGitPullOnly(t *testing.T) {
 }
 
 func TestRenderDashboardAgentStatusIcons(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		status   string
@@ -2426,6 +2480,7 @@ func fixedTime() time.Time {
 // Note: mustJSON helper is defined in automode_test.go and available here
 
 func TestRenderDashboardWorkspaceMode(t *testing.T) {
+	t.Parallel()
 	data := &MonitorData{
 		Timestamp: fixedTime(),
 		Agents: []AgentStatus{
@@ -2476,6 +2531,7 @@ func TestRenderDashboardWorkspaceMode(t *testing.T) {
 }
 
 func TestRenderDashboardMixedWorkspace(t *testing.T) {
+	t.Parallel()
 	// Agents with empty Workspace get grouped under "(legacy)"
 	data := &MonitorData{
 		Timestamp: fixedTime(),
@@ -2516,6 +2572,7 @@ func TestRenderDashboardMixedWorkspace(t *testing.T) {
 }
 
 func TestRenderDashboardLegacyModeNoWorkspace(t *testing.T) {
+	t.Parallel()
 	// When no agents have Workspace set, should NOT show workspace headers
 	data := &MonitorData{
 		Timestamp: fixedTime(),
@@ -2547,6 +2604,7 @@ func TestRenderDashboardLegacyModeNoWorkspace(t *testing.T) {
 }
 
 func TestAgentStatusWorkspaceField(t *testing.T) {
+	t.Parallel()
 	// Verify Workspace field in AgentStatus JSON serialization
 	agent := AgentStatus{
 		Name:      "falcon",
@@ -2615,6 +2673,7 @@ func TestAgentStatusWorkspaceField(t *testing.T) {
 }
 
 func TestRenderAgentsWorkspace(t *testing.T) {
+	t.Parallel()
 	agents := []AgentStatus{
 		{Name: "alpha", Branch: "alpha", Status: "ready", Workspace: "ws-a"},
 		{Name: "beta", Branch: "beta", Status: "working: T-1 (3m)", Workspace: "ws-a"},
@@ -2665,6 +2724,7 @@ func TestRenderAgentsWorkspace(t *testing.T) {
 }
 
 func TestRenderAgentsLegacy(t *testing.T) {
+	t.Parallel()
 	agents := []AgentStatus{
 		{Name: "alpha", Branch: "alpha", Status: "ready"},
 		{Name: "beta", Branch: "beta", Status: "3 changes"},
@@ -2688,6 +2748,7 @@ func TestRenderAgentsLegacy(t *testing.T) {
 }
 
 func TestRenderAgentLine(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name           string
 		agent          AgentStatus
@@ -2730,6 +2791,7 @@ func TestRenderAgentLine(t *testing.T) {
 }
 
 func TestRenderDashboardWithDaemonManagedAgents(t *testing.T) {
+	t.Parallel()
 	data := &MonitorData{
 		Timestamp: fixedTime(),
 		Agents: []AgentStatus{
@@ -2769,6 +2831,7 @@ func TestRenderDashboardWithDaemonManagedAgents(t *testing.T) {
 // TestCollectTaskStatusReadyCommandArgs tests limit=100 (monitor default);
 // this test covers limit=50 (serve default).
 func TestCollectTaskStatusReadyLimitParam(t *testing.T) {
+	// not parallel: uses setDefaultTracker
 	mock := NewMockTracker()
 	var capturedOpts ReadyOpts
 	mock.ReadyFunc = func(_ context.Context, opts ReadyOpts) ([]BdIssue, error) {
@@ -2792,6 +2855,7 @@ func TestCollectTaskStatusReadyLimitParam(t *testing.T) {
 // collectReadyTasksByPriority passes the readyLimit parameter through to
 // Ready() (limit=50, matching the serve use case).
 func TestCollectReadyTasksByPriorityReadyLimitParam(t *testing.T) {
+	// not parallel: uses setDefaultTracker
 	mock := NewMockTracker()
 	var capturedOpts ReadyOpts
 	mock.ReadyFunc = func(_ context.Context, opts ReadyOpts) ([]BdIssue, error) {
@@ -2821,6 +2885,7 @@ func TestCollectReadyTasksByPriorityReadyLimitParam(t *testing.T) {
 }
 
 func TestBdIssueUnmarshalDependencies(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		jsonInput   string
@@ -2942,6 +3007,7 @@ func TestBdIssueUnmarshalDependencies(t *testing.T) {
 }
 
 func TestBdIssueUnmarshalDependenciesRoundTrip(t *testing.T) {
+	t.Parallel()
 	// Verify that marshaling and unmarshaling a BdIssue with dependencies preserves data
 	original := BdIssue{
 		ID:        "T-10",
@@ -2997,6 +3063,7 @@ func TestBdIssueUnmarshalDependenciesRoundTrip(t *testing.T) {
 // TestCompleteSyncStatusDetails tests that completeSyncStatus populates
 // GitPushDetails and GitPullDetails from agent Ahead/Behind counts.
 func TestCompleteSyncStatusDetails(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name            string
 		agents          []AgentStatus

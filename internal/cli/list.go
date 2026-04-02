@@ -109,7 +109,7 @@ func renderListWorkspace(worktrees []WorktreeInfo) {
 	fmt.Printf("Default branch: %s\n", GetDefaultBranchForWorktrees(worktrees))
 }
 
-func getWorktreeListStatus(wt WorktreeInfo) string {
+func getWorktreeListStatusDeps(deps *Deps, wt WorktreeInfo) string {
 	// Check for running agent first (highest priority)
 	lockStatus := GetLockStatus(wt.Path)
 	if lockStatus != "" {
@@ -117,14 +117,14 @@ func getWorktreeListStatus(wt WorktreeInfo) string {
 	}
 
 	// Check if working tree is clean
-	clean, _ := IsCleanWorkingTree(wt.Path)
+	clean, _ := isCleanWorkingTreeDeps(deps, wt.Path)
 	status := "✓ ready"
 	if !clean {
 		status = "● dirty"
 	}
 
 	// Check for uncommitted changes count
-	changes := getUncommittedChangesCount(wt.Path)
+	changes := getUncommittedChangesCountDeps(deps, wt.Path)
 	if changes > 0 {
 		status = fmt.Sprintf("● %d changes", changes)
 	}
@@ -132,8 +132,12 @@ func getWorktreeListStatus(wt WorktreeInfo) string {
 	return status
 }
 
-func getUncommittedChangesCount(path string) int {
-	output, err := RunGitCommand(path, "status", "--porcelain")
+func getWorktreeListStatus(wt WorktreeInfo) string {
+	return getWorktreeListStatusDeps(defaultDeps, wt)
+}
+
+func getUncommittedChangesCountDeps(deps *Deps, path string) int {
+	output, err := runGit(deps, path, "status", "--porcelain")
 	if err != nil {
 		return 0
 	}
@@ -142,4 +146,8 @@ func getUncommittedChangesCount(path string) int {
 		return 0
 	}
 	return len(lines)
+}
+
+func getUncommittedChangesCount(path string) int {
+	return getUncommittedChangesCountDeps(defaultDeps, path)
 }

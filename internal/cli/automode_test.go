@@ -295,6 +295,7 @@ func TestHasAvailableImplementationTasks(t *testing.T) {
 }
 
 func TestAutoModeOptions(t *testing.T) {
+	t.Parallel()
 	opts := AutoModeOptions{
 		Interval:     60,
 		MaxTasks:     10,
@@ -321,6 +322,7 @@ func TestAutoModeOptions(t *testing.T) {
 }
 
 func TestFormatLimit(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		limit int
 		want  string
@@ -341,6 +343,7 @@ func TestFormatLimit(t *testing.T) {
 }
 
 func TestFormatTimeout(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		timeout int
 		want    string
@@ -413,6 +416,7 @@ func TestSetupSignalHandler_StopsSignalDelivery(t *testing.T) {
 }
 
 func TestInterruptibleSleep_CompletesNormally(t *testing.T) {
+	t.Parallel()
 	shutdown := make(chan struct{})
 
 	start := time.Now()
@@ -428,6 +432,7 @@ func TestInterruptibleSleep_CompletesNormally(t *testing.T) {
 }
 
 func TestInterruptibleSleep_InterruptedByShutdown(t *testing.T) {
+	t.Parallel()
 	shutdown := make(chan struct{})
 
 	// Close shutdown after a short delay
@@ -449,6 +454,7 @@ func TestInterruptibleSleep_InterruptedByShutdown(t *testing.T) {
 }
 
 func TestInterruptibleSleep_AlreadyClosedChannel(t *testing.T) {
+	t.Parallel()
 	shutdown := make(chan struct{})
 	close(shutdown) // Already closed
 
@@ -465,6 +471,7 @@ func TestInterruptibleSleep_AlreadyClosedChannel(t *testing.T) {
 }
 
 func TestClosedChannelPattern_MultipleReceivers(t *testing.T) {
+	t.Parallel()
 	// Verify that closing a channel unblocks multiple receivers (the core pattern we're using)
 	shutdown := make(chan struct{})
 
@@ -507,6 +514,7 @@ func mustJSON(v interface{}) string {
 }
 
 func TestShellQuote(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 		want  string
@@ -707,6 +715,7 @@ func TestRunAutoModeTmux_MaxTasksZero(t *testing.T) {
 }
 
 func TestAdaptivePoller_Creation(t *testing.T) {
+	t.Parallel()
 	p := newAdaptivePoller()
 
 	if p.minInterval != 100*time.Millisecond {
@@ -724,6 +733,7 @@ func TestAdaptivePoller_Creation(t *testing.T) {
 }
 
 func TestAdaptivePoller_BackoffBehavior(t *testing.T) {
+	t.Parallel()
 	p := newAdaptivePoller()
 
 	// Start at 200ms
@@ -763,6 +773,7 @@ func TestAdaptivePoller_BackoffBehavior(t *testing.T) {
 }
 
 func TestAdaptivePoller_ResetOnActivity(t *testing.T) {
+	t.Parallel()
 	p := newAdaptivePoller()
 
 	// Back off a few times
@@ -782,6 +793,7 @@ func TestAdaptivePoller_ResetOnActivity(t *testing.T) {
 }
 
 func TestAdaptivePoller_Tick(t *testing.T) {
+	t.Parallel()
 	p := newAdaptivePoller()
 	p.currentInterval = 10 * time.Millisecond // Short for test
 
@@ -795,6 +807,7 @@ func TestAdaptivePoller_Tick(t *testing.T) {
 }
 
 func TestGetPaneState_NonExistentSession(t *testing.T) {
+	t.Parallel()
 	_, err := getPaneState("nonexistent-test-session-12345")
 	if err == nil {
 		t.Error("expected error for non-existent session")
@@ -802,6 +815,7 @@ func TestGetPaneState_NonExistentSession(t *testing.T) {
 }
 
 func TestPaneState_Fields(t *testing.T) {
+	t.Parallel()
 	// Test that PaneState struct has expected fields
 	state := &PaneState{
 		Dead:       true,
@@ -825,6 +839,7 @@ func TestPaneState_Fields(t *testing.T) {
 }
 
 func TestStreamRemainingLogContent_ReadsNewContent(t *testing.T) {
+	t.Parallel()
 	// Create temp log file with content
 	tmpFile, err := os.CreateTemp("", "loom-test-*.log")
 	if err != nil {
@@ -849,6 +864,7 @@ func TestStreamRemainingLogContent_ReadsNewContent(t *testing.T) {
 }
 
 func TestStreamRemainingLogContent_SkipsAlreadyReadContent(t *testing.T) {
+	t.Parallel()
 	// Create temp log file with content
 	tmpFile, err := os.CreateTemp("", "loom-test-*.log")
 	if err != nil {
@@ -873,6 +889,7 @@ func TestStreamRemainingLogContent_SkipsAlreadyReadContent(t *testing.T) {
 }
 
 func TestStreamRemainingLogContent_HandlesNonExistentFile(t *testing.T) {
+	t.Parallel()
 	// Should not panic for non-existent file
 	var offset int64 = 0
 	streamRemainingLogContent("/nonexistent/path/to/file.log", &offset)
@@ -884,6 +901,7 @@ func TestStreamRemainingLogContent_HandlesNonExistentFile(t *testing.T) {
 }
 
 func TestStreamRemainingLogContent_ReadsIncrementalContent(t *testing.T) {
+	t.Parallel()
 	// Create temp log file
 	tmpFile, err := os.CreateTemp("", "loom-test-*.log")
 	if err != nil {
@@ -922,6 +940,7 @@ func TestStreamRemainingLogContent_ReadsIncrementalContent(t *testing.T) {
 }
 
 func TestFilterFocusEscapes(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input []byte
@@ -990,6 +1009,7 @@ func TestFilterFocusEscapes(t *testing.T) {
 }
 
 func TestStreamUntilExit_StartsFromCurrentFileSize(t *testing.T) {
+	t.Parallel()
 	// This tests the principle that we should start from current file size
 	// to avoid replaying old content from previous sessions.
 	// The actual streamUntilExit function is tested via e2e tests.
@@ -1053,6 +1073,7 @@ func TestStreamUntilExit_StartsFromCurrentFileSize(t *testing.T) {
 }
 
 func TestStreamUntilExit_HandlesNonExistentFile(t *testing.T) {
+	t.Parallel()
 	// When log file doesn't exist yet, offset should start at 0
 	nonExistentFile := "/tmp/loom-nonexistent-test-file-12345.log"
 
@@ -1072,6 +1093,7 @@ func TestStreamUntilExit_HandlesNonExistentFile(t *testing.T) {
 // ============================================================================
 
 func TestAgentClaimedTask_WithTaskID(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 
 	err := AcquireLock(tmpDir, "plan", "falcon")
@@ -1092,6 +1114,7 @@ func TestAgentClaimedTask_WithTaskID(t *testing.T) {
 }
 
 func TestAgentClaimedTask_WithoutTaskID(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 
 	err := AcquireLock(tmpDir, "plan", "falcon")
@@ -1107,6 +1130,7 @@ func TestAgentClaimedTask_WithoutTaskID(t *testing.T) {
 }
 
 func TestAgentClaimedTask_NoLockFile(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 
 	// No lock file — daemon never ran or failed before writing lock. No progress.
@@ -1116,6 +1140,7 @@ func TestAgentClaimedTask_NoLockFile(t *testing.T) {
 }
 
 func TestAgentClaimedTask_AfterClear(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 
 	err := AcquireLock(tmpDir, "plan", "falcon")
@@ -1134,6 +1159,7 @@ func TestAgentClaimedTask_AfterClear(t *testing.T) {
 }
 
 func TestAgentClaimedTask_ClearThenReclaim(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 
 	err := AcquireLock(tmpDir, "plan", "falcon")
@@ -1171,6 +1197,7 @@ func TestAgentClaimedTask_ClearThenReclaim(t *testing.T) {
 // a task (e.g. no plannable tasks found). The lock file should remain on disk
 // with an empty TaskID so the parent correctly detects no progress.
 func TestTmuxCycle_DaemonExitsWithoutClaimingTask(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 
 	// Parent removes any old lock (start of cycle)
@@ -1203,6 +1230,7 @@ func TestTmuxCycle_DaemonExitsWithoutClaimingTask(t *testing.T) {
 // Simulates the tmux auto mode cycle where the daemon claims a task.
 // The lock file should remain with a TaskID so the parent detects progress.
 func TestTmuxCycle_DaemonClaimsTask(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 
 	// Parent removes any old lock (start of cycle)
@@ -1248,6 +1276,7 @@ func TestTmuxCycle_DaemonClaimsTask(t *testing.T) {
 // Simulates consecutive no-progress cycles in tmux auto mode.
 // After 3 cycles where the daemon doesn't claim a task, auto mode should exit.
 func TestTmuxCycle_ConsecutiveNoProgress(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	lockPath := filepath.Join(tmpDir, LockFileName)
 	consecutiveNoProgress := 0
@@ -1283,6 +1312,7 @@ func TestTmuxCycle_ConsecutiveNoProgress(t *testing.T) {
 // Verifies that if the daemon crashes before even creating the lock file,
 // the parent correctly detects no progress (returns false, not true).
 func TestTmuxCycle_DaemonCrashesBeforeAcquiringLock(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 
 	// Parent removes old lock
@@ -1302,6 +1332,7 @@ func TestTmuxCycle_DaemonCrashesBeforeAcquiringLock(t *testing.T) {
 // ============================================================================
 
 func TestWorkspaceHash_Deterministic(t *testing.T) {
+	t.Parallel()
 	// Same input should always produce the same hash
 	hash1 := workspaceHash("/some/path")
 	hash2 := workspaceHash("/some/path")
@@ -1312,6 +1343,7 @@ func TestWorkspaceHash_Deterministic(t *testing.T) {
 }
 
 func TestWorkspaceHash_Length(t *testing.T) {
+	t.Parallel()
 	// Should return a 16-character hex string (8 bytes = 16 hex chars)
 	hash := workspaceHash("/some/path")
 
@@ -1329,6 +1361,7 @@ func TestWorkspaceHash_Length(t *testing.T) {
 }
 
 func TestWorkspaceHash_DifferentPaths(t *testing.T) {
+	t.Parallel()
 	// Different paths should produce different hashes
 	tests := []struct {
 		path1 string
@@ -1351,6 +1384,7 @@ func TestWorkspaceHash_DifferentPaths(t *testing.T) {
 }
 
 func TestWorkspaceHash_KnownValue(t *testing.T) {
+	t.Parallel()
 	// Verify against a pre-computed sha256 value to ensure the implementation
 	// matches: sha256("/some/path")[:8] hex-encoded
 	hash := workspaceHash("/some/path")
@@ -1362,6 +1396,7 @@ func TestWorkspaceHash_KnownValue(t *testing.T) {
 }
 
 func TestWorkspaceHash_EmptyString(t *testing.T) {
+	t.Parallel()
 	// Empty string should still produce a valid 16-char hex hash
 	hash := workspaceHash("")
 
@@ -1371,6 +1406,7 @@ func TestWorkspaceHash_EmptyString(t *testing.T) {
 }
 
 func TestStreamRemainingLogContent_HandlesLogTruncation(t *testing.T) {
+	t.Parallel()
 	// Create temp log file with initial content
 	tmpFile, err := os.CreateTemp("", "loom-test-*.log")
 	if err != nil {
