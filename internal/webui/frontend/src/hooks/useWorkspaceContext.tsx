@@ -2,7 +2,7 @@
  * useWorkspaceContext - React context for sharing workspace data across components.
  * Centralizes workspace state with workspace-level selection, repo-level filtering,
  * and localStorage persistence. This is THE canonical workspace hook.
- * Follows useAgentContext pattern.
+ * Context provider pattern for workspace data.
  *
  * T12 changes: accepts workspaceId prop from route params instead of reading
  * from localStorage/URL. Removed _ws URL param hack and full-page reload switching.

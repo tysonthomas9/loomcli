@@ -21,7 +21,7 @@ import styles from "./AgentActivityPanel.module.css";
  * Props for the AgentActivityPanel component.
  */
 export interface AgentActivityPanelProps {
-  /** Agent status data from useAgents */
+  /** Agent status data from agent store */
   agents: LoomAgentStatus[];
   /** Task info keyed by agent name (for titles) */
   agentTasks: Record<string, LoomTaskInfo>;

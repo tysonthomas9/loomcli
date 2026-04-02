@@ -1,9 +1,9 @@
 /**
  * useEventProvider - React context for a shared SSE connection with typed event subscription.
- * Consolidates multiple useSSE() calls into a single BeadsSSEClient instance per workspace,
+ * Consolidates SSE into a single BeadsSSEClient instance per workspace,
  * fanning out mutation events to subscribers via a ref-based registry.
  *
- * Follows useWorkspaceContext / useAgentContext pattern.
+ * Follows useWorkspaceContext pattern.
  */
 
 import {

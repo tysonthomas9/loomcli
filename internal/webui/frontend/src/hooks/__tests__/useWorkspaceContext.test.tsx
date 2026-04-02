@@ -4,7 +4,7 @@
 
 /**
  * Unit tests for useWorkspaceContext hook and WorkspaceProvider.
- * Follows useAgentContext test pattern: mock underlying hook, test provider and helpers.
+ * Mock underlying hook, test provider and helpers.
  *
  * T12 changes: WorkspaceProvider now requires workspaceId prop and uses useNavigate.
  */

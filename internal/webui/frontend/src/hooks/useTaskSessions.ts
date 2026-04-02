@@ -9,7 +9,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { getTaskSessions } from "../api/sessions";
 import type { MutationPayload } from "../api/sse";
 import type { SessionRecord } from "../types/session";
-import { useSSE } from "./useSSE";
+import { useEventSubscription } from "./useEventProvider";
 import { useWorkspaceContext } from "./useWorkspaceContext";
 
 /** Return type for the useTaskSessions hook. */
@@ -80,7 +80,9 @@ export function useTaskSessions(taskId: string | null): UseTaskSessionsResult {
     [taskId, fetchData],
   );
 
-  useSSE({ onMutation: handleMutation });
+  useEventSubscription(handleMutation, {
+    types: ["session_change"],
+  });
 
   useEffect(() => {
     mountedRef.current = true;
@@ -114,7 +116,6 @@ export function useTaskSessions(taskId: string | null): UseTaskSessionsResult {
       mountedRef.current = false;
       if (timer) clearTimeout(timer);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId, taskId, fetchData]);
 
   return { sessions, isLoading, error, refetch };

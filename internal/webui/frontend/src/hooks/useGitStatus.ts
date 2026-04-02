@@ -1,6 +1,6 @@
 /**
  * Hook for polling git status for an agent's worktree.
- * Follows the same polling pattern as useAgents.
+ * Follows a polling pattern with backoff.
  */
 
 import { useState, useEffect, useRef, useCallback } from "react";

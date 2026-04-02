@@ -2,7 +2,7 @@
  * React hook for transforming issue data into React Flow nodes and edges.
  *
  * This hook serves as the data transformation layer between the issue data
- * (from useIssues) and the graph visualization (React Flow). It extracts
+ * and the graph visualization (React Flow). It extracts
  * dependency relationships, computes counts, and creates properly typed
  * IssueNode and DependencyEdge objects.
  */
@@ -152,7 +152,7 @@ function shouldIncludeDependency(
  * @example
  * ```tsx
  * function DependencyGraph() {
- *   const { issues } = useIssues()
+ *   const issues = useStore(issueStore, s => s.issues)
  *   const { nodes, edges, totalDependencies } = useGraphData(issues)
  *
  *   return (

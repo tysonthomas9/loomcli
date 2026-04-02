@@ -16,13 +16,17 @@ import { SearchBar } from "@/components/TerminalView/SearchBar";
 import {
   useToast,
   ToastProvider,
-  AgentContext,
-  NO_AGENT_CONTEXT,
+  StoreContext,
+  NO_STORE_CONTEXT,
   WorkspaceContext,
   NO_WORKSPACE_CONTEXT,
 } from "@/hooks";
-import type { AgentContextValue } from "@/hooks";
 import type { WorkspaceContextValue } from "@/hooks";
+import {
+  createAgentStore,
+  INITIAL_STATE as AGENT_INITIAL,
+} from "@/stores/agentStore";
+import { createIssueStore } from "@/stores/issueStore";
 import type { IssueDetails, Priority, Issue } from "@/types";
 import type { Status } from "@/types/status";
 import { useState, useCallback } from "react";
@@ -429,12 +433,12 @@ export function SearchBarFixture(): JSX.Element {
 // ---------------------------------------------------------------------------
 export function AgentsSidebarFixture(): JSX.Element {
   const agents = readFixtureData("agents", []);
-  const tasks = readFixtureData("tasks", NO_AGENT_CONTEXT.tasks);
+  const tasks = readFixtureData("tasks", AGENT_INITIAL.tasks);
   const agentTasks = readFixtureData("agentTasks", {});
-  const taskLists = readFixtureData("taskLists", NO_AGENT_CONTEXT.taskLists);
+  const taskLists = readFixtureData("taskLists", AGENT_INITIAL.taskLists);
 
-  const agentContextValue: AgentContextValue = {
-    ...NO_AGENT_CONTEXT,
+  const agentStore = createAgentStore();
+  agentStore.setState({
     agents,
     tasks,
     agentTasks,
@@ -442,8 +446,12 @@ export function AgentsSidebarFixture(): JSX.Element {
     isConnected: true,
     connectionState: "connected",
     wasEverConnected: true,
-    getAgentByName: (name: string) =>
-      agents.find((a: { name: string }) => a.name === name),
+  });
+
+  const storeContextValue = {
+    ...NO_STORE_CONTEXT,
+    agentStore,
+    issueStore: createIssueStore(),
   };
 
   const wsContextValue: WorkspaceContextValue = {
@@ -453,11 +461,11 @@ export function AgentsSidebarFixture(): JSX.Element {
 
   return (
     <WorkspaceContext.Provider value={wsContextValue}>
-      <AgentContext.Provider value={agentContextValue}>
+      <StoreContext.Provider value={storeContextValue}>
         <div data-testid="fixture-root" style={FIXTURE_ROOT_STYLE}>
           <AgentsSidebar />
         </div>
-      </AgentContext.Provider>
+      </StoreContext.Provider>
     </WorkspaceContext.Provider>
   );
 }
@@ -468,19 +476,23 @@ export function AgentsSidebarFixture(): JSX.Element {
 // ---------------------------------------------------------------------------
 export function WorkspaceTreeFixture(): JSX.Element {
   const agents = readFixtureData("agents", []);
-  const tasks = readFixtureData("tasks", NO_AGENT_CONTEXT.tasks);
+  const tasks = readFixtureData("tasks", AGENT_INITIAL.tasks);
   const agentTasks = readFixtureData("agentTasks", {});
 
-  const agentContextValue: AgentContextValue = {
-    ...NO_AGENT_CONTEXT,
+  const agentStore = createAgentStore();
+  agentStore.setState({
     agents,
     tasks,
     agentTasks,
     isConnected: true,
     connectionState: "connected",
     wasEverConnected: true,
-    getAgentByName: (name: string) =>
-      agents.find((a: { name: string }) => a.name === name),
+  });
+
+  const storeContextValue = {
+    ...NO_STORE_CONTEXT,
+    agentStore,
+    issueStore: createIssueStore(),
   };
 
   const repos = readFixtureData("repos", []);
@@ -502,11 +514,11 @@ export function WorkspaceTreeFixture(): JSX.Element {
   return (
     <ToastProvider>
       <WorkspaceContext.Provider value={wsContextValue}>
-        <AgentContext.Provider value={agentContextValue}>
+        <StoreContext.Provider value={storeContextValue}>
           <div data-testid="fixture-root" style={FIXTURE_ROOT_STYLE}>
             <WorkspaceTree />
           </div>
-        </AgentContext.Provider>
+        </StoreContext.Provider>
       </WorkspaceContext.Provider>
     </ToastProvider>
   );

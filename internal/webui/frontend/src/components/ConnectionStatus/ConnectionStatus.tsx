@@ -11,7 +11,7 @@ import styles from "./ConnectionStatus.module.css";
  * Props for the ConnectionStatus component.
  */
 export interface ConnectionStatusProps {
-  /** Current connection state from useSSE */
+  /** Current connection state */
   state: ConnectionState;
   /** Additional CSS class name */
   className?: string;
@@ -21,7 +21,7 @@ export interface ConnectionStatusProps {
   compact?: boolean;
   /** Show status text (default: true) */
   showText?: boolean;
-  /** Current reconnect attempt count (from useSSE) */
+  /** Current reconnect attempt count */
   reconnectAttempts?: number;
   /** Callback when retry button is clicked */
   onRetry?: () => void;

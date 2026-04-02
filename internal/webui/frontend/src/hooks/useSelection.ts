@@ -96,7 +96,7 @@ export function useSelection(options: UseSelectionOptions): UseSelectionReturn {
     return new Set(initialSelection);
   });
 
-  // Store callback in ref to avoid stale closures (following useMutationHandler pattern)
+  // Store callback in ref to avoid stale closures
   const onSelectionChangeRef = useRef(onSelectionChange);
 
   // Update ref when callback changes

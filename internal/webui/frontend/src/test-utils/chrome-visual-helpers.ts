@@ -128,7 +128,7 @@ export const TIMING_EXPECTATIONS = {
   updateLatency: 200,
   /** Browser's EventSource reconnection delay (approximate) */
   browserReconnectDelayMs: 3000,
-  /** Initial application reconnect delay (for useSSE hook) */
+  /** Initial application reconnect delay */
   reconnectDelayMs: 1000,
   /** Maximum reconnect delay with backoff */
   maxReconnectDelayMs: 30000,

@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 
 import { listSessionsByIssue } from "@/api/terminal";
 import type { MutationPayload } from "@/api/sse";
-import { useSSE } from "@/hooks/useSSE";
+import { useEventSubscription } from "./useEventProvider";
 import { useWorkspaceContext } from "./useWorkspaceContext";
 
 export interface UseIssueSessionMapReturn {
@@ -77,7 +77,9 @@ export function useIssueSessionMap(): UseIssueSessionMapReturn {
     [fetchMap],
   );
 
-  useSSE({ onMutation: handleMutation });
+  useEventSubscription(handleMutation, {
+    types: ["terminal_session_change", "terminal_metadata"],
+  });
 
   return {
     issueSessionMap,
