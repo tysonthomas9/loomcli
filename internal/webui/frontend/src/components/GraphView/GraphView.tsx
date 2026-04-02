@@ -167,7 +167,7 @@ export interface GraphViewProps {
  * @example
  * ```tsx
  * function DependencyGraphPage() {
- *   const { issues } = useIssues();
+ *   const issues = useStore(issueStore, s => s.issues);
  *
  *   return (
  *     <GraphView

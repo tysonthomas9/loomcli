@@ -11,8 +11,8 @@ vi.mock("../../api/terminal", () => ({
   listSessionsByIssue: vi.fn(),
 }));
 
-vi.mock("../useSSE", () => ({
-  useSSE: vi.fn(),
+vi.mock("../useEventProvider", () => ({
+  useEventSubscription: vi.fn(),
 }));
 
 vi.mock("../useWorkspaceContext", () => ({

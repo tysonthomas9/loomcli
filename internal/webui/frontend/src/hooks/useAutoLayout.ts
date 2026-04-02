@@ -181,7 +181,7 @@ function getLayoutedNodes(
  * @example
  * ```tsx
  * function DependencyGraph() {
- *   const { issues } = useIssues()
+ *   const issues = useStore(issueStore, s => s.issues)
  *   const { nodes, edges } = useGraphData(issues)
  *   const { nodes: layoutedNodes, bounds } = useAutoLayout(nodes, edges)
  *

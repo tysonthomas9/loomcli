@@ -3,7 +3,7 @@
  * (issueStore, agentStore). Creates store instances once, mounts EventProvider
  * for SSE, and uses an internal StoreWiring child to connect stores ↔ EventProvider.
  *
- * Follows useWorkspaceContext / useAgentContext pattern.
+ * Follows useWorkspaceContext pattern.
  */
 
 import {

@@ -4,7 +4,7 @@
 
 /**
  * Unit tests for useWorkspace hook.
- * Follows useAgents test pattern: mock API, fake timers, test polling and error handling.
+ * Mock API, fake timers, test polling and error handling.
  */
 
 import { renderHook, act } from "@testing-library/react";

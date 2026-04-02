@@ -2,9 +2,6 @@
  * Hook barrel exports for the beads-web-ui frontend.
  */
 
-export { useSSE } from "./useSSE";
-export type { UseSSEOptions, UseSSEReturn } from "./useSSE";
-
 export { useDebounce } from "./useDebounce";
 
 export { useDebouncedCallback } from "./useDebouncedCallback";
@@ -29,12 +26,6 @@ export type {
   UseBlockedIssuesResult,
 } from "./useBlockedIssues";
 
-export { useMutationHandler } from "./useMutationHandler";
-export type {
-  UseMutationHandlerOptions,
-  UseMutationHandlerReturn,
-} from "./useMutationHandler";
-
 export {
   useFilterState,
   toQueryString,
@@ -54,9 +45,6 @@ export type { UseSelectionOptions, UseSelectionReturn } from "./useSelection";
 
 export { useBulkClose } from "./useBulkClose";
 export type { UseBulkCloseOptions, UseBulkCloseReturn } from "./useBulkClose";
-
-export { useIssues } from "./useIssues";
-export type { UseIssuesOptions, UseIssuesReturn } from "./useIssues";
 
 export { useGraphData } from "./useGraphData";
 export type { UseGraphDataOptions, UseGraphDataReturn } from "./useGraphData";
@@ -112,17 +100,6 @@ export type {
   UseInlineCreateOptions,
   UseInlineCreateReturn,
 } from "./useInlineCreate";
-
-export { useAgents } from "./useAgents";
-export type { UseAgentsOptions, UseAgentsResult } from "./useAgents";
-
-export {
-  AgentProvider,
-  useAgentContext,
-  AgentContext,
-  NO_AGENT_CONTEXT,
-} from "./useAgentContext";
-export type { AgentContextValue, AgentProviderProps } from "./useAgentContext";
 
 export {
   EventProvider,
