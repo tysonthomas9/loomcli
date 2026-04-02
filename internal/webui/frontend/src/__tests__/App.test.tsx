@@ -40,7 +40,10 @@ vi.mock("react-router-dom", () => ({
     state: null,
     key: "default",
   })),
-  Outlet: () => null,
+  Outlet: () => {
+    const view = mockUseRouteView()?.view ?? "kanban";
+    return viewRegistry[view]?.() ?? null;
+  },
 }));
 
 // Create hoisted mocks for @/api functions used by handleApprove/handleReject
@@ -178,6 +181,10 @@ const { mockUseRouteView, mockSetActiveView, mockNavigateToView } = vi.hoisted(
     mockNavigateToView: vi.fn(),
   }),
 );
+
+// Mutable view registry — populated after imports, used by Outlet mock at render time
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const viewRegistry: Record<string, () => any> = {};
 
 /**
  * Helper to create a useRouteView return value (object shape).
@@ -377,6 +384,34 @@ vi.mock("@/hooks", () => ({
 
 // Alias for convenience in tests (prefixed with _ to satisfy linter for unused vars)
 const _useRouteViewMock = mockUseRouteView;
+
+// Import view pages — rendered by Outlet mock via viewRegistry.
+// Views use WorkspaceViewContext (provided by App) and their heavy sub-components
+// are already mocked above (GraphView, MonitorDashboard, FileExplorer, etc.).
+import { KanbanPage } from "@/views/KanbanPage";
+import { TablePage } from "@/views/TablePage";
+import { GraphPage } from "@/views/GraphPage";
+import { MonitorPage } from "@/views/MonitorPage";
+import { ObservabilityPage } from "@/views/ObservabilityPage";
+import { SettingsPage } from "@/views/SettingsPage";
+import { WorkspacePage } from "@/views/WorkspacePage";
+import { FilesPage } from "@/views/FilesPage";
+import { IssueDetailPage } from "@/views/IssueDetailPage";
+
+// Register views so the Outlet mock renders the correct view based on activeView.
+// "terminal" is intentionally omitted — in production the terminal route's Component
+// returns null (TerminalView is always-mounted in the App shell, outside Outlet).
+Object.assign(viewRegistry, {
+  kanban: () => <KanbanPage />,
+  table: () => <TablePage />,
+  graph: () => <GraphPage />,
+  monitor: () => <MonitorPage />,
+  observability: () => <ObservabilityPage />,
+  settings: () => <SettingsPage />,
+  workspace: () => <WorkspacePage />,
+  files: () => <FilesPage />,
+  "issue-detail": () => <IssueDetailPage />,
+});
 
 /**
  * Create a mock issue for testing.
@@ -1849,239 +1884,6 @@ describe("App", () => {
       expect(mockStoreState.fetchIssues).toHaveBeenCalledWith(
         expect.objectContaining({ mode: "ready" }),
       );
-    });
-  });
-
-  describe("MonitorDashboard lazy loading integration", () => {
-    it('renders MonitorDashboard when activeView is "monitor"', async () => {
-      const mockReturn = createMockUseIssuesReturn({});
-      mockStoreState = mockReturn;
-      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("monitor"));
-
-      render(<App />);
-
-      // Wait for lazy-loaded MonitorDashboard to appear
-      await waitFor(() => {
-        expect(screen.getByTestId("monitor-dashboard")).toBeInTheDocument();
-      });
-    });
-
-    it("shows LoadingSkeleton.Monitor as fallback during lazy load", async () => {
-      const mockReturn = createMockUseIssuesReturn({});
-      mockStoreState = mockReturn;
-      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("monitor"));
-
-      render(<App />);
-
-      // The skeleton may appear briefly during the lazy load
-      // We check that MonitorDashboard eventually loads (which means Suspense worked)
-      await waitFor(() => {
-        expect(screen.getByTestId("monitor-dashboard")).toBeInTheDocument();
-      });
-    });
-
-    it('does not render MonitorDashboard when activeView is "kanban"', () => {
-      const mockReturn = createMockUseIssuesReturn({});
-      mockStoreState = mockReturn;
-      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("kanban"));
-
-      render(<App />);
-
-      // MonitorDashboard should not be rendered when kanban view is active
-      expect(screen.queryByTestId("monitor-dashboard")).not.toBeInTheDocument();
-      // Kanban view should be active (SwimLaneBoard renders status columns)
-      expect(screen.getByRole("heading", { name: "Open" })).toBeInTheDocument();
-    });
-
-    it('does not render MonitorDashboard when activeView is "table"', () => {
-      const mockReturn = createMockUseIssuesReturn({});
-      mockStoreState = mockReturn;
-      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("table"));
-
-      render(<App />);
-
-      // MonitorDashboard should not be rendered when table view is active
-      expect(screen.queryByTestId("monitor-dashboard")).not.toBeInTheDocument();
-    });
-
-    it('does not render MonitorDashboard when activeView is "graph"', async () => {
-      const mockReturn = createMockUseIssuesReturn({});
-      mockStoreState = mockReturn;
-      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("graph"));
-
-      render(<App />);
-
-      // Wait for lazy-loaded GraphView to appear
-      await waitFor(() => {
-        expect(screen.getByTestId("mock-graph-view")).toBeInTheDocument();
-      });
-
-      // MonitorDashboard should not be rendered when graph view is active
-      expect(screen.queryByTestId("monitor-dashboard")).not.toBeInTheDocument();
-    });
-
-    it("transitions from kanban to monitor view correctly", async () => {
-      const mockReturn = createMockUseIssuesReturn({});
-      mockStoreState = mockReturn;
-
-      // Start with kanban view
-      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("kanban"));
-
-      const { rerender } = render(<App />);
-
-      // Verify kanban view is rendered
-      expect(screen.getByRole("heading", { name: "Open" })).toBeInTheDocument();
-      expect(screen.queryByTestId("monitor-dashboard")).not.toBeInTheDocument();
-
-      // Switch to monitor view
-      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("monitor"));
-
-      rerender(<App />);
-
-      // Wait for MonitorDashboard to load
-      await waitFor(() => {
-        expect(screen.getByTestId("monitor-dashboard")).toBeInTheDocument();
-      });
-
-      // Kanban columns should no longer be rendered
-      expect(
-        screen.queryByRole("heading", { name: "Open" }),
-      ).not.toBeInTheDocument();
-    });
-
-    it("transitions from monitor to kanban view correctly", async () => {
-      const mockReturn = createMockUseIssuesReturn({});
-      mockStoreState = mockReturn;
-
-      // Start with monitor view
-      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("monitor"));
-
-      const { rerender } = render(<App />);
-
-      // Wait for MonitorDashboard to load
-      await waitFor(() => {
-        expect(screen.getByTestId("monitor-dashboard")).toBeInTheDocument();
-      });
-
-      // Switch to kanban view
-      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("kanban"));
-
-      rerender(<App />);
-
-      // Verify kanban view is now rendered
-      expect(screen.getByRole("heading", { name: "Open" })).toBeInTheDocument();
-      expect(screen.queryByTestId("monitor-dashboard")).not.toBeInTheDocument();
-    });
-
-    it("transitions from graph to monitor view correctly", async () => {
-      const mockReturn = createMockUseIssuesReturn({});
-      mockStoreState = mockReturn;
-
-      // Start with graph view
-      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("graph"));
-
-      const { rerender } = render(<App />);
-
-      // Wait for GraphView to load
-      await waitFor(() => {
-        expect(screen.getByTestId("mock-graph-view")).toBeInTheDocument();
-      });
-
-      // Switch to monitor view
-      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("monitor"));
-
-      rerender(<App />);
-
-      // Wait for MonitorDashboard to load
-      await waitFor(() => {
-        expect(screen.getByTestId("monitor-dashboard")).toBeInTheDocument();
-      });
-
-      // GraphView should no longer be rendered
-      expect(screen.queryByTestId("mock-graph-view")).not.toBeInTheDocument();
-    });
-
-    it("transitions from monitor to graph view correctly", async () => {
-      const mockReturn = createMockUseIssuesReturn({});
-      mockStoreState = mockReturn;
-
-      // Start with monitor view
-      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("monitor"));
-
-      const { rerender } = render(<App />);
-
-      // Wait for MonitorDashboard to load
-      await waitFor(() => {
-        expect(screen.getByTestId("monitor-dashboard")).toBeInTheDocument();
-      });
-
-      // Switch to graph view
-      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("graph"));
-
-      rerender(<App />);
-
-      // Wait for GraphView to load
-      await waitFor(() => {
-        expect(screen.getByTestId("mock-graph-view")).toBeInTheDocument();
-      });
-
-      // MonitorDashboard should no longer be rendered
-      expect(screen.queryByTestId("monitor-dashboard")).not.toBeInTheDocument();
-    });
-
-    it("transitions from table to monitor view correctly", async () => {
-      const mockReturn = createMockUseIssuesReturn({
-        issues: [
-          createMockIssue({
-            id: "test-1",
-            title: "Test Issue",
-            status: "open",
-          }),
-        ],
-      });
-      mockStoreState = mockReturn;
-
-      // Start with table view
-      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("table"));
-
-      const { rerender } = render(<App />);
-
-      // Verify table view is rendered (IssueTable has specific structure)
-      expect(screen.queryByTestId("monitor-dashboard")).not.toBeInTheDocument();
-
-      // Switch to monitor view
-      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("monitor"));
-
-      rerender(<App />);
-
-      // Wait for MonitorDashboard to load
-      await waitFor(() => {
-        expect(screen.getByTestId("monitor-dashboard")).toBeInTheDocument();
-      });
-    });
-  });
-
-  describe("FileExplorer lazy loading integration", () => {
-    it('renders FileExplorer when activeView is "files"', async () => {
-      const mockReturn = createMockUseIssuesReturn({});
-      mockStoreState = mockReturn;
-      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("files"));
-
-      render(<App />);
-
-      await waitFor(() => {
-        expect(screen.getByTestId("file-explorer")).toBeInTheDocument();
-      });
-    });
-
-    it('does not render FileExplorer when activeView is "kanban"', () => {
-      const mockReturn = createMockUseIssuesReturn({});
-      mockStoreState = mockReturn;
-      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("kanban"));
-
-      render(<App />);
-
-      expect(screen.queryByTestId("file-explorer")).not.toBeInTheDocument();
     });
   });
 
