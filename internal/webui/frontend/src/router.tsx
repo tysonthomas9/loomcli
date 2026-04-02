@@ -15,6 +15,7 @@ import App from "@/App";
 import { WorkspaceLayout } from "@/components/WorkspaceLayout";
 import { RedirectToWorkspace } from "@/components/RedirectToWorkspace";
 import { NotFound } from "@/components/NotFound";
+import { AuthBootstrap } from "@/components/AuthBootstrap";
 
 const devRoutes = import.meta.env.DEV
   ? [
@@ -44,26 +45,32 @@ const devRoutes = import.meta.env.DEV
 
 export const router = createBrowserRouter([
   {
-    path: "/",
-    element: <RedirectToWorkspace />,
-  },
-  {
-    path: "/ws/:workspaceId",
-    element: <WorkspaceLayout />,
+    // AuthBootstrap wraps all routes — discovers auth mode, provides context
+    element: <AuthBootstrap />,
     children: [
       {
-        index: true,
-        element: <App />,
+        path: "/",
+        element: <RedirectToWorkspace />,
       },
       {
-        path: "issues/:issueId",
-        element: <App />,
+        path: "/ws/:workspaceId",
+        element: <WorkspaceLayout />,
+        children: [
+          {
+            index: true,
+            element: <App />,
+          },
+          {
+            path: "issues/:issueId",
+            element: <App />,
+          },
+        ],
+      },
+      ...devRoutes,
+      {
+        path: "*",
+        element: <NotFound />,
       },
     ],
-  },
-  ...devRoutes,
-  {
-    path: "*",
-    element: <NotFound />,
   },
 ]);
