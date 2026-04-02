@@ -6,42 +6,42 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 )
 
-// setupRoutes configures all HTTP routes for the server.
-// Handler fields must be populated by buildHandlers before calling this method.
-func (app *Server) setupRoutes(mux *http.ServeMux) {
+// registerRoutes maps URL patterns to pre-built handler fields on the Server.
+// Called from NewServer after buildHandlers().
+func (app *Server) registerRoutes() {
 	// Health check endpoint for load balancers and monitoring
-	mux.HandleFunc("GET /health", app.healthHandler)
+	app.mux.HandleFunc("GET /health", app.healthHandler)
 
 	// API health endpoint that reports daemon connection status
-	mux.HandleFunc("GET /api/health", app.apiHealthHandler)
+	app.mux.HandleFunc("GET /api/health", app.apiHealthHandler)
 
 	// Client-side error reporting endpoint (has its own per-IP rate limiter, 10 req/min/IP)
-	mux.HandleFunc("POST /api/client-errors", app.clientErrorsHandler)
+	app.mux.HandleFunc("POST /api/client-errors", app.clientErrorsHandler)
 
 	// CSP violation reporting endpoint (has its own per-IP rate limiter, 60 req/min/IP)
-	mux.HandleFunc("POST /api/csp-report", app.cspReportHandler)
+	app.mux.HandleFunc("POST /api/csp-report", app.cspReportHandler)
 
 	// Auth mode discovery endpoint (public, rate-limited — called once per page load).
-	mux.HandleFunc("GET /api/config", app.authConfigHandler)
+	app.mux.HandleFunc("GET /api/config", app.authConfigHandler)
 
 	// Stats endpoint for project statistics (workspace-aware when multiPool available)
-	mux.HandleFunc("GET /api/stats", app.statsHandler)
+	app.mux.HandleFunc("GET /api/stats", app.statsHandler)
 
 	// SSE hub metrics endpoint
-	mux.HandleFunc("GET /api/metrics", app.metricsHandler)
+	app.mux.HandleFunc("GET /api/metrics", app.metricsHandler)
 
 	// Daemon status endpoint - exposes daemon configuration (auto-commit, auto-push, etc.)
-	mux.HandleFunc("GET /api/daemon/status", app.daemonStatusHandler)
+	app.mux.HandleFunc("GET /api/daemon/status", app.daemonStatusHandler)
 
 	// Backend configuration endpoints
-	mux.HandleFunc("GET /api/config/backend", app.getBackendConfigHandler)
-	mux.HandleFunc("PATCH /api/config/backend", app.patchBackendConfigHandler)
+	app.mux.HandleFunc("GET /api/config/backend", app.getBackendConfigHandler)
+	app.mux.HandleFunc("PATCH /api/config/backend", app.patchBackendConfigHandler)
 
 	// Workspace CRUD endpoints are registered in registerWorkspaceRoutes below.
 
 	// Backend health endpoint
 	if app.getBackendsHealthHandler != nil {
-		mux.HandleFunc("GET /api/backends", app.getBackendsHealthHandler)
+		app.mux.HandleFunc("GET /api/backends", app.getBackendsHealthHandler)
 	}
 
 	// Fleet endpoints: workspace-scoped routes only (flat routes removed).
@@ -51,55 +51,55 @@ func (app *Server) setupRoutes(mux *http.ServeMux) {
 
 	// Loom proxy for agent status endpoints (same-origin to avoid CORS/CSP issues)
 	if app.loomProxy != nil {
-		mux.Handle("/api/loom/", app.loomProxy)
+		app.mux.Handle("/api/loom/", app.loomProxy)
 	}
 
 	// Terminal endpoints: workspace-scoped routes only (flat routes removed).
 	// All terminal routes are registered in registerWorkspaceRoutes below.
 
 	// Editor endpoints for external editor detection and launch
-	mux.HandleFunc("GET /api/editors", app.listEditorsHandler)
-	mux.HandleFunc("POST /api/editors/open", app.openEditorHandler)
+	app.mux.HandleFunc("GET /api/editors", app.listEditorsHandler)
+	app.mux.HandleFunc("POST /api/editors/open", app.openEditorHandler)
 
 	// Session change notification endpoint for local agents to push SSE events
 	if app.notifySessionChangeHandler != nil {
-		mux.HandleFunc("POST /api/sessions/notify", app.notifySessionChangeHandler)
+		app.mux.HandleFunc("POST /api/sessions/notify", app.notifySessionChangeHandler)
 	}
 
 	// Workspace management and workspace-scoped API routes
 	if app.multiPool != nil {
-		app.registerWorkspaceRoutes(mux)
+		app.registerWorkspaceRoutes()
 	}
 
 	// Static file serving with SPA routing (must be last - catches all paths)
-	mux.Handle("/", app.frontendH)
+	app.mux.Handle("/", app.frontendH)
 }
 
 // registerWorkspaceRoutes sets up workspace listing, CRUD, and workspace-scoped API routes.
-func (app *Server) registerWorkspaceRoutes(mux *http.ServeMux) { //nolint:funlen // route registration function
+func (app *Server) registerWorkspaceRoutes() { //nolint:funlen // route registration function
 	workspaceConfigFn := app.config.WorkspaceConfigFn
 	workspaceConfigByIDFn := app.config.WorkspaceConfigByIDFn
 
 	// Active workspace endpoint — returns full topology for the default workspace
-	mux.HandleFunc("GET /api/workspaces/active", handleActiveWorkspace(workspaceConfigFn))
+	app.mux.HandleFunc("GET /api/workspaces/active", handleActiveWorkspace(workspaceConfigFn))
 
 	// Workspace listing (not workspace-scoped themselves)
-	mux.HandleFunc("GET /api/workspaces", handleListWorkspaces(app.multiPool, workspaceConfigFn))
-	mux.HandleFunc("GET /api/workspaces/{ws}", handleGetWorkspace(app.wsExistsFn, workspaceConfigByIDFn))
+	app.mux.HandleFunc("GET /api/workspaces", handleListWorkspaces(app.multiPool, workspaceConfigFn))
+	app.mux.HandleFunc("GET /api/workspaces/{ws}", handleGetWorkspace(app.wsExistsFn, workspaceConfigByIDFn))
 
 	// Global workspace CRUD operations (no WorkspaceMiddleware)
-	mux.HandleFunc("POST /api/workspaces", handleWorkspaceCreate(app.wrappedCreateFn, workspaceConfigFn, app.jobStore))
+	app.mux.HandleFunc("POST /api/workspaces", handleWorkspaceCreate(app.wrappedCreateFn, workspaceConfigFn, app.jobStore))
 
 	// Workspace job polling endpoint (literal "jobs" segment wins over {ws} wildcard)
-	mux.HandleFunc("GET /api/workspaces/jobs/{id}", handleGetWorkspaceJob(app.jobStore))
-	mux.HandleFunc("PUT /api/workspaces/order", handleWorkspaceReorder(workspaceConfigFn))
-	mux.HandleFunc("PUT /api/workspaces/default", handleSetDefaultWorkspace(app.config.SetDefaultWorkspaceFn, workspaceConfigFn))
-	mux.HandleFunc("DELETE /api/workspaces/default", handleClearDefaultWorkspace(app.config.ClearDefaultWorkspaceFn, workspaceConfigFn))
+	app.mux.HandleFunc("GET /api/workspaces/jobs/{id}", handleGetWorkspaceJob(app.jobStore))
+	app.mux.HandleFunc("PUT /api/workspaces/order", handleWorkspaceReorder(workspaceConfigFn))
+	app.mux.HandleFunc("PUT /api/workspaces/default", handleSetDefaultWorkspace(app.config.SetDefaultWorkspaceFn, workspaceConfigFn))
+	app.mux.HandleFunc("DELETE /api/workspaces/default", handleClearDefaultWorkspace(app.config.ClearDefaultWorkspaceFn, workspaceConfigFn))
 
 	// Per-workspace DELETE — registered on main mux with manual middleware wrapping
 	// because DELETE /api/workspaces/{ws} (no trailing slash) won't match the
 	// wsMux prefix handler at /api/workspaces/{ws}/.
-	mux.Handle("DELETE /api/workspaces/{ws}", WorkspaceMiddleware(app.wsExistsFn, handleWorkspaceDelete(app.wrappedDeleteFn, workspaceConfigFn)))
+	app.mux.Handle("DELETE /api/workspaces/{ws}", WorkspaceMiddleware(app.wsExistsFn, handleWorkspaceDelete(app.wrappedDeleteFn, workspaceConfigFn)))
 
 	// Workspace-scoped API routes via a sub-mux with WorkspaceMiddleware.
 	// The middleware injects the workspace ID into the context so that
@@ -284,7 +284,7 @@ func (app *Server) registerWorkspaceRoutes(mux *http.ServeMux) { //nolint:funlen
 	}
 
 	// Apply WorkspaceMiddleware to all workspace-scoped routes
-	mux.Handle("/api/workspaces/{ws}/", WorkspaceMiddleware(app.wsExistsFn, wsMux))
+	app.mux.Handle("/api/workspaces/{ws}/", WorkspaceMiddleware(app.wsExistsFn, wsMux))
 }
 
 // fleetWSHandler resolves a per-workspace fleet Store via the provided lookup

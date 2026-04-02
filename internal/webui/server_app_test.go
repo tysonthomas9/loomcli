@@ -22,14 +22,14 @@ func TestServer_Close_NilPointer(t *testing.T) {
 	app.Close()
 }
 
-// TestServer_SetupRoutes_ZeroValue verifies that buildHandlers + setupRoutes
+// TestServer_RegisterRoutes_ZeroValue verifies that buildHandlers + registerRoutes
 // can be called on a zero-value Server without panicking. All nil pools,
 // stores, and managers should be handled gracefully.
-func TestServer_SetupRoutes_ZeroValue(t *testing.T) {
+func TestServer_RegisterRoutes_ZeroValue(t *testing.T) {
 	var app Server
+	app.mux = http.NewServeMux()
 	app.buildHandlers()
-	mux := http.NewServeMux()
-	app.setupRoutes(mux)
+	app.registerRoutes()
 
 	// Limiters must be non-nil after buildHandlers.
 	if app.clientErrLimiter == nil {
@@ -48,13 +48,13 @@ func TestServer_SetupRoutes_ZeroValue(t *testing.T) {
 	app.authCfgLimiter.stop()
 }
 
-// TestServer_SetupRoutes_HealthRegistered verifies that setupRoutes
-// registers the /api/health endpoint on the provided mux.
-func TestServer_SetupRoutes_HealthRegistered(t *testing.T) {
+// TestServer_RegisterRoutes_HealthRegistered verifies that registerRoutes
+// registers the /api/health endpoint on the mux.
+func TestServer_RegisterRoutes_HealthRegistered(t *testing.T) {
 	var app Server
+	app.mux = http.NewServeMux()
 	app.buildHandlers()
-	mux := http.NewServeMux()
-	app.setupRoutes(mux)
+	app.registerRoutes()
 	defer app.clientErrLimiter.stop()
 	defer app.cspLimiter.stop()
 	defer app.authCfgLimiter.stop()
@@ -64,7 +64,7 @@ func TestServer_SetupRoutes_HealthRegistered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create request: %v", err)
 	}
-	_, pattern := mux.Handler(req)
+	_, pattern := app.mux.Handler(req)
 	if pattern == "" {
 		t.Error("expected /api/health to be registered, got empty pattern")
 	}

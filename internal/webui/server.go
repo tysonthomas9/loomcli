@@ -33,6 +33,9 @@ type Server struct {
 	actualPort int
 	corsConfig CORSConfig
 
+	// HTTP routing
+	mux *http.ServeMux
+
 	// Connection pools
 	pool      daemon.Pool // may be nil if daemon unavailable at startup
 	multiPool *daemon.MultiPool
@@ -111,7 +114,8 @@ type Server struct {
 
 // buildHandlers constructs all top-level HTTP handlers from the current dependency
 // fields. Called by NewServer after all dependencies are initialized. Tests that
-// bypass NewServer should call this explicitly before calling setupRoutes.
+// bypass NewServer must assign app.mux before calling registerRoutes, then call
+// this method explicitly.
 func (app *Server) buildHandlers() {
 	// Rate limiters
 	app.clientErrLimiter = newClientErrorLimiter(rate.Limit(10.0/60.0), 10, 5*time.Minute, 10*time.Minute)
@@ -213,12 +217,6 @@ func (app *Server) Close() {
 // server encounters a fatal error. It performs graceful shutdown and stops
 // components in reverse-initialization order.
 func (app *Server) run(ctx context.Context) error { //nolint:funlen // server lifecycle method
-	// Create HTTP server and register routes
-	mux := http.NewServeMux()
-	app.setupRoutes(mux)
-
-	app.registerWorkerAPIRoutes(mux)
-
 	// Middleware chain: rate-limit -> security -> auth -> CORS -> mux
 	corsMiddleware := NewCORSMiddleware(app.corsConfig)
 	authMW := app.extAuthMiddleware
@@ -230,7 +228,7 @@ func (app *Server) run(ctx context.Context) error { //nolint:funlen // server li
 		ExtAuthOrigin: extractOrigin(app.config.ExtAuthURL),
 	})
 	rl, rateLimitMiddleware := NewRateLimitMiddleware(DefaultRateLimitConfig())
-	handler := h2c.NewHandler(NewRequestLogMiddleware(app.config.Logger)(rateLimitMiddleware(securityMiddleware(authMW(corsMiddleware(mux))))), &http2.Server{})
+	handler := h2c.NewHandler(NewRequestLogMiddleware(app.config.Logger)(rateLimitMiddleware(securityMiddleware(authMW(corsMiddleware(app.mux))))), &http2.Server{})
 
 	// Shutdown context: when canceled, in-flight handlers abort quickly.
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())

@@ -25,8 +25,8 @@ func TestSessionRouteMigration_OldFlatRoutesReturn404(t *testing.T) {
 	_ = multiPool.Register("test-ws", &stubPool{})
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
 
-	mux := http.NewServeMux()
-	setupTestRoutes(t, &Server{multiPool: multiPool, config: ServerConfig{SessionsStore: sessStore}, wsExistsFn: wsExistsFn}, mux)
+	app := &Server{multiPool: multiPool, config: ServerConfig{SessionsStore: sessStore}, wsExistsFn: wsExistsFn}
+	setupTestRoutes(t, app)
 
 	// Old flat routes that should have been removed — each must return 404.
 	oldRoutes := []struct {
@@ -43,7 +43,7 @@ func TestSessionRouteMigration_OldFlatRoutesReturn404(t *testing.T) {
 		t.Run("old_"+tc.method+"_"+tc.path, func(t *testing.T) {
 			req := httptest.NewRequest(tc.method, tc.path, nil)
 			rr := httptest.NewRecorder()
-			mux.ServeHTTP(rr, req)
+			app.mux.ServeHTTP(rr, req)
 
 			if rr.Code != http.StatusNotFound {
 				t.Errorf("old flat route %s %s: expected status %d, got %d (body: %s)",
@@ -69,8 +69,8 @@ func TestSessionRouteMigration_WorkspaceScopedRoutesRegistered(t *testing.T) {
 	_ = multiPool.Register("test-ws", &stubPool{})
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
 
-	mux := http.NewServeMux()
-	setupTestRoutes(t, &Server{multiPool: multiPool, config: ServerConfig{SessionsStore: sessStore}, wsExistsFn: wsExistsFn}, mux)
+	app := &Server{multiPool: multiPool, config: ServerConfig{SessionsStore: sessStore}, wsExistsFn: wsExistsFn}
+	setupTestRoutes(t, app)
 
 	// New workspace-scoped routes that should be registered.
 	scopedRoutes := []struct {
@@ -87,7 +87,7 @@ func TestSessionRouteMigration_WorkspaceScopedRoutesRegistered(t *testing.T) {
 		t.Run("scoped_"+tc.method+"_"+tc.path, func(t *testing.T) {
 			req := httptest.NewRequest(tc.method, tc.path, nil)
 			rr := httptest.NewRecorder()
-			mux.ServeHTTP(rr, req)
+			app.mux.ServeHTTP(rr, req)
 
 			// The SPA catch-all returns exactly {"error":"not found"} for
 			// unregistered /api/* paths. If the route is properly registered,
@@ -119,8 +119,8 @@ func TestSessionRouteMigration_UnknownWorkspaceReturns404(t *testing.T) {
 	_ = multiPool.Register("test-ws", &stubPool{})
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
 
-	mux := http.NewServeMux()
-	setupTestRoutes(t, &Server{multiPool: multiPool, config: ServerConfig{SessionsStore: sessStore}, wsExistsFn: wsExistsFn}, mux)
+	app := &Server{multiPool: multiPool, config: ServerConfig{SessionsStore: sessStore}, wsExistsFn: wsExistsFn}
+	setupTestRoutes(t, app)
 
 	// Routes with a non-existent workspace should return 404 from WorkspaceMiddleware.
 	routes := []struct {
@@ -137,7 +137,7 @@ func TestSessionRouteMigration_UnknownWorkspaceReturns404(t *testing.T) {
 		t.Run("unknown_ws_"+tc.method+"_"+tc.path, func(t *testing.T) {
 			req := httptest.NewRequest(tc.method, tc.path, nil)
 			rr := httptest.NewRecorder()
-			mux.ServeHTTP(rr, req)
+			app.mux.ServeHTTP(rr, req)
 
 			if rr.Code != http.StatusNotFound {
 				t.Errorf("route %s %s with unknown workspace: expected status %d, got %d",
@@ -157,14 +157,14 @@ func TestSessionRouteMigration_WorkspaceScopedListReturnsJSON(t *testing.T) {
 	_ = multiPool.Register("test-ws", &stubPool{})
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
 
-	mux := http.NewServeMux()
-	setupTestRoutes(t, &Server{multiPool: multiPool, config: ServerConfig{SessionsStore: sessStore}, wsExistsFn: wsExistsFn}, mux)
+	app := &Server{multiPool: multiPool, config: ServerConfig{SessionsStore: sessStore}, wsExistsFn: wsExistsFn}
+	setupTestRoutes(t, app)
 
 	// GET /api/workspaces/{ws}/tasks/{taskId}/sessions should return 200 with
 	// a proper JSON response from the handler (empty sessions list).
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/tasks/bd-task42/sessions", nil)
 	rr := httptest.NewRecorder()
-	mux.ServeHTTP(rr, req)
+	app.mux.ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("GET /api/workspaces/test-ws/tasks/bd-task42/sessions: expected %d, got %d (body: %s)",
@@ -205,13 +205,13 @@ func TestSessionRouteMigration_WorkspaceScopedSessionWithData(t *testing.T) {
 	_ = multiPool.Register("test-ws", &stubPool{})
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
 
-	mux := http.NewServeMux()
-	setupTestRoutes(t, &Server{multiPool: multiPool, config: ServerConfig{SessionsStore: sessStore}, wsExistsFn: wsExistsFn}, mux)
+	app := &Server{multiPool: multiPool, config: ServerConfig{SessionsStore: sessStore}, wsExistsFn: wsExistsFn}
+	setupTestRoutes(t, app)
 
 	// GET session detail via workspace-scoped route.
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/tasks/bd-routed/sessions/"+sess.SessionID(), nil)
 	rr := httptest.NewRecorder()
-	mux.ServeHTTP(rr, req)
+	app.mux.ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected %d, got %d (body: %s)", http.StatusOK, rr.Code, rr.Body.String())
@@ -242,13 +242,13 @@ func TestSessionRouteMigration_WorkspaceScopedDiffEndpoint(t *testing.T) {
 	_ = multiPool.Register("test-ws", &stubPool{})
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
 
-	mux := http.NewServeMux()
-	setupTestRoutes(t, &Server{multiPool: multiPool, config: ServerConfig{SessionsStore: sessStore}, wsExistsFn: wsExistsFn}, mux)
+	app := &Server{multiPool: multiPool, config: ServerConfig{SessionsStore: sessStore}, wsExistsFn: wsExistsFn}
+	setupTestRoutes(t, app)
 
 	// GET diff via workspace-scoped route — createTestSession includes a DiffPatch.
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/tasks/bd-diffrouted/sessions/"+sess.SessionID()+"/diff", nil)
 	rr := httptest.NewRecorder()
-	mux.ServeHTTP(rr, req)
+	app.mux.ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected %d, got %d (body: %s)", http.StatusOK, rr.Code, rr.Body.String())
@@ -286,12 +286,12 @@ func TestSessionRouteMigration_WorkspaceScopedTranscriptEndpoint(t *testing.T) {
 	_ = multiPool.Register("test-ws", &stubPool{})
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
 
-	mux := http.NewServeMux()
-	setupTestRoutes(t, &Server{multiPool: multiPool, config: ServerConfig{SessionsStore: sessStore}, wsExistsFn: wsExistsFn}, mux)
+	app := &Server{multiPool: multiPool, config: ServerConfig{SessionsStore: sessStore}, wsExistsFn: wsExistsFn}
+	setupTestRoutes(t, app)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/tasks/bd-transrouted/sessions/"+sess.SessionID()+"/transcript", nil)
 	rr := httptest.NewRecorder()
-	mux.ServeHTTP(rr, req)
+	app.mux.ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected %d, got %d (body: %s)", http.StatusOK, rr.Code, rr.Body.String())

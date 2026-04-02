@@ -317,8 +317,8 @@ func TestHandleHealth(t *testing.T) {
 }
 
 func TestSetupRoutes(t *testing.T) {
-	mux := http.NewServeMux()
-	setupTestRoutes(t, &Server{}, mux)
+	app := &Server{}
+	setupTestRoutes(t, app)
 
 	tests := []struct {
 		name       string
@@ -351,7 +351,7 @@ func TestSetupRoutes(t *testing.T) {
 			req := httptest.NewRequest(tt.method, tt.path, nil)
 			w := httptest.NewRecorder()
 
-			mux.ServeHTTP(w, req)
+			app.mux.ServeHTTP(w, req)
 
 			if w.Code != tt.wantStatus {
 				t.Errorf("status = %d, want %d", w.Code, tt.wantStatus)
@@ -361,13 +361,13 @@ func TestSetupRoutes(t *testing.T) {
 }
 
 func TestHealthEndpointJSON(t *testing.T) {
-	mux := http.NewServeMux()
-	setupTestRoutes(t, &Server{}, mux)
+	app := &Server{}
+	setupTestRoutes(t, app)
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	w := httptest.NewRecorder()
 
-	mux.ServeHTTP(w, req)
+	app.mux.ServeHTTP(w, req)
 
 	// Verify it's valid JSON
 	var response map[string]interface{}
@@ -596,8 +596,8 @@ func TestSetupRoutes_DevMode(t *testing.T) {
 		t.Fatalf("failed to write index.html: %v", err)
 	}
 
-	mux := http.NewServeMux()
-	setupTestRoutes(t, &Server{config: ServerConfig{DevMode: true, DevFrontendDir: dir}}, mux)
+	app := &Server{config: ServerConfig{DevMode: true, DevFrontendDir: dir}}
+	setupTestRoutes(t, app)
 
 	tests := []struct {
 		name             string
@@ -634,7 +634,7 @@ func TestSetupRoutes_DevMode(t *testing.T) {
 			req := httptest.NewRequest(tt.method, tt.path, nil)
 			w := httptest.NewRecorder()
 
-			mux.ServeHTTP(w, req)
+			app.mux.ServeHTTP(w, req)
 
 			if w.Code != tt.wantStatus {
 				t.Errorf("status = %d, want %d", w.Code, tt.wantStatus)

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -376,6 +377,11 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 	app.notifyToken, app.notifyTokenFile = generateNotifyToken(config.NotifyTokenDir)
 
 	app.buildHandlers()
+
+	// Create mux and register all routes.
+	app.mux = http.NewServeMux()
+	app.registerRoutes()
+	app.registerWorkerAPIRoutes()
 
 	return app, nil
 }

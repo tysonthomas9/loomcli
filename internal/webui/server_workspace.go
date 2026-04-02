@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -235,7 +234,7 @@ func safeLogPath(basePath, agent string) string {
 	return candidate
 }
 
-func (app *Server) registerWorkerAPIRoutes(mux *http.ServeMux) {
+func (app *Server) registerWorkerAPIRoutes() {
 	workspaceConfigFn := app.config.WorkspaceConfigFn
 
 	workerToken := os.Getenv("LOOM_WORKER_TOKEN")
@@ -258,7 +257,7 @@ func (app *Server) registerWorkerAPIRoutes(mux *http.ServeMux) {
 		return findWorkspacePathByID(wsData, id) != ""
 	}
 
-	SetupWorkerAPIRoutes(mux, workerToken,
+	SetupWorkerAPIRoutes(app.mux, workerToken,
 		func(workspace, agent string) string {
 			wsPath := resolveWorkspacePath(workspaceConfigFn, workspace)
 			if wsPath == "" || agent == "" {
