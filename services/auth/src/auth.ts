@@ -56,7 +56,7 @@ export const auth = betterAuth({
   }),
 
   emailAndPassword: {
-    enabled: true,
+    enabled: env.EMAIL_PASSWORD_ENABLED,
     minPasswordLength: 8,
     maxPasswordLength: 128,
   },
