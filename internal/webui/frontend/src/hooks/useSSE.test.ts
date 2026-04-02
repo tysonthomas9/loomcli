@@ -306,7 +306,7 @@ describe("useSSE", () => {
       expect(result.current.isConnected).toBe(true);
     });
 
-    it("lastError updates on errors", async () => {
+    it("error triggers reconnecting state (no lastError for transient errors)", async () => {
       const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
       act(() => {
@@ -322,7 +322,9 @@ describe("useSSE", () => {
         MockEventSource.lastInstance?.simulateError(MockEventSource.CLOSED);
       });
 
-      expect(result.current.lastError).toBe("Connection closed");
+      // Unified reconnect: errors enter reconnecting, no onError for transient failures
+      expect(result.current.state).toBe("reconnecting");
+      expect(result.current.lastError).toBeNull();
     });
 
     it("lastError is cleared on successful connection", async () => {
@@ -337,12 +339,12 @@ describe("useSSE", () => {
         MockEventSource.lastInstance?.simulateOpen();
       });
 
-      // Trigger an error
+      // Error enters reconnecting (no lastError set for transient errors)
       act(() => {
         MockEventSource.lastInstance?.simulateError(MockEventSource.CLOSED);
       });
 
-      expect(result.current.lastError).toBe("Connection closed");
+      expect(result.current.lastError).toBeNull();
 
       // Simulate successful reconnection
       act(() => {
@@ -469,7 +471,7 @@ describe("useSSE", () => {
       );
     });
 
-    it("onError called with error message", async () => {
+    it("onError not called for transient connection errors", async () => {
       const onError = vi.fn();
       const { result } = renderHook(() =>
         useSSE({ autoConnect: false, onError }),
@@ -488,7 +490,9 @@ describe("useSSE", () => {
         MockEventSource.lastInstance?.simulateError(MockEventSource.CLOSED);
       });
 
-      expect(onError).toHaveBeenCalledWith("Connection closed");
+      // Unified reconnect: transient errors enter reconnecting, no onError
+      expect(onError).not.toHaveBeenCalled();
+      expect(result.current.state).toBe("reconnecting");
     });
 
     it("onStateChange called on transitions", async () => {

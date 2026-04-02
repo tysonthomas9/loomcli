@@ -20,8 +20,8 @@ export {
 export type { RequestOptions, AuthState } from "./client";
 
 // SSE client for real-time updates (recommended)
-export { BeadsSSEClient, getSSEUrl } from "./sse";
-export type { SSEClientOptions } from "./sse";
+export { BeadsSSEClient, getSSEUrl, fetchSseToken } from "./sse";
+export type { SSEClientOptions, SseTokenResult } from "./sse";
 
 // Re-export common types from SSE
 export type { ConnectionState, MutationType, MutationPayload } from "./sse";

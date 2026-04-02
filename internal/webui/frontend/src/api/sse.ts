@@ -1,17 +1,20 @@
 /**
  * SSE (Server-Sent Events) client for real-time mutation events from the beads server.
- * Provides a simpler push model compared to WebSocket with built-in browser reconnection.
+ * Provides injectable token exchange, typed event callbacks, and unified manual reconnect
+ * with configurable exponential backoff.
  */
 
 import { get, ApiError, wsUrl } from "./client";
 
 // SSE token exchange: fetch opaque token to avoid exposing JWT in URL
-type SseTokenResult =
+export type SseTokenResult =
   | { kind: "token"; token: string }
   | { kind: "disabled" }
   | { kind: "error"; message: string };
 
-async function fetchSseToken(workspaceId: string): Promise<SseTokenResult> {
+export async function fetchSseToken(
+  workspaceId: string,
+): Promise<SseTokenResult> {
   try {
     const resp = await get<{ token: string }>(
       wsUrl(workspaceId, "/events/token"),
@@ -79,11 +82,19 @@ export interface SSEClientOptions {
   onStateChange?: (state: ConnectionState) => void;
   /** Called on reconnection attempts (for tracking consecutive errors) */
   onReconnect?: (attempt: number) => void;
+  /** Called when the server sends the "connected" SSE event (after catch-up events are flushed) */
+  onConnected?: () => void;
+  /** Injectable token provider. Default: fetchSseToken(workspaceId) */
+  fetchToken?: () => Promise<SseTokenResult>;
+  /** Starting backoff delay in ms for reconnect (default 1000) */
+  initialReconnectDelay?: number;
+  /** Maximum backoff delay in ms for reconnect (default 30000) */
+  maxReconnectDelay?: number;
 }
 
 /**
  * SSE client for beads mutation events.
- * Uses the EventSource API which provides automatic reconnection.
+ * Uses unified manual reconnect with configurable exponential backoff.
  */
 export class BeadsSSEClient {
   private eventSource: EventSource | null = null;
@@ -91,14 +102,20 @@ export class BeadsSSEClient {
   private reconnectAttempts = 0;
   private lastEventId: number | undefined;
   private manualDisconnect = false;
-  private usesOpaqueToken = false;
   private currentSourceRepos?: string[] | undefined;
   private workspaceId: string;
+  private destroyed = false;
+  private connectAbortController: AbortController | null = null;
+  private retryTimerId: ReturnType<typeof setTimeout> | null = null;
 
   private onMutation: ((mutation: MutationPayload) => void) | undefined;
   private onError: ((error: string) => void) | undefined;
   private onStateChange: ((state: ConnectionState) => void) | undefined;
   private onReconnect: ((attempt: number) => void) | undefined;
+  private onConnected: (() => void) | undefined;
+  private fetchTokenFn: () => Promise<SseTokenResult>;
+  private initialReconnectDelay: number;
+  private maxReconnectDelay: number;
 
   constructor(workspaceId: string, options: SSEClientOptions = {}) {
     this.workspaceId = workspaceId;
@@ -106,6 +123,11 @@ export class BeadsSSEClient {
     this.onError = options.onError;
     this.onStateChange = options.onStateChange;
     this.onReconnect = options.onReconnect;
+    this.onConnected = options.onConnected;
+    this.fetchTokenFn =
+      options.fetchToken ?? (() => fetchSseToken(this.workspaceId));
+    this.initialReconnectDelay = options.initialReconnectDelay ?? 1000;
+    this.maxReconnectDelay = options.maxReconnectDelay ?? 30000;
   }
 
   /**
@@ -114,6 +136,8 @@ export class BeadsSSEClient {
    * @param sourceRepos Optional repo filter for server-side event filtering
    */
   async connect(since?: number, sourceRepos?: string[]): Promise<void> {
+    if (this.destroyed) return;
+
     // Always update stored sourceRepos even if we bail early,
     // so retryNow() uses the latest filter
     if (sourceRepos !== undefined) {
@@ -127,11 +151,30 @@ export class BeadsSSEClient {
     this.manualDisconnect = false;
     this.setState("connecting");
 
-    // Fetch opaque SSE token (external auth mode)
-    const tokenResult = await fetchSseToken(this.workspaceId);
+    // Create AbortController for this connection attempt
+    const abortController = new AbortController();
+    this.connectAbortController = abortController;
 
-    // Bail out if disconnected while awaiting token
-    if (this.manualDisconnect || this.state === "disconnected") {
+    // Fetch opaque SSE token (injectable or default)
+    let tokenResult: SseTokenResult;
+    try {
+      tokenResult = await this.fetchTokenFn();
+    } catch (err) {
+      // Custom fetchToken threw — treat as error
+      if (abortController.signal.aborted || this.destroyed) return;
+      const message = err instanceof Error ? err.message : "Unknown error";
+      this.onError?.(`SSE auth failed: ${message}`);
+      this.setState("disconnected");
+      return;
+    }
+
+    // Bail out if aborted or destroyed while awaiting token
+    if (
+      abortController.signal.aborted ||
+      this.destroyed ||
+      this.manualDisconnect ||
+      this.state === "disconnected"
+    ) {
       return;
     }
 
@@ -143,7 +186,6 @@ export class BeadsSSEClient {
 
     const opaqueToken =
       tokenResult.kind === "token" ? tokenResult.token : undefined;
-    this.usesOpaqueToken = tokenResult.kind === "token";
 
     // Use provided since value or fall back to last received event ID
     const sinceParam = since ?? this.lastEventId;
@@ -161,16 +203,12 @@ export class BeadsSSEClient {
       this.eventSource.addEventListener("mutation", (e) =>
         this.handleMutation(e as MessageEvent),
       );
-      this.eventSource.addEventListener("connected", () => {
-        // Server sends 'connected' event on successful connection
-        // State already set by onopen, so just log for debugging
-        if (process.env.NODE_ENV === "development") {
-          console.debug("[SSE] Received connected event");
-        }
-      });
+      this.eventSource.addEventListener("connected", () =>
+        this.handleConnected(),
+      );
     } catch (err) {
       console.error("[SSE] Failed to create EventSource:", err);
-      this.handleError();
+      this.scheduleReconnect();
     }
   }
 
@@ -178,7 +216,21 @@ export class BeadsSSEClient {
    * Disconnect from the SSE endpoint.
    */
   disconnect(): void {
+    if (this.destroyed) return;
+
     this.manualDisconnect = true;
+
+    // Abort any in-flight token fetch
+    if (this.connectAbortController) {
+      this.connectAbortController.abort();
+      this.connectAbortController = null;
+    }
+
+    // Clear any pending retry timer
+    if (this.retryTimerId !== null) {
+      clearTimeout(this.retryTimerId);
+      this.retryTimerId = null;
+    }
 
     if (this.eventSource) {
       this.eventSource.close();
@@ -217,8 +269,13 @@ export class BeadsSSEClient {
    * Resets the reconnect counter on manual retry.
    */
   retryNow(): void {
-    if (this.state !== "reconnecting") {
-      return;
+    if (this.destroyed) return;
+    if (this.state !== "reconnecting") return;
+
+    // Clear pending retry timer
+    if (this.retryTimerId !== null) {
+      clearTimeout(this.retryTimerId);
+      this.retryTimerId = null;
     }
 
     // Close existing EventSource if any
@@ -234,15 +291,35 @@ export class BeadsSSEClient {
 
   /**
    * Disconnect and clean up all resources.
-   * After calling destroy(), this instance should not be reused.
+   * After calling destroy(), all public methods become no-ops.
    */
   destroy(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
+
+    // Abort any in-flight token fetch
+    if (this.connectAbortController) {
+      this.connectAbortController.abort();
+      this.connectAbortController = null;
+    }
+
+    // Clear any pending retry timer
+    if (this.retryTimerId !== null) {
+      clearTimeout(this.retryTimerId);
+      this.retryTimerId = null;
+    }
+
     // Clear callbacks first to prevent any callbacks during cleanup
     this.onMutation = undefined;
     this.onError = undefined;
     this.onStateChange = undefined;
     this.onReconnect = undefined;
-    this.disconnect();
+    this.onConnected = undefined;
+
+    if (this.eventSource) {
+      this.eventSource.close();
+      this.eventSource = null;
+    }
   }
 
   private setState(state: ConnectionState): void {
@@ -262,52 +339,28 @@ export class BeadsSSEClient {
     }
   }
 
+  private handleConnected(): void {
+    this.onConnected?.();
+  }
+
   private handleError(): void {
     // If manually disconnected, don't process error
-    if (this.manualDisconnect) {
-      return;
-    }
+    if (this.manualDisconnect) return;
+    if (this.destroyed) return;
 
-    // When using opaque tokens, disable browser auto-reconnect.
-    // The browser would reuse the same URL, but opaque tokens are single-use.
-    // Close the EventSource, signal reconnecting, and schedule an automatic
-    // retry with backoff — the browser won't do it for us.
-    if (this.usesOpaqueToken && this.eventSource) {
+    // Unified manual reconnect: always close EventSource and schedule retry
+    if (this.eventSource) {
       this.eventSource.close();
       this.eventSource = null;
-      this.reconnectAttempts++;
-      this.setState("reconnecting");
-      this.onReconnect?.(this.reconnectAttempts);
-      // Auto-retry with capped exponential backoff
-      const delay = Math.min(1000 * this.reconnectAttempts, 30000);
-      setTimeout(() => {
-        if (!this.manualDisconnect && this.state === "reconnecting") {
-          this.connect(undefined, this.currentSourceRepos);
-        }
-      }, delay);
-      return;
     }
 
-    // EventSource has three readyStates: CONNECTING(0), OPEN(1), CLOSED(2)
-    // Browser automatically retries on error, so we track attempts
-    if (
-      this.eventSource &&
-      this.eventSource.readyState === EventSource.CONNECTING
-    ) {
-      // Browser is reconnecting
-      this.reconnectAttempts++;
-      this.setState("reconnecting");
-      this.onReconnect?.(this.reconnectAttempts);
-    } else if (
-      this.eventSource &&
-      this.eventSource.readyState === EventSource.CLOSED
-    ) {
-      // Connection permanently closed
-      this.reconnectAttempts++;
-      this.setState("reconnecting");
-      this.onReconnect?.(this.reconnectAttempts);
-      this.onError?.("Connection closed");
-    }
+    this.scheduleReconnect();
+  }
+
+  private scheduleReconnect(): void {
+    this.reconnectAttempts++;
+    this.setState("reconnecting");
+    this.onReconnect?.(this.reconnectAttempts);
 
     // Log warning after multiple failures
     if (this.reconnectAttempts === 5) {
@@ -315,6 +368,23 @@ export class BeadsSSEClient {
         "[SSE] Multiple connection failures, will continue retrying",
       );
     }
+
+    // Exponential backoff: min(initialDelay * 2^(attempts-1), maxDelay)
+    const delay = Math.min(
+      this.initialReconnectDelay * Math.pow(2, this.reconnectAttempts - 1),
+      this.maxReconnectDelay,
+    );
+
+    this.retryTimerId = setTimeout(() => {
+      this.retryTimerId = null;
+      if (
+        !this.manualDisconnect &&
+        !this.destroyed &&
+        this.state === "reconnecting"
+      ) {
+        this.connect(undefined, this.currentSourceRepos);
+      }
+    }, delay);
   }
 
   private handleMutation(event: MessageEvent): void {
