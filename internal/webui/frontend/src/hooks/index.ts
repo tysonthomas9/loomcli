@@ -137,6 +137,15 @@ export type {
   SubscriptionOptions,
 } from "./useEventProvider";
 
+export {
+  StoreProvider,
+  useIssueStoreInstance,
+  useAgentStoreInstance,
+  StoreContext,
+  NO_STORE_CONTEXT,
+} from "./useStoreContext";
+export type { StoreContextValue, StoreProviderProps } from "./useStoreContext";
+
 export { useToast, ToastProvider } from "./useToast";
 export type {
   ToastType,
