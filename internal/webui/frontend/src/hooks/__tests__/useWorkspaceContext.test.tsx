@@ -4,9 +4,10 @@
 
 /**
  * Unit tests for useWorkspaceContext hook and WorkspaceProvider.
- * Mock underlying hook, test provider and helpers.
+ * Mocks the workspace API (fetchWorkspaceApi) which the workspaceStore calls.
  *
  * T12 changes: WorkspaceProvider now requires workspaceId prop and uses useNavigate.
+ * Store migration: WorkspaceProvider now uses workspaceStore instead of useWorkspace hook.
  */
 
 import { renderHook, act } from "@testing-library/react";
@@ -14,20 +15,17 @@ import { MemoryRouter } from "react-router-dom";
 import type { ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-import type { RepoInfo, WorkspaceAgentInfo } from "@/api/workspace";
+import type {
+  RepoInfo,
+  WorkspaceAgentInfo,
+  WorkspaceData,
+} from "@/api/workspace";
 
 import { WorkspaceProvider, useWorkspaceContext } from "../useWorkspaceContext";
-import { useWorkspace } from "../useWorkspace";
-import type { UseWorkspaceReturn } from "../useWorkspace";
 
-// Mock useWorkspace so we don't trigger real polling
-vi.mock("../useWorkspace", () => ({
-  useWorkspace: vi.fn(),
-}));
-const mockUseWorkspace = vi.mocked(useWorkspace);
-
-// Mock API and storage modules used by WorkspaceProvider
+// Mock the workspace API so the store can call fetchWorkspaceApi
 vi.mock("@/api/workspace", () => ({
+  fetchWorkspaceApi: vi.fn(),
   setDefaultWorkspace: vi.fn().mockResolvedValue(undefined),
   clearDefaultWorkspace: vi.fn().mockResolvedValue(undefined),
 }));
@@ -42,32 +40,31 @@ vi.mock("@/utils/scopedStorage", () => ({
   setLastWorkspaceId: vi.fn(),
 }));
 
+import { fetchWorkspaceApi } from "@/api/workspace";
+
+const mockFetchWorkspaceApi = vi.mocked(fetchWorkspaceApi);
+
 const TEST_WS_ID = "test-ws-uuid-1234";
 
 /**
- * Helper to create a mock UseWorkspaceReturn.
+ * Helper to create workspace data and configure the mock API.
  */
-function setupMockWorkspace(overrides?: Partial<UseWorkspaceReturn>): void {
-  const defaultReturn: UseWorkspaceReturn = {
-    workspace: {
-      id: TEST_WS_ID,
-      name: "test-workspace",
-      path: "/home/user/workspace",
-      repos: [],
-      groups: [],
-      agents: [],
-      workspaces: [],
-      default_workspace: "",
-    },
+function setupMockWorkspaceApi(
+  overrides?: Partial<WorkspaceData>,
+): WorkspaceData {
+  const data: WorkspaceData = {
+    id: TEST_WS_ID,
+    name: "test-workspace",
+    path: "/home/user/workspace",
     repos: [],
     groups: [],
     agents: [],
-    isLoading: false,
-    error: null,
-    refetch: vi.fn(),
+    workspaces: [],
+    default_workspace: "",
     ...overrides,
   };
-  mockUseWorkspace.mockReturnValue(defaultReturn);
+  mockFetchWorkspaceApi.mockResolvedValue(data);
+  return data;
 }
 
 /**
@@ -99,7 +96,22 @@ function createMockAgent(
   };
 }
 
+/**
+ * Helper to flush pending promises (allows store fetch to complete).
+ */
+async function flushPromises(): Promise<void> {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
 describe("useWorkspaceContext", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+  });
+
   describe("outside provider", () => {
     it("returns safe defaults without throwing", () => {
       const { result } = renderHook(() => useWorkspaceContext());
@@ -133,7 +145,6 @@ describe("useWorkspaceContext", () => {
     it("refetch is a no-op function outside provider", () => {
       const { result } = renderHook(() => useWorkspaceContext());
 
-      // Should not throw
       expect(() => result.current.refetch()).not.toThrow();
     });
   });
@@ -149,77 +160,74 @@ describe("useWorkspaceContext", () => {
       );
     }
 
-    it("provides repos from useWorkspace", () => {
+    it("provides repos from workspace data", async () => {
       const repos = [
         createMockRepo({ name: "api" }),
         createMockRepo({ name: "frontend" }),
       ];
-      setupMockWorkspace({ repos });
+      setupMockWorkspaceApi({ repos });
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
+
+      await flushPromises();
 
       expect(result.current.repos).toHaveLength(2);
       expect(result.current.repos[0].name).toBe("api");
       expect(result.current.repos[1].name).toBe("frontend");
     });
 
-    it("provides groups from useWorkspace", () => {
-      setupMockWorkspace({ groups: ["backend", "frontend", "infra"] });
+    it("provides groups from workspace data", async () => {
+      setupMockWorkspaceApi({ groups: ["backend", "frontend", "infra"] });
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
+
+      await flushPromises();
 
       expect(result.current.groups).toEqual(["backend", "frontend", "infra"]);
     });
 
-    it("provides agents from useWorkspace", () => {
+    it("provides agents from workspace data", async () => {
       const agents = [
         createMockAgent({ name: "nova" }),
         createMockAgent({ name: "falcon", cross_repo: true }),
       ];
-      setupMockWorkspace({ agents });
+      setupMockWorkspaceApi({ agents });
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
+
+      await flushPromises();
 
       expect(result.current.agents).toHaveLength(2);
       expect(result.current.agents[0].name).toBe("nova");
       expect(result.current.agents[1].name).toBe("falcon");
     });
 
-    it("provides isLoading from useWorkspace", () => {
-      setupMockWorkspace({ isLoading: true });
+    it("provides error on fetch failure", async () => {
+      mockFetchWorkspaceApi.mockRejectedValue(new Error("Network error"));
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
 
-      expect(result.current.isLoading).toBe(true);
-    });
-
-    it("provides error from useWorkspace", () => {
-      setupMockWorkspace({ error: "Network error" });
-
-      const { result } = renderHook(() => useWorkspaceContext(), {
-        wrapper,
-      });
+      await flushPromises();
 
       expect(result.current.error).toBe("Network error");
     });
 
-    it("passes pollInterval of 60000 to useWorkspace", () => {
-      setupMockWorkspace();
+    it("calls fetchWorkspaceApi with the workspaceId", async () => {
+      setupMockWorkspaceApi();
 
       renderHook(() => useWorkspaceContext(), { wrapper });
 
-      expect(mockUseWorkspace).toHaveBeenCalledWith({
-        pollInterval: 60000,
-        workspaceId: TEST_WS_ID,
-      });
+      await flushPromises();
+
+      expect(mockFetchWorkspaceApi).toHaveBeenCalledWith(TEST_WS_ID);
     });
   });
 
@@ -234,17 +242,19 @@ describe("useWorkspaceContext", () => {
       );
     }
 
-    it("finds correct repo by name", () => {
+    it("finds correct repo by name", async () => {
       const repos = [
         createMockRepo({ name: "api", source_repo_id: "repo-1" }),
         createMockRepo({ name: "frontend", source_repo_id: "repo-2" }),
         createMockRepo({ name: "backend", source_repo_id: "repo-3" }),
       ];
-      setupMockWorkspace({ repos });
+      setupMockWorkspaceApi({ repos });
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
+
+      await flushPromises();
 
       const found = result.current.getRepoByName("frontend");
       expect(found).toBeDefined();
@@ -252,23 +262,27 @@ describe("useWorkspaceContext", () => {
       expect(found!.source_repo_id).toBe("repo-2");
     });
 
-    it("returns undefined for unknown repo name", () => {
+    it("returns undefined for unknown repo name", async () => {
       const repos = [createMockRepo({ name: "api" })];
-      setupMockWorkspace({ repos });
+      setupMockWorkspaceApi({ repos });
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
+
+      await flushPromises();
 
       expect(result.current.getRepoByName("unknown")).toBeUndefined();
     });
 
-    it("returns undefined when repos list is empty", () => {
-      setupMockWorkspace({ repos: [] });
+    it("returns undefined when repos list is empty", async () => {
+      setupMockWorkspaceApi({ repos: [] });
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
+
+      await flushPromises();
 
       expect(result.current.getRepoByName("api")).toBeUndefined();
     });
@@ -285,7 +299,7 @@ describe("useWorkspaceContext", () => {
       );
     }
 
-    it("filters correctly by group", () => {
+    it("filters correctly by group", async () => {
       const repos = [
         createMockRepo({ name: "api", groups: ["backend"] }),
         createMockRepo({
@@ -297,56 +311,63 @@ describe("useWorkspaceContext", () => {
           groups: ["backend", "infra"],
         }),
       ];
-      setupMockWorkspace({ repos });
+      setupMockWorkspaceApi({ repos });
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
+
+      await flushPromises();
 
       const backendRepos = result.current.getReposByGroup("backend");
       expect(backendRepos).toHaveLength(2);
       expect(backendRepos.map((r) => r.name)).toEqual(["api", "gateway"]);
     });
 
-    it("returns empty array for unknown group", () => {
+    it("returns empty array for unknown group", async () => {
       const repos = [createMockRepo({ name: "api", groups: ["backend"] })];
-      setupMockWorkspace({ repos });
+      setupMockWorkspaceApi({ repos });
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
+
+      await flushPromises();
 
       expect(result.current.getReposByGroup("nonexistent")).toEqual([]);
     });
 
-    it("returns empty array when no repos have groups", () => {
+    it("returns empty array when no repos have groups", async () => {
       const repos = [
         createMockRepo({ name: "api", groups: undefined }),
         createMockRepo({ name: "frontend", groups: undefined }),
       ];
-      setupMockWorkspace({ repos });
+      setupMockWorkspaceApi({ repos });
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
 
+      await flushPromises();
+
       expect(result.current.getReposByGroup("backend")).toEqual([]);
     });
 
-    it("returns repos that belong to multiple groups", () => {
+    it("returns repos that belong to multiple groups", async () => {
       const repos = [
         createMockRepo({
           name: "gateway",
           groups: ["backend", "infra"],
         }),
       ];
-      setupMockWorkspace({ repos });
+      setupMockWorkspaceApi({ repos });
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
 
-      // Should appear in both groups
+      await flushPromises();
+
       expect(result.current.getReposByGroup("backend")).toHaveLength(1);
       expect(result.current.getReposByGroup("infra")).toHaveLength(1);
     });
@@ -363,16 +384,18 @@ describe("useWorkspaceContext", () => {
       );
     }
 
-    it("finds correct agent by name", () => {
+    it("finds correct agent by name", async () => {
       const agents = [
         createMockAgent({ name: "nova", cross_repo: false }),
         createMockAgent({ name: "falcon", cross_repo: true }),
       ];
-      setupMockWorkspace({ agents });
+      setupMockWorkspaceApi({ agents });
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
+
+      await flushPromises();
 
       const found = result.current.getAgentByName("falcon");
       expect(found).toBeDefined();
@@ -380,23 +403,27 @@ describe("useWorkspaceContext", () => {
       expect(found!.cross_repo).toBe(true);
     });
 
-    it("returns undefined for unknown agent name", () => {
+    it("returns undefined for unknown agent name", async () => {
       const agents = [createMockAgent({ name: "nova" })];
-      setupMockWorkspace({ agents });
+      setupMockWorkspaceApi({ agents });
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
+
+      await flushPromises();
 
       expect(result.current.getAgentByName("unknown-agent")).toBeUndefined();
     });
 
-    it("returns undefined when agents list is empty", () => {
-      setupMockWorkspace({ agents: [] });
+    it("returns undefined when agents list is empty", async () => {
+      setupMockWorkspaceApi({ agents: [] });
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
+
+      await flushPromises();
 
       expect(result.current.getAgentByName("nova")).toBeUndefined();
     });
@@ -413,33 +440,21 @@ describe("useWorkspaceContext", () => {
       );
     }
 
-    beforeEach(() => {
-      localStorage.clear();
-    });
-
-    it("is set to workspace.name on load", () => {
-      setupMockWorkspace({
-        workspace: {
-          id: TEST_WS_ID,
-          name: "my-workspace",
-          path: "/home/user/workspace",
-          repos: [],
-          groups: [],
-          agents: [],
-          workspaces: [],
-          default_workspace: "",
-        },
-      });
+    it("is set to workspace.name on load", async () => {
+      setupMockWorkspaceApi({ name: "my-workspace" });
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
 
+      await flushPromises();
+
       expect(result.current.activeWorkspaceName).toBe("my-workspace");
     });
 
-    it("is null when workspace is null", () => {
-      setupMockWorkspace({ workspace: null });
+    it("is null when workspace has not loaded yet", () => {
+      // Never resolve the fetch
+      mockFetchWorkspaceApi.mockReturnValue(new Promise(() => {}));
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
@@ -460,29 +475,26 @@ describe("useWorkspaceContext", () => {
       );
     }
 
-    beforeEach(() => {
-      localStorage.clear();
-    });
-
-    it("setActiveWorkspace navigates via React Router (no page reload)", () => {
-      setupMockWorkspace({
-        workspace: {
-          id: TEST_WS_ID,
-          name: "test-workspace",
-          path: "/home/user/workspace",
-          repos: [],
-          groups: [],
-          agents: [],
-          workspaces: [{ id: "ws-2", name: "new-workspace", path: "/path" }],
-          default_workspace: "",
-        },
+    it("setActiveWorkspace navigates via React Router (no page reload)", async () => {
+      setupMockWorkspaceApi({
+        workspaces: [
+          {
+            id: "ws-2",
+            name: "new-workspace",
+            path: "/path",
+            active: false,
+            repo_count: 1,
+            is_default: false,
+          },
+        ],
       });
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
 
-      // setActiveWorkspace looks up the workspace by name and navigates
+      await flushPromises();
+
       act(() => {
         result.current.setActiveWorkspace("new-workspace");
       });
@@ -502,21 +514,19 @@ describe("useWorkspaceContext", () => {
       );
     }
 
-    beforeEach(() => {
-      localStorage.clear();
-    });
-
-    it("updates activeRepos to only the named repos", () => {
+    it("updates activeRepos to only the named repos", async () => {
       const repos = [
         createMockRepo({ name: "api" }),
         createMockRepo({ name: "frontend" }),
         createMockRepo({ name: "backend" }),
       ];
-      setupMockWorkspace({ repos });
+      setupMockWorkspaceApi({ repos });
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
+
+      await flushPromises();
 
       act(() => {
         result.current.selectRepos(["api", "backend"]);
@@ -529,16 +539,18 @@ describe("useWorkspaceContext", () => {
       ]);
     });
 
-    it("updates selectedRepoNames set", () => {
+    it("updates selectedRepoNames set", async () => {
       const repos = [
         createMockRepo({ name: "api" }),
         createMockRepo({ name: "frontend" }),
       ];
-      setupMockWorkspace({ repos });
+      setupMockWorkspaceApi({ repos });
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
+
+      await flushPromises();
 
       act(() => {
         result.current.selectRepos(["frontend"]);
@@ -560,29 +572,25 @@ describe("useWorkspaceContext", () => {
       );
     }
 
-    beforeEach(() => {
-      localStorage.clear();
-    });
-
-    it("clears selection and returns all repos", () => {
+    it("clears selection and returns all repos", async () => {
       const repos = [
         createMockRepo({ name: "api" }),
         createMockRepo({ name: "frontend" }),
         createMockRepo({ name: "backend" }),
       ];
-      setupMockWorkspace({ repos });
+      setupMockWorkspaceApi({ repos });
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
 
-      // First select a subset
+      await flushPromises();
+
       act(() => {
         result.current.selectRepos(["api"]);
       });
       expect(result.current.activeRepos).toHaveLength(1);
 
-      // Then select all
       act(() => {
         result.current.selectAll();
       });
@@ -604,20 +612,18 @@ describe("useWorkspaceContext", () => {
       );
     }
 
-    beforeEach(() => {
-      localStorage.clear();
-    });
-
-    it("adds a repo to selection", () => {
+    it("adds a repo to selection", async () => {
       const repos = [
         createMockRepo({ name: "api" }),
         createMockRepo({ name: "frontend" }),
       ];
-      setupMockWorkspace({ repos });
+      setupMockWorkspaceApi({ repos });
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
+
+      await flushPromises();
 
       act(() => {
         result.current.toggleRepo("api");
@@ -626,18 +632,19 @@ describe("useWorkspaceContext", () => {
       expect(result.current.selectedRepoNames.has("api")).toBe(true);
     });
 
-    it("removes a repo from selection", () => {
+    it("removes a repo from selection", async () => {
       const repos = [
         createMockRepo({ name: "api" }),
         createMockRepo({ name: "frontend" }),
       ];
-      setupMockWorkspace({ repos });
+      setupMockWorkspaceApi({ repos });
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
 
-      // Add then remove
+      await flushPromises();
+
       act(() => {
         result.current.toggleRepo("api");
       });
@@ -661,35 +668,35 @@ describe("useWorkspaceContext", () => {
       );
     }
 
-    beforeEach(() => {
-      localStorage.clear();
-    });
-
-    it("returns undefined when all repos selected", () => {
+    it("returns undefined when all repos selected", async () => {
       const repos = [
         createMockRepo({ name: "api" }),
         createMockRepo({ name: "frontend" }),
       ];
-      setupMockWorkspace({ repos });
+      setupMockWorkspaceApi({ repos });
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
 
+      await flushPromises();
+
       expect(result.current.sourceReposFilter).toBeUndefined();
     });
 
-    it("returns repo names when subset selected", () => {
+    it("returns repo names when subset selected", async () => {
       const repos = [
         createMockRepo({ name: "api" }),
         createMockRepo({ name: "frontend" }),
         createMockRepo({ name: "backend" }),
       ];
-      setupMockWorkspace({ repos });
+      setupMockWorkspaceApi({ repos });
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
+
+      await flushPromises();
 
       act(() => {
         result.current.selectRepos(["api", "backend"]);
@@ -698,16 +705,18 @@ describe("useWorkspaceContext", () => {
       expect(result.current.sourceReposFilter).toEqual(["api", "backend"]);
     });
 
-    it("returns undefined after selectAll", () => {
+    it("returns undefined after selectAll", async () => {
       const repos = [
         createMockRepo({ name: "api" }),
         createMockRepo({ name: "frontend" }),
       ];
-      setupMockWorkspace({ repos });
+      setupMockWorkspaceApi({ repos });
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
+
+      await flushPromises();
 
       act(() => {
         result.current.selectRepos(["api"]);
@@ -732,52 +741,59 @@ describe("useWorkspaceContext", () => {
       );
     }
 
-    it("is false when 0 repos", () => {
-      setupMockWorkspace({ repos: [] });
+    it("is false when 0 repos", async () => {
+      setupMockWorkspaceApi({ repos: [] });
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
+
+      await flushPromises();
 
       expect(result.current.isMultiRepo).toBe(false);
     });
 
-    it("is true when 1 repo", () => {
-      setupMockWorkspace({ repos: [createMockRepo({ name: "api" })] });
+    it("is true when 1 repo", async () => {
+      setupMockWorkspaceApi({ repos: [createMockRepo({ name: "api" })] });
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
 
-      // isMultiRepo is true when workspace has 1+ repos (changed from 2+)
+      await flushPromises();
+
       expect(result.current.isMultiRepo).toBe(true);
     });
 
-    it("is true when 2+ repos", () => {
+    it("is true when 2+ repos", async () => {
       const repos = [
         createMockRepo({ name: "api" }),
         createMockRepo({ name: "frontend" }),
       ];
-      setupMockWorkspace({ repos });
+      setupMockWorkspaceApi({ repos });
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
 
+      await flushPromises();
+
       expect(result.current.isMultiRepo).toBe(true);
     });
 
-    it("is true when 3 repos", () => {
+    it("is true when 3 repos", async () => {
       const repos = [
         createMockRepo({ name: "api" }),
         createMockRepo({ name: "frontend" }),
         createMockRepo({ name: "backend" }),
       ];
-      setupMockWorkspace({ repos });
+      setupMockWorkspaceApi({ repos });
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
+
+      await flushPromises();
 
       expect(result.current.isMultiRepo).toBe(true);
     });
@@ -794,53 +810,28 @@ describe("useWorkspaceContext", () => {
       );
     }
 
-    beforeEach(() => {
-      localStorage.clear();
-    });
+    it("workspace name survives unmount/remount", async () => {
+      setupMockWorkspaceApi({ name: "persistent-ws" });
 
-    it("workspace name survives unmount/remount", () => {
-      setupMockWorkspace({
-        workspace: {
-          id: TEST_WS_ID,
-          name: "persistent-ws",
-          path: "/home/user/workspace",
-          repos: [],
-          groups: [],
-          agents: [],
-          workspaces: [],
-          default_workspace: "",
-        },
-      });
-
-      // First render sets activeWorkspaceName from useWorkspace hook
       const { unmount } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
+      await flushPromises();
       unmount();
 
-      // Second render gets name from useWorkspace hook (not localStorage)
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
+      await flushPromises();
 
       expect(result.current.activeWorkspaceName).toBe("persistent-ws");
     });
 
-    it("does not write to loom-active-workspace", () => {
-      setupMockWorkspace({
-        workspace: {
-          id: TEST_WS_ID,
-          name: "my-workspace",
-          path: "/home/user/workspace",
-          repos: [],
-          groups: [],
-          agents: [],
-          workspaces: [],
-          default_workspace: "",
-        },
-      });
+    it("does not write to loom-active-workspace", async () => {
+      setupMockWorkspaceApi({ name: "my-workspace" });
 
       renderHook(() => useWorkspaceContext(), { wrapper });
+      await flushPromises();
 
       expect(localStorage.getItem("loom-active-workspace")).toBeNull();
     });
@@ -864,14 +855,13 @@ describe("useWorkspaceContext", () => {
           throw new Error("localStorage disabled");
         });
 
-      // Use null workspace so the useEffect doesn't override the initial null
-      setupMockWorkspace({ workspace: null });
+      // Never resolve to keep workspace null
+      mockFetchWorkspaceApi.mockReturnValue(new Promise(() => {}));
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
 
-      // Should not throw and should have defaults (localStorage read failed gracefully)
       expect(result.current.activeWorkspaceName).toBeNull();
       expect(result.current.selectedRepoNames.size).toBe(0);
       expect(result.current.isAllSelected).toBe(true);
@@ -879,20 +869,21 @@ describe("useWorkspaceContext", () => {
       getItemSpy.mockRestore();
     });
 
-    it("gracefully handles setItem failure", () => {
+    it("gracefully handles setItem failure", async () => {
       const setItemSpy = vi
         .spyOn(Storage.prototype, "setItem")
         .mockImplementation(() => {
           throw new Error("quota exceeded");
         });
 
-      setupMockWorkspace();
+      setupMockWorkspaceApi();
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
 
-      // Should not throw when persisting
+      await flushPromises();
+
       expect(() => {
         act(() => {
           result.current.setActiveWorkspace("new-ws");
@@ -956,34 +947,34 @@ describe("useWorkspaceContext", () => {
       );
     }
 
-    beforeEach(() => {
-      localStorage.clear();
-    });
-
-    it("is true when selectedRepoNames is empty (no filter)", () => {
+    it("is true when selectedRepoNames is empty (no filter)", async () => {
       const repos = [
         createMockRepo({ name: "api" }),
         createMockRepo({ name: "frontend" }),
       ];
-      setupMockWorkspace({ repos });
+      setupMockWorkspaceApi({ repos });
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
+
+      await flushPromises();
 
       expect(result.current.isAllSelected).toBe(true);
     });
 
-    it("is false when repos are selected", () => {
+    it("is false when repos are selected", async () => {
       const repos = [
         createMockRepo({ name: "api" }),
         createMockRepo({ name: "frontend" }),
       ];
-      setupMockWorkspace({ repos });
+      setupMockWorkspaceApi({ repos });
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
+
+      await flushPromises();
 
       act(() => {
         result.current.selectRepos(["api"]);
@@ -992,16 +983,18 @@ describe("useWorkspaceContext", () => {
       expect(result.current.isAllSelected).toBe(false);
     });
 
-    it("becomes true again after selectAll", () => {
+    it("becomes true again after selectAll", async () => {
       const repos = [
         createMockRepo({ name: "api" }),
         createMockRepo({ name: "frontend" }),
       ];
-      setupMockWorkspace({ repos });
+      setupMockWorkspaceApi({ repos });
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
+
+      await flushPromises();
 
       act(() => {
         result.current.selectRepos(["api"]);
@@ -1026,21 +1019,19 @@ describe("useWorkspaceContext", () => {
       );
     }
 
-    beforeEach(() => {
-      localStorage.clear();
-    });
-
-    it("returns all repo names when no filter applied", () => {
+    it("returns all repo names when no filter applied", async () => {
       const repos = [
         createMockRepo({ name: "api" }),
         createMockRepo({ name: "frontend" }),
         createMockRepo({ name: "backend" }),
       ];
-      setupMockWorkspace({ repos });
+      setupMockWorkspaceApi({ repos });
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
+
+      await flushPromises();
 
       expect(result.current.activeRepoNames).toEqual([
         "api",
@@ -1049,17 +1040,19 @@ describe("useWorkspaceContext", () => {
       ]);
     });
 
-    it("returns only selected repo names when filter applied", () => {
+    it("returns only selected repo names when filter applied", async () => {
       const repos = [
         createMockRepo({ name: "api" }),
         createMockRepo({ name: "frontend" }),
         createMockRepo({ name: "backend" }),
       ];
-      setupMockWorkspace({ repos });
+      setupMockWorkspaceApi({ repos });
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
+
+      await flushPromises();
 
       act(() => {
         result.current.selectRepos(["frontend", "backend"]);
@@ -1068,12 +1061,14 @@ describe("useWorkspaceContext", () => {
       expect(result.current.activeRepoNames).toEqual(["frontend", "backend"]);
     });
 
-    it("returns empty array when no repos exist", () => {
-      setupMockWorkspace({ repos: [] });
+    it("returns empty array when no repos exist", async () => {
+      setupMockWorkspaceApi({ repos: [] });
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
+
+      await flushPromises();
 
       expect(result.current.activeRepoNames).toEqual([]);
     });

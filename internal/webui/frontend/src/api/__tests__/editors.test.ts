@@ -5,13 +5,9 @@
 /**
  * Unit tests for the editors API functions (editors.ts).
  *
- * These tests verify that fetchEditors, refreshEditors, getCachedEditors,
- * and openInEditor correctly call the API client, manage the module-level
- * cache, and propagate errors.
- *
- * Because editors.ts uses a module-level cache (editorCache), we use
- * vi.resetModules() + dynamic import in beforeEach to get a fresh module
- * instance for each test.
+ * These tests verify that fetchEditors, refreshEditors, and openInEditor
+ * correctly call the API client. The module is now stateless — caching
+ * lives in editorStore, so there are no cache tests here.
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -37,14 +33,8 @@ function createMockEditor(overrides?: Partial<EditorInfo>): EditorInfo {
   };
 }
 
-/**
- * Because the editors module has a module-level cache, we dynamically import
- * a fresh copy of the module (and its client dependency) in each test via
- * vi.resetModules(). The helpers below are reassigned in beforeEach.
- */
 let fetchEditors: typeof import("../editors").fetchEditors;
 let refreshEditors: typeof import("../editors").refreshEditors;
-let getCachedEditors: typeof import("../editors").getCachedEditors;
 let openInEditor: typeof import("../editors").openInEditor;
 let mockGet: ReturnType<typeof vi.fn>;
 let mockPost: ReturnType<typeof vi.fn>;
@@ -54,7 +44,6 @@ describe("editors API", () => {
     vi.clearAllMocks();
     vi.resetModules();
 
-    // Re-import after resetModules to get a fresh module with empty cache
     const clientMod = await import("../client");
     mockGet = vi.mocked(clientMod.get);
     mockPost = vi.mocked(clientMod.post);
@@ -62,7 +51,6 @@ describe("editors API", () => {
     const editorsMod = await import("../editors");
     fetchEditors = editorsMod.fetchEditors;
     refreshEditors = editorsMod.refreshEditors;
-    getCachedEditors = editorsMod.getCachedEditors;
     openInEditor = editorsMod.openInEditor;
   });
 
@@ -86,17 +74,14 @@ describe("editors API", () => {
       expect(result).toHaveLength(2);
     });
 
-    it("returns cached data on second call without making another HTTP request", async () => {
+    it("always hits the network (no caching)", async () => {
       const editors = [createMockEditor()];
-      mockGet.mockResolvedValueOnce({ editors });
+      mockGet.mockResolvedValue({ editors });
 
-      const first = await fetchEditors();
-      const second = await fetchEditors();
+      await fetchEditors();
+      await fetchEditors();
 
-      expect(mockGet).toHaveBeenCalledTimes(1);
-      expect(first).toEqual(editors);
-      expect(second).toEqual(editors);
-      expect(first).toBe(second);
+      expect(mockGet).toHaveBeenCalledTimes(2);
     });
 
     it("returns empty array when API returns empty editors list", async () => {
@@ -126,98 +111,21 @@ describe("editors API", () => {
   });
 
   describe("refreshEditors", () => {
-    it("invalidates cache and re-fetches from API", async () => {
-      const initialEditors = [
-        createMockEditor({ id: "vscode", detected: true }),
-      ];
-      const updatedEditors = [
-        createMockEditor({ id: "vscode", detected: true }),
-        createMockEditor({
-          id: "cursor",
-          display_name: "Cursor",
-          detected: true,
-        }),
-      ];
-      mockGet.mockResolvedValueOnce({ editors: initialEditors });
-      mockGet.mockResolvedValueOnce({ editors: updatedEditors });
+    it("calls GET /api/editors (delegates to fetchEditors)", async () => {
+      const editors = [createMockEditor()];
+      mockGet.mockResolvedValueOnce({ editors });
 
-      // First fetch populates cache
-      const first = await fetchEditors();
-      expect(first).toEqual(initialEditors);
+      const result = await refreshEditors();
+
       expect(mockGet).toHaveBeenCalledTimes(1);
-
-      // Refresh invalidates cache and re-fetches
-      const refreshed = await refreshEditors();
-      expect(refreshed).toEqual(updatedEditors);
-      expect(mockGet).toHaveBeenCalledTimes(2);
-    });
-
-    it("updates the cache so subsequent fetchEditors returns new data", async () => {
-      const initialEditors = [createMockEditor()];
-      const updatedEditors = [
-        createMockEditor({
-          id: "neovim",
-          display_name: "Neovim",
-          detected: false,
-        }),
-      ];
-      mockGet.mockResolvedValueOnce({ editors: initialEditors });
-      mockGet.mockResolvedValueOnce({ editors: updatedEditors });
-
-      await fetchEditors();
-      await refreshEditors();
-
-      // Third call should use the refreshed cache, no new HTTP request
-      const result = await fetchEditors();
-      expect(result).toEqual(updatedEditors);
-      expect(mockGet).toHaveBeenCalledTimes(2);
+      expect(mockGet).toHaveBeenCalledWith("/api/editors");
+      expect(result).toEqual(editors);
     });
 
     it("throws on network error during refresh", async () => {
       mockGet.mockRejectedValueOnce(new Error("Connection refused"));
 
       await expect(refreshEditors()).rejects.toThrow("Connection refused");
-    });
-  });
-
-  describe("getCachedEditors", () => {
-    it("returns null before any fetch has been made", () => {
-      const result = getCachedEditors();
-
-      expect(result).toBeNull();
-    });
-
-    it("returns editors array after fetchEditors has been called", async () => {
-      const editors = [
-        createMockEditor(),
-        createMockEditor({
-          id: "intellij",
-          display_name: "IntelliJ",
-          detected: false,
-        }),
-      ];
-      mockGet.mockResolvedValueOnce({ editors });
-
-      await fetchEditors();
-      const cached = getCachedEditors();
-
-      expect(cached).toEqual(editors);
-      expect(cached).toHaveLength(2);
-    });
-
-    it("returns updated data after refreshEditors", async () => {
-      const initial = [createMockEditor({ id: "vscode" })];
-      const updated = [
-        createMockEditor({ id: "cursor", display_name: "Cursor" }),
-      ];
-      mockGet.mockResolvedValueOnce({ editors: initial });
-      mockGet.mockResolvedValueOnce({ editors: updated });
-
-      await fetchEditors();
-      expect(getCachedEditors()).toEqual(initial);
-
-      await refreshEditors();
-      expect(getCachedEditors()).toEqual(updated);
     });
   });
 

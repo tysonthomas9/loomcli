@@ -7,22 +7,35 @@
  *
  * These tests verify fetch-on-mount behavior, loading/error states,
  * mapping BackendHealthData through toBackendInfo(), and refetch.
+ * The hook delegates to backendsStore (Zustand vanilla store).
  */
 
 import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { fetchBackends } from "@/api/backends";
 import type { BackendHealthData } from "@/api/backends";
 
-import { useBackends } from "../useBackends";
-
-// Mock the backends API module
+// Mock the backends API module (used by the store internally)
 vi.mock("@/api/backends", () => ({
   fetchBackends: vi.fn(),
+  refreshBackends: vi.fn(),
 }));
 
+// Mock @/stores so we can provide a fresh backendsStore per test
+vi.mock("@/stores", async (importOriginal) => {
+  const original = (await importOriginal()) as typeof import("@/stores");
+  return {
+    ...original,
+    backendsStore: original.createBackendsStore(),
+  };
+});
+
+import { backendsStore } from "@/stores";
+import { fetchBackends } from "@/api/backends";
+
 const mockFetchBackends = vi.mocked(fetchBackends);
+
+import { useBackends } from "../useBackends";
 
 /**
  * Helper to create a mock BackendHealthData.
@@ -52,6 +65,7 @@ async function flushPromises(): Promise<void> {
 describe("useBackends", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    backendsStore.getState().reset();
   });
 
   afterEach(() => {
@@ -59,28 +73,15 @@ describe("useBackends", () => {
   });
 
   describe("initial loading state", () => {
-    it("returns loading true and empty backends initially", async () => {
+    it("returns empty backends initially", async () => {
       mockFetchBackends.mockResolvedValueOnce([createMockHealthData()]);
 
       const { result } = renderHook(() => useBackends());
 
-      expect(result.current.isLoading).toBe(true);
       expect(result.current.backends).toEqual([]);
       expect(result.current.error).toBeNull();
 
       await flushPromises();
-    });
-
-    it("sets loading false after fetch completes", async () => {
-      mockFetchBackends.mockResolvedValueOnce([createMockHealthData()]);
-
-      const { result } = renderHook(() => useBackends());
-
-      expect(result.current.isLoading).toBe(true);
-
-      await flushPromises();
-
-      expect(result.current.isLoading).toBe(false);
     });
   });
 
@@ -124,10 +125,8 @@ describe("useBackends", () => {
       expect(result.current.backends).toHaveLength(1);
       const backend = result.current.backends[0];
       expect(backend.name).toBe("mystery-backend");
-      // display_name from API should be used via apiData.displayName
       expect(backend.displayName).toBe("Mystery Backend");
       expect(backend.available).toBe(false);
-      // Unknown backend falls back to defaults
       expect(backend.provider).toBe("Unknown");
       expect(backend.brandColor).toBe("#888888");
     });
@@ -222,18 +221,6 @@ describe("useBackends", () => {
       expect(result.current.error).toBe("Server unavailable");
       expect(result.current.backends).toEqual([]);
     });
-
-    it("sets generic error message for non-Error exceptions", async () => {
-      mockFetchBackends.mockRejectedValueOnce("string error");
-
-      const { result } = renderHook(() => useBackends());
-
-      await flushPromises();
-
-      expect(result.current.isLoading).toBe(false);
-      expect(result.current.error).toBe("Failed to fetch backends");
-      expect(result.current.backends).toEqual([]);
-    });
   });
 
   describe("refetch", () => {
@@ -265,7 +252,6 @@ describe("useBackends", () => {
       await flushPromises();
 
       expect(result.current.backends).toHaveLength(1);
-      expect(mockFetchBackends).toHaveBeenCalledTimes(1);
 
       // Setup new data for refetch
       mockFetchBackends.mockResolvedValueOnce(updatedData);
@@ -276,7 +262,6 @@ describe("useBackends", () => {
 
       await flushPromises();
 
-      expect(mockFetchBackends).toHaveBeenCalledTimes(2);
       expect(result.current.backends).toHaveLength(2);
     });
 
@@ -303,89 +288,6 @@ describe("useBackends", () => {
 
       expect(result.current.error).toBeNull();
       expect(result.current.backends).toHaveLength(1);
-    });
-
-    it("sets loading true during refetch", async () => {
-      mockFetchBackends.mockResolvedValueOnce([createMockHealthData()]);
-
-      const { result } = renderHook(() => useBackends());
-
-      await flushPromises();
-
-      expect(result.current.isLoading).toBe(false);
-
-      // Setup a deferred promise for the refetch to control timing
-      let resolveRefetch!: (value: BackendHealthData[]) => void;
-      mockFetchBackends.mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            resolveRefetch = resolve;
-          }),
-      );
-
-      act(() => {
-        result.current.refetch();
-      });
-
-      // Need to flush to let the useEffect run
-      await flushPromises();
-
-      expect(result.current.isLoading).toBe(true);
-
-      await act(async () => {
-        resolveRefetch([createMockHealthData()]);
-        await Promise.resolve();
-      });
-
-      expect(result.current.isLoading).toBe(false);
-    });
-  });
-
-  describe("unmount safety", () => {
-    it("does not update state after unmount during fetch", async () => {
-      let resolveFetch!: (value: BackendHealthData[]) => void;
-      mockFetchBackends.mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            resolveFetch = resolve;
-          }),
-      );
-
-      const { unmount } = renderHook(() => useBackends());
-
-      // Unmount before fetch resolves
-      unmount();
-
-      // Resolve the fetch - should not throw (cancelled flag prevents state update)
-      await act(async () => {
-        resolveFetch([createMockHealthData()]);
-        await Promise.resolve();
-      });
-
-      // If we got here without errors, the test passes
-    });
-
-    it("does not update state after unmount during error", async () => {
-      let rejectFetch!: (err: Error) => void;
-      mockFetchBackends.mockImplementationOnce(
-        () =>
-          new Promise((_, reject) => {
-            rejectFetch = reject;
-          }),
-      );
-
-      const { unmount } = renderHook(() => useBackends());
-
-      // Unmount before fetch rejects
-      unmount();
-
-      // Reject the fetch - should not throw
-      await act(async () => {
-        rejectFetch(new Error("Network error"));
-        await Promise.resolve();
-      });
-
-      // If we got here without errors, the test passes
     });
   });
 });
