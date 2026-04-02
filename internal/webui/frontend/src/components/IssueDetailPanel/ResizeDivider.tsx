@@ -36,7 +36,11 @@ export function ResizeDivider({
   // useLayoutEffect so dividerRef.current is still valid (runs before ref detachment).
   useLayoutEffect(() => {
     return () => {
-      if (isDraggingRef.current && pointerIdRef.current !== null && dividerRef.current) {
+      if (
+        isDraggingRef.current &&
+        pointerIdRef.current !== null &&
+        dividerRef.current
+      ) {
         dividerRef.current.releasePointerCapture(pointerIdRef.current);
       }
     };

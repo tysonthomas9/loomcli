@@ -17,7 +17,14 @@ export function AuthGate({ children }: { children: ReactNode }): JSX.Element {
   // Still checking session
   if (isLoading) {
     return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          minHeight: "100vh",
+        }}
+      >
         <div style={{ color: "var(--text-secondary, #666)", fontSize: "14px" }}>
           Checking authentication...
         </div>

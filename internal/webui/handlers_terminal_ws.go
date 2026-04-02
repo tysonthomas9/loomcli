@@ -194,7 +194,7 @@ func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigi
 	}
 }
 
-const wsCloseBackendExited = 4001  // WebSocket close code for backend process exit (4000-4999 range)
+const wsCloseBackendExited = 4001 // WebSocket close code for backend process exit (4000-4999 range)
 const wsCloseSessionKilled = 4002 // WebSocket close code for user-initiated session kill
 
 // crashInfo communicates crash state from ptyToWS so the handler sets the right close code.

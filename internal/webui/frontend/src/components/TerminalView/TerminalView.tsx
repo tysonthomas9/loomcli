@@ -795,10 +795,20 @@ export function TerminalView({
   // This prevents the popup from blocking the terminal on first visit when
   // sessions are already running from a previous page load.
   useEffect(() => {
-    if (!dismissedWelcome && !metaLoading && tabMetadata && tabMetadata.length > 0) {
+    if (
+      !dismissedWelcome &&
+      !metaLoading &&
+      tabMetadata &&
+      tabMetadata.length > 0
+    ) {
       handleDismissWelcome();
     }
-  }, [dismissedWelcome, metaLoading, tabMetadata?.length, handleDismissWelcome]);
+  }, [
+    dismissedWelcome,
+    metaLoading,
+    tabMetadata?.length,
+    handleDismissWelcome,
+  ]);
 
   const handleToggleHelp = useCallback(() => {
     setIsHelpOpen((prev) => !prev);
@@ -1011,22 +1021,22 @@ export function TerminalView({
                   {tabs.map((tab) => {
                     const active = tab.id === activeTabId;
                     return (
-                    <div
-                      key={tab.id}
-                      className={styles.terminalPaneSplit}
-                      style={{
-                        visibility: active ? "visible" : "hidden",
-                        position: active ? "relative" : "absolute",
-                        inset: active ? undefined : 0,
-                      }}
-                      role="tabpanel"
-                      aria-hidden={!active}
-                      {...(!active && { inert: "" })}
-                      id={`terminal-panel-${tab.id}`}
-                      aria-labelledby={`terminal-tab-${tab.id}`}
-                    >
-                      {renderTerminalPane(tab, "left")}
-                    </div>
+                      <div
+                        key={tab.id}
+                        className={styles.terminalPaneSplit}
+                        style={{
+                          visibility: active ? "visible" : "hidden",
+                          position: active ? "relative" : "absolute",
+                          inset: active ? undefined : 0,
+                        }}
+                        role="tabpanel"
+                        aria-hidden={!active}
+                        {...(!active && { inert: "" })}
+                        id={`terminal-panel-${tab.id}`}
+                        aria-labelledby={`terminal-tab-${tab.id}`}
+                      >
+                        {renderTerminalPane(tab, "left")}
+                      </div>
                     );
                   })}
                 </div>
@@ -1048,21 +1058,21 @@ export function TerminalView({
                   {tabs.map((tab) => {
                     const active = tab.id === rightPaneTabId;
                     return (
-                    <div
-                      key={tab.id}
-                      className={styles.terminalPaneSplit}
-                      style={{
-                        visibility: active ? "visible" : "hidden",
-                        position: active ? "relative" : "absolute",
-                        inset: active ? undefined : 0,
-                      }}
-                      role="tabpanel"
-                      aria-hidden={!active}
-                      {...(!active && { inert: "" })}
-                      id={`terminal-panel-right-${tab.id}`}
-                    >
-                      {renderTerminalPane(tab, "right")}
-                    </div>
+                      <div
+                        key={tab.id}
+                        className={styles.terminalPaneSplit}
+                        style={{
+                          visibility: active ? "visible" : "hidden",
+                          position: active ? "relative" : "absolute",
+                          inset: active ? undefined : 0,
+                        }}
+                        role="tabpanel"
+                        aria-hidden={!active}
+                        {...(!active && { inert: "" })}
+                        id={`terminal-panel-right-${tab.id}`}
+                      >
+                        {renderTerminalPane(tab, "right")}
+                      </div>
                     );
                   })}
                 </div>

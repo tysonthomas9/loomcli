@@ -254,7 +254,9 @@ export const TerminalInstance = forwardRef<
         (reason: string) => onBackendCrashRef.current?.(reason),
         (data, sendToWs) => interceptorRef.current?.handleData(data, sendToWs),
         agentName,
-        () => { beingKilledRef.current = true; }, // onSessionKilled (code 4002)
+        () => {
+          beingKilledRef.current = true;
+        }, // onSessionKilled (code 4002)
       );
       wsCleanupRef.current = cleanupWs;
     };
@@ -283,10 +285,21 @@ export const TerminalInstance = forwardRef<
         reconnectCancelRef.current?.();
         reconnectCancelRef.current = null;
         const ws = wsRef.current;
-        if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+        if (
+          ws &&
+          (ws.readyState === WebSocket.OPEN ||
+            ws.readyState === WebSocket.CONNECTING)
+        ) {
           return new Promise<void>((resolve) => {
             const timeout = setTimeout(resolve, 2000); // fallback if close hangs
-            ws.addEventListener("close", () => { clearTimeout(timeout); resolve(); }, { once: true });
+            ws.addEventListener(
+              "close",
+              () => {
+                clearTimeout(timeout);
+                resolve();
+              },
+              { once: true },
+            );
             wsCleanupRef.current?.();
             wsCleanupRef.current = null;
           });
@@ -441,7 +454,10 @@ export const TerminalInstance = forwardRef<
     // Resolves to true if copy succeeded, false otherwise.
     function writeToClipboard(text: string): Promise<boolean> {
       if (navigator.clipboard?.writeText) {
-        return navigator.clipboard.writeText(text).then(() => true).catch(() => execCommandCopy(text));
+        return navigator.clipboard
+          .writeText(text)
+          .then(() => true)
+          .catch(() => execCommandCopy(text));
       }
       return Promise.resolve(execCommandCopy(text));
     }
@@ -472,7 +488,9 @@ export const TerminalInstance = forwardRef<
       const clean = stripAnsi(text);
       clearTimeout(copyDebounce);
       copyDebounce = setTimeout(() => {
-        writeToClipboard(clean).then((ok) => { if (ok) onCopyNotifyRef.current?.(); });
+        writeToClipboard(clean).then((ok) => {
+          if (ok) onCopyNotifyRef.current?.();
+        });
       }, 100);
     });
 
@@ -491,7 +509,9 @@ export const TerminalInstance = forwardRef<
         if (terminal.hasSelection()) {
           clearTimeout(copyDebounce); // cancel pending copy-on-select debounce
           const clean = stripAnsi(terminal.getSelection());
-          writeToClipboard(clean).then((ok) => { if (ok) onCopyNotifyRef.current?.(); });
+          writeToClipboard(clean).then((ok) => {
+            if (ok) onCopyNotifyRef.current?.();
+          });
           terminal.clearSelection();
           return false; // suppress SIGINT
         }
@@ -649,7 +669,9 @@ export const TerminalInstance = forwardRef<
           (data, sendToWs) =>
             interceptorRef.current?.handleData(data, sendToWs),
           agentName,
-          () => { beingKilledRef.current = true; }, // onSessionKilled (code 4002)
+          () => {
+            beingKilledRef.current = true;
+          }, // onSessionKilled (code 4002)
         );
         wsCleanupRef.current = cleanup;
       };

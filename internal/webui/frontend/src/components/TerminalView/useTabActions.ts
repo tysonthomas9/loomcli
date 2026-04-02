@@ -92,10 +92,7 @@ export function useTabActions({
       // recreating the session.
       const doKill = () =>
         scheduleSessionKill("", sessionNameToDelete, true).catch((err) =>
-          console.error(
-            `Failed to kill session ${sessionNameToDelete}:`,
-            err,
-          ),
+          console.error(`Failed to kill session ${sessionNameToDelete}:`, err),
         );
       if (handle?.disconnect) {
         handle.disconnect().then(doKill);

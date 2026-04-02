@@ -223,6 +223,25 @@ func resolveRepoPaths(repoPaths []string) ([]resolvedRepo, error) {
 	return resolved, nil
 }
 
+// initWorkspaceBeads initializes beads in each repo and at the workspace root,
+// then registers repos with relative paths for correct source_repo values.
+func initWorkspaceBeads(wsDir string, repos []RepoConfig) {
+	for _, repo := range repos {
+		if result := execCommand(repo.Path, "bd", "init", "--quiet"); result.Err != nil {
+			slog.Warn("bd init failed for repo", "repo", repo.Name, "path", repo.Path, "err", result.Err)
+		}
+	}
+	if result := execCommand(wsDir, "bd", "init", "--quiet"); result.Err != nil {
+		slog.Warn("bd init failed for workspace root", "path", wsDir, "err", result.Err)
+	}
+	for _, repo := range repos {
+		result := execCommand(wsDir, "bd", "repo", "add", repo.Name)
+		if result.Err != nil {
+			slog.Warn("failed to add repo to workspace beads", "repo", repo.Name, "err", result.Err)
+		}
+	}
+}
+
 // createEmptyWorkspace creates worktrees from existing repos.
 func createEmptyWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir, branch string, repoPaths []string) (webui.WorkspaceCreateResult, error) {
 	// Security: ensure path is under allowed base directory
@@ -274,22 +293,7 @@ func createEmptyWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir, b
 		repos = append(repos, RepoConfig{Name: repo.name, Path: worktreePath})
 	}
 
-	// Initialize beads in each worktree repo so it has issues to hydrate from.
-	for _, repo := range repos {
-		_ = execCommand(repo.Path, "bd", "init", "--quiet")
-	}
-
-	// Initialize beads at the workspace root and register each repo using
-	// relative paths. Relative paths ensure source_repo values match the
-	// repo names used by the frontend's source_repos filter.
-	_ = execCommand(wsDir, "bd", "init", "--quiet")
-	for _, repo := range repos {
-		result := execCommand(wsDir, "bd", "repo", "add", repo.Name)
-		if result.Err != nil {
-			slog.Warn("failed to add repo to workspace beads", "repo", repo.Name, "err", result.Err)
-		}
-	}
-	_ = execCommand(wsDir, "bd", "repo", "sync")
+	initWorkspaceBeads(wsDir, repos)
 
 	// Write default loom.yaml with agents (best-effort; non-fatal)
 	if err := writeLoomYaml(wsDir); err != nil {
@@ -313,6 +317,10 @@ func createEmptyWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir, b
 	go func() {
 		if err := ensureDaemonForWorkspace(context.Background(), wsDir, timeout); err != nil {
 			slog.Warn("failed to start daemon for workspace", "workspace", wsName, "err", err)
+		}
+		// Sync repos after daemon is ready (can be slow for large repos)
+		if result := execCommand(wsDir, "bd", "repo", "sync"); result.Err != nil {
+			slog.Warn("bd repo sync failed", "workspace", wsName, "err", result.Err)
 		}
 	}()
 
@@ -390,22 +398,7 @@ func createCloneWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir st
 		repos = append(repos, RepoConfig{Name: repoName, Path: clonePath})
 	}
 
-	// Initialize beads in each cloned repo so it has issues to hydrate from.
-	for _, repo := range repos {
-		_ = execCommand(repo.Path, "bd", "init", "--quiet")
-	}
-
-	// Initialize beads at the workspace root (SQLite mode for multi-repo hydration)
-	// and register each repo using relative paths. Relative paths ensure source_repo
-	// values (e.g. "loomcli") match the repo names used by the frontend filter.
-	_ = execCommand(wsDir, "bd", "init", "--quiet")
-	for _, repo := range repos {
-		result := execCommand(wsDir, "bd", "repo", "add", repo.Name)
-		if result.Err != nil {
-			slog.Warn("failed to add repo to workspace beads", "repo", repo.Name, "err", result.Err)
-		}
-	}
-	_ = execCommand(wsDir, "bd", "repo", "sync")
+	initWorkspaceBeads(wsDir, repos)
 
 	// Write default loom.yaml with agents (best-effort; non-fatal)
 	if err := writeLoomYaml(wsDir); err != nil {
@@ -429,6 +422,10 @@ func createCloneWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir st
 	go func() {
 		if err := ensureDaemonForWorkspace(context.Background(), wsDir, timeout); err != nil {
 			slog.Warn("failed to start daemon for workspace", "workspace", wsName, "err", err)
+		}
+		// Sync repos after daemon is ready (can be slow for large repos)
+		if result := execCommand(wsDir, "bd", "repo", "sync"); result.Err != nil {
+			slog.Warn("bd repo sync failed", "workspace", wsName, "err", result.Err)
 		}
 	}()
 

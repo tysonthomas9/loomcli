@@ -38,10 +38,10 @@ var validSessionName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 type TerminalSession struct {
 	ConnID  string   // unique connection ID (e.g., "talk-to-lead:1")
 	Name    string   // tmux session name (e.g., "talk-to-lead")
-	Command string        // command running in the session
-	PTY     *os.File      // PTY master fd from creack/pty
+	Command string   // command running in the session
+	PTY     *os.File // PTY master fd from creack/pty
 	cmd     *exec.Cmd
-	killCh  chan struct{}  // closed by KillSessionByName to signal WS handlers
+	killCh  chan struct{} // closed by KillSessionByName to signal WS handlers
 	mu      sync.Mutex
 	closed  bool
 }

@@ -1,12 +1,13 @@
 import { useState, useEffect } from "react";
 import { Outlet } from "react-router-dom";
 
-import { fetchAppConfig, type AppConfig, AppConfigError } from "@/api/appConfig";
-import { initExternalAuth } from "@/api/authClient";
 import {
-  ExternalAuthProvider,
-  NoAuthProvider,
-} from "@/contexts/AuthContext";
+  fetchAppConfig,
+  type AppConfig,
+  AppConfigError,
+} from "@/api/appConfig";
+import { initExternalAuth } from "@/api/authClient";
+import { ExternalAuthProvider, NoAuthProvider } from "@/contexts/AuthContext";
 import { AuthGate } from "@/components/AuthGate";
 
 /**
@@ -37,12 +38,34 @@ export function AuthBootstrap(): JSX.Element {
   // Error state — config endpoint unreachable or invalid
   if (error) {
     return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          minHeight: "100vh",
+        }}
+      >
         <div style={{ textAlign: "center", maxWidth: 400 }}>
-          <h2 style={{ color: "var(--text-primary, #1a1a1a)", margin: "0 0 8px" }}>Configuration Error</h2>
-          <p style={{ color: "var(--text-secondary, #666)", fontSize: "14px", margin: "0 0 16px" }}>{error}</p>
+          <h2
+            style={{ color: "var(--text-primary, #1a1a1a)", margin: "0 0 8px" }}
+          >
+            Configuration Error
+          </h2>
+          <p
+            style={{
+              color: "var(--text-secondary, #666)",
+              fontSize: "14px",
+              margin: "0 0 16px",
+            }}
+          >
+            {error}
+          </p>
           <button
-            onClick={() => { setError(null); setConfig(null); }}
+            onClick={() => {
+              setError(null);
+              setConfig(null);
+            }}
             style={{
               padding: "8px 20px",
               border: "1px solid var(--border-primary, #ccc)",
@@ -62,7 +85,14 @@ export function AuthBootstrap(): JSX.Element {
   // Loading state
   if (!config) {
     return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          minHeight: "100vh",
+        }}
+      >
         <div style={{ color: "var(--text-secondary, #666)", fontSize: "14px" }}>
           Loading...
         </div>

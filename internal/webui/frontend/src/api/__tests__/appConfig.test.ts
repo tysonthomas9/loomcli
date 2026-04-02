@@ -210,22 +210,16 @@ describe("appConfig", () => {
     ).rejects.toThrow("Unknown auth mode: magic");
   });
 
-  it("throws AppConfigError when external mode missing auth_url", async () => {
+  it("uses window.location.origin when external mode has no auth_url", async () => {
     global.fetch = vi
       .fn()
       .mockResolvedValue(jsonResponse({ mode: "external" }));
 
-    await expect(fetchAppConfig()).rejects.toThrow(AppConfigError);
-    await expect(
-      (async () => {
-        vi.resetModules();
-        const mod = await import("../appConfig");
-        global.fetch = vi
-          .fn()
-          .mockResolvedValue(jsonResponse({ mode: "external" }));
-        return mod.fetchAppConfig();
-      })(),
-    ).rejects.toThrow("External auth mode missing auth_url");
+    const config = await fetchAppConfig();
+    expect(config.mode).toBe("external");
+    if (config.mode === "external") {
+      expect(config.auth_url).toBe(window.location.origin);
+    }
   });
 
   it("strips unexpected fields from none response", async () => {
