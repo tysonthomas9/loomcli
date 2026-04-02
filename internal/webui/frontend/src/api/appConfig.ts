@@ -65,10 +65,12 @@ async function doFetch(): Promise<AppConfig> {
     }
 
     if (mode === "external") {
-      const authUrl = data.auth_url;
-      if (typeof authUrl !== "string" || authUrl === "") {
-        throw new AppConfigError("External auth mode missing auth_url");
-      }
+      // auth_url may be empty when the server proxies auth requests
+      // same-origin via /api/auth/*. Use current origin in that case.
+      const authUrl =
+        typeof data.auth_url === "string" && data.auth_url !== ""
+          ? data.auth_url
+          : window.location.origin;
       return { mode: "external", auth_url: authUrl };
     }
 

@@ -32,10 +32,14 @@ func TestIsPublicRoute(t *testing.T) {
 		{"GET /api/issues/123", http.MethodGet, "/api/issues/123", false},
 		{"GET /api/events (SSE, own auth)", http.MethodGet, "/api/events", true},
 
+		// Auth routes are public for all methods (BetterAuth proxy handles its own auth)
+		{"POST /api/auth/token", http.MethodPost, "/api/auth/token", true},
+		{"POST /api/auth/sign-in/email", http.MethodPost, "/api/auth/sign-in/email", true},
+		{"POST /api/auth/sign-up/email", http.MethodPost, "/api/auth/sign-up/email", true},
+
 		// Non-GET methods on public paths should not be public
 		{"POST /health", http.MethodPost, "/health", false},
 		{"POST /api/health", http.MethodPost, "/api/health", false},
-		{"POST /api/auth/token", http.MethodPost, "/api/auth/token", false},
 		{"PUT /health", http.MethodPut, "/health", false},
 		{"DELETE /api/health", http.MethodDelete, "/api/health", false},
 		{"POST /", http.MethodPost, "/", false},

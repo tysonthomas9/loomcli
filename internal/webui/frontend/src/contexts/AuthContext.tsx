@@ -31,8 +31,14 @@ type AuthContextValue = {
   isAuthenticated: boolean;
   /** True when the auth service is unreachable (network error, not 401) */
   authServiceDown: boolean;
-  /** Start OAuth flow for the given provider */
-  signIn: (provider: "github" | "google") => Promise<void>;
+  /** Start sign-in: OAuth provider or email/password */
+  signIn: (
+    provider: "github" | "google" | "email",
+    email?: string,
+    password?: string,
+  ) => Promise<void>;
+  /** Sign up with email/password */
+  signUp: (email: string, password: string, name: string) => Promise<void>;
   /** Sign out: clears session, token, dispatches event */
   signOut: () => Promise<void>;
 };
@@ -158,20 +164,52 @@ export function ExternalAuthProvider({
       }
     : null;
 
-  const signIn = useCallback(async (provider: "github" | "google") => {
-    try {
-      sessionStorage.setItem(
-        "loom-auth-return-to",
-        window.location.pathname + window.location.search,
-      );
-    } catch {
-      // sessionStorage quota exceeded — acceptable to lose returnTo
-    }
-    await getAuthClient().signIn.social({
-      provider,
-      callbackURL: window.location.origin,
-    });
-  }, []);
+  const signIn = useCallback(
+    async (
+      provider: "github" | "google" | "email",
+      email?: string,
+      password?: string,
+    ) => {
+      if (provider === "email") {
+        if (!email || !password) throw new Error("Email and password required");
+        const result = await getAuthClient().signIn.email({
+          email,
+          password,
+        });
+        if (result.error) {
+          throw new Error(result.error.message ?? "Sign in failed");
+        }
+        return;
+      }
+      try {
+        sessionStorage.setItem(
+          "loom-auth-return-to",
+          window.location.pathname + window.location.search,
+        );
+      } catch {
+        // sessionStorage quota exceeded — acceptable to lose returnTo
+      }
+      await getAuthClient().signIn.social({
+        provider,
+        callbackURL: window.location.origin,
+      });
+    },
+    [],
+  );
+
+  const signUp = useCallback(
+    async (email: string, password: string, name: string) => {
+      const result = await getAuthClient().signUp.email({
+        email,
+        password,
+        name,
+      });
+      if (result.error) {
+        throw new Error(result.error.message ?? "Sign up failed");
+      }
+    },
+    [],
+  );
 
   const signOut = useCallback(async () => {
     await getAuthClient().signOut();
@@ -186,6 +224,7 @@ export function ExternalAuthProvider({
     isAuthenticated: !!session?.user,
     authServiceDown,
     signIn,
+    signUp,
     signOut,
   };
 
@@ -201,6 +240,7 @@ const NO_AUTH_VALUE: AuthContextValue = {
   isAuthenticated: true,
   authServiceDown: false,
   signIn: async () => {},
+  signUp: async () => {},
   signOut: async () => {},
 };
 

@@ -23,6 +23,12 @@ func isPublicRoute(method, path string) bool {
 		return true
 	}
 
+	// All auth routes are public — the BetterAuth service handles its own auth.
+	// Must be above the GET-only gate because sign-in/sign-up use POST.
+	if strings.HasPrefix(normalizedPath, "/api/auth/") {
+		return true
+	}
+
 	// Client error reporting is public so errors during auth bootstrap are captured
 	if method == http.MethodPost && normalizedPath == "/api/client-errors" {
 		return true
@@ -46,8 +52,6 @@ func isPublicRoute(method, path string) bool {
 	case normalizedPath == "/health":
 		return true
 	case normalizedPath == "/api/health":
-		return true
-	case normalizedPath == "/api/auth/token":
 		return true
 	case normalizedPath == "/api/config":
 		// Auth discovery endpoint must be accessible without JWT (bootstrap)

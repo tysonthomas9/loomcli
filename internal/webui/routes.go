@@ -38,13 +38,15 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 	authCfgLimiter := newAuthConfigLimiter(rate.Limit(5), 10, 5*time.Minute, 10*time.Minute)
 	mux.HandleFunc("GET /api/config", handleAuthConfig(extAuthURL, authCfgLimiter))
 
-	// Auth token bootstrap endpoint (same-origin only)
-	// Always register this route so that when auth is disabled, the frontend
-	// gets an explicit 404 JSON response instead of a 200 HTML from the SPA catch-all.
-	if authEnabled {
-		mux.HandleFunc("GET /api/auth/token", handleAuthToken(apiKey))
-	} else {
-		mux.HandleFunc("GET /api/auth/token", handleAuthTokenDisabled())
+	// Auth token bootstrap endpoint (same-origin only).
+	// When external auth is active (extAuthURL != ""), skip the legacy handler
+	// so that /api/auth/token is proxied to BetterAuth's JWT endpoint instead.
+	if extAuthURL == "" {
+		if authEnabled {
+			mux.HandleFunc("GET /api/auth/token", handleAuthToken(apiKey))
+		} else {
+			mux.HandleFunc("GET /api/auth/token", handleAuthTokenDisabled())
+		}
 	}
 
 	// Stats endpoint for project statistics (workspace-aware when multiPool available)
@@ -98,6 +100,13 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 	}
 
 	// Legacy SSE endpoint removed — SSE is now workspace-scoped at /api/workspaces/{ws}/events
+
+	// Auth proxy — forwards /api/auth/* to the external BetterAuth service.
+	// Makes auth cookies same-origin with the frontend, avoiding cross-site
+	// cookie restrictions that block SameSite cookies over HTTP.
+	if authProxy := newAuthProxy(extAuthURL, nil); authProxy != nil {
+		mux.Handle("/api/auth/", authProxy)
+	}
 
 	// Loom proxy for agent status endpoints (same-origin to avoid CORS/CSP issues)
 	if loomProxy := newLoomProxy(loomServerURL); loomProxy != nil {

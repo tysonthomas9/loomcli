@@ -36,6 +36,8 @@ let mockSessionData: {
 
 const mockToken = vi.fn();
 const mockSignInSocial = vi.fn();
+const mockSignInEmail = vi.fn();
+const mockSignUpEmail = vi.fn();
 const mockSignOut = vi.fn();
 
 const mockGetAuthClient = vi.fn();
@@ -52,7 +54,8 @@ function buildMockClient() {
   return {
     useSession: () => mockSessionData,
     token: mockToken,
-    signIn: { social: mockSignInSocial },
+    signIn: { social: mockSignInSocial, email: mockSignInEmail },
+    signUp: { email: mockSignUpEmail },
     signOut: mockSignOut,
   };
 }
@@ -75,6 +78,8 @@ describe("AuthContext", () => {
     resetSessionData();
     mockToken.mockReset();
     mockSignInSocial.mockReset();
+    mockSignInEmail.mockReset();
+    mockSignUpEmail.mockReset();
     mockSignOut.mockReset();
     mockSetAuthToken.mockReset();
     mockSetAuthState.mockReset();
@@ -83,6 +88,8 @@ describe("AuthContext", () => {
     // Default mock implementations
     mockToken.mockResolvedValue({ data: { token: "jwt-123" }, error: null });
     mockSignInSocial.mockResolvedValue(undefined);
+    mockSignInEmail.mockResolvedValue({ data: {}, error: null });
+    mockSignUpEmail.mockResolvedValue({ data: {}, error: null });
     mockSignOut.mockResolvedValue(undefined);
     mockGetAuthClient.mockReturnValue(buildMockClient());
 

@@ -2,31 +2,37 @@
  * RedirectToWorkspace — root "/" route component.
  * Reads last-used workspace from localStorage or fetches from API,
  * then navigates to /ws/{id}/ with replace semantics.
- * T25 will enhance this with full name-to-ID fallback and migration logic.
+ * When no workspaces exist, shows a create button.
+ *
+ * Waits for the auth token to be acquired before fetching workspaces,
+ * preventing a race condition where the API call fires before the JWT
+ * is exchanged and returns 401.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
   getLastWorkspaceId,
   clearLastWorkspaceId,
 } from "@/utils/scopedStorage";
-import { fetchWorkspace } from "@/api/workspace";
+import { fetchWorkspace, invalidateWorkspaceCache } from "@/api/workspace";
+import { getAuthState, onAuthStateChange } from "@/api/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { CreateWorkspaceModal } from "@/components/CreateWorkspaceModal";
 
 export function RedirectToWorkspace() {
   const navigate = useNavigate();
+  const { mode } = useAuth();
   const [resolving, setResolving] = useState(true);
+  const [showCreate, setShowCreate] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-
+  const resolveWorkspace = useCallback(() => {
     const lastId = getLastWorkspaceId();
 
-    // Fetch workspace list — validates lastId and provides fallback
+    invalidateWorkspaceCache();
     fetchWorkspace()
       .then((data) => {
-        if (cancelled) return;
         const workspaces = data.workspaces;
         if (workspaces.length === 0) {
           if (lastId) clearLastWorkspaceId(lastId);
@@ -51,7 +57,6 @@ export function RedirectToWorkspace() {
         }
       })
       .catch(() => {
-        if (cancelled) return;
         // Network error — try localStorage as best-effort if available
         if (lastId) {
           navigate(`/ws/${lastId}/`, { replace: true });
@@ -59,25 +64,76 @@ export function RedirectToWorkspace() {
         }
         setResolving(false);
       });
-
-    return () => {
-      cancelled = true;
-    };
   }, [navigate]);
+
+  useEffect(() => {
+    // No auth mode — fetch immediately
+    if (mode === "none") {
+      resolveWorkspace();
+      return;
+    }
+
+    // External auth — wait for JWT to be acquired before fetching
+    if (getAuthState() === "authenticated") {
+      resolveWorkspace();
+      return;
+    }
+
+    const unsub = onAuthStateChange((state) => {
+      if (state === "authenticated") {
+        unsub();
+        resolveWorkspace();
+      }
+    });
+
+    return unsub;
+  }, [mode, resolveWorkspace]);
 
   if (!resolving) {
     return (
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          height: "100vh",
-          color: "var(--text-secondary, #666)",
-        }}
-      >
-        No workspaces found. Create one to get started.
-      </div>
+      <>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            height: "100vh",
+            gap: "16px",
+            color: "var(--text-secondary, #666)",
+          }}
+        >
+          <p style={{ margin: 0, fontSize: "15px" }}>
+            No workspaces found. Create one to get started.
+          </p>
+          <button
+            onClick={() => setShowCreate(true)}
+            style={{
+              padding: "10px 24px",
+              border: "none",
+              borderRadius: "8px",
+              background: "var(--bg-accent, #1976d2)",
+              color: "#fff",
+              fontSize: "14px",
+              fontWeight: 500,
+              cursor: "pointer",
+            }}
+          >
+            Create Workspace
+          </button>
+        </div>
+        <CreateWorkspaceModal
+          isOpen={showCreate}
+          onClose={() => setShowCreate(false)}
+          onSuccess={(data, _name) => {
+            setShowCreate(false);
+            const ws = data.workspaces[0];
+            if (ws) {
+              navigate(`/ws/${ws.id}/`, { replace: true });
+            }
+          }}
+        />
+      </>
     );
   }
 

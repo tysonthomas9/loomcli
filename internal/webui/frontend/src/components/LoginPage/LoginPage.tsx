@@ -1,8 +1,15 @@
+import { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import styles from "./LoginPage.module.css";
 
 export function LoginPage(): JSX.Element {
-  const { signIn, authServiceDown } = useAuth();
+  const { signIn, signUp, authServiceDown } = useAuth();
+  const [isSignUp, setIsSignUp] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [name, setName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
   if (authServiceDown) {
     return (
@@ -23,11 +30,97 @@ export function LoginPage(): JSX.Element {
     );
   }
 
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+
+    try {
+      if (isSignUp) {
+        await signUp(email, password, name);
+      } else {
+        await signIn("email", email, password);
+      }
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Authentication failed",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <div className={styles.container}>
       <div className={styles.card}>
         <h1 className={styles.title}>Loom</h1>
         <p className={styles.subtitle}>Agent Management Platform</p>
+
+        <form onSubmit={handleSubmit} className={styles.form}>
+          {isSignUp && (
+            <input
+              type="text"
+              placeholder="Name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className={styles.input}
+              autoComplete="name"
+            />
+          )}
+          <input
+            type="email"
+            placeholder="Email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className={styles.input}
+            autoComplete="email"
+            required
+          />
+          <input
+            type="password"
+            placeholder="Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className={styles.input}
+            autoComplete={isSignUp ? "new-password" : "current-password"}
+            required
+            minLength={8}
+          />
+
+          {error && <p className={styles.error}>{error}</p>}
+
+          <button
+            type="submit"
+            className={styles.submitButton}
+            disabled={loading}
+          >
+            {loading
+              ? isSignUp
+                ? "Creating account..."
+                : "Signing in..."
+              : isSignUp
+                ? "Create account"
+                : "Sign in"}
+          </button>
+        </form>
+
+        <p className={styles.toggleText}>
+          {isSignUp ? "Already have an account?" : "Don't have an account?"}{" "}
+          <button
+            type="button"
+            className={styles.toggleButton}
+            onClick={() => {
+              setIsSignUp(!isSignUp);
+              setError(null);
+            }}
+          >
+            {isSignUp ? "Sign in" : "Sign up"}
+          </button>
+        </p>
+
+        <div className={styles.divider}>
+          <span className={styles.dividerText}>or</span>
+        </div>
 
         <div className={styles.providers}>
           <button

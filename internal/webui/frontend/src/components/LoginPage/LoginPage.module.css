@@ -30,6 +30,95 @@
   margin: 0 0 32px;
 }
 
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.input {
+  padding: 12px 14px;
+  border: 1px solid var(--border-primary, #d0d0d0);
+  border-radius: 8px;
+  font-size: 15px;
+  background: var(--bg-surface, #fff);
+  color: var(--text-primary, #1a1a1a);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.input:focus {
+  border-color: var(--bg-accent, #1976d2);
+}
+
+.input::placeholder {
+  color: var(--text-tertiary, #999);
+}
+
+.submitButton {
+  padding: 12px 24px;
+  border: none;
+  border-radius: 8px;
+  background: var(--bg-accent, #1976d2);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.submitButton:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.submitButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.toggleText {
+  font-size: 13px;
+  color: var(--text-secondary, #666);
+  margin: 0 0 20px;
+}
+
+.toggleButton {
+  background: none;
+  border: none;
+  color: var(--bg-accent, #1976d2);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.divider {
+  position: relative;
+  margin: 0 0 20px;
+  text-align: center;
+}
+
+.divider::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--border-primary, #e0e0e0);
+}
+
+.dividerText {
+  position: relative;
+  background: var(--bg-surface, #fff);
+  padding: 0 12px;
+  font-size: 12px;
+  color: var(--text-tertiary, #999);
+  text-transform: uppercase;
+}
+
 .providers {
   display: flex;
   flex-direction: column;
@@ -65,7 +154,7 @@
 .error {
   color: var(--text-danger, #d32f2f);
   font-size: 14px;
-  margin: 0 0 16px;
+  margin: 0;
 }
 
 .retryButton {

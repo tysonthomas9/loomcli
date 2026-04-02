@@ -274,8 +274,22 @@ func createEmptyWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir, b
 		repos = append(repos, RepoConfig{Name: repo.name, Path: worktreePath})
 	}
 
-	// bd init (best-effort)
-	_ = execCommand(wsDir, "bd", "init")
+	// Initialize beads in each worktree repo so it has issues to hydrate from.
+	for _, repo := range repos {
+		_ = execCommand(repo.Path, "bd", "init", "--quiet")
+	}
+
+	// Initialize beads at the workspace root and register each repo using
+	// relative paths. Relative paths ensure source_repo values match the
+	// repo names used by the frontend's source_repos filter.
+	_ = execCommand(wsDir, "bd", "init", "--quiet")
+	for _, repo := range repos {
+		result := execCommand(wsDir, "bd", "repo", "add", repo.Name)
+		if result.Err != nil {
+			slog.Warn("failed to add repo to workspace beads", "repo", repo.Name, "err", result.Err)
+		}
+	}
+	_ = execCommand(wsDir, "bd", "repo", "sync")
 
 	// Write default loom.yaml with agents (best-effort; non-fatal)
 	if err := writeLoomYaml(wsDir); err != nil {
@@ -376,8 +390,22 @@ func createCloneWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir st
 		repos = append(repos, RepoConfig{Name: repoName, Path: clonePath})
 	}
 
-	// bd init (best-effort)
-	_ = execCommand(wsDir, "bd", "init")
+	// Initialize beads in each cloned repo so it has issues to hydrate from.
+	for _, repo := range repos {
+		_ = execCommand(repo.Path, "bd", "init", "--quiet")
+	}
+
+	// Initialize beads at the workspace root (SQLite mode for multi-repo hydration)
+	// and register each repo using relative paths. Relative paths ensure source_repo
+	// values (e.g. "loomcli") match the repo names used by the frontend filter.
+	_ = execCommand(wsDir, "bd", "init", "--quiet")
+	for _, repo := range repos {
+		result := execCommand(wsDir, "bd", "repo", "add", repo.Name)
+		if result.Err != nil {
+			slog.Warn("failed to add repo to workspace beads", "repo", repo.Name, "err", result.Err)
+		}
+	}
+	_ = execCommand(wsDir, "bd", "repo", "sync")
 
 	// Write default loom.yaml with agents (best-effort; non-fatal)
 	if err := writeLoomYaml(wsDir); err != nil {
