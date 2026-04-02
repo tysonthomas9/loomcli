@@ -210,20 +210,15 @@ describe("appConfig", () => {
     ).rejects.toThrow("Unknown auth mode: magic");
   });
 
-  it("throws AppConfigError when oidc mode missing auth_url", async () => {
+  it("falls back to window.location.origin when oidc mode omits auth_url (same-origin proxy)", async () => {
     global.fetch = vi.fn().mockResolvedValue(jsonResponse({ mode: "oidc" }));
 
-    await expect(fetchAppConfig()).rejects.toThrow(AppConfigError);
-    await expect(
-      (async () => {
-        vi.resetModules();
-        const mod = await import("../appConfig");
-        global.fetch = vi
-          .fn()
-          .mockResolvedValue(jsonResponse({ mode: "oidc" }));
-        return mod.fetchAppConfig();
-      })(),
-    ).rejects.toThrow("OIDC auth mode missing auth_url");
+    const config = await fetchAppConfig();
+
+    expect(config).toEqual({
+      mode: "oidc",
+      auth_url: window.location.origin,
+    });
   });
 
   it("strips unexpected fields from open response", async () => {

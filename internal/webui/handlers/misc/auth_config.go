@@ -111,9 +111,12 @@ func (l *AuthConfigLimiter) evictStale() {
 func HandleAuthConfig(extAuthURL string, limiter *AuthConfigLimiter) http.HandlerFunc {
 	var resp authConfigResponse
 	if extAuthURL != "" {
+		// Return same-origin URL so the frontend BetterAuth client sends
+		// requests through the auth proxy at /api/auth/*. This makes cookies
+		// first-party and avoids cross-origin issues over HTTP.
 		resp = authConfigResponse{
 			Mode:    authmode.ModeOIDC,
-			AuthURL: extAuthURL,
+			AuthURL: "", // empty = same-origin proxy at /api/auth/*
 		}
 	} else {
 		resp = authConfigResponse{

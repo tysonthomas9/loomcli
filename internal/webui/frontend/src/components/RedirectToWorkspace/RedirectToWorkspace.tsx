@@ -2,10 +2,13 @@
  * RedirectToWorkspace — root "/" route component.
  * Reads last-used workspace from localStorage or fetches from API,
  * then navigates to /ws/{id}/ with replace semantics.
- * T25 will enhance this with full name-to-ID fallback and migration logic.
+ * When no workspaces exist, shows a create button.
+ *
+ * Waits for auth to settle before fetching workspaces, preventing a race
+ * where the API call fires before the JWT is exchanged and returns 401.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 
 import {
@@ -13,20 +16,23 @@ import {
   clearLastWorkspaceId,
 } from "@/utils/scopedStorage";
 import { fetchWorkspaceApi } from "@/hooks/api";
+import { useAuth } from "@/contexts/AuthContext";
+import { CreateWorkspaceModal } from "@/components/CreateWorkspaceModal";
+import { AUTH_MODE_OPEN } from "@/types/common";
 
 export function RedirectToWorkspace() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { mode, isAuthenticated, isLoading } = useAuth();
   const [resolving, setResolving] = useState(true);
+  const [showCreate, setShowCreate] = useState(false);
 
-  useEffect(() => {
+  const resolveWorkspace = useCallback(() => {
     let cancelled = false;
-
     const lastId = getLastWorkspaceId();
     const failedId = (location.state as { failedWorkspaceId?: string } | null)
       ?.failedWorkspaceId;
 
-    // Fetch workspace list — validates lastId and provides fallback
     fetchWorkspaceApi()
       .then((data) => {
         if (cancelled) return;
@@ -37,13 +43,11 @@ export function RedirectToWorkspace() {
           return;
         }
 
-        // If localStorage has a valid workspace, use it
         if (lastId && workspaces.some((ws) => ws.id === lastId)) {
           navigate(`/ws/${lastId}/kanban`, { replace: true });
           return;
         }
 
-        // Stale or missing — clear and use default
         if (lastId) clearLastWorkspaceId(lastId);
         const defaultWs =
           workspaces.find((ws) => ws.is_default) ?? workspaces[0];
@@ -55,9 +59,6 @@ export function RedirectToWorkspace() {
       })
       .catch(() => {
         if (cancelled) return;
-        // API unreachable — show empty state. Do NOT blindly redirect to
-        // a potentially stale lastId; WorkspaceLayout will just 404 and
-        // redirect back, creating a loop.
         setResolving(false);
       });
 
@@ -66,19 +67,59 @@ export function RedirectToWorkspace() {
     };
   }, [navigate, location.state]);
 
+  useEffect(() => {
+    if (mode === AUTH_MODE_OPEN) {
+      return resolveWorkspace();
+    }
+    if (isLoading || !isAuthenticated) return;
+    return resolveWorkspace();
+  }, [mode, isAuthenticated, isLoading, resolveWorkspace]);
+
   if (!resolving) {
     return (
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          height: "100vh",
-          color: "var(--text-secondary, #666)",
-        }}
-      >
-        No workspaces found. Create one to get started.
-      </div>
+      <>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            height: "100vh",
+            gap: "16px",
+            color: "var(--text-secondary, #666)",
+          }}
+        >
+          <p style={{ margin: 0, fontSize: "15px" }}>
+            No workspaces found. Create one to get started.
+          </p>
+          <button
+            onClick={() => setShowCreate(true)}
+            style={{
+              padding: "10px 24px",
+              border: "none",
+              borderRadius: "8px",
+              background: "var(--bg-accent, #1976d2)",
+              color: "#fff",
+              fontSize: "14px",
+              fontWeight: 500,
+              cursor: "pointer",
+            }}
+          >
+            Create Workspace
+          </button>
+        </div>
+        <CreateWorkspaceModal
+          isOpen={showCreate}
+          onClose={() => setShowCreate(false)}
+          onSuccess={(data) => {
+            setShowCreate(false);
+            const ws = data.workspaces[0];
+            if (ws) {
+              navigate(`/ws/${ws.id}/`, { replace: true });
+            }
+          }}
+        />
+      </>
     );
   }
 

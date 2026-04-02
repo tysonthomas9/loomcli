@@ -36,8 +36,29 @@ const { mockFetchWorkspace } = vi.hoisted(() => ({
   mockFetchWorkspace: vi.fn(),
 }));
 
-vi.mock("@/api/workspace", () => ({
+vi.mock("@/hooks/api", () => ({
   fetchWorkspaceApi: mockFetchWorkspace,
+}));
+
+const { mockUseAuth } = vi.hoisted(() => ({
+  mockUseAuth: vi.fn(() => ({
+    mode: "open" as const,
+    isAuthenticated: true,
+    isLoading: false,
+    user: null,
+    authServiceDown: false,
+    signIn: vi.fn(),
+    signUp: vi.fn(),
+    signOut: vi.fn(),
+  })),
+}));
+
+vi.mock("@/contexts/AuthContext", () => ({
+  useAuth: mockUseAuth,
+}));
+
+vi.mock("@/components/CreateWorkspaceModal", () => ({
+  CreateWorkspaceModal: () => null,
 }));
 
 const { mockGetLastWorkspaceId, mockClearLastWorkspaceId } = vi.hoisted(() => ({

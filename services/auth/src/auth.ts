@@ -55,6 +55,12 @@ export const auth = betterAuth({
     provider: dialect === "sqlite" ? "sqlite" : "pg",
   }),
 
+  emailAndPassword: {
+    enabled: true,
+    minPasswordLength: 8,
+    maxPasswordLength: 128,
+  },
+
   socialProviders,
 
   account: {
@@ -112,9 +118,12 @@ export const auth = betterAuth({
             }
           }
 
-          // SECURITY: Defense-in-depth — reject unverified emails.
-          // Backstop for the trustedProviders exclusion above.
-          if (user.emailVerified === false) {
+          // SECURITY: Defense-in-depth — reject unverified emails from
+          // OAuth providers. Email/password signups start unverified by
+          // design (no OAuth provider to vouch), so only block when an
+          // OAuth provider explicitly reports email_verified=false.
+          const isOAuthSignup = "providerId" in user || "accountId" in user;
+          if (isOAuthSignup && user.emailVerified === false) {
             throw new APIError("FORBIDDEN", {
               message:
                 "Email address must be verified by the OAuth provider before account creation is allowed.",

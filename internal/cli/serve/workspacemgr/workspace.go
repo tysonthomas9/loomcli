@@ -329,7 +329,21 @@ func addWorktrees(ctx context.Context, resolved []resolvedRepo, wsDir, branch st
 
 // finalizeWorkspace performs bd init, config save, and daemon start for a new workspace.
 func finalizeWorkspace(cfg *config.LoomConfig, wsName, wsDir string, repos []config.RepoConfig, created []createdWorktree, save func(*config.LoomConfig) error) (service.WorkspaceCreateResult, error) {
-	_ = cli.GetDeps(nil).Exec.Run(wsDir, "bd", "init")
+	exec := cli.GetDeps(nil).Exec
+	// Initialize beads in each repo so it has issues to hydrate from.
+	for _, repo := range repos {
+		_ = exec.Run(repo.Path, "bd", "init", "--quiet")
+	}
+	// Initialize beads at the workspace root and register each repo using
+	// relative paths. Relative paths ensure source_repo values match the
+	// repo names used by the frontend's source_repos filter.
+	_ = exec.Run(wsDir, "bd", "init", "--quiet")
+	for _, repo := range repos {
+		if result := exec.Run(wsDir, "bd", "repo", "add", repo.Name); result.Err != nil {
+			slog.Warn("failed to add repo to workspace beads", "repo", repo.Name, "err", result.Err)
+		}
+	}
+	_ = exec.Run(wsDir, "bd", "repo", "sync")
 	if err := workspace.WriteLoomYaml(wsDir); err != nil {
 		slog.Warn("failed to write loom.yaml for workspace", "workspace", wsName, "err", err)
 	}

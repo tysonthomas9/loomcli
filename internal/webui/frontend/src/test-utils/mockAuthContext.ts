@@ -23,6 +23,7 @@ export function createDefaultAuth(
     authServiceDown: false,
     user: null,
     signIn: vi.fn(),
+    signUp: vi.fn(),
     signOut: vi.fn(),
     ...overrides,
   };

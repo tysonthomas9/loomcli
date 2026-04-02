@@ -32,8 +32,10 @@ func TestHandleAuthConfig_ExternalMode(t *testing.T) {
 	if resp.Mode != "oidc" {
 		t.Errorf("expected mode 'oidc', got %q", resp.Mode)
 	}
-	if resp.AuthURL != "https://auth.example.com" {
-		t.Errorf("expected auth_url 'https://auth.example.com', got %q", resp.AuthURL)
+	// When auth proxy is active, auth_url is empty so the frontend uses
+	// window.location.origin (same-origin proxy at /api/auth/*).
+	if resp.AuthURL != "" {
+		t.Errorf("expected empty auth_url for proxy mode, got %q", resp.AuthURL)
 	}
 }
 

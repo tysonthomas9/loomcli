@@ -201,14 +201,14 @@ async function main(): Promise<void> {
 
   const server = serve(
     { fetch: app.fetch, port: env.PORT },
-    (info) => {
+    (info: { port: number }) => {
       logger.info("auth service listening", { port: info.port });
     },
   );
 
   const metricsServer = serve(
     { fetch: metricsApp.fetch, port: env.METRICS_PORT, hostname: "127.0.0.1" },
-    (info) => {
+    (info: { port: number }) => {
       logger.info("metrics server listening (internal only)", {
         port: info.port,
       });

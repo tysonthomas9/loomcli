@@ -79,10 +79,16 @@ describe("LoginPage", () => {
       );
     });
 
-    it("all buttons have type=button", () => {
+    it("OAuth and toggle buttons have type=button (only form submit is type=submit)", () => {
       render(<LoginPage error={null} onErrorClear={vi.fn()} />);
-      const buttons = screen.getAllByRole("button");
-      buttons.forEach((button) => {
+      const submitButtons = screen
+        .getAllByRole("button")
+        .filter((b) => b.getAttribute("type") === "submit");
+      expect(submitButtons).toHaveLength(1);
+      const nonSubmit = screen
+        .getAllByRole("button")
+        .filter((b) => b.getAttribute("type") !== "submit");
+      nonSubmit.forEach((button) => {
         expect(button).toHaveAttribute("type", "button");
       });
     });
@@ -111,7 +117,7 @@ describe("LoginPage", () => {
       expect(mockSignIn).toHaveBeenCalledWith("google");
     });
 
-    it("disables both buttons after click (loading state)", async () => {
+    it("disables OAuth and submit buttons after click (loading state)", async () => {
       // signIn never resolves to keep loading state
       mockSignIn.mockReturnValue(new Promise(() => {}));
       render(<LoginPage error={null} onErrorClear={vi.fn()} />);
@@ -120,10 +126,17 @@ describe("LoginPage", () => {
           screen.getByRole("button", { name: "Continue with GitHub" }),
         );
       });
-      const buttons = screen.getAllByRole("button");
-      buttons.forEach((button) => {
-        expect(button).toBeDisabled();
-      });
+      expect(
+        screen.getByRole("button", {
+          name: /Continue with GitHub|Redirecting/,
+        }),
+      ).toBeDisabled();
+      expect(
+        screen.getByRole("button", { name: "Continue with Google" }),
+      ).toBeDisabled();
+      expect(
+        screen.getByRole("button", { name: /Sign in|Signing in/ }),
+      ).toBeDisabled();
     });
 
     it('shows "Redirecting..." on clicked button', async () => {

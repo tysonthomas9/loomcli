@@ -3,6 +3,7 @@ package app
 import (
 	"net/http"
 
+	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlermux"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
@@ -15,6 +16,7 @@ func (app *Server) registerRoutes() {
 	app.registerDaemonRoutes(h)
 	app.registerMonitorHandlers()
 	app.registerEditorAndNotifyRoutes(h)
+	app.registerAuthProxy()
 
 	// Workspace management and workspace-scoped API routes
 	if app.multiPool != nil {
@@ -57,6 +59,15 @@ func (app *Server) registerDaemonRoutes(h *handlermux.Handlers) {
 	}
 	if h.DaemonConfig != nil {
 		app.mux.HandleFunc("GET /api/daemon/config", h.DaemonConfig)
+	}
+}
+
+// registerAuthProxy forwards /api/auth/* to the external BetterAuth service.
+// Makes auth cookies same-origin with the frontend, avoiding cross-site cookie
+// restrictions that block SameSite cookies over HTTP.
+func (app *Server) registerAuthProxy() {
+	if proxy := webui.NewAuthProxy(app.config.ExtAuthURL, logger); proxy != nil {
+		app.mux.Handle("/api/auth/", proxy)
 	}
 }
 
