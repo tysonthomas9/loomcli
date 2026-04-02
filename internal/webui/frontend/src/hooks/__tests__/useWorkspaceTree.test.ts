@@ -8,41 +8,26 @@
  * active/all filtering, empty issues, and exclusion of non-epic/non-task issues.
  */
 
-import { renderHook } from "@testing-library/react";
+import { renderHook, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import type { Issue } from "@/types";
 
 import { useWorkspaceTree } from "../useWorkspaceTree";
 
-// Mock useIssues which is the data source for useWorkspaceTree.
-const mockRefetch = vi.fn().mockResolvedValue(undefined);
+// Mock getKanbanIssues API (data source for useWorkspaceTree after migration)
+const mockGetKanbanIssues = vi.fn().mockResolvedValue([]);
 
-vi.mock("../useIssues", () => ({
-  useIssues: vi.fn(() => ({
-    issues: [] as Issue[],
-    issuesMap: new Map<string, Issue>(),
-    isLoading: false,
-    error: null,
-    connectionState: "connected",
-    isConnected: true,
-    reconnectAttempts: 0,
-    lastEventId: undefined,
-    refetch: mockRefetch,
-    updateIssueStatus: vi.fn(),
-    getIssue: vi.fn(),
-    mutationCount: 0,
-    retryConnection: vi.fn(),
-    showStaleBanner: false,
-    connectionLost: false,
-    disconnectedSince: null,
-    pendingIds: new Set<string>(),
-  })),
+vi.mock("@/api", () => ({
+  getKanbanIssues: (...args: unknown[]) => mockGetKanbanIssues(...args),
 }));
 
-import { useIssues } from "../useIssues";
-
-const mockUseIssues = vi.mocked(useIssues);
+// Mock useWorkspaceContext for workspaceId
+vi.mock("../useWorkspaceContext", () => ({
+  useWorkspaceContext: vi.fn(() => ({
+    workspaceId: "test-ws-id",
+  })),
+}));
 
 /** Helper to create a test Issue. */
 function makeIssue(
@@ -57,34 +42,17 @@ function makeIssue(
 }
 
 function setMockIssues(issues: Issue[]): void {
-  mockUseIssues.mockReturnValue({
-    issues,
-    issuesMap: new Map(issues.map((i) => [i.id, i])),
-    isLoading: false,
-    error: null,
-    connectionState: "connected",
-    isConnected: true,
-    reconnectAttempts: 0,
-    lastEventId: undefined,
-    refetch: mockRefetch,
-    updateIssueStatus: vi.fn(),
-    getIssue: vi.fn(),
-    mutationCount: 0,
-    retryConnection: vi.fn(),
-    showStaleBanner: false,
-    connectionLost: false,
-    disconnectedSince: null,
-    pendingIds: new Set<string>(),
-  });
+  mockGetKanbanIssues.mockResolvedValue(issues);
 }
 
 describe("useWorkspaceTree", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetKanbanIssues.mockResolvedValue([]);
   });
 
   describe("grouping tasks under parent epics", () => {
-    it("groups tasks under their parent epic", () => {
+    it("groups tasks under their parent epic", async () => {
       const epic = makeIssue({
         id: "epic-1",
         title: "Epic 1",
@@ -111,7 +79,9 @@ describe("useWorkspaceTree", () => {
         useWorkspaceTree("ws-1", "all", ["repo-1"]),
       );
 
-      expect(result.current.epics).toHaveLength(1);
+      await waitFor(() => {
+        expect(result.current.epics).toHaveLength(1);
+      });
       expect(result.current.epics[0].epic.id).toBe("epic-1");
       expect(result.current.epics[0].tasks).toHaveLength(2);
       expect(result.current.epics[0].tasks.map((t) => t.id)).toEqual([
@@ -121,7 +91,7 @@ describe("useWorkspaceTree", () => {
       expect(result.current.orphanTasks).toHaveLength(0);
     });
 
-    it("groups tasks under correct epics when multiple epics exist", () => {
+    it("groups tasks under correct epics when multiple epics exist", async () => {
       const epicA = makeIssue({
         id: "epic-a",
         title: "Epic A",
@@ -160,7 +130,9 @@ describe("useWorkspaceTree", () => {
         useWorkspaceTree("ws-1", "all", ["repo-1"]),
       );
 
-      expect(result.current.epics).toHaveLength(2);
+      await waitFor(() => {
+        expect(result.current.epics).toHaveLength(2);
+      });
       const epicAResult = result.current.epics.find(
         (e) => e.epic.id === "epic-a",
       );
@@ -173,7 +145,7 @@ describe("useWorkspaceTree", () => {
   });
 
   describe("orphan tasks", () => {
-    it("treats tasks with no parent as orphans", () => {
+    it("treats tasks with no parent as orphans", async () => {
       const epic = makeIssue({
         id: "epic-1",
         title: "Epic 1",
@@ -192,11 +164,13 @@ describe("useWorkspaceTree", () => {
         useWorkspaceTree("ws-1", "all", ["repo-1"]),
       );
 
-      expect(result.current.orphanTasks).toHaveLength(1);
+      await waitFor(() => {
+        expect(result.current.orphanTasks).toHaveLength(1);
+      });
       expect(result.current.orphanTasks[0].id).toBe("task-orphan");
     });
 
-    it("treats tasks whose parent is not in the epic set as orphans", () => {
+    it("treats tasks whose parent is not in the epic set as orphans", async () => {
       const epic = makeIssue({
         id: "epic-1",
         title: "Epic 1",
@@ -216,7 +190,9 @@ describe("useWorkspaceTree", () => {
         useWorkspaceTree("ws-1", "all", ["repo-1"]),
       );
 
-      expect(result.current.orphanTasks).toHaveLength(1);
+      await waitFor(() => {
+        expect(result.current.orphanTasks).toHaveLength(1);
+      });
       expect(result.current.orphanTasks[0].id).toBe("task-1");
       // The existing epic should have no tasks
       expect(result.current.epics[0].tasks).toHaveLength(0);
@@ -224,7 +200,7 @@ describe("useWorkspaceTree", () => {
   });
 
   describe("active filter", () => {
-    it("only includes epics with in_progress or review tasks", () => {
+    it("only includes epics with in_progress or review tasks", async () => {
       const epicActive = makeIssue({
         id: "epic-active",
         title: "Active Epic",
@@ -256,12 +232,14 @@ describe("useWorkspaceTree", () => {
         useWorkspaceTree("ws-1", "active", ["repo-1"]),
       );
 
-      expect(result.current.epics).toHaveLength(1);
+      await waitFor(() => {
+        expect(result.current.epics).toHaveLength(1);
+      });
       expect(result.current.epics[0].epic.id).toBe("epic-active");
       expect(result.current.epics[0].tasks).toHaveLength(1);
     });
 
-    it("filters out non-active tasks from active epics", () => {
+    it("filters out non-active tasks from active epics", async () => {
       const epic = makeIssue({
         id: "epic-1",
         title: "Epic 1",
@@ -295,13 +273,15 @@ describe("useWorkspaceTree", () => {
         useWorkspaceTree("ws-1", "active", ["repo-1"]),
       );
 
-      expect(result.current.epics).toHaveLength(1);
+      await waitFor(() => {
+        expect(result.current.epics).toHaveLength(1);
+      });
       // Only the review task should be included
       expect(result.current.epics[0].tasks).toHaveLength(1);
       expect(result.current.epics[0].tasks[0].id).toBe("task-review");
     });
 
-    it("filters orphan tasks to only active statuses", () => {
+    it("filters orphan tasks to only active statuses", async () => {
       const orphanActive = makeIssue({
         id: "orphan-active",
         title: "Active Orphan",
@@ -321,13 +301,15 @@ describe("useWorkspaceTree", () => {
         useWorkspaceTree("ws-1", "active", ["repo-1"]),
       );
 
-      expect(result.current.orphanTasks).toHaveLength(1);
+      await waitFor(() => {
+        expect(result.current.orphanTasks).toHaveLength(1);
+      });
       expect(result.current.orphanTasks[0].id).toBe("orphan-active");
     });
   });
 
   describe("all filter", () => {
-    it("includes all epics regardless of task status", () => {
+    it("includes all epics regardless of task status", async () => {
       const epic1 = makeIssue({
         id: "epic-1",
         title: "Epic 1",
@@ -359,12 +341,14 @@ describe("useWorkspaceTree", () => {
         useWorkspaceTree("ws-1", "all", ["repo-1"]),
       );
 
-      expect(result.current.epics).toHaveLength(2);
+      await waitFor(() => {
+        expect(result.current.epics).toHaveLength(2);
+      });
       expect(result.current.epics[0].tasks).toHaveLength(1);
       expect(result.current.epics[1].tasks).toHaveLength(1);
     });
 
-    it("includes epics with no tasks", () => {
+    it("includes epics with no tasks", async () => {
       const epic = makeIssue({
         id: "epic-empty",
         title: "Empty Epic",
@@ -377,7 +361,9 @@ describe("useWorkspaceTree", () => {
         useWorkspaceTree("ws-1", "all", ["repo-1"]),
       );
 
-      expect(result.current.epics).toHaveLength(1);
+      await waitFor(() => {
+        expect(result.current.epics).toHaveLength(1);
+      });
       expect(result.current.epics[0].epic.id).toBe("epic-empty");
       expect(result.current.epics[0].tasks).toHaveLength(0);
     });
@@ -397,7 +383,7 @@ describe("useWorkspaceTree", () => {
   });
 
   describe("exclusion of non-epic/non-task issues", () => {
-    it("excludes issues with issue_type other than epic or task", () => {
+    it("excludes issues with issue_type other than epic or task", async () => {
       const epic = makeIssue({
         id: "epic-1",
         title: "Epic 1",
@@ -424,33 +410,18 @@ describe("useWorkspaceTree", () => {
         useWorkspaceTree("ws-1", "all", ["repo-1"]),
       );
 
-      expect(result.current.epics).toHaveLength(1);
+      await waitFor(() => {
+        expect(result.current.epics).toHaveLength(1);
+      });
       expect(result.current.epics[0].tasks).toHaveLength(1);
       expect(result.current.orphanTasks).toHaveLength(0);
     });
   });
 
   describe("return value", () => {
-    it("passes through isLoading from useIssues", () => {
-      mockUseIssues.mockReturnValue({
-        issues: [],
-        issuesMap: new Map(),
-        isLoading: true,
-        error: null,
-        connectionState: "loading",
-        isConnected: false,
-        reconnectAttempts: 0,
-        lastEventId: undefined,
-        refetch: mockRefetch,
-        updateIssueStatus: vi.fn(),
-        getIssue: vi.fn(),
-        mutationCount: 0,
-        retryConnection: vi.fn(),
-        showStaleBanner: false,
-        connectionLost: false,
-        disconnectedSince: null,
-        pendingIds: new Set<string>(),
-      });
+    it("shows isLoading while fetching", () => {
+      // Use a never-resolving promise to keep loading state
+      mockGetKanbanIssues.mockReturnValue(new Promise(() => {}));
 
       const { result } = renderHook(() =>
         useWorkspaceTree("ws-1", "all", ["repo-1"]),
@@ -459,42 +430,47 @@ describe("useWorkspaceTree", () => {
       expect(result.current.isLoading).toBe(true);
     });
 
-    it("passes through error from useIssues", () => {
-      mockUseIssues.mockReturnValue({
-        issues: [],
-        issuesMap: new Map(),
-        isLoading: false,
-        error: "fetch failed",
-        connectionState: "error_never_connected",
-        isConnected: false,
-        reconnectAttempts: 0,
-        lastEventId: undefined,
-        refetch: mockRefetch,
-        updateIssueStatus: vi.fn(),
-        getIssue: vi.fn(),
-        mutationCount: 0,
-        retryConnection: vi.fn(),
-        showStaleBanner: false,
-        connectionLost: false,
-        disconnectedSince: null,
-        pendingIds: new Set<string>(),
-      });
+    it("shows error from API failure", async () => {
+      mockGetKanbanIssues.mockRejectedValue(new Error("fetch failed"));
 
       const { result } = renderHook(() =>
         useWorkspaceTree("ws-1", "all", ["repo-1"]),
       );
 
-      expect(result.current.error).toBe("fetch failed");
+      await waitFor(() => {
+        expect(result.current.error).toBe("fetch failed");
+      });
     });
 
-    it("passes through refetch from useIssues", () => {
+    it("refetch calls the API again", async () => {
       setMockIssues([]);
 
       const { result } = renderHook(() =>
         useWorkspaceTree("ws-1", "all", ["repo-1"]),
       );
 
-      expect(result.current.refetch).toBe(mockRefetch);
+      await waitFor(() => {
+        expect(mockGetKanbanIssues).toHaveBeenCalledTimes(1);
+      });
+
+      await result.current.refetch();
+
+      expect(mockGetKanbanIssues).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not fetch when sourceRepos is empty", () => {
+      const { result } = renderHook(() => useWorkspaceTree("ws-1", "all", []));
+
+      expect(mockGetKanbanIssues).not.toHaveBeenCalled();
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.epics).toHaveLength(0);
+    });
+
+    it("does not fetch when sourceRepos is undefined", () => {
+      const { result } = renderHook(() => useWorkspaceTree("ws-1", "all"));
+
+      expect(mockGetKanbanIssues).not.toHaveBeenCalled();
+      expect(result.current.isLoading).toBe(false);
     });
   });
 });

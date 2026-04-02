@@ -4,11 +4,12 @@
  * and applies active/all filtering.
  */
 
-import { useMemo } from "react";
+import { useMemo, useState, useEffect, useCallback, useRef } from "react";
 
+import { getKanbanIssues } from "@/api";
 import type { Issue } from "@/types";
 
-import { useIssues } from "./useIssues";
+import { useWorkspaceContext } from "./useWorkspaceContext";
 
 /** An epic with its grouped child tasks. */
 export interface EpicWithTasks {
@@ -42,12 +43,54 @@ export function useWorkspaceTree(
   activeFilter: "active" | "all",
   sourceRepos?: string[],
 ): UseWorkspaceTreeReturn {
-  const { issues, isLoading, error, refetch } = useIssues({
-    mode: "kanban",
-    sourceRepos,
-    autoFetch: sourceRepos !== undefined && sourceRepos.length > 0,
-    autoConnect: false, // sidebar tree uses parent's SSE connection, no redundant EventSource
-  });
+  const { workspaceId } = useWorkspaceContext();
+  const [issues, setIssues] = useState<Issue[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const shouldFetch = sourceRepos !== undefined && sourceRepos.length > 0;
+
+  // Stable key for sourceRepos to prevent infinite re-renders from array identity changes
+  const sourceReposKey = useMemo(
+    () => (sourceRepos ? [...sourceRepos].sort().join(",") : ""),
+    [sourceRepos],
+  );
+
+  // Store sourceRepos in a ref so fetchData always uses the latest value
+  // without recreating the callback on every render
+  const sourceReposRef = useRef(sourceRepos);
+  sourceReposRef.current = sourceRepos;
+
+  const fetchData = useCallback(
+    async (signal?: AbortSignal) => {
+      if (!shouldFetch) return;
+      setIsLoading(true);
+      setError(null);
+      try {
+        const filter = sourceReposRef.current
+          ? { source_repos: sourceReposRef.current }
+          : undefined;
+        const reqOpts = signal ? { signal } : undefined;
+        const data = await getKanbanIssues(workspaceId, filter, reqOpts);
+        setIssues(data);
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        setError(err instanceof Error ? err.message : "Failed to fetch issues");
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [workspaceId, shouldFetch, sourceReposKey], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  // Auto-fetch on mount (AbortController cancels in-flight fetch on unmount or dep change)
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetchData(controller.signal);
+    return () => controller.abort();
+  }, [fetchData]);
+
+  const refetch = useCallback(() => fetchData(), [fetchData]);
 
   // Partition issues into epics and tasks by issue_type.
   const { epics: epicIssues, tasks: taskIssues } = useMemo(() => {
