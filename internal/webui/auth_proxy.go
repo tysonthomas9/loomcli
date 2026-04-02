@@ -65,7 +65,8 @@ func NewAuthProxy(extAuthURL string, logger *slog.Logger) http.Handler {
 
 // rewriteAuthProxyCookies rewrites Set-Cookie headers so cookies are
 // first-party to the frontend origin (Domain stripped, SameSite=Lax, Secure
-// conditioned on TLS).
+// conditioned on TLS). Malformed upstream cookies containing CR/LF are
+// dropped as defense-in-depth.
 func rewriteAuthProxyCookies(resp *http.Response) error {
 	cookies := resp.Header.Values("Set-Cookie")
 	if len(cookies) == 0 {
@@ -74,6 +75,9 @@ func rewriteAuthProxyCookies(resp *http.Response) error {
 	isTLS, _ := resp.Request.Context().Value(authProxyCtxKey{}).(bool)
 	resp.Header.Del("Set-Cookie")
 	for _, c := range cookies {
+		if strings.ContainsAny(c, "\r\n") {
+			continue // drop malformed cookie from upstream
+		}
 		c = stripCookieAttr(c, "Domain")
 		c = replaceCookieAttr(c, "SameSite", "Lax")
 		c = stripCookieFlag(c, "Partitioned")
