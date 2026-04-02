@@ -1,5 +1,6 @@
 /**
- * API client for editor endpoints with module-level caching.
+ * API client for editor endpoints.
+ * Stateless — no module-level caches. Caching belongs in editorStore.
  * Interfaces with GET /api/editors and POST /api/editors/open endpoints.
  */
 
@@ -12,53 +13,21 @@ interface EditorsListResponse {
   editors: EditorInfo[];
 }
 
-// ============= Module-level Cache =============
-
-let editorCache: EditorInfo[] | null = null; // null = not yet fetched
-let fetchPromise: Promise<EditorInfo[]> | null = null; // dedup concurrent calls
-
 // ============= API Functions =============
 
 /**
- * Fetch the list of available editors. Returns cached data if available.
- * Deduplicates concurrent in-flight requests.
+ * Fetch the list of available editors. Always hits the network.
  */
 export async function fetchEditors(): Promise<EditorInfo[]> {
-  if (editorCache !== null) {
-    return editorCache;
-  }
-  if (fetchPromise !== null) {
-    return fetchPromise;
-  }
-  fetchPromise = get<EditorsListResponse>("/api/editors").then(
-    (response) => {
-      editorCache = response.editors;
-      fetchPromise = null;
-      return editorCache;
-    },
-    (err) => {
-      fetchPromise = null;
-      throw err;
-    },
-  );
-  return fetchPromise;
+  const response = await get<EditorsListResponse>("/api/editors");
+  return response.editors;
 }
 
 /**
- * Invalidate the cache and re-fetch editors from the backend.
+ * Re-fetch editors from the backend. Alias for fetchEditors (no cache to invalidate).
  */
 export async function refreshEditors(): Promise<EditorInfo[]> {
-  editorCache = null;
-  fetchPromise = null;
   return fetchEditors();
-}
-
-/**
- * Synchronous getter for current cache state.
- * Returns null if not yet fetched, or the cached editor list.
- */
-export function getCachedEditors(): EditorInfo[] | null {
-  return editorCache;
 }
 
 /**

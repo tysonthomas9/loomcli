@@ -15,9 +15,11 @@ import {
   useState,
   useEffect,
   useMemo,
+  useRef,
   type ReactNode,
 } from "react";
 import { useNavigate } from "react-router-dom";
+import { useStore } from "zustand";
 
 import type { RepoInfo, WorkspaceAgentInfo } from "@/api/workspace";
 import {
@@ -25,8 +27,8 @@ import {
   clearDefaultWorkspace as clearDefaultWorkspaceApi,
 } from "@/api/workspace";
 import { wsGet, wsSet, setLastWorkspaceId } from "@/utils/scopedStorage";
+import { createWorkspaceStore } from "@/stores";
 
-import { useWorkspace as useWorkspaceData } from "./useWorkspace";
 import type { UseWorkspaceReturn } from "./useWorkspace";
 
 // localStorage keys
@@ -155,10 +157,35 @@ export function WorkspaceProvider({
     setLastWorkspaceId(workspaceId);
   });
 
-  const workspaceResult = useWorkspaceData({
-    pollInterval: 60000,
-    workspaceId,
-  });
+  // Workspace store — one instance per provider lifetime
+  const storeRef = useRef(createWorkspaceStore());
+  const store = storeRef.current;
+
+  // Start/stop polling keyed on workspaceId
+  useEffect(() => {
+    store.getState().startPolling({ workspaceId, pollInterval: 60000 });
+    return () => store.getState().stopPolling();
+  }, [workspaceId, store]);
+
+  const workspace = useStore(store, (s) => s.workspace);
+  const wsIsLoading = useStore(store, (s) => s.isLoading);
+  const wsError = useStore(store, (s) => s.error);
+
+  // Stable refetch callback — store ref is constant for provider lifetime
+  const refetch = useCallback(() => store.getState().refetch(), [store]);
+
+  const workspaceResult: UseWorkspaceReturn = useMemo(
+    () => ({
+      workspace,
+      repos: workspace?.repos ?? [],
+      groups: workspace?.groups ?? [],
+      agents: workspace?.agents ?? [],
+      isLoading: wsIsLoading,
+      error: wsError,
+      refetch,
+    }),
+    [workspace, wsIsLoading, wsError, refetch],
+  );
 
   // Track workspace name for display and localStorage
   const [activeWorkspaceName, setActiveWorkspaceNameRaw] = useState<
@@ -252,14 +279,14 @@ export function WorkspaceProvider({
         } else {
           await clearDefaultWorkspaceApi();
         }
-        workspaceResult.refetch();
+        refetch();
       } catch (err) {
         setDefaultWorkspaceNameRaw(previous);
         lsSet(LS_DEFAULT_WORKSPACE, previous ?? "");
         throw err;
       }
     },
-    [defaultWorkspaceName, workspaceResult.refetch],
+    [defaultWorkspaceName, refetch],
   );
 
   // Repo selection actions — use workspace-scoped storage

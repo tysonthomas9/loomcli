@@ -85,12 +85,7 @@ export type {
 } from "./workspace";
 
 // Editor API functions
-export {
-  fetchEditors,
-  refreshEditors,
-  getCachedEditors,
-  openInEditor,
-} from "./editors";
+export { fetchEditors, refreshEditors, openInEditor } from "./editors";
 
 // Diff API functions (agent worktree diffs)
 export { fetchDiffCommits, fetchDiffFiles, fetchDiffFile } from "./diff";

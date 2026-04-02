@@ -1,5 +1,6 @@
 /**
- * API client for backend health endpoint with module-level caching.
+ * API client for backend health endpoint.
+ * Stateless — no module-level caches. Caching belongs in backendsStore.
  * Interfaces with GET /api/backends endpoint.
  */
 
@@ -35,12 +36,6 @@ interface ApiFailure {
 
 type ApiResult<T> = ApiSuccess<T> | ApiFailure;
 
-// ============= Module-level Cache =============
-
-let backendsCache: BackendHealthData[] | null = null;
-let fetchPromise: Promise<BackendHealthData[]> | null = null;
-let cacheGeneration = 0;
-
 // ============= Helpers =============
 
 function unwrap<T>(response: ApiResult<T>): T {
@@ -53,42 +48,16 @@ function unwrap<T>(response: ApiResult<T>): T {
 // ============= API Functions =============
 
 /**
- * Fetch registered backends with health status. Returns cached data if available.
- * Deduplicates concurrent in-flight requests.
+ * Fetch registered backends with health status. Always hits the network.
  */
 export async function fetchBackends(): Promise<BackendHealthData[]> {
-  if (backendsCache !== null) {
-    return backendsCache;
-  }
-  if (fetchPromise !== null) {
-    return fetchPromise;
-  }
-  const gen = cacheGeneration;
-  fetchPromise = get<ApiResult<BackendHealthData[]>>("/api/backends").then(
-    (response) => {
-      if (gen !== cacheGeneration) {
-        return fetchBackends();
-      }
-      backendsCache = unwrap(response);
-      fetchPromise = null;
-      return backendsCache;
-    },
-    (err) => {
-      if (gen === cacheGeneration) {
-        fetchPromise = null;
-      }
-      throw err;
-    },
-  );
-  return fetchPromise;
+  const response = await get<ApiResult<BackendHealthData[]>>("/api/backends");
+  return unwrap(response);
 }
 
 /**
- * Invalidate the cache and re-fetch backends from the server.
+ * Re-fetch backends from the server. Alias for fetchBackends (no cache to invalidate).
  */
 export async function refreshBackends(): Promise<BackendHealthData[]> {
-  cacheGeneration++;
-  backendsCache = null;
-  fetchPromise = null;
   return fetchBackends();
 }
