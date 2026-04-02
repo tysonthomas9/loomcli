@@ -89,6 +89,10 @@ const envSchema = z
     NODE_ENV: z.string().default("development"),
     LOG_LEVEL: z.string().default("info"),
 
+    EMAIL_PASSWORD_ENABLED: z.preprocess(
+      (val) => val === "true" || val === "1",
+      z.boolean().default(false),
+    ),
     TRUSTED_ORIGINS: z.string().optional(),
     ALLOWED_EMAIL_DOMAINS: z.string().optional(),
     ADMIN_USER_IDS: z.string().optional(),
@@ -151,6 +155,7 @@ const envSchema = z
       JWT_AUDIENCE: data.JWT_AUDIENCE,
       NODE_ENV: data.NODE_ENV,
       LOG_LEVEL: data.LOG_LEVEL,
+      EMAIL_PASSWORD_ENABLED: data.EMAIL_PASSWORD_ENABLED,
       TRUSTED_ORIGINS: trustedOrigins,
       ALLOWED_EMAIL_DOMAINS: splitCommaList(data.ALLOWED_EMAIL_DOMAINS),
       ADMIN_USER_IDS: splitCommaList(data.ADMIN_USER_IDS),
