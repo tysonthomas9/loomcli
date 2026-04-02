@@ -327,23 +327,28 @@ func addWorktrees(ctx context.Context, resolved []resolvedRepo, wsDir, branch st
 	return created, repos, nil
 }
 
-// finalizeWorkspace performs bd init, config save, and daemon start for a new workspace.
-func finalizeWorkspace(cfg *config.LoomConfig, wsName, wsDir string, repos []config.RepoConfig, created []createdWorktree, save func(*config.LoomConfig) error) (service.WorkspaceCreateResult, error) {
+// initWorkspaceBeads initializes beads in each repo and at the workspace root,
+// then registers repos with relative paths for correct source_repo values.
+func initWorkspaceBeads(wsDir string, repos []config.RepoConfig) {
 	exec := cli.GetDeps(nil).Exec
-	// Initialize beads in each repo so it has issues to hydrate from.
 	for _, repo := range repos {
-		_ = exec.Run(repo.Path, "bd", "init", "--quiet")
+		if result := exec.Run(repo.Path, "bd", "init", "--quiet"); result.Err != nil {
+			slog.Warn("bd init failed for repo", "repo", repo.Name, "path", repo.Path, "err", result.Err)
+		}
 	}
-	// Initialize beads at the workspace root and register each repo using
-	// relative paths. Relative paths ensure source_repo values match the
-	// repo names used by the frontend's source_repos filter.
-	_ = exec.Run(wsDir, "bd", "init", "--quiet")
+	if result := exec.Run(wsDir, "bd", "init", "--quiet"); result.Err != nil {
+		slog.Warn("bd init failed for workspace root", "path", wsDir, "err", result.Err)
+	}
 	for _, repo := range repos {
 		if result := exec.Run(wsDir, "bd", "repo", "add", repo.Name); result.Err != nil {
 			slog.Warn("failed to add repo to workspace beads", "repo", repo.Name, "err", result.Err)
 		}
 	}
-	_ = exec.Run(wsDir, "bd", "repo", "sync")
+}
+
+// finalizeWorkspace performs bd init, config save, and daemon start for a new workspace.
+func finalizeWorkspace(cfg *config.LoomConfig, wsName, wsDir string, repos []config.RepoConfig, created []createdWorktree, save func(*config.LoomConfig) error) (service.WorkspaceCreateResult, error) {
+	initWorkspaceBeads(wsDir, repos)
 	if err := workspace.WriteLoomYaml(wsDir); err != nil {
 		slog.Warn("failed to write loom.yaml for workspace", "workspace", wsName, "err", err)
 	}
@@ -380,11 +385,16 @@ func validateWorkspacePath(wsDir string) error {
 	return nil
 }
 
-// startDaemonAsync starts the bd daemon for a workspace in the background.
+// startDaemonAsync starts the bd daemon for a workspace in the background,
+// then syncs repos after the daemon is ready (sync can be slow for large repos).
 func startDaemonAsync(timeout time.Duration, wsName, wsDir string) {
 	go func() { //nolint:gosec // G118 — intentional: daemon outlives request
-		if err := workspace.EnsureDaemonForWorkspace(cli.GetDeps(nil), context.Background(), wsDir, timeout); err != nil {
+		deps := cli.GetDeps(nil)
+		if err := workspace.EnsureDaemonForWorkspace(deps, context.Background(), wsDir, timeout); err != nil {
 			slog.Warn("failed to start daemon for workspace", "workspace", wsName, "err", err)
+		}
+		if result := deps.Exec.Run(wsDir, "bd", "repo", "sync"); result.Err != nil {
+			slog.Warn("bd repo sync failed", "workspace", wsName, "err", result.Err)
 		}
 	}()
 }
