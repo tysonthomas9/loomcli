@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
-	"github.com/tysonthomas9/loomcli/internal/types"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // trackingMockPool is a daemon.Pool implementation that tracks calls for assertions.
@@ -123,7 +123,7 @@ func TestMultiWorkspace_StaleWorkspaceUUID(t *testing.T) {
 	// Build a mux with WorkspaceMiddleware-protected issue route
 	mux := http.NewServeMux()
 	wsMux := http.NewServeMux()
-	wsMux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}", handleGetIssue(mp))
+	wsMux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}", workspaceProbeHandler(mp))
 	mux.Handle("/api/workspaces/{ws}/", WorkspaceMiddleware(wsExists, wsMux))
 
 	ts := httptest.NewServer(mux)
@@ -560,66 +560,20 @@ func TestMultiWorkspace_TwoTabSSEIndependence(t *testing.T) {
 // --- Test 7: Cross-Workspace Move ---
 
 func TestMultiWorkspace_CrossWorkspaceMove(t *testing.T) {
-	sourceIssueData, _ := json.Marshal(types.Issue{
-		ID:        "src-001",
-		Title:     "Bug to move",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeBug,
-		Priority:  2,
-	})
-	createdIssueData, _ := json.Marshal(types.Issue{
-		ID:        "tgt-001",
-		Title:     "Bug to move",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeBug,
-		Priority:  2,
-	})
-
 	t.Run("successful cross-workspace move", func(t *testing.T) {
-		var sourceGetCtx context.Context
-		var targetGetCtx context.Context
-
-		sourceClient := &mockMoveClient{
-			showFunc: func(args *rpc.ShowArgs) (*rpc.Response, error) {
-				if args.ID != "src-001" {
-					t.Errorf("expected Show ID src-001, got %s", args.ID)
+		svc := &mockIssueService{
+			moveIssueFunc: func(ctx context.Context, params service.MoveIssueParams) (*service.MoveIssueResult, error) {
+				if params.IssueID != "src-001" {
+					t.Errorf("expected IssueID src-001, got %s", params.IssueID)
 				}
-				return &rpc.Response{Success: true, Data: json.RawMessage(sourceIssueData)}, nil
-			},
-			createFunc: func(args *rpc.CreateArgs) (*rpc.Response, error) {
-				t.Error("source client should not receive Create")
-				return nil, errors.New("unexpected")
-			},
-			addCommentFn: func(args *rpc.CommentAddArgs) (*rpc.Response, error) {
-				return &rpc.Response{Success: true}, nil
-			},
-			closeIssueFunc: func(args *rpc.CloseArgs) (*rpc.Response, error) {
-				return &rpc.Response{Success: true}, nil
-			},
-		}
-
-		targetClient := &mockMoveClient{
-			createFunc: func(args *rpc.CreateArgs) (*rpc.Response, error) {
-				if args.Title != "Bug to move" {
-					t.Errorf("expected Title 'Bug to move', got %q", args.Title)
+				if params.TargetWorkspace != "beta" {
+					t.Errorf("expected TargetWorkspace beta, got %s", params.TargetWorkspace)
 				}
-				return &rpc.Response{Success: true, Data: json.RawMessage(createdIssueData)}, nil
+				return &service.MoveIssueResult{
+					SourceID: "src-001",
+					TargetID: "tgt-001",
+				}, nil
 			},
-		}
-
-		sourcePool := &mockMovePool{
-			getFunc: func(ctx context.Context) (issueMover, error) {
-				sourceGetCtx = ctx
-				return sourceClient, nil
-			},
-			putFunc: func(_ issueMover) {},
-		}
-		targetPool := &mockMovePool{
-			getFunc: func(ctx context.Context) (issueMover, error) {
-				targetGetCtx = ctx
-				return targetClient, nil
-			},
-			putFunc: func(_ issueMover) {},
 		}
 
 		workspaces := []WorkspaceSummary{
@@ -628,7 +582,7 @@ func TestMultiWorkspace_CrossWorkspaceMove(t *testing.T) {
 		}
 		wsCfg := testWorkspaceConfigFn("alpha", workspaces)
 
-		handler := handleMoveIssueWithPool(sourcePool, targetPool, wsCfg)
+		handler := handleMoveIssue(svc, wsCfg)
 
 		body := `{"target_workspace":"beta"}`
 		req := httptest.NewRequest(http.MethodPost, "/api/workspaces/ws-alpha/issues/src-001/move", strings.NewReader(body))
@@ -654,36 +608,25 @@ func TestMultiWorkspace_CrossWorkspaceMove(t *testing.T) {
 		if resp.Data.TargetID != "tgt-001" {
 			t.Errorf("expected TargetID tgt-001, got %s", resp.Data.TargetID)
 		}
-
-		// Verify source pool's Get was called
-		if sourceGetCtx == nil {
-			t.Error("source pool.Get was never called")
-		}
-		// Verify target pool's Get was called with correct workspace in context
-		if targetGetCtx == nil {
-			t.Fatal("target pool.Get was never called")
-		}
-		targetWS := WorkspaceFromContext(targetGetCtx)
-		if targetWS != "ws-beta-uuid" {
-			t.Errorf("expected target context workspace 'ws-beta-uuid', got %q", targetWS)
-		}
 	})
 
 	t.Run("move to non-existent workspace returns 400", func(t *testing.T) {
-		sourcePool := &mockMovePool{
-			getFunc: func(ctx context.Context) (issueMover, error) {
-				return &mockMoveClient{}, nil
+		svc := &mockIssueService{
+			moveIssueFunc: func(ctx context.Context, params service.MoveIssueParams) (*service.MoveIssueResult, error) {
+				_, err := params.Validator.ValidateTarget(params.TargetWorkspace)
+				if err != nil {
+					return nil, err
+				}
+				return nil, nil
 			},
-			putFunc: func(_ issueMover) {},
 		}
-		targetPool := &mockMovePool{}
 
 		workspaces := []WorkspaceSummary{
 			{Name: "alpha", Path: "/ws/alpha", Active: true},
 		}
 		wsCfg := testWorkspaceConfigFn("alpha", workspaces)
 
-		handler := handleMoveIssueWithPool(sourcePool, targetPool, wsCfg)
+		handler := handleMoveIssue(svc, wsCfg)
 
 		body := `{"target_workspace":"nonexistent"}`
 		req := httptest.NewRequest(http.MethodPost, "/api/issues/src-001/move", strings.NewReader(body))
@@ -698,13 +641,15 @@ func TestMultiWorkspace_CrossWorkspaceMove(t *testing.T) {
 	})
 
 	t.Run("move to same workspace returns 400", func(t *testing.T) {
-		sourcePool := &mockMovePool{
-			getFunc: func(ctx context.Context) (issueMover, error) {
-				return &mockMoveClient{}, nil
+		svc := &mockIssueService{
+			moveIssueFunc: func(ctx context.Context, params service.MoveIssueParams) (*service.MoveIssueResult, error) {
+				_, err := params.Validator.ValidateTarget(params.TargetWorkspace)
+				if err != nil {
+					return nil, err
+				}
+				return nil, nil
 			},
-			putFunc: func(_ issueMover) {},
 		}
-		targetPool := &mockMovePool{}
 
 		workspaces := []WorkspaceSummary{
 			{Name: "alpha", Path: "/ws/alpha", Active: true},
@@ -712,7 +657,7 @@ func TestMultiWorkspace_CrossWorkspaceMove(t *testing.T) {
 		}
 		wsCfg := testWorkspaceConfigFn("alpha", workspaces)
 
-		handler := handleMoveIssueWithPool(sourcePool, targetPool, wsCfg)
+		handler := handleMoveIssue(svc, wsCfg)
 
 		body := `{"target_workspace":"alpha"}`
 		req := httptest.NewRequest(http.MethodPost, "/api/issues/src-001/move", strings.NewReader(body))

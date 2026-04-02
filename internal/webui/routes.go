@@ -110,19 +110,19 @@ func (app *Server) registerWorkspaceRoutes() { //nolint:funlen // route registra
 	wsMux.HandleFunc("PATCH /api/workspaces/{ws}/name", handleWorkspaceRename(workspaceConfigFn))
 
 	// Issue endpoints
-	wsMux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}", handleGetIssue(app.multiPool))
-	wsMux.HandleFunc("GET /api/workspaces/{ws}/issues", handleListIssues(app.multiPool))
-	wsMux.HandleFunc("POST /api/workspaces/{ws}/issues", handleCreateIssue(app.multiPool))
-	wsMux.HandleFunc("PATCH /api/workspaces/{ws}/issues/{id}", handlePatchIssue(app.multiPool))
-	wsMux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/close", handleCloseIssue(app.multiPool))
-	wsMux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/move", handleMoveIssue(app.multiPool, app.multiPool, workspaceConfigFn))
-	wsMux.HandleFunc("DELETE /api/workspaces/{ws}/issues/{id}", handleDeleteIssue(app.multiPool))
-	wsMux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/comments", handleAddComment(app.multiPool))
-	wsMux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/events", handleGetIssueEvents(app.multiPool))
+	wsMux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}", handleGetIssue(app.issueSvc))
+	wsMux.HandleFunc("GET /api/workspaces/{ws}/issues", handleListIssues(app.issueSvc))
+	wsMux.HandleFunc("POST /api/workspaces/{ws}/issues", handleCreateIssue(app.issueSvc))
+	wsMux.HandleFunc("PATCH /api/workspaces/{ws}/issues/{id}", handlePatchIssue(app.issueSvc))
+	wsMux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/close", handleCloseIssue(app.issueSvc))
+	wsMux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/move", handleMoveIssue(app.issueSvc, workspaceConfigFn))
+	wsMux.HandleFunc("DELETE /api/workspaces/{ws}/issues/{id}", handleDeleteIssue(app.issueSvc))
+	wsMux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/comments", handleAddComment(app.issueSvc))
+	wsMux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/events", handleGetIssueEvents(app.issueSvc))
 
 	// Dependency management
-	wsMux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/dependencies", handleAddDependency(app.multiPool))
-	wsMux.HandleFunc("DELETE /api/workspaces/{ws}/issues/{id}/dependencies/{depId}", handleRemoveDependency(app.multiPool))
+	wsMux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/dependencies", handleAddDependency(app.issueSvc))
+	wsMux.HandleFunc("DELETE /api/workspaces/{ws}/issues/{id}/dependencies/{depId}", handleRemoveDependency(app.issueSvc))
 
 	// Stats, ready, blocked, graph
 	wsMux.HandleFunc("GET /api/workspaces/{ws}/stats", handleStats(app.multiPool))

@@ -3,8 +3,6 @@ package webui
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,40 +10,8 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
-
-// --- Mock types for issue handler tests ---
-
-// issuesMockClient implements issueGetter for handleGetIssue tests.
-type issuesMockClient struct {
-	showFunc func(args *rpc.ShowArgs) (*rpc.Response, error)
-}
-
-func (m *issuesMockClient) Show(args *rpc.ShowArgs) (*rpc.Response, error) {
-	if m.showFunc != nil {
-		return m.showFunc(args)
-	}
-	return nil, errors.New("showFunc not implemented")
-}
-
-// issuesMockPool implements connectionGetter for handleGetIssueWithPool tests.
-type issuesMockPool struct {
-	getFunc func(ctx context.Context) (issueGetter, error)
-	putFunc func(client issueGetter)
-}
-
-func (m *issuesMockPool) Get(ctx context.Context) (issueGetter, error) {
-	if m.getFunc != nil {
-		return m.getFunc(ctx)
-	}
-	return nil, errors.New("getFunc not implemented")
-}
-
-func (m *issuesMockPool) Put(client issueGetter) {
-	if m.putFunc != nil {
-		m.putFunc(client)
-	}
-}
 
 // --- handleGetIssue tests ---
 
@@ -62,25 +28,16 @@ func TestHandleGetIssue_Success_ResponseShape(t *testing.T) {
 		t.Fatalf("marshal issue data: %v", err)
 	}
 
-	client := &issuesMockClient{
-		showFunc: func(args *rpc.ShowArgs) (*rpc.Response, error) {
-			if args.ID != "proj-abc12" {
-				t.Errorf("expected ID %q, got %q", "proj-abc12", args.ID)
+	svc := &mockIssueService{
+		getIssueFunc: func(ctx context.Context, issueID string) (json.RawMessage, error) {
+			if issueID != "proj-abc12" {
+				t.Errorf("expected ID %q, got %q", "proj-abc12", issueID)
 			}
-			return &rpc.Response{
-				Success: true,
-				Data:    json.RawMessage(issueBytes),
-			}, nil
+			return json.RawMessage(issueBytes), nil
 		},
 	}
 
-	pool := &issuesMockPool{
-		getFunc: func(ctx context.Context) (issueGetter, error) {
-			return client, nil
-		},
-	}
-
-	handler := handleGetIssueWithPool(pool)
+	handler := handleGetIssue(svc)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/issues/proj-abc12", nil)
 	req.SetPathValue("id", "proj-abc12")
@@ -112,19 +69,13 @@ func TestHandleGetIssue_Success_ResponseShape(t *testing.T) {
 }
 
 func TestHandleGetIssue_NotFound_404(t *testing.T) {
-	client := &issuesMockClient{
-		showFunc: func(args *rpc.ShowArgs) (*rpc.Response, error) {
-			return nil, fmt.Errorf("issue not found: %s", args.ID)
+	svc := &mockIssueService{
+		getIssueFunc: func(ctx context.Context, issueID string) (json.RawMessage, error) {
+			return nil, service.ErrNotFound("issue not found: " + issueID)
 		},
 	}
 
-	pool := &issuesMockPool{
-		getFunc: func(ctx context.Context) (issueGetter, error) {
-			return client, nil
-		},
-	}
-
-	handler := handleGetIssueWithPool(pool)
+	handler := handleGetIssue(svc)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/issues/nonexistent-99", nil)
 	req.SetPathValue("id", "nonexistent-99")
@@ -140,14 +91,14 @@ func TestHandleGetIssue_NotFound_404(t *testing.T) {
 }
 
 func TestHandleGetIssue_MissingID_400(t *testing.T) {
-	pool := &issuesMockPool{
-		getFunc: func(ctx context.Context) (issueGetter, error) {
-			t.Fatal("pool.Get should not be called for empty ID")
+	svc := &mockIssueService{
+		getIssueFunc: func(ctx context.Context, issueID string) (json.RawMessage, error) {
+			t.Fatal("service.GetIssue should not be called for empty ID")
 			return nil, nil
 		},
 	}
 
-	handler := handleGetIssueWithPool(pool)
+	handler := handleGetIssue(svc)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/issues/", nil)
 	// Do NOT set path value to simulate missing ID
@@ -162,14 +113,14 @@ func TestHandleGetIssue_MissingID_400(t *testing.T) {
 	assertPlainError(t, body)
 }
 
-func TestHandleGetIssue_PoolUnavailable_503(t *testing.T) {
-	pool := &issuesMockPool{
-		getFunc: func(ctx context.Context) (issueGetter, error) {
-			return nil, errors.New("connection refused")
+func TestHandleGetIssue_ServiceUnavailable_503(t *testing.T) {
+	svc := &mockIssueService{
+		getIssueFunc: func(ctx context.Context, issueID string) (json.RawMessage, error) {
+			return nil, service.ErrUnavailable("daemon not available")
 		},
 	}
 
-	handler := handleGetIssueWithPool(pool)
+	handler := handleGetIssue(svc)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/issues/proj-1", nil)
 	req.SetPathValue("id", "proj-1")
@@ -185,19 +136,13 @@ func TestHandleGetIssue_PoolUnavailable_503(t *testing.T) {
 }
 
 func TestHandleGetIssue_InternalError_500(t *testing.T) {
-	client := &issuesMockClient{
-		showFunc: func(args *rpc.ShowArgs) (*rpc.Response, error) {
-			return nil, errors.New("disk I/O error")
+	svc := &mockIssueService{
+		getIssueFunc: func(ctx context.Context, issueID string) (json.RawMessage, error) {
+			return nil, service.ErrInternal("internal server error", nil)
 		},
 	}
 
-	pool := &issuesMockPool{
-		getFunc: func(ctx context.Context) (issueGetter, error) {
-			return client, nil
-		},
-	}
-
-	handler := handleGetIssueWithPool(pool)
+	handler := handleGetIssue(svc)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/issues/proj-1", nil)
 	req.SetPathValue("id", "proj-1")
@@ -212,98 +157,52 @@ func TestHandleGetIssue_InternalError_500(t *testing.T) {
 	assertPlainError(t, body)
 }
 
-func TestHandleGetIssue_ClientReturnedToPoolOnSuccess(t *testing.T) {
-	putCalled := false
-
-	client := &issuesMockClient{
-		showFunc: func(args *rpc.ShowArgs) (*rpc.Response, error) {
-			return &rpc.Response{
-				Success: true,
-				Data:    json.RawMessage(`{"id":"proj-1","title":"Test"}`),
-			}, nil
-		},
-	}
-
-	pool := &issuesMockPool{
-		getFunc: func(ctx context.Context) (issueGetter, error) {
-			return client, nil
-		},
-		putFunc: func(c issueGetter) {
-			putCalled = true
-			if c != client {
-				t.Error("pool.Put called with wrong client")
-			}
-		},
-	}
-
-	handler := handleGetIssueWithPool(pool)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/issues/proj-1", nil)
-	req.SetPathValue("id", "proj-1")
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	if !putCalled {
-		t.Error("expected pool.Put to be called (connection returned to pool)")
-	}
-}
-
 func TestHandleGetIssue_TableDriven(t *testing.T) {
 	tests := []struct {
 		name       string
 		issueID    string
-		showResp   *rpc.Response
-		showErr    error
-		poolErr    error
+		result     json.RawMessage
+		svcErr     error
 		wantStatus int
 	}{
 		{
-			name:    "success with full issue details",
-			issueID: "proj-full",
-			showResp: &rpc.Response{
-				Success: true,
-				Data:    json.RawMessage(`{"id":"proj-full","title":"Full Details","status":"in_progress","priority":1,"issue_type":"feature","labels":[],"dependencies":[],"dependents":[],"comments":[]}`),
-			},
+			name:       "success with full issue details",
+			issueID:    "proj-full",
+			result:     json.RawMessage(`{"id":"proj-full","title":"Full Details","status":"in_progress","priority":1,"issue_type":"feature","labels":[],"dependencies":[],"dependents":[],"comments":[]}`),
 			wantStatus: http.StatusOK,
 		},
 		{
 			name:       "not found error",
 			issueID:    "proj-missing",
-			showErr:    fmt.Errorf("issue not found: proj-missing"),
+			svcErr:     service.ErrNotFound("issue not found: proj-missing"),
 			wantStatus: http.StatusNotFound,
 		},
 		{
-			name:       "generic RPC error",
+			name:       "internal error",
 			issueID:    "proj-err",
-			showErr:    errors.New("timeout"),
+			svcErr:     service.ErrInternal("internal server error", nil),
 			wantStatus: http.StatusInternalServerError,
 		},
 		{
-			name:       "pool unavailable",
+			name:       "service unavailable",
 			issueID:    "proj-down",
-			poolErr:    errors.New("pool closed"),
+			svcErr:     service.ErrUnavailable("daemon not available"),
 			wantStatus: http.StatusServiceUnavailable,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client := &issuesMockClient{
-				showFunc: func(args *rpc.ShowArgs) (*rpc.Response, error) {
-					return tt.showResp, tt.showErr
-				},
-			}
-
-			pool := &issuesMockPool{
-				getFunc: func(ctx context.Context) (issueGetter, error) {
-					if tt.poolErr != nil {
-						return nil, tt.poolErr
+			svc := &mockIssueService{
+				getIssueFunc: func(ctx context.Context, issueID string) (json.RawMessage, error) {
+					if tt.svcErr != nil {
+						return nil, tt.svcErr
 					}
-					return client, nil
+					return tt.result, nil
 				},
 			}
 
-			handler := handleGetIssueWithPool(pool)
+			handler := handleGetIssue(svc)
 
 			req := httptest.NewRequest(http.MethodGet, "/api/issues/"+tt.issueID, nil)
 			req.SetPathValue("id", tt.issueID)
@@ -322,8 +221,14 @@ func TestHandleGetIssue_TableDriven(t *testing.T) {
 
 // --- handleListIssues tests ---
 
-func TestHandleListIssues_NilPool_503(t *testing.T) {
-	handler := handleListIssues(nil)
+func TestHandleListIssues_ServiceUnavailable_503(t *testing.T) {
+	svc := &mockIssueService{
+		listIssuesFunc: func(ctx context.Context, params service.ListIssuesParams) (*service.ListIssuesResult, error) {
+			return nil, service.ErrUnavailable("daemon not available")
+		},
+	}
+
+	handler := handleListIssues(svc)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/issues", nil)
 	rec := httptest.NewRecorder()
@@ -334,12 +239,7 @@ func TestHandleListIssues_NilPool_503(t *testing.T) {
 	}
 
 	body := assertJSONResponse(t, rec)
-	if body["success"] != false {
-		t.Error("expected success=false for nil pool")
-	}
-	if code, ok := body["code"].(string); !ok || code != "POOL_NOT_INITIALIZED" {
-		t.Errorf("expected code POOL_NOT_INITIALIZED, got %v", body["code"])
-	}
+	assertPlainError(t, body)
 }
 
 // --- parseListParams tests ---
@@ -603,154 +503,6 @@ func TestHandleListIssues_ParseKanbanParams(t *testing.T) {
 	}
 }
 
-// --- KanbanIssue enrichment tests ---
-
-func TestHandleListIssues_GetUnclosedBlockerRefs(t *testing.T) {
-	now := time.Now()
-
-	unclosedIDs := map[string]bool{
-		"blocker-1": true,
-		"blocker-2": true,
-		// "resolved-1" is not in unclosedIDs (closed)
-	}
-
-	issueMap := map[string]*types.IssueWithCounts{
-		"blocker-1": {
-			Issue: &types.Issue{
-				ID:        "blocker-1",
-				Title:     "Database migration",
-				Priority:  1,
-				Status:    types.StatusOpen,
-				CreatedAt: now,
-				UpdatedAt: now,
-			},
-		},
-		"blocker-2": {
-			Issue: &types.Issue{
-				ID:        "blocker-2",
-				Title:     "Auth service",
-				Priority:  0,
-				Status:    types.StatusInProgress,
-				CreatedAt: now,
-				UpdatedAt: now,
-			},
-		},
-	}
-
-	tests := []struct {
-		name    string
-		deps    []*types.Dependency
-		wantLen int
-		wantIDs []string
-	}{
-		{
-			name:    "no dependencies",
-			deps:    nil,
-			wantLen: 0,
-		},
-		{
-			name: "one unclosed blocker",
-			deps: []*types.Dependency{
-				{IssueID: "child-1", DependsOnID: "blocker-1", Type: types.DepBlocks},
-			},
-			wantLen: 1,
-			wantIDs: []string{"blocker-1"},
-		},
-		{
-			name: "resolved blocker excluded",
-			deps: []*types.Dependency{
-				{IssueID: "child-1", DependsOnID: "resolved-1", Type: types.DepBlocks},
-			},
-			wantLen: 0,
-		},
-		{
-			name: "multiple unclosed blockers",
-			deps: []*types.Dependency{
-				{IssueID: "child-1", DependsOnID: "blocker-1", Type: types.DepBlocks},
-				{IssueID: "child-1", DependsOnID: "blocker-2", Type: types.DepBlocks},
-			},
-			wantLen: 2,
-			wantIDs: []string{"blocker-1", "blocker-2"},
-		},
-		{
-			name: "non-blocking dependency type excluded",
-			deps: []*types.Dependency{
-				{IssueID: "child-1", DependsOnID: "blocker-1", Type: types.DepRelated},
-			},
-			wantLen: 0,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			refs := getUnclosedBlockerRefs(tt.deps, unclosedIDs, issueMap)
-			if len(refs) != tt.wantLen {
-				t.Fatalf("expected %d refs, got %d: %+v", tt.wantLen, len(refs), refs)
-			}
-			for i, wantID := range tt.wantIDs {
-				if refs[i].ID != wantID {
-					t.Errorf("refs[%d].ID = %q, want %q", i, refs[i].ID, wantID)
-				}
-			}
-			// Check that title and priority are populated from issueMap
-			for _, ref := range refs {
-				if iwc, ok := issueMap[ref.ID]; ok {
-					if ref.Title != iwc.Issue.Title {
-						t.Errorf("ref %q title = %q, want %q", ref.ID, ref.Title, iwc.Issue.Title)
-					}
-					if ref.Priority != iwc.Issue.Priority {
-						t.Errorf("ref %q priority = %d, want %d", ref.ID, ref.Priority, iwc.Issue.Priority)
-					}
-				}
-			}
-		})
-	}
-}
-
-func TestHandleListIssues_ExtractBlockerIDs(t *testing.T) {
-	tests := []struct {
-		name    string
-		refs    []types.BlockerRef
-		wantIDs []string
-	}{
-		{
-			name:    "empty refs",
-			refs:    []types.BlockerRef{},
-			wantIDs: []string{},
-		},
-		{
-			name: "single ref",
-			refs: []types.BlockerRef{
-				{ID: "blocker-1", Title: "Fix DB", Priority: 1},
-			},
-			wantIDs: []string{"blocker-1"},
-		},
-		{
-			name: "multiple refs",
-			refs: []types.BlockerRef{
-				{ID: "blocker-1", Title: "Fix DB", Priority: 1},
-				{ID: "blocker-2", Title: "Fix Auth", Priority: 0},
-				{ID: "blocker-3", Title: "Fix Cache", Priority: 2},
-			},
-			wantIDs: []string{"blocker-1", "blocker-2", "blocker-3"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ids := extractBlockerIDs(tt.refs)
-			if len(ids) != len(tt.wantIDs) {
-				t.Fatalf("expected %d IDs, got %d", len(tt.wantIDs), len(ids))
-			}
-			for i, wantID := range tt.wantIDs {
-				if ids[i] != wantID {
-					t.Errorf("ids[%d] = %q, want %q", i, ids[i], wantID)
-				}
-			}
-		})
-	}
-}
-
 // --- IssueWithParent / KanbanIssue JSON shape tests ---
 
 func TestHandleListIssues_IssueWithParent_JSONShape(t *testing.T) {
@@ -759,7 +511,7 @@ func TestHandleListIssues_IssueWithParent_JSONShape(t *testing.T) {
 	parentTitle := "Epic: User Auth"
 	repo := "core-repo"
 
-	iwp := &IssueWithParent{
+	iwp := &service.IssueWithParent{
 		IssueWithCounts: &types.IssueWithCounts{
 			Issue: &types.Issue{
 				ID:        "child-1",
@@ -809,7 +561,7 @@ func TestHandleListIssues_IssueWithParent_JSONShape(t *testing.T) {
 
 func TestHandleListIssues_IssueWithParent_NilOptionalFields(t *testing.T) {
 	now := time.Now()
-	iwp := &IssueWithParent{
+	iwp := &service.IssueWithParent{
 		IssueWithCounts: &types.IssueWithCounts{
 			Issue: &types.Issue{
 				ID:        "orphan-1",
@@ -851,7 +603,7 @@ func TestHandleListIssues_KanbanIssue_JSONShape(t *testing.T) {
 	parentID := "epic-1"
 	parentTitle := "Auth Epic"
 
-	ki := &KanbanIssue{
+	ki := &service.KanbanIssue{
 		IssueWithCounts: &types.IssueWithCounts{
 			Issue: &types.Issue{
 				ID:        "task-1",
@@ -927,7 +679,7 @@ func TestHandleListIssues_KanbanIssue_JSONShape(t *testing.T) {
 
 func TestHandleListIssues_KanbanIssue_NotBlocked(t *testing.T) {
 	now := time.Now()
-	ki := &KanbanIssue{
+	ki := &service.KanbanIssue{
 		IssueWithCounts: &types.IssueWithCounts{
 			Issue: &types.Issue{
 				ID:        "task-2",
@@ -1038,7 +790,7 @@ func TestHandleListIssues_IssuesResponse_ErrorEnvelope(t *testing.T) {
 
 func TestHandleListIssues_IssuesResponse_EmptyDataEnvelope(t *testing.T) {
 	// Empty list case -- what handleListIssues returns for empty results
-	data, _ := json.Marshal([]*IssueWithParent{})
+	data, _ := json.Marshal([]service.IssueWithParent{})
 
 	resp := IssuesResponse{
 		Success: true,

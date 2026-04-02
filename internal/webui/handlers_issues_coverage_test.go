@@ -1,130 +1,16 @@
 package webui
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
-	"net"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
-	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
-
-// --- Mock RPC server infrastructure for handleListIssues / fetchUnclosedIDSetAndMap ---
-
-// issuesMockRPCHandler is a function that handles an RPC request and returns a response.
-type issuesMockRPCHandler func(req rpc.Request) rpc.Response
-
-// startIssuesMockRPCServer creates a Unix socket mock server that handles RPC requests
-// using the provided handler. Returns the socket path.
-func startIssuesMockRPCServer(t *testing.T, handler issuesMockRPCHandler) string {
-	t.Helper()
-
-	dir, err := os.MkdirTemp("/tmp", "issues-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(dir) })
-
-	socketPath := filepath.Join(dir, "bd.sock")
-
-	listener, err := net.Listen("unix", socketPath)
-	if err != nil {
-		t.Fatalf("failed to create mock server: %v", err)
-	}
-	t.Cleanup(func() { listener.Close() })
-
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return // listener closed
-			}
-			go func(c net.Conn) {
-				defer c.Close()
-				scanner := bufio.NewScanner(c)
-				scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
-				for scanner.Scan() {
-					var req rpc.Request
-					if err := json.Unmarshal(scanner.Bytes(), &req); err != nil {
-						continue
-					}
-					resp := handler(req)
-					data, _ := json.Marshal(resp)
-					data = append(data, '\n')
-					_, _ = c.Write(data)
-				}
-			}(conn)
-		}
-	}()
-
-	return socketPath
-}
-
-// issuesCovDaemonPool implements daemon.Pool for testing with a mock RPC server.
-type issuesCovDaemonPool struct {
-	socketPath string
-	clients    []*rpc.Client
-}
-
-func newIssuesCovDaemonPool(socketPath string) *issuesCovDaemonPool {
-	return &issuesCovDaemonPool{socketPath: socketPath}
-}
-
-func (p *issuesCovDaemonPool) Get(_ context.Context) (*rpc.Client, error) {
-	client, err := rpc.TryConnectWithTimeout(p.socketPath, 2*time.Second)
-	if err != nil {
-		return nil, err
-	}
-	if client == nil {
-		return nil, context.DeadlineExceeded
-	}
-	p.clients = append(p.clients, client)
-	return client, nil
-}
-
-func (p *issuesCovDaemonPool) Put(client *rpc.Client) {
-	if client != nil {
-		_ = client.Close()
-	}
-}
-
-func (p *issuesCovDaemonPool) PutAfterError(client *rpc.Client) { p.Put(client) }
-
-func (p *issuesCovDaemonPool) Discard(client *rpc.Client) {
-	if client != nil {
-		_ = client.Close()
-	}
-}
-
-func (p *issuesCovDaemonPool) Stats() daemon.PoolStats {
-	return daemon.PoolStats{}
-}
-
-func (p *issuesCovDaemonPool) Close() error {
-	for _, c := range p.clients {
-		_ = c.Close()
-	}
-	return nil
-}
-
-// issuesCovHealthyResponse returns a successful health response for mock servers.
-func issuesCovHealthyResponse() rpc.Response {
-	healthData, _ := json.Marshal(rpc.HealthResponse{
-		Status:     "healthy",
-		Version:    "test",
-		Compatible: true,
-		Uptime:     1.0,
-	})
-	return rpc.Response{Success: true, Data: json.RawMessage(healthData)}
-}
 
 // makeCovIssue creates a test issue with the given parameters.
 func makeCovIssue(id, title string, status types.Status, priority int) *types.IssueWithCounts {
@@ -145,30 +31,21 @@ func makeCovIssue(id, title string, status types.Status, priority int) *types.Is
 // --- handleListIssues coverage tests ---
 
 func TestHandleListIssues_BasicSuccess_ListMode(t *testing.T) {
-	issues := []*types.IssueWithCounts{
-		makeCovIssue("issue-1", "First Issue", types.StatusOpen, 2),
-		makeCovIssue("issue-2", "Second Issue", types.StatusInProgress, 1),
+	issue1 := makeCovIssue("issue-1", "First Issue", types.StatusOpen, 2)
+	issue2 := makeCovIssue("issue-2", "Second Issue", types.StatusInProgress, 1)
+
+	svc := &mockIssueService{
+		listIssuesFunc: func(ctx context.Context, params service.ListIssuesParams) (*service.ListIssuesResult, error) {
+			return &service.ListIssuesResult{
+				Issues: []service.IssueWithParent{
+					{IssueWithCounts: issue1},
+					{IssueWithCounts: issue2},
+				},
+			}, nil
+		},
 	}
 
-	socketPath := startIssuesMockRPCServer(t, func(req rpc.Request) rpc.Response {
-		switch req.Operation {
-		case "list":
-			data, _ := json.Marshal(issues)
-			return rpc.Response{Success: true, Data: json.RawMessage(data)}
-		case "get_parent_ids":
-			return rpc.Response{
-				Success: true,
-				Data:    json.RawMessage(`{"parents":{}}`),
-			}
-		default:
-			return rpc.Response{Success: true, Data: json.RawMessage(`{}`)}
-		}
-	})
-
-	pool := newIssuesCovDaemonPool(socketPath)
-	defer pool.Close()
-
-	handler := handleListIssues(pool)
+	handler := handleListIssues(svc)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/issues?status=open", nil)
 	rec := httptest.NewRecorder()
@@ -196,20 +73,15 @@ func TestHandleListIssues_BasicSuccess_ListMode(t *testing.T) {
 }
 
 func TestHandleListIssues_EmptyResultListMode(t *testing.T) {
-	socketPath := startIssuesMockRPCServer(t, func(req rpc.Request) rpc.Response {
-		switch req.Operation {
-		case "list":
-			data, _ := json.Marshal([]*types.IssueWithCounts{})
-			return rpc.Response{Success: true, Data: json.RawMessage(data)}
-		default:
-			return rpc.Response{Success: true, Data: json.RawMessage(`{}`)}
-		}
-	})
+	svc := &mockIssueService{
+		listIssuesFunc: func(ctx context.Context, params service.ListIssuesParams) (*service.ListIssuesResult, error) {
+			return &service.ListIssuesResult{
+				Issues: []service.IssueWithParent{},
+			}, nil
+		},
+	}
 
-	pool := newIssuesCovDaemonPool(socketPath)
-	defer pool.Close()
-
-	handler := handleListIssues(pool)
+	handler := handleListIssues(svc)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/issues", nil)
 	rec := httptest.NewRecorder()
@@ -237,31 +109,22 @@ func TestHandleListIssues_EmptyResultListMode(t *testing.T) {
 }
 
 func TestHandleListIssues_WithExcludeStatus(t *testing.T) {
-	issues := []*types.IssueWithCounts{
-		makeCovIssue("issue-1", "Open", types.StatusOpen, 2),
-		makeCovIssue("issue-2", "Closed", types.StatusClosed, 1),
-		makeCovIssue("issue-3", "In Progress", types.StatusInProgress, 0),
+	issue1 := makeCovIssue("issue-1", "Open", types.StatusOpen, 2)
+	issue3 := makeCovIssue("issue-3", "In Progress", types.StatusInProgress, 0)
+
+	svc := &mockIssueService{
+		listIssuesFunc: func(ctx context.Context, params service.ListIssuesParams) (*service.ListIssuesResult, error) {
+			// Service layer handles exclude filtering
+			return &service.ListIssuesResult{
+				Issues: []service.IssueWithParent{
+					{IssueWithCounts: issue1},
+					{IssueWithCounts: issue3},
+				},
+			}, nil
+		},
 	}
 
-	socketPath := startIssuesMockRPCServer(t, func(req rpc.Request) rpc.Response {
-		switch req.Operation {
-		case "list":
-			data, _ := json.Marshal(issues)
-			return rpc.Response{Success: true, Data: json.RawMessage(data)}
-		case "get_parent_ids":
-			return rpc.Response{
-				Success: true,
-				Data:    json.RawMessage(`{"parents":{}}`),
-			}
-		default:
-			return rpc.Response{Success: true, Data: json.RawMessage(`{}`)}
-		}
-	})
-
-	pool := newIssuesCovDaemonPool(socketPath)
-	defer pool.Close()
-
-	handler := handleListIssues(pool)
+	handler := handleListIssues(svc)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/issues?exclude_status=closed", nil)
 	rec := httptest.NewRecorder()
@@ -294,32 +157,25 @@ func TestHandleListIssues_WithExcludeStatus(t *testing.T) {
 }
 
 func TestHandleListIssues_WithParentInfo(t *testing.T) {
-	issues := []*types.IssueWithCounts{
-		makeCovIssue("child-1", "Child Issue", types.StatusOpen, 2),
+	child := makeCovIssue("child-1", "Child Issue", types.StatusOpen, 2)
+	parentID := "parent-1"
+	parentTitle := "Parent Epic"
+
+	svc := &mockIssueService{
+		listIssuesFunc: func(ctx context.Context, params service.ListIssuesParams) (*service.ListIssuesResult, error) {
+			return &service.ListIssuesResult{
+				Issues: []service.IssueWithParent{
+					{
+						IssueWithCounts: child,
+						Parent:          &parentID,
+						ParentTitle:     &parentTitle,
+					},
+				},
+			}, nil
+		},
 	}
 
-	parentInfo := map[string]*rpc.ParentInfo{
-		"child-1": {ParentID: "parent-1", ParentTitle: "Parent Epic"},
-	}
-
-	socketPath := startIssuesMockRPCServer(t, func(req rpc.Request) rpc.Response {
-		switch req.Operation {
-		case "list":
-			data, _ := json.Marshal(issues)
-			return rpc.Response{Success: true, Data: json.RawMessage(data)}
-		case "get_parent_ids":
-			resp := rpc.GetParentIDsResponse{Parents: parentInfo}
-			data, _ := json.Marshal(resp)
-			return rpc.Response{Success: true, Data: json.RawMessage(data)}
-		default:
-			return rpc.Response{Success: true, Data: json.RawMessage(`{}`)}
-		}
-	})
-
-	pool := newIssuesCovDaemonPool(socketPath)
-	defer pool.Close()
-
-	handler := handleListIssues(pool)
+	handler := handleListIssues(svc)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/issues", nil)
 	rec := httptest.NewRecorder()
@@ -351,53 +207,29 @@ func TestHandleListIssues_WithParentInfo(t *testing.T) {
 }
 
 func TestHandleListIssues_KanbanMode_IncludeBlocked(t *testing.T) {
-	issues := []*types.IssueWithCounts{
-		makeCovIssue("task-1", "Blocked Task", types.StatusOpen, 2),
-		makeCovIssue("task-2", "Free Task", types.StatusOpen, 3),
-	}
+	task1 := makeCovIssue("task-1", "Blocked Task", types.StatusOpen, 2)
+	task2 := makeCovIssue("task-2", "Free Task", types.StatusOpen, 3)
 
-	allIssues := []*types.IssueWithCounts{
-		makeCovIssue("task-1", "Blocked Task", types.StatusOpen, 2),
-		makeCovIssue("task-2", "Free Task", types.StatusOpen, 3),
-		makeCovIssue("blocker-1", "Blocker Issue", types.StatusOpen, 1),
-	}
-	issues[0].Issue.Dependencies = []*types.Dependency{
-		{
-			IssueID:     "task-1",
-			DependsOnID: "blocker-1",
-			Type:        types.DepBlocks,
-			CreatedAt:   time.Now(),
+	svc := &mockIssueService{
+		listIssuesFunc: func(ctx context.Context, params service.ListIssuesParams) (*service.ListIssuesResult, error) {
+			return &service.ListIssuesResult{
+				KanbanIssues: []service.KanbanIssue{
+					{
+						IssueWithCounts: task1,
+						IsBlocked:       true,
+						BlockedByCount:  1,
+					},
+					{
+						IssueWithCounts: task2,
+						IsBlocked:       false,
+						BlockedByCount:  0,
+					},
+				},
+			}, nil
 		},
 	}
 
-	callCount := 0
-	socketPath := startIssuesMockRPCServer(t, func(req rpc.Request) rpc.Response {
-		switch req.Operation {
-		case "list":
-			callCount++
-			if callCount == 1 {
-				data, _ := json.Marshal(issues)
-				return rpc.Response{Success: true, Data: json.RawMessage(data)}
-			}
-			data, _ := json.Marshal(allIssues)
-			return rpc.Response{Success: true, Data: json.RawMessage(data)}
-		case "get_parent_ids":
-			return rpc.Response{
-				Success: true,
-				Data:    json.RawMessage(`{"parents":{}}`),
-			}
-		case "blocked":
-			data, _ := json.Marshal([]*types.BlockedIssue{})
-			return rpc.Response{Success: true, Data: json.RawMessage(data)}
-		default:
-			return rpc.Response{Success: true, Data: json.RawMessage(`{}`)}
-		}
-	})
-
-	pool := newIssuesCovDaemonPool(socketPath)
-	defer pool.Close()
-
-	handler := handleListIssues(pool)
+	handler := handleListIssues(svc)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/issues?include_blocked=true", nil)
 	rec := httptest.NewRecorder()
@@ -441,20 +273,15 @@ func TestHandleListIssues_KanbanMode_IncludeBlocked(t *testing.T) {
 }
 
 func TestHandleListIssues_KanbanMode_EmptyResult(t *testing.T) {
-	socketPath := startIssuesMockRPCServer(t, func(req rpc.Request) rpc.Response {
-		switch req.Operation {
-		case "list":
-			data, _ := json.Marshal([]*types.IssueWithCounts{})
-			return rpc.Response{Success: true, Data: json.RawMessage(data)}
-		default:
-			return rpc.Response{Success: true, Data: json.RawMessage(`{}`)}
-		}
-	})
+	svc := &mockIssueService{
+		listIssuesFunc: func(ctx context.Context, params service.ListIssuesParams) (*service.ListIssuesResult, error) {
+			return &service.ListIssuesResult{
+				KanbanIssues: []service.KanbanIssue{},
+			}, nil
+		},
+	}
 
-	pool := newIssuesCovDaemonPool(socketPath)
-	defer pool.Close()
-
-	handler := handleListIssues(pool)
+	handler := handleListIssues(svc)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/issues?include_blocked=true", nil)
 	rec := httptest.NewRecorder()
@@ -481,20 +308,14 @@ func TestHandleListIssues_KanbanMode_EmptyResult(t *testing.T) {
 	}
 }
 
-func TestHandleListIssues_DaemonErrorResponse(t *testing.T) {
-	socketPath := startIssuesMockRPCServer(t, func(req rpc.Request) rpc.Response {
-		switch req.Operation {
-		case "list":
-			return rpc.Response{Success: false, Error: "internal daemon error"}
-		default:
-			return rpc.Response{Success: true, Data: json.RawMessage(`{}`)}
-		}
-	})
+func TestHandleListIssues_ServiceError(t *testing.T) {
+	svc := &mockIssueService{
+		listIssuesFunc: func(ctx context.Context, params service.ListIssuesParams) (*service.ListIssuesResult, error) {
+			return nil, service.ErrInternal("internal daemon error", nil)
+		},
+	}
 
-	pool := newIssuesCovDaemonPool(socketPath)
-	defer pool.Close()
-
-	handler := handleListIssues(pool)
+	handler := handleListIssues(svc)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/issues", nil)
 	rec := httptest.NewRecorder()
@@ -503,45 +324,24 @@ func TestHandleListIssues_DaemonErrorResponse(t *testing.T) {
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500, got %d: %s", rec.Code, rec.Body.String())
 	}
-
-	var resp IssuesResponse
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
-	if resp.Success {
-		t.Error("expected success=false for daemon error")
-	}
-	// When the daemon returns Success=false, the rpc.Client wraps it as an error,
-	// so handleListIssues sees it as an RPC error (not a DAEMON_ERROR).
-	if resp.Code != "RPC_ERROR" {
-		t.Errorf("expected code RPC_ERROR, got %q", resp.Code)
-	}
 }
 
 func TestHandleListIssues_WithRepoField(t *testing.T) {
 	issue := makeCovIssue("repo-issue", "Multi-repo Issue", types.StatusOpen, 2)
 	issue.Issue.SourceRepo = "backend-repo"
-	issues := []*types.IssueWithCounts{issue}
+	repo := "backend-repo"
 
-	socketPath := startIssuesMockRPCServer(t, func(req rpc.Request) rpc.Response {
-		switch req.Operation {
-		case "list":
-			data, _ := json.Marshal(issues)
-			return rpc.Response{Success: true, Data: json.RawMessage(data)}
-		case "get_parent_ids":
-			return rpc.Response{
-				Success: true,
-				Data:    json.RawMessage(`{"parents":{}}`),
-			}
-		default:
-			return rpc.Response{Success: true, Data: json.RawMessage(`{}`)}
-		}
-	})
+	svc := &mockIssueService{
+		listIssuesFunc: func(ctx context.Context, params service.ListIssuesParams) (*service.ListIssuesResult, error) {
+			return &service.ListIssuesResult{
+				Issues: []service.IssueWithParent{
+					{IssueWithCounts: issue, Repo: &repo},
+				},
+			}, nil
+		},
+	}
 
-	pool := newIssuesCovDaemonPool(socketPath)
-	defer pool.Close()
-
-	handler := handleListIssues(pool)
+	handler := handleListIssues(svc)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/issues", nil)
 	rec := httptest.NewRecorder()
@@ -569,29 +369,19 @@ func TestHandleListIssues_WithRepoField(t *testing.T) {
 }
 
 func TestHandleListIssues_MultipleFilters(t *testing.T) {
-	issues := []*types.IssueWithCounts{
-		makeCovIssue("filtered-1", "Filtered Result", types.StatusOpen, 1),
+	issue := makeCovIssue("filtered-1", "Filtered Result", types.StatusOpen, 1)
+
+	svc := &mockIssueService{
+		listIssuesFunc: func(ctx context.Context, params service.ListIssuesParams) (*service.ListIssuesResult, error) {
+			return &service.ListIssuesResult{
+				Issues: []service.IssueWithParent{
+					{IssueWithCounts: issue},
+				},
+			}, nil
+		},
 	}
 
-	socketPath := startIssuesMockRPCServer(t, func(req rpc.Request) rpc.Response {
-		switch req.Operation {
-		case "list":
-			data, _ := json.Marshal(issues)
-			return rpc.Response{Success: true, Data: json.RawMessage(data)}
-		case "get_parent_ids":
-			return rpc.Response{
-				Success: true,
-				Data:    json.RawMessage(`{"parents":{}}`),
-			}
-		default:
-			return rpc.Response{Success: true, Data: json.RawMessage(`{}`)}
-		}
-	})
-
-	pool := newIssuesCovDaemonPool(socketPath)
-	defer pool.Close()
-
-	handler := handleListIssues(pool)
+	handler := handleListIssues(svc)
 
 	req := httptest.NewRequest(http.MethodGet,
 		"/api/issues?status=open&type=bug&assignee=alice&priority=1&limit=50&labels=urgent,backend", nil)
@@ -612,30 +402,16 @@ func TestHandleListIssues_MultipleFilters(t *testing.T) {
 }
 
 func TestHandleListIssues_ExcludeAllStatuses(t *testing.T) {
-	issues := []*types.IssueWithCounts{
-		makeCovIssue("issue-1", "Open", types.StatusOpen, 2),
-		makeCovIssue("issue-2", "InProgress", types.StatusInProgress, 1),
+	svc := &mockIssueService{
+		listIssuesFunc: func(ctx context.Context, params service.ListIssuesParams) (*service.ListIssuesResult, error) {
+			// After excluding all statuses, no issues remain
+			return &service.ListIssuesResult{
+				Issues: []service.IssueWithParent{},
+			}, nil
+		},
 	}
 
-	socketPath := startIssuesMockRPCServer(t, func(req rpc.Request) rpc.Response {
-		switch req.Operation {
-		case "list":
-			data, _ := json.Marshal(issues)
-			return rpc.Response{Success: true, Data: json.RawMessage(data)}
-		case "get_parent_ids":
-			return rpc.Response{
-				Success: true,
-				Data:    json.RawMessage(`{"parents":{}}`),
-			}
-		default:
-			return rpc.Response{Success: true, Data: json.RawMessage(`{}`)}
-		}
-	})
-
-	pool := newIssuesCovDaemonPool(socketPath)
-	defer pool.Close()
-
-	handler := handleListIssues(pool)
+	handler := handleListIssues(svc)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/issues?exclude_status=open,in_progress", nil)
 	rec := httptest.NewRecorder()
@@ -662,187 +438,20 @@ func TestHandleListIssues_ExcludeAllStatuses(t *testing.T) {
 	}
 }
 
-// --- fetchUnclosedIDSetAndMap coverage tests ---
-
-func TestFetchUnclosedIDSetAndMap_Success(t *testing.T) {
-	now := time.Now()
-	closedAt := now
-	allIssues := []*types.IssueWithCounts{
-		{
-			Issue: &types.Issue{
-				ID: "open-1", Title: "Open Issue", Status: types.StatusOpen,
-				Priority: 2, IssueType: types.TypeTask, CreatedAt: now, UpdatedAt: now,
-			},
-		},
-		{
-			Issue: &types.Issue{
-				ID: "closed-1", Title: "Closed Issue", Status: types.StatusClosed,
-				Priority: 1, IssueType: types.TypeBug, CreatedAt: now, UpdatedAt: now,
-				ClosedAt: &closedAt,
-			},
-		},
-		{
-			Issue: &types.Issue{
-				ID: "ip-1", Title: "In Progress", Status: types.StatusInProgress,
-				Priority: 0, IssueType: types.TypeFeature, CreatedAt: now, UpdatedAt: now,
-			},
+func TestHandleListIssues_ServiceUnavailable(t *testing.T) {
+	svc := &mockIssueService{
+		listIssuesFunc: func(ctx context.Context, params service.ListIssuesParams) (*service.ListIssuesResult, error) {
+			return nil, service.ErrUnavailable("daemon not available")
 		},
 	}
 
-	socketPath := startIssuesMockRPCServer(t, func(req rpc.Request) rpc.Response {
-		if req.Operation == "health" {
-			return issuesCovHealthyResponse()
-		}
-		data, _ := json.Marshal(allIssues)
-		return rpc.Response{Success: true, Data: json.RawMessage(data)}
-	})
+	handler := handleListIssues(svc)
 
-	client, err := rpc.TryConnectWithTimeout(socketPath, 2*time.Second)
-	if err != nil {
-		t.Fatalf("failed to connect to mock server: %v", err)
-	}
-	if client == nil {
-		t.Fatal("mock server returned nil client (health check likely failed)")
-	}
-	defer client.Close()
+	req := httptest.NewRequest(http.MethodGet, "/api/issues", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
 
-	unclosedIDs, issueMap := fetchUnclosedIDSetAndMap(client)
-
-	if unclosedIDs == nil {
-		t.Fatal("expected unclosedIDs to be non-nil")
-	}
-	if issueMap == nil {
-		t.Fatal("expected issueMap to be non-nil")
-	}
-
-	if !unclosedIDs["open-1"] {
-		t.Error("expected open-1 to be in unclosedIDs")
-	}
-	if !unclosedIDs["ip-1"] {
-		t.Error("expected ip-1 to be in unclosedIDs")
-	}
-	if unclosedIDs["closed-1"] {
-		t.Error("closed-1 should NOT be in unclosedIDs")
-	}
-
-	if len(issueMap) != 3 {
-		t.Errorf("expected 3 issues in issueMap, got %d", len(issueMap))
-	}
-	if issueMap["open-1"] == nil {
-		t.Error("expected open-1 in issueMap")
-	}
-	if issueMap["closed-1"] == nil {
-		t.Error("expected closed-1 in issueMap")
-	}
-}
-
-func TestFetchUnclosedIDSetAndMap_EmptyList(t *testing.T) {
-	socketPath := startIssuesMockRPCServer(t, func(req rpc.Request) rpc.Response {
-		if req.Operation == "health" {
-			return issuesCovHealthyResponse()
-		}
-		data, _ := json.Marshal([]*types.IssueWithCounts{})
-		return rpc.Response{Success: true, Data: json.RawMessage(data)}
-	})
-
-	client, err := rpc.TryConnectWithTimeout(socketPath, 2*time.Second)
-	if err != nil {
-		t.Fatalf("failed to connect to mock server: %v", err)
-	}
-	if client == nil {
-		t.Fatal("mock server returned nil client")
-	}
-	defer client.Close()
-
-	unclosedIDs, issueMap := fetchUnclosedIDSetAndMap(client)
-
-	if unclosedIDs == nil {
-		t.Fatal("expected unclosedIDs to be non-nil (empty map)")
-	}
-	if issueMap == nil {
-		t.Fatal("expected issueMap to be non-nil (empty map)")
-	}
-	if len(unclosedIDs) != 0 {
-		t.Errorf("expected 0 unclosed IDs, got %d", len(unclosedIDs))
-	}
-	if len(issueMap) != 0 {
-		t.Errorf("expected 0 issues in map, got %d", len(issueMap))
-	}
-}
-
-func TestFetchUnclosedIDSetAndMap_RPCError(t *testing.T) {
-	socketPath := startIssuesMockRPCServer(t, func(req rpc.Request) rpc.Response {
-		if req.Operation == "health" {
-			return issuesCovHealthyResponse()
-		}
-		return rpc.Response{Success: false, Error: "daemon error"}
-	})
-
-	client, err := rpc.TryConnectWithTimeout(socketPath, 2*time.Second)
-	if err != nil {
-		t.Fatalf("failed to connect to mock server: %v", err)
-	}
-	if client == nil {
-		t.Fatal("mock server returned nil client")
-	}
-	defer client.Close()
-
-	unclosedIDs, issueMap := fetchUnclosedIDSetAndMap(client)
-
-	if unclosedIDs != nil {
-		t.Errorf("expected nil unclosedIDs on RPC error, got %v", unclosedIDs)
-	}
-	if issueMap != nil {
-		t.Errorf("expected nil issueMap on RPC error, got %v", issueMap)
-	}
-}
-
-func TestFetchUnclosedIDSetAndMap_AllClosed(t *testing.T) {
-	now := time.Now()
-	closedAt := now
-	allIssues := []*types.IssueWithCounts{
-		{
-			Issue: &types.Issue{
-				ID: "closed-1", Title: "Closed 1", Status: types.StatusClosed,
-				Priority: 1, IssueType: types.TypeTask, CreatedAt: now, UpdatedAt: now,
-				ClosedAt: &closedAt,
-			},
-		},
-		{
-			Issue: &types.Issue{
-				ID: "closed-2", Title: "Closed 2", Status: types.StatusClosed,
-				Priority: 2, IssueType: types.TypeBug, CreatedAt: now, UpdatedAt: now,
-				ClosedAt: &closedAt,
-			},
-		},
-	}
-
-	socketPath := startIssuesMockRPCServer(t, func(req rpc.Request) rpc.Response {
-		if req.Operation == "health" {
-			return issuesCovHealthyResponse()
-		}
-		data, _ := json.Marshal(allIssues)
-		return rpc.Response{Success: true, Data: json.RawMessage(data)}
-	})
-
-	client, err := rpc.TryConnectWithTimeout(socketPath, 2*time.Second)
-	if err != nil {
-		t.Fatalf("failed to connect to mock server: %v", err)
-	}
-	if client == nil {
-		t.Fatal("mock server returned nil client")
-	}
-	defer client.Close()
-
-	unclosedIDs, issueMap := fetchUnclosedIDSetAndMap(client)
-
-	if unclosedIDs == nil {
-		t.Fatal("expected non-nil unclosedIDs")
-	}
-	if len(unclosedIDs) != 0 {
-		t.Errorf("expected 0 unclosed IDs (all closed), got %d", len(unclosedIDs))
-	}
-	if len(issueMap) != 2 {
-		t.Errorf("expected 2 issues in map (all issues regardless of status), got %d", len(issueMap))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", rec.Code, rec.Body.String())
 	}
 }

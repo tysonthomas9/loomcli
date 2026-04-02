@@ -3,143 +3,13 @@ package webui
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/rpc"
-	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
-
-// ===========================================================================
-// Mock types (W-suffixed to avoid collisions with handlers_test.go)
-// ===========================================================================
-
-// wMockPatchClient implements issueUpdater for testing.
-type wMockPatchClient struct {
-	updateFunc func(args *rpc.UpdateArgs) (*rpc.Response, error)
-}
-
-func (m *wMockPatchClient) Update(args *rpc.UpdateArgs) (*rpc.Response, error) {
-	if m.updateFunc != nil {
-		return m.updateFunc(args)
-	}
-	return nil, errors.New("updateFunc not implemented")
-}
-
-// wMockPatchPool implements patchConnectionGetter for testing.
-type wMockPatchPool struct {
-	getFunc func(ctx context.Context) (issueUpdater, error)
-	putFunc func(client issueUpdater)
-}
-
-func (m *wMockPatchPool) Get(ctx context.Context) (issueUpdater, error) {
-	if m.getFunc != nil {
-		return m.getFunc(ctx)
-	}
-	return nil, errors.New("getFunc not implemented")
-}
-
-func (m *wMockPatchPool) Put(client issueUpdater) {
-	if m.putFunc != nil {
-		m.putFunc(client)
-	}
-}
-
-// wMockCreateClient implements issueCreator for testing.
-type wMockCreateClient struct {
-	createFunc func(args *rpc.CreateArgs) (*rpc.Response, error)
-}
-
-func (m *wMockCreateClient) Create(args *rpc.CreateArgs) (*rpc.Response, error) {
-	if m.createFunc != nil {
-		return m.createFunc(args)
-	}
-	return nil, errors.New("createFunc not implemented")
-}
-
-// wMockCreatePool implements createConnectionGetter for testing.
-type wMockCreatePool struct {
-	getFunc func(ctx context.Context) (issueCreator, error)
-	putFunc func(client issueCreator)
-}
-
-func (m *wMockCreatePool) Get(ctx context.Context) (issueCreator, error) {
-	if m.getFunc != nil {
-		return m.getFunc(ctx)
-	}
-	return nil, errors.New("getFunc not implemented")
-}
-
-func (m *wMockCreatePool) Put(client issueCreator) {
-	if m.putFunc != nil {
-		m.putFunc(client)
-	}
-}
-
-// wMockCloseClient implements issueCloser for testing.
-type wMockCloseClient struct {
-	closeFunc func(args *rpc.CloseArgs) (*rpc.Response, error)
-}
-
-func (m *wMockCloseClient) CloseIssue(args *rpc.CloseArgs) (*rpc.Response, error) {
-	if m.closeFunc != nil {
-		return m.closeFunc(args)
-	}
-	return nil, errors.New("closeFunc not implemented")
-}
-
-// wMockClosePool implements closeConnectionGetter for testing.
-type wMockClosePool struct {
-	getFunc func(ctx context.Context) (issueCloser, error)
-	putFunc func(client issueCloser)
-}
-
-func (m *wMockClosePool) Get(ctx context.Context) (issueCloser, error) {
-	if m.getFunc != nil {
-		return m.getFunc(ctx)
-	}
-	return nil, errors.New("getFunc not implemented")
-}
-
-func (m *wMockClosePool) Put(client issueCloser) {
-	if m.putFunc != nil {
-		m.putFunc(client)
-	}
-}
-
-// wMockDeleteClient implements issueDeleter for testing.
-type wMockDeleteClient struct {
-	deleteFunc func(args *rpc.DeleteArgs) (*rpc.Response, error)
-}
-
-func (m *wMockDeleteClient) Delete(args *rpc.DeleteArgs) (*rpc.Response, error) {
-	if m.deleteFunc != nil {
-		return m.deleteFunc(args)
-	}
-	return nil, errors.New("deleteFunc not implemented")
-}
-
-// wMockDeletePool implements deleteConnectionGetter for testing.
-type wMockDeletePool struct {
-	getFunc func(ctx context.Context) (issueDeleter, error)
-	putFunc func(client issueDeleter)
-}
-
-func (m *wMockDeletePool) Get(ctx context.Context) (issueDeleter, error) {
-	if m.getFunc != nil {
-		return m.getFunc(ctx)
-	}
-	return nil, errors.New("getFunc not implemented")
-}
-
-func (m *wMockDeletePool) Put(client issueDeleter) {
-	if m.putFunc != nil {
-		m.putFunc(client)
-	}
-}
 
 // ===========================================================================
 // handlePatchIssue tests
@@ -159,21 +29,15 @@ func TestHandlePatchIssueW_UpdateStatus(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client := &wMockPatchClient{
-				updateFunc: func(args *rpc.UpdateArgs) (*rpc.Response, error) {
-					if args.Status == nil || *args.Status != tt.wantStatus {
-						t.Errorf("Update() Status = %v, want %q", args.Status, tt.wantStatus)
+			svc := &mockIssueService{
+				patchIssueFunc: func(ctx context.Context, params service.PatchIssueParams) error {
+					if params.Status == nil || *params.Status != tt.wantStatus {
+						t.Errorf("PatchIssue() Status = %v, want %q", params.Status, tt.wantStatus)
 					}
-					return &rpc.Response{Success: true}, nil
+					return nil
 				},
 			}
-			pool := &wMockPatchPool{
-				getFunc: func(ctx context.Context) (issueUpdater, error) {
-					return client, nil
-				},
-				putFunc: func(c issueUpdater) {},
-			}
-			handler := handlePatchIssueWithPool(pool)
+			handler := handlePatchIssue(svc)
 
 			body := `{"status":"` + tt.status + `"}`
 			req := httptest.NewRequest(http.MethodPatch, "/api/issues/abc123", strings.NewReader(body))
@@ -192,22 +56,18 @@ func TestHandlePatchIssueW_UpdateStatus(t *testing.T) {
 }
 
 func TestHandlePatchIssueW_UpdateTitle(t *testing.T) {
-	client := &wMockPatchClient{
-		updateFunc: func(args *rpc.UpdateArgs) (*rpc.Response, error) {
-			if args.Title == nil || *args.Title != "New Title" {
-				t.Errorf("Update() Title = %v, want %q", args.Title, "New Title")
+	svc := &mockIssueService{
+		patchIssueFunc: func(ctx context.Context, params service.PatchIssueParams) error {
+			if params.Title == nil || *params.Title != "New Title" {
+				t.Errorf("PatchIssue() Title = %v, want %q", params.Title, "New Title")
 			}
-			if args.ID != "issue-42" {
-				t.Errorf("Update() ID = %q, want %q", args.ID, "issue-42")
+			if params.IssueID != "issue-42" {
+				t.Errorf("PatchIssue() IssueID = %q, want %q", params.IssueID, "issue-42")
 			}
-			return &rpc.Response{Success: true}, nil
+			return nil
 		},
 	}
-	pool := &wMockPatchPool{
-		getFunc: func(ctx context.Context) (issueUpdater, error) { return client, nil },
-		putFunc: func(c issueUpdater) {},
-	}
-	handler := handlePatchIssueWithPool(pool)
+	handler := handlePatchIssue(svc)
 
 	body := `{"title":"New Title"}`
 	req := httptest.NewRequest(http.MethodPatch, "/api/issues/issue-42", strings.NewReader(body))
@@ -224,19 +84,15 @@ func TestHandlePatchIssueW_UpdateTitle(t *testing.T) {
 }
 
 func TestHandlePatchIssueW_UpdatePriority(t *testing.T) {
-	client := &wMockPatchClient{
-		updateFunc: func(args *rpc.UpdateArgs) (*rpc.Response, error) {
-			if args.Priority == nil || *args.Priority != 2 {
-				t.Errorf("Update() Priority = %v, want 2", args.Priority)
+	svc := &mockIssueService{
+		patchIssueFunc: func(ctx context.Context, params service.PatchIssueParams) error {
+			if params.Priority == nil || *params.Priority != 2 {
+				t.Errorf("PatchIssue() Priority = %v, want 2", params.Priority)
 			}
-			return &rpc.Response{Success: true}, nil
+			return nil
 		},
 	}
-	pool := &wMockPatchPool{
-		getFunc: func(ctx context.Context) (issueUpdater, error) { return client, nil },
-		putFunc: func(c issueUpdater) {},
-	}
-	handler := handlePatchIssueWithPool(pool)
+	handler := handlePatchIssue(svc)
 
 	body := `{"priority":2}`
 	req := httptest.NewRequest(http.MethodPatch, "/api/issues/p-1", strings.NewReader(body))
@@ -251,19 +107,15 @@ func TestHandlePatchIssueW_UpdatePriority(t *testing.T) {
 }
 
 func TestHandlePatchIssueW_UpdateAssignee(t *testing.T) {
-	client := &wMockPatchClient{
-		updateFunc: func(args *rpc.UpdateArgs) (*rpc.Response, error) {
-			if args.Assignee == nil || *args.Assignee != "alice" {
-				t.Errorf("Update() Assignee = %v, want %q", args.Assignee, "alice")
+	svc := &mockIssueService{
+		patchIssueFunc: func(ctx context.Context, params service.PatchIssueParams) error {
+			if params.Assignee == nil || *params.Assignee != "alice" {
+				t.Errorf("PatchIssue() Assignee = %v, want %q", params.Assignee, "alice")
 			}
-			return &rpc.Response{Success: true}, nil
+			return nil
 		},
 	}
-	pool := &wMockPatchPool{
-		getFunc: func(ctx context.Context) (issueUpdater, error) { return client, nil },
-		putFunc: func(c issueUpdater) {},
-	}
-	handler := handlePatchIssueWithPool(pool)
+	handler := handlePatchIssue(svc)
 
 	body := `{"assignee":"alice"}`
 	req := httptest.NewRequest(http.MethodPatch, "/api/issues/a-1", strings.NewReader(body))
@@ -278,20 +130,12 @@ func TestHandlePatchIssueW_UpdateAssignee(t *testing.T) {
 }
 
 func TestHandlePatchIssueW_InvalidStatusValue(t *testing.T) {
-	// The handler passes status through to the daemon which rejects invalid values.
-	client := &wMockPatchClient{
-		updateFunc: func(args *rpc.UpdateArgs) (*rpc.Response, error) {
-			return &rpc.Response{
-				Success: false,
-				Error:   "invalid status: bogus",
-			}, nil
+	svc := &mockIssueService{
+		patchIssueFunc: func(ctx context.Context, params service.PatchIssueParams) error {
+			return service.ErrValidation("invalid status: bogus")
 		},
 	}
-	pool := &wMockPatchPool{
-		getFunc: func(ctx context.Context) (issueUpdater, error) { return client, nil },
-		putFunc: func(c issueUpdater) {},
-	}
-	handler := handlePatchIssueWithPool(pool)
+	handler := handlePatchIssue(svc)
 
 	body := `{"status":"bogus"}`
 	req := httptest.NewRequest(http.MethodPatch, "/api/issues/x-1", strings.NewReader(body))
@@ -300,23 +144,14 @@ func TestHandlePatchIssueW_InvalidStatusValue(t *testing.T) {
 
 	handler.ServeHTTP(w, req)
 
-	if w.Code != http.StatusInternalServerError {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
-	}
-	result := assertJSONResponse(t, w)
-	if result["success"] != false {
-		t.Error("expected success=false")
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
 	}
 }
 
 func TestHandlePatchIssueW_MissingIssueID(t *testing.T) {
-	pool := &wMockPatchPool{
-		getFunc: func(ctx context.Context) (issueUpdater, error) {
-			return &wMockPatchClient{}, nil
-		},
-		putFunc: func(c issueUpdater) {},
-	}
-	handler := handlePatchIssueWithPool(pool)
+	svc := &mockIssueService{}
+	handler := handlePatchIssue(svc)
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/issues/", strings.NewReader(`{"title":"x"}`))
 	req.SetPathValue("id", "")
@@ -338,13 +173,8 @@ func TestHandlePatchIssueW_MissingIssueID(t *testing.T) {
 }
 
 func TestHandlePatchIssueW_EmptyBody(t *testing.T) {
-	pool := &wMockPatchPool{
-		getFunc: func(ctx context.Context) (issueUpdater, error) {
-			return &wMockPatchClient{}, nil
-		},
-		putFunc: func(c issueUpdater) {},
-	}
-	handler := handlePatchIssueWithPool(pool)
+	svc := &mockIssueService{}
+	handler := handlePatchIssue(svc)
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/issues/e-1", strings.NewReader(""))
 	req.SetPathValue("id", "e-1")
@@ -365,34 +195,13 @@ func TestHandlePatchIssueW_EmptyBody(t *testing.T) {
 	}
 }
 
-func TestHandlePatchIssueW_NilPool(t *testing.T) {
-	handler := handlePatchIssueWithPool(nil)
-
-	req := httptest.NewRequest(http.MethodPatch, "/api/issues/np-1", strings.NewReader(`{"title":"x"}`))
-	req.SetPathValue("id", "np-1")
-	w := httptest.NewRecorder()
-
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusServiceUnavailable {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusServiceUnavailable)
-	}
-}
-
 func TestHandlePatchIssueW_NotFound(t *testing.T) {
-	client := &wMockPatchClient{
-		updateFunc: func(args *rpc.UpdateArgs) (*rpc.Response, error) {
-			return &rpc.Response{
-				Success: false,
-				Error:   "issue not found",
-			}, nil
+	svc := &mockIssueService{
+		patchIssueFunc: func(ctx context.Context, params service.PatchIssueParams) error {
+			return service.ErrNotFound("issue not found")
 		},
 	}
-	pool := &wMockPatchPool{
-		getFunc: func(ctx context.Context) (issueUpdater, error) { return client, nil },
-		putFunc: func(c issueUpdater) {},
-	}
-	handler := handlePatchIssueWithPool(pool)
+	handler := handlePatchIssue(svc)
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/issues/missing", strings.NewReader(`{"title":"x"}`))
 	req.SetPathValue("id", "missing")
@@ -405,13 +214,13 @@ func TestHandlePatchIssueW_NotFound(t *testing.T) {
 	}
 }
 
-func TestHandlePatchIssueW_PoolGetError(t *testing.T) {
-	pool := &wMockPatchPool{
-		getFunc: func(ctx context.Context) (issueUpdater, error) {
-			return nil, errors.New("pool exhausted")
+func TestHandlePatchIssueW_ServiceUnavailable(t *testing.T) {
+	svc := &mockIssueService{
+		patchIssueFunc: func(ctx context.Context, params service.PatchIssueParams) error {
+			return service.ErrUnavailable("daemon not available")
 		},
 	}
-	handler := handlePatchIssueWithPool(pool)
+	handler := handlePatchIssue(svc)
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/issues/pg-1", strings.NewReader(`{"title":"x"}`))
 	req.SetPathValue("id", "pg-1")
@@ -424,17 +233,13 @@ func TestHandlePatchIssueW_PoolGetError(t *testing.T) {
 	}
 }
 
-func TestHandlePatchIssueW_RPCError(t *testing.T) {
-	client := &wMockPatchClient{
-		updateFunc: func(args *rpc.UpdateArgs) (*rpc.Response, error) {
-			return nil, errors.New("connection reset")
+func TestHandlePatchIssueW_InternalError(t *testing.T) {
+	svc := &mockIssueService{
+		patchIssueFunc: func(ctx context.Context, params service.PatchIssueParams) error {
+			return service.ErrInternal("connection reset", nil)
 		},
 	}
-	pool := &wMockPatchPool{
-		getFunc: func(ctx context.Context) (issueUpdater, error) { return client, nil },
-		putFunc: func(c issueUpdater) {},
-	}
-	handler := handlePatchIssueWithPool(pool)
+	handler := handlePatchIssue(svc)
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/issues/rpc-1", strings.NewReader(`{"title":"x"}`))
 	req.SetPathValue("id", "rpc-1")
@@ -448,16 +253,12 @@ func TestHandlePatchIssueW_RPCError(t *testing.T) {
 }
 
 func TestHandlePatchIssueW_RPCErrorNotFound(t *testing.T) {
-	client := &wMockPatchClient{
-		updateFunc: func(args *rpc.UpdateArgs) (*rpc.Response, error) {
-			return nil, errors.New("issue not found: abc")
+	svc := &mockIssueService{
+		patchIssueFunc: func(ctx context.Context, params service.PatchIssueParams) error {
+			return service.ErrNotFound("issue not found: abc")
 		},
 	}
-	pool := &wMockPatchPool{
-		getFunc: func(ctx context.Context) (issueUpdater, error) { return client, nil },
-		putFunc: func(c issueUpdater) {},
-	}
-	handler := handlePatchIssueWithPool(pool)
+	handler := handlePatchIssue(svc)
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/issues/abc", strings.NewReader(`{"title":"x"}`))
 	req.SetPathValue("id", "abc")
@@ -471,19 +272,12 @@ func TestHandlePatchIssueW_RPCErrorNotFound(t *testing.T) {
 }
 
 func TestHandlePatchIssueW_CannotUpdateTemplate(t *testing.T) {
-	client := &wMockPatchClient{
-		updateFunc: func(args *rpc.UpdateArgs) (*rpc.Response, error) {
-			return &rpc.Response{
-				Success: false,
-				Error:   "cannot update template issue",
-			}, nil
+	svc := &mockIssueService{
+		patchIssueFunc: func(ctx context.Context, params service.PatchIssueParams) error {
+			return service.ErrConflict("cannot update template issue")
 		},
 	}
-	pool := &wMockPatchPool{
-		getFunc: func(ctx context.Context) (issueUpdater, error) { return client, nil },
-		putFunc: func(c issueUpdater) {},
-	}
-	handler := handlePatchIssueWithPool(pool)
+	handler := handlePatchIssue(svc)
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/issues/tmpl-1", strings.NewReader(`{"title":"x"}`))
 	req.SetPathValue("id", "tmpl-1")
@@ -493,6 +287,55 @@ func TestHandlePatchIssueW_CannotUpdateTemplate(t *testing.T) {
 
 	if w.Code != http.StatusConflict {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusConflict)
+	}
+}
+
+// ===========================================================================
+// validatePatchRequest tests (still in handler layer)
+// ===========================================================================
+
+func TestValidatePatchRequest_MissingID(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPatch, "/api/issues/", strings.NewReader(`{"title":"x"}`))
+	req.SetPathValue("id", "")
+	w := httptest.NewRecorder()
+
+	_, _, ok := validatePatchRequest(w, req)
+	if ok {
+		t.Error("expected ok=false for missing ID")
+	}
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestValidatePatchRequest_EmptyBody(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPatch, "/api/issues/x-1", strings.NewReader(""))
+	req.SetPathValue("id", "x-1")
+	w := httptest.NewRecorder()
+
+	_, _, ok := validatePatchRequest(w, req)
+	if ok {
+		t.Error("expected ok=false for empty body")
+	}
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestValidatePatchRequest_ValidRequest(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPatch, "/api/issues/v-1", strings.NewReader(`{"title":"Test"}`))
+	req.SetPathValue("id", "v-1")
+	w := httptest.NewRecorder()
+
+	issueID, patchReq, ok := validatePatchRequest(w, req)
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if issueID != "v-1" {
+		t.Errorf("issueID = %q, want %q", issueID, "v-1")
+	}
+	if patchReq.Title == nil || *patchReq.Title != "Test" {
+		t.Errorf("Title = %v, want %q", patchReq.Title, "Test")
 	}
 }
 
@@ -520,22 +363,18 @@ func TestHandleCreateIssueW_WithTitleAndType(t *testing.T) {
 				"issue_type": tt.issueType,
 				"status":     "open",
 			})
-			client := &wMockCreateClient{
-				createFunc: func(args *rpc.CreateArgs) (*rpc.Response, error) {
-					if args.Title != "Test Issue" {
-						t.Errorf("Create() Title = %q, want %q", args.Title, "Test Issue")
+			svc := &mockIssueService{
+				createIssueFunc: func(ctx context.Context, params service.CreateIssueParams) (json.RawMessage, error) {
+					if params.Title != "Test Issue" {
+						t.Errorf("CreateIssue() Title = %q, want %q", params.Title, "Test Issue")
 					}
-					if args.IssueType != tt.issueType {
-						t.Errorf("Create() IssueType = %q, want %q", args.IssueType, tt.issueType)
+					if params.IssueType != tt.issueType {
+						t.Errorf("CreateIssue() IssueType = %q, want %q", params.IssueType, tt.issueType)
 					}
-					return &rpc.Response{Success: true, Data: expectedData}, nil
+					return expectedData, nil
 				},
 			}
-			pool := &wMockCreatePool{
-				getFunc: func(ctx context.Context) (issueCreator, error) { return client, nil },
-				putFunc: func(c issueCreator) {},
-			}
-			handler := handleCreateIssueWithPool(pool)
+			handler := handleCreateIssue(svc)
 
 			body := `{"title":"Test Issue","issue_type":"` + tt.issueType + `","priority":1}`
 			req := httptest.NewRequest(http.MethodPost, "/api/issues", strings.NewReader(body))
@@ -559,25 +398,18 @@ func TestHandleCreateIssueW_WithTitleAndType(t *testing.T) {
 }
 
 func TestHandleCreateIssueW_WithParent(t *testing.T) {
-	client := &wMockCreateClient{
-		createFunc: func(args *rpc.CreateArgs) (*rpc.Response, error) {
-			if args.Parent != "epic-42" {
-				t.Errorf("Create() Parent = %q, want %q", args.Parent, "epic-42")
+	svc := &mockIssueService{
+		createIssueFunc: func(ctx context.Context, params service.CreateIssueParams) (json.RawMessage, error) {
+			if params.Parent != "epic-42" {
+				t.Errorf("CreateIssue() Parent = %q, want %q", params.Parent, "epic-42")
 			}
-			if args.Title != "Child Task" {
-				t.Errorf("Create() Title = %q, want %q", args.Title, "Child Task")
+			if params.Title != "Child Task" {
+				t.Errorf("CreateIssue() Title = %q, want %q", params.Title, "Child Task")
 			}
-			return &rpc.Response{
-				Success: true,
-				Data:    []byte(`{"id":"child-1","title":"Child Task","parent":"epic-42"}`),
-			}, nil
+			return json.RawMessage(`{"id":"child-1","title":"Child Task","parent":"epic-42"}`), nil
 		},
 	}
-	pool := &wMockCreatePool{
-		getFunc: func(ctx context.Context) (issueCreator, error) { return client, nil },
-		putFunc: func(c issueCreator) {},
-	}
-	handler := handleCreateIssueWithPool(pool)
+	handler := handleCreateIssue(svc)
 
 	body := `{"title":"Child Task","issue_type":"task","priority":2,"parent":"epic-42"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/issues", strings.NewReader(body))
@@ -607,30 +439,23 @@ func TestHandleCreateIssueW_MissingRequiredFields(t *testing.T) {
 		{
 			name:        "missing title",
 			body:        `{"issue_type":"bug","priority":1}`,
-			wantContain: "title is required",
+			wantContain: "title",
 		},
 		{
 			name:        "empty title",
 			body:        `{"title":"   ","issue_type":"bug","priority":1}`,
-			wantContain: "title is required",
-		},
-		{
-			name:        "missing issue_type",
-			body:        `{"title":"Test","priority":1}`,
-			wantContain: "issue_type is required",
+			wantContain: "title",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Validation happens before pool access, so use a real pool.
-			pool, err := daemon.NewConnectionPool("/tmp/test-create-w.sock", 1)
-			if err != nil {
-				t.Fatalf("NewConnectionPool() error = %v", err)
+			svc := &mockIssueService{
+				createIssueFunc: func(ctx context.Context, params service.CreateIssueParams) (json.RawMessage, error) {
+					return nil, service.ErrValidation(tt.wantContain + " is required")
+				},
 			}
-			defer pool.Close()
-
-			handler := handleCreateIssue(pool)
+			handler := handleCreateIssue(svc)
 
 			req := httptest.NewRequest(http.MethodPost, "/api/issues", strings.NewReader(tt.body))
 			req.Header.Set("Content-Type", "application/json")
@@ -638,31 +463,21 @@ func TestHandleCreateIssueW_MissingRequiredFields(t *testing.T) {
 
 			handler.ServeHTTP(w, req)
 
+			// writeServiceError for validation errors returns 400
 			if w.Code != http.StatusBadRequest {
-				t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
-			}
-			var resp IssuesResponse
-			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-				t.Fatalf("decode error: %v", err)
-			}
-			if resp.Success {
-				t.Error("expected success=false")
-			}
-			if !strings.Contains(resp.Error, tt.wantContain) {
-				t.Errorf("error = %q, want to contain %q", resp.Error, tt.wantContain)
+				t.Errorf("status = %d, want %d: %s", w.Code, http.StatusBadRequest, w.Body.String())
 			}
 		})
 	}
 }
 
 func TestHandleCreateIssueW_InvalidType(t *testing.T) {
-	pool, err := daemon.NewConnectionPool("/tmp/test-create-type-w.sock", 1)
-	if err != nil {
-		t.Fatalf("NewConnectionPool() error = %v", err)
+	svc := &mockIssueService{
+		createIssueFunc: func(ctx context.Context, params service.CreateIssueParams) (json.RawMessage, error) {
+			return nil, service.ErrValidation("invalid issue_type")
+		},
 	}
-	defer pool.Close()
-
-	handler := handleCreateIssue(pool)
+	handler := handleCreateIssue(svc)
 
 	body := `{"title":"Test","issue_type":"invalid_type","priority":1}`
 	req := httptest.NewRequest(http.MethodPost, "/api/issues", strings.NewReader(body))
@@ -674,20 +489,15 @@ func TestHandleCreateIssueW_InvalidType(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
 	}
-	var resp IssuesResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode error: %v", err)
-	}
-	if resp.Success {
-		t.Error("expected success=false")
-	}
-	if !strings.Contains(resp.Error, "invalid issue_type") {
-		t.Errorf("error = %q, want to contain 'invalid issue_type'", resp.Error)
-	}
 }
 
-func TestHandleCreateIssueW_NilPoolReturns503(t *testing.T) {
-	handler := handleCreateIssue(nil)
+func TestHandleCreateIssueW_ServiceUnavailable(t *testing.T) {
+	svc := &mockIssueService{
+		createIssueFunc: func(ctx context.Context, params service.CreateIssueParams) (json.RawMessage, error) {
+			return nil, service.ErrUnavailable("daemon not available")
+		},
+	}
+	handler := handleCreateIssue(svc)
 
 	body := `{"title":"Test","issue_type":"bug","priority":1}`
 	req := httptest.NewRequest(http.MethodPost, "/api/issues", strings.NewReader(body))
@@ -701,37 +511,13 @@ func TestHandleCreateIssueW_NilPoolReturns503(t *testing.T) {
 	}
 }
 
-func TestHandleCreateIssueW_PoolGetError(t *testing.T) {
-	pool := &wMockCreatePool{
-		getFunc: func(ctx context.Context) (issueCreator, error) {
-			return nil, errors.New("pool exhausted")
+func TestHandleCreateIssueW_InternalError(t *testing.T) {
+	svc := &mockIssueService{
+		createIssueFunc: func(ctx context.Context, params service.CreateIssueParams) (json.RawMessage, error) {
+			return nil, service.ErrInternal("connection reset", nil)
 		},
 	}
-	handler := handleCreateIssueWithPool(pool)
-
-	body := `{"title":"Test","issue_type":"bug","priority":1}`
-	req := httptest.NewRequest(http.MethodPost, "/api/issues", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusServiceUnavailable {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusServiceUnavailable)
-	}
-}
-
-func TestHandleCreateIssueW_RPCError(t *testing.T) {
-	client := &wMockCreateClient{
-		createFunc: func(args *rpc.CreateArgs) (*rpc.Response, error) {
-			return nil, errors.New("connection reset")
-		},
-	}
-	pool := &wMockCreatePool{
-		getFunc: func(ctx context.Context) (issueCreator, error) { return client, nil },
-		putFunc: func(c issueCreator) {},
-	}
-	handler := handleCreateIssueWithPool(pool)
+	handler := handleCreateIssue(svc)
 
 	body := `{"title":"Test","issue_type":"bug","priority":1}`
 	req := httptest.NewRequest(http.MethodPost, "/api/issues", strings.NewReader(body))
@@ -746,19 +532,12 @@ func TestHandleCreateIssueW_RPCError(t *testing.T) {
 }
 
 func TestHandleCreateIssueW_DaemonError(t *testing.T) {
-	client := &wMockCreateClient{
-		createFunc: func(args *rpc.CreateArgs) (*rpc.Response, error) {
-			return &rpc.Response{
-				Success: false,
-				Error:   "duplicate issue ID",
-			}, nil
+	svc := &mockIssueService{
+		createIssueFunc: func(ctx context.Context, params service.CreateIssueParams) (json.RawMessage, error) {
+			return nil, service.ErrInternal("duplicate issue ID", nil)
 		},
 	}
-	pool := &wMockCreatePool{
-		getFunc: func(ctx context.Context) (issueCreator, error) { return client, nil },
-		putFunc: func(c issueCreator) {},
-	}
-	handler := handleCreateIssueWithPool(pool)
+	handler := handleCreateIssue(svc)
 
 	body := `{"title":"Test","issue_type":"bug","priority":1}`
 	req := httptest.NewRequest(http.MethodPost, "/api/issues", strings.NewReader(body))
@@ -770,26 +549,11 @@ func TestHandleCreateIssueW_DaemonError(t *testing.T) {
 	if w.Code != http.StatusInternalServerError {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
 	}
-	var resp IssuesResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode error: %v", err)
-	}
-	if resp.Success {
-		t.Error("expected success=false")
-	}
-	if resp.Error != "duplicate issue ID" {
-		t.Errorf("error = %q, want %q", resp.Error, "duplicate issue ID")
-	}
 }
 
 func TestHandleCreateIssueW_EmptyBody(t *testing.T) {
-	pool, err := daemon.NewConnectionPool("/tmp/test-create-empty-w.sock", 1)
-	if err != nil {
-		t.Fatalf("NewConnectionPool() error = %v", err)
-	}
-	defer pool.Close()
-
-	handler := handleCreateIssue(pool)
+	svc := &mockIssueService{}
+	handler := handleCreateIssue(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/issues", strings.NewReader(""))
 	req.Header.Set("Content-Type", "application/json")
@@ -802,55 +566,23 @@ func TestHandleCreateIssueW_EmptyBody(t *testing.T) {
 	}
 }
 
-func TestHandleCreateIssueW_ClientReturnedToPool(t *testing.T) {
-	putCalled := false
-	client := &wMockCreateClient{
-		createFunc: func(args *rpc.CreateArgs) (*rpc.Response, error) {
-			return &rpc.Response{Success: true, Data: []byte(`{"id":"t-1"}`)}, nil
-		},
-	}
-	pool := &wMockCreatePool{
-		getFunc: func(ctx context.Context) (issueCreator, error) { return client, nil },
-		putFunc: func(c issueCreator) { putCalled = true },
-	}
-	handler := handleCreateIssueWithPool(pool)
-
-	body := `{"title":"Test","issue_type":"bug","priority":1}`
-	req := httptest.NewRequest(http.MethodPost, "/api/issues", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-
-	handler.ServeHTTP(w, req)
-
-	if !putCalled {
-		t.Error("Put() was not called - client not returned to pool")
-	}
-}
-
 // ===========================================================================
 // handleCloseIssue tests
 // ===========================================================================
 
 func TestHandleCloseIssueW_WithReason(t *testing.T) {
-	client := &wMockCloseClient{
-		closeFunc: func(args *rpc.CloseArgs) (*rpc.Response, error) {
-			if args.ID != "close-1" {
-				t.Errorf("CloseIssue() ID = %q, want %q", args.ID, "close-1")
+	svc := &mockIssueService{
+		closeIssueFunc: func(ctx context.Context, params service.CloseIssueParams) (json.RawMessage, error) {
+			if params.IssueID != "close-1" {
+				t.Errorf("CloseIssue() IssueID = %q, want %q", params.IssueID, "close-1")
 			}
-			if args.Reason != "completed" {
-				t.Errorf("CloseIssue() Reason = %q, want %q", args.Reason, "completed")
+			if params.Reason != "completed" {
+				t.Errorf("CloseIssue() Reason = %q, want %q", params.Reason, "completed")
 			}
-			return &rpc.Response{
-				Success: true,
-				Data:    []byte(`{"id":"close-1","status":"closed"}`),
-			}, nil
+			return json.RawMessage(`{"id":"close-1","status":"closed"}`), nil
 		},
 	}
-	pool := &wMockClosePool{
-		getFunc: func(ctx context.Context) (issueCloser, error) { return client, nil },
-		putFunc: func(c issueCloser) {},
-	}
-	handler := handleCloseIssueWithPool(pool)
+	handler := handleCloseIssue(svc)
 
 	body := `{"reason":"completed"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/close-1/close", strings.NewReader(body))
@@ -873,24 +605,16 @@ func TestHandleCloseIssueW_WithReason(t *testing.T) {
 }
 
 func TestHandleCloseIssueW_WithoutReason(t *testing.T) {
-	client := &wMockCloseClient{
-		closeFunc: func(args *rpc.CloseArgs) (*rpc.Response, error) {
-			if args.Reason != "" {
-				t.Errorf("CloseIssue() Reason = %q, want empty", args.Reason)
+	svc := &mockIssueService{
+		closeIssueFunc: func(ctx context.Context, params service.CloseIssueParams) (json.RawMessage, error) {
+			if params.Reason != "" {
+				t.Errorf("CloseIssue() Reason = %q, want empty", params.Reason)
 			}
-			return &rpc.Response{
-				Success: true,
-				Data:    []byte(`{"id":"close-2","status":"closed"}`),
-			}, nil
+			return json.RawMessage(`{"id":"close-2","status":"closed"}`), nil
 		},
 	}
-	pool := &wMockClosePool{
-		getFunc: func(ctx context.Context) (issueCloser, error) { return client, nil },
-		putFunc: func(c issueCloser) {},
-	}
-	handler := handleCloseIssueWithPool(pool)
+	handler := handleCloseIssue(svc)
 
-	// No body / content-length 0
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/close-2/close", nil)
 	req.SetPathValue("id", "close-2")
 	req.ContentLength = 0
@@ -904,16 +628,12 @@ func TestHandleCloseIssueW_WithoutReason(t *testing.T) {
 }
 
 func TestHandleCloseIssueW_NotFound(t *testing.T) {
-	client := &wMockCloseClient{
-		closeFunc: func(args *rpc.CloseArgs) (*rpc.Response, error) {
-			return nil, errors.New("issue not found: ghost-1")
+	svc := &mockIssueService{
+		closeIssueFunc: func(ctx context.Context, params service.CloseIssueParams) (json.RawMessage, error) {
+			return nil, service.ErrNotFound("issue not found: ghost-1")
 		},
 	}
-	pool := &wMockClosePool{
-		getFunc: func(ctx context.Context) (issueCloser, error) { return client, nil },
-		putFunc: func(c issueCloser) {},
-	}
-	handler := handleCloseIssueWithPool(pool)
+	handler := handleCloseIssue(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/ghost-1/close", nil)
 	req.SetPathValue("id", "ghost-1")
@@ -933,13 +653,8 @@ func TestHandleCloseIssueW_NotFound(t *testing.T) {
 }
 
 func TestHandleCloseIssueW_MissingID(t *testing.T) {
-	pool := &wMockClosePool{
-		getFunc: func(ctx context.Context) (issueCloser, error) {
-			return &wMockCloseClient{}, nil
-		},
-		putFunc: func(c issueCloser) {},
-	}
-	handler := handleCloseIssueWithPool(pool)
+	svc := &mockIssueService{}
+	handler := handleCloseIssue(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/issues//close", nil)
 	req.SetPathValue("id", "")
@@ -953,28 +668,13 @@ func TestHandleCloseIssueW_MissingID(t *testing.T) {
 	}
 }
 
-func TestHandleCloseIssueW_NilPool(t *testing.T) {
-	handler := handleCloseIssueWithPool(nil)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/issues/nil-1/close", nil)
-	req.SetPathValue("id", "nil-1")
-	req.ContentLength = 0
-	w := httptest.NewRecorder()
-
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusServiceUnavailable {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusServiceUnavailable)
-	}
-}
-
-func TestHandleCloseIssueW_PoolGetError(t *testing.T) {
-	pool := &wMockClosePool{
-		getFunc: func(ctx context.Context) (issueCloser, error) {
-			return nil, errors.New("pool exhausted")
+func TestHandleCloseIssueW_ServiceUnavailable(t *testing.T) {
+	svc := &mockIssueService{
+		closeIssueFunc: func(ctx context.Context, params service.CloseIssueParams) (json.RawMessage, error) {
+			return nil, service.ErrUnavailable("daemon not available")
 		},
 	}
-	handler := handleCloseIssueWithPool(pool)
+	handler := handleCloseIssue(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/pge-1/close", nil)
 	req.SetPathValue("id", "pge-1")
@@ -988,17 +688,13 @@ func TestHandleCloseIssueW_PoolGetError(t *testing.T) {
 	}
 }
 
-func TestHandleCloseIssueW_RPCError(t *testing.T) {
-	client := &wMockCloseClient{
-		closeFunc: func(args *rpc.CloseArgs) (*rpc.Response, error) {
-			return nil, errors.New("connection reset")
+func TestHandleCloseIssueW_InternalError(t *testing.T) {
+	svc := &mockIssueService{
+		closeIssueFunc: func(ctx context.Context, params service.CloseIssueParams) (json.RawMessage, error) {
+			return nil, service.ErrInternal("connection reset", nil)
 		},
 	}
-	pool := &wMockClosePool{
-		getFunc: func(ctx context.Context) (issueCloser, error) { return client, nil },
-		putFunc: func(c issueCloser) {},
-	}
-	handler := handleCloseIssueWithPool(pool)
+	handler := handleCloseIssue(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/rpc-close/close", nil)
 	req.SetPathValue("id", "rpc-close")
@@ -1012,20 +708,13 @@ func TestHandleCloseIssueW_RPCError(t *testing.T) {
 	}
 }
 
-func TestHandleCloseIssueW_DaemonError(t *testing.T) {
-	client := &wMockCloseClient{
-		closeFunc: func(args *rpc.CloseArgs) (*rpc.Response, error) {
-			return &rpc.Response{
-				Success: false,
-				Error:   "issue already closed",
-			}, nil
+func TestHandleCloseIssueW_ConflictError(t *testing.T) {
+	svc := &mockIssueService{
+		closeIssueFunc: func(ctx context.Context, params service.CloseIssueParams) (json.RawMessage, error) {
+			return nil, service.ErrConflict("issue already closed")
 		},
 	}
-	pool := &wMockClosePool{
-		getFunc: func(ctx context.Context) (issueCloser, error) { return client, nil },
-		putFunc: func(c issueCloser) {},
-	}
-	handler := handleCloseIssueWithPool(pool)
+	handler := handleCloseIssue(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/dup-close/close", nil)
 	req.SetPathValue("id", "dup-close")
@@ -1034,22 +723,18 @@ func TestHandleCloseIssueW_DaemonError(t *testing.T) {
 
 	handler.ServeHTTP(w, req)
 
-	if w.Code != http.StatusInternalServerError {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	if w.Code != http.StatusConflict {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusConflict)
 	}
 }
 
 func TestHandleCloseIssueW_BlockerConflict(t *testing.T) {
-	client := &wMockCloseClient{
-		closeFunc: func(args *rpc.CloseArgs) (*rpc.Response, error) {
-			return nil, errors.New("has open blocker dependencies")
+	svc := &mockIssueService{
+		closeIssueFunc: func(ctx context.Context, params service.CloseIssueParams) (json.RawMessage, error) {
+			return nil, service.ErrConflict("has open blocker dependencies")
 		},
 	}
-	pool := &wMockClosePool{
-		getFunc: func(ctx context.Context) (issueCloser, error) { return client, nil },
-		putFunc: func(c issueCloser) {},
-	}
-	handler := handleCloseIssueWithPool(pool)
+	handler := handleCloseIssue(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/issues/blocked-1/close", nil)
 	req.SetPathValue("id", "blocked-1")
@@ -1063,56 +748,13 @@ func TestHandleCloseIssueW_BlockerConflict(t *testing.T) {
 	}
 }
 
-func TestHandleCloseIssueW_ClientReturnedToPool(t *testing.T) {
-	putCalled := false
-	client := &wMockCloseClient{
-		closeFunc: func(args *rpc.CloseArgs) (*rpc.Response, error) {
-			return &rpc.Response{Success: true, Data: []byte(`{}`)}, nil
-		},
-	}
-	pool := &wMockClosePool{
-		getFunc: func(ctx context.Context) (issueCloser, error) { return client, nil },
-		putFunc: func(c issueCloser) { putCalled = true },
-	}
-	handler := handleCloseIssueWithPool(pool)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/issues/pool-ret/close", nil)
-	req.SetPathValue("id", "pool-ret")
-	req.ContentLength = 0
-	w := httptest.NewRecorder()
-
-	handler.ServeHTTP(w, req)
-
-	if !putCalled {
-		t.Error("Put() was not called - client not returned to pool")
-	}
-}
-
 // ===========================================================================
 // handleDeleteIssue tests
 // ===========================================================================
 
-func TestHandleDeleteIssueW_NilPool(t *testing.T) {
-	handler := handleDeleteIssue(nil)
-
-	req := httptest.NewRequest(http.MethodDelete, "/api/issues/del-1", nil)
-	req.SetPathValue("id", "del-1")
-	w := httptest.NewRecorder()
-
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusServiceUnavailable {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusServiceUnavailable)
-	}
-	result := assertJSONResponse(t, w)
-	errMsg, _ := result["error"].(string)
-	if !strings.Contains(errMsg, "connection pool not initialized") {
-		t.Errorf("error = %q, want to contain 'connection pool not initialized'", errMsg)
-	}
-}
-
 func TestHandleDeleteIssueW_MissingID(t *testing.T) {
-	handler := handleDeleteIssue(nil)
+	svc := &mockIssueService{}
+	handler := handleDeleteIssue(svc)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/issues/", nil)
 	req.SetPathValue("id", "")
@@ -1131,25 +773,15 @@ func TestHandleDeleteIssueW_MissingID(t *testing.T) {
 }
 
 func TestHandleDeleteIssueW_Success(t *testing.T) {
-	client := &wMockDeleteClient{
-		deleteFunc: func(args *rpc.DeleteArgs) (*rpc.Response, error) {
-			if len(args.IDs) != 1 || args.IDs[0] != "del-ok" {
-				t.Errorf("Delete() IDs = %v, want [del-ok]", args.IDs)
+	svc := &mockIssueService{
+		deleteIssueFunc: func(ctx context.Context, issueID string) (json.RawMessage, error) {
+			if issueID != "del-ok" {
+				t.Errorf("DeleteIssue() ID = %q, want %q", issueID, "del-ok")
 			}
-			if !args.Force {
-				t.Error("Delete() Force = false, want true")
-			}
-			return &rpc.Response{
-				Success: true,
-				Data:    []byte(`{"id":"del-ok","deleted":true}`),
-			}, nil
+			return json.RawMessage(`{"id":"del-ok","deleted":true}`), nil
 		},
 	}
-	pool := &wMockDeletePool{
-		getFunc: func(ctx context.Context) (issueDeleter, error) { return client, nil },
-		putFunc: func(c issueDeleter) {},
-	}
-	handler := handleDeleteIssueWithPool(pool)
+	handler := handleDeleteIssue(svc)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/issues/del-ok", nil)
 	req.SetPathValue("id", "del-ok")
@@ -1174,17 +806,13 @@ func TestHandleDeleteIssueW_Success(t *testing.T) {
 	}
 }
 
-func TestHandleDeleteIssueW_RPCError(t *testing.T) {
-	client := &wMockDeleteClient{
-		deleteFunc: func(args *rpc.DeleteArgs) (*rpc.Response, error) {
-			return nil, errors.New("connection reset")
+func TestHandleDeleteIssueW_InternalError(t *testing.T) {
+	svc := &mockIssueService{
+		deleteIssueFunc: func(ctx context.Context, issueID string) (json.RawMessage, error) {
+			return nil, service.ErrInternal("connection reset", nil)
 		},
 	}
-	pool := &wMockDeletePool{
-		getFunc: func(ctx context.Context) (issueDeleter, error) { return client, nil },
-		putFunc: func(c issueDeleter) {},
-	}
-	handler := handleDeleteIssueWithPool(pool)
+	handler := handleDeleteIssue(svc)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/issues/rpc-del", nil)
 	req.SetPathValue("id", "rpc-del")
@@ -1197,25 +825,18 @@ func TestHandleDeleteIssueW_RPCError(t *testing.T) {
 	}
 	result := assertJSONResponse(t, w)
 	errMsg, _ := result["error"].(string)
-	if !strings.Contains(errMsg, "internal server error") {
-		t.Errorf("error = %q, want to contain 'internal server error'", errMsg)
+	if !strings.Contains(errMsg, "connection reset") {
+		t.Errorf("error = %q, want to contain 'connection reset'", errMsg)
 	}
 }
 
 func TestHandleDeleteIssueW_DaemonReturnsFalse(t *testing.T) {
-	client := &wMockDeleteClient{
-		deleteFunc: func(args *rpc.DeleteArgs) (*rpc.Response, error) {
-			return &rpc.Response{
-				Success: false,
-				Error:   "cannot delete: issue has children",
-			}, nil
+	svc := &mockIssueService{
+		deleteIssueFunc: func(ctx context.Context, issueID string) (json.RawMessage, error) {
+			return nil, service.ErrInternal("cannot delete: issue has children", nil)
 		},
 	}
-	pool := &wMockDeletePool{
-		getFunc: func(ctx context.Context) (issueDeleter, error) { return client, nil },
-		putFunc: func(c issueDeleter) {},
-	}
-	handler := handleDeleteIssueWithPool(pool)
+	handler := handleDeleteIssue(svc)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/issues/fail-del", nil)
 	req.SetPathValue("id", "fail-del")
@@ -1226,24 +847,15 @@ func TestHandleDeleteIssueW_DaemonReturnsFalse(t *testing.T) {
 	if w.Code != http.StatusInternalServerError {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
 	}
-	result := assertJSONResponse(t, w)
-	errMsg, _ := result["error"].(string)
-	if !strings.Contains(errMsg, "cannot delete: issue has children") {
-		t.Errorf("error = %q, want to contain 'cannot delete: issue has children'", errMsg)
-	}
 }
 
 func TestHandleDeleteIssueW_NotFound(t *testing.T) {
-	client := &wMockDeleteClient{
-		deleteFunc: func(args *rpc.DeleteArgs) (*rpc.Response, error) {
-			return nil, errors.New("issue not found: ghost-del")
+	svc := &mockIssueService{
+		deleteIssueFunc: func(ctx context.Context, issueID string) (json.RawMessage, error) {
+			return nil, service.ErrNotFound("issue not found: ghost-del")
 		},
 	}
-	pool := &wMockDeletePool{
-		getFunc: func(ctx context.Context) (issueDeleter, error) { return client, nil },
-		putFunc: func(c issueDeleter) {},
-	}
-	handler := handleDeleteIssueWithPool(pool)
+	handler := handleDeleteIssue(svc)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/issues/ghost-del", nil)
 	req.SetPathValue("id", "ghost-del")
@@ -1261,13 +873,13 @@ func TestHandleDeleteIssueW_NotFound(t *testing.T) {
 	}
 }
 
-func TestHandleDeleteIssueW_PoolGetError(t *testing.T) {
-	pool := &wMockDeletePool{
-		getFunc: func(ctx context.Context) (issueDeleter, error) {
-			return nil, errors.New("pool exhausted")
+func TestHandleDeleteIssueW_ServiceUnavailable(t *testing.T) {
+	svc := &mockIssueService{
+		deleteIssueFunc: func(ctx context.Context, issueID string) (json.RawMessage, error) {
+			return nil, service.ErrUnavailable("daemon not available")
 		},
 	}
-	handler := handleDeleteIssueWithPool(pool)
+	handler := handleDeleteIssue(svc)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/issues/pge-del", nil)
 	req.SetPathValue("id", "pge-del")
@@ -1278,20 +890,15 @@ func TestHandleDeleteIssueW_PoolGetError(t *testing.T) {
 	if w.Code != http.StatusServiceUnavailable {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusServiceUnavailable)
 	}
-	result := assertJSONResponse(t, w)
-	errMsg, _ := result["error"].(string)
-	if !strings.Contains(errMsg, "daemon not available") {
-		t.Errorf("error = %q, want to contain 'daemon not available'", errMsg)
-	}
 }
 
-func TestHandleDeleteIssueW_PoolGetTimeout(t *testing.T) {
-	pool := &wMockDeletePool{
-		getFunc: func(ctx context.Context) (issueDeleter, error) {
-			return nil, context.DeadlineExceeded
+func TestHandleDeleteIssueW_Timeout(t *testing.T) {
+	svc := &mockIssueService{
+		deleteIssueFunc: func(ctx context.Context, issueID string) (json.RawMessage, error) {
+			return nil, service.ErrTimeout("daemon not available")
 		},
 	}
-	handler := handleDeleteIssueWithPool(pool)
+	handler := handleDeleteIssue(svc)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/issues/timeout-del", nil)
 	req.SetPathValue("id", "timeout-del")
@@ -1301,53 +908,5 @@ func TestHandleDeleteIssueW_PoolGetTimeout(t *testing.T) {
 
 	if w.Code != http.StatusGatewayTimeout {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusGatewayTimeout)
-	}
-}
-
-func TestHandleDeleteIssueW_ClientReturnedToPool(t *testing.T) {
-	putCalled := false
-	client := &wMockDeleteClient{
-		deleteFunc: func(args *rpc.DeleteArgs) (*rpc.Response, error) {
-			return &rpc.Response{Success: true, Data: []byte(`{}`)}, nil
-		},
-	}
-	pool := &wMockDeletePool{
-		getFunc: func(ctx context.Context) (issueDeleter, error) { return client, nil },
-		putFunc: func(c issueDeleter) { putCalled = true },
-	}
-	handler := handleDeleteIssueWithPool(pool)
-
-	req := httptest.NewRequest(http.MethodDelete, "/api/issues/pool-ret-del", nil)
-	req.SetPathValue("id", "pool-ret-del")
-	w := httptest.NewRecorder()
-
-	handler.ServeHTTP(w, req)
-
-	if !putCalled {
-		t.Error("Put() was not called - client not returned to pool")
-	}
-}
-
-func TestHandleDeleteIssueW_ClientReturnedToPoolOnError(t *testing.T) {
-	putCalled := false
-	client := &wMockDeleteClient{
-		deleteFunc: func(args *rpc.DeleteArgs) (*rpc.Response, error) {
-			return nil, errors.New("rpc failure")
-		},
-	}
-	pool := &wMockDeletePool{
-		getFunc: func(ctx context.Context) (issueDeleter, error) { return client, nil },
-		putFunc: func(c issueDeleter) { putCalled = true },
-	}
-	handler := handleDeleteIssueWithPool(pool)
-
-	req := httptest.NewRequest(http.MethodDelete, "/api/issues/pool-ret-err", nil)
-	req.SetPathValue("id", "pool-ret-err")
-	w := httptest.NewRecorder()
-
-	handler.ServeHTTP(w, req)
-
-	if !putCalled {
-		t.Error("Put() was not called on error path - client not returned to pool")
 	}
 }

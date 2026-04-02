@@ -20,6 +20,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/editor"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
@@ -39,6 +40,9 @@ type Server struct {
 	// Connection pools
 	pool      daemon.Pool // may be nil if daemon unavailable at startup
 	multiPool *daemon.MultiPool
+
+	// Service layer
+	issueSvc service.IssueService
 
 	// Real-time
 	hub               *SSEHub
