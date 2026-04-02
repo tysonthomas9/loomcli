@@ -161,14 +161,32 @@ func TestFindBeadsDir(t *testing.T) {
 }
 
 func TestFindBeadsDir_NotFound(t *testing.T) {
-	// Create a temporary directory without .beads
-	tmpDir, err := os.MkdirTemp("", "beads-test-*")
+	// Create a temporary directory without .beads, nested under a fresh parent
+	// to avoid false positives from .beads directories in ancestor paths
+	// (e.g., /tmp/.beads left by other test runs or daemon processes).
+	outerDir, err := os.MkdirTemp("", "beads-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer os.RemoveAll(outerDir)
 
-	_, err = FindBeadsDir(tmpDir)
+	// Verify no .beads directory exists in any ancestor of outerDir.
+	// If one does (e.g., /tmp/.beads), FindBeadsDir will find it and the test
+	// premise is invalid — skip rather than fail.
+	current := outerDir
+	for {
+		parent := filepath.Dir(current)
+		if parent == current {
+			break
+		}
+		candidate := filepath.Join(parent, ".beads")
+		if info, statErr := os.Stat(candidate); statErr == nil && info.IsDir() {
+			t.Skipf("Skipping: ancestor %s has .beads directory", parent)
+		}
+		current = parent
+	}
+
+	_, err = FindBeadsDir(outerDir)
 	if err != ErrInvalidSocketPath {
 		t.Errorf("FindBeadsDir() for no-.beads dir error = %v, wantErr %v", err, ErrInvalidSocketPath)
 	}
