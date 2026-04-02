@@ -4,7 +4,7 @@
  * for screen reader announcements. Debounces rapid sequential announcements.
  */
 
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 type Priority = "polite" | "assertive";
 
@@ -50,6 +50,16 @@ export function useAnnounce(debounceMs = 150): {
   announce: (message: string, priority?: Priority) => void;
 } {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clean up pending timer on unmount to prevent dispatching after teardown
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, []);
 
   const announce = useCallback(
     (message: string, priority: Priority = "polite") => {
