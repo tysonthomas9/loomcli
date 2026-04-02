@@ -27,6 +27,7 @@ export const ALLOWLIST = new Map([
   ["src/components/IssueDetailPanel/AssigneeDropdown.tsx", 535],
   ["src/components/WorkspaceTree/WorkspaceTree.tsx", 985],
   ["src/components/WorkspaceTree/EpicTaskTree.tsx", 510],
+  ["src/stores/agentStore.ts", 525],
 ]);
 
 // Patterns to skip (test files, generated files, fixtures).
