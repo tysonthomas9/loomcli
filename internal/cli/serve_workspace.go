@@ -317,6 +317,7 @@ func createEmptyWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir, b
 	go func() {
 		if err := ensureDaemonForWorkspace(context.Background(), wsDir, timeout); err != nil {
 			slog.Warn("failed to start daemon for workspace", "workspace", wsName, "err", err)
+			return // daemon not ready — skip sync
 		}
 		// Sync repos after daemon is ready (can be slow for large repos)
 		if result := execCommand(wsDir, "bd", "repo", "sync"); result.Err != nil {
@@ -422,6 +423,7 @@ func createCloneWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir st
 	go func() {
 		if err := ensureDaemonForWorkspace(context.Background(), wsDir, timeout); err != nil {
 			slog.Warn("failed to start daemon for workspace", "workspace", wsName, "err", err)
+			return // daemon not ready — skip sync
 		}
 		// Sync repos after daemon is ready (can be slow for large repos)
 		if result := execCommand(wsDir, "bd", "repo", "sync"); result.Err != nil {
