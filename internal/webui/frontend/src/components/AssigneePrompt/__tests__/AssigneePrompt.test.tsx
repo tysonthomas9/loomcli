@@ -7,11 +7,29 @@
  * Tests modal behavior for entering assignee name on drag to In Progress.
  */
 
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import {
+  render as rtlRender,
+  screen,
+  fireEvent,
+  act,
+} from "@testing-library/react";
+import type { RenderOptions } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import "@testing-library/jest-dom";
+import { KeyboardShortcutProvider } from "@/hooks";
 import { AssigneePrompt } from "../AssigneePrompt";
+
+const Wrapper = ({ children }: { children: React.ReactNode }) => (
+  <KeyboardShortcutProvider>{children}</KeyboardShortcutProvider>
+);
+
+function render(
+  ui: React.ReactElement,
+  options?: Omit<RenderOptions, "wrapper">,
+) {
+  return rtlRender(ui, { wrapper: Wrapper, ...options });
+}
 
 describe("AssigneePrompt", () => {
   const defaultProps = {

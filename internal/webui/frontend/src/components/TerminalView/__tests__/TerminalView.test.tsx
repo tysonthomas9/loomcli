@@ -7,14 +7,16 @@
  */
 
 import {
-  render,
+  render as rtlRender,
   screen,
   fireEvent,
   waitFor,
   act,
 } from "@testing-library/react";
+import type { RenderOptions } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
+import { KeyboardShortcutProvider } from "@/hooks/useKeyboardShortcuts";
 
 import { TerminalView } from "../TerminalView";
 import { BackendPickerPrompt } from "../BackendPickerPrompt";
@@ -193,6 +195,19 @@ vi.mock("../SessionNamePrompt.module.css", () => ({
     buttonSecondary: "buttonSecondary",
   },
 }));
+
+// ── Render wrapper (provides KeyboardShortcutProvider for escape layers) ─────
+
+const Wrapper = ({ children }: { children: React.ReactNode }) => (
+  <KeyboardShortcutProvider>{children}</KeyboardShortcutProvider>
+);
+
+function render(
+  ui: React.ReactElement,
+  options?: Omit<RenderOptions, "wrapper">,
+) {
+  return rtlRender(ui, { wrapper: Wrapper, ...options });
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

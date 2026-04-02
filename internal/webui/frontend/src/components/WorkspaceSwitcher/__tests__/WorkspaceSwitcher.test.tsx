@@ -6,13 +6,26 @@
  * Unit tests for WorkspaceSwitcher component.
  */
 
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render as rtlRender, screen, fireEvent } from "@testing-library/react";
+import type { RenderOptions } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
 import type { WorkspaceSummary } from "@/api/workspace";
+import { KeyboardShortcutProvider } from "@/hooks";
 
 import { WorkspaceSwitcher } from "../WorkspaceSwitcher";
+
+const Wrapper = ({ children }: { children: React.ReactNode }) => (
+  <KeyboardShortcutProvider>{children}</KeyboardShortcutProvider>
+);
+
+function render(
+  ui: React.ReactElement,
+  options?: Omit<RenderOptions, "wrapper">,
+) {
+  return rtlRender(ui, { wrapper: Wrapper, ...options });
+}
 
 // scrollIntoView is not available in jsdom
 Element.prototype.scrollIntoView = vi.fn();

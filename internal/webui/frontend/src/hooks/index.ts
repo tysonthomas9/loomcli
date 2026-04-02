@@ -307,7 +307,6 @@ export {
   KeyboardShortcutProvider,
   useKeyboardShortcuts,
   useRegisterEscapeLayer,
-  resetEscapeRegistry,
   EscapeRegistryContext,
   LAYER_CONFIRM_DIALOG,
   LAYER_TOAST,
