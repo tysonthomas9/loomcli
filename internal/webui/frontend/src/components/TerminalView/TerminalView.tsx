@@ -1,12 +1,9 @@
-import { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 
 import type { IssueContext } from "@/api/terminal";
 import {
-  seedTerminalSession,
   spawnTerminalSession,
   patchTerminalState,
-  restartTerminalSession,
-  fetchTerminalToken,
   getExportUrl,
 } from "@/api/terminal";
 import { LoadingSkeleton } from "@/components";
@@ -19,33 +16,30 @@ import { HelpPopover } from "./HelpPopover";
 import { NoBackendsEmptyState } from "./NoBackendsEmptyState";
 import { CopyToast } from "./CopyToast";
 import { PasteConfirmDialog } from "./PasteConfirmDialog";
-import type { ReconnectOverlayState } from "./ReconnectingOverlay";
 import { SearchBar } from "./SearchBar";
 import { TerminalContextMenu } from "./TerminalContextMenu";
-import type {
-  ConnectionState,
-  ContextMenuEvent,
-  TerminalInstanceHandle,
-} from "./TerminalInstance";
+import type { TerminalInstanceHandle } from "./TerminalInstance";
 import { TerminalPane } from "./TerminalPane";
+import { TerminalPaneArea } from "./TerminalPaneArea";
 import { TerminalTabBar } from "./TerminalTabBar";
-import { SplitDivider } from "./SplitDivider";
-import { SplitPaneSelector } from "./SplitPaneSelector";
 import {
   MAX_TABS,
   BACKEND_BRAND_COLORS,
   type TabState,
   generateTabName,
-  sanitizeSessionName,
 } from "./terminalTabUtils";
 import { useTabOrdering } from "./useTabOrdering";
 import { useClipboard } from "./useClipboard";
 import { useSessionManagement } from "./useCloseAllSessions";
+import { useConnectionState } from "./useConnectionState";
+import { useContextMenuActions } from "./useContextMenuActions";
+import { useSessionSeeding } from "./useSessionSeeding";
 import { useSplitView } from "./useSplitView";
 import { useTabActions } from "./useTabActions";
 import { useTabInit } from "./useTabInit";
 import { useTerminalKeyboardShortcuts } from "./useTerminalKeyboardShortcuts";
 import { useTerminalSearch } from "./useTerminalSearch";
+import { useUnreadTracking } from "./useUnreadTracking";
 import { useWorkspaceTabState } from "./useWorkspaceTabState";
 import styles from "./TerminalView.module.css";
 
@@ -114,16 +108,6 @@ export function TerminalView({
   } = useSplitView({ tabs, activeTabId });
   const splitContainerRef = useRef<HTMLDivElement>(null);
   const [isSessionPromptOpen, setIsSessionPromptOpen] = useState(false);
-  const [contextMenu, setContextMenu] = useState<ContextMenuEvent | null>(null);
-  const [tabHasConnected, setTabHasConnected] = useState<Map<string, boolean>>(
-    () => new Map(),
-  );
-  const [tabReconnectState, setTabReconnectState] = useState<
-    Map<string, ReconnectOverlayState>
-  >(() => new Map());
-  const [tabUnread, setTabUnread] = useState<Map<string, boolean>>(
-    () => new Map(),
-  );
   const [dismissedWelcome, setDismissedWelcome] = useState<boolean>(() => {
     try {
       if (localStorage.getItem("terminal-onboarding-dismissed") === "1")
@@ -188,43 +172,57 @@ export function TerminalView({
     isActive,
   });
 
-  const handleOutput = useCallback((tabId: string) => {
-    if (tabId !== activeTabIdRef.current) {
-      setTabUnread((prev) => {
-        if (prev.get(tabId)) return prev;
-        const next = new Map(prev);
-        next.set(tabId, true);
-        return next;
-      });
-    }
-  }, []);
+  // Hook ordering: useSessionSeeding before useConnectionState
+  // so trySeedOnConnect is available as the onTabConnected callback.
+  const { trySeedOnConnect } = useSessionSeeding({
+    pendingIssueContext,
+    onIssueContextConsumed,
+    pendingAgentName,
+    onAgentNameConsumed,
+    tabs,
+    setTabs,
+    setActiveTabId,
+    createTab,
+    config: config ?? undefined,
+    initializedRef,
+    tabsRef,
+    workspaceIdRef,
+  });
 
-  // Compute aggregate unread and notify parent
-  const hasAnyUnread = useMemo(() => {
-    for (const val of tabUnread.values()) {
-      if (val) return true;
-    }
-    return false;
-  }, [tabUnread]);
+  const {
+    tabHasConnected,
+    tabReconnectState,
+    handleConnectionStateChange,
+    handleReconnectStateChange,
+    handleReconnect,
+    handleBackendCrash,
+    handleCrashRestart,
+  } = useConnectionState({
+    setTabs,
+    instanceRefs,
+    workspaceId,
+    onTabConnected: trySeedOnConnect,
+  });
 
-  useEffect(() => {
-    onUnreadChange?.(hasAnyUnread);
-  }, [hasAnyUnread, onUnreadChange]);
+  const { tabUnread, handleOutput, clearTabUnread } = useUnreadTracking({
+    activeTabIdRef,
+    isActive,
+    onUnreadChange,
+  });
 
-  // When view becomes active, clear unread on the currently active tab
-  const prevIsActiveRef = useRef(isActive);
-  useEffect(() => {
-    if (isActive && !prevIsActiveRef.current) {
-      setTabUnread((prev) => {
-        const currentTab = activeTabIdRef.current;
-        if (!prev.get(currentTab)) return prev;
-        const next = new Map(prev);
-        next.delete(currentTab);
-        return next;
-      });
-    }
-    prevIsActiveRef.current = isActive;
-  }, [isActive]);
+  const {
+    contextMenu,
+    handleContextMenu,
+    handleContextMenuClose,
+    handleContextMenuCopy,
+    handleContextMenuPaste,
+    handleContextMenuSelectAll,
+  } = useContextMenuActions({
+    instanceRefs,
+    activeTabId,
+    handleCopyNotify,
+    handlePasteRequest,
+  });
 
   useTabInit({
     tabMetadata,
@@ -281,130 +279,6 @@ export function TerminalView({
     };
   }, [onActiveSessionCountChange]);
 
-  // Track sessions that have been seeded so we don't re-seed on reconnect
-  const seededSessionsRef = useRef<Set<string>>(new Set());
-  // Store pending seed context by session name (survives across renders)
-  const pendingSeedRef = useRef<Map<string, IssueContext>>(new Map());
-
-  // Handle pending issue context: create or switch to issue tab, then seed
-  useEffect(() => {
-    if (!pendingIssueContext || !initializedRef.current) return;
-
-    const sessionName = `issue-${sanitizeSessionName(pendingIssueContext.issue_id)}`;
-
-    // Check if tab already exists — switch to it without re-seeding
-    const existingTab = tabs.find((t) => t.sessionName === sessionName);
-    if (existingTab) {
-      setActiveTabId(existingTab.id);
-      onIssueContextConsumed?.();
-      return;
-    }
-
-    // Store seed context in ref before consuming the prop
-    pendingSeedRef.current.set(sessionName, pendingIssueContext);
-
-    // Create new tab
-    const newTab: TabState = {
-      id: sessionName,
-      label: `issue-${sanitizeSessionName(pendingIssueContext.issue_id)}`,
-      sessionName,
-      connectionState: "disconnected" as ConnectionState,
-      backendName: config?.backend ?? "unknown",
-    };
-    setTabs((prev) => [...prev, newTab]);
-    setActiveTabId(sessionName);
-
-    // Persist tab metadata (fire-and-forget)
-    createTab(sessionName, newTab.label, tabs.length).catch((err) =>
-      console.error(`Failed to persist issue tab ${sessionName}:`, err),
-    );
-
-    onIssueContextConsumed?.();
-  }, [pendingIssueContext, tabs, createTab, onIssueContextConsumed]);
-
-  // Handle pending agent name: create or switch to agent terminal tab
-  useEffect(() => {
-    if (!pendingAgentName || !initializedRef.current) return;
-
-    const sessionName = `agent-${sanitizeSessionName(pendingAgentName)}`;
-
-    // Check if tab already exists — switch to it
-    const existingTab = tabs.find((t) => t.sessionName === sessionName);
-    if (existingTab) {
-      setActiveTabId(existingTab.id);
-      onAgentNameConsumed?.();
-      return;
-    }
-
-    // Max tabs check
-    if (tabs.length >= MAX_TABS) {
-      onAgentNameConsumed?.();
-      return;
-    }
-
-    // Create new agent terminal tab
-    const newTab: TabState = {
-      id: sessionName,
-      label: `agent-${pendingAgentName}`,
-      sessionName,
-      connectionState: "disconnected" as ConnectionState,
-      backendName: "agent",
-      agentName: pendingAgentName,
-    };
-    setTabs((prev) => [...prev, newTab]);
-    setActiveTabId(sessionName);
-
-    // Persist tab metadata (fire-and-forget)
-    createTab(sessionName, newTab.label, tabs.length).catch((err) =>
-      console.error(`Failed to persist agent tab ${sessionName}:`, err),
-    );
-
-    onAgentNameConsumed?.();
-  }, [pendingAgentName, tabs, createTab, onAgentNameConsumed]);
-
-  // Seed the session when it connects for the first time
-  const handleConnectionStateChange = useCallback(
-    (tabId: string, state: ConnectionState, hasConnected: boolean) => {
-      setTabs((prev) =>
-        prev.map((t) =>
-          t.id === tabId ? { ...t, connectionState: state } : t,
-        ),
-      );
-
-      if (hasConnected) {
-        setTabHasConnected((prev) => {
-          if (prev.get(tabId)) return prev;
-          const next = new Map(prev);
-          next.set(tabId, true);
-          return next;
-        });
-      }
-
-      // If this tab just connected and has pending seed data, seed it
-      if (state === "connected") {
-        const tab = tabsRef.current.find((t) => t.id === tabId);
-        if (tab && !seededSessionsRef.current.has(tab.sessionName)) {
-          const seedCtx = pendingSeedRef.current.get(tab.sessionName);
-          if (seedCtx) {
-            seededSessionsRef.current.add(tab.sessionName);
-            pendingSeedRef.current.delete(tab.sessionName);
-            seedTerminalSession(
-              workspaceIdRef.current,
-              tab.sessionName,
-              seedCtx,
-            ).catch((err) =>
-              console.error(
-                `Failed to seed terminal session ${tab.sessionName}:`,
-                err,
-              ),
-            );
-          }
-        }
-      }
-    },
-    [],
-  );
-
   // Body scroll lock for full-height mode
   useEffect(() => {
     if (isFullHeight) document.body.style.overflow = "hidden";
@@ -413,66 +287,13 @@ export function TerminalView({
     };
   }, [isFullHeight]);
 
-  const handleReconnectStateChange = useCallback(
-    (tabId: string, state: ReconnectOverlayState) => {
-      setTabReconnectState((prev) => {
-        if (prev.get(tabId) === state) return prev;
-        const next = new Map(prev);
-        if (state === null) next.delete(tabId);
-        else next.set(tabId, state);
-        return next;
-      });
+  const handleTabChange = useCallback(
+    (tabId: string) => {
+      setActiveTabId(tabId);
+      clearTabUnread(tabId);
     },
-    [],
+    [clearTabUnread],
   );
-
-  const handleReconnect = useCallback((tabId: string) => {
-    instanceRefs.current.get(tabId)?.reconnect();
-  }, []);
-
-  const handleBackendCrash = useCallback((tabId: string, reason: string) => {
-    setTabs((prev) =>
-      prev.map((t) => (t.id === tabId ? { ...t, crashReason: reason } : t)),
-    );
-  }, []);
-
-  const handleCrashRestart = useCallback(
-    (tabId: string, sessionName: string) => {
-      // Clear crash state, call restart endpoint, then reconnect
-      setTabs((prev) =>
-        prev.map((t) => (t.id === tabId ? { ...t, crashReason: null } : t)),
-      );
-      fetchTerminalToken(workspaceId, sessionName)
-        .then((token) => {
-          if (!token) {
-            // Token fetch failed — skip restart, just reconnect (creates new session)
-            instanceRefs.current.get(tabId)?.reconnect();
-            return;
-          }
-          return restartTerminalSession(workspaceId, sessionName, token).then(
-            () => {
-              instanceRefs.current.get(tabId)?.reconnect();
-            },
-          );
-        })
-        .catch((err) => {
-          console.error(`Failed to restart session ${sessionName}:`, err);
-          // Still try to reconnect — the WebSocket reconnect will create a new session
-          instanceRefs.current.get(tabId)?.reconnect();
-        });
-    },
-    [],
-  );
-
-  const handleTabChange = useCallback((tabId: string) => {
-    setActiveTabId(tabId);
-    setTabUnread((prev) => {
-      if (!prev.get(tabId)) return prev;
-      const next = new Map(prev);
-      next.delete(tabId);
-      return next;
-    });
-  }, []);
 
   const { handleTabClose, handleDuplicateTab, handleTabRename } = useTabActions(
     {
@@ -581,40 +402,6 @@ export function TerminalView({
   const handleSessionPromptCancel = useCallback(() => {
     setIsSessionPromptOpen(false);
   }, []);
-
-  // Context menu handlers
-  const handleContextMenu = useCallback((event: ContextMenuEvent) => {
-    setContextMenu(event);
-  }, []);
-
-  const handleContextMenuClose = useCallback(() => {
-    setContextMenu(null);
-  }, []);
-
-  const handleContextMenuCopy = useCallback(() => {
-    const instance = instanceRefs.current.get(activeTabId);
-    if (instance) {
-      const sel = instance.getSelection();
-      if (sel) {
-        navigator.clipboard
-          .writeText(sel)
-          .then(() => handleCopyNotify())
-          .catch(() => {});
-      }
-    }
-    setContextMenu(null);
-    instanceRefs.current.get(activeTabId)?.focus();
-  }, [activeTabId, handleCopyNotify]);
-
-  const handleContextMenuPaste = useCallback(() => {
-    setContextMenu(null);
-    handlePasteRequest();
-  }, [handlePasteRequest]);
-
-  const handleContextMenuSelectAll = useCallback(() => {
-    instanceRefs.current.get(activeTabId)?.selectAll();
-    setContextMenu(null);
-  }, [activeTabId]);
 
   const handleCloseAll = useSessionManagement({
     workspaceId,
@@ -817,79 +604,17 @@ export function TerminalView({
             isOpen={isHelpOpen}
             onClose={() => setIsHelpOpen(false)}
           />
-          <div className={styles.terminalsContainer}>
-            {isSplitView && rightPaneTabId ? (
-              <div
-                ref={splitContainerRef}
-                className={styles.splitContainer}
-                style={{
-                  gridTemplateColumns: `${splitRatio}fr auto ${1 - splitRatio}fr`,
-                }}
-                data-testid="split-container"
-              >
-                <div className={styles.splitPaneLeft}>
-                  {tabs.map((tab) => (
-                    <div
-                      key={tab.id}
-                      className={styles.terminalPaneSplit}
-                      style={{
-                        display: tab.id === activeTabId ? "flex" : "none",
-                      }}
-                      role="tabpanel"
-                      id={`terminal-panel-${tab.id}`}
-                      aria-labelledby={`terminal-tab-${tab.id}`}
-                    >
-                      {renderTerminalPane(tab, "left")}
-                    </div>
-                  ))}
-                </div>
-                <SplitDivider
-                  onRatioChange={handleSplitRatioChange}
-                  containerRef={splitContainerRef}
-                />
-                <div className={styles.splitPaneRight}>
-                  <SplitPaneSelector
-                    tabs={tabs.map((t) => ({
-                      id: t.id,
-                      label: t.label,
-                      brandColor: BACKEND_BRAND_COLORS[t.backendName],
-                    }))}
-                    activeLeftTabId={activeTabId}
-                    rightPaneTabId={rightPaneTabId}
-                    onTabChange={handleRightPaneTabChange}
-                  />
-                  {tabs.map((tab) => (
-                    <div
-                      key={tab.id}
-                      className={styles.terminalPaneSplit}
-                      style={{
-                        display: tab.id === rightPaneTabId ? "flex" : "none",
-                      }}
-                      role="tabpanel"
-                      id={`terminal-panel-right-${tab.id}`}
-                    >
-                      {renderTerminalPane(tab, "right")}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              tabs.map((tab) => (
-                <div
-                  key={tab.id}
-                  className={styles.terminalPane}
-                  style={{
-                    display: tab.id === activeTabId ? "flex" : "none",
-                  }}
-                  role="tabpanel"
-                  id={`terminal-panel-${tab.id}`}
-                  aria-labelledby={`terminal-tab-${tab.id}`}
-                >
-                  {renderTerminalPane(tab, null)}
-                </div>
-              ))
-            )}
-          </div>
+          <TerminalPaneArea
+            tabs={tabs}
+            activeTabId={activeTabId}
+            isSplitView={isSplitView}
+            rightPaneTabId={rightPaneTabId}
+            splitRatio={splitRatio}
+            splitContainerRef={splitContainerRef}
+            onSplitRatioChange={handleSplitRatioChange}
+            onRightPaneTabChange={handleRightPaneTabChange}
+            renderPane={renderTerminalPane}
+          />
           {isSearchOpen && (
             <SearchBar
               value={searchTerm}
