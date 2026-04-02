@@ -6,11 +6,9 @@ internal/cli/claim.go
 internal/cli/concurrency.go
 internal/cli/config_fleetdb.go
 internal/cli/daemon_backend.go
-internal/cli/daemon_branch.go
 internal/cli/daemon_classify.go
 internal/cli/daemon_cmd.go
 internal/cli/daemon_epic.go
-internal/cli/daemon_pr.go
 internal/cli/daemon_repos.go
 internal/cli/daemon_restart.go
 internal/cli/daemon_run_helpers.go

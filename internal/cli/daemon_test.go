@@ -2483,3 +2483,49 @@ func TestDaemonStop_ClosesConcurrencyTracker(t *testing.T) {
 		t.Error("Acquire after Stop should return false (tracker closed)")
 	}
 }
+
+func TestAgentProcess_resolveRemote(t *testing.T) {
+	tests := []struct {
+		name       string
+		repoConfig *RepoConfig
+		want       string
+	}{
+		{"nil config", nil, "origin"},
+		{"empty remote", &RepoConfig{}, "origin"},
+		{"custom remote", &RepoConfig{Remote: "upstream"}, "upstream"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ap := &AgentProcess{repoConfig: tc.repoConfig}
+			got := ap.resolveRemote()
+			if got != tc.want {
+				t.Errorf("resolveRemote() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAgentProcess_resolveRemoteBranch(t *testing.T) {
+	tests := []struct {
+		name       string
+		repoConfig *RepoConfig
+		want       string
+	}{
+		{"nil config", nil, "origin/main"},
+		{"empty config", &RepoConfig{}, "origin/main"},
+		{"custom remote and branch", &RepoConfig{Remote: "upstream", DefaultBranch: "develop"}, "upstream/develop"},
+		{"custom branch only", &RepoConfig{DefaultBranch: "develop"}, "origin/develop"},
+		{"custom remote only", &RepoConfig{Remote: "upstream"}, "upstream/main"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ap := &AgentProcess{repoConfig: tc.repoConfig}
+			got := ap.resolveRemoteBranch()
+			if got != tc.want {
+				t.Errorf("resolveRemoteBranch() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

@@ -9,47 +9,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
-// resetWorktreeBranches moves all worktrees back to their default
-// (worktree-named) branches. This prevents cross-checkout deadlocks
-// when epic assignments differ from a prior daemon run — git refuses
-// to checkout a branch that is already checked out in another worktree.
-func (d *Daemon) resetWorktreeBranches() {
-	d.agentsMu.RLock()
-	snapshot := make([]*AgentProcess, len(d.agents))
-	copy(snapshot, d.agents)
-	d.agentsMu.RUnlock()
-
-	for _, ap := range snapshot {
-		current, err := GetCurrentBranch(ap.worktreePath)
-		if err != nil {
-			slog.Warn("failed to get branch", "worktree", ap.entry.Worktree, "err", err)
-			continue
-		}
-		defaultBranch := ap.entry.Worktree
-		if current == defaultBranch {
-			continue
-		}
-		slog.Info("resetting worktree branch", "worktree", ap.entry.Worktree, "from", current, "to", defaultBranch)
-		// Discard dirty state before switching
-		clean, _ := IsCleanWorkingTree(ap.worktreePath)
-		if !clean {
-			if err := discardDirtyState(ap.worktreePath); err != nil {
-				slog.Warn("discard dirty state failed", "worktree", ap.entry.Worktree, "err", err)
-			}
-		}
-		if err := GitCheckout(ap.worktreePath, defaultBranch); err != nil {
-			slog.Warn("failed to reset worktree", "worktree", ap.entry.Worktree, "branch", defaultBranch, "err", err)
-		}
-	}
-}
-
 // Start launches supervisor goroutines for all configured agents.
 func (d *Daemon) Start() error {
 	d.shutdown = make(chan struct{})
-
-	// Reset all worktrees to their default branches to prevent
-	// cross-checkout conflicts from prior daemon runs.
-	d.resetWorktreeBranches()
 
 	// Sweep orphaned sessions from prior daemon runs before launching agents.
 	if sessStore, err := sessions.NewStore(GetBeadsDir()); err != nil {
@@ -177,7 +139,7 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 			// Continue with caution - spawn may still work
 		}
 
-		// 1.5. Assign epic to worktree (only if parent is configured)
+		// 2. Assign epic to worktree (only if parent is configured)
 		var epicID string
 		if ap.entry.Parent != "" {
 			epicID = ap.entry.Parent
@@ -194,22 +156,7 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 			}
 		}
 
-		// 2. Ensure correct branch for epic assignment
-		targetBranch := ap.entry.Worktree // default: agent-name branch
-		if epicID != "" {
-			targetBranch = epicBranchName(epicID)
-		}
-		slog.Info("ensuring branch", "worktree", ap.entry.Worktree, "branch", targetBranch)
-		if err := EnsureWorktreeBranch(ap.worktreePath, targetBranch, ap.resolveRemote(), ap.resolveRemoteBranch()); err != nil {
-			slog.Warn("branch setup failed", "worktree", ap.entry.Worktree, "err", err)
-			d.concurrency.Release(ap.entry.Role)
-			if !d.handleRestartAfterError(ap) {
-				return
-			}
-			continue
-		}
-
-		// 2.5. Create session for liveness tracking + capture git state for finalization
+		// 3. Create session for liveness tracking + capture git state for finalization
 		beadsDir := GetBeadsDir()
 		if sessStore, err := sessions.NewStore(beadsDir); err == nil {
 			phase := "implementation"
@@ -242,10 +189,10 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 			slog.Warn("session store unavailable, watchdog will use log file", "worktree", ap.entry.Worktree, "err", err)
 		}
 
-		// 3. Spawn subprocess
+		// 4. Spawn subprocess
 		if err := d.spawnAgent(ap); err != nil {
 			slog.Warn("spawn failed", "worktree", ap.entry.Worktree, "err", err)
-			// Finalize orphaned session from step 2.5 (would stay in "running" forever)
+			// Finalize orphaned session from step 3 (would stay in "running" forever)
 			ap.mu.Lock()
 			orphanSess := ap.session
 			ap.session = nil
@@ -260,13 +207,13 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 			continue
 		}
 
-		// 4. Wait for exit
+		// 5. Wait for exit
 		exitCode := d.waitForAgent(ap)
 
-		// 4.5. Classify error and detect NoWork (before recovery clears lock file)
+		// 5.1. Classify error and detect NoWork (before recovery clears lock file)
 		d.classifyAgentExit(ap, exitCode)
 
-		// 4.6. Finalize daemon-created session
+		// 5.2. Finalize daemon-created session
 		ap.mu.Lock()
 		sess := ap.session
 		bRef := ap.beforeRef
@@ -301,33 +248,22 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 			}
 		}
 
-		// 4.7. Checkpoint management (save on error, clear on success)
+		// 5.3. Checkpoint management (save on error, clear on success)
 		d.handleAgentCheckpoint(ap, exitCode)
 
-		// 5. Post-mortem recovery (exit-code-aware)
+		// 6. Post-mortem recovery (exit-code-aware)
 		if err := d.recoverAgent(ap, exitCode); err != nil {
 			slog.Warn("post-mortem recovery failed", "worktree", ap.entry.Worktree, "err", err)
 			// Non-fatal, continue with restart logic
 		}
 
-		// 5.5. Ensure PR exists for epic branch (non-fatal)
-		ap.mu.Lock()
-		currentEpicID := ap.assignedEpicID
-		ap.mu.Unlock()
-		if currentEpicID != "" {
-			if err := EnsureEpicPR(ap.worktreePath, currentEpicID, d.eventBus); err != nil {
-				slog.Warn("PR creation failed", "worktree", ap.entry.Worktree, "err", err)
-				// Non-fatal — don't block restart
-			}
-		}
-
-		// 5.6. Release concurrency slot so waiting agents can proceed
+		// 7. Release concurrency slot so waiting agents can proceed
 		d.concurrency.Release(ap.entry.Role)
 
-		// 6. Epic exhaustion check
+		// 8. Epic exhaustion check
 		d.handleEpicTransition(ap)
 
-		// 7. Check shutdown or per-agent stop after subprocess exit
+		// 9. Check shutdown or per-agent stop after subprocess exit
 		select {
 		case <-d.shutdown:
 			slog.Info("shutdown signal received after exit", "worktree", ap.entry.Worktree)
@@ -346,19 +282,19 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 		default:
 		}
 
-		// 7.5. Check for backend failover (before restart decision)
+		// 9.1. Check for backend failover (before restart decision)
 		if d.tryFallbackBackend(ap) {
 			slog.Info("backend failover triggered", "worktree", ap.entry.Worktree, "backend", d.getEffectiveBackend(ap))
 			continue
 		}
 
-		// 8. Restart decision
+		// 10. Restart decision
 		if !d.shouldRestart(ap) {
 			slog.Warn("max restarts exceeded, stopping supervisor", "worktree", ap.entry.Worktree)
 			return
 		}
 
-		// 9. Backoff sleep (interruptible)
+		// 11. Backoff sleep (interruptible)
 		backoff := d.computeBackoff(ap)
 		ap.mu.Lock()
 		count := ap.restartCount
