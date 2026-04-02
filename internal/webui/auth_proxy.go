@@ -48,37 +48,8 @@ func newAuthProxy(extAuthURL string, logger *slog.Logger) http.Handler {
 	}
 
 	proxy.ModifyResponse = func(resp *http.Response) error {
-		// Rewrite Set-Cookie domains to match the frontend origin so
-		// cookies are stored as first-party.
-		if cookies := resp.Header.Values("Set-Cookie"); len(cookies) > 0 {
-			isTLS, _ := resp.Request.Context().Value(ctxKey{}).(bool)
-			resp.Header.Del("Set-Cookie")
-			for _, c := range cookies {
-				if strings.ContainsAny(c, "\r\n") {
-					continue // drop malformed cookie from upstream
-				}
-				// Strip Domain= so the cookie defaults to the request host
-				c = stripCookieAttr(c, "Domain")
-				// Replace SameSite=None with Lax (same-origin proxy)
-				c = replaceCookieAttr(c, "SameSite", "Lax")
-				// If SameSite was absent, replaceCookieAttr is a no-op; append it.
-				if !strings.Contains(strings.ToLower(c), "samesite=") {
-					c = c + "; SameSite=Lax"
-				}
-				// Remove Partitioned flag (not needed for same-origin)
-				c = stripCookieFlag(c, "Partitioned")
-				if isTLS {
-					// Ensure Secure is present (required for __Secure- prefix cookies)
-					if !hasCookieFlag(c, "Secure") {
-						c = c + "; Secure"
-					}
-				} else {
-					// Strip Secure for plain HTTP (browsers reject Secure cookies over HTTP)
-					c = stripCookieFlag(c, "Secure")
-				}
-				resp.Header.Add("Set-Cookie", c)
-			}
-		}
+		isTLS, _ := resp.Request.Context().Value(ctxKey{}).(bool)
+		rewriteAuthCookies(resp, isTLS)
 		return nil
 	}
 
@@ -94,6 +65,35 @@ func newAuthProxy(extAuthURL string, logger *slog.Logger) http.Handler {
 	}
 
 	return proxy
+}
+
+// rewriteAuthCookies rewrites Set-Cookie headers from the upstream auth service
+// to work as first-party cookies through the same-origin proxy.
+func rewriteAuthCookies(resp *http.Response, isTLS bool) {
+	cookies := resp.Header.Values("Set-Cookie")
+	if len(cookies) == 0 {
+		return
+	}
+	resp.Header.Del("Set-Cookie")
+	for _, c := range cookies {
+		if strings.ContainsAny(c, "\r\n") {
+			continue // drop malformed cookie from upstream
+		}
+		c = stripCookieAttr(c, "Domain")
+		c = replaceCookieAttr(c, "SameSite", "Lax")
+		if !strings.Contains(strings.ToLower(c), "samesite=") {
+			c += "; SameSite=Lax"
+		}
+		c = stripCookieFlag(c, "Partitioned")
+		if isTLS {
+			if !hasCookieFlag(c, "Secure") {
+				c += "; Secure"
+			}
+		} else {
+			c = stripCookieFlag(c, "Secure")
+		}
+		resp.Header.Add("Set-Cookie", c)
+	}
 }
 
 // stripCookieAttr removes a named attribute (e.g. "Domain") from a Set-Cookie header value.

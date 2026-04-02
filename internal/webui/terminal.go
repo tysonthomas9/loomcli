@@ -180,7 +180,7 @@ func (m *TerminalManager) tmuxAttach(name string) (*exec.Cmd, *os.File, error) {
 	cmd := exec.Command(m.tmuxPath, "attach-session", "-t", name)
 	// Always set TERM to a capable terminal type for the subprocess.
 	// tmux 3.6+ exits immediately with "open terminal failed" when TERM is
-	// unset, "dumb", "unknown", or any other value it doesn't recognise.
+	// unset, "dumb", "unknown", or any other value it doesn't recognize.
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
