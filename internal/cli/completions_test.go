@@ -10,6 +10,8 @@ import (
 )
 
 func TestGetGitBranches(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name       string
 		mockOutput string
@@ -68,15 +70,17 @@ func TestGetGitBranches(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
 			mock := NewCommandMock(t, []CommandStub{{
 				Name:   "git",
 				Args:   []string{"branch", "-a", "--format=%(refname:short)"},
 				Stdout: tc.mockOutput,
 				Err:    tc.mockErr,
 			}})
-			mock.Install()
+			mock.InstallOn(deps)
 
-			got, err := GetGitBranches()
+			got, err := getGitBranchesDeps(deps)
 
 			if tc.wantErr && err == nil {
 				t.Error("expected error, got nil")

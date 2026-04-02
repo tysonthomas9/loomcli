@@ -66,7 +66,7 @@ func writeLoomYaml(wsDir string) error {
 // is started with --local to avoid requiring a git repo at the workspace root.
 // The function respects the provided context for cancellation and uses timeout as
 // a fallback deadline for polling.
-func ensureDaemonForWorkspace(ctx context.Context, wsDir string, timeout time.Duration) error {
+func ensureDaemonForWorkspace(deps *Deps, ctx context.Context, wsDir string, timeout time.Duration) error {
 	if ctx.Err() != nil {
 		return fmt.Errorf("daemon startup in %s cancelled: %w", wsDir, ctx.Err())
 	}
@@ -76,7 +76,7 @@ func ensureDaemonForWorkspace(ctx context.Context, wsDir string, timeout time.Du
 	if _, err := os.Stat(filepath.Join(wsDir, ".git")); err != nil {
 		args = append(args, "--local")
 	}
-	result := defaultDeps.Exec.Run(wsDir, "bd", args...)
+	result := deps.Exec.Run(wsDir, "bd", args...)
 	if result.Err != nil {
 		// bd daemon start returns non-zero when already running — proceed to poll anyway
 		slog.Warn("bd daemon start returned error, will poll for readiness",
@@ -95,7 +95,7 @@ func ensureDaemonForWorkspace(ctx context.Context, wsDir string, timeout time.Du
 		case <-deadlineTimer.C:
 			return fmt.Errorf("daemon in %s did not become ready within %s", wsDir, timeout)
 		case <-ticker.C:
-			check := defaultDeps.Exec.Run(wsDir, "bd", "daemon", "status", "--json")
+			check := deps.Exec.Run(wsDir, "bd", "daemon", "status", "--json")
 			if check.Err == nil && strings.Contains(check.Stdout, `"status":"running"`) {
 				slog.Info("bd daemon started for workspace", "path", wsDir)
 				return nil
@@ -108,11 +108,11 @@ func ensureDaemonForWorkspace(ctx context.Context, wsDir string, timeout time.Du
 // It runs `bd daemon stop` in wsDir on a best-effort basis: errors are logged at
 // debug level but never returned, so callers can safely use it in cleanup paths
 // without aborting other cleanup steps.
-func stopDaemonForWorkspace(wsDir string) {
+func stopDaemonForWorkspace(deps *Deps, wsDir string) {
 	if wsDir == "" {
 		return
 	}
-	result := defaultDeps.Exec.Run(wsDir, "bd", "daemon", "stop")
+	result := deps.Exec.Run(wsDir, "bd", "daemon", "stop")
 	if result.Err != nil {
 		slog.Debug("stopDaemonForWorkspace: bd daemon stop returned error (expected if not running)",
 			"path", wsDir, "err", result.Err)

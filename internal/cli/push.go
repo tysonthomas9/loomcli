@@ -60,7 +60,7 @@ Examples:
 		}
 		return nil
 	},
-	Run: runPush,
+	RunE: runPush,
 }
 
 func init() {
@@ -69,9 +69,13 @@ func init() {
 	rootCmd.AddCommand(pushCmd)
 }
 
-func runPush(cmd *cobra.Command, args []string) {
+func runPush(cmd *cobra.Command, args []string) error {
+	deps := GetDeps(cmd)
+	all, _ := cmd.Flags().GetBool("all")
+	ws, _ := cmd.Flags().GetString("workspace")
+
 	if IsWorkspaceMode() {
-		if pushAll && pushWorkspace != "" {
+		if all && ws != "" {
 			fmt.Fprintln(os.Stderr, "Error: --all and --workspace are mutually exclusive")
 			os.Exit(1)
 		}
@@ -79,11 +83,11 @@ func runPush(cmd *cobra.Command, args []string) {
 		targetBranch := ""
 		sourceBranch := ""
 
-		if pushAll {
+		if all {
 			if len(args) == 1 {
 				targetBranch = args[0]
 			}
-			pushAllWorkspaces(targetBranch)
+			pushAllWorkspaces(deps, targetBranch)
 		} else {
 			sourceBranch = args[0]
 			if len(args) == 2 {
@@ -96,7 +100,7 @@ func runPush(cmd *cobra.Command, args []string) {
 				os.Exit(1)
 			}
 
-			wsName := pushWorkspace
+			wsName := ws
 			if wsName != "" {
 				if err := resolver.SetWorkspace(wsName); err != nil {
 					available := resolver.WorkspaceNames()
@@ -105,15 +109,16 @@ func runPush(cmd *cobra.Command, args []string) {
 				}
 			}
 
-			pushWorkspaceRepos(resolver, sourceBranch, targetBranch)
+			pushWorkspaceRepos(deps, resolver, sourceBranch, targetBranch)
 		}
-		return
+		return nil
 	}
 
 	// Legacy mode
-	if pushAll {
-		pushAllWorktrees(args[0])
+	if all {
+		pushAllWorktrees(deps, args[0])
 	} else {
-		pushBranch(args[0], args[1])
+		pushBranch(deps, args[0], args[1])
 	}
+	return nil
 }

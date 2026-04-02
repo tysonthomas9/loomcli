@@ -15,6 +15,7 @@ import (
 )
 
 func TestForceReleaseLock_RemovesLockFile(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 
 	// Create a lock file
@@ -41,6 +42,7 @@ func TestForceReleaseLock_RemovesLockFile(t *testing.T) {
 }
 
 func TestForceReleaseLock_NoLockFile(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 
 	// Call forceReleaseLock on directory without lock
@@ -54,11 +56,10 @@ func TestForceReleaseLock_NoLockFile(t *testing.T) {
 }
 
 func TestCloseTask_Success(t *testing.T) {
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
+	t.Parallel()
+	deps, _, _, _, tracker := NewTestDeps(t)
 
-	mock := NewMockTracker()
-	mock.CloseIssueFunc = func(ctx context.Context, id, reason string) error {
+	tracker.CloseIssueFunc = func(ctx context.Context, id, reason string) error {
 		if id != "task-123" {
 			t.Errorf("CloseIssue id = %q, want task-123", id)
 		}
@@ -68,34 +69,30 @@ func TestCloseTask_Success(t *testing.T) {
 		}
 		return nil
 	}
-	setDefaultTracker(mock)
 
-	closeTask("task-123", "Tests pass")
+	closeTask(deps, "task-123", "Tests pass")
 
-	if !mock.Called("CloseIssue") {
+	if !tracker.Called("CloseIssue") {
 		t.Error("CloseIssue was not called")
 	}
 }
 
 func TestCloseTask_Failure(t *testing.T) {
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
+	t.Parallel()
+	deps, _, _, _, tracker := NewTestDeps(t)
 
-	mock := NewMockTracker()
-	mock.CloseIssueErr = errors.New("task not found")
-	setDefaultTracker(mock)
+	tracker.CloseIssueErr = errors.New("task not found")
 
 	// closeTask prints warning but doesn't panic
-	closeTask("task-456", "Done")
+	closeTask(deps, "task-456", "Done")
 }
 
 func TestResetTask_Success(t *testing.T) {
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
+	t.Parallel()
+	deps, _, _, _, tracker := NewTestDeps(t)
 
-	mock := NewMockTracker()
-	mock.GetIssueResult = &BdIssue{ID: "task-789", Status: "in_progress"}
-	mock.UpdateIssueFunc = func(ctx context.Context, id string, opts UpdateOpts) error {
+	tracker.GetIssueResult = &BdIssue{ID: "task-789", Status: "in_progress"}
+	tracker.UpdateIssueFunc = func(ctx context.Context, id string, opts UpdateOpts) error {
 		if id != "task-789" {
 			t.Errorf("UpdateIssue id = %q, want task-789", id)
 		}
@@ -107,84 +104,73 @@ func TestResetTask_Success(t *testing.T) {
 		}
 		return nil
 	}
-	setDefaultTracker(mock)
 
-	resetTask("task-789")
+	resetTask(deps, "task-789")
 
-	if !mock.Called("GetIssue") {
+	if !tracker.Called("GetIssue") {
 		t.Error("GetIssue was not called")
 	}
-	if !mock.Called("UpdateIssue") {
+	if !tracker.Called("UpdateIssue") {
 		t.Error("UpdateIssue was not called")
 	}
 }
 
 func TestResetTask_Failure(t *testing.T) {
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
+	t.Parallel()
+	deps, _, _, _, tracker := NewTestDeps(t)
 
-	mock := NewMockTracker()
-	mock.GetIssueResult = &BdIssue{ID: "task-789", Status: "in_progress"}
-	mock.UpdateIssueErr = errors.New("invalid task")
-	setDefaultTracker(mock)
+	tracker.GetIssueResult = &BdIssue{ID: "task-789", Status: "in_progress"}
+	tracker.UpdateIssueErr = errors.New("invalid task")
 
 	// resetTask prints warning and manual instructions but doesn't panic
-	resetTask("task-789")
+	resetTask(deps, "task-789")
 }
 
 func TestResetTask_AlreadyReview(t *testing.T) {
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
+	t.Parallel()
+	deps, _, _, _, tracker := NewTestDeps(t)
 
-	mock := NewMockTracker()
-	mock.GetIssueResult = &BdIssue{ID: "task-789", Status: "review"}
-	setDefaultTracker(mock)
+	tracker.GetIssueResult = &BdIssue{ID: "task-789", Status: "review"}
 
-	resetTask("task-789")
+	resetTask(deps, "task-789")
 
-	if mock.Called("UpdateIssue") {
+	if tracker.Called("UpdateIssue") {
 		t.Error("UpdateIssue should not be called when task is already in review")
 	}
 }
 
 func TestResetTask_AlreadyClosed(t *testing.T) {
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
+	t.Parallel()
+	deps, _, _, _, tracker := NewTestDeps(t)
 
-	mock := NewMockTracker()
-	mock.GetIssueResult = &BdIssue{ID: "task-789", Status: "closed"}
-	setDefaultTracker(mock)
+	tracker.GetIssueResult = &BdIssue{ID: "task-789", Status: "closed"}
 
-	resetTask("task-789")
+	resetTask(deps, "task-789")
 
-	if mock.Called("UpdateIssue") {
+	if tracker.Called("UpdateIssue") {
 		t.Error("UpdateIssue should not be called when task is already closed")
 	}
 }
 
 func TestResetTask_GetIssueFails(t *testing.T) {
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
+	t.Parallel()
+	deps, _, _, _, tracker := NewTestDeps(t)
 
-	mock := NewMockTracker()
-	mock.GetIssueErr = errors.New("not found")
-	setDefaultTracker(mock)
+	tracker.GetIssueErr = errors.New("not found")
 
 	// When GetIssue fails, resetTask should still attempt UpdateIssue
-	resetTask("task-789")
+	resetTask(deps, "task-789")
 
-	if !mock.Called("UpdateIssue") {
+	if !tracker.Called("UpdateIssue") {
 		t.Error("UpdateIssue should still be called when GetIssue fails")
 	}
 }
 
 func TestAnalyzeTaskCompletion_Completed(t *testing.T) {
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
+	t.Parallel()
+	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker := NewMockTracker()
 	tracker.GetIssueTextResult = "Task: Implement feature X\nStatus: in_progress\n"
-	setDefaultTracker(tracker)
 
 	mock := NewCommandMock(t, []CommandStub{
 		{
@@ -201,9 +187,9 @@ func TestAnalyzeTaskCompletion_Completed(t *testing.T) {
 			Err:    nil,
 		},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	completed, reason := analyzeTaskCompletion("/test/worktree", "task-abc")
+	completed, reason := analyzeTaskCompletion(deps, "/test/worktree", "task-abc")
 
 	if !completed {
 		t.Error("expected completed=true")
@@ -214,12 +200,10 @@ func TestAnalyzeTaskCompletion_Completed(t *testing.T) {
 }
 
 func TestAnalyzeTaskCompletion_Incomplete(t *testing.T) {
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
+	t.Parallel()
+	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker := NewMockTracker()
 	tracker.GetIssueTextResult = "Task: Add unit tests\nStatus: in_progress\n"
-	setDefaultTracker(tracker)
 
 	mock := NewCommandMock(t, []CommandStub{
 		{
@@ -236,9 +220,9 @@ func TestAnalyzeTaskCompletion_Incomplete(t *testing.T) {
 			Err:    nil,
 		},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	completed, reason := analyzeTaskCompletion("/test/worktree", "task-def")
+	completed, reason := analyzeTaskCompletion(deps, "/test/worktree", "task-def")
 
 	if completed {
 		t.Error("expected completed=false")
@@ -249,14 +233,12 @@ func TestAnalyzeTaskCompletion_Incomplete(t *testing.T) {
 }
 
 func TestAnalyzeTaskCompletion_BdShowFails(t *testing.T) {
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
+	t.Parallel()
+	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker := NewMockTracker()
 	tracker.GetIssueTextErr = errors.New("task not found")
-	setDefaultTracker(tracker)
 
-	completed, reason := analyzeTaskCompletion("/test/worktree", "task-notfound")
+	completed, reason := analyzeTaskCompletion(deps, "/test/worktree", "task-notfound")
 
 	if completed {
 		t.Error("expected completed=false when GetIssueText fails")
@@ -267,12 +249,10 @@ func TestAnalyzeTaskCompletion_BdShowFails(t *testing.T) {
 }
 
 func TestAnalyzeTaskCompletion_ClaudeFails(t *testing.T) {
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
+	t.Parallel()
+	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker := NewMockTracker()
 	tracker.GetIssueTextResult = "Task: Some task\n"
-	setDefaultTracker(tracker)
 
 	mock := NewCommandMock(t, []CommandStub{
 		{
@@ -290,9 +270,9 @@ func TestAnalyzeTaskCompletion_ClaudeFails(t *testing.T) {
 			Err:    errors.New("exit status 1"),
 		},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	completed, reason := analyzeTaskCompletion("/test/worktree", "task-xyz")
+	completed, reason := analyzeTaskCompletion(deps, "/test/worktree", "task-xyz")
 
 	if completed {
 		t.Error("expected completed=false when claude fails")
@@ -303,12 +283,10 @@ func TestAnalyzeTaskCompletion_ClaudeFails(t *testing.T) {
 }
 
 func TestAnalyzeTaskCompletion_ParsesMultilineResponse(t *testing.T) {
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
+	t.Parallel()
+	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker := NewMockTracker()
 	tracker.GetIssueTextResult = "Task: Multiline test\n"
-	setDefaultTracker(tracker)
 
 	mock := NewCommandMock(t, []CommandStub{
 		{
@@ -325,9 +303,9 @@ func TestAnalyzeTaskCompletion_ParsesMultilineResponse(t *testing.T) {
 			Err:    nil,
 		},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	completed, reason := analyzeTaskCompletion("/test/worktree", "task-multi")
+	completed, reason := analyzeTaskCompletion(deps, "/test/worktree", "task-multi")
 
 	if !completed {
 		t.Error("expected completed=true for multiline response with COMPLETED")
@@ -338,12 +316,10 @@ func TestAnalyzeTaskCompletion_ParsesMultilineResponse(t *testing.T) {
 }
 
 func TestAnalyzeTaskCompletion_CaseInsensitive(t *testing.T) {
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
+	t.Parallel()
+	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker := NewMockTracker()
 	tracker.GetIssueTextResult = "Task: Case test\n"
-	setDefaultTracker(tracker)
 
 	mock := NewCommandMock(t, []CommandStub{
 		{
@@ -360,9 +336,9 @@ func TestAnalyzeTaskCompletion_CaseInsensitive(t *testing.T) {
 			Err:    nil,
 		},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	completed, reason := analyzeTaskCompletion("/test/worktree", "task-case")
+	completed, reason := analyzeTaskCompletion(deps, "/test/worktree", "task-case")
 
 	if !completed {
 		t.Error("expected completed=true for lowercase 'Completed'")
@@ -373,12 +349,10 @@ func TestAnalyzeTaskCompletion_CaseInsensitive(t *testing.T) {
 }
 
 func TestAnalyzeTaskCompletion_ReasonWithColons(t *testing.T) {
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
+	t.Parallel()
+	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker := NewMockTracker()
 	tracker.GetIssueTextResult = "Task: Colon test\n"
-	setDefaultTracker(tracker)
 
 	mock := NewCommandMock(t, []CommandStub{
 		{
@@ -395,9 +369,9 @@ func TestAnalyzeTaskCompletion_ReasonWithColons(t *testing.T) {
 			Err:    nil,
 		},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	completed, reason := analyzeTaskCompletion("/test/worktree", "task-colon")
+	completed, reason := analyzeTaskCompletion(deps, "/test/worktree", "task-colon")
 
 	if completed {
 		t.Error("expected completed=false")
@@ -409,12 +383,10 @@ func TestAnalyzeTaskCompletion_ReasonWithColons(t *testing.T) {
 }
 
 func TestAnalyzeTaskCompletion_UnparseableResponse(t *testing.T) {
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
+	t.Parallel()
+	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker := NewMockTracker()
 	tracker.GetIssueTextResult = "Task: Unparse test\n"
-	setDefaultTracker(tracker)
 
 	mock := NewCommandMock(t, []CommandStub{
 		{
@@ -431,9 +403,9 @@ func TestAnalyzeTaskCompletion_UnparseableResponse(t *testing.T) {
 			Err:    nil,
 		},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	completed, reason := analyzeTaskCompletion("/test/worktree", "task-unparse")
+	completed, reason := analyzeTaskCompletion(deps, "/test/worktree", "task-unparse")
 
 	if completed {
 		t.Error("expected completed=false when response is unparseable")
@@ -444,12 +416,10 @@ func TestAnalyzeTaskCompletion_UnparseableResponse(t *testing.T) {
 }
 
 func TestHandleOrphanedTask_AnalyzeComplete(t *testing.T) {
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
+	t.Parallel()
+	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker := NewMockTracker()
 	tracker.GetIssueTextResult = "Task: Orphan complete\n"
-	setDefaultTracker(tracker)
 
 	mock := NewCommandMock(t, []CommandStub{
 		{
@@ -466,9 +436,9 @@ func TestHandleOrphanedTask_AnalyzeComplete(t *testing.T) {
 			Err:    nil,
 		},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	handleOrphanedTask("/test/worktree", "task-orphan1", true)
+	handleOrphanedTask(deps, "/test/worktree", "task-orphan1", true)
 
 	if !tracker.Called("CloseIssue") {
 		t.Error("CloseIssue should be called for completed task")
@@ -476,13 +446,11 @@ func TestHandleOrphanedTask_AnalyzeComplete(t *testing.T) {
 }
 
 func TestHandleOrphanedTask_AnalyzeIncomplete(t *testing.T) {
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
+	t.Parallel()
+	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker := NewMockTracker()
 	tracker.GetIssueTextResult = "Task: Orphan incomplete\n"
 	tracker.GetIssueResult = &BdIssue{ID: "task-orphan2", Status: "in_progress"}
-	setDefaultTracker(tracker)
 
 	mock := NewCommandMock(t, []CommandStub{
 		{
@@ -499,9 +467,9 @@ func TestHandleOrphanedTask_AnalyzeIncomplete(t *testing.T) {
 			Err:    nil,
 		},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	handleOrphanedTask("/test/worktree", "task-orphan2", true)
+	handleOrphanedTask(deps, "/test/worktree", "task-orphan2", true)
 
 	if !tracker.Called("UpdateIssue") {
 		t.Error("UpdateIssue should be called for incomplete task")
@@ -509,14 +477,12 @@ func TestHandleOrphanedTask_AnalyzeIncomplete(t *testing.T) {
 }
 
 func TestHandleOrphanedTask_NoAnalyze(t *testing.T) {
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
+	t.Parallel()
+	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker := NewMockTracker()
 	tracker.GetIssueResult = &BdIssue{ID: "task-orphan3", Status: "in_progress"}
-	setDefaultTracker(tracker)
 
-	handleOrphanedTask("/test/worktree", "task-orphan3", false)
+	handleOrphanedTask(deps, "/test/worktree", "task-orphan3", false)
 
 	if tracker.Called("GetIssueText") {
 		t.Error("GetIssueText should not be called when analyze=false")
@@ -527,6 +493,9 @@ func TestHandleOrphanedTask_NoAnalyze(t *testing.T) {
 }
 
 func TestCleanUntrackedFiles_NoFiles(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// Dry run returns empty — no clean should be called
 	mock := NewCommandMock(t, []CommandStub{{
 		Dir:    "/test/worktree",
@@ -535,14 +504,17 @@ func TestCleanUntrackedFiles_NoFiles(t *testing.T) {
 		Stdout: "",
 		Err:    nil,
 	}})
-	mock.Install()
+	mock.InstallOn(deps)
 
 	// No output command mock needed — GitClean should not be called
-	cleanUntrackedFiles("/test/worktree", false)
+	cleanUntrackedFiles(deps, "/test/worktree", false)
 }
 
 func TestCleanUntrackedFiles_WithForce(t *testing.T) {
-	// Dry run returns files, force=true → clean is called without prompt
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
+	// Dry run returns files, force=true -> clean is called without prompt
 	mock := NewCommandMock(t, []CommandStub{{
 		Dir:    "/test/worktree",
 		Name:   "git",
@@ -550,20 +522,23 @@ func TestCleanUntrackedFiles_WithForce(t *testing.T) {
 		Stdout: "Would remove test.txt\nWould remove screenshots/\n",
 		Err:    nil,
 	}})
-	mock.Install()
+	mock.InstallOn(deps)
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{{
 		Dir:  "/test/worktree",
 		Args: []string{"clean", "-fd", "--exclude=.beads", "--exclude=.loom", "--exclude=sessions", "--exclude=loom.yaml", "--exclude=AGENTS.md"},
 		Err:  nil,
 	}})
-	outputMock.Install()
+	outputMock.InstallOn(deps)
 
-	cleanUntrackedFiles("/test/worktree", true)
+	cleanUntrackedFiles(deps, "/test/worktree", true)
 }
 
 func TestCleanUntrackedFiles_DryRunFails(t *testing.T) {
-	// Dry run fails — prints warning, no clean called
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
+	// Dry run fails -- prints warning, no clean called
 	mock := NewCommandMock(t, []CommandStub{{
 		Dir:    "/test/worktree",
 		Name:   "git",
@@ -572,13 +547,16 @@ func TestCleanUntrackedFiles_DryRunFails(t *testing.T) {
 		Stderr: "error: not a git repo\n",
 		Err:    errors.New("exit status 128"),
 	}})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	cleanUntrackedFiles("/test/worktree", true)
+	cleanUntrackedFiles(deps, "/test/worktree", true)
 }
 
 func TestCleanUntrackedFiles_CleanFails(t *testing.T) {
-	// Dry run succeeds but actual clean fails — prints warning
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
+	// Dry run succeeds but actual clean fails -- prints warning
 	mock := NewCommandMock(t, []CommandStub{{
 		Dir:    "/test/worktree",
 		Name:   "git",
@@ -586,19 +564,20 @@ func TestCleanUntrackedFiles_CleanFails(t *testing.T) {
 		Stdout: "Would remove test.txt\n",
 		Err:    nil,
 	}})
-	mock.Install()
+	mock.InstallOn(deps)
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{{
 		Dir:  "/test/worktree",
 		Args: []string{"clean", "-fd", "--exclude=.beads", "--exclude=.loom", "--exclude=sessions", "--exclude=loom.yaml", "--exclude=AGENTS.md"},
 		Err:  errors.New("Permission denied"),
 	}})
-	outputMock.Install()
+	outputMock.InstallOn(deps)
 
-	cleanUntrackedFiles("/test/worktree", true)
+	cleanUntrackedFiles(deps, "/test/worktree", true)
 }
 
 func TestKillProcess_Success(t *testing.T) {
+	t.Parallel()
 	// Start a sleep process in its own process group (as the daemon does)
 	cmd := exec.Command("sleep", "60") //nolint:norawexec
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -635,6 +614,7 @@ func TestKillProcess_Success(t *testing.T) {
 }
 
 func TestKillProcess_NonExistentPid(t *testing.T) {
+	t.Parallel()
 	// Use a PID that almost certainly doesn't exist
 	// killProcess treats ESRCH (no such process) as success
 	err := killProcess(999999999)
@@ -644,6 +624,7 @@ func TestKillProcess_NonExistentPid(t *testing.T) {
 }
 
 func TestKillProcess_AlreadyDead(t *testing.T) {
+	t.Parallel()
 	// Start and immediately kill a process to get a dead PID
 	cmd := exec.Command("sleep", "60") //nolint:norawexec
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -664,6 +645,7 @@ func TestKillProcess_AlreadyDead(t *testing.T) {
 }
 
 func TestKillProcess_WithChildProcesses(t *testing.T) {
+	t.Parallel()
 	// Start a process that spawns children, all in their own process group.
 	// killProcess should terminate the entire group.
 	cmd := exec.Command("bash", "-c", "sleep 60 & sleep 60 & wait") //nolint:norawexec
@@ -705,18 +687,16 @@ func TestKillProcess_WithChildProcesses(t *testing.T) {
 }
 
 func TestResetOrphanedAgentTasks_FindsAndResetsMultiple(t *testing.T) {
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
+	t.Parallel()
+	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker := NewMockTracker()
 	tracker.ListResult = []BdIssue{
 		{ID: "task-1", Title: "First task"},
 		{ID: "task-2", Title: "Second task"},
 	}
 	tracker.GetIssueResult = &BdIssue{Status: "in_progress"}
-	setDefaultTracker(tracker)
 
-	resetOrphanedAgentTasks("/test/worktree", "falcon", "", false)
+	resetOrphanedAgentTasks(deps, "/test/worktree", "falcon", "", false)
 
 	if !tracker.Called("List") {
 		t.Error("List should be called")
@@ -730,18 +710,16 @@ func TestResetOrphanedAgentTasks_FindsAndResetsMultiple(t *testing.T) {
 }
 
 func TestResetOrphanedAgentTasks_SkipsAlreadyHandled(t *testing.T) {
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
+	t.Parallel()
+	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker := NewMockTracker()
 	tracker.ListResult = []BdIssue{
 		{ID: "task-1", Title: "Already handled"},
 		{ID: "task-2", Title: "Orphaned task"},
 	}
 	tracker.GetIssueResult = &BdIssue{Status: "in_progress"}
-	setDefaultTracker(tracker)
 
-	resetOrphanedAgentTasks("/test/worktree", "ember", "task-1", false)
+	resetOrphanedAgentTasks(deps, "/test/worktree", "ember", "task-1", false)
 
 	// Only task-2 should be processed (task-1 is alreadyHandledTaskID)
 	if tracker.CallCount("GetIssue") != 1 {
@@ -753,14 +731,12 @@ func TestResetOrphanedAgentTasks_SkipsAlreadyHandled(t *testing.T) {
 }
 
 func TestResetOrphanedAgentTasks_NoOrphanedTasks(t *testing.T) {
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
+	t.Parallel()
+	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker := NewMockTracker()
 	tracker.ListResult = []BdIssue{}
-	setDefaultTracker(tracker)
 
-	resetOrphanedAgentTasks("/test/worktree", "falcon", "", false)
+	resetOrphanedAgentTasks(deps, "/test/worktree", "falcon", "", false)
 
 	if !tracker.Called("List") {
 		t.Error("List should be called")
@@ -771,26 +747,25 @@ func TestResetOrphanedAgentTasks_NoOrphanedTasks(t *testing.T) {
 }
 
 func TestResetOrphanedAgentTasks_BdListFails(t *testing.T) {
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
+	t.Parallel()
+	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker := NewMockTracker()
 	tracker.ListErr = errors.New("connection failed")
-	setDefaultTracker(tracker)
 
 	// Should not panic
-	resetOrphanedAgentTasks("/test/worktree", "falcon", "", false)
+	resetOrphanedAgentTasks(deps, "/test/worktree", "falcon", "", false)
 }
 
 func TestResetOrphanedAgentTasks_EmptyAgentName(t *testing.T) {
-	mock := NewCommandMock(t, []CommandStub{})
-	mock.Install()
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
 
 	// Should return immediately with no commands
-	resetOrphanedAgentTasks("/test/worktree", "", "", false)
+	resetOrphanedAgentTasks(deps, "/test/worktree", "", "", false)
 }
 
 func TestRecoverWorktree_NoLock(t *testing.T) {
+	// RecoverWorktree uses defaultDeps internally; must use global mocks.
 	resetDefaultTracker()
 	t.Cleanup(resetDefaultTracker)
 	tmpDir := t.TempDir()
@@ -864,6 +839,7 @@ func TestRecoverWorktree_StaleLock(t *testing.T) {
 }
 
 func TestRecoverWorktree_LockCheckError(t *testing.T) {
+	// RecoverWorktree uses defaultDeps internally; must use global mocks.
 	ResetBeadsDirCache()
 	tmpDir := t.TempDir()
 
@@ -873,7 +849,7 @@ func TestRecoverWorktree_LockCheckError(t *testing.T) {
 		t.Fatalf("failed to create lock dir: %v", err)
 	}
 
-	// No mocks needed — RecoverWorktree should return an error before calling any commands
+	// No mocks needed -- RecoverWorktree should return an error before calling any commands
 	mock := NewCommandMock(t, []CommandStub{})
 	mock.Install()
 
@@ -884,6 +860,7 @@ func TestRecoverWorktree_LockCheckError(t *testing.T) {
 }
 
 func TestRecoverWorktree_EmptyAgentName(t *testing.T) {
+	// RecoverWorktree uses defaultDeps internally; must use global mocks.
 	ResetBeadsDirCache()
 	tmpDir := t.TempDir()
 
@@ -913,6 +890,7 @@ func TestRecoverWorktree_EmptyAgentName(t *testing.T) {
 func TestForceReleaseLock_WorkspacePath(t *testing.T) {
 	// With per-worktree locks, forceReleaseLock removes the lock at the
 	// given path (no redirect to workspace root).
+	// Uses setupLockWorkspaceConfig which calls t.Setenv, so not parallel-safe.
 	wsDir := t.TempDir()
 	repoDir := filepath.Join(wsDir, "repo1")
 	if err := os.MkdirAll(repoDir, 0755); err != nil {
@@ -950,6 +928,7 @@ func TestForceReleaseLock_WorkspacePath(t *testing.T) {
 
 func TestForceReleaseLock_WorkspacePath_NoLock(t *testing.T) {
 	// forceReleaseLock via workspace path when no lock exists should return error
+	// Uses setupLockWorkspaceConfig which calls t.Setenv, so not parallel-safe.
 	wsDir := t.TempDir()
 	repoDir := filepath.Join(wsDir, "repo1")
 	if err := os.MkdirAll(repoDir, 0755); err != nil {
@@ -979,6 +958,7 @@ func TestForceReleaseLock_WorkspacePath_NoLock(t *testing.T) {
 func TestAnalyzeTaskCompletion_WorkspaceMode(t *testing.T) {
 	// In workspace mode, analyzeTaskCompletion should search git logs across
 	// all repos discovered by the resolver, aggregating with repo name labels.
+	// Uses defaultResolver (global) and DiscoverWorktrees (global deps), so not parallel-safe.
 	resetDefaultTracker()
 	t.Cleanup(resetDefaultTracker)
 
@@ -1011,6 +991,9 @@ func TestAnalyzeTaskCompletion_WorkspaceMode(t *testing.T) {
 	tracker := NewMockTracker()
 	tracker.GetIssueTextResult = "Task: Cross-repo feature\nStatus: in_progress\n"
 	setDefaultTracker(tracker)
+	origTracker := defaultDeps.Tracker
+	defaultDeps.Tracker = tracker
+	t.Cleanup(func() { defaultDeps.Tracker = origTracker })
 
 	mock := NewCommandMock(t, []CommandStub{
 		// DiscoverWorktrees calls GetCurrentBranch for each repo
@@ -1042,7 +1025,7 @@ func TestAnalyzeTaskCompletion_WorkspaceMode(t *testing.T) {
 	})
 	mock.Install()
 
-	completed, reason := analyzeTaskCompletion("/test/worktree", "task-ws1")
+	completed, reason := analyzeTaskCompletion(defaultDeps, "/test/worktree", "task-ws1")
 
 	if !completed {
 		t.Error("expected completed=true in workspace mode")
@@ -1055,6 +1038,7 @@ func TestAnalyzeTaskCompletion_WorkspaceMode(t *testing.T) {
 func TestAnalyzeTaskCompletion_WorkspaceMode_NoCommitsInAnyRepo(t *testing.T) {
 	// When workspace mode finds no commits across any repo, the fallback
 	// single-repo search also runs. Either way, claude receives empty git logs.
+	// Uses defaultResolver (global) and DiscoverWorktrees (global deps), so not parallel-safe.
 	resetDefaultTracker()
 	t.Cleanup(resetDefaultTracker)
 
@@ -1084,6 +1068,9 @@ func TestAnalyzeTaskCompletion_WorkspaceMode_NoCommitsInAnyRepo(t *testing.T) {
 	tracker := NewMockTracker()
 	tracker.GetIssueTextResult = "Task: Nothing done\nStatus: in_progress\n"
 	setDefaultTracker(tracker)
+	origTracker := defaultDeps.Tracker
+	defaultDeps.Tracker = tracker
+	t.Cleanup(func() { defaultDeps.Tracker = origTracker })
 
 	mock := NewCommandMock(t, []CommandStub{
 		// DiscoverWorktrees: GetCurrentBranch for repo1
@@ -1107,7 +1094,7 @@ func TestAnalyzeTaskCompletion_WorkspaceMode_NoCommitsInAnyRepo(t *testing.T) {
 	})
 	mock.Install()
 
-	completed, _ := analyzeTaskCompletion("/test/worktree", "task-empty")
+	completed, _ := analyzeTaskCompletion(defaultDeps, "/test/worktree", "task-empty")
 
 	if completed {
 		t.Error("expected completed=false when no commits found in workspace")
@@ -1117,6 +1104,7 @@ func TestAnalyzeTaskCompletion_WorkspaceMode_NoCommitsInAnyRepo(t *testing.T) {
 func TestAnalyzeTaskCompletion_WorkspaceMode_PartialResults(t *testing.T) {
 	// Only some repos have matching commits; the aggregated output
 	// should include only those repos with results.
+	// Uses defaultResolver (global) and DiscoverWorktrees (global deps), so not parallel-safe.
 	resetDefaultTracker()
 	t.Cleanup(resetDefaultTracker)
 
@@ -1149,6 +1137,9 @@ func TestAnalyzeTaskCompletion_WorkspaceMode_PartialResults(t *testing.T) {
 	tracker := NewMockTracker()
 	tracker.GetIssueTextResult = "Task: Partial work\nStatus: in_progress\n"
 	setDefaultTracker(tracker)
+	origTracker := defaultDeps.Tracker
+	defaultDeps.Tracker = tracker
+	t.Cleanup(func() { defaultDeps.Tracker = origTracker })
 
 	mock := NewCommandMock(t, []CommandStub{
 		// DiscoverWorktrees: GetCurrentBranch for each repo
@@ -1180,7 +1171,7 @@ func TestAnalyzeTaskCompletion_WorkspaceMode_PartialResults(t *testing.T) {
 	})
 	mock.Install()
 
-	completed, reason := analyzeTaskCompletion("/test/worktree", "task-partial")
+	completed, reason := analyzeTaskCompletion(defaultDeps, "/test/worktree", "task-partial")
 
 	if completed {
 		t.Error("expected completed=false")
@@ -1192,6 +1183,7 @@ func TestAnalyzeTaskCompletion_WorkspaceMode_PartialResults(t *testing.T) {
 
 func TestCleanUntrackedFiles_WorkspaceMode(t *testing.T) {
 	// In workspace mode, cleanUntrackedFiles should iterate over all repos.
+	// Uses defaultResolver (global) and DiscoverWorktrees (global deps), so not parallel-safe.
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
 
@@ -1236,11 +1228,12 @@ func TestCleanUntrackedFiles_WorkspaceMode(t *testing.T) {
 	})
 	outputMock.Install()
 
-	cleanUntrackedFiles("/some/path", true)
+	cleanUntrackedFiles(defaultDeps, "/some/path", true)
 }
 
 func TestCleanUntrackedFiles_WorkspaceMode_NoUntrackedInAnyRepo(t *testing.T) {
 	// No untracked files in any workspace repo -- GitClean should not be called.
+	// Uses defaultResolver (global) and DiscoverWorktrees (global deps), so not parallel-safe.
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
 
@@ -1278,13 +1271,14 @@ func TestCleanUntrackedFiles_WorkspaceMode_NoUntrackedInAnyRepo(t *testing.T) {
 	mock.Install()
 
 	// No OutputCommandMock needed -- GitClean should not be called
-	cleanUntrackedFiles("/some/path", true)
+	cleanUntrackedFiles(defaultDeps, "/some/path", true)
 }
 
 func TestCleanUntrackedFiles_WorkspaceMode_PartialUntracked(t *testing.T) {
 	// Only one repo has untracked files. Both repos go through the dry-run
 	// check, but both have GitClean called when any repo has untracked files.
 	// However, the code below tests that the workspace iterates all repos.
+	// Uses defaultResolver (global) and DiscoverWorktrees (global deps), so not parallel-safe.
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
 
@@ -1328,7 +1322,7 @@ func TestCleanUntrackedFiles_WorkspaceMode_PartialUntracked(t *testing.T) {
 	})
 	outputMock.Install()
 
-	cleanUntrackedFiles("/some/path", true)
+	cleanUntrackedFiles(defaultDeps, "/some/path", true)
 }
 
 func TestRecoverWorktree_WorkspaceStaleLock(t *testing.T) {
@@ -1395,15 +1389,13 @@ func TestRecoverWorktree_WorkspaceStaleLock(t *testing.T) {
 // ============================================================================
 
 func TestAnalyzeTaskCompletion_TruncatesLongTaskDetails(t *testing.T) {
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
+	t.Parallel()
+	deps, _, _, _, tracker := NewTestDeps(t)
 
 	// Generate task details output exceeding 4000 chars
 	longTaskOutput := strings.Repeat("A", 5000)
 
-	tracker := NewMockTracker()
 	tracker.GetIssueTextResult = longTaskOutput
-	setDefaultTracker(tracker)
 
 	mock := NewCommandMock(t, []CommandStub{
 		{
@@ -1420,9 +1412,9 @@ func TestAnalyzeTaskCompletion_TruncatesLongTaskDetails(t *testing.T) {
 			Err:    nil,
 		},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	analyzeTaskCompletion("/test/worktree", "task-trunc1")
+	analyzeTaskCompletion(deps, "/test/worktree", "task-trunc1")
 
 	// Inspect the prompt passed to claude (2nd call, index 1 — bd show is now via MockIssueTracker)
 	calls := mock.Calls()
@@ -1455,15 +1447,13 @@ func TestAnalyzeTaskCompletion_TruncatesLongTaskDetails(t *testing.T) {
 }
 
 func TestAnalyzeTaskCompletion_TruncatesLongGitOutput(t *testing.T) {
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
+	t.Parallel()
+	deps, _, _, _, tracker := NewTestDeps(t)
 
 	// Generate git log output exceeding 4000 chars
 	longGitOutput := strings.Repeat("B", 5000)
 
-	tracker := NewMockTracker()
 	tracker.GetIssueTextResult = "Task: Short task\n"
-	setDefaultTracker(tracker)
 
 	mock := NewCommandMock(t, []CommandStub{
 		{
@@ -1480,9 +1470,9 @@ func TestAnalyzeTaskCompletion_TruncatesLongGitOutput(t *testing.T) {
 			Err:    nil,
 		},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	analyzeTaskCompletion("/test/worktree", "task-trunc2")
+	analyzeTaskCompletion(deps, "/test/worktree", "task-trunc2")
 
 	// Inspect the prompt passed to claude (2nd call, index 1)
 	calls := mock.Calls()
@@ -1510,12 +1500,10 @@ func TestAnalyzeTaskCompletion_TruncatesLongGitOutput(t *testing.T) {
 }
 
 func TestAnalyzeTaskCompletion_XMLDelimitersInPrompt(t *testing.T) {
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
+	t.Parallel()
+	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker := NewMockTracker()
 	tracker.GetIssueTextResult = "Task: XML delimiter test\nStatus: in_progress\n"
-	setDefaultTracker(tracker)
 
 	mock := NewCommandMock(t, []CommandStub{
 		{
@@ -1532,9 +1520,9 @@ func TestAnalyzeTaskCompletion_XMLDelimitersInPrompt(t *testing.T) {
 			Err:    nil,
 		},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	analyzeTaskCompletion("/test/worktree", "task-xml")
+	analyzeTaskCompletion(deps, "/test/worktree", "task-xml")
 
 	// Inspect the prompt passed to claude (2nd call, index 1)
 	calls := mock.Calls()
@@ -1591,12 +1579,10 @@ func TestAnalyzeTaskCompletion_XMLDelimitersInPrompt(t *testing.T) {
 }
 
 func TestAnalyzeTaskCompletion_AntiInjectionInstruction(t *testing.T) {
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
+	t.Parallel()
+	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker := NewMockTracker()
 	tracker.GetIssueTextResult = "Task: Anti-injection test\n"
-	setDefaultTracker(tracker)
 
 	mock := NewCommandMock(t, []CommandStub{
 		{
@@ -1613,9 +1599,9 @@ func TestAnalyzeTaskCompletion_AntiInjectionInstruction(t *testing.T) {
 			Err:    nil,
 		},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	analyzeTaskCompletion("/test/worktree", "task-inject")
+	analyzeTaskCompletion(deps, "/test/worktree", "task-inject")
 
 	// Inspect the prompt passed to claude (2nd call, index 1)
 	calls := mock.Calls()

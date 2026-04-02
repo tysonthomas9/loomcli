@@ -60,7 +60,7 @@ Examples:
 		}
 		return nil
 	},
-	Run: runPull,
+	RunE: runPull,
 }
 
 func init() {
@@ -69,9 +69,13 @@ func init() {
 	rootCmd.AddCommand(pullCmd)
 }
 
-func runPull(cmd *cobra.Command, args []string) {
+func runPull(cmd *cobra.Command, args []string) error {
+	deps := GetDeps(cmd)
+	all, _ := cmd.Flags().GetBool("all")
+	ws, _ := cmd.Flags().GetString("workspace")
+
 	if IsWorkspaceMode() {
-		if pullAll && pullWorkspace != "" {
+		if all && ws != "" {
 			fmt.Fprintln(os.Stderr, "Error: --all and --workspace are mutually exclusive")
 			os.Exit(1)
 		}
@@ -79,11 +83,11 @@ func runPull(cmd *cobra.Command, args []string) {
 		sourceBranch := ""
 		worktreeName := ""
 
-		if pullAll {
+		if all {
 			if len(args) == 1 {
 				sourceBranch = args[0]
 			}
-			pullAllWorkspaces(sourceBranch)
+			pullAllWorkspaces(deps, sourceBranch)
 		} else {
 			worktreeName = args[0]
 			if len(args) == 2 {
@@ -96,7 +100,7 @@ func runPull(cmd *cobra.Command, args []string) {
 				os.Exit(1)
 			}
 
-			wsName := pullWorkspace
+			wsName := ws
 			if wsName != "" {
 				if err := resolver.SetWorkspace(wsName); err != nil {
 					available := resolver.WorkspaceNames()
@@ -105,20 +109,21 @@ func runPull(cmd *cobra.Command, args []string) {
 				}
 			}
 
-			pullWorkspaceRepo(resolver, worktreeName, sourceBranch)
+			pullWorkspaceRepo(deps, resolver, worktreeName, sourceBranch)
 		}
-		return
+		return nil
 	}
 
 	// Legacy mode
-	if pullAll {
-		pullAllWorktrees(args[0])
+	if all {
+		pullAllWorktrees(deps, args[0])
 	} else {
-		pullWorktree(args[0], args[1])
+		pullWorktree(deps, args[0], args[1])
 	}
+	return nil
 }
 
-func pullAllWorkspaces(sourceBranch string) {
+func pullAllWorkspaces(deps *Deps, sourceBranch string) {
 	resolver, err := NewResolver()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating resolver: %v\n", err)
@@ -154,7 +159,7 @@ func pullAllWorkspaces(sourceBranch string) {
 			continue
 		}
 
-		pullWorkspaceWorktrees(worktrees, sourceBranch)
+		pullWorkspaceWorktrees(deps, worktrees, sourceBranch)
 		fmt.Println("")
 	}
 
@@ -163,7 +168,7 @@ func pullAllWorkspaces(sourceBranch string) {
 	fmt.Println("=========================================")
 }
 
-func pullWorkspaceRepo(resolver *Resolver, worktreeName, sourceBranch string) {
+func pullWorkspaceRepo(deps *Deps, resolver *Resolver, worktreeName, sourceBranch string) {
 	// Resolve the specific worktree path
 	worktreePath, err := resolver.ResolveWorktreePath(worktreeName)
 	if err != nil {
@@ -192,7 +197,7 @@ func pullWorkspaceRepo(resolver *Resolver, worktreeName, sourceBranch string) {
 		if source == "" {
 			source = "main"
 		}
-		pullWorktree(worktreeName, source)
+		pullWorktree(deps, worktreeName, source)
 		return
 	}
 
@@ -211,14 +216,14 @@ func pullWorkspaceRepo(resolver *Resolver, worktreeName, sourceBranch string) {
 	fmt.Println("=========================================")
 	fmt.Println("")
 
-	err = pullRepoWorktree(matched.Path, matched.Branch, source, remote)
+	err = pullRepoWorktree(deps, matched.Path, matched.Branch, source, remote)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func pullWorkspaceWorktrees(worktrees []WorktreeInfo, sourceBranch string) {
+func pullWorkspaceWorktrees(deps *Deps, worktrees []WorktreeInfo, sourceBranch string) {
 	type result struct {
 		repo    string
 		success bool
@@ -241,7 +246,7 @@ func pullWorkspaceWorktrees(worktrees []WorktreeInfo, sourceBranch string) {
 
 		remote := wt.Repo.Remote
 
-		err := pullRepoWorktree(wt.Path, wt.Branch, source, remote)
+		err := pullRepoWorktree(deps, wt.Path, wt.Branch, source, remote)
 		if err != nil {
 			results = append(results, result{repo: wt.Name, success: false, err: err.Error()})
 		} else {
@@ -261,7 +266,7 @@ func pullWorkspaceWorktrees(worktrees []WorktreeInfo, sourceBranch string) {
 	}
 }
 
-func pullRepoWorktree(repoPath, currentBranch, sourceBranch, remote string) error {
+func pullRepoWorktree(deps *Deps, repoPath, currentBranch, sourceBranch, remote string) error {
 	r := resolveRemote(remote)
 
 	fmt.Println("=========================================")
@@ -269,15 +274,15 @@ func pullRepoWorktree(repoPath, currentBranch, sourceBranch, remote string) erro
 	fmt.Println("=========================================")
 
 	// Fetch latest
-	if err := GitFetchRemote(repoPath, remote); err != nil {
+	if err := gitFetchRemote(deps, repoPath, remote); err != nil {
 		return fmt.Errorf("fetching: %v", err)
 	}
 
 	// Attempt merge
 	mergeMsg := fmt.Sprintf("Pull from %s\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", sourceBranch)
-	if err := GitMergeRemote(repoPath, remote, sourceBranch, mergeMsg); err != nil {
+	if err := gitMergeRemote(deps, repoPath, remote, sourceBranch, mergeMsg); err != nil {
 		// Check for conflicts
-		conflicts, conflictErr := GetConflictedFiles(repoPath)
+		conflicts, conflictErr := getConflictedFilesDeps(deps, repoPath)
 		if conflictErr != nil || len(conflicts) == 0 {
 			return fmt.Errorf("merge failed: %v", err)
 		}
@@ -292,7 +297,7 @@ func pullRepoWorktree(repoPath, currentBranch, sourceBranch, remote string) erro
 		fmt.Println("")
 
 		// Launch Claude for conflict resolution
-		if err := InvokeAgentForConflicts(repoPath, sourceBranch, currentBranch, conflicts); err != nil {
+		if err := invokeAgentForConflictsDeps(deps, repoPath, sourceBranch, currentBranch, conflicts); err != nil {
 			return fmt.Errorf("resolving conflicts: %v", err)
 		}
 		return nil
@@ -301,7 +306,7 @@ func pullRepoWorktree(repoPath, currentBranch, sourceBranch, remote string) erro
 	fmt.Println("✓ Pull completed successfully (no conflicts)")
 
 	// Push
-	if err := GitPushRemote(repoPath, remote, currentBranch); err != nil {
+	if err := gitPushRemote(deps, repoPath, remote, currentBranch); err != nil {
 		return fmt.Errorf("pushing: %v", err)
 	}
 
@@ -316,7 +321,7 @@ func sourceBranchDisplay(source string) string {
 	return source
 }
 
-func pullAllWorktrees(sourceBranch string) {
+func pullAllWorktrees(deps *Deps, sourceBranch string) {
 	fmt.Println("=========================================")
 	fmt.Printf("Pulling all worktrees <- %s\n", sourceBranch)
 	fmt.Println("=========================================")
@@ -335,7 +340,7 @@ func pullAllWorktrees(sourceBranch string) {
 
 	// Pull into each worktree
 	for _, wt := range worktrees {
-		pullWorktree(wt.Name, sourceBranch)
+		pullWorktree(deps, wt.Name, sourceBranch)
 		fmt.Println("")
 	}
 
@@ -344,7 +349,7 @@ func pullAllWorktrees(sourceBranch string) {
 	fmt.Println("=========================================")
 }
 
-func pullWorktree(worktreeName, sourceBranch string) {
+func pullWorktree(deps *Deps, worktreeName, sourceBranch string) {
 	worktreePath, err := ResolveWorktreePath(worktreeName)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -356,23 +361,23 @@ func pullWorktree(worktreeName, sourceBranch string) {
 	fmt.Println("=========================================")
 
 	// Get current branch
-	currentBranch, err := GetCurrentBranch(worktreePath)
+	currentBranch, err := getCurrentBranchDeps(deps, worktreePath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error getting current branch: %v\n", err)
 		return
 	}
 
 	// Fetch latest
-	if err := GitFetch(worktreePath); err != nil {
+	if err := gitFetch(deps, worktreePath); err != nil {
 		fmt.Fprintf(os.Stderr, "Error fetching: %v\n", err)
 		return
 	}
 
 	// Attempt merge
 	mergeMsg := fmt.Sprintf("Pull from %s\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", sourceBranch)
-	if err := GitMergeOrigin(worktreePath, sourceBranch, mergeMsg); err != nil {
+	if err := gitMergeOrigin(deps, worktreePath, sourceBranch, mergeMsg); err != nil {
 		// Check for conflicts
-		conflicts, conflictErr := GetConflictedFiles(worktreePath)
+		conflicts, conflictErr := getConflictedFilesDeps(deps, worktreePath)
 		if conflictErr != nil || len(conflicts) == 0 {
 			fmt.Fprintf(os.Stderr, "Pull failed: %v\n", err)
 			return
@@ -388,7 +393,7 @@ func pullWorktree(worktreeName, sourceBranch string) {
 		fmt.Println("")
 
 		// Launch Claude for conflict resolution
-		if err := InvokeAgentForConflicts(worktreePath, sourceBranch, currentBranch, conflicts); err != nil {
+		if err := invokeAgentForConflictsDeps(deps, worktreePath, sourceBranch, currentBranch, conflicts); err != nil {
 			fmt.Fprintf(os.Stderr, "Error resolving conflicts: %v\n", err)
 			return
 		}
@@ -398,7 +403,7 @@ func pullWorktree(worktreeName, sourceBranch string) {
 	fmt.Println("✓ Pull completed successfully (no conflicts)")
 
 	// Push
-	if err := GitPush(worktreePath, currentBranch); err != nil {
+	if err := gitPush(deps, worktreePath, currentBranch); err != nil {
 		fmt.Fprintf(os.Stderr, "Error pushing: %v\n", err)
 		return
 	}

@@ -10,6 +10,7 @@ import (
 )
 
 func TestParseNames(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input    string
 		expected []string
@@ -31,6 +32,7 @@ func TestParseNames(t *testing.T) {
 }
 
 func TestFilterExisting(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		names    []string
 		existing []string
@@ -51,6 +53,7 @@ func TestFilterExisting(t *testing.T) {
 }
 
 func TestGetFirstName(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		names    []string
 		expected string
@@ -70,6 +73,7 @@ func TestGetFirstName(t *testing.T) {
 }
 
 func TestListExistingWorktrees(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
 
@@ -111,6 +115,7 @@ func TestListExistingWorktrees(t *testing.T) {
 }
 
 func TestListExistingWorktrees_EmptyDir(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	got := listExistingWorktrees(tmpDir)
 	if len(got) != 0 {
@@ -119,6 +124,7 @@ func TestListExistingWorktrees_EmptyDir(t *testing.T) {
 }
 
 func TestListExistingWorktrees_NonexistentDir(t *testing.T) {
+	t.Parallel()
 	got := listExistingWorktrees("/nonexistent/path/12345")
 	if got != nil {
 		t.Errorf("listExistingWorktrees() on nonexistent = %v, want nil", got)
@@ -126,42 +132,48 @@ func TestListExistingWorktrees_NonexistentDir(t *testing.T) {
 }
 
 func TestCheckPrerequisites_NotGitRepo(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"rev-parse", "--is-inside-work-tree"}, Err: errors.New("not a git repo")},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	result := checkPrerequisites()
+	result := checkPrerequisites(deps)
 	if result {
 		t.Error("checkPrerequisites() should return false when not in git repo")
 	}
 }
 
 func TestCheckPrerequisites_NoBd(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"rev-parse", "--is-inside-work-tree"}, Stdout: "true"},
 		{Name: "git", Args: []string{"rev-parse", "--git-common-dir"}, Stdout: ".git"},
 		{Name: "git", Args: []string{"rev-parse", "--git-dir"}, Stdout: ".git"},
 		{Name: "bd", Args: []string{"--version"}, Err: errors.New("bd not found")},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	result := checkPrerequisites()
+	result := checkPrerequisites(deps)
 	if result {
 		t.Error("checkPrerequisites() should return false when bd not installed")
 	}
 }
 
 func TestCheckPrerequisites_Success(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"rev-parse", "--is-inside-work-tree"}, Stdout: "true"},
 		{Name: "git", Args: []string{"rev-parse", "--git-common-dir"}, Stdout: ".git"},
 		{Name: "git", Args: []string{"rev-parse", "--git-dir"}, Stdout: ".git"},
 		{Name: "bd", Args: []string{"--version"}, Stdout: "beads v1.0.0"},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	result := checkPrerequisites()
+	result := checkPrerequisites(deps)
 	if !result {
 		t.Error("checkPrerequisites() should return true when all prerequisites met")
 	}
@@ -178,8 +190,10 @@ func TestInitBeads_AlreadyInitialized(t *testing.T) {
 	// Create .beads directory
 	os.MkdirAll(".beads", 0755)
 
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// No mock needed - should skip without running any commands
-	result := initBeads()
+	result := initBeads(deps)
 	if !result {
 		t.Error("initBeads() should return true when already initialized")
 	}
@@ -201,18 +215,20 @@ func TestInitBeads_Initialize(t *testing.T) {
 	initYes = true
 	defer func() { initYes = origYes }()
 
+	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "bd", Args: []string{"init"}, Stdout: "Initialized beads"},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	result := initBeads()
+	result := initBeads(deps)
 	if !result {
 		t.Error("initBeads() should return true after successful init")
 	}
 }
 
 func TestCreateWorktreesDir_AlreadyExists(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	result := createWorktreesDir(tmpDir)
 	if !result {
@@ -221,6 +237,7 @@ func TestCreateWorktreesDir_AlreadyExists(t *testing.T) {
 }
 
 func TestCreateWorktreesDir_NotADirectory(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "testfile")
 	os.WriteFile(filePath, []byte{}, 0644)
@@ -256,66 +273,74 @@ func TestCreateWorktreesDir_Create(t *testing.T) {
 }
 
 func TestCreateSingleWorktree_Success(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 
+	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"worktree", "add", filepath.Join(tmpDir, "falcon"), "-b", "falcon"}, Stdout: "Created worktree"},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	result := createSingleWorktree(tmpDir, "falcon")
+	result := createSingleWorktree(deps, tmpDir, "falcon")
 	if !result {
 		t.Error("createSingleWorktree() should return true on success")
 	}
 }
 
 func TestCreateSingleWorktree_BranchExists(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	wtPath := filepath.Join(tmpDir, "falcon")
 
+	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewCommandMock(t, []CommandStub{
 		// First attempt fails with branch exists
 		{Name: "git", Args: []string{"worktree", "add", wtPath, "-b", "falcon"}, Stderr: "branch already exists", Err: errors.New("exit 1")},
 		// Second attempt without -b
 		{Name: "git", Args: []string{"worktree", "add", wtPath, "falcon"}, Stdout: "Created worktree"},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	result := createSingleWorktree(tmpDir, "falcon")
+	result := createSingleWorktree(deps, tmpDir, "falcon")
 	if !result {
 		t.Error("createSingleWorktree() should retry without -b when branch exists")
 	}
 }
 
 func TestCreateSingleWorktree_AlreadyExists(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	wtPath := filepath.Join(tmpDir, "falcon")
 
 	// Both git worktree add attempts fail with "already exists" / "already a worktree"
+	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"worktree", "add", wtPath, "-b", "falcon"}, Stderr: "fatal: 'falcon' already exists", Err: errors.New("exit 1")},
 		{Name: "git", Args: []string{"worktree", "add", wtPath, "falcon"}, Stderr: "fatal: '/path' is already a worktree", Err: errors.New("exit 1")},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	result := createSingleWorktree(tmpDir, "falcon")
+	result := createSingleWorktree(deps, tmpDir, "falcon")
 	if result {
 		t.Error("createSingleWorktree() should return false when worktree already exists")
 	}
 }
 
 func TestCreateSingleWorktree_AlreadyCheckedOut(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	wtPath := filepath.Join(tmpDir, "falcon")
 
 	// Both git worktree add attempts fail with "already checked out" (alternate git message)
+	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"worktree", "add", wtPath, "-b", "falcon"}, Stderr: "fatal: 'falcon' already exists", Err: errors.New("exit 1")},
 		{Name: "git", Args: []string{"worktree", "add", wtPath, "falcon"}, Stderr: "fatal: 'falcon' is already checked out at '/other/worktree'", Err: errors.New("exit 1")},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	result := createSingleWorktree(tmpDir, "falcon")
+	result := createSingleWorktree(deps, tmpDir, "falcon")
 	if result {
 		t.Error("createSingleWorktree() should return false when branch is already checked out")
 	}
@@ -341,6 +366,7 @@ func TestGetWorktreesDirForInit(t *testing.T) {
 }
 
 func TestDefaultAgentNames(t *testing.T) {
+	t.Parallel()
 	// Verify defaults are set correctly
 	if len(defaultAgentNames) != 2 {
 		t.Errorf("defaultAgentNames has %d items, want 2", len(defaultAgentNames))
@@ -354,6 +380,7 @@ func TestDefaultAgentNames(t *testing.T) {
 }
 
 func TestSuggestedAgentNames(t *testing.T) {
+	t.Parallel()
 	// Verify suggested names list is reasonable
 	if len(suggestedAgentNames) < 5 {
 		t.Errorf("suggestedAgentNames has %d items, want at least 5", len(suggestedAgentNames))
@@ -491,13 +518,14 @@ func TestCreateWorktrees_NonInteractive_NoExisting(t *testing.T) {
 	initNames = ""
 	defer func() { initYes = origYes; initNames = origNames }()
 
+	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"worktree", "add", filepath.Join(worktreesDir, "falcon"), "-b", "falcon"}, Stdout: "Created"},
 		{Name: "git", Args: []string{"worktree", "add", filepath.Join(worktreesDir, "nova"), "-b", "nova"}, Stdout: "Created"},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	names := createWorktrees(worktreesDir)
+	names := createWorktrees(deps, worktreesDir)
 	if len(names) != 2 {
 		t.Fatalf("createWorktrees returned %d names, want 2", len(names))
 	}
@@ -521,12 +549,13 @@ func TestCreateWorktrees_NonInteractive_WithExisting(t *testing.T) {
 	defer func() { initYes = origYes; initNames = origNames }()
 
 	// Only "nova" should be created (falcon already exists and is filtered)
+	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"worktree", "add", filepath.Join(worktreesDir, "nova"), "-b", "nova"}, Stdout: "Created"},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	names := createWorktrees(worktreesDir)
+	names := createWorktrees(deps, worktreesDir)
 	if len(names) != 2 {
 		t.Fatalf("createWorktrees returned %d names, want 2 (1 existing + 1 created)", len(names))
 	}
@@ -546,13 +575,14 @@ func TestCreateWorktrees_NonInteractive_CustomNames(t *testing.T) {
 	initNames = "alpha,beta"
 	defer func() { initYes = origYes; initNames = origNames }()
 
+	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"worktree", "add", filepath.Join(worktreesDir, "alpha"), "-b", "alpha"}, Stdout: "Created"},
 		{Name: "git", Args: []string{"worktree", "add", filepath.Join(worktreesDir, "beta"), "-b", "beta"}, Stdout: "Created"},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	names := createWorktrees(worktreesDir)
+	names := createWorktrees(deps, worktreesDir)
 	if len(names) != 2 {
 		t.Fatalf("createWorktrees returned %d names, want 2", len(names))
 	}
@@ -578,22 +608,26 @@ func TestCreateWorktrees_NonInteractive_NoneToCreate(t *testing.T) {
 	defer func() { initYes = origYes; initNames = origNames }()
 
 	// No commands should be called since all names already exist
+	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewCommandMock(t, []CommandStub{})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	names := createWorktrees(worktreesDir)
+	names := createWorktrees(deps, worktreesDir)
 	if len(names) != 2 {
 		t.Fatalf("createWorktrees returned %d names, want 2 existing", len(names))
 	}
 }
 
 func TestCreateSingleWorktree_PathTraversal(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
+	deps, _, _, _, _ := NewTestDeps(t)
 
 	traversalNames := []string{"..", "../../etc", "../secret"}
 	for _, name := range traversalNames {
 		t.Run(name, func(t *testing.T) {
-			result := createSingleWorktree(tmpDir, name)
+			t.Parallel()
+			result := createSingleWorktree(deps, tmpDir, name)
 			if result {
 				t.Errorf("createSingleWorktree(%q, %q) should return false for path traversal", tmpDir, name)
 			}
@@ -602,6 +636,7 @@ func TestCreateSingleWorktree_PathTraversal(t *testing.T) {
 }
 
 func TestValidateNewWorktreeName(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		wantErr bool
@@ -649,6 +684,7 @@ func TestValidateNewWorktreeName(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			err := validateNewWorktreeName(tc.name)
 			if (err != nil) != tc.wantErr {
 				t.Errorf("validateNewWorktreeName(%q) error = %v, wantErr %v", tc.name, err, tc.wantErr)
@@ -661,16 +697,19 @@ func TestValidateNewWorktreeName(t *testing.T) {
 }
 
 func TestCreateSingleWorktree_InvalidName(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 
 	// No command mock stubs — if git were called, the mock would panic
+	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewCommandMock(t, []CommandStub{})
-	mock.Install()
+	mock.InstallOn(deps)
 
 	invalidNames := []string{"--orphan", "-flag", ".", "a b", "a/b"}
 	for _, name := range invalidNames {
 		t.Run(name, func(t *testing.T) {
-			result := createSingleWorktree(tmpDir, name)
+			t.Parallel()
+			result := createSingleWorktree(deps, tmpDir, name)
 			if result {
 				t.Errorf("createSingleWorktree(%q, %q) should return false for invalid name", tmpDir, name)
 			}
@@ -690,13 +729,14 @@ func TestCreateWorktrees_SkipsInvalidNames(t *testing.T) {
 	defer func() { initYes = origYes; initNames = origNames }()
 
 	// Only "valid" and "ok" should trigger git commands; "--evil" is skipped
+	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"worktree", "add", filepath.Join(worktreesDir, "valid"), "-b", "valid"}, Stdout: "Created"},
 		{Name: "git", Args: []string{"worktree", "add", filepath.Join(worktreesDir, "ok"), "-b", "ok"}, Stdout: "Created"},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	names := createWorktrees(worktreesDir)
+	names := createWorktrees(deps, worktreesDir)
 	// Should have 2 created names (valid, ok) — "--evil" skipped
 	if len(names) != 2 {
 		t.Fatalf("createWorktrees returned %d names, want 2", len(names))
@@ -709,6 +749,7 @@ func TestCreateWorktrees_SkipsInvalidNames(t *testing.T) {
 // --- showSummary tests ---
 
 func TestShowSummary_MultipleNames(t *testing.T) {
+	// Not parallel: captures os.Stdout which is a global.
 	// Capture stdout
 	origStdout := os.Stdout
 	r, w, _ := os.Pipe()
@@ -738,6 +779,7 @@ func TestShowSummary_MultipleNames(t *testing.T) {
 }
 
 func TestShowSummary_EmptyNames(t *testing.T) {
+	// Not parallel: captures os.Stdout which is a global.
 	origStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
@@ -773,48 +815,53 @@ func TestInitBeads_Failure(t *testing.T) {
 	initYes = true
 	defer func() { initYes = origYes }()
 
+	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "bd", Args: []string{"init"}, Stderr: "failed to init", Err: errors.New("exit 1")},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	result := initBeads()
+	result := initBeads(deps)
 	if result {
 		t.Error("initBeads() should return false when bd init fails")
 	}
 }
 
 func TestCreateSingleWorktree_RetryFails(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	wtPath := filepath.Join(tmpDir, "falcon")
 
+	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"worktree", "add", wtPath, "-b", "falcon"}, Stderr: "branch already exists", Err: errors.New("exit 1")},
 		{Name: "git", Args: []string{"worktree", "add", wtPath, "falcon"}, Stderr: "worktree locked", Err: errors.New("exit 1")},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	result := createSingleWorktree(tmpDir, "falcon")
+	result := createSingleWorktree(deps, tmpDir, "falcon")
 	if result {
 		t.Error("createSingleWorktree() should return false when retry also fails")
 	}
 }
 
 func TestCheckPrerequisites_InsideWorktree(t *testing.T) {
+	// Not parallel: captures os.Stdout which is a global.
+	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"rev-parse", "--is-inside-work-tree"}, Stdout: "true"},
 		{Name: "git", Args: []string{"rev-parse", "--git-common-dir"}, Stdout: "/repo/.git"},
 		{Name: "git", Args: []string{"rev-parse", "--git-dir"}, Stdout: "/repo/.git/worktrees/falcon"},
 		{Name: "bd", Args: []string{"--version"}, Stdout: "beads v1.0.0"},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
 	// Capture stderr to verify warning is printed
 	origStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	result := checkPrerequisites()
+	result := checkPrerequisites(deps)
 
 	w.Close()
 	os.Stdout = origStdout
@@ -834,6 +881,7 @@ func TestCheckPrerequisites_InsideWorktree(t *testing.T) {
 // --- runInitWorkspace tests ---
 
 func TestRunInitWorkspace_NoConfig(t *testing.T) {
+	// Not parallel: uses t.Setenv.
 	// Set up empty config directory (no config.yaml)
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 
@@ -863,6 +911,7 @@ func TestRunInitWorkspace_NoConfig(t *testing.T) {
 }
 
 func TestRunInitWorkspace_WorkspaceNotFound(t *testing.T) {
+	// Not parallel: uses setupWorkspaceConfig which calls t.Setenv.
 	// Set up config with workspaces, but not the one we're looking for
 	cfg := &LoomConfig{
 		DefaultWorkspace: "existing",
@@ -913,6 +962,7 @@ func TestRunInitWorkspace_WorkspaceNotFound(t *testing.T) {
 }
 
 func TestRunInitWorkspace_WorkspaceExists(t *testing.T) {
+	// Not parallel: uses setupWorkspaceConfig which calls t.Setenv.
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
 
@@ -955,6 +1005,7 @@ func TestRunInitWorkspace_WorkspaceExists(t *testing.T) {
 }
 
 func TestShowWorkspaceSummary(t *testing.T) {
+	// Not parallel: captures os.Stdout which is a global.
 	ws := WorkspaceConfig{
 		Path: "/home/user/myworkspace",
 		Repos: []RepoConfig{
@@ -996,6 +1047,7 @@ func TestShowWorkspaceSummary(t *testing.T) {
 }
 
 func TestShowWorkspaceSummary_NoRepos(t *testing.T) {
+	// Not parallel: captures os.Stdout which is a global.
 	ws := WorkspaceConfig{
 		Path:  "/home/user/emptyws",
 		Repos: []RepoConfig{},

@@ -12,15 +12,19 @@ import (
 )
 
 func TestCheckGit(t *testing.T) {
+	t.Parallel()
+
 	t.Run("git found with good version", func(t *testing.T) {
-		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
+		deps.Exec = &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			if name == "git" && len(args) > 0 && args[0] == "--version" {
 				return CommandResult{Stdout: "git version 2.44.0\n"}
 			}
 			return CommandResult{Err: fmt.Errorf("unexpected: %s %v", name, args)}
-		}})
+		}}
 
-		result := checkGit()
+		result := checkGit(deps)
 		if result.Status != StatusPass {
 			t.Errorf("expected pass, got %v: %s", result.Status, result.Summary)
 		}
@@ -30,44 +34,52 @@ func TestCheckGit(t *testing.T) {
 	})
 
 	t.Run("git not found", func(t *testing.T) {
-		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
+		deps.Exec = &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			return CommandResult{Err: fmt.Errorf("exec: not found")}
-		}})
+		}}
 
-		result := checkGit()
+		result := checkGit(deps)
 		if result.Status != StatusFail {
 			t.Errorf("expected fail, got %v", result.Status)
 		}
 	})
 
 	t.Run("git version too old", func(t *testing.T) {
-		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
+		deps.Exec = &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			return CommandResult{Stdout: "git version 2.19.3\n"}
-		}})
+		}}
 
-		result := checkGit()
+		result := checkGit(deps)
 		if result.Status != StatusFail {
 			t.Errorf("expected fail, got %v: %s", result.Status, result.Summary)
 		}
 	})
 
 	t.Run("apple git version suffix", func(t *testing.T) {
-		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
+		deps.Exec = &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			return CommandResult{Stdout: "git version 2.39.3 (Apple Git-146)\n"}
-		}})
+		}}
 
-		result := checkGit()
+		result := checkGit(deps)
 		if result.Status != StatusPass {
 			t.Errorf("expected pass, got %v: %s", result.Status, result.Summary)
 		}
 	})
 
 	t.Run("unparseable version", func(t *testing.T) {
-		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
+		deps.Exec = &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			return CommandResult{Stdout: "git version unknown\n"}
-		}})
+		}}
 
-		result := checkGit()
+		result := checkGit(deps)
 		if result.Status != StatusWarn {
 			t.Errorf("expected warn, got %v: %s", result.Status, result.Summary)
 		}
@@ -75,8 +87,12 @@ func TestCheckGit(t *testing.T) {
 }
 
 func TestCheckGitRepo(t *testing.T) {
+	t.Parallel()
+
 	t.Run("inside git repo", func(t *testing.T) {
-		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
+		deps.Exec = &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			if name == "git" && len(args) > 0 {
 				switch args[0] {
 				case "rev-parse":
@@ -93,27 +109,31 @@ func TestCheckGitRepo(t *testing.T) {
 				}
 			}
 			return CommandResult{Err: fmt.Errorf("unexpected")}
-		}})
+		}}
 
-		result := checkGitRepo()
+		result := checkGitRepo(deps)
 		if result.Status != StatusPass {
 			t.Errorf("expected pass, got %v: %s", result.Status, result.Summary)
 		}
 	})
 
 	t.Run("not in git repo", func(t *testing.T) {
-		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
+		deps.Exec = &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			return CommandResult{Err: fmt.Errorf("not a git repository")}
-		}})
+		}}
 
-		result := checkGitRepo()
+		result := checkGitRepo(deps)
 		if result.Status != StatusWarn {
 			t.Errorf("expected warn, got %v", result.Status)
 		}
 	})
 
 	t.Run("inside worktree", func(t *testing.T) {
-		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
+		deps.Exec = &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			if name == "git" && len(args) > 1 {
 				switch args[1] {
 				case "--is-inside-work-tree":
@@ -125,9 +145,9 @@ func TestCheckGitRepo(t *testing.T) {
 				}
 			}
 			return CommandResult{Err: fmt.Errorf("unexpected")}
-		}})
+		}}
 
-		result := checkGitRepo()
+		result := checkGitRepo(deps)
 		if result.Status != StatusWarn {
 			t.Errorf("expected warn for worktree, got %v: %s", result.Status, result.Summary)
 		}
@@ -135,12 +155,16 @@ func TestCheckGitRepo(t *testing.T) {
 }
 
 func TestCheckBdDaemon(t *testing.T) {
-	t.Run("bd not on PATH", func(t *testing.T) {
-		installLookPathMock(t, func(string) (string, error) {
-			return "", exec.ErrNotFound
-		})
+	t.Parallel()
 
-		result := checkBdDaemon()
+	t.Run("bd not on PATH", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
+		deps.LookPath = func(string) (string, error) {
+			return "", exec.ErrNotFound
+		}
+
+		result := checkBdDaemon(deps)
 		if result.Status != StatusFail {
 			t.Errorf("expected fail, got %v: %s", result.Status, result.Summary)
 		}
@@ -150,31 +174,31 @@ func TestCheckBdDaemon(t *testing.T) {
 	})
 
 	t.Run("daemon running", func(t *testing.T) {
-		defer ResetBeadsDirCache()
-
-		installLookPathMock(t, func(string) (string, error) { return "/usr/bin/bd", nil })
-		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
+		deps.LookPath = func(string) (string, error) { return "/usr/bin/bd", nil }
+		deps.Exec = &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			if name == "bd" && len(args) >= 2 && args[1] == "status" {
 				return CommandResult{Stdout: `{"status":"running","pid":1234}`}
 			}
 			return CommandResult{Err: fmt.Errorf("unexpected")}
-		}})
+		}}
 
-		result := checkBdDaemon()
+		result := checkBdDaemon(deps)
 		if result.Status != StatusPass {
 			t.Errorf("expected pass, got %v: %s", result.Status, result.Summary)
 		}
 	})
 
 	t.Run("daemon not running", func(t *testing.T) {
-		defer ResetBeadsDirCache()
-
-		installLookPathMock(t, func(string) (string, error) { return "/usr/bin/bd", nil })
-		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
+		deps.LookPath = func(string) (string, error) { return "/usr/bin/bd", nil }
+		deps.Exec = &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 			return CommandResult{Err: fmt.Errorf("not running")}
-		}})
+		}}
 
-		result := checkBdDaemon()
+		result := checkBdDaemon(deps)
 		if result.Status != StatusWarn {
 			t.Errorf("expected warn, got %v", result.Status)
 		}
@@ -367,6 +391,8 @@ func TestCheckRedis(t *testing.T) {
 }
 
 func TestDoctorJSONOutput(t *testing.T) {
+	t.Parallel()
+
 	output := DoctorOutput{
 		Checks: []CheckResult{
 			{Name: "git", Status: StatusPass, Summary: "git 2.44 found"},
@@ -424,6 +450,8 @@ func TestDoctorJSONOutput(t *testing.T) {
 }
 
 func TestCheckStatusString(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		status CheckStatus
 		want   string
@@ -436,6 +464,7 @@ func TestCheckStatusString(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.want, func(t *testing.T) {
+			t.Parallel()
 			if got := tt.status.String(); got != tt.want {
 				t.Errorf("String() = %q, want %q", got, tt.want)
 			}
@@ -444,7 +473,10 @@ func TestCheckStatusString(t *testing.T) {
 }
 
 func TestCheckBackendCLI(t *testing.T) {
+	t.Parallel()
+
 	t.Run("backend on PATH", func(t *testing.T) {
+		t.Parallel()
 		// This test verifies the check runs without error.
 		// The actual result depends on whether claude/codex is installed.
 		result := checkBackendCLI()
@@ -521,7 +553,10 @@ func TestCheckIssueBackend(t *testing.T) {
 }
 
 func TestCheckFleetDB(t *testing.T) {
+	t.Parallel()
+
 	t.Run("autostart with no redis URL passes", func(t *testing.T) {
+		t.Parallel()
 		cfg := FleetDBServerConfig{
 			AutoStart: true,
 			RedisURL:  "",
@@ -543,6 +578,7 @@ func TestCheckFleetDB(t *testing.T) {
 	})
 
 	t.Run("no redis URL and no autostart fails", func(t *testing.T) {
+		t.Parallel()
 		cfg := FleetDBServerConfig{
 			AutoStart: false,
 			RedisURL:  "",
@@ -564,6 +600,7 @@ func TestCheckFleetDB(t *testing.T) {
 	})
 
 	t.Run("redis URL set but unreachable fails", func(t *testing.T) {
+		t.Parallel()
 		cfg := FleetDBServerConfig{
 			AutoStart: false,
 			RedisURL:  "redis://localhost:19999", // unlikely to be running

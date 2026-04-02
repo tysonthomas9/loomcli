@@ -8,6 +8,7 @@ import (
 )
 
 func TestMapTaskFilter(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		filter      string
@@ -78,6 +79,7 @@ func TestMapTaskFilter(t *testing.T) {
 // TestMapTaskFilter_WithParentID verifies that mapTaskFilter returns closures
 // that properly pass the parentID through to the underlying task functions.
 func TestMapTaskFilter_WithParentID(t *testing.T) {
+	// not parallel: uses installExecMock (global state)
 	tests := []struct {
 		name           string
 		filter         string
@@ -205,6 +207,7 @@ func TestMapTaskFilter_WithParentID(t *testing.T) {
 // TestMapTaskFilter_ParentIDCapturedInClosure verifies that the parentID is properly
 // captured in the closure and persists across multiple calls to the returned function.
 func TestMapTaskFilter_ParentIDCapturedInClosure(t *testing.T) {
+	// not parallel: uses installExecMock (global state)
 	var readyCapturedArgs [][]string
 
 	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
@@ -256,6 +259,7 @@ func TestMapTaskFilter_ParentIDCapturedInClosure(t *testing.T) {
 }
 
 func TestMakeCustomPromptGen_ValidTemplate(t *testing.T) {
+	t.Parallel()
 	// Create a temporary template file
 	tmpDir := t.TempDir()
 	promptFile := filepath.Join(tmpDir, "test-prompt.txt")
@@ -282,6 +286,7 @@ Do the work!`
 }
 
 func TestMakeCustomPromptGen_RawFile(t *testing.T) {
+	t.Parallel()
 	// Create a temporary file without template syntax
 	tmpDir := t.TempDir()
 	promptFile := filepath.Join(tmpDir, "raw-prompt.txt")
@@ -301,6 +306,7 @@ Just plain text.`
 }
 
 func TestMakeCustomPromptGen_MissingFile(t *testing.T) {
+	t.Parallel()
 	gen := makeCustomPromptGen("/nonexistent/path/prompt.txt")
 	result := gen("spark", nil)
 
@@ -311,6 +317,7 @@ func TestMakeCustomPromptGen_MissingFile(t *testing.T) {
 }
 
 func TestMakeCustomPromptGen_InvalidTemplate(t *testing.T) {
+	t.Parallel()
 	// Create a template with invalid syntax
 	tmpDir := t.TempDir()
 	promptFile := filepath.Join(tmpDir, "bad-template.txt")
@@ -330,6 +337,7 @@ func TestMakeCustomPromptGen_InvalidTemplate(t *testing.T) {
 }
 
 func TestMakeCustomPromptGen_WithWorkspace(t *testing.T) {
+	t.Parallel()
 	// Create a temporary template file
 	tmpDir := t.TempDir()
 	promptFile := filepath.Join(tmpDir, "workspace-prompt.txt")

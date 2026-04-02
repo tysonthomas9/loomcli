@@ -9,8 +9,12 @@ import (
 )
 
 func TestEnsureBdDaemonRunning(t *testing.T) {
+	t.Parallel()
+
 	t.Run("daemon already running", func(t *testing.T) {
-		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+		t.Parallel()
+		deps, _, execR, _, _ := NewTestDeps(t)
+		execR.RunFunc = func(dir, name string, args ...string) CommandResult {
 			if len(args) >= 2 && args[1] == "status" {
 				return CommandResult{
 					Stdout: `{"status":"running","pid":1234}`,
@@ -18,9 +22,9 @@ func TestEnsureBdDaemonRunning(t *testing.T) {
 			}
 			t.Fatalf("unexpected command: %s %v", name, args)
 			return CommandResult{}
-		}})
+		}
 
-		started, err := EnsureBdDaemonRunning(100 * time.Millisecond)
+		started, err := EnsureBdDaemonRunning(deps, 100*time.Millisecond)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -30,9 +34,11 @@ func TestEnsureBdDaemonRunning(t *testing.T) {
 	})
 
 	t.Run("daemon not running, start succeeds, becomes ready", func(t *testing.T) {
+		t.Parallel()
+		deps, _, execR, _, _ := NewTestDeps(t)
 		var statusCalls atomic.Int32
 
-		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+		execR.RunFunc = func(dir, name string, args ...string) CommandResult {
 			if len(args) >= 2 && args[1] == "status" {
 				n := statusCalls.Add(1)
 				if n <= 1 {
@@ -47,9 +53,9 @@ func TestEnsureBdDaemonRunning(t *testing.T) {
 			}
 			t.Fatalf("unexpected command: %s %v", name, args)
 			return CommandResult{}
-		}})
+		}
 
-		started, err := EnsureBdDaemonRunning(2 * time.Second)
+		started, err := EnsureBdDaemonRunning(deps, 2*time.Second)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -59,7 +65,9 @@ func TestEnsureBdDaemonRunning(t *testing.T) {
 	})
 
 	t.Run("daemon not running, start fails", func(t *testing.T) {
-		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+		t.Parallel()
+		deps, _, execR, _, _ := NewTestDeps(t)
+		execR.RunFunc = func(dir, name string, args ...string) CommandResult {
 			if len(args) >= 2 && args[1] == "status" {
 				return CommandResult{Err: fmt.Errorf("not running")}
 			}
@@ -71,9 +79,9 @@ func TestEnsureBdDaemonRunning(t *testing.T) {
 			}
 			t.Fatalf("unexpected command: %s %v", name, args)
 			return CommandResult{}
-		}})
+		}
 
-		started, err := EnsureBdDaemonRunning(100 * time.Millisecond)
+		started, err := EnsureBdDaemonRunning(deps, 100*time.Millisecond)
 		if err == nil {
 			t.Fatal("expected error when start fails")
 		}
@@ -86,7 +94,9 @@ func TestEnsureBdDaemonRunning(t *testing.T) {
 	})
 
 	t.Run("daemon not running, start succeeds, never becomes ready", func(t *testing.T) {
-		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+		t.Parallel()
+		deps, _, execR, _, _ := NewTestDeps(t)
+		execR.RunFunc = func(dir, name string, args ...string) CommandResult {
 			if len(args) >= 2 && args[1] == "status" {
 				return CommandResult{Err: fmt.Errorf("not running")}
 			}
@@ -95,9 +105,9 @@ func TestEnsureBdDaemonRunning(t *testing.T) {
 			}
 			t.Fatalf("unexpected command: %s %v", name, args)
 			return CommandResult{}
-		}})
+		}
 
-		started, err := EnsureBdDaemonRunning(300 * time.Millisecond)
+		started, err := EnsureBdDaemonRunning(deps, 300*time.Millisecond)
 		if err == nil {
 			t.Fatal("expected timeout error")
 		}
@@ -110,8 +120,10 @@ func TestEnsureBdDaemonRunning(t *testing.T) {
 	})
 
 	t.Run("status returns invalid JSON", func(t *testing.T) {
+		t.Parallel()
+		deps, _, execR, _, _ := NewTestDeps(t)
 		var startCalled atomic.Bool
-		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+		execR.RunFunc = func(dir, name string, args ...string) CommandResult {
 			if len(args) >= 2 && args[1] == "status" {
 				return CommandResult{Stdout: "not json"}
 			}
@@ -120,9 +132,9 @@ func TestEnsureBdDaemonRunning(t *testing.T) {
 				return CommandResult{Err: fmt.Errorf("fail")}
 			}
 			return CommandResult{}
-		}})
+		}
 
-		_, err := EnsureBdDaemonRunning(100 * time.Millisecond)
+		_, err := EnsureBdDaemonRunning(deps, 100*time.Millisecond)
 		if err == nil {
 			t.Fatal("expected error when start fails")
 		}
@@ -133,6 +145,8 @@ func TestEnsureBdDaemonRunning(t *testing.T) {
 }
 
 func TestIsDaemonRunning(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name   string
 		result CommandResult
@@ -167,11 +181,13 @@ func TestIsDaemonRunning(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+			t.Parallel()
+			deps, _, execR, _, _ := NewTestDeps(t)
+			execR.RunFunc = func(dir, name string, args ...string) CommandResult {
 				return tt.result
-			}})
+			}
 
-			got := isDaemonRunning()
+			got := isDaemonRunning(deps)
 			if got != tt.want {
 				t.Errorf("isDaemonRunning() = %v, want %v", got, tt.want)
 			}
@@ -180,10 +196,13 @@ func TestIsDaemonRunning(t *testing.T) {
 }
 
 func TestEnsureIssueBackendRunning(t *testing.T) {
+	// Not parallel: subtests use t.Setenv which is incompatible with t.Parallel.
+
 	t.Run("fleetdb returns false nil immediately", func(t *testing.T) {
 		t.Setenv("LOOM_FLEETDB_ENABLED", "true")
+		deps, _, _, _, _ := NewTestDeps(t)
 
-		started, err := EnsureIssueBackendRunning(100 * time.Millisecond)
+		started, err := EnsureIssueBackendRunning(deps, 100*time.Millisecond)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -194,13 +213,13 @@ func TestEnsureIssueBackendRunning(t *testing.T) {
 
 	t.Run("fleetdb does not call execCommand", func(t *testing.T) {
 		t.Setenv("LOOM_FLEETDB_ENABLED", "true")
-
-		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+		deps, _, execR, _, _ := NewTestDeps(t)
+		execR.RunFunc = func(dir, name string, args ...string) CommandResult {
 			t.Fatalf("execCommand should not be called for fleet-db backend: %s %v", name, args)
 			return CommandResult{}
-		}})
+		}
 
-		_, err := EnsureIssueBackendRunning(100 * time.Millisecond)
+		_, err := EnsureIssueBackendRunning(deps, 100*time.Millisecond)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -208,9 +227,10 @@ func TestEnsureIssueBackendRunning(t *testing.T) {
 
 	t.Run("beads delegates to EnsureBdDaemonRunning", func(t *testing.T) {
 		t.Setenv("LOOM_FLEETDB_ENABLED", "false")
+		deps, _, execR, _, _ := NewTestDeps(t)
 
 		// Mock: daemon already running
-		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+		execR.RunFunc = func(dir, name string, args ...string) CommandResult {
 			if len(args) >= 2 && args[1] == "status" {
 				return CommandResult{
 					Stdout: `{"status":"running","pid":9876}`,
@@ -218,9 +238,9 @@ func TestEnsureIssueBackendRunning(t *testing.T) {
 			}
 			t.Fatalf("unexpected command: %s %v", name, args)
 			return CommandResult{}
-		}})
+		}
 
-		started, err := EnsureIssueBackendRunning(100 * time.Millisecond)
+		started, err := EnsureIssueBackendRunning(deps, 100*time.Millisecond)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -231,9 +251,10 @@ func TestEnsureIssueBackendRunning(t *testing.T) {
 
 	t.Run("beads with daemon not running delegates start", func(t *testing.T) {
 		t.Setenv("LOOM_FLEETDB_ENABLED", "false")
+		deps, _, execR, _, _ := NewTestDeps(t)
 
 		var statusCalls atomic.Int32
-		installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+		execR.RunFunc = func(dir, name string, args ...string) CommandResult {
 			if len(args) >= 2 && args[1] == "status" {
 				n := statusCalls.Add(1)
 				if n <= 1 {
@@ -248,9 +269,9 @@ func TestEnsureIssueBackendRunning(t *testing.T) {
 			}
 			t.Fatalf("unexpected command: %s %v", name, args)
 			return CommandResult{}
-		}})
+		}
 
-		started, err := EnsureIssueBackendRunning(2 * time.Second)
+		started, err := EnsureIssueBackendRunning(deps, 2*time.Second)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

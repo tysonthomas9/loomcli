@@ -12,6 +12,7 @@ import (
 // ---------- ResolveWorkspaceByName ----------
 
 func TestResolveWorkspaceByName_Match(t *testing.T) {
+	// not parallel: uses setupWorkspaceConfig (t.Setenv), defaultResolver global
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
 
@@ -45,7 +46,7 @@ func TestResolveWorkspaceByName_Match(t *testing.T) {
 }
 
 func TestResolveWorkspaceByName_LegacyMode(t *testing.T) {
-	// No config -> legacy mode
+	// not parallel: uses t.Setenv, defaultResolver global
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 
 	old := defaultResolver
@@ -70,6 +71,7 @@ func TestResolveWorkspaceByName_LegacyMode(t *testing.T) {
 }
 
 func TestResolveWorkspaceByName_EmptyName(t *testing.T) {
+	// not parallel: uses setupWorkspaceConfig (t.Setenv), defaultResolver global
 	cfg := &LoomConfig{
 		DefaultWorkspace: "ws",
 		Workspaces: map[string]WorkspaceConfig{
@@ -97,6 +99,7 @@ func TestResolveWorkspaceByName_EmptyName(t *testing.T) {
 }
 
 func TestResolveWorkspaceByName_NoMatch(t *testing.T) {
+	// not parallel: uses setupWorkspaceConfig (t.Setenv), defaultResolver global
 	cfg := &LoomConfig{
 		DefaultWorkspace: "ws",
 		Workspaces: map[string]WorkspaceConfig{
@@ -126,6 +129,7 @@ func TestResolveWorkspaceByName_NoMatch(t *testing.T) {
 // ---------- ResolveAgentTarget ----------
 
 func TestResolveAgentTarget_WorkspaceMode_WorkspaceName(t *testing.T) {
+	// not parallel: uses setupWorkspaceConfig (t.Setenv), defaultResolver global
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
 
@@ -160,6 +164,7 @@ func TestResolveAgentTarget_WorkspaceMode_WorkspaceName(t *testing.T) {
 }
 
 func TestResolveAgentTarget_WorkspaceMode_RepoName(t *testing.T) {
+	// not parallel: uses setupWorkspaceConfig (t.Setenv), defaultResolver global
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
 
@@ -196,6 +201,7 @@ func TestResolveAgentTarget_WorkspaceMode_RepoName(t *testing.T) {
 }
 
 func TestResolveAgentTarget_WorkspaceMode_NoArg(t *testing.T) {
+	// not parallel: uses setupWorkspaceConfig (t.Setenv), defaultResolver global
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
 
@@ -230,6 +236,7 @@ func TestResolveAgentTarget_WorkspaceMode_NoArg(t *testing.T) {
 }
 
 func TestResolveAgentTarget_WorkspaceMode_InvalidName(t *testing.T) {
+	// not parallel: uses setupWorkspaceConfig (t.Setenv), defaultResolver global
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
 
@@ -261,6 +268,7 @@ func TestResolveAgentTarget_WorkspaceMode_InvalidName(t *testing.T) {
 }
 
 func TestResolveAgentTarget_LegacyMode_WorktreeName(t *testing.T) {
+	// not parallel: uses t.Setenv, defaultResolver global, os.Chdir
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 
 	old := defaultResolver
@@ -293,6 +301,7 @@ func TestResolveAgentTarget_LegacyMode_WorktreeName(t *testing.T) {
 }
 
 func TestResolveAgentTarget_LegacyMode_NoArg(t *testing.T) {
+	// not parallel: uses t.Setenv, defaultResolver global, os.Chdir
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 
 	old := defaultResolver
@@ -323,6 +332,7 @@ func TestResolveAgentTarget_LegacyMode_NoArg(t *testing.T) {
 // ---------- ResolveAgentTarget per-repo routing ----------
 
 func TestResolveAgentTarget_WorkspaceMode_WithRepo(t *testing.T) {
+	// not parallel: uses setupWorkspaceConfig (t.Setenv), defaultResolver global, defaultDeps (ensureRepoWorktree)
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
 
@@ -366,6 +376,7 @@ func TestResolveAgentTarget_WorkspaceMode_WithRepo(t *testing.T) {
 }
 
 func TestResolveAgentTarget_WorkspaceMode_WithRepo_AlreadyExists(t *testing.T) {
+	// not parallel: uses setupWorkspaceConfig (t.Setenv), defaultResolver global, defaultDeps (ensureRepoWorktree)
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
 
@@ -404,6 +415,7 @@ func TestResolveAgentTarget_WorkspaceMode_WithRepo_AlreadyExists(t *testing.T) {
 }
 
 func TestResolveAgentTarget_WorkspaceMode_EmptyRepo(t *testing.T) {
+	// not parallel: uses setupWorkspaceConfig (t.Setenv), defaultResolver global
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
 
@@ -439,6 +451,7 @@ func TestResolveAgentTarget_WorkspaceMode_EmptyRepo(t *testing.T) {
 }
 
 func TestResolveAgentTarget_WorkspaceMode_UnknownRepo(t *testing.T) {
+	// not parallel: uses setupWorkspaceConfig (t.Setenv), defaultResolver global
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
 
@@ -470,6 +483,7 @@ func TestResolveAgentTarget_WorkspaceMode_UnknownRepo(t *testing.T) {
 }
 
 func TestResolveAgentTarget_WorkspaceMode_AbsPathIgnoresRepo(t *testing.T) {
+	// not parallel: uses setupWorkspaceConfig (t.Setenv), defaultResolver global
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
 
@@ -505,6 +519,7 @@ func TestResolveAgentTarget_WorkspaceMode_AbsPathIgnoresRepo(t *testing.T) {
 }
 
 func TestResolveAgentTarget_LegacyMode_RepoError(t *testing.T) {
+	// not parallel: uses t.Setenv, defaultResolver global
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 
 	old := defaultResolver
@@ -521,6 +536,7 @@ func TestResolveAgentTarget_LegacyMode_RepoError(t *testing.T) {
 }
 
 func TestEnsureRepoWorktree_Creates(t *testing.T) {
+	// not parallel: uses ensureRepoWorktree which calls defaultDeps
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
 
@@ -539,6 +555,7 @@ func TestEnsureRepoWorktree_Creates(t *testing.T) {
 }
 
 func TestEnsureRepoWorktree_Idempotent(t *testing.T) {
+	// not parallel: uses ensureRepoWorktree which calls defaultDeps
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
 
@@ -557,6 +574,7 @@ func TestEnsureRepoWorktree_Idempotent(t *testing.T) {
 }
 
 func TestEnsureRepoWorktree_BranchExists(t *testing.T) {
+	// not parallel: uses ensureRepoWorktree which calls defaultDeps
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
 
@@ -578,6 +596,7 @@ func TestEnsureRepoWorktree_BranchExists(t *testing.T) {
 }
 
 func TestResolveAgentTarget_WorkspaceMode_MultipleAgentsSameRepo(t *testing.T) {
+	// not parallel: uses setupWorkspaceConfig (t.Setenv), defaultResolver global, defaultDeps (ensureRepoWorktree)
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
 
@@ -625,6 +644,7 @@ func TestResolveAgentTarget_WorkspaceMode_MultipleAgentsSameRepo(t *testing.T) {
 // ---------- worktreeCompletion with workspaces ----------
 
 func TestWorktreeCompletion_WorkspaceMode(t *testing.T) {
+	// not parallel: uses setupWorkspaceConfig (t.Setenv), defaultResolver global, mock.Install()
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
 
@@ -680,6 +700,7 @@ func TestWorktreeCompletion_WorkspaceMode(t *testing.T) {
 }
 
 func TestWorktreeCompletion_WorkspaceMode_DeduplicatesNames(t *testing.T) {
+	// not parallel: uses setupWorkspaceConfig (t.Setenv), defaultResolver global, mock.Install()
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
 
@@ -729,7 +750,7 @@ func TestWorktreeCompletion_WorkspaceMode_DeduplicatesNames(t *testing.T) {
 }
 
 func TestWorktreeCompletion_LegacyMode_Unchanged(t *testing.T) {
-	// No config -> legacy mode, should behave same as before
+	// not parallel: uses t.Setenv, defaultResolver global, os.Chdir, mock.Install()
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 
 	old := defaultResolver

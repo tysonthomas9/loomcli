@@ -111,6 +111,7 @@ func isValidWorkspaceName(name string) bool {
 }
 
 func runWorkspaceCreate(cmd *cobra.Command, args []string) {
+	deps := GetDeps(cmd)
 	wsName := args[0]
 
 	if !isValidWorkspaceName(wsName) {
@@ -248,13 +249,13 @@ func runWorkspaceCreate(cmd *cobra.Command, args []string) {
 		worktreePath := filepath.Join(wsDir, repo.name)
 
 		// Run git worktree add from the repo root
-		_, err := RunGitCommand(repo.path, "worktree", "add", worktreePath, "-b", branch)
+		_, err := runGit(deps, repo.path, "worktree", "add", worktreePath, "-b", branch)
 		if err != nil {
 			// Clean up workspace directory on failure
 			fmt.Fprintf(os.Stderr, "Error: git worktree add failed for %s: %v\n", repo.name, err)
 			// Attempt cleanup of already-created worktrees using original repo paths
 			for _, c := range created {
-				_, _ = RunGitCommand(c.origRepoPath, "worktree", "remove", c.worktreePath)
+				_, _ = runGit(deps, c.origRepoPath, "worktree", "remove", c.worktreePath)
 			}
 			_ = os.RemoveAll(wsDir)
 			os.Exit(1)
@@ -270,7 +271,7 @@ func runWorkspaceCreate(cmd *cobra.Command, args []string) {
 	}
 
 	// Run bd init in workspace directory (best-effort)
-	bdResult := defaultDeps.Exec.Run(wsDir, "bd", "init")
+	bdResult := deps.Exec.Run(wsDir, "bd", "init")
 	if bdResult.Err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: bd init failed in workspace (non-fatal): %s\n", bdResult.Stderr)
 	}
@@ -341,6 +342,7 @@ func runWorkspaceList(cmd *cobra.Command, args []string) {
 }
 
 func runWorkspaceRemove(cmd *cobra.Command, args []string) {
+	deps := GetDeps(cmd)
 	wsName := args[0]
 
 	// Acquire config lock for the entire load-mutate-save sequence.
@@ -408,11 +410,11 @@ func runWorkspaceRemove(cmd *cobra.Command, args []string) {
 			// We need the main repo path. Read .git file to find it.
 			mainRepoPath := findMainRepoPath(repoPath)
 			if mainRepoPath != "" {
-				_, err := RunGitCommand(mainRepoPath, "worktree", "remove", repoPath)
+				_, err := runGit(deps, mainRepoPath, "worktree", "remove", repoPath)
 				if err != nil {
 					if wsRemoveForce {
 						// Force remove
-						_, err = RunGitCommand(mainRepoPath, "worktree", "remove", "--force", repoPath)
+						_, err = runGit(deps, mainRepoPath, "worktree", "remove", "--force", repoPath)
 						if err != nil {
 							errors = append(errors, fmt.Sprintf("  %s: %v", repo.Name, err))
 						}

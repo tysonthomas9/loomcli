@@ -10,6 +10,9 @@ import (
 // --- Group 1: GetCurrentBranch() unit tests ---
 
 func TestGetCurrentBranch_NormalBranch(t *testing.T) {
+	t.Parallel()
+
+	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{
 			Name:   "git",
@@ -17,11 +20,11 @@ func TestGetCurrentBranch_NormalBranch(t *testing.T) {
 			Stdout: "feature-x\n",
 		},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	branch, err := GetCurrentBranch("/some/repo")
+	branch, err := getCurrentBranchDeps(deps, "/some/repo")
 	if err != nil {
-		t.Fatalf("GetCurrentBranch: unexpected error: %v", err)
+		t.Fatalf("getCurrentBranchDeps: unexpected error: %v", err)
 	}
 	if branch != "feature-x" {
 		t.Errorf("expected 'feature-x', got %q", branch)
@@ -29,6 +32,9 @@ func TestGetCurrentBranch_NormalBranch(t *testing.T) {
 }
 
 func TestGetCurrentBranch_DetachedHEAD(t *testing.T) {
+	t.Parallel()
+
+	deps, _, _, _, _ := NewTestDeps(t)
 	// git branch --show-current returns empty string on detached HEAD
 	mock := NewCommandMock(t, []CommandStub{
 		{
@@ -37,11 +43,11 @@ func TestGetCurrentBranch_DetachedHEAD(t *testing.T) {
 			Stdout: "",
 		},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	branch, err := GetCurrentBranch("/some/repo")
+	branch, err := getCurrentBranchDeps(deps, "/some/repo")
 	if err != nil {
-		t.Fatalf("GetCurrentBranch: unexpected error: %v", err)
+		t.Fatalf("getCurrentBranchDeps: unexpected error: %v", err)
 	}
 	if branch != "" {
 		t.Errorf("expected empty string for detached HEAD, got %q", branch)
@@ -49,6 +55,9 @@ func TestGetCurrentBranch_DetachedHEAD(t *testing.T) {
 }
 
 func TestGetCurrentBranch_GitError(t *testing.T) {
+	t.Parallel()
+
+	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{
 			Name:   "git",
@@ -57,9 +66,9 @@ func TestGetCurrentBranch_GitError(t *testing.T) {
 			Err:    errors.New("exit status 128"),
 		},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	_, err := GetCurrentBranch("/not/a/repo")
+	_, err := getCurrentBranchDeps(deps, "/not/a/repo")
 	if err == nil {
 		t.Fatal("expected error when git command fails")
 	}

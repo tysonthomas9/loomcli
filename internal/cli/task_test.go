@@ -2,14 +2,27 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
+// testCmdWithDeps creates a minimal cobra.Command with deps injected into context.
+func testCmdWithDeps(deps *Deps) *cobra.Command {
+	cmd := &cobra.Command{}
+	cmd.SetContext(WithDeps(context.Background(), deps))
+	return cmd
+}
+
 func TestRunTask_SingleTask_NoTasksAvailable(t *testing.T) {
+	// not parallel: uses os.Chdir, global taskAutoMode/taskDaemonMode, mock.Install(), os.Stdout capture
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// Setup temp worktree directory
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
@@ -36,7 +49,7 @@ func TestRunTask_SingleTask_NoTasksAvailable(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	runTask(nil, nil)
+	runTask(testCmdWithDeps(deps), nil)
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -51,6 +64,9 @@ func TestRunTask_SingleTask_NoTasksAvailable(t *testing.T) {
 }
 
 func TestRunTask_SingleTask_Success(t *testing.T) {
+	// not parallel: uses os.Chdir, global taskAutoMode/taskDaemonMode, mock.Install(), os.Stdout capture
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// Setup temp worktree directory
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
@@ -75,15 +91,15 @@ func TestRunTask_SingleTask_Success(t *testing.T) {
 	})
 	mock.Install()
 
-	// Mock Claude invoker
-	recorder := SetupMockClaudeInvoker(t, nil)
+	// Mock Claude invoker on deps
+	recorder := SetupMockAgentInvokerOn(t, deps, nil)
 
 	// Capture stdout
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	runTask(nil, nil)
+	runTask(testCmdWithDeps(deps), nil)
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -109,6 +125,9 @@ func TestRunTask_SingleTask_Success(t *testing.T) {
 }
 
 func TestRunTask_DaemonMode_AcquiresLock(t *testing.T) {
+	// not parallel: uses os.Chdir, global taskDaemonMode, os.Stdout capture
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// Setup temp worktree directory
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
@@ -124,15 +143,15 @@ func TestRunTask_DaemonMode_AcquiresLock(t *testing.T) {
 	taskDaemonMode = true
 	defer func() { taskDaemonMode = false }()
 
-	// Mock Claude invoker
-	recorder := SetupMockClaudeInvoker(t, nil)
+	// Mock Claude invoker on deps
+	recorder := SetupMockAgentInvokerOn(t, deps, nil)
 
 	// Capture stdout
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	runTask(nil, nil)
+	runTask(testCmdWithDeps(deps), nil)
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -161,6 +180,9 @@ func TestRunTask_DaemonMode_AcquiresLock(t *testing.T) {
 }
 
 func TestRunTask_SkipsEpics(t *testing.T) {
+	// not parallel: uses os.Chdir, global taskAutoMode/taskDaemonMode, mock.Install(), os.Stdout capture
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// Setup temp worktree directory
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
@@ -188,7 +210,7 @@ func TestRunTask_SkipsEpics(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	runTask(nil, nil)
+	runTask(testCmdWithDeps(deps), nil)
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -203,6 +225,9 @@ func TestRunTask_SkipsEpics(t *testing.T) {
 }
 
 func TestRunTask_SkipsTasksWithoutDesign(t *testing.T) {
+	// not parallel: uses os.Chdir, global taskAutoMode/taskDaemonMode, mock.Install(), os.Stdout capture
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// Setup temp worktree directory
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
@@ -230,7 +255,7 @@ func TestRunTask_SkipsTasksWithoutDesign(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	runTask(nil, nil)
+	runTask(testCmdWithDeps(deps), nil)
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -245,6 +270,9 @@ func TestRunTask_SkipsTasksWithoutDesign(t *testing.T) {
 }
 
 func TestRunTask_SkipsTasksWithNeedsRevision(t *testing.T) {
+	// not parallel: uses os.Chdir, global taskAutoMode/taskDaemonMode, mock.Install(), os.Stdout capture
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// Setup temp worktree directory
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
@@ -272,7 +300,7 @@ func TestRunTask_SkipsTasksWithNeedsRevision(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	runTask(nil, nil)
+	runTask(testCmdWithDeps(deps), nil)
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -287,6 +315,7 @@ func TestRunTask_SkipsTasksWithNeedsRevision(t *testing.T) {
 }
 
 func TestHasAvailableImplementationTasks_Success(t *testing.T) {
+	// not parallel: uses mock.Install() which mutates global defaultDeps.Exec
 	// Task with design and no needs-revision is available for implementation
 	taskJSON := `[{"id":"bd-1","status":"open","issue_type":"task","design":"Implementation plan"}]`
 	mock := NewCommandMock(t, []CommandStub{
@@ -305,6 +334,7 @@ func TestHasAvailableImplementationTasks_Success(t *testing.T) {
 }
 
 func TestHasAvailableImplementationTasks_SkipsTasksWithoutDesign(t *testing.T) {
+	// not parallel: uses mock.Install() which mutates global defaultDeps.Exec
 	// Task without design should be skipped
 	taskJSON := `[{"id":"bd-1","status":"open","issue_type":"task","design":""}]`
 	mock := NewCommandMock(t, []CommandStub{
@@ -323,6 +353,7 @@ func TestHasAvailableImplementationTasks_SkipsTasksWithoutDesign(t *testing.T) {
 }
 
 func TestHasAvailableImplementationTasks_SkipsNeedsRevision(t *testing.T) {
+	// not parallel: uses mock.Install() which mutates global defaultDeps.Exec
 	// Task with needs-revision label should be skipped
 	taskJSON := `[{"id":"bd-1","status":"open","issue_type":"task","design":"Some plan","labels":["needs-revision"]}]`
 	mock := NewCommandMock(t, []CommandStub{
@@ -341,6 +372,7 @@ func TestHasAvailableImplementationTasks_SkipsNeedsRevision(t *testing.T) {
 }
 
 func TestHasAvailableImplementationTasks_BdError(t *testing.T) {
+	// not parallel: uses mock.Install() which mutates global defaultDeps.Exec
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Err: os.ErrNotExist},
 	})
@@ -357,6 +389,7 @@ func TestHasAvailableImplementationTasks_BdError(t *testing.T) {
 // ============================================================================
 
 func TestGetAvailableImplementationTasks_Success(t *testing.T) {
+	// not parallel: uses mock.Install() which mutates global defaultDeps.Exec
 	taskJSON := `[{"id":"bd-1","status":"open","issue_type":"task","design":"Implementation plan"}]`
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
@@ -377,6 +410,7 @@ func TestGetAvailableImplementationTasks_Success(t *testing.T) {
 }
 
 func TestGetAvailableImplementationTasks_ReturnsEmpty(t *testing.T) {
+	// not parallel: uses mock.Install() which mutates global defaultDeps.Exec
 	taskJSON := `[{"id":"bd-1","status":"open","issue_type":"task","design":""}]`
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
@@ -394,6 +428,7 @@ func TestGetAvailableImplementationTasks_ReturnsEmpty(t *testing.T) {
 }
 
 func TestGetAvailableImplementationTasks_SkipsNeedsRevision(t *testing.T) {
+	// not parallel: uses mock.Install() which mutates global defaultDeps.Exec
 	taskJSON := `[{"id":"bd-1","status":"open","issue_type":"task","design":"Some plan","labels":["needs-revision"]}]`
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
@@ -411,6 +446,7 @@ func TestGetAvailableImplementationTasks_SkipsNeedsRevision(t *testing.T) {
 }
 
 func TestGetAvailableImplementationTasks_BdError(t *testing.T) {
+	// not parallel: uses mock.Install() which mutates global defaultDeps.Exec
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Err: os.ErrNotExist},
 	})

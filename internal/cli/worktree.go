@@ -137,11 +137,16 @@ func DiscoverWorktrees() ([]WorktreeInfo, error) {
 	return getDefaultResolver().DiscoverWorktrees()
 }
 
-// GetCurrentBranch returns the current branch for a git directory
-func GetCurrentBranch(path string) (string, error) {
-	output, err := RunGitCommand(path, "branch", "--show-current")
+// getCurrentBranchDeps is the deps-aware implementation of GetCurrentBranch.
+func getCurrentBranchDeps(deps *Deps, path string) (string, error) {
+	output, err := runGit(deps, path, "branch", "--show-current")
 	if err != nil {
 		return "", err
 	}
 	return strings.TrimSpace(output), nil
+}
+
+// GetCurrentBranch returns the current branch for a git directory
+func GetCurrentBranch(path string) (string, error) {
+	return getCurrentBranchDeps(defaultDeps, path)
 }

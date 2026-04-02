@@ -13,8 +13,10 @@ import (
 )
 
 func TestEnsureDaemonForWorkspace_ContextCancelled(t *testing.T) {
+	t.Parallel()
+	deps, _, execR, _, _ := NewTestDeps(t)
 	// Mock: daemon start succeeds but status never reports running.
-	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+	execR.RunFunc = func(dir, name string, args ...string) CommandResult {
 		if len(args) >= 2 && args[1] == "start" {
 			return CommandResult{}
 		}
@@ -22,12 +24,12 @@ func TestEnsureDaemonForWorkspace_ContextCancelled(t *testing.T) {
 			return CommandResult{Err: fmt.Errorf("not running")}
 		}
 		return CommandResult{}
-	}})
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately
 
-	err := ensureDaemonForWorkspace(ctx, t.TempDir(), 5*time.Second)
+	err := ensureDaemonForWorkspace(deps, ctx, t.TempDir(), 5*time.Second)
 	if err == nil {
 		t.Fatal("expected error from cancelled context")
 	}
@@ -40,8 +42,10 @@ func TestEnsureDaemonForWorkspace_ContextCancelled(t *testing.T) {
 }
 
 func TestEnsureDaemonForWorkspace_ContextDeadlineExceeded(t *testing.T) {
+	t.Parallel()
+	deps, _, execR, _, _ := NewTestDeps(t)
 	// Mock: daemon start succeeds but status never reports running.
-	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+	execR.RunFunc = func(dir, name string, args ...string) CommandResult {
 		if len(args) >= 2 && args[1] == "start" {
 			return CommandResult{}
 		}
@@ -49,14 +53,14 @@ func TestEnsureDaemonForWorkspace_ContextDeadlineExceeded(t *testing.T) {
 			return CommandResult{Err: fmt.Errorf("not running")}
 		}
 		return CommandResult{}
-	}})
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
 	defer cancel()
 	// Give the context time to expire before calling.
 	time.Sleep(5 * time.Millisecond)
 
-	err := ensureDaemonForWorkspace(ctx, t.TempDir(), 5*time.Second)
+	err := ensureDaemonForWorkspace(deps, ctx, t.TempDir(), 5*time.Second)
 	if err == nil {
 		t.Fatal("expected error from expired context deadline")
 	}
@@ -66,8 +70,10 @@ func TestEnsureDaemonForWorkspace_ContextDeadlineExceeded(t *testing.T) {
 }
 
 func TestEnsureDaemonForWorkspace_TimeoutFallback(t *testing.T) {
+	t.Parallel()
+	deps, _, execR, _, _ := NewTestDeps(t)
 	// Mock: daemon start succeeds but status never reports running.
-	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+	execR.RunFunc = func(dir, name string, args ...string) CommandResult {
 		if len(args) >= 2 && args[1] == "start" {
 			return CommandResult{}
 		}
@@ -75,9 +81,9 @@ func TestEnsureDaemonForWorkspace_TimeoutFallback(t *testing.T) {
 			return CommandResult{Err: fmt.Errorf("not running")}
 		}
 		return CommandResult{}
-	}})
+	}
 
-	err := ensureDaemonForWorkspace(context.Background(), t.TempDir(), 200*time.Millisecond)
+	err := ensureDaemonForWorkspace(deps, context.Background(), t.TempDir(), 200*time.Millisecond)
 	if err == nil {
 		t.Fatal("expected timeout error")
 	}
@@ -87,12 +93,14 @@ func TestEnsureDaemonForWorkspace_TimeoutFallback(t *testing.T) {
 }
 
 func TestDefaultDaemonStartupTimeout(t *testing.T) {
+	t.Parallel()
 	if defaultDaemonStartupTimeout != 30*time.Second {
 		t.Errorf("defaultDaemonStartupTimeout = %v, want 30s", defaultDaemonStartupTimeout)
 	}
 }
 
 func TestEnsureCurrentProjectRegistered_GeneratesUUID(t *testing.T) {
+	// Not parallel: uses t.Setenv and os.Chdir.
 	configDir := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", configDir)
 
@@ -135,6 +143,7 @@ func TestEnsureCurrentProjectRegistered_GeneratesUUID(t *testing.T) {
 }
 
 func TestEnsureCurrentProjectRegistered_SkipsExistingByPath(t *testing.T) {
+	// Not parallel: uses t.Setenv and os.Chdir.
 	configDir := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", configDir)
 
@@ -187,6 +196,7 @@ func TestEnsureCurrentProjectRegistered_SkipsExistingByPath(t *testing.T) {
 }
 
 func TestEnsureCurrentProjectRegistered_RefusesToSaveOnParseError(t *testing.T) {
+	// Not parallel: uses t.Setenv and os.Chdir.
 	configDir := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", configDir)
 
@@ -223,17 +233,19 @@ func TestEnsureCurrentProjectRegistered_RefusesToSaveOnParseError(t *testing.T) 
 }
 
 func TestStopDaemonForWorkspace_CallsBdDaemonStop(t *testing.T) {
+	t.Parallel()
+	deps, _, execR, _, _ := NewTestDeps(t)
 	var calledDir, calledName string
 	var calledArgs []string
-	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+	execR.RunFunc = func(dir, name string, args ...string) CommandResult {
 		calledDir = dir
 		calledName = name
 		calledArgs = args
 		return CommandResult{}
-	}})
+	}
 
 	wsDir := t.TempDir()
-	stopDaemonForWorkspace(wsDir)
+	stopDaemonForWorkspace(deps, wsDir)
 
 	if calledDir != wsDir {
 		t.Errorf("dir = %q, want %q", calledDir, wsDir)
@@ -248,22 +260,26 @@ func TestStopDaemonForWorkspace_CallsBdDaemonStop(t *testing.T) {
 }
 
 func TestStopDaemonForWorkspace_ErrorIsNonFatal(t *testing.T) {
-	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+	t.Parallel()
+	deps, _, execR, _, _ := NewTestDeps(t)
+	execR.RunFunc = func(dir, name string, args ...string) CommandResult {
 		return CommandResult{Err: fmt.Errorf("daemon not running")}
-	}})
+	}
 
 	// Should not panic or crash
-	stopDaemonForWorkspace(t.TempDir())
+	stopDaemonForWorkspace(deps, t.TempDir())
 }
 
 func TestStopDaemonForWorkspace_EmptyDir(t *testing.T) {
+	t.Parallel()
+	deps, _, execR, _, _ := NewTestDeps(t)
 	called := false
-	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+	execR.RunFunc = func(dir, name string, args ...string) CommandResult {
 		called = true
 		return CommandResult{}
-	}})
+	}
 
-	stopDaemonForWorkspace("")
+	stopDaemonForWorkspace(deps, "")
 
 	if called {
 		t.Error("execCommand should not be called with empty dir")
@@ -274,6 +290,7 @@ func TestEnsureCurrentProjectRegistered_RefusesToSaveOnReadError(t *testing.T) {
 	if os.Getuid() == 0 {
 		t.Skip("skipping: root can read anything")
 	}
+	// Not parallel: uses t.Setenv and os.Chdir.
 
 	configDir := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", configDir)

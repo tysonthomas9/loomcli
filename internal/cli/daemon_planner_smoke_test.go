@@ -14,6 +14,7 @@ import (
 // flow end-to-end: mock bd returning one open task with no design, verify
 // HasAvailablePlanningTasks, generate prompt, invoke Claude, check lock lifecycle.
 func TestDaemonPlannerSmoke_FullPlanningPipeline(t *testing.T) {
+	// not parallel: uses os.Chdir, global planAutoMode/planDaemonMode, mock.Install(), os.Stdout capture
 	// Setup temp worktree directory
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
@@ -29,6 +30,7 @@ func TestDaemonPlannerSmoke_FullPlanningPipeline(t *testing.T) {
 
 	// Task with no design and open status
 	taskJSON := `[{"id":"smoke-1","status":"open","issue_type":"task","title":"Smoke test task","design":""}]`
+	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewCommandMock(t, []CommandStub{
 		// HasAvailablePlanningTasks -> fetchReadyIssues
 		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
@@ -41,15 +43,15 @@ func TestDaemonPlannerSmoke_FullPlanningPipeline(t *testing.T) {
 	})
 	mock.Install()
 
-	// Mock Claude invoker
-	recorder := SetupMockClaudeInvoker(t, nil)
+	// Mock Claude invoker on deps
+	recorder := SetupMockAgentInvokerOn(t, deps, nil)
 
 	// Capture stdout
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	runPlan(nil, nil)
+	runPlan(testCmdWithDeps(deps), nil)
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -83,6 +85,7 @@ func TestDaemonPlannerSmoke_FullPlanningPipeline(t *testing.T) {
 // TestDaemonPlannerSmoke_EpicScopedPlanning verifies that --parent epic scoping
 // propagates through the entire planning pipeline.
 func TestDaemonPlannerSmoke_EpicScopedPlanning(t *testing.T) {
+	// not parallel: uses os.Chdir, global planAutoMode/planDaemonMode/planParentID, mock.Install(), os.Stdout capture
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
 	origDir, _ := os.Getwd()
@@ -96,6 +99,7 @@ func TestDaemonPlannerSmoke_EpicScopedPlanning(t *testing.T) {
 	planParentID = "epic-42"
 	defer func() { planParentID = "" }()
 
+	deps, _, _, _, _ := NewTestDeps(t)
 	taskJSON := `[{"id":"smoke-2","status":"open","issue_type":"task","title":"Scoped task","design":""}]`
 	mock := NewCommandMock(t, []CommandStub{
 		// fetchReadyIssues with parent filter
@@ -106,13 +110,13 @@ func TestDaemonPlannerSmoke_EpicScopedPlanning(t *testing.T) {
 	})
 	mock.Install()
 
-	recorder := SetupMockClaudeInvoker(t, nil)
+	recorder := SetupMockAgentInvokerOn(t, deps, nil)
 
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	runPlan(nil, nil)
+	runPlan(testCmdWithDeps(deps), nil)
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -141,6 +145,7 @@ func TestDaemonPlannerSmoke_EpicScopedPlanning(t *testing.T) {
 // TestDaemonPlannerSmoke_NeedsRevisionRoundTrip verifies that a task with
 // design + needs-revision label is still identified as needing planning.
 func TestDaemonPlannerSmoke_NeedsRevisionRoundTrip(t *testing.T) {
+	// not parallel: uses os.Chdir, global planAutoMode/planDaemonMode, mock.Install(), os.Stdout capture
 	// Test predicates directly
 	revisionTask := BdIssue{
 		ID:        "smoke-3",
@@ -174,6 +179,7 @@ func TestDaemonPlannerSmoke_NeedsRevisionRoundTrip(t *testing.T) {
 	planDaemonMode = false
 
 	// Task with design AND needs-revision label
+	deps, _, _, _, _ := NewTestDeps(t)
 	taskJSON := `[{"id":"smoke-3","status":"open","issue_type":"task","title":"Revision task","design":"old plan","labels":["needs-revision"]}]`
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
@@ -183,13 +189,13 @@ func TestDaemonPlannerSmoke_NeedsRevisionRoundTrip(t *testing.T) {
 	})
 	mock.Install()
 
-	recorder := SetupMockClaudeInvoker(t, nil)
+	recorder := SetupMockAgentInvokerOn(t, deps, nil)
 
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	runPlan(nil, nil)
+	runPlan(testCmdWithDeps(deps), nil)
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -206,6 +212,7 @@ func TestDaemonPlannerSmoke_NeedsRevisionRoundTrip(t *testing.T) {
 // the lock file is retained after completion (for parent to read), unlike
 // single-task mode which releases it.
 func TestDaemonPlannerSmoke_DaemonModeLockRetention(t *testing.T) {
+	// not parallel: uses os.Chdir, global planAutoMode/planDaemonMode, mock.Install(), os.Stdout capture
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
 	origDir, _ := os.Getwd()
@@ -214,18 +221,19 @@ func TestDaemonPlannerSmoke_DaemonModeLockRetention(t *testing.T) {
 
 	os.MkdirAll(filepath.Join(tmpDir, ".git"), 0755)
 
+	deps, _, _, _, _ := NewTestDeps(t)
 	// Set daemon mode
 	planAutoMode = false
 	planDaemonMode = true
 	defer func() { planDaemonMode = false }()
 
-	recorder := SetupMockClaudeInvoker(t, nil)
+	recorder := SetupMockAgentInvokerOn(t, deps, nil)
 
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	runPlan(nil, nil)
+	runPlan(testCmdWithDeps(deps), nil)
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -261,6 +269,7 @@ func TestDaemonPlannerSmoke_DaemonModeLockRetention(t *testing.T) {
 	// Clean up the lock file left by daemon mode
 	os.Remove(lockPath)
 
+	deps2, _, _, _, _ := NewTestDeps(t)
 	taskJSON := `[{"id":"smoke-4","status":"open","issue_type":"task","title":"Single task","design":""}]`
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
@@ -271,13 +280,13 @@ func TestDaemonPlannerSmoke_DaemonModeLockRetention(t *testing.T) {
 	mock.Install()
 
 	// Need a fresh recorder for the second run
-	recorder2 := SetupMockClaudeInvoker(t, nil)
+	recorder2 := SetupMockAgentInvokerOn(t, deps2, nil)
 
 	oldStdout = os.Stdout
 	r, w, _ = os.Pipe()
 	os.Stdout = w
 
-	runPlan(nil, nil)
+	runPlan(testCmdWithDeps(deps2), nil)
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -298,6 +307,7 @@ func TestDaemonPlannerSmoke_DaemonModeLockRetention(t *testing.T) {
 // TestDaemonPlannerSmoke_DaemonBuildsPlanCommand verifies that buildCommand
 // constructs the correct exec.Cmd for plan-role agents, including args and env.
 func TestDaemonPlannerSmoke_DaemonBuildsPlanCommand(t *testing.T) {
+	// not parallel: uses t.Setenv
 	tmpDir := t.TempDir()
 	wtPath := filepath.Join(tmpDir, "worktrees", "planner")
 	os.MkdirAll(filepath.Join(wtPath, ".git"), 0755)
@@ -437,6 +447,7 @@ func TestDaemonPlannerSmoke_DaemonBuildsPlanCommand(t *testing.T) {
 // TestDaemonPlannerSmoke_SupervisorStartShutdown verifies that the daemon
 // supervisor starts and shuts down cleanly without deadlocks.
 func TestDaemonPlannerSmoke_SupervisorStartShutdown(t *testing.T) {
+	// not parallel: uses t.Setenv
 	tmpDir := t.TempDir()
 	wt1 := filepath.Join(tmpDir, "worktrees", "alpha")
 	wt2 := filepath.Join(tmpDir, "worktrees", "beta")

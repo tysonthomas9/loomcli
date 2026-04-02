@@ -29,15 +29,26 @@ func validateGitRef(name string) error {
 	return nil
 }
 
-// RunGitCommand executes a git command in the specified directory.
-// It routes through the package-level defaultDeps.Git runner, which
-// delegates to execCommand for backward compatibility.
-func RunGitCommand(dir string, args ...string) (string, error) {
-	result := defaultDeps.Git.Run(dir, args...)
+// runGit is a deps-aware helper for running git commands.
+// Production functions in tested call chains use this instead of RunGitCommand.
+func runGit(deps *Deps, dir string, args ...string) (string, error) {
+	result := deps.Git.Run(dir, args...)
 	if result.Err != nil {
 		return "", fmt.Errorf("git %s failed: %s", strings.Join(args, " "), result.Stderr)
 	}
 	return result.Stdout, nil
+}
+
+// runGitOutput is a deps-aware helper for running git commands with output streaming.
+func runGitOutput(deps *Deps, dir string, args ...string) error {
+	return deps.Git.RunWithOutput(dir, args...)
+}
+
+// RunGitCommand executes a git command in the specified directory.
+// It routes through the package-level defaultDeps.Git runner, which
+// delegates to execCommand for backward compatibility.
+func RunGitCommand(dir string, args ...string) (string, error) {
+	return runGit(defaultDeps, dir, args...)
 }
 
 func defaultRunGitWithOutput(dir string, args ...string) error {
@@ -51,147 +62,86 @@ func defaultRunGitWithOutput(dir string, args ...string) error {
 // RunGitCommandWithOutput executes a git command and streams output to stdout/stderr.
 // It routes through the package-level defaultDeps.Git runner.
 func RunGitCommandWithOutput(dir string, args ...string) error {
-	return defaultDeps.Git.RunWithOutput(dir, args...)
+	return runGitOutput(defaultDeps, dir, args...)
 }
+
+// --- exported backward-compatible wrappers ---
 
 // GitFetch fetches from origin
 func GitFetch(dir string) error {
-	fmt.Println("Fetching from origin...")
-	return RunGitCommandWithOutput(dir, "fetch", "origin")
+	return gitFetch(defaultDeps, dir)
 }
 
 // GitCheckout checks out a branch
 func GitCheckout(dir, branch string) error {
-	if err := validateGitRef(branch); err != nil {
-		return err
-	}
-	fmt.Printf("Checking out %s...\n", branch)
-	return RunGitCommandWithOutput(dir, "checkout", branch)
+	return gitCheckout(defaultDeps, dir, branch)
 }
 
 // GitPull pulls from origin for the current branch
 func GitPull(dir, branch string) error {
-	if err := validateGitRef(branch); err != nil {
-		return err
-	}
-	fmt.Printf("Pulling from origin/%s...\n", branch)
-	return RunGitCommandWithOutput(dir, "pull", "origin", branch)
+	return gitPull(defaultDeps, dir, branch)
 }
 
 // GitMerge attempts to merge a branch
 func GitMerge(dir, branch, message string) error {
-	if err := validateGitRef(branch); err != nil {
-		return err
-	}
-	fmt.Printf("Merging %s...\n", branch)
-	return RunGitCommandWithOutput(dir, "merge", "-m", message, "--", branch)
+	return gitMerge(defaultDeps, dir, branch, message)
 }
 
 // GitMergeOrigin attempts to merge origin/branch
 func GitMergeOrigin(dir, branch, message string) error {
-	if err := validateGitRef(branch); err != nil {
-		return err
-	}
-	fmt.Printf("Merging origin/%s...\n", branch)
-	return RunGitCommandWithOutput(dir, "merge", "origin/"+branch, "-m", message)
+	return gitMergeOrigin(defaultDeps, dir, branch, message)
 }
 
 // GitPush pushes to origin
 func GitPush(dir, branch string) error {
-	if err := validateGitRef(branch); err != nil {
-		return err
-	}
-	fmt.Printf("Pushing to origin/%s...\n", branch)
-	return RunGitCommandWithOutput(dir, "push", "origin", branch)
+	return gitPush(defaultDeps, dir, branch)
 }
 
 // GitPushForce force pushes to origin
 func GitPushForce(dir, branch string) error {
-	if err := validateGitRef(branch); err != nil {
-		return err
-	}
-	fmt.Printf("Force pushing to origin/%s...\n", branch)
-	return RunGitCommandWithOutput(dir, "push", "origin", branch, "--force")
+	return gitPushForce(defaultDeps, dir, branch)
 }
 
 // GitReset performs a hard reset to a ref
 func GitReset(dir, ref string) error {
-	if err := validateGitRef(ref); err != nil {
-		return err
-	}
-	fmt.Printf("Resetting to %s...\n", ref)
-	return RunGitCommandWithOutput(dir, "reset", "--hard", ref)
+	return gitReset(defaultDeps, dir, ref)
 }
 
 // GitClean removes untracked files and directories
 func GitClean(dir string) error {
-	fmt.Println("Cleaning untracked files...")
-	return RunGitCommandWithOutput(dir, "clean", "-fd")
+	return gitClean(defaultDeps, dir)
 }
 
 // GitCleanDryRun returns the list of untracked files that would be removed by git clean
 func GitCleanDryRun(dir string) (string, error) {
-	return RunGitCommand(dir, "clean", "-fdn")
+	return gitCleanDryRun(defaultDeps, dir)
 }
 
 // GitCleanExclude removes untracked files and directories, excluding paths
 // that match any of the given exclude patterns (passed as --exclude flags).
 func GitCleanExclude(dir string, excludes []string) error {
-	args := []string{"clean", "-fd"}
-	for _, ex := range excludes {
-		args = append(args, "--exclude="+ex)
-	}
-	fmt.Println("Cleaning untracked files (preserving runtime state)...")
-	return RunGitCommandWithOutput(dir, args...)
+	return gitCleanExclude(defaultDeps, dir, excludes)
 }
 
 // GitCleanDryRunExclude returns the list of untracked files that would be
 // removed by git clean, excluding paths matching the given patterns.
 func GitCleanDryRunExclude(dir string, excludes []string) (string, error) {
-	args := []string{"clean", "-fdn"}
-	for _, ex := range excludes {
-		args = append(args, "--exclude="+ex)
-	}
-	return RunGitCommand(dir, args...)
+	return gitCleanDryRunExclude(defaultDeps, dir, excludes)
 }
 
 // GetConflictedFiles returns a list of files with merge conflicts
 func GetConflictedFiles(dir string) ([]string, error) {
-	output, err := RunGitCommand(dir, "diff", "--name-only", "--diff-filter=U")
-	if err != nil {
-		return nil, err
-	}
-
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-	if len(lines) == 1 && lines[0] == "" {
-		return nil, nil
-	}
-	return lines, nil
+	return getConflictedFilesDeps(defaultDeps, dir)
 }
 
 // HasCommitsBetween checks if source has commits not in target
 func HasCommitsBetween(dir, target, source string) (bool, error) {
-	if err := validateGitRef(target); err != nil {
-		return false, err
-	}
-	if err := validateGitRef(source); err != nil {
-		return false, err
-	}
-	output, err := RunGitCommand(dir, "log", fmt.Sprintf("%s..%s", target, source), "--oneline")
-	if err != nil {
-		// If the command fails, assume there might be commits
-		return true, nil
-	}
-	return strings.TrimSpace(output) != "", nil
+	return hasCommitsBetweenDeps(defaultDeps, dir, target, source)
 }
 
 // IsCleanWorkingTree checks if the working tree is clean
 func IsCleanWorkingTree(dir string) (bool, error) {
-	output, err := RunGitCommand(dir, "status", "--porcelain")
-	if err != nil {
-		return false, err
-	}
-	return strings.TrimSpace(output) == "", nil
+	return isCleanWorkingTreeDeps(defaultDeps, dir)
 }
 
 // resolveRemote returns "origin" if remote is empty, otherwise returns remote as-is.
@@ -204,238 +154,91 @@ func resolveRemote(remote string) string {
 
 // GitFetchRemote fetches from the specified remote
 func GitFetchRemote(dir, remote string) error {
-	r := resolveRemote(remote)
-	if err := validateGitRef(r); err != nil {
-		return err
-	}
-	fmt.Printf("Fetching from %s...\n", r)
-	return RunGitCommandWithOutput(dir, "fetch", r)
+	return gitFetchRemote(defaultDeps, dir, remote)
 }
 
 // GitMergeRemote attempts to merge remote/branch
 func GitMergeRemote(dir, remote, branch, message string) error {
-	r := resolveRemote(remote)
-	if err := validateGitRef(r); err != nil {
-		return err
-	}
-	if err := validateGitRef(branch); err != nil {
-		return err
-	}
-	ref := r + "/" + branch
-	fmt.Printf("Merging %s...\n", ref)
-	return RunGitCommandWithOutput(dir, "merge", ref, "-m", message)
+	return gitMergeRemote(defaultDeps, dir, remote, branch, message)
 }
 
 // GitPushRemote pushes to the specified remote
 func GitPushRemote(dir, remote, branch string) error {
-	r := resolveRemote(remote)
-	if err := validateGitRef(r); err != nil {
-		return err
-	}
-	if err := validateGitRef(branch); err != nil {
-		return err
-	}
-	fmt.Printf("Pushing to %s/%s...\n", r, branch)
-	return RunGitCommandWithOutput(dir, "push", r, branch)
+	return gitPushRemote(defaultDeps, dir, remote, branch)
 }
 
 // GitPullRemote pulls from the specified remote for the given branch
 func GitPullRemote(dir, remote, branch string) error {
-	r := resolveRemote(remote)
-	if err := validateGitRef(r); err != nil {
-		return err
-	}
-	if err := validateGitRef(branch); err != nil {
-		return err
-	}
-	fmt.Printf("Pulling from %s/%s...\n", r, branch)
-	return RunGitCommandWithOutput(dir, "pull", r, branch)
+	return gitPullRemote(defaultDeps, dir, remote, branch)
 }
 
 // HasCommitsBetweenRemote checks if source has commits not in target using a specific remote
 func HasCommitsBetweenRemote(dir, remote, target, source string) (bool, error) {
-	r := resolveRemote(remote)
-	if err := validateGitRef(r); err != nil {
-		return false, err
-	}
-	if err := validateGitRef(target); err != nil {
-		return false, err
-	}
-	if err := validateGitRef(source); err != nil {
-		return false, err
-	}
-	output, err := RunGitCommand(dir, "log", fmt.Sprintf("%s/%s..%s", r, target, source), "--oneline")
-	if err != nil {
-		return true, nil
-	}
-	return strings.TrimSpace(output) != "", nil
+	return hasCommitsBetweenRemoteDeps(defaultDeps, dir, remote, target, source)
 }
 
 // IsRefCheckedOutInWorktree checks if a branch is checked out in any worktree.
-// Returns (isCheckedOut, worktreePath, error).
 func IsRefCheckedOutInWorktree(dir, branch string) (bool, string, error) {
-	output, err := RunGitCommand(dir, "worktree", "list", "--porcelain")
-	if err != nil {
-		return false, "", err
-	}
-
-	var currentWorktree string
-	for _, line := range strings.Split(output, "\n") {
-		if line == "" {
-			currentWorktree = ""
-			continue
-		}
-		if strings.HasPrefix(line, "worktree ") {
-			currentWorktree = strings.TrimPrefix(line, "worktree ")
-		} else if strings.HasPrefix(line, "branch refs/heads/") {
-			branchName := strings.TrimPrefix(line, "branch refs/heads/")
-			if branchName == branch {
-				return true, currentWorktree, nil
-			}
-		}
-	}
-
-	return false, "", nil
+	return isRefCheckedOutInWorktreeDeps(defaultDeps, dir, branch)
 }
 
 // GitCheckoutDetached checks out a ref in detached HEAD mode
 func GitCheckoutDetached(dir, ref string) error {
-	if err := validateGitRef(ref); err != nil {
-		return err
-	}
-	fmt.Printf("Checking out %s (detached)...\n", ref)
-	return RunGitCommandWithOutput(dir, "checkout", "--detach", ref)
+	return gitCheckoutDetached(defaultDeps, dir, ref)
 }
 
 // GitCreateBranchFromHead creates a new branch at the current HEAD and switches to it
 func GitCreateBranchFromHead(dir, name string) error {
-	if err := validateGitRef(name); err != nil {
-		return err
-	}
-	fmt.Printf("Creating branch %s...\n", name)
-	return RunGitCommandWithOutput(dir, "checkout", "-b", name)
+	return gitCreateBranchFromHead(defaultDeps, dir, name)
 }
 
 // GitDeleteBranch deletes a local branch. Use force=true for -D (force delete).
 func GitDeleteBranch(dir, name string, force bool) error {
-	if err := validateGitRef(name); err != nil {
-		return err
-	}
-	flag := "-d"
-	if force {
-		flag = "-D"
-	}
-	return RunGitCommandWithOutput(dir, "branch", flag, "--", name)
+	return gitDeleteBranch(defaultDeps, dir, name, force)
 }
 
 // GitPushRefspec pushes a local ref to a different remote ref using a refspec
 func GitPushRefspec(dir, remote, localRef, remoteRef string) error {
-	r := resolveRemote(remote)
-	if err := validateGitRef(r); err != nil {
-		return err
-	}
-	if err := validateGitRef(localRef); err != nil {
-		return err
-	}
-	if err := validateGitRef(remoteRef); err != nil {
-		return err
-	}
-	refspec := localRef + ":" + remoteRef
-	fmt.Printf("Pushing %s to %s/%s...\n", localRef, r, remoteRef)
-	return RunGitCommandWithOutput(dir, "push", r, refspec)
+	return gitPushRefspec(defaultDeps, dir, remote, localRef, remoteRef)
 }
 
 // getStashCount returns the number of entries in the stash.
 func getStashCount(dir string) (int, error) {
-	output, err := RunGitCommand(dir, "stash", "list")
-	if err != nil {
-		return 0, err
-	}
-	trimmed := strings.TrimSpace(output)
-	if trimmed == "" {
-		return 0, nil
-	}
-	return len(strings.Split(trimmed, "\n")), nil
+	return getStashCountDeps(defaultDeps, dir)
 }
 
 // GitStash stashes local changes. Returns true if changes were actually stashed,
 // false if nothing was stashed (e.g. only untracked files, or clean tree).
 func GitStash(dir string) (bool, error) {
-	countBefore, err := getStashCount(dir)
-	if err != nil {
-		return false, err
-	}
-
-	fmt.Println("Stashing local changes...")
-	if err := RunGitCommandWithOutput(dir, "stash"); err != nil {
-		return false, fmt.Errorf("failed to stash changes: %w", err)
-	}
-
-	countAfter, err := getStashCount(dir)
-	if err != nil {
-		return false, err
-	}
-
-	return countAfter > countBefore, nil
+	return gitStash(defaultDeps, dir)
 }
 
 // GitStashPop pops the most recent stash entry
 func GitStashPop(dir string) error {
-	fmt.Println("Restoring stashed changes...")
-	return RunGitCommandWithOutput(dir, "stash", "pop")
+	return gitStashPop(defaultDeps, dir)
 }
 
 // BranchExistsLocally checks if a branch exists as a local ref.
 func BranchExistsLocally(dir, branch string) (bool, error) {
-	if err := validateGitRef(branch); err != nil {
-		return false, err
-	}
-	_, err := RunGitCommand(dir, "rev-parse", "--verify", "refs/heads/"+branch)
-	if err != nil {
-		return false, nil
-	}
-	return true, nil
+	return branchExistsLocallyDeps(defaultDeps, dir, branch)
 }
 
 // RemoteBranchExists checks if a branch exists on the specified remote.
 func RemoteBranchExists(dir, remote, branch string) (bool, error) {
-	r := resolveRemote(remote)
-	if err := validateGitRef(r); err != nil {
-		return false, err
-	}
-	if err := validateGitRef(branch); err != nil {
-		return false, err
-	}
-	_, err := RunGitCommand(dir, "rev-parse", "--verify", "refs/remotes/"+r+"/"+branch)
-	if err != nil {
-		return false, nil
-	}
-	return true, nil
+	return remoteBranchExistsDeps(defaultDeps, dir, remote, branch)
 }
 
 // GitCheckoutNewFromRef creates a new local branch at the given starting point.
 func GitCheckoutNewFromRef(dir, branch, startPoint string) error {
-	if err := validateGitRef(branch); err != nil {
-		return err
-	}
-	if err := validateGitRef(startPoint); err != nil {
-		return err
-	}
-	fmt.Printf("Creating branch %s from %s...\n", branch, startPoint)
-	return RunGitCommandWithOutput(dir, "checkout", "-b", branch, startPoint)
+	return gitCheckoutNewFromRef(defaultDeps, dir, branch, startPoint)
 }
 
 // GitMergeAbort aborts an in-progress merge, restoring the pre-merge state.
 func GitMergeAbort(dir string) error {
-	_, err := RunGitCommand(dir, "merge", "--abort")
-	return err
+	return gitMergeAbort(defaultDeps, dir)
 }
 
 // HasUnmergedFiles checks if there are unmerged files in the working tree
 func HasUnmergedFiles(dir string) (bool, error) {
-	files, err := GetConflictedFiles(dir)
-	if err != nil {
-		return false, err
-	}
-	return len(files) > 0, nil
+	return hasUnmergedFilesDeps(defaultDeps, dir)
 }

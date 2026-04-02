@@ -2,44 +2,33 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
 // TestPlanSmoke_HappyPath validates the full single-task pipeline:
-// task found → prompt generated → agent invoked → lock released → session finalized with exit code 0.
+// task found -> prompt generated -> agent invoked -> lock released -> session finalized with exit code 0.
 func TestPlanSmoke_HappyPath(t *testing.T) {
+	// Not parallel: uses global default tracker.
+
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
-	origDir, _ := os.Getwd()
-	os.Chdir(tmpDir)
-	t.Cleanup(func() { os.Chdir(origDir) })
-
 	os.MkdirAll(filepath.Join(tmpDir, ".git"), 0755)
 
-	origAuto, origDaemon := planAutoMode, planDaemonMode
-	planAutoMode = false
-	planDaemonMode = false
-	t.Cleanup(func() {
-		planAutoMode = origAuto
-		planDaemonMode = origDaemon
+	deps, _, _, _, _ := NewTestDeps(t)
+	setupPlanTracker(t, deps, []BdIssue{
+		{ID: "smoke-1", Status: "open", IssueType: "task", Title: "Smoke task", Design: ""},
 	})
 
-	taskJSON := `[{"id":"smoke-1","status":"open","issue_type":"task","title":"Smoke task","design":""}]`
-	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
-		{Name: "bd", Args: []string{"list", "--json", "--limit", "500"}, Stdout: taskJSON},
-		{Name: "git", Args: []string{"rev-parse", "HEAD"}, Stdout: "abc123\n"},
-		{Name: "git", Args: []string{"diff", "--numstat", "abc123..HEAD"}, Stdout: ""},
-	})
-	mock.Install()
-
-	recorder := SetupMockClaudeInvoker(t, nil)
+	recorder := SetupMockAgentInvokerOn(t, deps, nil)
 
 	// Capture stdout
 	oldStdout := os.Stdout
@@ -47,7 +36,9 @@ func TestPlanSmoke_HappyPath(t *testing.T) {
 	os.Stdout = w
 	t.Cleanup(func() { os.Stdout = oldStdout })
 
-	runPlan(nil, nil)
+	cmd := &cobra.Command{Use: "plan", Args: cobra.MaximumNArgs(1), Run: runPlan}
+	cmd.SetContext(WithDeps(context.Background(), deps))
+	cmd.Run(cmd, []string{tmpDir})
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -55,23 +46,18 @@ func TestPlanSmoke_HappyPath(t *testing.T) {
 	buf.ReadFrom(r)
 	output := buf.String()
 
-	// Verify banner
 	if !strings.Contains(output, "Running PLANNING agent") {
 		t.Errorf("expected 'Running PLANNING agent' in output, got: %s", output)
 	}
-
-	// Verify Claude invoked exactly once
 	if len(recorder.Invocations) != 1 {
-		t.Fatalf("expected 1 Claude invocation, got %d", len(recorder.Invocations))
+		t.Fatalf("expected 1 agent invocation, got %d", len(recorder.Invocations))
 	}
 
-	// Verify prompt contains planning workflow marker
 	prompt := recorder.Invocations[0].Prompt
 	if !strings.Contains(prompt, "WORKFLOW: Planning Task") {
 		t.Errorf("prompt should contain 'WORKFLOW: Planning Task', got prompt length %d", len(prompt))
 	}
 
-	// Verify lock file is released after single-task mode
 	_, err := os.Stat(filepath.Join(tmpDir, LockFileName))
 	if err == nil {
 		t.Error("lock file should be released after runPlan completes in single-task mode")
@@ -81,33 +67,18 @@ func TestPlanSmoke_HappyPath(t *testing.T) {
 // TestPlanSmoke_NeedsRevisionTask validates that a task with design + needs-revision label
 // is still picked up for planning (re-planning flow).
 func TestPlanSmoke_NeedsRevisionTask(t *testing.T) {
+	// Not parallel: uses global default tracker.
+
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
-	origDir, _ := os.Getwd()
-	os.Chdir(tmpDir)
-	t.Cleanup(func() { os.Chdir(origDir) })
-
 	os.MkdirAll(filepath.Join(tmpDir, ".git"), 0755)
 
-	origAuto, origDaemon := planAutoMode, planDaemonMode
-	planAutoMode = false
-	planDaemonMode = false
-	t.Cleanup(func() {
-		planAutoMode = origAuto
-		planDaemonMode = origDaemon
+	deps, _, _, _, _ := NewTestDeps(t)
+	setupPlanTracker(t, deps, []BdIssue{
+		{ID: "smoke-2", Status: "open", IssueType: "task", Title: "Revision task", Design: "existing plan", Labels: []string{"needs-revision"}},
 	})
 
-	// Task has design but needs-revision label — should still be available for planning
-	taskJSON := `[{"id":"smoke-2","status":"open","issue_type":"task","title":"Revision task","design":"existing plan","labels":["needs-revision"]}]`
-	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
-		{Name: "bd", Args: []string{"list", "--json", "--limit", "500"}, Stdout: taskJSON},
-		{Name: "git", Args: []string{"rev-parse", "HEAD"}, Stdout: "def456\n"},
-		{Name: "git", Args: []string{"diff", "--numstat", "def456..HEAD"}, Stdout: ""},
-	})
-	mock.Install()
-
-	recorder := SetupMockClaudeInvoker(t, nil)
+	recorder := SetupMockAgentInvokerOn(t, deps, nil)
 
 	// Capture stdout
 	oldStdout := os.Stdout
@@ -115,7 +86,9 @@ func TestPlanSmoke_NeedsRevisionTask(t *testing.T) {
 	os.Stdout = w
 	t.Cleanup(func() { os.Stdout = oldStdout })
 
-	runPlan(nil, nil)
+	cmd := &cobra.Command{Use: "plan", Args: cobra.MaximumNArgs(1), Run: runPlan}
+	cmd.SetContext(WithDeps(context.Background(), deps))
+	cmd.Run(cmd, []string{tmpDir})
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -123,44 +96,27 @@ func TestPlanSmoke_NeedsRevisionTask(t *testing.T) {
 	buf.ReadFrom(r)
 	output := buf.String()
 
-	// Should NOT say "no tasks available" — needs-revision task should be picked up
 	if strings.Contains(output, "No tasks available for planning") {
 		t.Error("needs-revision task should be available for planning, but got 'No tasks available'")
 	}
-
-	// Agent should have been invoked
 	if len(recorder.Invocations) != 1 {
-		t.Fatalf("expected 1 Claude invocation for needs-revision task, got %d", len(recorder.Invocations))
+		t.Fatalf("expected 1 agent invocation for needs-revision task, got %d", len(recorder.Invocations))
 	}
 }
 
 // TestPlanSmoke_NoTasksExitsCleanly validates that an empty pipeline exits
 // cleanly with a message and no agent invocation.
 func TestPlanSmoke_NoTasksExitsCleanly(t *testing.T) {
+	// Not parallel: uses global default tracker.
+
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
-	origDir, _ := os.Getwd()
-	os.Chdir(tmpDir)
-	t.Cleanup(func() { os.Chdir(origDir) })
-
 	os.MkdirAll(filepath.Join(tmpDir, ".git"), 0755)
 
-	origAuto, origDaemon := planAutoMode, planDaemonMode
-	planAutoMode = false
-	planDaemonMode = false
-	t.Cleanup(func() {
-		planAutoMode = origAuto
-		planDaemonMode = origDaemon
-	})
+	deps, _, _, _, _ := NewTestDeps(t)
+	setupPlanTracker(t, deps, nil)
 
-	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: "[]"},
-		{Name: "bd", Args: []string{"list", "--json", "--limit", "500"}, Stdout: "[]"},
-	})
-	mock.Install()
-
-	// Install mock invoker and assert it was never called
-	recorder := SetupMockClaudeInvoker(t, nil)
+	recorder := SetupMockAgentInvokerOn(t, deps, nil)
 
 	// Capture stdout
 	oldStdout := os.Stdout
@@ -168,7 +124,9 @@ func TestPlanSmoke_NoTasksExitsCleanly(t *testing.T) {
 	os.Stdout = w
 	t.Cleanup(func() { os.Stdout = oldStdout })
 
-	runPlan(nil, nil)
+	cmd := &cobra.Command{Use: "plan", Args: cobra.MaximumNArgs(1), Run: runPlan}
+	cmd.SetContext(WithDeps(context.Background(), deps))
+	cmd.Run(cmd, []string{tmpDir})
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -179,13 +137,10 @@ func TestPlanSmoke_NoTasksExitsCleanly(t *testing.T) {
 	if !strings.Contains(output, "No tasks available for planning") {
 		t.Errorf("expected 'No tasks available for planning' in output, got: %s", output)
 	}
-
-	// Verify Claude was NOT invoked
 	if len(recorder.Invocations) != 0 {
-		t.Errorf("expected no Claude invocations when no tasks available, got %d", len(recorder.Invocations))
+		t.Errorf("expected no agent invocations when no tasks available, got %d", len(recorder.Invocations))
 	}
 
-	// Verify no lock file was left behind
 	_, err := os.Stat(filepath.Join(tmpDir, LockFileName))
 	if err == nil {
 		t.Error("no lock file should exist when no tasks are available")
@@ -194,9 +149,9 @@ func TestPlanSmoke_NoTasksExitsCleanly(t *testing.T) {
 
 // TestPlanSmoke_AgentError_SessionFinalized validates that when the agent returns an error,
 // the session is finalized with a non-zero exit code.
-// Since runPlan calls os.Exit(1) on agent error, we exercise the session
-// finalization path directly — the same code path runPlan executes before exit.
 func TestPlanSmoke_AgentError_SessionFinalized(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	beadsDir := filepath.Join(tmpDir, "beads")
 
@@ -215,15 +170,11 @@ func TestPlanSmoke_AgentError_SessionFinalized(t *testing.T) {
 		t.Fatalf("failed to create session: %v", err)
 	}
 
-	// Verify session starts as running
 	if sess.Meta.Status != sessions.StatusRunning {
 		t.Errorf("new session status should be 'running', got %q", sess.Meta.Status)
 	}
 
-	// Finalize with error exit code (simulating what runPlan does on agent error)
-	err = sess.Finalize(sessions.FinalizeOptions{
-		ExitCode: 1,
-	})
+	err = sess.Finalize(sessions.FinalizeOptions{ExitCode: 1})
 	if err != nil {
 		t.Fatalf("failed to finalize session: %v", err)
 	}
@@ -238,7 +189,6 @@ func TestPlanSmoke_AgentError_SessionFinalized(t *testing.T) {
 		t.Errorf("session phase should be 'planning', got %q", sess.Meta.Phase)
 	}
 
-	// Verify metadata was persisted to disk
 	metaPath := filepath.Join(beadsDir, "sessions", sess.SessionID(), "metadata.json")
 	data, err := os.ReadFile(metaPath)
 	if err != nil {
@@ -256,14 +206,16 @@ func TestPlanSmoke_AgentError_SessionFinalized(t *testing.T) {
 // TestPlanSmoke_PromptIncludesAllSections validates that GeneratePlanningPrompt
 // produces a prompt containing all expected workflow sections and safety guardrails.
 func TestPlanSmoke_PromptIncludesAllSections(t *testing.T) {
+	t.Parallel()
+
 	prompt := GeneratePlanningPrompt("smoke-agent", nil, "")
 
 	expectedSections := []string{
-		"Step 1:",        // task selection
-		"Step 2:",        // research
-		"Step 3:",        // plan creation
-		"agent name is:", // agent identity
-		"bd ready",       // task discovery command
+		"Step 1:",
+		"Step 2:",
+		"Step 3:",
+		"agent name is:",
+		"bd ready",
 	}
 
 	for _, section := range expectedSections {
@@ -272,12 +224,10 @@ func TestPlanSmoke_PromptIncludesAllSections(t *testing.T) {
 		}
 	}
 
-	// Verify agent name is embedded
 	if !strings.Contains(prompt, "smoke-agent") {
 		t.Error("prompt should contain the agent name 'smoke-agent'")
 	}
 
-	// Verify prompt is non-trivially long (a real planning prompt has workflow details)
 	if len(prompt) < 500 {
 		t.Errorf("prompt seems too short for a planning workflow (%d chars), expected > 500", len(prompt))
 	}

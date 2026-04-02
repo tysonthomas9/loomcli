@@ -117,9 +117,9 @@ func GetWorktreeName(path string) string {
 	return filepath.Base(path)
 }
 
-// ensureRepoWorktree creates a git worktree at targetPath from repoPath if it
+// ensureRepoWorktreeDeps creates a git worktree at targetPath from repoPath if it
 // doesn't already exist. The worktree is created on branch branchName.
-func ensureRepoWorktree(repoPath, targetPath, branchName string) error {
+func ensureRepoWorktreeDeps(deps *Deps, repoPath, targetPath, branchName string) error {
 	// Check if worktree already exists
 	gitFile := filepath.Join(targetPath, ".git")
 	if _, err := os.Stat(gitFile); err == nil {
@@ -132,7 +132,7 @@ func ensureRepoWorktree(repoPath, targetPath, branchName string) error {
 	}
 
 	// Try creating with new branch
-	_, err := RunGitCommand(repoPath, "worktree", "add", targetPath, "-b", branchName)
+	_, err := runGit(deps, repoPath, "worktree", "add", targetPath, "-b", branchName)
 	if err == nil {
 		return nil
 	}
@@ -140,7 +140,7 @@ func ensureRepoWorktree(repoPath, targetPath, branchName string) error {
 	errStr := err.Error()
 	if strings.Contains(errStr, "already exists") || strings.Contains(errStr, "already a worktree") {
 		// Branch exists — try attaching to existing branch
-		_, err = RunGitCommand(repoPath, "worktree", "add", targetPath, branchName)
+		_, err = runGit(deps, repoPath, "worktree", "add", targetPath, branchName)
 		if err == nil {
 			return nil
 		}
@@ -153,4 +153,10 @@ func ensureRepoWorktree(repoPath, targetPath, branchName string) error {
 	}
 
 	return err
+}
+
+// ensureRepoWorktree creates a git worktree at targetPath from repoPath if it
+// doesn't already exist. The worktree is created on branch branchName.
+func ensureRepoWorktree(repoPath, targetPath, branchName string) error {
+	return ensureRepoWorktreeDeps(defaultDeps, repoPath, targetPath, branchName)
 }

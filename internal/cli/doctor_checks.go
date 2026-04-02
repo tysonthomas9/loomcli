@@ -21,8 +21,8 @@ import (
 // versionRegex extracts major.minor from version strings.
 var versionRegex = regexp.MustCompile(`(\d+)\.(\d+)`)
 
-func checkGit() CheckResult {
-	result := defaultDeps.Exec.Run(".", "git", "--version")
+func checkGit(deps *Deps) CheckResult {
+	result := deps.Exec.Run(".", "git", "--version")
 	if result.Err != nil {
 		return CheckResult{
 			Name:    "git",
@@ -60,8 +60,8 @@ func checkGit() CheckResult {
 	}
 }
 
-func checkGitRepo() CheckResult {
-	result := defaultDeps.Exec.Run(".", "git", "rev-parse", "--is-inside-work-tree")
+func checkGitRepo(deps *Deps) CheckResult {
+	result := deps.Exec.Run(".", "git", "rev-parse", "--is-inside-work-tree")
 	if result.Err != nil {
 		return CheckResult{
 			Name:    "git_repo",
@@ -72,8 +72,8 @@ func checkGitRepo() CheckResult {
 	}
 
 	// Check if inside a worktree (not the main working tree)
-	mainResult := defaultDeps.Exec.Run(".", "git", "rev-parse", "--git-common-dir")
-	gitDirResult := defaultDeps.Exec.Run(".", "git", "rev-parse", "--git-dir")
+	mainResult := deps.Exec.Run(".", "git", "rev-parse", "--git-common-dir")
+	gitDirResult := deps.Exec.Run(".", "git", "rev-parse", "--git-dir")
 	if mainResult.Err == nil && gitDirResult.Err == nil {
 		commonDir := strings.TrimSpace(mainResult.Stdout)
 		gitDir := strings.TrimSpace(gitDirResult.Stdout)
@@ -94,8 +94,8 @@ func checkGitRepo() CheckResult {
 	}
 }
 
-func checkTmux() CheckResult {
-	_, err := exec.LookPath("tmux")
+func checkTmux(deps *Deps) CheckResult {
+	_, err := deps.LookPath("tmux")
 	if err != nil {
 		return CheckResult{
 			Name:    "tmux",
@@ -105,7 +105,7 @@ func checkTmux() CheckResult {
 		}
 	}
 
-	result := defaultDeps.Exec.Run(".", "tmux", "-V")
+	result := deps.Exec.Run(".", "tmux", "-V")
 	versionStr := strings.TrimSpace(result.Stdout)
 	matches := versionRegex.FindStringSubmatch(versionStr)
 	if len(matches) >= 3 {
@@ -123,8 +123,8 @@ func checkTmux() CheckResult {
 	}
 }
 
-func checkBdCLI() CheckResult {
-	_, err := exec.LookPath("bd")
+func checkBdCLI(deps *Deps) CheckResult {
+	_, err := deps.LookPath("bd")
 	if err != nil {
 		return CheckResult{
 			Name:    "bd_cli",
@@ -134,7 +134,7 @@ func checkBdCLI() CheckResult {
 		}
 	}
 
-	result := defaultDeps.Exec.Run(".", "bd", "--version")
+	result := deps.Exec.Run(".", "bd", "--version")
 	versionStr := strings.TrimSpace(result.Stdout)
 	if versionStr != "" {
 		return CheckResult{
@@ -151,8 +151,8 @@ func checkBdCLI() CheckResult {
 	}
 }
 
-func checkBdDaemon() CheckResult {
-	if _, err := defaultDeps.LookPath("bd"); err != nil {
+func checkBdDaemon(deps *Deps) CheckResult {
+	if _, err := deps.LookPath("bd"); err != nil {
 		return CheckResult{
 			Name:    "bd_daemon",
 			Status:  StatusFail,
@@ -161,7 +161,7 @@ func checkBdDaemon() CheckResult {
 		}
 	}
 
-	result := defaultDeps.Exec.Run(GetBeadsDir(), "bd", "daemon", "status", "--json")
+	result := deps.Exec.Run(GetBeadsDir(), "bd", "daemon", "status", "--json")
 	if result.Err != nil {
 		return CheckResult{
 			Name:    "bd_daemon",

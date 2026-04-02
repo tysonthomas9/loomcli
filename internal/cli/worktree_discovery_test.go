@@ -114,6 +114,7 @@ func TestGetDefaultBranchForWorktrees_CacheExpired(t *testing.T) {
 }
 
 func TestDetectIntegrationBranch_GitBranchFails(t *testing.T) {
+	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{
 			Name:   "git",
@@ -122,20 +123,21 @@ func TestDetectIntegrationBranch_GitBranchFails(t *testing.T) {
 			Err:    errors.New("exit status 128"),
 		},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
 	worktrees := []WorktreeInfo{
 		{Name: "falcon", Path: "/tmp/repo", Branch: "falcon"},
 		{Name: "nova", Path: "/tmp/repo", Branch: "nova"},
 	}
 
-	result := DetectIntegrationBranch(worktrees)
+	result := detectIntegrationBranchDeps(deps, worktrees)
 	if result != "" {
 		t.Errorf("expected empty string when git branch fails, got %q", result)
 	}
 }
 
 func TestDetectIntegrationBranch_NoCandidates(t *testing.T) {
+	deps, _, _, _, _ := NewTestDeps(t)
 	// Only origin/main and worktree branches - no candidates left
 	mock := NewCommandMock(t, []CommandStub{
 		{
@@ -144,20 +146,21 @@ func TestDetectIntegrationBranch_NoCandidates(t *testing.T) {
 			Stdout: "origin/main\norigin/falcon\norigin/nova\norigin/HEAD\n",
 		},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
 	worktrees := []WorktreeInfo{
 		{Name: "falcon", Path: "/tmp/repo", Branch: "falcon"},
 		{Name: "nova", Path: "/tmp/repo", Branch: "nova"},
 	}
 
-	result := DetectIntegrationBranch(worktrees)
+	result := detectIntegrationBranchDeps(deps, worktrees)
 	if result != "" {
 		t.Errorf("expected empty string when no candidates, got %q", result)
 	}
 }
 
 func TestDetectIntegrationBranch_MergeBaseFails(t *testing.T) {
+	deps, _, _, _, _ := NewTestDeps(t)
 	// A candidate exists, but merge-base --is-ancestor fails for it
 	mock := NewCommandMock(t, []CommandStub{
 		{
@@ -172,20 +175,21 @@ func TestDetectIntegrationBranch_MergeBaseFails(t *testing.T) {
 			Err:  errors.New("exit status 1"),
 		},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
 	worktrees := []WorktreeInfo{
 		{Name: "falcon", Path: "/tmp/repo", Branch: "falcon"},
 		{Name: "nova", Path: "/tmp/repo", Branch: "nova"},
 	}
 
-	result := DetectIntegrationBranch(worktrees)
+	result := detectIntegrationBranchDeps(deps, worktrees)
 	if result != "" {
 		t.Errorf("expected empty string when merge-base fails, got %q", result)
 	}
 }
 
 func TestDetectIntegrationBranch_NoMainOrMaster(t *testing.T) {
+	deps, _, _, _, _ := NewTestDeps(t)
 	// Candidate is an ancestor of all worktrees, but origin/main and origin/master don't exist
 	mock := NewCommandMock(t, []CommandStub{
 		{
@@ -228,14 +232,14 @@ func TestDetectIntegrationBranch_NoMainOrMaster(t *testing.T) {
 			Err:  errors.New("fatal: Needed a single revision"),
 		},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
 	worktrees := []WorktreeInfo{
 		{Name: "falcon", Path: "/tmp/repo", Branch: "falcon"},
 		{Name: "nova", Path: "/tmp/repo", Branch: "nova"},
 	}
 
-	result := DetectIntegrationBranch(worktrees)
+	result := detectIntegrationBranchDeps(deps, worktrees)
 	if result != "" {
 		t.Errorf("expected empty string when no main/master exists, got %q", result)
 	}
@@ -496,6 +500,8 @@ func TestDiscoverWorkspace_BranchErrorFallback(t *testing.T) {
 }
 
 func TestResolveWorkspacePath_WorkspaceNotFound(t *testing.T) {
+	t.Parallel()
+
 	cfg := &LoomConfig{
 		DefaultWorkspace: "existing",
 		Workspaces: map[string]WorkspaceConfig{
@@ -519,6 +525,8 @@ func TestResolveWorkspacePath_WorkspaceNotFound(t *testing.T) {
 }
 
 func TestResolveWorkspacePath_RepoPathNotExist(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 
 	cfg := &LoomConfig{

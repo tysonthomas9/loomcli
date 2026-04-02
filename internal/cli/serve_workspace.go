@@ -268,7 +268,7 @@ func createEmptyWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir, b
 	var repos []RepoConfig
 
 	cleanup := func() {
-		stopDaemonForWorkspace(wsDir)
+		stopDaemonForWorkspace(defaultDeps, wsDir)
 		for _, c := range created {
 			_, _ = RunGitCommand(c.origRepoPath, "worktree", "remove", c.worktreePath)
 		}
@@ -314,7 +314,7 @@ func createEmptyWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir, b
 	// Uses context.Background() because the request context is cancelled when the handler returns.
 	timeout := cfg.Daemon.GetStartupTimeout(defaultDaemonStartupTimeout)
 	go func() { //nolint:gosec // G118 — intentional: daemon outlives request
-		if err := ensureDaemonForWorkspace(context.Background(), wsDir, timeout); err != nil {
+		if err := ensureDaemonForWorkspace(defaultDeps, context.Background(), wsDir, timeout); err != nil {
 			slog.Warn("failed to start daemon for workspace", "workspace", wsName, "err", err)
 		}
 	}()
@@ -362,7 +362,7 @@ func createCloneWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir st
 	}
 
 	cleanupDir := func() {
-		stopDaemonForWorkspace(wsDir)
+		stopDaemonForWorkspace(defaultDeps, wsDir)
 		_ = os.RemoveAll(wsDir)
 	}
 
@@ -421,7 +421,7 @@ func createCloneWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir st
 	// Uses context.Background() because the request context is cancelled when the handler returns.
 	timeout := cfg.Daemon.GetStartupTimeout(defaultDaemonStartupTimeout)
 	go func() { //nolint:gosec // G118 — intentional: daemon outlives request
-		if err := ensureDaemonForWorkspace(context.Background(), wsDir, timeout); err != nil {
+		if err := ensureDaemonForWorkspace(defaultDeps, context.Background(), wsDir, timeout); err != nil {
 			slog.Warn("failed to start daemon for workspace", "workspace", wsName, "err", err)
 		}
 	}()

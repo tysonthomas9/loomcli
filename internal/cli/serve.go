@@ -156,7 +156,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	// Auto-start issue backend if needed (unless --no-daemon)
 	var daemonWeStarted bool
 	if !serveNoDaemon {
-		started, err := EnsureIssueBackendRunning(5 * time.Second)
+		started, err := EnsureIssueBackendRunning(defaultDeps, 5*time.Second)
 		if err != nil {
 			log.Printf("Warning: failed to auto-start issue backend: %v", err)
 			log.Printf("Some API endpoints may return incomplete data.")

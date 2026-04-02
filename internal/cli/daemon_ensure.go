@@ -15,22 +15,22 @@ type daemonStatus struct {
 // EnsureIssueBackendRunning dispatches to the appropriate backend daemon.
 // For fleet-db, the server lifecycle is managed by daemon_cmd.go,
 // so this is a no-op. For beads, it delegates to EnsureBdDaemonRunning.
-func EnsureIssueBackendRunning(timeout time.Duration) (bool, error) {
+func EnsureIssueBackendRunning(deps *Deps, timeout time.Duration) (bool, error) {
 	if isFleetDBActive() {
 		return false, nil
 	}
-	return EnsureBdDaemonRunning(timeout)
+	return EnsureBdDaemonRunning(deps, timeout)
 }
 
 // EnsureBdDaemonRunning checks if the bd daemon is running and starts it if not.
 // Returns (true, nil) if we started the daemon, (false, nil) if it was already running,
 // or (false, err) if the daemon could not be started or did not become ready in time.
-func EnsureBdDaemonRunning(timeout time.Duration) (bool, error) {
-	if isDaemonRunning() {
+func EnsureBdDaemonRunning(deps *Deps, timeout time.Duration) (bool, error) {
+	if isDaemonRunning(deps) {
 		return false, nil
 	}
 
-	result := defaultDeps.Exec.Run(GetBeadsDir(), "bd", "daemon", "start")
+	result := deps.Exec.Run(GetBeadsDir(), "bd", "daemon", "start")
 	if result.Err != nil {
 		return false, fmt.Errorf("failed to start bd daemon: %w", result.Err)
 	}
@@ -44,7 +44,7 @@ func EnsureBdDaemonRunning(timeout time.Duration) (bool, error) {
 		case <-deadline:
 			return false, fmt.Errorf("daemon did not become ready within %s", timeout)
 		case <-ticker.C:
-			if isDaemonRunning() {
+			if isDaemonRunning(deps) {
 				return true, nil
 			}
 		}
@@ -52,8 +52,8 @@ func EnsureBdDaemonRunning(timeout time.Duration) (bool, error) {
 }
 
 // isDaemonRunning checks if the bd daemon is currently running.
-func isDaemonRunning() bool {
-	result := defaultDeps.Exec.Run(GetBeadsDir(), "bd", "daemon", "status", "--json")
+func isDaemonRunning(deps *Deps) bool {
+	result := deps.Exec.Run(GetBeadsDir(), "bd", "daemon", "status", "--json")
 	if result.Err != nil {
 		return false
 	}

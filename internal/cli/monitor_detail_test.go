@@ -8,6 +8,7 @@ import (
 
 // TestGetGitHubRemoteURL tests conversion of git remote URLs to GitHub HTTPS URLs.
 func TestGetGitHubRemoteURL(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		stdout   string
@@ -64,6 +65,8 @@ func TestGetGitHubRemoteURL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
 			mock := NewCommandMock(t, []CommandStub{
 				{
 					Name:   "git",
@@ -72,9 +75,9 @@ func TestGetGitHubRemoteURL(t *testing.T) {
 					Err:    tt.err,
 				},
 			})
-			mock.Install()
+			mock.InstallOn(deps)
 
-			result := getGitHubRemoteURL("/some/path")
+			result := getGitHubRemoteURLDeps(deps, "/some/path")
 			if result != tt.expected {
 				t.Errorf("expected %q, got %q", tt.expected, result)
 			}
@@ -84,8 +87,10 @@ func TestGetGitHubRemoteURL(t *testing.T) {
 
 // TestGetWorktreeCommitDetails tests fetching recent commits ahead of integration branch.
 func TestGetWorktreeCommitDetails(t *testing.T) {
+	t.Parallel()
 	t.Run("normal commits with github URL", func(t *testing.T) {
-
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewCommandMock(t, []CommandStub{
 			{
 				Name: "git",
@@ -95,9 +100,9 @@ func TestGetWorktreeCommitDetails(t *testing.T) {
 					"ghi9012|Third commit message\n",
 			},
 		})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		commits := getWorktreeCommitDetails("/some/path", "main", 5, "https://github.com/user/repo", "")
+		commits := getWorktreeCommitDetailsDeps(deps, "/some/path", "main", 5, "https://github.com/user/repo", "")
 		if len(commits) != 3 {
 			t.Fatalf("expected 3 commits, got %d", len(commits))
 		}
@@ -123,6 +128,8 @@ func TestGetWorktreeCommitDetails(t *testing.T) {
 	})
 
 	t.Run("commits without github URL", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewCommandMock(t, []CommandStub{
 			{
 				Name:   "git",
@@ -130,9 +137,9 @@ func TestGetWorktreeCommitDetails(t *testing.T) {
 				Stdout: "abc1234|Some commit\n",
 			},
 		})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		commits := getWorktreeCommitDetails("/some/path", "main", 3, "", "")
+		commits := getWorktreeCommitDetailsDeps(deps, "/some/path", "main", 3, "", "")
 		if len(commits) != 1 {
 			t.Fatalf("expected 1 commit, got %d", len(commits))
 		}
@@ -148,6 +155,8 @@ func TestGetWorktreeCommitDetails(t *testing.T) {
 	})
 
 	t.Run("no commits ahead", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewCommandMock(t, []CommandStub{
 			{
 				Name:   "git",
@@ -155,15 +164,17 @@ func TestGetWorktreeCommitDetails(t *testing.T) {
 				Stdout: "",
 			},
 		})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		commits := getWorktreeCommitDetails("/some/path", "main", 10, "https://github.com/user/repo", "")
+		commits := getWorktreeCommitDetailsDeps(deps, "/some/path", "main", 10, "https://github.com/user/repo", "")
 		if commits != nil {
 			t.Errorf("expected nil for no commits, got %v", commits)
 		}
 	})
 
 	t.Run("git error returns nil", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewCommandMock(t, []CommandStub{
 			{
 				Name: "git",
@@ -171,15 +182,17 @@ func TestGetWorktreeCommitDetails(t *testing.T) {
 				Err:  fmt.Errorf("fatal: bad revision"),
 			},
 		})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		commits := getWorktreeCommitDetails("/some/path", "main", 10, "https://github.com/user/repo", "")
+		commits := getWorktreeCommitDetailsDeps(deps, "/some/path", "main", 10, "https://github.com/user/repo", "")
 		if commits != nil {
 			t.Errorf("expected nil on git error, got %v", commits)
 		}
 	})
 
 	t.Run("uses branch override", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewCommandMock(t, []CommandStub{
 			{
 				Name:   "git",
@@ -187,9 +200,9 @@ func TestGetWorktreeCommitDetails(t *testing.T) {
 				Stdout: "abc1234|Commit on develop\n",
 			},
 		})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		commits := getWorktreeCommitDetails("/some/path", "main", 5, "", "develop")
+		commits := getWorktreeCommitDetailsDeps(deps, "/some/path", "main", 5, "", "develop")
 		if len(commits) != 1 {
 			t.Fatalf("expected 1 commit, got %d", len(commits))
 		}
@@ -199,6 +212,8 @@ func TestGetWorktreeCommitDetails(t *testing.T) {
 	})
 
 	t.Run("commit message with pipe character", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewCommandMock(t, []CommandStub{
 			{
 				Name:   "git",
@@ -206,9 +221,9 @@ func TestGetWorktreeCommitDetails(t *testing.T) {
 				Stdout: "abc1234|Fix bug | handle edge case\n",
 			},
 		})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		commits := getWorktreeCommitDetails("/some/path", "main", 5, "", "")
+		commits := getWorktreeCommitDetailsDeps(deps, "/some/path", "main", 5, "", "")
 		if len(commits) != 1 {
 			t.Fatalf("expected 1 commit, got %d", len(commits))
 		}
@@ -219,6 +234,8 @@ func TestGetWorktreeCommitDetails(t *testing.T) {
 	})
 
 	t.Run("whitespace-only output returns nil", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewCommandMock(t, []CommandStub{
 			{
 				Name:   "git",
@@ -226,9 +243,9 @@ func TestGetWorktreeCommitDetails(t *testing.T) {
 				Stdout: "   \n  \n",
 			},
 		})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		commits := getWorktreeCommitDetails("/some/path", "main", 10, "", "")
+		commits := getWorktreeCommitDetailsDeps(deps, "/some/path", "main", 10, "", "")
 		if commits != nil {
 			t.Errorf("expected nil for whitespace-only output, got %v", commits)
 		}
@@ -237,7 +254,10 @@ func TestGetWorktreeCommitDetails(t *testing.T) {
 
 // TestGetWorktreeFileChanges tests parsing of git status --porcelain output.
 func TestGetWorktreeFileChanges(t *testing.T) {
+	t.Parallel()
 	t.Run("mixed statuses", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		porcelainOutput := " M internal/cli/monitor.go\n" +
 			"A  internal/cli/new_file.go\n" +
 			" D internal/cli/deleted.go\n" +
@@ -251,9 +271,9 @@ func TestGetWorktreeFileChanges(t *testing.T) {
 				Stdout: porcelainOutput,
 			},
 		})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		changes := getWorktreeFileChanges("/some/path")
+		changes := getWorktreeFileChangesDeps(deps, "/some/path")
 		if len(changes) != 5 {
 			t.Fatalf("expected 5 changes, got %d", len(changes))
 		}
@@ -281,6 +301,8 @@ func TestGetWorktreeFileChanges(t *testing.T) {
 	})
 
 	t.Run("empty working tree", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewCommandMock(t, []CommandStub{
 			{
 				Name:   "git",
@@ -288,15 +310,17 @@ func TestGetWorktreeFileChanges(t *testing.T) {
 				Stdout: "",
 			},
 		})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		changes := getWorktreeFileChanges("/some/path")
+		changes := getWorktreeFileChangesDeps(deps, "/some/path")
 		if changes != nil {
 			t.Errorf("expected nil for empty working tree, got %v", changes)
 		}
 	})
 
 	t.Run("git error returns nil", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewCommandMock(t, []CommandStub{
 			{
 				Name: "git",
@@ -304,15 +328,17 @@ func TestGetWorktreeFileChanges(t *testing.T) {
 				Err:  fmt.Errorf("not a git repository"),
 			},
 		})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		changes := getWorktreeFileChanges("/some/path")
+		changes := getWorktreeFileChangesDeps(deps, "/some/path")
 		if changes != nil {
 			t.Errorf("expected nil on git error, got %v", changes)
 		}
 	})
 
 	t.Run("more than 20 files limited", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		// Generate 25 file changes
 		var lines []string
 		for i := 0; i < 25; i++ {
@@ -327,9 +353,9 @@ func TestGetWorktreeFileChanges(t *testing.T) {
 				Stdout: porcelainOutput,
 			},
 		})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		changes := getWorktreeFileChanges("/some/path")
+		changes := getWorktreeFileChangesDeps(deps, "/some/path")
 		if len(changes) != 20 {
 			t.Errorf("expected 20 changes (limited), got %d", len(changes))
 		}
@@ -344,6 +370,8 @@ func TestGetWorktreeFileChanges(t *testing.T) {
 	})
 
 	t.Run("exactly 20 files", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		var lines []string
 		for i := 0; i < 20; i++ {
 			lines = append(lines, fmt.Sprintf(" M file_%02d.go", i))
@@ -357,15 +385,17 @@ func TestGetWorktreeFileChanges(t *testing.T) {
 				Stdout: porcelainOutput,
 			},
 		})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		changes := getWorktreeFileChanges("/some/path")
+		changes := getWorktreeFileChangesDeps(deps, "/some/path")
 		if len(changes) != 20 {
 			t.Errorf("expected 20 changes, got %d", len(changes))
 		}
 	})
 
 	t.Run("whitespace-only output returns nil", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewCommandMock(t, []CommandStub{
 			{
 				Name:   "git",
@@ -373,15 +403,17 @@ func TestGetWorktreeFileChanges(t *testing.T) {
 				Stdout: "   \n  \n",
 			},
 		})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		changes := getWorktreeFileChanges("/some/path")
+		changes := getWorktreeFileChangesDeps(deps, "/some/path")
 		if changes != nil {
 			t.Errorf("expected nil for whitespace-only output, got %v", changes)
 		}
 	})
 
 	t.Run("short lines are skipped", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		// Lines shorter than 4 chars should be skipped
 		porcelainOutput := " M valid_file.go\n" +
 			"ab\n" + // too short (len < 4)
@@ -394,9 +426,9 @@ func TestGetWorktreeFileChanges(t *testing.T) {
 				Stdout: porcelainOutput,
 			},
 		})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		changes := getWorktreeFileChanges("/some/path")
+		changes := getWorktreeFileChangesDeps(deps, "/some/path")
 		if len(changes) != 2 {
 			t.Fatalf("expected 2 changes (short line skipped), got %d", len(changes))
 		}
@@ -409,6 +441,8 @@ func TestGetWorktreeFileChanges(t *testing.T) {
 	})
 
 	t.Run("staged modification status", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		// Staged modifications have a letter in the first column
 		porcelainOutput := "M  staged_file.go\n" +
 			"MM both_modified.go\n"
@@ -420,9 +454,9 @@ func TestGetWorktreeFileChanges(t *testing.T) {
 				Stdout: porcelainOutput,
 			},
 		})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		changes := getWorktreeFileChanges("/some/path")
+		changes := getWorktreeFileChangesDeps(deps, "/some/path")
 		if len(changes) != 2 {
 			t.Fatalf("expected 2 changes, got %d", len(changes))
 		}

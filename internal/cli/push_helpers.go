@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func pushAllWorkspaces(targetBranch string) {
+func pushAllWorkspaces(deps *Deps, targetBranch string) {
 	resolver, err := NewResolver()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating resolver: %v\n", err)
@@ -42,7 +42,7 @@ func pushAllWorkspaces(targetBranch string) {
 			continue
 		}
 
-		pushWorkspaceWorktrees(worktrees, "", targetBranch)
+		pushWorkspaceWorktrees(deps, worktrees, "", targetBranch)
 		fmt.Println("")
 	}
 
@@ -51,7 +51,7 @@ func pushAllWorkspaces(targetBranch string) {
 	fmt.Println("=========================================")
 }
 
-func pushWorkspaceRepos(resolver *Resolver, sourceBranch, targetBranch string) {
+func pushWorkspaceRepos(deps *Deps, resolver *Resolver, sourceBranch, targetBranch string) {
 	worktrees, err := resolver.DiscoverWorktrees()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error discovering repos: %v\n", err)
@@ -68,14 +68,14 @@ func pushWorkspaceRepos(resolver *Resolver, sourceBranch, targetBranch string) {
 	fmt.Println("=========================================")
 	fmt.Println("")
 
-	pushWorkspaceWorktrees(worktrees, sourceBranch, targetBranch)
+	pushWorkspaceWorktrees(deps, worktrees, sourceBranch, targetBranch)
 
 	fmt.Println("=========================================")
 	fmt.Printf("Workspace %q push complete!\n", resolver.WorkspaceName())
 	fmt.Println("=========================================")
 }
 
-func pushWorkspaceWorktrees(worktrees []WorktreeInfo, sourceBranch, targetBranch string) {
+func pushWorkspaceWorktrees(deps *Deps, worktrees []WorktreeInfo, sourceBranch, targetBranch string) {
 	type result struct {
 		repo    string
 		success bool
@@ -103,7 +103,7 @@ func pushWorkspaceWorktrees(worktrees []WorktreeInfo, sourceBranch, targetBranch
 
 		remote := wt.Repo.Remote
 
-		err := pushBranchInRepo(wt.Path, source, target, remote)
+		err := pushBranchInRepo(deps, wt.Path, source, target, remote)
 		if err != nil {
 			results = append(results, result{repo: wt.Name, success: false, err: err.Error()})
 		} else {
@@ -123,7 +123,7 @@ func pushWorkspaceWorktrees(worktrees []WorktreeInfo, sourceBranch, targetBranch
 	}
 }
 
-func pushBranchInRepo(repoPath, sourceBranch, targetBranch, remote string) error {
+func pushBranchInRepo(deps *Deps, repoPath, sourceBranch, targetBranch, remote string) error {
 	r := resolveRemote(remote)
 
 	fmt.Println("=========================================")
@@ -131,46 +131,46 @@ func pushBranchInRepo(repoPath, sourceBranch, targetBranch, remote string) error
 	fmt.Println("=========================================")
 
 	// Fetch latest
-	if err := GitFetchRemote(repoPath, remote); err != nil {
+	if err := gitFetchRemote(deps, repoPath, remote); err != nil {
 		return fmt.Errorf("fetching: %v", err)
 	}
 
 	// Stash local changes if working tree is dirty
-	stashCleanup, err := stashIfDirty(repoPath)
+	stashCleanup, err := stashIfDirtyDeps(deps, repoPath)
 	if err != nil {
 		return fmt.Errorf("stashing changes: %v", err)
 	}
 	defer stashCleanup()
 
 	// Checkout target branch, with deferred restore of original branch
-	restoreBranch, err := checkoutTarget(repoPath, targetBranch)
+	restoreBranch, err := checkoutTargetDeps(deps, repoPath, targetBranch)
 	defer restoreBranch()
 	if err != nil {
 		if isWorktreeConflictErr(err) {
 			fmt.Printf("⚠ Target branch %s is checked out in another worktree\n", targetBranch)
 			fmt.Println("⚠ Using detached HEAD approach")
-			return pushBranchInRepoDetached(repoPath, sourceBranch, targetBranch, remote)
+			return pushBranchInRepoDetached(deps, repoPath, sourceBranch, targetBranch, remote)
 		}
 		return fmt.Errorf("checking out %s: %v", targetBranch, err)
 	}
 
 	// Pull latest
-	if err := GitPullRemote(repoPath, remote, targetBranch); err != nil {
+	if err := gitPullRemote(deps, repoPath, remote, targetBranch); err != nil {
 		return fmt.Errorf("pulling %s: %v", targetBranch, err)
 	}
 
 	// Check if there are commits to merge
-	hasCommits, err := HasCommitsBetweenRemote(repoPath, remote, targetBranch, sourceBranch)
+	hasCommits, err := hasCommitsBetweenRemoteDeps(deps, repoPath, remote, targetBranch, sourceBranch)
 	if err == nil && !hasCommits {
 		fmt.Printf("✓ Already up to date (no new commits in %s)\n", sourceBranch)
 		return nil
 	}
 
 	// Attempt merge
-	conflicts, mergeErr := mergeSource(repoPath, sourceBranch, targetBranch)
+	conflicts, mergeErr := mergeSourceDeps(deps, repoPath, sourceBranch, targetBranch)
 	if mergeErr != nil {
 		if len(conflicts) > 0 {
-			if err := resolveConflictsWithAgent(repoPath, sourceBranch, targetBranch, conflicts); err != nil {
+			if err := resolveConflictsWithAgentDeps(deps, repoPath, sourceBranch, targetBranch, conflicts); err != nil {
 				return fmt.Errorf("resolving conflicts: %v", err)
 			}
 			return nil
@@ -181,7 +181,7 @@ func pushBranchInRepo(repoPath, sourceBranch, targetBranch, remote string) error
 	fmt.Println("✓ Push completed successfully (no conflicts)")
 
 	// Push
-	if err := GitPushRemote(repoPath, remote, targetBranch); err != nil {
+	if err := gitPushRemote(deps, repoPath, remote, targetBranch); err != nil {
 		return fmt.Errorf("pushing: %v", err)
 	}
 
@@ -191,43 +191,43 @@ func pushBranchInRepo(repoPath, sourceBranch, targetBranch, remote string) error
 
 // pushBranchInRepoDetached handles pushing when the target branch is checked out
 // in another worktree. Uses detached HEAD + temp branch to avoid conflicts.
-func pushBranchInRepoDetached(repoPath, sourceBranch, targetBranch, remote string) error {
+func pushBranchInRepoDetached(deps *Deps, repoPath, sourceBranch, targetBranch, remote string) error {
 	r := resolveRemote(remote)
 	tempBranch := fmt.Sprintf("loom-push-temp-%d", time.Now().UnixNano())
 
 	// Checkout origin/<target> detached
-	if err := GitCheckoutDetached(repoPath, r+"/"+targetBranch); err != nil {
+	if err := gitCheckoutDetached(deps, repoPath, r+"/"+targetBranch); err != nil {
 		return fmt.Errorf("checking out %s/%s detached: %v", r, targetBranch, err)
 	}
 
 	// Ensure we restore source branch on any exit path (including early return)
 	defer func() {
-		_ = GitCheckout(repoPath, sourceBranch)
+		_ = gitCheckout(deps, repoPath, sourceBranch)
 	}()
 
 	// Check if there are commits to merge before creating temp branch
-	hasCommits, err := HasCommitsBetweenRemote(repoPath, remote, targetBranch, sourceBranch)
+	hasCommits, err := hasCommitsBetweenRemoteDeps(deps, repoPath, remote, targetBranch, sourceBranch)
 	if err == nil && !hasCommits {
 		fmt.Printf("✓ Already up to date (no new commits in %s)\n", sourceBranch)
 		return nil
 	}
 
 	// Create temp branch from detached HEAD
-	if err := GitCreateBranchFromHead(repoPath, tempBranch); err != nil {
+	if err := gitCreateBranchFromHead(deps, repoPath, tempBranch); err != nil {
 		return fmt.Errorf("creating temp branch: %v", err)
 	}
 
 	// Cleanup temp branch on exit
 	defer func() {
-		_ = GitDeleteBranch(repoPath, tempBranch, true)
+		_ = gitDeleteBranch(deps, repoPath, tempBranch, true)
 	}()
 
 	// Attempt merge
-	conflicts, mergeErr := mergeSource(repoPath, sourceBranch, targetBranch)
+	conflicts, mergeErr := mergeSourceDeps(deps, repoPath, sourceBranch, targetBranch)
 	if mergeErr != nil {
 		if len(conflicts) > 0 {
 			pushRef := fmt.Sprintf("HEAD:%s", targetBranch)
-			if err := resolveConflictsDetached(repoPath, sourceBranch, targetBranch, conflicts, pushRef); err != nil {
+			if err := resolveConflictsDetachedDeps(deps, repoPath, sourceBranch, targetBranch, conflicts, pushRef); err != nil {
 				return fmt.Errorf("resolving conflicts: %v", err)
 			}
 			return nil
@@ -238,7 +238,7 @@ func pushBranchInRepoDetached(repoPath, sourceBranch, targetBranch, remote strin
 	fmt.Println("✓ Push completed successfully (no conflicts)")
 
 	// Push temp branch to remote target using refspec
-	if err := GitPushRefspec(repoPath, remote, tempBranch, targetBranch); err != nil {
+	if err := gitPushRefspec(deps, repoPath, remote, tempBranch, targetBranch); err != nil {
 		return fmt.Errorf("pushing: %v", err)
 	}
 
@@ -253,7 +253,7 @@ func targetBranchDisplay(target string) string {
 	return target
 }
 
-func pushAllWorktrees(targetBranch string) {
+func pushAllWorktrees(deps *Deps, targetBranch string) {
 	fmt.Println("=========================================")
 	fmt.Printf("Pushing all worktrees -> %s\n", targetBranch)
 	fmt.Println("=========================================")
@@ -280,7 +280,7 @@ func pushAllWorktrees(targetBranch string) {
 
 	// Push each branch
 	for _, wt := range worktrees {
-		pushBranch(wt.Branch, targetBranch)
+		pushBranch(deps, wt.Branch, targetBranch)
 		fmt.Println("")
 	}
 
@@ -289,7 +289,7 @@ func pushAllWorktrees(targetBranch string) {
 	fmt.Println("=========================================")
 }
 
-func pushBranch(sourceBranch, targetBranch string) {
+func pushBranch(deps *Deps, sourceBranch, targetBranch string) {
 	scriptDir, err := GetScriptDir()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -301,13 +301,13 @@ func pushBranch(sourceBranch, targetBranch string) {
 	fmt.Println("=========================================")
 
 	// Fetch latest
-	if err := GitFetch(scriptDir); err != nil {
+	if err := gitFetch(deps, scriptDir); err != nil {
 		fmt.Fprintf(os.Stderr, "Error fetching: %v\n", err)
 		return
 	}
 
 	// Stash local changes if working tree is dirty
-	stashCleanup, err := stashIfDirty(scriptDir)
+	stashCleanup, err := stashIfDirtyDeps(deps, scriptDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error stashing: %v\n", err)
 		return
@@ -315,13 +315,13 @@ func pushBranch(sourceBranch, targetBranch string) {
 	defer stashCleanup()
 
 	// Checkout target branch, with deferred restore of original branch
-	restoreBranch, err := checkoutTarget(scriptDir, targetBranch)
+	restoreBranch, err := checkoutTargetDeps(deps, scriptDir, targetBranch)
 	defer restoreBranch()
 	if err != nil {
 		if isWorktreeConflictErr(err) {
 			fmt.Printf("⚠ Target branch %s is checked out in another worktree\n", targetBranch)
 			fmt.Println("⚠ Using detached HEAD approach")
-			if err := pushBranchDetached(scriptDir, sourceBranch, targetBranch); err != nil {
+			if err := pushBranchDetached(deps, scriptDir, sourceBranch, targetBranch); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			}
 			return
@@ -331,23 +331,23 @@ func pushBranch(sourceBranch, targetBranch string) {
 	}
 
 	// Pull latest
-	if err := GitPull(scriptDir, targetBranch); err != nil {
+	if err := gitPull(deps, scriptDir, targetBranch); err != nil {
 		fmt.Fprintf(os.Stderr, "Error pulling %s: %v\n", targetBranch, err)
 		return
 	}
 
 	// Check if there are commits to merge
-	hasCommits, err := HasCommitsBetween(scriptDir, targetBranch, sourceBranch)
+	hasCommits, err := hasCommitsBetweenDeps(deps, scriptDir, targetBranch, sourceBranch)
 	if err == nil && !hasCommits {
 		fmt.Printf("✓ Already up to date (no new commits in %s)\n", sourceBranch)
 		return
 	}
 
 	// Attempt merge
-	conflicts, mergeErr := mergeSource(scriptDir, sourceBranch, targetBranch)
+	conflicts, mergeErr := mergeSourceDeps(deps, scriptDir, sourceBranch, targetBranch)
 	if mergeErr != nil {
 		if len(conflicts) > 0 {
-			if err := resolveConflictsWithAgent(scriptDir, sourceBranch, targetBranch, conflicts); err != nil {
+			if err := resolveConflictsWithAgentDeps(deps, scriptDir, sourceBranch, targetBranch, conflicts); err != nil {
 				fmt.Fprintf(os.Stderr, "Error resolving conflicts: %v\n", err)
 			}
 			return
@@ -359,7 +359,7 @@ func pushBranch(sourceBranch, targetBranch string) {
 	fmt.Println("✓ Push completed successfully (no conflicts)")
 
 	// Push
-	if err := GitPush(scriptDir, targetBranch); err != nil {
+	if err := gitPush(deps, scriptDir, targetBranch); err != nil {
 		fmt.Fprintf(os.Stderr, "Error pushing: %v\n", err)
 		return
 	}
@@ -369,42 +369,42 @@ func pushBranch(sourceBranch, targetBranch string) {
 
 // pushBranchDetached handles legacy push when target branch is checked out elsewhere.
 // Uses detached HEAD + temp branch approach with "origin" as the remote.
-func pushBranchDetached(scriptDir, sourceBranch, targetBranch string) error {
+func pushBranchDetached(deps *Deps, scriptDir, sourceBranch, targetBranch string) error {
 	tempBranch := fmt.Sprintf("loom-push-temp-%d", time.Now().UnixNano())
 
 	// Checkout origin/<target> detached
-	if err := GitCheckoutDetached(scriptDir, "origin/"+targetBranch); err != nil {
+	if err := gitCheckoutDetached(deps, scriptDir, "origin/"+targetBranch); err != nil {
 		return fmt.Errorf("checking out origin/%s detached: %v", targetBranch, err)
 	}
 
 	// Ensure we restore source branch on any exit path (including early return)
 	defer func() {
-		_ = GitCheckout(scriptDir, sourceBranch)
+		_ = gitCheckout(deps, scriptDir, sourceBranch)
 	}()
 
 	// Check if there are commits to merge before creating temp branch
-	hasCommits, err := HasCommitsBetween(scriptDir, targetBranch, sourceBranch)
+	hasCommits, err := hasCommitsBetweenDeps(deps, scriptDir, targetBranch, sourceBranch)
 	if err == nil && !hasCommits {
 		fmt.Printf("✓ Already up to date (no new commits in %s)\n", sourceBranch)
 		return nil
 	}
 
 	// Create temp branch from detached HEAD
-	if err := GitCreateBranchFromHead(scriptDir, tempBranch); err != nil {
+	if err := gitCreateBranchFromHead(deps, scriptDir, tempBranch); err != nil {
 		return fmt.Errorf("creating temp branch: %v", err)
 	}
 
 	// Cleanup temp branch on exit
 	defer func() {
-		_ = GitDeleteBranch(scriptDir, tempBranch, true)
+		_ = gitDeleteBranch(deps, scriptDir, tempBranch, true)
 	}()
 
 	// Attempt merge
-	conflicts, mergeErr := mergeSource(scriptDir, sourceBranch, targetBranch)
+	conflicts, mergeErr := mergeSourceDeps(deps, scriptDir, sourceBranch, targetBranch)
 	if mergeErr != nil {
 		if len(conflicts) > 0 {
 			pushRef := fmt.Sprintf("HEAD:%s", targetBranch)
-			if err := resolveConflictsDetached(scriptDir, sourceBranch, targetBranch, conflicts, pushRef); err != nil {
+			if err := resolveConflictsDetachedDeps(deps, scriptDir, sourceBranch, targetBranch, conflicts, pushRef); err != nil {
 				return fmt.Errorf("resolving conflicts: %v", err)
 			}
 			return nil
@@ -415,7 +415,7 @@ func pushBranchDetached(scriptDir, sourceBranch, targetBranch string) error {
 	fmt.Println("✓ Push completed successfully (no conflicts)")
 
 	// Push temp branch to remote target using refspec
-	if err := GitPushRefspec(scriptDir, "", tempBranch, targetBranch); err != nil {
+	if err := gitPushRefspec(deps, scriptDir, "", tempBranch, targetBranch); err != nil {
 		return fmt.Errorf("pushing: %v", err)
 	}
 

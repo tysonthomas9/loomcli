@@ -10,6 +10,7 @@ import (
 )
 
 func TestOpenCodeBackendName(t *testing.T) {
+	t.Parallel()
 	b := &OpenCodeBackend{}
 	if got := b.Name(); got != "opencode" {
 		t.Errorf("expected 'opencode', got %q", got)
@@ -17,6 +18,7 @@ func TestOpenCodeBackendName(t *testing.T) {
 }
 
 func TestOpenCodeBackendRegistered(t *testing.T) {
+	t.Parallel()
 	// After init(), the OpenCode backend should be registered
 	backendMu.RLock()
 	b, ok := backends["opencode"]
@@ -31,6 +33,7 @@ func TestOpenCodeBackendRegistered(t *testing.T) {
 }
 
 func TestOpenCodeInvokeInteractive_MockInvoker(t *testing.T) {
+	// Not parallel: mutates global openCodeInvoker.
 	var gotWorkDir, gotPrompt, gotAgentName string
 	installOpenCodeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		gotWorkDir = workDir
@@ -56,6 +59,7 @@ func TestOpenCodeInvokeInteractive_MockInvoker(t *testing.T) {
 }
 
 func TestOpenCodeInvokeInteractive_MockInvokerError(t *testing.T) {
+	// Not parallel: mutates global openCodeInvoker.
 	expectedErr := errors.New("opencode invocation failed")
 	installOpenCodeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		return expectedErr
@@ -69,6 +73,7 @@ func TestOpenCodeInvokeInteractive_MockInvokerError(t *testing.T) {
 }
 
 func TestOpenCodeInvokeNonInteractive_MockInvoker(t *testing.T) {
+	// Not parallel: mutates global openCodeNonInteractiveInvoker.
 	var gotWorkDir, gotPrompt, gotAgentName string
 	var gotShutdown <-chan struct{}
 	installOpenCodeNonInteractiveMock(t, func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
@@ -100,6 +105,7 @@ func TestOpenCodeInvokeNonInteractive_MockInvoker(t *testing.T) {
 }
 
 func TestOpenCodeInvokeNonInteractive_MockInvokerError(t *testing.T) {
+	// Not parallel: mutates global openCodeNonInteractiveInvoker.
 	expectedErr := errors.New("opencode non-interactive failed")
 	installOpenCodeNonInteractiveMock(t, func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		return expectedErr
@@ -113,6 +119,7 @@ func TestOpenCodeInvokeNonInteractive_MockInvokerError(t *testing.T) {
 }
 
 func TestOpenCodeInvokeInteractive_EnvVars(t *testing.T) {
+	// Not parallel: mutates global openCodeInvoker.
 	var capturedEnv []string
 	installOpenCodeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		env := append(FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
@@ -138,6 +145,7 @@ func TestOpenCodeInvokeInteractive_EnvVars(t *testing.T) {
 }
 
 func TestOpenCodeInvokeInteractive_NoAgentName(t *testing.T) {
+	// Not parallel: mutates global openCodeInvoker and env vars.
 	// Clear any existing BD_ACTOR from the environment first.
 	origBDActor, hadBDActor := os.LookupEnv("BD_ACTOR")
 	os.Unsetenv("BD_ACTOR")
@@ -169,6 +177,7 @@ func TestOpenCodeInvokeInteractive_NoAgentName(t *testing.T) {
 }
 
 func TestOpenCodeBackendInvokeInteractive(t *testing.T) {
+	// Not parallel: mutates global openCodeInvoker.
 	var called bool
 	installOpenCodeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		called = true
@@ -186,6 +195,7 @@ func TestOpenCodeBackendInvokeInteractive(t *testing.T) {
 }
 
 func TestOpenCodeBackendInvokeNonInteractive(t *testing.T) {
+	// Not parallel: mutates global openCodeNonInteractiveInvoker.
 	var called bool
 	var gotShutdown <-chan struct{}
 	installOpenCodeNonInteractiveMock(t, func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
@@ -209,6 +219,7 @@ func TestOpenCodeBackendInvokeNonInteractive(t *testing.T) {
 }
 
 func TestCollectOpenCodeStreamUsage_WithUsage(t *testing.T) {
+	t.Parallel()
 	c := usage.NewCollector("opencode", "test")
 
 	line := `{"usage":{"input_tokens":800,"output_tokens":400}}`
@@ -224,6 +235,7 @@ func TestCollectOpenCodeStreamUsage_WithUsage(t *testing.T) {
 }
 
 func TestCollectOpenCodeStreamUsage_NoUsage(t *testing.T) {
+	t.Parallel()
 	c := usage.NewCollector("opencode", "test")
 
 	line := `{"type":"message","content":"hello"}`
@@ -236,6 +248,7 @@ func TestCollectOpenCodeStreamUsage_NoUsage(t *testing.T) {
 }
 
 func TestCollectOpenCodeStreamUsage_InvalidJSON(t *testing.T) {
+	t.Parallel()
 	c := usage.NewCollector("opencode", "test")
 	collectOpenCodeStreamUsage("not json", c)
 

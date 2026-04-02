@@ -6,6 +6,7 @@ import (
 )
 
 func TestSyncSingleWorkspace_PushAndPull(t *testing.T) {
+	// not parallel: uses SetupTestEnv, mock.Install(), defaultDeps.Agent mutation
 	tmpDir := t.TempDir()
 	configDir := tmpDir + "/.loom"
 	os.MkdirAll(configDir, 0755)
@@ -27,15 +28,6 @@ func TestSyncSingleWorkspace_PushAndPull(t *testing.T) {
 	SetupTestEnv(t, map[string]string{
 		"LOOM_CONFIG_DIR": configDir,
 	})
-
-	origPushOnly := syncPushOnly
-	origPullOnly := syncPullOnly
-	t.Cleanup(func() {
-		syncPushOnly = origPushOnly
-		syncPullOnly = origPullOnly
-	})
-	syncPushOnly = false
-	syncPullOnly = false
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
 		// Push phase: fetch, stash, checkout, pull, merge, push, restore-checkout
@@ -51,7 +43,6 @@ func TestSyncSingleWorkspace_PushAndPull(t *testing.T) {
 		{Args: []string{"merge", "origin/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
 		{Args: []string{"push", "origin", "api-branch"}, Err: nil},
 	})
-	outputMock.Install()
 
 	cmdMock := NewCommandMock(t, []CommandStub{
 		// DiscoverWorktrees: GetCurrentBranch for api
@@ -63,11 +54,17 @@ func TestSyncSingleWorkspace_PushAndPull(t *testing.T) {
 		{Name: "git", Args: []string{"log", "origin/main..api-branch", "--oneline"}, Stdout: "abc commit\n"},
 	})
 	cmdMock.Install()
+	outputMock.Install()
 
-	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
-		t.Error("unexpected claude invocation")
-		return nil
-	})
+	// Set agent mock on defaultDeps (cleaned up by test)
+	origAgent := defaultDeps.Agent
+	defaultDeps.Agent = &MockAgentInvoker{
+		InteractiveFunc: func(workDir, prompt, agentName string) error {
+			t.Error("unexpected claude invocation")
+			return nil
+		},
+	}
+	t.Cleanup(func() { defaultDeps.Agent = origAgent })
 
 	resolver, err := NewResolver()
 	if err != nil {
@@ -77,10 +74,11 @@ func TestSyncSingleWorkspace_PushAndPull(t *testing.T) {
 		t.Fatalf("failed to set workspace: %v", err)
 	}
 
-	syncSingleWorkspace(resolver)
+	syncSingleWorkspace(defaultDeps, resolver, false, false)
 }
 
 func TestSyncSingleWorkspace_PushOnly(t *testing.T) {
+	// not parallel: uses SetupTestEnv, mock.Install(), defaultDeps.Agent mutation
 	tmpDir := t.TempDir()
 	configDir := tmpDir + "/.loom"
 	os.MkdirAll(configDir, 0755)
@@ -102,15 +100,6 @@ func TestSyncSingleWorkspace_PushOnly(t *testing.T) {
 	SetupTestEnv(t, map[string]string{
 		"LOOM_CONFIG_DIR": configDir,
 	})
-
-	origPushOnly := syncPushOnly
-	origPullOnly := syncPullOnly
-	t.Cleanup(func() {
-		syncPushOnly = origPushOnly
-		syncPullOnly = origPullOnly
-	})
-	syncPushOnly = true
-	syncPullOnly = false
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
 		// Push phase only: fetch, stash, checkout, pull, merge, push, restore-checkout
@@ -122,7 +111,6 @@ func TestSyncSingleWorkspace_PushOnly(t *testing.T) {
 		{Args: []string{"push", "origin", "main"}, Err: nil},
 		{Args: []string{"checkout", "api-branch"}, Err: nil},
 	})
-	outputMock.Install()
 
 	cmdMock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "api-branch\n"},
@@ -132,11 +120,16 @@ func TestSyncSingleWorkspace_PushOnly(t *testing.T) {
 		{Name: "git", Args: []string{"log", "origin/main..api-branch", "--oneline"}, Stdout: "abc commit\n"},
 	})
 	cmdMock.Install()
+	outputMock.Install()
 
-	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
-		t.Error("unexpected claude invocation")
-		return nil
-	})
+	origAgent := defaultDeps.Agent
+	defaultDeps.Agent = &MockAgentInvoker{
+		InteractiveFunc: func(workDir, prompt, agentName string) error {
+			t.Error("unexpected claude invocation")
+			return nil
+		},
+	}
+	t.Cleanup(func() { defaultDeps.Agent = origAgent })
 
 	resolver, err := NewResolver()
 	if err != nil {
@@ -146,10 +139,11 @@ func TestSyncSingleWorkspace_PushOnly(t *testing.T) {
 		t.Fatalf("failed to set workspace: %v", err)
 	}
 
-	syncSingleWorkspace(resolver)
+	syncSingleWorkspace(defaultDeps, resolver, true, false)
 }
 
 func TestSyncSingleWorkspace_PullOnly(t *testing.T) {
+	// not parallel: uses SetupTestEnv, mock.Install(), defaultDeps.Agent mutation
 	tmpDir := t.TempDir()
 	configDir := tmpDir + "/.loom"
 	os.MkdirAll(configDir, 0755)
@@ -172,32 +166,27 @@ func TestSyncSingleWorkspace_PullOnly(t *testing.T) {
 		"LOOM_CONFIG_DIR": configDir,
 	})
 
-	origPushOnly := syncPushOnly
-	origPullOnly := syncPullOnly
-	t.Cleanup(func() {
-		syncPushOnly = origPushOnly
-		syncPullOnly = origPullOnly
-	})
-	syncPushOnly = false
-	syncPullOnly = true
-
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
 		// Pull phase only
 		{Args: []string{"fetch", "origin"}, Err: nil},
 		{Args: []string{"merge", "origin/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
 		{Args: []string{"push", "origin", "api-branch"}, Err: nil},
 	})
-	outputMock.Install()
 
 	cmdMock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "api-branch\n"},
 	})
 	cmdMock.Install()
+	outputMock.Install()
 
-	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
-		t.Error("unexpected claude invocation")
-		return nil
-	})
+	origAgent := defaultDeps.Agent
+	defaultDeps.Agent = &MockAgentInvoker{
+		InteractiveFunc: func(workDir, prompt, agentName string) error {
+			t.Error("unexpected claude invocation")
+			return nil
+		},
+	}
+	t.Cleanup(func() { defaultDeps.Agent = origAgent })
 
 	resolver, err := NewResolver()
 	if err != nil {
@@ -207,5 +196,5 @@ func TestSyncSingleWorkspace_PullOnly(t *testing.T) {
 		t.Fatalf("failed to set workspace: %v", err)
 	}
 
-	syncSingleWorkspace(resolver)
+	syncSingleWorkspace(defaultDeps, resolver, false, true)
 }

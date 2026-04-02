@@ -19,6 +19,7 @@ var bdEmptyResponse = `[]`
 
 // TestLockWorkflowIntegration tests the full lock lifecycle
 func TestLockWorkflowIntegration(t *testing.T) {
+	t.Parallel()
 	tmpDir := SetupTestWorktree(t, "falcon")
 	wtPath := filepath.Join(tmpDir, "worktrees", "falcon")
 
@@ -65,6 +66,7 @@ func TestLockWorkflowIntegration(t *testing.T) {
 
 // TestLockContention tests that concurrent locks are prevented
 func TestLockContention(t *testing.T) {
+	t.Parallel()
 	tmpDir := SetupTestWorktree(t, "falcon")
 	wtPath := filepath.Join(tmpDir, "worktrees", "falcon")
 
@@ -93,6 +95,7 @@ func TestLockContention(t *testing.T) {
 // TestMonitorDataCollection tests dashboard data aggregation with mocked bd commands.
 // Uses FlexibleCommandMock to handle variable call counts from parallel execution.
 func TestMonitorDataCollection(t *testing.T) {
+	// not parallel: uses os.Chdir, SetupTestEnv, mock.Install()
 	// Save and restore working directory
 	origDir, _ := os.Getwd()
 	tmpDir := t.TempDir()
@@ -164,6 +167,7 @@ func TestMonitorDataCollection(t *testing.T) {
 // TestMultiWorktreeDiscovery tests discovering multiple worktrees
 // Note: Uses relative "worktrees" directory from current working directory
 func TestMultiWorktreeDiscovery(t *testing.T) {
+	// not parallel: uses os.Chdir
 	// Save and restore working directory
 	origDir, _ := os.Getwd()
 	tmpDir := t.TempDir()
@@ -203,9 +207,11 @@ func TestMultiWorktreeDiscovery(t *testing.T) {
 // TestAgentInvokerMocking tests that agent invocation can be mocked and that
 // arguments flow correctly through the backend dispatch to the invoker
 func TestAgentInvokerMocking(t *testing.T) {
-	recorder := SetupMockClaudeInvoker(t, nil)
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+	recorder := SetupMockAgentInvokerOn(t, deps, nil)
 
-	err := InvokeAgent("/tmp/test", "test prompt", "test-agent")
+	err := deps.Agent.InvokeInteractive("/tmp/test", "test prompt", "test-agent")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -228,6 +234,7 @@ func TestAgentInvokerMocking(t *testing.T) {
 
 // TestAgentStatusWithLock tests agent status when lock is held
 func TestAgentStatusWithLock(t *testing.T) {
+	// not parallel: uses SetupTestEnv, mock.Install()
 	tmpDir := SetupTestWorktree(t, "falcon")
 	wtPath := filepath.Join(tmpDir, "worktrees", "falcon")
 
@@ -245,7 +252,7 @@ func TestAgentStatusWithLock(t *testing.T) {
 	// Update with task
 	UpdateLockTask(wtPath, "TASK-42", "Test task")
 
-	// Mock bd command to return task status
+	// Mock bd command to return task status (uses global state via defaultTracker)
 	mock := NewCommandMock(t, []CommandStub{
 		// bd show for task status lookup
 		{Name: "bd", Args: []string{"show", "TASK-42", "--json"},
@@ -265,6 +272,7 @@ func TestAgentStatusWithLock(t *testing.T) {
 // TestWorktreeResolution tests worktree path resolution
 // Note: Uses relative "worktrees" directory from current working directory
 func TestWorktreeResolution(t *testing.T) {
+	// not parallel: uses os.Chdir
 	// Save and restore working directory
 	origDir, _ := os.Getwd()
 	tmpDir := t.TempDir()
@@ -322,6 +330,7 @@ func TestWorktreeResolution(t *testing.T) {
 
 // TestDashboardRenderingDoesNotPanic ensures rendering works with various data
 func TestDashboardRenderingDoesNotPanic(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		data *MonitorData
@@ -383,6 +392,7 @@ func TestDashboardRenderingDoesNotPanic(t *testing.T) {
 // TestMultiAgentConflictDetection tests that multiple agents claiming the same task
 // are detected and reported in TaskConflicts
 func TestMultiAgentConflictDetection(t *testing.T) {
+	// not parallel: uses os.Chdir, SetupTestEnv, mock.Install()
 	// Save and restore working directory
 	origDir, _ := os.Getwd()
 	tmpDir := t.TempDir()
@@ -447,6 +457,7 @@ func TestMultiAgentConflictDetection(t *testing.T) {
 // TestNoConflictForDifferentTasks verifies that agents working on different tasks
 // do NOT trigger a conflict detection
 func TestNoConflictForDifferentTasks(t *testing.T) {
+	// not parallel: uses os.Chdir, SetupTestEnv, mock.Install()
 	// Save and restore working directory
 	origDir, _ := os.Getwd()
 	tmpDir := t.TempDir()
@@ -504,6 +515,7 @@ func TestNoConflictForDifferentTasks(t *testing.T) {
 
 // TestCrashRecoveryFlow tests that stale locks (from dead processes) are recovered
 func TestCrashRecoveryFlow(t *testing.T) {
+	t.Parallel()
 	tmpDir := SetupTestWorktree(t, "falcon")
 	wtPath := filepath.Join(tmpDir, "worktrees", "falcon")
 
@@ -555,6 +567,7 @@ func TestCrashRecoveryFlow(t *testing.T) {
 
 // TestMonitorAgentStatusVariants tests all agent status display states
 func TestMonitorAgentStatusVariants(t *testing.T) {
+	// not parallel: subtests use os.Chdir, SetupTestEnv, mock.Install()
 	tests := []struct {
 		name           string
 		hasLock        bool
@@ -665,6 +678,7 @@ func TestMonitorAgentStatusVariants(t *testing.T) {
 
 // TestAutoModeLoopExitConditions tests that auto mode loop exits correctly
 func TestAutoModeLoopExitConditions(t *testing.T) {
+	t.Parallel()
 	t.Run("shutdown signal exits immediately", func(t *testing.T) {
 		// Create shutdown channel and close it immediately
 		shutdown := make(chan struct{})
@@ -732,6 +746,7 @@ func TestAutoModeLoopExitConditions(t *testing.T) {
 
 // TestPlanReviewTaskWorkflow tests the full plan→review→task lifecycle
 func TestPlanReviewTaskWorkflow(t *testing.T) {
+	// not parallel: subtests use mock.Install()
 	// Test HasAvailablePlanningTasks returns true for tasks without design
 	t.Run("tasks without design need planning", func(t *testing.T) {
 		mock := NewFlexibleCommandMock(t)
@@ -855,6 +870,7 @@ func TestPlanReviewTaskWorkflow(t *testing.T) {
 
 // TestSyncConflictResolution tests the sync flow handles merge conflicts
 func TestSyncConflictResolution(t *testing.T) {
+	t.Parallel()
 	// Test that git merge failure with conflicts is handled
 	t.Run("merge conflict detection", func(t *testing.T) {
 		// This tests the sync command's behavior when encountering conflicts
@@ -896,6 +912,7 @@ func TestSyncConflictResolution(t *testing.T) {
 
 // TestLoadFixtures verifies all test fixtures can be loaded and parsed
 func TestLoadFixtures(t *testing.T) {
+	t.Parallel()
 	fixtures := []struct {
 		path   string
 		isJSON bool

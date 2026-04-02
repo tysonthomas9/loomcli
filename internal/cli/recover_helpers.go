@@ -13,32 +13,32 @@ import (
 )
 
 // handleOrphanedTask decides whether to close or reopen an orphaned task
-func handleOrphanedTask(worktreePath, taskID string, analyze bool) {
+func handleOrphanedTask(deps *Deps, worktreePath, taskID string, analyze bool) {
 	fmt.Printf("\nHandling orphaned task: %s\n", taskID)
 
 	if analyze {
 		fmt.Println("Analyzing task completion with Claude...")
-		completed, reason := analyzeTaskCompletion(worktreePath, taskID)
+		completed, reason := analyzeTaskCompletion(deps, worktreePath, taskID)
 
 		if completed {
 			fmt.Printf("Task appears COMPLETE: %s\n", reason)
-			closeTask(taskID, reason)
+			closeTask(deps, taskID, reason)
 		} else {
 			fmt.Printf("Task appears INCOMPLETE: %s\n", reason)
-			resetTask(taskID)
+			resetTask(deps, taskID)
 		}
 	} else {
 		fmt.Println("Skipping analysis (--no-analyze)")
-		resetTask(taskID)
+		resetTask(deps, taskID)
 	}
 }
 
 // analyzeTaskCompletion uses Claude to determine if a task was completed.
 // In workspace mode, it searches git logs across ALL repos in the workspace
 // to give Claude the most complete picture of relevant commits.
-func analyzeTaskCompletion(worktreePath, taskID string) (completed bool, reason string) {
+func analyzeTaskCompletion(deps *Deps, worktreePath, taskID string) (completed bool, reason string) {
 	// Get task details
-	taskText, err := defaultTracker().GetIssueText(context.Background(), taskID)
+	taskText, err := deps.Tracker.GetIssueText(context.Background(), taskID)
 	if err != nil {
 		return false, "Could not fetch task details"
 	}
@@ -54,7 +54,7 @@ func analyzeTaskCompletion(worktreePath, taskID string) (completed bool, reason 
 			searchedWorkspace = true
 			var parts []string
 			for _, wt := range worktrees {
-				result := defaultDeps.Exec.Run(wt.Path, "git", "log", "--oneline", "-20", "--all", "--grep", taskID)
+				result := deps.Exec.Run(wt.Path, "git", "log", "--oneline", "-20", "--all", "--grep", taskID)
 				output := strings.TrimSpace(result.Stdout)
 				if output != "" {
 					parts = append(parts, fmt.Sprintf("[%s]\n%s", wt.Name, output))
@@ -65,7 +65,7 @@ func analyzeTaskCompletion(worktreePath, taskID string) (completed bool, reason 
 	}
 	if !searchedWorkspace {
 		// Legacy mode or workspace discovery failed: search single repo
-		gitResult := defaultDeps.Exec.Run(worktreePath, "git", "log", "--oneline", "-20", "--all", "--grep", taskID)
+		gitResult := deps.Exec.Run(worktreePath, "git", "log", "--oneline", "-20", "--all", "--grep", taskID)
 		gitOutput = gitResult.Stdout
 	}
 
@@ -100,7 +100,7 @@ INCOMPLETE: <brief reason>
 `, taskID, taskDetails, gitOutput)
 
 	// Run claude -p with the prompt
-	claudeResult := defaultDeps.Exec.Run(worktreePath, "claude", "-p", "--output-format", "text", prompt)
+	claudeResult := deps.Exec.Run(worktreePath, "claude", "-p", "--output-format", "text", prompt)
 	if claudeResult.Err != nil {
 		return false, fmt.Sprintf("Claude analysis failed: %v", claudeResult.Err)
 	}
@@ -131,9 +131,9 @@ INCOMPLETE: <brief reason>
 }
 
 // closeTask closes a completed task
-func closeTask(taskID, reason string) {
+func closeTask(deps *Deps, taskID, reason string) {
 	closeReason := fmt.Sprintf("Completed (verified by recovery analysis): %s", reason)
-	err := defaultTracker().CloseIssue(context.Background(), taskID, closeReason)
+	err := deps.Tracker.CloseIssue(context.Background(), taskID, closeReason)
 	if err != nil {
 		fmt.Printf("Warning: failed to close task: %v\n", err)
 	} else {
@@ -144,8 +144,8 @@ func closeTask(taskID, reason string) {
 // resetTask resets a task to open status, but only if it's still in_progress.
 // Tasks that have already reached review or closed status were successfully
 // processed and should not be reset.
-func resetTask(taskID string) {
-	tracker := defaultTracker()
+func resetTask(deps *Deps, taskID string) {
+	tracker := deps.Tracker
 	ctx := context.Background()
 
 	// Check current status before resetting
@@ -209,7 +209,7 @@ func confirmKill(pid int) bool {
 // In workspace mode, it iterates over all repos in the workspace.
 // Protected runtime paths (.beads/, .loom/, sessions/, loom.yaml, AGENTS.md)
 // are always excluded from cleanup to prevent destroying live daemon state.
-func cleanUntrackedFiles(worktreePath string, force bool) {
+func cleanUntrackedFiles(deps *Deps, worktreePath string, force bool) {
 	// Collect paths to clean. In workspace mode, clean all repos.
 	type cleanTarget struct {
 		name string
@@ -234,7 +234,7 @@ func cleanUntrackedFiles(worktreePath string, force bool) {
 	// Check for untracked files across all targets, track which ones need cleaning
 	var dirtyTargets []cleanTarget
 	for _, t := range targets {
-		output, err := GitCleanDryRunExclude(t.path, protectedRuntimePaths)
+		output, err := gitCleanDryRunExclude(deps, t.path, protectedRuntimePaths)
 		if err != nil {
 			fmt.Printf("Warning: could not check for untracked files in %s: %v\n", t.path, err)
 			continue
@@ -267,7 +267,7 @@ func cleanUntrackedFiles(worktreePath string, force bool) {
 
 	cleaned := 0
 	for _, t := range dirtyTargets {
-		if err := GitCleanExclude(t.path, protectedRuntimePaths); err != nil {
+		if err := gitCleanExclude(deps, t.path, protectedRuntimePaths); err != nil {
 			label := t.path
 			if t.name != "" {
 				label = t.name
@@ -284,12 +284,12 @@ func cleanUntrackedFiles(worktreePath string, force bool) {
 
 // resetOrphanedAgentTasks finds all in_progress tasks assigned to the given agent
 // and handles them (analyze or reset). Tasks matching alreadyHandledTaskID are skipped.
-func resetOrphanedAgentTasks(worktreePath, agentName, alreadyHandledTaskID string, analyze bool) {
+func resetOrphanedAgentTasks(deps *Deps, worktreePath, agentName, alreadyHandledTaskID string, analyze bool) {
 	if agentName == "" {
 		return
 	}
 
-	issues, err := defaultTracker().List(context.Background(), ListOpts{Assignee: agentName, Status: "in_progress"})
+	issues, err := deps.Tracker.List(context.Background(), ListOpts{Assignee: agentName, Status: "in_progress"})
 	if err != nil {
 		fmt.Printf("Warning: could not check for orphaned tasks: %v\n", err)
 		return
@@ -309,7 +309,7 @@ func resetOrphanedAgentTasks(worktreePath, agentName, alreadyHandledTaskID strin
 
 	fmt.Printf("\nFound %d additional orphaned task(s) for agent %s:\n", len(orphaned), agentName)
 	for _, t := range orphaned {
-		handleOrphanedTask(worktreePath, t.ID, analyze)
+		handleOrphanedTask(deps, worktreePath, t.ID, analyze)
 	}
 }
 

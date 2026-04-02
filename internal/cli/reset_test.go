@@ -17,6 +17,7 @@ import (
 // ============================================================================
 
 func TestResetCmd_HelpText_NoHardcodedBranch(t *testing.T) {
+	t.Parallel()
 	// Regression test: the Long help text should not contain hardcoded branch
 	// names as the default. The actual default comes from GetDefaultBranch()
 	// which dynamically detects the integration branch.
@@ -41,8 +42,10 @@ func TestResetCmd_HelpText_NoHardcodedBranch(t *testing.T) {
 // ============================================================================
 
 func TestResetAllWorktrees_PerRepoBranch(t *testing.T) {
+	// not parallel: uses global resetForce/resetPush, defaultResolver, mock.Install(), setupWorkspaceConfig
 	// In workspace mode with per-repo DefaultBranch values, resetAllWorktrees
 	// should use each repo's own DefaultBranch when explicitTarget=false.
+	// Uses defaultResolver, DiscoverWorktrees (global deps), and resetForce/resetPush globals.
 	ResetBeadsDirCache()
 
 	tmpDir := t.TempDir()
@@ -105,13 +108,14 @@ func TestResetAllWorktrees_PerRepoBranch(t *testing.T) {
 	defer func() { resetForce = false; resetPush = false }()
 
 	defaultBranch := GetDefaultBranch()
-	err := resetAllWorktrees(defaultBranch, false)
+	err := resetAllWorktrees(defaultDeps, defaultBranch, false)
 	if err != nil {
 		t.Errorf("expected no error, got: %v", err)
 	}
 }
 
 func TestResetAllWorktrees_ExplicitBranchOverridesPerRepo(t *testing.T) {
+	// not parallel: uses global resetForce/resetPush, defaultResolver, mock.Install(), setupWorkspaceConfig
 	// When explicitTarget=true, all repos should use the given branch,
 	// ignoring per-repo DefaultBranch settings.
 	ResetBeadsDirCache()
@@ -171,13 +175,14 @@ func TestResetAllWorktrees_ExplicitBranchOverridesPerRepo(t *testing.T) {
 	resetPush = false
 	defer func() { resetForce = false; resetPush = false }()
 
-	err := resetAllWorktrees("release", true)
+	err := resetAllWorktrees(defaultDeps, "release", true)
 	if err != nil {
 		t.Errorf("expected no error, got: %v", err)
 	}
 }
 
 func TestResetAllWorktrees_MixedDefaultBranch(t *testing.T) {
+	// not parallel: uses global resetForce/resetPush, defaultResolver, mock.Install(), setupWorkspaceConfig
 	// One repo has a custom DefaultBranch, the other has none.
 	// The repo without DefaultBranch should use the global default.
 	ResetBeadsDirCache()
@@ -239,13 +244,14 @@ func TestResetAllWorktrees_MixedDefaultBranch(t *testing.T) {
 	resetPush = false
 	defer func() { resetForce = false; resetPush = false }()
 
-	err := resetAllWorktrees(defaultBranch, false)
+	err := resetAllWorktrees(defaultDeps, defaultBranch, false)
 	if err != nil {
 		t.Errorf("expected no error, got: %v", err)
 	}
 }
 
 func TestResetAllWorktrees_LegacyMode_NoPerRepoBranch(t *testing.T) {
+	// not parallel: uses t.Setenv, global resetForce/resetPush, defaultResolver, mock.Install(), os.Chdir
 	// In legacy mode (no workspace config), all repos use the same target branch
 	// because WorktreeInfo.Repo is nil.
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
@@ -295,7 +301,7 @@ func TestResetAllWorktrees_LegacyMode_NoPerRepoBranch(t *testing.T) {
 	resetPush = false
 	defer func() { resetForce = false; resetPush = false }()
 
-	err := resetAllWorktrees("main", false)
+	err := resetAllWorktrees(defaultDeps, "main", false)
 	if err != nil {
 		t.Errorf("expected no error, got: %v", err)
 	}
@@ -306,6 +312,7 @@ func TestResetAllWorktrees_LegacyMode_NoPerRepoBranch(t *testing.T) {
 // ============================================================================
 
 func TestResetCmd_ArgsValidation_MissingWorktree(t *testing.T) {
+	// not parallel: uses global resetAll
 	// The reset command's Args function requires either --all flag or a worktree argument
 	// Test that it returns an error when neither is provided
 	resetAll = false
@@ -323,6 +330,7 @@ func TestResetCmd_ArgsValidation_MissingWorktree(t *testing.T) {
 }
 
 func TestResetCmd_ArgsValidation_AllWithTooManyArgs(t *testing.T) {
+	// not parallel: uses global resetAll
 	// When --all is set, at most 1 argument (target branch) is allowed
 	resetAll = true
 	defer func() { resetAll = false }()
@@ -339,6 +347,7 @@ func TestResetCmd_ArgsValidation_AllWithTooManyArgs(t *testing.T) {
 }
 
 func TestResetCmd_ArgsValidation_AllWithOneArg(t *testing.T) {
+	// not parallel: uses global resetAll
 	// --all with one arg (target branch) should be valid
 	resetAll = true
 	defer func() { resetAll = false }()
@@ -351,6 +360,7 @@ func TestResetCmd_ArgsValidation_AllWithOneArg(t *testing.T) {
 }
 
 func TestResetCmd_ArgsValidation_AllWithNoArgs(t *testing.T) {
+	// not parallel: uses global resetAll
 	// --all with no args should be valid (uses default branch)
 	resetAll = true
 	defer func() { resetAll = false }()
@@ -363,6 +373,7 @@ func TestResetCmd_ArgsValidation_AllWithNoArgs(t *testing.T) {
 }
 
 func TestResetCmd_ArgsValidation_WorktreeProvided(t *testing.T) {
+	// not parallel: uses global resetAll
 	// When worktree is provided and --all is not set, should be valid
 	resetAll = false
 	defer func() { resetAll = false }()
@@ -375,6 +386,7 @@ func TestResetCmd_ArgsValidation_WorktreeProvided(t *testing.T) {
 }
 
 func TestResetCmd_ArgsValidation_WorktreeAndBranch(t *testing.T) {
+	// not parallel: uses global resetAll
 	// When worktree and branch are provided (no --all), should be valid
 	resetAll = false
 	defer func() { resetAll = false }()
@@ -391,7 +403,9 @@ func TestResetCmd_ArgsValidation_WorktreeAndBranch(t *testing.T) {
 // ============================================================================
 
 func TestResetWorktree_ReturnsTrue_OnSuccess(t *testing.T) {
+	// not parallel: uses os.Chdir, os.Stdout capture, global resetPush
 	// Verify that resetWorktree returns true on a successful reset (local only, no push).
+	deps, _, _, _, _ := NewTestDeps(t)
 	ResetBeadsDirCache()
 
 	tmpDir := t.TempDir()
@@ -407,7 +421,7 @@ func TestResetWorktree_ReturnsTrue_OnSuccess(t *testing.T) {
 	mock := NewCommandMock(t, []CommandStub{
 		{Dir: wtPath, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "test-branch\n"},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
 		{Dir: wtPath, Args: []string{"fetch", "origin"}},
@@ -415,7 +429,7 @@ func TestResetWorktree_ReturnsTrue_OnSuccess(t *testing.T) {
 		{Dir: wtPath, Args: []string{"clean", "-fd"}},
 		{Dir: wtPath, Args: []string{"reset", "--hard", "origin/main"}},
 	})
-	outputMock.Install()
+	outputMock.InstallOn(deps)
 
 	resetPush = false
 	defer func() { resetPush = false }()
@@ -425,7 +439,7 @@ func TestResetWorktree_ReturnsTrue_OnSuccess(t *testing.T) {
 	_, w, _ := os.Pipe()
 	os.Stdout = w
 
-	result := resetWorktree("test-wt", "main", false)
+	result := resetWorktree(deps, "test-wt", "main", false)
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -436,7 +450,9 @@ func TestResetWorktree_ReturnsTrue_OnSuccess(t *testing.T) {
 }
 
 func TestResetWorktree_ReturnsFalse_OnFetchError(t *testing.T) {
+	// not parallel: uses os.Chdir, os.Stdout/os.Stderr capture
 	// Verify that resetWorktree returns false when fetch fails.
+	deps, _, _, _, _ := NewTestDeps(t)
 	ResetBeadsDirCache()
 
 	tmpDir := t.TempDir()
@@ -452,12 +468,12 @@ func TestResetWorktree_ReturnsFalse_OnFetchError(t *testing.T) {
 	mock := NewCommandMock(t, []CommandStub{
 		{Dir: wtPath, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "test-branch\n"},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
 		{Dir: wtPath, Args: []string{"fetch", "origin"}, Err: fmt.Errorf("network error")},
 	})
-	outputMock.Install()
+	outputMock.InstallOn(deps)
 
 	// Capture stderr and stdout to suppress output
 	oldStderr := os.Stderr
@@ -468,7 +484,7 @@ func TestResetWorktree_ReturnsFalse_OnFetchError(t *testing.T) {
 	_, wOut, _ := os.Pipe()
 	os.Stdout = wOut
 
-	result := resetWorktree("test-wt", "main", false)
+	result := resetWorktree(deps, "test-wt", "main", false)
 
 	wErr.Close()
 	wOut.Close()
@@ -481,8 +497,9 @@ func TestResetWorktree_ReturnsFalse_OnFetchError(t *testing.T) {
 }
 
 func TestResetWorktree_ReturnsFalse_OnResolveError(t *testing.T) {
-	// Verify that resetWorktree returns false when ResolveWorktreePath fails
+	// not parallel: uses os.Chdir, os.Stdout/os.Stderr capture
 	// (e.g., invalid worktree name that doesn't exist).
+	deps, _, _, _, _ := NewTestDeps(t)
 	ResetBeadsDirCache()
 
 	// Set up a temp dir with no worktrees directory so resolution fails
@@ -495,10 +512,10 @@ func TestResetWorktree_ReturnsFalse_OnResolveError(t *testing.T) {
 
 	// No command mocks needed - should fail before any git commands run
 	mock := NewCommandMock(t, []CommandStub{})
-	mock.Install()
+	mock.InstallOn(deps)
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{})
-	outputMock.Install()
+	outputMock.InstallOn(deps)
 
 	// Capture stderr and stdout to suppress output
 	oldStderr := os.Stderr
@@ -509,7 +526,7 @@ func TestResetWorktree_ReturnsFalse_OnResolveError(t *testing.T) {
 	_, wOut, _ := os.Pipe()
 	os.Stdout = wOut
 
-	result := resetWorktree("nonexistent-worktree-xyz", "main", false)
+	result := resetWorktree(deps, "nonexistent-worktree-xyz", "main", false)
 
 	wErr.Close()
 	wOut.Close()
@@ -522,8 +539,9 @@ func TestResetWorktree_ReturnsFalse_OnResolveError(t *testing.T) {
 }
 
 func TestResetWorktree_ReturnsTrue_OnUserAbort(t *testing.T) {
-	// Verify that resetWorktree returns true when the user declines confirmation.
+	// not parallel: uses os.Chdir, os.Stdout capture, MockStdin
 	// A user abort is not an error, so it should return true.
+	deps, _, _, _, _ := NewTestDeps(t)
 	ResetBeadsDirCache()
 
 	tmpDir := t.TempDir()
@@ -538,10 +556,10 @@ func TestResetWorktree_ReturnsTrue_OnUserAbort(t *testing.T) {
 
 	// No git commands should be called since the user aborts before any git ops
 	mock := NewCommandMock(t, []CommandStub{})
-	mock.Install()
+	mock.InstallOn(deps)
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{})
-	outputMock.Install()
+	outputMock.InstallOn(deps)
 
 	// Mock stdin to respond "n" to the confirmation prompt
 	MockStdin(t, "n\n")
@@ -552,7 +570,7 @@ func TestResetWorktree_ReturnsTrue_OnUserAbort(t *testing.T) {
 	os.Stdout = w
 
 	// askConfirm=true triggers the confirmation prompt
-	result := resetWorktree("test-wt", "main", true)
+	result := resetWorktree(deps, "test-wt", "main", true)
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -566,6 +584,7 @@ func TestResetWorktree_ReturnsTrue_OnUserAbort(t *testing.T) {
 // worktree fails during resetAllWorktrees, the function returns an error
 // and the failure summary is printed to stderr.
 func TestResetAllWorktrees_PartialFailure_ReturnsError(t *testing.T) {
+	// not parallel: uses global resetForce/resetPush, defaultResolver, mock.Install(), setupWorkspaceConfig, os.Stdout/os.Stderr capture
 	ResetBeadsDirCache()
 
 	tmpDir := t.TempDir()
@@ -629,7 +648,7 @@ func TestResetAllWorktrees_PartialFailure_ReturnsError(t *testing.T) {
 	_, wOut, _ := os.Pipe()
 	os.Stdout = wOut
 
-	err := resetAllWorktrees("main", false)
+	err := resetAllWorktrees(defaultDeps, "main", false)
 
 	wErr.Close()
 	wOut.Close()
@@ -655,6 +674,7 @@ func TestResetAllWorktrees_PartialFailure_ReturnsError(t *testing.T) {
 // TestResetAllWorktrees_AllFail_ReturnsError verifies that when all worktrees
 // fail, the error includes all worktree names.
 func TestResetAllWorktrees_AllFail_ReturnsError(t *testing.T) {
+	// not parallel: uses global resetForce/resetPush, defaultResolver, mock.Install(), setupWorkspaceConfig, os.Stdout/os.Stderr capture
 	ResetBeadsDirCache()
 
 	tmpDir := t.TempDir()
@@ -715,7 +735,7 @@ func TestResetAllWorktrees_AllFail_ReturnsError(t *testing.T) {
 	_, wOut, _ := os.Pipe()
 	os.Stdout = wOut
 
-	err := resetAllWorktrees("main", false)
+	err := resetAllWorktrees(defaultDeps, "main", false)
 
 	wErr.Close()
 	wOut.Close()
@@ -743,6 +763,7 @@ func TestResetAllWorktrees_AllFail_ReturnsError(t *testing.T) {
 // ============================================================================
 
 func TestConfirmAction_Yes(t *testing.T) {
+	// not parallel: uses MockStdin
 	MockStdin(t, "y\n")
 
 	result := confirmAction("Are you sure?")
@@ -752,6 +773,7 @@ func TestConfirmAction_Yes(t *testing.T) {
 }
 
 func TestConfirmAction_YesLong(t *testing.T) {
+	// not parallel: uses MockStdin
 	MockStdin(t, "yes\n")
 
 	result := confirmAction("Are you sure?")
@@ -761,6 +783,7 @@ func TestConfirmAction_YesLong(t *testing.T) {
 }
 
 func TestConfirmAction_YesUppercase(t *testing.T) {
+	// not parallel: uses MockStdin
 	MockStdin(t, "Y\n")
 
 	result := confirmAction("Are you sure?")
@@ -770,6 +793,7 @@ func TestConfirmAction_YesUppercase(t *testing.T) {
 }
 
 func TestConfirmAction_No(t *testing.T) {
+	// not parallel: uses MockStdin
 	MockStdin(t, "n\n")
 
 	result := confirmAction("Are you sure?")
@@ -779,6 +803,7 @@ func TestConfirmAction_No(t *testing.T) {
 }
 
 func TestConfirmAction_NoLong(t *testing.T) {
+	// not parallel: uses MockStdin
 	MockStdin(t, "no\n")
 
 	result := confirmAction("Are you sure?")
@@ -788,6 +813,7 @@ func TestConfirmAction_NoLong(t *testing.T) {
 }
 
 func TestConfirmAction_Default(t *testing.T) {
+	// not parallel: uses MockStdin
 	// Empty input (just newline) should default to false
 	MockStdin(t, "\n")
 
@@ -798,6 +824,7 @@ func TestConfirmAction_Default(t *testing.T) {
 }
 
 func TestConfirmAction_Whitespace(t *testing.T) {
+	// not parallel: uses MockStdin
 	// Whitespace only should default to false
 	MockStdin(t, "   \n")
 
@@ -808,6 +835,7 @@ func TestConfirmAction_Whitespace(t *testing.T) {
 }
 
 func TestConfirmAction_Invalid(t *testing.T) {
+	// not parallel: uses MockStdin
 	// Invalid input should default to false
 	MockStdin(t, "maybe\n")
 
@@ -818,6 +846,7 @@ func TestConfirmAction_Invalid(t *testing.T) {
 }
 
 func TestConfirmAction_YesWithSpaces(t *testing.T) {
+	// not parallel: uses MockStdin
 	// Input with surrounding spaces should be trimmed
 	MockStdin(t, "  y  \n")
 
@@ -828,6 +857,7 @@ func TestConfirmAction_YesWithSpaces(t *testing.T) {
 }
 
 func TestConfirmAction_Output(t *testing.T) {
+	// not parallel: uses MockStdin, os.Stdout capture
 	// Test that the prompt is displayed correctly
 	// This is a basic test - confirmAction writes to stdout
 	MockStdin(t, "n\n")
@@ -857,6 +887,8 @@ func TestConfirmAction_Output(t *testing.T) {
 // ============================================================================
 
 func TestResetWorktree_Success(t *testing.T) {
+	// not parallel: uses os.Chdir, os.Stdout capture, global resetPush
+	deps, _, _, _, _ := NewTestDeps(t)
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
 
@@ -870,7 +902,7 @@ func TestResetWorktree_Success(t *testing.T) {
 	mock := NewCommandMock(t, []CommandStub{
 		{Dir: wtPath, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "test-branch\n"},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
 		{Dir: wtPath, Args: []string{"fetch", "origin"}},
@@ -878,7 +910,7 @@ func TestResetWorktree_Success(t *testing.T) {
 		{Dir: wtPath, Args: []string{"clean", "-fd"}},
 		{Dir: wtPath, Args: []string{"reset", "--hard", "origin/main"}},
 	})
-	outputMock.Install()
+	outputMock.InstallOn(deps)
 
 	resetPush = false
 	defer func() { resetPush = false }()
@@ -888,7 +920,7 @@ func TestResetWorktree_Success(t *testing.T) {
 	_, w, _ := os.Pipe()
 	os.Stdout = w
 
-	resetWorktree("test-wt", "main", false)
+	resetWorktree(deps, "test-wt", "main", false)
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -896,6 +928,8 @@ func TestResetWorktree_Success(t *testing.T) {
 }
 
 func TestResetWorktree_FetchError(t *testing.T) {
+	// not parallel: uses os.Chdir, os.Stdout/os.Stderr capture
+	deps, _, _, _, _ := NewTestDeps(t)
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
 
@@ -909,12 +943,12 @@ func TestResetWorktree_FetchError(t *testing.T) {
 	mock := NewCommandMock(t, []CommandStub{
 		{Dir: wtPath, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "test-branch\n"},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
 		{Dir: wtPath, Args: []string{"fetch", "origin"}, Err: fmt.Errorf("network error")},
 	})
-	outputMock.Install()
+	outputMock.InstallOn(deps)
 
 	// Capture stderr to check error message
 	oldStderr := os.Stderr
@@ -926,7 +960,7 @@ func TestResetWorktree_FetchError(t *testing.T) {
 	_, wOut, _ := os.Pipe()
 	os.Stdout = wOut
 
-	resetWorktree("test-wt", "main", false)
+	resetWorktree(deps, "test-wt", "main", false)
 
 	w.Close()
 	wOut.Close()
@@ -947,6 +981,8 @@ func TestResetWorktree_FetchError(t *testing.T) {
 // ============================================================================
 
 func TestResetWorktree_RefusesWithActiveLock(t *testing.T) {
+	// not parallel: uses os.Chdir, os.Stdout/os.Stderr capture, global resetForce
+	deps, _, _, _, _ := NewTestDeps(t)
 	ResetBeadsDirCache()
 
 	tmpDir := t.TempDir()
@@ -972,9 +1008,9 @@ func TestResetWorktree_RefusesWithActiveLock(t *testing.T) {
 
 	// No git commands should be called - reset should abort before any git ops
 	mock := NewCommandMock(t, []CommandStub{})
-	mock.Install()
+	mock.InstallOn(deps)
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{})
-	outputMock.Install()
+	outputMock.InstallOn(deps)
 
 	// Capture stderr
 	oldStderr := os.Stderr
@@ -986,7 +1022,7 @@ func TestResetWorktree_RefusesWithActiveLock(t *testing.T) {
 	_, wOut, _ := os.Pipe()
 	os.Stdout = wOut
 
-	result := resetWorktree("test-wt", "main", false)
+	result := resetWorktree(deps, "test-wt", "main", false)
 
 	w.Close()
 	wOut.Close()
@@ -1009,6 +1045,8 @@ func TestResetWorktree_RefusesWithActiveLock(t *testing.T) {
 }
 
 func TestResetWorktree_RefusesWithActiveLock_ShowsTaskID(t *testing.T) {
+	// not parallel: uses os.Chdir, os.Stdout/os.Stderr capture, global resetForce
+	deps, _, _, _, _ := NewTestDeps(t)
 	ResetBeadsDirCache()
 
 	tmpDir := t.TempDir()
@@ -1033,9 +1071,9 @@ func TestResetWorktree_RefusesWithActiveLock_ShowsTaskID(t *testing.T) {
 	defer func() { resetForce = false }()
 
 	mock := NewCommandMock(t, []CommandStub{})
-	mock.Install()
+	mock.InstallOn(deps)
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{})
-	outputMock.Install()
+	outputMock.InstallOn(deps)
 
 	oldStderr := os.Stderr
 	r, w, _ := os.Pipe()
@@ -1045,7 +1083,7 @@ func TestResetWorktree_RefusesWithActiveLock_ShowsTaskID(t *testing.T) {
 	_, wOut, _ := os.Pipe()
 	os.Stdout = wOut
 
-	resetWorktree("test-wt", "main", false)
+	resetWorktree(deps, "test-wt", "main", false)
 
 	w.Close()
 	wOut.Close()
@@ -1062,6 +1100,8 @@ func TestResetWorktree_RefusesWithActiveLock_ShowsTaskID(t *testing.T) {
 }
 
 func TestResetWorktree_ForceOverridesLock(t *testing.T) {
+	// not parallel: uses os.Chdir, os.Stdout/os.Stderr capture, global resetForce/resetPush
+	deps, _, _, _, _ := NewTestDeps(t)
 	ResetBeadsDirCache()
 
 	tmpDir := t.TempDir()
@@ -1090,7 +1130,7 @@ func TestResetWorktree_ForceOverridesLock(t *testing.T) {
 	mock := NewCommandMock(t, []CommandStub{
 		{Dir: wtPath, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "test-branch\n"},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
 		{Dir: wtPath, Args: []string{"fetch", "origin"}},
@@ -1098,7 +1138,7 @@ func TestResetWorktree_ForceOverridesLock(t *testing.T) {
 		{Dir: wtPath, Args: []string{"clean", "-fd"}},
 		{Dir: wtPath, Args: []string{"reset", "--hard", "origin/main"}},
 	})
-	outputMock.Install()
+	outputMock.InstallOn(deps)
 
 	// Capture stderr to verify warning
 	oldStderr := os.Stderr
@@ -1109,7 +1149,7 @@ func TestResetWorktree_ForceOverridesLock(t *testing.T) {
 	_, wOut, _ := os.Pipe()
 	os.Stdout = wOut
 
-	result := resetWorktree("test-wt", "main", false)
+	result := resetWorktree(deps, "test-wt", "main", false)
 
 	w.Close()
 	wOut.Close()
@@ -1129,6 +1169,8 @@ func TestResetWorktree_ForceOverridesLock(t *testing.T) {
 }
 
 func TestResetWorktree_ProceedsWithStaleLock(t *testing.T) {
+	// not parallel: uses os.Chdir, os.Stdout capture, global resetForce/resetPush
+	deps, _, _, _, _ := NewTestDeps(t)
 	ResetBeadsDirCache()
 
 	tmpDir := t.TempDir()
@@ -1162,7 +1204,7 @@ func TestResetWorktree_ProceedsWithStaleLock(t *testing.T) {
 	mock := NewCommandMock(t, []CommandStub{
 		{Dir: wtPath, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "test-branch\n"},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
 		{Dir: wtPath, Args: []string{"fetch", "origin"}},
@@ -1170,14 +1212,14 @@ func TestResetWorktree_ProceedsWithStaleLock(t *testing.T) {
 		{Dir: wtPath, Args: []string{"clean", "-fd"}},
 		{Dir: wtPath, Args: []string{"reset", "--hard", "origin/main"}},
 	})
-	outputMock.Install()
+	outputMock.InstallOn(deps)
 
 	// Capture output
 	oldStdout := os.Stdout
 	_, w, _ := os.Pipe()
 	os.Stdout = w
 
-	result := resetWorktree("test-wt", "main", false)
+	result := resetWorktree(deps, "test-wt", "main", false)
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -1188,6 +1230,8 @@ func TestResetWorktree_ProceedsWithStaleLock(t *testing.T) {
 }
 
 func TestResetWorktree_ProceedsWithNoLock(t *testing.T) {
+	// not parallel: uses os.Chdir, os.Stdout capture, global resetForce/resetPush
+	deps, _, _, _, _ := NewTestDeps(t)
 	ResetBeadsDirCache()
 
 	tmpDir := t.TempDir()
@@ -1209,7 +1253,7 @@ func TestResetWorktree_ProceedsWithNoLock(t *testing.T) {
 	mock := NewCommandMock(t, []CommandStub{
 		{Dir: wtPath, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "test-branch\n"},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
 		{Dir: wtPath, Args: []string{"fetch", "origin"}},
@@ -1217,13 +1261,13 @@ func TestResetWorktree_ProceedsWithNoLock(t *testing.T) {
 		{Dir: wtPath, Args: []string{"clean", "-fd"}},
 		{Dir: wtPath, Args: []string{"reset", "--hard", "origin/main"}},
 	})
-	outputMock.Install()
+	outputMock.InstallOn(deps)
 
 	oldStdout := os.Stdout
 	_, w, _ := os.Pipe()
 	os.Stdout = w
 
-	result := resetWorktree("test-wt", "main", false)
+	result := resetWorktree(deps, "test-wt", "main", false)
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -1238,6 +1282,7 @@ func TestResetWorktree_ProceedsWithNoLock(t *testing.T) {
 // ============================================================================
 
 func TestIsProtectedBranch(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		branch string
 		want   bool
@@ -1263,8 +1308,10 @@ func TestIsProtectedBranch(t *testing.T) {
 // ============================================================================
 
 func TestResetWorktree_ProtectedBranch_Blocked(t *testing.T) {
+	// not parallel: uses os.Chdir, os.Stdout/os.Stderr capture, global resetForce/resetPush
 	// When current branch is "main", --push is set but --force is not,
 	// resetWorktree should return false and NOT call GitPushForce.
+	deps, _, _, _, _ := NewTestDeps(t)
 	ResetBeadsDirCache()
 
 	tmpDir := t.TempDir()
@@ -1284,7 +1331,7 @@ func TestResetWorktree_ProtectedBranch_Blocked(t *testing.T) {
 	mock := NewCommandMock(t, []CommandStub{
 		{Dir: wtPath, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "main\n"},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
 	// No push step - should be blocked before GitPushForce
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
@@ -1293,7 +1340,7 @@ func TestResetWorktree_ProtectedBranch_Blocked(t *testing.T) {
 		{Dir: wtPath, Args: []string{"clean", "-fd"}},
 		{Dir: wtPath, Args: []string{"reset", "--hard", "origin/main"}},
 	})
-	outputMock.Install()
+	outputMock.InstallOn(deps)
 
 	// Capture stderr
 	oldStderr := os.Stderr
@@ -1305,7 +1352,7 @@ func TestResetWorktree_ProtectedBranch_Blocked(t *testing.T) {
 	_, wOut, _ := os.Pipe()
 	os.Stdout = wOut
 
-	result := resetWorktree("test-wt", "main", false)
+	result := resetWorktree(deps, "test-wt", "main", false)
 
 	wErr.Close()
 	wOut.Close()
@@ -1325,7 +1372,9 @@ func TestResetWorktree_ProtectedBranch_Blocked(t *testing.T) {
 }
 
 func TestResetWorktree_ProtectedBranch_Master_Blocked(t *testing.T) {
+	// not parallel: uses os.Chdir, os.Stdout/os.Stderr capture, global resetForce/resetPush
 	// Same as above but with "master" as current branch.
+	deps, _, _, _, _ := NewTestDeps(t)
 	ResetBeadsDirCache()
 
 	tmpDir := t.TempDir()
@@ -1345,7 +1394,7 @@ func TestResetWorktree_ProtectedBranch_Master_Blocked(t *testing.T) {
 	mock := NewCommandMock(t, []CommandStub{
 		{Dir: wtPath, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "master\n"},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
 	// No push step - should be blocked before GitPushForce
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
@@ -1354,7 +1403,7 @@ func TestResetWorktree_ProtectedBranch_Master_Blocked(t *testing.T) {
 		{Dir: wtPath, Args: []string{"clean", "-fd"}},
 		{Dir: wtPath, Args: []string{"reset", "--hard", "origin/main"}},
 	})
-	outputMock.Install()
+	outputMock.InstallOn(deps)
 
 	// Capture stderr
 	oldStderr := os.Stderr
@@ -1366,7 +1415,7 @@ func TestResetWorktree_ProtectedBranch_Master_Blocked(t *testing.T) {
 	_, wOut, _ := os.Pipe()
 	os.Stdout = wOut
 
-	result := resetWorktree("test-wt", "main", false)
+	result := resetWorktree(deps, "test-wt", "main", false)
 
 	wErr.Close()
 	wOut.Close()
@@ -1386,8 +1435,10 @@ func TestResetWorktree_ProtectedBranch_Master_Blocked(t *testing.T) {
 }
 
 func TestResetWorktree_ProtectedBranch_ForceOverride(t *testing.T) {
+	// not parallel: uses os.Chdir, os.Stdout/os.Stderr capture, global resetForce/resetPush
 	// When current branch is "main" AND both --push and --force are set,
 	// force push should proceed with a warning.
+	deps, _, _, _, _ := NewTestDeps(t)
 	ResetBeadsDirCache()
 
 	tmpDir := t.TempDir()
@@ -1407,7 +1458,7 @@ func TestResetWorktree_ProtectedBranch_ForceOverride(t *testing.T) {
 	mock := NewCommandMock(t, []CommandStub{
 		{Dir: wtPath, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "main\n"},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
 	// Full command sequence including push (should proceed)
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
@@ -1417,7 +1468,7 @@ func TestResetWorktree_ProtectedBranch_ForceOverride(t *testing.T) {
 		{Dir: wtPath, Args: []string{"reset", "--hard", "origin/main"}},
 		{Dir: wtPath, Args: []string{"push", "origin", "main", "--force"}},
 	})
-	outputMock.Install()
+	outputMock.InstallOn(deps)
 
 	// Capture stderr to verify warning
 	oldStderr := os.Stderr
@@ -1429,7 +1480,7 @@ func TestResetWorktree_ProtectedBranch_ForceOverride(t *testing.T) {
 	_, wOut, _ := os.Pipe()
 	os.Stdout = wOut
 
-	result := resetWorktree("test-wt", "main", false)
+	result := resetWorktree(deps, "test-wt", "main", false)
 
 	wErr.Close()
 	wOut.Close()
@@ -1449,8 +1500,10 @@ func TestResetWorktree_ProtectedBranch_ForceOverride(t *testing.T) {
 }
 
 func TestResetWorktree_NonProtectedBranch_Allowed(t *testing.T) {
+	// not parallel: uses os.Chdir, os.Stdout/os.Stderr capture, global resetForce/resetPush
 	// A non-protected branch like "feature-x" should push without warnings
 	// or blocks when --push is set (even without --force).
+	deps, _, _, _, _ := NewTestDeps(t)
 	ResetBeadsDirCache()
 
 	tmpDir := t.TempDir()
@@ -1470,7 +1523,7 @@ func TestResetWorktree_NonProtectedBranch_Allowed(t *testing.T) {
 	mock := NewCommandMock(t, []CommandStub{
 		{Dir: wtPath, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature-x\n"},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
 		{Dir: wtPath, Args: []string{"fetch", "origin"}},
@@ -1479,7 +1532,7 @@ func TestResetWorktree_NonProtectedBranch_Allowed(t *testing.T) {
 		{Dir: wtPath, Args: []string{"reset", "--hard", "origin/main"}},
 		{Dir: wtPath, Args: []string{"push", "origin", "feature-x", "--force"}},
 	})
-	outputMock.Install()
+	outputMock.InstallOn(deps)
 
 	// Capture stderr to verify no protected branch warning
 	oldStderr := os.Stderr
@@ -1491,7 +1544,7 @@ func TestResetWorktree_NonProtectedBranch_Allowed(t *testing.T) {
 	_, wOut, _ := os.Pipe()
 	os.Stdout = wOut
 
-	result := resetWorktree("test-wt", "main", false)
+	result := resetWorktree(deps, "test-wt", "main", false)
 
 	wErr.Close()
 	wOut.Close()

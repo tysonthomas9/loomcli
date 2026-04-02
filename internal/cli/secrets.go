@@ -120,11 +120,17 @@ func redactOpURI(uri string) string {
 // OnePasswordBackend resolves op:// URIs via the 1Password CLI.
 type OnePasswordBackend struct {
 	opAvailable bool
+	deps        *Deps
 }
 
 func NewOnePasswordBackend() *OnePasswordBackend {
 	_, err := exec.LookPath("op")
 	return &OnePasswordBackend{opAvailable: err == nil}
+}
+
+func NewOnePasswordBackendWithDeps(deps *Deps) *OnePasswordBackend {
+	_, err := deps.LookPath("op")
+	return &OnePasswordBackend{opAvailable: err == nil, deps: deps}
 }
 
 func (b *OnePasswordBackend) Name() string { return "1password" }
@@ -140,7 +146,11 @@ func (b *OnePasswordBackend) Resolve(name string) (string, bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	result := defaultDeps.ExecCtx.Run(ctx, "", "op", "read", name)
+	d := b.deps
+	if d == nil {
+		d = defaultDeps
+	}
+	result := d.ExecCtx.Run(ctx, "", "op", "read", name)
 	if result.Err != nil {
 		return "", false, fmt.Errorf("op read %s: %s", redactOpURI(name), strings.TrimSpace(result.Stderr))
 	}

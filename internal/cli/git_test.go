@@ -7,6 +7,8 @@ import (
 )
 
 func TestRunGitCommand(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name       string
 		dir        string
@@ -45,6 +47,8 @@ func TestRunGitCommand(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
 			mock := NewCommandMock(t, []CommandStub{{
 				Dir:    tc.dir,
 				Name:   "git",
@@ -53,9 +57,9 @@ func TestRunGitCommand(t *testing.T) {
 				Stderr: tc.mockStderr,
 				Err:    tc.mockErr,
 			}})
-			mock.Install()
+			mock.InstallOn(deps)
 
-			output, err := RunGitCommand(tc.dir, tc.args...)
+			output, err := runGit(deps, tc.dir, tc.args...)
 
 			if tc.wantErr && err == nil {
 				t.Error("expected error, got nil")
@@ -71,6 +75,8 @@ func TestRunGitCommand(t *testing.T) {
 }
 
 func TestIsCleanWorkingTree(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name       string
 		mockOutput string
@@ -107,15 +113,17 @@ func TestIsCleanWorkingTree(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
 			mock := NewCommandMock(t, []CommandStub{{
 				Name:   "git",
 				Args:   []string{"status", "--porcelain"},
 				Stdout: tc.mockOutput,
 				Err:    tc.mockErr,
 			}})
-			mock.Install()
+			mock.InstallOn(deps)
 
-			clean, err := IsCleanWorkingTree("/repo")
+			clean, err := isCleanWorkingTreeDeps(deps, "/repo")
 
 			if tc.wantErr && err == nil {
 				t.Error("expected error, got nil")
@@ -131,6 +139,8 @@ func TestIsCleanWorkingTree(t *testing.T) {
 }
 
 func TestGetConflictedFiles(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name       string
 		mockOutput string
@@ -162,15 +172,17 @@ func TestGetConflictedFiles(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
 			mock := NewCommandMock(t, []CommandStub{{
 				Name:   "git",
 				Args:   []string{"diff", "--name-only", "--diff-filter=U"},
 				Stdout: tc.mockOutput,
 				Err:    tc.mockErr,
 			}})
-			mock.Install()
+			mock.InstallOn(deps)
 
-			files, err := GetConflictedFiles("/repo")
+			files, err := getConflictedFilesDeps(deps, "/repo")
 
 			if tc.wantErr && err == nil {
 				t.Error("expected error, got nil")
@@ -191,6 +203,8 @@ func TestGetConflictedFiles(t *testing.T) {
 }
 
 func TestHasCommitsBetween(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name       string
 		target     string
@@ -231,15 +245,17 @@ func TestHasCommitsBetween(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
 			mock := NewCommandMock(t, []CommandStub{{
 				Name:   "git",
 				Args:   []string{"log", tc.target + ".." + tc.source, "--oneline"},
 				Stdout: tc.mockOutput,
 				Err:    tc.mockErr,
 			}})
-			mock.Install()
+			mock.InstallOn(deps)
 
-			hasCommits, _ := HasCommitsBetween("/repo", tc.target, tc.source)
+			hasCommits, _ := hasCommitsBetweenDeps(deps, "/repo", tc.target, tc.source)
 
 			if hasCommits != tc.wantHas {
 				t.Errorf("hasCommits = %v, want %v", hasCommits, tc.wantHas)
@@ -249,6 +265,8 @@ func TestHasCommitsBetween(t *testing.T) {
 }
 
 func TestRunGitCommandWithOutput(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		dir     string
@@ -274,14 +292,16 @@ func TestRunGitCommandWithOutput(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
 			mock := NewOutputCommandMock(t, []OutputCommandStub{{
 				Dir:  tc.dir,
 				Args: tc.args,
 				Err:  tc.mockErr,
 			}})
-			mock.Install()
+			mock.InstallOn(deps)
 
-			err := RunGitCommandWithOutput(tc.dir, tc.args...)
+			err := runGitOutput(deps, tc.dir, tc.args...)
 
 			if tc.wantErr && err == nil {
 				t.Error("expected error, got nil")
@@ -294,6 +314,8 @@ func TestRunGitCommandWithOutput(t *testing.T) {
 }
 
 func TestGitFetch(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		dir     string
@@ -307,14 +329,16 @@ func TestGitFetch(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
 			mock := NewOutputCommandMock(t, []OutputCommandStub{{
 				Dir:  tc.dir,
 				Args: []string{"fetch", "origin"},
 				Err:  tc.mockErr,
 			}})
-			mock.Install()
+			mock.InstallOn(deps)
 
-			err := GitFetch(tc.dir)
+			err := gitFetch(deps, tc.dir)
 
 			if tc.wantErr && err == nil {
 				t.Error("expected error, got nil")
@@ -327,6 +351,8 @@ func TestGitFetch(t *testing.T) {
 }
 
 func TestGitCheckout(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		dir     string
@@ -341,14 +367,16 @@ func TestGitCheckout(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
 			mock := NewOutputCommandMock(t, []OutputCommandStub{{
 				Dir:  tc.dir,
 				Args: []string{"checkout", tc.branch},
 				Err:  tc.mockErr,
 			}})
-			mock.Install()
+			mock.InstallOn(deps)
 
-			err := GitCheckout(tc.dir, tc.branch)
+			err := gitCheckout(deps, tc.dir, tc.branch)
 
 			if tc.wantErr && err == nil {
 				t.Error("expected error, got nil")
@@ -361,6 +389,8 @@ func TestGitCheckout(t *testing.T) {
 }
 
 func TestGitPull(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		dir     string
@@ -375,14 +405,16 @@ func TestGitPull(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
 			mock := NewOutputCommandMock(t, []OutputCommandStub{{
 				Dir:  tc.dir,
 				Args: []string{"pull", "origin", tc.branch},
 				Err:  tc.mockErr,
 			}})
-			mock.Install()
+			mock.InstallOn(deps)
 
-			err := GitPull(tc.dir, tc.branch)
+			err := gitPull(deps, tc.dir, tc.branch)
 
 			if tc.wantErr && err == nil {
 				t.Error("expected error, got nil")
@@ -395,6 +427,8 @@ func TestGitPull(t *testing.T) {
 }
 
 func TestGitMerge(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		dir     string
@@ -410,14 +444,16 @@ func TestGitMerge(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
 			mock := NewOutputCommandMock(t, []OutputCommandStub{{
 				Dir:  tc.dir,
 				Args: []string{"merge", "-m", tc.message, "--", tc.branch},
 				Err:  tc.mockErr,
 			}})
-			mock.Install()
+			mock.InstallOn(deps)
 
-			err := GitMerge(tc.dir, tc.branch, tc.message)
+			err := gitMerge(deps, tc.dir, tc.branch, tc.message)
 
 			if tc.wantErr && err == nil {
 				t.Error("expected error, got nil")
@@ -430,6 +466,8 @@ func TestGitMerge(t *testing.T) {
 }
 
 func TestGitMergeOrigin(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		dir     string
@@ -444,14 +482,16 @@ func TestGitMergeOrigin(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
 			mock := NewOutputCommandMock(t, []OutputCommandStub{{
 				Dir:  tc.dir,
 				Args: []string{"merge", "origin/" + tc.branch, "-m", tc.message},
 				Err:  tc.mockErr,
 			}})
-			mock.Install()
+			mock.InstallOn(deps)
 
-			err := GitMergeOrigin(tc.dir, tc.branch, tc.message)
+			err := gitMergeOrigin(deps, tc.dir, tc.branch, tc.message)
 
 			if tc.wantErr && err == nil {
 				t.Error("expected error, got nil")
@@ -464,6 +504,8 @@ func TestGitMergeOrigin(t *testing.T) {
 }
 
 func TestGitPush(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		dir     string
@@ -478,14 +520,16 @@ func TestGitPush(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
 			mock := NewOutputCommandMock(t, []OutputCommandStub{{
 				Dir:  tc.dir,
 				Args: []string{"push", "origin", tc.branch},
 				Err:  tc.mockErr,
 			}})
-			mock.Install()
+			mock.InstallOn(deps)
 
-			err := GitPush(tc.dir, tc.branch)
+			err := gitPush(deps, tc.dir, tc.branch)
 
 			if tc.wantErr && err == nil {
 				t.Error("expected error, got nil")
@@ -498,6 +542,8 @@ func TestGitPush(t *testing.T) {
 }
 
 func TestGitPushForce(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		dir     string
@@ -511,14 +557,16 @@ func TestGitPushForce(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
 			mock := NewOutputCommandMock(t, []OutputCommandStub{{
 				Dir:  tc.dir,
 				Args: []string{"push", "origin", tc.branch, "--force"},
 				Err:  tc.mockErr,
 			}})
-			mock.Install()
+			mock.InstallOn(deps)
 
-			err := GitPushForce(tc.dir, tc.branch)
+			err := gitPushForce(deps, tc.dir, tc.branch)
 
 			if tc.wantErr && err == nil {
 				t.Error("expected error, got nil")
@@ -531,6 +579,8 @@ func TestGitPushForce(t *testing.T) {
 }
 
 func TestGitReset(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		dir     string
@@ -546,14 +596,16 @@ func TestGitReset(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
 			mock := NewOutputCommandMock(t, []OutputCommandStub{{
 				Dir:  tc.dir,
 				Args: []string{"reset", "--hard", tc.ref},
 				Err:  tc.mockErr,
 			}})
-			mock.Install()
+			mock.InstallOn(deps)
 
-			err := GitReset(tc.dir, tc.ref)
+			err := gitReset(deps, tc.dir, tc.ref)
 
 			if tc.wantErr && err == nil {
 				t.Error("expected error, got nil")
@@ -566,6 +618,8 @@ func TestGitReset(t *testing.T) {
 }
 
 func TestGitCleanDryRun(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name       string
 		dir        string
@@ -596,6 +650,8 @@ func TestGitCleanDryRun(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
 			mock := NewCommandMock(t, []CommandStub{{
 				Dir:    tc.dir,
 				Name:   "git",
@@ -604,9 +660,9 @@ func TestGitCleanDryRun(t *testing.T) {
 				Stderr: "",
 				Err:    tc.mockErr,
 			}})
-			mock.Install()
+			mock.InstallOn(deps)
 
-			output, err := GitCleanDryRun(tc.dir)
+			output, err := gitCleanDryRun(deps, tc.dir)
 
 			if tc.wantErr && err == nil {
 				t.Error("expected error, got nil")
@@ -622,6 +678,8 @@ func TestGitCleanDryRun(t *testing.T) {
 }
 
 func TestGitClean(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		dir     string
@@ -635,14 +693,16 @@ func TestGitClean(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
 			mock := NewOutputCommandMock(t, []OutputCommandStub{{
 				Dir:  tc.dir,
 				Args: []string{"clean", "-fd"},
 				Err:  tc.mockErr,
 			}})
-			mock.Install()
+			mock.InstallOn(deps)
 
-			err := GitClean(tc.dir)
+			err := gitClean(deps, tc.dir)
 
 			if tc.wantErr && err == nil {
 				t.Error("expected error, got nil")
@@ -655,6 +715,8 @@ func TestGitClean(t *testing.T) {
 }
 
 func TestResolveRemote(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name   string
 		input  string
@@ -667,6 +729,7 @@ func TestResolveRemote(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			got := resolveRemote(tc.input)
 			if got != tc.expect {
 				t.Errorf("resolveRemote(%q) = %q, want %q", tc.input, got, tc.expect)
@@ -676,6 +739,8 @@ func TestResolveRemote(t *testing.T) {
 }
 
 func TestGitFetchRemote(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name       string
 		dir        string
@@ -691,14 +756,16 @@ func TestGitFetchRemote(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
 			mock := NewOutputCommandMock(t, []OutputCommandStub{{
 				Dir:  tc.dir,
 				Args: []string{"fetch", tc.wantRemote},
 				Err:  tc.mockErr,
 			}})
-			mock.Install()
+			mock.InstallOn(deps)
 
-			err := GitFetchRemote(tc.dir, tc.remote)
+			err := gitFetchRemote(deps, tc.dir, tc.remote)
 
 			if tc.wantErr && err == nil {
 				t.Error("expected error, got nil")
@@ -711,6 +778,8 @@ func TestGitFetchRemote(t *testing.T) {
 }
 
 func TestGitMergeRemote(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name       string
 		dir        string
@@ -728,14 +797,16 @@ func TestGitMergeRemote(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
 			mock := NewOutputCommandMock(t, []OutputCommandStub{{
 				Dir:  tc.dir,
 				Args: []string{"merge", tc.wantRemote + "/" + tc.branch, "-m", tc.message},
 				Err:  tc.mockErr,
 			}})
-			mock.Install()
+			mock.InstallOn(deps)
 
-			err := GitMergeRemote(tc.dir, tc.remote, tc.branch, tc.message)
+			err := gitMergeRemote(deps, tc.dir, tc.remote, tc.branch, tc.message)
 
 			if tc.wantErr && err == nil {
 				t.Error("expected error, got nil")
@@ -748,6 +819,8 @@ func TestGitMergeRemote(t *testing.T) {
 }
 
 func TestGitPushRemote(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name       string
 		dir        string
@@ -764,14 +837,16 @@ func TestGitPushRemote(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
 			mock := NewOutputCommandMock(t, []OutputCommandStub{{
 				Dir:  tc.dir,
 				Args: []string{"push", tc.wantRemote, tc.branch},
 				Err:  tc.mockErr,
 			}})
-			mock.Install()
+			mock.InstallOn(deps)
 
-			err := GitPushRemote(tc.dir, tc.remote, tc.branch)
+			err := gitPushRemote(deps, tc.dir, tc.remote, tc.branch)
 
 			if tc.wantErr && err == nil {
 				t.Error("expected error, got nil")
@@ -784,6 +859,8 @@ func TestGitPushRemote(t *testing.T) {
 }
 
 func TestGitPullRemote(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name       string
 		dir        string
@@ -800,14 +877,16 @@ func TestGitPullRemote(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
 			mock := NewOutputCommandMock(t, []OutputCommandStub{{
 				Dir:  tc.dir,
 				Args: []string{"pull", tc.wantRemote, tc.branch},
 				Err:  tc.mockErr,
 			}})
-			mock.Install()
+			mock.InstallOn(deps)
 
-			err := GitPullRemote(tc.dir, tc.remote, tc.branch)
+			err := gitPullRemote(deps, tc.dir, tc.remote, tc.branch)
 
 			if tc.wantErr && err == nil {
 				t.Error("expected error, got nil")
@@ -820,6 +899,8 @@ func TestGitPullRemote(t *testing.T) {
 }
 
 func TestHasCommitsBetweenRemote(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name       string
 		remote     string
@@ -870,15 +951,17 @@ func TestHasCommitsBetweenRemote(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
 			mock := NewCommandMock(t, []CommandStub{{
 				Name:   "git",
 				Args:   []string{"log", tc.wantRemote + "/" + tc.target + ".." + tc.source, "--oneline"},
 				Stdout: tc.mockOutput,
 				Err:    tc.mockErr,
 			}})
-			mock.Install()
+			mock.InstallOn(deps)
 
-			hasCommits, _ := HasCommitsBetweenRemote("/repo", tc.remote, tc.target, tc.source)
+			hasCommits, _ := hasCommitsBetweenRemoteDeps(deps, "/repo", tc.remote, tc.target, tc.source)
 
 			if hasCommits != tc.wantHas {
 				t.Errorf("hasCommits = %v, want %v", hasCommits, tc.wantHas)
@@ -888,19 +971,22 @@ func TestHasCommitsBetweenRemote(t *testing.T) {
 }
 
 func TestGitStash_DirtyWorkingTree(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// When tracked changes exist, git stash increases stash count → stashed=true
 	cmdMock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                  // before: 0 entries
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: "stash@{0}: WIP on main: abc1234\n"}, // after: 1 entry
 	})
-	cmdMock.Install()
+	cmdMock.InstallOn(deps)
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
 		{Args: []string{"stash"}, Err: nil},
 	})
-	outputMock.Install()
+	outputMock.InstallOn(deps)
 
-	stashed, err := GitStash("/repo")
+	stashed, err := gitStash(deps, "/repo")
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -911,19 +997,22 @@ func TestGitStash_DirtyWorkingTree(t *testing.T) {
 }
 
 func TestGitStash_UntrackedFilesOnly(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// When only untracked files exist, git stash is a no-op → stash count unchanged → stashed=false
 	cmdMock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""}, // before: 0 entries
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""}, // after: still 0 entries
 	})
-	cmdMock.Install()
+	cmdMock.InstallOn(deps)
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
 		{Args: []string{"stash"}, Err: nil}, // git stash runs but is a no-op
 	})
-	outputMock.Install()
+	outputMock.InstallOn(deps)
 
-	stashed, err := GitStash("/repo")
+	stashed, err := gitStash(deps, "/repo")
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -934,19 +1023,22 @@ func TestGitStash_UntrackedFilesOnly(t *testing.T) {
 }
 
 func TestGitStash_NothingToStash(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// Clean working tree: git stash is a no-op, stash count stays 0
 	cmdMock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""}, // before: 0
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""}, // after: 0
 	})
-	cmdMock.Install()
+	cmdMock.InstallOn(deps)
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
 		{Args: []string{"stash"}, Err: nil},
 	})
-	outputMock.Install()
+	outputMock.InstallOn(deps)
 
-	stashed, err := GitStash("/repo")
+	stashed, err := gitStash(deps, "/repo")
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -957,13 +1049,16 @@ func TestGitStash_NothingToStash(t *testing.T) {
 }
 
 func TestGitStash_StashListFails(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// When initial stash list fails, GitStash should return the error
 	cmdMock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"stash", "list"}, Err: errors.New("not a git repository")},
 	})
-	cmdMock.Install()
+	cmdMock.InstallOn(deps)
 
-	stashed, err := GitStash("/repo")
+	stashed, err := gitStash(deps, "/repo")
 
 	if err == nil {
 		t.Error("expected error, got nil")
@@ -974,18 +1069,21 @@ func TestGitStash_StashListFails(t *testing.T) {
 }
 
 func TestGitStash_StashCommandFails(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// When git stash command fails, GitStash should return wrapped error
 	cmdMock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""}, // before: succeeds
 	})
-	cmdMock.Install()
+	cmdMock.InstallOn(deps)
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
 		{Args: []string{"stash"}, Err: errors.New("stash failed")},
 	})
-	outputMock.Install()
+	outputMock.InstallOn(deps)
 
-	stashed, err := GitStash("/repo")
+	stashed, err := gitStash(deps, "/repo")
 
 	if err == nil {
 		t.Error("expected error, got nil")
@@ -996,19 +1094,22 @@ func TestGitStash_StashCommandFails(t *testing.T) {
 }
 
 func TestGitStash_SecondStashListFails(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	// When the second stash list call fails after a successful stash, return error
 	cmdMock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                // before: 0
 		{Name: "git", Args: []string{"stash", "list"}, Err: errors.New("unexpected stash error")}, // after: fails
 	})
-	cmdMock.Install()
+	cmdMock.InstallOn(deps)
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
 		{Args: []string{"stash"}, Err: nil}, // stash succeeds
 	})
-	outputMock.Install()
+	outputMock.InstallOn(deps)
 
-	stashed, err := GitStash("/repo")
+	stashed, err := gitStash(deps, "/repo")
 
 	if err == nil {
 		t.Error("expected error, got nil")
@@ -1019,12 +1120,15 @@ func TestGitStash_SecondStashListFails(t *testing.T) {
 }
 
 func TestGitStashPop_Success(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
 		{Args: []string{"stash", "pop"}, Err: nil},
 	})
-	outputMock.Install()
+	outputMock.InstallOn(deps)
 
-	err := GitStashPop("/repo")
+	err := gitStashPop(deps, "/repo")
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -1032,12 +1136,15 @@ func TestGitStashPop_Success(t *testing.T) {
 }
 
 func TestGitStashPop_Fails(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
 		{Args: []string{"stash", "pop"}, Err: errors.New("conflict during stash pop")},
 	})
-	outputMock.Install()
+	outputMock.InstallOn(deps)
 
-	err := GitStashPop("/repo")
+	err := gitStashPop(deps, "/repo")
 
 	if err == nil {
 		t.Error("expected error, got nil")
@@ -1045,12 +1152,15 @@ func TestGitStashPop_Fails(t *testing.T) {
 }
 
 func TestHasUnmergedFiles_WithConflicts(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	cmdMock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "file1.go\nfile2.go\n"},
 	})
-	cmdMock.Install()
+	cmdMock.InstallOn(deps)
 
-	hasUnmerged, err := HasUnmergedFiles("/repo")
+	hasUnmerged, err := hasUnmergedFilesDeps(deps, "/repo")
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -1061,12 +1171,15 @@ func TestHasUnmergedFiles_WithConflicts(t *testing.T) {
 }
 
 func TestHasUnmergedFiles_Clean(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	cmdMock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: ""},
 	})
-	cmdMock.Install()
+	cmdMock.InstallOn(deps)
 
-	hasUnmerged, err := HasUnmergedFiles("/repo")
+	hasUnmerged, err := hasUnmergedFilesDeps(deps, "/repo")
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -1077,12 +1190,15 @@ func TestHasUnmergedFiles_Clean(t *testing.T) {
 }
 
 func TestHasUnmergedFiles_GitError(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
 	cmdMock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Err: errors.New("not a git repository")},
 	})
-	cmdMock.Install()
+	cmdMock.InstallOn(deps)
 
-	hasUnmerged, err := HasUnmergedFiles("/repo")
+	hasUnmerged, err := hasUnmergedFilesDeps(deps, "/repo")
 
 	if err == nil {
 		t.Error("expected error, got nil")
@@ -1093,6 +1209,8 @@ func TestHasUnmergedFiles_GitError(t *testing.T) {
 }
 
 func TestIsRefCheckedOutInWorktree(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name             string
 		branch           string
@@ -1154,15 +1272,17 @@ func TestIsRefCheckedOutInWorktree(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
 			mock := NewCommandMock(t, []CommandStub{{
 				Name:   "git",
 				Args:   []string{"worktree", "list", "--porcelain"},
 				Stdout: tc.mockOutput,
 				Err:    tc.mockErr,
 			}})
-			mock.Install()
+			mock.InstallOn(deps)
 
-			checkedOut, wtPath, err := IsRefCheckedOutInWorktree("/repo", tc.branch)
+			checkedOut, wtPath, err := isRefCheckedOutInWorktreeDeps(deps, "/repo", tc.branch)
 
 			if tc.wantErr && err == nil {
 				t.Error("expected error, got nil")
@@ -1181,6 +1301,8 @@ func TestIsRefCheckedOutInWorktree(t *testing.T) {
 }
 
 func TestGitCheckoutDetached(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		dir     string
@@ -1194,14 +1316,16 @@ func TestGitCheckoutDetached(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
 			mock := NewOutputCommandMock(t, []OutputCommandStub{{
 				Dir:  tc.dir,
 				Args: []string{"checkout", "--detach", tc.ref},
 				Err:  tc.mockErr,
 			}})
-			mock.Install()
+			mock.InstallOn(deps)
 
-			err := GitCheckoutDetached(tc.dir, tc.ref)
+			err := gitCheckoutDetached(deps, tc.dir, tc.ref)
 
 			if tc.wantErr && err == nil {
 				t.Error("expected error, got nil")
@@ -1214,6 +1338,8 @@ func TestGitCheckoutDetached(t *testing.T) {
 }
 
 func TestGitCreateBranchFromHead(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		dir     string
@@ -1227,14 +1353,16 @@ func TestGitCreateBranchFromHead(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
 			mock := NewOutputCommandMock(t, []OutputCommandStub{{
 				Dir:  tc.dir,
 				Args: []string{"checkout", "-b", tc.branch},
 				Err:  tc.mockErr,
 			}})
-			mock.Install()
+			mock.InstallOn(deps)
 
-			err := GitCreateBranchFromHead(tc.dir, tc.branch)
+			err := gitCreateBranchFromHead(deps, tc.dir, tc.branch)
 
 			if tc.wantErr && err == nil {
 				t.Error("expected error, got nil")
@@ -1247,6 +1375,8 @@ func TestGitCreateBranchFromHead(t *testing.T) {
 }
 
 func TestGitDeleteBranch(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		dir     string
@@ -1264,14 +1394,16 @@ func TestGitDeleteBranch(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
 			mock := NewOutputCommandMock(t, []OutputCommandStub{{
 				Dir:  tc.dir,
 				Args: []string{"branch", tc.wantArg, "--", tc.branch},
 				Err:  tc.mockErr,
 			}})
-			mock.Install()
+			mock.InstallOn(deps)
 
-			err := GitDeleteBranch(tc.dir, tc.branch, tc.force)
+			err := gitDeleteBranch(deps, tc.dir, tc.branch, tc.force)
 
 			if tc.wantErr && err == nil {
 				t.Error("expected error, got nil")
@@ -1284,6 +1416,8 @@ func TestGitDeleteBranch(t *testing.T) {
 }
 
 func TestGitPushRefspec(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name       string
 		dir        string
@@ -1332,14 +1466,16 @@ func TestGitPushRefspec(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
 			mock := NewOutputCommandMock(t, []OutputCommandStub{{
 				Dir:  tc.dir,
 				Args: tc.wantArgs,
 				Err:  tc.mockErr,
 			}})
-			mock.Install()
+			mock.InstallOn(deps)
 
-			err := GitPushRefspec(tc.dir, tc.remote, tc.localRef, tc.remoteRef)
+			err := gitPushRefspec(deps, tc.dir, tc.remote, tc.localRef, tc.remoteRef)
 
 			if tc.wantErr && err == nil {
 				t.Error("expected error, got nil")
@@ -1352,6 +1488,8 @@ func TestGitPushRefspec(t *testing.T) {
 }
 
 func TestBranchExistsLocally(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name       string
 		branch     string
@@ -1382,15 +1520,17 @@ func TestBranchExistsLocally(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
 			mock := NewCommandMock(t, []CommandStub{{
 				Name:   "git",
 				Args:   []string{"rev-parse", "--verify", "refs/heads/" + tc.branch},
 				Stdout: tc.mockOutput,
 				Err:    tc.mockErr,
 			}})
-			mock.Install()
+			mock.InstallOn(deps)
 
-			exists, err := BranchExistsLocally("/repo", tc.branch)
+			exists, err := branchExistsLocallyDeps(deps, "/repo", tc.branch)
 
 			if tc.wantErr && err == nil {
 				t.Error("expected error, got nil")
@@ -1406,6 +1546,8 @@ func TestBranchExistsLocally(t *testing.T) {
 }
 
 func TestRemoteBranchExists(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name       string
 		remote     string
@@ -1444,15 +1586,17 @@ func TestRemoteBranchExists(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
 			mock := NewCommandMock(t, []CommandStub{{
 				Name:   "git",
 				Args:   []string{"rev-parse", "--verify", "refs/remotes/" + tc.wantRemote + "/" + tc.branch},
 				Stdout: tc.mockOutput,
 				Err:    tc.mockErr,
 			}})
-			mock.Install()
+			mock.InstallOn(deps)
 
-			exists, err := RemoteBranchExists("/repo", tc.remote, tc.branch)
+			exists, err := remoteBranchExistsDeps(deps, "/repo", tc.remote, tc.branch)
 
 			if tc.wantErr && err == nil {
 				t.Error("expected error, got nil")
@@ -1468,6 +1612,8 @@ func TestRemoteBranchExists(t *testing.T) {
 }
 
 func TestGitCheckoutNewFromRef(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name       string
 		dir        string
@@ -1483,14 +1629,16 @@ func TestGitCheckoutNewFromRef(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
 			mock := NewOutputCommandMock(t, []OutputCommandStub{{
 				Dir:  tc.dir,
 				Args: []string{"checkout", "-b", tc.branch, tc.startPoint},
 				Err:  tc.mockErr,
 			}})
-			mock.Install()
+			mock.InstallOn(deps)
 
-			err := GitCheckoutNewFromRef(tc.dir, tc.branch, tc.startPoint)
+			err := gitCheckoutNewFromRef(deps, tc.dir, tc.branch, tc.startPoint)
 
 			if tc.wantErr && err == nil {
 				t.Error("expected error, got nil")
@@ -1503,6 +1651,8 @@ func TestGitCheckoutNewFromRef(t *testing.T) {
 }
 
 func TestValidateGitRef(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		input   string
@@ -1534,6 +1684,7 @@ func TestValidateGitRef(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			err := validateGitRef(tc.input)
 
 			if tc.wantErr && err == nil {
@@ -1550,213 +1701,256 @@ func TestValidateGitRef(t *testing.T) {
 }
 
 func TestGitRefInjectionRejected(t *testing.T) {
+	t.Parallel()
 	dir := "/repo"
 
 	t.Run("GitCheckout", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewOutputCommandMock(t, []OutputCommandStub{})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		err := GitCheckout(dir, "-flag")
+		err := gitCheckout(deps, dir, "-flag")
 		if err == nil {
 			t.Error("expected error, got nil")
 		}
 	})
 
 	t.Run("GitPull", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewOutputCommandMock(t, []OutputCommandStub{})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		err := GitPull(dir, "--upload-pack=evil")
+		err := gitPull(deps, dir, "--upload-pack=evil")
 		if err == nil {
 			t.Error("expected error, got nil")
 		}
 	})
 
 	t.Run("GitMerge", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewOutputCommandMock(t, []OutputCommandStub{})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		err := GitMerge(dir, "--strategy=evil", "msg")
+		err := gitMerge(deps, dir, "--strategy=evil", "msg")
 		if err == nil {
 			t.Error("expected error, got nil")
 		}
 	})
 
 	t.Run("GitMergeOrigin", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewOutputCommandMock(t, []OutputCommandStub{})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		err := GitMergeOrigin(dir, "--strategy=evil", "msg")
+		err := gitMergeOrigin(deps, dir, "--strategy=evil", "msg")
 		if err == nil {
 			t.Error("expected error, got nil")
 		}
 	})
 
 	t.Run("GitPush", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewOutputCommandMock(t, []OutputCommandStub{})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		err := GitPush(dir, "--receive-pack=evil")
+		err := gitPush(deps, dir, "--receive-pack=evil")
 		if err == nil {
 			t.Error("expected error, got nil")
 		}
 	})
 
 	t.Run("GitPushForce", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewOutputCommandMock(t, []OutputCommandStub{})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		err := GitPushForce(dir, "-flag")
+		err := gitPushForce(deps, dir, "-flag")
 		if err == nil {
 			t.Error("expected error, got nil")
 		}
 	})
 
 	t.Run("GitReset", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewOutputCommandMock(t, []OutputCommandStub{})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		err := GitReset(dir, "--flag")
+		err := gitReset(deps, dir, "--flag")
 		if err == nil {
 			t.Error("expected error, got nil")
 		}
 	})
 
 	t.Run("GitCheckoutDetached", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewOutputCommandMock(t, []OutputCommandStub{})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		err := GitCheckoutDetached(dir, "--flag")
+		err := gitCheckoutDetached(deps, dir, "--flag")
 		if err == nil {
 			t.Error("expected error, got nil")
 		}
 	})
 
 	t.Run("GitCreateBranchFromHead", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewOutputCommandMock(t, []OutputCommandStub{})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		err := GitCreateBranchFromHead(dir, "--orphan")
+		err := gitCreateBranchFromHead(deps, dir, "--orphan")
 		if err == nil {
 			t.Error("expected error, got nil")
 		}
 	})
 
 	t.Run("GitDeleteBranch", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewOutputCommandMock(t, []OutputCommandStub{})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		err := GitDeleteBranch(dir, "--flag", false)
+		err := gitDeleteBranch(deps, dir, "--flag", false)
 		if err == nil {
 			t.Error("expected error, got nil")
 		}
 	})
 
 	t.Run("GitFetchRemote", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewOutputCommandMock(t, []OutputCommandStub{})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		err := GitFetchRemote(dir, "-evil")
+		err := gitFetchRemote(deps, dir, "-evil")
 		if err == nil {
 			t.Error("expected error, got nil")
 		}
 	})
 
 	t.Run("GitMergeRemote_bad_remote", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewOutputCommandMock(t, []OutputCommandStub{})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		err := GitMergeRemote(dir, "-evil", "main", "msg")
+		err := gitMergeRemote(deps, dir, "-evil", "main", "msg")
 		if err == nil {
 			t.Error("expected error, got nil")
 		}
 	})
 
 	t.Run("GitMergeRemote_bad_branch", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewOutputCommandMock(t, []OutputCommandStub{})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		err := GitMergeRemote(dir, "", "-evil", "msg")
+		err := gitMergeRemote(deps, dir, "", "-evil", "msg")
 		if err == nil {
 			t.Error("expected error, got nil")
 		}
 	})
 
 	t.Run("GitPushRemote_bad_remote", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewOutputCommandMock(t, []OutputCommandStub{})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		err := GitPushRemote(dir, "-evil", "main")
+		err := gitPushRemote(deps, dir, "-evil", "main")
 		if err == nil {
 			t.Error("expected error, got nil")
 		}
 	})
 
 	t.Run("GitPushRemote_bad_branch", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewOutputCommandMock(t, []OutputCommandStub{})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		err := GitPushRemote(dir, "", "--evil")
+		err := gitPushRemote(deps, dir, "", "--evil")
 		if err == nil {
 			t.Error("expected error, got nil")
 		}
 	})
 
 	t.Run("GitPullRemote_bad_remote", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewOutputCommandMock(t, []OutputCommandStub{})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		err := GitPullRemote(dir, "-evil", "main")
+		err := gitPullRemote(deps, dir, "-evil", "main")
 		if err == nil {
 			t.Error("expected error, got nil")
 		}
 	})
 
 	t.Run("GitPullRemote_bad_branch", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewOutputCommandMock(t, []OutputCommandStub{})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		err := GitPullRemote(dir, "", "--evil")
+		err := gitPullRemote(deps, dir, "", "--evil")
 		if err == nil {
 			t.Error("expected error, got nil")
 		}
 	})
 
 	t.Run("GitPushRefspec_bad_remote", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewOutputCommandMock(t, []OutputCommandStub{})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		err := GitPushRefspec(dir, "-evil", "local", "remote")
+		err := gitPushRefspec(deps, dir, "-evil", "local", "remote")
 		if err == nil {
 			t.Error("expected error, got nil")
 		}
 	})
 
 	t.Run("GitPushRefspec_bad_localRef", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewOutputCommandMock(t, []OutputCommandStub{})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		err := GitPushRefspec(dir, "", "-local", "remote")
+		err := gitPushRefspec(deps, dir, "", "-local", "remote")
 		if err == nil {
 			t.Error("expected error, got nil")
 		}
 	})
 
 	t.Run("GitPushRefspec_bad_remoteRef", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewOutputCommandMock(t, []OutputCommandStub{})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		err := GitPushRefspec(dir, "", "local", "-remote")
+		err := gitPushRefspec(deps, dir, "", "local", "-remote")
 		if err == nil {
 			t.Error("expected error, got nil")
 		}
 	})
 
 	t.Run("HasCommitsBetween_bad_target", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewCommandMock(t, []CommandStub{})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		hasCommits, err := HasCommitsBetween(dir, "-target", "source")
+		hasCommits, err := hasCommitsBetweenDeps(deps, dir, "-target", "source")
 		if err == nil {
 			t.Error("expected error, got nil")
 		}
@@ -1766,10 +1960,12 @@ func TestGitRefInjectionRejected(t *testing.T) {
 	})
 
 	t.Run("HasCommitsBetween_bad_source", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewCommandMock(t, []CommandStub{})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		hasCommits, err := HasCommitsBetween(dir, "target", "-source")
+		hasCommits, err := hasCommitsBetweenDeps(deps, dir, "target", "-source")
 		if err == nil {
 			t.Error("expected error, got nil")
 		}
@@ -1779,10 +1975,12 @@ func TestGitRefInjectionRejected(t *testing.T) {
 	})
 
 	t.Run("HasCommitsBetweenRemote_bad_remote", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewCommandMock(t, []CommandStub{})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		hasCommits, err := HasCommitsBetweenRemote(dir, "-evil", "target", "source")
+		hasCommits, err := hasCommitsBetweenRemoteDeps(deps, dir, "-evil", "target", "source")
 		if err == nil {
 			t.Error("expected error, got nil")
 		}
@@ -1792,10 +1990,12 @@ func TestGitRefInjectionRejected(t *testing.T) {
 	})
 
 	t.Run("HasCommitsBetweenRemote_bad_target", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewCommandMock(t, []CommandStub{})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		hasCommits, err := HasCommitsBetweenRemote(dir, "", "-target", "source")
+		hasCommits, err := hasCommitsBetweenRemoteDeps(deps, dir, "", "-target", "source")
 		if err == nil {
 			t.Error("expected error, got nil")
 		}
@@ -1805,10 +2005,12 @@ func TestGitRefInjectionRejected(t *testing.T) {
 	})
 
 	t.Run("HasCommitsBetweenRemote_bad_source", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewCommandMock(t, []CommandStub{})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		hasCommits, err := HasCommitsBetweenRemote(dir, "", "target", "-source")
+		hasCommits, err := hasCommitsBetweenRemoteDeps(deps, dir, "", "target", "-source")
 		if err == nil {
 			t.Error("expected error, got nil")
 		}
@@ -1818,10 +2020,12 @@ func TestGitRefInjectionRejected(t *testing.T) {
 	})
 
 	t.Run("BranchExistsLocally_bad_branch", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewCommandMock(t, []CommandStub{})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		exists, err := BranchExistsLocally(dir, "--flag")
+		exists, err := branchExistsLocallyDeps(deps, dir, "--flag")
 		if err == nil {
 			t.Error("expected error, got nil")
 		}
@@ -1831,10 +2035,12 @@ func TestGitRefInjectionRejected(t *testing.T) {
 	})
 
 	t.Run("RemoteBranchExists_bad_remote", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewCommandMock(t, []CommandStub{})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		exists, err := RemoteBranchExists(dir, "-evil", "main")
+		exists, err := remoteBranchExistsDeps(deps, dir, "-evil", "main")
 		if err == nil {
 			t.Error("expected error, got nil")
 		}
@@ -1844,10 +2050,12 @@ func TestGitRefInjectionRejected(t *testing.T) {
 	})
 
 	t.Run("RemoteBranchExists_bad_branch", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewCommandMock(t, []CommandStub{})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		exists, err := RemoteBranchExists(dir, "", "--evil")
+		exists, err := remoteBranchExistsDeps(deps, dir, "", "--evil")
 		if err == nil {
 			t.Error("expected error, got nil")
 		}
@@ -1857,20 +2065,24 @@ func TestGitRefInjectionRejected(t *testing.T) {
 	})
 
 	t.Run("GitCheckoutNewFromRef_bad_branch", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewOutputCommandMock(t, []OutputCommandStub{})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		err := GitCheckoutNewFromRef(dir, "--orphan", "origin/main")
+		err := gitCheckoutNewFromRef(deps, dir, "--orphan", "origin/main")
 		if err == nil {
 			t.Error("expected error, got nil")
 		}
 	})
 
 	t.Run("GitCheckoutNewFromRef_bad_startPoint", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, _ := NewTestDeps(t)
 		mock := NewOutputCommandMock(t, []OutputCommandStub{})
-		mock.Install()
+		mock.InstallOn(deps)
 
-		err := GitCheckoutNewFromRef(dir, "feature", "--evil")
+		err := gitCheckoutNewFromRef(deps, dir, "feature", "--evil")
 		if err == nil {
 			t.Error("expected error, got nil")
 		}
@@ -1880,6 +2092,8 @@ func TestGitRefInjectionRejected(t *testing.T) {
 // ---------- GitCleanExclude / GitCleanDryRunExclude ----------
 
 func TestGitCleanExclude(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name     string
 		dir      string
@@ -1932,14 +2146,16 @@ func TestGitCleanExclude(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
 			mock := NewOutputCommandMock(t, []OutputCommandStub{{
 				Dir:  tc.dir,
 				Args: tc.wantArgs,
 				Err:  tc.mockErr,
 			}})
-			mock.Install()
+			mock.InstallOn(deps)
 
-			err := GitCleanExclude(tc.dir, tc.excludes)
+			err := gitCleanExclude(deps, tc.dir, tc.excludes)
 
 			if tc.wantErr && err == nil {
 				t.Error("expected error, got nil")
@@ -1952,6 +2168,8 @@ func TestGitCleanExclude(t *testing.T) {
 }
 
 func TestGitCleanDryRunExclude(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name       string
 		dir        string
@@ -2001,6 +2219,8 @@ func TestGitCleanDryRunExclude(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			deps, _, _, _, _ := NewTestDeps(t)
 			mock := NewCommandMock(t, []CommandStub{{
 				Dir:    tc.dir,
 				Name:   "git",
@@ -2008,9 +2228,9 @@ func TestGitCleanDryRunExclude(t *testing.T) {
 				Stdout: tc.mockStdout,
 				Err:    tc.mockErr,
 			}})
-			mock.Install()
+			mock.InstallOn(deps)
 
-			output, err := GitCleanDryRunExclude(tc.dir, tc.excludes)
+			output, err := gitCleanDryRunExclude(deps, tc.dir, tc.excludes)
 
 			if tc.wantErr && err == nil {
 				t.Error("expected error, got nil")

@@ -61,12 +61,23 @@ func worktreeThenBranchCompletion(cmd *cobra.Command, args []string, toComplete 
 	return nil, cobra.ShellCompDirectiveNoFileComp
 }
 
-// GetGitBranches returns all local and remote branch names
-func GetGitBranches() ([]string, error) {
-	output, err := RunGitCommand(".", "branch", "-a", "--format=%(refname:short)")
+// getGitBranchesDeps is the deps-aware implementation of GetGitBranches.
+func getGitBranchesDeps(deps *Deps) ([]string, error) {
+	output, err := runGit(deps, ".", "branch", "-a", "--format=%(refname:short)")
 	if err != nil {
 		return nil, err
 	}
+
+	return parseGitBranches(output), nil
+}
+
+// GetGitBranches returns all local and remote branch names
+func GetGitBranches() ([]string, error) {
+	return getGitBranchesDeps(defaultDeps)
+}
+
+// parseGitBranches parses the output of git branch -a into unique branch names.
+func parseGitBranches(output string) []string {
 
 	var branches []string
 	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
@@ -92,5 +103,5 @@ func GetGitBranches() ([]string, error) {
 		}
 	}
 
-	return unique, nil
+	return unique
 }

@@ -26,6 +26,7 @@ func TestEnvSecretBackend_Resolves(t *testing.T) {
 }
 
 func TestEnvSecretBackend_NotFound(t *testing.T) {
+	t.Parallel()
 	os.Unsetenv("LOOM_SECRET_MISSING_VAR")
 	b := &EnvSecretBackend{}
 	_, found, err := b.Resolve("missing-var")
@@ -65,6 +66,7 @@ func TestEnvSecretBackend_NameConversion(t *testing.T) {
 }
 
 func TestToEnvName(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		in, want string
 	}{
@@ -84,6 +86,7 @@ func TestToEnvName(t *testing.T) {
 // --- FileSecretBackend tests ---
 
 func TestFileSecretBackend_Resolves(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	secretPath := filepath.Join(dir, "test-key")
 	if err := os.WriteFile(secretPath, []byte("file-secret\n"), 0600); err != nil {
@@ -104,6 +107,7 @@ func TestFileSecretBackend_Resolves(t *testing.T) {
 }
 
 func TestFileSecretBackend_NotFound(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	b := &FileSecretBackend{dir: dir}
 	_, found, err := b.Resolve("nonexistent")
@@ -116,6 +120,7 @@ func TestFileSecretBackend_NotFound(t *testing.T) {
 }
 
 func TestFileSecretBackend_PathTraversal(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	b := &FileSecretBackend{dir: dir}
 
@@ -131,6 +136,7 @@ func TestFileSecretBackend_PathTraversal(t *testing.T) {
 }
 
 func TestFileSecretBackend_TrimsNewline(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "key"), []byte("value\nextra\n"), 0600); err != nil {
 		t.Fatal(err)
@@ -149,6 +155,7 @@ func TestFileSecretBackend_TrimsNewline(t *testing.T) {
 // --- OnePasswordBackend tests ---
 
 func TestOnePasswordBackend_NotAvailable(t *testing.T) {
+	t.Parallel()
 	b := &OnePasswordBackend{opAvailable: false}
 	_, found, err := b.Resolve("op://vault/item/field")
 	if err != nil {
@@ -160,6 +167,7 @@ func TestOnePasswordBackend_NotAvailable(t *testing.T) {
 }
 
 func TestOnePasswordBackend_NonOpURI(t *testing.T) {
+	t.Parallel()
 	b := &OnePasswordBackend{opAvailable: true}
 	_, found, err := b.Resolve("plain-name")
 	if err != nil {
@@ -171,11 +179,13 @@ func TestOnePasswordBackend_NonOpURI(t *testing.T) {
 }
 
 func TestOnePasswordBackend_Success(t *testing.T) {
-	installExecContextMock(t, func(_ context.Context, dir, name string, args ...string) CommandResult {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+	deps.ExecCtx = &funcExecContextRunner{fn: func(_ context.Context, dir, name string, args ...string) CommandResult {
 		return CommandResult{Stdout: "op-secret-value\n", Stderr: "", Err: nil}
-	})
+	}}
 
-	b := &OnePasswordBackend{opAvailable: true}
+	b := &OnePasswordBackend{opAvailable: true, deps: deps}
 	val, found, err := b.Resolve("op://vault/item/field")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -186,11 +196,13 @@ func TestOnePasswordBackend_Success(t *testing.T) {
 }
 
 func TestOnePasswordBackend_Error(t *testing.T) {
-	installExecContextMock(t, func(_ context.Context, dir, name string, args ...string) CommandResult {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+	deps.ExecCtx = &funcExecContextRunner{fn: func(_ context.Context, dir, name string, args ...string) CommandResult {
 		return CommandResult{Stdout: "", Stderr: "not signed in\n", Err: os.ErrPermission}
-	})
+	}}
 
-	b := &OnePasswordBackend{opAvailable: true}
+	b := &OnePasswordBackend{opAvailable: true, deps: deps}
 	_, _, err := b.Resolve("op://vault/item/field")
 	if err == nil {
 		t.Fatal("expected error")
@@ -218,6 +230,7 @@ func (m *mockSecretBackend) Resolve(name string) (string, bool, error) {
 }
 
 func TestSecretResolver_ChainPriority(t *testing.T) {
+	t.Parallel()
 	b1 := &mockSecretBackend{name: "first", secrets: map[string]string{"key": "from-first"}}
 	b2 := &mockSecretBackend{name: "second", secrets: map[string]string{"key": "from-second"}}
 
@@ -239,6 +252,7 @@ func TestSecretResolver_ChainPriority(t *testing.T) {
 }
 
 func TestSecretResolver_Fallback(t *testing.T) {
+	t.Parallel()
 	b1 := &mockSecretBackend{name: "first", secrets: map[string]string{}}
 	b2 := &mockSecretBackend{name: "second", secrets: map[string]string{"key": "from-second"}}
 
@@ -257,6 +271,7 @@ func TestSecretResolver_Fallback(t *testing.T) {
 }
 
 func TestSecretResolver_Caching(t *testing.T) {
+	t.Parallel()
 	b := &mockSecretBackend{name: "mock", secrets: map[string]string{"key": "cached-val"}}
 	r := &SecretResolver{
 		backends: []SecretBackend{b},
@@ -277,6 +292,7 @@ func TestSecretResolver_Caching(t *testing.T) {
 }
 
 func TestSecretResolver_NotFound(t *testing.T) {
+	t.Parallel()
 	b := &mockSecretBackend{name: "mock", secrets: map[string]string{}}
 	r := &SecretResolver{
 		backends: []SecretBackend{b},
@@ -295,6 +311,7 @@ func TestSecretResolver_NotFound(t *testing.T) {
 // --- ResolveAllInString tests ---
 
 func TestResolveAllInString_Single(t *testing.T) {
+	t.Parallel()
 	b := &mockSecretBackend{name: "mock", secrets: map[string]string{"api-key": "sk-123"}}
 	r := &SecretResolver{backends: []SecretBackend{b}, cache: make(map[string]string)}
 
@@ -308,6 +325,7 @@ func TestResolveAllInString_Single(t *testing.T) {
 }
 
 func TestResolveAllInString_Multiple(t *testing.T) {
+	t.Parallel()
 	b := &mockSecretBackend{name: "mock", secrets: map[string]string{"a": "1", "b": "2"}}
 	r := &SecretResolver{backends: []SecretBackend{b}, cache: make(map[string]string)}
 
@@ -321,6 +339,7 @@ func TestResolveAllInString_Multiple(t *testing.T) {
 }
 
 func TestResolveAllInString_NoReferences(t *testing.T) {
+	t.Parallel()
 	r := &SecretResolver{backends: nil, cache: make(map[string]string)}
 
 	got, err := r.ResolveAllInString("no secrets here")
@@ -333,6 +352,7 @@ func TestResolveAllInString_NoReferences(t *testing.T) {
 }
 
 func TestResolveAllInString_Error(t *testing.T) {
+	t.Parallel()
 	b := &mockSecretBackend{name: "mock", secrets: map[string]string{}}
 	r := &SecretResolver{backends: []SecretBackend{b}, cache: make(map[string]string)}
 
@@ -345,6 +365,7 @@ func TestResolveAllInString_Error(t *testing.T) {
 // --- MaskSecrets tests ---
 
 func TestMaskSecrets_Known(t *testing.T) {
+	t.Parallel()
 	r := &SecretResolver{backends: nil, cache: map[string]string{"key": "supersecret"}}
 
 	got := r.MaskSecrets("the password is supersecret here")
@@ -357,6 +378,7 @@ func TestMaskSecrets_Known(t *testing.T) {
 }
 
 func TestMaskSecrets_ShortValueSkipped(t *testing.T) {
+	t.Parallel()
 	r := &SecretResolver{backends: nil, cache: map[string]string{"key": "ab"}}
 
 	got := r.MaskSecrets("value is ab here")
@@ -366,6 +388,7 @@ func TestMaskSecrets_ShortValueSkipped(t *testing.T) {
 }
 
 func TestMaskSecrets_LongerFirst(t *testing.T) {
+	t.Parallel()
 	r := &SecretResolver{backends: nil, cache: map[string]string{
 		"short": "secret",
 		"long":  "supersecret",
@@ -379,6 +402,7 @@ func TestMaskSecrets_LongerFirst(t *testing.T) {
 }
 
 func TestMaskSecrets_Empty(t *testing.T) {
+	t.Parallel()
 	r := &SecretResolver{backends: nil, cache: map[string]string{}}
 	got := r.MaskSecrets("nothing to mask")
 	if got != "nothing to mask" {
@@ -389,6 +413,7 @@ func TestMaskSecrets_Empty(t *testing.T) {
 // --- Snapshot tests ---
 
 func TestSnapshot_ReturnsCopy(t *testing.T) {
+	t.Parallel()
 	r := &SecretResolver{backends: nil, cache: map[string]string{"a": "1", "b": "2"}}
 
 	snap := r.Snapshot()
@@ -406,6 +431,7 @@ func TestSnapshot_ReturnsCopy(t *testing.T) {
 // --- ResolveSecretsInBytes tests ---
 
 func TestResolveSecretsInBytes_FullYAML(t *testing.T) {
+	t.Parallel()
 	b := &mockSecretBackend{name: "mock", secrets: map[string]string{"db-pass": "s3cret"}}
 	r := &SecretResolver{backends: []SecretBackend{b}, cache: make(map[string]string)}
 
@@ -423,6 +449,7 @@ func TestResolveSecretsInBytes_FullYAML(t *testing.T) {
 }
 
 func TestResolveSecretsInBytes_NoReferences(t *testing.T) {
+	t.Parallel()
 	r := &SecretResolver{backends: nil, cache: make(map[string]string)}
 
 	input := []byte("key: value\n")
@@ -437,6 +464,7 @@ func TestResolveSecretsInBytes_NoReferences(t *testing.T) {
 }
 
 func TestResolveSecretsInBytes_Empty(t *testing.T) {
+	t.Parallel()
 	r := &SecretResolver{backends: nil, cache: make(map[string]string)}
 
 	out, err := ResolveSecretsInBytes(nil, r)
@@ -449,6 +477,7 @@ func TestResolveSecretsInBytes_Empty(t *testing.T) {
 }
 
 func TestResolveSecretsInBytes_ErrorIncludesLocation(t *testing.T) {
+	t.Parallel()
 	b := &mockSecretBackend{name: "mock", secrets: map[string]string{}}
 	r := &SecretResolver{backends: []SecretBackend{b}, cache: make(map[string]string)}
 
@@ -463,6 +492,7 @@ func TestResolveSecretsInBytes_ErrorIncludesLocation(t *testing.T) {
 }
 
 func TestResolveSecretsInBytes_NestedMaps(t *testing.T) {
+	t.Parallel()
 	b := &mockSecretBackend{name: "mock", secrets: map[string]string{"key1": "val1", "key2": "val2"}}
 	r := &SecretResolver{backends: []SecretBackend{b}, cache: make(map[string]string)}
 

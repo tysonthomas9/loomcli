@@ -14,6 +14,7 @@ import (
 )
 
 func TestDisplayStreamEvent_TextBlock(t *testing.T) {
+	// not parallel: captures os.Stdout
 	// Capture stdout
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
@@ -35,6 +36,7 @@ func TestDisplayStreamEvent_TextBlock(t *testing.T) {
 }
 
 func TestDisplayStreamEvent_ToolUse_Bash(t *testing.T) {
+	// not parallel: captures os.Stdout
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
@@ -57,6 +59,7 @@ func TestDisplayStreamEvent_ToolUse_Bash(t *testing.T) {
 }
 
 func TestDisplayStreamEvent_ToolUse_Read(t *testing.T) {
+	// not parallel: captures os.Stdout
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
@@ -79,6 +82,7 @@ func TestDisplayStreamEvent_ToolUse_Read(t *testing.T) {
 }
 
 func TestDisplayStreamEvent_ToolUse_Write(t *testing.T) {
+	// not parallel: captures os.Stdout
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
@@ -101,6 +105,7 @@ func TestDisplayStreamEvent_ToolUse_Write(t *testing.T) {
 }
 
 func TestDisplayStreamEvent_ToolUse_Edit(t *testing.T) {
+	// not parallel: captures os.Stdout
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
@@ -123,6 +128,7 @@ func TestDisplayStreamEvent_ToolUse_Edit(t *testing.T) {
 }
 
 func TestDisplayStreamEvent_Result(t *testing.T) {
+	// not parallel: captures os.Stdout
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
@@ -143,6 +149,7 @@ func TestDisplayStreamEvent_Result(t *testing.T) {
 }
 
 func TestDisplayStreamEvent_InvalidJSON(t *testing.T) {
+	// not parallel: captures os.Stdout
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
@@ -162,6 +169,7 @@ func TestDisplayStreamEvent_InvalidJSON(t *testing.T) {
 }
 
 func TestDisplayStreamEvent_UnknownType(t *testing.T) {
+	// not parallel: captures os.Stdout
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
@@ -182,6 +190,7 @@ func TestDisplayStreamEvent_UnknownType(t *testing.T) {
 }
 
 func TestDisplayStreamEvent_AssistantNoMessage(t *testing.T) {
+	// not parallel: captures os.Stdout
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
@@ -202,6 +211,7 @@ func TestDisplayStreamEvent_AssistantNoMessage(t *testing.T) {
 }
 
 func TestDisplayStreamEvent_ToolUse_OtherTool(t *testing.T) {
+	// not parallel: captures os.Stdout
 	// Test a tool that's not Bash/Read/Write/Edit - should still show tool name
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
@@ -226,6 +236,7 @@ func TestDisplayStreamEvent_ToolUse_OtherTool(t *testing.T) {
 }
 
 func TestClaudeBackendName(t *testing.T) {
+	t.Parallel()
 	b := &ClaudeBackend{}
 	if got := b.Name(); got != "claude" {
 		t.Errorf("expected 'claude', got %q", got)
@@ -233,6 +244,7 @@ func TestClaudeBackendName(t *testing.T) {
 }
 
 func TestClaudeBackendRegistered(t *testing.T) {
+	t.Parallel()
 	// After init(), the Claude backend should be registered
 	backendMu.RLock()
 	b, ok := backends["claude"]
@@ -247,6 +259,7 @@ func TestClaudeBackendRegistered(t *testing.T) {
 }
 
 func TestClaudeBackendInvokeInteractive(t *testing.T) {
+	// Not parallel: mutates global claudeInvoker.
 	recorder := SetupMockClaudeInvoker(t, nil)
 
 	b := &ClaudeBackend{}
@@ -265,6 +278,7 @@ func TestClaudeBackendInvokeInteractive(t *testing.T) {
 }
 
 func TestClaudeBackendInvokeNonInteractive(t *testing.T) {
+	// Not parallel: mutates global claudeNonInteractiveInvoker.
 	var called bool
 	var gotWorkDir, gotPrompt, gotAgent string
 	installClaudeNonInteractiveMock(t, func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
@@ -295,6 +309,7 @@ func TestClaudeBackendInvokeNonInteractive(t *testing.T) {
 // without the guard, sending SIGTERM to a reaped PID could hit an unrelated
 // process that reused the same PID.
 func TestShutdownRace_NoSignalAfterExit(t *testing.T) {
+	t.Parallel()
 	t.Helper()
 
 	// "true" exits immediately with status 0.
@@ -336,6 +351,7 @@ func TestShutdownRace_NoSignalAfterExit(t *testing.T) {
 // shutdown channel fires while the process is still running. This confirms the
 // normal (non-race) shutdown path works correctly.
 func TestShutdownRace_SignalDuringRun(t *testing.T) {
+	t.Parallel()
 	t.Helper()
 
 	// "sleep 60" will run until killed.
@@ -395,6 +411,7 @@ func TestShutdownRace_SignalDuringRun(t *testing.T) {
 }
 
 func TestCollectClaudeStreamUsage_MessageStart(t *testing.T) {
+	t.Parallel()
 	c := usage.NewCollector("claude", "test")
 
 	// message_start event with usage nested in message
@@ -414,6 +431,7 @@ func TestCollectClaudeStreamUsage_MessageStart(t *testing.T) {
 }
 
 func TestCollectClaudeStreamUsage_MessageDelta(t *testing.T) {
+	t.Parallel()
 	c := usage.NewCollector("claude", "test")
 
 	// message_delta event with top-level usage (cumulative final)
@@ -430,6 +448,7 @@ func TestCollectClaudeStreamUsage_MessageDelta(t *testing.T) {
 }
 
 func TestCollectClaudeStreamUsage_Dedup(t *testing.T) {
+	t.Parallel()
 	c := usage.NewCollector("claude", "test")
 
 	// Same message ID in both message_start and message_delta
@@ -447,6 +466,7 @@ func TestCollectClaudeStreamUsage_Dedup(t *testing.T) {
 }
 
 func TestCollectClaudeStreamUsage_InvalidJSON(t *testing.T) {
+	t.Parallel()
 	c := usage.NewCollector("claude", "test")
 
 	// Should not panic on invalid JSON
@@ -459,6 +479,7 @@ func TestCollectClaudeStreamUsage_InvalidJSON(t *testing.T) {
 }
 
 func TestCollectClaudeStreamUsage_NoUsage(t *testing.T) {
+	t.Parallel()
 	c := usage.NewCollector("claude", "test")
 
 	// assistant event with no usage field
@@ -472,9 +493,10 @@ func TestCollectClaudeStreamUsage_NoUsage(t *testing.T) {
 }
 
 func TestCollectClaudeStreamUsage_TopLevelUsagePreferred(t *testing.T) {
+	t.Parallel()
 	c := usage.NewCollector("claude", "test")
 
-	// Event with both top-level usage AND message.usage — top-level should be preferred
+	// Event with both top-level usage AND message.usage -- top-level should be preferred
 	line := `{"type":"message_delta","message":{"id":"msg-abc","usage":{"input_tokens":100,"output_tokens":10}},"usage":{"input_tokens":500,"output_tokens":200}}`
 	collectClaudeStreamUsage(line, c)
 
