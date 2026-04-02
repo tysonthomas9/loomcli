@@ -1,0 +1,1 @@
+export { IssueViewGuard } from "./IssueViewGuard";

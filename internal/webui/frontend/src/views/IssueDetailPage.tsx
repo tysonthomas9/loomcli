@@ -1,50 +1,71 @@
+import { useCallback } from "react";
+import { useNavigate } from "react-router-dom";
+
 import { ErrorBoundary, IssueDetailView } from "@/components";
-import type { ViewMode } from "@/components/ViewSwitcher";
 import type { Issue, IssueDetails } from "@/types";
+import type { IssueContext } from "@/api/terminal";
+import {
+  useWorkspaceViewData,
+  useWorkspaceViewActions,
+} from "@/contexts/WorkspaceViewContext";
 
-export interface IssueDetailPageProps {
-  issueDetails: Issue | IssueDetails | null;
-  isLoading: boolean;
-  error: string | null;
-  previousView: ViewMode;
-  selectedIssueId: string | null;
-  onBack: () => void;
-  onApprove: (issue: Issue) => Promise<void>;
-  onReject: (issue: Issue, comment: string) => Promise<void>;
-  onOpenInTerminal: (issue: Issue | IssueDetails) => void;
-  onCopyLink: () => void;
-  onNavigateToIssue: (issue: Issue) => void;
-  onIssueUpdate: (issue: Issue) => void;
-}
+export function IssueDetailPage() {
+  const {
+    issueDetails,
+    isLoadingDetails,
+    detailError,
+    selectedIssueId,
+    previousView,
+  } = useWorkspaceViewData();
 
-export function IssueDetailPage({
-  issueDetails,
-  isLoading,
-  error,
-  previousView,
-  selectedIssueId,
-  onBack,
-  onApprove,
-  onReject,
-  onOpenInTerminal,
-  onCopyLink,
-  onNavigateToIssue,
-  onIssueUpdate,
-}: IssueDetailPageProps) {
+  const {
+    handleApprove,
+    handleReject,
+    handleCopyLink,
+    handleIssueClick,
+    updateIssueDetails,
+    navigateToView,
+    setPendingIssueContext,
+  } = useWorkspaceViewActions();
+
+  const navigate = useNavigate();
+
+  const handleBackFromDetail = useCallback(() => {
+    if (window.history.length > 1) {
+      navigate(-1);
+    } else {
+      navigateToView("kanban");
+    }
+  }, [navigate, navigateToView]);
+
+  const handleOpenIssueInTerminal = useCallback(
+    (issue: Issue | IssueDetails) => {
+      const context: IssueContext = {
+        issue_id: issue.id,
+        title: issue.title,
+      };
+      if (issue.description) context.description = issue.description;
+      if (issue.design) context.design = issue.design;
+      setPendingIssueContext(context);
+      navigateToView("terminal");
+    },
+    [navigateToView, setPendingIssueContext],
+  );
+
   return (
     <ErrorBoundary resetOnChange={[selectedIssueId]}>
       <IssueDetailView
         issue={issueDetails}
-        isLoading={isLoading}
-        error={error}
+        isLoading={isLoadingDetails}
+        error={detailError}
         previousView={previousView}
-        onBack={onBack}
-        onApprove={onApprove}
-        onReject={onReject}
-        onOpenInTerminal={onOpenInTerminal}
-        onCopyLink={onCopyLink}
-        onNavigateToIssue={onNavigateToIssue}
-        onIssueUpdate={onIssueUpdate}
+        onBack={handleBackFromDetail}
+        onApprove={handleApprove}
+        onReject={handleReject}
+        onOpenInTerminal={handleOpenIssueInTerminal}
+        onCopyLink={handleCopyLink}
+        onNavigateToIssue={handleIssueClick}
+        onIssueUpdate={updateIssueDetails}
       />
     </ErrorBoundary>
   );

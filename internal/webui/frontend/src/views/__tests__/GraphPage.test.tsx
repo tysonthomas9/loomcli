@@ -6,7 +6,23 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom";
 
-import type { Issue } from "@/types";
+import {
+  NO_WORKSPACE_VIEW_DATA,
+  NO_WORKSPACE_VIEW_ACTIONS,
+} from "@/contexts/WorkspaceViewContext";
+
+const mockData = { ...NO_WORKSPACE_VIEW_DATA, activeView: "graph" as const };
+const mockActions = { ...NO_WORKSPACE_VIEW_ACTIONS };
+
+vi.mock("@/contexts/WorkspaceViewContext", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/contexts/WorkspaceViewContext")>();
+  return {
+    ...actual,
+    useWorkspaceViewData: () => mockData,
+    useWorkspaceViewActions: () => mockActions,
+  };
+});
 
 // Mock the lazy-loaded component module
 vi.mock("@/components/GraphView", () => ({
@@ -23,22 +39,22 @@ vi.mock("@/components", () => ({
   },
 }));
 
-import { GraphPage } from "../GraphPage";
+vi.mock("@/components/IssueViewGuard", () => ({
+  IssueViewGuard: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid="issue-view-guard">{children}</div>
+  ),
+}));
 
-const baseProps = {
-  filteredIssues: [] as Issue[],
-  onNodeClick: vi.fn() as (issue: Issue) => void,
-  activeView: "graph" as const,
-};
+import { GraphPage } from "../GraphPage";
 
 describe("GraphPage", () => {
   it("renders without crashing", async () => {
-    const { container } = render(<GraphPage {...baseProps} />);
+    const { container } = render(<GraphPage />);
     expect(container).toBeTruthy();
   });
 
   it("renders the GraphView inside ErrorBoundary after lazy load", async () => {
-    render(<GraphPage {...baseProps} />);
+    render(<GraphPage />);
     expect(screen.getByTestId("error-boundary")).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByTestId("graph-view")).toBeInTheDocument();
@@ -46,10 +62,7 @@ describe("GraphPage", () => {
   });
 
   it("shows loading skeleton while lazy component loads", () => {
-    // Since we mock the module, the lazy component resolves immediately in the
-    // next microtask. We can still verify the Suspense fallback structure exists
-    // by checking ErrorBoundary wraps the content.
-    render(<GraphPage {...baseProps} />);
+    render(<GraphPage />);
     expect(screen.getByTestId("error-boundary")).toBeInTheDocument();
   });
 });

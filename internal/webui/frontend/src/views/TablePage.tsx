@@ -1,57 +1,66 @@
 import { ErrorBoundary, IssueTable, BulkActionToolbar } from "@/components";
-import type { BlockedInfo } from "@/components/KanbanBoard";
-import type { ViewMode } from "@/components/ViewSwitcher";
-import type { Issue } from "@/types";
+import { IssueViewGuard } from "@/components/IssueViewGuard";
+import { useSelection } from "@/hooks";
+import {
+  useWorkspaceViewData,
+  useWorkspaceViewActions,
+} from "@/contexts/WorkspaceViewContext";
 
-export interface TablePageProps {
-  filteredIssues: Issue[];
-  selectedIds: Set<string>;
-  onSelectionChange: (issueId: string, selected: boolean) => void;
-  onClearSelection: () => void;
-  onIssueClick: (issue: Issue) => void;
-  searchTerm: string;
-  activeView: ViewMode;
-  selectedIssueId?: string | null | undefined;
-  blockedIssuesMap?: Map<string, BlockedInfo> | undefined;
-  showBlocked?: boolean | undefined;
-}
+export function TablePage() {
+  const {
+    filteredIssues,
+    issues,
+    isLoading,
+    error,
+    isMultiRepo,
+    debouncedSearch,
+    activeView,
+    selectedIssueId,
+    blockedIssuesMap,
+    filters,
+  } = useWorkspaceViewData();
 
-export function TablePage({
-  filteredIssues,
-  selectedIds,
-  onSelectionChange,
-  onClearSelection,
-  onIssueClick,
-  searchTerm,
-  activeView,
-  selectedIssueId,
-  blockedIssuesMap,
-  showBlocked,
-}: TablePageProps) {
+  const { handleIssueClick, refetch } = useWorkspaceViewActions();
+
+  const {
+    selectedIds,
+    toggleSelection,
+    deselectAll: clearSelection,
+  } = useSelection({ visibleItems: filteredIssues });
+
   return (
     <ErrorBoundary resetOnChange={[activeView]}>
-      <IssueTable
-        issues={filteredIssues}
-        sortable
-        showCheckbox
-        selectedIds={selectedIds}
-        onSelectionChange={onSelectionChange}
-        onRowClick={onIssueClick}
-        searchTerm={searchTerm}
-        {...(selectedIssueId != null && {
-          selectedId: selectedIssueId,
-        })}
-        {...(blockedIssuesMap !== undefined && {
-          blockedIssues: blockedIssuesMap,
-        })}
-        {...(showBlocked !== undefined && {
-          showBlocked,
-        })}
-      />
-      <BulkActionToolbar
-        selectedIds={selectedIds}
-        onClearSelection={onClearSelection}
-      />
+      <IssueViewGuard
+        issues={issues}
+        isLoading={isLoading}
+        error={error}
+        isMultiRepo={isMultiRepo}
+        onRetry={refetch}
+        loadingVariant="table"
+      >
+        <IssueTable
+          issues={filteredIssues}
+          sortable
+          showCheckbox
+          selectedIds={selectedIds}
+          onSelectionChange={toggleSelection}
+          onRowClick={handleIssueClick}
+          searchTerm={debouncedSearch}
+          {...(selectedIssueId != null && {
+            selectedId: selectedIssueId,
+          })}
+          {...(blockedIssuesMap !== undefined && {
+            blockedIssues: blockedIssuesMap,
+          })}
+          {...(filters.showBlocked !== undefined && {
+            showBlocked: filters.showBlocked,
+          })}
+        />
+        <BulkActionToolbar
+          selectedIds={selectedIds}
+          onClearSelection={clearSelection}
+        />
+      </IssueViewGuard>
     </ErrorBoundary>
   );
 }

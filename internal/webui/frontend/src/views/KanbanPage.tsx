@@ -1,53 +1,138 @@
-import { ErrorBoundary, SwimLaneBoard } from "@/components";
-import type { BlockedInfo } from "@/components/KanbanBoard";
-import type { GroupByField } from "@/components/SwimLaneBoard";
-import type { ViewMode } from "@/components/ViewSwitcher";
-import type { Issue, Status } from "@/types";
+import { useState, useCallback, useEffect, useRef } from "react";
+
+import { ErrorBoundary, SwimLaneBoard, AssigneePrompt } from "@/components";
+import { IssueViewGuard } from "@/components/IssueViewGuard";
+import type { Status } from "@/types";
+import { updateIssue } from "@/api";
+import { useRecentAssignees } from "@/hooks";
+import {
+  useWorkspaceViewData,
+  useWorkspaceViewActions,
+} from "@/contexts/WorkspaceViewContext";
 
 import styles from "./KanbanPage.module.css";
 
-export interface KanbanPageProps {
-  filteredIssues: Issue[];
-  groupBy: GroupByField;
-  onDragEnd: (issueId: string, newStatus: Status, oldStatus: Status) => void;
-  onIssueClick: (issue: Issue) => void;
-  isMultiRepo: boolean;
-  activeView: ViewMode;
-  blockedIssuesMap?: Map<string, BlockedInfo> | undefined;
-  showBlocked?: boolean | undefined;
-  pendingIds?: Set<string> | undefined;
-}
+export function KanbanPage() {
+  const {
+    filteredIssues,
+    issues,
+    isLoading,
+    error,
+    isMultiRepo,
+    activeView,
+    blockedIssuesMap,
+    filters,
+    groupBy,
+    pendingIds,
+    workspaceId,
+  } = useWorkspaceViewData();
 
-export function KanbanPage({
-  filteredIssues,
-  groupBy,
-  onDragEnd,
-  onIssueClick,
-  isMultiRepo,
-  activeView,
-  blockedIssuesMap,
-  showBlocked,
-  pendingIds,
-}: KanbanPageProps) {
+  const { handleIssueClick, updateIssueStatus, refetch, showToast } =
+    useWorkspaceViewActions();
+
+  // Assignee prompt state for Ready -> In Progress drag
+  const { recentAssignees, addRecentAssignee } = useRecentAssignees();
+  const [pendingDragData, setPendingDragData] = useState<{
+    issueId: string;
+    newStatus: Status;
+    oldStatus: Status;
+  } | null>(null);
+
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const handleDragEnd = useCallback(
+    async (issueId: string, newStatus: Status, oldStatus: Status) => {
+      if (oldStatus === "open" && newStatus === "in_progress") {
+        setPendingDragData({ issueId, newStatus, oldStatus });
+        return;
+      }
+      try {
+        await updateIssueStatus(issueId, newStatus);
+      } catch {
+        // Rollback + error toast handled by useOptimisticUpdate
+      }
+    },
+    [updateIssueStatus],
+  );
+
+  const handleAssigneeConfirm = useCallback(
+    async (assignee: string) => {
+      if (!pendingDragData) return;
+
+      const { issueId, newStatus } = pendingDragData;
+      setPendingDragData(null);
+
+      const nameWithoutPrefix = assignee.replace(/^\[H\]\s*/, "");
+      addRecentAssignee(nameWithoutPrefix);
+
+      try {
+        await updateIssue(workspaceId, issueId, {
+          status: newStatus,
+          assignee,
+        });
+      } catch (err) {
+        if (!mountedRef.current) return;
+        const message =
+          err instanceof Error ? err.message : "Failed to update status";
+        showToast(message, { type: "error" });
+      }
+    },
+    [pendingDragData, addRecentAssignee, workspaceId, showToast],
+  );
+
+  const handleAssigneeSkip = useCallback(async () => {
+    if (!pendingDragData) return;
+
+    const { issueId, newStatus } = pendingDragData;
+    setPendingDragData(null);
+
+    try {
+      await updateIssueStatus(issueId, newStatus);
+    } catch {
+      // Rollback + error toast handled by useOptimisticUpdate
+    }
+  }, [pendingDragData, updateIssueStatus]);
+
   return (
     <ErrorBoundary resetOnChange={[activeView]}>
-      <div className={styles.kanbanShell}>
-        <SwimLaneBoard
-          issues={filteredIssues}
-          groupBy={groupBy}
-          onDragEnd={onDragEnd}
-          onIssueClick={onIssueClick}
-          isMultiRepo={isMultiRepo}
-          {...(blockedIssuesMap !== undefined && {
-            blockedIssues: blockedIssuesMap,
-          })}
-          {...(showBlocked !== undefined && {
-            showBlocked,
-          })}
-          {...(pendingIds !== undefined &&
-            pendingIds.size > 0 && { pendingIds })}
-        />
-      </div>
+      <IssueViewGuard
+        issues={issues}
+        isLoading={isLoading}
+        error={error}
+        isMultiRepo={isMultiRepo}
+        onRetry={refetch}
+        loadingVariant="columns"
+      >
+        <div className={styles.kanbanShell}>
+          <SwimLaneBoard
+            issues={filteredIssues}
+            groupBy={groupBy}
+            onDragEnd={handleDragEnd}
+            onIssueClick={handleIssueClick}
+            isMultiRepo={isMultiRepo}
+            {...(blockedIssuesMap !== undefined && {
+              blockedIssues: blockedIssuesMap,
+            })}
+            {...(filters.showBlocked !== undefined && {
+              showBlocked: filters.showBlocked,
+            })}
+            {...(pendingIds !== undefined &&
+              pendingIds.size > 0 && { pendingIds })}
+          />
+        </div>
+      </IssueViewGuard>
+      <AssigneePrompt
+        isOpen={pendingDragData !== null}
+        onConfirm={handleAssigneeConfirm}
+        onSkip={handleAssigneeSkip}
+        recentNames={recentAssignees}
+      />
     </ErrorBoundary>
   );
 }

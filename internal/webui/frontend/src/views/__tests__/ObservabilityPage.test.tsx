@@ -6,6 +6,14 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom";
 
+vi.mock("@/hooks", () => ({
+  useRouteView: () => ({
+    view: "observability",
+    setView: vi.fn(),
+    navigateToView: vi.fn(),
+  }),
+}));
+
 // Mock the lazy-loaded component module
 vi.mock("@/components/ObservabilityDashboard", () => ({
   ObservabilityDashboard: () => <div data-testid="observability-dashboard" />,
@@ -25,14 +33,12 @@ import { ObservabilityPage } from "../ObservabilityPage";
 
 describe("ObservabilityPage", () => {
   it("renders without crashing", () => {
-    const { container } = render(
-      <ObservabilityPage activeView="observability" />,
-    );
+    const { container } = render(<ObservabilityPage />);
     expect(container).toBeTruthy();
   });
 
   it("renders ObservabilityDashboard inside ErrorBoundary after lazy load", async () => {
-    render(<ObservabilityPage activeView="observability" />);
+    render(<ObservabilityPage />);
     expect(screen.getByTestId("error-boundary")).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByTestId("observability-dashboard")).toBeInTheDocument();

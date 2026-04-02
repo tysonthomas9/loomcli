@@ -1,6 +1,6 @@
 import { lazy, Suspense } from "react";
 import { ErrorBoundary, LoadingSkeleton } from "@/components";
-import type { ViewMode } from "@/components/ViewSwitcher";
+import { useRouteView } from "@/hooks";
 
 const SettingsView = lazy(() =>
   import("@/components/SettingsView").then((m) => ({
@@ -8,16 +8,13 @@ const SettingsView = lazy(() =>
   })),
 );
 
-export interface SettingsPageProps {
-  onNavigate: (view: ViewMode) => void;
-  activeView: ViewMode;
-}
+export function SettingsPage() {
+  const { view: activeView, navigateToView } = useRouteView();
 
-export function SettingsPage({ onNavigate, activeView }: SettingsPageProps) {
   return (
     <ErrorBoundary resetOnChange={[activeView]}>
       <Suspense fallback={<LoadingSkeleton.Column />}>
-        <SettingsView onNavigate={onNavigate} />
+        <SettingsView onNavigate={navigateToView} />
       </Suspense>
     </ErrorBoundary>
   );

@@ -71,3 +71,4 @@ export * from "./DaemonUnavailableOverlay";
 export * from "./KeyboardCheatsheet";
 export * from "./LoginPage";
 export * from "./UserMenu";
+export * from "./IssueViewGuard";

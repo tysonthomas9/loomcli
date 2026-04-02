@@ -6,7 +6,13 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom";
 
-import type { ViewMode } from "@/components/ViewSwitcher";
+vi.mock("@/hooks", () => ({
+  useRouteView: () => ({
+    view: "settings",
+    setView: vi.fn(),
+    navigateToView: vi.fn(),
+  }),
+}));
 
 // Mock the lazy-loaded component module
 vi.mock("@/components/SettingsView", () => ({
@@ -25,19 +31,14 @@ vi.mock("@/components", () => ({
 
 import { SettingsPage } from "../SettingsPage";
 
-const baseProps = {
-  onNavigate: vi.fn() as (view: ViewMode) => void,
-  activeView: "settings" as const,
-};
-
 describe("SettingsPage", () => {
   it("renders without crashing", () => {
-    const { container } = render(<SettingsPage {...baseProps} />);
+    const { container } = render(<SettingsPage />);
     expect(container).toBeTruthy();
   });
 
   it("renders SettingsView inside ErrorBoundary after lazy load", async () => {
-    render(<SettingsPage {...baseProps} />);
+    render(<SettingsPage />);
     expect(screen.getByTestId("error-boundary")).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByTestId("settings-view")).toBeInTheDocument();

@@ -1,7 +1,9 @@
 import { lazy, Suspense } from "react";
 import { ErrorBoundary, LoadingSkeleton } from "@/components";
-import type { ViewMode } from "@/components/ViewSwitcher";
-import type { Issue } from "@/types";
+import {
+  useWorkspaceViewData,
+  useWorkspaceViewActions,
+} from "@/contexts/WorkspaceViewContext";
 
 const MonitorDashboard = lazy(() =>
   import("@/components/MonitorDashboard").then((m) => ({
@@ -9,26 +11,18 @@ const MonitorDashboard = lazy(() =>
   })),
 );
 
-export interface MonitorPageProps {
-  onViewChange: (view: ViewMode) => void;
-  onIssueClick: (issue: Issue) => void;
-  onAgentClick: (agentName: string) => void;
-  activeView: ViewMode;
-}
+export function MonitorPage() {
+  const { activeView } = useWorkspaceViewData();
+  const { navigateToView, handleIssueClick, handleAgentClick } =
+    useWorkspaceViewActions();
 
-export function MonitorPage({
-  onViewChange,
-  onIssueClick,
-  onAgentClick,
-  activeView,
-}: MonitorPageProps) {
   return (
     <ErrorBoundary resetOnChange={[activeView]}>
       <Suspense fallback={<LoadingSkeleton.Monitor />}>
         <MonitorDashboard
-          onViewChange={onViewChange}
-          onIssueClick={onIssueClick}
-          onAgentClick={onAgentClick}
+          onViewChange={navigateToView}
+          onIssueClick={handleIssueClick}
+          onAgentClick={handleAgentClick}
         />
       </Suspense>
     </ErrorBoundary>

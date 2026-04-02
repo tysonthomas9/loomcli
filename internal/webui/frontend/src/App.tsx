@@ -36,8 +36,6 @@ import {
   AppLayout,
   WorkspaceBreadcrumb,
   LoadingSkeleton,
-  EmptyWorkspaceBoard,
-  ErrorDisplay,
   ConnectionStatus,
   StaleDataBanner,
   DaemonUnavailableOverlay,
@@ -49,7 +47,6 @@ import {
   IssueDetailPanel,
   AgentDetailPanel,
   WorkspaceTree,
-  AssigneePrompt,
   TalkToLeadButton,
   NavRail,
   ViewSubSwitcher,
@@ -61,6 +58,11 @@ import {
   UserMenu,
 } from "@/components";
 import { SearchTermProvider } from "@/contexts/SearchTermContext";
+import {
+  WorkspaceViewProvider,
+  type WorkspaceViewData,
+  type WorkspaceViewActions,
+} from "@/contexts/WorkspaceViewContext";
 import type { BlockedInfo } from "@/components/KanbanBoard";
 import type { ViewMode } from "@/components/ViewSwitcher";
 import {
@@ -73,8 +75,6 @@ import {
   useBlockedIssues,
   useIssueDetail,
   useToast,
-  useRecentAssignees,
-  useSelection,
   useAgentContext,
   useTheme,
   useWorkspaceContext,
@@ -85,7 +85,7 @@ import {
   usePanelManager,
   KeyboardShortcutProvider,
 } from "@/hooks";
-import type { Issue, IssueDetails, Status } from "@/types";
+import type { Issue } from "@/types";
 
 import styles from "./App.module.css";
 
@@ -326,13 +326,6 @@ function App() {
     mainContentRef.current = document.getElementById("main-content");
   }, []);
 
-  // Bulk selection state for Table view
-  const {
-    selectedIds,
-    toggleSelection,
-    deselectAll: clearSelection,
-  } = useSelection({ visibleItems: filteredIssues });
-
   const {
     issueDetails,
     isLoading: isLoadingDetails,
@@ -399,14 +392,6 @@ function App() {
 
   // Create issue modal state
   const [showCreateIssue, setShowCreateIssue] = useState(false);
-
-  // Assignee prompt state for Ready → In Progress drag
-  const { recentAssignees, addRecentAssignee } = useRecentAssignees();
-  const [pendingDragData, setPendingDragData] = useState<{
-    issueId: string;
-    newStatus: Status;
-    oldStatus: Status;
-  } | null>(null);
 
   // Track mount state for async operations (must set true in setup for StrictMode compatibility)
   useEffect(() => {
@@ -497,80 +482,27 @@ function App() {
     }
   }, [activeView]);
 
+  // Refs for handleCopyLink stability — avoids recreating the actions context
+  // on every activeView/selectedIssueId change (only IssueDetailPage uses it).
+  const activeViewRef = useRef(activeView);
+  activeViewRef.current = activeView;
+  const selectedIssueIdRef = useRef(selectedIssueId);
+  selectedIssueIdRef.current = selectedIssueId;
+
   // Copy link handler: copies a clean shareable URL to clipboard
   const handleCopyLink = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(
-        buildShareUrl({ view: activeView, issue: selectedIssueId }),
+        buildShareUrl({
+          view: activeViewRef.current,
+          issue: selectedIssueIdRef.current,
+        }),
       );
       showToast("Link copied to clipboard", { type: "success" });
     } catch {
       showToast("Failed to copy link", { type: "error" });
     }
-  }, [activeView, selectedIssueId, showToast]);
-
-  const handleDragEnd = useCallback(
-    async (issueId: string, newStatus: Status, oldStatus: Status) => {
-      // Check if dragging from Ready (open) to In Progress (in_progress)
-      // If so, show the assignee prompt instead of updating immediately
-      if (oldStatus === "open" && newStatus === "in_progress") {
-        setPendingDragData({ issueId, newStatus, oldStatus });
-        return;
-      }
-
-      // Normal drag - update status directly
-      // Toast on error is handled by updateIssueStatus rollback
-      try {
-        await updateIssueStatus(issueId, newStatus);
-      } catch {
-        // Rollback + error toast handled by useOptimisticUpdate
-      }
-    },
-    [updateIssueStatus],
-  );
-
-  // Handle assignee prompt confirmation
-  const handleAssigneeConfirm = useCallback(
-    async (assignee: string) => {
-      if (!pendingDragData) return;
-
-      const { issueId, newStatus } = pendingDragData;
-      setPendingDragData(null);
-
-      // Extract the name without [H] prefix for storing in recent (we add it back when selecting)
-      const nameWithoutPrefix = assignee.replace(/^\[H\]\s*/, "");
-      addRecentAssignee(nameWithoutPrefix);
-
-      try {
-        // Update both status and assignee
-        await updateIssue(workspaceId, issueId, {
-          status: newStatus,
-          assignee,
-        });
-      } catch (err) {
-        if (!mountedRef.current) return;
-        const message =
-          err instanceof Error ? err.message : "Failed to update status";
-        showToast(message, { type: "error" });
-      }
-    },
-    [pendingDragData, addRecentAssignee, showToast],
-  );
-
-  // Handle assignee prompt skip
-  const handleAssigneeSkip = useCallback(async () => {
-    if (!pendingDragData) return;
-
-    const { issueId, newStatus } = pendingDragData;
-    setPendingDragData(null);
-
-    try {
-      // Update status only (no assignee)
-      await updateIssueStatus(issueId, newStatus);
-    } catch {
-      // Rollback + error toast handled by useOptimisticUpdate
-    }
-  }, [pendingDragData, updateIssueStatus]);
+  }, [showToast]);
 
   // Handle search clear to sync both local and filter state
   const handleSearchClear = useCallback(() => {
@@ -606,15 +538,6 @@ function App() {
       clearIssue();
     }, 300);
   }, [closePanel, clearIssue]);
-
-  // Handle back from issue detail view — use browser history for natural back nav.
-  const handleBackFromDetail = useCallback(() => {
-    if (window.history.length > 1) {
-      navigate(-1);
-    } else {
-      navigateToView("kanban");
-    }
-  }, [navigate, navigateToView]);
 
   // Handle approve button click on review cards
   const handleApprove = useCallback(
@@ -758,21 +681,6 @@ function App() {
     navigateToView("terminal");
   }, [navigateToView]);
 
-  // Handle "Open in Terminal" from issue detail view
-  const handleOpenIssueInTerminal = useCallback(
-    (issue: Issue | IssueDetails) => {
-      const context: IssueContext = {
-        issue_id: issue.id,
-        title: issue.title,
-      };
-      if (issue.description) context.description = issue.description;
-      if (issue.design) context.design = issue.design;
-      setPendingIssueContext(context);
-      navigateToView("terminal");
-    },
-    [navigateToView],
-  );
-
   const handleIssueContextConsumed = useCallback(() => {
     setPendingIssueContext(undefined);
   }, []);
@@ -860,6 +768,134 @@ function App() {
     },
     [openPanel, fetchIssue],
   );
+
+  // -----------------------------------------------------------------------
+  // WorkspaceViewContext: data + actions for view components
+  // -----------------------------------------------------------------------
+
+  const workspaceViewData: WorkspaceViewData = useMemo(
+    () => ({
+      issues,
+      filteredIssues,
+      isLoading,
+      error,
+      connectionState,
+      reconnectAttempts,
+      pendingIds,
+      blockedIssuesMap,
+      filters,
+      groupBy: filters.groupBy ?? DEFAULT_GROUP_BY,
+      debouncedSearch,
+      activeView,
+      selectedIssueId,
+      workspaceId,
+      isMultiRepo,
+      agents,
+      agentTasks,
+      issueDetails,
+      isLoadingDetails,
+      detailError,
+      previousView,
+    }),
+    [
+      issues,
+      filteredIssues,
+      isLoading,
+      error,
+      connectionState,
+      reconnectAttempts,
+      pendingIds,
+      blockedIssuesMap,
+      filters,
+      debouncedSearch,
+      activeView,
+      selectedIssueId,
+      workspaceId,
+      isMultiRepo,
+      agents,
+      agentTasks,
+      issueDetails,
+      isLoadingDetails,
+      detailError,
+      previousView,
+    ],
+  );
+
+  const workspaceViewActions: WorkspaceViewActions = useMemo(
+    () => ({
+      refetch,
+      updateIssueStatus,
+      fetchIssue,
+      clearIssue,
+      updateIssueDetails,
+      openPanel,
+      closePanel,
+      handleIssueClick,
+      handlePanelClose,
+      handleAgentClick,
+      handleAgentPanelClose,
+      handleAgentTaskClick,
+      handleApprove,
+      handleReject,
+      handleCopyLink,
+      navigateToView,
+      showToast,
+      setPendingIssueContext,
+    }),
+    [
+      refetch,
+      updateIssueStatus,
+      fetchIssue,
+      clearIssue,
+      updateIssueDetails,
+      openPanel,
+      closePanel,
+      handleIssueClick,
+      handlePanelClose,
+      handleAgentClick,
+      handleAgentPanelClose,
+      handleAgentTaskClick,
+      handleApprove,
+      handleReject,
+      handleCopyLink,
+      navigateToView,
+      showToast,
+      setPendingIssueContext,
+    ],
+  );
+
+  // Whether the current view depends on issue data (for stale banner suppression)
+  const isIssueBasedView =
+    activeView === "kanban" ||
+    activeView === "table" ||
+    activeView === "graph" ||
+    activeView === "issue-detail";
+
+  // Render the active view (propless — data comes from WorkspaceViewContext)
+  const renderViewContent = () => {
+    switch (activeView) {
+      case "kanban":
+        return <KanbanPage />;
+      case "table":
+        return <TablePage />;
+      case "graph":
+        return <GraphPage />;
+      case "monitor":
+        return <MonitorPage />;
+      case "observability":
+        return <ObservabilityPage />;
+      case "settings":
+        return <SettingsPage />;
+      case "workspace":
+        return <WorkspacePage />;
+      case "files":
+        return <FilesPage />;
+      case "issue-detail":
+        return <IssueDetailPage />;
+      default:
+        return null;
+    }
+  };
 
   const headerNavigation = (
     <div className={styles.headerControls}>
@@ -957,140 +993,6 @@ function App() {
     />
   );
 
-  // Whether the current view depends on issue data (loading/error/empty guards)
-  const isIssueBasedView =
-    activeView === "kanban" ||
-    activeView === "table" ||
-    activeView === "graph" ||
-    activeView === "issue-detail";
-
-  // Inline content guard: renders loading/error/empty for issue-based views,
-  // or the actual view component for all views including independent ones.
-  const renderViewContent = () => {
-    // Issue-based views: show loading skeleton while fetching
-    if (isLoading && isIssueBasedView) {
-      return (
-        <div
-          className={styles.loadingContainer}
-          data-testid="loading-container"
-        >
-          {activeView === "table" ? (
-            <LoadingSkeleton.Table />
-          ) : (
-            <>
-              <LoadingSkeleton.Column />
-              <LoadingSkeleton.Column />
-              <LoadingSkeleton.Column />
-            </>
-          )}
-        </div>
-      );
-    }
-
-    // Issue-based views: show error display with retry
-    if (error && !isLoading && isIssueBasedView) {
-      return (
-        <ErrorDisplay
-          variant="fetch-error"
-          error={new Error(error)}
-          showDetails
-          onRetry={refetch}
-        />
-      );
-    }
-
-    // Issue-based views (except issue-detail): show empty state
-    if (
-      issues.length === 0 &&
-      (activeView === "kanban" ||
-        activeView === "table" ||
-        activeView === "graph")
-    ) {
-      return <EmptyWorkspaceBoard isMultiRepo={isMultiRepo} />;
-    }
-
-    // Render the active view
-    switch (activeView) {
-      case "kanban":
-        return (
-          <KanbanPage
-            filteredIssues={filteredIssues}
-            groupBy={filters.groupBy ?? DEFAULT_GROUP_BY}
-            onDragEnd={handleDragEnd}
-            onIssueClick={handleIssueClick}
-            isMultiRepo={isMultiRepo}
-            activeView={activeView}
-            blockedIssuesMap={blockedIssuesMap}
-            showBlocked={filters.showBlocked}
-            pendingIds={pendingIds}
-          />
-        );
-      case "table":
-        return (
-          <TablePage
-            filteredIssues={filteredIssues}
-            selectedIds={selectedIds}
-            onSelectionChange={toggleSelection}
-            onClearSelection={clearSelection}
-            onIssueClick={handleIssueClick}
-            searchTerm={debouncedSearch}
-            activeView={activeView}
-            selectedIssueId={selectedIssueId}
-            blockedIssuesMap={blockedIssuesMap}
-            showBlocked={filters.showBlocked}
-          />
-        );
-      case "graph":
-        return (
-          <GraphPage
-            filteredIssues={filteredIssues}
-            onNodeClick={handleIssueClick}
-            activeView={activeView}
-          />
-        );
-      case "monitor":
-        return (
-          <MonitorPage
-            onViewChange={handleNavChange}
-            onIssueClick={handleIssueClick}
-            onAgentClick={handleAgentClick}
-            activeView={activeView}
-          />
-        );
-      case "observability":
-        return <ObservabilityPage activeView={activeView} />;
-      case "settings":
-        return (
-          <SettingsPage onNavigate={navigateToView} activeView={activeView} />
-        );
-      case "workspace":
-        return (
-          <WorkspacePage isMultiRepo={isMultiRepo} activeView={activeView} />
-        );
-      case "files":
-        return <FilesPage activeView={activeView} />;
-      case "issue-detail":
-        return (
-          <IssueDetailPage
-            issueDetails={issueDetails}
-            isLoading={isLoadingDetails}
-            error={detailError}
-            previousView={previousView}
-            selectedIssueId={selectedIssueId}
-            onBack={handleBackFromDetail}
-            onApprove={handleApprove}
-            onReject={handleReject}
-            onOpenInTerminal={handleOpenIssueInTerminal}
-            onCopyLink={handleCopyLink}
-            onNavigateToIssue={handleIssueClick}
-            onIssueUpdate={updateIssueDetails}
-          />
-        );
-      default:
-        return null;
-    }
-  };
-
   return (
     <KeyboardShortcutProvider
       onViewChange={handleNavChange}
@@ -1130,7 +1032,12 @@ function App() {
                 connectionLost={isConnectionLost}
               />
             )}
-          {renderViewContent()}
+          <WorkspaceViewProvider
+            data={workspaceViewData}
+            actions={workspaceViewActions}
+          >
+            {renderViewContent()}
+          </WorkspaceViewProvider>
           {/* Outlet required for nested route matching; child elements are empty */}
           <Outlet />
           <ToastContainer toasts={toasts} onDismiss={dismissToast} />
@@ -1182,12 +1089,6 @@ function App() {
             onClick={handleTalkToLeadClick}
             isActive={activeView === "terminal"}
             sessionCount={activeSessionCount}
-          />
-          <AssigneePrompt
-            isOpen={pendingDragData !== null}
-            onConfirm={handleAssigneeConfirm}
-            onSkip={handleAssigneeSkip}
-            recentNames={recentAssignees}
           />
         </AppLayout>
         {!isDaemonAvailable && (

@@ -6,7 +6,24 @@ import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom";
 
-import type { Issue, Status } from "@/types";
+import type { Issue } from "@/types";
+import {
+  NO_WORKSPACE_VIEW_DATA,
+  NO_WORKSPACE_VIEW_ACTIONS,
+} from "@/contexts/WorkspaceViewContext";
+
+const mockData = { ...NO_WORKSPACE_VIEW_DATA, activeView: "kanban" as const };
+const mockActions = { ...NO_WORKSPACE_VIEW_ACTIONS };
+
+vi.mock("@/contexts/WorkspaceViewContext", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/contexts/WorkspaceViewContext")>();
+  return {
+    ...actual,
+    useWorkspaceViewData: () => mockData,
+    useWorkspaceViewActions: () => mockActions,
+  };
+});
 
 // Mock child components to avoid deep rendering
 vi.mock("@/components", () => ({
@@ -19,39 +36,43 @@ vi.mock("@/components", () => ({
       data-issues={JSON.stringify(props.issues)}
     />
   ),
+  AssigneePrompt: () => <div data-testid="assignee-prompt" />,
+}));
+
+vi.mock("@/components/IssueViewGuard", () => ({
+  IssueViewGuard: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid="issue-view-guard">{children}</div>
+  ),
+}));
+
+vi.mock("@/hooks", () => ({
+  useRecentAssignees: () => ({
+    recentAssignees: [],
+    addRecentAssignee: vi.fn(),
+  }),
+}));
+
+vi.mock("@/api", () => ({
+  updateIssue: vi.fn(),
 }));
 
 import { KanbanPage } from "../KanbanPage";
 
-const baseProps = {
-  filteredIssues: [] as Issue[],
-  groupBy: "none" as const,
-  onDragEnd: vi.fn() as (
-    issueId: string,
-    newStatus: Status,
-    oldStatus: Status,
-  ) => void,
-  onIssueClick: vi.fn() as (issue: Issue) => void,
-  isMultiRepo: false,
-  activeView: "kanban" as const,
-};
-
 describe("KanbanPage", () => {
   it("renders without crashing", () => {
-    const { container } = render(<KanbanPage {...baseProps} />);
+    const { container } = render(<KanbanPage />);
     expect(container).toBeTruthy();
   });
 
   it("renders the SwimLaneBoard inside an ErrorBoundary", () => {
-    render(<KanbanPage {...baseProps} />);
+    render(<KanbanPage />);
     expect(screen.getByTestId("error-boundary")).toBeInTheDocument();
     expect(screen.getByTestId("swim-lane-board")).toBeInTheDocument();
   });
 
   it("wraps content in a kanbanShell div", () => {
-    const { container } = render(<KanbanPage {...baseProps} />);
-    // The kanbanShell div is inside the ErrorBoundary
-    const shell = container.querySelector("div > div > div");
+    const { container } = render(<KanbanPage />);
+    const shell = container.querySelector("div > div > div > div");
     expect(shell).toBeTruthy();
   });
 
@@ -65,8 +86,10 @@ describe("KanbanPage", () => {
         updated_at: "",
       },
     ] as Issue[];
-    render(<KanbanPage {...baseProps} filteredIssues={issues} />);
+    mockData.filteredIssues = issues;
+    render(<KanbanPage />);
     const board = screen.getByTestId("swim-lane-board");
     expect(board.getAttribute("data-issues")).toContain("Test");
+    mockData.filteredIssues = [];
   });
 });

@@ -6,6 +6,14 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom";
 
+vi.mock("@/hooks", () => ({
+  useRouteView: () => ({
+    view: "files",
+    setView: vi.fn(),
+    navigateToView: vi.fn(),
+  }),
+}));
+
 // Mock the lazy-loaded component module
 vi.mock("@/components/FileExplorer", () => ({
   FileExplorer: () => <div data-testid="file-explorer" />,
@@ -25,12 +33,12 @@ import { FilesPage } from "../FilesPage";
 
 describe("FilesPage", () => {
   it("renders without crashing", () => {
-    const { container } = render(<FilesPage activeView="files" />);
+    const { container } = render(<FilesPage />);
     expect(container).toBeTruthy();
   });
 
   it("renders FileExplorer inside ErrorBoundary after lazy load", async () => {
-    render(<FilesPage activeView="files" />);
+    render(<FilesPage />);
     expect(screen.getByTestId("error-boundary")).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByTestId("file-explorer")).toBeInTheDocument();
