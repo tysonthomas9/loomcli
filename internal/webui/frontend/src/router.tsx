@@ -4,16 +4,16 @@
  * Route tree:
  *   /                                      → RedirectToWorkspace (resolve last-used or default)
  *   /ws/:workspaceId/                      → WorkspaceLayout → App (shell/layout)
- *     /kanban                              → KanbanPage (via App switch)
- *     /table                               → TablePage
- *     /graph                               → GraphPage
- *     /monitor                             → MonitorPage
- *     /observability                       → ObservabilityPage
- *     /terminal                            → TerminalView (always-mounted in shell)
- *     /settings                            → SettingsPage
- *     /workspace                           → WorkspacePage
- *     /files                               → FilesPage
- *     /issues/:issueId                     → IssueDetailPage
+ *     /kanban                              → KanbanPage (lazy)
+ *     /table                               → TablePage (lazy)
+ *     /graph                               → GraphPage (lazy)
+ *     /monitor                             → MonitorPage (lazy)
+ *     /observability                       → ObservabilityPage (lazy)
+ *     /terminal                            → TerminalView (always-mounted in shell, route renders null)
+ *     /settings                            → SettingsPage (lazy)
+ *     /workspace                           → WorkspacePage (lazy)
+ *     /files                               → FilesPage (lazy)
+ *     /issues/:issueId                     → IssueDetailPage (lazy)
  *   /test/*                                → TestFixtures (dev only, preserved)
  *   *                                      → NotFound (404 page)
  */
@@ -75,22 +75,73 @@ const devRoutes = import.meta.env.DEV
 
 /**
  * View route children under /ws/:workspaceId.
- * App acts as the layout shell (pathless route); child routes provide URL
- * segments for matching. App derives the active view from the route path
- * and renders the corresponding view component.
+ * App acts as the layout shell (pathless route); child routes use lazy()
+ * to code-split each view page into its own chunk. Views read shared state
+ * from WorkspaceViewContext (provided by App), not from Outlet context.
+ *
+ * Terminal is NOT lazy-loaded — it's always-mounted in the App shell to
+ * preserve WebSocket connections across view switches. Its route exists
+ * solely for URL matching; the Component renders null.
  */
 const viewRoutes = [
   { index: true, element: <Navigate to="kanban" replace /> },
-  { path: "kanban" },
-  { path: "table" },
-  { path: "graph" },
-  { path: "monitor" },
-  { path: "observability" },
-  { path: "terminal" },
-  { path: "settings" },
-  { path: "workspace" },
-  { path: "files" },
-  { path: "issues/:issueId" },
+  {
+    path: "kanban",
+    lazy: () =>
+      import("@/views/KanbanPage").then((m) => ({ Component: m.KanbanPage })),
+  },
+  {
+    path: "table",
+    lazy: () =>
+      import("@/views/TablePage").then((m) => ({ Component: m.TablePage })),
+  },
+  {
+    path: "graph",
+    lazy: () =>
+      import("@/views/GraphPage").then((m) => ({ Component: m.GraphPage })),
+  },
+  {
+    path: "monitor",
+    lazy: () =>
+      import("@/views/MonitorPage").then((m) => ({ Component: m.MonitorPage })),
+  },
+  {
+    path: "observability",
+    lazy: () =>
+      import("@/views/ObservabilityPage").then((m) => ({
+        Component: m.ObservabilityPage,
+      })),
+  },
+  {
+    path: "terminal",
+    Component: () => null,
+  },
+  {
+    path: "settings",
+    lazy: () =>
+      import("@/views/SettingsPage").then((m) => ({
+        Component: m.SettingsPage,
+      })),
+  },
+  {
+    path: "workspace",
+    lazy: () =>
+      import("@/views/WorkspacePage").then((m) => ({
+        Component: m.WorkspacePage,
+      })),
+  },
+  {
+    path: "files",
+    lazy: () =>
+      import("@/views/FilesPage").then((m) => ({ Component: m.FilesPage })),
+  },
+  {
+    path: "issues/:issueId",
+    lazy: () =>
+      import("@/views/IssueDetailPage").then((m) => ({
+        Component: m.IssueDetailPage,
+      })),
+  },
   { path: "*", element: <Navigate to="kanban" replace /> },
 ];
 

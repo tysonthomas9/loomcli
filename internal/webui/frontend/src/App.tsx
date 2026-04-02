@@ -16,17 +16,6 @@ import {
 
 import { useStore } from "zustand";
 
-import {
-  KanbanPage,
-  TablePage,
-  GraphPage,
-  MonitorPage,
-  ObservabilityPage,
-  SettingsPage,
-  WorkspacePage,
-  FilesPage,
-  IssueDetailPage,
-} from "@/views";
 import { useParams, useNavigate, useLocation, Outlet } from "react-router-dom";
 
 import { updateIssue, addComment, closeIssue } from "@/api";
@@ -902,32 +891,6 @@ function App() {
     activeView === "graph" ||
     activeView === "issue-detail";
 
-  // Render the active view (propless — data comes from WorkspaceViewContext)
-  const renderViewContent = () => {
-    switch (activeView) {
-      case "kanban":
-        return <KanbanPage />;
-      case "table":
-        return <TablePage />;
-      case "graph":
-        return <GraphPage />;
-      case "monitor":
-        return <MonitorPage />;
-      case "observability":
-        return <ObservabilityPage />;
-      case "settings":
-        return <SettingsPage />;
-      case "workspace":
-        return <WorkspacePage />;
-      case "files":
-        return <FilesPage />;
-      case "issue-detail":
-        return <IssueDetailPage />;
-      default:
-        return null;
-    }
-  };
-
   const headerNavigation = (
     <div className={styles.headerControls}>
       <div className={styles.searchWrapper}>
@@ -1067,10 +1030,10 @@ function App() {
             data={workspaceViewData}
             actions={workspaceViewActions}
           >
-            {renderViewContent()}
+            <Suspense fallback={<LoadingSkeleton.Column />}>
+              <Outlet />
+            </Suspense>
           </WorkspaceViewProvider>
-          {/* Outlet required for nested route matching; child elements are empty */}
-          <Outlet />
           <ToastContainer toasts={toasts} onDismiss={dismissToast} />
           <IssueDetailPanel
             isOpen={isPanelOpen}
