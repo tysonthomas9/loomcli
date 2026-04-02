@@ -2,58 +2,46 @@ package webui
 
 import (
 	"net/http"
-	"time"
 
-	"golang.org/x/time/rate"
-
-	"github.com/tysonthomas9/loomcli/internal/webui/editor"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 )
 
 // setupRoutes configures all HTTP routes for the server.
-// Dependencies are read from Server fields.
-func (app *Server) setupRoutes(mux *http.ServeMux) (*clientErrorLimiter, *cspReportLimiter, *authConfigLimiter) {
+// Handler fields must be populated by buildHandlers before calling this method.
+func (app *Server) setupRoutes(mux *http.ServeMux) {
 	// Health check endpoint for load balancers and monitoring
-	mux.HandleFunc("GET /health", handleHealth(app.pool))
+	mux.HandleFunc("GET /health", app.healthHandler)
 
 	// API health endpoint that reports daemon connection status
-	mux.HandleFunc("GET /api/health", handleAPIHealth(app.pool))
+	mux.HandleFunc("GET /api/health", app.apiHealthHandler)
 
 	// Client-side error reporting endpoint (has its own per-IP rate limiter, 10 req/min/IP)
-	clientErrLimiter := newClientErrorLimiter(rate.Limit(10.0/60.0), 10, 5*time.Minute, 10*time.Minute)
-	mux.HandleFunc("POST /api/client-errors", handleClientErrors(clientErrLimiter))
+	mux.HandleFunc("POST /api/client-errors", app.clientErrorsHandler)
 
 	// CSP violation reporting endpoint (has its own per-IP rate limiter, 60 req/min/IP)
-	cspLimiter := newCSPReportLimiter(rate.Limit(1.0), 20, 5*time.Minute, 10*time.Minute)
-	mux.HandleFunc("POST /api/csp-report", handleCSPReport(cspLimiter))
+	mux.HandleFunc("POST /api/csp-report", app.cspReportHandler)
 
 	// Auth mode discovery endpoint (public, rate-limited — called once per page load).
-	// extAuthURL is the Better Auth service base URL for OAuth redirects, not JWKS.
-	authCfgLimiter := newAuthConfigLimiter(rate.Limit(5), 10, 5*time.Minute, 10*time.Minute)
-	mux.HandleFunc("GET /api/config", handleAuthConfig(app.config.ExtAuthURL, authCfgLimiter))
+	mux.HandleFunc("GET /api/config", app.authConfigHandler)
 
 	// Stats endpoint for project statistics (workspace-aware when multiPool available)
-	mux.HandleFunc("GET /api/stats", handleStats(app.pool)) // Keep using main pool for now
+	mux.HandleFunc("GET /api/stats", app.statsHandler)
 
 	// SSE hub metrics endpoint
-	var getFleetTimeouts func() int64
-	if app.fleetRegistry != nil {
-		getFleetTimeouts = app.registry.FleetTimeoutCount
-	}
-	mux.HandleFunc("GET /api/metrics", handleMetrics(app.hub, getFleetTimeouts, app.claimMetrics))
+	mux.HandleFunc("GET /api/metrics", app.metricsHandler)
 
 	// Daemon status endpoint - exposes daemon configuration (auto-commit, auto-push, etc.)
-	mux.HandleFunc("GET /api/daemon/status", handleDaemonStatus(app.pool))
+	mux.HandleFunc("GET /api/daemon/status", app.daemonStatusHandler)
 
 	// Backend configuration endpoints
-	mux.HandleFunc("GET /api/config/backend", handleGetBackendConfig(app.pool))
-	mux.HandleFunc("PATCH /api/config/backend", handlePatchBackendConfig(app.pool))
+	mux.HandleFunc("GET /api/config/backend", app.getBackendConfigHandler)
+	mux.HandleFunc("PATCH /api/config/backend", app.patchBackendConfigHandler)
 
 	// Workspace CRUD endpoints are registered in registerWorkspaceRoutes below.
 
 	// Backend health endpoint
-	if app.config.BackendOps != nil {
-		mux.HandleFunc("GET /api/backends", handleGetBackendsHealth(app.config.BackendOps))
+	if app.getBackendsHealthHandler != nil {
+		mux.HandleFunc("GET /api/backends", app.getBackendsHealthHandler)
 	}
 
 	// Fleet endpoints: workspace-scoped routes only (flat routes removed).
@@ -62,21 +50,20 @@ func (app *Server) setupRoutes(mux *http.ServeMux) (*clientErrorLimiter, *cspRep
 	// Legacy SSE endpoint removed — SSE is now workspace-scoped at /api/workspaces/{ws}/events
 
 	// Loom proxy for agent status endpoints (same-origin to avoid CORS/CSP issues)
-	if loomProxy := newLoomProxy(app.config.LoomServerURL); loomProxy != nil {
-		mux.Handle("/api/loom/", loomProxy)
+	if app.loomProxy != nil {
+		mux.Handle("/api/loom/", app.loomProxy)
 	}
 
 	// Terminal endpoints: workspace-scoped routes only (flat routes removed).
 	// All terminal routes are registered in registerWorkspaceRoutes below.
 
 	// Editor endpoints for external editor detection and launch
-	editorCache := newDefaultEditorCache()
-	mux.HandleFunc("GET /api/editors", handleListEditors(editorCache))
-	mux.HandleFunc("POST /api/editors/open", handleOpenEditor(editorCache, editor.LaunchEditor))
+	mux.HandleFunc("GET /api/editors", app.listEditorsHandler)
+	mux.HandleFunc("POST /api/editors/open", app.openEditorHandler)
 
 	// Session change notification endpoint for local agents to push SSE events
-	if app.hub != nil {
-		mux.HandleFunc("POST /api/sessions/notify", handleNotifySessionChange(app.hub, app.notifyToken))
+	if app.notifySessionChangeHandler != nil {
+		mux.HandleFunc("POST /api/sessions/notify", app.notifySessionChangeHandler)
 	}
 
 	// Workspace management and workspace-scoped API routes
@@ -85,13 +72,7 @@ func (app *Server) setupRoutes(mux *http.ServeMux) (*clientErrorLimiter, *cspRep
 	}
 
 	// Static file serving with SPA routing (must be last - catches all paths)
-	if app.config.DevMode {
-		mux.Handle("/", devFrontendHandler(app.config.DevFrontendDir))
-	} else {
-		mux.Handle("/", frontendHandler())
-	}
-
-	return clientErrLimiter, cspLimiter, authCfgLimiter
+	mux.Handle("/", app.frontendH)
 }
 
 // registerWorkspaceRoutes sets up workspace listing, CRUD, and workspace-scoped API routes.

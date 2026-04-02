@@ -19,6 +19,25 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 )
 
+// setupTestRoutes constructs handlers and registers routes on the given mux.
+// Cleans up rate limiter goroutines when the test finishes.
+func setupTestRoutes(t *testing.T, app *Server, mux *http.ServeMux) {
+	t.Helper()
+	app.buildHandlers()
+	app.setupRoutes(mux)
+	t.Cleanup(func() {
+		if app.clientErrLimiter != nil {
+			app.clientErrLimiter.stop()
+		}
+		if app.cspLimiter != nil {
+			app.cspLimiter.stop()
+		}
+		if app.authCfgLimiter != nil {
+			app.authCfgLimiter.stop()
+		}
+	})
+}
+
 // TestHandleStats_NilPool verifies that handleStats returns 503 when pool is nil.
 func TestHandleStats_NilPool(t *testing.T) {
 	handler := handleStats(nil)
@@ -617,7 +636,7 @@ func TestHandleAPIHealth_NilPool(t *testing.T) {
 // the flat terminal WebSocket endpoint returns 404 (removed in favor of workspace-scoped).
 func TestSetupRoutes_FlatTerminalWSEndpointReturns404(t *testing.T) {
 	mux := http.NewServeMux()
-	(&Server{}).setupRoutes(mux)
+	setupTestRoutes(t, &Server{}, mux)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/ws?session=test", nil)
 	rr := httptest.NewRecorder()
@@ -647,7 +666,7 @@ func TestSetupRoutes_FlatTerminalRoutesReturn404(t *testing.T) {
 	defer termMgr.Shutdown()
 
 	mux := http.NewServeMux()
-	(&Server{termMgr: termMgr}).setupRoutes(mux)
+	setupTestRoutes(t, &Server{termMgr: termMgr}, mux)
 
 	flatRoutes := []struct {
 		method string
@@ -709,7 +728,7 @@ func TestSetupRoutes_TerminalEndpointNilManagerReturns503(t *testing.T) {
 // TestSetupRoutes_StatsEndpoint tests that stats endpoint is registered.
 func TestSetupRoutes_StatsEndpoint(t *testing.T) {
 	mux := http.NewServeMux()
-	(&Server{}).setupRoutes(mux)
+	setupTestRoutes(t, &Server{}, mux)
 
 	// Test that stats endpoint is registered
 	req := httptest.NewRequest(http.MethodGet, "/api/stats", nil)
@@ -738,7 +757,7 @@ func TestSetupRoutes_StatsEndpoint(t *testing.T) {
 // catch-all frontend handler which rejects /api/* paths with 404 JSON.
 func TestSetupRoutes_StatsEndpointPOSTFallsThrough(t *testing.T) {
 	mux := http.NewServeMux()
-	(&Server{}).setupRoutes(mux)
+	setupTestRoutes(t, &Server{}, mux)
 
 	// POST to GET-only endpoint falls through to frontend handler which rejects /api/* paths
 	req := httptest.NewRequest(http.MethodPost, "/api/stats", nil)
@@ -951,7 +970,7 @@ func TestHandleStats_DaemonError(t *testing.T) {
 // fleet endpoints are NOT registered when fleetEnabled is false.
 func TestSetupRoutes_FleetEndpointsNotRegisteredWhenDisabled(t *testing.T) {
 	mux := http.NewServeMux()
-	(&Server{}).setupRoutes(mux) // fleetEnabled=false
+	setupTestRoutes(t, &Server{}, mux) // fleetEnabled=false
 
 	// Request to fleet endpoint should return 404 JSON since the route is not
 	// registered and the SPA catch-all rejects /api/* paths
@@ -974,7 +993,7 @@ func TestSetupRoutes_FleetEndpointsNotRegisteredWhenDisabled(t *testing.T) {
 // workspace-scoped equivalents).
 func TestSetupRoutes_FlatFleetRoutesReturn404(t *testing.T) {
 	mux := http.NewServeMux()
-	(&Server{}).setupRoutes(mux) // fleetEnabled=true
+	setupTestRoutes(t, &Server{}, mux) // fleetEnabled=true
 
 	req := httptest.NewRequest(http.MethodPost, "/api/fleet/claim", nil)
 	rr := httptest.NewRecorder()
@@ -1395,7 +1414,7 @@ func TestHandleAPIHealth_SuccessWithMockServer(t *testing.T) {
 // (legacy endpoint) returns 404 now that SSE is workspace-scoped.
 func TestSetupRoutes_LegacySSEEndpointReturns404(t *testing.T) {
 	mux := http.NewServeMux()
-	(&Server{}).setupRoutes(mux)
+	setupTestRoutes(t, &Server{}, mux)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
 	rr := httptest.NewRecorder()
@@ -1426,7 +1445,7 @@ func TestSetupRoutes_SSEEndpointRegisteredOnWorkspaceScope(t *testing.T) {
 
 	mux := http.NewServeMux()
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
-	(&Server{multiPool: multiPool, hub: hub, wsExistsFn: wsExistsFn}).setupRoutes(mux)
+	setupTestRoutes(t, &Server{multiPool: multiPool, hub: hub, wsExistsFn: wsExistsFn}, mux)
 
 	// Use a context with short timeout because the SSE handler streams forever
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
@@ -1468,7 +1487,7 @@ func TestSetupRoutes_WorkspaceBackendPatchEndpoint(t *testing.T) {
 	workspaceConfigFn := func() (*WorkspaceData, error) {
 		return &WorkspaceData{Name: "test-ws", Path: "/tmp/test"}, nil
 	}
-	(&Server{multiPool: multiPool, config: ServerConfig{WorkspaceConfigFn: workspaceConfigFn}, wsExistsFn: wsExistsFn}).setupRoutes(mux)
+	setupTestRoutes(t, &Server{multiPool: multiPool, config: ServerConfig{WorkspaceConfigFn: workspaceConfigFn}, wsExistsFn: wsExistsFn}, mux)
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/workspaces/test-ws/config/backend",
 		strings.NewReader(`{"backend":"codex"}`))
@@ -1525,7 +1544,7 @@ func TestSetupRoutes_FlatTerminalTokenReturns404(t *testing.T) {
 	t.Cleanup(func() { termAuth.Stop() })
 
 	mux := http.NewServeMux()
-	(&Server{termMgr: termMgr, termAuth: termAuth}).setupRoutes(mux)
+	setupTestRoutes(t, &Server{termMgr: termMgr, termAuth: termAuth}, mux)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/token?session=test", nil)
 	rr := httptest.NewRecorder()
@@ -1547,7 +1566,7 @@ func TestSetupRoutes_FlatTerminalTokenReturns404(t *testing.T) {
 // and POST /health falls through to the frontend.
 func TestSetupRoutes_HealthEndpoint_GETOnly(t *testing.T) {
 	mux := http.NewServeMux()
-	(&Server{}).setupRoutes(mux)
+	setupTestRoutes(t, &Server{}, mux)
 
 	// GET should return JSON health response
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -1593,7 +1612,7 @@ func TestSetupRoutes_IssueEndpoints_MethodRestrictions(t *testing.T) {
 	pool := newRoutesMockPool(t, socketPath)
 
 	mux := http.NewServeMux()
-	(&Server{pool: pool}).setupRoutes(mux)
+	setupTestRoutes(t, &Server{pool: pool}, mux)
 
 	tests := []struct {
 		name        string
@@ -1654,7 +1673,7 @@ func TestSetupRoutes_DependencyEndpoints_MethodRestrictions(t *testing.T) {
 	pool := newRoutesMockPool(t, socketPath)
 
 	mux := http.NewServeMux()
-	(&Server{pool: pool}).setupRoutes(mux)
+	setupTestRoutes(t, &Server{pool: pool}, mux)
 
 	tests := []struct {
 		name        string
@@ -1697,7 +1716,7 @@ func TestSetupRoutes_DependencyEndpoints_MethodRestrictions(t *testing.T) {
 // fleet endpoints return 404 (removed in favor of workspace-scoped equivalents).
 func TestSetupRoutes_FleetEndpoints_AllFlatRoutesReturn404(t *testing.T) {
 	mux := http.NewServeMux()
-	(&Server{}).setupRoutes(mux)
+	setupTestRoutes(t, &Server{}, mux)
 
 	flatRoutes := []string{
 		"/api/fleet/register",
@@ -1731,7 +1750,7 @@ func TestSetupRoutes_FleetEndpoints_AllFlatRoutesReturn404(t *testing.T) {
 func TestSetupRoutes_DevMode_FrontendHandler(t *testing.T) {
 	mux := http.NewServeMux()
 	// Pass devMode=true with a non-existent dir; the handler should not panic
-	(&Server{config: ServerConfig{DevMode: true, DevFrontendDir: "/nonexistent/dev/dir"}}).setupRoutes(mux)
+	setupTestRoutes(t, &Server{config: ServerConfig{DevMode: true, DevFrontendDir: "/nonexistent/dev/dir"}}, mux)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
@@ -1755,7 +1774,7 @@ func TestSetupRoutes_LoomProxy_RegisteredWhenURLSet(t *testing.T) {
 	t.Setenv("LOOM_SERVER_URL", "")
 
 	mux := http.NewServeMux()
-	(&Server{config: ServerConfig{LoomServerURL: "http://localhost:9999"}}).setupRoutes(mux)
+	setupTestRoutes(t, &Server{config: ServerConfig{LoomServerURL: "http://localhost:9999"}}, mux)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/loom/status", nil)
 	rr := httptest.NewRecorder()
@@ -1779,7 +1798,7 @@ func TestSetupRoutes_LoomProxy_NotRegisteredWhenURLInvalid(t *testing.T) {
 
 	mux := http.NewServeMux()
 	// Use a URL with a non-localhost host and no allowed hosts → proxy returns nil
-	(&Server{config: ServerConfig{LoomServerURL: "http://external-host.example.com:9999"}}).setupRoutes(mux)
+	setupTestRoutes(t, &Server{config: ServerConfig{LoomServerURL: "http://external-host.example.com:9999"}}, mux)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/loom/status", nil)
 	rr := httptest.NewRecorder()
@@ -1805,7 +1824,7 @@ func TestSetupRoutes_LoomProxy_NotRegisteredWhenURLInvalid(t *testing.T) {
 func TestSetupRoutes_TabMetadataReturns404WhenStoreNil(t *testing.T) {
 	mux := http.NewServeMux()
 	// All nil params — tabMetaStore (param 21) is nil, so tab metadata routes are not registered.
-	(&Server{}).setupRoutes(mux)
+	setupTestRoutes(t, &Server{}, mux)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/tabs", nil)
 	rr := httptest.NewRecorder()
@@ -1839,7 +1858,7 @@ func TestLegacyFlatAgentRoutesRemoved(t *testing.T) {
 	fileOps := &mockFileOps{}
 
 	mux := http.NewServeMux()
-	(&Server{multiPool: multiPool, config: ServerConfig{GitOps: gitOps, FileOps: fileOps}, wsExistsFn: wsExistsFn}).setupRoutes(mux)
+	setupTestRoutes(t, &Server{multiPool: multiPool, config: ServerConfig{GitOps: gitOps, FileOps: fileOps}, wsExistsFn: wsExistsFn}, mux)
 
 	// Legacy flat routes that should have been removed — each must return 404.
 	legacyRoutes := []struct {

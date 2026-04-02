@@ -26,7 +26,7 @@ func TestSessionRouteMigration_OldFlatRoutesReturn404(t *testing.T) {
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
 
 	mux := http.NewServeMux()
-	(&Server{multiPool: multiPool, config: ServerConfig{SessionsStore: sessStore}, wsExistsFn: wsExistsFn}).setupRoutes(mux)
+	setupTestRoutes(t, &Server{multiPool: multiPool, config: ServerConfig{SessionsStore: sessStore}, wsExistsFn: wsExistsFn}, mux)
 
 	// Old flat routes that should have been removed — each must return 404.
 	oldRoutes := []struct {
@@ -70,7 +70,7 @@ func TestSessionRouteMigration_WorkspaceScopedRoutesRegistered(t *testing.T) {
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
 
 	mux := http.NewServeMux()
-	(&Server{multiPool: multiPool, config: ServerConfig{SessionsStore: sessStore}, wsExistsFn: wsExistsFn}).setupRoutes(mux)
+	setupTestRoutes(t, &Server{multiPool: multiPool, config: ServerConfig{SessionsStore: sessStore}, wsExistsFn: wsExistsFn}, mux)
 
 	// New workspace-scoped routes that should be registered.
 	scopedRoutes := []struct {
@@ -120,7 +120,7 @@ func TestSessionRouteMigration_UnknownWorkspaceReturns404(t *testing.T) {
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
 
 	mux := http.NewServeMux()
-	(&Server{multiPool: multiPool, config: ServerConfig{SessionsStore: sessStore}, wsExistsFn: wsExistsFn}).setupRoutes(mux)
+	setupTestRoutes(t, &Server{multiPool: multiPool, config: ServerConfig{SessionsStore: sessStore}, wsExistsFn: wsExistsFn}, mux)
 
 	// Routes with a non-existent workspace should return 404 from WorkspaceMiddleware.
 	routes := []struct {
@@ -158,7 +158,7 @@ func TestSessionRouteMigration_WorkspaceScopedListReturnsJSON(t *testing.T) {
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
 
 	mux := http.NewServeMux()
-	(&Server{multiPool: multiPool, config: ServerConfig{SessionsStore: sessStore}, wsExistsFn: wsExistsFn}).setupRoutes(mux)
+	setupTestRoutes(t, &Server{multiPool: multiPool, config: ServerConfig{SessionsStore: sessStore}, wsExistsFn: wsExistsFn}, mux)
 
 	// GET /api/workspaces/{ws}/tasks/{taskId}/sessions should return 200 with
 	// a proper JSON response from the handler (empty sessions list).
@@ -206,7 +206,7 @@ func TestSessionRouteMigration_WorkspaceScopedSessionWithData(t *testing.T) {
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
 
 	mux := http.NewServeMux()
-	(&Server{multiPool: multiPool, config: ServerConfig{SessionsStore: sessStore}, wsExistsFn: wsExistsFn}).setupRoutes(mux)
+	setupTestRoutes(t, &Server{multiPool: multiPool, config: ServerConfig{SessionsStore: sessStore}, wsExistsFn: wsExistsFn}, mux)
 
 	// GET session detail via workspace-scoped route.
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/tasks/bd-routed/sessions/"+sess.SessionID(), nil)
@@ -243,7 +243,7 @@ func TestSessionRouteMigration_WorkspaceScopedDiffEndpoint(t *testing.T) {
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
 
 	mux := http.NewServeMux()
-	(&Server{multiPool: multiPool, config: ServerConfig{SessionsStore: sessStore}, wsExistsFn: wsExistsFn}).setupRoutes(mux)
+	setupTestRoutes(t, &Server{multiPool: multiPool, config: ServerConfig{SessionsStore: sessStore}, wsExistsFn: wsExistsFn}, mux)
 
 	// GET diff via workspace-scoped route — createTestSession includes a DiffPatch.
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/tasks/bd-diffrouted/sessions/"+sess.SessionID()+"/diff", nil)
@@ -287,7 +287,7 @@ func TestSessionRouteMigration_WorkspaceScopedTranscriptEndpoint(t *testing.T) {
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
 
 	mux := http.NewServeMux()
-	(&Server{multiPool: multiPool, config: ServerConfig{SessionsStore: sessStore}, wsExistsFn: wsExistsFn}).setupRoutes(mux)
+	setupTestRoutes(t, &Server{multiPool: multiPool, config: ServerConfig{SessionsStore: sessStore}, wsExistsFn: wsExistsFn}, mux)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/tasks/bd-transrouted/sessions/"+sess.SessionID()+"/transcript", nil)
 	rr := httptest.NewRecorder()

@@ -41,7 +41,7 @@ func TestTerminalStateRouteMigration_OldFlatRoutesReturn404(t *testing.T) {
 	t.Cleanup(func() { termMgr.Shutdown() })
 
 	mux := http.NewServeMux()
-	(&Server{multiPool: multiPool, termMgr: termMgr, tabMetaStore: tms, wsExistsFn: wsExistsFn}).setupRoutes(mux)
+	setupTestRoutes(t, &Server{multiPool: multiPool, termMgr: termMgr, tabMetaStore: tms, wsExistsFn: wsExistsFn}, mux)
 
 	// Old flat routes that should have been removed — each must return 404.
 	oldRoutes := []struct {
@@ -98,7 +98,7 @@ func TestTerminalStateRouteMigration_NewWorkspaceScopedRoutesRegistered(t *testi
 	t.Cleanup(func() { termMgr.Shutdown() })
 
 	mux := http.NewServeMux()
-	(&Server{multiPool: multiPool, termMgr: termMgr, tabMetaStore: tms, wsExistsFn: wsExistsFn}).setupRoutes(mux)
+	setupTestRoutes(t, &Server{multiPool: multiPool, termMgr: termMgr, tabMetaStore: tms, wsExistsFn: wsExistsFn}, mux)
 
 	// New workspace-scoped routes that should be registered.
 	scopedRoutes := []struct {
@@ -161,7 +161,7 @@ func TestTerminalStateRouteMigration_UnknownWorkspaceReturns404(t *testing.T) {
 	t.Cleanup(func() { termMgr.Shutdown() })
 
 	mux := http.NewServeMux()
-	(&Server{multiPool: multiPool, termMgr: termMgr, tabMetaStore: tms, wsExistsFn: wsExistsFn}).setupRoutes(mux)
+	setupTestRoutes(t, &Server{multiPool: multiPool, termMgr: termMgr, tabMetaStore: tms, wsExistsFn: wsExistsFn}, mux)
 
 	// Routes with a non-existent workspace should return 404 from WorkspaceMiddleware.
 	routes := []struct {
@@ -204,7 +204,7 @@ func TestTerminalStateRouteMigration_StateEndpointsReturnJSON(t *testing.T) {
 
 	mux := http.NewServeMux()
 	// termManager is nil here since state routes only need tabMetaStore.
-	(&Server{multiPool: multiPool, tabMetaStore: tms, wsExistsFn: wsExistsFn}).setupRoutes(mux)
+	setupTestRoutes(t, &Server{multiPool: multiPool, tabMetaStore: tms, wsExistsFn: wsExistsFn}, mux)
 
 	// GET /api/workspaces/{ws}/terminal/state should return 200 with an
 	// active_tab field (empty when no state has been set).

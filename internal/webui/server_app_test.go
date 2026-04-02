@@ -22,40 +22,42 @@ func TestServer_Close_NilPointer(t *testing.T) {
 	app.Close()
 }
 
-// TestServer_SetupRoutes_ZeroValue verifies that setupRoutes can be called
-// on a zero-value Server without panicking. All nil pools, stores, and
-// managers should be handled gracefully by the route registration code.
+// TestServer_SetupRoutes_ZeroValue verifies that buildHandlers + setupRoutes
+// can be called on a zero-value Server without panicking. All nil pools,
+// stores, and managers should be handled gracefully.
 func TestServer_SetupRoutes_ZeroValue(t *testing.T) {
 	var app Server
+	app.buildHandlers()
 	mux := http.NewServeMux()
-	clientErrLimiter, cspLimiter, authCfgLimiter := app.setupRoutes(mux)
+	app.setupRoutes(mux)
 
-	// Returned limiters must be non-nil and stoppable.
-	if clientErrLimiter == nil {
-		t.Fatal("setupRoutes returned nil clientErrLimiter")
+	// Limiters must be non-nil after buildHandlers.
+	if app.clientErrLimiter == nil {
+		t.Fatal("buildHandlers produced nil clientErrLimiter")
 	}
-	if cspLimiter == nil {
-		t.Fatal("setupRoutes returned nil cspLimiter")
+	if app.cspLimiter == nil {
+		t.Fatal("buildHandlers produced nil cspLimiter")
 	}
-	if authCfgLimiter == nil {
-		t.Fatal("setupRoutes returned nil authCfgLimiter")
+	if app.authCfgLimiter == nil {
+		t.Fatal("buildHandlers produced nil authCfgLimiter")
 	}
 
 	// Clean up background goroutines.
-	clientErrLimiter.stop()
-	cspLimiter.stop()
-	authCfgLimiter.stop()
+	app.clientErrLimiter.stop()
+	app.cspLimiter.stop()
+	app.authCfgLimiter.stop()
 }
 
 // TestServer_SetupRoutes_HealthRegistered verifies that setupRoutes
 // registers the /api/health endpoint on the provided mux.
 func TestServer_SetupRoutes_HealthRegistered(t *testing.T) {
 	var app Server
+	app.buildHandlers()
 	mux := http.NewServeMux()
-	cel, csp, acl := app.setupRoutes(mux)
-	defer cel.stop()
-	defer csp.stop()
-	defer acl.stop()
+	app.setupRoutes(mux)
+	defer app.clientErrLimiter.stop()
+	defer app.cspLimiter.stop()
+	defer app.authCfgLimiter.stop()
 
 	// Build a request for /api/health and verify the mux finds a handler.
 	req, err := http.NewRequest("GET", "/api/health", nil)

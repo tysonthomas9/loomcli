@@ -13,9 +13,11 @@ import (
 
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
+	"golang.org/x/time/rate"
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/editor"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
@@ -79,6 +81,82 @@ type Server struct {
 	// Notify token for session change endpoint auth
 	notifyToken     string
 	notifyTokenFile string
+
+	// Rate limiters (created in buildHandlers, stopped in Close)
+	clientErrLimiter *clientErrorLimiter
+	cspLimiter       *cspReportLimiter
+	authCfgLimiter   *authConfigLimiter
+
+	// Shared infrastructure
+	editorCache *editorCache
+	loomProxy   http.Handler // nil if LoomServerURL is empty
+	frontendH   http.Handler // embedded FS handler or dev-mode handler
+
+	// Pre-built top-level handlers
+	healthHandler              http.HandlerFunc
+	apiHealthHandler           http.HandlerFunc
+	clientErrorsHandler        http.HandlerFunc
+	cspReportHandler           http.HandlerFunc
+	authConfigHandler          http.HandlerFunc
+	statsHandler               http.HandlerFunc
+	metricsHandler             http.HandlerFunc
+	daemonStatusHandler        http.HandlerFunc
+	getBackendConfigHandler    http.HandlerFunc
+	patchBackendConfigHandler  http.HandlerFunc
+	getBackendsHealthHandler   http.HandlerFunc // nil if BackendOps is nil
+	listEditorsHandler         http.HandlerFunc
+	openEditorHandler          http.HandlerFunc
+	notifySessionChangeHandler http.HandlerFunc // nil if hub is nil
+}
+
+// buildHandlers constructs all top-level HTTP handlers from the current dependency
+// fields. Called by NewServer after all dependencies are initialized. Tests that
+// bypass NewServer should call this explicitly before calling setupRoutes.
+func (app *Server) buildHandlers() {
+	// Rate limiters
+	app.clientErrLimiter = newClientErrorLimiter(rate.Limit(10.0/60.0), 10, 5*time.Minute, 10*time.Minute)
+	app.cspLimiter = newCSPReportLimiter(rate.Limit(1.0), 20, 5*time.Minute, 10*time.Minute)
+	app.authCfgLimiter = newAuthConfigLimiter(rate.Limit(5), 10, 5*time.Minute, 10*time.Minute)
+
+	// Editor infrastructure
+	app.editorCache = newDefaultEditorCache()
+
+	// Handlers
+	app.healthHandler = handleHealth(app.pool)
+	app.apiHealthHandler = handleAPIHealth(app.pool)
+	app.clientErrorsHandler = handleClientErrors(app.clientErrLimiter)
+	app.cspReportHandler = handleCSPReport(app.cspLimiter)
+	app.authConfigHandler = handleAuthConfig(app.config.ExtAuthURL, app.authCfgLimiter)
+	app.statsHandler = handleStats(app.pool)
+
+	var getFleetTimeouts func() int64
+	if app.fleetRegistry != nil {
+		getFleetTimeouts = app.registry.FleetTimeoutCount
+	}
+	app.metricsHandler = handleMetrics(app.hub, getFleetTimeouts, app.claimMetrics)
+
+	app.daemonStatusHandler = handleDaemonStatus(app.pool)
+	app.getBackendConfigHandler = handleGetBackendConfig(app.pool)
+	app.patchBackendConfigHandler = handlePatchBackendConfig(app.pool)
+
+	if app.config.BackendOps != nil {
+		app.getBackendsHealthHandler = handleGetBackendsHealth(app.config.BackendOps)
+	}
+
+	app.loomProxy = newLoomProxy(app.config.LoomServerURL)
+
+	app.listEditorsHandler = handleListEditors(app.editorCache)
+	app.openEditorHandler = handleOpenEditor(app.editorCache, editor.LaunchEditor)
+
+	if app.hub != nil {
+		app.notifySessionChangeHandler = handleNotifySessionChange(app.hub, app.notifyToken)
+	}
+
+	if app.config.DevMode {
+		app.frontendH = devFrontendHandler(app.config.DevFrontendDir)
+	} else {
+		app.frontendH = frontendHandler()
+	}
 }
 
 // StartServer starts the web UI server with the given configuration.
@@ -96,6 +174,17 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 // Close releases deferred resources that outlive the HTTP server lifetime.
 // Called from StartServer via defer after run() returns.
 func (app *Server) Close() {
+	// Stop rate limiter background goroutines.
+	if app.clientErrLimiter != nil {
+		app.clientErrLimiter.stop()
+	}
+	if app.cspLimiter != nil {
+		app.cspLimiter.stop()
+	}
+	if app.authCfgLimiter != nil {
+		app.authCfgLimiter.stop()
+	}
+
 	if app.notifyTokenFile != "" {
 		_ = os.Remove(app.notifyTokenFile)
 	}
@@ -126,10 +215,7 @@ func (app *Server) Close() {
 func (app *Server) run(ctx context.Context) error { //nolint:funlen // server lifecycle method
 	// Create HTTP server and register routes
 	mux := http.NewServeMux()
-	clientErrLimiter, cspLimiter, authCfgLimiter := app.setupRoutes(mux)
-	defer clientErrLimiter.stop()
-	defer cspLimiter.stop()
-	defer authCfgLimiter.stop()
+	app.setupRoutes(mux)
 
 	app.registerWorkerAPIRoutes(mux)
 

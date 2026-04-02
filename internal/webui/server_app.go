@@ -375,5 +375,7 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 	// Generate and persist notify token for session change endpoint auth.
 	app.notifyToken, app.notifyTokenFile = generateNotifyToken(config.NotifyTokenDir)
 
+	app.buildHandlers()
+
 	return app, nil
 }
