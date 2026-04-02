@@ -7,7 +7,12 @@
 import { useParams, useNavigate, Outlet } from "react-router-dom";
 import { useEffect, useState } from "react";
 
-import { WorkspaceProvider, AgentProvider, useIssueSessionMap } from "@/hooks";
+import {
+  WorkspaceProvider,
+  StoreProvider,
+  AgentProvider,
+  useIssueSessionMap,
+} from "@/hooks";
 import { IssueSessionProvider } from "@/contexts/IssueSessionContext";
 import { fetchWorkspaceApi } from "@/api/workspace";
 import { clearLastWorkspaceId } from "@/utils/scopedStorage";
@@ -83,11 +88,13 @@ export function WorkspaceLayout() {
 
   return (
     <WorkspaceProvider workspaceId={workspaceId}>
-      <AgentProvider>
-        <IssueSessionWrapper>
-          <Outlet />
-        </IssueSessionWrapper>
-      </AgentProvider>
+      <StoreProvider>
+        <AgentProvider>
+          <IssueSessionWrapper>
+            <Outlet />
+          </IssueSessionWrapper>
+        </AgentProvider>
+      </StoreProvider>
     </WorkspaceProvider>
   );
 }
