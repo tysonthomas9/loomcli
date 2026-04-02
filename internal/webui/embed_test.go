@@ -318,7 +318,7 @@ func TestHandleHealth(t *testing.T) {
 
 func TestSetupRoutes(t *testing.T) {
 	mux := http.NewServeMux()
-	(&serverApp{}).setupRoutes(mux)
+	(&Server{}).setupRoutes(mux)
 
 	tests := []struct {
 		name       string
@@ -362,7 +362,7 @@ func TestSetupRoutes(t *testing.T) {
 
 func TestHealthEndpointJSON(t *testing.T) {
 	mux := http.NewServeMux()
-	(&serverApp{}).setupRoutes(mux)
+	(&Server{}).setupRoutes(mux)
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	w := httptest.NewRecorder()
@@ -597,7 +597,7 @@ func TestSetupRoutes_DevMode(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	(&serverApp{config: ServerConfig{DevMode: true, DevFrontendDir: dir}}).setupRoutes(mux)
+	(&Server{config: ServerConfig{DevMode: true, DevFrontendDir: dir}}).setupRoutes(mux)
 
 	tests := []struct {
 		name             string

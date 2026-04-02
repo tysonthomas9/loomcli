@@ -6,14 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/circuitbreaker"
-	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
@@ -22,70 +19,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/workspace"
 )
 
-// serverApp holds all initialized server dependencies as struct fields.
-// It replaces the positional parameter threading through setupRoutes and
-// registerWorkspaceRoutes.
-type serverApp struct {
-	config ServerConfig
-
-	// Network
-	listener   net.Listener
-	actualPort int
-	corsConfig CORSConfig
-
-	// Connection pools
-	pool      daemon.Pool // may be nil if daemon unavailable at startup
-	multiPool *daemon.MultiPool
-
-	// Real-time
-	hub               *SSEHub
-	multiSub          *MultiWorkspaceSubscriber
-	getMutationsSince func(wsID string, since int64) []rpc.MutationEvent
-
-	// Workspace lifecycle
-	registry           *WorkspaceRegistry
-	initialWorkspaceID string
-
-	// Terminal
-	termMgr  *TerminalManager // nil if tmux unavailable
-	termAuth *terminalAuth    // nil if termMgr is nil
-
-	// SSE token exchange (external auth mode only)
-	sseTokens *sseTokenStore // nil if ExtAuthURL is empty
-
-	// Fleet
-	fleetRegistry *fleet.StoreRegistry // nil if Redis unconfigured
-	tokenCfg      *TokenConfig         // nil if fleetRegistry is nil
-	claimMetrics  *fleet.ClaimMetrics  // nil if fleetRegistry is nil
-	fleetRegCfg   *FleetRegisterConfig // nil if no fleet API key
-
-	// Redis-backed stores
-	tabMetaStore        *tabmeta.Store        // nil if Redis unconfigured
-	issueTabStore       *issuetabs.Store      // nil if Redis unconfigured
-	sessionHistoryStore *sessionhistory.Store // nil if Redis unconfigured
-
-	// External auth
-	extAuthMiddleware func(http.Handler) http.Handler // nil = open mode
-	jwksCleanup       func()                          // nil if no JWKS cache
-
-	// Wrapped workspace lifecycle functions
-	wrappedCreateFn WorkspaceCreateFn
-	wrappedDeleteFn func(string) error
-
-	// Async workspace creation jobs
-	jobStore *WorkspaceJobStore
-
-	// Workspace existence checker
-	wsExistsFn func(string) bool
-
-	// Notify token for session change endpoint auth
-	notifyToken     string
-	notifyTokenFile string
-}
-
-// newServerApp initializes all server dependencies. On failure, it cleans up
+// NewServer initializes all server dependencies. On failure, it cleans up
 // resources allocated before the error point via a cleanup stack.
-func newServerApp(ctx context.Context, config ServerConfig) (_ *serverApp, retErr error) { //nolint:gocognit,cyclop,funlen // server initialization requires sequential resource setup
+func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr error) { //nolint:gocognit,cyclop,funlen // server initialization requires sequential resource setup
 	// Apply defaults for zero values
 	if config.Port == 0 {
 		config.Port = defaultPort
@@ -103,7 +39,7 @@ func newServerApp(ctx context.Context, config ServerConfig) (_ *serverApp, retEr
 		config.BindAddress = "127.0.0.1"
 	}
 
-	app := &serverApp{config: config}
+	app := &Server{config: config}
 
 	var cleanups []func()
 	defer func() {

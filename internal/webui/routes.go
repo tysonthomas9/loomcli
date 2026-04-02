@@ -11,8 +11,8 @@ import (
 )
 
 // setupRoutes configures all HTTP routes for the server.
-// Dependencies are read from serverApp fields.
-func (app *serverApp) setupRoutes(mux *http.ServeMux) (*clientErrorLimiter, *cspReportLimiter, *authConfigLimiter) {
+// Dependencies are read from Server fields.
+func (app *Server) setupRoutes(mux *http.ServeMux) (*clientErrorLimiter, *cspReportLimiter, *authConfigLimiter) {
 	// Health check endpoint for load balancers and monitoring
 	mux.HandleFunc("GET /health", handleHealth(app.pool))
 
@@ -95,7 +95,7 @@ func (app *serverApp) setupRoutes(mux *http.ServeMux) (*clientErrorLimiter, *csp
 }
 
 // registerWorkspaceRoutes sets up workspace listing, CRUD, and workspace-scoped API routes.
-func (app *serverApp) registerWorkspaceRoutes(mux *http.ServeMux) { //nolint:funlen // route registration function
+func (app *Server) registerWorkspaceRoutes(mux *http.ServeMux) { //nolint:funlen // route registration function
 	workspaceConfigFn := app.config.WorkspaceConfigFn
 	workspaceConfigByIDFn := app.config.WorkspaceConfigByIDFn
 

@@ -6,27 +6,27 @@ import (
 	"time"
 )
 
-// TestServerApp_Close_ZeroValue verifies that calling Close on a zero-value
-// serverApp does not panic. All optional fields are nil by default, and
+// TestServer_Close_ZeroValue verifies that calling Close on a zero-value
+// Server does not panic. All optional fields are nil by default, and
 // Close must guard each one.
-func TestServerApp_Close_ZeroValue(t *testing.T) {
-	var app serverApp
+func TestServer_Close_ZeroValue(t *testing.T) {
+	var app Server
 	// Should not panic — every field is nil/zero.
 	app.Close()
 }
 
-// TestServerApp_Close_NilPointer verifies that calling Close on a nil-safe
+// TestServer_Close_NilPointer verifies that calling Close on a nil-safe
 // allocated pointer works the same as the zero-value case.
-func TestServerApp_Close_NilPointer(t *testing.T) {
-	app := &serverApp{}
+func TestServer_Close_NilPointer(t *testing.T) {
+	app := &Server{}
 	app.Close()
 }
 
-// TestServerApp_SetupRoutes_ZeroValue verifies that setupRoutes can be called
-// on a zero-value serverApp without panicking. All nil pools, stores, and
+// TestServer_SetupRoutes_ZeroValue verifies that setupRoutes can be called
+// on a zero-value Server without panicking. All nil pools, stores, and
 // managers should be handled gracefully by the route registration code.
-func TestServerApp_SetupRoutes_ZeroValue(t *testing.T) {
-	var app serverApp
+func TestServer_SetupRoutes_ZeroValue(t *testing.T) {
+	var app Server
 	mux := http.NewServeMux()
 	clientErrLimiter, cspLimiter, authCfgLimiter := app.setupRoutes(mux)
 
@@ -47,10 +47,10 @@ func TestServerApp_SetupRoutes_ZeroValue(t *testing.T) {
 	authCfgLimiter.stop()
 }
 
-// TestServerApp_SetupRoutes_HealthRegistered verifies that setupRoutes
+// TestServer_SetupRoutes_HealthRegistered verifies that setupRoutes
 // registers the /api/health endpoint on the provided mux.
-func TestServerApp_SetupRoutes_HealthRegistered(t *testing.T) {
-	var app serverApp
+func TestServer_SetupRoutes_HealthRegistered(t *testing.T) {
+	var app Server
 	mux := http.NewServeMux()
 	cel, csp, acl := app.setupRoutes(mux)
 	defer cel.stop()
@@ -68,10 +68,10 @@ func TestServerApp_SetupRoutes_HealthRegistered(t *testing.T) {
 	}
 }
 
-// TestServerApp_ConfigDefaults_Port verifies that newServerApp applies the
+// TestServer_ConfigDefaults_Port verifies that NewServer applies the
 // default port when the config has Port=0.
-func TestServerApp_ConfigDefaults_Port(t *testing.T) {
-	// We cannot call newServerApp (it needs network), so we replicate the
+func TestServer_ConfigDefaults_Port(t *testing.T) {
+	// We cannot call NewServer (it needs network), so we replicate the
 	// default-application logic inline to verify the expected constants.
 	config := ServerConfig{}
 
@@ -83,9 +83,9 @@ func TestServerApp_ConfigDefaults_Port(t *testing.T) {
 	}
 }
 
-// TestServerApp_ConfigDefaults_PoolSize verifies that the default pool size is
+// TestServer_ConfigDefaults_PoolSize verifies that the default pool size is
 // applied when the config has PoolSize=0.
-func TestServerApp_ConfigDefaults_PoolSize(t *testing.T) {
+func TestServer_ConfigDefaults_PoolSize(t *testing.T) {
 	config := ServerConfig{}
 
 	if config.PoolSize == 0 {
@@ -96,9 +96,9 @@ func TestServerApp_ConfigDefaults_PoolSize(t *testing.T) {
 	}
 }
 
-// TestServerApp_ConfigDefaults_ShutdownTimeout verifies that the default
+// TestServer_ConfigDefaults_ShutdownTimeout verifies that the default
 // shutdown timeout is applied when the config has ShutdownTimeout=0.
-func TestServerApp_ConfigDefaults_ShutdownTimeout(t *testing.T) {
+func TestServer_ConfigDefaults_ShutdownTimeout(t *testing.T) {
 	config := ServerConfig{}
 
 	if config.ShutdownTimeout == 0 {
@@ -109,9 +109,9 @@ func TestServerApp_ConfigDefaults_ShutdownTimeout(t *testing.T) {
 	}
 }
 
-// TestServerApp_ConfigDefaults_MaxPortAttempts verifies that the default max
+// TestServer_ConfigDefaults_MaxPortAttempts verifies that the default max
 // port attempts value is applied when the config has MaxPortAttempts=0.
-func TestServerApp_ConfigDefaults_MaxPortAttempts(t *testing.T) {
+func TestServer_ConfigDefaults_MaxPortAttempts(t *testing.T) {
 	config := ServerConfig{}
 
 	if config.MaxPortAttempts == 0 {
@@ -122,9 +122,9 @@ func TestServerApp_ConfigDefaults_MaxPortAttempts(t *testing.T) {
 	}
 }
 
-// TestServerApp_ConfigDefaults_BindAddress verifies that the default bind
+// TestServer_ConfigDefaults_BindAddress verifies that the default bind
 // address is applied when the config has BindAddress="".
-func TestServerApp_ConfigDefaults_BindAddress(t *testing.T) {
+func TestServer_ConfigDefaults_BindAddress(t *testing.T) {
 	config := ServerConfig{}
 
 	if config.BindAddress == "" {
@@ -135,12 +135,12 @@ func TestServerApp_ConfigDefaults_BindAddress(t *testing.T) {
 	}
 }
 
-// TestServerApp_ConfigDefaults_AllAtOnce verifies that all defaults are applied
-// together, matching the logic in newServerApp.
-func TestServerApp_ConfigDefaults_AllAtOnce(t *testing.T) {
+// TestServer_ConfigDefaults_AllAtOnce verifies that all defaults are applied
+// together, matching the logic in NewServer.
+func TestServer_ConfigDefaults_AllAtOnce(t *testing.T) {
 	config := ServerConfig{}
 
-	// Apply defaults exactly as newServerApp does.
+	// Apply defaults exactly as NewServer does.
 	if config.Port == 0 {
 		config.Port = defaultPort
 	}
@@ -174,9 +174,9 @@ func TestServerApp_ConfigDefaults_AllAtOnce(t *testing.T) {
 	}
 }
 
-// TestServerApp_ConfigDefaults_ExplicitValuesPreserved verifies that explicitly
+// TestServer_ConfigDefaults_ExplicitValuesPreserved verifies that explicitly
 // set config values are not overwritten by the default-application logic.
-func TestServerApp_ConfigDefaults_ExplicitValuesPreserved(t *testing.T) {
+func TestServer_ConfigDefaults_ExplicitValuesPreserved(t *testing.T) {
 	config := ServerConfig{
 		Port:            9090,
 		PoolSize:        50,

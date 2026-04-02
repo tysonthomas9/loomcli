@@ -235,7 +235,7 @@ func safeLogPath(basePath, agent string) string {
 	return candidate
 }
 
-func (app *serverApp) registerWorkerAPIRoutes(mux *http.ServeMux) {
+func (app *Server) registerWorkerAPIRoutes(mux *http.ServeMux) {
 	workspaceConfigFn := app.config.WorkspaceConfigFn
 
 	workerToken := os.Getenv("LOOM_WORKER_TOKEN")

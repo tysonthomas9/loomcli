@@ -13,13 +13,79 @@ import (
 
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
+
+	"github.com/tysonthomas9/loomcli/internal/rpc"
+	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
+	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
+	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
+	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
+
+// Server holds all initialized server dependencies as struct fields.
+type Server struct {
+	config ServerConfig
+
+	// Network
+	listener   net.Listener
+	actualPort int
+	corsConfig CORSConfig
+
+	// Connection pools
+	pool      daemon.Pool // may be nil if daemon unavailable at startup
+	multiPool *daemon.MultiPool
+
+	// Real-time
+	hub               *SSEHub
+	multiSub          *MultiWorkspaceSubscriber
+	getMutationsSince func(wsID string, since int64) []rpc.MutationEvent
+
+	// Workspace lifecycle
+	registry           *WorkspaceRegistry
+	initialWorkspaceID string
+
+	// Terminal
+	termMgr  *TerminalManager // nil if tmux unavailable
+	termAuth *terminalAuth    // nil if termMgr is nil
+
+	// SSE token exchange (external auth mode only)
+	sseTokens *sseTokenStore // nil if ExtAuthURL is empty
+
+	// Fleet
+	fleetRegistry *fleet.StoreRegistry // nil if Redis unconfigured
+	tokenCfg      *TokenConfig         // nil if fleetRegistry is nil
+	claimMetrics  *fleet.ClaimMetrics  // nil if fleetRegistry is nil
+	fleetRegCfg   *FleetRegisterConfig // nil if no fleet API key
+
+	// Redis-backed stores
+	tabMetaStore        *tabmeta.Store        // nil if Redis unconfigured
+	issueTabStore       *issuetabs.Store      // nil if Redis unconfigured
+	sessionHistoryStore *sessionhistory.Store // nil if Redis unconfigured
+
+	// External auth
+	extAuthMiddleware func(http.Handler) http.Handler // nil = open mode
+	jwksCleanup       func()                          // nil if no JWKS cache
+
+	// Wrapped workspace lifecycle functions
+	wrappedCreateFn WorkspaceCreateFn
+	wrappedDeleteFn func(string) error
+
+	// Async workspace creation jobs
+	jobStore *WorkspaceJobStore
+
+	// Workspace existence checker
+	wsExistsFn func(string) bool
+
+	// Notify token for session change endpoint auth
+	notifyToken     string
+	notifyTokenFile string
+}
 
 // StartServer starts the web UI server with the given configuration.
 // It blocks until the context is canceled, then performs graceful shutdown.
 // Returns the actual port used (which may differ from config.Port if it was in use).
 func StartServer(ctx context.Context, config ServerConfig) error {
-	app, err := newServerApp(ctx, config)
+	app, err := NewServer(ctx, config)
 	if err != nil {
 		return err
 	}
@@ -29,7 +95,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 
 // Close releases deferred resources that outlive the HTTP server lifetime.
 // Called from StartServer via defer after run() returns.
-func (app *serverApp) Close() {
+func (app *Server) Close() {
 	if app.notifyTokenFile != "" {
 		_ = os.Remove(app.notifyTokenFile)
 	}
@@ -57,7 +123,7 @@ func (app *serverApp) Close() {
 // run starts the HTTP server and blocks until the context is canceled or the
 // server encounters a fatal error. It performs graceful shutdown and stops
 // components in reverse-initialization order.
-func (app *serverApp) run(ctx context.Context) error { //nolint:funlen // server lifecycle method
+func (app *Server) run(ctx context.Context) error { //nolint:funlen // server lifecycle method
 	// Create HTTP server and register routes
 	mux := http.NewServeMux()
 	clientErrLimiter, cspLimiter, authCfgLimiter := app.setupRoutes(mux)
