@@ -1,17 +1,8 @@
 /**
  * App component styles.
- * Layout styling for loading states and navigation bar.
+ * Layout styling for navigation bar.
  * Uses CSS Modules for component-scoped styling.
  */
-
-/* ===========================
- * Loading State Container
- * =========================== */
-.loadingContainer {
-  display: flex;
-  gap: var(--space-4);
-  padding: var(--space-4);
-}
 
 /* ===========================
  * Actions Container (user-area)

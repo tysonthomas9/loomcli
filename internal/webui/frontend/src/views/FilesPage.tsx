@@ -1,6 +1,6 @@
 import { lazy, Suspense } from "react";
 import { ErrorBoundary, LoadingSkeleton } from "@/components";
-import type { ViewMode } from "@/components/ViewSwitcher";
+import { useRouteView } from "@/hooks";
 
 const FileExplorer = lazy(() =>
   import("@/components/FileExplorer").then((m) => ({
@@ -8,11 +8,9 @@ const FileExplorer = lazy(() =>
   })),
 );
 
-export interface FilesPageProps {
-  activeView: ViewMode;
-}
+export function FilesPage() {
+  const { view: activeView } = useRouteView();
 
-export function FilesPage({ activeView }: FilesPageProps) {
   return (
     <ErrorBoundary resetOnChange={[activeView]}>
       <Suspense fallback={<LoadingSkeleton.FileExplorer />}>

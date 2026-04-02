@@ -1,6 +1,6 @@
 import { lazy, Suspense } from "react";
 import { ErrorBoundary, LoadingSkeleton } from "@/components";
-import type { ViewMode } from "@/components/ViewSwitcher";
+import { useRouteView } from "@/hooks";
 
 const ObservabilityDashboard = lazy(() =>
   import("@/components/ObservabilityDashboard").then((m) => ({
@@ -8,11 +8,9 @@ const ObservabilityDashboard = lazy(() =>
   })),
 );
 
-export interface ObservabilityPageProps {
-  activeView: ViewMode;
-}
+export function ObservabilityPage() {
+  const { view: activeView } = useRouteView();
 
-export function ObservabilityPage({ activeView }: ObservabilityPageProps) {
   return (
     <ErrorBoundary resetOnChange={[activeView]}>
       <Suspense fallback={<LoadingSkeleton.Observability />}>

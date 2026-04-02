@@ -6,7 +6,23 @@ import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom";
 
-import type { Issue } from "@/types";
+import {
+  NO_WORKSPACE_VIEW_DATA,
+  NO_WORKSPACE_VIEW_ACTIONS,
+} from "@/contexts/WorkspaceViewContext";
+
+const mockData = { ...NO_WORKSPACE_VIEW_DATA, activeView: "table" as const };
+const mockActions = { ...NO_WORKSPACE_VIEW_ACTIONS };
+
+vi.mock("@/contexts/WorkspaceViewContext", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/contexts/WorkspaceViewContext")>();
+  return {
+    ...actual,
+    useWorkspaceViewData: () => mockData,
+    useWorkspaceViewActions: () => mockActions,
+  };
+});
 
 // Mock child components to avoid deep rendering
 vi.mock("@/components", () => ({
@@ -19,33 +35,37 @@ vi.mock("@/components", () => ({
   BulkActionToolbar: () => <div data-testid="bulk-action-toolbar" />,
 }));
 
-import { TablePage } from "../TablePage";
+vi.mock("@/components/IssueViewGuard", () => ({
+  IssueViewGuard: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid="issue-view-guard">{children}</div>
+  ),
+}));
 
-const baseProps = {
-  filteredIssues: [] as Issue[],
-  selectedIds: new Set<string>(),
-  onSelectionChange: vi.fn(),
-  onClearSelection: vi.fn(),
-  onIssueClick: vi.fn() as (issue: Issue) => void,
-  searchTerm: "",
-  activeView: "table" as const,
-};
+vi.mock("@/hooks", () => ({
+  useSelection: () => ({
+    selectedIds: new Set<string>(),
+    toggleSelection: vi.fn(),
+    deselectAll: vi.fn(),
+  }),
+}));
+
+import { TablePage } from "../TablePage";
 
 describe("TablePage", () => {
   it("renders without crashing", () => {
-    const { container } = render(<TablePage {...baseProps} />);
+    const { container } = render(<TablePage />);
     expect(container).toBeTruthy();
   });
 
   it("renders IssueTable and BulkActionToolbar inside ErrorBoundary", () => {
-    render(<TablePage {...baseProps} />);
+    render(<TablePage />);
     expect(screen.getByTestId("error-boundary")).toBeInTheDocument();
     expect(screen.getByTestId("issue-table")).toBeInTheDocument();
     expect(screen.getByTestId("bulk-action-toolbar")).toBeInTheDocument();
   });
 
   it("passes sortable prop to IssueTable", () => {
-    render(<TablePage {...baseProps} />);
+    render(<TablePage />);
     expect(
       screen.getByTestId("issue-table").getAttribute("data-sortable"),
     ).toBe("true");

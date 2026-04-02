@@ -1,28 +1,35 @@
 import { lazy, Suspense } from "react";
 import { ErrorBoundary, LoadingSkeleton } from "@/components";
-import type { ViewMode } from "@/components/ViewSwitcher";
-import type { Issue } from "@/types";
+import { IssueViewGuard } from "@/components/IssueViewGuard";
+import {
+  useWorkspaceViewData,
+  useWorkspaceViewActions,
+} from "@/contexts/WorkspaceViewContext";
 
 const GraphView = lazy(() =>
   import("@/components/GraphView").then((m) => ({ default: m.GraphView })),
 );
 
-export interface GraphPageProps {
-  filteredIssues: Issue[];
-  onNodeClick: (issue: Issue) => void;
-  activeView: ViewMode;
-}
+export function GraphPage() {
+  const { filteredIssues, issues, isLoading, error, isMultiRepo, activeView } =
+    useWorkspaceViewData();
 
-export function GraphPage({
-  filteredIssues,
-  onNodeClick,
-  activeView,
-}: GraphPageProps) {
+  const { handleIssueClick, refetch } = useWorkspaceViewActions();
+
   return (
     <ErrorBoundary resetOnChange={[activeView]}>
-      <Suspense fallback={<LoadingSkeleton.Graph />}>
-        <GraphView issues={filteredIssues} onNodeClick={onNodeClick} />
-      </Suspense>
+      <IssueViewGuard
+        issues={issues}
+        isLoading={isLoading}
+        error={error}
+        isMultiRepo={isMultiRepo}
+        onRetry={refetch}
+        loadingVariant="columns"
+      >
+        <Suspense fallback={<LoadingSkeleton.Graph />}>
+          <GraphView issues={filteredIssues} onNodeClick={handleIssueClick} />
+        </Suspense>
+      </IssueViewGuard>
     </ErrorBoundary>
   );
 }

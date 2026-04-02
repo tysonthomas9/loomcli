@@ -1,6 +1,6 @@
 import { lazy, Suspense } from "react";
 import { ErrorBoundary, LoadingSkeleton } from "@/components";
-import type { ViewMode } from "@/components/ViewSwitcher";
+import { useRouteView, useWorkspaceContext } from "@/hooks";
 
 const WorkspaceView = lazy(() =>
   import("@/components/WorkspaceView").then((m) => ({
@@ -8,12 +8,10 @@ const WorkspaceView = lazy(() =>
   })),
 );
 
-export interface WorkspacePageProps {
-  isMultiRepo: boolean;
-  activeView: ViewMode;
-}
+export function WorkspacePage() {
+  const { view: activeView } = useRouteView();
+  const { isMultiRepo } = useWorkspaceContext();
 
-export function WorkspacePage({ isMultiRepo, activeView }: WorkspacePageProps) {
   if (!isMultiRepo) return null;
 
   return (

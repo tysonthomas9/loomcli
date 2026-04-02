@@ -6,6 +6,28 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom";
 
+let mockIsMultiRepo = true;
+
+vi.mock("@/hooks", () => ({
+  useRouteView: () => ({
+    view: "workspace",
+    setView: vi.fn(),
+    navigateToView: vi.fn(),
+  }),
+  useWorkspaceContext: () => ({
+    isMultiRepo: mockIsMultiRepo,
+    workspaceId: "ws-1",
+    workspace: null,
+    activeWorkspaceName: "test",
+    setActiveWorkspace: vi.fn(),
+    repos: [],
+    selectedRepoNames: new Set<string>(),
+    selectAll: vi.fn(),
+    selectRepos: vi.fn(),
+    sourceReposFilter: undefined,
+  }),
+}));
+
 // Mock the lazy-loaded component module
 vi.mock("@/components/WorkspaceView", () => ({
   WorkspaceView: () => <div data-testid="workspace-view" />,
@@ -25,21 +47,21 @@ import { WorkspacePage } from "../WorkspacePage";
 
 describe("WorkspacePage", () => {
   it("renders without crashing when isMultiRepo is true", () => {
-    const { container } = render(
-      <WorkspacePage isMultiRepo={true} activeView="workspace" />,
-    );
+    mockIsMultiRepo = true;
+    const { container } = render(<WorkspacePage />);
     expect(container).toBeTruthy();
   });
 
   it("returns null when isMultiRepo is false", () => {
-    const { container } = render(
-      <WorkspacePage isMultiRepo={false} activeView="workspace" />,
-    );
+    mockIsMultiRepo = false;
+    const { container } = render(<WorkspacePage />);
     expect(container.innerHTML).toBe("");
+    mockIsMultiRepo = true;
   });
 
   it("renders WorkspaceView inside ErrorBoundary when isMultiRepo is true", async () => {
-    render(<WorkspacePage isMultiRepo={true} activeView="workspace" />);
+    mockIsMultiRepo = true;
+    render(<WorkspacePage />);
     expect(screen.getByTestId("error-boundary")).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByTestId("workspace-view")).toBeInTheDocument();
@@ -47,7 +69,9 @@ describe("WorkspacePage", () => {
   });
 
   it("does not render ErrorBoundary when isMultiRepo is false", () => {
-    render(<WorkspacePage isMultiRepo={false} activeView="workspace" />);
+    mockIsMultiRepo = false;
+    render(<WorkspacePage />);
     expect(screen.queryByTestId("error-boundary")).not.toBeInTheDocument();
+    mockIsMultiRepo = true;
   });
 });
