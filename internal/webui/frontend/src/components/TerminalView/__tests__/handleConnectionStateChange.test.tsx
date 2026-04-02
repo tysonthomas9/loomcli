@@ -7,8 +7,10 @@
  * where tabs.find() used a captured tabs array instead of tabsRef.current.
  */
 
-import { render, act } from "@testing-library/react";
+import { render as rtlRender, act } from "@testing-library/react";
+import type { RenderOptions } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { KeyboardShortcutProvider } from "@/hooks/useKeyboardShortcuts";
 
 import { TerminalView } from "../TerminalView";
 
@@ -201,6 +203,19 @@ vi.mock("../SessionNamePrompt.module.css", () => ({
     buttonSecondary: "buttonSecondary",
   },
 }));
+
+// ── Render wrapper ─────────────────────────────────────────────────────────
+
+const Wrapper = ({ children }: { children: React.ReactNode }) => (
+  <KeyboardShortcutProvider>{children}</KeyboardShortcutProvider>
+);
+
+function render(
+  ui: React.ReactElement,
+  options?: Omit<RenderOptions, "wrapper">,
+) {
+  return rtlRender(ui, { wrapper: Wrapper, ...options });
+}
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 

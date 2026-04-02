@@ -382,6 +382,12 @@ vi.mock("@/hooks", () => ({
   }),
 }));
 
+vi.mock("@/hooks/useKeyboardShortcuts", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/hooks/useKeyboardShortcuts")>();
+  return { ...actual, useRegisterEscapeLayer: vi.fn() };
+});
+
 // Alias for convenience in tests (prefixed with _ to satisfy linter for unused vars)
 const _useRouteViewMock = mockUseRouteView;
 

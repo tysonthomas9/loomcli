@@ -180,7 +180,7 @@ Two independent mechanisms:
 
 **A. Global shortcut provider** — handles view switching, Cmd/Ctrl+K, `?`, arrow delegation.
 
-**B. Escape layer registry** — module-level sorted array of layers. Works without the provider.
+**B. Escape layer registry** — context-scoped sorted array of layers. Requires KeyboardShortcutProvider.
 
 ### Layer Priority Constants
 
@@ -208,7 +208,7 @@ export function useRegisterEscapeLayer(
 ): void
 ```
 
-Registers when `active` becomes true; unregisters when false or on unmount. Uses a stable wrapper that reads `handlerRef.current`. Module-level listener attached when first layer registers, detached when last unregisters.
+Registers when `active` becomes true; unregisters when false or on unmount. Uses a stable wrapper that reads `handlerRef.current`. The registry's `document` listener is attached when the first layer registers within that provider instance and detached when the last layer unregisters or the provider unmounts.
 
 ### KeyboardShortcutProvider Bindings
 

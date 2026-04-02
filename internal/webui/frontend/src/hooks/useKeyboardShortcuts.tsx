@@ -12,9 +12,8 @@
  * contenteditable, CodeMirror editor, or xterm terminal — except for
  * Escape and Cmd/Ctrl+K which always work.
  *
- * The Escape layer system is self-contained and works without the provider
- * (e.g., in tests). The provider adds view switching, search focus, and
- * cheatsheet functionality.
+ * The Escape layer system requires a KeyboardShortcutProvider ancestor.
+ * The provider adds view switching, search focus, and cheatsheet functionality.
  */
 
 import {
@@ -75,7 +74,7 @@ export function useKeyboardShortcuts(): KeyboardShortcutContextValue {
 // ---------------------------------------------------------------------------
 function isInputFocused(event: KeyboardEvent): boolean {
   const target = event.target as HTMLElement | null;
-  if (!target) return false;
+  if (!(target instanceof HTMLElement)) return false;
 
   const tagName = target.tagName;
 
@@ -102,11 +101,10 @@ function isInputFocused(event: KeyboardEvent): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Self-contained Escape layer registry
+// Escape layer registry
 //
 // Each registry instance manages its own layers and document keydown listener.
-// The KeyboardShortcutProvider creates a context-scoped registry; a module-level
-// fallback exists for standalone usage (e.g., tests without a provider).
+// The KeyboardShortcutProvider creates a context-scoped registry.
 // ---------------------------------------------------------------------------
 
 export interface EscapeRegistryAPI {
@@ -158,17 +156,6 @@ function createEscapeRegistry(): EscapeRegistryAPI {
       state.idCounter = 0;
     },
   };
-}
-
-// Module-level fallback for standalone usage (without provider)
-let defaultRegistry = createEscapeRegistry();
-
-/**
- * Reset the module-level fallback escape registry. For test cleanup only.
- */
-export function resetEscapeRegistry(): void {
-  defaultRegistry.destroy();
-  defaultRegistry = createEscapeRegistry();
 }
 
 export const EscapeRegistryContext = createContext<EscapeRegistryAPI | null>(
@@ -335,7 +322,7 @@ export function KeyboardShortcutProvider({
 // ---------------------------------------------------------------------------
 // useRegisterEscapeLayer hook
 //
-// Self-contained: works with or without KeyboardShortcutProvider.
+// Requires KeyboardShortcutProvider ancestor.
 // ---------------------------------------------------------------------------
 export function useRegisterEscapeLayer(
   priority: number,
@@ -343,7 +330,12 @@ export function useRegisterEscapeLayer(
   active: boolean,
 ): void {
   const contextRegistry = useContext(EscapeRegistryContext);
-  const registry = contextRegistry ?? defaultRegistry;
+  if (!contextRegistry) {
+    throw new Error(
+      "useRegisterEscapeLayer must be used within a KeyboardShortcutProvider",
+    );
+  }
+  const registry = contextRegistry;
 
   const layerIdRef = useRef<string | null>(null);
   const handlerRef = useRef(handler);

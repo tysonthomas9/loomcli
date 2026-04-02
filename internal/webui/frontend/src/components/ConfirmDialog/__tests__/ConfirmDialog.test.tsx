@@ -10,12 +10,18 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom";
 
+import { KeyboardShortcutProvider } from "@/hooks";
+
 import { ConfirmDialog } from "../ConfirmDialog";
+
+function renderWithProvider(ui: React.ReactElement) {
+  return render(<KeyboardShortcutProvider>{ui}</KeyboardShortcutProvider>);
+}
 
 describe("ConfirmDialog", () => {
   describe("rendering", () => {
     it("does not render when isOpen is false", () => {
-      render(
+      renderWithProvider(
         <ConfirmDialog
           isOpen={false}
           title="Confirm"
@@ -31,7 +37,7 @@ describe("ConfirmDialog", () => {
     });
 
     it("renders title and message when open", () => {
-      render(
+      renderWithProvider(
         <ConfirmDialog
           isOpen={true}
           title="Close Tab"
@@ -48,7 +54,7 @@ describe("ConfirmDialog", () => {
     });
 
     it("renders default confirm and cancel labels", () => {
-      render(
+      renderWithProvider(
         <ConfirmDialog
           isOpen={true}
           title="Title"
@@ -67,7 +73,7 @@ describe("ConfirmDialog", () => {
     });
 
     it("renders custom labels", () => {
-      render(
+      renderWithProvider(
         <ConfirmDialog
           isOpen={true}
           title="Title"
@@ -88,7 +94,7 @@ describe("ConfirmDialog", () => {
     });
 
     it("renders ReactNode message content", () => {
-      render(
+      renderWithProvider(
         <ConfirmDialog
           isOpen={true}
           title="Confirm"
@@ -111,7 +117,7 @@ describe("ConfirmDialog", () => {
   describe("interactions", () => {
     it("calls onConfirm when confirm button clicked", () => {
       const onConfirm = vi.fn();
-      render(
+      renderWithProvider(
         <ConfirmDialog
           isOpen={true}
           title="Title"
@@ -127,7 +133,7 @@ describe("ConfirmDialog", () => {
 
     it("calls onCancel when cancel button clicked", () => {
       const onCancel = vi.fn();
-      render(
+      renderWithProvider(
         <ConfirmDialog
           isOpen={true}
           title="Title"
@@ -143,7 +149,7 @@ describe("ConfirmDialog", () => {
 
     it("calls onCancel when Escape pressed", () => {
       const onCancel = vi.fn();
-      render(
+      renderWithProvider(
         <ConfirmDialog
           isOpen={true}
           title="Title"
@@ -159,7 +165,7 @@ describe("ConfirmDialog", () => {
 
     it("calls onCancel when backdrop clicked", () => {
       const onCancel = vi.fn();
-      render(
+      renderWithProvider(
         <ConfirmDialog
           isOpen={true}
           title="Title"
@@ -175,7 +181,7 @@ describe("ConfirmDialog", () => {
 
     it("does not call onCancel when dialog content clicked", () => {
       const onCancel = vi.fn();
-      render(
+      renderWithProvider(
         <ConfirmDialog
           isOpen={true}
           title="Title"
@@ -194,7 +200,7 @@ describe("ConfirmDialog", () => {
 
   describe("variants", () => {
     it("danger variant applies correct class to confirm button", () => {
-      render(
+      renderWithProvider(
         <ConfirmDialog
           isOpen={true}
           title="Title"
@@ -211,7 +217,7 @@ describe("ConfirmDialog", () => {
     });
 
     it("default variant does not apply danger class to confirm button", () => {
-      render(
+      renderWithProvider(
         <ConfirmDialog
           isOpen={true}
           title="Title"
@@ -229,7 +235,7 @@ describe("ConfirmDialog", () => {
 
   describe("accessibility", () => {
     it("has alertdialog role", () => {
-      render(
+      renderWithProvider(
         <ConfirmDialog
           isOpen={true}
           title="Confirm Action"
@@ -246,7 +252,7 @@ describe("ConfirmDialog", () => {
     });
 
     it("buttons have type=button", () => {
-      render(
+      renderWithProvider(
         <ConfirmDialog
           isOpen={true}
           title="Title"
