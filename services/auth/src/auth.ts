@@ -123,7 +123,7 @@ export const auth = betterAuth({
           // design (no OAuth provider to vouch), so only block when an
           // OAuth provider explicitly reports email_verified=false.
           const isOAuthSignup = "providerId" in user || "accountId" in user;
-          if (isOAuthSignup && user.emailVerified === false) {
+          if (isOAuthSignup && user.emailVerified !== true) {
             throw new APIError("FORBIDDEN", {
               message:
                 "Email address must be verified by the OAuth provider before account creation is allowed.",
@@ -152,6 +152,7 @@ export const auth = betterAuth({
         audience: env.JWT_AUDIENCE,
         definePayload: ({ user }) => ({
           email: user.email,
+          email_verified: (user as Record<string, unknown>).emailVerified ?? false,
           name: user.name,
           role: (user as Record<string, unknown>).role ?? "user",
           jti: randomUUID(),

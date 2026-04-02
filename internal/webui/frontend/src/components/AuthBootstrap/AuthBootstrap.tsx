@@ -72,7 +72,7 @@ export function AuthBootstrap(): JSX.Element {
 
   // External auth — initialize BetterAuth client and wrap with provider
   if (config.mode === "external") {
-    initExternalAuth(config.auth_url);
+    initExternalAuth(config.auth_url ?? window.location.origin);
     return (
       <ExternalAuthProvider>
         <AuthGate>

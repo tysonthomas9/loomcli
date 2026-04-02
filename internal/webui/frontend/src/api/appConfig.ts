@@ -11,7 +11,7 @@
 
 export type AppConfig =
   | { mode: "none" }
-  | { mode: "external"; auth_url: string };
+  | { mode: "external"; auth_url?: string };
 
 export class AppConfigError extends Error {
   constructor(

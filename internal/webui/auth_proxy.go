@@ -54,10 +54,17 @@ func newAuthProxy(extAuthURL string, logger *slog.Logger) http.Handler {
 			isTLS, _ := resp.Request.Context().Value(ctxKey{}).(bool)
 			resp.Header.Del("Set-Cookie")
 			for _, c := range cookies {
+				if strings.ContainsAny(c, "\r\n") {
+					continue // drop malformed cookie from upstream
+				}
 				// Strip Domain= so the cookie defaults to the request host
 				c = stripCookieAttr(c, "Domain")
 				// Replace SameSite=None with Lax (same-origin proxy)
 				c = replaceCookieAttr(c, "SameSite", "Lax")
+				// If SameSite was absent, replaceCookieAttr is a no-op; append it.
+				if !strings.Contains(strings.ToLower(c), "samesite=") {
+					c = c + "; SameSite=Lax"
+				}
 				// Remove Partitioned flag (not needed for same-origin)
 				c = stripCookieFlag(c, "Partitioned")
 				if isTLS {

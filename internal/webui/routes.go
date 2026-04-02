@@ -1,6 +1,7 @@
 package webui
 
 import (
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -104,7 +105,7 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 	// Auth proxy — forwards /api/auth/* to the external BetterAuth service.
 	// Makes auth cookies same-origin with the frontend, avoiding cross-site
 	// cookie restrictions that block SameSite cookies over HTTP.
-	if authProxy := newAuthProxy(extAuthURL, nil); authProxy != nil {
+	if authProxy := newAuthProxy(extAuthURL, slog.Default()); authProxy != nil {
 		mux.Handle("/api/auth/", authProxy)
 	}
 
