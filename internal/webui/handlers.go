@@ -22,63 +22,31 @@ func writeIssuesError(w http.ResponseWriter, status int, message, code string) {
 }
 
 // serviceErrorStatus returns the HTTP status code for an error.
-// ServiceError kinds are mapped to their natural HTTP codes; other errors
-// default to 500.
+// ServiceError kinds are mapped to their natural HTTP codes via kindStatus;
+// other errors default to 500.
 func serviceErrorStatus(err error) int {
 	var svcErr *service.ServiceError
 	if errors.As(err, &svcErr) {
-		switch svcErr.Kind {
-		case service.KindNotFound:
-			return http.StatusNotFound
-		case service.KindValidation:
-			return http.StatusBadRequest
-		case service.KindUnavailable:
-			return http.StatusServiceUnavailable
-		case service.KindTimeout:
-			return http.StatusGatewayTimeout
-		case service.KindConflict:
-			return http.StatusConflict
-		case service.KindForbidden:
-			return http.StatusForbidden
-		}
+		return statusForKind(svcErr.Kind)
 	}
 	return http.StatusInternalServerError
 }
 
 // serviceErrorMessage returns the user-facing message for an error.
 // For ServiceErrors it returns the Message field (without the Kind prefix);
-// for other errors it returns err.Error().
+// for other errors it returns a generic message to avoid leaking internals.
 func serviceErrorMessage(err error) string {
 	var svcErr *service.ServiceError
 	if errors.As(err, &svcErr) {
 		return svcErr.Message
 	}
-	return err.Error()
+	return "internal server error"
 }
 
 // writeServiceError maps a service.ServiceError to an HTTP response.
+// Delegates to WriteServiceError which uses the canonical kindStatus table.
 func writeServiceError(w http.ResponseWriter, err error) {
-	var svcErr *service.ServiceError
-	if errors.As(err, &svcErr) {
-		status := http.StatusInternalServerError
-		switch svcErr.Kind {
-		case service.KindNotFound:
-			status = http.StatusNotFound
-		case service.KindValidation:
-			status = http.StatusBadRequest
-		case service.KindUnavailable:
-			status = http.StatusServiceUnavailable
-		case service.KindTimeout:
-			status = http.StatusGatewayTimeout
-		case service.KindConflict:
-			status = http.StatusConflict
-		case service.KindForbidden:
-			status = http.StatusForbidden
-		}
-		respondError(w, status, svcErr.Message)
-		return
-	}
-	respondError(w, http.StatusInternalServerError, "internal server error")
+	WriteServiceError(w, err)
 }
 
 // splitAndTrim splits a comma-separated string and trims whitespace from each element.
