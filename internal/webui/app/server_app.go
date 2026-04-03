@@ -304,16 +304,13 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 		app.getMutationsSince = appstores.GetMutationsSinceFn(app.multiSub)
 	}
 
-	// Reconcile all config workspaces. Subscribers for secondary workspaces are
-	// deferred — they activate only after DaemonStartupFn confirms the daemon.
+	// Reconcile all config workspaces. Subscribers for secondary workspaces
+	// activate lazily via the workspace middleware on the first API request.
 	appinfra.ReconcileConfigWorkspaces(config.WorkspaceListFn, app.initialWorkspaceID, app.pool != nil, app.registry, config.Logger)
 
-	// Deferred subscriber activation: start daemons for secondary workspaces,
-	// activate SSE subscriber only after each daemon is confirmed reachable.
+	// Start daemons for secondary workspaces (subscribers activate lazily via middleware).
 	if config.DaemonStartupFn != nil {
-		go config.DaemonStartupFn(ctx, func(wsID string) {
-			_ = app.registry.ActivateSubscriber(wsID)
-		})
+		go config.DaemonStartupFn(ctx, nil)
 	}
 
 	// Build fleet registration config.
@@ -360,9 +357,14 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	app.jobStore = svcimpl.NewWorkspaceJobStore()
 	cleanups = append(cleanups, func() { app.jobStore.Stop() })
 
-	// Workspace-existence checker.
+	// Workspace-existence checker. Also activates the SSE subscriber lazily
+	// on the first API request (idempotent — no-op if already active).
 	app.wsExistsFn = func(id string) bool {
-		return app.registry.Registered(id)
+		if !app.registry.Registered(id) {
+			return false
+		}
+		_ = app.registry.ActivateSubscriber(id)
+		return true
 	}
 
 	// Initialize workspace service layer

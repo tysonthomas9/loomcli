@@ -65,6 +65,14 @@ func (m *MultiWorkspaceSubscriber) AddWorkspace(wsID string) error {
 	return nil
 }
 
+// HasSubscriber returns true if a subscriber is registered for the workspace.
+func (m *MultiWorkspaceSubscriber) HasSubscriber(wsID string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_, ok := m.subscribers[wsID]
+	return ok
+}
+
 // RemoveWorkspace stops and removes the subscriber for the given workspace.
 func (m *MultiWorkspaceSubscriber) RemoveWorkspace(wsID string) {
 	m.mu.Lock()

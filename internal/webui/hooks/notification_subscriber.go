@@ -50,12 +50,14 @@ func (h *NotificationSubscriberHook) OnRegister(ctx *coordinator.RegistrationCon
 }
 
 // Activate starts the SSE subscriber for a workspace whose pool is already
-// registered. Call this after the daemon is confirmed reachable. Safe to call
-// multiple times for the same workspace (AddWorkspace replaces the existing
-// subscriber).
+// registered. Safe (and cheap) to call on every request: if the subscriber is
+// already running, this is a no-op via the HasSubscriber fast path.
 func (h *NotificationSubscriberHook) Activate(wsID string) error {
 	if wsID == "" {
 		return fmt.Errorf("activate notification subscriber: empty workspace id")
+	}
+	if h.multiSub.HasSubscriber(wsID) {
+		return nil
 	}
 	if err := h.multiSub.AddWorkspace(wsID); err != nil {
 		h.logger.Warn("failed to activate notification subscriber for workspace",

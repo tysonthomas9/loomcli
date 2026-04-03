@@ -1,7 +1,6 @@
 package hooks
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -103,25 +102,6 @@ func (h *BeadsPoolHook) OnDeregister(ctx coordinator.DeregistrationContext) {
 // OnRollback undoes OnRegister — same as OnDeregister.
 func (h *BeadsPoolHook) OnRollback(ctx coordinator.DeregistrationContext) {
 	h.OnDeregister(ctx)
-}
-
-// PoolConnectable tests if the daemon pool for a workspace can establish a
-// connection. Returns true if a connection succeeds, false otherwise. Used by
-// coordinator.WorkspaceRegistry.PoolConnectable to defer subscriber activation
-// until the daemon is actually reachable.
-func (h *BeadsPoolHook) PoolConnectable(wsID string) bool {
-	pool := h.multiPool.PoolForWorkspace(wsID)
-	if pool == nil {
-		return false
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	client, err := pool.Get(ctx)
-	if err != nil {
-		return false
-	}
-	pool.Put(client)
-	return true
 }
 
 // SetPrebuiltPool stores a pre-built pool for a workspace ID. When OnRegister
