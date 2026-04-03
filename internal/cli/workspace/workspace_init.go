@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"math/rand"
@@ -120,12 +121,24 @@ func EnsureDaemonForWorkspace(deps *cli.Deps, ctx context.Context, wsDir string,
 			return fmt.Errorf("daemon in %s did not become ready within %s", wsDir, timeout)
 		case <-ticker.C:
 			check := deps.Exec.Run(wsDir, "bd", "daemon", "status", "--json")
-			if check.Err == nil && strings.Contains(check.Stdout, `"status":"running"`) {
+			if check.Err == nil && isDaemonStatusRunning(check.Stdout) {
 				slog.Info("bd daemon started for workspace", "path", wsDir)
 				return nil
 			}
 		}
 	}
+}
+
+// isDaemonStatusRunning parses bd daemon status JSON and checks if running.
+// Uses JSON unmarshal instead of string matching to handle pretty-printed output.
+func isDaemonStatusRunning(jsonOutput string) bool {
+	var status struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(jsonOutput), &status); err != nil {
+		return false
+	}
+	return status.Status == "running"
 }
 
 // stopDaemonForWorkspace is the cleanup counterpart to ensureDaemonForWorkspace.
