@@ -287,12 +287,9 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	// so that other workspaces are also registered in the fleet).
 	reconcileConfigWorkspaces(config.WorkspaceListFn, initialWorkspaceID, pool != nil, registry, fleetRegistry)
 
-	// Deferred subscriber activation: start daemons for secondary workspaces,
-	// activate SSE subscriber only after each daemon is confirmed reachable.
+	// Start daemons for secondary workspaces (subscribers activate lazily via middleware).
 	if config.DaemonStartupFn != nil {
-		go config.DaemonStartupFn(ctx, func(wsID string) {
-			_ = registry.ActivateSubscriber(wsID)
-		})
+		go config.DaemonStartupFn(ctx, nil)
 	}
 
 	// Build fleet registration config (API key + rate limiter)
@@ -388,9 +385,12 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	// Async job store for clone workspace creation (202 + polling).
 	jobStore := NewWorkspaceJobStore()
 	defer jobStore.Stop()
-	// Workspace-existence checker for WorkspaceMiddleware (MultiPool is authoritative registry).
 	wsExistsFn := func(id string) bool {
-		return multiPool.PoolForWorkspace(id) != nil
+		if multiPool.PoolForWorkspace(id) == nil {
+			return false
+		}
+		_ = registry.ActivateSubscriber(id) // lazy: activates subscriber on first request
+		return true
 	}
 
 	// Create HTTP server and register routes (allowedOrigins: nil = same-origin only)

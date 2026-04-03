@@ -128,21 +128,8 @@ func wrapWorkspaceCreateFn(
 		}
 
 		_ = registry.Register(wsID, wsDir)
-		// Don't activate subscriber yet — daemon starts async after this
-		// function returns. The subscriber will be activated by the
-		// post-creation polling goroutine via OnDaemonReady callback.
-		go func() {
-			// Poll for daemon readiness (started by the async goroutine in createWorkspace).
-			for range 150 { // 150 * 2s = 5 min max
-				time.Sleep(2 * time.Second)
-				if registry.PoolConnectable(wsID) {
-					_ = registry.ActivateSubscriber(wsID)
-					return
-				}
-			}
-			slog.Warn("timed out waiting for daemon to activate subscriber",
-				"workspace", wsID)
-		}()
+		// Subscriber activation is deferred — the WorkspaceMiddleware's
+		// wsExistsFn lazily activates it on the first API request.
 
 		// Register workspace in fleet store registry (non-fatal on error).
 		if fleetRegistry != nil {

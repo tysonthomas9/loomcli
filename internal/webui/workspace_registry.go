@@ -1,7 +1,6 @@
 package webui
 
 import (
-	"context"
 	"errors"
 	"log/slog"
 	"sync"
@@ -144,12 +143,17 @@ func (r *WorkspaceRegistry) RegisterPool(id string, pool daemon.Pool) error {
 }
 
 // ActivateSubscriber starts the SSE subscriber for a workspace whose pool is
-// already registered. Call this after the daemon is confirmed reachable to avoid
-// priming the circuit breaker with connection failures during startup.
-// Safe to call multiple times (idempotent — replaces existing subscriber).
+// already registered. No-op if subscriber is already active (fast path for
+// middleware that calls on every request). Only creates a new subscriber when
+// one doesn't exist yet.
 func (r *WorkspaceRegistry) ActivateSubscriber(id string) error {
 	if id == "" {
 		return ErrEmptyWorkspaceID
+	}
+
+	// Fast path: already active — no lock needed on registry.
+	if r.multiSub.HasSubscriber(id) {
+		return nil
 	}
 
 	r.mu.Lock()
@@ -159,6 +163,11 @@ func (r *WorkspaceRegistry) ActivateSubscriber(id string) error {
 		return ErrRegistryClosed
 	}
 
+	// Double-check after acquiring lock (another goroutine may have activated).
+	if r.multiSub.HasSubscriber(id) {
+		return nil
+	}
+
 	if err := r.multiSub.AddWorkspace(id); err != nil {
 		r.logger.Warn("failed to activate subscriber for workspace",
 			"workspace", id, "err", err)
@@ -166,24 +175,6 @@ func (r *WorkspaceRegistry) ActivateSubscriber(id string) error {
 	}
 	r.logger.Info("subscriber activated for workspace", "workspace", id)
 	return nil
-}
-
-// PoolConnectable tests if the daemon pool for a workspace can establish a connection.
-// Returns true if a connection succeeds, false otherwise. Used to defer subscriber
-// activation until the daemon is actually reachable.
-func (r *WorkspaceRegistry) PoolConnectable(id string) bool {
-	pool := r.multiPool.PoolForWorkspace(id)
-	if pool == nil {
-		return false
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	client, err := pool.Get(ctx)
-	if err != nil {
-		return false
-	}
-	pool.Put(client)
-	return true
 }
 
 // Deregister removes the pool and subscriber for the workspace. No-op if the
