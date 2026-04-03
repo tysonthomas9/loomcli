@@ -19,10 +19,31 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 // ---------------------------------------------------------------------------
 const mockSetAuthToken = vi.fn();
 const mockSetAuthState = vi.fn();
+let authStateListeners: Array<(state: string) => void> = [];
+let currentAuthState = "none";
+
+function notifyAuthListeners(state: string) {
+  currentAuthState = state;
+  for (const cb of authStateListeners) cb(state);
+}
 
 vi.mock("@/api", () => ({
-  setAuthToken: (...args: unknown[]) => mockSetAuthToken(...args),
-  setAuthState: (...args: unknown[]) => mockSetAuthState(...args),
+  setAuthToken: (...args: unknown[]) => {
+    mockSetAuthToken(...args);
+    // Simulate real setAuthToken behavior: update state + notify
+    notifyAuthListeners(args[0] !== null ? "authenticated" : "none");
+  },
+  setAuthState: (...args: unknown[]) => {
+    mockSetAuthState(...args);
+    notifyAuthListeners(args[0] as string);
+  },
+  getAuthState: () => currentAuthState,
+  onAuthStateChange: (cb: (state: string) => void) => {
+    authStateListeners.push(cb);
+    return () => {
+      authStateListeners = authStateListeners.filter((l) => l !== cb);
+    };
+  },
 }));
 
 // ---------------------------------------------------------------------------
@@ -75,6 +96,8 @@ describe("AuthContext", () => {
     vi.resetModules();
 
     // Reset all mock state
+    authStateListeners = [];
+    currentAuthState = "none";
     resetSessionData();
     mockToken.mockReset();
     mockSignInSocial.mockReset();

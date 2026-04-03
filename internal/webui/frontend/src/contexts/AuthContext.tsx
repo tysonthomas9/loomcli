@@ -9,7 +9,13 @@ import {
 } from "react";
 
 import { getAuthClient } from "@/api/authClient";
-import { setAuthToken, setAuthState } from "@/api";
+import {
+  setAuthToken,
+  setAuthState,
+  getAuthState,
+  onAuthStateChange,
+  type AuthState,
+} from "@/api";
 
 // ============= Types =============
 
@@ -102,7 +108,17 @@ export function ExternalAuthProvider({
 }): JSX.Element {
   const { data: session, isPending, error } = getUseSession()();
   const [authServiceDown, setAuthServiceDown] = useState(false);
+  const [tokenReady, setTokenReady] = useState(
+    () => getAuthState() === "authenticated",
+  );
   const tokenFetchedForSession = useRef<string | null>(null);
+
+  // Track authState changes so isAuthenticated waits for JWT
+  useEffect(() => {
+    return onAuthStateChange((state: AuthState) => {
+      setTokenReady(state === "authenticated");
+    });
+  }, []);
 
   // When session changes: acquire JWT via authClient.token()
   useEffect(() => {
@@ -217,11 +233,17 @@ export function ExternalAuthProvider({
     window.dispatchEvent(new CustomEvent("auth-sign-out"));
   }, []);
 
+  // isAuthenticated requires both a valid session AND an acquired JWT.
+  // Without this, AuthGate unblocks before the Bearer token is ready,
+  // causing 401s on the first API calls after a hard refresh.
+  const hasSession = !!session?.user;
+  const isAuthenticated = hasSession && tokenReady;
+
   const value: AuthContextValue = {
     mode: "external",
     user,
-    isLoading: isPending,
-    isAuthenticated: !!session?.user,
+    isLoading: isPending || (hasSession && !tokenReady),
+    isAuthenticated,
     authServiceDown,
     signIn,
     signUp,
