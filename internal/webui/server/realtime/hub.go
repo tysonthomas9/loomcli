@@ -279,6 +279,19 @@ func (h *Hub) ClientCount() int {
 	return len(h.clients)
 }
 
+// ClientCountForWorkspace returns the number of SSE clients for a workspace.
+func (h *Hub) ClientCountForWorkspace(wsID string) int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	n := 0
+	for c := range h.clients {
+		if c.workspaceID == wsID {
+			n++
+		}
+	}
+	return n
+}
+
 // GetDroppedCount returns the number of mutations dropped due to queue overflow.
 func (h *Hub) GetDroppedCount() int64 {
 	return atomic.LoadInt64(&h.droppedCount)
