@@ -16,9 +16,8 @@ const idleDeactivationTimeout = 60 * time.Second
 
 // subscriberEntry tracks a subscriber and when it last had SSE clients.
 type subscriberEntry struct {
-	sub        *DaemonSubscriber
-	generation int64     // incremented on each activation, used for TOCTOU guard
-	idleSince  time.Time // when client count first dropped to 0; zero if clients connected
+	sub       *DaemonSubscriber
+	idleSince time.Time // when client count first dropped to 0; zero if clients connected
 }
 
 // MultiWorkspaceSubscriber manages per-workspace DaemonSubscribers, each polling
@@ -28,8 +27,7 @@ type MultiWorkspaceSubscriber struct {
 	multiPool   *daemon.MultiPool
 	logger      *slog.Logger
 	subscribers map[string]*subscriberEntry // workspace ID → entry
-	generation  int64                       // global generation counter
-	mu          sync.Mutex
+	mu          sync.RWMutex
 	ctx         context.Context
 	cancel      context.CancelFunc
 }
@@ -66,14 +64,10 @@ func (m *MultiWorkspaceSubscriber) AddWorkspace(wsID string) error {
 		return fmt.Errorf("no pool registered for workspace %q", wsID)
 	}
 
-	m.generation++
 	sub := NewDaemonSubscriber(pool, m.hub)
 	sub.workspaceID = wsID
 	sub.Start()
-	m.subscribers[wsID] = &subscriberEntry{
-		sub:        sub,
-		generation: m.generation,
-	}
+	m.subscribers[wsID] = &subscriberEntry{sub: sub}
 
 	m.logger.Info("workspace subscriber started", "workspace", wsID)
 	return nil
@@ -81,8 +75,8 @@ func (m *MultiWorkspaceSubscriber) AddWorkspace(wsID string) error {
 
 // HasSubscriber returns true if a subscriber is registered for the workspace.
 func (m *MultiWorkspaceSubscriber) HasSubscriber(wsID string) bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	_, ok := m.subscribers[wsID]
 	return ok
 }
@@ -132,8 +126,8 @@ func (m *MultiWorkspaceSubscriber) Stop() {
 
 // WorkspaceIDs returns a sorted list of active workspace subscription IDs.
 func (m *MultiWorkspaceSubscriber) WorkspaceIDs() []string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
 	ids := make([]string, 0, len(m.subscribers))
 	for id := range m.subscribers {
@@ -146,12 +140,12 @@ func (m *MultiWorkspaceSubscriber) WorkspaceIDs() []string {
 // GetMutationsSince retrieves mutations since the given timestamp from all
 // workspace subscribers. This is used for SSE client reconnection catch-up.
 func (m *MultiWorkspaceSubscriber) GetMutationsSince(since int64) []rpc.MutationEvent {
-	m.mu.Lock()
+	m.mu.RLock()
 	entries := make(map[string]*subscriberEntry, len(m.subscribers))
 	for k, v := range m.subscribers {
 		entries[k] = v
 	}
-	m.mu.Unlock()
+	m.mu.RUnlock()
 
 	var all []rpc.MutationEvent
 	for _, entry := range entries {
@@ -161,11 +155,8 @@ func (m *MultiWorkspaceSubscriber) GetMutationsSince(since int64) []rpc.Mutation
 	return all
 }
 
-// GetMutationsSinceForWorkspace retrieves mutations since the given timestamp
-// from a specific workspace's subscriber only. Returns nil if the workspace
-// has no active subscriber.
 // idleDeactivationLoop runs every 15s and deactivates subscribers with no
-// SSE clients for >60s. Uses generation counter as TOCTOU guard.
+// SSE clients for >60s.
 func (m *MultiWorkspaceSubscriber) idleDeactivationLoop() {
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
@@ -174,11 +165,25 @@ func (m *MultiWorkspaceSubscriber) idleDeactivationLoop() {
 		case <-m.ctx.Done():
 			return
 		case now := <-ticker.C:
+			// Snapshot workspace IDs under read lock, then query hub WITHOUT holding m.mu
+			// to avoid lock inversion (m.mu → h.mu).
+			m.mu.RLock()
+			wsIDs := make([]string, 0, len(m.subscribers))
+			for id := range m.subscribers {
+				wsIDs = append(wsIDs, id)
+			}
+			m.mu.RUnlock()
+
+			clientCounts := make(map[string]int, len(wsIDs))
+			for _, id := range wsIDs {
+				clientCounts[id] = m.hub.ClientCountForWorkspace(id)
+			}
+
+			// Now take write lock and apply deactivation decisions.
 			m.mu.Lock()
 			for wsID, entry := range m.subscribers {
-				clients := m.hub.ClientCountForWorkspace(wsID)
-				if clients > 0 {
-					entry.idleSince = time.Time{} // reset
+				if clientCounts[wsID] > 0 {
+					entry.idleSince = time.Time{}
 					continue
 				}
 				if entry.idleSince.IsZero() {
@@ -186,12 +191,10 @@ func (m *MultiWorkspaceSubscriber) idleDeactivationLoop() {
 					continue
 				}
 				if now.Sub(entry.idleSince) >= idleDeactivationTimeout {
-					gen := entry.generation
 					m.logger.Info("deactivating idle subscriber",
 						"workspace", wsID, "idle_for", now.Sub(entry.idleSince).Round(time.Second))
 					entry.sub.Stop()
 					delete(m.subscribers, wsID)
-					_ = gen // generation recorded for debug; re-activation via middleware creates new gen
 				}
 			}
 			m.mu.Unlock()
@@ -200,9 +203,9 @@ func (m *MultiWorkspaceSubscriber) idleDeactivationLoop() {
 }
 
 func (m *MultiWorkspaceSubscriber) GetMutationsSinceForWorkspace(wsID string, since int64) []rpc.MutationEvent {
-	m.mu.Lock()
+	m.mu.RLock()
 	entry, ok := m.subscribers[wsID]
-	m.mu.Unlock()
+	m.mu.RUnlock()
 	if !ok {
 		return nil
 	}

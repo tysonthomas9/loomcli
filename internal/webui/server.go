@@ -287,9 +287,9 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	// so that other workspaces are also registered in the fleet).
 	reconcileConfigWorkspaces(config.WorkspaceListFn, initialWorkspaceID, pool != nil, registry, fleetRegistry)
 
-	// Start daemons for secondary workspaces (subscribers activate lazily via middleware).
 	if config.DaemonStartupFn != nil {
-		go config.DaemonStartupFn(ctx, nil)
+		onReady := func(wsID string) { _ = registry.ActivateSubscriber(wsID) }
+		go config.DaemonStartupFn(ctx, onReady)
 	}
 
 	// Build fleet registration config (API key + rate limiter)
