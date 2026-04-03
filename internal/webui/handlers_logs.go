@@ -31,81 +31,33 @@ var validPhase = regexp.MustCompile(`^(planning|implementation)$`)
 // GET /api/workspaces/{ws}/agents/{name}/logs
 // Query params: ?lines=N (default 200, max 10000)
 // Response: {success: true, data: {lines: [...], lineCount: N}}
-func handleGetAgentLog() http.HandlerFunc {
+func handleGetAgentLog(svc AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Get workspace ID from context (injected by WorkspaceMiddleware)
 		wsID := WorkspaceFromContext(r.Context())
-
-		// Get agent name from path
 		agentName := r.PathValue("name")
-		if agentName == "" {
-			respondJSON(w, http.StatusBadRequest, LogContentResponse{
-				Success: false,
-				Error:   "missing agent name",
-			})
-			return
-		}
 
-		// Validate agent name
-		if !validAgentName.MatchString(agentName) {
-			respondJSON(w, http.StatusBadRequest, LogContentResponse{
-				Success: false,
-				Error:   "invalid agent name: must match [a-zA-Z0-9_-]+",
-			})
-			return
-		}
-
-		// Parse lines parameter
+		// Parse lines parameter (HTTP concern)
 		lines := logReadDefaultLines
 		if linesParam := r.URL.Query().Get("lines"); linesParam != "" {
 			if n, err := strconv.Atoi(linesParam); err == nil && n > 0 {
 				lines = n
-				if lines > logReadMaxLines {
-					lines = logReadMaxLines
-				}
 			}
 		}
 
-		// Get log file path (workspace-scoped)
-		logPath, err := getAgentLogPath(wsID, agentName)
-		if err != nil {
-			slog.Error("agent log path error", "agent", agentName, "err", err)
-			respondJSON(w, http.StatusInternalServerError, LogContentResponse{
-				Success: false,
-				Error:   "failed to resolve log path",
-			})
-			return
-		}
-
-		// Check if file exists
-		if !fileExists(logPath) {
-			respondJSON(w, http.StatusNotFound, LogContentResponse{
-				Success: false,
-				Error:   "log file not found - agent may not be active",
-			})
-			return
-		}
-
-		// Parse before_line for pagination
 		beforeLine := parseBeforeLine(r)
 
-		// Read log content
-		content, startLine, err := readFileLastLines(logPath, lines, beforeLine)
+		result, err := svc.GetLog(r.Context(), wsID, agentName, lines, beforeLine)
 		if err != nil {
-			slog.Error("failed to read agent log", "agent", agentName, "err", err)
-			respondJSON(w, http.StatusInternalServerError, LogContentResponse{
-				Success: false,
-				Error:   "failed to read log file",
-			})
+			writeServiceError(w, err)
 			return
 		}
 
 		respondJSON(w, http.StatusOK, LogContentResponse{
 			Success: true,
 			Data: &LogContentData{
-				Lines:     content,
-				LineCount: startLine + int64(len(content)) - 1,
-				StartLine: startLine,
+				Lines:     result.Lines,
+				LineCount: result.LineCount,
+				StartLine: result.StartLine,
 			},
 		})
 	}

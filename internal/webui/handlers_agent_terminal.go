@@ -36,98 +36,47 @@ type agentTerminalTokenData struct {
 	Token string `json:"token"`
 }
 
-func agentLogTokenScope(agentName string) string {
-	return "agent:" + agentName + ":logs"
-}
-
 // handleGetAgentTerminalInfo reports whether an agent has a live tmux session
 // suitable for terminal streaming, or should fall back to archive logs.
-func handleGetAgentTerminalInfo(manager *TerminalManager) http.HandlerFunc {
+func handleGetAgentTerminalInfo(svc AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentName := r.PathValue("name")
-		if agentName == "" {
-			respondJSON(w, http.StatusBadRequest, agentTerminalInfoResponse{
-				Success: false,
-				Error:   "missing agent name",
-			})
-			return
-		}
-		if !validAgentName.MatchString(agentName) {
-			respondJSON(w, http.StatusBadRequest, agentTerminalInfoResponse{
-				Success: false,
-				Error:   "invalid agent name: must match [a-zA-Z0-9_-]+",
-			})
-			return
-		}
-		if manager == nil {
-			respondJSON(w, http.StatusServiceUnavailable, agentTerminalInfoResponse{
-				Success: false,
-				Error:   "terminal manager not initialized",
-			})
-			return
-		}
-
 		wsID := WorkspaceFromContext(r.Context())
 
-		mode := agentTerminalModeArchive
-		if _, found, err := manager.FindLatestAgentSession(wsID, agentName); err != nil {
-			slog.Error("failed to resolve agent tmux session", "agent", agentName, "err", err)
-			respondJSON(w, http.StatusInternalServerError, agentTerminalInfoResponse{
+		result, err := svc.GetTerminalInfo(r.Context(), wsID, agentName)
+		if err != nil {
+			respondJSON(w, serviceErrorStatus(err), agentTerminalInfoResponse{
 				Success: false,
-				Error:   "failed to inspect terminal sessions",
+				Error:   err.Error(),
 			})
 			return
-		} else if found {
-			mode = agentTerminalModeTmux
 		}
 
 		respondJSON(w, http.StatusOK, agentTerminalInfoResponse{
 			Success: true,
 			Data: &agentTerminalInfoData{
-				Agent: agentName,
-				Mode:  mode,
+				Agent: result.Agent,
+				Mode:  result.Mode,
 			},
 		})
 	}
 }
 
 // handleGetAgentTerminalToken generates a one-time token scoped to an agent logs stream.
-func handleGetAgentTerminalToken(auth *terminalAuth) http.HandlerFunc {
+func handleGetAgentTerminalToken(svc AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentName := r.PathValue("name")
-		if agentName == "" {
-			respondJSON(w, http.StatusBadRequest, agentTerminalTokenResponse{
-				Success: false,
-				Error:   "missing agent name",
-			})
-			return
-		}
-		if !validAgentName.MatchString(agentName) {
-			respondJSON(w, http.StatusBadRequest, agentTerminalTokenResponse{
-				Success: false,
-				Error:   "invalid agent name: must match [a-zA-Z0-9_-]+",
-			})
-			return
-		}
-		if auth == nil {
-			respondJSON(w, http.StatusServiceUnavailable, agentTerminalTokenResponse{
-				Success: false,
-				Error:   "terminal authentication not initialized",
-			})
-			return
-		}
 
 		var userID string
 		if identity, ok := UserIdentityFromContext(r.Context()); ok {
 			userID = identity.UserID
 		}
 
-		token, err := auth.GenerateToken(agentLogTokenScope(agentName), userID)
+		token, err := svc.GenerateTerminalToken(r.Context(), agentName, userID)
 		if err != nil {
-			slog.Error("failed to generate agent terminal token", "agent", agentName, "err", err)
-			respondJSON(w, http.StatusInternalServerError, agentTerminalTokenResponse{
+			respondJSON(w, serviceErrorStatus(err), agentTerminalTokenResponse{
 				Success: false,
-				Error:   "failed to generate token",
+				Error:   err.Error(),
 			})
 			return
 		}

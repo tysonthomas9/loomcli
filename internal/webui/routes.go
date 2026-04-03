@@ -76,7 +76,7 @@ func (app *Server) registerRoutes() {
 }
 
 // registerWorkspaceRoutes sets up workspace listing, CRUD, and workspace-scoped API routes.
-func (app *Server) registerWorkspaceRoutes() { //nolint:funlen // route registration function
+func (app *Server) registerWorkspaceRoutes() { //nolint:funlen,gocognit,cyclop // route registration function
 	workspaceConfigFn := app.config.WorkspaceConfigFn
 	workspaceConfigByIDFn := app.config.WorkspaceConfigByIDFn
 
@@ -136,7 +136,9 @@ func (app *Server) registerWorkspaceRoutes() { //nolint:funlen // route registra
 	wsMux.HandleFunc("PATCH /api/workspaces/{ws}/config/backend", handleWorkspaceBackendPatch(workspaceConfigFn))
 
 	// Log streaming endpoints (workspace-scoped)
-	wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/logs", handleGetAgentLog())
+	if app.agentSvc != nil {
+		wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/logs", handleGetAgentLog(app.agentSvc))
+	}
 	wsMux.HandleFunc("GET /api/workspaces/{ws}/tasks/{id}/logs", handleListTaskPhases())
 	wsMux.HandleFunc("GET /api/workspaces/{ws}/tasks/{id}/logs/{phase}", handleGetTaskLog())
 
@@ -195,9 +197,11 @@ func (app *Server) registerWorkspaceRoutes() { //nolint:funlen // route registra
 	// Terminal endpoints (workspace-scoped) — agent, core session, and scrollback/export
 	if app.termMgr != nil {
 		// Agent terminal endpoints
-		wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/terminal/info", handleGetAgentTerminalInfo(app.termMgr))
-		if app.termAuth != nil {
-			wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/terminal/token", handleGetAgentTerminalToken(app.termAuth))
+		if app.agentSvc != nil {
+			wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/terminal/info", handleGetAgentTerminalInfo(app.agentSvc))
+			if app.termAuth != nil {
+				wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/terminal/token", handleGetAgentTerminalToken(app.agentSvc))
+			}
 		}
 		wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/terminal/ws", handleAgentTerminalWS(app.termMgr, app.termAuth, app.corsConfig.AllowedOrigins))
 
@@ -259,16 +263,16 @@ func (app *Server) registerWorkspaceRoutes() { //nolint:funlen // route registra
 
 	// Git operations (workspace-scoped)
 	if app.config.GitOps != nil {
-		wsMux.HandleFunc("POST /api/workspaces/{ws}/git/push-all", handleGitPushAll(app.config.GitOps))
-		wsMux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/git/push", handleGitPush(app.config.GitOps))
-		wsMux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/git/pull", handleGitPull(app.config.GitOps))
-		wsMux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/git/sync", handleGitSync(app.config.GitOps))
-		wsMux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/git/pr", handleGitPR(app.config.GitOps))
-		wsMux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/git/reset", handleGitReset(app.config.GitOps))
-		wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/git/status", handleGitStatus(app.config.GitOps))
-		wsMux.HandleFunc("PATCH /api/workspaces/{ws}/agents/{name}/git/target", handleGitTargetUpdate(app.config.GitOps))
+		wsMux.HandleFunc("POST /api/workspaces/{ws}/git/push-all", handleGitPushAll(app.agentSvc))
+		wsMux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/git/push", handleGitPush(app.agentSvc))
+		wsMux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/git/pull", handleGitPull(app.agentSvc))
+		wsMux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/git/sync", handleGitSync(app.agentSvc))
+		wsMux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/git/pr", handleGitPR(app.agentSvc))
+		wsMux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/git/reset", handleGitReset(app.agentSvc))
+		wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/git/status", handleGitStatus(app.agentSvc))
+		wsMux.HandleFunc("PATCH /api/workspaces/{ws}/agents/{name}/git/target", handleGitTargetUpdate(app.agentSvc))
 		wsMux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/git/diff-stat", handleGetIssueDiffStat(app.multiPool, app.config.GitOps))
-		wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/git/diff-stat", handleAgentDiffStat(app.config.GitOps))
+		wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/git/diff-stat", handleAgentDiffStat(app.agentSvc))
 
 		// Diff endpoints (workspace-scoped)
 		wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/diff/commits", handleDiffCommits(app.config.GitOps))

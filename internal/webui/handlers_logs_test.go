@@ -1,6 +1,7 @@
 package webui
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -9,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // TestValidAgentNameRegex tests the agent name validation regex.
@@ -120,7 +123,12 @@ func TestValidPhaseRegex(t *testing.T) {
 
 // TestHandleGetAgentLog_MissingName tests that missing agent name returns 400.
 func TestHandleGetAgentLog_MissingName(t *testing.T) {
-	handler := handleGetAgentLog()
+	svc := &mockAgentService{
+		getLogFunc: func(_ context.Context, _, agentName string, _ int, _ int64) (*AgentLogResult, error) {
+			return nil, service.ErrValidation("missing agent name")
+		},
+	}
+	handler := handleGetAgentLog(svc)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents//logs", nil)
 	req.SetPathValue("name", "")
@@ -133,22 +141,24 @@ func TestHandleGetAgentLog_MissingName(t *testing.T) {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
 	}
 
-	var resp LogContentResponse
+	var resp map[string]string
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	if resp.Success {
-		t.Error("expected success to be false")
-	}
-	if resp.Error != "missing agent name" {
-		t.Errorf("error = %q, want %q", resp.Error, "missing agent name")
+	if resp["error"] != "missing agent name" {
+		t.Errorf("error = %q, want %q", resp["error"], "missing agent name")
 	}
 }
 
 // TestHandleGetAgentLog_InvalidName tests that invalid agent name returns 400.
 func TestHandleGetAgentLog_InvalidName(t *testing.T) {
-	handler := handleGetAgentLog()
+	svc := &mockAgentService{
+		getLogFunc: func(_ context.Context, _, agentName string, _ int, _ int64) (*AgentLogResult, error) {
+			return nil, service.ErrValidation("invalid agent name: must match [a-zA-Z0-9_-]+")
+		},
+	}
+	handler := handleGetAgentLog(svc)
 
 	tests := []struct {
 		name      string
@@ -174,16 +184,13 @@ func TestHandleGetAgentLog_InvalidName(t *testing.T) {
 				t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
 			}
 
-			var resp LogContentResponse
+			var resp map[string]string
 			if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 				t.Fatalf("failed to decode response: %v", err)
 			}
 
-			if resp.Success {
-				t.Error("expected success to be false")
-			}
-			if resp.Error != "invalid agent name: must match [a-zA-Z0-9_-]+" {
-				t.Errorf("error = %q, want %q", resp.Error, "invalid agent name: must match [a-zA-Z0-9_-]+")
+			if resp["error"] != "invalid agent name: must match [a-zA-Z0-9_-]+" {
+				t.Errorf("error = %q, want %q", resp["error"], "invalid agent name: must match [a-zA-Z0-9_-]+")
 			}
 		})
 	}
@@ -191,7 +198,12 @@ func TestHandleGetAgentLog_InvalidName(t *testing.T) {
 
 // TestHandleGetAgentLog_FileNotFound tests that missing log file returns 404.
 func TestHandleGetAgentLog_FileNotFound(t *testing.T) {
-	handler := handleGetAgentLog()
+	svc := &mockAgentService{
+		getLogFunc: func(_ context.Context, _, _ string, _ int, _ int64) (*AgentLogResult, error) {
+			return nil, service.ErrNotFound("log file not found - agent may not be active")
+		},
+	}
+	handler := handleGetAgentLog(svc)
 
 	// Use a valid but non-existent agent name
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/nonexistent-agent-xyz/logs", nil)
@@ -205,16 +217,13 @@ func TestHandleGetAgentLog_FileNotFound(t *testing.T) {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
 	}
 
-	var resp LogContentResponse
+	var resp map[string]string
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	if resp.Success {
-		t.Error("expected success to be false")
-	}
-	if resp.Error != "log file not found - agent may not be active" {
-		t.Errorf("error = %q, want %q", resp.Error, "log file not found - agent may not be active")
+	if resp["error"] != "log file not found - agent may not be active" {
+		t.Errorf("error = %q, want %q", resp["error"], "log file not found - agent may not be active")
 	}
 }
 
@@ -1067,7 +1076,12 @@ func TestFileExists(t *testing.T) {
 
 // TestHandleGetAgentLog_ContentType tests that Content-Type is always application/json.
 func TestHandleGetAgentLog_ContentType(t *testing.T) {
-	handler := handleGetAgentLog()
+	svc := &mockAgentService{
+		getLogFunc: func(_ context.Context, _, _ string, _ int, _ int64) (*AgentLogResult, error) {
+			return nil, service.ErrValidation("missing agent name")
+		},
+	}
+	handler := handleGetAgentLog(svc)
 
 	// Test with missing name
 	req := httptest.NewRequest(http.MethodGet, "/api/agents//logs", nil)
@@ -1144,37 +1158,24 @@ func itoa(i int) string {
 
 // --- Happy path tests for log handlers ---
 
-// TestHandleGetAgentLog_Success tests the full success path with an actual log file.
+// TestHandleGetAgentLog_Success tests the full success path via mock service.
 func TestHandleGetAgentLog_Success(t *testing.T) {
-	// Redirect HOME to a temp dir so we don't write to the real ~/.loom/logs/
-	// Resolve symlinks first (macOS /tmp -> /private/tmp) so validatePathWithinDir works.
-	tmpHome, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
-		t.Fatalf("failed to resolve temp dir: %v", err)
+	svc := &mockAgentService{
+		getLogFunc: func(_ context.Context, wsID, agentName string, lines int, beforeLine int64) (*AgentLogResult, error) {
+			return &AgentLogResult{
+				Lines:     []string{"line 1: agent started", "line 2: processing task", "line 3: task complete"},
+				LineCount: 3,
+				StartLine: 1,
+			}, nil
+		},
 	}
-	t.Setenv("HOME", tmpHome)
+	handler := handleGetAgentLog(svc)
 
-	wsID := "test-ws-success"
-	agentLogDir := filepath.Join(tmpHome, ".loom", "logs", wsID, "agents")
-	if err := os.MkdirAll(agentLogDir, 0o755); err != nil {
-		t.Fatalf("failed to create agent log dir: %v", err)
-	}
-
-	testAgentName := "testcoveragexyz123"
-	logPath := filepath.Join(agentLogDir, testAgentName+".log")
-	logContent := "line 1: agent started\nline 2: processing task\nline 3: task complete\n"
-	if err := os.WriteFile(logPath, []byte(logContent), 0o644); err != nil {
-		t.Fatalf("failed to write test log: %v", err)
-	}
-
-	handler := handleGetAgentLog()
-
-	// Use the mux to route properly with path params
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/logs", handler)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+wsID+"/agents/"+testAgentName+"/logs", nil)
-	req = req.WithContext(WithWorkspace(req.Context(), wsID))
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws-success/agents/testcoveragexyz123/logs", nil)
+	req = req.WithContext(WithWorkspace(req.Context(), "test-ws-success"))
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
@@ -1192,47 +1193,45 @@ func TestHandleGetAgentLog_Success(t *testing.T) {
 	if resp.Data == nil {
 		t.Fatal("expected Data to be non-nil")
 	}
-	if len(resp.Data.Lines) == 0 {
-		t.Error("expected non-empty lines")
+	if len(resp.Data.Lines) != 3 {
+		t.Errorf("expected 3 lines, got %d", len(resp.Data.Lines))
 	}
 }
 
-// TestHandleGetAgentLog_LinesParam tests the lines query parameter.
+// TestHandleGetAgentLog_LinesParam tests the lines query parameter is parsed and forwarded.
 func TestHandleGetAgentLog_LinesParam(t *testing.T) {
-	tmpHome, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
-		t.Fatalf("failed to resolve temp dir: %v", err)
+	var capturedLines int
+	svc := &mockAgentService{
+		getLogFunc: func(_ context.Context, _, _ string, lines int, _ int64) (*AgentLogResult, error) {
+			capturedLines = lines
+			// Return exactly the number of lines requested (up to 5)
+			result := make([]string, lines)
+			for i := range result {
+				result[i] = fmt.Sprintf("line %d: test data", i+1)
+			}
+			return &AgentLogResult{
+				Lines:     result,
+				LineCount: 50,
+				StartLine: int64(50 - lines + 1),
+			}, nil
+		},
 	}
-	t.Setenv("HOME", tmpHome)
-
-	wsID := "test-ws-lines"
-	agentLogDir := filepath.Join(tmpHome, ".loom", "logs", wsID, "agents")
-	if err := os.MkdirAll(agentLogDir, 0o755); err != nil {
-		t.Fatalf("failed to create agent log dir: %v", err)
-	}
-
-	testAgentName := "testcoveragelines"
-	logPath := filepath.Join(agentLogDir, testAgentName+".log")
-	var lines []string
-	for i := 0; i < 50; i++ {
-		lines = append(lines, fmt.Sprintf("line %d: test data", i+1))
-	}
-	if err := os.WriteFile(logPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
-		t.Fatalf("failed to write test log: %v", err)
-	}
-
-	handler := handleGetAgentLog()
+	handler := handleGetAgentLog(svc)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/logs", handler)
 
 	// Request only 5 lines
-	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+wsID+"/agents/"+testAgentName+"/logs?lines=5", nil)
-	req = req.WithContext(WithWorkspace(req.Context(), wsID))
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws-lines/agents/testcoveragelines/logs?lines=5", nil)
+	req = req.WithContext(WithWorkspace(req.Context(), "test-ws-lines"))
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusOK {
 		t.Errorf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	if capturedLines != 5 {
+		t.Errorf("service received lines = %d, want 5", capturedLines)
 	}
 
 	var resp LogContentResponse
@@ -1568,35 +1567,27 @@ func TestReadLastNLines_BeforeLine_ExactBoundary(t *testing.T) {
 
 // TestHandleGetAgentLog_StartLineInResponse verifies start_line is in all responses.
 func TestHandleGetAgentLog_StartLineInResponse(t *testing.T) {
-	tmpHome, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
-		t.Fatalf("failed to resolve temp dir: %v", err)
+	svc := &mockAgentService{
+		getLogFunc: func(_ context.Context, _, _ string, lines int, _ int64) (*AgentLogResult, error) {
+			// Simulate a 50-line file, last 10 lines requested
+			resultLines := make([]string, 10)
+			for i := range resultLines {
+				resultLines[i] = fmt.Sprintf("line %d", 41+i)
+			}
+			return &AgentLogResult{
+				Lines:     resultLines,
+				LineCount: 50,
+				StartLine: 41,
+			}, nil
+		},
 	}
-	t.Setenv("HOME", tmpHome)
-
-	wsID := "test-ws-startline"
-	agentLogDir := filepath.Join(tmpHome, ".loom", "logs", wsID, "agents")
-	if err := os.MkdirAll(agentLogDir, 0o755); err != nil {
-		t.Fatalf("failed to create agent log dir: %v", err)
-	}
-
-	testAgentName := "teststartline"
-	logPath := filepath.Join(agentLogDir, testAgentName+".log")
-	var logLines []string
-	for i := 1; i <= 50; i++ {
-		logLines = append(logLines, fmt.Sprintf("line %d", i))
-	}
-	if err := os.WriteFile(logPath, []byte(strings.Join(logLines, "\n")+"\n"), 0o644); err != nil {
-		t.Fatalf("failed to write test log: %v", err)
-	}
-
-	handler := handleGetAgentLog()
+	handler := handleGetAgentLog(svc)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/logs", handler)
 
 	// Request last 10 lines (no before_line)
-	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+wsID+"/agents/"+testAgentName+"/logs?lines=10", nil)
-	req = req.WithContext(WithWorkspace(req.Context(), wsID))
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws-startline/agents/teststartline/logs?lines=10", nil)
+	req = req.WithContext(WithWorkspace(req.Context(), "test-ws-startline"))
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
@@ -1621,40 +1612,43 @@ func TestHandleGetAgentLog_StartLineInResponse(t *testing.T) {
 
 // TestHandleGetAgentLog_BeforeLine tests the before_line query parameter via the handler.
 func TestHandleGetAgentLog_BeforeLine(t *testing.T) {
-	tmpHome, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
-		t.Fatalf("failed to resolve temp dir: %v", err)
+	var capturedLines int
+	var capturedBeforeLine int64
+	svc := &mockAgentService{
+		getLogFunc: func(_ context.Context, _, _ string, lines int, beforeLine int64) (*AgentLogResult, error) {
+			capturedLines = lines
+			capturedBeforeLine = beforeLine
+			// Simulate: 20 lines before line 50 -> lines 30-49
+			resultLines := make([]string, 20)
+			for i := range resultLines {
+				resultLines[i] = fmt.Sprintf("line %d", 30+i)
+			}
+			return &AgentLogResult{
+				Lines:     resultLines,
+				LineCount: 49,
+				StartLine: 30,
+			}, nil
+		},
 	}
-	t.Setenv("HOME", tmpHome)
-
-	wsID := "test-ws-beforeline"
-	agentLogDir := filepath.Join(tmpHome, ".loom", "logs", wsID, "agents")
-	if err := os.MkdirAll(agentLogDir, 0o755); err != nil {
-		t.Fatalf("failed to create agent log dir: %v", err)
-	}
-
-	testAgentName := "testbeforeline"
-	logPath := filepath.Join(agentLogDir, testAgentName+".log")
-	var logLines []string
-	for i := 1; i <= 100; i++ {
-		logLines = append(logLines, fmt.Sprintf("line %d", i))
-	}
-	if err := os.WriteFile(logPath, []byte(strings.Join(logLines, "\n")+"\n"), 0o644); err != nil {
-		t.Fatalf("failed to write test log: %v", err)
-	}
-
-	handler := handleGetAgentLog()
+	handler := handleGetAgentLog(svc)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/logs", handler)
 
 	// Request 20 lines before line 50 -> should get lines 30-49
-	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+wsID+"/agents/"+testAgentName+"/logs?lines=20&before_line=50", nil)
-	req = req.WithContext(WithWorkspace(req.Context(), wsID))
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws-beforeline/agents/testbeforeline/logs?lines=20&before_line=50", nil)
+	req = req.WithContext(WithWorkspace(req.Context(), "test-ws-beforeline"))
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	if capturedLines != 20 {
+		t.Errorf("service received lines = %d, want 20", capturedLines)
+	}
+	if capturedBeforeLine != 50 {
+		t.Errorf("service received beforeLine = %d, want 50", capturedBeforeLine)
 	}
 
 	var resp LogContentResponse
@@ -1739,31 +1733,25 @@ func TestHandleGetTaskLog_BeforeLine(t *testing.T) {
 
 // --- Workspace-scoped handler tests ---
 
-// TestHandleGetAgentLog_WorkspaceScoped verifies that the handler reads from the
-// workspace-scoped log directory when a workspace ID is present in context.
+// TestHandleGetAgentLog_WorkspaceScoped verifies that the handler passes the
+// workspace ID from context to the service.
 func TestHandleGetAgentLog_WorkspaceScoped(t *testing.T) {
-	tmpHome, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
-		t.Fatalf("failed to resolve temp dir: %v", err)
+	var capturedWsID, capturedAgent string
+	svc := &mockAgentService{
+		getLogFunc: func(_ context.Context, wsID, agentName string, _ int, _ int64) (*AgentLogResult, error) {
+			capturedWsID = wsID
+			capturedAgent = agentName
+			return &AgentLogResult{
+				Lines:     []string{"ws-line 1: agent started", "ws-line 2: processing", "ws-line 3: done"},
+				LineCount: 3,
+				StartLine: 1,
+			}, nil
+		},
 	}
-	t.Setenv("HOME", tmpHome)
+	handler := handleGetAgentLog(svc)
 
 	wsID := "test-ws-id"
 	agentName := "scopedagent"
-
-	// Create workspace-scoped agent log directory and file
-	wsAgentDir := filepath.Join(tmpHome, ".loom", "logs", wsID, "agents")
-	if err := os.MkdirAll(wsAgentDir, 0o755); err != nil {
-		t.Fatalf("failed to create workspace agent log dir: %v", err)
-	}
-
-	logContent := "ws-line 1: agent started\nws-line 2: processing\nws-line 3: done\n"
-	logPath := filepath.Join(wsAgentDir, agentName+".log")
-	if err := os.WriteFile(logPath, []byte(logContent), 0o644); err != nil {
-		t.Fatalf("failed to write test log: %v", err)
-	}
-
-	handler := handleGetAgentLog()
 
 	// Create request with workspace in context
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+wsID+"/agents/"+agentName+"/logs", nil)
@@ -1776,6 +1764,13 @@ func TestHandleGetAgentLog_WorkspaceScoped(t *testing.T) {
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+
+	if capturedWsID != wsID {
+		t.Errorf("service received wsID = %q, want %q", capturedWsID, wsID)
+	}
+	if capturedAgent != agentName {
+		t.Errorf("service received agentName = %q, want %q", capturedAgent, agentName)
 	}
 
 	var resp LogContentResponse
@@ -1797,37 +1792,33 @@ func TestHandleGetAgentLog_WorkspaceScoped(t *testing.T) {
 }
 
 // TestHandleGetAgentLog_DifferentWorkspaces verifies that two requests with different
-// workspace IDs read from their respective directories and do not cross-contaminate.
+// workspace IDs pass the correct workspace to the service and do not cross-contaminate.
 func TestHandleGetAgentLog_DifferentWorkspaces(t *testing.T) {
-	tmpHome, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
-		t.Fatalf("failed to resolve temp dir: %v", err)
-	}
-	t.Setenv("HOME", tmpHome)
-
 	agentName := "sharedagent"
 	wsA := "workspace-aaa"
 	wsB := "workspace-bbb"
 
-	// Create workspace A log
-	dirA := filepath.Join(tmpHome, ".loom", "logs", wsA, "agents")
-	if err := os.MkdirAll(dirA, 0o755); err != nil {
-		t.Fatalf("failed to create dir A: %v", err)
+	svc := &mockAgentService{
+		getLogFunc: func(_ context.Context, wsID, _ string, _ int, _ int64) (*AgentLogResult, error) {
+			switch wsID {
+			case wsA:
+				return &AgentLogResult{
+					Lines:     []string{"from workspace A"},
+					LineCount: 1,
+					StartLine: 1,
+				}, nil
+			case wsB:
+				return &AgentLogResult{
+					Lines:     []string{"from workspace B"},
+					LineCount: 1,
+					StartLine: 1,
+				}, nil
+			default:
+				return nil, service.ErrNotFound("unknown workspace")
+			}
+		},
 	}
-	if err := os.WriteFile(filepath.Join(dirA, agentName+".log"), []byte("from workspace A\n"), 0o644); err != nil {
-		t.Fatalf("failed to write log A: %v", err)
-	}
-
-	// Create workspace B log
-	dirB := filepath.Join(tmpHome, ".loom", "logs", wsB, "agents")
-	if err := os.MkdirAll(dirB, 0o755); err != nil {
-		t.Fatalf("failed to create dir B: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dirB, agentName+".log"), []byte("from workspace B\n"), 0o644); err != nil {
-		t.Fatalf("failed to write log B: %v", err)
-	}
-
-	handler := handleGetAgentLog()
+	handler := handleGetAgentLog(svc)
 
 	// Request from workspace A
 	reqA := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+wsA+"/agents/"+agentName+"/logs", nil)

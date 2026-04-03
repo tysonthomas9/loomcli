@@ -4,19 +4,21 @@ import "net/http"
 
 // handleAgentDiffStat returns diff statistics (added/removed lines, branch)
 // for an agent's worktree, resolved directly by agent name.
-func handleAgentDiffStat(gitOps GitOps) http.HandlerFunc {
+func handleAgentDiffStat(svc AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		wt, ok := resolveAgent(w, r, gitOps)
-		if !ok {
+		agentName := r.PathValue("name")
+		wsID := WorkspaceFromContext(r.Context())
+
+		result, err := svc.GetDiffStat(r.Context(), wsID, agentName)
+		if err != nil {
+			writeServiceError(w, err)
 			return
 		}
 
-		stats := gitOps.DiffStat(wt.Path, wt.DefaultBranch)
-
 		respondJSON(w, http.StatusOK, DiffStatResponse{
-			Branch:  wt.Branch,
-			Added:   stats.LinesAdded,
-			Removed: stats.LinesRemoved,
+			Branch:  result.Branch,
+			Added:   result.Added,
+			Removed: result.Removed,
 		})
 	}
 }

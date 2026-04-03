@@ -21,6 +21,28 @@ func writeIssuesError(w http.ResponseWriter, status int, message, code string) {
 	respondJSON(w, status, IssuesResponse{Success: false, Error: message, Code: code})
 }
 
+// serviceErrorStatus returns the HTTP status code for an error.
+// ServiceError kinds are mapped to their natural HTTP codes; other errors
+// default to 500.
+func serviceErrorStatus(err error) int {
+	var svcErr *service.ServiceError
+	if errors.As(err, &svcErr) {
+		switch svcErr.Kind {
+		case service.KindNotFound:
+			return http.StatusNotFound
+		case service.KindValidation:
+			return http.StatusBadRequest
+		case service.KindUnavailable:
+			return http.StatusServiceUnavailable
+		case service.KindTimeout:
+			return http.StatusGatewayTimeout
+		case service.KindConflict:
+			return http.StatusConflict
+		}
+	}
+	return http.StatusInternalServerError
+}
+
 // writeServiceError maps a service.ServiceError to an HTTP response.
 func writeServiceError(w http.ResponseWriter, err error) {
 	var svcErr *service.ServiceError

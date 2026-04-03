@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // validGitRef matches safe git ref names: alphanumeric, hyphens, underscores, dots, slashes.
@@ -46,6 +48,17 @@ func resolveAgent(w http.ResponseWriter, r *http.Request, ops AgentResolver) (*A
 	return wt, true
 }
 
+// writeAgentGitError maps a service error to an HTTP response for agent git handlers.
+// ServiceErrors use writeServiceError; other errors use the given fallback status.
+func writeAgentGitError(w http.ResponseWriter, err error, fallbackStatus int) {
+	var svcErr *service.ServiceError
+	if errors.As(err, &svcErr) {
+		writeServiceError(w, err)
+		return
+	}
+	respondError(w, fallbackStatus, err.Error())
+}
+
 // --- Push ---
 
 type gitPushRequest struct {
@@ -54,12 +67,10 @@ type gitPushRequest struct {
 
 // handleGitPush handles POST /api/agents/{name}/git/push
 // Merges the agent's worktree branch INTO the target branch (loom push semantics).
-func handleGitPush(ops GitOps) http.HandlerFunc {
+func handleGitPush(svc AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		wt, ok := resolveAgent(w, r, ops)
-		if !ok {
-			return
-		}
+		agentName := r.PathValue("name")
+		wsID := WorkspaceFromContext(r.Context())
 
 		var req gitPushRequest
 		if r.Body != nil {
@@ -68,17 +79,14 @@ func handleGitPush(ops GitOps) http.HandlerFunc {
 		}
 
 		target := req.Target
-		if target == "" {
-			target = wt.DefaultBranch
-		}
-		if !validGitRef.MatchString(target) || strings.Contains(target, "..") {
+		if target != "" && (!validGitRef.MatchString(target) || strings.Contains(target, "..")) {
 			respondError(w, http.StatusBadRequest, "invalid target branch name")
 			return
 		}
 
-		result, err := ops.Push(wt.Path, wt.Branch, target, wt.Remote)
+		result, err := svc.GitPush(r.Context(), wsID, agentName, target)
 		if err != nil {
-			respondError(w, http.StatusBadGateway, err.Error())
+			writeAgentGitError(w, err, http.StatusBadGateway)
 			return
 		}
 
@@ -93,76 +101,19 @@ func handleGitPush(ops GitOps) http.HandlerFunc {
 
 // --- Push All ---
 
-type pushAllWorktreeResult struct {
-	Name    string `json:"name"`
-	Success bool   `json:"success"`
-	Message string `json:"message,omitempty"`
-	Error   string `json:"error,omitempty"`
-}
-
-type pushAllResponse struct {
-	Results []pushAllWorktreeResult `json:"results"`
-	Pushed  int                     `json:"pushed"`
-	Failed  int                     `json:"failed"`
-}
-
 // handleGitPushAll handles POST /api/git/push-all
 // Pushes all agent worktree branches to their target branches.
-func handleGitPushAll(ops GitOps) http.HandlerFunc {
+func handleGitPushAll(svc AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := WorkspaceFromContext(r.Context())
-		worktrees, err := ops.ListAgentWorktrees(wsID)
+
+		result, err := svc.GitPushAll(r.Context(), wsID)
 		if err != nil {
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("listing worktrees: %v", err))
+			respondError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 
-		var results []pushAllWorktreeResult
-		pushed, failed := 0, 0
-
-		for _, wt := range worktrees {
-			remote := wt.Remote
-			if remote == "" {
-				remote = "origin"
-			}
-			result, pushErr := ops.Push(wt.Path, wt.Branch, wt.DefaultBranch, remote)
-			if pushErr != nil {
-				results = append(results, pushAllWorktreeResult{
-					Name:  wt.Name,
-					Error: pushErr.Error(),
-				})
-				failed++
-				continue
-			}
-			if result.AlreadyUpToDate {
-				results = append(results, pushAllWorktreeResult{
-					Name:    wt.Name,
-					Success: true,
-					Message: "already up to date",
-				})
-				continue
-			}
-			if !result.Success {
-				results = append(results, pushAllWorktreeResult{
-					Name:  wt.Name,
-					Error: result.Message,
-				})
-				failed++
-				continue
-			}
-			results = append(results, pushAllWorktreeResult{
-				Name:    wt.Name,
-				Success: true,
-				Message: result.Message,
-			})
-			pushed++
-		}
-
-		respondJSON(w, http.StatusOK, pushAllResponse{
-			Results: results,
-			Pushed:  pushed,
-			Failed:  failed,
-		})
+		respondJSON(w, http.StatusOK, result)
 	}
 }
 
@@ -174,12 +125,10 @@ type gitPullRequest struct {
 
 // handleGitPull handles POST /api/agents/{name}/git/pull
 // Merges the source branch INTO the agent's worktree branch.
-func handleGitPull(ops GitOps) http.HandlerFunc {
+func handleGitPull(svc AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		wt, ok := resolveAgent(w, r, ops)
-		if !ok {
-			return
-		}
+		agentName := r.PathValue("name")
+		wsID := WorkspaceFromContext(r.Context())
 
 		var req gitPullRequest
 		if r.Body != nil {
@@ -188,23 +137,14 @@ func handleGitPull(ops GitOps) http.HandlerFunc {
 		}
 
 		source := req.Source
-		if source == "" {
-			source = wt.DefaultBranch
-		}
-		if !validGitRef.MatchString(source) || strings.Contains(source, "..") {
+		if source != "" && (!validGitRef.MatchString(source) || strings.Contains(source, "..")) {
 			respondError(w, http.StatusBadRequest, "invalid source branch name")
 			return
 		}
 
-		currentBranch, err := ops.GetCurrentBranch(wt.Path)
+		result, err := svc.GitPull(r.Context(), wsID, agentName, source)
 		if err != nil {
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("getting current branch: %v", err))
-			return
-		}
-
-		result, err := ops.Pull(wt.Path, currentBranch, source, wt.Remote)
-		if err != nil {
-			respondError(w, http.StatusBadGateway, err.Error())
+			writeAgentGitError(w, err, http.StatusBadGateway)
 			return
 		}
 
@@ -219,54 +159,31 @@ func handleGitPull(ops GitOps) http.HandlerFunc {
 
 // --- Sync ---
 
-type gitSyncResponse struct {
-	PushResult *GitPushResult `json:"push_result"`
-	PullResult *GitPullResult `json:"pull_result"`
-}
-
 // handleGitSync handles POST /api/agents/{name}/git/sync
 // Full push+pull cycle: first push to target, then pull from target.
-func handleGitSync(ops GitOps) http.HandlerFunc {
+func handleGitSync(svc AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		wt, ok := resolveAgent(w, r, ops)
-		if !ok {
-			return
-		}
+		agentName := r.PathValue("name")
+		wsID := WorkspaceFromContext(r.Context())
 
-		target := wt.DefaultBranch
-
-		pushResult, err := ops.Push(wt.Path, wt.Branch, target, wt.Remote)
+		result, err := svc.GitSync(r.Context(), wsID, agentName)
 		if err != nil {
-			respondError(w, http.StatusBadGateway, fmt.Sprintf("push failed: %v", err))
+			writeAgentGitError(w, err, http.StatusBadGateway)
 			return
 		}
 
-		if !pushResult.Success && len(pushResult.ConflictedFiles) > 0 {
-			respondJSON(w, http.StatusConflict, gitSyncResponse{PushResult: pushResult})
-			return
-		}
-
-		currentBranch, err := ops.GetCurrentBranch(wt.Path)
-		if err != nil {
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("getting current branch: %v", err))
-			return
-		}
-
-		pullResult, err := ops.Pull(wt.Path, currentBranch, target, wt.Remote)
-		if err != nil {
-			respondError(w, http.StatusBadGateway, fmt.Sprintf("pull failed: %v", err))
+		// Push conflict: return partial result
+		if result.PushResult != nil && !result.PushResult.Success && len(result.PushResult.ConflictedFiles) > 0 {
+			respondJSON(w, http.StatusConflict, result)
 			return
 		}
 
 		status := http.StatusOK
-		if !pullResult.Success && len(pullResult.ConflictedFiles) > 0 {
+		if result.PullResult != nil && !result.PullResult.Success && len(result.PullResult.ConflictedFiles) > 0 {
 			status = http.StatusConflict
 		}
 
-		respondJSON(w, status, gitSyncResponse{
-			PushResult: pushResult,
-			PullResult: pullResult,
-		})
+		respondJSON(w, status, result)
 	}
 }
 
@@ -278,17 +195,10 @@ type gitPRRequest struct {
 
 // handleGitPR handles POST /api/agents/{name}/git/pr
 // Creates a GitHub PR from the agent's worktree branch.
-func handleGitPR(ops GitOps) http.HandlerFunc {
+func handleGitPR(svc AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		wt, ok := resolveAgent(w, r, ops)
-		if !ok {
-			return
-		}
-
-		if err := ops.CheckGhInstalled(); err != nil {
-			respondError(w, http.StatusServiceUnavailable, "gh CLI not installed: install from https://cli.github.com/ and run 'gh auth login'")
-			return
-		}
+		agentName := r.PathValue("name")
+		wsID := WorkspaceFromContext(r.Context())
 
 		var req gitPRRequest
 		if r.Body != nil {
@@ -297,17 +207,14 @@ func handleGitPR(ops GitOps) http.HandlerFunc {
 		}
 
 		target := req.Target
-		if target == "" {
-			target = wt.DefaultBranch
-		}
-		if !validGitRef.MatchString(target) || strings.Contains(target, "..") {
+		if target != "" && (!validGitRef.MatchString(target) || strings.Contains(target, "..")) {
 			respondError(w, http.StatusBadRequest, "invalid target branch name")
 			return
 		}
 
-		result, err := ops.CreatePR(wt.Path, wt.Branch, target, wt.Remote)
+		result, err := svc.CreatePR(r.Context(), wsID, agentName, target)
 		if err != nil {
-			respondError(w, http.StatusBadGateway, err.Error())
+			writeAgentGitError(w, err, http.StatusBadGateway)
 			return
 		}
 
@@ -341,12 +248,10 @@ type lockInfoResp struct {
 
 // handleGitReset handles POST /api/agents/{name}/git/reset
 // Hard resets the worktree to a branch.
-func handleGitReset(ops GitOps) http.HandlerFunc {
+func handleGitReset(svc AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		wt, ok := resolveAgent(w, r, ops)
-		if !ok {
-			return
-		}
+		agentName := r.PathValue("name")
+		wsID := WorkspaceFromContext(r.Context())
 
 		var req gitResetRequest
 		if r.Body != nil {
@@ -354,16 +259,13 @@ func handleGitReset(ops GitOps) http.HandlerFunc {
 			_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req)
 		}
 
-		target := req.Branch
-		if target == "" {
-			target = wt.DefaultBranch
-		}
-		if !validGitRef.MatchString(target) || strings.Contains(target, "..") {
+		branch := req.Branch
+		if branch != "" && (!validGitRef.MatchString(branch) || strings.Contains(branch, "..")) {
 			respondError(w, http.StatusBadRequest, "invalid branch name")
 			return
 		}
 
-		result, err := ops.Reset(wt.Path, wt.Name, target, req.Force, req.Push)
+		result, err := svc.GitReset(r.Context(), wsID, agentName, branch, req.Force, req.Push)
 		if err != nil {
 			var lockedErr *GitResetLockedError
 			if errors.As(err, &lockedErr) {
@@ -378,7 +280,7 @@ func handleGitReset(ops GitOps) http.HandlerFunc {
 				})
 				return
 			}
-			respondError(w, http.StatusBadGateway, err.Error())
+			writeAgentGitError(w, err, http.StatusBadGateway)
 			return
 		}
 
@@ -390,20 +292,18 @@ func handleGitReset(ops GitOps) http.HandlerFunc {
 
 // handleGitStatus handles GET /api/agents/{name}/git/status
 // Returns detailed git status for the agent's worktree.
-func handleGitStatus(ops GitOps) http.HandlerFunc {
+func handleGitStatus(svc AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		wt, ok := resolveAgent(w, r, ops)
-		if !ok {
-			return
-		}
+		agentName := r.PathValue("name")
+		wsID := WorkspaceFromContext(r.Context())
 
-		summary, err := ops.Status(wt.Path, wt.DefaultBranch)
+		result, err := svc.GitStatus(r.Context(), wsID, agentName)
 		if err != nil {
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("getting git status: %v", err))
+			writeAgentGitError(w, err, http.StatusInternalServerError)
 			return
 		}
 
-		respondJSON(w, http.StatusOK, summary)
+		respondJSON(w, http.StatusOK, result)
 	}
 }
 
@@ -420,12 +320,10 @@ type gitTargetResponse struct {
 
 // handleGitTargetUpdate handles PATCH /api/agents/{name}/git/target
 // Changes the target/integration branch for a worktree.
-func handleGitTargetUpdate(ops GitOps) http.HandlerFunc {
+func handleGitTargetUpdate(svc AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		wt, ok := resolveAgent(w, r, ops)
-		if !ok {
-			return
-		}
+		agentName := r.PathValue("name")
+		wsID := WorkspaceFromContext(r.Context())
 
 		var req gitTargetRequest
 		if r.Body != nil {
@@ -446,14 +344,8 @@ func handleGitTargetUpdate(ops GitOps) http.HandlerFunc {
 			return
 		}
 
-		if !wt.IsWorkspace {
-			respondError(w, http.StatusBadRequest, "target branch update only supported in workspace mode")
-			return
-		}
-
-		wsID := WorkspaceFromContext(r.Context())
-		if err := ops.SetRepoDefaultBranch(wsID, wt.RepoName, req.Branch); err != nil {
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("updating target branch: %v", err))
+		if err := svc.SetTargetBranch(r.Context(), wsID, agentName, req.Branch); err != nil {
+			writeAgentGitError(w, err, http.StatusInternalServerError)
 			return
 		}
 

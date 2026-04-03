@@ -246,6 +246,11 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 		}
 	}
 
+	// Initialize agent service layer (requires GitOps; termMgr/termAuth may be nil)
+	if config.GitOps != nil {
+		app.agentSvc = NewAgentService(config.GitOps, app.termMgr, app.termAuth)
+	}
+
 	// Initialize SSE token exchange store (external auth mode only).
 	if config.ExtAuthURL != "" {
 		var sseErr error

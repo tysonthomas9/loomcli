@@ -1,12 +1,15 @@
 package webui
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // mockGitOps implements GitOps for testing.
@@ -156,11 +159,23 @@ func resolveOK() *mockGitOps {
 	}
 }
 
+// resolveAgentTestHandler builds a minimal handler that exercises resolveAgent
+// without depending on any specific git-operation handler.  This lets the
+// resolveAgent unit tests remain independent of which handler calls it.
+func resolveAgentTestHandler(ops AgentResolver) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		_, ok := resolveAgent(w, r, ops)
+		if ok {
+			respondJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		}
+	}
+}
+
 // --- resolveAgent tests ---
 
 func TestGitResolveAgent_EmptyName(t *testing.T) {
 	ops := resolveOK()
-	handler := handleGitPush(ops)
+	handler := resolveAgentTestHandler(ops)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents//git/push", nil)
 	req.SetPathValue("name", "")
@@ -184,7 +199,7 @@ func TestGitResolveAgent_EmptyName(t *testing.T) {
 
 func TestGitResolveAgent_InvalidName(t *testing.T) {
 	ops := resolveOK()
-	handler := handleGitPush(ops)
+	handler := resolveAgentTestHandler(ops)
 
 	tests := []struct {
 		name      string
@@ -227,7 +242,7 @@ func TestGitResolveAgent_NotFound(t *testing.T) {
 			return nil, errors.New("not found")
 		},
 	}
-	handler := handleGitPush(ops)
+	handler := resolveAgentTestHandler(ops)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/nonexistent/git/push", nil)
 	req.SetPathValue("name", "nonexistent")
@@ -252,14 +267,15 @@ func TestGitResolveAgent_NotFound(t *testing.T) {
 // --- Push tests ---
 
 func TestGitPush_Success(t *testing.T) {
-	ops := resolveOK()
-	ops.pushFunc = func(worktreePath, sourceBranch, targetBranch, remote string) (*GitPushResult, error) {
-		if targetBranch != "main" {
-			t.Errorf("targetBranch = %q, want %q", targetBranch, "main")
-		}
-		return &GitPushResult{Success: true, Message: "merged"}, nil
+	svc := &mockAgentService{
+		gitPushFunc: func(ctx context.Context, wsID, agentName, target string) (*GitPushResult, error) {
+			if target != "" {
+				t.Errorf("target = %q, want %q", target, "")
+			}
+			return &GitPushResult{Success: true, Message: "merged"}, nil
+		},
 	}
-	handler := handleGitPush(ops)
+	handler := handleGitPush(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/push", nil)
 	req.SetPathValue("name", "test-agent")
@@ -282,14 +298,15 @@ func TestGitPush_Success(t *testing.T) {
 }
 
 func TestGitPush_CustomTarget(t *testing.T) {
-	ops := resolveOK()
-	ops.pushFunc = func(worktreePath, sourceBranch, targetBranch, remote string) (*GitPushResult, error) {
-		if targetBranch != "develop" {
-			t.Errorf("targetBranch = %q, want %q", targetBranch, "develop")
-		}
-		return &GitPushResult{Success: true, Message: "merged to develop"}, nil
+	svc := &mockAgentService{
+		gitPushFunc: func(ctx context.Context, wsID, agentName, target string) (*GitPushResult, error) {
+			if target != "develop" {
+				t.Errorf("target = %q, want %q", target, "develop")
+			}
+			return &GitPushResult{Success: true, Message: "merged to develop"}, nil
+		},
 	}
-	handler := handleGitPush(ops)
+	handler := handleGitPush(svc)
 
 	body := `{"target": "develop"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/push", strings.NewReader(body))
@@ -305,15 +322,16 @@ func TestGitPush_CustomTarget(t *testing.T) {
 }
 
 func TestGitPush_Conflict(t *testing.T) {
-	ops := resolveOK()
-	ops.pushFunc = func(worktreePath, sourceBranch, targetBranch, remote string) (*GitPushResult, error) {
-		return &GitPushResult{
-			Success:         false,
-			Message:         "merge conflict",
-			ConflictedFiles: []string{"file1.go", "file2.go"},
-		}, nil
+	svc := &mockAgentService{
+		gitPushFunc: func(ctx context.Context, wsID, agentName, target string) (*GitPushResult, error) {
+			return &GitPushResult{
+				Success:         false,
+				Message:         "merge conflict",
+				ConflictedFiles: []string{"file1.go", "file2.go"},
+			}, nil
+		},
 	}
-	handler := handleGitPush(ops)
+	handler := handleGitPush(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/push", nil)
 	req.SetPathValue("name", "test-agent")
@@ -339,11 +357,12 @@ func TestGitPush_Conflict(t *testing.T) {
 }
 
 func TestGitPush_OperationError(t *testing.T) {
-	ops := resolveOK()
-	ops.pushFunc = func(worktreePath, sourceBranch, targetBranch, remote string) (*GitPushResult, error) {
-		return nil, errors.New("remote unreachable")
+	svc := &mockAgentService{
+		gitPushFunc: func(ctx context.Context, wsID, agentName, target string) (*GitPushResult, error) {
+			return nil, errors.New("remote unreachable")
+		},
 	}
-	handler := handleGitPush(ops)
+	handler := handleGitPush(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/push", nil)
 	req.SetPathValue("name", "test-agent")
@@ -360,20 +379,15 @@ func TestGitPush_OperationError(t *testing.T) {
 // --- Pull tests ---
 
 func TestGitPull_Success(t *testing.T) {
-	ops := resolveOK()
-	ops.getCurrentBranchFunc = func(worktreePath string) (string, error) {
-		return "loomcli-test-agent", nil
+	svc := &mockAgentService{
+		gitPullFunc: func(ctx context.Context, wsID, agentName, source string) (*GitPullResult, error) {
+			if source != "" {
+				t.Errorf("source = %q, want %q", source, "")
+			}
+			return &GitPullResult{Success: true, Message: "pulled"}, nil
+		},
 	}
-	ops.pullFunc = func(worktreePath, currentBranch, sourceBranch, remote string) (*GitPullResult, error) {
-		if sourceBranch != "main" {
-			t.Errorf("sourceBranch = %q, want %q", sourceBranch, "main")
-		}
-		if currentBranch != "loomcli-test-agent" {
-			t.Errorf("currentBranch = %q, want %q", currentBranch, "loomcli-test-agent")
-		}
-		return &GitPullResult{Success: true, Message: "pulled"}, nil
-	}
-	handler := handleGitPull(ops)
+	handler := handleGitPull(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/pull", nil)
 	req.SetPathValue("name", "test-agent")
@@ -396,17 +410,15 @@ func TestGitPull_Success(t *testing.T) {
 }
 
 func TestGitPull_CustomSource(t *testing.T) {
-	ops := resolveOK()
-	ops.getCurrentBranchFunc = func(worktreePath string) (string, error) {
-		return "loomcli-test-agent", nil
+	svc := &mockAgentService{
+		gitPullFunc: func(ctx context.Context, wsID, agentName, source string) (*GitPullResult, error) {
+			if source != "develop" {
+				t.Errorf("source = %q, want %q", source, "develop")
+			}
+			return &GitPullResult{Success: true, Message: "pulled from develop"}, nil
+		},
 	}
-	ops.pullFunc = func(worktreePath, currentBranch, sourceBranch, remote string) (*GitPullResult, error) {
-		if sourceBranch != "develop" {
-			t.Errorf("sourceBranch = %q, want %q", sourceBranch, "develop")
-		}
-		return &GitPullResult{Success: true, Message: "pulled from develop"}, nil
-	}
-	handler := handleGitPull(ops)
+	handler := handleGitPull(svc)
 
 	body := `{"source": "develop"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/pull", strings.NewReader(body))
@@ -422,18 +434,16 @@ func TestGitPull_CustomSource(t *testing.T) {
 }
 
 func TestGitPull_Conflict(t *testing.T) {
-	ops := resolveOK()
-	ops.getCurrentBranchFunc = func(worktreePath string) (string, error) {
-		return "loomcli-test-agent", nil
+	svc := &mockAgentService{
+		gitPullFunc: func(ctx context.Context, wsID, agentName, source string) (*GitPullResult, error) {
+			return &GitPullResult{
+				Success:         false,
+				Message:         "merge conflict",
+				ConflictedFiles: []string{"main.go"},
+			}, nil
+		},
 	}
-	ops.pullFunc = func(worktreePath, currentBranch, sourceBranch, remote string) (*GitPullResult, error) {
-		return &GitPullResult{
-			Success:         false,
-			Message:         "merge conflict",
-			ConflictedFiles: []string{"main.go"},
-		}, nil
-	}
-	handler := handleGitPull(ops)
+	handler := handleGitPull(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/pull", nil)
 	req.SetPathValue("name", "test-agent")
@@ -448,11 +458,12 @@ func TestGitPull_Conflict(t *testing.T) {
 }
 
 func TestGitPull_GetCurrentBranchError(t *testing.T) {
-	ops := resolveOK()
-	ops.getCurrentBranchFunc = func(worktreePath string) (string, error) {
-		return "", errors.New("detached HEAD")
+	svc := &mockAgentService{
+		gitPullFunc: func(ctx context.Context, wsID, agentName, source string) (*GitPullResult, error) {
+			return nil, &service.ServiceError{Kind: service.KindInternal, Message: "detached HEAD"}
+		},
 	}
-	handler := handleGitPull(ops)
+	handler := handleGitPull(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/pull", nil)
 	req.SetPathValue("name", "test-agent")
@@ -467,14 +478,12 @@ func TestGitPull_GetCurrentBranchError(t *testing.T) {
 }
 
 func TestGitPull_OperationError(t *testing.T) {
-	ops := resolveOK()
-	ops.getCurrentBranchFunc = func(worktreePath string) (string, error) {
-		return "loomcli-test-agent", nil
+	svc := &mockAgentService{
+		gitPullFunc: func(ctx context.Context, wsID, agentName, source string) (*GitPullResult, error) {
+			return nil, errors.New("network error")
+		},
 	}
-	ops.pullFunc = func(worktreePath, currentBranch, sourceBranch, remote string) (*GitPullResult, error) {
-		return nil, errors.New("network error")
-	}
-	handler := handleGitPull(ops)
+	handler := handleGitPull(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/pull", nil)
 	req.SetPathValue("name", "test-agent")
@@ -491,17 +500,15 @@ func TestGitPull_OperationError(t *testing.T) {
 // --- Sync tests ---
 
 func TestGitSync_Success(t *testing.T) {
-	ops := resolveOK()
-	ops.pushFunc = func(worktreePath, sourceBranch, targetBranch, remote string) (*GitPushResult, error) {
-		return &GitPushResult{Success: true, Message: "pushed"}, nil
+	svc := &mockAgentService{
+		gitSyncFunc: func(ctx context.Context, wsID, agentName string) (*GitSyncResult, error) {
+			return &GitSyncResult{
+				PushResult: &GitPushResult{Success: true, Message: "pushed"},
+				PullResult: &GitPullResult{Success: true, Message: "pulled"},
+			}, nil
+		},
 	}
-	ops.getCurrentBranchFunc = func(worktreePath string) (string, error) {
-		return "loomcli-test-agent", nil
-	}
-	ops.pullFunc = func(worktreePath, currentBranch, sourceBranch, remote string) (*GitPullResult, error) {
-		return &GitPullResult{Success: true, Message: "pulled"}, nil
-	}
-	handler := handleGitSync(ops)
+	handler := handleGitSync(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/sync", nil)
 	req.SetPathValue("name", "test-agent")
@@ -514,7 +521,7 @@ func TestGitSync_Success(t *testing.T) {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
 
-	var resp gitSyncResponse
+	var resp GitSyncResult
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode error: %v", err)
 	}
@@ -533,15 +540,18 @@ func TestGitSync_Success(t *testing.T) {
 }
 
 func TestGitSync_PushConflict(t *testing.T) {
-	ops := resolveOK()
-	ops.pushFunc = func(worktreePath, sourceBranch, targetBranch, remote string) (*GitPushResult, error) {
-		return &GitPushResult{
-			Success:         false,
-			Message:         "conflict",
-			ConflictedFiles: []string{"a.go"},
-		}, nil
+	svc := &mockAgentService{
+		gitSyncFunc: func(ctx context.Context, wsID, agentName string) (*GitSyncResult, error) {
+			return &GitSyncResult{
+				PushResult: &GitPushResult{
+					Success:         false,
+					Message:         "conflict",
+					ConflictedFiles: []string{"a.go"},
+				},
+			}, nil
+		},
 	}
-	handler := handleGitSync(ops)
+	handler := handleGitSync(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/sync", nil)
 	req.SetPathValue("name", "test-agent")
@@ -554,7 +564,7 @@ func TestGitSync_PushConflict(t *testing.T) {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusConflict)
 	}
 
-	var resp gitSyncResponse
+	var resp GitSyncResult
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode error: %v", err)
 	}
@@ -567,11 +577,12 @@ func TestGitSync_PushConflict(t *testing.T) {
 }
 
 func TestGitSync_PushError(t *testing.T) {
-	ops := resolveOK()
-	ops.pushFunc = func(worktreePath, sourceBranch, targetBranch, remote string) (*GitPushResult, error) {
-		return nil, errors.New("push failed")
+	svc := &mockAgentService{
+		gitSyncFunc: func(ctx context.Context, wsID, agentName string) (*GitSyncResult, error) {
+			return nil, errors.New("push failed")
+		},
 	}
-	handler := handleGitSync(ops)
+	handler := handleGitSync(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/sync", nil)
 	req.SetPathValue("name", "test-agent")
@@ -586,21 +597,19 @@ func TestGitSync_PushError(t *testing.T) {
 }
 
 func TestGitSync_PullConflict(t *testing.T) {
-	ops := resolveOK()
-	ops.pushFunc = func(worktreePath, sourceBranch, targetBranch, remote string) (*GitPushResult, error) {
-		return &GitPushResult{Success: true, Message: "pushed"}, nil
+	svc := &mockAgentService{
+		gitSyncFunc: func(ctx context.Context, wsID, agentName string) (*GitSyncResult, error) {
+			return &GitSyncResult{
+				PushResult: &GitPushResult{Success: true, Message: "pushed"},
+				PullResult: &GitPullResult{
+					Success:         false,
+					Message:         "conflict on pull",
+					ConflictedFiles: []string{"b.go"},
+				},
+			}, nil
+		},
 	}
-	ops.getCurrentBranchFunc = func(worktreePath string) (string, error) {
-		return "loomcli-test-agent", nil
-	}
-	ops.pullFunc = func(worktreePath, currentBranch, sourceBranch, remote string) (*GitPullResult, error) {
-		return &GitPullResult{
-			Success:         false,
-			Message:         "conflict on pull",
-			ConflictedFiles: []string{"b.go"},
-		}, nil
-	}
-	handler := handleGitSync(ops)
+	handler := handleGitSync(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/sync", nil)
 	req.SetPathValue("name", "test-agent")
@@ -613,7 +622,7 @@ func TestGitSync_PullConflict(t *testing.T) {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusConflict)
 	}
 
-	var resp gitSyncResponse
+	var resp GitSyncResult
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode error: %v", err)
 	}
@@ -626,17 +635,12 @@ func TestGitSync_PullConflict(t *testing.T) {
 }
 
 func TestGitSync_PullError(t *testing.T) {
-	ops := resolveOK()
-	ops.pushFunc = func(worktreePath, sourceBranch, targetBranch, remote string) (*GitPushResult, error) {
-		return &GitPushResult{Success: true, Message: "pushed"}, nil
+	svc := &mockAgentService{
+		gitSyncFunc: func(ctx context.Context, wsID, agentName string) (*GitSyncResult, error) {
+			return nil, errors.New("pull failed")
+		},
 	}
-	ops.getCurrentBranchFunc = func(worktreePath string) (string, error) {
-		return "loomcli-test-agent", nil
-	}
-	ops.pullFunc = func(worktreePath, currentBranch, sourceBranch, remote string) (*GitPullResult, error) {
-		return nil, errors.New("pull failed")
-	}
-	handler := handleGitSync(ops)
+	handler := handleGitSync(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/sync", nil)
 	req.SetPathValue("name", "test-agent")
@@ -651,14 +655,12 @@ func TestGitSync_PullError(t *testing.T) {
 }
 
 func TestGitSync_GetCurrentBranchError(t *testing.T) {
-	ops := resolveOK()
-	ops.pushFunc = func(worktreePath, sourceBranch, targetBranch, remote string) (*GitPushResult, error) {
-		return &GitPushResult{Success: true, Message: "pushed"}, nil
+	svc := &mockAgentService{
+		gitSyncFunc: func(ctx context.Context, wsID, agentName string) (*GitSyncResult, error) {
+			return nil, &service.ServiceError{Kind: service.KindInternal, Message: "detached HEAD"}
+		},
 	}
-	ops.getCurrentBranchFunc = func(worktreePath string) (string, error) {
-		return "", errors.New("detached HEAD")
-	}
-	handler := handleGitSync(ops)
+	handler := handleGitSync(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/sync", nil)
 	req.SetPathValue("name", "test-agent")
@@ -675,11 +677,12 @@ func TestGitSync_GetCurrentBranchError(t *testing.T) {
 // --- PR tests ---
 
 func TestGitPR_Created(t *testing.T) {
-	ops := resolveOK()
-	ops.createPRFunc = func(worktreePath, sourceBranch, targetBranch, remote string) (*GitPRResult, error) {
-		return &GitPRResult{URL: "https://github.com/test/pr/1", Created: true}, nil
+	svc := &mockAgentService{
+		createPRFunc: func(ctx context.Context, wsID, agentName, target string) (*GitPRResult, error) {
+			return &GitPRResult{URL: "https://github.com/test/pr/1", Created: true}, nil
+		},
 	}
-	handler := handleGitPR(ops)
+	handler := handleGitPR(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/pr", nil)
 	req.SetPathValue("name", "test-agent")
@@ -705,11 +708,12 @@ func TestGitPR_Created(t *testing.T) {
 }
 
 func TestGitPR_AlreadyExists(t *testing.T) {
-	ops := resolveOK()
-	ops.createPRFunc = func(worktreePath, sourceBranch, targetBranch, remote string) (*GitPRResult, error) {
-		return &GitPRResult{URL: "https://github.com/test/pr/1", Created: false, AlreadyExists: true}, nil
+	svc := &mockAgentService{
+		createPRFunc: func(ctx context.Context, wsID, agentName, target string) (*GitPRResult, error) {
+			return &GitPRResult{URL: "https://github.com/test/pr/1", Created: false, AlreadyExists: true}, nil
+		},
 	}
-	handler := handleGitPR(ops)
+	handler := handleGitPR(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/pr", nil)
 	req.SetPathValue("name", "test-agent")
@@ -735,11 +739,12 @@ func TestGitPR_AlreadyExists(t *testing.T) {
 }
 
 func TestGitPR_GhNotInstalled(t *testing.T) {
-	ops := resolveOK()
-	ops.checkGhInstalledFunc = func() error {
-		return errors.New("gh not found")
+	svc := &mockAgentService{
+		createPRFunc: func(ctx context.Context, wsID, agentName, target string) (*GitPRResult, error) {
+			return nil, &service.ServiceError{Kind: service.KindUnavailable, Message: "gh CLI not installed"}
+		},
 	}
-	handler := handleGitPR(ops)
+	handler := handleGitPR(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/pr", nil)
 	req.SetPathValue("name", "test-agent")
@@ -762,14 +767,15 @@ func TestGitPR_GhNotInstalled(t *testing.T) {
 }
 
 func TestGitPR_CustomTarget(t *testing.T) {
-	ops := resolveOK()
-	ops.createPRFunc = func(worktreePath, sourceBranch, targetBranch, remote string) (*GitPRResult, error) {
-		if targetBranch != "develop" {
-			t.Errorf("targetBranch = %q, want %q", targetBranch, "develop")
-		}
-		return &GitPRResult{URL: "https://github.com/test/pr/2", Created: true}, nil
+	svc := &mockAgentService{
+		createPRFunc: func(ctx context.Context, wsID, agentName, target string) (*GitPRResult, error) {
+			if target != "develop" {
+				t.Errorf("target = %q, want %q", target, "develop")
+			}
+			return &GitPRResult{URL: "https://github.com/test/pr/2", Created: true}, nil
+		},
 	}
-	handler := handleGitPR(ops)
+	handler := handleGitPR(svc)
 
 	body := `{"target": "develop"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/pr", strings.NewReader(body))
@@ -785,11 +791,12 @@ func TestGitPR_CustomTarget(t *testing.T) {
 }
 
 func TestGitPR_OperationError(t *testing.T) {
-	ops := resolveOK()
-	ops.createPRFunc = func(worktreePath, sourceBranch, targetBranch, remote string) (*GitPRResult, error) {
-		return nil, errors.New("API rate limit exceeded")
+	svc := &mockAgentService{
+		createPRFunc: func(ctx context.Context, wsID, agentName, target string) (*GitPRResult, error) {
+			return nil, errors.New("API rate limit exceeded")
+		},
 	}
-	handler := handleGitPR(ops)
+	handler := handleGitPR(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/pr", nil)
 	req.SetPathValue("name", "test-agent")
@@ -806,11 +813,12 @@ func TestGitPR_OperationError(t *testing.T) {
 // --- Reset tests ---
 
 func TestGitReset_Success(t *testing.T) {
-	ops := resolveOK()
-	ops.resetFunc = func(worktreePath, worktreeName, targetBranch string, force, push bool) (*GitResetResult, error) {
-		return &GitResetResult{Success: true, Message: "reset to main", PreviousBranch: "loomcli-test-agent"}, nil
+	svc := &mockAgentService{
+		gitResetFunc: func(ctx context.Context, wsID, agentName, branch string, force, push bool) (*GitResetResult, error) {
+			return &GitResetResult{Success: true, Message: "reset to main", PreviousBranch: "loomcli-test-agent"}, nil
+		},
 	}
-	handler := handleGitReset(ops)
+	handler := handleGitReset(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/reset", nil)
 	req.SetPathValue("name", "test-agent")
@@ -833,14 +841,15 @@ func TestGitReset_Success(t *testing.T) {
 }
 
 func TestGitReset_CustomBranch(t *testing.T) {
-	ops := resolveOK()
-	ops.resetFunc = func(worktreePath, worktreeName, targetBranch string, force, push bool) (*GitResetResult, error) {
-		if targetBranch != "develop" {
-			t.Errorf("targetBranch = %q, want %q", targetBranch, "develop")
-		}
-		return &GitResetResult{Success: true, Message: "reset to develop"}, nil
+	svc := &mockAgentService{
+		gitResetFunc: func(ctx context.Context, wsID, agentName, branch string, force, push bool) (*GitResetResult, error) {
+			if branch != "develop" {
+				t.Errorf("branch = %q, want %q", branch, "develop")
+			}
+			return &GitResetResult{Success: true, Message: "reset to develop"}, nil
+		},
 	}
-	handler := handleGitReset(ops)
+	handler := handleGitReset(svc)
 
 	body := `{"branch": "develop"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/reset", strings.NewReader(body))
@@ -856,14 +865,15 @@ func TestGitReset_CustomBranch(t *testing.T) {
 }
 
 func TestGitReset_ForceFlag(t *testing.T) {
-	ops := resolveOK()
-	ops.resetFunc = func(worktreePath, worktreeName, targetBranch string, force, push bool) (*GitResetResult, error) {
-		if !force {
-			t.Error("expected force to be true")
-		}
-		return &GitResetResult{Success: true, Message: "force reset"}, nil
+	svc := &mockAgentService{
+		gitResetFunc: func(ctx context.Context, wsID, agentName, branch string, force, push bool) (*GitResetResult, error) {
+			if !force {
+				t.Error("expected force to be true")
+			}
+			return &GitResetResult{Success: true, Message: "force reset"}, nil
+		},
 	}
-	handler := handleGitReset(ops)
+	handler := handleGitReset(svc)
 
 	body := `{"force": true}`
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/reset", strings.NewReader(body))
@@ -879,16 +889,17 @@ func TestGitReset_ForceFlag(t *testing.T) {
 }
 
 func TestGitReset_Locked(t *testing.T) {
-	ops := resolveOK()
-	ops.resetFunc = func(worktreePath, worktreeName, targetBranch string, force, push bool) (*GitResetResult, error) {
-		return nil, &GitResetLockedError{
-			AgentName: "test-agent",
-			PID:       12345,
-			Duration:  "5m32s",
-			TaskID:    "task-abc",
-		}
+	svc := &mockAgentService{
+		gitResetFunc: func(ctx context.Context, wsID, agentName, branch string, force, push bool) (*GitResetResult, error) {
+			return nil, &GitResetLockedError{
+				AgentName: "test-agent",
+				PID:       12345,
+				Duration:  "5m32s",
+				TaskID:    "task-abc",
+			}
+		},
 	}
-	handler := handleGitReset(ops)
+	handler := handleGitReset(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/reset", nil)
 	req.SetPathValue("name", "test-agent")
@@ -923,11 +934,12 @@ func TestGitReset_Locked(t *testing.T) {
 }
 
 func TestGitReset_OperationError(t *testing.T) {
-	ops := resolveOK()
-	ops.resetFunc = func(worktreePath, worktreeName, targetBranch string, force, push bool) (*GitResetResult, error) {
-		return nil, errors.New("reset failed: dirty worktree")
+	svc := &mockAgentService{
+		gitResetFunc: func(ctx context.Context, wsID, agentName, branch string, force, push bool) (*GitResetResult, error) {
+			return nil, errors.New("reset failed: dirty worktree")
+		},
 	}
-	handler := handleGitReset(ops)
+	handler := handleGitReset(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/reset", nil)
 	req.SetPathValue("name", "test-agent")
@@ -944,19 +956,20 @@ func TestGitReset_OperationError(t *testing.T) {
 // --- Status tests ---
 
 func TestGitStatus_Success(t *testing.T) {
-	ops := resolveOK()
-	ops.statusFunc = func(worktreePath, targetBranch string) (*GitStatusResult, error) {
-		return &GitStatusResult{
-			Branch:       "loomcli-test-agent",
-			TargetBranch: "main",
-			IsClean:      false,
-			Ahead:        3,
-			Behind:       1,
-			ChangedFiles: []string{"file1.go", "file2.go"},
-			StashCount:   2,
-		}, nil
+	svc := &mockAgentService{
+		gitStatusFunc: func(ctx context.Context, wsID, agentName string) (*GitStatusResult, error) {
+			return &GitStatusResult{
+				Branch:       "loomcli-test-agent",
+				TargetBranch: "main",
+				IsClean:      false,
+				Ahead:        3,
+				Behind:       1,
+				ChangedFiles: []string{"file1.go", "file2.go"},
+				StashCount:   2,
+			}, nil
+		},
 	}
-	handler := handleGitStatus(ops)
+	handler := handleGitStatus(svc)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/git/status", nil)
 	req.SetPathValue("name", "test-agent")
@@ -994,11 +1007,12 @@ func TestGitStatus_Success(t *testing.T) {
 }
 
 func TestGitStatus_Error(t *testing.T) {
-	ops := resolveOK()
-	ops.statusFunc = func(worktreePath, targetBranch string) (*GitStatusResult, error) {
-		return nil, errors.New("git not initialized")
+	svc := &mockAgentService{
+		gitStatusFunc: func(ctx context.Context, wsID, agentName string) (*GitStatusResult, error) {
+			return nil, errors.New("git not initialized")
+		},
 	}
-	handler := handleGitStatus(ops)
+	handler := handleGitStatus(svc)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/git/status", nil)
 	req.SetPathValue("name", "test-agent")
@@ -1015,17 +1029,15 @@ func TestGitStatus_Error(t *testing.T) {
 // --- Target Update tests ---
 
 func TestGitTargetUpdate_Success(t *testing.T) {
-	ops := resolveOK()
-	ops.setRepoDefaultFunc = func(repoName, branch string) error {
-		if repoName != "myrepo" {
-			t.Errorf("repoName = %q, want %q", repoName, "myrepo")
-		}
-		if branch != "develop" {
-			t.Errorf("branch = %q, want %q", branch, "develop")
-		}
-		return nil
+	svc := &mockAgentService{
+		setTargetBranchFunc: func(ctx context.Context, wsID, agentName, branch string) error {
+			if branch != "develop" {
+				t.Errorf("branch = %q, want %q", branch, "develop")
+			}
+			return nil
+		},
 	}
-	handler := handleGitTargetUpdate(ops)
+	handler := handleGitTargetUpdate(svc)
 
 	body := `{"branch": "develop"}`
 	req := httptest.NewRequest(http.MethodPatch, "/api/agents/test-agent/git/target", strings.NewReader(body))
@@ -1052,8 +1064,8 @@ func TestGitTargetUpdate_Success(t *testing.T) {
 }
 
 func TestGitTargetUpdate_MissingBranch(t *testing.T) {
-	ops := resolveOK()
-	handler := handleGitTargetUpdate(ops)
+	svc := &mockAgentService{}
+	handler := handleGitTargetUpdate(svc)
 
 	body := `{}`
 	req := httptest.NewRequest(http.MethodPatch, "/api/agents/test-agent/git/target", strings.NewReader(body))
@@ -1077,14 +1089,12 @@ func TestGitTargetUpdate_MissingBranch(t *testing.T) {
 }
 
 func TestGitTargetUpdate_NotWorkspaceMode(t *testing.T) {
-	wt := testWorktree()
-	wt.IsWorkspace = false
-	ops := &mockGitOps{
-		resolveFunc: func(name string) (*AgentWorktree, error) {
-			return wt, nil
+	svc := &mockAgentService{
+		setTargetBranchFunc: func(ctx context.Context, wsID, agentName, branch string) error {
+			return &service.ServiceError{Kind: service.KindValidation, Message: "target branch can only be changed in workspace mode"}
 		},
 	}
-	handler := handleGitTargetUpdate(ops)
+	handler := handleGitTargetUpdate(svc)
 
 	body := `{"branch": "develop"}`
 	req := httptest.NewRequest(http.MethodPatch, "/api/agents/test-agent/git/target", strings.NewReader(body))
@@ -1108,11 +1118,12 @@ func TestGitTargetUpdate_NotWorkspaceMode(t *testing.T) {
 }
 
 func TestGitTargetUpdate_SetError(t *testing.T) {
-	ops := resolveOK()
-	ops.setRepoDefaultFunc = func(repoName, branch string) error {
-		return errors.New("branch not found")
+	svc := &mockAgentService{
+		setTargetBranchFunc: func(ctx context.Context, wsID, agentName, branch string) error {
+			return errors.New("branch not found")
+		},
 	}
-	handler := handleGitTargetUpdate(ops)
+	handler := handleGitTargetUpdate(svc)
 
 	body := `{"branch": "nonexistent"}`
 	req := httptest.NewRequest(http.MethodPatch, "/api/agents/test-agent/git/target", strings.NewReader(body))
@@ -1128,8 +1139,8 @@ func TestGitTargetUpdate_SetError(t *testing.T) {
 }
 
 func TestGitTargetUpdate_InvalidBody(t *testing.T) {
-	ops := resolveOK()
-	handler := handleGitTargetUpdate(ops)
+	svc := &mockAgentService{}
+	handler := handleGitTargetUpdate(svc)
 
 	body := `{invalid json`
 	req := httptest.NewRequest(http.MethodPatch, "/api/agents/test-agent/git/target", strings.NewReader(body))
@@ -1155,7 +1166,7 @@ func TestGitTargetUpdate_InvalidBody(t *testing.T) {
 // --- Validate Content-Type ---
 
 func TestGitHandlers_ContentType(t *testing.T) {
-	ops := resolveOK()
+	svc := &mockAgentService{}
 
 	tests := []struct {
 		name    string
@@ -1163,12 +1174,12 @@ func TestGitHandlers_ContentType(t *testing.T) {
 		method  string
 		path    string
 	}{
-		{"push", handleGitPush(ops), http.MethodPost, "/api/agents/test-agent/git/push"},
-		{"pull", handleGitPull(ops), http.MethodPost, "/api/agents/test-agent/git/pull"},
-		{"sync", handleGitSync(ops), http.MethodPost, "/api/agents/test-agent/git/sync"},
-		{"pr", handleGitPR(ops), http.MethodPost, "/api/agents/test-agent/git/pr"},
-		{"reset", handleGitReset(ops), http.MethodPost, "/api/agents/test-agent/git/reset"},
-		{"status", handleGitStatus(ops), http.MethodGet, "/api/agents/test-agent/git/status"},
+		{"push", handleGitPush(svc), http.MethodPost, "/api/agents/test-agent/git/push"},
+		{"pull", handleGitPull(svc), http.MethodPost, "/api/agents/test-agent/git/pull"},
+		{"sync", handleGitSync(svc), http.MethodPost, "/api/agents/test-agent/git/sync"},
+		{"pr", handleGitPR(svc), http.MethodPost, "/api/agents/test-agent/git/pr"},
+		{"reset", handleGitReset(svc), http.MethodPost, "/api/agents/test-agent/git/reset"},
+		{"status", handleGitStatus(svc), http.MethodGet, "/api/agents/test-agent/git/status"},
 	}
 
 	for _, tt := range tests {
@@ -1191,20 +1202,22 @@ func TestGitHandlers_ContentType(t *testing.T) {
 // --- Push All tests ---
 
 func TestGitPushAll_Success(t *testing.T) {
-	ops := &mockGitOps{
-		listAgentWorktreesFunc: func() ([]AgentWorktree, error) {
-			return []AgentWorktree{
-				{Name: "falcon", Path: "/tmp/wt/falcon", Branch: "falcon", DefaultBranch: "main", Remote: "origin"},
-				{Name: "nova", Path: "/tmp/wt/nova", Branch: "nova", DefaultBranch: "main", Remote: "origin"},
+	svc := &mockAgentService{
+		gitPushAllFunc: func(ctx context.Context, wsID string) (*GitPushAllResult, error) {
+			return &GitPushAllResult{
+				Pushed: 2,
+				Failed: 0,
+				Results: []GitPushAllWorktreeResult{
+					{Name: "falcon", Success: true, Message: "merged"},
+					{Name: "nova", Success: true, Message: "merged"},
+				},
 			}, nil
 		},
-		pushFunc: func(worktreePath, sourceBranch, targetBranch, remote string) (*GitPushResult, error) {
-			return &GitPushResult{Success: true, Message: "merged"}, nil
-		},
 	}
-	handler := handleGitPushAll(ops)
+	handler := handleGitPushAll(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/git/push-all", nil)
+	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -1213,7 +1226,7 @@ func TestGitPushAll_Success(t *testing.T) {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
 
-	var resp pushAllResponse
+	var resp GitPushAllResult
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode error: %v", err)
 	}
@@ -1229,23 +1242,22 @@ func TestGitPushAll_Success(t *testing.T) {
 }
 
 func TestGitPushAll_PartialFailure(t *testing.T) {
-	ops := &mockGitOps{
-		listAgentWorktreesFunc: func() ([]AgentWorktree, error) {
-			return []AgentWorktree{
-				{Name: "falcon", Path: "/tmp/wt/falcon", Branch: "falcon", DefaultBranch: "main", Remote: "origin"},
-				{Name: "nova", Path: "/tmp/wt/nova", Branch: "nova", DefaultBranch: "main", Remote: "origin"},
+	svc := &mockAgentService{
+		gitPushAllFunc: func(ctx context.Context, wsID string) (*GitPushAllResult, error) {
+			return &GitPushAllResult{
+				Pushed: 1,
+				Failed: 1,
+				Results: []GitPushAllWorktreeResult{
+					{Name: "falcon", Success: true, Message: "merged"},
+					{Name: "nova", Success: false, Error: "remote unreachable"},
+				},
 			}, nil
 		},
-		pushFunc: func(worktreePath, sourceBranch, targetBranch, remote string) (*GitPushResult, error) {
-			if sourceBranch == "nova" {
-				return nil, errors.New("remote unreachable")
-			}
-			return &GitPushResult{Success: true, Message: "merged"}, nil
-		},
 	}
-	handler := handleGitPushAll(ops)
+	handler := handleGitPushAll(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/git/push-all", nil)
+	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -1254,7 +1266,7 @@ func TestGitPushAll_PartialFailure(t *testing.T) {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
 
-	var resp pushAllResponse
+	var resp GitPushAllResult
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode error: %v", err)
 	}
@@ -1267,14 +1279,19 @@ func TestGitPushAll_PartialFailure(t *testing.T) {
 }
 
 func TestGitPushAll_EmptyWorktreeList(t *testing.T) {
-	ops := &mockGitOps{
-		listAgentWorktreesFunc: func() ([]AgentWorktree, error) {
-			return []AgentWorktree{}, nil
+	svc := &mockAgentService{
+		gitPushAllFunc: func(ctx context.Context, wsID string) (*GitPushAllResult, error) {
+			return &GitPushAllResult{
+				Pushed:  0,
+				Failed:  0,
+				Results: []GitPushAllWorktreeResult{},
+			}, nil
 		},
 	}
-	handler := handleGitPushAll(ops)
+	handler := handleGitPushAll(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/git/push-all", nil)
+	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -1283,7 +1300,7 @@ func TestGitPushAll_EmptyWorktreeList(t *testing.T) {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
 
-	var resp pushAllResponse
+	var resp GitPushAllResult
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode error: %v", err)
 	}
@@ -1296,19 +1313,21 @@ func TestGitPushAll_EmptyWorktreeList(t *testing.T) {
 }
 
 func TestGitPushAll_AllUpToDate(t *testing.T) {
-	ops := &mockGitOps{
-		listAgentWorktreesFunc: func() ([]AgentWorktree, error) {
-			return []AgentWorktree{
-				{Name: "falcon", Path: "/tmp/wt/falcon", Branch: "falcon", DefaultBranch: "main", Remote: "origin"},
+	svc := &mockAgentService{
+		gitPushAllFunc: func(ctx context.Context, wsID string) (*GitPushAllResult, error) {
+			return &GitPushAllResult{
+				Pushed: 0,
+				Failed: 0,
+				Results: []GitPushAllWorktreeResult{
+					{Name: "falcon", Success: true, Message: "already up to date"},
+				},
 			}, nil
 		},
-		pushFunc: func(worktreePath, sourceBranch, targetBranch, remote string) (*GitPushResult, error) {
-			return &GitPushResult{Success: true, AlreadyUpToDate: true, Message: "already up to date"}, nil
-		},
 	}
-	handler := handleGitPushAll(ops)
+	handler := handleGitPushAll(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/git/push-all", nil)
+	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -1317,7 +1336,7 @@ func TestGitPushAll_AllUpToDate(t *testing.T) {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
 
-	var resp pushAllResponse
+	var resp GitPushAllResult
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode error: %v", err)
 	}
@@ -1336,14 +1355,15 @@ func TestGitPushAll_AllUpToDate(t *testing.T) {
 }
 
 func TestGitPushAll_ListError(t *testing.T) {
-	ops := &mockGitOps{
-		listAgentWorktreesFunc: func() ([]AgentWorktree, error) {
+	svc := &mockAgentService{
+		gitPushAllFunc: func(ctx context.Context, wsID string) (*GitPushAllResult, error) {
 			return nil, errors.New("config not found")
 		},
 	}
-	handler := handleGitPushAll(ops)
+	handler := handleGitPushAll(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/git/push-all", nil)
+	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -1371,7 +1391,7 @@ func TestResolveAgent_WorkspaceScoped(t *testing.T) {
 		},
 	}
 
-	handler := handleGitPush(captureOps)
+	handler := resolveAgentTestHandler(captureOps)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/push", nil)
 	req.SetPathValue("name", "test-agent")
@@ -1396,7 +1416,7 @@ func TestResolveAgent_NoWorkspace_Returns400(t *testing.T) {
 		},
 	}
 
-	handler := handleGitPush(ops)
+	handler := resolveAgentTestHandler(ops)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/push", nil)
 	req.SetPathValue("name", "test-agent")
@@ -1411,26 +1431,20 @@ func TestResolveAgent_NoWorkspace_Returns400(t *testing.T) {
 }
 
 func TestHandleGitPushAll_WorkspaceScoped(t *testing.T) {
-	var capturedWorkspaceID string
-	ops := &mockGitOps{
-		pushFunc: func(worktreePath, sourceBranch, targetBranch, remote string) (*GitPushResult, error) {
-			return &GitPushResult{Success: true, Message: "merged"}, nil
+	var capturedWSID string
+	svc := &mockAgentService{
+		gitPushAllFunc: func(ctx context.Context, wsID string) (*GitPushAllResult, error) {
+			capturedWSID = wsID
+			return &GitPushAllResult{
+				Pushed: 1,
+				Results: []GitPushAllWorktreeResult{
+					{Name: "falcon", Success: true, Message: "merged"},
+				},
+			}, nil
 		},
-	}
-	captureOps := &wsCaptureMockGitOps{
-		mockGitOps: ops,
-		captureListWS: func(wsID string) {
-			capturedWorkspaceID = wsID
-		},
-	}
-	// Set up list to return worktrees.
-	ops.listAgentWorktreesFunc = func() ([]AgentWorktree, error) {
-		return []AgentWorktree{
-			{Name: "falcon", Path: "/tmp/wt/falcon", Branch: "falcon", DefaultBranch: "main", Remote: "origin"},
-		}, nil
 	}
 
-	handler := handleGitPushAll(captureOps)
+	handler := handleGitPushAll(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/git/push-all", nil)
 	req = req.WithContext(WithWorkspace(req.Context(), "ws-prod"))
@@ -1441,29 +1455,21 @@ func TestHandleGitPushAll_WorkspaceScoped(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
-	if capturedWorkspaceID != "ws-prod" {
-		t.Errorf("capturedWorkspaceID = %q, want %q", capturedWorkspaceID, "ws-prod")
+	if capturedWSID != "ws-prod" {
+		t.Errorf("capturedWSID = %q, want %q", capturedWSID, "ws-prod")
 	}
 }
 
 func TestHandleGitTargetUpdate_WorkspaceScoped(t *testing.T) {
-	var capturedWorkspaceID string
-	ops := &mockGitOps{
-		resolveFunc: func(name string) (*AgentWorktree, error) {
-			return testWorktree(), nil
+	var capturedWSID string
+	svc := &mockAgentService{
+		setTargetBranchFunc: func(ctx context.Context, wsID, agentName, branch string) error {
+			capturedWSID = wsID
+			return nil
 		},
-	}
-	captureOps := &wsCaptureMockGitOps{
-		mockGitOps: ops,
-		captureSetRepoWS: func(wsID string) {
-			capturedWorkspaceID = wsID
-		},
-	}
-	ops.setRepoDefaultFunc = func(repoName, branch string) error {
-		return nil
 	}
 
-	handler := handleGitTargetUpdate(captureOps)
+	handler := handleGitTargetUpdate(svc)
 
 	body := `{"branch": "develop"}`
 	req := httptest.NewRequest(http.MethodPatch, "/api/agents/test-agent/git/target", strings.NewReader(body))
@@ -1476,8 +1482,8 @@ func TestHandleGitTargetUpdate_WorkspaceScoped(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body = %s", w.Code, http.StatusOK, w.Body.String())
 	}
-	if capturedWorkspaceID != "ws-staging" {
-		t.Errorf("capturedWorkspaceID = %q, want %q", capturedWorkspaceID, "ws-staging")
+	if capturedWSID != "ws-staging" {
+		t.Errorf("capturedWSID = %q, want %q", capturedWSID, "ws-staging")
 	}
 }
 
@@ -1513,21 +1519,20 @@ func (m *wsCaptureMockGitOps) SetRepoDefaultBranch(workspaceID, repoName, branch
 }
 
 func TestGitPushAll_DefaultRemote(t *testing.T) {
-	var capturedRemote string
-	ops := &mockGitOps{
-		listAgentWorktreesFunc: func() ([]AgentWorktree, error) {
-			return []AgentWorktree{
-				{Name: "falcon", Path: "/tmp/wt/falcon", Branch: "falcon", DefaultBranch: "main", Remote: ""},
+	svc := &mockAgentService{
+		gitPushAllFunc: func(ctx context.Context, wsID string) (*GitPushAllResult, error) {
+			return &GitPushAllResult{
+				Pushed: 1,
+				Results: []GitPushAllWorktreeResult{
+					{Name: "falcon", Success: true, Message: "merged"},
+				},
 			}, nil
 		},
-		pushFunc: func(worktreePath, sourceBranch, targetBranch, remote string) (*GitPushResult, error) {
-			capturedRemote = remote
-			return &GitPushResult{Success: true, Message: "merged"}, nil
-		},
 	}
-	handler := handleGitPushAll(ops)
+	handler := handleGitPushAll(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/git/push-all", nil)
+	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -1535,7 +1540,12 @@ func TestGitPushAll_DefaultRemote(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
-	if capturedRemote != "origin" {
-		t.Errorf("remote = %q, want %q", capturedRemote, "origin")
+
+	var resp GitPushAllResult
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if resp.Pushed != 1 {
+		t.Errorf("pushed = %d, want 1", resp.Pushed)
 	}
 }

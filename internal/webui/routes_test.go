@@ -1858,7 +1858,7 @@ func TestLegacyFlatAgentRoutesRemoved(t *testing.T) {
 	gitOps := &mockGitOps{}
 	fileOps := &mockFileOps{}
 
-	app := &Server{multiPool: multiPool, config: ServerConfig{GitOps: gitOps, FileOps: fileOps}, wsExistsFn: wsExistsFn}
+	app := &Server{multiPool: multiPool, config: ServerConfig{GitOps: gitOps, FileOps: fileOps}, wsExistsFn: wsExistsFn, agentSvc: NewAgentService(gitOps, nil, nil)}
 	setupTestRoutes(t, app)
 
 	// Legacy flat routes that should have been removed — each must return 404.

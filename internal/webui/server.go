@@ -43,6 +43,7 @@ type Server struct {
 
 	// Service layer
 	issueSvc service.IssueService
+	agentSvc AgentService
 
 	// Real-time
 	hub               *SSEHub
