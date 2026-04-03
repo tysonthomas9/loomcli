@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"math/rand"
@@ -117,12 +118,24 @@ func ensureDaemonForWorkspace(ctx context.Context, wsDir string, timeout time.Du
 			return fmt.Errorf("daemon in %s did not become ready within %s", wsDir, timeout)
 		case <-ticker.C:
 			check := execCommand(wsDir, "bd", "daemon", "status", "--json")
-			if check.Err == nil && strings.Contains(check.Stdout, `"status":"running"`) {
+			if check.Err == nil && isDaemonStatusRunning(check.Stdout) {
 				slog.Info("bd daemon started for workspace", "path", wsDir)
 				return nil
 			}
 		}
 	}
+}
+
+// isDaemonStatusRunning parses bd daemon status JSON and checks if running.
+// Uses JSON unmarshal instead of string matching to handle pretty-printed output.
+func isDaemonStatusRunning(jsonOutput string) bool {
+	var status struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(jsonOutput), &status); err != nil {
+		return false
+	}
+	return status.Status == "running"
 }
 
 // ensureCurrentProjectRegistered registers the current working directory as a workspace
