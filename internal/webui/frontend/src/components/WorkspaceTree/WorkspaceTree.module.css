@@ -418,6 +418,32 @@
   letter-spacing: 0.03em;
 }
 
+.errorDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-danger, #dc2626);
+  flex-shrink: 0;
+  margin-left: 4px;
+}
+
+.stateSpinner {
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid var(--color-border);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: wsStateSpin 0.8s linear infinite;
+  flex-shrink: 0;
+  margin-left: 4px;
+}
+
+@keyframes wsStateSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .overflowButton {
   display: flex;
   align-items: center;

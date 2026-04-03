@@ -7,6 +7,7 @@ import (
 	"sort"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 )
 
@@ -121,6 +122,7 @@ func buildWorkspaceSummaries(cfg *config.LoomConfig, activeWS string) []ops.Work
 		summaries = append(summaries, ops.WorkspaceSummary{
 			ID: w.ID, Name: name, Path: w.Path, Active: name == activeWS,
 			RepoCount: len(w.Repos), IsDefault: name == cfg.DefaultWorkspace, Backend: w.Backend,
+			State: workspace.WSState(w.State), ErrorMessage: w.ErrorMessage,
 		})
 	}
 	SortWorkspaceSummaries(summaries, cfg.WorkspaceOrder)

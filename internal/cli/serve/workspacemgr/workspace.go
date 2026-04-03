@@ -299,17 +299,29 @@ func createEmptyWorkspace(ctx context.Context, cfg *config.LoomConfig, wsName, w
 		return service.WorkspaceCreateResult{}, nil, nil, err
 	}
 
+	// Phase 1: persist a creating-state record BEFORE filesystem ops so a crash
+	// mid-creation leaves a recoverable surface for RecoverIncompleteWorkspaces.
+	wsID, err := beginWorkspaceCreate(cfg, wsName, wsDir, nil, save)
+	if err != nil {
+		return service.WorkspaceCreateResult{}, nil, nil, err
+	}
+	markErr := makeErrorMarker(cfg, wsName, save)
+
 	if err := os.MkdirAll(wsDir, 0755); err != nil {
+		markErr(fmt.Sprintf("cannot create directory: %v", err))
 		return service.WorkspaceCreateResult{}, nil, nil, fmt.Errorf("cannot create workspace directory: %w", err)
 	}
+
+	transitionState(cfg, wsName, config.WorkspaceStateCloning, save)
 
 	created, repos, err := addWorktrees(ctx, resolved, wsDir, branch)
 	if err != nil {
 		cleanupWorktrees(wsDir, created)
+		markErr(err.Error())
 		return service.WorkspaceCreateResult{}, nil, nil, err
 	}
 
-	return finalizeWorkspace(cfg, wsName, wsDir, repos, created, save)
+	return finalizeWorkspace(cfg, wsName, wsDir, wsID, repos, created, save)
 }
 
 // addWorktrees creates git worktrees for each resolved repo in the workspace directory.
@@ -350,21 +362,23 @@ func initWorkspaceBeads(wsDir string, repos []config.RepoConfig) {
 	}
 }
 
-// finalizeWorkspace performs bd init, config save, and daemon start for a new workspace.
+// finalizeWorkspace performs bd init and writes the workspace into config with
+// state=initializing. Async daemon startup will transition it to ready.
 // Returns the repos and generated agent names so the daemon-start goroutine can
 // create per-agent worktrees before running bd repo sync.
-func finalizeWorkspace(cfg *config.LoomConfig, wsName, wsDir string, repos []config.RepoConfig, created []createdWorktree, save func(*config.LoomConfig) error) (service.WorkspaceCreateResult, []config.RepoConfig, []string, error) {
+func finalizeWorkspace(cfg *config.LoomConfig, wsName, wsDir, wsID string, repos []config.RepoConfig, created []createdWorktree, save func(*config.LoomConfig) error) (service.WorkspaceCreateResult, []config.RepoConfig, []string, error) {
+	transitionState(cfg, wsName, config.WorkspaceStateInitializing, save)
+
 	initWorkspaceBeads(wsDir, repos)
 	agentNames, err := workspace.WriteLoomYaml(wsDir)
 	if err != nil {
 		slog.Warn("failed to write loom.yaml for workspace", "workspace", wsName, "err", err)
 	}
 
-	wsID := config.NewWorkspaceID()
-	cfg.Workspaces[wsName] = config.WorkspaceConfig{ID: wsID, Path: wsDir, Repos: repos}
-	if len(cfg.Workspaces) == 1 {
-		cfg.DefaultWorkspace = wsName
-	}
+	// Update existing workspace entry with repos; keep state=initializing.
+	ws := cfg.Workspaces[wsName]
+	ws.Repos = repos
+	cfg.Workspaces[wsName] = ws
 
 	if err := save(cfg); err != nil {
 		cleanupWorktrees(wsDir, created)
@@ -372,6 +386,57 @@ func finalizeWorkspace(cfg *config.LoomConfig, wsName, wsDir string, repos []con
 	}
 
 	return service.WorkspaceCreateResult{WorkspaceID: wsID, WorkspacePath: wsDir, DeferDaemonStart: true}, repos, agentNames, nil
+}
+
+// beginWorkspaceCreate persists the workspace with state=creating before any
+// filesystem operations. Stores cloneURLs (if any) for future retry support.
+// Returns the generated workspace UUID.
+func beginWorkspaceCreate(cfg *config.LoomConfig, wsName, wsDir string, cloneURLs []string, save func(*config.LoomConfig) error) (string, error) {
+	wsID := config.NewWorkspaceID()
+	cfg.Workspaces[wsName] = config.WorkspaceConfig{
+		ID: wsID, Path: wsDir, State: config.WorkspaceStateCreating, CloneURLs: cloneURLs,
+	}
+	if len(cfg.Workspaces) == 1 {
+		cfg.DefaultWorkspace = wsName
+	}
+	if err := save(cfg); err != nil {
+		return "", workspaceerrors.New(workspaceerrors.ConfigFailed, "failed to save config", err)
+	}
+	return wsID, nil
+}
+
+// transitionState updates the workspace state in cfg and saves. Logs and
+// continues on save failure — state transitions are best-effort progress
+// markers, not load-bearing for correctness of the create flow itself.
+func transitionState(cfg *config.LoomConfig, wsName string, state config.WorkspaceState, save func(*config.LoomConfig) error) {
+	ws, ok := cfg.Workspaces[wsName]
+	if !ok {
+		return
+	}
+	ws.State = state
+	cfg.Workspaces[wsName] = ws
+	if err := save(cfg); err != nil {
+		slog.Error("workspace state transition save failed", "workspace", wsName, "state", state, "err", err)
+		return
+	}
+	slog.Info("workspace state transition", "workspace", wsName, "state", state)
+}
+
+// makeErrorMarker returns a closure that marks the workspace as errored with
+// the given message. Used by failure paths during synchronous create.
+func makeErrorMarker(cfg *config.LoomConfig, wsName string, save func(*config.LoomConfig) error) func(string) {
+	return func(msg string) {
+		ws, ok := cfg.Workspaces[wsName]
+		if !ok {
+			return
+		}
+		ws.State = config.WorkspaceStateError
+		ws.ErrorMessage = msg
+		cfg.Workspaces[wsName] = ws
+		if err := save(cfg); err != nil {
+			slog.Error("failed to mark workspace error", "workspace", wsName, "err", err)
+		}
+	}
 }
 
 // cleanupWorktrees removes created worktrees and the workspace directory on failure.
@@ -403,10 +468,14 @@ func startDaemonAsync(timeout time.Duration, wsName, wsDir string, repos []confi
 		workspace.CreateAgentWorktrees(wsDir, repos, agentNames)
 		if err := workspace.EnsureDaemonForWorkspace(deps, context.Background(), wsDir, timeout); err != nil {
 			slog.Warn("failed to start daemon for workspace", "workspace", wsName, "err", err)
-			return
-		}
-		if result := deps.Exec.Run(wsDir, "bd", "repo", "sync"); result.Err != nil {
+		} else if result := deps.Exec.Run(wsDir, "bd", "repo", "sync"); result.Err != nil {
 			slog.Warn("bd repo sync failed", "workspace", wsName, "err", result.Err)
+		}
+		// Mark ready even if daemon/sync failed — the workspace itself is created.
+		// Daemon health is surfaced separately; trapping a workspace in
+		// "initializing" forever would prevent the user from seeing or fixing it.
+		if err := workspace.SetWorkspaceState(wsName, config.WorkspaceStateReady, ""); err != nil {
+			slog.Error("failed to mark workspace ready", "workspace", wsName, "err", err)
 		}
 	}()
 }
@@ -440,17 +509,27 @@ func createCloneWorkspace(ctx context.Context, cfg *config.LoomConfig, wsName, w
 		return service.WorkspaceCreateResult{}, nil, nil, err
 	}
 
+	wsID, err := beginWorkspaceCreate(cfg, wsName, wsDir, cloneURLs, save)
+	if err != nil {
+		return service.WorkspaceCreateResult{}, nil, nil, err
+	}
+	markErr := makeErrorMarker(cfg, wsName, save)
+
 	if err := os.MkdirAll(wsDir, 0755); err != nil {
+		markErr(fmt.Sprintf("cannot create directory: %v", err))
 		return service.WorkspaceCreateResult{}, nil, nil, fmt.Errorf("cannot create workspace directory: %w", err)
 	}
+
+	transitionState(cfg, wsName, config.WorkspaceStateCloning, save)
 
 	repos, err := cloneRepos(ctx, cloneURLs, wsDir)
 	if err != nil {
 		cleanupCloneDir(wsDir)
+		markErr(err.Error())
 		return service.WorkspaceCreateResult{}, nil, nil, err
 	}
 
-	return finalizeWorkspace(cfg, wsName, wsDir, repos, nil, save)
+	return finalizeWorkspace(cfg, wsName, wsDir, wsID, repos, nil, save)
 }
 
 // cloneRepos clones each URL into the workspace directory, deduplicating names.

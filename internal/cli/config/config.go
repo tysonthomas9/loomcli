@@ -51,12 +51,26 @@ type LoomConfig struct {
 	DefaultWorkspaceID string `yaml:"-" json:"-"`
 }
 
-// WorkspaceConfig defines a named workspace containing multiple repos
+// WorkspaceState represents the lifecycle state of a workspace.
+type WorkspaceState string
+
+const (
+	WorkspaceStateCreating     WorkspaceState = "creating"
+	WorkspaceStateCloning      WorkspaceState = "cloning"
+	WorkspaceStateInitializing WorkspaceState = "initializing"
+	WorkspaceStateReady        WorkspaceState = "ready"
+	WorkspaceStateError        WorkspaceState = "error"
+)
+
+// WorkspaceConfig defines a named workspace containing multiple repos.
 type WorkspaceConfig struct {
-	ID      string       `yaml:"id,omitempty" json:"id,omitempty"`           // Stable UUID, generated at creation, never changes
-	Path    string       `yaml:"path" json:"path"`                           // Directory path for this workspace
-	Backend string       `yaml:"backend,omitempty" json:"backend,omitempty"` // AI backend override for this workspace
-	Repos   []RepoConfig `yaml:"repos" json:"repos"`                         // Repositories in this workspace
+	ID           string         `yaml:"id,omitempty" json:"id,omitempty"`                       // Stable UUID, generated at creation, never changes
+	Path         string         `yaml:"path" json:"path"`                                       // Directory path for this workspace
+	Backend      string         `yaml:"backend,omitempty" json:"backend,omitempty"`             // AI backend override for this workspace
+	Repos        []RepoConfig   `yaml:"repos" json:"repos"`                                     // Repositories in this workspace
+	State        WorkspaceState `yaml:"state,omitempty" json:"state,omitempty"`                 // Lifecycle state (empty/"" = ready)
+	ErrorMessage string         `yaml:"error_message,omitempty" json:"error_message,omitempty"` // Error detail when State=error
+	CloneURLs    []string       `yaml:"clone_urls,omitempty" json:"clone_urls,omitempty"`       // Original clone URLs (for retry)
 }
 
 // RepoConfig defines a single repository within a workspace

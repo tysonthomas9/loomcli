@@ -22,13 +22,15 @@ type WorkspaceResponse struct {
 
 // WorkspaceSummary is a lightweight summary of a configured workspace.
 type WorkspaceSummary struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Path      string `json:"path"`
-	Active    bool   `json:"active"`
-	RepoCount int    `json:"repo_count"`
-	IsDefault bool   `json:"is_default"`
-	Backend   string `json:"backend,omitempty"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Path         string `json:"path"`
+	Active       bool   `json:"active"`
+	RepoCount    int    `json:"repo_count"`
+	IsDefault    bool   `json:"is_default"`
+	Backend      string `json:"backend,omitempty"`
+	State        string `json:"state,omitempty"`
+	ErrorMessage string `json:"error_message,omitempty"`
 }
 
 // WorkspaceRepo represents a repository within a workspace.
