@@ -106,9 +106,10 @@ async function fetchApi<T>(
 
   const clearTimeoutCleanup = () => clearTimeout(timeoutId);
 
-  const signal = options.signal
-    ? AbortSignal.any([controller.signal, options.signal])
-    : controller.signal;
+  const signal =
+    options.signal instanceof AbortSignal
+      ? AbortSignal.any([controller.signal, options.signal])
+      : controller.signal;
 
   try {
     const headers: Record<string, string> = {
