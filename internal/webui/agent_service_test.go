@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -120,9 +121,9 @@ func TestAgentService_GenerateTerminalToken(t *testing.T) {
 	})
 
 	t.Run("valid generates token", func(t *testing.T) {
-		ta, err := newTerminalAuth()
+		ta, err := realtime.NewTerminalAuth()
 		if err != nil {
-			t.Fatalf("newTerminalAuth: %v", err)
+			t.Fatalf("NewTerminalAuth: %v", err)
 		}
 		defer ta.Stop()
 

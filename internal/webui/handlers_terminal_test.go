@@ -20,6 +20,7 @@ import (
 	"nhooyr.io/websocket"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
@@ -1757,12 +1758,7 @@ func TestHandleTerminalWS_SSEBroadcastOnIssueSession(t *testing.T) {
 
 	// Register an SSE client on the hub to capture broadcast events.
 	// WorkspaceID must match the workspace in the tab metadata ("default").
-	client := &SSEClient{
-		id:          1,
-		send:        make(chan *MutationPayload, 64),
-		done:        make(chan struct{}),
-		workspaceID: "default",
-	}
+	client := realtime.NewClient(1, 64, 0, nil, "default")
 	hub.RegisterClient(client)
 	defer hub.UnregisterClient(client)
 
@@ -1790,7 +1786,7 @@ func TestHandleTerminalWS_SSEBroadcastOnIssueSession(t *testing.T) {
 
 	// Wait for the SSE broadcast to arrive.
 	select {
-	case mutation := <-client.send:
+	case mutation := <-client.Send():
 		if mutation.Type != "terminal_session_change" {
 			t.Errorf("expected type %q, got %q", "terminal_session_change", mutation.Type)
 		}
@@ -1838,11 +1834,7 @@ func TestHandleTerminalWS_NoSSEBroadcastWithoutIssueID(t *testing.T) {
 		t.Fatalf("failed to set tab metadata: %v", err)
 	}
 
-	client := &SSEClient{
-		id:   1,
-		send: make(chan *MutationPayload, 64),
-		done: make(chan struct{}),
-	}
+	client := realtime.NewClient(1, 64, 0, nil, "")
 	hub.RegisterClient(client)
 	defer hub.UnregisterClient(client)
 
@@ -1868,7 +1860,7 @@ func TestHandleTerminalWS_NoSSEBroadcastWithoutIssueID(t *testing.T) {
 
 	// No SSE event should arrive within a reasonable timeout.
 	select {
-	case mutation := <-client.send:
+	case mutation := <-client.Send():
 		t.Errorf("unexpected SSE broadcast: type=%q issue_id=%q", mutation.Type, mutation.IssueID)
 	case <-time.After(500 * time.Millisecond):
 		// Success: no broadcast was sent.
@@ -1928,11 +1920,7 @@ func TestHandleTerminalWS_NoSSEBroadcastWhenMetadataNotFound(t *testing.T) {
 	store, hub := setupTabMetaTest(t)
 	// Do NOT populate metadata for the session — store.Get will return nil.
 
-	client := &SSEClient{
-		id:   1,
-		send: make(chan *MutationPayload, 64),
-		done: make(chan struct{}),
-	}
+	client := realtime.NewClient(1, 64, 0, nil, "")
 	hub.RegisterClient(client)
 	defer hub.UnregisterClient(client)
 
@@ -1958,7 +1946,7 @@ func TestHandleTerminalWS_NoSSEBroadcastWhenMetadataNotFound(t *testing.T) {
 
 	// No SSE event should arrive.
 	select {
-	case mutation := <-client.send:
+	case mutation := <-client.Send():
 		t.Errorf("unexpected SSE broadcast: type=%q issue_id=%q", mutation.Type, mutation.IssueID)
 	case <-time.After(500 * time.Millisecond):
 		// Success: no broadcast was sent.
@@ -2000,12 +1988,7 @@ func TestHandleTerminalWS_SSEBroadcastNonDefaultWorkspace(t *testing.T) {
 	}
 
 	// Register an SSE client on the hub subscribed to workspace "myproject".
-	client := &SSEClient{
-		id:          1,
-		send:        make(chan *MutationPayload, 64),
-		done:        make(chan struct{}),
-		workspaceID: "myproject",
-	}
+	client := realtime.NewClient(1, 64, 0, nil, "myproject")
 	hub.RegisterClient(client)
 	defer hub.UnregisterClient(client)
 
@@ -2034,7 +2017,7 @@ func TestHandleTerminalWS_SSEBroadcastNonDefaultWorkspace(t *testing.T) {
 
 	// Wait for the SSE broadcast to arrive.
 	select {
-	case mutation := <-client.send:
+	case mutation := <-client.Send():
 		if mutation.Type != "terminal_session_change" {
 			t.Errorf("expected type %q, got %q", "terminal_session_change", mutation.Type)
 		}
@@ -2086,12 +2069,7 @@ func TestHandleTerminalWS_SSEBroadcastNoWorkspaceParamUsesDefault(t *testing.T) 
 	}
 
 	// Register an SSE client subscribed to workspace "default".
-	client := &SSEClient{
-		id:          1,
-		send:        make(chan *MutationPayload, 64),
-		done:        make(chan struct{}),
-		workspaceID: "default",
-	}
+	client := realtime.NewClient(1, 64, 0, nil, "default")
 	hub.RegisterClient(client)
 	defer hub.UnregisterClient(client)
 
@@ -2120,7 +2098,7 @@ func TestHandleTerminalWS_SSEBroadcastNoWorkspaceParamUsesDefault(t *testing.T) 
 
 	// Wait for the SSE broadcast to arrive.
 	select {
-	case mutation := <-client.send:
+	case mutation := <-client.Send():
 		if mutation.Type != "terminal_session_change" {
 			t.Errorf("expected type %q, got %q", "terminal_session_change", mutation.Type)
 		}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
 // --- Tests for parseChangedIssues ---
@@ -143,16 +144,11 @@ func TestParseChangedIssues_ExtraFieldsIgnored(t *testing.T) {
 // TestEmitGranularMutations_NewIssue tests that emitGranularMutations broadcasts MutationCreate
 // for an issue not present in knownIssues.
 func TestEmitGranularMutations_NewIssue(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
-	client := &SSEClient{
-		id:          1,
-		send:        make(chan *MutationPayload, 64),
-		done:        make(chan struct{}),
-		workspaceID: "test-ws",
-	}
+	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -169,7 +165,7 @@ func TestEmitGranularMutations_NewIssue(t *testing.T) {
 
 	// Should receive a MutationCreate event
 	select {
-	case received := <-client.send:
+	case received := <-client.Send():
 		if received.Type != rpc.MutationCreate {
 			t.Errorf("expected type %q, got %q", rpc.MutationCreate, received.Type)
 		}
@@ -207,16 +203,11 @@ func TestEmitGranularMutations_NewIssue(t *testing.T) {
 // TestEmitGranularMutations_StatusChange tests that emitGranularMutations broadcasts MutationStatus
 // when the issue's status has changed.
 func TestEmitGranularMutations_StatusChange(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
-	client := &SSEClient{
-		id:          1,
-		send:        make(chan *MutationPayload, 64),
-		done:        make(chan struct{}),
-		workspaceID: "test-ws",
-	}
+	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -234,7 +225,7 @@ func TestEmitGranularMutations_StatusChange(t *testing.T) {
 	subscriber.emitGranularMutations(changed, now, 10)
 
 	select {
-	case received := <-client.send:
+	case received := <-client.Send():
 		if received.Type != rpc.MutationStatus {
 			t.Errorf("expected type %q, got %q", rpc.MutationStatus, received.Type)
 		}
@@ -263,16 +254,11 @@ func TestEmitGranularMutations_StatusChange(t *testing.T) {
 // TestEmitGranularMutations_UpdateNonStatus tests that emitGranularMutations broadcasts MutationUpdate
 // when the issue exists in knownIssues but the status is unchanged.
 func TestEmitGranularMutations_UpdateNonStatus(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
-	client := &SSEClient{
-		id:          1,
-		send:        make(chan *MutationPayload, 64),
-		done:        make(chan struct{}),
-		workspaceID: "test-ws",
-	}
+	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -290,7 +276,7 @@ func TestEmitGranularMutations_UpdateNonStatus(t *testing.T) {
 	subscriber.emitGranularMutations(changed, now, 10)
 
 	select {
-	case received := <-client.send:
+	case received := <-client.Send():
 		if received.Type != rpc.MutationUpdate {
 			t.Errorf("expected type %q, got %q", rpc.MutationUpdate, received.Type)
 		}
@@ -313,16 +299,11 @@ func TestEmitGranularMutations_UpdateNonStatus(t *testing.T) {
 
 // TestEmitGranularMutations_SkipsEmptyID tests that emitGranularMutations skips issues with empty IDs.
 func TestEmitGranularMutations_SkipsEmptyID(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
-	client := &SSEClient{
-		id:          1,
-		send:        make(chan *MutationPayload, 64),
-		done:        make(chan struct{}),
-		workspaceID: "test-ws",
-	}
+	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -339,7 +320,7 @@ func TestEmitGranularMutations_SkipsEmptyID(t *testing.T) {
 
 	// Should NOT receive any broadcast
 	select {
-	case received := <-client.send:
+	case received := <-client.Send():
 		t.Errorf("expected no broadcast for empty-ID issue, but received: %+v", received)
 	case <-time.After(200 * time.Millisecond):
 		// Good — no broadcast
@@ -357,7 +338,7 @@ func TestEmitGranularMutations_SkipsEmptyID(t *testing.T) {
 // TestEmitGranularMutations_UpdatesTrackingState tests that emitGranularMutations updates
 // lastKnownCount and lastPollTime.
 func TestEmitGranularMutations_UpdatesTrackingState(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
@@ -385,16 +366,11 @@ func TestEmitGranularMutations_UpdatesTrackingState(t *testing.T) {
 // TestEmitGranularMutations_MixedMutationTypes tests emitGranularMutations with a mix of
 // new, status-changed, and update issues in a single batch.
 func TestEmitGranularMutations_MixedMutationTypes(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
-	client := &SSEClient{
-		id:          1,
-		send:        make(chan *MutationPayload, 64),
-		done:        make(chan struct{}),
-		workspaceID: "test-ws",
-	}
+	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -415,11 +391,11 @@ func TestEmitGranularMutations_MixedMutationTypes(t *testing.T) {
 	subscriber.emitGranularMutations(changed, now, 15)
 
 	// Collect 3 broadcasts
-	received := make(map[string]*MutationPayload, 3)
+	received := make(map[string]*realtime.MutationPayload, 3)
 	timeout := time.After(1 * time.Second)
 	for i := 0; i < 3; i++ {
 		select {
-		case msg := <-client.send:
+		case msg := <-client.Send():
 			received[msg.IssueID] = msg
 		case <-timeout:
 			t.Fatalf("timed out waiting for broadcast %d/3", i+1)
@@ -446,16 +422,11 @@ func TestEmitGranularMutations_MixedMutationTypes(t *testing.T) {
 // TestBroadcastRefresh tests that broadcastRefresh sends a MutationRefresh event
 // and updates poll state.
 func TestBroadcastRefresh(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
-	client := &SSEClient{
-		id:          1,
-		send:        make(chan *MutationPayload, 64),
-		done:        make(chan struct{}),
-		workspaceID: "test-ws",
-	}
+	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -470,7 +441,7 @@ func TestBroadcastRefresh(t *testing.T) {
 
 	// Should receive MutationRefresh
 	select {
-	case received := <-client.send:
+	case received := <-client.Send():
 		if received.Type != rpc.MutationRefresh {
 			t.Errorf("expected type %q, got %q", rpc.MutationRefresh, received.Type)
 		}
@@ -548,16 +519,11 @@ func TestPollDBChanges_GranularPath_EmitsIndividualMutations(t *testing.T) {
 	pool := newSubscriptionMockPool(socketPath)
 	defer pool.Close()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
-	client := &SSEClient{
-		id:          1,
-		send:        make(chan *MutationPayload, 64),
-		done:        make(chan struct{}),
-		workspaceID: "test-ws",
-	}
+	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -574,11 +540,11 @@ func TestPollDBChanges_GranularPath_EmitsIndividualMutations(t *testing.T) {
 	subscriber.pollDBChanges()
 
 	// Collect 2 granular broadcasts (NOT a MutationRefresh)
-	received := make(map[string]*MutationPayload, 2)
+	received := make(map[string]*realtime.MutationPayload, 2)
 	timeout := time.After(1 * time.Second)
 	for i := 0; i < 2; i++ {
 		select {
-		case msg := <-client.send:
+		case msg := <-client.Send():
 			received[msg.IssueID] = msg
 		case <-timeout:
 			t.Fatalf("timed out waiting for broadcast %d/2", i+1)
@@ -609,7 +575,7 @@ func TestPollDBChanges_GranularPath_EmitsIndividualMutations(t *testing.T) {
 
 	// Ensure no MutationRefresh was sent
 	select {
-	case extra := <-client.send:
+	case extra := <-client.Send():
 		if extra.Type == rpc.MutationRefresh {
 			t.Errorf("did not expect MutationRefresh in granular path, but received one")
 		}
@@ -646,16 +612,11 @@ func TestPollDBChanges_FallbackOnDeletion(t *testing.T) {
 	pool := newSubscriptionMockPool(socketPath)
 	defer pool.Close()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
-	client := &SSEClient{
-		id:          1,
-		send:        make(chan *MutationPayload, 64),
-		done:        make(chan struct{}),
-		workspaceID: "test-ws",
-	}
+	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -672,7 +633,7 @@ func TestPollDBChanges_FallbackOnDeletion(t *testing.T) {
 
 	// Should receive MutationRefresh (not granular mutations)
 	select {
-	case received := <-client.send:
+	case received := <-client.Send():
 		if received.Type != rpc.MutationRefresh {
 			t.Errorf("expected type %q on deletion, got %q", rpc.MutationRefresh, received.Type)
 		}
@@ -755,16 +716,11 @@ func TestPollDBChanges_FallbackOnThresholdExceeded(t *testing.T) {
 	pool := newSubscriptionMockPool(socketPath)
 	defer pool.Close()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
-	client := &SSEClient{
-		id:          1,
-		send:        make(chan *MutationPayload, 256),
-		done:        make(chan struct{}),
-		workspaceID: "test-ws",
-	}
+	client := realtime.NewClient(1, 256, 0, nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -779,7 +735,7 @@ func TestPollDBChanges_FallbackOnThresholdExceeded(t *testing.T) {
 
 	// Should receive MutationRefresh (threshold exceeded)
 	select {
-	case received := <-client.send:
+	case received := <-client.Send():
 		if received.Type != rpc.MutationRefresh {
 			t.Errorf("expected type %q when threshold exceeded, got %q", rpc.MutationRefresh, received.Type)
 		}
@@ -823,16 +779,11 @@ func TestPollDBChanges_FallbackWhenListFails(t *testing.T) {
 	pool := newSubscriptionMockPool(socketPath)
 	defer pool.Close()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
-	client := &SSEClient{
-		id:          1,
-		send:        make(chan *MutationPayload, 64),
-		done:        make(chan struct{}),
-		workspaceID: "test-ws",
-	}
+	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -847,7 +798,7 @@ func TestPollDBChanges_FallbackWhenListFails(t *testing.T) {
 
 	// Should fall back to MutationRefresh
 	select {
-	case received := <-client.send:
+	case received := <-client.Send():
 		if received.Type != rpc.MutationRefresh {
 			t.Errorf("expected type %q when List fails, got %q", rpc.MutationRefresh, received.Type)
 		}
@@ -898,16 +849,11 @@ func TestPollDBChanges_GranularPath_StatusChange(t *testing.T) {
 	pool := newSubscriptionMockPool(socketPath)
 	defer pool.Close()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
-	client := &SSEClient{
-		id:          1,
-		send:        make(chan *MutationPayload, 64),
-		done:        make(chan struct{}),
-		workspaceID: "test-ws",
-	}
+	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -923,7 +869,7 @@ func TestPollDBChanges_GranularPath_StatusChange(t *testing.T) {
 	subscriber.pollDBChanges()
 
 	select {
-	case received := <-client.send:
+	case received := <-client.Send():
 		if received.Type != rpc.MutationStatus {
 			t.Errorf("expected type %q, got %q", rpc.MutationStatus, received.Type)
 		}
@@ -973,16 +919,11 @@ func TestPollDBChanges_CountIncrease_GranularPath(t *testing.T) {
 	pool := newSubscriptionMockPool(socketPath)
 	defer pool.Close()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
-	client := &SSEClient{
-		id:          1,
-		send:        make(chan *MutationPayload, 64),
-		done:        make(chan struct{}),
-		workspaceID: "test-ws",
-	}
+	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -996,11 +937,11 @@ func TestPollDBChanges_CountIncrease_GranularPath(t *testing.T) {
 	subscriber.pollDBChanges()
 
 	// Collect 2 granular broadcasts (MutationCreate for new issues)
-	received := make(map[string]*MutationPayload, 2)
+	received := make(map[string]*realtime.MutationPayload, 2)
 	timeout := time.After(1 * time.Second)
 	for i := 0; i < 2; i++ {
 		select {
-		case msg := <-client.send:
+		case msg := <-client.Send():
 			received[msg.IssueID] = msg
 		case <-timeout:
 			t.Fatalf("timed out waiting for broadcast %d/2", i+1)
@@ -1060,7 +1001,7 @@ func TestLoadKnownIssues(t *testing.T) {
 	pool := newSubscriptionMockPool(socketPath)
 	defer pool.Close()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	subscriber := NewDaemonSubscriber(pool, hub)
 
 	// Load known issues
@@ -1118,7 +1059,7 @@ func TestLoadKnownIssues_SkipsEmptyID(t *testing.T) {
 	pool := newSubscriptionMockPool(socketPath)
 	defer pool.Close()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	subscriber := NewDaemonSubscriber(pool, hub)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -1142,11 +1083,11 @@ func TestLoadKnownIssues_SkipsEmptyID(t *testing.T) {
 	}
 }
 
-// TestMutationPayload_PriorityField tests that MutationPayload correctly serializes/deserializes
+// TestMutationPayload_PriorityField tests that realtime.MutationPayload correctly serializes/deserializes
 // the Priority field as a pointer.
 func TestMutationPayload_PriorityField(t *testing.T) {
 	prio := 3
-	payload := &MutationPayload{
+	payload := &realtime.MutationPayload{
 		Type:     rpc.MutationUpdate,
 		IssueID:  "bd-1",
 		Priority: &prio,
@@ -1157,7 +1098,7 @@ func TestMutationPayload_PriorityField(t *testing.T) {
 		t.Fatalf("failed to marshal: %v", err)
 	}
 
-	var decoded MutationPayload
+	var decoded realtime.MutationPayload
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatalf("failed to unmarshal: %v", err)
 	}
@@ -1170,12 +1111,12 @@ func TestMutationPayload_PriorityField(t *testing.T) {
 	}
 
 	// Test nil priority is omitted
-	payloadNoPrio := &MutationPayload{
+	payloadNoPrio := &realtime.MutationPayload{
 		Type:    rpc.MutationUpdate,
 		IssueID: "bd-2",
 	}
 	data2, _ := json.Marshal(payloadNoPrio)
-	var decoded2 MutationPayload
+	var decoded2 realtime.MutationPayload
 	json.Unmarshal(data2, &decoded2)
 
 	if decoded2.Priority != nil {

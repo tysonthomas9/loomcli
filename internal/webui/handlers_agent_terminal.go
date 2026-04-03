@@ -10,6 +10,7 @@ import (
 	"nhooyr.io/websocket"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
 const (
@@ -94,7 +95,7 @@ func handleGetAgentTerminalToken(svc AgentService) http.HandlerFunc {
 }
 
 // handleAgentTerminalWS streams a live read-only tmux session for an agent.
-func handleAgentTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigins []string) http.HandlerFunc {
+func handleAgentTerminalWS(manager *TerminalManager, auth *realtime.TerminalAuth, allowedOrigins []string) http.HandlerFunc {
 	patterns := originHosts(allowedOrigins)
 
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -180,7 +181,7 @@ func handleAgentTerminalWS(manager *TerminalManager, auth *terminalAuth, allowed
 			slog.Error("failed to accept agent terminal websocket", "err", err)
 			return
 		}
-		conn.SetReadLimit(wsReadLimit)
+		conn.SetReadLimit(realtime.WSReadLimit)
 
 		closeStatus := websocket.StatusInternalError
 		closeReason := "connection closed"
@@ -203,18 +204,19 @@ func handleAgentTerminalWS(manager *TerminalManager, auth *terminalAuth, allowed
 		ctx, cancel := context.WithCancel(r.Context())
 		defer cancel()
 
-		crashCh := make(chan crashInfo, 1)
+		monitor := &terminalMonitor{mgr: manager}
+		crashCh := make(chan realtime.CrashInfo, 1)
 		go func() {
-			result := ptyToWS(ctx, cancel, conn, termSession, manager, nil)
+			result := realtime.PtyToWS(ctx, cancel, conn, termSession.PTY, termSession.Name, monitor, nil)
 			crashCh <- result
 		}()
 
-		wsToPTY(ctx, conn, termSession, manager, connID)
+		realtime.WSToPTY(ctx, conn, termSession.PTY, manager, connID)
 
 		if err := manager.Detach(connID); err != nil {
 			slog.Error("failed to detach agent terminal connection", "conn_id", connID, "err", err)
 		}
 
-		closeStatus, closeReason = (<-crashCh).wsClose()
+		closeStatus, closeReason = (<-crashCh).WSClose()
 	}
 }

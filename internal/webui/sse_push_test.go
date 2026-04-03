@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
 // TestSSE_MutationDelivery_Create verifies that create operations produce mutations
@@ -22,7 +23,7 @@ func TestSSE_MutationDelivery_Create(t *testing.T) {
 	defer cleanup()
 
 	// Create SSE hub
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
@@ -60,9 +61,9 @@ func TestSSE_MutationDelivery_Create(t *testing.T) {
 }
 
 // broadcastMutations converts RPC mutations to payloads and broadcasts them.
-func broadcastMutations(hub *SSEHub, mutations []rpc.MutationEvent) {
+func broadcastMutations(hub *realtime.Hub, mutations []rpc.MutationEvent) {
 	for _, m := range mutations {
-		payload := rpcMutationToPayload(m)
+		payload := realtime.RPCMutationToPayload(m)
 		hub.Broadcast(payload)
 	}
 }
@@ -72,7 +73,7 @@ func TestSSE_MutationDelivery_Update(t *testing.T) {
 	td, cleanup := setupTestDaemon(t)
 	defer cleanup()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
@@ -116,7 +117,7 @@ func TestSSE_MutationDelivery_StatusChange(t *testing.T) {
 	td, cleanup := setupTestDaemon(t)
 	defer cleanup()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
@@ -163,7 +164,7 @@ func TestSSE_MutationDelivery_Close(t *testing.T) {
 	td, cleanup := setupTestDaemon(t)
 	defer cleanup()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
@@ -210,7 +211,7 @@ func TestSSE_MutationDelivery_Delete(t *testing.T) {
 	td, cleanup := setupTestDaemon(t)
 	defer cleanup()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
@@ -251,7 +252,7 @@ func TestSSE_MultipleClients(t *testing.T) {
 	td, cleanup := setupTestDaemon(t)
 	defer cleanup()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
@@ -301,7 +302,7 @@ func TestSSE_UnregisteredClientNoMutations(t *testing.T) {
 	td, cleanup := setupTestDaemon(t)
 	defer cleanup()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
@@ -331,7 +332,7 @@ func TestSSE_TimestampFiltering(t *testing.T) {
 	td, cleanup := setupTestDaemon(t)
 	defer cleanup()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
@@ -374,7 +375,7 @@ func TestSSE_MutationSequence(t *testing.T) {
 	td, cleanup := setupTestDaemon(t)
 	defer cleanup()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
@@ -418,7 +419,7 @@ func TestSSE_ValidTimestampFormat(t *testing.T) {
 	td, cleanup := setupTestDaemon(t)
 	defer cleanup()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 

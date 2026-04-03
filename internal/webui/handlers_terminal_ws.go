@@ -2,7 +2,6 @@ package webui
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -11,9 +10,22 @@ import (
 	"nhooyr.io/websocket"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
+
+// terminalMonitor adapts TerminalManager to the realtime.SessionMonitor interface.
+// Uses the raw internal tmux session name (no prefix applied).
+type terminalMonitor struct {
+	mgr *TerminalManager
+}
+
+func (m *terminalMonitor) HasSession(name string) bool { return m.mgr.tmuxHasSession(name) }
+func (m *terminalMonitor) PaneDead(name string) bool   { return m.mgr.paneDead(name) }
+func (m *terminalMonitor) CapturePaneRaw(name string, lines int) string {
+	return m.mgr.capturePaneRaw(name, lines)
+}
 
 // handleTerminalWS returns a WebSocket handler for terminal relay.
 // It upgrades HTTP connections to WebSocket, bridges them to tmux sessions
@@ -25,7 +37,7 @@ import (
 // whose host portions are used as OriginPatterns for the WebSocket upgrade.
 // When nil or empty, only same-origin and non-browser (no Origin header)
 // connections are accepted.
-func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigins []string, loomServerURL string, workspaceConfigByIDFn func(string) (*service.WorkspaceData, error), tabMetaStore *tabmeta.Store, hub *SSEHub) http.HandlerFunc {
+func handleTerminalWS(manager *TerminalManager, auth *realtime.TerminalAuth, allowedOrigins []string, loomServerURL string, workspaceConfigByIDFn func(string) (*service.WorkspaceData, error), tabMetaStore *tabmeta.Store, hub *realtime.Hub) http.HandlerFunc {
 	// Compute origin host patterns once at construction time.
 	patterns := originHosts(allowedOrigins)
 
@@ -103,7 +115,7 @@ func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigi
 			slog.Error("failed to accept websocket", "err", err)
 			return
 		}
-		conn.SetReadLimit(wsReadLimit)
+		conn.SetReadLimit(realtime.WSReadLimit)
 
 		// Track close status for deferred cleanup
 		closeStatus := websocket.StatusInternalError
@@ -143,177 +155,35 @@ func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigi
 		}
 
 		// Broadcast SSE event if this session is linked to an issue, so indicators update on connect.
-		broadcastSessionIssueEvent(tabMetaStore, hub, workspace, session)
+		realtime.BroadcastSessionIssueEvent(tabMetaStore, hub, workspace, session)
 
 		// Create context for coordinating goroutines
 		ctx, cancel := context.WithCancel(r.Context())
 		defer cancel()
 
 		// Channel to signal when PTY reader finishes and communicate crash state
-		crashCh := make(chan crashInfo, 1)
+		crashCh := make(chan realtime.CrashInfo, 1)
 
 		// Start PTY -> WebSocket goroutine (with scrollback capture)
 		scrollback := manager.GetScrollbackBuffer(session)
+		monitor := &terminalMonitor{mgr: manager}
 		go func() {
-			result := ptyToWS(ctx, cancel, conn, termSession, manager, scrollback)
+			result := realtime.PtyToWS(ctx, cancel, conn, termSession.PTY, termSession.Name, monitor, scrollback)
 			crashCh <- result
 		}()
 
 		// Run WebSocket -> PTY relay (blocks until WebSocket closes)
-		wsToPTY(ctx, conn, termSession, manager, connID)
+		realtime.WSToPTY(ctx, conn, termSession.PTY, manager, connID)
 
-		// WebSocket closed - detach connection to close PTY and unblock ptyToWS
-		// (Detach closes the PTY, causing the Read in ptyToWS to return an error)
+		// WebSocket closed - detach connection to close PTY and unblock PtyToWS
+		// (Detach closes the PTY, causing the Read in PtyToWS to return an error)
 		if err := manager.Detach(connID); err != nil {
 			slog.Error("failed to detach terminal connection", "conn_id", connID, "err", err)
 		}
 
 		// Wait for PTY reader to finish and check for backend crash
-		closeStatus, closeReason = (<-crashCh).wsClose()
+		closeStatus, closeReason = (<-crashCh).WSClose()
 	}
-}
-
-const wsCloseBackendExited = 4001 // WebSocket close code for backend process exit (4000-4999 range)
-
-// crashInfo communicates crash state from ptyToWS so the handler sets the right close code.
-type crashInfo struct {
-	crashed bool
-	reason  string
-}
-
-// wsClose returns the WebSocket close status code and reason string for a PTY session exit.
-func (c crashInfo) wsClose() (websocket.StatusCode, string) {
-	if c.crashed {
-		return websocket.StatusCode(wsCloseBackendExited), c.reason
-	}
-	return websocket.StatusNormalClosure, "session detached"
-}
-
-// ptyToWS relays PTY data to the WebSocket and detects backend crashes.
-// If scrollback is non-nil, PTY output is also captured in the ring buffer.
-func ptyToWS(ctx context.Context, cancel context.CancelFunc, conn *websocket.Conn, session *TerminalSession, manager *TerminalManager, scrollback *ScrollbackBuffer) crashInfo {
-	buf := make([]byte, terminalReadBufSize)
-	for {
-		select {
-		case <-ctx.Done():
-			return crashInfo{}
-		default:
-		}
-
-		n, err := session.PTY.Read(buf)
-		if err != nil {
-			// PTY closed or error — check if the backend process has exited.
-			// Use the raw internal tmux session name (session.Name) directly
-			// since SessionAlive/PaneDead apply the prefix and we already have
-			// the internal name.
-			sessionGone := !manager.tmuxHasSession(session.Name)
-			paneDead := false
-			if !sessionGone {
-				paneDead = manager.paneDead(session.Name)
-			}
-
-			cancel()
-
-			if sessionGone || paneDead {
-				reason := "backend process exited"
-				captured := manager.capturePaneRaw(session.Name, 10)
-				if captured != "" {
-					reason = captured
-				}
-				// WebSocket close reasons are limited to 123 bytes.
-				// Truncate safely at UTF-8 rune boundaries.
-				reason = truncateUTF8(reason, 123)
-				return crashInfo{crashed: true, reason: reason}
-			}
-			return crashInfo{}
-		}
-
-		if n > 0 {
-			if err := conn.Write(ctx, websocket.MessageBinary, buf[:n]); err != nil {
-				// WebSocket write failed - cancel context to unblock wsToPTY
-				cancel()
-				return crashInfo{}
-			}
-			if scrollback != nil {
-				scrollback.Append(buf[:n])
-			}
-		}
-	}
-}
-
-// truncateUTF8 truncates s to at most maxBytes bytes, keeping the last portion
-// and ensuring the result is valid UTF-8 (doesn't split multi-byte characters).
-func truncateUTF8(s string, maxBytes int) string {
-	if len(s) <= maxBytes {
-		return s
-	}
-	// Take the tail
-	s = s[len(s)-maxBytes:]
-	// Skip any leading bytes that are continuation bytes (10xxxxxx)
-	// to avoid splitting a multi-byte UTF-8 sequence.
-	for len(s) > 0 && s[0]&0xC0 == 0x80 {
-		s = s[1:]
-	}
-	return s
-}
-
-// wsToPTY reads from the WebSocket and writes to the PTY.
-// Handles the in-band resize protocol.
-func wsToPTY(ctx context.Context, conn *websocket.Conn, session *TerminalSession, manager *TerminalManager, connID string) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		msgType, data, err := conn.Read(ctx)
-		if err != nil {
-			// WebSocket read failed - client disconnected
-			return
-		}
-
-		// Binary messages may carry the in-band resize protocol.
-		if msgType == websocket.MessageBinary {
-			if len(data) == resizeMsgLen && data[0] == resizeMsgMarker {
-				cols := binary.BigEndian.Uint16(data[1:3])
-				rows := binary.BigEndian.Uint16(data[3:5])
-
-				if cols > 0 && rows > 0 && cols <= maxTerminalCols && rows <= maxTerminalRows {
-					if err := manager.Resize(connID, cols, rows); err != nil {
-						slog.Error("failed to resize terminal session", "conn_id", connID, "err", err)
-					}
-				}
-				continue
-			}
-		}
-
-		// Text and non-resize binary data - write to PTY
-		if _, err := session.PTY.Write(data); err != nil {
-			// PTY write failed
-			return
-		}
-	}
-}
-
-// broadcastSessionIssueEvent sends an SSE event if the given session is linked to an issue.
-// Uses a background context since the caller's request context may be invalid after WebSocket hijack.
-func broadcastSessionIssueEvent(tabMetaStore *tabmeta.Store, hub *SSEHub, workspace, session string) {
-	if tabMetaStore == nil || hub == nil {
-		return
-	}
-	metaCtx, metaCancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer metaCancel()
-	meta, err := tabMetaStore.Get(metaCtx, workspace, session)
-	if err != nil || meta == nil || meta.IssueID == "" {
-		return
-	}
-	hub.Broadcast(&MutationPayload{
-		Type:        "terminal_session_change",
-		IssueID:     meta.IssueID,
-		Timestamp:   time.Now().UTC().Format(time.RFC3339),
-		WorkspaceID: meta.Workspace,
-	})
 }
 
 // injectTerminalContextBanner fetches project context from the loom server

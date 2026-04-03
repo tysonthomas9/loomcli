@@ -2,12 +2,14 @@ package webui
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
 // TestHandleMetrics_NilHub tests that handleMetrics returns 503 when hub is nil.
@@ -56,7 +58,7 @@ func TestHandleMetrics_NilHub(t *testing.T) {
 
 // TestHandleMetrics_ValidHub tests that handleMetrics returns correct metrics for a valid hub.
 func TestHandleMetrics_ValidHub(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 
 	handler := handleMetrics(hub, nil, nil)
 
@@ -134,32 +136,35 @@ func TestHandleMetrics_ValidHub(t *testing.T) {
 }
 
 // TestGetRetryQueueDepth tests that GetRetryQueueDepth returns the correct count.
+// Since retryQueue is unexported, we fill the broadcast channel (buffer=256) first,
+// then overflow into retryQueue via Broadcast().
 func TestGetRetryQueueDepth(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
+	// Do NOT call hub.Run() — we want the broadcast channel to fill up.
 
 	// Initially should be 0
 	if depth := hub.GetRetryQueueDepth(); depth != 0 {
 		t.Errorf("expected initial retry queue depth=0, got %d", depth)
 	}
 
-	// Manually add items to retryQueue (same package, so we can access unexported fields)
-	hub.retryMu.Lock()
-	hub.retryQueue = append(hub.retryQueue, &MutationPayload{Type: "create", IssueID: "test-1"})
-	hub.retryQueue = append(hub.retryQueue, &MutationPayload{Type: "update", IssueID: "test-2"})
-	hub.retryQueue = append(hub.retryQueue, &MutationPayload{Type: "delete", IssueID: "test-3"})
-	hub.retryMu.Unlock()
+	// Fill the broadcast channel (buffer=256)
+	for i := 0; i < 256; i++ {
+		hub.Broadcast(&realtime.MutationPayload{Type: "create", IssueID: fmt.Sprintf("fill-%d", i), WorkspaceID: "ws"})
+	}
 
-	// Should now be 3
+	// Now the broadcast channel is full. The next Broadcast() calls will
+	// go to the retryQueue.
+	hub.Broadcast(&realtime.MutationPayload{Type: "create", IssueID: "retry-1", WorkspaceID: "ws"})
+	hub.Broadcast(&realtime.MutationPayload{Type: "update", IssueID: "retry-2", WorkspaceID: "ws"})
+	hub.Broadcast(&realtime.MutationPayload{Type: "delete", IssueID: "retry-3", WorkspaceID: "ws"})
+
 	if depth := hub.GetRetryQueueDepth(); depth != 3 {
 		t.Errorf("expected retry queue depth=3, got %d", depth)
 	}
 
 	// Add one more
-	hub.retryMu.Lock()
-	hub.retryQueue = append(hub.retryQueue, &MutationPayload{Type: "status", IssueID: "test-4"})
-	hub.retryMu.Unlock()
+	hub.Broadcast(&realtime.MutationPayload{Type: "status", IssueID: "retry-4", WorkspaceID: "ws"})
 
-	// Should now be 4
 	if depth := hub.GetRetryQueueDepth(); depth != 4 {
 		t.Errorf("expected retry queue depth=4, got %d", depth)
 	}
@@ -167,7 +172,7 @@ func TestGetRetryQueueDepth(t *testing.T) {
 
 // TestGetUptime tests that GetUptime returns a positive duration after creation.
 func TestGetUptime(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 
 	// Sleep to ensure measurable uptime
 	time.Sleep(10 * time.Millisecond)
@@ -186,7 +191,7 @@ func TestGetUptime(t *testing.T) {
 // TestHandleMetrics_WithClaimMetrics tests that claim metrics appear in the
 // /api/metrics response when a ClaimMetrics instance is provided.
 func TestHandleMetrics_WithClaimMetrics(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 
 	claimMetrics := fleet.NewClaimMetrics()
 	// Record 3 successes, 2 collisions, 1 timeout.

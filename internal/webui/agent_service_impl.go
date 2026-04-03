@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -12,13 +13,13 @@ import (
 type agentServiceImpl struct {
 	gitOps   GitOps
 	termMgr  *TerminalManager
-	termAuth *terminalAuth
+	termAuth *realtime.TerminalAuth
 }
 
 // NewAgentService creates a new AgentService implementation.
 // gitOps must be non-nil. termMgr and termAuth may be nil (methods
 // that require them return service.ErrUnavailable).
-func NewAgentService(gitOps GitOps, termMgr *TerminalManager, termAuth *terminalAuth) AgentService {
+func NewAgentService(gitOps GitOps, termMgr *TerminalManager, termAuth *realtime.TerminalAuth) AgentService {
 	return &agentServiceImpl{
 		gitOps:   gitOps,
 		termMgr:  termMgr,

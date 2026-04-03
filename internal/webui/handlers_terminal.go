@@ -10,6 +10,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
 // Constants for terminal WebSocket communication.
@@ -47,7 +48,7 @@ func originHosts(origins []string) []string {
 // handleTerminalToken returns a handler that generates a one-time terminal auth token
 // for the given session. The caller must already be authenticated via the API key
 // middleware.
-func handleTerminalToken(auth *terminalAuth) http.HandlerFunc {
+func handleTerminalToken(auth *realtime.TerminalAuth) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		session := r.URL.Query().Get("session")
 		if session == "" || !validTerminalSession.MatchString(session) {
@@ -78,7 +79,7 @@ func handleTerminalToken(auth *terminalAuth) http.HandlerFunc {
 // with the current backend from loom.yaml. It reads the backend from the project
 // config, updates the TerminalManager's default command, kills the existing tmux
 // session, and returns the new backend name.
-func handleTerminalRestart(manager *TerminalManager, pool daemon.Pool, auth *terminalAuth) http.HandlerFunc {
+func handleTerminalRestart(manager *TerminalManager, pool daemon.Pool, auth *realtime.TerminalAuth) http.HandlerFunc {
 	var configPool configConnectionGetter
 	if pool != nil {
 		configPool = &configPoolAdapter{pool: pool}
@@ -87,7 +88,7 @@ func handleTerminalRestart(manager *TerminalManager, pool daemon.Pool, auth *ter
 }
 
 // handleTerminalRestartWithPool is the internal testable implementation.
-func handleTerminalRestartWithPool(manager *TerminalManager, configPool configConnectionGetter, auth *terminalAuth) http.HandlerFunc {
+func handleTerminalRestartWithPool(manager *TerminalManager, configPool configConnectionGetter, auth *realtime.TerminalAuth) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			respondJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"success": false, "error": "method not allowed"})
@@ -162,7 +163,7 @@ func handleTerminalRestartWithPool(manager *TerminalManager, configPool configCo
 // handleTerminalKill returns a handler that forcibly kills a terminal session.
 // This is used for hung backends — it kills the tmux session, which triggers the
 // PTY close → crash detection flow in ptyToWS.
-func handleTerminalKill(manager *TerminalManager, auth *terminalAuth) http.HandlerFunc {
+func handleTerminalKill(manager *TerminalManager, auth *realtime.TerminalAuth) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			respondJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"success": false, "error": "method not allowed"})
@@ -195,7 +196,7 @@ func handleTerminalKill(manager *TerminalManager, auth *terminalAuth) http.Handl
 
 // handleTerminalSessionStatus returns a handler that checks whether a tmux session is alive.
 // This is a fallback for when the WebSocket close code is missed.
-func handleTerminalSessionStatus(manager *TerminalManager, auth *terminalAuth) http.HandlerFunc {
+func handleTerminalSessionStatus(manager *TerminalManager, auth *realtime.TerminalAuth) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		session := r.URL.Query().Get("session")
 		if session == "" || !validTerminalSession.MatchString(session) {

@@ -433,7 +433,7 @@ func TestHandleGetAgentTerminalToken_ValidNames(t *testing.T) {
 }
 
 // --- handleAgentTerminalWS tests ---
-// These tests remain unchanged — handleAgentTerminalWS still takes *TerminalManager, *terminalAuth directly.
+// These tests remain unchanged — handleAgentTerminalWS still takes *TerminalManager, *realtime.TerminalAuth directly.
 
 // TestHandleAgentTerminalWS_MissingName tests that a missing agent name returns 400.
 func TestHandleAgentTerminalWS_MissingName(t *testing.T) {

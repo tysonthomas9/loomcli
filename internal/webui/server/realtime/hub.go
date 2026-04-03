@@ -1,6 +1,7 @@
-package webui
+package realtime
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -9,24 +10,31 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
 const (
-	// sseRetryMs is the reconnection interval sent to clients in milliseconds.
-	sseRetryMs = 5000
-	// sseHeartbeatInterval is how often heartbeat comments are sent to keep connections alive.
-	sseHeartbeatInterval = 30 * time.Second
-	// sseClientSendBuf is the per-client channel buffer size for outbound mutation events.
-	sseClientSendBuf = 64
+	// RetryMs is the reconnection interval sent to clients in milliseconds.
+	RetryMs = 5000
+	// HeartbeatInterval is how often heartbeat comments are sent to keep connections alive.
+	HeartbeatInterval = 30 * time.Second
+	// ClientSendBuf is the per-client channel buffer size for outbound mutation events.
+	ClientSendBuf = 64
 )
 
-// sseEventIDCounter provides monotonically increasing event IDs across all SSE connections.
+// eventIDCounter provides monotonically increasing event IDs across all SSE connections.
 // Initialized to current time in milliseconds so IDs remain roughly time-ordered,
 // which is important for the Last-Event-ID catch-up mechanism.
-var sseEventIDCounter atomic.Int64
+var eventIDCounter atomic.Int64
 
 func init() {
-	sseEventIDCounter.Store(time.Now().UnixMilli())
+	eventIDCounter.Store(time.Now().UnixMilli())
+}
+
+// NextEventID returns the next monotonically increasing event ID.
+func NextEventID() int64 {
+	return eventIDCounter.Add(1)
 }
 
 // MutationPayload represents mutation data sent to clients.
@@ -46,11 +54,11 @@ type MutationPayload struct {
 	WorkspaceID string `json:"workspace_id,omitempty"` // Workspace ID for multi-workspace filtering
 }
 
-// SSEHub manages connected SSE clients and broadcasts mutations to them.
-type SSEHub struct {
-	clients      map[*SSEClient]bool
-	register     chan *SSEClient
-	unregister   chan *SSEClient
+// Hub manages connected SSE clients and broadcasts mutations to them.
+type Hub struct {
+	clients      map[*Client]bool
+	register     chan *Client
+	unregister   chan *Client
 	broadcast    chan *MutationPayload
 	mu           sync.RWMutex
 	done         chan struct{}
@@ -60,8 +68,8 @@ type SSEHub struct {
 	startedAt    time.Time
 }
 
-// SSEClient represents a single SSE connection.
-type SSEClient struct {
+// Client represents a single SSE connection.
+type Client struct {
 	id          int64
 	send        chan *MutationPayload
 	done        chan struct{}
@@ -70,9 +78,30 @@ type SSEClient struct {
 	workspaceID string   // workspace this client subscribed to; empty = no mutations (fail-closed)
 }
 
-// parseSourceRepos parses a comma-separated source_repos query parameter,
+// NewClient creates a new SSE client with the given parameters.
+func NewClient(id int64, sendBuf int, lastSince int64, sourceRepos []string, workspaceID string) *Client {
+	return &Client{
+		id:          id,
+		send:        make(chan *MutationPayload, sendBuf),
+		done:        make(chan struct{}),
+		lastSince:   lastSince,
+		sourceRepos: sourceRepos,
+		workspaceID: workspaceID,
+	}
+}
+
+// ID returns the client's unique identifier.
+func (c *Client) ID() int64 { return c.id }
+
+// Send returns the client's send channel.
+func (c *Client) Send() <-chan *MutationPayload { return c.send }
+
+// Done returns the client's done channel.
+func (c *Client) Done() chan struct{} { return c.done }
+
+// ParseSourceRepos parses a comma-separated source_repos query parameter,
 // trimming whitespace and skipping empty entries.
-func parseSourceRepos(param string) []string {
+func ParseSourceRepos(param string) []string {
 	if param == "" {
 		return nil
 	}
@@ -86,28 +115,28 @@ func parseSourceRepos(param string) []string {
 	return repos
 }
 
-// matchesWorkspaceFilter returns true if the mutation should be delivered.
+// MatchesWorkspaceFilter returns true if the mutation should be delivered.
 // Fail-closed: empty client workspace or empty mutation workspace = no delivery.
-func matchesWorkspaceFilter(clientWorkspaceID, mutationWorkspaceID string) bool {
+func MatchesWorkspaceFilter(clientWorkspaceID, mutationWorkspaceID string) bool {
 	return clientWorkspaceID != "" && mutationWorkspaceID != "" && clientWorkspaceID == mutationWorkspaceID
 }
 
-// matchesSourceRepoFilter returns true if the mutation should be delivered
-// to a client with the given sourceRepos filter. Empty sourceRepo → true
+// MatchesSourceRepoFilter returns true if the mutation should be delivered
+// to a client with the given sourceRepos filter. Empty sourceRepo -> true
 // (intentional fan-out for events with unknown origin; client refetch is scoped).
-func matchesSourceRepoFilter(sourceRepos []string, sourceRepo string) bool {
+func MatchesSourceRepoFilter(sourceRepos []string, sourceRepo string) bool {
 	if len(sourceRepos) == 0 || sourceRepo == "" {
 		return true
 	}
 	return slices.Contains(sourceRepos, sourceRepo)
 }
 
-// NewSSEHub creates a new SSE hub.
-func NewSSEHub() *SSEHub {
-	return &SSEHub{
-		clients:    make(map[*SSEClient]bool),
-		register:   make(chan *SSEClient, 16),
-		unregister: make(chan *SSEClient, 16),
+// NewHub creates a new SSE hub.
+func NewHub() *Hub {
+	return &Hub{
+		clients:    make(map[*Client]bool),
+		register:   make(chan *Client, 16),
+		unregister: make(chan *Client, 16),
 		broadcast:  make(chan *MutationPayload, 256),
 		done:       make(chan struct{}),
 		startedAt:  time.Now(),
@@ -115,7 +144,7 @@ func NewSSEHub() *SSEHub {
 }
 
 // Run starts the hub's main loop for managing clients and broadcasts.
-func (h *SSEHub) Run() {
+func (h *Hub) Run() {
 	retryTicker := time.NewTicker(100 * time.Millisecond)
 	defer retryTicker.Stop()
 
@@ -143,10 +172,10 @@ func (h *SSEHub) Run() {
 			}
 			h.mu.RLock()
 			for client := range h.clients {
-				if !matchesWorkspaceFilter(client.workspaceID, mutation.WorkspaceID) {
+				if !MatchesWorkspaceFilter(client.workspaceID, mutation.WorkspaceID) {
 					continue
 				}
-				if !matchesSourceRepoFilter(client.sourceRepos, mutation.SourceRepo) {
+				if !MatchesSourceRepoFilter(client.sourceRepos, mutation.SourceRepo) {
 					continue
 				}
 				select {
@@ -174,13 +203,13 @@ func (h *SSEHub) Run() {
 }
 
 // Stop gracefully stops the hub.
-func (h *SSEHub) Stop() {
+func (h *Hub) Stop() {
 	close(h.done)
 }
 
 // RegisterClient adds a new client to the hub.
-// Non-blocking if the hub has been stopped — closes the client's send channel instead.
-func (h *SSEHub) RegisterClient(client *SSEClient) {
+// Non-blocking if the hub has been stopped -- closes the client's send channel instead.
+func (h *Hub) RegisterClient(client *Client) {
 	// Check done first to avoid writing to the buffered register channel
 	// after Run() has exited (nobody would process it).
 	select {
@@ -198,7 +227,7 @@ func (h *SSEHub) RegisterClient(client *SSEClient) {
 
 // UnregisterClient removes a client from the hub.
 // Non-blocking if the hub has been stopped.
-func (h *SSEHub) UnregisterClient(client *SSEClient) {
+func (h *Hub) UnregisterClient(client *Client) {
 	select {
 	case <-h.done:
 		return
@@ -212,7 +241,7 @@ func (h *SSEHub) UnregisterClient(client *SSEClient) {
 
 // Broadcast sends a mutation to all connected clients.
 // If the broadcast channel is full, mutations are queued for retry.
-func (h *SSEHub) Broadcast(mutation *MutationPayload) {
+func (h *Hub) Broadcast(mutation *MutationPayload) {
 	select {
 	case h.broadcast <- mutation:
 	default:
@@ -229,31 +258,31 @@ func (h *SSEHub) Broadcast(mutation *MutationPayload) {
 }
 
 // ClientCount returns the number of connected clients.
-func (h *SSEHub) ClientCount() int {
+func (h *Hub) ClientCount() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return len(h.clients)
 }
 
 // GetDroppedCount returns the number of mutations dropped due to queue overflow.
-func (h *SSEHub) GetDroppedCount() int64 {
+func (h *Hub) GetDroppedCount() int64 {
 	return atomic.LoadInt64(&h.droppedCount)
 }
 
 // GetRetryQueueDepth returns the current number of mutations waiting in the retry queue.
-func (h *SSEHub) GetRetryQueueDepth() int {
+func (h *Hub) GetRetryQueueDepth() int {
 	h.retryMu.Lock()
 	defer h.retryMu.Unlock()
 	return len(h.retryQueue)
 }
 
 // GetUptime returns the duration since the hub was created.
-func (h *SSEHub) GetUptime() time.Duration {
+func (h *Hub) GetUptime() time.Duration {
 	return time.Since(h.startedAt)
 }
 
 // drainRetryQueue attempts to send queued mutations to the broadcast channel.
-func (h *SSEHub) drainRetryQueue() {
+func (h *Hub) drainRetryQueue() {
 	h.retryMu.Lock()
 	defer h.retryMu.Unlock()
 
@@ -291,9 +320,9 @@ func (h *SSEHub) drainRetryQueue() {
 	}
 }
 
-// parseLastSince extracts the reconnection catch-up timestamp from the request,
+// ParseLastSince extracts the reconnection catch-up timestamp from the request,
 // preferring the larger of Last-Event-ID header and ?since query parameter.
-func parseLastSince(r *http.Request) int64 {
+func ParseLastSince(r *http.Request) int64 {
 	var lastSince int64
 	if lastEventID := r.Header.Get("Last-Event-ID"); lastEventID != "" {
 		if ts, err := strconv.ParseInt(lastEventID, 10, 64); err == nil {
@@ -306,4 +335,45 @@ func parseLastSince(r *http.Request) int64 {
 		}
 	}
 	return lastSince
+}
+
+// GetActiveSourceRepos returns deduplicated source repos across connected
+// clients that have a repo filter. Returns nil when no client has a filter.
+func (h *Hub) GetActiveSourceRepos() []string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	seen := make(map[string]struct{})
+	for c := range h.clients {
+		for _, r := range c.sourceRepos {
+			seen[r] = struct{}{}
+		}
+	}
+	if len(seen) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(seen))
+	for r := range seen {
+		out = append(out, r)
+	}
+	return out
+}
+
+// BroadcastSessionIssueEvent sends an SSE event if the given session is linked to an issue.
+// Uses a background context since the caller's request context may be invalid after WebSocket hijack.
+func BroadcastSessionIssueEvent(tabMetaStore *tabmeta.Store, hub *Hub, workspace, session string) {
+	if tabMetaStore == nil || hub == nil {
+		return
+	}
+	metaCtx, metaCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer metaCancel()
+	meta, err := tabMetaStore.Get(metaCtx, workspace, session)
+	if err != nil || meta == nil || meta.IssueID == "" {
+		return
+	}
+	hub.Broadcast(&MutationPayload{
+		Type:        "terminal_session_change",
+		IssueID:     meta.IssueID,
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		WorkspaceID: meta.Workspace,
+	})
 }

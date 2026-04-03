@@ -10,6 +10,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
 const (
@@ -34,7 +35,7 @@ const (
 // bridges them to the SSE hub.
 type DaemonSubscriber struct {
 	pool        daemon.Pool
-	hub         *SSEHub
+	hub         *realtime.Hub
 	done        chan struct{}
 	wg          sync.WaitGroup
 	lastSince   int64
@@ -55,7 +56,7 @@ type DaemonSubscriber struct {
 }
 
 // NewDaemonSubscriber creates a new daemon subscriber.
-func NewDaemonSubscriber(pool daemon.Pool, hub *SSEHub) *DaemonSubscriber {
+func NewDaemonSubscriber(pool daemon.Pool, hub *realtime.Hub) *DaemonSubscriber {
 	return &DaemonSubscriber{
 		pool: pool,
 		hub:  hub,
@@ -275,7 +276,7 @@ func (s *DaemonSubscriber) processMutationResponse(resp *rpc.Response) {
 
 	// Broadcast each mutation to SSE clients
 	for _, m := range mutations {
-		payload := rpcMutationToPayload(m)
+		payload := realtime.RPCMutationToPayload(m)
 		if s.workspaceID != "" {
 			payload.WorkspaceID = s.workspaceID
 		}

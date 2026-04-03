@@ -13,16 +13,17 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
-func setupTabMetaTest(t *testing.T) (*tabmeta.Store, *SSEHub) {
+func setupTabMetaTest(t *testing.T) (*tabmeta.Store, *realtime.Hub) {
 	t.Helper()
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { rdb.Close() })
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	t.Cleanup(func() { hub.Stop() })
 

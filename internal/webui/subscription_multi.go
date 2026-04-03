@@ -9,12 +9,13 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
 // MultiWorkspaceSubscriber manages per-workspace DaemonSubscribers, each polling
 // its own daemon and broadcasting workspace-tagged mutations to a shared SSEHub.
 type MultiWorkspaceSubscriber struct {
-	hub         *SSEHub
+	hub         *realtime.Hub
 	multiPool   *daemon.MultiPool
 	logger      *slog.Logger
 	subscribers map[string]*DaemonSubscriber // workspace ID → subscriber
@@ -24,7 +25,7 @@ type MultiWorkspaceSubscriber struct {
 }
 
 // NewMultiWorkspaceSubscriber creates a new MultiWorkspaceSubscriber.
-func NewMultiWorkspaceSubscriber(hub *SSEHub, multiPool *daemon.MultiPool, logger *slog.Logger) *MultiWorkspaceSubscriber {
+func NewMultiWorkspaceSubscriber(hub *realtime.Hub, multiPool *daemon.MultiPool, logger *slog.Logger) *MultiWorkspaceSubscriber {
 	if logger == nil {
 		logger = slog.Default()
 	}

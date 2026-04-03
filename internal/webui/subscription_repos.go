@@ -6,35 +6,15 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
-
-// GetActiveSourceRepos returns deduplicated source repos across connected
-// clients that have a repo filter. Returns nil when no client has a filter.
-func (h *SSEHub) GetActiveSourceRepos() []string {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	seen := make(map[string]struct{})
-	for c := range h.clients {
-		for _, r := range c.sourceRepos {
-			seen[r] = struct{}{}
-		}
-	}
-	if len(seen) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(seen))
-	for r := range seen {
-		out = append(out, r)
-	}
-	return out
-}
 
 // emitPerRepoRefreshes checks which watched repos have changes and emits
 // per-repo refresh events. Falls back to a global refresh when no clients
 // have repo filters or when per-repo Count RPCs fail.
 func (s *DaemonSubscriber) emitPerRepoRefreshes(client *rpc.Client, now time.Time, lastPollTime time.Time, totalCount int64) {
 	ts := now.UTC().Format(time.RFC3339)
-	globalRefresh := &MutationPayload{
+	globalRefresh := &realtime.MutationPayload{
 		Type: rpc.MutationRefresh, Timestamp: ts, WorkspaceID: s.workspaceID,
 	}
 
@@ -68,7 +48,7 @@ func (s *DaemonSubscriber) emitPerRepoRefreshes(client *rpc.Client, now time.Tim
 			return
 		}
 		if countResult.Count > 0 {
-			s.hub.Broadcast(&MutationPayload{
+			s.hub.Broadcast(&realtime.MutationPayload{
 				Type: rpc.MutationRefresh, SourceRepo: repo, Timestamp: ts, WorkspaceID: s.workspaceID,
 			})
 			anyPerRepo = true

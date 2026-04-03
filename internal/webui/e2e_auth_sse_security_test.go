@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
 // --- Test 13: Token exchange Cache-Control: no-store ---
@@ -78,20 +79,30 @@ func TestSSETokenExchange_NoIdentity_Returns401(t *testing.T) {
 }
 
 // --- Test 14: SSE auth enforcement ---
+// validateSSEAuth is now internal to realtime.Handler. These tests exercise
+// the same behavior through the Handler's ServeHTTP method.
 
 func TestSSEAuth_NoToken_Returns401_WhenAuthEnabled(t *testing.T) {
 	store := newTestSSETokenStore()
 	defer store.Stop()
+
+	hub := realtime.NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	handler := realtime.NewHandler(realtime.HandlerConfig{
+		Hub:              hub,
+		TokenStore:       store,
+		WorkspaceFromCtx: middleware.WorkspaceFromContext,
+	})
 
 	ctx := middleware.WithWorkspace(context.Background(), "test-ws")
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil)
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 
-	ok := validateSSEAuth(w, req, store)
-	if ok {
-		t.Error("validateSSEAuth should return false without token when auth enabled")
-	}
+	handler.ServeHTTP(w, req)
+
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", w.Code)
 	}
@@ -107,15 +118,23 @@ func TestSSEAuth_InvalidToken_Returns401(t *testing.T) {
 	store := newTestSSETokenStore()
 	defer store.Stop()
 
+	hub := realtime.NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	handler := realtime.NewHandler(realtime.HandlerConfig{
+		Hub:              hub,
+		TokenStore:       store,
+		WorkspaceFromCtx: middleware.WorkspaceFromContext,
+	})
+
 	ctx := middleware.WithWorkspace(context.Background(), "test-ws")
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events?token=garbage", nil)
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 
-	ok := validateSSEAuth(w, req, store)
-	if ok {
-		t.Error("validateSSEAuth should return false for invalid token")
-	}
+	handler.ServeHTTP(w, req)
+
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", w.Code)
 	}
@@ -131,19 +150,39 @@ func TestSSEAuth_ValidOpaqueToken_Passes(t *testing.T) {
 	store := newTestSSETokenStore()
 	defer store.Stop()
 
+	hub := realtime.NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
 	token, err := store.Generate("user-1", "test-ws")
 	if err != nil {
 		t.Fatalf("Generate() error = %v", err)
 	}
 
-	ctx := middleware.WithWorkspace(context.Background(), "test-ws")
+	handler := realtime.NewHandler(realtime.HandlerConfig{
+		Hub:              hub,
+		TokenStore:       store,
+		WorkspaceFromCtx: middleware.WorkspaceFromContext,
+	})
+
+	ctx, cancel := context.WithCancel(middleware.WithWorkspace(context.Background(), "test-ws"))
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events?token="+token, nil)
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 
-	ok := validateSSEAuth(w, req, store)
-	if !ok {
-		t.Error("validateSSEAuth should return true for valid opaque token")
+	done := make(chan struct{})
+	go func() {
+		handler.ServeHTTP(w, req)
+		close(done)
+	}()
+
+	// Give the handler time to start streaming
+	cancel()
+	<-done
+
+	// Should succeed (200 with SSE content type)
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200; body = %s", w.Code, w.Body.String())
 	}
 }
 
@@ -151,42 +190,74 @@ func TestSSEAuth_ReplayedToken_Returns401(t *testing.T) {
 	store := newTestSSETokenStore()
 	defer store.Stop()
 
+	hub := realtime.NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
 	token, err := store.Generate("user-1", "test-ws")
 	if err != nil {
 		t.Fatalf("Generate() error = %v", err)
 	}
 
+	handler := realtime.NewHandler(realtime.HandlerConfig{
+		Hub:              hub,
+		TokenStore:       store,
+		WorkspaceFromCtx: middleware.WorkspaceFromContext,
+	})
+
 	ctx := middleware.WithWorkspace(context.Background(), "test-ws")
 
-	// First use — should pass
+	// First use — consume the token through the handler
+	ctx1, cancel1 := context.WithCancel(ctx)
 	req1 := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events?token="+token, nil)
-	req1 = req1.WithContext(ctx)
+	req1 = req1.WithContext(ctx1)
 	w1 := httptest.NewRecorder()
-	ok := validateSSEAuth(w1, req1, store)
-	if !ok {
-		t.Fatal("first use should pass")
-	}
+
+	done1 := make(chan struct{})
+	go func() {
+		handler.ServeHTTP(w1, req1)
+		close(done1)
+	}()
+	cancel1()
+	<-done1
 
 	// Second use (replay) — should fail
 	req2 := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events?token="+token, nil)
 	req2 = req2.WithContext(ctx)
 	w2 := httptest.NewRecorder()
-	ok2 := validateSSEAuth(w2, req2, store)
-	if ok2 {
-		t.Error("replayed token should be rejected")
-	}
+	handler.ServeHTTP(w2, req2)
+
 	if w2.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401 for replayed token", w2.Code)
 	}
 }
 
 func TestSSEAuth_OpenMode_NoTokenRequired(t *testing.T) {
-	// nil sseAuth = open mode
+	hub := realtime.NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	// nil TokenStore = open mode
+	handler := realtime.NewHandler(realtime.HandlerConfig{
+		Hub:              hub,
+		WorkspaceFromCtx: middleware.WorkspaceFromContext,
+	})
+
+	ctx, cancel := context.WithCancel(middleware.WithWorkspace(context.Background(), "test-ws"))
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil)
+	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 
-	ok := validateSSEAuth(w, req, nil)
-	if !ok {
-		t.Error("validateSSEAuth should return true in open mode (nil sseAuth)")
+	done := make(chan struct{})
+	go func() {
+		handler.ServeHTTP(w, req)
+		close(done)
+	}()
+
+	cancel()
+	<-done
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200; body = %s", w.Code, w.Body.String())
 	}
 }

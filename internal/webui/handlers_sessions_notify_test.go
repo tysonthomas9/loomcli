@@ -5,10 +5,12 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
 func TestNotifySessionChange_ValidToken(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
@@ -28,7 +30,7 @@ func TestNotifySessionChange_ValidToken(t *testing.T) {
 }
 
 func TestNotifySessionChange_MissingAuthHeader(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
@@ -48,7 +50,7 @@ func TestNotifySessionChange_MissingAuthHeader(t *testing.T) {
 }
 
 func TestNotifySessionChange_WrongToken(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
@@ -68,7 +70,7 @@ func TestNotifySessionChange_WrongToken(t *testing.T) {
 }
 
 func TestNotifySessionChange_EmptyServerToken(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
@@ -88,7 +90,7 @@ func TestNotifySessionChange_EmptyServerToken(t *testing.T) {
 }
 
 func TestNotifySessionChange_InvalidJSON(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
@@ -107,7 +109,7 @@ func TestNotifySessionChange_InvalidJSON(t *testing.T) {
 }
 
 func TestNotifySessionChange_MissingTaskID(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
@@ -128,7 +130,7 @@ func TestNotifySessionChange_MissingTaskID(t *testing.T) {
 }
 
 func TestNotifySessionChange_MissingSessionID(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 

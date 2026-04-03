@@ -1,4 +1,4 @@
-package webui
+package realtime
 
 import (
 	"crypto/hmac"
@@ -14,7 +14,9 @@ import (
 )
 
 const (
-	terminalTokenExpiry     = 60 * time.Second
+	// TerminalTokenExpiry is the lifetime of a terminal auth token.
+	TerminalTokenExpiry = 60 * time.Second
+
 	terminalNonceBytes      = 16
 	terminalSecretBytes     = 32
 	terminalCleanupInterval = 5 * time.Minute
@@ -29,8 +31,8 @@ type terminalTokenPayload struct {
 	Nonce   string `json:"nonce"`
 }
 
-// terminalAuth manages one-time tokens for terminal WebSocket connections.
-type terminalAuth struct {
+// TerminalAuth manages one-time tokens for terminal WebSocket connections.
+type TerminalAuth struct {
 	secret   []byte
 	used     map[string]time.Time // nonce -> time added
 	mu       sync.Mutex
@@ -38,13 +40,13 @@ type terminalAuth struct {
 	stopOnce sync.Once
 }
 
-// newTerminalAuth creates a new terminal auth manager with a random secret.
-func newTerminalAuth() (*terminalAuth, error) {
+// NewTerminalAuth creates a new terminal auth manager with a random secret.
+func NewTerminalAuth() (*TerminalAuth, error) {
 	secret := make([]byte, terminalSecretBytes)
 	if _, err := rand.Read(secret); err != nil {
 		return nil, fmt.Errorf("failed to generate terminal auth secret: %w", err)
 	}
-	ta := &terminalAuth{
+	ta := &TerminalAuth{
 		secret: secret,
 		used:   make(map[string]time.Time),
 		done:   make(chan struct{}),
@@ -55,7 +57,7 @@ func newTerminalAuth() (*terminalAuth, error) {
 
 // GenerateToken creates a signed, time-limited token for the given session.
 // userID is embedded for audit logging; pass "" in open mode (no auth).
-func (ta *terminalAuth) GenerateToken(session, userID string) (string, error) {
+func (ta *TerminalAuth) GenerateToken(session, userID string) (string, error) {
 	nonce := make([]byte, terminalNonceBytes)
 	if _, err := rand.Read(nonce); err != nil {
 		return "", fmt.Errorf("failed to generate nonce: %w", err)
@@ -64,7 +66,7 @@ func (ta *terminalAuth) GenerateToken(session, userID string) (string, error) {
 	payload := terminalTokenPayload{
 		Session: session,
 		UserID:  userID,
-		Exp:     time.Now().Add(terminalTokenExpiry).Unix(),
+		Exp:     time.Now().Add(TerminalTokenExpiry).Unix(),
 		Nonce:   hex.EncodeToString(nonce),
 	}
 
@@ -84,7 +86,7 @@ func (ta *terminalAuth) GenerateToken(session, userID string) (string, error) {
 
 // ValidateToken checks the token signature, expiry, session match, and single-use.
 // Returns the embedded userID (may be empty in open mode) and nil error if valid.
-func (ta *terminalAuth) ValidateToken(token, session string) (string, error) {
+func (ta *TerminalAuth) ValidateToken(token, session string) (string, error) {
 	parts := strings.SplitN(token, ".", 2)
 	if len(parts) != 2 {
 		return "", fmt.Errorf("malformed token")
@@ -140,14 +142,14 @@ func (ta *terminalAuth) ValidateToken(token, session string) (string, error) {
 }
 
 // Stop stops the cleanup goroutine. Safe to call multiple times.
-func (ta *terminalAuth) Stop() {
+func (ta *TerminalAuth) Stop() {
 	ta.stopOnce.Do(func() {
 		close(ta.done)
 	})
 }
 
 // cleanupLoop periodically removes old nonces from the used set.
-func (ta *terminalAuth) cleanupLoop() {
+func (ta *TerminalAuth) cleanupLoop() {
 	ticker := time.NewTicker(terminalCleanupInterval)
 	defer ticker.Stop()
 
@@ -162,7 +164,7 @@ func (ta *terminalAuth) cleanupLoop() {
 }
 
 // cleanup removes expired nonces from the used set.
-func (ta *terminalAuth) cleanup() {
+func (ta *TerminalAuth) cleanup() {
 	ta.mu.Lock()
 	defer ta.mu.Unlock()
 

@@ -13,17 +13,18 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
 const testWSID = "test-ws-uuid"
 
-func setupIssueTabsTest(t *testing.T) (*issuetabs.Store, *SSEHub) {
+func setupIssueTabsTest(t *testing.T) (*issuetabs.Store, *realtime.Hub) {
 	t.Helper()
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { rdb.Close() })
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	t.Cleanup(func() { hub.Stop() })
 
@@ -301,10 +302,8 @@ func TestHandleSaveIssueTabs_BroadcastsSSE(t *testing.T) {
 	store, hub := setupIssueTabsTest(t)
 
 	// Register an SSE client to verify broadcast
-	client := &SSEClient{
-		send: make(chan *MutationPayload, 16),
-	}
-	hub.register <- client
+	client := realtime.NewClient(1, 16, 0, nil, testWSID)
+	hub.RegisterClient(client)
 	// Give the hub goroutine a moment to process
 	// We use a non-blocking approach: try to read after the handler call
 

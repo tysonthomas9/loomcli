@@ -21,6 +21,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
@@ -48,7 +49,7 @@ type Server struct {
 	workspaceSvc service.WorkspaceService
 
 	// Real-time
-	hub               *SSEHub
+	hub               *realtime.Hub
 	multiSub          *MultiWorkspaceSubscriber
 	getMutationsSince func(wsID string, since int64) []rpc.MutationEvent
 
@@ -57,11 +58,11 @@ type Server struct {
 	initialWorkspaceID string
 
 	// Terminal
-	termMgr  *TerminalManager // nil if tmux unavailable
-	termAuth *terminalAuth    // nil if termMgr is nil
+	termMgr  *TerminalManager       // nil if tmux unavailable
+	termAuth *realtime.TerminalAuth // nil if termMgr is nil
 
 	// SSE token exchange (external auth mode only)
-	sseTokens *sseTokenStore // nil if ExtAuthURL is empty
+	sseTokens *realtime.TokenStore // nil if ExtAuthURL is empty
 
 	// Fleet
 	fleetRegistry *fleet.StoreRegistry // nil if Redis unconfigured

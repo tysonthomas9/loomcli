@@ -11,13 +11,14 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
 // --- Registry.Register unit tests ---
 
 func TestRegistry_Register_RegistersInMultiPoolAndSubscriber(t *testing.T) {
 	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 10)
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
@@ -52,7 +53,7 @@ func TestRegistry_Register_RegistersInMultiPoolAndSubscriber(t *testing.T) {
 
 func TestRegistry_Register_MultipleWorkspaces(t *testing.T) {
 	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 10)
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
@@ -88,7 +89,7 @@ func TestRegistry_Register_MultipleWorkspaces(t *testing.T) {
 
 func TestRegistry_Register_DuplicateReplacesExisting(t *testing.T) {
 	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 10)
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
@@ -349,7 +350,7 @@ func TestStartupReconciliation_WorkspaceListFnReturnsEmptyMap(t *testing.T) {
 
 func TestReconciliationLogic_SkipsInitialWorkspace(t *testing.T) {
 	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 10)
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
@@ -401,7 +402,7 @@ func TestReconciliationLogic_SkipsInitialWorkspace(t *testing.T) {
 
 func TestReconciliationLogic_EmptyWorkspaceMap(t *testing.T) {
 	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 10)
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
@@ -434,7 +435,7 @@ func TestReconciliationLogic_EmptyWorkspaceMap(t *testing.T) {
 
 func TestReconciliationLogic_NilWorkspaceListFn(t *testing.T) {
 	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 10)
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
@@ -463,7 +464,7 @@ func TestReconciliationLogic_NilWorkspaceListFn(t *testing.T) {
 
 func TestReconciliationLogic_ErrorFromWorkspaceListFn(t *testing.T) {
 	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 10)
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
@@ -496,7 +497,7 @@ func TestReconciliationLogic_ErrorFromWorkspaceListFn(t *testing.T) {
 
 func TestReconcileConfigWorkspaces_UUIDKeys(t *testing.T) {
 	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 10)
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
@@ -539,7 +540,7 @@ func TestReconcileConfigWorkspaces_UUIDKeys(t *testing.T) {
 
 func TestReconcileConfigWorkspaces_PreMigrationNameKeys(t *testing.T) {
 	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 10)
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
@@ -585,7 +586,7 @@ func TestReconcileConfigWorkspaces_UUIDSkipMatchesInitialID(t *testing.T) {
 	// initialID was a UUID, so the skip check failed and the initial workspace
 	// got re-registered (replacing the custom auto-discovered pool).
 	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 10)
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
@@ -627,7 +628,7 @@ func TestReconcileConfigWorkspaces_UUIDSkipMatchesInitialID(t *testing.T) {
 
 func TestReconciliationLogic_OnlyInitialInMap(t *testing.T) {
 	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 10)
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 

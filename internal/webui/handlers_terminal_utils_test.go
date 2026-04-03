@@ -9,6 +9,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -133,20 +134,20 @@ func TestTruncateUTF8(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := truncateUTF8(tt.input, tt.max)
+			got := realtime.TruncateUTF8(tt.input, tt.max)
 
 			if tt.wantUTF8 && !utf8.ValidString(got) {
 				t.Errorf("result is not valid UTF-8: %q", got)
 			}
 
 			if tt.wantExact && got != tt.want {
-				t.Errorf("truncateUTF8(%q, %d) = %q, want %q", tt.input, tt.max, got, tt.want)
+				t.Errorf("realtime.TruncateUTF8(%q, %d) = %q, want %q", tt.input, tt.max, got, tt.want)
 			} else if !tt.wantExact && tt.want != "" && got != tt.want {
-				t.Errorf("truncateUTF8(%q, %d) = %q, want %q", tt.input, tt.max, got, tt.want)
+				t.Errorf("realtime.TruncateUTF8(%q, %d) = %q, want %q", tt.input, tt.max, got, tt.want)
 			}
 
 			if tt.wantLen != nil && !tt.wantLen(got) {
-				t.Errorf("truncateUTF8(%q, %d) = %q (len=%d), failed length constraint",
+				t.Errorf("realtime.TruncateUTF8(%q, %d) = %q (len=%d), failed length constraint",
 					tt.input, tt.max, got, len(got))
 			}
 
@@ -161,12 +162,12 @@ func TestTruncateUTF8_NeverSplitsRune(t *testing.T) {
 	// Exhaustive check: build a string with 1/2/3/4-byte runes and try every maxBytes value.
 	s := "A\u00e9\u4e16\U0001F600" // 1 + 2 + 3 + 4 = 10 bytes
 	for max := 0; max <= len(s)+5; max++ {
-		got := truncateUTF8(s, max)
+		got := realtime.TruncateUTF8(s, max)
 		if !utf8.ValidString(got) {
-			t.Errorf("truncateUTF8(%q, %d) = %q is invalid UTF-8", s, max, got)
+			t.Errorf("realtime.TruncateUTF8(%q, %d) = %q is invalid UTF-8", s, max, got)
 		}
 		if max >= 0 && len(got) > max && max < len(s) {
-			t.Errorf("truncateUTF8(%q, %d) = %q (len=%d) exceeds max", s, max, got, len(got))
+			t.Errorf("realtime.TruncateUTF8(%q, %d) = %q (len=%d) exceeds max", s, max, got, len(got))
 		}
 	}
 }

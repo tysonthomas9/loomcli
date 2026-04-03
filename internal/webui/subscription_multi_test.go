@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
 // TestGetMutationsSinceForWorkspace_KnownWorkspace verifies that querying
@@ -37,7 +38,7 @@ func TestGetMutationsSinceForWorkspace_KnownWorkspace(t *testing.T) {
 	pool := newSubscriptionMockPool(socketPath)
 	defer pool.Close()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
@@ -64,7 +65,7 @@ func TestGetMutationsSinceForWorkspace_KnownWorkspace(t *testing.T) {
 // TestGetMutationsSinceForWorkspace_UnknownWorkspace verifies that querying
 // a workspace with no active subscriber returns nil.
 func TestGetMutationsSinceForWorkspace_UnknownWorkspace(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
@@ -124,7 +125,7 @@ func TestGetMutationsSinceForWorkspace_OnlyQueriesCorrectSubscriber(t *testing.T
 	ws2Pool := newSubscriptionMockPool(ws2Socket)
 	defer ws2Pool.Close()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 

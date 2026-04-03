@@ -13,6 +13,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
 // testWorkspaceID is the default workspace ID used in SSE live tests.
@@ -178,22 +179,22 @@ func (c *sseTestClient) close() {
 	c.resp.Body.Close()
 }
 
-// parseMutationPayload unmarshals a MutationPayload from SSE event data.
-func parseMutationPayload(data string) (*MutationPayload, error) {
-	var p MutationPayload
+// parseMutationPayload unmarshals a realtime.MutationPayload from SSE event data.
+func parseMutationPayload(data string) (*realtime.MutationPayload, error) {
+	var p realtime.MutationPayload
 	if err := json.Unmarshal([]byte(data), &p); err != nil {
 		return nil, err
 	}
 	return &p, nil
 }
 
-// newLiveSSEServer creates an httptest.NewServer wired to NewSSEHandler with the
+// newLiveSSEServer creates an httptest.NewServer wired to realtime.NewHandler with the
 // given hub and getMutationsSince callback. The caller must call server.Close()
 // and hub.Stop() when done (use t.Cleanup).
-func newLiveSSEServer(t *testing.T, hub *SSEHub, getMutationsSince func(wsID string, since int64) []rpc.MutationEvent) *httptest.Server {
+func newLiveSSEServer(t *testing.T, hub *realtime.Hub, getMutationsSince func(wsID string, since int64) []rpc.MutationEvent) *httptest.Server {
 	t.Helper()
 
-	handler := NewSSEHandler(hub, getMutationsSince)
+	handler := realtime.NewHandler(realtime.HandlerConfig{Hub: hub, GetMutationsSince: getMutationsSince, WorkspaceFromCtx: middleware.WorkspaceFromContext})
 	wsMux := http.NewServeMux()
 	wsMux.Handle("GET /api/workspaces/{ws}/events", handler)
 	// Wrap with a simple workspace existence check that always passes in tests
@@ -211,7 +212,7 @@ func newLiveSSEServer(t *testing.T, hub *SSEHub, getMutationsSince func(wsID str
 // endpoint returns the correct HTTP headers, the retry field, and a connected
 // event with a clientId.
 func TestSSELive_ConnectionAndHandshake(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	t.Cleanup(hub.Stop)
 
@@ -254,7 +255,7 @@ func TestSSELive_ConnectionAndHandshake(t *testing.T) {
 // TestSSELive_MutationDelivery connects a client, broadcasts a create mutation
 // via hub.Broadcast(), and verifies the client receives it with correct fields.
 func TestSSELive_MutationDelivery(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	t.Cleanup(hub.Stop)
 
@@ -279,7 +280,7 @@ func TestSSELive_MutationDelivery(t *testing.T) {
 	}
 
 	// Broadcast a mutation
-	hub.Broadcast(&MutationPayload{
+	hub.Broadcast(&realtime.MutationPayload{
 		Type:        "create",
 		IssueID:     "bd-live-1",
 		Title:       "Live Test Issue",
@@ -320,7 +321,7 @@ func TestSSELive_MutationDelivery(t *testing.T) {
 // TestSSELive_MultipleClients connects 3 clients, broadcasts a mutation, and
 // verifies all 3 receive it.
 func TestSSELive_MultipleClients(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	t.Cleanup(hub.Stop)
 
@@ -349,7 +350,7 @@ func TestSSELive_MultipleClients(t *testing.T) {
 	}
 
 	// Broadcast
-	hub.Broadcast(&MutationPayload{
+	hub.Broadcast(&realtime.MutationPayload{
 		Type:        "create",
 		IssueID:     "bd-multi-1",
 		Title:       "Multi-client Test",
@@ -380,7 +381,7 @@ func TestSSELive_MultipleClients(t *testing.T) {
 // delete mutations sequentially and verifies the client receives all in order
 // with correct types.
 func TestSSELive_MultipleMutationTypes(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	t.Cleanup(hub.Stop)
 
@@ -401,7 +402,7 @@ func TestSSELive_MultipleMutationTypes(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	mutations := []MutationPayload{
+	mutations := []realtime.MutationPayload{
 		{Type: "create", IssueID: "bd-types-1", Title: "Created", Timestamp: time.Now().UTC().Format(time.RFC3339), WorkspaceID: testWorkspaceID},
 		{Type: "update", IssueID: "bd-types-1", Title: "Updated", Timestamp: time.Now().UTC().Format(time.RFC3339), WorkspaceID: testWorkspaceID},
 		{Type: "status", IssueID: "bd-types-1", OldStatus: "open", NewStatus: "in_progress", Timestamp: time.Now().UTC().Format(time.RFC3339), WorkspaceID: testWorkspaceID},
@@ -438,7 +439,7 @@ func TestSSELive_MultipleMutationTypes(t *testing.T) {
 // mutations, connects with ?since= parameter, and verifies catch-up events
 // arrive before the connected event's regular stream.
 func TestSSELive_CatchUpOnReconnect(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	t.Cleanup(hub.Stop)
 
@@ -506,7 +507,7 @@ func TestSSELive_CatchUpOnReconnect(t *testing.T) {
 // TestSSELive_LastEventIDHeader connects with Last-Event-ID header and verifies
 // getMutationsSince is called with the correct since value.
 func TestSSELive_LastEventIDHeader(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	t.Cleanup(hub.Stop)
 
@@ -537,7 +538,7 @@ func TestSSELive_LastEventIDHeader(t *testing.T) {
 // TestSSELive_MonotonicEventIDs sends multiple mutations and verifies each
 // event's id field is strictly greater than the previous.
 func TestSSELive_MonotonicEventIDs(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	t.Cleanup(hub.Stop)
 
@@ -560,7 +561,7 @@ func TestSSELive_MonotonicEventIDs(t *testing.T) {
 
 	const numMutations = 5
 	for i := 0; i < numMutations; i++ {
-		hub.Broadcast(&MutationPayload{
+		hub.Broadcast(&realtime.MutationPayload{
 			Type:        "create",
 			IssueID:     fmt.Sprintf("bd-mono-%d", i),
 			Timestamp:   time.Now().UTC().Format(time.RFC3339),
@@ -588,7 +589,7 @@ func TestSSELive_MonotonicEventIDs(t *testing.T) {
 // TestSSELive_ClientDisconnect connects a client, disconnects (closes body),
 // and verifies the hub client count drops back to 0.
 func TestSSELive_ClientDisconnect(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	t.Cleanup(hub.Stop)
 
@@ -628,7 +629,7 @@ func TestSSELive_ClientDisconnect(t *testing.T) {
 // in the raw SSE stream for a fresh (non-reconnecting) connection. The
 // readEvent helper skips retry: lines, so this test reads raw bytes instead.
 func TestSSELive_RetryFieldInStream(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	t.Cleanup(hub.Stop)
 
@@ -677,7 +678,7 @@ func TestSSELive_RetryFieldInStream(t *testing.T) {
 
 	select {
 	case res := <-resCh:
-		expectedRetry := fmt.Sprintf("retry: %d", sseRetryMs)
+		expectedRetry := fmt.Sprintf("retry: %d", realtime.RetryMs)
 		if res.retryLine != expectedRetry {
 			t.Errorf("expected %q in raw stream, got %q", expectedRetry, res.retryLine)
 		}

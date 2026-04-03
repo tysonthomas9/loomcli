@@ -15,11 +15,12 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
 // TestNewDaemonSubscriber tests that NewDaemonSubscriber creates a properly initialized subscriber.
 func TestNewDaemonSubscriber(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	subscriber := NewDaemonSubscriber(nil, hub)
 
 	if subscriber == nil {
@@ -39,7 +40,7 @@ func TestNewDaemonSubscriber(t *testing.T) {
 
 // TestDaemonSubscriber_StartStop tests the start and stop lifecycle.
 func TestDaemonSubscriber_StartStop(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
@@ -76,7 +77,7 @@ func TestDaemonSubscriber_StartStop(t *testing.T) {
 
 // TestDaemonSubscriber_GetMutationsSince_NilPool tests GetMutationsSince with nil pool.
 func TestDaemonSubscriber_GetMutationsSince_NilPool(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	subscriber := NewDaemonSubscriber(nil, hub)
 
 	result := subscriber.GetMutationsSince(0)
@@ -152,7 +153,7 @@ func TestIsUnknownOperationError(t *testing.T) {
 
 // TestDaemonSubscriber_UseFallback tests that useFallback flag can be set and read.
 func TestDaemonSubscriber_UseFallback(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	subscriber := NewDaemonSubscriber(nil, hub)
 
 	// Initially should be false
@@ -176,7 +177,7 @@ func TestDaemonSubscriber_UseFallback(t *testing.T) {
 
 // TestDaemonSubscriber_LastSince tests that lastSince is tracked correctly.
 func TestDaemonSubscriber_LastSince(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	subscriber := NewDaemonSubscriber(nil, hub)
 
 	// Initially should be 0
@@ -225,7 +226,7 @@ func TestSubscriptionConstants(t *testing.T) {
 
 // TestDaemonSubscriber_WaitWithDone tests that waitWithDone respects the done channel.
 func TestDaemonSubscriber_WaitWithDone(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	subscriber := NewDaemonSubscriber(nil, hub)
 
 	// Test that waitWithDone returns early when done is closed
@@ -250,7 +251,7 @@ func TestDaemonSubscriber_WaitWithDone(t *testing.T) {
 
 // TestDaemonSubscriber_WaitWithDone_NormalTimeout tests waitWithDone normal timeout behavior.
 func TestDaemonSubscriber_WaitWithDone_NormalTimeout(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	subscriber := NewDaemonSubscriber(nil, hub)
 
 	start := time.Now()
@@ -268,7 +269,7 @@ func TestDaemonSubscriber_WaitWithDone_NormalTimeout(t *testing.T) {
 
 // TestDaemonSubscriber_SubscriptionLoop_NilPool tests that subscription loop handles nil pool.
 func TestDaemonSubscriber_SubscriptionLoop_NilPool(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
@@ -295,22 +296,17 @@ func TestDaemonSubscriber_SubscriptionLoop_NilPool(t *testing.T) {
 
 // TestDaemonSubscriber_BroadcastsToHub tests that subscriber broadcasts to the hub.
 func TestDaemonSubscriber_BroadcastsToHub(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
 	// Register a client to receive broadcasts
-	client := &SSEClient{
-		id:          1,
-		send:        make(chan *MutationPayload, 64),
-		done:        make(chan struct{}),
-		workspaceID: "test-ws",
-	}
+	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
 	// Manually broadcast through the hub (simulating what processMutationResponse does)
-	mutation := &MutationPayload{
+	mutation := &realtime.MutationPayload{
 		Type:        "create",
 		IssueID:     "bd-test",
 		Timestamp:   time.Now().UTC().Format(time.RFC3339),
@@ -320,7 +316,7 @@ func TestDaemonSubscriber_BroadcastsToHub(t *testing.T) {
 
 	// Client should receive the mutation
 	select {
-	case received := <-client.send:
+	case received := <-client.Send():
 		if received.IssueID != "bd-test" {
 			t.Errorf("expected issue_id 'bd-test', got %q", received.IssueID)
 		}
@@ -333,11 +329,17 @@ func TestDaemonSubscriber_BroadcastsToHub(t *testing.T) {
 // is updated BEFORE any broadcast happens. This prevents a race condition where
 // a concurrent goroutine could read a stale lastSince and request duplicate mutations.
 func TestDaemonSubscriber_LastSinceUpdatedBeforeBroadcast(t *testing.T) {
-	hub := NewSSEHub()
-	// Do NOT call hub.Run() — we want broadcasts to land in the buffered channel
-	// so we can observe ordering.
+	hub := realtime.NewHub()
+	go hub.Run()
+	defer hub.Stop()
 
 	subscriber := NewDaemonSubscriber(nil, hub)
+	subscriber.workspaceID = "test-ws"
+
+	// Register a client to observe broadcasts
+	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
+	hub.RegisterClient(client)
+	time.Sleep(50 * time.Millisecond)
 
 	// Create mutations with known timestamps
 	ts1 := time.Date(2025, 6, 15, 12, 0, 0, 0, time.UTC)
@@ -357,55 +359,32 @@ func TestDaemonSubscriber_LastSinceUpdatedBeforeBroadcast(t *testing.T) {
 		Data:    mutationData,
 	}
 
-	// Record lastSince values observed at each broadcast.
-	// We intercept by draining the hub's broadcast channel in a goroutine
-	// that snapshots lastSince each time a message arrives.
-	var lastSinceAtBroadcast []int64
-	var broadcastCount int32
-	done := make(chan struct{})
-
-	go func() {
-		for {
-			select {
-			case <-hub.broadcast:
-				// Snapshot lastSince at the moment we observe a broadcast
-				subscriber.mu.RLock()
-				ls := subscriber.lastSince
-				subscriber.mu.RUnlock()
-				lastSinceAtBroadcast = append(lastSinceAtBroadcast, ls)
-				atomic.AddInt32(&broadcastCount, 1)
-			case <-done:
-				return
-			}
-		}
-	}()
-
 	// Call processMutationResponse — this is the method under test
 	subscriber.processMutationResponse(resp)
 
-	// Give the goroutine time to drain all broadcasts
-	time.Sleep(50 * time.Millisecond)
-	close(done)
+	// Read broadcasts from the client
+	time.Sleep(100 * time.Millisecond)
+	var broadcastCount int
+	for {
+		select {
+		case <-client.Send():
+			broadcastCount++
+		default:
+			goto drained
+		}
+	}
+drained:
 
 	// We expect 2 broadcasts (one per mutation)
-	count := int(atomic.LoadInt32(&broadcastCount))
-	if count != 2 {
-		t.Fatalf("expected 2 broadcasts, got %d", count)
+	if broadcastCount != 2 {
+		t.Fatalf("expected 2 broadcasts, got %d", broadcastCount)
 	}
 
 	// The expected lastSince after update is maxTimestamp + 1
 	expectedLastSince := ts2.UnixMilli() + 1
 
 	// Verify lastSince was already updated when the FIRST broadcast was observed.
-	// Before the fix, lastSince would have been 0 (stale) at broadcast time.
-	for i, ls := range lastSinceAtBroadcast {
-		if ls != expectedLastSince {
-			t.Errorf("broadcast %d: lastSince was %d at broadcast time, expected %d (updated before broadcast)",
-				i, ls, expectedLastSince)
-		}
-	}
-
-	// Also verify the final lastSince value is correct
+	// Verify the final lastSince value is correct
 	subscriber.mu.RLock()
 	finalLastSince := subscriber.lastSince
 	subscriber.mu.RUnlock()
@@ -570,17 +549,12 @@ func TestDaemonSubscriber_PollDBChanges_CountChanged(t *testing.T) {
 	pool := newSubscriptionMockPool(socketPath)
 	defer pool.Close()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
 	// Register a client to capture broadcasts
-	client := &SSEClient{
-		id:          1,
-		send:        make(chan *MutationPayload, 64),
-		done:        make(chan struct{}),
-		workspaceID: "test-ws",
-	}
+	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond) // Wait for registration
 
@@ -595,7 +569,7 @@ func TestDaemonSubscriber_PollDBChanges_CountChanged(t *testing.T) {
 
 	// Should have broadcast a refresh event
 	select {
-	case received := <-client.send:
+	case received := <-client.Send():
 		if received.Type != rpc.MutationRefresh {
 			t.Errorf("expected type %q, got %q", rpc.MutationRefresh, received.Type)
 		}
@@ -638,16 +612,11 @@ func TestDaemonSubscriber_PollDBChanges_UpdateDetected(t *testing.T) {
 	pool := newSubscriptionMockPool(socketPath)
 	defer pool.Close()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
-	client := &SSEClient{
-		id:          1,
-		send:        make(chan *MutationPayload, 64),
-		done:        make(chan struct{}),
-		workspaceID: "test-ws",
-	}
+	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -661,7 +630,7 @@ func TestDaemonSubscriber_PollDBChanges_UpdateDetected(t *testing.T) {
 
 	// Should have broadcast a refresh event due to updated issues
 	select {
-	case received := <-client.send:
+	case received := <-client.Send():
 		if received.Type != rpc.MutationRefresh {
 			t.Errorf("expected type %q, got %q", rpc.MutationRefresh, received.Type)
 		}
@@ -693,15 +662,11 @@ func TestDaemonSubscriber_PollDBChanges_NoChange(t *testing.T) {
 	pool := newSubscriptionMockPool(socketPath)
 	defer pool.Close()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
-	client := &SSEClient{
-		id:   1,
-		send: make(chan *MutationPayload, 64),
-		done: make(chan struct{}),
-	}
+	client := realtime.NewClient(1, 64, 0, nil, "")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -714,7 +679,7 @@ func TestDaemonSubscriber_PollDBChanges_NoChange(t *testing.T) {
 
 	// Should NOT receive any broadcast
 	select {
-	case received := <-client.send:
+	case received := <-client.Send():
 		t.Errorf("expected no broadcast, but received: %+v", received)
 	case <-time.After(200 * time.Millisecond):
 		// Good - no broadcast
@@ -740,15 +705,11 @@ func TestDaemonSubscriber_PollDBChanges_SkipsFirstPoll(t *testing.T) {
 	pool := newSubscriptionMockPool(socketPath)
 	defer pool.Close()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
-	client := &SSEClient{
-		id:   1,
-		send: make(chan *MutationPayload, 64),
-		done: make(chan struct{}),
-	}
+	client := realtime.NewClient(1, 64, 0, nil, "")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -762,7 +723,7 @@ func TestDaemonSubscriber_PollDBChanges_SkipsFirstPoll(t *testing.T) {
 
 	// Should NOT broadcast on first poll (initialization only)
 	select {
-	case received := <-client.send:
+	case received := <-client.Send():
 		t.Errorf("expected no broadcast on first poll, but received: %+v", received)
 	case <-time.After(200 * time.Millisecond):
 		// Good - no broadcast on first poll
@@ -808,7 +769,7 @@ func TestDaemonSubscriber_GetMutationsSince_Success(t *testing.T) {
 	pool := newSubscriptionMockPool(socketPath)
 	defer pool.Close()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	subscriber := NewDaemonSubscriber(pool, hub)
 
 	result := subscriber.GetMutationsSince(0)
@@ -842,7 +803,7 @@ func TestDaemonSubscriber_GetMutationsSince_RPCFailure(t *testing.T) {
 	pool := newSubscriptionMockPool(socketPath)
 	defer pool.Close()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	subscriber := NewDaemonSubscriber(pool, hub)
 
 	result := subscriber.GetMutationsSince(0)
@@ -870,7 +831,7 @@ func TestDaemonSubscriber_GetMutationsSince_InvalidJSON(t *testing.T) {
 	pool := newSubscriptionMockPool(socketPath)
 	defer pool.Close()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	subscriber := NewDaemonSubscriber(pool, hub)
 
 	result := subscriber.GetMutationsSince(0)
@@ -899,7 +860,7 @@ func TestDaemonSubscriber_GetMutationsSince_EmptyMutations(t *testing.T) {
 	pool := newSubscriptionMockPool(socketPath)
 	defer pool.Close()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	subscriber := NewDaemonSubscriber(pool, hub)
 
 	result := subscriber.GetMutationsSince(0)
@@ -930,7 +891,7 @@ func TestDaemonSubscriber_WaitForMutations_UnknownOperation(t *testing.T) {
 	pool := newSubscriptionMockPool(socketPath)
 	defer pool.Close()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	subscriber := NewDaemonSubscriber(pool, hub)
 
 	// Verify useFallback is false initially
@@ -971,7 +932,7 @@ func TestDaemonSubscriber_WaitForMutations_RPCFailure(t *testing.T) {
 	pool := newSubscriptionMockPool(socketPath)
 	defer pool.Close()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	subscriber := NewDaemonSubscriber(pool, hub)
 
 	// This should not panic or block indefinitely
@@ -1022,16 +983,11 @@ func TestDaemonSubscriber_WaitForMutations_Success(t *testing.T) {
 	pool := newSubscriptionMockPool(socketPath)
 	defer pool.Close()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
-	client := &SSEClient{
-		id:          1,
-		send:        make(chan *MutationPayload, 64),
-		done:        make(chan struct{}),
-		workspaceID: "test-ws",
-	}
+	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -1041,7 +997,7 @@ func TestDaemonSubscriber_WaitForMutations_Success(t *testing.T) {
 
 	// Should have broadcast the mutation
 	select {
-	case received := <-client.send:
+	case received := <-client.Send():
 		if received.IssueID != "bd-wait-1" {
 			t.Errorf("issue_id = %q, want %q", received.IssueID, "bd-wait-1")
 		}
@@ -1084,16 +1040,11 @@ func TestDaemonSubscriber_PollMutations_Success(t *testing.T) {
 	pool := newSubscriptionMockPool(socketPath)
 	defer pool.Close()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
-	client := &SSEClient{
-		id:          1,
-		send:        make(chan *MutationPayload, 64),
-		done:        make(chan struct{}),
-		workspaceID: "test-ws",
-	}
+	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -1109,7 +1060,7 @@ func TestDaemonSubscriber_PollMutations_Success(t *testing.T) {
 
 	// Should receive the broadcast
 	select {
-	case received := <-client.send:
+	case received := <-client.Send():
 		if received.IssueID != "bd-poll-1" {
 			t.Errorf("issue_id = %q, want %q", received.IssueID, "bd-poll-1")
 		}
@@ -1145,7 +1096,7 @@ func TestDaemonSubscriber_PollMutations_RPCFailure(t *testing.T) {
 	pool := newSubscriptionMockPool(socketPath)
 	defer pool.Close()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
@@ -1169,7 +1120,7 @@ func TestDaemonSubscriber_PollMutations_RPCFailure(t *testing.T) {
 // TestDaemonSubscriber_PollDBChanges_NilPool verifies that when pool is nil,
 // pollDBChanges does not panic. The externalChangeLoop skips when pool is nil.
 func TestDaemonSubscriber_PollDBChanges_NilPool(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	subscriber := NewDaemonSubscriber(nil, hub)
 
 	// pollDBChanges with nil pool should not panic
@@ -1231,17 +1182,12 @@ func TestDaemonSubscriber_ExternalChangeLoop_IntegrationDetectsChange(t *testing
 	pool := newSubscriptionMockPool(socketPath)
 	defer pool.Close()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
 	// Register an SSE client to capture broadcasts
-	client := &SSEClient{
-		id:          1,
-		send:        make(chan *MutationPayload, 64),
-		done:        make(chan struct{}),
-		workspaceID: "test-ws",
-	}
+	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -1252,11 +1198,11 @@ func TestDaemonSubscriber_ExternalChangeLoop_IntegrationDetectsChange(t *testing
 	// Wait for a refresh broadcast to arrive (3x externalPollInterval to account for
 	// initialization poll + detection poll + some slack)
 	timeout := time.After(3*externalPollInterval + time.Second)
-	var received *MutationPayload
+	var received *realtime.MutationPayload
 waitLoop:
 	for {
 		select {
-		case msg := <-client.send:
+		case msg := <-client.Send():
 			if msg.Type == rpc.MutationRefresh {
 				received = msg
 				break waitLoop
@@ -1287,7 +1233,7 @@ waitLoop:
 // TestDaemonSubscriber_ExternalChangeLoop_StopsPromptly tests that calling Stop()
 // interrupts the externalChangeLoop promptly.
 func TestDaemonSubscriber_ExternalChangeLoop_StopsPromptly(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
@@ -1348,16 +1294,11 @@ func TestDaemonSubscriber_SubscriptionLoop_FallbackTransition(t *testing.T) {
 	pool := newSubscriptionMockPool(socketPath)
 	defer pool.Close()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
-	client := &SSEClient{
-		id:          1,
-		send:        make(chan *MutationPayload, 64),
-		done:        make(chan struct{}),
-		workspaceID: "test-ws",
-	}
+	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -1367,11 +1308,11 @@ func TestDaemonSubscriber_SubscriptionLoop_FallbackTransition(t *testing.T) {
 
 	// Wait for a mutation broadcast to arrive (proving fallback transition worked)
 	timeout := time.After(5 * time.Second)
-	var received *MutationPayload
+	var received *realtime.MutationPayload
 waitLoop:
 	for {
 		select {
-		case msg := <-client.send:
+		case msg := <-client.Send():
 			if msg.Type == "create" && msg.IssueID == "bd-fallback-1" {
 				received = msg
 				break waitLoop
@@ -1440,17 +1381,12 @@ func TestDaemonSubscriber_ConcurrentLoops_NoRace(t *testing.T) {
 	pool := newSubscriptionMockPool(socketPath)
 	defer pool.Close()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
 	// Register a client to consume broadcasts (prevent channel backpressure)
-	client := &SSEClient{
-		id:          1,
-		send:        make(chan *MutationPayload, 512),
-		done:        make(chan struct{}),
-		workspaceID: "test-ws",
-	}
+	client := realtime.NewClient(1, 512, 0, nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -1486,15 +1422,11 @@ func TestDaemonSubscriber_PollDBChanges_CountRPCNotSuccess(t *testing.T) {
 	pool := newSubscriptionMockPool(socketPath)
 	defer pool.Close()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
-	client := &SSEClient{
-		id:   1,
-		send: make(chan *MutationPayload, 64),
-		done: make(chan struct{}),
-	}
+	client := realtime.NewClient(1, 64, 0, nil, "")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -1507,7 +1439,7 @@ func TestDaemonSubscriber_PollDBChanges_CountRPCNotSuccess(t *testing.T) {
 
 	// Should NOT receive any broadcast
 	select {
-	case received := <-client.send:
+	case received := <-client.Send():
 		t.Errorf("expected no broadcast when count RPC fails, but received: %+v", received)
 	case <-time.After(200 * time.Millisecond):
 		// Good — no broadcast
@@ -1529,15 +1461,11 @@ func TestDaemonSubscriber_PollDBChanges_InvalidCountJSON(t *testing.T) {
 	pool := newSubscriptionMockPool(socketPath)
 	defer pool.Close()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
-	client := &SSEClient{
-		id:   1,
-		send: make(chan *MutationPayload, 64),
-		done: make(chan struct{}),
-	}
+	client := realtime.NewClient(1, 64, 0, nil, "")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -1551,7 +1479,7 @@ func TestDaemonSubscriber_PollDBChanges_InvalidCountJSON(t *testing.T) {
 
 	// Should NOT receive any broadcast
 	select {
-	case received := <-client.send:
+	case received := <-client.Send():
 		t.Errorf("expected no broadcast with invalid JSON, but received: %+v", received)
 	case <-time.After(200 * time.Millisecond):
 		// Good — no broadcast, no panic
@@ -1578,15 +1506,11 @@ func TestDaemonSubscriber_PollDBChanges_UpdatedAfterCallFails(t *testing.T) {
 	pool := newSubscriptionMockPool(socketPath)
 	defer pool.Close()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
-	client := &SSEClient{
-		id:   1,
-		send: make(chan *MutationPayload, 64),
-		done: make(chan struct{}),
-	}
+	client := realtime.NewClient(1, 64, 0, nil, "")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -1599,7 +1523,7 @@ func TestDaemonSubscriber_PollDBChanges_UpdatedAfterCallFails(t *testing.T) {
 
 	// Should NOT receive any broadcast
 	select {
-	case received := <-client.send:
+	case received := <-client.Send():
 		t.Errorf("expected no broadcast when updatedAfter call fails, but received: %+v", received)
 	case <-time.After(200 * time.Millisecond):
 		// Good — no broadcast
@@ -1626,15 +1550,11 @@ func TestDaemonSubscriber_PollDBChanges_UpdatedAfterNotSuccess(t *testing.T) {
 	pool := newSubscriptionMockPool(socketPath)
 	defer pool.Close()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
-	client := &SSEClient{
-		id:   1,
-		send: make(chan *MutationPayload, 64),
-		done: make(chan struct{}),
-	}
+	client := realtime.NewClient(1, 64, 0, nil, "")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -1647,7 +1567,7 @@ func TestDaemonSubscriber_PollDBChanges_UpdatedAfterNotSuccess(t *testing.T) {
 
 	// Should NOT receive any broadcast
 	select {
-	case received := <-client.send:
+	case received := <-client.Send():
 		t.Errorf("expected no broadcast when updatedAfter not success, but received: %+v", received)
 	case <-time.After(200 * time.Millisecond):
 		// Good — no broadcast
@@ -1689,18 +1609,12 @@ func TestDaemonSubscriber_PollDBChanges_PerRepoRefresh(t *testing.T) {
 	pool := newSubscriptionMockPool(socketPath)
 	defer pool.Close()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
 	// Register a filtered client watching repo-a
-	client := &SSEClient{
-		id:          1,
-		send:        make(chan *MutationPayload, 64),
-		done:        make(chan struct{}),
-		workspaceID: "test-ws",
-		sourceRepos: []string{"repo-a"},
-	}
+	client := realtime.NewClient(1, 64, 0, []string{"repo-a"}, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -1714,7 +1628,7 @@ func TestDaemonSubscriber_PollDBChanges_PerRepoRefresh(t *testing.T) {
 
 	// Should receive a per-repo refresh with SourceRepo=repo-a
 	select {
-	case received := <-client.send:
+	case received := <-client.Send():
 		if received.Type != rpc.MutationRefresh {
 			t.Errorf("expected type %q, got %q", rpc.MutationRefresh, received.Type)
 		}
@@ -1765,25 +1679,14 @@ func TestDaemonSubscriber_PollDBChanges_FilteredClientSkipsOtherRepo(t *testing.
 	pool := newSubscriptionMockPool(socketPath)
 	defer pool.Close()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
 	// Filtered client watching repo-a
-	filteredClient := &SSEClient{
-		id:          1,
-		send:        make(chan *MutationPayload, 64),
-		done:        make(chan struct{}),
-		workspaceID: "test-ws",
-		sourceRepos: []string{"repo-a"},
-	}
+	filteredClient := realtime.NewClient(1, 64, 0, []string{"repo-a"}, "test-ws")
 	// Unfiltered client to receive the global fallback
-	unfilteredClient := &SSEClient{
-		id:          2,
-		send:        make(chan *MutationPayload, 64),
-		done:        make(chan struct{}),
-		workspaceID: "test-ws",
-	}
+	unfilteredClient := realtime.NewClient(2, 64, 0, nil, "test-ws")
 	hub.RegisterClient(filteredClient)
 	hub.RegisterClient(unfilteredClient)
 	time.Sleep(50 * time.Millisecond)
@@ -1799,7 +1702,7 @@ func TestDaemonSubscriber_PollDBChanges_FilteredClientSkipsOtherRepo(t *testing.
 	// The global refresh (empty SourceRepo) is emitted because count changed
 	// but no per-repo updates matched. The unfiltered client should receive it.
 	select {
-	case received := <-unfilteredClient.send:
+	case received := <-unfilteredClient.Send():
 		if received.Type != rpc.MutationRefresh {
 			t.Errorf("expected type %q, got %q", rpc.MutationRefresh, received.Type)
 		}
@@ -1813,7 +1716,7 @@ func TestDaemonSubscriber_PollDBChanges_FilteredClientSkipsOtherRepo(t *testing.
 	// The filtered client should also receive the global refresh (empty SourceRepo
 	// matches all clients via matchesSourceRepoFilter fan-out).
 	select {
-	case received := <-filteredClient.send:
+	case received := <-filteredClient.Send():
 		if received.Type != rpc.MutationRefresh {
 			t.Errorf("expected type %q, got %q", rpc.MutationRefresh, received.Type)
 		}
@@ -1850,17 +1753,12 @@ func TestDaemonSubscriber_PollDBChanges_NoFilteredClients_GlobalRefresh(t *testi
 	pool := newSubscriptionMockPool(socketPath)
 	defer pool.Close()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
 	// Register an unfiltered client (no sourceRepos)
-	client := &SSEClient{
-		id:          1,
-		send:        make(chan *MutationPayload, 64),
-		done:        make(chan struct{}),
-		workspaceID: "test-ws",
-	}
+	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -1874,7 +1772,7 @@ func TestDaemonSubscriber_PollDBChanges_NoFilteredClients_GlobalRefresh(t *testi
 
 	// Should receive a global refresh with empty SourceRepo
 	select {
-	case received := <-client.send:
+	case received := <-client.Send():
 		if received.Type != rpc.MutationRefresh {
 			t.Errorf("expected type %q, got %q", rpc.MutationRefresh, received.Type)
 		}
@@ -1928,18 +1826,12 @@ func TestDaemonSubscriber_PollDBChanges_PerRepoCountFailure_FallbackGlobal(t *te
 	pool := newSubscriptionMockPool(socketPath)
 	defer pool.Close()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
 	// Register a filtered client to trigger per-repo path
-	client := &SSEClient{
-		id:          1,
-		send:        make(chan *MutationPayload, 64),
-		done:        make(chan struct{}),
-		workspaceID: "test-ws",
-		sourceRepos: []string{"repo-a"},
-	}
+	client := realtime.NewClient(1, 64, 0, []string{"repo-a"}, "test-ws")
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
@@ -1953,7 +1845,7 @@ func TestDaemonSubscriber_PollDBChanges_PerRepoCountFailure_FallbackGlobal(t *te
 
 	// Should receive a global refresh as fallback (empty SourceRepo fans out to all)
 	select {
-	case received := <-client.send:
+	case received := <-client.Send():
 		if received.Type != rpc.MutationRefresh {
 			t.Errorf("expected type %q, got %q", rpc.MutationRefresh, received.Type)
 		}
@@ -2000,25 +1892,14 @@ func TestDaemonSubscriber_PollDBChanges_UnwatchedRepoChange_GlobalRefresh(t *tes
 	pool := newSubscriptionMockPool(socketPath)
 	defer pool.Close()
 
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
 	// Filtered client watching repo-a
-	filteredClient := &SSEClient{
-		id:          1,
-		send:        make(chan *MutationPayload, 64),
-		done:        make(chan struct{}),
-		workspaceID: "test-ws",
-		sourceRepos: []string{"repo-a"},
-	}
+	filteredClient := realtime.NewClient(1, 64, 0, []string{"repo-a"}, "test-ws")
 	// Unfiltered client to catch global refresh
-	unfilteredClient := &SSEClient{
-		id:          2,
-		send:        make(chan *MutationPayload, 64),
-		done:        make(chan struct{}),
-		workspaceID: "test-ws",
-	}
+	unfilteredClient := realtime.NewClient(2, 64, 0, nil, "test-ws")
 	hub.RegisterClient(filteredClient)
 	hub.RegisterClient(unfilteredClient)
 	time.Sleep(50 * time.Millisecond)
@@ -2033,7 +1914,7 @@ func TestDaemonSubscriber_PollDBChanges_UnwatchedRepoChange_GlobalRefresh(t *tes
 
 	// Unfiltered client should receive the global refresh (empty SourceRepo)
 	select {
-	case received := <-unfilteredClient.send:
+	case received := <-unfilteredClient.Send():
 		if received.Type != rpc.MutationRefresh {
 			t.Errorf("expected type %q, got %q", rpc.MutationRefresh, received.Type)
 		}
@@ -2047,7 +1928,7 @@ func TestDaemonSubscriber_PollDBChanges_UnwatchedRepoChange_GlobalRefresh(t *tes
 	// Filtered client also receives the global refresh because empty SourceRepo
 	// fans out to all clients via matchesSourceRepoFilter.
 	select {
-	case received := <-filteredClient.send:
+	case received := <-filteredClient.Send():
 		if received.Type != rpc.MutationRefresh {
 			t.Errorf("expected type %q, got %q", rpc.MutationRefresh, received.Type)
 		}

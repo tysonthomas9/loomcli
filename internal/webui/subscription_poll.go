@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
 // knownIssueState is a lightweight snapshot of an issue used by pollDBChanges
@@ -49,7 +50,7 @@ func (s *DaemonSubscriber) emitGranularMutations(changed []changedIssue, now tim
 			continue
 		}
 
-		payload := &MutationPayload{
+		payload := &realtime.MutationPayload{
 			IssueID:     issue.ID,
 			Title:       issue.Title,
 			Assignee:    issue.Assignee,
@@ -149,7 +150,7 @@ func parseChangedIssues(data json.RawMessage) []changedIssue {
 
 // broadcastRefresh sends a MutationRefresh event and updates poll state.
 func (s *DaemonSubscriber) broadcastRefresh(now time.Time, totalCount int64) {
-	s.hub.Broadcast(&MutationPayload{
+	s.hub.Broadcast(&realtime.MutationPayload{
 		Type:        rpc.MutationRefresh,
 		IssueID:     "",
 		Timestamp:   now.UTC().Format(time.RFC3339),

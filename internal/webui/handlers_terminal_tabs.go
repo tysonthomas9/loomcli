@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
@@ -141,7 +142,7 @@ func buildPatchFields(req tabPatchRequest) (fields map[string]string, issueIDCha
 }
 
 // handlePatchTerminalTab partially updates tab metadata and broadcasts an SSE event.
-func handlePatchTerminalTab(store *tabmeta.Store, hub *SSEHub) http.HandlerFunc {
+func handlePatchTerminalTab(store *tabmeta.Store, hub *realtime.Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondJSON(w, http.StatusServiceUnavailable, tabMetadataResponse{
@@ -198,7 +199,7 @@ func handlePatchTerminalTab(store *tabmeta.Store, hub *SSEHub) http.HandlerFunc 
 
 		// Broadcast SSE event for real-time sync
 		if hub != nil {
-			hub.Broadcast(&MutationPayload{
+			hub.Broadcast(&realtime.MutationPayload{
 				Type:        "terminal_metadata",
 				Timestamp:   time.Now().UTC().Format(time.RFC3339),
 				WorkspaceID: workspace,
@@ -207,7 +208,7 @@ func handlePatchTerminalTab(store *tabmeta.Store, hub *SSEHub) http.HandlerFunc 
 
 		// Broadcast additional terminal_session_change event when issue linkage changes
 		if issueIDChanged && hub != nil {
-			hub.Broadcast(&MutationPayload{
+			hub.Broadcast(&realtime.MutationPayload{
 				Type:        "terminal_session_change",
 				Timestamp:   time.Now().UTC().Format(time.RFC3339),
 				WorkspaceID: workspace,
@@ -230,7 +231,7 @@ type tabPutRequest struct {
 }
 
 // handlePutTerminalTab creates or replaces tab metadata and broadcasts an SSE event.
-func handlePutTerminalTab(store *tabmeta.Store, hub *SSEHub) http.HandlerFunc {
+func handlePutTerminalTab(store *tabmeta.Store, hub *realtime.Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondJSON(w, http.StatusServiceUnavailable, tabMetadataResponse{
@@ -292,7 +293,7 @@ func handlePutTerminalTab(store *tabmeta.Store, hub *SSEHub) http.HandlerFunc {
 
 		// Broadcast SSE event for real-time sync
 		if hub != nil {
-			hub.Broadcast(&MutationPayload{
+			hub.Broadcast(&realtime.MutationPayload{
 				Type:        "terminal_metadata",
 				Timestamp:   time.Now().UTC().Format(time.RFC3339),
 				WorkspaceID: workspace,
@@ -307,7 +308,7 @@ func handlePutTerminalTab(store *tabmeta.Store, hub *SSEHub) http.HandlerFunc {
 }
 
 // handleDeleteTerminalTab removes tab metadata and broadcasts an SSE event.
-func handleDeleteTerminalTab(store *tabmeta.Store, hub *SSEHub) http.HandlerFunc {
+func handleDeleteTerminalTab(store *tabmeta.Store, hub *realtime.Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondJSON(w, http.StatusServiceUnavailable, tabMetadataResponse{
@@ -339,7 +340,7 @@ func handleDeleteTerminalTab(store *tabmeta.Store, hub *SSEHub) http.HandlerFunc
 
 		// Broadcast SSE event for real-time sync
 		if hub != nil {
-			hub.Broadcast(&MutationPayload{
+			hub.Broadcast(&realtime.MutationPayload{
 				Type:        "terminal_metadata",
 				Timestamp:   time.Now().UTC().Format(time.RFC3339),
 				WorkspaceID: workspace,

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
@@ -228,7 +229,7 @@ func handleListSessionsByIssue(tabMetaStore *tabmeta.Store) http.HandlerFunc {
 
 // handleCloseAllSessions kills all tmux sessions, deletes all tab metadata, and broadcasts SSE event.
 // POST /api/terminal/sessions/close-all
-func handleCloseAllSessions(manager *TerminalManager, tabMetaStore *tabmeta.Store, hub *SSEHub) http.HandlerFunc {
+func handleCloseAllSessions(manager *TerminalManager, tabMetaStore *tabmeta.Store, hub *realtime.Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if manager == nil {
 			respondJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
@@ -274,7 +275,7 @@ func handleCloseAllSessions(manager *TerminalManager, tabMetaStore *tabmeta.Stor
 		if hub != nil {
 			now := time.Now().UTC().Format(time.RFC3339)
 			for ws := range affectedWorkspaces {
-				hub.Broadcast(&MutationPayload{
+				hub.Broadcast(&realtime.MutationPayload{
 					Type:        "terminal_session_change",
 					Timestamp:   now,
 					WorkspaceID: ws,

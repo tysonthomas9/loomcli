@@ -13,6 +13,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
 // validSessionID matches session IDs produced by GenerateSessionID:
@@ -295,7 +296,7 @@ type sessionNotifyRequest struct {
 // agent processes when a session status changes, and broadcasts a session_change
 // SSE event to all connected web UI clients.
 // POST /api/sessions/notify
-func handleNotifySessionChange(hub *SSEHub, notifyToken string) http.HandlerFunc {
+func handleNotifySessionChange(hub *realtime.Hub, notifyToken string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Validate bearer token — fail-closed if server token is empty.
 		if notifyToken == "" {
@@ -328,7 +329,7 @@ func handleNotifySessionChange(hub *SSEHub, notifyToken string) http.HandlerFunc
 		if req.WorkspaceID == "" {
 			slog.Warn("session notify missing workspace_id, mutation will be dropped", "task_id", req.TaskID)
 		}
-		hub.Broadcast(&MutationPayload{
+		hub.Broadcast(&realtime.MutationPayload{
 			Type:        rpc.MutationSessionChange,
 			IssueID:     req.TaskID,
 			NewStatus:   req.Status,

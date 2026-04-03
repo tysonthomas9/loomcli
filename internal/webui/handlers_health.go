@@ -13,6 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/types"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
 // CircuitBreakerStatus represents the circuit breaker state in health responses.
@@ -248,7 +249,7 @@ func handleStatsWithPool(pool statsConnectionGetter) http.HandlerFunc {
 
 // handleMetrics returns a handler that exposes SSE hub runtime metrics.
 // getFleetTimeouts returns the aggregate fleet timeout count (nil = fleet disabled).
-func handleMetrics(hub *SSEHub, getFleetTimeouts func() int64, claimMetrics *fleet.ClaimMetrics) http.HandlerFunc {
+func handleMetrics(hub *realtime.Hub, getFleetTimeouts func() int64, claimMetrics *fleet.ClaimMetrics) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if hub == nil {
 			respondJSON(w, http.StatusServiceUnavailable, MetricsResponse{

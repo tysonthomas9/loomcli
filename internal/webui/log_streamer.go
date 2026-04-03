@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
 const (
@@ -290,7 +292,7 @@ func (s *LogStreamer) Stream(ctx context.Context, w http.ResponseWriter, startOf
 	w.Header().Set("X-Accel-Buffering", "no")
 
 	// Send retry interval
-	_, _ = fmt.Fprintf(w, "retry: %d\n\n", sseRetryMs)
+	_, _ = fmt.Fprintf(w, "retry: %d\n\n", realtime.RetryMs)
 	flusher.Flush()
 
 	// Open file and seek to position
@@ -480,14 +482,14 @@ func (s *LogStreamer) sendLogChunk(w http.ResponseWriter, flusher http.Flusher, 
 	if err != nil {
 		return
 	}
-	eventID := sseEventIDCounter.Add(1)
+	eventID := realtime.NextEventID()
 	_, _ = fmt.Fprintf(w, "id: %d\nevent: log-chunk\ndata: %s\n\n", eventID, string(data))
 	flusher.Flush()
 }
 
 // sendTruncatedEvent notifies the client that the file was truncated.
 func (s *LogStreamer) sendTruncatedEvent(w http.ResponseWriter, flusher http.Flusher) {
-	eventID := sseEventIDCounter.Add(1)
+	eventID := realtime.NextEventID()
 	_, _ = fmt.Fprintf(w, "id: %d\nevent: truncated\ndata: {}\n\n", eventID)
 	flusher.Flush()
 }

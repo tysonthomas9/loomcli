@@ -18,6 +18,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/types"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -1438,7 +1439,7 @@ func TestSetupRoutes_LegacySSEEndpointReturns404(t *testing.T) {
 // GET /api/workspaces/{ws}/events is handled by the SSE handler when
 // hub and multiPool are non-nil.
 func TestSetupRoutes_SSEEndpointRegisteredOnWorkspaceScope(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
@@ -1533,7 +1534,7 @@ func TestSetupRoutes_FlatTerminalTokenReturns404(t *testing.T) {
 	}
 	t.Cleanup(func() { termMgr.Shutdown() })
 
-	termAuth, err := newTerminalAuth()
+	termAuth, err := realtime.NewTerminalAuth()
 	if err != nil {
 		t.Fatalf("failed to create terminal auth: %v", err)
 	}

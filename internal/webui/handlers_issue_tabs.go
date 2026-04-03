@@ -8,6 +8,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
 // issueTabResponse wraps issue tab API responses.
@@ -93,7 +94,7 @@ type issueTabSaveRequest struct {
 }
 
 // handleSaveIssueTabs saves the full tab state for an issue and broadcasts an SSE event.
-func handleSaveIssueTabs(store *issuetabs.Store, hub *SSEHub) http.HandlerFunc {
+func handleSaveIssueTabs(store *issuetabs.Store, hub *realtime.Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondJSON(w, http.StatusServiceUnavailable, issueTabResponse{
@@ -140,7 +141,7 @@ func handleSaveIssueTabs(store *issuetabs.Store, hub *SSEHub) http.HandlerFunc {
 
 		// Broadcast SSE event for real-time sync — workspace derived from middleware context.
 		if hub != nil {
-			hub.Broadcast(&MutationPayload{
+			hub.Broadcast(&realtime.MutationPayload{
 				Type:        "issue_tabs",
 				IssueID:     issueID,
 				Timestamp:   time.Now().UTC().Format(time.RFC3339),

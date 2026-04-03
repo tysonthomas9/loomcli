@@ -14,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -75,15 +76,10 @@ func (p *trackingMockPool) IsClosed() bool {
 }
 
 // newTestSSEClientWithWorkspace creates a testSSEClient with a specific workspace ID.
-func newTestSSEClientWithWorkspace(t *testing.T, hub *SSEHub, id int64, workspaceID string) *testSSEClient {
+func newTestSSEClientWithWorkspace(t *testing.T, hub *realtime.Hub, id int64, workspaceID string) *testSSEClient {
 	t.Helper()
 
-	client := &SSEClient{
-		id:          id,
-		send:        make(chan *MutationPayload, 64),
-		done:        make(chan struct{}),
-		workspaceID: workspaceID,
-	}
+	client := realtime.NewClient(id, 64, 0, nil, workspaceID)
 
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
@@ -97,7 +93,7 @@ func newTestSSEClientWithWorkspace(t *testing.T, hub *SSEHub, id int64, workspac
 // waitForClientCount polls hub.ClientCount() until it reaches the expected
 // value or the deadline expires. This avoids race conditions between client
 // registration and broadcast calls.
-func waitForClientCount(t *testing.T, hub *SSEHub, expected int) {
+func waitForClientCount(t *testing.T, hub *realtime.Hub, expected int) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for hub.ClientCount() < expected && time.Now().Before(deadline) {
@@ -357,7 +353,7 @@ func TestMultiWorkspace_DuplicateAgentNames(t *testing.T) {
 // --- Test 5: Duplicate Issue IDs ---
 
 func TestMultiWorkspace_DuplicateIssueIDs(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
@@ -369,7 +365,7 @@ func TestMultiWorkspace_DuplicateIssueIDs(t *testing.T) {
 	waitForClientCount(t, hub, 2)
 
 	// Broadcast mutation for same issue ID "issue-1" but different workspaces
-	hub.Broadcast(&MutationPayload{
+	hub.Broadcast(&realtime.MutationPayload{
 		Type:        "create",
 		IssueID:     "issue-1",
 		Title:       "Alpha Issue",
@@ -377,7 +373,7 @@ func TestMultiWorkspace_DuplicateIssueIDs(t *testing.T) {
 		WorkspaceID: "ws-alpha",
 	})
 
-	hub.Broadcast(&MutationPayload{
+	hub.Broadcast(&realtime.MutationPayload{
 		Type:        "create",
 		IssueID:     "issue-1",
 		Title:       "Beta Issue",
@@ -427,7 +423,7 @@ func TestMultiWorkspace_DuplicateIssueIDs(t *testing.T) {
 // --- Test 6: Two-Tab SSE Independence ---
 
 func TestMultiWorkspace_TwoTabSSEIndependence(t *testing.T) {
-	hub := NewSSEHub()
+	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
 
@@ -439,7 +435,7 @@ func TestMultiWorkspace_TwoTabSSEIndependence(t *testing.T) {
 	waitForClientCount(t, hub, 2)
 
 	t.Run("alpha mutation reaches only tab1", func(t *testing.T) {
-		hub.Broadcast(&MutationPayload{
+		hub.Broadcast(&realtime.MutationPayload{
 			Type:        "create",
 			IssueID:     "bd-alpha-1",
 			Timestamp:   time.Now().UTC().Format(time.RFC3339),
@@ -463,7 +459,7 @@ func TestMultiWorkspace_TwoTabSSEIndependence(t *testing.T) {
 	})
 
 	t.Run("beta mutation reaches only tab2", func(t *testing.T) {
-		hub.Broadcast(&MutationPayload{
+		hub.Broadcast(&realtime.MutationPayload{
 			Type:        "update",
 			IssueID:     "bd-beta-1",
 			Timestamp:   time.Now().UTC().Format(time.RFC3339),
@@ -487,7 +483,7 @@ func TestMultiWorkspace_TwoTabSSEIndependence(t *testing.T) {
 	})
 
 	t.Run("untagged mutation reaches neither tab", func(t *testing.T) {
-		hub.Broadcast(&MutationPayload{
+		hub.Broadcast(&realtime.MutationPayload{
 			Type:        "create",
 			IssueID:     "bd-untagged",
 			Timestamp:   time.Now().UTC().Format(time.RFC3339),
@@ -513,7 +509,7 @@ func TestMultiWorkspace_TwoTabSSEIndependence(t *testing.T) {
 
 		// Simulate rename: the UUID (ws-alpha) stays the same. A new mutation
 		// with the same UUID should still be delivered to tab1.
-		hub.Broadcast(&MutationPayload{
+		hub.Broadcast(&realtime.MutationPayload{
 			Type:        "status",
 			IssueID:     "bd-post-rename",
 			Timestamp:   time.Now().UTC().Format(time.RFC3339),
@@ -539,7 +535,7 @@ func TestMultiWorkspace_TwoTabSSEIndependence(t *testing.T) {
 		staleTab := newTestSSEClientWithWorkspace(t, hub, 99, "ws-deleted")
 		defer staleTab.Close()
 
-		hub.Broadcast(&MutationPayload{
+		hub.Broadcast(&realtime.MutationPayload{
 			Type:        "create",
 			IssueID:     "bd-stale",
 			Timestamp:   time.Now().UTC().Format(time.RFC3339),

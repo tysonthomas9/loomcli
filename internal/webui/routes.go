@@ -5,6 +5,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
 // registerRoutes maps URL patterns to pre-built handler fields on the Server.
@@ -145,12 +146,12 @@ func (app *Server) registerWorkspaceRoutes() { //nolint:funlen,gocognit,cyclop /
 
 	// Server-Sent Events endpoint (workspace-scoped)
 	if app.hub != nil {
-		var sseHandler http.Handler
-		if app.sseTokens != nil {
-			sseHandler = NewSSEHandlerWithAuth(app.hub, app.getMutationsSince, app.sseTokens)
-		} else {
-			sseHandler = NewSSEHandler(app.hub, app.getMutationsSince)
-		}
+		sseHandler := realtime.NewHandler(realtime.HandlerConfig{
+			Hub:               app.hub,
+			GetMutationsSince: app.getMutationsSince,
+			WorkspaceFromCtx:  middleware.WorkspaceFromContext,
+			TokenStore:        app.sseTokens,
+		})
 		wsMux.Handle("GET /api/workspaces/{ws}/events", sseHandler)
 		// SSE token exchange: exchanges JWT for a short-lived opaque token.
 		// Protected by ExtAuth middleware (JWT required in external mode).

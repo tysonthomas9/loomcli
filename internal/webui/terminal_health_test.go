@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
 // TestHandleTerminalKill_MethodNotAllowed tests that a GET request to the kill
@@ -149,7 +151,7 @@ func TestHandleTerminalKill_AuthRequired(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	auth, err := newTerminalAuth()
+	auth, err := realtime.NewTerminalAuth()
 	if err != nil {
 		t.Fatalf("failed to create terminal auth: %v", err)
 	}
@@ -191,7 +193,7 @@ func TestHandleTerminalKill_AuthWithValidToken(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	auth, err := newTerminalAuth()
+	auth, err := realtime.NewTerminalAuth()
 	if err != nil {
 		t.Fatalf("failed to create terminal auth: %v", err)
 	}
@@ -465,7 +467,7 @@ func TestHandleTerminalSessionStatus_ResponseFormat(t *testing.T) {
 
 // TestWSCloseBackendExitedConstant verifies the WebSocket close code constant.
 func TestWSCloseBackendExitedConstant(t *testing.T) {
-	if wsCloseBackendExited != 4001 {
-		t.Errorf("wsCloseBackendExited = %d, want %d", wsCloseBackendExited, 4001)
+	if realtime.WSCloseBackendExited != 4001 {
+		t.Errorf("realtime.WSCloseBackendExited = %d, want %d", realtime.WSCloseBackendExited, 4001)
 	}
 }

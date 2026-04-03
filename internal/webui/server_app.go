@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
@@ -172,7 +173,7 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 	app.issueSvc = service.NewIssueService(app.pool, app.multiPool, middleware.WithWorkspace)
 
 	// Create SSE hub for real-time push notifications
-	app.hub = NewSSEHub()
+	app.hub = realtime.NewHub()
 	go app.hub.Run()
 	cleanups = append(cleanups, func() { app.hub.Stop() })
 
@@ -238,7 +239,7 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 	// Initialize terminal auth for one-time WebSocket tokens
 	if app.termMgr != nil {
 		var authErr error
-		app.termAuth, authErr = newTerminalAuth()
+		app.termAuth, authErr = realtime.NewTerminalAuth()
 		if authErr != nil {
 			slog.Warn("failed to initialize terminal auth, terminal feature disabled", "err", authErr)
 			app.termMgr = nil
@@ -255,7 +256,7 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 	// Initialize SSE token exchange store (external auth mode only).
 	if config.ExtAuthURL != "" {
 		var sseErr error
-		app.sseTokens, sseErr = newSSETokenStore()
+		app.sseTokens, sseErr = realtime.NewTokenStore()
 		if sseErr != nil {
 			slog.Warn("failed to initialize SSE token store", "err", sseErr)
 		} else {
