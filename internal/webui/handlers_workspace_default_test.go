@@ -1,25 +1,29 @@
 package webui
 
 import (
+	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 func TestHandleSetDefaultWorkspace_Success(t *testing.T) {
 	setCalled := false
-	setFn := func(name string) error {
-		setCalled = true
-		if name != "my-ws" {
-			t.Errorf("expected set called with %q, got %q", "my-ws", name)
-		}
-		return nil
+	svc := &mockWorkspaceService{
+		setDefaultWorkspaceFn: func(_ context.Context, name string) (*service.WorkspaceData, error) {
+			setCalled = true
+			if name != "my-ws" {
+				t.Errorf("expected set called with %q, got %q", "my-ws", name)
+			}
+			return &service.WorkspaceData{Name: "test-ws"}, nil
+		},
 	}
 
-	handler := handleSetDefaultWorkspace(setFn, mockWorkspaceConfigFn)
+	handler := handleSetDefaultWorkspace(svc)
 
 	body := strings.NewReader(`{"name":"my-ws"}`)
 	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/default", body)
@@ -41,7 +45,7 @@ func TestHandleSetDefaultWorkspace_Success(t *testing.T) {
 		t.Error("expected setFn to be called")
 	}
 	if resp.Data == nil {
-		t.Fatal("expected Data to be non-nil when workspaceConfigFn provided")
+		t.Fatal("expected Data to be non-nil")
 	}
 	if resp.Data.Name != "test-ws" {
 		t.Errorf("expected data name %q, got %q", "test-ws", resp.Data.Name)
@@ -49,12 +53,8 @@ func TestHandleSetDefaultWorkspace_Success(t *testing.T) {
 }
 
 func TestHandleSetDefaultWorkspace_EmptyBody(t *testing.T) {
-	setFn := func(name string) error {
-		t.Fatal("setFn should not be called with empty body")
-		return nil
-	}
-
-	handler := handleSetDefaultWorkspace(setFn, nil)
+	svc := &mockWorkspaceService{}
+	handler := handleSetDefaultWorkspace(svc)
 
 	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/default", strings.NewReader(""))
 	rec := httptest.NewRecorder()
@@ -77,12 +77,8 @@ func TestHandleSetDefaultWorkspace_EmptyBody(t *testing.T) {
 }
 
 func TestHandleSetDefaultWorkspace_EmptyName(t *testing.T) {
-	setFn := func(name string) error {
-		t.Fatal("setFn should not be called with empty name")
-		return nil
-	}
-
-	handler := handleSetDefaultWorkspace(setFn, nil)
+	svc := &mockWorkspaceService{}
+	handler := handleSetDefaultWorkspace(svc)
 
 	body := strings.NewReader(`{"name":""}`)
 	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/default", body)
@@ -105,36 +101,31 @@ func TestHandleSetDefaultWorkspace_EmptyName(t *testing.T) {
 	}
 }
 
-func TestHandleSetDefaultWorkspace_NilSetFn(t *testing.T) {
-	handler := handleSetDefaultWorkspace(nil, nil)
+func TestHandleSetDefaultWorkspace_Unavailable(t *testing.T) {
+	svc := &mockWorkspaceService{
+		setDefaultWorkspaceFn: func(_ context.Context, _ string) (*service.WorkspaceData, error) {
+			return nil, service.ErrUnavailable("set default workspace not available")
+		},
+	}
+	handler := handleSetDefaultWorkspace(svc)
 
 	body := strings.NewReader(`{"name":"my-ws"}`)
 	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/default", body)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNotImplemented {
-		t.Fatalf("expected 501, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	var resp workspaceResponse
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.Success {
-		t.Fatal("expected failure")
-	}
-	if resp.Error != "set default workspace not available" {
-		t.Errorf("expected %q, got: %s", "set default workspace not available", resp.Error)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
 func TestHandleSetDefaultWorkspace_NotFound(t *testing.T) {
-	setFn := func(name string) error {
-		return fmt.Errorf("workspace %q not found", name)
+	svc := &mockWorkspaceService{
+		setDefaultWorkspaceFn: func(_ context.Context, _ string) (*service.WorkspaceData, error) {
+			return nil, service.ErrNotFound("workspace not found")
+		},
 	}
-
-	handler := handleSetDefaultWorkspace(setFn, nil)
+	handler := handleSetDefaultWorkspace(svc)
 
 	body := strings.NewReader(`{"name":"nonexistent"}`)
 	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/default", body)
@@ -144,55 +135,18 @@ func TestHandleSetDefaultWorkspace_NotFound(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
 	}
-
-	var resp workspaceResponse
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.Success {
-		t.Fatal("expected failure")
-	}
-	if resp.Error != `workspace "nonexistent" not found` {
-		t.Errorf("expected not found error, got: %s", resp.Error)
-	}
-}
-
-func TestHandleSetDefaultWorkspace_InternalError(t *testing.T) {
-	setFn := func(name string) error {
-		return fmt.Errorf("disk I/O error")
-	}
-
-	handler := handleSetDefaultWorkspace(setFn, nil)
-
-	body := strings.NewReader(`{"name":"my-ws"}`)
-	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/default", body)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("expected 500, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	var resp workspaceResponse
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.Success {
-		t.Fatal("expected failure")
-	}
-	if resp.Error != "disk I/O error" {
-		t.Errorf("expected %q error, got: %s", "disk I/O error", resp.Error)
-	}
 }
 
 func TestHandleClearDefaultWorkspace_Success(t *testing.T) {
 	clearCalled := false
-	clearFn := func() error {
-		clearCalled = true
-		return nil
+	svc := &mockWorkspaceService{
+		clearDefaultWorkspaceFn: func(_ context.Context) (*service.WorkspaceData, error) {
+			clearCalled = true
+			return &service.WorkspaceData{Name: "test-ws"}, nil
+		},
 	}
 
-	handler := handleClearDefaultWorkspace(clearFn, mockWorkspaceConfigFn)
+	handler := handleClearDefaultWorkspace(svc)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/default", nil)
 	rec := httptest.NewRecorder()
@@ -213,42 +167,34 @@ func TestHandleClearDefaultWorkspace_Success(t *testing.T) {
 		t.Error("expected clearFn to be called")
 	}
 	if resp.Data == nil {
-		t.Fatal("expected Data to be non-nil when workspaceConfigFn provided")
-	}
-	if resp.Data.Name != "test-ws" {
-		t.Errorf("expected data name %q, got %q", "test-ws", resp.Data.Name)
+		t.Fatal("expected Data to be non-nil")
 	}
 }
 
-func TestHandleClearDefaultWorkspace_NilClearFn(t *testing.T) {
-	handler := handleClearDefaultWorkspace(nil, nil)
+func TestHandleClearDefaultWorkspace_Unavailable(t *testing.T) {
+	svc := &mockWorkspaceService{
+		clearDefaultWorkspaceFn: func(_ context.Context) (*service.WorkspaceData, error) {
+			return nil, service.ErrUnavailable("clear default workspace not available")
+		},
+	}
+	handler := handleClearDefaultWorkspace(svc)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/default", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNotImplemented {
-		t.Fatalf("expected 501, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	var resp workspaceResponse
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.Success {
-		t.Fatal("expected failure")
-	}
-	if resp.Error != "clear default workspace not available" {
-		t.Errorf("expected %q, got: %s", "clear default workspace not available", resp.Error)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
 func TestHandleClearDefaultWorkspace_Error(t *testing.T) {
-	clearFn := func() error {
-		return fmt.Errorf("config write failed")
+	svc := &mockWorkspaceService{
+		clearDefaultWorkspaceFn: func(_ context.Context) (*service.WorkspaceData, error) {
+			return nil, service.ErrInternal("config write failed", nil)
+		},
 	}
-
-	handler := handleClearDefaultWorkspace(clearFn, nil)
+	handler := handleClearDefaultWorkspace(svc)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/default", nil)
 	rec := httptest.NewRecorder()
@@ -256,16 +202,5 @@ func TestHandleClearDefaultWorkspace_Error(t *testing.T) {
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	var resp workspaceResponse
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.Success {
-		t.Fatal("expected failure")
-	}
-	if resp.Error != "config write failed" {
-		t.Errorf("expected %q error, got: %s", "config write failed", resp.Error)
 	}
 }

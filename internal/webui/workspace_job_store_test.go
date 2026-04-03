@@ -5,17 +5,19 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 func TestWorkspaceJobStore_StartReturnsUUID(t *testing.T) {
 	store := NewWorkspaceJobStore()
 	defer store.Stop()
 
-	createFn := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
-		return WorkspaceCreateResult{WorkspaceID: "ws-123"}, nil
+	createFn := func(ctx context.Context, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
+		return service.WorkspaceCreateResult{WorkspaceID: "ws-123"}, nil
 	}
 
-	id := store.Start(WorkspaceCreateRequest{Name: "test", Type: "clone"}, createFn)
+	id := store.Start(service.WorkspaceCreateRequest{Name: "test", Type: "clone"}, createFn)
 	if id == "" {
 		t.Fatal("expected non-empty job ID")
 	}
@@ -32,13 +34,13 @@ func TestWorkspaceJobStore_GetRunningJob(t *testing.T) {
 	started := make(chan struct{})
 	proceed := make(chan struct{})
 
-	createFn := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
+	createFn := func(ctx context.Context, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
 		close(started)
 		<-proceed
-		return WorkspaceCreateResult{WorkspaceID: "ws-123"}, nil
+		return service.WorkspaceCreateResult{WorkspaceID: "ws-123"}, nil
 	}
 
-	id := store.Start(WorkspaceCreateRequest{Name: "test", Type: "clone"}, createFn)
+	id := store.Start(service.WorkspaceCreateRequest{Name: "test", Type: "clone"}, createFn)
 
 	// Wait for goroutine to start
 	<-started
@@ -47,8 +49,8 @@ func TestWorkspaceJobStore_GetRunningJob(t *testing.T) {
 	if job == nil {
 		t.Fatal("expected job to exist")
 	}
-	if job.Status != JobStatusRunning {
-		t.Errorf("expected status %q, got %q", JobStatusRunning, job.Status)
+	if job.Status != service.JobStatusRunning {
+		t.Errorf("expected status %q, got %q", service.JobStatusRunning, job.Status)
 	}
 	if job.Progress == "" {
 		t.Error("expected non-empty progress for running job")
@@ -63,12 +65,12 @@ func TestWorkspaceJobStore_GetCompletedJob(t *testing.T) {
 
 	done := make(chan struct{})
 
-	createFn := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
+	createFn := func(ctx context.Context, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
 		defer close(done)
-		return WorkspaceCreateResult{WorkspaceID: "ws-456"}, nil
+		return service.WorkspaceCreateResult{WorkspaceID: "ws-456"}, nil
 	}
 
-	id := store.Start(WorkspaceCreateRequest{Name: "test", Type: "clone"}, createFn)
+	id := store.Start(service.WorkspaceCreateRequest{Name: "test", Type: "clone"}, createFn)
 
 	// Wait for completion
 	<-done
@@ -79,8 +81,8 @@ func TestWorkspaceJobStore_GetCompletedJob(t *testing.T) {
 	if job == nil {
 		t.Fatal("expected job to exist")
 	}
-	if job.Status != JobStatusDone {
-		t.Errorf("expected status %q, got %q", JobStatusDone, job.Status)
+	if job.Status != service.JobStatusDone {
+		t.Errorf("expected status %q, got %q", service.JobStatusDone, job.Status)
 	}
 	if job.WorkspaceID != "ws-456" {
 		t.Errorf("expected workspace_id %q, got %q", "ws-456", job.WorkspaceID)
@@ -96,12 +98,12 @@ func TestWorkspaceJobStore_GetFailedJob(t *testing.T) {
 
 	done := make(chan struct{})
 
-	createFn := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
+	createFn := func(ctx context.Context, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
 		defer close(done)
-		return WorkspaceCreateResult{}, fmt.Errorf("git clone failed: exit 128")
+		return service.WorkspaceCreateResult{}, fmt.Errorf("git clone failed: exit 128")
 	}
 
-	id := store.Start(WorkspaceCreateRequest{Name: "test", Type: "clone"}, createFn)
+	id := store.Start(service.WorkspaceCreateRequest{Name: "test", Type: "clone"}, createFn)
 
 	<-done
 	time.Sleep(10 * time.Millisecond)
@@ -110,8 +112,8 @@ func TestWorkspaceJobStore_GetFailedJob(t *testing.T) {
 	if job == nil {
 		t.Fatal("expected job to exist")
 	}
-	if job.Status != JobStatusFailed {
-		t.Errorf("expected status %q, got %q", JobStatusFailed, job.Status)
+	if job.Status != service.JobStatusFailed {
+		t.Errorf("expected status %q, got %q", service.JobStatusFailed, job.Status)
 	}
 	// Non-CreateError errors are sanitized to a generic message.
 	if job.Error != "workspace creation failed" {
@@ -145,23 +147,23 @@ func TestWorkspaceJobStore_EvictExpired(t *testing.T) {
 	defer store.Stop()
 
 	// Manually insert a terminal job with an old CompletedAt.
-	store.jobs.Store("old-job", &WorkspaceJob{
+	store.jobs.Store("old-job", &service.WorkspaceJob{
 		ID:          "old-job",
-		Status:      JobStatusDone,
+		Status:      service.JobStatusDone,
 		WorkspaceID: "ws-old",
 		CompletedAt: time.Now().Add(-10 * time.Minute), // expired
 	})
 
 	// Insert a running job (should never be evicted).
-	store.jobs.Store("running-job", &WorkspaceJob{
+	store.jobs.Store("running-job", &service.WorkspaceJob{
 		ID:     "running-job",
-		Status: JobStatusRunning,
+		Status: service.JobStatusRunning,
 	})
 
 	// Insert a recently completed job (should NOT be evicted).
-	store.jobs.Store("recent-job", &WorkspaceJob{
+	store.jobs.Store("recent-job", &service.WorkspaceJob{
 		ID:          "recent-job",
-		Status:      JobStatusDone,
+		Status:      service.JobStatusDone,
 		CompletedAt: time.Now(),
 	})
 

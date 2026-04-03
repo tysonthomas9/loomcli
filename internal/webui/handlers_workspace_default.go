@@ -2,19 +2,14 @@ package webui
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // handleSetDefaultWorkspace handles PUT /api/workspaces/default.
-// Sets the default workspace in the config file.
-func handleSetDefaultWorkspace(setFn func(string) error, workspaceConfigFn func() (*WorkspaceData, error)) http.HandlerFunc {
+func handleSetDefaultWorkspace(svc service.WorkspaceService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if setFn == nil {
-			respondJSON(w, http.StatusNotImplemented, workspaceResponse{Success: false, Error: "set default workspace not available"})
-			return
-		}
-
 		var body struct {
 			Name string `json:"name"`
 		}
@@ -27,54 +22,23 @@ func handleSetDefaultWorkspace(setFn func(string) error, workspaceConfigFn func(
 			return
 		}
 
-		if err := setFn(body.Name); err != nil {
-			status := http.StatusInternalServerError
-			switch err.Error() {
-			case fmt.Sprintf("workspace %q not found", body.Name):
-				status = http.StatusNotFound
-			}
-			respondJSON(w, status, workspaceResponse{Success: false, Error: err.Error()})
+		data, err := svc.SetDefaultWorkspace(r.Context(), body.Name)
+		if err != nil {
+			writeServiceError(w, err)
 			return
 		}
-
-		// Return refreshed workspace data
-		if workspaceConfigFn != nil {
-			data, err := workspaceConfigFn()
-			if err == nil && data != nil {
-				normalizeWorkspaceData(data)
-			}
-			respondJSON(w, http.StatusOK, workspaceResponse{Success: true, Data: data})
-			return
-		}
-
-		respondJSON(w, http.StatusOK, workspaceResponse{Success: true})
+		respondJSON(w, http.StatusOK, workspaceResponse{Success: true, Data: data})
 	}
 }
 
 // handleClearDefaultWorkspace handles DELETE /api/workspaces/default.
-// Clears the default workspace, reverting to first-workspace behavior.
-func handleClearDefaultWorkspace(clearFn func() error, workspaceConfigFn func() (*WorkspaceData, error)) http.HandlerFunc {
+func handleClearDefaultWorkspace(svc service.WorkspaceService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if clearFn == nil {
-			respondJSON(w, http.StatusNotImplemented, workspaceResponse{Success: false, Error: "clear default workspace not available"})
+		data, err := svc.ClearDefaultWorkspace(r.Context())
+		if err != nil {
+			writeServiceError(w, err)
 			return
 		}
-
-		if err := clearFn(); err != nil {
-			respondJSON(w, http.StatusInternalServerError, workspaceResponse{Success: false, Error: err.Error()})
-			return
-		}
-
-		// Return refreshed workspace data
-		if workspaceConfigFn != nil {
-			data, err := workspaceConfigFn()
-			if err == nil && data != nil {
-				normalizeWorkspaceData(data)
-			}
-			respondJSON(w, http.StatusOK, workspaceResponse{Success: true, Data: data})
-			return
-		}
-
-		respondJSON(w, http.StatusOK, workspaceResponse{Success: true})
+		respondJSON(w, http.StatusOK, workspaceResponse{Success: true, Data: data})
 	}
 }

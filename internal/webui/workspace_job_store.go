@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/workspaceerrors"
 )
 
@@ -18,33 +19,13 @@ const (
 	jobCreateTimeout   = 5 * time.Minute
 )
 
-// WorkspaceJobStatus represents the current state of a workspace creation job.
-type WorkspaceJobStatus string
-
-const (
-	JobStatusRunning WorkspaceJobStatus = "running"
-	JobStatusDone    WorkspaceJobStatus = "done"
-	JobStatusFailed  WorkspaceJobStatus = "failed"
-)
-
-// WorkspaceJob is an immutable snapshot of a workspace creation job's state.
-// Workers create new values and Store them atomically via sync.Map.Store.
-type WorkspaceJob struct {
-	ID          string             `json:"id"`
-	Status      WorkspaceJobStatus `json:"status"`
-	Progress    string             `json:"progress,omitempty"`
-	WorkspaceID string             `json:"workspace_id,omitempty"`
-	Error       string             `json:"error,omitempty"`
-	CompletedAt time.Time          `json:"-"` // zero while running; set on done/failed
-}
-
 // WorkspaceJobStore manages async workspace creation jobs. Jobs are keyed by
 // UUID in a sync.Map. Terminal jobs (done or failed) expire after
 // jobExpiryDuration. A background goroutine cleans up expired entries.
 //
 // Follows the terminalAuth done/stopOnce pattern for lifecycle management.
 type WorkspaceJobStore struct {
-	jobs     sync.Map // map[string]*WorkspaceJob
+	jobs     sync.Map // map[string]*service.WorkspaceJob
 	done     chan struct{}
 	stopOnce sync.Once
 }
@@ -61,13 +42,13 @@ func NewWorkspaceJobStore() *WorkspaceJobStore {
 // Start launches an async workspace creation job. It stores an initial
 // "running" entry, spawns a goroutine that calls createFn, and returns the
 // job ID immediately.
-func (s *WorkspaceJobStore) Start(req WorkspaceCreateRequest, createFn WorkspaceCreateFn) string {
+func (s *WorkspaceJobStore) Start(req service.WorkspaceCreateRequest, createFn service.WorkspaceCreateFn) string {
 	id := uuid.New().String()
 
 	// Store initial running state.
-	s.jobs.Store(id, &WorkspaceJob{
+	s.jobs.Store(id, &service.WorkspaceJob{
 		ID:       id,
-		Status:   JobStatusRunning,
+		Status:   service.JobStatusRunning,
 		Progress: "cloning repository...",
 	})
 
@@ -82,9 +63,9 @@ func (s *WorkspaceJobStore) Start(req WorkspaceCreateRequest, createFn Workspace
 			if errors.As(err, &ce) {
 				errMsg = ce.Message
 			}
-			s.jobs.Store(id, &WorkspaceJob{
+			s.jobs.Store(id, &service.WorkspaceJob{
 				ID:          id,
-				Status:      JobStatusFailed,
+				Status:      service.JobStatusFailed,
 				Error:       errMsg,
 				CompletedAt: time.Now(),
 			})
@@ -93,9 +74,9 @@ func (s *WorkspaceJobStore) Start(req WorkspaceCreateRequest, createFn Workspace
 			return
 		}
 
-		s.jobs.Store(id, &WorkspaceJob{
+		s.jobs.Store(id, &service.WorkspaceJob{
 			ID:          id,
-			Status:      JobStatusDone,
+			Status:      service.JobStatusDone,
 			WorkspaceID: result.WorkspaceID,
 			CompletedAt: time.Now(),
 		})
@@ -107,12 +88,12 @@ func (s *WorkspaceJobStore) Start(req WorkspaceCreateRequest, createFn Workspace
 }
 
 // Get returns the current state of a job, or nil if not found / expired.
-func (s *WorkspaceJobStore) Get(id string) *WorkspaceJob {
+func (s *WorkspaceJobStore) Get(id string) *service.WorkspaceJob {
 	v, ok := s.jobs.Load(id)
 	if !ok {
 		return nil
 	}
-	return v.(*WorkspaceJob)
+	return v.(*service.WorkspaceJob)
 }
 
 // Stop stops the cleanup goroutine. Safe to call multiple times.
@@ -141,7 +122,7 @@ func (s *WorkspaceJobStore) cleanupLoop() {
 func (s *WorkspaceJobStore) evictExpired() {
 	cutoff := time.Now().Add(-jobExpiryDuration)
 	s.jobs.Range(func(key, value any) bool {
-		job := value.(*WorkspaceJob)
+		job := value.(*service.WorkspaceJob)
 		if !job.CompletedAt.IsZero() && job.CompletedAt.Before(cutoff) {
 			s.jobs.Delete(key)
 		}

@@ -1,10 +1,14 @@
 package webui
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
+)
 
 // handleGetWorkspaceJob returns a handler that polls the status of an async
-// workspace creation job. Returns 404 if the job is not found or has expired.
-func handleGetWorkspaceJob(jobStore *WorkspaceJobStore) http.HandlerFunc {
+// workspace creation job.
+func handleGetWorkspaceJob(svc service.WorkspaceService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		if id == "" {
@@ -15,20 +19,9 @@ func handleGetWorkspaceJob(jobStore *WorkspaceJobStore) http.HandlerFunc {
 			return
 		}
 
-		if jobStore == nil {
-			respondJSON(w, http.StatusNotFound, map[string]any{
-				"success": false,
-				"error":   "job not found",
-			})
-			return
-		}
-
-		job := jobStore.Get(id)
-		if job == nil {
-			respondJSON(w, http.StatusNotFound, map[string]any{
-				"success": false,
-				"error":   "job not found",
-			})
+		job, err := svc.GetWorkspaceJob(r.Context(), id)
+		if err != nil {
+			writeServiceError(w, err)
 			return
 		}
 

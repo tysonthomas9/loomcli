@@ -1,23 +1,15 @@
 package webui
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-)
 
-// mockWorkspaceConfigFnWithSummaries returns a workspaceConfigFn that includes workspace summaries.
-func mockWorkspaceConfigFnWithSummaries(summaries []WorkspaceSummary) func() (*WorkspaceData, error) {
-	return func() (*WorkspaceData, error) {
-		return &WorkspaceData{
-			Name:       "test-ws",
-			Path:       "/tmp/test",
-			Workspaces: summaries,
-		}, nil
-	}
-}
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
+)
 
 // deleteRequest creates a DELETE request with workspace UUID in context.
 func deleteRequest(wsID string) *http.Request {
@@ -28,18 +20,16 @@ func deleteRequest(wsID string) *http.Request {
 
 func TestHandleWorkspaceDelete_Success(t *testing.T) {
 	deleteCalled := false
-	deleteFn := func(name string) error {
-		deleteCalled = true
-		if name != "my-ws" {
-			t.Errorf("expected delete called with %q, got %q", "my-ws", name)
-		}
-		return nil
+	svc := &mockWorkspaceService{
+		deleteWorkspaceFn: func(_ context.Context, wsID string) (*service.WorkspaceData, error) {
+			deleteCalled = true
+			if wsID != "ws-uuid-1" {
+				t.Errorf("expected wsID %q, got %q", "ws-uuid-1", wsID)
+			}
+			return &service.WorkspaceData{Name: "test-ws"}, nil
+		},
 	}
-
-	configFn := mockWorkspaceConfigFnWithSummaries([]WorkspaceSummary{
-		{ID: "ws-uuid-1", Name: "my-ws", Path: "/tmp/my-ws"},
-	})
-	handler := handleWorkspaceDelete(deleteFn, configFn)
+	handler := handleWorkspaceDelete(svc)
 
 	req := deleteRequest("ws-uuid-1")
 	rec := httptest.NewRecorder()
@@ -57,17 +47,13 @@ func TestHandleWorkspaceDelete_Success(t *testing.T) {
 		t.Fatalf("expected success, got error: %s", resp.Error)
 	}
 	if !deleteCalled {
-		t.Error("expected deleteFn to be called")
+		t.Error("expected service DeleteWorkspace to be called")
 	}
 }
 
 func TestHandleWorkspaceDelete_MissingWorkspaceID(t *testing.T) {
-	deleteFn := func(name string) error {
-		t.Fatal("deleteFn should not be called when ID is missing")
-		return nil
-	}
-
-	handler := handleWorkspaceDelete(deleteFn, nil)
+	svc := &mockWorkspaceService{}
+	handler := handleWorkspaceDelete(svc)
 
 	// No workspace ID in context
 	req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/", nil)
@@ -80,15 +66,12 @@ func TestHandleWorkspaceDelete_MissingWorkspaceID(t *testing.T) {
 }
 
 func TestHandleWorkspaceDelete_UnknownUUID(t *testing.T) {
-	deleteFn := func(name string) error {
-		t.Fatal("deleteFn should not be called for unknown UUID")
-		return nil
+	svc := &mockWorkspaceService{
+		deleteWorkspaceFn: func(_ context.Context, wsID string) (*service.WorkspaceData, error) {
+			return nil, service.ErrNotFound(fmt.Sprintf("workspace with ID %q not found", wsID))
+		},
 	}
-
-	configFn := mockWorkspaceConfigFnWithSummaries([]WorkspaceSummary{
-		{ID: "known-uuid", Name: "known-ws", Path: "/tmp/known"},
-	})
-	handler := handleWorkspaceDelete(deleteFn, configFn)
+	handler := handleWorkspaceDelete(svc)
 
 	req := deleteRequest("unknown-uuid")
 	rec := httptest.NewRecorder()
@@ -99,34 +82,13 @@ func TestHandleWorkspaceDelete_UnknownUUID(t *testing.T) {
 	}
 }
 
-func TestHandleWorkspaceDelete_NotFound(t *testing.T) {
-	deleteFn := func(name string) error {
-		return fmt.Errorf("workspace %q not found", name)
-	}
-
-	configFn := mockWorkspaceConfigFnWithSummaries([]WorkspaceSummary{
-		{ID: "ws-uuid", Name: "nonexistent", Path: "/tmp/ne"},
-	})
-	handler := handleWorkspaceDelete(deleteFn, configFn)
-
-	req := deleteRequest("ws-uuid")
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
-	}
-}
-
 func TestHandleWorkspaceDelete_HasRunningAgents(t *testing.T) {
-	deleteFn := func(name string) error {
-		return fmt.Errorf("workspace %q has running agents", name)
+	svc := &mockWorkspaceService{
+		deleteWorkspaceFn: func(_ context.Context, _ string) (*service.WorkspaceData, error) {
+			return nil, service.ErrConflict("workspace has running agents")
+		},
 	}
-
-	configFn := mockWorkspaceConfigFnWithSummaries([]WorkspaceSummary{
-		{ID: "busy-uuid", Name: "busy-ws", Path: "/tmp/busy"},
-	})
-	handler := handleWorkspaceDelete(deleteFn, configFn)
+	handler := handleWorkspaceDelete(svc)
 
 	req := deleteRequest("busy-uuid")
 	rec := httptest.NewRecorder()
@@ -137,14 +99,19 @@ func TestHandleWorkspaceDelete_HasRunningAgents(t *testing.T) {
 	}
 }
 
-func TestHandleWorkspaceDelete_NilDeleteFn(t *testing.T) {
-	handler := handleWorkspaceDelete(nil, nil)
+func TestHandleWorkspaceDelete_Unavailable(t *testing.T) {
+	svc := &mockWorkspaceService{
+		deleteWorkspaceFn: func(_ context.Context, _ string) (*service.WorkspaceData, error) {
+			return nil, service.ErrUnavailable("workspace deletion not available")
+		},
+	}
+	handler := handleWorkspaceDelete(svc)
 
 	req := deleteRequest("some-uuid")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNotImplemented {
-		t.Fatalf("expected 501, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", rec.Code, rec.Body.String())
 	}
 }

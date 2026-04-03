@@ -382,6 +382,18 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 		return app.multiPool.PoolForWorkspace(id) != nil
 	}
 
+	// Initialize workspace service layer
+	app.workspaceSvc = service.NewWorkspaceService(service.WorkspaceServiceConfig{
+		ConfigFn:       config.WorkspaceConfigFn,
+		ConfigByIDFn:   config.WorkspaceConfigByIDFn,
+		MultiPool:      app.multiPool,
+		CreateFn:       app.wrappedCreateFn,
+		DeleteFn:       app.wrappedDeleteFn,
+		JobStore:       app.jobStore,
+		SetDefaultFn:   config.SetDefaultWorkspaceFn,
+		ClearDefaultFn: config.ClearDefaultWorkspaceFn,
+	})
+
 	// Generate and persist notify token for session change endpoint auth.
 	app.notifyToken, app.notifyTokenFile = generateNotifyToken(config.NotifyTokenDir)
 

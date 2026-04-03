@@ -19,6 +19,7 @@ const (
 	KindTimeout     = "Timeout"
 	KindConflict    = "Conflict"
 	KindInternal    = "Internal"
+	KindForbidden   = "Forbidden"
 )
 
 func ErrNotFound(msg string) *ServiceError {
@@ -43,4 +44,8 @@ func ErrConflict(msg string) *ServiceError {
 
 func ErrInternal(msg string, cause error) *ServiceError {
 	return &ServiceError{Kind: KindInternal, Message: msg, Cause: cause}
+}
+
+func ErrForbidden(msg string) *ServiceError {
+	return &ServiceError{Kind: KindForbidden, Message: msg}
 }

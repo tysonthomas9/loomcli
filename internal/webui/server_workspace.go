@@ -7,73 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
-
-// WorkspaceData represents the full workspace topology returned by the API.
-type WorkspaceData struct {
-	ID               string               `json:"id"`
-	Name             string               `json:"name"`
-	Path             string               `json:"path"`
-	Repos            []WorkspaceRepo      `json:"repos"`
-	Groups           []string             `json:"groups"`
-	Agents           []WorkspaceAgentInfo `json:"agents"`
-	Workspaces       []WorkspaceSummary   `json:"workspaces"`
-	WorkspaceOrder   []string             `json:"workspace_order,omitempty"`
-	DefaultWorkspace string               `json:"default_workspace"`
-}
-
-// WorkspaceSummary provides a lightweight summary of a configured workspace.
-type WorkspaceSummary struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Path      string `json:"path"`
-	Active    bool   `json:"active"`
-	RepoCount int    `json:"repo_count"`
-	IsDefault bool   `json:"is_default"`
-	Backend   string `json:"backend,omitempty"`
-}
-
-// WorkspaceRepo represents a repository within a workspace.
-type WorkspaceRepo struct {
-	Name          string   `json:"name"`
-	Path          string   `json:"path"`
-	DefaultBranch string   `json:"default_branch"`
-	Remote        string   `json:"remote"`
-	SourceRepoID  string   `json:"source_repo_id,omitempty"`
-	Groups        []string `json:"groups"`
-}
-
-// WorkspaceAgentInfo represents an agent's repo/group assignments.
-type WorkspaceAgentInfo struct {
-	Name       string   `json:"name"`
-	Repos      []string `json:"repos"`
-	RepoGroups []string `json:"repo_groups"`
-	CrossRepo  bool     `json:"cross_repo"`
-}
-
-type createWarningsKey struct{}
-
-// WithCreateWarnings returns a child context carrying an empty warnings collector.
-func WithCreateWarnings(ctx context.Context) context.Context {
-	w := &[]string{}
-	return context.WithValue(ctx, createWarningsKey{}, w)
-}
-
-// AddCreateWarning appends a non-fatal warning to the context's collector.
-// No-op if the context has no collector.
-func AddCreateWarning(ctx context.Context, msg string) {
-	if w, ok := ctx.Value(createWarningsKey{}).(*[]string); ok {
-		*w = append(*w, msg)
-	}
-}
-
-// GetCreateWarnings returns collected warnings, or nil.
-func GetCreateWarnings(ctx context.Context) []string {
-	if w, ok := ctx.Value(createWarningsKey{}).(*[]string); ok && len(*w) > 0 {
-		return *w
-	}
-	return nil
-}
 
 // reconcileConfigWorkspaces registers all configured workspaces via the
 // WorkspaceRegistry at startup. Skips the initial workspace if it was already
@@ -105,13 +41,13 @@ func reconcileConfigWorkspaces(
 }
 
 func wrapWorkspaceCreateFn(
-	innerCreate WorkspaceCreateFn,
+	innerCreate service.WorkspaceCreateFn,
 	registry *WorkspaceRegistry,
-) WorkspaceCreateFn {
+) service.WorkspaceCreateFn {
 	if innerCreate == nil {
 		return nil
 	}
-	return func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
+	return func(ctx context.Context, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
 		result, err := innerCreate(ctx, req)
 		if err != nil {
 			return result, err
@@ -123,7 +59,7 @@ func wrapWorkspaceCreateFn(
 		if wsID == "" {
 			slog.Error("workspace creation returned empty WorkspaceID — skipping runtime registration",
 				"workspace", req.Name)
-			AddCreateWarning(ctx, "Could not register workspace with daemon — workspace may not auto-connect until restart")
+			service.AddCreateWarning(ctx, "Could not register workspace with daemon — workspace may not auto-connect until restart")
 			return result, nil
 		}
 
@@ -131,7 +67,7 @@ func wrapWorkspaceCreateFn(
 		if wsDir == "" {
 			slog.Warn("workspace creation returned empty WorkspacePath — skipping runtime registration",
 				"workspace", req.Name)
-			AddCreateWarning(ctx, "Could not determine workspace directory for daemon registration")
+			service.AddCreateWarning(ctx, "Could not determine workspace directory for daemon registration")
 			return result, nil
 		}
 
@@ -189,33 +125,6 @@ func wrapWorkspaceDeleteFn(
 	}
 }
 
-// findWorkspacePathByID scans workspace summaries for a matching UUID and
-// returns its filesystem path. Returns empty string if not found.
-func findWorkspacePathByID(wsData *WorkspaceData, id string) string {
-	if wsData == nil {
-		return ""
-	}
-	for _, ws := range wsData.Workspaces {
-		if ws.ID == id {
-			return ws.Path
-		}
-	}
-	return ""
-}
-
-// resolveWorkspacePath loads config and resolves a workspace UUID to its
-// filesystem path. Returns empty string on any failure.
-func resolveWorkspacePath(configFn func() (*WorkspaceData, error), workspaceID string) string {
-	if configFn == nil {
-		return ""
-	}
-	wsData, err := configFn()
-	if err != nil || wsData == nil {
-		return ""
-	}
-	return findWorkspacePathByID(wsData, workspaceID)
-}
-
 // safeLogPath builds a log file path for an agent, guarding against path traversal.
 func safeLogPath(basePath, agent string) string {
 	logsDir := filepath.Join(basePath, ".loom", "logs")
@@ -254,12 +163,12 @@ func (app *Server) registerWorkerAPIRoutes() {
 		if wsData == nil {
 			return false
 		}
-		return findWorkspacePathByID(wsData, id) != ""
+		return service.FindWorkspacePathByID(wsData, id) != ""
 	}
 
 	SetupWorkerAPIRoutes(app.mux, workerToken,
 		func(workspace, agent string) string {
-			wsPath := resolveWorkspacePath(workspaceConfigFn, workspace)
+			wsPath := service.ResolveWorkspacePath(workspaceConfigFn, workspace)
 			if wsPath == "" || agent == "" {
 				return ""
 			}
@@ -281,14 +190,14 @@ func (app *Server) registerWorkerAPIRoutes() {
 			return candidate
 		},
 		func(workspace string) string {
-			path := resolveWorkspacePath(workspaceConfigFn, workspace)
+			path := service.ResolveWorkspacePath(workspaceConfigFn, workspace)
 			if path == "" {
 				return ""
 			}
 			return filepath.Join(path, ".loom", "events")
 		},
 		func(workspace, agent string) string {
-			path := resolveWorkspacePath(workspaceConfigFn, workspace)
+			path := service.ResolveWorkspacePath(workspaceConfigFn, workspace)
 			if path == "" {
 				return ""
 			}

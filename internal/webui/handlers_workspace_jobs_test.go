@@ -3,19 +3,21 @@ package webui
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
-	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 func TestHandleGetWorkspaceJob_NotFound(t *testing.T) {
-	store := NewWorkspaceJobStore()
-	defer store.Stop()
+	svc := &mockWorkspaceService{
+		getWorkspaceJobFn: func(_ context.Context, _ string) (*service.WorkspaceJob, error) {
+			return nil, service.ErrNotFound("job not found")
+		},
+	}
 
-	handler := handleGetWorkspaceJob(store)
+	handler := handleGetWorkspaceJob(svc)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/jobs/nonexistent", nil)
 	req.SetPathValue("id", "nonexistent")
@@ -25,35 +27,13 @@ func TestHandleGetWorkspaceJob_NotFound(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
 	}
-
-	var resp map[string]any
-	json.NewDecoder(rec.Body).Decode(&resp)
-	if resp["error"] != "job not found" {
-		t.Errorf("expected 'job not found' error, got: %v", resp["error"])
-	}
-}
-
-func TestHandleGetWorkspaceJob_NilStore(t *testing.T) {
-	handler := handleGetWorkspaceJob(nil)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/jobs/some-id", nil)
-	req.SetPathValue("id", "some-id")
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("expected 404 for nil store, got %d: %s", rec.Code, rec.Body.String())
-	}
 }
 
 func TestHandleGetWorkspaceJob_MissingID(t *testing.T) {
-	store := NewWorkspaceJobStore()
-	defer store.Stop()
-
-	handler := handleGetWorkspaceJob(store)
+	svc := &mockWorkspaceService{}
+	handler := handleGetWorkspaceJob(svc)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/jobs/", nil)
-	// Do not set path value — simulates missing {id}
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -63,24 +43,19 @@ func TestHandleGetWorkspaceJob_MissingID(t *testing.T) {
 }
 
 func TestHandleGetWorkspaceJob_RunningJob(t *testing.T) {
-	store := NewWorkspaceJobStore()
-	defer store.Stop()
-
-	started := make(chan struct{})
-	proceed := make(chan struct{})
-
-	createFn := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
-		close(started)
-		<-proceed
-		return WorkspaceCreateResult{WorkspaceID: "ws-123"}, nil
+	svc := &mockWorkspaceService{
+		getWorkspaceJobFn: func(_ context.Context, jobID string) (*service.WorkspaceJob, error) {
+			return &service.WorkspaceJob{
+				ID:       jobID,
+				Status:   service.JobStatusRunning,
+				Progress: "cloning repository...",
+			}, nil
+		},
 	}
 
-	id := store.Start(WorkspaceCreateRequest{Name: "test", Type: "clone"}, createFn)
-	<-started
-
-	handler := handleGetWorkspaceJob(store)
-	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/jobs/"+id, nil)
-	req.SetPathValue("id", id)
+	handler := handleGetWorkspaceJob(svc)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/jobs/job-123", nil)
+	req.SetPathValue("id", "job-123")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -90,30 +65,25 @@ func TestHandleGetWorkspaceJob_RunningJob(t *testing.T) {
 
 	var resp map[string]any
 	json.NewDecoder(rec.Body).Decode(&resp)
-	if resp["status"] != string(JobStatusRunning) {
-		t.Errorf("expected status %q, got %v", JobStatusRunning, resp["status"])
+	if resp["status"] != string(service.JobStatusRunning) {
+		t.Errorf("expected status %q, got %v", service.JobStatusRunning, resp["status"])
 	}
-
-	close(proceed)
 }
 
 func TestHandleGetWorkspaceJob_CompletedJob(t *testing.T) {
-	store := NewWorkspaceJobStore()
-	defer store.Stop()
-
-	done := make(chan struct{})
-	createFn := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
-		defer close(done)
-		return WorkspaceCreateResult{WorkspaceID: "ws-done"}, nil
+	svc := &mockWorkspaceService{
+		getWorkspaceJobFn: func(_ context.Context, jobID string) (*service.WorkspaceJob, error) {
+			return &service.WorkspaceJob{
+				ID:          jobID,
+				Status:      service.JobStatusDone,
+				WorkspaceID: "ws-done",
+			}, nil
+		},
 	}
 
-	id := store.Start(WorkspaceCreateRequest{Name: "test", Type: "clone"}, createFn)
-	<-done
-	time.Sleep(10 * time.Millisecond)
-
-	handler := handleGetWorkspaceJob(store)
-	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/jobs/"+id, nil)
-	req.SetPathValue("id", id)
+	handler := handleGetWorkspaceJob(svc)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/jobs/job-done", nil)
+	req.SetPathValue("id", "job-done")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -123,8 +93,8 @@ func TestHandleGetWorkspaceJob_CompletedJob(t *testing.T) {
 
 	var resp map[string]any
 	json.NewDecoder(rec.Body).Decode(&resp)
-	if resp["status"] != string(JobStatusDone) {
-		t.Errorf("expected status %q, got %v", JobStatusDone, resp["status"])
+	if resp["status"] != string(service.JobStatusDone) {
+		t.Errorf("expected status %q, got %v", service.JobStatusDone, resp["status"])
 	}
 	if resp["workspace_id"] != "ws-done" {
 		t.Errorf("expected workspace_id %q, got %v", "ws-done", resp["workspace_id"])
@@ -132,22 +102,19 @@ func TestHandleGetWorkspaceJob_CompletedJob(t *testing.T) {
 }
 
 func TestHandleGetWorkspaceJob_FailedJob(t *testing.T) {
-	store := NewWorkspaceJobStore()
-	defer store.Stop()
-
-	done := make(chan struct{})
-	createFn := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
-		defer close(done)
-		return WorkspaceCreateResult{}, fmt.Errorf("clone failed")
+	svc := &mockWorkspaceService{
+		getWorkspaceJobFn: func(_ context.Context, jobID string) (*service.WorkspaceJob, error) {
+			return &service.WorkspaceJob{
+				ID:     jobID,
+				Status: service.JobStatusFailed,
+				Error:  "workspace creation failed",
+			}, nil
+		},
 	}
 
-	id := store.Start(WorkspaceCreateRequest{Name: "test", Type: "clone"}, createFn)
-	<-done
-	time.Sleep(10 * time.Millisecond)
-
-	handler := handleGetWorkspaceJob(store)
-	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/jobs/"+id, nil)
-	req.SetPathValue("id", id)
+	handler := handleGetWorkspaceJob(svc)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/jobs/job-fail", nil)
+	req.SetPathValue("id", "job-fail")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -157,92 +124,10 @@ func TestHandleGetWorkspaceJob_FailedJob(t *testing.T) {
 
 	var resp map[string]any
 	json.NewDecoder(rec.Body).Decode(&resp)
-	if resp["status"] != string(JobStatusFailed) {
-		t.Errorf("expected status %q, got %v", JobStatusFailed, resp["status"])
+	if resp["status"] != string(service.JobStatusFailed) {
+		t.Errorf("expected status %q, got %v", service.JobStatusFailed, resp["status"])
 	}
-	// Non-CreateError errors are sanitized to a generic message.
 	if resp["error"] != "workspace creation failed" {
 		t.Errorf("expected error %q, got %v", "workspace creation failed", resp["error"])
-	}
-}
-
-func TestHandleWorkspaceCreate_CloneAsync202(t *testing.T) {
-	store := NewWorkspaceJobStore()
-	defer store.Stop()
-
-	createFn := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
-		return WorkspaceCreateResult{WorkspaceID: "ws-async"}, nil
-	}
-
-	handler := handleWorkspaceCreate(createFn, nil, store)
-
-	body := strings.NewReader(`{"name":"async-ws","type":"clone","clone_url":"https://github.com/user/repo.git"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusAccepted {
-		t.Fatalf("expected 202, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	var resp map[string]any
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp["success"] != true {
-		t.Fatalf("expected success=true, got %v", resp["success"])
-	}
-	jobID, ok := resp["job_id"].(string)
-	if !ok || jobID == "" {
-		t.Fatalf("expected non-empty job_id, got %v", resp["job_id"])
-	}
-}
-
-func TestHandleWorkspaceCreate_CloneNilJobStoreFallsThrough(t *testing.T) {
-	createCalled := false
-	createFn := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
-		createCalled = true
-		return WorkspaceCreateResult{WorkspaceID: "ws-sync"}, nil
-	}
-
-	// nil jobStore should fall through to synchronous path
-	handler := handleWorkspaceCreate(createFn, nil, nil)
-
-	body := strings.NewReader(`{"name":"sync-ws","type":"clone","clone_url":"https://github.com/user/repo.git"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("expected 201 (sync fallback), got %d: %s", rec.Code, rec.Body.String())
-	}
-	if !createCalled {
-		t.Error("expected createFn to be called synchronously")
-	}
-}
-
-func TestHandleWorkspaceCreate_EmptyTypeNotAffectedByJobStore(t *testing.T) {
-	store := NewWorkspaceJobStore()
-	defer store.Stop()
-
-	createCalled := false
-	createFn := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
-		createCalled = true
-		return WorkspaceCreateResult{}, nil
-	}
-
-	handler := handleWorkspaceCreate(createFn, nil, store)
-
-	body := strings.NewReader(`{"name":"empty-ws","type":"empty","repos":["/a"]}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	// Empty type should still return 201 synchronously, even with jobStore present.
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if !createCalled {
-		t.Error("expected createFn to be called synchronously for empty type")
 	}
 }

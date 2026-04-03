@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 func TestTruncateUTF8(t *testing.T) {
@@ -204,8 +206,8 @@ func TestInjectTerminalContextBanner_Success(t *testing.T) {
 		PTY: w,
 	}
 
-	wsConfigFn := func() (*WorkspaceData, error) {
-		return &WorkspaceData{Name: "test-project"}, nil
+	wsConfigFn := func() (*service.WorkspaceData, error) {
+		return &service.WorkspaceData{Name: "test-project"}, nil
 	}
 
 	injectTerminalContextBanner(session, srv.URL, wsConfigFn)
@@ -286,7 +288,7 @@ func TestInjectTerminalContextBanner_WorkspaceConfigError(t *testing.T) {
 	session := &TerminalSession{PTY: w}
 
 	// workspaceConfigFn returns an error -- banner should still be injected with empty workspace.
-	wsConfigFn := func() (*WorkspaceData, error) {
+	wsConfigFn := func() (*service.WorkspaceData, error) {
 		return nil, os.ErrNotExist
 	}
 

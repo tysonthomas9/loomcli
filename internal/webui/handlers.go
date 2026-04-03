@@ -38,6 +38,8 @@ func serviceErrorStatus(err error) int {
 			return http.StatusGatewayTimeout
 		case service.KindConflict:
 			return http.StatusConflict
+		case service.KindForbidden:
+			return http.StatusForbidden
 		}
 	}
 	return http.StatusInternalServerError
@@ -59,6 +61,8 @@ func writeServiceError(w http.ResponseWriter, err error) {
 			status = http.StatusGatewayTimeout
 		case service.KindConflict:
 			status = http.StatusConflict
+		case service.KindForbidden:
+			status = http.StatusForbidden
 		}
 		respondError(w, status, svcErr.Message)
 		return

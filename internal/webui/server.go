@@ -42,8 +42,9 @@ type Server struct {
 	multiPool *daemon.MultiPool
 
 	// Service layer
-	issueSvc service.IssueService
-	agentSvc AgentService
+	issueSvc     service.IssueService
+	agentSvc     AgentService
+	workspaceSvc service.WorkspaceService
 
 	// Real-time
 	hub               *SSEHub
@@ -77,7 +78,7 @@ type Server struct {
 	jwksCleanup       func()                          // nil if no JWKS cache
 
 	// Wrapped workspace lifecycle functions
-	wrappedCreateFn WorkspaceCreateFn
+	wrappedCreateFn service.WorkspaceCreateFn
 	wrappedDeleteFn func(string) error
 
 	// Async workspace creation jobs

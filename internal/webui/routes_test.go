@@ -17,6 +17,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // setupTestRoutes constructs handlers and registers routes on app.mux.
@@ -1468,26 +1469,19 @@ func TestSetupRoutes_SSEEndpointRegisteredOnWorkspaceScope(t *testing.T) {
 // PATCH /api/workspaces/{ws}/config/backend is handled by handleWorkspaceBackendPatch
 // (which returns workspaceResponse shape) rather than handlePatchBackendConfig.
 func TestSetupRoutes_WorkspaceBackendPatchEndpoint(t *testing.T) {
-	// Set up a temp config dir with a test workspace so the handler can load it
-	dir := t.TempDir()
-	setLoomConfigDir(t, dir)
-
-	writeTestBackendConfig(t, dir, &loomConfigForBackend{
-		Version: 1,
-		Backend: "claude",
-		Workspaces: map[string]loomWorkspaceForBackend{
-			"test-ws": {ID: "test-ws", Path: "/tmp/test", Backend: "claude"},
-		},
-	})
-
 	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 1)
 	_ = multiPool.Register("test-ws", &stubPool{})
 
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
-	workspaceConfigFn := func() (*WorkspaceData, error) {
-		return &WorkspaceData{Name: "test-ws", Path: "/tmp/test"}, nil
+	workspaceConfigFn := func() (*service.WorkspaceData, error) {
+		return &service.WorkspaceData{Name: "test-ws", Path: "/tmp/test"}, nil
 	}
-	app := &Server{multiPool: multiPool, config: ServerConfig{WorkspaceConfigFn: workspaceConfigFn}, wsExistsFn: wsExistsFn}
+	wsSvc := &mockWorkspaceService{
+		patchWorkspaceBackendFn: func(_ context.Context, _ string, _ string) (*service.WorkspaceData, error) {
+			return &service.WorkspaceData{Name: "test-ws", Path: "/tmp/test"}, nil
+		},
+	}
+	app := &Server{multiPool: multiPool, config: ServerConfig{WorkspaceConfigFn: workspaceConfigFn}, wsExistsFn: wsExistsFn, workspaceSvc: wsSvc}
 	setupTestRoutes(t, app)
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/workspaces/test-ws/config/backend",

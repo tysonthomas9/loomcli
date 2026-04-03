@@ -13,9 +13,9 @@ import (
 )
 
 // testWorkspaceConfigFn returns a workspace config function for testing.
-func testWorkspaceConfigFn(name string, workspaces []WorkspaceSummary) func() (*WorkspaceData, error) {
-	return func() (*WorkspaceData, error) {
-		return &WorkspaceData{
+func testWorkspaceConfigFn(name string, workspaces []service.WorkspaceSummary) func() (*service.WorkspaceData, error) {
+	return func() (*service.WorkspaceData, error) {
+		return &service.WorkspaceData{
 			Name:       name,
 			Workspaces: workspaces,
 		}, nil
@@ -23,8 +23,8 @@ func testWorkspaceConfigFn(name string, workspaces []WorkspaceSummary) func() (*
 }
 
 // defaultWorkspaces returns a standard set of workspaces for tests.
-func defaultWorkspaces() []WorkspaceSummary {
-	return []WorkspaceSummary{
+func defaultWorkspaces() []service.WorkspaceSummary {
+	return []service.WorkspaceSummary{
 		{Name: "alpha", Path: "/ws/alpha", Active: true, RepoCount: 2},
 		{Name: "beta", Path: "/ws/beta", Active: false, RepoCount: 1},
 		{Name: "gamma", Path: "/ws/gamma", Active: false, RepoCount: 3},
@@ -513,7 +513,7 @@ func TestHandleMoveIssue_WorkspaceConfigError(t *testing.T) {
 			return nil, nil
 		},
 	}
-	errCfg := func() (*WorkspaceData, error) {
+	errCfg := func() (*service.WorkspaceData, error) {
 		return nil, errors.New("config file not found")
 	}
 	handler := handleMoveIssue(svc, errCfg)

@@ -81,25 +81,25 @@ func (app *Server) registerWorkspaceRoutes() { //nolint:funlen,gocognit,cyclop /
 	workspaceConfigByIDFn := app.config.WorkspaceConfigByIDFn
 
 	// Active workspace endpoint — returns full topology for the default workspace
-	app.mux.HandleFunc("GET /api/workspaces/active", handleActiveWorkspace(workspaceConfigFn))
+	app.mux.HandleFunc("GET /api/workspaces/active", handleActiveWorkspace(app.workspaceSvc))
 
 	// Workspace listing (not workspace-scoped themselves)
-	app.mux.HandleFunc("GET /api/workspaces", handleListWorkspaces(app.multiPool, workspaceConfigFn))
-	app.mux.HandleFunc("GET /api/workspaces/{ws}", handleGetWorkspace(app.wsExistsFn, workspaceConfigByIDFn))
+	app.mux.HandleFunc("GET /api/workspaces", handleListWorkspaces(app.workspaceSvc))
+	app.mux.HandleFunc("GET /api/workspaces/{ws}", handleGetWorkspace(app.workspaceSvc))
 
 	// Global workspace CRUD operations (no WorkspaceMiddleware)
-	app.mux.HandleFunc("POST /api/workspaces", handleWorkspaceCreate(app.wrappedCreateFn, workspaceConfigFn, app.jobStore))
+	app.mux.HandleFunc("POST /api/workspaces", handleWorkspaceCreate(app.workspaceSvc))
 
 	// Workspace job polling endpoint (literal "jobs" segment wins over {ws} wildcard)
-	app.mux.HandleFunc("GET /api/workspaces/jobs/{id}", handleGetWorkspaceJob(app.jobStore))
-	app.mux.HandleFunc("PUT /api/workspaces/order", handleWorkspaceReorder(workspaceConfigFn))
-	app.mux.HandleFunc("PUT /api/workspaces/default", handleSetDefaultWorkspace(app.config.SetDefaultWorkspaceFn, workspaceConfigFn))
-	app.mux.HandleFunc("DELETE /api/workspaces/default", handleClearDefaultWorkspace(app.config.ClearDefaultWorkspaceFn, workspaceConfigFn))
+	app.mux.HandleFunc("GET /api/workspaces/jobs/{id}", handleGetWorkspaceJob(app.workspaceSvc))
+	app.mux.HandleFunc("PUT /api/workspaces/order", handleWorkspaceReorder(app.workspaceSvc))
+	app.mux.HandleFunc("PUT /api/workspaces/default", handleSetDefaultWorkspace(app.workspaceSvc))
+	app.mux.HandleFunc("DELETE /api/workspaces/default", handleClearDefaultWorkspace(app.workspaceSvc))
 
 	// Per-workspace DELETE — registered on main mux with manual middleware wrapping
 	// because DELETE /api/workspaces/{ws} (no trailing slash) won't match the
 	// wsMux prefix handler at /api/workspaces/{ws}/.
-	app.mux.Handle("DELETE /api/workspaces/{ws}", WorkspaceMiddleware(app.wsExistsFn, handleWorkspaceDelete(app.wrappedDeleteFn, workspaceConfigFn)))
+	app.mux.Handle("DELETE /api/workspaces/{ws}", WorkspaceMiddleware(app.wsExistsFn, handleWorkspaceDelete(app.workspaceSvc)))
 
 	// Workspace-scoped API routes via a sub-mux with WorkspaceMiddleware.
 	// The middleware injects the workspace ID into the context so that
@@ -107,7 +107,7 @@ func (app *Server) registerWorkspaceRoutes() { //nolint:funlen,gocognit,cyclop /
 	wsMux := http.NewServeMux()
 
 	// Per-workspace CRUD (through WorkspaceMiddleware via wsMux)
-	wsMux.HandleFunc("PATCH /api/workspaces/{ws}/name", handleWorkspaceRename(workspaceConfigFn))
+	wsMux.HandleFunc("PATCH /api/workspaces/{ws}/name", handleWorkspaceRename(app.workspaceSvc))
 
 	// Issue endpoints
 	wsMux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}", handleGetIssue(app.issueSvc))
@@ -133,7 +133,7 @@ func (app *Server) registerWorkspaceRoutes() { //nolint:funlen,gocognit,cyclop /
 	// Daemon status and config
 	wsMux.HandleFunc("GET /api/workspaces/{ws}/daemon/status", handleDaemonStatus(app.multiPool))
 	wsMux.HandleFunc("GET /api/workspaces/{ws}/config/backend", handleGetBackendConfig(app.multiPool))
-	wsMux.HandleFunc("PATCH /api/workspaces/{ws}/config/backend", handleWorkspaceBackendPatch(workspaceConfigFn))
+	wsMux.HandleFunc("PATCH /api/workspaces/{ws}/config/backend", handleWorkspaceBackendPatch(app.workspaceSvc))
 
 	// Log streaming endpoints (workspace-scoped)
 	if app.agentSvc != nil {

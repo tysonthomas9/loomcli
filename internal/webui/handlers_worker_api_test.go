@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // ---------------------------------------------------------------------------
@@ -1835,9 +1837,9 @@ func TestAppendToLogFile_ReadOnlyParent(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestFindWorkspacePathByID(t *testing.T) {
-	wsData := &WorkspaceData{
+	wsData := &service.WorkspaceData{
 		Path: "/default/path",
-		Workspaces: []WorkspaceSummary{
+		Workspaces: []service.WorkspaceSummary{
 			{ID: "uuid-aaa", Name: "alpha", Path: "/ws/alpha"},
 			{ID: "uuid-bbb", Name: "beta", Path: "/ws/beta"},
 		},
@@ -1845,7 +1847,7 @@ func TestFindWorkspacePathByID(t *testing.T) {
 
 	tests := []struct {
 		name   string
-		wsData *WorkspaceData
+		wsData *service.WorkspaceData
 		id     string
 		want   string
 	}{
@@ -1875,8 +1877,8 @@ func TestFindWorkspacePathByID(t *testing.T) {
 		},
 		{
 			name: "empty ID in summary is skipped",
-			wsData: &WorkspaceData{
-				Workspaces: []WorkspaceSummary{
+			wsData: &service.WorkspaceData{
+				Workspaces: []service.WorkspaceSummary{
 					{ID: "", Name: "no-id", Path: "/ws/no-id"},
 					{ID: "uuid-ccc", Name: "gamma", Path: "/ws/gamma"},
 				},
@@ -1886,8 +1888,8 @@ func TestFindWorkspacePathByID(t *testing.T) {
 		},
 		{
 			name: "lookup with empty ID returns empty",
-			wsData: &WorkspaceData{
-				Workspaces: []WorkspaceSummary{
+			wsData: &service.WorkspaceData{
+				Workspaces: []service.WorkspaceSummary{
 					{ID: "uuid-aaa", Name: "alpha", Path: "/ws/alpha"},
 				},
 			},
@@ -1898,9 +1900,9 @@ func TestFindWorkspacePathByID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := findWorkspacePathByID(tt.wsData, tt.id)
+			got := service.FindWorkspacePathByID(tt.wsData, tt.id)
 			if got != tt.want {
-				t.Errorf("findWorkspacePathByID() = %q, want %q", got, tt.want)
+				t.Errorf("service.FindWorkspacePathByID() = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -2014,33 +2016,33 @@ func TestResolveWorktreePath_UsesWorkspaceUUID(t *testing.T) {
 	os.WriteFile(filepath.Join(wsAPath, ".agent.lock"), []byte(`{"state":"idle"}`), 0600)
 	os.WriteFile(filepath.Join(wsBPath, ".agent.lock"), []byte(`{"state":"idle"}`), 0600)
 
-	wsData := &WorkspaceData{
+	wsData := &service.WorkspaceData{
 		Path: tmpDir,
-		Workspaces: []WorkspaceSummary{
+		Workspaces: []service.WorkspaceSummary{
 			{ID: uuidA, Name: "alpha", Path: wsAPath},
 			{ID: uuidB, Name: "beta", Path: wsBPath},
 		},
 	}
 
 	resolveWT := func(workspace, agent string) string {
-		return findWorkspacePathByID(wsData, workspace)
+		return service.FindWorkspacePathByID(wsData, workspace)
 	}
 	resolveEvt := func(workspace string) string {
-		path := findWorkspacePathByID(wsData, workspace)
+		path := service.FindWorkspacePathByID(wsData, workspace)
 		if path == "" {
 			return ""
 		}
 		return filepath.Join(path, ".loom", "events")
 	}
 	resolveLog := func(workspace, agent string) string {
-		path := findWorkspacePathByID(wsData, workspace)
+		path := service.FindWorkspacePathByID(wsData, workspace)
 		if path == "" {
 			return ""
 		}
 		return filepath.Join(path, ".loom", "logs", "task-"+agent+".log")
 	}
 	validator := func(id string) bool {
-		return findWorkspacePathByID(wsData, id) != ""
+		return service.FindWorkspacePathByID(wsData, id) != ""
 	}
 
 	mux := http.NewServeMux()

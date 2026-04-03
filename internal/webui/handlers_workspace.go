@@ -2,68 +2,43 @@ package webui
 
 import (
 	"net/http"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 type workspaceResponse struct {
-	Success  bool           `json:"success"`
-	Data     *WorkspaceData `json:"data,omitempty"`
-	Error    string         `json:"error,omitempty"`
-	Warnings []string       `json:"warnings,omitempty"`
+	Success  bool                   `json:"success"`
+	Data     *service.WorkspaceData `json:"data,omitempty"`
+	Error    string                 `json:"error,omitempty"`
+	Warnings []string               `json:"warnings,omitempty"`
 }
 
 // handleActiveWorkspace returns the active workspace topology.
-// This is the replacement for the removed GET /api/workspace endpoint.
-// Frontend's fetchWorkspace() calls this when no explicit workspaceId is provided.
-func handleActiveWorkspace(configFn func() (*WorkspaceData, error)) http.HandlerFunc {
+func handleActiveWorkspace(svc service.WorkspaceService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if configFn == nil {
-			respondJSON(w, http.StatusOK, workspaceResponse{
-				Success: true,
-				Data: &WorkspaceData{
-					Repos:      []WorkspaceRepo{},
-					Groups:     []string{},
-					Agents:     []WorkspaceAgentInfo{},
-					Workspaces: []WorkspaceSummary{},
-				},
-			})
-			return
-		}
-
-		data, err := configFn()
+		data, err := svc.GetActiveWorkspace(r.Context())
 		if err != nil {
-			respondJSON(w, http.StatusInternalServerError, workspaceResponse{
-				Success: false,
-				Error:   "failed to load workspace config",
-			})
+			writeServiceError(w, err)
 			return
 		}
-
-		if data == nil {
-			data = &WorkspaceData{}
-		}
-
-		normalizeWorkspaceData(data)
-
-		respondJSON(w, http.StatusOK, workspaceResponse{
-			Success: true,
-			Data:    data,
-		})
+		respondJSON(w, http.StatusOK, workspaceResponse{Success: true, Data: data})
 	}
 }
 
 // normalizeWorkspaceData ensures all slice fields are non-nil so JSON marshals as [] not null.
-func normalizeWorkspaceData(data *WorkspaceData) {
+// Kept here as a convenience for non-service callers (server_workspace.go etc.).
+func normalizeWorkspaceData(data *service.WorkspaceData) {
 	if data.Repos == nil {
-		data.Repos = []WorkspaceRepo{}
+		data.Repos = []service.WorkspaceRepo{}
 	}
 	if data.Groups == nil {
 		data.Groups = []string{}
 	}
 	if data.Agents == nil {
-		data.Agents = []WorkspaceAgentInfo{}
+		data.Agents = []service.WorkspaceAgentInfo{}
 	}
 	if data.Workspaces == nil {
-		data.Workspaces = []WorkspaceSummary{}
+		data.Workspaces = []service.WorkspaceSummary{}
 	}
 	for i := range data.Repos {
 		if data.Repos[i].Groups == nil {

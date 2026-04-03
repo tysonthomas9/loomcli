@@ -10,6 +10,7 @@ import (
 
 	"nhooyr.io/websocket"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
@@ -23,7 +24,7 @@ import (
 // whose host portions are used as OriginPatterns for the WebSocket upgrade.
 // When nil or empty, only same-origin and non-browser (no Origin header)
 // connections are accepted.
-func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigins []string, loomServerURL string, workspaceConfigByIDFn func(string) (*WorkspaceData, error), tabMetaStore *tabmeta.Store, hub *SSEHub) http.HandlerFunc {
+func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigins []string, loomServerURL string, workspaceConfigByIDFn func(string) (*service.WorkspaceData, error), tabMetaStore *tabmeta.Store, hub *SSEHub) http.HandlerFunc {
 	// Compute origin host patterns once at construction time.
 	patterns := originHosts(allowedOrigins)
 
@@ -136,7 +137,7 @@ func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigi
 		// Inject project context banner into freshly created talk-to-lead sessions.
 		if isNewSession && loomServerURL != "" {
 			wsID := WorkspaceFromContext(r.Context())
-			wsConfigFn := func() (*WorkspaceData, error) { return workspaceConfigByIDFn(wsID) }
+			wsConfigFn := func() (*service.WorkspaceData, error) { return workspaceConfigByIDFn(wsID) }
 			injectTerminalContextBanner(termSession, loomServerURL, wsConfigFn)
 		}
 
@@ -316,7 +317,7 @@ func broadcastSessionIssueEvent(tabMetaStore *tabmeta.Store, hub *SSEHub, worksp
 
 // injectTerminalContextBanner fetches project context from the loom server
 // and writes a formatted banner to the terminal session's PTY.
-func injectTerminalContextBanner(session *TerminalSession, loomServerURL string, workspaceConfigFn func() (*WorkspaceData, error)) {
+func injectTerminalContextBanner(session *TerminalSession, loomServerURL string, workspaceConfigFn func() (*service.WorkspaceData, error)) {
 	tc, err := FetchTerminalContext(loomServerURL)
 	if err != nil {
 		slog.Error("terminal context fetch failed, skipping banner", "err", err)

@@ -576,7 +576,7 @@ func TestMultiWorkspace_CrossWorkspaceMove(t *testing.T) {
 			},
 		}
 
-		workspaces := []WorkspaceSummary{
+		workspaces := []service.WorkspaceSummary{
 			{ID: "ws-alpha-uuid", Name: "alpha", Path: "/ws/alpha", Active: true},
 			{ID: "ws-beta-uuid", Name: "beta", Path: "/ws/beta", Active: false},
 		}
@@ -621,7 +621,7 @@ func TestMultiWorkspace_CrossWorkspaceMove(t *testing.T) {
 			},
 		}
 
-		workspaces := []WorkspaceSummary{
+		workspaces := []service.WorkspaceSummary{
 			{Name: "alpha", Path: "/ws/alpha", Active: true},
 		}
 		wsCfg := testWorkspaceConfigFn("alpha", workspaces)
@@ -651,7 +651,7 @@ func TestMultiWorkspace_CrossWorkspaceMove(t *testing.T) {
 			},
 		}
 
-		workspaces := []WorkspaceSummary{
+		workspaces := []service.WorkspaceSummary{
 			{Name: "alpha", Path: "/ws/alpha", Active: true},
 			{Name: "beta", Path: "/ws/beta", Active: false},
 		}

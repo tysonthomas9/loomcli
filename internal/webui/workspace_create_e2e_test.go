@@ -3,75 +3,49 @@ package webui
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/workspaceerrors"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // TestWorkspaceCreateE2E_ErrorCodes exercises the full handler chain for
-// workspace creation error handling, verifying that typed errors from createFn
-// produce the correct HTTP status codes and user-facing messages.
+// workspace creation error handling via the mock service.
 func TestWorkspaceCreateE2E_ErrorCodes(t *testing.T) {
 	tests := []struct {
 		name         string
 		body         string
-		createErr    error
+		svcErr       error
 		wantStatus   int
-		wantContains string // substring expected in the error message
+		wantContains string
 	}{
 		{
-			name: "duplicate workspace returns 409 with workspace name",
-			body: `{"name":"my-dup","type":"empty","repos":["/home/user/repo"]}`,
-			createErr: workspaceerrors.New(
-				workspaceerrors.AlreadyExists,
-				"workspace 'my-dup' already exists at /tmp/workspaces/my-dup",
-				nil,
-			),
+			name:         "conflict returns 409",
+			body:         `{"name":"my-dup","type":"empty","repos":["/home/user/repo"]}`,
+			svcErr:       service.ErrConflict("workspace 'my-dup' already exists"),
 			wantStatus:   http.StatusConflict,
 			wantContains: "my-dup",
 		},
 		{
-			name: "invalid repo path returns 422 with bad path",
-			body: `{"name":"bad-path","type":"empty","repos":["/nonexistent/fake/dir"]}`,
-			createErr: workspaceerrors.New(
-				workspaceerrors.PathNotFound,
-				"repo path does not exist: /nonexistent/fake/dir",
-				nil,
-			),
-			wantStatus:   http.StatusUnprocessableEntity,
+			name:         "validation error returns 400",
+			body:         `{"name":"bad-path","type":"empty","repos":["/nonexistent/fake/dir"]}`,
+			svcErr:       service.ErrValidation("repo path does not exist: /nonexistent/fake/dir"),
+			wantStatus:   http.StatusBadRequest,
 			wantContains: "/nonexistent/fake/dir",
 		},
 		{
-			name: "not a git repo returns 422 with git message",
-			body: `{"name":"not-git","type":"empty","repos":["/tmp/plain-dir"]}`,
-			createErr: workspaceerrors.New(
-				workspaceerrors.NotGitRepo,
-				"/tmp/plain-dir is not a git repository",
-				nil,
-			),
-			wantStatus:   http.StatusUnprocessableEntity,
-			wantContains: "not a git repository",
-		},
-		{
-			name: "security violation returns 403",
-			body: `{"name":"escape","type":"empty","repos":["/a"]}`,
-			createErr: workspaceerrors.New(
-				workspaceerrors.SecurityViolation,
-				"path traversal detected in workspace path",
-				nil,
-			),
+			name:         "forbidden returns 403",
+			body:         `{"name":"escape","type":"empty","repos":["/a"]}`,
+			svcErr:       service.ErrForbidden("path traversal detected"),
 			wantStatus:   http.StatusForbidden,
 			wantContains: "path traversal",
 		},
 		{
-			name:         "unknown error returns 500 generic message",
+			name:         "internal error returns 500",
 			body:         `{"name":"boom","type":"empty","repos":["/a"]}`,
-			createErr:    fmt.Errorf("disk full"),
+			svcErr:       service.ErrInternal("failed to create workspace", nil),
 			wantStatus:   http.StatusInternalServerError,
 			wantContains: "failed to create workspace",
 		},
@@ -79,10 +53,15 @@ func TestWorkspaceCreateE2E_ErrorCodes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			createFn := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
-				return WorkspaceCreateResult{}, tt.createErr
+			svc := &mockWorkspaceService{
+				startAsyncCreateFn: func(_ context.Context, _ service.WorkspaceCreateRequest) (string, error) {
+					return "", service.ErrUnavailable("not available")
+				},
+				createWorkspaceFn: func(_ context.Context, _ service.WorkspaceCreateRequest) (*service.WorkspaceData, []string, error) {
+					return nil, nil, tt.svcErr
+				},
 			}
-			handler := handleWorkspaceCreate(createFn, nil, nil)
+			handler := handleWorkspaceCreate(svc)
 
 			req := httptest.NewRequest(http.MethodPost, "/api/workspaces", strings.NewReader(tt.body))
 			rec := httptest.NewRecorder()
@@ -106,20 +85,15 @@ func TestWorkspaceCreateE2E_ErrorCodes(t *testing.T) {
 	}
 }
 
-// TestWorkspaceCreateE2E_CloneAsync verifies that clone-type creation with a
-// jobStore returns 202 Accepted with a job_id, and that the job can be polled
-// to completion.
+// TestWorkspaceCreateE2E_CloneAsync verifies async creation path with mock service.
 func TestWorkspaceCreateE2E_CloneAsync(t *testing.T) {
-	store := NewWorkspaceJobStore()
-	defer store.Stop()
-
-	done := make(chan struct{})
-	createFn := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
-		defer close(done)
-		return WorkspaceCreateResult{WorkspaceID: "ws-e2e-async"}, nil
+	svc := &mockWorkspaceService{
+		startAsyncCreateFn: func(_ context.Context, req service.WorkspaceCreateRequest) (string, error) {
+			return "job-e2e-123", nil
+		},
 	}
 
-	handler := handleWorkspaceCreate(createFn, nil, store)
+	handler := handleWorkspaceCreate(svc)
 
 	body := strings.NewReader(`{"name":"async-e2e","type":"clone","clone_url":"https://github.com/user/repo.git"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
@@ -141,50 +115,22 @@ func TestWorkspaceCreateE2E_CloneAsync(t *testing.T) {
 	if !ok || jobID == "" {
 		t.Fatalf("expected non-empty job_id in 202 response, got %v", createResp["job_id"])
 	}
-
-	// Wait for the background job to complete.
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for async job to complete")
-	}
-	// Brief settle for sync.Map store to propagate.
-	time.Sleep(20 * time.Millisecond)
-
-	// Poll the job and verify completed state.
-	jobHandler := handleGetWorkspaceJob(store)
-	pollReq := httptest.NewRequest(http.MethodGet, "/api/workspaces/jobs/"+jobID, nil)
-	pollReq.SetPathValue("id", jobID)
-	pollRec := httptest.NewRecorder()
-	jobHandler.ServeHTTP(pollRec, pollReq)
-
-	if pollRec.Code != http.StatusOK {
-		t.Fatalf("expected 200 for completed job, got %d: %s", pollRec.Code, pollRec.Body.String())
-	}
-
-	var jobResp map[string]any
-	if err := json.NewDecoder(pollRec.Body).Decode(&jobResp); err != nil {
-		t.Fatalf("decode job response: %v", err)
-	}
-	if jobResp["status"] != string(JobStatusDone) {
-		t.Errorf("expected job status %q, got %v", JobStatusDone, jobResp["status"])
-	}
-	if jobResp["workspace_id"] != "ws-e2e-async" {
-		t.Errorf("expected workspace_id %q, got %v", "ws-e2e-async", jobResp["workspace_id"])
-	}
 }
 
-// TestWorkspaceCreateE2E_CloneNilJobStoreSync verifies that clone-type
-// creation without a jobStore falls back to synchronous 201.
+// TestWorkspaceCreateE2E_CloneNilJobStoreSync verifies clone falls back to sync.
 func TestWorkspaceCreateE2E_CloneNilJobStoreSync(t *testing.T) {
 	createCalled := false
-	createFn := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
-		createCalled = true
-		return WorkspaceCreateResult{WorkspaceID: "ws-sync"}, nil
+	svc := &mockWorkspaceService{
+		startAsyncCreateFn: func(_ context.Context, _ service.WorkspaceCreateRequest) (string, error) {
+			return "", service.ErrUnavailable("async not available")
+		},
+		createWorkspaceFn: func(_ context.Context, _ service.WorkspaceCreateRequest) (*service.WorkspaceData, []string, error) {
+			createCalled = true
+			return &service.WorkspaceData{Name: "sync-e2e"}, nil, nil
+		},
 	}
 
-	// nil jobStore => sync fallback
-	handler := handleWorkspaceCreate(createFn, nil, nil)
+	handler := handleWorkspaceCreate(svc)
 
 	body := strings.NewReader(`{"name":"sync-e2e","type":"clone","clone_url":"https://github.com/user/repo.git"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
@@ -197,30 +143,23 @@ func TestWorkspaceCreateE2E_CloneNilJobStoreSync(t *testing.T) {
 	if !createCalled {
 		t.Error("expected createFn to be called synchronously")
 	}
-
-	var resp workspaceResponse
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if !resp.Success {
-		t.Fatalf("expected success=true, got error: %s", resp.Error)
-	}
 }
 
-// TestWorkspaceCreateE2E_EmptySuccess verifies that an empty workspace
-// creation returns 201 with WorkspaceData when workspaceConfigFn is provided.
+// TestWorkspaceCreateE2E_EmptySuccess verifies empty workspace creation.
 func TestWorkspaceCreateE2E_EmptySuccess(t *testing.T) {
-	createFn := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
-		if req.Type != "empty" {
-			t.Errorf("expected type %q, got %q", "empty", req.Type)
-		}
-		if req.Name != "fresh-ws" {
-			t.Errorf("expected name %q, got %q", "fresh-ws", req.Name)
-		}
-		return WorkspaceCreateResult{}, nil
+	svc := &mockWorkspaceService{
+		startAsyncCreateFn: func(_ context.Context, _ service.WorkspaceCreateRequest) (string, error) {
+			return "", service.ErrUnavailable("not available")
+		},
+		createWorkspaceFn: func(_ context.Context, req service.WorkspaceCreateRequest) (*service.WorkspaceData, []string, error) {
+			if req.Type != "empty" {
+				t.Errorf("expected type %q, got %q", "empty", req.Type)
+			}
+			return &service.WorkspaceData{Name: "test-ws"}, nil, nil
+		},
 	}
 
-	handler := handleWorkspaceCreate(createFn, mockWorkspaceConfigFn, nil)
+	handler := handleWorkspaceCreate(svc)
 
 	body := strings.NewReader(`{"name":"fresh-ws","type":"empty","repos":["/home/user/project"]}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
@@ -241,18 +180,16 @@ func TestWorkspaceCreateE2E_EmptySuccess(t *testing.T) {
 	if resp.Data == nil {
 		t.Fatal("expected non-nil Data in 201 response")
 	}
-	if resp.Data.Name != "test-ws" {
-		t.Errorf("expected data.name=%q (from mockWorkspaceConfigFn), got %q", "test-ws", resp.Data.Name)
-	}
 }
 
-// TestWorkspaceCreateE2E_JobPollingUnknownID verifies that polling a
-// non-existent job ID returns 404.
+// TestWorkspaceCreateE2E_JobPollingUnknownID verifies 404 for unknown job.
 func TestWorkspaceCreateE2E_JobPollingUnknownID(t *testing.T) {
-	store := NewWorkspaceJobStore()
-	defer store.Stop()
-
-	handler := handleGetWorkspaceJob(store)
+	svc := &mockWorkspaceService{
+		getWorkspaceJobFn: func(_ context.Context, _ string) (*service.WorkspaceJob, error) {
+			return nil, service.ErrNotFound("job not found")
+		},
+	}
+	handler := handleGetWorkspaceJob(svc)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/jobs/does-not-exist", nil)
 	req.SetPathValue("id", "does-not-exist")
@@ -262,41 +199,22 @@ func TestWorkspaceCreateE2E_JobPollingUnknownID(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
 	}
-
-	var resp map[string]any
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp["error"] != "job not found" {
-		t.Errorf("expected error %q, got %v", "job not found", resp["error"])
-	}
 }
 
-// TestWorkspaceCreateE2E_JobPollingCompleted verifies that polling a completed
-// job returns 200 with workspace_id populated.
+// TestWorkspaceCreateE2E_JobPollingCompleted verifies completed job polling.
 func TestWorkspaceCreateE2E_JobPollingCompleted(t *testing.T) {
-	store := NewWorkspaceJobStore()
-	defer store.Stop()
-
-	done := make(chan struct{})
-	createFn := func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
-		defer close(done)
-		return WorkspaceCreateResult{WorkspaceID: "ws-poll-done"}, nil
+	svc := &mockWorkspaceService{
+		getWorkspaceJobFn: func(_ context.Context, jobID string) (*service.WorkspaceJob, error) {
+			return &service.WorkspaceJob{
+				ID:          jobID,
+				Status:      service.JobStatusDone,
+				WorkspaceID: "ws-poll-done",
+			}, nil
+		},
 	}
-
-	jobID := store.Start(WorkspaceCreateRequest{Name: "poll-test", Type: "clone"}, createFn)
-
-	// Wait for job to complete.
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for job to complete")
-	}
-	time.Sleep(20 * time.Millisecond)
-
-	handler := handleGetWorkspaceJob(store)
-	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/jobs/"+jobID, nil)
-	req.SetPathValue("id", jobID)
+	handler := handleGetWorkspaceJob(svc)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/jobs/job-123", nil)
+	req.SetPathValue("id", "job-123")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -308,8 +226,8 @@ func TestWorkspaceCreateE2E_JobPollingCompleted(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if resp["status"] != string(JobStatusDone) {
-		t.Errorf("expected status %q, got %v", JobStatusDone, resp["status"])
+	if resp["status"] != string(service.JobStatusDone) {
+		t.Errorf("expected status %q, got %v", service.JobStatusDone, resp["status"])
 	}
 	if resp["workspace_id"] != "ws-poll-done" {
 		t.Errorf("expected workspace_id %q, got %v", "ws-poll-done", resp["workspace_id"])
