@@ -62,6 +62,7 @@ type ServerConfig struct {
 	SessionsStore           *sessions.Store                                      // File-based session audit trail store (optional; nil disables session endpoints)
 	Logger                  *slog.Logger                                         // Structured logger (optional; nil falls back to slog.Default())
 	DaemonStartupFn         func(ctx context.Context, onReady func(wsID string)) // Starts daemons for secondary workspaces; calls onReady(wsID) when each is reachable
+	WorkspaceAgentsFn       func(wsPath string) ([]WorkspaceAgentStatus, error)  // Returns agent status for a workspace by scanning its worktrees dir
 }
 
 // DefaultConfig returns a ServerConfig with sensible defaults.

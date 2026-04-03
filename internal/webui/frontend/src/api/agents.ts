@@ -14,7 +14,7 @@ import type {
   LoomSyncInfo,
   LoomStats,
 } from "@/types";
-import { get } from "./client";
+import { get, wsUrl } from "./client";
 
 /**
  * Default loom server URL.
@@ -30,6 +30,20 @@ export async function fetchAgents(): Promise<LoomAgentStatus[]> {
   const data = await get<LoomAgentsResponse>(`${LOOM_SERVER_URL}/api/agents`, {
     timeout: 15000,
   });
+  return data.agents ?? [];
+}
+
+/**
+ * Fetch agents for a specific workspace by scanning its worktrees directory.
+ * Returns agents scoped to the workspace (not the global loom server).
+ */
+export async function fetchWorkspaceAgents(
+  workspaceId: string,
+): Promise<LoomAgentStatus[]> {
+  const data = await get<{ agents: LoomAgentStatus[] }>(
+    wsUrl(workspaceId, "/agents"),
+    { timeout: 10000 },
+  );
   return data.agents ?? [];
 }
 
