@@ -46,7 +46,7 @@ func TestGetMutationsSinceForWorkspace_KnownWorkspace(t *testing.T) {
 	sub := NewDaemonSubscriber(pool, hub)
 	sub.workspaceID = "ws-1"
 	multi.mu.Lock()
-	multi.subscribers["ws-1"] = sub
+	multi.subscribers["ws-1"] = &subscriberEntry{sub: sub}
 	multi.mu.Unlock()
 
 	got := multi.GetMutationsSinceForWorkspace("ws-1", 0)
@@ -137,8 +137,8 @@ func TestGetMutationsSinceForWorkspace_OnlyQueriesCorrectSubscriber(t *testing.T
 	sub2.workspaceID = "ws-2"
 
 	multi.mu.Lock()
-	multi.subscribers["ws-1"] = sub1
-	multi.subscribers["ws-2"] = sub2
+	multi.subscribers["ws-1"] = &subscriberEntry{sub: sub1}
+	multi.subscribers["ws-2"] = &subscriberEntry{sub: sub2}
 	multi.mu.Unlock()
 
 	// Query ws-1 only
