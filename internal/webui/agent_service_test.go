@@ -12,7 +12,7 @@ import (
 
 // requireServiceError is a test helper that asserts err is a *service.ServiceError
 // with the expected kind. It returns the ServiceError for further inspection.
-func requireServiceError(t *testing.T, err error, wantKind string) *service.ServiceError {
+func requireServiceError(t *testing.T, err error, wantKind service.ErrorKind) *service.ServiceError {
 	t.Helper()
 	if err == nil {
 		t.Fatalf("expected error with kind %s, got nil", wantKind)

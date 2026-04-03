@@ -47,7 +47,7 @@ func handleGetAgentTerminalInfo(svc AgentService) http.HandlerFunc {
 		if err != nil {
 			respondJSON(w, serviceErrorStatus(err), agentTerminalInfoResponse{
 				Success: false,
-				Error:   err.Error(),
+				Error:   serviceErrorMessage(err),
 			})
 			return
 		}
@@ -76,7 +76,7 @@ func handleGetAgentTerminalToken(svc AgentService) http.HandlerFunc {
 		if err != nil {
 			respondJSON(w, serviceErrorStatus(err), agentTerminalTokenResponse{
 				Success: false,
-				Error:   err.Error(),
+				Error:   serviceErrorMessage(err),
 			})
 			return
 		}

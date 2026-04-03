@@ -45,6 +45,17 @@ func serviceErrorStatus(err error) int {
 	return http.StatusInternalServerError
 }
 
+// serviceErrorMessage returns the user-facing message for an error.
+// For ServiceErrors it returns the Message field (without the Kind prefix);
+// for other errors it returns err.Error().
+func serviceErrorMessage(err error) string {
+	var svcErr *service.ServiceError
+	if errors.As(err, &svcErr) {
+		return svcErr.Message
+	}
+	return err.Error()
+}
+
 // writeServiceError maps a service.ServiceError to an HTTP response.
 func writeServiceError(w http.ResponseWriter, err error) {
 	var svcErr *service.ServiceError
