@@ -392,18 +392,19 @@ func validateWorkspacePath(wsDir string) error {
 	return nil
 }
 
-// startDaemonAsync starts the bd daemon for a workspace in the background,
-// creates per-agent worktrees before the daemon indexes them, then syncs
-// repos after the daemon is ready (sync can be slow for large repos).
+// startDaemonAsync creates per-agent worktrees, starts the bd daemon for a
+// workspace in the background, then syncs repos after the daemon is ready
+// (sync can be slow for large repos). Worktree creation runs first because
+// it's pure git ops and doesn't need the daemon.
 func startDaemonAsync(timeout time.Duration, wsName, wsDir string, repos []config.RepoConfig, agentNames []string) {
 	go func() { //nolint:gosec // G118 — intentional: daemon outlives request
 		deps := cli.GetDeps(nil)
+		// Create agent worktrees first (pure git ops, no daemon needed).
+		workspace.CreateAgentWorktrees(wsDir, repos, agentNames)
 		if err := workspace.EnsureDaemonForWorkspace(deps, context.Background(), wsDir, timeout); err != nil {
 			slog.Warn("failed to start daemon for workspace", "workspace", wsName, "err", err)
 			return
 		}
-		// Create agent worktrees before sync so daemon can index them.
-		workspace.CreateAgentWorktrees(wsDir, repos, agentNames)
 		if result := deps.Exec.Run(wsDir, "bd", "repo", "sync"); result.Err != nil {
 			slog.Warn("bd repo sync failed", "workspace", wsName, "err", result.Err)
 		}
