@@ -209,6 +209,9 @@ func ensureCurrentProjectRegistered() {
 // daemon is confirmed running. This is used to defer SSE subscriber activation
 // until the daemon is reachable, preventing circuit breaker trips during startup.
 func ensureDaemonsForAllWorkspaces(ctx context.Context, onReady func(wsID string)) {
+	// Mark any interrupted workspaces as error before attempting daemon startup.
+	recoverIncompleteWorkspaces()
+
 	cwd, _ := os.Getwd()
 
 	cfg, err := LoadConfig()
@@ -224,6 +227,10 @@ func ensureDaemonsForAllWorkspaces(ctx context.Context, onReady func(wsID string
 		}
 		// Skip the CWD workspace — its daemon is managed by the main serve loop.
 		if ws.Path == cwd {
+			continue
+		}
+		// Skip workspaces that aren't ready (error, creating, etc.)
+		if ws.State != "" && ws.State != WorkspaceStateReady {
 			continue
 		}
 		// Only start daemons for workspaces that have a .beads/ directory.

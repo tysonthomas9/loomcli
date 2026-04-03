@@ -25,6 +25,13 @@ export interface WorkspaceAgentInfo {
   cross_repo: boolean;
 }
 
+export type WorkspaceLifecycleState =
+  | "creating"
+  | "cloning"
+  | "initializing"
+  | "ready"
+  | "error";
+
 export interface WorkspaceSummary {
   id: string;
   name: string;
@@ -33,6 +40,8 @@ export interface WorkspaceSummary {
   repo_count: number;
   is_default: boolean;
   backend?: string;
+  state?: WorkspaceLifecycleState;
+  error_message?: string;
 }
 
 export interface WorkspaceData {

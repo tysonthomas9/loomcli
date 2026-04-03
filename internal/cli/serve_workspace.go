@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -259,97 +258,81 @@ func createEmptyWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir, b
 		return webui.WorkspaceCreateResult{}, err
 	}
 
+	// Phase 1: Write config with state=creating BEFORE filesystem ops.
+	wsID := NewWorkspaceID()
+	cfg.Workspaces[wsName] = WorkspaceConfig{
+		ID: wsID, Path: wsDir, State: WorkspaceStateCreating,
+	}
+	if len(cfg.Workspaces) == 1 {
+		cfg.DefaultWorkspace = wsName
+	}
+	if err := SaveConfig(cfg); err != nil {
+		return webui.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.ConfigFailed, "failed to save config", err)
+	}
+
+	markError := func(msg string) {
+		if err := setWorkspaceState(wsName, WorkspaceStateError, msg); err != nil {
+			slog.Error("failed to mark workspace error", "workspace", wsName, "err", err)
+		}
+	}
+
 	if err := os.MkdirAll(wsDir, 0755); err != nil {
+		markError(fmt.Sprintf("cannot create directory: %v", err))
 		return webui.WorkspaceCreateResult{}, fmt.Errorf("cannot create workspace directory: %w", err)
 	}
 
-	type createdWorktree struct {
-		origRepoPath string
-		worktreePath string
-	}
-	var created []createdWorktree
-	var repos []RepoConfig
-
-	cleanup := func() {
-		for _, c := range created {
-			_, _ = RunGitCommand(c.origRepoPath, "worktree", "remove", c.worktreePath)
-		}
-		_ = os.RemoveAll(wsDir)
+	// Phase 2: Creating worktrees
+	if err := setWorkspaceState(wsName, WorkspaceStateCloning, ""); err != nil {
+		slog.Error("state transition failed", "err", err)
 	}
 
-	for _, repo := range resolved {
-		if ctx.Err() != nil {
-			cleanup()
-			return webui.WorkspaceCreateResult{}, ctx.Err()
-		}
+	repos, cleanupWT, err := createRepoWorktrees(ctx, wsDir, resolved, branch)
+	if err != nil {
+		cleanupWT()
+		markError(err.Error())
+		return webui.WorkspaceCreateResult{}, err
+	}
+	_ = cleanupWT // kept for error paths only
 
-		worktreePath := filepath.Join(wsDir, repo.name)
-		if _, err := RunGitCommand(repo.path, "worktree", "add", worktreePath, "-b", branch); err != nil {
-			cleanup()
-			return webui.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.GitFailed, fmt.Sprintf("git worktree add failed for %s", repo.name), err)
-		}
+	// Update config with repos.
+	if loadedCfg, err := LoadConfig(); err == nil && loadedCfg != nil {
+		ws := loadedCfg.Workspaces[wsName]
+		ws.Repos = repos
+		loadedCfg.Workspaces[wsName] = ws
+		_ = SaveConfig(loadedCfg)
+	}
 
-		created = append(created, createdWorktree{origRepoPath: repo.path, worktreePath: worktreePath})
-		repos = append(repos, RepoConfig{Name: repo.name, Path: worktreePath})
+	// Phase 3: Initializing
+	if err := setWorkspaceState(wsName, WorkspaceStateInitializing, ""); err != nil {
+		slog.Error("state transition failed", "err", err)
 	}
 
 	initWorkspaceBeads(wsDir, repos)
-
-	// Write default loom.yaml with agents (best-effort; non-fatal)
 	agentNames, err := writeLoomYaml(wsDir)
 	if err != nil {
 		slog.Warn("failed to write loom.yaml for workspace", "workspace", wsName, "err", err)
 	}
 
-	wsID := NewWorkspaceID()
-	cfg.Workspaces[wsName] = WorkspaceConfig{ID: wsID, Path: wsDir, Repos: repos}
-	if len(cfg.Workspaces) == 1 {
-		cfg.DefaultWorkspace = wsName
-	}
-
-	if err := SaveConfig(cfg); err != nil {
-		cleanup()
-		return webui.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.ConfigFailed, "failed to save config", err)
-	}
-
-	// Start bd daemon and create agent worktrees asynchronously (best-effort; non-fatal).
-	// Uses context.Background() because the request context is cancelled when the handler returns.
 	timeout := cfg.Daemon.GetStartupTimeout(defaultDaemonStartupTimeout)
-	go func() { //nolint:gosec // G118: intentional — goroutine must outlive the HTTP request for async daemon startup
-		// Create agent worktrees first (pure git ops, no daemon needed).
+	go func() { //nolint:gosec // G118: intentional — goroutine must outlive the HTTP request
 		createAgentWorktrees(wsDir, repos, agentNames)
 		if err := ensureDaemonForWorkspace(context.Background(), wsDir, timeout); err != nil {
 			slog.Warn("failed to start daemon for workspace", "workspace", wsName, "err", err)
-			return // daemon not ready — skip sync
 		}
 		if result := execCommand(wsDir, "bd", "repo", "sync"); result.Err != nil {
 			slog.Warn("bd repo sync failed", "workspace", wsName, "err", result.Err)
+		}
+		// Phase 4: Ready
+		if err := setWorkspaceState(wsName, WorkspaceStateReady, ""); err != nil {
+			slog.Error("failed to mark workspace ready", "workspace", wsName, "err", err)
 		}
 	}()
 
 	return webui.WorkspaceCreateResult{WorkspaceID: wsID, WorkspacePath: wsDir}, nil
 }
 
-// repoNameFromURL derives a directory name from a git clone URL.
-// e.g. "https://github.com/foo/bar.git" → "bar"
-func repoNameFromURL(cloneURL string) string {
-	// Strip trailing .git
-	u := strings.TrimSuffix(cloneURL, ".git")
-	// Strip trailing slashes
-	u = strings.TrimRight(u, "/")
-	// Take the last path segment
-	if idx := strings.LastIndex(u, "/"); idx >= 0 {
-		u = u[idx+1:]
-	}
-	// For SSH URLs like git@github.com:foo/bar
-	if idx := strings.LastIndex(u, ":"); idx >= 0 {
-		u = u[idx+1:]
-	}
-	if u == "" {
-		return "repo"
-	}
-	return u
-}
+// createRepoWorktrees creates git worktrees for each resolved repo. Returns
+// the repo configs and a cleanup function to remove worktrees on error.
 
 // createCloneWorkspace clones one or more repos and creates a workspace from them.
 func createCloneWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir string, cloneURLs []string) (webui.WorkspaceCreateResult, error) {
@@ -363,75 +346,71 @@ func createCloneWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir st
 		return webui.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.SecurityViolation, fmt.Sprintf("workspace path must be under %s", allowedBase), nil)
 	}
 
+	// Phase 1: Write config with state=creating BEFORE filesystem ops.
+	wsID := NewWorkspaceID()
+	cfg.Workspaces[wsName] = WorkspaceConfig{
+		ID: wsID, Path: wsDir, State: WorkspaceStateCreating, CloneURLs: cloneURLs,
+	}
+	if len(cfg.Workspaces) == 1 {
+		cfg.DefaultWorkspace = wsName
+	}
+	if err := SaveConfig(cfg); err != nil {
+		return webui.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.ConfigFailed, "failed to save config", err)
+	}
+
+	markError := func(msg string) {
+		if err := setWorkspaceState(wsName, WorkspaceStateError, msg); err != nil {
+			slog.Error("failed to mark workspace error", "workspace", wsName, "err", err)
+		}
+	}
+
 	if err := os.MkdirAll(wsDir, 0755); err != nil {
+		markError(fmt.Sprintf("cannot create directory: %v", err))
 		return webui.WorkspaceCreateResult{}, fmt.Errorf("cannot create workspace directory: %w", err)
 	}
 
-	cleanupDir := func() { _ = os.RemoveAll(wsDir) }
+	// Phase 2: Cloning
+	if err := setWorkspaceState(wsName, WorkspaceStateCloning, ""); err != nil {
+		slog.Error("state transition failed", "err", err)
+	}
 
-	var repos []RepoConfig
-	seenNames := make(map[string]bool)
+	repos, err := cloneRepos(ctx, wsDir, cloneURLs)
+	if err != nil {
+		markError(err.Error())
+		return webui.WorkspaceCreateResult{}, err
+	}
 
-	for _, cloneURL := range cloneURLs {
-		if ctx.Err() != nil {
-			cleanupDir()
-			return webui.WorkspaceCreateResult{}, ctx.Err()
-		}
+	// Update config with repos now that clone succeeded.
+	if loadedCfg, err := LoadConfig(); err == nil && loadedCfg != nil {
+		ws := loadedCfg.Workspaces[wsName]
+		ws.Repos = repos
+		loadedCfg.Workspaces[wsName] = ws
+		_ = SaveConfig(loadedCfg)
+	}
 
-		repoName := repoNameFromURL(cloneURL)
-		// Deduplicate names
-		if seenNames[repoName] {
-			for i := 2; ; i++ {
-				candidate := fmt.Sprintf("%s-%d", repoName, i)
-				if !seenNames[candidate] {
-					repoName = candidate
-					break
-				}
-			}
-		}
-		seenNames[repoName] = true
-
-		clonePath := filepath.Join(wsDir, repoName)
-		cmd := exec.CommandContext(ctx, "git", "clone", cloneURL, clonePath) //nolint:gosec // URL validated: prefix (https://|git@), no control chars, no dash-prefixed path segments
-		if output, err := cmd.CombinedOutput(); err != nil {
-			cleanupDir()
-			return webui.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.GitFailed, fmt.Sprintf("git clone failed for %s: %s", cloneURL, strings.TrimSpace(string(output))), err)
-		}
-
-		repos = append(repos, RepoConfig{Name: repoName, Path: clonePath})
+	// Phase 3: Initializing (async — beads, agents, daemon)
+	if err := setWorkspaceState(wsName, WorkspaceStateInitializing, ""); err != nil {
+		slog.Error("state transition failed", "err", err)
 	}
 
 	initWorkspaceBeads(wsDir, repos)
-
-	// Write default loom.yaml with agents (best-effort; non-fatal)
 	cloneAgentNames, err := writeLoomYaml(wsDir)
 	if err != nil {
 		slog.Warn("failed to write loom.yaml for workspace", "workspace", wsName, "err", err)
 	}
 
-	wsID := NewWorkspaceID()
-	cfg.Workspaces[wsName] = WorkspaceConfig{ID: wsID, Path: wsDir, Repos: repos}
-	if len(cfg.Workspaces) == 1 {
-		cfg.DefaultWorkspace = wsName
-	}
-
-	if err := SaveConfig(cfg); err != nil {
-		cleanupDir()
-		return webui.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.ConfigFailed, "failed to save config", err)
-	}
-
-	// Start bd daemon and create agent worktrees asynchronously (best-effort; non-fatal).
-	// Uses context.Background() because the request context is cancelled when the handler returns.
 	timeout := cfg.Daemon.GetStartupTimeout(defaultDaemonStartupTimeout)
-	go func() { //nolint:gosec // G118: intentional — goroutine must outlive the HTTP request for async daemon startup
-		// Create agent worktrees first (pure git ops, no daemon needed).
+	go func() { //nolint:gosec // G118: intentional — goroutine must outlive the HTTP request
 		createAgentWorktrees(wsDir, repos, cloneAgentNames)
 		if err := ensureDaemonForWorkspace(context.Background(), wsDir, timeout); err != nil {
 			slog.Warn("failed to start daemon for workspace", "workspace", wsName, "err", err)
-			return // daemon not ready — skip sync
 		}
 		if result := execCommand(wsDir, "bd", "repo", "sync"); result.Err != nil {
 			slog.Warn("bd repo sync failed", "workspace", wsName, "err", result.Err)
+		}
+		// Phase 4: Ready
+		if err := setWorkspaceState(wsName, WorkspaceStateReady, ""); err != nil {
+			slog.Error("failed to mark workspace ready", "workspace", wsName, "err", err)
 		}
 	}()
 

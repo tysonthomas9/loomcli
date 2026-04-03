@@ -94,15 +94,12 @@ func buildWorkspaceInfoForName(targetName string) (*webui.WorkspaceData, error) 
 
 	summaries := make([]webui.WorkspaceSummary, 0, len(cfg.Workspaces))
 	for name, w := range cfg.Workspaces {
-		summaries = append(summaries, webui.WorkspaceSummary{
-			ID:        w.ID,
-			Name:      name,
-			Path:      w.Path,
-			Active:    name == wsName,
-			RepoCount: len(w.Repos),
-			IsDefault: name == cfg.DefaultWorkspace,
-			Backend:   w.Backend,
-		})
+		s := webui.WorkspaceSummary{
+			ID: w.ID, Name: name, Path: w.Path, Active: name == wsName,
+			RepoCount: len(w.Repos), IsDefault: name == cfg.DefaultWorkspace,
+			Backend: w.Backend, State: wsState(w.State), ErrorMessage: w.ErrorMessage,
+		}
+		summaries = append(summaries, s)
 	}
 	sortWorkspaceSummaries(summaries, cfg.WorkspaceOrder)
 
