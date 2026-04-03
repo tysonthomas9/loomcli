@@ -312,17 +312,16 @@ func createEmptyWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir, b
 		return webui.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.ConfigFailed, "failed to save config", err)
 	}
 
-	// Start bd daemon for the workspace asynchronously (best-effort; non-fatal).
+	// Start bd daemon and create agent worktrees asynchronously (best-effort; non-fatal).
 	// Uses context.Background() because the request context is cancelled when the handler returns.
 	timeout := cfg.Daemon.GetStartupTimeout(defaultDaemonStartupTimeout)
 	go func() { //nolint:gosec // G118: intentional — goroutine must outlive the HTTP request for async daemon startup
+		// Create agent worktrees first (pure git ops, no daemon needed).
+		createAgentWorktrees(wsDir, repos, agentNames)
 		if err := ensureDaemonForWorkspace(context.Background(), wsDir, timeout); err != nil {
 			slog.Warn("failed to start daemon for workspace", "workspace", wsName, "err", err)
 			return // daemon not ready — skip sync
 		}
-		// Create agent worktrees before sync so daemon can index them.
-		createAgentWorktrees(wsDir, repos, agentNames)
-		// Sync repos after daemon is ready (can be slow for large repos)
 		if result := execCommand(wsDir, "bd", "repo", "sync"); result.Err != nil {
 			slog.Warn("bd repo sync failed", "workspace", wsName, "err", result.Err)
 		}
@@ -421,17 +420,16 @@ func createCloneWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir st
 		return webui.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.ConfigFailed, "failed to save config", err)
 	}
 
-	// Start bd daemon for the workspace asynchronously (best-effort; non-fatal).
+	// Start bd daemon and create agent worktrees asynchronously (best-effort; non-fatal).
 	// Uses context.Background() because the request context is cancelled when the handler returns.
 	timeout := cfg.Daemon.GetStartupTimeout(defaultDaemonStartupTimeout)
 	go func() { //nolint:gosec // G118: intentional — goroutine must outlive the HTTP request for async daemon startup
+		// Create agent worktrees first (pure git ops, no daemon needed).
+		createAgentWorktrees(wsDir, repos, cloneAgentNames)
 		if err := ensureDaemonForWorkspace(context.Background(), wsDir, timeout); err != nil {
 			slog.Warn("failed to start daemon for workspace", "workspace", wsName, "err", err)
 			return // daemon not ready — skip sync
 		}
-		// Create agent worktrees before sync so daemon can index them.
-		createAgentWorktrees(wsDir, repos, cloneAgentNames)
-		// Sync repos after daemon is ready (can be slow for large repos)
 		if result := execCommand(wsDir, "bd", "repo", "sync"); result.Err != nil {
 			slog.Warn("bd repo sync failed", "workspace", wsName, "err", result.Err)
 		}
