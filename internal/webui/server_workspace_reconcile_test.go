@@ -42,10 +42,15 @@ func TestRegistry_Register_RegistersInMultiPoolAndSubscriber(t *testing.T) {
 		t.Errorf("expected WorkspaceIDs=[test-ws], got %v", ids)
 	}
 
-	// Verify subscriber was added
+	// Register does NOT start subscriber; ActivateSubscriber does.
 	subIDs := multiSub.WorkspaceIDs()
+	if len(subIDs) != 0 {
+		t.Errorf("expected 0 subscriber IDs before ActivateSubscriber, got %v", subIDs)
+	}
+	_ = registry.ActivateSubscriber("test-ws")
+	subIDs = multiSub.WorkspaceIDs()
 	if len(subIDs) != 1 || subIDs[0] != "test-ws" {
-		t.Errorf("expected subscriber WorkspaceIDs=[test-ws], got %v", subIDs)
+		t.Errorf("expected subscriber WorkspaceIDs=[test-ws] after ActivateSubscriber, got %v", subIDs)
 	}
 }
 
@@ -65,6 +70,7 @@ func TestRegistry_Register_MultipleWorkspaces(t *testing.T) {
 		if err := registry.Register(name, wsPath); err != nil {
 			t.Fatalf("Register(%q) returned error: %v", name, err)
 		}
+		_ = registry.ActivateSubscriber(name)
 	}
 
 	ids := multiPool.WorkspaceIDs()
@@ -395,10 +401,13 @@ func TestReconciliationLogic_SkipsInitialWorkspace(t *testing.T) {
 		}
 	}
 
-	// Verify subscriber has all workspaces
+	// Subscribers are NOT started by Register; activate them explicitly.
+	for _, wsName := range expected {
+		_ = registry.ActivateSubscriber(wsName)
+	}
 	subIDs := multiSub.WorkspaceIDs()
 	if len(subIDs) != 3 {
-		t.Errorf("expected 3 subscriber IDs, got %d: %v", len(subIDs), subIDs)
+		t.Errorf("expected 3 subscriber IDs after ActivateSubscriber, got %d: %v", len(subIDs), subIDs)
 	}
 }
 

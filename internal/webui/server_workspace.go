@@ -128,6 +128,8 @@ func wrapWorkspaceCreateFn(
 		}
 
 		_ = registry.Register(wsID, wsDir)
+		// Daemon is started during creation, so activate subscriber immediately.
+		_ = registry.ActivateSubscriber(wsID)
 
 		// Register workspace in fleet store registry (non-fatal on error).
 		if fleetRegistry != nil {

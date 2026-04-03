@@ -50,7 +50,11 @@ func TestRegistry_Register_CreatesPoolAndSubscriber(t *testing.T) {
 		t.Errorf("expected pool keyed by UUID %q, got %q", wsID, poolIDs[0])
 	}
 
-	// Verify subscriber appears in MultiWorkspaceSubscriber.WorkspaceIDs(), keyed by UUID.
+	// Register does NOT start subscriber; ActivateSubscriber does.
+	if subIDs := multiSub.WorkspaceIDs(); len(subIDs) != 0 {
+		t.Fatalf("expected 0 subscriber IDs before ActivateSubscriber, got %v", subIDs)
+	}
+	_ = registry.ActivateSubscriber(wsID)
 	subIDs := multiSub.WorkspaceIDs()
 	if len(subIDs) != 1 {
 		t.Fatalf("expected 1 workspace ID in subscriber, got %d: %v", len(subIDs), subIDs)
@@ -79,6 +83,7 @@ func TestRegistry_Deregister_CleansUp(t *testing.T) {
 	if err := registry.Register(wsID, wsPath); err != nil {
 		t.Fatalf("Register returned error: %v", err)
 	}
+	_ = registry.ActivateSubscriber(wsID)
 
 	// Sanity check: registered.
 	if multiPool.PoolForWorkspace(wsID) == nil {
@@ -132,7 +137,11 @@ func TestRegistry_RegisterPool_WithPrebuiltPool(t *testing.T) {
 		t.Error("expected pre-built pool to be registered in MultiPool")
 	}
 
-	// Verify subscriber was started.
+	// RegisterPool does NOT start subscriber; ActivateSubscriber does.
+	if subIDs := multiSub.WorkspaceIDs(); len(subIDs) != 0 {
+		t.Errorf("expected 0 subscriber IDs before ActivateSubscriber, got %v", subIDs)
+	}
+	_ = registry.ActivateSubscriber(wsID)
 	subIDs := multiSub.WorkspaceIDs()
 	if len(subIDs) != 1 || subIDs[0] != wsID {
 		t.Errorf("expected subscriber for %q, got %v", wsID, subIDs)
@@ -256,10 +265,11 @@ func TestRegistry_DoubleRegister_ReplacesCleanly(t *testing.T) {
 		t.Errorf("expected 1 workspace ID after double registration, got %d: %v", len(poolIDs), poolIDs)
 	}
 
-	// Subscriber should also have exactly one entry.
+	// Activate subscriber after the second register.
+	_ = registry.ActivateSubscriber(wsID)
 	subIDs := multiSub.WorkspaceIDs()
 	if len(subIDs) != 1 {
-		t.Errorf("expected 1 subscriber ID after double registration, got %d: %v", len(subIDs), subIDs)
+		t.Errorf("expected 1 subscriber ID after ActivateSubscriber, got %d: %v", len(subIDs), subIDs)
 	}
 
 	// The second pool should be the active one.
@@ -341,9 +351,15 @@ func TestRegistry_Register_PoolFailure_StillAttemptsSubscriber(t *testing.T) {
 		t.Errorf("expected pool registered after factory restore, got %v", poolIDs)
 	}
 
+	// Register no longer starts subscriber; ActivateSubscriber does.
+	subIDs = multiSub.WorkspaceIDs()
+	if len(subIDs) != 0 {
+		t.Errorf("expected 0 subscriber IDs before ActivateSubscriber, got %v", subIDs)
+	}
+	_ = registry.ActivateSubscriber(wsID)
 	subIDs = multiSub.WorkspaceIDs()
 	if len(subIDs) != 1 || subIDs[0] != wsID {
-		t.Errorf("expected subscriber registered after factory restore, got %v", subIDs)
+		t.Errorf("expected subscriber registered after ActivateSubscriber, got %v", subIDs)
 	}
 }
 

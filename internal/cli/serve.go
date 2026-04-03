@@ -263,9 +263,6 @@ func runServe(cmd *cobra.Command, args []string) {
 			log.Printf("WebUI API authentication is disabled (enable with --auth)")
 		}
 		ensureCurrentProjectRegistered()
-		if !serveNoDaemon {
-			go ensureDaemonsForAllWorkspaces(ctx) // staggered, async, best-effort
-		}
 		go func() {
 			gitOps := NewGitOps()
 			// Initialize session audit trail store (best-effort; nil disables endpoints).
@@ -328,6 +325,9 @@ func runServe(cmd *cobra.Command, args []string) {
 				BackendOps:            backendOps,
 				SessionsStore:         sessStore,
 				Logger:                slog.Default(),
+			}
+			if !serveNoDaemon {
+				cfg.DaemonStartupFn = ensureDaemonsForAllWorkspaces
 			}
 			if serveCorsOrigin != "" {
 				cfg.CORSEnabled = true

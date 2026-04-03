@@ -59,13 +59,15 @@ func NewWorkspaceRegistry(
 }
 
 // Register creates a connection pool with circuit breaker for the workspace at
-// the given filesystem path and registers it in both MultiPool and the
-// subscriber. The id must be the workspace UUID; path is used to derive the
-// daemon socket path.
+// the given filesystem path and registers it in MultiPool. The id must be the
+// workspace UUID; path is used to derive the daemon socket path.
+//
+// The SSE subscriber is NOT started here — call ActivateSubscriber after the
+// daemon is confirmed reachable to avoid priming the circuit breaker with
+// connection failures during startup.
 //
 // Returns error only for hard failures (closed registry, empty id/path).
-// Pool registration failures are logged but non-fatal (workspace was created,
-// pool registration is best-effort).
+// Pool registration failures are logged but non-fatal.
 func (r *WorkspaceRegistry) Register(id, path string) error {
 	if id == "" {
 		return ErrEmptyWorkspaceID
@@ -108,20 +110,13 @@ func (r *WorkspaceRegistry) Register(id, path string) error {
 		}
 	}
 
-	// Always attempt subscriber registration, even if pool creation failed.
-	if err := r.multiSub.AddWorkspace(id); err != nil {
-		r.logger.Warn("failed to start subscriber for workspace",
-			"workspace", id, "err", err)
-	} else {
-		r.logger.Info("started subscriber for workspace", "workspace", id)
-	}
-
 	return nil
 }
 
 // RegisterPool registers a pre-built pool for the workspace. This is used for
 // the initial workspace at startup where the pool is already constructed with
 // custom config (auto-discover, specific OnStateChange callbacks, etc.).
+// Call ActivateSubscriber after to start the SSE subscriber.
 func (r *WorkspaceRegistry) RegisterPool(id string, pool daemon.Pool) error {
 	if id == "" {
 		return ErrEmptyWorkspaceID
@@ -143,14 +138,32 @@ func (r *WorkspaceRegistry) RegisterPool(id string, pool daemon.Pool) error {
 		return nil
 	}
 
-	if err := r.multiSub.AddWorkspace(id); err != nil {
-		r.logger.Warn("failed to start subscriber for workspace",
-			"workspace", id, "err", err)
-	} else {
-		r.logger.Info("registered pre-built pool and subscriber for workspace",
-			"workspace", id)
+	r.logger.Info("registered pre-built pool for workspace", "workspace", id)
+	return nil
+}
+
+// ActivateSubscriber starts the SSE subscriber for a workspace whose pool is
+// already registered. Call this after the daemon is confirmed reachable to avoid
+// priming the circuit breaker with connection failures during startup.
+// Safe to call multiple times (idempotent — replaces existing subscriber).
+func (r *WorkspaceRegistry) ActivateSubscriber(id string) error {
+	if id == "" {
+		return ErrEmptyWorkspaceID
 	}
 
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.closed {
+		return ErrRegistryClosed
+	}
+
+	if err := r.multiSub.AddWorkspace(id); err != nil {
+		r.logger.Warn("failed to activate subscriber for workspace",
+			"workspace", id, "err", err)
+		return err
+	}
+	r.logger.Info("subscriber activated for workspace", "workspace", id)
 	return nil
 }
 

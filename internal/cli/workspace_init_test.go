@@ -96,8 +96,8 @@ func TestEnsureDaemonForWorkspace_TimeoutFallback(t *testing.T) {
 }
 
 func TestDefaultDaemonStartupTimeout(t *testing.T) {
-	if defaultDaemonStartupTimeout != 30*time.Second {
-		t.Errorf("defaultDaemonStartupTimeout = %v, want 30s", defaultDaemonStartupTimeout)
+	if defaultDaemonStartupTimeout != 120*time.Second {
+		t.Errorf("defaultDaemonStartupTimeout = %v, want 120s", defaultDaemonStartupTimeout)
 	}
 }
 

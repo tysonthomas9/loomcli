@@ -176,9 +176,8 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	// Create central WorkspaceRegistry to coordinate all workspace lifecycle.
 	registry := NewWorkspaceRegistry(multiPool, multiSub, config.PoolSize, config.Logger)
 	if pool != nil {
-		if err := registry.RegisterPool(initialWorkspaceID, pool); err != nil {
-			slog.Warn("failed to register initial workspace", "err", err)
-		}
+		_ = registry.RegisterPool(initialWorkspaceID, pool)
+		_ = registry.ActivateSubscriber(initialWorkspaceID) // daemon confirmed running before StartServer
 		getMutationsSince = multiSub.GetMutationsSinceForWorkspace
 	}
 
@@ -287,6 +286,14 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	// Reconcile all config workspaces (deferred until after fleet registry init
 	// so that other workspaces are also registered in the fleet).
 	reconcileConfigWorkspaces(config.WorkspaceListFn, initialWorkspaceID, pool != nil, registry, fleetRegistry)
+
+	// Deferred subscriber activation: start daemons for secondary workspaces,
+	// activate SSE subscriber only after each daemon is confirmed reachable.
+	if config.DaemonStartupFn != nil {
+		go config.DaemonStartupFn(ctx, func(wsID string) {
+			_ = registry.ActivateSubscriber(wsID)
+		})
+	}
 
 	// Build fleet registration config (API key + rate limiter)
 	var fleetRegCfg *FleetRegisterConfig
