@@ -67,7 +67,7 @@ func TestNotificationSubscriberHook_Critical(t *testing.T) {
 	}
 }
 
-func TestNotificationSubscriberHook_OnRegister_StartsSubscriber(t *testing.T) {
+func TestNotificationSubscriberHook_OnRegister_DefersSubscriber(t *testing.T) {
 	hook, multiSub, mp := newTestNotificationHookEnv(t)
 	registerSafePool(t, mp, "ws-1")
 
@@ -76,13 +76,21 @@ func TestNotificationSubscriberHook_OnRegister_StartsSubscriber(t *testing.T) {
 		t.Fatalf("OnRegister returned error: %v", err)
 	}
 
-	// Verify subscriber is active.
+	// OnRegister no longer starts the subscriber; activation is deferred.
+	if ids := multiSub.WorkspaceIDs(); len(ids) != 0 {
+		t.Errorf("expected 0 subscriber IDs after OnRegister, got %v", ids)
+	}
+
+	// Activate explicitly after daemon is confirmed reachable.
+	if err := hook.Activate("ws-1"); err != nil {
+		t.Fatalf("Activate returned error: %v", err)
+	}
 	ids := multiSub.WorkspaceIDs()
 	if len(ids) != 1 || ids[0] != "ws-1" {
 		t.Errorf("WorkspaceIDs() = %v, want [ws-1]", ids)
 	}
 
-	// Verify resource was provided.
+	// Verify resource was provided during OnRegister.
 	res, ok := ctx.Resolve(coordinator.ResourceKeySubscriber)
 	if !ok {
 		t.Fatal("expected ResourceKeySubscriber to be provided")
@@ -92,37 +100,38 @@ func TestNotificationSubscriberHook_OnRegister_StartsSubscriber(t *testing.T) {
 	}
 }
 
-func TestNotificationSubscriberHook_OnRegister_NoPool_ReturnsError(t *testing.T) {
+func TestNotificationSubscriberHook_Activate_NoPool_ReturnsError(t *testing.T) {
 	hook, multiSub, _ := newTestNotificationHookEnv(t)
 
+	// OnRegister is a no-op for activation so it should not error.
 	ctx := regCtx("ws-no-pool", "/tmp/ws")
-	err := hook.OnRegister(ctx)
-	if err == nil {
-		t.Fatal("expected error when no pool registered, got nil")
+	if err := hook.OnRegister(ctx); err != nil {
+		t.Fatalf("OnRegister returned unexpected error: %v", err)
 	}
 
-	// Verify subscriber was NOT added.
+	// Activate should fail because no pool is registered for this workspace.
+	if err := hook.Activate("ws-no-pool"); err == nil {
+		t.Fatal("expected error from Activate when no pool registered, got nil")
+	}
+
 	ids := multiSub.WorkspaceIDs()
 	for _, id := range ids {
 		if id == "ws-no-pool" {
-			t.Error("workspace should not appear in WorkspaceIDs after failed register")
+			t.Error("workspace should not appear in WorkspaceIDs after failed activate")
 		}
 	}
 }
 
-func TestNotificationSubscriberHook_OnRegister_ReplacesExisting(t *testing.T) {
+func TestNotificationSubscriberHook_Activate_ReplacesExisting(t *testing.T) {
 	hook, multiSub, mp := newTestNotificationHookEnv(t)
 	registerSafePool(t, mp, "ws-1")
 
-	// Register twice.
-	ctx1 := regCtx("ws-1", "/tmp/ws1")
-	if err := hook.OnRegister(ctx1); err != nil {
-		t.Fatalf("first OnRegister: %v", err)
+	// Activate twice.
+	if err := hook.Activate("ws-1"); err != nil {
+		t.Fatalf("first Activate: %v", err)
 	}
-
-	ctx2 := regCtx("ws-1", "/tmp/ws1")
-	if err := hook.OnRegister(ctx2); err != nil {
-		t.Fatalf("second OnRegister: %v", err)
+	if err := hook.Activate("ws-1"); err != nil {
+		t.Fatalf("second Activate: %v", err)
 	}
 
 	// Verify only one entry (not duplicated).
@@ -139,6 +148,9 @@ func TestNotificationSubscriberHook_OnDeregister_StopsSubscriber(t *testing.T) {
 	ctx := regCtx("ws-1", "/tmp/ws1")
 	if err := hook.OnRegister(ctx); err != nil {
 		t.Fatalf("OnRegister: %v", err)
+	}
+	if err := hook.Activate("ws-1"); err != nil {
+		t.Fatalf("Activate: %v", err)
 	}
 
 	hook.OnDeregister(deregCtx("ws-1"))
@@ -164,6 +176,9 @@ func TestNotificationSubscriberHook_OnRollback_SameAsDeregister(t *testing.T) {
 	ctx := regCtx("ws-1", "/tmp/ws1")
 	if err := hook.OnRegister(ctx); err != nil {
 		t.Fatalf("OnRegister: %v", err)
+	}
+	if err := hook.Activate("ws-1"); err != nil {
+		t.Fatalf("Activate: %v", err)
 	}
 
 	hook.OnRollback(deregCtx("ws-1"))
@@ -244,7 +259,13 @@ func TestNotificationSubscriberHook_IntegrationWithCoordinatorRegistry(t *testin
 		t.Fatalf("Register: %v", err)
 	}
 
-	// Subscriber should be active.
+	// Register defers subscriber activation; explicitly activate.
+	if ids := multiSub.WorkspaceIDs(); len(ids) != 0 {
+		t.Fatalf("expected 0 subscriber IDs before ActivateSubscriber, got %v", ids)
+	}
+	if err := registry.ActivateSubscriber("ws-1"); err != nil {
+		t.Fatalf("ActivateSubscriber: %v", err)
+	}
 	ids := multiSub.WorkspaceIDs()
 	if len(ids) != 1 || ids[0] != "ws-1" {
 		t.Errorf("WorkspaceIDs() = %v, want [ws-1]", ids)

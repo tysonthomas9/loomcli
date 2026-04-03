@@ -39,18 +39,30 @@ func (h *NotificationSubscriberHook) Name() string { return "notification-subscr
 // push but does not prevent the workspace from being usable.
 func (h *NotificationSubscriberHook) Critical() bool { return false }
 
-// OnRegister creates and starts a DaemonSubscriber for the workspace by
-// delegating to MultiWorkspaceSubscriber.AddWorkspace. Provides the
-// multi-subscriber to the resource bag for downstream hooks.
+// OnRegister provides the MultiWorkspaceSubscriber to the resource bag for
+// downstream hooks but does NOT start the per-workspace subscriber — call
+// Activate after the daemon is confirmed reachable to avoid priming the
+// circuit breaker with connection failures during startup.
 func (h *NotificationSubscriberHook) OnRegister(ctx *coordinator.RegistrationContext) error {
-	id := ctx.WorkspaceID
-
-	if err := h.multiSub.AddWorkspace(id); err != nil {
-		return fmt.Errorf("add workspace subscriber %q: %w", id, err)
-	}
-
 	ctx.Provide(coordinator.ResourceKeySubscriber, h.multiSub)
-	h.logger.Info("registered notification subscriber for workspace", "workspace", id)
+	h.logger.Debug("notification subscriber hook registered for workspace (deferred)", "workspace", ctx.WorkspaceID)
+	return nil
+}
+
+// Activate starts the SSE subscriber for a workspace whose pool is already
+// registered. Call this after the daemon is confirmed reachable. Safe to call
+// multiple times for the same workspace (AddWorkspace replaces the existing
+// subscriber).
+func (h *NotificationSubscriberHook) Activate(wsID string) error {
+	if wsID == "" {
+		return fmt.Errorf("activate notification subscriber: empty workspace id")
+	}
+	if err := h.multiSub.AddWorkspace(wsID); err != nil {
+		h.logger.Warn("failed to activate notification subscriber for workspace",
+			"workspace", wsID, "err", err)
+		return fmt.Errorf("add workspace subscriber %q: %w", wsID, err)
+	}
+	h.logger.Info("notification subscriber activated for workspace", "workspace", wsID)
 	return nil
 }
 

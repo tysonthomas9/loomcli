@@ -49,6 +49,9 @@ func wrapWorkspaceCreateFn(
 			logger.Warn("workspace created but runtime registration failed",
 				"workspace", req.Name, "workspace_id", wsID, "err", err)
 			service.AddCreateWarning(ctx, "Workspace created but runtime registration failed — some features may be unavailable until restart")
+		} else {
+			// Daemon is started during creation, so activate subscriber immediately.
+			_ = registry.ActivateSubscriber(wsID)
 		}
 
 		return result, nil

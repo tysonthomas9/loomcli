@@ -268,7 +268,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	app.registry = appinfra.NewWorkspaceRegistry(config.Logger)
 	cleanups = append(cleanups, func() { _ = app.registry.Close() })
 
-	beadsPoolHook := appinfra.RegisterHooks(app.registry, appinfra.HookConfig{
+	registeredHooks := appinfra.RegisterHooks(app.registry, appinfra.HookConfig{
 		MultiPool: app.multiPool,
 		PoolSize:  config.PoolSize,
 		MultiSub:  app.multiSub,
@@ -283,7 +283,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 
 	// Register the initial workspace.
 	if app.pool != nil {
-		appinfra.SetPrebuiltPool(beadsPoolHook, app.initialWorkspaceID, app.pool)
+		appinfra.SetPrebuiltPool(registeredHooks.BeadsPool, app.initialWorkspaceID, app.pool)
 		var initialWSPath string
 		if config.WorkspaceListFn != nil {
 			if wsMap, listErr := config.WorkspaceListFn(); listErr == nil {
@@ -297,12 +297,24 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 		}
 		if err := app.registry.Register(app.initialWorkspaceID, initialWSPath); err != nil {
 			logger.Warn("failed to register initial workspace", "err", err)
+		} else {
+			// Daemon was confirmed running above, activate subscriber immediately.
+			_ = app.registry.ActivateSubscriber(app.initialWorkspaceID)
 		}
 		app.getMutationsSince = appstores.GetMutationsSinceFn(app.multiSub)
 	}
 
-	// Reconcile all config workspaces.
+	// Reconcile all config workspaces. Subscribers for secondary workspaces are
+	// deferred — they activate only after DaemonStartupFn confirms the daemon.
 	appinfra.ReconcileConfigWorkspaces(config.WorkspaceListFn, app.initialWorkspaceID, app.pool != nil, app.registry, config.Logger)
+
+	// Deferred subscriber activation: start daemons for secondary workspaces,
+	// activate SSE subscriber only after each daemon is confirmed reachable.
+	if config.DaemonStartupFn != nil {
+		go config.DaemonStartupFn(ctx, func(wsID string) {
+			_ = app.registry.ActivateSubscriber(wsID)
+		})
+	}
 
 	// Build fleet registration config.
 	if config.FleetAPIKey != "" && app.fleetRegistry != nil {

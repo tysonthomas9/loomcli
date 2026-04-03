@@ -99,19 +99,28 @@ type HookConfig struct {
 	Logger    *slog.Logger
 }
 
-// RegisterHooks attaches lifecycle hooks to a workspace registry. Returns the
-// beads pool hook for pre-built pool injection (nil in fleet mode).
-func RegisterHooks(registry *WorkspaceRegistry, cfg HookConfig) *hooks.BeadsPoolHook {
+// RegisteredHooks returns references to hooks that require post-registration
+// operations (pre-built pool injection, deferred subscriber activation). Either
+// field may be nil (e.g., in fleet mode).
+type RegisteredHooks struct {
+	BeadsPool    *hooks.BeadsPoolHook
+	Notification *hooks.NotificationSubscriberHook
+}
+
+// RegisterHooks attaches lifecycle hooks to a workspace registry and returns
+// the hook references needed for pre-built pool injection and deferred
+// subscriber activation.
+func RegisterHooks(registry *WorkspaceRegistry, cfg HookConfig) RegisteredHooks {
 	if cfg.FleetMode {
 		cfg.Logger.Info("beads pool and notification subscriber suppressed (fleet mode)", "component", "fleet_mode")
 	}
 
-	var beadsPoolHook *hooks.BeadsPoolHook
+	var registered RegisteredHooks
 	if !cfg.FleetMode && cfg.MultiSub != nil {
-		beadsPoolHook = hooks.NewBeadsPoolHook(cfg.MultiPool, cfg.PoolSize, cfg.Logger)
-		notifHook := hooks.NewNotificationSubscriberHook(cfg.MultiSub, cfg.Logger)
-		_ = registry.AddHook(beadsPoolHook)
-		_ = registry.AddHook(notifHook)
+		registered.BeadsPool = hooks.NewBeadsPoolHook(cfg.MultiPool, cfg.PoolSize, cfg.Logger)
+		registered.Notification = hooks.NewNotificationSubscriberHook(cfg.MultiSub, cfg.Logger)
+		_ = registry.AddHook(registered.BeadsPool)
+		_ = registry.AddHook(registered.Notification)
 	}
 
 	if cfg.TermMgr != nil {
@@ -124,7 +133,7 @@ func RegisterHooks(registry *WorkspaceRegistry, cfg HookConfig) *hooks.BeadsPool
 		_ = registry.AddHook(hooks.NewFleetBackendHook(cfg.FleetURL, cfg.FleetWS, cfg.FleetKey, cfg.Logger))
 	}
 
-	return beadsPoolHook
+	return registered
 }
 
 // SetPrebuiltPool sets a pre-built pool on a beads pool hook for the initial workspace.

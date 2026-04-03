@@ -224,6 +224,35 @@ func (r *WorkspaceRegistry) Registered(id string) bool {
 	return ok
 }
 
+// subscriberActivator is implemented by hooks that support deferred per-workspace
+// subscriber activation (e.g., the notification subscriber hook).
+type subscriberActivator interface {
+	Activate(wsID string) error
+}
+
+// ActivateSubscriber activates the deferred SSE subscriber for a registered
+// workspace by delegating to any hook that implements subscriberActivator
+// (typically the notification subscriber hook). Returns nil if no activator
+// hook is present — activation is best-effort.
+func (r *WorkspaceRegistry) ActivateSubscriber(id string) error {
+	if id == "" {
+		return ErrEmptyWorkspaceID
+	}
+	r.mu.RLock()
+	hooks := append([]LifecycleHook(nil), r.hooks...)
+	closed := r.closed
+	r.mu.RUnlock()
+	if closed {
+		return ErrRegistryClosed
+	}
+	for _, h := range hooks {
+		if activator, ok := h.(subscriberActivator); ok {
+			return activator.Activate(id)
+		}
+	}
+	return nil
+}
+
 // WorkspaceIDs returns the IDs of all currently registered workspaces.
 func (r *WorkspaceRegistry) WorkspaceIDs() []string {
 	r.mu.RLock()

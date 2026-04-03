@@ -15,6 +15,8 @@ func EnsureProjectRegistered() {
 
 // EnsureDaemonsForAllWorkspaces auto-starts bd daemons for every configured
 // workspace (other than the CWD, which is managed by the main serve loop).
-func EnsureDaemonsForAllWorkspaces(ctx context.Context) {
-	workspace.EnsureDaemonsForAllWorkspaces(cli.GetDeps(nil), ctx)
+// When onReady is non-nil, it is invoked with the workspace UUID after each
+// daemon is confirmed reachable.
+func EnsureDaemonsForAllWorkspaces(ctx context.Context, onReady func(wsID string)) {
+	workspace.EnsureDaemonsForAllWorkspaces(cli.GetDeps(nil), ctx, onReady)
 }

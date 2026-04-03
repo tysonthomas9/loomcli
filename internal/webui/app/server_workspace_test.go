@@ -350,6 +350,7 @@ func TestWrapWorkspaceDeleteFn_Success(t *testing.T) {
 	if err := registry.Register(wsID, wsPath); err != nil {
 		t.Fatalf("Register returned error: %v", err)
 	}
+	_ = registry.ActivateSubscriber(wsID)
 
 	// Sanity check: workspace is registered.
 	if multiPool.PoolForWorkspace(wsID) == nil {
@@ -407,6 +408,7 @@ func TestWrapWorkspaceDeleteFn_InnerFailSkipsCleanup(t *testing.T) {
 	if err := registry.Register(wsID, wsPath); err != nil {
 		t.Fatalf("Register returned error: %v", err)
 	}
+	_ = registry.ActivateSubscriber(wsID)
 
 	deleteErr := fmt.Errorf("permission denied")
 	innerDelete := func(name string) error {
@@ -467,6 +469,7 @@ func TestWrapWorkspaceDeleteFn_NilFleetRegistry(t *testing.T) {
 	if err := registry.Register(wsID, wsPath); err != nil {
 		t.Fatalf("Register returned error: %v", err)
 	}
+	_ = registry.ActivateSubscriber(wsID)
 
 	innerDelete := func(name string) error {
 		return nil
@@ -503,6 +506,7 @@ func TestWrapWorkspaceDeleteFn_UUIDResolutionFails(t *testing.T) {
 	if err := registry.Register(wsID, wsPath); err != nil {
 		t.Fatalf("Register returned error: %v", err)
 	}
+	_ = registry.ActivateSubscriber(wsID)
 
 	var innerCalled bool
 	innerDelete := func(name string) error {
@@ -544,6 +548,7 @@ func TestWrapWorkspaceDeleteFn_NilResolveID(t *testing.T) {
 	if err := registry.Register(wsID, wsPath); err != nil {
 		t.Fatalf("Register returned error: %v", err)
 	}
+	_ = registry.ActivateSubscriber(wsID)
 
 	var innerCalled bool
 	innerDelete := func(name string) error {
@@ -580,6 +585,7 @@ func TestWrapWorkspaceDeleteFn_ResolveIDEmptyString(t *testing.T) {
 	if err := registry.Register(wsID, wsPath); err != nil {
 		t.Fatalf("Register returned error: %v", err)
 	}
+	_ = registry.ActivateSubscriber(wsID)
 
 	var innerCalled bool
 	innerDelete := func(name string) error {
@@ -620,6 +626,7 @@ func TestWrapWorkspaceDeleteFn_SkipsCleanupOnResolutionFailure(t *testing.T) {
 	if err := registry.Register(wsID, wsPath); err != nil {
 		t.Fatalf("Register returned error: %v", err)
 	}
+	_ = registry.ActivateSubscriber(wsID)
 
 	var innerCalledWith string
 	innerDelete := func(name string) error {
@@ -667,6 +674,7 @@ func TestWrapWorkspaceDeleteFn_UUIDResolvedBeforeDelete(t *testing.T) {
 	if err := registry.Register(wsID, wsPath); err != nil {
 		t.Fatalf("Register returned error: %v", err)
 	}
+	_ = registry.ActivateSubscriber(wsID)
 
 	// Track call ordering with a monotonic counter.
 	var seq atomic.Int64

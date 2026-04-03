@@ -15,7 +15,9 @@ import (
 )
 
 // DefaultDaemonStartupTimeout is the fallback timeout for waiting for the daemon to become ready.
-const DefaultDaemonStartupTimeout = 30 * time.Second
+// Set to 120s because secondary workspaces start async (no HTTP request waiting)
+// and large repos can take >30s for daemon initialization.
+const DefaultDaemonStartupTimeout = 120 * time.Second
 
 // agentNamePool is the list of fun agent names to pick from when seeding loom.yaml.
 var agentNamePool = []string{
@@ -216,7 +218,11 @@ func EnsureCurrentProjectRegistered() {
 // that have a .beads/ directory. Runs staggered (200ms between each) to avoid
 // thundering-herd on system resources. Skips the CWD workspace (already started
 // by EnsureIssueBackendRunning in serve.go). Best-effort: errors are logged, not fatal.
-func EnsureDaemonsForAllWorkspaces(deps *cli.Deps, ctx context.Context) {
+//
+// When onReady is non-nil, it is called with the workspace UUID after each
+// daemon is confirmed running. This is used to defer SSE subscriber activation
+// until the daemon is reachable, preventing circuit breaker trips during startup.
+func EnsureDaemonsForAllWorkspaces(deps *cli.Deps, ctx context.Context, onReady func(wsID string)) {
 	cwd, _ := os.Getwd()
 
 	cfg, err := config.LoadConfig()
@@ -246,6 +252,10 @@ func EnsureDaemonsForAllWorkspaces(deps *cli.Deps, ctx context.Context) {
 		if err := EnsureDaemonForWorkspace(deps, ctx, ws.Path, timeout); err != nil {
 			slog.Warn("failed to auto-start daemon for workspace",
 				"workspace", name, "path", ws.Path, "err", err)
+			continue
+		}
+		if onReady != nil && ws.ID != "" {
+			onReady(ws.ID)
 		}
 	}
 }
