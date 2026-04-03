@@ -35,7 +35,7 @@ var geminiNonInteractiveInvoker func(workDir, prompt, agentName string, shutdown
 // buildGeminiInteractiveCmd constructs the exec.Cmd for interactive Gemini invocation.
 // Extracted for testability — callers can inspect the returned cmd without execution.
 func buildGeminiInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
-	cmd := exec.Command("gemini", "--approval-mode=yolo", prompt)
+	cmd := exec.Command("gemini", "--approval-mode=yolo", prompt) //nolint:gosec // G204: prompt is from the CLI operator, not untrusted input
 	cmd.Dir = workDir
 	env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 	if agentName != "" {
@@ -55,7 +55,7 @@ func defaultGeminiInvoker(workDir, prompt, agentName string) error {
 		fmt.Println("Launching Gemini agent (non-interactive, no TTY)...")
 		fmt.Println("")
 
-		cmd := exec.Command("gemini", "--approval-mode=yolo", "-p", prompt)
+		cmd := exec.Command("gemini", "--approval-mode=yolo", "-p", prompt) //nolint:gosec // G204: prompt is from the CLI operator, not untrusted input
 		cmd.Dir = workDir
 		env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 		if agentName != "" {
@@ -76,7 +76,7 @@ func defaultGeminiInvoker(workDir, prompt, agentName string) error {
 }
 
 func defaultGeminiNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
-	cmd := exec.Command("gemini", "--approval-mode=yolo", "-p", prompt, "-o", "stream-json")
+	cmd := exec.Command("gemini", "--approval-mode=yolo", "-p", prompt, "-o", "stream-json") //nolint:gosec // G204: prompt is from the CLI operator, not untrusted input
 	cmd.Dir = workDir
 	env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 	if agentName != "" {
