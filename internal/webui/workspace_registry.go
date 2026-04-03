@@ -1,6 +1,7 @@
 package webui
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"sync"
@@ -165,6 +166,24 @@ func (r *WorkspaceRegistry) ActivateSubscriber(id string) error {
 	}
 	r.logger.Info("subscriber activated for workspace", "workspace", id)
 	return nil
+}
+
+// PoolConnectable tests if the daemon pool for a workspace can establish a connection.
+// Returns true if a connection succeeds, false otherwise. Used to defer subscriber
+// activation until the daemon is actually reachable.
+func (r *WorkspaceRegistry) PoolConnectable(id string) bool {
+	pool := r.multiPool.PoolForWorkspace(id)
+	if pool == nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	client, err := pool.Get(ctx)
+	if err != nil {
+		return false
+	}
+	pool.Put(client)
+	return true
 }
 
 // Deregister removes the pool and subscriber for the workspace. No-op if the
