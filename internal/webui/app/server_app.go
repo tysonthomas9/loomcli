@@ -308,9 +308,9 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	// activate lazily via the workspace middleware on the first API request.
 	appinfra.ReconcileConfigWorkspaces(config.WorkspaceListFn, app.initialWorkspaceID, app.pool != nil, app.registry, config.Logger)
 
-	// Start daemons for secondary workspaces (subscribers activate lazily via middleware).
 	if config.DaemonStartupFn != nil {
-		go config.DaemonStartupFn(ctx, nil)
+		onReady := func(wsID string) { _ = app.registry.ActivateSubscriber(wsID) }
+		go config.DaemonStartupFn(ctx, onReady)
 	}
 
 	// Build fleet registration config.
