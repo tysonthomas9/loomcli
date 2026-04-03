@@ -236,13 +236,12 @@ func TestWrapWorkspaceCreateFn_ResultWithID_RegistersByUUID(t *testing.T) {
 		t.Error("workspace should NOT be registered under name key")
 	}
 
-	// Verify subscriber registered.
+	// Subscriber is activated asynchronously after daemon becomes reachable,
+	// not immediately at creation time. Verify pool is registered but
+	// subscriber activation is deferred.
 	subIDs := multiSub.WorkspaceIDs()
-	if len(subIDs) != 1 {
-		t.Fatalf("expected 1 subscriber, got %d: %v", len(subIDs), subIDs)
-	}
-	if subIDs[0] != wsUUID {
-		t.Errorf("expected subscriber keyed by UUID %q, got %q", wsUUID, subIDs[0])
+	if len(subIDs) != 0 {
+		t.Errorf("expected 0 subscribers immediately after create (deferred activation), got %d: %v", len(subIDs), subIDs)
 	}
 }
 

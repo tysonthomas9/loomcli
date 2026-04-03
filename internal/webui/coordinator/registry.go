@@ -266,6 +266,44 @@ func (r *WorkspaceRegistry) ActivateSubscriber(id string) error {
 	return firstErr
 }
 
+// poolConnector is implemented by hooks that can test daemon pool connectivity
+// for a workspace (typically the beads pool hook).
+type poolConnector interface {
+	PoolConnectable(wsID string) bool
+}
+
+// PoolConnectable reports whether the daemon pool for a workspace can currently
+// establish a connection. Used to defer subscriber activation until the daemon
+// is actually reachable (daemons start async after workspace creation).
+// Returns false if the workspace is not registered, the registry is closed, or
+// no connector hook is present.
+func (r *WorkspaceRegistry) PoolConnectable(id string) bool {
+	if id == "" {
+		return false
+	}
+	r.mu.RLock()
+	if r.closed {
+		r.mu.RUnlock()
+		return false
+	}
+	if _, ok := r.active[id]; !ok {
+		r.mu.RUnlock()
+		return false
+	}
+	hooks := append([]LifecycleHook(nil), r.hooks...)
+	r.mu.RUnlock()
+	for _, h := range hooks {
+		connector, ok := h.(poolConnector)
+		if !ok {
+			continue
+		}
+		if connector.PoolConnectable(id) {
+			return true
+		}
+	}
+	return false
+}
+
 // WorkspaceIDs returns the IDs of all currently registered workspaces.
 func (r *WorkspaceRegistry) WorkspaceIDs() []string {
 	r.mu.RLock()

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui"
@@ -50,8 +51,19 @@ func wrapWorkspaceCreateFn(
 				"workspace", req.Name, "workspace_id", wsID, "err", err)
 			service.AddCreateWarning(ctx, "Workspace created but runtime registration failed — some features may be unavailable until restart")
 		} else {
-			// Daemon is started during creation, so activate subscriber immediately.
-			_ = registry.ActivateSubscriber(wsID)
+			// Don't activate subscriber yet — daemon starts async after this
+			// function returns. Poll for daemon readiness, then activate.
+			go func() {
+				for range 150 { // 150 * 2s = 5 min max
+					time.Sleep(2 * time.Second)
+					if registry.PoolConnectable(wsID) {
+						_ = registry.ActivateSubscriber(wsID)
+						return
+					}
+				}
+				logger.Warn("timed out waiting for daemon to activate subscriber",
+					"workspace", wsID)
+			}()
 		}
 
 		return result, nil
