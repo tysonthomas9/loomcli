@@ -65,4 +65,5 @@ export * from "./WorkspaceBreadcrumb";
 export * from "./WorkspaceSwitcher";
 export * from "./WorkspaceTree";
 export * from "./DaemonUnavailableOverlay";
+export * from "./DaemonStatusBadge";
 export * from "./KeyboardCheatsheet";

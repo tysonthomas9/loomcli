@@ -262,9 +262,10 @@ func runServe(cmd *cobra.Command, args []string) {
 		if !serveAuth {
 			log.Printf("WebUI API authentication is disabled (enable with --auth)")
 		}
-		// Register the current project as a workspace in the config so it
-		// appears in the sidebar alongside workspaces created via the UI.
 		ensureCurrentProjectRegistered()
+		if !serveNoDaemon {
+			go ensureDaemonsForAllWorkspaces(ctx) // staggered, async, best-effort
+		}
 		go func() {
 			gitOps := NewGitOps()
 			// Initialize session audit trail store (best-effort; nil disables endpoints).

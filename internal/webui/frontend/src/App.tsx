@@ -31,7 +31,7 @@ import {
   ErrorBoundary,
   ConnectionStatus,
   StaleDataBanner,
-  DaemonUnavailableOverlay,
+  DaemonStatusBadge,
   ToastContainer,
   FilterBar,
   MoreFiltersMenu,
@@ -938,6 +938,13 @@ function App() {
 
   const headerActions = (
     <div className={styles.headerActions}>
+      <DaemonStatusBadge
+        isDaemonAvailable={isDaemonAvailable}
+        mode={connectionMode}
+        retryCountdown={retryCountdown}
+        lastError={lastError}
+        onRetry={daemonRetryNow}
+      />
       <ThemeToggle theme={theme} onToggle={toggleTheme} />
       <ConnectionStatus
         state={connectionState}
@@ -1014,15 +1021,6 @@ function App() {
             )}
           </div>
         </AppLayout>
-        {!isDaemonAvailable && (
-          <DaemonUnavailableOverlay
-            mode={connectionMode}
-            retryCountdown={retryCountdown}
-            lastError={lastError}
-            onRetry={daemonRetryNow}
-            onSettingsClick={() => setActiveView("settings")}
-          />
-        )}
       </>
     );
   }
@@ -1062,15 +1060,6 @@ function App() {
             onRetry={refetch}
           />
         </AppLayout>
-        {!isDaemonAvailable && (
-          <DaemonUnavailableOverlay
-            mode={connectionMode}
-            retryCountdown={retryCountdown}
-            lastError={lastError}
-            onRetry={daemonRetryNow}
-            onSettingsClick={() => setActiveView("settings")}
-          />
-        )}
       </>
     );
   }
@@ -1100,15 +1089,6 @@ function App() {
         >
           <EmptyWorkspaceBoard isMultiRepo={isMultiRepo} />
         </AppLayout>
-        {!isDaemonAvailable && (
-          <DaemonUnavailableOverlay
-            mode={connectionMode}
-            retryCountdown={retryCountdown}
-            lastError={lastError}
-            onRetry={daemonRetryNow}
-            onSettingsClick={() => setActiveView("settings")}
-          />
-        )}
       </>
     );
   }
@@ -1309,15 +1289,6 @@ function App() {
             recentNames={recentAssignees}
           />
         </AppLayout>
-        {!isDaemonAvailable && (
-          <DaemonUnavailableOverlay
-            mode={connectionMode}
-            retryCountdown={retryCountdown}
-            lastError={lastError}
-            onRetry={daemonRetryNow}
-            onSettingsClick={() => setActiveView("settings")}
-          />
-        )}
       </SearchTermProvider>
       <KeyboardCheatsheet />
       {isMultiRepo && (

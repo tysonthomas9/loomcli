@@ -88,8 +88,8 @@ func (r *WorkspaceRegistry) Register(id, path string) error {
 			"workspace", id, "socket", socketPath, "err", err)
 	} else {
 		breaker := circuitbreaker.NewBreaker("ws-"+shortBreakerName(id), circuitbreaker.Config{
-			FailureThreshold:  5,
-			OpenTimeout:       30 * time.Second,
+			FailureThreshold:  3,
+			OpenTimeout:       8 * time.Second,
 			HalfOpenMaxProbes: 1,
 			ShouldTrip:        daemon.DaemonShouldTrip,
 			OnStateChange: func(from, to circuitbreaker.State) {

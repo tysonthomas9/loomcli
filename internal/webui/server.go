@@ -139,8 +139,8 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	} else {
 		// Wrap pool with circuit breaker for resilience
 		breaker := circuitbreaker.NewBreaker("daemon", circuitbreaker.Config{
-			FailureThreshold:  5,
-			OpenTimeout:       30 * time.Second,
+			FailureThreshold:  3,
+			OpenTimeout:       8 * time.Second,
 			HalfOpenMaxProbes: 1,
 			ShouldTrip:        daemon.DaemonShouldTrip,
 			OnStateChange: func(from, to circuitbreaker.State) {

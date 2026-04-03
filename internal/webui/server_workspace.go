@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 )
@@ -73,10 +74,16 @@ func reconcileConfigWorkspaces(
 		slog.Warn("failed to load workspace list for startup reconciliation", "err", err)
 		return
 	}
+	first := true
 	for wsID, wsPath := range workspaces {
 		if initialRegistered && wsID == initialID {
 			continue
 		}
+		// Stagger pool creation to avoid thundering-herd on daemon sockets.
+		if !first {
+			time.Sleep(200 * time.Millisecond)
+		}
+		first = false
 		_ = registry.Register(wsID, wsPath)
 		if fleetRegistry != nil {
 			if err := fleetRegistry.Register(wsID); err != nil {
