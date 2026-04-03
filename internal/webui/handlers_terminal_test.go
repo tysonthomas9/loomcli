@@ -1467,7 +1467,7 @@ func TestHandleTerminalRestart_Success(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "loom.yaml"), []byte("backend: codex\n"), 0644)
 
 	pool := newMockConfigPool(dir)
-	handler := handleTerminalRestartWithPool(manager, pool, nil)
+	handler := handleTerminalRestart(NewTerminalService(manager, nil, pool, nil, nil, nil, nil), nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/restart?session=test-session", nil)
 	rec := httptest.NewRecorder()
@@ -1511,7 +1511,7 @@ func TestHandleTerminalRestart_DefaultBackend(t *testing.T) {
 	// No loom.yaml — loadProjectFile returns empty projectFile with Backend=""
 
 	pool := newMockConfigPool(dir)
-	handler := handleTerminalRestartWithPool(manager, pool, nil)
+	handler := handleTerminalRestart(NewTerminalService(manager, nil, pool, nil, nil, nil, nil), nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/restart?session=test-session", nil)
 	rec := httptest.NewRecorder()
@@ -1551,7 +1551,7 @@ func TestHandleTerminalRestart_InvalidSession(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	handler := handleTerminalRestartWithPool(manager, nil, nil)
+	handler := handleTerminalRestart(NewTerminalService(manager, nil, nil, nil, nil, nil, nil), nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/restart?session=bad%2Fsession", nil)
 	rec := httptest.NewRecorder()
@@ -1586,7 +1586,7 @@ func TestHandleTerminalRestart_MissingSession(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	handler := handleTerminalRestartWithPool(manager, nil, nil)
+	handler := handleTerminalRestart(NewTerminalService(manager, nil, nil, nil, nil, nil, nil), nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/restart", nil)
 	rec := httptest.NewRecorder()
@@ -1604,14 +1604,19 @@ func TestHandleTerminalRestart_MissingSession(t *testing.T) {
 	if resp["success"] != false {
 		t.Error("expected success to be false")
 	}
-	if resp["error"] != "missing session parameter" {
-		t.Errorf("expected error %q, got %q", "missing session parameter", resp["error"])
+	if resp["error"] != "invalid session name" {
+		t.Errorf("expected error %q, got %q", "invalid session name", resp["error"])
 	}
 }
 
-// TestHandleTerminalRestart_MethodNotAllowed tests that a GET request to the
-// restart endpoint returns 405.
-func TestHandleTerminalRestart_MethodNotAllowed(t *testing.T) {
+// TestHandleTerminalRestart_MethodNotAllowed is removed — method routing is
+// handled by Go 1.22 ServeMux method patterns (e.g. "POST /api/.../restart").
+// The handler no longer includes an explicit method check.
+
+func TestHandleTerminalRestart_GetRequestSuccess(t *testing.T) {
+	// With service-based handlers, method enforcement is done by the mux,
+	// not the handler. A direct handler call with GET succeeds because the
+	// handler doesn't check the method. This test documents that behavior.
 	manager, err := NewTerminalManager("", "", 0)
 	if err == ErrTmuxNotFound {
 		t.Skip("tmux not installed, skipping test")
@@ -1621,26 +1626,15 @@ func TestHandleTerminalRestart_MethodNotAllowed(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	handler := handleTerminalRestartWithPool(manager, nil, nil)
+	handler := handleTerminalRestart(NewTerminalService(manager, nil, nil, nil, nil, nil, nil), nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/restart?session=test-session", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("expected 405, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	var resp map[string]interface{}
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("failed to parse response: %v", err)
-	}
-
-	if resp["success"] != false {
-		t.Error("expected success to be false")
-	}
-	if resp["error"] != "method not allowed" {
-		t.Errorf("expected error %q, got %q", "method not allowed", resp["error"])
+	// Handler processes the request (method enforcement is in the mux)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -1660,7 +1654,7 @@ func TestHandleTerminalRestart_ShellSession(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "loom.yaml"), []byte("backend: codex\n"), 0644)
 
 	pool := newMockConfigPool(dir)
-	handler := handleTerminalRestartWithPool(manager, pool, nil)
+	handler := handleTerminalRestart(NewTerminalService(manager, nil, pool, nil, nil, nil, nil), nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/restart?session=lead-shell-1", nil)
 	rec := httptest.NewRecorder()
@@ -1700,7 +1694,7 @@ func TestHandleTerminalRestart_ShellSession_NilPool(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	handler := handleTerminalRestartWithPool(manager, nil, nil)
+	handler := handleTerminalRestart(NewTerminalService(manager, nil, nil, nil, nil, nil, nil), nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/restart?session=lead-shell-3", nil)
 	rec := httptest.NewRecorder()

@@ -23,7 +23,7 @@ func TestHandleFileRead_EmptyFile(t *testing.T) {
 	}
 
 	ops := resolveToDir(dir)
-	handler := handleFileRead(ops)
+	handler := handleFileRead(NewFileService(ops))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/files?path=empty.txt", nil)
 	req.SetPathValue("name", "test-agent")
@@ -36,7 +36,7 @@ func TestHandleFileRead_EmptyFile(t *testing.T) {
 		t.Fatalf("status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
 	}
 
-	var resp fileReadResult
+	var resp FileReadResult
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode error: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestHandleFileRead_PathTraversalVariants(t *testing.T) {
 	}
 
 	ops := resolveToDir(dir)
-	handler := handleFileRead(ops)
+	handler := handleFileRead(NewFileService(ops))
 
 	// All traversal attempts should be rejected (403) or not found (404), never 200
 	paths := []string{
@@ -95,7 +95,7 @@ func TestHandleFileRead_DeniedPathOnFullPath(t *testing.T) {
 	}
 
 	ops := resolveToDir(dir)
-	handler := handleFileRead(ops)
+	handler := handleFileRead(NewFileService(ops))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/files?path=config/secrets.env", nil)
 	req.SetPathValue("name", "test-agent")
@@ -122,7 +122,7 @@ func TestHandleFileRead_UnreadableFile(t *testing.T) {
 	t.Cleanup(func() { os.Chmod(filePath, 0644) })
 
 	ops := resolveToDir(dir)
-	handler := handleFileRead(ops)
+	handler := handleFileRead(NewFileService(ops))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/files?path=noperm.txt", nil)
 	req.SetPathValue("name", "test-agent")
@@ -146,7 +146,7 @@ func TestHandleFileRead_BinaryContentWithNullByte(t *testing.T) {
 	}
 
 	ops := resolveToDir(dir)
-	handler := handleFileRead(ops)
+	handler := handleFileRead(NewFileService(ops))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/files?path=nullbyte.txt", nil)
 	req.SetPathValue("name", "test-agent")
@@ -159,7 +159,7 @@ func TestHandleFileRead_BinaryContentWithNullByte(t *testing.T) {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
 
-	var resp fileReadResult
+	var resp FileReadResult
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode error: %v", err)
 	}
@@ -491,7 +491,7 @@ func TestHandleFileRead_SymlinkFile(t *testing.T) {
 	}
 
 	ops := resolveToDir(dir)
-	handler := handleFileRead(ops)
+	handler := handleFileRead(NewFileService(ops))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/files?path=sym.txt", nil)
 	req.SetPathValue("name", "test-agent")
@@ -522,7 +522,7 @@ func TestHandleFileRead_SymlinkPointingOutsideWorktree(t *testing.T) {
 	}
 
 	ops := resolveToDir(dir)
-	handler := handleFileRead(ops)
+	handler := handleFileRead(NewFileService(ops))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/files?path=escape.txt", nil)
 	req.SetPathValue("name", "test-agent")
@@ -608,7 +608,7 @@ func TestHandleFileTree_NestedDirectories(t *testing.T) {
 	}
 
 	ops := resolveToDir(dir)
-	handler := handleFileTree(ops)
+	handler := handleFileTree(NewFileService(ops))
 
 	// List root
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/files/tree", nil)
@@ -620,7 +620,7 @@ func TestHandleFileTree_NestedDirectories(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("root: status = %d, want %d", w.Code, http.StatusOK)
 	}
-	var rootResp fileTreeResult
+	var rootResp FileTreeResult
 	if err := json.NewDecoder(w.Body).Decode(&rootResp); err != nil {
 		t.Fatalf("decode root: %v", err)
 	}
@@ -641,7 +641,7 @@ func TestHandleFileTree_NestedDirectories(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("a: status = %d, want %d", w.Code, http.StatusOK)
 	}
-	var aResp fileTreeResult
+	var aResp FileTreeResult
 	if err := json.NewDecoder(w.Body).Decode(&aResp); err != nil {
 		t.Fatalf("decode a: %v", err)
 	}
@@ -668,7 +668,7 @@ func TestHandleFileTree_NestedDirectories(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("a/b: status = %d, want %d", w.Code, http.StatusOK)
 	}
-	var bResp fileTreeResult
+	var bResp FileTreeResult
 	if err := json.NewDecoder(w.Body).Decode(&bResp); err != nil {
 		t.Fatalf("decode a/b: %v", err)
 	}
@@ -689,7 +689,7 @@ func TestHandleFileTree_NestedDirectories(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("a/b/c: status = %d, want %d", w.Code, http.StatusOK)
 	}
-	var cResp fileTreeResult
+	var cResp FileTreeResult
 	if err := json.NewDecoder(w.Body).Decode(&cResp); err != nil {
 		t.Fatalf("decode a/b/c: %v", err)
 	}
@@ -718,7 +718,7 @@ func TestHandleFileTree_NestedSymlinksSkipped(t *testing.T) {
 	}
 
 	ops := resolveToDir(dir)
-	handler := handleFileTree(ops)
+	handler := handleFileTree(NewFileService(ops))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/files/tree", nil)
 	req.SetPathValue("name", "test-agent")
@@ -730,7 +730,7 @@ func TestHandleFileTree_NestedSymlinksSkipped(t *testing.T) {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
 
-	var resp fileTreeResult
+	var resp FileTreeResult
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -758,7 +758,7 @@ func TestHandleFileTree_EmptyDirectory(t *testing.T) {
 	}
 
 	ops := resolveToDir(dir)
-	handler := handleFileTree(ops)
+	handler := handleFileTree(NewFileService(ops))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/files/tree?path=empty", nil)
 	req.SetPathValue("name", "test-agent")
@@ -770,7 +770,7 @@ func TestHandleFileTree_EmptyDirectory(t *testing.T) {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
 
-	var resp fileTreeResult
+	var resp FileTreeResult
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -795,7 +795,7 @@ func TestHandleFileTree_DirsSortedBeforeFiles(t *testing.T) {
 	}
 
 	ops := resolveToDir(dir)
-	handler := handleFileTree(ops)
+	handler := handleFileTree(NewFileService(ops))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/files/tree", nil)
 	req.SetPathValue("name", "test-agent")
@@ -807,7 +807,7 @@ func TestHandleFileTree_DirsSortedBeforeFiles(t *testing.T) {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
 
-	var resp fileTreeResult
+	var resp FileTreeResult
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -838,7 +838,7 @@ func TestHandleFileWrite_DeniedPathOnFullPath(t *testing.T) {
 	}
 
 	ops := resolveToDir(dir)
-	handler := handleFileWrite(ops)
+	handler := handleFileWrite(NewFileService(ops))
 
 	body := `{"content": "SECRET=yes"}`
 	req := httptest.NewRequest(http.MethodPut, "/api/agents/test-agent/files?path=config/.env.local", strings.NewReader(body))
@@ -865,7 +865,7 @@ func TestHandleFileWrite_SymlinkTarget(t *testing.T) {
 	}
 
 	ops := resolveToDir(dir)
-	handler := handleFileWrite(ops)
+	handler := handleFileWrite(NewFileService(ops))
 
 	body := `{"content": "hacked"}`
 	req := httptest.NewRequest(http.MethodPut, "/api/agents/test-agent/files?path=linked.txt", strings.NewReader(body))
@@ -888,7 +888,7 @@ func TestHandleFileWrite_SymlinkTarget(t *testing.T) {
 func TestHandleFileWrite_NonexistentDeepParent(t *testing.T) {
 	dir := t.TempDir()
 	ops := resolveToDir(dir)
-	handler := handleFileWrite(ops)
+	handler := handleFileWrite(NewFileService(ops))
 
 	body := `{"content": "data"}`
 	req := httptest.NewRequest(http.MethodPut, "/api/agents/test-agent/files?path=deep/nested/nonexistent/file.txt", strings.NewReader(body))
@@ -906,7 +906,7 @@ func TestHandleFileWrite_NonexistentDeepParent(t *testing.T) {
 func TestHandleFileWrite_EmptyContent(t *testing.T) {
 	dir := t.TempDir()
 	ops := resolveToDir(dir)
-	handler := handleFileWrite(ops)
+	handler := handleFileWrite(NewFileService(ops))
 
 	body := `{"content": ""}`
 	req := httptest.NewRequest(http.MethodPut, "/api/agents/test-agent/files?path=empty_write.txt", strings.NewReader(body))
@@ -931,7 +931,7 @@ func TestHandleFileWrite_EmptyContent(t *testing.T) {
 
 func TestHandleFileWrite_InvalidAgent(t *testing.T) {
 	ops := &mockFileOps{}
-	handler := handleFileWrite(ops)
+	handler := handleFileWrite(NewFileService(ops))
 
 	body := `{"content": "data"}`
 	req := httptest.NewRequest(http.MethodPut, "/api/agents/bad.agent/files?path=test.txt", strings.NewReader(body))
@@ -953,7 +953,7 @@ func TestHandleFileWrite_ParentIsFile(t *testing.T) {
 	}
 
 	ops := resolveToDir(dir)
-	handler := handleFileWrite(ops)
+	handler := handleFileWrite(NewFileService(ops))
 
 	body := `{"content": "data"}`
 	req := httptest.NewRequest(http.MethodPut, "/api/agents/test-agent/files?path=notadir/child.txt", strings.NewReader(body))

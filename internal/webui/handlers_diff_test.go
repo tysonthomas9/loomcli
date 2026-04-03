@@ -29,7 +29,7 @@ func TestDiffCommits_Success(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffCommits(ops).ServeHTTP(w, req)
+	handleDiffCommits(NewDiffService(ops, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -67,7 +67,7 @@ func TestDiffCommits_NoAgent(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffCommits(ops).ServeHTTP(w, req)
+	handleDiffCommits(NewDiffService(ops, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusNotFound)
@@ -85,7 +85,7 @@ func TestDiffCommits_MergeBaseError(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffCommits(ops).ServeHTTP(w, req)
+	handleDiffCommits(NewDiffService(ops, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusInternalServerError)
@@ -110,7 +110,7 @@ func TestDiffCommits_WithLimit(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffCommits(ops).ServeHTTP(w, req)
+	handleDiffCommits(NewDiffService(ops, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -134,7 +134,7 @@ func TestDiffCommits_EmptyResult(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffCommits(ops).ServeHTTP(w, req)
+	handleDiffCommits(NewDiffService(ops, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -175,7 +175,7 @@ func TestDiffFiles_Success(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFiles(ops).ServeHTTP(w, req)
+	handleDiffFiles(NewDiffService(ops, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -203,7 +203,7 @@ func TestDiffFiles_MissingTo(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFiles(ops).ServeHTTP(w, req)
+	handleDiffFiles(NewDiffService(ops, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
@@ -218,7 +218,7 @@ func TestDiffFiles_InvalidRef(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFiles(ops).ServeHTTP(w, req)
+	handleDiffFiles(NewDiffService(ops, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
@@ -241,7 +241,7 @@ func TestDiffFiles_DefaultFrom(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFiles(ops).ServeHTTP(w, req)
+	handleDiffFiles(NewDiffService(ops, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -265,7 +265,7 @@ func TestDiffFiles_ExplicitFrom(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFiles(ops).ServeHTTP(w, req)
+	handleDiffFiles(NewDiffService(ops, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -299,7 +299,7 @@ func TestDiffFile_Success(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFile(ops).ServeHTTP(w, req)
+	handleDiffFile(NewDiffService(ops, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -322,7 +322,7 @@ func TestDiffFile_MissingPath(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFile(ops).ServeHTTP(w, req)
+	handleDiffFile(NewDiffService(ops, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
@@ -337,7 +337,7 @@ func TestDiffFile_MissingTo(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFile(ops).ServeHTTP(w, req)
+	handleDiffFile(NewDiffService(ops, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
@@ -352,7 +352,7 @@ func TestDiffFile_PathTraversal(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFile(ops).ServeHTTP(w, req)
+	handleDiffFile(NewDiffService(ops, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
@@ -369,7 +369,7 @@ func TestDiffFile_DotPath(t *testing.T) {
 		req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 		w := httptest.NewRecorder()
 
-		handleDiffFile(ops).ServeHTTP(w, req)
+		handleDiffFile(NewDiffService(ops, nil)).ServeHTTP(w, req)
 
 		if w.Code != http.StatusBadRequest {
 			t.Errorf("path=%q: status = %d, want %d", p, w.Code, http.StatusBadRequest)
@@ -385,7 +385,7 @@ func TestDiffFile_AbsolutePath(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFile(ops).ServeHTTP(w, req)
+	handleDiffFile(NewDiffService(ops, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
@@ -408,7 +408,7 @@ func TestDiffFile_BinaryFile(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFile(ops).ServeHTTP(w, req)
+	handleDiffFile(NewDiffService(ops, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -443,7 +443,7 @@ func TestDiffFile_TooLarge(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFile(ops).ServeHTTP(w, req)
+	handleDiffFile(NewDiffService(ops, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -479,7 +479,7 @@ func TestDiffFiles_EmptyDiff(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFiles(ops).ServeHTTP(w, req)
+	handleDiffFiles(NewDiffService(ops, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -514,7 +514,7 @@ func TestDiffFiles_DiffFilesError(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFiles(ops).ServeHTTP(w, req)
+	handleDiffFiles(NewDiffService(ops, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusInternalServerError)
@@ -544,7 +544,7 @@ func TestDiffFiles_MergeBaseError(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFiles(ops).ServeHTTP(w, req)
+	handleDiffFiles(NewDiffService(ops, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusInternalServerError)
@@ -560,7 +560,7 @@ func TestDiffFiles_InvalidFromRef(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFiles(ops).ServeHTTP(w, req)
+	handleDiffFiles(NewDiffService(ops, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
@@ -580,7 +580,7 @@ func TestDiffFiles_NoAgent(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFiles(ops).ServeHTTP(w, req)
+	handleDiffFiles(NewDiffService(ops, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusNotFound)
@@ -609,7 +609,7 @@ func TestDiffFile_InvalidPathChars(t *testing.T) {
 			req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 			w := httptest.NewRecorder()
 
-			handleDiffFile(ops).ServeHTTP(w, req)
+			handleDiffFile(NewDiffService(ops, nil)).ServeHTTP(w, req)
 
 			if w.Code != http.StatusBadRequest {
 				t.Errorf("path=%q: status = %d, want %d", tt.path, w.Code, http.StatusBadRequest)
@@ -633,7 +633,7 @@ func TestDiffFile_DiffFilePatchError(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFile(ops).ServeHTTP(w, req)
+	handleDiffFile(NewDiffService(ops, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusInternalServerError)
@@ -660,7 +660,7 @@ func TestDiffFile_InvalidToRef(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFile(ops).ServeHTTP(w, req)
+	handleDiffFile(NewDiffService(ops, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
@@ -679,7 +679,7 @@ func TestDiffFile_MergeBaseError(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFile(ops).ServeHTTP(w, req)
+	handleDiffFile(NewDiffService(ops, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusInternalServerError)
@@ -707,7 +707,7 @@ func TestDiffFile_NoAgent(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFile(ops).ServeHTTP(w, req)
+	handleDiffFile(NewDiffService(ops, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusNotFound)
@@ -729,7 +729,7 @@ func TestDiffCommits_DiffCommitsError(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffCommits(ops).ServeHTTP(w, req)
+	handleDiffCommits(NewDiffService(ops, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusInternalServerError)
@@ -756,7 +756,7 @@ func TestDiffCommits_InvalidLimit(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffCommits(ops).ServeHTTP(w, req)
+	handleDiffCommits(NewDiffService(ops, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
@@ -777,7 +777,7 @@ func TestDiffCommits_ExplicitFrom(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffCommits(ops).ServeHTTP(w, req)
+	handleDiffCommits(NewDiffService(ops, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -796,116 +796,8 @@ func TestDiffCommits_InvalidFrom(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffCommits(ops).ServeHTTP(w, req)
+	handleDiffCommits(NewDiffService(ops, nil)).ServeHTTP(w, req)
 
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
-	}
-}
-
-// --- resolveMergeBaseDefault tests ---
-
-// TestResolveMergeBaseDefault_ExplicitFrom tests with a valid explicit from param.
-func TestResolveMergeBaseDefault_ExplicitFrom(t *testing.T) {
-	ops := resolveOK()
-	wt := testWorktree()
-
-	req := httptest.NewRequest(http.MethodGet, "/test?from=abc123", nil)
-	w := httptest.NewRecorder()
-
-	from, ok := resolveMergeBaseDefault(w, req, ops, wt)
-	if !ok {
-		t.Fatal("expected ok=true")
-	}
-	if from != "abc123" {
-		t.Fatalf("expected from=abc123, got %q", from)
-	}
-}
-
-// TestResolveMergeBaseDefault_InvalidFrom tests with an invalid from param.
-func TestResolveMergeBaseDefault_InvalidFrom(t *testing.T) {
-	ops := resolveOK()
-	wt := testWorktree()
-
-	req := httptest.NewRequest(http.MethodGet, "/test?from=abc..def", nil)
-	w := httptest.NewRecorder()
-
-	_, ok := resolveMergeBaseDefault(w, req, ops, wt)
-	if ok {
-		t.Fatal("expected ok=false for invalid from ref")
-	}
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
-	}
-}
-
-// TestResolveMergeBaseDefault_NoMergeBase tests when ResolveMergeBase returns an error.
-func TestResolveMergeBaseDefault_NoMergeBase(t *testing.T) {
-	ops := resolveOK()
-	ops.resolveMergeBaseFunc = func(_, _ string) (string, error) {
-		return "", errors.New("no merge base found")
-	}
-	wt := testWorktree()
-
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	w := httptest.NewRecorder()
-
-	_, ok := resolveMergeBaseDefault(w, req, ops, wt)
-	if ok {
-		t.Fatal("expected ok=false when merge base not found")
-	}
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want %d", w.Code, http.StatusInternalServerError)
-	}
-
-	var resp diffResponse
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode error: %v", err)
-	}
-	if resp.Success {
-		t.Fatal("expected success=false")
-	}
-	if resp.Error == "" {
-		t.Fatal("expected non-empty error message")
-	}
-}
-
-// TestResolveMergeBaseDefault_FallbackToMergeBase tests the default path that
-// calls ResolveMergeBase when no from param is provided.
-func TestResolveMergeBaseDefault_FallbackToMergeBase(t *testing.T) {
-	ops := resolveOK()
-	ops.resolveMergeBaseFunc = func(_, branch string) (string, error) {
-		if branch != "main" {
-			t.Errorf("expected default branch 'main', got %q", branch)
-		}
-		return "resolved-sha", nil
-	}
-	wt := testWorktree()
-
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	w := httptest.NewRecorder()
-
-	from, ok := resolveMergeBaseDefault(w, req, ops, wt)
-	if !ok {
-		t.Fatal("expected ok=true")
-	}
-	if from != "resolved-sha" {
-		t.Fatalf("expected from=resolved-sha, got %q", from)
-	}
-}
-
-// TestResolveMergeBaseDefault_FromWithTraversal tests that ".." in from ref is rejected.
-func TestResolveMergeBaseDefault_FromWithTraversal(t *testing.T) {
-	ops := resolveOK()
-	wt := testWorktree()
-
-	req := httptest.NewRequest(http.MethodGet, "/test?from=HEAD..main", nil)
-	w := httptest.NewRecorder()
-
-	_, ok := resolveMergeBaseDefault(w, req, ops, wt)
-	if ok {
-		t.Fatal("expected ok=false for from ref containing '..'")
-	}
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
 	}

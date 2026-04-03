@@ -47,6 +47,10 @@ type Server struct {
 	issueSvc     service.IssueService
 	agentSvc     AgentService
 	workspaceSvc service.WorkspaceService
+	termSvc      TerminalService // nil if termMgr is nil
+	diffSvc      DiffService     // nil if GitOps is nil
+	fileSvc      FileService     // nil if FileOps is nil
+	sessSvc      SessionService  // always constructed (stores may be nil internally)
 
 	// Real-time
 	hub               *realtime.Hub

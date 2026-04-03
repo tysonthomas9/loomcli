@@ -1,0 +1,29 @@
+package webui
+
+import "context"
+
+// DiffService defines business logic for git diff operations on agent worktrees.
+// Handlers call this interface and map returned errors to HTTP responses.
+type DiffService interface {
+	// DiffCommits returns commit history between from (merge-base if empty) and HEAD.
+	DiffCommits(ctx context.Context, wsID, agentName, from string, limit int) ([]DiffCommitResult, error)
+
+	// DiffFiles returns file-level diff summary between from and to refs.
+	DiffFiles(ctx context.Context, wsID, agentName, from, to string) ([]DiffFileResult, error)
+
+	// DiffFilePatch returns the patch for a specific file between two refs.
+	DiffFilePatch(ctx context.Context, wsID, agentName, from, to, filePath string) (*DiffFilePatchResult, error)
+
+	// GetIssueDiffStat returns diff statistics for an issue's assigned agent worktree.
+	GetIssueDiffStat(ctx context.Context, wsID, issueID string) (*IssueDiffStatResult, error)
+}
+
+// Compile-time check that diffServiceImpl satisfies DiffService.
+var _ DiffService = (*diffServiceImpl)(nil)
+
+// IssueDiffStatResult contains diff statistics for an issue's assigned agent worktree.
+type IssueDiffStatResult struct {
+	Branch  string
+	Added   int
+	Removed int
+}

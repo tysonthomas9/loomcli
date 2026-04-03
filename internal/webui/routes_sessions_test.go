@@ -27,6 +27,7 @@ func TestSessionRouteMigration_OldFlatRoutesReturn404(t *testing.T) {
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
 
 	app := &Server{multiPool: multiPool, config: ServerConfig{SessionsStore: sessStore}, wsExistsFn: wsExistsFn}
+	app.sessSvc = NewSessionService(sessStore, nil)
 	setupTestRoutes(t, app)
 
 	// Old flat routes that should have been removed — each must return 404.
@@ -71,6 +72,7 @@ func TestSessionRouteMigration_WorkspaceScopedRoutesRegistered(t *testing.T) {
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
 
 	app := &Server{multiPool: multiPool, config: ServerConfig{SessionsStore: sessStore}, wsExistsFn: wsExistsFn}
+	app.sessSvc = NewSessionService(sessStore, nil)
 	setupTestRoutes(t, app)
 
 	// New workspace-scoped routes that should be registered.
@@ -121,6 +123,7 @@ func TestSessionRouteMigration_UnknownWorkspaceReturns404(t *testing.T) {
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
 
 	app := &Server{multiPool: multiPool, config: ServerConfig{SessionsStore: sessStore}, wsExistsFn: wsExistsFn}
+	app.sessSvc = NewSessionService(sessStore, nil)
 	setupTestRoutes(t, app)
 
 	// Routes with a non-existent workspace should return 404 from WorkspaceMiddleware.
@@ -159,6 +162,7 @@ func TestSessionRouteMigration_WorkspaceScopedListReturnsJSON(t *testing.T) {
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
 
 	app := &Server{multiPool: multiPool, config: ServerConfig{SessionsStore: sessStore}, wsExistsFn: wsExistsFn}
+	app.sessSvc = NewSessionService(sessStore, nil)
 	setupTestRoutes(t, app)
 
 	// GET /api/workspaces/{ws}/tasks/{taskId}/sessions should return 200 with
@@ -207,6 +211,7 @@ func TestSessionRouteMigration_WorkspaceScopedSessionWithData(t *testing.T) {
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
 
 	app := &Server{multiPool: multiPool, config: ServerConfig{SessionsStore: sessStore}, wsExistsFn: wsExistsFn}
+	app.sessSvc = NewSessionService(sessStore, nil)
 	setupTestRoutes(t, app)
 
 	// GET session detail via workspace-scoped route.
@@ -244,6 +249,7 @@ func TestSessionRouteMigration_WorkspaceScopedDiffEndpoint(t *testing.T) {
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
 
 	app := &Server{multiPool: multiPool, config: ServerConfig{SessionsStore: sessStore}, wsExistsFn: wsExistsFn}
+	app.sessSvc = NewSessionService(sessStore, nil)
 	setupTestRoutes(t, app)
 
 	// GET diff via workspace-scoped route — createTestSession includes a DiffPatch.
@@ -288,6 +294,7 @@ func TestSessionRouteMigration_WorkspaceScopedTranscriptEndpoint(t *testing.T) {
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
 
 	app := &Server{multiPool: multiPool, config: ServerConfig{SessionsStore: sessStore}, wsExistsFn: wsExistsFn}
+	app.sessSvc = NewSessionService(sessStore, nil)
 	setupTestRoutes(t, app)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/tasks/bd-transrouted/sessions/"+sess.SessionID()+"/transcript", nil)

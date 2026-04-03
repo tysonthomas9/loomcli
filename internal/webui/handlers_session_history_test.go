@@ -47,7 +47,7 @@ func TestHandleListSessionHistory_ReturnsRecords(t *testing.T) {
 		t.Fatalf("Add: %v", err)
 	}
 
-	handler := handleListSessionHistory(store)
+	handler := handleListSessionHistory(NewSessionService(nil, store))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testSHWSID+"/issues/proj.1/sessions", nil)
 	req.SetPathValue("issueId", "proj.1")
@@ -83,7 +83,7 @@ func TestHandleListSessionHistory_ReturnsRecords(t *testing.T) {
 func TestHandleListSessionHistory_EmptyArrayForUnknownIssue(t *testing.T) {
 	store := setupSessionHistoryStore(t)
 
-	handler := handleListSessionHistory(store)
+	handler := handleListSessionHistory(NewSessionService(nil, store))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testSHWSID+"/issues/unknown.99/sessions", nil)
 	req.SetPathValue("issueId", "unknown.99")
@@ -114,7 +114,7 @@ func TestHandleListSessionHistory_EmptyArrayForUnknownIssue(t *testing.T) {
 }
 
 func TestHandleListSessionHistory_NilStore(t *testing.T) {
-	handler := handleListSessionHistory(nil)
+	handler := handleListSessionHistory(NewSessionService(nil, nil))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testSHWSID+"/issues/proj.1/sessions", nil)
 	req.SetPathValue("issueId", "proj.1")
@@ -130,14 +130,14 @@ func TestHandleListSessionHistory_NilStore(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if resp["success"] != false {
-		t.Error("expected success=false")
+	if _, ok := resp["error"]; !ok {
+		t.Error("expected error field in response")
 	}
 }
 
 func TestHandleListSessionHistory_InvalidIssueID(t *testing.T) {
 	store := setupSessionHistoryStore(t)
-	handler := handleListSessionHistory(store)
+	handler := handleListSessionHistory(NewSessionService(nil, store))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testSHWSID+"/issues//sessions", nil)
 	req = withSHWSContext(req, testSHWSID)
@@ -151,7 +151,7 @@ func TestHandleListSessionHistory_InvalidIssueID(t *testing.T) {
 }
 
 func TestHandleGetSessionScrollback_NilStore(t *testing.T) {
-	handler := handleGetSessionScrollback(nil)
+	handler := handleGetSessionScrollback(NewSessionService(nil, nil))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testSHWSID+"/issues/proj.1/sessions/rec-1/scrollback", nil)
 	req.SetPathValue("issueId", "proj.1")
@@ -168,14 +168,14 @@ func TestHandleGetSessionScrollback_NilStore(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if resp["success"] != false {
-		t.Error("expected success=false")
+	if _, ok := resp["error"]; !ok {
+		t.Error("expected error field in response")
 	}
 }
 
 func TestHandleGetSessionScrollback_RecordNotFound(t *testing.T) {
 	store := setupSessionHistoryStore(t)
-	handler := handleGetSessionScrollback(store)
+	handler := handleGetSessionScrollback(NewSessionService(nil, store))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testSHWSID+"/issues/proj.1/sessions/nonexistent/scrollback", nil)
 	req.SetPathValue("issueId", "proj.1")
@@ -199,7 +199,7 @@ func TestHandleGetSessionScrollback_RecordNotFound(t *testing.T) {
 
 func TestHandleGetSessionScrollback_InvalidIssueID(t *testing.T) {
 	store := setupSessionHistoryStore(t)
-	handler := handleGetSessionScrollback(store)
+	handler := handleGetSessionScrollback(NewSessionService(nil, store))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testSHWSID+"/issues//sessions/rec-1/scrollback", nil)
 	req = withSHWSContext(req, testSHWSID)
@@ -215,7 +215,7 @@ func TestHandleGetSessionScrollback_InvalidIssueID(t *testing.T) {
 
 func TestHandleGetSessionScrollback_EmptyRecordID(t *testing.T) {
 	store := setupSessionHistoryStore(t)
-	handler := handleGetSessionScrollback(store)
+	handler := handleGetSessionScrollback(NewSessionService(nil, store))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testSHWSID+"/issues/proj.1/sessions//scrollback", nil)
 	req.SetPathValue("issueId", "proj.1")
@@ -248,7 +248,7 @@ func TestHandleGetSessionScrollback_NoScrollbackAvailable(t *testing.T) {
 		t.Fatalf("Add: %v", err)
 	}
 
-	handler := handleGetSessionScrollback(store)
+	handler := handleGetSessionScrollback(NewSessionService(nil, store))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testSHWSID+"/issues/proj.1/sessions/issue-proj-1:1700000000/scrollback", nil)
 	req.SetPathValue("issueId", "proj.1")

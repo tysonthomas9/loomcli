@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/redis/go-redis/v9"
+
 	"github.com/tysonthomas9/loomcli/internal/circuitbreaker"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
@@ -398,6 +400,35 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 
 	// Generate and persist notify token for session change endpoint auth.
 	app.notifyToken, app.notifyTokenFile = generateNotifyToken(config.NotifyTokenDir)
+
+	// Initialize terminal service layer (requires termMgr, stores)
+	if app.termMgr != nil {
+		var configPool configConnectionGetter
+		if app.multiPool != nil {
+			configPool = &configPoolAdapter{pool: app.multiPool}
+		}
+		var rc *redis.Client
+		if app.tabMetaStore != nil {
+			rc = app.tabMetaStore.RedisClient()
+		}
+		app.termSvc = NewTerminalService(
+			app.termMgr, app.termAuth, configPool,
+			app.tabMetaStore, app.hub, app.sessionHistoryStore, rc,
+		)
+	}
+
+	// Initialize diff service layer (requires GitOps)
+	if config.GitOps != nil {
+		app.diffSvc = NewDiffService(config.GitOps, app.multiPool)
+	}
+
+	// Initialize file service layer (requires FileOps)
+	if config.FileOps != nil {
+		app.fileSvc = NewFileService(config.FileOps)
+	}
+
+	// Initialize session service layer (always constructed; stores may be nil internally)
+	app.sessSvc = NewSessionService(config.SessionsStore, app.sessionHistoryStore)
 
 	app.buildHandlers()
 

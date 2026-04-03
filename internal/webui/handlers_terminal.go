@@ -1,14 +1,11 @@
 package webui
 
 import (
-	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
-	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
@@ -45,28 +42,19 @@ func originHosts(origins []string) []string {
 	return hosts
 }
 
-// handleTerminalToken returns a handler that generates a one-time terminal auth token
-// for the given session. The caller must already be authenticated via the API key
-// middleware.
-func handleTerminalToken(auth *realtime.TerminalAuth) http.HandlerFunc {
+// handleTerminalToken returns a handler that generates a one-time terminal auth token.
+func handleTerminalToken(svc TerminalService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		session := r.URL.Query().Get("session")
-		if session == "" || !validTerminalSession.MatchString(session) {
-			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid session"})
-			return
-		}
 
-		// Extract user identity when available (OIDC mode).
-		// In open mode, UserIdentityFromContext returns false and userID stays empty.
 		var userID string
 		if identity, ok := middleware.UserIdentityFromContext(r.Context()); ok {
 			userID = identity.UserID
 		}
 
-		token, err := auth.GenerateToken(session, userID)
+		token, err := svc.GenerateToken(r.Context(), session, userID)
 		if err != nil {
-			slog.Error("failed to generate terminal token", "err", err)
-			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to generate token"})
+			writeServiceError(w, err)
 			return
 		}
 
@@ -75,33 +63,11 @@ func handleTerminalToken(auth *realtime.TerminalAuth) http.HandlerFunc {
 	}
 }
 
-// handleTerminalRestart returns a handler that restarts the terminal session
-// with the current backend from loom.yaml. It reads the backend from the project
-// config, updates the TerminalManager's default command, kills the existing tmux
-// session, and returns the new backend name.
-func handleTerminalRestart(manager *TerminalManager, pool daemon.Pool, auth *realtime.TerminalAuth) http.HandlerFunc {
-	var configPool configConnectionGetter
-	if pool != nil {
-		configPool = &configPoolAdapter{pool: pool}
-	}
-	return handleTerminalRestartWithPool(manager, configPool, auth)
-}
-
-// handleTerminalRestartWithPool is the internal testable implementation.
-func handleTerminalRestartWithPool(manager *TerminalManager, configPool configConnectionGetter, auth *realtime.TerminalAuth) http.HandlerFunc {
+// handleTerminalRestart returns a handler that restarts the terminal session.
+func handleTerminalRestart(svc TerminalService, auth *realtime.TerminalAuth) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			respondJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"success": false, "error": "method not allowed"})
-			return
-		}
-
-		// Validate session parameter
 		session := r.URL.Query().Get("session")
-		if session == "" {
-			respondJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "error": "missing session parameter"})
-			return
-		}
-		if !validTerminalSession.MatchString(session) {
+		if session == "" || !validTerminalSession.MatchString(session) {
 			respondJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "error": "invalid session name"})
 			return
 		}
@@ -115,61 +81,20 @@ func handleTerminalRestartWithPool(manager *TerminalManager, configPool configCo
 			}
 		}
 
-		if manager == nil {
-			respondJSON(w, http.StatusServiceUnavailable, map[string]interface{}{"success": false, "error": "terminal manager not initialized"})
+		wsID := middleware.WorkspaceFromContext(r.Context())
+		result, err := svc.RestartSession(r.Context(), wsID, session)
+		if err != nil {
+			writeServiceError(w, err)
 			return
 		}
-		// Shell tabs: kill and return without changing defaultCommand.
-		if strings.HasPrefix(session, "lead-shell-") {
-			_ = manager.KillSessionByName(session)
-			respondJSON(w, http.StatusOK, map[string]interface{}{"success": true, "backend": "shell"})
-			return
-		}
-		// Read current backend from loom.yaml via daemon
-		backend := manager.DefaultCommand() // fallback to current
-		if configPool != nil {
-			wsPath, err := getWorkspacePath(configPool, r.Context())
-			if err == nil {
-				pf, err := loadProjectFile(wsPath)
-				if err == nil {
-					b := pf.Backend
-					if b == "" {
-						b = "claude"
-					}
-					if !isValidBackend(b) {
-						respondJSON(w, http.StatusBadRequest, map[string]interface{}{
-							"success": false,
-							"error":   fmt.Sprintf("invalid backend %q; valid: %s", b, strings.Join(validBackends, ", ")),
-						})
-						return
-					}
-					backend = b
-				}
-			}
-		}
 
-		// Build the full terminal command with the lead agent prompt
-		termCmd := fmt.Sprintf("loom lead --backend %s", backend)
-
-		// Kill existing session first, then update command. This ordering ensures
-		// racing Attach calls either get killed or use the new backend.
-		_ = manager.KillSessionByName(session)
-		manager.SetDefaultCommand(termCmd)
-
-		respondJSON(w, http.StatusOK, map[string]interface{}{"success": true, "backend": backend})
+		respondJSON(w, http.StatusOK, map[string]interface{}{"success": true, "backend": result.Backend})
 	}
 }
 
 // handleTerminalKill returns a handler that forcibly kills a terminal session.
-// This is used for hung backends — it kills the tmux session, which triggers the
-// PTY close → crash detection flow in ptyToWS.
-func handleTerminalKill(manager *TerminalManager, auth *realtime.TerminalAuth) http.HandlerFunc {
+func handleTerminalKill(svc TerminalService, auth *realtime.TerminalAuth) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			respondJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"success": false, "error": "method not allowed"})
-			return
-		}
-
 		session := r.URL.Query().Get("session")
 		if session == "" || !validTerminalSession.MatchString(session) {
 			respondJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "error": "invalid session"})
@@ -184,19 +109,17 @@ func handleTerminalKill(manager *TerminalManager, auth *realtime.TerminalAuth) h
 			}
 		}
 
-		if manager == nil {
-			respondJSON(w, http.StatusServiceUnavailable, map[string]interface{}{"success": false, "error": "terminal manager not initialized"})
+		if err := svc.KillSession(r.Context(), session); err != nil {
+			writeServiceError(w, err)
 			return
 		}
 
-		_ = manager.KillSessionByName(session)
 		respondJSON(w, http.StatusOK, map[string]interface{}{"success": true})
 	}
 }
 
 // handleTerminalSessionStatus returns a handler that checks whether a tmux session is alive.
-// This is a fallback for when the WebSocket close code is missed.
-func handleTerminalSessionStatus(manager *TerminalManager, auth *realtime.TerminalAuth) http.HandlerFunc {
+func handleTerminalSessionStatus(svc TerminalService, auth *realtime.TerminalAuth) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		session := r.URL.Query().Get("session")
 		if session == "" || !validTerminalSession.MatchString(session) {
@@ -212,28 +135,18 @@ func handleTerminalSessionStatus(manager *TerminalManager, auth *realtime.Termin
 			}
 		}
 
-		if manager == nil {
-			respondJSON(w, http.StatusServiceUnavailable, map[string]interface{}{"error": "terminal manager not initialized"})
+		result, err := svc.GetSessionStatus(r.Context(), session)
+		if err != nil {
+			writeServiceError(w, err)
 			return
 		}
 
-		alive := manager.SessionAlive(session)
-		result := map[string]interface{}{
-			"alive": alive,
+		resp := map[string]interface{}{
+			"alive": result.Alive,
 		}
-
-		if !alive {
-			// Try to capture last lines of output for error context
-			if captured, err := manager.CapturePane(session, 10); err == nil && captured != "" {
-				result["exit_reason"] = captured
-			}
-		} else if manager.PaneDead(session) {
-			result["alive"] = false
-			if captured, err := manager.CapturePane(session, 10); err == nil && captured != "" {
-				result["exit_reason"] = captured
-			}
+		if result.ExitReason != "" {
+			resp["exit_reason"] = result.ExitReason
 		}
-
-		respondJSON(w, http.StatusOK, result)
+		respondJSON(w, http.StatusOK, resp)
 	}
 }

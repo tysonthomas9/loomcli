@@ -3,7 +3,6 @@ package webui
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"regexp"
 	"strings"
@@ -16,38 +15,6 @@ import (
 // Rejects names starting with '-' or containing '..'.
 // Keep in sync with internal/cli/git.go:gitRefPattern
 var validGitRef = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_./-]*$`)
-
-// AgentResolver is satisfied by any interface that can resolve agent worktrees.
-// Both GitOps and FileOps implement this, allowing resolveAgent to be shared.
-type AgentResolver interface {
-	ResolveAgentWorktree(workspaceID, name string) (*AgentWorktree, error)
-}
-
-// resolveAgent validates the agent name from the path and resolves it via the given resolver.
-// It extracts the workspace ID from the request context (set by WorkspaceMiddleware).
-func resolveAgent(w http.ResponseWriter, r *http.Request, ops AgentResolver) (*AgentWorktree, bool) {
-	agentName := r.PathValue("name")
-	if agentName == "" {
-		respondError(w, http.StatusBadRequest, "missing agent name")
-		return nil, false
-	}
-	if !validAgentName.MatchString(agentName) {
-		respondError(w, http.StatusBadRequest, "invalid agent name: must match [a-zA-Z0-9_-]+")
-		return nil, false
-	}
-
-	wsID := middleware.WorkspaceFromContext(r.Context())
-	if wsID == "" {
-		respondError(w, http.StatusBadRequest, "workspace ID required")
-		return nil, false
-	}
-	wt, err := ops.ResolveAgentWorktree(wsID, agentName)
-	if err != nil {
-		respondError(w, http.StatusNotFound, fmt.Sprintf("agent worktree %q not found", agentName))
-		return nil, false
-	}
-	return wt, true
-}
 
 // writeAgentGitError maps a service error to an HTTP response for agent git handlers.
 // ServiceErrors use writeServiceError; other errors use the given fallback status.

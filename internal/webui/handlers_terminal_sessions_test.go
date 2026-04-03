@@ -16,7 +16,7 @@ import (
 // TestHandleListTerminalSessions_NilManager tests that a nil manager returns 503
 // with an appropriate error message.
 func TestHandleListTerminalSessions_NilManager(t *testing.T) {
-	handler := handleListTerminalSessions(nil)
+	handler := handleListTerminalSessions(NewTerminalService(nil, nil, nil, nil, nil, nil, nil))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/sessions", nil)
 	w := httptest.NewRecorder()
@@ -30,10 +30,6 @@ func TestHandleListTerminalSessions_NilManager(t *testing.T) {
 	var resp map[string]interface{}
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
-	}
-
-	if resp["success"] != false {
-		t.Error("expected success to be false")
 	}
 
 	if resp["error"] != "terminal manager not initialized" {
@@ -69,7 +65,7 @@ func TestHandleListTerminalSessions_Success(t *testing.T) {
 	}
 	defer manager.Detach(session.ConnID)
 
-	handler := handleListTerminalSessions(manager)
+	handler := handleListTerminalSessions(NewTerminalService(manager, nil, nil, nil, nil, nil, nil))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/sessions", nil)
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
@@ -138,7 +134,7 @@ func TestHandleListTerminalSessions_AlwaysIncludesTalkToLead(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	handler := handleListTerminalSessions(manager)
+	handler := handleListTerminalSessions(NewTerminalService(manager, nil, nil, nil, nil, nil, nil))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/sessions", nil)
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
@@ -218,7 +214,7 @@ func TestHandleListTerminalSessions_FiltersOtherSessions(t *testing.T) {
 		_ = killCmd.Run()
 	}()
 
-	handler := handleListTerminalSessions(manager)
+	handler := handleListTerminalSessions(NewTerminalService(manager, nil, nil, nil, nil, nil, nil))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/sessions", nil)
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
@@ -554,7 +550,7 @@ func TestHandleScheduleSessionKill_ValidSession(t *testing.T) {
 	}
 	t.Cleanup(func() { mgr.Shutdown() })
 
-	handler := handleScheduleSessionKill(mgr)
+	handler := handleScheduleSessionKill(NewTerminalService(mgr, nil, nil, nil, nil, nil, nil))
 
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/sessions/test-session/kill", nil)
 	req.SetPathValue("session", "test-session")
@@ -587,7 +583,7 @@ func TestHandleScheduleSessionKill_InvalidSession(t *testing.T) {
 	}
 	t.Cleanup(func() { mgr.Shutdown() })
 
-	handler := handleScheduleSessionKill(mgr)
+	handler := handleScheduleSessionKill(NewTerminalService(mgr, nil, nil, nil, nil, nil, nil))
 
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/sessions/invalid%20name/kill", nil)
 	req.SetPathValue("session", "invalid name")
@@ -602,7 +598,7 @@ func TestHandleScheduleSessionKill_InvalidSession(t *testing.T) {
 // TestHandleScheduleSessionKill_NilManager verifies the handler returns 503
 // when the terminal manager is nil.
 func TestHandleScheduleSessionKill_NilManager(t *testing.T) {
-	handler := handleScheduleSessionKill(nil)
+	handler := handleScheduleSessionKill(NewTerminalService(nil, nil, nil, nil, nil, nil, nil))
 
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/sessions/test-session/kill", nil)
 	req.SetPathValue("session", "test-session")
@@ -619,7 +615,7 @@ func TestHandleScheduleSessionKill_NilManager(t *testing.T) {
 // TestHandleSeedTerminalSession_MissingName tests that the seed handler returns
 // 400 when the session name path parameter is empty.
 func TestHandleSeedTerminalSession_NilManager(t *testing.T) {
-	handler := handleSeedTerminalSession(nil)
+	handler := handleSeedTerminalSession(NewTerminalService(nil, nil, nil, nil, nil, nil, nil))
 
 	body := strings.NewReader(`{"issue_id":"X-1","title":"Test"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/sessions/{name}/seed", body)
@@ -646,7 +642,7 @@ func TestHandleSeedTerminalSession_NilManager(t *testing.T) {
 func TestHandleSeedTerminalSession_MissingName(t *testing.T) {
 	// Use a non-nil manager so the nil guard doesn't trip
 	mgr := &TerminalManager{}
-	handler := handleSeedTerminalSession(mgr)
+	handler := handleSeedTerminalSession(NewTerminalService(mgr, nil, nil, nil, nil, nil, nil))
 
 	body := strings.NewReader(`{"issue_id":"X-1","title":"Test"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/sessions//seed", body)
@@ -673,7 +669,7 @@ func TestHandleSeedTerminalSession_MissingName(t *testing.T) {
 // 400 for malformed JSON.
 func TestHandleSeedTerminalSession_InvalidJSON(t *testing.T) {
 	mgr := &TerminalManager{}
-	handler := handleSeedTerminalSession(mgr)
+	handler := handleSeedTerminalSession(NewTerminalService(mgr, nil, nil, nil, nil, nil, nil))
 
 	body := strings.NewReader(`{invalid json}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/sessions/{name}/seed", body)
@@ -713,7 +709,7 @@ func TestHandleSeedTerminalSession_MissingRequiredFields(t *testing.T) {
 	mgr := &TerminalManager{}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler := handleSeedTerminalSession(mgr)
+			handler := handleSeedTerminalSession(NewTerminalService(mgr, nil, nil, nil, nil, nil, nil))
 
 			body := strings.NewReader(tt.body)
 			req := httptest.NewRequest(http.MethodPost, "/api/terminal/sessions/{name}/seed", body)

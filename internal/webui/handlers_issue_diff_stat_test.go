@@ -54,7 +54,7 @@ func TestHandleGetIssueDiffStat_Success(t *testing.T) {
 		},
 	}
 
-	handler := handleGetIssueDiffStat(pool, gitOps)
+	handler := handleGetIssueDiffStat(NewDiffService(gitOps, pool))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/issues/test-123/git/diff-stat", nil)
 	req.SetPathValue("id", "test-123")
@@ -94,7 +94,7 @@ func TestHandleGetIssueDiffStat_MissingIssueID(t *testing.T) {
 	}
 	defer pool.Close()
 
-	handler := handleGetIssueDiffStat(pool, &mockGitOps{})
+	handler := handleGetIssueDiffStat(NewDiffService(&mockGitOps{}, pool))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/issues//git/diff-stat", nil)
 	req.SetPathValue("id", "")
@@ -129,7 +129,7 @@ func TestHandleGetIssueDiffStat_IssueNotFound(t *testing.T) {
 	})
 
 	pool := newHandlersMockPool(t, socketPath)
-	handler := handleGetIssueDiffStat(pool, &mockGitOps{})
+	handler := handleGetIssueDiffStat(NewDiffService(&mockGitOps{}, pool))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/issues/nonexistent-id/git/diff-stat", nil)
 	req.SetPathValue("id", "nonexistent-id")
@@ -166,7 +166,7 @@ func TestHandleGetIssueDiffStat_NoAssignee(t *testing.T) {
 	})
 
 	pool := newHandlersMockPool(t, socketPath)
-	handler := handleGetIssueDiffStat(pool, &mockGitOps{})
+	handler := handleGetIssueDiffStat(NewDiffService(&mockGitOps{}, pool))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/issues/test-123/git/diff-stat", nil)
 	req.SetPathValue("id", "test-123")
@@ -209,7 +209,7 @@ func TestHandleGetIssueDiffStat_WorktreeNotFound(t *testing.T) {
 		},
 	}
 
-	handler := handleGetIssueDiffStat(pool, gitOps)
+	handler := handleGetIssueDiffStat(NewDiffService(gitOps, pool))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/issues/test-123/git/diff-stat", nil)
 	req.SetPathValue("id", "test-123")
@@ -240,7 +240,7 @@ func TestHandleGetIssueDiffStat_DaemonUnavailable(t *testing.T) {
 	pool.SetPoolTimeout(100 * 1e6) // 100ms
 	defer pool.Close()
 
-	handler := handleGetIssueDiffStat(pool, &mockGitOps{})
+	handler := handleGetIssueDiffStat(NewDiffService(&mockGitOps{}, pool))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/issues/test-123/git/diff-stat", nil)
 	req.SetPathValue("id", "test-123")

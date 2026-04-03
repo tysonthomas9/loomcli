@@ -3,10 +3,8 @@ package webui
 import (
 	"crypto/subtle"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"net/http"
-	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -73,59 +71,18 @@ type TranscriptData struct {
 // --- Handlers ---
 
 // handleListTaskSessions returns all sessions for a given task.
-// GET /api/workspaces/{ws}/tasks/{taskId}/sessions
-func handleListTaskSessions(sessStore *sessions.Store) http.HandlerFunc {
+func handleListTaskSessions(svc SessionService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if sessStore == nil {
-			respondJSON(w, http.StatusServiceUnavailable, SessionListResponse{
-				Success: false,
-				Error:   "session store not available",
-			})
-			return
-		}
-
 		taskID := r.PathValue("taskId")
-		if taskID == "" {
-			respondJSON(w, http.StatusBadRequest, SessionListResponse{
-				Success: false,
-				Error:   "missing task ID",
-			})
-			return
-		}
 
-		if !validTaskID.MatchString(taskID) {
-			respondJSON(w, http.StatusBadRequest, SessionListResponse{
-				Success: false,
-				Error:   "invalid task ID: must match [a-zA-Z0-9._-]+",
-			})
-			return
-		}
-
-		records, err := sessStore.SessionsByTask(taskID)
+		items, err := svc.ListTaskSessions(r.Context(), taskID)
 		if err != nil {
-			slog.Error("failed to list sessions", "task_id", taskID, "err", err)
-			respondJSON(w, http.StatusInternalServerError, SessionListResponse{
+			status := serviceErrorStatus(err)
+			respondJSON(w, status, SessionListResponse{
 				Success: false,
-				Error:   "failed to list sessions",
+				Error:   serviceErrorMessage(err),
 			})
 			return
-		}
-
-		// Build list items with computed fields.
-		items := make([]SessionListItem, 0, len(records))
-		for _, rec := range records {
-			item := SessionListItem{
-				SessionRecord: rec,
-				IsActive:      rec.Status == sessions.StatusRunning,
-			}
-			// Check if transcript and diff files exist and have content.
-			if entries, err := sessStore.LoadTranscript(rec.SessionID); err == nil && len(entries) > 0 {
-				item.HasTranscript = true
-			}
-			if diff, err := sessStore.ReadDiff(rec.SessionID); err == nil && diff != "" {
-				item.HasDiff = true
-			}
-			items = append(items, item)
 		}
 
 		respondJSON(w, http.StatusOK, SessionListResponse{
@@ -139,139 +96,42 @@ func handleListTaskSessions(sessStore *sessions.Store) http.HandlerFunc {
 }
 
 // handleGetSession returns metadata for a single session.
-// GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}
-func handleGetSession(sessStore *sessions.Store) http.HandlerFunc {
+func handleGetSession(svc SessionService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if sessStore == nil {
-			respondJSON(w, http.StatusServiceUnavailable, SessionDetailResponse{
-				Success: false,
-				Error:   "session store not available",
-			})
-			return
-		}
-
 		taskID := r.PathValue("taskId")
-		if taskID == "" || !validTaskID.MatchString(taskID) {
-			respondJSON(w, http.StatusBadRequest, SessionDetailResponse{
-				Success: false,
-				Error:   "invalid task ID",
-			})
-			return
-		}
-
 		sessionID := r.PathValue("sessionId")
-		if sessionID == "" || !validSessionID.MatchString(sessionID) {
-			respondJSON(w, http.StatusBadRequest, SessionDetailResponse{
-				Success: false,
-				Error:   "invalid session ID",
-			})
-			return
-		}
 
-		meta, err := sessStore.LoadMetadata(sessionID)
+		result, err := svc.GetSession(r.Context(), taskID, sessionID)
 		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				respondJSON(w, http.StatusNotFound, SessionDetailResponse{
-					Success: false,
-					Error:   "session not found",
-				})
-				return
-			}
-			slog.Error("failed to load session", "session_id", sessionID, "err", err)
-			respondJSON(w, http.StatusInternalServerError, SessionDetailResponse{
+			status := serviceErrorStatus(err)
+			respondJSON(w, status, SessionDetailResponse{
 				Success: false,
-				Error:   "failed to load session",
-			})
-			return
-		}
-
-		// Enforce task ownership — session must belong to the requested task.
-		if meta.TaskID != taskID {
-			respondJSON(w, http.StatusNotFound, SessionDetailResponse{
-				Success: false,
-				Error:   "session not found",
+				Error:   serviceErrorMessage(err),
 			})
 			return
 		}
 
 		respondJSON(w, http.StatusOK, SessionDetailResponse{
 			Success: true,
-			Data: &SessionDetailData{
-				SessionMetadata: *meta,
-				IsActive:        meta.Status == sessions.StatusRunning,
-			},
+			Data:    result,
 		})
 	}
 }
 
 // handleGetSessionTranscript returns the transcript entries for a session.
-// GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/transcript
-func handleGetSessionTranscript(sessStore *sessions.Store) http.HandlerFunc {
+func handleGetSessionTranscript(svc SessionService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if sessStore == nil {
-			respondJSON(w, http.StatusServiceUnavailable, TranscriptResponse{
-				Success: false,
-				Error:   "session store not available",
-			})
-			return
-		}
-
 		taskID := r.PathValue("taskId")
-		if taskID == "" || !validTaskID.MatchString(taskID) {
-			respondJSON(w, http.StatusBadRequest, TranscriptResponse{
-				Success: false,
-				Error:   "invalid task ID",
-			})
-			return
-		}
-
 		sessionID := r.PathValue("sessionId")
-		if sessionID == "" || !validSessionID.MatchString(sessionID) {
-			respondJSON(w, http.StatusBadRequest, TranscriptResponse{
-				Success: false,
-				Error:   "invalid session ID",
-			})
-			return
-		}
 
-		// Enforce task ownership before returning transcript.
-		meta, err := sessStore.LoadMetadata(sessionID)
+		entries, err := svc.GetSessionTranscript(r.Context(), taskID, sessionID)
 		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				respondJSON(w, http.StatusNotFound, TranscriptResponse{
-					Success: false,
-					Error:   "session not found",
-				})
-				return
-			}
-			slog.Error("failed to load session metadata", "session_id", sessionID, "err", err)
-			respondJSON(w, http.StatusInternalServerError, TranscriptResponse{
+			status := serviceErrorStatus(err)
+			respondJSON(w, status, TranscriptResponse{
 				Success: false,
-				Error:   "failed to load session",
+				Error:   serviceErrorMessage(err),
 			})
 			return
-		}
-		if meta.TaskID != taskID {
-			respondJSON(w, http.StatusNotFound, TranscriptResponse{
-				Success: false,
-				Error:   "session not found",
-			})
-			return
-		}
-
-		entries, loadErr := sessStore.LoadTranscript(sessionID)
-		if loadErr != nil {
-			slog.Error("failed to load transcript", "session_id", sessionID, "err", loadErr)
-			respondJSON(w, http.StatusInternalServerError, TranscriptResponse{
-				Success: false,
-				Error:   "failed to load transcript",
-			})
-			return
-		}
-
-		// Ensure empty array instead of null in JSON output.
-		if entries == nil {
-			entries = []sessions.TranscriptEntry{}
 		}
 
 		respondJSON(w, http.StatusOK, TranscriptResponse{
@@ -342,73 +202,17 @@ func handleNotifySessionChange(hub *realtime.Hub, notifyToken string) http.Handl
 }
 
 // handleGetSessionDiff returns the diff.patch file for a session as plain text.
-// GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/diff
-func handleGetSessionDiff(sessStore *sessions.Store) http.HandlerFunc {
+func handleGetSessionDiff(svc SessionService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if sessStore == nil {
-			respondJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
-				"success": false,
-				"error":   "session store not available",
-			})
-			return
-		}
-
 		taskID := r.PathValue("taskId")
-		if taskID == "" || !validTaskID.MatchString(taskID) {
-			respondJSON(w, http.StatusBadRequest, map[string]interface{}{
-				"success": false,
-				"error":   "invalid task ID",
-			})
-			return
-		}
-
 		sessionID := r.PathValue("sessionId")
-		if sessionID == "" || !validSessionID.MatchString(sessionID) {
-			respondJSON(w, http.StatusBadRequest, map[string]interface{}{
-				"success": false,
-				"error":   "invalid session ID",
-			})
-			return
-		}
 
-		// Enforce task ownership before returning diff.
-		meta, err := sessStore.LoadMetadata(sessionID)
+		diff, err := svc.GetSessionDiff(r.Context(), taskID, sessionID)
 		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				respondJSON(w, http.StatusNotFound, map[string]interface{}{
-					"success": false,
-					"error":   "session not found",
-				})
-				return
-			}
-			slog.Error("failed to load session metadata", "session_id", sessionID, "err", err)
-			respondJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			status := serviceErrorStatus(err)
+			respondJSON(w, status, map[string]interface{}{
 				"success": false,
-				"error":   "failed to load session",
-			})
-			return
-		}
-		if meta.TaskID != taskID {
-			respondJSON(w, http.StatusNotFound, map[string]interface{}{
-				"success": false,
-				"error":   "session not found",
-			})
-			return
-		}
-
-		diff, diffErr := sessStore.ReadDiff(sessionID)
-		if diffErr != nil {
-			if errors.Is(diffErr, os.ErrNotExist) {
-				respondJSON(w, http.StatusNotFound, map[string]interface{}{
-					"success": false,
-					"error":   "diff not found",
-				})
-				return
-			}
-			slog.Error("failed to read diff", "session_id", sessionID, "err", diffErr)
-			respondJSON(w, http.StatusInternalServerError, map[string]interface{}{
-				"success": false,
-				"error":   "failed to read diff",
+				"error":   serviceErrorMessage(err),
 			})
 			return
 		}

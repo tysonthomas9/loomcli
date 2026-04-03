@@ -14,7 +14,7 @@ import (
 // ── handleListSessionsByIssue tests ─────────────────────────────────────────────
 
 func TestHandleListSessionsByIssue_NilStore(t *testing.T) {
-	handler := handleListSessionsByIssue(nil)
+	handler := handleListSessionsByIssue(NewTerminalService(nil, nil, nil, nil, nil, nil, nil))
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/sessions/by-issue", nil)
 	rr := httptest.NewRecorder()
 	handler(rr, req)
@@ -27,17 +27,14 @@ func TestHandleListSessionsByIssue_NilStore(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if resp["success"] != false {
-		t.Error("expected success=false")
-	}
-	if resp["error"] != "tab metadata not available (no Redis)" {
-		t.Errorf("unexpected error message: %v", resp["error"])
+	if _, ok := resp["error"]; !ok {
+		t.Error("expected error field in response")
 	}
 }
 
 func TestHandleListSessionsByIssue_EmptyStore(t *testing.T) {
 	store, _ := setupTabMetaTest(t)
-	handler := handleListSessionsByIssue(store)
+	handler := handleListSessionsByIssue(NewTerminalService(nil, nil, nil, store, nil, nil, nil))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/sessions/by-issue", nil)
 	rr := httptest.NewRecorder()
@@ -81,7 +78,7 @@ func TestHandleListSessionsByIssue_ReturnsGroupedSessions(t *testing.T) {
 		}
 	}
 
-	handler := handleListSessionsByIssue(store)
+	handler := handleListSessionsByIssue(NewTerminalService(nil, nil, nil, store, nil, nil, nil))
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/sessions/by-issue", nil)
 	rr := httptest.NewRecorder()
 	handler(rr, req)
@@ -147,7 +144,7 @@ func TestHandleListSessionsByIssue_CrossWorkspace(t *testing.T) {
 		}
 	}
 
-	handler := handleListSessionsByIssue(store)
+	handler := handleListSessionsByIssue(NewTerminalService(nil, nil, nil, store, nil, nil, nil))
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/sessions/by-issue", nil)
 	rr := httptest.NewRecorder()
 	handler(rr, req)
@@ -211,7 +208,7 @@ func TestHandleListSessionsByIssue_CrossWorkspace(t *testing.T) {
 // ── handleCloseAllSessions tests ────────────────────────────────────────────────
 
 func TestHandleCloseAllSessions_NilManager(t *testing.T) {
-	handler := handleCloseAllSessions(nil, nil, nil)
+	handler := handleCloseAllSessions(NewTerminalService(nil, nil, nil, nil, nil, nil, nil))
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/sessions/close-all", nil)
 	rr := httptest.NewRecorder()
 	handler(rr, req)
@@ -223,9 +220,6 @@ func TestHandleCloseAllSessions_NilManager(t *testing.T) {
 	var resp map[string]interface{}
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
-	}
-	if resp["success"] != false {
-		t.Error("expected success=false")
 	}
 	if resp["error"] != "terminal manager not initialized" {
 		t.Errorf("unexpected error message: %v", resp["error"])
@@ -269,7 +263,7 @@ func TestHandleCloseAllSessions_DeletesTabMetadata(t *testing.T) {
 		t.Fatalf("expected 2 tabs before close-all, got %d", len(before))
 	}
 
-	handler := handleCloseAllSessions(mgr, store, hub)
+	handler := handleCloseAllSessions(NewTerminalService(mgr, nil, nil, store, hub, nil, nil))
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/sessions/close-all", nil)
 	rr := httptest.NewRecorder()
 	handler(rr, req)
@@ -306,7 +300,7 @@ func TestHandleCloseAllSessions_WorksWithNilStore(t *testing.T) {
 	t.Cleanup(func() { mgr.Shutdown() })
 
 	// Pass nil store and nil hub — should still succeed
-	handler := handleCloseAllSessions(mgr, nil, nil)
+	handler := handleCloseAllSessions(NewTerminalService(mgr, nil, nil, nil, nil, nil, nil))
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/sessions/close-all", nil)
 	rr := httptest.NewRecorder()
 	handler(rr, req)

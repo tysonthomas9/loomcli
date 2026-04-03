@@ -3,14 +3,11 @@ package webui
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
 // terminalSessionInfo describes a terminal session visible to the frontend.
@@ -32,8 +29,6 @@ type terminalSessionsData struct {
 }
 
 // ListActiveSessions returns sessions owned by this server instance.
-// It filters tmux sessions by the manager's sessionPrefix and always
-// includes "talk-to-lead" as the default session.
 func (m *TerminalManager) ListActiveSessions() ([]terminalSessionInfo, error) {
 	m.mu.RLock()
 	sessionPrefix := m.sessionPrefix
@@ -79,24 +74,12 @@ func (m *TerminalManager) ListActiveSessions() ([]terminalSessionInfo, error) {
 	return result, nil
 }
 
-func handleListTerminalSessions(manager *TerminalManager) http.HandlerFunc {
+func handleListTerminalSessions(svc TerminalService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if manager == nil {
-			respondJSON(w, http.StatusServiceUnavailable, terminalSessionsResponse{
-				Success: false,
-				Error:   "terminal manager not initialized",
-			})
-			return
-		}
-
 		workspace := middleware.WorkspaceFromContext(r.Context())
-		sessions, err := manager.ListActiveSessionsForWorkspace(workspace)
+		sessions, err := svc.ListSessions(r.Context(), workspace)
 		if err != nil {
-			slog.Error("failed to list terminal sessions", "err", err)
-			respondJSON(w, http.StatusInternalServerError, terminalSessionsResponse{
-				Success: false,
-				Error:   "failed to list terminal sessions",
-			})
+			writeServiceError(w, err)
 			return
 		}
 
@@ -170,27 +153,13 @@ func formatSeedPrompt(req *seedRequest) string {
 const sessionKillGracePeriod = 30 * time.Second
 
 // handleScheduleSessionKill schedules a deferred tmux session kill with a grace period.
-// POST /api/terminal/sessions/{session}/kill
-func handleScheduleSessionKill(manager *TerminalManager) http.HandlerFunc {
+func handleScheduleSessionKill(svc TerminalService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if manager == nil {
-			respondJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
-				"success": false,
-				"error":   "terminal manager not initialized",
-			})
-			return
-		}
-
 		session := r.PathValue("session")
-		if err := tabmeta.ValidateSessionName(session); err != nil {
-			respondJSON(w, http.StatusBadRequest, map[string]interface{}{
-				"success": false,
-				"error":   err.Error(),
-			})
+		if err := svc.ScheduleKill(r.Context(), session); err != nil {
+			writeServiceError(w, err)
 			return
 		}
-
-		manager.ScheduleKill(session, sessionKillGracePeriod)
 
 		respondJSON(w, http.StatusOK, map[string]interface{}{
 			"success": true,
@@ -198,25 +167,12 @@ func handleScheduleSessionKill(manager *TerminalManager) http.HandlerFunc {
 	}
 }
 
-// handleListSessionsByIssue returns a map of issue_id → session_names for all sessions linked to issues.
-// GET /api/terminal/sessions/by-issue
-func handleListSessionsByIssue(tabMetaStore *tabmeta.Store) http.HandlerFunc {
+// handleListSessionsByIssue returns a map of issue_id → session_names.
+func handleListSessionsByIssue(svc TerminalService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if tabMetaStore == nil {
-			respondJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
-				"success": false,
-				"error":   "tab metadata not available (no Redis)",
-			})
-			return
-		}
-
-		sessionMap, err := tabMetaStore.ListIssueSessionMap(r.Context())
+		sessionMap, err := svc.ListSessionsByIssue(r.Context())
 		if err != nil {
-			slog.Error("failed to list sessions by issue", "err", err)
-			respondJSON(w, http.StatusInternalServerError, map[string]interface{}{
-				"success": false,
-				"error":   "failed to list sessions by issue",
-			})
+			writeServiceError(w, err)
 			return
 		}
 
@@ -227,94 +183,27 @@ func handleListSessionsByIssue(tabMetaStore *tabmeta.Store) http.HandlerFunc {
 	}
 }
 
-// handleCloseAllSessions kills all tmux sessions, deletes all tab metadata, and broadcasts SSE event.
-// POST /api/terminal/sessions/close-all
-func handleCloseAllSessions(manager *TerminalManager, tabMetaStore *tabmeta.Store, hub *realtime.Hub) http.HandlerFunc {
+// handleCloseAllSessions kills all tmux sessions and metadata.
+func handleCloseAllSessions(svc TerminalService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if manager == nil {
-			respondJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
-				"success": false,
-				"error":   "terminal manager not initialized",
-			})
+		result, err := svc.CloseAllSessions(r.Context())
+		if err != nil {
+			writeServiceError(w, err)
 			return
 		}
 
-		// Kill all tmux sessions
-		if err := manager.KillAllSessions(); err != nil {
-			slog.Error("failed to kill all sessions", "err", err)
-			respondJSON(w, http.StatusInternalServerError, map[string]interface{}{
-				"success": false,
-				"error":   "failed to kill all sessions",
-			})
-			return
+		resp := map[string]interface{}{"success": true}
+		if result.MetaCleanupIncomplete {
+			resp["warning"] = "sessions killed but metadata cleanup incomplete"
 		}
 
-		// Delete all tab metadata (across all workspaces), collecting workspace IDs
-		// for SSE broadcast.
-		metaCleanupFailed := false
-		affectedWorkspaces := make(map[string]bool)
-		if tabMetaStore != nil {
-			allTabs, err := tabMetaStore.ListAll(r.Context())
-			if err != nil {
-				slog.Error("failed to list tab metadata for cleanup", "err", err)
-				metaCleanupFailed = true
-			} else {
-				for _, tab := range allTabs {
-					if tab.Workspace != "" {
-						affectedWorkspaces[tab.Workspace] = true
-					}
-					if err := tabMetaStore.Delete(r.Context(), tab.Workspace, tab.SessionName); err != nil {
-						slog.Error("failed to delete tab metadata", "session", tab.SessionName, "err", err)
-						metaCleanupFailed = true
-					}
-				}
-			}
-		}
-
-		// Broadcast SSE event per affected workspace so each workspace's clients update.
-		if hub != nil {
-			now := time.Now().UTC().Format(time.RFC3339)
-			for ws := range affectedWorkspaces {
-				hub.Broadcast(&realtime.MutationPayload{
-					Type:        "terminal_session_change",
-					Timestamp:   now,
-					WorkspaceID: ws,
-				})
-			}
-		}
-
-		if metaCleanupFailed {
-			respondJSON(w, http.StatusOK, map[string]interface{}{
-				"success": true,
-				"warning": "sessions killed but metadata cleanup incomplete",
-			})
-			return
-		}
-
-		respondJSON(w, http.StatusOK, map[string]interface{}{
-			"success": true,
-		})
+		respondJSON(w, http.StatusOK, resp)
 	}
 }
 
-func handleSeedTerminalSession(manager *TerminalManager) http.HandlerFunc {
+func handleSeedTerminalSession(svc TerminalService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if manager == nil {
-			respondJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
-				"success": false,
-				"error":   "terminal manager not initialized",
-			})
-			return
-		}
-
 		sessionName := r.PathValue("name")
-		if sessionName == "" {
-			respondJSON(w, http.StatusBadRequest, map[string]interface{}{
-				"success": false,
-				"error":   "missing session name",
-			})
-			return
-		}
 
 		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
 		var req seedRequest
@@ -326,29 +215,18 @@ func handleSeedTerminalSession(manager *TerminalManager) http.HandlerFunc {
 			return
 		}
 
-		if req.IssueID == "" || req.Title == "" {
-			respondJSON(w, http.StatusBadRequest, map[string]interface{}{
-				"success": false,
-				"error":   "issue_id and title are required",
-			})
-			return
+		params := &SeedParams{
+			IssueID:     req.IssueID,
+			Title:       req.Title,
+			Description: req.Description,
+			Design:      req.Design,
+		}
+		for _, b := range req.Blockers {
+			params.Blockers = append(params.Blockers, SeedBlocker(b))
 		}
 
-		prompt := formatSeedPrompt(&req)
-
-		if err := manager.SendKeys(sessionName, prompt); err != nil {
-			if strings.Contains(err.Error(), "not found") {
-				respondJSON(w, http.StatusNotFound, map[string]interface{}{
-					"success": false,
-					"error":   "session not found: " + sessionName,
-				})
-				return
-			}
-			slog.Error("failed to seed terminal session", "session", sessionName, "err", err)
-			respondJSON(w, http.StatusInternalServerError, map[string]interface{}{
-				"success": false,
-				"error":   "failed to seed terminal session",
-			})
+		if err := svc.SeedSession(r.Context(), sessionName, params); err != nil {
+			writeServiceError(w, err)
 			return
 		}
 

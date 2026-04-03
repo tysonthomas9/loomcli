@@ -1449,6 +1449,7 @@ func TestSetupRoutes_SSEEndpointRegisteredOnWorkspaceScope(t *testing.T) {
 
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
 	app := &Server{multiPool: multiPool, hub: hub, wsExistsFn: wsExistsFn}
+	app.sessSvc = NewSessionService(nil, nil)
 	setupTestRoutes(t, app)
 
 	// Use a context with short timeout because the SSE handler streams forever
@@ -1484,6 +1485,7 @@ func TestSetupRoutes_WorkspaceBackendPatchEndpoint(t *testing.T) {
 		},
 	}
 	app := &Server{multiPool: multiPool, config: ServerConfig{WorkspaceConfigFn: workspaceConfigFn}, wsExistsFn: wsExistsFn, workspaceSvc: wsSvc}
+	app.sessSvc = NewSessionService(nil, nil)
 	setupTestRoutes(t, app)
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/workspaces/test-ws/config/backend",
@@ -1855,6 +1857,9 @@ func TestLegacyFlatAgentRoutesRemoved(t *testing.T) {
 	fileOps := &mockFileOps{}
 
 	app := &Server{multiPool: multiPool, config: ServerConfig{GitOps: gitOps, FileOps: fileOps}, wsExistsFn: wsExistsFn, agentSvc: NewAgentService(gitOps, nil, nil)}
+	app.diffSvc = NewDiffService(gitOps, nil)
+	app.fileSvc = NewFileService(fileOps)
+	app.sessSvc = NewSessionService(nil, nil)
 	setupTestRoutes(t, app)
 
 	// Legacy flat routes that should have been removed — each must return 404.

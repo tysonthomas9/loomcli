@@ -3,14 +3,11 @@ package webui
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
@@ -22,38 +19,13 @@ type tabMetadataResponse struct {
 }
 
 // handleListTerminalTabs returns all tab metadata, auto-creating defaults for new sessions.
-func handleListTerminalTabs(store *tabmeta.Store, manager *TerminalManager) http.HandlerFunc {
+func handleListTerminalTabs(svc TerminalService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if store == nil {
-			respondJSON(w, http.StatusServiceUnavailable, tabMetadataResponse{
-				Success: false,
-				Error:   "tab metadata not available (no Redis)",
-			})
-			return
-		}
-
 		workspace := middleware.WorkspaceFromContext(r.Context())
 
-		// Get active sessions from tmux (filtered by workspace ownership)
-		var activeNames []string
-		if manager != nil {
-			sessions, err := manager.ListActiveSessionsForWorkspace(workspace)
-			if err != nil {
-				slog.Error("failed to list active sessions for tab metadata", "err", err)
-			} else {
-				for _, s := range sessions {
-					activeNames = append(activeNames, s.Name)
-				}
-			}
-		}
-
-		tabs, err := store.EnsureDefaults(r.Context(), workspace, activeNames)
+		tabs, err := svc.ListTabs(r.Context(), workspace)
 		if err != nil {
-			slog.Error("failed to list tab metadata", "err", err)
-			respondJSON(w, http.StatusInternalServerError, tabMetadataResponse{
-				Success: false,
-				Error:   "failed to list tab metadata",
-			})
+			writeServiceError(w, err)
 			return
 		}
 
@@ -65,41 +37,14 @@ func handleListTerminalTabs(store *tabmeta.Store, manager *TerminalManager) http
 }
 
 // handleGetTerminalTab returns metadata for a single tab.
-func handleGetTerminalTab(store *tabmeta.Store) http.HandlerFunc {
+func handleGetTerminalTab(svc TerminalService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if store == nil {
-			respondJSON(w, http.StatusServiceUnavailable, tabMetadataResponse{
-				Success: false,
-				Error:   "tab metadata not available (no Redis)",
-			})
-			return
-		}
-
 		workspace := middleware.WorkspaceFromContext(r.Context())
-
 		session := r.PathValue("session")
-		if err := tabmeta.ValidateSessionName(session); err != nil {
-			respondJSON(w, http.StatusBadRequest, tabMetadataResponse{
-				Success: false,
-				Error:   err.Error(),
-			})
-			return
-		}
 
-		meta, err := store.Get(r.Context(), workspace, session)
+		meta, err := svc.GetTab(r.Context(), workspace, session)
 		if err != nil {
-			slog.Error("failed to get tab metadata", "session", session, "err", err)
-			respondJSON(w, http.StatusInternalServerError, tabMetadataResponse{
-				Success: false,
-				Error:   "failed to get tab metadata",
-			})
-			return
-		}
-		if meta == nil {
-			respondJSON(w, http.StatusNotFound, tabMetadataResponse{
-				Success: false,
-				Error:   "tab metadata not found",
-			})
+			writeServiceError(w, err)
 			return
 		}
 
@@ -120,8 +65,8 @@ type tabPatchRequest struct {
 }
 
 // buildPatchFields converts a tabPatchRequest into a partial fields map for store.Patch.
-func buildPatchFields(req tabPatchRequest) (fields map[string]string, issueIDChanged bool) {
-	fields = make(map[string]string)
+func buildPatchFields(req tabPatchRequest) map[string]string {
+	fields := make(map[string]string)
 	if req.Label != nil {
 		fields["label"] = *req.Label
 	}
@@ -136,32 +81,15 @@ func buildPatchFields(req tabPatchRequest) (fields map[string]string, issueIDCha
 	}
 	if req.IssueID != nil {
 		fields["issue_id"] = *req.IssueID
-		issueIDChanged = true
 	}
-	return fields, issueIDChanged
+	return fields
 }
 
 // handlePatchTerminalTab partially updates tab metadata and broadcasts an SSE event.
-func handlePatchTerminalTab(store *tabmeta.Store, hub *realtime.Hub) http.HandlerFunc {
+func handlePatchTerminalTab(svc TerminalService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if store == nil {
-			respondJSON(w, http.StatusServiceUnavailable, tabMetadataResponse{
-				Success: false,
-				Error:   "tab metadata not available (no Redis)",
-			})
-			return
-		}
-
 		workspace := middleware.WorkspaceFromContext(r.Context())
-
 		session := r.PathValue("session")
-		if err := tabmeta.ValidateSessionName(session); err != nil {
-			respondJSON(w, http.StatusBadRequest, tabMetadataResponse{
-				Success: false,
-				Error:   err.Error(),
-			})
-			return
-		}
 
 		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
 		var req tabPatchRequest
@@ -173,8 +101,7 @@ func handlePatchTerminalTab(store *tabmeta.Store, hub *realtime.Hub) http.Handle
 			return
 		}
 
-		fields, issueIDChanged := buildPatchFields(req)
-
+		fields := buildPatchFields(req)
 		if len(fields) == 0 {
 			respondJSON(w, http.StatusBadRequest, tabMetadataResponse{
 				Success: false,
@@ -183,41 +110,15 @@ func handlePatchTerminalTab(store *tabmeta.Store, hub *realtime.Hub) http.Handle
 			return
 		}
 
-		meta, err := store.Patch(r.Context(), workspace, session, fields)
+		result, err := svc.PatchTab(r.Context(), workspace, session, fields)
 		if err != nil {
-			slog.Error("failed to patch tab metadata", "session", session, "err", err)
-			status := http.StatusInternalServerError
-			if strings.Contains(err.Error(), "not found") {
-				status = http.StatusNotFound
-			}
-			respondJSON(w, status, tabMetadataResponse{
-				Success: false,
-				Error:   "failed to update tab metadata",
-			})
+			writeServiceError(w, err)
 			return
-		}
-
-		// Broadcast SSE event for real-time sync
-		if hub != nil {
-			hub.Broadcast(&realtime.MutationPayload{
-				Type:        "terminal_metadata",
-				Timestamp:   time.Now().UTC().Format(time.RFC3339),
-				WorkspaceID: workspace,
-			})
-		}
-
-		// Broadcast additional terminal_session_change event when issue linkage changes
-		if issueIDChanged && hub != nil {
-			hub.Broadcast(&realtime.MutationPayload{
-				Type:        "terminal_session_change",
-				Timestamp:   time.Now().UTC().Format(time.RFC3339),
-				WorkspaceID: workspace,
-			})
 		}
 
 		respondJSON(w, http.StatusOK, tabMetadataResponse{
 			Success: true,
-			Data:    meta,
+			Data:    result.Tab,
 		})
 	}
 }
@@ -231,26 +132,10 @@ type tabPutRequest struct {
 }
 
 // handlePutTerminalTab creates or replaces tab metadata and broadcasts an SSE event.
-func handlePutTerminalTab(store *tabmeta.Store, hub *realtime.Hub) http.HandlerFunc {
+func handlePutTerminalTab(svc TerminalService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if store == nil {
-			respondJSON(w, http.StatusServiceUnavailable, tabMetadataResponse{
-				Success: false,
-				Error:   "tab metadata not available (no Redis)",
-			})
-			return
-		}
-
 		workspace := middleware.WorkspaceFromContext(r.Context())
-
 		session := r.PathValue("session")
-		if err := tabmeta.ValidateSessionName(session); err != nil {
-			respondJSON(w, http.StatusBadRequest, tabMetadataResponse{
-				Success: false,
-				Error:   err.Error(),
-			})
-			return
-		}
 
 		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
 		var req tabPutRequest
@@ -282,22 +167,9 @@ func handlePutTerminalTab(store *tabmeta.Store, hub *realtime.Hub) http.HandlerF
 			UpdatedAt:   now,
 		}
 
-		if err := store.Set(r.Context(), meta); err != nil {
-			slog.Error("failed to put tab metadata", "session", session, "err", err)
-			respondJSON(w, http.StatusInternalServerError, tabMetadataResponse{
-				Success: false,
-				Error:   "failed to create/replace tab metadata",
-			})
+		if err := svc.PutTab(r.Context(), workspace, meta); err != nil {
+			writeServiceError(w, err)
 			return
-		}
-
-		// Broadcast SSE event for real-time sync
-		if hub != nil {
-			hub.Broadcast(&realtime.MutationPayload{
-				Type:        "terminal_metadata",
-				Timestamp:   time.Now().UTC().Format(time.RFC3339),
-				WorkspaceID: workspace,
-			})
 		}
 
 		respondJSON(w, http.StatusOK, tabMetadataResponse{
@@ -308,43 +180,14 @@ func handlePutTerminalTab(store *tabmeta.Store, hub *realtime.Hub) http.HandlerF
 }
 
 // handleDeleteTerminalTab removes tab metadata and broadcasts an SSE event.
-func handleDeleteTerminalTab(store *tabmeta.Store, hub *realtime.Hub) http.HandlerFunc {
+func handleDeleteTerminalTab(svc TerminalService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if store == nil {
-			respondJSON(w, http.StatusServiceUnavailable, tabMetadataResponse{
-				Success: false,
-				Error:   "tab metadata not available (no Redis)",
-			})
-			return
-		}
-
 		workspace := middleware.WorkspaceFromContext(r.Context())
-
 		session := r.PathValue("session")
-		if err := tabmeta.ValidateSessionName(session); err != nil {
-			respondJSON(w, http.StatusBadRequest, tabMetadataResponse{
-				Success: false,
-				Error:   err.Error(),
-			})
-			return
-		}
 
-		if err := store.Delete(r.Context(), workspace, session); err != nil {
-			slog.Error("failed to delete tab metadata", "session", session, "err", err)
-			respondJSON(w, http.StatusInternalServerError, tabMetadataResponse{
-				Success: false,
-				Error:   "failed to delete tab metadata",
-			})
+		if err := svc.DeleteTab(r.Context(), workspace, session); err != nil {
+			writeServiceError(w, err)
 			return
-		}
-
-		// Broadcast SSE event for real-time sync
-		if hub != nil {
-			hub.Broadcast(&realtime.MutationPayload{
-				Type:        "terminal_metadata",
-				Timestamp:   time.Now().UTC().Format(time.RFC3339),
-				WorkspaceID: workspace,
-			})
 		}
 
 		respondJSON(w, http.StatusOK, tabMetadataResponse{

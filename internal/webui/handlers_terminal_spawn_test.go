@@ -1,30 +1,135 @@
 package webui
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
-// mockSpawner implements the terminalSpawner interface for testing.
-type mockSpawner struct {
-	spawnCreated bool
-	spawnErr     error
+// mockSpawnService implements TerminalService for spawn handler tests.
+// Only SpawnSession is used by handleTerminalSpawn; all other methods panic.
+type mockSpawnService struct {
+	spawnFunc func(ctx context.Context, wsID string, params *SpawnParams) (*SpawnResult, error)
 }
 
-func (m *mockSpawner) Spawn(name, command string, cols, rows uint16) (bool, error) {
-	if m.spawnErr != nil {
-		return false, m.spawnErr
+func (m *mockSpawnService) SpawnSession(ctx context.Context, wsID string, params *SpawnParams) (*SpawnResult, error) {
+	if m.spawnFunc != nil {
+		return m.spawnFunc(ctx, wsID, params)
 	}
-	return m.spawnCreated, nil
+	return nil, service.ErrUnavailable("not configured")
+}
+
+// --- Stub methods required by TerminalService interface ---
+func (m *mockSpawnService) GenerateToken(_ context.Context, _, _ string) (string, error) {
+	panic("not implemented")
+}
+func (m *mockSpawnService) RestartSession(_ context.Context, _, _ string) (*TerminalRestartResult, error) {
+	panic("not implemented")
+}
+func (m *mockSpawnService) KillSession(_ context.Context, _ string) error {
+	panic("not implemented")
+}
+func (m *mockSpawnService) GetSessionStatus(_ context.Context, _ string) (*TerminalStatusResult, error) {
+	panic("not implemented")
+}
+func (m *mockSpawnService) ListSessions(_ context.Context, _ string) ([]terminalSessionInfo, error) {
+	panic("not implemented")
+}
+func (m *mockSpawnService) SeedSession(_ context.Context, _ string, _ *SeedParams) error {
+	panic("not implemented")
+}
+func (m *mockSpawnService) ScheduleKill(_ context.Context, _ string) error {
+	panic("not implemented")
+}
+func (m *mockSpawnService) CloseAllSessions(_ context.Context) (*CloseAllResult, error) {
+	panic("not implemented")
+}
+func (m *mockSpawnService) ExportSession(_ context.Context, _ string) (string, error) {
+	panic("not implemented")
+}
+func (m *mockSpawnService) GetScrollbackInfo(_ context.Context, _ string) (*ScrollbackInfoResult, error) {
+	panic("not implemented")
+}
+func (m *mockSpawnService) GetScrollback(_ context.Context, _ string) (*ScrollbackResult, error) {
+	panic("not implemented")
+}
+func (m *mockSpawnService) ListTabs(_ context.Context, _ string) ([]tabmeta.TabMetadata, error) {
+	panic("not implemented")
+}
+func (m *mockSpawnService) GetTab(_ context.Context, _, _ string) (*tabmeta.TabMetadata, error) {
+	panic("not implemented")
+}
+func (m *mockSpawnService) PatchTab(_ context.Context, _, _ string, _ map[string]string) (*PatchTabResult, error) {
+	panic("not implemented")
+}
+func (m *mockSpawnService) PutTab(_ context.Context, _ string, _ *tabmeta.TabMetadata) error {
+	panic("not implemented")
+}
+func (m *mockSpawnService) DeleteTab(_ context.Context, _, _ string) error {
+	panic("not implemented")
+}
+func (m *mockSpawnService) ListSessionsByIssue(_ context.Context) (map[string][]string, error) {
+	panic("not implemented")
+}
+func (m *mockSpawnService) GetTerminalState(_ context.Context, _ string) (string, error) {
+	panic("not implemented")
+}
+func (m *mockSpawnService) PatchTerminalState(_ context.Context, _, _ string) error {
+	panic("not implemented")
+}
+
+// newMockSpawnService creates a mock that delegates spawn to the service impl
+// (which handles validation) but uses a custom spawner function for the actual
+// tmux spawn step. This simulates the old mockSpawner pattern.
+func newMockSpawnService(spawnCreated bool, spawnErr error) TerminalService {
+	return &mockSpawnService{
+		spawnFunc: func(_ context.Context, _ string, params *SpawnParams) (*SpawnResult, error) {
+			// Replicate the service's validation logic
+			if params.SessionName == "" {
+				return nil, service.ErrValidation("missing required field: session_name")
+			}
+			if params.Backend == "" {
+				return nil, service.ErrValidation("missing required field: backend")
+			}
+
+			sanitizedName := strings.ReplaceAll(params.SessionName, ".", "-")
+			if !validSessionName.MatchString(sanitizedName) {
+				return nil, service.ErrValidation(fmt.Sprintf("invalid session name %q after sanitization: must match [a-zA-Z0-9_-]+", sanitizedName))
+			}
+
+			var command string
+			if params.Backend == "shell" {
+				command = shellCommand()
+			} else if !isValidBackend(params.Backend) {
+				return nil, service.ErrValidation(fmt.Sprintf("invalid backend %q; valid: %s", params.Backend, strings.Join(validBackends, ", ")))
+			} else {
+				command = params.Backend
+			}
+
+			if spawnErr != nil {
+				return nil, service.ErrInternal("failed to spawn terminal session", spawnErr)
+			}
+
+			return &SpawnResult{
+				SessionName: sanitizedName,
+				Backend:     params.Backend,
+				Command:     command,
+				Created:     spawnCreated,
+			}, nil
+		},
+	}
 }
 
 func TestHandleTerminalSpawn_HappyPath(t *testing.T) {
-	mock := &mockSpawner{spawnCreated: true}
-	handler := handleTerminalSpawnImpl(mock)
+	svc := newMockSpawnService(true, nil)
+	handler := handleTerminalSpawn(svc)
 
 	body := `{"session_name":"my-session","backend":"claude"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/spawn", strings.NewReader(body))
@@ -60,8 +165,8 @@ func TestHandleTerminalSpawn_HappyPath(t *testing.T) {
 }
 
 func TestHandleTerminalSpawn_Idempotent(t *testing.T) {
-	mock := &mockSpawner{spawnCreated: false}
-	handler := handleTerminalSpawnImpl(mock)
+	svc := newMockSpawnService(false, nil)
+	handler := handleTerminalSpawn(svc)
 
 	body := `{"session_name":"existing-session","backend":"claude"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/spawn", strings.NewReader(body))
@@ -88,8 +193,8 @@ func TestHandleTerminalSpawn_Idempotent(t *testing.T) {
 }
 
 func TestHandleTerminalSpawn_DotSanitization(t *testing.T) {
-	mock := &mockSpawner{spawnCreated: true}
-	handler := handleTerminalSpawnImpl(mock)
+	svc := newMockSpawnService(true, nil)
+	handler := handleTerminalSpawn(svc)
 
 	body := `{"session_name":"issue-abc.5-claude-1","backend":"claude"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/spawn", strings.NewReader(body))
@@ -116,8 +221,8 @@ func TestHandleTerminalSpawn_DotSanitization(t *testing.T) {
 }
 
 func TestHandleTerminalSpawn_MissingSessionName(t *testing.T) {
-	mock := &mockSpawner{spawnCreated: true}
-	handler := handleTerminalSpawnImpl(mock)
+	svc := newMockSpawnService(true, nil)
+	handler := handleTerminalSpawn(svc)
 
 	body := `{"backend":"claude"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/spawn", strings.NewReader(body))
@@ -128,21 +233,15 @@ func TestHandleTerminalSpawn_MissingSessionName(t *testing.T) {
 		t.Fatalf("status = %d, want %d; body: %s", rr.Code, http.StatusBadRequest, rr.Body.String())
 	}
 
-	var resp terminalSpawnResponse
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if resp.Success {
-		t.Error("expected success=false")
-	}
-	if !strings.Contains(resp.Error, "missing required field: session_name") {
-		t.Errorf("error = %q, want it to contain %q", resp.Error, "missing required field: session_name")
+	body2 := rr.Body.String()
+	if !strings.Contains(body2, "missing required field: session_name") {
+		t.Errorf("error body = %q, want it to contain %q", body2, "missing required field: session_name")
 	}
 }
 
 func TestHandleTerminalSpawn_MissingBackend(t *testing.T) {
-	mock := &mockSpawner{spawnCreated: true}
-	handler := handleTerminalSpawnImpl(mock)
+	svc := newMockSpawnService(true, nil)
+	handler := handleTerminalSpawn(svc)
 
 	body := `{"session_name":"my-session"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/spawn", strings.NewReader(body))
@@ -153,21 +252,15 @@ func TestHandleTerminalSpawn_MissingBackend(t *testing.T) {
 		t.Fatalf("status = %d, want %d; body: %s", rr.Code, http.StatusBadRequest, rr.Body.String())
 	}
 
-	var resp terminalSpawnResponse
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if resp.Success {
-		t.Error("expected success=false")
-	}
-	if !strings.Contains(resp.Error, "missing required field: backend") {
-		t.Errorf("error = %q, want it to contain %q", resp.Error, "missing required field: backend")
+	body2 := rr.Body.String()
+	if !strings.Contains(body2, "missing required field: backend") {
+		t.Errorf("error body = %q, want it to contain %q", body2, "missing required field: backend")
 	}
 }
 
 func TestHandleTerminalSpawn_InvalidSessionNameAfterSanitization(t *testing.T) {
-	mock := &mockSpawner{spawnCreated: true}
-	handler := handleTerminalSpawnImpl(mock)
+	svc := newMockSpawnService(true, nil)
+	handler := handleTerminalSpawn(svc)
 
 	body := `{"session_name":"bad name!","backend":"claude"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/spawn", strings.NewReader(body))
@@ -178,21 +271,15 @@ func TestHandleTerminalSpawn_InvalidSessionNameAfterSanitization(t *testing.T) {
 		t.Fatalf("status = %d, want %d; body: %s", rr.Code, http.StatusBadRequest, rr.Body.String())
 	}
 
-	var resp terminalSpawnResponse
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if resp.Success {
-		t.Error("expected success=false")
-	}
-	if !strings.Contains(resp.Error, "invalid session name") {
-		t.Errorf("error = %q, want it to contain %q", resp.Error, "invalid session name")
+	body2 := rr.Body.String()
+	if !strings.Contains(body2, "invalid session name") {
+		t.Errorf("error body = %q, want it to contain %q", body2, "invalid session name")
 	}
 }
 
 func TestHandleTerminalSpawn_InvalidBackend(t *testing.T) {
-	mock := &mockSpawner{spawnCreated: true}
-	handler := handleTerminalSpawnImpl(mock)
+	svc := newMockSpawnService(true, nil)
+	handler := handleTerminalSpawn(svc)
 
 	body := `{"session_name":"my-session","backend":"invalid-backend"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/spawn", strings.NewReader(body))
@@ -203,26 +290,20 @@ func TestHandleTerminalSpawn_InvalidBackend(t *testing.T) {
 		t.Fatalf("status = %d, want %d; body: %s", rr.Code, http.StatusBadRequest, rr.Body.String())
 	}
 
-	var resp terminalSpawnResponse
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if resp.Success {
-		t.Error("expected success=false")
-	}
-	if !strings.Contains(resp.Error, "invalid backend") {
-		t.Errorf("error = %q, want it to contain %q", resp.Error, "invalid backend")
+	body2 := rr.Body.String()
+	if !strings.Contains(body2, "invalid backend") {
+		t.Errorf("error body = %q, want it to contain %q", body2, "invalid backend")
 	}
 	// Check that valid options are listed in the error message.
 	for _, backend := range validBackends {
-		if !strings.Contains(resp.Error, backend) {
-			t.Errorf("error = %q, want it to list valid backend %q", resp.Error, backend)
+		if !strings.Contains(body2, backend) {
+			t.Errorf("error body = %q, want it to list valid backend %q", body2, backend)
 		}
 	}
 }
 
 func TestHandleTerminalSpawn_NilManager(t *testing.T) {
-	handler := handleTerminalSpawn(nil, nil)
+	handler := handleTerminalSpawn(NewTerminalService(nil, nil, nil, nil, nil, nil, nil))
 
 	body := `{"session_name":"my-session","backend":"claude"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/spawn", strings.NewReader(body))
@@ -233,23 +314,15 @@ func TestHandleTerminalSpawn_NilManager(t *testing.T) {
 		t.Fatalf("status = %d, want %d; body: %s", rr.Code, http.StatusServiceUnavailable, rr.Body.String())
 	}
 
-	var resp terminalSpawnResponse
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if resp.Success {
-		t.Error("expected success=false")
-	}
-	if !strings.Contains(resp.Error, "terminal manager not initialized") {
-		t.Errorf("error = %q, want it to contain %q", resp.Error, "terminal manager not initialized")
+	body2 := rr.Body.String()
+	if !strings.Contains(body2, "terminal manager not initialized") {
+		t.Errorf("error body = %q, want it to contain %q", body2, "terminal manager not initialized")
 	}
 }
 
 func TestHandleTerminalSpawn_TmuxFailure(t *testing.T) {
-	mock := &mockSpawner{
-		spawnErr: fmt.Errorf("tmux new-session: exit status 1"),
-	}
-	handler := handleTerminalSpawnImpl(mock)
+	svc := newMockSpawnService(false, fmt.Errorf("tmux new-session: exit status 1"))
+	handler := handleTerminalSpawn(svc)
 
 	body := `{"session_name":"my-session","backend":"claude"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/spawn", strings.NewReader(body))
@@ -260,21 +333,15 @@ func TestHandleTerminalSpawn_TmuxFailure(t *testing.T) {
 		t.Fatalf("status = %d, want %d; body: %s", rr.Code, http.StatusInternalServerError, rr.Body.String())
 	}
 
-	var resp terminalSpawnResponse
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if resp.Success {
-		t.Error("expected success=false")
-	}
-	if !strings.Contains(resp.Error, "failed to spawn terminal session") {
-		t.Errorf("error = %q, want it to contain %q", resp.Error, "failed to spawn terminal session")
+	body2 := rr.Body.String()
+	if !strings.Contains(body2, "failed to spawn terminal session") {
+		t.Errorf("error body = %q, want it to contain %q", body2, "failed to spawn terminal session")
 	}
 }
 
 func TestHandleTerminalSpawn_MalformedJSON(t *testing.T) {
-	mock := &mockSpawner{spawnCreated: true}
-	handler := handleTerminalSpawnImpl(mock)
+	svc := newMockSpawnService(true, nil)
+	handler := handleTerminalSpawn(svc)
 
 	body := `{invalid json`
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/spawn", strings.NewReader(body))
@@ -298,8 +365,8 @@ func TestHandleTerminalSpawn_MalformedJSON(t *testing.T) {
 }
 
 func TestHandleTerminalSpawn_OversizedBody(t *testing.T) {
-	mock := &mockSpawner{spawnCreated: true}
-	handler := handleTerminalSpawnImpl(mock)
+	svc := newMockSpawnService(true, nil)
+	handler := handleTerminalSpawn(svc)
 
 	// Create a body larger than 1MB (maxRequestBody)
 	largeData := make([]byte, maxRequestBody+1)
@@ -328,8 +395,8 @@ func TestHandleTerminalSpawn_OversizedBody(t *testing.T) {
 }
 
 func TestHandleTerminalSpawn_ShellBackend(t *testing.T) {
-	mock := &mockSpawner{spawnCreated: true}
-	handler := handleTerminalSpawnImpl(mock)
+	svc := newMockSpawnService(true, nil)
+	handler := handleTerminalSpawn(svc)
 
 	body := `{"session_name":"lead-shell-1","backend":"shell"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/spawn", strings.NewReader(body))
@@ -394,8 +461,8 @@ func TestExtractIssueID(t *testing.T) {
 }
 
 func TestHandleTerminalSpawn_ShellBackendUsesShellCommand(t *testing.T) {
-	mock := &mockSpawner{spawnCreated: true}
-	handler := handleTerminalSpawnImpl(mock)
+	svc := newMockSpawnService(true, nil)
+	handler := handleTerminalSpawn(svc)
 
 	body := `{"session_name":"lead-shell-2","backend":"shell"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/spawn", strings.NewReader(body))

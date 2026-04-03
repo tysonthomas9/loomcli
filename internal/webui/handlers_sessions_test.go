@@ -55,7 +55,7 @@ func createTestSession(t *testing.T, store *sessions.Store, taskID string) *sess
 
 func TestListTaskSessions_Empty(t *testing.T) {
 	store := newTestSessionStore(t)
-	handler := handleListTaskSessions(store)
+	handler := handleListTaskSessions(NewSessionService(store, nil))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/tasks/bd-abc123/sessions", nil)
 	req.SetPathValue("taskId", "bd-abc123")
@@ -89,7 +89,7 @@ func TestListTaskSessions_WithData(t *testing.T) {
 	store := newTestSessionStore(t)
 	sess := createTestSession(t, store, "bd-xyz789")
 
-	handler := handleListTaskSessions(store)
+	handler := handleListTaskSessions(NewSessionService(store, nil))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/tasks/bd-xyz789/sessions", nil)
 	req.SetPathValue("taskId", "bd-xyz789")
@@ -124,7 +124,7 @@ func TestListTaskSessions_WithData(t *testing.T) {
 
 func TestGetSession_NotFound(t *testing.T) {
 	store := newTestSessionStore(t)
-	handler := handleGetSession(store)
+	handler := handleGetSession(NewSessionService(store, nil))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/tasks/bd-abc/sessions/nonexistent-session", nil)
 	req.SetPathValue("taskId", "bd-abc")
@@ -150,7 +150,7 @@ func TestGetSession_Found(t *testing.T) {
 	store := newTestSessionStore(t)
 	sess := createTestSession(t, store, "bd-task1")
 
-	handler := handleGetSession(store)
+	handler := handleGetSession(NewSessionService(store, nil))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/tasks/bd-task1/sessions/"+sess.SessionID(), nil)
 	req.SetPathValue("taskId", "bd-task1")
@@ -198,7 +198,7 @@ func TestGetSessionTranscript(t *testing.T) {
 		t.Fatalf("AppendTranscript: %v", err)
 	}
 
-	handler := handleGetSessionTranscript(store)
+	handler := handleGetSessionTranscript(NewSessionService(store, nil))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/tasks/bd-task2/sessions/"+sess.SessionID()+"/transcript", nil)
 	req.SetPathValue("taskId", "bd-task2")
@@ -249,7 +249,7 @@ func TestGetSessionDiff_NoDiff(t *testing.T) {
 		t.Fatalf("Finalize: %v", err)
 	}
 
-	handler := handleGetSessionDiff(store)
+	handler := handleGetSessionDiff(NewSessionService(store, nil))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/tasks/bd-nodiff/sessions/"+sess.SessionID()+"/diff", nil)
 	req.SetPathValue("taskId", "bd-nodiff")
@@ -267,7 +267,7 @@ func TestGetSessionDiff_WithDiff(t *testing.T) {
 	store := newTestSessionStore(t)
 	sess := createTestSession(t, store, "bd-withdiff")
 
-	handler := handleGetSessionDiff(store)
+	handler := handleGetSessionDiff(NewSessionService(store, nil))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/tasks/bd-withdiff/sessions/"+sess.SessionID()+"/diff", nil)
 	req.SetPathValue("taskId", "bd-withdiff")
@@ -297,10 +297,10 @@ func TestNilStore_503(t *testing.T) {
 		handler http.HandlerFunc
 		path    string
 	}{
-		{"ListTaskSessions", handleListTaskSessions(nil), "/api/tasks/bd-abc/sessions"},
-		{"GetSession", handleGetSession(nil), "/api/tasks/bd-abc/sessions/some-session"},
-		{"GetSessionTranscript", handleGetSessionTranscript(nil), "/api/tasks/bd-abc/sessions/some-session/transcript"},
-		{"GetSessionDiff", handleGetSessionDiff(nil), "/api/tasks/bd-abc/sessions/some-session/diff"},
+		{"ListTaskSessions", handleListTaskSessions(NewSessionService(nil, nil)), "/api/tasks/bd-abc/sessions"},
+		{"GetSession", handleGetSession(NewSessionService(nil, nil)), "/api/tasks/bd-abc/sessions/some-session"},
+		{"GetSessionTranscript", handleGetSessionTranscript(NewSessionService(nil, nil)), "/api/tasks/bd-abc/sessions/some-session/transcript"},
+		{"GetSessionDiff", handleGetSessionDiff(NewSessionService(nil, nil)), "/api/tasks/bd-abc/sessions/some-session/diff"},
 	}
 
 	for _, h := range handlers {
@@ -325,10 +325,10 @@ func TestInvalidTaskId_400(t *testing.T) {
 		name    string
 		handler http.HandlerFunc
 	}{
-		{"ListTaskSessions", handleListTaskSessions(store)},
-		{"GetSession", handleGetSession(store)},
-		{"GetSessionTranscript", handleGetSessionTranscript(store)},
-		{"GetSessionDiff", handleGetSessionDiff(store)},
+		{"ListTaskSessions", handleListTaskSessions(NewSessionService(store, nil))},
+		{"GetSession", handleGetSession(NewSessionService(store, nil))},
+		{"GetSessionTranscript", handleGetSessionTranscript(NewSessionService(store, nil))},
+		{"GetSessionDiff", handleGetSessionDiff(NewSessionService(store, nil))},
 	}
 
 	for _, h := range handlers {
@@ -349,7 +349,7 @@ func TestInvalidTaskId_400(t *testing.T) {
 
 func TestListTaskSessions_EmptyArrayNotNull(t *testing.T) {
 	store := newTestSessionStore(t)
-	handler := handleListTaskSessions(store)
+	handler := handleListTaskSessions(NewSessionService(store, nil))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/tasks/bd-unknown/sessions", nil)
 	req.SetPathValue("taskId", "bd-unknown")
@@ -381,7 +381,7 @@ func TestGetSessionTranscript_EmptyEntries(t *testing.T) {
 	store := newTestSessionStore(t)
 	sess := createTestSession(t, store, "bd-noentries")
 
-	handler := handleGetSessionTranscript(store)
+	handler := handleGetSessionTranscript(NewSessionService(store, nil))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/tasks/bd-noentries/sessions/"+sess.SessionID()+"/transcript", nil)
 	req.SetPathValue("taskId", "bd-noentries")
@@ -430,7 +430,7 @@ func TestGetSession_IsActive(t *testing.T) {
 		t.Fatalf("write metadata: %v", err)
 	}
 
-	handler := handleGetSession(store)
+	handler := handleGetSession(NewSessionService(store, nil))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/tasks/bd-active/sessions/"+sess.SessionID(), nil)
 	req.SetPathValue("taskId", "bd-active")
