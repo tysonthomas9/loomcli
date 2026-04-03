@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 // --- Test 9: Auth service down ---
@@ -88,12 +90,12 @@ func TestResilience_JWKS500_CacheRetained(t *testing.T) {
 	t.Cleanup(jwksSrv.Close)
 
 	// Build cache manually so we can manipulate it
-	cache := newTestJWKSCache(t, jwksSrv.URL)
-	if err := cache.fetch(t.Context()); err != nil {
+	cache := middleware.NewJWKSCacheNoFetch(jwksSrv.URL, nil, nil)
+	if err := cache.Fetch(t.Context()); err != nil {
 		t.Fatalf("initial fetch failed: %v", err)
 	}
 
-	extAuthMW := NewExtAuthMiddleware(ExtAuthConfig{
+	extAuthMW := middleware.Auth(middleware.AuthConfig{
 		JWKSCache: cache,
 		Issuer:    "https://auth.example.com",
 		Audience:  "loom",
@@ -129,7 +131,7 @@ func TestResilience_JWKS500_CacheRetained(t *testing.T) {
 	mu.Unlock()
 
 	// Force a fetch attempt (will fail with 500)
-	_ = cache.fetch(t.Context())
+	_ = cache.Fetch(t.Context())
 
 	// Request with the same key should still work (cache retained)
 	token2 := signExtAuthJWT(t, claims, testRSAKey, "test-kid-1", jwt.SigningMethodRS256)
@@ -155,10 +157,10 @@ func TestResilience_JWKSTimeout_NoHang(t *testing.T) {
 	}))
 	t.Cleanup(slowSrv.Close)
 
-	// newTestJWKSCache uses a 5-second HTTP client timeout
-	cache := newTestJWKSCache(t, slowSrv.URL)
+	// Use 5-second HTTP client timeout so this test completes quickly
+	cache := middleware.NewJWKSCacheNoFetch(slowSrv.URL, &http.Client{Timeout: 5 * time.Second}, nil)
 
-	extAuthMW := NewExtAuthMiddleware(ExtAuthConfig{
+	extAuthMW := middleware.Auth(middleware.AuthConfig{
 		JWKSCache: cache,
 		Issuer:    "https://auth.example.com",
 		Audience:  "loom",
@@ -214,12 +216,12 @@ func TestResilience_KeyRotation_NewKeyAccepted(t *testing.T) {
 	}))
 	t.Cleanup(jwksSrv.Close)
 
-	cache := newTestJWKSCache(t, jwksSrv.URL)
-	if err := cache.fetch(t.Context()); err != nil {
+	cache := middleware.NewJWKSCacheNoFetch(jwksSrv.URL, nil, nil)
+	if err := cache.Fetch(t.Context()); err != nil {
 		t.Fatalf("initial fetch failed: %v", err)
 	}
 
-	extAuthMW := NewExtAuthMiddleware(ExtAuthConfig{
+	extAuthMW := middleware.Auth(middleware.AuthConfig{
 		JWKSCache: cache,
 		Issuer:    "https://auth.example.com",
 		Audience:  "loom",
@@ -289,12 +291,12 @@ func TestResilience_KeyRotation_OldKeyStillValid(t *testing.T) {
 	}))
 	t.Cleanup(jwksSrv.Close)
 
-	cache := newTestJWKSCache(t, jwksSrv.URL)
-	if err := cache.fetch(t.Context()); err != nil {
+	cache := middleware.NewJWKSCacheNoFetch(jwksSrv.URL, nil, nil)
+	if err := cache.Fetch(t.Context()); err != nil {
 		t.Fatalf("initial fetch failed: %v", err)
 	}
 
-	extAuthMW := NewExtAuthMiddleware(ExtAuthConfig{
+	extAuthMW := middleware.Auth(middleware.AuthConfig{
 		JWKSCache: cache,
 		Issuer:    "https://auth.example.com",
 		Audience:  "loom",
@@ -338,13 +340,13 @@ func TestResilience_KidStorm_CooldownEnforced(t *testing.T) {
 	jwksSrv := newTestJWKSServer(makeJWKSJSON(jk), &fetchCount)
 	t.Cleanup(jwksSrv.Close)
 
-	cache := newTestJWKSCache(t, jwksSrv.URL)
-	if err := cache.fetch(t.Context()); err != nil {
+	cache := middleware.NewJWKSCacheNoFetch(jwksSrv.URL, nil, nil)
+	if err := cache.Fetch(t.Context()); err != nil {
 		t.Fatalf("initial fetch failed: %v", err)
 	}
 	initialFetches := fetchCount.Load()
 
-	extAuthMW := NewExtAuthMiddleware(ExtAuthConfig{
+	extAuthMW := middleware.Auth(middleware.AuthConfig{
 		JWKSCache: cache,
 		Issuer:    "https://auth.example.com",
 		Audience:  "loom",

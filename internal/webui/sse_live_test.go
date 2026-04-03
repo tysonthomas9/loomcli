@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 // testWorkspaceID is the default workspace ID used in SSE live tests.
@@ -197,7 +198,7 @@ func newLiveSSEServer(t *testing.T, hub *SSEHub, getMutationsSince func(wsID str
 	wsMux.Handle("GET /api/workspaces/{ws}/events", handler)
 	// Wrap with a simple workspace existence check that always passes in tests
 	mux := http.NewServeMux()
-	mux.Handle("/api/workspaces/{ws}/", WorkspaceMiddleware(func(string) bool { return true }, wsMux))
+	mux.Handle("/api/workspaces/{ws}/", middleware.Workspace(func(string) bool { return true })(wsMux))
 
 	server := httptest.NewServer(mux)
 	t.Cleanup(func() {

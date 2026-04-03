@@ -1,4 +1,4 @@
-package webui
+package middleware
 
 import (
 	"math"
@@ -41,18 +41,18 @@ type ipLimiterEntry struct {
 	lastSeen      atomic.Int64 // unix timestamp
 }
 
-// rateLimiter manages per-IP rate limiters with background cleanup.
-type rateLimiter struct {
+// RateLimiter manages per-IP rate limiters with background cleanup.
+type RateLimiter struct {
 	clients     sync.Map // map[string]*ipLimiterEntry
 	config      RateLimitConfig
 	stopCleanup chan struct{}
 	stopOnce    sync.Once
 }
 
-// NewRateLimitMiddleware creates a per-IP rate limiting middleware and returns
-// both the rateLimiter (for graceful shutdown via Stop()) and the middleware function.
-func NewRateLimitMiddleware(config RateLimitConfig) (*rateLimiter, func(http.Handler) http.Handler) {
-	rl := &rateLimiter{
+// RateLimit creates a per-IP rate limiting middleware and returns
+// both the RateLimiter (for graceful shutdown via Stop()) and the middleware function.
+func RateLimit(config RateLimitConfig) (*RateLimiter, Middleware) {
+	rl := &RateLimiter{
 		config:      config,
 		stopCleanup: make(chan struct{}),
 	}
@@ -67,7 +67,7 @@ func NewRateLimitMiddleware(config RateLimitConfig) (*rateLimiter, func(http.Han
 				return
 			}
 
-			ip := extractClientIP(r)
+			ip := ExtractClientIP(r)
 			entry := rl.getOrCreate(ip)
 			entry.lastSeen.Store(time.Now().Unix())
 
@@ -82,7 +82,7 @@ func NewRateLimitMiddleware(config RateLimitConfig) (*rateLimiter, func(http.Han
 			if !limiter.Allow() {
 				retryAfter := int(math.Ceil(1.0 / float64(limiter.Limit())))
 				w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
-				respondJSON(w, http.StatusTooManyRequests, map[string]interface{}{
+				writeJSON(w, http.StatusTooManyRequests, map[string]interface{}{
 					"error":       "rate limit exceeded",
 					"retry_after": retryAfter,
 				})
@@ -97,14 +97,14 @@ func NewRateLimitMiddleware(config RateLimitConfig) (*rateLimiter, func(http.Han
 }
 
 // Stop terminates the background cleanup goroutine. Safe to call multiple times.
-func (rl *rateLimiter) Stop() {
+func (rl *RateLimiter) Stop() {
 	rl.stopOnce.Do(func() {
 		close(rl.stopCleanup)
 	})
 }
 
 // getOrCreate retrieves or lazily creates a limiter entry for the given IP.
-func (rl *rateLimiter) getOrCreate(ip string) *ipLimiterEntry {
+func (rl *RateLimiter) getOrCreate(ip string) *ipLimiterEntry {
 	if v, ok := rl.clients.Load(ip); ok {
 		return v.(*ipLimiterEntry)
 	}
@@ -118,7 +118,7 @@ func (rl *rateLimiter) getOrCreate(ip string) *ipLimiterEntry {
 }
 
 // cleanupLoop periodically evicts stale entries.
-func (rl *rateLimiter) cleanupLoop() {
+func (rl *RateLimiter) cleanupLoop() {
 	ticker := time.NewTicker(rl.config.CleanupInterval)
 	defer ticker.Stop()
 
@@ -133,7 +133,7 @@ func (rl *rateLimiter) cleanupLoop() {
 }
 
 // evictStale removes entries that haven't been seen within the TTL.
-func (rl *rateLimiter) evictStale() {
+func (rl *RateLimiter) evictStale() {
 	cutoff := time.Now().Add(-rl.config.EntryTTL).Unix()
 	rl.clients.Range(func(key, value interface{}) bool {
 		entry := value.(*ipLimiterEntry)

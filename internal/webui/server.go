@@ -20,6 +20,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/editor"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
@@ -32,7 +33,7 @@ type Server struct {
 	// Network
 	listener   net.Listener
 	actualPort int
-	corsConfig CORSConfig
+	corsConfig middleware.CORSConfig
 
 	// HTTP routing
 	mux *http.ServeMux
@@ -74,8 +75,8 @@ type Server struct {
 	sessionHistoryStore *sessionhistory.Store // nil if Redis unconfigured
 
 	// External auth
-	extAuthMiddleware func(http.Handler) http.Handler // nil = open mode
-	jwksCleanup       func()                          // nil if no JWKS cache
+	extAuthMiddleware middleware.Middleware // nil = open mode
+	jwksCleanup       func()                // nil if no JWKS cache
 
 	// Wrapped workspace lifecycle functions
 	wrappedCreateFn service.WorkspaceCreateFn
@@ -223,18 +224,24 @@ func (app *Server) Close() {
 // server encounters a fatal error. It performs graceful shutdown and stops
 // components in reverse-initialization order.
 func (app *Server) run(ctx context.Context) error { //nolint:funlen // server lifecycle method
-	// Middleware chain: rate-limit -> security -> auth -> CORS -> mux
-	corsMiddleware := NewCORSMiddleware(app.corsConfig)
+	// Middleware chain: recover -> log -> ratelimit -> security -> auth -> CORS -> mux
 	authMW := app.extAuthMiddleware
 	if authMW == nil {
 		authMW = func(next http.Handler) http.Handler { return next }
 	}
-	securityMiddleware := NewSecurityHeadersMiddleware(SecurityConfig{
-		HSTSEnabled:   app.config.HSTSEnabled,
-		ExtAuthOrigin: extractOrigin(app.config.ExtAuthURL),
-	})
-	rl, rateLimitMiddleware := NewRateLimitMiddleware(DefaultRateLimitConfig())
-	handler := h2c.NewHandler(NewRequestLogMiddleware(app.config.Logger)(rateLimitMiddleware(securityMiddleware(authMW(corsMiddleware(app.mux))))), &http2.Server{})
+	rl, rateLimitMW := middleware.RateLimit(middleware.DefaultRateLimitConfig())
+	chain := middleware.Chain(
+		middleware.Recover(app.config.Logger),
+		middleware.RequestLog(app.config.Logger),
+		rateLimitMW,
+		middleware.SecurityHeaders(middleware.SecurityConfig{
+			HSTSEnabled:   app.config.HSTSEnabled,
+			ExtAuthOrigin: middleware.ExtractOrigin(app.config.ExtAuthURL),
+		}),
+		authMW,
+		middleware.CORS(app.corsConfig),
+	)
+	handler := h2c.NewHandler(chain(app.mux), &http2.Server{})
 
 	// Shutdown context: when canceled, in-flight handlers abort quickly.
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())

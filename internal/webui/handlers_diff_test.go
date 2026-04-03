@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 // --- handleDiffCommits tests ---
@@ -24,7 +26,7 @@ func TestDiffCommits_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/commits", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handleDiffCommits(ops).ServeHTTP(w, req)
@@ -62,7 +64,7 @@ func TestDiffCommits_NoAgent(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/nonexistent/diff/commits", nil)
 	req.SetPathValue("name", "nonexistent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handleDiffCommits(ops).ServeHTTP(w, req)
@@ -80,7 +82,7 @@ func TestDiffCommits_MergeBaseError(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/commits", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handleDiffCommits(ops).ServeHTTP(w, req)
@@ -105,7 +107,7 @@ func TestDiffCommits_WithLimit(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/commits?limit=1", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handleDiffCommits(ops).ServeHTTP(w, req)
@@ -129,7 +131,7 @@ func TestDiffCommits_EmptyResult(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/commits", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handleDiffCommits(ops).ServeHTTP(w, req)
@@ -170,7 +172,7 @@ func TestDiffFiles_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/files?to=HEAD", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handleDiffFiles(ops).ServeHTTP(w, req)
@@ -198,7 +200,7 @@ func TestDiffFiles_MissingTo(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/files", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handleDiffFiles(ops).ServeHTTP(w, req)
@@ -213,7 +215,7 @@ func TestDiffFiles_InvalidRef(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/files?to=../bad", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handleDiffFiles(ops).ServeHTTP(w, req)
@@ -236,7 +238,7 @@ func TestDiffFiles_DefaultFrom(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/files?to=HEAD", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handleDiffFiles(ops).ServeHTTP(w, req)
@@ -260,7 +262,7 @@ func TestDiffFiles_ExplicitFrom(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/files?to=HEAD&from=abc123", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handleDiffFiles(ops).ServeHTTP(w, req)
@@ -294,7 +296,7 @@ func TestDiffFile_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/file?path=main.go&to=HEAD", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handleDiffFile(ops).ServeHTTP(w, req)
@@ -317,7 +319,7 @@ func TestDiffFile_MissingPath(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/file?to=HEAD", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handleDiffFile(ops).ServeHTTP(w, req)
@@ -332,7 +334,7 @@ func TestDiffFile_MissingTo(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/file?path=main.go", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handleDiffFile(ops).ServeHTTP(w, req)
@@ -347,7 +349,7 @@ func TestDiffFile_PathTraversal(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/file?path=../../etc/passwd&to=HEAD", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handleDiffFile(ops).ServeHTTP(w, req)
@@ -364,7 +366,7 @@ func TestDiffFile_DotPath(t *testing.T) {
 	for _, p := range []string{".", "./", "./."} {
 		req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/file?path="+p+"&to=HEAD", nil)
 		req.SetPathValue("name", "test-agent")
-		req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+		req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 		w := httptest.NewRecorder()
 
 		handleDiffFile(ops).ServeHTTP(w, req)
@@ -380,7 +382,7 @@ func TestDiffFile_AbsolutePath(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/file?path=/etc/passwd&to=HEAD", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handleDiffFile(ops).ServeHTTP(w, req)
@@ -403,7 +405,7 @@ func TestDiffFile_BinaryFile(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/file?path=image.png&to=HEAD", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handleDiffFile(ops).ServeHTTP(w, req)
@@ -438,7 +440,7 @@ func TestDiffFile_TooLarge(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/file?path=huge.sql&to=HEAD", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handleDiffFile(ops).ServeHTTP(w, req)
@@ -474,7 +476,7 @@ func TestDiffFiles_EmptyDiff(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/files?to=HEAD", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handleDiffFiles(ops).ServeHTTP(w, req)
@@ -509,7 +511,7 @@ func TestDiffFiles_DiffFilesError(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/files?to=HEAD", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handleDiffFiles(ops).ServeHTTP(w, req)
@@ -539,7 +541,7 @@ func TestDiffFiles_MergeBaseError(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/files?to=HEAD", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handleDiffFiles(ops).ServeHTTP(w, req)
@@ -555,7 +557,7 @@ func TestDiffFiles_InvalidFromRef(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/files?to=HEAD&from=../bad", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handleDiffFiles(ops).ServeHTTP(w, req)
@@ -575,7 +577,7 @@ func TestDiffFiles_NoAgent(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/nonexistent/diff/files?to=HEAD", nil)
 	req.SetPathValue("name", "nonexistent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handleDiffFiles(ops).ServeHTTP(w, req)
@@ -604,7 +606,7 @@ func TestDiffFile_InvalidPathChars(t *testing.T) {
 			url := "/api/agents/test-agent/diff/file?to=HEAD&path=" + tt.path
 			req := httptest.NewRequest(http.MethodGet, url, nil)
 			req.SetPathValue("name", "test-agent")
-			req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+			req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 			w := httptest.NewRecorder()
 
 			handleDiffFile(ops).ServeHTTP(w, req)
@@ -628,7 +630,7 @@ func TestDiffFile_DiffFilePatchError(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/file?path=main.go&to=HEAD", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handleDiffFile(ops).ServeHTTP(w, req)
@@ -655,7 +657,7 @@ func TestDiffFile_InvalidToRef(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/file?path=main.go&to=abc..def", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handleDiffFile(ops).ServeHTTP(w, req)
@@ -674,7 +676,7 @@ func TestDiffFile_MergeBaseError(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/file?path=main.go&to=HEAD", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handleDiffFile(ops).ServeHTTP(w, req)
@@ -702,7 +704,7 @@ func TestDiffFile_NoAgent(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/nonexistent/diff/file?path=main.go&to=HEAD", nil)
 	req.SetPathValue("name", "nonexistent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handleDiffFile(ops).ServeHTTP(w, req)
@@ -724,7 +726,7 @@ func TestDiffCommits_DiffCommitsError(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/commits", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handleDiffCommits(ops).ServeHTTP(w, req)
@@ -751,7 +753,7 @@ func TestDiffCommits_InvalidLimit(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/commits?limit=abc", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handleDiffCommits(ops).ServeHTTP(w, req)
@@ -772,7 +774,7 @@ func TestDiffCommits_ExplicitFrom(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/commits?from=deadbeef", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handleDiffCommits(ops).ServeHTTP(w, req)
@@ -791,7 +793,7 @@ func TestDiffCommits_InvalidFrom(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/commits?from=abc..def", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handleDiffCommits(ops).ServeHTTP(w, req)

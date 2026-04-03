@@ -10,6 +10,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 func TestFleetWSHandler_ResolvesStore(t *testing.T) {
@@ -42,7 +43,7 @@ func TestFleetWSHandler_ResolvesStore(t *testing.T) {
 
 	// Build a request with workspace in context
 	req := httptest.NewRequest("POST", "/api/workspaces/ws-test/fleet/register", nil)
-	ctx := WithWorkspace(req.Context(), "ws-test")
+	ctx := middleware.WithWorkspace(req.Context(), "ws-test")
 	req = req.WithContext(ctx)
 
 	rr := httptest.NewRecorder()
@@ -90,7 +91,7 @@ func TestFleetWSHandler_WorkspaceNotFound(t *testing.T) {
 	})
 
 	req := httptest.NewRequest("POST", "/api/workspaces/unknown-ws/fleet/register", nil)
-	ctx := WithWorkspace(req.Context(), "unknown-ws")
+	ctx := middleware.WithWorkspace(req.Context(), "unknown-ws")
 	req = req.WithContext(ctx)
 
 	rr := httptest.NewRecorder()

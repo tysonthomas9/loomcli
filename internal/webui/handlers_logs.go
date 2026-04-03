@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 // parseBeforeLine extracts and validates the before_line query parameter.
@@ -33,7 +35,7 @@ var validPhase = regexp.MustCompile(`^(planning|implementation)$`)
 // Response: {success: true, data: {lines: [...], lineCount: N}}
 func handleGetAgentLog(svc AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		wsID := WorkspaceFromContext(r.Context())
+		wsID := middleware.WorkspaceFromContext(r.Context())
 		agentName := r.PathValue("name")
 
 		// Parse lines parameter (HTTP concern)
@@ -69,7 +71,7 @@ func handleGetAgentLog(svc AgentService) http.HandlerFunc {
 func handleListTaskPhases() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Get workspace ID from context (injected by WorkspaceMiddleware)
-		wsID := WorkspaceFromContext(r.Context())
+		wsID := middleware.WorkspaceFromContext(r.Context())
 
 		// Get task ID from path
 		taskID := r.PathValue("id")
@@ -117,7 +119,7 @@ func handleListTaskPhases() http.HandlerFunc {
 func handleGetTaskLog() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Get workspace ID from context (injected by WorkspaceMiddleware)
-		wsID := WorkspaceFromContext(r.Context())
+		wsID := middleware.WorkspaceFromContext(r.Context())
 
 		// Get task ID from path
 		taskID := r.PathValue("id")

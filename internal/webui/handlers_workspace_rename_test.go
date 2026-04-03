@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -15,7 +16,7 @@ import (
 func renameRequest(wsID, newName string) *http.Request {
 	body := strings.NewReader(`{"new_name":"` + newName + `"}`)
 	req := httptest.NewRequest(http.MethodPatch, "/api/workspaces/"+wsID+"/name", body)
-	ctx := WithWorkspace(req.Context(), wsID)
+	ctx := middleware.WithWorkspace(req.Context(), wsID)
 	return req.WithContext(ctx)
 }
 
@@ -123,7 +124,7 @@ func TestWorkspaceRename_InvalidRequestBody(t *testing.T) {
 
 	body := strings.NewReader(`{invalid json}`)
 	req := httptest.NewRequest(http.MethodPatch, "/api/workspaces/uuid/name", body)
-	ctx := WithWorkspace(req.Context(), "some-uuid")
+	ctx := middleware.WithWorkspace(req.Context(), "some-uuid")
 	req = req.WithContext(ctx)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)

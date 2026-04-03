@@ -15,6 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 // newTestRegistry creates a WorkspaceRegistry with all supporting infrastructure
@@ -22,7 +23,7 @@ import (
 // the returned cleanup function.
 func newTestRegistry(t *testing.T) (*WorkspaceRegistry, *daemon.MultiPool, *MultiWorkspaceSubscriber) {
 	t.Helper()
-	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 10)
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 10)
 	hub := NewSSEHub()
 	go hub.Run()
 	t.Cleanup(func() { hub.Stop() })

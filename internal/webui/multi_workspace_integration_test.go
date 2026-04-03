@@ -13,6 +13,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -110,7 +111,7 @@ func waitForClientCount(t *testing.T, hub *SSEHub, expected int) {
 // --- Test 1: Stale Workspace UUID ---
 
 func TestMultiWorkspace_StaleWorkspaceUUID(t *testing.T) {
-	mp := daemon.NewMultiPool(WorkspaceFromContext, 10)
+	mp := daemon.NewMultiPool(middleware.WorkspaceFromContext, 10)
 	poolAlpha := &trackingMockPool{}
 	if err := mp.Register("ws-alpha", poolAlpha); err != nil {
 		t.Fatal(err)
@@ -124,7 +125,7 @@ func TestMultiWorkspace_StaleWorkspaceUUID(t *testing.T) {
 	mux := http.NewServeMux()
 	wsMux := http.NewServeMux()
 	wsMux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}", workspaceProbeHandler(mp))
-	mux.Handle("/api/workspaces/{ws}/", WorkspaceMiddleware(wsExists, wsMux))
+	mux.Handle("/api/workspaces/{ws}/", middleware.Workspace(wsExists)(wsMux))
 
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
@@ -178,13 +179,13 @@ func workspaceProbeHandler(mp *daemon.MultiPool) http.HandlerFunc {
 			return
 		}
 		mp.Put(client)
-		wsID := WorkspaceFromContext(r.Context())
+		wsID := middleware.WorkspaceFromContext(r.Context())
 		respondJSON(w, http.StatusOK, map[string]string{"workspace": wsID})
 	}
 }
 
 func TestMultiWorkspace_RenameWhileRunning(t *testing.T) {
-	mp := daemon.NewMultiPool(WorkspaceFromContext, 10)
+	mp := daemon.NewMultiPool(middleware.WorkspaceFromContext, 10)
 	pool := &trackingMockPool{}
 	if err := mp.Register("original-name", pool); err != nil {
 		t.Fatal(err)
@@ -197,7 +198,7 @@ func TestMultiWorkspace_RenameWhileRunning(t *testing.T) {
 	mux := http.NewServeMux()
 	wsMux := http.NewServeMux()
 	wsMux.HandleFunc("GET /api/workspaces/{ws}/probe", workspaceProbeHandler(mp))
-	mux.Handle("/api/workspaces/{ws}/", WorkspaceMiddleware(wsExists, wsMux))
+	mux.Handle("/api/workspaces/{ws}/", middleware.Workspace(wsExists)(wsMux))
 
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
@@ -254,7 +255,7 @@ func TestMultiWorkspace_RenameWhileRunning(t *testing.T) {
 // --- Test 3: Delete While Running ---
 
 func TestMultiWorkspace_DeleteWhileRunning(t *testing.T) {
-	mp := daemon.NewMultiPool(WorkspaceFromContext, 10)
+	mp := daemon.NewMultiPool(middleware.WorkspaceFromContext, 10)
 	pool := &trackingMockPool{}
 	if err := mp.Register("ws-to-delete", pool); err != nil {
 		t.Fatal(err)
@@ -274,7 +275,7 @@ func TestMultiWorkspace_DeleteWhileRunning(t *testing.T) {
 	}
 
 	// Verify Get fails with ErrWorkspaceNotRegistered
-	ctx := WithWorkspace(context.Background(), "ws-to-delete")
+	ctx := middleware.WithWorkspace(context.Background(), "ws-to-delete")
 	_, err := mp.Get(ctx)
 	if err == nil {
 		t.Fatal("expected error after deregister")
@@ -302,7 +303,7 @@ func TestMultiWorkspace_DeleteWhileRunning(t *testing.T) {
 // --- Test 4: Duplicate Agent Names ---
 
 func TestMultiWorkspace_DuplicateAgentNames(t *testing.T) {
-	mp := daemon.NewMultiPool(WorkspaceFromContext, 10)
+	mp := daemon.NewMultiPool(middleware.WorkspaceFromContext, 10)
 	poolAlpha := &trackingMockPool{}
 	poolBeta := &trackingMockPool{}
 	if err := mp.Register("ws-alpha", poolAlpha); err != nil {
@@ -319,7 +320,7 @@ func TestMultiWorkspace_DuplicateAgentNames(t *testing.T) {
 	mux := http.NewServeMux()
 	wsMux := http.NewServeMux()
 	wsMux.HandleFunc("GET /api/workspaces/{ws}/probe", workspaceProbeHandler(mp))
-	mux.Handle("/api/workspaces/{ws}/", WorkspaceMiddleware(wsExists, wsMux))
+	mux.Handle("/api/workspaces/{ws}/", middleware.Workspace(wsExists)(wsMux))
 
 	ts := httptest.NewServer(mux)
 	defer ts.Close()

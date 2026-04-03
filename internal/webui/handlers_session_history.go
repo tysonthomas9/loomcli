@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 )
 
@@ -23,7 +24,7 @@ func handleListSessionHistory(store *sessionhistory.Store) http.HandlerFunc {
 			return
 		}
 
-		wsID := WorkspaceFromContext(r.Context())
+		wsID := middleware.WorkspaceFromContext(r.Context())
 		issueID := r.PathValue("issueId")
 		if err := sessionhistory.ValidateIssueID(issueID); err != nil {
 			respondJSON(w, http.StatusBadRequest, map[string]interface{}{
@@ -96,7 +97,7 @@ func handleGetSessionScrollback(store *sessionhistory.Store) http.HandlerFunc {
 			return
 		}
 
-		wsID := WorkspaceFromContext(r.Context())
+		wsID := middleware.WorkspaceFromContext(r.Context())
 		issueID := r.PathValue("issueId")
 		if err := sessionhistory.ValidateIssueID(issueID); err != nil {
 			respondJSON(w, http.StatusBadRequest, map[string]interface{}{

@@ -10,6 +10,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
@@ -19,7 +20,7 @@ import (
 // the main mux and return 404 from the SPA catch-all.
 func TestTerminalStateRouteMigration_OldFlatRoutesReturn404(t *testing.T) {
 	// Create dependencies needed for route registration.
-	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 1)
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
 	_ = multiPool.Register("test-ws", &stubPool{})
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
 
@@ -79,7 +80,7 @@ func TestTerminalStateRouteMigration_OldFlatRoutesReturn404(t *testing.T) {
 // that the workspace-scoped equivalents of the migrated terminal routes are
 // registered and handled (i.e. they do NOT fall through to the SPA catch-all).
 func TestTerminalStateRouteMigration_NewWorkspaceScopedRoutesRegistered(t *testing.T) {
-	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 1)
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
 	_ = multiPool.Register("test-ws", &stubPool{})
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
 
@@ -142,7 +143,7 @@ func TestTerminalStateRouteMigration_NewWorkspaceScopedRoutesRegistered(t *testi
 // the workspace-scoped routes return 404 when the workspace ID is not recognized
 // by the WorkspaceMiddleware.
 func TestTerminalStateRouteMigration_UnknownWorkspaceReturns404(t *testing.T) {
-	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 1)
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
 	_ = multiPool.Register("test-ws", &stubPool{})
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
 
@@ -193,7 +194,7 @@ func TestTerminalStateRouteMigration_UnknownWorkspaceReturns404(t *testing.T) {
 // workspace-scoped terminal state endpoints actually serve JSON responses,
 // confirming they are wired to the correct handlers (not just registered).
 func TestTerminalStateRouteMigration_StateEndpointsReturnJSON(t *testing.T) {
-	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 1)
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
 	_ = multiPool.Register("test-ws", &stubPool{})
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
 

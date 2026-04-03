@@ -11,6 +11,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 )
 
@@ -25,7 +26,7 @@ func setupSessionHistoryStore(t *testing.T) *sessionhistory.Store {
 }
 
 func withSHWSContext(r *http.Request, wsID string) *http.Request {
-	return r.WithContext(WithWorkspace(r.Context(), wsID))
+	return r.WithContext(middleware.WithWorkspace(r.Context(), wsID))
 }
 
 func TestHandleListSessionHistory_ReturnsRecords(t *testing.T) {

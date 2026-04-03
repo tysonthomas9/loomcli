@@ -8,6 +8,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 // TestSessionRouteMigration_OldFlatRoutesReturn404 verifies that the old flat
@@ -21,7 +22,7 @@ func TestSessionRouteMigration_OldFlatRoutesReturn404(t *testing.T) {
 	// "handler returns error").
 	sessStore := newTestSessionStore(t)
 
-	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 1)
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
 	_ = multiPool.Register("test-ws", &stubPool{})
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
 
@@ -65,7 +66,7 @@ func TestSessionRouteMigration_OldFlatRoutesReturn404(t *testing.T) {
 func TestSessionRouteMigration_WorkspaceScopedRoutesRegistered(t *testing.T) {
 	sessStore := newTestSessionStore(t)
 
-	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 1)
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
 	_ = multiPool.Register("test-ws", &stubPool{})
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
 
@@ -115,7 +116,7 @@ func TestSessionRouteMigration_WorkspaceScopedRoutesRegistered(t *testing.T) {
 func TestSessionRouteMigration_UnknownWorkspaceReturns404(t *testing.T) {
 	sessStore := newTestSessionStore(t)
 
-	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 1)
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
 	_ = multiPool.Register("test-ws", &stubPool{})
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
 
@@ -153,7 +154,7 @@ func TestSessionRouteMigration_UnknownWorkspaceReturns404(t *testing.T) {
 func TestSessionRouteMigration_WorkspaceScopedListReturnsJSON(t *testing.T) {
 	sessStore := newTestSessionStore(t)
 
-	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 1)
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
 	_ = multiPool.Register("test-ws", &stubPool{})
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
 
@@ -201,7 +202,7 @@ func TestSessionRouteMigration_WorkspaceScopedSessionWithData(t *testing.T) {
 	sessStore := newTestSessionStore(t)
 	sess := createTestSession(t, sessStore, "bd-routed")
 
-	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 1)
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
 	_ = multiPool.Register("test-ws", &stubPool{})
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
 
@@ -238,7 +239,7 @@ func TestSessionRouteMigration_WorkspaceScopedDiffEndpoint(t *testing.T) {
 	sessStore := newTestSessionStore(t)
 	sess := createTestSession(t, sessStore, "bd-diffrouted")
 
-	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 1)
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
 	_ = multiPool.Register("test-ws", &stubPool{})
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
 
@@ -282,7 +283,7 @@ func TestSessionRouteMigration_WorkspaceScopedTranscriptEndpoint(t *testing.T) {
 		t.Fatalf("AppendTranscript: %v", err)
 	}
 
-	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 1)
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
 	_ = multiPool.Register("test-ws", &stubPool{})
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
 

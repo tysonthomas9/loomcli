@@ -8,13 +8,14 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // deleteRequest creates a DELETE request with workspace UUID in context.
 func deleteRequest(wsID string) *http.Request {
 	req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/"+wsID, nil)
-	ctx := WithWorkspace(req.Context(), wsID)
+	ctx := middleware.WithWorkspace(req.Context(), wsID)
 	return req.WithContext(ctx)
 }
 

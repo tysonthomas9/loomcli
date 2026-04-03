@@ -1,4 +1,4 @@
-package webui
+package middleware
 
 import (
 	"bufio"
@@ -57,11 +57,11 @@ func (r *responseRecorder) Unwrap() http.ResponseWriter {
 	return r.ResponseWriter
 }
 
-// NewRequestLogMiddleware returns middleware that logs method, path, status,
+// RequestLog returns middleware that logs method, path, status,
 // duration_ms, and client IP for every HTTP request using slog.
 // Health-check paths (/health, /api/health) are excluded to avoid probe spam.
 // If logger is nil, slog.Default() is used.
-func NewRequestLogMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
+func RequestLog(logger *slog.Logger) Middleware {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -83,7 +83,7 @@ func NewRequestLogMiddleware(logger *slog.Logger) func(http.Handler) http.Handle
 				slog.String("path", r.URL.Path),
 				slog.Int("status", rec.statusCode),
 				slog.Float64("duration_ms", float64(duration.Microseconds())/1000.0),
-				slog.String("ip", extractClientIP(r)),
+				slog.String("ip", ExtractClientIP(r)),
 			)
 		})
 	}

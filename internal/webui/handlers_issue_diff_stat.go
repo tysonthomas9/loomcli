@@ -10,6 +10,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 // DiffStatResponse is the JSON shape for GET /api/issues/{id}/git/diff-stat.
@@ -64,7 +65,7 @@ func handleGetIssueDiffStat(pool daemon.Pool, gitOps GitOps) http.HandlerFunc {
 		}
 
 		// Resolve assignee to worktree (workspace-scoped).
-		wsID := WorkspaceFromContext(r.Context())
+		wsID := middleware.WorkspaceFromContext(r.Context())
 		wt, err := gitOps.ResolveAgentWorktree(wsID, issue.Assignee)
 		if err != nil {
 			respondError(w, http.StatusNotFound, fmt.Sprintf("agent worktree not found for %s", issue.Assignee))

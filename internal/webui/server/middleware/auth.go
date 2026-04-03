@@ -1,4 +1,4 @@
-package webui
+package middleware
 
 import (
 	"context"
@@ -33,8 +33,8 @@ func (u UserIdentity) String() string {
 // userIdentityContextKey is the unexported context key for storing UserIdentity.
 type userIdentityContextKey struct{}
 
-// ExtAuthConfig holds configuration for the external auth middleware.
-type ExtAuthConfig struct {
+// AuthConfig holds configuration for the external auth middleware.
+type AuthConfig struct {
 	JWKSCache *JWKSCache   // JWKS cache for public key lookup; nil = passthrough (open mode)
 	Issuer    string       // Expected JWT issuer (validated against "iss" claim)
 	Audience  string       // Expected JWT audience (validated against "aud" claim)
@@ -107,10 +107,10 @@ func (v *extAuthValidator) tryKeys(tokenStr string, keys []*rsa.PublicKey) (*ext
 	return nil, lastErr
 }
 
-// NewExtAuthMiddleware creates a middleware that validates Bearer JWTs from an
+// Auth creates a middleware that validates Bearer JWTs from an
 // external auth service using cached JWKS public keys. When cfg.JWKSCache is nil,
 // returns a passthrough middleware (open mode).
-func NewExtAuthMiddleware(cfg ExtAuthConfig) func(http.Handler) http.Handler {
+func Auth(cfg AuthConfig) Middleware {
 	if cfg.JWKSCache == nil {
 		return func(next http.Handler) http.Handler {
 			return next
@@ -143,13 +143,13 @@ func NewExtAuthMiddleware(cfg ExtAuthConfig) func(http.Handler) http.Handler {
 
 			tokenStr := extractBearerToken(r)
 			if tokenStr == "" {
-				respondError(w, http.StatusUnauthorized, "authentication required")
+				writeJSONError(w, http.StatusUnauthorized, "authentication required")
 				return
 			}
 
 			claims, status, msg := v.validateToken(tokenStr)
 			if claims == nil {
-				respondError(w, status, msg)
+				writeJSONError(w, status, msg)
 				return
 			}
 
@@ -162,6 +162,13 @@ func NewExtAuthMiddleware(cfg ExtAuthConfig) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// WithUserIdentity returns a new context with the given UserIdentity set.
+// This is primarily used by tests that need to inject an identity without
+// going through the full auth middleware.
+func WithUserIdentity(ctx context.Context, identity UserIdentity) context.Context {
+	return context.WithValue(ctx, userIdentityContextKey{}, identity)
 }
 
 // UserIdentityFromContext extracts UserIdentity from the request context.
@@ -215,32 +222,4 @@ func classifyJWTError(err error) string {
 // isTokenMalformed checks if a JWT parse error indicates a malformed token.
 func isTokenMalformed(err error) bool {
 	return errors.Is(err, jwt.ErrTokenMalformed)
-}
-
-// initExtAuth initializes external JWT auth from ServerConfig. Returns
-// the middleware (nil if unconfigured) and a cleanup function for the JWKS cache.
-func initExtAuth(config ServerConfig) (func(http.Handler) http.Handler, func()) {
-	if config.ExtAuthURL == "" {
-		return nil, nil
-	}
-	jwksURL := config.ExtAuthURL + "/api/auth/jwks"
-	var jwksClient *http.Client
-	if config.ExtAuthAllowInsecure {
-		jwksClient = newJWKSHTTPClient(safeDialContext(true))
-	}
-	jwksCache := NewJWKSCache(jwksURL, jwksClient, config.Logger)
-
-	mw := NewExtAuthMiddleware(ExtAuthConfig{
-		JWKSCache: jwksCache,
-		Issuer:    config.ExtAuthIssuer,
-		Audience:  config.ExtAuthAudience,
-		Logger:    config.Logger,
-	})
-	slog.Info("external auth enabled",
-		"component", "auth",
-		"auth_url", config.ExtAuthURL,
-		"jwks_url", jwksURL,
-		"issuer", config.ExtAuthIssuer,
-	)
-	return mw, jwksCache.Stop
 }

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 )
 
@@ -147,7 +148,7 @@ func handleTerminalSpawnImplWithHistory(manager terminalSpawner, sessionHistoryS
 // recordSpawnOwnershipAndHistory records workspace ownership and session history
 // for a newly created terminal session.
 func recordSpawnOwnershipAndHistory(r *http.Request, manager terminalSpawner, sessionHistoryStore *sessionhistory.Store, sessionName, backend string) {
-	wsID := WorkspaceFromContext(r.Context())
+	wsID := middleware.WorkspaceFromContext(r.Context())
 
 	// Record workspace ownership immediately (before WebSocket attach).
 	if wsID != "" {

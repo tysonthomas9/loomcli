@@ -12,6 +12,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 const testWSID = "test-ws-uuid"
@@ -31,7 +32,7 @@ func setupIssueTabsTest(t *testing.T) (*issuetabs.Store, *SSEHub) {
 
 // withWSContext adds workspace context to a request (simulating WorkspaceMiddleware).
 func withWSContext(r *http.Request, wsID string) *http.Request {
-	return r.WithContext(WithWorkspace(r.Context(), wsID))
+	return r.WithContext(middleware.WithWorkspace(r.Context(), wsID))
 }
 
 // ── GET handler tests ─────────────────────────────────────────────────────────

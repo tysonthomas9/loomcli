@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 // grabEphemeralPort asks the OS to assign a free port, then releases it and
@@ -314,9 +316,9 @@ func TestExtractOrigin(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := extractOrigin(tt.rawURL)
+			got := middleware.ExtractOrigin(tt.rawURL)
 			if got != tt.want {
-				t.Errorf("extractOrigin(%q) = %q, want %q", tt.rawURL, got, tt.want)
+				t.Errorf("middleware.ExtractOrigin(%q) = %q, want %q", tt.rawURL, got, tt.want)
 			}
 		})
 	}

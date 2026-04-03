@@ -19,6 +19,7 @@ import (
 
 	"nhooyr.io/websocket"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
@@ -1771,7 +1772,7 @@ func TestHandleTerminalWS_SSEBroadcastOnIssueSession(t *testing.T) {
 	innerHandler := handleTerminalWS(manager, nil, nil, "", nil, store, hub)
 	// Inject workspace into context (WorkspaceMiddleware does this in production).
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := WithWorkspace(r.Context(), "default")
+		ctx := middleware.WithWorkspace(r.Context(), "default")
 		innerHandler.ServeHTTP(w, r.WithContext(ctx))
 	})
 	server := httptest.NewServer(handler)
@@ -1849,7 +1850,7 @@ func TestHandleTerminalWS_NoSSEBroadcastWithoutIssueID(t *testing.T) {
 
 	innerHandler := handleTerminalWS(manager, nil, nil, "", nil, store, hub)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := WithWorkspace(r.Context(), "default")
+		ctx := middleware.WithWorkspace(r.Context(), "default")
 		innerHandler.ServeHTTP(w, r.WithContext(ctx))
 	})
 	server := httptest.NewServer(handler)
@@ -1939,7 +1940,7 @@ func TestHandleTerminalWS_NoSSEBroadcastWhenMetadataNotFound(t *testing.T) {
 
 	innerHandler := handleTerminalWS(manager, nil, nil, "", nil, store, hub)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := WithWorkspace(r.Context(), "default")
+		ctx := middleware.WithWorkspace(r.Context(), "default")
 		innerHandler.ServeHTTP(w, r.WithContext(ctx))
 	})
 	server := httptest.NewServer(handler)
@@ -2014,7 +2015,7 @@ func TestHandleTerminalWS_SSEBroadcastNonDefaultWorkspace(t *testing.T) {
 	innerHandler := handleTerminalWS(manager, nil, nil, "", nil, store, hub)
 	// Inject workspace into context (WorkspaceMiddleware does this in production).
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := WithWorkspace(r.Context(), "myproject")
+		ctx := middleware.WithWorkspace(r.Context(), "myproject")
 		innerHandler.ServeHTTP(w, r.WithContext(ctx))
 	})
 	server := httptest.NewServer(handler)
@@ -2100,7 +2101,7 @@ func TestHandleTerminalWS_SSEBroadcastNoWorkspaceParamUsesDefault(t *testing.T) 
 	innerHandler := handleTerminalWS(manager, nil, nil, "", nil, store, hub)
 	// Inject "default" workspace into context (WorkspaceMiddleware does this in production).
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := WithWorkspace(r.Context(), "default")
+		ctx := middleware.WithWorkspace(r.Context(), "default")
 		innerHandler.ServeHTTP(w, r.WithContext(ctx))
 	})
 	server := httptest.NewServer(handler)

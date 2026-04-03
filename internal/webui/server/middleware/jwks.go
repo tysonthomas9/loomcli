@@ -1,4 +1,4 @@
-package webui
+package middleware
 
 import (
 	"context"
@@ -63,8 +63,28 @@ type JWKSCache struct {
 	done chan struct{}
 }
 
+// NewJWKSCacheNoFetch creates a JWKSCache without an initial fetch or background
+// refresh goroutine. The caller must call Fetch() to populate keys. This is
+// intended for tests that need fine-grained control over fetch timing.
+func NewJWKSCacheNoFetch(endpoint string, client *http.Client, logger *slog.Logger) *JWKSCache {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	if client == nil {
+		client = &http.Client{Timeout: jwksHTTPTimeout}
+	}
+	return &JWKSCache{
+		endpoint: endpoint,
+		client:   client,
+		logger:   logger,
+		keys:     make(map[string]*rsa.PublicKey),
+		negCache: make(map[string]time.Time),
+		done:     make(chan struct{}),
+	}
+}
+
 // NewJWKSCache creates a new JWKS cache that fetches keys from the given endpoint.
-// If client is nil, a default client with SSRF protection is created.
+// If client is nil, a default client with a 10s timeout is created.
 // If logger is nil, slog.Default() is used.
 // Performs an initial synchronous fetch (logs warning on failure, doesn't fail startup).
 // Starts a background refresh goroutine.
@@ -75,9 +95,6 @@ func NewJWKSCache(endpoint string, client *http.Client, logger *slog.Logger) *JW
 	if client == nil {
 		client = &http.Client{
 			Timeout: jwksHTTPTimeout,
-			Transport: &http.Transport{
-				DialContext: safeDialContext(false),
-			},
 		}
 	}
 
@@ -181,6 +198,11 @@ func (c *JWKSCache) GetKey(kid string) ([]*rsa.PublicKey, error) {
 	c.negCache[kid] = time.Now().Add(jwksNegativeCacheTTL)
 	c.mu.Unlock()
 	return nil, fmt.Errorf("unknown kid %q after JWKS refresh", kid)
+}
+
+// Fetch triggers a synchronous key refresh from the JWKS endpoint.
+func (c *JWKSCache) Fetch(ctx context.Context) error {
+	return c.fetch(ctx)
 }
 
 // Stop shuts down the background refresh goroutine.
@@ -319,9 +341,9 @@ func parseJWK(key jwkKey) (*rsa.PublicKey, error) {
 	return pubKey, nil
 }
 
-// newJWKSHTTPClient creates an HTTP client suitable for JWKS fetching with SSRF protection.
+// NewJWKSHTTPClient creates an HTTP client suitable for JWKS fetching.
 // Accessible from same-package tests to allow custom dial functions.
-func newJWKSHTTPClient(dialCtx func(ctx context.Context, network, addr string) (net.Conn, error)) *http.Client {
+func NewJWKSHTTPClient(dialCtx func(ctx context.Context, network, addr string) (net.Conn, error)) *http.Client {
 	return &http.Client{
 		Timeout: jwksHTTPTimeout,
 		Transport: &http.Transport{

@@ -12,6 +12,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
@@ -31,7 +32,7 @@ func setupTabMetaTest(t *testing.T) (*tabmeta.Store, *SSEHub) {
 // withWorkspaceCtx injects a workspace ID into the request context,
 // simulating what WorkspaceMiddleware does for workspace-scoped routes.
 func withWorkspaceCtx(r *http.Request, ws string) *http.Request {
-	return r.WithContext(WithWorkspace(r.Context(), ws))
+	return r.WithContext(middleware.WithWorkspace(r.Context(), ws))
 }
 
 func TestHandleListTerminalTabs_NilStore(t *testing.T) {

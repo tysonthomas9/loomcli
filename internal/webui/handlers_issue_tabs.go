@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 // issueTabResponse wraps issue tab API responses.
@@ -28,7 +29,7 @@ func handleGetIssueTabs(store *issuetabs.Store, manager *TerminalManager) http.H
 			return
 		}
 
-		wsID := WorkspaceFromContext(r.Context())
+		wsID := middleware.WorkspaceFromContext(r.Context())
 		issueID := r.PathValue("issueId")
 		if err := issuetabs.ValidateIssueID(issueID); err != nil {
 			respondJSON(w, http.StatusBadRequest, issueTabResponse{
@@ -102,7 +103,7 @@ func handleSaveIssueTabs(store *issuetabs.Store, hub *SSEHub) http.HandlerFunc {
 			return
 		}
 
-		wsID := WorkspaceFromContext(r.Context())
+		wsID := middleware.WorkspaceFromContext(r.Context())
 		issueID := r.PathValue("issueId")
 		if err := issuetabs.ValidateIssueID(issueID); err != nil {
 			respondJSON(w, http.StatusBadRequest, issueTabResponse{
@@ -165,7 +166,7 @@ func handleDeleteIssueTabs(store *issuetabs.Store) http.HandlerFunc {
 			return
 		}
 
-		wsID := WorkspaceFromContext(r.Context())
+		wsID := middleware.WorkspaceFromContext(r.Context())
 		issueID := r.PathValue("issueId")
 		if err := issuetabs.ValidateIssueID(issueID); err != nil {
 			respondJSON(w, http.StatusBadRequest, issueTabResponse{

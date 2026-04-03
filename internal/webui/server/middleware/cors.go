@@ -1,4 +1,4 @@
-package webui
+package middleware
 
 import (
 	"net/http"
@@ -13,9 +13,9 @@ type CORSConfig struct {
 	RejectDisallowed bool     // When true, reject non-preflight requests from disallowed origins on /api/ routes (always active in internal/webui)
 }
 
-// NewCORSMiddleware creates a middleware that adds CORS headers to responses.
+// CORS creates a middleware that adds CORS headers to responses.
 // If the config is not enabled, it returns a passthrough handler.
-func NewCORSMiddleware(config CORSConfig) func(http.Handler) http.Handler {
+func CORS(config CORSConfig) Middleware {
 	if !config.Enabled {
 		// Return passthrough middleware when CORS is disabled
 		return func(next http.Handler) http.Handler {

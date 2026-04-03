@@ -194,7 +194,7 @@ linters:
         linters: [funlen, cyclop, gocognit]
       - path: "internal/cli/worktree(_branch)?\\.go"
         linters: [cyclop, gocognit]
-      - path: "internal/webui/cors\\.go"
+      - path: "internal/webui/server/middleware/cors\\.go"
         linters: [gocognit]
       - path: "internal/webui/fleet_handlers(_done|_claim)?\\.go"
         linters: [funlen, cyclop, gocognit]

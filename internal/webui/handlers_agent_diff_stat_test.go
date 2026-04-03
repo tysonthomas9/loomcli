@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -27,7 +28,7 @@ func TestHandleAgentDiffStat(t *testing.T) {
 
 		req := httptest.NewRequest("GET", "/api/workspaces/ws1/agents/falcon/git/diff-stat", nil)
 		req.SetPathValue("name", "falcon")
-		req = req.WithContext(WithWorkspace(req.Context(), "ws1"))
+		req = req.WithContext(middleware.WithWorkspace(req.Context(), "ws1"))
 
 		rr := httptest.NewRecorder()
 		handler.ServeHTTP(rr, req)
@@ -61,7 +62,7 @@ func TestHandleAgentDiffStat(t *testing.T) {
 
 		req := httptest.NewRequest("GET", "/api/workspaces/ws1/agents//git/diff-stat", nil)
 		req.SetPathValue("name", "")
-		req = req.WithContext(WithWorkspace(req.Context(), "ws1"))
+		req = req.WithContext(middleware.WithWorkspace(req.Context(), "ws1"))
 
 		rr := httptest.NewRecorder()
 		handler.ServeHTTP(rr, req)
@@ -81,7 +82,7 @@ func TestHandleAgentDiffStat(t *testing.T) {
 
 		req := httptest.NewRequest("GET", "/api/workspaces/ws1/agents/unknown/git/diff-stat", nil)
 		req.SetPathValue("name", "unknown")
-		req = req.WithContext(WithWorkspace(req.Context(), "ws1"))
+		req = req.WithContext(middleware.WithWorkspace(req.Context(), "ws1"))
 
 		rr := httptest.NewRecorder()
 		handler.ServeHTTP(rr, req)
@@ -124,7 +125,7 @@ func TestHandleAgentDiffStat(t *testing.T) {
 
 		req := httptest.NewRequest("GET", "/api/workspaces/ws1/agents/idle-agent/git/diff-stat", nil)
 		req.SetPathValue("name", "idle-agent")
-		req = req.WithContext(WithWorkspace(req.Context(), "ws1"))
+		req = req.WithContext(middleware.WithWorkspace(req.Context(), "ws1"))
 
 		rr := httptest.NewRecorder()
 		handler.ServeHTTP(rr, req)

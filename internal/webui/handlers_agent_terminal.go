@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"nhooyr.io/websocket"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 const (
@@ -41,7 +43,7 @@ type agentTerminalTokenData struct {
 func handleGetAgentTerminalInfo(svc AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentName := r.PathValue("name")
-		wsID := WorkspaceFromContext(r.Context())
+		wsID := middleware.WorkspaceFromContext(r.Context())
 
 		result, err := svc.GetTerminalInfo(r.Context(), wsID, agentName)
 		if err != nil {
@@ -68,7 +70,7 @@ func handleGetAgentTerminalToken(svc AgentService) http.HandlerFunc {
 		agentName := r.PathValue("name")
 
 		var userID string
-		if identity, ok := UserIdentityFromContext(r.Context()); ok {
+		if identity, ok := middleware.UserIdentityFromContext(r.Context()); ok {
 			userID = identity.UserID
 		}
 
@@ -140,7 +142,7 @@ func handleAgentTerminalWS(manager *TerminalManager, auth *terminalAuth, allowed
 			slog.Info("agent terminal authenticated", "agent", agentName, "user_id", userID)
 		}
 
-		wsID := WorkspaceFromContext(r.Context())
+		wsID := middleware.WorkspaceFromContext(r.Context())
 
 		sessionName, found, err := manager.FindLatestAgentSession(wsID, agentName)
 		if err != nil {

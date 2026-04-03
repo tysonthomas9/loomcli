@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 // --- handleFileRead additional coverage ---
@@ -25,7 +27,7 @@ func TestHandleFileRead_EmptyFile(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/files?path=empty.txt", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -68,7 +70,7 @@ func TestHandleFileRead_PathTraversalVariants(t *testing.T) {
 	for _, p := range paths {
 		req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/files?path="+p, nil)
 		req.SetPathValue("name", "test-agent")
-		req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+		req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 		w := httptest.NewRecorder()
 
 		handler.ServeHTTP(w, req)
@@ -97,7 +99,7 @@ func TestHandleFileRead_DeniedPathOnFullPath(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/files?path=config/secrets.env", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -124,7 +126,7 @@ func TestHandleFileRead_UnreadableFile(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/files?path=noperm.txt", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -148,7 +150,7 @@ func TestHandleFileRead_BinaryContentWithNullByte(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/files?path=nullbyte.txt", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -493,7 +495,7 @@ func TestHandleFileRead_SymlinkFile(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/files?path=sym.txt", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -524,7 +526,7 @@ func TestHandleFileRead_SymlinkPointingOutsideWorktree(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/files?path=escape.txt", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -611,7 +613,7 @@ func TestHandleFileTree_NestedDirectories(t *testing.T) {
 	// List root
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/files/tree", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -632,7 +634,7 @@ func TestHandleFileTree_NestedDirectories(t *testing.T) {
 	// List "a" -- dirs-first sorting: "b" before "file_a.txt"
 	req = httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/files/tree?path=a", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -659,7 +661,7 @@ func TestHandleFileTree_NestedDirectories(t *testing.T) {
 	// List "a/b"
 	req = httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/files/tree?path=a/b", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -680,7 +682,7 @@ func TestHandleFileTree_NestedDirectories(t *testing.T) {
 	// List "a/b/c" -- leaf directory
 	req = httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/files/tree?path=a/b/c", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -720,7 +722,7 @@ func TestHandleFileTree_NestedSymlinksSkipped(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/files/tree", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -760,7 +762,7 @@ func TestHandleFileTree_EmptyDirectory(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/files/tree?path=empty", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -797,7 +799,7 @@ func TestHandleFileTree_DirsSortedBeforeFiles(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/files/tree", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -841,7 +843,7 @@ func TestHandleFileWrite_DeniedPathOnFullPath(t *testing.T) {
 	body := `{"content": "SECRET=yes"}`
 	req := httptest.NewRequest(http.MethodPut, "/api/agents/test-agent/files?path=config/.env.local", strings.NewReader(body))
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -868,7 +870,7 @@ func TestHandleFileWrite_SymlinkTarget(t *testing.T) {
 	body := `{"content": "hacked"}`
 	req := httptest.NewRequest(http.MethodPut, "/api/agents/test-agent/files?path=linked.txt", strings.NewReader(body))
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -891,7 +893,7 @@ func TestHandleFileWrite_NonexistentDeepParent(t *testing.T) {
 	body := `{"content": "data"}`
 	req := httptest.NewRequest(http.MethodPut, "/api/agents/test-agent/files?path=deep/nested/nonexistent/file.txt", strings.NewReader(body))
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -909,7 +911,7 @@ func TestHandleFileWrite_EmptyContent(t *testing.T) {
 	body := `{"content": ""}`
 	req := httptest.NewRequest(http.MethodPut, "/api/agents/test-agent/files?path=empty_write.txt", strings.NewReader(body))
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -934,7 +936,7 @@ func TestHandleFileWrite_InvalidAgent(t *testing.T) {
 	body := `{"content": "data"}`
 	req := httptest.NewRequest(http.MethodPut, "/api/agents/bad.agent/files?path=test.txt", strings.NewReader(body))
 	req.SetPathValue("name", "bad.agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -956,7 +958,7 @@ func TestHandleFileWrite_ParentIsFile(t *testing.T) {
 	body := `{"content": "data"}`
 	req := httptest.NewRequest(http.MethodPut, "/api/agents/test-agent/files?path=notadir/child.txt", strings.NewReader(body))
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)

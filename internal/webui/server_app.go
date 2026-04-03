@@ -15,6 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
@@ -53,7 +54,7 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 	}()
 
 	// Build CORS configuration
-	app.corsConfig = CORSConfig{
+	app.corsConfig = middleware.CORSConfig{
 		Enabled: config.CORSEnabled,
 	}
 	if config.CORSEnabled {
@@ -66,7 +67,7 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 	}
 
 	// Auto-add auth service origin to CORS when external auth is configured
-	if authOrigin := extractOrigin(config.ExtAuthURL); authOrigin != "" {
+	if authOrigin := middleware.ExtractOrigin(config.ExtAuthURL); authOrigin != "" {
 		app.corsConfig.Enabled = true
 		app.corsConfig.AllowedOrigins = append(app.corsConfig.AllowedOrigins, authOrigin)
 	}
@@ -112,7 +113,7 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 	}
 
 	// MultiPool for workspace-aware connection routing.
-	app.multiPool = daemon.NewMultiPool(WorkspaceFromContext, config.PoolSize)
+	app.multiPool = daemon.NewMultiPool(middleware.WorkspaceFromContext, config.PoolSize)
 	cleanups = append(cleanups, func() { _ = app.multiPool.Close() })
 
 	// Initialize the initial workspace connection pool (stable UUID or CWD basename).
@@ -168,7 +169,7 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 	}
 
 	// Initialize issue service layer
-	app.issueSvc = service.NewIssueService(app.pool, app.multiPool, WithWorkspace)
+	app.issueSvc = service.NewIssueService(app.pool, app.multiPool, middleware.WithWorkspace)
 
 	// Create SSE hub for real-time push notifications
 	app.hub = NewSSEHub()
@@ -405,4 +406,34 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 	app.registerWorkerAPIRoutes()
 
 	return app, nil
+}
+
+// initExtAuth initializes external JWT auth from ServerConfig. Returns
+// the middleware (nil if unconfigured) and a cleanup function for the JWKS cache.
+func initExtAuth(config ServerConfig) (middleware.Middleware, func()) {
+	if config.ExtAuthURL == "" {
+		return nil, nil
+	}
+	jwksURL := config.ExtAuthURL + "/api/auth/jwks"
+	var jwksClient *http.Client
+	if config.ExtAuthAllowInsecure {
+		jwksClient = middleware.NewJWKSHTTPClient(safeDialContext(true))
+	} else {
+		jwksClient = middleware.NewJWKSHTTPClient(safeDialContext(false))
+	}
+	jwksCache := middleware.NewJWKSCache(jwksURL, jwksClient, config.Logger)
+
+	mw := middleware.Auth(middleware.AuthConfig{
+		JWKSCache: jwksCache,
+		Issuer:    config.ExtAuthIssuer,
+		Audience:  config.ExtAuthAudience,
+		Logger:    config.Logger,
+	})
+	slog.Info("external auth enabled",
+		"component", "auth",
+		"auth_url", config.ExtAuthURL,
+		"jwks_url", jwksURL,
+		"issuer", config.ExtAuthIssuer,
+	)
+	return mw, jwksCache.Stop
 }

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -566,7 +567,7 @@ func TestWrapWorkspaceDeleteFn_UUIDResolvedBeforeDelete(t *testing.T) {
 	// This test verifies that resolveID is called BEFORE innerDelete.
 	// This ordering is critical because innerDelete removes the config entry,
 	// which would make UUID resolution impossible after the fact.
-	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 10)
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 10)
 	hub := NewSSEHub()
 	go hub.Run()
 	t.Cleanup(func() { hub.Stop() })

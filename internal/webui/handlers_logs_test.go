@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -132,7 +133,7 @@ func TestHandleGetAgentLog_MissingName(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents//logs", nil)
 	req.SetPathValue("name", "")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -175,7 +176,7 @@ func TestHandleGetAgentLog_InvalidName(t *testing.T) {
 			// Use a clean URL path and set the path value directly
 			req := httptest.NewRequest(http.MethodGet, "/api/agents/invalid/logs", nil)
 			req.SetPathValue("name", tt.agentName)
-			req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+			req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 			w := httptest.NewRecorder()
 
 			handler.ServeHTTP(w, req)
@@ -208,7 +209,7 @@ func TestHandleGetAgentLog_FileNotFound(t *testing.T) {
 	// Use a valid but non-existent agent name
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/nonexistent-agent-xyz/logs", nil)
 	req.SetPathValue("name", "nonexistent-agent-xyz")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -1086,7 +1087,7 @@ func TestHandleGetAgentLog_ContentType(t *testing.T) {
 	// Test with missing name
 	req := httptest.NewRequest(http.MethodGet, "/api/agents//logs", nil)
 	req.SetPathValue("name", "")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -1175,7 +1176,7 @@ func TestHandleGetAgentLog_Success(t *testing.T) {
 	mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/logs", handler)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws-success/agents/testcoveragexyz123/logs", nil)
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws-success"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws-success"))
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
@@ -1222,7 +1223,7 @@ func TestHandleGetAgentLog_LinesParam(t *testing.T) {
 
 	// Request only 5 lines
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws-lines/agents/testcoveragelines/logs?lines=5", nil)
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws-lines"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws-lines"))
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
@@ -1274,7 +1275,7 @@ func TestHandleListTaskPhases_Success(t *testing.T) {
 	mux.HandleFunc("GET /api/workspaces/{ws}/tasks/{id}/logs", handler)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+wsID+"/tasks/"+taskID+"/logs", nil)
-	req = req.WithContext(WithWorkspace(req.Context(), wsID))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), wsID))
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
@@ -1322,7 +1323,7 @@ func TestHandleGetTaskLog_Success(t *testing.T) {
 	mux.HandleFunc("GET /api/workspaces/{ws}/tasks/{id}/logs/{phase}", handler)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+wsID+"/tasks/"+taskID+"/logs/planning", nil)
-	req = req.WithContext(WithWorkspace(req.Context(), wsID))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), wsID))
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
@@ -1587,7 +1588,7 @@ func TestHandleGetAgentLog_StartLineInResponse(t *testing.T) {
 
 	// Request last 10 lines (no before_line)
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws-startline/agents/teststartline/logs?lines=10", nil)
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws-startline"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws-startline"))
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
@@ -1636,7 +1637,7 @@ func TestHandleGetAgentLog_BeforeLine(t *testing.T) {
 
 	// Request 20 lines before line 50 -> should get lines 30-49
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws-beforeline/agents/testbeforeline/logs?lines=20&before_line=50", nil)
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws-beforeline"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws-beforeline"))
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
@@ -1705,7 +1706,7 @@ func TestHandleGetTaskLog_BeforeLine(t *testing.T) {
 
 	// Request 10 lines before line 20 -> should get lines 10-19
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+wsID+"/tasks/"+taskID+"/logs/planning?lines=10&before_line=20", nil)
-	req = req.WithContext(WithWorkspace(req.Context(), wsID))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), wsID))
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
@@ -1756,7 +1757,7 @@ func TestHandleGetAgentLog_WorkspaceScoped(t *testing.T) {
 	// Create request with workspace in context
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+wsID+"/agents/"+agentName+"/logs", nil)
 	req.SetPathValue("name", agentName)
-	ctx := WithWorkspace(req.Context(), wsID)
+	ctx := middleware.WithWorkspace(req.Context(), wsID)
 	req = req.WithContext(ctx)
 
 	rr := httptest.NewRecorder()
@@ -1823,7 +1824,7 @@ func TestHandleGetAgentLog_DifferentWorkspaces(t *testing.T) {
 	// Request from workspace A
 	reqA := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+wsA+"/agents/"+agentName+"/logs", nil)
 	reqA.SetPathValue("name", agentName)
-	reqA = reqA.WithContext(WithWorkspace(reqA.Context(), wsA))
+	reqA = reqA.WithContext(middleware.WithWorkspace(reqA.Context(), wsA))
 	rrA := httptest.NewRecorder()
 	handler.ServeHTTP(rrA, reqA)
 
@@ -1844,7 +1845,7 @@ func TestHandleGetAgentLog_DifferentWorkspaces(t *testing.T) {
 	// Request from workspace B
 	reqB := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+wsB+"/agents/"+agentName+"/logs", nil)
 	reqB.SetPathValue("name", agentName)
-	reqB = reqB.WithContext(WithWorkspace(reqB.Context(), wsB))
+	reqB = reqB.WithContext(middleware.WithWorkspace(reqB.Context(), wsB))
 	rrB := httptest.NewRecorder()
 	handler.ServeHTTP(rrB, reqB)
 

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 // TestNewSSEHub tests that NewSSEHub creates a properly initialized hub.
@@ -319,7 +320,7 @@ func TestHandleSSE_Headers(t *testing.T) {
 	handler := NewSSEHandler(hub, nil)
 
 	// Create a test request with cancelable context
-	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
+	ctx, cancel := context.WithCancel(middleware.WithWorkspace(context.Background(), "test-ws"))
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil)
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
@@ -411,7 +412,7 @@ func TestHandleSSE_ParsesLastEventID(t *testing.T) {
 			if tt.sinceParam != "" {
 				url += "?since=" + tt.sinceParam
 			}
-			ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
+			ctx, cancel := context.WithCancel(middleware.WithWorkspace(context.Background(), "test-ws"))
 			req := httptest.NewRequest(http.MethodGet, url, nil)
 			req = req.WithContext(ctx)
 			if tt.lastEventID != "" {
@@ -445,7 +446,7 @@ func TestHandleSSE_SendsConnectedEvent(t *testing.T) {
 
 	handler := NewSSEHandler(hub, nil)
 
-	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
+	ctx, cancel := context.WithCancel(middleware.WithWorkspace(context.Background(), "test-ws"))
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil)
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
@@ -490,7 +491,7 @@ func TestHandleSSE_CatchUpEvents(t *testing.T) {
 	handler := NewSSEHandler(hub, getMutations)
 
 	// Connect with a since timestamp to trigger catch-up
-	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
+	ctx, cancel := context.WithCancel(middleware.WithWorkspace(context.Background(), "test-ws"))
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events?since=1000", nil)
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
@@ -1031,7 +1032,7 @@ func TestHandleSSE_SendsRetryField(t *testing.T) {
 
 	handler := NewSSEHandler(hub, nil)
 
-	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
+	ctx, cancel := context.WithCancel(middleware.WithWorkspace(context.Background(), "test-ws"))
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil)
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
@@ -1071,7 +1072,7 @@ func TestHandleSSE_HeartbeatSent(t *testing.T) {
 
 	handler := NewSSEHandler(hub, nil)
 
-	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
+	ctx, cancel := context.WithCancel(middleware.WithWorkspace(context.Background(), "test-ws"))
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil)
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
@@ -1236,7 +1237,7 @@ func TestHandleSSE_ClientDisconnectDuringCatchUp(t *testing.T) {
 
 	handler := NewSSEHandler(hub, getMutations)
 
-	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
+	ctx, cancel := context.WithCancel(middleware.WithWorkspace(context.Background(), "test-ws"))
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events?since=1000", nil)
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
@@ -1277,7 +1278,7 @@ func TestHandleSSE_ContextAlreadyCancelled(t *testing.T) {
 	handler := NewSSEHandler(hub, nil)
 
 	// Create request with already-cancelled context
-	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
+	ctx, cancel := context.WithCancel(middleware.WithWorkspace(context.Background(), "test-ws"))
 	cancel() // Cancel before calling handler
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil)
@@ -1314,7 +1315,7 @@ func TestHandleSSE_NoCatchUpWhenGetMutationsSinceNil(t *testing.T) {
 	// Pass nil for getMutationsSince, but connect with since=1000
 	handler := NewSSEHandler(hub, nil)
 
-	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
+	ctx, cancel := context.WithCancel(middleware.WithWorkspace(context.Background(), "test-ws"))
 	req := httptest.NewRequest(http.MethodGet, "/api/events?since=1000", nil)
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
@@ -1352,7 +1353,7 @@ func TestHandleSSE_NoCatchUpWhenSinceZero(t *testing.T) {
 	// Connect WITHOUT Last-Event-ID and without since param
 	handler := NewSSEHandler(hub, getMutations)
 
-	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
+	ctx, cancel := context.WithCancel(middleware.WithWorkspace(context.Background(), "test-ws"))
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil)
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
@@ -1414,7 +1415,7 @@ func TestHandleSSE_WriteDeadlineDisabled(t *testing.T) {
 
 	handler := NewSSEHandler(hub, nil)
 
-	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
+	ctx, cancel := context.WithCancel(middleware.WithWorkspace(context.Background(), "test-ws"))
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil)
 	req = req.WithContext(ctx)
 	rr := &writeDeadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
@@ -1446,7 +1447,7 @@ func TestHandleSSE_StreamsMutationFromHub(t *testing.T) {
 
 	handler := NewSSEHandler(hub, nil)
 
-	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
+	ctx, cancel := context.WithCancel(middleware.WithWorkspace(context.Background(), "test-ws"))
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil)
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
@@ -1500,7 +1501,7 @@ func TestHandleSSE_SendChannelClosed(t *testing.T) {
 
 	handler := NewSSEHandler(hub, nil)
 
-	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
+	ctx, cancel := context.WithCancel(middleware.WithWorkspace(context.Background(), "test-ws"))
 	defer cancel()
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil)
 	req = req.WithContext(ctx)
@@ -1774,7 +1775,7 @@ func TestHandleSSE_ParsesSourceReposParam(t *testing.T) {
 	handler := NewSSEHandler(hub, nil)
 
 	// Connect with source_repos=repo-a,repo-b
-	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
+	ctx, cancel := context.WithCancel(middleware.WithWorkspace(context.Background(), "test-ws"))
 	defer cancel()
 
 	req := httptest.NewRequest("GET", "/api/events?source_repos=repo-a,repo-b", nil)
@@ -1840,7 +1841,7 @@ func TestHandleSSE_SourceReposParamEmpty(t *testing.T) {
 
 	handler := NewSSEHandler(hub, nil)
 
-	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
+	ctx, cancel := context.WithCancel(middleware.WithWorkspace(context.Background(), "test-ws"))
 	defer cancel()
 
 	req := httptest.NewRequest("GET", "/api/workspaces/test-ws/events", nil)
@@ -1889,7 +1890,7 @@ func TestHandleSSE_SourceReposTrimsWhitespace(t *testing.T) {
 
 	handler := NewSSEHandler(hub, nil)
 
-	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
+	ctx, cancel := context.WithCancel(middleware.WithWorkspace(context.Background(), "test-ws"))
 	defer cancel()
 
 	// Spaces around repo names and an empty segment
@@ -1952,7 +1953,7 @@ func TestHandleSSE_CatchUpFiltersSourceRepos(t *testing.T) {
 
 	handler := NewSSEHandler(hub, getMutationsSince)
 
-	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
+	ctx, cancel := context.WithCancel(middleware.WithWorkspace(context.Background(), "test-ws"))
 	defer cancel()
 
 	// Connect with source_repos=repo-a and a since value to trigger catch-up
@@ -2433,7 +2434,7 @@ func TestSSEHandler_ConfigurableHeartbeat(t *testing.T) {
 	handler := NewSSEHandler(hub, nil)
 	handler.heartbeatInterval = 50 * time.Millisecond
 
-	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
+	ctx, cancel := context.WithCancel(middleware.WithWorkspace(context.Background(), "test-ws"))
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil)
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
@@ -2470,7 +2471,7 @@ func TestSSEHandler_WriteErrorDuringCatchUp(t *testing.T) {
 
 	handler := NewSSEHandler(hub, getMutations)
 
-	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
+	ctx, cancel := context.WithCancel(middleware.WithWorkspace(context.Background(), "test-ws"))
 	defer cancel()
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events?since=1000", nil)
 	req = req.WithContext(ctx)

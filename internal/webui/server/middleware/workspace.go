@@ -1,4 +1,4 @@
-package webui
+package middleware
 
 import (
 	"context"
@@ -23,23 +23,25 @@ func WithWorkspace(ctx context.Context, wsID string) context.Context {
 	return context.WithValue(ctx, workspaceContextKey{}, wsID)
 }
 
-// WorkspaceMiddleware extracts the {ws} path parameter, validates that the
+// Workspace extracts the {ws} path parameter, validates that the
 // workspace exists via wsExists, and injects it into the context. If the path
 // param is empty it returns 400; if the workspace is not found it returns 404.
-func WorkspaceMiddleware(wsExists func(id string) bool, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		wsID := strings.TrimSpace(r.PathValue("ws"))
-		if wsID == "" {
-			respondError(w, http.StatusBadRequest, "workspace ID is required")
-			return
-		}
+func Workspace(wsExists func(id string) bool) Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			wsID := strings.TrimSpace(r.PathValue("ws"))
+			if wsID == "" {
+				writeJSONError(w, http.StatusBadRequest, "workspace ID is required")
+				return
+			}
 
-		if !wsExists(wsID) {
-			respondError(w, http.StatusNotFound, "workspace not found: "+wsID)
-			return
-		}
+			if !wsExists(wsID) {
+				writeJSONError(w, http.StatusNotFound, "workspace not found: "+wsID)
+				return
+			}
 
-		ctx := WithWorkspace(r.Context(), wsID)
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
+			ctx := WithWorkspace(r.Context(), wsID)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
 }

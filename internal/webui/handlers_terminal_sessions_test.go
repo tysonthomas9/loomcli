@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 // TestHandleListTerminalSessions_NilManager tests that a nil manager returns 503
@@ -70,7 +72,7 @@ func TestHandleListTerminalSessions_Success(t *testing.T) {
 	handler := handleListTerminalSessions(manager)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/sessions", nil)
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -139,7 +141,7 @@ func TestHandleListTerminalSessions_AlwaysIncludesTalkToLead(t *testing.T) {
 	handler := handleListTerminalSessions(manager)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/sessions", nil)
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -219,7 +221,7 @@ func TestHandleListTerminalSessions_FiltersOtherSessions(t *testing.T) {
 	handler := handleListTerminalSessions(manager)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/sessions", nil)
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -622,7 +624,7 @@ func TestHandleSeedTerminalSession_NilManager(t *testing.T) {
 	body := strings.NewReader(`{"issue_id":"X-1","title":"Test"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/sessions/{name}/seed", body)
 	req.SetPathValue("name", "test-session")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -676,7 +678,7 @@ func TestHandleSeedTerminalSession_InvalidJSON(t *testing.T) {
 	body := strings.NewReader(`{invalid json}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/sessions/{name}/seed", body)
 	req.SetPathValue("name", "test-session")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -716,7 +718,7 @@ func TestHandleSeedTerminalSession_MissingRequiredFields(t *testing.T) {
 			body := strings.NewReader(tt.body)
 			req := httptest.NewRequest(http.MethodPost, "/api/terminal/sessions/{name}/seed", body)
 			req.SetPathValue("name", "test-session")
-			req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+			req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 			w := httptest.NewRecorder()
 
 			handler.ServeHTTP(w, req)

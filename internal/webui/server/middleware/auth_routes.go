@@ -1,4 +1,4 @@
-package webui
+package middleware
 
 import (
 	"net/http"
@@ -84,33 +84,4 @@ func stripWorkspacePrefix(path string) string {
 		return path
 	}
 	return "/api" + rest[idx:]
-}
-
-// extractToken extracts the bearer token from the request. It checks the
-// Authorization header first, then falls back to the "token" query parameter
-// for WebSocket and SSE connections that can't set custom headers.
-func extractToken(r *http.Request) string {
-	// Check Authorization header
-	auth := r.Header.Get("Authorization")
-	if auth != "" {
-		const prefix = "Bearer "
-		if strings.HasPrefix(auth, prefix) {
-			return auth[len(prefix):]
-		}
-		return ""
-	}
-
-	// Fallback to query parameter (for WebSocket and EventSource opaque tokens)
-	qp := r.URL.Query().Get("token")
-
-	// Defense-in-depth: reject query-param tokens that look like JWTs.
-	// JWTs have the format header.payload.signature (two dots) and are typically
-	// >200 chars. Opaque tokens (API keys, HMAC tokens) don't match this pattern.
-	// This prevents accidental JWT leakage into URLs (which may be logged in access
-	// logs, browser history, or referrer headers).
-	if len(qp) > 200 && strings.Count(qp, ".") == 2 {
-		return ""
-	}
-
-	return qp
 }

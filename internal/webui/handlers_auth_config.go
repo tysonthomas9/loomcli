@@ -11,6 +11,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/tysonthomas9/loomcli/internal/authmode"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 // authConfigResponse is the JSON response for GET /api/config.
@@ -118,7 +119,7 @@ func handleAuthConfig(extAuthURL string, limiter *authConfigLimiter) http.Handle
 	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
-		ip := extractClientIP(r)
+		ip := middleware.ExtractClientIP(r)
 		if !limiter.allow(ip) {
 			retryAfter := int(math.Ceil(1.0 / float64(limiter.ratePerSec)))
 			w.Header().Set("Retry-After", strconv.Itoa(retryAfter))

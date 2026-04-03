@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
@@ -87,7 +88,7 @@ func handleListTerminalSessions(manager *TerminalManager) http.HandlerFunc {
 			return
 		}
 
-		workspace := WorkspaceFromContext(r.Context())
+		workspace := middleware.WorkspaceFromContext(r.Context())
 		sessions, err := manager.ListActiveSessionsForWorkspace(workspace)
 		if err != nil {
 			slog.Error("failed to list terminal sessions", "err", err)

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -179,7 +180,7 @@ func TestGitResolveAgent_EmptyName(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents//git/push", nil)
 	req.SetPathValue("name", "")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -216,7 +217,7 @@ func TestGitResolveAgent_InvalidName(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/api/agents/invalid/git/push", nil)
 			req.SetPathValue("name", tt.agentName)
-			req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+			req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 			w := httptest.NewRecorder()
 
 			handler.ServeHTTP(w, req)
@@ -246,7 +247,7 @@ func TestGitResolveAgent_NotFound(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/nonexistent/git/push", nil)
 	req.SetPathValue("name", "nonexistent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -279,7 +280,7 @@ func TestGitPush_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/push", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -311,7 +312,7 @@ func TestGitPush_CustomTarget(t *testing.T) {
 	body := `{"target": "develop"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/push", strings.NewReader(body))
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -335,7 +336,7 @@ func TestGitPush_Conflict(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/push", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -366,7 +367,7 @@ func TestGitPush_OperationError(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/push", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -391,7 +392,7 @@ func TestGitPull_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/pull", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -423,7 +424,7 @@ func TestGitPull_CustomSource(t *testing.T) {
 	body := `{"source": "develop"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/pull", strings.NewReader(body))
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -447,7 +448,7 @@ func TestGitPull_Conflict(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/pull", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -467,7 +468,7 @@ func TestGitPull_GetCurrentBranchError(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/pull", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -487,7 +488,7 @@ func TestGitPull_OperationError(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/pull", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -512,7 +513,7 @@ func TestGitSync_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/sync", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -555,7 +556,7 @@ func TestGitSync_PushConflict(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/sync", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -586,7 +587,7 @@ func TestGitSync_PushError(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/sync", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -613,7 +614,7 @@ func TestGitSync_PullConflict(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/sync", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -644,7 +645,7 @@ func TestGitSync_PullError(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/sync", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -664,7 +665,7 @@ func TestGitSync_GetCurrentBranchError(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/sync", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -686,7 +687,7 @@ func TestGitPR_Created(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/pr", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -717,7 +718,7 @@ func TestGitPR_AlreadyExists(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/pr", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -748,7 +749,7 @@ func TestGitPR_GhNotInstalled(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/pr", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -780,7 +781,7 @@ func TestGitPR_CustomTarget(t *testing.T) {
 	body := `{"target": "develop"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/pr", strings.NewReader(body))
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -800,7 +801,7 @@ func TestGitPR_OperationError(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/pr", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -822,7 +823,7 @@ func TestGitReset_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/reset", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -854,7 +855,7 @@ func TestGitReset_CustomBranch(t *testing.T) {
 	body := `{"branch": "develop"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/reset", strings.NewReader(body))
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -878,7 +879,7 @@ func TestGitReset_ForceFlag(t *testing.T) {
 	body := `{"force": true}`
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/reset", strings.NewReader(body))
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -903,7 +904,7 @@ func TestGitReset_Locked(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/reset", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -943,7 +944,7 @@ func TestGitReset_OperationError(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/reset", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -973,7 +974,7 @@ func TestGitStatus_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/git/status", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -1016,7 +1017,7 @@ func TestGitStatus_Error(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/git/status", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -1042,7 +1043,7 @@ func TestGitTargetUpdate_Success(t *testing.T) {
 	body := `{"branch": "develop"}`
 	req := httptest.NewRequest(http.MethodPatch, "/api/agents/test-agent/git/target", strings.NewReader(body))
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -1070,7 +1071,7 @@ func TestGitTargetUpdate_MissingBranch(t *testing.T) {
 	body := `{}`
 	req := httptest.NewRequest(http.MethodPatch, "/api/agents/test-agent/git/target", strings.NewReader(body))
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -1099,7 +1100,7 @@ func TestGitTargetUpdate_NotWorkspaceMode(t *testing.T) {
 	body := `{"branch": "develop"}`
 	req := httptest.NewRequest(http.MethodPatch, "/api/agents/test-agent/git/target", strings.NewReader(body))
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -1128,7 +1129,7 @@ func TestGitTargetUpdate_SetError(t *testing.T) {
 	body := `{"branch": "nonexistent"}`
 	req := httptest.NewRequest(http.MethodPatch, "/api/agents/test-agent/git/target", strings.NewReader(body))
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -1145,7 +1146,7 @@ func TestGitTargetUpdate_InvalidBody(t *testing.T) {
 	body := `{invalid json`
 	req := httptest.NewRequest(http.MethodPatch, "/api/agents/test-agent/git/target", strings.NewReader(body))
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -1186,7 +1187,7 @@ func TestGitHandlers_ContentType(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(tt.method, tt.path, nil)
 			req.SetPathValue("name", "test-agent")
-			req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+			req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 			w := httptest.NewRecorder()
 
 			tt.handler.ServeHTTP(w, req)
@@ -1217,7 +1218,7 @@ func TestGitPushAll_Success(t *testing.T) {
 	handler := handleGitPushAll(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/git/push-all", nil)
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -1257,7 +1258,7 @@ func TestGitPushAll_PartialFailure(t *testing.T) {
 	handler := handleGitPushAll(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/git/push-all", nil)
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -1291,7 +1292,7 @@ func TestGitPushAll_EmptyWorktreeList(t *testing.T) {
 	handler := handleGitPushAll(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/git/push-all", nil)
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -1327,7 +1328,7 @@ func TestGitPushAll_AllUpToDate(t *testing.T) {
 	handler := handleGitPushAll(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/git/push-all", nil)
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -1363,7 +1364,7 @@ func TestGitPushAll_ListError(t *testing.T) {
 	handler := handleGitPushAll(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/git/push-all", nil)
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -1395,7 +1396,7 @@ func TestResolveAgent_WorkspaceScoped(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/push", nil)
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "ws1"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "ws1"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -1447,7 +1448,7 @@ func TestHandleGitPushAll_WorkspaceScoped(t *testing.T) {
 	handler := handleGitPushAll(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/git/push-all", nil)
-	req = req.WithContext(WithWorkspace(req.Context(), "ws-prod"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "ws-prod"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -1474,7 +1475,7 @@ func TestHandleGitTargetUpdate_WorkspaceScoped(t *testing.T) {
 	body := `{"branch": "develop"}`
 	req := httptest.NewRequest(http.MethodPatch, "/api/agents/test-agent/git/target", strings.NewReader(body))
 	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(WithWorkspace(req.Context(), "ws-staging"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "ws-staging"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -1532,7 +1533,7 @@ func TestGitPushAll_DefaultRemote(t *testing.T) {
 	handler := handleGitPushAll(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/git/push-all", nil)
-	req = req.WithContext(WithWorkspace(req.Context(), "test-ws"))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)

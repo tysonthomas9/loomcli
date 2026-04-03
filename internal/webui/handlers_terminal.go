@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 // Constants for terminal WebSocket communication.
@@ -57,7 +58,7 @@ func handleTerminalToken(auth *terminalAuth) http.HandlerFunc {
 		// Extract user identity when available (OIDC mode).
 		// In open mode, UserIdentityFromContext returns false and userID stays empty.
 		var userID string
-		if identity, ok := UserIdentityFromContext(r.Context()); ok {
+		if identity, ok := middleware.UserIdentityFromContext(r.Context()); ok {
 			userID = identity.UserID
 		}
 

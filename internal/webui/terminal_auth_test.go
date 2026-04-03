@@ -1,7 +1,6 @@
 package webui
 
 import (
-	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -13,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 // newTestTerminalAuth creates a terminalAuth with a known secret for testing.
@@ -908,8 +909,8 @@ func TestHandleTerminalToken_WithUserIdentity(t *testing.T) {
 	handler := handleTerminalToken(ta)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/token?session=oidc-test", nil)
-	identity := UserIdentity{UserID: "test-user", Email: "test@example.com"}
-	req = req.WithContext(context.WithValue(req.Context(), userIdentityContextKey{}, identity))
+	identity := middleware.UserIdentity{UserID: "test-user", Email: "test@example.com"}
+	req = req.WithContext(middleware.WithUserIdentity(req.Context(), identity))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
@@ -30,7 +31,7 @@ func handleListTerminalTabs(store *tabmeta.Store, manager *TerminalManager) http
 			return
 		}
 
-		workspace := WorkspaceFromContext(r.Context())
+		workspace := middleware.WorkspaceFromContext(r.Context())
 
 		// Get active sessions from tmux (filtered by workspace ownership)
 		var activeNames []string
@@ -73,7 +74,7 @@ func handleGetTerminalTab(store *tabmeta.Store) http.HandlerFunc {
 			return
 		}
 
-		workspace := WorkspaceFromContext(r.Context())
+		workspace := middleware.WorkspaceFromContext(r.Context())
 
 		session := r.PathValue("session")
 		if err := tabmeta.ValidateSessionName(session); err != nil {
@@ -150,7 +151,7 @@ func handlePatchTerminalTab(store *tabmeta.Store, hub *SSEHub) http.HandlerFunc 
 			return
 		}
 
-		workspace := WorkspaceFromContext(r.Context())
+		workspace := middleware.WorkspaceFromContext(r.Context())
 
 		session := r.PathValue("session")
 		if err := tabmeta.ValidateSessionName(session); err != nil {
@@ -239,7 +240,7 @@ func handlePutTerminalTab(store *tabmeta.Store, hub *SSEHub) http.HandlerFunc {
 			return
 		}
 
-		workspace := WorkspaceFromContext(r.Context())
+		workspace := middleware.WorkspaceFromContext(r.Context())
 
 		session := r.PathValue("session")
 		if err := tabmeta.ValidateSessionName(session); err != nil {
@@ -316,7 +317,7 @@ func handleDeleteTerminalTab(store *tabmeta.Store, hub *SSEHub) http.HandlerFunc
 			return
 		}
 
-		workspace := WorkspaceFromContext(r.Context())
+		workspace := middleware.WorkspaceFromContext(r.Context())
 
 		session := r.PathValue("session")
 		if err := tabmeta.ValidateSessionName(session); err != nil {

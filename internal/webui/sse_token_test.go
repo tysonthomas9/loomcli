@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 // newTestSSETokenStore creates an sseTokenStore with a known secret for testing.
@@ -446,9 +448,9 @@ func TestHandleSSEToken_Success(t *testing.T) {
 
 	handler := handleSSEToken(store)
 
-	identity := UserIdentity{UserID: "user-123", Email: "test@example.com"}
-	ctx := context.WithValue(context.Background(), userIdentityContextKey{}, identity)
-	ctx = WithWorkspace(ctx, "ws-1")
+	identity := middleware.UserIdentity{UserID: "user-123", Email: "test@example.com"}
+	ctx := middleware.WithUserIdentity(context.Background(), identity)
+	ctx = middleware.WithWorkspace(ctx, "ws-1")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sse/token", nil)
 	req = req.WithContext(ctx)
@@ -514,9 +516,9 @@ func TestHandleSSEToken_GeneratedTokenIsValid(t *testing.T) {
 
 	handler := handleSSEToken(store)
 
-	identity := UserIdentity{UserID: "user-456", Email: "test@example.com"}
-	ctx := context.WithValue(context.Background(), userIdentityContextKey{}, identity)
-	ctx = WithWorkspace(ctx, "ws-2")
+	identity := middleware.UserIdentity{UserID: "user-456", Email: "test@example.com"}
+	ctx := middleware.WithUserIdentity(context.Background(), identity)
+	ctx = middleware.WithWorkspace(ctx, "ws-2")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sse/token", nil)
 	req = req.WithContext(ctx)
@@ -564,7 +566,7 @@ func TestSSE_OpaqueTokenAuth(t *testing.T) {
 
 	handler := NewSSEHandlerWithAuth(hub, nil, store)
 
-	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
+	ctx, cancel := context.WithCancel(middleware.WithWorkspace(context.Background(), "test-ws"))
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events?token="+token, nil)
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
@@ -605,7 +607,7 @@ func TestSSE_InvalidOpaqueToken(t *testing.T) {
 
 	handler := NewSSEHandlerWithAuth(hub, nil, store)
 
-	ctx := WithWorkspace(context.Background(), "test-ws")
+	ctx := middleware.WithWorkspace(context.Background(), "test-ws")
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events?token=bogus.token", nil)
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
@@ -638,7 +640,7 @@ func TestSSE_NoTokenWhenRequired(t *testing.T) {
 
 	handler := NewSSEHandlerWithAuth(hub, nil, store)
 
-	ctx := WithWorkspace(context.Background(), "test-ws")
+	ctx := middleware.WithWorkspace(context.Background(), "test-ws")
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil)
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
@@ -668,7 +670,7 @@ func TestSSE_NoTokenOpenMode(t *testing.T) {
 
 	handler := NewSSEHandler(hub, nil) // sseAuth is nil (open mode)
 
-	ctx, cancel := context.WithCancel(WithWorkspace(context.Background(), "test-ws"))
+	ctx, cancel := context.WithCancel(middleware.WithWorkspace(context.Background(), "test-ws"))
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil)
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
@@ -716,7 +718,7 @@ func TestSSE_CrossWorkspaceTokenRejected(t *testing.T) {
 	handler := NewSSEHandlerWithAuth(hub, nil, store)
 
 	// Connect to workspace "ws-beta" with a token for "ws-alpha" — must be rejected
-	ctx := WithWorkspace(context.Background(), "ws-beta")
+	ctx := middleware.WithWorkspace(context.Background(), "ws-beta")
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/ws-beta/events?token="+token, nil)
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()

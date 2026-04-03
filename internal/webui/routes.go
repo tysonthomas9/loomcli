@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 // registerRoutes maps URL patterns to pre-built handler fields on the Server.
@@ -99,7 +100,7 @@ func (app *Server) registerWorkspaceRoutes() { //nolint:funlen,gocognit,cyclop /
 	// Per-workspace DELETE — registered on main mux with manual middleware wrapping
 	// because DELETE /api/workspaces/{ws} (no trailing slash) won't match the
 	// wsMux prefix handler at /api/workspaces/{ws}/.
-	app.mux.Handle("DELETE /api/workspaces/{ws}", WorkspaceMiddleware(app.wsExistsFn, handleWorkspaceDelete(app.workspaceSvc)))
+	app.mux.Handle("DELETE /api/workspaces/{ws}", middleware.Workspace(app.wsExistsFn)(handleWorkspaceDelete(app.workspaceSvc)))
 
 	// Workspace-scoped API routes via a sub-mux with WorkspaceMiddleware.
 	// The middleware injects the workspace ID into the context so that
@@ -288,7 +289,7 @@ func (app *Server) registerWorkspaceRoutes() { //nolint:funlen,gocognit,cyclop /
 	}
 
 	// Apply WorkspaceMiddleware to all workspace-scoped routes
-	app.mux.Handle("/api/workspaces/{ws}/", WorkspaceMiddleware(app.wsExistsFn, wsMux))
+	app.mux.Handle("/api/workspaces/{ws}/", middleware.Workspace(app.wsExistsFn)(wsMux))
 }
 
 // fleetWSHandler resolves a per-workspace fleet Store via the provided lookup
@@ -296,7 +297,7 @@ func (app *Server) registerWorkspaceRoutes() { //nolint:funlen,gocognit,cyclop /
 // workspace is not found in the fleet registry.
 func fleetWSHandler(getStore func(string) (*fleet.Store, bool), makeHandler func(*fleet.Store) http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		wsID := WorkspaceFromContext(r.Context())
+		wsID := middleware.WorkspaceFromContext(r.Context())
 		store, ok := getStore(wsID)
 		if !ok {
 			respondJSON(w, http.StatusServiceUnavailable, map[string]any{

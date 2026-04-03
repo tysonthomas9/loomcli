@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"golang.org/x/time/rate"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 const (
@@ -115,7 +117,7 @@ func (l *cspReportLimiter) evictStale() {
 func handleCSPReport(limiter *cspReportLimiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Check per-endpoint rate limit
-		ip := extractClientIP(r)
+		ip := middleware.ExtractClientIP(r)
 		if !limiter.allow(ip) {
 			retryAfter := int(math.Ceil(1.0 / float64(limiter.ratePerSec)))
 			w.Header().Set("Retry-After", strconv.Itoa(retryAfter))

@@ -8,13 +8,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // backendPatchRequest creates a PATCH request with workspace UUID in context.
 func backendPatchRequest(wsID, body string) *http.Request {
 	req := httptest.NewRequest(http.MethodPatch, "/api/workspaces/"+wsID+"/config/backend", strings.NewReader(body))
-	ctx := WithWorkspace(req.Context(), wsID)
+	ctx := middleware.WithWorkspace(req.Context(), wsID)
 	return req.WithContext(ctx)
 }
 

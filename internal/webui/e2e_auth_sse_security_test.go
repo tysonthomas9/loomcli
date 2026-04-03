@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 // --- Test 13: Token exchange Cache-Control: no-store ---
@@ -16,9 +18,9 @@ func TestSSETokenExchange_CacheControlNoStore(t *testing.T) {
 
 	handler := handleSSEToken(store)
 
-	identity := UserIdentity{UserID: "user-123", Email: "test@example.com"}
-	ctx := context.WithValue(context.Background(), userIdentityContextKey{}, identity)
-	ctx = WithWorkspace(ctx, "test-ws")
+	identity := middleware.UserIdentity{UserID: "user-123", Email: "test@example.com"}
+	ctx := middleware.WithUserIdentity(context.Background(), identity)
+	ctx = middleware.WithWorkspace(ctx, "test-ws")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events/token", nil)
 	req = req.WithContext(ctx)
@@ -81,7 +83,7 @@ func TestSSEAuth_NoToken_Returns401_WhenAuthEnabled(t *testing.T) {
 	store := newTestSSETokenStore()
 	defer store.Stop()
 
-	ctx := WithWorkspace(context.Background(), "test-ws")
+	ctx := middleware.WithWorkspace(context.Background(), "test-ws")
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil)
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
@@ -105,7 +107,7 @@ func TestSSEAuth_InvalidToken_Returns401(t *testing.T) {
 	store := newTestSSETokenStore()
 	defer store.Stop()
 
-	ctx := WithWorkspace(context.Background(), "test-ws")
+	ctx := middleware.WithWorkspace(context.Background(), "test-ws")
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events?token=garbage", nil)
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
@@ -134,7 +136,7 @@ func TestSSEAuth_ValidOpaqueToken_Passes(t *testing.T) {
 		t.Fatalf("Generate() error = %v", err)
 	}
 
-	ctx := WithWorkspace(context.Background(), "test-ws")
+	ctx := middleware.WithWorkspace(context.Background(), "test-ws")
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events?token="+token, nil)
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
@@ -154,7 +156,7 @@ func TestSSEAuth_ReplayedToken_Returns401(t *testing.T) {
 		t.Fatalf("Generate() error = %v", err)
 	}
 
-	ctx := WithWorkspace(context.Background(), "test-ws")
+	ctx := middleware.WithWorkspace(context.Background(), "test-ws")
 
 	// First use — should pass
 	req1 := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events?token="+token, nil)

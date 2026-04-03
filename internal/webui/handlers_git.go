@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -35,7 +36,7 @@ func resolveAgent(w http.ResponseWriter, r *http.Request, ops AgentResolver) (*A
 		return nil, false
 	}
 
-	wsID := WorkspaceFromContext(r.Context())
+	wsID := middleware.WorkspaceFromContext(r.Context())
 	if wsID == "" {
 		respondError(w, http.StatusBadRequest, "workspace ID required")
 		return nil, false
@@ -70,7 +71,7 @@ type gitPushRequest struct {
 func handleGitPush(svc AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentName := r.PathValue("name")
-		wsID := WorkspaceFromContext(r.Context())
+		wsID := middleware.WorkspaceFromContext(r.Context())
 
 		var req gitPushRequest
 		if r.Body != nil {
@@ -105,7 +106,7 @@ func handleGitPush(svc AgentService) http.HandlerFunc {
 // Pushes all agent worktree branches to their target branches.
 func handleGitPushAll(svc AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		wsID := WorkspaceFromContext(r.Context())
+		wsID := middleware.WorkspaceFromContext(r.Context())
 
 		result, err := svc.GitPushAll(r.Context(), wsID)
 		if err != nil {
@@ -128,7 +129,7 @@ type gitPullRequest struct {
 func handleGitPull(svc AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentName := r.PathValue("name")
-		wsID := WorkspaceFromContext(r.Context())
+		wsID := middleware.WorkspaceFromContext(r.Context())
 
 		var req gitPullRequest
 		if r.Body != nil {
@@ -164,7 +165,7 @@ func handleGitPull(svc AgentService) http.HandlerFunc {
 func handleGitSync(svc AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentName := r.PathValue("name")
-		wsID := WorkspaceFromContext(r.Context())
+		wsID := middleware.WorkspaceFromContext(r.Context())
 
 		result, err := svc.GitSync(r.Context(), wsID, agentName)
 		if err != nil {
@@ -198,7 +199,7 @@ type gitPRRequest struct {
 func handleGitPR(svc AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentName := r.PathValue("name")
-		wsID := WorkspaceFromContext(r.Context())
+		wsID := middleware.WorkspaceFromContext(r.Context())
 
 		var req gitPRRequest
 		if r.Body != nil {
@@ -251,7 +252,7 @@ type lockInfoResp struct {
 func handleGitReset(svc AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentName := r.PathValue("name")
-		wsID := WorkspaceFromContext(r.Context())
+		wsID := middleware.WorkspaceFromContext(r.Context())
 
 		var req gitResetRequest
 		if r.Body != nil {
@@ -295,7 +296,7 @@ func handleGitReset(svc AgentService) http.HandlerFunc {
 func handleGitStatus(svc AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentName := r.PathValue("name")
-		wsID := WorkspaceFromContext(r.Context())
+		wsID := middleware.WorkspaceFromContext(r.Context())
 
 		result, err := svc.GitStatus(r.Context(), wsID, agentName)
 		if err != nil {
@@ -323,7 +324,7 @@ type gitTargetResponse struct {
 func handleGitTargetUpdate(svc AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentName := r.PathValue("name")
-		wsID := WorkspaceFromContext(r.Context())
+		wsID := middleware.WorkspaceFromContext(r.Context())
 
 		var req gitTargetRequest
 		if r.Body != nil {

@@ -198,14 +198,7 @@ func TestCSPReportLimiter_Cleanup(t *testing.T) {
 	}
 }
 
-func TestIsPublicRoute_CSPReport(t *testing.T) {
-	if !isPublicRoute(http.MethodPost, "/api/csp-report") {
-		t.Error("POST /api/csp-report should be a public route")
-	}
-	if isPublicRoute(http.MethodGet, "/api/csp-report") {
-		t.Error("GET /api/csp-report should not be a public route")
-	}
-}
+// TestIsPublicRoute_CSPReport moved to internal/webui/server/middleware/ package tests.
 
 func TestHandleCSPReport_OversizedFieldsTruncated(t *testing.T) {
 	limiter := newCSPReportLimiter(rate.Limit(10), 20, time.Hour, time.Hour)
@@ -260,8 +253,4 @@ func TestHandleCSPReport_OversizedFieldsTruncated(t *testing.T) {
 	checkLen("source_file", 2048)
 }
 
-func TestIsExcludedFromRateLimit_CSPReport(t *testing.T) {
-	if !isExcludedFromRateLimit("/api/csp-report") {
-		t.Error("/api/csp-report should be excluded from global rate limit")
-	}
-}
+// TestIsExcludedFromRateLimit_CSPReport moved to internal/webui/server/middleware/ package tests.

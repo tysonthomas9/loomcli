@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 // SSEWriter centralizes SSE wire-format concerns.
@@ -100,7 +101,7 @@ func (h *SSEHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	lastSince := parseLastSince(r)
 	sourceRepos := parseSourceRepos(r.URL.Query().Get("source_repos"))
-	workspaceID := WorkspaceFromContext(r.Context())
+	workspaceID := middleware.WorkspaceFromContext(r.Context())
 	if workspaceID == "" {
 		slog.Warn("SSE client connected with empty workspace_id — will not receive mutations (fail-closed)", "client_id", clientID, "remote_addr", r.RemoteAddr)
 	}

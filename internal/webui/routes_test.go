@@ -17,6 +17,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -1441,7 +1442,7 @@ func TestSetupRoutes_SSEEndpointRegisteredOnWorkspaceScope(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 1)
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
 	// Register a fake workspace so WorkspaceMiddleware passes
 	_ = multiPool.Register("test-ws", &stubPool{})
 
@@ -1469,7 +1470,7 @@ func TestSetupRoutes_SSEEndpointRegisteredOnWorkspaceScope(t *testing.T) {
 // PATCH /api/workspaces/{ws}/config/backend is handled by handleWorkspaceBackendPatch
 // (which returns workspaceResponse shape) rather than handlePatchBackendConfig.
 func TestSetupRoutes_WorkspaceBackendPatchEndpoint(t *testing.T) {
-	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 1)
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
 	_ = multiPool.Register("test-ws", &stubPool{})
 
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
@@ -1844,7 +1845,7 @@ func TestSetupRoutes_TabMetadataReturns404WhenStoreNil(t *testing.T) {
 func TestLegacyFlatAgentRoutesRemoved(t *testing.T) {
 	// Set up a multiPool with a registered workspace so workspace-scoped routes
 	// are functional.
-	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 1)
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
 	_ = multiPool.Register("test-ws", &stubPool{})
 
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }

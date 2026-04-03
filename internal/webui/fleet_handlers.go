@@ -7,11 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 // FleetRegisterConfig holds configuration for fleet worker registration authentication.
@@ -86,7 +86,7 @@ func handleFleetRegisterWithStore(store workerRegistrar, tokenCfg *TokenConfig, 
 
 		// Rate limit by client IP (if rate limiter is configured)
 		if regCfg.RateLimiter != nil {
-			clientIP := extractClientIP(r)
+			clientIP := middleware.ExtractClientIP(r)
 			allowed, _ := regCfg.RateLimiter.Allow(r.Context(), clientIP)
 			if !allowed {
 				respondJSON(w, http.StatusTooManyRequests, FleetRegisterResponse{
@@ -170,16 +170,4 @@ func handleFleetRegisterWithStore(store workerRegistrar, tokenCfg *TokenConfig, 
 			Token:   token,
 		})
 	}
-}
-
-// extractClientIP returns the client IP address from the request.
-// Uses RemoteAddr only — X-Forwarded-For is not trusted because clients
-// can spoof it to bypass rate limiting. If a reverse proxy is needed,
-// configure the proxy to set RemoteAddr (e.g., PROXY protocol).
-func extractClientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
 }

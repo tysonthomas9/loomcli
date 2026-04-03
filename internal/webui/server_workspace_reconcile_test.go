@@ -10,12 +10,13 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 // --- Registry.Register unit tests ---
 
 func TestRegistry_Register_RegistersInMultiPoolAndSubscriber(t *testing.T) {
-	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 10)
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 10)
 	hub := NewSSEHub()
 	go hub.Run()
 	defer hub.Stop()
@@ -50,7 +51,7 @@ func TestRegistry_Register_RegistersInMultiPoolAndSubscriber(t *testing.T) {
 }
 
 func TestRegistry_Register_MultipleWorkspaces(t *testing.T) {
-	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 10)
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 10)
 	hub := NewSSEHub()
 	go hub.Run()
 	defer hub.Stop()
@@ -86,7 +87,7 @@ func TestRegistry_Register_MultipleWorkspaces(t *testing.T) {
 }
 
 func TestRegistry_Register_DuplicateReplacesExisting(t *testing.T) {
-	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 10)
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 10)
 	hub := NewSSEHub()
 	go hub.Run()
 	defer hub.Stop()
@@ -347,7 +348,7 @@ func TestStartupReconciliation_WorkspaceListFnReturnsEmptyMap(t *testing.T) {
 // without starting a full HTTP server.
 
 func TestReconciliationLogic_SkipsInitialWorkspace(t *testing.T) {
-	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 10)
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 10)
 	hub := NewSSEHub()
 	go hub.Run()
 	defer hub.Stop()
@@ -399,7 +400,7 @@ func TestReconciliationLogic_SkipsInitialWorkspace(t *testing.T) {
 }
 
 func TestReconciliationLogic_EmptyWorkspaceMap(t *testing.T) {
-	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 10)
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 10)
 	hub := NewSSEHub()
 	go hub.Run()
 	defer hub.Stop()
@@ -432,7 +433,7 @@ func TestReconciliationLogic_EmptyWorkspaceMap(t *testing.T) {
 }
 
 func TestReconciliationLogic_NilWorkspaceListFn(t *testing.T) {
-	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 10)
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 10)
 	hub := NewSSEHub()
 	go hub.Run()
 	defer hub.Stop()
@@ -461,7 +462,7 @@ func TestReconciliationLogic_NilWorkspaceListFn(t *testing.T) {
 }
 
 func TestReconciliationLogic_ErrorFromWorkspaceListFn(t *testing.T) {
-	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 10)
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 10)
 	hub := NewSSEHub()
 	go hub.Run()
 	defer hub.Stop()
@@ -494,7 +495,7 @@ func TestReconciliationLogic_ErrorFromWorkspaceListFn(t *testing.T) {
 }
 
 func TestReconcileConfigWorkspaces_UUIDKeys(t *testing.T) {
-	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 10)
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 10)
 	hub := NewSSEHub()
 	go hub.Run()
 	defer hub.Stop()
@@ -537,7 +538,7 @@ func TestReconcileConfigWorkspaces_UUIDKeys(t *testing.T) {
 }
 
 func TestReconcileConfigWorkspaces_PreMigrationNameKeys(t *testing.T) {
-	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 10)
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 10)
 	hub := NewSSEHub()
 	go hub.Run()
 	defer hub.Stop()
@@ -583,7 +584,7 @@ func TestReconcileConfigWorkspaces_UUIDSkipMatchesInitialID(t *testing.T) {
 	// This was the core bug T2 fixes: previously, map keys were names but
 	// initialID was a UUID, so the skip check failed and the initial workspace
 	// got re-registered (replacing the custom auto-discovered pool).
-	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 10)
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 10)
 	hub := NewSSEHub()
 	go hub.Run()
 	defer hub.Stop()
@@ -625,7 +626,7 @@ func TestReconcileConfigWorkspaces_UUIDSkipMatchesInitialID(t *testing.T) {
 }
 
 func TestReconciliationLogic_OnlyInitialInMap(t *testing.T) {
-	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 10)
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 10)
 	hub := NewSSEHub()
 	go hub.Run()
 	defer hub.Stop()

@@ -1,4 +1,4 @@
-package webui
+package middleware
 
 import (
 	"fmt"
@@ -12,10 +12,10 @@ type SecurityConfig struct {
 	ExtAuthOrigin string // Auth service origin to add to CSP connect-src (e.g., "https://auth.loomcli.com")
 }
 
-// NewSecurityHeadersMiddleware creates a middleware that sets standard HTTP
+// SecurityHeaders creates a middleware that sets standard HTTP
 // security headers on all responses. These headers protect against common
 // web attacks (XSS, clickjacking, MIME sniffing, information leakage).
-func NewSecurityHeadersMiddleware(cfg SecurityConfig) func(http.Handler) http.Handler {
+func SecurityHeaders(cfg SecurityConfig) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			h := w.Header()
@@ -47,9 +47,9 @@ func NewSecurityHeadersMiddleware(cfg SecurityConfig) func(http.Handler) http.Ha
 	}
 }
 
-// extractOrigin returns the scheme://host portion of a URL, suitable for
+// ExtractOrigin returns the scheme://host portion of a URL, suitable for
 // CORS and CSP origin matching.
-func extractOrigin(rawURL string) string {
+func ExtractOrigin(rawURL string) string {
 	u, err := url.Parse(rawURL)
 	if err != nil || u.Host == "" {
 		return ""

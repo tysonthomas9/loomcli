@@ -206,17 +206,5 @@ func TestClientErrorLimiter_Cleanup(t *testing.T) {
 	}
 }
 
-func TestIsPublicRoute_ClientErrors(t *testing.T) {
-	if !isPublicRoute(http.MethodPost, "/api/client-errors") {
-		t.Error("POST /api/client-errors should be a public route")
-	}
-	if isPublicRoute(http.MethodGet, "/api/client-errors") {
-		t.Error("GET /api/client-errors should not be a public route")
-	}
-}
-
-func TestIsExcludedFromRateLimit_ClientErrors(t *testing.T) {
-	if !isExcludedFromRateLimit("/api/client-errors") {
-		t.Error("/api/client-errors should be excluded from global rate limit")
-	}
-}
+// TestIsPublicRoute_ClientErrors and TestIsExcludedFromRateLimit_ClientErrors
+// moved to internal/webui/server/middleware/ package tests.

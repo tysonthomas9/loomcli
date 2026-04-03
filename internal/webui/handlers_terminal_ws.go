@@ -10,6 +10,7 @@ import (
 
 	"nhooyr.io/websocket"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
@@ -41,7 +42,7 @@ func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigi
 		// Parse session parameter. Workspace is derived from the URL path
 		// via WorkspaceMiddleware (injected into context).
 		session := r.URL.Query().Get("session")
-		workspace := WorkspaceFromContext(r.Context())
+		workspace := middleware.WorkspaceFromContext(r.Context())
 		if session == "" {
 			respondJSON(w, http.StatusBadRequest, map[string]interface{}{
 				"success": false,
@@ -136,7 +137,7 @@ func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigi
 
 		// Inject project context banner into freshly created talk-to-lead sessions.
 		if isNewSession && loomServerURL != "" {
-			wsID := WorkspaceFromContext(r.Context())
+			wsID := middleware.WorkspaceFromContext(r.Context())
 			wsConfigFn := func() (*service.WorkspaceData, error) { return workspaceConfigByIDFn(wsID) }
 			injectTerminalContextBanner(termSession, loomServerURL, wsConfigFn)
 		}

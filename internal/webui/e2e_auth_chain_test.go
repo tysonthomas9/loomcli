@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 // newFullChainTestServer creates an httptest.Server with the complete middleware
@@ -27,7 +29,7 @@ func newFullChainTestServer(t *testing.T, jwksURL, issuer, audience string) *htt
 
 	// Protected: returns UserIdentity as JSON if present
 	mux.HandleFunc("GET /api/workspaces/{ws}/issues", func(w http.ResponseWriter, r *http.Request) {
-		identity, ok := UserIdentityFromContext(r.Context())
+		identity, ok := middleware.UserIdentityFromContext(r.Context())
 		if ok {
 			respondJSON(w, http.StatusOK, map[string]string{
 				"user_id": identity.UserID,
@@ -55,24 +57,24 @@ func newFullChainTestServer(t *testing.T, jwksURL, issuer, audience string) *htt
 	// Build middleware chain
 	var extAuthMW func(http.Handler) http.Handler
 	if jwksURL != "" {
-		cache := newTestJWKSCache(t, jwksURL)
-		if err := cache.fetch(t.Context()); err != nil {
+		cache := middleware.NewJWKSCacheNoFetch(jwksURL, nil, nil)
+		if err := cache.Fetch(t.Context()); err != nil {
 			// Allow initial fetch to fail (tested in resilience tests)
 			t.Logf("initial JWKS fetch failed (may be intentional): %v", err)
 		}
-		extAuthMW = NewExtAuthMiddleware(ExtAuthConfig{
+		extAuthMW = middleware.Auth(middleware.AuthConfig{
 			JWKSCache: cache,
 			Issuer:    issuer,
 			Audience:  audience,
 			Logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
 		})
 	} else {
-		extAuthMW = NewExtAuthMiddleware(ExtAuthConfig{JWKSCache: nil})
+		extAuthMW = middleware.Auth(middleware.AuthConfig{JWKSCache: nil})
 	}
 
-	corsMiddleware := NewCORSMiddleware(CORSConfig{})
-	securityMiddleware := NewSecurityHeadersMiddleware(SecurityConfig{})
-	_, rateLimitMiddleware := NewRateLimitMiddleware(DefaultRateLimitConfig())
+	corsMiddleware := middleware.CORS(middleware.CORSConfig{})
+	securityMiddleware := middleware.SecurityHeaders(middleware.SecurityConfig{})
+	_, rateLimitMiddleware := middleware.RateLimit(middleware.DefaultRateLimitConfig())
 
 	handler := rateLimitMiddleware(securityMiddleware(extAuthMW(corsMiddleware(mux))))
 	return httptest.NewServer(handler)
@@ -227,11 +229,11 @@ func TestFullChain_CrossSystem_UserJWTToFleetRoute(t *testing.T) {
 	})))
 
 	// Apply the same middleware chain
-	cache := newTestJWKSCache(t, jwksSrv.URL)
-	if err := cache.fetch(t.Context()); err != nil {
+	cache := middleware.NewJWKSCacheNoFetch(jwksSrv.URL, nil, nil)
+	if err := cache.Fetch(t.Context()); err != nil {
 		t.Fatalf("initial JWKS fetch failed: %v", err)
 	}
-	extAuthMW := NewExtAuthMiddleware(ExtAuthConfig{
+	extAuthMW := middleware.Auth(middleware.AuthConfig{
 		JWKSCache: cache,
 		Issuer:    "https://auth.example.com",
 		Audience:  "loom",

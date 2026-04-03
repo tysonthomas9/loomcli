@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 const (
@@ -196,7 +198,7 @@ func validateSSEAuth(w http.ResponseWriter, r *http.Request, sseAuth *sseTokenSt
 		respondError(w, http.StatusUnauthorized, "authentication required")
 		return false
 	}
-	expectedWS := WorkspaceFromContext(r.Context())
+	expectedWS := middleware.WorkspaceFromContext(r.Context())
 	if _, err := sseAuth.Validate(token, expectedWS); err != nil {
 		respondError(w, http.StatusUnauthorized, "invalid or expired token")
 		return false
@@ -209,13 +211,13 @@ func validateSSEAuth(w http.ResponseWriter, r *http.Request, sseAuth *sseTokenSt
 // upstream; this handler extracts UserIdentity from the request context.
 func handleSSEToken(store *sseTokenStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		identity, ok := UserIdentityFromContext(r.Context())
+		identity, ok := middleware.UserIdentityFromContext(r.Context())
 		if !ok || identity.UserID == "" {
 			respondError(w, http.StatusUnauthorized, "authentication required")
 			return
 		}
 
-		workspaceID := WorkspaceFromContext(r.Context())
+		workspaceID := middleware.WorkspaceFromContext(r.Context())
 
 		token, err := store.Generate(identity.UserID, workspaceID)
 		if err != nil {
