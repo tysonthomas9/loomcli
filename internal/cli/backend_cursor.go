@@ -34,7 +34,7 @@ var cursorNonInteractiveInvoker func(workDir, prompt, agentName string, shutdown
 // buildCursorInteractiveCmd constructs the exec.Cmd for interactive Cursor invocation.
 // Extracted for testability — callers can inspect the returned cmd without execution.
 func buildCursorInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
-	cmd := exec.Command("cursor", "--force", prompt)
+	cmd := exec.Command("cursor", "--force", prompt) //nolint:gosec // G204: prompt is from the CLI operator, not untrusted input
 	cmd.Dir = workDir
 	env := append(FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 	if agentName != "" {
@@ -54,7 +54,7 @@ func defaultCursorInvoker(workDir, prompt, agentName string) error {
 		fmt.Println("Launching Cursor agent (non-interactive, no TTY)...")
 		fmt.Println("")
 
-		cmd := exec.Command("cursor", "-p", "--force", prompt)
+		cmd := exec.Command("cursor", "-p", "--force", prompt) //nolint:gosec // G204: prompt is from the CLI operator, not untrusted input
 		cmd.Dir = workDir
 		env := append(FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 		if agentName != "" {
@@ -75,7 +75,7 @@ func defaultCursorInvoker(workDir, prompt, agentName string) error {
 }
 
 func defaultCursorNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
-	cmd := exec.Command("cursor", "-p", "--output-format", "stream-json", "--force", prompt)
+	cmd := exec.Command("cursor", "-p", "--output-format", "stream-json", "--force", prompt) //nolint:gosec // G204: prompt is from the CLI operator, not untrusted input
 	cmd.Dir = workDir
 	env := append(FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 	if agentName != "" {

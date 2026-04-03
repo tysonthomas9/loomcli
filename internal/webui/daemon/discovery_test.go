@@ -161,14 +161,31 @@ func TestFindBeadsDir(t *testing.T) {
 }
 
 func TestFindBeadsDir_NotFound(t *testing.T) {
-	// Create a temporary directory without .beads
-	tmpDir, err := os.MkdirTemp("", "beads-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
+	// FindBeadsDir walks UP the directory tree. To guarantee no .beads
+	// exists in any ancestor, we create a temp dir and explicitly verify
+	// no .beads exists in the walk path up to root. If an ancestor has
+	// .beads (e.g. /tmp/.beads from other tests), we skip rather than
+	// produce a false failure.
+	tmpDir := t.TempDir()
+	nested := filepath.Join(tmpDir, "a", "b", "c")
+	if err := os.MkdirAll(nested, 0755); err != nil {
+		t.Fatalf("failed to create nested dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
 
-	_, err = FindBeadsDir(tmpDir)
+	// Check if any ancestor has .beads — if so, skip this test
+	check := nested
+	for {
+		if _, err := os.Stat(filepath.Join(check, ".beads")); err == nil {
+			t.Skipf("ancestor %s has .beads directory; cannot test NotFound path", check)
+		}
+		parent := filepath.Dir(check)
+		if parent == check {
+			break
+		}
+		check = parent
+	}
+
+	_, err := FindBeadsDir(nested)
 	if err != ErrInvalidSocketPath {
 		t.Errorf("FindBeadsDir() for no-.beads dir error = %v, wantErr %v", err, ErrInvalidSocketPath)
 	}

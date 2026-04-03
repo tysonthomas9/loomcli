@@ -13,6 +13,82 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
+// validateTerminalWSParams validates the query parameters and pre-upgrade
+// conditions for a terminal WebSocket connection. It returns the session name,
+// workspace name, and true on success. On validation failure it writes an HTTP
+// error response and returns ("", "", false).
+func validateTerminalWSParams(w http.ResponseWriter, r *http.Request, manager *TerminalManager, auth *terminalAuth) (session, workspace string, ok bool) {
+	// Check if manager is available
+	if manager == nil {
+		respondJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
+			"success": false,
+			"error":   "terminal manager not initialized",
+		})
+		return "", "", false
+	}
+
+	// Parse and validate session and workspace parameters.
+	session = r.URL.Query().Get("session")
+	workspace = r.URL.Query().Get("workspace")
+	if workspace == "" {
+		workspace = "default"
+	} else if !validWorkspaceName(workspace) {
+		respondJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "invalid workspace name: must contain only alphanumeric, hyphen, or underscore",
+		})
+		return "", "", false
+	}
+	if session == "" {
+		respondJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "missing session parameter",
+		})
+		return "", "", false
+	}
+
+	if !validTerminalSession.MatchString(session) {
+		respondJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "invalid session name: must match [a-zA-Z0-9_-]+",
+		})
+		return "", "", false
+	}
+
+	// Validate one-time terminal token before WebSocket upgrade
+	if auth != nil {
+		token := r.URL.Query().Get("token")
+		if err := auth.ValidateToken(token, session); err != nil {
+			respondJSON(w, http.StatusUnauthorized, map[string]interface{}{
+				"success": false,
+				"error":   "terminal authentication failed",
+			})
+			log.Printf("Terminal auth failed for session %q: %v", session, err)
+			return "", "", false
+		}
+	}
+
+	// Pre-upgrade check: reject if session is being killed (tombstone).
+	if manager.SessionIsBeingKilled(session) {
+		respondJSON(w, http.StatusConflict, map[string]interface{}{
+			"success": false,
+			"error":   "session is being killed",
+		})
+		return "", "", false
+	}
+
+	// Pre-upgrade check: reject before WebSocket upgrade if at session limit.
+	if manager.SessionCount() >= manager.MaxSessions() {
+		respondJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
+			"success": false,
+			"error":   "maximum terminal sessions reached",
+		})
+		return "", "", false
+	}
+
+	return session, workspace, true
+}
+
 // handleTerminalWS returns a WebSocket handler for terminal relay.
 // It upgrades HTTP connections to WebSocket, bridges them to tmux sessions
 // via the TerminalManager, and handles bidirectional binary data relay
@@ -28,74 +104,8 @@ func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigi
 	patterns := originHosts(allowedOrigins)
 
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Check if manager is available
-		if manager == nil {
-			respondJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
-				"success": false,
-				"error":   "terminal manager not initialized",
-			})
-			return
-		}
-
-		// Parse and validate session and workspace parameters.
-		// Extract workspace from query params before WebSocket upgrade
-		// (r.URL is still valid before hijack). Falls back to "default"
-		// for backward compatibility with old frontends.
-		session := r.URL.Query().Get("session")
-		workspace := r.URL.Query().Get("workspace")
-		if workspace == "" {
-			workspace = "default"
-		} else if !validWorkspaceName(workspace) {
-			respondJSON(w, http.StatusBadRequest, map[string]interface{}{
-				"success": false,
-				"error":   "invalid workspace name: must contain only alphanumeric, hyphen, or underscore",
-			})
-			return
-		}
-		if session == "" {
-			respondJSON(w, http.StatusBadRequest, map[string]interface{}{
-				"success": false,
-				"error":   "missing session parameter",
-			})
-			return
-		}
-
-		if !validTerminalSession.MatchString(session) {
-			respondJSON(w, http.StatusBadRequest, map[string]interface{}{
-				"success": false,
-				"error":   "invalid session name: must match [a-zA-Z0-9_-]+",
-			})
-			return
-		}
-
-		// Validate one-time terminal token before WebSocket upgrade
-		if auth != nil {
-			token := r.URL.Query().Get("token")
-			if err := auth.ValidateToken(token, session); err != nil {
-				respondJSON(w, http.StatusUnauthorized, map[string]interface{}{
-					"success": false,
-					"error":   "terminal authentication failed",
-				})
-				log.Printf("Terminal auth failed for session %q: %v", session, err)
-				return
-			}
-		}
-
-		// Pre-upgrade check: reject if session is being killed (tombstone).
-		if manager.SessionIsBeingKilled(session) {
-			respondJSON(w, http.StatusConflict, map[string]interface{}{
-				"success": false,
-				"error":   "session is being killed",
-			})
-			return
-		}
-
-		// Pre-upgrade check: reject before WebSocket upgrade if at session limit.
-		if manager.SessionCount() >= manager.MaxSessions() {
-			respondJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
-				"success": false,
-				"error":   "maximum terminal sessions reached",
-			})
+		session, workspace, ok := validateTerminalWSParams(w, r, manager, auth)
+		if !ok {
 			return
 		}
 

@@ -314,7 +314,7 @@ func createEmptyWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir, b
 	// Start bd daemon for the workspace asynchronously (best-effort; non-fatal).
 	// Uses context.Background() because the request context is cancelled when the handler returns.
 	timeout := cfg.Daemon.GetStartupTimeout(defaultDaemonStartupTimeout)
-	go func() {
+	go func() { //nolint:gosec // G118: intentional — goroutine must outlive the HTTP request for async daemon startup
 		if err := ensureDaemonForWorkspace(context.Background(), wsDir, timeout); err != nil {
 			slog.Warn("failed to start daemon for workspace", "workspace", wsName, "err", err)
 			return // daemon not ready — skip sync
@@ -420,7 +420,7 @@ func createCloneWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir st
 	// Start bd daemon for the workspace asynchronously (best-effort; non-fatal).
 	// Uses context.Background() because the request context is cancelled when the handler returns.
 	timeout := cfg.Daemon.GetStartupTimeout(defaultDaemonStartupTimeout)
-	go func() {
+	go func() { //nolint:gosec // G118: intentional — goroutine must outlive the HTTP request for async daemon startup
 		if err := ensureDaemonForWorkspace(context.Background(), wsDir, timeout); err != nil {
 			slog.Warn("failed to start daemon for workspace", "workspace", wsName, "err", err)
 			return // daemon not ready — skip sync
