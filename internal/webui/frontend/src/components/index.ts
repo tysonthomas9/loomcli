@@ -68,6 +68,7 @@ export * from "./WorkspaceTree";
 export * from "./AuthGate";
 export * from "./BootError";
 export * from "./DaemonUnavailableOverlay";
+export * from "./DaemonStatusBadge";
 export * from "./KeyboardCheatsheet";
 export * from "./LoginPage";
 export * from "./UserMenu";

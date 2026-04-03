@@ -168,6 +168,9 @@ func runServe(cmd *cobra.Command, args []string) {
 
 	monitorHandlers := buildMonitorHandlers(collectDataFn, staleDetectorHandler)
 	workspacemgr.EnsureProjectRegistered()
+	if !serveNoDaemon {
+		go workspacemgr.EnsureDaemonsForAllWorkspaces(ctx) // staggered, async, best-effort
+	}
 
 	webuiErr := make(chan error, 1)
 	go func() {

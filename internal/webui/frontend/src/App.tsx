@@ -29,7 +29,7 @@ import {
   LoadingSkeleton,
   ConnectionStatus,
   StaleDataBanner,
-  DaemonUnavailableOverlay,
+  DaemonStatusBadge,
   ToastContainer,
   FilterBar,
   MoreFiltersMenu,
@@ -952,6 +952,13 @@ function App() {
 
   const headerActions = (
     <div className={styles.headerActions}>
+      <DaemonStatusBadge
+        isDaemonAvailable={isDaemonAvailable}
+        mode={connectionMode}
+        retryCountdown={retryCountdown}
+        lastError={lastError}
+        onRetry={daemonRetryNow}
+      />
       <UserMenu />
       <ThemeToggle theme={theme} onToggle={toggleTheme} />
       <ConnectionStatus
@@ -1085,15 +1092,6 @@ function App() {
             sessionCount={activeSessionCount}
           />
         </AppLayout>
-        {!isDaemonAvailable && (
-          <DaemonUnavailableOverlay
-            mode={connectionMode}
-            retryCountdown={retryCountdown}
-            lastError={lastError}
-            onRetry={daemonRetryNow}
-            onSettingsClick={() => navigateToView("settings")}
-          />
-        )}
       </SearchTermProvider>
       <KeyboardCheatsheet />
       {isMultiRepo && (

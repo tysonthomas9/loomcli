@@ -74,8 +74,8 @@ func NewWorkspaceRegistry(logger *slog.Logger) *WorkspaceRegistry {
 // Returns the pool and a nil error on success.
 func InitProtectedPool(rawPool *daemon.ConnectionPool, logger *slog.Logger) daemon.Pool {
 	breaker := circuitbreaker.NewBreaker("daemon", circuitbreaker.Config{
-		FailureThreshold:  5,
-		OpenTimeout:       30 * time.Second,
+		FailureThreshold:  3,
+		OpenTimeout:       8 * time.Second,
 		HalfOpenMaxProbes: 1,
 		ShouldTrip:        daemon.DaemonShouldTrip,
 		OnStateChange: func(from, to circuitbreaker.State) {
@@ -155,10 +155,16 @@ func ReconcileConfigWorkspaces(
 		logger.Warn("failed to load workspace list for startup reconciliation", "err", err)
 		return
 	}
+	first := true
 	for wsID, wsPath := range workspaces {
 		if initialRegistered && wsID == initialID {
 			continue
 		}
+		// Stagger pool creation to avoid thundering-herd on daemon sockets.
+		if !first {
+			time.Sleep(200 * time.Millisecond)
+		}
+		first = false
 		if err := registry.Register(wsID, wsPath); err != nil {
 			logger.Warn("failed to register workspace during startup reconciliation",
 				"workspace", wsID, "err", err)

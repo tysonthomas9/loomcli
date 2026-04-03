@@ -126,11 +126,27 @@ func StopDaemonForWorkspace(deps *cli.Deps, wsDir string) {
 // in ~/.loom/config.yaml (if not already registered). This ensures
 // the project that `loom serve` is running from always appears in the workspace
 // list alongside any workspaces created via the UI.
+//
+// critical section inline; splitting would require passing cwd/wsName through a helper for no clarity gain.
+//
+//nolint:funlen // 57 lines: single-responsibility (register CWD) with a config-lock
 func EnsureCurrentProjectRegistered() {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return
 	}
+
+	// Guard: only auto-register directories that look like a loom project
+	// (must have .git/ so we know it's a repo, and .beads/ so we know bd can serve it).
+	if _, err := os.Stat(filepath.Join(cwd, ".git")); err != nil {
+		slog.Debug("skipping CWD auto-registration: no .git directory", "path", cwd)
+		return
+	}
+	if _, err := os.Stat(filepath.Join(cwd, ".beads")); err != nil {
+		slog.Debug("skipping CWD auto-registration: no .beads directory", "path", cwd)
+		return
+	}
+
 	wsName := filepath.Base(cwd)
 
 	if err := config.WithConfigLock(func() error {
@@ -174,5 +190,43 @@ func EnsureCurrentProjectRegistered() {
 		return config.SaveConfigUnlocked(cfg)
 	}); err != nil {
 		slog.Warn("failed to register current project as workspace", "err", err)
+	}
+}
+
+// EnsureDaemonsForAllWorkspaces starts bd daemons for all configured workspaces
+// that have a .beads/ directory. Runs staggered (200ms between each) to avoid
+// thundering-herd on system resources. Skips the CWD workspace (already started
+// by EnsureIssueBackendRunning in serve.go). Best-effort: errors are logged, not fatal.
+func EnsureDaemonsForAllWorkspaces(deps *cli.Deps, ctx context.Context) {
+	cwd, _ := os.Getwd()
+
+	cfg, err := config.LoadConfig()
+	if err != nil || cfg == nil {
+		return
+	}
+
+	timeout := cfg.Daemon.GetStartupTimeout(DefaultDaemonStartupTimeout)
+
+	for name, ws := range cfg.Workspaces {
+		if ctx.Err() != nil {
+			return
+		}
+		// Skip the CWD workspace — its daemon is managed by the main serve loop.
+		if ws.Path == cwd {
+			continue
+		}
+		// Only start daemons for workspaces that have a .beads/ directory.
+		if _, err := os.Stat(filepath.Join(ws.Path, ".beads")); err != nil {
+			continue
+		}
+
+		// Stagger to avoid thundering-herd.
+		time.Sleep(200 * time.Millisecond)
+
+		slog.Info("auto-starting daemon for workspace", "workspace", name, "path", ws.Path)
+		if err := EnsureDaemonForWorkspace(deps, ctx, ws.Path, timeout); err != nil {
+			slog.Warn("failed to auto-start daemon for workspace",
+				"workspace", name, "path", ws.Path, "err", err)
+		}
 	}
 }

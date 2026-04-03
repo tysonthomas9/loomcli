@@ -109,6 +109,13 @@ func TestEnsureCurrentProjectRegistered_GeneratesUUID(t *testing.T) {
 	if err := os.MkdirAll(wsDir, 0755); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
+	// Create .git and .beads so the guard allows registration.
+	if err := os.MkdirAll(filepath.Join(wsDir, ".git"), 0755); err != nil {
+		t.Fatalf("MkdirAll(.git) error = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(wsDir, ".beads"), 0755); err != nil {
+		t.Fatalf("MkdirAll(.beads) error = %v", err)
+	}
 
 	// Change to the workspace directory so ensureCurrentProjectRegistered uses it.
 	origDir, err := os.Getwd()
@@ -150,6 +157,13 @@ func TestEnsureCurrentProjectRegistered_SkipsExistingByPath(t *testing.T) {
 	wsDir := filepath.Join(t.TempDir(), "existing")
 	if err := os.MkdirAll(wsDir, 0755); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	// Create .git and .beads so the guard allows registration.
+	if err := os.MkdirAll(filepath.Join(wsDir, ".git"), 0755); err != nil {
+		t.Fatalf("MkdirAll(.git) error = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(wsDir, ".beads"), 0755); err != nil {
+		t.Fatalf("MkdirAll(.beads) error = %v", err)
 	}
 
 	// Resolve symlinks (macOS /var -> /private/var) so the path matches os.Getwd().
