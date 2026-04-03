@@ -18,6 +18,7 @@ linters:
     - misspell
     - revive
     - staticcheck
+    - depguard
     - unconvert
     - unparam
 
@@ -56,6 +57,23 @@ linters:
       min-complexity: 30
     misspell:
       locale: US
+    depguard:
+      rules:
+        handler-layer-isolation:
+          list-mode: lax
+          files:
+            - "**/handler/**"
+          deny:
+            - pkg: github.com/tysonthomas9/loomcli/internal/webui/daemon
+              desc: "Handlers must not import daemon directly; use the service layer (internal/webui/service)"
+            - pkg: github.com/tysonthomas9/loomcli/internal/backend
+              desc: "Handlers must not import backend directly; use the service layer (internal/webui/service)"
+            - pkg: github.com/tysonthomas9/loomcli/internal/notify
+              desc: "Handlers must not import notify directly; use the service layer (internal/webui/service)"
+            - pkg: github.com/tysonthomas9/loomcli/internal/webui/store
+              desc: "Handlers must not import store directly; use the service layer (internal/webui/service)"
+            - pkg: github.com/tysonthomas9/loomcli/internal/store
+              desc: "Handlers must not import store directly; use the service layer (internal/webui/service)"
     staticcheck:
       checks:
         - "all"
