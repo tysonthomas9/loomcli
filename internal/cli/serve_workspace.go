@@ -296,7 +296,8 @@ func createEmptyWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir, b
 	initWorkspaceBeads(wsDir, repos)
 
 	// Write default loom.yaml with agents (best-effort; non-fatal)
-	if err := writeLoomYaml(wsDir); err != nil {
+	agentNames, err := writeLoomYaml(wsDir)
+	if err != nil {
 		slog.Warn("failed to write loom.yaml for workspace", "workspace", wsName, "err", err)
 	}
 
@@ -319,6 +320,8 @@ func createEmptyWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir, b
 			slog.Warn("failed to start daemon for workspace", "workspace", wsName, "err", err)
 			return // daemon not ready — skip sync
 		}
+		// Create agent worktrees before sync so daemon can index them.
+		createAgentWorktrees(wsDir, repos, agentNames)
 		// Sync repos after daemon is ready (can be slow for large repos)
 		if result := execCommand(wsDir, "bd", "repo", "sync"); result.Err != nil {
 			slog.Warn("bd repo sync failed", "workspace", wsName, "err", result.Err)
@@ -402,7 +405,8 @@ func createCloneWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir st
 	initWorkspaceBeads(wsDir, repos)
 
 	// Write default loom.yaml with agents (best-effort; non-fatal)
-	if err := writeLoomYaml(wsDir); err != nil {
+	cloneAgentNames, err := writeLoomYaml(wsDir)
+	if err != nil {
 		slog.Warn("failed to write loom.yaml for workspace", "workspace", wsName, "err", err)
 	}
 
@@ -425,6 +429,8 @@ func createCloneWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir st
 			slog.Warn("failed to start daemon for workspace", "workspace", wsName, "err", err)
 			return // daemon not ready — skip sync
 		}
+		// Create agent worktrees before sync so daemon can index them.
+		createAgentWorktrees(wsDir, repos, cloneAgentNames)
 		// Sync repos after daemon is ready (can be slow for large repos)
 		if result := execCommand(wsDir, "bd", "repo", "sync"); result.Err != nil {
 			slog.Warn("bd repo sync failed", "workspace", wsName, "err", result.Err)

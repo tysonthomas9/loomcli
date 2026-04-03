@@ -37,7 +37,8 @@ func pickAgentNames(n int) []string {
 
 // writeLoomYaml writes a loom.yaml with default agent configuration into wsDir.
 // The YAML is built via string formatting to avoid pulling in a YAML library.
-func writeLoomYaml(wsDir string) error {
+// Returns the generated agent names so callers can create worktrees for them.
+func writeLoomYaml(wsDir string) ([]string, error) {
 	names := pickAgentNames(2)
 
 	var sb strings.Builder
@@ -54,10 +55,28 @@ func writeLoomYaml(wsDir string) error {
 
 	yamlPath := filepath.Join(wsDir, "loom.yaml")
 	if err := os.WriteFile(yamlPath, []byte(sb.String()), 0644); err != nil { //nolint:gosec // config file, not secret
-		return fmt.Errorf("failed to write loom.yaml: %w", err)
+		return nil, fmt.Errorf("failed to write loom.yaml: %w", err)
 	}
 	slog.Info("wrote default loom.yaml", "path", yamlPath, "agents", names)
-	return nil
+	return names, nil
+}
+
+// createAgentWorktrees creates git worktrees for each agent in each repo.
+// Worktrees are placed at <wsDir>/worktrees/<repoName>/<agentName>, matching
+// the path convention in worktree_repo.go:resolveRepoWorktreeTarget.
+// Best-effort: errors are logged but not fatal.
+func createAgentWorktrees(wsDir string, repos []RepoConfig, agentNames []string) {
+	for _, repo := range repos {
+		for _, agent := range agentNames {
+			wtPath := filepath.Join(wsDir, "worktrees", repo.Name, agent)
+			if err := ensureRepoWorktree(repo.Path, wtPath, agent); err != nil {
+				slog.Warn("failed to create agent worktree",
+					"repo", repo.Name, "agent", agent, "err", err)
+			} else {
+				slog.Info("created agent worktree", "repo", repo.Name, "agent", agent)
+			}
+		}
+	}
 }
 
 // ensureDaemonForWorkspace starts the bd daemon in the given workspace directory.
