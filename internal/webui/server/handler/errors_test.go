@@ -213,6 +213,41 @@ func TestHandleServiceError_UnknownKind(t *testing.T) {
 	}
 }
 
+func TestStatusForKind(t *testing.T) {
+	tests := []struct {
+		kind service.ErrorKind
+		want int
+	}{
+		{service.KindNotFound, http.StatusNotFound},
+		{service.KindValidation, http.StatusBadRequest},
+		{service.KindUnavailable, http.StatusServiceUnavailable},
+		{service.KindTimeout, http.StatusGatewayTimeout},
+		{service.KindConflict, http.StatusConflict},
+		{service.KindInternal, http.StatusInternalServerError},
+		{service.KindForbidden, http.StatusForbidden},
+		{service.KindUnauthorized, http.StatusUnauthorized},
+		{service.KindLocked, http.StatusLocked},
+		{service.KindPayloadTooLarge, http.StatusRequestEntityTooLarge},
+		{service.KindRateLimited, http.StatusTooManyRequests},
+		{service.KindBadGateway, http.StatusBadGateway},
+		{service.KindNotImplemented, http.StatusNotImplemented},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.kind), func(t *testing.T) {
+			if got := StatusForKind(tt.kind); got != tt.want {
+				t.Errorf("StatusForKind(%q) = %d, want %d", tt.kind, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStatusForKind_UnknownKind(t *testing.T) {
+	got := StatusForKind(service.ErrorKind("totally_unknown"))
+	if got != http.StatusInternalServerError {
+		t.Errorf("StatusForKind(unknown) = %d, want %d", got, http.StatusInternalServerError)
+	}
+}
+
 func TestKindToStatus_Completeness(t *testing.T) {
 	// All 13 ErrorKind constants defined in service/errors.go.
 	allKinds := []service.ErrorKind{

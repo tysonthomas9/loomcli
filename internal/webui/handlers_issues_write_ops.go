@@ -49,7 +49,7 @@ func handleCreateIssue(svc service.IssueService) http.HandlerFunc {
 
 		data, err := svc.CreateIssue(r.Context(), params)
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 
@@ -95,7 +95,7 @@ func handleCloseIssue(svc service.IssueService) http.HandlerFunc {
 
 		data, err := svc.CloseIssue(r.Context(), params)
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 
@@ -117,7 +117,7 @@ func handleDeleteIssue(svc service.IssueService) http.HandlerFunc {
 
 		data, err := svc.DeleteIssue(r.Context(), issueID)
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 

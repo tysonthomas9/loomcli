@@ -31,7 +31,7 @@ func handleWorkspaceReorder(svc service.WorkspaceService) http.HandlerFunc {
 
 		data, err := svc.ReorderWorkspaces(r.Context(), req.Order)
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 		respondJSON(w, http.StatusOK, workspaceResponse{Success: true, Data: data})

@@ -117,7 +117,7 @@ func handleMoveIssue(svc service.IssueService, workspaceConfigFn func() (*servic
 			Validator:       validator,
 		})
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 

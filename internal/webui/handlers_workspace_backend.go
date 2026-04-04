@@ -53,7 +53,7 @@ func handleWorkspaceBackendPatch(svc service.WorkspaceService) http.HandlerFunc 
 
 		data, err := svc.PatchWorkspaceBackend(r.Context(), wsID, req.Backend)
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 		respondJSON(w, http.StatusOK, workspaceResponse{Success: true, Data: data})

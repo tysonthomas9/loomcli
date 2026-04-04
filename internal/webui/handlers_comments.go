@@ -49,7 +49,7 @@ func handleAddComment(svc service.IssueService) http.HandlerFunc {
 			Text:    req.Text,
 		})
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 

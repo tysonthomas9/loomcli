@@ -3,6 +3,7 @@ package webui
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"regexp"
@@ -11,7 +12,9 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // validSessionID matches session IDs produced by GenerateSessionID:
@@ -77,10 +80,16 @@ func handleListTaskSessions(svc SessionService) http.HandlerFunc {
 
 		items, err := svc.ListTaskSessions(r.Context(), taskID)
 		if err != nil {
-			status := serviceErrorStatus(err)
+			var svcErr *service.ServiceError
+			status := http.StatusInternalServerError
+			msg := "internal server error"
+			if errors.As(err, &svcErr) {
+				status = handler.StatusForKind(svcErr.Kind)
+				msg = svcErr.Message
+			}
 			respondJSON(w, status, SessionListResponse{
 				Success: false,
-				Error:   serviceErrorMessage(err),
+				Error:   msg,
 			})
 			return
 		}
@@ -103,10 +112,16 @@ func handleGetSession(svc SessionService) http.HandlerFunc {
 
 		result, err := svc.GetSession(r.Context(), taskID, sessionID)
 		if err != nil {
-			status := serviceErrorStatus(err)
+			var svcErr *service.ServiceError
+			status := http.StatusInternalServerError
+			msg := "internal server error"
+			if errors.As(err, &svcErr) {
+				status = handler.StatusForKind(svcErr.Kind)
+				msg = svcErr.Message
+			}
 			respondJSON(w, status, SessionDetailResponse{
 				Success: false,
-				Error:   serviceErrorMessage(err),
+				Error:   msg,
 			})
 			return
 		}
@@ -126,10 +141,16 @@ func handleGetSessionTranscript(svc SessionService) http.HandlerFunc {
 
 		entries, err := svc.GetSessionTranscript(r.Context(), taskID, sessionID)
 		if err != nil {
-			status := serviceErrorStatus(err)
+			var svcErr *service.ServiceError
+			status := http.StatusInternalServerError
+			msg := "internal server error"
+			if errors.As(err, &svcErr) {
+				status = handler.StatusForKind(svcErr.Kind)
+				msg = svcErr.Message
+			}
 			respondJSON(w, status, TranscriptResponse{
 				Success: false,
-				Error:   serviceErrorMessage(err),
+				Error:   msg,
 			})
 			return
 		}
@@ -209,10 +230,16 @@ func handleGetSessionDiff(svc SessionService) http.HandlerFunc {
 
 		diff, err := svc.GetSessionDiff(r.Context(), taskID, sessionID)
 		if err != nil {
-			status := serviceErrorStatus(err)
+			var svcErr *service.ServiceError
+			status := http.StatusInternalServerError
+			msg := "internal server error"
+			if errors.As(err, &svcErr) {
+				status = handler.StatusForKind(svcErr.Kind)
+				msg = svcErr.Message
+			}
 			respondJSON(w, status, map[string]interface{}{
 				"success": false,
-				"error":   serviceErrorMessage(err),
+				"error":   msg,
 			})
 			return
 		}

@@ -17,11 +17,11 @@ import (
 var validGitRef = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_./-]*$`)
 
 // writeAgentGitError maps a service error to an HTTP response for agent git handlers.
-// ServiceErrors use writeServiceError; other errors use the given fallback status.
+// ServiceErrors use WriteServiceError; other errors use the given fallback status.
 func writeAgentGitError(w http.ResponseWriter, err error, fallbackStatus int) {
 	var svcErr *service.ServiceError
 	if errors.As(err, &svcErr) {
-		writeServiceError(w, err)
+		WriteServiceError(w, err)
 		return
 	}
 	respondError(w, fallbackStatus, err.Error())

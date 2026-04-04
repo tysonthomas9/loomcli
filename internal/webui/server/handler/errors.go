@@ -33,13 +33,19 @@ var kindToStatus = map[service.ErrorKind]int{
 //
 // The response body is always {"error": "<message>"}. The message comes from
 // ServiceError.Message (not Error()) to avoid leaking cause chains to clients.
+// StatusForKind returns the HTTP status code for the given ErrorKind.
+// Unknown kinds return 500 Internal Server Error.
+func StatusForKind(kind service.ErrorKind) int {
+	if status, ok := kindToStatus[kind]; ok {
+		return status
+	}
+	return http.StatusInternalServerError
+}
+
 func HandleServiceError(w http.ResponseWriter, err error) {
 	var svcErr *service.ServiceError
 	if errors.As(err, &svcErr) {
-		status, ok := kindToStatus[svcErr.Kind]
-		if !ok {
-			status = http.StatusInternalServerError
-		}
+		status := StatusForKind(svcErr.Kind)
 		slog.Error("service error",
 			"kind", string(svcErr.Kind),
 			"status", status,

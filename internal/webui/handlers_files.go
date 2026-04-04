@@ -132,7 +132,7 @@ func handleFileTree(svc FileService) http.HandlerFunc {
 
 		result, err := svc.ListDirectory(r.Context(), wsID, agentName, reqPath)
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 
@@ -149,7 +149,7 @@ func handleFileRead(svc FileService) http.HandlerFunc {
 
 		result, err := svc.ReadFile(r.Context(), wsID, agentName, reqPath)
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 
@@ -185,7 +185,7 @@ func handleFileWrite(svc FileService) http.HandlerFunc {
 		}
 
 		if err := svc.WriteFile(r.Context(), wsID, agentName, reqPath, req.Content); err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 

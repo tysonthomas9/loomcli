@@ -54,7 +54,7 @@ func handleTerminalToken(svc TerminalService) http.HandlerFunc {
 
 		token, err := svc.GenerateToken(r.Context(), session, userID)
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 
@@ -84,7 +84,7 @@ func handleTerminalRestart(svc TerminalService, auth *realtime.TerminalAuth) htt
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		result, err := svc.RestartSession(r.Context(), wsID, session)
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 
@@ -110,7 +110,7 @@ func handleTerminalKill(svc TerminalService, auth *realtime.TerminalAuth) http.H
 		}
 
 		if err := svc.KillSession(r.Context(), session); err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 
@@ -137,7 +137,7 @@ func handleTerminalSessionStatus(svc TerminalService, auth *realtime.TerminalAut
 
 		result, err := svc.GetSessionStatus(r.Context(), session)
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 

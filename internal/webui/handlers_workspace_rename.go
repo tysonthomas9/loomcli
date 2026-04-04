@@ -38,7 +38,7 @@ func handleWorkspaceRename(svc service.WorkspaceService) http.HandlerFunc {
 
 		data, err := svc.RenameWorkspace(r.Context(), wsID, req.NewName)
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 		respondJSON(w, http.StatusOK, workspaceResponse{Success: true, Data: data})

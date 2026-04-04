@@ -41,7 +41,7 @@ func handlePatchIssue(svc service.IssueService) http.HandlerFunc {
 		}
 
 		if err := svc.PatchIssue(r.Context(), params); err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 

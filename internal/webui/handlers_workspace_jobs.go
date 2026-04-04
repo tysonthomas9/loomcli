@@ -21,7 +21,7 @@ func handleGetWorkspaceJob(svc service.WorkspaceService) http.HandlerFunc {
 
 		job, err := svc.GetWorkspaceJob(r.Context(), id)
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 

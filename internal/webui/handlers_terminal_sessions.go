@@ -79,7 +79,7 @@ func handleListTerminalSessions(svc TerminalService) http.HandlerFunc {
 		workspace := middleware.WorkspaceFromContext(r.Context())
 		sessions, err := svc.ListSessions(r.Context(), workspace)
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 
@@ -157,7 +157,7 @@ func handleScheduleSessionKill(svc TerminalService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		session := r.PathValue("session")
 		if err := svc.ScheduleKill(r.Context(), session); err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 
@@ -172,7 +172,7 @@ func handleListSessionsByIssue(svc TerminalService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sessionMap, err := svc.ListSessionsByIssue(r.Context())
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 
@@ -188,7 +188,7 @@ func handleCloseAllSessions(svc TerminalService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		result, err := svc.CloseAllSessions(r.Context())
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 
@@ -226,7 +226,7 @@ func handleSeedTerminalSession(svc TerminalService) http.HandlerFunc {
 		}
 
 		if err := svc.SeedSession(r.Context(), sessionName, params); err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 

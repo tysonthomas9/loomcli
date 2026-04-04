@@ -39,7 +39,7 @@ func handleWorkspaceCreate(svc service.WorkspaceService) http.HandlerFunc {
 				if errors.As(err, &svcErr) && svcErr.Kind == service.KindUnavailable {
 					// fall through to sync creation below
 				} else {
-					writeServiceError(w, err)
+					WriteServiceError(w, err)
 					return
 				}
 			} else {
@@ -51,7 +51,7 @@ func handleWorkspaceCreate(svc service.WorkspaceService) http.HandlerFunc {
 		// Sync path
 		data, warnings, err := svc.CreateWorkspace(r.Context(), req)
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 		resp := workspaceResponse{Success: true, Data: data}

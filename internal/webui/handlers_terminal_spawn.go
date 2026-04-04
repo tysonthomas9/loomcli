@@ -71,7 +71,7 @@ func handleTerminalSpawn(svc TerminalService) http.HandlerFunc {
 
 		result, err := svc.SpawnSession(r.Context(), wsID, params)
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 

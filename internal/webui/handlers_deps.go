@@ -61,7 +61,7 @@ func handleAddDependency(svc service.IssueService) http.HandlerFunc {
 			DepType:     req.DepType,
 		})
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 
@@ -99,7 +99,7 @@ func handleRemoveDependency(svc service.IssueService) http.HandlerFunc {
 			DepID:   depID,
 		})
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 

@@ -58,7 +58,7 @@ func handleDiffCommits(svc DiffService) http.HandlerFunc {
 
 		commits, svcErr := svc.DiffCommits(r.Context(), wsID, agentName, from, limit)
 		if svcErr != nil {
-			writeServiceError(w, svcErr)
+			WriteServiceError(w, svcErr)
 			return
 		}
 
@@ -77,7 +77,7 @@ func handleDiffFiles(svc DiffService) http.HandlerFunc {
 
 		files, err := svc.DiffFiles(r.Context(), wsID, agentName, from, to)
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 
@@ -98,7 +98,7 @@ func handleDiffFile(svc DiffService) http.HandlerFunc {
 
 		result, err := svc.DiffFilePatch(r.Context(), wsID, agentName, from, to, filePath)
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 

@@ -21,7 +21,7 @@ func handleGetIssueDiffStat(svc DiffService) http.HandlerFunc {
 
 		result, err := svc.GetIssueDiffStat(r.Context(), wsID, issueID)
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 

@@ -97,7 +97,7 @@ func handleGetIssue(svc service.IssueService) http.HandlerFunc {
 		}
 		data, err := svc.GetIssue(r.Context(), issueID)
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 		respondJSON(w, http.StatusOK, IssuesResponse{
@@ -128,7 +128,7 @@ func handleListIssues(svc service.IssueService) http.HandlerFunc {
 			IncludeBlocked: kp.IncludeBlocked,
 		})
 		if svcErr != nil {
-			writeServiceError(w, svcErr)
+			WriteServiceError(w, svcErr)
 			return
 		}
 

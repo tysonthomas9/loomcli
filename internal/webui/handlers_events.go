@@ -52,7 +52,7 @@ func handleGetIssueEvents(svc service.IssueService) http.HandlerFunc {
 			Limit:   parseEventLimit(r),
 		})
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 

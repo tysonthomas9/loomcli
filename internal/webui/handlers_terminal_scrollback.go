@@ -11,7 +11,7 @@ func handleGetScrollback(svc TerminalService) http.HandlerFunc {
 
 		result, err := svc.GetScrollback(r.Context(), session)
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 

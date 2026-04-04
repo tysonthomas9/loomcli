@@ -24,7 +24,7 @@ func handleExportSession(svc TerminalService) http.HandlerFunc {
 
 		content, err := svc.ExportSession(r.Context(), session)
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 
@@ -53,7 +53,7 @@ func handleScrollbackInfo(svc TerminalService) http.HandlerFunc {
 
 		result, err := svc.GetScrollbackInfo(r.Context(), session)
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 

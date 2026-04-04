@@ -1,11 +1,8 @@
 package webui
 
 import (
-	"errors"
 	"net/http"
 	"strings"
-
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 const (
@@ -19,34 +16,6 @@ const (
 // writeIssuesError writes a JSON error response for the issues endpoint.
 func writeIssuesError(w http.ResponseWriter, status int, message, code string) {
 	respondJSON(w, status, IssuesResponse{Success: false, Error: message, Code: code})
-}
-
-// serviceErrorStatus returns the HTTP status code for an error.
-// ServiceError kinds are mapped to their natural HTTP codes via kindStatus;
-// other errors default to 500.
-func serviceErrorStatus(err error) int {
-	var svcErr *service.ServiceError
-	if errors.As(err, &svcErr) {
-		return statusForKind(svcErr.Kind)
-	}
-	return http.StatusInternalServerError
-}
-
-// serviceErrorMessage returns the user-facing message for an error.
-// For ServiceErrors it returns the Message field (without the Kind prefix);
-// for other errors it returns a generic message to avoid leaking internals.
-func serviceErrorMessage(err error) string {
-	var svcErr *service.ServiceError
-	if errors.As(err, &svcErr) {
-		return svcErr.Message
-	}
-	return "internal server error"
-}
-
-// writeServiceError maps a service.ServiceError to an HTTP response.
-// Delegates to WriteServiceError which uses the canonical kindStatus table.
-func writeServiceError(w http.ResponseWriter, err error) {
-	WriteServiceError(w, err)
 }
 
 // splitAndTrim splits a comma-separated string and trims whitespace from each element.

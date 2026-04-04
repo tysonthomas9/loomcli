@@ -24,7 +24,7 @@ func handleSetDefaultWorkspace(svc service.WorkspaceService) http.HandlerFunc {
 
 		data, err := svc.SetDefaultWorkspace(r.Context(), body.Name)
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 		respondJSON(w, http.StatusOK, workspaceResponse{Success: true, Data: data})
@@ -36,7 +36,7 @@ func handleClearDefaultWorkspace(svc service.WorkspaceService) http.HandlerFunc 
 	return func(w http.ResponseWriter, r *http.Request) {
 		data, err := svc.ClearDefaultWorkspace(r.Context())
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 		respondJSON(w, http.StatusOK, workspaceResponse{Success: true, Data: data})

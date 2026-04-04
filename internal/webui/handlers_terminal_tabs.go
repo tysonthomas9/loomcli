@@ -25,7 +25,7 @@ func handleListTerminalTabs(svc TerminalService) http.HandlerFunc {
 
 		tabs, err := svc.ListTabs(r.Context(), workspace)
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 
@@ -44,7 +44,7 @@ func handleGetTerminalTab(svc TerminalService) http.HandlerFunc {
 
 		meta, err := svc.GetTab(r.Context(), workspace, session)
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 
@@ -112,7 +112,7 @@ func handlePatchTerminalTab(svc TerminalService) http.HandlerFunc {
 
 		result, err := svc.PatchTab(r.Context(), workspace, session, fields)
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 
@@ -168,7 +168,7 @@ func handlePutTerminalTab(svc TerminalService) http.HandlerFunc {
 		}
 
 		if err := svc.PutTab(r.Context(), workspace, meta); err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 
@@ -186,7 +186,7 @@ func handleDeleteTerminalTab(svc TerminalService) http.HandlerFunc {
 		session := r.PathValue("session")
 
 		if err := svc.DeleteTab(r.Context(), workspace, session); err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 

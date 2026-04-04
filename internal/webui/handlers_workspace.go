@@ -18,7 +18,7 @@ func handleActiveWorkspace(svc service.WorkspaceService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		data, err := svc.GetActiveWorkspace(r.Context())
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 		respondJSON(w, http.StatusOK, workspaceResponse{Success: true, Data: data})

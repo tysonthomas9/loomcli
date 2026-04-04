@@ -463,7 +463,7 @@ func TestHandleCreateIssueW_MissingRequiredFields(t *testing.T) {
 
 			handler.ServeHTTP(w, req)
 
-			// writeServiceError for validation errors returns 400
+			// WriteServiceError for validation errors returns 400
 			if w.Code != http.StatusBadRequest {
 				t.Errorf("status = %d, want %d: %s", w.Code, http.StatusBadRequest, w.Body.String())
 			}

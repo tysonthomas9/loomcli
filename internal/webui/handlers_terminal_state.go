@@ -13,7 +13,7 @@ func handleGetTerminalState(svc TerminalService) http.HandlerFunc {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		activeTab, err := svc.GetTerminalState(r.Context(), wsID)
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 
@@ -36,7 +36,7 @@ func handlePatchTerminalState(svc TerminalService) http.HandlerFunc {
 
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		if err := svc.PatchTerminalState(r.Context(), wsID, req.ActiveTab); err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 

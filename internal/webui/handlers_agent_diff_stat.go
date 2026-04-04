@@ -15,7 +15,7 @@ func handleAgentDiffStat(svc AgentService) http.HandlerFunc {
 
 		result, err := svc.GetDiffStat(r.Context(), wsID, agentName)
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 

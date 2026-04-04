@@ -13,7 +13,7 @@ func handleListWorkspaces(svc service.WorkspaceService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		items, err := svc.ListWorkspaces(r.Context())
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 		respondJSON(w, http.StatusOK, map[string]interface{}{
@@ -35,7 +35,7 @@ func handleGetWorkspace(svc service.WorkspaceService) http.HandlerFunc {
 		}
 		data, err := svc.GetWorkspace(r.Context(), wsID)
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 		respondJSON(w, http.StatusOK, workspaceResponse{Success: true, Data: data})

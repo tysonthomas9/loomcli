@@ -50,7 +50,7 @@ func handleGetAgentLog(svc AgentService) http.HandlerFunc {
 
 		result, err := svc.GetLog(r.Context(), wsID, agentName, lines, beforeLine)
 		if err != nil {
-			writeServiceError(w, err)
+			WriteServiceError(w, err)
 			return
 		}
 

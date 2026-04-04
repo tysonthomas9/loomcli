@@ -9,8 +9,10 @@ import (
 
 	"nhooyr.io/websocket"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 const (
@@ -48,9 +50,16 @@ func handleGetAgentTerminalInfo(svc AgentService) http.HandlerFunc {
 
 		result, err := svc.GetTerminalInfo(r.Context(), wsID, agentName)
 		if err != nil {
-			respondJSON(w, serviceErrorStatus(err), agentTerminalInfoResponse{
+			var svcErr *service.ServiceError
+			status := http.StatusInternalServerError
+			msg := "internal server error"
+			if errors.As(err, &svcErr) {
+				status = handler.StatusForKind(svcErr.Kind)
+				msg = svcErr.Message
+			}
+			respondJSON(w, status, agentTerminalInfoResponse{
 				Success: false,
-				Error:   serviceErrorMessage(err),
+				Error:   msg,
 			})
 			return
 		}
@@ -77,9 +86,16 @@ func handleGetAgentTerminalToken(svc AgentService) http.HandlerFunc {
 
 		token, err := svc.GenerateTerminalToken(r.Context(), agentName, userID)
 		if err != nil {
-			respondJSON(w, serviceErrorStatus(err), agentTerminalTokenResponse{
+			var svcErr *service.ServiceError
+			status := http.StatusInternalServerError
+			msg := "internal server error"
+			if errors.As(err, &svcErr) {
+				status = handler.StatusForKind(svcErr.Kind)
+				msg = svcErr.Message
+			}
+			respondJSON(w, status, agentTerminalTokenResponse{
 				Success: false,
-				Error:   serviceErrorMessage(err),
+				Error:   msg,
 			})
 			return
 		}
