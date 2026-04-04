@@ -57,6 +57,7 @@ type DoctorSummary struct {
 }
 
 var doctorJSON bool
+var doctorFix bool
 
 var doctorCmd = &cobra.Command{
 	Use:     "doctor",
@@ -82,6 +83,7 @@ Examples:
 
 func init() {
 	doctorCmd.Flags().BoolVar(&doctorJSON, "json", false, "Output in JSON format")
+	doctorCmd.Flags().BoolVar(&doctorFix, "fix", false, "Automatically fix issues where possible")
 	rootCmd.AddCommand(doctorCmd)
 }
 
@@ -105,7 +107,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 			checkBdSocket, checkBeadsInit)
 	}
 	checks = append(checks, checkBackendCLI, checkProjectConfig, checkGlobalConfig,
-		checkWorktrees, checkStaleLocks, checkLoomDaemon, checkRedis)
+		checkWorktrees, checkStaleLocks, checkOrphanedTmuxSessions, checkLoomDaemon, checkRedis)
 
 	var results []CheckResult
 	for _, check := range checks {

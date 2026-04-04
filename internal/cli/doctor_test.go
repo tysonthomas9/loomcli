@@ -619,6 +619,301 @@ func TestCheckFleetDB(t *testing.T) {
 	})
 }
 
+func TestLoomSessionRegex(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		input     string
+		wantMatch bool
+		wsPrefix  string
+		role      string
+		agent     string
+		pid       string
+	}{
+		{
+			name:      "standard session with hex prefix",
+			input:     "loom-aaaabbbb-plan-falcon-12345",
+			wantMatch: true,
+			wsPrefix:  "aaaabbbb",
+			role:      "plan",
+			agent:     "falcon",
+			pid:       "12345",
+		},
+		{
+			name:      "default workspace prefix with task role",
+			input:     "loom-default-task-nova-67890",
+			wantMatch: true,
+			wsPrefix:  "default",
+			role:      "task",
+			agent:     "nova",
+			pid:       "67890",
+		},
+		{
+			name:      "agent name with hyphens",
+			input:     "loom-aaaabbbb-plan-my-agent-12345",
+			wantMatch: true,
+			wsPrefix:  "aaaabbbb",
+			role:      "plan",
+			agent:     "my-agent",
+			pid:       "12345",
+		},
+		{
+			name:      "keepalive role does not match",
+			input:     "loom-test-keepalive-12345",
+			wantMatch: false,
+		},
+		{
+			name:      "e2e-test style does not match",
+			input:     "loom-e2e-test-12345-9876",
+			wantMatch: false,
+		},
+		{
+			name:      "non-loom session does not match",
+			input:     "my-shell-session",
+			wantMatch: false,
+		},
+		{
+			name:      "uppercase hex prefix does not match",
+			input:     "loom-AABB1234-plan-falcon-12345",
+			wantMatch: false,
+		},
+		{
+			name:      "invalid role does not match",
+			input:     "loom-aaaabbbb-build-falcon-12345",
+			wantMatch: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			matches := loomSessionRegex.FindStringSubmatch(tt.input)
+			if tt.wantMatch {
+				if matches == nil {
+					t.Fatalf("expected %q to match, but it did not", tt.input)
+				}
+				if matches[1] != tt.wsPrefix {
+					t.Errorf("wsPrefix: got %q, want %q", matches[1], tt.wsPrefix)
+				}
+				if matches[2] != tt.role {
+					t.Errorf("role: got %q, want %q", matches[2], tt.role)
+				}
+				if matches[3] != tt.agent {
+					t.Errorf("agent: got %q, want %q", matches[3], tt.agent)
+				}
+				if matches[4] != tt.pid {
+					t.Errorf("pid: got %q, want %q", matches[4], tt.pid)
+				}
+			} else if matches != nil {
+				t.Errorf("expected %q NOT to match, but got %v", tt.input, matches)
+			}
+		})
+	}
+}
+
+func TestCheckOrphanedTmuxSessions_NoSessions(t *testing.T) {
+	origList := listLoomTmuxSessions
+	origFix := doctorFix
+	doctorFix = false
+	listLoomTmuxSessions = func() ([]loomTmuxSession, error) {
+		return nil, nil
+	}
+	t.Cleanup(func() {
+		listLoomTmuxSessions = origList
+		doctorFix = origFix
+	})
+
+	result := checkOrphanedTmuxSessions()
+	if result.Name != "" {
+		t.Errorf("expected empty result (skip) when no sessions, got name=%q status=%v", result.Name, result.Status)
+	}
+}
+
+func TestCheckOrphanedTmuxSessions_ListError(t *testing.T) {
+	origList := listLoomTmuxSessions
+	origFix := doctorFix
+	doctorFix = false
+	listLoomTmuxSessions = func() ([]loomTmuxSession, error) {
+		return nil, fmt.Errorf("tmux list-sessions: connection refused")
+	}
+	t.Cleanup(func() {
+		listLoomTmuxSessions = origList
+		doctorFix = origFix
+	})
+
+	result := checkOrphanedTmuxSessions()
+	if result.Status != StatusWarn {
+		t.Errorf("expected warn, got %v: %s", result.Status, result.Summary)
+	}
+	if !strings.Contains(result.Summary, "could not list") {
+		t.Errorf("expected summary about listing failure, got %q", result.Summary)
+	}
+	if !strings.Contains(result.Detail, "connection refused") {
+		t.Errorf("expected detail to contain error message, got %q", result.Detail)
+	}
+}
+
+func TestCheckOrphanedTmuxSessions_AllActive(t *testing.T) {
+	origList := listLoomTmuxSessions
+	origFix := doctorFix
+	doctorFix = false
+	listLoomTmuxSessions = func() ([]loomTmuxSession, error) {
+		return []loomTmuxSession{
+			{Name: "loom-aaaabbbb-plan-falcon-" + fmt.Sprint(os.Getpid()), Role: "plan", Agent: "falcon", PID: os.Getpid(), Created: time.Now()},
+			{Name: "loom-aaaabbbb-task-nova-" + fmt.Sprint(os.Getpid()), Role: "task", Agent: "nova", PID: os.Getpid(), Created: time.Now()},
+		}, nil
+	}
+	t.Cleanup(func() {
+		listLoomTmuxSessions = origList
+		doctorFix = origFix
+	})
+
+	result := checkOrphanedTmuxSessions()
+	if result.Status != StatusPass {
+		t.Errorf("expected pass when all PIDs alive, got %v: %s", result.Status, result.Summary)
+	}
+	if !strings.Contains(result.Summary, "no orphaned") {
+		t.Errorf("expected summary about no orphans, got %q", result.Summary)
+	}
+}
+
+func TestCheckOrphanedTmuxSessions_Orphaned(t *testing.T) {
+	origList := listLoomTmuxSessions
+	origFix := doctorFix
+	doctorFix = false
+	listLoomTmuxSessions = func() ([]loomTmuxSession, error) {
+		return []loomTmuxSession{
+			{Name: "loom-aaaabbbb-plan-falcon-999999", Role: "plan", Agent: "falcon", PID: 999999, Created: time.Now().Add(-1 * time.Hour)},
+			{Name: "loom-ccccdddd-task-nova-999998", Role: "task", Agent: "nova", PID: 999998, Created: time.Now().Add(-30 * time.Minute)},
+		}, nil
+	}
+	t.Cleanup(func() {
+		listLoomTmuxSessions = origList
+		doctorFix = origFix
+	})
+
+	result := checkOrphanedTmuxSessions()
+	if result.Status != StatusWarn {
+		t.Errorf("expected warn, got %v: %s", result.Status, result.Summary)
+	}
+	if !strings.Contains(result.Summary, "2 orphaned") {
+		t.Errorf("expected summary with count 2, got %q", result.Summary)
+	}
+	if !strings.Contains(result.Detail, "loom-aaaabbbb-plan-falcon-999999") {
+		t.Errorf("expected detail to list first orphaned session, got %q", result.Detail)
+	}
+	if !strings.Contains(result.Detail, "loom-ccccdddd-task-nova-999998") {
+		t.Errorf("expected detail to list second orphaned session, got %q", result.Detail)
+	}
+	if !strings.Contains(result.Detail, "loom doctor --fix") {
+		t.Errorf("expected detail to suggest --fix, got %q", result.Detail)
+	}
+}
+
+func TestCheckOrphanedTmuxSessions_MixedActiveAndOrphaned(t *testing.T) {
+	origList := listLoomTmuxSessions
+	origFix := doctorFix
+	doctorFix = false
+	listLoomTmuxSessions = func() ([]loomTmuxSession, error) {
+		return []loomTmuxSession{
+			{Name: "loom-aaaabbbb-plan-falcon-" + fmt.Sprint(os.Getpid()), Role: "plan", Agent: "falcon", PID: os.Getpid(), Created: time.Now()},
+			{Name: "loom-ccccdddd-task-nova-999999", Role: "task", Agent: "nova", PID: 999999, Created: time.Now().Add(-1 * time.Hour)},
+		}, nil
+	}
+	t.Cleanup(func() {
+		listLoomTmuxSessions = origList
+		doctorFix = origFix
+	})
+
+	result := checkOrphanedTmuxSessions()
+	if result.Status != StatusWarn {
+		t.Errorf("expected warn, got %v: %s", result.Status, result.Summary)
+	}
+	if !strings.Contains(result.Summary, "1 orphaned") {
+		t.Errorf("expected summary with count 1, got %q", result.Summary)
+	}
+	// The active session should NOT appear in the detail
+	if strings.Contains(result.Detail, fmt.Sprint(os.Getpid())) {
+		t.Errorf("active session PID should not appear in detail, got %q", result.Detail)
+	}
+	// The dead session should appear
+	if !strings.Contains(result.Detail, "loom-ccccdddd-task-nova-999999") {
+		t.Errorf("expected orphaned session in detail, got %q", result.Detail)
+	}
+}
+
+func TestCheckOrphanedTmuxSessions_FixMode(t *testing.T) {
+	origList := listLoomTmuxSessions
+	origKill := killTmuxSession
+	origFix := doctorFix
+
+	doctorFix = true
+	listLoomTmuxSessions = func() ([]loomTmuxSession, error) {
+		return []loomTmuxSession{
+			{Name: "loom-aaaabbbb-plan-falcon-999999", Role: "plan", Agent: "falcon", PID: 999999, Created: time.Now().Add(-1 * time.Hour)},
+			{Name: "loom-ccccdddd-task-nova-999998", Role: "task", Agent: "nova", PID: 999998, Created: time.Now().Add(-30 * time.Minute)},
+		}, nil
+	}
+	var killed []string
+	killTmuxSession = func(name string) error {
+		killed = append(killed, name)
+		return nil
+	}
+	t.Cleanup(func() {
+		listLoomTmuxSessions = origList
+		killTmuxSession = origKill
+		doctorFix = origFix
+	})
+
+	result := checkOrphanedTmuxSessions()
+	if result.Status != StatusPass {
+		t.Errorf("expected pass after fix, got %v: %s", result.Status, result.Summary)
+	}
+	if !strings.Contains(result.Summary, "fixed 2") {
+		t.Errorf("expected summary to say 'fixed 2', got %q", result.Summary)
+	}
+	if len(killed) != 2 {
+		t.Errorf("expected 2 sessions killed, got %d", len(killed))
+	}
+}
+
+func TestCheckOrphanedTmuxSessions_FixModePartialFailure(t *testing.T) {
+	origList := listLoomTmuxSessions
+	origKill := killTmuxSession
+	origFix := doctorFix
+
+	doctorFix = true
+	listLoomTmuxSessions = func() ([]loomTmuxSession, error) {
+		return []loomTmuxSession{
+			{Name: "loom-aaaabbbb-plan-falcon-999999", Role: "plan", Agent: "falcon", PID: 999999, Created: time.Now().Add(-1 * time.Hour)},
+			{Name: "loom-ccccdddd-task-nova-999998", Role: "task", Agent: "nova", PID: 999998, Created: time.Now().Add(-30 * time.Minute)},
+		}, nil
+	}
+	killTmuxSession = func(name string) error {
+		if name == "loom-ccccdddd-task-nova-999998" {
+			return fmt.Errorf("session not found")
+		}
+		return nil
+	}
+	t.Cleanup(func() {
+		listLoomTmuxSessions = origList
+		killTmuxSession = origKill
+		doctorFix = origFix
+	})
+
+	result := checkOrphanedTmuxSessions()
+	if result.Status != StatusWarn {
+		t.Errorf("expected warn on partial failure, got %v: %s", result.Status, result.Summary)
+	}
+	if !strings.Contains(result.Summary, "fixed 1") {
+		t.Errorf("expected 'fixed 1' in summary, got %q", result.Summary)
+	}
+	if !strings.Contains(result.Summary, "1 failed") {
+		t.Errorf("expected '1 failed' in summary, got %q", result.Summary)
+	}
+}
+
 func TestCheckFleetDB_Integration(t *testing.T) {
 	t.Run("checkFleetDB with no config falls back to defaults", func(t *testing.T) {
 		// Use a temp dir so LoadDaemonConfig fails (no loom.yaml)
