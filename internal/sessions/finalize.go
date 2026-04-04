@@ -111,6 +111,13 @@ func (s *Store) appendIndex(rec SessionRecord) error {
 	return nil
 }
 
+// ReIndex appends a SessionRecord to index.jsonl. Used by doctor --fix
+// to re-index orphaned session directories that exist on disk but are
+// missing from the index.
+func (s *Store) ReIndex(rec SessionRecord) error {
+	return s.appendIndex(rec)
+}
+
 // mergeTokenVal returns opts if non-zero, otherwise disk.
 func mergeTokenVal(opts, disk int64) int64 {
 	if opts != 0 {

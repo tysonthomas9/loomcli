@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
 func TestCheckGit(t *testing.T) {
@@ -937,4 +939,499 @@ func TestCheckFleetDB_Integration(t *testing.T) {
 			t.Errorf("expected fail with default config (no redis, no autostart), got %v: %s", result.Status, result.Summary)
 		}
 	})
+}
+
+// --- Signal File Tests ---
+
+func TestCheckStaleSignalFiles_NoDir(t *testing.T) {
+	origGetSignalDir := getSignalDir
+	origFix := doctorFix
+	doctorFix = false
+	getSignalDir = func() string {
+		return filepath.Join(t.TempDir(), "nonexistent-signal-dir")
+	}
+	t.Cleanup(func() {
+		getSignalDir = origGetSignalDir
+		doctorFix = origFix
+	})
+
+	result := checkStaleSignalFiles()
+	if result.Name != "" {
+		t.Errorf("expected empty result (skip) for nonexistent dir, got name=%q status=%v", result.Name, result.Status)
+	}
+}
+
+func TestCheckStaleSignalFiles_EmptyDir(t *testing.T) {
+	dir := t.TempDir()
+	origGetSignalDir := getSignalDir
+	origFix := doctorFix
+	doctorFix = false
+	getSignalDir = func() string { return dir }
+	t.Cleanup(func() {
+		getSignalDir = origGetSignalDir
+		doctorFix = origFix
+	})
+
+	result := checkStaleSignalFiles()
+	if result.Name != "" {
+		t.Errorf("expected empty result (skip) for empty dir, got name=%q status=%v", result.Name, result.Status)
+	}
+}
+
+func TestCheckStaleSignalFiles_AllFresh(t *testing.T) {
+	dir := t.TempDir()
+	origGetSignalDir := getSignalDir
+	origFix := doctorFix
+	doctorFix = false
+	getSignalDir = func() string { return dir }
+	t.Cleanup(func() {
+		getSignalDir = origGetSignalDir
+		doctorFix = origFix
+	})
+
+	// Create fresh signal files (current timestamps)
+	for _, name := range []string{"sig-a", "sig-b", "sig-c"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("1"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	result := checkStaleSignalFiles()
+	if result.Status != StatusPass {
+		t.Errorf("expected pass, got %v: %s", result.Status, result.Summary)
+	}
+	if !strings.Contains(result.Summary, "no stale signal files") {
+		t.Errorf("expected summary to say 'no stale signal files', got %q", result.Summary)
+	}
+}
+
+func TestCheckStaleSignalFiles_Stale(t *testing.T) {
+	dir := t.TempDir()
+	origGetSignalDir := getSignalDir
+	origFix := doctorFix
+	doctorFix = false
+	getSignalDir = func() string { return dir }
+	t.Cleanup(func() {
+		getSignalDir = origGetSignalDir
+		doctorFix = origFix
+	})
+
+	// Create signal files and backdate them to 2 hours ago
+	staleTime := time.Now().Add(-2 * time.Hour)
+	for _, name := range []string{"sig-old-1", "sig-old-2"} {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte("1"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(p, staleTime, staleTime); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	result := checkStaleSignalFiles()
+	if result.Status != StatusWarn {
+		t.Errorf("expected warn, got %v: %s", result.Status, result.Summary)
+	}
+	if !strings.Contains(result.Summary, "2 stale signal file(s)") {
+		t.Errorf("expected summary with count 2, got %q", result.Summary)
+	}
+	if !strings.Contains(result.Detail, "sig-old-1") {
+		t.Errorf("expected detail to list sig-old-1, got %q", result.Detail)
+	}
+	if !strings.Contains(result.Detail, "sig-old-2") {
+		t.Errorf("expected detail to list sig-old-2, got %q", result.Detail)
+	}
+}
+
+func TestCheckStaleSignalFiles_MixedFreshAndStale(t *testing.T) {
+	dir := t.TempDir()
+	origGetSignalDir := getSignalDir
+	origFix := doctorFix
+	doctorFix = false
+	getSignalDir = func() string { return dir }
+	t.Cleanup(func() {
+		getSignalDir = origGetSignalDir
+		doctorFix = origFix
+	})
+
+	// Create a fresh file
+	if err := os.WriteFile(filepath.Join(dir, "sig-fresh"), []byte("1"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a stale file
+	staleTime := time.Now().Add(-2 * time.Hour)
+	stalePath := filepath.Join(dir, "sig-stale")
+	if err := os.WriteFile(stalePath, []byte("1"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(stalePath, staleTime, staleTime); err != nil {
+		t.Fatal(err)
+	}
+
+	result := checkStaleSignalFiles()
+	if result.Status != StatusWarn {
+		t.Errorf("expected warn, got %v: %s", result.Status, result.Summary)
+	}
+	if !strings.Contains(result.Summary, "1 stale signal file(s)") {
+		t.Errorf("expected summary with count 1, got %q", result.Summary)
+	}
+	if !strings.Contains(result.Detail, "sig-stale") {
+		t.Errorf("expected detail to list sig-stale, got %q", result.Detail)
+	}
+	if strings.Contains(result.Detail, "sig-fresh") {
+		t.Errorf("fresh file should not appear in detail, got %q", result.Detail)
+	}
+}
+
+func TestCheckStaleSignalFiles_FixMode(t *testing.T) {
+	dir := t.TempDir()
+	origGetSignalDir := getSignalDir
+	origFix := doctorFix
+	doctorFix = true
+	getSignalDir = func() string { return dir }
+	t.Cleanup(func() {
+		getSignalDir = origGetSignalDir
+		doctorFix = origFix
+	})
+
+	// Create stale files
+	staleTime := time.Now().Add(-2 * time.Hour)
+	for _, name := range []string{"sig-fix-1", "sig-fix-2"} {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte("1"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(p, staleTime, staleTime); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	result := checkStaleSignalFiles()
+	if result.Status != StatusPass {
+		t.Errorf("expected pass after fix, got %v: %s", result.Status, result.Summary)
+	}
+	if !strings.Contains(result.Summary, "fixed 2") {
+		t.Errorf("expected 'fixed 2' in summary, got %q", result.Summary)
+	}
+
+	// Verify files are actually removed
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("expected all stale files removed, but %d remain", len(entries))
+	}
+}
+
+func TestCheckStaleSignalFiles_SkipsSubdirectories(t *testing.T) {
+	dir := t.TempDir()
+	origGetSignalDir := getSignalDir
+	origFix := doctorFix
+	doctorFix = false
+	getSignalDir = func() string { return dir }
+	t.Cleanup(func() {
+		getSignalDir = origGetSignalDir
+		doctorFix = origFix
+	})
+
+	// Create a subdirectory (should be skipped)
+	if err := os.MkdirAll(filepath.Join(dir, "subdir"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Backdate the subdirectory to make it "stale" by mtime
+	staleTime := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(filepath.Join(dir, "subdir"), staleTime, staleTime); err != nil {
+		t.Fatal(err)
+	}
+
+	// Also create a fresh file so we get a pass result instead of skip
+	if err := os.WriteFile(filepath.Join(dir, "sig-fresh"), []byte("1"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := checkStaleSignalFiles()
+	if result.Status != StatusPass {
+		t.Errorf("expected pass (subdirectories skipped), got %v: %s", result.Status, result.Summary)
+	}
+	if !strings.Contains(result.Summary, "no stale signal files") {
+		t.Errorf("expected summary about no stale files, got %q", result.Summary)
+	}
+}
+
+// --- Session Record Tests ---
+
+// setupBeadsDirForTest configures GetBeadsDir() to return the given directory.
+// Must not be used with t.Parallel() since it mutates global state.
+func setupBeadsDirForTest(t *testing.T, dir string) {
+	t.Helper()
+	ResetBeadsDirCache()
+	setupWorkspaceConfig(t, &LoomConfig{
+		DefaultWorkspace: "test",
+		Workspaces: map[string]WorkspaceConfig{
+			"test": {Path: dir},
+		},
+	})
+	t.Cleanup(func() { ResetBeadsDirCache() })
+}
+
+func TestCheckStaleSessionRecords_NoSessions(t *testing.T) {
+	dir := t.TempDir()
+	setupBeadsDirForTest(t, dir)
+
+	origFix := doctorFix
+	doctorFix = false
+	t.Cleanup(func() { doctorFix = origFix })
+
+	result := checkStaleSessionRecords()
+	if result.Status != StatusPass {
+		t.Errorf("expected pass for no sessions, got %v: %s", result.Status, result.Summary)
+	}
+	if !strings.Contains(result.Summary, "no stale or orphaned sessions") {
+		t.Errorf("expected summary about no stale sessions, got %q", result.Summary)
+	}
+}
+
+func TestCheckStaleSessionRecords_HalfWritten(t *testing.T) {
+	dir := t.TempDir()
+	setupBeadsDirForTest(t, dir)
+
+	origFix := doctorFix
+	doctorFix = false
+	t.Cleanup(func() { doctorFix = origFix })
+
+	// Create a session dir with only prompt.txt (no metadata.json)
+	sessDir := filepath.Join(dir, "sessions", "half-written-session")
+	if err := os.MkdirAll(sessDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sessDir, "prompt.txt"), []byte("test prompt"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := checkStaleSessionRecords()
+	if result.Status != StatusWarn {
+		t.Errorf("expected warn, got %v: %s", result.Status, result.Summary)
+	}
+	if !strings.Contains(result.Detail, "half-written") {
+		t.Errorf("expected detail to contain 'half-written', got %q", result.Detail)
+	}
+	if !strings.Contains(result.Detail, "half-written-session") {
+		t.Errorf("expected detail to contain session name, got %q", result.Detail)
+	}
+}
+
+func TestCheckStaleSessionRecords_HalfWrittenFixMode(t *testing.T) {
+	dir := t.TempDir()
+	setupBeadsDirForTest(t, dir)
+
+	origFix := doctorFix
+	doctorFix = true
+	t.Cleanup(func() { doctorFix = origFix })
+
+	// Create a half-written session dir
+	sessDir := filepath.Join(dir, "sessions", "half-written-fix")
+	if err := os.MkdirAll(sessDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sessDir, "prompt.txt"), []byte("test prompt"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := checkStaleSessionRecords()
+	if result.Status != StatusPass {
+		t.Errorf("expected pass after fix, got %v: %s", result.Status, result.Summary)
+	}
+
+	// Verify the directory was removed
+	if _, err := os.Stat(sessDir); !os.IsNotExist(err) {
+		t.Errorf("expected half-written directory to be removed, but it still exists")
+	}
+}
+
+func TestCheckStaleSessionRecords_OrphanedDir(t *testing.T) {
+	dir := t.TempDir()
+	setupBeadsDirForTest(t, dir)
+
+	origFix := doctorFix
+	doctorFix = false
+	t.Cleanup(func() { doctorFix = origFix })
+
+	// Create a session dir with valid metadata.json but no index entry
+	sessID := "orphaned-test-session"
+	sessDir := filepath.Join(dir, "sessions", sessID)
+	if err := os.MkdirAll(sessDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	meta := sessions.SessionMetadata{
+		SessionRecord: sessions.SessionRecord{
+			SchemaVersion: sessions.CurrentSchemaVersion,
+			SessionID:     sessID,
+			AgentName:     "test-agent",
+			Status:        sessions.StatusCompleted,
+			StartedAt:     time.Now().UTC().Add(-1 * time.Hour),
+		},
+	}
+	metaData, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sessDir, "metadata.json"), metaData, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := checkStaleSessionRecords()
+	if result.Status != StatusWarn {
+		t.Errorf("expected warn, got %v: %s", result.Status, result.Summary)
+	}
+	if !strings.Contains(result.Detail, "orphaned") {
+		t.Errorf("expected detail to contain 'orphaned', got %q", result.Detail)
+	}
+	if !strings.Contains(result.Detail, sessID) {
+		t.Errorf("expected detail to contain session ID %q, got %q", sessID, result.Detail)
+	}
+}
+
+func TestCheckStaleSessionRecords_OrphanedDirFixMode(t *testing.T) {
+	dir := t.TempDir()
+	setupBeadsDirForTest(t, dir)
+
+	origFix := doctorFix
+	doctorFix = true
+	t.Cleanup(func() { doctorFix = origFix })
+
+	// Create a session dir with valid metadata.json but no index entry
+	sessID := "orphaned-fix-session"
+	sessDir := filepath.Join(dir, "sessions", sessID)
+	if err := os.MkdirAll(sessDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	meta := sessions.SessionMetadata{
+		SessionRecord: sessions.SessionRecord{
+			SchemaVersion: sessions.CurrentSchemaVersion,
+			SessionID:     sessID,
+			AgentName:     "test-agent",
+			Status:        sessions.StatusCompleted,
+			StartedAt:     now.Add(-1 * time.Hour),
+		},
+	}
+	metaData, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sessDir, "metadata.json"), metaData, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := checkStaleSessionRecords()
+	if result.Status != StatusPass {
+		t.Errorf("expected pass after fix, got %v: %s", result.Status, result.Summary)
+	}
+
+	// Verify the session was re-indexed (should now appear in queries)
+	store, err := sessions.NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records, err := store.Query(sessions.Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, rec := range records {
+		if rec.SessionID == sessID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected orphaned session %q to be re-indexed, but not found in query results", sessID)
+	}
+}
+
+func TestCheckStaleSessionRecords_LeftoverTmp(t *testing.T) {
+	dir := t.TempDir()
+	setupBeadsDirForTest(t, dir)
+
+	origFix := doctorFix
+	doctorFix = false
+	t.Cleanup(func() { doctorFix = origFix })
+
+	// Create a proper session via the store so it's in the index
+	store, err := sessions.NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := store.CreateSession(sessions.CreateOptions{
+		AgentName: "test-agent",
+		Backend:   "claude",
+		Prompt:    "test prompt",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessID := sess.SessionID()
+
+	// Add a leftover .tmp file
+	tmpPath := filepath.Join(store.Dir(), sessID, "metadata.json.tmp")
+	if err := os.WriteFile(tmpPath, []byte(`{"partial":"data"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := checkStaleSessionRecords()
+	if result.Status != StatusWarn {
+		t.Errorf("expected warn, got %v: %s", result.Status, result.Summary)
+	}
+	if !strings.Contains(result.Detail, "leftover tmp") {
+		t.Errorf("expected detail to contain 'leftover tmp', got %q", result.Detail)
+	}
+}
+
+func TestCheckStaleSessionRecords_LeftoverTmpFixMode(t *testing.T) {
+	dir := t.TempDir()
+	setupBeadsDirForTest(t, dir)
+
+	origFix := doctorFix
+	doctorFix = true
+	t.Cleanup(func() { doctorFix = origFix })
+
+	// Create a proper session via the store so it's in the index
+	store, err := sessions.NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := store.CreateSession(sessions.CreateOptions{
+		AgentName: "test-agent",
+		Backend:   "claude",
+		Prompt:    "test prompt",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessID := sess.SessionID()
+
+	// Add a leftover .tmp file
+	sessDir := filepath.Join(store.Dir(), sessID)
+	tmpPath := filepath.Join(sessDir, "metadata.json.tmp")
+	if err := os.WriteFile(tmpPath, []byte(`{"partial":"data"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := checkStaleSessionRecords()
+	if result.Status != StatusPass {
+		t.Errorf("expected pass after fix, got %v: %s", result.Status, result.Summary)
+	}
+
+	// Verify .tmp file is removed
+	if _, err := os.Stat(tmpPath); !os.IsNotExist(err) {
+		t.Errorf("expected .tmp file to be removed, but it still exists")
+	}
+
+	// Verify metadata.json is preserved
+	metaPath := filepath.Join(sessDir, "metadata.json")
+	if _, err := os.Stat(metaPath); err != nil {
+		t.Errorf("expected metadata.json to be preserved, but got error: %v", err)
+	}
 }

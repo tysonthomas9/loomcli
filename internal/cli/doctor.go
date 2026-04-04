@@ -107,7 +107,8 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 			checkBdSocket, checkBeadsInit)
 	}
 	checks = append(checks, checkBackendCLI, checkProjectConfig, checkGlobalConfig,
-		checkWorktrees, checkStaleLocks, checkOrphanedTmuxSessions, checkLoomDaemon, checkRedis)
+		checkWorktrees, checkStaleLocks, checkStaleSignalFiles, checkStaleSessionRecords,
+		checkOrphanedTmuxSessions, checkLoomDaemon, checkRedis)
 
 	var results []CheckResult
 	for _, check := range checks {
