@@ -981,6 +981,12 @@ type IssueFilter struct {
 	DueAfter    *time.Time // Filter issues with due_at > this time
 	DueBefore   *time.Time // Filter issues with due_at < this time
 	Overdue     bool       // Filter issues where due_at < now AND status != closed
+
+	// Lightweight mode: skip heavy text fields (description, design, acceptance_criteria, notes)
+	Lightweight bool
+
+	// Pagination offset for streaming exports
+	Offset int
 }
 
 // SortPolicy determines how ready work is ordered

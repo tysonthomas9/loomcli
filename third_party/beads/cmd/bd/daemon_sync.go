@@ -36,59 +36,26 @@ func exportToJSONLWithStore(ctx context.Context, store storage.Storage, jsonlPat
 		}
 	}
 
-	// Single-repo mode - use existing logic
-	// Get all issues including tombstones for sync propagation
-	// Tombstones must be exported so they propagate to other clones and prevent resurrection
-	issues, err := store.SearchIssues(ctx, "", types.IssueFilter{IncludeTombstones: true})
-	if err != nil {
-		return fmt.Errorf("failed to get issues: %w", err)
-	}
+	// Single-repo mode: stream issues in pages to bound memory usage.
+	// Each page loads, enriches (deps/labels/comments), writes to JSONL, then is released.
+	const pageSize = 100
 
-	// Safety check: prevent exporting empty database over non-empty JSONL
-	// Note: The main protection is in sync.go's reverse ZFC check which runs BEFORE export.
-	// Here we only block the most catastrophic case (empty DB) to allow legitimate deletions.
-	if len(issues) == 0 {
+	// Safety check: get first page to see if DB is empty
+	firstPage, err := store.SearchIssues(ctx, "", types.IssueFilter{
+		IncludeTombstones: true, Limit: 1, Lightweight: true,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to check issues: %w", err)
+	}
+	if len(firstPage) == 0 {
 		existingCount, err := countIssuesInJSONL(jsonlPath)
 		if err != nil {
-			// If we can't read the file, it might not exist yet, which is fine
 			if !os.IsNotExist(err) {
 				return fmt.Errorf("warning: failed to read existing JSONL: %w", err)
 			}
 		} else if existingCount > 0 {
 			return fmt.Errorf("refusing to export empty database over non-empty JSONL file (database: 0 issues, JSONL: %d issues). This would result in data loss", existingCount)
 		}
-	}
-
-	// Sort by ID for consistent output
-	slices.SortFunc(issues, func(a, b *types.Issue) int {
-		return cmp.Compare(a.ID, b.ID)
-	})
-
-	// Populate dependencies for all issues
-	allDeps, err := store.GetAllDependencyRecords(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get dependencies: %w", err)
-	}
-	for _, issue := range issues {
-		issue.Dependencies = allDeps[issue.ID]
-	}
-
-	// Populate labels for all issues
-	for _, issue := range issues {
-		labels, err := store.GetLabels(ctx, issue.ID)
-		if err != nil {
-			return fmt.Errorf("failed to get labels for %s: %w", issue.ID, err)
-		}
-		issue.Labels = labels
-	}
-
-	// Populate comments for all issues
-	for _, issue := range issues {
-		comments, err := store.GetIssueComments(ctx, issue.ID)
-		if err != nil {
-			return fmt.Errorf("failed to get comments for %s: %w", issue.ID, err)
-		}
-		issue.Comments = comments
 	}
 
 	// Create temp file for atomic write
@@ -100,44 +67,83 @@ func exportToJSONLWithStore(ctx context.Context, store storage.Storage, jsonlPat
 	}
 	tempPath := tempFile.Name()
 
-	// Use defer pattern for proper cleanup
 	var writeErr error
 	defer func() {
 		_ = tempFile.Close()
 		if writeErr != nil {
-			_ = os.Remove(tempPath) // Remove temp file on error
+			_ = os.Remove(tempPath)
 		}
 	}()
 
-	// Write JSONL
-	for _, issue := range issues {
-		data, marshalErr := json.Marshal(issue)
-		if marshalErr != nil {
-			writeErr = fmt.Errorf("failed to marshal issue %s: %w", issue.ID, marshalErr)
+	// Load deps once (they're small — just ID pairs)
+	allDeps, err := store.GetAllDependencyRecords(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get dependencies: %w", err)
+	}
+
+	// Stream pages: load, enrich, write, release
+	offset := 0
+	for {
+		page, err := store.SearchIssues(ctx, "", types.IssueFilter{
+			IncludeTombstones: true,
+			Limit:             pageSize,
+			Offset:            offset,
+		})
+		if err != nil {
+			writeErr = fmt.Errorf("failed to get issues page at offset %d: %w", offset, err)
 			return writeErr
 		}
-		if _, writeErr = tempFile.Write(data); writeErr != nil {
-			writeErr = fmt.Errorf("failed to write issue %s: %w", issue.ID, writeErr)
-			return writeErr
+		if len(page) == 0 {
+			break
 		}
-		if _, writeErr = tempFile.WriteString("\n"); writeErr != nil {
-			writeErr = fmt.Errorf("failed to write newline: %w", writeErr)
-			return writeErr
+
+		// Sort page by ID for consistent output
+		slices.SortFunc(page, func(a, b *types.Issue) int {
+			return cmp.Compare(a.ID, b.ID)
+		})
+
+		// Enrich with deps, labels, comments
+		for _, issue := range page {
+			issue.Dependencies = allDeps[issue.ID]
+			if labels, err := store.GetLabels(ctx, issue.ID); err == nil {
+				issue.Labels = labels
+			}
+			if comments, err := store.GetIssueComments(ctx, issue.ID); err == nil {
+				issue.Comments = comments
+			}
+		}
+
+		// Write page to JSONL
+		for _, issue := range page {
+			data, marshalErr := json.Marshal(issue)
+			if marshalErr != nil {
+				writeErr = fmt.Errorf("failed to marshal issue %s: %w", issue.ID, marshalErr)
+				return writeErr
+			}
+			if _, writeErr = tempFile.Write(data); writeErr != nil {
+				writeErr = fmt.Errorf("failed to write issue %s: %w", issue.ID, writeErr)
+				return writeErr
+			}
+			if _, writeErr = tempFile.WriteString("\n"); writeErr != nil {
+				writeErr = fmt.Errorf("failed to write newline: %w", writeErr)
+				return writeErr
+			}
+		}
+
+		offset += len(page)
+		if len(page) < pageSize {
+			break
 		}
 	}
 
-	// Close before rename
 	if writeErr = tempFile.Close(); writeErr != nil {
 		writeErr = fmt.Errorf("failed to close temp file: %w", writeErr)
 		return writeErr
 	}
-
-	// Atomic rename
 	if writeErr = os.Rename(tempPath, jsonlPath); writeErr != nil {
 		writeErr = fmt.Errorf("failed to rename temp file: %w", writeErr)
 		return writeErr
 	}
-
 	return nil
 }
 

@@ -220,6 +220,9 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 			writeIssuesError(w, http.StatusBadRequest, err.Error(), "INVALID_PARAMS")
 			return
 		}
+		// List views don't need full issue bodies — use lightweight mode
+		// to avoid allocating multi-KB description/design/notes per issue.
+		args.Lightweight = true
 
 		// Parse kanban-specific parameters
 		kp, err := parseKanbanParams(r)

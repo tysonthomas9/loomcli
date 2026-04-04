@@ -56,28 +56,21 @@ export function AgentProvider({ children }: AgentProviderProps): JSX.Element {
     };
   }, []);
 
-  // Poll workspace-scoped agents alongside global agents
+  // Fetch workspace agents whenever global agents update (piggyback on same poll cycle).
+  // No separate interval — avoids dual-polling that doubles request rate.
+  const lastUpdated = agentsResult.lastUpdated;
   useEffect(() => {
-    if (!workspaceId) return;
+    if (!workspaceId || !lastUpdated) return;
     let cancelled = false;
-
-    const poll = () => {
-      fetchWorkspaceAgents(workspaceId)
-        .then((agents) => {
-          if (!cancelled && mountedRef.current) setWsAgents(agents);
-        })
-        .catch(() => {
-          // Best-effort; fall back to global agents
-        });
-    };
-
-    poll();
-    const id = setInterval(poll, 5000);
+    fetchWorkspaceAgents(workspaceId)
+      .then((agents) => {
+        if (!cancelled && mountedRef.current) setWsAgents(agents);
+      })
+      .catch(() => {});
     return () => {
       cancelled = true;
-      clearInterval(id);
     };
-  }, [workspaceId]);
+  }, [workspaceId, lastUpdated]);
 
   // Merge: workspace agents take priority (they have repo-specific data),
   // then append global agents not already present by name.

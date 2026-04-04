@@ -2130,11 +2130,23 @@ func (s *SQLiteStorage) SearchIssues(ctx context.Context, query string, filter t
 	if filter.Limit > 0 {
 		limitSQL = " LIMIT ?"
 		args = append(args, filter.Limit)
+		if filter.Offset > 0 {
+			limitSQL += " OFFSET ?"
+			args = append(args, filter.Offset)
+		}
+	}
+
+	// In lightweight mode, replace heavy text fields with empty strings to avoid
+	// allocating multi-KB descriptions for list views that only need metadata.
+	// The scanner still reads the same column count so scanIssues works unchanged.
+	columns := `id, content_hash, title, description, design, acceptance_criteria, notes`
+	if filter.Lightweight {
+		columns = `id, content_hash, title, '' as description, '' as design, '' as acceptance_criteria, '' as notes`
 	}
 
 	// #nosec G201 - safe SQL with controlled formatting
 	querySQL := fmt.Sprintf(`
-		SELECT id, content_hash, title, description, design, acceptance_criteria, notes,
+		SELECT %s,
 		       status, priority, issue_type, assignee, estimated_minutes,
 		       created_at, created_by, owner, updated_at, closed_at, external_ref, source_repo, close_reason,
 		       deleted_at, deleted_by, delete_reason, original_type,
@@ -2146,7 +2158,7 @@ func (s *SQLiteStorage) SearchIssues(ctx context.Context, query string, filter t
 		%s
 		ORDER BY priority ASC, created_at DESC
 		%s
-	`, whereSQL, limitSQL)
+	`, columns, whereSQL, limitSQL)
 
 	rows, err := s.db.QueryContext(ctx, querySQL, args...)
 	if err != nil {
