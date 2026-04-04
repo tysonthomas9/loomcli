@@ -203,7 +203,7 @@ func TestHandleObservabilityEvents_FilterByType(t *testing.T) {
 	writeTestEvent(t, dir, e2)
 
 	handler := handleObservabilityEvents(dir)
-	req := httptest.NewRequest("GET", "/api/observability/events?type=task_completed", nil)
+	req := httptest.NewRequest("GET", "/api/observability/events?type=task.completed", nil)
 	rec := httptest.NewRecorder()
 	handler(rec, req)
 
@@ -215,7 +215,7 @@ func TestHandleObservabilityEvents_FilterByType(t *testing.T) {
 		t.Errorf("expected 1 filtered event, got %d", resp.Total)
 	}
 	if len(resp.Data) > 0 && resp.Data[0].Type != events.TaskCompleted {
-		t.Errorf("expected task_completed, got %s", resp.Data[0].Type)
+		t.Errorf("expected task.completed, got %s", resp.Data[0].Type)
 	}
 }
 
