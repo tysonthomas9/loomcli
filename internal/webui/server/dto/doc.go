@@ -1,7 +1,8 @@
 // Package dto defines Data Transfer Objects for the loomcli HTTP API.
 // These types represent the JSON wire format for API requests and responses.
 //
-// DTOs are a leaf package: they import only the Go standard library.
+// DTOs are a leaf package: they import only internal/entity (for domain
+// enums and value types) and the Go standard library.
 // They do NOT import service, handler, or any infrastructure packages.
 //
 // Request DTOs (CreateIssueRequest, PatchIssueRequest) represent incoming
