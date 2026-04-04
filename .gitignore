@@ -26,6 +26,8 @@ loom.yaml
 .loom-dev.pid
 .make-dev.log
 .make-dev.pid
+usage.jsonl
+sessions/
 
 # Auth service
 services/auth/node_modules/
