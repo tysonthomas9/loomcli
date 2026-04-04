@@ -116,7 +116,7 @@ func TestDefaultTracker_ConcurrentAccess(t *testing.T) {
 
 	wg.Wait()
 
-	// After all goroutines finish, defaultTracker should still return non-nil.
+	// After all goroutines finish, defaultIssueBackend should still return non-nil.
 	if defaultIssueBackend() == nil {
 		t.Error("defaultIssueBackend() is nil after concurrent access")
 	}

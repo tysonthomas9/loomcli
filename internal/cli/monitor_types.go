@@ -94,43 +94,6 @@ type MonitorStats struct {
 	Blocked    int     `json:"blocked"`
 }
 
-// Dependency represents a dependency relationship from bd ready --json
-type Dependency struct {
-	IssueID     string `json:"issue_id"`
-	DependsOnID string `json:"depends_on_id"`
-	Type        string `json:"type"` // "parent-child" or "blocks"
-	CreatedAt   string `json:"created_at"`
-	CreatedBy   string `json:"created_by"`
-}
-
-// BdIssue represents an issue from bd list --json
-type BdIssue struct {
-	ID           string       `json:"id"`
-	Title        string       `json:"title"`
-	Status       string       `json:"status"`
-	Priority     int          `json:"priority"`
-	IssueType    string       `json:"issue_type"`
-	Design       string       `json:"design"`
-	Assignee     string       `json:"assignee"`
-	Labels       []string     `json:"labels"`
-	Dependencies []Dependency `json:"dependencies"`
-	SourceRepo   string       `json:"source_repo,omitempty"`
-}
-
-// BdStats represents output from bd stats --json
-type BdStats struct {
-	Summary struct {
-		TotalIssues      int `json:"total_issues"`
-		OpenIssues       int `json:"open_issues"`
-		ClosedIssues     int `json:"closed_issues"`
-		InProgressIssues int `json:"in_progress_issues"`
-		BlockedIssues    int `json:"blocked_issues"`
-		DeferredIssues   int `json:"deferred_issues"`
-		TombstoneIssues  int `json:"tombstone_issues"`
-		PinnedIssues     int `json:"pinned_issues"`
-	} `json:"summary"`
-}
-
 // DaemonAgentState represents the daemon-agents.json file format.
 // This matches the DaemonState written by daemon_cmd.go.
 type DaemonAgentState struct {

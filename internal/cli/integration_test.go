@@ -252,7 +252,7 @@ func TestAgentStatusWithLock(t *testing.T) {
 	// Update with task
 	UpdateLockTask(wtPath, "TASK-42", "Test task")
 
-	// Mock bd command to return task status (uses global state via defaultTracker)
+	// Mock bd command to return task status (uses global state via defaultIssueBackend)
 	mock := NewCommandMock(t, []CommandStub{
 		// bd show for task status lookup
 		{Name: "bd", Args: []string{"show", "TASK-42", "--json"},

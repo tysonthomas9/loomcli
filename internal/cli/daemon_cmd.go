@@ -280,7 +280,7 @@ func runDaemon(cmd *cobra.Command, args []string) {
 	}
 
 	// 10. Create and start daemon (from daemon.go)
-	daemon, err := NewDaemon(config, projectDir, eventBus, nil)
+	daemon, err := NewDaemon(config, projectDir, eventBus, defaultIssueBackend())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: creating daemon: %v\n", err)
 		os.Exit(1)

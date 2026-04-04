@@ -20,11 +20,16 @@ func TestHandleEpicTransition_NotAssignedToEpic(t *testing.T) {
 }
 
 func TestHandleEpicTransition_ConfigDriven_StillHasTasks(t *testing.T) {
-	stubEpicHasReadyTasks(t, func(id string) (bool, error) {
-		return id == "epic-1", nil
-	})
+	mock := &mockDaemonIssueBackend{
+		ReadyFn: func(_ context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
+			if opts.ParentID == "epic-1" {
+				return []backend.IssueData{{ID: "task-1"}}, nil
+			}
+			return nil, nil
+		},
+	}
 
-	d := &Daemon{}
+	d := &Daemon{issueBackend: mock}
 	ap := &AgentProcess{
 		entry:          AgentEntry{Worktree: "falcon", Parent: "epic-1"},
 		worktreePath:   "/repo/worktrees/falcon",
@@ -47,11 +52,13 @@ func TestHandleEpicTransition_ConfigDriven_StillHasTasks(t *testing.T) {
 }
 
 func TestHandleEpicTransition_ConfigDriven_Exhausted(t *testing.T) {
-	stubEpicHasReadyTasks(t, func(id string) (bool, error) {
-		return false, nil
-	})
+	mock := &mockDaemonIssueBackend{
+		ReadyFn: func(_ context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
+			return []backend.IssueData{}, nil
+		},
+	}
 
-	d := &Daemon{config: &DaemonConfig{}}
+	d := &Daemon{config: &DaemonConfig{}, issueBackend: mock}
 	ap := &AgentProcess{
 		entry:          AgentEntry{Worktree: "falcon", Parent: "epic-1"},
 		worktreePath:   "/repo/worktrees/falcon",
@@ -82,11 +89,11 @@ func TestHandleEpicTransition_ConfigDriven_Exhausted(t *testing.T) {
 }
 
 func TestHandleEpicTransition_ConfigDriven_Exhausted_DoesNotMaskCrashError(t *testing.T) {
-	// When the agent crashed (lastError is a real error) and the epic is also
-	// exhausted, the crash error should NOT be overwritten with NoWork.
-	stubEpicHasReadyTasks(t, func(id string) (bool, error) {
-		return false, nil
-	})
+	mock := &mockDaemonIssueBackend{
+		ReadyFn: func(_ context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
+			return []backend.IssueData{}, nil
+		},
+	}
 
 	crashErr := &agenterr.AgentError{
 		Class:   agenterr.Unknown,
@@ -94,7 +101,7 @@ func TestHandleEpicTransition_ConfigDriven_Exhausted_DoesNotMaskCrashError(t *te
 		Backend: "claude",
 	}
 
-	d := &Daemon{config: &DaemonConfig{}}
+	d := &Daemon{config: &DaemonConfig{}, issueBackend: mock}
 	ap := &AgentProcess{
 		entry:          AgentEntry{Worktree: "falcon", Parent: "epic-1"},
 		worktreePath:   "/repo/worktrees/falcon",
@@ -109,22 +116,22 @@ func TestHandleEpicTransition_ConfigDriven_Exhausted_DoesNotMaskCrashError(t *te
 	noWork := ap.lastNoWork
 	ap.mu.Unlock()
 
-	// lastNoWork should be set (epic IS exhausted)
 	if !noWork {
 		t.Error("expected lastNoWork=true")
 	}
-	// But lastError should still be the crash error, not overwritten
 	if lastErr != crashErr {
 		t.Errorf("expected lastError to remain the crash error, got %v", lastErr)
 	}
 }
 
 func TestHandleEpicTransition_ConfigDriven_BdReadyFails(t *testing.T) {
-	stubEpicHasReadyTasks(t, func(id string) (bool, error) {
-		return false, fmt.Errorf("bd command failed")
-	})
+	mock := &mockDaemonIssueBackend{
+		ReadyFn: func(_ context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
+			return nil, fmt.Errorf("bd command failed")
+		},
+	}
 
-	d := &Daemon{}
+	d := &Daemon{issueBackend: mock}
 	ap := &AgentProcess{
 		entry:          AgentEntry{Worktree: "falcon", Parent: "epic-1"},
 		worktreePath:   "/repo/worktrees/falcon",
@@ -259,27 +266,6 @@ func TestHandleEpicTransition_WithIssueBackend_Error(t *testing.T) {
 	}
 	if rc != 1 {
 		t.Errorf("expected restartCount unchanged at 1, got %d", rc)
-	}
-}
-
-func TestHandleEpicTransition_NilIssueBackend_FallsBackToLegacy(t *testing.T) {
-	called := false
-	stubEpicHasReadyTasks(t, func(id string) (bool, error) {
-		called = true
-		return true, nil
-	})
-
-	d := &Daemon{} // nil issueBackend
-	ap := &AgentProcess{
-		entry:          AgentEntry{Worktree: "falcon", Parent: "epic-1"},
-		worktreePath:   "/repo/worktrees/falcon",
-		assignedEpicID: "epic-1",
-	}
-
-	d.handleEpicTransition(ap)
-
-	if !called {
-		t.Error("expected legacy epicHasReadyTasks to be called when issueBackend is nil")
 	}
 }
 

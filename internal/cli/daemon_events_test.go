@@ -1,11 +1,13 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/events"
 )
 
@@ -120,16 +122,18 @@ func TestCheckAgentHealth_EmitsHealthCheck(t *testing.T) {
 }
 
 func TestHandleEpicTransition_EmitsEpicExhausted(t *testing.T) {
-	// Stub epicHasReadyTasks to return false (epic exhausted)
-	stubEpicHasReadyTasks(t, func(id string) (bool, error) {
-		return false, nil
-	})
+	mock := &mockDaemonIssueBackend{
+		ReadyFn: func(_ context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
+			return []backend.IssueData{}, nil
+		},
+	}
 
 	spy := &SpyEmitter{}
 
 	d := &Daemon{
-		config:   &DaemonConfig{},
-		eventBus: spy,
+		config:       &DaemonConfig{},
+		eventBus:     spy,
+		issueBackend: mock,
 	}
 	ap := &AgentProcess{
 		entry:          AgentEntry{Worktree: "falcon", Role: "task", Parent: "epic-1"},

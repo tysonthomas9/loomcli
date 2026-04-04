@@ -130,7 +130,7 @@ type Daemon struct {
 
 	concurrency  *ConcurrencyTracker  // enforces per-role concurrency limits
 	eventBus     events.Emitter       // event emission for observability (nil-safe via NopBus default)
-	issueBackend backend.IssueBackend // pluggable issue data access (nil = use legacy defaultTracker)
+	issueBackend backend.IssueBackend // pluggable issue data access
 	repos        []RepoConfig         // workspace repos for resolveAgentRepos; nil outside workspace mode
 	workspaceID  string               // stable workspace UUID for log namespacing; empty outside workspace mode
 
@@ -204,7 +204,7 @@ var builtInRoles = map[string]bool{
 
 // NewDaemon creates a daemon from the loaded config.
 // If eventBus is nil, a NopBus is used (events are silently discarded).
-// If issueBackend is nil, the daemon falls back to the legacy defaultTracker() for issue queries.
+// issueBackend provides issue data access for epic transition checks.
 func NewDaemon(config *DaemonConfig, projectDir string, eventBus events.Emitter, issueBackend backend.IssueBackend) (*Daemon, error) {
 	if config == nil {
 		return nil, fmt.Errorf("daemon config is nil")
