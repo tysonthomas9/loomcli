@@ -35,7 +35,7 @@ function createTestEvent(overrides: Partial<Event> = {}): Event {
   return {
     id: 1,
     issue_id: "test-issue",
-    event_type: "created" as EventType,
+    event_type: "issue.created" as EventType,
     actor: "alice",
     created_at: "2026-01-20T10:00:00Z",
     ...overrides,
@@ -64,7 +64,9 @@ describe("ActivityLog", () => {
 
     it("shows item count in title when items exist", () => {
       const comments = [createTestComment({ id: 1 })];
-      const events = [createTestEvent({ id: 1, event_type: "status_changed" })];
+      const events = [
+        createTestEvent({ id: 1, event_type: "issue.status_changed" }),
+      ];
       render(
         <ActivityLog
           comments={comments}
@@ -89,8 +91,8 @@ describe("ActivityLog", () => {
 
     it("renders event entries with data-testid", () => {
       const events = [
-        createTestEvent({ id: 1, event_type: "status_changed" }),
-        createTestEvent({ id: 2, event_type: "label_added" }),
+        createTestEvent({ id: 1, event_type: "issue.status_changed" }),
+        createTestEvent({ id: 2, event_type: "issue.label_added" }),
       ];
       render(
         <ActivityLog comments={[]} events={events} issueId="test-issue" />,
@@ -103,7 +105,9 @@ describe("ActivityLog", () => {
   describe("mixed comments and events", () => {
     it("renders both comments and events together", () => {
       const comments = [createTestComment({ id: 1 })];
-      const events = [createTestEvent({ id: 1, event_type: "status_changed" })];
+      const events = [
+        createTestEvent({ id: 1, event_type: "issue.status_changed" }),
+      ];
       render(
         <ActivityLog
           comments={comments}
@@ -118,8 +122,8 @@ describe("ActivityLog", () => {
     it("filters out 'commented' events to avoid duplicates", () => {
       const comments = [createTestComment({ id: 1 })];
       const events = [
-        createTestEvent({ id: 1, event_type: "commented" }),
-        createTestEvent({ id: 2, event_type: "status_changed" }),
+        createTestEvent({ id: 1, event_type: "issue.commented" }),
+        createTestEvent({ id: 2, event_type: "issue.status_changed" }),
       ];
       render(
         <ActivityLog
@@ -147,13 +151,13 @@ describe("ActivityLog", () => {
       const events = [
         createTestEvent({
           id: 1,
-          event_type: "created",
+          event_type: "issue.created",
           actor: "First",
           created_at: "2026-01-25T10:00:00Z",
         }),
         createTestEvent({
           id: 3,
-          event_type: "closed",
+          event_type: "issue.closed",
           actor: "Last",
           created_at: "2026-01-27T10:00:00Z",
         }),
@@ -205,7 +209,7 @@ describe("ActivityLog", () => {
       render(
         <ActivityLog
           comments={[]}
-          events={[createTestEvent({ event_type: "created" })]}
+          events={[createTestEvent({ event_type: "issue.created" })]}
           issueId="test-issue"
         />,
       );
@@ -216,7 +220,7 @@ describe("ActivityLog", () => {
   describe("event description text", () => {
     it("describes 'created' events", () => {
       const events = [
-        createTestEvent({ id: 1, event_type: "created", actor: "alice" }),
+        createTestEvent({ id: 1, event_type: "issue.created", actor: "alice" }),
       ];
       render(
         <ActivityLog comments={[]} events={events} issueId="test-issue" />,
@@ -228,7 +232,7 @@ describe("ActivityLog", () => {
       const events = [
         createTestEvent({
           id: 1,
-          event_type: "status_changed",
+          event_type: "issue.status_changed",
           actor: "bob",
           old_value: "open",
           new_value: "in_progress",
@@ -246,7 +250,7 @@ describe("ActivityLog", () => {
       const events = [
         createTestEvent({
           id: 1,
-          event_type: "status_changed",
+          event_type: "issue.status_changed",
           actor: "bob",
         }),
       ];
@@ -258,7 +262,7 @@ describe("ActivityLog", () => {
 
     it("describes 'closed' events", () => {
       const events = [
-        createTestEvent({ id: 1, event_type: "closed", actor: "carol" }),
+        createTestEvent({ id: 1, event_type: "issue.closed", actor: "carol" }),
       ];
       render(
         <ActivityLog comments={[]} events={events} issueId="test-issue" />,
@@ -268,7 +272,7 @@ describe("ActivityLog", () => {
 
     it("describes 'reopened' events", () => {
       const events = [
-        createTestEvent({ id: 1, event_type: "reopened", actor: "dave" }),
+        createTestEvent({ id: 1, event_type: "issue.reopened", actor: "dave" }),
       ];
       render(
         <ActivityLog comments={[]} events={events} issueId="test-issue" />,
@@ -280,7 +284,7 @@ describe("ActivityLog", () => {
       const events = [
         createTestEvent({
           id: 1,
-          event_type: "label_added",
+          event_type: "issue.label_added",
           actor: "eve",
           new_value: "bug",
         }),
@@ -295,7 +299,7 @@ describe("ActivityLog", () => {
       const events = [
         createTestEvent({
           id: 1,
-          event_type: "label_removed",
+          event_type: "issue.label_removed",
           actor: "eve",
           old_value: "wontfix",
         }),
@@ -310,7 +314,7 @@ describe("ActivityLog", () => {
       const events = [
         createTestEvent({
           id: 1,
-          event_type: "dependency_added",
+          event_type: "issue.dependency_added",
           actor: "frank",
           new_value: "issue-42",
         }),
@@ -327,7 +331,7 @@ describe("ActivityLog", () => {
       const events = [
         createTestEvent({
           id: 1,
-          event_type: "dependency_removed",
+          event_type: "issue.dependency_removed",
           actor: "frank",
           old_value: "issue-42",
         }),
@@ -344,7 +348,7 @@ describe("ActivityLog", () => {
       const events = [
         createTestEvent({
           id: 1,
-          event_type: "compacted",
+          event_type: "issue.compacted",
           actor: "system",
         }),
       ];
@@ -360,7 +364,7 @@ describe("ActivityLog", () => {
       const events = [
         createTestEvent({
           id: 1,
-          event_type: "updated",
+          event_type: "issue.updated",
           actor: "grace",
           old_value: "low",
           new_value: "high",
@@ -376,7 +380,7 @@ describe("ActivityLog", () => {
       const events = [
         createTestEvent({
           id: 1,
-          event_type: "updated",
+          event_type: "issue.updated",
           actor: "grace",
         }),
       ];
@@ -390,7 +394,7 @@ describe("ActivityLog", () => {
       const events = [
         createTestEvent({
           id: 1,
-          event_type: "created",
+          event_type: "issue.created",
           actor: "",
         }),
       ];
@@ -465,7 +469,7 @@ describe("ActivityLog", () => {
       const events = [
         createTestEvent({
           id: 1,
-          event_type: "created",
+          event_type: "issue.created",
           created_at: "2026-01-20T10:00:00Z",
         }),
       ];

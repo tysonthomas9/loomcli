@@ -9,32 +9,32 @@ import type { ISODateString } from './common';
  * Maps to Go types.EventType.
  */
 export type EventType =
-  | 'created'
-  | 'updated'
-  | 'status_changed'
-  | 'commented'
-  | 'closed'
-  | 'reopened'
-  | 'dependency_added'
-  | 'dependency_removed'
-  | 'label_added'
-  | 'label_removed'
-  | 'compacted';
+  | 'issue.created'
+  | 'issue.updated'
+  | 'issue.status_changed'
+  | 'issue.commented'
+  | 'issue.closed'
+  | 'issue.reopened'
+  | 'issue.dependency_added'
+  | 'issue.dependency_removed'
+  | 'issue.label_added'
+  | 'issue.label_removed'
+  | 'issue.compacted';
 
 /**
  * Event type constants.
  */
-export const EventCreated: EventType = 'created';
-export const EventUpdated: EventType = 'updated';
-export const EventStatusChanged: EventType = 'status_changed';
-export const EventCommented: EventType = 'commented';
-export const EventClosed: EventType = 'closed';
-export const EventReopened: EventType = 'reopened';
-export const EventDependencyAdded: EventType = 'dependency_added';
-export const EventDependencyRemoved: EventType = 'dependency_removed';
-export const EventLabelAdded: EventType = 'label_added';
-export const EventLabelRemoved: EventType = 'label_removed';
-export const EventCompacted: EventType = 'compacted';
+export const EventCreated: EventType = 'issue.created';
+export const EventUpdated: EventType = 'issue.updated';
+export const EventStatusChanged: EventType = 'issue.status_changed';
+export const EventCommented: EventType = 'issue.commented';
+export const EventClosed: EventType = 'issue.closed';
+export const EventReopened: EventType = 'issue.reopened';
+export const EventDependencyAdded: EventType = 'issue.dependency_added';
+export const EventDependencyRemoved: EventType = 'issue.dependency_removed';
+export const EventLabelAdded: EventType = 'issue.label_added';
+export const EventLabelRemoved: EventType = 'issue.label_removed';
+export const EventCompacted: EventType = 'issue.compacted';
 
 /**
  * Audit trail event.

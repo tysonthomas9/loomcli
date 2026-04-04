@@ -303,7 +303,7 @@ func (e *Exporter) handleAgentRestarted(ev events.Event) {
 	e.mu.Unlock()
 
 	if taskSpan != nil {
-		taskSpan.SetStatus(codes.Error, "agent_restarted")
+		taskSpan.SetStatus(codes.Error, "agent.restarted")
 		taskSpan.End()
 	}
 }

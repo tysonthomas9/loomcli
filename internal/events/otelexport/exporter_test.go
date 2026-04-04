@@ -396,17 +396,17 @@ func TestAgentRestarted_EndsTaskSpan(t *testing.T) {
 	exp.HandleEvent(makeEvent(events.TaskClaimed, "agent1", "task", "epic-1", events.TaskClaimedData{TaskID: "t1", Title: "Some task"}))
 	exp.HandleEvent(makeEvent(events.AgentRestarted, "agent1", "task", "", events.AgentRestartedData{PID: 300, RestartCount: 1}))
 
-	// The task span should have been ended with error status "agent_restarted".
+	// The task span should have been ended with error status "agent.restarted".
 	spans := spanExp.GetSpans()
 	var found bool
 	for _, s := range spans {
-		if s.Name == "loom.task" && s.Status.Code == codes.Error && s.Status.Description == "agent_restarted" {
+		if s.Name == "loom.task" && s.Status.Code == codes.Error && s.Status.Description == "agent.restarted" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Error("expected loom.task span with error status 'agent_restarted'")
+		t.Error("expected loom.task span with error status 'agent.restarted'")
 	}
 
 	// activeTaskSpans should be empty for that agent.
@@ -436,7 +436,7 @@ func TestFullRestartCycle_NoLeaks(t *testing.T) {
 
 	// We expect 4 ended spans:
 	// 1. loom.agent.lifecycle (first, superseded by second AgentStarted)
-	// 2. loom.task (first task, ended by AgentRestarted with "agent_restarted")
+	// 2. loom.task (first task, ended by AgentRestarted with "agent.restarted")
 	// 3. loom.agent.lifecycle (second, ended by AgentStopped)
 	// 4. loom.task (second task, ended by TaskCompleted)
 	var agentLifecycleCount, taskCount int

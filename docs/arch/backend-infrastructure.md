@@ -571,7 +571,7 @@ Runs every 30 seconds:
 3. `diffAgents(old, new)` using `reflect.DeepEqual`
 4. `drainAgent()` for removed/modified agents (blocks)
 5. `addAgent()` for added/modified agents (starts immediately)
-6. Emits `config_reloaded` event
+6. Emits `system.config_reloaded` event
 
 ---
 
@@ -594,7 +594,7 @@ Runs every 30 seconds:
 10. Finalize session (exitCode, taskID, DiffStats)
 11. If error: increment ConsecutiveErrors, backoff
 12. If success, no task claimed: increment ConsecutiveNoProgress, exponential backoff
-13. If success, task claimed: increment TasksCompleted, emit task_completed
+13. If success, task claimed: increment TasksCompleted, emit task.completed
 ```
 
 Exit conditions: `MaxTasks` reached, `ConsecutiveErrors >= 3`, `ConsecutiveNoProgress >= 3`, `IdleTimeout` exceeded.
@@ -615,14 +615,14 @@ JSONL event files in `daemon.events_dir`. Event types:
 
 | Event Type | Emitted By | Data |
 |------------|-----------|------|
-| `agent_started` | `spawnAgent` | PID |
-| `agent_stopped` | `waitForAgent` | PID, ExitCode |
-| `agent_restarted` | `superviseAgent` | PID, RestartCount |
-| `epic_assigned` | `superviseAgent` | EpicID |
-| `task_completed` | `RunAutoModeLoop` | TaskID, Duration, DiffStats |
-| `task_failed` | `RunAutoModeLoop` | TaskID, Error |
-| `config_reloaded` | `reloadAndReconcile` | Added, Removed, Modified |
-| `health_check` | `healthChecker` | AgentCount, HealthyCount |
+| `agent.started` | `spawnAgent` | PID |
+| `agent.stopped` | `waitForAgent` | PID, ExitCode |
+| `agent.restarted` | `superviseAgent` | PID, RestartCount |
+| `epic.assigned` | `superviseAgent` | EpicID |
+| `task.completed` | `RunAutoModeLoop` | TaskID, Duration, DiffStats |
+| `task.failed` | `RunAutoModeLoop` | TaskID, Error |
+| `system.config_reloaded` | `reloadAndReconcile` | Added, Removed, Modified |
+| `system.health_check` | `healthChecker` | AgentCount, HealthyCount |
 
 Metrics replayed from disk into `MetricsStore` (30s TTL cache). `GET /api/metrics` returns SSE hub stats, fleet state, and claim metrics alongside the snapshot.
 

@@ -27,33 +27,33 @@ function describeEvent(event: Event): string {
   const who = actor || "Someone";
 
   switch (event_type as EventType) {
-    case "created":
+    case "issue.created":
       return `${who} created this issue`;
-    case "status_changed":
+    case "issue.status_changed":
       if (old_value && new_value) {
         return `${who} changed status from ${old_value} to ${new_value}`;
       }
       return `${who} changed the status`;
-    case "closed":
+    case "issue.closed":
       return `${who} closed this issue`;
-    case "reopened":
+    case "issue.reopened":
       return `${who} reopened this issue`;
-    case "updated":
+    case "issue.updated":
       if (old_value && new_value) {
         return `${who} updated ${old_value} to ${new_value}`;
       }
       return `${who} updated this issue`;
-    case "dependency_added":
+    case "issue.dependency_added":
       return `${who} added dependency ${new_value || ""}`.trim();
-    case "dependency_removed":
+    case "issue.dependency_removed":
       return `${who} removed dependency ${old_value || ""}`.trim();
-    case "label_added":
+    case "issue.label_added":
       return `${who} added label ${new_value || ""}`.trim();
-    case "label_removed":
+    case "issue.label_removed":
       return `${who} removed label ${old_value || ""}`.trim();
-    case "commented":
+    case "issue.commented":
       return `${who} commented`;
-    case "compacted":
+    case "issue.compacted":
       return "Earlier activity was summarized";
     default:
       return `${who} performed an action`;
@@ -63,9 +63,9 @@ function describeEvent(event: Event): string {
 /** Icon for each event type. */
 function EventIcon({ eventType }: { eventType: EventType }): JSX.Element {
   switch (eventType) {
-    case "status_changed":
-    case "closed":
-    case "reopened":
+    case "issue.status_changed":
+    case "issue.closed":
+    case "issue.reopened":
       return (
         <svg className={styles.eventIcon} viewBox="0 0 16 16" fill="none">
           <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" />
@@ -78,8 +78,8 @@ function EventIcon({ eventType }: { eventType: EventType }): JSX.Element {
           />
         </svg>
       );
-    case "label_added":
-    case "label_removed":
+    case "issue.label_added":
+    case "issue.label_removed":
       return (
         <svg className={styles.eventIcon} viewBox="0 0 16 16" fill="none">
           <path
@@ -91,8 +91,8 @@ function EventIcon({ eventType }: { eventType: EventType }): JSX.Element {
           <circle cx="12" cy="4.5" r="1" fill="currentColor" />
         </svg>
       );
-    case "dependency_added":
-    case "dependency_removed":
+    case "issue.dependency_added":
+    case "issue.dependency_removed":
       return (
         <svg className={styles.eventIcon} viewBox="0 0 16 16" fill="none">
           <path
@@ -126,7 +126,7 @@ export function ActivityLog({
     const all: ActivityItem[] = [
       ...comments.map((c): ActivityItem => ({ kind: "comment", data: c })),
       ...events
-        .filter((e) => e.event_type !== "commented") // avoid duplicates with comments
+        .filter((e) => e.event_type !== "issue.commented") // avoid duplicates with comments
         .map((e): ActivityItem => ({ kind: "event", data: e })),
     ];
     all.sort((a, b) => getTimestamp(a) - getTimestamp(b));

@@ -59,6 +59,7 @@ var migrationsList = []Migration{
 	{"quality_score_column", migrations.MigrateQualityScoreColumn},
 	{"status_source_repo_index", migrations.MigrateStatusSourceRepoIndex},
 	{"comment_improvements", migrations.MigrateCommentImprovements},
+	{"event_type_dot_notation", migrations.MigrateEventTypeDotNotation},
 }
 
 // MigrationInfo contains metadata about a migration for inspection
@@ -125,6 +126,7 @@ func getMigrationDescription(name string) string {
 		"quality_score_column":       "Adds quality_score column for aggregate quality (0.0-1.0) set by Refineries",
 		"status_source_repo_index":   "Adds composite partial index on (status, source_repo) for multi-repo filtering",
 		"comment_improvements":       "Adds comment threading (parent_id), soft-delete (deleted_at), and creates comment_reactions + comment_edits tables",
+		"event_type_dot_notation":    "Renames event_type values from underscore format to dot-notation (e.g., created -> issue.created)",
 	}
 
 	if desc, ok := descriptions[name]; ok {

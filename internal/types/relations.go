@@ -230,17 +230,17 @@ type EventType string
 
 // Event type constants for audit trail
 const (
-	EventCreated           EventType = "created"
-	EventUpdated           EventType = "updated"
-	EventStatusChanged     EventType = "status_changed"
-	EventCommented         EventType = "commented"
-	EventClosed            EventType = "closed"
-	EventReopened          EventType = "reopened"
-	EventDependencyAdded   EventType = "dependency_added"
-	EventDependencyRemoved EventType = "dependency_removed"
-	EventLabelAdded        EventType = "label_added"
-	EventLabelRemoved      EventType = "label_removed"
-	EventCompacted         EventType = "compacted"
+	EventCreated           EventType = "issue.created"
+	EventUpdated           EventType = "issue.updated"
+	EventStatusChanged     EventType = "issue.status_changed"
+	EventCommented         EventType = "issue.commented"
+	EventClosed            EventType = "issue.closed"
+	EventReopened          EventType = "issue.reopened"
+	EventDependencyAdded   EventType = "issue.dependency_added"
+	EventDependencyRemoved EventType = "issue.dependency_removed"
+	EventLabelAdded        EventType = "issue.label_added"
+	EventLabelRemoved      EventType = "issue.label_removed"
+	EventCompacted         EventType = "issue.compacted"
 )
 
 // BondRef tracks compound molecule lineage.

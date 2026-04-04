@@ -30,19 +30,19 @@ func (d *Duration) UnmarshalJSON(b []byte) error {
 type EventType string
 
 const (
-	TaskClaimed      EventType = "task_claimed"
-	TaskStarted      EventType = "task_started"
-	TaskCompleted    EventType = "task_completed"
-	TaskFailed       EventType = "task_failed"
-	AgentStarted     EventType = "agent_started"
-	AgentRestarted   EventType = "agent_restarted"
-	AgentStopped     EventType = "agent_stopped"
-	EpicAssigned     EventType = "epic_assigned"
-	EpicExhausted    EventType = "epic_exhausted"
-	PRCreated        EventType = "pr_created"
-	ConflictResolved EventType = "conflict_resolved"
-	HealthCheck      EventType = "health_check"
-	ConfigReloaded   EventType = "config_reloaded"
+	TaskClaimed      EventType = "task.claimed"
+	TaskStarted      EventType = "task.started"
+	TaskCompleted    EventType = "task.completed"
+	TaskFailed       EventType = "task.failed"
+	AgentStarted     EventType = "agent.started"
+	AgentRestarted   EventType = "agent.restarted"
+	AgentStopped     EventType = "agent.stopped"
+	EpicAssigned     EventType = "epic.assigned"
+	EpicExhausted    EventType = "epic.exhausted"
+	PRCreated        EventType = "pr.created"
+	ConflictResolved EventType = "conflict.resolved"
+	HealthCheck      EventType = "system.health_check"
+	ConfigReloaded   EventType = "system.config_reloaded"
 )
 
 // Event is the envelope written to JSONL files. Data is stored as json.RawMessage
