@@ -2,7 +2,6 @@ package webui
 
 import (
 	"encoding/json"
-	"log/slog"
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
@@ -139,7 +138,7 @@ func handleListIssues(svc service.IssueService) http.HandlerFunc {
 			data, err = json.Marshal(result.Issues)
 		}
 		if err != nil {
-			slog.Error("failed to marshal issues", "err", err)
+			logger.Error("failed to marshal issues", "err", err)
 			writeIssuesError(w, http.StatusInternalServerError, "failed to encode response", "ENCODE_ERROR")
 			return
 		}

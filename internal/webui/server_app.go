@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -45,6 +44,8 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 		config.BindAddress = "127.0.0.1"
 	}
 
+	initLogger(config.Logger)
+
 	app := &Server{config: config}
 
 	var cleanups []func()
@@ -76,32 +77,32 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 	}
 
 	// Log configuration
-	slog.Info("starting web UI server", "port", config.Port, "pool_size", config.PoolSize, "bind_address", config.BindAddress)
+	logger.Info("starting web UI server", "port", config.Port, "pool_size", config.PoolSize, "bind_address", config.BindAddress)
 	if config.SocketPath != "" {
-		slog.Info("daemon socket configured", "socket", config.SocketPath)
+		logger.Info("daemon socket configured", "socket", config.SocketPath)
 	} else {
-		slog.Info("daemon socket: auto-detect")
+		logger.Info("daemon socket: auto-detect")
 	}
 	if app.corsConfig.Enabled {
-		slog.Info("CORS enabled", "origins", app.corsConfig.AllowedOrigins)
+		logger.Info("CORS enabled", "origins", app.corsConfig.AllowedOrigins)
 	}
 	if config.HSTSEnabled {
-		slog.Info("HSTS enabled: ensure this server is behind a TLS-terminating proxy")
+		logger.Info("HSTS enabled: ensure this server is behind a TLS-terminating proxy")
 	}
 	if config.ExtAuthURL == "" && config.BindAddress != "127.0.0.1" && config.BindAddress != "::1" {
-		slog.Warn("no authentication configured and server is exposed to network", "bind_address", config.BindAddress)
+		logger.Warn("no authentication configured and server is exposed to network", "bind_address", config.BindAddress)
 	}
 	if config.DevMode {
 		dir := config.DevFrontendDir
 		if dir == "" {
 			dir = "internal/webui/frontend/dist"
 		}
-		slog.Info("dev mode enabled", "frontend_dir", dir)
+		logger.Info("dev mode enabled", "frontend_dir", dir)
 	} else {
 		logFrontendBuildMeta()
 	}
 	if config.FleetEnabled {
-		slog.Info("fleet routes enabled")
+		logger.Info("fleet routes enabled")
 	}
 
 	// Find an available port (auto-fallback if requested port is in use)
@@ -112,7 +113,7 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 	}
 	cleanups = append(cleanups, func() { _ = app.listener.Close() })
 	if app.actualPort != config.Port {
-		slog.Info("configured port in use, using fallback", "requested_port", config.Port, "actual_port", app.actualPort)
+		logger.Info("configured port in use, using fallback", "requested_port", config.Port, "actual_port", app.actualPort)
 	}
 
 	// MultiPool for workspace-aware connection routing.
@@ -135,15 +136,15 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 	} else {
 		cwd, err := getCwd()
 		if err != nil {
-			slog.Warn("failed to get current directory", "err", err)
+			logger.Warn("failed to get current directory", "err", err)
 		} else {
 			rawPool, poolErr = daemon.NewConnectionPoolAutoDiscover(cwd, config.PoolSize)
 		}
 	}
 
 	if poolErr != nil {
-		slog.Warn("failed to initialize daemon connection pool", "err", poolErr)
-		slog.Info("web UI will start but API endpoints may not work until daemon is available")
+		logger.Warn("failed to initialize daemon connection pool", "err", poolErr)
+		logger.Info("web UI will start but API endpoints may not work until daemon is available")
 	} else {
 		breaker := circuitbreaker.NewBreaker("daemon", circuitbreaker.Config{
 			FailureThreshold:  5,
@@ -151,22 +152,22 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 			HalfOpenMaxProbes: 1,
 			ShouldTrip:        daemon.DaemonShouldTrip,
 			OnStateChange: func(from, to circuitbreaker.State) {
-				slog.Info("circuit breaker state change", "component", "circuit_breaker", "from", from, "to", to)
+				logger.Info("circuit breaker state change", "component", "circuit_breaker", "from", from, "to", to)
 			},
 		})
 		app.pool = daemon.NewProtectedPool(rawPool, breaker)
-		slog.Info("daemon connection pool initialized with circuit breaker")
+		logger.Info("daemon connection pool initialized with circuit breaker")
 
 		func() {
 			testCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 			client, err := app.pool.Get(testCtx)
 			if err != nil {
-				slog.Warn("daemon not available at startup", "err", err)
-				slog.Info("API endpoints will attempt to connect when called")
+				logger.Warn("daemon not available at startup", "err", err)
+				logger.Info("API endpoints will attempt to connect when called")
 			} else {
 				app.pool.Put(client)
-				slog.Info("daemon connection verified")
+				logger.Info("daemon connection verified")
 			}
 		}()
 	}
@@ -188,7 +189,7 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 	cleanups = append(cleanups, func() { _ = app.registry.Close() })
 	if app.pool != nil {
 		if err := app.registry.RegisterPool(app.initialWorkspaceID, app.pool); err != nil {
-			slog.Warn("failed to register initial workspace", "err", err)
+			logger.Warn("failed to register initial workspace", "err", err)
 		}
 		app.getMutationsSince = app.multiSub.GetMutationsSinceForWorkspace
 	}
@@ -199,16 +200,16 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 	termSessionPrefix := fmt.Sprintf("%d-%s", app.actualPort, workspace.ShortWorkspaceID(app.initialWorkspaceID))
 	if app.termMgr, err = NewTerminalManager(config.TerminalCmd, termSessionPrefix, config.MaxTerminalSessions); err != nil {
 		if errors.Is(err, ErrTmuxNotFound) {
-			slog.Warn("tmux not found, terminal feature disabled")
+			logger.Warn("tmux not found, terminal feature disabled")
 		} else {
-			slog.Warn("failed to initialize terminal manager", "err", err)
+			logger.Warn("failed to initialize terminal manager", "err", err)
 		}
 	} else {
 		if config.ScrollbackMaxLines > 0 {
 			app.termMgr.SetScrollbackMaxLines(config.ScrollbackMaxLines)
 		}
 		cleanups = append(cleanups, func() { _ = app.termMgr.Shutdown() })
-		slog.Info("terminal manager initialized", "component", "terminal", "default_command", config.TerminalCmd)
+		logger.Info("terminal manager initialized", "component", "terminal", "default_command", config.TerminalCmd)
 	}
 
 	// Wire session history callback. The closure captures app.sessionHistoryStore,
@@ -233,7 +234,7 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 				scrollbackPath = ""
 			}
 			if err := store.Complete(context.Background(), app.initialWorkspaceID, issueID, sessionName, scrollbackPath); err != nil {
-				slog.Warn("failed to complete session history", "session", sessionName, "err", err)
+				logger.Warn("failed to complete session history", "session", sessionName, "err", err)
 			}
 		})
 	}
@@ -243,7 +244,7 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 		var authErr error
 		app.termAuth, authErr = realtime.NewTerminalAuth()
 		if authErr != nil {
-			slog.Warn("failed to initialize terminal auth, terminal feature disabled", "err", authErr)
+			logger.Warn("failed to initialize terminal auth, terminal feature disabled", "err", authErr)
 			app.termMgr = nil
 		} else {
 			cleanups = append(cleanups, func() { app.termAuth.Stop() })
@@ -260,7 +261,7 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 		var sseErr error
 		app.sseTokens, sseErr = realtime.NewTokenStore()
 		if sseErr != nil {
-			slog.Warn("failed to initialize SSE token store", "err", sseErr)
+			logger.Warn("failed to initialize SSE token store", "err", sseErr)
 		} else {
 			cleanups = append(cleanups, func() { app.sseTokens.Stop() })
 		}
@@ -270,21 +271,21 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 	if config.FleetRedis != nil {
 		app.fleetRegistry, err = fleet.NewStoreRegistry(*config.FleetRedis, fleet.DefaultTimeoutConfig(), nil)
 		if err != nil {
-			slog.Warn("failed to initialize fleet store registry", "component", "fleet", "err", err)
+			logger.Warn("failed to initialize fleet store registry", "component", "fleet", "err", err)
 		} else {
 			if regErr := app.fleetRegistry.Register(app.initialWorkspaceID); regErr != nil {
-				slog.Warn("failed to register initial workspace in fleet registry",
+				logger.Warn("failed to register initial workspace in fleet registry",
 					"workspace", app.initialWorkspaceID, "err", regErr)
 			}
 
 			var jwtKey []byte
 			if len(config.FleetJWTKey) > 0 {
 				jwtKey = config.FleetJWTKey
-				slog.Info("using pre-provisioned JWT signing key", "component", "fleet")
+				logger.Info("using pre-provisioned JWT signing key", "component", "fleet")
 			} else {
 				jwtKey = make([]byte, 32)
 				if _, err := rand.Read(jwtKey); err != nil {
-					slog.Warn("failed to generate JWT signing key", "component", "fleet", "err", err)
+					logger.Warn("failed to generate JWT signing key", "component", "fleet", "err", err)
 					_ = app.fleetRegistry.Close()
 					app.fleetRegistry = nil
 				}
@@ -295,7 +296,7 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 					Expiry:     time.Hour,
 				}
 				// fleetRegistry cleanup is handled by registry.Close() via SetFleetRegistry.
-				slog.Info("fleet store registry initialized", "component", "fleet", "redis_address", config.FleetRedis.Address)
+				logger.Info("fleet store registry initialized", "component", "fleet", "redis_address", config.FleetRedis.Address)
 			}
 		}
 	}
@@ -325,17 +326,17 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 			app.fleetRegCfg.RateLimiter = NewFleetRateLimiter(rlClient, 10, time.Minute)
 			cleanups = append(cleanups, func() { _ = app.fleetRegCfg.RateLimiter.Close() })
 		}
-		slog.Info("fleet API key authentication enabled", "component", "fleet")
+		logger.Info("fleet API key authentication enabled", "component", "fleet")
 	} else if app.fleetRegistry != nil && config.FleetAPIKey == "" {
-		slog.Warn("fleet store configured but no fleet API key set", "component", "fleet", "env_var", "LOOM_FLEET_API_KEY")
-		slog.Warn("fleet registration endpoint will return 503 until fleet API key is configured", "component", "fleet")
+		logger.Warn("fleet store configured but no fleet API key set", "component", "fleet", "env_var", "LOOM_FLEET_API_KEY")
+		logger.Warn("fleet registration endpoint will return 503 until fleet API key is configured", "component", "fleet")
 	}
 
 	if config.FleetRedis != nil {
 		tmClient := fleet.NewRedisClient(config.FleetRedis.Address, config.FleetRedis.Password, 0)
 		app.tabMetaStore = tabmeta.NewStore(tmClient, nil)
 		cleanups = append(cleanups, func() { _ = app.tabMetaStore.Close() })
-		slog.Info("tab metadata store initialized", "redis_address", config.FleetRedis.Address)
+		logger.Info("tab metadata store initialized", "redis_address", config.FleetRedis.Address)
 		_ = app.tabMetaStore.MigrateLegacyKeys(ctx, "default")
 		if config.WorkspaceConfigFn != nil {
 			if wsData, err := config.WorkspaceConfigFn(); err == nil && wsData != nil {
@@ -354,7 +355,7 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 		itClient := fleet.NewRedisClient(config.FleetRedis.Address, config.FleetRedis.Password, 0)
 		app.issueTabStore = issuetabs.NewStore(itClient, nil)
 		cleanups = append(cleanups, func() { _ = app.issueTabStore.Close() })
-		slog.Info("issue tab store initialized", "redis_address", config.FleetRedis.Address)
+		logger.Info("issue tab store initialized", "redis_address", config.FleetRedis.Address)
 		_, _ = app.issueTabStore.MigrateLegacyKeys(ctx, app.initialWorkspaceID)
 	}
 
@@ -362,9 +363,9 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 		shClient := fleet.NewRedisClient(config.FleetRedis.Address, config.FleetRedis.Password, 0)
 		app.sessionHistoryStore = sessionhistory.NewStore(shClient, nil)
 		cleanups = append(cleanups, func() { _ = app.sessionHistoryStore.Close() })
-		slog.Info("session history store initialized", "redis_address", config.FleetRedis.Address)
+		logger.Info("session history store initialized", "redis_address", config.FleetRedis.Address)
 		if n, err := app.sessionHistoryStore.MigrateLegacyKeys(ctx, app.initialWorkspaceID); err == nil && n > 0 {
-			slog.Info("session history legacy keys migrated", "count", n)
+			logger.Info("session history legacy keys migrated", "count", n)
 		}
 	}
 
@@ -461,7 +462,7 @@ func initExtAuth(config ServerConfig) (middleware.Middleware, func()) {
 		Audience:  config.ExtAuthAudience,
 		Logger:    config.Logger,
 	})
-	slog.Info("external auth enabled",
+	logger.Info("external auth enabled",
 		"component", "auth",
 		"auth_url", config.ExtAuthURL,
 		"jwks_url", jwksURL,

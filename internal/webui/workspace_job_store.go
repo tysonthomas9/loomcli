@@ -3,7 +3,6 @@ package webui
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"sync"
 	"time"
 
@@ -69,7 +68,7 @@ func (s *WorkspaceJobStore) Start(req service.WorkspaceCreateRequest, createFn s
 				Error:       errMsg,
 				CompletedAt: time.Now(),
 			})
-			slog.Warn("async workspace creation failed",
+			logger.Warn("async workspace creation failed",
 				"job_id", id, "name", req.Name, "err", err)
 			return
 		}
@@ -80,7 +79,7 @@ func (s *WorkspaceJobStore) Start(req service.WorkspaceCreateRequest, createFn s
 			WorkspaceID: result.WorkspaceID,
 			CompletedAt: time.Now(),
 		})
-		slog.Info("async workspace creation completed",
+		logger.Info("async workspace creation completed",
 			"job_id", id, "name", req.Name, "workspace_id", result.WorkspaceID)
 	}()
 

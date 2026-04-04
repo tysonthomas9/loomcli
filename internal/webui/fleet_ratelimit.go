@@ -3,7 +3,6 @@ package webui
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -44,7 +43,7 @@ func (rl *FleetRateLimiter) Allow(ctx context.Context, key string) (bool, error)
 
 	_, err := pipe.Exec(ctx)
 	if err != nil {
-		slog.Warn("rate limiter redis fail-open", "err", err)
+		logger.Warn("rate limiter redis fail-open", "err", err)
 		return true, err
 	}
 

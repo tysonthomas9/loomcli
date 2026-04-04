@@ -3,7 +3,6 @@ package webui
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -193,7 +192,7 @@ func (s *terminalServiceImpl) SpawnSession(_ context.Context, wsID string, param
 					StartedAt:   now,
 				}
 				if err := s.histStore.Add(context.Background(), wsID, record); err != nil {
-					slog.Warn("failed to record session history", "session", sanitizedName, "err", err)
+					logger.Warn("failed to record session history", "session", sanitizedName, "err", err)
 				}
 			}
 		}
@@ -254,7 +253,7 @@ func (s *terminalServiceImpl) CloseAllSessions(ctx context.Context) (*CloseAllRe
 	if s.tabStore != nil {
 		allTabs, err := s.tabStore.ListAll(ctx)
 		if err != nil {
-			slog.Error("failed to list tab metadata for cleanup", "err", err)
+			logger.Error("failed to list tab metadata for cleanup", "err", err)
 			result.MetaCleanupIncomplete = true
 		} else {
 			for _, tab := range allTabs {
@@ -262,7 +261,7 @@ func (s *terminalServiceImpl) CloseAllSessions(ctx context.Context) (*CloseAllRe
 					affectedWorkspaces[tab.Workspace] = true
 				}
 				if err := s.tabStore.Delete(ctx, tab.Workspace, tab.SessionName); err != nil {
-					slog.Error("failed to delete tab metadata", "session", tab.SessionName, "err", err)
+					logger.Error("failed to delete tab metadata", "session", tab.SessionName, "err", err)
 					result.MetaCleanupIncomplete = true
 				}
 			}

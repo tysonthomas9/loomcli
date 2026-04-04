@@ -4,7 +4,6 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 	"regexp"
 	"strings"
@@ -208,7 +207,7 @@ func handleNotifySessionChange(hub *realtime.Hub, notifyToken string) http.Handl
 		}
 
 		if req.WorkspaceID == "" {
-			slog.Warn("session notify missing workspace_id, mutation will be dropped", "task_id", req.TaskID)
+			logger.Warn("session notify missing workspace_id, mutation will be dropped", "task_id", req.TaskID)
 		}
 		hub.Broadcast(&realtime.MutationPayload{
 			Type:        rpc.MutationSessionChange,

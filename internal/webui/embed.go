@@ -4,7 +4,6 @@ import (
 	"embed"
 	"encoding/json"
 	"io/fs"
-	"log/slog"
 	"net/http"
 	"os"
 	"path"
@@ -21,7 +20,7 @@ var frontendFS embed.FS
 func logFrontendBuildMeta() {
 	data, err := frontendFS.ReadFile("frontend/dist/.build-meta")
 	if err != nil {
-		slog.Warn("frontend build metadata not found — frontend may be stale (run 'make install' to rebuild)")
+		logger.Warn("frontend build metadata not found — frontend may be stale (run 'make install' to rebuild)")
 		return
 	}
 	var meta struct {
@@ -29,10 +28,10 @@ func logFrontendBuildMeta() {
 		GitHash string `json:"git_hash"`
 	}
 	if err := json.Unmarshal(data, &meta); err != nil {
-		slog.Warn("failed to parse frontend build metadata", "err", err)
+		logger.Warn("failed to parse frontend build metadata", "err", err)
 		return
 	}
-	slog.Info("embedded frontend", "built_at", meta.BuiltAt, "git_hash", meta.GitHash)
+	logger.Info("embedded frontend", "built_at", meta.BuiltAt, "git_hash", meta.GitHash)
 }
 
 // frontendHandler returns an http.Handler that serves the embedded frontend assets.
@@ -148,13 +147,13 @@ func devFrontendHandler(dir string) http.Handler {
 	// Resolve to absolute path for path traversal validation
 	absDir, err := filepath.Abs(dir)
 	if err != nil {
-		slog.Warn("failed to resolve dev frontend directory", "err", err)
+		logger.Warn("failed to resolve dev frontend directory", "err", err)
 		absDir = dir
 	}
 
 	// Warn if the directory doesn't exist at startup
 	if _, err := os.Stat(absDir); err != nil {
-		slog.Warn("dev frontend directory not found (run 'npm run build' first)", "dir", absDir)
+		logger.Warn("dev frontend directory not found (run 'npm run build' first)", "dir", absDir)
 	}
 
 	fileServer := http.FileServer(http.Dir(absDir))

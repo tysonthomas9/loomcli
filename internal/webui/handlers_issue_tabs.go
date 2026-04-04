@@ -2,7 +2,6 @@ package webui
 
 import (
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"time"
 
@@ -42,7 +41,7 @@ func handleGetIssueTabs(store *issuetabs.Store, manager *TerminalManager) http.H
 
 		state, err := store.Get(r.Context(), wsID, issueID)
 		if err != nil {
-			slog.Error("failed to get issue tab state", "issue_id", issueID, "err", err)
+			logger.Error("failed to get issue tab state", "issue_id", issueID, "err", err)
 			respondJSON(w, http.StatusInternalServerError, issueTabResponse{
 				Success: false,
 				Error:   "failed to get issue tab state",
@@ -63,7 +62,7 @@ func handleGetIssueTabs(store *issuetabs.Store, manager *TerminalManager) http.H
 		if manager != nil {
 			sessions, err := manager.ListActiveSessionsForWorkspace(wsID)
 			if err != nil {
-				slog.Error("failed to list active sessions for issue tab validation", "err", err)
+				logger.Error("failed to list active sessions for issue tab validation", "err", err)
 			} else {
 				for _, s := range sessions {
 					activeNames = append(activeNames, s.Name)
@@ -76,7 +75,7 @@ func handleGetIssueTabs(store *issuetabs.Store, manager *TerminalManager) http.H
 		// Save back filtered state if tabs were removed or active tab changed
 		if len(filtered.Tabs) != len(state.Tabs) || filtered.ActiveTabID != state.ActiveTabID {
 			if err := store.Save(r.Context(), wsID, filtered); err != nil {
-				slog.Error("failed to save filtered issue tab state", "issue_id", issueID, "err", err)
+				logger.Error("failed to save filtered issue tab state", "issue_id", issueID, "err", err)
 			}
 		}
 
@@ -131,7 +130,7 @@ func handleSaveIssueTabs(store *issuetabs.Store, hub *realtime.Hub) http.Handler
 		}
 
 		if err := store.Save(r.Context(), wsID, state); err != nil {
-			slog.Error("failed to save issue tab state", "issue_id", issueID, "err", err)
+			logger.Error("failed to save issue tab state", "issue_id", issueID, "err", err)
 			respondJSON(w, http.StatusInternalServerError, issueTabResponse{
 				Success: false,
 				Error:   "failed to save issue tab state",
@@ -178,7 +177,7 @@ func handleDeleteIssueTabs(store *issuetabs.Store) http.HandlerFunc {
 		}
 
 		if err := store.Delete(r.Context(), wsID, issueID); err != nil {
-			slog.Error("failed to delete issue tab state", "issue_id", issueID, "err", err)
+			logger.Error("failed to delete issue tab state", "issue_id", issueID, "err", err)
 			respondJSON(w, http.StatusInternalServerError, issueTabResponse{
 				Success: false,
 				Error:   "failed to delete issue tab state",

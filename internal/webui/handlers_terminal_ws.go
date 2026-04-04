@@ -3,7 +3,6 @@ package webui
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"net/http"
 	"time"
 
@@ -80,11 +79,11 @@ func handleTerminalWS(manager *TerminalManager, auth *realtime.TerminalAuth, all
 					"success": false,
 					"error":   "terminal authentication failed",
 				})
-				slog.Warn("terminal auth failed", "session", session, "err", err)
+				logger.Warn("terminal auth failed", "session", session, "err", err)
 				return
 			}
 			if userID != "" {
-				slog.Info("terminal session authenticated", "session", session, "user_id", userID)
+				logger.Info("terminal session authenticated", "session", session, "user_id", userID)
 			}
 		}
 
@@ -101,7 +100,7 @@ func handleTerminalWS(manager *TerminalManager, auth *realtime.TerminalAuth, all
 		// Must be called before websocket.Accept which hijacks the connection.
 		rc := http.NewResponseController(w)
 		if err := rc.SetWriteDeadline(time.Time{}); err != nil {
-			slog.Warn("terminal ws: failed to disable write deadline", "err", err)
+			logger.Warn("terminal ws: failed to disable write deadline", "err", err)
 		}
 
 		// Accept WebSocket upgrade with origin validation.
@@ -112,7 +111,7 @@ func handleTerminalWS(manager *TerminalManager, auth *realtime.TerminalAuth, all
 			OriginPatterns: patterns,
 		})
 		if err != nil {
-			slog.Error("failed to accept websocket", "err", err)
+			logger.Error("failed to accept websocket", "err", err)
 			return
 		}
 		conn.SetReadLimit(realtime.WSReadLimit)
@@ -133,9 +132,9 @@ func handleTerminalWS(manager *TerminalManager, auth *realtime.TerminalAuth, all
 		termSession, err := manager.Attach(session, attachCommandForSession(session), 80, 24)
 		if err != nil {
 			if errors.Is(err, ErrMaxSessionsReached) {
-				slog.Info("terminal session limit reached", "session", session)
+				logger.Info("terminal session limit reached", "session", session)
 			} else {
-				slog.Error("failed to attach terminal session", "session", session, "err", err)
+				logger.Error("failed to attach terminal session", "session", session, "err", err)
 			}
 			closeReason = err.Error()
 			return
@@ -178,7 +177,7 @@ func handleTerminalWS(manager *TerminalManager, auth *realtime.TerminalAuth, all
 		// WebSocket closed - detach connection to close PTY and unblock PtyToWS
 		// (Detach closes the PTY, causing the Read in PtyToWS to return an error)
 		if err := manager.Detach(connID); err != nil {
-			slog.Error("failed to detach terminal connection", "conn_id", connID, "err", err)
+			logger.Error("failed to detach terminal connection", "conn_id", connID, "err", err)
 		}
 
 		// Wait for PTY reader to finish and check for backend crash
@@ -191,7 +190,7 @@ func handleTerminalWS(manager *TerminalManager, auth *realtime.TerminalAuth, all
 func injectTerminalContextBanner(session *TerminalSession, loomServerURL string, workspaceConfigFn func() (*service.WorkspaceData, error)) {
 	tc, err := FetchTerminalContext(loomServerURL)
 	if err != nil {
-		slog.Error("terminal context fetch failed, skipping banner", "err", err)
+		logger.Error("terminal context fetch failed, skipping banner", "err", err)
 		return
 	}
 
@@ -200,12 +199,12 @@ func injectTerminalContextBanner(session *TerminalSession, loomServerURL string,
 		if wsData, wsErr := workspaceConfigFn(); wsErr == nil && wsData != nil {
 			wsName = wsData.Name
 		} else if wsErr != nil {
-			slog.Warn("workspace config unavailable for terminal context", "err", wsErr)
+			logger.Warn("workspace config unavailable for terminal context", "err", wsErr)
 		}
 	}
 
 	banner := FormatContextBanner(tc, wsName)
 	if _, writeErr := session.PTY.Write([]byte(banner)); writeErr != nil {
-		slog.Warn("failed to write context banner to pty", "err", writeErr)
+		logger.Warn("failed to write context banner to pty", "err", writeErr)
 	}
 }

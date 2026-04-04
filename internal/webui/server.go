@@ -4,7 +4,6 @@ package webui
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -267,7 +266,7 @@ func (app *Server) run(ctx context.Context) error { //nolint:funlen // server li
 	// Start server in a goroutine using the pre-acquired listener
 	serverErr := make(chan error, 1)
 	go func() {
-		slog.Info("server listening", "address", app.config.BindAddress, "port", app.actualPort)
+		logger.Info("server listening", "address", app.config.BindAddress, "port", app.actualPort)
 		if err := server.Serve(app.listener); err != nil && err != http.ErrServerClosed {
 			serverErr <- fmt.Errorf("server error: %w", err)
 		}
@@ -283,7 +282,7 @@ func (app *Server) run(ctx context.Context) error { //nolint:funlen // server li
 		}
 	}
 
-	slog.Info("shutting down server")
+	logger.Info("shutting down server")
 
 	// Cancel server-wide context so in-flight handlers abort quickly.
 	shutdownCancel()
@@ -295,7 +294,7 @@ func (app *Server) run(ctx context.Context) error { //nolint:funlen // server li
 	if err := server.Shutdown(drainCtx); err != nil {
 		return fmt.Errorf("server forced to shutdown: %w", err)
 	}
-	slog.Info("server stopped")
+	logger.Info("server stopped")
 
 	// Stop components in reverse-initialization order.
 
@@ -315,9 +314,9 @@ func (app *Server) run(ctx context.Context) error { //nolint:funlen // server li
 	// Stop terminal manager (kill tmux sessions and close PTYs)
 	if app.termMgr != nil {
 		if err := app.termMgr.Shutdown(); err != nil {
-			slog.Warn("error shutting down terminal manager", "component", "terminal", "err", err)
+			logger.Warn("error shutting down terminal manager", "component", "terminal", "err", err)
 		} else {
-			slog.Info("terminal manager stopped", "component", "terminal")
+			logger.Info("terminal manager stopped", "component", "terminal")
 		}
 	}
 
@@ -326,21 +325,21 @@ func (app *Server) run(ctx context.Context) error { //nolint:funlen // server li
 	// Stop multi-workspace subscriber (no more handlers need it)
 	if app.multiSub != nil {
 		app.multiSub.Stop()
-		slog.Info("multi-workspace subscriber stopped")
+		logger.Info("multi-workspace subscriber stopped")
 	}
 
 	// Stop SSE hub (all SSE handlers have exited)
 	if app.hub != nil {
 		app.hub.Stop()
-		slog.Info("SSE hub stopped")
+		logger.Info("SSE hub stopped")
 	}
 
 	// Close MultiPool (closes all per-workspace pools including the initial one)
 	if app.multiPool != nil {
 		if err := app.multiPool.Close(); err != nil {
-			slog.Warn("error closing multi-pool", "err", err)
+			logger.Warn("error closing multi-pool", "err", err)
 		} else {
-			slog.Info("multi-pool closed")
+			logger.Info("multi-pool closed")
 		}
 	}
 

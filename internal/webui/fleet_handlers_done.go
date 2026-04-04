@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -76,7 +75,7 @@ func handleFleetDoneWithStore(store fleetDoneStore) http.HandlerFunc {
 				})
 				return
 			}
-			slog.Warn("invalid request body", "handler", "handleFleetDone", "err", err)
+			logger.Warn("invalid request body", "handler", "handleFleetDone", "err", err)
 			respondJSON(w, http.StatusBadRequest, FleetDoneResponse{
 				Success: false,
 				Error:   "invalid request body",
@@ -91,7 +90,7 @@ func handleFleetDoneWithStore(store fleetDoneStore) http.HandlerFunc {
 		worker, err := store.GetWorker(ctx, workerID)
 		if err != nil {
 			safeID := strconv.Quote(workerID)
-			slog.Error("failed to get worker", "worker_id", safeID, "err", err)
+			logger.Error("failed to get worker", "worker_id", safeID, "err", err)
 			respondJSON(w, http.StatusInternalServerError, FleetDoneResponse{
 				Success: false,
 				Error:   "failed to look up worker",
@@ -110,7 +109,7 @@ func handleFleetDoneWithStore(store fleetDoneStore) http.HandlerFunc {
 		claim, err := store.GetWorkerClaim(ctx, workerID)
 		if err != nil {
 			safeID := strconv.Quote(workerID)
-			slog.Error("failed to get worker claim", "worker_id", safeID, "err", err)
+			logger.Error("failed to get worker claim", "worker_id", safeID, "err", err)
 			respondJSON(w, http.StatusInternalServerError, FleetDoneResponse{
 				Success: false,
 				Error:   "failed to look up worker claim",
@@ -140,7 +139,7 @@ func handleFleetDoneWithStore(store fleetDoneStore) http.HandlerFunc {
 		}
 		if err := store.RecordTaskResult(ctx, result); err != nil {
 			safeWorker, safeTask := strconv.Quote(workerID), strconv.Quote(taskID)
-			slog.Error("failed to record task result", "worker_id", safeWorker, "task_id", safeTask, "err", err)
+			logger.Error("failed to record task result", "worker_id", safeWorker, "task_id", safeTask, "err", err)
 			respondJSON(w, http.StatusInternalServerError, FleetDoneResponse{
 				Success: false,
 				Error:   "failed to record task result",
@@ -150,7 +149,7 @@ func handleFleetDoneWithStore(store fleetDoneStore) http.HandlerFunc {
 
 		// Release the claim
 		if err := store.ReleaseClaim(ctx, taskID); err != nil {
-			slog.Error("failed to release claim", "task_id", taskID, "err", err)
+			logger.Error("failed to release claim", "task_id", taskID, "err", err)
 			respondJSON(w, http.StatusInternalServerError, FleetDoneResponse{
 				Success: false,
 				Error:   "failed to release task claim",
@@ -162,10 +161,10 @@ func handleFleetDoneWithStore(store fleetDoneStore) http.HandlerFunc {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cleanupCancel()
 		if err := store.ClearWorkerClaim(cleanupCtx, workerID); err != nil {
-			slog.Warn("failed to clear worker claim cache", "worker_id", workerID, "err", err)
+			logger.Warn("failed to clear worker claim cache", "worker_id", workerID, "err", err)
 		}
 
-		slog.Info("task completed", "worker_id", workerID, "task_id", taskID, "success", req.Success)
+		logger.Info("task completed", "worker_id", workerID, "task_id", taskID, "success", req.Success)
 		respondJSON(w, http.StatusOK, FleetDoneResponse{
 			Success:  true,
 			TaskID:   taskID,

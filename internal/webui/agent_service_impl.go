@@ -3,7 +3,6 @@ package webui
 import (
 	"context"
 	"fmt"
-	"log/slog"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
@@ -65,7 +64,7 @@ func (s *agentServiceImpl) GetTerminalInfo(_ context.Context, wsID, agentName st
 
 	mode := agentTerminalModeArchive
 	if _, found, err := s.termMgr.FindLatestAgentSession(wsID, agentName); err != nil {
-		slog.Error("failed to resolve agent tmux session", "agent", agentName, "err", err)
+		logger.Error("failed to resolve agent tmux session", "agent", agentName, "err", err)
 		return nil, service.ErrInternal("failed to inspect terminal sessions", err)
 	} else if found {
 		mode = agentTerminalModeTmux
@@ -84,7 +83,7 @@ func (s *agentServiceImpl) GenerateTerminalToken(_ context.Context, agentName, u
 
 	token, err := s.termAuth.GenerateToken(agentLogTokenScope(agentName), userID)
 	if err != nil {
-		slog.Error("failed to generate agent terminal token", "agent", agentName, "err", err)
+		logger.Error("failed to generate agent terminal token", "agent", agentName, "err", err)
 		return "", service.ErrInternal("failed to generate token", err)
 	}
 	return token, nil
@@ -105,7 +104,7 @@ func (s *agentServiceImpl) GetLog(_ context.Context, wsID, agentName string, lin
 
 	logPath, err := getAgentLogPath(wsID, agentName)
 	if err != nil {
-		slog.Error("agent log path error", "agent", agentName, "err", err)
+		logger.Error("agent log path error", "agent", agentName, "err", err)
 		return nil, service.ErrInternal("failed to resolve log path", err)
 	}
 
@@ -115,7 +114,7 @@ func (s *agentServiceImpl) GetLog(_ context.Context, wsID, agentName string, lin
 
 	content, startLine, err := readFileLastLines(logPath, lines, beforeLine)
 	if err != nil {
-		slog.Error("failed to read agent log", "agent", agentName, "err", err)
+		logger.Error("failed to read agent log", "agent", agentName, "err", err)
 		return nil, service.ErrInternal("failed to read log file", err)
 	}
 

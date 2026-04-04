@@ -1,7 +1,6 @@
 package webui
 
 import (
-	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -34,7 +33,7 @@ func originHosts(origins []string) []string {
 	for _, o := range origins {
 		u, err := url.Parse(o)
 		if err != nil || u.Host == "" {
-			slog.Warn("skipping malformed origin", "origin", o, "err", err)
+			logger.Warn("skipping malformed origin", "origin", o, "err", err)
 			continue
 		}
 		hosts = append(hosts, u.Host)

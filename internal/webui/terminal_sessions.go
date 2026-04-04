@@ -2,7 +2,6 @@ package webui
 
 import (
 	"fmt"
-	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
@@ -19,7 +18,7 @@ func (m *TerminalManager) SetOnSessionKilled(fn func(sessionName string)) {
 // Best-effort: failure does not prevent the kill.
 func (m *TerminalManager) captureScrollbackToFile(name string) string {
 	if !validSessionName.MatchString(name) {
-		slog.Warn("rejecting scrollback capture for invalid session name", "session", name)
+		logger.Warn("rejecting scrollback capture for invalid session name", "session", name)
 		return ""
 	}
 	internalName := m.tmuxName(name)
@@ -30,25 +29,25 @@ func (m *TerminalManager) captureScrollbackToFile(name string) string {
 	cmd := exec.Command(m.tmuxPath, "capture-pane", "-p", "-t", internalName, "-S", "-10000") //nolint:gosec // tmuxPath from LookPath
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		slog.Warn("failed to capture scrollback", "session", name, "err", err)
+		logger.Warn("failed to capture scrollback", "session", name, "err", err)
 		return ""
 	}
 
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		slog.Warn("failed to get home dir for scrollback capture", "err", err)
+		logger.Warn("failed to get home dir for scrollback capture", "err", err)
 		return ""
 	}
 
 	dir := homeDir + "/.loom/session-scrollback"
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		slog.Warn("failed to create scrollback dir", "err", err)
+		logger.Warn("failed to create scrollback dir", "err", err)
 		return ""
 	}
 
 	path := dir + "/" + name + ".log"
 	if err := os.WriteFile(path, out, 0o600); err != nil {
-		slog.Warn("failed to write scrollback file", "path", path, "err", err)
+		logger.Warn("failed to write scrollback file", "path", path, "err", err)
 		return ""
 	}
 
@@ -77,7 +76,7 @@ func (m *TerminalManager) KillAllSessions() error {
 	// Close all PTYs.
 	for connID, session := range sessions {
 		if err := session.Close(); err != nil {
-			slog.Warn("error closing connection", "conn_id", connID, "err", err)
+			logger.Warn("error closing connection", "conn_id", connID, "err", err)
 		}
 	}
 
@@ -90,7 +89,7 @@ func (m *TerminalManager) KillAllSessions() error {
 		killed[session.Name] = true
 		cmd := exec.Command(m.tmuxPath, "kill-session", "-t", session.Name) //nolint:gosec // tmuxPath is set at construction from LookPath
 		if err := cmd.Run(); err != nil {
-			slog.Warn("error killing tmux session", "session", session.Name, "err", err)
+			logger.Warn("error killing tmux session", "session", session.Name, "err", err)
 		}
 	}
 

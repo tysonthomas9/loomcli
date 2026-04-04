@@ -3,7 +3,6 @@ package webui
 import (
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
@@ -47,7 +46,7 @@ func handleAddDependency(svc service.IssueService) http.HandlerFunc {
 				})
 				return
 			}
-			slog.Warn("invalid request body in handleAddDependency", "err", err)
+			logger.Warn("invalid request body in handleAddDependency", "err", err)
 			respondJSON(w, http.StatusBadRequest, DependencyResponse{
 				Success: false,
 				Error:   "invalid request body",

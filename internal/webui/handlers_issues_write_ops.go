@@ -3,7 +3,6 @@ package webui
 import (
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
@@ -21,7 +20,7 @@ func handleCreateIssue(svc service.IssueService) http.HandlerFunc {
 				writeIssuesError(w, http.StatusRequestEntityTooLarge, "request body too large (max 1MB)", "REQUEST_TOO_LARGE")
 				return
 			}
-			slog.Warn("invalid JSON body in handleCreateIssue", "err", err)
+			logger.Warn("invalid JSON body in handleCreateIssue", "err", err)
 			writeIssuesError(w, http.StatusBadRequest, "invalid request body", "INVALID_JSON")
 			return
 		}
@@ -79,7 +78,7 @@ func handleCloseIssue(svc service.IssueService) http.HandlerFunc {
 					respondError(w, http.StatusRequestEntityTooLarge, "request body too large (max 1MB)")
 					return
 				}
-				slog.Warn("invalid request body in handleCloseIssue", "err", err)
+				logger.Warn("invalid request body in handleCloseIssue", "err", err)
 				respondError(w, http.StatusBadRequest, "invalid request body")
 				return
 			}

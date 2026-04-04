@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -239,7 +238,7 @@ func (m *TerminalManager) AttachExistingRaw(tmuxSessionName string, cols, rows u
 	// Mirror Talk-to-Lead behavior so wheel/input interactions are consistent.
 	mouseCmd := exec.Command(m.tmuxPath, "set-option", "-t", tmuxSessionName, "mouse", "on")
 	if err := mouseCmd.Run(); err != nil {
-		slog.Warn("failed to enable mouse mode for session", "session", tmuxSessionName, "err", err)
+		logger.Warn("failed to enable mouse mode for session", "session", tmuxSessionName, "err", err)
 	}
 
 	cmd, ptmx, err := m.tmuxAttach(tmuxSessionName)

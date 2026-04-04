@@ -3,7 +3,6 @@ package webui
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"net/http"
 	"time"
 
@@ -152,11 +151,11 @@ func handleAgentTerminalWS(manager *TerminalManager, auth *realtime.TerminalAuth
 				"success": false,
 				"error":   "terminal authentication failed",
 			})
-			slog.Warn("agent terminal auth failed", "agent", agentName, "err", err)
+			logger.Warn("agent terminal auth failed", "agent", agentName, "err", err)
 			return
 		}
 		if userID != "" {
-			slog.Info("agent terminal authenticated", "agent", agentName, "user_id", userID)
+			logger.Info("agent terminal authenticated", "agent", agentName, "user_id", userID)
 		}
 
 		wsID := middleware.WorkspaceFromContext(r.Context())
@@ -187,14 +186,14 @@ func handleAgentTerminalWS(manager *TerminalManager, auth *realtime.TerminalAuth
 
 		rc := http.NewResponseController(w)
 		if err := rc.SetWriteDeadline(time.Time{}); err != nil {
-			slog.Warn("agent terminal ws: failed to disable write deadline", "err", err)
+			logger.Warn("agent terminal ws: failed to disable write deadline", "err", err)
 		}
 
 		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 			OriginPatterns: patterns,
 		})
 		if err != nil {
-			slog.Error("failed to accept agent terminal websocket", "err", err)
+			logger.Error("failed to accept agent terminal websocket", "err", err)
 			return
 		}
 		conn.SetReadLimit(realtime.WSReadLimit)
@@ -208,9 +207,9 @@ func handleAgentTerminalWS(manager *TerminalManager, auth *realtime.TerminalAuth
 		termSession, err := manager.AttachExistingRaw(sessionName, 80, 24)
 		if err != nil {
 			if errors.Is(err, ErrMaxSessionsReached) {
-				slog.Info("agent terminal session limit reached", "agent", agentName)
+				logger.Info("agent terminal session limit reached", "agent", agentName)
 			} else {
-				slog.Error("failed to attach agent terminal session", "agent", agentName, "session", sessionName, "err", err)
+				logger.Error("failed to attach agent terminal session", "agent", agentName, "session", sessionName, "err", err)
 			}
 			closeReason = err.Error()
 			return
@@ -230,7 +229,7 @@ func handleAgentTerminalWS(manager *TerminalManager, auth *realtime.TerminalAuth
 		realtime.WSToPTY(ctx, conn, termSession.PTY, manager, connID)
 
 		if err := manager.Detach(connID); err != nil {
-			slog.Error("failed to detach agent terminal connection", "conn_id", connID, "err", err)
+			logger.Error("failed to detach agent terminal connection", "conn_id", connID, "err", err)
 		}
 
 		closeStatus, closeReason = (<-crashCh).WSClose()

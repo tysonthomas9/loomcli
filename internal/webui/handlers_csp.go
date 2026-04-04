@@ -3,7 +3,6 @@ package webui
 import (
 	"encoding/json"
 	"io"
-	"log/slog"
 	"math"
 	"net/http"
 	"strconv"
@@ -164,7 +163,7 @@ func handleCSPReport(limiter *cspReportLimiter) http.HandlerFunc {
 			report.SourceFile = report.SourceFile[:cspReportMaxURILen]
 		}
 
-		slog.Warn("csp-violation",
+		logger.Warn("csp-violation",
 			"document_uri", report.DocumentURI,
 			"violated_directive", report.ViolatedDirective,
 			"blocked_uri", report.BlockedURI,

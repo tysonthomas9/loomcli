@@ -1,7 +1,6 @@
 package webui
 
 import (
-	"log/slog"
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -23,7 +22,7 @@ func handleSSEToken(store *realtime.TokenStore) http.HandlerFunc {
 
 		token, err := store.Generate(identity.UserID, workspaceID)
 		if err != nil {
-			slog.Warn("failed to generate SSE token", "err", err)
+			logger.Warn("failed to generate SSE token", "err", err)
 			respondError(w, http.StatusInternalServerError, "failed to generate token")
 			return
 		}

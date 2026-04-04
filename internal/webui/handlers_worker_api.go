@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -136,7 +135,7 @@ func handleWorkerRegister(registry *WorkerRegistry, validateWorkspace func(id st
 		}
 		registry.Register(info)
 
-		slog.Info("worker registered", "worker_id", workerID, "workspace", req.Workspace, "agent", req.Agent)
+		logger.Info("worker registered", "worker_id", workerID, "workspace", req.Workspace, "agent", req.Agent)
 
 		respondJSON(w, http.StatusCreated, workerRegisterResponse{
 			WorkerID: workerID,
@@ -154,7 +153,7 @@ func handleWorkerDeregister(registry *WorkerRegistry) http.HandlerFunc {
 		}
 
 		if registry.Deregister(workerID) {
-			slog.Info("worker deregistered", "worker_id", workerID)
+			logger.Info("worker deregistered", "worker_id", workerID)
 			w.WriteHeader(http.StatusNoContent)
 		} else {
 			respondError(w, http.StatusNotFound, "worker not found")
@@ -198,7 +197,7 @@ func handleWorkerState(registry *WorkerRegistry, resolveWorktreePath func(worksp
 		switch req.Action {
 		case "update_state":
 			if err := updateWorkerLockState(worktreePath, req.State); err != nil {
-				slog.Warn("worker state update failed", "worker_id", workerID, "err", err)
+				logger.Warn("worker state update failed", "worker_id", workerID, "err", err)
 				respondError(w, http.StatusInternalServerError, "failed to update state")
 				return
 			}
@@ -206,7 +205,7 @@ func handleWorkerState(registry *WorkerRegistry, resolveWorktreePath func(worksp
 
 		case "update_task":
 			if err := updateWorkerLockTask(worktreePath, req.TaskID, req.TaskTitle); err != nil {
-				slog.Warn("worker task update failed", "worker_id", workerID, "err", err)
+				logger.Warn("worker task update failed", "worker_id", workerID, "err", err)
 				respondError(w, http.StatusInternalServerError, "failed to update task")
 				return
 			}
@@ -214,7 +213,7 @@ func handleWorkerState(registry *WorkerRegistry, resolveWorktreePath func(worksp
 
 		case "clear_task":
 			if err := clearWorkerLockTask(worktreePath); err != nil {
-				slog.Warn("worker clear task failed", "worker_id", workerID, "err", err)
+				logger.Warn("worker clear task failed", "worker_id", workerID, "err", err)
 				respondError(w, http.StatusInternalServerError, "failed to clear task")
 				return
 			}
@@ -258,7 +257,7 @@ func handleWorkerEvents(registry *WorkerRegistry, resolveEventsDir func(workspac
 
 		// Append the event to the JSONL file
 		if err := appendToEventsFile(eventsDir, body); err != nil {
-			slog.Warn("failed to write worker event", "worker_id", workerID, "err", err)
+			logger.Warn("failed to write worker event", "worker_id", workerID, "err", err)
 			respondError(w, http.StatusInternalServerError, "failed to write event")
 			return
 		}
@@ -291,7 +290,7 @@ func handleWorkerLogs(registry *WorkerRegistry, resolveLogPath func(workspace, a
 
 		// Append to the agent's log file so existing log tailing works
 		if err := appendToLogFile(logPath, body); err != nil {
-			slog.Warn("failed to write worker log", "worker_id", workerID, "err", err)
+			logger.Warn("failed to write worker log", "worker_id", workerID, "err", err)
 			respondError(w, http.StatusInternalServerError, "failed to write log")
 			return
 		}

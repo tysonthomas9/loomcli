@@ -2,7 +2,6 @@ package webui
 
 import (
 	"context"
-	"log/slog"
 	"net/http"
 	"strings"
 )
@@ -17,7 +16,7 @@ type workerClaimsContextKey struct{}
 // If signingKey is nil or empty, all requests are rejected with 401.
 func NewFleetAuthMiddleware(signingKey []byte) func(http.Handler) http.Handler {
 	if len(signingKey) == 0 {
-		slog.Warn("fleet JWT signing key is empty, all fleet auth requests will be rejected")
+		logger.Warn("fleet JWT signing key is empty, all fleet auth requests will be rejected")
 	}
 
 	return func(next http.Handler) http.Handler {

@@ -2,7 +2,6 @@ package webui
 
 import (
 	"encoding/json"
-	"log/slog"
 	"math"
 	"net/http"
 	"strconv"
@@ -162,7 +161,7 @@ func handleClientErrors(limiter *clientErrorLimiter) http.HandlerFunc {
 			payload.UserAgent = payload.UserAgent[:clientErrorMaxUserAgentLen]
 		}
 
-		slog.Warn("client-error",
+		logger.Warn("client-error",
 			"type", payload.Type,
 			"message", payload.Message,
 			"stack", payload.Stack,

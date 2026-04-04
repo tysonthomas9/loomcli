@@ -2,7 +2,6 @@ package webui
 
 import (
 	"fmt"
-	"log/slog"
 	"os"
 	"os/exec"
 	"sync"
@@ -73,7 +72,7 @@ func (m *TerminalManager) tmuxNewSession(name, command string, cols, rows uint16
 	} {
 		c := exec.Command(m.tmuxPath, "set-option", "-t", name, opt[0], opt[1]) //nolint:gosec // tmuxPath from LookPath, opt values are string literals
 		if err := c.Run(); err != nil {
-			slog.Warn("failed to set tmux option", "option", opt[0], "session", name, "err", err)
+			logger.Warn("failed to set tmux option", "option", opt[0], "session", name, "err", err)
 		}
 	}
 	return nil

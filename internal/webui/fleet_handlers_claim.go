@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -95,7 +94,7 @@ func handleFleetClaimWithPool(pool fleetClaimPoolGetter, claimMetrics *fleet.Cla
 					})
 					return
 				}
-				slog.Warn("invalid request body", "handler", "handleFleetClaim", "err", err)
+				logger.Warn("invalid request body", "handler", "handleFleetClaim", "err", err)
 				respondJSON(w, http.StatusBadRequest, FleetClaimResponse{
 					Success: false,
 					Error:   "invalid request body",
@@ -142,7 +141,7 @@ func handleFleetClaimWithPool(pool fleetClaimPoolGetter, claimMetrics *fleet.Cla
 
 		resp, err := client.Ready(readyArgs)
 		if err != nil {
-			slog.Error("fleet RPC error", "handler", "handleFleetClaim", "op", "ready", "err", err)
+			logger.Error("fleet RPC error", "handler", "handleFleetClaim", "op", "ready", "err", err)
 			respondJSON(w, http.StatusInternalServerError, FleetClaimResponse{
 				Success: false,
 				Error:   "internal server error",
@@ -202,7 +201,7 @@ func claimSpecificIssue(w http.ResponseWriter, client fleetClaimClient, issueID 
 		if strings.Contains(err.Error(), "not found") {
 			status = http.StatusNotFound
 		}
-		slog.Error("fleet RPC error", "handler", "claimSpecificIssue", "issue_id", issueID, "err", err)
+		logger.Error("fleet RPC error", "handler", "claimSpecificIssue", "issue_id", issueID, "err", err)
 		respondJSON(w, status, FleetClaimResponse{
 			Success: false,
 			Error:   "internal server error",
@@ -258,13 +257,13 @@ func tryClaimIssue(w http.ResponseWriter, client fleetClaimClient, issueID strin
 
 	resp, err := client.Update(updateArgs)
 	if err != nil {
-		slog.Warn("fleet claim attempt failed", "issue_id", issueID, "err", err)
+		logger.Warn("fleet claim attempt failed", "issue_id", issueID, "err", err)
 		return false
 	}
 
 	if !resp.Success {
 		// "already claimed" is expected during contention - log at debug level
-		slog.Warn("fleet claim attempt failed", "issue_id", issueID, "err", resp.Error)
+		logger.Warn("fleet claim attempt failed", "issue_id", issueID, "err", resp.Error)
 		recordClaim(claimMetrics, fleet.ClaimResultCollision)
 		return false
 	}
@@ -272,7 +271,7 @@ func tryClaimIssue(w http.ResponseWriter, client fleetClaimClient, issueID strin
 	// Parse the updated issue from response
 	var issue types.Issue
 	if err := json.Unmarshal(resp.Data, &issue); err != nil {
-		slog.Error("failed to parse claim response", "issue_id", issueID, "err", err)
+		logger.Error("failed to parse claim response", "issue_id", issueID, "err", err)
 		return false
 	}
 

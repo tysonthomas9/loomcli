@@ -204,11 +204,11 @@ func TestHandleCSPReport_OversizedFieldsTruncated(t *testing.T) {
 	limiter := newCSPReportLimiter(rate.Limit(10), 20, time.Hour, time.Hour)
 	defer limiter.stop()
 
-	// Capture slog output
+	// Capture logger output via the package-level logger variable.
 	var buf bytes.Buffer
-	oldLogger := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
-	defer slog.SetDefault(oldLogger)
+	oldLogger := logger
+	logger = slog.New(slog.NewJSONHandler(&buf, nil))
+	defer func() { logger = oldLogger }()
 
 	handler := handleCSPReport(limiter)
 

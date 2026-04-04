@@ -3,7 +3,6 @@ package webui
 import (
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
@@ -75,7 +74,7 @@ func validatePatchRequest(w http.ResponseWriter, r *http.Request) (string, *Patc
 			})
 			return "", nil, false
 		}
-		slog.Warn("invalid request body in handlePatchIssue", "err", err)
+		logger.Warn("invalid request body in handlePatchIssue", "err", err)
 		respondJSON(w, http.StatusBadRequest, PatchIssueResponse{
 			Success: false,
 			Error:   "invalid request body",

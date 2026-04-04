@@ -2,7 +2,6 @@ package webui
 
 import (
 	"encoding/json"
-	"log/slog"
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/types"
@@ -35,7 +34,7 @@ func handleAddComment(svc service.IssueService) http.HandlerFunc {
 
 		var req CommentRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			slog.Warn("invalid request body in handleAddComment", "err", err)
+			logger.Warn("invalid request body in handleAddComment", "err", err)
 			respondJSON(w, http.StatusBadRequest, CommentResponse{
 				Success: false,
 				Error:   "invalid request body",

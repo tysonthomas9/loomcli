@@ -2,7 +2,6 @@ package webui
 
 import (
 	"context"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -20,7 +19,7 @@ func (s *terminalServiceImpl) ListTabs(ctx context.Context, wsID string) ([]tabm
 	if s.termMgr != nil {
 		sessions, err := s.termMgr.ListActiveSessionsForWorkspace(wsID)
 		if err != nil {
-			slog.Error("failed to list active sessions for tab metadata", "err", err)
+			logger.Error("failed to list active sessions for tab metadata", "err", err)
 		} else {
 			for _, sess := range sessions {
 				activeNames = append(activeNames, sess.Name)
@@ -149,7 +148,7 @@ func (s *terminalServiceImpl) GetTerminalState(ctx context.Context, _ string) (s
 	}
 	vals, err := s.redisClient.HGetAll(ctx, terminalUIStateKeyImpl).Result()
 	if err != nil {
-		slog.Warn("failed to get terminal state", "err", err)
+		logger.Warn("failed to get terminal state", "err", err)
 		return "", nil // graceful degradation
 	}
 	return vals["active_tab"], nil

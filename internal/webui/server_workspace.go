@@ -3,7 +3,6 @@ package webui
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,7 +25,7 @@ func reconcileConfigWorkspaces(
 	}
 	workspaces, err := listFn()
 	if err != nil {
-		slog.Warn("failed to load workspace list for startup reconciliation", "err", err)
+		logger.Warn("failed to load workspace list for startup reconciliation", "err", err)
 		return
 	}
 	for wsID, wsPath := range workspaces {
@@ -35,7 +34,7 @@ func reconcileConfigWorkspaces(
 		}
 		_ = registry.Register(wsID, wsPath)
 	}
-	slog.Info("startup reconciliation complete",
+	logger.Info("startup reconciliation complete",
 		"total_workspaces", len(workspaces),
 		"registered", len(registry.WorkspaceIDs()))
 }
@@ -57,7 +56,7 @@ func wrapWorkspaceCreateFn(
 		// eliminating the need for a post-creation config re-read.
 		wsID := result.WorkspaceID
 		if wsID == "" {
-			slog.Error("workspace creation returned empty WorkspaceID — skipping runtime registration",
+			logger.Error("workspace creation returned empty WorkspaceID — skipping runtime registration",
 				"workspace", req.Name)
 			service.AddCreateWarning(ctx, "Could not register workspace with daemon — workspace may not auto-connect until restart")
 			return result, nil
@@ -65,7 +64,7 @@ func wrapWorkspaceCreateFn(
 
 		wsDir := result.WorkspacePath
 		if wsDir == "" {
-			slog.Warn("workspace creation returned empty WorkspacePath — skipping runtime registration",
+			logger.Warn("workspace creation returned empty WorkspacePath — skipping runtime registration",
 				"workspace", req.Name)
 			service.AddCreateWarning(ctx, "Could not determine workspace directory for daemon registration")
 			return result, nil
@@ -95,17 +94,17 @@ func wrapWorkspaceDeleteFn(
 		var resolved bool
 		if resolveID != nil {
 			if id, err := resolveID(name); err != nil {
-				slog.Error("failed to resolve workspace UUID for deletion cleanup — pool and fleet store will leak until restart",
+				logger.Error("failed to resolve workspace UUID for deletion cleanup — pool and fleet store will leak until restart",
 					"workspace", name, "err", err)
 			} else if id == "" {
-				slog.Error("workspace ID resolver returned empty UUID for deletion cleanup — pool and fleet store will leak until restart",
+				logger.Error("workspace ID resolver returned empty UUID for deletion cleanup — pool and fleet store will leak until restart",
 					"workspace", name)
 			} else {
 				wsID = id
 				resolved = true
 			}
 		} else {
-			slog.Error("no workspace ID resolver available — pool and fleet store will leak until restart",
+			logger.Error("no workspace ID resolver available — pool and fleet store will leak until restart",
 				"workspace", name)
 		}
 
@@ -117,7 +116,7 @@ func wrapWorkspaceDeleteFn(
 		// 3. Clean up pool, subscriber, and fleet state atomically (only if UUID was resolved).
 		if resolved && registry != nil {
 			registry.Deregister(wsID)
-			slog.Info("workspace cleaned up after deletion",
+			logger.Info("workspace cleaned up after deletion",
 				"workspace", name, "id", wsID)
 		}
 
@@ -157,7 +156,7 @@ func (app *Server) registerWorkerAPIRoutes() {
 		}
 		wsData, err := workspaceConfigFn()
 		if err != nil {
-			slog.Warn("workspace validation failed due to config error", "workspace_id", id, "err", err)
+			logger.Warn("workspace validation failed due to config error", "workspace_id", id, "err", err)
 			return false
 		}
 		if wsData == nil {
@@ -205,5 +204,5 @@ func (app *Server) registerWorkerAPIRoutes() {
 		},
 		validateWorkspace,
 	)
-	slog.Info("worker API routes registered", "component", "worker")
+	logger.Info("worker API routes registered", "component", "worker")
 }

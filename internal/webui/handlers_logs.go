@@ -1,7 +1,6 @@
 package webui
 
 import (
-	"log/slog"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -95,7 +94,7 @@ func handleListTaskPhases() http.HandlerFunc {
 		// List available phases (workspace-scoped)
 		phases, err := listTaskPhases(wsID, taskID)
 		if err != nil {
-			slog.Error("failed to list task phases", "task_id", taskID, "err", err)
+			logger.Error("failed to list task phases", "task_id", taskID, "err", err)
 			respondJSON(w, http.StatusInternalServerError, TaskPhasesResponse{
 				Success: false,
 				Error:   "failed to list task phases",
@@ -173,7 +172,7 @@ func handleGetTaskLog() http.HandlerFunc {
 		// Get log file path (workspace-scoped)
 		logPath, err := getTaskLogPath(wsID, taskID, phase)
 		if err != nil {
-			slog.Error("task log path error", "task_id", taskID, "phase", phase, "err", err)
+			logger.Error("task log path error", "task_id", taskID, "phase", phase, "err", err)
 			respondJSON(w, http.StatusInternalServerError, LogContentResponse{
 				Success: false,
 				Error:   "failed to resolve log path",
@@ -196,7 +195,7 @@ func handleGetTaskLog() http.HandlerFunc {
 		// Read log content
 		content, startLine, err := readFileLastLines(logPath, lines, beforeLine)
 		if err != nil {
-			slog.Error("failed to read task log", "task_id", taskID, "phase", phase, "err", err)
+			logger.Error("failed to read task log", "task_id", taskID, "phase", phase, "err", err)
 			respondJSON(w, http.StatusInternalServerError, LogContentResponse{
 				Success: false,
 				Error:   "failed to read log file",

@@ -402,12 +402,12 @@ func TestSafeDialContext_BlocksPrivateIPs(t *testing.T) {
 
 func TestNewLoomProxy_DebugLogDoesNotLeakToken(t *testing.T) {
 	// Capture slog output for the duration of this test.
-	// Do NOT run sub-tests in parallel — slog.SetDefault is global.
+	// Do NOT run sub-tests in parallel — logger is a package-level variable.
 	var buf bytes.Buffer
-	origLogger := slog.Default()
-	handler := slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})
-	slog.SetDefault(slog.New(handler))
-	defer slog.SetDefault(origLogger)
+	origLogger := logger
+	testLogger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	logger = testLogger
+	defer func() { logger = origLogger }()
 
 	const secretToken = "supersecretvalue42"
 

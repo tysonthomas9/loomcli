@@ -2,7 +2,6 @@ package webui
 
 import (
 	"encoding/json"
-	"log/slog"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
@@ -21,7 +20,7 @@ func (s *DaemonSubscriber) emitPerRepoRefreshes(client *rpc.Client, now time.Tim
 	activeRepos := s.hub.GetActiveSourceRepos()
 	if len(activeRepos) == 0 {
 		s.hub.Broadcast(globalRefresh)
-		slog.Info("external DB change detected, broadcast global refresh", "clients", s.hub.ClientCount())
+		logger.Info("external DB change detected, broadcast global refresh", "clients", s.hub.ClientCount())
 		return
 	}
 
@@ -30,12 +29,12 @@ func (s *DaemonSubscriber) emitPerRepoRefreshes(client *rpc.Client, now time.Tim
 	for _, repo := range activeRepos {
 		resp, err := client.Count(&rpc.CountArgs{UpdatedAfter: updatedAfter, SourceRepos: []string{repo}})
 		if err != nil {
-			slog.Error("external poll: per-repo count error, falling back to global refresh", "repo", repo, "err", err)
+			logger.Error("external poll: per-repo count error, falling back to global refresh", "repo", repo, "err", err)
 			s.hub.Broadcast(globalRefresh)
 			return
 		}
 		if !resp.Success {
-			slog.Warn("external poll: per-repo count not success, falling back to global refresh", "repo", repo)
+			logger.Warn("external poll: per-repo count not success, falling back to global refresh", "repo", repo)
 			s.hub.Broadcast(globalRefresh)
 			return
 		}
@@ -43,7 +42,7 @@ func (s *DaemonSubscriber) emitPerRepoRefreshes(client *rpc.Client, now time.Tim
 			Count int64 `json:"count"`
 		}
 		if err := json.Unmarshal(resp.Data, &countResult); err != nil {
-			slog.Error("external poll: per-repo count parse error, falling back to global refresh", "repo", repo, "err", err)
+			logger.Error("external poll: per-repo count parse error, falling back to global refresh", "repo", repo, "err", err)
 			s.hub.Broadcast(globalRefresh)
 			return
 		}
@@ -52,7 +51,7 @@ func (s *DaemonSubscriber) emitPerRepoRefreshes(client *rpc.Client, now time.Tim
 				Type: rpc.MutationRefresh, SourceRepo: repo, Timestamp: ts, WorkspaceID: s.workspaceID,
 			})
 			anyPerRepo = true
-			slog.Info("external DB change detected, broadcast per-repo refresh", "repo", repo)
+			logger.Info("external DB change detected, broadcast per-repo refresh", "repo", repo)
 		}
 	}
 
@@ -62,6 +61,6 @@ func (s *DaemonSubscriber) emitPerRepoRefreshes(client *rpc.Client, now time.Tim
 	s.mu.RUnlock()
 	if !anyPerRepo && totalCount != lastKnown {
 		s.hub.Broadcast(globalRefresh)
-		slog.Info("external DB change in unwatched repo, broadcast global refresh", "clients", s.hub.ClientCount())
+		logger.Info("external DB change in unwatched repo, broadcast global refresh", "clients", s.hub.ClientCount())
 	}
 }

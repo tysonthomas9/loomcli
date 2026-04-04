@@ -3,7 +3,6 @@ package webui
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"log/slog"
 	"os"
 	"path/filepath"
 )
@@ -14,7 +13,7 @@ import (
 func generateNotifyToken(dir string) (token, filePath string) {
 	tokenBytes := make([]byte, 32)
 	if _, err := rand.Read(tokenBytes); err != nil {
-		slog.Warn("failed to generate notify token, session notifications will be rejected", "err", err)
+		logger.Warn("failed to generate notify token, session notifications will be rejected", "err", err)
 		return "", ""
 	}
 	token = hex.EncodeToString(tokenBytes)
@@ -24,9 +23,9 @@ func generateNotifyToken(dir string) (token, filePath string) {
 	}
 	filePath = filepath.Join(dir, "notify.token")
 	if err := os.WriteFile(filePath, []byte(token), 0600); err != nil {
-		slog.Warn("failed to write notify token file", "path", filePath, "err", err)
+		logger.Warn("failed to write notify token file", "path", filePath, "err", err)
 		return token, ""
 	}
-	slog.Info("notify token written", "path", filePath)
+	logger.Info("notify token written", "path", filePath)
 	return token, filePath
 }

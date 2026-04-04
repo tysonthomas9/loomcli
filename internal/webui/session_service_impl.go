@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,7 +34,7 @@ func (s *sessionServiceImpl) ListTaskSessions(_ context.Context, taskID string) 
 
 	records, err := s.sessStore.SessionsByTask(taskID)
 	if err != nil {
-		slog.Error("failed to list sessions", "task_id", taskID, "err", err)
+		logger.Error("failed to list sessions", "task_id", taskID, "err", err)
 		return nil, service.ErrInternal("failed to list sessions", err)
 	}
 
@@ -72,7 +71,7 @@ func (s *sessionServiceImpl) GetSession(_ context.Context, taskID, sessionID str
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, service.ErrNotFound("session not found")
 		}
-		slog.Error("failed to load session", "session_id", sessionID, "err", err)
+		logger.Error("failed to load session", "session_id", sessionID, "err", err)
 		return nil, service.ErrInternal("failed to load session", err)
 	}
 
@@ -104,7 +103,7 @@ func (s *sessionServiceImpl) GetSessionTranscript(_ context.Context, taskID, ses
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, service.ErrNotFound("session not found")
 		}
-		slog.Error("failed to load session metadata", "session_id", sessionID, "err", err)
+		logger.Error("failed to load session metadata", "session_id", sessionID, "err", err)
 		return nil, service.ErrInternal("failed to load session", err)
 	}
 	if meta.TaskID != taskID {
@@ -113,7 +112,7 @@ func (s *sessionServiceImpl) GetSessionTranscript(_ context.Context, taskID, ses
 
 	entries, loadErr := s.sessStore.LoadTranscript(sessionID)
 	if loadErr != nil {
-		slog.Error("failed to load transcript", "session_id", sessionID, "err", loadErr)
+		logger.Error("failed to load transcript", "session_id", sessionID, "err", loadErr)
 		return nil, service.ErrInternal("failed to load transcript", loadErr)
 	}
 
@@ -141,7 +140,7 @@ func (s *sessionServiceImpl) GetSessionDiff(_ context.Context, taskID, sessionID
 		if errors.Is(err, os.ErrNotExist) {
 			return "", service.ErrNotFound("session not found")
 		}
-		slog.Error("failed to load session metadata", "session_id", sessionID, "err", err)
+		logger.Error("failed to load session metadata", "session_id", sessionID, "err", err)
 		return "", service.ErrInternal("failed to load session", err)
 	}
 	if meta.TaskID != taskID {
@@ -153,7 +152,7 @@ func (s *sessionServiceImpl) GetSessionDiff(_ context.Context, taskID, sessionID
 		if errors.Is(diffErr, os.ErrNotExist) {
 			return "", service.ErrNotFound("diff not found")
 		}
-		slog.Error("failed to read diff", "session_id", sessionID, "err", diffErr)
+		logger.Error("failed to read diff", "session_id", sessionID, "err", diffErr)
 		return "", service.ErrInternal("failed to read diff", diffErr)
 	}
 	return diff, nil
@@ -169,7 +168,7 @@ func (s *sessionServiceImpl) ListSessionHistory(ctx context.Context, wsID, issue
 
 	records, err := s.histStore.List(ctx, wsID, issueID)
 	if err != nil {
-		slog.Error("failed to list session history", "issue_id", issueID, "err", err)
+		logger.Error("failed to list session history", "issue_id", issueID, "err", err)
 		return nil, service.ErrInternal("failed to list session history", err)
 	}
 	return records, nil
@@ -188,7 +187,7 @@ func (s *sessionServiceImpl) GetSessionScrollback(ctx context.Context, wsID, iss
 
 	records, err := s.histStore.List(ctx, wsID, issueID)
 	if err != nil {
-		slog.Error("failed to get session history for scrollback", "issue_id", issueID, "err", err)
+		logger.Error("failed to get session history for scrollback", "issue_id", issueID, "err", err)
 		return nil, service.ErrInternal("failed to get session history", err)
 	}
 
@@ -220,14 +219,14 @@ func (s *sessionServiceImpl) GetSessionScrollback(ctx context.Context, wsID, iss
 		if os.IsNotExist(err) {
 			return nil, service.ErrNotFound("scrollback file not found")
 		}
-		slog.Error("failed to open scrollback file", "path", found.ScrollbackPath, "err", err)
+		logger.Error("failed to open scrollback file", "path", found.ScrollbackPath, "err", err)
 		return nil, service.ErrInternal("failed to read scrollback", err)
 	}
 	defer f.Close()
 
 	content, err := io.ReadAll(f)
 	if err != nil {
-		slog.Error("failed to read scrollback file", "path", found.ScrollbackPath, "err", err)
+		logger.Error("failed to read scrollback file", "path", found.ScrollbackPath, "err", err)
 		return nil, service.ErrInternal("failed to read scrollback", err)
 	}
 

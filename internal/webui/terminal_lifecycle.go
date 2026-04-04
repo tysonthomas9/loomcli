@@ -3,7 +3,6 @@ package webui
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"os/exec"
 	"strings"
 	"time"
@@ -29,7 +28,7 @@ func (m *TerminalManager) Shutdown() error {
 	// Close all PTYs first.
 	for connID, session := range sessions {
 		if err := session.Close(); err != nil {
-			slog.Warn("error closing connection", "conn_id", connID, "err", err)
+			logger.Warn("error closing connection", "conn_id", connID, "err", err)
 		}
 	}
 
@@ -42,7 +41,7 @@ func (m *TerminalManager) Shutdown() error {
 		killed[session.Name] = true
 		cmd := exec.Command(m.tmuxPath, "kill-session", "-t", session.Name) //nolint:gosec // tmuxPath validated at init; session.Name is internal
 		if err := cmd.Run(); err != nil {
-			slog.Warn("error killing tmux session", "session", session.Name, "err", err)
+			logger.Warn("error killing tmux session", "session", session.Name, "err", err)
 		}
 	}
 
@@ -82,7 +81,7 @@ func (m *TerminalManager) KillSessionByName(name string) error {
 	// Close collected sessions outside the lock.
 	for _, session := range toClose {
 		if err := session.Close(); err != nil {
-			slog.Warn("error closing connection for session", "session", internalName, "err", err)
+			logger.Warn("error closing connection for session", "session", internalName, "err", err)
 		}
 	}
 
