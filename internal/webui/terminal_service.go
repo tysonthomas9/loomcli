@@ -15,7 +15,7 @@ type TerminalService interface {
 	RestartSession(ctx context.Context, wsID, session string) (*TerminalRestartResult, error)
 	KillSession(ctx context.Context, session string) error
 	GetSessionStatus(ctx context.Context, session string) (*TerminalStatusResult, error)
-	ListSessions(ctx context.Context, wsID string) ([]terminalSessionInfo, error)
+	ListSessions(ctx context.Context, wsID string) ([]TerminalSessionInfo, error)
 	SpawnSession(ctx context.Context, wsID string, params *SpawnParams) (*SpawnResult, error)
 	SeedSession(ctx context.Context, session string, params *SeedParams) error
 	ScheduleKill(ctx context.Context, session string) error

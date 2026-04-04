@@ -122,7 +122,7 @@ func (m *TerminalManager) SessionOwner(name string) (string, bool) {
 // Sessions owned by the specified workspace are included.
 // Sessions with no recorded owner are also included (backward compatibility).
 // Sessions owned by a different workspace are excluded.
-func (m *TerminalManager) ListActiveSessionsForWorkspace(workspaceID string) ([]terminalSessionInfo, error) {
+func (m *TerminalManager) ListActiveSessionsForWorkspace(workspaceID string) ([]TerminalSessionInfo, error) {
 	all, err := m.ListActiveSessions()
 	if err != nil {
 		return nil, err
@@ -131,7 +131,7 @@ func (m *TerminalManager) ListActiveSessionsForWorkspace(workspaceID string) ([]
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	var result []terminalSessionInfo
+	var result []TerminalSessionInfo
 	for _, s := range all {
 		owner, hasOwner := m.sessionOwners[s.Name]
 		if !hasOwner || owner == workspaceID {

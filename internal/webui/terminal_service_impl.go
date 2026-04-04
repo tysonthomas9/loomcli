@@ -130,7 +130,7 @@ func (s *terminalServiceImpl) GetSessionStatus(_ context.Context, session string
 	return result, nil
 }
 
-func (s *terminalServiceImpl) ListSessions(_ context.Context, wsID string) ([]terminalSessionInfo, error) {
+func (s *terminalServiceImpl) ListSessions(_ context.Context, wsID string) ([]TerminalSessionInfo, error) {
 	if s.termMgr == nil {
 		return nil, service.ErrUnavailable("terminal manager not initialized")
 	}

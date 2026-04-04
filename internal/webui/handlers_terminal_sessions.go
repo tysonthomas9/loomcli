@@ -10,8 +10,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
-// terminalSessionInfo describes a terminal session visible to the frontend.
-type terminalSessionInfo struct {
+// TerminalSessionInfo describes a terminal session visible to the frontend.
+type TerminalSessionInfo struct {
 	Name    string `json:"name"`               // user-facing name, e.g. "talk-to-lead"
 	Label   string `json:"label"`              // display label (same as name for now)
 	Created int64  `json:"created"`            // Unix timestamp, 0 if session not yet created
@@ -25,11 +25,11 @@ type terminalSessionsResponse struct {
 }
 
 type terminalSessionsData struct {
-	Sessions []terminalSessionInfo `json:"sessions"`
+	Sessions []TerminalSessionInfo `json:"sessions"`
 }
 
 // ListActiveSessions returns sessions owned by this server instance.
-func (m *TerminalManager) ListActiveSessions() ([]terminalSessionInfo, error) {
+func (m *TerminalManager) ListActiveSessions() ([]TerminalSessionInfo, error) {
 	m.mu.RLock()
 	sessionPrefix := m.sessionPrefix
 	m.mu.RUnlock()
@@ -41,7 +41,7 @@ func (m *TerminalManager) ListActiveSessions() ([]terminalSessionInfo, error) {
 
 	prefix := sessionPrefix + "-"
 	hasTalkToLead := false
-	var result []terminalSessionInfo
+	var result []TerminalSessionInfo
 
 	for _, s := range allSessions {
 		var name string
@@ -53,7 +53,7 @@ func (m *TerminalManager) ListActiveSessions() ([]terminalSessionInfo, error) {
 			continue
 		}
 
-		result = append(result, terminalSessionInfo{
+		result = append(result, TerminalSessionInfo{
 			Name:    name,
 			Label:   name,
 			Created: s.created,
@@ -64,7 +64,7 @@ func (m *TerminalManager) ListActiveSessions() ([]terminalSessionInfo, error) {
 	}
 
 	if !hasTalkToLead {
-		result = append([]terminalSessionInfo{{
+		result = append([]TerminalSessionInfo{{
 			Name:    "talk-to-lead",
 			Label:   "talk-to-lead",
 			Created: 0,

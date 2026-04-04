@@ -2213,7 +2213,7 @@ List all active terminal sessions in a workspace.
 - `"talk-to-lead"` is always included (`created` = 0 if not yet spawned)
 - Sessions are filtered by server's `sessionPrefix` (workspace-scoped isolation)
 - `created`: Unix timestamp, 0 if session not yet created in tmux
-- **Note:** The `terminalSessionInfo` struct declares `issue_id` with `json:"issue_id,omitempty"` but the handler never populates it — it is always omitted from the JSON response. Issue-to-session mapping is served by `GET /api/workspaces/{ws}/terminal/sessions/by-issue` (documented in the tab metadata spec, loomcli-wit5o).
+- **Note:** The `TerminalSessionInfo` struct declares `issue_id` with `json:"issue_id,omitempty"` but the handler never populates it — it is always omitted from the JSON response. Issue-to-session mapping is served by `GET /api/workspaces/{ws}/terminal/sessions/by-issue` (documented in the tab metadata spec, loomcli-wit5o).
 
 - **Errors:**
   - `404` — workspace not found

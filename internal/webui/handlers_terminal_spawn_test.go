@@ -39,7 +39,7 @@ func (m *mockSpawnService) KillSession(_ context.Context, _ string) error {
 func (m *mockSpawnService) GetSessionStatus(_ context.Context, _ string) (*TerminalStatusResult, error) {
 	panic("not implemented")
 }
-func (m *mockSpawnService) ListSessions(_ context.Context, _ string) ([]terminalSessionInfo, error) {
+func (m *mockSpawnService) ListSessions(_ context.Context, _ string) ([]TerminalSessionInfo, error) {
 	panic("not implemented")
 }
 func (m *mockSpawnService) SeedSession(_ context.Context, _ string, _ *SeedParams) error {
