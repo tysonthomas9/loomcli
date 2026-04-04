@@ -104,16 +104,19 @@ type EventData struct {
 }
 
 // StatsData contains aggregate issue statistics.
+// Fields mirror types.Statistics so no data is dropped during mapping.
 type StatsData struct {
-	TotalIssues      int `json:"total_issues"`
-	OpenIssues       int `json:"open_issues"`
-	InProgressIssues int `json:"in_progress_issues"`
-	ClosedIssues     int `json:"closed_issues"`
-	BlockedIssues    int `json:"blocked_issues"`
-	DeferredIssues   int `json:"deferred_issues"`
-	ReadyIssues      int `json:"ready_issues"`
-	TombstoneIssues  int `json:"tombstone_issues"`
-	PinnedIssues     int `json:"pinned_issues"`
+	TotalIssues             int     `json:"total_issues"`
+	OpenIssues              int     `json:"open_issues"`
+	InProgressIssues        int     `json:"in_progress_issues"`
+	ClosedIssues            int     `json:"closed_issues"`
+	BlockedIssues           int     `json:"blocked_issues"`
+	DeferredIssues          int     `json:"deferred_issues"`
+	ReadyIssues             int     `json:"ready_issues"`
+	TombstoneIssues         int     `json:"tombstone_issues"`
+	PinnedIssues            int     `json:"pinned_issues"`
+	EpicsEligibleForClosure int     `json:"epics_eligible_for_closure"`
+	AverageLeadTime         float64 `json:"average_lead_time_hours"`
 }
 
 // CloseResult is returned by Close. It contains the closed issue
@@ -125,6 +128,10 @@ type CloseResult struct {
 
 // MutationData represents a mutation event for real-time subscriptions.
 // Used by GetMutations and WaitForMutations.
+//
+// MutationData mirrors rpc.MutationEvent but is backend-agnostic. The
+// BeadsBackend subscription layer (task .11) maps rpc.MutationEvent to
+// MutationData. Other backends produce MutationData directly.
 type MutationData struct {
 	Type       string    `json:"type"`
 	IssueID    string    `json:"issue_id"`
@@ -136,6 +143,7 @@ type MutationData struct {
 	NewStatus  string    `json:"new_status,omitempty"`
 	ParentID   string    `json:"parent_id,omitempty"`
 	SourceRepo string    `json:"source_repo,omitempty"`
+	StepCount  int       `json:"step_count,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -388,6 +396,9 @@ const (
 	MutationUpdate        = "update"
 	MutationDelete        = "delete"
 	MutationComment       = "comment"
+	MutationBonded        = "bonded"
+	MutationSquashed      = "squashed"
+	MutationBurned        = "burned"
 	MutationStatus        = "status"
 	MutationRefresh       = "refresh"
 	MutationSessionChange = "session_change"
