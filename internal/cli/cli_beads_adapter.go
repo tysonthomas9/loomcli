@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 )
@@ -145,6 +146,18 @@ func (a *cliBeadsAdapter) Update(_ context.Context, id string, params backend.Up
 		args = append(args, "--external-ref", *params.ExternalRef)
 	}
 	return a.runMutation("Update", args...)
+}
+
+// ClaimIssue atomically claims an issue by shelling out to bd update --claim.
+// The lockTTL parameter is accepted but ignored (beads SQLite claims don't support TTL).
+func (a *cliBeadsAdapter) ClaimIssue(_ context.Context, id string, lockTTL time.Duration) error {
+	if id == "" {
+		return backend.ErrValidation("ClaimIssue", "id must not be empty")
+	}
+	if lockTTL < 0 {
+		return backend.ErrValidation("ClaimIssue", "lockTTL must not be negative")
+	}
+	return a.runMutation("ClaimIssue", "update", id, "--claim")
 }
 
 func (a *cliBeadsAdapter) Close(_ context.Context, id string, params backend.CloseParams) (*backend.CloseResult, error) {

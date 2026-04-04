@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -569,6 +570,126 @@ func TestUpdate_HappyPath(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("Update() error = %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ClaimIssue
+// ---------------------------------------------------------------------------
+
+func TestClaimIssue_HappyPath(t *testing.T) {
+	called := false
+	mc := &mockClient{
+		UpdateFn: func(args *rpc.UpdateArgs) (*rpc.Response, error) {
+			called = true
+			if args.ID != "T-10" {
+				t.Errorf("UpdateArgs.ID = %q, want %q", args.ID, "T-10")
+			}
+			if !args.Claim {
+				t.Error("UpdateArgs.Claim should be true")
+			}
+			return &rpc.Response{Success: true, Data: []byte(`{}`)}, nil
+		},
+	}
+	b := New(mc)
+	err := b.ClaimIssue(context.Background(), "T-10", 0)
+	if err != nil {
+		t.Fatalf("ClaimIssue() error = %v", err)
+	}
+	if !called {
+		t.Error("expected Update to be called")
+	}
+}
+
+func TestClaimIssue_EmptyID(t *testing.T) {
+	called := false
+	mc := &mockClient{
+		UpdateFn: func(_ *rpc.UpdateArgs) (*rpc.Response, error) {
+			called = true
+			return nil, nil
+		},
+	}
+	b := New(mc)
+	err := b.ClaimIssue(context.Background(), "", 0)
+	if err == nil {
+		t.Fatal("expected error for empty ID")
+	}
+	if called {
+		t.Error("UpdateFn should not have been called")
+	}
+	var be *backend.BackendError
+	if !errors.As(err, &be) {
+		t.Fatalf("expected *backend.BackendError, got %T", err)
+	}
+	if be.Kind != backend.KindValidation {
+		t.Errorf("BackendError.Kind = %q, want %q", be.Kind, backend.KindValidation)
+	}
+	if msg := err.Error(); !strings.Contains(msg, "id must not be empty") {
+		t.Errorf("error message = %q, want it to contain %q", msg, "id must not be empty")
+	}
+}
+
+func TestClaimIssue_NegativeTTL(t *testing.T) {
+	called := false
+	mc := &mockClient{
+		UpdateFn: func(_ *rpc.UpdateArgs) (*rpc.Response, error) {
+			called = true
+			return nil, nil
+		},
+	}
+	b := New(mc)
+	err := b.ClaimIssue(context.Background(), "T-10", -1*time.Second)
+	if err == nil {
+		t.Fatal("expected error for negative lockTTL")
+	}
+	if called {
+		t.Error("UpdateFn should not have been called")
+	}
+	var be *backend.BackendError
+	if !errors.As(err, &be) {
+		t.Fatalf("expected *backend.BackendError, got %T", err)
+	}
+	if be.Kind != backend.KindValidation {
+		t.Errorf("BackendError.Kind = %q, want %q", be.Kind, backend.KindValidation)
+	}
+	if msg := err.Error(); !strings.Contains(msg, "lockTTL must not be negative") {
+		t.Errorf("error message = %q, want it to contain %q", msg, "lockTTL must not be negative")
+	}
+}
+
+func TestClaimIssue_AlreadyClaimed(t *testing.T) {
+	mc := &mockClient{
+		UpdateFn: func(_ *rpc.UpdateArgs) (*rpc.Response, error) {
+			return &rpc.Response{Success: false, Error: "already claimed by other-agent"}, nil
+		},
+	}
+	b := New(mc)
+	err := b.ClaimIssue(context.Background(), "T-10", 0)
+	if err == nil {
+		t.Fatal("expected error for already claimed")
+	}
+	var be *backend.BackendError
+	if !errors.As(err, &be) {
+		t.Fatalf("expected *backend.BackendError, got %T", err)
+	}
+	if be.Kind != backend.KindConflict {
+		t.Errorf("BackendError.Kind = %q, want %q", be.Kind, backend.KindConflict)
+	}
+}
+
+func TestClaimIssue_TransportError(t *testing.T) {
+	mc := &mockClient{
+		UpdateFn: func(_ *rpc.UpdateArgs) (*rpc.Response, error) {
+			return nil, errors.New("connection refused")
+		},
+	}
+	b := New(mc)
+	err := b.ClaimIssue(context.Background(), "T-10", 0)
+	if err == nil {
+		t.Fatal("expected error for transport failure")
+	}
+	if !backend.IsKind(err, backend.KindUnavailable) {
+		t.Errorf("error kind = %v, want KindUnavailable", err)
 	}
 }
 

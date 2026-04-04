@@ -3,6 +3,7 @@ package beads
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
@@ -275,6 +276,22 @@ func (b *BeadsBackend) Update(_ context.Context, id string, params backend.Updat
 	}
 	_, err := b.execAndCheck("Update", func() (*rpc.Response, error) {
 		return b.client.Update(rpcArgs)
+	})
+	return err
+}
+
+// ClaimIssue atomically claims an issue for the current agent by delegating to
+// Update with Claim=true. The lockTTL parameter is accepted but ignored because
+// beads SQLite claims don't support TTL-based expiry.
+func (b *BeadsBackend) ClaimIssue(_ context.Context, id string, lockTTL time.Duration) error {
+	if id == "" {
+		return backend.ErrValidation("ClaimIssue", "id must not be empty")
+	}
+	if lockTTL < 0 {
+		return backend.ErrValidation("ClaimIssue", "lockTTL must not be negative")
+	}
+	_, err := b.execAndCheck("ClaimIssue", func() (*rpc.Response, error) {
+		return b.client.Update(&rpc.UpdateArgs{ID: id, Claim: true})
 	})
 	return err
 }

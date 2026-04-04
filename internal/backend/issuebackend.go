@@ -1,6 +1,9 @@
 package backend
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // IssueBackend is the pluggable data access interface for issue tracking.
 // It abstracts the underlying storage (beads CLI, fleet-db, Redis, etc.) behind
@@ -50,6 +53,15 @@ type IssueBackend interface {
 	// the issue does not exist, KindConflict if Claim is true and the issue
 	// is already claimed.
 	Update(ctx context.Context, id string, params UpdateParams) error
+
+	// ClaimIssue atomically claims an issue for the current agent. The
+	// assignee identity comes from the environment (BD_ACTOR) at the backend
+	// level, not from the caller. lockTTL configures TTL-based lock expiry
+	// for backends that support it (e.g., fleet-db Redis); backends without
+	// TTL support (beads SQLite) accept but ignore the parameter. Pass 0 to
+	// use the backend's default TTL. Returns KindConflict if the issue is
+	// already claimed by another agent.
+	ClaimIssue(ctx context.Context, id string, lockTTL time.Duration) error
 
 	// Close marks an issue as closed and returns the closed issue along with
 	// any issues that became unblocked as a result. Returns KindNotFound if

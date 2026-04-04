@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 )
@@ -62,6 +63,10 @@ type MockIssueBackend struct {
 	// Update
 	UpdateErr error
 	UpdateFn  func(ctx context.Context, id string, params backend.UpdateParams) error
+
+	// ClaimIssue
+	ClaimIssueErr error
+	ClaimIssueFn  func(ctx context.Context, id string, lockTTL time.Duration) error
 
 	// Close
 	CloseResult *backend.CloseResult
@@ -237,6 +242,19 @@ func (m *MockIssueBackend) Update(ctx context.Context, id string, params backend
 	m.mu.Unlock()
 	if fn != nil {
 		return fn(ctx, id, params)
+	}
+	return resultErr
+}
+
+// ClaimIssue implements backend.IssueBackend.
+func (m *MockIssueBackend) ClaimIssue(ctx context.Context, id string, lockTTL time.Duration) error {
+	m.mu.Lock()
+	m.record("ClaimIssue", id, lockTTL)
+	fn := m.ClaimIssueFn
+	resultErr := m.ClaimIssueErr
+	m.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, id, lockTTL)
 	}
 	return resultErr
 }
