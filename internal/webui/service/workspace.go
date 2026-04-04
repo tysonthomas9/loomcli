@@ -2,17 +2,15 @@ package service
 
 import (
 	"context"
-
-	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 )
 
 // WorkspaceListItem represents a workspace in the list response.
 type WorkspaceListItem struct {
-	ID     string            `json:"id"`
-	Name   string            `json:"name"`
-	Path   string            `json:"path"`
-	Active bool              `json:"active"`
-	Pool   *daemon.PoolStats `json:"pool,omitempty"`
+	ID     string     `json:"id"`
+	Name   string     `json:"name"`
+	Path   string     `json:"path"`
+	Active bool       `json:"active"`
+	Pool   *PoolStats `json:"pool,omitempty"`
 }
 
 // JobStore is implemented by WorkspaceJobStore for async workspace creation.

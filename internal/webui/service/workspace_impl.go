@@ -120,8 +120,8 @@ func (s *workspaceServiceImpl) ListWorkspaces(_ context.Context) ([]WorkspaceLis
 		}
 
 		if p := s.multiPool.PoolForWorkspace(id); p != nil {
-			stats := p.Stats()
-			item.Pool = &stats
+			ps := poolStatsFromDaemon(p.Stats())
+			item.Pool = &ps
 		}
 
 		items = append(items, item)
@@ -381,6 +381,16 @@ func (s *workspaceServiceImpl) PatchWorkspaceBackend(_ context.Context, wsID str
 	}
 
 	return s.refreshWorkspaceData()
+}
+
+func poolStatsFromDaemon(d daemon.PoolStats) PoolStats {
+	return PoolStats{
+		Size:      d.Size,
+		Created:   d.Created,
+		Active:    d.Active,
+		Available: d.Available,
+		Closed:    d.Closed,
+	}
 }
 
 // --- Internal helpers ---

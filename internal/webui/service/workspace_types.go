@@ -104,6 +104,16 @@ func AddCreateWarning(ctx context.Context, msg string) {
 	}
 }
 
+// PoolStats contains connection pool statistics.
+// Mirrors daemon.PoolStats so the service API does not leak daemon types.
+type PoolStats struct {
+	Size      int  `json:"size"`
+	Created   int  `json:"created"`
+	Active    int  `json:"active"`
+	Available int  `json:"available"`
+	Closed    bool `json:"closed"`
+}
+
 // GetCreateWarnings returns collected warnings, or nil.
 func GetCreateWarnings(ctx context.Context) []string {
 	if w, ok := ctx.Value(createWarningsKey{}).(*[]string); ok && len(*w) > 0 {
