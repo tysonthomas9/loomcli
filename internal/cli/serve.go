@@ -390,7 +390,7 @@ func runServe(cmd *cobra.Command, args []string) {
 		} else if healed > 0 {
 			log.Printf("[serve] healed %d orphaned sessions on startup", healed)
 		}
-		count, err := sessStore.PurgeOlderThan(30 * 24 * time.Hour)
+		count, err := sessStore.PurgeOlderThan(DefaultRetentionAge)
 		if err != nil {
 			log.Printf("[serve] session purge error: %v", err)
 		} else if count > 0 {
