@@ -17,7 +17,8 @@ import {
   walkDir,
   countLines,
   checkLoc,
-  THRESHOLD,
+  THRESHOLD_TS,
+  THRESHOLD_TSX,
   ALLOWLIST,
 } from "../check-loc.mjs";
 
@@ -56,13 +57,13 @@ function runScript(projectRoot) {
   // import.meta.url-based resolution. Instead, we call checkLoc directly from
   // a small inline ESM script.
   const inline = `
-    import { checkLoc, THRESHOLD } from ${JSON.stringify(SCRIPT_PATH)};
+    import { checkLoc, THRESHOLD_TS, THRESHOLD_TSX } from ${JSON.stringify(SCRIPT_PATH)};
     import { join } from "path";
 
     const frontendDir = ${JSON.stringify(projectRoot)};
     const srcDir = join(frontendDir, "src");
     const allowlist = new Map();
-    const result = checkLoc(frontendDir, srcDir, allowlist, THRESHOLD);
+    const result = checkLoc(frontendDir, srcDir, allowlist, { ts: THRESHOLD_TS, tsx: THRESHOLD_TSX });
 
     if (result.error) {
       process.stderr.write(result.error + "\\n");
@@ -81,7 +82,7 @@ function runScript(projectRoot) {
       const suffix = v.ceiling !== null ? " (ceiling: " + v.ceiling + ")" : "";
       process.stderr.write("  " + v.loc + "\\t" + v.relPath + suffix + "\\n");
     }
-    process.stderr.write("\\n✗ " + violations.length + " file(s) exceed " + THRESHOLD + " LOC limit\\n");
+    process.stderr.write("\\n✗ " + violations.length + " file(s) exceed LOC limits (" + THRESHOLD_TSX + " .tsx / " + THRESHOLD_TS + " .ts)\\n");
     process.exit(1);
   `;
 
@@ -104,13 +105,13 @@ function runScript(projectRoot) {
 function runScriptWithAllowlist(projectRoot, allowlistEntries) {
   const allowlistStr = JSON.stringify(allowlistEntries);
   const inline = `
-    import { checkLoc, THRESHOLD } from ${JSON.stringify(SCRIPT_PATH)};
+    import { checkLoc, THRESHOLD_TS, THRESHOLD_TSX } from ${JSON.stringify(SCRIPT_PATH)};
     import { join } from "path";
 
     const frontendDir = ${JSON.stringify(projectRoot)};
     const srcDir = join(frontendDir, "src");
     const allowlist = new Map(${allowlistStr});
-    const result = checkLoc(frontendDir, srcDir, allowlist, THRESHOLD);
+    const result = checkLoc(frontendDir, srcDir, allowlist, { ts: THRESHOLD_TS, tsx: THRESHOLD_TSX });
 
     if (result.error) {
       process.stderr.write(result.error + "\\n");
@@ -129,7 +130,7 @@ function runScriptWithAllowlist(projectRoot, allowlistEntries) {
       const suffix = v.ceiling !== null ? " (ceiling: " + v.ceiling + ")" : "";
       process.stderr.write("  " + v.loc + "\\t" + v.relPath + suffix + "\\n");
     }
-    process.stderr.write("\\n✗ " + violations.length + " file(s) exceed " + THRESHOLD + " LOC limit\\n");
+    process.stderr.write("\\n✗ " + violations.length + " file(s) exceed LOC limits (" + THRESHOLD_TSX + " .tsx / " + THRESHOLD_TS + " .ts)\\n");
     process.exit(1);
   `;
 
@@ -431,12 +432,51 @@ describe("checkLoc", () => {
     expect(result.exitCode).toBe(2);
   });
 
-  it("respects custom threshold", () => {
+  it("respects custom threshold as a single number", () => {
     writeFile(srcDir, "medium.ts", 250);
-    // Under default threshold, over custom threshold of 200
     const result = checkLoc(root, srcDir, new Map(), 200);
     expect(result.violations).toHaveLength(1);
     expect(result.violations[0].loc).toBe(250);
+  });
+
+  it("applies 300-line threshold to .tsx files and 500 to .ts files", () => {
+    writeFile(srcDir, "large-component.tsx", 350);
+    writeFile(srcDir, "large-util.ts", 350);
+    const result = checkLoc(root, srcDir, new Map());
+    expect(result.violations).toHaveLength(1);
+    expect(result.violations[0].relPath).toContain(".tsx");
+  });
+
+  it("passes .tsx file at exactly 300 lines", () => {
+    writeFile(srcDir, "exact.tsx", 300);
+    const result = checkLoc(root, srcDir, new Map());
+    expect(result.violations).toEqual([]);
+  });
+
+  it("fails .tsx file at 301 lines", () => {
+    writeFile(srcDir, "over.tsx", 301);
+    const result = checkLoc(root, srcDir, new Map());
+    expect(result.violations).toHaveLength(1);
+    expect(result.violations[0].relPath).toBe("src/over.tsx");
+  });
+
+  it("passes .ts file at 400 lines (under 500 threshold)", () => {
+    writeFile(srcDir, "util.ts", 400);
+    const result = checkLoc(root, srcDir, new Map());
+    expect(result.violations).toEqual([]);
+  });
+
+  it("respects custom thresholds object", () => {
+    writeFile(srcDir, "a.tsx", 150);
+    writeFile(srcDir, "b.ts", 250);
+    const result = checkLoc(root, srcDir, new Map(), { ts: 200, tsx: 100 });
+    expect(result.violations).toHaveLength(2);
+  });
+
+  it("accepts a single number threshold for backward compatibility", () => {
+    writeFile(srcDir, "big.tsx", 250);
+    const result = checkLoc(root, srcDir, new Map(), 200);
+    expect(result.violations).toHaveLength(1);
   });
 });
 
@@ -445,14 +485,17 @@ describe("checkLoc", () => {
 // ---------------------------------------------------------------------------
 
 describe("constants", () => {
-  it("THRESHOLD is 500", () => {
-    expect(THRESHOLD).toBe(500);
+  it("THRESHOLD_TS is 500", () => {
+    expect(THRESHOLD_TS).toBe(500);
+  });
+
+  it("THRESHOLD_TSX is 300", () => {
+    expect(THRESHOLD_TSX).toBe(300);
   });
 
   it("ALLOWLIST is a Map with known entries", () => {
     expect(ALLOWLIST).toBeInstanceOf(Map);
     expect(ALLOWLIST.size).toBeGreaterThan(0);
-    // Verify a known entry
     expect(ALLOWLIST.has("src/App.tsx")).toBe(true);
     expect(typeof ALLOWLIST.get("src/App.tsx")).toBe("number");
   });
@@ -490,7 +533,7 @@ describe("check-loc subprocess", () => {
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("501");
     expect(result.stderr).toContain("src/big.ts");
-    expect(result.stderr).toContain("1 file(s) exceed 500 LOC limit");
+    expect(result.stderr).toContain("1 file(s) exceed LOC limits (300 .tsx / 500 .ts)");
   });
 
   it("prints ceiling in output for allowlisted violations", () => {
@@ -526,7 +569,7 @@ describe("check-loc subprocess", () => {
     writeFile(srcDir, "b.ts", 700);
     const result = runScript(root);
     expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("2 file(s) exceed 500 LOC limit");
+    expect(result.stderr).toContain("2 file(s) exceed LOC limits (300 .tsx / 500 .ts)");
   });
 
   it("counts allowlisted files in success message", () => {

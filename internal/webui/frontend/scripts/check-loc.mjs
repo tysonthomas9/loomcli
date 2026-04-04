@@ -1,12 +1,13 @@
 #!/usr/bin/env node
-// Check that frontend TypeScript/TSX source files do not exceed 500 LOC.
+// Check that frontend source files do not exceed LOC limits (300 .tsx / 500 .ts).
 // Files in the allowlist are permitted up to their recorded ceiling (ratchet).
 
 import { readFileSync, readdirSync, statSync } from "fs";
 import { join, relative, extname, sep } from "path";
 import { fileURLToPath } from "url";
 
-export const THRESHOLD = 500;
+export const THRESHOLD_TS = 500;
+export const THRESHOLD_TSX = 300;
 
 // Ratchet allowlist: files that exceed the threshold with their recorded ceiling.
 // If a file grows past its ceiling, it fails. Shrinking is always OK.
@@ -28,6 +29,23 @@ export const ALLOWLIST = new Map([
   ["src/components/WorkspaceTree/WorkspaceTree.tsx", 985],
   ["src/components/WorkspaceTree/EpicTaskTree.tsx", 510],
   ["src/stores/agentStore.ts", 525],
+  ["src/components/GraphView/GraphView.tsx", 469],
+  ["src/components/SwimLaneBoard/SwimLaneBoard.tsx", 466],
+  ["src/components/KanbanBoard/KanbanBoard.tsx", 460],
+  ["src/hooks/useWorkspaceContext.tsx", 458],
+  ["src/components/LogViewer/LogViewer.tsx", 447],
+  ["src/components/LoadingSkeleton/LoadingSkeleton.tsx", 436],
+  ["src/components/FilterBar/FilterBar.tsx", 400],
+  ["src/components/UsageDashboard/UsageDashboard.tsx", 374],
+  ["src/hooks/useKeyboardShortcuts.tsx", 364],
+  ["src/components/BackendSelectorDropdown/BackendSelectorDropdown.tsx", 345],
+  ["src/components/GraphControls/GraphControls.tsx", 345],
+  ["src/components/IssueDetailPanel/DependencySection.tsx", 323],
+  ["src/components/SettingsView/SettingsView.tsx", 315],
+  ["src/components/IssueCard/IssueCard.tsx", 311],
+  ["src/components/IssueDetailPanel/StartWorkButton.tsx", 311],
+  ["src/hooks/useEventProvider.tsx", 311],
+  ["src/components/IssueDetailPanel/PriorityDropdown.tsx", 307],
 ]);
 
 // Patterns to skip (test files, generated files, fixtures).
@@ -80,7 +98,7 @@ export function countLines(filePath) {
  * Returns { violations, allowlistedCount } without calling process.exit,
  * so callers (including tests) can inspect the result.
  */
-export function checkLoc(frontendDir, srcDir, allowlist = ALLOWLIST, threshold = THRESHOLD) {
+export function checkLoc(frontendDir, srcDir, allowlist = ALLOWLIST, thresholds = { ts: THRESHOLD_TS, tsx: THRESHOLD_TSX }) {
   let srcStat;
   try {
     srcStat = statSync(srcDir);
@@ -102,6 +120,9 @@ export function checkLoc(frontendDir, srcDir, allowlist = ALLOWLIST, threshold =
 
     const loc = countLines(filePath);
     const ceiling = allowlist.get(relPath);
+
+    const ext = relPath.endsWith(".tsx") ? "tsx" : "ts";
+    const threshold = typeof thresholds === "number" ? thresholds : (thresholds[ext] ?? THRESHOLD_TS);
 
     if (ceiling !== undefined) {
       allowlistedCount++;
@@ -143,7 +164,7 @@ function main() {
     console.error(`  ${v.loc}\t${v.relPath}${suffix}`);
   }
   console.error(
-    `\n\u2717 ${violations.length} file(s) exceed ${THRESHOLD} LOC limit`,
+    `\n\u2717 ${violations.length} file(s) exceed LOC limits (${THRESHOLD_TSX} .tsx / ${THRESHOLD_TS} .ts)`,
   );
   process.exit(1);
 }
