@@ -265,7 +265,7 @@ func checkProjectConfig() CheckResult {
 			Name:    "project_config",
 			Status:  StatusFail,
 			Summary: "loom.yaml has parse errors",
-			Detail:  err.Error(),
+			Detail:  formatYAMLDiagnostic(filepath.Join(beadsDir, "loom.yaml"), err),
 		}
 	}
 
@@ -317,7 +317,7 @@ func checkGlobalConfig() CheckResult {
 			Name:    "global_config",
 			Status:  StatusFail,
 			Summary: "~/.loom/config.yaml has errors",
-			Detail:  err.Error(),
+			Detail:  formatYAMLDiagnostic(GetConfigPath(), err),
 		}
 	}
 

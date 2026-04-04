@@ -226,14 +226,21 @@ func TestCheckProjectConfig(t *testing.T) {
 		ResetBeadsDirCache()
 		setupWorkspaceConfig(t, &LoomConfig{DefaultWorkspace: "test", Workspaces: map[string]WorkspaceConfig{"test": {Path: dir}}})
 
-		// Write invalid YAML
-		if err := os.WriteFile(filepath.Join(dir, "loom.yaml"), []byte("{{invalid"), 0644); err != nil {
+		// Write invalid YAML with a missing colon on line 3
+		invalidYAML := "agents:\n  - worktree: falcon\n    role plan\n  - worktree: nova\n"
+		if err := os.WriteFile(filepath.Join(dir, "loom.yaml"), []byte(invalidYAML), 0644); err != nil {
 			t.Fatal(err)
 		}
 
 		result := checkProjectConfig()
 		if result.Status != StatusFail {
 			t.Errorf("expected fail for invalid loom.yaml, got %v: %s", result.Status, result.Summary)
+		}
+		if !strings.Contains(result.Detail, ">>>") {
+			t.Errorf("expected detail to contain context marker '>>>', got: %s", result.Detail)
+		}
+		if !strings.Contains(result.Detail, "Fix:") {
+			t.Errorf("expected detail to contain 'Fix:' suggestion, got: %s", result.Detail)
 		}
 	})
 
@@ -269,6 +276,25 @@ func TestCheckGlobalConfig(t *testing.T) {
 		result := checkGlobalConfig()
 		if result.Status != StatusWarn {
 			t.Errorf("expected warn, got %v: %s", result.Status, result.Summary)
+		}
+	})
+
+	t.Run("invalid yaml config", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("LOOM_CONFIG_DIR", dir)
+		defer ResetBeadsDirCache()
+
+		invalidYAML := "workspaces:\n  dev\n    path: /tmp/dev\n"
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(invalidYAML), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		result := checkGlobalConfig()
+		if result.Status != StatusFail {
+			t.Errorf("expected fail for invalid yaml, got %v: %s", result.Status, result.Summary)
+		}
+		if !strings.Contains(result.Detail, ">>>") {
+			t.Errorf("expected detail to contain context marker '>>>', got: %s", result.Detail)
 		}
 	})
 
