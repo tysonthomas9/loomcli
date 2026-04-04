@@ -184,7 +184,7 @@ func (s *DaemonSubscriber) broadcastRefresh(now time.Time, totalCount int64) {
 // issues beyond this snapshot may produce spurious MutationCreate events, but the frontend
 // dedup logic in useMutationHandler handles this gracefully (treating duplicate creates as updates).
 func (s *DaemonSubscriber) loadKnownIssues(client *rpc.Client) {
-	resp, err := client.List(&rpc.ListArgs{Limit: 500})
+	resp, err := client.List(&rpc.ListArgs{Limit: 500, Lightweight: true})
 	if err != nil || !resp.Success {
 		return
 	}

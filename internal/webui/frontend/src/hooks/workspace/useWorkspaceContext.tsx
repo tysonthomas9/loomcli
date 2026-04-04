@@ -335,11 +335,15 @@ export function WorkspaceProvider({
     [activeRepos],
   );
 
-  // Derived: sourceReposFilter for API filtering
+  // Derived: sourceReposFilter for API filtering.
+  // Use string key for stability — avoids new array reference when repo names
+  // haven't changed (prevents refetch identity churn in useIssues).
+  const activeRepoNamesKey = activeRepoNames.join(",");
   const sourceReposFilter = useMemo(() => {
     if (isAllSelected) return undefined;
-    return activeRepos.map((r) => r.name);
-  }, [isAllSelected, activeRepos]);
+    return activeRepoNamesKey.split(",");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAllSelected, activeRepoNamesKey]);
 
   const isMultiRepo = useMemo(
     () => workspaceResult.repos.length >= 1,

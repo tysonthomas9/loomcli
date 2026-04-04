@@ -269,6 +269,10 @@ type ListArgs struct {
 	AllowStale bool `json:"allow_stale,omitempty"` // Skip staleness check, return potentially stale data
 
 	SourceRepos []string `json:"source_repos,omitempty"` // Filter to issues from these source repos
+
+	// Lightweight mode: skip heavy text fields (description, design, acceptance_criteria, notes)
+	// to reduce memory usage for list views that only need metadata.
+	Lightweight bool `json:"lightweight,omitempty"`
 }
 
 // CountArgs represents arguments for the count operation

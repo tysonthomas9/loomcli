@@ -196,6 +196,9 @@ type ListArgs struct {
 
 	// Multi-repo filtering
 	SourceRepos []string `json:"source_repos,omitempty"` // Filter by source repository
+
+	// Lightweight mode: skip heavy text fields (description, design, notes)
+	Lightweight bool `json:"lightweight,omitempty"`
 }
 
 // CountArgs represents arguments for the count operation
