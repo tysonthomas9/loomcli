@@ -50,7 +50,7 @@ linters:
     cyclop:
       max-complexity: 20
     funlen:
-      lines: 100
+      lines: 50
       statements: -1
       ignore-comments: true
     gocognit:
@@ -193,9 +193,9 @@ linters:
       - path: "internal/cli/workspace_cmd\\.go"
         linters: [funlen, cyclop, gocognit]
       - path: "internal/cli/worktree(_branch)?\\.go"
-        linters: [cyclop, gocognit]
+        linters: [funlen, cyclop, gocognit]
       - path: "internal/webui/server/middleware/cors\\.go"
-        linters: [gocognit]
+        linters: [funlen, gocognit]
       - path: "internal/webui/fleet_handlers(_done|_claim)?\\.go"
         linters: [funlen, cyclop, gocognit]
       - path: "internal/webui/handlers_comments\\.go"
@@ -214,6 +214,53 @@ linters:
         linters: [funlen, cyclop, gocognit]
       - path: "internal/webui/sse\\.go"
         linters: [gocognit]
+      # funlen: Existing functions exceeding 50-line limit — cleanup tracked separately
+      - path: "internal/cli/backend_.*\\.go"
+        linters: [funlen]
+      - path: "internal/cli/config(_cmd)?\\.go"
+        linters: [funlen]
+      - path: "internal/cli/daemon_(config|config_display|reconciler|spawn)\\.go"
+        linters: [funlen]
+      - path: "internal/cli/git_(api|diff)\\.go"
+        linters: [funlen]
+      - path: "internal/cli/hooks_(install|parse)\\.go"
+        linters: [funlen]
+      - path: "internal/cli/init(_helpers)?\\.go"
+        linters: [funlen]
+      - path: "internal/cli/recover(_helpers)?\\.go"
+        linters: [funlen]
+      - path: "internal/cli/serve_(observability|usage|workspace|workspace_info)\\.go"
+        linters: [funlen]
+      - path: "internal/cli/(doctor|fleetdb_server|pr|pull|push_helpers|reset|setup|status|task_router|usage_cmd|worker_cmd)\\.go"
+        linters: [funlen]
+      - path: "internal/events/otelexport/exporter\\.go"
+        linters: [funlen]
+      - path: "internal/kv/stale\\.go"
+        linters: [funlen]
+      - path: "internal/rpc/(client|metrics)\\.go"
+        linters: [funlen]
+      - path: "internal/sessions/(finalize|transcript_usage)\\.go"
+        linters: [funlen]
+      - path: "internal/types/issue_hash\\.go"
+        linters: [funlen]
+      - path: "internal/webui/server/realtime/sse_token\\.go"
+        linters: [funlen]
+      - path: "internal/webui/handlers_(client_errors|config|csp|editors|graph|issue_tabs|issues_parse|ready|worker_api)\\.go"
+        linters: [funlen]
+      - path: "internal/webui/fleet_handlers_heartbeat\\.go"
+        linters: [funlen]
+      - path: "internal/webui/(agent_service_impl|embed|file_service_impl|loom_proxy|server_workspace|session_service_impl|terminal|terminal_context|terminal_service_impl|workspace_registry)\\.go"
+        linters: [funlen]
+      - path: "internal/webui/subscription(_poll)?\\.go"
+        linters: [funlen]
+      - path: "internal/webui/daemon/pool\\.go"
+        linters: [funlen]
+      - path: "internal/webui/server/middleware/(auth|jwks)\\.go"
+        linters: [funlen]
+      - path: "internal/webui/server/realtime/(handler|hub)\\.go"
+        linters: [funlen]
+      - path: "internal/webui/service/issue_move\\.go"
+        linters: [funlen]
 
       # === Test file relaxations (matching beads patterns) ===
 
