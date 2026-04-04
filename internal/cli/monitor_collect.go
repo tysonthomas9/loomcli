@@ -7,13 +7,15 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/backend"
 )
 
 func collectMonitorData(readyLimit int, branch string) *MonitorData {
-	// Copy defaultDeps and override Tracker with the global tracker
-	// (respects setDefaultTracker used by tests).
+	// Copy defaultDeps and override IssueBackend with the global backend
+	// (respects setDefaultIssueBackend used by tests).
 	d := *defaultDeps
-	d.Tracker = defaultTracker()
+	d.IssueBackend = defaultIssueBackend()
 	return collectMonitorDataDeps(&d, readyLimit, branch)
 }
 
@@ -78,7 +80,7 @@ func collectMonitorDataDeps(deps *Deps, readyLimit int, branch string) *MonitorD
 
 func collectAgentStatus(agentTasks map[string]TaskInfo, branch string) ([]AgentStatus, map[string][]string) {
 	d := *defaultDeps
-	d.Tracker = defaultTracker()
+	d.IssueBackend = defaultIssueBackend()
 	return collectAgentStatusDeps(&d, agentTasks, branch)
 }
 
@@ -203,7 +205,7 @@ func collectAgentStatusDeps(deps *Deps, agentTasks map[string]TaskInfo, branch s
 
 func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, map[string]TaskInfo) {
 	d := *defaultDeps
-	d.Tracker = defaultTracker()
+	d.IssueBackend = defaultIssueBackend()
 	return collectTaskStatusDeps(&d, readyLimit)
 }
 
@@ -217,41 +219,41 @@ func collectTaskStatusDeps(deps *Deps, readyLimit int) (TaskSummary, []TaskInfo,
 	var closedTasks []TaskInfo
 	agentTasks := make(map[string]TaskInfo)
 
-	// Run all 5 typed IssueTracker queries in parallel
+	// Run all 5 typed IssueBackend queries in parallel
 	var (
-		readyIssues, inProgressIssues, reviewIssues, backlogIssues, closedIssues []BdIssue
+		readyIssues, inProgressIssues, reviewIssues, backlogIssues, closedIssues []backend.IssueData
 		readyErr, inProgressErr, reviewErr, backlogErr, closedErr                error
 		wg                                                                       sync.WaitGroup
 	)
 
-	tracker := deps.Tracker
+	ib := deps.IssueBackend
 	ctx := context.Background()
 
 	wg.Add(5)
 
 	go func() {
 		defer wg.Done()
-		readyIssues, readyErr = tracker.Ready(ctx, ReadyOpts{Limit: readyLimit})
+		readyIssues, readyErr = ib.Ready(ctx, backend.ReadyOpts{Limit: readyLimit})
 	}()
 
 	go func() {
 		defer wg.Done()
-		inProgressIssues, inProgressErr = tracker.List(ctx, ListOpts{Status: "in_progress"})
+		inProgressIssues, inProgressErr = ib.List(ctx, backend.ListOpts{Status: "in_progress"})
 	}()
 
 	go func() {
 		defer wg.Done()
-		reviewIssues, reviewErr = tracker.List(ctx, ListOpts{Status: "review"})
+		reviewIssues, reviewErr = ib.List(ctx, backend.ListOpts{Status: "review"})
 	}()
 
 	go func() {
 		defer wg.Done()
-		backlogIssues, backlogErr = tracker.Blocked(ctx)
+		backlogIssues, backlogErr = ib.Blocked(ctx, backend.BlockedOpts{})
 	}()
 
 	go func() {
 		defer wg.Done()
-		closedIssues, closedErr = tracker.List(ctx, ListOpts{Status: "closed", Limit: 50})
+		closedIssues, closedErr = ib.List(ctx, backend.ListOpts{Status: "closed", Limit: 50})
 	}()
 
 	wg.Wait()
@@ -420,20 +422,20 @@ func collectSyncStatus(agents []AgentStatus) SyncInfo {
 
 func collectStatistics() MonitorStats {
 	d := *defaultDeps
-	d.Tracker = defaultTracker()
+	d.IssueBackend = defaultIssueBackend()
 	return collectStatisticsDeps(&d)
 }
 
 func collectStatisticsDeps(deps *Deps) MonitorStats {
 	var stats MonitorStats
 
-	bdStats, err := deps.Tracker.Stats(context.Background())
-	if err == nil && bdStats != nil {
-		stats.Open = bdStats.Summary.OpenIssues
-		stats.Closed = bdStats.Summary.ClosedIssues
-		stats.Total = bdStats.Summary.TotalIssues
-		stats.InProgress = bdStats.Summary.InProgressIssues
-		stats.Blocked = bdStats.Summary.BlockedIssues
+	statsData, err := deps.IssueBackend.Stats(context.Background())
+	if err == nil && statsData != nil {
+		stats.Open = statsData.OpenIssues
+		stats.Closed = statsData.ClosedIssues
+		stats.Total = statsData.TotalIssues
+		stats.InProgress = statsData.InProgressIssues
+		stats.Blocked = statsData.BlockedIssues
 		if stats.Total > 0 {
 			stats.Completion = float64(stats.Closed) / float64(stats.Total) * 100
 		}
@@ -448,7 +450,7 @@ func collectStatisticsDeps(deps *Deps) MonitorStats {
 		// Review = total - open - inProgress - closed - blocked - deferred - pinned
 		// Note: bd stats total_issues already excludes tombstones
 		stats.Review = stats.Total - stats.Open - stats.InProgress - stats.Closed -
-			stats.Blocked - bdStats.Summary.DeferredIssues - bdStats.Summary.PinnedIssues
+			stats.Blocked - statsData.DeferredIssues - statsData.PinnedIssues
 		if stats.Review < 0 {
 			stats.Review = 0
 		}
@@ -467,7 +469,7 @@ func collectReadyTasksByPriority(readyLimit int) map[int]int {
 		counts[i] = 0
 	}
 
-	issues, err := defaultTracker().Ready(context.Background(), ReadyOpts{Limit: readyLimit})
+	issues, err := defaultIssueBackend().Ready(context.Background(), backend.ReadyOpts{Limit: readyLimit})
 	if err != nil {
 		return counts
 	}

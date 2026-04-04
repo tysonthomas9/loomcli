@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -53,15 +54,15 @@ type FileSystem interface {
 // Deps is the central dependency-injection container for CLI commands.
 // It holds all external dependencies so they can be swapped for testing.
 type Deps struct {
-	Git      GitRunner
-	Exec     ExecRunner
-	FS       FileSystem
-	Logger   *slog.Logger
-	Clock    func() time.Time
-	Tracker  IssueTracker
-	LookPath func(file string) (string, error)
-	ExecCtx  ExecContextRunner
-	Agent    AgentInvoker
+	Git          GitRunner
+	Exec         ExecRunner
+	FS           FileSystem
+	Logger       *slog.Logger
+	Clock        func() time.Time
+	IssueBackend backend.IssueBackend
+	LookPath     func(file string) (string, error)
+	ExecCtx      ExecContextRunner
+	Agent        AgentInvoker
 }
 
 // --- default implementations ---
@@ -125,15 +126,15 @@ func (defaultExecContextRunner) Run(ctx context.Context, dir, name string, args 
 func DefaultDeps() *Deps {
 	bdRunner := defaultBDRunnerImpl{}
 	return &Deps{
-		Git:      defaultGitRunner{},
-		Exec:     defaultExecRunner{},
-		FS:       defaultFileSystem{},
-		Logger:   slog.Default(),
-		Clock:    time.Now,
-		Tracker:  newBdBackend(bdRunner, GetBeadsDir()),
-		LookPath: exec.LookPath,
-		ExecCtx:  defaultExecContextRunner{},
-		Agent:    registryAgentInvoker{},
+		Git:          defaultGitRunner{},
+		Exec:         defaultExecRunner{},
+		FS:           defaultFileSystem{},
+		Logger:       slog.Default(),
+		Clock:        time.Now,
+		IssueBackend: newCliBeadsAdapter(bdRunner, GetBeadsDir()),
+		LookPath:     exec.LookPath,
+		ExecCtx:      defaultExecContextRunner{},
+		Agent:        registryAgentInvoker{},
 	}
 }
 

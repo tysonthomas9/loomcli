@@ -100,9 +100,9 @@ func emitTaskClaimedEvent(taskID, taskTitle string) {
 }
 
 func getTaskTitle(taskID string) string {
-	issue, err := defaultTracker().GetIssue(context.Background(), taskID)
-	if err != nil || issue == nil {
+	detail, err := defaultIssueBackend().Get(context.Background(), taskID)
+	if err != nil || detail == nil {
 		return ""
 	}
-	return issue.Title
+	return detail.Title
 }

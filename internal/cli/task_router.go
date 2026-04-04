@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/tysonthomas9/loomcli/internal/backend"
 )
 
 // RoleConstraints holds the resolved routing constraints from a RoleConfig
@@ -25,7 +27,7 @@ type RoleConstraints struct {
 
 // TaskMatch represents the result of matching a single issue against role constraints.
 type TaskMatch struct {
-	Issue  BdIssue
+	Issue  backend.IssueData
 	Score  int    // 0 = rejected, 10 = fallback, 100+ = matched
 	Reason string // human-readable explanation of the score
 }
@@ -60,9 +62,9 @@ func MergeRoleConstraints(rc RoleConfig, ae AgentEntry) RoleConstraints {
 }
 
 // MatchTask scores a single issue against the given constraints.
-// unclosedIDs is the set of issue IDs that have NOT been closed (for blocker checks).
+// Ready issues are pre-filtered by the backend to exclude blocked issues.
 // Returns a TaskMatch with Score=0 for rejected issues.
-func MatchTask(issue BdIssue, constraints RoleConstraints, unclosedIDs map[string]bool) TaskMatch {
+func MatchTask(issue backend.IssueData, constraints RoleConstraints) TaskMatch {
 	// Reject epics
 	if IsEpic(issue) {
 		return TaskMatch{Issue: issue, Score: 0, Reason: "epic"}
@@ -76,11 +78,6 @@ func MatchTask(issue BdIssue, constraints RoleConstraints, unclosedIDs map[strin
 	// Reject non-open
 	if !IsOpen(issue) {
 		return TaskMatch{Issue: issue, Score: 0, Reason: "not open"}
-	}
-
-	// Reject blocked
-	if HasUnclosedBlockers(issue.Dependencies, unclosedIDs) {
-		return TaskMatch{Issue: issue, Score: 0, Reason: "blocked"}
 	}
 
 	// Apply TaskFilter
@@ -140,10 +137,10 @@ func MatchTask(issue BdIssue, constraints RoleConstraints, unclosedIDs map[strin
 // SelectBestTask picks the highest-scoring task from a list of candidates.
 // Returns nil if no candidates pass filters (Score > 0).
 // Ties are broken by: higher score > lower priority number > alphabetical ID.
-func SelectBestTask(issues []BdIssue, constraints RoleConstraints, unclosedIDs map[string]bool) *TaskMatch {
+func SelectBestTask(issues []backend.IssueData, constraints RoleConstraints) *TaskMatch {
 	var matches []TaskMatch
 	for _, issue := range issues {
-		m := MatchTask(issue, constraints, unclosedIDs)
+		m := MatchTask(issue, constraints)
 		if m.Score > 0 {
 			matches = append(matches, m)
 		}
@@ -229,7 +226,7 @@ func AgentEntryFromEnv() AgentEntry {
 
 // applyTaskFilter checks if the issue passes the given task filter.
 // Returns an empty string if the issue passes, or a rejection reason.
-func applyTaskFilter(issue BdIssue, filter string) string {
+func applyTaskFilter(issue backend.IssueData, filter string) string {
 	if filter == "" {
 		filter = "has_design"
 	}

@@ -378,17 +378,17 @@ func GetLockStatus(worktreePath string) string {
 // Returns "needs_review", "closed", "in_progress", "open", or ""
 func getTaskStatus(taskID string) string {
 	d := *defaultDeps
-	d.Tracker = defaultTracker()
+	d.IssueBackend = defaultIssueBackend()
 	return getTaskStatusDeps(&d, taskID)
 }
 
 func getTaskStatusDeps(deps *Deps, taskID string) string {
-	issue, err := deps.Tracker.GetIssue(context.Background(), taskID)
-	if err != nil || issue == nil {
+	detail, err := deps.IssueBackend.Get(context.Background(), taskID)
+	if err != nil || detail == nil {
 		return ""
 	}
-	if issue.Status == "review" {
+	if detail.Status == "review" {
 		return "needs_review"
 	}
-	return issue.Status
+	return detail.Status
 }

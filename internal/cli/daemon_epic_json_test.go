@@ -5,15 +5,17 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/backend"
 )
 
 func TestDefaultEpicHasReadyTasks_HasTasks(t *testing.T) {
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
+	resetDefaultIssueBackend()
+	t.Cleanup(resetDefaultIssueBackend)
 
-	mock := NewMockTracker()
-	mock.ReadyResult = []BdIssue{{ID: "task-1"}}
-	setDefaultTracker(mock)
+	mock := NewMockIssueBackend()
+	mock.ReadyResult = []backend.IssueData{{ID: "task-1"}}
+	setDefaultIssueBackend(mock)
 
 	has, err := defaultEpicHasReadyTasks("epic-xyz")
 	if err != nil {
@@ -25,12 +27,12 @@ func TestDefaultEpicHasReadyTasks_HasTasks(t *testing.T) {
 }
 
 func TestDefaultEpicHasReadyTasks_NoTasks(t *testing.T) {
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
+	resetDefaultIssueBackend()
+	t.Cleanup(resetDefaultIssueBackend)
 
-	mock := NewMockTracker()
-	mock.ReadyResult = []BdIssue{}
-	setDefaultTracker(mock)
+	mock := NewMockIssueBackend()
+	mock.ReadyResult = []backend.IssueData{}
+	setDefaultIssueBackend(mock)
 
 	has, err := defaultEpicHasReadyTasks("epic-xyz")
 	if err != nil {
@@ -42,12 +44,12 @@ func TestDefaultEpicHasReadyTasks_NoTasks(t *testing.T) {
 }
 
 func TestDefaultEpicHasReadyTasks_TrackerError(t *testing.T) {
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
+	resetDefaultIssueBackend()
+	t.Cleanup(resetDefaultIssueBackend)
 
-	mock := NewMockTracker()
+	mock := NewMockIssueBackend()
 	mock.ReadyErr = fmt.Errorf("timeout")
-	setDefaultTracker(mock)
+	setDefaultIssueBackend(mock)
 
 	has, err := defaultEpicHasReadyTasks("epic-xyz")
 	if err == nil {
@@ -62,11 +64,11 @@ func TestDefaultEpicHasReadyTasks_TrackerError(t *testing.T) {
 }
 
 func TestDefaultEpicHasReadyTasks_PassesCorrectOpts(t *testing.T) {
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
+	resetDefaultIssueBackend()
+	t.Cleanup(resetDefaultIssueBackend)
 
-	mock := NewMockTracker()
-	mock.ReadyFunc = func(_ context.Context, opts ReadyOpts) ([]BdIssue, error) {
+	mock := NewMockIssueBackend()
+	mock.ReadyFn = func(_ context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
 		if opts.ParentID != "epic-xyz" {
 			t.Errorf("ParentID = %q, want epic-xyz", opts.ParentID)
 		}
@@ -75,7 +77,7 @@ func TestDefaultEpicHasReadyTasks_PassesCorrectOpts(t *testing.T) {
 		}
 		return nil, nil
 	}
-	setDefaultTracker(mock)
+	setDefaultIssueBackend(mock)
 
 	defaultEpicHasReadyTasks("epic-xyz")
 	if mock.CallCount("Ready") != 1 {

@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/backend"
 )
 
 // useFixedPolling allows reverting to fixed 200ms polling via environment variable
@@ -48,62 +50,38 @@ func (p *adaptivePoller) hadNoActivity() {
 	p.currentInterval = newInterval
 }
 
-// fetchReadyIssues returns parsed ready issues via the typed IssueTracker.
+// fetchReadyIssues returns parsed ready issues via the IssueBackend.
 // When parentID is non-empty, filters to tasks under that epic.
 // When repoLabel is non-empty, filters to tasks labeled repo:<name>.
-func fetchReadyIssues(parentID string, repoLabel string) ([]BdIssue, error) {
-	tracker := defaultTracker()
-	opts := ReadyOpts{Limit: 100, ParentID: parentID}
+func fetchReadyIssues(parentID string, repoLabel string) ([]backend.IssueData, error) {
+	ib := defaultIssueBackend()
+	opts := backend.ReadyOpts{Limit: 100, ParentID: parentID}
 	if repoLabel != "" {
 		opts.Labels = []string{"repo:" + repoLabel}
 	}
 	if sourceRepos := os.Getenv("LOOM_SOURCE_REPOS"); sourceRepos != "" {
 		opts.SourceRepos = strings.Split(sourceRepos, ",")
 	}
-	issues, err := tracker.Ready(context.Background(), opts)
+	issues, err := ib.Ready(context.Background(), opts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check ready tasks: %w", err)
 	}
 	return issues, nil
 }
 
-// fetchUnclosedIssueIDs returns IDs of all issues that are NOT closed.
-// Used for accurate blocker checking — a blocker is resolved only when closed,
-// not when it merely moves to in_progress or review.
-// ListOpts{Limit: 500} with zero-value Status returns ALL statuses (per
-// IssueTracker contract); client-side filtering then excludes closed.
-func fetchUnclosedIssueIDs() (map[string]bool, error) {
-	tracker := defaultTracker()
-	issues, err := tracker.List(context.Background(), ListOpts{Limit: 500})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list issues: %w", err)
-	}
-	ids := make(map[string]bool, len(issues))
-	for _, issue := range issues {
-		if issue.Status != "closed" {
-			ids[issue.ID] = true
-		}
-	}
-	return ids, nil
-}
-
 // GetAvailablePlanningTasks returns tasks that need planning
 // (ready tasks without a design OR with needs-revision label, excluding epics)
 // When parentID is non-empty, only tasks under that epic are returned.
 // When repoLabel is non-empty, only tasks labeled repo:<name> are returned.
-func GetAvailablePlanningTasks(parentID string, repoLabel string) ([]BdIssue, error) {
+func GetAvailablePlanningTasks(parentID string, repoLabel string) ([]backend.IssueData, error) {
 	candidates, err := fetchReadyIssues(parentID, repoLabel)
 	if err != nil {
 		return nil, err
 	}
-	unclosedIDs, err := fetchUnclosedIssueIDs()
-	if err != nil {
-		return nil, err
-	}
 
-	var result []BdIssue
+	var result []backend.IssueData
 	for _, issue := range candidates {
-		if IsAvailableForPlanning(issue, unclosedIDs) {
+		if IsAvailableForPlanning(issue) {
 			result = append(result, issue)
 		}
 	}
@@ -124,19 +102,15 @@ func HasAvailablePlanningTasks(parentID string, repoLabel string) (bool, error) 
 // (ready tasks WITH an approved design, excluding tasks with needs-revision label and epics)
 // When parentID is non-empty, only tasks under that epic are returned.
 // When repoLabel is non-empty, only tasks labeled repo:<name> are returned.
-func GetAvailableImplementationTasks(parentID string, repoLabel string) ([]BdIssue, error) {
+func GetAvailableImplementationTasks(parentID string, repoLabel string) ([]backend.IssueData, error) {
 	candidates, err := fetchReadyIssues(parentID, repoLabel)
 	if err != nil {
 		return nil, err
 	}
-	unclosedIDs, err := fetchUnclosedIssueIDs()
-	if err != nil {
-		return nil, err
-	}
 
-	var result []BdIssue
+	var result []backend.IssueData
 	for _, issue := range candidates {
-		if IsAvailableForImplementation(issue, unclosedIDs) {
+		if IsAvailableForImplementation(issue) {
 			result = append(result, issue)
 		}
 	}
@@ -157,19 +131,15 @@ func HasAvailableImplementationTasks(parentID string, repoLabel string) (bool, e
 // Used by custom roles with task_filter=any.
 // When parentID is non-empty, only tasks under that epic are returned.
 // When repoLabel is non-empty, only tasks labeled repo:<name> are returned.
-func GetAnyAvailableTasks(parentID string, repoLabel string) ([]BdIssue, error) {
+func GetAnyAvailableTasks(parentID string, repoLabel string) ([]backend.IssueData, error) {
 	candidates, err := fetchReadyIssues(parentID, repoLabel)
 	if err != nil {
 		return nil, err
 	}
-	unclosedIDs, err := fetchUnclosedIssueIDs()
-	if err != nil {
-		return nil, err
-	}
 
-	var result []BdIssue
+	var result []backend.IssueData
 	for _, issue := range candidates {
-		if IsAvailableForAny(issue, unclosedIDs) {
+		if IsAvailableForAny(issue) {
 			result = append(result, issue)
 		}
 	}
@@ -190,14 +160,9 @@ func HasAnyAvailableTasks(parentID string, repoLabel string) (bool, error) {
 // SelectBestTask instead of the generic Has*Tasks functions. Returns nil if the role
 // has no routing constraints (Skills, MaxPriority, and TaskFilter all unset), signaling
 // the caller to use default task checking.
-//
-// Wire-up: The daemon passes routing constraints as env vars; the subprocess (loom agent)
-// reconstructs the RoleConfig and calls this function when setting up AutoModeOptions.
-// Consumer-side integration is tracked separately.
 func BuildRouterTaskCheck(rc RoleConfig, ae AgentEntry, parentID string) func() (bool, error) {
 	constraints := MergeRoleConstraints(rc, ae)
 	repoLabel := ae.Repo
-	// If no routing fields are set, return nil to use defaults
 	if len(constraints.Skills) == 0 && constraints.MaxPriority == nil && constraints.TaskFilter == "" && repoLabel == "" && len(constraints.SourceRepos) == 0 {
 		return nil
 	}
@@ -206,11 +171,7 @@ func BuildRouterTaskCheck(rc RoleConfig, ae AgentEntry, parentID string) func() 
 		if err != nil {
 			return false, err
 		}
-		unclosedIDs, err := fetchUnclosedIssueIDs()
-		if err != nil {
-			return false, err
-		}
-		match := SelectBestTask(issues, constraints, unclosedIDs)
+		match := SelectBestTask(issues, constraints)
 		return match != nil, nil
 	}
 }

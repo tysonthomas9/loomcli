@@ -1,72 +1,84 @@
-// Issue tracking interfaces.
+// Issue tracking — package-level IssueBackend state and legacy type definitions.
 //
-// This file defines IssueTracker for abstracting issue data operations
-// (ready, list, update, close, etc.) across backends (beads bd CLI, fleet-db).
-// These are distinct from Backend and StreamingBackend (defined in backend.go
-// and backend_capabilities.go) which handle AI agent invocation (Claude, etc.).
+// The IssueBackend interface is defined in internal/backend/issuebackend.go.
+// This file provides lazy initialization and test overrides for the
+// package-level IssueBackend instance used by CLI commands.
+//
+// Legacy types (IssueTracker, ReadyOpts, ListOpts, UpdateOpts) are kept
+// temporarily so that dead-code files (bdBackend, fleetDBBackend,
+// MockIssueTracker) still compile. They will be removed in task .9.
 
 package cli
 
 import (
 	"context"
 	"sync"
+
+	"github.com/tysonthomas9/loomcli/internal/backend"
 )
 
-// IssueTracker provides typed methods for direct issue data access across
-// backends (bdBackend for beads CLI, fleetDBBackend for fleet-db RPC).
+// IssueTracker is the legacy issue data access interface.
+// Kept so that bdBackend, fleetDBBackend, and MockIssueTracker still compile.
+// Will be removed in task .9.
+//
+// Deprecated: All production callers now use backend.IssueBackend.
 type IssueTracker interface {
-	// Query operations
 	Ready(ctx context.Context, opts ReadyOpts) ([]BdIssue, error)
 	List(ctx context.Context, opts ListOpts) ([]BdIssue, error)
 	Blocked(ctx context.Context) ([]BdIssue, error)
 	Stats(ctx context.Context) (*BdStats, error)
 	GetIssue(ctx context.Context, id string) (*BdIssue, error)
 	GetIssueText(ctx context.Context, id string) (string, error)
-
-	// Mutation operations
 	UpdateIssue(ctx context.Context, id string, opts UpdateOpts) error
 	UpdateExternalRef(ctx context.Context, id, ref string) error
 	CloseIssue(ctx context.Context, id, reason string) error
-
-	// Metadata
 	BackendName() string
 }
 
 // ReadyOpts configures the Ready query.
+// Will be removed in task .9.
+//
+// Deprecated: Production code uses backend.ReadyOpts directly.
 type ReadyOpts struct {
-	ParentID    string   // filter by parent epic ID (empty = no filter)
-	Limit       int      // max results (0 = backend default)
-	Labels      []string // filter by labels (empty = no filter); e.g. ["repo:frontend"]
-	SourceRepos []string // filter by source repos (empty = no filter); maps to --source-repos
+	ParentID    string
+	Limit       int
+	Labels      []string
+	SourceRepos []string
 }
 
 // ListOpts configures the List query.
+// Will be removed in task .9.
+//
+// Deprecated: Production code uses backend.ListOpts directly.
 type ListOpts struct {
-	Status   string // filter by status (empty = all)
-	Assignee string // filter by assignee (empty = all)
-	Type     string // filter by issue_type (empty = all)
-	ParentID string // filter by parent epic ID (empty = no filter)
-	Limit    int    // max results (0 = backend default)
+	Status   string
+	Assignee string
+	Type     string
+	ParentID string
+	Limit    int
 }
 
-// UpdateOpts configures issue field updates. Zero-value fields are not sent.
+// UpdateOpts configures issue field updates.
+// Will be removed in task .9.
+//
+// Deprecated: Production code uses backend.UpdateParams directly.
 type UpdateOpts struct {
-	Status   string  // new status (empty = don't change)
-	Assignee *string // new assignee (nil = don't change, pointer to "" = clear)
-	Design   string  // new design text (empty = don't change)
-	Claim    bool    // if true, atomically claim the issue
+	Status   string
+	Assignee *string
+	Design   string
+	Claim    bool
 }
 
-// --- Package-level tracker state ---
+// --- Package-level IssueBackend state ---
 
 var (
 	trackerMu   sync.RWMutex
-	trackerInst IssueTracker
+	trackerInst backend.IssueBackend
 )
 
-// defaultTracker returns the package-level IssueTracker, lazily initializing
-// from defaultDeps.Tracker if not explicitly set.
-func defaultTracker() IssueTracker {
+// defaultIssueBackend returns the package-level IssueBackend, lazily initializing
+// from defaultDeps.IssueBackend if not explicitly set.
+func defaultIssueBackend() backend.IssueBackend {
 	trackerMu.RLock()
 	t := trackerInst
 	trackerMu.RUnlock()
@@ -76,27 +88,24 @@ func defaultTracker() IssueTracker {
 	trackerMu.Lock()
 	defer trackerMu.Unlock()
 	if trackerInst == nil {
-		if t := defaultDeps.Tracker; t != nil {
+		if t := defaultDeps.IssueBackend; t != nil {
 			trackerInst = t
 		} else {
-			// Fallback: don't cache nil — return an ephemeral backend so
-			// callers never get a nil pointer even if defaultDeps.Tracker
-			// was not set (e.g. partial test fixtures).
-			return newBdBackend(defaultBDRunnerImpl{}, GetBeadsDir())
+			return newCliBeadsAdapter(defaultBDRunnerImpl{}, GetBeadsDir())
 		}
 	}
 	return trackerInst
 }
 
-// setDefaultTracker overrides the package-level tracker (for testing).
-func setDefaultTracker(t IssueTracker) {
+// setDefaultIssueBackend overrides the package-level IssueBackend (for testing).
+func setDefaultIssueBackend(ib backend.IssueBackend) {
 	trackerMu.Lock()
 	defer trackerMu.Unlock()
-	trackerInst = t
+	trackerInst = ib
 }
 
-// resetDefaultTracker clears the override so defaultTracker() re-initializes.
-func resetDefaultTracker() {
+// resetDefaultIssueBackend clears the override so defaultIssueBackend() re-initializes.
+func resetDefaultIssueBackend() {
 	trackerMu.Lock()
 	defer trackerMu.Unlock()
 	trackerInst = nil

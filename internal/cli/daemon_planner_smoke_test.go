@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/backend"
 )
 
 // TestDaemonPlannerSmoke_FullPlanningPipeline exercises the single-task planning
@@ -34,8 +36,6 @@ func TestDaemonPlannerSmoke_FullPlanningPipeline(t *testing.T) {
 	mock := NewCommandMock(t, []CommandStub{
 		// HasAvailablePlanningTasks -> fetchReadyIssues
 		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
-		// HasAvailablePlanningTasks -> fetchUnclosedIssueIDs
-		{Name: "bd", Args: []string{"list", "--json", "--limit", "500"}, Stdout: taskJSON},
 		// captureHEADRef
 		{Name: "git", Args: []string{"rev-parse", "HEAD"}, Stdout: "abc123\n"},
 		// ComputeDiffStats
@@ -104,7 +104,6 @@ func TestDaemonPlannerSmoke_EpicScopedPlanning(t *testing.T) {
 	mock := NewCommandMock(t, []CommandStub{
 		// fetchReadyIssues with parent filter
 		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100", "--parent", "epic-42"}, Stdout: taskJSON},
-		{Name: "bd", Args: []string{"list", "--json", "--limit", "500"}, Stdout: taskJSON},
 		{Name: "git", Args: []string{"rev-parse", "HEAD"}, Stdout: "abc123\n"},
 		{Name: "git", Args: []string{"diff", "--numstat", "abc123..HEAD"}, Stdout: ""},
 	})
@@ -147,7 +146,7 @@ func TestDaemonPlannerSmoke_EpicScopedPlanning(t *testing.T) {
 func TestDaemonPlannerSmoke_NeedsRevisionRoundTrip(t *testing.T) {
 	// not parallel: uses os.Chdir, global planAutoMode/planDaemonMode, mock.Install(), os.Stdout capture
 	// Test predicates directly
-	revisionTask := BdIssue{
+	revisionTask := backend.IssueData{
 		ID:        "smoke-3",
 		Status:    "open",
 		IssueType: "task",
@@ -156,8 +155,7 @@ func TestDaemonPlannerSmoke_NeedsRevisionRoundTrip(t *testing.T) {
 	}
 
 	// IsAvailableForPlanning should return true despite having a design
-	unclosed := map[string]bool{}
-	if !IsAvailableForPlanning(revisionTask, unclosed) {
+	if !IsAvailableForPlanning(revisionTask) {
 		t.Error("expected needs-revision task to be available for planning")
 	}
 
@@ -183,7 +181,6 @@ func TestDaemonPlannerSmoke_NeedsRevisionRoundTrip(t *testing.T) {
 	taskJSON := `[{"id":"smoke-3","status":"open","issue_type":"task","title":"Revision task","design":"old plan","labels":["needs-revision"]}]`
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
-		{Name: "bd", Args: []string{"list", "--json", "--limit", "500"}, Stdout: taskJSON},
 		{Name: "git", Args: []string{"rev-parse", "HEAD"}, Stdout: "abc123\n"},
 		{Name: "git", Args: []string{"diff", "--numstat", "abc123..HEAD"}, Stdout: ""},
 	})
@@ -273,7 +270,6 @@ func TestDaemonPlannerSmoke_DaemonModeLockRetention(t *testing.T) {
 	taskJSON := `[{"id":"smoke-4","status":"open","issue_type":"task","title":"Single task","design":""}]`
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
-		{Name: "bd", Args: []string{"list", "--json", "--limit", "500"}, Stdout: taskJSON},
 		{Name: "git", Args: []string{"rev-parse", "HEAD"}, Stdout: "abc123\n"},
 		{Name: "git", Args: []string{"diff", "--numstat", "abc123..HEAD"}, Stdout: ""},
 	})

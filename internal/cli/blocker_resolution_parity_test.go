@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/backend"
 )
 
 func TestBlockerResolutionParity_CLI(t *testing.T) {
@@ -23,7 +25,7 @@ func TestBlockerResolutionParity_CLI(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.ID, func(t *testing.T) {
-			deps := []Dependency{{Type: c.DepType, DependsOnID: "BLOCKER-1"}}
+			deps := []backend.DependencyData{{Type: c.DepType, DependsOnID: "BLOCKER-1"}}
 			unclosedIDs := map[string]bool{}
 			if c.BlockerStatus != "closed" {
 				unclosedIDs["BLOCKER-1"] = true

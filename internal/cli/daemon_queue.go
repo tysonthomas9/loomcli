@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/tysonthomas9/loomcli/internal/backend"
 )
 
 var daemonQueueCmd = &cobra.Command{
@@ -120,13 +122,7 @@ func runDaemonQueue(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	unclosedIDs, err := fetchUnclosedIssueIDs()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: fetching unclosed issues: %v\n", err)
-		os.Exit(1)
-	}
-
-	matched, rejections := scoreQueueCandidates(issues, constraints, unclosedIDs)
+	matched, rejections := scoreQueueCandidates(issues, constraints)
 	printQueueResults(matched, rejections)
 }
 
@@ -146,12 +142,12 @@ func resolveQueueSourceRepos(agent *AgentEntry) {
 }
 
 // scoreQueueCandidates scores all candidate issues and partitions into matched/rejected.
-func scoreQueueCandidates(issues []BdIssue, constraints RoleConstraints, unclosedIDs map[string]bool) ([]TaskMatch, map[string]int) {
+func scoreQueueCandidates(issues []backend.IssueData, constraints RoleConstraints) ([]TaskMatch, map[string]int) {
 	var matched []TaskMatch
 	rejections := make(map[string]int)
 
 	for _, issue := range issues {
-		m := MatchTask(issue, constraints, unclosedIDs)
+		m := MatchTask(issue, constraints)
 		if m.Score > 0 {
 			matched = append(matched, m)
 		} else {

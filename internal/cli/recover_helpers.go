@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
@@ -38,10 +39,11 @@ func handleOrphanedTask(deps *Deps, worktreePath, taskID string, analyze bool) {
 // to give Claude the most complete picture of relevant commits.
 func analyzeTaskCompletion(deps *Deps, worktreePath, taskID string) (completed bool, reason string) {
 	// Get task details
-	taskText, err := deps.Tracker.GetIssueText(context.Background(), taskID)
-	if err != nil {
+	detail, err := deps.IssueBackend.Get(context.Background(), taskID)
+	if err != nil || detail == nil {
 		return false, "Could not fetch task details"
 	}
+	taskText := FormatIssueText(detail)
 
 	// Get git commits mentioning this task.
 	// In workspace mode, search across all repos for a complete picture.
@@ -133,7 +135,7 @@ INCOMPLETE: <brief reason>
 // closeTask closes a completed task
 func closeTask(deps *Deps, taskID, reason string) {
 	closeReason := fmt.Sprintf("Completed (verified by recovery analysis): %s", reason)
-	err := deps.Tracker.CloseIssue(context.Background(), taskID, closeReason)
+	_, err := deps.IssueBackend.Close(context.Background(), taskID, backend.CloseParams{Reason: closeReason})
 	if err != nil {
 		fmt.Printf("Warning: failed to close task: %v\n", err)
 	} else {
@@ -145,20 +147,20 @@ func closeTask(deps *Deps, taskID, reason string) {
 // Tasks that have already reached review or closed status were successfully
 // processed and should not be reset.
 func resetTask(deps *Deps, taskID string) {
-	tracker := deps.Tracker
+	ib := deps.IssueBackend
 	ctx := context.Background()
 
 	// Check current status before resetting
-	issue, err := tracker.GetIssue(ctx, taskID)
-	if err == nil {
-		if issue.Status == "review" || issue.Status == "closed" {
-			fmt.Printf("✓ Task %s already %s, skipping reset\n", taskID, issue.Status)
+	detail, err := ib.Get(ctx, taskID)
+	if err == nil && detail != nil {
+		if detail.Status == "review" || detail.Status == "closed" {
+			fmt.Printf("✓ Task %s already %s, skipping reset\n", taskID, detail.Status)
 			return
 		}
 	}
 
-	err = tracker.UpdateIssue(ctx, taskID, UpdateOpts{
-		Status:   "open",
+	err = ib.Update(ctx, taskID, backend.UpdateParams{
+		Status:   strPtr("open"),
 		Assignee: strPtr(""),
 	})
 	if err != nil {
@@ -289,14 +291,14 @@ func resetOrphanedAgentTasks(deps *Deps, worktreePath, agentName, alreadyHandled
 		return
 	}
 
-	issues, err := deps.Tracker.List(context.Background(), ListOpts{Assignee: agentName, Status: "in_progress"})
+	issues, err := deps.IssueBackend.List(context.Background(), backend.ListOpts{Assignee: agentName, Status: "in_progress"})
 	if err != nil {
 		fmt.Printf("Warning: could not check for orphaned tasks: %v\n", err)
 		return
 	}
 
 	// Filter out the task already handled from lock file
-	var orphaned []BdIssue
+	var orphaned []backend.IssueData
 	for _, t := range issues {
 		if t.ID != alreadyHandledTaskID {
 			orphaned = append(orphaned, t)

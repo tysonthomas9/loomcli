@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
@@ -24,7 +25,7 @@ func TestPlanSmoke_HappyPath(t *testing.T) {
 	os.MkdirAll(filepath.Join(tmpDir, ".git"), 0755)
 
 	deps, _, _, _, _ := NewTestDeps(t)
-	setupPlanTracker(t, deps, []BdIssue{
+	setupPlanTracker(t, deps, []backend.IssueData{
 		{ID: "smoke-1", Status: "open", IssueType: "task", Title: "Smoke task", Design: ""},
 	})
 
@@ -74,7 +75,7 @@ func TestPlanSmoke_NeedsRevisionTask(t *testing.T) {
 	os.MkdirAll(filepath.Join(tmpDir, ".git"), 0755)
 
 	deps, _, _, _, _ := NewTestDeps(t)
-	setupPlanTracker(t, deps, []BdIssue{
+	setupPlanTracker(t, deps, []backend.IssueData{
 		{ID: "smoke-2", Status: "open", IssueType: "task", Title: "Revision task", Design: "existing plan", Labels: []string{"needs-revision"}},
 	})
 

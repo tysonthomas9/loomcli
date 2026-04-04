@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/backend"
 )
 
 func TestMapTaskFilter(t *testing.T) {
@@ -156,15 +158,15 @@ func TestMapTaskFilter_WithParentID(t *testing.T) {
 					capturedArgs = append([]string{name}, args...)
 				}
 				// Return appropriate mock data based on filter
-				var mockIssue BdIssue
+				var mockIssue backend.IssueData
 				if tt.filter == "needs_design" {
-					mockIssue = BdIssue{ID: "T-1", Title: "Task", Status: "open", Design: ""}
+					mockIssue = backend.IssueData{ID: "T-1", Title: "Task", Status: "open", Design: ""}
 				} else if tt.filter == "has_design" {
-					mockIssue = BdIssue{ID: "T-2", Title: "Task with design", Status: "open", Design: "Implementation plan"}
+					mockIssue = backend.IssueData{ID: "T-2", Title: "Task with design", Status: "open", Design: "Implementation plan"}
 				} else {
-					mockIssue = BdIssue{ID: "T-3", Title: "Any task", Status: "open", Design: ""}
+					mockIssue = backend.IssueData{ID: "T-3", Title: "Any task", Status: "open", Design: ""}
 				}
-				return CommandResult{Stdout: mustJSON([]BdIssue{mockIssue})}
+				return CommandResult{Stdout: mustJSON([]backend.IssueData{mockIssue})}
 			}})
 
 			// Get the function from mapTaskFilter
@@ -217,7 +219,7 @@ func TestMapTaskFilter_ParentIDCapturedInClosure(t *testing.T) {
 			readyCapturedArgs = append(readyCapturedArgs, fullArgs)
 		}
 		return CommandResult{
-			Stdout: mustJSON([]BdIssue{
+			Stdout: mustJSON([]backend.IssueData{
 				{ID: "T-1", Title: "Task", Status: "open", Design: ""},
 			}),
 		}

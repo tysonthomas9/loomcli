@@ -352,7 +352,7 @@ func ReadOnlyPreamble() string {
 
 // truncateUTF8Safe truncates s to at most max bytes without splitting a
 // multi-byte UTF-8 character, appending a truncation marker if shortened.
-func truncateUTF8Safe(s string, max int) string {
+func truncateUTF8Safe(s string, max int) string { //nolint:unparam // max is parameterized for readability at call sites
 	if len(s) <= max {
 		return s
 	}

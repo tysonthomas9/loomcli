@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -194,22 +195,22 @@ func (m *MockFileSystem) Remove(path string) error {
 }
 
 // NewTestDeps returns a *Deps with all fields set to mock implementations.
-func NewTestDeps(t *testing.T) (*Deps, *MockGitRunner, *MockExecRunner, *MockFileSystem, *MockIssueTracker) {
+func NewTestDeps(t *testing.T) (*Deps, *MockGitRunner, *MockExecRunner, *MockFileSystem, *MockIssueBackend) {
 	t.Helper()
 	git := &MockGitRunner{}
 	execR := &MockExecRunner{}
 	fs := NewMockFileSystem()
-	tracker := NewMockTracker()
+	tracker := NewMockIssueBackend()
 	deps := &Deps{
-		Git:      git,
-		Exec:     execR,
-		FS:       fs,
-		Logger:   slog.Default(),
-		Tracker:  tracker,
-		Clock:    func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) },
-		LookPath: func(file string) (string, error) { return "/usr/bin/" + file, nil },
-		ExecCtx:  &MockExecContextRunner{},
-		Agent:    &MockAgentInvoker{},
+		Git:          git,
+		Exec:         execR,
+		FS:           fs,
+		Logger:       slog.Default(),
+		IssueBackend: tracker,
+		Clock:        func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) },
+		LookPath:     func(file string) (string, error) { return "/usr/bin/" + file, nil },
+		ExecCtx:      &MockExecContextRunner{},
+		Agent:        &MockAgentInvoker{},
 	}
 	return deps, git, execR, fs, tracker
 }
@@ -233,11 +234,11 @@ func TestDefaultDeps_NonNilFields(t *testing.T) {
 	if d.Clock == nil {
 		t.Error("Clock is nil")
 	}
-	if d.Tracker == nil {
+	if d.IssueBackend == nil {
 		t.Error("Tracker is nil")
 	}
-	if d.Tracker.BackendName() != "beads" {
-		t.Errorf("Tracker.BackendName() = %q, want beads", d.Tracker.BackendName())
+	if d.IssueBackend.BackendName() != "beads" {
+		t.Errorf("Tracker.BackendName() = %q, want beads", d.IssueBackend.BackendName())
 	}
 	if d.LookPath == nil {
 		t.Error("LookPath is nil")
@@ -364,19 +365,19 @@ func TestRunGitCommandWithOutput_UsesDefaultDeps(t *testing.T) {
 }
 
 func TestFetchReadyIssues_UsesTracker(t *testing.T) {
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
+	resetDefaultIssueBackend()
+	t.Cleanup(resetDefaultIssueBackend)
 
-	mock := NewMockTracker()
-	mock.ReadyResult = []BdIssue{
+	mock := NewMockIssueBackend()
+	mock.ReadyResult = []backend.IssueData{
 		{ID: "test-1", Title: "Test task", Status: "open"},
 	}
-	var capturedOpts ReadyOpts
-	mock.ReadyFunc = func(_ context.Context, opts ReadyOpts) ([]BdIssue, error) {
+	var capturedOpts backend.ReadyOpts
+	mock.ReadyFn = func(_ context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
 		capturedOpts = opts
 		return mock.ReadyResult, nil
 	}
-	setDefaultTracker(mock)
+	setDefaultIssueBackend(mock)
 
 	got, err := fetchReadyIssues("epic-1", "")
 	if err != nil {
@@ -394,16 +395,16 @@ func TestFetchReadyIssues_UsesTracker(t *testing.T) {
 }
 
 func TestFetchReadyIssues_NoParentViaTracker(t *testing.T) {
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
+	resetDefaultIssueBackend()
+	t.Cleanup(resetDefaultIssueBackend)
 
-	mock := NewMockTracker()
-	var capturedOpts ReadyOpts
-	mock.ReadyFunc = func(_ context.Context, opts ReadyOpts) ([]BdIssue, error) {
+	mock := NewMockIssueBackend()
+	var capturedOpts backend.ReadyOpts
+	mock.ReadyFn = func(_ context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
 		capturedOpts = opts
 		return nil, nil
 	}
-	setDefaultTracker(mock)
+	setDefaultIssueBackend(mock)
 
 	_, err := fetchReadyIssues("", "")
 	if err != nil {
@@ -417,44 +418,9 @@ func TestFetchReadyIssues_NoParentViaTracker(t *testing.T) {
 	}
 }
 
-func TestFetchUnclosedIssueIDs_UsesTracker(t *testing.T) {
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
-
-	mock := NewMockTracker()
-	mock.ListResult = []BdIssue{
-		{ID: "open-1", Status: "open"},
-		{ID: "closed-1", Status: "closed"},
-		{ID: "review-1", Status: "review"},
-	}
-	var capturedOpts ListOpts
-	mock.ListFunc = func(_ context.Context, opts ListOpts) ([]BdIssue, error) {
-		capturedOpts = opts
-		return mock.ListResult, nil
-	}
-	setDefaultTracker(mock)
-
-	got, err := fetchUnclosedIssueIDs()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !got["open-1"] {
-		t.Error("expected open-1 in unclosed set")
-	}
-	if got["closed-1"] {
-		t.Error("closed-1 should not be in unclosed set")
-	}
-	if !got["review-1"] {
-		t.Error("expected review-1 in unclosed set")
-	}
-	// CRITICAL: verify no implicit status filter (empty = all statuses)
-	if capturedOpts.Status != "" {
-		t.Errorf("opts.Status = %q, want empty (all statuses)", capturedOpts.Status)
-	}
-	if capturedOpts.Limit != 500 {
-		t.Errorf("opts.Limit = %d, want 500", capturedOpts.Limit)
-	}
-}
+// TestFetchUnclosedIssueIDs_UsesTracker removed: fetchUnclosedIssueIDs was
+// removed in the IssueBackend migration. The backend now pre-filters blocked
+// issues in Ready/Blocked endpoints.
 
 func TestMockFileSystem_ReadWrite(t *testing.T) {
 	fs := NewMockFileSystem()
@@ -517,8 +483,8 @@ func TestNewTestDeps_Returns5Tuple(t *testing.T) {
 	if deps.FS != fs {
 		t.Error("deps.FS is not the returned MockFileSystem")
 	}
-	if deps.Tracker != tracker {
-		t.Error("deps.Tracker is not the returned MockIssueTracker")
+	if deps.IssueBackend != tracker {
+		t.Error("deps.IssueBackend is not the returned MockIssueBackend")
 	}
 	if deps.Logger == nil {
 		t.Error("deps.Logger is nil")
@@ -545,7 +511,7 @@ func TestDefaultDeps_NoBDField(t *testing.T) {
 		{"FS", d.FS == nil},
 		{"Logger", d.Logger == nil},
 		{"Clock", d.Clock == nil},
-		{"Tracker", d.Tracker == nil},
+		{"IssueBackend", d.IssueBackend == nil},
 		{"LookPath", d.LookPath == nil},
 		{"ExecCtx", d.ExecCtx == nil},
 		{"Agent", d.Agent == nil},
@@ -557,7 +523,7 @@ func TestDefaultDeps_NoBDField(t *testing.T) {
 	}
 
 	// Verify Tracker is a bdBackend (backed by defaultBDRunnerImpl).
-	if d.Tracker.BackendName() != "beads" {
-		t.Errorf("Tracker.BackendName() = %q, want beads", d.Tracker.BackendName())
+	if d.IssueBackend.BackendName() != "beads" {
+		t.Errorf("Tracker.BackendName() = %q, want beads", d.IssueBackend.BackendName())
 	}
 }

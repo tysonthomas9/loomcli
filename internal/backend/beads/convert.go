@@ -68,6 +68,7 @@ func issueToData(issue *types.Issue) backend.IssueData {
 		Owner:      issue.Owner,
 		Labels:     labels,
 		SourceRepo: issue.SourceRepo,
+		Design:     issue.Design,
 		CreatedAt:  issue.CreatedAt,
 		UpdatedAt:  issue.UpdatedAt,
 		DueAt:      issue.DueAt,

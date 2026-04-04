@@ -21,16 +21,18 @@ import (
 // IssueData is the slim issue projection returned by List, Ready, and Blocked.
 // It contains the fields needed for list views, kanban boards, and summary displays.
 type IssueData struct {
-	ID         string     `json:"id"`
-	Title      string     `json:"title"`
-	Status     string     `json:"status"`
-	Priority   int        `json:"priority"`
-	IssueType  string     `json:"issue_type,omitempty"`
-	Assignee   string     `json:"assignee,omitempty"`
-	Owner      string     `json:"owner,omitempty"`
-	Labels     []string   `json:"labels,omitempty"`
-	SourceRepo string     `json:"source_repo,omitempty"`
-	Parent     string     `json:"parent,omitempty"`
+	ID         string   `json:"id"`
+	Title      string   `json:"title"`
+	Status     string   `json:"status"`
+	Priority   int      `json:"priority"`
+	IssueType  string   `json:"issue_type,omitempty"`
+	Assignee   string   `json:"assignee,omitempty"`
+	Owner      string   `json:"owner,omitempty"`
+	Labels     []string `json:"labels,omitempty"`
+	SourceRepo string   `json:"source_repo,omitempty"`
+	Parent     string   `json:"parent,omitempty"`
+	// Populated by backends that include design in list queries (e.g., beads daemon).
+	Design     string     `json:"design,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
 	DueAt      *time.Time `json:"due_at,omitempty"`

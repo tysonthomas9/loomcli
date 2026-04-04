@@ -15,6 +15,8 @@ import (
 	"github.com/redis/go-redis/v9"
 	beads "github.com/steveyegge/beads"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
+	beadsbackend "github.com/tysonthomas9/loomcli/internal/backend/beads"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 )
@@ -34,7 +36,7 @@ type FleetDBServerConfig struct {
 // FleetDBServer manages the lifecycle of an embedded beads issue-tracking
 // server with optional Redis-backed fleet coordination.
 type FleetDBServer struct {
-	backend    *fleetDBBackend
+	backend    backend.IssueBackend
 	rpcServer  *beads.Server
 	rpcClient  *rpc.Client
 	rdb        *redis.Client
@@ -131,14 +133,14 @@ func NewFleetDBServer(cfg FleetDBServerConfig, logger *slog.Logger) (*FleetDBSer
 	}
 	srv.rpcClient = client
 
-	// 5. Backend
-	srv.backend = newFleetDBBackend(client, cfg.Workspace)
+	// 5. Backend — use BeadsBackend (backend.IssueBackend) instead of legacy fleetDBBackend
+	srv.backend = beadsbackend.New(client)
 
 	return srv, nil
 }
 
 // Backend returns the issue-tracking backend.
-func (s *FleetDBServer) Backend() *fleetDBBackend {
+func (s *FleetDBServer) Backend() backend.IssueBackend {
 	return s.backend
 }
 

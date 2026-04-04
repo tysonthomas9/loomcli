@@ -6,88 +6,88 @@ import (
 )
 
 func TestDefaultTracker_ReturnsNonNil(t *testing.T) {
-	// Ensure any previous test override is cleared so defaultTracker()
-	// falls back to defaultDeps.Tracker (which DefaultDeps sets to a bdBackend).
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
+	// Ensure any previous test override is cleared so defaultIssueBackend()
+	// falls back to defaultDeps.IssueBackend (which DefaultDeps sets to a bdBackend).
+	resetDefaultIssueBackend()
+	t.Cleanup(resetDefaultIssueBackend)
 
-	tracker := defaultTracker()
+	tracker := defaultIssueBackend()
 	if tracker == nil {
-		t.Fatal("defaultTracker() returned nil; expected non-nil from defaultDeps.Tracker")
+		t.Fatal("defaultIssueBackend() returned nil; expected non-nil from defaultDeps.IssueBackend")
 	}
 }
 
 func TestSetDefaultTracker_OverridesDefault(t *testing.T) {
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
+	resetDefaultIssueBackend()
+	t.Cleanup(resetDefaultIssueBackend)
 
-	mock := NewMockTracker()
+	mock := NewMockIssueBackend()
 	mock.BackendNameResult = "test-override"
-	setDefaultTracker(mock)
+	setDefaultIssueBackend(mock)
 
-	got := defaultTracker()
+	got := defaultIssueBackend()
 	if got == nil {
-		t.Fatal("defaultTracker() returned nil after setDefaultTracker")
+		t.Fatal("defaultIssueBackend() returned nil after setDefaultIssueBackend")
 	}
 	if got.BackendName() != "test-override" {
 		t.Errorf("BackendName() = %q, want %q", got.BackendName(), "test-override")
 	}
 }
 
-func TestResetDefaultTracker_ClearsOverride(t *testing.T) {
-	t.Cleanup(resetDefaultTracker)
+func TestResetDefaultIssueBackend_ClearsOverride(t *testing.T) {
+	t.Cleanup(resetDefaultIssueBackend)
 
 	// Set an override first
-	mock := NewMockTracker()
+	mock := NewMockIssueBackend()
 	mock.BackendNameResult = "will-be-cleared"
-	setDefaultTracker(mock)
+	setDefaultIssueBackend(mock)
 
 	// Verify the override is active
-	if defaultTracker().BackendName() != "will-be-cleared" {
+	if defaultIssueBackend().BackendName() != "will-be-cleared" {
 		t.Fatal("override not active before reset")
 	}
 
-	// Reset and verify it falls back to defaultDeps.Tracker
-	resetDefaultTracker()
+	// Reset and verify it falls back to defaultDeps.IssueBackend
+	resetDefaultIssueBackend()
 
-	got := defaultTracker()
+	got := defaultIssueBackend()
 	if got == nil {
-		t.Fatal("defaultTracker() returned nil after resetDefaultTracker")
+		t.Fatal("defaultIssueBackend() returned nil after resetDefaultIssueBackend")
 	}
-	// After reset, it should reinitialize from defaultDeps.Tracker which is a bdBackend ("beads").
+	// After reset, it should reinitialize from defaultDeps.IssueBackend which is a bdBackend ("beads").
 	if got.BackendName() == "will-be-cleared" {
-		t.Error("resetDefaultTracker did not clear the override; still returning mock")
+		t.Error("resetDefaultIssueBackend did not clear the override; still returning mock")
 	}
 }
 
 func TestSetDefaultTracker_SubsequentCallsOverride(t *testing.T) {
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
+	resetDefaultIssueBackend()
+	t.Cleanup(resetDefaultIssueBackend)
 
-	mock1 := NewMockTracker()
+	mock1 := NewMockIssueBackend()
 	mock1.BackendNameResult = "first"
-	setDefaultTracker(mock1)
+	setDefaultIssueBackend(mock1)
 
-	if defaultTracker().BackendName() != "first" {
-		t.Fatalf("expected first override, got %q", defaultTracker().BackendName())
+	if defaultIssueBackend().BackendName() != "first" {
+		t.Fatalf("expected first override, got %q", defaultIssueBackend().BackendName())
 	}
 
-	mock2 := NewMockTracker()
+	mock2 := NewMockIssueBackend()
 	mock2.BackendNameResult = "second"
-	setDefaultTracker(mock2)
+	setDefaultIssueBackend(mock2)
 
-	if defaultTracker().BackendName() != "second" {
-		t.Errorf("expected second override, got %q", defaultTracker().BackendName())
+	if defaultIssueBackend().BackendName() != "second" {
+		t.Errorf("expected second override, got %q", defaultIssueBackend().BackendName())
 	}
 }
 
 func TestDefaultTracker_ConcurrentAccess(t *testing.T) {
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
+	resetDefaultIssueBackend()
+	t.Cleanup(resetDefaultIssueBackend)
 
-	mock := NewMockTracker()
+	mock := NewMockIssueBackend()
 	mock.BackendNameResult = "concurrent-test"
-	setDefaultTracker(mock)
+	setDefaultIssueBackend(mock)
 
 	const goroutines = 50
 	var wg sync.WaitGroup
@@ -98,18 +98,18 @@ func TestDefaultTracker_ConcurrentAccess(t *testing.T) {
 		if i%2 == 0 {
 			go func() {
 				defer wg.Done()
-				tracker := defaultTracker()
+				tracker := defaultIssueBackend()
 				if tracker == nil {
-					t.Error("defaultTracker() returned nil during concurrent access")
+					t.Error("defaultIssueBackend() returned nil during concurrent access")
 				}
 				_ = tracker.BackendName()
 			}()
 		} else {
 			go func(n int) {
 				defer wg.Done()
-				m := NewMockTracker()
+				m := NewMockIssueBackend()
 				m.BackendNameResult = "writer"
-				setDefaultTracker(m)
+				setDefaultIssueBackend(m)
 			}(i)
 		}
 	}
@@ -117,13 +117,13 @@ func TestDefaultTracker_ConcurrentAccess(t *testing.T) {
 	wg.Wait()
 
 	// After all goroutines finish, defaultTracker should still return non-nil.
-	if defaultTracker() == nil {
-		t.Error("defaultTracker() is nil after concurrent access")
+	if defaultIssueBackend() == nil {
+		t.Error("defaultIssueBackend() is nil after concurrent access")
 	}
 }
 
 func TestDefaultTracker_ConcurrentResetAndRead(t *testing.T) {
-	t.Cleanup(resetDefaultTracker)
+	t.Cleanup(resetDefaultIssueBackend)
 
 	const goroutines = 50
 	var wg sync.WaitGroup
@@ -133,14 +133,14 @@ func TestDefaultTracker_ConcurrentResetAndRead(t *testing.T) {
 		if i%3 == 0 {
 			go func() {
 				defer wg.Done()
-				resetDefaultTracker()
+				resetDefaultIssueBackend()
 			}()
 		} else {
 			go func() {
 				defer wg.Done()
-				tracker := defaultTracker()
+				tracker := defaultIssueBackend()
 				if tracker == nil {
-					t.Error("defaultTracker() returned nil during concurrent reset/read")
+					t.Error("defaultIssueBackend() returned nil during concurrent reset/read")
 				}
 			}()
 		}
@@ -150,18 +150,18 @@ func TestDefaultTracker_ConcurrentResetAndRead(t *testing.T) {
 }
 
 func TestDefaultTracker_LazyInitFromDefaultDeps(t *testing.T) {
-	// Verify that when trackerInst is nil, defaultTracker() initializes
-	// from defaultDeps.Tracker (double-checked locking path).
-	resetDefaultTracker()
-	t.Cleanup(resetDefaultTracker)
+	// Verify that when trackerInst is nil, defaultIssueBackend() initializes
+	// from defaultDeps.IssueBackend (double-checked locking path).
+	resetDefaultIssueBackend()
+	t.Cleanup(resetDefaultIssueBackend)
 
-	// defaultDeps.Tracker is initialized by DefaultDeps() to a bdBackend.
-	tracker := defaultTracker()
+	// defaultDeps.IssueBackend is initialized by DefaultDeps() to a bdBackend.
+	tracker := defaultIssueBackend()
 	if tracker == nil {
-		t.Fatal("defaultTracker() returned nil on lazy init")
+		t.Fatal("defaultIssueBackend() returned nil on lazy init")
 	}
-	// Should be the same object as defaultDeps.Tracker.
-	if tracker != defaultDeps.Tracker {
-		t.Error("defaultTracker() did not return defaultDeps.Tracker on lazy init")
+	// Should be the same object as defaultDeps.IssueBackend.
+	if tracker != defaultDeps.IssueBackend {
+		t.Error("defaultIssueBackend() did not return defaultDeps.IssueBackend on lazy init")
 	}
 }

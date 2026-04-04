@@ -139,7 +139,7 @@ func runRecover(cmd *cobra.Command, args []string) {
 func RecoverWorktree(worktreePath, agentName string, exitCode int) error {
 	deps := &Deps{}
 	*deps = *defaultDeps
-	deps.Tracker = defaultTracker()
+	deps.IssueBackend = defaultIssueBackend()
 
 	// 1. Check lock status
 	lockInfo, isRunning, err := CheckLock(worktreePath)

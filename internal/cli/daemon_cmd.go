@@ -273,7 +273,7 @@ func runDaemon(cmd *cobra.Command, args []string) {
 			log.Printf("warning: failed to start fleet-db server: %v (continuing without fleet-db)", fleetErr)
 			fleetDBSrv = nil
 		} else {
-			setDefaultTracker(fleetDBSrv.Backend())
+			setDefaultIssueBackend(fleetDBSrv.Backend())
 			defer fleetDBSrv.Stop()
 			log.Printf("fleet-db backend active (workspace: %s)", fleetCfg.Workspace)
 		}

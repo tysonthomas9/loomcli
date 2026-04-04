@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/backend"
 )
 
 func TestRunClaim_Success(t *testing.T) {
@@ -31,13 +33,13 @@ func TestRunClaim_Success(t *testing.T) {
 	os.WriteFile(filepath.Join(tmpDir, LockFileName), lockData, 0644)
 
 	// Mock IssueTracker for getTaskTitle
-	mockTracker := &MockIssueTracker{
-		GetIssueFunc: func(ctx context.Context, id string) (*BdIssue, error) {
-			return &BdIssue{ID: id, Title: "Test Task Title"}, nil
+	mockTracker := &MockIssueBackend{
+		GetFn: func(ctx context.Context, id string) (*backend.IssueDetailData, error) {
+			return &backend.IssueDetailData{IssueData: backend.IssueData{ID: id, Title: "Test Task Title"}}, nil
 		},
 	}
-	setDefaultTracker(mockTracker)
-	t.Cleanup(func() { setDefaultTracker(nil) })
+	setDefaultIssueBackend(mockTracker)
+	t.Cleanup(func() { setDefaultIssueBackend(nil) })
 
 	// Capture stdout
 	oldStdout := os.Stdout
@@ -97,13 +99,13 @@ func TestRunClaim_NoTitle(t *testing.T) {
 	os.WriteFile(filepath.Join(tmpDir, LockFileName), lockData, 0644)
 
 	// Mock IssueTracker returning error
-	mockTracker := &MockIssueTracker{
-		GetIssueFunc: func(ctx context.Context, id string) (*BdIssue, error) {
+	mockTracker := &MockIssueBackend{
+		GetFn: func(ctx context.Context, id string) (*backend.IssueDetailData, error) {
 			return nil, errors.New("bd error")
 		},
 	}
-	setDefaultTracker(mockTracker)
-	t.Cleanup(func() { setDefaultTracker(nil) })
+	setDefaultIssueBackend(mockTracker)
+	t.Cleanup(func() { setDefaultIssueBackend(nil) })
 
 	// Capture stdout
 	oldStdout := os.Stdout
@@ -128,13 +130,13 @@ func TestRunClaim_NoTitle(t *testing.T) {
 }
 
 func TestGetTaskTitle_Success(t *testing.T) {
-	mock := &MockIssueTracker{
-		GetIssueFunc: func(ctx context.Context, id string) (*BdIssue, error) {
-			return &BdIssue{ID: id, Title: "My Task Title"}, nil
+	mock := &MockIssueBackend{
+		GetFn: func(ctx context.Context, id string) (*backend.IssueDetailData, error) {
+			return &backend.IssueDetailData{IssueData: backend.IssueData{ID: id, Title: "My Task Title"}}, nil
 		},
 	}
-	setDefaultTracker(mock)
-	t.Cleanup(func() { setDefaultTracker(nil) })
+	setDefaultIssueBackend(mock)
+	t.Cleanup(func() { setDefaultIssueBackend(nil) })
 
 	title := getTaskTitle("bd-789")
 	if title != "My Task Title" {
@@ -143,13 +145,13 @@ func TestGetTaskTitle_Success(t *testing.T) {
 }
 
 func TestGetTaskTitle_BdError(t *testing.T) {
-	mock := &MockIssueTracker{
-		GetIssueFunc: func(ctx context.Context, id string) (*BdIssue, error) {
+	mock := &MockIssueBackend{
+		GetFn: func(ctx context.Context, id string) (*backend.IssueDetailData, error) {
 			return nil, errors.New("bd error")
 		},
 	}
-	setDefaultTracker(mock)
-	t.Cleanup(func() { setDefaultTracker(nil) })
+	setDefaultIssueBackend(mock)
+	t.Cleanup(func() { setDefaultIssueBackend(nil) })
 
 	title := getTaskTitle("bd-error")
 	if title != "" {
@@ -158,13 +160,13 @@ func TestGetTaskTitle_BdError(t *testing.T) {
 }
 
 func TestGetTaskTitle_NilIssue(t *testing.T) {
-	mock := &MockIssueTracker{
-		GetIssueFunc: func(ctx context.Context, id string) (*BdIssue, error) {
+	mock := &MockIssueBackend{
+		GetFn: func(ctx context.Context, id string) (*backend.IssueDetailData, error) {
 			return nil, nil
 		},
 	}
-	setDefaultTracker(mock)
-	t.Cleanup(func() { setDefaultTracker(nil) })
+	setDefaultIssueBackend(mock)
+	t.Cleanup(func() { setDefaultIssueBackend(nil) })
 
 	title := getTaskTitle("bd-empty")
 	if title != "" {
@@ -174,14 +176,14 @@ func TestGetTaskTitle_NilIssue(t *testing.T) {
 
 func TestGetTaskTitle_PassesCorrectID(t *testing.T) {
 	var capturedID string
-	mock := &MockIssueTracker{
-		GetIssueFunc: func(ctx context.Context, id string) (*BdIssue, error) {
+	mock := &MockIssueBackend{
+		GetFn: func(ctx context.Context, id string) (*backend.IssueDetailData, error) {
 			capturedID = id
-			return &BdIssue{ID: id, Title: "Test"}, nil
+			return &backend.IssueDetailData{IssueData: backend.IssueData{ID: id, Title: "Test"}}, nil
 		},
 	}
-	setDefaultTracker(mock)
-	t.Cleanup(func() { setDefaultTracker(nil) })
+	setDefaultIssueBackend(mock)
+	t.Cleanup(func() { setDefaultIssueBackend(nil) })
 
 	getTaskTitle("bd-123")
 	if capturedID != "bd-123" {

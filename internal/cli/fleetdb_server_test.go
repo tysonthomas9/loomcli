@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/backend"
 )
 
 // shortTempSocket creates a short socket path under /tmp to stay within the
@@ -65,14 +67,14 @@ func TestFleetDBServer_AutoStartMiniredis(t *testing.T) {
 func TestFleetDBServer_InMemoryStorage(t *testing.T) {
 	srv := newTestFleetDBServer(t)
 
-	backend := srv.Backend()
-	if backend == nil {
+	ib := srv.Backend()
+	if ib == nil {
 		t.Fatal("expected Backend() to return non-nil")
 	}
 
 	// List issues — should return empty list for fresh in-memory storage.
 	ctx := context.Background()
-	issues, err := backend.List(ctx, ListOpts{})
+	issues, err := ib.List(ctx, backend.ListOpts{})
 	if err != nil {
 		t.Fatalf("unexpected error from list: %v", err)
 	}
@@ -101,15 +103,15 @@ func TestFleetDBServer_StopIdempotent(t *testing.T) {
 func TestFleetDBServer_BackendRoundTrip(t *testing.T) {
 	srv := newTestFleetDBServer(t)
 
-	backend := srv.Backend()
-	if backend == nil {
+	ib := srv.Backend()
+	if ib == nil {
 		t.Fatal("expected Backend() to return non-nil")
 	}
 
 	ctx := context.Background()
 
 	// Verify list returns empty initially.
-	issues, err := backend.List(ctx, ListOpts{})
+	issues, err := ib.List(ctx, backend.ListOpts{})
 	if err != nil {
 		t.Fatalf("unexpected error from list: %v", err)
 	}
@@ -118,17 +120,17 @@ func TestFleetDBServer_BackendRoundTrip(t *testing.T) {
 	}
 
 	// Verify stats works and returns valid data.
-	stats, err := backend.Stats(ctx)
+	stats, err := ib.Stats(ctx)
 	if err != nil {
 		t.Fatalf("unexpected error from stats: %v", err)
 	}
 	// Fresh database should have zero issues.
-	if stats.Summary.TotalIssues != 0 {
-		t.Errorf("expected 0 total issues, got %d", stats.Summary.TotalIssues)
+	if stats.TotalIssues != 0 {
+		t.Errorf("expected 0 total issues, got %d", stats.TotalIssues)
 	}
 
 	// Verify ready returns empty list.
-	readyIssues, err := backend.Ready(ctx, ReadyOpts{})
+	readyIssues, err := ib.Ready(ctx, backend.ReadyOpts{})
 	if err != nil {
 		t.Fatalf("unexpected error from ready: %v", err)
 	}
@@ -137,7 +139,7 @@ func TestFleetDBServer_BackendRoundTrip(t *testing.T) {
 	}
 
 	// Verify blocked returns empty list.
-	blockedIssues, err := backend.Blocked(ctx)
+	blockedIssues, err := ib.Blocked(ctx, backend.BlockedOpts{})
 	if err != nil {
 		t.Fatalf("unexpected error from blocked: %v", err)
 	}
@@ -214,15 +216,15 @@ func TestFleetDBServer_NoRedis(t *testing.T) {
 	}
 
 	// Backend should still work for issue operations.
-	backend := srv.Backend()
-	if backend == nil {
+	ib := srv.Backend()
+	if ib == nil {
 		t.Fatal("expected Backend() to return non-nil even without Redis")
 	}
 
 	ctx := context.Background()
 
 	// List issues — should still return empty list.
-	issues, err := backend.List(ctx, ListOpts{})
+	issues, err := ib.List(ctx, backend.ListOpts{})
 	if err != nil {
 		t.Fatalf("unexpected error from list: %v", err)
 	}
@@ -231,11 +233,11 @@ func TestFleetDBServer_NoRedis(t *testing.T) {
 	}
 
 	// Stats should work.
-	stats, err := backend.Stats(ctx)
+	stats, err := ib.Stats(ctx)
 	if err != nil {
 		t.Fatalf("unexpected error from stats: %v", err)
 	}
-	if stats.Summary.TotalIssues != 0 {
-		t.Errorf("expected 0 total issues, got %d", stats.Summary.TotalIssues)
+	if stats.TotalIssues != 0 {
+		t.Errorf("expected 0 total issues, got %d", stats.TotalIssues)
 	}
 }

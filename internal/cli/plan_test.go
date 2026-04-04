@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	"github.com/tysonthomas9/loomcli/internal/backend"
 )
 
 // newPlanCmd creates a fresh cobra.Command wired to runPlan with given deps.
@@ -23,16 +25,16 @@ func newPlanCmd(deps *Deps) *cobra.Command {
 	return cmd
 }
 
-// setupPlanTracker configures deps.Tracker with the given issues and installs
+// setupPlanTracker configures deps.IssueBackend with the given issues and installs
 // it as the global default tracker. Cleanup restores the original tracker.
-func setupPlanTracker(t *testing.T, deps *Deps, issues []BdIssue) {
+func setupPlanTracker(t *testing.T, deps *Deps, issues []backend.IssueData) {
 	t.Helper()
-	tracker := deps.Tracker.(*MockIssueTracker)
+	tracker := deps.IssueBackend.(*MockIssueBackend)
 	tracker.ReadyResult = issues
 	tracker.ListResult = issues
-	resetDefaultTracker()
-	setDefaultTracker(tracker)
-	t.Cleanup(resetDefaultTracker)
+	resetDefaultIssueBackend()
+	setDefaultIssueBackend(tracker)
+	t.Cleanup(resetDefaultIssueBackend)
 }
 
 func TestRunPlan_SingleTask_NoTasksAvailable(t *testing.T) {
@@ -72,7 +74,7 @@ func TestRunPlan_SingleTask_Success(t *testing.T) {
 	os.MkdirAll(filepath.Join(tmpDir, ".git"), 0755)
 
 	deps, _, _, _, _ := NewTestDeps(t)
-	setupPlanTracker(t, deps, []BdIssue{
+	setupPlanTracker(t, deps, []backend.IssueData{
 		{ID: "bd-123", Status: "open", IssueType: "task", Title: "Test task"},
 	})
 
@@ -162,7 +164,7 @@ func TestRunPlan_SkipsEpics(t *testing.T) {
 	os.MkdirAll(filepath.Join(tmpDir, ".git"), 0755)
 
 	deps, _, _, _, _ := NewTestDeps(t)
-	setupPlanTracker(t, deps, []BdIssue{
+	setupPlanTracker(t, deps, []backend.IssueData{
 		{ID: "bd-123", Status: "open", IssueType: "epic", Title: "Test epic"},
 	})
 
@@ -192,7 +194,7 @@ func TestRunPlan_SkipsInProgress(t *testing.T) {
 	os.MkdirAll(filepath.Join(tmpDir, ".git"), 0755)
 
 	deps, _, _, _, _ := NewTestDeps(t)
-	setupPlanTracker(t, deps, []BdIssue{
+	setupPlanTracker(t, deps, []backend.IssueData{
 		{ID: "bd-123", Status: "in_progress", IssueType: "task", Title: "Test task"},
 	})
 
@@ -219,7 +221,6 @@ func TestHasAvailablePlanningTasks_Success(t *testing.T) {
 	taskJSON := `[{"id":"bd-1","status":"open","issue_type":"task","design":""}]`
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
-		{Name: "bd", Args: []string{"list", "--json", "--limit", "500"}, Stdout: taskJSON},
 	})
 	mock.Install()
 
@@ -237,7 +238,6 @@ func TestHasAvailablePlanningTasks_SkipsTasksWithDesign(t *testing.T) {
 	taskJSON := `[{"id":"bd-1","status":"open","issue_type":"task","design":"Some plan here"}]`
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
-		{Name: "bd", Args: []string{"list", "--json", "--limit", "500"}, Stdout: taskJSON},
 	})
 	mock.Install()
 
@@ -272,7 +272,6 @@ func TestGetAvailablePlanningTasks_Success(t *testing.T) {
 	taskJSON := `[{"id":"bd-1","status":"open","issue_type":"task","design":""}]`
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
-		{Name: "bd", Args: []string{"list", "--json", "--limit", "500"}, Stdout: taskJSON},
 	})
 	mock.Install()
 
@@ -293,7 +292,6 @@ func TestGetAvailablePlanningTasks_ReturnsEmpty(t *testing.T) {
 	taskJSON := `[{"id":"bd-1","status":"open","issue_type":"task","design":"Some plan here"}]`
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
-		{Name: "bd", Args: []string{"list", "--json", "--limit", "500"}, Stdout: taskJSON},
 	})
 	mock.Install()
 

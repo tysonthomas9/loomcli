@@ -15,8 +15,8 @@ import (
 var epicHasReadyTasks = defaultEpicHasReadyTasks
 
 func defaultEpicHasReadyTasks(epicID string) (bool, error) {
-	tracker := defaultTracker()
-	issues, err := tracker.Ready(context.Background(), ReadyOpts{ParentID: epicID, Limit: 1})
+	ib := defaultIssueBackend()
+	issues, err := ib.Ready(context.Background(), backend.ReadyOpts{ParentID: epicID, Limit: 1})
 	if err != nil {
 		return false, fmt.Errorf("failed to check ready tasks for epic %s: %w", epicID, err)
 	}
