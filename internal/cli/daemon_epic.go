@@ -6,6 +6,7 @@ import (
 	"log"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/events"
 )
 
@@ -16,6 +17,23 @@ var epicHasReadyTasks = defaultEpicHasReadyTasks
 func defaultEpicHasReadyTasks(epicID string) (bool, error) {
 	tracker := defaultTracker()
 	issues, err := tracker.Ready(context.Background(), ReadyOpts{ParentID: epicID, Limit: 1})
+	if err != nil {
+		return false, fmt.Errorf("failed to check ready tasks for epic %s: %w", epicID, err)
+	}
+	return len(issues) > 0, nil
+}
+
+// epicHasReadyTasksViaBackend checks if the given epic has at least one
+// ready task using the daemon's injected IssueBackend. When the backend is nil,
+// it falls back to the legacy global epicHasReadyTasks function.
+func (d *Daemon) epicHasReadyTasksViaBackend(epicID string) (bool, error) {
+	if d.issueBackend == nil {
+		return epicHasReadyTasks(epicID)
+	}
+	issues, err := d.issueBackend.Ready(context.Background(), backend.ReadyOpts{
+		ParentID: epicID,
+		Limit:    1,
+	})
 	if err != nil {
 		return false, fmt.Errorf("failed to check ready tasks for epic %s: %w", epicID, err)
 	}
@@ -46,7 +64,7 @@ func (d *Daemon) handleEpicTransition(ap *AgentProcess) {
 		return
 	}
 
-	hasReady, err := epicHasReadyTasks(currentEpicID)
+	hasReady, err := d.epicHasReadyTasksViaBackend(currentEpicID)
 	if err != nil {
 		log.Printf("[daemon] Agent %s: failed to check epic %s for ready tasks: %v",
 			ap.entry.Worktree, currentEpicID, err)

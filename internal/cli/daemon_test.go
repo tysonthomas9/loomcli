@@ -63,7 +63,7 @@ func TestNewDaemon(t *testing.T) {
 			nil,
 		)
 
-		daemon, err := NewDaemon(config, tmpDir, nil)
+		daemon, err := NewDaemon(config, tmpDir, nil, nil)
 		if err != nil {
 			t.Fatalf("NewDaemon() error = %v", err)
 		}
@@ -76,7 +76,7 @@ func TestNewDaemon(t *testing.T) {
 	})
 
 	t.Run("nil config returns error", func(t *testing.T) {
-		_, err := NewDaemon(nil, "/tmp", nil)
+		_, err := NewDaemon(nil, "/tmp", nil, nil)
 		if err == nil {
 			t.Fatal("expected error for nil config")
 		}
@@ -88,7 +88,7 @@ func TestNewDaemon(t *testing.T) {
 	t.Run("empty agents list returns error", func(t *testing.T) {
 		config := makeDaemonConfig([]AgentEntry{}, nil)
 
-		_, err := NewDaemon(config, "/tmp", nil)
+		_, err := NewDaemon(config, "/tmp", nil, nil)
 		if err == nil {
 			t.Fatal("expected error for empty agents")
 		}
@@ -113,7 +113,7 @@ func TestNewDaemon(t *testing.T) {
 			nil, // no custom roles defined
 		)
 
-		_, err := NewDaemon(config, tmpDir, nil)
+		_, err := NewDaemon(config, tmpDir, nil, nil)
 		if err == nil {
 			t.Fatal("expected error for unknown role")
 		}
@@ -140,7 +140,7 @@ func TestNewDaemon(t *testing.T) {
 			},
 		)
 
-		_, err := NewDaemon(config, tmpDir, nil)
+		_, err := NewDaemon(config, tmpDir, nil, nil)
 		if err == nil {
 			t.Fatal("expected error for missing prompt_file")
 		}
@@ -170,7 +170,7 @@ func TestNewDaemon(t *testing.T) {
 			},
 		)
 
-		_, err := NewDaemon(config, tmpDir, nil)
+		_, err := NewDaemon(config, tmpDir, nil, nil)
 		if err == nil {
 			t.Fatal("expected error for non-existent prompt file")
 		}
@@ -200,7 +200,7 @@ func TestNewDaemon(t *testing.T) {
 			nil, // no custom roles - built-in should work
 		)
 
-		daemon, err := NewDaemon(config, tmpDir, nil)
+		daemon, err := NewDaemon(config, tmpDir, nil, nil)
 		if err != nil {
 			t.Fatalf("NewDaemon() error = %v", err)
 		}
@@ -248,7 +248,7 @@ func TestNewDaemon(t *testing.T) {
 			},
 		)
 
-		daemon, err := NewDaemon(config, tmpDir, nil)
+		daemon, err := NewDaemon(config, tmpDir, nil, nil)
 		if err != nil {
 			t.Fatalf("NewDaemon() error = %v", err)
 		}
@@ -1075,7 +1075,7 @@ func TestDaemonAgents(t *testing.T) {
 			nil,
 		)
 
-		daemon, err := NewDaemon(config, tmpDir, nil)
+		daemon, err := NewDaemon(config, tmpDir, nil, nil)
 		if err != nil {
 			t.Fatalf("NewDaemon() error = %v", err)
 		}

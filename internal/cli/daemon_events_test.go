@@ -62,7 +62,7 @@ func TestDaemon_NewDaemon_StoresEventBus(t *testing.T) {
 	tmpDir := setupTestWorktree(t, "falcon")
 	config := makeDaemonConfig(agents, nil)
 
-	daemon, err := NewDaemon(config, tmpDir, spy)
+	daemon, err := NewDaemon(config, tmpDir, spy, nil)
 	if err != nil {
 		t.Fatalf("NewDaemon() error = %v", err)
 	}
@@ -76,7 +76,7 @@ func TestDaemon_NewDaemon_NilBusDefaultsToNop(t *testing.T) {
 	tmpDir := setupTestWorktree(t, "falcon")
 	config := makeDaemonConfig(agents, nil)
 
-	daemon, err := NewDaemon(config, tmpDir, nil)
+	daemon, err := NewDaemon(config, tmpDir, nil, nil)
 	if err != nil {
 		t.Fatalf("NewDaemon() error = %v", err)
 	}

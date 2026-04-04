@@ -465,7 +465,7 @@ func TestDaemonPlannerSmoke_SupervisorStartShutdown(t *testing.T) {
 		nil,
 	)
 
-	daemon, err := NewDaemon(config, tmpDir, nil)
+	daemon, err := NewDaemon(config, tmpDir, nil, nil)
 	if err != nil {
 		t.Fatalf("NewDaemon() error = %v", err)
 	}

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
@@ -127,10 +128,11 @@ type Daemon struct {
 	shutdownOnce sync.Once      // protects shutdown channel from double-close
 	wg           sync.WaitGroup // tracks superviseAgent goroutines
 
-	concurrency *ConcurrencyTracker // enforces per-role concurrency limits
-	eventBus    events.Emitter      // event emission for observability (nil-safe via NopBus default)
-	repos       []RepoConfig        // workspace repos for resolveAgentRepos; nil outside workspace mode
-	workspaceID string              // stable workspace UUID for log namespacing; empty outside workspace mode
+	concurrency  *ConcurrencyTracker  // enforces per-role concurrency limits
+	eventBus     events.Emitter       // event emission for observability (nil-safe via NopBus default)
+	issueBackend backend.IssueBackend // pluggable issue data access (nil = use legacy defaultTracker)
+	repos        []RepoConfig         // workspace repos for resolveAgentRepos; nil outside workspace mode
+	workspaceID  string               // stable workspace UUID for log namespacing; empty outside workspace mode
 
 	configHash  string       // SHA-256 hash of current running config for no-op detection
 	reconcileMu sync.RWMutex // serializes config writes; readers hold RLock when accessing d.config
@@ -202,7 +204,8 @@ var builtInRoles = map[string]bool{
 
 // NewDaemon creates a daemon from the loaded config.
 // If eventBus is nil, a NopBus is used (events are silently discarded).
-func NewDaemon(config *DaemonConfig, projectDir string, eventBus events.Emitter) (*Daemon, error) {
+// If issueBackend is nil, the daemon falls back to the legacy defaultTracker() for issue queries.
+func NewDaemon(config *DaemonConfig, projectDir string, eventBus events.Emitter, issueBackend backend.IssueBackend) (*Daemon, error) {
 	if config == nil {
 		return nil, fmt.Errorf("daemon config is nil")
 	}
@@ -221,6 +224,7 @@ func NewDaemon(config *DaemonConfig, projectDir string, eventBus events.Emitter)
 		stoppedAgents: make(map[string]struct{}),
 		concurrency:   NewConcurrencyTracker(config.Roles),
 		eventBus:      eventBus,
+		issueBackend:  issueBackend,
 	}
 
 	// Load workspace repos and ID for source repo resolution and log namespacing (best-effort)
