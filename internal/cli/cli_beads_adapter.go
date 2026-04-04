@@ -171,6 +171,17 @@ func (a *cliBeadsAdapter) Close(_ context.Context, id string, params backend.Clo
 	return &backend.CloseResult{}, nil
 }
 
+func (a *cliBeadsAdapter) Reopen(_ context.Context, id string, params backend.ReopenParams) error {
+	if id == "" {
+		return backend.ErrValidation("Reopen", "id must not be empty")
+	}
+	args := []string{"reopen", id}
+	if params.Reason != "" {
+		args = append(args, "--reason", params.Reason)
+	}
+	return a.runMutation("Reopen", args...)
+}
+
 func (a *cliBeadsAdapter) Delete(_ context.Context, _ backend.DeleteParams) error {
 	return backend.ErrNotImplemented("Delete", "not supported via CLI adapter")
 }

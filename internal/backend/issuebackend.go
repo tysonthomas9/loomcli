@@ -68,6 +68,11 @@ type IssueBackend interface {
 	// the issue does not exist.
 	Close(ctx context.Context, id string, params CloseParams) (*CloseResult, error)
 
+	// Reopen transitions a closed issue back to open status. If
+	// ReopenParams.Reason is non-empty, it is recorded as a comment on the
+	// issue. Returns KindNotFound if the issue does not exist.
+	Reopen(ctx context.Context, id string, params ReopenParams) error
+
 	// Delete permanently removes one or more issues. Returns KindValidation
 	// if DeleteParams.IDs is empty, KindNotFound if any ID does not exist
 	// (unless Force is true).

@@ -113,3 +113,79 @@ func TestCliBeadsAdapter_ClaimIssue_RunnerError(t *testing.T) {
 		t.Errorf("error should contain 'already claimed', got %q", err.Error())
 	}
 }
+
+func TestCliBeadsAdapter_Reopen_Success(t *testing.T) {
+	runner := &mockBDRunner{}
+	a := newCliBeadsAdapter(runner, "/tmp/test")
+
+	err := a.Reopen(context.Background(), "T-11", backend.ReopenParams{Reason: "regression found"})
+	if err != nil {
+		t.Fatalf("Reopen() error = %v", err)
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(runner.calls))
+	}
+	got := strings.Join(runner.calls[0].Args, " ")
+	want := "reopen T-11 --reason regression found"
+	if got != want {
+		t.Errorf("args = %q, want %q", got, want)
+	}
+}
+
+func TestCliBeadsAdapter_Reopen_NoReason(t *testing.T) {
+	runner := &mockBDRunner{}
+	a := newCliBeadsAdapter(runner, "/tmp/test")
+
+	err := a.Reopen(context.Background(), "T-11", backend.ReopenParams{})
+	if err != nil {
+		t.Fatalf("Reopen() error = %v", err)
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(runner.calls))
+	}
+	got := strings.Join(runner.calls[0].Args, " ")
+	want := "reopen T-11"
+	if got != want {
+		t.Errorf("args = %q, want %q", got, want)
+	}
+}
+
+func TestCliBeadsAdapter_Reopen_RunnerError(t *testing.T) {
+	runner := &mockBDRunner{
+		fn: func(_ string, _ ...string) CommandResult {
+			return CommandResult{
+				Err:    fmt.Errorf("exit status 1"),
+				Stderr: "issue not found",
+			}
+		},
+	}
+	a := newCliBeadsAdapter(runner, "/tmp/test")
+
+	err := a.Reopen(context.Background(), "T-11", backend.ReopenParams{Reason: "test"})
+	if err == nil {
+		t.Fatal("expected error for runner failure")
+	}
+	if !strings.Contains(err.Error(), "issue not found") {
+		t.Errorf("error should contain 'issue not found', got %q", err.Error())
+	}
+}
+
+func TestCliBeadsAdapter_Reopen_EmptyID(t *testing.T) {
+	runner := &mockBDRunner{}
+	a := newCliBeadsAdapter(runner, "/tmp/test")
+
+	err := a.Reopen(context.Background(), "", backend.ReopenParams{Reason: "test"})
+	if err == nil {
+		t.Fatal("expected error for empty ID")
+	}
+	if len(runner.calls) != 0 {
+		t.Error("runner should not be called for empty ID")
+	}
+	var be *backend.BackendError
+	if !errors.As(err, &be) {
+		t.Fatalf("expected *backend.BackendError, got %T", err)
+	}
+	if be.Kind != backend.KindValidation {
+		t.Errorf("BackendError.Kind = %q, want %q", be.Kind, backend.KindValidation)
+	}
+}

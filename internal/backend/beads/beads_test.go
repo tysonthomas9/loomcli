@@ -744,6 +744,144 @@ func TestClose_HappyPath(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Reopen
+// ---------------------------------------------------------------------------
+
+func TestReopen_HappyPath(t *testing.T) {
+	var updateCalled, commentCalled bool
+
+	mc := &mockClient{
+		UpdateFn: func(args *rpc.UpdateArgs) (*rpc.Response, error) {
+			updateCalled = true
+			if args.ID != "bd-60" {
+				t.Errorf("UpdateArgs.ID = %q, want %q", args.ID, "bd-60")
+			}
+			if args.Status == nil || *args.Status != "open" {
+				t.Errorf("UpdateArgs.Status = %v, want ptr to %q", args.Status, "open")
+			}
+			return &rpc.Response{Success: true, Data: []byte(`{}`)}, nil
+		},
+		AddCommentFn: func(args *rpc.CommentAddArgs) (*rpc.Response, error) {
+			commentCalled = true
+			if args.ID != "bd-60" {
+				t.Errorf("CommentAddArgs.ID = %q, want %q", args.ID, "bd-60")
+			}
+			if args.Text != "regression found" {
+				t.Errorf("CommentAddArgs.Text = %q, want %q", args.Text, "regression found")
+			}
+			return &rpc.Response{Success: true, Data: []byte(`{}`)}, nil
+		},
+	}
+
+	b := New(mc)
+	err := b.Reopen(context.Background(), "bd-60", backend.ReopenParams{
+		Reason: "regression found",
+	})
+	if err != nil {
+		t.Fatalf("Reopen() error = %v", err)
+	}
+	if !updateCalled {
+		t.Error("expected Update to be called")
+	}
+	if !commentCalled {
+		t.Error("expected AddComment to be called when reason is non-empty")
+	}
+}
+
+func TestReopen_NoReason(t *testing.T) {
+	var updateCalled, commentCalled bool
+
+	mc := &mockClient{
+		UpdateFn: func(args *rpc.UpdateArgs) (*rpc.Response, error) {
+			updateCalled = true
+			if args.ID != "bd-61" {
+				t.Errorf("UpdateArgs.ID = %q, want %q", args.ID, "bd-61")
+			}
+			if args.Status == nil || *args.Status != "open" {
+				t.Errorf("UpdateArgs.Status = %v, want ptr to %q", args.Status, "open")
+			}
+			return &rpc.Response{Success: true, Data: []byte(`{}`)}, nil
+		},
+		AddCommentFn: func(_ *rpc.CommentAddArgs) (*rpc.Response, error) {
+			commentCalled = true
+			return &rpc.Response{Success: true, Data: []byte(`{}`)}, nil
+		},
+	}
+
+	b := New(mc)
+	err := b.Reopen(context.Background(), "bd-61", backend.ReopenParams{})
+	if err != nil {
+		t.Fatalf("Reopen() error = %v", err)
+	}
+	if !updateCalled {
+		t.Error("expected Update to be called")
+	}
+	if commentCalled {
+		t.Error("AddComment should NOT be called when reason is empty")
+	}
+}
+
+func TestReopen_UpdateError(t *testing.T) {
+	var commentCalled bool
+
+	mc := &mockClient{
+		UpdateFn: func(_ *rpc.UpdateArgs) (*rpc.Response, error) {
+			return nil, errors.New("update failed")
+		},
+		AddCommentFn: func(_ *rpc.CommentAddArgs) (*rpc.Response, error) {
+			commentCalled = true
+			return &rpc.Response{Success: true, Data: []byte(`{}`)}, nil
+		},
+	}
+
+	b := New(mc)
+	err := b.Reopen(context.Background(), "bd-62", backend.ReopenParams{
+		Reason: "should not matter",
+	})
+	if err == nil {
+		t.Fatal("expected error when Update fails")
+	}
+	if commentCalled {
+		t.Error("AddComment should NOT be called when Update fails")
+	}
+}
+
+func TestReopen_AddCommentError_NonFatal(t *testing.T) {
+	mc := &mockClient{
+		UpdateFn: func(_ *rpc.UpdateArgs) (*rpc.Response, error) {
+			return &rpc.Response{Success: true, Data: []byte(`{}`)}, nil
+		},
+		AddCommentFn: func(_ *rpc.CommentAddArgs) (*rpc.Response, error) {
+			return nil, errors.New("comment failed")
+		},
+	}
+
+	b := New(mc)
+	err := b.Reopen(context.Background(), "bd-63", backend.ReopenParams{
+		Reason: "regression found",
+	})
+	if err != nil {
+		t.Fatalf("Reopen() should succeed even when AddComment fails, got %v", err)
+	}
+}
+
+func TestReopen_EmptyID(t *testing.T) {
+	mc := &mockClient{}
+	b := New(mc)
+	err := b.Reopen(context.Background(), "", backend.ReopenParams{Reason: "test"})
+	if err == nil {
+		t.Fatal("expected error for empty ID")
+	}
+	var be *backend.BackendError
+	if !errors.As(err, &be) {
+		t.Fatalf("expected *backend.BackendError, got %T", err)
+	}
+	if be.Kind != backend.KindValidation {
+		t.Errorf("BackendError.Kind = %q, want %q", be.Kind, backend.KindValidation)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Delete (happy path)
 // ---------------------------------------------------------------------------
 

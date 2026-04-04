@@ -339,6 +339,11 @@ type CloseParams struct {
 	Force       bool   `json:"force,omitempty"`
 }
 
+// ReopenParams contains fields for reopening a closed issue.
+type ReopenParams struct {
+	Reason string `json:"reason,omitempty"`
+}
+
 // DeleteParams contains fields for deleting issue(s).
 // At least one ID is required; implementations return a validation error
 // if IDs is empty.

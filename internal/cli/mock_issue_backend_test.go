@@ -73,6 +73,10 @@ type MockIssueBackend struct {
 	CloseErr    error
 	CloseFn     func(ctx context.Context, id string, params backend.CloseParams) (*backend.CloseResult, error)
 
+	// Reopen
+	ReopenErr error
+	ReopenFn  func(ctx context.Context, id string, params backend.ReopenParams) error
+
 	// Delete
 	DeleteErr error
 	DeleteFn  func(ctx context.Context, params backend.DeleteParams) error
@@ -272,6 +276,19 @@ func (m *MockIssueBackend) Close(ctx context.Context, id string, params backend.
 	return result, resultErr
 }
 
+// Reopen implements backend.IssueBackend.
+func (m *MockIssueBackend) Reopen(ctx context.Context, id string, params backend.ReopenParams) error {
+	m.mu.Lock()
+	m.record("Reopen", id, params)
+	fn := m.ReopenFn
+	resultErr := m.ReopenErr
+	m.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, id, params)
+	}
+	return resultErr
+}
+
 // Delete implements backend.IssueBackend.
 func (m *MockIssueBackend) Delete(ctx context.Context, params backend.DeleteParams) error {
 	m.mu.Lock()
@@ -458,9 +475,10 @@ func TestMockIssueBackend_RecordsCalls(t *testing.T) {
 	_, _ = m.Ready(ctx, backend.ReadyOpts{Limit: 10})
 	_, _ = m.Get(ctx, "task-1")
 	_, _ = m.Close(ctx, "task-1", backend.CloseParams{Reason: "done"})
+	_ = m.Reopen(ctx, "task-1", backend.ReopenParams{Reason: "regression"})
 
-	if len(m.Calls) != 3 {
-		t.Fatalf("expected 3 calls, got %d", len(m.Calls))
+	if len(m.Calls) != 4 {
+		t.Fatalf("expected 4 calls, got %d", len(m.Calls))
 	}
 	if m.Calls[0].Method != "Ready" {
 		t.Errorf("call 0: got %q, want Ready", m.Calls[0].Method)
@@ -471,9 +489,19 @@ func TestMockIssueBackend_RecordsCalls(t *testing.T) {
 	if m.Calls[2].Method != "Close" {
 		t.Errorf("call 2: got %q, want Close", m.Calls[2].Method)
 	}
+	if m.Calls[3].Method != "Reopen" {
+		t.Errorf("call 3: got %q, want Reopen", m.Calls[3].Method)
+	}
 	// Verify args recorded for Get
 	if id, ok := m.Calls[1].Args[0].(string); !ok || id != "task-1" {
 		t.Errorf("Get arg: got %v, want task-1", m.Calls[1].Args[0])
+	}
+	// Verify args recorded for Reopen
+	if id, ok := m.Calls[3].Args[0].(string); !ok || id != "task-1" {
+		t.Errorf("Reopen arg 0: got %v, want task-1", m.Calls[3].Args[0])
+	}
+	if params, ok := m.Calls[3].Args[1].(backend.ReopenParams); !ok || params.Reason != "regression" {
+		t.Errorf("Reopen arg 1: got %v, want ReopenParams{Reason: regression}", m.Calls[3].Args[1])
 	}
 }
 
