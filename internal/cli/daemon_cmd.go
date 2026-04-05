@@ -49,6 +49,8 @@ type DaemonState struct {
 
 // Cobra command variables
 var daemonDryRun bool
+var daemonStopForce bool
+var daemonStopTimeout int // seconds; 0 = default (60)
 
 // daemonCmd is the parent command for daemon subcommands
 var daemonCmd = &cobra.Command{
@@ -143,6 +145,10 @@ func init() {
 		"Validate config and print what would be started without actually starting")
 	daemonCmd.AddCommand(daemonStatusCmd)
 	daemonCmd.AddCommand(daemonLogsCmd)
+	daemonStopCmd.Flags().BoolVarP(&daemonStopForce, "force", "f", false,
+		"Skip graceful yield, send SIGTERM immediately (agent) or SIGKILL (daemon)")
+	daemonStopCmd.Flags().IntVarP(&daemonStopTimeout, "timeout", "t", 0,
+		"Yield timeout in seconds (default: 60; only for agent stop)")
 	daemonCmd.AddCommand(daemonStopCmd)
 	daemonCmd.AddCommand(daemonAgentStartCmd)
 	daemonCmd.AddCommand(daemonAgentRestartCmd)
@@ -407,7 +413,12 @@ func statusToIcon(status string) string {
 func runDaemonStop(cmd *cobra.Command, args []string) {
 	// If an agent name is provided, stop that single agent via control socket
 	if len(args) > 0 {
-		runDaemonAgentStop(args[0])
+		// --timeout flag: 0 = force (skip yield), >0 = custom, unset = default 60s
+		timeout := 60 * time.Second
+		if cmd.Flags().Changed("timeout") {
+			timeout = time.Duration(daemonStopTimeout) * time.Second
+		}
+		runDaemonAgentStop(args[0], daemonStopForce, timeout)
 		return
 	}
 
@@ -432,27 +443,11 @@ func runDaemonStop(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	fmt.Printf("Stopping daemon (PID %d)...\n", rt.PID)
-
-	// Send SIGTERM for graceful shutdown
-	if err := syscall.Kill(rt.PID, syscall.SIGTERM); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: sending SIGTERM: %v\n", err)
-		os.Exit(1)
+	if daemonStopForce {
+		stopDaemonForce(rt.PID)
+	} else {
+		stopDaemonGraceful(rt.PID)
 	}
-
-	// Wait for daemon to exit (up to 30 seconds)
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		if !lockfile.IsProcessRunning(rt.PID) {
-			fmt.Println("Daemon stopped.")
-			return
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-
-	fmt.Fprintf(os.Stderr, "Warning: daemon did not stop within 30 seconds\n")
-	fmt.Fprintf(os.Stderr, "You may need to kill it manually: kill -9 %d\n", rt.PID)
-	os.Exit(1)
 }
 
 func runDaemonConfig(cmd *cobra.Command, args []string) {

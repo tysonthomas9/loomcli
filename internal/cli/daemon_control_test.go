@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"encoding/json"
 	"net"
 	"os"
@@ -61,7 +62,7 @@ func TestControlServer_StopAgent(t *testing.T) {
 	})
 	defer close(d.shutdown)
 
-	resp := d.handleAgentControlStop("alpha")
+	resp := d.handleAgentControlStop("alpha", false)
 	if !resp.Success {
 		t.Fatalf("expected success, got error: %s", resp.Error)
 	}
@@ -105,7 +106,7 @@ func TestControlServer_StartAgent(t *testing.T) {
 	}()
 
 	// Stop the agent first
-	resp := d.handleAgentControlStop("alpha")
+	resp := d.handleAgentControlStop("alpha", false)
 	if !resp.Success {
 		t.Fatalf("stop failed: %s", resp.Error)
 	}
@@ -202,7 +203,7 @@ func TestControlServer_RestartStoppedAgent(t *testing.T) {
 	}()
 
 	// Stop it first
-	resp := d.handleAgentControlStop("alpha")
+	resp := d.handleAgentControlStop("alpha", false)
 	if !resp.Success {
 		t.Fatalf("stop failed: %s", resp.Error)
 	}
@@ -231,13 +232,13 @@ func TestControlServer_StopAlreadyStopped(t *testing.T) {
 	defer close(d.shutdown)
 
 	// Stop it
-	resp := d.handleAgentControlStop("alpha")
+	resp := d.handleAgentControlStop("alpha", false)
 	if !resp.Success {
 		t.Fatalf("first stop failed: %s", resp.Error)
 	}
 
 	// Stop again — should fail
-	resp = d.handleAgentControlStop("alpha")
+	resp = d.handleAgentControlStop("alpha", false)
 	if resp.Success {
 		t.Fatal("expected error when stopping already stopped agent")
 	}
@@ -269,7 +270,7 @@ func TestControlServer_UnknownAgent(t *testing.T) {
 	defer close(d.shutdown)
 
 	t.Run("stop unknown agent", func(t *testing.T) {
-		resp := d.handleAgentControlStop("nonexistent")
+		resp := d.handleAgentControlStop("nonexistent", false)
 		if resp.Success {
 			t.Fatal("expected error for unknown agent")
 		}
@@ -315,7 +316,7 @@ func TestControlServer_ReconcilerRespectsStoppedAgents(t *testing.T) {
 	}
 
 	// Stop alpha
-	resp := d.handleAgentControlStop("alpha")
+	resp := d.handleAgentControlStop("alpha", false)
 	if !resp.Success {
 		t.Fatalf("stop failed: %s", resp.Error)
 	}
@@ -454,7 +455,7 @@ func TestControlServer_AgentList(t *testing.T) {
 
 	t.Run("with stopped agent", func(t *testing.T) {
 		// Stop beta
-		stopResp := d.handleAgentControlStop("beta")
+		stopResp := d.handleAgentControlStop("beta", false)
 		if !stopResp.Success {
 			t.Fatalf("stop failed: %s", stopResp.Error)
 		}
@@ -566,7 +567,7 @@ func TestControlServer_EmptyAgentName(t *testing.T) {
 	defer close(d.shutdown)
 
 	t.Run("stop with empty name", func(t *testing.T) {
-		resp := d.handleAgentControlStop("")
+		resp := d.handleAgentControlStop("", false)
 		if resp.Success {
 			t.Fatal("expected error for empty agent name")
 		}
@@ -613,7 +614,7 @@ func TestControlServer_ConcurrentStops(t *testing.T) {
 		wg.Add(1)
 		go func(idx int, n string) {
 			defer wg.Done()
-			results[idx] = d.handleAgentControlStop(n)
+			results[idx] = d.handleAgentControlStop(n, false)
 		}(i, name)
 	}
 	wg.Wait()
@@ -632,5 +633,297 @@ func TestControlServer_ConcurrentStops(t *testing.T) {
 		if !d.isAgentStopped(name) {
 			t.Errorf("isAgentStopped(%q) = false, want true", name)
 		}
+	}
+}
+
+func TestControlServer_ForceStop(t *testing.T) {
+	d := newTestDaemonWithAgents([]AgentEntry{
+		{Worktree: "alpha", Role: "plan"},
+		{Worktree: "beta", Role: "task"},
+	})
+	defer close(d.shutdown)
+
+	resp := d.handleAgentControlStop("alpha", true)
+	if !resp.Success {
+		t.Fatalf("expected success, got error: %s", resp.Error)
+	}
+
+	// alpha should be removed from agents slice
+	if d.AgentCount() != 1 {
+		t.Errorf("AgentCount() = %d, want 1", d.AgentCount())
+	}
+
+	// alpha should be in stoppedAgents
+	if !d.isAgentStopped("alpha") {
+		t.Error("isAgentStopped(alpha) = false, want true")
+	}
+
+	// beta should still be running
+	if d.isAgentStopped("beta") {
+		t.Error("isAgentStopped(beta) = true, want false")
+	}
+	if !d.isAgentRunning("beta") {
+		t.Error("isAgentRunning(beta) = false, want true")
+	}
+}
+
+func TestControlServer_ForceStopAlreadyStopped(t *testing.T) {
+	d := newTestDaemonWithAgents([]AgentEntry{
+		{Worktree: "alpha", Role: "plan"},
+	})
+	defer close(d.shutdown)
+
+	// Stop it first (graceful)
+	resp := d.handleAgentControlStop("alpha", false)
+	if !resp.Success {
+		t.Fatalf("first stop failed: %s", resp.Error)
+	}
+
+	// Force-stop again — should fail
+	resp = d.handleAgentControlStop("alpha", true)
+	if resp.Success {
+		t.Fatal("expected error when force-stopping already stopped agent")
+	}
+	if !strings.Contains(resp.Error, "already stopped") {
+		t.Errorf("error = %q, want contains 'already stopped'", resp.Error)
+	}
+}
+
+func TestControlServer_ForceStopUnknown(t *testing.T) {
+	d := newTestDaemonWithAgents([]AgentEntry{
+		{Worktree: "alpha", Role: "plan"},
+	})
+	defer close(d.shutdown)
+
+	resp := d.handleAgentControlStop("nonexistent", true)
+	if resp.Success {
+		t.Fatal("expected error for unknown agent")
+	}
+	if !strings.Contains(resp.Error, "not found") {
+		t.Errorf("error = %q, want contains 'not found'", resp.Error)
+	}
+}
+
+func TestControlServer_ForceViaSocketRoundTrip(t *testing.T) {
+	tmpDir := shortSocketDir(t)
+	socketPath := filepath.Join(tmpDir, "daemon.sock")
+
+	d := newTestDaemonWithAgents([]AgentEntry{
+		{Worktree: "alpha", Role: "plan"},
+		{Worktree: "beta", Role: "task"},
+	})
+	defer func() {
+		close(d.shutdown)
+		if d.controlListener != nil {
+			_ = d.controlListener.Close()
+		}
+	}()
+
+	if err := d.startControlServer(socketPath); err != nil {
+		t.Fatalf("startControlServer() error = %v", err)
+	}
+
+	resp, err := sendDaemonControlRequestFull(socketPath, DaemonControlRequest{
+		Operation: ctrlOpAgentStop,
+		AgentName: "alpha",
+		Force:     true,
+	})
+	if err != nil {
+		t.Fatalf("sendDaemonControlRequestFull() error = %v", err)
+	}
+	if !resp.Success {
+		t.Fatalf("expected success, got error: %s", resp.Error)
+	}
+
+	if !d.isAgentStopped("alpha") {
+		t.Error("isAgentStopped(alpha) = false after force stop via socket")
+	}
+	if d.AgentCount() != 1 {
+		t.Errorf("AgentCount() = %d, want 1", d.AgentCount())
+	}
+}
+
+func TestControlServer_ForceFieldOmittedBackwardCompat(t *testing.T) {
+	tmpDir := shortSocketDir(t)
+	socketPath := filepath.Join(tmpDir, "daemon.sock")
+
+	d := newTestDaemonWithAgents([]AgentEntry{
+		{Worktree: "alpha", Role: "plan"},
+	})
+	defer func() {
+		close(d.shutdown)
+		if d.controlListener != nil {
+			_ = d.controlListener.Close()
+		}
+	}()
+
+	if err := d.startControlServer(socketPath); err != nil {
+		t.Fatalf("startControlServer() error = %v", err)
+	}
+
+	// Send raw JSON without the "force" field — should default to false (graceful stop)
+	conn, err := net.DialTimeout("unix", socketPath, 5*time.Second)
+	if err != nil {
+		t.Fatalf("dial error: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	raw := `{"operation":"agent_stop","agent_name":"alpha"}` + "\n"
+	if _, err := conn.Write([]byte(raw)); err != nil {
+		t.Fatalf("write error: %v", err)
+	}
+
+	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	scanner := bufio.NewScanner(conn)
+	if !scanner.Scan() {
+		t.Fatalf("no response from daemon: %v", scanner.Err())
+	}
+
+	var resp DaemonControlResponse
+	if err := json.Unmarshal(scanner.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if !resp.Success {
+		t.Fatalf("expected success, got error: %s", resp.Error)
+	}
+
+	if !d.isAgentStopped("alpha") {
+		t.Error("isAgentStopped(alpha) = false after stop via raw JSON without force field")
+	}
+}
+
+func TestIsAgentRunningViaSocket_Running(t *testing.T) {
+	tmpDir := shortSocketDir(t)
+	socketPath := filepath.Join(tmpDir, "daemon.sock")
+
+	d := newTestDaemonWithAgents([]AgentEntry{
+		{Worktree: "alpha", Role: "plan"},
+		{Worktree: "beta", Role: "task"},
+	})
+	defer func() {
+		close(d.shutdown)
+		if d.controlListener != nil {
+			_ = d.controlListener.Close()
+		}
+	}()
+
+	if err := d.startControlServer(socketPath); err != nil {
+		t.Fatalf("startControlServer() error = %v", err)
+	}
+
+	if !isAgentRunningViaSocket(socketPath, "alpha") {
+		t.Error("isAgentRunningViaSocket(alpha) = false, want true")
+	}
+	if !isAgentRunningViaSocket(socketPath, "beta") {
+		t.Error("isAgentRunningViaSocket(beta) = false, want true")
+	}
+}
+
+func TestIsAgentRunningViaSocket_Stopped(t *testing.T) {
+	tmpDir := shortSocketDir(t)
+	socketPath := filepath.Join(tmpDir, "daemon.sock")
+
+	d := newTestDaemonWithAgents([]AgentEntry{
+		{Worktree: "alpha", Role: "plan"},
+	})
+	defer func() {
+		close(d.shutdown)
+		if d.controlListener != nil {
+			_ = d.controlListener.Close()
+		}
+	}()
+
+	if err := d.startControlServer(socketPath); err != nil {
+		t.Fatalf("startControlServer() error = %v", err)
+	}
+
+	// Stop the agent
+	resp := d.handleAgentControlStop("alpha", false)
+	if !resp.Success {
+		t.Fatalf("stop failed: %s", resp.Error)
+	}
+
+	if isAgentRunningViaSocket(socketPath, "alpha") {
+		t.Error("isAgentRunningViaSocket(alpha) = true after stop, want false")
+	}
+}
+
+func TestIsAgentRunningViaSocket_NotFound(t *testing.T) {
+	tmpDir := shortSocketDir(t)
+	socketPath := filepath.Join(tmpDir, "daemon.sock")
+
+	d := newTestDaemonWithAgents([]AgentEntry{
+		{Worktree: "alpha", Role: "plan"},
+	})
+	defer func() {
+		close(d.shutdown)
+		if d.controlListener != nil {
+			_ = d.controlListener.Close()
+		}
+	}()
+
+	if err := d.startControlServer(socketPath); err != nil {
+		t.Fatalf("startControlServer() error = %v", err)
+	}
+
+	if isAgentRunningViaSocket(socketPath, "nonexistent") {
+		t.Error("isAgentRunningViaSocket(nonexistent) = true, want false")
+	}
+}
+
+func TestIsAgentRunningViaSocket_DaemonDown(t *testing.T) {
+	// Use a path where no listener exists
+	tmpDir := shortSocketDir(t)
+	socketPath := filepath.Join(tmpDir, "no-such-daemon.sock")
+
+	// Should return false without panicking
+	if isAgentRunningViaSocket(socketPath, "alpha") {
+		t.Error("isAgentRunningViaSocket with no daemon = true, want false")
+	}
+}
+
+func TestSendDaemonControlRequestFull_RoundTrip(t *testing.T) {
+	tmpDir := shortSocketDir(t)
+	socketPath := filepath.Join(tmpDir, "daemon.sock")
+
+	d := newTestDaemonWithAgents([]AgentEntry{
+		{Worktree: "alpha", Role: "plan"},
+		{Worktree: "beta", Role: "task"},
+	})
+	defer func() {
+		close(d.shutdown)
+		if d.controlListener != nil {
+			_ = d.controlListener.Close()
+		}
+	}()
+
+	if err := d.startControlServer(socketPath); err != nil {
+		t.Fatalf("startControlServer() error = %v", err)
+	}
+
+	// Send a full request with Force=true for agent_stop
+	resp, err := sendDaemonControlRequestFull(socketPath, DaemonControlRequest{
+		Operation: ctrlOpAgentStop,
+		AgentName: "alpha",
+		Force:     true,
+	})
+	if err != nil {
+		t.Fatalf("sendDaemonControlRequestFull() error = %v", err)
+	}
+	if !resp.Success {
+		t.Fatalf("expected success, got error: %s", resp.Error)
+	}
+
+	// Verify the agent was actually stopped
+	if !d.isAgentStopped("alpha") {
+		t.Error("isAgentStopped(alpha) = false after force stop")
+	}
+	if d.AgentCount() != 1 {
+		t.Errorf("AgentCount() = %d, want 1", d.AgentCount())
+	}
+
+	// beta should still be running
+	if !d.isAgentRunning("beta") {
+		t.Error("isAgentRunning(beta) = false, want true")
 	}
 }

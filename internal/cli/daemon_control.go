@@ -15,7 +15,8 @@ import (
 type DaemonControlRequest struct {
 	Operation string          `json:"operation"` // "agent_stop", "agent_start", "agent_restart", "agent_list", "get_mutations", "wait_for_mutations"
 	AgentName string          `json:"agent_name,omitempty"`
-	Args      json.RawMessage `json:"args,omitempty"` // operation-specific parameters
+	Force     bool            `json:"force,omitempty"` // For agent_stop: skip yield, SIGTERM directly
+	Args      json.RawMessage `json:"args,omitempty"`  // operation-specific parameters
 }
 
 // DaemonControlResponse is sent by the daemon back to the CLI client.
@@ -103,8 +104,12 @@ func (d *Daemon) handleControlConnection(conn net.Conn) {
 	var resp DaemonControlResponse
 	switch req.Operation {
 	case ctrlOpAgentStop:
-		_ = conn.SetWriteDeadline(time.Now().Add(d.getYieldTimeout() + 10*time.Second))
-		resp = d.handleAgentControlStop(req.AgentName)
+		if req.Force {
+			_ = conn.SetWriteDeadline(time.Now().Add(20 * time.Second)) // SIGTERM(5s) + SIGKILL + done drain
+		} else {
+			_ = conn.SetWriteDeadline(time.Now().Add(d.getYieldTimeout() + 10*time.Second))
+		}
+		resp = d.handleAgentControlStop(req.AgentName, req.Force)
 	case ctrlOpAgentStart:
 		resp = d.handleAgentControlStart(req.AgentName)
 	case ctrlOpAgentRestart:
@@ -128,7 +133,8 @@ func (d *Daemon) handleControlConnection(conn net.Conn) {
 }
 
 // handleAgentControlStop stops a single agent and records it in stoppedAgents.
-func (d *Daemon) handleAgentControlStop(name string) DaemonControlResponse {
+// When force is true, it skips DrainWithGrace and sends SIGTERM directly.
+func (d *Daemon) handleAgentControlStop(name string, force bool) DaemonControlResponse {
 	if name == "" {
 		return DaemonControlResponse{Error: "agent name is required"}
 	}
@@ -146,7 +152,12 @@ func (d *Daemon) handleAgentControlStop(name string) DaemonControlResponse {
 		d.drainAddMu.Unlock()
 		return DaemonControlResponse{Error: fmt.Sprintf("agent %q is already stopped", name)}
 	}
-	err := d.drainAgentWithReason(name, StopReasonManualStop)
+	var err error
+	if force {
+		err = d.drainAgentForceful(name, StopReasonManualStop)
+	} else {
+		err = d.drainAgentWithReason(name, StopReasonManualStop)
+	}
 	if err == nil {
 		d.agentsMu.Lock()
 		d.stoppedAgents[name] = struct{}{}
@@ -157,7 +168,7 @@ func (d *Daemon) handleAgentControlStop(name string) DaemonControlResponse {
 		return DaemonControlResponse{Error: fmt.Sprintf("failed to stop agent %q: %v", name, err)}
 	}
 
-	slog.Info("agent stopped via control socket", "worktree", name)
+	slog.Info("agent stopped via control socket", "worktree", name, "force", force)
 	return DaemonControlResponse{Success: true}
 }
 
@@ -315,6 +326,55 @@ func (d *Daemon) drainAgentWithReason(name string, reason StopReason) error {
 	d.agentsMu.Unlock()
 
 	slog.Info("agent drained", "worktree", name, "reason", reason)
+	return nil
+}
+
+// drainAgentForceful is like drainAgentWithReason but skips DrainWithGrace,
+// going directly to SIGTERM/SIGKILL. Used by the CLI force-stop path where
+// the control socket timeout is a concern.
+func (d *Daemon) drainAgentForceful(name string, reason StopReason) error {
+	// Find the agent under lock
+	d.agentsMu.Lock()
+	var target *AgentProcess
+	for _, ap := range d.agents {
+		if ap.entry.Worktree == name {
+			target = ap
+			break
+		}
+	}
+	if target == nil {
+		d.agentsMu.Unlock()
+		return fmt.Errorf("agent %q not found", name)
+	}
+	d.agentsMu.Unlock()
+
+	// Set stop reason before signaling
+	target.mu.Lock()
+	target.stopReason = reason
+	target.mu.Unlock()
+
+	// Signal the agent to stop (safe against double-close)
+	target.stopOnce.Do(func() {
+		close(target.stopCh)
+	})
+
+	// Stop the subprocess directly: SIGTERM → 5s → SIGKILL (no yield)
+	d.stopAgent(target)
+
+	// Wait for the superviseAgent goroutine to exit
+	<-target.done
+
+	// Remove from the agents slice under write lock
+	d.agentsMu.Lock()
+	for i, ap := range d.agents {
+		if ap == target {
+			d.agents = append(d.agents[:i], d.agents[i+1:]...)
+			break
+		}
+	}
+	d.agentsMu.Unlock()
+
+	slog.Info("agent force-drained", "worktree", name, "reason", reason)
 	return nil
 }
 
