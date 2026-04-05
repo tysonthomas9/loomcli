@@ -42,7 +42,7 @@ func (d *Daemon) drainAgent(name string) error {
 	})
 
 	// Yield → wait → SIGTERM → SIGKILL
-	d.DrainWithGrace(target, "config_removed", d.getYieldTimeout())
+	d.DrainWithGrace(target, "config_removed", d.getYieldTimeout(), d.getSigtermTimeout())
 
 	// Wait for the superviseAgent goroutine to exit
 	<-target.done

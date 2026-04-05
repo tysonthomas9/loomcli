@@ -168,7 +168,7 @@ func TestStopAgent_NilProcess(t *testing.T) {
 		// cmd is nil, pid is 0
 	}
 	// Should return immediately without error
-	d.stopAgent(ap)
+	d.stopAgent(ap, 5*time.Second)
 }
 
 // TestStopAgent_ProcessAlreadyExited tests that stopAgent handles a process
@@ -193,7 +193,7 @@ func TestStopAgent_ProcessAlreadyExited(t *testing.T) {
 	}
 
 	// stopAgent should handle SIGTERM failure gracefully (process already exited)
-	d.stopAgent(ap)
+	d.stopAgent(ap, 5*time.Second)
 }
 
 // TestStopAgent_GracefulShutdown tests that stopAgent sends SIGTERM and the
@@ -229,7 +229,7 @@ func TestStopAgent_GracefulShutdown(t *testing.T) {
 	}()
 
 	// stopAgent sends SIGTERM, sleep should respond and exit
-	d.stopAgent(ap)
+	d.stopAgent(ap, 5*time.Second)
 
 	// Wait for waitForAgent to complete
 	done := make(chan struct{})
@@ -287,7 +287,7 @@ func TestStopAgent_ForcedKill(t *testing.T) {
 	}()
 
 	// stopAgent should SIGTERM, wait 5s, then SIGKILL
-	d.stopAgent(ap)
+	d.stopAgent(ap, 5*time.Second)
 
 	// Wait for waitForAgent to complete
 	done := make(chan struct{})
@@ -301,6 +301,60 @@ func TestStopAgent_ForcedKill(t *testing.T) {
 		// Success - process was killed
 	case <-time.After(15 * time.Second):
 		t.Fatal("timeout waiting for process to be killed")
+	}
+}
+
+// TestStopAgent_CustomTimeout verifies that a custom SIGTERM timeout is passed
+// through to the deadline. The process responds to SIGTERM and exits within the
+// configured window (timeout is a ceiling, not a sleep).
+func TestStopAgent_CustomTimeout(t *testing.T) {
+	d := &Daemon{config: &DaemonConfig{}}
+
+	cmd := exec.Command("sleep", "60") //nolint:norawexec
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("failed to start sleep: %v", err)
+	}
+	pid := cmd.Process.Pid
+
+	t.Cleanup(func() {
+		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		_ = cmd.Wait()
+	})
+
+	ap := &AgentProcess{
+		entry: AgentEntry{Worktree: "test"},
+		cmd:   cmd,
+		pid:   pid,
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		d.waitForAgent(ap)
+	}()
+
+	// Use 30s timeout — process should exit promptly from SIGTERM (sleep responds),
+	// well before the 30s deadline. This confirms the timeout is a ceiling, not a sleep.
+	start := time.Now()
+	d.stopAgent(ap, 30*time.Second)
+	elapsed := time.Since(start)
+
+	if elapsed > 5*time.Second {
+		t.Errorf("stopAgent took %v, want < 5s (sleep responds to SIGTERM immediately)", elapsed)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for process to exit")
 	}
 }
 
@@ -975,7 +1029,7 @@ func TestStopAgent_KillsProcessGroup(t *testing.T) {
 		d.waitForAgent(ap)
 	}()
 
-	d.stopAgent(ap)
+	d.stopAgent(ap, 5*time.Second)
 
 	done := make(chan struct{})
 	go func() {
@@ -1029,7 +1083,7 @@ func TestStopAgent_ConcurrentWithWaitForAgent(t *testing.T) {
 	}()
 	go func() {
 		defer wg.Done()
-		d.stopAgent(ap)
+		d.stopAgent(ap, 5*time.Second)
 	}()
 
 	done := make(chan struct{})

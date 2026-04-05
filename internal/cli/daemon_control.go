@@ -315,7 +315,7 @@ func (d *Daemon) drainAgentWithReason(name string, reason StopReason) error {
 	})
 
 	// Yield → wait → SIGTERM → SIGKILL
-	d.DrainWithGrace(target, string(reason), d.getYieldTimeout())
+	d.DrainWithGrace(target, string(reason), d.getYieldTimeout(), d.getSigtermTimeout())
 
 	// Wait for the superviseAgent goroutine to exit
 	<-target.done
@@ -368,8 +368,8 @@ func (d *Daemon) drainAgentForceful(name string, reason StopReason) error {
 		close(target.stopCh)
 	})
 
-	// Stop the subprocess directly: SIGTERM → 5s → SIGKILL (no yield)
-	d.stopAgent(target)
+	// Stop the subprocess directly: SIGTERM → SIGKILL (no yield)
+	d.stopAgent(target, d.getSigtermTimeout())
 
 	// Wait for the superviseAgent goroutine to exit
 	<-target.done

@@ -74,7 +74,7 @@ func TestDrainWithGrace_PIDZero(t *testing.T) {
 	}
 
 	start := time.Now()
-	result := d.DrainWithGrace(ap, "test", 10*time.Second)
+	result := d.DrainWithGrace(ap, "test", 10*time.Second, 5*time.Second)
 	elapsed := time.Since(start)
 
 	if !result {
@@ -124,7 +124,7 @@ func TestDrainWithGrace_AgentExitsDuringYield(t *testing.T) {
 	}()
 
 	start := time.Now()
-	result := d.DrainWithGrace(ap, "test-yield", 10*time.Second)
+	result := d.DrainWithGrace(ap, "test-yield", 10*time.Second, 5*time.Second)
 	elapsed := time.Since(start)
 
 	if !result {
@@ -179,7 +179,7 @@ func TestDrainWithGrace_AgentIgnoresYield_FallsToSIGTERM(t *testing.T) {
 	}()
 
 	// Use a short yield timeout so the test doesn't take too long
-	result := d.DrainWithGrace(ap, "test-timeout", 2*time.Second)
+	result := d.DrainWithGrace(ap, "test-timeout", 2*time.Second, 5*time.Second)
 
 	if result {
 		t.Error("DrainWithGrace() = true, want false (agent ignores yield, should fall to SIGTERM)")
@@ -237,7 +237,7 @@ func TestDrainWithGrace_RequestYieldFails(t *testing.T) {
 	}()
 
 	start := time.Now()
-	result := d.DrainWithGrace(ap, "test-fail", 10*time.Second)
+	result := d.DrainWithGrace(ap, "test-fail", 10*time.Second, 5*time.Second)
 	elapsed := time.Since(start)
 
 	if result {
@@ -330,6 +330,143 @@ func TestApplyRestartPolicyDefaults_YieldTimeout(t *testing.T) {
 
 		if *rp.YieldTimeout != 200 {
 			t.Errorf("YieldTimeout = %d, want 200 (should not be overwritten)", *rp.YieldTimeout)
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// getSigtermTimeout tests
+// ---------------------------------------------------------------------------
+
+func TestGetSigtermTimeout_Default(t *testing.T) {
+	d := &Daemon{config: &DaemonConfig{}}
+	got := d.getSigtermTimeout()
+	want := time.Duration(DefaultSigtermTimeout) * time.Second
+	if got != want {
+		t.Errorf("getSigtermTimeout() = %v, want %v", got, want)
+	}
+}
+
+func TestGetSigtermTimeout_Custom(t *testing.T) {
+	d := &Daemon{config: &DaemonConfig{
+		Daemon: DaemonSettings{RestartPolicy: RestartPolicy{
+			SigtermTimeout: intPtr(120),
+		}},
+	}}
+	got := d.getSigtermTimeout()
+	want := 120 * time.Second
+	if got != want {
+		t.Errorf("getSigtermTimeout() = %v, want %v", got, want)
+	}
+}
+
+func TestGetSigtermTimeout_Zero(t *testing.T) {
+	d := &Daemon{config: &DaemonConfig{
+		Daemon: DaemonSettings{RestartPolicy: RestartPolicy{
+			SigtermTimeout: intPtr(0),
+		}},
+	}}
+	got := d.getSigtermTimeout()
+	want := time.Duration(DefaultSigtermTimeout) * time.Second
+	if got != want {
+		t.Errorf("getSigtermTimeout(0) = %v, want %v (default)", got, want)
+	}
+}
+
+func TestGetSigtermTimeout_Negative(t *testing.T) {
+	d := &Daemon{config: &DaemonConfig{
+		Daemon: DaemonSettings{RestartPolicy: RestartPolicy{
+			SigtermTimeout: intPtr(-1),
+		}},
+	}}
+	got := d.getSigtermTimeout()
+	want := time.Duration(DefaultSigtermTimeout) * time.Second
+	if got != want {
+		t.Errorf("getSigtermTimeout(-1) = %v, want %v (default)", got, want)
+	}
+}
+
+func TestGetSigtermTimeout_One(t *testing.T) {
+	d := &Daemon{config: &DaemonConfig{
+		Daemon: DaemonSettings{RestartPolicy: RestartPolicy{
+			SigtermTimeout: intPtr(1),
+		}},
+	}}
+	got := d.getSigtermTimeout()
+	want := 1 * time.Second
+	if got != want {
+		t.Errorf("getSigtermTimeout(1) = %v, want %v", got, want)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// overlayRestartPolicy SigtermTimeout tests
+// ---------------------------------------------------------------------------
+
+func TestOverlayRestartPolicy_SigtermTimeout(t *testing.T) {
+	t.Run("src sets SigtermTimeout on nil dst", func(t *testing.T) {
+		dst := RestartPolicy{}
+		src := RestartPolicy{SigtermTimeout: intPtr(120)}
+		overlayRestartPolicy(&dst, &src)
+
+		if dst.SigtermTimeout == nil {
+			t.Fatal("dst.SigtermTimeout is nil, want 120")
+		}
+		if *dst.SigtermTimeout != 120 {
+			t.Errorf("dst.SigtermTimeout = %d, want 120", *dst.SigtermTimeout)
+		}
+	})
+
+	t.Run("src nil does not overwrite dst", func(t *testing.T) {
+		dst := RestartPolicy{SigtermTimeout: intPtr(90)}
+		src := RestartPolicy{}
+		overlayRestartPolicy(&dst, &src)
+
+		if dst.SigtermTimeout == nil {
+			t.Fatal("dst.SigtermTimeout became nil, should remain 90")
+		}
+		if *dst.SigtermTimeout != 90 {
+			t.Errorf("dst.SigtermTimeout = %d, want 90 (should not be overwritten)", *dst.SigtermTimeout)
+		}
+	})
+
+	t.Run("src overwrites existing dst", func(t *testing.T) {
+		dst := RestartPolicy{SigtermTimeout: intPtr(60)}
+		src := RestartPolicy{SigtermTimeout: intPtr(180)}
+		overlayRestartPolicy(&dst, &src)
+
+		if dst.SigtermTimeout == nil {
+			t.Fatal("dst.SigtermTimeout is nil, want 180")
+		}
+		if *dst.SigtermTimeout != 180 {
+			t.Errorf("dst.SigtermTimeout = %d, want 180", *dst.SigtermTimeout)
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// applyRestartPolicyDefaults SigtermTimeout test
+// ---------------------------------------------------------------------------
+
+func TestApplyRestartPolicyDefaults_SigtermTimeout(t *testing.T) {
+	t.Run("nil gets default", func(t *testing.T) {
+		rp := RestartPolicy{}
+		applyRestartPolicyDefaults(&rp)
+
+		if rp.SigtermTimeout == nil {
+			t.Fatal("SigtermTimeout is nil after applyDefaults, want DefaultSigtermTimeout")
+		}
+		if *rp.SigtermTimeout != DefaultSigtermTimeout {
+			t.Errorf("SigtermTimeout = %d, want %d", *rp.SigtermTimeout, DefaultSigtermTimeout)
+		}
+	})
+
+	t.Run("already set is preserved", func(t *testing.T) {
+		rp := RestartPolicy{SigtermTimeout: intPtr(200)}
+		applyRestartPolicyDefaults(&rp)
+
+		if *rp.SigtermTimeout != 200 {
+			t.Errorf("SigtermTimeout = %d, want 200 (should not be overwritten)", *rp.SigtermTimeout)
 		}
 	})
 }

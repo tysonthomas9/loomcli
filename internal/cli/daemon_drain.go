@@ -15,13 +15,13 @@ const DefaultYieldTimeout = 60 // seconds
 // DrainWithGrace implements a four-phase graceful shutdown sequence:
 // yield file → wait for voluntary exit → SIGTERM → SIGKILL.
 // Returns true if the agent exited from yield alone (SIGTERM was not needed).
-func (d *Daemon) DrainWithGrace(ap *AgentProcess, reason string, yieldTimeout time.Duration) bool {
+func (d *Daemon) DrainWithGrace(ap *AgentProcess, reason string, yieldTimeout, sigtermTimeout time.Duration) bool {
 	slog.Info("requesting yield", "worktree", ap.entry.Worktree, "reason", reason, "timeout", yieldTimeout)
 
 	// Phase 1: Write yield file
 	if err := d.RequestYield(ap, reason); err != nil {
 		slog.Warn("yield file write failed, falling back to SIGTERM", "worktree", ap.entry.Worktree, "err", err)
-		d.stopAgent(ap)
+		d.stopAgent(ap, sigtermTimeout)
 		return false
 	}
 
@@ -47,7 +47,7 @@ func (d *Daemon) DrainWithGrace(ap *AgentProcess, reason string, yieldTimeout ti
 
 	// Phase 3: Escalate to SIGTERM → SIGKILL
 	slog.Info("yield timeout expired, escalating to SIGTERM", "worktree", ap.entry.Worktree, "timeout", yieldTimeout)
-	d.stopAgent(ap)
+	d.stopAgent(ap, sigtermTimeout)
 	return false
 }
 
@@ -62,12 +62,17 @@ func (d *Daemon) getYieldTimeout() time.Duration {
 }
 
 // drainAllWithGrace yields all agents in parallel, used by Daemon.Stop().
-// The yield timeout is capped at 30s to keep daemon shutdown prompt.
+// Both yield and SIGTERM timeouts are capped at 30s to keep daemon shutdown prompt.
 func (d *Daemon) drainAllWithGrace(agents []*AgentProcess) {
 	yieldTimeout := d.getYieldTimeout()
 	if yieldTimeout > 30*time.Second {
 		slog.Info("capping yield timeout for daemon shutdown", "configured", yieldTimeout, "capped", 30*time.Second)
 		yieldTimeout = 30 * time.Second
+	}
+	sigtermTimeout := d.getSigtermTimeout()
+	if sigtermTimeout > 30*time.Second {
+		slog.Info("capping SIGTERM timeout for daemon shutdown", "configured", sigtermTimeout, "capped", 30*time.Second)
+		sigtermTimeout = 30 * time.Second
 	}
 
 	var stopWg sync.WaitGroup
@@ -75,7 +80,7 @@ func (d *Daemon) drainAllWithGrace(agents []*AgentProcess) {
 		stopWg.Add(1)
 		go func(agent *AgentProcess) {
 			defer stopWg.Done()
-			d.DrainWithGrace(agent, "shutdown", yieldTimeout)
+			d.DrainWithGrace(agent, "shutdown", yieldTimeout, sigtermTimeout)
 		}(ap)
 	}
 	stopWg.Wait()

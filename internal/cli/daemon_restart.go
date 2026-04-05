@@ -249,3 +249,13 @@ func (d *Daemon) getIdlePollInterval() int {
 	}
 	return 30 // default seconds
 }
+
+const DefaultSigtermTimeout = 300 // seconds; SIGTERM→SIGKILL window
+
+func (d *Daemon) getSigtermTimeout() time.Duration {
+	cfg := d.configSnapshot()
+	if cfg.Daemon.RestartPolicy.SigtermTimeout != nil && *cfg.Daemon.RestartPolicy.SigtermTimeout > 0 {
+		return time.Duration(*cfg.Daemon.RestartPolicy.SigtermTimeout) * time.Second
+	}
+	return time.Duration(DefaultSigtermTimeout) * time.Second
+}

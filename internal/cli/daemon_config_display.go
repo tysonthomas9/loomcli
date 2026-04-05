@@ -36,6 +36,9 @@ func applyRestartPolicyDefaults(rp *RestartPolicy) {
 	if rp.YieldTimeout == nil {
 		rp.YieldTimeout = intPtr(DefaultYieldTimeout)
 	}
+	if rp.SigtermTimeout == nil {
+		rp.SigtermTimeout = intPtr(DefaultSigtermTimeout)
+	}
 }
 
 // maskDaemonSecrets replaces sensitive fields in DaemonSettings with "***".
@@ -52,6 +55,60 @@ func maskDaemonSecrets(ds *DaemonSettings) {
 	}
 }
 
+// deepCopyRestartPolicy returns a deep copy of src with all pointer fields cloned.
+func deepCopyRestartPolicy(src *RestartPolicy) RestartPolicy {
+	dst := *src
+	if src.MaxRetries != nil {
+		v := *src.MaxRetries
+		dst.MaxRetries = &v
+	}
+	if src.BackoffInitial != nil {
+		v := *src.BackoffInitial
+		dst.BackoffInitial = &v
+	}
+	if src.BackoffMax != nil {
+		v := *src.BackoffMax
+		dst.BackoffMax = &v
+	}
+	if src.OutputTimeout != nil {
+		v := *src.OutputTimeout
+		dst.OutputTimeout = &v
+	}
+	if src.RateLimitBackoff != nil {
+		v := *src.RateLimitBackoff
+		dst.RateLimitBackoff = &v
+	}
+	if src.RateLimitMaxWait != nil {
+		v := *src.RateLimitMaxWait
+		dst.RateLimitMaxWait = &v
+	}
+	if src.RateLimitNoCount != nil {
+		v := *src.RateLimitNoCount
+		dst.RateLimitNoCount = &v
+	}
+	if src.TimeoutBackoff != nil {
+		v := *src.TimeoutBackoff
+		dst.TimeoutBackoff = &v
+	}
+	if src.NoWorkBackoff != nil {
+		v := *src.NoWorkBackoff
+		dst.NoWorkBackoff = &v
+	}
+	if src.IdlePollInterval != nil {
+		v := *src.IdlePollInterval
+		dst.IdlePollInterval = &v
+	}
+	if src.YieldTimeout != nil {
+		v := *src.YieldTimeout
+		dst.YieldTimeout = &v
+	}
+	if src.SigtermTimeout != nil {
+		v := *src.SigtermTimeout
+		dst.SigtermTimeout = &v
+	}
+	return dst
+}
+
 // resolvedConfigForDisplay returns a copy of cfg with secrets masked and
 // RestartPolicy defaults filled in. The original cfg is not mutated.
 func resolvedConfigForDisplay(cfg *DaemonConfig) DaemonConfig {
@@ -59,7 +116,7 @@ func resolvedConfigForDisplay(cfg *DaemonConfig) DaemonConfig {
 
 	// Deep copy Daemon to avoid mutating the original
 	out.Daemon = cfg.Daemon
-	out.Daemon.RestartPolicy = cfg.Daemon.RestartPolicy
+	out.Daemon.RestartPolicy = deepCopyRestartPolicy(&cfg.Daemon.RestartPolicy)
 
 	// Copy pointer fields to avoid aliasing
 	if cfg.Daemon.MaxAgents != nil {
@@ -81,53 +138,6 @@ func resolvedConfigForDisplay(cfg *DaemonConfig) DaemonConfig {
 	if cfg.Daemon.Fleet != nil {
 		fleetClientCopy := *cfg.Daemon.Fleet
 		out.Daemon.Fleet = &fleetClientCopy
-	}
-
-	// Copy RestartPolicy pointer fields
-	rp := &out.Daemon.RestartPolicy
-	if cfg.Daemon.RestartPolicy.MaxRetries != nil {
-		v := *cfg.Daemon.RestartPolicy.MaxRetries
-		rp.MaxRetries = &v
-	}
-	if cfg.Daemon.RestartPolicy.BackoffInitial != nil {
-		v := *cfg.Daemon.RestartPolicy.BackoffInitial
-		rp.BackoffInitial = &v
-	}
-	if cfg.Daemon.RestartPolicy.BackoffMax != nil {
-		v := *cfg.Daemon.RestartPolicy.BackoffMax
-		rp.BackoffMax = &v
-	}
-	if cfg.Daemon.RestartPolicy.OutputTimeout != nil {
-		v := *cfg.Daemon.RestartPolicy.OutputTimeout
-		rp.OutputTimeout = &v
-	}
-	if cfg.Daemon.RestartPolicy.RateLimitBackoff != nil {
-		v := *cfg.Daemon.RestartPolicy.RateLimitBackoff
-		rp.RateLimitBackoff = &v
-	}
-	if cfg.Daemon.RestartPolicy.RateLimitMaxWait != nil {
-		v := *cfg.Daemon.RestartPolicy.RateLimitMaxWait
-		rp.RateLimitMaxWait = &v
-	}
-	if cfg.Daemon.RestartPolicy.RateLimitNoCount != nil {
-		v := *cfg.Daemon.RestartPolicy.RateLimitNoCount
-		rp.RateLimitNoCount = &v
-	}
-	if cfg.Daemon.RestartPolicy.TimeoutBackoff != nil {
-		v := *cfg.Daemon.RestartPolicy.TimeoutBackoff
-		rp.TimeoutBackoff = &v
-	}
-	if cfg.Daemon.RestartPolicy.NoWorkBackoff != nil {
-		v := *cfg.Daemon.RestartPolicy.NoWorkBackoff
-		rp.NoWorkBackoff = &v
-	}
-	if cfg.Daemon.RestartPolicy.IdlePollInterval != nil {
-		v := *cfg.Daemon.RestartPolicy.IdlePollInterval
-		rp.IdlePollInterval = &v
-	}
-	if cfg.Daemon.RestartPolicy.YieldTimeout != nil {
-		v := *cfg.Daemon.RestartPolicy.YieldTimeout
-		rp.YieldTimeout = &v
 	}
 
 	// Copy Roles map

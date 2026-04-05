@@ -14,7 +14,7 @@ import (
 // This function is safe to call concurrently with waitForAgent.
 // It uses polling instead of cmd.Wait() to avoid double-wait issues.
 // The process group kill ensures child processes (e.g. codex) are not orphaned.
-func (d *Daemon) stopAgent(ap *AgentProcess) {
+func (d *Daemon) stopAgent(ap *AgentProcess, sigtermTimeout time.Duration) {
 	ap.mu.Lock()
 	proc := ap.cmd
 	pid := ap.pid
@@ -36,9 +36,9 @@ func (d *Daemon) stopAgent(ap *AgentProcess) {
 		}
 	}
 
-	// Poll for process exit up to 5 seconds instead of calling Wait()
+	// Poll for process exit instead of calling Wait()
 	// (Wait() is called by waitForAgent in the supervise loop)
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(sigtermTimeout)
 	for time.Now().Before(deadline) {
 		ap.mu.Lock()
 		currentPID := ap.pid
@@ -109,7 +109,7 @@ func (d *Daemon) checkWatchdog(ap *AgentProcess, outputTimeout int, logPath stri
 			slog.Error("killing hung process, no activity detected",
 				"worktree", worktreeName, "silent_duration", silent.Truncate(time.Second),
 				"threshold_sec", outputTimeout, "source", activitySource)
-			d.stopAgent(ap)
+			d.stopAgent(ap, 10*time.Second)
 		}
 	}
 }

@@ -308,7 +308,7 @@ func TestDaemon_StopAgent_NilProcess(t *testing.T) {
 	}
 
 	// Should be a no-op without panicking
-	d.stopAgent(ap)
+	d.stopAgent(ap, 5*time.Second)
 }
 
 func TestDaemon_WaitForAgent_NilCmd(t *testing.T) {
