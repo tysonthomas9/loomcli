@@ -7,6 +7,7 @@
 package cli
 
 import (
+	"os"
 	"sync"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -31,10 +32,13 @@ func defaultIssueBackend() backend.IssueBackend {
 	trackerMu.Lock()
 	defer trackerMu.Unlock()
 	if trackerInst == nil {
-		if t := defaultDeps.IssueBackend; t != nil {
-			trackerInst = t
+		if sock := os.Getenv("LOOM_DAEMON_SOCKET"); sock != "" {
+			agentName := os.Getenv("BD_ACTOR")
+			fallback := resolveFallbackBackend()
+			ipcClient := NewAgentIPCClient(sock, agentName)
+			trackerInst = newIPCIssueBackend(ipcClient, fallback)
 		} else {
-			return newCliBeadsAdapter(defaultBDRunnerImpl{}, GetBeadsDir())
+			trackerInst = resolveFallbackBackend()
 		}
 	}
 	return trackerInst

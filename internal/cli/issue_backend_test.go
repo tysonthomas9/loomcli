@@ -152,6 +152,7 @@ func TestDefaultTracker_ConcurrentResetAndRead(t *testing.T) {
 func TestDefaultTracker_LazyInitFromDefaultDeps(t *testing.T) {
 	// Verify that when trackerInst is nil, defaultIssueBackend() initializes
 	// from defaultDeps.IssueBackend (double-checked locking path).
+	t.Setenv("LOOM_DAEMON_SOCKET", "") // ensure IPC path is not triggered
 	resetDefaultIssueBackend()
 	t.Cleanup(resetDefaultIssueBackend)
 
