@@ -55,6 +55,8 @@ func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
 	}
 	logFile := filepath.Join(agentLogDir, fmt.Sprintf("%s.log", opts.AgentName))
 
+	yieldFile := os.Getenv("LOOM_YIELD_FILE")
+
 	// Choose task checker based on agent type (CustomPromptGen not used — tmux delegates to daemon).
 	var hasAvailableTasks func() (bool, error)
 	repoLabel := os.Getenv("LOOM_AGENT_REPO")
@@ -95,6 +97,14 @@ func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
 			printTmuxSummary(taskCount)
 			return
 		default:
+		}
+
+		// Check for yield file (cooperative preemption from daemon)
+		if reason, yielded := checkYieldFile(yieldFile); yielded {
+			fmt.Printf("[auto] Yield requested (reason: %s), exiting gracefully...\n", reason)
+			cleanupTmuxSession(sessionName)
+			printTmuxSummary(taskCount)
+			return
 		}
 
 		// Check max tasks
@@ -165,6 +175,14 @@ func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
 			printTmuxSummary(taskCount)
 			return
 		default:
+		}
+
+		// Check for yield after agent subprocess exit
+		if reason, yielded := checkYieldFile(yieldFile); yielded {
+			fmt.Printf("[auto] Yield requested after task (reason: %s), exiting gracefully...\n", reason)
+			cleanupTmuxSession(sessionName)
+			printTmuxSummary(taskCount)
+			return
 		}
 
 		// Check if agent actually claimed a task

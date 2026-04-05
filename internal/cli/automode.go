@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -80,6 +81,27 @@ func interruptibleSleep(d time.Duration, shutdown <-chan struct{}) bool {
 	}
 }
 
+// checkYieldFile returns (reason, true) if a yield file exists at the given path, or ("", false) otherwise.
+func checkYieldFile(yieldFile string) (string, bool) {
+	if yieldFile == "" {
+		return "", false
+	}
+	if _, err := os.Stat(yieldFile); err != nil {
+		return "", false
+	}
+	data, err := os.ReadFile(yieldFile)
+	if err != nil {
+		return "unknown", true
+	}
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if json.Unmarshal(data, &req) != nil || req.Reason == "" {
+		return "unknown", true
+	}
+	return req.Reason, true
+}
+
 // agentClaimedTask checks the lock file to determine if the agent claimed a task
 // during its session. Returns true if TaskID is non-empty.
 // When bridge is non-nil, reads via the bridge; otherwise uses the local filesystem.
@@ -114,6 +136,8 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 	if opts.EventBus == nil {
 		opts.EventBus = events.NopBus{}
 	}
+
+	yieldFile := os.Getenv("LOOM_YIELD_FILE")
 
 	state := &AutoModeState{
 		LastTaskTime:  time.Now(),
@@ -204,6 +228,15 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 			state.ShouldExit = true
 			state.ExitReason = "shutdown signal received"
 		default:
+		}
+
+		// Check for yield file (cooperative preemption from daemon)
+		if !state.ShouldExit {
+			if reason, yielded := checkYieldFile(yieldFile); yielded {
+				fmt.Printf("[auto] Yield requested (reason: %s), exiting gracefully...\n", reason)
+				state.ShouldExit = true
+				state.ExitReason = fmt.Sprintf("yield requested: %s", reason)
+			}
 		}
 
 		if state.ShouldExit {
@@ -330,6 +363,14 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 		// Return to idle state after agent finishes
 		if updateErr := updateState(StateIdle); updateErr != nil {
 			fmt.Printf("[auto] Warning: failed to update state: %v\n", updateErr)
+		}
+
+		// Check yield before deciding whether to continue
+		if reason, yielded := checkYieldFile(yieldFile); yielded {
+			fmt.Printf("[auto] Yield requested after task (reason: %s), exiting gracefully...\n", reason)
+			state.ShouldExit = true
+			state.ExitReason = fmt.Sprintf("yield requested: %s", reason)
+			break
 		}
 
 		if err != nil {
