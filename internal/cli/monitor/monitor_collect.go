@@ -133,14 +133,14 @@ func buildAgentStatus(deps *cli.Deps, wt cli.WorktreeInfo, daemonManaged map[str
 	if wt.Repo != nil {
 		wtDefaultBranch = cli.DefaultBranchForWorktree(wt)
 	}
-	agent.Ahead, agent.Behind = GetWorktreeGitSyncStatusDeps(deps, wt.Path, wtDefaultBranch, branch)
+	agent.Ahead, agent.Behind = collectAgentAheadBehind(deps, wt, agent.Branch, wtDefaultBranch, branch)
 
 	if agent.Ahead > 0 {
 		wtGithubURL := githubURL
 		if wt.Repo != nil {
 			wtGithubURL = getGitHubRemoteURLDeps(deps, wt.Path)
 		}
-		agent.Commits = getWorktreeCommitDetailsDeps(deps, wt.Path, wtDefaultBranch, 10, wtGithubURL, branch)
+		agent.Commits = collectAgentCommits(deps, wt, agent.Branch, wtDefaultBranch, wtGithubURL, branch)
 	}
 	if idleHandled {
 		agent.Changes = idleChanges
@@ -196,8 +196,26 @@ func refineLockStatus(deps *cli.Deps, lockStatus, agentName string, agentTasks m
 // resolveIdleStatus determines the status for an agent with no lock and no in-progress task.
 // It also returns the file changes derived from the single git status invocation
 // so the caller can avoid running git status a second time.
+//
+// Tries the filesystem-level change detector first (zero subprocess cost on hit).
+// Falls through to getWorktreeStatus on cache miss or when the gitdir cannot be resolved.
 func resolveIdleStatus(deps *cli.Deps, wtPath string) (string, []FileChange) {
+	if gitDir, err := resolveGitDir(wtPath); err == nil {
+		if hit, cachedClean, cachedCount, cachedChanges := globalChangeDetector.CheckStatus(gitDir); hit {
+			return idleStatusFromValues(cachedClean, cachedCount, cachedChanges)
+		}
+		clean, count, fileChanges := getWorktreeStatus(deps, wtPath)
+		globalChangeDetector.UpdateStatus(gitDir, clean, count, fileChanges)
+		return idleStatusFromValues(clean, count, fileChanges)
+	}
 	clean, count, fileChanges := getWorktreeStatus(deps, wtPath)
+	return idleStatusFromValues(clean, count, fileChanges)
+}
+
+// idleStatusFromValues formats the (clean, count, changes) triple into the
+// (statusString, returnedChanges) pair expected by resolveIdleStatus. When the
+// worktree is clean, file changes are nil — preserving the original semantics.
+func idleStatusFromValues(clean bool, count int, fileChanges []FileChange) (string, []FileChange) {
 	if clean {
 		return "ready", nil
 	}
@@ -205,6 +223,54 @@ func resolveIdleStatus(deps *cli.Deps, wtPath string) (string, []FileChange) {
 		return fmt.Sprintf("%d changes", count), fileChanges
 	}
 	return "dirty", fileChanges
+}
+
+// collectAgentAheadBehind returns the (ahead, behind) counts for an agent's
+// branch vs its integration branch, consulting the filesystem ref-SHA cache
+// first to avoid spawning git when nothing has changed.
+func collectAgentAheadBehind(deps *cli.Deps, wt cli.WorktreeInfo, agentBranch, defaultBranch, overrideBranch string) (ahead, behind int) {
+	abBranch := overrideBranch
+	if abBranch == "" {
+		abBranch = defaultBranch
+	}
+	gitDir, err := resolveGitDir(wt.Path)
+	if err != nil {
+		return GetWorktreeGitSyncStatusDeps(deps, wt.Path, defaultBranch, overrideBranch)
+	}
+	commonDir, err := resolveCommonGitDir(gitDir)
+	if err != nil {
+		return GetWorktreeGitSyncStatusDeps(deps, wt.Path, defaultBranch, overrideBranch)
+	}
+	if hit, cachedAhead, cachedBehind := globalChangeDetector.CheckAheadBehind(commonDir, agentBranch, abBranch); hit {
+		return cachedAhead, cachedBehind
+	}
+	ahead, behind = GetWorktreeGitSyncStatusDeps(deps, wt.Path, defaultBranch, overrideBranch)
+	globalChangeDetector.UpdateAheadBehind(commonDir, agentBranch, abBranch, ahead, behind)
+	return ahead, behind
+}
+
+// collectAgentCommits returns the recent commit details for an agent, using
+// the global commit cache keyed by the local branch's HEAD SHA so that
+// unchanged branches return cached results without spawning git log.
+func collectAgentCommits(deps *cli.Deps, wt cli.WorktreeInfo, agentBranch, defaultBranch, githubURL, overrideBranch string) []CommitDetail {
+	gitDir, err := resolveGitDir(wt.Path)
+	if err != nil {
+		return getWorktreeCommitDetailsDeps(deps, wt.Path, defaultBranch, 10, githubURL, overrideBranch)
+	}
+	commonDir, err := resolveCommonGitDir(gitDir)
+	if err != nil {
+		return getWorktreeCommitDetailsDeps(deps, wt.Path, defaultBranch, 10, githubURL, overrideBranch)
+	}
+	headSHA, err := ReadRefSHA(commonDir, "refs/heads/"+agentBranch)
+	if err != nil {
+		return getWorktreeCommitDetailsDeps(deps, wt.Path, defaultBranch, 10, githubURL, overrideBranch)
+	}
+	if commits, ok := globalCommitCache.Get(headSHA); ok {
+		return commits
+	}
+	commits := getWorktreeCommitDetailsDeps(deps, wt.Path, defaultBranch, 10, githubURL, overrideBranch)
+	globalCommitCache.Set(headSHA, commits)
+	return commits
 }
 
 func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, map[string]TaskInfo) {
