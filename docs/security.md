@@ -39,6 +39,13 @@ For production Redis deployments:
 2. **Bind to localhost** or a private network interface — avoid exposing Redis on `0.0.0.0`.
 3. **Use a TLS-terminating proxy** (e.g., stunnel, HAProxy) if Redis is accessed over a network. Loom does not natively configure TLS on Redis connections.
 
+### Config File Security Hardening
+
+- **Atomic writes**: `SaveConfig` and `MigrateConfigFile` use tmp+rename to prevent partial writes on crash.
+- **File locking**: flock-based config file locking (`internal/configlock`) prevents concurrent write corruption from parallel agents.
+- **Parse failure protection**: `LoadConfig` refuses to overwrite config after parse/read failures, preventing data loss from corrupted reads.
+- **Session file permissions**: Session audit trail files are created with `0o600` permissions. Session directories use `0o700`.
+
 ### Secret Rotation
 
 Redis configuration changes require restarting `loom serve` — there is no hot-reload mechanism. Plan maintenance windows accordingly.
@@ -49,6 +56,45 @@ Redis configuration changes require restarting `loom serve` — there is no hot-
 - When binding `loom serve` to a non-localhost address (`--bind 0.0.0.0`), a warning is logged. Ensure this is intentional and that appropriate network controls are in place.
 - Use `--auth-url` to point at an external auth service for JWT-based authentication. Always enable external auth in production.
 - Use `--fleet-api-key` (or `LOOM_FLEET_API_KEY` env var) to authenticate fleet worker registration.
+- The legacy API key auth system has been removed. Authentication is now handled exclusively via external OIDC (`--auth-url`) or open mode.
+
+## Agent IPC Security
+
+The daemon IPC Unix socket is created with strict owner-only permissions (`0600`). Only the user running the daemon can connect. Stale socket files from previous crashes are removed on startup. The daemon lockfile prevents concurrent startup.
+
+IPC operations are limited to three mutations (claim, update, complete) — no read operations are exposed over IPC. The `LOOM_DAEMON_SOCKET` environment variable is injected into agent subprocesses automatically.
+
+## Input Sanitization
+
+### Markdown Rendering (XSS Prevention)
+
+All user-supplied markdown rendered in the frontend passes through DOMPurify sanitization. This prevents stored XSS via issue descriptions, comments, and design fields.
+
+### Git Environment Variable Blocklist
+
+`FilterEnv()` strips `GIT_*` environment variables from agent subprocess environments as defense-in-depth. This prevents agents from inheriting git credential helpers, custom hooks, or configuration that could leak credentials or alter git behavior.
+
+### Log Path Sanitization
+
+Role names used in daemon log file paths are sanitized to prevent path traversal. Characters outside `[a-zA-Z0-9_-]` are rejected.
+
+## SSE and WebSocket Security
+
+### SSE Token Workspace Binding
+
+SSE tokens are bound to a specific workspace ID at issuance. The server enforces that a token can only subscribe to mutations for its bound workspace, preventing cross-workspace data leakage via SSE.
+
+### Terminal WebSocket Auth
+
+Terminal WebSocket connections use HMAC-SHA256 token exchange. Tokens bind to both user identity and workspace, preventing cross-workspace terminal access.
+
+### Session Notification Endpoint
+
+`POST /api/sessions/notify` uses bearer token authentication instead of the previous loopback IP check, hardening against request forgery from local processes.
+
+## Editor Launch Security
+
+`POST /api/editors/open` is restricted to loopback-only connections. This prevents remote attackers from triggering arbitrary editor launches on the server host.
 
 ## Workspace Clone Security
 

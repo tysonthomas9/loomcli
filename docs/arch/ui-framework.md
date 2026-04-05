@@ -2,7 +2,7 @@
 
 ## Overview
 
-The UI framework provides the foundational infrastructure for the web UI: design tokens, theme system, responsive layout, keyboard shortcuts, accessibility primitives, real-time data management, and shared UI components. All frontend components consume this framework through CSS custom properties, React context providers, and shared hooks.
+The UI framework provides the foundational infrastructure for the web UI: design tokens, theme system, responsive layout, keyboard shortcuts, accessibility primitives, real-time data management, state management, and shared UI components. All frontend components consume this framework through CSS custom properties, React context providers, Zustand stores, and shared hooks.
 
 Source root: `internal/webui/frontend/src/`
 
@@ -10,25 +10,45 @@ Source root: `internal/webui/frontend/src/`
 
 ## 1. Component Tree Overview
 
+### Provider Hierarchy (top-down)
+
 ```
-<ToastProvider>               <- useToast context (toast notifications)
-  <KeyboardShortcutProvider>  <- global shortcut listener + cheatsheet state
-    <AppLayout>               <- fixed header, NavRail slot, sidebar slot, <main>
-      <LiveRegion />          <- aria-live singletons (polite + assertive)
-      <NavRail />             <- icon-only left rail (or bottom tab bar on mobile)
-      <main id="main-content">
-        {activeView}          <- Kanban / Table / Terminal / ... loaded lazily
-      </main>
-      <IssueDetailPanel />    <- slide-out panel (usePanelManager controls open/close)
-      <AgentDetailPanel />    <- slide-out panel (mutually exclusive with issue panel)
-      <KeyboardCheatsheet />  <- portal overlay, ? key
-      <ToastContainer />      <- bottom-right, stacked toasts
-      <DaemonUnavailableOverlay /> <- full-page overlay when daemon unreachable
-      <StaleDataBanner />     <- sticky banner after SSE disconnect > 5s
-    </AppLayout>
-  </KeyboardShortcutProvider>
-</ToastProvider>
+main.tsx
+├─ StrictMode
+├─ ErrorBoundary
+├─ ToastProvider                    <- useToast context (toast notifications)
+└─ AuthProvider (OIDC or NoAuth)
+   └─ AuthGate
+   └─ RouterProvider
+      └─ WorkspaceLayout (/ws/:workspaceId)
+         ├─ WorkspaceProvider
+         └─ StoreProvider           <- creates issueStore + agentStore instances
+            ├─ StoreContext.Provider
+            └─ EventProvider        <- shared SSE connection per workspace
+               └─ StoreWiring       <- connects Zustand stores <-> SSE events
 ```
+
+### Application Shell (inside StoreWiring)
+
+```
+<KeyboardShortcutProvider>  <- global shortcut listener + cheatsheet state
+  <AppLayout>               <- fixed header, NavRail slot, sidebar slot, <main>
+    <LiveRegion />          <- aria-live singletons (polite + assertive)
+    <NavRail />             <- icon-only left rail (or bottom tab bar on mobile)
+    <main id="main-content">
+      {activeView}          <- Kanban / Table / Terminal / ... loaded via React.lazy()
+    </main>
+    <IssueDetailPanel />    <- slide-out panel (usePanelManager controls open/close)
+    <AgentDetailPanel />    <- slide-out panel (mutually exclusive with issue panel)
+    <KeyboardCheatsheet />  <- portal overlay, ? key
+    <ToastContainer />      <- bottom-right, stacked toasts
+    <DaemonUnavailableOverlay /> <- full-page overlay when daemon unreachable
+    <StaleDataBanner />     <- sticky banner after SSE disconnect > 5s
+  </AppLayout>
+</KeyboardShortcutProvider>
+```
+
+View routes are lazy-loaded via `React.lazy()` with code splitting, so each view bundle is fetched on demand.
 
 ---
 
@@ -180,7 +200,7 @@ Two independent mechanisms:
 
 **A. Global shortcut provider** — handles view switching, Cmd/Ctrl+K, `?`, arrow delegation.
 
-**B. Escape layer registry** — context-scoped sorted array of layers. Requires KeyboardShortcutProvider.
+**B. Escape layer registry** — context-scoped sorted array of layers (context-only pattern; module-level escape registry has been removed). Requires KeyboardShortcutProvider.
 
 ### Layer Priority Constants
 
@@ -302,33 +322,93 @@ useFocusTrap(panelRef, isOpen, { activationDelay: 50 });
 
 ---
 
-## 7. Real-Time Data (SSE)
+## 7. State Management (Zustand Stores)
+
+### Architecture
+
+State management uses Zustand vanilla stores (via `createStore` from `zustand/vanilla`) rather than hook-based composition. The old `useIssues` and `useAgents` hooks have been deleted and replaced by dedicated stores. Module-level caches for editors, backends, and workspace metadata have also been replaced with Zustand stores.
+
+Consumers access store state via the `useStore(storeInstance, selector)` pattern, where the store instance is obtained from context (see StoreProvider below).
+
+### Stores
+
+| Store | File | Replaces | Responsibilities |
+|-------|------|----------|------------------|
+| `issueStore` | `stores/issueStore.ts` | `useIssues` hook | Issue list state, optimistic entries, fetch timestamps, deletion tracking, timeout management |
+| `agentStore` | `stores/agentStore.ts` | `useAgents` hook (371 lines) | Agent list state, polling lifecycle with interval-based fetching, exponential backoff, watchdog timers, visibility-change refetch |
+| `backendsStore` | `stores/backendsStore.ts` | Module-level backends cache | Backend configuration state |
+| `editorStore` | `stores/editorStore.ts` | Module-level editor cache | Editor configuration state |
+| `workspaceStore` | `stores/workspaceStore.ts` | Module-level workspace cache | Workspace metadata state |
+
+### Agent Store Backoff Configuration
+
+The agent store manages its own polling lifecycle with exponential backoff on failure:
+
+| Constant | Value |
+|----------|-------|
+| `INITIAL_RETRY_DELAY_S` | 5 |
+| `MAX_RETRY_DELAY_S` | 60 |
+| `BACKOFF_MULTIPLIER` | 2 |
+
+On successful fetch, the retry delay resets to initial. On failure, it doubles up to the max. A watchdog timer detects stalled polling. The store also refetches on `visibilitychange` events (tab becomes visible).
+
+### StoreProvider
+
+**File**: `hooks/useStoreContext.tsx`
+
+Creates `issueStore` and `agentStore` instances per workspace via `useState(() => createStore(...))`. Provides them through `StoreContext`. An internal `StoreWiring` component subscribes to EventProvider SSE events and dispatches mutations to the appropriate stores.
+
+Consumer hooks:
+- `useIssueStoreInstance()` -- returns the issueStore instance for use with `useStore()`
+- `useAgentStoreInstance()` -- returns the agentStore instance for use with `useStore()`
+
+---
+
+## 8. Real-Time Data (SSE)
 
 ### SSE Architecture
 
-**Files**: `api/sse.ts` + `hooks/useSSE.ts`
+**Files**: `api/sse.ts` (BeadsSSEClient) + `hooks/useEventProvider.tsx` (EventProvider)
 
-Server-Sent Events for push-based real-time updates. Connection states:
+Server-Sent Events for push-based real-time updates. The SSE layer has two parts: a low-level client and a React context provider that manages its lifecycle.
+
+Connection states:
 ```typescript
 export type ConnectionState = "disconnected" | "connecting" | "connected" | "reconnecting";
 ```
 
-### `useSSE` Hook
+### BeadsSSEClient
 
+Rewritten SSE client with unified reconnect logic and injectable auth token. Handles connection establishment, typed event parsing, and automatic reconnection. A single `BeadsSSEClient` instance is created per workspace by the `EventProvider`.
+
+### EventProvider
+
+**File**: `hooks/useEventProvider.tsx`
+
+React context providing a shared SSE connection with typed event subscription. One instance per workspace, created by `StoreProvider`.
+
+Interface exposed via context:
 ```typescript
-const { state, isConnected, reconnectAttempts, lastEventId, retryNow } = useSSE({
-  autoConnect: true,
-  since: Date.now(),
-  sourceRepos: ["repo-a"],
-  onMutation: (mutation) => { ... },
-  onError: (error) => { ... },
-  onStateChange: (state) => { ... },
-});
+{
+  state: ConnectionState;
+  reconnectAttempts: number;
+  lastError: Error | null;
+  isConnected: boolean;
+  subscribe: (handler, options?: SubscriptionOptions) => Unsubscribe;
+  retryNow: () => void;
+  disconnect: () => void;
+}
 ```
 
-- Callbacks stored in refs to avoid stale closures
-- `sourceRepos` reconnects when the repo set changes
+- Fans out mutation events to subscribers via a ref-based registry
+- `SubscriptionOptions` allows filtering mutations by type, so consumers only receive relevant events
 - `beforeunload` flag suppresses false-positive error events during page navigation
+
+### StoreWiring
+
+**File**: inside `hooks/useStoreContext.tsx`
+
+Internal component within `StoreProvider` that connects Zustand stores to EventProvider SSE events. Subscribes to the EventProvider and dispatches incoming mutations to the appropriate store (issueStore, agentStore). This replaces the old pattern of passing SSE callbacks directly to hooks.
 
 ### Reconnect Backoff
 
@@ -349,26 +429,18 @@ Shown when SSE disconnected for more than 5 seconds. `role="alert"`, `aria-live=
 
 ### Optimistic Updates with Rollback
 
-**File**: `hooks/useOptimisticUpdate.ts`
-
-```typescript
-const handle = startOptimistic(issueId, snapshot);
-// Apply optimistic UI update immediately
-// SSE mutations for this issue are buffered during optimistic window
-handle.confirm();   // flushes buffered SSE mutations in order
-handle.rollback("Update failed"); // restores snapshot + error toast
-```
+Optimistic update logic is now managed within the issue store (`stores/issueStore.ts`). The store tracks optimistic entries, deletion markers, and fetch timestamps internally.
 
 Lifecycle:
-1. `startOptimistic` saves pre-change snapshot, starts 30-second auto-rollback timer
-2. Incoming SSE mutations for the optimistic issue are buffered
-3. `confirm()` flushes buffered mutations in order
-4. `rollback()` restores snapshot, replays buffered mutations, shows error toast
-5. Auto-rollback at 30s if neither confirm nor rollback was called
+1. Store applies optimistic entry immediately, starts timeout for auto-rollback
+2. Incoming SSE mutations for the optimistic issue are buffered by the store
+3. On API success: confirm flushes buffered mutations in order
+4. On API failure: rollback restores snapshot, replays buffered mutations, shows error toast
+5. Auto-rollback at timeout if neither confirm nor rollback was called
 
 ---
 
-## 8. Shared UI Primitives
+## 9. Shared UI Primitives
 
 ### Toast Notifications
 
@@ -430,7 +502,7 @@ Badge driven by `ConnectionState`. Colored dot with text. "Retry Now" button aft
 
 ---
 
-## 9. Search
+## 10. Search
 
 ### SearchInput Component
 
@@ -456,11 +528,11 @@ const searchTerm = useSearchTerm();
 
 ---
 
-## 10. Navigation and State
+## 11. Navigation and State
 
 ### URL Parameter Map
 
-All navigation state encoded in `window.location.search`. No React Router — direct `replaceState` / `pushState`.
+Navigation state encoded in URL parameters. Routes managed by React Router with lazy-loaded view routes (code splitting via `React.lazy()`).
 
 | Parameter | Hook | Values |
 |-----------|------|--------|
@@ -500,7 +572,7 @@ Module-level `Map<viewKey, number>`. Saves `scrollTop` on unmount, restores via 
 
 ---
 
-## 11. localStorage Management
+## 12. localStorage Management
 
 ### V5 -> V6 Migration
 
@@ -527,7 +599,7 @@ All V6 keys use the `cortex:` namespace prefix. Handles `QuotaExceededError`.
 
 ---
 
-## 12. Performance
+## 13. Performance
 
 ### Virtualized Lists
 
@@ -549,7 +621,7 @@ With `measureElements: true`, uses `getBoundingClientRect().height` for actual s
 
 ---
 
-## 13. File Map
+## 14. File Map
 
 ### Styles
 
@@ -561,22 +633,32 @@ With `measureElements: true`, uses `getBoundingClientRect().height` for actual s
 | `styles/fonts.css` | Inter woff2 @font-face declarations |
 | `styles/index.css` | Import orchestration |
 
+### Stores
+
+| File | Role |
+|------|------|
+| `stores/issueStore.ts` | Zustand vanilla store for issue state, optimistic entries, fetch timestamps, deletion tracking |
+| `stores/agentStore.ts` | Zustand vanilla store for agent state, polling lifecycle, exponential backoff, watchdog timers |
+| `stores/backendsStore.ts` | Zustand store for backend configuration |
+| `stores/editorStore.ts` | Zustand store for editor configuration |
+| `stores/workspaceStore.ts` | Zustand store for workspace metadata |
+
 ### Hooks
 
 | File | Role |
 |------|------|
 | `hooks/useTheme.ts` | Dark/light theme, OS detection, localStorage persistence |
-| `hooks/useKeyboardShortcuts.tsx` | Global shortcuts, Escape layer registry, cheatsheet state |
+| `hooks/useKeyboardShortcuts.tsx` | Global shortcuts, Escape layer registry (context-only), cheatsheet state |
+| `hooks/useEventProvider.tsx` | EventProvider context: shared SSE connection, typed event subscription, ref-based fan-out |
+| `hooks/useStoreContext.tsx` | StoreProvider: creates store instances, StoreWiring connects stores to SSE |
 | `hooks/usePanelManager.ts` | Panel mutual exclusivity and transition choreography |
 | `hooks/useViewState.ts` | View mode URL sync, pushState/replaceState, popstate |
 | `hooks/useWorkspaceParam.ts` | `?workspace=` URL param sync |
 | `hooks/useWorkspaceState.ts` | Per-workspace UI snapshot on switch |
 | `hooks/useFilterState.ts` | Multi-key filter URL sync |
 | `hooks/useRepoFilter.ts` | `?repos=` URL param sync |
-| `hooks/useSSE.ts` | SSE connection lifecycle wrapper |
-| `hooks/useOptimisticUpdate.ts` | Optimistic state with SSE buffering and rollback |
 | `hooks/useDebounce.ts` | Generic debounce |
-| `hooks/useIssueSearch.ts` | Client-side issue search with module-level cache |
+| `hooks/useIssueSearch.ts` | Client-side issue search |
 | `hooks/useSearchScope.ts` | Search scope context |
 | `hooks/useVirtualList.ts` | @tanstack/react-virtual wrapper |
 | `hooks/useScrollRestore.ts` | Per-view scroll position persistence |
@@ -586,7 +668,6 @@ With `measureElements: true`, uses `getBoundingClientRect().height` for actual s
 | `hooks/useFocusReturn.ts` | Focus restoration on close |
 | `hooks/useToast.tsx` | Toast context + reducer + coalescing |
 | `hooks/useDaemonHealth.ts` | Daemon availability polling + backoff |
-| `hooks/useBackends.ts` | Backend health data fetch + merge |
 
 ### Components
 
