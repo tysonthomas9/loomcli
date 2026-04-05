@@ -818,6 +818,10 @@ func (m *mockStatsPool) Put(client healthhandlers.StatsClient) {
 	}
 }
 
+func (m *mockStatsPool) Discard(client healthhandlers.StatsClient) {
+	// no-op for tests
+}
+
 // TestHandleStats_ContentType verifies Content-Type header is application/json for all responses.
 func TestHandleStats_ContentType(t *testing.T) {
 	handler := healthhandlers.HandleStats(nil)

@@ -132,7 +132,8 @@ func (p *contractMockStatsPool) Get(ctx context.Context) (healthhandlers.StatsCl
 	return p.client, nil
 }
 
-func (p *contractMockStatsPool) Put(client healthhandlers.StatsClient) {}
+func (p *contractMockStatsPool) Put(client healthhandlers.StatsClient)     {}
+func (p *contractMockStatsPool) Discard(client healthhandlers.StatsClient) {}
 
 // contractMockGraphClient implements graphClient.
 type contractMockGraphClient struct {
@@ -152,7 +153,8 @@ func (p *contractMockGraphPool) Get(ctx context.Context) (githandlers.GraphClien
 	return p.client, nil
 }
 
-func (p *contractMockGraphPool) Put(client githandlers.GraphClient) {}
+func (p *contractMockGraphPool) Put(client githandlers.GraphClient)     {}
+func (p *contractMockGraphPool) Discard(client githandlers.GraphClient) {}
 
 // contractMockBlockedClient implements blockedClient.
 type contractMockBlockedClient struct {
@@ -172,7 +174,8 @@ func (p *contractMockBlockedPool) Get(ctx context.Context) (githandlers.BlockedC
 	return p.client, nil
 }
 
-func (p *contractMockBlockedPool) Put(client githandlers.BlockedClient) {}
+func (p *contractMockBlockedPool) Put(client githandlers.BlockedClient)     {}
+func (p *contractMockBlockedPool) Discard(client githandlers.BlockedClient) {}
 
 // --- Error pool mocks (return error from Get) ---
 
@@ -181,21 +184,24 @@ type errorStatsPool struct{}
 func (p *errorStatsPool) Get(ctx context.Context) (healthhandlers.StatsClient, error) {
 	return nil, errors.New("pool unavailable")
 }
-func (p *errorStatsPool) Put(client healthhandlers.StatsClient) {}
+func (p *errorStatsPool) Put(client healthhandlers.StatsClient)     {}
+func (p *errorStatsPool) Discard(client healthhandlers.StatsClient) {}
 
 type errorGraphPool struct{}
 
 func (p *errorGraphPool) Get(ctx context.Context) (githandlers.GraphClient, error) {
 	return nil, errors.New("pool unavailable")
 }
-func (p *errorGraphPool) Put(client githandlers.GraphClient) {}
+func (p *errorGraphPool) Put(client githandlers.GraphClient)     {}
+func (p *errorGraphPool) Discard(client githandlers.GraphClient) {}
 
 type errorBlockedPool struct{}
 
 func (p *errorBlockedPool) Get(ctx context.Context) (githandlers.BlockedClient, error) {
 	return nil, errors.New("pool unavailable")
 }
-func (p *errorBlockedPool) Put(client githandlers.BlockedClient) {}
+func (p *errorBlockedPool) Put(client githandlers.BlockedClient)     {}
+func (p *errorBlockedPool) Discard(client githandlers.BlockedClient) {}
 
 // =============================================================================
 // Contract Tests: Success Responses

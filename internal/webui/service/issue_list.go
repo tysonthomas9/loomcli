@@ -27,12 +27,16 @@ func (s *issueServiceImpl) ListIssues(ctx context.Context, params ListIssuesPara
 		slog.Error("connection pool error", "err", err)
 		return nil, ErrUnavailable("daemon unavailable")
 	}
-	defer s.pool.Put(client)
+	rpcOK := false
+	defer s.releaseClient(client, &rpcOK)
 
 	issuesWithCounts, err := s.fetchAndFilterIssues(client, params)
 	if err != nil {
 		return nil, err
 	}
+	// List succeeded; downstream batchGetParentIDs / Blocked calls log on
+	// error and continue, so we accept the connection back at this point.
+	rpcOK = true
 
 	if len(issuesWithCounts) == 0 {
 		if params.IncludeBlocked {

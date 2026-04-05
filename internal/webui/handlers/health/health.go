@@ -84,6 +84,7 @@ type StatsClient interface {
 type StatsConnectionGetter interface {
 	Get(ctx context.Context) (StatsClient, error)
 	Put(client StatsClient)
+	Discard(client StatsClient)
 }
 
 // statsPoolAdapter wraps daemon.Pool to implement StatsConnectionGetter.
@@ -98,6 +99,12 @@ func (p *statsPoolAdapter) Get(ctx context.Context) (StatsClient, error) {
 func (p *statsPoolAdapter) Put(client StatsClient) {
 	if c, ok := client.(*rpc.Client); ok {
 		p.pool.Put(c)
+	}
+}
+
+func (p *statsPoolAdapter) Discard(client StatsClient) {
+	if c, ok := client.(*rpc.Client); ok {
+		p.pool.Discard(c)
 	}
 }
 
@@ -150,7 +157,14 @@ func HandleAPIHealth(pool daemon.Pool) http.HandlerFunc { //nolint:funlen
 				status.Status = "degraded"
 				status.Daemon.Error = err.Error()
 			} else {
-				defer pool.Put(client)
+				rpcOK := false
+				defer func() {
+					if rpcOK {
+						pool.Put(client)
+					} else {
+						pool.Discard(client)
+					}
+				}()
 
 				// Get daemon health
 				health, err := client.Health()
@@ -158,6 +172,7 @@ func HandleAPIHealth(pool daemon.Pool) http.HandlerFunc { //nolint:funlen
 					status.Status = "degraded"
 					status.Daemon.Error = err.Error()
 				} else {
+					rpcOK = true
 					status.Daemon.Connected = true
 					status.Daemon.Status = health.Status
 					status.Daemon.Uptime = health.Uptime
@@ -214,7 +229,14 @@ func HandleStatsWithPool(pool StatsConnectionGetter) http.HandlerFunc { //nolint
 			handler.WriteJSON(w, status, StatsResponse{Success: false, Error: err.Error()})
 			return
 		}
-		defer pool.Put(client)
+		rpcOK := false
+		defer func() {
+			if rpcOK {
+				pool.Put(client)
+			} else {
+				pool.Discard(client)
+			}
+		}()
 
 		// Execute Stats RPC call
 		resp, err := client.Stats()
@@ -225,6 +247,7 @@ func HandleStatsWithPool(pool StatsConnectionGetter) http.HandlerFunc { //nolint
 			})
 			return
 		}
+		rpcOK = true
 
 		if !resp.Success {
 			handler.WriteJSON(w, http.StatusInternalServerError, StatsResponse{
@@ -307,7 +330,14 @@ func HandleDaemonStatus(pool daemon.Pool) http.HandlerFunc {
 			handler.WriteJSON(w, status, DaemonStatusResponse{Success: false, Error: err.Error()})
 			return
 		}
-		defer pool.Put(client)
+		rpcOK := false
+		defer func() {
+			if rpcOK {
+				pool.Put(client)
+			} else {
+				pool.Discard(client)
+			}
+		}()
 
 		// Get daemon status
 		daemonStatus, err := client.Status()
@@ -318,6 +348,7 @@ func HandleDaemonStatus(pool daemon.Pool) http.HandlerFunc {
 			})
 			return
 		}
+		rpcOK = true
 
 		handler.WriteJSON(w, http.StatusOK, DaemonStatusResponse{Success: true, Data: daemonStatus})
 	}

@@ -114,6 +114,7 @@ type configClient interface {
 type configConnectionGetter interface {
 	Get(ctx context.Context) (configClient, error)
 	Put(client configClient)
+	Discard(client configClient)
 }
 
 // configPoolAdapter wraps daemon.Pool to implement configConnectionGetter.
@@ -128,6 +129,12 @@ func (p *configPoolAdapter) Get(ctx context.Context) (configClient, error) {
 func (p *configPoolAdapter) Put(client configClient) {
 	if c, ok := client.(*rpc.Client); ok {
 		p.pool.Put(c)
+	}
+}
+
+func (p *configPoolAdapter) Discard(client configClient) {
+	if c, ok := client.(*rpc.Client); ok {
+		p.pool.Discard(c)
 	}
 }
 
@@ -284,12 +291,20 @@ func getWorkspacePath(pool configConnectionGetter, ctx context.Context) (string,
 	if err != nil {
 		return "", err
 	}
-	defer pool.Put(client)
+	rpcOK := false
+	defer func() {
+		if rpcOK {
+			pool.Put(client)
+		} else {
+			pool.Discard(client)
+		}
+	}()
 
 	status, err := client.Status()
 	if err != nil {
 		return "", err
 	}
+	rpcOK = true
 	return status.WorkspacePath, nil
 }
 

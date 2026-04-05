@@ -279,7 +279,7 @@ func TestHandleBlocked_QueryParamsPassed(t *testing.T) {
 }
 
 func TestHandleBlocked_ClientReturnedToPoolOnError(t *testing.T) {
-	putCalled := false
+	discardCalled := false
 
 	pool := &mockBlockedPool{
 		getFunc: func(ctx context.Context) (BlockedClient, error) {
@@ -289,8 +289,8 @@ func TestHandleBlocked_ClientReturnedToPoolOnError(t *testing.T) {
 				},
 			}, nil
 		},
-		putFunc: func(c BlockedClient) {
-			putCalled = true
+		discardFunc: func(c BlockedClient) {
+			discardCalled = true
 		},
 	}
 
@@ -300,8 +300,8 @@ func TestHandleBlocked_ClientReturnedToPoolOnError(t *testing.T) {
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 
-	if !putCalled {
-		t.Error("expected client to be returned to pool via Put, but Put was not called")
+	if !discardCalled {
+		t.Error("expected Discard to be called on RPC error")
 	}
 }
 
@@ -685,7 +685,7 @@ func TestHandleGraph_StatusFilterArgs(t *testing.T) {
 }
 
 func TestHandleGraph_ClientReturnedToPoolOnRPCError(t *testing.T) {
-	putCalled := false
+	discardCalled := false
 
 	pool := &mockGraphPool{
 		getFunc: func(ctx context.Context) (GraphClient, error) {
@@ -695,8 +695,8 @@ func TestHandleGraph_ClientReturnedToPoolOnRPCError(t *testing.T) {
 				},
 			}, nil
 		},
-		putFunc: func(c GraphClient) {
-			putCalled = true
+		discardFunc: func(c GraphClient) {
+			discardCalled = true
 		},
 	}
 
@@ -706,8 +706,8 @@ func TestHandleGraph_ClientReturnedToPoolOnRPCError(t *testing.T) {
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 
-	if !putCalled {
-		t.Error("expected client to be returned to pool via Put, but Put was not called")
+	if !discardCalled {
+		t.Error("expected Discard to be called on RPC error")
 	}
 }
 

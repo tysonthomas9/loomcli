@@ -124,8 +124,9 @@ func (m *mockBlockedClient) Blocked(args *rpc.BlockedArgs) (*rpc.Response, error
 
 // mockBlockedPool implements BlockedConnectionGetter for testing.
 type mockBlockedPool struct {
-	getFunc func(ctx context.Context) (BlockedClient, error)
-	putFunc func(c BlockedClient)
+	getFunc     func(ctx context.Context) (BlockedClient, error)
+	putFunc     func(c BlockedClient)
+	discardFunc func(c BlockedClient)
 }
 
 func (m *mockBlockedPool) Get(ctx context.Context) (BlockedClient, error) {
@@ -138,6 +139,12 @@ func (m *mockBlockedPool) Get(ctx context.Context) (BlockedClient, error) {
 func (m *mockBlockedPool) Put(c BlockedClient) {
 	if m.putFunc != nil {
 		m.putFunc(c)
+	}
+}
+
+func (m *mockBlockedPool) Discard(c BlockedClient) {
+	if m.discardFunc != nil {
+		m.discardFunc(c)
 	}
 }
 
@@ -155,8 +162,9 @@ func (m *mockGraphClient) GetGraphData(args *rpc.GetGraphDataArgs) (*rpc.GetGrap
 
 // mockGraphPool implements GraphConnectionGetter for testing.
 type mockGraphPool struct {
-	getFunc func(ctx context.Context) (GraphClient, error)
-	putFunc func(c GraphClient)
+	getFunc     func(ctx context.Context) (GraphClient, error)
+	putFunc     func(c GraphClient)
+	discardFunc func(c GraphClient)
 }
 
 func (m *mockGraphPool) Get(ctx context.Context) (GraphClient, error) {
@@ -169,6 +177,12 @@ func (m *mockGraphPool) Get(ctx context.Context) (GraphClient, error) {
 func (m *mockGraphPool) Put(c GraphClient) {
 	if m.putFunc != nil {
 		m.putFunc(c)
+	}
+}
+
+func (m *mockGraphPool) Discard(c GraphClient) {
+	if m.discardFunc != nil {
+		m.discardFunc(c)
 	}
 }
 

@@ -39,7 +39,8 @@ func (s *issueServiceImpl) MoveIssue(ctx context.Context, params MoveIssueParams
 		slog.Error("pool error in MoveIssue", "err", err)
 		return nil, ErrUnavailable("daemon not available")
 	}
-	defer s.pool.Put(client)
+	rpcOK := false
+	defer s.releaseClient(client, &rpcOK)
 
 	// Fetch and validate source issue
 	sourceIssue, err := s.fetchSourceIssue(client, params.IssueID)
@@ -60,7 +61,8 @@ func (s *issueServiceImpl) MoveIssue(ctx context.Context, params MoveIssueParams
 
 	// Add comment on source noting the move (non-fatal)
 	commentText := fmt.Sprintf("Moved to %s in workspace %q", newID, params.TargetWorkspace)
-	if _, commentErr := client.AddComment(&rpc.CommentAddArgs{ID: params.IssueID, Author: "web-ui", Text: commentText}); commentErr != nil {
+	_, commentErr := client.AddComment(&rpc.CommentAddArgs{ID: params.IssueID, Author: "web-ui", Text: commentText})
+	if commentErr != nil {
 		slog.Error("failed to add move comment on source", "issue_id", params.IssueID, "err", commentErr)
 		warnings = append(warnings, "Failed to add comment on source issue")
 	}
@@ -73,6 +75,12 @@ func (s *issueServiceImpl) MoveIssue(ctx context.Context, params MoveIssueParams
 	} else if !closeResp.Success {
 		slog.Error("close failed for source", "issue_id", params.IssueID, "err", closeResp.Error)
 		warnings = append(warnings, "Source issue could not be closed")
+	}
+	// All RPCs over `client` succeeded at the transport level; safe to return
+	// the connection. Any transport error keeps rpcOK false so the connection
+	// is discarded (its read buffer may hold stale bytes).
+	if commentErr == nil && closeErr == nil {
+		rpcOK = true
 	}
 
 	return &MoveIssueResult{
@@ -121,7 +129,14 @@ func (s *issueServiceImpl) createIssueInTarget(ctx context.Context, targetWsID, 
 		slog.Error("target pool error in MoveIssue", "workspace", targetWorkspace, "err", err)
 		return "", ErrUnavailable("target workspace daemon not available")
 	}
-	defer s.multiPool.Put(targetClient)
+	rpcOK := false
+	defer func() {
+		if rpcOK {
+			s.multiPool.Put(targetClient)
+		} else {
+			s.multiPool.Discard(targetClient)
+		}
+	}()
 
 	createArgs := buildMoveCreateArgs(sourceIssue, sourceID)
 	createResp, err := targetClient.Create(createArgs)
@@ -129,6 +144,7 @@ func (s *issueServiceImpl) createIssueInTarget(ctx context.Context, targetWsID, 
 		slog.Error("RPC create error in MoveIssue", "err", err)
 		return "", ErrInternal("failed to create issue in target workspace", err)
 	}
+	rpcOK = true
 	if !createResp.Success {
 		return "", ErrInternal(fmt.Sprintf("failed to create issue: %s", createResp.Error), nil)
 	}

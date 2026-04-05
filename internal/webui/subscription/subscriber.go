@@ -100,13 +100,21 @@ func (s *DaemonSubscriber) GetMutationsSince(since int64) []rpc.MutationEvent {
 		slog.Error("failed to get connection", "op", "GetMutationsSince", "err", err)
 		return nil
 	}
-	defer s.pool.Put(client)
+	rpcOK := false
+	defer func() {
+		if rpcOK {
+			s.pool.Put(client)
+		} else {
+			s.pool.Discard(client)
+		}
+	}()
 
 	resp, err := client.GetMutations(&rpc.GetMutationsArgs{Since: since})
 	if err != nil {
 		slog.Error("RPC error", "op", "GetMutationsSince", "err", err)
 		return nil
 	}
+	rpcOK = true
 
 	if !resp.Success {
 		slog.Error("RPC failed", "op", "GetMutationsSince", "err", resp.Error)
@@ -217,7 +225,14 @@ func (s *DaemonSubscriber) pollMutations() {
 		s.waitWithDone(subscriptionRetryDelay)
 		return
 	}
-	defer s.pool.Put(client)
+	rpcOK := false
+	defer func() {
+		if rpcOK {
+			s.pool.Put(client)
+		} else {
+			s.pool.Discard(client)
+		}
+	}()
 
 	s.mu.RLock()
 	since := s.lastSince
@@ -229,6 +244,7 @@ func (s *DaemonSubscriber) pollMutations() {
 		s.waitWithDone(subscriptionRetryDelay)
 		return
 	}
+	rpcOK = true
 
 	if !resp.Success {
 		s.waitWithDone(subscriptionRetryDelay)
@@ -320,12 +336,20 @@ func (s *DaemonSubscriber) pollDBChanges() {
 	if err != nil {
 		return
 	}
-	defer s.pool.Put(client)
+	rpcOK := false
+	defer func() {
+		if rpcOK {
+			s.pool.Put(client)
+		} else {
+			s.pool.Discard(client)
+		}
+	}()
 
 	totalCount, ok := s.fetchTotalCount(client)
 	if !ok {
 		return
 	}
+	rpcOK = true
 
 	now := time.Now()
 

@@ -59,6 +59,26 @@ func (s *issueServiceImpl) acquireClient(ctx context.Context) (*rpc.Client, erro
 	return client, nil
 }
 
+// releaseClient returns the connection to the pool when *ok is true, or
+// closes (Discards) it when *ok is false. Use the conditional defer pattern:
+//
+//	rpcOK := false
+//	defer s.releaseClient(client, &rpcOK)
+//	... resp, err := client.Foo(...)
+//	if err != nil { return err }
+//	rpcOK = true
+//
+// On RPC error, the connection's read buffer may retain stale bytes that
+// would corrupt the next borrower. Discarding closes the connection so a
+// fresh one is opened next time.
+func (s *issueServiceImpl) releaseClient(client *rpc.Client, ok *bool) {
+	if *ok {
+		s.pool.Put(client)
+	} else {
+		s.pool.Discard(client)
+	}
+}
+
 func (s *issueServiceImpl) GetIssue(ctx context.Context, issueID string) (json.RawMessage, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -67,7 +87,8 @@ func (s *issueServiceImpl) GetIssue(ctx context.Context, issueID string) (json.R
 	if err != nil {
 		return nil, err
 	}
-	defer s.pool.Put(client)
+	rpcOK := false
+	defer s.releaseClient(client, &rpcOK)
 
 	resp, err := client.Show(&rpc.ShowArgs{ID: issueID})
 	if err != nil {
@@ -77,6 +98,7 @@ func (s *issueServiceImpl) GetIssue(ctx context.Context, issueID string) (json.R
 		slog.Error("RPC error in GetIssue", "issue_id", issueID, "err", err)
 		return nil, ErrInternal("internal server error", err)
 	}
+	rpcOK = true
 
 	return resp.Data, nil
 }
@@ -93,7 +115,8 @@ func (s *issueServiceImpl) CreateIssue(ctx context.Context, params CreateIssuePa
 	if err != nil {
 		return nil, err
 	}
-	defer s.pool.Put(client)
+	rpcOK := false
+	defer s.releaseClient(client, &rpcOK)
 
 	createArgs := toCreateArgs(&params)
 	resp, err := client.Create(createArgs)
@@ -101,6 +124,7 @@ func (s *issueServiceImpl) CreateIssue(ctx context.Context, params CreateIssuePa
 		slog.Error("RPC error in CreateIssue", "err", err)
 		return nil, ErrInternal("failed to create issue", err)
 	}
+	rpcOK = true
 
 	if !resp.Success {
 		return nil, ErrInternal(resp.Error, nil)
@@ -117,7 +141,8 @@ func (s *issueServiceImpl) PatchIssue(ctx context.Context, params PatchIssuePara
 	if err != nil {
 		return err
 	}
-	defer s.pool.Put(client)
+	rpcOK := false
+	defer s.releaseClient(client, &rpcOK)
 
 	updateArgs := patchParamsToUpdateArgs(&params)
 	resp, err := client.Update(updateArgs)
@@ -128,6 +153,7 @@ func (s *issueServiceImpl) PatchIssue(ctx context.Context, params PatchIssuePara
 		slog.Error("RPC error in PatchIssue", "issue_id", params.IssueID, "err", err)
 		return ErrInternal("internal server error", err)
 	}
+	rpcOK = true
 
 	if !resp.Success {
 		if strings.Contains(resp.Error, "not found") {
@@ -150,7 +176,8 @@ func (s *issueServiceImpl) CloseIssue(ctx context.Context, params CloseIssuePara
 	if err != nil {
 		return nil, err
 	}
-	defer s.pool.Put(client)
+	rpcOK := false
+	defer s.releaseClient(client, &rpcOK)
 
 	args := &rpc.CloseArgs{
 		ID:          params.IssueID,
@@ -171,6 +198,7 @@ func (s *issueServiceImpl) CloseIssue(ctx context.Context, params CloseIssuePara
 		slog.Error("RPC error in CloseIssue", "issue_id", params.IssueID, "err", err)
 		return nil, ErrInternal("internal server error", err)
 	}
+	rpcOK = true
 
 	if !resp.Success {
 		return nil, ErrInternal(resp.Error, nil)
@@ -187,7 +215,8 @@ func (s *issueServiceImpl) DeleteIssue(ctx context.Context, issueID string) (jso
 	if err != nil {
 		return nil, err
 	}
-	defer s.pool.Put(client)
+	rpcOK := false
+	defer s.releaseClient(client, &rpcOK)
 
 	resp, err := client.Delete(&rpc.DeleteArgs{
 		IDs:   []string{issueID},
@@ -200,6 +229,7 @@ func (s *issueServiceImpl) DeleteIssue(ctx context.Context, issueID string) (jso
 		slog.Error("RPC error in DeleteIssue", "issue_id", issueID, "err", err)
 		return nil, ErrInternal("internal server error", err)
 	}
+	rpcOK = true
 
 	if !resp.Success {
 		return nil, ErrInternal(resp.Error, nil)
@@ -224,7 +254,8 @@ func (s *issueServiceImpl) AddComment(ctx context.Context, params AddCommentPara
 	if err != nil {
 		return nil, err
 	}
-	defer s.pool.Put(client)
+	rpcOK := false
+	defer s.releaseClient(client, &rpcOK)
 
 	author := params.Author
 	if author == "" {
@@ -243,6 +274,7 @@ func (s *issueServiceImpl) AddComment(ctx context.Context, params AddCommentPara
 		slog.Error("RPC error in AddComment", "err", err)
 		return nil, ErrInternal("internal server error", err)
 	}
+	rpcOK = true
 
 	if !resp.Success {
 		if strings.Contains(resp.Error, "not found") {
@@ -279,7 +311,8 @@ func (s *issueServiceImpl) AddDependency(ctx context.Context, params AddDependen
 	if err != nil {
 		return err
 	}
-	defer s.pool.Put(client)
+	rpcOK := false
+	defer s.releaseClient(client, &rpcOK)
 
 	resp, err := client.AddDependency(&rpc.DepAddArgs{
 		FromID:  params.IssueID,
@@ -296,6 +329,7 @@ func (s *issueServiceImpl) AddDependency(ctx context.Context, params AddDependen
 		slog.Error("RPC error in AddDependency", "err", err)
 		return ErrInternal("internal server error", err)
 	}
+	rpcOK = true
 
 	if !resp.Success {
 		if strings.Contains(resp.Error, "not found") {
@@ -318,7 +352,8 @@ func (s *issueServiceImpl) RemoveDependency(ctx context.Context, params RemoveDe
 	if err != nil {
 		return err
 	}
-	defer s.pool.Put(client)
+	rpcOK := false
+	defer s.releaseClient(client, &rpcOK)
 
 	resp, err := client.RemoveDependency(&rpc.DepRemoveArgs{
 		FromID: params.IssueID,
@@ -331,6 +366,7 @@ func (s *issueServiceImpl) RemoveDependency(ctx context.Context, params RemoveDe
 		slog.Error("RPC error in RemoveDependency", "err", err)
 		return ErrInternal("internal server error", err)
 	}
+	rpcOK = true
 
 	if !resp.Success {
 		if strings.Contains(resp.Error, "not found") {
@@ -350,7 +386,8 @@ func (s *issueServiceImpl) ListEvents(ctx context.Context, params EventListParam
 	if err != nil {
 		return nil, err
 	}
-	defer s.pool.Put(client)
+	rpcOK := false
+	defer s.releaseClient(client, &rpcOK)
 
 	resp, err := client.ListEvents(&rpc.EventListArgs{
 		ID:    params.IssueID,
@@ -363,6 +400,7 @@ func (s *issueServiceImpl) ListEvents(ctx context.Context, params EventListParam
 		slog.Error("RPC error in ListEvents", "err", err)
 		return nil, ErrInternal("internal server error", err)
 	}
+	rpcOK = true
 
 	if !resp.Success {
 		if strings.Contains(resp.Error, "not found") {
