@@ -572,6 +572,48 @@ func TestRegistry_ForWorkspace_AfterClose(t *testing.T) {
 	}
 }
 
+func TestRegistry_Registered(t *testing.T) {
+	r := newRegistry(t)
+
+	// Empty string is never registered.
+	if r.Registered("") {
+		t.Error("expected Registered(\"\") = false")
+	}
+
+	// Nonexistent workspace.
+	if r.Registered("ws-1") {
+		t.Error("expected Registered(\"ws-1\") = false before registration")
+	}
+
+	// Register and check.
+	if err := r.Register("ws-1", "/tmp/ws-1"); err != nil {
+		t.Fatal(err)
+	}
+	if !r.Registered("ws-1") {
+		t.Error("expected Registered(\"ws-1\") = true after registration")
+	}
+
+	// Deregister and check.
+	r.Deregister("ws-1")
+	if r.Registered("ws-1") {
+		t.Error("expected Registered(\"ws-1\") = false after deregistration")
+	}
+}
+
+func TestRegistry_Registered_AfterClose(t *testing.T) {
+	r := newRegistry(t)
+	r.Register("ws-1", "/tmp/ws-1")
+	r.Close()
+
+	// Registered should still work after Close.
+	if !r.Registered("ws-1") {
+		t.Error("expected Registered(\"ws-1\") = true after Close")
+	}
+	if r.Registered("nonexistent") {
+		t.Error("expected Registered(\"nonexistent\") = false after Close")
+	}
+}
+
 func assertCalls(t *testing.T, got, want []string) {
 	t.Helper()
 	if len(got) != len(want) {

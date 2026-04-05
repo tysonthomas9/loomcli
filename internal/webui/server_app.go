@@ -408,9 +408,9 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 	app.jobStore = NewWorkspaceJobStore()
 	cleanups = append(cleanups, func() { app.jobStore.Stop() })
 
-	// Workspace-existence checker for WorkspaceMiddleware (MultiPool is authoritative registry).
+	// Workspace-existence checker for WorkspaceMiddleware (Registry is authoritative for workspace existence).
 	app.wsExistsFn = func(id string) bool {
-		return app.multiPool.PoolForWorkspace(id) != nil
+		return app.registry.Registered(id)
 	}
 
 	// Initialize workspace service layer

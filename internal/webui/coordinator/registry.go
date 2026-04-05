@@ -215,6 +215,15 @@ func (r *WorkspaceRegistry) ForWorkspace(id string) *WorkspaceHandle {
 	return aw.handle
 }
 
+// Registered reports whether a workspace with the given ID is currently
+// registered. It is safe to call on a closed registry.
+func (r *WorkspaceRegistry) Registered(id string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	_, ok := r.active[id]
+	return ok
+}
+
 // WorkspaceIDs returns the IDs of all currently registered workspaces.
 func (r *WorkspaceRegistry) WorkspaceIDs() []string {
 	r.mu.RLock()
