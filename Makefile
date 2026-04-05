@@ -185,8 +185,8 @@ check-frontend: frontend-ensure
 	@cd $(FRONTEND_DIR) && npm run lint
 	@echo "=== [4/5] Frontend: architectural checks ==="
 	@cd $(FRONTEND_DIR) && npm run check:arch
-	@echo "=== [5/5] Frontend: unit tests ==="
-	@cd $(FRONTEND_DIR) && npm run test:unit
+	@echo "=== [5/5] Frontend: unit tests + coverage (60% threshold) ==="
+	@cd $(FRONTEND_DIR) && npm run test:coverage
 	@echo "=== Frontend quality gates PASSED ==="
 
 # Unified quality gate — runs Go + frontend checks in parallel

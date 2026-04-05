@@ -467,6 +467,148 @@ func TestAirTomlExcludesFrontend(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Coverage threshold tests (loomcli-c3jj9.3)
+// ---------------------------------------------------------------------------
+
+// TestMakefileCheckFrontendUsesTestCoverage verifies that the check-frontend
+// target's step 5 runs `npm run test:coverage` (not test:unit) to enforce
+// the frontend coverage threshold.
+func TestMakefileCheckFrontendUsesTestCoverage(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile(repoRoot(t) + "/Makefile")
+	if err != nil {
+		t.Fatalf("reading Makefile: %v", err)
+	}
+	content := string(data)
+
+	if !strings.Contains(content, "npm run test:coverage") {
+		t.Errorf("Makefile check-frontend should run 'npm run test:coverage', not 'test:unit'")
+	}
+
+	// Verify the step label mentions the 60% threshold.
+	if !strings.Contains(content, "coverage (60% threshold)") {
+		t.Errorf("Makefile check-frontend step 5 label should mention '60%% threshold'")
+	}
+}
+
+// TestViteConfigCoverageThresholds verifies that vite.config.ts sets all
+// four coverage threshold categories to 60.
+func TestViteConfigCoverageThresholds(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile(repoRoot(t) + "/internal/webui/frontend/vite.config.ts")
+	if err != nil {
+		t.Fatalf("reading vite.config.ts: %v", err)
+	}
+	content := string(data)
+
+	// Each threshold category must be set to 60.
+	for _, category := range []string{"lines", "branches", "functions", "statements"} {
+		needle := category + ": 60"
+		if !strings.Contains(content, needle) {
+			t.Errorf("vite.config.ts should set %s threshold to 60, expected %q in file", category, needle)
+		}
+	}
+}
+
+// TestGoCoverageScriptDefaultThreshold verifies that check-coverage.sh
+// defaults to a 70%% threshold when no argument or env var is provided.
+func TestGoCoverageScriptDefaultThreshold(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile(repoRoot(t) + "/scripts/check-coverage.sh")
+	if err != nil {
+		t.Fatalf("reading check-coverage.sh: %v", err)
+	}
+	content := string(data)
+
+	// The script should default to 70 when COVERAGE_THRESHOLD is not set.
+	if !strings.Contains(content, "COVERAGE_THRESHOLD:-70") {
+		t.Errorf("check-coverage.sh should default COVERAGE_THRESHOLD to 70")
+	}
+}
+
+// TestCIWorkflowHasFrontendCoverageStep verifies that the CI workflow
+// includes a step to check frontend coverage thresholds.
+func TestCIWorkflowHasFrontendCoverageStep(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile(repoRoot(t) + "/.github/workflows/ci.yml")
+	if err != nil {
+		t.Fatalf("reading ci.yml: %v", err)
+	}
+	content := string(data)
+
+	if !strings.Contains(content, "Check frontend coverage threshold") {
+		t.Errorf("ci.yml should have a 'Check frontend coverage threshold' step")
+	}
+
+	// Verify it runs npm run test:coverage
+	if !strings.Contains(content, "npm run test:coverage") {
+		t.Errorf("ci.yml frontend coverage step should run 'npm run test:coverage'")
+	}
+}
+
+// TestCIWorkflowHasGoCoverageThreshold verifies that the CI workflow
+// invokes check-coverage.sh with a 70%% threshold.
+func TestCIWorkflowHasGoCoverageThreshold(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile(repoRoot(t) + "/.github/workflows/ci.yml")
+	if err != nil {
+		t.Fatalf("reading ci.yml: %v", err)
+	}
+	content := string(data)
+
+	if !strings.Contains(content, "check-coverage.sh coverage.out 70") {
+		t.Errorf("ci.yml should invoke check-coverage.sh with threshold 70")
+	}
+}
+
+// TestGitignoreIncludesFrontendCoverage verifies that .gitignore excludes
+// the frontend coverage output directory.
+func TestGitignoreIncludesFrontendCoverage(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile(repoRoot(t) + "/.gitignore")
+	if err != nil {
+		t.Fatalf("reading .gitignore: %v", err)
+	}
+
+	found := false
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "internal/webui/frontend/coverage/" || trimmed == "internal/webui/frontend/coverage" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf(".gitignore should contain 'internal/webui/frontend/coverage/' entry")
+	}
+}
+
+// TestFrontendPackageJsonHasTestCoverageScript verifies that package.json
+// defines a test:coverage script that runs vitest with --coverage.
+func TestFrontendPackageJsonHasTestCoverageScript(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile(repoRoot(t) + "/internal/webui/frontend/package.json")
+	if err != nil {
+		t.Fatalf("reading package.json: %v", err)
+	}
+	content := string(data)
+
+	if !strings.Contains(content, `"test:coverage"`) {
+		t.Errorf("package.json should define a test:coverage script")
+	}
+	if !strings.Contains(content, "vitest run --coverage") {
+		t.Errorf("package.json test:coverage should run 'vitest run --coverage'")
+	}
+}
+
 // TestDevShExists verifies that scripts/dev.sh exists and is executable.
 func TestDevShExists(t *testing.T) {
 	t.Parallel()

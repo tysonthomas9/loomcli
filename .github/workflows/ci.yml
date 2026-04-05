@@ -85,6 +85,9 @@ jobs:
           file: ./coverage.out
           fail_ci_if_error: false
 
+      - name: Check frontend coverage threshold
+        run: cd internal/webui/frontend && npm run test:coverage
+
   # Cross-platform verification (lightweight — Go tests only)
   test-macos:
     name: Test (macOS)
