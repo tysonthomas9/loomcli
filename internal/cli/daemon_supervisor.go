@@ -45,6 +45,13 @@ func (d *Daemon) Start() error {
 		d.configReconciler()
 	}()
 
+	// In fleet mode, skip agent supervision — agents are managed by the fleet server.
+	// Health checker and config reconciler still run for status queries and monitoring.
+	if isFleetMode(d.config) {
+		slog.Info("agent supervision suppressed (fleet mode — agents managed by fleet server)")
+		return nil
+	}
+
 	// Initialize stop/done channels and start superviseAgent goroutine for each agent
 	d.agentsMu.RLock()
 	snapshot := make([]*AgentProcess, len(d.agents))

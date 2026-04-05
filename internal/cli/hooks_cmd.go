@@ -180,6 +180,9 @@ func checkYieldForGuard(yieldFile string) (blockJSON string, shouldBlock bool) {
 	return string(out), true
 }
 
+// hooksInstallForce overrides the fleet mode warning.
+var hooksInstallForce bool
+
 // hooksInstallCmd installs loom hooks into .claude/settings.json.
 var hooksInstallCmd = &cobra.Command{
 	Use:   "install [worktree-path]",
@@ -193,6 +196,10 @@ var hooksInstallCmd = &cobra.Command{
 		absPath, err := filepath.Abs(path)
 		if err != nil {
 			return fmt.Errorf("failed to resolve path: %w", err)
+		}
+		if isFleetModeFromEnv() && !hooksInstallForce {
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Warning: fleet mode is active — hooks may not be needed (install anyway with --force)\n")
+			return nil
 		}
 		if err := InstallClaudeHooks(absPath); err != nil {
 			return err
@@ -266,6 +273,8 @@ func init() {
 
 	// Wire up user-facing commands and claude-code subgroup
 	hooksCmd.AddCommand(hooksClaudeCodeCmd)
+	hooksInstallCmd.Flags().BoolVar(&hooksInstallForce, "force", false,
+		"Install hooks even when fleet mode is active")
 	hooksCmd.AddCommand(hooksInstallCmd)
 	hooksCmd.AddCommand(hooksUninstallCmd)
 	hooksCmd.AddCommand(hooksStatusCmd)

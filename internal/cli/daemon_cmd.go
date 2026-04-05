@@ -293,16 +293,7 @@ func runDaemon(cmd *cobra.Command, args []string) {
 	}
 
 	// 11. Print startup banner
-	fmt.Println("═══════════════════════════════════════════════════════════════")
-	fmt.Println("Loom Agent Supervisor")
-	fmt.Printf("PID: %d\n", os.Getpid())
-	fmt.Printf("Config: %s/loom.yaml\n", projectDir)
-	fmt.Printf("Agents: %d\n", len(config.Agents))
-	for _, a := range config.Agents {
-		fmt.Printf("  - %s (%s)\n", a.Worktree, a.Role)
-	}
-	fmt.Println("Press Ctrl+C to stop")
-	fmt.Println("═══════════════════════════════════════════════════════════════")
+	printDaemonBanner(config, projectDir)
 
 	// Extract configured max retries (default 3)
 	maxRetries := 3

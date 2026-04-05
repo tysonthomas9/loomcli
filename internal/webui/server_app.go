@@ -295,13 +295,20 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 
 	// Construct lifecycle hooks in canonical order:
 	// beads-pool (critical), notification-subscriber, terminal (conditional), fleet-store (conditional).
-	beadsPoolHook := NewBeadsPoolHook(app.multiPool, config.PoolSize, config.Logger)
-	notifHook := NewNotificationSubscriberHook(app.multiSub, config.Logger)
-
+	// In fleet mode, beads-pool and notification-subscriber hooks are suppressed —
+	// the fleet server manages agent orchestration, so local pools and SSE subscribers
+	// are unnecessary.
+	var beadsPoolHook *BeadsPoolHook
 	app.registry = coordinator.NewWorkspaceRegistry(config.Logger)
 	cleanups = append(cleanups, func() { _ = app.registry.Close() })
-	_ = app.registry.AddHook(beadsPoolHook)
-	_ = app.registry.AddHook(notifHook)
+	if config.FleetMode {
+		logger.Info("beads pool and notification subscriber suppressed (fleet mode)", "component", "fleet_mode")
+	} else {
+		beadsPoolHook = NewBeadsPoolHook(app.multiPool, config.PoolSize, config.Logger)
+		notifHook := NewNotificationSubscriberHook(app.multiSub, config.Logger)
+		_ = app.registry.AddHook(beadsPoolHook)
+		_ = app.registry.AddHook(notifHook)
+	}
 
 	if app.termMgr != nil {
 		_ = app.registry.AddHook(NewTerminalHook(app.termMgr, config.Logger))
@@ -312,7 +319,9 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 
 	// Register the initial workspace (replaces old RegisterPool pattern).
 	if app.pool != nil {
-		beadsPoolHook.SetPrebuiltPool(app.initialWorkspaceID, app.pool)
+		if beadsPoolHook != nil {
+			beadsPoolHook.SetPrebuiltPool(app.initialWorkspaceID, app.pool)
+		}
 		var initialWSPath string
 		if config.WorkspaceListFn != nil {
 			if wsMap, listErr := config.WorkspaceListFn(); listErr == nil {

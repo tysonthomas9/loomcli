@@ -24,6 +24,11 @@ func (d *Daemon) drainAgent(name string) error {
 	}
 	d.agentsMu.Unlock()
 
+	// Fleet mode: no superviseAgent goroutine was launched, stopCh/done are nil.
+	if target.stopCh == nil {
+		return nil
+	}
+
 	// Set stop reason before signaling (superviseAgent reads it after seeing stopCh closed)
 	target.mu.Lock()
 	target.stopReason = StopReasonConfigRemoved

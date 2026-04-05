@@ -153,6 +153,18 @@ func (d *Daemon) reloadAndReconcile() {
 		return
 	}
 
+	// In fleet mode, agent lifecycle is managed by the fleet server.
+	// Store the updated config but do not drain/add agents locally —
+	// their stopCh/done channels were never initialized.
+	if isFleetMode(newConfig) {
+		d.config = newConfig
+		d.configHash = newHash
+		d.reconcileMu.Unlock()
+		slog.Info("config reloaded in fleet mode (agent changes not applied locally)",
+			"added", len(added), "removed", len(removed), "modified", len(modified))
+		return
+	}
+
 	// Update stored config and hash before drain/add so that new agents
 	// spawned by addAgent see the updated config.
 	d.config = newConfig

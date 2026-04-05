@@ -297,6 +297,11 @@ func (d *Daemon) drainAgentWithReason(name string, reason StopReason) error {
 	}
 	d.agentsMu.Unlock()
 
+	// Fleet mode: no superviseAgent goroutine was launched, stopCh/done are nil.
+	if target.stopCh == nil {
+		return nil
+	}
+
 	// Set stop reason before signaling
 	target.mu.Lock()
 	target.stopReason = reason
@@ -347,6 +352,11 @@ func (d *Daemon) drainAgentForceful(name string, reason StopReason) error {
 		return fmt.Errorf("agent %q not found", name)
 	}
 	d.agentsMu.Unlock()
+
+	// Fleet mode: no superviseAgent goroutine was launched, stopCh/done are nil.
+	if target.stopCh == nil {
+		return nil
+	}
 
 	// Set stop reason before signaling
 	target.mu.Lock()

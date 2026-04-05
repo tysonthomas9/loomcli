@@ -59,6 +59,7 @@ type ServerConfig struct {
 	ScrollbackMaxLines      int                                          // Maximum lines per scrollback buffer (0 = default 10000)
 	SessionsStore           *sessions.Store                              // File-based session audit trail store (optional; nil disables session endpoints)
 	NotifyTokenDir          string                                       // Directory to write notify.token (typically beads dir); empty = token file not written
+	FleetMode               bool                                         // When true, skip beads-specific lifecycle hooks (pools, subscribers); fleet server manages agents
 	Logger                  *slog.Logger                                 // Structured logger (optional; nil falls back to slog.Default())
 }
 

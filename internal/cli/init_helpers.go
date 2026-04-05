@@ -332,8 +332,11 @@ func createSingleWorktree(deps *Deps, worktreesDir, name string) bool {
 
 	fmt.Printf("  ✓ Created %s\n", worktreePath)
 
-	// Auto-install Claude Code hooks (non-fatal on failure)
-	if err := InstallClaudeHooks(worktreePath); err != nil {
+	// Auto-install Claude Code hooks (non-fatal on failure).
+	// Skip in fleet mode — hooks are unnecessary when agents are managed by fleet server.
+	if isFleetModeFromEnv() {
+		fmt.Println("  → Skipping Claude Code hooks (fleet mode)")
+	} else if err := InstallClaudeHooks(worktreePath); err != nil {
 		fmt.Fprintf(os.Stderr, "  ⚠ Failed to install hooks: %v\n", err)
 	} else {
 		fmt.Printf("  ✓ Installed Claude Code hooks\n")
