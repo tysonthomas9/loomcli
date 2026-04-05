@@ -1,0 +1,49 @@
+package webui
+
+import (
+	"context"
+	"net/http"
+
+	"github.com/tysonthomas9/loomcli/internal/rpc"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
+)
+
+// SSEModule registers the workspace-scoped SSE event stream routes on a
+// [*http.ServeMux]. The module is only constructed when hub is non-nil.
+//
+// The SSE token exchange route is conditional on sseTokens being non-nil
+// (external auth mode only).
+type SSEModule struct {
+	hub               *realtime.Hub
+	getMutationsSince func(wsID string, since int64) []rpc.MutationEvent
+	workspaceFromCtx  func(context.Context) string
+	sseTokens         *realtime.TokenStore // may be nil — token route skipped
+}
+
+// NewSSEModule returns an SSEModule. sseTokens may be nil — the token
+// exchange route will simply not be registered.
+func NewSSEModule(hub *realtime.Hub, getMutationsSince func(string, int64) []rpc.MutationEvent, workspaceFromCtx func(context.Context) string, sseTokens *realtime.TokenStore) *SSEModule {
+	return &SSEModule{
+		hub:               hub,
+		getMutationsSince: getMutationsSince,
+		workspaceFromCtx:  workspaceFromCtx,
+		sseTokens:         sseTokens,
+	}
+}
+
+// Register implements [Module] by registering 1–2 SSE routes.
+func (m *SSEModule) Register(mux *http.ServeMux) {
+	// SSE event stream — uses mux.Handle because realtime.NewHandler returns http.Handler
+	sseHandler := realtime.NewHandler(realtime.HandlerConfig{
+		Hub:               m.hub,
+		GetMutationsSince: m.getMutationsSince,
+		WorkspaceFromCtx:  m.workspaceFromCtx,
+		TokenStore:        m.sseTokens,
+	})
+	mux.Handle("GET /api/workspaces/{ws}/events", sseHandler)
+
+	// SSE token exchange — conditional on external auth mode
+	if m.sseTokens != nil {
+		mux.HandleFunc("GET /api/workspaces/{ws}/events/token", handleSSEToken(m.sseTokens))
+	}
+}
