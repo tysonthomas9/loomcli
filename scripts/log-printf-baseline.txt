@@ -65,5 +65,4 @@ internal/webui/subscription_repos.go
 internal/webui/subscription_poll.go
 internal/webui/terminal.go
 internal/webui/terminal_sessions.go
-internal/webui/subscription_poll.go
 internal/cli/automode_usage.go
