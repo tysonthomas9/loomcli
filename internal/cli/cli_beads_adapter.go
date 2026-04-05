@@ -77,28 +77,34 @@ func (a *cliBeadsAdapter) Stats(_ context.Context) (*backend.StatsData, error) {
 	// bd stats --json returns a nested structure with "summary" key
 	var raw struct {
 		Summary struct {
-			TotalIssues      int `json:"total_issues"`
-			OpenIssues       int `json:"open_issues"`
-			ClosedIssues     int `json:"closed_issues"`
-			InProgressIssues int `json:"in_progress_issues"`
-			BlockedIssues    int `json:"blocked_issues"`
-			DeferredIssues   int `json:"deferred_issues"`
-			TombstoneIssues  int `json:"tombstone_issues"`
-			PinnedIssues     int `json:"pinned_issues"`
+			TotalIssues             int     `json:"total_issues"`
+			OpenIssues              int     `json:"open_issues"`
+			ClosedIssues            int     `json:"closed_issues"`
+			InProgressIssues        int     `json:"in_progress_issues"`
+			BlockedIssues           int     `json:"blocked_issues"`
+			DeferredIssues          int     `json:"deferred_issues"`
+			ReadyIssues             int     `json:"ready_issues"`
+			TombstoneIssues         int     `json:"tombstone_issues"`
+			PinnedIssues            int     `json:"pinned_issues"`
+			EpicsEligibleForClosure int     `json:"epics_eligible_for_closure"`
+			AverageLeadTime         float64 `json:"average_lead_time_hours"`
 		} `json:"summary"`
 	}
 	if err := json.Unmarshal([]byte(result.Stdout), &raw); err != nil {
 		return nil, fmt.Errorf("cliBeadsAdapter.Stats: parse: %w", err)
 	}
 	return &backend.StatsData{
-		TotalIssues:      raw.Summary.TotalIssues,
-		OpenIssues:       raw.Summary.OpenIssues,
-		ClosedIssues:     raw.Summary.ClosedIssues,
-		InProgressIssues: raw.Summary.InProgressIssues,
-		BlockedIssues:    raw.Summary.BlockedIssues,
-		DeferredIssues:   raw.Summary.DeferredIssues,
-		TombstoneIssues:  raw.Summary.TombstoneIssues,
-		PinnedIssues:     raw.Summary.PinnedIssues,
+		TotalIssues:             raw.Summary.TotalIssues,
+		OpenIssues:              raw.Summary.OpenIssues,
+		ClosedIssues:            raw.Summary.ClosedIssues,
+		InProgressIssues:        raw.Summary.InProgressIssues,
+		BlockedIssues:           raw.Summary.BlockedIssues,
+		DeferredIssues:          raw.Summary.DeferredIssues,
+		ReadyIssues:             raw.Summary.ReadyIssues,
+		TombstoneIssues:         raw.Summary.TombstoneIssues,
+		PinnedIssues:            raw.Summary.PinnedIssues,
+		EpicsEligibleForClosure: raw.Summary.EpicsEligibleForClosure,
+		AverageLeadTime:         raw.Summary.AverageLeadTime,
 	}, nil
 }
 
