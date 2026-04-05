@@ -332,6 +332,9 @@ func runDaemon(cmd *cobra.Command, args []string) {
 		defer os.Remove(socketPath)
 	}
 
+	// 12.55. Create notification bus for IPC mutation events → SSE push
+	wireDaemonNotifyBus(daemon)
+
 	// 12.6. Start agent IPC socket server for issue mutations from agent subprocesses
 	ipcSocketPath := resolveAgentIPCSocketPath(projectDir, config.Daemon.PIDFile)
 	if err := daemon.startIPCServer(ipcSocketPath); err != nil {

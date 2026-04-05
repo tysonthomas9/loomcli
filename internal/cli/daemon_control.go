@@ -13,8 +13,9 @@ import (
 
 // DaemonControlRequest is sent by the CLI client to the daemon control socket.
 type DaemonControlRequest struct {
-	Operation string `json:"operation"` // "agent_stop", "agent_start", "agent_restart", "agent_list"
-	AgentName string `json:"agent_name,omitempty"`
+	Operation string          `json:"operation"` // "agent_stop", "agent_start", "agent_restart", "agent_list", "get_mutations", "wait_for_mutations"
+	AgentName string          `json:"agent_name,omitempty"`
+	Args      json.RawMessage `json:"args,omitempty"` // operation-specific parameters
 }
 
 // DaemonControlResponse is sent by the daemon back to the CLI client.
@@ -105,6 +106,12 @@ func (d *Daemon) handleControlConnection(conn net.Conn) {
 		resp = d.handleAgentControlRestart(req.AgentName)
 	case ctrlOpAgentList:
 		resp = d.handleAgentControlList()
+	case ctrlOpGetMutations:
+		resp = d.handleControlGetMutations(req.Args)
+	case ctrlOpWaitForMutations:
+		// Extend write deadline for long-poll
+		_ = conn.SetWriteDeadline(time.Now().Add(70 * time.Second))
+		resp = d.handleControlWaitForMutations(req.Args)
 	default:
 		resp = DaemonControlResponse{Error: fmt.Sprintf("unknown operation: %q", req.Operation)}
 	}

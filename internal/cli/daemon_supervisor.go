@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/events"
+	"github.com/tysonthomas9/loomcli/internal/notify"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
@@ -79,6 +80,16 @@ func (d *Daemon) Stop() {
 	// Close the agent IPC socket listener (if running)
 	if d.ipcListener != nil {
 		_ = d.ipcListener.Close()
+	}
+
+	// Stop mutation buffer (drains subscription goroutine)
+	if d.mutBuf != nil {
+		d.mutBuf.Stop()
+	}
+
+	// Close notification bus (closes subscriber channels, no-ops if NopPublisher)
+	if bus, ok := d.notifyBus.(*notify.Bus); ok {
+		bus.Close()
 	}
 
 	// Unblock any agents waiting for concurrency slots

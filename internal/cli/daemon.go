@@ -12,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/events"
+	"github.com/tysonthomas9/loomcli/internal/notify"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
@@ -156,6 +157,14 @@ type Daemon struct {
 	// ipcListener is the Unix domain socket listener for the agent IPC server.
 	// Set by startIPCServer, closed on Stop.
 	ipcListener net.Listener
+
+	// notifyBus publishes IPC mutation events for real-time consumers.
+	// Defaults to NopPublisher; set to a real Bus in runDaemon().
+	notifyBus notify.Publisher
+
+	// mutBuf accumulates IPC mutations from notifyBus for control socket queries.
+	// Nil when no real Bus is wired (e.g., tests, non-daemon mode).
+	mutBuf *MutationBuffer
 }
 
 // isAgentStopped returns true if the named agent was stopped via the control socket.
@@ -229,6 +238,7 @@ func NewDaemon(config *DaemonConfig, projectDir string, eventBus events.Emitter,
 		concurrency:   NewConcurrencyTracker(config.Roles),
 		eventBus:      eventBus,
 		issueBackend:  issueBackend,
+		notifyBus:     notify.NopPublisher{},
 	}
 
 	// Load workspace repos and ID for source repo resolution and log namespacing (best-effort)
