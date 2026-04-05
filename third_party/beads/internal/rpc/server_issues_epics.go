@@ -1338,6 +1338,8 @@ func (s *Server) handleList(req *Request) Response {
 		}
 	}
 
+	filter.Lightweight = listArgs.Lightweight
+
 	ctx, cancel := s.reqCtx(req)
 	defer cancel()
 	issues, err := store.SearchIssues(ctx, listArgs.Query, filter)
