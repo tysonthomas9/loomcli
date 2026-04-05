@@ -319,8 +319,9 @@ func (b *FleetBackend) Close(ctx context.Context, id string, params backend.Clos
 	if err != nil {
 		return nil, err
 	}
-	// The close endpoint returns the same type structure as beads: close result with
-	// closed issue and unblocked issues. Parse as a generic structure.
+	// The close endpoint returns a close result with closed issue and unblocked issues.
+	// TODO(fleet-q6ox): fleet-db does not yet return unblocked issues on close;
+	// Unblocked will be empty until fleet-db adds unblocked-on-close support.
 	if !hasData(resp) {
 		return nil, backend.ErrInternal("Close", "empty response from server", nil)
 	}

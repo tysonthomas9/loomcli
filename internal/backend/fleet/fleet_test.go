@@ -723,6 +723,87 @@ func TestClose_HappyPath(t *testing.T) {
 	}
 }
 
+func TestClose_NoUnblockedIssues(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		// fleet-db currently returns closed issue but no unblocked issues (fleet-q6ox)
+		respondOK(w, closeResultJSON{
+			Closed: &types.Issue{ID: "T-10", Title: "Done", Status: types.StatusClosed, CreatedAt: now, UpdatedAt: now, ClosedAt: &now},
+		})
+	})
+	defer ts.Close()
+
+	result, err := fb.Close(context.Background(), "T-10", backend.CloseParams{Reason: "done"})
+	if err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if result.Closed == nil || result.Closed.ID != "T-10" {
+		t.Errorf("Closed.ID = %v, want T-10", result.Closed)
+	}
+	if result.Closed.Status != "closed" {
+		t.Errorf("Closed.Status = %q, want %q", result.Closed.Status, "closed")
+	}
+	if result.Unblocked == nil {
+		t.Fatal("Unblocked must be non-nil (empty slice, not nil)")
+	}
+	if len(result.Unblocked) != 0 {
+		t.Errorf("Unblocked len = %d, want 0", len(result.Unblocked))
+	}
+}
+
+func TestClose_ServerError(t *testing.T) {
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		respondErr(w, 409, "issue already closed")
+	})
+	defer ts.Close()
+
+	result, err := fb.Close(context.Background(), "test-1", backend.CloseParams{})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if result != nil {
+		t.Errorf("result = %v, want nil on error", result)
+	}
+	if !backend.IsKind(err, backend.KindConflict) {
+		t.Errorf("expected KindConflict, got %v", err)
+	}
+}
+
+func TestClose_EmptyResponse(t *testing.T) {
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(apiResponse{Success: true}) //nolint:errcheck
+	})
+	defer ts.Close()
+
+	result, err := fb.Close(context.Background(), "test-1", backend.CloseParams{})
+	if err == nil {
+		t.Fatal("expected error for empty response data, got nil")
+	}
+	if result != nil {
+		t.Errorf("result = %v, want nil on error", result)
+	}
+}
+
+func TestClose_UnmarshalError(t *testing.T) {
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(apiResponse{ //nolint:errcheck
+			Success: true,
+			Data:    json.RawMessage(`"not a close result"`),
+		})
+	})
+	defer ts.Close()
+
+	result, err := fb.Close(context.Background(), "test-1", backend.CloseParams{})
+	if err == nil {
+		t.Fatal("expected unmarshal error, got nil")
+	}
+	if result != nil {
+		t.Errorf("result = %v, want nil on error", result)
+	}
+}
+
 // --- Delete tests ---
 
 func TestDelete_HappyPath(t *testing.T) {
