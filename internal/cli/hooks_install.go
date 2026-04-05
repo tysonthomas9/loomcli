@@ -48,6 +48,16 @@ var hookMatchers = map[string]string{
 	"PostToolUse":      "Task",
 }
 
+// yieldHookEntries lists yield-specific hooks that are installed separately
+// from the main hooks. These use empty matchers to fire on all tools.
+var yieldHookEntries = []struct {
+	hookType string
+	matcher  string
+	command  string
+}{
+	{"PreToolUse", "", "loom hooks claude-code yield-guard"},
+}
+
 // claudeHookMatcher groups hook entries under a matcher pattern.
 // Claude Code expects this two-level structure:
 //
@@ -131,6 +141,11 @@ func InstallClaudeHooks(worktreePath string) error {
 			return fmt.Errorf("failed to marshal %s hooks: %w", hookType, err)
 		}
 		rawHooks[hookType] = data
+	}
+
+	// Install yield-specific hooks (separate pass to avoid interfering with hasLoomHook)
+	if err := installYieldHooks(rawHooks); err != nil {
+		return err
 	}
 
 	// Marshal hooks back into rawSettings
@@ -274,6 +289,49 @@ func ClaudeHooksStatus(worktreePath string) (installed bool, hooks []string, err
 	}
 
 	return len(found) > 0, found, nil
+}
+
+// installYieldHooks adds yield-specific hook entries to rawHooks.
+func installYieldHooks(rawHooks map[string]json.RawMessage) error {
+	for _, entry := range yieldHookEntries {
+		var matchers []claudeHookMatcher
+		if data, ok := rawHooks[entry.hookType]; ok {
+			if err := json.Unmarshal(data, &matchers); err != nil {
+				return fmt.Errorf("failed to parse %s hooks for yield: %w", entry.hookType, err)
+			}
+		}
+
+		if hasYieldGuardHook(matchers) {
+			continue
+		}
+
+		matchers = append(matchers, claudeHookMatcher{
+			Matcher: entry.matcher,
+			Hooks: []claudeHookEntry{{
+				Type:    "command",
+				Command: entry.command,
+			}},
+		})
+
+		data, err := json.Marshal(matchers)
+		if err != nil {
+			return fmt.Errorf("failed to marshal %s yield hooks: %w", entry.hookType, err)
+		}
+		rawHooks[entry.hookType] = data
+	}
+	return nil
+}
+
+// hasYieldGuardHook returns true if any matcher's hooks contain the yield-guard command.
+func hasYieldGuardHook(matchers []claudeHookMatcher) bool {
+	for _, m := range matchers {
+		for _, e := range m.Hooks {
+			if strings.Contains(e.Command, "yield-guard") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // hasLoomHook returns true if any matcher's hooks contain a loom command.

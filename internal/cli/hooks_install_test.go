@@ -466,8 +466,9 @@ func TestClaudeHooksStatus(t *testing.T) {
 		if !installed {
 			t.Error("expected installed=true after install")
 		}
-		if len(hooks) != len(managedHookTypes) {
-			t.Errorf("expected %d hooks, got %d: %v", len(managedHookTypes), len(hooks), hooks)
+		expectedCount := len(managedHookTypes) + len(yieldHookEntries)
+		if len(hooks) != expectedCount {
+			t.Errorf("expected %d hooks, got %d: %v", expectedCount, len(hooks), hooks)
 		}
 	})
 

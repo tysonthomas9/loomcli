@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -86,6 +87,19 @@ var hookPostTaskCmd = &cobra.Command{
 	},
 }
 
+// hookYieldGuardCmd checks the yield file and blocks all tools if yield is requested.
+// This is a PreToolUse hook with an empty matcher (fires on ALL tools), providing
+// sub-minute cooperative preemption during active Claude invocations.
+var hookYieldGuardCmd = &cobra.Command{
+	Use:    "yield-guard",
+	Short:  "Check yield file and block tools if yield requested",
+	Hidden: true,
+	Args:   cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runYieldGuard(cmd)
+	},
+}
+
 // hookSessionEndCmd handles the Claude Code SessionEnd hook.
 var hookSessionEndCmd = &cobra.Command{
 	Use:    "session-end",
@@ -112,7 +126,58 @@ func runClaudeHook(cmd *cobra.Command, hookName string) error {
 	}
 
 	_ = dispatchHookEvent(event, beadsDir, sessionID)
+
+	// Yield check for stop hook (defense-in-depth)
+	if hookName == "stop" {
+		if yieldFile := os.Getenv("LOOM_YIELD_FILE"); yieldFile != "" {
+			if _, statErr := os.Stat(yieldFile); statErr == nil {
+				fmt.Fprintf(os.Stderr, "loom hook stop: yield file detected, ensuring stop\n")
+			}
+		}
+	}
+
 	return nil // Always exit 0
+}
+
+// runYieldGuard checks the yield file and blocks tools if yield is requested.
+// It does NOT read stdin — only checks the LOOM_YIELD_FILE env var.
+func runYieldGuard(cmd *cobra.Command) error {
+	yieldFile := os.Getenv("LOOM_YIELD_FILE")
+	blockJSON, shouldBlock := checkYieldForGuard(yieldFile)
+	if !shouldBlock {
+		return nil // exit 0 — tool proceeds
+	}
+	_, _ = fmt.Fprint(cmd.OutOrStdout(), blockJSON)
+	os.Exit(2) // signal tool block to Claude Code
+	return nil // unreachable
+}
+
+// checkYieldForGuard checks if a yield file exists at the given path and returns
+// the JSON to print to stdout and whether to block. Extracted for testability.
+func checkYieldForGuard(yieldFile string) (blockJSON string, shouldBlock bool) {
+	if yieldFile == "" {
+		return "", false
+	}
+	if _, err := os.Stat(yieldFile); err != nil {
+		return "", false
+	}
+	// File exists — read reason (best-effort)
+	reason := "unknown"
+	data, err := os.ReadFile(yieldFile) //nolint:gosec // path from trusted env var
+	if err == nil {
+		var req struct {
+			Reason string `json:"reason"`
+		}
+		if json.Unmarshal(data, &req) == nil && req.Reason != "" {
+			reason = req.Reason
+		}
+	}
+	resp := map[string]string{
+		"decision": "block",
+		"reason":   fmt.Sprintf("Yield requested (%s) — please stop and exit immediately.", reason),
+	}
+	out, _ := json.Marshal(resp)
+	return string(out), true
 }
 
 // hooksInstallCmd installs loom hooks into .claude/settings.json.
@@ -197,6 +262,7 @@ func init() {
 	hooksClaudeCodeCmd.AddCommand(hookSessionEndCmd)
 	hooksClaudeCodeCmd.AddCommand(hookPreTaskCmd)
 	hooksClaudeCodeCmd.AddCommand(hookPostTaskCmd)
+	hooksClaudeCodeCmd.AddCommand(hookYieldGuardCmd)
 
 	// Wire up user-facing commands and claude-code subgroup
 	hooksCmd.AddCommand(hooksClaudeCodeCmd)
