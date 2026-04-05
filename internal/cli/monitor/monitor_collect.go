@@ -11,7 +11,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
-	"github.com/tysonthomas9/loomcli/internal/cli/git"
 )
 
 func CollectMonitorData(readyLimit int, branch string) *MonitorData {
@@ -126,7 +125,9 @@ func buildAgentStatus(deps *cli.Deps, wt cli.WorktreeInfo, daemonManaged map[str
 		taskIDToAgents[lockInfo.TaskID] = append(taskIDToAgents[lockInfo.TaskID], wt.Name)
 	}
 
-	agent.Status = resolveAgentStatus(deps, wt, agentTasks)
+	var idleChanges []FileChange
+	var idleHandled bool
+	agent.Status, idleChanges, idleHandled = resolveAgentStatus(deps, wt, agentTasks)
 
 	wtDefaultBranch := globalDefaultBranch
 	if wt.Repo != nil {
@@ -141,20 +142,28 @@ func buildAgentStatus(deps *cli.Deps, wt cli.WorktreeInfo, daemonManaged map[str
 		}
 		agent.Commits = getWorktreeCommitDetailsDeps(deps, wt.Path, wtDefaultBranch, 10, wtGithubURL, branch)
 	}
-	agent.Changes = getWorktreeFileChangesDeps(deps, wt.Path)
+	if idleHandled {
+		agent.Changes = idleChanges
+	} else {
+		agent.Changes = getWorktreeFileChangesDeps(deps, wt.Path)
+	}
 	return agent
 }
 
 // resolveAgentStatus determines the status string for a worktree.
-func resolveAgentStatus(deps *cli.Deps, wt cli.WorktreeInfo, agentTasks map[string]TaskInfo) string {
+// When the worktree is idle (no lock, no in-progress task), it also returns
+// the file changes derived from the same git status invocation, with idle=true,
+// so the caller can avoid a redundant git subprocess.
+func resolveAgentStatus(deps *cli.Deps, wt cli.WorktreeInfo, agentTasks map[string]TaskInfo) (status string, changes []FileChange, idle bool) {
 	lockStatus := cli.GetLockStatus(wt.Path)
 	if lockStatus != "" {
-		return refineLockStatus(deps, lockStatus, wt.Name, agentTasks)
+		return refineLockStatus(deps, lockStatus, wt.Name, agentTasks), nil, false
 	}
 	if task, ok := agentTasks[wt.Name]; ok && task.Status == "in_progress" {
-		return fmt.Sprintf("error: %s", task.ID)
+		return fmt.Sprintf("error: %s", task.ID), nil, false
 	}
-	return resolveIdleStatus(deps, wt.Path)
+	s, c := resolveIdleStatus(deps, wt.Path)
+	return s, c, true
 }
 
 // refineLockStatus enriches a lock status with task details when needed.
@@ -185,16 +194,17 @@ func refineLockStatus(deps *cli.Deps, lockStatus, agentName string, agentTasks m
 }
 
 // resolveIdleStatus determines the status for an agent with no lock and no in-progress task.
-func resolveIdleStatus(deps *cli.Deps, wtPath string) string {
-	clean, _ := git.IsCleanWorkingTreeDeps(deps, wtPath)
+// It also returns the file changes derived from the single git status invocation
+// so the caller can avoid running git status a second time.
+func resolveIdleStatus(deps *cli.Deps, wtPath string) (string, []FileChange) {
+	clean, count, fileChanges := getWorktreeStatus(deps, wtPath)
 	if clean {
-		return "ready"
+		return "ready", nil
 	}
-	changes := getUncommittedChanges(deps, wtPath)
-	if changes > 0 {
-		return fmt.Sprintf("%d changes", changes)
+	if count > 0 {
+		return fmt.Sprintf("%d changes", count), fileChanges
 	}
-	return "dirty"
+	return "dirty", fileChanges
 }
 
 func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, map[string]TaskInfo) {
@@ -469,16 +479,4 @@ func CollectReadyTasksByPriority(readyLimit int) map[int]int {
 	}
 
 	return counts
-}
-
-func getUncommittedChanges(deps *cli.Deps, path string) int {
-	result := deps.Git.Run(path, "status", "--porcelain")
-	if result.Err != nil {
-		return 0
-	}
-	output := strings.TrimSpace(result.Stdout)
-	if output == "" {
-		return 0
-	}
-	return len(strings.Split(output, "\n"))
 }

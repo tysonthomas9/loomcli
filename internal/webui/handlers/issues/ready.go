@@ -180,12 +180,33 @@ func handleReadyWithPool(pool readyConnectionGetter) http.HandlerFunc {
 }
 
 // filterUnclosedBlockers removes issues whose blocking dependencies are not yet closed.
-// It fetches all issues via client.List() to build the unclosed set.
+// It extracts dependency target IDs from the ready result and fetches only those
+// specific issues via client.List(IDs: ...) instead of a full table scan.
 // On error, returns the original list unfiltered (non-fatal).
 func filterUnclosedBlockers(client readyClient, issues []*types.Issue) []*types.Issue {
-	listResp, err := client.List(&rpc.ListArgs{Limit: 500})
+	// Extract unique dependency target IDs that affect ready work
+	depIDSet := make(map[string]struct{})
+	for _, issue := range issues {
+		for _, dep := range issue.Dependencies {
+			if dep.Type.AffectsReadyWork() {
+				depIDSet[dep.DependsOnID] = struct{}{}
+			}
+		}
+	}
+
+	// Fast path: no blocking dependencies means nothing to filter
+	if len(depIDSet) == 0 {
+		return issues
+	}
+
+	depIDs := make([]string, 0, len(depIDSet))
+	for id := range depIDSet {
+		depIDs = append(depIDs, id)
+	}
+
+	listResp, err := client.List(&rpc.ListArgs{IDs: depIDs})
 	if err != nil {
-		slog.Error("failed to fetch issue list for blocker filtering", "err", err)
+		slog.Error("failed to fetch blocker issues for filtering", "err", err)
 		return issues
 	}
 	if !listResp.Success {
@@ -193,14 +214,14 @@ func filterUnclosedBlockers(client readyClient, issues []*types.Issue) []*types.
 		return issues
 	}
 
-	var allIssues []*types.Issue
-	if err := json.Unmarshal(listResp.Data, &allIssues); err != nil {
-		slog.Error("failed to parse issue list for blocker filtering", "err", err)
+	var blockerIssues []*types.Issue
+	if err := json.Unmarshal(listResp.Data, &blockerIssues); err != nil {
+		slog.Error("failed to parse blocker issues for filtering", "err", err)
 		return issues
 	}
 
-	unclosedIDs := make(map[string]bool, len(allIssues))
-	for _, issue := range allIssues {
+	unclosedIDs := make(map[string]bool, len(blockerIssues))
+	for _, issue := range blockerIssues {
 		if issue.Status != types.StatusClosed {
 			unclosedIDs[issue.ID] = true
 		}

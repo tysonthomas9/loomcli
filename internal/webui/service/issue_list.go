@@ -139,7 +139,8 @@ func (s *issueServiceImpl) buildKanbanResult(client *rpc.Client, issuesWithCount
 		}
 	}
 
-	unclosedIDs, issueMap := fetchUnclosedIDSetAndMap(client)
+	// Build unclosed-ID set from already-fetched data, avoiding an extra List RPC.
+	unclosedIDs, issueMap := buildUnclosedSetsFromFetched(issuesWithCounts)
 
 	kanbanIssues := make([]KanbanIssue, len(issuesWithCounts))
 	for i, iwc := range issuesWithCounts {
@@ -151,14 +152,15 @@ func (s *issueServiceImpl) buildKanbanResult(client *rpc.Client, issuesWithCount
 		if iwc.Issue.SourceRepo != "" {
 			ki.Repo = &iwc.Issue.SourceRepo
 		}
-		if unclosedIDs != nil {
-			refs := getUnclosedBlockerRefs(iwc.Issue.Dependencies, unclosedIDs, issueMap)
-			if len(refs) > 0 {
-				ki.IsBlocked = true
-				ki.BlockedByCount = len(refs)
-				ki.BlockedBy = extractBlockerIDs(refs)
-				ki.BlockedByDetails = refs
-			}
+		// Client-side blocker check (considers only closed blockers as resolved).
+		// For filtered views, blocker targets may be outside the result set, so
+		// fall back to daemon blocked data.
+		refs := getUnclosedBlockerRefs(iwc.Issue.Dependencies, unclosedIDs, issueMap)
+		if len(refs) > 0 {
+			ki.IsBlocked = true
+			ki.BlockedByCount = len(refs)
+			ki.BlockedBy = extractBlockerIDs(refs)
+			ki.BlockedByDetails = refs
 		} else if bi, ok := blockedMap[iwc.Issue.ID]; ok {
 			ki.IsBlocked = true
 			ki.BlockedByCount = bi.BlockedByCount

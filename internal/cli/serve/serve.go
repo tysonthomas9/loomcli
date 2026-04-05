@@ -149,7 +149,7 @@ func init() {
 func runServe(cmd *cobra.Command, args []string) {
 	checkTmuxInstalled()
 
-	collectDataFn := metricscmd.NewCollector(2 * time.Second)
+	collectDataFn := metricscmd.NewCollector(10 * time.Second)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

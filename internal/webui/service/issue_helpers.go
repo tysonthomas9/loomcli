@@ -1,9 +1,7 @@
 package service
 
 import (
-	"encoding/json"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -121,31 +119,19 @@ func formatTimePtr(t *time.Time) string {
 	return t.Format(time.RFC3339)
 }
 
-// fetchUnclosedIDSetAndMap fetches all issues via client.List and returns:
+// buildUnclosedSetsFromFetched builds the unclosed-ID set and issue lookup map
+// from already-fetched issuesWithCounts, avoiding an extra List RPC call.
+//
+// Returns:
 //   - unclosedIDs: set of issue IDs with status != closed
 //   - issueMap: lookup map for populating blocker details (title, priority)
 //
-// Returns nil, nil on error (non-fatal — caller falls back to daemon data).
-func fetchUnclosedIDSetAndMap(client *rpc.Client) (map[string]bool, map[string]*types.IssueWithCounts) {
-	resp, err := client.List(&rpc.ListArgs{Limit: maxListLimit})
-	if err != nil {
-		slog.Error("failed to fetch issues for blocker detection", "err", err)
-		return nil, nil
-	}
-	if !resp.Success {
-		slog.Error("list RPC failed for blocker detection", "err", resp.Error)
-		return nil, nil
-	}
-
-	var allIssues []*types.IssueWithCounts
-	if err := json.Unmarshal(resp.Data, &allIssues); err != nil {
-		slog.Error("failed to parse issues for blocker detection", "err", err)
-		return nil, nil
-	}
-
-	unclosedIDs := make(map[string]bool, len(allIssues))
-	issueMap := make(map[string]*types.IssueWithCounts, len(allIssues))
-	for _, iwc := range allIssues {
+// For filtered views (by assignee/type), some blocker targets may be outside the
+// result set. The caller's blockedMap fallback handles those cases.
+func buildUnclosedSetsFromFetched(issues []*types.IssueWithCounts) (map[string]bool, map[string]*types.IssueWithCounts) {
+	unclosedIDs := make(map[string]bool, len(issues))
+	issueMap := make(map[string]*types.IssueWithCounts, len(issues))
+	for _, iwc := range issues {
 		issueMap[iwc.Issue.ID] = iwc
 		if iwc.Issue.Status != types.StatusClosed {
 			unclosedIDs[iwc.Issue.ID] = true
