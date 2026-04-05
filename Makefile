@@ -156,23 +156,25 @@ update-beads:
 
 # Go-only quality gate (skips frontend rebuild if dist/ exists)
 check-go: frontend-ensure
-	@echo "=== [1/8] Go: format check ==="
+	@echo "=== [1/9] Go: format check ==="
 	@bad=$$(gofmt -l . 2>/dev/null | grep -v third_party | grep -v worktrees | grep -v vendor | grep -v node_modules | head -20); \
 	if [ -n "$$bad" ]; then echo "gofmt violations:"; echo "$$bad"; exit 1; fi
-	@echo "=== [2/8] Go: vet ==="
+	@echo "=== [2/9] Go: vet ==="
 	@go vet ./...
-	@echo "=== [3/8] Go: build ==="
+	@echo "=== [3/9] Go: build ==="
 	@go build -buildvcs=false ./...
-	@echo "=== [4/8] Go: lint (golangci-lint + depguard) ==="
+	@echo "=== [4/9] Go: lint (golangci-lint + depguard) ==="
 	@golangci-lint run --timeout=5m --allow-parallel-runners
-	@echo "=== [5/8] Go: LOC check ==="
+	@echo "=== [5/9] Go: LOC check ==="
 	@./scripts/check-loc.sh 500
-	@echo "=== [6/8] Go: exec.Command guard ==="
+	@echo "=== [6/9] Go: exec.Command guard ==="
 	@./scripts/check-no-raw-exec.sh
-	@echo "=== [7/8] Go: log.Printf guard ==="
+	@echo "=== [7/9] Go: log.Printf guard ==="
 	@./scripts/check-no-log-printf.sh
-	@echo "=== [8/8] Go: test with race detector ==="
-	@go test -race -timeout 15m ./...
+	@echo "=== [8/9] Go: test with race detector ==="
+	@go test -race -covermode=atomic -coverprofile=/tmp/loom.coverage.out -timeout 15m ./...
+	@echo "=== [9/9] Go: coverage threshold ==="
+	@./scripts/check-coverage.sh
 	@echo "=== Go quality gates PASSED ==="
 
 # Frontend-only quality gate (builds frontend first)
@@ -285,7 +287,7 @@ help:
 	@echo "  make frontend  - Build frontend (requires Node.js >= 20)"
 	@echo "  make sync-beads   - Sync beads packages (rewrite imports)"
 	@echo "  make update-beads - Pull latest beads + sync"
-	@echo "  make check        - Unified quality gate (all 12 checks)"
+	@echo "  make check        - Unified quality gate (all 14 checks)"
 	@echo "  make check-go     - Go-only quality gate (skips frontend rebuild if dist/ exists)"
 	@echo "  make check-frontend - Frontend-only quality gate"
 	@echo "  make gate         - Alias for make check"
