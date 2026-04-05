@@ -205,6 +205,11 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 			slog.Warn("session store unavailable, watchdog will use log file", "worktree", ap.entry.Worktree, "err", err)
 		}
 
+		// 3.5. Clear stale yield file from previous run
+		if err := ClearYieldFile(ap.worktreePath); err != nil {
+			slog.Warn("failed to clear stale yield file", "worktree", ap.entry.Worktree, "err", err)
+		}
+
 		// 4. Spawn subprocess
 		if err := d.spawnAgent(ap); err != nil {
 			slog.Warn("spawn failed", "worktree", ap.entry.Worktree, "err", err)

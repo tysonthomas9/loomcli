@@ -109,6 +109,9 @@ func (d *Daemon) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 	// Propagate daemon-level identifiers (workspace ID, IPC socket path)
 	cmd.Env = d.appendDaemonEnv(cmd.Env)
 
+	// Propagate yield file path for cooperative preemption
+	cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_YIELD_FILE=%s", filepath.Join(ap.worktreePath, YieldFileName)))
+
 	// Propagate session env vars for transcript-based liveness tracking
 	ap.mu.Lock()
 	sess := ap.session
