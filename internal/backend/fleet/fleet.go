@@ -223,20 +223,35 @@ func (b *FleetBackend) Blocked(ctx context.Context, opts backend.BlockedOpts) ([
 	return blockedIssuesToData(issues), nil
 }
 
+// Stats builds StatsData from the fleet server's count endpoint with
+// group_by=status. ReadyIssues, EpicsEligibleForClosure, and AverageLeadTime
+// are unavailable until fleet-db adds server-side stats aggregation (fleet-08yg).
 func (b *FleetBackend) Stats(ctx context.Context) (*backend.StatsData, error) {
-	resp, err := b.exec(ctx, "Stats", "GET", "/stats", nil)
+	resp, err := b.exec(ctx, "Stats", "GET", "/issues/count?group_by=status", nil)
 	if err != nil {
 		return nil, err
 	}
 	if !hasData(resp) {
-		return nil, backend.ErrInternal("Stats", "empty response from server", nil)
+		return nil, backend.ErrInternal("Stats", "nil response from CountIssues", nil)
 	}
-	var stats types.Statistics
-	if err := json.Unmarshal(resp.Data, &stats); err != nil {
+	var countResp countIssuesResponse
+	if err := json.Unmarshal(resp.Data, &countResp); err != nil {
 		return nil, backend.ErrInternal("Stats", "unmarshal response", err)
 	}
-	result := statisticsToStatsData(&stats)
-	return &result, nil
+	groups := countResp.Groups
+	return &backend.StatsData{
+		TotalIssues:      int(countResp.Total),
+		OpenIssues:       int(groups[string(types.StatusOpen)]),
+		InProgressIssues: int(groups[string(types.StatusInProgress)]),
+		ClosedIssues:     int(groups[string(types.StatusClosed)]),
+		BlockedIssues:    int(groups[string(types.StatusBlocked)]),
+		DeferredIssues:   int(groups[string(types.StatusDeferred)]),
+		TombstoneIssues:  int(groups[string(types.StatusTombstone)]),
+		PinnedIssues:     int(groups[string(types.StatusPinned)]),
+		// ReadyIssues, EpicsEligibleForClosure, AverageLeadTime: 0 (fleet-08yg).
+		// StatusReview and StatusHooked counts are included in TotalIssues but have
+		// no dedicated StatsData field; they are silently omitted from per-status counts.
+	}, nil
 }
 
 func (b *FleetBackend) Count(_ context.Context, _ backend.CountOpts) (int, error) {

@@ -15,6 +15,13 @@ type readyIssueWithParent struct {
 	Repo        *string `json:"repo,omitempty"`
 }
 
+// countIssuesResponse is the JSON structure returned by the fleet server's
+// /issues/count?group_by=status endpoint.
+type countIssuesResponse struct {
+	Total  int64            `json:"total"`
+	Groups map[string]int64 `json:"groups"`
+}
+
 // closeResultJSON is the JSON structure returned by the close endpoint.
 type closeResultJSON struct {
 	Closed    *types.Issue   `json:"closed,omitempty"`
@@ -183,23 +190,6 @@ func eventToData(e *types.Event) backend.EventData {
 		Kind:      string(e.EventType),
 		Actor:     e.Actor,
 		CreatedAt: e.CreatedAt,
-	}
-}
-
-// statisticsToStatsData converts types.Statistics to backend.StatsData.
-func statisticsToStatsData(stats *types.Statistics) backend.StatsData {
-	return backend.StatsData{
-		TotalIssues:             stats.TotalIssues,
-		OpenIssues:              stats.OpenIssues,
-		InProgressIssues:        stats.InProgressIssues,
-		ClosedIssues:            stats.ClosedIssues,
-		BlockedIssues:           stats.BlockedIssues,
-		DeferredIssues:          stats.DeferredIssues,
-		ReadyIssues:             stats.ReadyIssues,
-		TombstoneIssues:         stats.TombstoneIssues,
-		PinnedIssues:            stats.PinnedIssues,
-		EpicsEligibleForClosure: stats.EpicsEligibleForClosure,
-		AverageLeadTime:         stats.AverageLeadTime,
 	}
 }
 

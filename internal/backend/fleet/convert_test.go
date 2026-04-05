@@ -1,6 +1,7 @@
 package fleet
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -156,34 +157,23 @@ func TestDetailsToDetailData(t *testing.T) {
 	}
 }
 
-func TestStatisticsToStatsData(t *testing.T) {
-	stats := &types.Statistics{
-		TotalIssues:             50,
-		OpenIssues:              10,
-		InProgressIssues:        5,
-		ClosedIssues:            20,
-		BlockedIssues:           3,
-		DeferredIssues:          2,
-		ReadyIssues:             7,
-		TombstoneIssues:         1,
-		PinnedIssues:            2,
-		EpicsEligibleForClosure: 1,
-		AverageLeadTime:         24.5,
+func TestCountIssuesResponse_ZeroValueGroups(t *testing.T) {
+	// Verify that countIssuesResponse can be unmarshaled and that
+	// missing keys in Groups produce zero values via Go map semantics.
+	raw := `{"total": 5, "groups": {"open": 3, "closed": 2}}`
+	var resp countIssuesResponse
+	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
 	}
-
-	d := statisticsToStatsData(stats)
-
-	if d.TotalIssues != 50 {
-		t.Errorf("TotalIssues = %d, want 50", d.TotalIssues)
+	if resp.Total != 5 {
+		t.Errorf("Total = %d, want 5", resp.Total)
 	}
-	if d.OpenIssues != 10 {
-		t.Errorf("OpenIssues = %d, want 10", d.OpenIssues)
+	if resp.Groups["open"] != 3 {
+		t.Errorf("Groups[open] = %d, want 3", resp.Groups["open"])
 	}
-	if d.ReadyIssues != 7 {
-		t.Errorf("ReadyIssues = %d, want 7", d.ReadyIssues)
-	}
-	if d.AverageLeadTime != 24.5 {
-		t.Errorf("AverageLeadTime = %f, want 24.5", d.AverageLeadTime)
+	// Missing key returns 0.
+	if resp.Groups["in_progress"] != 0 {
+		t.Errorf("Groups[in_progress] = %d, want 0", resp.Groups["in_progress"])
 	}
 }
 
