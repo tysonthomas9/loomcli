@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 // WorkspaceAgentStatus represents an agent's status within a workspace.
@@ -46,13 +47,20 @@ func handleListWorkspaceAgents(
 }
 
 // discoverWorkspaceAgents scans <wsPath>/worktrees/<repo>/<agent> for git worktrees.
+// Worktrees are processed in parallel to reduce latency.
 func discoverWorkspaceAgents(wsPath string) []WorkspaceAgentStatus {
 	worktreesDir := filepath.Join(wsPath, "worktrees")
 	if _, err := os.Stat(worktreesDir); err != nil {
 		return nil
 	}
 
-	var agents []WorkspaceAgentStatus
+	// First pass: collect all candidate agent paths (cheap OS reads).
+	type candidate struct {
+		agentName string
+		agentPath string
+		repoName  string
+	}
+	var candidates []candidate
 
 	// Iterate repos under worktrees/
 	repoEntries, err := os.ReadDir(worktreesDir)
@@ -82,19 +90,74 @@ func discoverWorkspaceAgents(wsPath string) []WorkspaceAgentStatus {
 				continue
 			}
 
-			branch := getGitBranch(agentPath)
-			status := getGitStatus(agentPath)
-
-			agents = append(agents, WorkspaceAgentStatus{
-				Name:   agentEntry.Name(),
-				Branch: branch,
-				Status: status,
-				Repo:   repoName,
+			candidates = append(candidates, candidate{
+				agentName: agentEntry.Name(),
+				agentPath: agentPath,
+				repoName:  repoName,
 			})
 		}
 	}
 
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	// Second pass: fan out git calls in parallel.
+	agents := make([]WorkspaceAgentStatus, len(candidates))
+	var wg sync.WaitGroup
+	wg.Add(len(candidates))
+
+	for i, c := range candidates {
+		go func(idx int, cand candidate) {
+			defer wg.Done()
+			branch, status := getGitBranchAndStatus(cand.agentPath)
+			agents[idx] = WorkspaceAgentStatus{
+				Name:   cand.agentName,
+				Branch: branch,
+				Status: status,
+				Repo:   cand.repoName,
+			}
+		}(i, c)
+	}
+
+	wg.Wait()
 	return agents
+}
+
+// getGitBranchAndStatus runs a single "git status --branch --porcelain" and
+// parses both the branch name and the working-tree status from the output.
+func getGitBranchAndStatus(path string) (branch string, status string) {
+	cmd := exec.Command("git", "status", "--branch", "--porcelain") //nolint:gosec // path is workspace-internal
+	cmd.Dir = path
+	output, err := cmd.Output()
+	if err != nil {
+		return "unknown", "error"
+	}
+
+	lines := strings.Split(strings.TrimRight(string(output), "\n"), "\n")
+	if len(lines) == 0 {
+		return "unknown", "ready"
+	}
+
+	// Parse branch from first line: "## main...origin/main" or "## main"
+	branchLine := lines[0]
+	branch = "unknown"
+	if strings.HasPrefix(branchLine, "## ") {
+		branch = strings.TrimPrefix(branchLine, "## ")
+		if idx := strings.Index(branch, "..."); idx >= 0 {
+			branch = branch[:idx]
+		}
+	}
+
+	// Count changes (remaining lines)
+	changeCount := len(lines) - 1
+	if changeCount == 0 {
+		return branch, "ready"
+	}
+	if changeCount == 1 {
+		return branch, "1 change"
+	}
+	return branch, fmt.Sprintf("%d changes", changeCount)
 }
 
 // getGitBranch returns the current branch for a git directory.
