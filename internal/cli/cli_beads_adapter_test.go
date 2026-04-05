@@ -270,3 +270,504 @@ func TestCliBeadsAdapter_Reopen_EmptyID(t *testing.T) {
 		t.Errorf("BackendError.Kind = %q, want %q", be.Kind, backend.KindValidation)
 	}
 }
+
+// --- List method tests ---
+
+// emptyJSONRunner returns a mock runner whose fn returns an empty JSON array.
+func emptyJSONRunner() *mockBDRunner {
+	return &mockBDRunner{
+		fn: func(_ string, _ ...string) CommandResult {
+			return CommandResult{Stdout: "[]"}
+		},
+	}
+}
+
+// listArgs is a convenience that calls List with the given opts and returns the
+// captured args slice. It fails the test on error.
+func listArgs(t *testing.T, opts backend.ListOpts) []string {
+	t.Helper()
+	runner := emptyJSONRunner()
+	a := newCliBeadsAdapter(runner, "/tmp/test")
+	_, err := a.List(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(runner.calls))
+	}
+	return runner.calls[0].Args
+}
+
+// containsFlag checks that args contains the given flag (and optional value).
+// For a flag-only arg (e.g. "--deferred"), pass value "".
+// For a flag+value pair (e.g. "--status open"), pass value "open".
+func containsFlag(args []string, flag, value string) bool {
+	for i, a := range args {
+		if a == flag {
+			if value == "" {
+				return true
+			}
+			if i+1 < len(args) && args[i+1] == value {
+				return true
+			}
+		}
+		// Handle --key=value style.
+		if value != "" && a == flag+"="+value {
+			return true
+		}
+	}
+	return false
+}
+
+// containsFlagOnly checks that a flag-only arg is present (no value following).
+func containsFlagOnly(args []string, flag string) bool {
+	for _, a := range args {
+		if a == flag {
+			return true
+		}
+	}
+	return false
+}
+
+// assertNoFlag checks that the flag does NOT appear in args.
+func assertNoFlag(t *testing.T, args []string, flag string) {
+	t.Helper()
+	for _, a := range args {
+		if a == flag || strings.HasPrefix(a, flag+"=") {
+			t.Errorf("expected no %s flag, but found it in args: %v", flag, args)
+			return
+		}
+	}
+}
+
+func TestCliBeadsAdapter_List_ZeroOpts(t *testing.T) {
+	args := listArgs(t, backend.ListOpts{})
+	got := strings.Join(args, " ")
+	want := "list --json"
+	if got != want {
+		t.Errorf("args = %q, want %q", got, want)
+	}
+}
+
+func TestCliBeadsAdapter_List_BasicFilters(t *testing.T) {
+	args := listArgs(t, backend.ListOpts{
+		Status:    "open",
+		Assignee:  "agent-1",
+		IssueType: "task",
+		ParentID:  "E-100",
+		Limit:     25,
+	})
+	checks := []struct {
+		flag, value string
+	}{
+		{"--status", "open"},
+		{"--assignee", "agent-1"},
+		{"--type", "task"},
+		{"--parent", "E-100"},
+		{"--limit", "25"},
+	}
+	for _, c := range checks {
+		if !containsFlag(args, c.flag, c.value) {
+			t.Errorf("expected %s %s in args: %v", c.flag, c.value, args)
+		}
+	}
+}
+
+func TestCliBeadsAdapter_List_PriorityNilVsZero(t *testing.T) {
+	t.Run("nil_no_flag", func(t *testing.T) {
+		args := listArgs(t, backend.ListOpts{Priority: nil})
+		assertNoFlag(t, args, "--priority")
+	})
+
+	t.Run("zero_emits_flag", func(t *testing.T) {
+		args := listArgs(t, backend.ListOpts{Priority: intPtr(0)})
+		if !containsFlag(args, "--priority", "0") {
+			t.Errorf("expected --priority 0 in args: %v", args)
+		}
+	})
+
+	t.Run("nonzero_emits_flag", func(t *testing.T) {
+		args := listArgs(t, backend.ListOpts{Priority: intPtr(2)})
+		if !containsFlag(args, "--priority", "2") {
+			t.Errorf("expected --priority 2 in args: %v", args)
+		}
+	})
+}
+
+func TestCliBeadsAdapter_List_PriorityRange(t *testing.T) {
+	t.Run("min_and_max", func(t *testing.T) {
+		args := listArgs(t, backend.ListOpts{
+			PriorityMin: intPtr(1),
+			PriorityMax: intPtr(5),
+		})
+		if !containsFlag(args, "--priority-min", "1") {
+			t.Errorf("expected --priority-min 1 in args: %v", args)
+		}
+		if !containsFlag(args, "--priority-max", "5") {
+			t.Errorf("expected --priority-max 5 in args: %v", args)
+		}
+	})
+
+	t.Run("zero_values", func(t *testing.T) {
+		args := listArgs(t, backend.ListOpts{
+			PriorityMin: intPtr(0),
+			PriorityMax: intPtr(0),
+		})
+		if !containsFlag(args, "--priority-min", "0") {
+			t.Errorf("expected --priority-min 0 in args: %v", args)
+		}
+		if !containsFlag(args, "--priority-max", "0") {
+			t.Errorf("expected --priority-max 0 in args: %v", args)
+		}
+	})
+
+	t.Run("nil_no_flags", func(t *testing.T) {
+		args := listArgs(t, backend.ListOpts{})
+		assertNoFlag(t, args, "--priority-min")
+		assertNoFlag(t, args, "--priority-max")
+	})
+}
+
+func TestCliBeadsAdapter_List_Labels(t *testing.T) {
+	args := listArgs(t, backend.ListOpts{
+		Labels:    []string{"repo:fe", "urgent"},
+		LabelsAny: []string{"A", "B"},
+	})
+	// Verify --label repo:fe and --label urgent
+	if !containsFlag(args, "--label", "repo:fe") {
+		t.Errorf("expected --label repo:fe in args: %v", args)
+	}
+	if !containsFlag(args, "--label", "urgent") {
+		t.Errorf("expected --label urgent in args: %v", args)
+	}
+	// Verify --label-any A and --label-any B
+	if !containsFlag(args, "--label-any", "A") {
+		t.Errorf("expected --label-any A in args: %v", args)
+	}
+	if !containsFlag(args, "--label-any", "B") {
+		t.Errorf("expected --label-any B in args: %v", args)
+	}
+}
+
+func TestCliBeadsAdapter_List_PatternMatching(t *testing.T) {
+	args := listArgs(t, backend.ListOpts{
+		TitleContains:       "login bug",
+		DescriptionContains: "null pointer",
+		NotesContains:       "workaround",
+	})
+	checks := []struct {
+		flag, value string
+	}{
+		{"--title-contains", "login bug"},
+		{"--desc-contains", "null pointer"},
+		{"--notes-contains", "workaround"},
+	}
+	for _, c := range checks {
+		if !containsFlag(args, c.flag, c.value) {
+			t.Errorf("expected %s %s in args: %v", c.flag, c.value, args)
+		}
+	}
+}
+
+func TestCliBeadsAdapter_List_DateFilters(t *testing.T) {
+	args := listArgs(t, backend.ListOpts{
+		CreatedAfter:  "2026-01-01",
+		CreatedBefore: "2026-03-01",
+		UpdatedAfter:  "2026-02-01",
+		UpdatedBefore: "2026-02-28",
+		ClosedAfter:   "2026-01-15",
+		ClosedBefore:  "2026-03-15",
+	})
+	checks := []struct {
+		flag, value string
+	}{
+		{"--created-after", "2026-01-01"},
+		{"--created-before", "2026-03-01"},
+		{"--updated-after", "2026-02-01"},
+		{"--updated-before", "2026-02-28"},
+		{"--closed-after", "2026-01-15"},
+		{"--closed-before", "2026-03-15"},
+	}
+	for _, c := range checks {
+		if !containsFlag(args, c.flag, c.value) {
+			t.Errorf("expected %s %s in args: %v", c.flag, c.value, args)
+		}
+	}
+}
+
+func TestCliBeadsAdapter_List_SchedulingFilters(t *testing.T) {
+	args := listArgs(t, backend.ListOpts{
+		Deferred:    true,
+		DeferAfter:  "2026-04-01",
+		DeferBefore: "2026-05-01",
+		DueAfter:    "2026-04-10",
+		DueBefore:   "2026-04-30",
+		Overdue:     true,
+	})
+	checks := []struct {
+		flag  string
+		value string
+	}{
+		{"--deferred", ""},
+		{"--defer-after", "2026-04-01"},
+		{"--defer-before", "2026-05-01"},
+		{"--due-after", "2026-04-10"},
+		{"--due-before", "2026-04-30"},
+		{"--overdue", ""},
+	}
+	for _, c := range checks {
+		if c.value == "" {
+			if !containsFlagOnly(args, c.flag) {
+				t.Errorf("expected %s flag in args: %v", c.flag, args)
+			}
+		} else {
+			if !containsFlag(args, c.flag, c.value) {
+				t.Errorf("expected %s %s in args: %v", c.flag, c.value, args)
+			}
+		}
+	}
+}
+
+func TestCliBeadsAdapter_List_BooleanFlags(t *testing.T) {
+	args := listArgs(t, backend.ListOpts{
+		Overdue:          true,
+		Deferred:         true,
+		EmptyDescription: true,
+		NoAssignee:       true,
+		NoLabels:         true,
+		IncludeTemplates: true,
+		AllowStale:       true,
+	})
+	flags := []string{
+		"--overdue",
+		"--deferred",
+		"--empty-description",
+		"--no-assignee",
+		"--no-labels",
+		"--include-templates",
+		"--allow-stale",
+	}
+	for _, flag := range flags {
+		if !containsFlagOnly(args, flag) {
+			t.Errorf("expected %s flag in args: %v", flag, args)
+		}
+	}
+}
+
+func TestCliBeadsAdapter_List_PinnedVariants(t *testing.T) {
+	t.Run("nil_no_flag", func(t *testing.T) {
+		args := listArgs(t, backend.ListOpts{Pinned: nil})
+		assertNoFlag(t, args, "--pinned")
+		assertNoFlag(t, args, "--no-pinned")
+	})
+
+	t.Run("true_pinned", func(t *testing.T) {
+		args := listArgs(t, backend.ListOpts{Pinned: boolPtr(true)})
+		if !containsFlagOnly(args, "--pinned") {
+			t.Errorf("expected --pinned in args: %v", args)
+		}
+		assertNoFlag(t, args, "--no-pinned")
+	})
+
+	t.Run("false_no_pinned", func(t *testing.T) {
+		args := listArgs(t, backend.ListOpts{Pinned: boolPtr(false)})
+		if !containsFlagOnly(args, "--no-pinned") {
+			t.Errorf("expected --no-pinned in args: %v", args)
+		}
+		// --pinned should not be present (but --no-pinned starts with --pinned prefix,
+		// so check carefully).
+		found := false
+		for _, a := range args {
+			if a == "--pinned" {
+				found = true
+			}
+		}
+		if found {
+			t.Errorf("expected no --pinned (exact) in args: %v", args)
+		}
+	})
+}
+
+func TestCliBeadsAdapter_List_IDs(t *testing.T) {
+	args := listArgs(t, backend.ListOpts{
+		IDs: []string{"id1", "id2"},
+	})
+	if !containsFlag(args, "--id", "id1,id2") {
+		t.Errorf("expected --id id1,id2 in args: %v", args)
+	}
+}
+
+func TestCliBeadsAdapter_List_SourceRepos(t *testing.T) {
+	args := listArgs(t, backend.ListOpts{
+		SourceRepos: []string{"repo1", "repo2"},
+	})
+	// The implementation uses --source-repos=repo1,repo2 (= style)
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--source-repos=repo1,repo2") {
+		t.Errorf("expected --source-repos=repo1,repo2 in args: %v", args)
+	}
+}
+
+func TestCliBeadsAdapter_List_MolType(t *testing.T) {
+	args := listArgs(t, backend.ListOpts{
+		MolType: "swarm",
+	})
+	if !containsFlag(args, "--mol-type", "swarm") {
+		t.Errorf("expected --mol-type swarm in args: %v", args)
+	}
+}
+
+func TestCliBeadsAdapter_List_EphemeralSkipped(t *testing.T) {
+	args := listArgs(t, backend.ListOpts{
+		Ephemeral: boolPtr(true),
+	})
+	got := strings.Join(args, " ")
+	want := "list --json"
+	if got != want {
+		t.Errorf("Ephemeral should not produce any CLI flag; args = %q, want %q", got, want)
+	}
+}
+
+func TestCliBeadsAdapter_List_QuerySkipped(t *testing.T) {
+	// Query is a full-text search field used by bd search, not bd list.
+	// cliBeadsAdapter.List intentionally skips it.
+	args := listArgs(t, backend.ListOpts{
+		Query: "authentication bug",
+	})
+	got := strings.Join(args, " ")
+	want := "list --json"
+	if got != want {
+		t.Errorf("Query should not produce any CLI flag; args = %q, want %q", got, want)
+	}
+}
+
+func TestCliBeadsAdapter_List_AllFields(t *testing.T) {
+	args := listArgs(t, backend.ListOpts{
+		// Basic filters.
+		Status:    "in_progress",
+		Assignee:  "agent-99",
+		IssueType: "epic",
+		ParentID:  "E-1",
+		Limit:     50,
+		IDs:       []string{"T-1", "T-2", "T-3"},
+
+		// Priority.
+		Priority:    intPtr(3),
+		PriorityMin: intPtr(1),
+		PriorityMax: intPtr(5),
+
+		// Labels.
+		Labels:    []string{"repo:be", "critical"},
+		LabelsAny: []string{"p0", "p1"},
+
+		// Pattern matching.
+		TitleContains:       "auth",
+		DescriptionContains: "token refresh",
+		NotesContains:       "retry",
+
+		// Date range filters.
+		CreatedAfter:  "2026-01-01T00:00:00Z",
+		CreatedBefore: "2026-06-01T00:00:00Z",
+		UpdatedAfter:  "2026-03-01T00:00:00Z",
+		UpdatedBefore: "2026-04-01T00:00:00Z",
+		ClosedAfter:   "2026-02-01T00:00:00Z",
+		ClosedBefore:  "2026-05-01T00:00:00Z",
+
+		// Empty/null checks.
+		EmptyDescription: true,
+		NoAssignee:       true,
+		NoLabels:         true,
+
+		// Pinned.
+		Pinned: boolPtr(true),
+
+		// Ephemeral (should be ignored).
+		Ephemeral: boolPtr(true),
+
+		// Templates/mol.
+		IncludeTemplates: true,
+		MolType:          "swarm",
+
+		// Scheduling.
+		Deferred:    true,
+		DeferAfter:  "2026-04-01",
+		DeferBefore: "2026-05-01",
+		DueAfter:    "2026-04-10",
+		DueBefore:   "2026-04-30",
+		Overdue:     true,
+
+		// Multi-repo.
+		SourceRepos: []string{"repoA", "repoB"},
+
+		// Performance hints.
+		AllowStale: true,
+	})
+
+	// All expected flag/value pairs.
+	flagValueChecks := []struct {
+		flag, value string
+	}{
+		{"--status", "in_progress"},
+		{"--assignee", "agent-99"},
+		{"--type", "epic"},
+		{"--parent", "E-1"},
+		{"--limit", "50"},
+		{"--id", "T-1,T-2,T-3"},
+		{"--priority", "3"},
+		{"--priority-min", "1"},
+		{"--priority-max", "5"},
+		{"--label", "repo:be"},
+		{"--label", "critical"},
+		{"--label-any", "p0"},
+		{"--label-any", "p1"},
+		{"--title-contains", "auth"},
+		{"--desc-contains", "token refresh"},
+		{"--notes-contains", "retry"},
+		{"--created-after", "2026-01-01T00:00:00Z"},
+		{"--created-before", "2026-06-01T00:00:00Z"},
+		{"--updated-after", "2026-03-01T00:00:00Z"},
+		{"--updated-before", "2026-04-01T00:00:00Z"},
+		{"--closed-after", "2026-02-01T00:00:00Z"},
+		{"--closed-before", "2026-05-01T00:00:00Z"},
+		{"--defer-after", "2026-04-01"},
+		{"--defer-before", "2026-05-01"},
+		{"--due-after", "2026-04-10"},
+		{"--due-before", "2026-04-30"},
+		{"--mol-type", "swarm"},
+	}
+	for _, c := range flagValueChecks {
+		if !containsFlag(args, c.flag, c.value) {
+			t.Errorf("expected %s %s in args: %v", c.flag, c.value, args)
+		}
+	}
+
+	// Boolean-only flags.
+	boolFlags := []string{
+		"--deferred",
+		"--overdue",
+		"--empty-description",
+		"--no-assignee",
+		"--no-labels",
+		"--pinned",
+		"--include-templates",
+		"--allow-stale",
+	}
+	for _, flag := range boolFlags {
+		if !containsFlagOnly(args, flag) {
+			t.Errorf("expected %s flag in args: %v", flag, args)
+		}
+	}
+
+	// --source-repos uses = style.
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--source-repos=repoA,repoB") {
+		t.Errorf("expected --source-repos=repoA,repoB in args: %v", args)
+	}
+
+	// Ephemeral should NOT produce any flag.
+	assertNoFlag(t, args, "--ephemeral")
+	assertNoFlag(t, args, "--no-ephemeral")
+
+	// --no-pinned should NOT be present since Pinned=true.
+	assertNoFlag(t, args, "--no-pinned")
+}

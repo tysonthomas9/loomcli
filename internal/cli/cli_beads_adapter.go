@@ -47,22 +47,106 @@ func (a *cliBeadsAdapter) Ready(_ context.Context, opts backend.ReadyOpts) ([]ba
 
 func (a *cliBeadsAdapter) List(_ context.Context, opts backend.ListOpts) ([]backend.IssueData, error) {
 	args := []string{"list", "--json"}
-	if opts.Status != "" {
-		args = append(args, "--status", opts.Status)
-	}
-	if opts.Assignee != "" {
-		args = append(args, "--assignee", opts.Assignee)
-	}
-	if opts.IssueType != "" {
-		args = append(args, "--type", opts.IssueType)
-	}
-	if opts.ParentID != "" {
-		args = append(args, "--parent", opts.ParentID)
-	}
+	args = appendListOptArgs(args, opts)
+	return a.queryIssues("List", args)
+}
+
+// appendListOptArgs maps backend.ListOpts fields to bd list CLI flags.
+// Fields with no bd CLI equivalent (Query, Ephemeral, ExcludeStatus,
+// ExcludeTypes) are intentionally skipped.
+func appendListOptArgs(args []string, opts backend.ListOpts) []string {
+	args = appendListCoreArgs(args, opts)
+	args = appendListSearchArgs(args, opts)
+	args = appendListDateArgs(args, opts)
+	args = appendListAdvancedArgs(args, opts)
+	return args
+}
+
+func appendListCoreArgs(args []string, opts backend.ListOpts) []string {
+	appendNonEmpty(&args, "--status", opts.Status)
+	appendNonEmpty(&args, "--assignee", opts.Assignee)
+	appendNonEmpty(&args, "--type", opts.IssueType)
+	appendNonEmpty(&args, "--parent", opts.ParentID)
 	if opts.Limit > 0 {
 		args = append(args, "--limit", strconv.Itoa(opts.Limit))
 	}
-	return a.queryIssues("List", args)
+	appendOptInt(&args, "--priority", opts.Priority)
+	appendOptInt(&args, "--priority-min", opts.PriorityMin)
+	appendOptInt(&args, "--priority-max", opts.PriorityMax)
+	for _, label := range opts.Labels {
+		args = append(args, "--label", label)
+	}
+	for _, label := range opts.LabelsAny {
+		args = append(args, "--label-any", label)
+	}
+	if len(opts.IDs) > 0 {
+		args = append(args, "--id", strings.Join(opts.IDs, ","))
+	}
+	return args
+}
+
+func appendListSearchArgs(args []string, opts backend.ListOpts) []string {
+	appendNonEmpty(&args, "--title-contains", opts.TitleContains)
+	appendNonEmpty(&args, "--desc-contains", opts.DescriptionContains)
+	appendNonEmpty(&args, "--notes-contains", opts.NotesContains)
+	return args
+}
+
+func appendListDateArgs(args []string, opts backend.ListOpts) []string {
+	appendNonEmpty(&args, "--created-after", opts.CreatedAfter)
+	appendNonEmpty(&args, "--created-before", opts.CreatedBefore)
+	appendNonEmpty(&args, "--updated-after", opts.UpdatedAfter)
+	appendNonEmpty(&args, "--updated-before", opts.UpdatedBefore)
+	appendNonEmpty(&args, "--closed-after", opts.ClosedAfter)
+	appendNonEmpty(&args, "--closed-before", opts.ClosedBefore)
+	appendBoolFlag(&args, "--deferred", opts.Deferred)
+	appendNonEmpty(&args, "--defer-after", opts.DeferAfter)
+	appendNonEmpty(&args, "--defer-before", opts.DeferBefore)
+	appendNonEmpty(&args, "--due-after", opts.DueAfter)
+	appendNonEmpty(&args, "--due-before", opts.DueBefore)
+	appendBoolFlag(&args, "--overdue", opts.Overdue)
+	return args
+}
+
+func appendListAdvancedArgs(args []string, opts backend.ListOpts) []string {
+	appendBoolFlag(&args, "--empty-description", opts.EmptyDescription)
+	appendBoolFlag(&args, "--no-assignee", opts.NoAssignee)
+	appendBoolFlag(&args, "--no-labels", opts.NoLabels)
+	if opts.Pinned != nil {
+		if *opts.Pinned {
+			args = append(args, "--pinned")
+		} else {
+			args = append(args, "--no-pinned")
+		}
+	}
+	appendBoolFlag(&args, "--include-templates", opts.IncludeTemplates)
+	appendNonEmpty(&args, "--mol-type", opts.MolType)
+	if len(opts.SourceRepos) > 0 {
+		args = append(args, "--source-repos="+strings.Join(opts.SourceRepos, ","))
+	}
+	appendBoolFlag(&args, "--allow-stale", opts.AllowStale)
+	return args
+}
+
+// appendNonEmpty appends --flag value when val is non-empty.
+func appendNonEmpty(args *[]string, flag, val string) {
+	if val != "" {
+		*args = append(*args, flag, val)
+	}
+}
+
+// appendOptInt appends --flag N when val is non-nil.
+func appendOptInt(args *[]string, flag string, val *int) {
+	if val != nil {
+		*args = append(*args, flag, strconv.Itoa(*val))
+	}
+}
+
+// appendBoolFlag appends --flag (no value) when val is true.
+func appendBoolFlag(args *[]string, flag string, val bool) {
+	if val {
+		*args = append(*args, flag)
+	}
 }
 
 func (a *cliBeadsAdapter) Blocked(_ context.Context, _ backend.BlockedOpts) ([]backend.IssueData, error) {
