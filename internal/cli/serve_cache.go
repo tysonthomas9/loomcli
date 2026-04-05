@@ -36,16 +36,27 @@ func (c *cachedValue[T]) startBackground(ctx context.Context, interval time.Dura
 	// The first HTTP request hitting get() will trigger a singleflight collection
 	// if the background hasn't finished yet — this avoids blocking server startup.
 	go func() {
-		// Immediate first collection to warm the cache
-		result := c.collectFn()
-		c.mu.Lock()
-		c.cached = result
-		c.cachedAt = time.Now()
-		if c.inflight {
+		// Helper: run collectFn and update cache atomically.
+		// Uses inflight flag so get() callers wait instead of starting their own collection.
+		refresh := func() {
+			c.mu.Lock()
+			c.inflight = true
+			ch := make(chan struct{})
+			c.waitCh = ch
+			c.mu.Unlock()
+
+			result := c.collectFn()
+
+			c.mu.Lock()
+			c.cached = result
+			c.cachedAt = time.Now()
 			c.inflight = false
-			close(c.waitCh)
+			close(ch)
+			c.mu.Unlock()
 		}
-		c.mu.Unlock()
+
+		// Immediate first collection to warm the cache
+		refresh()
 
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
@@ -54,16 +65,7 @@ func (c *cachedValue[T]) startBackground(ctx context.Context, interval time.Dura
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				result := c.collectFn()
-				c.mu.Lock()
-				c.cached = result
-				c.cachedAt = time.Now()
-				// If anyone is waiting on inflight, signal them
-				if c.inflight {
-					c.inflight = false
-					close(c.waitCh)
-				}
-				c.mu.Unlock()
+				refresh()
 			}
 		}
 	}()
