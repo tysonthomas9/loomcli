@@ -78,6 +78,7 @@ func patchParamsToUpdateArgs(params *PatchIssueParams) *rpc.UpdateArgs {
 		Parent:             params.Parent,
 		DueAt:              params.DueAt,
 		DeferUntil:         params.DeferUntil,
+		AgentState:         params.AgentState,
 	}
 }
 

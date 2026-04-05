@@ -116,6 +116,7 @@ type PatchIssueParams struct {
 	Parent             *string
 	DueAt              *string
 	DeferUntil         *string
+	AgentState         *string
 }
 
 // AddCommentParams holds the parameters for adding a comment.

@@ -52,6 +52,7 @@ type PatchIssueRequest struct {
 	Parent             *string  `json:"parent,omitempty"`
 	DueAt              *string  `json:"due_at,omitempty"`
 	DeferUntil         *string  `json:"defer_until,omitempty"`
+	AgentState         *string  `json:"agent_state,omitempty"`
 }
 
 // PatchIssueResponse wraps the patch response for JSON output.

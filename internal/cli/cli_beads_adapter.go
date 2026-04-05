@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -219,6 +220,9 @@ func (a *cliBeadsAdapter) Create(_ context.Context, _ backend.CreateParams) (*ba
 }
 
 func (a *cliBeadsAdapter) Update(_ context.Context, id string, params backend.UpdateParams) error {
+	if params.AgentState != nil {
+		slog.Warn("cliBeadsAdapter: AgentState not supported via bd update CLI, skipping", "id", id, "value", *params.AgentState)
+	}
 	args := []string{"update", id}
 	if params.Status != nil {
 		args = append(args, "--status", *params.Status)
@@ -431,7 +435,6 @@ func (c *cliIssueJSON) toDetailData() *backend.IssueDetailData {
 	d := &backend.IssueDetailData{
 		IssueData:          c.toIssueData(),
 		Description:        c.Description,
-		Design:             c.Design,
 		AcceptanceCriteria: c.AcceptCrit,
 		Notes:              c.Notes,
 		ExternalRef:        c.ExternalRef,

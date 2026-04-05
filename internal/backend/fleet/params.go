@@ -253,6 +253,7 @@ func updateParamsToPatchRequest(params backend.UpdateParams) map[string]interfac
 	setStrField(req, "parent", params.Parent)
 	setStrField(req, "due_at", params.DueAt)
 	setStrField(req, "defer_until", params.DeferUntil)
+	setStrField(req, "agent_state", params.AgentState)
 	return req
 }
 

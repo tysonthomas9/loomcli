@@ -117,6 +117,13 @@ func (r *PatchIssueRequest) Validate() error {
 		b.add("estimated_minutes", "cannot be negative")
 	}
 
+	// agent_state: if set, must be valid
+	if r.AgentState != nil {
+		if !entity.AgentState(*r.AgentState).IsValid() {
+			b.add("agent_state", "must be one of: idle, spawning, running, working, stuck, done, stopped, dead (or empty to clear)")
+		}
+	}
+
 	validateOptionalTimestamp(&b, "due_at", r.DueAt)
 	validateOptionalTimestamp(&b, "defer_until", r.DeferUntil)
 	validateLabels(&b, r.SetLabels, r.AddLabels, r.RemoveLabels)

@@ -910,3 +910,83 @@ func TestHandleDeleteIssueW_Timeout(t *testing.T) {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusGatewayTimeout)
 	}
 }
+
+// ===========================================================================
+// PatchIssueRequest JSON deserialization — AgentState field threading
+// ===========================================================================
+
+func TestPatchIssueRequest_AgentState_Deserialized(t *testing.T) {
+	body := `{"agent_state":"running"}`
+	var req PatchIssueRequest
+	if err := json.Unmarshal([]byte(body), &req); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if req.AgentState == nil {
+		t.Fatal("expected AgentState to be non-nil")
+	}
+	if *req.AgentState != "running" {
+		t.Errorf("AgentState = %q, want %q", *req.AgentState, "running")
+	}
+}
+
+func TestPatchIssueRequest_AgentState_OmittedWhenAbsent(t *testing.T) {
+	body := `{"title":"Test"}`
+	var req PatchIssueRequest
+	if err := json.Unmarshal([]byte(body), &req); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if req.AgentState != nil {
+		t.Errorf("expected AgentState to be nil when not in JSON, got %q", *req.AgentState)
+	}
+}
+
+func TestHandlePatchIssueW_AgentState_ThreadedToService(t *testing.T) {
+	svc := &mockIssueService{
+		patchIssueFunc: func(ctx context.Context, params service.PatchIssueParams) error {
+			if params.AgentState == nil {
+				t.Fatal("expected AgentState to be non-nil in PatchIssueParams")
+			}
+			if *params.AgentState != "stuck" {
+				t.Errorf("AgentState = %q, want %q", *params.AgentState, "stuck")
+			}
+			return nil
+		},
+	}
+	handler := handlePatchIssue(svc)
+
+	body := `{"agent_state":"stuck"}`
+	req := httptest.NewRequest(http.MethodPatch, "/api/issues/agent-1", strings.NewReader(body))
+	req.SetPathValue("id", "agent-1")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	result := assertJSONResponse(t, w)
+	assertEnvelopeSuccess(t, result)
+}
+
+func TestHandlePatchIssueW_AgentState_NilWhenAbsent(t *testing.T) {
+	svc := &mockIssueService{
+		patchIssueFunc: func(ctx context.Context, params service.PatchIssueParams) error {
+			if params.AgentState != nil {
+				t.Errorf("expected AgentState to be nil when not in request, got %q", *params.AgentState)
+			}
+			return nil
+		},
+	}
+	handler := handlePatchIssue(svc)
+
+	body := `{"title":"No agent state"}`
+	req := httptest.NewRequest(http.MethodPatch, "/api/issues/no-agent", strings.NewReader(body))
+	req.SetPathValue("id", "no-agent")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+}

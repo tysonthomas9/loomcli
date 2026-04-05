@@ -37,6 +37,7 @@ func handlePatchIssue(svc service.IssueService) http.HandlerFunc {
 			Parent:             req.Parent,
 			DueAt:              req.DueAt,
 			DeferUntil:         req.DeferUntil,
+			AgentState:         req.AgentState,
 		}
 
 		if err := svc.PatchIssue(r.Context(), params); err != nil {

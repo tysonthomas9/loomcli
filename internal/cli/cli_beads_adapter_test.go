@@ -1040,3 +1040,63 @@ func TestCliBeadsAdapter_List_AllFields(t *testing.T) {
 	// --no-pinned should NOT be present since Pinned=true.
 	assertNoFlag(t, args, "--no-pinned")
 }
+
+// --- Update with AgentState tests ---
+
+func TestCliBeadsAdapter_Update_AgentState_LogsWarningAndContinues(t *testing.T) {
+	runner := &mockBDRunner{}
+	a := newCliBeadsAdapter(runner, "/tmp/test")
+
+	state := "running"
+	status := "in_progress"
+	err := a.Update(context.Background(), "T-42", backend.UpdateParams{
+		Status:     &status,
+		AgentState: &state,
+	})
+	if err != nil {
+		t.Fatalf("Update() error = %v, expected nil (AgentState should be logged but not cause error)", err)
+	}
+	// Runner should still be called with the other fields.
+	if len(runner.calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(runner.calls))
+	}
+	got := strings.Join(runner.calls[0].Args, " ")
+	if !strings.Contains(got, "--status") {
+		t.Errorf("expected --status in args: %q", got)
+	}
+}
+
+func TestCliBeadsAdapter_Update_AgentState_OnlyField(t *testing.T) {
+	runner := &mockBDRunner{}
+	a := newCliBeadsAdapter(runner, "/tmp/test")
+
+	state := "idle"
+	err := a.Update(context.Background(), "T-43", backend.UpdateParams{
+		AgentState: &state,
+	})
+	if err != nil {
+		t.Fatalf("Update() error = %v, expected nil", err)
+	}
+	// Runner should be called even if AgentState is the only field
+	// (bd update T-43 with no extra flags).
+	if len(runner.calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(runner.calls))
+	}
+}
+
+func TestCliBeadsAdapter_Update_NilAgentState(t *testing.T) {
+	runner := &mockBDRunner{}
+	a := newCliBeadsAdapter(runner, "/tmp/test")
+
+	status := "open"
+	err := a.Update(context.Background(), "T-44", backend.UpdateParams{
+		Status: &status,
+		// AgentState is nil — no warning should be logged
+	})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(runner.calls))
+	}
+}
