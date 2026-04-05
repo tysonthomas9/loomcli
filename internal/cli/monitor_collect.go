@@ -81,9 +81,6 @@ func collectAgentStatus(agentTasks map[string]TaskInfo, branch string) ([]AgentS
 		daemonManaged = loadDaemonManagedAgents(daemonStatePath)
 	}
 
-	var agents []AgentStatus
-	taskIDToAgents := make(map[string][]string) // Track which agents claim which tasks
-
 	// Global defaults for legacy mode; per-worktree values resolved in loop for workspace mode.
 	globalDefaultBranch := GetDefaultBranchForWorktrees(worktrees)
 	githubURL := ""
@@ -91,98 +88,181 @@ func collectAgentStatus(agentTasks map[string]TaskInfo, branch string) ([]AgentS
 		githubURL = getGitHubRemoteURL(worktrees[0].Path)
 	}
 
-	for _, wt := range worktrees {
-		daemonInfo := daemonManaged[wt.Name]
-		agent := AgentStatus{
-			Name:          wt.Name,
-			Branch:        wt.Branch,
-			Workspace:     wt.Workspace,
-			Role:          daemonInfo.Role,
-			Repo:          daemonInfo.Repo,
-			DaemonManaged: daemonInfo.Managed,
-		}
+	// Fan out one goroutine per worktree to collect agent status in parallel.
+	type agentResult struct {
+		index   int
+		agent   AgentStatus
+		taskIDs map[string]string // taskID -> agentName
+	}
 
-		// Check for running agent (lock status)
-		lockStatus := GetLockStatus(wt.Path)
+	resultCh := make(chan agentResult, len(worktrees))
+	for i, wt := range worktrees {
+		go func(idx int, wt WorktreeInfo) {
+			daemonInfo := daemonManaged[wt.Name]
+			agent := AgentStatus{
+				Name:          wt.Name,
+				Branch:        wt.Branch,
+				Workspace:     wt.Workspace,
+				Role:          daemonInfo.Role,
+				Repo:          daemonInfo.Repo,
+				DaemonManaged: daemonInfo.Managed,
+			}
 
-		// Also check lock file directly to get TaskID for conflict detection
-		if lockInfo, running, _ := CheckLock(wt.Path); running && lockInfo != nil && lockInfo.TaskID != "" {
-			taskIDToAgents[lockInfo.TaskID] = append(taskIDToAgents[lockInfo.TaskID], wt.Name)
-		}
+			localTaskIDs := make(map[string]string)
 
-		if lockStatus != "" {
-			// Lock file has status - check if it needs task ID from fallback
-			if strings.Contains(lockStatus, "...") {
-				if task, ok := agentTasks[wt.Name]; ok {
-					// Get actual task status to determine correct state
-					taskStatus := getTaskStatus(task.ID)
-					// Extract duration part (e.g., " (2m8s)")
-					durationIdx := strings.Index(lockStatus, " (")
-					durationPart := ""
-					if durationIdx != -1 {
-						durationPart = lockStatus[durationIdx:]
-					}
-					// Update state based on task status and agent type
-					switch taskStatus {
-					case "needs_review":
-						// Only show "review" for planning agents
-						if strings.HasPrefix(lockStatus, "planning:") {
-							lockStatus = fmt.Sprintf("review: %s%s", task.ID, durationPart)
-						} else {
-							// Implementation agents show "working"
-							lockStatus = fmt.Sprintf("working: %s%s", task.ID, durationPart)
+			// Check for running agent (lock status)
+			lockStatus := GetLockStatus(wt.Path)
+
+			// Also check lock file directly to get TaskID for conflict detection
+			if lockInfo, running, _ := CheckLock(wt.Path); running && lockInfo != nil && lockInfo.TaskID != "" {
+				localTaskIDs[lockInfo.TaskID] = wt.Name
+			}
+
+			if lockStatus != "" {
+				// Lock file has status - check if it needs task ID from fallback
+				if strings.Contains(lockStatus, "...") {
+					if task, ok := agentTasks[wt.Name]; ok {
+						// Get actual task status to determine correct state
+						taskStatus := getTaskStatus(task.ID)
+						// Extract duration part (e.g., " (2m8s)")
+						durationIdx := strings.Index(lockStatus, " (")
+						durationPart := ""
+						if durationIdx != -1 {
+							durationPart = lockStatus[durationIdx:]
 						}
-					case "closed":
-						lockStatus = fmt.Sprintf("done: %s%s", task.ID, durationPart)
-					default:
-						// Keep original state prefix, just replace "..."
-						lockStatus = strings.Replace(lockStatus, "...", task.ID, 1)
+						// Update state based on task status and agent type
+						switch taskStatus {
+						case "needs_review":
+							// Only show "review" for planning agents
+							if strings.HasPrefix(lockStatus, "planning:") {
+								lockStatus = fmt.Sprintf("review: %s%s", task.ID, durationPart)
+							} else {
+								// Implementation agents show "working"
+								lockStatus = fmt.Sprintf("working: %s%s", task.ID, durationPart)
+							}
+						case "closed":
+							lockStatus = fmt.Sprintf("done: %s%s", task.ID, durationPart)
+						default:
+							// Keep original state prefix, just replace "..."
+							lockStatus = strings.Replace(lockStatus, "...", task.ID, 1)
+						}
 					}
 				}
-			}
-			agent.Status = lockStatus
-		} else if task, ok := agentTasks[wt.Name]; ok && task.Status == "in_progress" {
-			// Task still in_progress but no lock - agent died
-			agent.Status = fmt.Sprintf("error: %s", task.ID)
-		} else {
-			// No lock and no in_progress task - check git status
-			// Use getWorktreeStatus to run git status --porcelain once instead of
-			// three separate calls (IsCleanWorkingTree + getUncommittedChangesCount + getWorktreeFileChanges).
-			clean, changes, fileChanges := getWorktreeStatus(wt.Path)
-			if clean {
-				agent.Status = "ready"
-			} else if changes > 0 {
-				agent.Status = fmt.Sprintf("%d changes", changes)
+				agent.Status = lockStatus
+			} else if task, ok := agentTasks[wt.Name]; ok && task.Status == "in_progress" {
+				// Task still in_progress but no lock - agent died
+				agent.Status = fmt.Sprintf("error: %s", task.ID)
 			} else {
-				agent.Status = "dirty"
+				// No lock and no in_progress task - check git status
+				// Try filesystem-level cache first (zero subprocess cost on hit).
+				gitDir, gitDirErr := resolveGitDir(wt.Path)
+				if gitDirErr == nil {
+					if hit, cachedClean, cachedCount, cachedChanges := globalChangeDetector.CheckStatus(gitDir); hit {
+						if cachedClean {
+							agent.Status = "ready"
+						} else if cachedCount > 0 {
+							agent.Status = fmt.Sprintf("%d changes", cachedCount)
+						} else {
+							agent.Status = "dirty"
+						}
+						agent.Changes = cachedChanges
+					} else {
+						clean, changes, fileChanges := getWorktreeStatus(wt.Path)
+						globalChangeDetector.UpdateStatus(gitDir, clean, changes, fileChanges)
+						if clean {
+							agent.Status = "ready"
+						} else if changes > 0 {
+							agent.Status = fmt.Sprintf("%d changes", changes)
+						} else {
+							agent.Status = "dirty"
+						}
+						agent.Changes = fileChanges
+					}
+				} else {
+					// Fallback: resolveGitDir failed, use subprocess directly
+					clean, changes, fileChanges := getWorktreeStatus(wt.Path)
+					if clean {
+						agent.Status = "ready"
+					} else if changes > 0 {
+						agent.Status = fmt.Sprintf("%d changes", changes)
+					} else {
+						agent.Status = "dirty"
+					}
+					agent.Changes = fileChanges
+				}
 			}
-			agent.Changes = fileChanges
-		}
 
-		// Use per-worktree default branch in workspace mode
-		wtDefaultBranch := globalDefaultBranch
-		if wt.Repo != nil {
-			wtDefaultBranch = DefaultBranchForWorktree(wt)
-		}
-
-		// Check ahead/behind integration branch
-		agent.Ahead, agent.Behind = getWorktreeGitSyncStatus(wt.Path, wtDefaultBranch, branch)
-
-		// Populate commit details when ahead > 0
-		if agent.Ahead > 0 {
-			wtGithubURL := githubURL
+			// Use per-worktree default branch in workspace mode
+			wtDefaultBranch := globalDefaultBranch
 			if wt.Repo != nil {
-				wtGithubURL = getGitHubRemoteURL(wt.Path)
+				wtDefaultBranch = DefaultBranchForWorktree(wt)
 			}
-			agent.Commits = getWorktreeCommitDetails(wt.Path, wtDefaultBranch, 10, wtGithubURL, branch)
-		}
 
-		// Populate file changes for agents with lock status (not already set by getWorktreeStatus)
-		if agent.Changes == nil && agent.Status != "ready" {
-			agent.Changes = getWorktreeFileChanges(wt.Path)
-		}
+			// Check ahead/behind integration branch using cache when possible.
+			aheadBehindBranch := branch
+			if aheadBehindBranch == "" {
+				aheadBehindBranch = wtDefaultBranch
+			}
+			if abGitDir, abErr := resolveGitDir(wt.Path); abErr == nil {
+				abCommonDir, abCErr := resolveCommonGitDir(abGitDir)
+				if abCErr == nil {
+					if hit, cachedAhead, cachedBehind := globalChangeDetector.CheckAheadBehind(abCommonDir, agent.Branch, aheadBehindBranch); hit {
+						agent.Ahead, agent.Behind = cachedAhead, cachedBehind
+					} else {
+						agent.Ahead, agent.Behind = getWorktreeGitSyncStatus(wt.Path, wtDefaultBranch, branch)
+						globalChangeDetector.UpdateAheadBehind(abCommonDir, agent.Branch, aheadBehindBranch, agent.Ahead, agent.Behind)
+					}
+				} else {
+					agent.Ahead, agent.Behind = getWorktreeGitSyncStatus(wt.Path, wtDefaultBranch, branch)
+				}
+			} else {
+				agent.Ahead, agent.Behind = getWorktreeGitSyncStatus(wt.Path, wtDefaultBranch, branch)
+			}
 
-		agents = append(agents, agent)
+			// Populate commit details when ahead > 0, using cache when possible.
+			if agent.Ahead > 0 {
+				wtGithubURL := githubURL
+				if wt.Repo != nil {
+					wtGithubURL = getGitHubRemoteURL(wt.Path)
+				}
+				var commitCacheHit bool
+				if cGitDir, cErr := resolveGitDir(wt.Path); cErr == nil {
+					if cCommonDir, ccErr := resolveCommonGitDir(cGitDir); ccErr == nil {
+						if headSHA, shaErr := ReadRefSHA(cCommonDir, "refs/heads/"+agent.Branch); shaErr == nil {
+							if commits, ok := globalCommitCache.Get(headSHA); ok {
+								agent.Commits = commits
+								commitCacheHit = true
+							} else {
+								agent.Commits = getWorktreeCommitDetails(wt.Path, wtDefaultBranch, 10, wtGithubURL, branch)
+								globalCommitCache.Set(headSHA, agent.Commits)
+								commitCacheHit = true
+							}
+						}
+					}
+				}
+				if !commitCacheHit {
+					agent.Commits = getWorktreeCommitDetails(wt.Path, wtDefaultBranch, 10, wtGithubURL, branch)
+				}
+			}
+
+			// Populate file changes for agents with lock status (not already set by getWorktreeStatus)
+			if agent.Changes == nil && agent.Status != "ready" {
+				agent.Changes = getWorktreeFileChanges(wt.Path)
+			}
+
+			resultCh <- agentResult{index: idx, agent: agent, taskIDs: localTaskIDs}
+		}(i, wt)
+	}
+
+	// Collect results preserving original worktree ordering.
+	agents := make([]AgentStatus, len(worktrees))
+	taskIDToAgents := make(map[string][]string)
+	for range worktrees {
+		r := <-resultCh
+		agents[r.index] = r.agent
+		for taskID, agentName := range r.taskIDs {
+			taskIDToAgents[taskID] = append(taskIDToAgents[taskID], agentName)
+		}
 	}
 
 	return agents, taskIDToAgents
