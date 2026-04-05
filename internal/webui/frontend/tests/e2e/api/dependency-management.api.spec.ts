@@ -5,7 +5,7 @@
  * Tests dependency CRUD operations used by GraphView and IssueDetailPanel Dependencies section.
  */
 
-import { test, expect, isIntegrationEnabled, generateTestId } from './api-client'
+import { test, expect, isIntegrationEnabled, generateTestId, resolvedApiBaseURL } from './api-client'
 
 // Skip if integration tests not enabled
 test.skip(!isIntegrationEnabled, 'API E2E tests require RUN_INTEGRATION_TESTS=1')
@@ -399,9 +399,10 @@ test.describe('Dependency Management', () => {
       })
 
       // Try to add circular dependency: A depends on B (should fail)
-      // Use raw request to check status code
+      // Use raw request to check status code — must use workspace-scoped route
+      const wsPrefix = await api.discoverWorkspace()
       const response = await request.post(
-        `/api/issues/${issueA.id}/dependencies`,
+        `${resolvedApiBaseURL}${wsPrefix}/issues/${issueA.id}/dependencies`,
         {
           data: {
             depends_on_id: issueB.id,

@@ -5,7 +5,7 @@
  * Tests issue CRUD and status transitions used by SwimLaneBoard and IssueDetailPanel.
  */
 
-import { test, expect, isIntegrationEnabled, generateTestId } from './api-client'
+import { test, expect, isIntegrationEnabled, generateTestId, resolvedApiBaseURL } from './api-client'
 
 // Skip if integration tests not enabled
 test.skip(!isIntegrationEnabled, 'API E2E tests require RUN_INTEGRATION_TESTS=1')
@@ -273,9 +273,10 @@ test.describe('Issue Lifecycle', () => {
   })
 
   test.describe('Validation Errors', () => {
-    test('reject: missing title returns 400', async ({ request }) => {
-      // Attempt to create issue without title using raw request
-      const response = await request.post('/api/issues', {
+    test('reject: missing title returns 400', async ({ api, request }) => {
+      // Attempt to create issue without title using raw request — must use workspace-scoped route
+      const wsPrefix = await api.discoverWorkspace()
+      const response = await request.post(`${resolvedApiBaseURL}${wsPrefix}/issues`, {
         data: {
           title: '', // Empty title
           issue_type: 'task',
@@ -299,8 +300,9 @@ test.describe('Issue Lifecycle', () => {
       })
       createdIssueIds.push(created.id)
 
-      // Try to update with invalid status using raw request
-      const response = await request.patch(`/api/issues/${created.id}`, {
+      // Try to update with invalid status using raw request — must use workspace-scoped route
+      const wsPrefix = await api.discoverWorkspace()
+      const response = await request.patch(`${resolvedApiBaseURL}${wsPrefix}/issues/${created.id}`, {
         data: {
           status: 'invalid_status',
         },
