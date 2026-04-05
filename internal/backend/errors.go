@@ -5,6 +5,12 @@ import (
 	"fmt"
 )
 
+// ErrFilterNotSupported is a sentinel error indicating that a backend does not
+// support one or more requested filter fields. Callers check with
+// errors.Is(err, ErrFilterNotSupported). The wrapping error message lists the
+// specific unsupported field names.
+var ErrFilterNotSupported = errors.New("filter not supported by backend")
+
 // ErrorKind categorizes backend-layer errors into domain-level failure modes.
 // The service layer maps these to service.ErrorKind for HTTP status mapping.
 type ErrorKind string

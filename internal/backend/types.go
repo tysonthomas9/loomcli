@@ -153,64 +153,66 @@ type MutationData struct {
 // ---------------------------------------------------------------------------
 
 // ListOpts configures the List query. Zero-value fields mean "no filter".
+// Fields marked "fleet-db: unsupported" are not handled by the fleet-db
+// server; FleetBackend.List returns ErrFilterNotSupported if they are set.
 type ListOpts struct {
 	// Basic filters.
 	Status    string   `json:"status,omitempty"`
-	Priority  *int     `json:"priority,omitempty"`
+	Priority  *int     `json:"priority,omitempty"` // fleet-db: unsupported (fleet-qx9c)
 	IssueType string   `json:"issue_type,omitempty"`
 	Assignee  string   `json:"assignee,omitempty"`
 	Labels    []string `json:"labels,omitempty"`
-	LabelsAny []string `json:"labels_any,omitempty"`
-	IDs       []string `json:"ids,omitempty"`
+	LabelsAny []string `json:"labels_any,omitempty"` // fleet-db: unsupported (fleet-qx9c)
+	IDs       []string `json:"ids,omitempty"`        // fleet-db: unsupported (fleet-qx9c)
 	ParentID  string   `json:"parent_id,omitempty"`
 	Limit     int      `json:"limit,omitempty"`
 
 	// Full-text search.
-	Query               string `json:"query,omitempty"`
-	TitleContains       string `json:"title_contains,omitempty"`
-	DescriptionContains string `json:"description_contains,omitempty"`
-	NotesContains       string `json:"notes_contains,omitempty"`
+	Query               string `json:"query,omitempty"`                // fleet-db: unsupported (fleet-qx9c)
+	TitleContains       string `json:"title_contains,omitempty"`       // fleet-db: unsupported (fleet-qx9c)
+	DescriptionContains string `json:"description_contains,omitempty"` // fleet-db: unsupported (fleet-qx9c)
+	NotesContains       string `json:"notes_contains,omitempty"`       // fleet-db: unsupported (fleet-qx9c)
 
 	// Date range filters (ISO 8601 strings).
-	CreatedAfter  string `json:"created_after,omitempty"`
-	CreatedBefore string `json:"created_before,omitempty"`
+	CreatedAfter  string `json:"created_after,omitempty"`  // fleet-db: unsupported (fleet-qx9c)
+	CreatedBefore string `json:"created_before,omitempty"` // fleet-db: unsupported (fleet-qx9c)
 	UpdatedAfter  string `json:"updated_after,omitempty"`
 	UpdatedBefore string `json:"updated_before,omitempty"`
-	ClosedAfter   string `json:"closed_after,omitempty"`
-	ClosedBefore  string `json:"closed_before,omitempty"`
+	ClosedAfter   string `json:"closed_after,omitempty"`  // fleet-db: unsupported (fleet-qx9c)
+	ClosedBefore  string `json:"closed_before,omitempty"` // fleet-db: unsupported (fleet-qx9c)
 
 	// Empty/null checks.
-	EmptyDescription bool `json:"empty_description,omitempty"`
-	NoAssignee       bool `json:"no_assignee,omitempty"`
-	NoLabels         bool `json:"no_labels,omitempty"`
+	EmptyDescription bool `json:"empty_description,omitempty"` // fleet-db: unsupported (fleet-qx9c)
+	NoAssignee       bool `json:"no_assignee,omitempty"`       // fleet-db: unsupported (fleet-qx9c)
+	NoLabels         bool `json:"no_labels,omitempty"`         // fleet-db: unsupported (fleet-qx9c)
 
 	// Priority range.
-	PriorityMin *int `json:"priority_min,omitempty"`
-	PriorityMax *int `json:"priority_max,omitempty"`
+	PriorityMin *int `json:"priority_min,omitempty"` // fleet-db: unsupported (fleet-qx9c)
+	PriorityMax *int `json:"priority_max,omitempty"` // fleet-db: unsupported (fleet-qx9c)
 
 	// Special filters.
-	Pinned           *bool  `json:"pinned,omitempty"`
-	Ephemeral        *bool  `json:"ephemeral,omitempty"`
-	IncludeTemplates bool   `json:"include_templates,omitempty"`
-	MolType          string `json:"mol_type,omitempty"`
+	Pinned           *bool  `json:"pinned,omitempty"`            // fleet-db: unsupported (fleet-qx9c)
+	Ephemeral        *bool  `json:"ephemeral,omitempty"`         // fleet-db: unsupported (fleet-qx9c)
+	IncludeTemplates bool   `json:"include_templates,omitempty"` // fleet-db: unsupported (fleet-qx9c)
+	MolType          string `json:"mol_type,omitempty"`          // fleet-db: unsupported (fleet-qx9c)
 
 	// Exclusion filters.
-	ExcludeStatus []string `json:"exclude_status,omitempty"`
-	ExcludeTypes  []string `json:"exclude_types,omitempty"`
+	ExcludeStatus []string `json:"exclude_status,omitempty"` // fleet-db: unsupported (fleet-qx9c)
+	ExcludeTypes  []string `json:"exclude_types,omitempty"`  // fleet-db: unsupported (fleet-qx9c)
 
 	// Scheduling filters.
-	Deferred    bool   `json:"deferred,omitempty"`
-	DeferAfter  string `json:"defer_after,omitempty"`
-	DeferBefore string `json:"defer_before,omitempty"`
-	DueAfter    string `json:"due_after,omitempty"`
-	DueBefore   string `json:"due_before,omitempty"`
-	Overdue     bool   `json:"overdue,omitempty"`
+	Deferred    bool   `json:"deferred,omitempty"`     // fleet-db: unsupported (fleet-qx9c)
+	DeferAfter  string `json:"defer_after,omitempty"`  // fleet-db: unsupported (fleet-qx9c)
+	DeferBefore string `json:"defer_before,omitempty"` // fleet-db: unsupported (fleet-qx9c)
+	DueAfter    string `json:"due_after,omitempty"`    // fleet-db: unsupported (fleet-qx9c)
+	DueBefore   string `json:"due_before,omitempty"`   // fleet-db: unsupported (fleet-qx9c)
+	Overdue     bool   `json:"overdue,omitempty"`      // fleet-db: unsupported (fleet-qx9c)
 
 	// Multi-repo.
 	SourceRepos []string `json:"source_repos,omitempty"`
 
 	// Performance hints.
-	AllowStale bool `json:"allow_stale,omitempty"`
+	AllowStale bool `json:"allow_stale,omitempty"` // fleet-db: unsupported (fleet-qx9c)
 }
 
 // ReadyOpts configures the Ready query (issues with no open blockers).

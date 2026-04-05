@@ -1,11 +1,135 @@
 package fleet
 
 import (
+	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 )
+
+// --- Unsupported filter validation ---
+
+// checkFleetUnsupportedFilters returns an error wrapping
+// backend.ErrFilterNotSupported if any ListOpts fields are set that the
+// fleet-db server cannot evaluate server-side. This prevents returning
+// unfiltered results when the caller expects filters to be applied.
+//
+// Fleet-db supported fields: Status, IssueType, Assignee, Labels,
+// SourceRepos, ParentID, UpdatedAfter, UpdatedBefore, Limit.
+// All others are unsupported (tracked in fleet-qx9c).
+func checkFleetUnsupportedFilters(opts backend.ListOpts) error {
+	var unsupported []string
+	checkUnsupportedCore(&unsupported, opts)
+	checkUnsupportedSearch(&unsupported, opts)
+	checkUnsupportedDates(&unsupported, opts)
+	checkUnsupportedAdvanced(&unsupported, opts)
+	if len(unsupported) > 0 {
+		return fmt.Errorf("fleet-db: unsupported filters [%s]: %w",
+			strings.Join(unsupported, ", "), backend.ErrFilterNotSupported)
+	}
+	return nil
+}
+
+func checkUnsupportedCore(out *[]string, opts backend.ListOpts) {
+	if opts.Priority != nil {
+		*out = append(*out, "Priority")
+	}
+	if len(opts.LabelsAny) > 0 {
+		*out = append(*out, "LabelsAny")
+	}
+	if len(opts.IDs) > 0 {
+		*out = append(*out, "IDs")
+	}
+	if opts.PriorityMin != nil {
+		*out = append(*out, "PriorityMin")
+	}
+	if opts.PriorityMax != nil {
+		*out = append(*out, "PriorityMax")
+	}
+}
+
+func checkUnsupportedSearch(out *[]string, opts backend.ListOpts) {
+	if opts.Query != "" {
+		*out = append(*out, "Query")
+	}
+	if opts.TitleContains != "" {
+		*out = append(*out, "TitleContains")
+	}
+	if opts.DescriptionContains != "" {
+		*out = append(*out, "DescriptionContains")
+	}
+	if opts.NotesContains != "" {
+		*out = append(*out, "NotesContains")
+	}
+}
+
+func checkUnsupportedDates(out *[]string, opts backend.ListOpts) {
+	if opts.CreatedAfter != "" {
+		*out = append(*out, "CreatedAfter")
+	}
+	if opts.CreatedBefore != "" {
+		*out = append(*out, "CreatedBefore")
+	}
+	if opts.ClosedAfter != "" {
+		*out = append(*out, "ClosedAfter")
+	}
+	if opts.ClosedBefore != "" {
+		*out = append(*out, "ClosedBefore")
+	}
+	if opts.DeferAfter != "" {
+		*out = append(*out, "DeferAfter")
+	}
+	if opts.DeferBefore != "" {
+		*out = append(*out, "DeferBefore")
+	}
+	if opts.DueAfter != "" {
+		*out = append(*out, "DueAfter")
+	}
+	if opts.DueBefore != "" {
+		*out = append(*out, "DueBefore")
+	}
+}
+
+func checkUnsupportedAdvanced(out *[]string, opts backend.ListOpts) {
+	if opts.EmptyDescription {
+		*out = append(*out, "EmptyDescription")
+	}
+	if opts.NoAssignee {
+		*out = append(*out, "NoAssignee")
+	}
+	if opts.NoLabels {
+		*out = append(*out, "NoLabels")
+	}
+	if opts.Pinned != nil {
+		*out = append(*out, "Pinned")
+	}
+	if opts.IncludeTemplates {
+		*out = append(*out, "IncludeTemplates")
+	}
+	if opts.Ephemeral != nil {
+		*out = append(*out, "Ephemeral")
+	}
+	if opts.MolType != "" {
+		*out = append(*out, "MolType")
+	}
+	if len(opts.ExcludeStatus) > 0 {
+		*out = append(*out, "ExcludeStatus")
+	}
+	if len(opts.ExcludeTypes) > 0 {
+		*out = append(*out, "ExcludeTypes")
+	}
+	if opts.Deferred {
+		*out = append(*out, "Deferred")
+	}
+	if opts.Overdue {
+		*out = append(*out, "Overdue")
+	}
+	if opts.AllowStale {
+		*out = append(*out, "AllowStale")
+	}
+}
 
 // --- Query parameter builders ---
 

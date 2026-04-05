@@ -357,6 +357,32 @@ func TestNewBackendError_NilCause(t *testing.T) {
 // ErrorKind constants sanity check
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// ErrFilterNotSupported sentinel tests
+// ---------------------------------------------------------------------------
+
+func TestErrFilterNotSupported_Wrapping(t *testing.T) {
+	wrapped := fmt.Errorf("wrapped: %w", ErrFilterNotSupported)
+	if !errors.Is(wrapped, ErrFilterNotSupported) {
+		t.Error("errors.Is should find ErrFilterNotSupported through fmt.Errorf wrapping")
+	}
+}
+
+func TestErrFilterNotSupported_NotMatchOther(t *testing.T) {
+	other := errors.New("some other error")
+	if errors.Is(other, ErrFilterNotSupported) {
+		t.Error("errors.Is should not match unrelated error as ErrFilterNotSupported")
+	}
+}
+
+func TestErrFilterNotSupported_DoubleWrapping(t *testing.T) {
+	inner := fmt.Errorf("inner: %w", ErrFilterNotSupported)
+	outer := fmt.Errorf("outer: %w", inner)
+	if !errors.Is(outer, ErrFilterNotSupported) {
+		t.Error("errors.Is should find ErrFilterNotSupported through double wrapping")
+	}
+}
+
 func TestErrorKindConstants(t *testing.T) {
 	tests := []struct {
 		kind ErrorKind

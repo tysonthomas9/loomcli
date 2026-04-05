@@ -175,6 +175,9 @@ func (b *FleetBackend) Get(ctx context.Context, id string) (*backend.IssueDetail
 }
 
 func (b *FleetBackend) List(ctx context.Context, opts backend.ListOpts) ([]backend.IssueData, error) {
+	if err := checkFleetUnsupportedFilters(opts); err != nil {
+		return nil, err
+	}
 	path := "/issues?" + listOptsToQuery(opts)
 	resp, err := b.exec(ctx, "List", "GET", path, nil)
 	if err != nil {

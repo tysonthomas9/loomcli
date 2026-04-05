@@ -3,6 +3,7 @@ package fleet
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -229,18 +230,164 @@ func TestList_QueryParams(t *testing.T) {
 	})
 	defer ts.Close()
 
-	p := 2
+	// Only fleet-db-supported fields: Status, IssueType, Assignee, Labels,
+	// SourceRepos, ParentID, UpdatedAfter, UpdatedBefore, Limit.
 	_, _ = fb.List(context.Background(), backend.ListOpts{
-		Status:   "open",
-		Priority: &p,
-		Limit:    5,
-		Assignee: "agent-1",
+		Status:       "open",
+		Limit:        5,
+		Assignee:     "agent-1",
+		Labels:       []string{"urgent"},
+		UpdatedAfter: "2026-01-01",
+		SourceRepos:  []string{"repo-a"},
 	})
 
-	for _, want := range []string{"status=open", "priority=2", "limit=5", "assignee=agent-1"} {
+	for _, want := range []string{
+		"status=open", "limit=5", "assignee=agent-1",
+		"labels=urgent", "updated_after=2026-01-01", "source_repos=repo-a",
+	} {
 		if !strings.Contains(gotQuery, want) {
 			t.Errorf("query %q missing %q", gotQuery, want)
 		}
+	}
+}
+
+func TestList_UnsupportedFilter_Single(t *testing.T) {
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("RPC call should not be made when unsupported filter is set")
+		respondOK(w, []*types.IssueWithCounts{})
+	})
+	defer ts.Close()
+
+	p := 2
+	_, err := fb.List(context.Background(), backend.ListOpts{
+		Status:   "open",
+		Priority: &p,
+	})
+	if err == nil {
+		t.Fatal("expected error for unsupported filter Priority")
+	}
+	if !errors.Is(err, backend.ErrFilterNotSupported) {
+		t.Errorf("expected ErrFilterNotSupported, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "Priority") {
+		t.Errorf("error should mention field name, got %q", err.Error())
+	}
+}
+
+func TestList_UnsupportedFilter_Multiple(t *testing.T) {
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("RPC call should not be made when unsupported filters are set")
+		respondOK(w, []*types.IssueWithCounts{})
+	})
+	defer ts.Close()
+
+	p := 1
+	_, err := fb.List(context.Background(), backend.ListOpts{
+		Query:    "test",
+		Priority: &p,
+		Overdue:  true,
+	})
+	if err == nil {
+		t.Fatal("expected error for unsupported filters")
+	}
+	if !errors.Is(err, backend.ErrFilterNotSupported) {
+		t.Errorf("expected ErrFilterNotSupported, got %v", err)
+	}
+	errMsg := err.Error()
+	for _, field := range []string{"Query", "Priority", "Overdue"} {
+		if !strings.Contains(errMsg, field) {
+			t.Errorf("error should mention %q, got %q", field, errMsg)
+		}
+	}
+}
+
+func TestList_EmptyOpts_NoError(t *testing.T) {
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		respondOK(w, []*types.IssueWithCounts{})
+	})
+	defer ts.Close()
+
+	_, err := fb.List(context.Background(), backend.ListOpts{})
+	if err != nil {
+		t.Errorf("empty ListOpts should not error, got %v", err)
+	}
+}
+
+// TestCheckFleetUnsupportedFilters_EachField sets each unsupported ListOpts
+// field individually and verifies that (a) the error wraps
+// ErrFilterNotSupported and (b) the error message contains the field name.
+// This ensures no field is accidentally omitted from checkFleetUnsupportedFilters.
+func TestCheckFleetUnsupportedFilters_EachField(t *testing.T) {
+	intVal := 1
+	boolTrue := true
+
+	tests := []struct {
+		name string
+		opts backend.ListOpts
+	}{
+		{"Query", backend.ListOpts{Query: "search"}},
+		{"Priority", backend.ListOpts{Priority: &intVal}},
+		{"LabelsAny", backend.ListOpts{LabelsAny: []string{"a"}}},
+		{"IDs", backend.ListOpts{IDs: []string{"id-1"}}},
+		{"TitleContains", backend.ListOpts{TitleContains: "title"}},
+		{"DescriptionContains", backend.ListOpts{DescriptionContains: "desc"}},
+		{"NotesContains", backend.ListOpts{NotesContains: "note"}},
+		{"CreatedAfter", backend.ListOpts{CreatedAfter: "2026-01-01"}},
+		{"CreatedBefore", backend.ListOpts{CreatedBefore: "2026-12-31"}},
+		{"ClosedAfter", backend.ListOpts{ClosedAfter: "2026-01-01"}},
+		{"ClosedBefore", backend.ListOpts{ClosedBefore: "2026-12-31"}},
+		{"EmptyDescription", backend.ListOpts{EmptyDescription: true}},
+		{"NoAssignee", backend.ListOpts{NoAssignee: true}},
+		{"NoLabels", backend.ListOpts{NoLabels: true}},
+		{"PriorityMin", backend.ListOpts{PriorityMin: &intVal}},
+		{"PriorityMax", backend.ListOpts{PriorityMax: &intVal}},
+		{"Pinned", backend.ListOpts{Pinned: &boolTrue}},
+		{"IncludeTemplates", backend.ListOpts{IncludeTemplates: true}},
+		{"Ephemeral", backend.ListOpts{Ephemeral: &boolTrue}},
+		{"MolType", backend.ListOpts{MolType: "molecule"}},
+		{"ExcludeStatus", backend.ListOpts{ExcludeStatus: []string{"closed"}}},
+		{"ExcludeTypes", backend.ListOpts{ExcludeTypes: []string{"epic"}}},
+		{"Deferred", backend.ListOpts{Deferred: true}},
+		{"DeferAfter", backend.ListOpts{DeferAfter: "2026-01-01"}},
+		{"DeferBefore", backend.ListOpts{DeferBefore: "2026-12-31"}},
+		{"DueAfter", backend.ListOpts{DueAfter: "2026-01-01"}},
+		{"DueBefore", backend.ListOpts{DueBefore: "2026-12-31"}},
+		{"Overdue", backend.ListOpts{Overdue: true}},
+		{"AllowStale", backend.ListOpts{AllowStale: true}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := checkFleetUnsupportedFilters(tt.opts)
+			if err == nil {
+				t.Fatalf("expected error for unsupported field %s, got nil", tt.name)
+			}
+			if !errors.Is(err, backend.ErrFilterNotSupported) {
+				t.Errorf("expected error wrapping ErrFilterNotSupported, got %v", err)
+			}
+			if !strings.Contains(err.Error(), tt.name) {
+				t.Errorf("error message should contain field name %q, got %q", tt.name, err.Error())
+			}
+		})
+	}
+}
+
+// TestCheckFleetUnsupportedFilters_SupportedFieldsOnly verifies that setting
+// only supported fields does not trigger an error.
+func TestCheckFleetUnsupportedFilters_SupportedFieldsOnly(t *testing.T) {
+	opts := backend.ListOpts{
+		Status:        "open",
+		IssueType:     "task",
+		Assignee:      "agent-1",
+		Labels:        []string{"urgent"},
+		ParentID:      "parent-1",
+		Limit:         50,
+		UpdatedAfter:  "2026-01-01",
+		UpdatedBefore: "2026-12-31",
+		SourceRepos:   []string{"repo-a"},
+	}
+	if err := checkFleetUnsupportedFilters(opts); err != nil {
+		t.Errorf("supported-only opts should not error, got %v", err)
 	}
 }
 
