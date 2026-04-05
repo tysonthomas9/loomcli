@@ -20,8 +20,39 @@ test.skip(!isIntegrationEnabled, 'API E2E tests require RUN_INTEGRATION_TESTS=1'
 // Serial mode: SSE tests create real-time state changes
 test.describe.configure({ mode: 'serial' })
 
-const SSE_ENDPOINT = `${resolvedApiBaseURL}/api/events`
+const BASE_URL = resolvedApiBaseURL
 const SSE_API_KEY = resolveApiKey()
+
+/** Cached workspace ID for building workspace-scoped SSE endpoint URL */
+let cachedWsId: string | null = null
+
+/**
+ * Resolve workspace ID for SSE endpoint URL.
+ * SSE is now workspace-scoped at /api/workspaces/{ws}/events.
+ */
+async function resolveWsId(): Promise<string> {
+  if (cachedWsId) return cachedWsId
+  const url = new URL(`${BASE_URL}/api/workspaces`)
+  const res = await new Promise<string>((resolve, reject) => {
+    http.get(url, (resp) => {
+      let data = ''
+      resp.on('data', (chunk: string) => { data += chunk })
+      resp.on('end', () => resolve(data))
+      resp.on('error', reject)
+    }).on('error', reject)
+  })
+  const body = JSON.parse(res) as { workspaces?: Array<{ id: string; active?: boolean }> }
+  const workspaces = body.workspaces ?? []
+  const active = workspaces.find(w => w.active)
+  const ws = active ?? workspaces[0]
+  if (!ws?.id) throw new Error('No workspace available for SSE E2E tests')
+  cachedWsId = ws.id
+  return cachedWsId
+}
+
+function sseEndpoint(wsId: string): string {
+  return `${BASE_URL}/api/workspaces/${wsId}/events`
+}
 
 /**
  * SSE Event parsed from stream.
@@ -63,12 +94,14 @@ class SSEClient {
    * Connect to SSE endpoint and start collecting events.
    * Resolves once the HTTP response headers are received.
    */
-  async connect(since?: number): Promise<void> {
+  async connect(since?: number, wsId?: string): Promise<void> {
+    const effectiveWsId = wsId ?? await resolveWsId()
+    const endpoint = sseEndpoint(effectiveWsId)
     const params = new URLSearchParams()
     if (since != null) params.set('since', String(since))
     if (SSE_API_KEY) params.set('token', SSE_API_KEY)
     const qs = params.toString()
-    const url = new URL(qs ? `${SSE_ENDPOINT}?${qs}` : SSE_ENDPOINT)
+    const url = new URL(qs ? `${endpoint}?${qs}` : endpoint)
 
     return new Promise<void>((resolve, reject) => {
       this.req = http.get(

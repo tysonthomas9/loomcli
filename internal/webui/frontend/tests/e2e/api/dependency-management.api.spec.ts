@@ -399,9 +399,9 @@ test.describe('Dependency Management', () => {
       })
 
       // Try to add circular dependency: A depends on B (should fail)
-      // Use raw request to check status code
+      // Use raw request to check status code — must use workspace-scoped route
       const response = await request.post(
-        `/api/issues/${issueA.id}/dependencies`,
+        `${api.wsPrefix}/issues/${issueA.id}/dependencies`,
         {
           data: {
             depends_on_id: issueB.id,
@@ -414,9 +414,10 @@ test.describe('Dependency Management', () => {
       expect(response.status()).toBe(409)
 
       const body = await response.json()
-      expect(body.success).toBe(false)
-      // Error message may be "internal server error" (RPC error path) or contain "cycle" (response path)
+      // Error responses may omit `success` field — verify error message is present
       expect(body.error).toBeDefined()
+      // Error message should indicate cycle detection
+      expect(body.error.toLowerCase()).toContain('cycle')
     })
   })
 })

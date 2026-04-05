@@ -74,8 +74,10 @@ async function getWorkspaceId(
 ): Promise<string> {
   if (cachedWorkspaceId) return cachedWorkspaceId;
   const response = await request.get(`${BASE_URL}/api/workspaces`, { headers });
-  const body = (await response.json()) as { data?: { workspaces?: Array<{ id: string }> } };
-  const ws = body.data?.workspaces?.[0];
+  const body = (await response.json()) as { workspaces?: Array<{ id: string; active?: boolean }> };
+  const workspaces = body.workspaces ?? [];
+  const active = workspaces.find(w => w.active);
+  const ws = active ?? workspaces[0];
   if (!ws?.id) throw new Error('No workspace available for E2E tests');
   cachedWorkspaceId = ws.id;
   return cachedWorkspaceId;
@@ -100,7 +102,8 @@ test.describe('Agent Logs and Terminal Transport', () => {
 
     expect(response.status()).toBe(404);
     const body = (await response.json()) as LogContentResponse;
-    expect(body.success).toBe(false);
+    // Error responses may omit `success` field — just verify error is present
+    expect(body.error).toBeDefined();
     expect(body.error?.toLowerCase()).toContain('log file');
   });
 
