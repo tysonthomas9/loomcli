@@ -36,18 +36,33 @@ func (c *cachedValue[T]) startBackground(ctx context.Context, interval time.Dura
 	// The first HTTP request hitting get() will trigger a singleflight collection
 	// if the background hasn't finished yet — this avoids blocking server startup.
 	go func() {
-		// Immediate first collection to warm the cache
-		result := c.collectFn()
-		collectedAt := time.Now()
-		c.mu.Lock()
-		// Don't roll back fresher data written by an in-flight get().
-		// Don't touch inflight/waitCh — those are owned by the get()
-		// collector and double-closing waitCh would panic.
-		if collectedAt.After(c.cachedAt) {
-			c.cached = result
-			c.cachedAt = collectedAt
+		// Helper: run collectFn and update cache atomically. Sets inflight/waitCh
+		// so concurrent get() callers wait instead of starting competing collections.
+		// Uses a local ch per invocation to avoid double-close if a get() collector
+		// is already inflight when refresh() starts.
+		refresh := func() {
+			c.mu.Lock()
+			c.inflight = true
+			ch := make(chan struct{})
+			c.waitCh = ch
+			c.mu.Unlock()
+
+			result := c.collectFn()
+			collectedAt := time.Now()
+
+			c.mu.Lock()
+			// Don't roll back fresher data written by a concurrent get() collector.
+			if collectedAt.After(c.cachedAt) {
+				c.cached = result
+				c.cachedAt = collectedAt
+			}
+			c.inflight = false
+			close(ch)
+			c.mu.Unlock()
 		}
-		c.mu.Unlock()
+
+		// Immediate first collection to warm the cache
+		refresh()
 
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
@@ -56,17 +71,7 @@ func (c *cachedValue[T]) startBackground(ctx context.Context, interval time.Dura
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				result := c.collectFn()
-				collectedAt := time.Now()
-				c.mu.Lock()
-				// Don't roll back fresher data written by an in-flight get().
-				// Don't touch inflight/waitCh — those are owned by the get()
-				// collector and double-closing waitCh would panic.
-				if collectedAt.After(c.cachedAt) {
-					c.cached = result
-					c.cachedAt = collectedAt
-				}
-				c.mu.Unlock()
+				refresh()
 			}
 		}
 	}()
