@@ -135,10 +135,10 @@ test.describe("Daemon error recovery", () => {
     await page.route("**/api/health", (route) => route.abort());
     await page.route("**/events", (route) => route.abort());
 
-    // Dispatch daemon-unavailable event to trigger an immediate health re-check
-    await page.evaluate(() =>
-      window.dispatchEvent(new Event("daemon-unavailable")),
-    );
+    // Route blocking triggers the cascade: SSE EventSource error → reconnect →
+    // token fetch via fetchApi fails → notifyDaemonUnavailable() → health check →
+    // health fails → debounce (2000ms) → overlay appears.
+    // No explicit trigger needed — the natural failure cascade handles it.
 
     // Wait for DaemonUnavailableOverlay to appear
     // Must exceed the 2000ms debounce (useDaemonHealth.ts: UNAVAILABLE_DEBOUNCE_MS = 2000)
@@ -189,7 +189,7 @@ test.describe("Daemon error recovery", () => {
     await page.unroute("**/events");
 
     // Wait for connected state to return
-    // EventSource auto-reconnects within retry interval (usePollingWithBackoff: initialDelay = 5s)
+    // EventSource auto-reconnects within retry interval (BeadsSSEClient: initialReconnectDelay = 1s, exponential backoff)
     await expect(
       page.locator('[role="status"][data-state="connected"]'),
     ).toBeVisible({ timeout: 15_000 });
@@ -205,10 +205,10 @@ test.describe("Daemon error recovery", () => {
     await page.route("**/api/health", (route) => route.abort());
     await page.route("**/events", (route) => route.abort());
 
-    // Dispatch daemon-unavailable event to trigger health re-check
-    await page.evaluate(() =>
-      window.dispatchEvent(new Event("daemon-unavailable")),
-    );
+    // Route blocking triggers the cascade: SSE EventSource error → reconnect →
+    // token fetch via fetchApi fails → notifyDaemonUnavailable() → health check →
+    // health fails → debounce (2000ms) → overlay appears.
+    // No explicit trigger needed — the natural failure cascade handles it.
 
     // Wait for overlay to appear (must wait >2000ms debounce)
     const overlay = page.locator('[aria-labelledby="daemon-overlay-title"]');
@@ -259,10 +259,10 @@ test.describe("Daemon error recovery", () => {
     await page.route("**/api/health", (route) => route.abort());
     await page.route("**/events", (route) => route.abort());
 
-    // Dispatch daemon-unavailable event
-    await page.evaluate(() =>
-      window.dispatchEvent(new Event("daemon-unavailable")),
-    );
+    // Route blocking triggers the cascade: SSE EventSource error → reconnect →
+    // token fetch via fetchApi fails → notifyDaemonUnavailable() → health check →
+    // health fails → debounce (2000ms) → overlay appears.
+    // No explicit trigger needed — the natural failure cascade handles it.
 
     // Wait for overlay to appear (>2000ms debounce)
     const overlay = page.locator('[aria-labelledby="daemon-overlay-title"]');
@@ -340,10 +340,10 @@ test.describe("Daemon error recovery", () => {
     const response = await request.get("/api/health");
     expect(response.ok()).toBe(true);
 
-    // Dispatch daemon-unavailable event
-    await page.evaluate(() =>
-      window.dispatchEvent(new Event("daemon-unavailable")),
-    );
+    // Route blocking triggers the cascade: SSE EventSource error → reconnect →
+    // token fetch via fetchApi fails → notifyDaemonUnavailable() → health check →
+    // health fails → debounce (2000ms) → overlay appears.
+    // No explicit trigger needed — the natural failure cascade handles it.
 
     // Wait for overlay to appear on the page (>2000ms debounce)
     const overlay = page.locator('[aria-labelledby="daemon-overlay-title"]');
