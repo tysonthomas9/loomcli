@@ -4,11 +4,14 @@
  * Tracks connection state to distinguish never-connected vs lost-connection.
  */
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 
 import { fetchWorkspaceApi } from "@/api/workspace";
 import type { WorkspaceData, RepoInfo } from "@/api/workspace";
 import { calculateBackoffDelay } from "@/utils/reconnectBackoff";
+
+// Stable empty array — avoids new [] reference on every render when workspace is null.
+const EMPTY_REPOS: RepoInfo[] = [];
 
 /** Connection state for workspace data fetching. */
 export type WorkspaceConnectionState =
@@ -51,7 +54,17 @@ const BACKOFF_CONFIG = {
  * backoff on failure. Preserves stale data on lost-connection.
  */
 export function useWorkspaceRepos(): UseWorkspaceReposReturn {
-  const [workspace, setWorkspace] = useState<WorkspaceData | null>(null);
+  const [workspace, setWorkspaceRaw] = useState<WorkspaceData | null>(null);
+
+  // Only commit a new workspace reference when content has actually changed.
+  const setWorkspace = useCallback((data: WorkspaceData | null) => {
+    setWorkspaceRaw((prev) => {
+      if (prev === null && data === null) return prev;
+      if (prev === null || data === null) return data;
+      if (JSON.stringify(prev) === JSON.stringify(data)) return prev;
+      return data;
+    });
+  }, []);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [connectionState, setConnectionState] =
@@ -190,15 +203,30 @@ export function useWorkspaceRepos(): UseWorkspaceReposReturn {
     };
   }, [clearTimers]);
 
-  return {
-    workspace,
-    repos: workspace?.repos ?? [],
-    isLoading,
-    error,
-    refetch: fetchData,
-    connectionState,
-    retryCountdown,
-    retryNow,
-    hasEverConnected,
-  };
+  const repos = workspace?.repos ?? EMPTY_REPOS;
+
+  return useMemo(
+    () => ({
+      workspace,
+      repos,
+      isLoading,
+      error,
+      refetch: fetchData,
+      connectionState,
+      retryCountdown,
+      retryNow,
+      hasEverConnected,
+    }),
+    [
+      workspace,
+      repos,
+      isLoading,
+      error,
+      fetchData,
+      connectionState,
+      retryCountdown,
+      retryNow,
+      hasEverConnected,
+    ],
+  );
 }

@@ -210,12 +210,6 @@ export function WorkspaceProvider({
     }
   }, [workspaceResult.workspace]);
 
-  // Stable key for repo list — avoids re-running cleanup on every poll tick
-  const repoNamesKey = useMemo(
-    () => workspaceResult.repos.map((r) => r.name).join(","),
-    [workspaceResult.repos],
-  );
-
   // Validate selected repos against actual repo list — discard stale entries
   useEffect(() => {
     if (workspaceResult.repos.length === 0) return;
@@ -240,8 +234,10 @@ export function WorkspaceProvider({
       wsSet(workspaceId, SK_SELECTED_REPOS, JSON.stringify([...cleaned]));
       return cleaned;
     });
+    // workspaceResult.repos is stable (equality-checked upstream), so this
+    // only re-runs when the actual repo list changes, not on every poll.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [repoNamesKey]);
+  }, [workspaceResult.repos]);
 
   // Sync default workspace from server response
   useEffect(() => {
@@ -336,15 +332,11 @@ export function WorkspaceProvider({
   );
 
   // Derived: sourceReposFilter for API filtering.
-  // Use string key for stability — avoids new array reference when repo names
-  // haven't changed (prevents refetch identity churn in useIssues).
-  const activeRepoNamesKey = activeRepoNames.join(",");
+  // Stable because activeRepoNames is stable (upstream workspace data is equality-checked).
   const sourceReposFilter = useMemo(() => {
     if (isAllSelected) return undefined;
-    // Empty string would split to [""], not [] — guard explicitly.
-    return activeRepoNamesKey === "" ? [] : activeRepoNamesKey.split(",");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAllSelected, activeRepoNamesKey]);
+    return activeRepoNames;
+  }, [isAllSelected, activeRepoNames]);
 
   const isMultiRepo = useMemo(
     () => workspaceResult.repos.length >= 1,

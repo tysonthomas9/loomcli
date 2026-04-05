@@ -169,6 +169,9 @@ export function WorkspaceTree({
   const agentStore = useAgentStoreInstance();
   const fleetAgents = useStore(agentStore, (s) => s.agents);
   const contextAgentTasks = useStore(agentStore, (s) => s.agentTasks);
+
+  // Derive repo names — stable because useWorkspaceRepos returns a stable repos ref.
+  const repoNames = useMemo(() => repos.map((r) => r.name), [repos]);
   const { showToast } = useToast();
 
   // Re-read scoped state when workspace changes (SPA navigation)
@@ -879,7 +882,7 @@ export function WorkspaceTree({
                 <EpicTaskTree
                   workspaceName={workspace.name}
                   activeFilter={activeFilter}
-                  sourceRepos={repos.map((r) => r.name)}
+                  sourceRepos={repoNames}
                   onTalkToLead={onTalkToLead}
                   onSelect={onTreeSelect}
                   onTaskTerminalOpen={onTaskTerminalOpen}
