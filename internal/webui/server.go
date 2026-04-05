@@ -37,7 +37,8 @@ type Server struct {
 	corsConfig middleware.CORSConfig
 
 	// HTTP routing
-	mux *http.ServeMux
+	mux       *http.ServeMux
+	wsModules []Module // workspace-scoped route modules (registered on wsMux)
 
 	// Connection pools
 	pool      daemon.Pool // may be nil if daemon unavailable at startup

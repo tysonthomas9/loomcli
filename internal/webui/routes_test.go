@@ -28,6 +28,7 @@ func setupTestRoutes(t *testing.T, app *Server) {
 	t.Helper()
 	app.mux = http.NewServeMux()
 	app.buildHandlers()
+	app.buildModules()
 	app.registerRoutes()
 	t.Cleanup(func() {
 		if app.clientErrLimiter != nil {

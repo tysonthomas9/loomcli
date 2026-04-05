@@ -458,6 +458,7 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 	app.sessSvc = NewSessionService(config.SessionsStore, app.sessionHistoryStore)
 
 	app.buildHandlers()
+	app.buildModules()
 
 	// Create mux and register all routes.
 	app.mux = http.NewServeMux()
