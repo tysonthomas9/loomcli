@@ -149,6 +149,15 @@ func (app *Server) buildHandlers() {
 // It blocks until the context is canceled, then performs graceful shutdown.
 // Returns the actual port used (which may differ from config.Port if it was in use).
 func StartServer(ctx context.Context, config webui.ServerConfig) error {
+	if config.SentryDSN != "" {
+		base := config.Logger
+		if base == nil {
+			base = slog.Default()
+		}
+		config.Logger = webui.InitSentry(base, config.SentryDSN, "")
+		slog.SetDefault(config.Logger)
+		defer webui.FlushSentry(2 * time.Second)
+	}
 	app, err := NewServer(ctx, config)
 	if err != nil {
 		return err
@@ -209,9 +218,13 @@ func (app *Server) run(ctx context.Context) error { //nolint:funlen // server li
 		authMW = func(next http.Handler) http.Handler { return next }
 	}
 	rl, rateLimitMW := middleware.RateLimit(middleware.DefaultRateLimitConfig())
+	// Prometheus HTTP metrics: outer wraps the chain to record duration+status;
+	// routeCapture must run innermost (after mux routes) to read r.Pattern.
+	metricsOuter, routeCapture := webui.PromMetricsMiddleware()
 	chain := middleware.Chain(
 		middleware.Recover(app.config.Logger),
 		middleware.RequestLog(app.config.Logger),
+		middleware.Middleware(metricsOuter),
 		rateLimitMW,
 		middleware.SecurityHeaders(middleware.SecurityConfig{
 			HSTSEnabled:   app.config.HSTSEnabled,
@@ -219,6 +232,7 @@ func (app *Server) run(ctx context.Context) error { //nolint:funlen // server li
 		}),
 		authMW,
 		middleware.CORS(app.corsConfig),
+		middleware.Middleware(routeCapture),
 	)
 	var handler http.Handler
 	if os.Getenv("LOOM_DISABLE_H2C") == "1" {

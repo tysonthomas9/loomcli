@@ -67,7 +67,10 @@ func (app *Server) registerDaemonRoutes(h *handlermux.Handlers) {
 // restrictions that block SameSite cookies over HTTP.
 func (app *Server) registerAuthProxy() {
 	if proxy := webui.NewAuthProxy(app.config.ExtAuthURL, logger); proxy != nil {
-		app.mux.Handle("/api/auth/", proxy)
+		// Wrap with metrics route capture so prefix-mounted proxy requests
+		// show the actual proxied path (e.g., /api/auth/sign-in/email) instead
+		// of the lumped /api/auth/ prefix bucket.
+		app.mux.Handle("/api/auth/", webui.PromRouteCaptureByPath(proxy))
 	}
 }
 
@@ -108,8 +111,17 @@ func (app *Server) registerMonitorHandlers() {
 	if mh.Usage != nil {
 		app.mux.HandleFunc("GET /api/monitor/usage", mh.Usage)
 	}
+	// /metrics serves both loom-specific monitor metrics and the auto-registered
+	// Prometheus metrics (loom_http_requests_total, loom_http_request_duration_seconds).
+	// Both write text/plain Prometheus format and can be concatenated for scraping.
+	promHandler := webui.PromHandler()
 	if mh.Metrics != nil {
-		app.mux.HandleFunc("GET /metrics", mh.Metrics)
+		app.mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, r *http.Request) {
+			mh.Metrics(w, r)
+			promHandler.ServeHTTP(w, r)
+		})
+	} else {
+		app.mux.Handle("GET /metrics", promHandler)
 	}
 	if mh.ObservabilityMetrics != nil {
 		app.mux.HandleFunc("GET /api/observability/metrics", mh.ObservabilityMetrics)
@@ -140,5 +152,16 @@ func (app *Server) registerWorkspaceRoutes() {
 	for _, mod := range app.wsModules {
 		mod.Register(wsMux)
 	}
-	app.mux.Handle("/api/workspaces/{ws}/", middleware.Workspace(app.wsExistsFn)(wsMux))
+	// Mount workspace sub-mux with route pattern capture for metrics.
+	// Go's ServeMux sets r.Pattern on an internal request copy, invisible to
+	// the outer metrics middleware. We pre-resolve the pattern via Handler()
+	// (a cheap trie lookup) and write it into the shared promRouteStore so
+	// metrics show granular routes (e.g., /api/workspaces/{ws}/issues) instead
+	// of the lumped prefix bucket.
+	wsHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, pattern := wsMux.Handler(r)
+		webui.SetPromRoutePattern(r.Context(), pattern)
+		wsMux.ServeHTTP(w, r)
+	})
+	app.mux.Handle("/api/workspaces/{ws}/", middleware.Workspace(app.wsExistsFn)(wsHandler))
 }

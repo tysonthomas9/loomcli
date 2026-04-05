@@ -43,6 +43,7 @@ var (
 	serveAuthIssuer        string
 	serveAuthAudience      string
 	serveAuthAllowInsecure bool
+	serveSentryDSN         string
 
 	// usageHandler holds the initialized usage HTTP handler.
 	usageHandler http.HandlerFunc
@@ -138,6 +139,9 @@ func init() {
 	serveCmd.Flags().StringVar(&serveAuthAudience, "auth-audience", defaultAuthAudience, "Expected JWT audience (defaults to \"loom\")")
 
 	serveCmd.Flags().BoolVar(&serveAuthAllowInsecure, "auth-allow-insecure", false, "Allow HTTP for non-loopback --auth-url (INSECURE, for Docker internal networks only)")
+
+	defaultSentryDSN := os.Getenv("LOOM_SENTRY_DSN")
+	serveCmd.Flags().StringVar(&serveSentryDSN, "sentry-dsn", defaultSentryDSN, "Sentry/GlitchTip DSN for error tracking (or LOOM_SENTRY_DSN)")
 
 	cli.RegisterCommand(serveCmd)
 }
@@ -321,6 +325,7 @@ func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimp
 		SessionsStore:        sessStore,
 		NotifyTokenDir:       cli.GetBeadsDir(),
 		Logger:               slog.Default(),
+		SentryDSN:            serveSentryDSN,
 	}
 }
 
