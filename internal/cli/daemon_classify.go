@@ -55,9 +55,15 @@ func (d *Daemon) classifyAgentExit(ap *AgentProcess, exitCode int) {
 }
 
 // handleAgentCheckpoint saves a checkpoint on non-zero exit (before recovery clears the
-// worktree) or clears the checkpoint on successful exit.
+// worktree) or clears the checkpoint on successful exit. For yield exits (exit 0 with
+// yield file present), a yield checkpoint is saved instead of clearing.
 func (d *Daemon) handleAgentCheckpoint(ap *AgentProcess, exitCode int) {
 	if exitCode == 0 {
+		// Check if this was a yield exit — save checkpoint instead of clearing
+		if IsYieldRequested(ap.worktreePath) {
+			d.saveYieldCheckpoint(ap)
+			return
+		}
 		lockDir := ResolveLockDir(ap.worktreePath)
 		if err := ClearCheckpoint(lockDir); err != nil {
 			log.Printf("[daemon] Agent %s: failed to clear checkpoint: %v", ap.entry.Worktree, err)
@@ -98,5 +104,44 @@ func (d *Daemon) saveAgentCheckpoint(ap *AgentProcess, exitCode int) {
 		log.Printf("[daemon] Agent %s: failed to save checkpoint: %v", ap.entry.Worktree, err)
 	} else {
 		log.Printf("[daemon] Agent %s: saved checkpoint for task %s", ap.entry.Worktree, lockInfo.TaskID)
+	}
+}
+
+// saveYieldCheckpoint captures the worktree state when an agent is preempted
+// via yield. Unlike saveAgentCheckpoint (crash path), this sets ErrorClass to
+// "Yielded" and records the yield reason from the yield file.
+func (d *Daemon) saveYieldCheckpoint(ap *AgentProcess) {
+	lockInfo, _, _ := CheckLock(ap.worktreePath)
+	if lockInfo == nil || lockInfo.TaskID == "" {
+		return
+	}
+
+	diff := captureGitDiff(ap.worktreePath, maxDiffBytes)
+
+	yieldReason := "unknown"
+	if req, err := ReadYieldFile(ap.worktreePath); err == nil && req != nil && req.Reason != "" {
+		yieldReason = req.Reason
+	}
+
+	ap.mu.Lock()
+	epicID := ap.assignedEpicID
+	ap.mu.Unlock()
+
+	cp := &Checkpoint{
+		AgentName:   lockInfo.AgentName,
+		TaskID:      lockInfo.TaskID,
+		EpicID:      epicID,
+		GitDiff:     diff,
+		ExitCode:    0,
+		ErrorClass:  "Yielded",
+		YieldReason: yieldReason,
+		Timestamp:   time.Now(),
+	}
+	lockDir := ResolveLockDir(ap.worktreePath)
+	if err := SaveCheckpoint(lockDir, cp); err != nil {
+		log.Printf("[daemon] Agent %s: failed to save yield checkpoint: %v", ap.entry.Worktree, err)
+	} else {
+		log.Printf("[daemon] Agent %s: saved yield checkpoint for task %s (reason: %s)",
+			ap.entry.Worktree, lockInfo.TaskID, yieldReason)
 	}
 }

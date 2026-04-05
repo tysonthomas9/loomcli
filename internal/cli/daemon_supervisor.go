@@ -271,9 +271,15 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 		d.handleAgentCheckpoint(ap, exitCode)
 
 		// 6. Post-mortem recovery (exit-code-aware)
-		if err := d.recoverAgent(ap, exitCode); err != nil {
-			slog.Warn("post-mortem recovery failed", "worktree", ap.entry.Worktree, "err", err)
-			// Non-fatal, continue with restart logic
+		// Skip recovery for yield exits — preserve worktree state (uncommitted changes,
+		// lock file) so the next attempt can continue from where the yielded agent stopped.
+		if IsYieldRequested(ap.worktreePath) {
+			slog.Info("skipping post-mortem recovery for yield exit", "worktree", ap.entry.Worktree)
+		} else {
+			if err := d.recoverAgent(ap, exitCode); err != nil {
+				slog.Warn("post-mortem recovery failed", "worktree", ap.entry.Worktree, "err", err)
+				// Non-fatal, continue with restart logic
+			}
 		}
 
 		// 7. Release concurrency slot so waiting agents can proceed

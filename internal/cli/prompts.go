@@ -314,14 +314,23 @@ func GenerateLeadPrompt() string {
 
 // injectCheckpointContext inserts a "PREVIOUS ATTEMPT CONTEXT" section into the prompt.
 // It places the block before "### Step 1:" if found, otherwise appends to the end.
+// Yield checkpoints (YieldReason non-empty) get trusting "continue" instructions,
+// while crash checkpoints get cautious "review and decide" instructions.
 func injectCheckpointContext(prompt string, cp *Checkpoint) string {
 	var sb strings.Builder
 	sb.WriteString("\n\n## PREVIOUS ATTEMPT CONTEXT\n\n")
-	sb.WriteString(fmt.Sprintf("A previous attempt on task **%s** exited with code %d", cp.TaskID, cp.ExitCode))
-	if cp.ErrorClass != "" {
-		sb.WriteString(fmt.Sprintf(" (error: %s)", cp.ErrorClass))
+
+	if cp.YieldReason != "" {
+		sb.WriteString(fmt.Sprintf("A previous attempt on task **%s** was preempted (yield reason: %s)", cp.TaskID, cp.YieldReason))
+		sb.WriteString(fmt.Sprintf(" at %s.\n\n", cp.Timestamp.Format(time.RFC3339)))
+	} else {
+		sb.WriteString(fmt.Sprintf("A previous attempt on task **%s** exited with code %d", cp.TaskID, cp.ExitCode))
+		if cp.ErrorClass != "" {
+			sb.WriteString(fmt.Sprintf(" (error: %s)", cp.ErrorClass))
+		}
+		sb.WriteString(fmt.Sprintf(" at %s.\n\n", cp.Timestamp.Format(time.RFC3339)))
 	}
-	sb.WriteString(fmt.Sprintf(" at %s.\n\n", cp.Timestamp.Format(time.RFC3339)))
+
 	if cp.GitDiff != "" {
 		sb.WriteString("The previous attempt made these uncommitted changes:\n```diff\n")
 		sb.WriteString(cp.GitDiff)
@@ -329,7 +338,12 @@ func injectCheckpointContext(prompt string, cp *Checkpoint) string {
 	} else {
 		sb.WriteString("The previous attempt made no uncommitted changes.\n\n")
 	}
-	sb.WriteString("**Instructions**: Review the previous changes. If they look correct and complete, continue from where they left off. If they look wrong or incomplete, start fresh. Do NOT blindly re-apply the diff — use it as context to understand what was attempted.\n")
+
+	if cp.YieldReason != "" {
+		sb.WriteString("**Instructions**: The previous agent was interrupted, not crashed. Its changes are likely correct and in-progress. Continue from where it left off. Review the diff to understand what was done, then pick up the next step.\n")
+	} else {
+		sb.WriteString("**Instructions**: Review the previous changes. If they look correct and complete, continue from where they left off. If they look wrong or incomplete, start fresh. Do NOT blindly re-apply the diff — use it as context to understand what was attempted.\n")
+	}
 
 	// Inject before "### Step 1:" if found
 	idx := strings.Index(prompt, "### Step 1:")
