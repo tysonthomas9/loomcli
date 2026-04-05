@@ -201,6 +201,20 @@ func (r *WorkspaceRegistry) hookByName(name string) LifecycleHook {
 	return nil
 }
 
+// ForWorkspace returns the WorkspaceHandle for a registered workspace, or nil
+// if the workspace is not registered. The returned handle is immutable and safe
+// for concurrent use. Callers can safely chain calls on a nil result because
+// WorkspaceHandle methods are nil-receiver safe.
+func (r *WorkspaceRegistry) ForWorkspace(id string) *WorkspaceHandle {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	aw, ok := r.active[id]
+	if !ok {
+		return nil
+	}
+	return aw.handle
+}
+
 // WorkspaceIDs returns the IDs of all currently registered workspaces.
 func (r *WorkspaceRegistry) WorkspaceIDs() []string {
 	r.mu.RLock()

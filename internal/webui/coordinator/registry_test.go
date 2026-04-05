@@ -416,6 +416,162 @@ func TestRegistry_PanicInOnDeregister_ContinuesDeregister(t *testing.T) {
 	assertCalls(t, calls, want)
 }
 
+func TestRegistry_ForWorkspace_RegisteredWorkspace(t *testing.T) {
+	var calls []string
+	sentinel := "pool-sentinel"
+	r := newRegistry(t)
+	r.AddHook(&mockHook{
+		name:  "provider",
+		calls: &calls,
+		provideFn: func(ctx *RegistrationContext) {
+			ctx.Provide(ResourceKeyPool, sentinel)
+		},
+	})
+
+	if err := r.Register("ws-1", "/tmp/ws-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	h := r.ForWorkspace("ws-1")
+	if h == nil {
+		t.Fatal("expected non-nil handle for registered workspace")
+	}
+	if h.ID() != "ws-1" {
+		t.Errorf("ID() = %q, want %q", h.ID(), "ws-1")
+	}
+	if h.Path() != "/tmp/ws-1" {
+		t.Errorf("Path() = %q, want %q", h.Path(), "/tmp/ws-1")
+	}
+	pool, ok := h.Resource(ResourceKeyPool)
+	if !ok {
+		t.Fatal("expected ResourceKeyPool to be provided")
+	}
+	if pool != sentinel {
+		t.Errorf("Resource(ResourceKeyPool) = %v, want %v", pool, sentinel)
+	}
+}
+
+func TestRegistry_ForWorkspace_UnregisteredWorkspace(t *testing.T) {
+	r := newRegistry(t)
+	if h := r.ForWorkspace("nonexistent"); h != nil {
+		t.Fatalf("expected nil for unregistered workspace, got %v", h)
+	}
+}
+
+func TestRegistry_ForWorkspace_AfterDeregister(t *testing.T) {
+	var calls []string
+	r := newRegistry(t)
+	r.AddHook(&mockHook{name: "a", calls: &calls})
+	r.Register("ws-1", "/tmp/ws-1")
+	r.Deregister("ws-1")
+
+	if h := r.ForWorkspace("ws-1"); h != nil {
+		t.Fatalf("expected nil after deregister, got %v", h)
+	}
+}
+
+func TestRegistry_ForWorkspace_EmptyID(t *testing.T) {
+	r := newRegistry(t)
+	if h := r.ForWorkspace(""); h != nil {
+		t.Fatalf("expected nil for empty ID, got %v", h)
+	}
+}
+
+func TestRegistry_ForWorkspace_ConcurrentWithRegister(t *testing.T) {
+	var calls []string
+	r := newRegistry(t)
+	r.AddHook(&mockHook{name: "a", calls: &calls})
+
+	var wg sync.WaitGroup
+	for i := range 10 {
+		id := fmt.Sprintf("ws-%d", i)
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			r.Register(id, "/tmp/"+id)
+		}()
+		go func() {
+			defer wg.Done()
+			r.ForWorkspace(id) // may return nil or valid handle — no panic/race
+		}()
+	}
+	wg.Wait()
+
+	// After all goroutines, all workspaces should be registered.
+	for i := range 10 {
+		id := fmt.Sprintf("ws-%d", i)
+		if h := r.ForWorkspace(id); h == nil {
+			t.Errorf("expected non-nil handle for %q after concurrent registration", id)
+		}
+	}
+}
+
+func TestRegistry_ForWorkspace_NilSafeChaining(t *testing.T) {
+	r := newRegistry(t)
+
+	// ForWorkspace returns nil; chained Resource should not panic.
+	h := r.ForWorkspace("nonexistent")
+	pool, ok := h.Resource(ResourceKeyPool)
+	if ok {
+		t.Error("expected ok=false from nil handle Resource")
+	}
+	if pool != nil {
+		t.Errorf("expected nil from nil handle Resource, got %v", pool)
+	}
+	if h.ID() != "" {
+		t.Errorf("expected empty ID from nil handle, got %q", h.ID())
+	}
+	if h.Path() != "" {
+		t.Errorf("expected empty Path from nil handle, got %q", h.Path())
+	}
+}
+
+func TestRegistry_ForWorkspace_AfterDoubleRegister(t *testing.T) {
+	var calls []string
+	callCount := 0
+	r := newRegistry(t)
+	r.AddHook(&mockHook{
+		name:  "marker",
+		calls: &calls,
+		provideFn: func(ctx *RegistrationContext) {
+			callCount++
+			ctx.Provide("marker", fmt.Sprintf("call-%d", callCount))
+		},
+	})
+
+	r.Register("ws-1", "/tmp/ws-1") // marker = "call-1"
+	r.Register("ws-1", "/tmp/ws-1") // triggers deregister + re-register, marker = "call-2"
+
+	h := r.ForWorkspace("ws-1")
+	if h == nil {
+		t.Fatal("expected non-nil handle after double register")
+	}
+	marker, ok := h.Resource("marker")
+	if !ok {
+		t.Fatal("expected marker resource to be provided")
+	}
+	if marker != "call-2" {
+		t.Errorf("expected marker %q, got %q", "call-2", marker)
+	}
+}
+
+func TestRegistry_ForWorkspace_AfterClose(t *testing.T) {
+	var calls []string
+	r := newRegistry(t)
+	r.AddHook(&mockHook{name: "a", calls: &calls})
+	r.Register("ws-1", "/tmp/ws-1")
+	r.Close()
+
+	// ForWorkspace should still return the handle after Close.
+	h := r.ForWorkspace("ws-1")
+	if h == nil {
+		t.Fatal("expected non-nil handle after Close — existing handles should be accessible")
+	}
+	if h.ID() != "ws-1" {
+		t.Errorf("ID() = %q, want %q", h.ID(), "ws-1")
+	}
+}
+
 func assertCalls(t *testing.T, got, want []string) {
 	t.Helper()
 	if len(got) != len(want) {
