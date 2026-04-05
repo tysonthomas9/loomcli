@@ -72,9 +72,7 @@ test.describe("Visual Regression - AgentsSidebar", () => {
     await page.goto(agentsSidebarUrl());
     await waitForStableContent(page);
 
-    await expect(page).toHaveScreenshot("agents-sidebar-expanded.png", {
-      maxDiffPixels: 500,
-    });
+    await expect(page).toHaveScreenshot("agents-sidebar-expanded.png");
   });
 
   test("empty no agents", async ({ screenshotPage: page }) => {
@@ -100,9 +98,7 @@ test.describe("Visual Regression - AgentsSidebar", () => {
     await page.goto(agentsSidebarUrl());
     await waitForStableContent(page);
 
-    await expect(page).toHaveScreenshot("agents-sidebar-empty.png", {
-      maxDiffPixels: 500,
-    });
+    await expect(page).toHaveScreenshot("agents-sidebar-empty.png");
   });
 });
 
@@ -156,9 +152,7 @@ test.describe("Visual Regression - WorkspaceTree", () => {
     await page.goto(workspaceTreeUrl());
     await waitForStableContent(page);
 
-    await expect(page).toHaveScreenshot("workspace-tree-single.png", {
-      maxDiffPixels: 500,
-    });
+    await expect(page).toHaveScreenshot("workspace-tree-single.png");
   });
 
   test("multi workspace with agents", async ({ screenshotPage: page }) => {
@@ -224,9 +218,7 @@ test.describe("Visual Regression - WorkspaceTree", () => {
     await page.goto(workspaceTreeUrl());
     await waitForStableContent(page);
 
-    await expect(page).toHaveScreenshot("workspace-tree-multi.png", {
-      maxDiffPixels: 500,
-    });
+    await expect(page).toHaveScreenshot("workspace-tree-multi.png");
   });
 
   test("workspace with health colors", async ({ screenshotPage: page }) => {
@@ -299,8 +291,6 @@ test.describe("Visual Regression - WorkspaceTree", () => {
     await page.goto(workspaceTreeUrl());
     await waitForStableContent(page);
 
-    await expect(page).toHaveScreenshot("workspace-tree-health.png", {
-      maxDiffPixels: 500,
-    });
+    await expect(page).toHaveScreenshot("workspace-tree-health.png");
   });
 });

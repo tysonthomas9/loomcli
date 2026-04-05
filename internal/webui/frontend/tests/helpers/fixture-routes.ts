@@ -79,6 +79,24 @@ export function splitDetailSummaryUrl(opts: {
   return `/test/split-detail-summary?${params}`;
 }
 
+export function issueDetailPanelUrl(opts: {
+  id: string;
+  title: string;
+  status: string;
+  priority: number;
+  issueType?: string;
+  description?: string;
+}): string {
+  const params = new URLSearchParams();
+  params.set("id", opts.id);
+  params.set("title", opts.title);
+  params.set("status", opts.status);
+  params.set("priority", String(opts.priority));
+  if (opts.issueType) params.set("issue_type", opts.issueType);
+  if (opts.description) params.set("description", opts.description);
+  return `/test/issue-detail-panel?${params}`;
+}
+
 /**
  * Seed window.__fixtureData before navigating to a fixture route.
  * Uses addInitScript so the data persists across page.goto() navigations.

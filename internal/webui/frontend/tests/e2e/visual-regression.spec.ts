@@ -58,6 +58,15 @@ async function setupMocks(
   page: import("@playwright/test").Page,
   issues = visualTestIssues
 ) {
+  // Mock app config endpoint (boot process requires this before rendering)
+  await page.route("**/api/config", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ mode: "open" }),
+    })
+  })
+
   // Mock auth token endpoint (required before any API call)
   await page.route("**/api/auth/token", async (route) => {
     await route.fulfill({
@@ -251,10 +260,7 @@ test.describe.skip("Visual Regression - Graph View", () => {
 
     await waitForStableContent(page)
 
-    await expect(page).toHaveScreenshot("graph-default-view.png", {
-      // Higher threshold for canvas rendering differences across platforms
-      maxDiffPixels: 500,
-    })
+    await expect(page).toHaveScreenshot("graph-default-view.png")
   })
 
   test("empty state", async ({ page }) => {
@@ -275,9 +281,7 @@ test.describe.skip("Visual Regression - Graph View", () => {
 
     await waitForStableContent(page)
 
-    await expect(page).toHaveScreenshot("graph-empty.png", {
-      maxDiffPixels: 500,
-    })
+    await expect(page).toHaveScreenshot("graph-empty.png")
   })
 })
 

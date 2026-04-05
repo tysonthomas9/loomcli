@@ -71,7 +71,7 @@ export default defineConfig({
   expect: {
     timeout: 5000,
     toHaveScreenshot: {
-      maxDiffPixels: 100,
+      maxDiffPixelRatio: 0.001,
       threshold: 0.2,
       animations: "disabled",
     },

@@ -24,6 +24,7 @@ import App from "@/App";
 import { WorkspaceLayout } from "@/components/WorkspaceLayout";
 import { RedirectToWorkspace } from "@/components/RedirectToWorkspace";
 import { NotFound } from "@/components/NotFound";
+import { KeyboardShortcutProvider } from "@/hooks";
 
 const devRoutes = import.meta.env.DEV
   ? [
@@ -46,26 +47,32 @@ const devRoutes = import.meta.env.DEV
           return {
             Component: () => {
               const path = window.location.pathname;
+              let fixture: JSX.Element;
               if (path === "/test/issue-detail-panel")
-                return <IssueDetailPanelFixture />;
-              if (path === "/test/error-boundary")
-                return <ErrorTriggerFixture />;
-              if (path === "/test/toast") return <ToastTestFixture />;
-              if (path === "/test/session-name-prompt")
-                return <SessionNamePromptFixture />;
-              if (path === "/test/welcome-banner")
-                return <WelcomeBannerFixture />;
-              if (path === "/test/help-popover") return <HelpPopoverFixture />;
-              if (path === "/test/search-bar") return <SearchBarFixture />;
-              if (path === "/test/agents-sidebar")
-                return <AgentsSidebarFixture />;
-              if (path === "/test/workspace-tree")
-                return <WorkspaceTreeFixture />;
-              if (path === "/test/split-detail-summary")
-                return <SplitDetailSummaryFixture />;
-              if (path === "/test/paste-confirm")
-                return <PasteConfirmDialogFixture />;
-              return <NotFound />;
+                fixture = <IssueDetailPanelFixture />;
+              else if (path === "/test/error-boundary")
+                fixture = <ErrorTriggerFixture />;
+              else if (path === "/test/toast") fixture = <ToastTestFixture />;
+              else if (path === "/test/session-name-prompt")
+                fixture = <SessionNamePromptFixture />;
+              else if (path === "/test/welcome-banner")
+                fixture = <WelcomeBannerFixture />;
+              else if (path === "/test/help-popover")
+                fixture = <HelpPopoverFixture />;
+              else if (path === "/test/search-bar")
+                fixture = <SearchBarFixture />;
+              else if (path === "/test/agents-sidebar")
+                fixture = <AgentsSidebarFixture />;
+              else if (path === "/test/workspace-tree")
+                fixture = <WorkspaceTreeFixture />;
+              else if (path === "/test/split-detail-summary")
+                fixture = <SplitDetailSummaryFixture />;
+              else if (path === "/test/paste-confirm")
+                fixture = <PasteConfirmDialogFixture />;
+              else return <NotFound />;
+              return (
+                <KeyboardShortcutProvider>{fixture}</KeyboardShortcutProvider>
+              );
             },
           };
         },

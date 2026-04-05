@@ -222,6 +222,15 @@ async function setupMocks(
 ) {
   const { loomServerAvailable = true, emptyAgents = false, customAgents, customAgentTasks, customBlockedIssues, emptyStats = false } = options ?? {}
 
+  // Mock app config endpoint (boot process requires this before rendering)
+  await page.route("**/api/config", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ mode: "open" }),
+    })
+  })
+
   // Mock auth token endpoint (required before any API call)
   await page.route("**/api/auth/token", async (route) => {
     await route.fulfill({
@@ -400,9 +409,7 @@ test.describe("Visual Regression - Monitor Dashboard Layout", () => {
         page.getByRole("heading", { name: "Agent Activity" })
       ).toBeVisible()
 
-      await expect(page).toHaveScreenshot("monitor-vertical-stack.png", {
-        maxDiffPixels: 500,
-      })
+      await expect(page).toHaveScreenshot("monitor-vertical-stack.png")
     })
   })
 
@@ -443,9 +450,7 @@ test.describe("Visual Regression - Monitor Dashboard Layout", () => {
         page.getByRole("heading", { name: "Agent Activity" })
       ).toBeVisible()
 
-      await expect(page).toHaveScreenshot("monitor-responsive-1024.png", {
-        maxDiffPixels: 500,
-      })
+      await expect(page).toHaveScreenshot("monitor-responsive-1024.png")
     })
   })
 
@@ -482,9 +487,7 @@ test.describe("Visual Regression - Monitor Dashboard Layout", () => {
       ).toBeVisible()
 
       await expect(page).toHaveScreenshot("monitor-responsive-768.png", {
-        // Full page to capture all stacked panels
         fullPage: true,
-        maxDiffPixels: 500,
       })
     })
   })
@@ -518,8 +521,7 @@ test.describe("Visual Regression - Agent Activity Panel", () => {
     await expect(agentPanel.getByText("need push", { exact: true })).toBeVisible()
 
     await expect(page).toHaveScreenshot(
-      "monitor-agent-activity-multiple-states.png",
-      { maxDiffPixels: 500 }
+      "monitor-agent-activity-multiple-states.png"
     )
   })
 
@@ -543,8 +545,7 @@ test.describe("Visual Regression - Agent Activity Panel", () => {
     await expect(agentPanel.getByText("No agents found")).toBeVisible()
 
     await expect(page).toHaveScreenshot(
-      "monitor-agent-activity-no-agents.png",
-      { maxDiffPixels: 500 }
+      "monitor-agent-activity-no-agents.png"
     )
   })
 
@@ -564,8 +565,7 @@ test.describe("Visual Regression - Agent Activity Panel", () => {
     await expect(agentPanel).toBeVisible()
 
     await expect(page).toHaveScreenshot(
-      "monitor-agent-activity-loom-unavailable.png",
-      { maxDiffPixels: 500 }
+      "monitor-agent-activity-loom-unavailable.png"
     )
   })
 
@@ -604,8 +604,7 @@ test.describe("Visual Regression - Agent Activity Panel", () => {
     ).toBeVisible()
 
     await expect(page).toHaveScreenshot(
-      "monitor-agent-cards-with-tasks.png",
-      { maxDiffPixels: 500 }
+      "monitor-agent-cards-with-tasks.png"
     )
   })
 })
@@ -636,8 +635,7 @@ test.describe("Visual Regression - Project Health Panel", () => {
     await expect(healthPanel.getByText("blocks 3")).toBeVisible()
 
     await expect(healthPanel).toHaveScreenshot(
-      "monitor-health-progress-bottlenecks.png",
-      { maxDiffPixels: 100 }
+      "monitor-health-progress-bottlenecks.png"
     )
   })
 
@@ -665,8 +663,7 @@ test.describe("Visual Regression - Project Health Panel", () => {
     await expect(healthPanel.getByText("No bottlenecks detected")).toBeVisible()
 
     await expect(healthPanel).toHaveScreenshot(
-      "monitor-health-empty.png",
-      { maxDiffPixels: 100 }
+      "monitor-health-empty.png"
     )
   })
 })
@@ -699,8 +696,7 @@ test.describe("Visual Regression - Interactions", () => {
     await page.waitForTimeout(200)
 
     await expect(healthPanel).toHaveScreenshot(
-      "monitor-bottleneck-hover.png",
-      { maxDiffPixels: 100 }
+      "monitor-bottleneck-hover.png"
     )
   })
 
@@ -728,8 +724,7 @@ test.describe("Visual Regression - Interactions", () => {
     await page.waitForTimeout(200)
 
     await expect(agentPanel).toHaveScreenshot(
-      "monitor-agent-card-hover.png",
-      { maxDiffPixels: 100 }
+      "monitor-agent-card-hover.png"
     )
   })
 })
@@ -758,8 +753,7 @@ test.describe("Visual Regression - Degradation Scenarios", () => {
     await expect(dashboard.getByText("No bottlenecks detected")).toBeVisible()
 
     await expect(page).toHaveScreenshot(
-      "monitor-degradation-empty.png",
-      { maxDiffPixels: 500 }
+      "monitor-degradation-empty.png"
     )
   })
 
@@ -822,8 +816,7 @@ test.describe("Visual Regression - Degradation Scenarios", () => {
     await expect(banner.getByRole("button", { name: "Retry connection now" })).toBeVisible()
 
     await expect(page).toHaveScreenshot(
-      "monitor-degradation-stale-banner.png",
-      { maxDiffPixels: 500 }
+      "monitor-degradation-stale-banner.png"
     )
   })
 })

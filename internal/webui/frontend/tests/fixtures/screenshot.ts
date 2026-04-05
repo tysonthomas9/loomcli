@@ -19,6 +19,18 @@ function isApiUrl(url: URL, prefix: string): boolean {
 
 export const test = base.extend<ScreenshotFixtures>({
   screenshotPage: async ({ page }, use) => {
+    // Mock app config endpoint (boot process requires this before rendering)
+    await page.route(
+      (url) => url.pathname === "/api/config",
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ mode: "open" }),
+        });
+      },
+    );
+
     // Mock auth token endpoint
     await page.route(
       (url) => url.pathname === "/api/auth/token",

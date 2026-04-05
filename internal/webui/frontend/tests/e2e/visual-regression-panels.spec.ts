@@ -29,9 +29,7 @@ test.describe("Visual Regression - SplitDetailSummary", () => {
     const designSection = page.getByTestId("design-section");
     await expect(designSection).toBeVisible();
 
-    await expect(page).toHaveScreenshot("split-detail-with-design.png", {
-      maxDiffPixels: 200,
-    });
+    await expect(page).toHaveScreenshot("split-detail-with-design.png");
   });
 
   test("without design single-column", async ({ screenshotPage: page }) => {
@@ -51,9 +49,7 @@ test.describe("Visual Regression - SplitDetailSummary", () => {
     const designSection = page.getByTestId("design-section");
     await expect(designSection).not.toBeVisible();
 
-    await expect(page).toHaveScreenshot("split-detail-no-design.png", {
-      maxDiffPixels: 200,
-    });
+    await expect(page).toHaveScreenshot("split-detail-no-design.png");
   });
 
   test("p0 priority badge", async ({ screenshotPage: page }) => {
@@ -69,8 +65,6 @@ test.describe("Visual Regression - SplitDetailSummary", () => {
     );
     await waitForStableContent(page);
 
-    await expect(page).toHaveScreenshot("split-detail-p0-badge.png", {
-      maxDiffPixels: 200,
-    });
+    await expect(page).toHaveScreenshot("split-detail-p0-badge.png");
   });
 });
