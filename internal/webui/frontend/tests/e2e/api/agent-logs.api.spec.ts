@@ -74,8 +74,8 @@ async function getWorkspaceId(
 ): Promise<string> {
   if (cachedWorkspaceId) return cachedWorkspaceId;
   const response = await request.get(`${BASE_URL}/api/workspaces`, { headers });
-  const body = (await response.json()) as { data?: { workspaces?: Array<{ id: string }> } };
-  const ws = body.data?.workspaces?.[0];
+  const body = (await response.json()) as { workspaces?: Array<{ id: string }> };
+  const ws = body.workspaces?.[0];
   if (!ws?.id) throw new Error('No workspace available for E2E tests');
   cachedWorkspaceId = ws.id;
   return cachedWorkspaceId;

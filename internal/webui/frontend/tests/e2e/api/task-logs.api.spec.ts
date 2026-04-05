@@ -6,7 +6,7 @@
  * - GET /api/tasks/{id}/logs/{phase} - Snapshot log content
  */
 
-import { test, expect, isIntegrationEnabled, generateTestId } from './api-client'
+import { test, expect, isIntegrationEnabled, generateTestId, resolvedApiBaseURL } from './api-client'
 
 // Skip if integration tests not enabled
 test.skip(!isIntegrationEnabled, 'API E2E tests require RUN_INTEGRATION_TESTS=1')
@@ -28,13 +28,26 @@ interface LogContentResponse {
   error?: string
 }
 
+/** Discover workspace ID for workspace-scoped routes */
+let cachedWsPrefix = ''
+async function wsPrefix(request: import('@playwright/test').APIRequestContext): Promise<string> {
+  if (cachedWsPrefix) return cachedWsPrefix
+  const response = await request.get(`${resolvedApiBaseURL}/api/workspaces`)
+  const body = (await response.json()) as { workspaces?: Array<{ id: string }> }
+  const ws = body.workspaces?.[0]
+  if (!ws?.id) throw new Error('No workspace available for E2E tests')
+  cachedWsPrefix = `${resolvedApiBaseURL}/api/workspaces/${ws.id}`
+  return cachedWsPrefix
+}
+
 test.describe('Task Logs API', () => {
   const testTaskId = 'bd-test-task-logs'
   const invalidTaskId = '../../../etc/passwd'
 
   test.describe('Phase Listing', () => {
     test('GET /api/tasks/:id/logs lists available phases', async ({ request }) => {
-      const response = await request.get(`/api/tasks/${testTaskId}/logs`)
+      const prefix = await wsPrefix(request)
+      const response = await request.get(`${prefix}/tasks/${testTaskId}/logs`)
 
       expect(response.ok()).toBe(true)
 
@@ -50,8 +63,9 @@ test.describe('Task Logs API', () => {
     })
 
     test('returns empty phases array for task with no logs', async ({ request }) => {
+      const prefix = await wsPrefix(request)
       const noLogsTaskId = `no-logs-${generateTestId()}`
-      const response = await request.get(`/api/tasks/${noLogsTaskId}/logs`)
+      const response = await request.get(`${prefix}/tasks/${noLogsTaskId}/logs`)
 
       expect(response.ok()).toBe(true)
 
@@ -63,7 +77,8 @@ test.describe('Task Logs API', () => {
 
   test.describe('Snapshot Logs', () => {
     test('GET /api/tasks/:id/logs/:phase returns log snapshot', async ({ request }) => {
-      const response = await request.get(`/api/tasks/${testTaskId}/logs/planning`)
+      const prefix = await wsPrefix(request)
+      const response = await request.get(`${prefix}/tasks/${testTaskId}/logs/planning`)
 
       if (response.ok()) {
         const body = (await response.json()) as LogContentResponse
@@ -79,7 +94,8 @@ test.describe('Task Logs API', () => {
     })
 
     test('phase endpoint supports ?lines=N parameter', async ({ request }) => {
-      const response = await request.get(`/api/tasks/${testTaskId}/logs/implementation?lines=50`)
+      const prefix = await wsPrefix(request)
+      const response = await request.get(`${prefix}/tasks/${testTaskId}/logs/implementation?lines=50`)
 
       if (response.ok()) {
         const body = (await response.json()) as LogContentResponse
@@ -91,7 +107,8 @@ test.describe('Task Logs API', () => {
     })
 
     test('invalid phase name returns 400', async ({ request }) => {
-      const response = await request.get(`/api/tasks/${testTaskId}/logs/invalid-phase`)
+      const prefix = await wsPrefix(request)
+      const response = await request.get(`${prefix}/tasks/${testTaskId}/logs/invalid-phase`)
 
       expect(response.status()).toBe(400)
       const body = (await response.json()) as LogContentResponse
@@ -102,8 +119,9 @@ test.describe('Task Logs API', () => {
 
   test.describe('Input Validation', () => {
     test('invalid task ID returns 400', async ({ request }) => {
+      const prefix = await wsPrefix(request)
       const response = await request.get(
-        `/api/tasks/${encodeURIComponent(invalidTaskId)}/logs`
+        `${prefix}/tasks/${encodeURIComponent(invalidTaskId)}/logs`
       )
 
       expect(response.status()).toBe(400)
@@ -113,8 +131,9 @@ test.describe('Task Logs API', () => {
     })
 
     test('invalid task ID on phase endpoint returns 400', async ({ request }) => {
+      const prefix = await wsPrefix(request)
       const response = await request.get(
-        `/api/tasks/${encodeURIComponent(invalidTaskId)}/logs/planning`
+        `${prefix}/tasks/${encodeURIComponent(invalidTaskId)}/logs/planning`
       )
 
       expect(response.status()).toBe(400)

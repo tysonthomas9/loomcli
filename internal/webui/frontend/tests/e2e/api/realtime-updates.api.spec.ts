@@ -20,8 +20,19 @@ test.skip(!isIntegrationEnabled, 'API E2E tests require RUN_INTEGRATION_TESTS=1'
 // Serial mode: SSE tests create real-time state changes
 test.describe.configure({ mode: 'serial' })
 
-const SSE_ENDPOINT = `${resolvedApiBaseURL}/api/events`
 const SSE_API_KEY = resolveApiKey()
+
+/** Discover workspace-scoped SSE endpoint */
+let cachedSseEndpoint = ''
+async function getSseEndpoint(request: import('@playwright/test').APIRequestContext): Promise<string> {
+  if (cachedSseEndpoint) return cachedSseEndpoint
+  const response = await request.get(`${resolvedApiBaseURL}/api/workspaces`)
+  const body = (await response.json()) as { workspaces?: Array<{ id: string }> }
+  const ws = body.workspaces?.[0]
+  if (!ws?.id) throw new Error('No workspace available for E2E tests')
+  cachedSseEndpoint = `${resolvedApiBaseURL}/api/workspaces/${ws.id}/events`
+  return cachedSseEndpoint
+}
 
 /**
  * SSE Event parsed from stream.
@@ -63,12 +74,14 @@ class SSEClient {
    * Connect to SSE endpoint and start collecting events.
    * Resolves once the HTTP response headers are received.
    */
-  async connect(since?: number): Promise<void> {
+  async connect(since?: number, endpoint?: string): Promise<void> {
+    if (!endpoint) throw new Error('SSEClient.connect requires an explicit endpoint — flat /api/events no longer exists')
+    const sseUrl = endpoint
     const params = new URLSearchParams()
     if (since != null) params.set('since', String(since))
     if (SSE_API_KEY) params.set('token', SSE_API_KEY)
     const qs = params.toString()
-    const url = new URL(qs ? `${SSE_ENDPOINT}?${qs}` : SSE_ENDPOINT)
+    const url = new URL(qs ? `${sseUrl}?${qs}` : sseUrl)
 
     return new Promise<void>((resolve, reject) => {
       this.req = http.get(
@@ -194,9 +207,10 @@ test.describe('Real-time Updates (SSE)', () => {
   })
 
   test.describe('Connection', () => {
-    test('SSE connection establishes successfully', async () => {
+    test('SSE connection establishes successfully', async ({ request }) => {
+      const endpoint = await getSseEndpoint(request)
       sseClient = new SSEClient()
-      await sseClient.connect()
+      await sseClient.connect(undefined, endpoint)
 
       // Wait for 'connected' event
       const connectedEvent = await sseClient.waitForEvent(
@@ -210,10 +224,11 @@ test.describe('Real-time Updates (SSE)', () => {
   })
 
   test.describe('Mutation Events', () => {
-    test('create event received after POST /api/issues', async ({ api }) => {
+    test('create event received after POST /api/issues', async ({ api, request }) => {
       // Connect SSE first
+      const endpoint = await getSseEndpoint(request)
       sseClient = new SSEClient()
-      await sseClient.connect()
+      await sseClient.connect(undefined, endpoint)
 
       // Wait for connection
       await sseClient.waitForEvent(e => e.event === 'connected', 5000)
@@ -236,15 +251,16 @@ test.describe('Real-time Updates (SSE)', () => {
       expect(createEvent.parsed?.timestamp).toBeDefined()
     })
 
-    test('update event received after PATCH', async ({ api }) => {
+    test('update event received after PATCH', async ({ api, request }) => {
       // Create issue first
       const title = `SSE Update Test ${generateTestId()}`
       const issue = await api.createIssue({ title, issue_type: 'task', priority: 2 })
       createdIssueIds.push(issue.id)
 
       // Connect SSE
+      const endpoint = await getSseEndpoint(request)
       sseClient = new SSEClient()
-      await sseClient.connect()
+      await sseClient.connect(undefined, endpoint)
       await sseClient.waitForEvent(e => e.event === 'connected', 5000)
       sseClient.clearEvents()
 
@@ -262,15 +278,16 @@ test.describe('Real-time Updates (SSE)', () => {
       expect(updateEvent.parsed?.issue_id).toBe(issue.id)
     })
 
-    test('status event received after status change', async ({ api }) => {
+    test('status event received after status change', async ({ api, request }) => {
       // Create issue
       const title = `SSE Status Test ${generateTestId()}`
       const issue = await api.createIssue({ title, issue_type: 'task', priority: 2 })
       createdIssueIds.push(issue.id)
 
       // Connect SSE
+      const endpoint = await getSseEndpoint(request)
       sseClient = new SSEClient()
-      await sseClient.connect()
+      await sseClient.connect(undefined, endpoint)
       await sseClient.waitForEvent(e => e.event === 'connected', 5000)
       sseClient.clearEvents()
 
@@ -289,15 +306,16 @@ test.describe('Real-time Updates (SSE)', () => {
       expect(statusEvent.parsed?.new_status).toBe('in_progress')
     })
 
-    test('close event received after close', async ({ api }) => {
+    test('close event received after close', async ({ api, request }) => {
       // Create issue
       const title = `SSE Close Test ${generateTestId()}`
       const issue = await api.createIssue({ title, issue_type: 'task', priority: 2 })
       createdIssueIds.push(issue.id)
 
       // Connect SSE
+      const endpoint = await getSseEndpoint(request)
       sseClient = new SSEClient()
-      await sseClient.connect()
+      await sseClient.connect(undefined, endpoint)
       await sseClient.waitForEvent(e => e.event === 'connected', 5000)
       sseClient.clearEvents()
 
@@ -316,15 +334,16 @@ test.describe('Real-time Updates (SSE)', () => {
       expect(closeEvent.parsed?.new_status).toBe('closed')
     })
 
-    test('comment event received after adding comment', async ({ api }) => {
+    test('comment event received after adding comment', async ({ api, request }) => {
       // Create issue
       const title = `SSE Comment Test ${generateTestId()}`
       const issue = await api.createIssue({ title, issue_type: 'task', priority: 2 })
       createdIssueIds.push(issue.id)
 
       // Connect SSE
+      const endpoint = await getSseEndpoint(request)
       sseClient = new SSEClient()
-      await sseClient.connect()
+      await sseClient.connect(undefined, endpoint)
       await sseClient.waitForEvent(e => e.event === 'connected', 5000)
       sseClient.clearEvents()
 
@@ -344,10 +363,11 @@ test.describe('Real-time Updates (SSE)', () => {
   })
 
   test.describe('Catch-up Mechanism', () => {
-    test('reconnect with ?since= catches up missed events', async ({ api }) => {
+    test('reconnect with ?since= catches up missed events', async ({ api, request }) => {
       // Connect first client to establish baseline and get event IDs
+      const endpoint = await getSseEndpoint(request)
       sseClient = new SSEClient()
-      await sseClient.connect()
+      await sseClient.connect(undefined, endpoint)
       await sseClient.waitForEvent(e => e.event === 'connected', 5000)
 
       // Create an issue while connected
@@ -380,7 +400,7 @@ test.describe('Real-time Updates (SSE)', () => {
       // Reconnect with since parameter
       // Note: Catch-up events are sent BEFORE the connected event per SSE handler
       sseClient = new SSEClient()
-      await sseClient.connect(parseInt(lastEventId!, 10))
+      await sseClient.connect(parseInt(lastEventId!, 10), endpoint)
 
       // Wait a moment for catch-up events to arrive (they come before connected event)
       // Then wait for connected to confirm stream is established
