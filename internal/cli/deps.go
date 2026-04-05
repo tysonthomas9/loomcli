@@ -124,14 +124,28 @@ func (defaultExecContextRunner) Run(ctx context.Context, dir, name string, args 
 
 // DefaultDeps returns a Deps populated with real (production) implementations.
 func DefaultDeps() *Deps {
-	bdRunner := defaultBDRunnerImpl{}
+	var issueBackend backend.IssueBackend
+
+	if resolveIssueBackendType() == IssueBackendFleet {
+		fb, err := createFleetIssueBackend()
+		if err != nil {
+			slog.Warn("fleet backend creation failed, falling back to beads", "err", err)
+		} else {
+			issueBackend = fb
+		}
+	}
+	if issueBackend == nil {
+		bdRunner := defaultBDRunnerImpl{}
+		issueBackend = newCliBeadsAdapter(bdRunner, GetBeadsDir())
+	}
+
 	return &Deps{
 		Git:          defaultGitRunner{},
 		Exec:         defaultExecRunner{},
 		FS:           defaultFileSystem{},
 		Logger:       slog.Default(),
 		Clock:        time.Now,
-		IssueBackend: newCliBeadsAdapter(bdRunner, GetBeadsDir()),
+		IssueBackend: issueBackend,
 		LookPath:     exec.LookPath,
 		ExecCtx:      defaultExecContextRunner{},
 		Agent:        registryAgentInvoker{},

@@ -32,7 +32,11 @@ func defaultIssueBackend() backend.IssueBackend {
 	trackerMu.Lock()
 	defer trackerMu.Unlock()
 	if trackerInst == nil {
-		if sock := os.Getenv("LOOM_DAEMON_SOCKET"); sock != "" {
+		// In fleet mode, use the fleet backend directly — skip IPC wrapping
+		// since the fleet server (not a local daemon) manages issues.
+		if isFleetActive() {
+			trackerInst = resolveFallbackBackend()
+		} else if sock := os.Getenv("LOOM_DAEMON_SOCKET"); sock != "" {
 			agentName := os.Getenv("BD_ACTOR")
 			fallback := resolveFallbackBackend()
 			ipcClient := NewAgentIPCClient(sock, agentName)

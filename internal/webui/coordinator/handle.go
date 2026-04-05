@@ -4,10 +4,11 @@ package coordinator
 // keys with RegistrationContext.Provide and callers use them with
 // WorkspaceHandle.Resource. Keys follow the "subsystem.Type" convention.
 const (
-	ResourceKeyPool       = "daemon.Pool"
-	ResourceKeySubscriber = "notification.Subscriber"
-	ResourceKeyTerminal   = "terminal.Manager"
-	ResourceKeyFleetStore = "fleet.Store"
+	ResourceKeyPool         = "daemon.Pool"
+	ResourceKeySubscriber   = "notification.Subscriber"
+	ResourceKeyTerminal     = "terminal.Manager"
+	ResourceKeyFleetStore   = "fleet.Store"
+	ResourceKeyFleetBackend = "fleet.Backend"
 )
 
 // WorkspaceHandle holds the per-workspace resources produced by LifecycleHooks

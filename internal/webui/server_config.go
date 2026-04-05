@@ -60,6 +60,9 @@ type ServerConfig struct {
 	SessionsStore           *sessions.Store                              // File-based session audit trail store (optional; nil disables session endpoints)
 	NotifyTokenDir          string                                       // Directory to write notify.token (typically beads dir); empty = token file not written
 	FleetMode               bool                                         // When true, skip beads-specific lifecycle hooks (pools, subscribers); fleet server manages agents
+	FleetClientURL          string                                       // Fleet server URL for fleet-mode workers (e.g., "http://fleet.example.com"); empty = no fleet client
+	FleetClientWorkspace    string                                       // Fleet server workspace ID (e.g., "default"); empty = use "default"
+	FleetClientAPIKey       string                                       // Pre-shared API key for fleet worker backend auth
 	Logger                  *slog.Logger                                 // Structured logger (optional; nil falls back to slog.Default())
 }
 

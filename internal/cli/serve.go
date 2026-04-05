@@ -158,8 +158,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	if !serveNoDaemon {
 		started, err := EnsureIssueBackendRunning(defaultDeps, 5*time.Second)
 		if err != nil {
-			log.Printf("Warning: failed to auto-start issue backend: %v", err)
-			log.Printf("Some API endpoints may return incomplete data.")
+			log.Printf("Warning: failed to auto-start issue backend: %v (endpoints may return incomplete data)", err)
 		} else if started {
 			daemonWeStarted = true
 			log.Printf("Auto-started issue backend daemon")
@@ -167,11 +166,8 @@ func runServe(cmd *cobra.Command, args []string) {
 			log.Printf("Issue backend daemon already running")
 		}
 	}
-
-	// Ensure daemon cleanup on any exit path (including os.Exit in error handlers)
 	if daemonWeStarted {
 		defer func() {
-			log.Printf("Stopping issue backend daemon...")
 			result := defaultDeps.Exec.Run(GetBeadsDir(), "bd", "daemon", "stop")
 			if result.Err != nil {
 				log.Printf("Warning: failed to stop issue backend daemon: %v", result.Err)
@@ -179,16 +175,21 @@ func runServe(cmd *cobra.Command, args []string) {
 		}()
 	}
 
-	// Fall back to daemon config for Redis/API key when CLI flags/env vars are not set.
-	// Also detect fleet mode from the loaded config for use in ServerConfig.
+	// Fall back to daemon config for Redis/API key; detect fleet mode for ServerConfig.
 	var fleetModeDetected bool
+	var daemonSettings *DaemonSettings
 	if dc, dcErr := LoadDaemonConfig("."); dcErr == nil {
 		if serveRedisAddr == "" && dc.Daemon.RedisURL != "" {
 			serveRedisAddr = dc.Daemon.RedisURL
 		}
 		fleetModeDetected = isFleetMode(dc)
+		daemonSettings = &dc.Daemon
 	} else {
 		fleetModeDetected = isFleetModeFromEnv()
+	}
+	var fleetClientCfg FleetClientConfig
+	if fleetModeDetected {
+		fleetClientCfg = resolveFleetConfig(daemonSettings)
 	}
 
 	// Provision shared JWT signing key from Redis (if configured) or environment
@@ -319,6 +320,9 @@ func runServe(cmd *cobra.Command, args []string) {
 				SessionsStore:         sessStore,
 				NotifyTokenDir:        GetBeadsDir(),
 				FleetMode:             fleetModeDetected,
+				FleetClientURL:        fleetClientCfg.URL,
+				FleetClientWorkspace:  fleetClientCfg.Workspace,
+				FleetClientAPIKey:     fleetClientCfg.APIKey,
 				Logger:                slog.Default(),
 			}
 			if serveCorsOrigin != "" {
@@ -373,15 +377,14 @@ func runServe(cmd *cobra.Command, args []string) {
 	}
 
 	// Initialize usage store for /api/usage endpoint
-	loomDir := GetBeadsDir()
-	if loomDir == "" {
-		loomDir = "."
-	}
-	usageStore, err := usage.NewStore(loomDir)
-	if err != nil {
-		log.Printf("Warning: failed to create usage store: %v", err)
-	} else {
-		usageStoreInstance = usageStore
+	if dir := GetBeadsDir(); dir != "" {
+		if s, err := usage.NewStore(dir); err == nil {
+			usageStoreInstance = s
+		} else {
+			log.Printf("Warning: failed to create usage store: %v", err)
+		}
+	} else if s, err := usage.NewStore("."); err == nil {
+		usageStoreInstance = s
 	}
 
 	// Purge old sessions in background (non-blocking)

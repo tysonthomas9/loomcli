@@ -293,11 +293,8 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 		app.claimMetrics = fleet.NewClaimMetrics()
 	}
 
-	// Construct lifecycle hooks in canonical order:
-	// beads-pool (critical), notification-subscriber, terminal (conditional), fleet-store (conditional).
-	// In fleet mode, beads-pool and notification-subscriber hooks are suppressed —
-	// the fleet server manages agent orchestration, so local pools and SSE subscribers
-	// are unnecessary.
+	// Construct lifecycle hooks in canonical order. In fleet mode, beads-pool and
+	// notification-subscriber are suppressed (fleet server manages agents).
 	var beadsPoolHook *BeadsPoolHook
 	app.registry = coordinator.NewWorkspaceRegistry(config.Logger)
 	cleanups = append(cleanups, func() { _ = app.registry.Close() })
@@ -315,6 +312,9 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 	}
 	if app.fleetRegistry != nil {
 		_ = app.registry.AddHook(NewFleetStoreHook(app.fleetRegistry, config.Logger))
+	}
+	if config.FleetClientURL != "" {
+		_ = app.registry.AddHook(NewFleetBackendHook(config.FleetClientURL, config.FleetClientWorkspace, config.FleetClientAPIKey, config.Logger))
 	}
 
 	// Register the initial workspace (replaces old RegisterPool pattern).
