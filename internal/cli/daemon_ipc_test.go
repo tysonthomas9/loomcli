@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/notify"
 )
 
 // mockIPCBackend is a minimal IssueBackend implementation for IPC server tests.
@@ -628,5 +629,189 @@ func TestResolveAgentIPCSocketPath(t *testing.T) {
 	want := "/project/.loom/agent-ipc.sock"
 	if path != want {
 		t.Errorf("resolveAgentIPCSocketPath = %q, want %q", path, want)
+	}
+}
+
+func TestIPCServer_ClaimPublishesMutation(t *testing.T) {
+	mb := &mockIPCBackend{}
+	d := newTestIPCDaemon(mb)
+	defer close(d.shutdown)
+
+	bus := notify.New()
+	defer bus.Close()
+	d.notifyBus = bus
+	d.workspaceID = "ws-test"
+
+	sub := bus.Subscribe("ws-test", "issue")
+	defer sub.Close()
+
+	resp := d.handleIPCClaim(AgentIPCRequest{
+		Operation: ipcOpClaim,
+		AgentName: "falcon",
+		IssueID:   "abc-123",
+	})
+	if !resp.Success {
+		t.Fatalf("expected success, got error: %s", resp.Error)
+	}
+
+	select {
+	case event := <-sub.Events():
+		mut, ok := event.Payload.(backend.MutationData)
+		if !ok {
+			t.Fatalf("payload type = %T, want backend.MutationData", event.Payload)
+		}
+		if mut.Type != backend.MutationStatus {
+			t.Errorf("Type = %q, want %q", mut.Type, backend.MutationStatus)
+		}
+		if mut.IssueID != "abc-123" {
+			t.Errorf("IssueID = %q, want %q", mut.IssueID, "abc-123")
+		}
+		if mut.Actor != "falcon" {
+			t.Errorf("Actor = %q, want %q", mut.Actor, "falcon")
+		}
+		if mut.NewStatus != "in_progress" {
+			t.Errorf("NewStatus = %q, want %q", mut.NewStatus, "in_progress")
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for mutation event")
+	}
+}
+
+func TestIPCServer_UpdatePublishesMutation(t *testing.T) {
+	mb := &mockIPCBackend{}
+	d := newTestIPCDaemon(mb)
+	defer close(d.shutdown)
+
+	bus := notify.New()
+	defer bus.Close()
+	d.notifyBus = bus
+	d.workspaceID = "ws-test"
+
+	sub := bus.Subscribe("ws-test", "issue")
+	defer sub.Close()
+
+	status := "in_progress"
+	args, _ := json.Marshal(backend.UpdateParams{Status: &status})
+
+	resp := d.handleIPCUpdate(AgentIPCRequest{
+		Operation: ipcOpUpdate,
+		AgentName: "falcon",
+		IssueID:   "abc-123",
+		Args:      args,
+	})
+	if !resp.Success {
+		t.Fatalf("expected success, got error: %s", resp.Error)
+	}
+
+	select {
+	case event := <-sub.Events():
+		mut, ok := event.Payload.(backend.MutationData)
+		if !ok {
+			t.Fatalf("payload type = %T, want backend.MutationData", event.Payload)
+		}
+		if mut.Type != backend.MutationUpdate {
+			t.Errorf("Type = %q, want %q", mut.Type, backend.MutationUpdate)
+		}
+		if mut.IssueID != "abc-123" {
+			t.Errorf("IssueID = %q, want %q", mut.IssueID, "abc-123")
+		}
+		if mut.Actor != "falcon" {
+			t.Errorf("Actor = %q, want %q", mut.Actor, "falcon")
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for mutation event")
+	}
+}
+
+func TestIPCServer_CompletePublishesMutation(t *testing.T) {
+	mb := &mockIPCBackend{
+		closeResult: &backend.CloseResult{
+			Closed: &backend.IssueData{ID: "abc-123", Title: "my task", Parent: "epic-1", Status: "closed"},
+		},
+	}
+	d := newTestIPCDaemon(mb)
+	defer close(d.shutdown)
+
+	bus := notify.New()
+	defer bus.Close()
+	d.notifyBus = bus
+	d.workspaceID = "ws-test"
+
+	sub := bus.Subscribe("ws-test", "issue")
+	defer sub.Close()
+
+	args, _ := json.Marshal(backend.CloseParams{Reason: "implemented"})
+
+	resp := d.handleIPCComplete(AgentIPCRequest{
+		Operation: ipcOpComplete,
+		AgentName: "falcon",
+		IssueID:   "abc-123",
+		Args:      args,
+	})
+	if !resp.Success {
+		t.Fatalf("expected success, got error: %s", resp.Error)
+	}
+
+	select {
+	case event := <-sub.Events():
+		mut, ok := event.Payload.(backend.MutationData)
+		if !ok {
+			t.Fatalf("payload type = %T, want backend.MutationData", event.Payload)
+		}
+		if mut.Type != backend.MutationStatus {
+			t.Errorf("Type = %q, want %q", mut.Type, backend.MutationStatus)
+		}
+		if mut.IssueID != "abc-123" {
+			t.Errorf("IssueID = %q, want %q", mut.IssueID, "abc-123")
+		}
+		if mut.Actor != "falcon" {
+			t.Errorf("Actor = %q, want %q", mut.Actor, "falcon")
+		}
+		if mut.OldStatus != "in_progress" {
+			t.Errorf("OldStatus = %q, want %q", mut.OldStatus, "in_progress")
+		}
+		if mut.NewStatus != "closed" {
+			t.Errorf("NewStatus = %q, want %q", mut.NewStatus, "closed")
+		}
+		if mut.Title != "my task" {
+			t.Errorf("Title = %q, want %q", mut.Title, "my task")
+		}
+		if mut.ParentID != "epic-1" {
+			t.Errorf("ParentID = %q, want %q", mut.ParentID, "epic-1")
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for mutation event")
+	}
+}
+
+func TestIPCServer_ClaimError_NoMutation(t *testing.T) {
+	mb := &mockIPCBackend{
+		claimErr: fmt.Errorf("database unavailable"),
+	}
+	d := newTestIPCDaemon(mb)
+	defer close(d.shutdown)
+
+	bus := notify.New()
+	defer bus.Close()
+	d.notifyBus = bus
+	d.workspaceID = "ws-test"
+
+	sub := bus.Subscribe("ws-test", "issue")
+	defer sub.Close()
+
+	resp := d.handleIPCClaim(AgentIPCRequest{
+		Operation: ipcOpClaim,
+		AgentName: "falcon",
+		IssueID:   "abc-123",
+	})
+	if resp.Success {
+		t.Fatal("expected failure, got success")
+	}
+
+	select {
+	case event := <-sub.Events():
+		t.Fatalf("expected no mutation event, got: %+v", event)
+	case <-time.After(50 * time.Millisecond):
+		// Good — no mutation published on error
 	}
 }

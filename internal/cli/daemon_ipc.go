@@ -177,6 +177,13 @@ func (d *Daemon) handleIPCClaim(req AgentIPCRequest) AgentIPCResponse {
 		return ipcErrorResponse(err)
 	}
 
+	d.publishMutation(backend.MutationData{
+		Type:      backend.MutationStatus,
+		IssueID:   req.IssueID,
+		Actor:     req.AgentName,
+		NewStatus: "in_progress",
+	})
+
 	return AgentIPCResponse{Success: true}
 }
 
@@ -198,6 +205,12 @@ func (d *Daemon) handleIPCUpdate(req AgentIPCRequest) AgentIPCResponse {
 	if err := d.issueBackend.Update(ctx, req.IssueID, params); err != nil {
 		return ipcErrorResponse(err)
 	}
+
+	d.publishMutation(backend.MutationData{
+		Type:    backend.MutationUpdate,
+		IssueID: req.IssueID,
+		Actor:   req.AgentName,
+	})
 
 	return AgentIPCResponse{Success: true}
 }
@@ -229,6 +242,19 @@ func (d *Daemon) handleIPCComplete(req AgentIPCRequest) AgentIPCResponse {
 			Kind:  string(backend.KindInternal),
 		}
 	}
+
+	mut := backend.MutationData{
+		Type:      backend.MutationStatus,
+		IssueID:   req.IssueID,
+		Actor:     req.AgentName,
+		OldStatus: "in_progress",
+		NewStatus: "closed",
+	}
+	if result.Closed != nil {
+		mut.Title = result.Closed.Title
+		mut.ParentID = result.Closed.Parent
+	}
+	d.publishMutation(mut)
 
 	return AgentIPCResponse{Success: true, Data: data}
 }
