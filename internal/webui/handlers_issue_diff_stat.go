@@ -38,7 +38,14 @@ func handleGetIssueDiffStat(pool daemon.Pool, gitOps GitOps) http.HandlerFunc {
 			respondError(w, http.StatusServiceUnavailable, "daemon not available")
 			return
 		}
-		defer pool.Put(client)
+		rpcOK := false
+		defer func() {
+			if rpcOK {
+				pool.Put(client)
+			} else {
+				pool.Discard(client)
+			}
+		}()
 
 		resp, err := client.Show(&rpc.ShowArgs{ID: issueID})
 		if err != nil {
@@ -62,6 +69,8 @@ func handleGetIssueDiffStat(pool daemon.Pool, gitOps GitOps) http.HandlerFunc {
 			respondError(w, http.StatusNotFound, "issue has no assignee (no agent worktree)")
 			return
 		}
+
+		rpcOK = true
 
 		// Resolve assignee to worktree (workspace-scoped).
 		wsID := WorkspaceFromContext(r.Context())

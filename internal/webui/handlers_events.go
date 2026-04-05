@@ -31,6 +31,7 @@ type eventLister interface {
 type eventConnectionGetter interface {
 	Get(ctx context.Context) (eventLister, error)
 	Put(client eventLister)
+	Discard(client eventLister)
 }
 
 // eventPoolAdapter wraps daemon.Pool to implement eventConnectionGetter.
@@ -45,6 +46,12 @@ func (p *eventPoolAdapter) Get(ctx context.Context) (eventLister, error) {
 func (p *eventPoolAdapter) Put(client eventLister) {
 	if c, ok := client.(*rpc.Client); ok {
 		p.pool.Put(c)
+	}
+}
+
+func (p *eventPoolAdapter) Discard(client eventLister) {
+	if c, ok := client.(*rpc.Client); ok {
+		p.pool.Discard(c)
 	}
 }
 
@@ -120,7 +127,14 @@ func handleGetIssueEventsWithPool(pool eventConnectionGetter) http.HandlerFunc {
 			})
 			return
 		}
-		defer pool.Put(client)
+		rpcOK := false
+		defer func() {
+			if rpcOK {
+				pool.Put(client)
+			} else {
+				pool.Discard(client)
+			}
+		}()
 
 		resp, err := client.ListEvents(&rpc.EventListArgs{
 			ID:    issueID,
@@ -156,6 +170,7 @@ func handleGetIssueEventsWithPool(pool eventConnectionGetter) http.HandlerFunc {
 			events = []*types.Event{}
 		}
 
+		rpcOK = true
 		respondJSON(w, http.StatusOK, EventListResponse{
 			Success: true,
 			Data:    events,

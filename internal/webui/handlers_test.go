@@ -44,8 +44,9 @@ func (m *mockClient) Update(args *rpc.UpdateArgs) (*rpc.Response, error) {
 
 // mockPool implements connectionGetter for testing
 type mockPool struct {
-	getFunc func(ctx context.Context) (issueGetter, error)
-	putFunc func(client issueGetter)
+	getFunc     func(ctx context.Context) (issueGetter, error)
+	putFunc     func(client issueGetter)
+	discardFunc func(client issueGetter)
 }
 
 func (m *mockPool) Get(ctx context.Context) (issueGetter, error) {
@@ -58,6 +59,12 @@ func (m *mockPool) Get(ctx context.Context) (issueGetter, error) {
 func (m *mockPool) Put(client issueGetter) {
 	if m.putFunc != nil {
 		m.putFunc(client)
+	}
+}
+
+func (m *mockPool) Discard(client issueGetter) {
+	if m.discardFunc != nil {
+		m.discardFunc(client)
 	}
 }
 
@@ -508,9 +515,10 @@ func TestHandleGetIssue_ClientReturnedToPool(t *testing.T) {
 	}
 }
 
-// TestHandleGetIssue_ClientReturnedToPoolOnError verifies client is returned even on RPC error
+// TestHandleGetIssue_ClientReturnedToPoolOnError verifies client is discarded on RPC error
 func TestHandleGetIssue_ClientReturnedToPoolOnError(t *testing.T) {
 	putCalled := false
+	discardCalled := false
 
 	client := &mockClient{
 		showFunc: func(args *rpc.ShowArgs) (*rpc.Response, error) {
@@ -525,6 +533,9 @@ func TestHandleGetIssue_ClientReturnedToPoolOnError(t *testing.T) {
 		putFunc: func(c issueGetter) {
 			putCalled = true
 		},
+		discardFunc: func(c issueGetter) {
+			discardCalled = true
+		},
 	}
 
 	handler := handleGetIssueWithPool(pool)
@@ -535,8 +546,11 @@ func TestHandleGetIssue_ClientReturnedToPoolOnError(t *testing.T) {
 
 	handler.ServeHTTP(w, req)
 
-	if !putCalled {
-		t.Error("Put() was not called on error - client not returned to pool")
+	if putCalled {
+		t.Error("Put() was called on RPC error - corrupted connection returned to pool")
+	}
+	if !discardCalled {
+		t.Error("Discard() was not called on RPC error - connection not properly discarded")
 	}
 }
 
@@ -2167,6 +2181,9 @@ func (m *mockCreatePool) Put(client issueCreator) {
 	}
 }
 
+func (m *mockCreatePool) Discard(client issueCreator) {
+}
+
 func TestHandleCreateIssue_NilPool(t *testing.T) {
 	handler := handleCreateIssue(nil)
 
@@ -2912,8 +2929,8 @@ func TestHandleCreateIssue_ClientReturnedToPoolOnError(t *testing.T) {
 
 	handler.ServeHTTP(w, req)
 
-	if !putCalled {
-		t.Error("Put() was not called on error - client not returned to pool")
+	if putCalled {
+		t.Error("Put() was called on RPC error - corrupted connection returned to pool")
 	}
 }
 
@@ -2937,6 +2954,9 @@ func (m *mockPatchPool) Put(client issueUpdater) {
 	if m.putFunc != nil {
 		m.putFunc(client)
 	}
+}
+
+func (m *mockPatchPool) Discard(client issueUpdater) {
 }
 
 // TestHandlePatchIssue_EmptyID tests that an empty issue ID returns 400 Bad Request
@@ -3548,7 +3568,7 @@ func TestHandlePatchIssue_ClientReturnedToPool(t *testing.T) {
 	}
 }
 
-// TestHandlePatchIssue_ClientReturnedToPoolOnError verifies client is returned even on RPC error
+// TestHandlePatchIssue_ClientReturnedToPoolOnError verifies client is discarded on RPC error
 func TestHandlePatchIssue_ClientReturnedToPoolOnError(t *testing.T) {
 	putCalled := false
 
@@ -3575,8 +3595,8 @@ func TestHandlePatchIssue_ClientReturnedToPoolOnError(t *testing.T) {
 
 	handler.ServeHTTP(w, req)
 
-	if !putCalled {
-		t.Error("Put() was not called on error - client not returned to pool")
+	if putCalled {
+		t.Error("Put() was called on RPC error - corrupted connection returned to pool")
 	}
 }
 
@@ -3855,6 +3875,9 @@ func (m *mockClosePool) Put(client issueCloser) {
 	if m.putFunc != nil {
 		m.putFunc(client)
 	}
+}
+
+func (m *mockClosePool) Discard(client issueCloser) {
 }
 
 // TestHandleCloseIssue_NilPool tests that nil pool returns 503 Service Unavailable
@@ -4201,7 +4224,7 @@ func TestHandleCloseIssue_SuccessWithForce(t *testing.T) {
 	}
 }
 
-// TestHandleCloseIssue_ClientReturnedToPool tests that client is always returned to pool
+// TestHandleCloseIssue_ClientReturnedToPool tests that client is discarded on RPC error
 func TestHandleCloseIssue_ClientReturnedToPool(t *testing.T) {
 	client := &mockCloseClient{
 		closeFunc: func(args *rpc.CloseArgs) (*rpc.Response, error) {
@@ -4227,8 +4250,8 @@ func TestHandleCloseIssue_ClientReturnedToPool(t *testing.T) {
 
 	handler.ServeHTTP(w, req)
 
-	if !putCalled {
-		t.Error("expected Put to be called")
+	if putCalled {
+		t.Error("Put() was called on RPC error - corrupted connection returned to pool")
 	}
 }
 
@@ -4343,6 +4366,7 @@ func (m *mockGraphClient) GetGraphData(args *rpc.GetGraphDataArgs) (*rpc.GetGrap
 
 // mockGraphPool implements graphConnectionGetter for testing
 type mockGraphPool struct {
+	discardFunc func(client graphClient)
 	getFunc func(ctx context.Context) (graphClient, error)
 	putFunc func(client graphClient)
 }
@@ -4358,6 +4382,9 @@ func (m *mockGraphPool) Put(client graphClient) {
 	if m.putFunc != nil {
 		m.putFunc(client)
 	}
+}
+
+func (m *mockGraphPool) Discard(client graphClient) { if m.discardFunc != nil { m.discardFunc(client) }
 }
 
 // TestHandleGraph_NilPool tests that nil pool returns 503 Service Unavailable
@@ -4941,7 +4968,7 @@ func TestHandleGraph_SlimPayload(t *testing.T) {
 	}
 }
 
-// TestHandleGraph_ClientReturnedToPoolOnError verifies client is returned even on errors
+// TestHandleGraph_ClientReturnedToPoolOnError verifies client is discarded on RPC error
 func TestHandleGraph_ClientReturnedToPoolOnError(t *testing.T) {
 	putCalled := false
 
@@ -4967,8 +4994,8 @@ func TestHandleGraph_ClientReturnedToPoolOnError(t *testing.T) {
 
 	handler.ServeHTTP(rr, req)
 
-	if !putCalled {
-		t.Error("Put() was not called on error - client not returned to pool")
+	if putCalled {
+		t.Error("Put() was called on RPC error - corrupted connection returned to pool")
 	}
 }
 
@@ -5144,6 +5171,9 @@ func (m *mockDependencyPool) Put(client dependencyManager) {
 	if m.putFunc != nil {
 		m.putFunc(client)
 	}
+}
+
+func (m *mockDependencyPool) Discard(client dependencyManager) {
 }
 
 // TestHandleAddDependency_Success tests successful dependency addition
@@ -5716,6 +5746,7 @@ func (m *mockBlockedClient) Blocked(args *rpc.BlockedArgs) (*rpc.Response, error
 
 // mockBlockedPool implements blockedConnectionGetter for testing
 type mockBlockedPool struct {
+	discardFunc func(client blockedClient)
 	getFunc func(ctx context.Context) (blockedClient, error)
 	putFunc func(client blockedClient)
 }
@@ -5731,6 +5762,9 @@ func (m *mockBlockedPool) Put(client blockedClient) {
 	if m.putFunc != nil {
 		m.putFunc(client)
 	}
+}
+
+func (m *mockBlockedPool) Discard(client blockedClient) { if m.discardFunc != nil { m.discardFunc(client) }
 }
 
 // TestHandleBlocked_Success tests the success path with mock data
@@ -6299,6 +6333,9 @@ func (m *mockCommentPool) Put(client commentAdder) {
 	}
 }
 
+func (m *mockCommentPool) Discard(client commentAdder) {
+}
+
 // TestHandleAddComment_Success verifies successful comment creation returns 201
 func TestHandleAddComment_Success(t *testing.T) {
 	commentData := `{"id":1,"issue_id":"test-123","author":"web-ui","text":"Test comment","created_at":"2026-01-28T00:00:00Z"}`
@@ -6653,7 +6690,7 @@ func TestHandleAddComment_ClientReturnedToPool(t *testing.T) {
 	}
 }
 
-// TestHandleAddComment_ClientReturnedToPoolOnError verifies client is returned even on RPC error
+// TestHandleAddComment_ClientReturnedToPoolOnError verifies client is discarded on RPC error
 func TestHandleAddComment_ClientReturnedToPoolOnError(t *testing.T) {
 	putCalled := false
 
@@ -6680,9 +6717,9 @@ func TestHandleAddComment_ClientReturnedToPoolOnError(t *testing.T) {
 
 	handler.ServeHTTP(w, req)
 
-	// Verify client was returned even though RPC failed
-	if !putCalled {
-		t.Error("Put() was not called on error - client not returned to pool")
+	// Verify client was discarded (not returned to pool) on RPC error
+	if putCalled {
+		t.Error("Put() was called on RPC error - corrupted connection returned to pool")
 	}
 
 	// Verify we got an error response
@@ -7485,6 +7522,9 @@ func (m *mockReadyPool) Put(client readyClient) {
 	if m.putFunc != nil {
 		m.putFunc(client)
 	}
+}
+
+func (m *mockReadyPool) Discard(client readyClient) {
 }
 
 func TestHandleReadyWithPool_NilPool(t *testing.T) {

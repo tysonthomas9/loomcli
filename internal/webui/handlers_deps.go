@@ -38,6 +38,7 @@ type dependencyManager interface {
 type dependencyConnectionGetter interface {
 	Get(ctx context.Context) (dependencyManager, error)
 	Put(client dependencyManager)
+	Discard(client dependencyManager)
 }
 
 // dependencyPoolAdapter wraps daemon.Pool to implement dependencyConnectionGetter.
@@ -52,6 +53,12 @@ func (p *dependencyPoolAdapter) Get(ctx context.Context) (dependencyManager, err
 func (p *dependencyPoolAdapter) Put(client dependencyManager) {
 	if c, ok := client.(*rpc.Client); ok {
 		p.pool.Put(c)
+	}
+}
+
+func (p *dependencyPoolAdapter) Discard(client dependencyManager) {
+	if c, ok := client.(*rpc.Client); ok {
+		p.pool.Discard(c)
 	}
 }
 
@@ -147,7 +154,14 @@ func handleAddDependencyWithPool(pool dependencyConnectionGetter) http.HandlerFu
 			})
 			return
 		}
-		defer pool.Put(client)
+		rpcOK := false
+		defer func() {
+			if rpcOK {
+				pool.Put(client)
+			} else {
+				pool.Discard(client)
+			}
+		}()
 
 		// Call AddDependency RPC
 		// FromID is the issue that depends on ToID
@@ -173,6 +187,7 @@ func handleAddDependencyWithPool(pool dependencyConnectionGetter) http.HandlerFu
 			})
 			return
 		}
+		rpcOK = true
 
 		if !resp.Success {
 			status := http.StatusInternalServerError
@@ -253,7 +268,14 @@ func handleRemoveDependencyWithPool(pool dependencyConnectionGetter) http.Handle
 			})
 			return
 		}
-		defer pool.Put(client)
+		rpcOK := false
+		defer func() {
+			if rpcOK {
+				pool.Put(client)
+			} else {
+				pool.Discard(client)
+			}
+		}()
 
 		// Call RemoveDependency RPC
 		// FromID is the issue, ToID is the issue it depends on
@@ -273,6 +295,7 @@ func handleRemoveDependencyWithPool(pool dependencyConnectionGetter) http.Handle
 			})
 			return
 		}
+		rpcOK = true
 
 		if !resp.Success {
 			status := http.StatusInternalServerError

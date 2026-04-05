@@ -23,6 +23,7 @@ type issueUpdater interface {
 type patchConnectionGetter interface {
 	Get(ctx context.Context) (issueUpdater, error)
 	Put(client issueUpdater)
+	Discard(client issueUpdater)
 }
 
 // patchPoolAdapter wraps daemon.Pool to implement patchConnectionGetter.
@@ -37,6 +38,12 @@ func (p *patchPoolAdapter) Get(ctx context.Context) (issueUpdater, error) {
 func (p *patchPoolAdapter) Put(client issueUpdater) {
 	if c, ok := client.(*rpc.Client); ok {
 		p.pool.Put(c)
+	}
+}
+
+func (p *patchPoolAdapter) Discard(client issueUpdater) {
+	if c, ok := client.(*rpc.Client); ok {
+		p.pool.Discard(c)
 	}
 }
 
@@ -140,7 +147,14 @@ func handlePatchIssueWithPool(pool patchConnectionGetter) http.HandlerFunc {
 			})
 			return
 		}
-		defer pool.Put(client)
+		rpcOK := false
+		defer func() {
+			if rpcOK {
+				pool.Put(client)
+			} else {
+				pool.Discard(client)
+			}
+		}()
 
 		resp, err := client.Update(patchRequestToUpdateArgs(issueID, req))
 		if err != nil {
@@ -155,6 +169,7 @@ func handlePatchIssueWithPool(pool patchConnectionGetter) http.HandlerFunc {
 			})
 			return
 		}
+		rpcOK = true
 
 		if !resp.Success {
 			status := http.StatusInternalServerError

@@ -58,6 +58,10 @@ func (m *mockFleetPool) Put(client fleetClaimClient) {
 	}
 }
 
+func (m *mockFleetPool) Discard(client fleetClaimClient) {
+	// no-op for tests
+}
+
 func TestFleetClaim_SuccessSpecificIssue(t *testing.T) {
 	issueData, _ := json.Marshal(types.Issue{
 		ID:     "test-123",

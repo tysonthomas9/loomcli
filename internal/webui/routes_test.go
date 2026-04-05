@@ -789,6 +789,10 @@ func (m *mockStatsPool) Put(client statsClient) {
 	}
 }
 
+func (m *mockStatsPool) Discard(client statsClient) {
+	// no-op for tests
+}
+
 // TestHandleStats_ContentType verifies Content-Type header is application/json for all responses.
 func TestHandleStats_ContentType(t *testing.T) {
 	handler := handleStats(nil)

@@ -71,6 +71,7 @@ type issueGetter interface {
 type connectionGetter interface {
 	Get(ctx context.Context) (issueGetter, error)
 	Put(client issueGetter)
+	Discard(client issueGetter)
 }
 
 // poolAdapter wraps daemon.Pool to implement connectionGetter.
@@ -85,6 +86,12 @@ func (p *poolAdapter) Get(ctx context.Context) (issueGetter, error) {
 func (p *poolAdapter) Put(client issueGetter) {
 	if c, ok := client.(*rpc.Client); ok {
 		p.pool.Put(c)
+	}
+}
+
+func (p *poolAdapter) Discard(client issueGetter) {
+	if c, ok := client.(*rpc.Client); ok {
+		p.pool.Discard(c)
 	}
 }
 
@@ -183,7 +190,14 @@ func handleGetIssueWithPool(pool connectionGetter) http.HandlerFunc {
 			respondError(w, http.StatusServiceUnavailable, "daemon not available")
 			return
 		}
-		defer pool.Put(client)
+		rpcOK := false
+		defer func() {
+			if rpcOK {
+				pool.Put(client)
+			} else {
+				pool.Discard(client)
+			}
+		}()
 
 		// Call Show RPC
 		resp, err := client.Show(&rpc.ShowArgs{ID: issueID})
@@ -197,6 +211,7 @@ func handleGetIssueWithPool(pool connectionGetter) http.HandlerFunc {
 			respondError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
+		rpcOK = true
 
 		// Return the issue details wrapped in standard {success, data} envelope
 		respondJSON(w, http.StatusOK, IssuesResponse{
@@ -249,7 +264,14 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 			writeIssuesError(w, status, message, code)
 			return
 		}
-		defer pool.Put(client)
+		rpcOK := false
+		defer func() {
+			if rpcOK {
+				pool.Put(client)
+			} else {
+				pool.Discard(client)
+			}
+		}()
 
 		// Execute List RPC call
 		resp, err := client.List(args)
@@ -258,6 +280,8 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 			writeIssuesError(w, http.StatusInternalServerError, "failed to list issues", "RPC_ERROR")
 			return
 		}
+
+		rpcOK = true
 
 		if !resp.Success {
 			writeIssuesError(w, http.StatusInternalServerError, resp.Error, "DAEMON_ERROR")
@@ -324,6 +348,7 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 			batch, err := client.GetParentIDs(&rpc.GetParentIDsArgs{IssueIDs: issueIDs[i:end]})
 			if err != nil {
 				log.Printf("Failed to get parent IDs (batch %d-%d): %v", i, end, err)
+				rpcOK = false
 				continue
 			}
 			for k, v := range batch.Parents {
@@ -337,6 +362,7 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 			blockedResp, blockedErr := client.Blocked(&rpc.BlockedArgs{})
 			if blockedErr != nil {
 				// Non-fatal: log and continue without blocked info
+				rpcOK = false
 				log.Printf("Failed to get blocked issues: %v", blockedErr)
 			} else if blockedResp.Success {
 				var blockedIssues []*types.BlockedIssue
@@ -352,7 +378,7 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 			// Build unclosed-ID set from already-fetched data for accurate blocker detection.
 			// The daemon's Blocked() RPC considers in_progress/review as resolved,
 			// but blockers should only clear when closed.
-			unclosedIDs, issueMap := buildUnclosedSetsFromFetched(issuesWithCounts)
+unclosedIDs, issueMap := buildUnclosedSetsFromFetched(issuesWithCounts)
 
 			// Build KanbanIssue response with blocked info merged
 			kanbanIssues := make([]*KanbanIssue, len(issuesWithCounts))

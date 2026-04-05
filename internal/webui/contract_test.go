@@ -128,7 +128,8 @@ func (p *contractMockStatsPool) Get(ctx context.Context) (statsClient, error) {
 	return p.client, nil
 }
 
-func (p *contractMockStatsPool) Put(client statsClient) {}
+func (p *contractMockStatsPool) Put(client statsClient)     {}
+func (p *contractMockStatsPool) Discard(client statsClient) {}
 
 // contractMockGraphClient implements graphClient.
 type contractMockGraphClient struct {
@@ -148,7 +149,8 @@ func (p *contractMockGraphPool) Get(ctx context.Context) (graphClient, error) {
 	return p.client, nil
 }
 
-func (p *contractMockGraphPool) Put(client graphClient) {}
+func (p *contractMockGraphPool) Put(client graphClient)     {}
+func (p *contractMockGraphPool) Discard(client graphClient) {}
 
 // contractMockBlockedClient implements blockedClient.
 type contractMockBlockedClient struct {
@@ -168,7 +170,8 @@ func (p *contractMockBlockedPool) Get(ctx context.Context) (blockedClient, error
 	return p.client, nil
 }
 
-func (p *contractMockBlockedPool) Put(client blockedClient) {}
+func (p *contractMockBlockedPool) Put(client blockedClient)     {}
+func (p *contractMockBlockedPool) Discard(client blockedClient) {}
 
 // contractMockCloseClient implements issueCloser.
 type contractMockCloseClient struct {
@@ -188,7 +191,8 @@ func (p *contractMockClosePool) Get(ctx context.Context) (issueCloser, error) {
 	return p.client, nil
 }
 
-func (p *contractMockClosePool) Put(client issueCloser) {}
+func (p *contractMockClosePool) Put(client issueCloser)     {}
+func (p *contractMockClosePool) Discard(client issueCloser) {}
 
 // contractMockCommentClient implements commentAdder.
 type contractMockCommentClient struct {
@@ -208,7 +212,8 @@ func (p *contractMockCommentPool) Get(ctx context.Context) (commentAdder, error)
 	return p.client, nil
 }
 
-func (p *contractMockCommentPool) Put(client commentAdder) {}
+func (p *contractMockCommentPool) Put(client commentAdder)     {}
+func (p *contractMockCommentPool) Discard(client commentAdder) {}
 
 // contractMockDepClient implements dependencyManager.
 type contractMockDepClient struct {
@@ -233,7 +238,8 @@ func (p *contractMockDepPool) Get(ctx context.Context) (dependencyManager, error
 	return p.client, nil
 }
 
-func (p *contractMockDepPool) Put(client dependencyManager) {}
+func (p *contractMockDepPool) Put(client dependencyManager)     {}
+func (p *contractMockDepPool) Discard(client dependencyManager) {}
 
 // contractMockPatchClient implements issueUpdater.
 type contractMockPatchClient struct {
@@ -253,7 +259,8 @@ func (p *contractMockPatchPool) Get(ctx context.Context) (issueUpdater, error) {
 	return p.client, nil
 }
 
-func (p *contractMockPatchPool) Put(client issueUpdater) {}
+func (p *contractMockPatchPool) Put(client issueUpdater)     {}
+func (p *contractMockPatchPool) Discard(client issueUpdater) {}
 
 // contractMockCreateClient implements issueCreator.
 type contractMockCreateClient struct {
@@ -273,7 +280,8 @@ func (p *contractMockCreatePool) Get(ctx context.Context) (issueCreator, error) 
 	return p.client, nil
 }
 
-func (p *contractMockCreatePool) Put(client issueCreator) {}
+func (p *contractMockCreatePool) Put(client issueCreator)     {}
+func (p *contractMockCreatePool) Discard(client issueCreator) {}
 
 // --- Error pool mocks (return error from Get) ---
 
@@ -282,56 +290,64 @@ type errorStatsPool struct{}
 func (p *errorStatsPool) Get(ctx context.Context) (statsClient, error) {
 	return nil, errors.New("pool unavailable")
 }
-func (p *errorStatsPool) Put(client statsClient) {}
+func (p *errorStatsPool) Put(client statsClient)     {}
+func (p *errorStatsPool) Discard(client statsClient) {}
 
 type errorGraphPool struct{}
 
 func (p *errorGraphPool) Get(ctx context.Context) (graphClient, error) {
 	return nil, errors.New("pool unavailable")
 }
-func (p *errorGraphPool) Put(client graphClient) {}
+func (p *errorGraphPool) Put(client graphClient)     {}
+func (p *errorGraphPool) Discard(client graphClient) {}
 
 type errorBlockedPool struct{}
 
 func (p *errorBlockedPool) Get(ctx context.Context) (blockedClient, error) {
 	return nil, errors.New("pool unavailable")
 }
-func (p *errorBlockedPool) Put(client blockedClient) {}
+func (p *errorBlockedPool) Put(client blockedClient)     {}
+func (p *errorBlockedPool) Discard(client blockedClient) {}
 
 type errorClosePool struct{}
 
 func (p *errorClosePool) Get(ctx context.Context) (issueCloser, error) {
 	return nil, errors.New("pool unavailable")
 }
-func (p *errorClosePool) Put(client issueCloser) {}
+func (p *errorClosePool) Put(client issueCloser)     {}
+func (p *errorClosePool) Discard(client issueCloser) {}
 
 type errorCommentPool struct{}
 
 func (p *errorCommentPool) Get(ctx context.Context) (commentAdder, error) {
 	return nil, errors.New("pool unavailable")
 }
-func (p *errorCommentPool) Put(client commentAdder) {}
+func (p *errorCommentPool) Put(client commentAdder)     {}
+func (p *errorCommentPool) Discard(client commentAdder) {}
 
 type errorDepPool struct{}
 
 func (p *errorDepPool) Get(ctx context.Context) (dependencyManager, error) {
 	return nil, errors.New("pool unavailable")
 }
-func (p *errorDepPool) Put(client dependencyManager) {}
+func (p *errorDepPool) Put(client dependencyManager)     {}
+func (p *errorDepPool) Discard(client dependencyManager) {}
 
 type errorPatchPool struct{}
 
 func (p *errorPatchPool) Get(ctx context.Context) (issueUpdater, error) {
 	return nil, errors.New("pool unavailable")
 }
-func (p *errorPatchPool) Put(client issueUpdater) {}
+func (p *errorPatchPool) Put(client issueUpdater)     {}
+func (p *errorPatchPool) Discard(client issueUpdater) {}
 
 type errorCreatePool struct{}
 
 func (p *errorCreatePool) Get(ctx context.Context) (issueCreator, error) {
 	return nil, errors.New("pool unavailable")
 }
-func (p *errorCreatePool) Put(client issueCreator) {}
+func (p *errorCreatePool) Put(client issueCreator)     {}
+func (p *errorCreatePool) Discard(client issueCreator) {}
 
 // =============================================================================
 // Contract Tests: Success Responses

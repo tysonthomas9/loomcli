@@ -39,6 +39,7 @@ type commentAdder interface {
 type commentConnectionGetter interface {
 	Get(ctx context.Context) (commentAdder, error)
 	Put(client commentAdder)
+	Discard(client commentAdder)
 }
 
 // commentPoolAdapter wraps daemon.Pool to implement commentConnectionGetter.
@@ -53,6 +54,12 @@ func (p *commentPoolAdapter) Get(ctx context.Context) (commentAdder, error) {
 func (p *commentPoolAdapter) Put(client commentAdder) {
 	if c, ok := client.(*rpc.Client); ok {
 		p.pool.Put(c)
+	}
+}
+
+func (p *commentPoolAdapter) Discard(client commentAdder) {
+	if c, ok := client.(*rpc.Client); ok {
+		p.pool.Discard(c)
 	}
 }
 
@@ -133,7 +140,14 @@ func handleAddCommentWithPool(pool commentConnectionGetter) http.HandlerFunc {
 			})
 			return
 		}
-		defer pool.Put(client)
+		rpcOK := false
+		defer func() {
+			if rpcOK {
+				pool.Put(client)
+			} else {
+				pool.Discard(client)
+			}
+		}()
 
 		// Build CommentAddArgs and call RPC
 		args := &rpc.CommentAddArgs{
@@ -156,6 +170,7 @@ func handleAddCommentWithPool(pool commentConnectionGetter) http.HandlerFunc {
 			})
 			return
 		}
+		rpcOK = true
 
 		if !resp.Success {
 			status := http.StatusInternalServerError

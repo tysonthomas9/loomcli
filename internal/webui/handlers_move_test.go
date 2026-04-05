@@ -70,6 +70,8 @@ func (m *mockMovePool) Put(client issueMover) {
 	}
 }
 
+func (m *mockMovePool) Discard(client issueMover) {}
+
 // testWorkspaceConfigFn returns a workspace config function for testing.
 func testWorkspaceConfigFn(name string, workspaces []WorkspaceSummary) func() (*WorkspaceData, error) {
 	return func() (*WorkspaceData, error) {

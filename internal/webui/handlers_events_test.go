@@ -43,6 +43,8 @@ func (m *mockEventPool) Put(client eventLister) {
 	}
 }
 
+func (m *mockEventPool) Discard(client eventLister) {}
+
 // TestHandleGetIssueEvents_Success verifies successful event listing returns 200
 func TestHandleGetIssueEvents_Success(t *testing.T) {
 	eventsData, _ := json.Marshal([]*types.Event{

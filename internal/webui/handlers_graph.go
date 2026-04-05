@@ -32,6 +32,7 @@ type blockedClient interface {
 type blockedConnectionGetter interface {
 	Get(ctx context.Context) (blockedClient, error)
 	Put(client blockedClient)
+	Discard(client blockedClient)
 }
 
 // blockedPoolAdapter wraps daemon.Pool to implement blockedConnectionGetter.
@@ -46,6 +47,12 @@ func (p *blockedPoolAdapter) Get(ctx context.Context) (blockedClient, error) {
 func (p *blockedPoolAdapter) Put(client blockedClient) {
 	if c, ok := client.(*rpc.Client); ok {
 		p.pool.Put(c)
+	}
+}
+
+func (p *blockedPoolAdapter) Discard(client blockedClient) {
+	if c, ok := client.(*rpc.Client); ok {
+		p.pool.Discard(c)
 	}
 }
 
@@ -85,6 +92,7 @@ type graphClient interface {
 type graphConnectionGetter interface {
 	Get(ctx context.Context) (graphClient, error)
 	Put(client graphClient)
+	Discard(client graphClient)
 }
 
 // graphPoolAdapter wraps daemon.Pool to implement graphConnectionGetter.
@@ -99,6 +107,12 @@ func (p *graphPoolAdapter) Get(ctx context.Context) (graphClient, error) {
 func (p *graphPoolAdapter) Put(client graphClient) {
 	if c, ok := client.(*rpc.Client); ok {
 		p.pool.Put(c)
+	}
+}
+
+func (p *graphPoolAdapter) Discard(client graphClient) {
+	if c, ok := client.(*rpc.Client); ok {
+		p.pool.Discard(c)
 	}
 }
 
@@ -148,7 +162,14 @@ func handleBlockedWithPool(pool blockedConnectionGetter) http.HandlerFunc {
 			})
 			return
 		}
-		defer pool.Put(client)
+		rpcOK := false
+		defer func() {
+			if rpcOK {
+				pool.Put(client)
+			} else {
+				pool.Discard(client)
+			}
+		}()
 
 		// Execute Blocked RPC call
 		resp, err := client.Blocked(args)
@@ -160,6 +181,7 @@ func handleBlockedWithPool(pool blockedConnectionGetter) http.HandlerFunc {
 			})
 			return
 		}
+		rpcOK = true
 
 		if !resp.Success {
 			respondJSON(w, http.StatusInternalServerError, BlockedResponse{
@@ -235,7 +257,14 @@ func handleGraphWithPool(pool graphConnectionGetter) http.HandlerFunc {
 			})
 			return
 		}
-		defer pool.Put(client)
+		rpcOK := false
+		defer func() {
+			if rpcOK {
+				pool.Put(client)
+			} else {
+				pool.Discard(client)
+			}
+		}()
 
 		// Build GetGraphData args based on status filter
 		graphArgs := &rpc.GetGraphDataArgs{
@@ -263,6 +292,7 @@ func handleGraphWithPool(pool graphConnectionGetter) http.HandlerFunc {
 			})
 			return
 		}
+		rpcOK = true
 
 		// Convert RPC response to HTTP response format
 		graphIssues := make([]*GraphIssue, 0, len(result.Issues))

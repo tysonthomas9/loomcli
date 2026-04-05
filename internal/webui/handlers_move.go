@@ -47,6 +47,7 @@ type issueMover interface {
 type moveConnectionGetter interface {
 	Get(ctx context.Context) (issueMover, error)
 	Put(client issueMover)
+	Discard(client issueMover)
 }
 
 // movePoolAdapter wraps daemon.Pool to implement moveConnectionGetter.
@@ -63,6 +64,12 @@ func (p *movePoolAdapter) Put(client issueMover) {
 		p.pool.Put(c)
 	} else if client != nil {
 		log.Printf("movePoolAdapter.Put: unexpected client type %T — connection leaked", client)
+	}
+}
+
+func (p *movePoolAdapter) Discard(client issueMover) {
+	if c, ok := client.(*rpc.Client); ok {
+		p.pool.Discard(c)
 	}
 }
 
@@ -300,12 +307,22 @@ func handleMoveIssueWithPool(pool moveConnectionGetter, targetPool moveConnectio
 			respondJSON(w, status, MoveIssueResponse{Success: false, Error: "daemon not available"})
 			return
 		}
-		defer pool.Put(client)
+		rpcOK := false
+		defer func() {
+			if rpcOK {
+				pool.Put(client)
+			} else {
+				pool.Discard(client)
+			}
+		}()
 
 		sourceIssue, ok := fetchSourceIssue(w, client, issueID)
 		if !ok {
-			return
+			return // rpcOK stays false → source connection discarded (RPC failed)
 		}
+		// Source Show RPC succeeded — connection is clean, safe to return to pool
+		// even if subsequent target operations fail.
+		rpcOK = true
 
 		var warnings []string
 		if sourceIssue.Assignee != "" {
@@ -336,6 +353,7 @@ func handleMoveIssueWithPool(pool moveConnectionGetter, targetPool moveConnectio
 			warnings = append(warnings, "Source issue could not be closed")
 		}
 
+		rpcOK = true
 		respondJSON(w, http.StatusOK, MoveIssueResponse{
 			Success: true,
 			Data:    &MoveResult{SourceID: issueID, TargetID: newID, Warnings: warnings},

@@ -42,6 +42,7 @@ type readyClient interface {
 type readyConnectionGetter interface {
 	Get(ctx context.Context) (readyClient, error)
 	Put(client readyClient)
+	Discard(client readyClient)
 }
 
 // readyPoolAdapter wraps daemon.Pool to implement readyConnectionGetter.
@@ -56,6 +57,12 @@ func (p *readyPoolAdapter) Get(ctx context.Context) (readyClient, error) {
 func (p *readyPoolAdapter) Put(client readyClient) {
 	if c, ok := client.(*rpc.Client); ok {
 		p.pool.Put(c)
+	}
+}
+
+func (p *readyPoolAdapter) Discard(client readyClient) {
+	if c, ok := client.(*rpc.Client); ok {
+		p.pool.Discard(c)
 	}
 }
 
@@ -80,7 +87,7 @@ func executeReadyRPC(ctx context.Context, pool readyConnectionGetter, args *rpc.
 
 	resp, err := client.Ready(args)
 	if err != nil {
-		pool.Put(client)
+		pool.Discard(client)
 		return nil, nil, http.StatusInternalServerError, fmt.Errorf("RPC error: %w", err)
 	}
 
@@ -159,7 +166,21 @@ func handleReadyWithPool(pool readyConnectionGetter) http.HandlerFunc {
 			})
 			return
 		}
-		defer pool.Put(client)
+		// executeReadyRPC already discards on RPC error; if we reach here,
+		// the Ready RPC succeeded. filterUnclosedBlockers and buildReadyResponse
+		// make additional non-fatal RPCs; we optimistically assume they succeeded.
+		// A failure there may corrupt the connection, but returning partial data
+		// is acceptable and a deeper refactor would be needed to track those.
+		rpcOK := false
+		defer func() {
+			if rpcOK {
+				pool.Put(client)
+			} else {
+				pool.Discard(client)
+			}
+		}()
+
+		rpcOK = true
 
 		if len(issues) == 0 {
 			respondJSON(w, http.StatusOK, ReadyResponse{

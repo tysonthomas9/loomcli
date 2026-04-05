@@ -47,6 +47,8 @@ func (m *issuesMockPool) Put(client issueGetter) {
 	}
 }
 
+func (m *issuesMockPool) Discard(client issueGetter) {}
+
 // --- handleGetIssue tests ---
 
 func TestHandleGetIssue_Success_ResponseShape(t *testing.T) {

@@ -45,6 +45,7 @@ type fleetClaimClient interface {
 type fleetClaimPoolGetter interface {
 	Get(ctx context.Context) (fleetClaimClient, error)
 	Put(client fleetClaimClient)
+	Discard(client fleetClaimClient)
 }
 
 // fleetClaimPoolAdapter wraps daemon.Pool to implement fleetClaimPoolGetter.
@@ -59,6 +60,12 @@ func (p *fleetClaimPoolAdapter) Get(ctx context.Context) (fleetClaimClient, erro
 func (p *fleetClaimPoolAdapter) Put(client fleetClaimClient) {
 	if c, ok := client.(*rpc.Client); ok {
 		p.pool.Put(c)
+	}
+}
+
+func (p *fleetClaimPoolAdapter) Discard(client fleetClaimClient) {
+	if c, ok := client.(*rpc.Client); ok {
+		p.pool.Discard(c)
 	}
 }
 
@@ -121,10 +128,18 @@ func handleFleetClaimWithPool(pool fleetClaimPoolGetter, claimMetrics *fleet.Cla
 			})
 			return
 		}
-		defer pool.Put(client)
+		rpcOK := false
+		defer func() {
+			if rpcOK {
+				pool.Put(client)
+			} else {
+				pool.Discard(client)
+			}
+		}()
 
 		// If a specific issue ID was requested, claim it directly
 		if req.IssueID != "" {
+			rpcOK = true
 			claimSpecificIssue(w, client, req.IssueID, claimMetrics)
 			return
 		}
@@ -157,6 +172,8 @@ func handleFleetClaimWithPool(pool fleetClaimPoolGetter, claimMetrics *fleet.Cla
 			})
 			return
 		}
+
+		rpcOK = true
 
 		// Parse ready issues
 		var issues []*types.Issue

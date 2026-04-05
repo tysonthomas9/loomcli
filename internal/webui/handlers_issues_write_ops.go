@@ -24,6 +24,7 @@ type issueCloser interface {
 type closeConnectionGetter interface {
 	Get(ctx context.Context) (issueCloser, error)
 	Put(client issueCloser)
+	Discard(client issueCloser)
 }
 
 // closePoolAdapter wraps daemon.Pool to implement closeConnectionGetter.
@@ -41,6 +42,12 @@ func (p *closePoolAdapter) Put(client issueCloser) {
 	}
 }
 
+func (p *closePoolAdapter) Discard(client issueCloser) {
+	if c, ok := client.(*rpc.Client); ok {
+		p.pool.Discard(c)
+	}
+}
+
 // issueCreator is an internal interface for testing issue creation.
 // The production code uses *rpc.Client which implements this interface.
 type issueCreator interface {
@@ -51,6 +58,7 @@ type issueCreator interface {
 type createConnectionGetter interface {
 	Get(ctx context.Context) (issueCreator, error)
 	Put(client issueCreator)
+	Discard(client issueCreator)
 }
 
 // createPoolAdapter wraps daemon.Pool to implement createConnectionGetter.
@@ -65,6 +73,12 @@ func (p *createPoolAdapter) Get(ctx context.Context) (issueCreator, error) {
 func (p *createPoolAdapter) Put(client issueCreator) {
 	if c, ok := client.(*rpc.Client); ok {
 		p.pool.Put(c)
+	}
+}
+
+func (p *createPoolAdapter) Discard(client issueCreator) {
+	if c, ok := client.(*rpc.Client); ok {
+		p.pool.Discard(c)
 	}
 }
 
@@ -122,7 +136,14 @@ func handleCreateIssueWithPool(pool createConnectionGetter) http.HandlerFunc {
 			writeIssuesError(w, status, message, code)
 			return
 		}
-		defer pool.Put(client)
+		rpcOK := false
+		defer func() {
+			if rpcOK {
+				pool.Put(client)
+			} else {
+				pool.Discard(client)
+			}
+		}()
 
 		// Convert request to RPC args and call daemon
 		createArgs := toCreateArgs(&req)
@@ -139,6 +160,7 @@ func handleCreateIssueWithPool(pool createConnectionGetter) http.HandlerFunc {
 		}
 
 		// Return success with created issue
+		rpcOK = true
 		respondJSON(w, http.StatusCreated, IssuesResponse{
 			Success: true,
 			Data:    resp.Data,
@@ -201,7 +223,14 @@ func handleCloseIssueWithPool(pool closeConnectionGetter) http.HandlerFunc {
 			respondError(w, status, "daemon not available")
 			return
 		}
-		defer pool.Put(client)
+		rpcOK := false
+		defer func() {
+			if rpcOK {
+				pool.Put(client)
+			} else {
+				pool.Discard(client)
+			}
+		}()
 
 		// Build CloseArgs from path and body
 		args := &rpc.CloseArgs{
@@ -236,6 +265,7 @@ func handleCloseIssueWithPool(pool closeConnectionGetter) http.HandlerFunc {
 		}
 
 		// Return success response with closed issue data
+		rpcOK = true
 		respondJSON(w, http.StatusOK, CloseResponse{
 			Success: true,
 			Data:    resp.Data,
@@ -252,6 +282,7 @@ type issueDeleter interface {
 type deleteConnectionGetter interface {
 	Get(ctx context.Context) (issueDeleter, error)
 	Put(client issueDeleter)
+	Discard(client issueDeleter)
 }
 
 // deletePoolAdapter wraps daemon.Pool to implement deleteConnectionGetter.
@@ -266,6 +297,12 @@ func (p *deletePoolAdapter) Get(ctx context.Context) (issueDeleter, error) {
 func (p *deletePoolAdapter) Put(client issueDeleter) {
 	if c, ok := client.(*rpc.Client); ok {
 		p.pool.Put(c)
+	}
+}
+
+func (p *deletePoolAdapter) Discard(client issueDeleter) {
+	if c, ok := client.(*rpc.Client); ok {
+		p.pool.Discard(c)
 	}
 }
 
@@ -303,7 +340,14 @@ func handleDeleteIssueWithPool(pool deleteConnectionGetter) http.HandlerFunc {
 			respondError(w, status, "daemon not available")
 			return
 		}
-		defer pool.Put(client)
+		rpcOK := false
+		defer func() {
+			if rpcOK {
+				pool.Put(client)
+			} else {
+				pool.Discard(client)
+			}
+		}()
 
 		resp, err := client.Delete(&rpc.DeleteArgs{
 			IDs:   []string{issueID},
@@ -324,6 +368,7 @@ func handleDeleteIssueWithPool(pool deleteConnectionGetter) http.HandlerFunc {
 			return
 		}
 
+		rpcOK = true
 		respondJSON(w, http.StatusOK, map[string]any{
 			"success": true,
 			"data":    resp.Data,

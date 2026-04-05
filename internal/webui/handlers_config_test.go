@@ -45,6 +45,10 @@ func (m *mockConfigPool) Put(client configClient) {
 	}
 }
 
+func (m *mockConfigPool) Discard(client configClient) {
+	// no-op for tests
+}
+
 // newMockConfigPool creates a pool that returns a client pointing to the given workspace path.
 func newMockConfigPool(wsPath string) *mockConfigPool {
 	return &mockConfigPool{

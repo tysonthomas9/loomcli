@@ -48,6 +48,8 @@ func (m *wMockPatchPool) Put(client issueUpdater) {
 	}
 }
 
+func (m *wMockPatchPool) Discard(client issueUpdater) {}
+
 // wMockCreateClient implements issueCreator for testing.
 type wMockCreateClient struct {
 	createFunc func(args *rpc.CreateArgs) (*rpc.Response, error)
@@ -78,6 +80,8 @@ func (m *wMockCreatePool) Put(client issueCreator) {
 		m.putFunc(client)
 	}
 }
+
+func (m *wMockCreatePool) Discard(client issueCreator) {}
 
 // wMockCloseClient implements issueCloser for testing.
 type wMockCloseClient struct {
@@ -110,6 +114,8 @@ func (m *wMockClosePool) Put(client issueCloser) {
 	}
 }
 
+func (m *wMockClosePool) Discard(client issueCloser) {}
+
 // wMockDeleteClient implements issueDeleter for testing.
 type wMockDeleteClient struct {
 	deleteFunc func(args *rpc.DeleteArgs) (*rpc.Response, error)
@@ -124,6 +130,7 @@ func (m *wMockDeleteClient) Delete(args *rpc.DeleteArgs) (*rpc.Response, error) 
 
 // wMockDeletePool implements deleteConnectionGetter for testing.
 type wMockDeletePool struct {
+	discardFunc func(client issueDeleter)
 	getFunc func(ctx context.Context) (issueDeleter, error)
 	putFunc func(client issueDeleter)
 }
@@ -138,6 +145,12 @@ func (m *wMockDeletePool) Get(ctx context.Context) (issueDeleter, error) {
 func (m *wMockDeletePool) Put(client issueDeleter) {
 	if m.putFunc != nil {
 		m.putFunc(client)
+	}
+}
+
+func (m *wMockDeletePool) Discard(client issueDeleter) {
+	if m.discardFunc != nil {
+		m.discardFunc(client)
 	}
 }
 
@@ -1328,8 +1341,8 @@ func TestHandleDeleteIssueW_ClientReturnedToPool(t *testing.T) {
 	}
 }
 
-func TestHandleDeleteIssueW_ClientReturnedToPoolOnError(t *testing.T) {
-	putCalled := false
+func TestHandleDeleteIssueW_ClientDiscardedOnError(t *testing.T) {
+	discardCalled := false
 	client := &wMockDeleteClient{
 		deleteFunc: func(args *rpc.DeleteArgs) (*rpc.Response, error) {
 			return nil, errors.New("rpc failure")
@@ -1337,7 +1350,7 @@ func TestHandleDeleteIssueW_ClientReturnedToPoolOnError(t *testing.T) {
 	}
 	pool := &wMockDeletePool{
 		getFunc: func(ctx context.Context) (issueDeleter, error) { return client, nil },
-		putFunc: func(c issueDeleter) { putCalled = true },
+		discardFunc: func(c issueDeleter) { discardCalled = true },
 	}
 	handler := handleDeleteIssueWithPool(pool)
 
@@ -1347,7 +1360,7 @@ func TestHandleDeleteIssueW_ClientReturnedToPoolOnError(t *testing.T) {
 
 	handler.ServeHTTP(w, req)
 
-	if !putCalled {
-		t.Error("Put() was not called on error path - client not returned to pool")
+	if !discardCalled {
+		t.Error("Discard() was not called on error path - client not returned to pool")
 	}
 }
