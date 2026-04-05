@@ -45,6 +45,7 @@ var (
 	serveAuthAllowInsecure bool
 	serveDev               bool
 	serveDevFrontDir       string
+	serveSentryDSN         string
 
 	// collectDataFunc is the function used to collect monitor data.
 	// This is a package-level variable to allow tests to inject mock data.
@@ -133,6 +134,9 @@ func init() {
 
 	serveCmd.Flags().BoolVar(&serveDev, "dev", false, "Development mode: serve frontend from disk, enable CORS for Vite dev server")
 	serveCmd.Flags().StringVar(&serveDevFrontDir, "dev-frontend-dir", "", "Frontend directory to serve in dev mode (default: internal/webui/frontend/dist)")
+
+	defaultSentryDSN := os.Getenv("LOOM_SENTRY_DSN")
+	serveCmd.Flags().StringVar(&serveSentryDSN, "sentry-dsn", defaultSentryDSN, "Sentry/GlitchTip DSN for error tracking (or LOOM_SENTRY_DSN)")
 
 	rootCmd.AddCommand(serveCmd)
 }
@@ -325,6 +329,7 @@ func runServe(cmd *cobra.Command, args []string) {
 				BackendOps:            backendOps,
 				SessionsStore:         sessStore,
 				Logger:                slog.Default(),
+				SentryDSN:             serveSentryDSN,
 			}
 			if !serveNoDaemon {
 				cfg.DaemonStartupFn = ensureDaemonsForAllWorkspaces

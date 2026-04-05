@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/getsentry/sentry-go"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 
@@ -46,6 +47,18 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	}
 	if config.BindAddress == "" {
 		config.BindAddress = "127.0.0.1"
+	}
+
+	// Initialize Sentry/GlitchTip error tracking.
+	// Wraps the logger with a fanout handler that sends ERROR+ to Sentry.
+	if config.SentryDSN != "" {
+		logger := config.Logger
+		if logger == nil {
+			logger = slog.Default()
+		}
+		config.Logger = initSentry(logger, config.SentryDSN, "")
+		slog.SetDefault(config.Logger)
+		defer sentry.Flush(2 * time.Second)
 	}
 
 	// Build CORS configuration
@@ -402,7 +415,10 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 
 	registerWorkerAPIRoutes(mux, config.WorkspaceConfigFn)
 
-	// Middleware chain: rate-limit -> security -> auth -> CORS -> mux
+	// Prometheus metrics middleware — outer captures timing+status, inner captures route pattern.
+	metricsOuter, routeCapture := PromMetricsMiddleware()
+
+	// Middleware chain: metrics -> rate-limit -> security -> auth -> CORS -> routeCapture -> mux
 	corsMiddleware := NewCORSMiddleware(corsConfig)
 	authMW := NewAuthMiddleware(AuthConfig{APIKey: apiKey, Enabled: config.AuthEnabled})
 	if extAuthMiddleware != nil {
@@ -413,7 +429,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		ExtAuthOrigin: extractOrigin(config.ExtAuthURL),
 	})
 	rl, rateLimitMiddleware := NewRateLimitMiddleware(DefaultRateLimitConfig())
-	handler := h2c.NewHandler(NewRequestLogMiddleware(config.Logger)(rateLimitMiddleware(securityMiddleware(authMW(corsMiddleware(mux))))), &http2.Server{})
+	handler := h2c.NewHandler(NewRequestLogMiddleware(config.Logger)(metricsOuter(rateLimitMiddleware(securityMiddleware(authMW(corsMiddleware(routeCapture(mux))))))), &http2.Server{})
 
 	// Shutdown context: when canceled, in-flight handlers abort quickly.
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())

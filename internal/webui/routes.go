@@ -3,6 +3,7 @@ package webui
 import (
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"golang.org/x/time/rate"
@@ -25,6 +26,9 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 
 	// API health endpoint that reports daemon connection status
 	mux.HandleFunc("GET /api/health", handleAPIHealth(pool))
+
+	// Prometheus metrics endpoint (scraped by VictoriaMetrics)
+	mux.Handle("GET /metrics", PromHandler())
 
 	// Client-side error reporting endpoint (has its own per-IP rate limiter, 10 req/min/IP)
 	clientErrLimiter := newClientErrorLimiter(rate.Limit(10.0/60.0), 10, 5*time.Minute, 10*time.Minute)
@@ -109,9 +113,11 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 		mux.Handle("/api/auth/", authProxy)
 	}
 
-	// Loom proxy for agent status endpoints (same-origin to avoid CORS/CSP issues)
+	// Loom proxy for agent status endpoints (same-origin to avoid CORS/CSP issues).
+	// Wrapped with route capture so metrics show the actual proxied path
+	// (e.g., /api/loom/api/agents) instead of the generic prefix.
 	if loomProxy := newLoomProxy(loomServerURL); loomProxy != nil {
-		mux.Handle("/api/loom/", loomProxy)
+		mux.Handle("/api/loom/", promRouteCaptureByPath(loomProxy))
 	}
 
 	// Terminal token and WebSocket endpoints for authenticated terminal relay
@@ -334,7 +340,21 @@ func registerWorkspaceRoutes(mux *http.ServeMux, multiPool *daemon.MultiPool, wo
 	}
 
 	// Apply WorkspaceMiddleware to all workspace-scoped routes
-	mux.Handle("/api/workspaces/{ws}/", WorkspaceMiddleware(wsExistsFn, wsMux))
+	// Mount workspace sub-mux with route pattern capture for metrics.
+	// Go's ServeMux sets r.Pattern on an internal request copy, invisible to
+	// the outer metrics middleware. We use Handler() to pre-resolve the pattern
+	// (a cheap trie lookup) and write it into the shared promRouteStore.
+	mux.Handle("/api/workspaces/{ws}/", WorkspaceMiddleware(wsExistsFn,
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, pattern := wsMux.Handler(r)
+			if store, ok := r.Context().Value(promRouteCtxKey{}).(*promRouteStore); ok && pattern != "" {
+				if idx := strings.Index(pattern, " /"); idx >= 0 {
+					pattern = pattern[idx+1:]
+				}
+				store.pattern = pattern
+			}
+			wsMux.ServeHTTP(w, r)
+		})))
 }
 
 // fleetWSHandler resolves a per-workspace fleet Store from the registry and

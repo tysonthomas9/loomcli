@@ -61,6 +61,7 @@ type ServerConfig struct {
 	ScrollbackMaxLines      int                                                  // Maximum lines per scrollback buffer (0 = default 10000)
 	SessionsStore           *sessions.Store                                      // File-based session audit trail store (optional; nil disables session endpoints)
 	Logger                  *slog.Logger                                         // Structured logger (optional; nil falls back to slog.Default())
+	SentryDSN               string                                               // Sentry/GlitchTip DSN for error tracking (optional; empty disables)
 	DaemonStartupFn         func(ctx context.Context, onReady func(wsID string)) // Starts daemons for secondary workspaces; calls onReady(wsID) when each is reachable
 	WorkspaceAgentsFn       func(wsPath string) ([]WorkspaceAgentStatus, error)  // Returns agent status for a workspace by scanning its worktrees dir
 }

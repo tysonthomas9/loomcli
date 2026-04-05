@@ -53,6 +53,8 @@ func isPublicRoute(method, path string) bool {
 		return true
 	case normalizedPath == "/api/health":
 		return true
+	case normalizedPath == "/metrics":
+		return true
 	case normalizedPath == "/api/config":
 		// Auth discovery endpoint must be accessible without JWT (bootstrap)
 		return true
