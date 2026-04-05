@@ -7,11 +7,34 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/coordinator"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
+
+// newTestRegistry creates a coordinator.WorkspaceRegistry with real hooks and
+// supporting infrastructure for testing. Returns the registry, the underlying
+// MultiPool (for pool assertions), and the MultiWorkspaceSubscriber (for
+// subscriber assertions). Cleanup is registered automatically.
+func newTestRegistry(t *testing.T) (*coordinator.WorkspaceRegistry, *daemon.MultiPool, *MultiWorkspaceSubscriber) {
+	t.Helper()
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 10)
+	hub := realtime.NewHub()
+	go hub.Run()
+	t.Cleanup(func() { hub.Stop() })
+
+	multiSub := NewMultiWorkspaceSubscriber(hub, multiPool, slog.Default())
+	t.Cleanup(func() { multiSub.Stop() })
+
+	reg := coordinator.NewWorkspaceRegistry(slog.Default())
+	_ = reg.AddHook(NewBeadsPoolHook(multiPool, 10, slog.Default()))
+	_ = reg.AddHook(NewNotificationSubscriberHook(multiSub, slog.Default()))
+	t.Cleanup(func() { _ = reg.Close() })
+
+	return reg, multiPool, multiSub
+}
 
 func TestCreateWarnings_ContextHelpers(t *testing.T) {
 	t.Run("full lifecycle", func(t *testing.T) {
@@ -568,15 +591,7 @@ func TestWrapWorkspaceDeleteFn_UUIDResolvedBeforeDelete(t *testing.T) {
 	// This test verifies that resolveID is called BEFORE innerDelete.
 	// This ordering is critical because innerDelete removes the config entry,
 	// which would make UUID resolution impossible after the fact.
-	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 10)
-	hub := realtime.NewHub()
-	go hub.Run()
-	t.Cleanup(func() { hub.Stop() })
-
-	multiSub := NewMultiWorkspaceSubscriber(hub, multiPool, slog.Default())
-	t.Cleanup(func() { multiSub.Stop() })
-
-	registry := NewWorkspaceRegistry(multiPool, multiSub, 10, slog.Default())
+	registry, _, _ := newTestRegistry(t)
 
 	wsID := "dddddddd-1111-2222-3333-444444444444"
 	wsName := "order-test-workspace"

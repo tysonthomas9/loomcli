@@ -81,6 +81,16 @@ func (rc *RegistrationContext) Resolve(key string) (any, bool) {
 	return v, ok
 }
 
+// Resources returns a shallow copy of the resource map. Used by the registry
+// to snapshot resources into a WorkspaceHandle after all hooks have run.
+func (rc *RegistrationContext) Resources() map[string]any {
+	copied := make(map[string]any, len(rc.resources))
+	for k, v := range rc.resources {
+		copied[k] = v
+	}
+	return copied
+}
+
 // DeregistrationContext carries workspace metadata for deregistration and
 // rollback callbacks. It does not carry a resource bag — hooks are expected
 // to track their own per-workspace state internally.

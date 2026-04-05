@@ -124,3 +124,11 @@ func (h *BeadsPoolHook) consumePrebuilt(id string) (daemon.Pool, bool) {
 	}
 	return pool, ok
 }
+
+// shortBreakerName returns first 8 chars of an ID for readable breaker names.
+func shortBreakerName(id string) string {
+	if len(id) > 8 {
+		return id[:8]
+	}
+	return id
+}

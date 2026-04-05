@@ -15,6 +15,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
+	"github.com/tysonthomas9/loomcli/internal/webui/coordinator"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/editor"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
@@ -57,7 +58,7 @@ type Server struct {
 	getMutationsSince func(wsID string, since int64) []rpc.MutationEvent
 
 	// Workspace lifecycle
-	registry           *WorkspaceRegistry
+	registry           *coordinator.WorkspaceRegistry
 	initialWorkspaceID string
 
 	// Terminal
@@ -146,7 +147,7 @@ func (app *Server) buildHandlers() {
 
 	var getFleetTimeouts func() int64
 	if app.fleetRegistry != nil {
-		getFleetTimeouts = app.registry.FleetTimeoutCount
+		getFleetTimeouts = app.fleetRegistry.GetTotalTimeoutCount
 	}
 	app.metricsHandler = handleMetrics(app.hub, getFleetTimeouts, app.claimMetrics)
 
@@ -221,7 +222,9 @@ func (app *Server) Close() {
 	if app.fleetRegCfg != nil && app.fleetRegCfg.RateLimiter != nil {
 		_ = app.fleetRegCfg.RateLimiter.Close()
 	}
-	// fleetRegistry is closed by registry.Close() — no separate close needed.
+	if app.fleetRegistry != nil {
+		_ = app.fleetRegistry.Close()
+	}
 }
 
 // run starts the HTTP server and blocks until the context is canceled or the

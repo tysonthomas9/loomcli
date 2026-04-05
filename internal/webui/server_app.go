@@ -13,6 +13,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/tysonthomas9/loomcli/internal/circuitbreaker"
+	"github.com/tysonthomas9/loomcli/internal/webui/coordinator"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
@@ -184,17 +185,9 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 	app.multiSub = NewMultiWorkspaceSubscriber(app.hub, app.multiPool, config.Logger)
 	cleanups = append(cleanups, func() { app.multiSub.Stop() })
 
-	// Create central WorkspaceRegistry to coordinate all workspace lifecycle.
-	app.registry = NewWorkspaceRegistry(app.multiPool, app.multiSub, config.PoolSize, config.Logger)
-	cleanups = append(cleanups, func() { _ = app.registry.Close() })
-	if app.pool != nil {
-		if err := app.registry.RegisterPool(app.initialWorkspaceID, app.pool); err != nil {
-			logger.Warn("failed to register initial workspace", "err", err)
-		}
-		app.getMutationsSince = app.multiSub.GetMutationsSinceForWorkspace
-	}
-
-	// NOTE: reconcileConfigWorkspaces called below after fleet registry init.
+	// NOTE: coordinator.WorkspaceRegistry construction is deferred until after
+	// TerminalManager and FleetStoreRegistry init, because all hooks must exist
+	// before the first Register call.
 
 	// Terminal manager for WebSocket sessions (workspace-scoped prefix prevents collisions).
 	termSessionPrefix := fmt.Sprintf("%d-%s", app.actualPort, workspace.ShortWorkspaceID(app.initialWorkspaceID))
@@ -273,11 +266,6 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 		if err != nil {
 			logger.Warn("failed to initialize fleet store registry", "component", "fleet", "err", err)
 		} else {
-			if regErr := app.fleetRegistry.Register(app.initialWorkspaceID); regErr != nil {
-				logger.Warn("failed to register initial workspace in fleet registry",
-					"workspace", app.initialWorkspaceID, "err", regErr)
-			}
-
 			var jwtKey []byte
 			if len(config.FleetJWTKey) > 0 {
 				jwtKey = config.FleetJWTKey
@@ -295,7 +283,6 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 					SigningKey: jwtKey,
 					Expiry:     time.Hour,
 				}
-				// fleetRegistry cleanup is handled by registry.Close() via SetFleetRegistry.
 				logger.Info("fleet store registry initialized", "component", "fleet", "redis_address", config.FleetRedis.Address)
 			}
 		}
@@ -306,14 +293,44 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 		app.claimMetrics = fleet.NewClaimMetrics()
 	}
 
-	// Wire fleet registry into WorkspaceRegistry so Register/Deregister
-	// atomically manage all three subsystems (pool, subscriber, fleet).
+	// Construct lifecycle hooks in canonical order:
+	// beads-pool (critical), notification-subscriber, terminal (conditional), fleet-store (conditional).
+	beadsPoolHook := NewBeadsPoolHook(app.multiPool, config.PoolSize, config.Logger)
+	notifHook := NewNotificationSubscriberHook(app.multiSub, config.Logger)
+
+	app.registry = coordinator.NewWorkspaceRegistry(config.Logger)
+	cleanups = append(cleanups, func() { _ = app.registry.Close() })
+	_ = app.registry.AddHook(beadsPoolHook)
+	_ = app.registry.AddHook(notifHook)
+
+	if app.termMgr != nil {
+		_ = app.registry.AddHook(NewTerminalHook(app.termMgr, config.Logger))
+	}
 	if app.fleetRegistry != nil {
-		app.registry.SetFleetRegistry(app.fleetRegistry)
+		_ = app.registry.AddHook(NewFleetStoreHook(app.fleetRegistry, config.Logger))
 	}
 
-	// Reconcile all config workspaces (deferred until after fleet registry init
-	// so that other workspaces are also registered in the fleet).
+	// Register the initial workspace (replaces old RegisterPool pattern).
+	if app.pool != nil {
+		beadsPoolHook.SetPrebuiltPool(app.initialWorkspaceID, app.pool)
+		var initialWSPath string
+		if config.WorkspaceListFn != nil {
+			if wsMap, listErr := config.WorkspaceListFn(); listErr == nil {
+				initialWSPath = wsMap[app.initialWorkspaceID]
+			}
+		}
+		if initialWSPath == "" {
+			if cwd, cwdErr := getCwd(); cwdErr == nil {
+				initialWSPath = cwd
+			}
+		}
+		if err := app.registry.Register(app.initialWorkspaceID, initialWSPath); err != nil {
+			logger.Warn("failed to register initial workspace", "err", err)
+		}
+		app.getMutationsSince = app.multiSub.GetMutationsSinceForWorkspace
+	}
+
+	// Reconcile all config workspaces (hooks handle pool, subscriber, terminal, fleet atomically).
 	reconcileConfigWorkspaces(config.WorkspaceListFn, app.initialWorkspaceID, app.pool != nil, app.registry)
 
 	// Build fleet registration config (API key + rate limiter)

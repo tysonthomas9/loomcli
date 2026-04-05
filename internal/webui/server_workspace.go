@@ -7,8 +7,13 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/coordinator"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
+
+// WorkspaceIDResolverFn resolves a workspace name to its stable UUID.
+// Returns ("", error) if the workspace is not found or config cannot be loaded.
+type WorkspaceIDResolverFn func(name string) (string, error)
 
 // reconcileConfigWorkspaces registers all configured workspaces via the
 // WorkspaceRegistry at startup. Skips the initial workspace if it was already
@@ -18,7 +23,7 @@ func reconcileConfigWorkspaces(
 	listFn func() (map[string]string, error),
 	initialID string,
 	initialRegistered bool,
-	registry *WorkspaceRegistry,
+	registry *coordinator.WorkspaceRegistry,
 ) {
 	if listFn == nil {
 		return
@@ -41,7 +46,7 @@ func reconcileConfigWorkspaces(
 
 func wrapWorkspaceCreateFn(
 	innerCreate service.WorkspaceCreateFn,
-	registry *WorkspaceRegistry,
+	registry *coordinator.WorkspaceRegistry,
 ) service.WorkspaceCreateFn {
 	if innerCreate == nil {
 		return nil
@@ -82,7 +87,7 @@ func wrapWorkspaceCreateFn(
 // FleetStoreRegistry (stopping fleet Store and TimeoutEnforcer).
 func wrapWorkspaceDeleteFn(
 	innerDelete func(name string) error,
-	registry *WorkspaceRegistry,
+	registry *coordinator.WorkspaceRegistry,
 	resolveID WorkspaceIDResolverFn,
 ) func(name string) error {
 	if innerDelete == nil {

@@ -6,6 +6,14 @@ import (
 	"sync"
 )
 
+// activeWorkspace holds per-workspace state: the resource handle produced by
+// hooks during registration and the list of hooks that succeeded (needed for
+// reverse-order deregistration).
+type activeWorkspace struct {
+	handle    *WorkspaceHandle
+	succeeded []string
+}
+
 // WorkspaceRegistry orchestrates LifecycleHook callbacks for workspace
 // registration and deregistration. Hooks are called in registration order
 // on Register and in reverse order on Deregister. Critical hook failures
@@ -13,7 +21,7 @@ import (
 type WorkspaceRegistry struct {
 	mu     sync.RWMutex
 	hooks  []LifecycleHook
-	active map[string][]string // workspace ID → hook names that succeeded
+	active map[string]*activeWorkspace
 	closed bool
 	logger *slog.Logger
 }
@@ -24,7 +32,7 @@ func NewWorkspaceRegistry(logger *slog.Logger) *WorkspaceRegistry {
 		logger = slog.Default()
 	}
 	return &WorkspaceRegistry{
-		active: make(map[string][]string),
+		active: make(map[string]*activeWorkspace),
 		logger: logger,
 	}
 }
@@ -100,7 +108,11 @@ func (r *WorkspaceRegistry) Register(id, path string) error {
 		succeeded = append(succeeded, hook.Name())
 	}
 
-	r.active[id] = succeeded
+	handle := NewWorkspaceHandle(id, path, ctx.Resources())
+	r.active[id] = &activeWorkspace{
+		handle:    handle,
+		succeeded: succeeded,
+	}
 	return nil
 }
 
@@ -119,7 +131,7 @@ func (r *WorkspaceRegistry) Deregister(id string) {
 
 // deregisterLocked performs deregistration under the existing lock.
 func (r *WorkspaceRegistry) deregisterLocked(id string) {
-	succeeded, ok := r.active[id]
+	aw, ok := r.active[id]
 	if !ok {
 		return
 	}
@@ -130,8 +142,8 @@ func (r *WorkspaceRegistry) deregisterLocked(id string) {
 	}
 
 	// Call OnDeregister in reverse order, only for hooks that succeeded.
-	for i := len(succeeded) - 1; i >= 0; i-- {
-		hook := r.hookByName(succeeded[i])
+	for i := len(aw.succeeded) - 1; i >= 0; i-- {
+		hook := r.hookByName(aw.succeeded[i])
 		if hook == nil {
 			continue
 		}

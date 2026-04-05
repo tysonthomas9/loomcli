@@ -229,7 +229,7 @@ func (app *Server) registerWorkspaceRoutes() { //nolint:funlen,gocognit,cyclop /
 	// Workspace-scoped fleet routes. Claim uses multiPool (routes to correct
 	// workspace daemon); register/done/heartbeat resolve the Store per-request.
 	if app.fleetRegistry != nil {
-		fleetStoreFn := app.registry.FleetStore
+		fleetStoreFn := app.fleetRegistry.Get
 		wsMux.HandleFunc("POST /api/workspaces/{ws}/fleet/register",
 			fleetWSHandler(fleetStoreFn, func(s *fleet.Store) http.HandlerFunc {
 				return handleFleetRegister(s, app.tokenCfg, app.fleetRegCfg)
