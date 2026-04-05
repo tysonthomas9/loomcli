@@ -95,15 +95,13 @@ func (d *Daemon) Stop() {
 	// Unblock any agents waiting for concurrency slots
 	d.concurrency.Close()
 
-	// Stop all agent processes
+	// Yield and stop all agent processes in parallel
 	d.agentsMu.RLock()
 	snapshot := make([]*AgentProcess, len(d.agents))
 	copy(snapshot, d.agents)
 	d.agentsMu.RUnlock()
 
-	for _, ap := range snapshot {
-		d.stopAgent(ap)
-	}
+	d.drainAllWithGrace(snapshot)
 
 	// Wait for all superviseAgent goroutines to exit
 	d.wg.Wait()

@@ -33,6 +33,9 @@ func applyRestartPolicyDefaults(rp *RestartPolicy) {
 	if rp.IdlePollInterval == nil {
 		rp.IdlePollInterval = intPtr(30)
 	}
+	if rp.YieldTimeout == nil {
+		rp.YieldTimeout = intPtr(DefaultYieldTimeout)
+	}
 }
 
 // maskDaemonSecrets replaces sensitive fields in DaemonSettings with "***".
@@ -114,6 +117,10 @@ func resolvedConfigForDisplay(cfg *DaemonConfig) DaemonConfig {
 	if cfg.Daemon.RestartPolicy.IdlePollInterval != nil {
 		v := *cfg.Daemon.RestartPolicy.IdlePollInterval
 		rp.IdlePollInterval = &v
+	}
+	if cfg.Daemon.RestartPolicy.YieldTimeout != nil {
+		v := *cfg.Daemon.RestartPolicy.YieldTimeout
+		rp.YieldTimeout = &v
 	}
 
 	// Copy Roles map

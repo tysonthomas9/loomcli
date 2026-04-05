@@ -64,6 +64,7 @@ type RestartPolicy struct {
 	TimeoutBackoff   *int  `yaml:"timeout_backoff,omitempty"`     // seconds (default 5)
 	NoWorkBackoff    *int  `yaml:"no_work_backoff,omitempty"`     // seconds (default 30); fixed interval when no tasks available
 	IdlePollInterval *int  `yaml:"idle_poll_interval,omitempty"`  // seconds (default 30); polling interval for task availability
+	YieldTimeout     *int  `yaml:"yield_timeout,omitempty"`       // seconds; how long to wait for agent to yield before SIGTERM (default 60)
 }
 
 // RoleConfig defines an agent role (built-in like "plan"/"task", or custom).
@@ -413,6 +414,9 @@ func overlayRestartPolicy(dst, src *RestartPolicy) {
 	}
 	if src.IdlePollInterval != nil {
 		dst.IdlePollInterval = src.IdlePollInterval
+	}
+	if src.YieldTimeout != nil {
+		dst.YieldTimeout = src.YieldTimeout
 	}
 }
 

@@ -29,13 +29,15 @@ func (d *Daemon) drainAgent(name string) error {
 	target.stopReason = StopReasonConfigRemoved
 	target.mu.Unlock()
 
-	// Signal the agent to stop (safe against double-close)
+	// Signal the agent to stop (safe against double-close).
+	// ORDERING: stopCh must close BEFORE DrainWithGrace — prevents superviseAgent
+	// from respawning after the subprocess exits via yield.
 	target.stopOnce.Do(func() {
 		close(target.stopCh)
 	})
 
-	// Stop the subprocess (SIGTERM → SIGKILL)
-	d.stopAgent(target)
+	// Yield → wait → SIGTERM → SIGKILL
+	d.DrainWithGrace(target, "config_removed", d.getYieldTimeout())
 
 	// Wait for the superviseAgent goroutine to exit
 	<-target.done

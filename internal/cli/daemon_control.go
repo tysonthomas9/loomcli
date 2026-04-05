@@ -94,16 +94,21 @@ func (d *Daemon) handleControlConnection(conn net.Conn) {
 		return
 	}
 
-	// Write timeout: 30 seconds for the response (drain/stop can take time)
-	_ = conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
+	// Write timeout: 30 seconds for simple operations.
+	// agent_stop/agent_restart may block for yield_timeout + SIGTERM grace (~65s+);
+	// extend their deadline below.
+	writeDeadline := 30 * time.Second
+	_ = conn.SetWriteDeadline(time.Now().Add(writeDeadline))
 
 	var resp DaemonControlResponse
 	switch req.Operation {
 	case ctrlOpAgentStop:
+		_ = conn.SetWriteDeadline(time.Now().Add(d.getYieldTimeout() + 10*time.Second))
 		resp = d.handleAgentControlStop(req.AgentName)
 	case ctrlOpAgentStart:
 		resp = d.handleAgentControlStart(req.AgentName)
 	case ctrlOpAgentRestart:
+		_ = conn.SetWriteDeadline(time.Now().Add(d.getYieldTimeout() + 10*time.Second))
 		resp = d.handleAgentControlRestart(req.AgentName)
 	case ctrlOpAgentList:
 		resp = d.handleAgentControlList()
@@ -286,13 +291,15 @@ func (d *Daemon) drainAgentWithReason(name string, reason StopReason) error {
 	target.stopReason = reason
 	target.mu.Unlock()
 
-	// Signal the agent to stop (safe against double-close)
+	// Signal the agent to stop (safe against double-close).
+	// ORDERING: stopCh must close BEFORE DrainWithGrace — prevents superviseAgent
+	// from respawning after the subprocess exits via yield.
 	target.stopOnce.Do(func() {
 		close(target.stopCh)
 	})
 
-	// Stop the subprocess (SIGTERM -> SIGKILL)
-	d.stopAgent(target)
+	// Yield → wait → SIGTERM → SIGKILL
+	d.DrainWithGrace(target, string(reason), d.getYieldTimeout())
 
 	// Wait for the superviseAgent goroutine to exit
 	<-target.done
