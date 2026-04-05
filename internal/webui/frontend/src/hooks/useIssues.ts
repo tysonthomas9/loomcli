@@ -178,7 +178,7 @@ export function useIssues(options: UseIssuesOptions): UseIssuesReturn {
   const deletedDuringFetchRef = useRef<Set<string>>(new Set());
 
   // Ref for refetch callback (needed because refetch is defined after useMutationHandler)
-  const refetchRef = useRef<() => void>(() => {});
+  const refetchRef = useRef<(signal?: AbortSignal) => void>(() => {});
 
   // Debounce timer for MutationRefresh events — collapses rapid successive
   // refresh events (e.g., multiple external writes in a 3s poll window) into
@@ -445,15 +445,20 @@ export function useIssues(options: UseIssuesOptions): UseIssuesReturn {
   // Keep refetchRef in sync with the latest refetch callback
   refetchRef.current = refetch;
 
-  // Auto-fetch on mount (AbortController cancels in-flight fetch on unmount or dep change)
+  // Auto-fetch on mount and when filter values change.
+  // Uses refetchRef (not refetch) to break the identity-churn cascade (e1lgt fix).
+  // Guards on workspaceId to avoid cancel storms during mount: context hydration
+  // updates workspaceId from "" → actual ID, then sourceRepos settles — without
+  // this guard, each transient state fires + aborts a request.
   useEffect(() => {
-    if (!autoFetch) return;
+    if (!autoFetch || !workspaceId) return;
     const controller = new AbortController();
-    void refetch(controller.signal);
+    void refetchRef.current(controller.signal);
     return () => {
       controller.abort();
     };
-  }, [autoFetch, refetch]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoFetch, filter, mode, graphFilter, sourceRepos, workspaceId]);
 
   // Track max reconnect attempts to detect prolonged disconnection
   useEffect(() => {
@@ -510,7 +515,7 @@ export function useIssues(options: UseIssuesOptions): UseIssuesReturn {
           type: "info",
           duration: 3000,
         });
-        void refetch();
+        void refetchRef.current();
       } else {
         // Show change count toast (only when not doing a full refetch)
         const changeCount =
@@ -538,7 +543,9 @@ export function useIssues(options: UseIssuesOptions): UseIssuesReturn {
         staleBannerTimerRef.current = null;
       }
     }
-  }, [connectionState, showToast, refetch, mutationCount]);
+    // refetch accessed via refetchRef — intentionally excluded from deps (e1lgt fix).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectionState, showToast, mutationCount]);
 
   // Cleanup on unmount
   useEffect(() => {

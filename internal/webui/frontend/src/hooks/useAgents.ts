@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 
-import { fetchAgents, fetchStatus, fetchTasks } from "@/api";
+import { fetchAgents, fetchStatus, fetchTasks, fetchWorkspaceAgents } from "@/api";
 import type {
   LoomAgentStatus,
   LoomTaskSummary,
@@ -24,6 +24,8 @@ export interface UseAgentsOptions {
   pollInterval?: number;
   /** Whether to fetch (default: true) */
   enabled?: boolean;
+  /** Optional workspace ID — when set, workspace agents are fetched in the same poll cycle */
+  workspaceId?: string;
 }
 
 /**
@@ -32,6 +34,8 @@ export interface UseAgentsOptions {
 export interface UseAgentsResult {
   /** Agent status data, empty array if not yet loaded or server unavailable */
   agents: LoomAgentStatus[];
+  /** Workspace-scoped agents (only populated when workspaceId is set) */
+  workspaceAgents: LoomAgentStatus[];
   /** Task queue summary counts */
   tasks: LoomTaskSummary;
   /** Task lists organized by category */
@@ -166,9 +170,10 @@ async function withTimeout<T>(
 }
 
 export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
-  const { pollInterval = 5000, enabled = true } = options ?? {};
+  const { pollInterval = 5000, enabled = true, workspaceId } = options ?? {};
 
   const [agents, setAgents] = useState<LoomAgentStatus[]>([]);
+  const [workspaceAgents, setWorkspaceAgents] = useState<LoomAgentStatus[]>([]);
   const [tasks, setTasks] = useState<LoomTaskSummary>(DEFAULT_TASKS);
   const [taskLists, setTaskLists] = useState<LoomTaskLists>(DEFAULT_TASK_LISTS);
   const [agentTasks, setAgentTasks] = useState<Record<string, LoomTaskInfo>>(
@@ -194,6 +199,17 @@ export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
   );
   const consecutiveFailuresAtCeilingRef = useRef(0);
   const disconnectedSinceRef = useRef<number | null>(null);
+
+  // Stable ref for workspaceId so fetchData callback doesn't need it as a dep
+  const workspaceIdRef = useRef(workspaceId);
+  workspaceIdRef.current = workspaceId;
+
+  // Clear stale workspace agents immediately when workspace changes.
+  // Follows the same pattern as useWorkspace/useIssues: old data is evicted
+  // before the new workspace's first poll responds.
+  useEffect(() => {
+    setWorkspaceAgents([]);
+  }, [workspaceId]);
 
   // Track if a fetch is in progress to prevent overlapping requests
   const fetchInProgressRef = useRef<boolean>(false);
@@ -247,6 +263,28 @@ export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
     fetchStartTimeRef.current = Date.now();
     setIsLoading(true);
     clearRetryTimers();
+
+    // Fire workspace agents concurrently with global agents (a7swy fix).
+    // Must be outside try block so it starts at the same time as fetchAgents.
+    const wsId = workspaceIdRef.current;
+    if (wsId) {
+      void (async () => {
+        try {
+          const wsAgents = await withTimeout(
+            fetchWorkspaceAgents(wsId),
+            LOOM_FETCH_TIMEOUT_MS,
+            "Workspace agents fetch",
+          );
+          // Guard: discard if workspace changed during the fetch (TOCTOU fix).
+          if (mountedRef.current && workspaceIdRef.current === wsId) {
+            setWorkspaceAgents(wsAgents);
+          }
+        } catch (e) {
+          // Non-critical: workspace agents are supplementary
+          console.warn("Workspace agents fetch failed:", e);
+        }
+      })();
+    }
 
     try {
       const agentsResult = await withTimeout(
@@ -317,6 +355,7 @@ export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
           );
         }
       })();
+
     } catch (err) {
       // Only update state if still mounted
       if (mountedRef.current) {
@@ -495,6 +534,7 @@ export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
 
   return {
     agents,
+    workspaceAgents,
     tasks,
     taskLists,
     agentTasks,

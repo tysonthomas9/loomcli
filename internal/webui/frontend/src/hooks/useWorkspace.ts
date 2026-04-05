@@ -4,7 +4,7 @@
  * and tab-visibility-aware refetching.
  */
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 
 import { fetchWorkspace, refreshWorkspace } from "@/api/workspace";
 import type {
@@ -12,6 +12,11 @@ import type {
   RepoInfo,
   WorkspaceAgentInfo,
 } from "@/api/workspace";
+
+// Stable empty arrays — avoids new [] reference on every render when workspace is null.
+const EMPTY_REPOS: RepoInfo[] = [];
+const EMPTY_GROUPS: string[] = [];
+const EMPTY_AGENTS: WorkspaceAgentInfo[] = [];
 
 export interface UseWorkspaceOptions {
   /** Poll interval in ms (default: 60000 = 60s) */
@@ -49,9 +54,21 @@ export function useWorkspace(
 ): UseWorkspaceReturn {
   const { pollInterval = DEFAULT_POLL_INTERVAL, workspaceId } = options ?? {};
 
-  const [workspace, setWorkspace] = useState<WorkspaceData | null>(null);
+  const [workspace, setWorkspaceRaw] = useState<WorkspaceData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Only commit a new workspace reference when content has actually changed.
+  // This is the root fix for downstream reference instability — every useMemo/useCallback
+  // that depends on workspace.repos/groups/agents stays stable across unchanged polls.
+  const setWorkspace = useCallback((data: WorkspaceData | null) => {
+    setWorkspaceRaw((prev) => {
+      if (prev === null && data === null) return prev;
+      if (prev === null || data === null) return data;
+      if (JSON.stringify(prev) === JSON.stringify(data)) return prev;
+      return data;
+    });
+  }, []);
 
   const mountedRef = useRef(true);
   const workspaceIdRef = useRef(workspaceId);
@@ -135,13 +152,12 @@ export function useWorkspace(
     );
   }, []);
 
-  return {
-    workspace,
-    repos: workspace?.repos ?? [],
-    groups: workspace?.groups ?? [],
-    agents: workspace?.agents ?? [],
-    isLoading,
-    error,
-    refetch,
-  };
+  const repos = workspace?.repos ?? EMPTY_REPOS;
+  const groups = workspace?.groups ?? EMPTY_GROUPS;
+  const agents = workspace?.agents ?? EMPTY_AGENTS;
+
+  return useMemo(
+    () => ({ workspace, repos, groups, agents, isLoading, error, refetch }),
+    [workspace, repos, groups, agents, isLoading, error, refetch],
+  );
 }

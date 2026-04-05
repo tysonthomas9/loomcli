@@ -51,6 +51,7 @@ export { getIssueEvents } from "./events";
 // Agent API functions (loom server)
 export {
   fetchAgents,
+  fetchWorkspaceAgents,
   checkLoomHealth,
   fetchStatus,
   fetchTasks,

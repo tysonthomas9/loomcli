@@ -7,15 +7,11 @@ import {
   createContext,
   useContext,
   useCallback,
-  useState,
-  useEffect,
-  useRef,
   useMemo,
   type ReactNode,
 } from "react";
 
 import type { LoomAgentStatus } from "@/types";
-import { fetchWorkspaceAgents } from "@/api/agents";
 
 import { useAgents } from "./useAgents";
 import type { UseAgentsResult } from "./useAgents";
@@ -44,44 +40,20 @@ export interface AgentProviderProps {
  * Internally manages a single useAgents() polling loop (5s interval).
  */
 export function AgentProvider({ children }: AgentProviderProps): JSX.Element {
-  const agentsResult = useAgents({ pollInterval: 5000 });
   const { workspaceId } = useWorkspaceContext();
-  const [wsAgents, setWsAgents] = useState<LoomAgentStatus[]>([]);
-  const mountedRef = useRef(true);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
-  // Fetch workspace agents whenever global agents update (piggyback on same poll cycle).
-  // No separate interval — avoids dual-polling that doubles request rate.
-  const lastUpdated = agentsResult.lastUpdated;
-  useEffect(() => {
-    if (!workspaceId || !lastUpdated) return;
-    let cancelled = false;
-    fetchWorkspaceAgents(workspaceId)
-      .then((agents) => {
-        if (!cancelled && mountedRef.current) setWsAgents(agents);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceId, lastUpdated]);
+  // Workspace agents are fetched concurrently in the same poll cycle (a7swy fix).
+  const agentsResult = useAgents({ pollInterval: 5000, workspaceId });
 
   // Merge: workspace agents take priority (they have repo-specific data),
   // then append global agents not already present by name.
   const mergedAgents = useMemo(() => {
     const byName = new Map<string, LoomAgentStatus>();
-    for (const a of wsAgents) byName.set(a.name, a);
+    for (const a of agentsResult.workspaceAgents) byName.set(a.name, a);
     for (const a of agentsResult.agents) {
       if (!byName.has(a.name)) byName.set(a.name, a);
     }
     return Array.from(byName.values());
-  }, [wsAgents, agentsResult.agents]);
+  }, [agentsResult.workspaceAgents, agentsResult.agents]);
 
   const getAgentByName = useCallback(
     (name: string): LoomAgentStatus | undefined => {
@@ -104,6 +76,7 @@ export function AgentProvider({ children }: AgentProviderProps): JSX.Element {
 /** Default no-op value returned when useAgentContext is called outside a provider. */
 const NO_AGENT_CONTEXT: AgentContextValue = {
   agents: [],
+  workspaceAgents: [],
   tasks: {
     needs_planning: 0,
     ready_to_implement: 0,

@@ -43,6 +43,7 @@ function createMockAgent(
 function setupMockAgents(agents: LoomAgentStatus[] = []) {
   mockUseAgents.mockReturnValue({
     agents,
+    workspaceAgents: [],
     tasks: {
       needs_planning: 0,
       ready_to_implement: 0,
@@ -241,7 +242,9 @@ describe("useAgentContext", () => {
 
       renderHook(() => useAgentContext(), { wrapper });
 
-      expect(mockUseAgents).toHaveBeenCalledWith({ pollInterval: 5000 });
+      expect(mockUseAgents).toHaveBeenCalledWith(
+        expect.objectContaining({ pollInterval: 5000 }),
+      );
     });
   });
 });
