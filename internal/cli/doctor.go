@@ -98,7 +98,9 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		func() CheckResult { return checkTmux(deps) },
 		checkIssueBackend,
 	}
-	if isFleetDBActive() {
+	if isFleetActive() {
+		checks = append(checks, checkFleet)
+	} else if isFleetDBActive() {
 		checks = append(checks, checkFleetDB)
 	} else {
 		checks = append(checks,

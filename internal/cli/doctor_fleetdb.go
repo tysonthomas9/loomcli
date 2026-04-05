@@ -10,6 +10,13 @@ import (
 )
 
 func checkIssueBackend() CheckResult {
+	if isFleetActive() {
+		return CheckResult{
+			Name:    "issue_backend",
+			Status:  StatusPass,
+			Summary: "Issue backend: fleet (remote server)",
+		}
+	}
 	if isFleetDBActive() {
 		return CheckResult{
 			Name:    "issue_backend",
@@ -71,5 +78,30 @@ func reportFleetDBConfig(cfg FleetDBServerConfig) CheckResult {
 		Name:    "fleetdb",
 		Status:  StatusPass,
 		Summary: fmt.Sprintf("fleet-db configured (workspace: %s, Redis: %s)", cfg.Workspace, cfg.RedisURL),
+	}
+}
+
+func checkFleet() CheckResult {
+	dc, err := LoadDaemonConfig(GetBeadsDir())
+	var fleetCfg FleetClientConfig
+	if err != nil {
+		fleetCfg = resolveFleetConfig(&DaemonSettings{})
+	} else {
+		fleetCfg = resolveFleetConfig(&dc.Daemon)
+	}
+
+	if fleetCfg.URL == "" {
+		return CheckResult{
+			Name:    "fleet",
+			Status:  StatusFail,
+			Summary: "fleet mode active but no fleet URL configured",
+			Detail:  "Set daemon.fleet.url in loom.yaml or LOOM_FLEET_URL env var",
+		}
+	}
+
+	return CheckResult{
+		Name:    "fleet",
+		Status:  StatusPass,
+		Summary: fmt.Sprintf("fleet configured (workspace: %s, URL: %s)", fleetCfg.Workspace, fleetCfg.URL),
 	}
 }

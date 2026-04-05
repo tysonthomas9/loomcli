@@ -46,13 +46,14 @@ func init() {
 
 // StatusData is the top-level JSON output for loom status.
 type StatusData struct {
-	Daemon    DaemonInfo       `json:"daemon"`
-	Backend   BackendInfo      `json:"backend"`
-	Worktrees WorktreesSummary `json:"worktrees"`
-	Beads     BeadsSummary     `json:"beads"`
-	Git       GitSummary       `json:"git"`
-	Redis     RedisInfo        `json:"redis"`
-	Issues    []StatusIssue    `json:"issues,omitempty"`
+	Daemon       DaemonInfo       `json:"daemon"`
+	Backend      BackendInfo      `json:"backend"`
+	IssueBackend string           `json:"issue_backend"`
+	Worktrees    WorktreesSummary `json:"worktrees"`
+	Beads        BeadsSummary     `json:"beads"`
+	Git          GitSummary       `json:"git"`
+	Redis        RedisInfo        `json:"redis"`
+	Issues       []StatusIssue    `json:"issues,omitempty"`
 }
 
 // DaemonInfo holds daemon health information.
@@ -156,9 +157,10 @@ func collectDaemonStatus() DaemonInfo {
 
 func buildStatusData(daemon DaemonInfo, mon *MonitorData) StatusData {
 	data := StatusData{
-		Daemon:  daemon,
-		Backend: collectBackendInfo(),
-		Redis:   collectRedisStatus(),
+		Daemon:       daemon,
+		Backend:      collectBackendInfo(),
+		IssueBackend: resolveIssueBackendType(),
+		Redis:        collectRedisStatus(),
 	}
 
 	if mon != nil {
@@ -319,6 +321,9 @@ func renderStatusHuman(data StatusData) {
 
 	// Backend
 	fmt.Printf("Backend:    %s (via %s)\n", data.Backend.Name, data.Backend.Source)
+
+	// Issue Backend
+	fmt.Printf("Issues:     %s\n", data.IssueBackend)
 
 	// Worktrees
 	total := len(data.Worktrees.List)

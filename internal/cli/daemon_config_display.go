@@ -47,6 +47,9 @@ func maskDaemonSecrets(ds *DaemonSettings) {
 	if ds.FleetDB != nil && ds.FleetDB.RedisURL != "" {
 		ds.FleetDB.RedisURL = "***"
 	}
+	if ds.Fleet != nil && ds.Fleet.APIKey != "" {
+		ds.Fleet.APIKey = "***"
+	}
 }
 
 // resolvedConfigForDisplay returns a copy of cfg with secrets masked and
@@ -74,6 +77,10 @@ func resolvedConfigForDisplay(cfg *DaemonConfig) DaemonConfig {
 	if cfg.Daemon.FleetDB != nil {
 		fleetCopy := *cfg.Daemon.FleetDB
 		out.Daemon.FleetDB = &fleetCopy
+	}
+	if cfg.Daemon.Fleet != nil {
+		fleetClientCopy := *cfg.Daemon.Fleet
+		out.Daemon.Fleet = &fleetClientCopy
 	}
 
 	// Copy RestartPolicy pointer fields

@@ -144,9 +144,11 @@ func runInitWorkspace(cmd *cobra.Command, _ []string) {
 	}
 	fmt.Println("")
 
-	// Step 3: Initialize beads in workspace root (skip when fleet-db is active)
+	// Step 3: Initialize beads in workspace root (skip when fleet or fleet-db is active)
 	fmt.Println("Step 3: Issue backend")
-	if isFleetDBActive() {
+	if isFleetActive() {
+		fmt.Println("→ Skipping beads init (fleet backend active)")
+	} else if isFleetDBActive() {
 		fmt.Println("→ Skipping beads init (fleet-db backend active)")
 	} else if _, statErr := os.Stat(filepath.Join(ws.Path, ".beads")); statErr == nil {
 		fmt.Println("✓ beads already initialized in workspace")

@@ -37,8 +37,10 @@ func checkPrerequisites(deps *Deps) bool {
 		}
 	}
 
-	// Check if bd (beads) CLI is available (skip when fleet-db is active)
-	if isFleetDBActive() {
+	// Check if bd (beads) CLI is available (skip when fleet or fleet-db is active)
+	if isFleetActive() {
+		fmt.Println("✓ fleet backend active (bd CLI not required)")
+	} else if isFleetDBActive() {
 		fmt.Println("✓ fleet-db backend active (bd CLI not required)")
 	} else if result = deps.Exec.Run(".", "bd", "--version"); result.Err != nil {
 		fmt.Println("✗ bd (beads CLI) not found")
@@ -54,6 +56,10 @@ func checkPrerequisites(deps *Deps) bool {
 
 // initBeads initializes beads if not already done
 func initBeads(deps *Deps) bool {
+	if isFleetActive() {
+		fmt.Println("→ Skipping beads init (fleet backend active)")
+		return true
+	}
 	if isFleetDBActive() {
 		fmt.Println("→ Skipping beads init (fleet-db backend active)")
 		return true

@@ -73,6 +73,14 @@ func ValidateProjectConfig(dc *DaemonConfig, projectDir string) *ValidationResul
 	if dc.Daemon.FleetDB != nil {
 		validateFleetDBSettings(r, dc.Daemon.FleetDB)
 	}
+	validateIssueBackend(r, dc.Daemon.IssueBackend)
+	if dc.Daemon.Fleet != nil {
+		validateFleetSettings(r, dc.Daemon.Fleet)
+	}
+	// Cross-field: fleet mode with no URL configured
+	if dc.Daemon.IssueBackend == IssueBackendFleet && (dc.Daemon.Fleet == nil || dc.Daemon.Fleet.URL == "") {
+		r.addWarning("daemon.fleet.url", "issue_backend is 'fleet' but daemon.fleet.url is not configured; set daemon.fleet.url or LOOM_FLEET_URL")
+	}
 
 	return r
 }
@@ -234,6 +242,30 @@ func validateFleetDBSettings(r *ValidationResult, fdb *FleetDBSettings) {
 	}
 }
 
+// validateIssueBackend checks that an issue_backend value (if set) is one of the valid options.
+func validateIssueBackend(r *ValidationResult, ib string) {
+	if ib == "" {
+		return
+	}
+	if !validIssueBackends[ib] {
+		r.addError("daemon.issue_backend", fmt.Sprintf("%q must be one of: beads, fleetdb, fleet", ib))
+	}
+}
+
+// validateFleetSettings checks fleet client config fields for validity.
+func validateFleetSettings(r *ValidationResult, fs *FleetSettings) {
+	if fs.URL != "" {
+		if !strings.HasPrefix(fs.URL, "http://") && !strings.HasPrefix(fs.URL, "https://") {
+			r.addError("daemon.fleet.url", fmt.Sprintf(
+				"%q must start with http:// or https://", fs.URL))
+		}
+	}
+	if fs.Workspace != "" && !isValidWorktreeName(fs.Workspace) {
+		r.addWarning("daemon.fleet.workspace", fmt.Sprintf(
+			"%q contains invalid characters; use only alphanumeric, hyphens, and underscores", fs.Workspace))
+	}
+}
+
 // ValidateGlobalConfig validates the global LoomConfig.
 func ValidateGlobalConfig(cfg *LoomConfig) *ValidationResult {
 	r := &ValidationResult{}
@@ -265,8 +297,14 @@ func ValidateGlobalConfig(cfg *LoomConfig) *ValidationResult {
 		validateWorkspaceRepos(r, field, ws)
 	}
 
-	if cfg.Daemon != nil && cfg.Daemon.FleetDB != nil {
-		validateFleetDBSettings(r, cfg.Daemon.FleetDB)
+	if cfg.Daemon != nil {
+		if cfg.Daemon.FleetDB != nil {
+			validateFleetDBSettings(r, cfg.Daemon.FleetDB)
+		}
+		validateIssueBackend(r, cfg.Daemon.IssueBackend)
+		if cfg.Daemon.Fleet != nil {
+			validateFleetSettings(r, cfg.Daemon.Fleet)
+		}
 	}
 
 	return r

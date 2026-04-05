@@ -16,6 +16,9 @@ type daemonStatus struct {
 // For fleet-db, the server lifecycle is managed by daemon_cmd.go,
 // so this is a no-op. For beads, it delegates to EnsureBdDaemonRunning.
 func EnsureIssueBackendRunning(deps *Deps, timeout time.Duration) (bool, error) {
+	if isFleetActive() {
+		return false, nil
+	}
 	if isFleetDBActive() {
 		return false, nil
 	}

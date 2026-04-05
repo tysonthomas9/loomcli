@@ -1,13 +1,11 @@
 package cli
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"sync"
-	"text/template"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -29,6 +27,8 @@ type DaemonSettings struct {
 	RedisURL       string            `yaml:"redis_url,omitempty"` // stale-detector/serve Redis — NOT used by fleet-db (see FleetDBSettings.RedisURL)
 	OTel           *OTelDaemonConfig `yaml:"otel,omitempty"`
 	FleetDB        *FleetDBSettings  `yaml:"fleetdb,omitempty"`         // fleet-db backend config (separate from RedisURL above)
+	IssueBackend   string            `yaml:"issue_backend,omitempty"`   // "beads" (default), "fleetdb", or "fleet"
+	Fleet          *FleetSettings    `yaml:"fleet,omitempty"`           // fleet client config (remote fleet server connection)
 	StartupTimeout *int              `yaml:"startup_timeout,omitempty"` // seconds; how long to wait for daemon readiness (default 30)
 }
 
@@ -130,14 +130,6 @@ type DaemonConfig struct {
 	Daemon  DaemonSettings        `yaml:"daemon,omitempty"`
 	Roles   map[string]RoleConfig `yaml:"roles,omitempty"`
 	Agents  []AgentEntry          `yaml:"agents,omitempty"`
-}
-
-// PromptData is the template context for custom prompt files.
-type PromptData struct {
-	AgentName    string
-	WorktreeName string
-	Role         string
-	TaskID       string
 }
 
 // LoadProjectFile reads and parses the project-local loom.yaml from dir.
@@ -379,6 +371,15 @@ func overlayDaemonSettings(dst *DaemonSettings, src *DaemonSettings) {
 		}
 		overlayFleetDBSettings(dst.FleetDB, src.FleetDB)
 	}
+	if src.IssueBackend != "" {
+		dst.IssueBackend = src.IssueBackend
+	}
+	if src.Fleet != nil {
+		if dst.Fleet == nil {
+			dst.Fleet = &FleetSettings{}
+		}
+		overlayFleetSettings(dst.Fleet, src.Fleet)
+	}
 	if src.StartupTimeout != nil {
 		dst.StartupTimeout = src.StartupTimeout
 	}
@@ -467,25 +468,4 @@ func ResolveDaemonStatePath(projectDir string) string {
 	}
 	pidFilePath := resolveDaemonPath(projectDir, config.Daemon.PIDFile)
 	return filepath.Join(filepath.Dir(pidFilePath), "daemon-agents.json")
-}
-
-// LoadPromptTemplate reads a prompt template file and executes it with the given data.
-// Returns the rendered prompt string.
-func LoadPromptTemplate(path string, data PromptData) (string, error) {
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("reading prompt template %s: %w", path, err)
-	}
-
-	tmpl, err := template.New(filepath.Base(path)).Parse(string(content))
-	if err != nil {
-		return "", fmt.Errorf("parsing prompt template %s: %w", path, err)
-	}
-
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return "", fmt.Errorf("executing prompt template %s: %w", path, err)
-	}
-
-	return buf.String(), nil
 }

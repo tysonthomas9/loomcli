@@ -216,6 +216,118 @@ func TestResolvedConfigForDisplay_DoesNotMutateOriginal(t *testing.T) {
 	}
 }
 
+func TestMaskDaemonSecrets_Fleet(t *testing.T) {
+	ds := &DaemonSettings{
+		Fleet: &FleetSettings{
+			URL:       "https://fleet.example.com",
+			Workspace: "prod",
+			APIKey:    "super-secret-key",
+		},
+	}
+	maskDaemonSecrets(ds)
+
+	if ds.Fleet.APIKey != "***" {
+		t.Errorf("Fleet.APIKey = %q, want ***", ds.Fleet.APIKey)
+	}
+	// URL and Workspace should NOT be masked
+	if ds.Fleet.URL != "https://fleet.example.com" {
+		t.Errorf("Fleet.URL should not be masked, got %q", ds.Fleet.URL)
+	}
+	if ds.Fleet.Workspace != "prod" {
+		t.Errorf("Fleet.Workspace should not be masked, got %q", ds.Fleet.Workspace)
+	}
+}
+
+func TestMaskDaemonSecrets_FleetEmptyAPIKey(t *testing.T) {
+	ds := &DaemonSettings{
+		Fleet: &FleetSettings{
+			URL:    "https://fleet.example.com",
+			APIKey: "",
+		},
+	}
+	maskDaemonSecrets(ds)
+
+	// Empty API key should remain empty (not masked)
+	if ds.Fleet.APIKey != "" {
+		t.Errorf("Fleet.APIKey = %q, want empty (should not mask empty values)", ds.Fleet.APIKey)
+	}
+}
+
+func TestMaskDaemonSecrets_FleetNil(t *testing.T) {
+	ds := &DaemonSettings{
+		Fleet: nil,
+	}
+	// Should not panic with nil Fleet
+	maskDaemonSecrets(ds)
+}
+
+func TestResolvedConfigForDisplay_Fleet(t *testing.T) {
+	cfg := &DaemonConfig{
+		Daemon: DaemonSettings{
+			Fleet: &FleetSettings{
+				URL:       "https://fleet.example.com",
+				Workspace: "staging",
+				APIKey:    "secret-api-key",
+			},
+			RestartPolicy: RestartPolicy{
+				MaxRetries: intPtr(3),
+			},
+		},
+		Roles: make(map[string]RoleConfig),
+	}
+
+	display := resolvedConfigForDisplay(cfg)
+
+	// Fleet API key should be masked in display copy
+	if display.Daemon.Fleet == nil {
+		t.Fatal("display.Daemon.Fleet should not be nil")
+	}
+	if display.Daemon.Fleet.APIKey != "***" {
+		t.Errorf("display Fleet.APIKey = %q, want ***", display.Daemon.Fleet.APIKey)
+	}
+	// URL and Workspace should be preserved in display
+	if display.Daemon.Fleet.URL != "https://fleet.example.com" {
+		t.Errorf("display Fleet.URL = %q, want https://fleet.example.com", display.Daemon.Fleet.URL)
+	}
+	if display.Daemon.Fleet.Workspace != "staging" {
+		t.Errorf("display Fleet.Workspace = %q, want staging", display.Daemon.Fleet.Workspace)
+	}
+
+	// Original should NOT be mutated (deep copy verification)
+	if cfg.Daemon.Fleet.APIKey != "secret-api-key" {
+		t.Errorf("original Fleet.APIKey mutated to %q", cfg.Daemon.Fleet.APIKey)
+	}
+	if cfg.Daemon.Fleet.URL != "https://fleet.example.com" {
+		t.Errorf("original Fleet.URL mutated to %q", cfg.Daemon.Fleet.URL)
+	}
+	if cfg.Daemon.Fleet.Workspace != "staging" {
+		t.Errorf("original Fleet.Workspace mutated to %q", cfg.Daemon.Fleet.Workspace)
+	}
+
+	// Modifying the display copy should not affect the original
+	display.Daemon.Fleet.URL = "https://modified.example.com"
+	if cfg.Daemon.Fleet.URL != "https://fleet.example.com" {
+		t.Errorf("modifying display copy affected original Fleet.URL: %q", cfg.Daemon.Fleet.URL)
+	}
+}
+
+func TestResolvedConfigForDisplay_FleetNil(t *testing.T) {
+	cfg := &DaemonConfig{
+		Daemon: DaemonSettings{
+			Fleet: nil,
+			RestartPolicy: RestartPolicy{
+				MaxRetries: intPtr(3),
+			},
+		},
+		Roles: make(map[string]RoleConfig),
+	}
+
+	display := resolvedConfigForDisplay(cfg)
+	if display.Daemon.Fleet != nil {
+		t.Error("display.Daemon.Fleet should be nil when original is nil")
+	}
+}
+
 func TestDaemonConfigCmd_Registered(t *testing.T) {
 	found := false
 	for _, cmd := range daemonCmd.Commands() {

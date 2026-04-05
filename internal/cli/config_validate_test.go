@@ -1002,6 +1002,148 @@ func TestValidateProjectConfig_AgentRepoGroupsInvalidName(t *testing.T) {
 	}
 }
 
+func TestValidateIssueBackend_Valid(t *testing.T) {
+	for _, value := range []string{"beads", "fleetdb", "fleet", ""} {
+		t.Run(value, func(t *testing.T) {
+			r := &ValidationResult{}
+			validateIssueBackend(r, value)
+			if len(r.Issues) != 0 {
+				t.Errorf("expected no issues for %q, got: %s", value, r.FormatIssues())
+			}
+		})
+	}
+}
+
+func TestValidateIssueBackend_Invalid(t *testing.T) {
+	r := &ValidationResult{}
+	validateIssueBackend(r, "postgres")
+	if len(r.Issues) != 1 {
+		t.Fatalf("expected 1 error, got %d: %s", len(r.Issues), r.FormatIssues())
+	}
+	if r.Issues[0].Severity != "error" {
+		t.Errorf("expected error severity, got %s", r.Issues[0].Severity)
+	}
+	if !strings.Contains(r.Issues[0].Message, "must be one of") {
+		t.Errorf("expected 'must be one of' in message, got %q", r.Issues[0].Message)
+	}
+}
+
+func TestValidateFleetSettings_ValidHTTPS(t *testing.T) {
+	r := &ValidationResult{}
+	validateFleetSettings(r, &FleetSettings{
+		URL: "https://fleet.example.com",
+	})
+	if len(r.Issues) != 0 {
+		t.Errorf("expected no issues for https URL, got: %s", r.FormatIssues())
+	}
+}
+
+func TestValidateFleetSettings_ValidHTTP(t *testing.T) {
+	r := &ValidationResult{}
+	validateFleetSettings(r, &FleetSettings{
+		URL: "http://fleet.example.com",
+	})
+	if len(r.Issues) != 0 {
+		t.Errorf("expected no issues for http URL, got: %s", r.FormatIssues())
+	}
+}
+
+func TestValidateFleetSettings_InvalidProtocol(t *testing.T) {
+	r := &ValidationResult{}
+	validateFleetSettings(r, &FleetSettings{
+		URL: "ftp://fleet.example.com",
+	})
+	if len(r.Issues) != 1 {
+		t.Fatalf("expected 1 error, got %d: %s", len(r.Issues), r.FormatIssues())
+	}
+	if r.Issues[0].Severity != "error" {
+		t.Errorf("expected error severity, got %s", r.Issues[0].Severity)
+	}
+	if !strings.Contains(r.Issues[0].Message, "http://") {
+		t.Errorf("expected 'http://' in message, got %q", r.Issues[0].Message)
+	}
+}
+
+func TestValidateFleetSettings_InvalidWorkspace(t *testing.T) {
+	r := &ValidationResult{}
+	validateFleetSettings(r, &FleetSettings{
+		Workspace: "bad/name",
+	})
+	if len(r.Issues) != 1 {
+		t.Fatalf("expected 1 warning, got %d: %s", len(r.Issues), r.FormatIssues())
+	}
+	if r.Issues[0].Severity != "warning" {
+		t.Errorf("expected warning severity, got %s", r.Issues[0].Severity)
+	}
+	if !strings.Contains(r.Issues[0].Message, "invalid characters") {
+		t.Errorf("expected 'invalid characters' in message, got %q", r.Issues[0].Message)
+	}
+}
+
+func TestValidateFleetSettings_EmptyFields(t *testing.T) {
+	r := &ValidationResult{}
+	validateFleetSettings(r, &FleetSettings{})
+	if len(r.Issues) != 0 {
+		t.Errorf("expected no issues for empty fleet settings, got: %s", r.FormatIssues())
+	}
+}
+
+func TestValidateCrossField_FleetNoURL(t *testing.T) {
+	dc := &DaemonConfig{
+		Daemon: DaemonSettings{
+			IssueBackend: IssueBackendFleet,
+			// Fleet is nil — no URL configured
+		},
+		Roles: make(map[string]RoleConfig),
+	}
+	r := ValidateProjectConfig(dc, t.TempDir())
+	found := false
+	for _, issue := range r.Issues {
+		if issue.Field == "daemon.fleet.url" && issue.Severity == "warning" && strings.Contains(issue.Message, "fleet") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected warning about missing fleet URL when issue_backend=fleet, got: %s", r.FormatIssues())
+	}
+}
+
+func TestValidateCrossField_FleetWithEmptyURL(t *testing.T) {
+	dc := &DaemonConfig{
+		Daemon: DaemonSettings{
+			IssueBackend: IssueBackendFleet,
+			Fleet:        &FleetSettings{URL: ""},
+		},
+		Roles: make(map[string]RoleConfig),
+	}
+	r := ValidateProjectConfig(dc, t.TempDir())
+	found := false
+	for _, issue := range r.Issues {
+		if issue.Field == "daemon.fleet.url" && issue.Severity == "warning" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected warning about missing fleet URL when Fleet.URL is empty, got: %s", r.FormatIssues())
+	}
+}
+
+func TestValidateCrossField_FleetWithURL_NoWarning(t *testing.T) {
+	dc := &DaemonConfig{
+		Daemon: DaemonSettings{
+			IssueBackend: IssueBackendFleet,
+			Fleet:        &FleetSettings{URL: "https://fleet.example.com"},
+		},
+		Roles: make(map[string]RoleConfig),
+	}
+	r := ValidateProjectConfig(dc, t.TempDir())
+	for _, issue := range r.Issues {
+		if issue.Field == "daemon.fleet.url" {
+			t.Errorf("unexpected fleet URL issue when URL is configured: %s", issue.Message)
+		}
+	}
+}
+
 func TestIsValidGroupName(t *testing.T) {
 	tests := []struct {
 		name  string
