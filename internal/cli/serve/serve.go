@@ -149,10 +149,12 @@ func init() {
 func runServe(cmd *cobra.Command, args []string) {
 	checkTmuxInstalled()
 
-	collectDataFn := metricscmd.NewCollector(10 * time.Second)
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// Proactively refresh the monitor cache every 8s so HTTP requests
+	// always read warm data instead of blocking on collectMonitorData.
+	collectDataFn := metricscmd.NewCollectorWithBackground(ctx, 10*time.Second, 8*time.Second)
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)

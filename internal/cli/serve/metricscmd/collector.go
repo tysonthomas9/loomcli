@@ -1,6 +1,7 @@
 package metricscmd
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -20,6 +21,19 @@ func NewCollector(ttl time.Duration) CollectDataFn {
 	return cv.get
 }
 
+// NewCollectorWithBackground creates a cached monitor data collector with a
+// background goroutine that proactively refreshes the cache every interval.
+// HTTP handlers always read pre-warmed data, eliminating cache-miss latency.
+// The background goroutine exits when ctx is canceled.
+func NewCollectorWithBackground(ctx context.Context, ttl, interval time.Duration) CollectDataFn {
+	cv := &cachedCollector{
+		ttl:       ttl,
+		collectFn: func() *monitor.MonitorData { return monitor.CollectMonitorData(10000, "") },
+	}
+	cv.startBackground(ctx, interval)
+	return cv.get
+}
+
 // cachedCollector wraps a collection function with TTL caching and request
 // coalescing. When multiple HTTP handlers call get() concurrently, only one
 // collection runs — the rest wait and share the same result.
@@ -32,6 +46,40 @@ type cachedCollector struct {
 	cachedAt time.Time
 	inflight bool
 	waitCh   chan struct{} // closed when inflight collection finishes
+}
+
+// startBackground starts a background goroutine that proactively refreshes
+// the cache every interval, ensuring get() always finds warm data.
+// The goroutine exits when ctx is canceled.
+func (c *cachedCollector) startBackground(ctx context.Context, interval time.Duration) {
+	// Run an immediate first collection to warm the cache on startup
+	result := c.collectFn()
+	c.mu.Lock()
+	c.cached = result
+	c.cachedAt = time.Now()
+	c.mu.Unlock()
+
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				result := c.collectFn()
+				c.mu.Lock()
+				c.cached = result
+				c.cachedAt = time.Now()
+				// If anyone is waiting on inflight, signal them
+				if c.inflight {
+					c.inflight = false
+					close(c.waitCh)
+				}
+				c.mu.Unlock()
+			}
+		}
+	}()
 }
 
 // get returns cached data if fresh, otherwise triggers a single collection
