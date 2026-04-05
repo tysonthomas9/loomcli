@@ -159,6 +159,10 @@ func runServe(cmd *cobra.Command, args []string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Proactively refresh the monitor cache every 8s so HTTP requests
+	// always read warm data instead of blocking on collectMonitorData.
+	collector.startBackground(ctx, 8*time.Second)
+
 	// Signal handling
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
