@@ -302,7 +302,7 @@ func (b *BeadsBackend) Close(_ context.Context, id string, params backend.CloseP
 		ID:          id,
 		Reason:      params.Reason,
 		Session:     params.Session,
-		SuggestNext: true, // Always request unblocked issues per design
+		SuggestNext: params.SuggestNext,
 		Force:       params.Force,
 	}
 	resp, err := b.execAndCheck("Close", func() (*rpc.Response, error) {

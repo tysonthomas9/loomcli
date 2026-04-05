@@ -709,7 +709,7 @@ func TestClose_HappyPath(t *testing.T) {
 				t.Errorf("CloseArgs.Reason = %q, want %q", args.Reason, "completed")
 			}
 			if !args.SuggestNext {
-				t.Error("CloseArgs.SuggestNext should be true (always set)")
+				t.Error("CloseArgs.SuggestNext should be true")
 			}
 			if !args.Force {
 				t.Error("CloseArgs.Force should be true")
@@ -729,8 +729,9 @@ func TestClose_HappyPath(t *testing.T) {
 
 	b := New(mc)
 	got, err := b.Close(context.Background(), "bd-50", backend.CloseParams{
-		Reason: "completed",
-		Force:  true,
+		Reason:      "completed",
+		Force:       true,
+		SuggestNext: true,
 	})
 	if err != nil {
 		t.Fatalf("Close() error = %v", err)
@@ -740,6 +741,43 @@ func TestClose_HappyPath(t *testing.T) {
 	}
 	if len(got.Unblocked) != 1 || got.Unblocked[0].ID != "bd-51" {
 		t.Errorf("Unblocked = %v, want [{ID: bd-51}]", got.Unblocked)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Close (SuggestNext false)
+// ---------------------------------------------------------------------------
+
+func TestClose_SuggestNextFalse(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
+
+	mc := &mockClient{
+		CloseIssueFn: func(args *rpc.CloseArgs) (*rpc.Response, error) {
+			if args.SuggestNext {
+				t.Error("CloseArgs.SuggestNext should be false")
+			}
+			cr := rpc.CloseResult{
+				Closed: &types.Issue{
+					ID: "bd-50", Title: "Closed", Status: types.StatusClosed,
+					CreatedAt: now, UpdatedAt: now,
+				},
+			}
+			return successResponse(t, cr), nil
+		},
+	}
+
+	b := New(mc)
+	got, err := b.Close(context.Background(), "bd-50", backend.CloseParams{
+		Reason: "done",
+	})
+	if err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if got.Closed == nil || got.Closed.ID != "bd-50" {
+		t.Errorf("Closed = %v, want {ID: bd-50}", got.Closed)
+	}
+	if len(got.Unblocked) != 0 {
+		t.Errorf("Unblocked = %v, want empty", got.Unblocked)
 	}
 }
 
