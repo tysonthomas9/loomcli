@@ -641,6 +641,46 @@ func TestUpdate_HappyPath(t *testing.T) {
 	}
 }
 
+func TestUpdate_ClaimRejected(t *testing.T) {
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("server should not be called when Claim=true")
+	})
+	defer ts.Close()
+
+	err := fb.Update(context.Background(), "test-1", backend.UpdateParams{
+		Claim: true,
+	})
+	if err == nil {
+		t.Fatal("expected error for Claim=true")
+	}
+	var be *backend.BackendError
+	if !errors.As(err, &be) {
+		t.Fatalf("expected *backend.BackendError, got %T", err)
+	}
+	if be.Kind != backend.KindValidation {
+		t.Errorf("Kind = %v, want KindValidation", be.Kind)
+	}
+	if !strings.Contains(be.Message, "ClaimIssue") {
+		t.Errorf("Message = %q, want it to mention ClaimIssue", be.Message)
+	}
+}
+
+func TestUpdate_ClaimFalseAllowed(t *testing.T) {
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		respondOK(w, json.RawMessage(`{}`))
+	})
+	defer ts.Close()
+
+	title := "Some Title"
+	err := fb.Update(context.Background(), "test-1", backend.UpdateParams{
+		Claim: false,
+		Title: &title,
+	})
+	if err != nil {
+		t.Fatalf("Update with Claim=false should succeed, got: %v", err)
+	}
+}
+
 // --- ClaimIssue tests ---
 
 func TestClaimIssue_HappyPath(t *testing.T) {

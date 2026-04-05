@@ -280,6 +280,9 @@ func (b *FleetBackend) Create(ctx context.Context, params backend.CreateParams) 
 }
 
 func (b *FleetBackend) Update(ctx context.Context, id string, params backend.UpdateParams) error {
+	if params.Claim {
+		return backend.ErrValidation("Update", "Claim field is not supported in FleetBackend.Update; use ClaimIssue instead")
+	}
 	// Map UpdateParams to the PatchIssueRequest format the server expects.
 	req := updateParamsToPatchRequest(params)
 	_, err := b.exec(ctx, "Update", "PATCH", "/issues/"+url.PathEscape(id), req)
