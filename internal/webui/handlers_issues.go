@@ -349,10 +349,10 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 				}
 			}
 
-			// Fetch unfiltered issue list for accurate blocker detection.
+			// Build unclosed-ID set from already-fetched data for accurate blocker detection.
 			// The daemon's Blocked() RPC considers in_progress/review as resolved,
 			// but blockers should only clear when closed.
-			unclosedIDs, issueMap := fetchUnclosedIDSetAndMap(client)
+			unclosedIDs, issueMap := buildUnclosedSetsFromFetched(issuesWithCounts)
 
 			// Build KanbanIssue response with blocked info merged
 			kanbanIssues := make([]*KanbanIssue, len(issuesWithCounts))
@@ -367,16 +367,15 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 				if iwc.Issue.SourceRepo != "" {
 					ki.Repo = &iwc.Issue.SourceRepo
 				}
-				// Client-side blocker check is authoritative (considers only closed
-				// blockers as resolved). Falls back to daemon data on error.
-				if unclosedIDs != nil {
-					refs := getUnclosedBlockerRefs(iwc.Issue.Dependencies, unclosedIDs, issueMap)
-					if len(refs) > 0 {
-						ki.IsBlocked = true
-						ki.BlockedByCount = len(refs)
-						ki.BlockedBy = extractBlockerIDs(refs)
-						ki.BlockedByDetails = refs
-					}
+				// Client-side blocker check (considers only closed blockers as
+				// resolved). For filtered views, blocker targets may be outside
+				// the result set, so fall back to daemon blocked data.
+				refs := getUnclosedBlockerRefs(iwc.Issue.Dependencies, unclosedIDs, issueMap)
+				if len(refs) > 0 {
+					ki.IsBlocked = true
+					ki.BlockedByCount = len(refs)
+					ki.BlockedBy = extractBlockerIDs(refs)
+					ki.BlockedByDetails = refs
 				} else if bi, ok := blockedMap[iwc.Issue.ID]; ok {
 					ki.IsBlocked = true
 					ki.BlockedByCount = bi.BlockedByCount

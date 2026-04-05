@@ -93,6 +93,32 @@ func getWorktreeCommitDetails(path, defaultBranch string, limit int, githubURL s
 	return commits
 }
 
+// getWorktreeStatus runs git status --porcelain once and returns all derived values:
+// clean (no changes), uncommitted count, and file change list.
+// Replaces the previous pattern of calling IsCleanWorkingTree + getUncommittedChangesCount +
+// getWorktreeFileChanges as three separate git subprocesses.
+func getWorktreeStatus(path string) (clean bool, uncommittedCount int, fileChanges []FileChange) {
+	output, err := RunGitCommand(path, "status", "--porcelain")
+	if err != nil || strings.TrimSpace(output) == "" {
+		return true, 0, nil
+	}
+	trimmed := strings.TrimRight(output, " \t\n\r")
+	lines := strings.Split(trimmed, "\n")
+	changes := make([]FileChange, 0, len(lines))
+	for i, line := range lines {
+		if i >= 20 {
+			break
+		}
+		if len(line) < 4 {
+			continue
+		}
+		status := strings.TrimSpace(line[:2])
+		filePath := line[3:]
+		changes = append(changes, FileChange{Status: status, Path: filePath})
+	}
+	return false, len(lines), changes
+}
+
 // getWorktreeFileChanges returns uncommitted file changes from git status.
 func getWorktreeFileChanges(path string) []FileChange {
 	output, err := RunGitCommand(path, "status", "--porcelain")

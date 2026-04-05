@@ -46,13 +46,13 @@ func runEventDrivenLoop(
 
 	// Debounced sync actions
 	exportDebouncer := NewDebouncer(500*time.Millisecond, func() {
-		log.log("Export triggered by mutation events")
+		log.Debug("Export triggered by mutation events")
 		doExport()
 	})
 	defer exportDebouncer.Cancel()
 
 	importDebouncer := NewDebouncer(500*time.Millisecond, func() {
-		log.log("Import triggered by file change")
+		log.Debug("Import triggered by file change")
 		doAutoImport()
 	})
 	defer importDebouncer.Cancel()
@@ -84,7 +84,7 @@ func runEventDrivenLoop(
 					log.log("Mutation channel closed; exiting listener")
 					return
 				}
-				log.log("Mutation detected: %s %s", event.Type, event.IssueID)
+				log.Debug("Mutation detected: %s %s", event.Type, event.IssueID)
 				exportDebouncer.Trigger()
 
 			case <-ctx.Done():
@@ -148,7 +148,7 @@ func runEventDrivenLoop(
 			// Periodic remote sync to pull updates from other clones
 			// This ensures the daemon sees changes pushed by other clones
 			// even when the local file watcher doesn't trigger
-			log.log("Periodic remote sync: checking for updates")
+			log.Debug("Periodic remote sync: checking for updates")
 			doAutoImport()
 
 		case <-parentCheckTicker.C:

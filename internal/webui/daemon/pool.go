@@ -19,6 +19,11 @@ const (
 
 	// maxRetries limits the number of retry attempts when finding stale connections.
 	maxRetries = 3
+
+	// idleValidationThreshold is how long a connection can sit idle before
+	// Get() re-validates it with a Ping. Connections used more recently than
+	// this are assumed healthy, avoiding a redundant RPC round-trip.
+	idleValidationThreshold = 30 * time.Second
 )
 
 // Pool is the interface for connection pool operations.
@@ -43,6 +48,11 @@ type ConnectionPool struct {
 	closed       bool
 	activeCount  int
 	createdCount int
+
+	// lastUsedAt tracks when each connection was last returned to the pool.
+	// Used by validateConnection to skip Ping for recently-active connections.
+	lastUsedMu sync.Mutex
+	lastUsedAt map[*rpc.Client]time.Time
 }
 
 // NewConnectionPool creates a new connection pool with the specified size.
@@ -60,6 +70,7 @@ func NewConnectionPool(socketPath string, poolSize int) (*ConnectionPool, error)
 		dialTimeout: DefaultDialTimeout,
 		poolTimeout: DefaultPoolTimeout,
 		available:   make(chan *rpc.Client, poolSize),
+		lastUsedAt:  make(map[*rpc.Client]time.Time),
 	}
 
 	return pool, nil
@@ -129,7 +140,10 @@ func (p *ConnectionPool) tryGet(ctx context.Context) (*rpc.Client, error, bool) 
 			p.mu.Unlock()
 			return client, nil, false
 		}
-		// Connection is stale, close it
+		// Connection is stale, close it and clean up tracking
+		p.lastUsedMu.Lock()
+		delete(p.lastUsedAt, client)
+		p.lastUsedMu.Unlock()
 		_ = client.Close()
 		p.mu.Lock()
 		p.createdCount--
@@ -179,7 +193,10 @@ func (p *ConnectionPool) tryGet(ctx context.Context) (*rpc.Client, error, bool) 
 			p.mu.Unlock()
 			return client, nil, false
 		}
-		// Connection is stale, close it and signal retry
+		// Connection is stale, close it and clean up tracking
+		p.lastUsedMu.Lock()
+		delete(p.lastUsedAt, client)
+		p.lastUsedMu.Unlock()
 		_ = client.Close()
 		p.mu.Lock()
 		p.createdCount--
@@ -204,11 +221,20 @@ func (p *ConnectionPool) Put(client *rpc.Client) {
 	p.mu.Lock()
 	if p.closed {
 		p.mu.Unlock()
+		p.lastUsedMu.Lock()
+		delete(p.lastUsedAt, client)
+		p.lastUsedMu.Unlock()
 		_ = client.Close()
 		return
 	}
 	p.activeCount--
 	p.mu.Unlock()
+
+	// Record when this connection was last used, so validateConnection
+	// can skip the Ping for recently-active connections.
+	p.lastUsedMu.Lock()
+	p.lastUsedAt[client] = time.Now()
+	p.lastUsedMu.Unlock()
 
 	// Try to return to pool
 	select {
@@ -216,6 +242,9 @@ func (p *ConnectionPool) Put(client *rpc.Client) {
 		// Returned to pool successfully
 	default:
 		// Pool is full, close the connection
+		p.lastUsedMu.Lock()
+		delete(p.lastUsedAt, client)
+		p.lastUsedMu.Unlock()
 		_ = client.Close()
 		p.mu.Lock()
 		p.createdCount--
@@ -232,6 +261,9 @@ func (p *ConnectionPool) Discard(client *rpc.Client) {
 	}
 
 	_ = client.Close()
+	p.lastUsedMu.Lock()
+	delete(p.lastUsedAt, client)
+	p.lastUsedMu.Unlock()
 	p.mu.Lock()
 	p.activeCount--
 	p.createdCount--
@@ -319,12 +351,22 @@ func (p *ConnectionPool) createConnection() (*rpc.Client, error) {
 }
 
 // validateConnection checks if a connection is still healthy.
+// Connections that were used within the last idleValidationThreshold are
+// assumed healthy and skip the Ping RPC, reducing daemon traffic.
 func (p *ConnectionPool) validateConnection(client *rpc.Client) bool {
 	if client == nil {
 		return false
 	}
 
-	// Try a ping to validate the connection
+	// Skip Ping for recently-used connections.
+	p.lastUsedMu.Lock()
+	last, ok := p.lastUsedAt[client]
+	p.lastUsedMu.Unlock()
+	if ok && time.Since(last) < idleValidationThreshold {
+		return true
+	}
+
+	// Connection has been idle too long (or is brand new to the pool) — verify.
 	if err := client.Ping(); err != nil {
 		log.Printf("Pool: connection validation failed: %v", err)
 		return false

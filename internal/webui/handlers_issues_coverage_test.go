@@ -17,7 +17,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 )
 
-// --- Mock RPC server infrastructure for handleListIssues / fetchUnclosedIDSetAndMap ---
+// --- Mock RPC server infrastructure for handleListIssues / buildUnclosedSetsFromFetched ---
 
 // issuesMockRPCHandler is a function that handles an RPC request and returns a response.
 type issuesMockRPCHandler func(req rpc.Request) rpc.Response
@@ -385,7 +385,10 @@ func TestHandleListIssues_KanbanMode_IncludeBlocked(t *testing.T) {
 				Data:    json.RawMessage(`{"parents":{}}`),
 			}
 		case "blocked":
-			data, _ := json.Marshal([]*types.BlockedIssue{})
+			blockedIssues := []*types.BlockedIssue{
+				{Issue: *allIssues[0].Issue, BlockedByCount: 1},
+			}
+			data, _ := json.Marshal(blockedIssues)
 			return rpc.Response{Success: true, Data: json.RawMessage(data)}
 		default:
 			return rpc.Response{Success: true, Data: json.RawMessage(`{}`)}
@@ -660,7 +663,7 @@ func TestHandleListIssues_ExcludeAllStatuses(t *testing.T) {
 	}
 }
 
-// --- fetchUnclosedIDSetAndMap coverage tests ---
+// --- buildUnclosedSetsFromFetched coverage tests ---
 
 func TestFetchUnclosedIDSetAndMap_Success(t *testing.T) {
 	now := time.Now()
@@ -704,7 +707,7 @@ func TestFetchUnclosedIDSetAndMap_Success(t *testing.T) {
 	}
 	defer client.Close()
 
-	unclosedIDs, issueMap := fetchUnclosedIDSetAndMap(client)
+	unclosedIDs, issueMap := buildUnclosedSetsFromFetched(allIssues)
 
 	if unclosedIDs == nil {
 		t.Fatal("expected unclosedIDs to be non-nil")
@@ -734,25 +737,8 @@ func TestFetchUnclosedIDSetAndMap_Success(t *testing.T) {
 	}
 }
 
-func TestFetchUnclosedIDSetAndMap_EmptyList(t *testing.T) {
-	socketPath := startIssuesMockRPCServer(t, func(req rpc.Request) rpc.Response {
-		if req.Operation == "health" {
-			return issuesCovHealthyResponse()
-		}
-		data, _ := json.Marshal([]*types.IssueWithCounts{})
-		return rpc.Response{Success: true, Data: json.RawMessage(data)}
-	})
-
-	client, err := rpc.TryConnectWithTimeout(socketPath, 2*time.Second)
-	if err != nil {
-		t.Fatalf("failed to connect to mock server: %v", err)
-	}
-	if client == nil {
-		t.Fatal("mock server returned nil client")
-	}
-	defer client.Close()
-
-	unclosedIDs, issueMap := fetchUnclosedIDSetAndMap(client)
+func TestBuildUnclosedSetsFromFetched_EmptyList(t *testing.T) {
+	unclosedIDs, issueMap := buildUnclosedSetsFromFetched([]*types.IssueWithCounts{})
 
 	if unclosedIDs == nil {
 		t.Fatal("expected unclosedIDs to be non-nil (empty map)")
@@ -768,30 +754,14 @@ func TestFetchUnclosedIDSetAndMap_EmptyList(t *testing.T) {
 	}
 }
 
-func TestFetchUnclosedIDSetAndMap_RPCError(t *testing.T) {
-	socketPath := startIssuesMockRPCServer(t, func(req rpc.Request) rpc.Response {
-		if req.Operation == "health" {
-			return issuesCovHealthyResponse()
-		}
-		return rpc.Response{Success: false, Error: "daemon error"}
-	})
+func TestBuildUnclosedSetsFromFetched_NilInput(t *testing.T) {
+	unclosedIDs, issueMap := buildUnclosedSetsFromFetched(nil)
 
-	client, err := rpc.TryConnectWithTimeout(socketPath, 2*time.Second)
-	if err != nil {
-		t.Fatalf("failed to connect to mock server: %v", err)
+	if len(unclosedIDs) != 0 {
+		t.Errorf("expected 0 unclosed IDs for nil input, got %d", len(unclosedIDs))
 	}
-	if client == nil {
-		t.Fatal("mock server returned nil client")
-	}
-	defer client.Close()
-
-	unclosedIDs, issueMap := fetchUnclosedIDSetAndMap(client)
-
-	if unclosedIDs != nil {
-		t.Errorf("expected nil unclosedIDs on RPC error, got %v", unclosedIDs)
-	}
-	if issueMap != nil {
-		t.Errorf("expected nil issueMap on RPC error, got %v", issueMap)
+	if len(issueMap) != 0 {
+		t.Errorf("expected 0 issues in map for nil input, got %d", len(issueMap))
 	}
 }
 
@@ -832,7 +802,7 @@ func TestFetchUnclosedIDSetAndMap_AllClosed(t *testing.T) {
 	}
 	defer client.Close()
 
-	unclosedIDs, issueMap := fetchUnclosedIDSetAndMap(client)
+	unclosedIDs, issueMap := buildUnclosedSetsFromFetched(allIssues)
 
 	if unclosedIDs == nil {
 		t.Fatal("expected non-nil unclosedIDs")

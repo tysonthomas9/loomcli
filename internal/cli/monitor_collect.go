@@ -146,18 +146,17 @@ func collectAgentStatus(agentTasks map[string]TaskInfo, branch string) ([]AgentS
 			agent.Status = fmt.Sprintf("error: %s", task.ID)
 		} else {
 			// No lock and no in_progress task - check git status
-			// (closed tasks don't trigger "done" fallback - "done" only shows while agent is running)
-			clean, _ := IsCleanWorkingTree(wt.Path)
+			// Use getWorktreeStatus to run git status --porcelain once instead of
+			// three separate calls (IsCleanWorkingTree + getUncommittedChangesCount + getWorktreeFileChanges).
+			clean, changes, fileChanges := getWorktreeStatus(wt.Path)
 			if clean {
 				agent.Status = "ready"
+			} else if changes > 0 {
+				agent.Status = fmt.Sprintf("%d changes", changes)
 			} else {
-				changes := getUncommittedChangesCount(wt.Path)
-				if changes > 0 {
-					agent.Status = fmt.Sprintf("%d changes", changes)
-				} else {
-					agent.Status = "dirty"
-				}
+				agent.Status = "dirty"
 			}
+			agent.Changes = fileChanges
 		}
 
 		// Use per-worktree default branch in workspace mode
@@ -178,8 +177,10 @@ func collectAgentStatus(agentTasks map[string]TaskInfo, branch string) ([]AgentS
 			agent.Commits = getWorktreeCommitDetails(wt.Path, wtDefaultBranch, 10, wtGithubURL, branch)
 		}
 
-		// Populate file changes (returns nil for clean trees)
-		agent.Changes = getWorktreeFileChanges(wt.Path)
+		// Populate file changes for agents with lock status (not already set by getWorktreeStatus)
+		if agent.Changes == nil && agent.Status != "ready" {
+			agent.Changes = getWorktreeFileChanges(wt.Path)
+		}
 
 		agents = append(agents, agent)
 	}

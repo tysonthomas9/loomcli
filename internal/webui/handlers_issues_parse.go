@@ -1,9 +1,7 @@
 package webui
 
 import (
-	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
@@ -102,31 +100,19 @@ func parseKanbanParams(r *http.Request) (*kanbanParams, error) {
 	return params, nil
 }
 
-// fetchUnclosedIDSetAndMap fetches all issues via client.List and returns:
+// buildUnclosedSetsFromFetched builds the unclosed-ID set and issue lookup map
+// from already-fetched issuesWithCounts, avoiding an extra List RPC call.
+//
+// Returns:
 //   - unclosedIDs: set of issue IDs with status != closed
 //   - issueMap: lookup map for populating blocker details (title, priority)
 //
-// Returns nil, nil on error (non-fatal — caller falls back to daemon data).
-func fetchUnclosedIDSetAndMap(client *rpc.Client) (map[string]bool, map[string]*types.IssueWithCounts) {
-	resp, err := client.List(&rpc.ListArgs{Limit: MaxListLimit})
-	if err != nil {
-		log.Printf("Failed to fetch issues for blocker detection: %v", err)
-		return nil, nil
-	}
-	if !resp.Success {
-		log.Printf("List RPC failed for blocker detection: %s", resp.Error)
-		return nil, nil
-	}
-
-	var allIssues []*types.IssueWithCounts
-	if err := json.Unmarshal(resp.Data, &allIssues); err != nil {
-		log.Printf("Failed to parse issues for blocker detection: %v", err)
-		return nil, nil
-	}
-
-	unclosedIDs := make(map[string]bool, len(allIssues))
-	issueMap := make(map[string]*types.IssueWithCounts, len(allIssues))
-	for _, iwc := range allIssues {
+// For filtered views (by assignee/type), some blocker targets may be outside the
+// result set. The caller's blockedMap fallback handles those cases.
+func buildUnclosedSetsFromFetched(issues []*types.IssueWithCounts) (map[string]bool, map[string]*types.IssueWithCounts) {
+	unclosedIDs := make(map[string]bool, len(issues))
+	issueMap := make(map[string]*types.IssueWithCounts, len(issues))
+	for _, iwc := range issues {
 		issueMap[iwc.Issue.ID] = iwc
 		if iwc.Issue.Status != types.StatusClosed {
 			unclosedIDs[iwc.Issue.ID] = true
