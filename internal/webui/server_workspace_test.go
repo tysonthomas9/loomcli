@@ -263,6 +263,72 @@ func TestWrapWorkspaceCreateFn_InnerCreateFails_NoRegistration(t *testing.T) {
 	}
 }
 
+func TestWrapWorkspaceCreateFn_RegisterFails_SurfacesWarning(t *testing.T) {
+	registry, multiPool, _ := newTestRegistry(t)
+
+	wsUUID := "aaaaaaaa-2222-3333-4444-555555555555"
+	wsPath := t.TempDir()
+
+	innerCreate := func(ctx context.Context, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
+		return service.WorkspaceCreateResult{WorkspaceID: wsUUID, WorkspacePath: wsPath}, nil
+	}
+
+	// Close MultiPool so BeadsPoolHook (critical) fails during Register.
+	multiPool.Close()
+
+	wrapped := wrapWorkspaceCreateFn(innerCreate, registry)
+
+	ctx := service.WithCreateWarnings(context.Background())
+	_, err := wrapped(ctx, service.WorkspaceCreateRequest{Name: "my-ws"})
+	if err != nil {
+		t.Fatalf("expected nil error (workspace creation succeeded), got %v", err)
+	}
+
+	warnings := service.GetCreateWarnings(ctx)
+	if len(warnings) == 0 {
+		t.Fatal("expected at least one warning from Register failure")
+	}
+
+	found := false
+	for _, w := range warnings {
+		if w == "Workspace created but runtime registration failed — some features may be unavailable until restart" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected runtime registration failure warning, got: %v", warnings)
+	}
+}
+
+func TestWrapWorkspaceCreateFn_RegisterFails_PlainContext_NoPanic(t *testing.T) {
+	registry, multiPool, _ := newTestRegistry(t)
+
+	wsUUID := "bbbbbbbb-2222-3333-4444-555555555555"
+	wsPath := t.TempDir()
+
+	innerCreate := func(ctx context.Context, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
+		return service.WorkspaceCreateResult{WorkspaceID: wsUUID, WorkspacePath: wsPath}, nil
+	}
+
+	// Close MultiPool so BeadsPoolHook (critical) fails during Register.
+	multiPool.Close()
+
+	wrapped := wrapWorkspaceCreateFn(innerCreate, registry)
+
+	// Use plain context without WithCreateWarnings — should not panic.
+	ctx := context.Background()
+	_, err := wrapped(ctx, service.WorkspaceCreateRequest{Name: "my-ws"})
+	if err != nil {
+		t.Fatalf("expected nil error (workspace creation succeeded), got %v", err)
+	}
+
+	// No warnings context — GetCreateWarnings should return nil.
+	if w := service.GetCreateWarnings(ctx); w != nil {
+		t.Errorf("expected nil warnings from plain context, got %v", w)
+	}
+}
+
 func TestWrapWorkspaceDeleteFn_NilInner(t *testing.T) {
 	registry, _, _ := newTestRegistry(t)
 

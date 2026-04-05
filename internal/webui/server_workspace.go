@@ -37,7 +37,10 @@ func reconcileConfigWorkspaces(
 		if initialRegistered && wsID == initialID {
 			continue
 		}
-		_ = registry.Register(wsID, wsPath)
+		if err := registry.Register(wsID, wsPath); err != nil {
+			logger.Warn("failed to register workspace during startup reconciliation",
+				"workspace", wsID, "err", err)
+		}
 	}
 	logger.Info("startup reconciliation complete",
 		"total_workspaces", len(workspaces),
@@ -75,7 +78,11 @@ func wrapWorkspaceCreateFn(
 			return result, nil
 		}
 
-		_ = registry.Register(wsID, wsDir)
+		if err := registry.Register(wsID, wsDir); err != nil {
+			logger.Warn("workspace created but runtime registration failed",
+				"workspace", req.Name, "workspace_id", wsID, "err", err)
+			service.AddCreateWarning(ctx, "Workspace created but runtime registration failed — some features may be unavailable until restart")
+		}
 
 		return result, nil
 	}
