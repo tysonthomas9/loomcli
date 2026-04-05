@@ -641,6 +641,275 @@ func TestCliBeadsAdapter_List_QuerySkipped(t *testing.T) {
 	}
 }
 
+// --- Close method tests ---
+
+func TestCliBeadsAdapter_Close_Args(t *testing.T) {
+	runner := &mockBDRunner{
+		fn: func(_ string, _ ...string) CommandResult {
+			return CommandResult{Stdout: `{"closed": [{"id": "T-1", "title": "Task One", "status": "closed", "priority": 2, "issue_type": "task"}]}`}
+		},
+	}
+	a := newCliBeadsAdapter(runner, "/tmp/test")
+
+	_, err := a.Close(context.Background(), "T-1", backend.CloseParams{Reason: "done"})
+	if err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(runner.calls))
+	}
+	got := strings.Join(runner.calls[0].Args, " ")
+	want := "close T-1 --suggest-next --json --reason done"
+	if got != want {
+		t.Errorf("args = %q, want %q", got, want)
+	}
+}
+
+func TestCliBeadsAdapter_Close_NoReason(t *testing.T) {
+	runner := &mockBDRunner{
+		fn: func(_ string, _ ...string) CommandResult {
+			return CommandResult{Stdout: `{"closed": [{"id": "T-1", "title": "Task One", "status": "closed", "priority": 2, "issue_type": "task"}]}`}
+		},
+	}
+	a := newCliBeadsAdapter(runner, "/tmp/test")
+
+	_, err := a.Close(context.Background(), "T-1", backend.CloseParams{})
+	if err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(runner.calls))
+	}
+	got := strings.Join(runner.calls[0].Args, " ")
+	want := "close T-1 --suggest-next --json"
+	if got != want {
+		t.Errorf("args = %q, want %q", got, want)
+	}
+}
+
+func TestCliBeadsAdapter_Close_FormatA_WithUnblocked(t *testing.T) {
+	jsonOut := `{"closed": [{"id": "T-1", "title": "Task One", "status": "closed", "priority": 2, "issue_type": "task"}], "unblocked": [{"id": "T-2", "title": "Task Two", "status": "open", "priority": 1, "issue_type": "bug"}, {"id": "T-3", "title": "Task Three", "status": "open", "priority": 3, "issue_type": "feature"}]}`
+	runner := &mockBDRunner{
+		fn: func(_ string, _ ...string) CommandResult {
+			return CommandResult{Stdout: jsonOut}
+		},
+	}
+	a := newCliBeadsAdapter(runner, "/tmp/test")
+
+	cr, err := a.Close(context.Background(), "T-1", backend.CloseParams{Reason: "complete"})
+	if err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if cr == nil {
+		t.Fatal("expected non-nil CloseResult")
+	}
+	if cr.Closed == nil {
+		t.Fatal("expected non-nil Closed")
+	}
+	if cr.Closed.ID != "T-1" {
+		t.Errorf("Closed.ID = %q, want %q", cr.Closed.ID, "T-1")
+	}
+	if cr.Closed.Title != "Task One" {
+		t.Errorf("Closed.Title = %q, want %q", cr.Closed.Title, "Task One")
+	}
+	if cr.Closed.Status != "closed" {
+		t.Errorf("Closed.Status = %q, want %q", cr.Closed.Status, "closed")
+	}
+	if cr.Closed.Priority != 2 {
+		t.Errorf("Closed.Priority = %d, want %d", cr.Closed.Priority, 2)
+	}
+	if cr.Closed.IssueType != "task" {
+		t.Errorf("Closed.IssueType = %q, want %q", cr.Closed.IssueType, "task")
+	}
+	if len(cr.Unblocked) != 2 {
+		t.Fatalf("expected 2 unblocked issues, got %d", len(cr.Unblocked))
+	}
+	if cr.Unblocked[0].ID != "T-2" {
+		t.Errorf("Unblocked[0].ID = %q, want %q", cr.Unblocked[0].ID, "T-2")
+	}
+	if cr.Unblocked[0].IssueType != "bug" {
+		t.Errorf("Unblocked[0].IssueType = %q, want %q", cr.Unblocked[0].IssueType, "bug")
+	}
+	if cr.Unblocked[1].ID != "T-3" {
+		t.Errorf("Unblocked[1].ID = %q, want %q", cr.Unblocked[1].ID, "T-3")
+	}
+	if cr.Unblocked[1].IssueType != "feature" {
+		t.Errorf("Unblocked[1].IssueType = %q, want %q", cr.Unblocked[1].IssueType, "feature")
+	}
+}
+
+func TestCliBeadsAdapter_Close_FormatB_Array(t *testing.T) {
+	jsonOut := `[{"id": "T-1", "title": "Task One", "status": "closed", "priority": 2, "issue_type": "task"}]`
+	runner := &mockBDRunner{
+		fn: func(_ string, _ ...string) CommandResult {
+			return CommandResult{Stdout: jsonOut}
+		},
+	}
+	a := newCliBeadsAdapter(runner, "/tmp/test")
+
+	cr, err := a.Close(context.Background(), "T-1", backend.CloseParams{})
+	if err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if cr == nil {
+		t.Fatal("expected non-nil CloseResult")
+	}
+	if cr.Closed == nil {
+		t.Fatal("expected non-nil Closed")
+	}
+	if cr.Closed.ID != "T-1" {
+		t.Errorf("Closed.ID = %q, want %q", cr.Closed.ID, "T-1")
+	}
+	if cr.Closed.Status != "closed" {
+		t.Errorf("Closed.Status = %q, want %q", cr.Closed.Status, "closed")
+	}
+	if cr.Unblocked != nil {
+		t.Errorf("expected nil Unblocked, got %v", cr.Unblocked)
+	}
+}
+
+func TestCliBeadsAdapter_Close_EmptyStdout(t *testing.T) {
+	runner := &mockBDRunner{
+		fn: func(_ string, _ ...string) CommandResult {
+			return CommandResult{Stdout: ""}
+		},
+	}
+	a := newCliBeadsAdapter(runner, "/tmp/test")
+
+	cr, err := a.Close(context.Background(), "T-1", backend.CloseParams{})
+	if err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if cr == nil {
+		t.Fatal("expected non-nil CloseResult")
+	}
+	if cr.Closed != nil {
+		t.Errorf("expected nil Closed for empty stdout, got %v", cr.Closed)
+	}
+	if cr.Unblocked != nil {
+		t.Errorf("expected nil Unblocked for empty stdout, got %v", cr.Unblocked)
+	}
+}
+
+func TestCliBeadsAdapter_Close_UnparsableJSON(t *testing.T) {
+	runner := &mockBDRunner{
+		fn: func(_ string, _ ...string) CommandResult {
+			return CommandResult{Stdout: "not json at all"}
+		},
+	}
+	a := newCliBeadsAdapter(runner, "/tmp/test")
+
+	cr, err := a.Close(context.Background(), "T-1", backend.CloseParams{})
+	if err != nil {
+		t.Fatalf("Close() error = %v, want nil", err)
+	}
+	if cr == nil {
+		t.Fatal("expected non-nil CloseResult")
+	}
+	if cr.Closed != nil {
+		t.Errorf("expected nil Closed for unparsable stdout, got %v", cr.Closed)
+	}
+	if cr.Unblocked != nil {
+		t.Errorf("expected nil Unblocked for unparsable stdout, got %v", cr.Unblocked)
+	}
+}
+
+func TestCliBeadsAdapter_Close_RunnerError(t *testing.T) {
+	runner := &mockBDRunner{
+		fn: func(_ string, _ ...string) CommandResult {
+			return CommandResult{
+				Err:    fmt.Errorf("exit status 1"),
+				Stderr: "unexpected error",
+			}
+		},
+	}
+	a := newCliBeadsAdapter(runner, "/tmp/test")
+
+	cr, err := a.Close(context.Background(), "T-1", backend.CloseParams{Reason: "done"})
+	if err == nil {
+		t.Fatal("expected error for runner failure")
+	}
+	if cr != nil {
+		t.Errorf("expected nil CloseResult on error, got %v", cr)
+	}
+}
+
+func TestCliBeadsAdapter_Close_Force(t *testing.T) {
+	runner := &mockBDRunner{
+		fn: func(_ string, _ ...string) CommandResult {
+			return CommandResult{Stdout: `[{"id":"T-1","title":"Pinned","status":"closed","priority":1,"issue_type":"task"}]`}
+		},
+	}
+	a := newCliBeadsAdapter(runner, "/tmp/test")
+
+	_, err := a.Close(context.Background(), "T-1", backend.CloseParams{Reason: "force it", Force: true})
+	if err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(runner.calls))
+	}
+	got := strings.Join(runner.calls[0].Args, " ")
+	want := "close T-1 --suggest-next --json --reason force it --force"
+	if got != want {
+		t.Errorf("args = %q, want %q", got, want)
+	}
+}
+
+func TestCliBeadsAdapter_Close_FormatA_EmptyClosedWithUnblocked(t *testing.T) {
+	jsonOutput := `{"closed": [], "unblocked": [{"id":"T-2","title":"Unblocked One","status":"open","priority":1,"issue_type":"bug"}]}`
+	runner := &mockBDRunner{
+		fn: func(_ string, _ ...string) CommandResult {
+			return CommandResult{Stdout: jsonOutput}
+		},
+	}
+	a := newCliBeadsAdapter(runner, "/tmp/test")
+
+	cr, err := a.Close(context.Background(), "T-1", backend.CloseParams{})
+	if err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if cr == nil {
+		t.Fatal("expected non-nil CloseResult")
+	}
+	if cr.Closed != nil {
+		t.Errorf("expected nil Closed when closed array is empty, got %v", cr.Closed)
+	}
+	if len(cr.Unblocked) != 1 {
+		t.Fatalf("expected 1 unblocked issue, got %d", len(cr.Unblocked))
+	}
+	if cr.Unblocked[0].ID != "T-2" {
+		t.Errorf("Unblocked[0].ID = %q, want T-2", cr.Unblocked[0].ID)
+	}
+}
+
+func TestCliBeadsAdapter_Close_NotFoundError(t *testing.T) {
+	runner := &mockBDRunner{
+		fn: func(_ string, _ ...string) CommandResult {
+			return CommandResult{
+				Err:    fmt.Errorf("exit status 1"),
+				Stderr: "issue not found",
+			}
+		},
+	}
+	a := newCliBeadsAdapter(runner, "/tmp/test")
+
+	cr, err := a.Close(context.Background(), "T-99", backend.CloseParams{})
+	if err == nil {
+		t.Fatal("expected error for not found")
+	}
+	if cr != nil {
+		t.Errorf("expected nil CloseResult on error, got %v", cr)
+	}
+	var be *backend.BackendError
+	if !errors.As(err, &be) {
+		t.Fatalf("expected *backend.BackendError, got %T", err)
+	}
+	if be.Kind != backend.KindNotFound {
+		t.Errorf("BackendError.Kind = %q, want %q", be.Kind, backend.KindNotFound)
+	}
+}
+
 func TestCliBeadsAdapter_List_AllFields(t *testing.T) {
 	args := listArgs(t, backend.ListOpts{
 		// Basic filters.

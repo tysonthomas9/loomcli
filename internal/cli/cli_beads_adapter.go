@@ -251,14 +251,56 @@ func (a *cliBeadsAdapter) ClaimIssue(_ context.Context, id string, lockTTL time.
 }
 
 func (a *cliBeadsAdapter) Close(_ context.Context, id string, params backend.CloseParams) (*backend.CloseResult, error) {
-	args := []string{"close", id}
+	args := []string{"close", id, "--suggest-next", "--json"}
 	if params.Reason != "" {
 		args = append(args, "--reason", params.Reason)
 	}
-	if err := a.runMutation("Close", args...); err != nil {
-		return nil, err
+	if params.Force {
+		args = append(args, "--force")
 	}
-	return &backend.CloseResult{}, nil
+	result := a.runner.Run(a.dir, args...)
+	if result.Err != nil {
+		return nil, a.classifyError("Close", result)
+	}
+	return a.parseCloseOutput(result.Stdout), nil
+}
+
+// parseCloseOutput handles dual-format bd close JSON output:
+//   - Format A (object): {"closed": [issue...], "unblocked": [issue...]}
+//   - Format B (array):  [issue...]
+func (a *cliBeadsAdapter) parseCloseOutput(stdout string) *backend.CloseResult {
+	stdout = strings.TrimSpace(stdout)
+	if stdout == "" {
+		return &backend.CloseResult{}
+	}
+
+	// Detect format by first byte: '{' = object (Format A), '[' = array (Format B).
+	if stdout[0] == '{' {
+		var obj struct {
+			Closed    []cliIssueJSON `json:"closed"`
+			Unblocked []cliIssueJSON `json:"unblocked"`
+		}
+		if err := json.Unmarshal([]byte(stdout), &obj); err == nil {
+			cr := &backend.CloseResult{}
+			if len(obj.Closed) > 0 {
+				closed := obj.Closed[0].toIssueData()
+				cr.Closed = &closed
+			}
+			for i := range obj.Unblocked {
+				cr.Unblocked = append(cr.Unblocked, obj.Unblocked[i].toIssueData())
+			}
+			return cr
+		}
+	}
+
+	// Try Format B: plain array of closed issues.
+	var arr []cliIssueJSON
+	if err := json.Unmarshal([]byte(stdout), &arr); err == nil && len(arr) > 0 {
+		closed := arr[0].toIssueData()
+		return &backend.CloseResult{Closed: &closed}
+	}
+
+	return &backend.CloseResult{}
 }
 
 func (a *cliBeadsAdapter) Reopen(_ context.Context, id string, params backend.ReopenParams) error {
