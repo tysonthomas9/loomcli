@@ -129,11 +129,12 @@ type Daemon struct {
 	shutdownOnce sync.Once      // protects shutdown channel from double-close
 	wg           sync.WaitGroup // tracks superviseAgent goroutines
 
-	concurrency  *ConcurrencyTracker  // enforces per-role concurrency limits
-	eventBus     events.Emitter       // event emission for observability (nil-safe via NopBus default)
-	issueBackend backend.IssueBackend // pluggable issue data access
-	repos        []RepoConfig         // workspace repos for resolveAgentRepos; nil outside workspace mode
-	workspaceID  string               // stable workspace UUID for log namespacing; empty outside workspace mode
+	concurrency   *ConcurrencyTracker  // enforces per-role concurrency limits
+	eventBus      events.Emitter       // event emission for observability (nil-safe via NopBus default)
+	issueBackend  backend.IssueBackend // pluggable issue data access
+	repos         []RepoConfig         // workspace repos for resolveAgentRepos; nil outside workspace mode
+	workspaceID   string               // stable workspace UUID for log namespacing; empty outside workspace mode
+	ipcSocketPath string               // resolved agent IPC socket path; empty if IPC server not started
 
 	configHash  string       // SHA-256 hash of current running config for no-op detection
 	reconcileMu sync.RWMutex // serializes config writes; readers hold RLock when accessing d.config

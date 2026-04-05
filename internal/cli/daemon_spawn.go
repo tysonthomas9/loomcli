@@ -106,10 +106,8 @@ func (d *Daemon) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_SOURCE_REPOS=%s", strings.Join(sourceRepos, ",")))
 	}
 
-	// Propagate workspace ID so subprocess can namespace logs
-	if d.workspaceID != "" {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_WORKSPACE_ID=%s", d.workspaceID))
-	}
+	// Propagate daemon-level identifiers (workspace ID, IPC socket path)
+	cmd.Env = d.appendDaemonEnv(cmd.Env)
 
 	// Propagate session env vars for transcript-based liveness tracking
 	ap.mu.Lock()
@@ -254,4 +252,16 @@ func (d *Daemon) waitForAgent(ap *AgentProcess) int {
 // reset on clean exit when the task status is already terminal).
 func (d *Daemon) recoverAgent(ap *AgentProcess, exitCode int) error {
 	return RecoverWorktree(ap.worktreePath, ap.entry.Worktree, exitCode)
+}
+
+// appendDaemonEnv appends daemon-level env vars (workspace ID, IPC socket path)
+// to the given env slice. Values are only set when non-empty.
+func (d *Daemon) appendDaemonEnv(env []string) []string {
+	if d.workspaceID != "" {
+		env = append(env, fmt.Sprintf("LOOM_WORKSPACE_ID=%s", d.workspaceID))
+	}
+	if d.ipcSocketPath != "" {
+		env = append(env, fmt.Sprintf("LOOM_DAEMON_SOCKET=%s", d.ipcSocketPath))
+	}
+	return env
 }

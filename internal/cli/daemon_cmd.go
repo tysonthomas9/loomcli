@@ -340,6 +340,7 @@ func runDaemon(cmd *cobra.Command, args []string) {
 	if err := daemon.startIPCServer(ipcSocketPath); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: agent IPC socket unavailable: %v\n", err)
 	} else {
+		daemon.ipcSocketPath = ipcSocketPath
 		defer os.Remove(ipcSocketPath)
 	}
 

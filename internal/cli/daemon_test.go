@@ -2439,6 +2439,65 @@ func TestBuildCommand_ErrorOnUnresolvableRepos(t *testing.T) {
 	}
 }
 
+// TestBuildCommand_DaemonSocketEnvVar verifies LOOM_DAEMON_SOCKET is set
+// when ipcSocketPath is non-empty and omitted when empty.
+func TestBuildCommand_DaemonSocketEnvVar(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	t.Run("ipcSocketPath set propagates LOOM_DAEMON_SOCKET", func(t *testing.T) {
+		d := &Daemon{
+			config:        &DaemonConfig{Daemon: DaemonSettings{}},
+			projectDir:    tmpDir,
+			ipcSocketPath: "/tmp/test-ipc/agent-ipc.sock",
+		}
+		ap := &AgentProcess{
+			entry:        AgentEntry{Worktree: "falcon", Role: "plan"},
+			roleConfig:   RoleConfig{Description: "Built-in plan agent"},
+			worktreePath: tmpDir,
+		}
+
+		cmd, err := d.buildCommand(ap)
+		if err != nil {
+			t.Fatalf("buildCommand error: %v", err)
+		}
+		found := false
+		for _, env := range cmd.Env {
+			if env == "LOOM_DAEMON_SOCKET=/tmp/test-ipc/agent-ipc.sock" {
+				found = true
+			}
+		}
+		if !found {
+			t.Error("LOOM_DAEMON_SOCKET=/tmp/test-ipc/agent-ipc.sock not found in cmd.Env")
+		}
+	})
+
+	t.Run("empty ipcSocketPath omits LOOM_DAEMON_SOCKET", func(t *testing.T) {
+		// Clear any inherited LOOM_DAEMON_SOCKET from parent env
+		t.Setenv("LOOM_DAEMON_SOCKET", "")
+		os.Unsetenv("LOOM_DAEMON_SOCKET")
+
+		d := &Daemon{
+			config:     &DaemonConfig{Daemon: DaemonSettings{}},
+			projectDir: tmpDir,
+		}
+		ap := &AgentProcess{
+			entry:        AgentEntry{Worktree: "hawk", Role: "task"},
+			roleConfig:   RoleConfig{Description: "Built-in task agent"},
+			worktreePath: tmpDir,
+		}
+
+		cmd, err := d.buildCommand(ap)
+		if err != nil {
+			t.Fatalf("buildCommand error: %v", err)
+		}
+		for _, env := range cmd.Env {
+			if strings.HasPrefix(env, "LOOM_DAEMON_SOCKET=") {
+				t.Errorf("LOOM_DAEMON_SOCKET should not be in cmd.Env when ipcSocketPath is empty, got: %s", env)
+			}
+		}
+	})
+}
+
 // TestDaemonStop_ClosesConcurrencyTracker verifies that Daemon.Stop() calls
 // concurrency.Close() to unblock waiters.
 func TestDaemonStop_ClosesConcurrencyTracker(t *testing.T) {
