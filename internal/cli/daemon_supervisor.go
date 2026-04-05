@@ -76,6 +76,11 @@ func (d *Daemon) Stop() {
 		_ = d.controlListener.Close()
 	}
 
+	// Close the agent IPC socket listener (if running)
+	if d.ipcListener != nil {
+		_ = d.ipcListener.Close()
+	}
+
 	// Unblock any agents waiting for concurrency slots
 	d.concurrency.Close()
 

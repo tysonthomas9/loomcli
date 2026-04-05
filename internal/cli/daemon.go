@@ -152,6 +152,10 @@ type Daemon struct {
 	// controlListener is the Unix domain socket listener for the control server.
 	// Set by startControlServer, closed on Stop.
 	controlListener net.Listener
+
+	// ipcListener is the Unix domain socket listener for the agent IPC server.
+	// Set by startIPCServer, closed on Stop.
+	ipcListener net.Listener
 }
 
 // isAgentStopped returns true if the named agent was stopped via the control socket.

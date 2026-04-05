@@ -332,6 +332,14 @@ func runDaemon(cmd *cobra.Command, args []string) {
 		defer os.Remove(socketPath)
 	}
 
+	// 12.6. Start agent IPC socket server for issue mutations from agent subprocesses
+	ipcSocketPath := resolveAgentIPCSocketPath(projectDir, config.Daemon.PIDFile)
+	if err := daemon.startIPCServer(ipcSocketPath); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: agent IPC socket unavailable: %v\n", err)
+	} else {
+		defer os.Remove(ipcSocketPath)
+	}
+
 	// Start state file updater goroutine
 	stateUpdateDone := startStateUpdater(shutdown, stateFilePath, startedAt, daemon, maxRetries)
 
