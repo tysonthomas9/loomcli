@@ -9,7 +9,7 @@ const execAsync = promisify(exec)
  *
  * These tests require:
  * - loom daemon running (loom daemon start)
- * - web server running (go run . -port 8081 or air)
+ * - web server running (go run . -port 8080 or air)
  *
  * Run with: npm run test:e2e:integration
  *

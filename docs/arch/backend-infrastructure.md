@@ -574,7 +574,17 @@ Registered directly in `registerRoutes()`:
 | GET | `/api/editors` | `listEditorsHandler` |
 | POST | `/api/editors/open` | `openEditorHandler` |
 | POST | `/api/sessions/notify` | `notifySessionChangeHandler` (conditional) |
-| GET/POST | `/api/loom/...` | Loom proxy (conditional) |
+| GET | `/api/monitor/status` | Monitor status (injected from cli) |
+| GET | `/api/monitor/agents` | Monitor agents (injected from cli) |
+| GET | `/api/monitor/tasks` | Monitor tasks (injected from cli) |
+| GET | `/api/monitor/stats` | Monitor stats (injected from cli) |
+| GET | `/api/monitor/sync` | Monitor sync (injected from cli) |
+| GET | `/api/monitor/workspaces` | Monitor workspaces (injected from cli) |
+| GET | `/api/monitor/stale-detector` | Stale detector (injected from cli) |
+| GET | `/api/monitor/usage` | Usage data (injected from cli) |
+| GET | `/metrics` | Prometheus metrics (injected from cli) |
+| GET | `/api/observability/metrics` | Observability metrics (injected from cli) |
+| GET | `/api/observability/events` | Observability events (injected from cli) |
 | * | `/` | SPA catch-all (embedded FS or dev mode) |
 
 ### Workspace Management Routes (App Mux)

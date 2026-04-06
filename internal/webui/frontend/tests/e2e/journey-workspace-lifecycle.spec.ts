@@ -63,7 +63,7 @@ async function setupMocks(page: Page) {
     if (url.includes("/terminal")) { await route.fulfill({ status: 200, contentType: "application/json", body: ok({}) }); return; }
     await route.fulfill({ status: 200, contentType: "application/json", body: ok(WORKSPACE_DATA) });
   });
-  await page.route("**/api/loom/**", async (route) => {
+  await page.route("**/api/monitor/**", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({}) });
   });
 }

@@ -52,7 +52,7 @@ func init() {
 	installServiceCmd.Flags().BoolVar(&installServiceInstall, "install", false, "Write and enable the service (instead of printing to stdout)")
 	installServiceCmd.Flags().BoolVar(&installServiceUninstall, "uninstall", false, "Stop and remove an installed service")
 	installServiceCmd.Flags().StringVar(&installServiceName, "name", "", "Service name suffix for multi-project setups (e.g. my-project)")
-	installServiceCmd.Flags().IntVar(&installServicePort, "port", 8081, "Port for loom serve")
+	installServiceCmd.Flags().IntVar(&installServicePort, "port", 8080, "Port for loom serve")
 	installServiceCmd.Flags().StringVar(&installServiceBind, "bind", "127.0.0.1", "Bind address for loom serve")
 	installServiceCmd.Flags().BoolVar(&installServiceNoWebUI, "no-webui", false, "Disable the web UI in the service")
 	installServiceCmd.Flags().StringArrayVar(&installServiceEnv, "env", nil, "Extra environment variables (KEY=VALUE, repeatable)")

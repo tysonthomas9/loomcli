@@ -2,7 +2,6 @@ package cli
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -79,34 +78,6 @@ type StatusResponse struct {
 	Stats          MonitorStats        `json:"stats"`
 	Sync           SyncInfo            `json:"sync"`
 	Timestamp      time.Time           `json:"timestamp"`
-}
-
-// corsMiddleware adds CORS headers to responses.
-func corsMiddleware(corsOrigin string, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := corsOrigin
-		if origin == "" {
-			origin = fmt.Sprintf("http://localhost:%d", serveWebUIPort)
-		}
-
-		w.Header().Set("Access-Control-Allow-Origin", origin)
-		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		next.ServeHTTP(w, r)
-	})
-}
-
-func handleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, HealthResponse{
-		Status:    "ok",
-		Timestamp: time.Now(),
-	})
 }
 
 func handleStatus(w http.ResponseWriter, r *http.Request) {

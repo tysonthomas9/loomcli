@@ -52,7 +52,7 @@ test.use({ viewport: { width: 1280, height: 720 } })
 /**
  * Helper to setup API mocks for visual tests.
  * The app uses /api/issues (kanban mode) not /api/ready, and
- * loom endpoints are proxied via /api/loom/* not localhost:9000.
+ * monitor endpoints are served at /api/monitor/* directly.
  */
 async function setupMocks(
   page: import("@playwright/test").Page,
@@ -123,8 +123,8 @@ async function setupMocks(
     })
   })
 
-  // Abort loom server requests (proxied via /api/loom/*)
-  await page.route("**/api/loom/**", async (route) => {
+  // Abort monitor server requests
+  await page.route("**/api/monitor/**", async (route) => {
     await route.abort()
   })
 }
@@ -307,11 +307,11 @@ test.describe("Visual Regression - Loading States", () => {
       })
     })
 
-    // Abort SSE and loom requests
+    // Abort SSE and monitor requests
     await page.route("**/api/events**", async (route) => {
       await route.abort()
     })
-    await page.route("**/api/loom/**", async (route) => {
+    await page.route("**/api/monitor/**", async (route) => {
       await route.abort()
     })
 
@@ -350,11 +350,11 @@ test.describe("Visual Regression - Error States", () => {
       })
     })
 
-    // Abort SSE and loom requests to prevent networkidle timeout
+    // Abort SSE and monitor requests to prevent networkidle timeout
     await page.route("**/api/events**", async (route) => {
       await route.abort()
     })
-    await page.route("**/api/loom/**", async (route) => {
+    await page.route("**/api/monitor/**", async (route) => {
       await route.abort()
     })
 

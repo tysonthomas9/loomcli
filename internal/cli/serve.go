@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
-	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -29,7 +27,6 @@ var (
 	servePort              int
 	serveBindAddr          string
 	serveCorsOrigin        string
-	serveWebUIPort         int
 	serveWebUISocket       string
 	serveNoWebUI           bool
 	serveNoDaemon          bool
@@ -63,7 +60,7 @@ var serveCmd = &cobra.Command{
 Auto-starts the bd daemon if not running (disable with --no-daemon).
 
 ENVIRONMENT VARIABLES
-  LOOM_SERVER_PORT     Server port (default: 8081)
+  LOOM_SERVER_PORT     Server port (default: 8080)
   LOOM_BIND_ADDR       Bind address (default: 127.0.0.1)
   LOOM_CORS_ORIGIN     CORS allowed origin
   LOOM_REDIS_PASSWORD  Redis password (avoids exposure in process list)
@@ -72,7 +69,7 @@ ENVIRONMENT VARIABLES
   LOOM_AUTH_AUDIENCE    Expected JWT audience (defaults to "loom")
 
 EXAMPLES
-  loom serve                                              # Default port 8081
+  loom serve                                              # Default port 8080
   loom serve --bind 0.0.0.0 --auth-url https://auth.co   # Exposed with JWT auth
   loom serve --dev                                        # Frontend from disk`,
 	Args: cobra.NoArgs,
@@ -81,7 +78,7 @@ EXAMPLES
 
 func init() {
 	// Get defaults from environment
-	defaultPort := 8081
+	defaultPort := 8080
 	if envPort := os.Getenv("LOOM_SERVER_PORT"); envPort != "" {
 		if p, err := strconv.Atoi(envPort); err == nil {
 			defaultPort = p
@@ -97,10 +94,9 @@ func init() {
 
 	serveCmd.Flags().IntVarP(&servePort, "port", "p", defaultPort, "Server port")
 	serveCmd.Flags().StringVar(&serveBindAddr, "bind", defaultBind, "Bind address (use 0.0.0.0 for all interfaces)")
-	serveCmd.Flags().StringVar(&serveCorsOrigin, "cors", defaultCors, "CORS allowed origin (default: http://localhost:<webui-port>)")
-	serveCmd.Flags().IntVar(&serveWebUIPort, "webui-port", 8080, "Port for the web UI server")
+	serveCmd.Flags().StringVar(&serveCorsOrigin, "cors", defaultCors, "CORS allowed origin")
 	serveCmd.Flags().StringVar(&serveWebUISocket, "webui-socket", "", "Daemon socket path for webui (auto-detect if empty)")
-	serveCmd.Flags().BoolVar(&serveNoWebUI, "no-webui", false, "Disable the web UI server, run only the API")
+	serveCmd.Flags().BoolVar(&serveNoWebUI, "no-webui", false, "Skip frontend static file serving (API-only/headless mode)")
 	serveCmd.Flags().BoolVar(&serveNoDaemon, "no-daemon", false, "Skip auto-starting the bd daemon")
 
 	defaultRedisAddr := os.Getenv("LOOM_REDIS_ADDR")
@@ -253,97 +249,6 @@ func runServe(cmd *cobra.Command, args []string) {
 	log.Printf("Terminal backend: %s", resolvedBackend)
 	terminalCmd := fmt.Sprintf("loom lead --backend %s", resolvedBackend)
 
-	// Start webui server in goroutine (unless --no-webui)
-	webuiErr := make(chan error, 1)
-	if !serveNoWebUI {
-		// Register the current project as a workspace in the config so it
-		// appears in the sidebar alongside workspaces created via the UI.
-		ensureCurrentProjectRegistered()
-		go func() {
-			gitOps := NewGitOps()
-			// Initialize session audit trail store (best-effort; nil disables endpoints).
-			var sessStore *sessions.Store
-			if dir := GetBeadsDir(); dir != "" {
-				if s, err := sessions.NewStore(dir); err == nil {
-					sessStore = s
-				}
-			}
-			cfg := webui.ServerConfig{
-				Port:                    serveWebUIPort,
-				BindAddress:             serveBindAddr,
-				SocketPath:              serveWebUISocket,
-				LoomServerURL:           fmt.Sprintf("http://localhost:%d", servePort),
-				TerminalCmd:             terminalCmd,
-				FleetEnabled:            serveRedisAddr != "",
-				FleetRedis:              fleetRedisConfig,
-				FleetJWTKey:             fleetJWTKey,
-				FleetAPIKey:             serveFleetAPIKey,
-				HSTSEnabled:             serveHSTS,
-				ExtAuthURL:              serveAuthURL,
-				ExtAuthIssuer:           serveAuthIssuer,
-				ExtAuthAudience:         serveAuthAudience,
-				ExtAuthAllowInsecure:    serveAuthAllowInsecure,
-				DevMode:                 serveDev,
-				DevFrontendDir:          serveDevFrontDir,
-				GitOps:                  gitOps,
-				FileOps:                 gitOps, // GitOpsImpl satisfies FileOps (same ResolveAgentWorktree)
-				WorkspaceConfigFn:       buildWorkspaceInfo,
-				WorkspaceConfigByIDFn:   buildWorkspaceInfoForID,
-				WorkspaceDeleteFn:       deleteWorkspace,
-				SetDefaultWorkspaceFn:   setDefaultWorkspace,
-				ClearDefaultWorkspaceFn: clearDefaultWorkspace,
-				WorkspaceCreateFn:       createWorkspace,
-				WorkspaceListFn: func() (map[string]string, error) {
-					cfg, err := LoadConfig()
-					if err != nil {
-						return nil, err
-					}
-					if cfg == nil || len(cfg.Workspaces) == 0 {
-						return nil, nil
-					}
-					result := make(map[string]string, len(cfg.Workspaces))
-					for name, ws := range cfg.Workspaces {
-						// Use stable UUID as map key so MultiPool is keyed
-						// by UUID (matches InitialWorkspaceID). Fall back to
-						// config name for pre-migration workspaces.
-						key := name
-						if ws.ID != "" {
-							key = ws.ID
-						}
-						result[key] = ws.Path
-					}
-					return result, nil
-				},
-				InitialWorkspaceID:    resolveInitialWorkspaceID(),
-				WorkspaceIDResolverFn: resolveWorkspaceID,
-				BackendOps:            backendOps,
-				SessionsStore:         sessStore,
-				NotifyTokenDir:        GetBeadsDir(),
-				FleetMode:             fleetModeDetected,
-				FleetClientURL:        fleetClientCfg.URL,
-				FleetClientWorkspace:  fleetClientCfg.Workspace,
-				FleetClientAPIKey:     fleetClientCfg.APIKey,
-				Logger:                slog.Default(),
-			}
-			if serveCorsOrigin != "" {
-				cfg.CORSEnabled = true
-				cfg.CORSOrigins = []string{serveCorsOrigin}
-			} else if serveDev {
-				cfg.CORSEnabled = true
-				// Uses default origin (http://localhost:3000) in server.go
-			}
-			webuiErr <- webui.StartServer(ctx, cfg)
-		}()
-		log.Printf("Web UI server starting on port %d", serveWebUIPort)
-		if serveDev {
-			dir := serveDevFrontDir
-			if dir == "" {
-				dir = "internal/webui/frontend/dist"
-			}
-			log.Printf("Development mode enabled: serving frontend from %s", dir)
-		}
-	}
-
 	// Start stale detector if Redis is configured
 	var kvClient *kv.Client
 	if serveRedisAddr != "" {
@@ -407,93 +312,142 @@ func runServe(cmd *cobra.Command, args []string) {
 		}
 	}()
 
-	// Set up the loom API server
-	mux := http.NewServeMux()
-
-	// Register routes
-	mux.HandleFunc("GET /health", handleHealth)
-	mux.HandleFunc("GET /api/status", handleStatus)
-	mux.HandleFunc("GET /api/agents", handleAgents)
-	mux.HandleFunc("GET /api/tasks", handleTasks)
-	mux.HandleFunc("GET /api/stats", handleStats)
-	mux.HandleFunc("GET /api/sync", handleSync)
-	mux.HandleFunc("GET /api/workspaces", handleWorkspaces)
-	mux.HandleFunc("GET /api/stale-detector", handleStaleDetector)
-	mux.HandleFunc("GET /api/usage", handleUsage)
-	mux.HandleFunc("GET /metrics", handleMetrics)
+	// Build monitor handlers — these reference cli package-level variables
+	// (collectDataFunc, staleDetectorInstance, usageStoreInstance) and are
+	// passed to the webui server as pre-built http.HandlerFunc values.
 	eventsDir := resolveEventsDir()
-	mux.HandleFunc("GET /api/observability/metrics", handleObservabilityMetrics(eventsDir, newMetricsCache(eventsDir)))
-	mux.HandleFunc("GET /api/observability/events", handleObservabilityEvents(eventsDir))
-
-	// Wrap with CORS middleware
-	handler := corsMiddleware(serveCorsOrigin, mux)
-
-	server := &http.Server{
-		Addr:              net.JoinHostPort(serveBindAddr, strconv.Itoa(servePort)),
-		Handler:           handler,
-		ReadTimeout:       10 * time.Second,
-		ReadHeaderTimeout: 10 * time.Second,
-		WriteTimeout:      10 * time.Second,
+	monitorHandlers := webui.MonitorHandlers{
+		Status:               handleStatus,
+		Agents:               handleAgents,
+		Tasks:                handleTasks,
+		Stats:                handleStats,
+		Sync:                 handleSync,
+		Workspaces:           handleWorkspaces,
+		StaleDetector:        handleStaleDetector,
+		Usage:                handleUsage,
+		Metrics:              handleMetrics,
+		ObservabilityMetrics: handleObservabilityMetrics(eventsDir, newMetricsCache(eventsDir)),
+		ObservabilityEvents:  handleObservabilityEvents(eventsDir),
 	}
 
-	// Start API server
-	apiErr := make(chan error, 1)
+	// Register the current project as a workspace in the config so it
+	// appears in the sidebar alongside workspaces created via the UI.
+	ensureCurrentProjectRegistered()
+
+	// Start the consolidated server
+	webuiErr := make(chan error, 1)
 	go func() {
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			apiErr <- err
+		gitOps := NewGitOps()
+		// Initialize session audit trail store (best-effort; nil disables endpoints).
+		var sessStore *sessions.Store
+		if dir := GetBeadsDir(); dir != "" {
+			if s, err := sessions.NewStore(dir); err == nil {
+				sessStore = s
+			}
 		}
-		close(apiErr)
+		cfg := webui.ServerConfig{
+			Port:                    servePort,
+			BindAddress:             serveBindAddr,
+			SocketPath:              serveWebUISocket,
+			SkipFrontend:            serveNoWebUI,
+			MonitorHandlers:         monitorHandlers,
+			TerminalCmd:             terminalCmd,
+			FleetEnabled:            serveRedisAddr != "",
+			FleetRedis:              fleetRedisConfig,
+			FleetJWTKey:             fleetJWTKey,
+			FleetAPIKey:             serveFleetAPIKey,
+			HSTSEnabled:             serveHSTS,
+			ExtAuthURL:              serveAuthURL,
+			ExtAuthIssuer:           serveAuthIssuer,
+			ExtAuthAudience:         serveAuthAudience,
+			ExtAuthAllowInsecure:    serveAuthAllowInsecure,
+			DevMode:                 serveDev,
+			DevFrontendDir:          serveDevFrontDir,
+			GitOps:                  gitOps,
+			FileOps:                 gitOps, // GitOpsImpl satisfies FileOps (same ResolveAgentWorktree)
+			WorkspaceConfigFn:       buildWorkspaceInfo,
+			WorkspaceConfigByIDFn:   buildWorkspaceInfoForID,
+			WorkspaceDeleteFn:       deleteWorkspace,
+			SetDefaultWorkspaceFn:   setDefaultWorkspace,
+			ClearDefaultWorkspaceFn: clearDefaultWorkspace,
+			WorkspaceCreateFn:       createWorkspace,
+			WorkspaceListFn: func() (map[string]string, error) {
+				cfg, err := LoadConfig()
+				if err != nil {
+					return nil, err
+				}
+				if cfg == nil || len(cfg.Workspaces) == 0 {
+					return nil, nil
+				}
+				result := make(map[string]string, len(cfg.Workspaces))
+				for name, ws := range cfg.Workspaces {
+					// Use stable UUID as map key so MultiPool is keyed
+					// by UUID (matches InitialWorkspaceID). Fall back to
+					// config name for pre-migration workspaces.
+					key := name
+					if ws.ID != "" {
+						key = ws.ID
+					}
+					result[key] = ws.Path
+				}
+				return result, nil
+			},
+			InitialWorkspaceID:    resolveInitialWorkspaceID(),
+			WorkspaceIDResolverFn: resolveWorkspaceID,
+			BackendOps:            backendOps,
+			SessionsStore:         sessStore,
+			NotifyTokenDir:        GetBeadsDir(),
+			FleetMode:             fleetModeDetected,
+			FleetClientURL:        fleetClientCfg.URL,
+			FleetClientWorkspace:  fleetClientCfg.Workspace,
+			FleetClientAPIKey:     fleetClientCfg.APIKey,
+			Logger:                slog.Default(),
+		}
+		if serveCorsOrigin != "" {
+			cfg.CORSEnabled = true
+			cfg.CORSOrigins = []string{serveCorsOrigin}
+		} else if serveDev {
+			cfg.CORSEnabled = true
+			// Uses default origin (http://localhost:3000) in server.go
+		}
+		webuiErr <- webui.StartServer(ctx, cfg)
 	}()
 
-	log.Printf("Starting loom API server on %s:%d", serveBindAddr, servePort)
+	log.Printf("Server starting on %s:%d", serveBindAddr, servePort)
+	if serveNoWebUI {
+		log.Printf("Frontend disabled (--no-webui): API-only mode")
+	}
+	if serveDev {
+		dir := serveDevFrontDir
+		if dir == "" {
+			dir = "internal/webui/frontend/dist"
+		}
+		log.Printf("Development mode enabled: serving frontend from %s", dir)
+	}
 	if serveCorsOrigin != "" {
 		log.Printf("CORS enabled for origin: %s", serveCorsOrigin)
 	}
 
-	// Wait for signal, API error, or webui error
+	// Wait for signal or server error
 	select {
 	case <-stop:
-		log.Println("Shutting down servers...")
-	case err := <-apiErr:
+		log.Println("Shutting down server...")
+	case err := <-webuiErr:
 		if err != nil {
-			cmd.PrintErrf("API server error: %v\n", err)
+			cmd.PrintErrf("Server error: %v\n", err)
 			cancel()
 			os.Exit(1)
 		}
-	case err := <-webuiErr:
-		if err != nil {
-			log.Printf("Warning: webui server error: %v", err)
-		}
-		// Webui failure should not bring down the API server; wait for signal or API error
-		select {
-		case <-stop:
-			log.Println("Shutting down servers...")
-		case err := <-apiErr:
-			if err != nil {
-				cmd.PrintErrf("API server error: %v\n", err)
-				cancel()
-				os.Exit(1)
-			}
-		}
 	}
 
-	// Cancel context to stop webui server
+	// Cancel context to trigger graceful shutdown
 	cancel()
 
-	// Gracefully shut down API server
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer shutdownCancel()
-	if err := server.Shutdown(shutdownCtx); err != nil {
-		log.Printf("API server shutdown error: %v", err)
-	}
-
-	// Wait for webui goroutine to finish its shutdown
-	if !serveNoWebUI {
-		select {
-		case <-webuiErr:
-		case <-time.After(10 * time.Second):
-			log.Printf("Warning: webui server did not shut down within timeout")
-		}
+	// Wait for server goroutine to finish its shutdown
+	select {
+	case <-webuiErr:
+	case <-time.After(10 * time.Second):
+		log.Printf("Warning: server did not shut down within timeout")
 	}
 }
 

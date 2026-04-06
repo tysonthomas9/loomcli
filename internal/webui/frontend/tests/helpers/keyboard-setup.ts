@@ -281,8 +281,8 @@ export async function bootApp(
     });
   });
 
-  // Loom server endpoints (global)
-  await page.route("**/api/loom/**", async function (route) {
+  // Monitor server endpoints (global)
+  await page.route("**/api/monitor/**", async function (route) {
     await route.fulfill({
       status: 200,
       contentType: "application/json",

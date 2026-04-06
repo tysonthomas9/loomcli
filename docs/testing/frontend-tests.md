@@ -600,7 +600,7 @@ Located in `tests/e2e/integration/`. These run against a real Podman Compose sta
 
 **What it does**:
 1. Starts Podman Compose stack (`compose.e2e.yml`)
-2. Waits for health checks on `localhost:8081` (WebUI) and `localhost:9000` (Loom API)
+2. Waits for health checks on `localhost:8080` (consolidated server) and `localhost:9000` (Loom API)
 3. Timeout: 2 minutes for container builds
 4. Writes state file (`.e2e-state.json`) with URLs for tests
 

@@ -413,8 +413,8 @@ test.describe("Sidebar Rendering", () => {
     ]
     await setupMocks(page, { issues })
 
-    // Also mock loom endpoint to prevent connection errors
-    await page.route("**/api/loom/**", async (route) => {
+    // Also mock monitor endpoint to prevent connection errors
+    await page.route("**/api/monitor/**", async (route) => {
       await route.abort()
     })
     await page.route("**/loom/**", async (route) => {

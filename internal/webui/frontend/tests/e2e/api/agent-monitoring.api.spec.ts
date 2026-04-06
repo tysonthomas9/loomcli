@@ -4,8 +4,8 @@
  * Story 11: As an operator, I want to monitor agent status via loom.
  * Tests loom proxy endpoints used by MonitorDashboard Agent Sidebar.
  *
- * The WebUI server proxies /api/loom/* to the Loom API server,
- * stripping the /api/loom prefix (e.g. /api/loom/health -> /health).
+ * Monitor endpoints are served directly on the single consolidated server
+ * (e.g. /health, /api/monitor/agents, /api/monitor/status).
  */
 
 import { test, expect, isIntegrationEnabled, generateTestId } from './api-client'
@@ -29,8 +29,8 @@ test.describe('Agent Monitoring (Loom)', () => {
   })
 
   test.describe('Health Endpoint', () => {
-    test('GET /api/loom/health returns ok', async ({ request }) => {
-      const response = await request.get('/api/loom/health')
+    test('GET /health returns ok', async ({ request }) => {
+      const response = await request.get('/health')
 
       expect(response.ok()).toBe(true)
 
@@ -42,8 +42,8 @@ test.describe('Agent Monitoring (Loom)', () => {
   })
 
   test.describe('Agents Endpoint', () => {
-    test('GET /api/loom/api/agents returns agent list', async ({ request }) => {
-      const response = await request.get('/api/loom/api/agents')
+    test('GET /api/monitor/agents returns agent list', async ({ request }) => {
+      const response = await request.get('/api/monitor/agents')
 
       expect(response.ok()).toBe(true)
 
@@ -62,7 +62,7 @@ test.describe('Agent Monitoring (Loom)', () => {
     })
 
     test('agent data includes name, branch, status fields', async ({ request }) => {
-      const response = await request.get('/api/loom/api/agents')
+      const response = await request.get('/api/monitor/agents')
 
       expect(response.ok()).toBe(true)
 
@@ -94,8 +94,8 @@ test.describe('Agent Monitoring (Loom)', () => {
   })
 
   test.describe('Status Endpoint', () => {
-    test('GET /api/loom/api/status returns system overview', async ({ request }) => {
-      const response = await request.get('/api/loom/api/status')
+    test('GET /api/monitor/status returns system overview', async ({ request }) => {
+      const response = await request.get('/api/monitor/status')
 
       expect(response.ok()).toBe(true)
 
@@ -121,7 +121,7 @@ test.describe('Agent Monitoring (Loom)', () => {
     })
 
     test('status includes task counts by workflow state', async ({ request }) => {
-      const response = await request.get('/api/loom/api/status')
+      const response = await request.get('/api/monitor/status')
 
       expect(response.ok()).toBe(true)
 
@@ -155,8 +155,8 @@ test.describe('Agent Monitoring (Loom)', () => {
   })
 
   test.describe('Tasks Endpoint', () => {
-    test('GET /api/loom/api/tasks returns task distribution', async ({ request }) => {
-      const response = await request.get('/api/loom/api/tasks')
+    test('GET /api/monitor/tasks returns task distribution', async ({ request }) => {
+      const response = await request.get('/api/monitor/tasks')
 
       expect(response.ok()).toBe(true)
 
@@ -195,7 +195,7 @@ test.describe('Agent Monitoring (Loom)', () => {
   test.describe('Loom Integration', () => {
     test('loom reflects issue changes from loom daemon', async ({ api, request }) => {
       // Capture initial stats from loom
-      const initialResponse = await request.get('/api/loom/api/status')
+      const initialResponse = await request.get('/api/monitor/status')
       const initialBody = await initialResponse.json()
       const initialTotal = initialBody.stats.total
 
@@ -215,7 +215,7 @@ test.describe('Agent Monitoring (Loom)', () => {
       // the test workspace, so verify the count is at least non-negative
       // rather than asserting exact delta.
       await expect(async () => {
-        const response = await request.get('/api/loom/api/status')
+        const response = await request.get('/api/monitor/status')
         const body = await response.json()
 
         if (initialTotal > 0) {

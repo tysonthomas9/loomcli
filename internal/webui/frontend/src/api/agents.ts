@@ -20,16 +20,19 @@ import { get } from "./client";
  * Default loom server URL.
  * Can be overridden via environment variable or config.
  */
-const LOOM_SERVER_URL = import.meta.env.VITE_LOOM_SERVER_URL ?? "/api/loom";
+const LOOM_SERVER_URL = import.meta.env.VITE_LOOM_SERVER_URL ?? "";
 
 /**
  * Fetch agents from the loom server.
  * Throws on network errors or non-OK responses so callers can handle connection state.
  */
 export async function fetchAgents(): Promise<LoomAgentStatus[]> {
-  const data = await get<LoomAgentsResponse>(`${LOOM_SERVER_URL}/api/agents`, {
-    timeout: 15000,
-  });
+  const data = await get<LoomAgentsResponse>(
+    `${LOOM_SERVER_URL}/api/monitor/agents`,
+    {
+      timeout: 15000,
+    },
+  );
   return data.agents ?? [];
 }
 
@@ -62,9 +65,12 @@ export interface FetchStatusResult {
  * Throws on network errors or invalid responses so callers can handle connection state.
  */
 export async function fetchStatus(): Promise<FetchStatusResult> {
-  const data = await get<LoomStatusResponse>(`${LOOM_SERVER_URL}/api/status`, {
-    timeout: 15000,
-  });
+  const data = await get<LoomStatusResponse>(
+    `${LOOM_SERVER_URL}/api/monitor/status`,
+    {
+      timeout: 15000,
+    },
+  );
   return {
     agents: data.agents ?? [],
     tasks: data.tasks,
@@ -80,9 +86,12 @@ export async function fetchStatus(): Promise<FetchStatusResult> {
  * Throws on network errors or invalid responses so callers can handle connection state.
  */
 export async function fetchTasks(): Promise<LoomTaskLists> {
-  const data = await get<LoomTasksResponse>(`${LOOM_SERVER_URL}/api/tasks`, {
-    timeout: 15000,
-  });
+  const data = await get<LoomTasksResponse>(
+    `${LOOM_SERVER_URL}/api/monitor/tasks`,
+    {
+      timeout: 15000,
+    },
+  );
   return {
     needsPlanning: data.needs_planning ?? [],
     readyToImplement: data.ready_to_implement ?? [],

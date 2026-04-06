@@ -105,7 +105,6 @@ type Server struct {
 
 	// Shared infrastructure
 	editorCache *editorCache
-	loomProxy   http.Handler // nil if LoomServerURL is empty
 	frontendH   http.Handler // embedded FS handler or dev-mode handler
 
 	// Pre-built top-level handlers
@@ -159,8 +158,6 @@ func (app *Server) buildHandlers() {
 	if app.config.BackendOps != nil {
 		app.getBackendsHealthHandler = handleGetBackendsHealth(app.config.BackendOps)
 	}
-
-	app.loomProxy = newLoomProxy(app.config.LoomServerURL)
 
 	app.listEditorsHandler = handleListEditors(app.editorCache)
 	app.openEditorHandler = handleOpenEditor(app.editorCache, editor.LaunchEditor)

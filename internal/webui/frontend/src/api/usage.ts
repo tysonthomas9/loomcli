@@ -6,14 +6,14 @@
 import type { UsageResponse, UsageParams } from "@/types";
 import { get } from "./client";
 
-const LOOM_SERVER_URL = import.meta.env.VITE_LOOM_SERVER_URL ?? "/api/loom";
+const LOOM_SERVER_URL = import.meta.env.VITE_LOOM_SERVER_URL ?? "";
 
 /**
  * Fetch usage data from the loom server with optional filters.
  * Throws on network errors or non-OK responses.
  */
 export async function fetchUsage(params?: UsageParams): Promise<UsageResponse> {
-  let url = `${LOOM_SERVER_URL}/api/usage`;
+  let url = `${LOOM_SERVER_URL}/api/monitor/usage`;
 
   if (params) {
     const qs = new URLSearchParams();

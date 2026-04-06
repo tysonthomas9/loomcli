@@ -360,8 +360,8 @@ async function setupHttpMocks(
     });
   });
 
-  // Loom server endpoints
-  await page.route("**/api/loom/**", async (route) => {
+  // Monitor server endpoints
+  await page.route("**/api/monitor/**", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",

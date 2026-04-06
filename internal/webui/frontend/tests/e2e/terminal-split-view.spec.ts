@@ -395,8 +395,8 @@ async function setupTerminalMocks(
     }
   );
 
-  // Loom server endpoints (global)
-  await page.route("**/api/loom/**", async (route) => {
+  // Monitor server endpoints (global)
+  await page.route("**/api/monitor/**", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",

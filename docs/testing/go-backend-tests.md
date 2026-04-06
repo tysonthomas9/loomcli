@@ -355,12 +355,6 @@ The WebUI package has **35 test files** including subdirectories for fleet and d
 
 **Why**: Agent logs are critical for debugging. Access bugs hide diagnostic info.
 
-#### `loom_proxy_test.go`
-
-**Purpose**: Tests the reverse proxy from WebUI server to Loom API server.
-
-**Why**: WebUI (port 8080) proxies API calls to Loom API (port 8081). Proxy bugs break all API functionality.
-
 #### `metrics_test.go`
 
 **Purpose**: Tests metrics collection endpoints.

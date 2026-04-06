@@ -305,8 +305,8 @@ async function setupBaseMocks(page: Page) {
     });
   });
 
-  // Loom catch-all (lowest priority — LIFO)
-  await page.route("**/api/loom/**", async (route) => {
+  // Monitor catch-all (lowest priority — LIFO)
+  await page.route("**/api/monitor/**", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -314,8 +314,17 @@ async function setupBaseMocks(page: Page) {
     });
   });
 
-  // Specific loom endpoints (registered last = highest priority)
-  await page.route("**/api/loom/api/agents", async (route) => {
+  // Health endpoint (now served at /health directly)
+  await page.route("**/health", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ status: "ok" }),
+    });
+  });
+
+  // Specific monitor endpoints (registered last = highest priority)
+  await page.route("**/api/monitor/agents", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -325,25 +334,18 @@ async function setupBaseMocks(page: Page) {
       }),
     });
   });
-  await page.route("**/api/loom/api/status", async (route) => {
+  await page.route("**/api/monitor/status", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify(mockLoomStatus),
     });
   });
-  await page.route("**/api/loom/api/tasks", async (route) => {
+  await page.route("**/api/monitor/tasks", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify(mockLoomTasks),
-    });
-  });
-  await page.route("**/api/loom/health", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ status: "ok" }),
     });
   });
 

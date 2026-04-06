@@ -51,7 +51,7 @@ func FetchTerminalContext(loomServerURL string) (*TerminalContext, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), contextFetchTimeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, loomServerURL+"/api/status", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, loomServerURL+"/api/monitor/status", nil)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}

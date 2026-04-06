@@ -8,7 +8,7 @@
  *
  * Mocks: /api/config, /api/workspaces/active, workspace-scoped sub-routes,
  * /api/health, /api/auth/token, and all 3 loom endpoints
- * (/api/loom/api/agents, /api/loom/api/status, /api/loom/api/tasks)
+ * (/api/monitor/agents, /api/monitor/status, /api/monitor/tasks)
  * with both proxy and direct URL patterns.
  */
 
@@ -403,8 +403,8 @@ async function setupMocks(
     }
   );
 
-  // Consolidated loom API handler (proxy path)
-  await page.route("**/api/loom/**", async (route) => {
+  // Consolidated monitor API handler
+  await page.route("**/api/monitor/**", async (route) => {
     const url = route.request().url();
 
     if (!loomServerAvailable) {
@@ -416,7 +416,7 @@ async function setupMocks(
       return;
     }
 
-    if (url.includes("/api/loom/api/agents")) {
+    if (url.includes("/api/monitor/agents")) {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -425,7 +425,7 @@ async function setupMocks(
           timestamp: "2026-01-24T12:00:00Z",
         }),
       });
-    } else if (url.includes("/api/loom/api/status")) {
+    } else if (url.includes("/api/monitor/status")) {
       const status = emptyAgents
         ? { ...mockLoomStatus, agents: [], agent_tasks: {} }
         : customAgents
@@ -436,7 +436,7 @@ async function setupMocks(
         contentType: "application/json",
         body: JSON.stringify(status),
       });
-    } else if (url.includes("/api/loom/api/tasks")) {
+    } else if (url.includes("/api/monitor/tasks")) {
       await route.fulfill({
         status: 200,
         contentType: "application/json",

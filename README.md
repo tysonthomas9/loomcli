@@ -279,7 +279,7 @@ Use `make dev-loom` when validating the actual Loom-served UI on `http://localho
 | `LOOM_BACKEND` | `claude` | AI backend CLI (claude, codex, opencode) |
 | `LOOM_DEFAULT_BRANCH` | `main` | Default integration branch |
 | `LOOM_WORKTREES_DIR` | `./worktrees` | Worktrees directory |
-| `LOOM_SERVER_PORT` | `8081` | Loom API server port |
+| `LOOM_SERVER_PORT` | `8080` | Server port |
 | `LOOM_BIND_ADDR` | `127.0.0.1` | Server bind address |
 
 ## Credits

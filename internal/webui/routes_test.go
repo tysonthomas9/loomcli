@@ -1765,56 +1765,6 @@ func TestSetupRoutes_DevMode_FrontendHandler(t *testing.T) {
 	}
 }
 
-// --- Loom proxy conditional registration tests ---
-
-// TestSetupRoutes_LoomProxy_RegisteredWhenURLSet verifies that /api/loom/ is handled
-// when a valid loomServerURL is provided.
-func TestSetupRoutes_LoomProxy_RegisteredWhenURLSet(t *testing.T) {
-	// Clear env to avoid interference
-	t.Setenv("LOOM_SERVER_URL", "")
-
-	app := &Server{config: ServerConfig{LoomServerURL: "http://localhost:9999"}}
-	setupTestRoutes(t, app)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/loom/status", nil)
-	rr := httptest.NewRecorder()
-	app.mux.ServeHTTP(rr, req)
-
-	// With a valid URL, the proxy is registered.
-	// The proxy will fail to connect to localhost:9999 but the route IS handled
-	// (not falling through to the frontend handler).
-	ct := rr.Header().Get("Content-Type")
-	if ct == "text/html; charset=utf-8" {
-		t.Error("expected loom proxy route to be registered, but request fell through to frontend handler")
-	}
-}
-
-// TestSetupRoutes_LoomProxy_NotRegisteredWhenURLInvalid verifies that /api/loom/ falls
-// through when the loomServerURL is invalid and causes newLoomProxy to return nil.
-func TestSetupRoutes_LoomProxy_NotRegisteredWhenURLInvalid(t *testing.T) {
-	// Clear env and use an invalid scheme so newLoomProxy returns nil
-	t.Setenv("LOOM_SERVER_URL", "")
-	t.Setenv("LOOM_PROXY_ALLOWED_HOSTS", "")
-
-	// Use a URL with a non-localhost host and no allowed hosts → proxy returns nil
-	app := &Server{config: ServerConfig{LoomServerURL: "http://external-host.example.com:9999"}}
-	setupTestRoutes(t, app)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/loom/status", nil)
-	rr := httptest.NewRecorder()
-	app.mux.ServeHTTP(rr, req)
-
-	// With nil proxy, the route falls through to SPA catch-all which rejects /api/* with 404 JSON
-	if rr.Code != http.StatusNotFound {
-		t.Errorf("expected /api/loom/status to return 404, got %d", rr.Code)
-	}
-
-	ct := rr.Header().Get("Content-Type")
-	if ct != "application/json" {
-		t.Errorf("Content-Type = %q, want %q", ct, "application/json")
-	}
-}
-
 // --- Tab metadata route conditional registration tests ---
 
 // TestSetupRoutes_TabMetadataReturns404WhenStoreNil verifies that GET /api/terminal/tabs

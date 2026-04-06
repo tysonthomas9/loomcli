@@ -14,7 +14,7 @@ func baseCfg() serviceConfig {
 		Description:      "Loom agent management server",
 		BinaryPath:       "/usr/local/bin/loom",
 		WorkingDirectory: "/home/user/project",
-		Port:             8081,
+		Port:             8080,
 		BindAddr:         "127.0.0.1",
 		NoWebUI:          false,
 		LogDir:           "/home/user/project/.loom/logs",
@@ -36,7 +36,7 @@ func TestRenderSystemdTemplate(t *testing.T) {
 		contains string
 	}{
 		{"ExecStart binary", "ExecStart=/usr/local/bin/loom serve"},
-		{"port flag", "--port 8081"},
+		{"port flag", "--port 8080"},
 		{"bind flag", "--bind 127.0.0.1"},
 		{"WorkingDirectory", "WorkingDirectory=/home/user/project"},
 		{"Description", "Description=Loom agent management server"},
@@ -121,7 +121,7 @@ func TestRenderLaunchdTemplate(t *testing.T) {
 		{"Label", "<string>com.loom.serve</string>"},
 		{"BinaryPath in ProgramArguments", "<string>/usr/local/bin/loom</string>"},
 		{"serve argument", "<string>serve</string>"},
-		{"port value", "<string>8081</string>"},
+		{"port value", "<string>8080</string>"},
 		{"bind value", "<string>127.0.0.1</string>"},
 		{"WorkingDirectory", "<string>/home/user/project</string>"},
 		{"RunAtLoad", "<true/>"},

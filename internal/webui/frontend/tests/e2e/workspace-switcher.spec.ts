@@ -224,21 +224,22 @@ async function setupMocks(page: Page) {
     });
   });
 
-  // Loom endpoints
-  await page.route("**/api/loom/**", async (route) => {
-    if (route.request().url().includes("/health")) {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ status: "ok" }),
-      });
-    } else {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({}),
-      });
-    }
+  // Health endpoint
+  await page.route("**/health", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ status: "ok" }),
+    });
+  });
+
+  // Monitor endpoints
+  await page.route("**/api/monitor/**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({}),
+    });
   });
 
   // Issues via addInitScript to survive StrictMode
@@ -777,20 +778,20 @@ test.describe("Workspace Switcher Dropdown", () => {
         });
       });
 
-      await page.route("**/api/loom/**", async (route) => {
-        if (route.request().url().includes("/health")) {
-          await route.fulfill({
-            status: 200,
-            contentType: "application/json",
-            body: JSON.stringify({ status: "ok" }),
-          });
-        } else {
-          await route.fulfill({
-            status: 200,
-            contentType: "application/json",
-            body: JSON.stringify({}),
-          });
-        }
+      await page.route("**/health", async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ status: "ok" }),
+        });
+      });
+
+      await page.route("**/api/monitor/**", async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({}),
+        });
       });
 
       await page.addInitScript((issue: typeof mockIssue) => {

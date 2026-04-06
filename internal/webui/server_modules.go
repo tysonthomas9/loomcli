@@ -1,6 +1,10 @@
 package webui
 
-import "github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
+import (
+	"fmt"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
+)
 
 // buildModules conditionally constructs workspace-scoped route modules
 // and assigns them to app.wsModules. Called from NewServer after
@@ -32,10 +36,13 @@ func (app *Server) buildModules() {
 			NewIssueTabModule(app.issueTabStore, app.termMgr, app.hub))
 	}
 	if app.termSvc != nil {
+		// Derive the server's own URL for terminal context banner fetches.
+		// After server consolidation, the status endpoint lives on the same server.
+		selfURL := fmt.Sprintf("http://localhost:%d", app.actualPort)
 		app.wsModules = append(app.wsModules,
 			NewTerminalModule(app.termSvc, app.agentSvc, app.termMgr,
 				app.termAuth, app.corsConfig.AllowedOrigins,
-				app.config.LoomServerURL, workspaceConfigByIDFn,
+				selfURL, workspaceConfigByIDFn,
 				app.tabMetaStore, app.hub))
 	}
 	if app.fleetRegistry != nil {

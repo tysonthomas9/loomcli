@@ -52,9 +52,9 @@ export const test = base.extend<ScreenshotFixtures>({
       },
     );
 
-    // Abort loom server requests
+    // Abort monitor server requests
     await page.route(
-      (url) => url.pathname.startsWith("/api/loom/"),
+      (url) => url.pathname.startsWith("/api/monitor/") || url.pathname === "/health",
       async (route) => {
         await route.abort();
       },

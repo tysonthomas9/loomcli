@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"strconv"
 	"time"
@@ -20,6 +21,23 @@ const (
 	defaultShutdownTimeout = 5 * time.Second
 	defaultMaxPortAttempts = 10
 )
+
+// MonitorHandlers holds pre-built HTTP handlers for the monitor/metrics
+// endpoints injected by the cli package. Nil fields are skipped during
+// route registration.
+type MonitorHandlers struct {
+	Status               http.HandlerFunc // GET /api/monitor/status
+	Agents               http.HandlerFunc // GET /api/monitor/agents
+	Tasks                http.HandlerFunc // GET /api/monitor/tasks
+	Stats                http.HandlerFunc // GET /api/monitor/stats
+	Sync                 http.HandlerFunc // GET /api/monitor/sync
+	Workspaces           http.HandlerFunc // GET /api/monitor/workspaces
+	StaleDetector        http.HandlerFunc // GET /api/monitor/stale-detector
+	Usage                http.HandlerFunc // GET /api/monitor/usage
+	Metrics              http.HandlerFunc // GET /metrics (Prometheus)
+	ObservabilityMetrics http.HandlerFunc // GET /api/observability/metrics
+	ObservabilityEvents  http.HandlerFunc // GET /api/observability/events
+}
 
 // ServerConfig holds configuration for the web UI server.
 type ServerConfig struct {
@@ -42,7 +60,8 @@ type ServerConfig struct {
 	ExtAuthIssuer           string                                   // Expected JWT issuer (validated against "iss" claim; defaults to ExtAuthURL)
 	ExtAuthAudience         string                                   // Expected JWT audience (validated against "aud" claim; defaults to "loom")
 	ExtAuthAllowInsecure    bool                                     // Allow HTTP for non-loopback --auth-url (escape hatch for Docker networks)
-	LoomServerURL           string                                   // Default target URL for the loom API proxy (set by 'loom serve')
+	SkipFrontend            bool                                     // When true, skip static file serving and SPA routing (headless API-only mode)
+	MonitorHandlers         MonitorHandlers                          // Pre-built handlers for monitor/metrics endpoints (injected by cli)
 	DevMode                 bool                                     // Serve frontend from disk instead of embedded FS
 	DevFrontendDir          string                                   // Directory to serve in dev mode (default: internal/webui/frontend/dist)
 	GitOps                  ops.GitOps                               // Git operations interface (optional; nil disables git endpoints)

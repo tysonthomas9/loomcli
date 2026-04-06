@@ -95,14 +95,14 @@ async function globalSetup(config: FullConfig): Promise<void> {
   console.log('Waiting for services to become healthy...')
 
   await Promise.all([
-    waitForHealth('http://localhost:8081/health'),
+    waitForHealth('http://localhost:8080/health'),
     waitForHealth('http://localhost:9000/health'),
   ])
 
   // Write state file for teardown and tests
   await fs.writeFile(STATE_FILE, JSON.stringify({
     startedAt: new Date().toISOString(),
-    webUrl: 'http://localhost:8081',
+    webUrl: 'http://localhost:8080',
     loomUrl: 'http://localhost:9000',
     composeDir: COMPOSE_DIR,
     localMode: false,

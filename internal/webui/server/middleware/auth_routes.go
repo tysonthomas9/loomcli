@@ -49,6 +49,8 @@ func isPublicRoute(method, path string) bool {
 		return true
 	case normalizedPath == "/api/health":
 		return true
+	case normalizedPath == "/metrics":
+		return true
 	case normalizedPath == "/api/events":
 		// Workspace-scoped SSE endpoint (/api/workspaces/{ws}/events) uses its own auth
 		// (sseAuth middleware or token exchange). Matched via stripWorkspacePrefix normalization.

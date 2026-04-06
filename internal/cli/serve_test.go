@@ -2,7 +2,6 @@ package cli
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -122,131 +121,6 @@ func TestWriteJSON(t *testing.T) {
 				t.Errorf("Response is not valid JSON: %v", err)
 			}
 		})
-	}
-}
-
-func TestCorsMiddleware(t *testing.T) {
-	tests := []struct {
-		name           string
-		corsOrigin     string
-		requestMethod  string
-		wantOrigin     string
-		wantStatusCode int
-		handlerCalled  bool
-	}{
-		{
-			name:           "empty origin defaults to localhost webui port",
-			corsOrigin:     "",
-			requestMethod:  "GET",
-			wantOrigin:     fmt.Sprintf("http://localhost:%d", serveWebUIPort),
-			wantStatusCode: http.StatusOK,
-			handlerCalled:  true,
-		},
-		{
-			name:           "specific origin is used",
-			corsOrigin:     "http://localhost:3000",
-			requestMethod:  "GET",
-			wantOrigin:     "http://localhost:3000",
-			wantStatusCode: http.StatusOK,
-			handlerCalled:  true,
-		},
-		{
-			name:           "OPTIONS preflight returns 200 without calling handler",
-			corsOrigin:     "http://example.com",
-			requestMethod:  "OPTIONS",
-			wantOrigin:     "http://example.com",
-			wantStatusCode: http.StatusOK,
-			handlerCalled:  false,
-		},
-		{
-			name:           "GET request calls handler",
-			corsOrigin:     "*",
-			requestMethod:  "GET",
-			wantOrigin:     "*",
-			wantStatusCode: http.StatusOK,
-			handlerCalled:  true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			handlerCalled := false
-			nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				handlerCalled = true
-				w.WriteHeader(http.StatusOK)
-			})
-
-			middleware := corsMiddleware(tt.corsOrigin, nextHandler)
-
-			req := httptest.NewRequest(tt.requestMethod, "/test", nil)
-			rr := httptest.NewRecorder()
-
-			middleware.ServeHTTP(rr, req)
-
-			// Check CORS headers
-			origin := rr.Header().Get("Access-Control-Allow-Origin")
-			if origin != tt.wantOrigin {
-				t.Errorf("Access-Control-Allow-Origin = %q, want %q", origin, tt.wantOrigin)
-			}
-
-			methods := rr.Header().Get("Access-Control-Allow-Methods")
-			if methods != "GET, OPTIONS" {
-				t.Errorf("Access-Control-Allow-Methods = %q, want %q", methods, "GET, OPTIONS")
-			}
-
-			headers := rr.Header().Get("Access-Control-Allow-Headers")
-			if headers != "Content-Type" {
-				t.Errorf("Access-Control-Allow-Headers = %q, want %q", headers, "Content-Type")
-			}
-
-			// Check status code
-			if rr.Code != tt.wantStatusCode {
-				t.Errorf("status code = %d, want %d", rr.Code, tt.wantStatusCode)
-			}
-
-			// Check if handler was called
-			if handlerCalled != tt.handlerCalled {
-				t.Errorf("handler called = %v, want %v", handlerCalled, tt.handlerCalled)
-			}
-		})
-	}
-}
-
-func TestHandleHealth(t *testing.T) {
-	req := httptest.NewRequest("GET", "/health", nil)
-	rr := httptest.NewRecorder()
-
-	handleHealth(rr, req)
-
-	// Check status code
-	if rr.Code != http.StatusOK {
-		t.Errorf("status code = %d, want %d", rr.Code, http.StatusOK)
-	}
-
-	// Check Content-Type
-	if ct := rr.Header().Get("Content-Type"); ct != "application/json" {
-		t.Errorf("Content-Type = %q, want %q", ct, "application/json")
-	}
-
-	// Parse response
-	var resp HealthResponse
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("failed to unmarshal response: %v", err)
-	}
-
-	// Verify status
-	if resp.Status != "ok" {
-		t.Errorf("status = %q, want %q", resp.Status, "ok")
-	}
-
-	// Verify timestamp is present and reasonable
-	if resp.Timestamp.IsZero() {
-		t.Error("timestamp should not be zero")
-	}
-
-	// Timestamp should be recent (within last minute)
-	if time.Since(resp.Timestamp) > time.Minute {
-		t.Error("timestamp should be recent")
 	}
 }
 
@@ -711,43 +585,15 @@ func TestResponseTypes(t *testing.T) {
 	}
 }
 
-func TestCorsMiddlewareAllHeaders(t *testing.T) {
-	// Verify all expected CORS headers are set correctly
-	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-
-	middleware := corsMiddleware("http://test.local", nextHandler)
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	rr := httptest.NewRecorder()
-
-	middleware.ServeHTTP(rr, req)
-
-	expectedHeaders := map[string]string{
-		"Access-Control-Allow-Origin":  "http://test.local",
-		"Access-Control-Allow-Methods": "GET, OPTIONS",
-		"Access-Control-Allow-Headers": "Content-Type",
-	}
-
-	for header, expected := range expectedHeaders {
-		actual := rr.Header().Get(header)
-		if actual != expected {
-			t.Errorf("%s = %q, want %q", header, actual, expected)
-		}
-	}
-}
-
 func TestServeFlags_Defaults(t *testing.T) {
-	// Verify the three new flags exist with correct defaults
 	f := serveCmd.Flags()
 
-	webuiPort, err := f.GetInt("webui-port")
+	port, err := f.GetInt("port")
 	if err != nil {
-		t.Fatalf("failed to get webui-port flag: %v", err)
+		t.Fatalf("failed to get port flag: %v", err)
 	}
-	if webuiPort != 8080 {
-		t.Errorf("webui-port default = %d, want %d", webuiPort, 8080)
+	if port != 8080 {
+		t.Errorf("port default = %d, want %d", port, 8080)
 	}
 
 	webuiSocket, err := f.GetString("webui-socket")
@@ -764,21 +610,6 @@ func TestServeFlags_Defaults(t *testing.T) {
 	}
 	if noWebUI != false {
 		t.Errorf("no-webui default = %v, want %v", noWebUI, false)
-	}
-}
-
-func TestServeFlags_WebUIPort(t *testing.T) {
-	f := serveCmd.Flags().Lookup("webui-port")
-	if f == nil {
-		t.Fatal("webui-port flag not registered on serveCmd")
-	}
-
-	if f.DefValue != "8080" {
-		t.Errorf("webui-port DefValue = %q, want %q", f.DefValue, "8080")
-	}
-
-	if f.Value.Type() != "int" {
-		t.Errorf("webui-port type = %q, want %q", f.Value.Type(), "int")
 	}
 }
 

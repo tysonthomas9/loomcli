@@ -140,7 +140,7 @@ async function setupBaseMocks(
     })
   })
 
-  await page.route('**/api/loom/api/agents', async (route) => {
+  await page.route('**/api/monitor/agents', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -148,7 +148,7 @@ async function setupBaseMocks(
     })
   })
 
-  await page.route('**/api/loom/api/status', async (route) => {
+  await page.route('**/api/monitor/status', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -169,7 +169,7 @@ async function setupBaseMocks(
     })
   })
 
-  await page.route('**/api/loom/api/tasks', async (route) => {
+  await page.route('**/api/monitor/tasks', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',

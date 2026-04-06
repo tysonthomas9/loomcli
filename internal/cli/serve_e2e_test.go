@@ -312,14 +312,6 @@ func TestE2E_ServePortFlag(t *testing.T) {
 		t.Errorf("Expected status 200, got %d", resp.StatusCode)
 	}
 
-	// Best-effort check: the default port (8081) should not respond from THIS
-	// serve instance. However, another process may be listening on 8081 in the
-	// environment, so we only log (not fail) if it does respond.
-	client := &http.Client{Timeout: 1 * time.Second}
-	if defaultResp, defaultErr := client.Get("http://127.0.0.1:8081/health"); defaultErr == nil {
-		defaultResp.Body.Close()
-		t.Logf("Note: port 8081 responded (likely another service); skipping default-port-not-bound assertion")
-	}
 }
 
 func TestE2E_ServeCORSHeaders(t *testing.T) {
@@ -418,7 +410,7 @@ func TestE2E_ServeDefaultCORSHeader(t *testing.T) {
 	defer resp.Body.Close()
 
 	origin := resp.Header.Get("Access-Control-Allow-Origin")
-	// Default CORS origin falls back to http://localhost:<webui-port> where webui-port defaults to 8080
+	// Default CORS origin falls back to http://localhost:<port> where port defaults to 8080
 	expected := "http://localhost:8080"
 	if origin != expected {
 		t.Errorf("Expected default CORS origin %q, got %q", expected, origin)

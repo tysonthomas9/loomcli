@@ -122,21 +122,22 @@ async function setupBaseMocks(page: Page) {
     });
   });
 
-  // Loom agent endpoints — return empty data
-  await page.route("**/api/loom/**", async (route) => {
-    if (route.request().url().includes("/health")) {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ status: "ok" }),
-      });
-    } else {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ agents: [], tasks: [] }),
-      });
-    }
+  // Health endpoint
+  await page.route("**/health", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ status: "ok" }),
+    });
+  });
+
+  // Monitor agent endpoints — return empty data
+  await page.route("**/api/monitor/**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ agents: [], tasks: [] }),
+    });
   });
 
   // Stats endpoint (workspace-scoped: /api/workspaces/default/stats)

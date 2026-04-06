@@ -51,10 +51,8 @@ func (app *Server) registerRoutes() {
 
 	// Legacy SSE endpoint removed — SSE is now workspace-scoped at /api/workspaces/{ws}/events
 
-	// Loom proxy for agent status endpoints (same-origin to avoid CORS/CSP issues)
-	if app.loomProxy != nil {
-		app.mux.Handle("/api/loom/", app.loomProxy)
-	}
+	// Monitor handlers (injected from cli via ServerConfig.MonitorHandlers)
+	app.registerMonitorHandlers()
 
 	// Terminal endpoints: workspace-scoped routes only (flat routes removed).
 	// All terminal routes are registered in registerWorkspaceRoutes below.
@@ -74,7 +72,49 @@ func (app *Server) registerRoutes() {
 	}
 
 	// Static file serving with SPA routing (must be last - catches all paths)
-	app.mux.Handle("/", app.frontendH)
+	if !app.config.SkipFrontend {
+		app.mux.Handle("/", app.frontendH)
+	}
+}
+
+// registerMonitorHandlers registers monitor/metrics/observability handlers
+// injected from the cli package via ServerConfig.MonitorHandlers.
+// Each handler is nil-guarded so callers can omit handlers they don't need.
+func (app *Server) registerMonitorHandlers() {
+	mh := app.config.MonitorHandlers
+	if mh.Status != nil {
+		app.mux.HandleFunc("GET /api/monitor/status", mh.Status)
+	}
+	if mh.Agents != nil {
+		app.mux.HandleFunc("GET /api/monitor/agents", mh.Agents)
+	}
+	if mh.Tasks != nil {
+		app.mux.HandleFunc("GET /api/monitor/tasks", mh.Tasks)
+	}
+	if mh.Stats != nil {
+		app.mux.HandleFunc("GET /api/monitor/stats", mh.Stats)
+	}
+	if mh.Sync != nil {
+		app.mux.HandleFunc("GET /api/monitor/sync", mh.Sync)
+	}
+	if mh.Workspaces != nil {
+		app.mux.HandleFunc("GET /api/monitor/workspaces", mh.Workspaces)
+	}
+	if mh.StaleDetector != nil {
+		app.mux.HandleFunc("GET /api/monitor/stale-detector", mh.StaleDetector)
+	}
+	if mh.Usage != nil {
+		app.mux.HandleFunc("GET /api/monitor/usage", mh.Usage)
+	}
+	if mh.Metrics != nil {
+		app.mux.HandleFunc("GET /metrics", mh.Metrics)
+	}
+	if mh.ObservabilityMetrics != nil {
+		app.mux.HandleFunc("GET /api/observability/metrics", mh.ObservabilityMetrics)
+	}
+	if mh.ObservabilityEvents != nil {
+		app.mux.HandleFunc("GET /api/observability/events", mh.ObservabilityEvents)
+	}
 }
 
 // registerWorkspaceRoutes sets up workspace listing, CRUD, and workspace-scoped API routes.

@@ -6,7 +6,7 @@
 import type { MetricsSnapshot, ObservabilityMetricsResponse } from "@/types";
 import { get } from "./client";
 
-const LOOM_SERVER_URL = import.meta.env.VITE_LOOM_SERVER_URL ?? "/api/loom";
+const LOOM_SERVER_URL = import.meta.env.VITE_LOOM_SERVER_URL ?? "";
 
 /**
  * Fetch observability metrics from the loom server.

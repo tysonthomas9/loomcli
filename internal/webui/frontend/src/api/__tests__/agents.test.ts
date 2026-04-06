@@ -97,7 +97,7 @@ describe("fetchAgents", () => {
     await fetchAgents();
 
     expect(mockGet).toHaveBeenCalledWith(
-      expect.stringContaining("/api/agents"),
+      expect.stringContaining("/api/monitor/agents"),
       { timeout: 15000 },
     );
   });
@@ -348,7 +348,7 @@ describe("fetchStatus", () => {
     await fetchStatus();
 
     expect(mockGet).toHaveBeenCalledWith(
-      expect.stringContaining("/api/status"),
+      expect.stringContaining("/api/monitor/status"),
       { timeout: 15000 },
     );
   });
@@ -575,7 +575,7 @@ describe("fetchTasks", () => {
     await fetchTasks();
 
     expect(mockGet).toHaveBeenCalledWith(
-      expect.stringContaining("/api/tasks"),
+      expect.stringContaining("/api/monitor/tasks"),
       { timeout: 15000 },
     );
   });

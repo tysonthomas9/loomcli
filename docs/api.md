@@ -3606,11 +3606,23 @@ Remove the tab state for an issue.
 - **Response `400`:** Invalid issue ID (empty or contains disallowed characters)
 - **Response `500`:** Redis delete failure
 
-## Loom Proxy
+## Monitor Endpoints
 
-### `/api/loom/**`
+Monitor endpoints serve daemon-collected data (agent status, task distribution, metrics). They are injected from the cli package via `ServerConfig.MonitorHandlers`.
 
-Proxies requests to the loom agent status server (same-origin to avoid CORS/CSP issues). Only available when a loom server URL is configured.
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/monitor/status` | Full monitor dashboard data |
+| GET | `/api/monitor/agents` | Agent list with workspace grouping |
+| GET | `/api/monitor/tasks` | Task distribution by status |
+| GET | `/api/monitor/stats` | Monitor statistics |
+| GET | `/api/monitor/sync` | Git sync status |
+| GET | `/api/monitor/workspaces` | Workspace topology metadata |
+| GET | `/api/monitor/stale-detector` | Stale detector status |
+| GET | `/api/monitor/usage` | Token usage aggregates |
+| GET | `/metrics` | Prometheus metrics (public, no auth required) |
+| GET | `/api/observability/metrics` | Event metrics snapshot |
+| GET | `/api/observability/events` | Paginated event log |
 
 ## Multi-Workspace Endpoints
 
