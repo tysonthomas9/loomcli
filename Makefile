@@ -156,24 +156,26 @@ update-beads:
 
 # Go-only quality gate (skips frontend rebuild if dist/ exists)
 check-go: frontend-ensure
-	@echo "=== [1/9] Go: format check ==="
+	@echo "=== [1/10] Go: format check ==="
 	@bad=$$(gofmt -l . 2>/dev/null | grep -v third_party | grep -v worktrees | grep -v vendor | grep -v node_modules | head -20); \
 	if [ -n "$$bad" ]; then echo "gofmt violations:"; echo "$$bad"; exit 1; fi
-	@echo "=== [2/9] Go: vet ==="
+	@echo "=== [2/10] Go: vet ==="
 	@go vet ./...
-	@echo "=== [3/9] Go: build ==="
+	@echo "=== [3/10] Go: build ==="
 	@go build -buildvcs=false ./...
-	@echo "=== [4/9] Go: lint (golangci-lint + depguard) ==="
+	@echo "=== [4/10] Go: lint (golangci-lint + depguard) ==="
 	@golangci-lint run --timeout=5m --allow-parallel-runners
-	@echo "=== [5/9] Go: LOC check ==="
+	@echo "=== [5/10] Go: LOC check ==="
 	@./scripts/check-loc.sh 500
-	@echo "=== [6/9] Go: exec.Command guard ==="
+	@echo "=== [6/10] Go: package size check ==="
+	@./scripts/check-package-size.sh 25
+	@echo "=== [7/10] Go: exec.Command guard ==="
 	@./scripts/check-no-raw-exec.sh
-	@echo "=== [7/9] Go: log.Printf guard ==="
+	@echo "=== [8/10] Go: log.Printf guard ==="
 	@./scripts/check-no-log-printf.sh
-	@echo "=== [8/9] Go: test with race detector ==="
+	@echo "=== [9/10] Go: test with race detector ==="
 	@go test -race -covermode=atomic -coverprofile=/tmp/loom.coverage.out -timeout 15m ./...
-	@echo "=== [9/9] Go: coverage threshold ==="
+	@echo "=== [10/10] Go: coverage threshold ==="
 	@./scripts/check-coverage.sh
 	@echo "=== Go quality gates PASSED ==="
 
