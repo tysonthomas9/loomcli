@@ -24,7 +24,7 @@ func (app *Server) buildModules() {
 	// Always-constructed modules
 	app.wsModules = append(app.wsModules,
 		issues.NewIssueModule(app.issueSvc, workspaceConfigFn),
-		NewWorkspaceOpsModule(app.workspaceSvc, app.multiPool),
+		NewWorkspaceOpsModule(app.workspaceSvc, app.multiPool, app.config.AgentQueueFn),
 		webuilog.NewModule(app.agentSvc),
 		issues.NewSessionModule(app.sessSvc, issues.SessionModuleOpts{
 			ListTaskSessions:     misc.HandleListTaskSessions(app.sessSvc),

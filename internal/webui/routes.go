@@ -37,6 +37,15 @@ func (app *Server) registerRoutes() {
 	// Daemon status endpoint - exposes daemon configuration (auto-commit, auto-push, etc.)
 	app.mux.HandleFunc("GET /api/daemon/status", app.daemonStatusHandler)
 
+	// Daemon supervisor state (PID, uptime, agent list from state file)
+	if app.daemonSupervisorHandler != nil {
+		app.mux.HandleFunc("GET /api/daemon/supervisor", app.daemonSupervisorHandler)
+	}
+	// Daemon effective config (merged loom.yaml as JSON)
+	if app.daemonConfigHandler != nil {
+		app.mux.HandleFunc("GET /api/daemon/config", app.daemonConfigHandler)
+	}
+
 	// Backend configuration endpoints
 	app.mux.HandleFunc("GET /api/config/backend", app.getBackendConfigHandler)
 	app.mux.HandleFunc("PATCH /api/config/backend", app.patchBackendConfigHandler)

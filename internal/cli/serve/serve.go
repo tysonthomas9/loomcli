@@ -13,15 +13,18 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/circuitbreaker"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/cli/daemon"
 	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
 	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
 	"github.com/tysonthomas9/loomcli/internal/kv"
@@ -361,6 +364,9 @@ func runServe(cmd *cobra.Command, args []string) {
 			SkipFrontend:            serveNoWebUI,
 			MonitorHandlers:         monitorHandlers,
 			AgentControlFn:          buildAgentControlFn(),
+			DaemonSupervisorFn:      buildDaemonSupervisorFn(),
+			DaemonConfigFn:          buildDaemonConfigFn(),
+			AgentQueueFn:            buildAgentQueueFn(),
 			TerminalCmd:             terminalCmd,
 			FleetEnabled:            serveRedisAddr != "",
 			FleetRedis:              fleetRedisConfig,
@@ -545,6 +551,147 @@ func sendControlRequest(socketPath, op, agentName string, force bool, readDeadli
 		return nil, fmt.Errorf("unmarshal response: %w", err)
 	}
 	return &result, nil
+}
+
+// buildDaemonSupervisorFn returns a callback that reads the daemon state file
+// and converts it to webui DTO types. Returns nil if the working directory
+// cannot be resolved.
+func buildDaemonSupervisorFn() func() (*webui.DaemonSupervisorData, error) {
+	projectDir, err := os.Getwd()
+	if err != nil {
+		return nil
+	}
+
+	return func() (*webui.DaemonSupervisorData, error) {
+		statePath := config.ResolveDaemonStatePath(projectDir)
+		state, err := daemon.ReadStateFile(statePath)
+		if err != nil {
+			return nil, err // os.ErrNotExist if file missing
+		}
+		agents := make([]webui.DaemonAgentEntry, len(state.Agents))
+		for i, a := range state.Agents {
+			agents[i] = webui.DaemonAgentEntry{
+				Worktree:       a.Worktree,
+				Role:           a.Role,
+				Repo:           a.Repo,
+				PID:            a.PID,
+				Status:         a.Status,
+				TaskID:         a.TaskID,
+				EpicID:         a.EpicID,
+				CurrentBackend: a.CurrentBackend,
+				RestartCount:   a.RestartCount,
+				LastStart:      a.LastStart,
+				LastExit:       a.LastExit,
+				LastExitCode:   a.LastExitCode,
+				StopReason:     a.StopReason,
+				StoppedAt:      a.StoppedAt,
+				WorktreePath:   a.WorktreePath,
+				LastErrorClass: a.LastErrorClass,
+				NoWorkCount:    a.NoWorkCount,
+				BackoffUntil:   a.BackoffUntil,
+				RemoteBranch:   a.RemoteBranch,
+			}
+		}
+		return &webui.DaemonSupervisorData{
+			PID:           state.PID,
+			StartedAt:     state.StartedAt,
+			UptimeSeconds: time.Since(state.StartedAt).Seconds(),
+			Agents:        agents,
+		}, nil
+	}
+}
+
+// buildDaemonConfigFn returns a callback that loads and marshals the daemon
+// config to JSON. Returns nil if the working directory cannot be resolved.
+func buildDaemonConfigFn() func() (json.RawMessage, error) {
+	projectDir, err := os.Getwd()
+	if err != nil {
+		return nil
+	}
+
+	return func() (json.RawMessage, error) {
+		cfg, err := config.LoadDaemonConfig(projectDir)
+		if err != nil {
+			return nil, err
+		}
+		data, err := json.Marshal(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("marshal daemon config: %w", err)
+		}
+		return json.RawMessage(data), nil
+	}
+}
+
+// buildAgentQueueFn returns a callback that fetches and scores ready issues
+// for a named agent using the task router. Returns nil if the working
+// directory cannot be resolved.
+func buildAgentQueueFn() func(string) ([]webui.AgentQueueEntry, error) {
+	projectDir, err := os.Getwd()
+	if err != nil {
+		return nil
+	}
+
+	return func(agentName string) ([]webui.AgentQueueEntry, error) {
+		cfg, err := config.LoadDaemonConfig(projectDir)
+		if err != nil {
+			return nil, fmt.Errorf("load daemon config: %w", err)
+		}
+
+		// Find agent entry by worktree name
+		var agent *config.AgentEntry
+		for i := range cfg.Agents {
+			if cfg.Agents[i].Worktree == agentName {
+				agent = &cfg.Agents[i]
+				break
+			}
+		}
+		if agent == nil {
+			return nil, webui.ErrAgentNotFound
+		}
+
+		// Resolve role constraints
+		roleConfig, ok := cfg.ResolveRole(agent.Role)
+		if !ok {
+			roleConfig = config.RoleConfig{TaskFilter: "has_design"}
+		}
+		constraints := cli.MergeRoleConstraints(roleConfig, *agent)
+
+		issues, err := cli.FetchReadyIssues(agent.Parent, agent.Repo)
+		if err != nil {
+			return nil, fmt.Errorf("fetch ready issues: %w", err)
+		}
+
+		return scoreAndSortQueue(issues, constraints), nil
+	}
+}
+
+// scoreAndSortQueue scores issues against constraints and returns sorted entries.
+func scoreAndSortQueue(issues []backend.IssueData, constraints cli.RoleConstraints) []webui.AgentQueueEntry {
+	var entries []webui.AgentQueueEntry
+	for _, issue := range issues {
+		m := cli.MatchTask(issue, constraints)
+		if m.Score > 0 {
+			entries = append(entries, webui.AgentQueueEntry{
+				IssueID:  m.Issue.ID,
+				Title:    m.Issue.Title,
+				Priority: m.Issue.Priority,
+				Score:    m.Score,
+				Reason:   m.Reason,
+				Labels:   m.Issue.Labels,
+				Parent:   m.Issue.Parent,
+			})
+		}
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].Score != entries[j].Score {
+			return entries[i].Score > entries[j].Score
+		}
+		if entries[i].Priority != entries[j].Priority {
+			return entries[i].Priority < entries[j].Priority
+		}
+		return entries[i].IssueID < entries[j].IssueID
+	})
+	return entries
 }
 
 // backendProvider maps backend names to their provider labels.

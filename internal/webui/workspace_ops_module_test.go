@@ -10,7 +10,7 @@ import (
 var _ Module = (*WorkspaceOpsModule)(nil)
 
 func TestWorkspaceOpsModule_RegisterRoutes(t *testing.T) {
-	mod := NewWorkspaceOpsModule(&mockWorkspaceService{}, &stubErrorPool{})
+	mod := NewWorkspaceOpsModule(&mockWorkspaceService{}, &stubErrorPool{}, nil)
 
 	mux := http.NewServeMux()
 	mod.Register(mux)
@@ -44,7 +44,7 @@ func TestWorkspaceOpsModule_RegisterRoutes(t *testing.T) {
 }
 
 func TestWorkspaceOpsModule_WrongMethod_Returns405(t *testing.T) {
-	mod := NewWorkspaceOpsModule(&mockWorkspaceService{}, &stubErrorPool{})
+	mod := NewWorkspaceOpsModule(&mockWorkspaceService{}, &stubErrorPool{}, nil)
 
 	mux := http.NewServeMux()
 	mod.Register(mux)
@@ -59,7 +59,7 @@ func TestWorkspaceOpsModule_WrongMethod_Returns405(t *testing.T) {
 }
 
 func TestWorkspaceOpsModule_NilDeps(t *testing.T) {
-	mod := NewWorkspaceOpsModule(nil, nil)
+	mod := NewWorkspaceOpsModule(nil, nil, nil)
 
 	mux := http.NewServeMux()
 	mod.Register(mux) // must not panic during registration

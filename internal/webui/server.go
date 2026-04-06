@@ -125,6 +125,10 @@ type Server struct {
 	listEditorsHandler         http.HandlerFunc
 	openEditorHandler          http.HandlerFunc
 	notifySessionChangeHandler http.HandlerFunc // nil if hub is nil
+
+	// Daemon supervisor/config handlers (nil when callback not provided)
+	daemonSupervisorHandler http.HandlerFunc
+	daemonConfigHandler     http.HandlerFunc
 }
 
 // buildHandlers constructs all top-level HTTP handlers from the current dependency
@@ -167,6 +171,13 @@ func (app *Server) buildHandlers() {
 
 	if app.hub != nil {
 		app.notifySessionChangeHandler = misc.HandleNotifySessionChange(app.hub, app.notifyToken)
+	}
+
+	if app.config.DaemonSupervisorFn != nil {
+		app.daemonSupervisorHandler = handleDaemonSupervisor(app.config.DaemonSupervisorFn)
+	}
+	if app.config.DaemonConfigFn != nil {
+		app.daemonConfigHandler = handleDaemonConfig(app.config.DaemonConfigFn)
 	}
 
 	if app.config.DevMode {

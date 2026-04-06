@@ -19,14 +19,16 @@ import (
 type WorkspaceOpsModule struct {
 	workspaceSvc service.WorkspaceService
 	multiPool    daemon.Pool
+	agentQueueFn func(agentName string) ([]AgentQueueEntry, error) // nil = endpoint not available
 }
 
 // NewWorkspaceOpsModule returns a WorkspaceOpsModule that will register routes
 // using the given workspace service and connection pool.
-func NewWorkspaceOpsModule(workspaceSvc service.WorkspaceService, multiPool daemon.Pool) *WorkspaceOpsModule {
+func NewWorkspaceOpsModule(workspaceSvc service.WorkspaceService, multiPool daemon.Pool, agentQueueFn func(string) ([]AgentQueueEntry, error)) *WorkspaceOpsModule {
 	return &WorkspaceOpsModule{
 		workspaceSvc: workspaceSvc,
 		multiPool:    multiPool,
+		agentQueueFn: agentQueueFn,
 	}
 }
 
@@ -45,4 +47,9 @@ func (m *WorkspaceOpsModule) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/workspaces/{ws}/daemon/status", misc.HandleDaemonStatus(m.multiPool))
 	mux.HandleFunc("GET /api/workspaces/{ws}/config/backend", misc.HandleGetBackendConfig(m.multiPool))
 	mux.HandleFunc("PATCH /api/workspaces/{ws}/config/backend", workspace.HandleWorkspaceBackendPatch(m.workspaceSvc))
+
+	// Agent work queue preview (scored by task router)
+	if m.agentQueueFn != nil {
+		mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/queue", handleAgentQueue(m.agentQueueFn))
+	}
 }
