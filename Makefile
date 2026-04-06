@@ -183,15 +183,17 @@ check-go: frontend-ensure
 
 # Frontend-only quality gate (builds frontend first)
 check-frontend: frontend-ensure
-	@echo "=== [1/5] Frontend: format check ==="
+	@echo "=== [1/6] Frontend: format check ==="
 	@cd $(FRONTEND_DIR) && npm run format:check
-	@echo "=== [2/5] Frontend: typecheck ==="
+	@echo "=== [2/6] Frontend: typecheck ==="
 	@cd $(FRONTEND_DIR) && npm run typecheck
-	@echo "=== [3/5] Frontend: eslint ==="
+	@echo "=== [3/6] Frontend: eslint ==="
 	@cd $(FRONTEND_DIR) && npm run lint
-	@echo "=== [4/5] Frontend: architectural checks ==="
+	@echo "=== [4/6] Frontend: architectural checks ==="
 	@cd $(FRONTEND_DIR) && npm run check:arch
-	@echo "=== [5/5] Frontend: unit tests + coverage (60% threshold) ==="
+	@echo "=== [5/6] Frontend: generated code staleness ==="
+	@cd $(FRONTEND_DIR) && npm run check:generated
+	@echo "=== [6/6] Frontend: unit tests + coverage (60% threshold) ==="
 	@cd $(FRONTEND_DIR) && npm run test:coverage
 	@echo "=== Frontend quality gates PASSED ==="
 

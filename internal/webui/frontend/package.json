@@ -17,6 +17,7 @@
     "check:no-hardcoded-urls": "node scripts/check-no-hardcoded-urls.mjs",
     "check:boundaries": "node scripts/check-component-boundaries.mjs",
     "check:arch": "npm run check:loc && npm run check:no-raw-fetch && npm run check:no-hardcoded-urls && npm run check:boundaries",
+    "check:generated": "node scripts/check-openapi-staleness.mjs",
     "test": "vitest run && playwright test",
     "test:unit": "vitest run",
     "test:coverage": "vitest run --coverage",
@@ -30,7 +31,7 @@
     "test:e2e:integration": "RUN_INTEGRATION_TESTS=1 playwright test --project=integration",
     "test:e2e:local-integration": "RUN_LOCAL_INTEGRATION_TESTS=1 playwright test --project=local-integration",
     "test:e2e:api": "RUN_INTEGRATION_TESTS=1 playwright test --project=api",
-    "generate:types": "openapi-typescript ../../../api/openapi.yaml -o src/types/generated/openapi.ts"
+    "generate:types": "openapi-typescript ../../../api/openapi.yaml -o src/types/generated/openapi.ts && prettier --write src/types/generated/openapi.ts"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.3",
