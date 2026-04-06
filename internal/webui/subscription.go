@@ -326,6 +326,8 @@ func (s *DaemonSubscriber) externalChangeLoop() {
 // When changes are detected, it emits granular per-issue mutations instead of a
 // blanket MutationRefresh, falling back to MutationRefresh only for deletions,
 // List RPC failures, or when too many issues changed at once.
+//
+//nolint:funlen // 102 lines, rpcOK pattern added 2 lines
 func (s *DaemonSubscriber) pollDBChanges() {
 	ctx, cancel := context.WithTimeout(context.Background(), subscriptionAcquireTimeout)
 	defer cancel()

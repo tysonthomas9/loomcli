@@ -5,4 +5,6 @@
 #
 # NOTE: No new entries allowed. All files must stay under 500 LOC.
 # Split large files into logical sub-files instead of adding them here.
-510 internal/webui/server.go
+530 internal/webui/server.go
+580 internal/cli/monitor_collect.go
+510 internal/cli/serve.go

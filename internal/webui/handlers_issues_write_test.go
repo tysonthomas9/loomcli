@@ -131,8 +131,8 @@ func (m *wMockDeleteClient) Delete(args *rpc.DeleteArgs) (*rpc.Response, error) 
 // wMockDeletePool implements deleteConnectionGetter for testing.
 type wMockDeletePool struct {
 	discardFunc func(client issueDeleter)
-	getFunc func(ctx context.Context) (issueDeleter, error)
-	putFunc func(client issueDeleter)
+	getFunc     func(ctx context.Context) (issueDeleter, error)
+	putFunc     func(client issueDeleter)
 }
 
 func (m *wMockDeletePool) Get(ctx context.Context) (issueDeleter, error) {
@@ -1349,7 +1349,7 @@ func TestHandleDeleteIssueW_ClientDiscardedOnError(t *testing.T) {
 		},
 	}
 	pool := &wMockDeletePool{
-		getFunc: func(ctx context.Context) (issueDeleter, error) { return client, nil },
+		getFunc:     func(ctx context.Context) (issueDeleter, error) { return client, nil },
 		discardFunc: func(c issueDeleter) { discardCalled = true },
 	}
 	handler := handleDeleteIssueWithPool(pool)

@@ -177,6 +177,8 @@ func handleCloseIssue(pool daemon.Pool) http.HandlerFunc {
 }
 
 // handleCloseIssueWithPool is the internal implementation that accepts an interface for testing.
+//
+//nolint:gocognit // rpcOK pattern adds conditional complexity
 func handleCloseIssueWithPool(pool closeConnectionGetter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Extract issue ID from path parameter

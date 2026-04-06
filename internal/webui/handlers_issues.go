@@ -378,7 +378,7 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 			// Build unclosed-ID set from already-fetched data for accurate blocker detection.
 			// The daemon's Blocked() RPC considers in_progress/review as resolved,
 			// but blockers should only clear when closed.
-unclosedIDs, issueMap := buildUnclosedSetsFromFetched(issuesWithCounts)
+			unclosedIDs, issueMap := buildUnclosedSetsFromFetched(issuesWithCounts)
 
 			// Build KanbanIssue response with blocked info merged
 			kanbanIssues := make([]*KanbanIssue, len(issuesWithCounts))

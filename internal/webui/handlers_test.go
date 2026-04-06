@@ -5,13 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"slices"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -4367,8 +4367,8 @@ func (m *mockGraphClient) GetGraphData(args *rpc.GetGraphDataArgs) (*rpc.GetGrap
 // mockGraphPool implements graphConnectionGetter for testing
 type mockGraphPool struct {
 	discardFunc func(client graphClient)
-	getFunc func(ctx context.Context) (graphClient, error)
-	putFunc func(client graphClient)
+	getFunc     func(ctx context.Context) (graphClient, error)
+	putFunc     func(client graphClient)
 }
 
 func (m *mockGraphPool) Get(ctx context.Context) (graphClient, error) {
@@ -4384,7 +4384,10 @@ func (m *mockGraphPool) Put(client graphClient) {
 	}
 }
 
-func (m *mockGraphPool) Discard(client graphClient) { if m.discardFunc != nil { m.discardFunc(client) }
+func (m *mockGraphPool) Discard(client graphClient) {
+	if m.discardFunc != nil {
+		m.discardFunc(client)
+	}
 }
 
 // TestHandleGraph_NilPool tests that nil pool returns 503 Service Unavailable
@@ -5747,8 +5750,8 @@ func (m *mockBlockedClient) Blocked(args *rpc.BlockedArgs) (*rpc.Response, error
 // mockBlockedPool implements blockedConnectionGetter for testing
 type mockBlockedPool struct {
 	discardFunc func(client blockedClient)
-	getFunc func(ctx context.Context) (blockedClient, error)
-	putFunc func(client blockedClient)
+	getFunc     func(ctx context.Context) (blockedClient, error)
+	putFunc     func(client blockedClient)
 }
 
 func (m *mockBlockedPool) Get(ctx context.Context) (blockedClient, error) {
@@ -5764,7 +5767,10 @@ func (m *mockBlockedPool) Put(client blockedClient) {
 	}
 }
 
-func (m *mockBlockedPool) Discard(client blockedClient) { if m.discardFunc != nil { m.discardFunc(client) }
+func (m *mockBlockedPool) Discard(client blockedClient) {
+	if m.discardFunc != nil {
+		m.discardFunc(client)
+	}
 }
 
 // TestHandleBlocked_Success tests the success path with mock data

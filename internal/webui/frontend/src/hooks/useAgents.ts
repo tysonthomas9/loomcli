@@ -5,7 +5,12 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 
-import { fetchAgents, fetchStatus, fetchTasks, fetchWorkspaceAgents } from "@/api";
+import {
+  fetchAgents,
+  fetchStatus,
+  fetchTasks,
+  fetchWorkspaceAgents,
+} from "@/api";
 import type {
   LoomAgentStatus,
   LoomTaskSummary,
@@ -355,7 +360,6 @@ export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
           );
         }
       })();
-
     } catch (err) {
       // Only update state if still mounted
       if (mountedRef.current) {

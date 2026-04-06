@@ -23,7 +23,7 @@ func resolveGitDir(worktreePath string) (string, error) {
 	}
 
 	// Linked worktree: .git is a file containing "gitdir: <path>"
-	data, err := os.ReadFile(gitPath)
+	data, err := os.ReadFile(gitPath) //nolint:gosec // reading .git files by design
 	if err != nil {
 		return "", fmt.Errorf("read .git file: %w", err)
 	}
@@ -42,7 +42,7 @@ func resolveGitDir(worktreePath string) (string, error) {
 // For linked worktrees, reads the commondir file.
 func resolveCommonGitDir(worktreeGitDir string) (string, error) {
 	commondirPath := filepath.Join(worktreeGitDir, "commondir")
-	data, err := os.ReadFile(commondirPath)
+	data, err := os.ReadFile(commondirPath) //nolint:gosec // reading .git commondir
 	if err != nil {
 		if os.IsNotExist(err) {
 			// No commondir file — this is the main repo, gitdir is the common dir
@@ -67,7 +67,7 @@ func ReadBranchFromFS(worktreePath string) (string, error) {
 	}
 
 	headPath := filepath.Join(gitDir, "HEAD")
-	data, err := os.ReadFile(headPath)
+	data, err := os.ReadFile(headPath) //nolint:gosec // reading .git HEAD
 	if err != nil {
 		return "", fmt.Errorf("read HEAD: %w", err)
 	}
@@ -86,7 +86,7 @@ func ReadBranchFromFS(worktreePath string) (string, error) {
 func ReadRefSHA(commonGitDir, refName string) (string, error) {
 	// Try loose ref first
 	loosePath := filepath.Join(commonGitDir, refName)
-	data, err := os.ReadFile(loosePath)
+	data, err := os.ReadFile(loosePath) //nolint:gosec // reading git ref file
 	if err == nil {
 		sha := strings.TrimSpace(string(data))
 		if len(sha) >= 40 {
@@ -96,7 +96,7 @@ func ReadRefSHA(commonGitDir, refName string) (string, error) {
 
 	// Fall back to packed-refs
 	packedPath := filepath.Join(commonGitDir, "packed-refs")
-	f, err := os.Open(packedPath)
+	f, err := os.Open(packedPath) //nolint:gosec // reading packed-refs
 	if err != nil {
 		return "", fmt.Errorf("ref %q not found in loose refs or packed-refs", refName)
 	}
