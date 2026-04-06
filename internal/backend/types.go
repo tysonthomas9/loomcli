@@ -49,7 +49,6 @@ type IssueDetailData struct {
 
 	// Content fields.
 	Description        string `json:"description,omitempty"`
-	Design             string `json:"design,omitempty"`
 	AcceptanceCriteria string `json:"acceptance_criteria,omitempty"`
 	Notes              string `json:"notes,omitempty"`
 

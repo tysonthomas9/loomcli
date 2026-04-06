@@ -158,6 +158,7 @@ func TestIssueDetailData_JSONRoundTrip(t *testing.T) {
 			Priority:  3,
 			IssueType: "epic",
 			Labels:    []string{"backend"},
+			Design:    "Round trip design",
 			CreatedAt: now,
 			UpdatedAt: now.Add(time.Hour),
 		},
@@ -199,6 +200,14 @@ func TestIssueDetailData_JSONRoundTrip(t *testing.T) {
 		t.Errorf("Labels = %v, want [backend]", decoded.Labels)
 	}
 
+	// Check Design survives round-trip (promoted from IssueData).
+	if !strings.Contains(string(data), `"design":"Round trip design"`) {
+		t.Errorf("marshaled JSON should contain design value, got: %s", data)
+	}
+	if decoded.Design != "Round trip design" {
+		t.Errorf("Design = %q, want %q", decoded.Design, "Round trip design")
+	}
+
 	// Check IssueDetailData-specific fields.
 	if decoded.Description != original.Description {
 		t.Errorf("Description = %q, want %q", decoded.Description, original.Description)
@@ -217,6 +226,45 @@ func TestIssueDetailData_JSONRoundTrip(t *testing.T) {
 	}
 	if len(decoded.Comments) != 1 || decoded.Comments[0].Author != "grace" {
 		t.Errorf("Comments = %v, want [{Author: grace}]", decoded.Comments)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Section 3b: Regression — Design must not be shadowed by IssueDetailData
+// ---------------------------------------------------------------------------
+
+func TestIssueDetailData_DesignNotShadowed(t *testing.T) {
+	detail := IssueDetailData{
+		IssueData: IssueData{
+			ID:     "shadow-1",
+			Title:  "Shadow test",
+			Status: "open",
+			Design: "my design",
+		},
+	}
+
+	// Marshal should include the design value.
+	data, err := json.Marshal(detail)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	raw := string(data)
+	if !strings.Contains(raw, `"design":"my design"`) {
+		t.Errorf("JSON should contain design value, got: %s", raw)
+	}
+
+	// Unmarshal back and verify Design survives.
+	var decoded IssueDetailData
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if decoded.Design != "my design" {
+		t.Errorf("Design = %q, want %q", decoded.Design, "my design")
+	}
+
+	// Verify dot-access resolves to the promoted field.
+	if decoded.IssueData.Design != "my design" {
+		t.Errorf("IssueData.Design = %q, want %q", decoded.IssueData.Design, "my design")
 	}
 }
 
