@@ -112,8 +112,11 @@ type MutationEvent struct {
 
 // NewServer creates a new RPC server
 func NewServer(socketPath string, store storage.Storage, workspacePath string, dbPath string) *Server {
-	// Parse config from env vars
-	maxConns := 100 // default
+	// Parse config from env vars.
+	// Default 20 is sized for a 1-CPU server where 100 concurrent SQLite
+	// connections create excessive write contention. Override with
+	// BEADS_DAEMON_MAX_CONNS for higher-capacity machines.
+	maxConns := 20 // default
 	if env := os.Getenv("BEADS_DAEMON_MAX_CONNS"); env != "" {
 		var conns int
 		if _, err := fmt.Sscanf(env, "%d", &conns); err == nil && conns > 0 {

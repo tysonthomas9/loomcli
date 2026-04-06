@@ -19,7 +19,7 @@ func TestDaemonShouldTrip(t *testing.T) {
 		{"daemon not running", ErrDaemonNotRunning, true},
 		{"connection timeout", ErrConnectionTimeout, true},
 		{"daemon unhealthy", ErrDaemonUnhealthy, true},
-		{"pool exhausted", ErrPoolExhausted, true},
+		{"pool exhausted", ErrPoolExhausted, false},
 		{"pool closed", ErrPoolClosed, false},
 		{"invalid socket path", ErrInvalidSocketPath, false},
 		{"context canceled", context.Canceled, false},

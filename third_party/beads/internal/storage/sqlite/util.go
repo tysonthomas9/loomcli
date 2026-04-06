@@ -22,7 +22,7 @@ func (s *SQLiteStorage) BeginTx(ctx context.Context) (*sql.Tx, error) {
 // If the function returns an error, the transaction is rolled back.
 // Otherwise, the transaction is committed.
 func (s *SQLiteStorage) withTx(ctx context.Context, fn func(*sql.Tx) error) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
 		return wrapDBError("begin transaction", err)
 	}

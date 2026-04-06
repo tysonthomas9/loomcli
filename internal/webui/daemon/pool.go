@@ -49,6 +49,11 @@ type ConnectionPool struct {
 	activeCount  int
 	createdCount int
 
+	// lastConnectedAt tracks when a connection was last successfully created or
+	// returned to the pool. Used by createConnection to distinguish a daemon that
+	// is alive-but-overloaded (semaphore full) from one that is genuinely dead.
+	lastConnectedAt time.Time
+
 	// lastUsedAt tracks when each connection was last returned to the pool.
 	// Used by validateConnection to skip Ping for recently-active connections.
 	lastUsedMu sync.Mutex
@@ -230,10 +235,16 @@ func (p *ConnectionPool) Put(client *rpc.Client) {
 	p.activeCount--
 	p.mu.Unlock()
 
+	// Update lastConnectedAt so createConnection knows the daemon was recently reachable.
+	now := time.Now()
+	p.mu.Lock()
+	p.lastConnectedAt = now
+	p.mu.Unlock()
+
 	// Record when this connection was last used, so validateConnection
 	// can skip the Ping for recently-active connections.
 	p.lastUsedMu.Lock()
-	p.lastUsedAt[client] = time.Now()
+	p.lastUsedAt[client] = now
 	p.lastUsedMu.Unlock()
 
 	// Try to return to pool
@@ -343,8 +354,23 @@ func (p *ConnectionPool) createConnection() (*rpc.Client, error) {
 		return nil, ErrConnectionTimeout
 	}
 	if client == nil {
-		return nil, ErrDaemonNotRunning
+		// TryConnectWithTimeout returned nil, nil — the socket accepted and
+		// immediately closed (daemon semaphore full) or the daemon is down.
+		// Check whether we had a successful connection recently; if so the
+		// daemon is alive but overloaded, not dead.
+		p.mu.Lock()
+		recentlyAlive := !p.lastConnectedAt.IsZero() && time.Since(p.lastConnectedAt) < 30*time.Second
+		p.mu.Unlock()
+		if recentlyAlive {
+			return nil, ErrPoolExhausted // daemon alive but overloaded — don't trip breaker
+		}
+		return nil, ErrDaemonNotRunning // daemon genuinely unreachable
 	}
+
+	// Successful connection — stamp the last-connected time.
+	p.mu.Lock()
+	p.lastConnectedAt = time.Now()
+	p.mu.Unlock()
 
 	client.SetTimeout(DefaultRequestTimeout)
 	return client, nil

@@ -71,6 +71,8 @@ func (p *ProtectedPool) SocketPath() string {
 
 // DaemonShouldTrip classifies daemon errors for the circuit breaker.
 // Transport/availability errors trip the breaker; application errors do not.
+// ErrPoolExhausted does NOT trip — it indicates the daemon is alive but
+// overloaded (semaphore full), not that it is unreachable.
 func DaemonShouldTrip(err error) bool {
 	if err == nil {
 		return false
@@ -78,16 +80,15 @@ func DaemonShouldTrip(err error) bool {
 	// Trip on daemon availability errors
 	if errors.Is(err, ErrDaemonNotRunning) ||
 		errors.Is(err, ErrConnectionTimeout) ||
-		errors.Is(err, ErrDaemonUnhealthy) ||
-		errors.Is(err, ErrPoolExhausted) {
+		errors.Is(err, ErrDaemonUnhealthy) {
 		return true
 	}
 	// Don't trip on client-side cancellation
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
 	}
-	// Don't trip on pool lifecycle errors
-	if errors.Is(err, ErrPoolClosed) || errors.Is(err, ErrInvalidSocketPath) {
+	// Don't trip on pool lifecycle or overload errors
+	if errors.Is(err, ErrPoolClosed) || errors.Is(err, ErrInvalidSocketPath) || errors.Is(err, ErrPoolExhausted) {
 		return false
 	}
 	return false
