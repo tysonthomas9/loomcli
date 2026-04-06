@@ -10,6 +10,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 // requireServiceError is a test helper that asserts err is a *service.ServiceError
@@ -87,8 +88,8 @@ func TestAgentService_GetTerminalInfo(t *testing.T) {
 	})
 
 	t.Run("valid agent returns archive mode when no session found", func(t *testing.T) {
-		mgr, err := NewTerminalManager("bash", "test-svc-archive", 0)
-		if err == ErrTmuxNotFound {
+		mgr, err := terminal.NewTerminalManager("bash", "test-svc-archive", 0)
+		if err == terminal.ErrTmuxNotFound {
 			t.Skip("tmux not installed, skipping test")
 		}
 		if err != nil {
@@ -101,8 +102,8 @@ func TestAgentService_GetTerminalInfo(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if result.Mode != agentTerminalModeArchive {
-			t.Errorf("Mode = %q, want %q", result.Mode, agentTerminalModeArchive)
+		if result.Mode != service.AgentTerminalModeArchive {
+			t.Errorf("Mode = %q, want %q", result.Mode, service.AgentTerminalModeArchive)
 		}
 		if result.Agent != "nonexistent-agent" {
 			t.Errorf("Agent = %q, want %q", result.Agent, "nonexistent-agent")
@@ -175,9 +176,9 @@ func TestAgentService_GetLog(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		// lines=0 should be clamped to logReadDefaultLines (200)
-		if len(result.Lines) != logReadDefaultLines {
-			t.Errorf("got %d lines, want %d (default)", len(result.Lines), logReadDefaultLines)
+		// lines=0 should be clamped to default (200)
+		if len(result.Lines) != 200 {
+			t.Errorf("got %d lines, want %d (default)", len(result.Lines), 200)
 		}
 	})
 
@@ -193,7 +194,7 @@ func TestAgentService_GetLog(t *testing.T) {
 		logFile := filepath.Join(logDir, "clampmax-agent.log")
 		// Write enough lines for the max test
 		var content string
-		for i := 1; i <= logReadMaxLines+100; i++ {
+		for i := 1; i <= 10000+100; i++ {
 			content += "line\n"
 		}
 		if err := os.WriteFile(logFile, []byte(content), 0o644); err != nil {
@@ -201,13 +202,13 @@ func TestAgentService_GetLog(t *testing.T) {
 		}
 		defer os.RemoveAll(filepath.Join(home, ".loom", "logs", "test-clampmax-ws"))
 
-		result, err := svc.GetLog(ctx, "test-clampmax-ws", "clampmax-agent", logReadMaxLines+5000, 0)
+		result, err := svc.GetLog(ctx, "test-clampmax-ws", "clampmax-agent", 10000+5000, 0)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		// lines > logReadMaxLines should be clamped to logReadMaxLines
-		if len(result.Lines) != logReadMaxLines {
-			t.Errorf("got %d lines, want %d (max)", len(result.Lines), logReadMaxLines)
+		// lines > 10000 should be clamped to 10000
+		if len(result.Lines) != 10000 {
+			t.Errorf("got %d lines, want %d (max)", len(result.Lines), 10000)
 		}
 	})
 }

@@ -13,7 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
-	"github.com/tysonthomas9/loomcli/internal/webui"
+	webuilog "github.com/tysonthomas9/loomcli/internal/webui/log"
 )
 
 var daemonLogsLines int
@@ -122,7 +122,7 @@ func showAgentLog(logPath string) {
 		os.Exit(1)
 	}
 
-	lines, _, err := webui.ReadLastNLines(logPath, daemonLogsLines)
+	lines, _, err := webuilog.ReadLastNLines(logPath, daemonLogsLines)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error reading log: %v\n", err)
 		os.Exit(1)

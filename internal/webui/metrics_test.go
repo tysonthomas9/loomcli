@@ -9,12 +9,13 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
 // TestHandleMetrics_NilHub tests that handleMetrics returns 503 when hub is nil.
 func TestHandleMetrics_NilHub(t *testing.T) {
-	handler := handleMetrics(nil, nil, nil)
+	handler := misc.HandleMetrics(nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/metrics", nil)
 	rec := httptest.NewRecorder()
@@ -60,7 +61,7 @@ func TestHandleMetrics_NilHub(t *testing.T) {
 func TestHandleMetrics_ValidHub(t *testing.T) {
 	hub := realtime.NewHub()
 
-	handler := handleMetrics(hub, nil, nil)
+	handler := misc.HandleMetrics(hub, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/metrics", nil)
 	rec := httptest.NewRecorder()
@@ -203,7 +204,7 @@ func TestHandleMetrics_WithClaimMetrics(t *testing.T) {
 	}
 	claimMetrics.RecordClaim(fleet.ClaimResultTimeout)
 
-	handler := handleMetrics(hub, nil, claimMetrics)
+	handler := misc.HandleMetrics(hub, nil, claimMetrics)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/metrics", nil)
 	rec := httptest.NewRecorder()

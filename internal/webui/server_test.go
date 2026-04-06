@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
+
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -270,7 +272,7 @@ func TestStartServer_WriteTimeout(t *testing.T) {
 	}
 
 	// The health endpoint returns JSON with a "status" field
-	var health HealthStatus
+	var health misc.HealthStatus
 	if err := json.Unmarshal(body, &health); err != nil {
 		cancel()
 		t.Fatalf("failed to parse health response: %v", err)
@@ -412,7 +414,7 @@ func TestStartServer_WriteTimeout_NonStreamingEndpoint(t *testing.T) {
 		t.Fatalf("failed to read response body: %v", err)
 	}
 
-	var statsResp StatsResponse
+	var statsResp misc.StatsResponse
 	if err := json.Unmarshal(body, &statsResp); err != nil {
 		cancel()
 		t.Fatalf("failed to parse stats response: %v", err)

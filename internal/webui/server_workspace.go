@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/coordinator"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -177,7 +178,7 @@ func (app *Server) registerWorkerAPIRoutes() {
 		return service.FindWorkspacePathByID(wsData, id) != ""
 	}
 
-	SetupWorkerAPIRoutes(app.mux, workerToken,
+	misc.SetupWorkerAPIRoutes(app.mux, workerToken,
 		func(workspace, agent string) string {
 			wsPath := service.ResolveWorkspacePath(workspaceConfigFn, workspace)
 			if wsPath == "" || agent == "" {

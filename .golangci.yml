@@ -190,6 +190,18 @@ linters:
     paths:
       - third_party
     rules:
+      # === Package naming exclusions ===
+      # "misc" is a domain sub-package name within the webui handler hierarchy.
+      - path: 'internal/webui/handlers/misc/'
+        linters:
+          - revive
+        text: "var-naming: avoid meaningless package names"
+      # "log" is a domain sub-package (log streaming), distinct from stdlib log.
+      - path: 'internal/webui/log/'
+        linters:
+          - revive
+        text: "var-naming: avoid package names that conflict"
+
       # === Existing loomcli-specific exclusions ===
 
       # G104: Unhandled errors for cleanup operations (Close, Remove) are acceptable

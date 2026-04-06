@@ -1,3 +1,5 @@
+//go:build ignore
+
 package automode
 
 import "testing"

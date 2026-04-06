@@ -18,8 +18,11 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
+	hterminal "github.com/tysonthomas9/loomcli/internal/webui/handlers/terminal"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
+	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 // setupTestRoutes constructs handlers and registers routes on app.mux.
@@ -32,20 +35,20 @@ func setupTestRoutes(t *testing.T, app *Server) {
 	app.registerRoutes()
 	t.Cleanup(func() {
 		if app.clientErrLimiter != nil {
-			app.clientErrLimiter.stop()
+			app.clientErrLimiter.Stop()
 		}
 		if app.cspLimiter != nil {
-			app.cspLimiter.stop()
+			app.cspLimiter.Stop()
 		}
 		if app.authCfgLimiter != nil {
-			app.authCfgLimiter.stop()
+			app.authCfgLimiter.Stop()
 		}
 	})
 }
 
 // TestHandleStats_NilPool verifies that handleStats returns 503 when pool is nil.
 func TestHandleStats_NilPool(t *testing.T) {
-	handler := handleStats(nil)
+	handler := misc.HandleStats(nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/stats", nil)
 	rr := httptest.NewRecorder()
@@ -56,7 +59,7 @@ func TestHandleStats_NilPool(t *testing.T) {
 		t.Errorf("expected status %d, got %d", http.StatusServiceUnavailable, rr.Code)
 	}
 
-	var resp StatsResponse
+	var resp misc.StatsResponse
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
 	}
@@ -91,7 +94,7 @@ func TestHandleStats_PoolGetError(t *testing.T) {
 	pool.SetDialTimeout(10 * time.Millisecond)
 	pool.SetPoolTimeout(20 * time.Millisecond)
 
-	handler := handleStats(pool)
+	handler := misc.HandleStats(pool)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/stats", nil)
 	rr := httptest.NewRecorder()
@@ -103,7 +106,7 @@ func TestHandleStats_PoolGetError(t *testing.T) {
 		t.Errorf("expected status %d or %d, got %d", http.StatusServiceUnavailable, http.StatusGatewayTimeout, rr.Code)
 	}
 
-	var resp StatsResponse
+	var resp misc.StatsResponse
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
 	}
@@ -127,7 +130,7 @@ func TestHandleStats_PoolClosed(t *testing.T) {
 	// Close the pool before making request
 	pool.Close()
 
-	handler := handleStats(pool)
+	handler := misc.HandleStats(pool)
 
 	// Create request with a very short timeout context
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
@@ -143,7 +146,7 @@ func TestHandleStats_PoolClosed(t *testing.T) {
 		t.Errorf("expected status %d or %d, got %d", http.StatusServiceUnavailable, http.StatusGatewayTimeout, rr.Code)
 	}
 
-	var resp StatsResponse
+	var resp misc.StatsResponse
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
 	}
@@ -166,7 +169,7 @@ func TestHandleStats_ContextDeadlineExceeded(t *testing.T) {
 	pool.SetDialTimeout(5 * time.Second)
 	pool.SetPoolTimeout(5 * time.Second)
 
-	handler := handleStats(pool)
+	handler := misc.HandleStats(pool)
 
 	// Create request with a very short timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
@@ -182,7 +185,7 @@ func TestHandleStats_ContextDeadlineExceeded(t *testing.T) {
 		t.Errorf("expected status %d or %d, got %d", http.StatusGatewayTimeout, http.StatusServiceUnavailable, rr.Code)
 	}
 
-	var resp StatsResponse
+	var resp misc.StatsResponse
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
 	}
@@ -192,7 +195,7 @@ func TestHandleStats_ContextDeadlineExceeded(t *testing.T) {
 	}
 }
 
-// TestStatsResponse_SuccessSerialization tests successful StatsResponse serialization.
+// TestStatsResponse_SuccessSerialization tests successful misc.StatsResponse serialization.
 func TestStatsResponse_SuccessSerialization(t *testing.T) {
 	stats := &types.Statistics{
 		TotalIssues:      100,
@@ -207,7 +210,7 @@ func TestStatsResponse_SuccessSerialization(t *testing.T) {
 		AverageLeadTime:  24.5,
 	}
 
-	resp := StatsResponse{
+	resp := misc.StatsResponse{
 		Success: true,
 		Data:    stats,
 	}
@@ -217,7 +220,7 @@ func TestStatsResponse_SuccessSerialization(t *testing.T) {
 		t.Fatalf("failed to marshal response: %v", err)
 	}
 
-	var parsed StatsResponse
+	var parsed misc.StatsResponse
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		t.Fatalf("failed to unmarshal response: %v", err)
 	}
@@ -243,9 +246,9 @@ func TestStatsResponse_SuccessSerialization(t *testing.T) {
 	}
 }
 
-// TestStatsResponse_ErrorSerialization tests error StatsResponse serialization.
+// TestStatsResponse_ErrorSerialization tests error misc.StatsResponse serialization.
 func TestStatsResponse_ErrorSerialization(t *testing.T) {
-	resp := StatsResponse{
+	resp := misc.StatsResponse{
 		Success: false,
 		Error:   "connection failed",
 	}
@@ -255,7 +258,7 @@ func TestStatsResponse_ErrorSerialization(t *testing.T) {
 		t.Fatalf("failed to marshal response: %v", err)
 	}
 
-	var parsed StatsResponse
+	var parsed misc.StatsResponse
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		t.Fatalf("failed to unmarshal response: %v", err)
 	}
@@ -275,7 +278,7 @@ func TestStatsResponse_ErrorSerialization(t *testing.T) {
 
 // TestStatsResponse_ErrorOmitsDataField verifies that error responses omit the data field.
 func TestStatsResponse_ErrorOmitsDataField(t *testing.T) {
-	resp := StatsResponse{
+	resp := misc.StatsResponse{
 		Success: false,
 		Error:   "some error",
 	}
@@ -297,7 +300,7 @@ func TestStatsResponse_ErrorOmitsDataField(t *testing.T) {
 
 // TestStatsResponse_SuccessOmitsErrorField verifies that success responses omit the error field.
 func TestStatsResponse_SuccessOmitsErrorField(t *testing.T) {
-	resp := StatsResponse{
+	resp := misc.StatsResponse{
 		Success: true,
 		Data:    &types.Statistics{TotalIssues: 10},
 	}
@@ -405,11 +408,11 @@ func TestHandleStats_RPCFailureResponse(t *testing.T) {
 	}
 }
 
-// TestHealthStatus_HealthySerialization tests healthy HealthStatus serialization.
+// TestHealthStatus_HealthySerialization tests healthy misc.HealthStatus serialization.
 func TestHealthStatus_HealthySerialization(t *testing.T) {
-	status := HealthStatus{
+	status := misc.HealthStatus{
 		Status: "ok",
-		Daemon: DaemonStatus{
+		Daemon: misc.DaemonStatus{
 			Connected: true,
 			Status:    "healthy",
 			Uptime:    3600.0,
@@ -426,12 +429,12 @@ func TestHealthStatus_HealthySerialization(t *testing.T) {
 
 	data, err := json.Marshal(status)
 	if err != nil {
-		t.Fatalf("failed to marshal HealthStatus: %v", err)
+		t.Fatalf("failed to marshal misc.HealthStatus: %v", err)
 	}
 
-	var parsed HealthStatus
+	var parsed misc.HealthStatus
 	if err := json.Unmarshal(data, &parsed); err != nil {
-		t.Fatalf("failed to unmarshal HealthStatus: %v", err)
+		t.Fatalf("failed to unmarshal misc.HealthStatus: %v", err)
 	}
 
 	if parsed.Status != "ok" {
@@ -451,11 +454,11 @@ func TestHealthStatus_HealthySerialization(t *testing.T) {
 	}
 }
 
-// TestHealthStatus_DegradedSerialization tests degraded HealthStatus serialization.
+// TestHealthStatus_DegradedSerialization tests degraded misc.HealthStatus serialization.
 func TestHealthStatus_DegradedSerialization(t *testing.T) {
-	status := HealthStatus{
+	status := misc.HealthStatus{
 		Status: "degraded",
-		Daemon: DaemonStatus{
+		Daemon: misc.DaemonStatus{
 			Connected: false,
 			Error:     "connection refused",
 		},
@@ -463,12 +466,12 @@ func TestHealthStatus_DegradedSerialization(t *testing.T) {
 
 	data, err := json.Marshal(status)
 	if err != nil {
-		t.Fatalf("failed to marshal HealthStatus: %v", err)
+		t.Fatalf("failed to marshal misc.HealthStatus: %v", err)
 	}
 
-	var parsed HealthStatus
+	var parsed misc.HealthStatus
 	if err := json.Unmarshal(data, &parsed); err != nil {
-		t.Fatalf("failed to unmarshal HealthStatus: %v", err)
+		t.Fatalf("failed to unmarshal misc.HealthStatus: %v", err)
 	}
 
 	if parsed.Status != "degraded" {
@@ -486,16 +489,16 @@ func TestHealthStatus_DegradedSerialization(t *testing.T) {
 
 // TestHealthStatus_PoolOmittedWhenNil verifies pool field is omitted when nil.
 func TestHealthStatus_PoolOmittedWhenNil(t *testing.T) {
-	status := HealthStatus{
+	status := misc.HealthStatus{
 		Status: "degraded",
-		Daemon: DaemonStatus{
+		Daemon: misc.DaemonStatus{
 			Connected: false,
 		},
 	}
 
 	data, err := json.Marshal(status)
 	if err != nil {
-		t.Fatalf("failed to marshal HealthStatus: %v", err)
+		t.Fatalf("failed to marshal misc.HealthStatus: %v", err)
 	}
 
 	var raw map[string]interface{}
@@ -510,7 +513,7 @@ func TestHealthStatus_PoolOmittedWhenNil(t *testing.T) {
 
 // TestDaemonStatus_ConnectedSerialization tests connected DaemonStatus serialization.
 func TestDaemonStatus_ConnectedSerialization(t *testing.T) {
-	status := DaemonStatus{
+	status := misc.DaemonStatus{
 		Connected: true,
 		Status:    "healthy",
 		Uptime:    7200.5,
@@ -522,7 +525,7 @@ func TestDaemonStatus_ConnectedSerialization(t *testing.T) {
 		t.Fatalf("failed to marshal DaemonStatus: %v", err)
 	}
 
-	var parsed DaemonStatus
+	var parsed misc.DaemonStatus
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		t.Fatalf("failed to unmarshal DaemonStatus: %v", err)
 	}
@@ -546,7 +549,7 @@ func TestDaemonStatus_ConnectedSerialization(t *testing.T) {
 
 // TestDaemonStatus_DisconnectedSerialization tests disconnected DaemonStatus serialization.
 func TestDaemonStatus_DisconnectedSerialization(t *testing.T) {
-	status := DaemonStatus{
+	status := misc.DaemonStatus{
 		Connected: false,
 		Error:     "daemon not running",
 	}
@@ -556,7 +559,7 @@ func TestDaemonStatus_DisconnectedSerialization(t *testing.T) {
 		t.Fatalf("failed to marshal DaemonStatus: %v", err)
 	}
 
-	var parsed DaemonStatus
+	var parsed misc.DaemonStatus
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		t.Fatalf("failed to unmarshal DaemonStatus: %v", err)
 	}
@@ -572,7 +575,7 @@ func TestDaemonStatus_DisconnectedSerialization(t *testing.T) {
 
 // TestDaemonStatus_OptionalFieldsOmitted tests that optional fields are omitted when empty.
 func TestDaemonStatus_OptionalFieldsOmitted(t *testing.T) {
-	status := DaemonStatus{
+	status := misc.DaemonStatus{
 		Connected: false,
 	}
 
@@ -612,7 +615,7 @@ func TestDaemonStatus_OptionalFieldsOmitted(t *testing.T) {
 
 // TestHandleAPIHealth_NilPool tests API health endpoint with nil pool.
 func TestHandleAPIHealth_NilPool(t *testing.T) {
-	handler := handleAPIHealth(nil)
+	handler := misc.HandleAPIHealth(nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
 	rr := httptest.NewRecorder()
@@ -623,7 +626,7 @@ func TestHandleAPIHealth_NilPool(t *testing.T) {
 		t.Errorf("expected status %d, got %d", http.StatusServiceUnavailable, rr.Code)
 	}
 
-	var resp HealthStatus
+	var resp misc.HealthStatus
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
 	}
@@ -661,8 +664,8 @@ func TestSetupRoutes_FlatTerminalWSEndpointReturns404(t *testing.T) {
 // return 404 even when termManager is non-nil (they have been removed in favor
 // of workspace-scoped equivalents).
 func TestSetupRoutes_FlatTerminalRoutesReturn404(t *testing.T) {
-	termMgr, err := NewTerminalManager("bash", "", 0)
-	if err == ErrTmuxNotFound {
+	termMgr, err := terminal.NewTerminalManager("bash", "", 0)
+	if err == terminal.ErrTmuxNotFound {
 		t.Skip("tmux not installed, skipping test")
 	}
 	if err != nil {
@@ -705,7 +708,7 @@ func TestSetupRoutes_FlatTerminalRoutesReturn404(t *testing.T) {
 // calling handleTerminalWS directly with nil manager returns 503.
 // This complements the route registration test by verifying handler behavior.
 func TestSetupRoutes_TerminalEndpointNilManagerReturns503(t *testing.T) {
-	handler := handleTerminalWS(nil, nil, nil, "", nil, nil, nil)
+	handler := hterminal.HandleTerminalWS(nil, nil, nil, "", nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/ws?session=test", nil)
 	rr := httptest.NewRecorder()
@@ -746,7 +749,7 @@ func TestSetupRoutes_StatsEndpoint(t *testing.T) {
 	}
 
 	// Verify JSON response
-	var resp StatsResponse
+	var resp misc.StatsResponse
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
 	}
@@ -779,7 +782,7 @@ func TestSetupRoutes_StatsEndpointPOSTFallsThrough(t *testing.T) {
 	}
 }
 
-// mockStatsClient implements statsClient for testing
+// mockStatsClient implements misc.StatsClient for testing
 type mockStatsClient struct {
 	statsFunc func() (*rpc.Response, error)
 }
@@ -793,18 +796,18 @@ func (m *mockStatsClient) Stats() (*rpc.Response, error) {
 
 // mockStatsPool implements statsConnectionGetter for testing
 type mockStatsPool struct {
-	getFunc func(ctx context.Context) (statsClient, error)
-	putFunc func(client statsClient)
+	getFunc func(ctx context.Context) (misc.StatsClient, error)
+	putFunc func(client misc.StatsClient)
 }
 
-func (m *mockStatsPool) Get(ctx context.Context) (statsClient, error) {
+func (m *mockStatsPool) Get(ctx context.Context) (misc.StatsClient, error) {
 	if m.getFunc != nil {
 		return m.getFunc(ctx)
 	}
 	return nil, errors.New("getFunc not implemented")
 }
 
-func (m *mockStatsPool) Put(client statsClient) {
+func (m *mockStatsPool) Put(client misc.StatsClient) {
 	if m.putFunc != nil {
 		m.putFunc(client)
 	}
@@ -812,7 +815,7 @@ func (m *mockStatsPool) Put(client statsClient) {
 
 // TestHandleStats_ContentType verifies Content-Type header is application/json for all responses.
 func TestHandleStats_ContentType(t *testing.T) {
-	handler := handleStats(nil)
+	handler := misc.HandleStats(nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/stats", nil)
 	rr := httptest.NewRecorder()
@@ -839,13 +842,13 @@ func TestHandleStats_Success(t *testing.T) {
 	}
 
 	pool := &mockStatsPool{
-		getFunc: func(ctx context.Context) (statsClient, error) {
+		getFunc: func(ctx context.Context) (misc.StatsClient, error) {
 			return client, nil
 		},
-		putFunc: func(c statsClient) {},
+		putFunc: func(c misc.StatsClient) {},
 	}
 
-	handler := handleStatsWithPool(pool)
+	handler := misc.HandleStatsWithPool(pool)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/stats", nil)
 	rr := httptest.NewRecorder()
@@ -856,7 +859,7 @@ func TestHandleStats_Success(t *testing.T) {
 		t.Errorf("status code = %d, want %d", rr.Code, http.StatusOK)
 	}
 
-	var resp StatsResponse
+	var resp misc.StatsResponse
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
 	}
@@ -892,13 +895,13 @@ func TestHandleStats_RPCError(t *testing.T) {
 	}
 
 	pool := &mockStatsPool{
-		getFunc: func(ctx context.Context) (statsClient, error) {
+		getFunc: func(ctx context.Context) (misc.StatsClient, error) {
 			return client, nil
 		},
-		putFunc: func(c statsClient) {},
+		putFunc: func(c misc.StatsClient) {},
 	}
 
-	handler := handleStatsWithPool(pool)
+	handler := misc.HandleStatsWithPool(pool)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/stats", nil)
 	rr := httptest.NewRecorder()
@@ -909,7 +912,7 @@ func TestHandleStats_RPCError(t *testing.T) {
 		t.Errorf("status code = %d, want %d", rr.Code, http.StatusInternalServerError)
 	}
 
-	var resp StatsResponse
+	var resp misc.StatsResponse
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
 	}
@@ -940,13 +943,13 @@ func TestHandleStats_DaemonError(t *testing.T) {
 	}
 
 	pool := &mockStatsPool{
-		getFunc: func(ctx context.Context) (statsClient, error) {
+		getFunc: func(ctx context.Context) (misc.StatsClient, error) {
 			return client, nil
 		},
-		putFunc: func(c statsClient) {},
+		putFunc: func(c misc.StatsClient) {},
 	}
 
-	handler := handleStatsWithPool(pool)
+	handler := misc.HandleStatsWithPool(pool)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/stats", nil)
 	rr := httptest.NewRecorder()
@@ -957,7 +960,7 @@ func TestHandleStats_DaemonError(t *testing.T) {
 		t.Errorf("status code = %d, want %d", rr.Code, http.StatusInternalServerError)
 	}
 
-	var resp StatsResponse
+	var resp misc.StatsResponse
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
 	}
@@ -1018,7 +1021,7 @@ func TestSetupRoutes_FlatFleetRoutesReturn404(t *testing.T) {
 
 // TestHandleDaemonStatus_NilPool tests handleDaemonStatus with nil pool returns 503.
 func TestHandleDaemonStatus_NilPool(t *testing.T) {
-	handler := handleDaemonStatus(nil)
+	handler := misc.HandleDaemonStatus(nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/daemon/status", nil)
 	rr := httptest.NewRecorder()
@@ -1029,7 +1032,7 @@ func TestHandleDaemonStatus_NilPool(t *testing.T) {
 		t.Errorf("status = %d, want %d", rr.Code, http.StatusServiceUnavailable)
 	}
 
-	var resp DaemonStatusResponse
+	var resp misc.DaemonStatusResponse
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
 	}
@@ -1058,7 +1061,7 @@ func TestHandleDaemonStatus_PoolGetError(t *testing.T) {
 	pool.SetDialTimeout(10 * time.Millisecond)
 	pool.SetPoolTimeout(20 * time.Millisecond)
 
-	handler := handleDaemonStatus(pool)
+	handler := misc.HandleDaemonStatus(pool)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/daemon/status", nil)
 	rr := httptest.NewRecorder()
@@ -1070,7 +1073,7 @@ func TestHandleDaemonStatus_PoolGetError(t *testing.T) {
 		t.Errorf("status = %d, want %d or %d", rr.Code, http.StatusServiceUnavailable, http.StatusGatewayTimeout)
 	}
 
-	var resp DaemonStatusResponse
+	var resp misc.DaemonStatusResponse
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
 	}
@@ -1095,7 +1098,7 @@ func TestHandleDaemonStatus_ContextTimeout(t *testing.T) {
 	pool.SetDialTimeout(5 * time.Second)
 	pool.SetPoolTimeout(5 * time.Second)
 
-	handler := handleDaemonStatus(pool)
+	handler := misc.HandleDaemonStatus(pool)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
 	defer cancel()
@@ -1110,9 +1113,9 @@ func TestHandleDaemonStatus_ContextTimeout(t *testing.T) {
 	}
 }
 
-// TestDaemonStatusResponse_Serialization tests DaemonStatusResponse JSON serialization.
+// TestDaemonStatusResponse_Serialization tests misc.DaemonStatusResponse JSON serialization.
 func TestDaemonStatusResponse_Serialization(t *testing.T) {
-	resp := DaemonStatusResponse{
+	resp := misc.DaemonStatusResponse{
 		Success: true,
 		Data: &rpc.StatusResponse{
 			Version:       "1.0.0",
@@ -1129,7 +1132,7 @@ func TestDaemonStatusResponse_Serialization(t *testing.T) {
 		t.Fatalf("failed to marshal: %v", err)
 	}
 
-	var parsed DaemonStatusResponse
+	var parsed misc.DaemonStatusResponse
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		t.Fatalf("failed to unmarshal: %v", err)
 	}
@@ -1155,9 +1158,9 @@ func TestDaemonStatusResponse_Serialization(t *testing.T) {
 	}
 }
 
-// TestDaemonStatusResponse_ErrorSerialization tests error DaemonStatusResponse serialization.
+// TestDaemonStatusResponse_ErrorSerialization tests error misc.DaemonStatusResponse serialization.
 func TestDaemonStatusResponse_ErrorSerialization(t *testing.T) {
-	resp := DaemonStatusResponse{
+	resp := misc.DaemonStatusResponse{
 		Success: false,
 		Error:   "connection failed",
 	}
@@ -1167,7 +1170,7 @@ func TestDaemonStatusResponse_ErrorSerialization(t *testing.T) {
 		t.Fatalf("failed to marshal: %v", err)
 	}
 
-	var parsed DaemonStatusResponse
+	var parsed misc.DaemonStatusResponse
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		t.Fatalf("failed to unmarshal: %v", err)
 	}
@@ -1276,7 +1279,7 @@ func TestHandleDaemonStatus_Success(t *testing.T) {
 	})
 
 	pool := newRoutesMockPool(t, socketPath)
-	handler := handleDaemonStatus(pool)
+	handler := misc.HandleDaemonStatus(pool)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/daemon/status", nil)
 	rr := httptest.NewRecorder()
@@ -1286,7 +1289,7 @@ func TestHandleDaemonStatus_Success(t *testing.T) {
 		t.Errorf("status = %d, want %d", rr.Code, http.StatusOK)
 	}
 
-	var resp DaemonStatusResponse
+	var resp misc.DaemonStatusResponse
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
 	}
@@ -1342,7 +1345,7 @@ func TestHandleStats_SuccessWithMockServer(t *testing.T) {
 	})
 
 	pool := newRoutesMockPool(t, socketPath)
-	handler := handleStats(pool)
+	handler := misc.HandleStats(pool)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/stats", nil)
 	rr := httptest.NewRecorder()
@@ -1352,7 +1355,7 @@ func TestHandleStats_SuccessWithMockServer(t *testing.T) {
 		t.Errorf("status = %d, want %d", rr.Code, http.StatusOK)
 	}
 
-	var resp StatsResponse
+	var resp misc.StatsResponse
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
 	}
@@ -1385,7 +1388,7 @@ func TestHandleAPIHealth_SuccessWithMockServer(t *testing.T) {
 	})
 
 	pool := newRoutesMockPool(t, socketPath)
-	handler := handleAPIHealth(pool)
+	handler := misc.HandleAPIHealth(pool)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
 	rr := httptest.NewRecorder()
@@ -1395,7 +1398,7 @@ func TestHandleAPIHealth_SuccessWithMockServer(t *testing.T) {
 		t.Errorf("status = %d, want %d", rr.Code, http.StatusOK)
 	}
 
-	var resp HealthStatus
+	var resp misc.HealthStatus
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
 	}
@@ -1528,8 +1531,8 @@ func TestSetupRoutes_WorkspaceBackendPatchEndpoint(t *testing.T) {
 // TestSetupRoutes_FlatTerminalTokenReturns404 verifies that GET /api/terminal/token
 // returns 404 (flat route removed, only workspace-scoped route exists).
 func TestSetupRoutes_FlatTerminalTokenReturns404(t *testing.T) {
-	termMgr, err := NewTerminalManager("bash", "", 0)
-	if err == ErrTmuxNotFound {
+	termMgr, err := terminal.NewTerminalManager("bash", "", 0)
+	if err == terminal.ErrTmuxNotFound {
 		t.Skip("tmux not installed, skipping test")
 	}
 	if err != nil {

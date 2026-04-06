@@ -11,6 +11,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -195,7 +196,7 @@ func TestFullChain_CrossSystem_FleetJWTToProtectedRoute(t *testing.T) {
 
 	// Generate HS256 fleet JWT
 	fleetKey := []byte("fleet-signing-key-for-test-1234!")
-	fleetToken, err := GenerateWorkerToken("worker-1", nil, fleetKey, time.Hour)
+	fleetToken, err := fleet.GenerateWorkerToken("worker-1", nil, fleetKey, time.Hour)
 	if err != nil {
 		t.Fatalf("failed to generate fleet token: %v", err)
 	}
@@ -223,7 +224,7 @@ func TestFullChain_CrossSystem_UserJWTToFleetRoute(t *testing.T) {
 	mux := http.NewServeMux()
 
 	fleetKey := []byte("fleet-signing-key-for-test-1234!")
-	fleetMW := NewFleetAuthMiddleware(fleetKey)
+	fleetMW := fleet.NewFleetAuthMiddleware(fleetKey)
 	mux.Handle("POST /api/fleet/claim", fleetMW(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		respondJSON(w, http.StatusOK, map[string]string{"status": "fleet_ok"})
 	})))

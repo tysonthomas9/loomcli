@@ -12,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
+	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 // TestTerminalStateRouteMigration_OldFlatRoutesReturn404 verifies that the
@@ -32,17 +33,17 @@ func TestTerminalStateRouteMigration_OldFlatRoutesReturn404(t *testing.T) {
 
 	// Create a termManager (needed for scrollback/export routes).
 	// Skip this portion if tmux is unavailable.
-	termMgr, err := NewTerminalManager("bash", "", 0)
-	if err == ErrTmuxNotFound {
+	termMgr, err := terminal.NewTerminalManager("bash", "", 0)
+	if err == terminal.ErrTmuxNotFound {
 		t.Skip("tmux not installed, skipping test")
 	}
 	if err != nil {
-		t.Fatalf("NewTerminalManager() error: %v", err)
+		t.Fatalf("terminal.NewTerminalManager() error: %v", err)
 	}
 	t.Cleanup(func() { termMgr.Shutdown() })
 
 	app := &Server{multiPool: multiPool, termMgr: termMgr, tabMetaStore: tms, wsExistsFn: wsExistsFn}
-	app.termSvc = NewTerminalService(termMgr, nil, nil, tms, nil, nil, tms.RedisClient())
+	app.termSvc = terminal.NewTerminalService(termMgr, nil, nil, tms, nil, nil, tms.RedisClient())
 	setupTestRoutes(t, app)
 
 	// Old flat routes that should have been removed — each must return 404.
@@ -90,17 +91,17 @@ func TestTerminalStateRouteMigration_NewWorkspaceScopedRoutesRegistered(t *testi
 	t.Cleanup(func() { rdb.Close() })
 	tms := tabmeta.NewStore(rdb, nil)
 
-	termMgr, err := NewTerminalManager("bash", "", 0)
-	if err == ErrTmuxNotFound {
+	termMgr, err := terminal.NewTerminalManager("bash", "", 0)
+	if err == terminal.ErrTmuxNotFound {
 		t.Skip("tmux not installed, skipping test")
 	}
 	if err != nil {
-		t.Fatalf("NewTerminalManager() error: %v", err)
+		t.Fatalf("terminal.NewTerminalManager() error: %v", err)
 	}
 	t.Cleanup(func() { termMgr.Shutdown() })
 
 	app := &Server{multiPool: multiPool, termMgr: termMgr, tabMetaStore: tms, wsExistsFn: wsExistsFn}
-	app.termSvc = NewTerminalService(termMgr, nil, nil, tms, nil, nil, tms.RedisClient())
+	app.termSvc = terminal.NewTerminalService(termMgr, nil, nil, tms, nil, nil, tms.RedisClient())
 	setupTestRoutes(t, app)
 
 	// New workspace-scoped routes that should be registered.
@@ -154,17 +155,17 @@ func TestTerminalStateRouteMigration_UnknownWorkspaceReturns404(t *testing.T) {
 	t.Cleanup(func() { rdb.Close() })
 	tms := tabmeta.NewStore(rdb, nil)
 
-	termMgr, err := NewTerminalManager("bash", "", 0)
-	if err == ErrTmuxNotFound {
+	termMgr, err := terminal.NewTerminalManager("bash", "", 0)
+	if err == terminal.ErrTmuxNotFound {
 		t.Skip("tmux not installed, skipping test")
 	}
 	if err != nil {
-		t.Fatalf("NewTerminalManager() error: %v", err)
+		t.Fatalf("terminal.NewTerminalManager() error: %v", err)
 	}
 	t.Cleanup(func() { termMgr.Shutdown() })
 
 	app := &Server{multiPool: multiPool, termMgr: termMgr, tabMetaStore: tms, wsExistsFn: wsExistsFn}
-	app.termSvc = NewTerminalService(termMgr, nil, nil, tms, nil, nil, tms.RedisClient())
+	app.termSvc = terminal.NewTerminalService(termMgr, nil, nil, tms, nil, nil, tms.RedisClient())
 	setupTestRoutes(t, app)
 
 	// Routes with a non-existent workspace should return 404 from WorkspaceMiddleware.
@@ -208,7 +209,7 @@ func TestTerminalStateRouteMigration_StateEndpointsReturnJSON(t *testing.T) {
 
 	// termManager is nil here since state routes only need tabMetaStore.
 	app := &Server{multiPool: multiPool, tabMetaStore: tms, wsExistsFn: wsExistsFn}
-	app.termSvc = NewTerminalService(nil, nil, nil, tms, nil, nil, tms.RedisClient())
+	app.termSvc = terminal.NewTerminalService(nil, nil, nil, tms, nil, nil, tms.RedisClient())
 	setupTestRoutes(t, app)
 
 	// GET /api/workspaces/{ws}/terminal/state should return 200 with an

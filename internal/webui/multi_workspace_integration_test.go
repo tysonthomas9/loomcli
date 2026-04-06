@@ -14,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/issues"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
@@ -580,7 +581,7 @@ func TestMultiWorkspace_CrossWorkspaceMove(t *testing.T) {
 		}
 		wsCfg := testWorkspaceConfigFn("alpha", workspaces)
 
-		handler := handleMoveIssue(svc, wsCfg)
+		handler := issues.HandleMoveIssue(svc, wsCfg)
 
 		body := `{"target_workspace":"beta"}`
 		req := httptest.NewRequest(http.MethodPost, "/api/workspaces/ws-alpha/issues/src-001/move", strings.NewReader(body))
@@ -593,7 +594,7 @@ func TestMultiWorkspace_CrossWorkspaceMove(t *testing.T) {
 			t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 		}
 
-		var resp MoveIssueResponse
+		var resp issues.MoveIssueResponse
 		if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 			t.Fatal(err)
 		}
@@ -624,7 +625,7 @@ func TestMultiWorkspace_CrossWorkspaceMove(t *testing.T) {
 		}
 		wsCfg := testWorkspaceConfigFn("alpha", workspaces)
 
-		handler := handleMoveIssue(svc, wsCfg)
+		handler := issues.HandleMoveIssue(svc, wsCfg)
 
 		body := `{"target_workspace":"nonexistent"}`
 		req := httptest.NewRequest(http.MethodPost, "/api/issues/src-001/move", strings.NewReader(body))
@@ -655,7 +656,7 @@ func TestMultiWorkspace_CrossWorkspaceMove(t *testing.T) {
 		}
 		wsCfg := testWorkspaceConfigFn("alpha", workspaces)
 
-		handler := handleMoveIssue(svc, wsCfg)
+		handler := issues.HandleMoveIssue(svc, wsCfg)
 
 		body := `{"target_workspace":"alpha"}`
 		req := httptest.NewRequest(http.MethodPost, "/api/issues/src-001/move", strings.NewReader(body))

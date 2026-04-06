@@ -19,12 +19,15 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/editor"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
 	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
+	"github.com/tysonthomas9/loomcli/internal/webui/subscription"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
+	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 // Server holds all initialized server dependencies as struct fields.
@@ -46,16 +49,16 @@ type Server struct {
 
 	// Service layer
 	issueSvc     service.IssueService
-	agentSvc     AgentService
+	agentSvc     service.AgentService
 	workspaceSvc service.WorkspaceService
-	termSvc      TerminalService // nil if termMgr is nil
-	diffSvc      DiffService     // nil if ops.GitOps is nil
-	fileSvc      FileService     // nil if ops.FileOps is nil
-	sessSvc      SessionService  // always constructed (stores may be nil internally)
+	termSvc      service.TerminalService // nil if termMgr is nil
+	diffSvc      service.DiffService     // nil if ops.GitOps is nil
+	fileSvc      service.FileService     // nil if ops.FileOps is nil
+	sessSvc      service.SessionService  // always constructed (stores may be nil internally)
 
 	// Real-time
 	hub               *realtime.Hub
-	multiSub          *MultiWorkspaceSubscriber
+	multiSub          *subscription.MultiWorkspaceSubscriber
 	getMutationsSince func(wsID string, since int64) []rpc.MutationEvent
 
 	// Workspace lifecycle
@@ -63,17 +66,17 @@ type Server struct {
 	initialWorkspaceID string
 
 	// Terminal
-	termMgr  *TerminalManager       // nil if tmux unavailable
-	termAuth *realtime.TerminalAuth // nil if termMgr is nil
+	termMgr  *terminal.TerminalManager // nil if tmux unavailable
+	termAuth *realtime.TerminalAuth    // nil if termMgr is nil
 
 	// SSE token exchange (external auth mode only)
 	sseTokens *realtime.TokenStore // nil if ExtAuthURL is empty
 
 	// Fleet
-	fleetRegistry *fleet.StoreRegistry // nil if Redis unconfigured
-	tokenCfg      *TokenConfig         // nil if fleetRegistry is nil
-	claimMetrics  *fleet.ClaimMetrics  // nil if fleetRegistry is nil
-	fleetRegCfg   *FleetRegisterConfig // nil if no fleet API key
+	fleetRegistry *fleet.StoreRegistry  // nil if Redis unconfigured
+	tokenCfg      *fleet.TokenConfig    // nil if fleetRegistry is nil
+	claimMetrics  *fleet.ClaimMetrics   // nil if fleetRegistry is nil
+	fleetRegCfg   *fleet.RegisterConfig // nil if no fleet API key
 
 	// Redis-backed stores
 	tabMetaStore        *tabmeta.Store        // nil if Redis unconfigured
@@ -99,12 +102,12 @@ type Server struct {
 	notifyTokenFile string
 
 	// Rate limiters (created in buildHandlers, stopped in Close)
-	clientErrLimiter *clientErrorLimiter
-	cspLimiter       *cspReportLimiter
-	authCfgLimiter   *authConfigLimiter
+	clientErrLimiter *misc.ClientErrorLimiter
+	cspLimiter       *misc.CSPReportLimiter
+	authCfgLimiter   *misc.AuthConfigLimiter
 
 	// Shared infrastructure
-	editorCache *editorCache
+	editorCache *misc.EditorCache
 	frontendH   http.Handler // embedded FS handler or dev-mode handler
 
 	// Pre-built top-level handlers
@@ -130,40 +133,40 @@ type Server struct {
 // this method explicitly.
 func (app *Server) buildHandlers() {
 	// Rate limiters
-	app.clientErrLimiter = newClientErrorLimiter(rate.Limit(10.0/60.0), 10, 5*time.Minute, 10*time.Minute)
-	app.cspLimiter = newCSPReportLimiter(rate.Limit(1.0), 20, 5*time.Minute, 10*time.Minute)
-	app.authCfgLimiter = newAuthConfigLimiter(rate.Limit(5), 10, 5*time.Minute, 10*time.Minute)
+	app.clientErrLimiter = misc.NewClientErrorLimiter(rate.Limit(10.0/60.0), 10, 5*time.Minute, 10*time.Minute)
+	app.cspLimiter = misc.NewCSPReportLimiter(rate.Limit(1.0), 20, 5*time.Minute, 10*time.Minute)
+	app.authCfgLimiter = misc.NewAuthConfigLimiter(rate.Limit(5), 10, 5*time.Minute, 10*time.Minute)
 
 	// Editor infrastructure
-	app.editorCache = newDefaultEditorCache()
+	app.editorCache = misc.NewDefaultEditorCache()
 
 	// Handlers
-	app.healthHandler = handleHealth(app.pool)
-	app.apiHealthHandler = handleAPIHealth(app.pool)
-	app.clientErrorsHandler = handleClientErrors(app.clientErrLimiter)
-	app.cspReportHandler = handleCSPReport(app.cspLimiter)
-	app.authConfigHandler = handleAuthConfig(app.config.ExtAuthURL, app.authCfgLimiter)
-	app.statsHandler = handleStats(app.pool)
+	app.healthHandler = misc.HandleHealth(app.pool)
+	app.apiHealthHandler = misc.HandleAPIHealth(app.pool)
+	app.clientErrorsHandler = misc.HandleClientErrors(app.clientErrLimiter)
+	app.cspReportHandler = misc.HandleCSPReport(app.cspLimiter)
+	app.authConfigHandler = misc.HandleAuthConfig(app.config.ExtAuthURL, app.authCfgLimiter)
+	app.statsHandler = misc.HandleStats(app.pool)
 
 	var getFleetTimeouts func() int64
 	if app.fleetRegistry != nil {
 		getFleetTimeouts = app.fleetRegistry.GetTotalTimeoutCount
 	}
-	app.metricsHandler = handleMetrics(app.hub, getFleetTimeouts, app.claimMetrics)
+	app.metricsHandler = misc.HandleMetrics(app.hub, getFleetTimeouts, app.claimMetrics)
 
-	app.daemonStatusHandler = handleDaemonStatus(app.pool)
-	app.getBackendConfigHandler = handleGetBackendConfig(app.pool)
-	app.patchBackendConfigHandler = handlePatchBackendConfig(app.pool)
+	app.daemonStatusHandler = misc.HandleDaemonStatus(app.pool)
+	app.getBackendConfigHandler = misc.HandleGetBackendConfig(app.pool)
+	app.patchBackendConfigHandler = misc.HandlePatchBackendConfig(app.pool)
 
 	if app.config.BackendOps != nil {
-		app.getBackendsHealthHandler = handleGetBackendsHealth(app.config.BackendOps)
+		app.getBackendsHealthHandler = misc.HandleGetBackendsHealth(app.config.BackendOps)
 	}
 
-	app.listEditorsHandler = handleListEditors(app.editorCache)
-	app.openEditorHandler = handleOpenEditor(app.editorCache, editor.LaunchEditor)
+	app.listEditorsHandler = misc.HandleListEditors(app.editorCache)
+	app.openEditorHandler = misc.HandleOpenEditor(app.editorCache, editor.LaunchEditor)
 
 	if app.hub != nil {
-		app.notifySessionChangeHandler = handleNotifySessionChange(app.hub, app.notifyToken)
+		app.notifySessionChangeHandler = misc.HandleNotifySessionChange(app.hub, app.notifyToken)
 	}
 
 	if app.config.DevMode {
@@ -190,13 +193,13 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 func (app *Server) Close() {
 	// Stop rate limiter background goroutines.
 	if app.clientErrLimiter != nil {
-		app.clientErrLimiter.stop()
+		app.clientErrLimiter.Stop()
 	}
 	if app.cspLimiter != nil {
-		app.cspLimiter.stop()
+		app.cspLimiter.Stop()
 	}
 	if app.authCfgLimiter != nil {
-		app.authCfgLimiter.stop()
+		app.authCfgLimiter.Stop()
 	}
 
 	if app.notifyTokenFile != "" {

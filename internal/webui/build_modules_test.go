@@ -26,10 +26,10 @@ func TestServer_BuildModules_ZeroValue(t *testing.T) {
 
 	// Verify concrete types in order.
 	wantTypes := []string{
-		"*webui.IssueModule",
+		"*issues.IssueModule",
 		"*webui.WorkspaceOpsModule",
-		"*webui.LogModule",
-		"*webui.SessionModule",
+		"*log.Module",
+		"*issues.SessionModule",
 	}
 	for i, mod := range app.wsModules {
 		got := fmt.Sprintf("%T", mod)
@@ -77,9 +77,9 @@ func TestRegisterWorkspaceRoutes_IteratesModules(t *testing.T) {
 	// required by registerRoutes.
 	app.buildHandlers()
 	t.Cleanup(func() {
-		app.clientErrLimiter.stop()
-		app.cspLimiter.stop()
-		app.authCfgLimiter.stop()
+		app.clientErrLimiter.Stop()
+		app.cspLimiter.Stop()
+		app.authCfgLimiter.Stop()
 	})
 
 	mock := &recordingModule{}

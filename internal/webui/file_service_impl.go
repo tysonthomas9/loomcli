@@ -11,8 +11,13 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
+	webuilog "github.com/tysonthomas9/loomcli/internal/webui/log"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
+
+// Compile-time check.
+var _ service.FileService = (*fileServiceImpl)(nil)
 
 // fileServiceImpl is the concrete implementation of FileService.
 type fileServiceImpl struct {
@@ -20,7 +25,7 @@ type fileServiceImpl struct {
 }
 
 // NewFileService creates a new FileService implementation.
-func NewFileService(fileOps ops.FileOps) FileService {
+func NewFileService(fileOps ops.FileOps) service.FileService {
 	return &fileServiceImpl{fileOps: fileOps}
 }
 
@@ -35,7 +40,7 @@ func (s *fileServiceImpl) resolveAgent(wsID, agentName string) (*ops.AgentWorktr
 	return wt, nil
 }
 
-func (s *fileServiceImpl) ListDirectory(_ context.Context, wsID, agentName, path string) (*FileTreeResult, error) {
+func (s *fileServiceImpl) ListDirectory(_ context.Context, wsID, agentName, path string) (*service.FileTreeResult, error) {
 	wt, err := s.resolveAgent(wsID, agentName)
 	if err != nil {
 		return nil, err
@@ -47,7 +52,7 @@ func (s *fileServiceImpl) ListDirectory(_ context.Context, wsID, agentName, path
 
 	fullPath := filepath.Join(wt.Path, filepath.Clean("/"+path))
 
-	if err := validatePathWithinDir(fullPath, wt.Path); err != nil {
+	if err := webuilog.ValidatePathWithinDir(fullPath, wt.Path); err != nil {
 		return nil, service.ErrForbidden("path outside worktree")
 	}
 
@@ -79,7 +84,7 @@ func (s *fileServiceImpl) ListDirectory(_ context.Context, wsID, agentName, path
 		return dirEntries[i].Name() < dirEntries[j].Name()
 	})
 
-	entries := make([]FileTreeEntry, 0, len(dirEntries))
+	entries := make([]service.FileTreeEntry, 0, len(dirEntries))
 	for _, de := range dirEntries {
 		if de.Type()&os.ModeSymlink != 0 {
 			continue
@@ -88,7 +93,7 @@ func (s *fileServiceImpl) ListDirectory(_ context.Context, wsID, agentName, path
 		if err != nil {
 			continue
 		}
-		entries = append(entries, FileTreeEntry{
+		entries = append(entries, service.FileTreeEntry{
 			Name:    de.Name(),
 			IsDir:   de.IsDir(),
 			Size:    info.Size(),
@@ -101,10 +106,10 @@ func (s *fileServiceImpl) ListDirectory(_ context.Context, wsID, agentName, path
 		relPath = "."
 	}
 
-	return &FileTreeResult{Path: relPath, Entries: entries}, nil
+	return &service.FileTreeResult{Path: relPath, Entries: entries}, nil
 }
 
-func (s *fileServiceImpl) ReadFile(_ context.Context, wsID, agentName, path string) (*FileReadResult, error) {
+func (s *fileServiceImpl) ReadFile(_ context.Context, wsID, agentName, path string) (*service.FileReadResult, error) {
 	wt, err := s.resolveAgent(wsID, agentName)
 	if err != nil {
 		return nil, err
@@ -119,7 +124,7 @@ func (s *fileServiceImpl) ReadFile(_ context.Context, wsID, agentName, path stri
 
 	fullPath := filepath.Join(wt.Path, filepath.Clean("/"+path))
 
-	if err := validatePathWithinDir(fullPath, wt.Path); err != nil {
+	if err := webuilog.ValidatePathWithinDir(fullPath, wt.Path); err != nil {
 		return nil, service.ErrForbidden("path outside worktree")
 	}
 	if isDeniedPath(fullPath) {
@@ -143,7 +148,7 @@ func (s *fileServiceImpl) ReadFile(_ context.Context, wsID, agentName, path stri
 		return nil, service.ErrPayloadTooLarge(fmt.Sprintf("file too large: %d bytes (max %d)", fi.Size(), maxRequestBody))
 	}
 
-	f, err := openLogFileSecure(fullPath, wt.Path)
+	f, err := misc.OpenLogFileSecure(fullPath, wt.Path)
 	if err != nil {
 		if strings.Contains(err.Error(), "symlink") {
 			return nil, service.ErrForbidden("refusing to follow symlink")
@@ -157,15 +162,15 @@ func (s *fileServiceImpl) ReadFile(_ context.Context, wsID, agentName, path stri
 		return nil, service.ErrInternal("failed to read file", err)
 	}
 
-	if isBinaryContent(data) {
-		return &FileReadResult{
+	if misc.IsBinaryContent(data) {
+		return &service.FileReadResult{
 			Path:   path,
 			Size:   fi.Size(),
 			Binary: true,
 		}, nil
 	}
 
-	return &FileReadResult{
+	return &service.FileReadResult{
 		Path:    path,
 		Content: string(data),
 		Size:    fi.Size(),
@@ -188,14 +193,14 @@ func (s *fileServiceImpl) WriteFile(_ context.Context, wsID, agentName, path, co
 
 	fullPath := filepath.Join(wt.Path, filepath.Clean("/"+path))
 
-	if err := validatePathWithinDir(fullPath, wt.Path); err != nil {
+	if err := webuilog.ValidatePathWithinDir(fullPath, wt.Path); err != nil {
 		return service.ErrForbidden("path outside worktree")
 	}
 	if isDeniedPath(fullPath) {
 		return service.ErrForbidden("access to this file type is denied")
 	}
 
-	if writeErr := validateParentDir(fullPath, wt.Path); writeErr != nil {
+	if writeErr := misc.ValidateParentDir(fullPath, wt.Path); writeErr != nil {
 		// Map fileWriteError to service errors
 		switch writeErr.Message {
 		case "parent directory does not exist":
@@ -207,12 +212,12 @@ func (s *fileServiceImpl) WriteFile(_ context.Context, wsID, agentName, path, co
 		}
 	}
 
-	perm, writeErr := resolveWritePermissions(fullPath)
+	perm, writeErr := misc.ResolveWritePermissions(fullPath)
 	if writeErr != nil {
 		return service.ErrForbidden(writeErr.Message)
 	}
 
-	if err := atomicWriteFile(fullPath, content, perm); err != nil {
+	if err := misc.AtomicWriteFile(fullPath, content, perm); err != nil {
 		return service.ErrInternal("failed to save file", err)
 	}
 	return nil

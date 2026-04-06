@@ -3,23 +3,32 @@ package webui
 import (
 	"context"
 	"fmt"
+	"regexp"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
+	webuilog "github.com/tysonthomas9/loomcli/internal/webui/log"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
+
+// Compile-time check that agentServiceImpl satisfies service.AgentService.
+var _ service.AgentService = (*agentServiceImpl)(nil)
+
+// validAgentName matches alphanumeric characters, hyphens, and underscores.
+var validAgentName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 // agentServiceImpl is the concrete implementation of AgentService.
 type agentServiceImpl struct {
 	gitOps   ops.GitOps
-	termMgr  *TerminalManager
+	termMgr  *terminal.TerminalManager
 	termAuth *realtime.TerminalAuth
 }
 
 // NewAgentService creates a new AgentService implementation.
 // gitOps must be non-nil. termMgr and termAuth may be nil (methods
 // that require them return service.ErrUnavailable).
-func NewAgentService(gitOps ops.GitOps, termMgr *TerminalManager, termAuth *realtime.TerminalAuth) AgentService {
+func NewAgentService(gitOps ops.GitOps, termMgr *terminal.TerminalManager, termAuth *realtime.TerminalAuth) service.AgentService {
 	return &agentServiceImpl{
 		gitOps:   gitOps,
 		termMgr:  termMgr,
@@ -55,7 +64,7 @@ func (s *agentServiceImpl) resolveAgentWorktree(wsID, agentName string) (*ops.Ag
 	return wt, nil
 }
 
-func (s *agentServiceImpl) GetTerminalInfo(_ context.Context, wsID, agentName string) (*AgentTerminalInfoResult, error) {
+func (s *agentServiceImpl) GetTerminalInfo(_ context.Context, wsID, agentName string) (*service.AgentTerminalInfoResult, error) {
 	if err := validateAgentName(agentName); err != nil {
 		return nil, err
 	}
@@ -63,15 +72,15 @@ func (s *agentServiceImpl) GetTerminalInfo(_ context.Context, wsID, agentName st
 		return nil, service.ErrUnavailable("terminal manager not initialized")
 	}
 
-	mode := agentTerminalModeArchive
+	mode := service.AgentTerminalModeArchive
 	if _, found, err := s.termMgr.FindLatestAgentSession(wsID, agentName); err != nil {
 		logger.Error("failed to resolve agent tmux session", "agent", agentName, "err", err)
 		return nil, service.ErrInternal("failed to inspect terminal sessions", err)
 	} else if found {
-		mode = agentTerminalModeTmux
+		mode = service.AgentTerminalModeTmux
 	}
 
-	return &AgentTerminalInfoResult{Agent: agentName, Mode: mode}, nil
+	return &service.AgentTerminalInfoResult{Agent: agentName, Mode: mode}, nil
 }
 
 func (s *agentServiceImpl) GenerateTerminalToken(_ context.Context, agentName, userID string) (string, error) {
@@ -90,50 +99,50 @@ func (s *agentServiceImpl) GenerateTerminalToken(_ context.Context, agentName, u
 	return token, nil
 }
 
-func (s *agentServiceImpl) GetLog(_ context.Context, wsID, agentName string, lines int, beforeLine int64) (*AgentLogResult, error) {
+func (s *agentServiceImpl) GetLog(_ context.Context, wsID, agentName string, lines int, beforeLine int64) (*service.AgentLogResult, error) {
 	if err := validateAgentName(agentName); err != nil {
 		return nil, err
 	}
 
 	// Clamp lines to valid range
 	if lines <= 0 {
-		lines = logReadDefaultLines
+		lines = webuilog.LogReadDefaultLines
 	}
-	if lines > logReadMaxLines {
-		lines = logReadMaxLines
+	if lines > webuilog.LogReadMaxLines {
+		lines = webuilog.LogReadMaxLines
 	}
 
-	logPath, err := getAgentLogPath(wsID, agentName)
+	logPath, err := webuilog.GetAgentLogPath(wsID, agentName)
 	if err != nil {
 		logger.Error("agent log path error", "agent", agentName, "err", err)
 		return nil, service.ErrInternal("failed to resolve log path", err)
 	}
 
-	if !fileExists(logPath) {
+	if !webuilog.FileExists(logPath) {
 		return nil, service.ErrNotFound("log file not found - agent may not be active")
 	}
 
-	content, startLine, err := readFileLastLines(logPath, lines, beforeLine)
+	content, startLine, err := webuilog.ReadFileLastLines(logPath, lines, beforeLine)
 	if err != nil {
 		logger.Error("failed to read agent log", "agent", agentName, "err", err)
 		return nil, service.ErrInternal("failed to read log file", err)
 	}
 
-	return &AgentLogResult{
+	return &service.AgentLogResult{
 		Lines:     content,
 		LineCount: startLine + int64(len(content)) - 1,
 		StartLine: startLine,
 	}, nil
 }
 
-func (s *agentServiceImpl) GetDiffStat(_ context.Context, wsID, agentName string) (*AgentDiffStatResult, error) {
+func (s *agentServiceImpl) GetDiffStat(_ context.Context, wsID, agentName string) (*service.AgentDiffStatResult, error) {
 	wt, err := s.resolveAgentWorktree(wsID, agentName)
 	if err != nil {
 		return nil, err
 	}
 
 	stats := s.gitOps.DiffStat(wt.Path, wt.DefaultBranch)
-	return &AgentDiffStatResult{
+	return &service.AgentDiffStatResult{
 		Branch:  wt.Branch,
 		Added:   stats.LinesAdded,
 		Removed: stats.LinesRemoved,
@@ -157,13 +166,13 @@ func (s *agentServiceImpl) GitPush(_ context.Context, wsID, agentName, target st
 	return result, nil
 }
 
-func (s *agentServiceImpl) GitPushAll(_ context.Context, wsID string) (*GitPushAllResult, error) {
+func (s *agentServiceImpl) GitPushAll(_ context.Context, wsID string) (*service.GitPushAllResult, error) {
 	worktrees, err := s.gitOps.ListAgentWorktrees(wsID)
 	if err != nil {
 		return nil, fmt.Errorf("listing worktrees: %w", err)
 	}
 
-	var results []GitPushAllWorktreeResult
+	var results []service.GitPushAllWorktreeResult
 	pushed, failed := 0, 0
 
 	for _, wt := range worktrees {
@@ -173,7 +182,7 @@ func (s *agentServiceImpl) GitPushAll(_ context.Context, wsID string) (*GitPushA
 		}
 		result, pushErr := s.gitOps.Push(wt.Path, wt.Branch, wt.DefaultBranch, remote)
 		if pushErr != nil {
-			results = append(results, GitPushAllWorktreeResult{
+			results = append(results, service.GitPushAllWorktreeResult{
 				Name:  wt.Name,
 				Error: pushErr.Error(),
 			})
@@ -181,7 +190,7 @@ func (s *agentServiceImpl) GitPushAll(_ context.Context, wsID string) (*GitPushA
 			continue
 		}
 		if result.AlreadyUpToDate {
-			results = append(results, GitPushAllWorktreeResult{
+			results = append(results, service.GitPushAllWorktreeResult{
 				Name:    wt.Name,
 				Success: true,
 				Message: "already up to date",
@@ -189,14 +198,14 @@ func (s *agentServiceImpl) GitPushAll(_ context.Context, wsID string) (*GitPushA
 			continue
 		}
 		if !result.Success {
-			results = append(results, GitPushAllWorktreeResult{
+			results = append(results, service.GitPushAllWorktreeResult{
 				Name:  wt.Name,
 				Error: result.Message,
 			})
 			failed++
 			continue
 		}
-		results = append(results, GitPushAllWorktreeResult{
+		results = append(results, service.GitPushAllWorktreeResult{
 			Name:    wt.Name,
 			Success: true,
 			Message: result.Message,
@@ -204,7 +213,7 @@ func (s *agentServiceImpl) GitPushAll(_ context.Context, wsID string) (*GitPushA
 		pushed++
 	}
 
-	return &GitPushAllResult{
+	return &service.GitPushAllResult{
 		Results: results,
 		Pushed:  pushed,
 		Failed:  failed,
@@ -233,7 +242,7 @@ func (s *agentServiceImpl) GitPull(_ context.Context, wsID, agentName, source st
 	return result, nil
 }
 
-func (s *agentServiceImpl) GitSync(_ context.Context, wsID, agentName string) (*GitSyncResult, error) {
+func (s *agentServiceImpl) GitSync(_ context.Context, wsID, agentName string) (*service.GitSyncResult, error) {
 	wt, err := s.resolveAgentWorktree(wsID, agentName)
 	if err != nil {
 		return nil, err
@@ -248,7 +257,7 @@ func (s *agentServiceImpl) GitSync(_ context.Context, wsID, agentName string) (*
 
 	// If push resulted in conflicts, return immediately with partial result
 	if !pushResult.Success && len(pushResult.ConflictedFiles) > 0 {
-		return &GitSyncResult{PushResult: pushResult}, nil
+		return &service.GitSyncResult{PushResult: pushResult}, nil
 	}
 
 	currentBranch, err := s.gitOps.GetCurrentBranch(wt.Path)
@@ -261,7 +270,7 @@ func (s *agentServiceImpl) GitSync(_ context.Context, wsID, agentName string) (*
 		return nil, fmt.Errorf("pull failed: %w", err)
 	}
 
-	return &GitSyncResult{
+	return &service.GitSyncResult{
 		PushResult: pushResult,
 		PullResult: pullResult,
 	}, nil

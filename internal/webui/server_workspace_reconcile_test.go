@@ -11,25 +11,27 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/webui/coordinator"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/hooks"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
+	"github.com/tysonthomas9/loomcli/internal/webui/subscription"
 )
 
 // newTestCoordinatorRegistry creates a coordinator.WorkspaceRegistry with real
 // hooks for reconciliation tests. Returns the registry, MultiPool, and subscriber.
-func newTestCoordinatorRegistry(t *testing.T) (*coordinator.WorkspaceRegistry, *daemon.MultiPool, *MultiWorkspaceSubscriber) {
+func newTestCoordinatorRegistry(t *testing.T) (*coordinator.WorkspaceRegistry, *daemon.MultiPool, *subscription.MultiWorkspaceSubscriber) {
 	t.Helper()
 	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 10)
 	hub := realtime.NewHub()
 	go hub.Run()
 	t.Cleanup(func() { hub.Stop() })
 
-	multiSub := NewMultiWorkspaceSubscriber(hub, multiPool, slog.Default())
+	multiSub := subscription.NewMultiWorkspaceSubscriber(hub, multiPool, slog.Default())
 	t.Cleanup(func() { multiSub.Stop() })
 
 	reg := coordinator.NewWorkspaceRegistry(slog.Default())
-	_ = reg.AddHook(NewBeadsPoolHook(multiPool, 10, slog.Default()))
-	_ = reg.AddHook(NewNotificationSubscriberHook(multiSub, slog.Default()))
+	_ = reg.AddHook(hooks.NewBeadsPoolHook(multiPool, 10, slog.Default()))
+	_ = reg.AddHook(hooks.NewNotificationSubscriberHook(multiSub, slog.Default()))
 	t.Cleanup(func() { _ = reg.Close() })
 
 	return reg, multiPool, multiSub

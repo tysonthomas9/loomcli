@@ -5,6 +5,8 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/workspace"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -120,25 +122,25 @@ func (app *Server) registerMonitorHandlers() {
 // registerWorkspaceRoutes sets up workspace listing, CRUD, and workspace-scoped API routes.
 func (app *Server) registerWorkspaceRoutes() {
 	// Active workspace endpoint — returns full topology for the default workspace
-	app.mux.HandleFunc("GET /api/workspaces/active", handleActiveWorkspace(app.workspaceSvc))
+	app.mux.HandleFunc("GET /api/workspaces/active", workspace.HandleActiveWorkspace(app.workspaceSvc))
 
 	// Workspace listing (not workspace-scoped themselves)
-	app.mux.HandleFunc("GET /api/workspaces", handleListWorkspaces(app.workspaceSvc))
-	app.mux.HandleFunc("GET /api/workspaces/{ws}", handleGetWorkspace(app.workspaceSvc))
+	app.mux.HandleFunc("GET /api/workspaces", workspace.HandleListWorkspaces(app.workspaceSvc))
+	app.mux.HandleFunc("GET /api/workspaces/{ws}", workspace.HandleGetWorkspace(app.workspaceSvc))
 
 	// Global workspace CRUD operations (no WorkspaceMiddleware)
-	app.mux.HandleFunc("POST /api/workspaces", handleWorkspaceCreate(app.workspaceSvc))
+	app.mux.HandleFunc("POST /api/workspaces", workspace.HandleWorkspaceCreate(app.workspaceSvc))
 
 	// Workspace job polling endpoint (literal "jobs" segment wins over {ws} wildcard)
-	app.mux.HandleFunc("GET /api/workspaces/jobs/{id}", handleGetWorkspaceJob(app.workspaceSvc))
-	app.mux.HandleFunc("PUT /api/workspaces/order", handleWorkspaceReorder(app.workspaceSvc))
-	app.mux.HandleFunc("PUT /api/workspaces/default", handleSetDefaultWorkspace(app.workspaceSvc))
-	app.mux.HandleFunc("DELETE /api/workspaces/default", handleClearDefaultWorkspace(app.workspaceSvc))
+	app.mux.HandleFunc("GET /api/workspaces/jobs/{id}", workspace.HandleGetWorkspaceJob(app.workspaceSvc))
+	app.mux.HandleFunc("PUT /api/workspaces/order", workspace.HandleWorkspaceReorder(app.workspaceSvc))
+	app.mux.HandleFunc("PUT /api/workspaces/default", workspace.HandleSetDefaultWorkspace(app.workspaceSvc))
+	app.mux.HandleFunc("DELETE /api/workspaces/default", workspace.HandleClearDefaultWorkspace(app.workspaceSvc))
 
 	// Per-workspace DELETE — registered on main mux with manual middleware wrapping
 	// because DELETE /api/workspaces/{ws} (no trailing slash) won't match the
 	// wsMux prefix handler at /api/workspaces/{ws}/.
-	app.mux.Handle("DELETE /api/workspaces/{ws}", middleware.Workspace(app.wsExistsFn)(handleWorkspaceDelete(app.workspaceSvc)))
+	app.mux.Handle("DELETE /api/workspaces/{ws}", middleware.Workspace(app.wsExistsFn)(workspace.HandleWorkspaceDelete(app.workspaceSvc)))
 
 	// Workspace-scoped API routes via a sub-mux with WorkspaceMiddleware.
 	// The middleware injects the workspace ID into the context so that
@@ -161,7 +163,7 @@ func fleetWSHandler(getStore func(string) (*fleet.Store, bool), makeHandler func
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		store, ok := getStore(wsID)
 		if !ok {
-			respondJSON(w, http.StatusServiceUnavailable, map[string]any{
+			handler.WriteJSON(w, http.StatusServiceUnavailable, map[string]any{
 				"success": false,
 				"error":   "fleet not configured for workspace",
 			})

@@ -13,15 +13,19 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/tysonthomas9/loomcli/internal/circuitbreaker"
+	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/coordinator"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
+	"github.com/tysonthomas9/loomcli/internal/webui/hooks"
 	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
+	"github.com/tysonthomas9/loomcli/internal/webui/subscription"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
+	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 	"github.com/tysonthomas9/loomcli/internal/workspace"
 )
 
@@ -182,7 +186,7 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 	cleanups = append(cleanups, func() { app.hub.Stop() })
 
 	// Bridge per-workspace daemon mutations to SSE clients.
-	app.multiSub = NewMultiWorkspaceSubscriber(app.hub, app.multiPool, config.Logger)
+	app.multiSub = subscription.NewMultiWorkspaceSubscriber(app.hub, app.multiPool, config.Logger)
 	cleanups = append(cleanups, func() { app.multiSub.Stop() })
 
 	// NOTE: coordinator.WorkspaceRegistry construction is deferred until after
@@ -191,8 +195,8 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 
 	// Terminal manager for WebSocket sessions (workspace-scoped prefix prevents collisions).
 	termSessionPrefix := fmt.Sprintf("%d-%s", app.actualPort, workspace.ShortWorkspaceID(app.initialWorkspaceID))
-	if app.termMgr, err = NewTerminalManager(config.TerminalCmd, termSessionPrefix, config.MaxTerminalSessions); err != nil {
-		if errors.Is(err, ErrTmuxNotFound) {
+	if app.termMgr, err = terminal.NewTerminalManager(config.TerminalCmd, termSessionPrefix, config.MaxTerminalSessions); err != nil {
+		if errors.Is(err, terminal.ErrTmuxNotFound) {
 			logger.Warn("tmux not found, terminal feature disabled")
 		} else {
 			logger.Warn("failed to initialize terminal manager", "err", err)
@@ -214,7 +218,7 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 			if store == nil {
 				return
 			}
-			issueID := extractIssueID(sessionName)
+			issueID := terminal.ExtractIssueID(sessionName)
 			if issueID == "" {
 				return
 			}
@@ -279,7 +283,7 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 				}
 			}
 			if app.fleetRegistry != nil {
-				app.tokenCfg = &TokenConfig{
+				app.tokenCfg = &fleet.TokenConfig{
 					SigningKey: jwtKey,
 					Expiry:     time.Hour,
 				}
@@ -295,26 +299,26 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 
 	// Construct lifecycle hooks in canonical order. In fleet mode, beads-pool and
 	// notification-subscriber are suppressed (fleet server manages agents).
-	var beadsPoolHook *BeadsPoolHook
+	var beadsPoolHook *hooks.BeadsPoolHook
 	app.registry = coordinator.NewWorkspaceRegistry(config.Logger)
 	cleanups = append(cleanups, func() { _ = app.registry.Close() })
 	if config.FleetMode {
 		logger.Info("beads pool and notification subscriber suppressed (fleet mode)", "component", "fleet_mode")
 	} else {
-		beadsPoolHook = NewBeadsPoolHook(app.multiPool, config.PoolSize, config.Logger)
-		notifHook := NewNotificationSubscriberHook(app.multiSub, config.Logger)
+		beadsPoolHook = hooks.NewBeadsPoolHook(app.multiPool, config.PoolSize, config.Logger)
+		notifHook := hooks.NewNotificationSubscriberHook(app.multiSub, config.Logger)
 		_ = app.registry.AddHook(beadsPoolHook)
 		_ = app.registry.AddHook(notifHook)
 	}
 
 	if app.termMgr != nil {
-		_ = app.registry.AddHook(NewTerminalHook(app.termMgr, config.Logger))
+		_ = app.registry.AddHook(hooks.NewTerminalHook(app.termMgr, config.Logger))
 	}
 	if app.fleetRegistry != nil {
-		_ = app.registry.AddHook(NewFleetStoreHook(app.fleetRegistry, config.Logger))
+		_ = app.registry.AddHook(hooks.NewFleetStoreHook(app.fleetRegistry, config.Logger))
 	}
 	if config.FleetClientURL != "" {
-		_ = app.registry.AddHook(NewFleetBackendHook(config.FleetClientURL, config.FleetClientWorkspace, config.FleetClientAPIKey, config.Logger))
+		_ = app.registry.AddHook(hooks.NewFleetBackendHook(config.FleetClientURL, config.FleetClientWorkspace, config.FleetClientAPIKey, config.Logger))
 	}
 
 	// Register the initial workspace (replaces old RegisterPool pattern).
@@ -344,12 +348,12 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 
 	// Build fleet registration config (API key + rate limiter)
 	if config.FleetAPIKey != "" && app.fleetRegistry != nil {
-		app.fleetRegCfg = &FleetRegisterConfig{
+		app.fleetRegCfg = &fleet.RegisterConfig{
 			APIKey: config.FleetAPIKey,
 		}
 		if config.FleetRedis != nil {
 			rlClient := fleet.NewRedisClient(config.FleetRedis.Address, config.FleetRedis.Password, 0)
-			app.fleetRegCfg.RateLimiter = NewFleetRateLimiter(rlClient, 10, time.Minute)
+			app.fleetRegCfg.RateLimiter = fleet.NewRateLimiter(rlClient, 10, time.Minute)
 			cleanups = append(cleanups, func() { _ = app.fleetRegCfg.RateLimiter.Close() })
 		}
 		logger.Info("fleet API key authentication enabled", "component", "fleet")
@@ -430,15 +434,15 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 
 	// Initialize terminal service layer (requires termMgr, stores)
 	if app.termMgr != nil {
-		var configPool configConnectionGetter
+		var configPool terminal.ConfigConnectionGetter
 		if app.multiPool != nil {
-			configPool = &configPoolAdapter{pool: app.multiPool}
+			configPool = &termConfigPoolAdapter{pool: app.multiPool}
 		}
 		var rc *redis.Client
 		if app.tabMetaStore != nil {
 			rc = app.tabMetaStore.RedisClient()
 		}
-		app.termSvc = NewTerminalService(
+		app.termSvc = terminal.NewTerminalService(
 			app.termMgr, app.termAuth, configPool,
 			app.tabMetaStore, app.hub, app.sessionHistoryStore, rc,
 		)
@@ -496,4 +500,19 @@ func initExtAuth(config ServerConfig) (middleware.Middleware, func()) {
 		"issuer", config.ExtAuthIssuer,
 	)
 	return mw, jwksCache.Stop
+}
+
+// termConfigPoolAdapter wraps daemon.Pool to implement terminal.ConfigConnectionGetter.
+type termConfigPoolAdapter struct {
+	pool daemon.Pool
+}
+
+func (a *termConfigPoolAdapter) Get(ctx context.Context) (terminal.ConfigClient, error) {
+	return a.pool.Get(ctx)
+}
+
+func (a *termConfigPoolAdapter) Put(client terminal.ConfigClient) {
+	if c, ok := client.(*rpc.Client); ok {
+		a.pool.Put(c)
+	}
 }

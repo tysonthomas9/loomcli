@@ -13,6 +13,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 )
 
+// Compile-time check.
+var _ service.SessionService = (*sessionServiceImpl)(nil)
+
 // sessionServiceImpl is the concrete implementation of SessionService.
 type sessionServiceImpl struct {
 	sessStore *sessions.Store
@@ -20,11 +23,11 @@ type sessionServiceImpl struct {
 }
 
 // NewSessionService creates a new SessionService implementation.
-func NewSessionService(sessStore *sessions.Store, histStore *sessionhistory.Store) SessionService {
+func NewSessionService(sessStore *sessions.Store, histStore *sessionhistory.Store) service.SessionService {
 	return &sessionServiceImpl{sessStore: sessStore, histStore: histStore}
 }
 
-func (s *sessionServiceImpl) ListTaskSessions(_ context.Context, taskID string) ([]SessionListItem, error) {
+func (s *sessionServiceImpl) ListTaskSessions(_ context.Context, taskID string) ([]service.SessionListItem, error) {
 	if s.sessStore == nil {
 		return nil, service.ErrUnavailable("session store not available")
 	}
@@ -38,9 +41,9 @@ func (s *sessionServiceImpl) ListTaskSessions(_ context.Context, taskID string) 
 		return nil, service.ErrInternal("failed to list sessions", err)
 	}
 
-	items := make([]SessionListItem, 0, len(records))
+	items := make([]service.SessionListItem, 0, len(records))
 	for _, rec := range records {
-		item := SessionListItem{
+		item := service.SessionListItem{
 			SessionRecord: rec,
 			IsActive:      rec.Status == sessions.StatusRunning,
 		}
@@ -55,7 +58,7 @@ func (s *sessionServiceImpl) ListTaskSessions(_ context.Context, taskID string) 
 	return items, nil
 }
 
-func (s *sessionServiceImpl) GetSession(_ context.Context, taskID, sessionID string) (*SessionDetailData, error) {
+func (s *sessionServiceImpl) GetSession(_ context.Context, taskID, sessionID string) (*service.SessionDetailData, error) {
 	if s.sessStore == nil {
 		return nil, service.ErrUnavailable("session store not available")
 	}
@@ -80,7 +83,7 @@ func (s *sessionServiceImpl) GetSession(_ context.Context, taskID, sessionID str
 		return nil, service.ErrNotFound("session not found")
 	}
 
-	return &SessionDetailData{
+	return &service.SessionDetailData{
 		SessionMetadata: *meta,
 		IsActive:        meta.Status == sessions.StatusRunning,
 	}, nil
@@ -174,7 +177,7 @@ func (s *sessionServiceImpl) ListSessionHistory(ctx context.Context, wsID, issue
 	return records, nil
 }
 
-func (s *sessionServiceImpl) GetSessionScrollback(ctx context.Context, wsID, issueID, recordID string) (*SessionScrollbackResult, error) {
+func (s *sessionServiceImpl) GetSessionScrollback(ctx context.Context, wsID, issueID, recordID string) (*service.SessionScrollbackResult, error) {
 	if s.histStore == nil {
 		return nil, service.ErrUnavailable("session history not available (no Redis)")
 	}
@@ -236,5 +239,5 @@ func (s *sessionServiceImpl) GetSessionScrollback(ctx context.Context, wsID, iss
 		lines = strings.Count(text, "\n") + 1
 	}
 
-	return &SessionScrollbackResult{Content: text, Lines: lines}, nil
+	return &service.SessionScrollbackResult{Content: text, Lines: lines}, nil
 }

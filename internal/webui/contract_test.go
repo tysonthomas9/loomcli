@@ -11,6 +11,9 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
+	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/issues"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -125,11 +128,11 @@ type contractMockStatsPool struct {
 	client *contractMockStatsClient
 }
 
-func (p *contractMockStatsPool) Get(ctx context.Context) (statsClient, error) {
+func (p *contractMockStatsPool) Get(ctx context.Context) (misc.StatsClient, error) {
 	return p.client, nil
 }
 
-func (p *contractMockStatsPool) Put(client statsClient) {}
+func (p *contractMockStatsPool) Put(client misc.StatsClient) {}
 
 // contractMockGraphClient implements graphClient.
 type contractMockGraphClient struct {
@@ -145,11 +148,11 @@ type contractMockGraphPool struct {
 	client *contractMockGraphClient
 }
 
-func (p *contractMockGraphPool) Get(ctx context.Context) (graphClient, error) {
+func (p *contractMockGraphPool) Get(ctx context.Context) (githandlers.GraphClient, error) {
 	return p.client, nil
 }
 
-func (p *contractMockGraphPool) Put(client graphClient) {}
+func (p *contractMockGraphPool) Put(client githandlers.GraphClient) {}
 
 // contractMockBlockedClient implements blockedClient.
 type contractMockBlockedClient struct {
@@ -165,34 +168,34 @@ type contractMockBlockedPool struct {
 	client *contractMockBlockedClient
 }
 
-func (p *contractMockBlockedPool) Get(ctx context.Context) (blockedClient, error) {
+func (p *contractMockBlockedPool) Get(ctx context.Context) (githandlers.BlockedClient, error) {
 	return p.client, nil
 }
 
-func (p *contractMockBlockedPool) Put(client blockedClient) {}
+func (p *contractMockBlockedPool) Put(client githandlers.BlockedClient) {}
 
 // --- Error pool mocks (return error from Get) ---
 
 type errorStatsPool struct{}
 
-func (p *errorStatsPool) Get(ctx context.Context) (statsClient, error) {
+func (p *errorStatsPool) Get(ctx context.Context) (misc.StatsClient, error) {
 	return nil, errors.New("pool unavailable")
 }
-func (p *errorStatsPool) Put(client statsClient) {}
+func (p *errorStatsPool) Put(client misc.StatsClient) {}
 
 type errorGraphPool struct{}
 
-func (p *errorGraphPool) Get(ctx context.Context) (graphClient, error) {
+func (p *errorGraphPool) Get(ctx context.Context) (githandlers.GraphClient, error) {
 	return nil, errors.New("pool unavailable")
 }
-func (p *errorGraphPool) Put(client graphClient) {}
+func (p *errorGraphPool) Put(client githandlers.GraphClient) {}
 
 type errorBlockedPool struct{}
 
-func (p *errorBlockedPool) Get(ctx context.Context) (blockedClient, error) {
+func (p *errorBlockedPool) Get(ctx context.Context) (githandlers.BlockedClient, error) {
 	return nil, errors.New("pool unavailable")
 }
-func (p *errorBlockedPool) Put(client blockedClient) {}
+func (p *errorBlockedPool) Put(client githandlers.BlockedClient) {}
 
 // =============================================================================
 // Contract Tests: Success Responses
@@ -223,7 +226,7 @@ func TestContractEnvelope_SuccessResponses(t *testing.T) {
 	}{
 		{
 			name: "GET /api/issues/{id} success",
-			handler: handleGetIssue(&mockIssueService{
+			handler: issues.HandleGetIssue(&mockIssueService{
 				getIssueFunc: func(ctx context.Context, issueID string) (json.RawMessage, error) {
 					return issueJSON, nil
 				},
@@ -236,7 +239,7 @@ func TestContractEnvelope_SuccessResponses(t *testing.T) {
 		},
 		{
 			name: "GET /api/stats success",
-			handler: handleStatsWithPool(&contractMockStatsPool{
+			handler: misc.HandleStatsWithPool(&contractMockStatsPool{
 				client: &contractMockStatsClient{
 					statsFunc: func() (*rpc.Response, error) {
 						return &rpc.Response{Success: true, Data: statsJSON}, nil
@@ -251,7 +254,7 @@ func TestContractEnvelope_SuccessResponses(t *testing.T) {
 		},
 		{
 			name: "GET /api/blocked success (empty list)",
-			handler: handleBlockedWithPool(&contractMockBlockedPool{
+			handler: githandlers.HandleBlockedWithPool(&contractMockBlockedPool{
 				client: &contractMockBlockedClient{
 					blockedFunc: func(args *rpc.BlockedArgs) (*rpc.Response, error) {
 						return &rpc.Response{Success: true, Data: blockedListJSON}, nil
@@ -266,7 +269,7 @@ func TestContractEnvelope_SuccessResponses(t *testing.T) {
 		},
 		{
 			name: "GET /api/issues/graph success",
-			handler: handleGraphWithPool(&contractMockGraphPool{
+			handler: githandlers.HandleGraphWithPool(&contractMockGraphPool{
 				client: &contractMockGraphClient{
 					getGraphDataFunc: func(args *rpc.GetGraphDataArgs) (*rpc.GetGraphDataResponse, error) {
 						return &rpc.GetGraphDataResponse{
@@ -285,7 +288,7 @@ func TestContractEnvelope_SuccessResponses(t *testing.T) {
 		},
 		{
 			name: "PATCH /api/issues/{id} success",
-			handler: handlePatchIssue(&mockIssueService{
+			handler: issues.HandlePatchIssue(&mockIssueService{
 				patchIssueFunc: func(ctx context.Context, params service.PatchIssueParams) error {
 					return nil
 				},
@@ -299,7 +302,7 @@ func TestContractEnvelope_SuccessResponses(t *testing.T) {
 		},
 		{
 			name: "POST /api/issues/{id}/close success",
-			handler: handleCloseIssue(&mockIssueService{
+			handler: issues.HandleCloseIssue(&mockIssueService{
 				closeIssueFunc: func(ctx context.Context, params service.CloseIssueParams) (json.RawMessage, error) {
 					return issueJSON, nil
 				},
@@ -312,7 +315,7 @@ func TestContractEnvelope_SuccessResponses(t *testing.T) {
 		},
 		{
 			name: "POST /api/issues/{id}/comments success",
-			handler: handleAddComment(&mockIssueService{
+			handler: issues.HandleAddComment(&mockIssueService{
 				addCommentFunc: func(ctx context.Context, params service.AddCommentParams) (*types.Comment, error) {
 					var c types.Comment
 					json.Unmarshal(commentJSON, &c)
@@ -328,7 +331,7 @@ func TestContractEnvelope_SuccessResponses(t *testing.T) {
 		},
 		{
 			name: "POST /api/issues/{id}/dependencies success",
-			handler: handleAddDependency(&mockIssueService{
+			handler: issues.HandleAddDependency(&mockIssueService{
 				addDependencyFunc: func(ctx context.Context, params service.AddDependencyParams) error {
 					return nil
 				},
@@ -342,7 +345,7 @@ func TestContractEnvelope_SuccessResponses(t *testing.T) {
 		},
 		{
 			name: "DELETE /api/issues/{id}/dependencies/{depId} success",
-			handler: handleRemoveDependency(&mockIssueService{
+			handler: issues.HandleRemoveDependency(&mockIssueService{
 				removeDependencyFunc: func(ctx context.Context, params service.RemoveDependencyParams) error {
 					return nil
 				},
@@ -355,7 +358,7 @@ func TestContractEnvelope_SuccessResponses(t *testing.T) {
 		},
 		{
 			name: "POST /api/issues (create) success",
-			handler: handleCreateIssue(&mockIssueService{
+			handler: issues.HandleCreateIssue(&mockIssueService{
 				createIssueFunc: func(ctx context.Context, params service.CreateIssueParams) (json.RawMessage, error) {
 					return issueJSON, nil
 				},
@@ -425,7 +428,7 @@ func TestContractEnvelope_ErrorResponses(t *testing.T) {
 		// --- Envelope-style errors ({success: false, error: ...}) ---
 		{
 			name:          "GET /api/stats pool unavailable (envelope)",
-			handler:       handleStatsWithPool(&errorStatsPool{}),
+			handler:       misc.HandleStatsWithPool(&errorStatsPool{}),
 			method:        http.MethodGet,
 			path:          "/api/stats",
 			wantStatus:    http.StatusServiceUnavailable,
@@ -434,7 +437,7 @@ func TestContractEnvelope_ErrorResponses(t *testing.T) {
 		},
 		{
 			name:          "GET /api/stats nil pool (envelope)",
-			handler:       handleStatsWithPool(nil),
+			handler:       misc.HandleStatsWithPool(nil),
 			method:        http.MethodGet,
 			path:          "/api/stats",
 			wantStatus:    http.StatusServiceUnavailable,
@@ -443,7 +446,7 @@ func TestContractEnvelope_ErrorResponses(t *testing.T) {
 		},
 		{
 			name:          "GET /api/blocked nil pool (envelope)",
-			handler:       handleBlockedWithPool(nil),
+			handler:       githandlers.HandleBlockedWithPool(nil),
 			method:        http.MethodGet,
 			path:          "/api/blocked",
 			wantStatus:    http.StatusServiceUnavailable,
@@ -452,7 +455,7 @@ func TestContractEnvelope_ErrorResponses(t *testing.T) {
 		},
 		{
 			name:          "GET /api/blocked pool unavailable (envelope)",
-			handler:       handleBlockedWithPool(&errorBlockedPool{}),
+			handler:       githandlers.HandleBlockedWithPool(&errorBlockedPool{}),
 			method:        http.MethodGet,
 			path:          "/api/blocked",
 			wantStatus:    http.StatusServiceUnavailable,
@@ -461,7 +464,7 @@ func TestContractEnvelope_ErrorResponses(t *testing.T) {
 		},
 		{
 			name:          "GET /api/issues/graph nil pool (envelope)",
-			handler:       handleGraphWithPool(nil),
+			handler:       githandlers.HandleGraphWithPool(nil),
 			method:        http.MethodGet,
 			path:          "/api/issues/graph",
 			wantStatus:    http.StatusServiceUnavailable,
@@ -470,7 +473,7 @@ func TestContractEnvelope_ErrorResponses(t *testing.T) {
 		},
 		{
 			name:          "GET /api/issues/graph pool unavailable (envelope)",
-			handler:       handleGraphWithPool(&errorGraphPool{}),
+			handler:       githandlers.HandleGraphWithPool(&errorGraphPool{}),
 			method:        http.MethodGet,
 			path:          "/api/issues/graph",
 			wantStatus:    http.StatusServiceUnavailable,
@@ -481,7 +484,7 @@ func TestContractEnvelope_ErrorResponses(t *testing.T) {
 		// --- Plain-style errors ({error: ...}) from respondError / WriteServiceError ---
 		{
 			name: "GET /api/issues/{id} not found (plain error)",
-			handler: handleGetIssue(&mockIssueService{
+			handler: issues.HandleGetIssue(&mockIssueService{
 				getIssueFunc: func(ctx context.Context, issueID string) (json.RawMessage, error) {
 					return nil, service.ErrNotFound("not found")
 				},
@@ -493,7 +496,7 @@ func TestContractEnvelope_ErrorResponses(t *testing.T) {
 		},
 		{
 			name: "GET /api/issues/{id} service unavailable (plain error)",
-			handler: handleGetIssue(&mockIssueService{
+			handler: issues.HandleGetIssue(&mockIssueService{
 				getIssueFunc: func(ctx context.Context, issueID string) (json.RawMessage, error) {
 					return nil, service.ErrUnavailable("pool unavailable")
 				},
@@ -505,7 +508,7 @@ func TestContractEnvelope_ErrorResponses(t *testing.T) {
 		},
 		{
 			name: "POST /api/issues/{id}/close not found (plain error)",
-			handler: handleCloseIssue(&mockIssueService{
+			handler: issues.HandleCloseIssue(&mockIssueService{
 				closeIssueFunc: func(ctx context.Context, params service.CloseIssueParams) (json.RawMessage, error) {
 					return nil, service.ErrNotFound("not found")
 				},
@@ -562,7 +565,7 @@ func TestContractEnvelope_GraphDeviation(t *testing.T) {
 
 	// The /api/issues/graph endpoint uses "issues" instead of "data" in its response.
 	// This test explicitly documents and validates this deviation.
-	handler := handleGraphWithPool(&contractMockGraphPool{
+	handler := githandlers.HandleGraphWithPool(&contractMockGraphPool{
 		client: &contractMockGraphClient{
 			getGraphDataFunc: func(args *rpc.GetGraphDataArgs) (*rpc.GetGraphDataResponse, error) {
 				return &rpc.GetGraphDataResponse{
@@ -620,7 +623,7 @@ func TestContractEnvelope_HealthEndpoints(t *testing.T) {
 
 	t.Run("GET /health returns plain {status} object", func(t *testing.T) {
 		t.Parallel()
-		handler := handleHealth(nil)
+		handler := misc.HandleHealth(nil)
 		req := httptest.NewRequest(http.MethodGet, "/health", nil)
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, req)
@@ -650,7 +653,7 @@ func TestContractEnvelope_HealthEndpoints(t *testing.T) {
 
 	t.Run("GET /api/health returns {status, daemon} object (no pool)", func(t *testing.T) {
 		t.Parallel()
-		handler := handleAPIHealth(nil)
+		handler := misc.HandleAPIHealth(nil)
 		req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, req)
@@ -698,7 +701,7 @@ func TestContractEnvelope_Metrics(t *testing.T) {
 
 	t.Run("GET /api/metrics nil hub returns envelope error", func(t *testing.T) {
 		t.Parallel()
-		handler := handleMetrics(nil, nil, nil)
+		handler := misc.HandleMetrics(nil, nil, nil)
 		req := httptest.NewRequest(http.MethodGet, "/api/metrics", nil)
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, req)
@@ -725,7 +728,7 @@ func TestContractEnvelope_IssuesResponseCodeField(t *testing.T) {
 	t.Run("POST /api/issues validation error includes code field", func(t *testing.T) {
 		t.Parallel()
 		// Send empty body which triggers INVALID_JSON code from handler-layer validation
-		handler := handleCreateIssue(&mockIssueService{})
+		handler := issues.HandleCreateIssue(&mockIssueService{})
 
 		req := httptest.NewRequest(http.MethodPost, "/api/issues", bytes.NewReader([]byte(`{}`)))
 		req.Header.Set("Content-Type", "application/json")
@@ -741,7 +744,7 @@ func TestContractEnvelope_IssuesResponseCodeField(t *testing.T) {
 
 	t.Run("POST /api/issues empty body returns INVALID_JSON code", func(t *testing.T) {
 		t.Parallel()
-		handler := handleCreateIssue(&mockIssueService{})
+		handler := issues.HandleCreateIssue(&mockIssueService{})
 
 		// Send actually invalid JSON (not even parseable)
 		req := httptest.NewRequest(http.MethodPost, "/api/issues", bytes.NewReader([]byte("")))
@@ -786,7 +789,7 @@ func TestContractEnvelope_OmitemptyBehavior(t *testing.T) {
 	t.Run("success response omits error field entirely", func(t *testing.T) {
 		t.Parallel()
 
-		handler := handleStatsWithPool(&contractMockStatsPool{
+		handler := misc.HandleStatsWithPool(&contractMockStatsPool{
 			client: &contractMockStatsClient{
 				statsFunc: func() (*rpc.Response, error) {
 					statsJSON, _ := json.Marshal(types.Statistics{TotalIssues: 1})
@@ -814,7 +817,7 @@ func TestContractEnvelope_OmitemptyBehavior(t *testing.T) {
 	t.Run("error response omits data field entirely", func(t *testing.T) {
 		t.Parallel()
 
-		handler := handleStatsWithPool(nil)
+		handler := misc.HandleStatsWithPool(nil)
 
 		req := httptest.NewRequest(http.MethodGet, "/api/stats", nil)
 		w := httptest.NewRecorder()
@@ -834,7 +837,7 @@ func TestContractEnvelope_OmitemptyBehavior(t *testing.T) {
 	t.Run("success response with data omits code field", func(t *testing.T) {
 		t.Parallel()
 
-		handler := handleGetIssue(&mockIssueService{
+		handler := issues.HandleGetIssue(&mockIssueService{
 			getIssueFunc: func(ctx context.Context, issueID string) (json.RawMessage, error) {
 				return json.RawMessage(`{"id":"test-1","title":"Test","status":"open"}`), nil
 			},
@@ -869,7 +872,7 @@ func TestContractEnvelope_FieldTypes(t *testing.T) {
 	t.Run("success field is boolean true", func(t *testing.T) {
 		t.Parallel()
 
-		handler := handleGetIssue(&mockIssueService{
+		handler := issues.HandleGetIssue(&mockIssueService{
 			getIssueFunc: func(ctx context.Context, issueID string) (json.RawMessage, error) {
 				return issueJSON, nil
 			},
@@ -892,7 +895,7 @@ func TestContractEnvelope_FieldTypes(t *testing.T) {
 	t.Run("success field is boolean false on error", func(t *testing.T) {
 		t.Parallel()
 
-		handler := handleStatsWithPool(nil)
+		handler := misc.HandleStatsWithPool(nil)
 
 		req := httptest.NewRequest(http.MethodGet, "/api/stats", nil)
 		w := httptest.NewRecorder()
@@ -911,7 +914,7 @@ func TestContractEnvelope_FieldTypes(t *testing.T) {
 	t.Run("error field is string type", func(t *testing.T) {
 		t.Parallel()
 
-		handler := handleBlockedWithPool(nil)
+		handler := githandlers.HandleBlockedWithPool(nil)
 
 		req := httptest.NewRequest(http.MethodGet, "/api/blocked", nil)
 		w := httptest.NewRecorder()
@@ -928,7 +931,7 @@ func TestContractEnvelope_FieldTypes(t *testing.T) {
 	t.Run("data field is object for single-item responses", func(t *testing.T) {
 		t.Parallel()
 
-		handler := handleGetIssue(&mockIssueService{
+		handler := issues.HandleGetIssue(&mockIssueService{
 			getIssueFunc: func(ctx context.Context, issueID string) (json.RawMessage, error) {
 				return issueJSON, nil
 			},
@@ -951,7 +954,7 @@ func TestContractEnvelope_FieldTypes(t *testing.T) {
 	t.Run("data field is array for list responses", func(t *testing.T) {
 		t.Parallel()
 
-		handler := handleBlockedWithPool(&contractMockBlockedPool{
+		handler := githandlers.HandleBlockedWithPool(&contractMockBlockedPool{
 			client: &contractMockBlockedClient{
 				blockedFunc: func(args *rpc.BlockedArgs) (*rpc.Response, error) {
 					data, _ := json.Marshal([]*types.BlockedIssue{

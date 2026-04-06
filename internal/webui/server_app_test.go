@@ -43,9 +43,9 @@ func TestServer_RegisterRoutes_ZeroValue(t *testing.T) {
 	}
 
 	// Clean up background goroutines.
-	app.clientErrLimiter.stop()
-	app.cspLimiter.stop()
-	app.authCfgLimiter.stop()
+	app.clientErrLimiter.Stop()
+	app.cspLimiter.Stop()
+	app.authCfgLimiter.Stop()
 }
 
 // TestServer_RegisterRoutes_HealthRegistered verifies that registerRoutes
@@ -55,9 +55,9 @@ func TestServer_RegisterRoutes_HealthRegistered(t *testing.T) {
 	app.mux = http.NewServeMux()
 	app.buildHandlers()
 	app.registerRoutes()
-	defer app.clientErrLimiter.stop()
-	defer app.cspLimiter.stop()
-	defer app.authCfgLimiter.stop()
+	defer app.clientErrLimiter.Stop()
+	defer app.cspLimiter.Stop()
+	defer app.authCfgLimiter.Stop()
 
 	// Build a request for /api/health and verify the mux finds a handler.
 	req, err := http.NewRequest("GET", "/api/health", nil)

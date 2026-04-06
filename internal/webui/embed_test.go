@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
 )
 
 // discoverAssetFilenames returns the actual CSS and JS asset filenames from the embedded filesystem.
@@ -293,7 +295,7 @@ func TestHandleHealth(t *testing.T) {
 			req := httptest.NewRequest(tt.method, "/health", nil)
 			w := httptest.NewRecorder()
 
-			handleHealth(nil)(w, req)
+			misc.HandleHealth(nil)(w, req)
 
 			if w.Code != tt.wantStatus {
 				t.Errorf("status = %d, want %d", w.Code, tt.wantStatus)

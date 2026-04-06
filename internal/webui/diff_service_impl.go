@@ -13,6 +13,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
+// Compile-time check.
+var _ service.DiffService = (*diffServiceImpl)(nil)
+
 // diffServiceImpl is the concrete implementation of DiffService.
 type diffServiceImpl struct {
 	gitOps ops.GitOps
@@ -20,7 +23,7 @@ type diffServiceImpl struct {
 }
 
 // NewDiffService creates a new DiffService implementation.
-func NewDiffService(gitOps ops.GitOps, pool daemon.Pool) DiffService {
+func NewDiffService(gitOps ops.GitOps, pool daemon.Pool) service.DiffService {
 	return &diffServiceImpl{gitOps: gitOps, pool: pool}
 }
 
@@ -144,7 +147,7 @@ func (s *diffServiceImpl) DiffFilePatch(_ context.Context, wsID, agentName, from
 	return result, nil
 }
 
-func (s *diffServiceImpl) GetIssueDiffStat(ctx context.Context, wsID, issueID string) (*IssueDiffStatResult, error) {
+func (s *diffServiceImpl) GetIssueDiffStat(ctx context.Context, wsID, issueID string) (*service.IssueDiffStatResult, error) {
 	if issueID == "" {
 		return nil, service.ErrValidation("missing issue ID")
 	}
@@ -185,7 +188,7 @@ func (s *diffServiceImpl) GetIssueDiffStat(ctx context.Context, wsID, issueID st
 	}
 
 	stats := s.gitOps.DiffStat(wt.Path, wt.DefaultBranch)
-	return &IssueDiffStatResult{
+	return &service.IssueDiffStatResult{
 		Branch:  wt.Branch,
 		Added:   stats.LinesAdded,
 		Removed: stats.LinesRemoved,

@@ -8,6 +8,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -181,7 +182,7 @@ func TestSessionRouteMigration_WorkspaceScopedListReturnsJSON(t *testing.T) {
 		t.Errorf("expected Content-Type 'application/json', got %q", ct)
 	}
 
-	var resp SessionListResponse
+	var resp misc.SessionListResponse
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatalf("failed to decode JSON response: %v", err)
 	}
@@ -223,7 +224,7 @@ func TestSessionRouteMigration_WorkspaceScopedSessionWithData(t *testing.T) {
 		t.Fatalf("expected %d, got %d (body: %s)", http.StatusOK, rr.Code, rr.Body.String())
 	}
 
-	var resp SessionDetailResponse
+	var resp misc.SessionDetailResponse
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -305,7 +306,7 @@ func TestSessionRouteMigration_WorkspaceScopedTranscriptEndpoint(t *testing.T) {
 		t.Fatalf("expected %d, got %d (body: %s)", http.StatusOK, rr.Code, rr.Body.String())
 	}
 
-	var resp TranscriptResponse
+	var resp misc.TranscriptResponse
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/workspace"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -62,7 +63,7 @@ func TestWorkspaceCreateE2E_ErrorCodes(t *testing.T) {
 					return nil, nil, tt.svcErr
 				},
 			}
-			handler := handleWorkspaceCreate(svc)
+			handler := workspace.HandleWorkspaceCreate(svc)
 
 			req := httptest.NewRequest(http.MethodPost, "/api/workspaces", strings.NewReader(tt.body))
 			rec := httptest.NewRecorder()
@@ -72,7 +73,7 @@ func TestWorkspaceCreateE2E_ErrorCodes(t *testing.T) {
 				t.Fatalf("expected status %d, got %d: %s", tt.wantStatus, rec.Code, rec.Body.String())
 			}
 
-			var resp workspaceResponse
+			var resp workspace.WorkspaceResponse
 			if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 				t.Fatalf("decode response: %v", err)
 			}
@@ -94,7 +95,7 @@ func TestWorkspaceCreateE2E_CloneAsync(t *testing.T) {
 		},
 	}
 
-	handler := handleWorkspaceCreate(svc)
+	handler := workspace.HandleWorkspaceCreate(svc)
 
 	body := strings.NewReader(`{"name":"async-e2e","type":"clone","clone_url":"https://github.com/user/repo.git"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
@@ -131,7 +132,7 @@ func TestWorkspaceCreateE2E_CloneNilJobStoreSync(t *testing.T) {
 		},
 	}
 
-	handler := handleWorkspaceCreate(svc)
+	handler := workspace.HandleWorkspaceCreate(svc)
 
 	body := strings.NewReader(`{"name":"sync-e2e","type":"clone","clone_url":"https://github.com/user/repo.git"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
@@ -160,7 +161,7 @@ func TestWorkspaceCreateE2E_EmptySuccess(t *testing.T) {
 		},
 	}
 
-	handler := handleWorkspaceCreate(svc)
+	handler := workspace.HandleWorkspaceCreate(svc)
 
 	body := strings.NewReader(`{"name":"fresh-ws","type":"empty","repos":["/home/user/project"]}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
@@ -171,7 +172,7 @@ func TestWorkspaceCreateE2E_EmptySuccess(t *testing.T) {
 		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	var resp workspaceResponse
+	var resp workspace.WorkspaceResponse
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
@@ -190,7 +191,7 @@ func TestWorkspaceCreateE2E_JobPollingUnknownID(t *testing.T) {
 			return nil, service.ErrNotFound("job not found")
 		},
 	}
-	handler := handleGetWorkspaceJob(svc)
+	handler := workspace.HandleGetWorkspaceJob(svc)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/jobs/does-not-exist", nil)
 	req.SetPathValue("id", "does-not-exist")
@@ -213,7 +214,7 @@ func TestWorkspaceCreateE2E_JobPollingCompleted(t *testing.T) {
 			}, nil
 		},
 	}
-	handler := handleGetWorkspaceJob(svc)
+	handler := workspace.HandleGetWorkspaceJob(svc)
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/jobs/job-123", nil)
 	req.SetPathValue("id", "job-123")
 	rec := httptest.NewRecorder()

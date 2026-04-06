@@ -9,7 +9,17 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
+	"github.com/tysonthomas9/loomcli/internal/webui/subscription"
 )
+
+// newTestSSETokenStore creates a TokenStore for testing via the public constructor.
+func newTestSSETokenStore() *realtime.TokenStore {
+	s, err := realtime.NewTokenStore()
+	if err != nil {
+		panic("failed to create SSE token store: " + err.Error())
+	}
+	return s
+}
 
 // --- Test 13: Token exchange Cache-Control: no-store ---
 
@@ -17,7 +27,7 @@ func TestSSETokenExchange_CacheControlNoStore(t *testing.T) {
 	store := newTestSSETokenStore()
 	defer store.Stop()
 
-	handler := handleSSEToken(store)
+	handler := subscription.HandleSSEToken(store)
 
 	identity := middleware.UserIdentity{UserID: "user-123", Email: "test@example.com"}
 	ctx := middleware.WithUserIdentity(context.Background(), identity)
@@ -57,7 +67,7 @@ func TestSSETokenExchange_NoIdentity_Returns401(t *testing.T) {
 	store := newTestSSETokenStore()
 	defer store.Stop()
 
-	handler := handleSSEToken(store)
+	handler := subscription.HandleSSEToken(store)
 
 	// No UserIdentity in context
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events/token", nil)
