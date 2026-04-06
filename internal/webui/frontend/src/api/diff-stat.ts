@@ -1,6 +1,6 @@
 /**
  * API function for issue diff-stat endpoint.
- * Interfaces with GET /api/issues/{id}/git/diff-stat.
+ * Uses legacy fetch wrapper (spec responses are untyped Record<string, never>).
  */
 
 import { get, wsUrl } from "./client";

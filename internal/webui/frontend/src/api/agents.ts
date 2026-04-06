@@ -1,39 +1,28 @@
 /**
  * Loom Agent API client.
- * Fetches agent status from the loom server.
+ * Uses openapi-fetch generated client (monitor endpoints are in the spec).
  */
 
 import type {
   LoomAgentStatus,
-  LoomAgentsResponse,
-  LoomStatusResponse,
-  LoomTasksResponse,
   LoomTaskSummary,
   LoomTaskInfo,
   LoomTaskLists,
   LoomSyncInfo,
   LoomStats,
 } from "@/types";
-import { get } from "./client";
-
-/**
- * Default loom server URL.
- * Can be overridden via environment variable or config.
- */
-const LOOM_SERVER_URL = import.meta.env.VITE_LOOM_SERVER_URL ?? "";
+import { api, apiErrorFromResponse, get } from "./client";
 
 /**
  * Fetch agents from the loom server.
  * Throws on network errors or non-OK responses so callers can handle connection state.
  */
 export async function fetchAgents(): Promise<LoomAgentStatus[]> {
-  const data = await get<LoomAgentsResponse>(
-    `${LOOM_SERVER_URL}/api/monitor/agents`,
-    {
-      timeout: 15000,
-    },
-  );
-  return data.agents ?? [];
+  const { data, error, response } = await api.GET("/api/monitor/agents", {
+    signal: AbortSignal.timeout(15000),
+  });
+  if (error) throw apiErrorFromResponse(error, response);
+  return (data!.agents ?? []) as unknown as LoomAgentStatus[];
 }
 
 /**
@@ -41,7 +30,7 @@ export async function fetchAgents(): Promise<LoomAgentStatus[]> {
  */
 export async function checkLoomHealth(): Promise<boolean> {
   try {
-    await get<unknown>(`${LOOM_SERVER_URL}/health`, { timeout: 15000 });
+    await get<unknown>("/health", { timeout: 15000 });
     return true;
   } catch {
     return false;
@@ -65,19 +54,21 @@ export interface FetchStatusResult {
  * Throws on network errors or invalid responses so callers can handle connection state.
  */
 export async function fetchStatus(): Promise<FetchStatusResult> {
-  const data = await get<LoomStatusResponse>(
-    `${LOOM_SERVER_URL}/api/monitor/status`,
-    {
-      timeout: 15000,
-    },
-  );
+  const { data, error, response } = await api.GET("/api/monitor/status", {
+    signal: AbortSignal.timeout(15000),
+  });
+  if (error) throw apiErrorFromResponse(error, response);
+  const d = data!;
   return {
-    agents: data.agents ?? [],
-    tasks: data.tasks,
-    agentTasks: data.agent_tasks ?? {},
-    sync: data.sync,
-    stats: data.stats,
-    timestamp: data.timestamp,
+    agents: (d.agents ?? []) as unknown as LoomAgentStatus[],
+    tasks: d.tasks as unknown as LoomTaskSummary,
+    agentTasks: (d.agent_tasks ?? {}) as unknown as Record<
+      string,
+      LoomTaskInfo
+    >,
+    sync: d.sync as unknown as LoomSyncInfo,
+    stats: d.stats as unknown as LoomStats,
+    timestamp: d.timestamp,
   };
 }
 
@@ -86,18 +77,17 @@ export async function fetchStatus(): Promise<FetchStatusResult> {
  * Throws on network errors or invalid responses so callers can handle connection state.
  */
 export async function fetchTasks(): Promise<LoomTaskLists> {
-  const data = await get<LoomTasksResponse>(
-    `${LOOM_SERVER_URL}/api/monitor/tasks`,
-    {
-      timeout: 15000,
-    },
-  );
+  const { data, error, response } = await api.GET("/api/monitor/tasks", {
+    signal: AbortSignal.timeout(15000),
+  });
+  if (error) throw apiErrorFromResponse(error, response);
+  const d = data!;
   return {
-    needsPlanning: data.needs_planning ?? [],
-    readyToImplement: data.ready_to_implement ?? [],
-    needsReview: data.needs_review ?? [],
-    inProgress: data.in_progress ?? [],
-    backlog: data.backlog ?? [],
-    done: data.closed ?? [],
-  };
+    needsPlanning: d.needs_planning ?? [],
+    readyToImplement: d.ready_to_implement ?? [],
+    needsReview: d.needs_review ?? [],
+    inProgress: d.in_progress ?? [],
+    backlog: d.backlog ?? [],
+    done: d.closed ?? [],
+  } as unknown as LoomTaskLists;
 }

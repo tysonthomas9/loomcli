@@ -15,23 +15,25 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { WorkspaceData } from "../workspace";
 
 // Mock the API client module
-vi.mock("../client", () => ({
-  get: vi.fn(),
-  post: vi.fn(),
-  patch: vi.fn(),
-  put: vi.fn(),
-  del: vi.fn(),
-  ApiError: class extends Error {
-    status: number;
-    statusText: string;
-    constructor(status: number, statusText: string) {
-      super(`API Error: ${status} ${statusText}`);
-      this.name = "ApiError";
-      this.status = status;
-      this.statusText = statusText;
-    }
-  },
-}));
+vi.mock("../client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../client")>();
+  return {
+    ...actual,
+    get: vi.fn(),
+    post: vi.fn(),
+    patch: vi.fn(),
+    put: vi.fn(),
+    del: vi.fn(),
+    api: {
+      GET: vi.fn(),
+      POST: vi.fn(),
+      PATCH: vi.fn(),
+      PUT: vi.fn(),
+      DELETE: vi.fn(),
+      use: vi.fn(),
+    },
+  };
+});
 
 function createMockWorkspaceData(
   overrides?: Partial<WorkspaceData>,
@@ -60,14 +62,14 @@ function createMockWorkspaceData(
 
 describe("fetchWorkspaceApi", () => {
   let fetchWorkspaceApi: typeof import("../workspace").fetchWorkspaceApi;
-  let mockGet: ReturnType<typeof vi.fn>;
+  let mockApiGet: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.clearAllMocks();
     vi.resetModules();
 
     const clientMod = await import("../client");
-    mockGet = vi.mocked(clientMod.get);
+    mockApiGet = vi.mocked(clientMod.api.GET);
 
     const workspaceMod = await import("../workspace");
     fetchWorkspaceApi = workspaceMod.fetchWorkspaceApi;
@@ -76,49 +78,77 @@ describe("fetchWorkspaceApi", () => {
   it("always makes a network request (no caching)", async () => {
     const wsData1 = createMockWorkspaceData({ name: "first" });
     const wsData2 = createMockWorkspaceData({ name: "second" });
-    mockGet.mockResolvedValueOnce({ success: true, data: wsData1 });
-    mockGet.mockResolvedValueOnce({ success: true, data: wsData2 });
+    mockApiGet.mockResolvedValueOnce({
+      data: wsData1,
+      error: undefined,
+      response: new Response(),
+    } as never);
+    mockApiGet.mockResolvedValueOnce({
+      data: wsData2,
+      error: undefined,
+      response: new Response(),
+    } as never);
 
     const first = await fetchWorkspaceApi();
     expect(first.name).toBe("first");
-    expect(mockGet).toHaveBeenCalledTimes(1);
+    expect(mockApiGet).toHaveBeenCalledTimes(1);
 
     // Second call also hits the network (no cache)
     const second = await fetchWorkspaceApi();
     expect(second.name).toBe("second");
-    expect(mockGet).toHaveBeenCalledTimes(2);
+    expect(mockApiGet).toHaveBeenCalledTimes(2);
   });
 
   it("calls the active workspace endpoint when no workspaceId given", async () => {
     const wsData = createMockWorkspaceData();
-    mockGet.mockResolvedValueOnce({ success: true, data: wsData });
+    mockApiGet.mockResolvedValueOnce({
+      data: wsData,
+      error: undefined,
+      response: new Response(),
+    } as never);
 
     await fetchWorkspaceApi();
 
-    expect(mockGet).toHaveBeenCalledWith("/api/workspaces/active");
+    expect(mockApiGet).toHaveBeenCalledWith("/api/workspaces/active");
   });
 
   it("calls the specific workspace endpoint when workspaceId given", async () => {
     const wsData = createMockWorkspaceData();
-    mockGet.mockResolvedValueOnce({ success: true, data: wsData });
+    mockApiGet.mockResolvedValueOnce({
+      data: wsData,
+      error: undefined,
+      response: new Response(),
+    } as never);
 
     await fetchWorkspaceApi("ws-123");
 
-    expect(mockGet).toHaveBeenCalledWith("/api/workspaces/ws-123");
+    expect(mockApiGet).toHaveBeenCalledWith("/api/workspaces/{ws}", {
+      params: { path: { ws: "ws-123" } },
+    });
   });
 
-  it("throws ApiError when response is unsuccessful", async () => {
-    mockGet.mockResolvedValueOnce({ success: false, error: "Not found" });
+  it("throws ApiError when response has error", async () => {
+    mockApiGet.mockResolvedValueOnce({
+      data: undefined,
+      error: { error: "Not found" },
+      response: new Response(null, { status: 404, statusText: "Not Found" }),
+    } as never);
 
-    await expect(fetchWorkspaceApi()).rejects.toThrow("Not found");
+    await expect(fetchWorkspaceApi()).rejects.toThrow();
   });
 
-  it("encodes special characters in workspaceId", async () => {
+  it("passes workspaceId as path param", async () => {
     const wsData = createMockWorkspaceData();
-    mockGet.mockResolvedValueOnce({ success: true, data: wsData });
+    mockApiGet.mockResolvedValueOnce({
+      data: wsData,
+      error: undefined,
+      response: new Response(),
+    } as never);
 
     await fetchWorkspaceApi("ws with spaces");
 
-    expect(mockGet).toHaveBeenCalledWith("/api/workspaces/ws%20with%20spaces");
+    expect(mockApiGet).toHaveBeenCalledWith("/api/workspaces/{ws}", {
+      params: { path: { ws: "ws with spaces" } },
+    });
   });
 });

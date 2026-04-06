@@ -1,6 +1,12 @@
-import { get, post, put, patch, del, ApiError, wsUrl } from "./client";
-
-// ============= Types =============
+/** Terminal API functions. openapi-fetch for typed endpoints, legacy for untyped. */
+import {
+  api,
+  ApiError,
+  apiErrorFromResponse,
+  unwrapResponse,
+  get,
+  wsUrl,
+} from "./client";
 
 export interface TerminalSessionInfo {
   name: string;
@@ -8,39 +14,20 @@ export interface TerminalSessionInfo {
   created: number;
 }
 
-// ============= Response Types =============
-
-interface ApiSuccess<T> {
-  success: true;
-  data: T;
-}
-
-interface ApiFailure {
-  success: false;
-  error: string;
-}
-
-type ApiResult<T> = ApiSuccess<T> | ApiFailure;
-
-function unwrap<T>(response: ApiResult<T>): T {
-  if (!response.success) {
-    throw new ApiError(0, response.error);
-  }
-  return response.data;
-}
-
-// ============= API Functions =============
-
 /**
  * List active terminal sessions from GET /api/workspaces/{ws}/terminal/sessions.
  */
 export async function listTerminalSessions(
   workspaceId: string,
 ): Promise<TerminalSessionInfo[]> {
-  const response = await get<ApiResult<{ sessions: TerminalSessionInfo[] }>>(
-    wsUrl(workspaceId, "/terminal/sessions"),
+  const { data, error, response } = await api.GET(
+    "/api/workspaces/{ws}/terminal/sessions",
+    {
+      params: { path: { ws: workspaceId } },
+    },
   );
-  return unwrap(response).sessions;
+  if (error) throw apiErrorFromResponse(error, response);
+  return (data.data?.sessions ?? []) as unknown as TerminalSessionInfo[];
 }
 
 /**
@@ -85,34 +72,35 @@ export function buildTerminalWsUrl(
   return url;
 }
 
-// ============= Spawn Session =============
-
 /**
  * Pre-create a tmux session for the given backend via POST /api/workspaces/{ws}/terminal/spawn.
- * Used for shell tabs to ensure the correct command before WebSocket connects.
  */
 export async function spawnTerminalSession(
   workspaceId: string,
   sessionName: string,
   backend: string,
 ): Promise<void> {
-  await post<{ success: boolean; data?: unknown; error?: string }>(
-    wsUrl(workspaceId, "/terminal/spawn"),
-    { session_name: sessionName, backend },
+  const { error, response } = await api.POST(
+    "/api/workspaces/{ws}/terminal/spawn",
+    {
+      params: { path: { ws: workspaceId } },
+      body: { session_name: sessionName, backend },
+    },
   );
+  if (error) throw apiErrorFromResponse(error, response);
 }
-
-// ============= Restart Session =============
 
 /**
  * Restart a terminal session with the current backend.
  * POST /api/workspaces/{ws}/terminal/restart?session=<name>&token=<token>
+ * Uses legacy client (spec doesn't support query params on this endpoint).
  */
 export async function restartTerminalSession(
   workspaceId: string,
   sessionName: string,
   token: string | null,
 ): Promise<{ success: boolean; backend: string }> {
+  const { post } = await import("./client");
   let url = wsUrl(
     workspaceId,
     `/terminal/restart?session=${encodeURIComponent(sessionName)}`,
@@ -123,17 +111,17 @@ export async function restartTerminalSession(
   return post<{ success: boolean; backend: string }>(url, {});
 }
 
-// ============= Kill Session =============
-
 /**
  * Forcibly kill a terminal session (for hung backends).
  * POST /api/workspaces/{ws}/terminal/kill?session=<name>&token=<token>
+ * Uses legacy client (spec doesn't support query params on this endpoint).
  */
 export async function killTerminalSession(
   workspaceId: string,
   sessionName: string,
   token: string | null,
 ): Promise<void> {
+  const { post } = await import("./client");
   let url = wsUrl(
     workspaceId,
     `/terminal/kill?session=${encodeURIComponent(sessionName)}`,
@@ -144,8 +132,6 @@ export async function killTerminalSession(
   await post<{ success: boolean }>(url, {});
 }
 
-// ============= Session Status =============
-
 /**
  * Check whether a terminal session's backend is alive.
  * GET /api/workspaces/{ws}/terminal/session-status?session=<name>
@@ -154,15 +140,22 @@ export async function getSessionStatus(
   workspaceId: string,
   sessionName: string,
 ): Promise<{ alive: boolean; exit_reason?: string }> {
-  return get<{ alive: boolean; exit_reason?: string }>(
-    wsUrl(
-      workspaceId,
-      `/terminal/session-status?session=${encodeURIComponent(sessionName)}`,
-    ),
+  const { data, error, response } = await api.GET(
+    "/api/workspaces/{ws}/terminal/session-status",
+    {
+      params: {
+        path: { ws: workspaceId },
+        query: { session: sessionName },
+      },
+    },
   );
+  if (error) throw apiErrorFromResponse(error, response);
+  const result: { alive: boolean; exit_reason?: string } = {
+    alive: data.alive ?? false,
+  };
+  if (data.exit_reason !== undefined) result.exit_reason = data.exit_reason;
+  return result;
 }
-
-// ============= Issue Context Seeding =============
 
 export interface IssueContext {
   issue_id: string;
@@ -180,16 +173,31 @@ export async function seedTerminalSession(
   sessionName: string,
   context: IssueContext,
 ): Promise<void> {
-  await post<{ success: boolean }>(
-    wsUrl(
-      workspaceId,
-      `/terminal/sessions/${encodeURIComponent(sessionName)}/seed`,
-    ),
-    context,
+  const { error, response } = await api.POST(
+    "/api/workspaces/{ws}/terminal/sessions/{name}/seed",
+    {
+      params: { path: { ws: workspaceId, name: sessionName } },
+      body: (() => {
+        const b: {
+          issue_id: string;
+          title: string;
+          description?: string;
+          design?: string;
+          blockers?: { id: string; title: string }[];
+        } = {
+          issue_id: context.issue_id,
+          title: context.title,
+        };
+        if (context.description !== undefined)
+          b.description = context.description;
+        if (context.design !== undefined) b.design = context.design;
+        if (context.blockers !== undefined) b.blockers = context.blockers;
+        return b;
+      })(),
+    },
   );
+  if (error) throw apiErrorFromResponse(error, response);
 }
-
-// ============= Tab Metadata Types =============
 
 export interface TabMetadata {
   session_name: string;
@@ -202,8 +210,6 @@ export interface TabMetadata {
   updated_at: string;
 }
 
-// ============= Tab Metadata API Functions =============
-
 /**
  * List all tab metadata from GET /api/workspaces/{workspace}/terminal/tabs.
  * Returns an empty array when tab metadata is unavailable (404 = no Redis, 503 = Redis down).
@@ -212,10 +218,14 @@ export async function listTabMetadata(
   workspaceId: string,
 ): Promise<TabMetadata[]> {
   try {
-    const response = await get<ApiResult<TabMetadata[]>>(
-      wsUrl(workspaceId, "/terminal/tabs"),
+    const { data, error, response } = await api.GET(
+      "/api/workspaces/{ws}/terminal/tabs",
+      {
+        params: { path: { ws: workspaceId } },
+      },
     );
-    return unwrap(response);
+    if (error) throw apiErrorFromResponse(error, response);
+    return (unwrapResponse(data) ?? []) as unknown as TabMetadata[];
   } catch (error) {
     if (
       error instanceof ApiError &&
@@ -234,10 +244,14 @@ export async function getTabMetadata(
   workspaceId: string,
   session: string,
 ): Promise<TabMetadata> {
-  const response = await get<ApiResult<TabMetadata>>(
-    wsUrl(workspaceId, `/terminal/tabs/${encodeURIComponent(session)}`),
+  const { data, error, response } = await api.GET(
+    "/api/workspaces/{ws}/terminal/tabs/{session}",
+    {
+      params: { path: { ws: workspaceId, session } },
+    },
   );
-  return unwrap(response);
+  if (error) throw apiErrorFromResponse(error, response);
+  return unwrapResponse(data!) as unknown as TabMetadata;
 }
 
 /**
@@ -254,11 +268,16 @@ export async function patchTabMetadata(
     issue_id: string;
   }>,
 ): Promise<TabMetadata> {
-  const response = await patch<ApiResult<TabMetadata>>(
-    wsUrl(workspaceId, `/terminal/tabs/${encodeURIComponent(session)}`),
-    fields,
+  const { error, response } = await api.PATCH(
+    "/api/workspaces/{ws}/terminal/tabs/{session}",
+    {
+      params: { path: { ws: workspaceId, session } },
+      body: fields,
+    },
   );
-  return unwrap(response);
+  if (error) throw apiErrorFromResponse(error, response);
+  // Refetch after patch since the response is just {success: boolean}
+  return getTabMetadata(workspaceId, session);
 }
 
 /**
@@ -269,11 +288,21 @@ export async function putTabMetadata(
   session: string,
   fields: { label: string; sort_order: number; notes?: string },
 ): Promise<TabMetadata> {
-  const response = await put<ApiResult<TabMetadata>>(
-    wsUrl(workspaceId, `/terminal/tabs/${encodeURIComponent(session)}`),
-    fields,
+  const { error, response } = await api.PUT(
+    "/api/workspaces/{ws}/terminal/tabs/{session}",
+    {
+      params: { path: { ws: workspaceId, session } },
+      body: {
+        label: fields.label,
+        sort_order: fields.sort_order,
+        notes: fields.notes ?? "",
+        pinned: false,
+      },
+    },
   );
-  return unwrap(response);
+  if (error) throw apiErrorFromResponse(error, response);
+  // Refetch after put since the response is just {success: boolean}
+  return getTabMetadata(workspaceId, session);
 }
 
 /**
@@ -283,9 +312,13 @@ export async function deleteTabMetadata(
   workspaceId: string,
   session: string,
 ): Promise<void> {
-  await del<ApiResult<undefined>>(
-    wsUrl(workspaceId, `/terminal/tabs/${encodeURIComponent(session)}`),
+  const { error, response } = await api.DELETE(
+    "/api/workspaces/{ws}/terminal/tabs/{session}",
+    {
+      params: { path: { ws: workspaceId, session } },
+    },
   );
+  if (error) throw apiErrorFromResponse(error, response);
 }
 
 /**
@@ -296,30 +329,30 @@ export async function scheduleSessionKill(
   workspaceId: string,
   sessionName: string,
 ): Promise<void> {
-  await post<{ success: boolean }>(
-    wsUrl(
-      workspaceId,
-      `/terminal/sessions/${encodeURIComponent(sessionName)}/kill`,
-    ),
-    {},
+  const { error, response } = await api.POST(
+    "/api/workspaces/{ws}/terminal/sessions/{session}/kill",
+    {
+      params: { path: { ws: workspaceId, session: sessionName } },
+    },
   );
+  if (error) throw apiErrorFromResponse(error, response);
 }
-
-// ============= Issue Session Management =============
 
 /**
  * List sessions grouped by issue ID from GET /api/workspaces/{workspace}/terminal/sessions/by-issue.
  * Returns a map of issue_id → session_name[].
- * Returns an empty map when tab metadata is unavailable (404 = no Redis, 503 = Redis down).
+ * Uses legacy client (spec response is untyped).
  */
 export async function listSessionsByIssue(
   workspaceId: string,
 ): Promise<Record<string, string[]>> {
   try {
-    const response = await get<ApiResult<Record<string, string[]>>>(
-      wsUrl(workspaceId, "/terminal/sessions/by-issue"),
-    );
-    return unwrap(response);
+    const response = await get<{
+      success: boolean;
+      data: Record<string, string[]>;
+    }>(wsUrl(workspaceId, "/terminal/sessions/by-issue"));
+    if (!response.success) return {};
+    return response.data ?? {};
   } catch (error) {
     if (
       error instanceof ApiError &&
@@ -334,16 +367,16 @@ export async function listSessionsByIssue(
 /**
  * Close all terminal sessions via POST /api/workspaces/{ws}/terminal/sessions/close-all.
  * Kills all tmux sessions and clears all tab metadata.
- * Note: operates globally regardless of workspace — workspace provides auth context only.
  */
 export async function closeAllSessions(workspaceId: string): Promise<void> {
-  await post<{ success: boolean }>(
-    wsUrl(workspaceId, "/terminal/sessions/close-all"),
-    {},
+  const { error, response } = await api.POST(
+    "/api/workspaces/{ws}/terminal/sessions/close-all",
+    {
+      params: { path: { ws: workspaceId } },
+    },
   );
+  if (error) throw apiErrorFromResponse(error, response);
 }
-
-// ============= Scrollback API =============
 
 /**
  * Fetch scrollback content for a terminal session.
@@ -353,16 +386,19 @@ export async function fetchScrollback(
   workspaceId: string,
   sessionName: string,
 ): Promise<{ content: string; lines: number }> {
-  const response = await get<ApiResult<{ content: string; lines: number }>>(
-    wsUrl(
-      workspaceId,
-      `/terminal/sessions/${encodeURIComponent(sessionName)}/scrollback`,
-    ),
+  const { data, error, response } = await api.GET(
+    "/api/workspaces/{ws}/terminal/sessions/{session}/scrollback",
+    {
+      params: { path: { ws: workspaceId, session: sessionName } },
+    },
   );
-  return unwrap(response);
+  if (error) throw apiErrorFromResponse(error, response);
+  const unwrapped = unwrapResponse(data);
+  return {
+    content: unwrapped?.content ?? "",
+    lines: unwrapped?.lines ?? 0,
+  };
 }
-
-// ============= Export API =============
 
 export interface ScrollbackInfo {
   line_count: number;
@@ -372,7 +408,7 @@ export interface ScrollbackInfo {
 
 /**
  * Get scrollback buffer info for a terminal session.
- * GET /api/workspaces/{ws}/terminal/sessions/{session}/scrollback-info
+ * Uses legacy client (spec response is untyped).
  */
 export async function getScrollbackInfo(
   workspaceId: string,
@@ -401,8 +437,6 @@ export function getExportUrl(
   );
 }
 
-// ============= Terminal UI State =============
-
 /**
  * Get persisted terminal UI state (active tab).
  * GET /api/workspaces/{ws}/terminal/state
@@ -410,7 +444,14 @@ export function getExportUrl(
 export async function getTerminalState(
   workspaceId: string,
 ): Promise<{ active_tab: string }> {
-  return get<{ active_tab: string }>(wsUrl(workspaceId, "/terminal/state"));
+  const { data, error, response } = await api.GET(
+    "/api/workspaces/{ws}/terminal/state",
+    {
+      params: { path: { ws: workspaceId } },
+    },
+  );
+  if (error) throw apiErrorFromResponse(error, response);
+  return { active_tab: data.active_tab ?? "" };
 }
 
 /**
@@ -423,8 +464,12 @@ export async function patchTerminalState(
     active_tab: string;
   },
 ): Promise<void> {
-  await patch<{ active_tab: string }>(
-    wsUrl(workspaceId, "/terminal/state"),
-    state,
+  const { error, response } = await api.PATCH(
+    "/api/workspaces/{ws}/terminal/state",
+    {
+      params: { path: { ws: workspaceId } },
+      body: { active_tab: state.active_tab },
+    },
   );
+  if (error) throw apiErrorFromResponse(error, response);
 }

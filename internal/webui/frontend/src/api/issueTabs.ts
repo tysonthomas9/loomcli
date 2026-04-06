@@ -1,4 +1,9 @@
-import { get, put, del, ApiError, wsUrl } from "./client";
+/**
+ * API functions for issue tab state persistence.
+ * Uses openapi-fetch generated client.
+ */
+
+import { api, apiErrorFromResponse, unwrapResponse } from "./client";
 
 // ============= Types =============
 
@@ -18,27 +23,6 @@ export interface IssueTabState {
   updated_at: string;
 }
 
-// ============= Response Types =============
-
-interface ApiSuccess<T> {
-  success: true;
-  data: T;
-}
-
-interface ApiFailure {
-  success: false;
-  error: string;
-}
-
-type ApiResult<T> = ApiSuccess<T> | ApiFailure;
-
-function unwrap<T>(response: ApiResult<T>): T {
-  if (!response.success) {
-    throw new ApiError(0, response.error);
-  }
-  return response.data;
-}
-
 // ============= API Functions =============
 
 /**
@@ -49,10 +33,16 @@ export async function fetchIssueTabState(
   workspaceId: string,
   issueId: string,
 ): Promise<IssueTabState | null> {
-  const response = await get<ApiResult<IssueTabState | null>>(
-    wsUrl(workspaceId, `/issues/${encodeURIComponent(issueId)}/tabs`),
+  const { data, error, response } = await api.GET(
+    "/api/workspaces/{ws}/issues/{issueId}/tabs",
+    {
+      params: {
+        path: { ws: workspaceId, issueId },
+      },
+    },
   );
-  return unwrap(response);
+  if (error) throw apiErrorFromResponse(error, response);
+  return (unwrapResponse(data) as IssueTabState | null) ?? null;
 }
 
 /**
@@ -64,10 +54,36 @@ export async function saveIssueTabState(
   tabs: IssueTab[],
   activeTabId: string,
 ): Promise<void> {
-  await put<ApiResult<IssueTabState>>(
-    wsUrl(workspaceId, `/issues/${encodeURIComponent(issueId)}/tabs`),
-    { tabs, active_tab_id: activeTabId },
+  const { error, response } = await api.PUT(
+    "/api/workspaces/{ws}/issues/{issueId}/tabs",
+    {
+      params: {
+        path: { ws: workspaceId, issueId },
+      },
+      body: {
+        tabs: tabs.map((t) => {
+          const tab: {
+            id: string;
+            type: "details" | "logs" | "terminal";
+            label: string;
+            sort_order: number;
+            session_name?: string;
+            backend?: string;
+          } = {
+            id: t.id,
+            type: t.type as "details" | "logs" | "terminal",
+            label: t.label,
+            sort_order: t.sort_order,
+          };
+          if (t.session_name !== undefined) tab.session_name = t.session_name;
+          if (t.backend !== undefined) tab.backend = t.backend;
+          return tab;
+        }),
+        active_tab_id: activeTabId,
+      },
+    },
   );
+  if (error) throw apiErrorFromResponse(error, response);
 }
 
 /**
@@ -77,7 +93,13 @@ export async function deleteIssueTabState(
   workspaceId: string,
   issueId: string,
 ): Promise<void> {
-  await del<ApiResult<undefined>>(
-    wsUrl(workspaceId, `/issues/${encodeURIComponent(issueId)}/tabs`),
+  const { error, response } = await api.DELETE(
+    "/api/workspaces/{ws}/issues/{issueId}/tabs",
+    {
+      params: {
+        path: { ws: workspaceId, issueId },
+      },
+    },
   );
+  if (error) throw apiErrorFromResponse(error, response);
 }

@@ -1,16 +1,11 @@
 /**
  * API functions for session audit trail endpoints.
+ * Uses openapi-fetch generated client.
  */
 
-import type {
-  SessionRecord,
-  SessionListResponse,
-  SessionDetailResponse,
-  TranscriptEntry,
-  TranscriptResponse,
-} from "../types/session";
+import type { SessionRecord, TranscriptEntry } from "../types/session";
 
-import { ApiError, get, getText, wsUrl } from "./client";
+import { api, ApiError, apiErrorFromResponse } from "./client";
 
 /**
  * Fetch all sessions for a task.
@@ -22,10 +17,14 @@ export async function getTaskSessions(
   taskId: string,
 ): Promise<SessionRecord[]> {
   try {
-    const resp = await get<SessionListResponse>(
-      wsUrl(workspaceId, `/tasks/${encodeURIComponent(taskId)}/sessions`),
+    const { data, error, response } = await api.GET(
+      "/api/workspaces/{ws}/tasks/{taskId}/sessions",
+      {
+        params: { path: { ws: workspaceId, taskId } },
+      },
     );
-    return resp.data?.sessions ?? [];
+    if (error) throw apiErrorFromResponse(error, response);
+    return (data!.data?.sessions ?? []) as unknown as SessionRecord[];
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) {
       return [];
@@ -44,13 +43,14 @@ export async function getSession(
   sessionId: string,
 ): Promise<SessionRecord | null> {
   try {
-    const resp = await get<SessionDetailResponse>(
-      wsUrl(
-        workspaceId,
-        `/tasks/${encodeURIComponent(taskId)}/sessions/${encodeURIComponent(sessionId)}`,
-      ),
+    const { data, error, response } = await api.GET(
+      "/api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}",
+      {
+        params: { path: { ws: workspaceId, taskId, sessionId } },
+      },
     );
-    return resp.data ?? null;
+    if (error) throw apiErrorFromResponse(error, response);
+    return (data!.data as unknown as SessionRecord) ?? null;
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) {
       return null;
@@ -69,13 +69,14 @@ export async function getSessionTranscript(
   sessionId: string,
 ): Promise<TranscriptEntry[]> {
   try {
-    const resp = await get<TranscriptResponse>(
-      wsUrl(
-        workspaceId,
-        `/tasks/${encodeURIComponent(taskId)}/sessions/${encodeURIComponent(sessionId)}/transcript`,
-      ),
+    const { data, error, response } = await api.GET(
+      "/api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/transcript",
+      {
+        params: { path: { ws: workspaceId, taskId, sessionId } },
+      },
     );
-    return resp.data?.entries ?? [];
+    if (error) throw apiErrorFromResponse(error, response);
+    return (data!.data?.entries ?? []) as unknown as TranscriptEntry[];
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) {
       return [];
@@ -95,12 +96,15 @@ export async function getSessionDiff(
   sessionId: string,
 ): Promise<string | null> {
   try {
-    return await getText(
-      wsUrl(
-        workspaceId,
-        `/tasks/${encodeURIComponent(taskId)}/sessions/${encodeURIComponent(sessionId)}/diff`,
-      ),
+    const { data, error, response } = await api.GET(
+      "/api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/diff",
+      {
+        params: { path: { ws: workspaceId, taskId, sessionId } },
+        parseAs: "text",
+      },
     );
+    if (error) throw apiErrorFromResponse(error, response);
+    return data ?? null;
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) {
       return null;

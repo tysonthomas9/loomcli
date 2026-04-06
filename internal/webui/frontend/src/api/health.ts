@@ -1,9 +1,9 @@
 /**
  * API functions for daemon health checking.
- * Interfaces with GET /api/health endpoint.
+ * Uses openapi-fetch generated client.
  */
 
-import { get } from "./client";
+import { api, apiErrorFromResponse } from "./client";
 
 /** Health endpoint response shape (matches Go HealthStatus struct). */
 export interface HealthResponse {
@@ -22,5 +22,9 @@ export interface HealthResponse {
  * Uses a short timeout (5s) since this is a connectivity probe.
  */
 export async function checkDaemonHealth(): Promise<HealthResponse> {
-  return get<HealthResponse>("/api/health", { timeout: 5000 });
+  const { data, error, response } = await api.GET("/api/health", {
+    signal: AbortSignal.timeout(5000),
+  });
+  if (error) throw apiErrorFromResponse(error, response);
+  return data as unknown as HealthResponse;
 }

@@ -1,52 +1,10 @@
 /**
  * API functions for log streaming endpoints.
+ * Uses openapi-fetch generated client where types are available,
+ * legacy fetch wrapper for untyped endpoints.
  */
 
-import { ApiError, get, wsUrl } from "./client";
-
-/**
- * Response from GET /api/tasks/{id}/logs
- */
-interface LogPhaseResponse {
-  success: boolean;
-  data: { phases: string[] };
-}
-
-interface TaskLogContentResponse {
-  success: boolean;
-  data?: {
-    lines: string[];
-    line_count: number;
-  };
-  error?: string;
-}
-
-interface AgentTerminalInfoResponse {
-  success: boolean;
-  data?: {
-    agent: string;
-    mode: "tmux" | "archive";
-  };
-  error?: string;
-}
-
-interface AgentTerminalTokenResponse {
-  success: boolean;
-  data?: {
-    token: string;
-  };
-  error?: string;
-}
-
-interface AgentLogContentResponse {
-  success: boolean;
-  data?: {
-    lines: string[];
-    line_count: number;
-    start_line: number;
-  };
-  error?: string;
-}
+import { api, ApiError, apiErrorFromResponse, get, wsUrl } from "./client";
 
 /**
  * Fetch available log phases for a task.
@@ -58,10 +16,14 @@ export async function getTaskLogPhases(
   taskId: string,
 ): Promise<string[]> {
   try {
-    const data = await get<LogPhaseResponse>(
-      wsUrl(workspaceId, `/tasks/${encodeURIComponent(taskId)}/logs`),
+    const { data, error, response } = await api.GET(
+      "/api/workspaces/{ws}/tasks/{id}/logs",
+      {
+        params: { path: { ws: workspaceId, id: taskId } },
+      },
     );
-    return data.data.phases;
+    if (error) throw apiErrorFromResponse(error, response);
+    return data.data?.phases ?? [];
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) {
       return [];
@@ -80,12 +42,16 @@ export async function getTaskLogContent(
   lines = 500,
 ): Promise<{ lines: string[]; lineCount: number }> {
   try {
-    const data = await get<TaskLogContentResponse>(
-      wsUrl(
-        workspaceId,
-        `/tasks/${encodeURIComponent(taskId)}/logs/${encodeURIComponent(phase)}?lines=${lines}`,
-      ),
+    const { data, error, response } = await api.GET(
+      "/api/workspaces/{ws}/tasks/{id}/logs/{phase}",
+      {
+        params: {
+          path: { ws: workspaceId, id: taskId, phase },
+          query: { lines },
+        },
+      },
     );
+    if (error) throw apiErrorFromResponse(error, response);
     return {
       lines: Array.isArray(data.data?.lines) ? data.data.lines : [],
       lineCount:
@@ -101,12 +67,17 @@ export async function getTaskLogContent(
 
 /**
  * Fetch whether agent logs should use live tmux streaming or archive fallback.
+ * Uses legacy client (spec response is untyped).
  */
 export async function getAgentTerminalInfo(
   workspaceId: string,
   agentName: string,
 ): Promise<"tmux" | "archive"> {
-  const response = await get<AgentTerminalInfoResponse>(
+  const response = await get<{
+    success: boolean;
+    data?: { agent: string; mode: "tmux" | "archive" };
+    error?: string;
+  }>(
     wsUrl(
       workspaceId,
       `/agents/${encodeURIComponent(agentName)}/terminal/info`,
@@ -125,16 +96,14 @@ export async function getAgentTerminalToken(
   workspaceId: string,
   agentName: string,
 ): Promise<string> {
-  const response = await get<AgentTerminalTokenResponse>(
-    wsUrl(
-      workspaceId,
-      `/agents/${encodeURIComponent(agentName)}/terminal/token`,
-    ),
+  const { data, error, response } = await api.GET(
+    "/api/workspaces/{ws}/agents/{name}/terminal/token",
+    {
+      params: { path: { ws: workspaceId, name: agentName } },
+    },
   );
-  if (!response.success || !response.data) {
-    throw new Error(response.error || "Failed to fetch agent terminal token");
-  }
-  return response.data.token;
+  if (error) throw apiErrorFromResponse(error, response);
+  return data.token;
 }
 
 /**
@@ -169,34 +138,37 @@ export async function getAgentLogArchive(
   lines = 500,
   beforeLine?: number,
 ): Promise<{ lines: string[]; lineCount: number; startLine: number }> {
-  let url = wsUrl(
-    workspaceId,
-    `/agents/${encodeURIComponent(agentName)}/logs?lines=${lines}`,
-  );
-  if (beforeLine !== undefined) {
-    url += `&before_line=${beforeLine}`;
-  }
-  let response: AgentLogContentResponse;
   try {
-    response = await get<AgentLogContentResponse>(url);
+    const { data, error, response } = await api.GET(
+      "/api/workspaces/{ws}/agents/{name}/logs",
+      {
+        params: {
+          path: { ws: workspaceId, name: agentName },
+          query:
+            beforeLine !== undefined
+              ? { lines, before_line: beforeLine }
+              : { lines },
+        },
+      },
+    );
+    if (error) throw apiErrorFromResponse(error, response);
+    if (!data.success || !data.data) {
+      throw new Error(
+        (data as { error?: string }).error ||
+          "Failed to fetch agent log archive",
+      );
+    }
+    return {
+      lines: Array.isArray(data.data.lines) ? data.data.lines : [],
+      lineCount:
+        typeof data.data.line_count === "number" ? data.data.line_count : 0,
+      startLine:
+        typeof data.data.start_line === "number" ? data.data.start_line : 1,
+    };
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) {
       return { lines: [], lineCount: 0, startLine: 1 };
     }
     throw err;
   }
-  if (!response.success || !response.data) {
-    throw new Error(response.error || "Failed to fetch agent log archive");
-  }
-  return {
-    lines: Array.isArray(response.data.lines) ? response.data.lines : [],
-    lineCount:
-      typeof response.data.line_count === "number"
-        ? response.data.line_count
-        : 0,
-    startLine:
-      typeof response.data.start_line === "number"
-        ? response.data.start_line
-        : 1,
-  };
 }

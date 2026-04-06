@@ -1,10 +1,18 @@
 /**
  * API client for workspace endpoints.
- * Stateless — no module-level caches. Caching belongs in React hooks/context.
- * Interfaces with GET /api/workspaces/active and /api/workspaces/ CRUD endpoints.
+ * Uses openapi-fetch for typed endpoints, legacy client where spec diverges.
  */
 
-import { get, post, patch, put, del, ApiError } from "./client";
+import {
+  api,
+  apiErrorFromResponse,
+  get,
+  post,
+  patch,
+  put,
+  del,
+  ApiError,
+} from "./client";
 import { createIssue } from "./issues";
 import type { Issue } from "@/types";
 
@@ -63,8 +71,6 @@ interface ApiFailure {
 
 type ApiResult<T> = ApiSuccess<T> | ApiFailure;
 
-// ============= Helpers =============
-
 function unwrap<T>(response: ApiResult<T>): T {
   if (!response.success) {
     throw new ApiError(0, response.error);
@@ -76,16 +82,20 @@ function unwrap<T>(response: ApiResult<T>): T {
 
 /**
  * Fetch workspace data from the API. Always hits the network.
- * Callers are responsible for caching/deduplication (via useWorkspace hook).
  */
 export async function fetchWorkspaceApi(
   workspaceId?: string,
 ): Promise<WorkspaceData> {
-  const path = workspaceId
-    ? `/api/workspaces/${encodeURIComponent(workspaceId)}`
-    : "/api/workspaces/active";
-  const response = await get<ApiResult<WorkspaceData>>(path);
-  return unwrap(response);
+  if (workspaceId) {
+    const { data, error, response } = await api.GET("/api/workspaces/{ws}", {
+      params: { path: { ws: workspaceId } },
+    });
+    if (error) throw apiErrorFromResponse(error, response);
+    return data as unknown as WorkspaceData;
+  }
+  const { data, error, response } = await api.GET("/api/workspaces/active");
+  if (error) throw apiErrorFromResponse(error, response);
+  return data as unknown as WorkspaceData;
 }
 
 /**
@@ -107,7 +117,7 @@ export async function renameWorkspace(
 }
 
 /**
- * Delete a workspace by ID. Returns the updated workspace data.
+ * Delete a workspace by ID.
  */
 export async function deleteWorkspace(
   workspaceId: string,
@@ -122,22 +132,20 @@ export async function deleteWorkspace(
 }
 
 /**
- * Reorder workspaces. Returns the updated workspace data.
+ * Reorder workspaces.
  */
 export async function reorderWorkspaces(
   order: string[],
 ): Promise<WorkspaceData> {
   const response = await put<ApiResult<WorkspaceData>>(
     "/api/workspaces/order",
-    {
-      order,
-    },
+    { order },
   );
   return unwrap(response);
 }
 
 /**
- * Set the default workspace. Returns the updated workspace data.
+ * Set the default workspace.
  */
 export async function setDefaultWorkspace(
   name: string,
@@ -150,7 +158,7 @@ export async function setDefaultWorkspace(
 }
 
 /**
- * Clear the default workspace. Returns the updated workspace data.
+ * Clear the default workspace.
  */
 export async function clearDefaultWorkspace(): Promise<WorkspaceData> {
   const response = await del<ApiResult<WorkspaceData>>(
@@ -205,8 +213,6 @@ const CLONE_CREATE_TIMEOUT = 300_000;
 export async function createWorkspace(
   req: CreateWorkspaceRequest,
 ): Promise<WorkspaceCreateResult> {
-  // Clone requests go through the async path; use a longer timeout since the
-  // backend returns 202 quickly, but we still want a generous client timeout.
   const options = req.type === "clone" ? { timeout: CLONE_CREATE_TIMEOUT } : {};
 
   const response = await post<
@@ -247,9 +253,6 @@ export interface WorkspaceJobState {
 
 /**
  * Poll the status of an async workspace creation job.
- *
- * Calls GET /api/workspaces/jobs/{jobId} and returns the current state.
- * Throws ApiError on network/HTTP errors (including 404 for expired jobs).
  */
 export async function pollWorkspaceJob(
   jobId: string,
@@ -279,7 +282,6 @@ export async function createWorkspaceTask(
 
 /**
  * Create an epic with sensible defaults.
- * Note: workspace association via source_repos is handled at the backend level.
  */
 export async function createWorkspaceEpic(
   workspaceId: string,

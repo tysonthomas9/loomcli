@@ -1,4 +1,9 @@
-import { get, ApiError, wsUrl } from "./client";
+/**
+ * API functions for session history (Redis-backed, per-issue).
+ * Uses openapi-fetch generated client.
+ */
+
+import { api, apiErrorFromResponse, unwrapResponse } from "./client";
 
 // ============= Types =============
 
@@ -14,27 +19,6 @@ export interface SessionRecord {
   scrollback_path?: string;
 }
 
-// ============= Response Types =============
-
-interface ApiSuccess<T> {
-  success: true;
-  data: T;
-}
-
-interface ApiFailure {
-  success: false;
-  error: string;
-}
-
-type ApiResult<T> = ApiSuccess<T> | ApiFailure;
-
-function unwrap<T>(response: ApiResult<T>): T {
-  if (!response.success) {
-    throw new ApiError(0, response.error);
-  }
-  return response.data;
-}
-
 // ============= API Functions =============
 
 /**
@@ -45,10 +29,14 @@ export async function listSessionHistory(
   workspaceId: string,
   issueId: string,
 ): Promise<SessionRecord[]> {
-  const response = await get<ApiResult<SessionRecord[]>>(
-    wsUrl(workspaceId, `/issues/${encodeURIComponent(issueId)}/sessions`),
+  const { data, error, response } = await api.GET(
+    "/api/workspaces/{ws}/issues/{issueId}/sessions",
+    {
+      params: { path: { ws: workspaceId, issueId } },
+    },
   );
-  return unwrap(response);
+  if (error) throw apiErrorFromResponse(error, response);
+  return (unwrapResponse(data) ?? []) as SessionRecord[];
 }
 
 /**
@@ -59,11 +47,16 @@ export async function getSessionScrollback(
   issueId: string,
   recordId: string,
 ): Promise<{ content: string; lines: number }> {
-  const response = await get<ApiResult<{ content: string; lines: number }>>(
-    wsUrl(
-      workspaceId,
-      `/issues/${encodeURIComponent(issueId)}/sessions/${encodeURIComponent(recordId)}/scrollback`,
-    ),
+  const { data, error, response } = await api.GET(
+    "/api/workspaces/{ws}/issues/{issueId}/sessions/{recordId}/scrollback",
+    {
+      params: { path: { ws: workspaceId, issueId, recordId } },
+      parseAs: "text",
+    },
   );
-  return unwrap(response);
+  if (error) throw apiErrorFromResponse(error, response);
+  // scrollback endpoint returns text/plain; wrap it for callers
+  const content = typeof data === "string" ? data : "";
+  const lines = content ? content.split("\n").length : 0;
+  return { content, lines };
 }

@@ -1,6 +1,7 @@
 /**
  * Type-safe API functions for issue operations.
  * Acts as the primary interface between React components and the Go backend.
+ * Uses openapi-fetch generated client for type-safe requests.
  */
 
 import type {
@@ -16,41 +17,7 @@ import type {
   Comment,
 } from "@/types";
 
-import {
-  get,
-  post,
-  patch,
-  del,
-  ApiError,
-  wsUrl,
-  type RequestOptions,
-} from "./client";
-
-// ============= Response Types =============
-
-/**
- * API success response wrapper.
- * Matches backend pattern for /api/ready, /api/stats, /api/issues endpoints.
- */
-interface ApiSuccess<T> {
-  success: true;
-  data: T;
-}
-
-/**
- * API error response wrapper.
- * Matches backend pattern when success is false.
- */
-interface ApiFailure {
-  success: false;
-  error: string;
-  code?: string;
-}
-
-/**
- * Union type for wrapped API responses.
- */
-type ApiResult<T> = ApiSuccess<T> | ApiFailure;
+import { api, ApiError, apiErrorFromResponse, cleanQuery } from "./client";
 
 // ============= Helper Functions =============
 
@@ -63,7 +30,6 @@ function buildQueryString(params: Record<string, unknown>): string {
   for (const [key, value] of Object.entries(params)) {
     if (value === undefined || value === null) continue;
     if (Array.isArray(value)) {
-      // Arrays become comma-separated: labels=a,b,c
       if (value.length > 0) {
         searchParams.set(key, value.join(","));
       }
@@ -79,18 +45,19 @@ function buildQueryString(params: Record<string, unknown>): string {
 
 /**
  * Unwrap API response, throwing ApiError on failure.
- * Used for endpoints that return wrapped responses.
  */
-function unwrap<T>(response: ApiResult<T>): T {
+function unwrap<T>(
+  response: { success: boolean; data?: T; error?: string } | undefined,
+): T {
+  if (!response) throw new ApiError(0, "Empty response");
   if (!response.success) {
-    throw new ApiError(0, response.error);
+    throw new ApiError(0, response.error ?? "Unknown error");
   }
-  return response.data;
+  return response.data as T;
 }
 
 /**
  * Map WorkFilter to backend query parameter names.
- * WorkFilter uses 'sort_policy' but backend expects 'sort'.
  */
 function mapWorkFilterToQueryParams(
   filter: WorkFilter,
@@ -112,10 +79,12 @@ export async function getIssue(
   workspaceId: string,
   id: string,
 ): Promise<IssueDetails> {
-  const response = await get<ApiResult<IssueDetails>>(
-    wsUrl(workspaceId, `/issues/${encodeURIComponent(id)}`),
+  const { data, error, response } = await api.GET(
+    "/api/workspaces/{ws}/issues/{id}",
+    { params: { path: { ws: workspaceId, id } } },
   );
-  return unwrap(response);
+  if (error) throw apiErrorFromResponse(error, response);
+  return unwrap(data) as unknown as IssueDetails;
 }
 
 /**
@@ -124,39 +93,54 @@ export async function getIssue(
 export async function getReadyIssues(
   workspaceId: string,
   options?: WorkFilter,
-  requestOptions?: Pick<RequestOptions, "signal">,
+  requestOptions?: { signal?: AbortSignal },
 ): Promise<Issue[]> {
-  const query = buildQueryString(mapWorkFilterToQueryParams(options ?? {}));
-  const url = wsUrl(workspaceId, `/ready${query}`);
-  const response = requestOptions
-    ? await get<ApiResult<Issue[]>>(url, requestOptions)
-    : await get<ApiResult<Issue[]>>(url);
-  return unwrap(response);
+  const mapped = mapWorkFilterToQueryParams(options ?? {});
+  const query = cleanQuery({
+    sort: mapped.sort as string | undefined,
+    assignee: mapped.assignee as string | undefined,
+    type: mapped.type as string | undefined,
+    priority: mapped.priority as number | undefined,
+    limit: mapped.limit as number | undefined,
+    labels: mapped.labels ? String(mapped.labels) : undefined,
+    source_repos: mapped.source_repos
+      ? Array.isArray(mapped.source_repos)
+        ? (mapped.source_repos as string[]).join(",")
+        : String(mapped.source_repos)
+      : undefined,
+  });
+  const { data, error, response } = await api.GET(
+    "/api/workspaces/{ws}/ready",
+    {
+      params: { path: { ws: workspaceId }, query },
+      ...(requestOptions?.signal ? { signal: requestOptions.signal } : {}),
+    },
+  );
+  if (error) throw apiErrorFromResponse(error, response);
+  return unwrap(data) as unknown as Issue[];
 }
 
 /**
  * Get project statistics.
  */
 export async function getStats(workspaceId: string): Promise<Statistics> {
-  const response = await get<ApiResult<Statistics>>(
-    wsUrl(workspaceId, "/stats"),
+  const { data, error, response } = await api.GET(
+    "/api/workspaces/{ws}/stats",
+    { params: { path: { ws: workspaceId } } },
   );
-  return unwrap(response);
+  if (error) throw apiErrorFromResponse(error, response);
+  // This endpoint returns Statistics directly, not wrapped
+  return data as unknown as Statistics;
 }
 
 /**
  * Filter options for blocked issues.
  */
 export interface BlockedFilter {
-  /** Filter to descendants of this parent issue/epic */
   parent_id?: string;
-  /** Filter by priority (0-4) */
   priority?: number;
-  /** Filter by issue type */
   type?: string;
-  /** Filter by assignee */
   assignee?: string;
-  /** Max results to return */
   limit?: number;
 }
 
@@ -167,146 +151,112 @@ export async function getBlockedIssues(
   workspaceId: string,
   options?: BlockedFilter,
 ): Promise<BlockedIssue[]> {
-  const params: Record<string, unknown> = {};
-  if (options?.parent_id) {
-    params.parent_id = options.parent_id;
-  }
-  if (options?.priority !== undefined) {
-    params.priority = options.priority;
-  }
-  if (options?.type) {
-    params.type = options.type;
-  }
-  if (options?.assignee) {
-    params.assignee = options.assignee;
-  }
-  if (options?.limit !== undefined) {
-    params.limit = options.limit;
-  }
-  const query = buildQueryString(params);
-  const response = await get<ApiResult<BlockedIssue[]>>(
-    wsUrl(workspaceId, `/blocked${query}`),
+  const query = cleanQuery({
+    parent_id: options?.parent_id,
+    priority: options?.priority,
+    type: options?.type as string | undefined,
+    assignee: options?.assignee,
+    limit: options?.limit,
+  });
+  const { data, error, response } = await api.GET(
+    "/api/workspaces/{ws}/blocked",
+    {
+      params: { path: { ws: workspaceId }, query },
+    },
   );
-  return unwrap(response);
+  if (error) throw apiErrorFromResponse(error, response);
+  return unwrap(data) as unknown as BlockedIssue[];
 }
 
 /**
  * Get issues for the Kanban board view.
- * Excludes tombstone issues and includes blocked dependency info.
- * Returns issues enriched with is_blocked, blocked_by_count, blocked_by fields.
  */
 export async function getKanbanIssues(
   workspaceId: string,
   options?: WorkFilter,
-  requestOptions?: Pick<RequestOptions, "signal">,
+  requestOptions?: { signal?: AbortSignal },
 ): Promise<Issue[]> {
-  const params: Record<string, unknown> = {
+  const mapped = options ? mapWorkFilterToQueryParams(options) : {};
+  const query = cleanQuery({
     exclude_status: "tombstone",
-    include_blocked: "true",
-  };
-  if (options) {
-    const mapped = mapWorkFilterToQueryParams(options);
-    Object.assign(params, mapped);
-  }
-  const query = buildQueryString(params);
-  const url = wsUrl(workspaceId, `/issues${query}`);
-  const response = requestOptions
-    ? await get<ApiResult<Issue[]>>(url, requestOptions)
-    : await get<ApiResult<Issue[]>>(url);
-  return unwrap(response);
+    include_blocked: true,
+    status: mapped.status as string | undefined,
+    type: mapped.type as string | undefined,
+    assignee: mapped.assignee as string | undefined,
+    priority: mapped.priority as number | undefined,
+    limit: mapped.limit as number | undefined,
+    labels: mapped.labels ? String(mapped.labels) : undefined,
+    source_repos: mapped.source_repos
+      ? Array.isArray(mapped.source_repos)
+        ? (mapped.source_repos as string[]).join(",")
+        : String(mapped.source_repos)
+      : undefined,
+  });
+  const { data, error, response } = await api.GET(
+    "/api/workspaces/{ws}/issues",
+    {
+      params: { path: { ws: workspaceId }, query },
+      ...(requestOptions?.signal ? { signal: requestOptions.signal } : {}),
+    },
+  );
+  if (error) throw apiErrorFromResponse(error, response);
+  return unwrap(data) as unknown as Issue[];
 }
 
 // ============= GRAPH OPERATIONS =============
 
-/**
- * Filter options for graph issues.
- */
 export interface GraphFilter {
-  /** Status filter: 'all', 'open', or 'closed' (default: 'all') */
   status?: "all" | "open" | "closed";
-  /** Include closed issues when status is 'all' (default: true) */
   includeClosed?: boolean;
-  /** Filter by source repositories */
   source_repos?: string[];
-}
-
-/**
- * Response structure from /api/issues/graph endpoint.
- * Note: Uses simplified dependency format from backend.
- */
-interface GraphApiResponse {
-  success: boolean;
-  issues?: GraphApiIssue[];
-  error?: string;
-}
-
-/**
- * Slim issue as returned by the graph API (only fields needed for rendering).
- * The backend returns a slim payload to reduce bandwidth and latency.
- */
-interface GraphApiIssue {
-  id: string;
-  title: string;
-  status: string;
-  priority: number;
-  issue_type: string;
-  labels?: string[];
-  dependencies?: { depends_on_id: string; type: string }[];
-  defer_until?: string;
-  due_at?: string;
 }
 
 /**
  * Get all issues with dependency data for graph visualization.
  * Transforms the slim backend response to full Issue objects for the frontend.
- *
- * NOTE: The backend returns a slim payload (id, title, status, priority,
- * issue_type, labels, dependencies). Missing Issue fields are set to defaults.
  */
 export async function fetchGraphIssues(
   workspaceId: string,
   options?: GraphFilter,
-  requestOptions?: Pick<RequestOptions, "signal">,
+  requestOptions?: { signal?: AbortSignal },
 ): Promise<Issue[]> {
-  const params: Record<string, unknown> = {};
-  if (options?.status) {
-    params.status = options.status;
-  }
-  if (options?.includeClosed !== undefined) {
-    params.include_closed = options.includeClosed;
-  }
-  if (options?.source_repos?.length) {
-    params.source_repos = options.source_repos;
-  }
-  const query = buildQueryString(params);
-  const url = wsUrl(workspaceId, `/issues/graph${query}`);
-  const response = requestOptions
-    ? await get<GraphApiResponse>(url, requestOptions)
-    : await get<GraphApiResponse>(url);
+  const query = cleanQuery({
+    status: options?.status,
+    include_closed: options?.includeClosed,
+    source_repos: options?.source_repos?.length
+      ? options.source_repos.join(",")
+      : undefined,
+  });
+  const { data, error, response } = await api.GET(
+    "/api/workspaces/{ws}/issues/graph",
+    {
+      params: { path: { ws: workspaceId }, query },
+      ...(requestOptions?.signal ? { signal: requestOptions.signal } : {}),
+    },
+  );
+  if (error) throw apiErrorFromResponse(error, response);
 
-  if (!response.success) {
-    throw new ApiError(0, response.error || "Unknown error");
+  if (!data || !data.success) {
+    throw new ApiError(0, "Unknown error");
   }
 
-  // Warn in development if backend returns success without issues field
-  if (response.issues === undefined && process.env.NODE_ENV === "development") {
+  if (data.data === undefined && process.env.NODE_ENV === "development") {
     console.warn(
-      "[fetchGraphIssues] Backend returned success without issues field",
+      "[fetchGraphIssues] Backend returned success without data field",
     );
   }
 
-  // Transform slim graph API response to full Issue objects
-  const issues = response.issues ?? [];
+  const issues = data.data ?? [];
   return issues.map((issue): Issue => {
     const result: Issue = {
       id: issue.id,
       title: issue.title,
-      status: issue.status as Status,
+      status: (issue.status ?? "open") as Status,
       priority: issue.priority as Priority,
-      issue_type: issue.issue_type as IssueType,
+      issue_type: (issue.issue_type ?? "task") as IssueType,
       labels: issue.labels ?? [],
-      created_at: "", // Not available in slim payload
-      updated_at: "", // Not available in slim payload
+      created_at: issue.created_at ?? "",
+      updated_at: issue.updated_at ?? "",
       defer_until: issue.defer_until ?? null,
       due_at: issue.due_at ?? null,
     };
@@ -315,7 +265,7 @@ export async function fetchGraphIssues(
         issue_id: issue.id,
         depends_on_id: dep.depends_on_id,
         type: dep.type as DependencyType,
-        created_at: "", // Not available in slim payload
+        created_at: dep.created_at ?? "",
       }));
     }
     return result;
@@ -323,18 +273,11 @@ export async function fetchGraphIssues(
 }
 
 // ============= WRITE OPERATIONS =============
-// These endpoints depend on T013, T014, T015 being complete.
 
-/**
- * Request body for creating an issue.
- */
 export interface CreateIssueRequest {
-  // Required
   title: string;
   issue_type: IssueType;
   priority: Priority;
-
-  // Optional
   id?: string;
   parent?: string;
   description?: string;
@@ -352,9 +295,6 @@ export interface CreateIssueRequest {
   defer_until?: string;
 }
 
-/**
- * Request body for updating an issue.
- */
 export interface UpdateIssueRequest {
   title?: string;
   description?: string;
@@ -375,13 +315,42 @@ export interface UpdateIssueRequest {
  */
 export async function createIssue(
   workspaceId: string,
-  data: CreateIssueRequest,
+  reqData: CreateIssueRequest,
 ): Promise<Issue> {
-  const response = await post<ApiResult<Issue>>(
-    wsUrl(workspaceId, "/issues"),
-    data,
+  const body = cleanQuery({
+    title: reqData.title,
+    issue_type: reqData.issue_type as
+      | "bug"
+      | "feature"
+      | "task"
+      | "epic"
+      | "chore",
+    priority: reqData.priority as number,
+    id: reqData.id,
+    parent: reqData.parent,
+    description: reqData.description,
+    design: reqData.design,
+    acceptance_criteria: reqData.acceptance_criteria,
+    notes: reqData.notes,
+    assignee: reqData.assignee,
+    owner: reqData.owner,
+    created_by: reqData.created_by,
+    external_ref: reqData.external_ref,
+    estimated_minutes: reqData.estimated_minutes,
+    labels: reqData.labels,
+    dependencies: reqData.dependencies,
+    due_at: reqData.due_at,
+    defer_until: reqData.defer_until,
+  });
+  const { data, error, response } = await api.POST(
+    "/api/workspaces/{ws}/issues",
+    {
+      params: { path: { ws: workspaceId } },
+      body,
+    },
   );
-  return unwrap(response);
+  if (error) throw apiErrorFromResponse(error, response);
+  return unwrap(data) as unknown as Issue;
 }
 
 /**
@@ -390,13 +359,31 @@ export async function createIssue(
 export async function updateIssue(
   workspaceId: string,
   id: string,
-  data: UpdateIssueRequest,
+  reqData: UpdateIssueRequest,
 ): Promise<Issue> {
-  const response = await patch<ApiResult<Issue>>(
-    wsUrl(workspaceId, `/issues/${encodeURIComponent(id)}`),
-    data,
+  const body = cleanQuery({
+    title: reqData.title,
+    description: reqData.description,
+    design: reqData.design,
+    notes: reqData.notes,
+    priority: reqData.priority as number | undefined,
+    status: reqData.status as string | undefined,
+    assignee: reqData.assignee,
+    owner: reqData.owner,
+    set_labels: reqData.labels,
+    add_labels: reqData.add_labels,
+    remove_labels: reqData.remove_labels,
+    issue_type: reqData.issue_type,
+  });
+  const { data, error, response } = await api.PATCH(
+    "/api/workspaces/{ws}/issues/{id}",
+    {
+      params: { path: { ws: workspaceId, id } },
+      body,
+    },
   );
-  return unwrap(response);
+  if (error) throw apiErrorFromResponse(error, response);
+  return unwrap(data) as unknown as Issue;
 }
 
 /**
@@ -407,108 +394,95 @@ export async function closeIssue(
   id: string,
   reason?: string,
 ): Promise<void> {
-  const response = await post<ApiResult<null>>(
-    wsUrl(workspaceId, `/issues/${encodeURIComponent(id)}/close`),
-    reason ? { reason } : {},
+  const { error, response } = await api.POST(
+    "/api/workspaces/{ws}/issues/{id}/close",
+    {
+      params: { path: { ws: workspaceId, id } },
+      body: reason ? { reason } : {},
+    },
   );
-  unwrap(response);
+  if (error) throw apiErrorFromResponse(error, response);
 }
 
 // ============= DEPENDENCY OPERATIONS =============
 
-/**
- * Add a dependency to an issue.
- * @param issueId - The issue that will depend on another
- * @param dependsOnId - The issue being depended on
- * @param depType - Type of dependency (defaults to "blocks")
- */
 export async function addDependency(
   workspaceId: string,
   issueId: string,
   dependsOnId: string,
   depType: DependencyType = "blocks",
 ): Promise<void> {
-  const response = await post<ApiResult<null>>(
-    wsUrl(workspaceId, `/issues/${encodeURIComponent(issueId)}/dependencies`),
-    { depends_on_id: dependsOnId, dep_type: depType },
+  const { error, response } = await api.POST(
+    "/api/workspaces/{ws}/issues/{id}/dependencies",
+    {
+      params: { path: { ws: workspaceId, id: issueId } },
+      body: { depends_on_id: dependsOnId, dep_type: depType },
+    },
   );
-  unwrap(response);
+  if (error) throw apiErrorFromResponse(error, response);
 }
 
-/**
- * Remove a dependency from an issue.
- * @param issueId - The issue to remove the dependency from
- * @param dependsOnId - The issue that was being depended on
- */
 export async function removeDependency(
   workspaceId: string,
   issueId: string,
   dependsOnId: string,
 ): Promise<void> {
-  const response = await del<ApiResult<null>>(
-    wsUrl(
-      workspaceId,
-      `/issues/${encodeURIComponent(issueId)}/dependencies/${encodeURIComponent(dependsOnId)}`,
-    ),
+  const { error, response } = await api.DELETE(
+    "/api/workspaces/{ws}/issues/{id}/dependencies/{depId}",
+    {
+      params: { path: { ws: workspaceId, id: issueId, depId: dependsOnId } },
+    },
   );
-  unwrap(response);
+  if (error) throw apiErrorFromResponse(error, response);
 }
 
 // ============= MOVE OPERATIONS =============
 
-/**
- * Result from moving an issue to another workspace.
- */
 export interface MoveIssueResult {
   source_id: string;
   target_id: string;
   warnings?: string[];
 }
 
-/**
- * Move an issue to a different workspace.
- * Creates a copy in the target workspace and closes the source.
- */
 export async function moveIssue(
   workspaceId: string,
   id: string,
   targetWorkspace: string,
 ): Promise<MoveIssueResult> {
-  const response = await post<ApiResult<MoveIssueResult>>(
-    wsUrl(workspaceId, `/issues/${encodeURIComponent(id)}/move`),
-    { target_workspace: targetWorkspace },
+  const { data, error, response } = await api.POST(
+    "/api/workspaces/{ws}/issues/{id}/move",
+    {
+      params: { path: { ws: workspaceId, id } },
+      body: { target_workspace: targetWorkspace },
+    },
   );
-  return unwrap(response);
+  if (error) throw apiErrorFromResponse(error, response);
+  return unwrap(data) as MoveIssueResult;
 }
 
 // ============= COMMENT OPERATIONS =============
 
-/**
- * Request body for adding a comment.
- */
 export interface AddCommentRequest {
   text: string;
 }
 
-/**
- * Add a comment to an issue.
- */
 export async function addComment(
   workspaceId: string,
   issueId: string,
   text: string,
 ): Promise<Comment> {
-  const response = await post<ApiResult<Comment>>(
-    wsUrl(workspaceId, `/issues/${encodeURIComponent(issueId)}/comments`),
-    { text },
+  const { data, error, response } = await api.POST(
+    "/api/workspaces/{ws}/issues/{id}/comments",
+    {
+      params: { path: { ws: workspaceId, id: issueId } },
+      body: { text },
+    },
   );
-  return unwrap(response);
+  if (error) throw apiErrorFromResponse(error, response);
+  return unwrap(data) as unknown as Comment;
 }
 
 // ============= EXPORTS FOR TESTING =============
 
-/**
- * Exported for unit testing.
- * @internal
- */
+/** @internal */
 export { buildQueryString, unwrap, mapWorkFilterToQueryParams };

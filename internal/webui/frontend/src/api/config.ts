@@ -1,9 +1,9 @@
 /**
  * API functions for backend configuration.
- * Interfaces with GET/PATCH /api/config/backend endpoints.
+ * Uses openapi-fetch generated client.
  */
 
-import { get, patch, ApiError } from "./client";
+import { api, ApiError, apiErrorFromResponse } from "./client";
 
 // ============= Types =============
 
@@ -31,29 +31,6 @@ export interface BackendConfigData {
  */
 export interface BackendConfigPatchRequest {
   backend: string;
-}
-
-// ============= Response Types =============
-
-interface ApiSuccess<T> {
-  success: true;
-  data: T;
-}
-
-interface ApiFailure {
-  success: false;
-  error: string;
-}
-
-type ApiResult<T> = ApiSuccess<T> | ApiFailure;
-
-// ============= Helpers =============
-
-function unwrap<T>(response: ApiResult<T>): T {
-  if (!response.success) {
-    throw new ApiError(0, response.error);
-  }
-  return response.data;
 }
 
 // ============= Cache =============
@@ -101,12 +78,19 @@ function cacheBackendConfig(data: BackendConfigData): void {
  * Caches the response in localStorage for offline access.
  */
 export async function getBackendConfig(): Promise<BackendConfigData> {
-  const response = await get<ApiResult<BackendConfigData>>(
-    "/api/config/backend",
-  );
-  const data = unwrap(response);
-  cacheBackendConfig(data);
-  return data;
+  const { data, error, response } = await api.GET("/api/config/backend");
+  if (error) throw apiErrorFromResponse(error, response);
+  // BackendConfigResponse has {success, data?, error?} shape
+  const envelope = data as {
+    success?: boolean;
+    data?: BackendConfigData;
+    error?: string;
+  };
+  if (!envelope.success || !envelope.data) {
+    throw new ApiError(0, envelope.error ?? "Unknown error");
+  }
+  cacheBackendConfig(envelope.data);
+  return envelope.data;
 }
 
 /**
@@ -115,9 +99,17 @@ export async function getBackendConfig(): Promise<BackendConfigData> {
 export async function updateBackendConfig(
   backend: string,
 ): Promise<BackendConfigData> {
-  const response = await patch<ApiResult<BackendConfigData>>(
-    "/api/config/backend",
-    { backend },
-  );
-  return unwrap(response);
+  const { data, error, response } = await api.PATCH("/api/config/backend", {
+    body: { backend },
+  });
+  if (error) throw apiErrorFromResponse(error, response);
+  const envelope = data as {
+    success?: boolean;
+    data?: BackendConfigData;
+    error?: string;
+  };
+  if (!envelope.success || !envelope.data) {
+    throw new ApiError(0, envelope.error ?? "Unknown error");
+  }
+  return envelope.data;
 }

@@ -1,9 +1,10 @@
 /**
  * API functions for agent worktree file operations.
- * Interfaces with GET/PUT /api/agents/{name}/files/* endpoints.
+ * Uses legacy fetch wrapper for tree endpoint (untyped spec),
+ * openapi-fetch for read/write endpoints.
  */
 
-import { get, put, wsUrl } from "./client";
+import { get, wsUrl } from "./client";
 
 // ============= Types =============
 
@@ -30,7 +31,7 @@ export interface FileReadData {
 
 /**
  * List files in an agent worktree directory (one level).
- * GET /api/agents/{name}/files/tree?path=
+ * Uses legacy client (spec response is untyped).
  */
 export async function listWorktreeDir(
   workspaceId: string,
@@ -73,6 +74,7 @@ export async function writeWorktreeFile(
   path: string,
   content: string,
 ): Promise<void> {
+  const { put } = await import("./client");
   const url = wsUrl(
     workspaceId,
     `/agents/${encodeURIComponent(agentName)}/files?path=${encodeURIComponent(path)}`,

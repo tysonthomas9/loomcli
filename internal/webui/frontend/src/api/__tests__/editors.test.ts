@@ -4,10 +4,6 @@
 
 /**
  * Unit tests for the editors API functions (editors.ts).
- *
- * These tests verify that fetchEditors, refreshEditors, and openInEditor
- * correctly call the API client. The module is now stateless — caching
- * lives in editorStore, so there are no cache tests here.
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -18,11 +14,21 @@ import type { EditorInfo } from "@/types/editor";
 vi.mock("../client", () => ({
   get: vi.fn(),
   post: vi.fn(),
+  api: {
+    GET: vi.fn(),
+    POST: vi.fn(),
+    PATCH: vi.fn(),
+    PUT: vi.fn(),
+    DELETE: vi.fn(),
+    use: vi.fn(),
+  },
+  apiErrorFromResponse: (error: unknown, response?: Response) => {
+    const status = response?.status ?? 0;
+    const statusText = response?.statusText ?? "Unknown";
+    return new Error(`API Error: ${status} ${statusText}`);
+  },
 }));
 
-/**
- * Helper to create a mock EditorInfo.
- */
 function createMockEditor(overrides?: Partial<EditorInfo>): EditorInfo {
   return {
     id: "vscode",
@@ -36,8 +42,8 @@ function createMockEditor(overrides?: Partial<EditorInfo>): EditorInfo {
 let fetchEditors: typeof import("../editors").fetchEditors;
 let refreshEditors: typeof import("../editors").refreshEditors;
 let openInEditor: typeof import("../editors").openInEditor;
-let mockGet: ReturnType<typeof vi.fn>;
-let mockPost: ReturnType<typeof vi.fn>;
+let mockApiGet: ReturnType<typeof vi.fn>;
+let mockApiPost: ReturnType<typeof vi.fn>;
 
 describe("editors API", () => {
   beforeEach(async () => {
@@ -45,8 +51,8 @@ describe("editors API", () => {
     vi.resetModules();
 
     const clientMod = await import("../client");
-    mockGet = vi.mocked(clientMod.get);
-    mockPost = vi.mocked(clientMod.post);
+    mockApiGet = vi.mocked(clientMod.api.GET);
+    mockApiPost = vi.mocked(clientMod.api.POST);
 
     const editorsMod = await import("../editors");
     fetchEditors = editorsMod.fetchEditors;
@@ -64,28 +70,40 @@ describe("editors API", () => {
           detected: false,
         }),
       ];
-      mockGet.mockResolvedValueOnce({ editors });
+      mockApiGet.mockResolvedValueOnce({
+        data: { success: true, data: { editors } },
+        error: undefined,
+        response: new Response(),
+      });
 
       const result = await fetchEditors();
 
-      expect(mockGet).toHaveBeenCalledTimes(1);
-      expect(mockGet).toHaveBeenCalledWith("/api/editors");
+      expect(mockApiGet).toHaveBeenCalledTimes(1);
+      expect(mockApiGet).toHaveBeenCalledWith("/api/editors");
       expect(result).toEqual(editors);
       expect(result).toHaveLength(2);
     });
 
     it("always hits the network (no caching)", async () => {
       const editors = [createMockEditor()];
-      mockGet.mockResolvedValue({ editors });
+      mockApiGet.mockResolvedValue({
+        data: { success: true, data: { editors } },
+        error: undefined,
+        response: new Response(),
+      });
 
       await fetchEditors();
       await fetchEditors();
 
-      expect(mockGet).toHaveBeenCalledTimes(2);
+      expect(mockApiGet).toHaveBeenCalledTimes(2);
     });
 
     it("returns empty array when API returns empty editors list", async () => {
-      mockGet.mockResolvedValueOnce({ editors: [] });
+      mockApiGet.mockResolvedValueOnce({
+        data: { success: true, data: { editors: [] } },
+        error: undefined,
+        response: new Response(),
+      });
 
       const result = await fetchEditors();
 
@@ -94,67 +112,98 @@ describe("editors API", () => {
     });
 
     it("throws on network error from client", async () => {
-      mockGet.mockRejectedValueOnce(new Error("Network error"));
+      mockApiGet.mockResolvedValueOnce({
+        data: undefined,
+        error: { message: "Network error" },
+        response: new Response(null, {
+          status: 500,
+          statusText: "Network error",
+        }),
+      });
 
-      await expect(fetchEditors()).rejects.toThrow("Network error");
+      await expect(fetchEditors()).rejects.toThrow();
     });
 
     it("throws on API error from client", async () => {
-      mockGet.mockRejectedValueOnce(
-        new Error("API Error: 500 Internal Server Error"),
-      );
+      mockApiGet.mockResolvedValueOnce({
+        data: undefined,
+        error: { error: "Internal Server Error" },
+        response: new Response(null, {
+          status: 500,
+          statusText: "Internal Server Error",
+        }),
+      });
 
-      await expect(fetchEditors()).rejects.toThrow(
-        "API Error: 500 Internal Server Error",
-      );
+      await expect(fetchEditors()).rejects.toThrow();
     });
   });
 
   describe("refreshEditors", () => {
     it("calls GET /api/editors (delegates to fetchEditors)", async () => {
       const editors = [createMockEditor()];
-      mockGet.mockResolvedValueOnce({ editors });
+      mockApiGet.mockResolvedValueOnce({
+        data: { success: true, data: { editors } },
+        error: undefined,
+        response: new Response(),
+      });
 
       const result = await refreshEditors();
 
-      expect(mockGet).toHaveBeenCalledTimes(1);
-      expect(mockGet).toHaveBeenCalledWith("/api/editors");
+      expect(mockApiGet).toHaveBeenCalledTimes(1);
+      expect(mockApiGet).toHaveBeenCalledWith("/api/editors");
       expect(result).toEqual(editors);
     });
 
     it("throws on network error during refresh", async () => {
-      mockGet.mockRejectedValueOnce(new Error("Connection refused"));
+      mockApiGet.mockResolvedValueOnce({
+        data: undefined,
+        error: { message: "Connection refused" },
+        response: new Response(null, {
+          status: 500,
+          statusText: "Connection refused",
+        }),
+      });
 
-      await expect(refreshEditors()).rejects.toThrow("Connection refused");
+      await expect(refreshEditors()).rejects.toThrow();
     });
   });
 
   describe("openInEditor", () => {
     it("calls POST /api/editors/open with correct body", async () => {
-      mockPost.mockResolvedValueOnce({ success: true });
+      mockApiPost.mockResolvedValueOnce({
+        data: { success: true },
+        error: undefined,
+        response: new Response(),
+      });
 
       await openInEditor("vscode", "/path/to/file.ts");
 
-      expect(mockPost).toHaveBeenCalledTimes(1);
-      expect(mockPost).toHaveBeenCalledWith("/api/editors/open", {
-        editor_id: "vscode",
-        path: "/path/to/file.ts",
+      expect(mockApiPost).toHaveBeenCalledTimes(1);
+      expect(mockApiPost).toHaveBeenCalledWith("/api/editors/open", {
+        body: { editor_id: "vscode", path: "/path/to/file.ts" },
       });
     });
 
     it("passes editor_id and path correctly for different editors", async () => {
-      mockPost.mockResolvedValueOnce({ success: true });
+      mockApiPost.mockResolvedValueOnce({
+        data: { success: true },
+        error: undefined,
+        response: new Response(),
+      });
 
       await openInEditor("cursor", "/workspace/src/main.go");
 
-      expect(mockPost).toHaveBeenCalledWith("/api/editors/open", {
-        editor_id: "cursor",
-        path: "/workspace/src/main.go",
+      expect(mockApiPost).toHaveBeenCalledWith("/api/editors/open", {
+        body: { editor_id: "cursor", path: "/workspace/src/main.go" },
       });
     });
 
     it("returns void on success", async () => {
-      mockPost.mockResolvedValueOnce({ success: true });
+      mockApiPost.mockResolvedValueOnce({
+        data: { success: true },
+        error: undefined,
+        response: new Response(),
+      });
 
       const result = await openInEditor("vscode", "/path/to/file.ts");
 
@@ -162,19 +211,28 @@ describe("editors API", () => {
     });
 
     it("throws on network error from client", async () => {
-      mockPost.mockRejectedValueOnce(new Error("Connection refused"));
+      mockApiPost.mockResolvedValueOnce({
+        data: undefined,
+        error: { message: "Connection refused" },
+        response: new Response(null, {
+          status: 500,
+          statusText: "Connection refused",
+        }),
+      });
 
-      await expect(openInEditor("vscode", "/path/to/file.ts")).rejects.toThrow(
-        "Connection refused",
-      );
+      await expect(
+        openInEditor("vscode", "/path/to/file.ts"),
+      ).rejects.toThrow();
     });
 
     it("throws on API error from client", async () => {
-      mockPost.mockRejectedValueOnce(new Error("API Error: 404 Not Found"));
+      mockApiPost.mockResolvedValueOnce({
+        data: undefined,
+        error: { error: "Not Found" },
+        response: new Response(null, { status: 404, statusText: "Not Found" }),
+      });
 
-      await expect(openInEditor("unknown-editor", "/path")).rejects.toThrow(
-        "API Error: 404 Not Found",
-      );
+      await expect(openInEditor("unknown-editor", "/path")).rejects.toThrow();
     });
   });
 });

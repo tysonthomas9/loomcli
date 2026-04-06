@@ -1,6 +1,6 @@
 /**
  * API functions for git endpoints.
- * Interfaces with /api/agents/{name}/git/* endpoints.
+ * Uses legacy fetch wrapper (most spec responses are untyped Record<string, never>).
  */
 
 import { get, post, patch, wsUrl } from "./client";

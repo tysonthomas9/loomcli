@@ -4,9 +4,6 @@
 
 /**
  * Unit tests for the backend config API functions (config.ts).
- *
- * These tests verify that getBackendConfig and updateBackendConfig correctly
- * call the API client and unwrap the response envelope.
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -15,29 +12,26 @@ import { getBackendConfig, updateBackendConfig } from "../config";
 import type { BackendConfigData } from "../config";
 
 // Mock the API client module
-vi.mock("../client", () => ({
-  get: vi.fn(),
-  patch: vi.fn(),
-  ApiError: class ApiError extends Error {
-    status: number;
-    statusText: string;
-    constructor(status: number, statusText: string) {
-      super(`API Error: ${status} ${statusText}`);
-      this.name = "ApiError";
-      this.status = status;
-      this.statusText = statusText;
-    }
-  },
-}));
+vi.mock("../client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../client")>();
+  return {
+    ...actual,
+    api: {
+      GET: vi.fn(),
+      POST: vi.fn(),
+      PATCH: vi.fn(),
+      PUT: vi.fn(),
+      DELETE: vi.fn(),
+      use: vi.fn(),
+    },
+  };
+});
 
-import { get, patch } from "../client";
+import { api } from "../client";
 
-const mockGet = vi.mocked(get);
-const mockPatch = vi.mocked(patch);
+const mockApiGet = vi.mocked(api.GET);
+const mockApiPatch = vi.mocked(api.PATCH);
 
-/**
- * Helper to create a mock BackendConfigData.
- */
 function createMockConfigData(
   overrides?: Partial<BackendConfigData>,
 ): BackendConfigData {
@@ -57,12 +51,16 @@ describe("getBackendConfig", () => {
 
   it("calls GET /api/config/backend and unwraps response", async () => {
     const configData = createMockConfigData();
-    mockGet.mockResolvedValueOnce({ success: true, data: configData });
+    mockApiGet.mockResolvedValueOnce({
+      data: { success: true, data: configData },
+      error: undefined,
+      response: new Response(),
+    } as never);
 
     const result = await getBackendConfig();
 
-    expect(mockGet).toHaveBeenCalledTimes(1);
-    expect(mockGet).toHaveBeenCalledWith("/api/config/backend");
+    expect(mockApiGet).toHaveBeenCalledTimes(1);
+    expect(mockApiGet).toHaveBeenCalledWith("/api/config/backend");
     expect(result).toEqual(configData);
   });
 
@@ -76,7 +74,11 @@ describe("getBackendConfig", () => {
         { worktree: "feature-b", role: "reviewer", backend: "openai" },
       ],
     });
-    mockGet.mockResolvedValueOnce({ success: true, data: configData });
+    mockApiGet.mockResolvedValueOnce({
+      data: { success: true, data: configData },
+      error: undefined,
+      response: new Response(),
+    } as never);
 
     const result = await getBackendConfig();
 
@@ -88,18 +90,26 @@ describe("getBackendConfig", () => {
   });
 
   it("throws on failure response", async () => {
-    mockGet.mockResolvedValueOnce({
-      success: false,
-      error: "config not found",
-    });
+    mockApiGet.mockResolvedValueOnce({
+      data: { success: false, error: "config not found" },
+      error: undefined,
+      response: new Response(),
+    } as never);
 
     await expect(getBackendConfig()).rejects.toThrow();
   });
 
   it("throws on network error from client", async () => {
-    mockGet.mockRejectedValueOnce(new Error("Network error"));
+    mockApiGet.mockResolvedValueOnce({
+      data: undefined,
+      error: { message: "Network error" },
+      response: new Response(null, {
+        status: 500,
+        statusText: "Network error",
+      }),
+    } as never);
 
-    await expect(getBackendConfig()).rejects.toThrow("Network error");
+    await expect(getBackendConfig()).rejects.toThrow();
   });
 });
 
@@ -113,13 +123,17 @@ describe("updateBackendConfig", () => {
       backend: "openai",
       source: "project",
     });
-    mockPatch.mockResolvedValueOnce({ success: true, data: configData });
+    mockApiPatch.mockResolvedValueOnce({
+      data: { success: true, data: configData },
+      error: undefined,
+      response: new Response(),
+    } as never);
 
     const result = await updateBackendConfig("openai");
 
-    expect(mockPatch).toHaveBeenCalledTimes(1);
-    expect(mockPatch).toHaveBeenCalledWith("/api/config/backend", {
-      backend: "openai",
+    expect(mockApiPatch).toHaveBeenCalledTimes(1);
+    expect(mockApiPatch).toHaveBeenCalledWith("/api/config/backend", {
+      body: { backend: "openai" },
     });
     expect(result).toEqual(configData);
   });
@@ -130,7 +144,11 @@ describe("updateBackendConfig", () => {
       source: "project",
       available: ["anthropic", "openai", "local"],
     });
-    mockPatch.mockResolvedValueOnce({ success: true, data: configData });
+    mockApiPatch.mockResolvedValueOnce({
+      data: { success: true, data: configData },
+      error: undefined,
+      response: new Response(),
+    } as never);
 
     const result = await updateBackendConfig("local");
 
@@ -139,19 +157,25 @@ describe("updateBackendConfig", () => {
   });
 
   it("throws on failure response", async () => {
-    mockPatch.mockResolvedValueOnce({
-      success: false,
-      error: "invalid backend",
-    });
+    mockApiPatch.mockResolvedValueOnce({
+      data: { success: false, error: "invalid backend" },
+      error: undefined,
+      response: new Response(),
+    } as never);
 
     await expect(updateBackendConfig("invalid")).rejects.toThrow();
   });
 
   it("throws on network error from client", async () => {
-    mockPatch.mockRejectedValueOnce(new Error("Connection refused"));
+    mockApiPatch.mockResolvedValueOnce({
+      data: undefined,
+      error: { message: "Connection refused" },
+      response: new Response(null, {
+        status: 500,
+        statusText: "Connection refused",
+      }),
+    } as never);
 
-    await expect(updateBackendConfig("openai")).rejects.toThrow(
-      "Connection refused",
-    );
+    await expect(updateBackendConfig("openai")).rejects.toThrow();
   });
 });

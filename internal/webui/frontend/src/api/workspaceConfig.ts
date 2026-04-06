@@ -1,22 +1,10 @@
 /**
  * API client for per-workspace configuration endpoints.
- * Interfaces with PATCH /api/workspaces/{ws}/config/backend.
+ * Uses openapi-fetch generated client.
  */
 
-import { patch, ApiError, wsUrl } from "./client";
+import { api, ApiError, apiErrorFromResponse } from "./client";
 import type { WorkspaceData } from "./workspace";
-
-interface ApiSuccess<T> {
-  success: true;
-  data: T;
-}
-
-interface ApiFailure {
-  success: false;
-  error: string;
-}
-
-type ApiResult<T> = ApiSuccess<T> | ApiFailure;
 
 /**
  * Update a workspace's AI backend. Returns the updated workspace data.
@@ -26,12 +14,22 @@ export async function updateWorkspaceBackend(
   workspaceId: string,
   backend: string,
 ): Promise<WorkspaceData> {
-  const response = await patch<ApiResult<WorkspaceData>>(
-    wsUrl(workspaceId, "/config/backend"),
-    { backend },
+  const { data, error, response } = await api.PATCH(
+    "/api/workspaces/{ws}/config/backend",
+    {
+      params: { path: { ws: workspaceId } },
+      body: { backend },
+    },
   );
-  if (!response.success) {
-    throw new ApiError(0, response.error);
+  if (error) throw apiErrorFromResponse(error, response);
+  // The response is a MessageResponse, refetch workspace data
+  if (data && typeof data === "object" && "success" in data) {
+    const msg = data as { success: boolean; message?: string };
+    if (!msg.success) {
+      throw new ApiError(0, msg.message ?? "Unknown error");
+    }
   }
-  return response.data;
+  // Refetch full workspace data after backend update
+  const { fetchWorkspaceApi } = await import("./workspace");
+  return fetchWorkspaceApi(workspaceId);
 }

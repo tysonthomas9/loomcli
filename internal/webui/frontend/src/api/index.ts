@@ -1,4 +1,5 @@
 export {
+  api,
   ApiError,
   get,
   getText,
@@ -16,6 +17,8 @@ export {
   notifyDaemonUnavailable,
   onAuthTokenExpired,
   notifyAuthTokenExpired,
+  unwrapResponse,
+  apiErrorFromResponse,
 } from "./client";
 export type { RequestOptions, AuthState } from "./client";
 

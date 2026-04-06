@@ -9,7 +9,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { ApiError, get, getText } from "../client";
+import { ApiError, api } from "../client";
 import {
   getTaskSessions,
   getSession,
@@ -23,11 +23,18 @@ vi.mock("../client", async (importOriginal) => {
     ...actual,
     get: vi.fn(),
     getText: vi.fn(),
+    api: {
+      GET: vi.fn(),
+      POST: vi.fn(),
+      PATCH: vi.fn(),
+      PUT: vi.fn(),
+      DELETE: vi.fn(),
+      use: vi.fn(),
+    },
   };
 });
 
-const mockGet = vi.mocked(get);
-const mockGetText = vi.mocked(getText);
+const mockApiGet = vi.mocked(api.GET);
 
 describe("sessions API", () => {
   beforeEach(() => {
@@ -65,20 +72,31 @@ describe("sessions API", () => {
         },
       ];
 
-      mockGet.mockResolvedValueOnce({
-        data: { sessions },
-      });
+      mockApiGet.mockResolvedValueOnce({
+        data: {
+          data: { sessions },
+        },
+        error: undefined,
+        response: new Response(),
+      } as never);
 
       const result = await getTaskSessions("test-ws-id", "bd-abc123");
 
       expect(result).toEqual(sessions);
-      expect(mockGet).toHaveBeenCalledWith(
-        "/api/workspaces/test-ws-id/tasks/bd-abc123/sessions",
+      expect(mockApiGet).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/tasks/{taskId}/sessions",
+        {
+          params: { path: { ws: "test-ws-id", taskId: "bd-abc123" } },
+        },
       );
     });
 
     it("returns empty array when data is null", async () => {
-      mockGet.mockResolvedValueOnce({ data: null });
+      mockApiGet.mockResolvedValueOnce({
+        data: { data: null },
+        error: undefined,
+        response: new Response(),
+      } as never);
 
       const result = await getTaskSessions("test-ws-id", "bd-abc123");
 
@@ -86,9 +104,13 @@ describe("sessions API", () => {
     });
 
     it("returns empty array when sessions is null", async () => {
-      mockGet.mockResolvedValueOnce({
-        data: { sessions: null },
-      });
+      mockApiGet.mockResolvedValueOnce({
+        data: {
+          data: { sessions: null },
+        },
+        error: undefined,
+        response: new Response(),
+      } as never);
 
       const result = await getTaskSessions("test-ws-id", "bd-abc123");
 
@@ -96,7 +118,11 @@ describe("sessions API", () => {
     });
 
     it("returns empty array on 404 error", async () => {
-      mockGet.mockRejectedValueOnce(new ApiError(404, "Not Found"));
+      mockApiGet.mockResolvedValueOnce({
+        data: undefined,
+        error: { error: "Not Found" },
+        response: new Response(null, { status: 404, statusText: "Not Found" }),
+      } as never);
 
       const result = await getTaskSessions("test-ws-id", "bd-nonexistent");
 
@@ -104,28 +130,44 @@ describe("sessions API", () => {
     });
 
     it("throws on non-404 API errors", async () => {
-      mockGet.mockRejectedValueOnce(new ApiError(500, "Internal Server Error"));
+      mockApiGet.mockResolvedValueOnce({
+        data: undefined,
+        error: { error: "Internal Server Error" },
+        response: new Response(null, {
+          status: 500,
+          statusText: "Internal Server Error",
+        }),
+      } as never);
 
       await expect(getTaskSessions("test-ws-id", "bd-err")).rejects.toThrow(
-        "API Error: 500 Internal Server Error",
+        ApiError,
       );
     });
 
     it("throws on network errors", async () => {
-      mockGet.mockRejectedValueOnce(new Error("Network error"));
+      mockApiGet.mockRejectedValueOnce(new Error("Network error"));
 
       await expect(getTaskSessions("test-ws-id", "bd-err")).rejects.toThrow(
         "Network error",
       );
     });
 
-    it("URL-encodes the task ID", async () => {
-      mockGet.mockResolvedValueOnce({ data: { sessions: [] } });
+    it("passes workspace and task IDs as path params", async () => {
+      mockApiGet.mockResolvedValueOnce({
+        data: { data: { sessions: [] } },
+        error: undefined,
+        response: new Response(),
+      } as never);
 
       await getTaskSessions("test-ws-id", "task with spaces");
 
-      expect(mockGet).toHaveBeenCalledWith(
-        "/api/workspaces/test-ws-id/tasks/task%20with%20spaces/sessions",
+      expect(mockApiGet).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/tasks/{taskId}/sessions",
+        {
+          params: {
+            path: { ws: "test-ws-id", taskId: "task with spaces" },
+          },
+        },
       );
     });
   });
@@ -155,18 +197,31 @@ describe("sessions API", () => {
         is_active: true,
       };
 
-      mockGet.mockResolvedValueOnce({ data: session });
+      mockApiGet.mockResolvedValueOnce({
+        data: { data: session },
+        error: undefined,
+        response: new Response(),
+      } as never);
 
       const result = await getSession("test-ws-id", "bd-123", "s1");
 
       expect(result).toEqual(session);
-      expect(mockGet).toHaveBeenCalledWith(
-        "/api/workspaces/test-ws-id/tasks/bd-123/sessions/s1",
+      expect(mockApiGet).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}",
+        {
+          params: {
+            path: { ws: "test-ws-id", taskId: "bd-123", sessionId: "s1" },
+          },
+        },
       );
     });
 
     it("returns null when data is null", async () => {
-      mockGet.mockResolvedValueOnce({ data: null });
+      mockApiGet.mockResolvedValueOnce({
+        data: { data: null },
+        error: undefined,
+        response: new Response(),
+      } as never);
 
       const result = await getSession("test-ws-id", "bd-123", "s-missing");
 
@@ -174,7 +229,11 @@ describe("sessions API", () => {
     });
 
     it("returns null on 404 error", async () => {
-      mockGet.mockRejectedValueOnce(new ApiError(404, "Not Found"));
+      mockApiGet.mockResolvedValueOnce({
+        data: undefined,
+        error: { error: "Not Found" },
+        response: new Response(null, { status: 404, statusText: "Not Found" }),
+      } as never);
 
       const result = await getSession("test-ws-id", "bd-123", "s-nonexistent");
 
@@ -182,20 +241,40 @@ describe("sessions API", () => {
     });
 
     it("throws on non-404 errors", async () => {
-      mockGet.mockRejectedValueOnce(new ApiError(500, "Internal Server Error"));
+      mockApiGet.mockResolvedValueOnce({
+        data: undefined,
+        error: { error: "Internal Server Error" },
+        response: new Response(null, {
+          status: 500,
+          statusText: "Internal Server Error",
+        }),
+      } as never);
 
       await expect(getSession("test-ws-id", "bd-123", "s1")).rejects.toThrow(
-        "API Error: 500 Internal Server Error",
+        ApiError,
       );
     });
 
-    it("URL-encodes both task and session IDs", async () => {
-      mockGet.mockResolvedValueOnce({ data: null });
+    it("passes all IDs as path params", async () => {
+      mockApiGet.mockResolvedValueOnce({
+        data: { data: null },
+        error: undefined,
+        response: new Response(),
+      } as never);
 
       await getSession("test-ws-id", "task/id", "session/id");
 
-      expect(mockGet).toHaveBeenCalledWith(
-        "/api/workspaces/test-ws-id/tasks/task%2Fid/sessions/session%2Fid",
+      expect(mockApiGet).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}",
+        {
+          params: {
+            path: {
+              ws: "test-ws-id",
+              taskId: "task/id",
+              sessionId: "session/id",
+            },
+          },
+        },
       );
     });
   });
@@ -221,20 +300,33 @@ describe("sessions API", () => {
         },
       ];
 
-      mockGet.mockResolvedValueOnce({
-        data: { entries },
-      });
+      mockApiGet.mockResolvedValueOnce({
+        data: {
+          data: { entries },
+        },
+        error: undefined,
+        response: new Response(),
+      } as never);
 
       const result = await getSessionTranscript("test-ws-id", "bd-123", "s1");
 
       expect(result).toEqual(entries);
-      expect(mockGet).toHaveBeenCalledWith(
-        "/api/workspaces/test-ws-id/tasks/bd-123/sessions/s1/transcript",
+      expect(mockApiGet).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/transcript",
+        {
+          params: {
+            path: { ws: "test-ws-id", taskId: "bd-123", sessionId: "s1" },
+          },
+        },
       );
     });
 
     it("returns empty array when data is null", async () => {
-      mockGet.mockResolvedValueOnce({ data: null });
+      mockApiGet.mockResolvedValueOnce({
+        data: { data: null },
+        error: undefined,
+        response: new Response(),
+      } as never);
 
       const result = await getSessionTranscript("test-ws-id", "bd-123", "s1");
 
@@ -242,9 +334,13 @@ describe("sessions API", () => {
     });
 
     it("returns empty array when entries is null", async () => {
-      mockGet.mockResolvedValueOnce({
-        data: { entries: null },
-      });
+      mockApiGet.mockResolvedValueOnce({
+        data: {
+          data: { entries: null },
+        },
+        error: undefined,
+        response: new Response(),
+      } as never);
 
       const result = await getSessionTranscript("test-ws-id", "bd-123", "s1");
 
@@ -252,7 +348,11 @@ describe("sessions API", () => {
     });
 
     it("returns empty array on 404 error", async () => {
-      mockGet.mockRejectedValueOnce(new ApiError(404, "Not Found"));
+      mockApiGet.mockResolvedValueOnce({
+        data: undefined,
+        error: { error: "Not Found" },
+        response: new Response(null, { status: 404, statusText: "Not Found" }),
+      } as never);
 
       const result = await getSessionTranscript(
         "test-ws-id",
@@ -264,20 +364,40 @@ describe("sessions API", () => {
     });
 
     it("throws on non-404 errors", async () => {
-      mockGet.mockRejectedValueOnce(new ApiError(500, "Internal Server Error"));
+      mockApiGet.mockResolvedValueOnce({
+        data: undefined,
+        error: { error: "Internal Server Error" },
+        response: new Response(null, {
+          status: 500,
+          statusText: "Internal Server Error",
+        }),
+      } as never);
 
       await expect(
         getSessionTranscript("test-ws-id", "bd-123", "s1"),
-      ).rejects.toThrow("API Error: 500 Internal Server Error");
+      ).rejects.toThrow(ApiError);
     });
 
-    it("URL-encodes both IDs", async () => {
-      mockGet.mockResolvedValueOnce({ data: { entries: [] } });
+    it("passes all IDs as path params", async () => {
+      mockApiGet.mockResolvedValueOnce({
+        data: { data: { entries: [] } },
+        error: undefined,
+        response: new Response(),
+      } as never);
 
       await getSessionTranscript("test-ws-id", "task id", "session id");
 
-      expect(mockGet).toHaveBeenCalledWith(
-        "/api/workspaces/test-ws-id/tasks/task%20id/sessions/session%20id/transcript",
+      expect(mockApiGet).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/transcript",
+        {
+          params: {
+            path: {
+              ws: "test-ws-id",
+              taskId: "task id",
+              sessionId: "session id",
+            },
+          },
+        },
       );
     });
   });
@@ -286,20 +406,32 @@ describe("sessions API", () => {
 
   describe("getSessionDiff", () => {
     it("returns diff text on success", async () => {
-      mockGetText.mockResolvedValueOnce(
-        "diff --git a/file.ts b/file.ts\n+added line\n",
-      );
+      mockApiGet.mockResolvedValueOnce({
+        data: "diff --git a/file.ts b/file.ts\n+added line\n",
+        error: undefined,
+        response: new Response(),
+      } as never);
 
       const result = await getSessionDiff("test-ws-id", "bd-123", "s1");
 
       expect(result).toBe("diff --git a/file.ts b/file.ts\n+added line\n");
-      expect(mockGetText).toHaveBeenCalledWith(
-        "/api/workspaces/test-ws-id/tasks/bd-123/sessions/s1/diff",
+      expect(mockApiGet).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/diff",
+        {
+          params: {
+            path: { ws: "test-ws-id", taskId: "bd-123", sessionId: "s1" },
+          },
+          parseAs: "text",
+        },
       );
     });
 
     it("returns null on 404", async () => {
-      mockGetText.mockRejectedValueOnce(new ApiError(404, "Not Found"));
+      mockApiGet.mockResolvedValueOnce({
+        data: undefined,
+        error: { error: "Not Found" },
+        response: new Response(null, { status: 404, statusText: "Not Found" }),
+      } as never);
 
       const result = await getSessionDiff("test-ws-id", "bd-123", "s-missing");
 
@@ -307,9 +439,14 @@ describe("sessions API", () => {
     });
 
     it("throws ApiError on non-404 error", async () => {
-      mockGetText.mockRejectedValueOnce(
-        new ApiError(500, "Internal Server Error"),
-      );
+      mockApiGet.mockResolvedValueOnce({
+        data: undefined,
+        error: { error: "Internal Server Error" },
+        response: new Response(null, {
+          status: 500,
+          statusText: "Internal Server Error",
+        }),
+      } as never);
 
       await expect(
         getSessionDiff("test-ws-id", "bd-123", "s1"),
@@ -317,20 +454,41 @@ describe("sessions API", () => {
     });
 
     it("returns empty string for empty diff", async () => {
-      mockGetText.mockResolvedValueOnce("");
+      mockApiGet.mockResolvedValueOnce({
+        data: "",
+        error: undefined,
+        response: new Response(),
+      } as never);
 
       const result = await getSessionDiff("test-ws-id", "bd-123", "s1");
 
+      // Note: empty string is falsy, so getSessionDiff returns null for it
+      // based on the implementation: `return data ?? null;`
+      // An empty string is not nullish, so it should return ""
       expect(result).toBe("");
     });
 
-    it("URL-encodes both IDs in the getText call", async () => {
-      mockGetText.mockResolvedValueOnce("");
+    it("passes all IDs as path params", async () => {
+      mockApiGet.mockResolvedValueOnce({
+        data: "",
+        error: undefined,
+        response: new Response(),
+      } as never);
 
       await getSessionDiff("test-ws-id", "task/id", "session/id");
 
-      expect(mockGetText).toHaveBeenCalledWith(
-        "/api/workspaces/test-ws-id/tasks/task%2Fid/sessions/session%2Fid/diff",
+      expect(mockApiGet).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/diff",
+        {
+          params: {
+            path: {
+              ws: "test-ws-id",
+              taskId: "task/id",
+              sessionId: "session/id",
+            },
+          },
+          parseAs: "text",
+        },
       );
     });
   });

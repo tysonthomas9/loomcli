@@ -1,29 +1,11 @@
 /**
  * API functions for issue events (audit trail).
+ * Uses openapi-fetch generated client.
  */
 
 import type { Event } from "@/types";
 
-import { get, ApiError, wsUrl } from "./client";
-
-interface ApiSuccess<T> {
-  success: true;
-  data: T;
-}
-
-interface ApiFailure {
-  success: false;
-  error: string;
-}
-
-type ApiResult<T> = ApiSuccess<T> | ApiFailure;
-
-function unwrap<T>(response: ApiResult<T>): T {
-  if (!response.success) {
-    throw new ApiError(0, response.error);
-  }
-  return response.data;
-}
+import { api, apiErrorFromResponse } from "./client";
 
 /**
  * Fetch events for an issue.
@@ -32,14 +14,17 @@ function unwrap<T>(response: ApiResult<T>): T {
 export async function getIssueEvents(
   workspaceId: string,
   issueId: string,
-  limit = 100,
+  _limit = 100,
 ): Promise<Event[]> {
-  const params = limit !== 100 ? `?limit=${limit}` : "";
-  const response = await get<ApiResult<Event[]>>(
-    wsUrl(
-      workspaceId,
-      `/issues/${encodeURIComponent(issueId)}/events${params}`,
-    ),
+  const { data, error, response } = await api.GET(
+    "/api/workspaces/{ws}/issues/{id}/events",
+    {
+      params: { path: { ws: workspaceId, id: issueId } },
+    },
   );
-  return unwrap(response);
+  if (error) throw apiErrorFromResponse(error, response);
+  if (!data || !data.success) {
+    throw new Error("Failed to fetch events");
+  }
+  return data.data as unknown as Event[];
 }

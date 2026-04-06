@@ -1,17 +1,10 @@
 /**
  * API client for editor endpoints.
- * Stateless — no module-level caches. Caching belongs in editorStore.
- * Interfaces with GET /api/editors and POST /api/editors/open endpoints.
+ * Uses openapi-fetch generated client.
  */
 
-import { get, post } from "./client";
+import { api, apiErrorFromResponse } from "./client";
 import type { EditorInfo } from "@/types/editor";
-
-// ============= Types =============
-
-interface EditorsListResponse {
-  editors: EditorInfo[];
-}
 
 // ============= API Functions =============
 
@@ -19,8 +12,9 @@ interface EditorsListResponse {
  * Fetch the list of available editors. Always hits the network.
  */
 export async function fetchEditors(): Promise<EditorInfo[]> {
-  const response = await get<EditorsListResponse>("/api/editors");
-  return response.editors;
+  const { data, error, response } = await api.GET("/api/editors");
+  if (error) throw apiErrorFromResponse(error, response);
+  return data.data?.editors ?? [];
 }
 
 /**
@@ -37,8 +31,8 @@ export async function openInEditor(
   editorId: string,
   path: string,
 ): Promise<void> {
-  await post<{ success: boolean }>("/api/editors/open", {
-    editor_id: editorId,
-    path,
+  const { error, response } = await api.POST("/api/editors/open", {
+    body: { editor_id: editorId, path },
   });
+  if (error) throw apiErrorFromResponse(error, response);
 }

@@ -23,22 +23,54 @@ import type {
   IssueContext,
 } from "./terminal";
 
-// Mock the client module
+// Mock the client module — export both legacy helpers AND the typed `api` object
 vi.mock("./client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./client")>();
   return {
     ...actual,
+    // Legacy fetch wrappers (still used by fetchTerminalToken, restartTerminalSession, etc.)
     get: vi.fn(),
     post: vi.fn(),
     patch: vi.fn(),
     del: vi.fn(),
+    // openapi-fetch typed client
+    api: {
+      GET: vi.fn(),
+      POST: vi.fn(),
+      PATCH: vi.fn(),
+      PUT: vi.fn(),
+      DELETE: vi.fn(),
+      use: vi.fn(),
+    },
   };
 });
 
+// Import the mocked api after vi.mock so we can reference it in tests
+import { api } from "./client";
+
 const mockGet = get as ReturnType<typeof vi.fn>;
-const mockPost = post as ReturnType<typeof vi.fn>;
-const mockPatch = patch as ReturnType<typeof vi.fn>;
-const mockDel = del as ReturnType<typeof vi.fn>;
+const _mockPost = post as ReturnType<typeof vi.fn>;
+const _mockPatch = patch as ReturnType<typeof vi.fn>;
+const _mockDel = del as ReturnType<typeof vi.fn>;
+
+const mockApiGET = api.GET as ReturnType<typeof vi.fn>;
+const mockApiPOST = api.POST as ReturnType<typeof vi.fn>;
+const mockApiPATCH = api.PATCH as ReturnType<typeof vi.fn>;
+const mockApiDELETE = api.DELETE as ReturnType<typeof vi.fn>;
+
+// Helper: build a successful openapi-fetch response
+function okResponse<T>(data: T) {
+  return { data, error: undefined, response: new Response() };
+}
+
+// Helper: build an error openapi-fetch response
+function errResponse(status: number, statusText: string, body?: unknown) {
+  return {
+    data: undefined,
+    error: body ?? statusText,
+    response: new Response(null, { status, statusText }),
+  };
+}
 
 describe("terminal API", () => {
   beforeEach(() => {
@@ -58,24 +90,25 @@ describe("terminal API", () => {
         { name: "session-2", label: "Session 2", created: 2000 },
       ];
 
-      mockGet.mockResolvedValue({
-        success: true,
-        data: { sessions },
-      });
+      mockApiGET.mockResolvedValue(
+        okResponse({ success: true, data: { sessions } }),
+      );
 
       const result = await listTerminalSessions("test-ws-id");
 
       expect(result).toEqual(sessions);
-      expect(mockGet).toHaveBeenCalledWith(
-        "/api/workspaces/test-ws-id/terminal/sessions",
+      expect(mockApiGET).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/terminal/sessions",
+        {
+          params: { path: { ws: "test-ws-id" } },
+        },
       );
     });
 
     it("returns empty array when server returns no sessions", async () => {
-      mockGet.mockResolvedValue({
-        success: true,
-        data: { sessions: [] },
-      });
+      mockApiGET.mockResolvedValue(
+        okResponse({ success: true, data: { sessions: [] } }),
+      );
 
       const result = await listTerminalSessions("test-ws-id");
 
@@ -83,21 +116,20 @@ describe("terminal API", () => {
     });
 
     it("throws ApiError when response indicates failure", async () => {
-      mockGet.mockResolvedValue({
-        success: false,
-        error: "terminal sessions unavailable",
-      });
+      mockApiGET.mockResolvedValue(
+        errResponse(400, "Bad Request", "terminal sessions unavailable"),
+      );
 
       await expect(listTerminalSessions("test-ws-id")).rejects.toThrow(
         ApiError,
       );
-      await expect(listTerminalSessions("test-ws-id")).rejects.toThrow(
-        "terminal sessions unavailable",
+      await expect(listTerminalSessions("test-ws-id")).rejects.toSatisfy(
+        (err: ApiError) => err.body === "terminal sessions unavailable",
       );
     });
 
     it("propagates network errors from client", async () => {
-      mockGet.mockRejectedValue(new ApiError(500, "Internal Server Error"));
+      mockApiGET.mockResolvedValue(errResponse(500, "Internal Server Error"));
 
       await expect(listTerminalSessions("test-ws-id")).rejects.toThrow(
         "API Error: 500 Internal Server Error",
@@ -156,31 +188,34 @@ describe("terminal API", () => {
           label: "Session 1",
           notes: "",
           sort_order: 0,
+          pinned: false,
           created_at: "2026-01-01T00:00:00Z",
           updated_at: "2026-01-01T00:00:00Z",
         },
       ];
 
-      mockGet.mockResolvedValue({ success: true, data: tabs });
+      mockApiGET.mockResolvedValue(okResponse({ success: true, data: tabs }));
 
       const result = await listTabMetadata("ws-123");
       expect(result).toEqual(tabs);
-      expect(mockGet).toHaveBeenCalledWith(
-        "/api/workspaces/ws-123/terminal/tabs",
+      expect(mockApiGET).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/terminal/tabs",
+        {
+          params: { path: { ws: "ws-123" } },
+        },
       );
     });
 
     it("throws on failure response", async () => {
-      mockGet.mockResolvedValue({
-        success: false,
-        error: "no Redis",
-      });
+      mockApiGET.mockResolvedValue(
+        okResponse({ success: false, error: "no Redis" }),
+      );
 
       await expect(listTabMetadata("ws-123")).rejects.toThrow(ApiError);
     });
 
     it("returns empty array on 404 ApiError (tab metadata disabled)", async () => {
-      mockGet.mockRejectedValue(new ApiError(404, "Not Found"));
+      mockApiGET.mockResolvedValue(errResponse(404, "Not Found"));
 
       const result = await listTabMetadata("ws-123");
 
@@ -188,7 +223,7 @@ describe("terminal API", () => {
     });
 
     it("returns empty array on 503 ApiError (Redis unavailable)", async () => {
-      mockGet.mockRejectedValue(new ApiError(503, "Service Unavailable"));
+      mockApiGET.mockResolvedValue(errResponse(503, "Service Unavailable"));
 
       const result = await listTabMetadata("ws-123");
 
@@ -196,7 +231,7 @@ describe("terminal API", () => {
     });
 
     it("re-throws non-404/503 ApiError", async () => {
-      mockGet.mockRejectedValue(new ApiError(500, "Internal Server Error"));
+      mockApiGET.mockResolvedValue(errResponse(500, "Internal Server Error"));
 
       await expect(listTabMetadata("ws-123")).rejects.toThrow(
         "API Error: 500 Internal Server Error",
@@ -204,7 +239,7 @@ describe("terminal API", () => {
     });
 
     it("re-throws non-ApiError errors", async () => {
-      mockGet.mockRejectedValue(new Error("network failure"));
+      mockApiGET.mockRejectedValue(new Error("network failure"));
 
       await expect(listTabMetadata("ws-123")).rejects.toThrow(
         "network failure",
@@ -221,35 +256,45 @@ describe("terminal API", () => {
         label: "Test",
         notes: "notes",
         sort_order: 1,
+        pinned: false,
         created_at: "2026-01-01T00:00:00Z",
         updated_at: "2026-01-01T00:00:00Z",
       };
 
-      mockGet.mockResolvedValue({ success: true, data: tab });
+      mockApiGET.mockResolvedValue(okResponse({ success: true, data: tab }));
 
       const result = await getTabMetadata("ws-123", "test");
       expect(result).toEqual(tab);
-      expect(mockGet).toHaveBeenCalledWith(
-        "/api/workspaces/ws-123/terminal/tabs/test",
+      expect(mockApiGET).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/terminal/tabs/{session}",
+        {
+          params: { path: { ws: "ws-123", session: "test" } },
+        },
       );
     });
 
     it("URL-encodes the session name", async () => {
-      mockGet.mockResolvedValue({
-        success: true,
-        data: {
-          session_name: "my-tab",
-          label: "My Tab",
-          notes: "",
-          sort_order: 0,
-          created_at: "",
-          updated_at: "",
-        },
-      });
+      mockApiGET.mockResolvedValue(
+        okResponse({
+          success: true,
+          data: {
+            session_name: "my-tab",
+            label: "My Tab",
+            notes: "",
+            sort_order: 0,
+            pinned: false,
+            created_at: "",
+            updated_at: "",
+          },
+        }),
+      );
 
       await getTabMetadata("ws-123", "my-tab");
-      expect(mockGet).toHaveBeenCalledWith(
-        "/api/workspaces/ws-123/terminal/tabs/my-tab",
+      expect(mockApiGET).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/terminal/tabs/{session}",
+        {
+          params: { path: { ws: "ws-123", session: "my-tab" } },
+        },
       );
     });
   });
@@ -263,20 +308,26 @@ describe("terminal API", () => {
         label: "Updated",
         notes: "",
         sort_order: 1,
+        pinned: false,
         created_at: "2026-01-01T00:00:00Z",
         updated_at: "2026-01-02T00:00:00Z",
       };
 
-      mockPatch.mockResolvedValue({ success: true, data: updated });
+      // patchTabMetadata does PATCH then refetches via getTabMetadata (GET)
+      mockApiPATCH.mockResolvedValue(okResponse({ success: true }));
+      mockApiGET.mockResolvedValue(
+        okResponse({ success: true, data: updated }),
+      );
 
       const result = await patchTabMetadata("ws-123", "test", {
         label: "Updated",
       });
       expect(result).toEqual(updated);
-      expect(mockPatch).toHaveBeenCalledWith(
-        "/api/workspaces/ws-123/terminal/tabs/test",
+      expect(mockApiPATCH).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/terminal/tabs/{session}",
         {
-          label: "Updated",
+          params: { path: { ws: "ws-123", session: "test" } },
+          body: { label: "Updated" },
         },
       );
     });
@@ -286,11 +337,14 @@ describe("terminal API", () => {
 
   describe("deleteTabMetadata", () => {
     it("sends delete request", async () => {
-      mockDel.mockResolvedValue({ success: true });
+      mockApiDELETE.mockResolvedValue(okResponse({ success: true }));
 
       await deleteTabMetadata("ws-123", "test");
-      expect(mockDel).toHaveBeenCalledWith(
-        "/api/workspaces/ws-123/terminal/tabs/test",
+      expect(mockApiDELETE).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/terminal/tabs/{session}",
+        {
+          params: { path: { ws: "ws-123", session: "test" } },
+        },
       );
     });
   });
@@ -299,7 +353,7 @@ describe("terminal API", () => {
 
   describe("seedTerminalSession", () => {
     it("sends POST to correct URL with context body", async () => {
-      mockPost.mockResolvedValue({ success: true });
+      mockApiPOST.mockResolvedValue(okResponse({ success: true }));
 
       const context: IssueContext = {
         issue_id: "PROJ-123",
@@ -311,28 +365,36 @@ describe("terminal API", () => {
 
       await seedTerminalSession("test-ws-id", "my-session", context);
 
-      expect(mockPost).toHaveBeenCalledWith(
-        "/api/workspaces/test-ws-id/terminal/sessions/my-session/seed",
-        context,
+      expect(mockApiPOST).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/terminal/sessions/{name}/seed",
+        {
+          params: { path: { ws: "test-ws-id", name: "my-session" } },
+          body: context,
+        },
       );
     });
 
     it("URL-encodes the session name", async () => {
-      mockPost.mockResolvedValue({ success: true });
+      mockApiPOST.mockResolvedValue(okResponse({ success: true }));
 
       await seedTerminalSession("test-ws-id", "session with spaces", {
         issue_id: "X-1",
         title: "Test",
       });
 
-      expect(mockPost).toHaveBeenCalledWith(
-        "/api/workspaces/test-ws-id/terminal/sessions/session%20with%20spaces/seed",
-        { issue_id: "X-1", title: "Test" },
+      expect(mockApiPOST).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/terminal/sessions/{name}/seed",
+        {
+          params: {
+            path: { ws: "test-ws-id", name: "session with spaces" },
+          },
+          body: { issue_id: "X-1", title: "Test" },
+        },
       );
     });
 
     it("sends minimal context without optional fields", async () => {
-      mockPost.mockResolvedValue({ success: true });
+      mockApiPOST.mockResolvedValue(okResponse({ success: true }));
 
       const context: IssueContext = {
         issue_id: "X-1",
@@ -341,14 +403,17 @@ describe("terminal API", () => {
 
       await seedTerminalSession("test-ws-id", "test-session", context);
 
-      expect(mockPost).toHaveBeenCalledWith(
-        "/api/workspaces/test-ws-id/terminal/sessions/test-session/seed",
-        context,
+      expect(mockApiPOST).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/terminal/sessions/{name}/seed",
+        {
+          params: { path: { ws: "test-ws-id", name: "test-session" } },
+          body: context,
+        },
       );
     });
 
     it("propagates errors from client", async () => {
-      mockPost.mockRejectedValue(new ApiError(404, "Not Found"));
+      mockApiPOST.mockResolvedValue(errResponse(404, "Not Found"));
 
       await expect(
         seedTerminalSession("test-ws-id", "missing", {
@@ -450,37 +515,50 @@ describe("terminal API", () => {
 
   describe("fetchScrollback", () => {
     it("returns scrollback content and line count on success", async () => {
-      mockGet.mockResolvedValue({
-        success: true,
-        data: { content: "line1\nline2\nline3", lines: 3 },
-      });
+      mockApiGET.mockResolvedValue(
+        okResponse({
+          success: true,
+          data: { content: "line1\nline2\nline3", lines: 3 },
+        }),
+      );
 
       const result = await fetchScrollback("test-ws-id", "my-session");
 
       expect(result).toEqual({ content: "line1\nline2\nline3", lines: 3 });
-      expect(mockGet).toHaveBeenCalledWith(
-        "/api/workspaces/test-ws-id/terminal/sessions/my-session/scrollback",
+      expect(mockApiGET).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/terminal/sessions/{session}/scrollback",
+        {
+          params: {
+            path: { ws: "test-ws-id", session: "my-session" },
+          },
+        },
       );
     });
 
     it("URL-encodes the session name", async () => {
-      mockGet.mockResolvedValue({
-        success: true,
-        data: { content: "", lines: 0 },
-      });
+      mockApiGET.mockResolvedValue(
+        okResponse({ success: true, data: { content: "", lines: 0 } }),
+      );
 
       await fetchScrollback("test-ws-id", "session with spaces");
 
-      expect(mockGet).toHaveBeenCalledWith(
-        "/api/workspaces/test-ws-id/terminal/sessions/session%20with%20spaces/scrollback",
+      expect(mockApiGET).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/terminal/sessions/{session}/scrollback",
+        {
+          params: {
+            path: {
+              ws: "test-ws-id",
+              session: "session with spaces",
+            },
+          },
+        },
       );
     });
 
     it("throws ApiError when response indicates failure", async () => {
-      mockGet.mockResolvedValue({
-        success: false,
-        error: "session not found",
-      });
+      mockApiGET.mockResolvedValue(
+        okResponse({ success: false, error: "session not found" }),
+      );
 
       await expect(fetchScrollback("test-ws-id", "missing")).rejects.toThrow(
         ApiError,
@@ -491,7 +569,7 @@ describe("terminal API", () => {
     });
 
     it("propagates network errors from client", async () => {
-      mockGet.mockRejectedValue(new ApiError(500, "Internal Server Error"));
+      mockApiGET.mockResolvedValue(errResponse(500, "Internal Server Error"));
 
       await expect(fetchScrollback("test-ws-id", "my-session")).rejects.toThrow(
         "API Error: 500 Internal Server Error",
@@ -503,18 +581,21 @@ describe("terminal API", () => {
 
   describe("getTerminalState", () => {
     it("returns terminal state with active_tab", async () => {
-      mockGet.mockResolvedValue({ active_tab: "session-abc" });
+      mockApiGET.mockResolvedValue(okResponse({ active_tab: "session-abc" }));
 
       const result = await getTerminalState("test-ws-id");
 
       expect(result).toEqual({ active_tab: "session-abc" });
-      expect(mockGet).toHaveBeenCalledWith(
-        "/api/workspaces/test-ws-id/terminal/state",
+      expect(mockApiGET).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/terminal/state",
+        {
+          params: { path: { ws: "test-ws-id" } },
+        },
       );
     });
 
     it("returns empty active_tab when no state set", async () => {
-      mockGet.mockResolvedValue({ active_tab: "" });
+      mockApiGET.mockResolvedValue(okResponse({ active_tab: "" }));
 
       const result = await getTerminalState("test-ws-id");
 
@@ -522,7 +603,7 @@ describe("terminal API", () => {
     });
 
     it("propagates network errors from client", async () => {
-      mockGet.mockRejectedValue(new ApiError(500, "Internal Server Error"));
+      mockApiGET.mockResolvedValue(errResponse(500, "Internal Server Error"));
 
       await expect(getTerminalState("test-ws-id")).rejects.toThrow(
         "API Error: 500 Internal Server Error",
@@ -534,33 +615,35 @@ describe("terminal API", () => {
 
   describe("patchTerminalState", () => {
     it("sends PATCH with active_tab", async () => {
-      mockPatch.mockResolvedValue({ active_tab: "session-xyz" });
+      mockApiPATCH.mockResolvedValue(okResponse({ active_tab: "session-xyz" }));
 
       await patchTerminalState("test-ws-id", { active_tab: "session-xyz" });
 
-      expect(mockPatch).toHaveBeenCalledWith(
-        "/api/workspaces/test-ws-id/terminal/state",
+      expect(mockApiPATCH).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/terminal/state",
         {
-          active_tab: "session-xyz",
+          params: { path: { ws: "test-ws-id" } },
+          body: { active_tab: "session-xyz" },
         },
       );
     });
 
     it("sends PATCH with empty active_tab to clear state", async () => {
-      mockPatch.mockResolvedValue({ active_tab: "" });
+      mockApiPATCH.mockResolvedValue(okResponse({ active_tab: "" }));
 
       await patchTerminalState("test-ws-id", { active_tab: "" });
 
-      expect(mockPatch).toHaveBeenCalledWith(
-        "/api/workspaces/test-ws-id/terminal/state",
+      expect(mockApiPATCH).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/terminal/state",
         {
-          active_tab: "",
+          params: { path: { ws: "test-ws-id" } },
+          body: { active_tab: "" },
         },
       );
     });
 
     it("propagates network errors from client", async () => {
-      mockPatch.mockRejectedValue(new ApiError(500, "Internal Server Error"));
+      mockApiPATCH.mockResolvedValue(errResponse(500, "Internal Server Error"));
 
       await expect(
         patchTerminalState("test-ws-id", { active_tab: "test" }),

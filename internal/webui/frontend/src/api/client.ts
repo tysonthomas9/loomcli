@@ -1,4 +1,6 @@
-const API_BASE_URL = "";
+import createClient, { type Middleware } from "openapi-fetch";
+import type { paths } from "@/types/generated/openapi";
+
 const DEFAULT_TIMEOUT = 30000;
 
 // Auth token stored in memory (not localStorage) for XSS safety
@@ -125,6 +127,145 @@ export function getAuthToken(): string | null {
   return authToken;
 }
 
+// ============= openapi-fetch client =============
+
+/**
+ * Middleware that injects auth token, handles timeouts, intercepts
+ * 401/503 responses, and reports 5xx errors.
+ */
+const apiMiddleware: Middleware = {
+  async onRequest({ request }) {
+    // Inject auth token
+    if (authToken && !request.headers.get("Authorization")) {
+      request.headers.set("Authorization", `Bearer ${authToken}`);
+    }
+
+    // Apply default timeout if no signal is already set.
+    // When a per-call signal is provided via fetch options, openapi-fetch
+    // passes it on the request already — skip adding a duplicate timeout.
+    if (!request.signal || !request.signal.aborted) {
+      // We attach a timeout controller via a custom header so the
+      // onResponse handler can clear it. openapi-fetch doesn't provide
+      // a context bag, so we stash the timeout ID on the request.
+      const hasCustomSignal =
+        request.signal && request.signal !== AbortSignal.prototype;
+
+      if (!hasCustomSignal) {
+        // No custom signal — add default timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT);
+        // Store cleanup function on the controller for later
+        (
+          controller as unknown as { _timeoutId: ReturnType<typeof setTimeout> }
+        )._timeoutId = timeoutId;
+        // Replace signal
+        const newReq = new Request(request, { signal: controller.signal });
+        // Copy over the timeout cleanup ref
+        (
+          newReq as unknown as { _timeoutController: AbortController }
+        )._timeoutController = controller;
+        return newReq;
+      }
+    }
+    return request;
+  },
+  async onResponse({ request, response }) {
+    // Clean up timeout if we created one
+    const controller = (
+      request as unknown as { _timeoutController?: AbortController }
+    )._timeoutController;
+    if (controller) {
+      clearTimeout(
+        (controller as unknown as { _timeoutId: ReturnType<typeof setTimeout> })
+          ._timeoutId,
+      );
+    }
+
+    if (!response.ok) {
+      // 401 interceptor
+      if (response.status === 401 && authToken !== null) {
+        setAuthToken(null);
+        notifyAuthTokenExpired();
+      }
+
+      // 503 daemon unavailable
+      if (response.status === 503) {
+        notifyDaemonUnavailable();
+      }
+
+      // 5xx error reporting (avoid recursion for the error endpoint itself)
+      const url = new URL(request.url, "http://localhost");
+      if (
+        response.status >= 500 &&
+        !url.pathname.endsWith("/api/client-errors")
+      ) {
+        import("@/api/errorReporter")
+          .then(({ reportError }) => {
+            reportError(
+              "api-error",
+              `${response.status} ${response.statusText}`,
+              { url: url.pathname },
+            );
+          })
+          .catch(() => {}); // silent
+      }
+    }
+    return response;
+  },
+};
+
+/** Typed openapi-fetch client for all REST API calls. */
+export const api = createClient<paths>({ baseUrl: "" });
+api.use(apiMiddleware);
+
+// ============= Helpers for facade layer =============
+
+/**
+ * Convert an openapi-fetch error response into an ApiError.
+ * Called by facade functions when `error` is truthy.
+ */
+export function apiErrorFromResponse(
+  error: unknown,
+  response?: Response,
+): ApiError {
+  if (response) {
+    return new ApiError(response.status, response.statusText, error);
+  }
+  return new ApiError(0, "Network error", error);
+}
+
+/**
+ * Unwrap the standard {success, data} response envelope.
+ * Throws ApiError if success is false.
+ */
+export function unwrapResponse<T>(envelope: {
+  success: boolean;
+  data?: T;
+  error?: string;
+}): T {
+  if (!envelope.success) {
+    throw new ApiError(0, envelope.error ?? "Unknown error");
+  }
+  return envelope.data as T;
+}
+
+/**
+ * Strip undefined values from an object so exactOptionalPropertyTypes is satisfied.
+ * Use with explicit type parameter: cleanQuery<TargetType>({...})
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function cleanQuery<Q = any>(obj: Record<string, unknown>): Q {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined) {
+      result[key] = value;
+    }
+  }
+  return result as Q;
+}
+
+// ============= Legacy fetchApi (kept for non-OpenAPI endpoints) =============
+
 async function fetchApi<T>(
   method: string,
   path: string,
@@ -163,7 +304,7 @@ async function fetchApi<T>(
 
     const requestBody = body !== undefined ? JSON.stringify(body) : null;
 
-    const response = await fetch(`${API_BASE_URL}${path}`, {
+    const response = await fetch(`${path}`, {
       method,
       headers,
       body: requestBody,

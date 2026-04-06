@@ -1,6 +1,6 @@
 /**
  * API functions for git diff endpoints.
- * Interfaces with GET /api/agents/{name}/diff/* endpoints.
+ * Uses legacy fetch wrapper (spec responses are untyped Record<string, never>).
  */
 
 import { get, ApiError, wsUrl } from "./client";
