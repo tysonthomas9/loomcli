@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
@@ -17,7 +18,7 @@ func TestNotifySessionChange_ValidToken(t *testing.T) {
 	handler := handleNotifySessionChange(hub, "secret-token-123")
 
 	body := `{"task_id":"task-1","session_id":"sess-1","status":"completed","workspace_id":"ws-1"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/sessions/notify", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, sessions.NotifyPath, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer secret-token-123")
 	rr := httptest.NewRecorder()
@@ -37,7 +38,7 @@ func TestNotifySessionChange_MissingAuthHeader(t *testing.T) {
 	handler := handleNotifySessionChange(hub, "secret-token-123")
 
 	body := `{"task_id":"task-1","session_id":"sess-1","status":"completed","workspace_id":"ws-1"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/sessions/notify", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, sessions.NotifyPath, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	// No Authorization header
 	rr := httptest.NewRecorder()
@@ -57,7 +58,7 @@ func TestNotifySessionChange_WrongToken(t *testing.T) {
 	handler := handleNotifySessionChange(hub, "correct-token")
 
 	body := `{"task_id":"task-1","session_id":"sess-1","status":"completed","workspace_id":"ws-1"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/sessions/notify", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, sessions.NotifyPath, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer wrong-token")
 	rr := httptest.NewRecorder()
@@ -77,7 +78,7 @@ func TestNotifySessionChange_EmptyServerToken(t *testing.T) {
 	handler := handleNotifySessionChange(hub, "")
 
 	body := `{"task_id":"task-1","session_id":"sess-1","status":"completed","workspace_id":"ws-1"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/sessions/notify", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, sessions.NotifyPath, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer any-token")
 	rr := httptest.NewRecorder()
@@ -96,7 +97,7 @@ func TestNotifySessionChange_InvalidJSON(t *testing.T) {
 
 	handler := handleNotifySessionChange(hub, "valid-token")
 
-	req := httptest.NewRequest(http.MethodPost, "/api/sessions/notify", strings.NewReader("not json"))
+	req := httptest.NewRequest(http.MethodPost, sessions.NotifyPath, strings.NewReader("not json"))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer valid-token")
 	rr := httptest.NewRecorder()
@@ -117,7 +118,7 @@ func TestNotifySessionChange_MissingTaskID(t *testing.T) {
 
 	// Missing task_id
 	body := `{"session_id":"sess-1","status":"completed","workspace_id":"ws-1"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/sessions/notify", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, sessions.NotifyPath, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer valid-token")
 	rr := httptest.NewRecorder()
@@ -138,7 +139,7 @@ func TestNotifySessionChange_MissingSessionID(t *testing.T) {
 
 	// Missing session_id
 	body := `{"task_id":"task-1","status":"completed","workspace_id":"ws-1"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/sessions/notify", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, sessions.NotifyPath, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer valid-token")
 	rr := httptest.NewRecorder()

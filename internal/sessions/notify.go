@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"time"
 )
+
+// NotifyPath is the API route path for session change notifications.
+// Used by both the client (sessions.NotifyWebUI) and server (webui routes + auth middleware).
+const NotifyPath = "/api/sessions/notify"
 
 // sessionNotifyPayload is the JSON body sent to the web UI notification endpoint.
 type sessionNotifyPayload struct {
@@ -41,7 +44,7 @@ func NotifyWebUI(ctx context.Context, serverURL, taskID, sessionID string, statu
 	notifyCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
-	url := fmt.Sprintf("%s/api/sessions/notify", serverURL)
+	url := serverURL + NotifyPath
 	req, err := http.NewRequestWithContext(notifyCtx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		log.Printf("sessions.NotifyWebUI: request error: %v", err)

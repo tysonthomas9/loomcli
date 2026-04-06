@@ -3,6 +3,7 @@ package webui
 import (
 	"net/http"
 
+	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
@@ -64,7 +65,7 @@ func (app *Server) registerRoutes() {
 
 	// Session change notification endpoint for local agents to push SSE events
 	if app.notifySessionChangeHandler != nil {
-		app.mux.HandleFunc("POST /api/sessions/notify", app.notifySessionChangeHandler)
+		app.mux.HandleFunc("POST "+sessions.NotifyPath, app.notifySessionChangeHandler)
 	}
 
 	// Workspace management and workspace-scoped API routes
