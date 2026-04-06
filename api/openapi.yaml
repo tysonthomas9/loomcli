@@ -1,0 +1,4885 @@
+openapi: 3.1.0
+info:
+  title: Loom CLI API
+  description: |
+    REST API for the Loom CLI web UI and daemon. Covers workspace management,
+    issue tracking, agent lifecycle, terminal sessions, git operations, fleet
+    coordination, monitoring, and observability.
+  version: 0.1.0
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:8080
+    description: Local development server (post-consolidation single server)
+
+tags:
+  - name: health
+    description: Health checks and metrics
+  - name: config
+    description: Authentication and backend configuration
+  - name: workspaces
+    description: Workspace CRUD and topology
+  - name: issues
+    description: Issue CRUD, search, and lifecycle
+  - name: comments
+    description: Issue comments
+  - name: dependencies
+    description: Issue dependency management
+  - name: ready
+    description: Ready (unblocked) issue queue
+  - name: blocked
+    description: Blocked issues listing
+  - name: graph
+    description: Dependency graph visualization
+  - name: stats
+    description: Workspace and project statistics
+  - name: events
+    description: Issue audit events and SSE mutation stream
+  - name: sessions
+    description: Session audit trail (task-scoped)
+  - name: session-history
+    description: Session history (issue-scoped, Redis-backed)
+  - name: logs
+    description: Agent and task log retrieval
+  - name: terminal
+    description: Terminal session management, spawning, scrollback
+  - name: terminal-tabs
+    description: Terminal tab metadata (Redis-backed)
+  - name: terminal-state
+    description: Terminal UI state persistence
+  - name: agent-terminal
+    description: Per-agent terminal info and WebSocket
+  - name: agent-control
+    description: Agent lifecycle (start/stop/restart/yield)
+  - name: git
+    description: Git operations (status, push, pull, sync, PR, reset)
+  - name: diff
+    description: Diff and commit inspection
+  - name: files
+    description: File tree browsing and editing
+  - name: editors
+    description: External editor detection and launch
+  - name: fleet
+    description: Fleet worker coordination
+  - name: workers
+    description: Internal worker API
+  - name: issue-tabs
+    description: Issue detail tab state (Redis-backed)
+  - name: monitor
+    description: Daemon monitor dashboard and metrics
+  - name: observability
+    description: Event metrics and paginated event log
+
+security:
+  - BearerAuth: []
+
+paths:
+  # ── Health ──────────────────────────────────────────────────────────────
+  /health:
+    get:
+      operationId: getHealth
+      tags: [health]
+      summary: Health check for load balancers
+      security: []
+      responses:
+        "200":
+          description: Server is healthy
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: ok
+
+  /api/health:
+    get:
+      operationId: getApiHealth
+      tags: [health]
+      summary: API health check with daemon status
+      security: []
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  /api/metrics:
+    get:
+      operationId: getMetrics
+      tags: [health]
+      summary: SSE hub metrics snapshot
+      responses:
+        "200":
+          description: Hub metrics
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/daemon/status:
+    get:
+      operationId: getDaemonStatus
+      tags: [health]
+      summary: Daemon configuration and status
+      responses:
+        "200":
+          description: Daemon status
+          content:
+            application/json:
+              schema:
+                type: object
+
+  # ── Config ──────────────────────────────────────────────────────────────
+  /api/config:
+    get:
+      operationId: getAuthConfig
+      tags: [config]
+      summary: Auth mode discovery (public, rate-limited)
+      security: []
+      responses:
+        "200":
+          description: Auth configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mode:
+                    type: string
+                    enum: [none, api_key, external]
+                  auth_url:
+                    type: string
+                    description: External auth service URL (only when mode=external)
+        "429":
+          description: Rate limited
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+
+  /api/config/backend:
+    get:
+      operationId: getBackendConfig
+      tags: [config]
+      summary: Get backend configuration
+      responses:
+        "200":
+          description: Backend config
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BackendConfigResponse"
+    patch:
+      operationId: patchBackendConfig
+      tags: [config]
+      summary: Update default backend
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BackendConfigPatchRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /api/backends:
+    get:
+      operationId: getBackendsHealth
+      tags: [config]
+      summary: Backend availability health check
+      responses:
+        "200":
+          description: Backend health statuses
+          content:
+            application/json:
+              schema:
+                type: object
+
+  # ── Client Error Reporting ──────────────────────────────────────────────
+  /api/client-errors:
+    post:
+      operationId: reportClientError
+      tags: [health]
+      summary: Client-side error reporting (rate-limited, 10 req/min/IP)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Error recorded
+        "429":
+          description: Rate limited
+
+  /api/csp-report:
+    post:
+      operationId: reportCSPViolation
+      tags: [health]
+      summary: CSP violation reporting (rate-limited, 60 req/min/IP)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Report recorded
+        "429":
+          description: Rate limited
+
+  # ── Stats ───────────────────────────────────────────────────────────────
+  /api/stats:
+    get:
+      operationId: getGlobalStats
+      tags: [stats]
+      summary: Global project statistics
+      responses:
+        "200":
+          description: Statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Statistics"
+
+  /api/workspaces/{ws}/stats:
+    get:
+      operationId: getWorkspaceStats
+      tags: [stats]
+      summary: Per-workspace statistics
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Statistics"
+
+  # ── Workspaces ──────────────────────────────────────────────────────────
+  /api/workspaces/active:
+    get:
+      operationId: getActiveWorkspace
+      tags: [workspaces]
+      summary: Get full topology for the default workspace
+      responses:
+        "200":
+          description: Active workspace topology
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceResponse"
+        "404":
+          description: No default workspace configured
+
+  /api/workspaces:
+    get:
+      operationId: listWorkspaces
+      tags: [workspaces]
+      summary: List all workspaces
+      responses:
+        "200":
+          description: Workspace list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WorkspaceSummary"
+    post:
+      operationId: createWorkspace
+      tags: [workspaces]
+      summary: Create a new workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, path]
+              properties:
+                name:
+                  type: string
+                path:
+                  type: string
+      responses:
+        "202":
+          description: Workspace creation started (async job)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  job_id:
+                    type: string
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}:
+    get:
+      operationId: getWorkspace
+      tags: [workspaces]
+      summary: Get workspace topology
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Workspace topology
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceResponse"
+        "404":
+          description: Workspace not found
+    delete:
+      operationId: deleteWorkspace
+      tags: [workspaces]
+      summary: Delete a workspace
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Workspace deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "404":
+          description: Workspace not found
+
+  /api/workspaces/jobs/{id}:
+    get:
+      operationId: getWorkspaceJob
+      tags: [workspaces]
+      summary: Poll workspace creation job status
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Job status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [pending, running, completed, failed]
+                  error:
+                    type: string
+        "404":
+          description: Job not found
+
+  /api/workspaces/order:
+    put:
+      operationId: reorderWorkspaces
+      tags: [workspaces]
+      summary: Set workspace display order
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [order]
+              properties:
+                order:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "200":
+          description: Order updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /api/workspaces/default:
+    put:
+      operationId: setDefaultWorkspace
+      tags: [workspaces]
+      summary: Set the default workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workspace]
+              properties:
+                workspace:
+                  type: string
+      responses:
+        "200":
+          description: Default set
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+    delete:
+      operationId: clearDefaultWorkspace
+      tags: [workspaces]
+      summary: Clear the default workspace
+      responses:
+        "200":
+          description: Default cleared
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /api/workspaces/{ws}/name:
+    patch:
+      operationId: renameWorkspace
+      tags: [workspaces]
+      summary: Rename a workspace
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkspaceRenameRequest"
+      responses:
+        "200":
+          description: Renamed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "400":
+          description: Invalid name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/config/backend:
+    get:
+      operationId: getWorkspaceBackendConfig
+      tags: [config]
+      summary: Get workspace-scoped backend configuration
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Backend config
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BackendConfigResponse"
+    patch:
+      operationId: patchWorkspaceBackend
+      tags: [config]
+      summary: Set workspace backend override
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkspaceBackendPatchRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /api/workspaces/{ws}/daemon/status:
+    get:
+      operationId: getWorkspaceDaemonStatus
+      tags: [health]
+      summary: Workspace-scoped daemon status
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Daemon status
+          content:
+            application/json:
+              schema:
+                type: object
+
+  # ── Issues ──────────────────────────────────────────────────────────────
+  /api/workspaces/{ws}/issues:
+    get:
+      operationId: listIssues
+      tags: [issues]
+      summary: List issues with filtering and search
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [open, in_progress, blocked, deferred, review, closed]
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [bug, feature, task, epic, chore]
+        - name: assignee
+          in: query
+          schema:
+            type: string
+        - name: q
+          in: query
+          description: Free-text search query
+          schema:
+            type: string
+        - name: priority
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 4
+        - name: labels
+          in: query
+          description: Comma-separated label filters (all must match)
+          schema:
+            type: string
+        - name: source_repos
+          in: query
+          description: Comma-separated source repo filters
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            maximum: 1000
+        - name: title_contains
+          in: query
+          schema:
+            type: string
+        - name: description_contains
+          in: query
+          schema:
+            type: string
+        - name: notes_contains
+          in: query
+          schema:
+            type: string
+        - name: created_after
+          in: query
+          description: RFC3339 or YYYY-MM-DD
+          schema:
+            type: string
+        - name: created_before
+          in: query
+          description: RFC3339 or YYYY-MM-DD
+          schema:
+            type: string
+        - name: updated_after
+          in: query
+          description: RFC3339 or YYYY-MM-DD
+          schema:
+            type: string
+        - name: updated_before
+          in: query
+          description: RFC3339 or YYYY-MM-DD
+          schema:
+            type: string
+        - name: empty_description
+          in: query
+          schema:
+            type: boolean
+        - name: no_assignee
+          in: query
+          schema:
+            type: boolean
+        - name: no_labels
+          in: query
+          schema:
+            type: boolean
+        - name: pinned
+          in: query
+          schema:
+            type: boolean
+        - name: exclude_status
+          in: query
+          description: Comma-separated statuses to exclude
+          schema:
+            type: string
+        - name: include_blocked
+          in: query
+          description: Include blocked dependency info
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: Issue list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Issue"
+        "400":
+          description: Invalid filter parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: createIssue
+      tags: [issues]
+      summary: Create a new issue
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateIssueRequest"
+      responses:
+        "201":
+          description: Issue created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: "#/components/schemas/IssueResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/issues/{id}:
+    get:
+      operationId: getIssue
+      tags: [issues]
+      summary: Get a single issue with full details
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/IssueId"
+      responses:
+        "200":
+          description: Issue details
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: "#/components/schemas/IssueResponse"
+        "404":
+          description: Issue not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: patchIssue
+      tags: [issues]
+      summary: Partially update an issue
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/IssueId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchIssueRequest"
+      responses:
+        "200":
+          description: Issue updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: "#/components/schemas/IssueResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Issue not found
+    delete:
+      operationId: deleteIssue
+      tags: [issues]
+      summary: Delete an issue (tombstone)
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/IssueId"
+      responses:
+        "200":
+          description: Issue deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "404":
+          description: Issue not found
+
+  /api/workspaces/{ws}/issues/{id}/close:
+    post:
+      operationId: closeIssue
+      tags: [issues]
+      summary: Close an issue with optional reason
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/IssueId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CloseRequest"
+      responses:
+        "200":
+          description: Issue closed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+        "404":
+          description: Issue not found
+
+  /api/workspaces/{ws}/issues/{id}/move:
+    post:
+      operationId: moveIssue
+      tags: [issues]
+      summary: Move an issue to another workspace
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/IssueId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MoveIssueRequest"
+      responses:
+        "200":
+          description: Issue moved
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: "#/components/schemas/MoveResult"
+        "400":
+          description: Invalid target workspace
+        "404":
+          description: Issue not found
+
+  /api/workspaces/{ws}/issues/{id}/events:
+    get:
+      operationId: getIssueEvents
+      tags: [events]
+      summary: Get audit trail events for an issue
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/IssueId"
+      responses:
+        "200":
+          description: Issue events
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/IssueEvent"
+        "404":
+          description: Issue not found
+
+  /api/workspaces/{ws}/issues/{id}/git/diff-stat:
+    get:
+      operationId: getIssueDiffStat
+      tags: [diff]
+      summary: Get git diff statistics for an issue
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/IssueId"
+      responses:
+        "200":
+          description: Diff statistics
+          content:
+            application/json:
+              schema:
+                type: object
+
+  # ── Comments ────────────────────────────────────────────────────────────
+  /api/workspaces/{ws}/issues/{id}/comments:
+    post:
+      operationId: addComment
+      tags: [comments]
+      summary: Add a comment to an issue
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/IssueId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CommentRequest"
+      responses:
+        "201":
+          description: Comment added
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: "#/components/schemas/Comment"
+        "400":
+          description: Empty comment text
+        "404":
+          description: Issue not found
+
+  # ── Dependencies ────────────────────────────────────────────────────────
+  /api/workspaces/{ws}/issues/{id}/dependencies:
+    post:
+      operationId: addDependency
+      tags: [dependencies]
+      summary: Add a dependency to an issue
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/IssueId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddDependencyRequest"
+      responses:
+        "200":
+          description: Dependency added
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+        "400":
+          description: Invalid dependency
+        "404":
+          description: Issue not found
+
+  /api/workspaces/{ws}/issues/{id}/dependencies/{depId}:
+    delete:
+      operationId: removeDependency
+      tags: [dependencies]
+      summary: Remove a dependency from an issue
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/IssueId"
+        - name: depId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Dependency removed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+        "404":
+          description: Dependency not found
+
+  # ── Ready ───────────────────────────────────────────────────────────────
+  /api/workspaces/{ws}/ready:
+    get:
+      operationId: listReady
+      tags: [ready]
+      summary: List ready (unblocked) issues
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: assignee
+          in: query
+          schema:
+            type: string
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [bug, feature, task, epic, chore]
+        - name: parent_id
+          in: query
+          schema:
+            type: string
+        - name: mol_type
+          in: query
+          schema:
+            type: string
+            enum: [swarm, patrol, work]
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [hybrid, priority, oldest]
+        - name: unassigned
+          in: query
+          schema:
+            type: boolean
+        - name: include_deferred
+          in: query
+          schema:
+            type: boolean
+        - name: priority
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 4
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: labels
+          in: query
+          description: Comma-separated labels (all must match)
+          schema:
+            type: string
+        - name: labels_any
+          in: query
+          description: Comma-separated labels (any match)
+          schema:
+            type: string
+        - name: source_repos
+          in: query
+          description: Comma-separated source repo filters
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Ready issues
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Issue"
+        "400":
+          description: Invalid parameters
+
+  # ── Blocked ─────────────────────────────────────────────────────────────
+  /api/workspaces/{ws}/blocked:
+    get:
+      operationId: listBlocked
+      tags: [blocked]
+      summary: List blocked issues with blocker details
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: parent_id
+          in: query
+          schema:
+            type: string
+        - name: assignee
+          in: query
+          schema:
+            type: string
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [bug, feature, task, epic, chore]
+        - name: priority
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 4
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            maximum: 1000
+      responses:
+        "200":
+          description: Blocked issues
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/BlockedIssue"
+
+  # ── Graph ───────────────────────────────────────────────────────────────
+  /api/workspaces/{ws}/issues/graph:
+    get:
+      operationId: getGraph
+      tags: [graph]
+      summary: Get dependency graph for visualization
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [all, open, closed]
+            default: all
+        - name: include_closed
+          in: query
+          schema:
+            type: boolean
+            default: true
+        - name: source_repos
+          in: query
+          description: Comma-separated source repo filters
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Dependency graph
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TreeNode"
+
+  # ── SSE Events ──────────────────────────────────────────────────────────
+  /api/workspaces/{ws}/events:
+    get:
+      operationId: subscribeEvents
+      tags: [events]
+      summary: SSE mutation event stream
+      description: |
+        Server-Sent Events endpoint that streams real-time mutations.
+        Not expressible as a standard REST operation in OpenAPI.
+        The frontend's `useSSE` hook consumes this stream directly.
+
+        **Event format**: Each SSE `data:` line contains a JSON `MutationPayload`:
+        ```json
+        {
+          "type": "update",
+          "issue_id": "proj-abc.5",
+          "title": "Fix login bug",
+          "assignee": "agent-1",
+          "actor": "agent-1",
+          "timestamp": "2026-04-06T12:00:00Z",
+          "old_status": "open",
+          "new_status": "in_progress",
+          "parent_id": "proj-abc",
+          "step_count": 3,
+          "priority": 1,
+          "source_repo": "my-repo",
+          "workspace_id": "default"
+        }
+        ```
+
+        **Mutation types**: `create`, `update`, `delete`, `comment`, `status`,
+        `bonded`, `squashed`, `burned`, `refresh`, `terminal_session_change`
+
+        **Authentication**: Accepts Bearer token via `Authorization` header or
+        one-time token via `token` query parameter (for EventSource which
+        cannot send custom headers). In external auth mode, use the
+        `/api/workspaces/{ws}/events/token` endpoint to obtain a one-time SSE token.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: token
+          in: query
+          description: One-time SSE auth token (for EventSource clients)
+          schema:
+            type: string
+      responses:
+        "200":
+          description: SSE event stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: Newline-delimited SSE events with JSON MutationPayload data
+
+  /api/workspaces/{ws}/events/token:
+    get:
+      operationId: getSSEToken
+      tags: [events]
+      summary: Get one-time SSE auth token (external auth mode only)
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: One-time token
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token]
+                properties:
+                  token:
+                    type: string
+        "404":
+          description: SSE token exchange not available (not in external auth mode)
+
+  # ── Session History (Issue-Scoped) ──────────────────────────────────────
+  /api/workspaces/{ws}/issues/{issueId}/sessions:
+    get:
+      operationId: listSessionHistory
+      tags: [session-history]
+      summary: List session history records for an issue
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: issueId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Session history
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SessionHistoryRecord"
+
+  /api/workspaces/{ws}/issues/{issueId}/sessions/{recordId}/scrollback:
+    get:
+      operationId: getSessionScrollback
+      tags: [session-history]
+      summary: Get scrollback content for a session history record
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: issueId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: recordId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Scrollback content
+          content:
+            text/plain:
+              schema:
+                type: string
+        "404":
+          description: Record not found
+
+  # ── Sessions (Task-Scoped Audit Trail) ──────────────────────────────────
+  /api/workspaces/{ws}/tasks/{taskId}/sessions:
+    get:
+      operationId: listTaskSessions
+      tags: [sessions]
+      summary: List sessions for a task
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Session list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      task_id:
+                        type: string
+                      sessions:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/SessionResponse"
+
+  /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}:
+    get:
+      operationId: getSession
+      tags: [sessions]
+      summary: Get session metadata
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Session detail
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: "#/components/schemas/SessionResponse"
+        "404":
+          description: Session not found
+
+  /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/transcript:
+    get:
+      operationId: getSessionTranscript
+      tags: [sessions]
+      summary: Get session transcript entries
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Transcript
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      session_id:
+                        type: string
+                      entries:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/TranscriptEntry"
+        "404":
+          description: Session not found
+
+  /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/diff:
+    get:
+      operationId: getSessionDiff
+      tags: [sessions]
+      summary: Get session git diff
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Diff content
+          content:
+            text/plain:
+              schema:
+                type: string
+        "404":
+          description: Session not found
+
+  # ── Logs ────────────────────────────────────────────────────────────────
+  /api/workspaces/{ws}/agents/{name}/logs:
+    get:
+      operationId: getAgentLog
+      tags: [logs]
+      summary: Get recent log lines for an agent
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+        - name: lines
+          in: query
+          description: Number of lines to return
+          schema:
+            type: integer
+            default: 100
+        - name: before_line
+          in: query
+          description: Read lines before this line number (for pagination)
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Log content
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      agent:
+                        type: string
+                      lines:
+                        type: array
+                        items:
+                          type: string
+                      line_count:
+                        type: integer
+                        format: int64
+                      start_line:
+                        type: integer
+                        format: int64
+
+  /api/workspaces/{ws}/tasks/{id}/logs:
+    get:
+      operationId: listTaskPhases
+      tags: [logs]
+      summary: List available log phases for a task
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Available phases
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      phases:
+                        type: array
+                        items:
+                          type: string
+
+  /api/workspaces/{ws}/tasks/{id}/logs/{phase}:
+    get:
+      operationId: getTaskLog
+      tags: [logs]
+      summary: Get log content for a specific task phase
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: phase
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: lines
+          in: query
+          description: Number of lines to return
+          schema:
+            type: integer
+        - name: before_line
+          in: query
+          description: Read lines before this line number (for pagination)
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Log content
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      lines:
+                        type: array
+                        items:
+                          type: string
+                      line_count:
+                        type: integer
+                        format: int64
+                      start_line:
+                        type: integer
+                        format: int64
+
+  # ── Terminal ────────────────────────────────────────────────────────────
+  /api/workspaces/{ws}/terminal/sessions:
+    get:
+      operationId: listTerminalSessions
+      tags: [terminal]
+      summary: List active terminal sessions
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Session list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      sessions:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/TerminalSessionInfo"
+
+  /api/workspaces/{ws}/terminal/token:
+    get:
+      operationId: getTerminalToken
+      tags: [terminal]
+      summary: Generate one-time WebSocket auth token
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: One-time token
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token]
+                properties:
+                  token:
+                    type: string
+
+  /api/workspaces/{ws}/terminal/ws:
+    get:
+      operationId: connectTerminalWS
+      tags: [terminal]
+      summary: WebSocket terminal relay
+      description: |
+        WebSocket endpoint for terminal I/O relay. Not a standard REST
+        operation. Uses binary frames for terminal data and text frames
+        for control messages. The frontend's `terminalConnection.ts`
+        consumes this directly.
+
+        **Authentication**: One-time token via `token` query parameter,
+        generated by `GET /api/workspaces/{ws}/terminal/token`.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: session
+          in: query
+          description: Terminal session name
+          schema:
+            type: string
+      responses:
+        "101":
+          description: Switching Protocols (WebSocket upgrade)
+        "401":
+          description: Invalid or expired token
+
+  /api/workspaces/{ws}/terminal/session-status:
+    get:
+      operationId: getTerminalSessionStatus
+      tags: [terminal]
+      summary: Check if a terminal session is alive
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: session
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Session status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  alive:
+                    type: boolean
+                  exit_reason:
+                    type: string
+
+  /api/workspaces/{ws}/terminal/spawn:
+    post:
+      operationId: spawnTerminalSession
+      tags: [terminal]
+      summary: Spawn a new terminal session
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TerminalSpawnRequest"
+      responses:
+        "200":
+          description: Session spawned
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: "#/components/schemas/TerminalSpawnData"
+
+  /api/workspaces/{ws}/terminal/restart:
+    post:
+      operationId: restartTerminal
+      tags: [terminal]
+      summary: Restart the terminal backend process
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Terminal restarted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /api/workspaces/{ws}/terminal/kill:
+    post:
+      operationId: killTerminal
+      tags: [terminal]
+      summary: Kill the terminal backend process
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Terminal killed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /api/workspaces/{ws}/terminal/sessions/{name}/seed:
+    post:
+      operationId: seedTerminalSession
+      tags: [terminal]
+      summary: Seed a terminal session with issue context
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SeedRequest"
+      responses:
+        "200":
+          description: Session seeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /api/workspaces/{ws}/terminal/sessions/{session}/kill:
+    post:
+      operationId: scheduleSessionKill
+      tags: [terminal]
+      summary: Schedule a terminal session for graceful termination
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: session
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Kill scheduled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /api/workspaces/{ws}/terminal/sessions/close-all:
+    post:
+      operationId: closeAllTerminalSessions
+      tags: [terminal]
+      summary: Close all terminal sessions
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: All sessions closed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /api/workspaces/{ws}/terminal/sessions/{session}/scrollback:
+    get:
+      operationId: getScrollback
+      tags: [terminal]
+      summary: Get scrollback buffer for a terminal session
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: session
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Scrollback content
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      content:
+                        type: string
+                      lines:
+                        type: integer
+
+  /api/workspaces/{ws}/terminal/sessions/{session}/export:
+    get:
+      operationId: exportSession
+      tags: [terminal]
+      summary: Export terminal session content
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: session
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Session export
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /api/workspaces/{ws}/terminal/sessions/{session}/scrollback-info:
+    get:
+      operationId: getScrollbackInfo
+      tags: [terminal]
+      summary: Get scrollback metadata (line count, size)
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: session
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Scrollback info
+          content:
+            application/json:
+              schema:
+                type: object
+
+  # ── Terminal Tabs ───────────────────────────────────────────────────────
+  /api/workspaces/{ws}/terminal/tabs:
+    get:
+      operationId: listTerminalTabs
+      tags: [terminal-tabs]
+      summary: List terminal tab metadata
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Tab list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TabMetadata"
+
+  /api/workspaces/{ws}/terminal/tabs/{session}:
+    get:
+      operationId: getTerminalTab
+      tags: [terminal-tabs]
+      summary: Get metadata for a single terminal tab
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: session
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Tab metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: "#/components/schemas/TabMetadata"
+        "404":
+          description: Tab not found
+    put:
+      operationId: putTerminalTab
+      tags: [terminal-tabs]
+      summary: Create or replace terminal tab metadata
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: session
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TabPutRequest"
+      responses:
+        "200":
+          description: Tab saved
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+    patch:
+      operationId: patchTerminalTab
+      tags: [terminal-tabs]
+      summary: Partially update terminal tab metadata
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: session
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TabPatchRequest"
+      responses:
+        "200":
+          description: Tab updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+    delete:
+      operationId: deleteTerminalTab
+      tags: [terminal-tabs]
+      summary: Delete terminal tab metadata
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: session
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Tab deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+
+  /api/workspaces/{ws}/terminal/sessions/by-issue:
+    get:
+      operationId: listSessionsByIssue
+      tags: [terminal-tabs]
+      summary: List terminal sessions grouped by issue
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: issue_id
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Sessions by issue
+          content:
+            application/json:
+              schema:
+                type: object
+
+  # ── Terminal State ──────────────────────────────────────────────────────
+  /api/workspaces/{ws}/terminal/state:
+    get:
+      operationId: getTerminalState
+      tags: [terminal-state]
+      summary: Get persisted terminal UI state
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Terminal state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  active_tab:
+                    type: string
+    patch:
+      operationId: patchTerminalState
+      tags: [terminal-state]
+      summary: Update terminal UI state
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                active_tab:
+                  type: string
+      responses:
+        "200":
+          description: State updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  active_tab:
+                    type: string
+
+  # ── Agent Terminal ──────────────────────────────────────────────────────
+  /api/workspaces/{ws}/agents/{name}/terminal/info:
+    get:
+      operationId: getAgentTerminalInfo
+      tags: [agent-terminal]
+      summary: Get terminal info for a specific agent
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      responses:
+        "200":
+          description: Agent terminal info
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/workspaces/{ws}/agents/{name}/terminal/token:
+    get:
+      operationId: getAgentTerminalToken
+      tags: [agent-terminal]
+      summary: Generate one-time WebSocket token for agent terminal
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      responses:
+        "200":
+          description: One-time token
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token]
+                properties:
+                  token:
+                    type: string
+
+  /api/workspaces/{ws}/agents/{name}/terminal/ws:
+    get:
+      operationId: connectAgentTerminalWS
+      tags: [agent-terminal]
+      summary: WebSocket terminal relay for agent
+      description: |
+        WebSocket endpoint for agent-specific terminal I/O. Uses the same
+        binary/text frame protocol as the main terminal WebSocket.
+        The frontend's `terminalConnection.ts` handles this directly.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "101":
+          description: Switching Protocols (WebSocket upgrade)
+        "401":
+          description: Invalid or expired token
+
+  # ── Agent Control ───────────────────────────────────────────────────────
+  /api/workspaces/{ws}/agents:
+    get:
+      operationId: listAgents
+      tags: [agent-control]
+      summary: List agents via daemon control socket
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Agent list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AgentControlEntry"
+        "503":
+          description: Daemon unavailable
+
+  /api/workspaces/{ws}/agents/{name}/stop:
+    post:
+      operationId: stopAgent
+      tags: [agent-control]
+      summary: Stop an agent (yield by default, force with body)
+      description: |
+        Without `force` (or empty body): sends `agent_yield` to the daemon,
+        returns 202 Accepted. With `{"force": true}`: sends `agent_stop(force=true)`,
+        returns 200.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                force:
+                  type: boolean
+                  default: false
+      responses:
+        "200":
+          description: Agent force-stopped
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "202":
+          description: Yield signal sent (graceful stop in progress)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "503":
+          description: Daemon unavailable
+
+  /api/workspaces/{ws}/agents/{name}/start:
+    post:
+      operationId: startAgent
+      tags: [agent-control]
+      summary: Start an agent
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      responses:
+        "200":
+          description: Agent started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "503":
+          description: Daemon unavailable
+
+  /api/workspaces/{ws}/agents/{name}/restart:
+    post:
+      operationId: restartAgent
+      tags: [agent-control]
+      summary: Restart an agent
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      responses:
+        "200":
+          description: Agent restarted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "503":
+          description: Daemon unavailable
+
+  /api/workspaces/{ws}/agents/{name}/yield:
+    post:
+      operationId: yieldAgent
+      tags: [agent-control]
+      summary: Yield an agent (graceful stop at next safe point)
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      responses:
+        "202":
+          description: Yield signal sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "503":
+          description: Daemon unavailable
+
+  # ── Git Operations ──────────────────────────────────────────────────────
+  /api/workspaces/{ws}/agents/{name}/git/status:
+    get:
+      operationId: getGitStatus
+      tags: [git]
+      summary: Get git status for an agent worktree
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      responses:
+        "200":
+          description: Git status
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/workspaces/{ws}/agents/{name}/git/push:
+    post:
+      operationId: gitPush
+      tags: [git]
+      summary: Push agent worktree to remote
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                target:
+                  type: string
+                  description: Remote branch target
+      responses:
+        "200":
+          description: Push result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /api/workspaces/{ws}/agents/{name}/git/pull:
+    post:
+      operationId: gitPull
+      tags: [git]
+      summary: Pull remote changes into agent worktree
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                source:
+                  type: string
+                  description: Remote branch source
+      responses:
+        "200":
+          description: Pull result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /api/workspaces/{ws}/agents/{name}/git/sync:
+    post:
+      operationId: gitSync
+      tags: [git]
+      summary: Sync agent worktree (pull + push)
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      responses:
+        "200":
+          description: Sync result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /api/workspaces/{ws}/agents/{name}/git/pr:
+    post:
+      operationId: gitCreatePR
+      tags: [git]
+      summary: Create a pull request from agent worktree
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      responses:
+        "200":
+          description: PR created
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/workspaces/{ws}/agents/{name}/git/reset:
+    post:
+      operationId: gitReset
+      tags: [git]
+      summary: Reset agent worktree to integration branch
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      responses:
+        "200":
+          description: Reset complete
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /api/workspaces/{ws}/agents/{name}/git/target:
+    patch:
+      operationId: updateGitTarget
+      tags: [git]
+      summary: Update agent git push target branch
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                target:
+                  type: string
+      responses:
+        "200":
+          description: Target updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /api/workspaces/{ws}/git/push-all:
+    post:
+      operationId: gitPushAll
+      tags: [git]
+      summary: Push all agent worktrees to remote
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Push results
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/workspaces/{ws}/agents/{name}/git/diff-stat:
+    get:
+      operationId: getAgentDiffStat
+      tags: [diff]
+      summary: Get git diff statistics for an agent
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      responses:
+        "200":
+          description: Diff statistics
+          content:
+            application/json:
+              schema:
+                type: object
+
+  # ── Diff ────────────────────────────────────────────────────────────────
+  /api/workspaces/{ws}/agents/{name}/diff/commits:
+    get:
+      operationId: getDiffCommits
+      tags: [diff]
+      summary: List commits for an agent worktree
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      responses:
+        "200":
+          description: Commit list
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/workspaces/{ws}/agents/{name}/diff/files:
+    get:
+      operationId: getDiffFiles
+      tags: [diff]
+      summary: List changed files in agent worktree
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      responses:
+        "200":
+          description: Changed files
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/workspaces/{ws}/agents/{name}/diff/file:
+    get:
+      operationId: getDiffFile
+      tags: [diff]
+      summary: Get diff for a specific file
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: File diff
+          content:
+            application/json:
+              schema:
+                type: object
+
+  # ── Files ───────────────────────────────────────────────────────────────
+  /api/workspaces/{ws}/agents/{name}/files/tree:
+    get:
+      operationId: getFileTree
+      tags: [files]
+      summary: Get file tree for an agent worktree
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      responses:
+        "200":
+          description: File tree
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/workspaces/{ws}/agents/{name}/files:
+    get:
+      operationId: readFile
+      tags: [files]
+      summary: Read a file from an agent worktree
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: File content
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  content:
+                    type: string
+        "404":
+          description: File not found
+    put:
+      operationId: writeFile
+      tags: [files]
+      summary: Write a file to an agent worktree
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content:
+                  type: string
+      responses:
+        "200":
+          description: File written
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  # ── Editors ─────────────────────────────────────────────────────────────
+  /api/editors:
+    get:
+      operationId: listEditors
+      tags: [editors]
+      summary: List detected external editors
+      responses:
+        "200":
+          description: Editor list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      editors:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/EditorInfo"
+
+  /api/editors/open:
+    post:
+      operationId: openEditor
+      tags: [editors]
+      summary: Open a file in an external editor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EditorOpenRequest"
+      responses:
+        "200":
+          description: Editor launched
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+
+  # ── Issue Tabs ──────────────────────────────────────────────────────────
+  /api/workspaces/{ws}/issues/{issueId}/tabs:
+    get:
+      operationId: getIssueTabs
+      tags: [issue-tabs]
+      summary: Get issue detail tab state
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: issueId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Tab state
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: "#/components/schemas/IssueTabState"
+    put:
+      operationId: saveIssueTabs
+      tags: [issue-tabs]
+      summary: Save issue detail tab state
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: issueId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tabs, active_tab_id]
+              properties:
+                tabs:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/IssueTab"
+                active_tab_id:
+                  type: string
+      responses:
+        "200":
+          description: Tabs saved
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+    delete:
+      operationId: deleteIssueTabs
+      tags: [issue-tabs]
+      summary: Delete issue detail tab state
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: issueId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Tabs deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+
+  # ── Session Notify ──────────────────────────────────────────────────────
+  /api/sessions/notify:
+    post:
+      operationId: notifySessionChange
+      tags: [sessions]
+      summary: Notify SSE hub of session status change (agent-to-server)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [task_id, session_id, status, workspace_id]
+              properties:
+                task_id:
+                  type: string
+                session_id:
+                  type: string
+                status:
+                  type: string
+                workspace_id:
+                  type: string
+      responses:
+        "200":
+          description: Notification received
+
+  # ── Fleet ───────────────────────────────────────────────────────────────
+  /api/workspaces/{ws}/fleet/register:
+    post:
+      operationId: fleetRegister
+      tags: [fleet]
+      summary: Register a fleet worker
+      security:
+        - FleetApiKey: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Worker registered
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          description: Invalid API key
+
+  /api/workspaces/{ws}/fleet/claim:
+    post:
+      operationId: fleetClaim
+      tags: [fleet]
+      summary: Claim a task from the fleet queue
+      security:
+        - FleetJWT: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Task claimed or no work available
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/workspaces/{ws}/fleet/done/{id}:
+    post:
+      operationId: fleetDone
+      tags: [fleet]
+      summary: Mark a fleet task as done
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Task marked done
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/workspaces/{ws}/fleet/heartbeat:
+    post:
+      operationId: fleetHeartbeat
+      tags: [fleet]
+      summary: Fleet worker heartbeat
+      security:
+        - FleetJWT: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Heartbeat acknowledged
+          content:
+            application/json:
+              schema:
+                type: object
+
+  # ── Workers (Internal) ──────────────────────────────────────────────────
+  /api/internal/workers/register:
+    post:
+      operationId: registerWorker
+      tags: [workers]
+      summary: Register a remote worker
+      security:
+        - WorkerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkerRegisterRequest"
+      responses:
+        "201":
+          description: Worker registered
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [worker_id]
+                properties:
+                  worker_id:
+                    type: string
+        "503":
+          description: Worker token not configured
+
+  /api/internal/workers/{id}:
+    delete:
+      operationId: deregisterWorker
+      tags: [workers]
+      summary: Deregister a remote worker
+      security:
+        - WorkerToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Worker deregistered
+
+  /api/internal/workers/{id}/state:
+    post:
+      operationId: updateWorkerState
+      tags: [workers]
+      summary: Update worker state (action, task assignment)
+      security:
+        - WorkerToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkerStateRequest"
+      responses:
+        "200":
+          description: State updated
+
+  /api/internal/workers/{id}/events:
+    post:
+      operationId: pushWorkerEvents
+      tags: [workers]
+      summary: Push events from a remote worker
+      security:
+        - WorkerToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Events received
+
+  /api/internal/workers/{id}/logs:
+    post:
+      operationId: pushWorkerLogs
+      tags: [workers]
+      summary: Push log lines from a remote worker
+      security:
+        - WorkerToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Logs received
+
+  # ── Monitor ─────────────────────────────────────────────────────────────
+  /api/monitor/status:
+    get:
+      operationId: getMonitorStatus
+      tags: [monitor]
+      summary: Full monitor dashboard data
+      responses:
+        "200":
+          description: Dashboard status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MonitorStatusResponse"
+        "503":
+          description: Data collection unavailable
+
+  /api/monitor/agents:
+    get:
+      operationId: getMonitorAgents
+      tags: [monitor]
+      summary: Agent list with optional workspace grouping
+      responses:
+        "200":
+          description: Agent list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MonitorAgentsResponse"
+        "503":
+          description: Data collection unavailable
+
+  /api/monitor/tasks:
+    get:
+      operationId: getMonitorTasks
+      tags: [monitor]
+      summary: Task distribution by status
+      responses:
+        "200":
+          description: Task breakdown
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MonitorTasksResponse"
+        "503":
+          description: Data collection unavailable
+
+  /api/monitor/stats:
+    get:
+      operationId: getMonitorStats
+      tags: [monitor]
+      summary: Monitor statistics (distinct from /api/stats issue stats)
+      responses:
+        "200":
+          description: Monitor stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MonitorStatsResponse"
+        "503":
+          description: Data collection unavailable
+
+  /api/monitor/sync:
+    get:
+      operationId: getMonitorSync
+      tags: [monitor]
+      summary: Git sync status
+      responses:
+        "200":
+          description: Sync status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MonitorSyncResponse"
+        "503":
+          description: Data collection unavailable
+
+  /api/monitor/workspaces:
+    get:
+      operationId: getMonitorWorkspaces
+      tags: [monitor]
+      summary: Workspace topology metadata
+      responses:
+        "200":
+          description: Workspace info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MonitorWorkspacesResponse"
+
+  /api/monitor/stale-detector:
+    get:
+      operationId: getStaleDetector
+      tags: [monitor]
+      summary: Stale detector status
+      responses:
+        "200":
+          description: Stale detector status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaleDetectorStatus"
+
+  /api/monitor/usage:
+    get:
+      operationId: getMonitorUsage
+      tags: [monitor]
+      summary: Token usage aggregates
+      parameters:
+        - name: agent
+          in: query
+          schema:
+            type: string
+        - name: backend
+          in: query
+          schema:
+            type: string
+        - name: epic
+          in: query
+          schema:
+            type: string
+        - name: since
+          in: query
+          description: "YYYY-MM-DD"
+          schema:
+            type: string
+        - name: until
+          in: query
+          description: "YYYY-MM-DD"
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Usage data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsageResponse"
+        "400":
+          description: Invalid date parameter
+        "503":
+          description: Usage store not initialized
+
+  /metrics:
+    get:
+      operationId: getPrometheusMetrics
+      tags: [monitor]
+      summary: Prometheus scrape endpoint
+      security: []
+      responses:
+        "200":
+          description: Prometheus metrics
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  # ── Observability ───────────────────────────────────────────────────────
+  /api/observability/metrics:
+    get:
+      operationId: getObservabilityMetrics
+      tags: [observability]
+      summary: Event metrics snapshot
+      responses:
+        "200":
+          description: Metrics snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ObservabilityMetricsResponse"
+        "503":
+          description: Observability not configured
+
+  /api/observability/events:
+    get:
+      operationId: getObservabilityEvents
+      tags: [observability]
+      summary: Paginated event log
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 200
+        - name: type
+          in: query
+          description: Event type filter
+          schema:
+            type: string
+        - name: agent
+          in: query
+          description: Agent name filter
+          schema:
+            type: string
+        - name: since
+          in: query
+          description: RFC3339 timestamp filter
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Paginated events
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ObservabilityEventsResponse"
+        "400":
+          description: Invalid parameters
+
+  # ── Auth Token ──────────────────────────────────────────────────────────
+  /api/auth/token:
+    get:
+      operationId: getAuthToken
+      tags: [config]
+      summary: Auth token endpoint (external auth mode)
+      security: []
+      responses:
+        "200":
+          description: Token info
+          content:
+            application/json:
+              schema:
+                type: object
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        API key authentication. The key is a 64-character hex string generated
+        from 32 random bytes. Configured via `LOOM_AUTH_API_KEY` env var or
+        loaded from `~/.loom/api-key`. Supports fallback to `?token=` query
+        parameter for WebSocket/EventSource connections.
+
+    WorkerToken:
+      type: http
+      scheme: bearer
+      description: |
+        Static token for internal worker API endpoints. Configured via
+        `LOOM_WORKER_TOKEN` env var. If not set, worker API returns 503.
+
+    FleetApiKey:
+      type: apiKey
+      in: header
+      name: X-Fleet-API-Key
+      description: |
+        API key for fleet registration. Configured via `LOOM_FLEET_API_KEY`
+        env var. Constant-time comparison with optional per-IP rate limiting.
+
+    FleetJWT:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        JWT token for fleet claim/heartbeat endpoints. HMAC-SHA256 signed.
+        Configured via `LOOM_FLEET_JWT_KEY` env var. Token expiry: 1 hour.
+
+  parameters:
+    WorkspaceId:
+      name: ws
+      in: path
+      required: true
+      description: Workspace identifier
+      schema:
+        type: string
+
+    IssueId:
+      name: id
+      in: path
+      required: true
+      description: Issue identifier
+      schema:
+        type: string
+
+    AgentName:
+      name: name
+      in: path
+      required: true
+      description: Agent worktree name
+      schema:
+        type: string
+
+  schemas:
+    # ── Response Envelopes ──────────────────────────────────────────────
+    ErrorResponse:
+      type: object
+      required: [success, error]
+      properties:
+        success:
+          type: boolean
+          const: false
+        error:
+          type: string
+        code:
+          type: string
+        details:
+          type: object
+
+    MessageResponse:
+      type: object
+      required: [success, message]
+      properties:
+        success:
+          type: boolean
+          const: true
+        message:
+          type: string
+
+    # ── Issue Schemas ───────────────────────────────────────────────────
+    Issue:
+      type: object
+      description: |
+        Core issue type used in list endpoints. Maps to `types.Issue` json
+        serialization. Some list endpoints return this shape directly (not
+        the richer IssueResponse). Fields marked optional may be absent
+        depending on issue state.
+      required: [id, title, priority, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        design:
+          type: string
+        acceptance_criteria:
+          type: string
+        notes:
+          type: string
+        status:
+          type: string
+          enum: [open, in_progress, blocked, deferred, review, closed]
+          description: |
+            User-facing statuses. Internal statuses (tombstone, pinned, hooked)
+            are not settable via the API and excluded from this enum.
+        priority:
+          type: integer
+          minimum: 0
+          maximum: 4
+        issue_type:
+          type: string
+          enum: [bug, feature, task, epic, chore]
+        assignee:
+          type: string
+        owner:
+          type: string
+        estimated_minutes:
+          type: [integer, "null"]
+        created_at:
+          type: string
+          format: date-time
+        created_by:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+        closed_at:
+          type: [string, "null"]
+          format: date-time
+        close_reason:
+          type: string
+        due_at:
+          type: [string, "null"]
+          format: date-time
+        defer_until:
+          type: [string, "null"]
+          format: date-time
+        external_ref:
+          type: [string, "null"]
+        source_system:
+          type: string
+        source_repo:
+          type: string
+        labels:
+          type: array
+          items:
+            type: string
+        dependencies:
+          type: array
+          items:
+            $ref: "#/components/schemas/Dependency"
+        comments:
+          type: array
+          items:
+            $ref: "#/components/schemas/Comment"
+        pinned:
+          type: boolean
+        agent_state:
+          type: string
+          enum: [idle, spawning, running, working, stuck, done, stopped, dead]
+        last_activity:
+          type: [string, "null"]
+          format: date-time
+        role_type:
+          type: string
+        rig:
+          type: string
+        hook_bead:
+          type: string
+        role_bead:
+          type: string
+        mol_type:
+          type: string
+        parent:
+          type: string
+
+    IssueResponse:
+      type: object
+      description: Full issue detail returned by get-single-issue endpoint. Includes dependency/dependent refs, comments, and counts.
+      required:
+        - id
+        - title
+        - status
+        - priority
+        - issue_type
+        - created_at
+        - updated_at
+        - labels
+        - dependencies
+        - dependents
+        - comments
+        - dependency_count
+        - dependent_count
+        - pinned
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        design:
+          type: string
+        acceptance_criteria:
+          type: string
+        notes:
+          type: string
+        status:
+          type: string
+          enum: [open, in_progress, blocked, deferred, review, closed]
+        priority:
+          type: integer
+          minimum: 0
+          maximum: 4
+        issue_type:
+          type: string
+          enum: [bug, feature, task, epic, chore]
+        assignee:
+          type: string
+        owner:
+          type: string
+        estimated_minutes:
+          type: [integer, "null"]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        closed_at:
+          type: [string, "null"]
+          format: date-time
+        close_reason:
+          type: string
+        due_at:
+          type: [string, "null"]
+          format: date-time
+        defer_until:
+          type: [string, "null"]
+          format: date-time
+        external_ref:
+          type: [string, "null"]
+        source_repo:
+          type: string
+        labels:
+          type: array
+          items:
+            type: string
+          default: []
+        dependencies:
+          type: array
+          items:
+            $ref: "#/components/schemas/DependencyRef"
+          default: []
+        dependents:
+          type: array
+          items:
+            $ref: "#/components/schemas/DependencyRef"
+          default: []
+        comments:
+          type: array
+          items:
+            $ref: "#/components/schemas/CommentResponse"
+          default: []
+        parent:
+          type: [string, "null"]
+        parent_title:
+          type: [string, "null"]
+        dependency_count:
+          type: integer
+        dependent_count:
+          type: integer
+        pinned:
+          type: boolean
+
+    DependencyRef:
+      type: object
+      description: Slim reference to a dependency/dependent issue
+      required: [id, title, status, priority, type, issue_type]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        status:
+          type: string
+        priority:
+          type: integer
+        type:
+          type: string
+          description: Dependency type (e.g. "blocks")
+        issue_type:
+          type: string
+
+    Dependency:
+      type: object
+      description: Full dependency relation from types.Dependency
+      required: [issue_id, depends_on_id, type, created_at]
+      properties:
+        issue_id:
+          type: string
+        depends_on_id:
+          type: string
+        type:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        created_by:
+          type: string
+        metadata:
+          type: string
+        thread_id:
+          type: string
+
+    Comment:
+      type: object
+      description: Comment from types.Comment
+      required: [id, issue_id, author, text, created_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        issue_id:
+          type: string
+        author:
+          type: string
+        text:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    CommentResponse:
+      type: object
+      description: Comment in IssueResponse (dto.CommentResponse)
+      required: [id, author, text, created_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        author:
+          type: string
+        text:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        parent_id:
+          type: [integer, "null"]
+          format: int64
+        edited_at:
+          type: [string, "null"]
+          format: date-time
+
+    BlockedIssue:
+      type: object
+      description: Issue with blocking information
+      allOf:
+        - $ref: "#/components/schemas/Issue"
+        - type: object
+          required: [blocked_by_count, blocked_by]
+          properties:
+            blocked_by_count:
+              type: integer
+            blocked_by:
+              type: array
+              items:
+                type: string
+            blocked_by_details:
+              type: array
+              items:
+                $ref: "#/components/schemas/BlockerRef"
+
+    BlockerRef:
+      type: object
+      required: [id, title, priority]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        priority:
+          type: integer
+
+    TreeNode:
+      type: object
+      description: Node in a dependency tree for graph visualization
+      allOf:
+        - $ref: "#/components/schemas/Issue"
+        - type: object
+          required: [depth, parent_id, truncated]
+          properties:
+            depth:
+              type: integer
+            parent_id:
+              type: string
+            truncated:
+              type: boolean
+
+    IssueEvent:
+      type: object
+      description: Audit trail entry for an issue
+      required: [id, issue_id, event_type, actor, created_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        issue_id:
+          type: string
+        event_type:
+          type: string
+        actor:
+          type: string
+        old_value:
+          type: [string, "null"]
+        new_value:
+          type: [string, "null"]
+        comment:
+          type: [string, "null"]
+        created_at:
+          type: string
+          format: date-time
+
+    Statistics:
+      type: object
+      required:
+        - total_issues
+        - open_issues
+        - in_progress_issues
+        - closed_issues
+        - blocked_issues
+        - deferred_issues
+        - ready_issues
+        - tombstone_issues
+        - pinned_issues
+        - epics_eligible_for_closure
+        - average_lead_time_hours
+      properties:
+        total_issues:
+          type: integer
+        open_issues:
+          type: integer
+        in_progress_issues:
+          type: integer
+        closed_issues:
+          type: integer
+        blocked_issues:
+          type: integer
+        deferred_issues:
+          type: integer
+        ready_issues:
+          type: integer
+        tombstone_issues:
+          type: integer
+        pinned_issues:
+          type: integer
+        epics_eligible_for_closure:
+          type: integer
+        average_lead_time_hours:
+          type: number
+          format: double
+
+    # ── Request Schemas ─────────────────────────────────────────────────
+    CreateIssueRequest:
+      type: object
+      required: [title, issue_type, priority]
+      properties:
+        title:
+          type: string
+        issue_type:
+          type: string
+          enum: [bug, feature, task, epic, chore]
+        priority:
+          type: integer
+          minimum: 0
+          maximum: 4
+        id:
+          type: string
+        parent:
+          type: string
+        description:
+          type: string
+        design:
+          type: string
+        acceptance_criteria:
+          type: string
+        notes:
+          type: string
+        assignee:
+          type: string
+        owner:
+          type: string
+        created_by:
+          type: string
+        external_ref:
+          type: string
+        estimated_minutes:
+          type: [integer, "null"]
+        labels:
+          type: array
+          items:
+            type: string
+        dependencies:
+          type: array
+          items:
+            type: string
+        due_at:
+          type: string
+        defer_until:
+          type: string
+
+    PatchIssueRequest:
+      type: object
+      description: All fields are optional for partial update. Pointer types in Go map to nullable here.
+      properties:
+        title:
+          type: [string, "null"]
+        description:
+          type: [string, "null"]
+        status:
+          type: [string, "null"]
+          enum: [open, in_progress, blocked, deferred, review, closed, null]
+        priority:
+          type: [integer, "null"]
+        assignee:
+          type: [string, "null"]
+        owner:
+          type: [string, "null"]
+        design:
+          type: [string, "null"]
+        acceptance_criteria:
+          type: [string, "null"]
+        notes:
+          type: [string, "null"]
+        external_ref:
+          type: [string, "null"]
+        estimated_minutes:
+          type: [integer, "null"]
+        issue_type:
+          type: [string, "null"]
+        add_labels:
+          type: array
+          items:
+            type: string
+        remove_labels:
+          type: array
+          items:
+            type: string
+        set_labels:
+          type: array
+          items:
+            type: string
+        pinned:
+          type: [boolean, "null"]
+        parent:
+          type: [string, "null"]
+        due_at:
+          type: [string, "null"]
+        defer_until:
+          type: [string, "null"]
+        agent_state:
+          type: [string, "null"]
+          enum: [idle, spawning, running, working, stuck, done, stopped, dead, null]
+
+    CloseRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+        session:
+          type: string
+        suggest_next:
+          type: boolean
+        force:
+          type: boolean
+
+    MoveIssueRequest:
+      type: object
+      required: [target_workspace]
+      properties:
+        target_workspace:
+          type: string
+
+    MoveResult:
+      type: object
+      required: [source_id, target_id]
+      properties:
+        source_id:
+          type: string
+        target_id:
+          type: string
+        warnings:
+          type: array
+          items:
+            type: string
+
+    CommentRequest:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+
+    AddDependencyRequest:
+      type: object
+      required: [depends_on_id]
+      properties:
+        depends_on_id:
+          type: string
+        dep_type:
+          type: string
+
+    # ── Workspace Schemas ───────────────────────────────────────────────
+    WorkspaceResponse:
+      type: object
+      required: [id, name, path, repos, groups, agents, workspaces, default_workspace]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        path:
+          type: string
+        repos:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkspaceRepo"
+          default: []
+        groups:
+          type: array
+          items:
+            type: string
+          default: []
+        agents:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkspaceAgentInfo"
+          default: []
+        workspaces:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkspaceSummary"
+          default: []
+        workspace_order:
+          type: array
+          items:
+            type: string
+        default_workspace:
+          type: string
+
+    WorkspaceSummary:
+      type: object
+      required: [id, name, path, active, repo_count, is_default]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        path:
+          type: string
+        active:
+          type: boolean
+        repo_count:
+          type: integer
+        is_default:
+          type: boolean
+        backend:
+          type: string
+
+    WorkspaceRepo:
+      type: object
+      required: [name, path, default_branch, remote, groups]
+      properties:
+        name:
+          type: string
+        path:
+          type: string
+        default_branch:
+          type: string
+        remote:
+          type: string
+        source_repo_id:
+          type: string
+        groups:
+          type: array
+          items:
+            type: string
+          default: []
+
+    WorkspaceAgentInfo:
+      type: object
+      required: [name, repos, repo_groups, cross_repo]
+      properties:
+        name:
+          type: string
+        repos:
+          type: array
+          items:
+            type: string
+          default: []
+        repo_groups:
+          type: array
+          items:
+            type: string
+          default: []
+        cross_repo:
+          type: boolean
+
+    WorkspaceRenameRequest:
+      type: object
+      required: [new_name]
+      properties:
+        new_name:
+          type: string
+
+    WorkspaceBackendPatchRequest:
+      type: object
+      required: [backend]
+      properties:
+        backend:
+          type: string
+
+    # ── Config Schemas ──────────────────────────────────────────────────
+    BackendConfigResponse:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            backend:
+              type: string
+            source:
+              type: string
+            available:
+              type: array
+              items:
+                type: string
+            agents:
+              type: array
+              items:
+                $ref: "#/components/schemas/AgentBackendOverride"
+        error:
+          type: string
+
+    AgentBackendOverride:
+      type: object
+      required: [worktree, role, backend]
+      properties:
+        worktree:
+          type: string
+        role:
+          type: string
+        backend:
+          type: string
+
+    BackendConfigPatchRequest:
+      type: object
+      required: [backend]
+      properties:
+        backend:
+          type: string
+
+    # ── Agent Schemas ───────────────────────────────────────────────────
+    AgentStatusResponse:
+      type: object
+      description: Agent entity from dto.AgentStatusResponse
+      required: [id, title, created_at, updated_at, labels]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+        agent_state:
+          type: string
+          enum: [idle, spawning, running, working, stuck, done, stopped, dead]
+        role_type:
+          type: string
+        rig:
+          type: string
+        hook_bead:
+          type: string
+        role_bead:
+          type: string
+        last_activity:
+          type: [string, "null"]
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        labels:
+          type: array
+          items:
+            type: string
+          default: []
+
+    AgentControlEntry:
+      type: object
+      description: Agent entry from daemon control socket list
+      required: [name, role, status]
+      properties:
+        name:
+          type: string
+        role:
+          type: string
+        status:
+          type: string
+
+    # ── Session Schemas ─────────────────────────────────────────────────
+    SessionResponse:
+      type: object
+      description: Session audit record from dto.SessionResponse
+      required:
+        - session_id
+        - task_id
+        - agent_name
+        - backend
+        - started_at
+        - status
+        - exit_code
+        - input_tokens
+        - output_tokens
+        - cache_read_tokens
+        - cache_write_tokens
+        - estimated_cost_usd
+        - files_changed
+        - lines_added
+        - lines_removed
+        - attempt_num
+        - is_active
+        - has_transcript
+        - has_diff
+      properties:
+        session_id:
+          type: string
+        task_id:
+          type: string
+        epic_id:
+          type: string
+        agent_name:
+          type: string
+        backend:
+          type: string
+        model:
+          type: string
+        phase:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: [string, "null"]
+          format: date-time
+        duration_s:
+          type: number
+          format: double
+        status:
+          type: string
+        exit_code:
+          type: integer
+        input_tokens:
+          type: integer
+          format: int64
+        output_tokens:
+          type: integer
+          format: int64
+        cache_read_tokens:
+          type: integer
+          format: int64
+        cache_write_tokens:
+          type: integer
+          format: int64
+        estimated_cost_usd:
+          type: number
+          format: double
+        files_changed:
+          type: integer
+        lines_added:
+          type: integer
+        lines_removed:
+          type: integer
+        files_touched:
+          type: array
+          items:
+            type: string
+        attempt_num:
+          type: integer
+        error_class:
+          type: string
+        is_active:
+          type: boolean
+        has_transcript:
+          type: boolean
+        has_diff:
+          type: boolean
+        last_error:
+          type: string
+
+    TranscriptEntry:
+      type: object
+      description: Single transcript entry from a session
+      required: [seq, ts, role, type]
+      properties:
+        seq:
+          type: integer
+        ts:
+          type: string
+          format: date-time
+        role:
+          type: string
+          enum: [user, assistant, system, tool]
+        type:
+          type: string
+          enum: [text, tool_use, tool_result]
+        content:
+          type: string
+        tool_name:
+          type: string
+        tool_input:
+          type: string
+        raw:
+          type: string
+
+    SessionHistoryRecord:
+      type: object
+      description: Session history record (Redis-backed, per-issue)
+      required: [id, session_name, issue_id, backend, status, launcher, started_at]
+      properties:
+        id:
+          type: string
+        session_name:
+          type: string
+        issue_id:
+          type: string
+        backend:
+          type: string
+        status:
+          type: string
+          enum: [active, completed]
+        launcher:
+          type: string
+          enum: [user, start-work]
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: [string, "null"]
+          format: date-time
+        scrollback_path:
+          type: string
+
+    # ── Terminal Schemas ────────────────────────────────────────────────
+    TerminalSessionInfo:
+      type: object
+      required: [name, label, created]
+      properties:
+        name:
+          type: string
+        label:
+          type: string
+        created:
+          type: integer
+          format: int64
+          description: Unix timestamp
+        issue_id:
+          type: string
+
+    TerminalSpawnRequest:
+      type: object
+      required: [session_name, backend]
+      properties:
+        session_name:
+          type: string
+        backend:
+          type: string
+
+    TerminalSpawnData:
+      type: object
+      required: [session_name, backend, command, created]
+      properties:
+        session_name:
+          type: string
+        backend:
+          type: string
+        command:
+          type: string
+        created:
+          type: boolean
+
+    SeedRequest:
+      type: object
+      required: [issue_id, title]
+      properties:
+        issue_id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        design:
+          type: string
+        blockers:
+          type: array
+          items:
+            type: object
+            required: [id, title]
+            properties:
+              id:
+                type: string
+              title:
+                type: string
+
+    TabMetadata:
+      type: object
+      description: Terminal tab metadata (Redis-backed)
+      required: [session_name, label, notes, sort_order, pinned, created_at, updated_at]
+      properties:
+        session_name:
+          type: string
+        workspace:
+          type: string
+        label:
+          type: string
+        notes:
+          type: string
+        sort_order:
+          type: integer
+        pinned:
+          type: boolean
+        issue_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    TabPutRequest:
+      type: object
+      required: [label, sort_order, notes, pinned]
+      properties:
+        label:
+          type: string
+        sort_order:
+          type: integer
+        notes:
+          type: string
+        pinned:
+          type: boolean
+
+    TabPatchRequest:
+      type: object
+      description: All fields optional for partial update
+      properties:
+        label:
+          type: [string, "null"]
+        notes:
+          type: [string, "null"]
+        sort_order:
+          type: [integer, "null"]
+        pinned:
+          type: [boolean, "null"]
+        issue_id:
+          type: [string, "null"]
+
+    # ── Issue Tab Schemas ───────────────────────────────────────────────
+    IssueTab:
+      type: object
+      required: [id, type, label, sort_order]
+      properties:
+        id:
+          type: string
+          description: '"details", "logs", or "terminal-{session}"'
+        type:
+          type: string
+          enum: [details, logs, terminal]
+        label:
+          type: string
+        session_name:
+          type: string
+          description: For terminal tabs only
+        backend:
+          type: string
+          description: For terminal tabs only
+        sort_order:
+          type: integer
+
+    IssueTabState:
+      type: object
+      required: [issue_id, tabs, active_tab_id, updated_at]
+      properties:
+        issue_id:
+          type: string
+        tabs:
+          type: array
+          items:
+            $ref: "#/components/schemas/IssueTab"
+        active_tab_id:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+
+    # ── Editor Schemas ──────────────────────────────────────────────────
+    EditorInfo:
+      type: object
+      required: [id, display_name, icon_name, detected]
+      properties:
+        id:
+          type: string
+        display_name:
+          type: string
+        icon_name:
+          type: string
+        detected:
+          type: boolean
+
+    EditorOpenRequest:
+      type: object
+      required: [editor_id, path]
+      properties:
+        editor_id:
+          type: string
+        path:
+          type: string
+
+    # ── Worker Schemas ──────────────────────────────────────────────────
+    WorkerRegisterRequest:
+      type: object
+      required: [workspace, agent]
+      properties:
+        workspace:
+          type: string
+        agent:
+          type: string
+        backend:
+          type: string
+
+    WorkerStateRequest:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+        state:
+          type: string
+        agent_name:
+          type: string
+        task_id:
+          type: string
+        task_title:
+          type: string
+
+    # ── SSE Schemas ─────────────────────────────────────────────────────
+    MutationPayload:
+      type: object
+      description: |
+        SSE mutation event payload. All fields except type, issue_id, and
+        timestamp are context-dependent. For status events: old_status and
+        new_status are present. For bonded events: parent_id and step_count
+        are present. This is documented as a flat schema (no discriminator)
+        because the SSE stream is not validated by generated clients.
+      required: [type, issue_id, timestamp]
+      properties:
+        type:
+          type: string
+          enum:
+            - create
+            - update
+            - delete
+            - comment
+            - status
+            - bonded
+            - squashed
+            - burned
+            - refresh
+            - terminal_session_change
+        issue_id:
+          type: string
+        title:
+          type: string
+        assignee:
+          type: string
+        actor:
+          type: string
+        timestamp:
+          type: string
+        old_status:
+          type: string
+          description: Present for status mutation events
+        new_status:
+          type: string
+          description: Present for status mutation events
+        parent_id:
+          type: string
+          description: Present for bonded mutation events
+        step_count:
+          type: integer
+          description: Present for bonded mutation events
+        priority:
+          type: [integer, "null"]
+        source_repo:
+          type: string
+        workspace_id:
+          type: string
+
+    # ── Monitor Schemas ─────────────────────────────────────────────────
+    MonitorStatusResponse:
+      type: object
+      required: [workspace, agents, tasks, in_progress_list, agent_tasks, stats, sync, timestamp]
+      properties:
+        workspace:
+          $ref: "#/components/schemas/MonitorWorkspaceInfo"
+        agents:
+          type: array
+          items:
+            $ref: "#/components/schemas/MonitorAgentStatus"
+        tasks:
+          $ref: "#/components/schemas/MonitorTaskSummary"
+        in_progress_list:
+          type: array
+          items:
+            $ref: "#/components/schemas/MonitorTaskInfo"
+        agent_tasks:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/MonitorTaskInfo"
+        stats:
+          $ref: "#/components/schemas/MonitorStats"
+        sync:
+          $ref: "#/components/schemas/MonitorSyncInfo"
+        timestamp:
+          type: string
+          format: date-time
+
+    MonitorAgentsResponse:
+      type: object
+      required: [workspace, agents, timestamp]
+      properties:
+        workspace:
+          $ref: "#/components/schemas/MonitorWorkspaceInfo"
+        agents:
+          type: array
+          items:
+            $ref: "#/components/schemas/MonitorAgentStatus"
+        by_workspace:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              $ref: "#/components/schemas/MonitorAgentStatus"
+        timestamp:
+          type: string
+          format: date-time
+
+    MonitorTasksResponse:
+      type: object
+      required: [summary, needs_planning, ready_to_implement, needs_review, in_progress, backlog, closed, timestamp]
+      properties:
+        summary:
+          $ref: "#/components/schemas/MonitorTaskSummary"
+        needs_planning:
+          type: array
+          items:
+            $ref: "#/components/schemas/MonitorTaskInfo"
+        ready_to_implement:
+          type: array
+          items:
+            $ref: "#/components/schemas/MonitorTaskInfo"
+        needs_review:
+          type: array
+          items:
+            $ref: "#/components/schemas/MonitorTaskInfo"
+        in_progress:
+          type: array
+          items:
+            $ref: "#/components/schemas/MonitorTaskInfo"
+        backlog:
+          type: array
+          items:
+            $ref: "#/components/schemas/MonitorTaskInfo"
+        closed:
+          type: array
+          items:
+            $ref: "#/components/schemas/MonitorTaskInfo"
+        timestamp:
+          type: string
+          format: date-time
+
+    MonitorStatsResponse:
+      type: object
+      required: [stats, timestamp]
+      properties:
+        stats:
+          $ref: "#/components/schemas/MonitorStats"
+        timestamp:
+          type: string
+          format: date-time
+
+    MonitorSyncResponse:
+      type: object
+      required: [sync, timestamp]
+      properties:
+        sync:
+          $ref: "#/components/schemas/MonitorSyncInfo"
+        timestamp:
+          type: string
+          format: date-time
+
+    MonitorWorkspacesResponse:
+      type: object
+      required: [mode, workspaces, timestamp]
+      properties:
+        mode:
+          type: string
+          enum: [workspace, legacy]
+        default:
+          type: string
+        workspaces:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/MonitorWorkspaceDetail"
+        timestamp:
+          type: string
+          format: date-time
+
+    MonitorWorkspaceInfo:
+      type: object
+      required: [mode]
+      properties:
+        mode:
+          type: string
+          enum: [workspace, legacy]
+        name:
+          type: string
+        workspaces:
+          type: array
+          items:
+            type: string
+
+    MonitorWorkspaceDetail:
+      type: object
+      required: [path, repos]
+      properties:
+        path:
+          type: string
+        repos:
+          type: array
+          items:
+            type: string
+
+    MonitorAgentStatus:
+      type: object
+      required: [name, branch, status, ahead, behind, workspace]
+      properties:
+        name:
+          type: string
+        branch:
+          type: string
+        status:
+          type: string
+        ahead:
+          type: integer
+        behind:
+          type: integer
+        role:
+          type: string
+        repo:
+          type: string
+        workspace:
+          type: string
+        daemon_managed:
+          type: boolean
+        commits:
+          type: array
+          items:
+            $ref: "#/components/schemas/MonitorCommitDetail"
+        changes:
+          type: array
+          items:
+            $ref: "#/components/schemas/MonitorFileChange"
+
+    MonitorCommitDetail:
+      type: object
+      required: [hash, message]
+      properties:
+        hash:
+          type: string
+        message:
+          type: string
+        url:
+          type: string
+
+    MonitorFileChange:
+      type: object
+      required: [status, path]
+      properties:
+        status:
+          type: string
+          description: '"M", "A", "D", "??", "R"'
+        path:
+          type: string
+
+    MonitorTaskInfo:
+      type: object
+      required: [id, title, priority, status]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        priority:
+          type: integer
+        status:
+          type: string
+
+    MonitorTaskSummary:
+      type: object
+      required: [needs_planning, ready_to_implement, in_progress, need_review, backlog, epics]
+      properties:
+        needs_planning:
+          type: integer
+        ready_to_implement:
+          type: integer
+        in_progress:
+          type: integer
+        need_review:
+          type: integer
+        backlog:
+          type: integer
+        epics:
+          type: integer
+
+    MonitorStats:
+      type: object
+      required: [open, closed, total, completion, remaining, in_progress, review, blocked]
+      properties:
+        open:
+          type: integer
+        closed:
+          type: integer
+        total:
+          type: integer
+        completion:
+          type: number
+          format: double
+        remaining:
+          type: integer
+        in_progress:
+          type: integer
+        review:
+          type: integer
+        blocked:
+          type: integer
+
+    MonitorSyncInfo:
+      type: object
+      required: [db_synced, db_last_sync, git_needs_push, git_needs_pull]
+      properties:
+        db_synced:
+          type: boolean
+        db_last_sync:
+          type: string
+        db_error:
+          type: string
+        git_needs_push:
+          type: integer
+        git_needs_pull:
+          type: integer
+        git_push_details:
+          type: array
+          items:
+            $ref: "#/components/schemas/MonitorWorktreeSyncDetail"
+        git_pull_details:
+          type: array
+          items:
+            $ref: "#/components/schemas/MonitorWorktreeSyncDetail"
+
+    MonitorWorktreeSyncDetail:
+      type: object
+      required: [name, count]
+      properties:
+        name:
+          type: string
+        count:
+          type: integer
+
+    StaleDetectorStatus:
+      type: object
+      required: [enabled, is_leader, stale_workers_found, tasks_reconciled]
+      properties:
+        enabled:
+          type: boolean
+        is_leader:
+          type: boolean
+        last_check:
+          type: string
+          format: date-time
+        stale_workers_found:
+          type: integer
+        tasks_reconciled:
+          type: integer
+
+    # ── Usage Schemas ───────────────────────────────────────────────────
+    UsageResponse:
+      type: object
+      required:
+        - total_input_tokens
+        - total_output_tokens
+        - total_cache_read_tokens
+        - total_cache_write_tokens
+        - total_cost
+        - session_count
+        - by_agent
+        - by_backend
+        - daily_costs
+        - sessions
+        - timestamp
+      properties:
+        total_input_tokens:
+          type: integer
+          format: int64
+        total_output_tokens:
+          type: integer
+          format: int64
+        total_cache_read_tokens:
+          type: integer
+          format: int64
+        total_cache_write_tokens:
+          type: integer
+          format: int64
+        total_cost:
+          type: number
+          format: double
+        session_count:
+          type: integer
+        by_agent:
+          type: array
+          items:
+            $ref: "#/components/schemas/UsageAgentSummary"
+        by_backend:
+          type: array
+          items:
+            $ref: "#/components/schemas/UsageBackendSummary"
+        daily_costs:
+          type: array
+          items:
+            $ref: "#/components/schemas/UsageDailyCost"
+        sessions:
+          type: array
+          items:
+            $ref: "#/components/schemas/UsageSessionRecord"
+        timestamp:
+          type: string
+          format: date-time
+
+    UsageAgentSummary:
+      type: object
+      required: [name, sessions, input_tokens, output_tokens, total_cost]
+      properties:
+        name:
+          type: string
+        sessions:
+          type: integer
+        input_tokens:
+          type: integer
+          format: int64
+        output_tokens:
+          type: integer
+          format: int64
+        total_cost:
+          type: number
+          format: double
+
+    UsageBackendSummary:
+      type: object
+      required: [name, sessions, total_cost]
+      properties:
+        name:
+          type: string
+        sessions:
+          type: integer
+        total_cost:
+          type: number
+          format: double
+
+    UsageDailyCost:
+      type: object
+      required: [date, cost, sessions]
+      properties:
+        date:
+          type: string
+        cost:
+          type: number
+          format: double
+        sessions:
+          type: integer
+
+    UsageSessionRecord:
+      type: object
+      required: [agent_name, backend, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, estimated_cost_usd, started_at, ended_at, exit_code]
+      properties:
+        agent_name:
+          type: string
+        backend:
+          type: string
+        task_id:
+          type: string
+        epic_id:
+          type: string
+        input_tokens:
+          type: integer
+          format: int64
+        output_tokens:
+          type: integer
+          format: int64
+        cache_read_tokens:
+          type: integer
+          format: int64
+        cache_write_tokens:
+          type: integer
+          format: int64
+        estimated_cost_usd:
+          type: number
+          format: double
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+        exit_code:
+          type: integer
+        model:
+          type: string
+        session_id:
+          type: string
+
+    # ── Observability Schemas ───────────────────────────────────────────
+    ObservabilityMetricsResponse:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/MetricsSnapshot"
+        error:
+          type: string
+
+    MetricsSnapshot:
+      type: object
+      required:
+        - timestamp
+        - tasks_completed_last_hour
+        - tasks_completed_24h
+        - avg_task_duration_sec
+        - lines_changed_last_hour
+        - error_rate_pct
+        - restart_count_24h
+        - restarts_by_agent
+        - agent_utilization
+        - tasks_by_role
+        - tasks_by_epic
+        - tasks_by_agent
+        - hourly_completions
+        - total_tasks_completed
+        - total_tasks_failed
+        - total_restarts
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        tasks_completed_last_hour:
+          type: integer
+        tasks_completed_24h:
+          type: integer
+        avg_task_duration_sec:
+          type: number
+          format: double
+        lines_changed_last_hour:
+          type: integer
+        error_rate_pct:
+          type: number
+          format: double
+        restart_count_24h:
+          type: integer
+        restarts_by_agent:
+          type: object
+          additionalProperties:
+            type: integer
+        agent_utilization:
+          type: object
+          additionalProperties:
+            type: number
+        tasks_by_role:
+          type: object
+          additionalProperties:
+            type: integer
+        tasks_by_epic:
+          type: object
+          additionalProperties:
+            type: integer
+        tasks_by_agent:
+          type: object
+          additionalProperties:
+            type: integer
+        hourly_completions:
+          type: array
+          items:
+            $ref: "#/components/schemas/HourlyBucket"
+        total_tasks_completed:
+          type: integer
+          format: int64
+        total_tasks_failed:
+          type: integer
+          format: int64
+        total_restarts:
+          type: integer
+          format: int64
+
+    HourlyBucket:
+      type: object
+      required: [hour, completed, failed, avg_duration]
+      properties:
+        hour:
+          type: string
+          format: date-time
+        completed:
+          type: integer
+        failed:
+          type: integer
+        avg_duration:
+          type: number
+          format: double
+
+    ObservabilityEventsResponse:
+      type: object
+      required: [success, data, total, page, per_page]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/ObservabilityEvent"
+        total:
+          type: integer
+        page:
+          type: integer
+        per_page:
+          type: integer
+        error:
+          type: string
+
+    ObservabilityEvent:
+      type: object
+      required: [type, timestamp]
+      properties:
+        type:
+          type: string
+          enum:
+            - task.claimed
+            - task.started
+            - task.completed
+            - task.failed
+            - agent.started
+            - agent.restarted
+            - agent.stopped
+            - epic.assigned
+            - epic.exhausted
+            - pr.created
+            - conflict.resolved
+            - system.health_check
+            - system.config_reloaded
+        timestamp:
+          type: string
+          format: date-time
+        agent:
+          type: string
+        role:
+          type: string
+        epic_id:
+          type: string
+        data:
+          type: object
+          description: Event-type-specific data (JSON object)
