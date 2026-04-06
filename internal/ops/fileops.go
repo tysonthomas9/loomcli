@@ -1,4 +1,4 @@
-package webui
+package ops
 
 // FileOps defines the interface for file operations on agent worktrees.
 // This interface breaks the import cycle between webui and cli packages.

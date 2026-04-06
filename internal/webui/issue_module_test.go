@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/ops"
 )
 
 // Compile-time assertion: *IssueModule implements Module.
@@ -13,7 +13,7 @@ var _ Module = (*IssueModule)(nil)
 
 func TestIssueModule_RegisterRoutes(t *testing.T) {
 	svc := &mockIssueService{}
-	configFn := func() (*service.WorkspaceData, error) { return nil, nil }
+	configFn := func() (*ops.WorkspaceData, error) { return nil, nil }
 	mod := NewIssueModule(svc, configFn)
 
 	mux := http.NewServeMux()
@@ -52,7 +52,7 @@ func TestIssueModule_RegisterRoutes(t *testing.T) {
 
 func TestIssueModule_ExcludedRoutes_NotRegistered(t *testing.T) {
 	svc := &mockIssueService{}
-	configFn := func() (*service.WorkspaceData, error) { return nil, nil }
+	configFn := func() (*ops.WorkspaceData, error) { return nil, nil }
 	mod := NewIssueModule(svc, configFn)
 
 	mux := http.NewServeMux()
@@ -83,7 +83,7 @@ func TestIssueModule_ExcludedRoutes_NotRegistered(t *testing.T) {
 
 func TestIssueModule_WrongMethod_Returns405(t *testing.T) {
 	svc := &mockIssueService{}
-	configFn := func() (*service.WorkspaceData, error) { return nil, nil }
+	configFn := func() (*ops.WorkspaceData, error) { return nil, nil }
 	mod := NewIssueModule(svc, configFn)
 
 	mux := http.NewServeMux()

@@ -1,17 +1,21 @@
 package webui
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/tysonthomas9/loomcli/internal/ops"
+)
 
 type backendsHealthResponse struct {
-	Success bool            `json:"success"`
-	Data    []BackendHealth `json:"data"`
-	Error   string          `json:"error,omitempty"`
+	Success bool                `json:"success"`
+	Data    []ops.BackendHealth `json:"data"`
+	Error   string              `json:"error,omitempty"`
 }
 
 // handleGetBackendsHealth returns a handler that lists registered backends with health status.
-func handleGetBackendsHealth(ops BackendOps) http.HandlerFunc {
+func handleGetBackendsHealth(backendOps ops.BackendOps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		backends, err := ops.ListBackendsHealth()
+		backends, err := backendOps.ListBackendsHealth()
 		if err != nil {
 			respondJSON(w, http.StatusInternalServerError, backendsHealthResponse{
 				Success: false,
@@ -22,7 +26,7 @@ func handleGetBackendsHealth(ops BackendOps) http.HandlerFunc {
 
 		// Ensure empty slice for JSON [] marshaling
 		if backends == nil {
-			backends = []BackendHealth{}
+			backends = []ops.BackendHealth{}
 		}
 
 		respondJSON(w, http.StatusOK, backendsHealthResponse{

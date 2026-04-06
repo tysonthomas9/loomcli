@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
@@ -22,12 +23,12 @@ func deleteRequest(wsID string) *http.Request {
 func TestHandleWorkspaceDelete_Success(t *testing.T) {
 	deleteCalled := false
 	svc := &mockWorkspaceService{
-		deleteWorkspaceFn: func(_ context.Context, wsID string) (*service.WorkspaceData, error) {
+		deleteWorkspaceFn: func(_ context.Context, wsID string) (*ops.WorkspaceData, error) {
 			deleteCalled = true
 			if wsID != "ws-uuid-1" {
 				t.Errorf("expected wsID %q, got %q", "ws-uuid-1", wsID)
 			}
-			return &service.WorkspaceData{Name: "test-ws"}, nil
+			return &ops.WorkspaceData{Name: "test-ws"}, nil
 		},
 	}
 	handler := handleWorkspaceDelete(svc)
@@ -68,7 +69,7 @@ func TestHandleWorkspaceDelete_MissingWorkspaceID(t *testing.T) {
 
 func TestHandleWorkspaceDelete_UnknownUUID(t *testing.T) {
 	svc := &mockWorkspaceService{
-		deleteWorkspaceFn: func(_ context.Context, wsID string) (*service.WorkspaceData, error) {
+		deleteWorkspaceFn: func(_ context.Context, wsID string) (*ops.WorkspaceData, error) {
 			return nil, service.ErrNotFound(fmt.Sprintf("workspace with ID %q not found", wsID))
 		},
 	}
@@ -85,7 +86,7 @@ func TestHandleWorkspaceDelete_UnknownUUID(t *testing.T) {
 
 func TestHandleWorkspaceDelete_HasRunningAgents(t *testing.T) {
 	svc := &mockWorkspaceService{
-		deleteWorkspaceFn: func(_ context.Context, _ string) (*service.WorkspaceData, error) {
+		deleteWorkspaceFn: func(_ context.Context, _ string) (*ops.WorkspaceData, error) {
 			return nil, service.ErrConflict("workspace has running agents")
 		},
 	}
@@ -102,7 +103,7 @@ func TestHandleWorkspaceDelete_HasRunningAgents(t *testing.T) {
 
 func TestHandleWorkspaceDelete_Unavailable(t *testing.T) {
 	svc := &mockWorkspaceService{
-		deleteWorkspaceFn: func(_ context.Context, _ string) (*service.WorkspaceData, error) {
+		deleteWorkspaceFn: func(_ context.Context, _ string) (*ops.WorkspaceData, error) {
 			return nil, service.ErrUnavailable("workspace deletion not available")
 		},
 	}

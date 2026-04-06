@@ -3,14 +3,15 @@ package webui
 import (
 	"net/http"
 
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 type workspaceResponse struct {
-	Success  bool                   `json:"success"`
-	Data     *service.WorkspaceData `json:"data,omitempty"`
-	Error    string                 `json:"error,omitempty"`
-	Warnings []string               `json:"warnings,omitempty"`
+	Success  bool               `json:"success"`
+	Data     *ops.WorkspaceData `json:"data,omitempty"`
+	Error    string             `json:"error,omitempty"`
+	Warnings []string           `json:"warnings,omitempty"`
 }
 
 // handleActiveWorkspace returns the active workspace topology.
@@ -27,18 +28,18 @@ func handleActiveWorkspace(svc service.WorkspaceService) http.HandlerFunc {
 
 // normalizeWorkspaceData ensures all slice fields are non-nil so JSON marshals as [] not null.
 // Kept here as a convenience for non-service callers (server_workspace.go etc.).
-func normalizeWorkspaceData(data *service.WorkspaceData) {
+func normalizeWorkspaceData(data *ops.WorkspaceData) {
 	if data.Repos == nil {
-		data.Repos = []service.WorkspaceRepo{}
+		data.Repos = []ops.WorkspaceRepo{}
 	}
 	if data.Groups == nil {
 		data.Groups = []string{}
 	}
 	if data.Agents == nil {
-		data.Agents = []service.WorkspaceAgentInfo{}
+		data.Agents = []ops.WorkspaceAgentInfo{}
 	}
 	if data.Workspaces == nil {
-		data.Workspaces = []service.WorkspaceSummary{}
+		data.Workspaces = []ops.WorkspaceSummary{}
 	}
 	for i := range data.Repos {
 		if data.Repos[i].Groups == nil {

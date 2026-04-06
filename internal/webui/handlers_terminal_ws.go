@@ -8,9 +8,9 @@ import (
 
 	"nhooyr.io/websocket"
 
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
@@ -36,7 +36,7 @@ func (m *terminalMonitor) CapturePaneRaw(name string, lines int) string {
 // whose host portions are used as OriginPatterns for the WebSocket upgrade.
 // When nil or empty, only same-origin and non-browser (no Origin header)
 // connections are accepted.
-func handleTerminalWS(manager *TerminalManager, auth *realtime.TerminalAuth, allowedOrigins []string, loomServerURL string, workspaceConfigByIDFn func(string) (*service.WorkspaceData, error), tabMetaStore *tabmeta.Store, hub *realtime.Hub) http.HandlerFunc {
+func handleTerminalWS(manager *TerminalManager, auth *realtime.TerminalAuth, allowedOrigins []string, loomServerURL string, workspaceConfigByIDFn func(string) (*ops.WorkspaceData, error), tabMetaStore *tabmeta.Store, hub *realtime.Hub) http.HandlerFunc {
 	// Compute origin host patterns once at construction time.
 	patterns := originHosts(allowedOrigins)
 
@@ -149,7 +149,7 @@ func handleTerminalWS(manager *TerminalManager, auth *realtime.TerminalAuth, all
 		// Inject project context banner into freshly created talk-to-lead sessions.
 		if isNewSession && loomServerURL != "" {
 			wsID := middleware.WorkspaceFromContext(r.Context())
-			wsConfigFn := func() (*service.WorkspaceData, error) { return workspaceConfigByIDFn(wsID) }
+			wsConfigFn := func() (*ops.WorkspaceData, error) { return workspaceConfigByIDFn(wsID) }
 			injectTerminalContextBanner(termSession, loomServerURL, wsConfigFn)
 		}
 
@@ -187,7 +187,7 @@ func handleTerminalWS(manager *TerminalManager, auth *realtime.TerminalAuth, all
 
 // injectTerminalContextBanner fetches project context from the loom server
 // and writes a formatted banner to the terminal session's PTY.
-func injectTerminalContextBanner(session *TerminalSession, loomServerURL string, workspaceConfigFn func() (*service.WorkspaceData, error)) {
+func injectTerminalContextBanner(session *TerminalSession, loomServerURL string, workspaceConfigFn func() (*ops.WorkspaceData, error)) {
 	tc, err := FetchTerminalContext(loomServerURL)
 	if err != nil {
 		logger.Error("terminal context fetch failed, skipping banner", "err", err)

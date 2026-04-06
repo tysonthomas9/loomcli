@@ -1,6 +1,10 @@
 package webui
 
-import "context"
+import (
+	"context"
+
+	"github.com/tysonthomas9/loomcli/internal/ops"
+)
 
 // AgentService defines the business logic operations for agents.
 // Handlers call this interface to perform agent-scoped operations and map
@@ -19,25 +23,25 @@ type AgentService interface {
 	GetDiffStat(ctx context.Context, wsID, agentName string) (*AgentDiffStatResult, error)
 
 	// GitPush merges the agent's branch into the target branch.
-	GitPush(ctx context.Context, wsID, agentName, target string) (*GitPushResult, error)
+	GitPush(ctx context.Context, wsID, agentName, target string) (*ops.GitPushResult, error)
 
 	// GitPushAll pushes all agent worktrees to their target branches.
 	GitPushAll(ctx context.Context, wsID string) (*GitPushAllResult, error)
 
 	// GitPull merges the source branch into the agent's worktree branch.
-	GitPull(ctx context.Context, wsID, agentName, source string) (*GitPullResult, error)
+	GitPull(ctx context.Context, wsID, agentName, source string) (*ops.GitPullResult, error)
 
 	// GitSync performs a full push+pull cycle against the default branch.
 	GitSync(ctx context.Context, wsID, agentName string) (*GitSyncResult, error)
 
 	// CreatePR creates a GitHub PR from the agent's worktree branch.
-	CreatePR(ctx context.Context, wsID, agentName, target string) (*GitPRResult, error)
+	CreatePR(ctx context.Context, wsID, agentName, target string) (*ops.GitPRResult, error)
 
 	// GitReset hard-resets the agent's worktree to a branch.
-	GitReset(ctx context.Context, wsID, agentName, branch string, force, push bool) (*GitResetResult, error)
+	GitReset(ctx context.Context, wsID, agentName, branch string, force, push bool) (*ops.GitResetResult, error)
 
 	// GitStatus returns detailed git status for the agent's worktree.
-	GitStatus(ctx context.Context, wsID, agentName string) (*GitStatusResult, error)
+	GitStatus(ctx context.Context, wsID, agentName string) (*ops.GitStatusResult, error)
 
 	// SetTargetBranch changes the target/integration branch for a worktree.
 	SetTargetBranch(ctx context.Context, wsID, agentName, branch string) error
@@ -68,8 +72,8 @@ type AgentDiffStatResult struct {
 
 // GitSyncResult contains the combined push+pull results.
 type GitSyncResult struct {
-	PushResult *GitPushResult `json:"push_result"`
-	PullResult *GitPullResult `json:"pull_result"`
+	PushResult *ops.GitPushResult `json:"push_result"`
+	PullResult *ops.GitPullResult `json:"pull_result"`
 }
 
 // GitPushAllResult contains aggregate results from pushing all worktrees.

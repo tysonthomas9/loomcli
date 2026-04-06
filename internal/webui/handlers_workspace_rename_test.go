@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
@@ -22,14 +23,14 @@ func renameRequest(wsID, newName string) *http.Request {
 
 func TestWorkspaceRename_Success(t *testing.T) {
 	svc := &mockWorkspaceService{
-		renameWorkspaceFn: func(_ context.Context, wsID string, newName string) (*service.WorkspaceData, error) {
+		renameWorkspaceFn: func(_ context.Context, wsID string, newName string) (*ops.WorkspaceData, error) {
 			if wsID != "uuid-old" {
 				t.Errorf("expected wsID %q, got %q", "uuid-old", wsID)
 			}
 			if newName != "new-name" {
 				t.Errorf("expected newName %q, got %q", "new-name", newName)
 			}
-			return &service.WorkspaceData{Name: "new-name"}, nil
+			return &ops.WorkspaceData{Name: "new-name"}, nil
 		},
 	}
 	handler := handleWorkspaceRename(svc)
@@ -53,7 +54,7 @@ func TestWorkspaceRename_Success(t *testing.T) {
 
 func TestWorkspaceRename_DuplicateName(t *testing.T) {
 	svc := &mockWorkspaceService{
-		renameWorkspaceFn: func(_ context.Context, _ string, _ string) (*service.WorkspaceData, error) {
+		renameWorkspaceFn: func(_ context.Context, _ string, _ string) (*ops.WorkspaceData, error) {
 			return nil, service.ErrConflict("workspace name already exists")
 		},
 	}
@@ -79,7 +80,7 @@ func TestWorkspaceRename_DuplicateName(t *testing.T) {
 
 func TestWorkspaceRename_UnknownUUID(t *testing.T) {
 	svc := &mockWorkspaceService{
-		renameWorkspaceFn: func(_ context.Context, _ string, _ string) (*service.WorkspaceData, error) {
+		renameWorkspaceFn: func(_ context.Context, _ string, _ string) (*ops.WorkspaceData, error) {
 			return nil, service.ErrNotFound("workspace not found")
 		},
 	}

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -1837,9 +1838,9 @@ func TestAppendToLogFile_ReadOnlyParent(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestFindWorkspacePathByID(t *testing.T) {
-	wsData := &service.WorkspaceData{
+	wsData := &ops.WorkspaceData{
 		Path: "/default/path",
-		Workspaces: []service.WorkspaceSummary{
+		Workspaces: []ops.WorkspaceSummary{
 			{ID: "uuid-aaa", Name: "alpha", Path: "/ws/alpha"},
 			{ID: "uuid-bbb", Name: "beta", Path: "/ws/beta"},
 		},
@@ -1847,7 +1848,7 @@ func TestFindWorkspacePathByID(t *testing.T) {
 
 	tests := []struct {
 		name   string
-		wsData *service.WorkspaceData
+		wsData *ops.WorkspaceData
 		id     string
 		want   string
 	}{
@@ -1877,8 +1878,8 @@ func TestFindWorkspacePathByID(t *testing.T) {
 		},
 		{
 			name: "empty ID in summary is skipped",
-			wsData: &service.WorkspaceData{
-				Workspaces: []service.WorkspaceSummary{
+			wsData: &ops.WorkspaceData{
+				Workspaces: []ops.WorkspaceSummary{
 					{ID: "", Name: "no-id", Path: "/ws/no-id"},
 					{ID: "uuid-ccc", Name: "gamma", Path: "/ws/gamma"},
 				},
@@ -1888,8 +1889,8 @@ func TestFindWorkspacePathByID(t *testing.T) {
 		},
 		{
 			name: "lookup with empty ID returns empty",
-			wsData: &service.WorkspaceData{
-				Workspaces: []service.WorkspaceSummary{
+			wsData: &ops.WorkspaceData{
+				Workspaces: []ops.WorkspaceSummary{
 					{ID: "uuid-aaa", Name: "alpha", Path: "/ws/alpha"},
 				},
 			},
@@ -2016,9 +2017,9 @@ func TestResolveWorktreePath_UsesWorkspaceUUID(t *testing.T) {
 	os.WriteFile(filepath.Join(wsAPath, ".agent.lock"), []byte(`{"state":"idle"}`), 0600)
 	os.WriteFile(filepath.Join(wsBPath, ".agent.lock"), []byte(`{"state":"idle"}`), 0600)
 
-	wsData := &service.WorkspaceData{
+	wsData := &ops.WorkspaceData{
 		Path: tmpDir,
-		Workspaces: []service.WorkspaceSummary{
+		Workspaces: []ops.WorkspaceSummary{
 			{ID: uuidA, Name: "alpha", Path: wsAPath},
 			{ID: uuidB, Name: "beta", Path: wsBPath},
 		},

@@ -6,19 +6,19 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/ops"
 )
 
 // buildWorkspaceInfo loads workspace topology from config and daemon config.
 // Returns nil when no workspaces are configured (single-repo mode).
-func buildWorkspaceInfo() (*service.WorkspaceData, error) {
+func buildWorkspaceInfo() (*ops.WorkspaceData, error) {
 	return buildWorkspaceInfoForName("")
 }
 
 // buildWorkspaceInfoForName loads workspace topology for a specific workspace.
 // When targetName is empty, it uses the default workspace from config.
 // Returns nil when no workspaces are configured (single-repo mode).
-func buildWorkspaceInfoForName(targetName string) (*service.WorkspaceData, error) {
+func buildWorkspaceInfoForName(targetName string) (*ops.WorkspaceData, error) {
 	cfg, err := LoadConfig()
 	if err != nil {
 		return nil, err
@@ -46,7 +46,7 @@ func buildWorkspaceInfoForName(targetName string) (*service.WorkspaceData, error
 	}
 
 	groupSet := make(map[string]bool)
-	repos := make([]service.WorkspaceRepo, 0, len(ws.Repos))
+	repos := make([]ops.WorkspaceRepo, 0, len(ws.Repos))
 	for _, r := range ws.Repos {
 		db := r.DefaultBranch
 		if db == "" {
@@ -56,7 +56,7 @@ func buildWorkspaceInfoForName(targetName string) (*service.WorkspaceData, error
 		if remote == "" {
 			remote = "origin"
 		}
-		repos = append(repos, service.WorkspaceRepo{
+		repos = append(repos, ops.WorkspaceRepo{
 			Name:          r.Name,
 			Path:          r.Path,
 			DefaultBranch: db,
@@ -75,7 +75,7 @@ func buildWorkspaceInfoForName(targetName string) (*service.WorkspaceData, error
 	}
 	sort.Strings(groups)
 
-	var agents []service.WorkspaceAgentInfo
+	var agents []ops.WorkspaceAgentInfo
 	dc, dcErr := LoadDaemonConfig(ws.Path)
 	if dcErr != nil {
 		slog.Warn("failed to load daemon config for workspace", "path", ws.Path, "err", dcErr)
@@ -83,7 +83,7 @@ func buildWorkspaceInfoForName(targetName string) (*service.WorkspaceData, error
 	if dcErr == nil && dc != nil {
 		for _, a := range dc.Agents {
 			name := filepath.Base(a.Worktree)
-			agents = append(agents, service.WorkspaceAgentInfo{
+			agents = append(agents, ops.WorkspaceAgentInfo{
 				Name:       name,
 				Repos:      a.Repos,
 				RepoGroups: a.RepoGroups,
@@ -92,9 +92,9 @@ func buildWorkspaceInfoForName(targetName string) (*service.WorkspaceData, error
 		}
 	}
 
-	summaries := make([]service.WorkspaceSummary, 0, len(cfg.Workspaces))
+	summaries := make([]ops.WorkspaceSummary, 0, len(cfg.Workspaces))
 	for name, w := range cfg.Workspaces {
-		summaries = append(summaries, service.WorkspaceSummary{
+		summaries = append(summaries, ops.WorkspaceSummary{
 			ID:        w.ID,
 			Name:      name,
 			Path:      w.Path,
@@ -106,7 +106,7 @@ func buildWorkspaceInfoForName(targetName string) (*service.WorkspaceData, error
 	}
 	sortWorkspaceSummaries(summaries, cfg.WorkspaceOrder)
 
-	return &service.WorkspaceData{
+	return &ops.WorkspaceData{
 		ID:               ws.ID,
 		Name:             wsName,
 		Path:             ws.Path,
@@ -121,7 +121,7 @@ func buildWorkspaceInfoForName(targetName string) (*service.WorkspaceData, error
 
 // buildWorkspaceInfoForID loads workspace topology for a specific workspace UUID.
 // Resolves the UUID to a config name, then delegates to buildWorkspaceInfoForName.
-func buildWorkspaceInfoForID(targetID string) (*service.WorkspaceData, error) {
+func buildWorkspaceInfoForID(targetID string) (*ops.WorkspaceData, error) {
 	cfg, err := LoadConfig()
 	if err != nil {
 		return nil, err
@@ -139,7 +139,7 @@ func buildWorkspaceInfoForID(targetID string) (*service.WorkspaceData, error) {
 }
 
 // sortWorkspaceSummaries sorts workspace summaries using custom order if provided.
-func sortWorkspaceSummaries(summaries []service.WorkspaceSummary, order []string) {
+func sortWorkspaceSummaries(summaries []ops.WorkspaceSummary, order []string) {
 	if len(order) > 0 {
 		orderIndex := make(map[string]int, len(order))
 		for i, name := range order {

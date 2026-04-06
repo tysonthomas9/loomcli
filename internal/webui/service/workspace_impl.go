@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/configlock"
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 )
 
@@ -19,19 +20,19 @@ const (
 
 // WorkspaceServiceConfig holds the dependencies for workspace service construction.
 type WorkspaceServiceConfig struct {
-	ConfigFn       func() (*WorkspaceData, error)       // Workspace topology supplier
-	ConfigByIDFn   func(string) (*WorkspaceData, error) // Topology supplier by workspace ID
-	MultiPool      *daemon.MultiPool                    // For listing workspaces and existence checks
-	CreateFn       WorkspaceCreateFn                    // Already wrapped with registry hooks
-	DeleteFn       func(string) error                   // Already wrapped with cleanup hooks
-	JobStore       JobStore                             // For async creation; nil = async unavailable
-	SetDefaultFn   func(string) error                   // nil = feature disabled
-	ClearDefaultFn func() error                         // nil = feature disabled
+	ConfigFn       func() (*ops.WorkspaceData, error)       // Workspace topology supplier
+	ConfigByIDFn   func(string) (*ops.WorkspaceData, error) // Topology supplier by workspace ID
+	MultiPool      *daemon.MultiPool                        // For listing workspaces and existence checks
+	CreateFn       WorkspaceCreateFn                        // Already wrapped with registry hooks
+	DeleteFn       func(string) error                       // Already wrapped with cleanup hooks
+	JobStore       JobStore                                 // For async creation; nil = async unavailable
+	SetDefaultFn   func(string) error                       // nil = feature disabled
+	ClearDefaultFn func() error                             // nil = feature disabled
 }
 
 type workspaceServiceImpl struct {
-	configFn       func() (*WorkspaceData, error)
-	configByIDFn   func(string) (*WorkspaceData, error)
+	configFn       func() (*ops.WorkspaceData, error)
+	configByIDFn   func(string) (*ops.WorkspaceData, error)
 	multiPool      *daemon.MultiPool
 	createFn       WorkspaceCreateFn
 	deleteFn       func(string) error
@@ -54,13 +55,13 @@ func NewWorkspaceService(cfg WorkspaceServiceConfig) WorkspaceService {
 	}
 }
 
-func (s *workspaceServiceImpl) GetActiveWorkspace(_ context.Context) (*WorkspaceData, error) {
+func (s *workspaceServiceImpl) GetActiveWorkspace(_ context.Context) (*ops.WorkspaceData, error) {
 	if s.configFn == nil {
-		return &WorkspaceData{
-			Repos:      []WorkspaceRepo{},
+		return &ops.WorkspaceData{
+			Repos:      []ops.WorkspaceRepo{},
 			Groups:     []string{},
-			Agents:     []WorkspaceAgentInfo{},
-			Workspaces: []WorkspaceSummary{},
+			Agents:     []ops.WorkspaceAgentInfo{},
+			Workspaces: []ops.WorkspaceSummary{},
 		}, nil
 	}
 
@@ -69,7 +70,7 @@ func (s *workspaceServiceImpl) GetActiveWorkspace(_ context.Context) (*Workspace
 		return nil, ErrInternal("failed to load workspace config", err)
 	}
 	if data == nil {
-		data = &WorkspaceData{}
+		data = &ops.WorkspaceData{}
 	}
 	normalizeWorkspaceData(data)
 	return data, nil
@@ -83,12 +84,12 @@ func (s *workspaceServiceImpl) ListWorkspaces(_ context.Context) ([]WorkspaceLis
 	ids := s.multiPool.WorkspaceIDs()
 
 	// Build workspace metadata maps from config if available.
-	var wsMetaByName map[string]WorkspaceSummary
-	var wsMetaByID map[string]WorkspaceSummary
+	var wsMetaByName map[string]ops.WorkspaceSummary
+	var wsMetaByID map[string]ops.WorkspaceSummary
 	if s.configFn != nil {
 		if data, err := s.configFn(); err == nil && data != nil {
-			wsMetaByName = make(map[string]WorkspaceSummary, len(data.Workspaces))
-			wsMetaByID = make(map[string]WorkspaceSummary, len(data.Workspaces))
+			wsMetaByName = make(map[string]ops.WorkspaceSummary, len(data.Workspaces))
+			wsMetaByID = make(map[string]ops.WorkspaceSummary, len(data.Workspaces))
 			for _, ws := range data.Workspaces {
 				wsMetaByName[ws.Name] = ws
 				if ws.ID != "" {
@@ -130,7 +131,7 @@ func (s *workspaceServiceImpl) ListWorkspaces(_ context.Context) ([]WorkspaceLis
 	return items, nil
 }
 
-func (s *workspaceServiceImpl) GetWorkspace(_ context.Context, wsID string) (*WorkspaceData, error) {
+func (s *workspaceServiceImpl) GetWorkspace(_ context.Context, wsID string) (*ops.WorkspaceData, error) {
 	if s.multiPool == nil || s.multiPool.PoolForWorkspace(wsID) == nil {
 		return nil, ErrNotFound("workspace not found: " + wsID)
 	}
@@ -151,7 +152,7 @@ func (s *workspaceServiceImpl) GetWorkspace(_ context.Context, wsID string) (*Wo
 	return data, nil
 }
 
-func (s *workspaceServiceImpl) CreateWorkspace(ctx context.Context, req WorkspaceCreateRequest) (*WorkspaceData, []string, error) {
+func (s *workspaceServiceImpl) CreateWorkspace(ctx context.Context, req WorkspaceCreateRequest) (*ops.WorkspaceData, []string, error) {
 	if s.createFn == nil {
 		return nil, nil, ErrUnavailable("workspace creation is not available")
 	}
@@ -178,7 +179,7 @@ func (s *workspaceServiceImpl) CreateWorkspace(ctx context.Context, req Workspac
 	}
 	_ = result // used by wrapWorkspaceCreateFn for registration
 
-	var data *WorkspaceData
+	var data *ops.WorkspaceData
 	if s.configFn != nil {
 		d, cfgErr := s.configFn()
 		if cfgErr == nil && d != nil {
@@ -215,7 +216,7 @@ func (s *workspaceServiceImpl) GetWorkspaceJob(_ context.Context, jobID string) 
 	return job, nil
 }
 
-func (s *workspaceServiceImpl) DeleteWorkspace(_ context.Context, wsID string) (*WorkspaceData, error) {
+func (s *workspaceServiceImpl) DeleteWorkspace(_ context.Context, wsID string) (*ops.WorkspaceData, error) {
 	if s.deleteFn == nil {
 		return nil, ErrUnavailable("workspace deletion not available")
 	}
@@ -242,7 +243,7 @@ func (s *workspaceServiceImpl) DeleteWorkspace(_ context.Context, wsID string) (
 	return s.refreshWorkspaceData()
 }
 
-func (s *workspaceServiceImpl) RenameWorkspace(_ context.Context, wsID string, newName string) (*WorkspaceData, error) {
+func (s *workspaceServiceImpl) RenameWorkspace(_ context.Context, wsID string, newName string) (*ops.WorkspaceData, error) {
 	if err := validateWorkspaceName(newName); err != nil {
 		return nil, err
 	}
@@ -284,7 +285,7 @@ func (s *workspaceServiceImpl) RenameWorkspace(_ context.Context, wsID string, n
 	return s.refreshWorkspaceData()
 }
 
-func (s *workspaceServiceImpl) ReorderWorkspaces(_ context.Context, order []string) (*WorkspaceData, error) {
+func (s *workspaceServiceImpl) ReorderWorkspaces(_ context.Context, order []string) (*ops.WorkspaceData, error) {
 	dir := loomConfigDir()
 	unlock, lockErr := configlock.ConfigLock(dir)
 	if lockErr != nil {
@@ -324,7 +325,7 @@ func (s *workspaceServiceImpl) ReorderWorkspaces(_ context.Context, order []stri
 	return s.refreshWorkspaceData()
 }
 
-func (s *workspaceServiceImpl) SetDefaultWorkspace(_ context.Context, name string) (*WorkspaceData, error) {
+func (s *workspaceServiceImpl) SetDefaultWorkspace(_ context.Context, name string) (*ops.WorkspaceData, error) {
 	if s.setDefaultFn == nil {
 		return nil, ErrUnavailable("set default workspace not available")
 	}
@@ -340,7 +341,7 @@ func (s *workspaceServiceImpl) SetDefaultWorkspace(_ context.Context, name strin
 	return s.refreshWorkspaceData()
 }
 
-func (s *workspaceServiceImpl) ClearDefaultWorkspace(_ context.Context) (*WorkspaceData, error) {
+func (s *workspaceServiceImpl) ClearDefaultWorkspace(_ context.Context) (*ops.WorkspaceData, error) {
 	if s.clearDefaultFn == nil {
 		return nil, ErrUnavailable("clear default workspace not available")
 	}
@@ -352,7 +353,7 @@ func (s *workspaceServiceImpl) ClearDefaultWorkspace(_ context.Context) (*Worksp
 	return s.refreshWorkspaceData()
 }
 
-func (s *workspaceServiceImpl) PatchWorkspaceBackend(_ context.Context, wsID string, backend string) (*WorkspaceData, error) {
+func (s *workspaceServiceImpl) PatchWorkspaceBackend(_ context.Context, wsID string, backend string) (*ops.WorkspaceData, error) {
 	dir := loomConfigDir()
 	unlock, lockErr := configlock.ConfigLock(dir)
 	if lockErr != nil {
@@ -395,7 +396,7 @@ func poolStatsFromDaemon(d daemon.PoolStats) PoolStats {
 
 // --- Internal helpers ---
 
-func (s *workspaceServiceImpl) refreshWorkspaceData() (*WorkspaceData, error) {
+func (s *workspaceServiceImpl) refreshWorkspaceData() (*ops.WorkspaceData, error) {
 	if s.configFn == nil {
 		return nil, nil
 	}
@@ -429,18 +430,18 @@ func (s *workspaceServiceImpl) resolveWorkspaceNameByUUID(wsID string) (string, 
 }
 
 // normalizeWorkspaceData ensures all slice fields are non-nil so JSON marshals as [] not null.
-func normalizeWorkspaceData(data *WorkspaceData) {
+func normalizeWorkspaceData(data *ops.WorkspaceData) {
 	if data.Repos == nil {
-		data.Repos = []WorkspaceRepo{}
+		data.Repos = []ops.WorkspaceRepo{}
 	}
 	if data.Groups == nil {
 		data.Groups = []string{}
 	}
 	if data.Agents == nil {
-		data.Agents = []WorkspaceAgentInfo{}
+		data.Agents = []ops.WorkspaceAgentInfo{}
 	}
 	if data.Workspaces == nil {
-		data.Workspaces = []WorkspaceSummary{}
+		data.Workspaces = []ops.WorkspaceSummary{}
 	}
 	for i := range data.Repos {
 		if data.Repos[i].Groups == nil {
@@ -459,7 +460,7 @@ func normalizeWorkspaceData(data *WorkspaceData) {
 
 // FindWorkspacePathByID scans workspace summaries for a matching UUID and
 // returns its filesystem path. Returns empty string if not found.
-func FindWorkspacePathByID(wsData *WorkspaceData, id string) string {
+func FindWorkspacePathByID(wsData *ops.WorkspaceData, id string) string {
 	if wsData == nil {
 		return ""
 	}
@@ -473,7 +474,7 @@ func FindWorkspacePathByID(wsData *WorkspaceData, id string) string {
 
 // ResolveWorkspacePath loads config and resolves a workspace UUID to its
 // filesystem path. Returns empty string on any failure.
-func ResolveWorkspacePath(configFn func() (*WorkspaceData, error), workspaceID string) string {
+func ResolveWorkspacePath(configFn func() (*ops.WorkspaceData, error), workspaceID string) string {
 	if configFn == nil {
 		return ""
 	}

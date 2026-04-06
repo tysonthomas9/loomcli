@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
@@ -14,16 +15,16 @@ import (
 
 // diffServiceImpl is the concrete implementation of DiffService.
 type diffServiceImpl struct {
-	gitOps GitOps
+	gitOps ops.GitOps
 	pool   daemon.Pool
 }
 
 // NewDiffService creates a new DiffService implementation.
-func NewDiffService(gitOps GitOps, pool daemon.Pool) DiffService {
+func NewDiffService(gitOps ops.GitOps, pool daemon.Pool) DiffService {
 	return &diffServiceImpl{gitOps: gitOps, pool: pool}
 }
 
-func (s *diffServiceImpl) resolveAgent(wsID, agentName string) (*AgentWorktree, error) {
+func (s *diffServiceImpl) resolveAgent(wsID, agentName string) (*ops.AgentWorktree, error) {
 	if err := validateAgentName(agentName); err != nil {
 		return nil, err
 	}
@@ -41,7 +42,7 @@ func (s *diffServiceImpl) validateRef(ref string) error {
 	return nil
 }
 
-func (s *diffServiceImpl) DiffCommits(_ context.Context, wsID, agentName, from string, limit int) ([]DiffCommitResult, error) {
+func (s *diffServiceImpl) DiffCommits(_ context.Context, wsID, agentName, from string, limit int) ([]ops.DiffCommitResult, error) {
 	wt, err := s.resolveAgent(wsID, agentName)
 	if err != nil {
 		return nil, err
@@ -64,12 +65,12 @@ func (s *diffServiceImpl) DiffCommits(_ context.Context, wsID, agentName, from s
 		return nil, service.ErrInternal("failed to get diff commits", err)
 	}
 	if commits == nil {
-		commits = []DiffCommitResult{}
+		commits = []ops.DiffCommitResult{}
 	}
 	return commits, nil
 }
 
-func (s *diffServiceImpl) DiffFiles(_ context.Context, wsID, agentName, from, to string) ([]DiffFileResult, error) {
+func (s *diffServiceImpl) DiffFiles(_ context.Context, wsID, agentName, from, to string) ([]ops.DiffFileResult, error) {
 	wt, err := s.resolveAgent(wsID, agentName)
 	if err != nil {
 		return nil, err
@@ -99,12 +100,12 @@ func (s *diffServiceImpl) DiffFiles(_ context.Context, wsID, agentName, from, to
 		return nil, service.ErrInternal("failed to get diff files", err)
 	}
 	if files == nil {
-		files = []DiffFileResult{}
+		files = []ops.DiffFileResult{}
 	}
 	return files, nil
 }
 
-func (s *diffServiceImpl) DiffFilePatch(_ context.Context, wsID, agentName, from, to, filePath string) (*DiffFilePatchResult, error) {
+func (s *diffServiceImpl) DiffFilePatch(_ context.Context, wsID, agentName, from, to, filePath string) (*ops.DiffFilePatchResult, error) {
 	wt, err := s.resolveAgent(wsID, agentName)
 	if err != nil {
 		return nil, err

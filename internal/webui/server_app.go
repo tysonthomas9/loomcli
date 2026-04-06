@@ -244,7 +244,7 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 		}
 	}
 
-	// Initialize agent service layer (requires GitOps; termMgr/termAuth may be nil)
+	// Initialize agent service layer (requires ops.GitOps; termMgr/termAuth may be nil)
 	if config.GitOps != nil {
 		app.agentSvc = NewAgentService(config.GitOps, app.termMgr, app.termAuth)
 	}
@@ -444,12 +444,12 @@ func NewServer(ctx context.Context, config ServerConfig) (_ *Server, retErr erro
 		)
 	}
 
-	// Initialize diff service layer (requires GitOps)
+	// Initialize diff service layer (requires ops.GitOps)
 	if config.GitOps != nil {
 		app.diffSvc = NewDiffService(config.GitOps, app.multiPool)
 	}
 
-	// Initialize file service layer (requires FileOps)
+	// Initialize file service layer (requires ops.FileOps)
 	if config.FileOps != nil {
 		app.fileSvc = NewFileService(config.FileOps)
 	}

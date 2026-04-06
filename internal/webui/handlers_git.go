@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
@@ -235,7 +236,7 @@ func handleGitReset(svc AgentService) http.HandlerFunc {
 
 		result, err := svc.GitReset(r.Context(), wsID, agentName, branch, req.Force, req.Push)
 		if err != nil {
-			var lockedErr *GitResetLockedError
+			var lockedErr *ops.GitResetLockedError
 			if errors.As(err, &lockedErr) {
 				respondJSON(w, http.StatusLocked, lockedResponse{
 					Error: "agent locked",

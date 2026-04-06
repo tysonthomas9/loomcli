@@ -8,18 +8,19 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 func TestWorkspaceReorder_Success(t *testing.T) {
 	reorderCalled := false
 	svc := &mockWorkspaceService{
-		reorderWorkspacesFn: func(_ context.Context, order []string) (*service.WorkspaceData, error) {
+		reorderWorkspacesFn: func(_ context.Context, order []string) (*ops.WorkspaceData, error) {
 			reorderCalled = true
 			if len(order) != 3 {
 				t.Errorf("expected 3 items, got %d", len(order))
 			}
-			return &service.WorkspaceData{Name: "test-ws"}, nil
+			return &ops.WorkspaceData{Name: "test-ws"}, nil
 		},
 	}
 
@@ -75,7 +76,7 @@ func TestWorkspaceReorder_InvalidJSON(t *testing.T) {
 
 func TestWorkspaceReorder_NotFound(t *testing.T) {
 	svc := &mockWorkspaceService{
-		reorderWorkspacesFn: func(_ context.Context, _ []string) (*service.WorkspaceData, error) {
+		reorderWorkspacesFn: func(_ context.Context, _ []string) (*ops.WorkspaceData, error) {
 			return nil, service.ErrNotFound("no config found")
 		},
 	}

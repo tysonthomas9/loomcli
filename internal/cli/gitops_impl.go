@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/webui"
+	"github.com/tysonthomas9/loomcli/internal/ops"
 )
 
-// GitOpsImpl implements webui.GitOps using the cli package git functions.
+// GitOpsImpl implements ops.GitOps using the cli package git functions.
 type GitOpsImpl struct{}
 
 // NewGitOps creates a new GitOps implementation.
@@ -48,7 +48,7 @@ func scopeResolverToWorkspace(resolver *Resolver, workspaceID string) error {
 	return resolver.SetWorkspace(wsName)
 }
 
-func (g *GitOpsImpl) ResolveAgentWorktree(workspaceID, name string) (*webui.AgentWorktree, error) {
+func (g *GitOpsImpl) ResolveAgentWorktree(workspaceID, name string) (*ops.AgentWorktree, error) {
 	resolver, err := NewResolver()
 	if err != nil {
 		return nil, fmt.Errorf("creating resolver: %v", err)
@@ -65,7 +65,7 @@ func (g *GitOpsImpl) ResolveAgentWorktree(workspaceID, name string) (*webui.Agen
 
 	for _, wt := range worktrees {
 		if wt.Name == name {
-			aw := &webui.AgentWorktree{
+			aw := &ops.AgentWorktree{
 				Name:          wt.Name,
 				Path:          wt.Path,
 				Branch:        wt.Branch,
@@ -86,12 +86,12 @@ func (g *GitOpsImpl) ResolveAgentWorktree(workspaceID, name string) (*webui.Agen
 	return nil, fmt.Errorf("worktree %q not found", name)
 }
 
-func (g *GitOpsImpl) Push(worktreePath, sourceBranch, targetBranch, remote string) (*webui.GitPushResult, error) {
+func (g *GitOpsImpl) Push(worktreePath, sourceBranch, targetBranch, remote string) (*ops.GitPushResult, error) {
 	result, err := PushBranchInRepoResult(worktreePath, sourceBranch, targetBranch, remote)
 	if err != nil {
 		return nil, err
 	}
-	return &webui.GitPushResult{
+	return &ops.GitPushResult{
 		Success:         result.Success,
 		Message:         result.Message,
 		AlreadyUpToDate: result.AlreadyUpToDate,
@@ -99,12 +99,12 @@ func (g *GitOpsImpl) Push(worktreePath, sourceBranch, targetBranch, remote strin
 	}, nil
 }
 
-func (g *GitOpsImpl) Pull(worktreePath, currentBranch, sourceBranch, remote string) (*webui.GitPullResult, error) {
+func (g *GitOpsImpl) Pull(worktreePath, currentBranch, sourceBranch, remote string) (*ops.GitPullResult, error) {
 	result, err := PullRepoWorktreeResult(worktreePath, currentBranch, sourceBranch, remote)
 	if err != nil {
 		return nil, err
 	}
-	return &webui.GitPullResult{
+	return &ops.GitPullResult{
 		Success:         result.Success,
 		Message:         result.Message,
 		AlreadyUpToDate: result.AlreadyUpToDate,
@@ -112,12 +112,12 @@ func (g *GitOpsImpl) Pull(worktreePath, currentBranch, sourceBranch, remote stri
 	}, nil
 }
 
-func (g *GitOpsImpl) CreatePR(worktreePath, sourceBranch, targetBranch, remote string) (*webui.GitPRResult, error) {
+func (g *GitOpsImpl) CreatePR(worktreePath, sourceBranch, targetBranch, remote string) (*ops.GitPRResult, error) {
 	result, err := CreatePRResult(worktreePath, sourceBranch, targetBranch, remote)
 	if err != nil {
 		return nil, err
 	}
-	return &webui.GitPRResult{
+	return &ops.GitPRResult{
 		URL:           result.URL,
 		Created:       result.Created,
 		AlreadyExists: result.AlreadyExists,
@@ -125,12 +125,12 @@ func (g *GitOpsImpl) CreatePR(worktreePath, sourceBranch, targetBranch, remote s
 	}, nil
 }
 
-func (g *GitOpsImpl) Reset(worktreePath, worktreeName, targetBranch string, force, push bool) (*webui.GitResetResult, error) {
+func (g *GitOpsImpl) Reset(worktreePath, worktreeName, targetBranch string, force, push bool) (*ops.GitResetResult, error) {
 	result, err := ResetWorktreeResult(worktreePath, worktreeName, targetBranch, force, push)
 	if err != nil {
 		var lockedErr *LockedError
 		if isLockedError(err, &lockedErr) {
-			return nil, &webui.GitResetLockedError{
+			return nil, &ops.GitResetLockedError{
 				AgentName: lockedErr.AgentName,
 				PID:       lockedErr.PID,
 				Duration:  lockedErr.Duration.Round(time.Second).String(),
@@ -139,7 +139,7 @@ func (g *GitOpsImpl) Reset(worktreePath, worktreeName, targetBranch string, forc
 		}
 		return nil, err
 	}
-	return &webui.GitResetResult{
+	return &ops.GitResetResult{
 		Success:        result.Success,
 		Message:        result.Message,
 		PreviousBranch: result.PreviousBranch,
@@ -147,12 +147,12 @@ func (g *GitOpsImpl) Reset(worktreePath, worktreeName, targetBranch string, forc
 	}, nil
 }
 
-func (g *GitOpsImpl) Status(worktreePath, targetBranch string) (*webui.GitStatusResult, error) {
+func (g *GitOpsImpl) Status(worktreePath, targetBranch string) (*ops.GitStatusResult, error) {
 	result, err := GetGitStatusSummary(worktreePath, targetBranch)
 	if err != nil {
 		return nil, err
 	}
-	return &webui.GitStatusResult{
+	return &ops.GitStatusResult{
 		Branch:          result.Branch,
 		TargetBranch:    result.TargetBranch,
 		IsClean:         result.IsClean,
@@ -184,7 +184,7 @@ func (g *GitOpsImpl) SetRepoDefaultBranch(workspaceID, repoName, branch string) 
 	return resolver.SetRepoDefaultBranch(repoName, branch)
 }
 
-func (g *GitOpsImpl) ListAgentWorktrees(workspaceID string) ([]webui.AgentWorktree, error) {
+func (g *GitOpsImpl) ListAgentWorktrees(workspaceID string) ([]ops.AgentWorktree, error) {
 	resolver, err := NewResolver()
 	if err != nil {
 		return nil, fmt.Errorf("creating resolver: %v", err)
@@ -199,9 +199,9 @@ func (g *GitOpsImpl) ListAgentWorktrees(workspaceID string) ([]webui.AgentWorktr
 		return nil, fmt.Errorf("discovering worktrees: %v", err)
 	}
 
-	result := make([]webui.AgentWorktree, 0, len(worktrees))
+	result := make([]ops.AgentWorktree, 0, len(worktrees))
 	for _, wt := range worktrees {
-		aw := webui.AgentWorktree{
+		aw := ops.AgentWorktree{
 			Name:          wt.Name,
 			Path:          wt.Path,
 			Branch:        wt.Branch,
@@ -220,9 +220,9 @@ func (g *GitOpsImpl) ListAgentWorktrees(workspaceID string) ([]webui.AgentWorktr
 	return result, nil
 }
 
-func (g *GitOpsImpl) DiffStat(worktreePath, fromRef string) webui.DiffStatResult {
+func (g *GitOpsImpl) DiffStat(worktreePath, fromRef string) ops.DiffStatResult {
 	stats := ComputeDiffStats(worktreePath, fromRef)
-	return webui.DiffStatResult{
+	return ops.DiffStatResult{
 		FilesChanged: stats.FilesChanged,
 		LinesAdded:   stats.LinesAdded,
 		LinesRemoved: stats.LinesRemoved,
@@ -233,15 +233,15 @@ func (g *GitOpsImpl) ResolveMergeBase(worktreePath, branch string) (string, erro
 	return ResolveMergeBase(worktreePath, branch)
 }
 
-func (g *GitOpsImpl) DiffCommits(worktreePath, mergeBase string, limit int) ([]webui.DiffCommitResult, error) {
+func (g *GitOpsImpl) DiffCommits(worktreePath, mergeBase string, limit int) ([]ops.DiffCommitResult, error) {
 	return DiffCommits(worktreePath, mergeBase, limit)
 }
 
-func (g *GitOpsImpl) DiffFiles(worktreePath, from, to string) ([]webui.DiffFileResult, error) {
+func (g *GitOpsImpl) DiffFiles(worktreePath, from, to string) ([]ops.DiffFileResult, error) {
 	return DiffFiles(worktreePath, from, to)
 }
 
-func (g *GitOpsImpl) DiffFilePatch(worktreePath, from, to, path string) (*webui.DiffFilePatchResult, error) {
+func (g *GitOpsImpl) DiffFilePatch(worktreePath, from, to, path string) (*ops.DiffFilePatchResult, error) {
 	return DiffFilePatch(worktreePath, from, to, path)
 }
 

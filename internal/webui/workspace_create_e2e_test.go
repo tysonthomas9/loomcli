@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -57,7 +58,7 @@ func TestWorkspaceCreateE2E_ErrorCodes(t *testing.T) {
 				startAsyncCreateFn: func(_ context.Context, _ service.WorkspaceCreateRequest) (string, error) {
 					return "", service.ErrUnavailable("not available")
 				},
-				createWorkspaceFn: func(_ context.Context, _ service.WorkspaceCreateRequest) (*service.WorkspaceData, []string, error) {
+				createWorkspaceFn: func(_ context.Context, _ service.WorkspaceCreateRequest) (*ops.WorkspaceData, []string, error) {
 					return nil, nil, tt.svcErr
 				},
 			}
@@ -124,9 +125,9 @@ func TestWorkspaceCreateE2E_CloneNilJobStoreSync(t *testing.T) {
 		startAsyncCreateFn: func(_ context.Context, _ service.WorkspaceCreateRequest) (string, error) {
 			return "", service.ErrUnavailable("async not available")
 		},
-		createWorkspaceFn: func(_ context.Context, _ service.WorkspaceCreateRequest) (*service.WorkspaceData, []string, error) {
+		createWorkspaceFn: func(_ context.Context, _ service.WorkspaceCreateRequest) (*ops.WorkspaceData, []string, error) {
 			createCalled = true
-			return &service.WorkspaceData{Name: "sync-e2e"}, nil, nil
+			return &ops.WorkspaceData{Name: "sync-e2e"}, nil, nil
 		},
 	}
 
@@ -151,11 +152,11 @@ func TestWorkspaceCreateE2E_EmptySuccess(t *testing.T) {
 		startAsyncCreateFn: func(_ context.Context, _ service.WorkspaceCreateRequest) (string, error) {
 			return "", service.ErrUnavailable("not available")
 		},
-		createWorkspaceFn: func(_ context.Context, req service.WorkspaceCreateRequest) (*service.WorkspaceData, []string, error) {
+		createWorkspaceFn: func(_ context.Context, req service.WorkspaceCreateRequest) (*ops.WorkspaceData, []string, error) {
 			if req.Type != "empty" {
 				t.Errorf("expected type %q, got %q", "empty", req.Type)
 			}
-			return &service.WorkspaceData{Name: "test-ws"}, nil, nil
+			return &ops.WorkspaceData{Name: "test-ws"}, nil, nil
 		},
 	}
 

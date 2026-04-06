@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -64,21 +65,21 @@ func TestHandleListWorkspaces_Empty(t *testing.T) {
 
 func TestHandleGetWorkspace(t *testing.T) {
 	svc := &mockWorkspaceService{
-		getWorkspaceFn: func(_ context.Context, wsID string) (*service.WorkspaceData, error) {
+		getWorkspaceFn: func(_ context.Context, wsID string) (*ops.WorkspaceData, error) {
 			if wsID != "ws-alpha" {
 				return nil, service.ErrNotFound("workspace not found")
 			}
-			return &service.WorkspaceData{
+			return &ops.WorkspaceData{
 				ID:   "ws-alpha",
 				Name: "alpha",
 				Path: "/path/alpha",
-				Workspaces: []service.WorkspaceSummary{
+				Workspaces: []ops.WorkspaceSummary{
 					{ID: "ws-alpha", Name: "alpha", Path: "/path/alpha", Active: true},
 					{ID: "ws-beta", Name: "beta", Path: "/path/beta"},
 				},
-				Repos:  []service.WorkspaceRepo{},
+				Repos:  []ops.WorkspaceRepo{},
 				Groups: []string{},
-				Agents: []service.WorkspaceAgentInfo{},
+				Agents: []ops.WorkspaceAgentInfo{},
 			}, nil
 		},
 	}
@@ -107,7 +108,7 @@ func TestHandleGetWorkspace(t *testing.T) {
 
 func TestHandleGetWorkspace_NotFound(t *testing.T) {
 	svc := &mockWorkspaceService{
-		getWorkspaceFn: func(_ context.Context, _ string) (*service.WorkspaceData, error) {
+		getWorkspaceFn: func(_ context.Context, _ string) (*ops.WorkspaceData, error) {
 			return nil, service.ErrNotFound("workspace not found")
 		},
 	}

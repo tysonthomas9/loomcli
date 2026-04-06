@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/webui"
+	"github.com/tysonthomas9/loomcli/internal/ops"
 )
 
 const (
@@ -27,7 +27,7 @@ func ResolveMergeBase(worktreePath, branch string) (string, error) {
 
 // DiffCommits returns the list of commits between mergeBase and HEAD.
 // Format: %H|%h|%an|%ae|%aI|%s — subject is last so pipes in it are preserved.
-func DiffCommits(worktreePath, mergeBase string, limit int) ([]webui.DiffCommitResult, error) {
+func DiffCommits(worktreePath, mergeBase string, limit int) ([]ops.DiffCommitResult, error) {
 	if err := validateGitRef(mergeBase); err != nil {
 		return nil, err
 	}
@@ -41,7 +41,7 @@ func DiffCommits(worktreePath, mergeBase string, limit int) ([]webui.DiffCommitR
 	}
 
 	lines := strings.Split(strings.TrimSpace(out), "\n")
-	results := make([]webui.DiffCommitResult, 0, len(lines))
+	results := make([]ops.DiffCommitResult, 0, len(lines))
 	for _, line := range lines {
 		if line == "" {
 			continue
@@ -50,7 +50,7 @@ func DiffCommits(worktreePath, mergeBase string, limit int) ([]webui.DiffCommitR
 		if len(parts) < 6 {
 			continue
 		}
-		results = append(results, webui.DiffCommitResult{
+		results = append(results, ops.DiffCommitResult{
 			Hash:      parts[0],
 			ShortHash: parts[1],
 			Author:    parts[2],
@@ -63,7 +63,7 @@ func DiffCommits(worktreePath, mergeBase string, limit int) ([]webui.DiffCommitR
 }
 
 // DiffFiles returns the list of changed files between two refs with status and stats.
-func DiffFiles(worktreePath, from, to string) ([]webui.DiffFileResult, error) {
+func DiffFiles(worktreePath, from, to string) ([]ops.DiffFileResult, error) {
 	if err := validateGitRef(from); err != nil {
 		return nil, err
 	}
@@ -113,7 +113,7 @@ func DiffFiles(worktreePath, from, to string) ([]webui.DiffFileResult, error) {
 	}
 
 	// Parse name-status and merge with stats
-	results := make([]webui.DiffFileResult, 0)
+	results := make([]ops.DiffFileResult, 0)
 	for _, line := range strings.Split(strings.TrimSpace(nameStatusOut), "\n") {
 		if line == "" {
 			continue
@@ -126,7 +126,7 @@ func DiffFiles(worktreePath, from, to string) ([]webui.DiffFileResult, error) {
 			continue
 		}
 		status := fields[0]
-		var result webui.DiffFileResult
+		var result ops.DiffFileResult
 
 		if strings.HasPrefix(status, "R") {
 			// Rename: R###\told\tnew
@@ -174,7 +174,7 @@ func parseNumstatRenamePath(s string) string {
 }
 
 // DiffFilePatch returns the unified diff patch for a single file between two refs.
-func DiffFilePatch(worktreePath, from, to, path string) (*webui.DiffFilePatchResult, error) {
+func DiffFilePatch(worktreePath, from, to, path string) (*ops.DiffFilePatchResult, error) {
 	if err := validateGitRef(from); err != nil {
 		return nil, err
 	}
@@ -192,7 +192,7 @@ func DiffFilePatch(worktreePath, from, to, path string) (*webui.DiffFilePatchRes
 		return nil, fmt.Errorf("diff numstat for file: %w", err)
 	}
 
-	result := &webui.DiffFilePatchResult{}
+	result := &ops.DiffFilePatchResult{}
 	numstatLine := strings.TrimSpace(numstatOut)
 	if numstatLine != "" {
 		fields := strings.SplitN(numstatLine, "\t", 3)

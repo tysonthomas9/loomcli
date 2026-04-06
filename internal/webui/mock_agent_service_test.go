@@ -1,6 +1,10 @@
 package webui
 
-import "context"
+import (
+	"context"
+
+	"github.com/tysonthomas9/loomcli/internal/ops"
+)
 
 // mockAgentService implements AgentService for handler-level testing.
 type mockAgentService struct {
@@ -8,13 +12,13 @@ type mockAgentService struct {
 	generateTerminalTokenFunc func(ctx context.Context, agentName, userID string) (string, error)
 	getLogFunc                func(ctx context.Context, wsID, agentName string, lines int, beforeLine int64) (*AgentLogResult, error)
 	getDiffStatFunc           func(ctx context.Context, wsID, agentName string) (*AgentDiffStatResult, error)
-	gitPushFunc               func(ctx context.Context, wsID, agentName, target string) (*GitPushResult, error)
+	gitPushFunc               func(ctx context.Context, wsID, agentName, target string) (*ops.GitPushResult, error)
 	gitPushAllFunc            func(ctx context.Context, wsID string) (*GitPushAllResult, error)
-	gitPullFunc               func(ctx context.Context, wsID, agentName, source string) (*GitPullResult, error)
+	gitPullFunc               func(ctx context.Context, wsID, agentName, source string) (*ops.GitPullResult, error)
 	gitSyncFunc               func(ctx context.Context, wsID, agentName string) (*GitSyncResult, error)
-	createPRFunc              func(ctx context.Context, wsID, agentName, target string) (*GitPRResult, error)
-	gitResetFunc              func(ctx context.Context, wsID, agentName, branch string, force, push bool) (*GitResetResult, error)
-	gitStatusFunc             func(ctx context.Context, wsID, agentName string) (*GitStatusResult, error)
+	createPRFunc              func(ctx context.Context, wsID, agentName, target string) (*ops.GitPRResult, error)
+	gitResetFunc              func(ctx context.Context, wsID, agentName, branch string, force, push bool) (*ops.GitResetResult, error)
+	gitStatusFunc             func(ctx context.Context, wsID, agentName string) (*ops.GitStatusResult, error)
 	setTargetBranchFunc       func(ctx context.Context, wsID, agentName, branch string) error
 }
 
@@ -46,11 +50,11 @@ func (m *mockAgentService) GetDiffStat(ctx context.Context, wsID, agentName stri
 	return &AgentDiffStatResult{}, nil
 }
 
-func (m *mockAgentService) GitPush(ctx context.Context, wsID, agentName, target string) (*GitPushResult, error) {
+func (m *mockAgentService) GitPush(ctx context.Context, wsID, agentName, target string) (*ops.GitPushResult, error) {
 	if m.gitPushFunc != nil {
 		return m.gitPushFunc(ctx, wsID, agentName, target)
 	}
-	return &GitPushResult{Success: true, Message: "pushed"}, nil
+	return &ops.GitPushResult{Success: true, Message: "pushed"}, nil
 }
 
 func (m *mockAgentService) GitPushAll(ctx context.Context, wsID string) (*GitPushAllResult, error) {
@@ -60,11 +64,11 @@ func (m *mockAgentService) GitPushAll(ctx context.Context, wsID string) (*GitPus
 	return &GitPushAllResult{}, nil
 }
 
-func (m *mockAgentService) GitPull(ctx context.Context, wsID, agentName, source string) (*GitPullResult, error) {
+func (m *mockAgentService) GitPull(ctx context.Context, wsID, agentName, source string) (*ops.GitPullResult, error) {
 	if m.gitPullFunc != nil {
 		return m.gitPullFunc(ctx, wsID, agentName, source)
 	}
-	return &GitPullResult{Success: true, Message: "pulled"}, nil
+	return &ops.GitPullResult{Success: true, Message: "pulled"}, nil
 }
 
 func (m *mockAgentService) GitSync(ctx context.Context, wsID, agentName string) (*GitSyncResult, error) {
@@ -72,30 +76,30 @@ func (m *mockAgentService) GitSync(ctx context.Context, wsID, agentName string) 
 		return m.gitSyncFunc(ctx, wsID, agentName)
 	}
 	return &GitSyncResult{
-		PushResult: &GitPushResult{Success: true},
-		PullResult: &GitPullResult{Success: true},
+		PushResult: &ops.GitPushResult{Success: true},
+		PullResult: &ops.GitPullResult{Success: true},
 	}, nil
 }
 
-func (m *mockAgentService) CreatePR(ctx context.Context, wsID, agentName, target string) (*GitPRResult, error) {
+func (m *mockAgentService) CreatePR(ctx context.Context, wsID, agentName, target string) (*ops.GitPRResult, error) {
 	if m.createPRFunc != nil {
 		return m.createPRFunc(ctx, wsID, agentName, target)
 	}
-	return &GitPRResult{URL: "https://github.com/test/pr/1", Created: true}, nil
+	return &ops.GitPRResult{URL: "https://github.com/test/pr/1", Created: true}, nil
 }
 
-func (m *mockAgentService) GitReset(ctx context.Context, wsID, agentName, branch string, force, push bool) (*GitResetResult, error) {
+func (m *mockAgentService) GitReset(ctx context.Context, wsID, agentName, branch string, force, push bool) (*ops.GitResetResult, error) {
 	if m.gitResetFunc != nil {
 		return m.gitResetFunc(ctx, wsID, agentName, branch, force, push)
 	}
-	return &GitResetResult{Success: true, Message: "reset done"}, nil
+	return &ops.GitResetResult{Success: true, Message: "reset done"}, nil
 }
 
-func (m *mockAgentService) GitStatus(ctx context.Context, wsID, agentName string) (*GitStatusResult, error) {
+func (m *mockAgentService) GitStatus(ctx context.Context, wsID, agentName string) (*ops.GitStatusResult, error) {
 	if m.gitStatusFunc != nil {
 		return m.gitStatusFunc(ctx, wsID, agentName)
 	}
-	return &GitStatusResult{Branch: "feature", TargetBranch: "main", IsClean: true}, nil
+	return &ops.GitStatusResult{Branch: "feature", TargetBranch: "main", IsClean: true}, nil
 }
 
 func (m *mockAgentService) SetTargetBranch(ctx context.Context, wsID, agentName, branch string) error {

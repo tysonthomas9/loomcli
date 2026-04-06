@@ -1,4 +1,4 @@
-package webui
+package ops
 
 // GitOps defines the interface for git operations on agent worktrees.
 // This interface breaks the import cycle between webui and cli packages.

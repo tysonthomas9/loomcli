@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -31,7 +32,7 @@ type MoveResult struct {
 
 // workspaceValidatorImpl implements service.WorkspaceValidator using the webui workspace config.
 type workspaceValidatorImpl struct {
-	workspaceConfigFn func() (*service.WorkspaceData, error)
+	workspaceConfigFn func() (*ops.WorkspaceData, error)
 }
 
 func (v *workspaceValidatorImpl) ValidateTarget(targetWorkspace string) (string, error) {
@@ -83,7 +84,7 @@ func (v *workspaceValidatorImpl) CurrentWorkspace() string {
 }
 
 // handleMoveIssue returns a handler that moves an issue to a different workspace.
-func handleMoveIssue(svc service.IssueService, workspaceConfigFn func() (*service.WorkspaceData, error)) http.HandlerFunc {
+func handleMoveIssue(svc service.IssueService, workspaceConfigFn func() (*ops.WorkspaceData, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		issueID := r.PathValue("id")
 		if issueID == "" {

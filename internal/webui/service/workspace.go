@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+
+	"github.com/tysonthomas9/loomcli/internal/ops"
 )
 
 // WorkspaceListItem represents a workspace in the list response.
@@ -23,19 +25,19 @@ type JobStore interface {
 // validation, and lifecycle logic behind a clean service boundary.
 type WorkspaceService interface {
 	// GetActiveWorkspace returns the active workspace topology.
-	// Returns empty WorkspaceData (non-nil, empty slices) if config unavailable.
-	GetActiveWorkspace(ctx context.Context) (*WorkspaceData, error)
+	// Returns empty ops.WorkspaceData (non-nil, empty slices) if config unavailable.
+	GetActiveWorkspace(ctx context.Context) (*ops.WorkspaceData, error)
 
 	// ListWorkspaces returns all registered workspaces with pool status.
 	ListWorkspaces(ctx context.Context) ([]WorkspaceListItem, error)
 
 	// GetWorkspace returns full workspace data for a specific workspace ID.
 	// Returns ServiceError{Kind: NotFound} if workspace does not exist.
-	GetWorkspace(ctx context.Context, wsID string) (*WorkspaceData, error)
+	GetWorkspace(ctx context.Context, wsID string) (*ops.WorkspaceData, error)
 
 	// CreateWorkspace creates a new workspace synchronously.
 	// Returns refreshed workspace data and any non-fatal warnings.
-	CreateWorkspace(ctx context.Context, req WorkspaceCreateRequest) (*WorkspaceData, []string, error)
+	CreateWorkspace(ctx context.Context, req WorkspaceCreateRequest) (*ops.WorkspaceData, []string, error)
 
 	// StartAsyncCreate starts an async workspace creation job for clone workspaces.
 	// Returns the job ID. Validates the request before starting.
@@ -48,26 +50,26 @@ type WorkspaceService interface {
 
 	// DeleteWorkspace deletes a workspace by UUID.
 	// Returns refreshed workspace data.
-	DeleteWorkspace(ctx context.Context, wsID string) (*WorkspaceData, error)
+	DeleteWorkspace(ctx context.Context, wsID string) (*ops.WorkspaceData, error)
 
 	// RenameWorkspace renames a workspace identified by UUID.
 	// Returns refreshed workspace data.
-	RenameWorkspace(ctx context.Context, wsID string, newName string) (*WorkspaceData, error)
+	RenameWorkspace(ctx context.Context, wsID string, newName string) (*ops.WorkspaceData, error)
 
 	// ReorderWorkspaces persists a custom workspace display order.
 	// Returns refreshed workspace data.
-	ReorderWorkspaces(ctx context.Context, order []string) (*WorkspaceData, error)
+	ReorderWorkspaces(ctx context.Context, order []string) (*ops.WorkspaceData, error)
 
 	// SetDefaultWorkspace sets the default workspace by name.
 	// Returns refreshed workspace data.
-	SetDefaultWorkspace(ctx context.Context, name string) (*WorkspaceData, error)
+	SetDefaultWorkspace(ctx context.Context, name string) (*ops.WorkspaceData, error)
 
 	// ClearDefaultWorkspace clears the default workspace setting.
 	// Returns refreshed workspace data.
-	ClearDefaultWorkspace(ctx context.Context) (*WorkspaceData, error)
+	ClearDefaultWorkspace(ctx context.Context) (*ops.WorkspaceData, error)
 
 	// PatchWorkspaceBackend updates a workspace's AI backend config setting.
 	// Caller must pre-validate the backend name (isValidBackend).
 	// Returns refreshed workspace data.
-	PatchWorkspaceBackend(ctx context.Context, wsID string, backend string) (*WorkspaceData, error)
+	PatchWorkspaceBackend(ctx context.Context, wsID string, backend string) (*ops.WorkspaceData, error)
 }

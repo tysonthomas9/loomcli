@@ -9,69 +9,70 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
-// mockGitOps implements GitOps for testing.
+// mockGitOps implements ops.GitOps for testing.
 type mockGitOps struct {
-	resolveFunc            func(name string) (*AgentWorktree, error)
-	pushFunc               func(worktreePath, sourceBranch, targetBranch, remote string) (*GitPushResult, error)
-	pullFunc               func(worktreePath, currentBranch, sourceBranch, remote string) (*GitPullResult, error)
-	createPRFunc           func(worktreePath, sourceBranch, targetBranch, remote string) (*GitPRResult, error)
-	resetFunc              func(worktreePath, worktreeName, targetBranch string, force, push bool) (*GitResetResult, error)
-	statusFunc             func(worktreePath, targetBranch string) (*GitStatusResult, error)
+	resolveFunc            func(name string) (*ops.AgentWorktree, error)
+	pushFunc               func(worktreePath, sourceBranch, targetBranch, remote string) (*ops.GitPushResult, error)
+	pullFunc               func(worktreePath, currentBranch, sourceBranch, remote string) (*ops.GitPullResult, error)
+	createPRFunc           func(worktreePath, sourceBranch, targetBranch, remote string) (*ops.GitPRResult, error)
+	resetFunc              func(worktreePath, worktreeName, targetBranch string, force, push bool) (*ops.GitResetResult, error)
+	statusFunc             func(worktreePath, targetBranch string) (*ops.GitStatusResult, error)
 	getCurrentBranchFunc   func(worktreePath string) (string, error)
 	checkGhInstalledFunc   func() error
 	setRepoDefaultFunc     func(repoName, branch string) error
-	listAgentWorktreesFunc func() ([]AgentWorktree, error)
-	diffStatFunc           func(worktreePath, fromRef string) DiffStatResult
+	listAgentWorktreesFunc func() ([]ops.AgentWorktree, error)
+	diffStatFunc           func(worktreePath, fromRef string) ops.DiffStatResult
 	resolveMergeBaseFunc   func(worktreePath, branch string) (string, error)
-	diffCommitsFunc        func(worktreePath, mergeBase string, limit int) ([]DiffCommitResult, error)
-	diffFilesFunc          func(worktreePath, from, to string) ([]DiffFileResult, error)
-	diffFilePatchFunc      func(worktreePath, from, to, path string) (*DiffFilePatchResult, error)
+	diffCommitsFunc        func(worktreePath, mergeBase string, limit int) ([]ops.DiffCommitResult, error)
+	diffFilesFunc          func(worktreePath, from, to string) ([]ops.DiffFileResult, error)
+	diffFilePatchFunc      func(worktreePath, from, to, path string) (*ops.DiffFilePatchResult, error)
 }
 
-func (m *mockGitOps) ResolveAgentWorktree(workspaceID, name string) (*AgentWorktree, error) {
+func (m *mockGitOps) ResolveAgentWorktree(workspaceID, name string) (*ops.AgentWorktree, error) {
 	if m.resolveFunc != nil {
 		return m.resolveFunc(name)
 	}
 	return nil, errors.New("not found")
 }
 
-func (m *mockGitOps) Push(worktreePath, sourceBranch, targetBranch, remote string) (*GitPushResult, error) {
+func (m *mockGitOps) Push(worktreePath, sourceBranch, targetBranch, remote string) (*ops.GitPushResult, error) {
 	if m.pushFunc != nil {
 		return m.pushFunc(worktreePath, sourceBranch, targetBranch, remote)
 	}
-	return &GitPushResult{Success: true, Message: "pushed"}, nil
+	return &ops.GitPushResult{Success: true, Message: "pushed"}, nil
 }
 
-func (m *mockGitOps) Pull(worktreePath, currentBranch, sourceBranch, remote string) (*GitPullResult, error) {
+func (m *mockGitOps) Pull(worktreePath, currentBranch, sourceBranch, remote string) (*ops.GitPullResult, error) {
 	if m.pullFunc != nil {
 		return m.pullFunc(worktreePath, currentBranch, sourceBranch, remote)
 	}
-	return &GitPullResult{Success: true, Message: "pulled"}, nil
+	return &ops.GitPullResult{Success: true, Message: "pulled"}, nil
 }
 
-func (m *mockGitOps) CreatePR(worktreePath, sourceBranch, targetBranch, remote string) (*GitPRResult, error) {
+func (m *mockGitOps) CreatePR(worktreePath, sourceBranch, targetBranch, remote string) (*ops.GitPRResult, error) {
 	if m.createPRFunc != nil {
 		return m.createPRFunc(worktreePath, sourceBranch, targetBranch, remote)
 	}
-	return &GitPRResult{URL: "https://github.com/test/pr/1", Created: true}, nil
+	return &ops.GitPRResult{URL: "https://github.com/test/pr/1", Created: true}, nil
 }
 
-func (m *mockGitOps) Reset(worktreePath, worktreeName, targetBranch string, force, push bool) (*GitResetResult, error) {
+func (m *mockGitOps) Reset(worktreePath, worktreeName, targetBranch string, force, push bool) (*ops.GitResetResult, error) {
 	if m.resetFunc != nil {
 		return m.resetFunc(worktreePath, worktreeName, targetBranch, force, push)
 	}
-	return &GitResetResult{Success: true, Message: "reset done"}, nil
+	return &ops.GitResetResult{Success: true, Message: "reset done"}, nil
 }
 
-func (m *mockGitOps) Status(worktreePath, targetBranch string) (*GitStatusResult, error) {
+func (m *mockGitOps) Status(worktreePath, targetBranch string) (*ops.GitStatusResult, error) {
 	if m.statusFunc != nil {
 		return m.statusFunc(worktreePath, targetBranch)
 	}
-	return &GitStatusResult{Branch: "feature", TargetBranch: "main", IsClean: true}, nil
+	return &ops.GitStatusResult{Branch: "feature", TargetBranch: "main", IsClean: true}, nil
 }
 
 func (m *mockGitOps) GetCurrentBranch(worktreePath string) (string, error) {
@@ -95,18 +96,18 @@ func (m *mockGitOps) SetRepoDefaultBranch(workspaceID, repoName, branch string) 
 	return nil
 }
 
-func (m *mockGitOps) ListAgentWorktrees(workspaceID string) ([]AgentWorktree, error) {
+func (m *mockGitOps) ListAgentWorktrees(workspaceID string) ([]ops.AgentWorktree, error) {
 	if m.listAgentWorktreesFunc != nil {
 		return m.listAgentWorktreesFunc()
 	}
 	return nil, nil
 }
 
-func (m *mockGitOps) DiffStat(worktreePath, fromRef string) DiffStatResult {
+func (m *mockGitOps) DiffStat(worktreePath, fromRef string) ops.DiffStatResult {
 	if m.diffStatFunc != nil {
 		return m.diffStatFunc(worktreePath, fromRef)
 	}
-	return DiffStatResult{}
+	return ops.DiffStatResult{}
 }
 
 func (m *mockGitOps) ResolveMergeBase(worktreePath, branch string) (string, error) {
@@ -116,30 +117,30 @@ func (m *mockGitOps) ResolveMergeBase(worktreePath, branch string) (string, erro
 	return "abc123", nil
 }
 
-func (m *mockGitOps) DiffCommits(worktreePath, mergeBase string, limit int) ([]DiffCommitResult, error) {
+func (m *mockGitOps) DiffCommits(worktreePath, mergeBase string, limit int) ([]ops.DiffCommitResult, error) {
 	if m.diffCommitsFunc != nil {
 		return m.diffCommitsFunc(worktreePath, mergeBase, limit)
 	}
-	return []DiffCommitResult{}, nil
+	return []ops.DiffCommitResult{}, nil
 }
 
-func (m *mockGitOps) DiffFiles(worktreePath, from, to string) ([]DiffFileResult, error) {
+func (m *mockGitOps) DiffFiles(worktreePath, from, to string) ([]ops.DiffFileResult, error) {
 	if m.diffFilesFunc != nil {
 		return m.diffFilesFunc(worktreePath, from, to)
 	}
-	return []DiffFileResult{}, nil
+	return []ops.DiffFileResult{}, nil
 }
 
-func (m *mockGitOps) DiffFilePatch(worktreePath, from, to, path string) (*DiffFilePatchResult, error) {
+func (m *mockGitOps) DiffFilePatch(worktreePath, from, to, path string) (*ops.DiffFilePatchResult, error) {
 	if m.diffFilePatchFunc != nil {
 		return m.diffFilePatchFunc(worktreePath, from, to, path)
 	}
-	return &DiffFilePatchResult{}, nil
+	return &ops.DiffFilePatchResult{}, nil
 }
 
-// testWorktree returns a standard AgentWorktree used across tests.
-func testWorktree() *AgentWorktree {
-	return &AgentWorktree{
+// testWorktree returns a standard ops.AgentWorktree used across tests.
+func testWorktree() *ops.AgentWorktree {
+	return &ops.AgentWorktree{
 		Name:          "test-agent",
 		Path:          "/tmp/worktrees/test-agent",
 		Branch:        "loomcli-test-agent",
@@ -154,7 +155,7 @@ func testWorktree() *AgentWorktree {
 func resolveOK() *mockGitOps {
 	wt := testWorktree()
 	return &mockGitOps{
-		resolveFunc: func(name string) (*AgentWorktree, error) {
+		resolveFunc: func(name string) (*ops.AgentWorktree, error) {
 			return wt, nil
 		},
 	}
@@ -164,11 +165,11 @@ func resolveOK() *mockGitOps {
 
 func TestGitPush_Success(t *testing.T) {
 	svc := &mockAgentService{
-		gitPushFunc: func(ctx context.Context, wsID, agentName, target string) (*GitPushResult, error) {
+		gitPushFunc: func(ctx context.Context, wsID, agentName, target string) (*ops.GitPushResult, error) {
 			if target != "" {
 				t.Errorf("target = %q, want %q", target, "")
 			}
-			return &GitPushResult{Success: true, Message: "merged"}, nil
+			return &ops.GitPushResult{Success: true, Message: "merged"}, nil
 		},
 	}
 	handler := handleGitPush(svc)
@@ -184,7 +185,7 @@ func TestGitPush_Success(t *testing.T) {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
 
-	var resp GitPushResult
+	var resp ops.GitPushResult
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode error: %v", err)
 	}
@@ -195,11 +196,11 @@ func TestGitPush_Success(t *testing.T) {
 
 func TestGitPush_CustomTarget(t *testing.T) {
 	svc := &mockAgentService{
-		gitPushFunc: func(ctx context.Context, wsID, agentName, target string) (*GitPushResult, error) {
+		gitPushFunc: func(ctx context.Context, wsID, agentName, target string) (*ops.GitPushResult, error) {
 			if target != "develop" {
 				t.Errorf("target = %q, want %q", target, "develop")
 			}
-			return &GitPushResult{Success: true, Message: "merged to develop"}, nil
+			return &ops.GitPushResult{Success: true, Message: "merged to develop"}, nil
 		},
 	}
 	handler := handleGitPush(svc)
@@ -219,8 +220,8 @@ func TestGitPush_CustomTarget(t *testing.T) {
 
 func TestGitPush_Conflict(t *testing.T) {
 	svc := &mockAgentService{
-		gitPushFunc: func(ctx context.Context, wsID, agentName, target string) (*GitPushResult, error) {
-			return &GitPushResult{
+		gitPushFunc: func(ctx context.Context, wsID, agentName, target string) (*ops.GitPushResult, error) {
+			return &ops.GitPushResult{
 				Success:         false,
 				Message:         "merge conflict",
 				ConflictedFiles: []string{"file1.go", "file2.go"},
@@ -240,7 +241,7 @@ func TestGitPush_Conflict(t *testing.T) {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusConflict)
 	}
 
-	var resp GitPushResult
+	var resp ops.GitPushResult
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode error: %v", err)
 	}
@@ -254,7 +255,7 @@ func TestGitPush_Conflict(t *testing.T) {
 
 func TestGitPush_OperationError(t *testing.T) {
 	svc := &mockAgentService{
-		gitPushFunc: func(ctx context.Context, wsID, agentName, target string) (*GitPushResult, error) {
+		gitPushFunc: func(ctx context.Context, wsID, agentName, target string) (*ops.GitPushResult, error) {
 			return nil, errors.New("remote unreachable")
 		},
 	}
@@ -276,11 +277,11 @@ func TestGitPush_OperationError(t *testing.T) {
 
 func TestGitPull_Success(t *testing.T) {
 	svc := &mockAgentService{
-		gitPullFunc: func(ctx context.Context, wsID, agentName, source string) (*GitPullResult, error) {
+		gitPullFunc: func(ctx context.Context, wsID, agentName, source string) (*ops.GitPullResult, error) {
 			if source != "" {
 				t.Errorf("source = %q, want %q", source, "")
 			}
-			return &GitPullResult{Success: true, Message: "pulled"}, nil
+			return &ops.GitPullResult{Success: true, Message: "pulled"}, nil
 		},
 	}
 	handler := handleGitPull(svc)
@@ -296,7 +297,7 @@ func TestGitPull_Success(t *testing.T) {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
 
-	var resp GitPullResult
+	var resp ops.GitPullResult
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode error: %v", err)
 	}
@@ -307,11 +308,11 @@ func TestGitPull_Success(t *testing.T) {
 
 func TestGitPull_CustomSource(t *testing.T) {
 	svc := &mockAgentService{
-		gitPullFunc: func(ctx context.Context, wsID, agentName, source string) (*GitPullResult, error) {
+		gitPullFunc: func(ctx context.Context, wsID, agentName, source string) (*ops.GitPullResult, error) {
 			if source != "develop" {
 				t.Errorf("source = %q, want %q", source, "develop")
 			}
-			return &GitPullResult{Success: true, Message: "pulled from develop"}, nil
+			return &ops.GitPullResult{Success: true, Message: "pulled from develop"}, nil
 		},
 	}
 	handler := handleGitPull(svc)
@@ -331,8 +332,8 @@ func TestGitPull_CustomSource(t *testing.T) {
 
 func TestGitPull_Conflict(t *testing.T) {
 	svc := &mockAgentService{
-		gitPullFunc: func(ctx context.Context, wsID, agentName, source string) (*GitPullResult, error) {
-			return &GitPullResult{
+		gitPullFunc: func(ctx context.Context, wsID, agentName, source string) (*ops.GitPullResult, error) {
+			return &ops.GitPullResult{
 				Success:         false,
 				Message:         "merge conflict",
 				ConflictedFiles: []string{"main.go"},
@@ -355,7 +356,7 @@ func TestGitPull_Conflict(t *testing.T) {
 
 func TestGitPull_GetCurrentBranchError(t *testing.T) {
 	svc := &mockAgentService{
-		gitPullFunc: func(ctx context.Context, wsID, agentName, source string) (*GitPullResult, error) {
+		gitPullFunc: func(ctx context.Context, wsID, agentName, source string) (*ops.GitPullResult, error) {
 			return nil, &service.ServiceError{Kind: service.KindInternal, Message: "detached HEAD"}
 		},
 	}
@@ -375,7 +376,7 @@ func TestGitPull_GetCurrentBranchError(t *testing.T) {
 
 func TestGitPull_OperationError(t *testing.T) {
 	svc := &mockAgentService{
-		gitPullFunc: func(ctx context.Context, wsID, agentName, source string) (*GitPullResult, error) {
+		gitPullFunc: func(ctx context.Context, wsID, agentName, source string) (*ops.GitPullResult, error) {
 			return nil, errors.New("network error")
 		},
 	}
@@ -399,8 +400,8 @@ func TestGitSync_Success(t *testing.T) {
 	svc := &mockAgentService{
 		gitSyncFunc: func(ctx context.Context, wsID, agentName string) (*GitSyncResult, error) {
 			return &GitSyncResult{
-				PushResult: &GitPushResult{Success: true, Message: "pushed"},
-				PullResult: &GitPullResult{Success: true, Message: "pulled"},
+				PushResult: &ops.GitPushResult{Success: true, Message: "pushed"},
+				PullResult: &ops.GitPullResult{Success: true, Message: "pulled"},
 			}, nil
 		},
 	}
@@ -439,7 +440,7 @@ func TestGitSync_PushConflict(t *testing.T) {
 	svc := &mockAgentService{
 		gitSyncFunc: func(ctx context.Context, wsID, agentName string) (*GitSyncResult, error) {
 			return &GitSyncResult{
-				PushResult: &GitPushResult{
+				PushResult: &ops.GitPushResult{
 					Success:         false,
 					Message:         "conflict",
 					ConflictedFiles: []string{"a.go"},
@@ -496,8 +497,8 @@ func TestGitSync_PullConflict(t *testing.T) {
 	svc := &mockAgentService{
 		gitSyncFunc: func(ctx context.Context, wsID, agentName string) (*GitSyncResult, error) {
 			return &GitSyncResult{
-				PushResult: &GitPushResult{Success: true, Message: "pushed"},
-				PullResult: &GitPullResult{
+				PushResult: &ops.GitPushResult{Success: true, Message: "pushed"},
+				PullResult: &ops.GitPullResult{
 					Success:         false,
 					Message:         "conflict on pull",
 					ConflictedFiles: []string{"b.go"},
@@ -574,8 +575,8 @@ func TestGitSync_GetCurrentBranchError(t *testing.T) {
 
 func TestGitPR_Created(t *testing.T) {
 	svc := &mockAgentService{
-		createPRFunc: func(ctx context.Context, wsID, agentName, target string) (*GitPRResult, error) {
-			return &GitPRResult{URL: "https://github.com/test/pr/1", Created: true}, nil
+		createPRFunc: func(ctx context.Context, wsID, agentName, target string) (*ops.GitPRResult, error) {
+			return &ops.GitPRResult{URL: "https://github.com/test/pr/1", Created: true}, nil
 		},
 	}
 	handler := handleGitPR(svc)
@@ -591,7 +592,7 @@ func TestGitPR_Created(t *testing.T) {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusCreated)
 	}
 
-	var resp GitPRResult
+	var resp ops.GitPRResult
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode error: %v", err)
 	}
@@ -605,8 +606,8 @@ func TestGitPR_Created(t *testing.T) {
 
 func TestGitPR_AlreadyExists(t *testing.T) {
 	svc := &mockAgentService{
-		createPRFunc: func(ctx context.Context, wsID, agentName, target string) (*GitPRResult, error) {
-			return &GitPRResult{URL: "https://github.com/test/pr/1", Created: false, AlreadyExists: true}, nil
+		createPRFunc: func(ctx context.Context, wsID, agentName, target string) (*ops.GitPRResult, error) {
+			return &ops.GitPRResult{URL: "https://github.com/test/pr/1", Created: false, AlreadyExists: true}, nil
 		},
 	}
 	handler := handleGitPR(svc)
@@ -622,7 +623,7 @@ func TestGitPR_AlreadyExists(t *testing.T) {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
 
-	var resp GitPRResult
+	var resp ops.GitPRResult
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode error: %v", err)
 	}
@@ -636,7 +637,7 @@ func TestGitPR_AlreadyExists(t *testing.T) {
 
 func TestGitPR_GhNotInstalled(t *testing.T) {
 	svc := &mockAgentService{
-		createPRFunc: func(ctx context.Context, wsID, agentName, target string) (*GitPRResult, error) {
+		createPRFunc: func(ctx context.Context, wsID, agentName, target string) (*ops.GitPRResult, error) {
 			return nil, &service.ServiceError{Kind: service.KindUnavailable, Message: "gh CLI not installed"}
 		},
 	}
@@ -664,11 +665,11 @@ func TestGitPR_GhNotInstalled(t *testing.T) {
 
 func TestGitPR_CustomTarget(t *testing.T) {
 	svc := &mockAgentService{
-		createPRFunc: func(ctx context.Context, wsID, agentName, target string) (*GitPRResult, error) {
+		createPRFunc: func(ctx context.Context, wsID, agentName, target string) (*ops.GitPRResult, error) {
 			if target != "develop" {
 				t.Errorf("target = %q, want %q", target, "develop")
 			}
-			return &GitPRResult{URL: "https://github.com/test/pr/2", Created: true}, nil
+			return &ops.GitPRResult{URL: "https://github.com/test/pr/2", Created: true}, nil
 		},
 	}
 	handler := handleGitPR(svc)
@@ -688,7 +689,7 @@ func TestGitPR_CustomTarget(t *testing.T) {
 
 func TestGitPR_OperationError(t *testing.T) {
 	svc := &mockAgentService{
-		createPRFunc: func(ctx context.Context, wsID, agentName, target string) (*GitPRResult, error) {
+		createPRFunc: func(ctx context.Context, wsID, agentName, target string) (*ops.GitPRResult, error) {
 			return nil, errors.New("API rate limit exceeded")
 		},
 	}
@@ -710,8 +711,8 @@ func TestGitPR_OperationError(t *testing.T) {
 
 func TestGitReset_Success(t *testing.T) {
 	svc := &mockAgentService{
-		gitResetFunc: func(ctx context.Context, wsID, agentName, branch string, force, push bool) (*GitResetResult, error) {
-			return &GitResetResult{Success: true, Message: "reset to main", PreviousBranch: "loomcli-test-agent"}, nil
+		gitResetFunc: func(ctx context.Context, wsID, agentName, branch string, force, push bool) (*ops.GitResetResult, error) {
+			return &ops.GitResetResult{Success: true, Message: "reset to main", PreviousBranch: "loomcli-test-agent"}, nil
 		},
 	}
 	handler := handleGitReset(svc)
@@ -727,7 +728,7 @@ func TestGitReset_Success(t *testing.T) {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
 
-	var resp GitResetResult
+	var resp ops.GitResetResult
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode error: %v", err)
 	}
@@ -738,11 +739,11 @@ func TestGitReset_Success(t *testing.T) {
 
 func TestGitReset_CustomBranch(t *testing.T) {
 	svc := &mockAgentService{
-		gitResetFunc: func(ctx context.Context, wsID, agentName, branch string, force, push bool) (*GitResetResult, error) {
+		gitResetFunc: func(ctx context.Context, wsID, agentName, branch string, force, push bool) (*ops.GitResetResult, error) {
 			if branch != "develop" {
 				t.Errorf("branch = %q, want %q", branch, "develop")
 			}
-			return &GitResetResult{Success: true, Message: "reset to develop"}, nil
+			return &ops.GitResetResult{Success: true, Message: "reset to develop"}, nil
 		},
 	}
 	handler := handleGitReset(svc)
@@ -762,11 +763,11 @@ func TestGitReset_CustomBranch(t *testing.T) {
 
 func TestGitReset_ForceFlag(t *testing.T) {
 	svc := &mockAgentService{
-		gitResetFunc: func(ctx context.Context, wsID, agentName, branch string, force, push bool) (*GitResetResult, error) {
+		gitResetFunc: func(ctx context.Context, wsID, agentName, branch string, force, push bool) (*ops.GitResetResult, error) {
 			if !force {
 				t.Error("expected force to be true")
 			}
-			return &GitResetResult{Success: true, Message: "force reset"}, nil
+			return &ops.GitResetResult{Success: true, Message: "force reset"}, nil
 		},
 	}
 	handler := handleGitReset(svc)
@@ -786,8 +787,8 @@ func TestGitReset_ForceFlag(t *testing.T) {
 
 func TestGitReset_Locked(t *testing.T) {
 	svc := &mockAgentService{
-		gitResetFunc: func(ctx context.Context, wsID, agentName, branch string, force, push bool) (*GitResetResult, error) {
-			return nil, &GitResetLockedError{
+		gitResetFunc: func(ctx context.Context, wsID, agentName, branch string, force, push bool) (*ops.GitResetResult, error) {
+			return nil, &ops.GitResetLockedError{
 				AgentName: "test-agent",
 				PID:       12345,
 				Duration:  "5m32s",
@@ -831,7 +832,7 @@ func TestGitReset_Locked(t *testing.T) {
 
 func TestGitReset_OperationError(t *testing.T) {
 	svc := &mockAgentService{
-		gitResetFunc: func(ctx context.Context, wsID, agentName, branch string, force, push bool) (*GitResetResult, error) {
+		gitResetFunc: func(ctx context.Context, wsID, agentName, branch string, force, push bool) (*ops.GitResetResult, error) {
 			return nil, errors.New("reset failed: dirty worktree")
 		},
 	}
@@ -853,8 +854,8 @@ func TestGitReset_OperationError(t *testing.T) {
 
 func TestGitStatus_Success(t *testing.T) {
 	svc := &mockAgentService{
-		gitStatusFunc: func(ctx context.Context, wsID, agentName string) (*GitStatusResult, error) {
-			return &GitStatusResult{
+		gitStatusFunc: func(ctx context.Context, wsID, agentName string) (*ops.GitStatusResult, error) {
+			return &ops.GitStatusResult{
 				Branch:       "loomcli-test-agent",
 				TargetBranch: "main",
 				IsClean:      false,
@@ -878,7 +879,7 @@ func TestGitStatus_Success(t *testing.T) {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
 
-	var resp GitStatusResult
+	var resp ops.GitStatusResult
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode error: %v", err)
 	}
@@ -904,7 +905,7 @@ func TestGitStatus_Success(t *testing.T) {
 
 func TestGitStatus_Error(t *testing.T) {
 	svc := &mockAgentService{
-		gitStatusFunc: func(ctx context.Context, wsID, agentName string) (*GitStatusResult, error) {
+		gitStatusFunc: func(ctx context.Context, wsID, agentName string) (*ops.GitStatusResult, error) {
 			return nil, errors.New("git not initialized")
 		},
 	}
@@ -1336,14 +1337,14 @@ type wsCaptureMockGitOps struct {
 	captureSetRepoWS func(wsID string)
 }
 
-func (m *wsCaptureMockGitOps) ResolveAgentWorktree(workspaceID, name string) (*AgentWorktree, error) {
+func (m *wsCaptureMockGitOps) ResolveAgentWorktree(workspaceID, name string) (*ops.AgentWorktree, error) {
 	if m.captureResolveWS != nil {
 		m.captureResolveWS(workspaceID)
 	}
 	return m.mockGitOps.ResolveAgentWorktree(workspaceID, name)
 }
 
-func (m *wsCaptureMockGitOps) ListAgentWorktrees(workspaceID string) ([]AgentWorktree, error) {
+func (m *wsCaptureMockGitOps) ListAgentWorktrees(workspaceID string) ([]ops.AgentWorktree, error) {
 	if m.captureListWS != nil {
 		m.captureListWS(workspaceID)
 	}

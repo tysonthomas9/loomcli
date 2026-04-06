@@ -5,7 +5,7 @@ import "net/http"
 // GitModule registers the 13 workspace-scoped git operation and diff routes
 // on a [*http.ServeMux].
 //
-// The module is only constructed when GitOps is non-nil. All routes are
+// The module is only constructed when ops.GitOps is non-nil. All routes are
 // unconditional within this module.
 type GitModule struct {
 	agentSvc AgentService

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 )
@@ -33,20 +34,20 @@ func TestHandleGetIssueDiffStat_Success(t *testing.T) {
 
 	wt := testWorktree()
 	gitOps := &mockGitOps{
-		resolveFunc: func(name string) (*AgentWorktree, error) {
+		resolveFunc: func(name string) (*ops.AgentWorktree, error) {
 			if name != "falcon" {
 				t.Errorf("resolveFunc name = %q, want %q", name, "falcon")
 			}
 			return wt, nil
 		},
-		diffStatFunc: func(worktreePath, fromRef string) DiffStatResult {
+		diffStatFunc: func(worktreePath, fromRef string) ops.DiffStatResult {
 			if worktreePath != wt.Path {
 				t.Errorf("diffStatFunc worktreePath = %q, want %q", worktreePath, wt.Path)
 			}
 			if fromRef != wt.DefaultBranch {
 				t.Errorf("diffStatFunc fromRef = %q, want %q", fromRef, wt.DefaultBranch)
 			}
-			return DiffStatResult{
+			return ops.DiffStatResult{
 				FilesChanged: 3,
 				LinesAdded:   42,
 				LinesRemoved: 7,
@@ -204,7 +205,7 @@ func TestHandleGetIssueDiffStat_WorktreeNotFound(t *testing.T) {
 
 	pool := newHandlersMockPool(t, socketPath)
 	gitOps := &mockGitOps{
-		resolveFunc: func(name string) (*AgentWorktree, error) {
+		resolveFunc: func(name string) (*ops.AgentWorktree, error) {
 			return nil, errors.New("worktree not found")
 		},
 	}

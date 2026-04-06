@@ -3,6 +3,7 @@ package webui
 import (
 	"net/http"
 
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -17,13 +18,13 @@ import (
 // mux will panic (duplicate route patterns in Go 1.22+ ServeMux).
 type IssueModule struct {
 	svc               service.IssueService
-	workspaceConfigFn func() (*service.WorkspaceData, error)
+	workspaceConfigFn func() (*ops.WorkspaceData, error)
 }
 
 // NewIssueModule returns an IssueModule that will register routes using the
 // given service and workspace config function. Nil values are accepted — the
 // underlying handler functions handle nil deps at request time.
-func NewIssueModule(svc service.IssueService, workspaceConfigFn func() (*service.WorkspaceData, error)) *IssueModule {
+func NewIssueModule(svc service.IssueService, workspaceConfigFn func() (*ops.WorkspaceData, error)) *IssueModule {
 	return &IssueModule{
 		svc:               svc,
 		workspaceConfigFn: workspaceConfigFn,

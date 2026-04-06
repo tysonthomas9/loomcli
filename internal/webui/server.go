@@ -49,8 +49,8 @@ type Server struct {
 	agentSvc     AgentService
 	workspaceSvc service.WorkspaceService
 	termSvc      TerminalService // nil if termMgr is nil
-	diffSvc      DiffService     // nil if GitOps is nil
-	fileSvc      FileService     // nil if FileOps is nil
+	diffSvc      DiffService     // nil if ops.GitOps is nil
+	fileSvc      FileService     // nil if ops.FileOps is nil
 	sessSvc      SessionService  // always constructed (stores may be nil internally)
 
 	// Real-time
@@ -119,7 +119,7 @@ type Server struct {
 	daemonStatusHandler        http.HandlerFunc
 	getBackendConfigHandler    http.HandlerFunc
 	patchBackendConfigHandler  http.HandlerFunc
-	getBackendsHealthHandler   http.HandlerFunc // nil if BackendOps is nil
+	getBackendsHealthHandler   http.HandlerFunc // nil if ops.BackendOps is nil
 	listEditorsHandler         http.HandlerFunc
 	openEditorHandler          http.HandlerFunc
 	notifySessionChangeHandler http.HandlerFunc // nil if hub is nil

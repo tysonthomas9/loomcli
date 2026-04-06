@@ -7,18 +7,19 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 // --- handleDiffCommits tests ---
 
 func TestDiffCommits_Success(t *testing.T) {
-	ops := resolveOK()
-	ops.resolveMergeBaseFunc = func(_, _ string) (string, error) {
+	gitOps := resolveOK()
+	gitOps.resolveMergeBaseFunc = func(_, _ string) (string, error) {
 		return "abc123", nil
 	}
-	ops.diffCommitsFunc = func(_, mergeBase string, limit int) ([]DiffCommitResult, error) {
-		return []DiffCommitResult{
+	gitOps.diffCommitsFunc = func(_, mergeBase string, limit int) ([]ops.DiffCommitResult, error) {
+		return []ops.DiffCommitResult{
 			{Hash: "aaa111", ShortHash: "aaa", Subject: "first commit", Author: "Alice", Email: "a@b.com", Date: "2026-01-01"},
 			{Hash: "bbb222", ShortHash: "bbb", Subject: "second commit", Author: "Bob", Email: "b@b.com", Date: "2026-01-02"},
 		}, nil
@@ -29,7 +30,7 @@ func TestDiffCommits_Success(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffCommits(NewDiffService(ops, nil)).ServeHTTP(w, req)
+	handleDiffCommits(NewDiffService(gitOps, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -56,8 +57,8 @@ func TestDiffCommits_Success(t *testing.T) {
 }
 
 func TestDiffCommits_NoAgent(t *testing.T) {
-	ops := &mockGitOps{
-		resolveFunc: func(name string) (*AgentWorktree, error) {
+	gitOps := &mockGitOps{
+		resolveFunc: func(name string) (*ops.AgentWorktree, error) {
 			return nil, errors.New("not found")
 		},
 	}
@@ -67,7 +68,7 @@ func TestDiffCommits_NoAgent(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffCommits(NewDiffService(ops, nil)).ServeHTTP(w, req)
+	handleDiffCommits(NewDiffService(gitOps, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusNotFound)
@@ -75,8 +76,8 @@ func TestDiffCommits_NoAgent(t *testing.T) {
 }
 
 func TestDiffCommits_MergeBaseError(t *testing.T) {
-	ops := resolveOK()
-	ops.resolveMergeBaseFunc = func(_, _ string) (string, error) {
+	gitOps := resolveOK()
+	gitOps.resolveMergeBaseFunc = func(_, _ string) (string, error) {
 		return "", errors.New("no common ancestor")
 	}
 
@@ -85,7 +86,7 @@ func TestDiffCommits_MergeBaseError(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffCommits(NewDiffService(ops, nil)).ServeHTTP(w, req)
+	handleDiffCommits(NewDiffService(gitOps, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusInternalServerError)
@@ -93,14 +94,14 @@ func TestDiffCommits_MergeBaseError(t *testing.T) {
 }
 
 func TestDiffCommits_WithLimit(t *testing.T) {
-	ops := resolveOK()
-	ops.resolveMergeBaseFunc = func(_, _ string) (string, error) {
+	gitOps := resolveOK()
+	gitOps.resolveMergeBaseFunc = func(_, _ string) (string, error) {
 		return "abc123", nil
 	}
 	var capturedLimit int
-	ops.diffCommitsFunc = func(_, _ string, limit int) ([]DiffCommitResult, error) {
+	gitOps.diffCommitsFunc = func(_, _ string, limit int) ([]ops.DiffCommitResult, error) {
 		capturedLimit = limit
-		return []DiffCommitResult{
+		return []ops.DiffCommitResult{
 			{Hash: "aaa111", ShortHash: "aaa", Subject: "first commit", Author: "Alice", Email: "a@b.com", Date: "2026-01-01"},
 		}, nil
 	}
@@ -110,7 +111,7 @@ func TestDiffCommits_WithLimit(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffCommits(NewDiffService(ops, nil)).ServeHTTP(w, req)
+	handleDiffCommits(NewDiffService(gitOps, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -121,11 +122,11 @@ func TestDiffCommits_WithLimit(t *testing.T) {
 }
 
 func TestDiffCommits_EmptyResult(t *testing.T) {
-	ops := resolveOK()
-	ops.resolveMergeBaseFunc = func(_, _ string) (string, error) {
+	gitOps := resolveOK()
+	gitOps.resolveMergeBaseFunc = func(_, _ string) (string, error) {
 		return "abc123", nil
 	}
-	ops.diffCommitsFunc = func(_, _ string, _ int) ([]DiffCommitResult, error) {
+	gitOps.diffCommitsFunc = func(_, _ string, _ int) ([]ops.DiffCommitResult, error) {
 		return nil, nil // return nil slice
 	}
 
@@ -134,7 +135,7 @@ func TestDiffCommits_EmptyResult(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffCommits(NewDiffService(ops, nil)).ServeHTTP(w, req)
+	handleDiffCommits(NewDiffService(gitOps, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -158,12 +159,12 @@ func TestDiffCommits_EmptyResult(t *testing.T) {
 // --- handleDiffFiles tests ---
 
 func TestDiffFiles_Success(t *testing.T) {
-	ops := resolveOK()
-	ops.resolveMergeBaseFunc = func(_, _ string) (string, error) {
+	gitOps := resolveOK()
+	gitOps.resolveMergeBaseFunc = func(_, _ string) (string, error) {
 		return "abc123", nil
 	}
-	ops.diffFilesFunc = func(_, from, to string) ([]DiffFileResult, error) {
-		return []DiffFileResult{
+	gitOps.diffFilesFunc = func(_, from, to string) ([]ops.DiffFileResult, error) {
+		return []ops.DiffFileResult{
 			{Path: "main.go", Status: "M", Additions: 10, Deletions: 5},
 			{Path: "new.go", Status: "A", Additions: 20, Deletions: 0},
 			{Path: "old.go", Status: "D", Additions: 0, Deletions: 15},
@@ -175,7 +176,7 @@ func TestDiffFiles_Success(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFiles(NewDiffService(ops, nil)).ServeHTTP(w, req)
+	handleDiffFiles(NewDiffService(gitOps, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -196,14 +197,14 @@ func TestDiffFiles_Success(t *testing.T) {
 }
 
 func TestDiffFiles_MissingTo(t *testing.T) {
-	ops := resolveOK()
+	gitOps := resolveOK()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/files", nil)
 	req.SetPathValue("name", "test-agent")
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFiles(NewDiffService(ops, nil)).ServeHTTP(w, req)
+	handleDiffFiles(NewDiffService(gitOps, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
@@ -211,14 +212,14 @@ func TestDiffFiles_MissingTo(t *testing.T) {
 }
 
 func TestDiffFiles_InvalidRef(t *testing.T) {
-	ops := resolveOK()
+	gitOps := resolveOK()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/files?to=../bad", nil)
 	req.SetPathValue("name", "test-agent")
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFiles(NewDiffService(ops, nil)).ServeHTTP(w, req)
+	handleDiffFiles(NewDiffService(gitOps, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
@@ -226,14 +227,14 @@ func TestDiffFiles_InvalidRef(t *testing.T) {
 }
 
 func TestDiffFiles_DefaultFrom(t *testing.T) {
-	ops := resolveOK()
+	gitOps := resolveOK()
 	var capturedFrom string
-	ops.resolveMergeBaseFunc = func(_, _ string) (string, error) {
+	gitOps.resolveMergeBaseFunc = func(_, _ string) (string, error) {
 		return "merge-base-sha", nil
 	}
-	ops.diffFilesFunc = func(_, from, to string) ([]DiffFileResult, error) {
+	gitOps.diffFilesFunc = func(_, from, to string) ([]ops.DiffFileResult, error) {
 		capturedFrom = from
-		return []DiffFileResult{}, nil
+		return []ops.DiffFileResult{}, nil
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/files?to=HEAD", nil)
@@ -241,7 +242,7 @@ func TestDiffFiles_DefaultFrom(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFiles(NewDiffService(ops, nil)).ServeHTTP(w, req)
+	handleDiffFiles(NewDiffService(gitOps, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -252,12 +253,12 @@ func TestDiffFiles_DefaultFrom(t *testing.T) {
 }
 
 func TestDiffFiles_ExplicitFrom(t *testing.T) {
-	ops := resolveOK()
+	gitOps := resolveOK()
 	var capturedFrom, capturedTo string
-	ops.diffFilesFunc = func(_, from, to string) ([]DiffFileResult, error) {
+	gitOps.diffFilesFunc = func(_, from, to string) ([]ops.DiffFileResult, error) {
 		capturedFrom = from
 		capturedTo = to
-		return []DiffFileResult{}, nil
+		return []ops.DiffFileResult{}, nil
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/files?to=HEAD&from=abc123", nil)
@@ -265,7 +266,7 @@ func TestDiffFiles_ExplicitFrom(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFiles(NewDiffService(ops, nil)).ServeHTTP(w, req)
+	handleDiffFiles(NewDiffService(gitOps, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -281,12 +282,12 @@ func TestDiffFiles_ExplicitFrom(t *testing.T) {
 // --- handleDiffFile tests ---
 
 func TestDiffFile_Success(t *testing.T) {
-	ops := resolveOK()
-	ops.resolveMergeBaseFunc = func(_, _ string) (string, error) {
+	gitOps := resolveOK()
+	gitOps.resolveMergeBaseFunc = func(_, _ string) (string, error) {
 		return "abc123", nil
 	}
-	ops.diffFilePatchFunc = func(_, _, _, path string) (*DiffFilePatchResult, error) {
-		return &DiffFilePatchResult{
+	gitOps.diffFilePatchFunc = func(_, _, _, path string) (*ops.DiffFilePatchResult, error) {
+		return &ops.DiffFilePatchResult{
 			Patch:     "--- a/main.go\n+++ b/main.go\n@@ -1,3 +1,4 @@\n+new line\n",
 			IsBinary:  false,
 			Additions: 1,
@@ -299,7 +300,7 @@ func TestDiffFile_Success(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFile(NewDiffService(ops, nil)).ServeHTTP(w, req)
+	handleDiffFile(NewDiffService(gitOps, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -315,14 +316,14 @@ func TestDiffFile_Success(t *testing.T) {
 }
 
 func TestDiffFile_MissingPath(t *testing.T) {
-	ops := resolveOK()
+	gitOps := resolveOK()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/file?to=HEAD", nil)
 	req.SetPathValue("name", "test-agent")
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFile(NewDiffService(ops, nil)).ServeHTTP(w, req)
+	handleDiffFile(NewDiffService(gitOps, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
@@ -330,14 +331,14 @@ func TestDiffFile_MissingPath(t *testing.T) {
 }
 
 func TestDiffFile_MissingTo(t *testing.T) {
-	ops := resolveOK()
+	gitOps := resolveOK()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/file?path=main.go", nil)
 	req.SetPathValue("name", "test-agent")
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFile(NewDiffService(ops, nil)).ServeHTTP(w, req)
+	handleDiffFile(NewDiffService(gitOps, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
@@ -345,14 +346,14 @@ func TestDiffFile_MissingTo(t *testing.T) {
 }
 
 func TestDiffFile_PathTraversal(t *testing.T) {
-	ops := resolveOK()
+	gitOps := resolveOK()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/file?path=../../etc/passwd&to=HEAD", nil)
 	req.SetPathValue("name", "test-agent")
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFile(NewDiffService(ops, nil)).ServeHTTP(w, req)
+	handleDiffFile(NewDiffService(gitOps, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
@@ -360,7 +361,7 @@ func TestDiffFile_PathTraversal(t *testing.T) {
 }
 
 func TestDiffFile_DotPath(t *testing.T) {
-	ops := resolveOK()
+	gitOps := resolveOK()
 
 	// "." would trigger a repo-wide diff instead of a single file
 	for _, p := range []string{".", "./", "./."} {
@@ -369,7 +370,7 @@ func TestDiffFile_DotPath(t *testing.T) {
 		req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 		w := httptest.NewRecorder()
 
-		handleDiffFile(NewDiffService(ops, nil)).ServeHTTP(w, req)
+		handleDiffFile(NewDiffService(gitOps, nil)).ServeHTTP(w, req)
 
 		if w.Code != http.StatusBadRequest {
 			t.Errorf("path=%q: status = %d, want %d", p, w.Code, http.StatusBadRequest)
@@ -378,14 +379,14 @@ func TestDiffFile_DotPath(t *testing.T) {
 }
 
 func TestDiffFile_AbsolutePath(t *testing.T) {
-	ops := resolveOK()
+	gitOps := resolveOK()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/file?path=/etc/passwd&to=HEAD", nil)
 	req.SetPathValue("name", "test-agent")
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFile(NewDiffService(ops, nil)).ServeHTTP(w, req)
+	handleDiffFile(NewDiffService(gitOps, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
@@ -393,12 +394,12 @@ func TestDiffFile_AbsolutePath(t *testing.T) {
 }
 
 func TestDiffFile_BinaryFile(t *testing.T) {
-	ops := resolveOK()
-	ops.resolveMergeBaseFunc = func(_, _ string) (string, error) {
+	gitOps := resolveOK()
+	gitOps.resolveMergeBaseFunc = func(_, _ string) (string, error) {
 		return "abc123", nil
 	}
-	ops.diffFilePatchFunc = func(_, _, _, _ string) (*DiffFilePatchResult, error) {
-		return &DiffFilePatchResult{
+	gitOps.diffFilePatchFunc = func(_, _, _, _ string) (*ops.DiffFilePatchResult, error) {
+		return &ops.DiffFilePatchResult{
 			IsBinary: true,
 		}, nil
 	}
@@ -408,7 +409,7 @@ func TestDiffFile_BinaryFile(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFile(NewDiffService(ops, nil)).ServeHTTP(w, req)
+	handleDiffFile(NewDiffService(gitOps, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -428,12 +429,12 @@ func TestDiffFile_BinaryFile(t *testing.T) {
 }
 
 func TestDiffFile_TooLarge(t *testing.T) {
-	ops := resolveOK()
-	ops.resolveMergeBaseFunc = func(_, _ string) (string, error) {
+	gitOps := resolveOK()
+	gitOps.resolveMergeBaseFunc = func(_, _ string) (string, error) {
 		return "abc123", nil
 	}
-	ops.diffFilePatchFunc = func(_, _, _, _ string) (*DiffFilePatchResult, error) {
-		return &DiffFilePatchResult{
+	gitOps.diffFilePatchFunc = func(_, _, _, _ string) (*ops.DiffFilePatchResult, error) {
+		return &ops.DiffFilePatchResult{
 			IsTooLarge: true,
 		}, nil
 	}
@@ -443,7 +444,7 @@ func TestDiffFile_TooLarge(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFile(NewDiffService(ops, nil)).ServeHTTP(w, req)
+	handleDiffFile(NewDiffService(gitOps, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -466,11 +467,11 @@ func TestDiffFile_TooLarge(t *testing.T) {
 
 // TestDiffFiles_EmptyDiff tests handleDiffFiles when DiffFiles returns an empty (nil) slice.
 func TestDiffFiles_EmptyDiff(t *testing.T) {
-	ops := resolveOK()
-	ops.resolveMergeBaseFunc = func(_, _ string) (string, error) {
+	gitOps := resolveOK()
+	gitOps.resolveMergeBaseFunc = func(_, _ string) (string, error) {
 		return "abc123", nil
 	}
-	ops.diffFilesFunc = func(_, _, _ string) ([]DiffFileResult, error) {
+	gitOps.diffFilesFunc = func(_, _, _ string) ([]ops.DiffFileResult, error) {
 		return nil, nil // nil slice => should be normalized to []
 	}
 
@@ -479,7 +480,7 @@ func TestDiffFiles_EmptyDiff(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFiles(NewDiffService(ops, nil)).ServeHTTP(w, req)
+	handleDiffFiles(NewDiffService(gitOps, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -501,11 +502,11 @@ func TestDiffFiles_EmptyDiff(t *testing.T) {
 
 // TestDiffFiles_DiffFilesError tests handleDiffFiles when DiffFiles returns an error.
 func TestDiffFiles_DiffFilesError(t *testing.T) {
-	ops := resolveOK()
-	ops.resolveMergeBaseFunc = func(_, _ string) (string, error) {
+	gitOps := resolveOK()
+	gitOps.resolveMergeBaseFunc = func(_, _ string) (string, error) {
 		return "abc123", nil
 	}
-	ops.diffFilesFunc = func(_, _, _ string) ([]DiffFileResult, error) {
+	gitOps.diffFilesFunc = func(_, _, _ string) ([]ops.DiffFileResult, error) {
 		return nil, errors.New("pool timeout")
 	}
 
@@ -514,7 +515,7 @@ func TestDiffFiles_DiffFilesError(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFiles(NewDiffService(ops, nil)).ServeHTTP(w, req)
+	handleDiffFiles(NewDiffService(gitOps, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusInternalServerError)
@@ -534,8 +535,8 @@ func TestDiffFiles_DiffFilesError(t *testing.T) {
 
 // TestDiffFiles_MergeBaseError tests handleDiffFiles when merge-base resolution fails.
 func TestDiffFiles_MergeBaseError(t *testing.T) {
-	ops := resolveOK()
-	ops.resolveMergeBaseFunc = func(_, _ string) (string, error) {
+	gitOps := resolveOK()
+	gitOps.resolveMergeBaseFunc = func(_, _ string) (string, error) {
 		return "", errors.New("no common ancestor")
 	}
 
@@ -544,7 +545,7 @@ func TestDiffFiles_MergeBaseError(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFiles(NewDiffService(ops, nil)).ServeHTTP(w, req)
+	handleDiffFiles(NewDiffService(gitOps, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusInternalServerError)
@@ -553,14 +554,14 @@ func TestDiffFiles_MergeBaseError(t *testing.T) {
 
 // TestDiffFiles_InvalidFromRef tests handleDiffFiles with invalid "from" query param.
 func TestDiffFiles_InvalidFromRef(t *testing.T) {
-	ops := resolveOK()
+	gitOps := resolveOK()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/files?to=HEAD&from=../bad", nil)
 	req.SetPathValue("name", "test-agent")
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFiles(NewDiffService(ops, nil)).ServeHTTP(w, req)
+	handleDiffFiles(NewDiffService(gitOps, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
@@ -569,8 +570,8 @@ func TestDiffFiles_InvalidFromRef(t *testing.T) {
 
 // TestDiffFiles_NoAgent tests handleDiffFiles when agent resolution fails.
 func TestDiffFiles_NoAgent(t *testing.T) {
-	ops := &mockGitOps{
-		resolveFunc: func(name string) (*AgentWorktree, error) {
+	gitOps := &mockGitOps{
+		resolveFunc: func(name string) (*ops.AgentWorktree, error) {
 			return nil, errors.New("not found")
 		},
 	}
@@ -580,7 +581,7 @@ func TestDiffFiles_NoAgent(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFiles(NewDiffService(ops, nil)).ServeHTTP(w, req)
+	handleDiffFiles(NewDiffService(gitOps, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusNotFound)
@@ -589,7 +590,7 @@ func TestDiffFiles_NoAgent(t *testing.T) {
 
 // TestDiffFile_InvalidPathChars tests handleDiffFile with various invalid file paths.
 func TestDiffFile_InvalidPathChars(t *testing.T) {
-	ops := resolveOK()
+	gitOps := resolveOK()
 
 	tests := []struct {
 		name string
@@ -609,7 +610,7 @@ func TestDiffFile_InvalidPathChars(t *testing.T) {
 			req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 			w := httptest.NewRecorder()
 
-			handleDiffFile(NewDiffService(ops, nil)).ServeHTTP(w, req)
+			handleDiffFile(NewDiffService(gitOps, nil)).ServeHTTP(w, req)
 
 			if w.Code != http.StatusBadRequest {
 				t.Errorf("path=%q: status = %d, want %d", tt.path, w.Code, http.StatusBadRequest)
@@ -620,11 +621,11 @@ func TestDiffFile_InvalidPathChars(t *testing.T) {
 
 // TestDiffFile_DiffFilePatchError tests handleDiffFile when DiffFilePatch returns an error.
 func TestDiffFile_DiffFilePatchError(t *testing.T) {
-	ops := resolveOK()
-	ops.resolveMergeBaseFunc = func(_, _ string) (string, error) {
+	gitOps := resolveOK()
+	gitOps.resolveMergeBaseFunc = func(_, _ string) (string, error) {
 		return "abc123", nil
 	}
-	ops.diffFilePatchFunc = func(_, _, _, _ string) (*DiffFilePatchResult, error) {
+	gitOps.diffFilePatchFunc = func(_, _, _, _ string) (*ops.DiffFilePatchResult, error) {
 		return nil, errors.New("git diff failed")
 	}
 
@@ -633,7 +634,7 @@ func TestDiffFile_DiffFilePatchError(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFile(NewDiffService(ops, nil)).ServeHTTP(w, req)
+	handleDiffFile(NewDiffService(gitOps, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusInternalServerError)
@@ -653,14 +654,14 @@ func TestDiffFile_DiffFilePatchError(t *testing.T) {
 
 // TestDiffFile_InvalidToRef tests handleDiffFile with invalid "to" ref.
 func TestDiffFile_InvalidToRef(t *testing.T) {
-	ops := resolveOK()
+	gitOps := resolveOK()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/file?path=main.go&to=abc..def", nil)
 	req.SetPathValue("name", "test-agent")
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFile(NewDiffService(ops, nil)).ServeHTTP(w, req)
+	handleDiffFile(NewDiffService(gitOps, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
@@ -669,8 +670,8 @@ func TestDiffFile_InvalidToRef(t *testing.T) {
 
 // TestDiffFile_MergeBaseError tests handleDiffFile when merge-base resolution fails.
 func TestDiffFile_MergeBaseError(t *testing.T) {
-	ops := resolveOK()
-	ops.resolveMergeBaseFunc = func(_, _ string) (string, error) {
+	gitOps := resolveOK()
+	gitOps.resolveMergeBaseFunc = func(_, _ string) (string, error) {
 		return "", errors.New("no merge base found")
 	}
 
@@ -679,7 +680,7 @@ func TestDiffFile_MergeBaseError(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFile(NewDiffService(ops, nil)).ServeHTTP(w, req)
+	handleDiffFile(NewDiffService(gitOps, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusInternalServerError)
@@ -696,8 +697,8 @@ func TestDiffFile_MergeBaseError(t *testing.T) {
 
 // TestDiffFile_NoAgent tests handleDiffFile when agent resolution fails.
 func TestDiffFile_NoAgent(t *testing.T) {
-	ops := &mockGitOps{
-		resolveFunc: func(name string) (*AgentWorktree, error) {
+	gitOps := &mockGitOps{
+		resolveFunc: func(name string) (*ops.AgentWorktree, error) {
 			return nil, errors.New("not found")
 		},
 	}
@@ -707,7 +708,7 @@ func TestDiffFile_NoAgent(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffFile(NewDiffService(ops, nil)).ServeHTTP(w, req)
+	handleDiffFile(NewDiffService(gitOps, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusNotFound)
@@ -716,11 +717,11 @@ func TestDiffFile_NoAgent(t *testing.T) {
 
 // TestDiffCommits_DiffCommitsError tests handleDiffCommits when DiffCommits returns an error.
 func TestDiffCommits_DiffCommitsError(t *testing.T) {
-	ops := resolveOK()
-	ops.resolveMergeBaseFunc = func(_, _ string) (string, error) {
+	gitOps := resolveOK()
+	gitOps.resolveMergeBaseFunc = func(_, _ string) (string, error) {
 		return "abc123", nil
 	}
-	ops.diffCommitsFunc = func(_, _ string, _ int) ([]DiffCommitResult, error) {
+	gitOps.diffCommitsFunc = func(_, _ string, _ int) ([]ops.DiffCommitResult, error) {
 		return nil, errors.New("pool timeout")
 	}
 
@@ -729,7 +730,7 @@ func TestDiffCommits_DiffCommitsError(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffCommits(NewDiffService(ops, nil)).ServeHTTP(w, req)
+	handleDiffCommits(NewDiffService(gitOps, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusInternalServerError)
@@ -749,14 +750,14 @@ func TestDiffCommits_DiffCommitsError(t *testing.T) {
 
 // TestDiffCommits_InvalidLimit tests handleDiffCommits with an invalid limit value.
 func TestDiffCommits_InvalidLimit(t *testing.T) {
-	ops := resolveOK()
+	gitOps := resolveOK()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/commits?limit=abc", nil)
 	req.SetPathValue("name", "test-agent")
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffCommits(NewDiffService(ops, nil)).ServeHTTP(w, req)
+	handleDiffCommits(NewDiffService(gitOps, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
@@ -765,11 +766,11 @@ func TestDiffCommits_InvalidLimit(t *testing.T) {
 
 // TestDiffCommits_ExplicitFrom tests handleDiffCommits with explicit from parameter.
 func TestDiffCommits_ExplicitFrom(t *testing.T) {
-	ops := resolveOK()
+	gitOps := resolveOK()
 	var capturedMergeBase string
-	ops.diffCommitsFunc = func(_, mergeBase string, _ int) ([]DiffCommitResult, error) {
+	gitOps.diffCommitsFunc = func(_, mergeBase string, _ int) ([]ops.DiffCommitResult, error) {
 		capturedMergeBase = mergeBase
-		return []DiffCommitResult{}, nil
+		return []ops.DiffCommitResult{}, nil
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/commits?from=deadbeef", nil)
@@ -777,7 +778,7 @@ func TestDiffCommits_ExplicitFrom(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffCommits(NewDiffService(ops, nil)).ServeHTTP(w, req)
+	handleDiffCommits(NewDiffService(gitOps, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -789,14 +790,14 @@ func TestDiffCommits_ExplicitFrom(t *testing.T) {
 
 // TestDiffCommits_InvalidFrom tests handleDiffCommits with an invalid from ref.
 func TestDiffCommits_InvalidFrom(t *testing.T) {
-	ops := resolveOK()
+	gitOps := resolveOK()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/commits?from=abc..def", nil)
 	req.SetPathValue("name", "test-agent")
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
-	handleDiffCommits(NewDiffService(ops, nil)).ServeHTTP(w, req)
+	handleDiffCommits(NewDiffService(gitOps, nil)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
@@ -34,36 +35,36 @@ type ServerConfig struct {
 	MaxTerminalSessions     int  // Maximum concurrent terminal connections (0 = default 20)
 	FleetEnabled            bool // Register fleet API routes (requires Redis coordination)
 	FleetRedis              *fleet.RedisConfig
-	FleetJWTKey             []byte                                       // Pre-provisioned JWT signing key for fleet auth (optional; if nil, server generates one)
-	FleetAPIKey             string                                       // Pre-shared API key for fleet worker registration (required for fleet register endpoint)
-	HSTSEnabled             bool                                         // Whether to send Strict-Transport-Security header (use when behind TLS-terminating proxy)
-	ExtAuthURL              string                                       // Auth service base URL (e.g., "https://auth.loomcli.com"); empty = open mode
-	ExtAuthIssuer           string                                       // Expected JWT issuer (validated against "iss" claim; defaults to ExtAuthURL)
-	ExtAuthAudience         string                                       // Expected JWT audience (validated against "aud" claim; defaults to "loom")
-	ExtAuthAllowInsecure    bool                                         // Allow HTTP for non-loopback --auth-url (escape hatch for Docker networks)
-	LoomServerURL           string                                       // Default target URL for the loom API proxy (set by 'loom serve')
-	DevMode                 bool                                         // Serve frontend from disk instead of embedded FS
-	DevFrontendDir          string                                       // Directory to serve in dev mode (default: internal/webui/frontend/dist)
-	GitOps                  GitOps                                       // Git operations interface (optional; nil disables git endpoints)
-	FileOps                 FileOps                                      // File operations interface (optional; nil disables file endpoints)
-	WorkspaceConfigFn       func() (*service.WorkspaceData, error)       // Workspace topology supplier; nil = single-repo mode
-	WorkspaceConfigByIDFn   func(string) (*service.WorkspaceData, error) // Workspace topology supplier by ID; nil = falls back to WorkspaceConfigFn
-	WorkspaceDeleteFn       func(name string) error                      // Workspace deletion function; nil = deletion unavailable
-	SetDefaultWorkspaceFn   func(name string) error                      // Set default workspace in config; nil = feature disabled
-	ClearDefaultWorkspaceFn func() error                                 // Clear default workspace in config; nil = feature disabled
-	WorkspaceCreateFn       service.WorkspaceCreateFn                    // Workspace creation function; nil = creation unavailable
-	WorkspaceListFn         func() (map[string]string, error)            // Returns all configured workspaces as id→path (UUID preferred, name fallback for pre-migration); nil = single-workspace mode
-	InitialWorkspaceID      string                                       // Stable UUID of the initial workspace (CWD); if empty, falls back to filepath.Base(cwd)
-	WorkspaceIDResolverFn   WorkspaceIDResolverFn                        // Resolves workspace name → UUID; nil = no resolution available
-	BackendOps              BackendOps                                   // Backend health operations interface (optional; nil disables backend health endpoint)
-	ScrollbackMaxLines      int                                          // Maximum lines per scrollback buffer (0 = default 10000)
-	SessionsStore           *sessions.Store                              // File-based session audit trail store (optional; nil disables session endpoints)
-	NotifyTokenDir          string                                       // Directory to write notify.token (typically beads dir); empty = token file not written
-	FleetMode               bool                                         // When true, skip beads-specific lifecycle hooks (pools, subscribers); fleet server manages agents
-	FleetClientURL          string                                       // Fleet server URL for fleet-mode workers (e.g., "http://fleet.example.com"); empty = no fleet client
-	FleetClientWorkspace    string                                       // Fleet server workspace ID (e.g., "default"); empty = use "default"
-	FleetClientAPIKey       string                                       // Pre-shared API key for fleet worker backend auth
-	Logger                  *slog.Logger                                 // Structured logger (optional; nil falls back to slog.Default())
+	FleetJWTKey             []byte                                   // Pre-provisioned JWT signing key for fleet auth (optional; if nil, server generates one)
+	FleetAPIKey             string                                   // Pre-shared API key for fleet worker registration (required for fleet register endpoint)
+	HSTSEnabled             bool                                     // Whether to send Strict-Transport-Security header (use when behind TLS-terminating proxy)
+	ExtAuthURL              string                                   // Auth service base URL (e.g., "https://auth.loomcli.com"); empty = open mode
+	ExtAuthIssuer           string                                   // Expected JWT issuer (validated against "iss" claim; defaults to ExtAuthURL)
+	ExtAuthAudience         string                                   // Expected JWT audience (validated against "aud" claim; defaults to "loom")
+	ExtAuthAllowInsecure    bool                                     // Allow HTTP for non-loopback --auth-url (escape hatch for Docker networks)
+	LoomServerURL           string                                   // Default target URL for the loom API proxy (set by 'loom serve')
+	DevMode                 bool                                     // Serve frontend from disk instead of embedded FS
+	DevFrontendDir          string                                   // Directory to serve in dev mode (default: internal/webui/frontend/dist)
+	GitOps                  ops.GitOps                               // Git operations interface (optional; nil disables git endpoints)
+	FileOps                 ops.FileOps                              // File operations interface (optional; nil disables file endpoints)
+	WorkspaceConfigFn       func() (*ops.WorkspaceData, error)       // Workspace topology supplier; nil = single-repo mode
+	WorkspaceConfigByIDFn   func(string) (*ops.WorkspaceData, error) // Workspace topology supplier by ID; nil = falls back to WorkspaceConfigFn
+	WorkspaceDeleteFn       func(name string) error                  // Workspace deletion function; nil = deletion unavailable
+	SetDefaultWorkspaceFn   func(name string) error                  // Set default workspace in config; nil = feature disabled
+	ClearDefaultWorkspaceFn func() error                             // Clear default workspace in config; nil = feature disabled
+	WorkspaceCreateFn       service.WorkspaceCreateFn                // Workspace creation function; nil = creation unavailable
+	WorkspaceListFn         func() (map[string]string, error)        // Returns all configured workspaces as id→path (UUID preferred, name fallback for pre-migration); nil = single-workspace mode
+	InitialWorkspaceID      string                                   // Stable UUID of the initial workspace (CWD); if empty, falls back to filepath.Base(cwd)
+	WorkspaceIDResolverFn   WorkspaceIDResolverFn                    // Resolves workspace name → UUID; nil = no resolution available
+	BackendOps              ops.BackendOps                           // Backend health operations interface (optional; nil disables backend health endpoint)
+	ScrollbackMaxLines      int                                      // Maximum lines per scrollback buffer (0 = default 10000)
+	SessionsStore           *sessions.Store                          // File-based session audit trail store (optional; nil disables session endpoints)
+	NotifyTokenDir          string                                   // Directory to write notify.token (typically beads dir); empty = token file not written
+	FleetMode               bool                                     // When true, skip beads-specific lifecycle hooks (pools, subscribers); fleet server manages agents
+	FleetClientURL          string                                   // Fleet server URL for fleet-mode workers (e.g., "http://fleet.example.com"); empty = no fleet client
+	FleetClientWorkspace    string                                   // Fleet server workspace ID (e.g., "default"); empty = use "default"
+	FleetClientAPIKey       string                                   // Pre-shared API key for fleet worker backend auth
+	Logger                  *slog.Logger                             // Structured logger (optional; nil falls back to slog.Default())
 }
 
 // DefaultConfig returns a ServerConfig with sensible defaults.

@@ -4,13 +4,14 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // agentServiceImpl is the concrete implementation of AgentService.
 type agentServiceImpl struct {
-	gitOps   GitOps
+	gitOps   ops.GitOps
 	termMgr  *TerminalManager
 	termAuth *realtime.TerminalAuth
 }
@@ -18,7 +19,7 @@ type agentServiceImpl struct {
 // NewAgentService creates a new AgentService implementation.
 // gitOps must be non-nil. termMgr and termAuth may be nil (methods
 // that require them return service.ErrUnavailable).
-func NewAgentService(gitOps GitOps, termMgr *TerminalManager, termAuth *realtime.TerminalAuth) AgentService {
+func NewAgentService(gitOps ops.GitOps, termMgr *TerminalManager, termAuth *realtime.TerminalAuth) AgentService {
 	return &agentServiceImpl{
 		gitOps:   gitOps,
 		termMgr:  termMgr,
@@ -43,7 +44,7 @@ func validateAgentName(name string) error {
 }
 
 // resolveAgentWorktree validates the agent name and resolves the worktree.
-func (s *agentServiceImpl) resolveAgentWorktree(wsID, agentName string) (*AgentWorktree, error) {
+func (s *agentServiceImpl) resolveAgentWorktree(wsID, agentName string) (*ops.AgentWorktree, error) {
 	if err := validateAgentName(agentName); err != nil {
 		return nil, err
 	}
@@ -139,7 +140,7 @@ func (s *agentServiceImpl) GetDiffStat(_ context.Context, wsID, agentName string
 	}, nil
 }
 
-func (s *agentServiceImpl) GitPush(_ context.Context, wsID, agentName, target string) (*GitPushResult, error) {
+func (s *agentServiceImpl) GitPush(_ context.Context, wsID, agentName, target string) (*ops.GitPushResult, error) {
 	wt, err := s.resolveAgentWorktree(wsID, agentName)
 	if err != nil {
 		return nil, err
@@ -210,7 +211,7 @@ func (s *agentServiceImpl) GitPushAll(_ context.Context, wsID string) (*GitPushA
 	}, nil
 }
 
-func (s *agentServiceImpl) GitPull(_ context.Context, wsID, agentName, source string) (*GitPullResult, error) {
+func (s *agentServiceImpl) GitPull(_ context.Context, wsID, agentName, source string) (*ops.GitPullResult, error) {
 	wt, err := s.resolveAgentWorktree(wsID, agentName)
 	if err != nil {
 		return nil, err
@@ -266,7 +267,7 @@ func (s *agentServiceImpl) GitSync(_ context.Context, wsID, agentName string) (*
 	}, nil
 }
 
-func (s *agentServiceImpl) CreatePR(_ context.Context, wsID, agentName, target string) (*GitPRResult, error) {
+func (s *agentServiceImpl) CreatePR(_ context.Context, wsID, agentName, target string) (*ops.GitPRResult, error) {
 	if err := s.gitOps.CheckGhInstalled(); err != nil {
 		return nil, service.ErrUnavailable("gh CLI not installed: install from https://cli.github.com/ and run 'gh auth login'")
 	}
@@ -287,7 +288,7 @@ func (s *agentServiceImpl) CreatePR(_ context.Context, wsID, agentName, target s
 	return result, nil
 }
 
-func (s *agentServiceImpl) GitReset(_ context.Context, wsID, agentName, branch string, force, push bool) (*GitResetResult, error) {
+func (s *agentServiceImpl) GitReset(_ context.Context, wsID, agentName, branch string, force, push bool) (*ops.GitResetResult, error) {
 	wt, err := s.resolveAgentWorktree(wsID, agentName)
 	if err != nil {
 		return nil, err
@@ -299,12 +300,12 @@ func (s *agentServiceImpl) GitReset(_ context.Context, wsID, agentName, branch s
 
 	result, err := s.gitOps.Reset(wt.Path, wt.Name, branch, force, push)
 	if err != nil {
-		return nil, err // GitResetLockedError passes through
+		return nil, err // ops.GitResetLockedError passes through
 	}
 	return result, nil
 }
 
-func (s *agentServiceImpl) GitStatus(_ context.Context, wsID, agentName string) (*GitStatusResult, error) {
+func (s *agentServiceImpl) GitStatus(_ context.Context, wsID, agentName string) (*ops.GitStatusResult, error) {
 	wt, err := s.resolveAgentWorktree(wsID, agentName)
 	if err != nil {
 		return nil, err

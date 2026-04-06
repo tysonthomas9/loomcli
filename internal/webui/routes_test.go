@@ -14,12 +14,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // setupTestRoutes constructs handlers and registers routes on app.mux.
@@ -1477,12 +1477,12 @@ func TestSetupRoutes_WorkspaceBackendPatchEndpoint(t *testing.T) {
 	_ = multiPool.Register("test-ws", &stubPool{})
 
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
-	workspaceConfigFn := func() (*service.WorkspaceData, error) {
-		return &service.WorkspaceData{Name: "test-ws", Path: "/tmp/test"}, nil
+	workspaceConfigFn := func() (*ops.WorkspaceData, error) {
+		return &ops.WorkspaceData{Name: "test-ws", Path: "/tmp/test"}, nil
 	}
 	wsSvc := &mockWorkspaceService{
-		patchWorkspaceBackendFn: func(_ context.Context, _ string, _ string) (*service.WorkspaceData, error) {
-			return &service.WorkspaceData{Name: "test-ws", Path: "/tmp/test"}, nil
+		patchWorkspaceBackendFn: func(_ context.Context, _ string, _ string) (*ops.WorkspaceData, error) {
+			return &ops.WorkspaceData{Name: "test-ws", Path: "/tmp/test"}, nil
 		},
 	}
 	app := &Server{multiPool: multiPool, config: ServerConfig{WorkspaceConfigFn: workspaceConfigFn}, wsExistsFn: wsExistsFn, workspaceSvc: wsSvc}

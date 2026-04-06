@@ -1,4 +1,4 @@
-package webui
+package ops
 
 // BackendOps defines the interface for backend discovery and health checking.
 // This interface breaks the import cycle between webui and cli packages.

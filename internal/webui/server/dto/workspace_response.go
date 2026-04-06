@@ -1,7 +1,7 @@
 package dto
 
 // WorkspaceResponse is the full workspace topology returned by the API.
-// Field names and JSON tags match service.WorkspaceData.
+// Field names and JSON tags match ops.WorkspaceData.
 type WorkspaceResponse struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`

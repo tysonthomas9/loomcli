@@ -6,25 +6,27 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/ops"
 )
 
-// mockBackendOps implements BackendOps for testing.
+// mockBackendOps implements ops.BackendOps for testing.
 type mockBackendOps struct {
-	fn func() ([]BackendHealth, error)
+	fn func() ([]ops.BackendHealth, error)
 }
 
-func (m *mockBackendOps) ListBackendsHealth() ([]BackendHealth, error) {
+func (m *mockBackendOps) ListBackendsHealth() ([]ops.BackendHealth, error) {
 	return m.fn()
 }
 
 func TestHandleGetBackendsHealth_AllAvailable(t *testing.T) {
-	ops := &mockBackendOps{fn: func() ([]BackendHealth, error) {
-		return []BackendHealth{
+	backendOps := &mockBackendOps{fn: func() ([]ops.BackendHealth, error) {
+		return []ops.BackendHealth{
 			{Name: "claude", DisplayName: "Claude", Available: true, Installed: true, APIKeySet: true, Version: "1.0.0"},
 			{Name: "codex", DisplayName: "Codex", Available: true, Installed: true, APIKeySet: true},
 		}, nil
 	}}
-	handler := handleGetBackendsHealth(ops)
+	handler := handleGetBackendsHealth(backendOps)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/backends", nil)
 	rec := httptest.NewRecorder()
@@ -54,13 +56,13 @@ func TestHandleGetBackendsHealth_AllAvailable(t *testing.T) {
 }
 
 func TestHandleGetBackendsHealth_MixedAvailability(t *testing.T) {
-	ops := &mockBackendOps{fn: func() ([]BackendHealth, error) {
-		return []BackendHealth{
+	backendOps := &mockBackendOps{fn: func() ([]ops.BackendHealth, error) {
+		return []ops.BackendHealth{
 			{Name: "claude", DisplayName: "Claude", Available: true, Installed: true, APIKeySet: true, Version: "1.0.0"},
 			{Name: "codex", DisplayName: "Codex", Available: false, Installed: false, APIKeySet: false, Message: "codex not found on PATH"},
 		}, nil
 	}}
-	handler := handleGetBackendsHealth(ops)
+	handler := handleGetBackendsHealth(backendOps)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/backends", nil)
 	rec := httptest.NewRecorder()
@@ -90,10 +92,10 @@ func TestHandleGetBackendsHealth_MixedAvailability(t *testing.T) {
 }
 
 func TestHandleGetBackendsHealth_EmptyList(t *testing.T) {
-	ops := &mockBackendOps{fn: func() ([]BackendHealth, error) {
-		return []BackendHealth{}, nil
+	backendOps := &mockBackendOps{fn: func() ([]ops.BackendHealth, error) {
+		return []ops.BackendHealth{}, nil
 	}}
-	handler := handleGetBackendsHealth(ops)
+	handler := handleGetBackendsHealth(backendOps)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/backends", nil)
 	rec := httptest.NewRecorder()
@@ -120,10 +122,10 @@ func TestHandleGetBackendsHealth_EmptyList(t *testing.T) {
 }
 
 func TestHandleGetBackendsHealth_NilResult(t *testing.T) {
-	ops := &mockBackendOps{fn: func() ([]BackendHealth, error) {
+	backendOps := &mockBackendOps{fn: func() ([]ops.BackendHealth, error) {
 		return nil, nil
 	}}
-	handler := handleGetBackendsHealth(ops)
+	handler := handleGetBackendsHealth(backendOps)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/backends", nil)
 	rec := httptest.NewRecorder()
@@ -147,10 +149,10 @@ func TestHandleGetBackendsHealth_NilResult(t *testing.T) {
 }
 
 func TestHandleGetBackendsHealth_Error(t *testing.T) {
-	ops := &mockBackendOps{fn: func() ([]BackendHealth, error) {
+	backendOps := &mockBackendOps{fn: func() ([]ops.BackendHealth, error) {
 		return nil, errors.New("backend inspection failed")
 	}}
-	handler := handleGetBackendsHealth(ops)
+	handler := handleGetBackendsHealth(backendOps)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/backends", nil)
 	rec := httptest.NewRecorder()

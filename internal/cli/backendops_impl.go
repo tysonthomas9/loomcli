@@ -1,21 +1,21 @@
 package cli
 
-import "github.com/tysonthomas9/loomcli/internal/webui"
+import "github.com/tysonthomas9/loomcli/internal/ops"
 
-// BackendOpsImpl implements webui.BackendOps by inspecting the registered
-// backend registry. It never imports webui types in the wrong direction —
-// webui owns the interface, cli provides this concrete implementation.
+// BackendOpsImpl implements ops.BackendOps by inspecting the registered
+// backend registry. The ops package owns the interface, cli provides this
+// concrete implementation.
 type BackendOpsImpl struct{}
 
 // NewBackendOps creates a new BackendOpsImpl.
 func NewBackendOps() *BackendOpsImpl { return &BackendOpsImpl{} }
 
 // ListBackendsHealth returns health/availability status for all registered backends.
-func (b *BackendOpsImpl) ListBackendsHealth() ([]webui.BackendHealth, error) {
+func (b *BackendOpsImpl) ListBackendsHealth() ([]ops.BackendHealth, error) {
 	names := ListBackends()
-	result := make([]webui.BackendHealth, 0, len(names))
+	result := make([]ops.BackendHealth, 0, len(names))
 	for _, name := range names {
-		entry := webui.BackendHealth{
+		entry := ops.BackendHealth{
 			Name:      name,
 			Available: false,
 			Installed: false,

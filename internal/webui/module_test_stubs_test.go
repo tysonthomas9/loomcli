@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
@@ -105,14 +106,14 @@ func (s *stubSessionService) GetSessionScrollback(_ context.Context, _, _, _ str
 // stubDiffService implements DiffService with no-op defaults for module tests.
 type stubDiffService struct{}
 
-func (s *stubDiffService) DiffCommits(_ context.Context, _, _, _ string, _ int) ([]DiffCommitResult, error) {
+func (s *stubDiffService) DiffCommits(_ context.Context, _, _, _ string, _ int) ([]ops.DiffCommitResult, error) {
 	return nil, nil
 }
-func (s *stubDiffService) DiffFiles(_ context.Context, _, _, _, _ string) ([]DiffFileResult, error) {
+func (s *stubDiffService) DiffFiles(_ context.Context, _, _, _, _ string) ([]ops.DiffFileResult, error) {
 	return nil, nil
 }
-func (s *stubDiffService) DiffFilePatch(_ context.Context, _, _, _, _, _ string) (*DiffFilePatchResult, error) {
-	return &DiffFilePatchResult{}, nil
+func (s *stubDiffService) DiffFilePatch(_ context.Context, _, _, _, _, _ string) (*ops.DiffFilePatchResult, error) {
+	return &ops.DiffFilePatchResult{}, nil
 }
 func (s *stubDiffService) GetIssueDiffStat(_ context.Context, _, _ string) (*IssueDiffStatResult, error) {
 	return &IssueDiffStatResult{}, nil

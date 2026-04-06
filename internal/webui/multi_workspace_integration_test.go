@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -573,7 +574,7 @@ func TestMultiWorkspace_CrossWorkspaceMove(t *testing.T) {
 			},
 		}
 
-		workspaces := []service.WorkspaceSummary{
+		workspaces := []ops.WorkspaceSummary{
 			{ID: "ws-alpha-uuid", Name: "alpha", Path: "/ws/alpha", Active: true},
 			{ID: "ws-beta-uuid", Name: "beta", Path: "/ws/beta", Active: false},
 		}
@@ -618,7 +619,7 @@ func TestMultiWorkspace_CrossWorkspaceMove(t *testing.T) {
 			},
 		}
 
-		workspaces := []service.WorkspaceSummary{
+		workspaces := []ops.WorkspaceSummary{
 			{Name: "alpha", Path: "/ws/alpha", Active: true},
 		}
 		wsCfg := testWorkspaceConfigFn("alpha", workspaces)
@@ -648,7 +649,7 @@ func TestMultiWorkspace_CrossWorkspaceMove(t *testing.T) {
 			},
 		}
 
-		workspaces := []service.WorkspaceSummary{
+		workspaces := []ops.WorkspaceSummary{
 			{Name: "alpha", Path: "/ws/alpha", Active: true},
 			{Name: "beta", Path: "/ws/beta", Active: false},
 		}

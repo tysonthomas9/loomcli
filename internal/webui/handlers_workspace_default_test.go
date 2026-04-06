@@ -8,18 +8,19 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 func TestHandleSetDefaultWorkspace_Success(t *testing.T) {
 	setCalled := false
 	svc := &mockWorkspaceService{
-		setDefaultWorkspaceFn: func(_ context.Context, name string) (*service.WorkspaceData, error) {
+		setDefaultWorkspaceFn: func(_ context.Context, name string) (*ops.WorkspaceData, error) {
 			setCalled = true
 			if name != "my-ws" {
 				t.Errorf("expected set called with %q, got %q", "my-ws", name)
 			}
-			return &service.WorkspaceData{Name: "test-ws"}, nil
+			return &ops.WorkspaceData{Name: "test-ws"}, nil
 		},
 	}
 
@@ -103,7 +104,7 @@ func TestHandleSetDefaultWorkspace_EmptyName(t *testing.T) {
 
 func TestHandleSetDefaultWorkspace_Unavailable(t *testing.T) {
 	svc := &mockWorkspaceService{
-		setDefaultWorkspaceFn: func(_ context.Context, _ string) (*service.WorkspaceData, error) {
+		setDefaultWorkspaceFn: func(_ context.Context, _ string) (*ops.WorkspaceData, error) {
 			return nil, service.ErrUnavailable("set default workspace not available")
 		},
 	}
@@ -121,7 +122,7 @@ func TestHandleSetDefaultWorkspace_Unavailable(t *testing.T) {
 
 func TestHandleSetDefaultWorkspace_NotFound(t *testing.T) {
 	svc := &mockWorkspaceService{
-		setDefaultWorkspaceFn: func(_ context.Context, _ string) (*service.WorkspaceData, error) {
+		setDefaultWorkspaceFn: func(_ context.Context, _ string) (*ops.WorkspaceData, error) {
 			return nil, service.ErrNotFound("workspace not found")
 		},
 	}
@@ -140,9 +141,9 @@ func TestHandleSetDefaultWorkspace_NotFound(t *testing.T) {
 func TestHandleClearDefaultWorkspace_Success(t *testing.T) {
 	clearCalled := false
 	svc := &mockWorkspaceService{
-		clearDefaultWorkspaceFn: func(_ context.Context) (*service.WorkspaceData, error) {
+		clearDefaultWorkspaceFn: func(_ context.Context) (*ops.WorkspaceData, error) {
 			clearCalled = true
-			return &service.WorkspaceData{Name: "test-ws"}, nil
+			return &ops.WorkspaceData{Name: "test-ws"}, nil
 		},
 	}
 
@@ -173,7 +174,7 @@ func TestHandleClearDefaultWorkspace_Success(t *testing.T) {
 
 func TestHandleClearDefaultWorkspace_Unavailable(t *testing.T) {
 	svc := &mockWorkspaceService{
-		clearDefaultWorkspaceFn: func(_ context.Context) (*service.WorkspaceData, error) {
+		clearDefaultWorkspaceFn: func(_ context.Context) (*ops.WorkspaceData, error) {
 			return nil, service.ErrUnavailable("clear default workspace not available")
 		},
 	}
@@ -190,7 +191,7 @@ func TestHandleClearDefaultWorkspace_Unavailable(t *testing.T) {
 
 func TestHandleClearDefaultWorkspace_Error(t *testing.T) {
 	svc := &mockWorkspaceService{
-		clearDefaultWorkspaceFn: func(_ context.Context) (*service.WorkspaceData, error) {
+		clearDefaultWorkspaceFn: func(_ context.Context) (*ops.WorkspaceData, error) {
 			return nil, service.ErrInternal("config write failed", nil)
 		},
 	}

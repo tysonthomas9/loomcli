@@ -9,13 +9,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // testWorkspaceConfigFn returns a workspace config function for testing.
-func testWorkspaceConfigFn(name string, workspaces []service.WorkspaceSummary) func() (*service.WorkspaceData, error) {
-	return func() (*service.WorkspaceData, error) {
-		return &service.WorkspaceData{
+func testWorkspaceConfigFn(name string, workspaces []ops.WorkspaceSummary) func() (*ops.WorkspaceData, error) {
+	return func() (*ops.WorkspaceData, error) {
+		return &ops.WorkspaceData{
 			Name:       name,
 			Workspaces: workspaces,
 		}, nil
@@ -23,8 +24,8 @@ func testWorkspaceConfigFn(name string, workspaces []service.WorkspaceSummary) f
 }
 
 // defaultWorkspaces returns a standard set of workspaces for tests.
-func defaultWorkspaces() []service.WorkspaceSummary {
-	return []service.WorkspaceSummary{
+func defaultWorkspaces() []ops.WorkspaceSummary {
+	return []ops.WorkspaceSummary{
 		{Name: "alpha", Path: "/ws/alpha", Active: true, RepoCount: 2},
 		{Name: "beta", Path: "/ws/beta", Active: false, RepoCount: 1},
 		{Name: "gamma", Path: "/ws/gamma", Active: false, RepoCount: 3},
@@ -513,7 +514,7 @@ func TestHandleMoveIssue_WorkspaceConfigError(t *testing.T) {
 			return nil, nil
 		},
 	}
-	errCfg := func() (*service.WorkspaceData, error) {
+	errCfg := func() (*ops.WorkspaceData, error) {
 		return nil, errors.New("config file not found")
 	}
 	handler := handleMoveIssue(svc, errCfg)

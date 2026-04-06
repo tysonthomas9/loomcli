@@ -10,20 +10,21 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // fileServiceImpl is the concrete implementation of FileService.
 type fileServiceImpl struct {
-	fileOps FileOps
+	fileOps ops.FileOps
 }
 
 // NewFileService creates a new FileService implementation.
-func NewFileService(fileOps FileOps) FileService {
+func NewFileService(fileOps ops.FileOps) FileService {
 	return &fileServiceImpl{fileOps: fileOps}
 }
 
-func (s *fileServiceImpl) resolveAgent(wsID, agentName string) (*AgentWorktree, error) {
+func (s *fileServiceImpl) resolveAgent(wsID, agentName string) (*ops.AgentWorktree, error) {
 	if err := validateAgentName(agentName); err != nil {
 		return nil, err
 	}

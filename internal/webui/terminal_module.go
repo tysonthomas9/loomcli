@@ -3,8 +3,8 @@ package webui
 import (
 	"net/http"
 
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
@@ -22,7 +22,7 @@ type TerminalModule struct {
 	termAuth              *realtime.TerminalAuth // may be nil — token routes skipped
 	allowedOrigins        []string
 	loomServerURL         string
-	workspaceConfigByIDFn func(string) (*service.WorkspaceData, error)
+	workspaceConfigByIDFn func(string) (*ops.WorkspaceData, error)
 	tabMetaStore          *tabmeta.Store
 	hub                   *realtime.Hub
 }
@@ -36,7 +36,7 @@ func NewTerminalModule(
 	termAuth *realtime.TerminalAuth,
 	allowedOrigins []string,
 	loomServerURL string,
-	workspaceConfigByIDFn func(string) (*service.WorkspaceData, error),
+	workspaceConfigByIDFn func(string) (*ops.WorkspaceData, error),
 	tabMetaStore *tabmeta.Store,
 	hub *realtime.Hub,
 ) *TerminalModule {

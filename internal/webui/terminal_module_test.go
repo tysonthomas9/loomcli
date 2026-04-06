@@ -5,8 +5,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // Compile-time assertion: *TerminalModule implements Module.
@@ -26,7 +26,7 @@ func TestTerminalModule_RegisterRoutes(t *testing.T) {
 		termAuth,               // termAuth — non-nil to register token routes
 		nil,                    // allowedOrigins
 		"",                     // loomServerURL
-		func(_ string) (*service.WorkspaceData, error) { return nil, nil },
+		func(_ string) (*ops.WorkspaceData, error) { return nil, nil },
 		nil, // tabMetaStore
 		nil, // hub
 	)
@@ -77,7 +77,7 @@ func TestTerminalModule_ConditionalRoutes(t *testing.T) {
 	t.Run("nil agentSvc omits agent terminal routes", func(t *testing.T) {
 		mod := NewTerminalModule(
 			&stubTerminalService{}, nil, nil, nil, nil, "",
-			func(_ string) (*service.WorkspaceData, error) { return nil, nil },
+			func(_ string) (*ops.WorkspaceData, error) { return nil, nil },
 			nil, nil,
 		)
 
@@ -106,7 +106,7 @@ func TestTerminalModule_ConditionalRoutes(t *testing.T) {
 	t.Run("nil termAuth omits token routes", func(t *testing.T) {
 		mod := NewTerminalModule(
 			&stubTerminalService{}, &mockAgentService{}, nil, nil, nil, "",
-			func(_ string) (*service.WorkspaceData, error) { return nil, nil },
+			func(_ string) (*ops.WorkspaceData, error) { return nil, nil },
 			nil, nil,
 		)
 
@@ -145,7 +145,7 @@ func TestTerminalModule_ConditionalRoutes(t *testing.T) {
 func TestTerminalModule_WrongMethod_Returns405(t *testing.T) {
 	mod := NewTerminalModule(
 		&stubTerminalService{}, nil, nil, nil, nil, "",
-		func(_ string) (*service.WorkspaceData, error) { return nil, nil },
+		func(_ string) (*ops.WorkspaceData, error) { return nil, nil },
 		nil, nil,
 	)
 
