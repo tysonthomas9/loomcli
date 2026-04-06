@@ -74,6 +74,96 @@ linters:
               desc: "Handlers must not import store directly; use the service layer (internal/webui/service)"
             - pkg: github.com/tysonthomas9/loomcli/internal/store
               desc: "Handlers must not import store directly; use the service layer (internal/webui/service)"
+        # Module boundary rules — dependency direction: sdk → infra → web → cli
+        # When adding new internal packages, add them to the appropriate rule below.
+        # See /Users/tyson/.claude/plans/purrfect-weaving-stream.md for layer definitions.
+        sdk-leaf:
+          list-mode: lax
+          files:
+            - "**/internal/types/**"
+            - "**/internal/entity/**"
+            - "**/internal/backend/*.go"       # root only — sub-packages are infra
+            - "**/internal/notify/**"
+            - "**/internal/agenterr/**"
+            - "**/internal/authmode/**"
+            - "**/internal/workspaceerrors/**"
+            - "**/internal/events/*.go"        # root only — otelexport is infra
+            - "**/internal/ops/**"             # future: created by loomcli-rir82.2
+          deny:
+            # Infra-layer packages (SDK must not import infra)
+            - pkg: github.com/tysonthomas9/loomcli/internal/rpc
+              desc: "SDK-layer packages must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/sessions
+              desc: "SDK-layer packages must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/lockfile
+              desc: "SDK-layer packages must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/circuitbreaker
+              desc: "SDK-layer packages must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/kv
+              desc: "SDK-layer packages must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/configlock
+              desc: "SDK-layer packages must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/usage
+              desc: "SDK-layer packages must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/logrouter
+              desc: "SDK-layer packages must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/atomicfile
+              desc: "SDK-layer packages must not import infra packages"
+            # NOTE: internal/workspace omitted — depguard prefix matching
+            # falsely matches internal/workspaceerrors (SDK). No SDK package
+            # imports workspace today; relies on code review if one ever does.
+            - pkg: github.com/tysonthomas9/loomcli/internal/debug
+              desc: "SDK-layer packages must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/testutil
+              desc: "SDK-layer packages must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/backend/beads
+              desc: "SDK-layer packages must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/backend/fleet
+              desc: "SDK-layer packages must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/backend/agentipc
+              desc: "SDK-layer packages must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/events/otelexport
+              desc: "SDK-layer packages must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/backend/mapping
+              desc: "SDK-layer packages must not import infra packages"
+            # Web-layer (SDK must not import webui)
+            - pkg: github.com/tysonthomas9/loomcli/internal/webui
+              desc: "SDK-layer packages must not import webui"
+            # CLI-layer (SDK must not import cli)
+            - pkg: github.com/tysonthomas9/loomcli/internal/cli
+              desc: "SDK-layer packages must not import cli"
+        infra-isolation:
+          list-mode: lax
+          files:
+            - "**/internal/rpc/**"
+            - "**/internal/sessions/**"
+            - "**/internal/lockfile/**"
+            - "**/internal/circuitbreaker/**"
+            - "**/internal/kv/**"
+            - "**/internal/configlock/**"
+            - "**/internal/usage/**"
+            - "**/internal/logrouter/**"
+            - "**/internal/atomicfile/**"
+            - "**/internal/workspace/**"
+            - "**/internal/debug/**"
+            - "**/internal/testutil/**"
+            - "**/internal/backend/mapping/**"
+            - "**/internal/backend/beads/**"
+            - "**/internal/backend/fleet/**"
+            - "**/internal/backend/agentipc/**"
+            - "**/internal/events/otelexport/**"
+          deny:
+            - pkg: github.com/tysonthomas9/loomcli/internal/webui
+              desc: "Infra packages must not import webui"
+            - pkg: github.com/tysonthomas9/loomcli/internal/cli
+              desc: "Infra packages must not import cli"
+        webui-isolation:
+          list-mode: lax
+          files:
+            - "**/internal/webui/**"
+          deny:
+            - pkg: github.com/tysonthomas9/loomcli/internal/cli
+              desc: "WebUI must not import cli"
     staticcheck:
       checks:
         - "all"
