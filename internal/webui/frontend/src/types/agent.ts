@@ -1,6 +1,16 @@
 /**
  * Agent-related types.
+ * Monitor/loom server types aliased from generated OpenAPI schemas where possible.
+ * LoomCommitDetail → MonitorCommitDetail, LoomFileChange → MonitorFileChange,
+ * LoomTaskInfo → MonitorTaskInfo, LoomStats → MonitorStats,
+ * WorktreeSyncDetail → MonitorWorktreeSyncDetail, LoomSyncInfo → MonitorSyncInfo.
+ * LoomAgentStatus extends MonitorAgentStatus with cross_repo, path, worktree_path fields not in spec.
+ * LoomTaskSummary extends MonitorTaskSummary with epics field from spec.
+ * LoomStatusResponse, LoomAgentsResponse, LoomTasksResponse aliased from generated schemas.
+ * Runtime constants, ParsedLoomStatus, LoomConnectionState, parseLoomStatus kept hand-written.
  */
+
+import type { components } from "./generated/openapi";
 
 /**
  * Agent state values.
@@ -71,52 +81,34 @@ export type LoomConnectionState =
 
 /**
  * Commit detail from the loom server.
+ * Aliased from generated MonitorCommitDetail schema.
  */
-export interface LoomCommitDetail {
-  hash: string;
-  message: string;
-  url?: string;
-}
+export type LoomCommitDetail = components["schemas"]["MonitorCommitDetail"];
 
 /**
  * File change from git status.
+ * Aliased from generated MonitorFileChange schema.
  */
-export interface LoomFileChange {
-  status: string; // "M", "A", "D", "??", "R"
-  path: string;
-}
+export type LoomFileChange = components["schemas"]["MonitorFileChange"];
 
 /**
  * Agent status from the loom server.
+ * Based on generated MonitorAgentStatus, with workspace made optional (legacy/single-repo mode
+ * sends empty string or omits it) and extended with cross_repo, path, worktree_path fields not in spec.
  */
-export interface LoomAgentStatus {
-  /** Worktree name (e.g., "nova", "falcon") */
-  name: string;
-  /** Current git branch */
-  branch: string;
-  /** Status string (e.g., "ready", "working: bd-123 (5m)", "planning: bd-456 (2m)") */
-  status: string;
-  /** Commits ahead of integration branch */
-  ahead: number;
-  /** Commits behind integration branch */
-  behind: number;
-  /** Role from daemon config (e.g., "plan", "task") */
-  role?: string;
+export type LoomAgentStatus = Omit<
+  components["schemas"]["MonitorAgentStatus"],
+  "workspace"
+> & {
   /** Workspace name from daemon config (empty string in legacy/single-repo mode) */
   workspace?: string;
-  /** Repository this agent is assigned to (multi-repo workspaces) */
-  repo?: string;
   /** Whether agent works across multiple repos */
   cross_repo?: boolean;
-  /** Recent commits ahead of integration branch */
-  commits?: LoomCommitDetail[];
-  /** Uncommitted file changes */
-  changes?: LoomFileChange[];
   /** Absolute path to the agent's working directory */
   path?: string;
   /** Absolute path to the agent's worktree */
   worktree_path?: string;
-}
+};
 
 /**
  * Parsed agent status for display.
@@ -142,81 +134,50 @@ export interface ParsedLoomStatus {
 }
 
 /**
- * Response from GET /api/agents on loom server
+ * Response from GET /api/agents on loom server.
+ * Aliased from generated MonitorAgentsResponse schema.
+ * Drift: generated has workspace field and non-null agents; hand-written had nullable agents.
  */
-export interface LoomAgentsResponse {
-  agents: LoomAgentStatus[] | null;
-  timestamp: string;
-}
+export type LoomAgentsResponse = components["schemas"]["MonitorAgentsResponse"];
 
 /**
  * Task info from loom server.
+ * Aliased from generated MonitorTaskInfo schema.
  */
-export interface LoomTaskInfo {
-  id: string;
-  title: string;
-  priority: number;
-  status: string;
-}
+export type LoomTaskInfo = components["schemas"]["MonitorTaskInfo"];
 
 /**
  * Task summary counts from loom server.
+ * Aliased from generated MonitorTaskSummary schema.
+ * Drift: generated has additional epics field.
  */
-export interface LoomTaskSummary {
-  needs_planning: number;
-  ready_to_implement: number;
-  in_progress: number;
-  need_review: number;
-  backlog: number;
-}
+export type LoomTaskSummary = components["schemas"]["MonitorTaskSummary"];
 
 /**
  * Per-worktree sync detail (commits ahead or behind).
+ * Aliased from generated MonitorWorktreeSyncDetail schema.
  */
-export interface WorktreeSyncDetail {
-  name: string;
-  count: number;
-}
+export type WorktreeSyncDetail =
+  components["schemas"]["MonitorWorktreeSyncDetail"];
 
 /**
  * Sync status from loom server.
+ * Aliased from generated MonitorSyncInfo schema.
  */
-export interface LoomSyncInfo {
-  db_synced: boolean;
-  db_last_sync: string;
-  db_error?: string;
-  git_needs_push: number;
-  git_needs_pull: number;
-  git_push_details?: WorktreeSyncDetail[];
-  git_pull_details?: WorktreeSyncDetail[];
-}
+export type LoomSyncInfo = components["schemas"]["MonitorSyncInfo"];
 
 /**
  * Statistics from loom server.
+ * Aliased from generated MonitorStats schema.
  */
-export interface LoomStats {
-  open: number;
-  closed: number;
-  total: number;
-  completion: number;
-  remaining: number;
-  in_progress: number;
-  review: number;
-  blocked: number;
-}
+export type LoomStats = components["schemas"]["MonitorStats"];
 
 /**
  * Full status response from GET /api/status on loom server.
+ * Aliased from generated MonitorStatusResponse schema.
+ * Drift: generated has workspace field not in hand-written type.
  */
-export interface LoomStatusResponse {
-  agents: LoomAgentStatus[] | null;
-  tasks: LoomTaskSummary;
-  in_progress_list: LoomTaskInfo[] | null;
-  agent_tasks: Record<string, LoomTaskInfo> | null;
-  stats: LoomStats;
-  sync: LoomSyncInfo;
-  timestamp: string;
-}
+export type LoomStatusResponse = components["schemas"]["MonitorStatusResponse"];
 
 /**
  * Task info keyed by agent name (from AgentTasks map).
@@ -225,18 +186,9 @@ export type LoomAgentTasks = Record<string, LoomTaskInfo>;
 
 /**
  * Response from GET /api/tasks on loom server.
- * Contains task lists organized by status category.
+ * Aliased from generated MonitorTasksResponse schema.
  */
-export interface LoomTasksResponse {
-  summary: LoomTaskSummary;
-  needs_planning: LoomTaskInfo[] | null;
-  ready_to_implement: LoomTaskInfo[] | null;
-  needs_review: LoomTaskInfo[] | null;
-  in_progress: LoomTaskInfo[] | null;
-  backlog: LoomTaskInfo[] | null;
-  closed: LoomTaskInfo[] | null;
-  timestamp: string;
-}
+export type LoomTasksResponse = components["schemas"]["MonitorTasksResponse"];
 
 /**
  * Task lists organized by category for UI display.

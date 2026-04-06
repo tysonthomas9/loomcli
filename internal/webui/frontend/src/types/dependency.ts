@@ -1,8 +1,11 @@
 /**
  * Dependency relationship types.
+ * Dependency interface aliased from generated OpenAPI schema: components.schemas.Dependency
+ * DependencyCounts kept hand-written (no standalone schema in spec).
+ * Runtime constants and type unions kept hand-written.
  */
 
-import type { ISODateString } from "./common";
+import type { components } from "./generated/openapi";
 
 /**
  * Well-known dependency types.
@@ -65,17 +68,9 @@ export const DepDelegatedFrom: DependencyType = "delegated-from";
 
 /**
  * Dependency relationship between issues.
- * Maps to Go types.Dependency.
+ * Aliased from generated OpenAPI schema.
  */
-export interface Dependency {
-  issue_id: string;
-  depends_on_id: string;
-  type: DependencyType;
-  created_at: ISODateString;
-  created_by?: string;
-  metadata?: string;
-  thread_id?: string;
-}
+export type Dependency = components["schemas"]["Dependency"];
 
 /**
  * Dependency counts for an issue.

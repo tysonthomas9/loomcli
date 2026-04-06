@@ -187,7 +187,7 @@ export function ActivityLog({
               className={styles.eventEntry}
               data-testid="activity-event"
             >
-              <EventIcon eventType={event.event_type} />
+              <EventIcon eventType={event.event_type as EventType} />
               <span className={styles.eventDescription}>
                 {describeEvent(event)}
               </span>

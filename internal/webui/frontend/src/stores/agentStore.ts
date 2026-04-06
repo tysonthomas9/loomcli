@@ -40,6 +40,7 @@ const DEFAULT_TASKS: LoomTaskSummary = {
   in_progress: 0,
   need_review: 0,
   backlog: 0,
+  epics: 0,
 };
 
 const DEFAULT_SYNC: LoomSyncInfo = {

@@ -83,6 +83,7 @@ function setupSuccessfulMocks(): void {
       in_progress: 3,
       need_review: 0,
       backlog: 0,
+      epics: 0,
     },
     agentTasks: {
       nova: { id: "task-1", title: "Test Task", priority: 1, status: "open" },

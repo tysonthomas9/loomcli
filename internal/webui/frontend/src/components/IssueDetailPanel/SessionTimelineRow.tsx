@@ -56,7 +56,7 @@ export function SessionTimelineRow({
         }
       }}
       aria-label={`Session by ${session.agent_name}, ${session.status}`}
-      data-testid={`session-row-${session.id}`}
+      data-testid={`session-row-${session.session_id}`}
     >
       <span
         className={styles.statusDot}

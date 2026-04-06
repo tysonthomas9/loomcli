@@ -1,30 +1,21 @@
 /**
  * Statistics and aggregate types.
+ * Statistics aliased from generated OpenAPI schema: components.schemas.Statistics
+ * EpicStatus kept hand-written (no standalone schema in spec).
  */
 
+import type { components } from "./generated/openapi";
 import type { Issue } from "./issue";
 
 /**
  * Aggregate statistics.
- * Maps to Go types.Statistics.
+ * Maps to Go types.Statistics via OpenAPI schema.
  */
-export interface Statistics {
-  total_issues: number;
-  open_issues: number;
-  in_progress_issues: number;
-  closed_issues: number;
-  blocked_issues: number;
-  deferred_issues: number;
-  ready_issues: number;
-  tombstone_issues: number;
-  pinned_issues: number;
-  epics_eligible_for_closure: number;
-  average_lead_time_hours: number;
-}
+export type Statistics = components["schemas"]["Statistics"];
 
 /**
  * Epic status with completion information.
- * Maps to Go types.EpicStatus.
+ * Maps to Go types.EpicStatus. No standalone schema in spec — kept hand-written.
  */
 export interface EpicStatus {
   epic: Issue | null;

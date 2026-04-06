@@ -38,7 +38,7 @@ export function SessionDetailView({
     entries,
     isLoading: transcriptLoading,
     error: transcriptError,
-  } = useSessionTranscript(taskId, session.id, session.is_active);
+  } = useSessionTranscript(taskId, session.session_id, session.is_active);
 
   const {
     diff,
@@ -46,7 +46,7 @@ export function SessionDetailView({
     error: diffError,
   } = useSessionDiff(
     taskId,
-    session.id,
+    session.session_id,
     innerTab === "diff" && session.has_diff,
   );
 

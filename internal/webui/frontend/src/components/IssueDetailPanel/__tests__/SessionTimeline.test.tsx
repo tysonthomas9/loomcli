@@ -16,7 +16,8 @@ import { SessionTimeline } from "../SessionTimeline";
 
 function createSession(overrides: Partial<SessionRecord> = {}): SessionRecord {
   return {
-    id: "sess-1",
+    session_id: "sess-1",
+    task_id: "task-1",
     agent_name: "nova",
     backend: "claude",
     model: "opus-4",
@@ -81,9 +82,9 @@ describe("SessionTimeline", () => {
   describe("rendering sessions", () => {
     it("renders a row for each session", () => {
       const sessions = [
-        createSession({ id: "s1", agent_name: "nova" }),
-        createSession({ id: "s2", agent_name: "falcon" }),
-        createSession({ id: "s3", agent_name: "eagle" }),
+        createSession({ session_id: "s1", agent_name: "nova" }),
+        createSession({ session_id: "s2", agent_name: "falcon" }),
+        createSession({ session_id: "s3", agent_name: "eagle" }),
       ];
       render(<SessionTimeline {...defaultProps} sessions={sessions} />);
       expect(screen.getByTestId("session-row-s1")).toBeInTheDocument();
@@ -102,17 +103,17 @@ describe("SessionTimeline", () => {
     it("sorts sessions newest first by started_at", () => {
       const sessions = [
         createSession({
-          id: "oldest",
+          session_id: "oldest",
           agent_name: "oldest-agent",
           started_at: "2026-01-18T10:00:00Z",
         }),
         createSession({
-          id: "newest",
+          session_id: "newest",
           agent_name: "newest-agent",
           started_at: "2026-01-20T10:00:00Z",
         }),
         createSession({
-          id: "middle",
+          session_id: "middle",
           agent_name: "middle-agent",
           started_at: "2026-01-19T10:00:00Z",
         }),
@@ -127,23 +128,23 @@ describe("SessionTimeline", () => {
 
     it("does not mutate the original sessions array", () => {
       const sessions = [
-        createSession({ id: "b", started_at: "2026-01-18T10:00:00Z" }),
-        createSession({ id: "a", started_at: "2026-01-20T10:00:00Z" }),
+        createSession({ session_id: "b", started_at: "2026-01-18T10:00:00Z" }),
+        createSession({ session_id: "a", started_at: "2026-01-20T10:00:00Z" }),
       ];
-      const originalOrder = sessions.map((s) => s.id);
+      const originalOrder = sessions.map((s) => s.session_id);
 
       render(<SessionTimeline {...defaultProps} sessions={sessions} />);
 
       // Original array should be unchanged
-      expect(sessions.map((s) => s.id)).toEqual(originalOrder);
+      expect(sessions.map((s) => s.session_id)).toEqual(originalOrder);
     });
   });
 
   describe("selection", () => {
     it("marks the selected session row", () => {
       const sessions = [
-        createSession({ id: "s1" }),
-        createSession({ id: "s2", started_at: "2026-01-19T10:00:00Z" }),
+        createSession({ session_id: "s1" }),
+        createSession({ session_id: "s2", started_at: "2026-01-19T10:00:00Z" }),
       ];
       render(
         <SessionTimeline
@@ -161,7 +162,7 @@ describe("SessionTimeline", () => {
 
     it("calls onSelect with session id when a row is clicked", () => {
       const onSelect = vi.fn();
-      const sessions = [createSession({ id: "s1" })];
+      const sessions = [createSession({ session_id: "s1" })];
       render(
         <SessionTimeline
           {...defaultProps}
@@ -175,8 +176,8 @@ describe("SessionTimeline", () => {
 
     it("no row is selected when selectedId is null", () => {
       const sessions = [
-        createSession({ id: "s1" }),
-        createSession({ id: "s2", started_at: "2026-01-19T10:00:00Z" }),
+        createSession({ session_id: "s1" }),
+        createSession({ session_id: "s2", started_at: "2026-01-19T10:00:00Z" }),
       ];
       render(
         <SessionTimeline

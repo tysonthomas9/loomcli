@@ -1,8 +1,14 @@
 /**
  * Core Issue type and related types.
+ * Issue aliased from generated OpenAPI schema (components.schemas.Issue) with extensions
+ * for fields not in the spec (HOP, bonding, gate, slot, compaction, tombstone, messaging, etc.).
+ * BlockerRef, BlockedIssue, TreeNode aliased from generated schemas.
+ * IssueDetails, GraphIssue, GraphDependency, IssueWithDependencyMetadata, IssueWithCounts,
+ * MoleculeProgressStats kept hand-written (no standalone schemas or different shapes).
  */
 
-import type { AgentState, MolType, WorkType } from "./agent";
+import type { components } from "./generated/openapi";
+import type { AgentState, WorkType } from "./agent";
 import type { Comment } from "./comment";
 import type { ISODateString, Priority, Duration } from "./common";
 import type { Dependency, DependencyType } from "./dependency";
@@ -11,45 +17,34 @@ import type { IssueType } from "./issueType";
 import type { Status } from "./status";
 
 /**
- * Core Issue interface.
- * Maps to Go types.Issue.
- * Field names match Go JSON tags for direct API compatibility.
+ * Fields present on the hand-written Issue type but absent from the generated schema.
+ * These fields come from Go types.Issue but are not in the DTO-derived OpenAPI spec.
  */
-export interface Issue {
-  // Core Identification
-  id: string;
-
-  // Issue Content
-  title: string;
-  description?: string;
-  design?: string;
-  acceptance_criteria?: string;
-  notes?: string;
-
-  // Status & Workflow
+interface IssueExtensions {
+  // Status & Workflow (wider union than spec enum)
   status?: Status;
   priority: Priority;
   issue_type?: IssueType;
 
-  // Assignment
-  assignee?: string;
-  owner?: string;
-  estimated_minutes?: number | null;
-
-  // Timestamps
+  // Timestamps (branded ISODateString)
   created_at: ISODateString;
-  created_by?: string;
   updated_at: ISODateString;
   closed_at?: ISODateString | null;
-  close_reason?: string;
-  closed_by_session?: string;
-
-  // Time-Based Scheduling
   due_at?: ISODateString | null;
   defer_until?: ISODateString | null;
 
+  // Agent Identity (wider union than spec enum)
+  agent_state?: AgentState;
+  last_activity?: ISODateString | null;
+
+  // Typed relational arrays
+  dependencies?: Dependency[];
+  comments?: Comment[];
+
+  // Assignment
+  closed_by_session?: string;
+
   // External Integration
-  external_ref?: string | null;
   source_system?: string;
 
   // Compaction Metadata
@@ -58,14 +53,8 @@ export interface Issue {
   compacted_at_commit?: string | null;
   original_size?: number;
 
-  // Relational Data
-  labels?: string[];
-  dependencies?: Dependency[];
-  comments?: Comment[];
-
-  // Parent-child hierarchy
-  parent?: string; // Parent issue ID
-  parent_title?: string; // Parent title for display
+  // Parent display
+  parent_title?: string;
 
   // Tombstone Fields
   deleted_at?: ISODateString | null;
@@ -78,7 +67,6 @@ export interface Issue {
   ephemeral?: boolean;
 
   // Context Markers
-  pinned?: boolean;
   is_template?: boolean;
 
   // Bonding Fields
@@ -106,17 +94,6 @@ export interface Issue {
   /** Repository that owns this issue (multi-repo workspaces) */
   repo?: string;
 
-  // Agent Identity Fields
-  hook_bead?: string;
-  role_bead?: string;
-  agent_state?: AgentState;
-  last_activity?: ISODateString | null;
-  role_type?: string;
-  rig?: string;
-
-  // Molecule Type Fields
-  mol_type?: MolType;
-
   // Work Type Fields
   work_type?: WorkType;
 
@@ -132,6 +109,28 @@ export interface Issue {
   blocked_by?: string[];
   blocked_by_details?: BlockerRef[];
 }
+
+/**
+ * Core Issue interface.
+ * Base from generated OpenAPI schema, extended with fields not in the spec.
+ */
+export type Issue = Omit<
+  components["schemas"]["Issue"],
+  // Remove fields we override with wider types in IssueExtensions
+  | "status"
+  | "priority"
+  | "issue_type"
+  | "created_at"
+  | "updated_at"
+  | "closed_at"
+  | "due_at"
+  | "defer_until"
+  | "agent_state"
+  | "last_activity"
+  | "dependencies"
+  | "comments"
+> &
+  IssueExtensions;
 
 /**
  * Issue with dependency metadata.
@@ -187,17 +186,15 @@ export interface IssueDetails extends Omit<
 
 /**
  * Blocker reference with title and priority.
- * Maps to Go types.BlockerRef.
+ * Aliased from generated OpenAPI schema.
  */
-export interface BlockerRef {
-  id: string;
-  title: string;
-  priority: number;
-}
+export type BlockerRef = components["schemas"]["BlockerRef"];
 
 /**
  * Blocked issue with blocking information.
  * Maps to Go types.BlockedIssue.
+ * Hand-written because the generated schema uses allOf with generated Issue
+ * but we need our extended Issue type.
  */
 export interface BlockedIssue extends Issue {
   blocked_by_count: number;
@@ -208,6 +205,8 @@ export interface BlockedIssue extends Issue {
 /**
  * Tree node in a dependency tree.
  * Maps to Go types.TreeNode.
+ * Hand-written because the generated schema uses allOf with generated Issue
+ * but we need our extended Issue type.
  */
 export interface TreeNode extends Issue {
   depth: number;
@@ -217,7 +216,7 @@ export interface TreeNode extends Issue {
 
 /**
  * Molecule progress statistics.
- * Maps to Go types.MoleculeProgressStats.
+ * Maps to Go types.MoleculeProgressStats. No standalone schema in spec.
  */
 export interface MoleculeProgressStats {
   molecule_id: string;

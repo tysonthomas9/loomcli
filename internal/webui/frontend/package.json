@@ -29,7 +29,8 @@
     "test:visual:update": "playwright test visual-regression --update-snapshots",
     "test:e2e:integration": "RUN_INTEGRATION_TESTS=1 playwright test --project=integration",
     "test:e2e:local-integration": "RUN_LOCAL_INTEGRATION_TESTS=1 playwright test --project=local-integration",
-    "test:e2e:api": "RUN_INTEGRATION_TESTS=1 playwright test --project=api"
+    "test:e2e:api": "RUN_INTEGRATION_TESTS=1 playwright test --project=api",
+    "generate:types": "openapi-typescript ../../../api/openapi.yaml -o src/types/generated/openapi.ts"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.3",
@@ -81,6 +82,7 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "jest-axe": "^10.0.0",
     "jsdom": "^27.4.0",
+    "openapi-typescript": "^7.13.0",
     "prettier": "^3.8.1",
     "typescript": "~5.6.2",
     "typescript-eslint": "^8.54.0",

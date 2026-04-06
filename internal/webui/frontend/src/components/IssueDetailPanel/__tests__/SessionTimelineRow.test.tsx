@@ -16,7 +16,8 @@ import { SessionTimelineRow } from "../SessionTimelineRow";
 
 function createSession(overrides: Partial<SessionRecord> = {}): SessionRecord {
   return {
-    id: "sess-1",
+    session_id: "sess-1",
+    task_id: "task-1",
     agent_name: "nova",
     backend: "claude",
     model: "opus-4",

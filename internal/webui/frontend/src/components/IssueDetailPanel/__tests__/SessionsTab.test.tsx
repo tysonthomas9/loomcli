@@ -28,10 +28,10 @@ vi.mock("../SessionTimeline", () => ({
     <div data-testid="session-timeline-mock">
       {sessions.map((s) => (
         <button
-          key={s.id}
-          data-testid={`timeline-row-${s.id}`}
-          data-selected={selectedId === s.id}
-          onClick={() => onSelect(s.id)}
+          key={s.session_id}
+          data-testid={`timeline-row-${s.session_id}`}
+          data-selected={selectedId === s.session_id}
+          onClick={() => onSelect(s.session_id)}
         >
           {s.agent_name}
         </button>
@@ -49,7 +49,7 @@ vi.mock("../SessionDetailView", () => ({
     session: SessionRecord;
   }) => (
     <div data-testid="session-detail-view-mock">
-      Detail for {session.id} in task {taskId}
+      Detail for {session.session_id} in task {taskId}
     </div>
   ),
 }));
@@ -69,7 +69,8 @@ const mockUseTaskSessions = vi.mocked(useTaskSessions);
 
 function createSession(overrides: Partial<SessionRecord> = {}): SessionRecord {
   return {
-    id: "sess-1",
+    session_id: "sess-1",
+    task_id: "task-1",
     agent_name: "nova",
     backend: "claude",
     model: "opus-4",
@@ -182,9 +183,9 @@ describe("SessionsTab", () => {
 
     it("shows detail view when a session is selected", async () => {
       const sessions = [
-        createSession({ id: "s1", agent_name: "nova" }),
+        createSession({ session_id: "s1", agent_name: "nova" }),
         createSession({
-          id: "s2",
+          session_id: "s2",
           agent_name: "falcon",
           started_at: "2026-01-19T10:00:00Z",
         }),
@@ -211,7 +212,7 @@ describe("SessionsTab", () => {
 
     it("shows placeholder when selected session id does not match any session", () => {
       mockUseTaskSessions.mockReturnValue({
-        sessions: [createSession({ id: "s1" })],
+        sessions: [createSession({ session_id: "s1" })],
         isLoading: false,
         error: null,
         refetch: vi.fn(),

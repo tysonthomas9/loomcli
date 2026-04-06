@@ -61,6 +61,7 @@ export function shouldSkip(relPath) {
   const parts = relPath.split("/");
   if (parts.includes("__tests__")) return true;
   if (parts.includes("test-utils")) return true;
+  if (parts.includes("generated")) return true;
 
   return false;
 }

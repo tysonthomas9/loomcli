@@ -1,62 +1,27 @@
 /**
  * TypeScript types for usage/cost tracking data.
- * Mirrors Go types from internal/cli/serve.go (UsageResponse, UsageAgentSummary, etc.)
+ * Aliased from generated OpenAPI schemas: UsageSessionRecord, UsageAgentSummary,
+ * UsageBackendSummary, UsageDailyCost, UsageResponse.
+ * Drift: generated UsageSessionRecord uses session_id (optional) vs hand-written UsageSession which had no session_id.
+ * UsageParams kept hand-written (query params type, not a schema).
  */
 
-/** A single agent session's usage record. */
-export interface UsageSession {
-  agent_name: string;
-  backend: string;
-  task_id?: string;
-  epic_id?: string;
-  input_tokens: number;
-  output_tokens: number;
-  cache_read_tokens: number;
-  cache_write_tokens: number;
-  estimated_cost_usd: number;
-  started_at: string;
-  ended_at: string;
-  exit_code: number;
-  model?: string;
-}
+import type { components } from "./generated/openapi";
+
+/** A single agent session's usage record. Aliased from generated UsageSessionRecord schema. */
+export type UsageSession = components["schemas"]["UsageSessionRecord"];
 
 /** Per-agent aggregated usage. */
-export interface UsageAgentSummary {
-  name: string;
-  sessions: number;
-  input_tokens: number;
-  output_tokens: number;
-  total_cost: number;
-}
+export type UsageAgentSummary = components["schemas"]["UsageAgentSummary"];
 
 /** Per-backend aggregated usage. */
-export interface UsageBackendSummary {
-  name: string;
-  sessions: number;
-  total_cost: number;
-}
+export type UsageBackendSummary = components["schemas"]["UsageBackendSummary"];
 
 /** Daily cost entry. */
-export interface UsageDailyCost {
-  date: string;
-  cost: number;
-  sessions: number;
-}
+export type UsageDailyCost = components["schemas"]["UsageDailyCost"];
 
 /** Full usage API response from GET /api/usage. */
-export interface UsageResponse {
-  total_input_tokens: number;
-  total_output_tokens: number;
-  total_cache_read_tokens: number;
-  total_cache_write_tokens: number;
-  total_cost: number;
-  session_count: number;
-  by_agent: UsageAgentSummary[];
-  by_backend: UsageBackendSummary[];
-  daily_costs: UsageDailyCost[];
-  sessions: UsageSession[];
-  timestamp: string;
-}
+export type UsageResponse = components["schemas"]["UsageResponse"];
 
 /** Query parameters for the usage endpoint. */
 export interface UsageParams {

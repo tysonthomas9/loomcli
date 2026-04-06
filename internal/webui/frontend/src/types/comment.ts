@@ -1,17 +1,12 @@
 /**
  * Comment type for issue comments.
+ * Aliased from generated OpenAPI schema: components.schemas.Comment
  */
 
-import type { ISODateString } from "./common";
+import type { components } from "./generated/openapi";
 
 /**
  * Comment on an issue.
- * Maps to Go types.Comment.
+ * Maps to Go types.Comment via OpenAPI schema.
  */
-export interface Comment {
-  id: number;
-  issue_id: string;
-  author: string;
-  text: string;
-  created_at: ISODateString;
-}
+export type Comment = components["schemas"]["Comment"];

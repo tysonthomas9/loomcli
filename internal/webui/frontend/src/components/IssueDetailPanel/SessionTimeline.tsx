@@ -42,10 +42,10 @@ export function SessionTimeline({
     <div className={styles.timeline} data-testid="session-timeline">
       {sorted.map((session) => (
         <SessionTimelineRow
-          key={session.id}
+          key={session.session_id}
           session={session}
-          isSelected={selectedId === session.id}
-          onClick={() => onSelect(session.id)}
+          isSelected={selectedId === session.session_id}
+          onClick={() => onSelect(session.session_id)}
         />
       ))}
     </div>

@@ -1,50 +1,20 @@
 /**
  * TypeScript types for session audit trail data.
- * Mirrors Go types from internal/sessions/ (SessionRecord, TranscriptEntry, etc.)
+ * SessionRecord and TranscriptEntry aliased from generated OpenAPI schemas.
+ * Drift: generated SessionResponse uses session_id (not id); has additional task_id, epic_id, last_error fields.
+ * Envelope response types (SessionListResponse, SessionDetailResponse, TranscriptResponse) kept hand-written.
  */
+
+import type { components } from "./generated/openapi";
 
 /** Lifecycle state of a session. */
 export type SessionStatus = "running" | "completed" | "failed" | "aborted";
 
-/** A single agent session record. */
-export interface SessionRecord {
-  id: string;
-  agent_name: string;
-  backend: string;
-  model?: string;
-  phase?: string; // "planning" | "implementation"
-  status: SessionStatus;
-  started_at: string;
-  ended_at?: string;
-  duration_s?: number;
-  input_tokens: number;
-  output_tokens: number;
-  cache_read_tokens: number;
-  cache_write_tokens: number;
-  estimated_cost_usd: number;
-  exit_code: number;
-  files_changed: number;
-  lines_added: number;
-  lines_removed: number;
-  files_touched?: string[];
-  attempt_num: number;
-  error_class?: string;
-  has_transcript: boolean;
-  has_diff: boolean;
-  is_active: boolean;
-}
+/** A single agent session record. Aliased from generated SessionResponse schema. */
+export type SessionRecord = components["schemas"]["SessionResponse"];
 
-/** A single entry in a session transcript. */
-export interface TranscriptEntry {
-  seq: number;
-  ts: string;
-  role: "user" | "assistant" | "system" | "tool";
-  type: string;
-  content?: string;
-  tool_name?: string;
-  tool_input?: string;
-  raw?: string;
-}
+/** A single entry in a session transcript. Aliased from generated TranscriptEntry schema. */
+export type TranscriptEntry = components["schemas"]["TranscriptEntry"];
 
 /** Response from GET /api/workspaces/{ws}/tasks/{taskId}/sessions */
 export interface SessionListResponse {

@@ -27,7 +27,8 @@ const mockGetSessions = vi.mocked(getTaskSessions);
 
 function createMockSession(overrides?: Partial<SessionRecord>): SessionRecord {
   return {
-    id: "session-1",
+    session_id: "session-1",
+    task_id: "task-1",
     agent_name: "ember",
     backend: "claude",
     status: "completed",
@@ -83,8 +84,8 @@ describe("useTaskSessions", () => {
   describe("fetching", () => {
     it("fetches sessions on mount with valid taskId", async () => {
       const sessions = [
-        createMockSession({ id: "s1" }),
-        createMockSession({ id: "s2" }),
+        createMockSession({ session_id: "s1" }),
+        createMockSession({ session_id: "s2" }),
       ];
       mockGetSessions.mockResolvedValueOnce(sessions);
 
@@ -99,7 +100,9 @@ describe("useTaskSessions", () => {
     });
 
     it("resets sessions and refetches when taskId changes", async () => {
-      mockGetSessions.mockResolvedValueOnce([createMockSession({ id: "s1" })]);
+      mockGetSessions.mockResolvedValueOnce([
+        createMockSession({ session_id: "s1" }),
+      ]);
 
       const { result, rerender } = renderHook(
         ({ taskId }: { taskId: string | null }) => useTaskSessions(taskId),
@@ -110,8 +113,8 @@ describe("useTaskSessions", () => {
       expect(result.current.sessions).toHaveLength(1);
 
       mockGetSessions.mockResolvedValueOnce([
-        createMockSession({ id: "s2" }),
-        createMockSession({ id: "s3" }),
+        createMockSession({ session_id: "s2" }),
+        createMockSession({ session_id: "s3" }),
       ]);
 
       rerender({ taskId: "task-2" });
@@ -121,7 +124,9 @@ describe("useTaskSessions", () => {
     });
 
     it("clears sessions when taskId changes to null", async () => {
-      mockGetSessions.mockResolvedValueOnce([createMockSession({ id: "s1" })]);
+      mockGetSessions.mockResolvedValueOnce([
+        createMockSession({ session_id: "s1" }),
+      ]);
 
       const { result, rerender } = renderHook(
         ({ taskId }: { taskId: string | null }) => useTaskSessions(taskId),
@@ -204,15 +209,17 @@ describe("useTaskSessions", () => {
 
   describe("refetch", () => {
     it("manually triggers a refetch", async () => {
-      mockGetSessions.mockResolvedValueOnce([createMockSession({ id: "s1" })]);
+      mockGetSessions.mockResolvedValueOnce([
+        createMockSession({ session_id: "s1" }),
+      ]);
 
       const { result } = renderHook(() => useTaskSessions("task-1"));
 
       await flushPromises();
 
       mockGetSessions.mockResolvedValueOnce([
-        createMockSession({ id: "s1" }),
-        createMockSession({ id: "s2" }),
+        createMockSession({ session_id: "s1" }),
+        createMockSession({ session_id: "s2" }),
       ]);
 
       await act(async () => {

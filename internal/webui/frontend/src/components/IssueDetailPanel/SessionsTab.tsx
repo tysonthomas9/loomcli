@@ -26,7 +26,7 @@ export function SessionsTab({ taskId }: SessionsTabProps): JSX.Element {
 
   const selectedSession =
     selectedSessionId != null
-      ? (sessions.find((s) => s.id === selectedSessionId) ?? null)
+      ? (sessions.find((s) => s.session_id === selectedSessionId) ?? null)
       : null;
 
   const summary = useMemo(() => computeCostSummary(sessions), [sessions]);

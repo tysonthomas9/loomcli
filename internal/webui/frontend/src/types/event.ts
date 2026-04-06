@@ -1,8 +1,10 @@
 /**
  * Event types for audit trail.
+ * Event interface aliased from generated OpenAPI schema: components.schemas.IssueEvent
+ * EventType union and constants kept hand-written (runtime values).
  */
 
-import type { ISODateString } from "./common";
+import type { components } from "./generated/openapi";
 
 /**
  * Event type values for audit trail.
@@ -38,15 +40,6 @@ export const EventCompacted: EventType = "issue.compacted";
 
 /**
  * Audit trail event.
- * Maps to Go types.Event.
+ * Aliased from generated OpenAPI schema (IssueEvent).
  */
-export interface Event {
-  id: number;
-  issue_id: string;
-  event_type: EventType;
-  actor: string;
-  old_value?: string | null;
-  new_value?: string | null;
-  comment?: string | null;
-  created_at: ISODateString;
-}
+export type Event = components["schemas"]["IssueEvent"];
