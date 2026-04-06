@@ -12,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agentcontrol"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -79,6 +80,7 @@ type ServerConfig struct {
 	ScrollbackMaxLines      int                                      // Maximum lines per scrollback buffer (0 = default 10000)
 	SessionsStore           *sessions.Store                          // File-based session audit trail store (optional; nil disables session endpoints)
 	NotifyTokenDir          string                                   // Directory to write notify.token (typically beads dir); empty = token file not written
+	AgentControlFn          agentcontrol.AgentControlFn              // Sends agent lifecycle commands to the daemon control socket; nil in fleet mode or --no-daemon
 	FleetMode               bool                                     // When true, skip beads-specific lifecycle hooks (pools, subscribers); fleet server manages agents
 	FleetClientURL          string                                   // Fleet server URL for fleet-mode workers (e.g., "http://fleet.example.com"); empty = no fleet client
 	FleetClientWorkspace    string                                   // Fleet server workspace ID (e.g., "default"); empty = use "default"

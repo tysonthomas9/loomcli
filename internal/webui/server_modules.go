@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agentcontrol"
 	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/issues"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
@@ -69,5 +70,9 @@ func (app *Server) buildModules() {
 	if app.fileSvc != nil {
 		app.wsModules = append(app.wsModules,
 			misc.NewModule(app.fileSvc))
+	}
+	if app.config.AgentControlFn != nil {
+		app.wsModules = append(app.wsModules,
+			agentcontrol.NewModule(app.config.AgentControlFn))
 	}
 }

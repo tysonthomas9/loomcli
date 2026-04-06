@@ -1,14 +1,18 @@
 package serve
 
 import (
+	"bufio"
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
 	"log/slog"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
@@ -25,6 +29,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/usage"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agentcontrol"
 )
 
 var (
@@ -355,6 +360,7 @@ func runServe(cmd *cobra.Command, args []string) {
 			SocketPath:              serveWebUISocket,
 			SkipFrontend:            serveNoWebUI,
 			MonitorHandlers:         monitorHandlers,
+			AgentControlFn:          buildAgentControlFn(),
 			TerminalCmd:             terminalCmd,
 			FleetEnabled:            serveRedisAddr != "",
 			FleetRedis:              fleetRedisConfig,
@@ -453,6 +459,92 @@ func runServe(cmd *cobra.Command, args []string) {
 	case <-time.After(10 * time.Second):
 		log.Printf("Warning: server did not shut down within timeout")
 	}
+}
+
+// buildAgentControlFn returns a callback that sends control commands to the
+// daemon control socket. Returns nil if the socket path cannot be resolved
+// (e.g., no daemon config). The socket path is resolved on each call to handle
+// daemon restarts that may change the PID file location.
+func buildAgentControlFn() agentcontrol.AgentControlFn {
+	projectDir, err := os.Getwd()
+	if err != nil {
+		return nil
+	}
+
+	// Per-operation socket read deadlines.
+	opDeadline := map[string]time.Duration{
+		"agent_yield":   5 * time.Second,
+		"agent_list":    5 * time.Second,
+		"agent_start":   10 * time.Second,
+		"agent_stop":    35 * time.Second, // daemon write deadline is 20s; 15s buffer
+		"agent_restart": 80 * time.Second, // yieldTimeout(default 60s) + 20s buffer
+	}
+
+	return func(op, agentName string, force bool) (*agentcontrol.AgentControlResult, error) {
+		socketPath := resolveControlSocketPath(projectDir)
+		deadline := opDeadline[op]
+		if deadline == 0 {
+			deadline = 30 * time.Second
+		}
+		return sendControlRequest(socketPath, op, agentName, force, deadline)
+	}
+}
+
+// resolveControlSocketPath returns the daemon control socket path for the
+// given project directory. Re-resolves on each call because the daemon may
+// restart with a different config.
+func resolveControlSocketPath(projectDir string) string {
+	dc, err := config.LoadDaemonConfig(projectDir)
+	if err != nil {
+		dc = &config.DaemonConfig{
+			Daemon: config.DaemonSettings{PIDFile: ".loom/daemon.pid"},
+		}
+	}
+	pidFilePath := dc.Daemon.PIDFile
+	if !filepath.IsAbs(pidFilePath) {
+		pidFilePath = filepath.Join(projectDir, pidFilePath)
+	}
+	return filepath.Join(filepath.Dir(pidFilePath), "daemon.sock")
+}
+
+// sendControlRequest dials the daemon control socket, sends a JSON request,
+// and reads the JSON response. The readDeadline sets the per-operation timeout.
+func sendControlRequest(socketPath, op, agentName string, force bool, readDeadline time.Duration) (*agentcontrol.AgentControlResult, error) {
+	conn, err := net.DialTimeout("unix", socketPath, 5*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("daemon is not running (no control socket at %s)", socketPath)
+	}
+	defer func() { _ = conn.Close() }()
+
+	reqData, err := json.Marshal(struct {
+		Operation string `json:"operation"`
+		AgentName string `json:"agent_name,omitempty"`
+		Force     bool   `json:"force,omitempty"`
+	}{Operation: op, AgentName: agentName, Force: force})
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+	reqData = append(reqData, '\n')
+
+	_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	if _, err := conn.Write(reqData); err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+
+	_ = conn.SetReadDeadline(time.Now().Add(readDeadline))
+	scanner := bufio.NewScanner(conn)
+	if !scanner.Scan() {
+		if scanErr := scanner.Err(); scanErr != nil {
+			return nil, fmt.Errorf("read response: %w", scanErr)
+		}
+		return nil, fmt.Errorf("empty response from daemon")
+	}
+
+	var result agentcontrol.AgentControlResult
+	if err := json.Unmarshal(scanner.Bytes(), &result); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w", err)
+	}
+	return &result, nil
 }
 
 // backendProvider maps backend names to their provider labels.
