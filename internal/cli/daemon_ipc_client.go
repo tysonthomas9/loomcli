@@ -30,13 +30,13 @@ func NewAgentIPCClient(socketPath, agentName string) *AgentIPCClient {
 // already claimed, KindNotFound if issue missing.
 func (c *AgentIPCClient) Claim(issueID string, lockTTL time.Duration) error {
 	req := AgentIPCRequest{
-		Operation: ipcOpClaim,
+		Operation: IPCOpClaim,
 		AgentName: c.AgentName,
 		IssueID:   issueID,
 	}
 
 	if lockTTL > 0 {
-		args, err := json.Marshal(ipcClaimArgs{LockTTLSeconds: int(lockTTL.Seconds())})
+		args, err := json.Marshal(IPCClaimArgs{LockTTLSeconds: int(lockTTL.Seconds())})
 		if err != nil {
 			return backend.ErrInternal("ipc.claim", "marshal args", err)
 		}
@@ -58,7 +58,7 @@ func (c *AgentIPCClient) Update(issueID string, params backend.UpdateParams) err
 	}
 
 	req := AgentIPCRequest{
-		Operation: ipcOpUpdate,
+		Operation: IPCOpUpdate,
 		AgentName: c.AgentName,
 		IssueID:   issueID,
 		Args:      args,
@@ -79,7 +79,7 @@ func (c *AgentIPCClient) Complete(issueID string, params backend.CloseParams) (*
 	}
 
 	req := AgentIPCRequest{
-		Operation: ipcOpComplete,
+		Operation: IPCOpComplete,
 		AgentName: c.AgentName,
 		IssueID:   issueID,
 		Args:      args,

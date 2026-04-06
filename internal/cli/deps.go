@@ -126,7 +126,7 @@ func (defaultExecContextRunner) Run(ctx context.Context, dir, name string, args 
 func DefaultDeps() *Deps {
 	var issueBackend backend.IssueBackend
 
-	if resolveIssueBackendType() == IssueBackendFleet {
+	if ResolveIssueBackendType() == IssueBackendFleet {
 		fb, err := createFleetIssueBackend()
 		if err != nil {
 			slog.Warn("fleet backend creation failed, falling back to beads", "err", err)

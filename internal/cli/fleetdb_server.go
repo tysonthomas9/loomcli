@@ -17,6 +17,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	beadsbackend "github.com/tysonthomas9/loomcli/internal/backend/beads"
+	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 )
@@ -24,14 +25,8 @@ import (
 // maxUnixSocketPath is the maximum length for a Unix socket path on Linux.
 const maxUnixSocketPath = 108
 
-// FleetDBServerConfig holds configuration for FleetDBServer.
-type FleetDBServerConfig struct {
-	RedisURL   string // Redis connection URL. Empty = use miniredis if AutoStart.
-	Workspace  string // Workspace/project identifier.
-	AutoStart  bool   // If true and RedisURL empty, auto-start miniredis.
-	DBPath     string // SQLite database path. Empty = in-memory storage.
-	SocketPath string // Unix socket path for RPC server.
-}
+// FleetDBServerConfig is an alias for config.FleetDBServerConfig.
+type FleetDBServerConfig = config.FleetDBServerConfig
 
 // FleetDBServer manages the lifecycle of an embedded beads issue-tracking
 // server with optional Redis-backed fleet coordination.

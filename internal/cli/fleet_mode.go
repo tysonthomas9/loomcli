@@ -3,6 +3,8 @@ package cli
 import (
 	"fmt"
 	"os"
+
+	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
 // BackendFleet is the issue backend identifier for fleet mode (external fleet
@@ -23,7 +25,7 @@ const fleetModeEnvVar = "LOOM_ISSUE_BACKEND"
 //  2. cfg.Backend == "fleet" (config field — added by sibling task .3; currently unused)
 //
 // Returns false for nil config and empty Backend (safe default = beads mode).
-func isFleetMode(cfg *DaemonConfig) bool {
+func IsFleetMode(cfg *config.DaemonConfig) bool {
 	if os.Getenv(fleetModeEnvVar) == BackendFleet {
 		return true
 	}
@@ -35,9 +37,9 @@ func isFleetMode(cfg *DaemonConfig) bool {
 
 // printDaemonBanner prints the startup banner for the daemon, varying the
 // output for fleet mode (no agent list) vs normal mode (shows agents).
-func printDaemonBanner(config *DaemonConfig, projectDir string) {
+func PrintDaemonBanner(config *config.DaemonConfig, projectDir string) {
 	fmt.Println("═══════════════════════════════════════════════════════════════")
-	if isFleetMode(config) {
+	if IsFleetMode(config) {
 		fmt.Println("Loom Agent Supervisor — Fleet Mode")
 		fmt.Printf("PID: %d\n", os.Getpid())
 		fmt.Printf("Config: %s/loom.yaml\n", projectDir)
@@ -56,15 +58,15 @@ func printDaemonBanner(config *DaemonConfig, projectDir string) {
 }
 
 // isFleetModeFromEnv checks fleet mode without a loaded config. Used in
-// contexts where DaemonConfig is not available (e.g., loom init, hooks install).
+// contexts where config.DaemonConfig is not available (e.g., loom init, hooks install).
 //
 // Checks LOOM_ISSUE_BACKEND env var first, then falls back to loading project config.
-func isFleetModeFromEnv() bool {
+func IsFleetModeFromEnv() bool {
 	if os.Getenv(fleetModeEnvVar) == BackendFleet {
 		return true
 	}
 	// Fall back to project config
-	pf, err := LoadProjectFile(".")
+	pf, err := config.LoadProjectFile(".")
 	if err == nil && pf != nil && pf.Backend == BackendFleet {
 		return true
 	}

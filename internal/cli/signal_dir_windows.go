@@ -9,12 +9,12 @@ import (
 
 // ensureSignalDir creates the signal directory on Windows.
 // Windows does not support symlink/ownership checks via syscall.Stat_t.
-func ensureSignalDir(dir string) error {
+func EnsureSignalDir(dir string) error {
 	return os.MkdirAll(dir, 0700)
 }
 
 // validateSignalDir validates the signal directory on Windows.
-func validateSignalDir(dir string) error {
+func ValidateSignalDir(dir string) error {
 	fi, err := os.Stat(dir)
 	if err != nil {
 		return err

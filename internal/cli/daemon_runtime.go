@@ -7,8 +7,17 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
+
+// resolvePath resolves a path relative to baseDir, or returns as-is if absolute.
+func resolvePath(baseDir, path string) string {
+	if filepath.IsAbs(path) {
+		return path
+	}
+	return filepath.Join(baseDir, path)
+}
 
 // DaemonRuntimeInfo describes the runtime state of a daemon as detected from
 // multiple sources (lock file, state file, PID file). All daemon lifecycle
@@ -41,21 +50,21 @@ func DetectDaemonRuntime(projectDir string) DaemonRuntimeInfo {
 	}
 
 	// --- 2. State file ---
-	stateFilePath := ResolveDaemonStatePath(projectDir)
+	stateFilePath := config.ResolveDaemonStatePath(projectDir)
 	if info, ok := detectFromStateFile(stateFilePath); ok {
 		return info
 	}
 
 	// --- 3. PID file (backward-compatible fallback) ---
-	config, err := LoadDaemonConfig(projectDir)
+	dcfg, err := config.LoadDaemonConfig(projectDir)
 	if err != nil {
-		config = &DaemonConfig{
-			Daemon: DaemonSettings{
+		dcfg = &config.DaemonConfig{
+			Daemon: config.DaemonSettings{
 				PIDFile: ".loom/daemon.pid",
 			},
 		}
 	}
-	pidFilePath := resolveDaemonPath(projectDir, config.Daemon.PIDFile)
+	pidFilePath := resolvePath(projectDir, dcfg.Daemon.PIDFile)
 	if info, ok := detectFromPIDFile(pidFilePath); ok {
 		return info
 	}
@@ -110,10 +119,20 @@ func detectFromLockFile(lockPath string) (DaemonRuntimeInfo, bool) {
 	return DaemonRuntimeInfo{Running: true, Source: "lock"}, true
 }
 
+// daemonStateMinimal is a minimal struct for reading the daemon state file
+// without importing the daemon package (avoids import cycle).
+type daemonStateMinimal struct {
+	PID int `json:"pid"`
+}
+
 // detectFromStateFile checks the daemon state file for a live PID.
 func detectFromStateFile(stateFilePath string) (DaemonRuntimeInfo, bool) {
-	state, err := readStateFile(stateFilePath)
-	if err != nil || state == nil {
+	data, err := os.ReadFile(stateFilePath) //nolint:gosec // controlled path
+	if err != nil {
+		return DaemonRuntimeInfo{}, false
+	}
+	var state daemonStateMinimal
+	if err := json.Unmarshal(data, &state); err != nil {
 		return DaemonRuntimeInfo{}, false
 	}
 	if state.PID > 0 && lockfile.IsProcessRunning(state.PID) {
@@ -138,10 +157,10 @@ func detectFromPIDFile(pidFilePath string) (DaemonRuntimeInfo, bool) {
 	return DaemonRuntimeInfo{}, false
 }
 
-// protectedRuntimePaths is the set of top-level directory/file names that must
+// ProtectedRuntimePaths is the set of top-level directory/file names that must
 // never be deleted by cleanup routines (git clean, stash-discard, recovery).
 // These paths contain live daemon state, persistent storage, or required config.
-var protectedRuntimePaths = []string{
+var ProtectedRuntimePaths = []string{
 	".beads",
 	".loom",
 	"sessions",
@@ -158,7 +177,7 @@ func IsProtectedRuntimePath(relPath string) bool {
 	// Strip leading "./" if present
 	clean = strings.TrimPrefix(clean, "./")
 
-	for _, p := range protectedRuntimePaths {
+	for _, p := range ProtectedRuntimePaths {
 		if clean == p || strings.HasPrefix(clean, p+"/") {
 			return true
 		}

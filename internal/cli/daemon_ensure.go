@@ -6,8 +6,8 @@ import (
 	"time"
 )
 
-// daemonStatus represents the JSON output of "bd daemon status --json"
-type daemonStatus struct {
+// DaemonStatus represents the JSON output of "bd daemon status --json"
+type DaemonStatus struct {
 	Status string `json:"status"`
 	PID    int    `json:"pid"`
 }
@@ -16,10 +16,10 @@ type daemonStatus struct {
 // For fleet-db, the server lifecycle is managed by daemon_cmd.go,
 // so this is a no-op. For beads, it delegates to EnsureBdDaemonRunning.
 func EnsureIssueBackendRunning(deps *Deps, timeout time.Duration) (bool, error) {
-	if isFleetActive() {
+	if IsFleetActive() {
 		return false, nil
 	}
-	if isFleetDBActive() {
+	if IsFleetDBActive() {
 		return false, nil
 	}
 	return EnsureBdDaemonRunning(deps, timeout)
@@ -61,7 +61,7 @@ func isDaemonRunning(deps *Deps) bool {
 		return false
 	}
 
-	var status daemonStatus
+	var status DaemonStatus
 	if err := json.Unmarshal([]byte(result.Stdout), &status); err != nil {
 		return false
 	}

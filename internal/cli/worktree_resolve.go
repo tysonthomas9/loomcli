@@ -6,21 +6,23 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+
+	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
 // Resolver abstracts worktree/repo discovery behind legacy and workspace modes.
 type Resolver struct {
-	mode      ResolverMode
-	config    *LoomConfig
-	workspace string // active workspace name (workspace mode only)
+	Mode      ResolverMode
+	Config    *config.LoomConfig
+	Workspace string // active workspace name (workspace mode only)
 }
 
 // NewResolver creates a Resolver, selecting workspace mode if a config with
 // workspaces exists, otherwise falling back to legacy mode.
 func NewResolver() (*Resolver, error) {
-	cfg, err := LoadConfig()
+	cfg, err := config.LoadConfig()
 	if err != nil {
-		return &Resolver{mode: ModeLegacy}, nil
+		return &Resolver{Mode: ModeLegacy}, nil
 	}
 	if cfg != nil && len(cfg.Workspaces) > 0 {
 		ws := cfg.DefaultWorkspace
@@ -34,40 +36,41 @@ func NewResolver() (*Resolver, error) {
 			ws = names[0]
 		}
 		return &Resolver{
-			mode:      ModeWorkspace,
-			config:    cfg,
-			workspace: ws,
+			Mode:      ModeWorkspace,
+			Config:    cfg,
+			Workspace: ws,
 		}, nil
 	}
-	return &Resolver{mode: ModeLegacy}, nil
+	return &Resolver{Mode: ModeLegacy}, nil
 }
 
 // Mode returns the resolver's current mode.
-func (r *Resolver) Mode() ResolverMode {
-	return r.mode
+// GetMode returns the resolver mode.
+func (r *Resolver) GetMode() ResolverMode {
+	return r.Mode
 }
 
 // WorkspaceName returns the active workspace name (empty in legacy mode).
 func (r *Resolver) WorkspaceName() string {
-	return r.workspace
+	return r.Workspace
 }
 
 // SetWorkspace switches the active workspace. Returns an error if the
 // workspace name is not found in the config.
 func (r *Resolver) SetWorkspace(name string) error {
-	if r.config == nil {
+	if r.Config == nil {
 		return fmt.Errorf("no config loaded; cannot set workspace")
 	}
-	if _, ok := r.config.Workspaces[name]; !ok {
+	if _, ok := r.Config.Workspaces[name]; !ok {
 		return fmt.Errorf("workspace %q not found in config", name)
 	}
-	r.workspace = name
+	r.Workspace = name
 	return nil
 }
 
 // DiscoverWorktrees returns discovered worktrees using the resolver's mode.
 func (r *Resolver) DiscoverWorktrees() ([]WorktreeInfo, error) {
-	if r.mode == ModeWorkspace {
+	if r.Mode == ModeWorkspace {
 		return r.discoverWorkspace()
 	}
 	return r.discoverLegacy()
@@ -120,9 +123,9 @@ func (r *Resolver) discoverLegacy() ([]WorktreeInfo, error) {
 
 // discoverWorkspace reads repos from the active workspace config.
 func (r *Resolver) discoverWorkspace() ([]WorktreeInfo, error) {
-	ws, ok := r.config.Workspaces[r.workspace]
+	ws, ok := r.Config.Workspaces[r.Workspace]
 	if !ok {
-		return nil, fmt.Errorf("workspace %q not found in config", r.workspace)
+		return nil, fmt.Errorf("workspace %q not found in config", r.Workspace)
 	}
 
 	var worktrees []WorktreeInfo
@@ -148,7 +151,7 @@ func (r *Resolver) discoverWorkspace() ([]WorktreeInfo, error) {
 			Name:      repo.Name,
 			Path:      repoPath,
 			Branch:    branch,
-			Workspace: r.workspace,
+			Workspace: r.Workspace,
 			Repo:      repo,
 		})
 	}
@@ -159,8 +162,8 @@ func (r *Resolver) discoverWorkspace() ([]WorktreeInfo, error) {
 // ResolveWorktreePath converts a worktree name to its full path using the
 // resolver's mode.
 func (r *Resolver) ResolveWorktreePath(name string) (string, error) {
-	if r.mode == ModeWorkspace {
-		return r.resolveWorkspacePath(name)
+	if r.Mode == ModeWorkspace {
+		return r.ResolveWorkspacePath(name)
 	}
 	return resolveLegacyPath(name)
 }
@@ -168,10 +171,10 @@ func (r *Resolver) ResolveWorktreePath(name string) (string, error) {
 // ResolveWorkspaceByName checks if name matches a workspace name and returns
 // the workspace root path. Returns (path, true) if found, ("", false) if not.
 func (r *Resolver) ResolveWorkspaceByName(name string) (string, bool) {
-	if r.mode != ModeWorkspace || r.config == nil || name == "" {
+	if r.Mode != ModeWorkspace || r.Config == nil || name == "" {
 		return "", false
 	}
-	if ws, ok := r.config.Workspaces[name]; ok && ws.Path != "" {
+	if ws, ok := r.Config.Workspaces[name]; ok && ws.Path != "" {
 		return ws.Path, true
 	}
 	return "", false
@@ -180,11 +183,11 @@ func (r *Resolver) ResolveWorkspaceByName(name string) (string, bool) {
 // WorkspaceNames returns the names of all configured workspaces.
 // Returns nil in legacy mode.
 func (r *Resolver) WorkspaceNames() []string {
-	if r.mode != ModeWorkspace || r.config == nil {
+	if r.Mode != ModeWorkspace || r.Config == nil {
 		return nil
 	}
-	names := make([]string, 0, len(r.config.Workspaces))
-	for name := range r.config.Workspaces {
+	names := make([]string, 0, len(r.Config.Workspaces))
+	for name := range r.Config.Workspaces {
 		names = append(names, name)
 	}
 	sort.Strings(names)
@@ -192,7 +195,7 @@ func (r *Resolver) WorkspaceNames() []string {
 }
 
 // resolveWorkspacePath looks up a repo by name in the active workspace config.
-func (r *Resolver) resolveWorkspacePath(name string) (string, error) {
+func (r *Resolver) ResolveWorkspacePath(name string) (string, error) {
 	if name == "" {
 		return os.Getwd()
 	}
@@ -203,9 +206,9 @@ func (r *Resolver) resolveWorkspacePath(name string) (string, error) {
 		return name, nil
 	}
 
-	ws, ok := r.config.Workspaces[r.workspace]
+	ws, ok := r.Config.Workspaces[r.Workspace]
 	if !ok {
-		return "", fmt.Errorf("workspace %q not found in config", r.workspace)
+		return "", fmt.Errorf("workspace %q not found in config", r.Workspace)
 	}
 
 	for _, repo := range ws.Repos {
@@ -228,18 +231,18 @@ func (r *Resolver) resolveWorkspacePath(name string) (string, error) {
 		gitFile := filepath.Join(candidate, ".git")
 		if _, err := os.Stat(gitFile); err == nil {
 			return "", fmt.Errorf("worktree '%s' exists on disk but is not registered in workspace %q.\n  Add it with: loom config add-repo %s --workspace %s --path %s",
-				name, r.workspace, name, r.workspace, candidate)
+				name, r.Workspace, name, r.Workspace, candidate)
 		}
 	}
 
-	return "", fmt.Errorf("repo '%s' not found in workspace %q", name, r.workspace)
+	return "", fmt.Errorf("repo '%s' not found in workspace %q", name, r.Workspace)
 }
 
 // GetWorktreesDir returns the worktrees directory path using the resolver's mode.
 // In workspace mode, returns the active workspace's path.
 func (r *Resolver) GetWorktreesDir() string {
-	if r.mode == ModeWorkspace {
-		if ws, ok := r.config.Workspaces[r.workspace]; ok {
+	if r.Mode == ModeWorkspace {
+		if ws, ok := r.Config.Workspaces[r.Workspace]; ok {
 			return ws.Path
 		}
 	}
@@ -252,8 +255,8 @@ func (r *Resolver) GetDefaultBranch() string {
 	if branch := os.Getenv("LOOM_DEFAULT_BRANCH"); branch != "" {
 		return branch
 	}
-	if r.mode == ModeWorkspace {
-		ws, ok := r.config.Workspaces[r.workspace]
+	if r.Mode == ModeWorkspace {
+		ws, ok := r.Config.Workspaces[r.Workspace]
 		if ok {
 			for _, repo := range ws.Repos {
 				if repo.DefaultBranch != "" {
@@ -271,20 +274,20 @@ func (r *Resolver) GetDefaultBranch() string {
 // Only works in workspace mode with a persisted config.
 // Reloads config inside the lock to avoid stale-read races.
 func (r *Resolver) SetRepoDefaultBranch(repoName, branch string) error {
-	if r.mode != ModeWorkspace || r.config == nil {
+	if r.Mode != ModeWorkspace || r.Config == nil {
 		return fmt.Errorf("target branch update only supported in workspace mode")
 	}
-	return WithConfigLock(func() error {
-		cfg, err := loadConfigUnlocked()
+	return config.WithConfigLock(func() error {
+		cfg, err := config.LoadConfigUnlocked()
 		if err != nil {
 			return err
 		}
 		if cfg == nil {
 			return fmt.Errorf("no config found")
 		}
-		ws, ok := cfg.Workspaces[r.workspace]
+		ws, ok := cfg.Workspaces[r.Workspace]
 		if !ok {
-			return fmt.Errorf("workspace %q not found", r.workspace)
+			return fmt.Errorf("workspace %q not found", r.Workspace)
 		}
 		found := false
 		for i, repo := range ws.Repos {
@@ -295,10 +298,10 @@ func (r *Resolver) SetRepoDefaultBranch(repoName, branch string) error {
 			}
 		}
 		if !found {
-			return fmt.Errorf("repo %q not found in workspace %q", repoName, r.workspace)
+			return fmt.Errorf("repo %q not found in workspace %q", repoName, r.Workspace)
 		}
-		cfg.Workspaces[r.workspace] = ws
-		return saveConfigUnlocked(cfg)
+		cfg.Workspaces[r.Workspace] = ws
+		return config.SaveConfigUnlocked(cfg)
 	})
 }
 
@@ -308,7 +311,7 @@ func (r *Resolver) SetRepoDefaultBranch(repoName, branch string) error {
 // The result is cached for the lifetime of the process.
 func GetBeadsDir() string {
 	beadsDirOnce.Do(func() {
-		cfg, err := LoadConfig()
+		cfg, err := config.LoadConfig()
 		if err != nil || cfg == nil || len(cfg.Workspaces) == 0 {
 			beadsDirCache = "."
 			return
@@ -347,11 +350,11 @@ var (
 // Package-level default resolver (lazily initialized)
 var defaultResolver *Resolver
 
-func getDefaultResolver() *Resolver {
+func GetDefaultResolver() *Resolver {
 	if defaultResolver == nil {
 		r, err := NewResolver()
 		if err != nil {
-			r = &Resolver{mode: ModeLegacy}
+			r = &Resolver{Mode: ModeLegacy}
 		}
 		defaultResolver = r
 	}

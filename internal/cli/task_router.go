@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -9,10 +10,11 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
-// RoleConstraints holds the resolved routing constraints from a RoleConfig
-// merged with any per-agent AgentEntry overrides.
+// RoleConstraints holds the resolved routing constraints from a config.RoleConfig
+// merged with any per-agent config.AgentEntry overrides.
 type RoleConstraints struct {
 	TaskFilter   string   // "needs_plan", "has_design", "any", or "" (defaults to "has_design")
 	Backend      string   // resolved backend name
@@ -32,11 +34,11 @@ type TaskMatch struct {
 	Reason string // human-readable explanation of the score
 }
 
-// MergeRoleConstraints resolves a RoleConstraints from a RoleConfig and optional
-// AgentEntry overrides. AgentEntry.PathPatterns replaces (not appends to)
-// RoleConfig.PathPatterns when non-nil. AgentEntry.Backend overrides RoleConfig.Backend
+// MergeRoleConstraints resolves a RoleConstraints from a config.RoleConfig and optional
+// config.AgentEntry overrides. config.AgentEntry.PathPatterns replaces (not appends to)
+// config.RoleConfig.PathPatterns when non-nil. config.AgentEntry.Backend overrides config.RoleConfig.Backend
 // when non-empty.
-func MergeRoleConstraints(rc RoleConfig, ae AgentEntry) RoleConstraints {
+func MergeRoleConstraints(rc config.RoleConfig, ae config.AgentEntry) RoleConstraints {
 	c := RoleConstraints{
 		TaskFilter:   rc.TaskFilter,
 		Backend:      rc.Backend,
@@ -48,7 +50,7 @@ func MergeRoleConstraints(rc RoleConfig, ae AgentEntry) RoleConstraints {
 		DeniedTools:  rc.DeniedTools,
 	}
 
-	// AgentEntry overrides
+	// config.AgentEntry overrides
 	if ae.PathPatterns != nil {
 		c.PathPatterns = ae.PathPatterns
 	}
@@ -166,7 +168,7 @@ func SelectBestTask(issues []backend.IssueData, constraints RoleConstraints) *Ta
 }
 
 // checkTaskAvailability uses routerCheck if non-nil, otherwise falls back to defaultCheck.
-func checkTaskAvailability(routerCheck, defaultCheck func() (bool, error)) (bool, error) {
+func CheckTaskAvailability(routerCheck, defaultCheck func() (bool, error)) (bool, error) {
 	if routerCheck != nil {
 		return routerCheck()
 	}
@@ -179,10 +181,10 @@ func RouterTaskCheckFromEnv(parentID string) func() (bool, error) {
 	return BuildRouterTaskCheck(RoleConfigFromEnv(), AgentEntryFromEnv(), parentID)
 }
 
-// RoleConfigFromEnv reconstructs a partial RoleConfig from LOOM_ROLE_* environment
+// RoleConfigFromEnv reconstructs a partial config.RoleConfig from LOOM_ROLE_* environment
 // variables set by the daemon's buildCommand.
-func RoleConfigFromEnv() RoleConfig {
-	var rc RoleConfig
+func RoleConfigFromEnv() config.RoleConfig {
+	var rc config.RoleConfig
 	if v := os.Getenv("LOOM_ROLE_SKILLS"); v != "" {
 		rc.Skills = strings.Split(v, ",")
 	}
@@ -202,10 +204,10 @@ func RoleConfigFromEnv() RoleConfig {
 	return rc
 }
 
-// AgentEntryFromEnv reconstructs a partial AgentEntry from LOOM_AGENT_*
+// AgentEntryFromEnv reconstructs a partial config.AgentEntry from LOOM_AGENT_*
 // and LOOM_ROLE environment variables set by the daemon's buildCommand.
-func AgentEntryFromEnv() AgentEntry {
-	var ae AgentEntry
+func AgentEntryFromEnv() config.AgentEntry {
+	var ae config.AgentEntry
 	if v := os.Getenv("LOOM_AGENT_PATH_PATTERNS"); v != "" {
 		ae.PathPatterns = strings.Split(v, ",")
 	}
@@ -275,4 +277,39 @@ func countSkillMatches(labels []string, skills []string) int {
 		}
 	}
 	return count
+}
+
+// FetchReadyIssues fetches issues ready for work.
+func FetchReadyIssues(parentID string, repoLabel string) ([]backend.IssueData, error) {
+	ib := DefaultIssueBackend()
+	opts := backend.ReadyOpts{Limit: 100, ParentID: parentID}
+	if repoLabel != "" {
+		opts.Labels = []string{"repo:" + repoLabel}
+	}
+	if sourceRepos := os.Getenv("LOOM_SOURCE_REPOS"); sourceRepos != "" {
+		opts.SourceRepos = strings.Split(sourceRepos, ",")
+	}
+	issues, err := ib.Ready(context.Background(), opts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check ready tasks: %w", err)
+	}
+	return issues, nil
+}
+
+// BuildRouterTaskCheck creates a CustomTaskCheck function that uses the task router's
+// SelectBestTask to check for available tasks. Returns nil if no filtering is needed.
+func BuildRouterTaskCheck(rc config.RoleConfig, ae config.AgentEntry, parentID string) func() (bool, error) {
+	constraints := MergeRoleConstraints(rc, ae)
+	repoLabel := ae.Repo
+	if len(constraints.Skills) == 0 && constraints.MaxPriority == nil && constraints.TaskFilter == "" && repoLabel == "" && len(constraints.SourceRepos) == 0 {
+		return nil
+	}
+	return func() (bool, error) {
+		issues, err := FetchReadyIssues(parentID, repoLabel)
+		if err != nil {
+			return false, err
+		}
+		match := SelectBestTask(issues, constraints)
+		return match != nil, nil
+	}
 }

@@ -124,5 +124,6 @@ func init() {
 
 // Execute runs the root command
 func Execute() error {
+	registerPendingCommands()
 	return rootCmd.Execute()
 }

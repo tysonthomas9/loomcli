@@ -43,7 +43,7 @@ func GetDefaultBranchForWorktrees(worktrees []WorktreeInfo) string {
 	// which is meaningless across repos. Use per-repo config instead.
 	for _, wt := range worktrees {
 		if wt.Repo != nil {
-			// Workspace mode: return first non-empty DefaultBranch, or "main"
+			// Workspace Mode: return first non-empty DefaultBranch, or "main"
 			for _, w := range worktrees {
 				if w.Repo != nil && w.Repo.DefaultBranch != "" {
 					return w.Repo.DefaultBranch
@@ -95,7 +95,7 @@ func detectIntegrationBranchDeps(deps *Deps, worktrees []WorktreeInfo) string {
 	repoPath := worktrees[0].Path //nolint:gosec // safe: len(worktrees) == 0 is checked above
 
 	// Get all remote branches as candidates
-	output, err := runGit(deps, repoPath, "branch", "-r", "--format=%(refname:short)")
+	output, err := RunGit(deps, repoPath, "branch", "-r", "--format=%(refname:short)")
 	if err != nil {
 		return ""
 	}
@@ -129,14 +129,14 @@ func detectIntegrationBranchDeps(deps *Deps, worktrees []WorktreeInfo) string {
 
 		for _, wt := range worktrees {
 			// Check if candidate is ancestor of worktree branch
-			_, err := runGit(deps, repoPath, "merge-base", "--is-ancestor", candidate, "origin/"+wt.Branch)
+			_, err := RunGit(deps, repoPath, "merge-base", "--is-ancestor", candidate, "origin/"+wt.Branch)
 			if err != nil {
 				isAncestorOfAll = false
 				break
 			}
 
 			// Get distance (commits between candidate and worktree branch)
-			distOutput, err := runGit(deps, repoPath, "rev-list", "--count", candidate+"..origin/"+wt.Branch)
+			distOutput, err := RunGit(deps, repoPath, "rev-list", "--count", candidate+"..origin/"+wt.Branch)
 			if err != nil {
 				isAncestorOfAll = false
 				break
@@ -165,8 +165,8 @@ func detectIntegrationBranchDeps(deps *Deps, worktrees []WorktreeInfo) string {
 	// Only use detected branch if it's actually closer than main/master
 	// Try origin/main first, fall back to origin/master
 	mainRef := "origin/main"
-	if _, err := runGit(deps, repoPath, "rev-parse", "--verify", "origin/main"); err != nil {
-		if _, err := runGit(deps, repoPath, "rev-parse", "--verify", "origin/master"); err != nil {
+	if _, err := RunGit(deps, repoPath, "rev-parse", "--verify", "origin/main"); err != nil {
+		if _, err := RunGit(deps, repoPath, "rev-parse", "--verify", "origin/master"); err != nil {
 			// Neither main nor master exists as remote branch; can't compare
 			return ""
 		}
@@ -174,7 +174,7 @@ func detectIntegrationBranchDeps(deps *Deps, worktrees []WorktreeInfo) string {
 	}
 	mainMaxDist := 0
 	for _, wt := range worktrees {
-		distOutput, err := runGit(deps, repoPath, "rev-list", "--count", mainRef+"..origin/"+wt.Branch)
+		distOutput, err := RunGit(deps, repoPath, "rev-list", "--count", mainRef+"..origin/"+wt.Branch)
 		if err != nil {
 			return ""
 		}

@@ -4,6 +4,8 @@ import (
 	"log/slog"
 	"os"
 	"strconv"
+
+	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
 // Issue backend type constants.
@@ -28,7 +30,7 @@ var validIssueBackends = map[string]bool{
 //  5. Project config daemon.fleetdb.enabled (existing)
 //  6. Global config daemon.fleetdb.enabled (existing)
 //  7. Default: "beads"
-func resolveIssueBackendType() string {
+func ResolveIssueBackendType() string {
 	if v := resolveIssueBackendFromEnv(); v != "" {
 		return v
 	}
@@ -64,7 +66,7 @@ func resolveIssueBackendFromEnv() string {
 // Returns "" if no config determines the backend.
 func resolveIssueBackendFromConfig() string {
 	// 3. Project config daemon.issue_backend
-	pf, pfErr := LoadProjectFile(".")
+	pf, pfErr := config.LoadProjectFile(".")
 
 	if pfErr == nil && pf != nil && pf.Daemon != nil {
 		if pf.Daemon.IssueBackend != "" && validIssueBackends[pf.Daemon.IssueBackend] {
@@ -73,7 +75,7 @@ func resolveIssueBackendFromConfig() string {
 	}
 
 	// 4. Global config daemon.issue_backend
-	cfg, cfgErr := LoadConfig()
+	cfg, cfgErr := config.LoadConfig()
 
 	if cfgErr == nil && cfg != nil && cfg.Daemon != nil {
 		if cfg.Daemon.IssueBackend != "" && validIssueBackends[cfg.Daemon.IssueBackend] {
@@ -95,20 +97,20 @@ func resolveIssueBackendFromConfig() string {
 }
 
 // fleetDBEnabledInDaemon returns true if ds has FleetDB.Enabled set to true.
-func fleetDBEnabledInDaemon(ds *DaemonSettings) bool {
+func fleetDBEnabledInDaemon(ds *config.DaemonSettings) bool {
 	return ds != nil && ds.FleetDB != nil && ds.FleetDB.Enabled != nil && *ds.FleetDB.Enabled
 }
 
-// projectDaemon extracts the DaemonSettings from a ProjectFile, or nil.
-func projectDaemon(pf *ProjectFile) *DaemonSettings {
+// projectDaemon extracts the config.DaemonSettings from a config.ProjectFile, or nil.
+func projectDaemon(pf *config.ProjectFile) *config.DaemonSettings {
 	if pf == nil {
 		return nil
 	}
 	return pf.Daemon
 }
 
-// globalDaemon extracts the DaemonSettings from a LoomConfig, or nil.
-func globalDaemon(cfg *LoomConfig) *DaemonSettings {
+// globalDaemon extracts the config.DaemonSettings from a config.LoomConfig, or nil.
+func globalDaemon(cfg *config.LoomConfig) *config.DaemonSettings {
 	if cfg == nil {
 		return nil
 	}
@@ -116,11 +118,11 @@ func globalDaemon(cfg *LoomConfig) *DaemonSettings {
 }
 
 // isFleetActive returns true if the fleet backend (remote fleet server) is active.
-func isFleetActive() bool {
-	return resolveIssueBackendType() == IssueBackendFleet
+func IsFleetActive() bool {
+	return ResolveIssueBackendType() == IssueBackendFleet
 }
 
 // isFleetDBActive returns true if the fleet-db backend is active.
-func isFleetDBActive() bool {
-	return resolveIssueBackendType() == IssueBackendFleetDB
+func IsFleetDBActive() bool {
+	return ResolveIssueBackendType() == IssueBackendFleetDB
 }

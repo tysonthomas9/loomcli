@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -87,11 +88,11 @@ func ResolveBackendName() string {
 	}
 	// 3. Project-local loom.yaml — use GetBeadsDir() so workspace mode
 	// resolves to workspace root, legacy mode uses CWD
-	if pf, err := LoadProjectFile(GetBeadsDir()); err == nil && pf != nil && pf.Backend != "" {
+	if pf, err := config.LoadProjectFile(GetBeadsDir()); err == nil && pf != nil && pf.Backend != "" {
 		return pf.Backend
 	}
 	// 4. Global config file backend setting
-	cfg, err := LoadConfig()
+	cfg, err := config.LoadConfig()
 	if err == nil && cfg != nil && cfg.Backend != "" {
 		return cfg.Backend
 	}
@@ -151,10 +152,4 @@ func InvokeAgentNonInteractive(workDir, prompt, agentName string, shutdown <-cha
 		return fmt.Errorf("backend %q not registered", name)
 	}
 	return b.InvokeNonInteractive(workDir, prompt, agentName, shutdown, collector)
-}
-
-// InvokeAgentForConflicts runs the active backend to resolve merge conflicts.
-func InvokeAgentForConflicts(workDir, sourceBranch, targetBranch string, conflicts []string) error {
-	prompt := GenerateConflictResolutionPrompt(sourceBranch, targetBranch, conflicts)
-	return InvokeAgent(workDir, prompt, "")
 }

@@ -1,0 +1,273 @@
+package daemon
+
+import (
+	"fmt"
+	"log"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/agent"
+	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/events"
+)
+
+// buildCommand constructs the exec.Cmd for spawning an agent subprocess (does not start it).
+func (d *Daemon) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
+	cfg := d.configSnapshot() // snapshot config for consistent reads
+
+	ap.mu.Lock()
+	epicID := ap.assignedEpicID // snapshot before getEffectiveBackend (also acquires ap.mu)
+	ap.mu.Unlock()
+	var cmd *exec.Cmd
+
+	// Resolve backend using failover-aware resolution
+	agentBackend := d.getEffectiveBackend(ap)
+
+	if builtInRoles[ap.entry.Role] {
+		// Built-in role: loom <role> <worktree> --auto --daemon-mode
+		args := []string{ap.entry.Role, ap.worktreePath, "--auto", "--daemon-mode"}
+		if agentBackend != "" {
+			args = append(args, "--backend", agentBackend)
+		}
+		if epicID != "" {
+			args = append(args, "--parent", epicID)
+		}
+		cmd = exec.Command("loom", args...)
+	} else {
+		// Custom role: loom agent <worktree> --prompt <path> --task-filter <filter> --auto --daemon-mode
+		args := []string{"agent", ap.worktreePath, "--prompt", ap.roleConfig.PromptFile, "--auto", "--daemon-mode"}
+		if ap.roleConfig.TaskFilter != "" {
+			args = append(args, "--task-filter", ap.roleConfig.TaskFilter)
+		}
+		if agentBackend != "" {
+			args = append(args, "--backend", agentBackend)
+		}
+		if epicID != "" {
+			args = append(args, "--parent", epicID)
+		}
+		cmd = exec.Command("loom", args...)
+	}
+
+	// Set working directory to worktree
+	cmd.Dir = ap.worktreePath
+
+	// Create a new process group so we can kill the entire tree on stop
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
+	// Set environment
+	cmd.Env = append(cli.FilteredEnv(),
+		fmt.Sprintf("BD_ACTOR=%s", ap.entry.Worktree),
+		fmt.Sprintf("LOOM_WORKTREE_PATH=%s", ap.worktreePath),
+		fmt.Sprintf("LOOM_EVENTS_DIR=%s", ResolveDaemonPath(d.projectDir, cfg.Daemon.EventsDir)),
+	)
+
+	// Propagate repo context for subprocess diagnostics and prompts
+	if ap.entry.Repo != "" {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_AGENT_REPO=%s", ap.entry.Repo))
+	}
+
+	// Propagate role constraints as env vars for the subprocess
+	if len(ap.roleConfig.AllowedTools) > 0 {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_ALLOWED_TOOLS=%s", strings.Join(ap.roleConfig.AllowedTools, ",")))
+	}
+	if len(ap.roleConfig.DeniedTools) > 0 {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_DENIED_TOOLS=%s", strings.Join(ap.roleConfig.DeniedTools, ",")))
+	}
+	if ap.roleConfig.ReadOnly {
+		cmd.Env = append(cmd.Env, "LOOM_READ_ONLY=1")
+	}
+
+	// Propagate routing constraints as env vars for subprocess task routing
+	if len(ap.roleConfig.Skills) > 0 {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_ROLE_SKILLS=%s", strings.Join(ap.roleConfig.Skills, ",")))
+	}
+	if len(ap.roleConfig.PathPatterns) > 0 {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_ROLE_PATH_PATTERNS=%s", strings.Join(ap.roleConfig.PathPatterns, ",")))
+	}
+	if ap.roleConfig.MaxPriority != nil {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_ROLE_MAX_PRIORITY=%d", *ap.roleConfig.MaxPriority))
+	}
+	if ap.roleConfig.TaskFilter != "" {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_ROLE_TASK_FILTER=%s", ap.roleConfig.TaskFilter))
+	}
+	cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_ROLE=%s", ap.entry.Role))
+	if len(ap.entry.PathPatterns) > 0 {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_AGENT_PATH_PATTERNS=%s", strings.Join(ap.entry.PathPatterns, ",")))
+	}
+
+	// Propagate resolved source repos for repo affinity scoring
+	sourceRepos, err := cfgpkg.ResolveAgentRepos(ap.entry, d.repos)
+	if err != nil {
+		return nil, fmt.Errorf("resolve agent repos: %w", err)
+	}
+	if len(sourceRepos) > 0 {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_SOURCE_REPOS=%s", strings.Join(sourceRepos, ",")))
+	}
+
+	// Propagate daemon-level identifiers (workspace ID, IPC socket path)
+	cmd.Env = d.appendDaemonEnv(cmd.Env)
+
+	// Propagate yield file path for cooperative preemption
+	cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_YIELD_FILE=%s", filepath.Join(ap.worktreePath, YieldFileName)))
+
+	// Propagate session env vars for transcript-based liveness tracking
+	ap.mu.Lock()
+	sess := ap.session
+	ap.mu.Unlock()
+	if sess != nil {
+		cmd.Env = append(cmd.Env,
+			fmt.Sprintf("LOOM_SESSION_ID=%s", sess.SessionID()),
+			fmt.Sprintf("LOOM_BEADS_DIR=%s", cli.GetBeadsDir()),
+		)
+	}
+
+	return cmd, nil
+}
+
+// spawnAgent starts the subprocess for an agent.
+func (d *Daemon) spawnAgent(ap *AgentProcess) error {
+	cmd, err := d.buildCommand(ap)
+	if err != nil {
+		return fmt.Errorf("build command: %w", err)
+	}
+
+	ap.mu.Lock()
+
+	// Set up log files if log directory is configured
+	cfg := d.configSnapshot()
+	if cfg.Daemon.LogDir != "" {
+		logDir := cfg.Daemon.LogDir
+		if !filepath.IsAbs(logDir) {
+			logDir = filepath.Join(d.projectDir, logDir)
+		}
+		// Namespace log directory by workspace ID to isolate logs per workspace
+		if d.workspaceID != "" {
+			logDir = filepath.Join(logDir, d.workspaceID)
+		}
+		if err := os.MkdirAll(logDir, 0700); err != nil {
+			log.Printf("[daemon] Agent %s: failed to create log directory: %v", ap.entry.Worktree, err)
+		} else {
+			// Sanitize worktree and role names to prevent path traversal in log filename
+			safeWorktree := filepath.Base(ap.entry.Worktree)
+			safeRole := filepath.Base(ap.entry.Role)
+			if safeRole != ap.entry.Role {
+				log.Printf("[daemon] Agent %s: role name %q sanitized to %q for log path",
+					ap.entry.Worktree, ap.entry.Role, safeRole)
+			}
+			logFilePath := filepath.Join(logDir, fmt.Sprintf("%s-%s.log", safeRole, safeWorktree))
+			ap.logFilePath = logFilePath // store for watchdog stat checks
+			f, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+			if err != nil {
+				log.Printf("[daemon] Agent %s: failed to open log file: %v", ap.entry.Worktree, err)
+			} else {
+				cmd.Stdout = f
+				cmd.Stderr = f
+				ap.logFile = f // Track file handle for cleanup in waitForAgent
+			}
+		}
+	}
+
+	// Start the subprocess
+	if err := cmd.Start(); err != nil {
+		if ap.logFile != nil {
+			_ = ap.logFile.Close()
+			ap.logFile = nil
+		}
+		ap.mu.Unlock()
+		return fmt.Errorf("failed to start subprocess: %w", err)
+	}
+
+	ap.cmd = cmd
+	ap.pid = cmd.Process.Pid
+	ap.lastStart = time.Now()
+	ap.stopReason = ""            // clear any stale stop reason from previous cycle
+	ap.backoffUntil = time.Time{} // clear any stale backoff from previous cycle
+
+	// Snapshot fields before releasing lock for event emission
+	pid := ap.pid
+	worktree := ap.entry.Worktree
+	role := ap.entry.Role
+	epicID := ap.assignedEpicID
+	ap.mu.Unlock()
+
+	log.Printf("[daemon] Agent %s: spawned subprocess PID %d", worktree, pid)
+
+	// Emit agent_started event outside the lock (best-effort, matching waitForAgent pattern)
+	if evt, err := events.NewEvent(events.AgentStarted, worktree, role, epicID, events.AgentStartedData{PID: pid}); err == nil {
+		d.emitEvent(evt)
+	}
+
+	return nil
+}
+
+// waitForAgent blocks until subprocess exits, returns exit code.
+func (d *Daemon) waitForAgent(ap *AgentProcess) int {
+	ap.mu.Lock()
+	cmd := ap.cmd
+	ap.mu.Unlock()
+
+	if cmd == nil {
+		return -1
+	}
+
+	err := cmd.Wait()
+
+	ap.mu.Lock()
+	ap.lastExit = time.Now()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			ap.lastExitCode = exitErr.ExitCode()
+		} else {
+			ap.lastExitCode = -1
+		}
+	} else {
+		ap.lastExitCode = 0
+	}
+	exitCode := ap.lastExitCode
+	pid := ap.pid // capture before clearing
+	worktree := ap.entry.Worktree
+	role := ap.entry.Role
+	epicID := ap.assignedEpicID
+	ap.cmd = nil
+	ap.pid = 0
+
+	// Close log file handle to prevent leaks
+	if ap.logFile != nil {
+		if err := ap.logFile.Close(); err != nil {
+			log.Printf("[daemon] Agent %s: failed to close log file: %v", ap.entry.Worktree, err)
+		}
+		ap.logFile = nil
+	}
+	ap.mu.Unlock()
+
+	// Emit agent_stopped event outside the lock (best-effort)
+	if evt, err := events.NewEvent(events.AgentStopped, worktree, role, epicID, events.AgentStoppedData{PID: pid, ExitCode: exitCode}); err == nil {
+		d.emitEvent(evt)
+	}
+
+	return exitCode
+}
+
+// recoverAgent calls RecoverWorktree for cleanup.
+// exitCode is passed so recovery can make smarter decisions (e.g. skip task
+// reset on clean exit when the task status is already terminal).
+func (d *Daemon) recoverAgent(ap *AgentProcess, exitCode int) error {
+	return agent.RecoverWorktree(ap.worktreePath, ap.entry.Worktree, exitCode)
+}
+
+// appendDaemonEnv appends daemon-level env vars (workspace ID, IPC socket path)
+// to the given env slice. Values are only set when non-empty.
+func (d *Daemon) appendDaemonEnv(env []string) []string {
+	if d.workspaceID != "" {
+		env = append(env, fmt.Sprintf("LOOM_WORKSPACE_ID=%s", d.workspaceID))
+	}
+	if d.ipcSocketPath != "" {
+		env = append(env, fmt.Sprintf("LOOM_DAEMON_SOCKET=%s", d.ipcSocketPath))
+	}
+	return env
+}

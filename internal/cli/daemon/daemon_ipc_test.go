@@ -1,0 +1,817 @@
+package daemon
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/notify"
+)
+
+// mockIPCBackend is a minimal IssueBackend implementation for IPC server tests.
+// It records calls and returns configurable results/errors.
+type mockIPCBackend struct {
+	// Recorded calls
+	claimCalls  []mockClaimCall
+	updateCalls []mockUpdateCall
+	closeCalls  []mockCloseCall
+
+	// Configurable returns
+	claimErr    error
+	updateErr   error
+	closeErr    error
+	closeResult *backend.CloseResult
+}
+
+type mockClaimCall struct {
+	ID      string
+	LockTTL time.Duration
+}
+
+type mockUpdateCall struct {
+	ID     string
+	Params backend.UpdateParams
+}
+
+type mockCloseCall struct {
+	ID     string
+	Params backend.CloseParams
+}
+
+func (m *mockIPCBackend) ClaimIssue(_ context.Context, id string, lockTTL time.Duration) error {
+	m.claimCalls = append(m.claimCalls, mockClaimCall{ID: id, LockTTL: lockTTL})
+	return m.claimErr
+}
+
+func (m *mockIPCBackend) Update(_ context.Context, id string, params backend.UpdateParams) error {
+	m.updateCalls = append(m.updateCalls, mockUpdateCall{ID: id, Params: params})
+	return m.updateErr
+}
+
+func (m *mockIPCBackend) Close(_ context.Context, id string, params backend.CloseParams) (*backend.CloseResult, error) {
+	m.closeCalls = append(m.closeCalls, mockCloseCall{ID: id, Params: params})
+	if m.closeErr != nil {
+		return nil, m.closeErr
+	}
+	if m.closeResult != nil {
+		return m.closeResult, nil
+	}
+	return &backend.CloseResult{
+		Closed: &backend.IssueData{ID: id, Title: "test", Status: "closed"},
+	}, nil
+}
+
+// Stub methods to satisfy the IssueBackend interface (not used by IPC server).
+func (m *mockIPCBackend) Get(context.Context, string) (*backend.IssueDetailData, error) {
+	panic("not implemented")
+}
+func (m *mockIPCBackend) List(context.Context, backend.ListOpts) ([]backend.IssueData, error) {
+	panic("not implemented")
+}
+func (m *mockIPCBackend) Ready(context.Context, backend.ReadyOpts) ([]backend.IssueData, error) {
+	panic("not implemented")
+}
+func (m *mockIPCBackend) Blocked(context.Context, backend.BlockedOpts) ([]backend.IssueData, error) {
+	panic("not implemented")
+}
+func (m *mockIPCBackend) Stats(context.Context) (*backend.StatsData, error) {
+	panic("not implemented")
+}
+func (m *mockIPCBackend) Count(context.Context, backend.CountOpts) (int, error) {
+	panic("not implemented")
+}
+func (m *mockIPCBackend) Create(context.Context, backend.CreateParams) (*backend.IssueData, error) {
+	panic("not implemented")
+}
+func (m *mockIPCBackend) Reopen(context.Context, string, backend.ReopenParams) error {
+	panic("not implemented")
+}
+func (m *mockIPCBackend) Delete(context.Context, backend.DeleteParams) error {
+	panic("not implemented")
+}
+func (m *mockIPCBackend) AddDependency(context.Context, backend.DepAddParams) error {
+	panic("not implemented")
+}
+func (m *mockIPCBackend) RemoveDependency(context.Context, backend.DepRemoveParams) error {
+	panic("not implemented")
+}
+func (m *mockIPCBackend) AddLabel(context.Context, string, string) error {
+	panic("not implemented")
+}
+func (m *mockIPCBackend) RemoveLabel(context.Context, string, string) error {
+	panic("not implemented")
+}
+func (m *mockIPCBackend) ListComments(context.Context, string) ([]backend.CommentData, error) {
+	panic("not implemented")
+}
+func (m *mockIPCBackend) AddComment(context.Context, backend.CommentAddParams) (*backend.CommentData, error) {
+	panic("not implemented")
+}
+func (m *mockIPCBackend) ListEvents(context.Context, string, int) ([]backend.EventData, error) {
+	panic("not implemented")
+}
+func (m *mockIPCBackend) Batch(context.Context, []backend.BatchOp) ([]backend.BatchResult, error) {
+	panic("not implemented")
+}
+func (m *mockIPCBackend) GetMutations(context.Context, int64) ([]backend.MutationData, error) {
+	panic("not implemented")
+}
+func (m *mockIPCBackend) WaitForMutations(context.Context, int64, int64) ([]backend.MutationData, error) {
+	panic("not implemented")
+}
+func (m *mockIPCBackend) BackendName() string { return "mock" }
+
+// newTestIPCDaemon constructs a Daemon with a mock backend for IPC server tests.
+func newTestIPCDaemon(mb *mockIPCBackend) *Daemon {
+	return &Daemon{
+		config:        makeDaemonConfig(nil, nil),
+		agents:        make([]*AgentProcess, 0),
+		stoppedAgents: make(map[string]struct{}),
+		shutdown:      make(chan struct{}),
+		concurrency:   NewConcurrencyTracker(nil),
+		issueBackend:  mb,
+	}
+}
+
+// sendIPCRequest connects to the IPC socket, sends a request, reads the response.
+func sendIPCRequest(t *testing.T, socketPath string, req AgentIPCRequest) AgentIPCResponse {
+	t.Helper()
+
+	conn, err := net.DialTimeout("unix", socketPath, 5*time.Second)
+	if err != nil {
+		t.Fatalf("dial IPC socket: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	data = append(data, '\n')
+	if _, err := conn.Write(data); err != nil {
+		t.Fatalf("write request: %v", err)
+	}
+
+	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	scanner := bufio.NewScanner(conn)
+	if !scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			t.Fatalf("read response: %v", err)
+		}
+		t.Fatal("empty response from IPC server")
+	}
+
+	var resp AgentIPCResponse
+	if err := json.Unmarshal(scanner.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	return resp
+}
+
+func TestIPCServer_ClaimSuccess(t *testing.T) {
+	mb := &mockIPCBackend{}
+	d := newTestIPCDaemon(mb)
+	defer close(d.shutdown)
+
+	resp := d.handleIPCClaim(AgentIPCRequest{
+		Operation: ipcOpClaim,
+		AgentName: "falcon",
+		IssueID:   "abc-123",
+	})
+
+	if !resp.Success {
+		t.Fatalf("expected success, got error: %s", resp.Error)
+	}
+	if len(mb.claimCalls) != 1 {
+		t.Fatalf("expected 1 claim call, got %d", len(mb.claimCalls))
+	}
+	if mb.claimCalls[0].ID != "abc-123" {
+		t.Errorf("claim ID = %q, want %q", mb.claimCalls[0].ID, "abc-123")
+	}
+	if mb.claimCalls[0].LockTTL != 0 {
+		t.Errorf("claim LockTTL = %v, want 0", mb.claimCalls[0].LockTTL)
+	}
+}
+
+func TestIPCServer_ClaimWithTTL(t *testing.T) {
+	mb := &mockIPCBackend{}
+	d := newTestIPCDaemon(mb)
+	defer close(d.shutdown)
+
+	resp := d.handleIPCClaim(AgentIPCRequest{
+		Operation: ipcOpClaim,
+		AgentName: "falcon",
+		IssueID:   "abc-123",
+		Args:      json.RawMessage(`{"lock_ttl_seconds": 300}`),
+	})
+
+	if !resp.Success {
+		t.Fatalf("expected success, got error: %s", resp.Error)
+	}
+	if mb.claimCalls[0].LockTTL != 300*time.Second {
+		t.Errorf("claim LockTTL = %v, want %v", mb.claimCalls[0].LockTTL, 300*time.Second)
+	}
+}
+
+func TestIPCServer_ClaimConflict(t *testing.T) {
+	mb := &mockIPCBackend{
+		claimErr: backend.ErrConflict("ClaimIssue", "already claimed by nova"),
+	}
+	d := newTestIPCDaemon(mb)
+	defer close(d.shutdown)
+
+	resp := d.handleIPCClaim(AgentIPCRequest{
+		Operation: ipcOpClaim,
+		AgentName: "falcon",
+		IssueID:   "abc-123",
+	})
+
+	if resp.Success {
+		t.Fatal("expected failure for conflict")
+	}
+	if resp.Kind != string(backend.KindConflict) {
+		t.Errorf("Kind = %q, want %q", resp.Kind, backend.KindConflict)
+	}
+	if !strings.Contains(resp.Error, "already claimed") {
+		t.Errorf("Error = %q, want contains 'already claimed'", resp.Error)
+	}
+}
+
+func TestIPCServer_ClaimNotFound(t *testing.T) {
+	mb := &mockIPCBackend{
+		claimErr: backend.ErrNotFound("ClaimIssue", "issue not found"),
+	}
+	d := newTestIPCDaemon(mb)
+	defer close(d.shutdown)
+
+	resp := d.handleIPCClaim(AgentIPCRequest{
+		Operation: ipcOpClaim,
+		AgentName: "falcon",
+		IssueID:   "abc-123",
+	})
+
+	if resp.Success {
+		t.Fatal("expected failure for not found")
+	}
+	if resp.Kind != string(backend.KindNotFound) {
+		t.Errorf("Kind = %q, want %q", resp.Kind, backend.KindNotFound)
+	}
+}
+
+func TestIPCServer_UpdateSuccess(t *testing.T) {
+	mb := &mockIPCBackend{}
+	d := newTestIPCDaemon(mb)
+	defer close(d.shutdown)
+
+	status := "in_progress"
+	args, _ := json.Marshal(backend.UpdateParams{Status: &status})
+
+	resp := d.handleIPCUpdate(AgentIPCRequest{
+		Operation: ipcOpUpdate,
+		AgentName: "falcon",
+		IssueID:   "abc-123",
+		Args:      args,
+	})
+
+	if !resp.Success {
+		t.Fatalf("expected success, got error: %s", resp.Error)
+	}
+	if len(mb.updateCalls) != 1 {
+		t.Fatalf("expected 1 update call, got %d", len(mb.updateCalls))
+	}
+	if mb.updateCalls[0].ID != "abc-123" {
+		t.Errorf("update ID = %q, want %q", mb.updateCalls[0].ID, "abc-123")
+	}
+	if mb.updateCalls[0].Params.Status == nil || *mb.updateCalls[0].Params.Status != "in_progress" {
+		t.Errorf("update Status = %v, want %q", mb.updateCalls[0].Params.Status, "in_progress")
+	}
+}
+
+func TestIPCServer_UpdateNotFound(t *testing.T) {
+	mb := &mockIPCBackend{
+		updateErr: backend.ErrNotFound("Update", "issue not found"),
+	}
+	d := newTestIPCDaemon(mb)
+	defer close(d.shutdown)
+
+	resp := d.handleIPCUpdate(AgentIPCRequest{
+		Operation: ipcOpUpdate,
+		AgentName: "falcon",
+		IssueID:   "abc-123",
+		Args:      json.RawMessage(`{"status": "in_progress"}`),
+	})
+
+	if resp.Success {
+		t.Fatal("expected failure for not found")
+	}
+	if resp.Kind != string(backend.KindNotFound) {
+		t.Errorf("Kind = %q, want %q", resp.Kind, backend.KindNotFound)
+	}
+}
+
+func TestIPCServer_CompleteSuccess(t *testing.T) {
+	mb := &mockIPCBackend{
+		closeResult: &backend.CloseResult{
+			Closed:    &backend.IssueData{ID: "abc-123", Title: "test", Status: "closed"},
+			Unblocked: []backend.IssueData{{ID: "def-456", Title: "unblocked task", Status: "open"}},
+		},
+	}
+	d := newTestIPCDaemon(mb)
+	defer close(d.shutdown)
+
+	args, _ := json.Marshal(backend.CloseParams{Reason: "implemented", Session: "sess-123"})
+
+	resp := d.handleIPCComplete(AgentIPCRequest{
+		Operation: ipcOpComplete,
+		AgentName: "falcon",
+		IssueID:   "abc-123",
+		Args:      args,
+	})
+
+	if !resp.Success {
+		t.Fatalf("expected success, got error: %s", resp.Error)
+	}
+	if len(mb.closeCalls) != 1 {
+		t.Fatalf("expected 1 close call, got %d", len(mb.closeCalls))
+	}
+	if mb.closeCalls[0].ID != "abc-123" {
+		t.Errorf("close ID = %q, want %q", mb.closeCalls[0].ID, "abc-123")
+	}
+	if mb.closeCalls[0].Params.Reason != "implemented" {
+		t.Errorf("close Reason = %q, want %q", mb.closeCalls[0].Params.Reason, "implemented")
+	}
+
+	// Verify Data contains CloseResult with unblocked
+	var result backend.CloseResult
+	if err := json.Unmarshal(resp.Data, &result); err != nil {
+		t.Fatalf("unmarshal CloseResult: %v", err)
+	}
+	if result.Closed.ID != "abc-123" {
+		t.Errorf("result.Closed.ID = %q, want %q", result.Closed.ID, "abc-123")
+	}
+	if len(result.Unblocked) != 1 {
+		t.Fatalf("len(result.Unblocked) = %d, want 1", len(result.Unblocked))
+	}
+	if result.Unblocked[0].ID != "def-456" {
+		t.Errorf("result.Unblocked[0].ID = %q, want %q", result.Unblocked[0].ID, "def-456")
+	}
+}
+
+func TestIPCServer_CompleteNotFound(t *testing.T) {
+	mb := &mockIPCBackend{
+		closeErr: backend.ErrNotFound("Close", "issue not found"),
+	}
+	d := newTestIPCDaemon(mb)
+	defer close(d.shutdown)
+
+	resp := d.handleIPCComplete(AgentIPCRequest{
+		Operation: ipcOpComplete,
+		AgentName: "falcon",
+		IssueID:   "abc-123",
+	})
+
+	if resp.Success {
+		t.Fatal("expected failure for not found")
+	}
+	if resp.Kind != string(backend.KindNotFound) {
+		t.Errorf("Kind = %q, want %q", resp.Kind, backend.KindNotFound)
+	}
+}
+
+func TestIPCServer_UnknownOperation(t *testing.T) {
+	mb := &mockIPCBackend{}
+	d := newTestIPCDaemon(mb)
+	defer close(d.shutdown)
+
+	tmpDir := shortSocketDir(t)
+	socketPath := filepath.Join(tmpDir, "ipc.sock")
+
+	if err := d.startIPCServer(socketPath); err != nil {
+		t.Fatalf("startIPCServer: %v", err)
+	}
+
+	resp := sendIPCRequest(t, socketPath, AgentIPCRequest{
+		Operation: "delete",
+		AgentName: "falcon",
+		IssueID:   "abc-123",
+	})
+
+	if resp.Success {
+		t.Fatal("expected failure for unknown operation")
+	}
+	if !strings.Contains(resp.Error, "unknown operation") {
+		t.Errorf("Error = %q, want contains 'unknown operation'", resp.Error)
+	}
+}
+
+func TestIPCServer_MissingAgentName(t *testing.T) {
+	mb := &mockIPCBackend{}
+	d := newTestIPCDaemon(mb)
+	defer close(d.shutdown)
+
+	tmpDir := shortSocketDir(t)
+	socketPath := filepath.Join(tmpDir, "ipc.sock")
+
+	if err := d.startIPCServer(socketPath); err != nil {
+		t.Fatalf("startIPCServer: %v", err)
+	}
+
+	resp := sendIPCRequest(t, socketPath, AgentIPCRequest{
+		Operation: ipcOpClaim,
+		AgentName: "",
+		IssueID:   "abc-123",
+	})
+
+	if resp.Success {
+		t.Fatal("expected failure for missing agent_name")
+	}
+	if resp.Kind != string(backend.KindValidation) {
+		t.Errorf("Kind = %q, want %q", resp.Kind, backend.KindValidation)
+	}
+	if !strings.Contains(resp.Error, "agent_name is required") {
+		t.Errorf("Error = %q, want contains 'agent_name is required'", resp.Error)
+	}
+
+	// Backend should NOT have been called
+	if len(mb.claimCalls) != 0 {
+		t.Errorf("expected 0 backend calls, got %d claim calls", len(mb.claimCalls))
+	}
+}
+
+func TestIPCServer_MissingIssueID(t *testing.T) {
+	mb := &mockIPCBackend{}
+	d := newTestIPCDaemon(mb)
+	defer close(d.shutdown)
+
+	tmpDir := shortSocketDir(t)
+	socketPath := filepath.Join(tmpDir, "ipc.sock")
+
+	if err := d.startIPCServer(socketPath); err != nil {
+		t.Fatalf("startIPCServer: %v", err)
+	}
+
+	resp := sendIPCRequest(t, socketPath, AgentIPCRequest{
+		Operation: ipcOpClaim,
+		AgentName: "falcon",
+		IssueID:   "",
+	})
+
+	if resp.Success {
+		t.Fatal("expected failure for missing issue_id")
+	}
+	if resp.Kind != string(backend.KindValidation) {
+		t.Errorf("Kind = %q, want %q", resp.Kind, backend.KindValidation)
+	}
+	if !strings.Contains(resp.Error, "issue_id is required") {
+		t.Errorf("Error = %q, want contains 'issue_id is required'", resp.Error)
+	}
+}
+
+func TestIPCServer_InvalidJSON(t *testing.T) {
+	mb := &mockIPCBackend{}
+	d := newTestIPCDaemon(mb)
+	defer close(d.shutdown)
+
+	tmpDir := shortSocketDir(t)
+	socketPath := filepath.Join(tmpDir, "ipc.sock")
+
+	if err := d.startIPCServer(socketPath); err != nil {
+		t.Fatalf("startIPCServer: %v", err)
+	}
+
+	// Send garbage bytes
+	conn, err := net.DialTimeout("unix", socketPath, 5*time.Second)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	_, _ = fmt.Fprintln(conn, "not json at all{{{")
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+
+	scanner := bufio.NewScanner(conn)
+	if !scanner.Scan() {
+		t.Fatal("no response for invalid JSON")
+	}
+
+	var resp AgentIPCResponse
+	if err := json.Unmarshal(scanner.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if resp.Success {
+		t.Fatal("expected failure for invalid JSON")
+	}
+	if !strings.Contains(resp.Error, "invalid request") {
+		t.Errorf("Error = %q, want contains 'invalid request'", resp.Error)
+	}
+}
+
+func TestIPCServer_SocketRoundTrip(t *testing.T) {
+	mb := &mockIPCBackend{
+		closeResult: &backend.CloseResult{
+			Closed: &backend.IssueData{ID: "abc-123", Title: "test", Status: "closed"},
+		},
+	}
+	d := newTestIPCDaemon(mb)
+	defer func() {
+		close(d.shutdown)
+		if d.ipcListener != nil {
+			_ = d.ipcListener.Close()
+		}
+	}()
+
+	tmpDir := shortSocketDir(t)
+	socketPath := filepath.Join(tmpDir, "ipc.sock")
+
+	if err := d.startIPCServer(socketPath); err != nil {
+		t.Fatalf("startIPCServer: %v", err)
+	}
+
+	t.Run("claim via socket", func(t *testing.T) {
+		resp := sendIPCRequest(t, socketPath, AgentIPCRequest{
+			Operation: ipcOpClaim,
+			AgentName: "falcon",
+			IssueID:   "abc-123",
+		})
+		if !resp.Success {
+			t.Fatalf("expected success, got error: %s (kind: %s)", resp.Error, resp.Kind)
+		}
+	})
+
+	t.Run("update via socket", func(t *testing.T) {
+		resp := sendIPCRequest(t, socketPath, AgentIPCRequest{
+			Operation: ipcOpUpdate,
+			AgentName: "falcon",
+			IssueID:   "abc-123",
+			Args:      json.RawMessage(`{"status": "in_progress"}`),
+		})
+		if !resp.Success {
+			t.Fatalf("expected success, got error: %s (kind: %s)", resp.Error, resp.Kind)
+		}
+	})
+
+	t.Run("complete via socket", func(t *testing.T) {
+		resp := sendIPCRequest(t, socketPath, AgentIPCRequest{
+			Operation: ipcOpComplete,
+			AgentName: "falcon",
+			IssueID:   "abc-123",
+			Args:      json.RawMessage(`{"reason": "done"}`),
+		})
+		if !resp.Success {
+			t.Fatalf("expected success, got error: %s (kind: %s)", resp.Error, resp.Kind)
+		}
+
+		var result backend.CloseResult
+		if err := json.Unmarshal(resp.Data, &result); err != nil {
+			t.Fatalf("unmarshal CloseResult: %v", err)
+		}
+		if result.Closed.ID != "abc-123" {
+			t.Errorf("result.Closed.ID = %q, want %q", result.Closed.ID, "abc-123")
+		}
+	})
+}
+
+func TestIPCServer_InternalError(t *testing.T) {
+	// Non-BackendError should produce Kind="internal"
+	mb := &mockIPCBackend{
+		claimErr: fmt.Errorf("unexpected database error"),
+	}
+	d := newTestIPCDaemon(mb)
+	defer close(d.shutdown)
+
+	resp := d.handleIPCClaim(AgentIPCRequest{
+		Operation: ipcOpClaim,
+		AgentName: "falcon",
+		IssueID:   "abc-123",
+	})
+
+	if resp.Success {
+		t.Fatal("expected failure for internal error")
+	}
+	if resp.Kind != string(backend.KindInternal) {
+		t.Errorf("Kind = %q, want %q", resp.Kind, backend.KindInternal)
+	}
+	if !strings.Contains(resp.Error, "unexpected database error") {
+		t.Errorf("Error = %q, want contains 'unexpected database error'", resp.Error)
+	}
+}
+
+func TestIPCServer_InvalidClaimArgs(t *testing.T) {
+	mb := &mockIPCBackend{}
+	d := newTestIPCDaemon(mb)
+	defer close(d.shutdown)
+
+	resp := d.handleIPCClaim(AgentIPCRequest{
+		Operation: ipcOpClaim,
+		AgentName: "falcon",
+		IssueID:   "abc-123",
+		Args:      json.RawMessage(`{"lock_ttl_seconds": "not a number"}`),
+	})
+
+	if resp.Success {
+		t.Fatal("expected failure for invalid claim args")
+	}
+	if resp.Kind != string(backend.KindValidation) {
+		t.Errorf("Kind = %q, want %q", resp.Kind, backend.KindValidation)
+	}
+}
+
+func TestResolveAgentIPCSocketPath(t *testing.T) {
+	path := resolveAgentIPCSocketPath("/project", ".loom/daemon.pid")
+	want := "/project/.loom/agent-ipc.sock"
+	if path != want {
+		t.Errorf("resolveAgentIPCSocketPath = %q, want %q", path, want)
+	}
+}
+
+func TestIPCServer_ClaimPublishesMutation(t *testing.T) {
+	mb := &mockIPCBackend{}
+	d := newTestIPCDaemon(mb)
+	defer close(d.shutdown)
+
+	bus := notify.New()
+	defer bus.Close()
+	d.notifyBus = bus
+	d.workspaceID = "ws-test"
+
+	sub := bus.Subscribe("ws-test", "issue")
+	defer sub.Close()
+
+	resp := d.handleIPCClaim(AgentIPCRequest{
+		Operation: ipcOpClaim,
+		AgentName: "falcon",
+		IssueID:   "abc-123",
+	})
+	if !resp.Success {
+		t.Fatalf("expected success, got error: %s", resp.Error)
+	}
+
+	select {
+	case event := <-sub.Events():
+		mut, ok := event.Payload.(backend.MutationData)
+		if !ok {
+			t.Fatalf("payload type = %T, want backend.MutationData", event.Payload)
+		}
+		if mut.Type != backend.MutationStatus {
+			t.Errorf("Type = %q, want %q", mut.Type, backend.MutationStatus)
+		}
+		if mut.IssueID != "abc-123" {
+			t.Errorf("IssueID = %q, want %q", mut.IssueID, "abc-123")
+		}
+		if mut.Actor != "falcon" {
+			t.Errorf("Actor = %q, want %q", mut.Actor, "falcon")
+		}
+		if mut.NewStatus != "in_progress" {
+			t.Errorf("NewStatus = %q, want %q", mut.NewStatus, "in_progress")
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for mutation event")
+	}
+}
+
+func TestIPCServer_UpdatePublishesMutation(t *testing.T) {
+	mb := &mockIPCBackend{}
+	d := newTestIPCDaemon(mb)
+	defer close(d.shutdown)
+
+	bus := notify.New()
+	defer bus.Close()
+	d.notifyBus = bus
+	d.workspaceID = "ws-test"
+
+	sub := bus.Subscribe("ws-test", "issue")
+	defer sub.Close()
+
+	status := "in_progress"
+	args, _ := json.Marshal(backend.UpdateParams{Status: &status})
+
+	resp := d.handleIPCUpdate(AgentIPCRequest{
+		Operation: ipcOpUpdate,
+		AgentName: "falcon",
+		IssueID:   "abc-123",
+		Args:      args,
+	})
+	if !resp.Success {
+		t.Fatalf("expected success, got error: %s", resp.Error)
+	}
+
+	select {
+	case event := <-sub.Events():
+		mut, ok := event.Payload.(backend.MutationData)
+		if !ok {
+			t.Fatalf("payload type = %T, want backend.MutationData", event.Payload)
+		}
+		if mut.Type != backend.MutationUpdate {
+			t.Errorf("Type = %q, want %q", mut.Type, backend.MutationUpdate)
+		}
+		if mut.IssueID != "abc-123" {
+			t.Errorf("IssueID = %q, want %q", mut.IssueID, "abc-123")
+		}
+		if mut.Actor != "falcon" {
+			t.Errorf("Actor = %q, want %q", mut.Actor, "falcon")
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for mutation event")
+	}
+}
+
+func TestIPCServer_CompletePublishesMutation(t *testing.T) {
+	mb := &mockIPCBackend{
+		closeResult: &backend.CloseResult{
+			Closed: &backend.IssueData{ID: "abc-123", Title: "my task", Parent: "epic-1", Status: "closed"},
+		},
+	}
+	d := newTestIPCDaemon(mb)
+	defer close(d.shutdown)
+
+	bus := notify.New()
+	defer bus.Close()
+	d.notifyBus = bus
+	d.workspaceID = "ws-test"
+
+	sub := bus.Subscribe("ws-test", "issue")
+	defer sub.Close()
+
+	args, _ := json.Marshal(backend.CloseParams{Reason: "implemented"})
+
+	resp := d.handleIPCComplete(AgentIPCRequest{
+		Operation: ipcOpComplete,
+		AgentName: "falcon",
+		IssueID:   "abc-123",
+		Args:      args,
+	})
+	if !resp.Success {
+		t.Fatalf("expected success, got error: %s", resp.Error)
+	}
+
+	select {
+	case event := <-sub.Events():
+		mut, ok := event.Payload.(backend.MutationData)
+		if !ok {
+			t.Fatalf("payload type = %T, want backend.MutationData", event.Payload)
+		}
+		if mut.Type != backend.MutationStatus {
+			t.Errorf("Type = %q, want %q", mut.Type, backend.MutationStatus)
+		}
+		if mut.IssueID != "abc-123" {
+			t.Errorf("IssueID = %q, want %q", mut.IssueID, "abc-123")
+		}
+		if mut.Actor != "falcon" {
+			t.Errorf("Actor = %q, want %q", mut.Actor, "falcon")
+		}
+		if mut.OldStatus != "in_progress" {
+			t.Errorf("OldStatus = %q, want %q", mut.OldStatus, "in_progress")
+		}
+		if mut.NewStatus != "closed" {
+			t.Errorf("NewStatus = %q, want %q", mut.NewStatus, "closed")
+		}
+		if mut.Title != "my task" {
+			t.Errorf("Title = %q, want %q", mut.Title, "my task")
+		}
+		if mut.ParentID != "epic-1" {
+			t.Errorf("ParentID = %q, want %q", mut.ParentID, "epic-1")
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for mutation event")
+	}
+}
+
+func TestIPCServer_ClaimError_NoMutation(t *testing.T) {
+	mb := &mockIPCBackend{
+		claimErr: fmt.Errorf("database unavailable"),
+	}
+	d := newTestIPCDaemon(mb)
+	defer close(d.shutdown)
+
+	bus := notify.New()
+	defer bus.Close()
+	d.notifyBus = bus
+	d.workspaceID = "ws-test"
+
+	sub := bus.Subscribe("ws-test", "issue")
+	defer sub.Close()
+
+	resp := d.handleIPCClaim(AgentIPCRequest{
+		Operation: ipcOpClaim,
+		AgentName: "falcon",
+		IssueID:   "abc-123",
+	})
+	if resp.Success {
+		t.Fatal("expected failure, got success")
+	}
+
+	select {
+	case event := <-sub.Events():
+		t.Fatalf("expected no mutation event, got: %+v", event)
+	case <-time.After(50 * time.Millisecond):
+		// Good — no mutation published on error
+	}
+}

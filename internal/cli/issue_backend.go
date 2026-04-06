@@ -22,7 +22,7 @@ var (
 
 // defaultIssueBackend returns the package-level IssueBackend, lazily initializing
 // from defaultDeps.IssueBackend if not explicitly set.
-func defaultIssueBackend() backend.IssueBackend {
+func DefaultIssueBackend() backend.IssueBackend {
 	trackerMu.RLock()
 	t := trackerInst
 	trackerMu.RUnlock()
@@ -34,7 +34,7 @@ func defaultIssueBackend() backend.IssueBackend {
 	if trackerInst == nil {
 		// In fleet mode, use the fleet backend directly — skip IPC wrapping
 		// since the fleet server (not a local daemon) manages issues.
-		if isFleetActive() {
+		if IsFleetActive() {
 			trackerInst = resolveFallbackBackend()
 		} else if sock := os.Getenv("LOOM_DAEMON_SOCKET"); sock != "" {
 			agentName := os.Getenv("BD_ACTOR")
@@ -49,13 +49,13 @@ func defaultIssueBackend() backend.IssueBackend {
 }
 
 // setDefaultIssueBackend overrides the package-level IssueBackend (for testing).
-func setDefaultIssueBackend(ib backend.IssueBackend) {
+func SetDefaultIssueBackend(ib backend.IssueBackend) {
 	trackerMu.Lock()
 	defer trackerMu.Unlock()
 	trackerInst = ib
 }
 
-// resetDefaultIssueBackend clears the override so defaultIssueBackend() re-initializes.
+// resetDefaultIssueBackend clears the override so DefaultIssueBackend() re-initializes.
 func resetDefaultIssueBackend() {
 	trackerMu.Lock()
 	defer trackerMu.Unlock()

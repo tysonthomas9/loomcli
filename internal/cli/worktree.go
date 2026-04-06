@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
 // WorktreeInfo holds information about a discovered worktree
@@ -12,8 +14,8 @@ type WorktreeInfo struct {
 	Name      string
 	Path      string
 	Branch    string
-	Workspace string      // workspace name (empty in legacy mode)
-	Repo      *RepoConfig // source repo config (nil in legacy mode)
+	Workspace string             // workspace name (empty in legacy mode)
+	Repo      *config.RepoConfig // source repo config (nil in legacy mode)
 }
 
 // ResolverMode indicates how the Resolver discovers worktrees
@@ -26,7 +28,7 @@ const (
 
 // validateWorktreeName checks that a worktree name does not contain path
 // traversal sequences. Returns an error if the name is unsafe.
-func validateWorktreeName(name string) error {
+func ValidateWorktreeName(name string) error {
 	cleaned := filepath.Clean(name)
 	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("invalid worktree name %q: path traversal not allowed", name)
@@ -49,7 +51,7 @@ func resolveLegacyPath(name string) (string, error) {
 	}
 
 	// Validate name does not traverse outside worktrees directory
-	if err := validateWorktreeName(name); err != nil {
+	if err := ValidateWorktreeName(name); err != nil {
 		return "", err
 	}
 
@@ -89,7 +91,7 @@ func getWorktreesDirLegacy() string {
 // GetWorktreesDir returns the worktrees directory path
 // Priority: --worktrees flag > LOOM_WORKTREES_DIR env var > default "worktrees"
 func GetWorktreesDir() string {
-	return getDefaultResolver().GetWorktreesDir()
+	return GetDefaultResolver().GetWorktreesDir()
 }
 
 // GetDefaultBranch returns the default integration branch.
@@ -97,7 +99,7 @@ func GetWorktreesDir() string {
 // This is a convenience wrapper that discovers worktrees automatically.
 // When worktrees are already available, use GetDefaultBranchForWorktrees instead.
 func GetDefaultBranch() string {
-	return getDefaultResolver().GetDefaultBranch()
+	return GetDefaultResolver().GetDefaultBranch()
 }
 
 // ResolveWorktreesDir returns the absolute path to the worktrees directory
@@ -129,17 +131,17 @@ func GetScriptDir() (string, error) {
 //   - An absolute path (e.g., /path/to/worktree) -> as-is
 //   - Empty string -> current directory
 func ResolveWorktreePath(name string) (string, error) {
-	return getDefaultResolver().ResolveWorktreePath(name)
+	return GetDefaultResolver().ResolveWorktreePath(name)
 }
 
 // DiscoverWorktrees finds all worktrees in the worktrees directory
 func DiscoverWorktrees() ([]WorktreeInfo, error) {
-	return getDefaultResolver().DiscoverWorktrees()
+	return GetDefaultResolver().DiscoverWorktrees()
 }
 
 // getCurrentBranchDeps is the deps-aware implementation of GetCurrentBranch.
 func getCurrentBranchDeps(deps *Deps, path string) (string, error) {
-	output, err := runGit(deps, path, "branch", "--show-current")
+	output, err := RunGit(deps, path, "branch", "--show-current")
 	if err != nil {
 		return "", err
 	}

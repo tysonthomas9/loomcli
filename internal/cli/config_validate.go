@@ -6,7 +6,24 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
+
+func init() {
+	config.SetGlobalConfigValidator(func(cfg *config.LoomConfig) error {
+		if vr := ValidateGlobalConfig(cfg); vr.HasErrors() {
+			return fmt.Errorf("%s", vr.FormatIssues())
+		}
+		return nil
+	})
+	config.SetProjectConfigValidator(func(dc *config.DaemonConfig, projectDir string) error {
+		if vr := ValidateProjectConfig(dc, projectDir); vr.HasErrors() {
+			return fmt.Errorf("%s", vr.FormatIssues())
+		}
+		return nil
+	})
+}
 
 // ValidationIssue represents a single config validation problem.
 type ValidationIssue struct {
@@ -51,16 +68,16 @@ func (r *ValidationResult) FormatIssues() string {
 	return b.String()
 }
 
-// validTaskFilters lists the accepted values for RoleConfig.TaskFilter.
+// validTaskFilters lists the accepted values for config.RoleConfig.TaskFilter.
 var validTaskFilters = map[string]bool{
 	"needs_design": true,
 	"has_design":   true,
 	"any":          true,
 }
 
-// ValidateProjectConfig validates a merged DaemonConfig.
+// ValidateProjectConfig validates a merged config.DaemonConfig.
 // projectDir is used for resolving relative paths.
-func ValidateProjectConfig(dc *DaemonConfig, projectDir string) *ValidationResult {
+func ValidateProjectConfig(dc *config.DaemonConfig, projectDir string) *ValidationResult {
 	r := &ValidationResult{}
 	if dc == nil {
 		return r
@@ -105,7 +122,7 @@ func validateBackendName(r *ValidationResult, field, name string) {
 }
 
 // validateAgentEntries checks all agent entries for worktree validity, role references, and duplicates.
-func validateAgentEntries(r *ValidationResult, agents []AgentEntry, roles map[string]RoleConfig) {
+func validateAgentEntries(r *ValidationResult, agents []config.AgentEntry, roles map[string]config.RoleConfig) {
 	seenWorktrees := make(map[string]int)
 	for i, a := range agents {
 		field := fmt.Sprintf("agents[%d]", i)
@@ -163,7 +180,7 @@ func validateAgentEntries(r *ValidationResult, agents []AgentEntry, roles map[st
 }
 
 // validateRoles checks role configs for valid prompt files and task filters.
-func validateRoles(r *ValidationResult, roles map[string]RoleConfig, projectDir string) {
+func validateRoles(r *ValidationResult, roles map[string]config.RoleConfig, projectDir string) {
 	roleNames := make([]string, 0, len(roles))
 	for name := range roles {
 		roleNames = append(roleNames, name)
@@ -205,7 +222,7 @@ func validateRoles(r *ValidationResult, roles map[string]RoleConfig, projectDir 
 }
 
 // validateRestartPolicy checks restart policy numeric constraints.
-func validateRestartPolicy(r *ValidationResult, rp RestartPolicy) {
+func validateRestartPolicy(r *ValidationResult, rp config.RestartPolicy) {
 	if rp.BackoffInitial != nil && *rp.BackoffInitial < 0 {
 		r.addError("daemon.restart_policy.backoff_initial", fmt.Sprintf(
 			"must be non-negative, got %d", *rp.BackoffInitial))
@@ -229,7 +246,7 @@ func validateRestartPolicy(r *ValidationResult, rp RestartPolicy) {
 }
 
 // validateFleetDBSettings checks fleet-db config fields for validity.
-func validateFleetDBSettings(r *ValidationResult, fdb *FleetDBSettings) {
+func validateFleetDBSettings(r *ValidationResult, fdb *config.FleetDBSettings) {
 	if fdb.RedisURL != "" {
 		if !strings.HasPrefix(fdb.RedisURL, "redis://") && !strings.HasPrefix(fdb.RedisURL, "rediss://") {
 			r.addWarning("daemon.fleetdb.redis_url", fmt.Sprintf(
@@ -253,7 +270,7 @@ func validateIssueBackend(r *ValidationResult, ib string) {
 }
 
 // validateFleetSettings checks fleet client config fields for validity.
-func validateFleetSettings(r *ValidationResult, fs *FleetSettings) {
+func validateFleetSettings(r *ValidationResult, fs *config.FleetSettings) {
 	if fs.URL != "" {
 		if !strings.HasPrefix(fs.URL, "http://") && !strings.HasPrefix(fs.URL, "https://") {
 			r.addError("daemon.fleet.url", fmt.Sprintf(
@@ -266,8 +283,8 @@ func validateFleetSettings(r *ValidationResult, fs *FleetSettings) {
 	}
 }
 
-// ValidateGlobalConfig validates the global LoomConfig.
-func ValidateGlobalConfig(cfg *LoomConfig) *ValidationResult {
+// ValidateGlobalConfig validates the global config.LoomConfig.
+func ValidateGlobalConfig(cfg *config.LoomConfig) *ValidationResult {
 	r := &ValidationResult{}
 	if cfg == nil {
 		return r
@@ -312,7 +329,7 @@ func ValidateGlobalConfig(cfg *LoomConfig) *ValidationResult {
 
 // validateWorkspaceRepos validates repos within a workspace for path existence,
 // group name format, and SourceRepoID uniqueness.
-func validateWorkspaceRepos(r *ValidationResult, wsField string, ws WorkspaceConfig) {
+func validateWorkspaceRepos(r *ValidationResult, wsField string, ws config.WorkspaceConfig) {
 	seenSourceRepoIDs := make(map[string]string) // sourceRepoID -> "repoName"
 	for i, repo := range ws.Repos {
 		repoField := fmt.Sprintf("%s.repos[%d]", wsField, i)
@@ -395,4 +412,10 @@ func isValidWorktreeName(name string) bool {
 		}
 	}
 	return true
+}
+
+// builtInRoles defines the built-in role names that use loom <role> command.
+var builtInRoles = map[string]bool{
+	"plan": true,
+	"task": true,
 }

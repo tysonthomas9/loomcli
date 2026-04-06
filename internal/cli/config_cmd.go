@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"gopkg.in/yaml.v3"
 )
 
@@ -113,7 +114,7 @@ func init() {
 }
 
 func runConfigInit(cmd *cobra.Command, args []string) {
-	configPath := GetConfigPath()
+	configPath := config.GetConfigPath()
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -126,27 +127,27 @@ func runConfigInit(cmd *cobra.Command, args []string) {
 		wsName = filepath.Base(cwd)
 	}
 
-	cfg := &LoomConfig{
-		Version:          CurrentConfigVersion,
+	cfg := &config.LoomConfig{
+		Version:          config.CurrentConfigVersion,
 		DefaultWorkspace: wsName,
-		Workspaces: map[string]WorkspaceConfig{
+		Workspaces: map[string]config.WorkspaceConfig{
 			wsName: {
-				ID:    NewWorkspaceID(),
+				ID:    config.NewWorkspaceID(),
 				Path:  cwd,
-				Repos: []RepoConfig{},
+				Repos: []config.RepoConfig{},
 			},
 		},
 	}
 
 	// Existence check + save inside the lock to prevent TOCTOU race
 	// between concurrent init and create.
-	if err := WithConfigLock(func() error {
+	if err := config.WithConfigLock(func() error {
 		if !configInitForce {
 			if _, err := os.Stat(configPath); err == nil {
 				return fmt.Errorf("config already exists at %s; use --force to overwrite", configPath)
 			}
 		}
-		return saveConfigUnlocked(cfg)
+		return config.SaveConfigUnlocked(cfg)
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -156,8 +157,8 @@ func runConfigInit(cmd *cobra.Command, args []string) {
 }
 
 func runConfigShow(cmd *cobra.Command, args []string) {
-	configPath := GetConfigPath()
-	data, err := os.ReadFile(configPath) // #nosec G304 — path from GetConfigPath(), not user input
+	configPath := config.GetConfigPath()
+	data, err := os.ReadFile(configPath) // #nosec G304 — path from config.GetConfigPath(), not user input
 	if err != nil {
 		if os.IsNotExist(err) {
 			fmt.Printf("No config file found at %s. Run 'loom config init' to create one.\n", configPath)
@@ -173,13 +174,13 @@ func runConfigAddRepo(cmd *cobra.Command, args []string) {
 	wsName := args[0]
 	repoName := args[1]
 
-	if err := ValidateRemoteName(configAddRepoRemote); err != nil {
+	if err := config.ValidateRemoteName(configAddRepoRemote); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	if err := WithConfigLock(func() error {
-		cfg, err := loadConfigUnlocked()
+	if err := config.WithConfigLock(func() error {
+		cfg, err := config.LoadConfigUnlocked()
 		if err != nil {
 			return err
 		}
@@ -203,7 +204,7 @@ func runConfigAddRepo(cmd *cobra.Command, args []string) {
 			}
 		}
 
-		ws.Repos = append(ws.Repos, RepoConfig{
+		ws.Repos = append(ws.Repos, config.RepoConfig{
 			Name:          repoName,
 			Path:          configAddRepoPath,
 			DefaultBranch: configAddRepoBranch,
@@ -211,7 +212,7 @@ func runConfigAddRepo(cmd *cobra.Command, args []string) {
 		})
 		cfg.Workspaces[wsName] = ws
 
-		return saveConfigUnlocked(cfg)
+		return config.SaveConfigUnlocked(cfg)
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -227,7 +228,7 @@ func runConfigMigrate(cmd *cobra.Command, args []string) {
 	} else if configMigrateProject {
 		path = "loom.yaml"
 	} else {
-		path = GetConfigPath()
+		path = config.GetConfigPath()
 	}
 
 	// Read and parse to determine current version for the listing.
@@ -246,21 +247,21 @@ func runConfigMigrate(cmd *cobra.Command, args []string) {
 		data = make(map[string]interface{})
 	}
 
-	currentVersion := getConfigVersion(data)
+	currentVersion := config.GetConfigVersion(data)
 
-	if currentVersion == CurrentConfigVersion {
-		fmt.Printf("Config is already at version %d, no migration needed.\n", CurrentConfigVersion)
+	if currentVersion == config.CurrentConfigVersion {
+		fmt.Printf("Config is already at version %d, no migration needed.\n", config.CurrentConfigVersion)
 		return
 	}
 
-	if currentVersion > CurrentConfigVersion {
+	if currentVersion > config.CurrentConfigVersion {
 		fmt.Fprintf(os.Stderr, "Error: config version %d is newer than supported version %d; please upgrade loom.\n",
-			currentVersion, CurrentConfigVersion)
+			currentVersion, config.CurrentConfigVersion)
 		os.Exit(1)
 	}
 
 	// List pending migrations.
-	pending := PendingMigrations(currentVersion)
+	pending := config.PendingMigrations(currentVersion)
 	hasDestructive := false
 	for _, m := range pending {
 		if m.Destructive {
@@ -269,7 +270,7 @@ func runConfigMigrate(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	fmt.Printf("Config at version %d, target version %d.\n\n", currentVersion, CurrentConfigVersion)
+	fmt.Printf("Config at version %d, target version %d.\n\n", currentVersion, config.CurrentConfigVersion)
 
 	if configMigrateDryRun {
 		fmt.Println("Migrations that would be applied:")
@@ -293,18 +294,18 @@ func runConfigMigrate(cmd *cobra.Command, args []string) {
 		fmt.Fprintf(os.Stderr, "\nWarning: destructive migrations may be incompatible with older versions of loom.\n")
 	}
 
-	oldVersion, backupPath, err := MigrateConfigFile(path)
+	oldVersion, backupPath, err := config.MigrateConfigFile(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	if oldVersion == CurrentConfigVersion {
+	if oldVersion == config.CurrentConfigVersion {
 		// File was migrated between our pre-read and MigrateConfigFile (e.g. by auto-migration).
-		fmt.Printf("\nConfig was already at version %d, no changes made.\n", CurrentConfigVersion)
+		fmt.Printf("\nConfig was already at version %d, no changes made.\n", config.CurrentConfigVersion)
 	} else {
 		fmt.Printf("\nMigrated from version %d to %d. Backup saved to %s.\n",
-			oldVersion, CurrentConfigVersion, backupPath)
+			oldVersion, config.CurrentConfigVersion, backupPath)
 	}
 }
 
@@ -312,8 +313,8 @@ func runConfigRemoveRepo(cmd *cobra.Command, args []string) {
 	wsName := args[0]
 	repoName := args[1]
 
-	if err := WithConfigLock(func() error {
-		cfg, err := loadConfigUnlocked()
+	if err := config.WithConfigLock(func() error {
+		cfg, err := config.LoadConfigUnlocked()
 		if err != nil {
 			return err
 		}
@@ -346,7 +347,7 @@ func runConfigRemoveRepo(cmd *cobra.Command, args []string) {
 
 		cfg.Workspaces[wsName] = ws
 
-		return saveConfigUnlocked(cfg)
+		return config.SaveConfigUnlocked(cfg)
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)

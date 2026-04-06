@@ -6,25 +6,26 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
+	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
 // createFleetIssueBackend resolves fleet config from daemon settings and env
 // vars, then constructs a FleetBackend. Returns an error if the fleet URL is
 // not configured.
 func createFleetIssueBackend() (backend.IssueBackend, error) {
-	dc, err := LoadDaemonConfig(".")
-	var daemon *DaemonSettings
+	dc, err := config.LoadDaemonConfig(".")
+	var daemon *config.DaemonSettings
 	if err == nil && dc != nil {
 		daemon = &dc.Daemon
 	}
 
-	cfg := resolveFleetConfig(daemon)
+	cfg := config.ResolveFleetConfig(daemon)
 	return createFleetIssueBackendFromConfig(cfg)
 }
 
 // createFleetIssueBackendFromConfig constructs a FleetBackend from pre-resolved
 // config. Used when the caller already has the config (e.g., serve.go).
-func createFleetIssueBackendFromConfig(cfg FleetClientConfig) (backend.IssueBackend, error) {
+func createFleetIssueBackendFromConfig(cfg config.FleetClientConfig) (backend.IssueBackend, error) {
 	if cfg.URL == "" {
 		return nil, fmt.Errorf("fleet URL is required")
 	}

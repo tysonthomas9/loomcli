@@ -7,7 +7,7 @@ import (
 )
 
 // worktreeCompletion provides completion for worktree and workspace names
-func worktreeCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+func WorktreeCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	// Only complete the first argument (worktree/workspace name)
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
@@ -42,7 +42,7 @@ func worktreeCompletion(cmd *cobra.Command, args []string, toComplete string) ([
 }
 
 // branchCompletion provides completion for git branch names
-func branchCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+func BranchCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	branches, err := GetGitBranches()
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveError
@@ -51,19 +51,19 @@ func branchCompletion(cmd *cobra.Command, args []string, toComplete string) ([]s
 }
 
 // worktreeThenBranchCompletion provides worktree names for first arg, branches for second
-func worktreeThenBranchCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+func WorktreeThenBranchCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if len(args) == 0 {
-		return worktreeCompletion(cmd, args, toComplete)
+		return WorktreeCompletion(cmd, args, toComplete)
 	}
 	if len(args) == 1 {
-		return branchCompletion(cmd, args, toComplete)
+		return BranchCompletion(cmd, args, toComplete)
 	}
 	return nil, cobra.ShellCompDirectiveNoFileComp
 }
 
 // getGitBranchesDeps is the deps-aware implementation of GetGitBranches.
 func getGitBranchesDeps(deps *Deps) ([]string, error) {
-	output, err := runGit(deps, ".", "branch", "-a", "--format=%(refname:short)")
+	output, err := RunGit(deps, ".", "branch", "-a", "--format=%(refname:short)")
 	if err != nil {
 		return nil, err
 	}

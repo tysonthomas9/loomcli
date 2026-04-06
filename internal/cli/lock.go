@@ -3,6 +3,8 @@ package cli
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -11,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
@@ -45,7 +48,7 @@ func ResolveLockDir(path string) string {
 
 // resolveWorkspaceName returns the workspace name for the given path, or empty string if not in a workspace.
 func resolveWorkspaceName(path string) string {
-	cfg, err := LoadConfig()
+	cfg, err := config.LoadConfig()
 	if err != nil || cfg == nil {
 		return ""
 	}
@@ -378,11 +381,11 @@ func GetLockStatus(worktreePath string) string {
 // Returns "needs_review", "closed", "in_progress", "open", or ""
 func getTaskStatus(taskID string) string {
 	d := *defaultDeps
-	d.IssueBackend = defaultIssueBackend()
-	return getTaskStatusDeps(&d, taskID)
+	d.IssueBackend = DefaultIssueBackend()
+	return GetTaskStatusDeps(&d, taskID)
 }
 
-func getTaskStatusDeps(deps *Deps, taskID string) string {
+func GetTaskStatusDeps(deps *Deps, taskID string) string {
 	detail, err := deps.IssueBackend.Get(context.Background(), taskID)
 	if err != nil || detail == nil {
 		return ""
@@ -391,4 +394,16 @@ func getTaskStatusDeps(deps *Deps, taskID string) string {
 		return "needs_review"
 	}
 	return detail.Status
+}
+
+// WorkspaceHash returns a short hash of the workspace path for signal file naming.
+func WorkspaceHash(path string) string {
+	hash := sha256.Sum256([]byte(path))
+	return hex.EncodeToString(hash[:8])
+}
+
+// GetSignalFilePath returns the signal file path for a worktree.
+func GetSignalFilePath(worktreePath string) string {
+	signalDir := filepath.Join(os.TempDir(), fmt.Sprintf("loom-signals-%d", os.Getuid()))
+	return filepath.Join(signalDir, WorkspaceHash(worktreePath))
 }
