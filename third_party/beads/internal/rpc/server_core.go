@@ -113,10 +113,11 @@ type MutationEvent struct {
 // NewServer creates a new RPC server
 func NewServer(socketPath string, store storage.Storage, workspacePath string, dbPath string) *Server {
 	// Parse config from env vars.
-	// Default 20 is sized for a 1-CPU server where 100 concurrent SQLite
-	// connections create excessive write contention. Override with
-	// BEADS_DAEMON_MAX_CONNS for higher-capacity machines.
-	maxConns := 20 // default
+	// Default is 100. maxConns=20 starved the semaphore under ~3.5 RPS
+	// concurrent load, producing more 503s than it prevented. Override
+	// with BEADS_DAEMON_MAX_CONNS if SQLite write contention is a concern
+	// on low-CPU hosts.
+	maxConns := 100
 	if env := os.Getenv("BEADS_DAEMON_MAX_CONNS"); env != "" {
 		var conns int
 		if _, err := fmt.Sscanf(env, "%d", &conns); err == nil && conns > 0 {
