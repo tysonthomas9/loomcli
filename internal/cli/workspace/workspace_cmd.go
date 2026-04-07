@@ -115,32 +115,61 @@ func isValidWorkspaceName(name string) bool {
 func runWorkspaceCreate(cmd *cobra.Command, args []string) {
 	deps := cli.GetDeps(cmd)
 	wsName := args[0]
+	branch := validateCreateInputs(wsName)
+	repoPaths := parseRepoPaths()
 
+	unlock := acquireConfigLock()
+	defer unlock()
+
+	cfg := loadOrInitConfig()
+	if _, exists := cfg.Workspaces[wsName]; exists {
+		fmt.Fprintf(os.Stderr, "Error: workspace %q already exists. Use a different name.\n", wsName)
+		os.Exit(1)
+	}
+
+	wsDir := wsCreatePath
+	if wsDir == "" {
+		wsDir = config.GetWorkspaceDir(wsName)
+	}
+
+	resolvedRepos := resolveAndValidateRepos(repoPaths)
+	repos := createWorkspaceWorktrees(deps, wsDir, resolvedRepos, branch)
+
+	bdResult := deps.Exec.Run(wsDir, "bd", "init")
+	if bdResult.Err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: bd init failed in workspace (non-fatal): %s\n", bdResult.Stderr)
+	}
+
+	saveWorkspaceConfig(cfg, wsName, wsDir, repos)
+	fmt.Printf("Workspace %q created at %s with %d repo(s).\n", wsName, wsDir, len(repos))
+}
+
+func validateCreateInputs(wsName string) string {
 	if !isValidWorkspaceName(wsName) {
 		fmt.Fprintf(os.Stderr, "Error: workspace name %q contains invalid characters. Use only alphanumeric, hyphens, and underscores.\n", wsName)
 		os.Exit(1)
 	}
-
 	branch := wsCreateBranch
 	if branch == "" {
 		branch = wsName
 	}
-
-	// Validate branch name (wsName is already validated above, but --branch flag is not)
 	if !isValidWorkspaceName(branch) || strings.HasPrefix(branch, "-") {
 		fmt.Fprintf(os.Stderr, "Error: branch name %q is invalid. Must contain only alphanumeric, hyphens, and underscores, and must not start with a dash.\n", branch)
 		os.Exit(1)
 	}
+	return branch
+}
 
-	// Parse repos
+func parseRepoPaths() []string {
 	repoPaths := strings.Split(wsCreateRepos, ",")
 	if len(repoPaths) == 0 || (len(repoPaths) == 1 && repoPaths[0] == "") {
 		fmt.Fprintf(os.Stderr, "Error: --repos is required and must not be empty\n")
 		os.Exit(1)
 	}
+	return repoPaths
+}
 
-	// Acquire config lock for the entire load-check-create-save sequence.
-	// The lock is released by defer on normal exit, or by the kernel on os.Exit.
+func acquireConfigLock() func() {
 	configDir := config.GetConfigDir()
 	if configDir == "" {
 		fmt.Fprintf(os.Stderr, "Error: cannot determine config directory\n")
@@ -151,151 +180,114 @@ func runWorkspaceCreate(cmd *cobra.Command, args []string) {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
-	defer unlock()
+	return unlock
+}
 
-	// Load or create config (unlocked — we hold the lock above)
+func loadOrInitConfig() *config.LoomConfig {
 	cfg, err := config.LoadConfigUnlocked()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 	if cfg == nil {
-		cfg = &config.LoomConfig{
-			Workspaces: make(map[string]config.WorkspaceConfig),
-		}
+		cfg = &config.LoomConfig{Workspaces: make(map[string]config.WorkspaceConfig)}
 	}
 	if cfg.Workspaces == nil {
 		cfg.Workspaces = make(map[string]config.WorkspaceConfig)
 	}
+	return cfg
+}
 
-	// Check if workspace already exists
-	if _, exists := cfg.Workspaces[wsName]; exists {
-		fmt.Fprintf(os.Stderr, "Error: workspace %q already exists. Use a different name.\n", wsName)
-		os.Exit(1)
-	}
+type cliResolvedRepo struct {
+	path string
+	name string
+}
 
-	// Determine workspace directory
-	wsDir := wsCreatePath
-	if wsDir == "" {
-		wsDir = config.GetWorkspaceDir(wsName)
-	}
-
-	// Validate all repo paths before creating anything
-	type resolvedRepo struct {
-		path string
-		name string
-	}
-	var resolvedRepos []resolvedRepo
-	seenNames := make(map[string]string) // basename -> original path (for duplicate detection)
+func resolveAndValidateRepos(repoPaths []string) []cliResolvedRepo {
+	var resolved []cliResolvedRepo
+	seenNames := make(map[string]string)
 
 	for _, rp := range repoPaths {
 		rp = strings.TrimSpace(rp)
 		if rp == "" {
 			continue
 		}
-
 		absPath, err := filepath.Abs(rp)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: cannot resolve path %q: %v\n", rp, err)
 			os.Exit(1)
 		}
-
-		// Validate path exists
-		info, err := os.Stat(absPath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: repo path does not exist: %s\n", absPath)
-			os.Exit(1)
-		}
-		if !info.IsDir() {
-			fmt.Fprintf(os.Stderr, "Error: repo path is not a directory: %s\n", absPath)
-			os.Exit(1)
-		}
-
-		// Validate it's a git repository
-		gitDir := filepath.Join(absPath, ".git")
-		if _, err := os.Stat(gitDir); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: not a git repository: %s\n", absPath)
-			os.Exit(1)
-		}
-
+		validateRepoPath(absPath)
 		baseName := filepath.Base(absPath)
 		if prev, exists := seenNames[baseName]; exists {
 			fmt.Fprintf(os.Stderr, "Error: duplicate repo name %q from paths %s and %s. Repos must have unique directory names.\n", baseName, prev, absPath)
 			os.Exit(1)
 		}
 		seenNames[baseName] = absPath
-
-		resolvedRepos = append(resolvedRepos, resolvedRepo{path: absPath, name: baseName})
+		resolved = append(resolved, cliResolvedRepo{path: absPath, name: baseName})
 	}
-
-	if len(resolvedRepos) == 0 {
+	if len(resolved) == 0 {
 		fmt.Fprintf(os.Stderr, "Error: no valid repos specified\n")
 		os.Exit(1)
 	}
+	return resolved
+}
 
-	// Create workspace directory
+func validateRepoPath(absPath string) {
+	info, err := os.Stat(absPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: repo path does not exist: %s\n", absPath)
+		os.Exit(1)
+	}
+	if !info.IsDir() {
+		fmt.Fprintf(os.Stderr, "Error: repo path is not a directory: %s\n", absPath)
+		os.Exit(1)
+	}
+	if _, err := os.Stat(filepath.Join(absPath, ".git")); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: not a git repository: %s\n", absPath)
+		os.Exit(1)
+	}
+}
+
+type cliCreatedWorktree struct {
+	origRepoPath string
+	worktreePath string
+}
+
+func createWorkspaceWorktrees(deps *cli.Deps, wsDir string, resolvedRepos []cliResolvedRepo, branch string) []config.RepoConfig {
 	if err := os.MkdirAll(wsDir, 0755); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: cannot create workspace directory %s: %v\n", wsDir, err)
 		os.Exit(1)
 	}
 
-	// Track created worktrees with their original repo paths for cleanup
-	type createdWorktree struct {
-		origRepoPath string
-		worktreePath string
-	}
-	var created []createdWorktree
+	var created []cliCreatedWorktree
 	var repos []config.RepoConfig
-
 	for _, repo := range resolvedRepos {
 		worktreePath := filepath.Join(wsDir, repo.name)
-
-		// Run git worktree add from the repo root
-		_, err := cli.RunGit(deps, repo.path, "worktree", "add", worktreePath, "-b", branch)
-		if err != nil {
-			// Clean up workspace directory on failure
+		if _, err := cli.RunGit(deps, repo.path, "worktree", "add", worktreePath, "-b", branch); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: git worktree add failed for %s: %v\n", repo.name, err)
-			// Attempt cleanup of already-created worktrees using original repo paths
 			for _, c := range created {
 				_, _ = cli.RunGit(deps, c.origRepoPath, "worktree", "remove", c.worktreePath)
 			}
 			_ = os.RemoveAll(wsDir)
 			os.Exit(1)
 		}
-
-		created = append(created, createdWorktree{origRepoPath: repo.path, worktreePath: worktreePath})
-		repos = append(repos, config.RepoConfig{
-			Name: repo.name,
-			Path: worktreePath,
-		})
-
+		created = append(created, cliCreatedWorktree{origRepoPath: repo.path, worktreePath: worktreePath})
+		repos = append(repos, config.RepoConfig{Name: repo.name, Path: worktreePath})
 		fmt.Printf("  Created worktree: %s -> %s\n", repo.name, worktreePath)
 	}
+	return repos
+}
 
-	// Run bd init in workspace directory (best-effort)
-	bdResult := deps.Exec.Run(wsDir, "bd", "init")
-	if bdResult.Err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: bd init failed in workspace (non-fatal): %s\n", bdResult.Stderr)
-	}
-
-	// Save config
-	ws := config.WorkspaceConfig{
-		ID:    config.NewWorkspaceID(),
-		Path:  wsDir,
-		Repos: repos,
-	}
-	cfg.Workspaces[wsName] = ws
-
+func saveWorkspaceConfig(cfg *config.LoomConfig, wsName, wsDir string, repos []config.RepoConfig) {
+	cfg.Workspaces[wsName] = config.WorkspaceConfig{ID: config.NewWorkspaceID(), Path: wsDir, Repos: repos}
 	if wsCreateDefault || len(cfg.Workspaces) == 1 {
 		cfg.DefaultWorkspace = wsName
 	}
-
 	if err := config.SaveConfigUnlocked(cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
-
-	fmt.Printf("Workspace %q created at %s with %d repo(s).\n", wsName, wsDir, len(repos))
 }
 
 func runWorkspaceList(cmd *cobra.Command, args []string) {
@@ -347,19 +339,22 @@ func runWorkspaceRemove(cmd *cobra.Command, args []string) {
 	deps := cli.GetDeps(cmd)
 	wsName := args[0]
 
-	// Acquire config lock for the entire load-mutate-save sequence.
-	configDir := config.GetConfigDir()
-	if configDir == "" {
-		fmt.Fprintf(os.Stderr, "Error: cannot determine config directory\n")
-		os.Exit(1)
-	}
-	unlock, err := configlock.ConfigLock(configDir)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
+	unlock := acquireConfigLock()
 	defer unlock()
 
+	cfg := loadConfigForRemove()
+	ws := findWorkspaceOrExit(cfg, wsName)
+	checkRunningAgentsOrExit(ws)
+
+	if !wsRemoveKeepWorktrees {
+		removeWorktrees(deps, ws)
+	}
+
+	updateConfigAfterRemove(cfg, wsName)
+	fmt.Printf("Workspace %q removed.\n", wsName)
+}
+
+func loadConfigForRemove() *config.LoomConfig {
 	cfg, err := config.LoadConfigUnlocked()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -369,82 +364,81 @@ func runWorkspaceRemove(cmd *cobra.Command, args []string) {
 		fmt.Fprintf(os.Stderr, "No config found. Nothing to remove.\n")
 		os.Exit(1)
 	}
+	return cfg
+}
 
+func findWorkspaceOrExit(cfg *config.LoomConfig, wsName string) config.WorkspaceConfig {
 	ws, ok := cfg.Workspaces[wsName]
-	if !ok {
-		available := make([]string, 0, len(cfg.Workspaces))
-		for name := range cfg.Workspaces {
-			available = append(available, name)
-		}
-		sort.Strings(available)
-		fmt.Fprintf(os.Stderr, "Workspace %q not found. Available: %s\n", wsName, strings.Join(available, ", "))
-		os.Exit(1)
+	if ok {
+		return ws
 	}
-
-	// Check for lock files (running agents) unless --force
-	if !wsRemoveForce {
-		for _, repo := range ws.Repos {
-			lockPath := filepath.Join(repo.Path, ".agent.lock")
-			if _, err := os.Stat(lockPath); err == nil {
-				fmt.Fprintf(os.Stderr, "Error: repo %q has a running agent (lock file exists). Use --force to override.\n", repo.Name)
-				os.Exit(1)
-			}
-		}
+	available := make([]string, 0, len(cfg.Workspaces))
+	for name := range cfg.Workspaces {
+		available = append(available, name)
 	}
+	sort.Strings(available)
+	fmt.Fprintf(os.Stderr, "Workspace %q not found. Available: %s\n", wsName, strings.Join(available, ", "))
+	os.Exit(1)
+	return config.WorkspaceConfig{} // unreachable
+}
 
-	// Remove git worktrees unless --keep-worktrees
-	if !wsRemoveKeepWorktrees {
-		var errors []string
-		for _, repo := range ws.Repos {
-			repoPath := repo.Path
-			if !filepath.IsAbs(repoPath) {
-				repoPath = filepath.Join(ws.Path, repoPath)
-			}
-
-			// Find the original repo root by reading the .git file in the worktree
-			gitFile := filepath.Join(repoPath, ".git")
-			if _, err := os.Stat(gitFile); err != nil {
-				// Worktree directory doesn't exist or isn't a git worktree
-				continue
-			}
-
-			// Try to remove worktree using git
-			// We need the main repo path. Read .git file to find it.
-			mainRepoPath := findMainRepoPath(repoPath)
-			if mainRepoPath != "" {
-				_, err := cli.RunGit(deps, mainRepoPath, "worktree", "remove", repoPath)
-				if err != nil {
-					if wsRemoveForce {
-						// Force remove
-						_, err = cli.RunGit(deps, mainRepoPath, "worktree", "remove", "--force", repoPath)
-						if err != nil {
-							errors = append(errors, fmt.Sprintf("  %s: %v", repo.Name, err))
-						}
-					} else {
-						errors = append(errors, fmt.Sprintf("  %s: %v", repo.Name, err))
-					}
-				}
-			}
-		}
-
-		if len(errors) > 0 && !wsRemoveForce {
-			fmt.Fprintf(os.Stderr, "Error removing worktrees:\n%s\nUse --force to override.\n", strings.Join(errors, "\n"))
+func checkRunningAgentsOrExit(ws config.WorkspaceConfig) {
+	if wsRemoveForce {
+		return
+	}
+	for _, repo := range ws.Repos {
+		lockPath := filepath.Join(repo.Path, ".agent.lock")
+		if _, err := os.Stat(lockPath); err == nil {
+			fmt.Fprintf(os.Stderr, "Error: repo %q has a running agent (lock file exists). Use --force to override.\n", repo.Name)
 			os.Exit(1)
 		}
+	}
+}
 
-		// Remove workspace directory
-		if err := os.RemoveAll(ws.Path); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: could not remove workspace directory %s: %v\n", ws.Path, err)
+func removeWorktrees(deps *cli.Deps, ws config.WorkspaceConfig) {
+	var errs []string
+	for _, repo := range ws.Repos {
+		repoPath := repo.Path
+		if !filepath.IsAbs(repoPath) {
+			repoPath = filepath.Join(ws.Path, repoPath)
+		}
+		if _, err := os.Stat(filepath.Join(repoPath, ".git")); err != nil {
+			continue
+		}
+		if err := removeOneWorktree(deps, repoPath, repo.Name); err != nil {
+			errs = append(errs, err.Error())
 		}
 	}
+	if len(errs) > 0 && !wsRemoveForce {
+		fmt.Fprintf(os.Stderr, "Error removing worktrees:\n%s\nUse --force to override.\n", strings.Join(errs, "\n"))
+		os.Exit(1)
+	}
+	if err := os.RemoveAll(ws.Path); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not remove workspace directory %s: %v\n", ws.Path, err)
+	}
+}
 
-	// Update config
+func removeOneWorktree(deps *cli.Deps, repoPath, repoName string) error {
+	mainRepoPath := findMainRepoPath(repoPath)
+	if mainRepoPath == "" {
+		return nil
+	}
+	if _, err := cli.RunGit(deps, mainRepoPath, "worktree", "remove", repoPath); err != nil {
+		if wsRemoveForce {
+			if _, err = cli.RunGit(deps, mainRepoPath, "worktree", "remove", "--force", repoPath); err != nil {
+				return fmt.Errorf("  %s: %v", repoName, err)
+			}
+			return nil
+		}
+		return fmt.Errorf("  %s: %v", repoName, err)
+	}
+	return nil
+}
+
+func updateConfigAfterRemove(cfg *config.LoomConfig, wsName string) {
 	delete(cfg.Workspaces, wsName)
-
-	// Update default workspace if needed
 	if cfg.DefaultWorkspace == wsName {
 		cfg.DefaultWorkspace = ""
-		// Set to first remaining workspace
 		names := make([]string, 0, len(cfg.Workspaces))
 		for name := range cfg.Workspaces {
 			names = append(names, name)
@@ -454,13 +448,10 @@ func runWorkspaceRemove(cmd *cobra.Command, args []string) {
 			cfg.DefaultWorkspace = names[0]
 		}
 	}
-
 	if err := config.SaveConfigUnlocked(cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
-
-	fmt.Printf("Workspace %q removed.\n", wsName)
 }
 
 // findMainRepoPath reads the .git file in a worktree to find the main repo's path.

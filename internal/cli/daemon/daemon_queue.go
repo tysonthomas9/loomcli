@@ -3,7 +3,6 @@ package daemon
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -11,8 +10,8 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 )
 
 var daemonQueueCmd = &cobra.Command{
@@ -37,38 +36,12 @@ Examples:
 // For built-in roles, merges any user-defined config on top of defaults.
 // For custom roles, requires a prompt_file that must exist.
 func ResolveRoleConfigStatic(roleName string, config *cfgpkg.DaemonConfig, projectDir string) (cfgpkg.RoleConfig, error) {
-	if builtInRoles[roleName] {
-		rc := cfgpkg.RoleConfig{Description: fmt.Sprintf("Built-in %s agent", roleName)}
-		if userRC, ok := config.ResolveRole(roleName); ok {
-			rc = mergeRoleConfig(rc, userRC)
-		}
-		return rc, nil
-	}
-
-	rc, ok := config.ResolveRole(roleName)
-	if !ok {
-		return cfgpkg.RoleConfig{}, fmt.Errorf("role %q not found (not a built-in role and not defined in config.Roles)", roleName)
-	}
-
-	if rc.PromptFile == "" {
-		return cfgpkg.RoleConfig{}, fmt.Errorf("custom role %q missing prompt_file", roleName)
-	}
-
-	promptPath := rc.PromptFile
-	if !filepath.IsAbs(promptPath) {
-		promptPath = filepath.Join(projectDir, promptPath)
-	}
-	if _, err := os.Stat(promptPath); err != nil {
-		return cfgpkg.RoleConfig{}, fmt.Errorf("prompt file %q not found: %w", promptPath, err)
-	}
-	rc.PromptFile = promptPath
-
-	return rc, nil
+	return supervisor.ResolveRoleConfigStatic(roleName, config, projectDir)
 }
 
-// findAgentEntry finds an agent by worktree name in the config.
+// findAgentEntryStatic finds an agent by worktree name in the config.
 // Returns the agent entry and nil error on success, or an error listing available names.
-func findAgentEntry(config *cfgpkg.DaemonConfig, worktreeName string) (*cfgpkg.AgentEntry, error) {
+func findAgentEntryStatic(config *cfgpkg.DaemonConfig, worktreeName string) (*cfgpkg.AgentEntry, error) {
 	for i := range config.Agents {
 		if config.Agents[i].Worktree == worktreeName {
 			return &config.Agents[i], nil
@@ -91,13 +64,13 @@ func runDaemonQueue(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	config, err := config.LoadDaemonConfig(projectDir)
+	config, err := cfgpkg.LoadDaemonConfig(projectDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: loading config: %v\n", err)
 		os.Exit(1)
 	}
 
-	agent, err := findAgentEntry(config, agentName)
+	agent, err := findAgentEntryStatic(config, agentName)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)

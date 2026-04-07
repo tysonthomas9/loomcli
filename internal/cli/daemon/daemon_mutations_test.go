@@ -1,5 +1,3 @@
-//go:build ignore
-
 package daemon
 
 import (
@@ -13,8 +11,25 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
+	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/notify"
 )
+
+// newMutationTestDaemon creates a Daemon with a notify bus and workspace ID for mutation tests.
+func newMutationTestDaemon(bus notify.Publisher, wsID string) *Daemon {
+	d := &Daemon{
+		notifyBus: bus,
+	}
+	d.sup = &supervisor.Supervisor{
+		ConfigSnapshot: func() *DaemonConfig { return &DaemonConfig{} },
+		WorkspaceID:    wsID,
+		Shutdown:       make(chan struct{}),
+		StoppedAgents:  make(map[string]struct{}),
+		EmitEvent:      func(events.Event) {},
+	}
+	return d
+}
 
 // --- MutationBuffer tests ---
 
@@ -305,10 +320,7 @@ func TestDaemon_PublishMutation(t *testing.T) {
 	sub := bus.Subscribe("ws-test", "issue")
 	defer sub.Close()
 
-	d := &Daemon{
-		notifyBus:   bus,
-		workspaceID: "ws-test",
-	}
+	d := newMutationTestDaemon(bus, "ws-test")
 
 	m := backend.MutationData{
 		Type:      "claim",
@@ -338,13 +350,13 @@ func TestDaemon_PublishMutation(t *testing.T) {
 }
 
 func TestDaemon_PublishMutation_NilBus(t *testing.T) {
-	d := &Daemon{notifyBus: nil}
+	d := newMutationTestDaemon(nil, "")
 	// Should not panic
 	d.publishMutation(backend.MutationData{Type: "claim", IssueID: "x"})
 }
 
 func TestDaemon_PublishMutation_NopPublisher(t *testing.T) {
-	d := &Daemon{notifyBus: notify.NopPublisher{}}
+	d := newMutationTestDaemon(notify.NopPublisher{}, "")
 	// Should not panic
 	d.publishMutation(backend.MutationData{Type: "claim", IssueID: "x"})
 }
@@ -356,10 +368,7 @@ func TestDaemon_PublishMutation_SetsTimestamp(t *testing.T) {
 	sub := bus.Subscribe("ws-test", "issue")
 	defer sub.Close()
 
-	d := &Daemon{
-		notifyBus:   bus,
-		workspaceID: "ws-test",
-	}
+	d := newMutationTestDaemon(bus, "ws-test")
 
 	before := time.Now()
 	d.publishMutation(backend.MutationData{Type: "status", IssueID: "z"})
@@ -383,10 +392,7 @@ func TestDaemon_PublishMutation_TopicAndWorkspace(t *testing.T) {
 	sub := bus.Subscribe("ws-42", "issue")
 	defer sub.Close()
 
-	d := &Daemon{
-		notifyBus:   bus,
-		workspaceID: "ws-42",
-	}
+	d := newMutationTestDaemon(bus, "ws-42")
 
 	d.publishMutation(backend.MutationData{Type: "status", IssueID: "t", Timestamp: time.Now()})
 
@@ -413,11 +419,8 @@ func TestControlHandler_GetMutations(t *testing.T) {
 	buf.Start()
 	defer buf.Stop()
 
-	d := &Daemon{
-		notifyBus:   bus,
-		workspaceID: "ws-1",
-		mutBuf:      buf,
-	}
+	d := newMutationTestDaemon(bus, "ws-1")
+	d.mutBuf = buf
 
 	// Publish 2 mutations
 	now := time.Now()
@@ -510,11 +513,8 @@ func TestControlHandler_WaitForMutations_Unblocks(t *testing.T) {
 	buf.Start()
 	defer buf.Stop()
 
-	d := &Daemon{
-		notifyBus:   bus,
-		workspaceID: "ws-1",
-		mutBuf:      buf,
-	}
+	d := newMutationTestDaemon(bus, "ws-1")
+	d.mutBuf = buf
 
 	args, _ := json.Marshal(WaitForMutationsArgs{Since: 0, Timeout: 5000})
 
@@ -599,20 +599,16 @@ func TestControlSocket_GetMutations_RoundTrip(t *testing.T) {
 	buf.Start()
 	defer buf.Stop()
 
-	d := &Daemon{
-		config:        &DaemonConfig{Agents: []AgentEntry{{Worktree: "t", Role: "task"}}},
-		shutdown:      make(chan struct{}),
-		stoppedAgents: make(map[string]struct{}),
-		notifyBus:     bus,
-		workspaceID:   "ws-rt",
-		mutBuf:        buf,
-	}
+	d := newMutationTestDaemon(bus, "ws-rt")
+	d.config = &DaemonConfig{Agents: []AgentEntry{{Worktree: "t", Role: "task"}}}
+	d.sup.ConfigSnapshot = d.configSnapshot
+	d.mutBuf = buf
 
 	if err := d.startControlServer(socketPath); err != nil {
 		t.Fatalf("startControlServer: %v", err)
 	}
 	defer func() {
-		close(d.shutdown)
+		d.sup.ShutdownOnce.Do(func() { close(d.sup.Shutdown) })
 		_ = d.controlListener.Close()
 	}()
 

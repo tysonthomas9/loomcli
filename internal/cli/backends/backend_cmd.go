@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
 	"github.com/tysonthomas9/loomcli/internal/cli"
 )
 
@@ -61,25 +62,8 @@ func runBackendList(cmd *cobra.Command, args []string) {
 
 	active := cli.GetBackendName()
 	entries := make([]backendListEntry, 0, len(names))
-
 	for _, name := range names {
-		e := backendListEntry{Name: name, Active: name == active}
-		b, ok := cli.GetBackendByName(name)
-		if ok {
-			if mp, ok := b.(MetadataProvider); ok {
-				meta := mp.Meta()
-				e.DisplayName = meta.DisplayName
-				e.Version = meta.Version
-			}
-			if hc, ok := b.(HealthCheckableBackend); ok {
-				hs := hc.HealthCheck()
-				e.Installed = hs.Installed
-				if e.Version == "" {
-					e.Version = hs.Version
-				}
-			}
-		}
-		entries = append(entries, e)
+		entries = append(entries, buildListEntry(name, active))
 	}
 
 	if backendListJSON {
@@ -89,24 +73,49 @@ func runBackendList(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	// Column-aligned table output
 	fmt.Printf("  %-12s %-16s %-20s %s\n", "NAME", "DISPLAY NAME", "VERSION", "INSTALLED")
 	for _, e := range entries {
-		marker := " "
-		if e.Active {
-			marker = "*"
-		}
-		displayName := e.DisplayName
-		if displayName == "" {
-			displayName = "-"
-		}
-		version := e.Version
-		if version == "" {
-			version = "-"
-		}
-		installed := boolSymbol(e.Installed)
-		fmt.Printf("%s %-12s %-16s %-20s %s\n", marker, e.Name, displayName, version, installed)
+		printListRow(e)
 	}
+}
+
+// buildListEntry populates a backendListEntry from the registered backend.
+func buildListEntry(name, active string) backendListEntry {
+	e := backendListEntry{Name: name, Active: name == active}
+	b, ok := cli.GetBackendByName(name)
+	if !ok {
+		return e
+	}
+	if mp, ok := b.(MetadataProvider); ok {
+		meta := mp.Meta()
+		e.DisplayName = meta.DisplayName
+		e.Version = meta.Version
+	}
+	if hc, ok := b.(HealthCheckableBackend); ok {
+		hs := hc.HealthCheck()
+		e.Installed = hs.Installed
+		if e.Version == "" {
+			e.Version = hs.Version
+		}
+	}
+	return e
+}
+
+// printListRow prints a single row for the backend list table.
+func printListRow(e backendListEntry) {
+	marker := " "
+	if e.Active {
+		marker = "*"
+	}
+	displayName := e.DisplayName
+	if displayName == "" {
+		displayName = "-"
+	}
+	version := e.Version
+	if version == "" {
+		version = "-"
+	}
+	fmt.Printf("%s %-12s %-16s %-20s %s\n", marker, e.Name, displayName, version, boolSymbol(e.Installed))
 }
 
 // --- health ---
@@ -136,22 +145,8 @@ func runBackendHealth(cmd *cobra.Command, args []string) {
 
 	entries := make([]backendHealthEntry, 0, len(names))
 	anyUnhealthy := false
-
 	for _, name := range names {
-		e := backendHealthEntry{Name: name}
-		b, ok := cli.GetBackendByName(name)
-		if ok {
-			if hc, ok := b.(HealthCheckableBackend); ok {
-				hs := hc.HealthCheck()
-				e.Healthy = hs.Healthy
-				e.Installed = hs.Installed
-				e.Version = hs.Version
-				e.APIKeySet = hs.APIKeySet
-				e.Message = hs.Message
-			} else {
-				e.Message = "no health check available"
-			}
-		}
+		e := buildHealthEntry(name)
 		if !e.Healthy {
 			anyUnhealthy = true
 		}
@@ -162,12 +157,38 @@ func runBackendHealth(cmd *cobra.Command, args []string) {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(entries)
-		if anyUnhealthy {
-			os.Exit(1)
-		}
-		return
+	} else {
+		printHealthTable(entries)
 	}
 
+	if anyUnhealthy {
+		os.Exit(1)
+	}
+}
+
+// buildHealthEntry populates a backendHealthEntry from the registered backend.
+func buildHealthEntry(name string) backendHealthEntry {
+	e := backendHealthEntry{Name: name}
+	b, ok := cli.GetBackendByName(name)
+	if !ok {
+		return e
+	}
+	hc, ok := b.(HealthCheckableBackend)
+	if !ok {
+		e.Message = "no health check available"
+		return e
+	}
+	hs := hc.HealthCheck()
+	e.Healthy = hs.Healthy
+	e.Installed = hs.Installed
+	e.Version = hs.Version
+	e.APIKeySet = hs.APIKeySet
+	e.Message = hs.Message
+	return e
+}
+
+// printHealthTable renders the health status table in human-readable format.
+func printHealthTable(entries []backendHealthEntry) {
 	fmt.Printf("%-12s %-9s %-11s %-20s %-9s %s\n", "NAME", "HEALTHY", "INSTALLED", "VERSION", "API KEY", "MESSAGE")
 	for _, e := range entries {
 		version := e.Version
@@ -175,17 +196,8 @@ func runBackendHealth(cmd *cobra.Command, args []string) {
 			version = "-"
 		}
 		fmt.Printf("%-12s %-9s %-11s %-20s %-9s %s\n",
-			e.Name,
-			boolSymbol(e.Healthy),
-			boolSymbol(e.Installed),
-			version,
-			boolSymbol(e.APIKeySet),
-			e.Message,
-		)
-	}
-
-	if anyUnhealthy {
-		os.Exit(1)
+			e.Name, boolSymbol(e.Healthy), boolSymbol(e.Installed),
+			version, boolSymbol(e.APIKeySet), e.Message)
 	}
 }
 
@@ -224,6 +236,20 @@ func runBackendInfo(cmd *cobra.Command, args []string) {
 	}
 
 	caps := InspectCapabilities(b)
+	out := buildInfoOutput(name, caps)
+
+	if backendInfoJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(out)
+		return
+	}
+
+	printInfoHumanReadable(name, out, caps)
+}
+
+// buildInfoOutput assembles the JSON-serialisable backend info structure.
+func buildInfoOutput(name string, caps BackendCapabilities) backendInfoOutput {
 	out := backendInfoOutput{
 		Name: name,
 		Capabilities: &capabilitiesOutput{
@@ -235,7 +261,6 @@ func runBackendInfo(cmd *cobra.Command, args []string) {
 			Metadata:  caps.HasMeta,
 		},
 	}
-
 	if caps.HasMeta {
 		meta := caps.Meta.Meta()
 		out.Meta = &meta
@@ -247,15 +272,11 @@ func runBackendInfo(cmd *cobra.Command, args []string) {
 	if caps.HasConfig {
 		out.Config = caps.Config.Options()
 	}
+	return out
+}
 
-	if backendInfoJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		_ = enc.Encode(out)
-		return
-	}
-
-	// Human-readable sections
+// printInfoHumanReadable renders the backend info sections for terminal output.
+func printInfoHumanReadable(name string, out backendInfoOutput, caps BackendCapabilities) {
 	fmt.Printf("Backend: %s\n", name)
 
 	if out.Meta != nil {
@@ -268,16 +289,27 @@ func runBackendInfo(cmd *cobra.Command, args []string) {
 	}
 
 	if out.Health != nil {
-		fmt.Println("\nHealth:")
-		fmt.Printf("  Healthy:     %s\n", boolSymbol(out.Health.Healthy))
-		fmt.Printf("  Installed:   %s\n", boolSymbol(out.Health.Installed))
-		printField("  Version", out.Health.Version)
-		fmt.Printf("  API Key Set: %s\n", boolSymbol(out.Health.APIKeySet))
-		printField("  Message", out.Health.Message)
+		printInfoHealth(out.Health)
 	}
 
+	printInfoCapabilities(caps)
+	printInfoConfig(out.Config)
+}
+
+// printInfoHealth renders the health section.
+func printInfoHealth(h *HealthStatus) {
+	fmt.Println("\nHealth:")
+	fmt.Printf("  Healthy:     %s\n", boolSymbol(h.Healthy))
+	fmt.Printf("  Installed:   %s\n", boolSymbol(h.Installed))
+	printField("  Version", h.Version)
+	fmt.Printf("  API Key Set: %s\n", boolSymbol(h.APIKeySet))
+	printField("  Message", h.Message)
+}
+
+// printInfoCapabilities renders the capabilities section.
+func printInfoCapabilities(caps BackendCapabilities) {
 	fmt.Println("\nCapabilities:")
-	capsList := []struct {
+	for _, c := range []struct {
 		name string
 		has  bool
 	}{
@@ -287,25 +319,28 @@ func runBackendInfo(cmd *cobra.Command, args []string) {
 		{"Health Check", caps.HasHealthCheck},
 		{"Configuration", caps.HasConfig},
 		{"Metadata", caps.HasMeta},
-	}
-	for _, c := range capsList {
+	} {
 		fmt.Printf("  %-16s %s\n", c.name, boolSymbol(c.has))
 	}
+}
 
-	if len(out.Config) > 0 {
-		fmt.Println("\nConfiguration Options:")
-		for _, opt := range out.Config {
-			fmt.Printf("  %s: %s\n", opt.Key, opt.Description)
-			parts := []string{}
-			if opt.Default != "" {
-				parts = append(parts, fmt.Sprintf("default=%s", opt.Default))
-			}
-			if opt.CurrentValue != "" {
-				parts = append(parts, fmt.Sprintf("current=%s", opt.CurrentValue))
-			}
-			if len(parts) > 0 {
-				fmt.Printf("    (%s)\n", strings.Join(parts, ", "))
-			}
+// printInfoConfig renders the configuration options section.
+func printInfoConfig(opts []BackendOption) {
+	if len(opts) == 0 {
+		return
+	}
+	fmt.Println("\nConfiguration Options:")
+	for _, opt := range opts {
+		fmt.Printf("  %s: %s\n", opt.Key, opt.Description)
+		var parts []string
+		if opt.Default != "" {
+			parts = append(parts, fmt.Sprintf("default=%s", opt.Default))
+		}
+		if opt.CurrentValue != "" {
+			parts = append(parts, fmt.Sprintf("current=%s", opt.CurrentValue))
+		}
+		if len(parts) > 0 {
+			fmt.Printf("    (%s)\n", strings.Join(parts, ", "))
 		}
 	}
 }

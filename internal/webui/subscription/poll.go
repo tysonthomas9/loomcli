@@ -35,49 +35,69 @@ const granularMutationThreshold = 100
 // emitGranularMutations broadcasts individual mutation events for each changed issue,
 // comparing against knownIssues to determine the mutation type (create/status/update).
 func (s *DaemonSubscriber) emitGranularMutations(changed []changedIssue, now time.Time, totalCount int64) {
-	// Copy knownIssues map contents (not just the pointer) while holding the lock
-	// to avoid a race with concurrent loadKnownIssues replacing the map.
-	s.mu.Lock()
-	known := make(map[string]knownIssueState, len(s.knownIssues))
-	for k, v := range s.knownIssues {
-		known[k] = v
-	}
-	s.mu.Unlock()
+	known := s.snapshotKnownIssues()
 
 	mutationCount := 0
 	for _, issue := range changed {
 		if issue.ID == "" {
 			continue
 		}
-
-		payload := &realtime.MutationPayload{
-			IssueID:     issue.ID,
-			Title:       issue.Title,
-			Assignee:    issue.Assignee,
-			Timestamp:   now.UTC().Format(time.RFC3339),
-			SourceRepo:  issue.SourceRepo,
-			WorkspaceID: s.workspaceID,
-			Priority:    &issue.Priority,
-		}
-
-		prev, existed := known[issue.ID]
-		if !existed {
-			payload.Type = rpc.MutationCreate
-			payload.NewStatus = issue.Status
-		} else if prev.Status != issue.Status {
-			payload.Type = rpc.MutationStatus
-			payload.OldStatus = prev.Status
-			payload.NewStatus = issue.Status
-		} else {
-			payload.Type = rpc.MutationUpdate
-		}
-
+		payload := s.buildMutationPayload(issue, now, known)
 		s.hub.Broadcast(payload)
 		mutationCount++
 	}
 
-	// Update known issues with new state
+	s.updateKnownIssues(changed, now, totalCount)
+
+	if mutationCount > 0 {
+		slog.Info("external DB change: broadcast granular mutations", "count", mutationCount, "clients", s.hub.ClientCount())
+	}
+}
+
+// snapshotKnownIssues returns a copy of the knownIssues map to avoid holding the
+// lock during broadcast.
+func (s *DaemonSubscriber) snapshotKnownIssues() map[string]knownIssueState {
 	s.mu.Lock()
+	known := make(map[string]knownIssueState, len(s.knownIssues))
+	for k, v := range s.knownIssues {
+		known[k] = v
+	}
+	s.mu.Unlock()
+	return known
+}
+
+// buildMutationPayload creates a MutationPayload for a changed issue, classifying
+// the mutation type by comparing against previously known state.
+func (s *DaemonSubscriber) buildMutationPayload(issue changedIssue, now time.Time, known map[string]knownIssueState) *realtime.MutationPayload {
+	payload := &realtime.MutationPayload{
+		IssueID:     issue.ID,
+		Title:       issue.Title,
+		Assignee:    issue.Assignee,
+		Timestamp:   now.UTC().Format(time.RFC3339),
+		SourceRepo:  issue.SourceRepo,
+		WorkspaceID: s.workspaceID,
+		Priority:    &issue.Priority,
+	}
+	prev, existed := known[issue.ID]
+	switch {
+	case !existed:
+		payload.Type = rpc.MutationCreate
+		payload.NewStatus = issue.Status
+	case prev.Status != issue.Status:
+		payload.Type = rpc.MutationStatus
+		payload.OldStatus = prev.Status
+		payload.NewStatus = issue.Status
+	default:
+		payload.Type = rpc.MutationUpdate
+	}
+	return payload
+}
+
+// updateKnownIssues merges changed issues into the known-issue snapshot and
+// advances the poll cursor.
+func (s *DaemonSubscriber) updateKnownIssues(changed []changedIssue, now time.Time, totalCount int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.knownIssues == nil {
 		s.knownIssues = make(map[string]knownIssueState, len(changed))
 	}
@@ -94,11 +114,6 @@ func (s *DaemonSubscriber) emitGranularMutations(changed []changedIssue, now tim
 	}
 	s.lastKnownCount = totalCount
 	s.lastPollTime = now
-	s.mu.Unlock()
-
-	if mutationCount > 0 {
-		slog.Info("external DB change: broadcast granular mutations", "count", mutationCount, "clients", s.hub.ClientCount())
-	}
 }
 
 // fetchChangedIssues calls List with UpdatedAfter to get issues changed since lastPollTime.

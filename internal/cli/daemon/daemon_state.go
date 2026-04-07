@@ -11,18 +11,11 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
-// resolveDaemonPath resolves a path relative to projectDir, or returns as-is if absolute
-func ResolveDaemonPath(projectDir, path string) string {
-	if filepath.IsAbs(path) {
-		return path
-	}
-	return filepath.Join(projectDir, path)
-}
-
-// validateDaemonPaths warns if LogDir or PIDFile paths resolve outside expected boundaries.
+// ValidateDaemonPaths warns if LogDir or PIDFile paths resolve outside expected boundaries.
 // Expected boundaries: within projectDir or within the loom config directory (~/.loom/).
 func ValidateDaemonPaths(projectDir, pidFilePath, logDir string) {
 	configDir := config.GetConfigDir()
@@ -49,7 +42,7 @@ func ValidateDaemonPaths(projectDir, pidFilePath, logDir string) {
 	}
 }
 
-// isLoomDaemonRunning checks if a loom daemon is running by reading PID file and checking process
+// IsLoomDaemonRunning checks if a loom daemon is running by reading PID file and checking process.
 func IsLoomDaemonRunning(pidFilePath string) (int, bool) {
 	data, err := os.ReadFile(pidFilePath) //nolint:gosec // pidFilePath constructed from known .loom directory
 	if err != nil {
@@ -69,7 +62,7 @@ func IsLoomDaemonRunning(pidFilePath string) (int, bool) {
 	return pid, lockfile.IsProcessRunning(pid)
 }
 
-// writePIDFile atomically writes the PID file
+// writePIDFile atomically writes the PID file.
 func writePIDFile(path string, pid int) error {
 	// Write to temp file first, then rename for atomicity
 	// Include PID in temp filename to avoid race conditions with concurrent daemons
@@ -84,7 +77,7 @@ func writePIDFile(path string, pid int) error {
 	return nil
 }
 
-// readStateFile reads the daemon-agents.json state file
+// ReadStateFile reads the daemon-agents.json state file.
 func ReadStateFile(path string) (*DaemonState, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // path constructed from known .loom directory
 	if err != nil {
@@ -98,8 +91,8 @@ func ReadStateFile(path string) (*DaemonState, error) {
 	return &state, nil
 }
 
-// writeStateFile writes the daemon-agents.json state file
-func writeStateFile(path string, startedAt time.Time, agents []SupervisedAgentStatus, maxRetries int) error {
+// writeStateFile writes the daemon-agents.json state file.
+func writeStateFile(path string, startedAt time.Time, agents []supervisor.SupervisedAgentStatus, maxRetries int) error {
 	state := DaemonState{
 		PID:       os.Getpid(),
 		StartedAt: startedAt,
@@ -154,13 +147,13 @@ func writeStateFile(path string, startedAt time.Time, agents []SupervisedAgentSt
 	return nil
 }
 
-// computeAgentStatus determines the status string based on agent state
-func computeAgentStatus(ap SupervisedAgentStatus, maxRetries int) string {
+// computeAgentStatus determines the status string based on agent state.
+func computeAgentStatus(ap supervisor.SupervisedAgentStatus, maxRetries int) string {
 	if ap.PID > 0 && lockfile.IsProcessRunning(ap.PID) {
 		return "running"
 	}
 	// Not running - check if it failed via stop reason or restart count
-	if ap.StopReason == StopReasonFatalError || ap.StopReason == StopReasonMaxRetries {
+	if ap.StopReason == supervisor.StopReasonFatalError || ap.StopReason == supervisor.StopReasonMaxRetries {
 		return "failed"
 	}
 	// Backward compatibility: high restart count without stop reason still means failed

@@ -151,55 +151,70 @@ func (h *Hub) Run() {
 	for {
 		select {
 		case client := <-h.register:
-			h.mu.Lock()
-			h.clients[client] = true
-			h.mu.Unlock()
-			slog.Info("SSE client registered", "client_id", client.id, "count", len(h.clients))
-
+			h.addClient(client)
 		case client := <-h.unregister:
-			h.mu.Lock()
-			if _, ok := h.clients[client]; ok {
-				delete(h.clients, client)
-				close(client.send)
-			}
-			h.mu.Unlock()
-			slog.Info("SSE client unregistered", "client_id", client.id, "count", len(h.clients))
-
+			h.removeClient(client)
 		case mutation := <-h.broadcast:
-			if mutation.WorkspaceID == "" {
-				slog.Warn("SSE: dropping mutation with empty workspace_id", "type", mutation.Type, "issue_id", mutation.IssueID)
-				break
-			}
-			h.mu.RLock()
-			for client := range h.clients {
-				if !MatchesWorkspaceFilter(client.workspaceID, mutation.WorkspaceID) {
-					continue
-				}
-				if !MatchesSourceRepoFilter(client.sourceRepos, mutation.SourceRepo) {
-					continue
-				}
-				select {
-				case client.send <- mutation:
-				default:
-					// Client buffer full, skip this mutation
-					slog.Warn("SSE client buffer full, skipping mutation", "client_id", client.id)
-				}
-			}
-			h.mu.RUnlock()
-
+			h.fanOutMutation(mutation)
 		case <-retryTicker.C:
 			h.drainRetryQueue()
-
 		case <-h.done:
-			h.mu.Lock()
-			for client := range h.clients {
-				close(client.send)
-				delete(h.clients, client)
-			}
-			h.mu.Unlock()
+			h.closeAllClients()
 			return
 		}
 	}
+}
+
+// addClient registers a new SSE client.
+func (h *Hub) addClient(client *Client) {
+	h.mu.Lock()
+	h.clients[client] = true
+	h.mu.Unlock()
+	slog.Info("SSE client registered", "client_id", client.id, "count", len(h.clients))
+}
+
+// removeClient unregisters an SSE client and closes its send channel.
+func (h *Hub) removeClient(client *Client) {
+	h.mu.Lock()
+	if _, ok := h.clients[client]; ok {
+		delete(h.clients, client)
+		close(client.send)
+	}
+	h.mu.Unlock()
+	slog.Info("SSE client unregistered", "client_id", client.id, "count", len(h.clients))
+}
+
+// fanOutMutation sends a mutation to all matching connected clients.
+func (h *Hub) fanOutMutation(mutation *MutationPayload) {
+	if mutation.WorkspaceID == "" {
+		slog.Warn("SSE: dropping mutation with empty workspace_id", "type", mutation.Type, "issue_id", mutation.IssueID)
+		return
+	}
+	h.mu.RLock()
+	for client := range h.clients {
+		if !MatchesWorkspaceFilter(client.workspaceID, mutation.WorkspaceID) {
+			continue
+		}
+		if !MatchesSourceRepoFilter(client.sourceRepos, mutation.SourceRepo) {
+			continue
+		}
+		select {
+		case client.send <- mutation:
+		default:
+			slog.Warn("SSE client buffer full, skipping mutation", "client_id", client.id)
+		}
+	}
+	h.mu.RUnlock()
+}
+
+// closeAllClients closes all client send channels and clears the client map.
+func (h *Hub) closeAllClients() {
+	h.mu.Lock()
+	for client := range h.clients {
+		close(client.send)
+		delete(h.clients, client)
+	}
+	h.mu.Unlock()
 }
 
 // Stop gracefully stops the hub.

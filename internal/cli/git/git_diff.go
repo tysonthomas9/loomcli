@@ -73,24 +73,29 @@ func DiffFiles(worktreePath, from, to string) ([]ops.DiffFileResult, error) {
 	}
 	diffRange := from + ".." + to
 
-	// Get file statuses
 	nameStatusOut, err := cli.RunGitCommand(worktreePath, "diff", "--name-status", diffRange)
 	if err != nil {
 		return nil, fmt.Errorf("diff name-status: %w", err)
 	}
 
-	// Get line stats
 	numstatOut, err := cli.RunGitCommand(worktreePath, "diff", "--numstat", diffRange)
 	if err != nil {
 		return nil, fmt.Errorf("diff numstat: %w", err)
 	}
 
-	// Parse numstat into a map keyed by path
-	type fileStat struct {
-		additions int
-		deletions int
-	}
-	statsMap := make(map[string]fileStat)
+	statsMap := parseNumstatToMap(numstatOut)
+	return parseNameStatusWithStats(nameStatusOut, statsMap), nil
+}
+
+// diffFileStat holds line additions/deletions for a single file.
+type diffFileStat struct {
+	additions int
+	deletions int
+}
+
+// parseNumstatToMap parses git diff --numstat output into a map keyed by file path.
+func parseNumstatToMap(numstatOut string) map[string]diffFileStat {
+	statsMap := make(map[string]diffFileStat)
 	for _, line := range strings.Split(strings.TrimSpace(numstatOut), "\n") {
 		if line == "" {
 			continue
@@ -100,20 +105,21 @@ func DiffFiles(worktreePath, from, to string) ([]ops.DiffFileResult, error) {
 			continue
 		}
 		path := fields[2]
-		// Handle renames: numstat shows "old => new" or "{old => new}/path"
-		if idx := strings.Index(path, " => "); idx >= 0 {
-			// Use the part after " => " but handle brace syntax
+		if strings.Contains(path, " => ") {
 			path = parseNumstatRenamePath(path)
 		}
-		var s fileStat
+		var s diffFileStat
 		if fields[0] != "-" && fields[1] != "-" {
 			s.additions, _ = strconv.Atoi(fields[0])
 			s.deletions, _ = strconv.Atoi(fields[1])
 		}
 		statsMap[path] = s
 	}
+	return statsMap
+}
 
-	// Parse name-status and merge with stats
+// parseNameStatusWithStats merges git diff --name-status output with numstat data.
+func parseNameStatusWithStats(nameStatusOut string, statsMap map[string]diffFileStat) []ops.DiffFileResult {
 	results := make([]ops.DiffFileResult, 0)
 	for _, line := range strings.Split(strings.TrimSpace(nameStatusOut), "\n") {
 		if line == "" {
@@ -122,33 +128,33 @@ func DiffFiles(worktreePath, from, to string) ([]ops.DiffFileResult, error) {
 		if len(results) >= maxDiffFiles {
 			break
 		}
-		fields := strings.Split(line, "\t")
-		if len(fields) < 2 {
+		result, ok := parseNameStatusLine(line)
+		if !ok {
 			continue
 		}
-		status := fields[0]
-		var result ops.DiffFileResult
-
-		if strings.HasPrefix(status, "R") {
-			// Rename: R###\told\tnew
-			if len(fields) < 3 {
-				continue
-			}
-			result.Status = "R"
-			result.OldPath = fields[1]
-			result.Path = fields[2]
-		} else {
-			result.Status = status
-			result.Path = fields[1]
-		}
-
-		if s, ok := statsMap[result.Path]; ok {
+		if s, found := statsMap[result.Path]; found {
 			result.Additions = s.additions
 			result.Deletions = s.deletions
 		}
 		results = append(results, result)
 	}
-	return results, nil
+	return results
+}
+
+// parseNameStatusLine parses a single line from git diff --name-status.
+func parseNameStatusLine(line string) (ops.DiffFileResult, bool) {
+	fields := strings.Split(line, "\t")
+	if len(fields) < 2 {
+		return ops.DiffFileResult{}, false
+	}
+	status := fields[0]
+	if strings.HasPrefix(status, "R") {
+		if len(fields) < 3 {
+			return ops.DiffFileResult{}, false
+		}
+		return ops.DiffFileResult{Status: "R", OldPath: fields[1], Path: fields[2]}, true
+	}
+	return ops.DiffFileResult{Status: status, Path: fields[1]}, true
 }
 
 // parseNumstatRenamePath extracts the new path from numstat rename output.

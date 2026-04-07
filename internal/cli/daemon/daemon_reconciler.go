@@ -36,7 +36,7 @@ func (d *Daemon) configReconciler() {
 
 	for {
 		select {
-		case <-d.shutdown:
+		case <-d.sup.Shutdown:
 			stopped.Store(true)
 			debounceMu.Lock()
 			if debounceTimer != nil {
@@ -49,22 +49,7 @@ func (d *Daemon) configReconciler() {
 			if !ok {
 				return
 			}
-			if !isConfigFileEvent(event) {
-				continue
-			}
-			slog.Info("config file change detected", "file", event.Name, "op", event.Op)
-
-			// Debounce: reset 500ms timer on each event
-			debounceMu.Lock()
-			if debounceTimer != nil {
-				debounceTimer.Stop()
-			}
-			debounceTimer = time.AfterFunc(500*time.Millisecond, func() {
-				if !stopped.Load() {
-					d.reloadAndReconcile()
-				}
-			})
-			debounceMu.Unlock()
+			d.handleConfigEvent(event, &debounceTimer, &debounceMu, &stopped)
 
 		case err, ok := <-watcher.Errors:
 			if !ok {
@@ -73,6 +58,25 @@ func (d *Daemon) configReconciler() {
 			slog.Warn("config watcher error", "err", err)
 		}
 	}
+}
+
+// handleConfigEvent processes a single fsnotify event, debouncing config reloads.
+func (d *Daemon) handleConfigEvent(event fsnotify.Event, debounceTimer **time.Timer, debounceMu *sync.Mutex, stopped *atomic.Bool) {
+	if !isConfigFileEvent(event) {
+		return
+	}
+	slog.Info("config file change detected", "file", event.Name, "op", event.Op)
+
+	debounceMu.Lock()
+	if *debounceTimer != nil {
+		(*debounceTimer).Stop()
+	}
+	*debounceTimer = time.AfterFunc(500*time.Millisecond, func() {
+		if !stopped.Load() {
+			d.reloadAndReconcile()
+		}
+	})
+	debounceMu.Unlock()
 }
 
 // watchConfigDirs adds the project and global config directories to the watcher.
@@ -110,7 +114,7 @@ func (d *Daemon) configPollingFallback() {
 
 	for {
 		select {
-		case <-d.shutdown:
+		case <-d.sup.Shutdown:
 			return
 		case <-ticker.C:
 			d.reloadAndReconcile()
@@ -125,11 +129,7 @@ func (d *Daemon) reloadAndReconcile() {
 	newConfig, err := config.LoadDaemonConfig(d.projectDir)
 	if err != nil {
 		slog.Warn("config reload failed, keeping current config", "err", err)
-		if evt, err := events.NewEvent(events.ConfigReloaded, "", "", "", events.ConfigReloadedData{
-			Error: err.Error(),
-		}); err == nil {
-			d.emitEvent(evt)
-		}
+		d.emitConfigReloadError(err)
 		return
 	}
 
@@ -147,7 +147,6 @@ func (d *Daemon) reloadAndReconcile() {
 	added, removed, modified := diffAgents(oldAgents, newConfig.Agents)
 
 	if len(added) == 0 && len(removed) == 0 && len(modified) == 0 {
-		// Config changed but no agent differences (e.g., daemon settings only)
 		d.config = newConfig
 		d.configHash = newHash
 		d.reconcileMu.Unlock()
@@ -155,9 +154,7 @@ func (d *Daemon) reloadAndReconcile() {
 		return
 	}
 
-	// In fleet mode, agent lifecycle is managed by the fleet server.
-	// Store the updated config but do not drain/add agents locally —
-	// their stopCh/done channels were never initialized.
+	// In fleet mode, store updated config but skip local drain/add.
 	if cli.IsFleetMode(newConfig) {
 		d.config = newConfig
 		d.configHash = newHash
@@ -167,64 +164,68 @@ func (d *Daemon) reloadAndReconcile() {
 		return
 	}
 
-	// Update stored config and hash before drain/add so that new agents
-	// spawned by addAgent see the updated config.
 	d.config = newConfig
 	d.configHash = newHash
-
-	// Release reconcileMu before drain/add — drainAgent blocks on <-target.done,
-	// and superviseAgent calls configSnapshot() which acquires reconcileMu.RLock.
-	// Holding reconcileMu.Lock through drain would deadlock.
 	d.reconcileMu.Unlock()
 
 	slog.Info("config changed", "added", len(added), "removed", len(removed), "modified", len(modified))
 
-	// Serialize the drain/add phase to prevent concurrent reconciliations from
-	// racing on the same agent (e.g., double SIGTERM/SIGKILL, duplicate adds).
-	d.drainAddMu.Lock()
+	d.applyAgentChanges(added, removed, modified)
 
-	// Drain removed and modified agents
-	for _, entry := range removed {
-		if err := d.drainAgent(entry.Worktree); err != nil {
-			slog.Error("failed to drain removed agent", "worktree", entry.Worktree, "err", err)
-		}
-	}
-	for _, entry := range modified {
-		if err := d.drainAgent(entry.Worktree); err != nil {
-			slog.Error("failed to drain modified agent", "worktree", entry.Worktree, "err", err)
-		}
-	}
+	d.emitConfigReloadSuccess(len(added), len(removed), len(modified))
+}
 
-	// Add new and modified agents.
-	// Agents stopped via control socket are excluded from re-addition until
-	// explicitly started via "loom daemon start <agent>".
-	for _, entry := range added {
-		if d.isAgentStopped(entry.Worktree) {
-			slog.Info("skipping re-add of manually stopped agent", "worktree", entry.Worktree)
-			continue
-		}
-		if err := d.addAgent(entry); err != nil {
-			slog.Error("failed to add agent", "worktree", entry.Worktree, "err", err)
-		}
+// emitConfigReloadError emits a ConfigReloaded event with an error.
+func (d *Daemon) emitConfigReloadError(err error) {
+	if evt, evtErr := events.NewEvent(events.ConfigReloaded, "", "", "", events.ConfigReloadedData{
+		Error: err.Error(),
+	}); evtErr == nil {
+		d.emitEvent(evt)
 	}
-	for _, entry := range modified {
-		if d.isAgentStopped(entry.Worktree) {
-			slog.Info("skipping re-add of manually stopped modified agent", "worktree", entry.Worktree)
-			continue
-		}
-		if err := d.addAgent(entry); err != nil {
-			slog.Error("failed to re-add modified agent", "worktree", entry.Worktree, "err", err)
-		}
-	}
+}
 
-	d.drainAddMu.Unlock()
-
+// emitConfigReloadSuccess emits a ConfigReloaded event with agent change counts.
+func (d *Daemon) emitConfigReloadSuccess(added, removed, modified int) {
 	if evt, err := events.NewEvent(events.ConfigReloaded, "", "", "", events.ConfigReloadedData{
-		Added:    len(added),
-		Removed:  len(removed),
-		Modified: len(modified),
+		Added:    added,
+		Removed:  removed,
+		Modified: modified,
 	}); err == nil {
 		d.emitEvent(evt)
+	}
+}
+
+// applyAgentChanges drains removed/modified agents and adds new/modified agents.
+func (d *Daemon) applyAgentChanges(added, removed, modified []config.AgentEntry) {
+	d.drainAddMu.Lock()
+	defer d.drainAddMu.Unlock()
+
+	d.drainAgents(removed, "removed")
+	d.drainAgents(modified, "modified")
+
+	d.addNewAgents(added, "add")
+	d.addNewAgents(modified, "re-add modified")
+}
+
+// drainAgents stops a list of agents, logging errors.
+func (d *Daemon) drainAgents(entries []config.AgentEntry, label string) {
+	for _, entry := range entries {
+		if err := d.sup.DrainAgent(entry.Worktree); err != nil {
+			slog.Error("failed to drain "+label+" agent", "worktree", entry.Worktree, "err", err)
+		}
+	}
+}
+
+// addNewAgents starts agents, skipping those manually stopped.
+func (d *Daemon) addNewAgents(entries []config.AgentEntry, label string) {
+	for _, entry := range entries {
+		if d.isAgentStopped(entry.Worktree) {
+			slog.Info("skipping "+label+" of manually stopped agent", "worktree", entry.Worktree)
+			continue
+		}
+		if err := d.sup.AddAgent(entry); err != nil {
+			slog.Error("failed to "+label+" agent", "worktree", entry.Worktree, "err", err)
+		}
 	}
 }
 

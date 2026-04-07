@@ -1,5 +1,3 @@
-//go:build ignore
-
 package daemon
 
 import (
@@ -169,12 +167,9 @@ func TestConcurrencyTracker_BlockAndRelease(t *testing.T) {
 			t.Fatal("goroutine acquired before Release")
 		default:
 		}
-		// If we can grab the lock and count is still 1, the goroutine
-		// must be in cond.Wait() (which released the lock for us to grab).
-		ct.mu.Lock()
-		count := ct.counts["task"]
-		ct.mu.Unlock()
-		if count == 1 {
+		// If active count is still 1, the goroutine must be in
+		// cond.Wait() — it hasn't acquired yet.
+		if ct.ActiveCount("task") == 1 {
 			// Goroutine is blocked in cond.Wait — proceed to release
 			break
 		}
@@ -216,10 +211,7 @@ func TestConcurrencyTracker_ShutdownUnblocks(t *testing.T) {
 			t.Fatal("timed out waiting for goroutine to block")
 		default:
 		}
-		ct.mu.Lock()
-		count := ct.counts["task"]
-		ct.mu.Unlock()
-		if count == 1 {
+		if ct.ActiveCount("task") == 1 {
 			break
 		}
 		runtime.Gosched()

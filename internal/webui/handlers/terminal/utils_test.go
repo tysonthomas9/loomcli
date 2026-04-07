@@ -1,5 +1,3 @@
-//go:build ignore
-
 // This file references TerminalContext, TerminalContextStats from the terminal
 // package. These cross-package dependencies require further refactoring.
 

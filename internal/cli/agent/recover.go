@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+
 	"github.com/tysonthomas9/loomcli/internal/cli"
 )
 
@@ -63,7 +64,6 @@ func runRecover(cmd *cobra.Command, args []string) {
 	deps := cli.GetDeps(cmd)
 	worktreeName := args[0]
 
-	// 1. Resolve worktree path
 	worktreePath, err := cli.ResolveWorktreePath(worktreeName)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -75,7 +75,6 @@ func runRecover(cmd *cobra.Command, args []string) {
 	fmt.Println("=========================================")
 	fmt.Println("")
 
-	// 2. Check lock status
 	lockInfo, isRunning, err := cli.CheckLock(worktreePath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error checking lock: %v\n", err)
@@ -90,48 +89,56 @@ func runRecover(cmd *cobra.Command, args []string) {
 	}
 
 	if isRunning {
-		fmt.Printf("Agent process (PID %d) is still running.\n", lockInfo.PID)
-
-		shouldKill := recoverForce
-		if !shouldKill {
-			shouldKill = confirmKill(lockInfo.PID)
-		}
-
-		if !shouldKill {
-			fmt.Println("Aborted. Agent process left running.")
+		if !handleRunningAgent(lockInfo.PID) {
 			return
 		}
-
-		if err := killProcess(lockInfo.PID); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to kill process: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Printf("✓ Killed agent process (PID %d)\n", lockInfo.PID)
 	}
 
-	// 3. Clear stale lock
-	fmt.Printf("Clearing stale lock (PID %d no longer running)...\n", lockInfo.PID)
-	if err := forceReleaseLock(worktreePath); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to clear lock: %v\n", err)
-	} else {
-		fmt.Println("✓ Lock cleared")
-	}
+	clearStaleLock(worktreePath, lockInfo.PID)
 
-	// 4. Handle orphaned task if there was one
 	if lockInfo.TaskID != "" {
 		handleOrphanedTask(deps, worktreePath, lockInfo.TaskID, !recoverNoAnalyze)
 	}
 
-	// 5. Find and reset any additional orphaned tasks assigned to this agent
 	resetOrphanedAgentTasks(deps, worktreePath, lockInfo.AgentName, lockInfo.TaskID, !recoverNoAnalyze)
-
-	// 6. Clean up untracked files left by the crashed agent
-	cleanUntrackedFiles(deps, worktreePath, recoverForce)
+	cleanUntrackedFiles(worktreePath, recoverForce)
 
 	fmt.Println("")
 	fmt.Println("=========================================")
 	fmt.Printf("✓ Agent '%s' recovered and ready for work\n", worktreeName)
 	fmt.Println("=========================================")
+}
+
+// handleRunningAgent prompts to kill a running agent process. Returns true if
+// the process was killed (or force mode is on), false if the user aborted.
+func handleRunningAgent(pid int) bool {
+	fmt.Printf("Agent process (PID %d) is still running.\n", pid)
+
+	shouldKill := recoverForce
+	if !shouldKill {
+		shouldKill = confirmKill(pid)
+	}
+	if !shouldKill {
+		fmt.Println("Aborted. Agent process left running.")
+		return false
+	}
+
+	if err := killProcess(pid); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to kill process: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("✓ Killed agent process (PID %d)\n", pid)
+	return true
+}
+
+// clearStaleLock removes the lock file for a no-longer-running process.
+func clearStaleLock(worktreePath string, pid int) {
+	fmt.Printf("Clearing stale lock (PID %d no longer running)...\n", pid)
+	if err := forceReleaseLock(worktreePath); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to clear lock: %v\n", err)
+	} else {
+		fmt.Println("✓ Lock cleared")
+	}
 }
 
 // RecoverWorktree provides a non-interactive recovery path for daemon use:
@@ -184,7 +191,7 @@ func RecoverWorktree(worktreePath, agentName string, exitCode int) error {
 	resetOrphanedAgentTasks(deps, worktreePath, agentName, lockTaskID, false)
 
 	// 6. Clean untracked files (force=true, no prompting)
-	cleanUntrackedFiles(deps, worktreePath, true)
+	cleanUntrackedFiles(worktreePath, true)
 
 	return nil
 }

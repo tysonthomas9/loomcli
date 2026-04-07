@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 )
 
 // AgentIPCRequest is sent by an agent subprocess to the daemon IPC socket.
@@ -71,7 +72,7 @@ func (d *Daemon) startIPCServer(socketPath string) error {
 			if err != nil {
 				// Listener closed (shutdown) — exit silently
 				select {
-				case <-d.shutdown:
+				case <-d.sup.Shutdown:
 					return
 				default:
 				}
@@ -276,7 +277,7 @@ func ipcErrorResponse(err error) AgentIPCResponse {
 
 // resolveAgentIPCSocketPath returns the IPC socket path adjacent to the PID file.
 func resolveAgentIPCSocketPath(projectDir, pidFile string) string {
-	pidFilePath := ResolveDaemonPath(projectDir, pidFile)
+	pidFilePath := supervisor.ResolveDaemonPath(projectDir, pidFile)
 	return filepath.Join(filepath.Dir(pidFilePath), "agent-ipc.sock")
 }
 

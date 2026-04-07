@@ -1,5 +1,3 @@
-//go:build ignore
-
 package agent
 
 import (
@@ -99,8 +97,8 @@ func TestRunPlan_SingleTask_Success(t *testing.T) {
 	if !strings.Contains(output, "Running PLANNING agent") {
 		t.Errorf("expected 'Running PLANNING agent' banner in output, got: %s", output)
 	}
-	if len(recorder.Invocations) != 1 {
-		t.Fatalf("expected 1 agent invocation, got %d", len(recorder.Invocations))
+	if len(recorder.InteractiveCalls) != 1 {
+		t.Fatalf("expected 1 agent invocation, got %d", len(recorder.InteractiveCalls))
 	}
 
 	_, err := os.Stat(filepath.Join(tmpDir, LockFileName))
@@ -139,8 +137,8 @@ func TestRunPlan_DaemonMode_AcquiresLock(t *testing.T) {
 	var buf bytes.Buffer
 	buf.ReadFrom(r)
 
-	if len(recorder.Invocations) != 1 {
-		t.Fatalf("expected 1 agent invocation in daemon mode, got %d", len(recorder.Invocations))
+	if len(recorder.InteractiveCalls) != 1 {
+		t.Fatalf("expected 1 agent invocation in daemon mode, got %d", len(recorder.InteractiveCalls))
 	}
 
 	lockPath := filepath.Join(tmpDir, LockFileName)

@@ -1,5 +1,3 @@
-//go:build ignore
-
 package config
 
 import (
@@ -451,7 +449,7 @@ func TestLoadConfig_AutoMigration(t *testing.T) {
 	if err := yaml.Unmarshal(raw, &diskMap); err != nil {
 		t.Fatal(err)
 	}
-	if v := getConfigVersion(diskMap); v != CurrentConfigVersion {
+	if v := GetConfigVersion(diskMap); v != CurrentConfigVersion {
 		t.Errorf("on-disk version = %d, want %d", v, CurrentConfigVersion)
 	}
 
@@ -665,7 +663,7 @@ func TestWithConfigLock_Serializes(t *testing.T) {
 		go func(idx int) {
 			defer wg.Done()
 			errs[idx] = WithConfigLock(func() error {
-				cfg, err := loadConfigUnlocked()
+				cfg, err := LoadConfigUnlocked()
 				if err != nil {
 					return err
 				}
@@ -683,7 +681,7 @@ func TestWithConfigLock_Serializes(t *testing.T) {
 					ID:   NewWorkspaceID(),
 					Path: filepath.Join("/tmp", name),
 				}
-				return saveConfigUnlocked(cfg)
+				return SaveConfigUnlocked(cfg)
 			})
 		}(i)
 	}

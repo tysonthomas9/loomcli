@@ -61,8 +61,6 @@ type GitStatusSummary struct {
 // Note: "push" in loom terminology means merge the source branch INTO the target branch,
 // not a simple git push.
 func PushBranchInRepoResult(repoPath, sourceBranch, targetBranch, remote string) (*PushResult, error) {
-	r := resolveRemote(remote)
-
 	if err := GitFetchRemote(repoPath, remote); err != nil {
 		return nil, fmt.Errorf("fetching: %v", err)
 	}
@@ -86,25 +84,20 @@ func PushBranchInRepoResult(repoPath, sourceBranch, targetBranch, remote string)
 		return nil, fmt.Errorf("pulling %s: %v", targetBranch, err)
 	}
 
-	hasCommits, err := HasCommitsBetweenRemote(repoPath, remote, targetBranch, sourceBranch)
-	if err == nil && !hasCommits {
-		return &PushResult{
-			Success:         true,
-			Message:         fmt.Sprintf("Already up to date (no new commits in %s)", sourceBranch),
-			AlreadyUpToDate: true,
-		}, nil
+	return pushMergeAndPush(repoPath, sourceBranch, targetBranch, remote)
+}
+
+// pushMergeAndPush checks for new commits, merges, and pushes to remote.
+func pushMergeAndPush(repoPath, sourceBranch, targetBranch, remote string) (*PushResult, error) {
+	r := resolveRemote(remote)
+
+	if upToDate, res := checkAlreadyUpToDate(repoPath, remote, targetBranch, sourceBranch); upToDate {
+		return res, nil
 	}
 
 	conflicts, mergeErr := mergeSource(repoPath, sourceBranch, targetBranch)
 	if mergeErr != nil {
-		if len(conflicts) > 0 {
-			return &PushResult{
-				Success:         false,
-				Message:         "merge conflicts detected",
-				ConflictedFiles: conflicts,
-			}, nil
-		}
-		return nil, mergeErr
+		return mergeResultToConflicts(conflicts, mergeErr)
 	}
 
 	if err := GitPushRemote(repoPath, remote, targetBranch); err != nil {
@@ -117,6 +110,31 @@ func PushBranchInRepoResult(repoPath, sourceBranch, targetBranch, remote string)
 	}, nil
 }
 
+// checkAlreadyUpToDate returns true with a success result if there are no new commits.
+func checkAlreadyUpToDate(repoPath, remote, targetBranch, sourceBranch string) (bool, *PushResult) {
+	hasCommits, err := HasCommitsBetweenRemote(repoPath, remote, targetBranch, sourceBranch)
+	if err == nil && !hasCommits {
+		return true, &PushResult{
+			Success:         true,
+			Message:         fmt.Sprintf("Already up to date (no new commits in %s)", sourceBranch),
+			AlreadyUpToDate: true,
+		}
+	}
+	return false, nil
+}
+
+// mergeResultToConflicts converts a merge error with optional conflicts into a PushResult.
+func mergeResultToConflicts(conflicts []string, mergeErr error) (*PushResult, error) {
+	if len(conflicts) > 0 {
+		return &PushResult{
+			Success:         false,
+			Message:         "merge conflicts detected",
+			ConflictedFiles: conflicts,
+		}, nil
+	}
+	return nil, mergeErr
+}
+
 func pushBranchInRepoDetachedResult(repoPath, sourceBranch, targetBranch, remote string) (*PushResult, error) {
 	r := resolveRemote(remote)
 	tempBranch := fmt.Sprintf("loom-push-temp-%d", time.Now().UnixNano())
@@ -124,36 +142,20 @@ func pushBranchInRepoDetachedResult(repoPath, sourceBranch, targetBranch, remote
 	if err := GitCheckoutDetached(repoPath, r+"/"+targetBranch); err != nil {
 		return nil, fmt.Errorf("checking out %s/%s detached: %v", r, targetBranch, err)
 	}
-	defer func() {
-		_ = GitCheckout(repoPath, sourceBranch)
-	}()
+	defer func() { _ = GitCheckout(repoPath, sourceBranch) }()
 
-	hasCommits, err := HasCommitsBetweenRemote(repoPath, remote, targetBranch, sourceBranch)
-	if err == nil && !hasCommits {
-		return &PushResult{
-			Success:         true,
-			Message:         fmt.Sprintf("Already up to date (no new commits in %s)", sourceBranch),
-			AlreadyUpToDate: true,
-		}, nil
+	if upToDate, res := checkAlreadyUpToDate(repoPath, remote, targetBranch, sourceBranch); upToDate {
+		return res, nil
 	}
 
 	if err := GitCreateBranchFromHead(repoPath, tempBranch); err != nil {
 		return nil, fmt.Errorf("creating temp branch: %v", err)
 	}
-	defer func() {
-		_ = GitDeleteBranch(repoPath, tempBranch, true)
-	}()
+	defer func() { _ = GitDeleteBranch(repoPath, tempBranch, true) }()
 
 	conflicts, mergeErr := mergeSource(repoPath, sourceBranch, targetBranch)
 	if mergeErr != nil {
-		if len(conflicts) > 0 {
-			return &PushResult{
-				Success:         false,
-				Message:         "merge conflicts detected",
-				ConflictedFiles: conflicts,
-			}, nil
-		}
-		return nil, mergeErr
+		return mergeResultToConflicts(conflicts, mergeErr)
 	}
 
 	if err := GitPushRefspec(repoPath, remote, tempBranch, targetBranch); err != nil {

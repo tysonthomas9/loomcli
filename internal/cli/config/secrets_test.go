@@ -1,5 +1,3 @@
-//go:build ignore
-
 package config
 
 import (
@@ -78,9 +76,9 @@ func TestToEnvName(t *testing.T) {
 		{"a-b.c", "A_B_C"},
 	}
 	for _, tc := range tests {
-		got := toEnvName(tc.in)
+		got := ToEnvName(tc.in)
 		if got != tc.want {
-			t.Errorf("toEnvName(%q) = %q, want %q", tc.in, got, tc.want)
+			t.Errorf("ToEnvName(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
 }
@@ -182,12 +180,12 @@ func TestOnePasswordBackend_NonOpURI(t *testing.T) {
 
 func TestOnePasswordBackend_Success(t *testing.T) {
 	t.Parallel()
-	deps, _, _, _, _ := NewTestDeps(t)
-	deps.ExecCtx = &funcExecContextRunner{fn: func(_ context.Context, dir, name string, args ...string) CommandResult {
-		return CommandResult{Stdout: "op-secret-value\n", Stderr: "", Err: nil}
-	}}
-
-	b := &OnePasswordBackend{opAvailable: true, deps: deps}
+	b := &OnePasswordBackend{
+		opAvailable: true,
+		execCtx: func(_ context.Context, _, _ string, _ ...string) (string, string, error) {
+			return "op-secret-value\n", "", nil
+		},
+	}
 	val, found, err := b.Resolve("op://vault/item/field")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -199,12 +197,12 @@ func TestOnePasswordBackend_Success(t *testing.T) {
 
 func TestOnePasswordBackend_Error(t *testing.T) {
 	t.Parallel()
-	deps, _, _, _, _ := NewTestDeps(t)
-	deps.ExecCtx = &funcExecContextRunner{fn: func(_ context.Context, dir, name string, args ...string) CommandResult {
-		return CommandResult{Stdout: "", Stderr: "not signed in\n", Err: os.ErrPermission}
-	}}
-
-	b := &OnePasswordBackend{opAvailable: true, deps: deps}
+	b := &OnePasswordBackend{
+		opAvailable: true,
+		execCtx: func(_ context.Context, _, _ string, _ ...string) (string, string, error) {
+			return "", "not signed in\n", os.ErrPermission
+		},
+	}
 	_, _, err := b.Resolve("op://vault/item/field")
 	if err == nil {
 		t.Fatal("expected error")

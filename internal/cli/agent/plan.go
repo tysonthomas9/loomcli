@@ -76,7 +76,6 @@ func init() {
 func runPlan(cmd *cobra.Command, args []string) {
 	deps := cli.GetDeps(cmd)
 
-	// Resolve worktree/workspace path
 	var argName string
 	if len(args) > 0 {
 		argName = args[0]
@@ -91,112 +90,23 @@ func runPlan(cmd *cobra.Command, args []string) {
 	worktreePath := target.WorkDir
 	agentName := target.AgentName
 
-	// DAEMON MODE: Called by tmux session, run single task
-	// Daemon manages its own lock (parent doesn't hold lock in tmux mode)
 	if planDaemonMode {
-		if err := cli.AcquireLock(worktreePath, "plan", agentName); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
-		}
-		// Lock intentionally NOT released here. Parent (RunAutoModeTmux)
-		// reads the lock after daemon exit to detect task claims, then
-		// removes it before the next cycle.
-
-		if err := cli.UpdateLockState(worktreePath, cli.StateActive); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: could not update lock state: %v\n", err)
-		}
-		workspace, _ := config.ResolveActiveWorkspace()
-		prompt := GeneratePlanningPrompt(agentName, workspace, planParentID)
-
-		// Session: adopt parent-created session if available, else create our own
-		var sess *sessions.Session
-		if inheritedSID := os.Getenv("LOOM_SESSION_ID"); inheritedSID != "" {
-			// Daemon parent created session — just set env for hook propagation.
-			// Daemon handles finalization after subprocess exits.
-			inheritedBeads := os.Getenv("LOOM_BEADS_DIR")
-			if inheritedBeads == "" {
-				inheritedBeads = cli.GetBeadsDir()
-			}
-			backends.SetActiveSessionEnv(inheritedBeads, inheritedSID)
-		} else {
-			// Standalone run (no daemon parent) — create our own session
-			sessStore, sessErr := sessions.NewStore(cli.GetBeadsDir())
-			if sessErr != nil {
-				log.Printf("[plan] Warning: session store unavailable: %v", sessErr)
-			}
-			if sessStore != nil {
-				sess, _ = sessStore.CreateSession(sessions.CreateOptions{
-					AgentName: agentName,
-					Backend:   cli.ResolveBackendName(),
-					EpicID:    planParentID,
-					Prompt:    prompt,
-					Phase:     "planning",
-				})
-				if sess != nil {
-					backends.SetActiveSessionEnv(cli.GetBeadsDir(), sess.SessionID())
-				}
-			}
-		}
-
-		beforeRef := automode.CaptureHEADRef(worktreePath)
-		invokeErr := deps.Agent.InvokeInteractive(worktreePath, prompt, agentName) // Interactive mode, nice output
-
-		// Finalize session after invocation (only in standalone mode)
-		if sess != nil {
-			exitCode := 0
-			if invokeErr != nil {
-				exitCode = 1
-				var exitErr *exec.ExitError
-				if errors.As(invokeErr, &exitErr) {
-					exitCode = exitErr.ExitCode()
-				}
-			}
-			taskID := ""
-			if info, lockErr := cli.ReadLockFile(worktreePath); lockErr == nil {
-				taskID = info.TaskID
-			}
-			diffStats := git.ComputeDiffStats(worktreePath, beforeRef)
-			_ = sess.Finalize(sessions.FinalizeOptions{
-				TaskID:       taskID,
-				ExitCode:     exitCode,
-				FilesTouched: diffStats.FilesTouched,
-				DiffStats: sessions.DiffStats{
-					FilesChanged: diffStats.FilesChanged,
-					LinesAdded:   diffStats.LinesAdded,
-					LinesRemoved: diffStats.LinesRemoved,
-				},
-			})
-			backends.ClearActiveSessionEnv()
-		}
-
-		if invokeErr != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", invokeErr)
-			os.Exit(1)
-		}
-		// Note: No StateIdle here - daemon exits immediately, lock left for parent to read
+		runPlanDaemon(deps, worktreePath, agentName)
 		return
 	}
 
-	// Build router-based task check from daemon env vars (nil when no routing env vars set)
 	routerCheck := cli.RouterTaskCheckFromEnv(planParentID)
 
-	// AUTO MODE with tmux - daemon manages lock, not parent
 	if planAutoMode && automode.IsTmuxAvailable() {
 		shutdown := automode.SetupSignalHandler()
 		automode.RunAutoModeTmux(automode.AutoModeOptions{
-			Interval:        planInterval,
-			MaxTasks:        planMaxTasks,
-			IdleTimeout:     planIdleTimeout,
-			AgentType:       "plan",
-			AgentName:       agentName,
-			WorktreePath:    worktreePath,
-			ParentID:        planParentID,
-			CustomTaskCheck: routerCheck,
+			Interval: planInterval, MaxTasks: planMaxTasks, IdleTimeout: planIdleTimeout,
+			AgentType: "plan", AgentName: agentName, WorktreePath: worktreePath,
+			ParentID: planParentID, CustomTaskCheck: routerCheck,
 		}, shutdown)
 		return
 	}
 
-	// AUTO MODE without tmux OR single task mode - parent manages lock
 	if err := cli.AcquireLock(worktreePath, "plan", agentName); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -204,24 +114,50 @@ func runPlan(cmd *cobra.Command, args []string) {
 	defer func() { _ = cli.ReleaseLock(worktreePath) }()
 
 	if planAutoMode {
-		// Fallback to JSON streaming mode (no tmux)
-		fmt.Println("[auto] tmux not found, using JSON streaming mode")
-		shutdown := automode.SetupSignalHandler()
-		automode.RunAutoModeLoop(automode.AutoModeOptions{
-			Interval:        planInterval,
-			MaxTasks:        planMaxTasks,
-			IdleTimeout:     planIdleTimeout,
-			AgentType:       "plan",
-			AgentName:       agentName,
-			WorktreePath:    worktreePath,
-			ParentID:        planParentID,
-			CustomTaskCheck: routerCheck,
-			Deps:            deps,
-		}, shutdown)
+		runPlanAutoFallback(deps, worktreePath, agentName, routerCheck)
 		return
 	}
 
-	// SINGLE TASK MODE - check if there are tasks available for planning
+	runPlanSingleTask(deps, worktreePath, agentName, routerCheck)
+}
+
+// runPlanDaemon handles daemon mode: acquire lock, invoke agent, finalize session.
+func runPlanDaemon(deps *cli.Deps, worktreePath, agentName string) {
+	if err := cli.AcquireLock(worktreePath, "plan", agentName); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	if err := cli.UpdateLockState(worktreePath, cli.StateActive); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not update lock state: %v\n", err)
+	}
+
+	ws, _ := config.ResolveActiveWorkspace()
+	prompt := GeneratePlanningPrompt(agentName, ws, planParentID)
+	sess := adoptOrCreateSession(agentName, planParentID, prompt, "planning")
+
+	beforeRef := automode.CaptureHEADRef(worktreePath)
+	invokeErr := deps.Agent.InvokeInteractive(worktreePath, prompt, agentName)
+	finalizeAgentSession(sess, worktreePath, beforeRef, invokeErr)
+
+	if invokeErr != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", invokeErr)
+		os.Exit(1)
+	}
+}
+
+// runPlanAutoFallback handles auto mode without tmux.
+func runPlanAutoFallback(deps *cli.Deps, worktreePath, agentName string, routerCheck func() (bool, error)) {
+	fmt.Println("[auto] tmux not found, using JSON streaming mode")
+	shutdown := automode.SetupSignalHandler()
+	automode.RunAutoModeLoop(automode.AutoModeOptions{
+		Interval: planInterval, MaxTasks: planMaxTasks, IdleTimeout: planIdleTimeout,
+		AgentType: "plan", AgentName: agentName, WorktreePath: worktreePath,
+		ParentID: planParentID, CustomTaskCheck: routerCheck, Deps: deps,
+	}, shutdown)
+}
+
+// runPlanSingleTask runs a single planning task.
+func runPlanSingleTask(deps *cli.Deps, worktreePath, agentName string, routerCheck func() (bool, error)) {
 	available, err := cli.CheckTaskAvailability(routerCheck, func() (bool, error) {
 		return automode.HasAvailablePlanningTasks(planParentID, os.Getenv("LOOM_AGENT_REPO"))
 	})
@@ -245,62 +181,73 @@ func runPlan(cmd *cobra.Command, args []string) {
 		fmt.Fprintf(os.Stderr, "Warning: could not update lock state: %v\n", err)
 	}
 
-	// Generate and run the planning prompt
-	workspace, _ := config.ResolveActiveWorkspace()
-	prompt := GeneratePlanningPrompt(agentName, workspace, planParentID)
-
-	// Create session before invocation (non-fatal if store init fails)
-	sessStore, sessErr := sessions.NewStore(cli.GetBeadsDir())
-	if sessErr != nil {
-		log.Printf("[plan] Warning: session store unavailable: %v", sessErr)
-	}
-	var sess *sessions.Session
-	if sessStore != nil {
-		sess, _ = sessStore.CreateSession(sessions.CreateOptions{
-			AgentName: agentName,
-			Backend:   cli.ResolveBackendName(),
-			EpicID:    planParentID,
-			Prompt:    prompt,
-			Phase:     "planning",
-		})
-		if sess != nil {
-			backends.SetActiveSessionEnv(cli.GetBeadsDir(), sess.SessionID())
-		}
-	}
+	ws, _ := config.ResolveActiveWorkspace()
+	prompt := GeneratePlanningPrompt(agentName, ws, planParentID)
+	sess := createAgentSession(agentName, planParentID, prompt, "planning")
 
 	beforeRef := automode.CaptureHEADRef(worktreePath)
 	invokeErr := deps.Agent.InvokeInteractive(worktreePath, prompt, agentName)
-
-	// Finalize session after invocation
-	if sess != nil {
-		exitCode := 0
-		if invokeErr != nil {
-			exitCode = 1
-			var exitErr *exec.ExitError
-			if errors.As(invokeErr, &exitErr) {
-				exitCode = exitErr.ExitCode()
-			}
-		}
-		taskID := ""
-		if info, lockErr := cli.ReadLockFile(worktreePath); lockErr == nil {
-			taskID = info.TaskID
-		}
-		diffStats := git.ComputeDiffStats(worktreePath, beforeRef)
-		_ = sess.Finalize(sessions.FinalizeOptions{
-			TaskID:       taskID,
-			ExitCode:     exitCode,
-			FilesTouched: diffStats.FilesTouched,
-			DiffStats: sessions.DiffStats{
-				FilesChanged: diffStats.FilesChanged,
-				LinesAdded:   diffStats.LinesAdded,
-				LinesRemoved: diffStats.LinesRemoved,
-			},
-		})
-		backends.ClearActiveSessionEnv()
-	}
+	finalizeAgentSession(sess, worktreePath, beforeRef, invokeErr)
 
 	if invokeErr != nil {
 		fmt.Fprintf(os.Stderr, "Error running agent: %v\n", invokeErr)
 		os.Exit(1)
 	}
+}
+
+// adoptOrCreateSession either inherits a parent session or creates a new one.
+func adoptOrCreateSession(agentName, parentID, prompt, phase string) *sessions.Session {
+	if inheritedSID := os.Getenv("LOOM_SESSION_ID"); inheritedSID != "" {
+		inheritedBeads := os.Getenv("LOOM_BEADS_DIR")
+		if inheritedBeads == "" {
+			inheritedBeads = cli.GetBeadsDir()
+		}
+		backends.SetActiveSessionEnv(inheritedBeads, inheritedSID)
+		return nil
+	}
+	return createAgentSession(agentName, parentID, prompt, phase)
+}
+
+// createAgentSession creates a new session for tracking.
+func createAgentSession(agentName, parentID, prompt, phase string) *sessions.Session {
+	sessStore, sessErr := sessions.NewStore(cli.GetBeadsDir())
+	if sessErr != nil {
+		log.Printf("[agent] Warning: session store unavailable: %v", sessErr)
+		return nil
+	}
+	sess, _ := sessStore.CreateSession(sessions.CreateOptions{
+		AgentName: agentName, Backend: cli.ResolveBackendName(),
+		EpicID: parentID, Prompt: prompt, Phase: phase,
+	})
+	if sess != nil {
+		backends.SetActiveSessionEnv(cli.GetBeadsDir(), sess.SessionID())
+	}
+	return sess
+}
+
+// finalizeAgentSession finalizes a session after agent invocation.
+func finalizeAgentSession(sess *sessions.Session, worktreePath, beforeRef string, invokeErr error) {
+	if sess == nil {
+		return
+	}
+	exitCode := 0
+	if invokeErr != nil {
+		exitCode = 1
+		var exitErr *exec.ExitError
+		if errors.As(invokeErr, &exitErr) {
+			exitCode = exitErr.ExitCode()
+		}
+	}
+	taskID := ""
+	if info, lockErr := cli.ReadLockFile(worktreePath); lockErr == nil {
+		taskID = info.TaskID
+	}
+	diffStats := git.ComputeDiffStats(worktreePath, beforeRef)
+	_ = sess.Finalize(sessions.FinalizeOptions{
+		TaskID: taskID, ExitCode: exitCode, FilesTouched: diffStats.FilesTouched,
+		DiffStats: sessions.DiffStats{
+			FilesChanged: diffStats.FilesChanged, LinesAdded: diffStats.LinesAdded, LinesRemoved: diffStats.LinesRemoved,
+		},
+	})
+	backends.ClearActiveSessionEnv()
 }

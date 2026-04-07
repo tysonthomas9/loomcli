@@ -1,5 +1,3 @@
-//go:build ignore
-
 package cli
 
 import (
@@ -450,52 +448,41 @@ func installExecContextMock(t *testing.T, fn func(context.Context, string, strin
 	t.Cleanup(func() { defaultDeps.ExecCtx = orig })
 }
 
-// installClaudeInvokerMock installs a mock claudeInvoker and registers cleanup.
+// installClaudeInvokerMock installs a mock agent invoker via defaultDeps.Agent.
+// The per-backend invoker vars moved to the backends package; use Agent mock instead.
 func installClaudeInvokerMock(t *testing.T, fn func(workDir, prompt, agentName string) error) {
 	t.Helper()
-	orig := claudeInvoker
-	claudeInvoker = fn
-	t.Cleanup(func() { claudeInvoker = orig })
+	orig := defaultDeps.Agent
+	defaultDeps.Agent = &MockAgentInvoker{InteractiveFunc: fn}
+	t.Cleanup(func() { defaultDeps.Agent = orig })
 }
 
-// installClaudeNonInteractiveMock installs a mock claudeNonInteractiveInvoker and registers cleanup.
+// installClaudeNonInteractiveMock installs a mock non-interactive agent invoker.
 func installClaudeNonInteractiveMock(t *testing.T, fn func(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error) {
 	t.Helper()
-	orig := claudeNonInteractiveInvoker
-	claudeNonInteractiveInvoker = fn
-	t.Cleanup(func() { claudeNonInteractiveInvoker = orig })
+	orig := defaultDeps.Agent
+	defaultDeps.Agent = &MockAgentInvoker{NonInteractiveFunc: fn}
+	t.Cleanup(func() { defaultDeps.Agent = orig })
 }
 
-// installCodexInvokerMock installs a mock codexInvoker and registers cleanup.
+// installCodexInvokerMock is a compat shim (invoker vars moved to backends).
 func installCodexInvokerMock(t *testing.T, fn func(workDir, prompt, agentName string) error) {
 	t.Helper()
-	orig := codexInvoker
-	codexInvoker = fn
-	t.Cleanup(func() { codexInvoker = orig })
 }
 
-// installCodexNonInteractiveMock installs a mock codexNonInteractiveInvoker and registers cleanup.
+// installCodexNonInteractiveMock is a compat shim.
 func installCodexNonInteractiveMock(t *testing.T, fn func(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error) {
 	t.Helper()
-	orig := codexNonInteractiveInvoker
-	codexNonInteractiveInvoker = fn
-	t.Cleanup(func() { codexNonInteractiveInvoker = orig })
 }
 
-// installOpenCodeInvokerMock installs a mock openCodeInvoker and registers cleanup.
+// installOpenCodeInvokerMock is a compat shim.
 func installOpenCodeInvokerMock(t *testing.T, fn func(workDir, prompt, agentName string) error) {
 	t.Helper()
-	orig := openCodeInvoker
-	openCodeInvoker = fn
-	t.Cleanup(func() { openCodeInvoker = orig })
 }
 
-// installOpenCodeNonInteractiveMock installs a mock openCodeNonInteractiveInvoker and registers cleanup.
+// installOpenCodeNonInteractiveMock is a compat shim.
 func installOpenCodeNonInteractiveMock(t *testing.T, fn func(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error) {
 	t.Helper()
-	orig := openCodeNonInteractiveInvoker
-	openCodeNonInteractiveInvoker = fn
-	t.Cleanup(func() { openCodeNonInteractiveInvoker = orig })
 }
 
 // OutputCommandStub represents an expected output command call and its response

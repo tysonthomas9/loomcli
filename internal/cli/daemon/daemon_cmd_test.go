@@ -1,5 +1,3 @@
-//go:build ignore
-
 package daemon
 
 import (
@@ -23,13 +21,13 @@ func TestIsLoomDaemonRunning_NoPIDFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	pidFilePath := filepath.Join(tmpDir, "daemon.pid")
 
-	pid, running := isLoomDaemonRunning(pidFilePath)
+	pid, running := IsLoomDaemonRunning(pidFilePath)
 
 	if running {
-		t.Error("isLoomDaemonRunning() = true, want false when PID file doesn't exist")
+		t.Error("IsLoomDaemonRunning() = true, want false when PID file doesn't exist")
 	}
 	if pid != 0 {
-		t.Errorf("isLoomDaemonRunning() pid = %d, want 0 when PID file doesn't exist", pid)
+		t.Errorf("IsLoomDaemonRunning() pid = %d, want 0 when PID file doesn't exist", pid)
 	}
 }
 
@@ -43,13 +41,13 @@ func TestIsLoomDaemonRunning_StalePIDFile(t *testing.T) {
 		t.Fatalf("failed to write stale PID file: %v", err)
 	}
 
-	pid, running := isLoomDaemonRunning(pidFilePath)
+	pid, running := IsLoomDaemonRunning(pidFilePath)
 
 	if running {
-		t.Error("isLoomDaemonRunning() = true, want false for stale PID")
+		t.Error("IsLoomDaemonRunning() = true, want false for stale PID")
 	}
 	if pid != stalePID {
-		t.Errorf("isLoomDaemonRunning() pid = %d, want %d", pid, stalePID)
+		t.Errorf("IsLoomDaemonRunning() pid = %d, want %d", pid, stalePID)
 	}
 }
 
@@ -63,13 +61,13 @@ func TestIsLoomDaemonRunning_ValidPIDFile(t *testing.T) {
 		t.Fatalf("failed to write PID file: %v", err)
 	}
 
-	pid, running := isLoomDaemonRunning(pidFilePath)
+	pid, running := IsLoomDaemonRunning(pidFilePath)
 
 	if !running {
-		t.Error("isLoomDaemonRunning() = false, want true for running process")
+		t.Error("IsLoomDaemonRunning() = false, want true for running process")
 	}
 	if pid != currentPID {
-		t.Errorf("isLoomDaemonRunning() pid = %d, want %d", pid, currentPID)
+		t.Errorf("IsLoomDaemonRunning() pid = %d, want %d", pid, currentPID)
 	}
 }
 
@@ -94,13 +92,13 @@ func TestIsLoomDaemonRunning_InvalidPIDContent(t *testing.T) {
 				t.Fatalf("failed to write PID file: %v", err)
 			}
 
-			pid, running := isLoomDaemonRunning(pidFilePath)
+			pid, running := IsLoomDaemonRunning(pidFilePath)
 
 			if running {
-				t.Errorf("isLoomDaemonRunning() = true, want false for invalid content %q", tt.content)
+				t.Errorf("IsLoomDaemonRunning() = true, want false for invalid content %q", tt.content)
 			}
 			if pid != 0 {
-				t.Errorf("isLoomDaemonRunning() pid = %d, want 0 for invalid content", pid)
+				t.Errorf("IsLoomDaemonRunning() pid = %d, want 0 for invalid content", pid)
 			}
 		})
 	}
@@ -115,14 +113,14 @@ func TestIsLoomDaemonRunning_NegativePID(t *testing.T) {
 		t.Fatalf("failed to write PID file: %v", err)
 	}
 
-	pid, running := isLoomDaemonRunning(pidFilePath)
+	pid, running := IsLoomDaemonRunning(pidFilePath)
 
 	// Negative PIDs are rejected as invalid
 	if pid != 0 {
-		t.Errorf("isLoomDaemonRunning() pid = %d, want 0 for negative PID", pid)
+		t.Errorf("IsLoomDaemonRunning() pid = %d, want 0 for negative PID", pid)
 	}
 	if running {
-		t.Error("isLoomDaemonRunning() = true, want false for negative PID")
+		t.Error("IsLoomDaemonRunning() = true, want false for negative PID")
 	}
 }
 
@@ -137,13 +135,13 @@ func TestIsLoomDaemonRunning_PIDWithWhitespace(t *testing.T) {
 		t.Fatalf("failed to write PID file: %v", err)
 	}
 
-	pid, running := isLoomDaemonRunning(pidFilePath)
+	pid, running := IsLoomDaemonRunning(pidFilePath)
 
 	if !running {
-		t.Error("isLoomDaemonRunning() = false, want true (should trim whitespace)")
+		t.Error("IsLoomDaemonRunning() = false, want true (should trim whitespace)")
 	}
 	if pid != currentPID {
-		t.Errorf("isLoomDaemonRunning() pid = %d, want %d", pid, currentPID)
+		t.Errorf("IsLoomDaemonRunning() pid = %d, want %d", pid, currentPID)
 	}
 }
 
@@ -276,10 +274,10 @@ func TestReadStateFile_ValidJSON(t *testing.T) {
 		t.Fatalf("failed to write state file: %v", err)
 	}
 
-	result, err := readStateFile(stateFilePath)
+	result, err := ReadStateFile(stateFilePath)
 
 	if err != nil {
-		t.Fatalf("readStateFile() error = %v", err)
+		t.Fatalf("ReadStateFile() error = %v", err)
 	}
 	if result.PID != 12345 {
 		t.Errorf("PID = %d, want 12345", result.PID)
@@ -302,13 +300,13 @@ func TestReadStateFile_MissingFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	stateFilePath := filepath.Join(tmpDir, "nonexistent.json")
 
-	result, err := readStateFile(stateFilePath)
+	result, err := ReadStateFile(stateFilePath)
 
 	if err == nil {
-		t.Error("readStateFile() should return error for missing file")
+		t.Error("ReadStateFile() should return error for missing file")
 	}
 	if result != nil {
-		t.Error("readStateFile() should return nil state for missing file")
+		t.Error("ReadStateFile() should return nil state for missing file")
 	}
 }
 
@@ -320,13 +318,13 @@ func TestReadStateFile_InvalidJSON(t *testing.T) {
 		t.Fatalf("failed to write state file: %v", err)
 	}
 
-	result, err := readStateFile(stateFilePath)
+	result, err := ReadStateFile(stateFilePath)
 
 	if err == nil {
-		t.Error("readStateFile() should return error for invalid JSON")
+		t.Error("ReadStateFile() should return error for invalid JSON")
 	}
 	if result != nil {
-		t.Error("readStateFile() should return nil state for invalid JSON")
+		t.Error("ReadStateFile() should return nil state for invalid JSON")
 	}
 }
 
@@ -338,13 +336,13 @@ func TestReadStateFile_EmptyFile(t *testing.T) {
 		t.Fatalf("failed to write state file: %v", err)
 	}
 
-	result, err := readStateFile(stateFilePath)
+	result, err := ReadStateFile(stateFilePath)
 
 	if err == nil {
-		t.Error("readStateFile() should return error for empty file")
+		t.Error("ReadStateFile() should return error for empty file")
 	}
 	if result != nil {
-		t.Error("readStateFile() should return nil state for empty file")
+		t.Error("ReadStateFile() should return nil state for empty file")
 	}
 }
 
@@ -363,10 +361,10 @@ func TestReadStateFile_EmptyAgentsList(t *testing.T) {
 		t.Fatalf("failed to write state file: %v", err)
 	}
 
-	result, err := readStateFile(stateFilePath)
+	result, err := ReadStateFile(stateFilePath)
 
 	if err != nil {
-		t.Fatalf("readStateFile() error = %v", err)
+		t.Fatalf("ReadStateFile() error = %v", err)
 	}
 	if len(result.Agents) != 0 {
 		t.Errorf("len(Agents) = %d, want 0", len(result.Agents))
@@ -391,9 +389,9 @@ func TestResolveDaemonPath_RelativePath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
-			got := resolveDaemonPath(tt.projectDir, tt.path)
+			got := ResolveDaemonPath(tt.projectDir, tt.path)
 			if got != tt.want {
-				t.Errorf("resolveDaemonPath(%q, %q) = %q, want %q", tt.projectDir, tt.path, got, tt.want)
+				t.Errorf("ResolveDaemonPath(%q, %q) = %q, want %q", tt.projectDir, tt.path, got, tt.want)
 			}
 		})
 	}
@@ -411,21 +409,21 @@ func TestResolveDaemonPath_AbsolutePath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
-			got := resolveDaemonPath(tt.projectDir, tt.path)
+			got := ResolveDaemonPath(tt.projectDir, tt.path)
 			// Absolute paths should be returned as-is
 			if got != tt.path {
-				t.Errorf("resolveDaemonPath(%q, %q) = %q, want %q", tt.projectDir, tt.path, got, tt.path)
+				t.Errorf("ResolveDaemonPath(%q, %q) = %q, want %q", tt.projectDir, tt.path, got, tt.path)
 			}
 		})
 	}
 }
 
 func TestResolveDaemonPath_EmptyPath(t *testing.T) {
-	got := resolveDaemonPath("/home/user/project", "")
+	got := ResolveDaemonPath("/home/user/project", "")
 	want := "/home/user/project"
 
 	if got != want {
-		t.Errorf("resolveDaemonPath(%q, %q) = %q, want %q", "/home/user/project", "", got, want)
+		t.Errorf("ResolveDaemonPath(%q, %q) = %q, want %q", "/home/user/project", "", got, want)
 	}
 }
 
@@ -620,7 +618,7 @@ func TestWriteStateFile_Success(t *testing.T) {
 	}
 
 	// Read back and verify
-	result, err := readStateFile(stateFilePath)
+	result, err := ReadStateFile(stateFilePath)
 	if err != nil {
 		t.Fatalf("failed to read state file: %v", err)
 	}
@@ -767,7 +765,7 @@ func TestDaemonPIDFileLifecycle(t *testing.T) {
 	}
 
 	// Initially no daemon running
-	_, running := isLoomDaemonRunning(pidFilePath)
+	_, running := IsLoomDaemonRunning(pidFilePath)
 	if running {
 		t.Error("should not be running initially")
 	}
@@ -779,7 +777,7 @@ func TestDaemonPIDFileLifecycle(t *testing.T) {
 	}
 
 	// Now daemon should appear running
-	pid, running := isLoomDaemonRunning(pidFilePath)
+	pid, running := IsLoomDaemonRunning(pidFilePath)
 	if !running {
 		t.Error("should be running after writing PID file")
 	}
@@ -793,7 +791,7 @@ func TestDaemonPIDFileLifecycle(t *testing.T) {
 	}
 
 	// No longer running
-	_, running = isLoomDaemonRunning(pidFilePath)
+	_, running = IsLoomDaemonRunning(pidFilePath)
 	if running {
 		t.Error("should not be running after removing PID file")
 	}
@@ -805,7 +803,7 @@ func TestStateFileLifecycle(t *testing.T) {
 	startedAt := time.Now()
 
 	// Initially no state file
-	_, err := readStateFile(stateFilePath)
+	_, err := ReadStateFile(stateFilePath)
 	if err == nil {
 		t.Error("should return error when state file doesn't exist")
 	}
@@ -819,9 +817,9 @@ func TestStateFileLifecycle(t *testing.T) {
 	}
 
 	// Read state
-	state, err := readStateFile(stateFilePath)
+	state, err := ReadStateFile(stateFilePath)
 	if err != nil {
-		t.Fatalf("readStateFile() error = %v", err)
+		t.Fatalf("ReadStateFile() error = %v", err)
 	}
 	if len(state.Agents) != 1 {
 		t.Errorf("len(Agents) = %d, want 1", len(state.Agents))
@@ -834,9 +832,9 @@ func TestStateFileLifecycle(t *testing.T) {
 	}
 
 	// Re-read
-	state, err = readStateFile(stateFilePath)
+	state, err = ReadStateFile(stateFilePath)
 	if err != nil {
-		t.Fatalf("readStateFile() error = %v", err)
+		t.Fatalf("ReadStateFile() error = %v", err)
 	}
 	if len(state.Agents) != 2 {
 		t.Errorf("len(Agents) = %d, want 2", len(state.Agents))
@@ -875,7 +873,7 @@ func TestValidateDaemonPaths_WithinProjectDir(t *testing.T) {
 	logDir := filepath.Join(projectDir, ".loom", "logs")
 
 	output := captureLogOutput(t, func() {
-		validateDaemonPaths(projectDir, pidFile, logDir)
+		ValidateDaemonPaths(projectDir, pidFile, logDir)
 	})
 
 	if strings.Contains(output, "WARN") {
@@ -894,7 +892,7 @@ func TestValidateDaemonPaths_WithinConfigDir(t *testing.T) {
 	logDir := filepath.Join(configDir, "logs")
 
 	output := captureLogOutput(t, func() {
-		validateDaemonPaths(projectDir, pidFile, logDir)
+		ValidateDaemonPaths(projectDir, pidFile, logDir)
 	})
 
 	if strings.Contains(output, "WARN") {
@@ -913,7 +911,7 @@ func TestValidateDaemonPaths_PIDFileOutsideBoundaries(t *testing.T) {
 	logDir := filepath.Join(projectDir, ".loom", "logs")
 
 	output := captureLogOutput(t, func() {
-		validateDaemonPaths(projectDir, pidFile, logDir)
+		ValidateDaemonPaths(projectDir, pidFile, logDir)
 	})
 
 	if !strings.Contains(output, "WARN") {
@@ -938,7 +936,7 @@ func TestValidateDaemonPaths_LogDirPathTraversal(t *testing.T) {
 	logDir := filepath.Join(projectDir, "../../outside")
 
 	output := captureLogOutput(t, func() {
-		validateDaemonPaths(projectDir, pidFile, logDir)
+		ValidateDaemonPaths(projectDir, pidFile, logDir)
 	})
 
 	if !strings.Contains(output, "WARN") {
@@ -959,7 +957,7 @@ func TestValidateDaemonPaths_AbsolutePathOutsideBoundaries(t *testing.T) {
 	logDir := "/tmp/loom-logs"
 
 	output := captureLogOutput(t, func() {
-		validateDaemonPaths(projectDir, pidFile, logDir)
+		ValidateDaemonPaths(projectDir, pidFile, logDir)
 	})
 
 	if !strings.Contains(output, "WARN") {
@@ -1205,9 +1203,9 @@ func TestWriteStateFile_WithStopReason(t *testing.T) {
 	}
 
 	// Read back
-	state, err := readStateFile(stateFilePath)
+	state, err := ReadStateFile(stateFilePath)
 	if err != nil {
-		t.Fatalf("readStateFile() error = %v", err)
+		t.Fatalf("ReadStateFile() error = %v", err)
 	}
 
 	if len(state.Agents) != 5 {
@@ -1407,9 +1405,9 @@ func TestWriteStateFile_NewFields_RoundTrip(t *testing.T) {
 		t.Fatalf("writeStateFile() error = %v", err)
 	}
 
-	state, err := readStateFile(stateFilePath)
+	state, err := ReadStateFile(stateFilePath)
 	if err != nil {
-		t.Fatalf("readStateFile() error = %v", err)
+		t.Fatalf("ReadStateFile() error = %v", err)
 	}
 
 	if len(state.Agents) != 1 {

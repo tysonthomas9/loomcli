@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
@@ -75,21 +76,9 @@ func init() {
 }
 
 func runAgent(cmd *cobra.Command, args []string) {
-	// Worktree is required (enforced by cobra.ExactArgs(1))
 	argName := args[0]
+	validatePromptFile(agentPromptFile)
 
-	// Validate prompt file exists and is a regular file
-	info, err := os.Stat(agentPromptFile)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: cannot access prompt file %s: %v\n", agentPromptFile, err)
-		os.Exit(1)
-	}
-	if info.IsDir() {
-		fmt.Fprintf(os.Stderr, "Error: prompt path is a directory, not a file: %s\n", agentPromptFile)
-		os.Exit(1)
-	}
-
-	// Validate and map task filter
 	taskCheckFn, err := mapTaskFilter(agentTaskFilter, agentParentID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -101,7 +90,6 @@ func runAgent(cmd *cobra.Command, args []string) {
 		taskCheckFn = routerCheck
 	}
 
-	// Resolve worktree/workspace path
 	target, err := workspace.ResolveAgentTarget(argName, "")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -110,89 +98,112 @@ func runAgent(cmd *cobra.Command, args []string) {
 
 	worktreePath := target.WorkDir
 	agentName := target.AgentName
-
-	// Create custom prompt generator
 	promptGen := makeCustomPromptGen(agentPromptFile)
 
-	// DAEMON MODE: Called by tmux session, run single task
-	// Daemon manages its own lock (parent doesn't hold lock in tmux mode)
 	if agentDaemonMode {
-		if err := cli.AcquireLock(worktreePath, "agent", agentName); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
-		}
-		// Lock intentionally NOT released here. Parent (RunAutoModeTmux)
-		// reads the lock after daemon exit to detect task claims, then
-		// removes it before the next cycle.
-
-		if err := cli.UpdateLockState(worktreePath, cli.StateActive); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: could not update lock state: %v\n", err)
-		}
-
-		// Adopt parent-created session env vars for transcript tracking
-		if inheritedSID := os.Getenv("LOOM_SESSION_ID"); inheritedSID != "" {
-			inheritedBeads := os.Getenv("LOOM_BEADS_DIR")
-			if inheritedBeads == "" {
-				inheritedBeads = cli.GetBeadsDir()
-			}
-			backends.SetActiveSessionEnv(inheritedBeads, inheritedSID)
-			defer backends.ClearActiveSessionEnv()
-		}
-
-		workspace, _ := config.ResolveActiveWorkspace()
-		prompt := promptGen(agentName, workspace)
-		if err := cli.InvokeAgent(worktreePath, prompt, agentName); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
-		}
-		// Note: No StateIdle here - daemon exits immediately, lock left for parent to read
+		runAgentDaemon(worktreePath, agentName, promptGen)
 		return
 	}
 
-	// AUTO MODE with tmux - daemon manages lock, not parent
-	if agentAutoMode && automode.IsTmuxAvailable() {
+	if agentAutoMode {
+		runAgentAutoMode(worktreePath, agentName, promptGen, taskCheckFn)
+		return
+	}
+
+	runAgentSingleTask(worktreePath, agentName, promptGen, taskCheckFn)
+}
+
+// validatePromptFile ensures the prompt path exists and is a regular file.
+func validatePromptFile(path string) {
+	info, err := os.Stat(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: cannot access prompt file %s: %v\n", path, err)
+		os.Exit(1)
+	}
+	if info.IsDir() {
+		fmt.Fprintf(os.Stderr, "Error: prompt path is a directory, not a file: %s\n", path)
+		os.Exit(1)
+	}
+}
+
+// runAgentDaemon handles daemon mode: single task execution inside a tmux session.
+// The daemon manages its own lock; the parent reads the lock after exit.
+func runAgentDaemon(worktreePath, agentName string, promptGen func(string, *config.WorkspaceConfig) string) {
+	if err := cli.AcquireLock(worktreePath, "agent", agentName); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	// Lock intentionally NOT released here. Parent (RunAutoModeTmux)
+	// reads the lock after daemon exit to detect task claims, then
+	// removes it before the next cycle.
+
+	if err := cli.UpdateLockState(worktreePath, cli.StateActive); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not update lock state: %v\n", err)
+	}
+
+	// Adopt parent-created session env vars for transcript tracking
+	if inheritedSID := os.Getenv("LOOM_SESSION_ID"); inheritedSID != "" {
+		inheritedBeads := os.Getenv("LOOM_BEADS_DIR")
+		if inheritedBeads == "" {
+			inheritedBeads = cli.GetBeadsDir()
+		}
+		backends.SetActiveSessionEnv(inheritedBeads, inheritedSID)
+		defer backends.ClearActiveSessionEnv()
+	}
+
+	ws, _ := config.ResolveActiveWorkspace()
+	prompt := promptGen(agentName, ws)
+	if err := cli.InvokeAgent(worktreePath, prompt, agentName); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// agentAutoOpts builds the common AutoModeOptions for auto mode invocations.
+func agentAutoOpts(worktreePath, agentName string, promptGen func(string, *config.WorkspaceConfig) string, taskCheckFn func() (bool, error)) automode.AutoModeOptions {
+	return automode.AutoModeOptions{
+		Interval:        agentInterval,
+		MaxTasks:        agentMaxTasks,
+		IdleTimeout:     agentIdleTimeout,
+		AgentType:       "agent",
+		AgentName:       agentName,
+		WorktreePath:    worktreePath,
+		ParentID:        agentParentID,
+		CustomPromptGen: promptGen,
+		CustomTaskCheck: taskCheckFn,
+	}
+}
+
+// runAgentAutoMode handles continuous mode with tmux (preferred) or JSON streaming fallback.
+func runAgentAutoMode(worktreePath, agentName string, promptGen func(string, *config.WorkspaceConfig) string, taskCheckFn func() (bool, error)) {
+	opts := agentAutoOpts(worktreePath, agentName, promptGen, taskCheckFn)
+
+	if automode.IsTmuxAvailable() {
 		shutdown := automode.SetupSignalHandler()
-		automode.RunAutoModeTmux(automode.AutoModeOptions{
-			Interval:        agentInterval,
-			MaxTasks:        agentMaxTasks,
-			IdleTimeout:     agentIdleTimeout,
-			AgentType:       "agent",
-			AgentName:       agentName,
-			WorktreePath:    worktreePath,
-			ParentID:        agentParentID,
-			CustomPromptGen: promptGen,
-			CustomTaskCheck: taskCheckFn,
-		}, shutdown)
+		automode.RunAutoModeTmux(opts, shutdown)
 		return
 	}
 
-	// AUTO MODE without tmux OR single task mode - parent manages lock
+	// Fallback to JSON streaming mode (no tmux)
 	if err := cli.AcquireLock(worktreePath, "agent", agentName); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 	defer func() { _ = cli.ReleaseLock(worktreePath) }()
 
-	if agentAutoMode {
-		// Fallback to JSON streaming mode (no tmux)
-		fmt.Println("[auto] tmux not found, using JSON streaming mode")
-		shutdown := automode.SetupSignalHandler()
-		automode.RunAutoModeLoop(automode.AutoModeOptions{
-			Interval:        agentInterval,
-			MaxTasks:        agentMaxTasks,
-			IdleTimeout:     agentIdleTimeout,
-			AgentType:       "agent",
-			AgentName:       agentName,
-			WorktreePath:    worktreePath,
-			ParentID:        agentParentID,
-			CustomPromptGen: promptGen,
-			CustomTaskCheck: taskCheckFn,
-		}, shutdown)
-		return
-	}
+	fmt.Println("[auto] tmux not found, using JSON streaming mode")
+	shutdown := automode.SetupSignalHandler()
+	automode.RunAutoModeLoop(opts, shutdown)
+}
 
-	// SINGLE TASK MODE
-	// Check if there are tasks available based on the filter
+// runAgentSingleTask handles the single-task (non-auto, non-daemon) execution path.
+func runAgentSingleTask(worktreePath, agentName string, promptGen func(string, *config.WorkspaceConfig) string, taskCheckFn func() (bool, error)) {
+	if err := cli.AcquireLock(worktreePath, "agent", agentName); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	defer func() { _ = cli.ReleaseLock(worktreePath) }()
+
 	available, err := taskCheckFn()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error checking tasks: %v\n", err)
@@ -216,9 +227,8 @@ func runAgent(cmd *cobra.Command, args []string) {
 		fmt.Fprintf(os.Stderr, "Warning: could not update lock state: %v\n", err)
 	}
 
-	// Generate and run the custom prompt
-	workspace, _ := config.ResolveActiveWorkspace()
-	prompt := promptGen(agentName, workspace)
+	ws, _ := config.ResolveActiveWorkspace()
+	prompt := promptGen(agentName, ws)
 	if err := cli.InvokeAgent(worktreePath, prompt, agentName); err != nil {
 		fmt.Fprintf(os.Stderr, "Error running agent: %v\n", err)
 		os.Exit(1)

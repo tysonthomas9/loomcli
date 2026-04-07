@@ -340,7 +340,7 @@ func TestDaemonSettings_NewFields_Overlay(t *testing.T) {
 	src := &DaemonSettings{
 		RedisURL: "redis://host:6379",
 	}
-	overlayDaemonSettings(dst, src)
+	OverlayDaemonSettings(dst, src)
 	if dst.RedisURL != "redis://host:6379" {
 		t.Errorf("RedisURL = %q, want %q", dst.RedisURL, "redis://host:6379")
 	}
@@ -351,7 +351,7 @@ func TestDaemonSettings_NewFields_OverlayEmpty(t *testing.T) {
 		RedisURL: "original",
 	}
 	src := &DaemonSettings{} // empty should not override
-	overlayDaemonSettings(dst, src)
+	OverlayDaemonSettings(dst, src)
 	if dst.RedisURL != "original" {
 		t.Errorf("RedisURL = %q, want %q", dst.RedisURL, "original")
 	}

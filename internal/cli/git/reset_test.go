@@ -1,5 +1,3 @@
-//go:build ignore
-
 package git
 
 import (
@@ -12,6 +10,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/tysonthomas9/loomcli/internal/cli"
 )
 
 // ============================================================================
@@ -72,9 +72,8 @@ func TestResetAllWorktrees_PerRepoBranch(t *testing.T) {
 	}
 	setupWorkspaceConfig(t, cfg)
 
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
+	oldR := cli.TestingResetDefaultResolver()
+	defer cli.TestingSetDefaultResolver(oldR)
 
 	// DiscoverWorktrees calls GetCurrentBranch for each repo (via execCommand),
 	// then resetWorktree calls GetCurrentBranch again for each.
@@ -144,9 +143,8 @@ func TestResetAllWorktrees_ExplicitBranchOverridesPerRepo(t *testing.T) {
 	}
 	setupWorkspaceConfig(t, cfg)
 
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
+	oldR := cli.TestingResetDefaultResolver()
+	defer cli.TestingSetDefaultResolver(oldR)
 
 	mock := NewCommandMock(t, []CommandStub{
 		// DiscoverWorktrees: GetCurrentBranch for each
@@ -211,9 +209,8 @@ func TestResetAllWorktrees_MixedDefaultBranch(t *testing.T) {
 	}
 	setupWorkspaceConfig(t, cfg)
 
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
+	oldR := cli.TestingResetDefaultResolver()
+	defer cli.TestingSetDefaultResolver(oldR)
 
 	defaultBranch := GetDefaultBranch()
 
@@ -259,9 +256,8 @@ func TestResetAllWorktrees_LegacyMode_NoPerRepoBranch(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	ResetBeadsDirCache()
 
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
+	oldR := cli.TestingResetDefaultResolver()
+	defer cli.TestingSetDefaultResolver(oldR)
 
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
@@ -611,9 +607,8 @@ func TestResetAllWorktrees_PartialFailure_ReturnsError(t *testing.T) {
 	}
 	setupWorkspaceConfig(t, cfg)
 
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
+	oldR := cli.TestingResetDefaultResolver()
+	defer cli.TestingSetDefaultResolver(oldR)
 
 	mock := NewCommandMock(t, []CommandStub{
 		// DiscoverWorktrees: GetCurrentBranch for each
@@ -701,9 +696,8 @@ func TestResetAllWorktrees_AllFail_ReturnsError(t *testing.T) {
 	}
 	setupWorkspaceConfig(t, cfg)
 
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
+	oldR := cli.TestingResetDefaultResolver()
+	defer cli.TestingSetDefaultResolver(oldR)
 
 	mock := NewCommandMock(t, []CommandStub{
 		// DiscoverWorktrees: GetCurrentBranch for each
@@ -973,8 +967,8 @@ func TestResetWorktree_FetchError(t *testing.T) {
 	n, _ := r.Read(buf)
 	stderr := string(buf[:n])
 
-	if stderr == "" || !containsSubstring([]string{stderr}, "Error fetching") {
-		t.Errorf("expected 'Error fetching' in stderr, got %q", stderr)
+	if stderr == "" || (!containsSubstring([]string{stderr}, "Error fetching") && !containsSubstring([]string{stderr}, "Error: fetching")) {
+		t.Errorf("expected 'Error fetching' or 'Error: fetching' in stderr, got %q", stderr)
 	}
 }
 

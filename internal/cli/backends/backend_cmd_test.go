@@ -1,5 +1,3 @@
-//go:build ignore
-
 package backends
 
 import (
@@ -133,7 +131,7 @@ func TestBackendListOutput(t *testing.T) {
 	RegisterBackend(&mockUnhealthyBackend{mockBackend: mockBackend{name: "beta"}})
 
 	backendMu.Lock()
-	activeBackend = "alpha"
+	*activeBackend = "alpha"
 	backendMu.Unlock()
 
 	out := captureOutput(t, func() {
@@ -164,7 +162,7 @@ func TestBackendListJSON(t *testing.T) {
 	RegisterBackend(&mockBackend{name: "minimal"})
 
 	backendMu.Lock()
-	activeBackend = "alpha"
+	*activeBackend = "alpha"
 	backendMu.Unlock()
 
 	origFlag := backendListJSON

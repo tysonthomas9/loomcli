@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 )
 
 // DaemonControlRequest is sent by the CLI client to the daemon control socket.
@@ -65,7 +65,7 @@ func (d *Daemon) startControlServer(socketPath string) error {
 			if err != nil {
 				// Listener closed (shutdown) — exit silently
 				select {
-				case <-d.shutdown:
+				case <-d.sup.Shutdown:
 					return
 				default:
 				}
@@ -109,13 +109,13 @@ func (d *Daemon) handleControlConnection(conn net.Conn) {
 		if req.Force {
 			_ = conn.SetWriteDeadline(time.Now().Add(20 * time.Second)) // SIGTERM(5s) + SIGKILL + done drain
 		} else {
-			_ = conn.SetWriteDeadline(time.Now().Add(d.getYieldTimeout() + 10*time.Second))
+			_ = conn.SetWriteDeadline(time.Now().Add(d.sup.GetYieldTimeout() + 10*time.Second))
 		}
 		resp = d.handleAgentControlStop(req.AgentName, req.Force)
 	case ctrlOpAgentStart:
 		resp = d.handleAgentControlStart(req.AgentName)
 	case ctrlOpAgentRestart:
-		_ = conn.SetWriteDeadline(time.Now().Add(d.getYieldTimeout() + 10*time.Second))
+		_ = conn.SetWriteDeadline(time.Now().Add(d.sup.GetYieldTimeout() + 10*time.Second))
 		resp = d.handleAgentControlRestart(req.AgentName)
 	case ctrlOpAgentList:
 		resp = d.handleAgentControlList()
@@ -134,7 +134,7 @@ func (d *Daemon) handleControlConnection(conn net.Conn) {
 	writeControlResponse(conn, resp)
 }
 
-// handleAgentControlStop stops a single agent and records it in stoppedAgents.
+// handleAgentControlStop stops a single agent and records it in StoppedAgents.
 // When force is true, it skips DrainWithGrace and sends SIGTERM directly.
 func (d *Daemon) handleAgentControlStop(name string, force bool) DaemonControlResponse {
 	if name == "" {
@@ -146,7 +146,7 @@ func (d *Daemon) handleAgentControlStop(name string, force bool) DaemonControlRe
 		return DaemonControlResponse{Error: fmt.Sprintf("agent %q not found in daemon config", name)}
 	}
 
-	// Drain the agent and record in stoppedAgents atomically under drainAddMu
+	// Drain the agent and record in StoppedAgents atomically under drainAddMu
 	// to prevent the reconciler from re-adding the agent in the gap.
 	// The isAgentStopped check is inside the lock to avoid TOCTOU races.
 	d.drainAddMu.Lock()
@@ -156,14 +156,14 @@ func (d *Daemon) handleAgentControlStop(name string, force bool) DaemonControlRe
 	}
 	var err error
 	if force {
-		err = d.drainAgentForceful(name, StopReasonManualStop)
+		err = d.sup.DrainAgentForceful(name, supervisor.StopReasonManualStop)
 	} else {
-		err = d.drainAgentWithReason(name, StopReasonManualStop)
+		err = d.sup.DrainAgentWithReason(name, supervisor.StopReasonManualStop)
 	}
 	if err == nil {
-		d.agentsMu.Lock()
-		d.stoppedAgents[name] = struct{}{}
-		d.agentsMu.Unlock()
+		d.sup.AgentsMu.Lock()
+		d.sup.StoppedAgents[name] = struct{}{}
+		d.sup.AgentsMu.Unlock()
 	}
 	d.drainAddMu.Unlock()
 	if err != nil {
@@ -185,7 +185,7 @@ func (d *Daemon) handleAgentControlStart(name string) DaemonControlResponse {
 		return DaemonControlResponse{Error: fmt.Sprintf("agent %q not found in daemon config", name)}
 	}
 
-	// Must be in stoppedAgents set
+	// Must be in StoppedAgents set
 	if !d.isAgentStopped(name) {
 		return DaemonControlResponse{Error: fmt.Sprintf("agent %q is not stopped (use restart to reset a running agent)", name)}
 	}
@@ -196,19 +196,19 @@ func (d *Daemon) handleAgentControlStart(name string) DaemonControlResponse {
 		return DaemonControlResponse{Error: fmt.Sprintf("agent %q not found in current config", name)}
 	}
 
-	// Remove from stoppedAgents and add agent
-	d.agentsMu.Lock()
-	delete(d.stoppedAgents, name)
-	d.agentsMu.Unlock()
+	// Remove from StoppedAgents and add agent
+	d.sup.AgentsMu.Lock()
+	delete(d.sup.StoppedAgents, name)
+	d.sup.AgentsMu.Unlock()
 
 	d.drainAddMu.Lock()
-	err := d.addAgent(entry)
+	err := d.sup.AddAgent(entry)
 	d.drainAddMu.Unlock()
 	if err != nil {
-		// Re-add to stoppedAgents on failure
-		d.agentsMu.Lock()
-		d.stoppedAgents[name] = struct{}{}
-		d.agentsMu.Unlock()
+		// Re-add to StoppedAgents on failure
+		d.sup.AgentsMu.Lock()
+		d.sup.StoppedAgents[name] = struct{}{}
+		d.sup.AgentsMu.Unlock()
 		return DaemonControlResponse{Error: fmt.Sprintf("failed to start agent %q: %v", name, err)}
 	}
 
@@ -234,15 +234,15 @@ func (d *Daemon) handleAgentControlRestart(name string) DaemonControlResponse {
 
 	// If running, drain it first
 	if !isStopped {
-		if err := d.drainAgentWithReason(name, StopReasonManualStop); err != nil {
+		if err := d.sup.DrainAgentWithReason(name, supervisor.StopReasonManualStop); err != nil {
 			return DaemonControlResponse{Error: fmt.Sprintf("failed to stop agent %q for restart: %v", name, err)}
 		}
 	}
 
-	// Remove from stoppedAgents if present
-	d.agentsMu.Lock()
-	delete(d.stoppedAgents, name)
-	d.agentsMu.Unlock()
+	// Remove from StoppedAgents if present
+	d.sup.AgentsMu.Lock()
+	delete(d.sup.StoppedAgents, name)
+	d.sup.AgentsMu.Unlock()
 
 	// Look up the config.AgentEntry from current config
 	entry, ok := d.findAgentEntry(name)
@@ -251,7 +251,7 @@ func (d *Daemon) handleAgentControlRestart(name string) DaemonControlResponse {
 	}
 
 	// Add the agent back with fresh state
-	if err := d.addAgent(entry); err != nil {
+	if err := d.sup.AddAgent(entry); err != nil {
 		return DaemonControlResponse{Error: fmt.Sprintf("failed to restart agent %q: %v", name, err)}
 	}
 
@@ -282,151 +282,44 @@ func (d *Daemon) handleAgentControlList() DaemonControlResponse {
 	return DaemonControlResponse{Success: true, Data: data}
 }
 
-// drainAgentWithReason is like drainAgent but sets a specific stop reason.
-func (d *Daemon) drainAgentWithReason(name string, reason StopReason) error {
-	// Find the agent under lock
-	d.agentsMu.Lock()
-	var target *AgentProcess
-	for _, ap := range d.agents {
-		if ap.entry.Worktree == name {
+// handleAgentControlYield handles the agent_yield control socket operation.
+func (d *Daemon) handleAgentControlYield(name string) DaemonControlResponse {
+	if name == "" {
+		return DaemonControlResponse{Error: "agent name is required"}
+	}
+
+	d.sup.AgentsMu.RLock()
+	var target *supervisor.AgentProcess
+	for _, ap := range d.sup.Agents {
+		if ap.Entry.Worktree == name {
 			target = ap
 			break
 		}
 	}
+	d.sup.AgentsMu.RUnlock()
+
 	if target == nil {
-		d.agentsMu.Unlock()
-		return fmt.Errorf("agent %q not found", name)
-	}
-	d.agentsMu.Unlock()
-
-	// Fleet mode: no superviseAgent goroutine was launched, stopCh/done are nil.
-	if target.stopCh == nil {
-		return nil
+		return DaemonControlResponse{Error: fmt.Sprintf("agent %q not found", name)}
 	}
 
-	// Set stop reason before signaling
-	target.mu.Lock()
-	target.stopReason = reason
-	target.mu.Unlock()
+	target.Mu.Lock()
+	pid := target.Pid
+	target.Mu.Unlock()
 
-	// Signal the agent to stop (safe against double-close).
-	// ORDERING: stopCh must close BEFORE DrainWithGrace — prevents superviseAgent
-	// from respawning after the subprocess exits via yield.
-	target.stopOnce.Do(func() {
-		close(target.stopCh)
-	})
-
-	// Yield → wait → SIGTERM → SIGKILL
-	d.DrainWithGrace(target, string(reason), d.getYieldTimeout(), d.getSigtermTimeout())
-
-	// Wait for the superviseAgent goroutine to exit
-	<-target.done
-
-	// Remove from the agents slice under write lock
-	d.agentsMu.Lock()
-	for i, ap := range d.agents {
-		if ap == target {
-			d.agents = append(d.agents[:i], d.agents[i+1:]...)
-			break
-		}
-	}
-	d.agentsMu.Unlock()
-
-	slog.Info("agent drained", "worktree", name, "reason", reason)
-	return nil
-}
-
-// drainAgentForceful is like drainAgentWithReason but skips DrainWithGrace,
-// going directly to SIGTERM/SIGKILL. Used by the CLI force-stop path where
-// the control socket timeout is a concern.
-func (d *Daemon) drainAgentForceful(name string, reason StopReason) error {
-	// Find the agent under lock
-	d.agentsMu.Lock()
-	var target *AgentProcess
-	for _, ap := range d.agents {
-		if ap.entry.Worktree == name {
-			target = ap
-			break
-		}
-	}
-	if target == nil {
-		d.agentsMu.Unlock()
-		return fmt.Errorf("agent %q not found", name)
-	}
-	d.agentsMu.Unlock()
-
-	// Fleet mode: no superviseAgent goroutine was launched, stopCh/done are nil.
-	if target.stopCh == nil {
-		return nil
+	if pid == 0 {
+		return DaemonControlResponse{Error: fmt.Sprintf("agent %q is not running", name)}
 	}
 
-	// Set stop reason before signaling
-	target.mu.Lock()
-	target.stopReason = reason
-	target.mu.Unlock()
-
-	// Signal the agent to stop (safe against double-close)
-	target.stopOnce.Do(func() {
-		close(target.stopCh)
-	})
-
-	// Stop the subprocess directly: SIGTERM → SIGKILL (no yield)
-	d.stopAgent(target, d.getSigtermTimeout())
-
-	// Wait for the superviseAgent goroutine to exit
-	<-target.done
-
-	// Remove from the agents slice under write lock
-	d.agentsMu.Lock()
-	for i, ap := range d.agents {
-		if ap == target {
-			d.agents = append(d.agents[:i], d.agents[i+1:]...)
-			break
-		}
+	if err := d.sup.RequestYield(target, "manual_stop"); err != nil {
+		return DaemonControlResponse{Error: fmt.Sprintf("failed to yield agent %q: %v", name, err)}
 	}
-	d.agentsMu.Unlock()
 
-	slog.Info("agent force-drained", "worktree", name, "reason", reason)
-	return nil
-}
-
-// agentExistsInConfig returns true if an agent with the given name exists in the current config.
-func (d *Daemon) agentExistsInConfig(name string) bool {
-	cfg := d.configSnapshot()
-	for _, agent := range cfg.Agents {
-		if agent.Worktree == name {
-			return true
-		}
-	}
-	return false
-}
-
-// findAgentEntry looks up an config.AgentEntry by worktree name in the current config.
-func (d *Daemon) findAgentEntry(name string) (config.AgentEntry, bool) {
-	cfg := d.configSnapshot()
-	for _, agent := range cfg.Agents {
-		if agent.Worktree == name {
-			return agent, true
-		}
-	}
-	return config.AgentEntry{}, false
-}
-
-// isAgentRunning returns true if the named agent has a running superviseAgent goroutine.
-func (d *Daemon) isAgentRunning(name string) bool {
-	d.agentsMu.RLock()
-	defer d.agentsMu.RUnlock()
-	for _, ap := range d.agents {
-		if ap.entry.Worktree == name {
-			return true
-		}
-	}
-	return false
+	return DaemonControlResponse{Success: true}
 }
 
 // resolveDaemonSocketPath returns the control socket path adjacent to the PID file.
 func resolveDaemonSocketPath(projectDir, pidFile string) string {
-	pidFilePath := ResolveDaemonPath(projectDir, pidFile)
+	pidFilePath := supervisor.ResolveDaemonPath(projectDir, pidFile)
 	return filepath.Join(filepath.Dir(pidFilePath), "daemon.sock")
 }
 

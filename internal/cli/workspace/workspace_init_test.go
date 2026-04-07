@@ -1,5 +1,3 @@
-//go:build ignore
-
 package workspace
 
 import (
@@ -31,7 +29,7 @@ func TestEnsureDaemonForWorkspace_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately
 
-	err := ensureDaemonForWorkspace(deps, ctx, t.TempDir(), 5*time.Second)
+	err := EnsureDaemonForWorkspace(deps, ctx, t.TempDir(), 5*time.Second)
 	if err == nil {
 		t.Fatal("expected error from cancelled context")
 	}
@@ -62,7 +60,7 @@ func TestEnsureDaemonForWorkspace_ContextDeadlineExceeded(t *testing.T) {
 	// Give the context time to expire before calling.
 	time.Sleep(5 * time.Millisecond)
 
-	err := ensureDaemonForWorkspace(deps, ctx, t.TempDir(), 5*time.Second)
+	err := EnsureDaemonForWorkspace(deps, ctx, t.TempDir(), 5*time.Second)
 	if err == nil {
 		t.Fatal("expected error from expired context deadline")
 	}
@@ -85,7 +83,7 @@ func TestEnsureDaemonForWorkspace_TimeoutFallback(t *testing.T) {
 		return CommandResult{}
 	}
 
-	err := ensureDaemonForWorkspace(deps, context.Background(), t.TempDir(), 200*time.Millisecond)
+	err := EnsureDaemonForWorkspace(deps, context.Background(), t.TempDir(), 200*time.Millisecond)
 	if err == nil {
 		t.Fatal("expected timeout error")
 	}
@@ -96,8 +94,8 @@ func TestEnsureDaemonForWorkspace_TimeoutFallback(t *testing.T) {
 
 func TestDefaultDaemonStartupTimeout(t *testing.T) {
 	t.Parallel()
-	if defaultDaemonStartupTimeout != 30*time.Second {
-		t.Errorf("defaultDaemonStartupTimeout = %v, want 30s", defaultDaemonStartupTimeout)
+	if DefaultDaemonStartupTimeout != 30*time.Second {
+		t.Errorf("DefaultDaemonStartupTimeout = %v, want 30s", DefaultDaemonStartupTimeout)
 	}
 }
 
@@ -122,7 +120,7 @@ func TestEnsureCurrentProjectRegistered_GeneratesUUID(t *testing.T) {
 	}
 	t.Cleanup(func() { os.Chdir(origDir) })
 
-	ensureCurrentProjectRegistered()
+	EnsureCurrentProjectRegistered()
 
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -180,7 +178,7 @@ func TestEnsureCurrentProjectRegistered_SkipsExistingByPath(t *testing.T) {
 	}
 	t.Cleanup(func() { os.Chdir(origDir) })
 
-	ensureCurrentProjectRegistered()
+	EnsureCurrentProjectRegistered()
 
 	loaded, err := LoadConfig()
 	if err != nil {
@@ -222,7 +220,7 @@ func TestEnsureCurrentProjectRegistered_RefusesToSaveOnParseError(t *testing.T) 
 	}
 	t.Cleanup(func() { os.Chdir(origDir) })
 
-	ensureCurrentProjectRegistered()
+	EnsureCurrentProjectRegistered()
 
 	// The config file must still contain the original invalid content (not overwritten).
 	got, err := os.ReadFile(configPath)
@@ -247,7 +245,7 @@ func TestStopDaemonForWorkspace_CallsBdDaemonStop(t *testing.T) {
 	}
 
 	wsDir := t.TempDir()
-	stopDaemonForWorkspace(deps, wsDir)
+	StopDaemonForWorkspace(deps, wsDir)
 
 	if calledDir != wsDir {
 		t.Errorf("dir = %q, want %q", calledDir, wsDir)
@@ -269,7 +267,7 @@ func TestStopDaemonForWorkspace_ErrorIsNonFatal(t *testing.T) {
 	}
 
 	// Should not panic or crash
-	stopDaemonForWorkspace(deps, t.TempDir())
+	StopDaemonForWorkspace(deps, t.TempDir())
 }
 
 func TestStopDaemonForWorkspace_EmptyDir(t *testing.T) {
@@ -281,7 +279,7 @@ func TestStopDaemonForWorkspace_EmptyDir(t *testing.T) {
 		return CommandResult{}
 	}
 
-	stopDaemonForWorkspace(deps, "")
+	StopDaemonForWorkspace(deps, "")
 
 	if called {
 		t.Error("execCommand should not be called with empty dir")
@@ -321,7 +319,7 @@ func TestEnsureCurrentProjectRegistered_RefusesToSaveOnReadError(t *testing.T) {
 	}
 	t.Cleanup(func() { os.Chdir(origDir) })
 
-	ensureCurrentProjectRegistered()
+	EnsureCurrentProjectRegistered()
 
 	// Restore permissions and verify content unchanged.
 	if err := os.Chmod(configPath, 0644); err != nil {

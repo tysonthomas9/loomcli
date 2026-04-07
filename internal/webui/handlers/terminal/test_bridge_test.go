@@ -9,9 +9,11 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
@@ -119,10 +121,62 @@ var handlePatchTerminalState = HandlePatchTerminalState
 var handleGetScrollback = HandleGetScrollback
 
 // ---------------------------------------------------------------------------
+// Terminal context type aliases (for utils_test.go)
+// ---------------------------------------------------------------------------
+
+type TerminalContext = webuterminal.TerminalContext
+type TerminalContextStats = webuterminal.TerminalContextStats
+type TerminalAgentInfo = webuterminal.TerminalAgentInfo
+type TerminalContextTasks = webuterminal.TerminalContextTasks
+
+// ---------------------------------------------------------------------------
 // Test helpers (duplicated from terminal/manager_test.go)
 // ---------------------------------------------------------------------------
 
 var testRunPrefix = fmt.Sprintf("tr%d", os.Getpid())
+
+// testSessionName returns a tmux session name unique to this process and test.
+func testSessionName(t *testing.T, suffix ...string) string {
+	t.Helper()
+	name := testRunPrefix + "-" + strings.ReplaceAll(t.Name(), "/", "-")
+	if len(suffix) > 0 {
+		name += "-" + suffix[0]
+	}
+	return name
+}
+
+// ---------------------------------------------------------------------------
+// Mock config pool (for restart tests that need a workspace path)
+// ---------------------------------------------------------------------------
+
+type mockConfigClient struct {
+	statusFunc func() (*rpc.StatusResponse, error)
+}
+
+func (m *mockConfigClient) Status() (*rpc.StatusResponse, error) {
+	if m.statusFunc != nil {
+		return m.statusFunc()
+	}
+	return nil, fmt.Errorf("statusFunc not set")
+}
+
+func newMockConfigPool(wsPath string) webuterminal.ConfigConnectionGetter {
+	return &mockConfigPool{wsPath: wsPath}
+}
+
+type mockConfigPool struct {
+	wsPath string
+}
+
+func (p *mockConfigPool) Get(_ context.Context) (webuterminal.ConfigClient, error) {
+	return &mockConfigClient{
+		statusFunc: func() (*rpc.StatusResponse, error) {
+			return &rpc.StatusResponse{WorkspacePath: p.wsPath}, nil
+		},
+	}, nil
+}
+
+func (p *mockConfigPool) Put(_ webuterminal.ConfigClient) {}
 
 func skipIfNoTmux(t *testing.T) {
 	t.Helper()

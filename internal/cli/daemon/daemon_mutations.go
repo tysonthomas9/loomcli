@@ -172,23 +172,6 @@ func (b *MutationBuffer) run() {
 	}
 }
 
-// publishMutation publishes a mutation event to the daemon's notification bus.
-// Nil-safe: returns immediately if notifyBus is nil.
-func (d *Daemon) publishMutation(m backend.MutationData) {
-	if d.notifyBus == nil {
-		return
-	}
-	if m.Timestamp.IsZero() {
-		m.Timestamp = time.Now()
-	}
-	d.notifyBus.Publish(notify.Event{
-		Topic:       "issue." + m.Type,
-		WorkspaceID: d.workspaceID,
-		Payload:     m,
-		Timestamp:   m.Timestamp,
-	})
-}
-
 // handleControlGetMutations handles the get_mutations control socket operation.
 func (d *Daemon) handleControlGetMutations(args json.RawMessage) DaemonControlResponse {
 	if d.mutBuf == nil {
@@ -257,7 +240,7 @@ func (d *Daemon) handleControlWaitForMutations(args json.RawMessage) DaemonContr
 func wireDaemonNotifyBus(d *Daemon) {
 	bus := notify.New()
 	d.notifyBus = bus
-	if mutBuf := NewMutationBuffer(defaultMutationBufferCapacity, bus, d.workspaceID); mutBuf != nil {
+	if mutBuf := NewMutationBuffer(defaultMutationBufferCapacity, bus, d.sup.WorkspaceID); mutBuf != nil {
 		d.mutBuf = mutBuf
 		mutBuf.Start()
 	}

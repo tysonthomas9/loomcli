@@ -266,42 +266,41 @@ func promptForWorktreeNames(existing []string) []string {
 	var names []string
 	defaultIdx := 0
 	for i := 0; i < count; i++ {
-		// Find next unused default name
-		defaultName := ""
-		for defaultIdx < len(suggestedAgentNames) {
-			candidate := suggestedAgentNames[defaultIdx]
-			if !existingSet[candidate] {
-				defaultName = candidate
-				break
-			}
-			defaultIdx++
-		}
-		if defaultName == "" {
-			defaultName = fmt.Sprintf("agent%d", i+1)
-		}
-
-		for {
-			name := promptString(fmt.Sprintf("Name for worktree %d", i+1), defaultName)
-			name = strings.TrimSpace(name)
-
-			if err := validateNewWorktreeName(name); err != nil {
-				fmt.Printf("  %v, try again\n", err)
-				continue
-			}
-
-			if existingSet[name] {
-				fmt.Printf("  '%s' already exists, choose a different name\n", name)
-				continue
-			}
-
-			names = append(names, name)
-			existingSet[name] = true
-			defaultIdx++
-			break
-		}
+		defaultName := nextDefaultName(&defaultIdx, existingSet)
+		name := promptValidWorktreeName(i+1, defaultName, existingSet)
+		names = append(names, name)
+		existingSet[name] = true
+		defaultIdx++
 	}
-
 	return names
+}
+
+// nextDefaultName finds the next unused suggested name.
+func nextDefaultName(defaultIdx *int, used map[string]bool) string {
+	for *defaultIdx < len(suggestedAgentNames) {
+		candidate := suggestedAgentNames[*defaultIdx]
+		if !used[candidate] {
+			return candidate
+		}
+		*defaultIdx++
+	}
+	return fmt.Sprintf("agent%d", *defaultIdx+1)
+}
+
+// promptValidWorktreeName prompts the user until a valid, unique name is entered.
+func promptValidWorktreeName(index int, defaultName string, used map[string]bool) string {
+	for {
+		name := strings.TrimSpace(promptString(fmt.Sprintf("Name for worktree %d", index), defaultName))
+		if err := validateNewWorktreeName(name); err != nil {
+			fmt.Printf("  %v, try again\n", err)
+			continue
+		}
+		if used[name] {
+			fmt.Printf("  '%s' already exists, choose a different name\n", name)
+			continue
+		}
+		return name
+	}
 }
 
 // createSingleWorktree creates one worktree

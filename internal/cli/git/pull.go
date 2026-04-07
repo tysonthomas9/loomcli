@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
@@ -362,53 +363,49 @@ func pullWorktree(deps *cli.Deps, worktreeName, sourceBranch string) {
 	fmt.Printf("Pulling: %s <- %s\n", worktreeName, sourceBranch)
 	fmt.Println("=========================================")
 
-	// Get current branch
-	currentBranch, err := cli.GetCurrentBranch(worktreePath)
+	currentBranch, err := getCurrentBranchViaDeps(deps, worktreePath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error getting current branch: %v\n", err)
 		return
 	}
 
-	// Fetch latest
 	if err := gitFetch(deps, worktreePath); err != nil {
 		fmt.Fprintf(os.Stderr, "Error fetching: %v\n", err)
 		return
 	}
 
-	// Attempt merge
 	mergeMsg := fmt.Sprintf("Pull from %s\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", sourceBranch)
 	if err := gitMergeOrigin(deps, worktreePath, sourceBranch, mergeMsg); err != nil {
-		// Check for conflicts
-		conflicts, conflictErr := getConflictedFilesDeps(deps, worktreePath)
-		if conflictErr != nil || len(conflicts) == 0 {
-			fmt.Fprintf(os.Stderr, "Pull failed: %v\n", err)
-			return
-		}
-
-		fmt.Println("")
-		fmt.Println("⚠ Merge conflicts detected. Launching AI agent to resolve...")
-		fmt.Println("")
-		fmt.Println("Conflicted files:")
-		for _, f := range conflicts {
-			fmt.Printf("  - %s\n", f)
-		}
-		fmt.Println("")
-
-		// Launch Claude for conflict resolution
-		if err := invokeAgentForConflictsDeps(deps, worktreePath, sourceBranch, currentBranch, conflicts); err != nil {
-			fmt.Fprintf(os.Stderr, "Error resolving conflicts: %v\n", err)
-			return
-		}
+		handlePullConflicts(deps, worktreePath, sourceBranch, currentBranch, err)
 		return
 	}
 
 	fmt.Println("✓ Pull completed successfully (no conflicts)")
-
-	// Push
 	if err := gitPush(deps, worktreePath, currentBranch); err != nil {
 		fmt.Fprintf(os.Stderr, "Error pushing: %v\n", err)
 		return
 	}
-
 	fmt.Printf("✓ Pushed to origin/%s\n", currentBranch)
+}
+
+// handlePullConflicts checks for merge conflicts and invokes the agent to resolve them.
+func handlePullConflicts(deps *cli.Deps, worktreePath, sourceBranch, currentBranch string, mergeErr error) {
+	conflicts, conflictErr := getConflictedFilesDeps(deps, worktreePath)
+	if conflictErr != nil || len(conflicts) == 0 {
+		fmt.Fprintf(os.Stderr, "Pull failed: %v\n", mergeErr)
+		return
+	}
+
+	fmt.Println("")
+	fmt.Println("⚠ Merge conflicts detected. Launching AI agent to resolve...")
+	fmt.Println("")
+	fmt.Println("Conflicted files:")
+	for _, f := range conflicts {
+		fmt.Printf("  - %s\n", f)
+	}
+	fmt.Println("")
+
+	if err := invokeAgentForConflictsDeps(deps, worktreePath, sourceBranch, currentBranch, conflicts); err != nil {
+		fmt.Fprintf(os.Stderr, "Error resolving conflicts: %v\n", err)
+	}
 }

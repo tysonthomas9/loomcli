@@ -152,24 +152,9 @@ func handleGetBackendConfigWithPool(pool configConnectionGetter) http.HandlerFun
 			source = "default"
 		}
 
-		agents := make([]AgentBackendOverride, 0, len(pf.Agents))
-		for _, a := range pf.Agents {
-			agents = append(agents, AgentBackendOverride{
-				Worktree: a.Worktree,
-				Role:     a.Role,
-				Backend:  a.Backend,
-			})
-		}
-
-		available := append(append([]string(nil), validBackends...), "shell")
 		handler.WriteJSON(w, http.StatusOK, BackendConfigResponse{
 			Success: true,
-			Data: &BackendConfigData{
-				Backend:   backend,
-				Source:    source,
-				Available: available,
-				Agents:    agents,
-			},
+			Data:    buildBackendConfigData(backend, source, pf.Agents),
 		})
 	}
 }
@@ -190,25 +175,11 @@ func handlePatchBackendConfigWithPool(pool configConnectionGetter) http.HandlerF
 			return
 		}
 
-		// Read and validate request body
-		r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
-		var req BackendConfigPatchRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			var maxBytesErr *http.MaxBytesError
-			if errors.As(err, &maxBytesErr) {
-				handler.WriteJSON(w, http.StatusRequestEntityTooLarge, BackendConfigResponse{Success: false, Error: "request body too large"})
-				return
-			}
-			handler.WriteJSON(w, http.StatusBadRequest, BackendConfigResponse{Success: false, Error: "invalid request body"})
-			return
+		backend, err := decodePatchBackendRequest(r, w)
+		if err != nil {
+			return // response already written
 		}
 
-		if !isValidBackend(req.Backend) {
-			handler.WriteJSON(w, http.StatusBadRequest, BackendConfigResponse{Success: false, Error: fmt.Sprintf("invalid backend %q; valid options: %s", req.Backend, strings.Join(validBackends, ", "))})
-			return
-		}
-
-		// Get workspace path from daemon status
 		wsPath, err := getWorkspacePath(pool, r.Context())
 		if err != nil {
 			status := http.StatusServiceUnavailable
@@ -219,42 +190,57 @@ func handlePatchBackendConfigWithPool(pool configConnectionGetter) http.HandlerF
 			return
 		}
 
-		// Read existing config (or start fresh)
 		pf, err := loadProjectFile(wsPath)
 		if err != nil {
 			handler.WriteJSON(w, http.StatusInternalServerError, BackendConfigResponse{Success: false, Error: fmt.Sprintf("failed to parse config: %v", err)})
 			return
 		}
 
-		// Update backend
-		pf.Backend = req.Backend
-
-		// Write back
+		pf.Backend = backend
 		if err := saveProjectFile(wsPath, pf); err != nil {
 			handler.WriteJSON(w, http.StatusInternalServerError, BackendConfigResponse{Success: false, Error: "failed to save config"})
 			return
 		}
 
-		// Return updated config (same format as GET)
-		agents := make([]AgentBackendOverride, 0, len(pf.Agents))
-		for _, a := range pf.Agents {
-			agents = append(agents, AgentBackendOverride{
-				Worktree: a.Worktree,
-				Role:     a.Role,
-				Backend:  a.Backend,
-			})
-		}
-
-		available := append(append([]string(nil), validBackends...), "shell")
 		handler.WriteJSON(w, http.StatusOK, BackendConfigResponse{
-			Success: true,
-			Data: &BackendConfigData{
-				Backend:   pf.Backend,
-				Source:    "project",
-				Available: available,
-				Agents:    agents,
-			},
+			Success: true, Data: buildBackendConfigData(pf.Backend, "project", pf.Agents),
 		})
+	}
+}
+
+// decodePatchBackendRequest reads and validates the PATCH request body.
+// On error, writes the HTTP response and returns a non-nil error.
+func decodePatchBackendRequest(r *http.Request, w http.ResponseWriter) (string, error) {
+	r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
+	var req BackendConfigPatchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			handler.WriteJSON(w, http.StatusRequestEntityTooLarge, BackendConfigResponse{Success: false, Error: "request body too large"})
+			return "", err
+		}
+		handler.WriteJSON(w, http.StatusBadRequest, BackendConfigResponse{Success: false, Error: "invalid request body"})
+		return "", err
+	}
+	if !isValidBackend(req.Backend) {
+		err := fmt.Errorf("invalid backend %q", req.Backend)
+		handler.WriteJSON(w, http.StatusBadRequest, BackendConfigResponse{Success: false, Error: fmt.Sprintf("invalid backend %q; valid options: %s", req.Backend, strings.Join(validBackends, ", "))})
+		return "", err
+	}
+	return req.Backend, nil
+}
+
+// buildBackendConfigData constructs the response data shared by GET and PATCH handlers.
+func buildBackendConfigData(backend, source string, agents []agentEntry) *BackendConfigData {
+	overrides := make([]AgentBackendOverride, 0, len(agents))
+	for _, a := range agents {
+		overrides = append(overrides, AgentBackendOverride{
+			Worktree: a.Worktree, Role: a.Role, Backend: a.Backend,
+		})
+	}
+	available := append(append([]string(nil), validBackends...), "shell")
+	return &BackendConfigData{
+		Backend: backend, Source: source, Available: available, Agents: overrides,
 	}
 }
 

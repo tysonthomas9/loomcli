@@ -321,109 +321,117 @@ func (s *DaemonSubscriber) pollDBChanges() {
 	}
 	defer s.pool.Put(client)
 
-	// Get total issue count
-	resp, err := client.Count(&rpc.CountArgs{})
-	if err != nil {
-		slog.Error("external poll: count error", "err", err)
-		return
-	}
-	if !resp.Success {
+	totalCount, ok := s.fetchTotalCount(client)
+	if !ok {
 		return
 	}
 
+	now := time.Now()
+
+	// First poll: initialize state without broadcasting
+	if s.initPollStateIfNeeded(client, totalCount, now) {
+		return
+	}
+
+	changeDetected, deletionDetected, lastPollTime := s.detectExternalChanges(client, totalCount)
+
+	if !changeDetected {
+		s.mu.Lock()
+		s.lastPollTime = now
+		s.mu.Unlock()
+		return
+	}
+
+	s.handleExternalChanges(client, now, totalCount, lastPollTime, deletionDetected)
+}
+
+// fetchTotalCount calls the Count RPC and returns the total issue count.
+// Returns (0, false) if the RPC fails or the response cannot be parsed.
+func (s *DaemonSubscriber) fetchTotalCount(client *rpc.Client) (int64, bool) {
+	resp, err := client.Count(&rpc.CountArgs{})
+	if err != nil {
+		slog.Error("external poll: count error", "err", err)
+		return 0, false
+	}
+	if !resp.Success {
+		return 0, false
+	}
 	var countResult struct {
 		Count int64 `json:"count"`
 	}
 	if err := json.Unmarshal(resp.Data, &countResult); err != nil {
 		slog.Error("external poll: parse count error", "err", err)
-		return
+		return 0, false
 	}
-	totalCount := countResult.Count
+	return countResult.Count, true
+}
 
-	now := time.Now()
-
-	// First poll: initialize state without broadcasting
+// initPollStateIfNeeded initializes poll state on the first invocation.
+// Returns true if this was the first poll (caller should return early).
+func (s *DaemonSubscriber) initPollStateIfNeeded(client *rpc.Client, totalCount int64, now time.Time) bool {
 	s.mu.Lock()
-	if !s.countInitialized {
-		s.lastKnownCount = totalCount
-		s.lastPollTime = now
-		s.countInitialized = true
+	if s.countInitialized {
 		s.mu.Unlock()
-		// Build initial knownIssues snapshot (best-effort, non-blocking)
-		s.loadKnownIssues(client)
-		return
+		return false
 	}
-
-	changeDetected := false
-	deletionDetected := false
-
-	// Check if total count changed (issue created or deleted externally)
-	if totalCount != s.lastKnownCount {
-		changeDetected = true
-		if totalCount < s.lastKnownCount {
-			deletionDetected = true
-		}
-	}
-
-	lastPollTime := s.lastPollTime
+	s.lastKnownCount = totalCount
+	s.lastPollTime = now
+	s.countInitialized = true
 	s.mu.Unlock()
+	// Build initial knownIssues snapshot (best-effort, non-blocking)
+	s.loadKnownIssues(client)
+	return true
+}
 
-	// Check for in-place updates (count same but issues modified)
-	if !changeDetected {
-		updatedAfter := lastPollTime.UTC().Format(time.RFC3339)
-		updatedResp, err := client.Count(&rpc.CountArgs{UpdatedAfter: updatedAfter})
-		if err == nil && updatedResp.Success {
-			var updatedResult struct {
-				Count int64 `json:"count"`
-			}
-			if err := json.Unmarshal(updatedResp.Data, &updatedResult); err == nil && updatedResult.Count > 0 {
-				changeDetected = true
-			}
+// detectExternalChanges compares the current count against the last known count
+// and checks for in-place updates via the Count(UpdatedAfter) RPC.
+func (s *DaemonSubscriber) detectExternalChanges(client *rpc.Client, totalCount int64) (changed, deleted bool, lastPoll time.Time) {
+	s.mu.RLock()
+	lastKnown := s.lastKnownCount
+	lastPoll = s.lastPollTime
+	s.mu.RUnlock()
+
+	if totalCount != lastKnown {
+		return true, totalCount < lastKnown, lastPoll
+	}
+	// Count unchanged — check for in-place updates
+	updatedAfter := lastPoll.UTC().Format(time.RFC3339)
+	resp, err := client.Count(&rpc.CountArgs{UpdatedAfter: updatedAfter})
+	if err == nil && resp.Success {
+		var result struct {
+			Count int64 `json:"count"`
+		}
+		if err := json.Unmarshal(resp.Data, &result); err == nil && result.Count > 0 {
+			return true, false, lastPoll
 		}
 	}
+	return false, false, lastPoll
+}
 
-	if !changeDetected {
-		s.mu.Lock()
-		s.lastPollTime = now
-		s.mu.Unlock()
-		return
-	}
-
-	// Deletion detected — fall back to global MutationRefresh (tracking all IDs for
-	// granular delete detection adds memory/complexity not worth the trade-off).
+// handleExternalChanges responds to detected external DB changes by emitting
+// granular per-issue mutations or falling back to a blanket refresh.
+func (s *DaemonSubscriber) handleExternalChanges(client *rpc.Client, now time.Time, totalCount int64, lastPollTime time.Time, deletionDetected bool) {
+	// Deletion detected — fall back to global MutationRefresh.
 	if deletionDetected {
 		s.broadcastRefresh(now, totalCount)
-		// Rebuild knownIssues snapshot after refresh
 		s.loadKnownIssues(client)
 		return
 	}
 
-	// Try granular mutations: fetch changed issues via List RPC
 	changed := s.fetchChangedIssues(client, lastPollTime)
-	if changed == nil {
-		// List RPC failed — fall back to per-repo scoped refresh (or global
-		// if no clients have repo filters).
+	if changed == nil || len(changed) > granularMutationThreshold {
+		// List RPC failed or too many changes — fall back to per-repo refresh.
 		s.emitPerRepoRefreshes(client, now, lastPollTime, totalCount)
 		s.mu.Lock()
 		s.lastKnownCount = totalCount
 		s.lastPollTime = now
 		s.mu.Unlock()
+		if changed != nil {
+			s.loadKnownIssues(client)
+		}
 		return
 	}
 
-	if len(changed) > granularMutationThreshold {
-		// Too many changes — fall back to per-repo scoped refresh to avoid SSE
-		// congestion, then rebuild the known-issues snapshot.
-		s.emitPerRepoRefreshes(client, now, lastPollTime, totalCount)
-		s.mu.Lock()
-		s.lastKnownCount = totalCount
-		s.lastPollTime = now
-		s.mu.Unlock()
-		s.loadKnownIssues(client)
-		return
-	}
-
-	// Emit granular per-issue mutations (updates lastKnownCount + lastPollTime internally)
 	s.emitGranularMutations(changed, now, totalCount)
 }
 

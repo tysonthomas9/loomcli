@@ -1,5 +1,3 @@
-//go:build ignore
-
 package serve
 
 import (
@@ -10,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 )
 
@@ -667,9 +666,8 @@ func TestGetWorkspaceInfo_WorkspaceMode(t *testing.T) {
 	}
 	setupWorkspaceConfig(t, cfg)
 
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
+	oldReal := cli.TestingResetDefaultResolver()
+	defer cli.TestingSetDefaultResolver(oldReal)
 
 	info := getWorkspaceInfo()
 
@@ -770,9 +768,8 @@ func TestHandleWorkspaces_LegacyMode(t *testing.T) {
 	// No config file -> legacy mode
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
+	oldReal := cli.TestingResetDefaultResolver()
+	defer cli.TestingSetDefaultResolver(oldReal)
 
 	req := httptest.NewRequest("GET", "/api/workspaces", nil)
 	rr := httptest.NewRecorder()
@@ -823,9 +820,8 @@ func TestHandleWorkspaces_WorkspaceMode(t *testing.T) {
 	}
 	setupWorkspaceConfig(t, cfg)
 
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
+	oldReal := cli.TestingResetDefaultResolver()
+	defer cli.TestingSetDefaultResolver(oldReal)
 
 	req := httptest.NewRequest("GET", "/api/workspaces", nil)
 	rr := httptest.NewRecorder()
@@ -892,9 +888,8 @@ func TestHandleAgents_WorkspaceMode(t *testing.T) {
 	}
 	setupWorkspaceConfig(t, cfg)
 
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
+	oldReal := cli.TestingResetDefaultResolver()
+	defer cli.TestingSetDefaultResolver(oldReal)
 
 	// Create mock data with agents that have workspace set
 	mockData := &MonitorData{
@@ -970,9 +965,8 @@ func TestHandleAgents_LegacyMode_NoByWorkspace(t *testing.T) {
 	// No config file -> legacy mode
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
+	oldReal := cli.TestingResetDefaultResolver()
+	defer cli.TestingSetDefaultResolver(oldReal)
 
 	mockData := &MonitorData{
 		Timestamp: time.Now(),

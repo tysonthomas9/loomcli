@@ -14,96 +14,90 @@ import (
 func ParseClaudeHookInput(hookName string, r io.Reader) (*HookEvent, error) {
 	switch hookName {
 	case "session-start":
-		raw, err := readAndParseHookInput[claudeSessionStartPayload](r)
-		if err != nil {
-			return nil, err
-		}
-		return &HookEvent{
-			Type:       HookSessionStart,
-			SessionID:  raw.SessionID,
-			SessionRef: raw.TranscriptPath,
-			Model:      raw.Model,
-			Backend:    "claude",
-			Timestamp:  time.Now(),
-		}, nil
-
+		return parseSessionStart(r)
 	case "user-prompt-submit":
-		raw, err := readAndParseHookInput[claudeUserPromptPayload](r)
-		if err != nil {
-			return nil, err
-		}
-		return &HookEvent{
-			Type:       HookTurnStart,
-			SessionID:  raw.SessionID,
-			SessionRef: raw.TranscriptPath,
-			Prompt:     raw.Prompt,
-			Backend:    "claude",
-			Timestamp:  time.Now(),
-		}, nil
-
+		return parseUserPromptSubmit(r)
 	case "stop":
-		raw, err := readAndParseHookInput[claudeSessionInfoPayload](r)
-		if err != nil {
-			return nil, err
-		}
-		return &HookEvent{
-			Type:       HookTurnEnd,
-			SessionID:  raw.SessionID,
-			SessionRef: raw.TranscriptPath,
-			Backend:    "claude",
-			Timestamp:  time.Now(),
-		}, nil
-
+		return parseStop(r)
 	case "session-end":
-		raw, err := readAndParseHookInput[claudeSessionInfoPayload](r)
-		if err != nil {
-			return nil, err
-		}
-		return &HookEvent{
-			Type:       HookSessionEnd,
-			SessionID:  raw.SessionID,
-			SessionRef: raw.TranscriptPath,
-			Backend:    "claude",
-			Timestamp:  time.Now(),
-		}, nil
-
+		return parseSessionEnd(r)
 	case "pre-task":
-		raw, err := readAndParseHookInput[claudePreToolUsePayload](r)
-		if err != nil {
-			return nil, err
-		}
-		return &HookEvent{
-			Type:       HookSubagentStart,
-			SessionID:  raw.SessionID,
-			SessionRef: raw.TranscriptPath,
-			ToolUseID:  raw.ToolUseID,
-			ToolInput:  raw.ToolInput,
-			Backend:    "claude",
-			Timestamp:  time.Now(),
-		}, nil
-
+		return parsePreTask(r)
 	case "post-task":
-		raw, err := readAndParseHookInput[claudePostToolUsePayload](r)
-		if err != nil {
-			return nil, err
-		}
-		event := &HookEvent{
-			Type:       HookSubagentEnd,
-			SessionID:  raw.SessionID,
-			SessionRef: raw.TranscriptPath,
-			ToolUseID:  raw.ToolUseID,
-			ToolInput:  raw.ToolInput,
-			Backend:    "claude",
-			Timestamp:  time.Now(),
-		}
-		if raw.ToolResponse.AgentID != "" {
-			event.SubagentID = raw.ToolResponse.AgentID
-		}
-		return event, nil
-
+		return parsePostTask(r)
 	default:
 		return nil, nil //nolint:nilnil // nil event = unhandled hook, not an error
 	}
+}
+
+func parseSessionStart(r io.Reader) (*HookEvent, error) {
+	raw, err := readAndParseHookInput[claudeSessionStartPayload](r)
+	if err != nil {
+		return nil, err
+	}
+	return &HookEvent{
+		Type: HookSessionStart, SessionID: raw.SessionID, SessionRef: raw.TranscriptPath,
+		Model: raw.Model, Backend: "claude", Timestamp: time.Now(),
+	}, nil
+}
+
+func parseUserPromptSubmit(r io.Reader) (*HookEvent, error) {
+	raw, err := readAndParseHookInput[claudeUserPromptPayload](r)
+	if err != nil {
+		return nil, err
+	}
+	return &HookEvent{
+		Type: HookTurnStart, SessionID: raw.SessionID, SessionRef: raw.TranscriptPath,
+		Prompt: raw.Prompt, Backend: "claude", Timestamp: time.Now(),
+	}, nil
+}
+
+func parseStop(r io.Reader) (*HookEvent, error) {
+	raw, err := readAndParseHookInput[claudeSessionInfoPayload](r)
+	if err != nil {
+		return nil, err
+	}
+	return &HookEvent{
+		Type: HookTurnEnd, SessionID: raw.SessionID, SessionRef: raw.TranscriptPath,
+		Backend: "claude", Timestamp: time.Now(),
+	}, nil
+}
+
+func parseSessionEnd(r io.Reader) (*HookEvent, error) {
+	raw, err := readAndParseHookInput[claudeSessionInfoPayload](r)
+	if err != nil {
+		return nil, err
+	}
+	return &HookEvent{
+		Type: HookSessionEnd, SessionID: raw.SessionID, SessionRef: raw.TranscriptPath,
+		Backend: "claude", Timestamp: time.Now(),
+	}, nil
+}
+
+func parsePreTask(r io.Reader) (*HookEvent, error) {
+	raw, err := readAndParseHookInput[claudePreToolUsePayload](r)
+	if err != nil {
+		return nil, err
+	}
+	return &HookEvent{
+		Type: HookSubagentStart, SessionID: raw.SessionID, SessionRef: raw.TranscriptPath,
+		ToolUseID: raw.ToolUseID, ToolInput: raw.ToolInput, Backend: "claude", Timestamp: time.Now(),
+	}, nil
+}
+
+func parsePostTask(r io.Reader) (*HookEvent, error) {
+	raw, err := readAndParseHookInput[claudePostToolUsePayload](r)
+	if err != nil {
+		return nil, err
+	}
+	event := &HookEvent{
+		Type: HookSubagentEnd, SessionID: raw.SessionID, SessionRef: raw.TranscriptPath,
+		ToolUseID: raw.ToolUseID, ToolInput: raw.ToolInput, Backend: "claude", Timestamp: time.Now(),
+	}
+	if raw.ToolResponse.AgentID != "" {
+		event.SubagentID = raw.ToolResponse.AgentID
+	}
+	return event, nil
 }
 
 // readAndParseHookInput reads all bytes from r and unmarshals JSON into T.

@@ -1,0 +1,435 @@
+package app
+
+import (
+	"context"
+	"crypto/rand"
+	"errors"
+	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/redis/go-redis/v9"
+
+	"github.com/tysonthomas9/loomcli/internal/webui"
+	"github.com/tysonthomas9/loomcli/internal/webui/appinfra"
+	"github.com/tysonthomas9/loomcli/internal/webui/appstores"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/svcimpl"
+	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
+)
+
+// NewServer initializes all server dependencies. On failure, it cleans up
+// resources allocated before the error point via a cleanup stack.
+func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retErr error) { //nolint:gocognit,cyclop,funlen // server initialization requires sequential resource setup
+	// Apply defaults for zero values
+	if config.Port == 0 {
+		config.Port = webui.DefaultPort
+	}
+	if config.PoolSize == 0 {
+		config.PoolSize = webui.DefaultPoolSize
+	}
+	if config.ShutdownTimeout == 0 {
+		config.ShutdownTimeout = webui.DefaultShutdownTimeout
+	}
+	if config.MaxPortAttempts == 0 {
+		config.MaxPortAttempts = webui.DefaultMaxPortAttempts
+	}
+	if config.BindAddress == "" {
+		config.BindAddress = "127.0.0.1"
+	}
+
+	initLogger(config.Logger)
+
+	app := &Server{config: config}
+
+	var cleanups []func()
+	defer func() {
+		if retErr != nil {
+			for i := len(cleanups) - 1; i >= 0; i-- {
+				cleanups[i]()
+			}
+		}
+	}()
+
+	// Build CORS configuration
+	app.corsConfig = middleware.CORSConfig{
+		Enabled: config.CORSEnabled,
+	}
+	if config.CORSEnabled {
+		if len(config.CORSOrigins) > 0 {
+			app.corsConfig.AllowedOrigins = config.CORSOrigins
+		} else {
+			// Default to Vite dev server
+			app.corsConfig.AllowedOrigins = []string{"http://localhost:3000"}
+		}
+	}
+
+	// Auto-add auth service origin to CORS when external auth is configured
+	if authOrigin := middleware.ExtractOrigin(config.ExtAuthURL); authOrigin != "" {
+		app.corsConfig.Enabled = true
+		app.corsConfig.AllowedOrigins = append(app.corsConfig.AllowedOrigins, authOrigin)
+	}
+
+	// Log configuration
+	logger.Info("starting web UI server", "port", config.Port, "pool_size", config.PoolSize, "bind_address", config.BindAddress)
+	if config.SocketPath != "" {
+		logger.Info("daemon socket configured", "socket", config.SocketPath)
+	} else {
+		logger.Info("daemon socket: auto-detect")
+	}
+	if app.corsConfig.Enabled {
+		logger.Info("CORS enabled", "origins", app.corsConfig.AllowedOrigins)
+	}
+	if config.HSTSEnabled {
+		logger.Info("HSTS enabled: ensure this server is behind a TLS-terminating proxy")
+	}
+	if config.ExtAuthURL == "" && config.BindAddress != "127.0.0.1" && config.BindAddress != "::1" {
+		logger.Warn("no authentication configured and server is exposed to network", "bind_address", config.BindAddress)
+	}
+	if config.DevMode {
+		dir := config.DevFrontendDir
+		if dir == "" {
+			dir = "internal/webui/frontend/dist"
+		}
+		logger.Info("dev mode enabled", "frontend_dir", dir)
+	} else {
+		webui.LogFrontendBuildMeta()
+	}
+	if config.FleetEnabled {
+		logger.Info("fleet routes enabled")
+	}
+
+	// Find an available port (auto-fallback if requested port is in use)
+	var err error
+	app.listener, app.actualPort, err = webui.FindAvailablePort(config.BindAddress, config.Port, config.MaxPortAttempts)
+	if err != nil {
+		return nil, fmt.Errorf("could not find available port: %w", err)
+	}
+	cleanups = append(cleanups, func() { _ = app.listener.Close() })
+	if app.actualPort != config.Port {
+		logger.Info("configured port in use, using fallback", "requested_port", config.Port, "actual_port", app.actualPort)
+	}
+
+	// MultiPool for workspace-aware connection routing.
+	app.multiPool = appinfra.NewMultiPool(middleware.WorkspaceFromContext, config.PoolSize)
+	cleanups = append(cleanups, func() { _ = app.multiPool.Close() })
+
+	// Initialize the initial workspace connection pool (stable UUID or CWD basename).
+	app.initialWorkspaceID = config.InitialWorkspaceID
+	if app.initialWorkspaceID == "" {
+		app.initialWorkspaceID = "default"
+		if cwd, err := os.Getwd(); err == nil {
+			app.initialWorkspaceID = filepath.Base(cwd)
+		}
+	}
+	var rawPool *appinfra.ConnectionPool
+	var poolErr error
+
+	if config.SocketPath != "" {
+		rawPool, poolErr = appinfra.NewConnectionPool(config.SocketPath, config.PoolSize)
+	} else {
+		cwd, err := appinfra.GetCwd()
+		if err != nil {
+			logger.Warn("failed to get current directory", "err", err)
+		} else {
+			rawPool, poolErr = appinfra.NewConnectionPoolAutoDiscover(cwd, config.PoolSize)
+		}
+	}
+
+	if poolErr != nil {
+		logger.Warn("failed to initialize daemon connection pool", "err", poolErr)
+		logger.Info("web UI will start but API endpoints may not work until daemon is available")
+	} else {
+		app.pool = appinfra.InitProtectedPool(rawPool, config.Logger)
+		logger.Info("daemon connection pool initialized with circuit breaker")
+
+		func() {
+			testCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			client, err := app.pool.Get(testCtx)
+			if err != nil {
+				logger.Warn("daemon not available at startup", "err", err)
+				logger.Info("API endpoints will attempt to connect when called")
+			} else {
+				app.pool.Put(client)
+				logger.Info("daemon connection verified")
+			}
+		}()
+	}
+
+	// Initialize issue service layer
+	app.issueSvc = service.NewIssueService(app.pool, app.multiPool, middleware.WithWorkspace)
+
+	// Create SSE hub for real-time push notifications
+	app.hub = appstores.NewHub()
+	go app.hub.Run()
+	cleanups = append(cleanups, func() { app.hub.Stop() })
+
+	// Bridge per-workspace daemon mutations to SSE clients.
+	app.multiSub = appstores.NewMultiSub(app.hub, app.multiPool, config.Logger)
+	cleanups = append(cleanups, func() { app.multiSub.Stop() })
+
+	// Terminal manager for WebSocket sessions (workspace-scoped prefix prevents collisions).
+	termSessionPrefix := fmt.Sprintf("%d-%s", app.actualPort, appinfra.ShortWorkspaceID(app.initialWorkspaceID))
+	if app.termMgr, err = terminal.NewTerminalManager(config.TerminalCmd, termSessionPrefix, config.MaxTerminalSessions); err != nil {
+		if errors.Is(err, terminal.ErrTmuxNotFound) {
+			logger.Warn("tmux not found, terminal feature disabled")
+		} else {
+			logger.Warn("failed to initialize terminal manager", "err", err)
+		}
+	} else {
+		if config.ScrollbackMaxLines > 0 {
+			app.termMgr.SetScrollbackMaxLines(config.ScrollbackMaxLines)
+		}
+		cleanups = append(cleanups, func() { _ = app.termMgr.Shutdown() })
+		logger.Info("terminal manager initialized", "component", "terminal", "default_command", config.TerminalCmd)
+	}
+
+	// Wire session history callback.
+	if app.termMgr != nil {
+		app.termMgr.SetOnSessionKilled(func(sessionName string) {
+			store := app.sessionHistoryStore
+			if store == nil {
+				return
+			}
+			issueID := terminal.ExtractIssueID(sessionName)
+			if issueID == "" {
+				return
+			}
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				return
+			}
+			scrollbackPath := homeDir + "/.loom/session-scrollback/" + sessionName + ".log"
+			if _, err := os.Stat(scrollbackPath); err != nil {
+				scrollbackPath = ""
+			}
+			if err := store.Complete(context.Background(), app.initialWorkspaceID, issueID, sessionName, scrollbackPath); err != nil {
+				logger.Warn("failed to complete session history", "session", sessionName, "err", err)
+			}
+		})
+	}
+
+	// Initialize terminal auth for one-time WebSocket tokens
+	if app.termMgr != nil {
+		var authErr error
+		app.termAuth, authErr = appstores.NewTerminalAuth()
+		if authErr != nil {
+			logger.Warn("failed to initialize terminal auth, terminal feature disabled", "err", authErr)
+			app.termMgr = nil
+		} else {
+			cleanups = append(cleanups, func() { app.termAuth.Stop() })
+		}
+	}
+
+	// Initialize agent service layer (requires ops.GitOps; termMgr/termAuth may be nil)
+	if config.GitOps != nil {
+		app.agentSvc = svcimpl.NewAgentService(config.GitOps, app.termMgr, app.termAuth)
+	}
+
+	// Initialize SSE token exchange store (external auth mode only).
+	if config.ExtAuthURL != "" {
+		var sseErr error
+		app.sseTokens, sseErr = appstores.NewTokenStore()
+		if sseErr != nil {
+			logger.Warn("failed to initialize SSE token store", "err", sseErr)
+		} else {
+			cleanups = append(cleanups, func() { app.sseTokens.Stop() })
+		}
+	}
+
+	// Fleet store registry and JWT config for worker registration.
+	if config.FleetRedis != nil {
+		app.fleetRegistry, err = appinfra.InitFleetRegistry(*config.FleetRedis, config.Logger)
+		if err != nil {
+			logger.Warn("failed to initialize fleet store registry", "component", "fleet", "err", err)
+		} else {
+			var jwtKey []byte
+			if len(config.FleetJWTKey) > 0 {
+				jwtKey = config.FleetJWTKey
+				logger.Info("using pre-provisioned JWT signing key", "component", "fleet")
+			} else {
+				jwtKey = make([]byte, 32)
+				if _, err := rand.Read(jwtKey); err != nil {
+					logger.Warn("failed to generate JWT signing key", "component", "fleet", "err", err)
+					_ = app.fleetRegistry.Close()
+					app.fleetRegistry = nil
+				}
+			}
+			if app.fleetRegistry != nil {
+				app.tokenCfg = appinfra.NewFleetTokenConfig(jwtKey, time.Hour)
+				logger.Info("fleet store registry initialized", "component", "fleet", "redis_address", config.FleetRedis.Address)
+			}
+		}
+	}
+
+	// Initialize fleet claim metrics
+	if app.fleetRegistry != nil {
+		app.claimMetrics = appinfra.NewFleetClaimMetrics()
+	}
+
+	// Construct lifecycle hooks.
+	app.registry = appinfra.NewWorkspaceRegistry(config.Logger)
+	cleanups = append(cleanups, func() { _ = app.registry.Close() })
+
+	beadsPoolHook := appinfra.RegisterHooks(app.registry, appinfra.HookConfig{
+		MultiPool: app.multiPool,
+		PoolSize:  config.PoolSize,
+		MultiSub:  app.multiSub,
+		TermMgr:   app.termMgr,
+		FleetReg:  app.fleetRegistry,
+		FleetURL:  config.FleetClientURL,
+		FleetWS:   config.FleetClientWorkspace,
+		FleetKey:  config.FleetClientAPIKey,
+		FleetMode: config.FleetMode,
+		Logger:    config.Logger,
+	})
+
+	// Register the initial workspace.
+	if app.pool != nil {
+		appinfra.SetPrebuiltPool(beadsPoolHook, app.initialWorkspaceID, app.pool)
+		var initialWSPath string
+		if config.WorkspaceListFn != nil {
+			if wsMap, listErr := config.WorkspaceListFn(); listErr == nil {
+				initialWSPath = wsMap[app.initialWorkspaceID]
+			}
+		}
+		if initialWSPath == "" {
+			if cwd, cwdErr := appinfra.GetCwd(); cwdErr == nil {
+				initialWSPath = cwd
+			}
+		}
+		if err := app.registry.Register(app.initialWorkspaceID, initialWSPath); err != nil {
+			logger.Warn("failed to register initial workspace", "err", err)
+		}
+		app.getMutationsSince = appstores.GetMutationsSinceFn(app.multiSub)
+	}
+
+	// Reconcile all config workspaces.
+	appinfra.ReconcileConfigWorkspaces(config.WorkspaceListFn, app.initialWorkspaceID, app.pool != nil, app.registry, config.Logger)
+
+	// Build fleet registration config.
+	if config.FleetAPIKey != "" && app.fleetRegistry != nil {
+		var regCleanup func()
+		app.fleetRegCfg, regCleanup = appinfra.NewFleetRegisterConfig(config.FleetAPIKey, config.FleetRedis, config.Logger)
+		if regCleanup != nil {
+			cleanups = append(cleanups, regCleanup)
+		}
+	} else if app.fleetRegistry != nil && config.FleetAPIKey == "" {
+		logger.Warn("fleet store configured but no fleet API key set", "component", "fleet", "env_var", "LOOM_FLEET_API_KEY")
+		logger.Warn("fleet registration endpoint will return 503 until fleet API key is configured", "component", "fleet")
+	}
+
+	if config.FleetRedis != nil {
+		nameToID := resolveWorkspaceNameToID(config)
+		var tmCleanup func()
+		app.tabMetaStore, tmCleanup = appstores.InitTabMeta(ctx, config.FleetRedis, nameToID, config.Logger)
+		cleanups = append(cleanups, tmCleanup)
+	}
+
+	if config.FleetRedis != nil {
+		var itCleanup func()
+		app.issueTabStore, itCleanup = appstores.InitIssueTabs(ctx, config.FleetRedis, app.initialWorkspaceID, config.Logger)
+		cleanups = append(cleanups, itCleanup)
+	}
+
+	if config.FleetRedis != nil {
+		var shCleanup func()
+		app.sessionHistoryStore, shCleanup = appstores.InitSessionHistory(ctx, config.FleetRedis, app.initialWorkspaceID, config.Logger)
+		cleanups = append(cleanups, shCleanup)
+	}
+
+	// Initialize external auth (JWKS cache + middleware)
+	app.extAuthMiddleware, app.jwksCleanup = initExtAuth(config)
+	if app.jwksCleanup != nil {
+		cleanups = append(cleanups, app.jwksCleanup)
+	}
+
+	app.wrappedCreateFn = wrapWorkspaceCreateFn(config.WorkspaceCreateFn, app.registry)
+	app.wrappedDeleteFn = wrapWorkspaceDeleteFn(config.WorkspaceDeleteFn, app.registry, config.WorkspaceIDResolverFn)
+
+	// Async job store for clone workspace creation (202 + polling).
+	app.jobStore = svcimpl.NewWorkspaceJobStore()
+	cleanups = append(cleanups, func() { app.jobStore.Stop() })
+
+	// Workspace-existence checker.
+	app.wsExistsFn = func(id string) bool {
+		return app.registry.Registered(id)
+	}
+
+	// Initialize workspace service layer
+	app.workspaceSvc = service.NewWorkspaceService(service.WorkspaceServiceConfig{
+		ConfigFn:       config.WorkspaceConfigFn,
+		ConfigByIDFn:   config.WorkspaceConfigByIDFn,
+		MultiPool:      app.multiPool,
+		CreateFn:       app.wrappedCreateFn,
+		DeleteFn:       app.wrappedDeleteFn,
+		JobStore:       app.jobStore,
+		SetDefaultFn:   config.SetDefaultWorkspaceFn,
+		ClearDefaultFn: config.ClearDefaultWorkspaceFn,
+	})
+
+	// Generate and persist notify token for session change endpoint auth.
+	app.notifyToken, app.notifyTokenFile = generateNotifyToken(config.NotifyTokenDir)
+
+	// Initialize terminal service layer (requires termMgr, stores)
+	if app.termMgr != nil {
+		var configPool terminal.ConfigConnectionGetter
+		if app.multiPool != nil {
+			configPool = &svcimpl.TermConfigPoolAdapter{Pool: app.multiPool}
+		}
+		var rc *redis.Client
+		if app.tabMetaStore != nil {
+			rc = app.tabMetaStore.RedisClient()
+		}
+		app.termSvc = terminal.NewTerminalService(
+			app.termMgr, app.termAuth, configPool,
+			app.tabMetaStore, app.hub, app.sessionHistoryStore, rc,
+		)
+	}
+
+	// Initialize diff service layer (requires ops.GitOps)
+	if config.GitOps != nil {
+		app.diffSvc = svcimpl.NewDiffService(config.GitOps, app.multiPool)
+	}
+
+	// Initialize file service layer (requires ops.FileOps)
+	if config.FileOps != nil {
+		app.fileSvc = svcimpl.NewFileService(config.FileOps)
+	}
+
+	// Initialize session service layer (always constructed; stores may be nil internally)
+	app.sessSvc = svcimpl.NewSessionService(config.SessionsStore, app.sessionHistoryStore)
+
+	app.buildHandlers()
+	app.buildModules()
+
+	// Create mux and register all routes.
+	app.mux = http.NewServeMux()
+	app.registerRoutes()
+	app.registerWorkerAPIRoutes()
+
+	return app, nil
+}
+
+// resolveWorkspaceNameToID creates a name-to-ID mapping from workspace config.
+func resolveWorkspaceNameToID(config webui.ServerConfig) map[string]string {
+	if config.WorkspaceConfigFn == nil {
+		return nil
+	}
+	wsData, err := config.WorkspaceConfigFn()
+	if err != nil || wsData == nil {
+		return nil
+	}
+	nameToID := make(map[string]string, len(wsData.Workspaces))
+	for _, ws := range wsData.Workspaces {
+		if ws.Name != "" && ws.ID != "" {
+			nameToID[ws.Name] = ws.ID
+		}
+	}
+	return nameToID
+}

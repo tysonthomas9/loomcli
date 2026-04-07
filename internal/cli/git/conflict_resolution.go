@@ -29,7 +29,15 @@ func resolveConflictsDetached(repoPath, sourceBranch, targetBranch string, confl
 
 func resolveConflictsDetachedDeps(deps *cli.Deps, repoPath, sourceBranch, targetBranch string, conflicts []string, pushRef string) error {
 	printConflictInfo(conflicts)
-	prompt := ConflictPromptGenWithPush(sourceBranch, targetBranch, conflicts, pushRef)
+	var prompt string
+	if ConflictPromptGenWithPush != nil {
+		prompt = ConflictPromptGenWithPush(sourceBranch, targetBranch, conflicts, pushRef)
+	} else {
+		prompt = fmt.Sprintf("Resolve merge conflicts in: %s -> %s (push to %s)\n\nConflicted files:\n", sourceBranch, targetBranch, pushRef)
+		for _, f := range conflicts {
+			prompt += "  - " + f + "\n"
+		}
+	}
 	return invokeAgentDeps(deps, repoPath, prompt, "")
 }
 
@@ -38,7 +46,16 @@ func invokeAgentDeps(deps *cli.Deps, workDir, prompt, agentName string) error {
 }
 
 func invokeAgentForConflictsDeps(deps *cli.Deps, workDir, sourceBranch, targetBranch string, conflicts []string) error {
-	prompt := ConflictPromptGen(sourceBranch, targetBranch, conflicts)
+	var prompt string
+	if ConflictPromptGen != nil {
+		prompt = ConflictPromptGen(sourceBranch, targetBranch, conflicts)
+	} else {
+		// Fallback when agent package init() has not registered the generator
+		prompt = fmt.Sprintf("Resolve merge conflicts in: %s -> %s\n\nConflicted files:\n", sourceBranch, targetBranch)
+		for _, f := range conflicts {
+			prompt += "  - " + f + "\n"
+		}
+	}
 	return invokeAgentDeps(deps, workDir, prompt, "")
 }
 

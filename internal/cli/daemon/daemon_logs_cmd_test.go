@@ -1,5 +1,3 @@
-//go:build ignore
-
 package daemon
 
 import (
@@ -138,7 +136,7 @@ agents:
 
 	// Read state and verify
 	stateFilePath := filepath.Join(loomDir, "daemon-agents.json")
-	readState, err := readStateFile(stateFilePath)
+	readState, err := ReadStateFile(stateFilePath)
 	if err != nil {
 		t.Fatalf("failed to read state file: %v", err)
 	}
@@ -170,7 +168,7 @@ func TestRunDaemonLogs_UnknownAgent(t *testing.T) {
 
 	// Read state and look for an unknown agent
 	stateFilePath := filepath.Join(loomDir, "daemon-agents.json")
-	readState, err := readStateFile(stateFilePath)
+	readState, err := ReadStateFile(stateFilePath)
 	if err != nil {
 		t.Fatalf("failed to read state file: %v", err)
 	}
@@ -228,7 +226,7 @@ func TestRunDaemonLogs_NoDaemonNoState(t *testing.T) {
 	tmpDir := t.TempDir()
 	stateFilePath := filepath.Join(tmpDir, ".loom", "daemon-agents.json")
 
-	_, err := readStateFile(stateFilePath)
+	_, err := ReadStateFile(stateFilePath)
 	if err == nil {
 		t.Error("expected error when reading nonexistent state file")
 	}

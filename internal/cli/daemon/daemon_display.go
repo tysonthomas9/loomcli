@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
 )
 
@@ -60,7 +61,7 @@ func printAgentStatus(agent DaemonAgentStatus) {
 		fmt.Printf("      Restarts: %d\n", agent.RestartCount)
 	}
 	if agent.StopReason != "" {
-		if agent.StopReason == string(StopReasonFatalError) && agent.LastExitCode != 0 {
+		if agent.StopReason == string(supervisor.StopReasonFatalError) && agent.LastExitCode != 0 {
 			fmt.Printf("      Stopped: %s (exit %d)\n", agent.StopReason, agent.LastExitCode)
 		} else {
 			fmt.Printf("      Stopped: %s\n", agent.StopReason)
@@ -80,7 +81,7 @@ func printAgentBranchInfo(agent DaemonAgentStatus) {
 
 	branchLine := fmt.Sprintf("      Branch: %s", branchName)
 
-	// Parse default branch from RemoteBranch (e.g. "origin/main" → "main")
+	// Parse default branch from RemoteBranch (e.g. "origin/main" -> "main")
 	defaultBranch := "main"
 	if agent.RemoteBranch != "" {
 		parts := strings.SplitN(agent.RemoteBranch, "/", 2)
@@ -101,7 +102,7 @@ func printAgentBranchInfo(agent DaemonAgentStatus) {
 }
 
 // formatDaemonDuration formats a duration in a human-readable way for daemon status.
-// <1s → "<1s", <1m → "Ns", <1h → "Nm Ns", ≥1h → "Nh Nm".
+// <1s -> "<1s", <1m -> "Ns", <1h -> "Nm Ns", >=1h -> "Nh Nm".
 func formatDaemonDuration(d time.Duration) string {
 	if d <= 0 {
 		return "<1s"

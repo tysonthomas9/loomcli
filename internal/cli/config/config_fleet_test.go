@@ -1,5 +1,3 @@
-//go:build ignore
-
 package config
 
 import (
@@ -84,7 +82,7 @@ func TestOverlayFleetSettings_NilSafe(t *testing.T) {
 }
 
 func TestResolveFleetConfig_Defaults(t *testing.T) {
-	cfg := resolveFleetConfig(nil)
+	cfg := ResolveFleetConfig(nil)
 
 	if cfg.Workspace != "default" {
 		t.Errorf("Workspace = %q, want %q", cfg.Workspace, "default")
@@ -99,7 +97,7 @@ func TestResolveFleetConfig_Defaults(t *testing.T) {
 
 func TestResolveFleetConfig_Defaults_NilFleet(t *testing.T) {
 	daemon := &DaemonSettings{Fleet: nil}
-	cfg := resolveFleetConfig(daemon)
+	cfg := ResolveFleetConfig(daemon)
 
 	if cfg.Workspace != "default" {
 		t.Errorf("Workspace = %q, want %q", cfg.Workspace, "default")
@@ -121,7 +119,7 @@ func TestResolveFleetConfig_FromYAML(t *testing.T) {
 		},
 	}
 
-	cfg := resolveFleetConfig(daemon)
+	cfg := ResolveFleetConfig(daemon)
 
 	if cfg.URL != "https://fleet.example.com" {
 		t.Errorf("URL = %q, want https://fleet.example.com", cfg.URL)
@@ -147,7 +145,7 @@ func TestResolveFleetConfig_EnvOverrides(t *testing.T) {
 	t.Setenv("LOOM_FLEET_WORKSPACE", "env-ws")
 	t.Setenv("LOOM_FLEET_API_KEY", "env-key")
 
-	cfg := resolveFleetConfig(daemon)
+	cfg := ResolveFleetConfig(daemon)
 
 	if cfg.URL != "https://env.example.com" {
 		t.Errorf("URL = %q, want https://env.example.com", cfg.URL)
@@ -167,7 +165,7 @@ func TestResolveFleetConfig_URLTrailingSlash(t *testing.T) {
 		},
 	}
 
-	cfg := resolveFleetConfig(daemon)
+	cfg := ResolveFleetConfig(daemon)
 
 	if cfg.URL != "https://fleet.example.com" {
 		t.Errorf("URL = %q, want trailing slash trimmed to https://fleet.example.com", cfg.URL)
@@ -181,7 +179,7 @@ func TestResolveFleetConfig_MultipleTrailingSlashes(t *testing.T) {
 		},
 	}
 
-	cfg := resolveFleetConfig(daemon)
+	cfg := ResolveFleetConfig(daemon)
 
 	if cfg.URL != "https://fleet.example.com" {
 		t.Errorf("URL = %q, want multiple trailing slashes trimmed to https://fleet.example.com", cfg.URL)
@@ -191,7 +189,7 @@ func TestResolveFleetConfig_MultipleTrailingSlashes(t *testing.T) {
 func TestResolveFleetConfig_EnvURLTrailingSlash(t *testing.T) {
 	t.Setenv("LOOM_FLEET_URL", "https://env.example.com/")
 
-	cfg := resolveFleetConfig(nil)
+	cfg := ResolveFleetConfig(nil)
 
 	if cfg.URL != "https://env.example.com" {
 		t.Errorf("URL = %q, want trailing slash trimmed from env override", cfg.URL)
@@ -206,7 +204,7 @@ func TestResolveFleetConfig_EmptyWorkspaceDefaults(t *testing.T) {
 		},
 	}
 
-	cfg := resolveFleetConfig(daemon)
+	cfg := ResolveFleetConfig(daemon)
 
 	if cfg.Workspace != "default" {
 		t.Errorf("Workspace = %q, want %q when not set", cfg.Workspace, "default")

@@ -75,25 +75,12 @@ func (c *ClaudeBackend) InvokeStreaming(ctx context.Context, workDir, prompt, ag
 	cmd := exec.Command("claude", "-p", "--verbose", "--output-format", "stream-json",
 		"--dangerously-skip-permissions")
 	cmd.Dir = workDir
-	env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
-	if agentName != "" {
-		env = append(env, "BD_ACTOR="+agentName)
-	}
-	env = append(env, activeSessionEnvVars()...)
-	cmd.Env = env
+	cmd.Env = buildClaudeEnv(workDir, agentName)
 
-	// Pass prompt via stdin pipe
-	r, w, err := os.Pipe()
+	r, err := pipePromptToCmd(cmd, prompt)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create pipe: %w", err)
+		return nil, err
 	}
-	if _, err := io.WriteString(w, prompt); err != nil {
-		w.Close()
-		r.Close()
-		return nil, fmt.Errorf("failed to write prompt to stdin: %w", err)
-	}
-	w.Close()
-	cmd.Stdin = r
 	cmd.Stderr = os.Stderr
 
 	stdout, err := cmd.StdoutPipe()
@@ -109,7 +96,6 @@ func (c *ClaudeBackend) InvokeStreaming(ctx context.Context, workDir, prompt, ag
 		return nil, fmt.Errorf("failed to start claude: %w", err)
 	}
 
-	// Monitor context cancellation
 	guard := newProcessGuard(cmd.Process)
 	go func() {
 		select {
@@ -119,12 +105,7 @@ func (c *ClaudeBackend) InvokeStreaming(ctx context.Context, workDir, prompt, ag
 		}
 	}()
 
-	return &streamReadCloser{
-		ReadCloser: stdout,
-		cmd:        cmd,
-		stdinPipe:  r,
-		guard:      guard,
-	}, nil
+	return &streamReadCloser{ReadCloser: stdout, cmd: cmd, stdinPipe: r, guard: guard}, nil
 }
 
 // streamReadCloser wraps a stdout pipe and ensures the subprocess is cleaned up on Close.
@@ -151,15 +132,10 @@ func (s *streamReadCloser) Close() error {
 
 // ContinueSession resumes an interactive Claude session by session ID.
 func (c *ClaudeBackend) ContinueSession(workDir, sessionID, agentName string) error {
-	cmd := exec.Command("claude", "--resume", "--session-id", sessionID,
+	cmd := exec.Command("claude", "--resume", "--session-id", sessionID, //nolint:gosec // G204: intentional subprocess launch for claude CLI
 		"--dangerously-skip-permissions")
 	cmd.Dir = workDir
-	env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
-	if agentName != "" {
-		env = append(env, "BD_ACTOR="+agentName)
-	}
-	env = append(env, activeSessionEnvVars()...)
-	cmd.Env = env
+	cmd.Env = buildClaudeEnv(workDir, agentName)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -185,14 +161,9 @@ var claudeInvoker = defaultClaudeInvoker
 // buildClaudeInteractiveCmd constructs the exec.Cmd for interactive Claude invocation.
 // Extracted for testability — callers can inspect the returned cmd without execution.
 func buildClaudeInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
-	cmd := exec.Command("claude", "--dangerously-skip-permissions", prompt)
+	cmd := exec.Command("claude", "--dangerously-skip-permissions", prompt) //nolint:gosec // G204: intentional subprocess launch for claude CLI
 	cmd.Dir = workDir
-	env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
-	if agentName != "" {
-		env = append(env, "BD_ACTOR="+agentName)
-	}
-	env = append(env, activeSessionEnvVars()...)
-	cmd.Env = env
+	cmd.Env = buildClaudeEnv(workDir, agentName)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -212,39 +183,33 @@ func defaultClaudeInvoker(workDir, prompt, agentName string) error {
 // claudeNonInteractiveInvoker is the function used for non-interactive Claude invocation (mockable for tests)
 var claudeNonInteractiveInvoker func(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error = defaultClaudeNonInteractiveInvoker
 
+// buildClaudeEnv constructs the environment variables for Claude subprocess invocations.
+func buildClaudeEnv(workDir, agentName string) []string {
+	env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
+	if agentName != "" {
+		env = append(env, "BD_ACTOR="+agentName)
+	}
+	return append(env, activeSessionEnvVars()...)
+}
+
 // defaultClaudeNonInteractiveInvoker is the real non-interactive Claude invocation
 func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
 	cmd := exec.Command("claude", "-p", "--verbose", "--output-format", "stream-json",
 		"--dangerously-skip-permissions")
 	cmd.Dir = workDir
-	env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
-	if agentName != "" {
-		env = append(env, "BD_ACTOR="+agentName)
-	}
-	env = append(env, activeSessionEnvVars()...)
-	cmd.Env = env
+	cmd.Env = buildClaudeEnv(workDir, agentName)
 
-	// Pass prompt via stdin pipe (not CLI args) to avoid exposure in process listings
-	r, w, err := os.Pipe()
+	r, err := pipePromptToCmd(cmd, prompt)
 	if err != nil {
-		return fmt.Errorf("failed to create pipe: %w", err)
+		return err
 	}
-	if _, err := io.WriteString(w, prompt); err != nil {
-		w.Close()
-		r.Close()
-		return fmt.Errorf("failed to write prompt to stdin: %w", err)
-	}
-	w.Close()
-	cmd.Stdin = r
 
-	// Capture stdout for parsing
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		r.Close()
 		return fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
 	cmd.Stderr = os.Stderr
-
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	fmt.Println("Launching Claude agent (non-interactive)...")
@@ -255,7 +220,6 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 		return fmt.Errorf("failed to start claude: %w", err)
 	}
 
-	// Monitor for shutdown signal
 	guard := newProcessGuard(cmd.Process)
 	go func() {
 		select {
@@ -265,22 +229,28 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 		}
 	}()
 
-	// Parse and display streaming output
-	scanner := bufio.NewScanner(stdout)
-	buf := make([]byte, 0, 1024*1024) // 1MB buffer for large tool results
-	scanner.Buffer(buf, 10*1024*1024)
-	for scanner.Scan() {
-		line := scanner.Text()
+	scanStreamOutput(stdout, func(line string) {
 		displayStreamEvent(line)
 		if collector != nil {
 			collectClaudeStreamUsage(line, collector)
 		}
-	}
+	})
 
 	runErr := cmd.Wait()
 	guard.WaitAndMark()
 	r.Close()
 	return runErr
+}
+
+// scanStreamOutput reads stdout line by line through a buffered scanner and
+// calls handler for each line. Shared by Claude, Codex, and OpenCode backends.
+func scanStreamOutput(stdout io.Reader, handler func(string)) {
+	scanner := bufio.NewScanner(stdout)
+	buf := make([]byte, 0, 1024*1024) // 1MB buffer for large tool results
+	scanner.Buffer(buf, 10*1024*1024)
+	for scanner.Scan() {
+		handler(scanner.Text())
+	}
 }
 
 // StreamEvent represents a Claude stream-json event.

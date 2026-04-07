@@ -22,10 +22,10 @@ func isPrivateIP(ip net.IP) bool {
 	return false
 }
 
-// safeDialContext returns a DialContext function that validates resolved IPs
+// SafeDialContext returns a DialContext function that validates resolved IPs
 // are not in private/reserved ranges (to prevent SSRF). If allowPrivate is
 // true, the check is skipped entirely.
-func safeDialContext(allowPrivate bool) func(ctx context.Context, network, addr string) (net.Conn, error) {
+func SafeDialContext(allowPrivate bool) func(ctx context.Context, network, addr string) (net.Conn, error) {
 	dialer := &net.Dialer{
 		Timeout:   5 * time.Second,
 		KeepAlive: 30 * time.Second,

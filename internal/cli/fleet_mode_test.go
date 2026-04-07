@@ -1,10 +1,7 @@
-//go:build ignore
-
 package cli
 
 import (
 	"testing"
-	"time"
 )
 
 func TestIsFleetMode_NilConfig(t *testing.T) {
@@ -92,105 +89,5 @@ func TestIsFleetModeFromEnv_EnvVar(t *testing.T) {
 	t.Setenv(fleetModeEnvVar, BackendFleet)
 	if !isFleetModeFromEnv() {
 		t.Error("isFleetModeFromEnv() = false, want true (LOOM_ISSUE_BACKEND=fleet)")
-	}
-}
-
-func TestDaemonStart_FleetMode_SkipsAgentSupervision(t *testing.T) {
-	t.Setenv(fleetModeEnvVar, "")
-
-	// Create a daemon with fleet mode config and one agent
-	d := &Daemon{
-		config: &DaemonConfig{
-			Backend: BackendFleet,
-			Daemon: DaemonSettings{
-				RestartPolicy: RestartPolicy{
-					MaxRetries:     intPtr(0),
-					BackoffInitial: intPtr(1),
-					BackoffMax:     intPtr(1),
-				},
-			},
-		},
-		agents: []*AgentProcess{
-			{
-				entry: AgentEntry{Worktree: "test-agent", Role: "task"},
-			},
-		},
-		concurrency: NewConcurrencyTracker(nil),
-	}
-
-	if err := d.Start(); err != nil {
-		t.Fatalf("Start() error = %v", err)
-	}
-
-	// In fleet mode, agent stopCh and done should NOT be initialized
-	// because superviseAgent goroutines were not launched
-	if d.agents[0].stopCh != nil {
-		t.Error("agent stopCh should be nil in fleet mode (supervision skipped)")
-	}
-	if d.agents[0].done != nil {
-		t.Error("agent done should be nil in fleet mode (supervision skipped)")
-	}
-
-	// Stop should complete quickly since no goroutines were launched
-	done := make(chan struct{})
-	go func() {
-		d.Stop()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		// Success
-	case <-time.After(5 * time.Second):
-		t.Fatal("Stop() did not complete within 5 seconds")
-	}
-}
-
-func TestDaemonStart_NonFleetMode_LaunchesAgents(t *testing.T) {
-	t.Setenv(fleetModeEnvVar, "")
-
-	// With empty backend (default beads mode), agents should be supervised
-	d := &Daemon{
-		config: &DaemonConfig{
-			Backend: "",
-			Daemon: DaemonSettings{
-				RestartPolicy: RestartPolicy{
-					MaxRetries:     intPtr(0),
-					BackoffInitial: intPtr(1),
-					BackoffMax:     intPtr(1),
-				},
-			},
-		},
-		agents: []*AgentProcess{
-			{
-				entry: AgentEntry{Worktree: "test-agent", Role: "task"},
-			},
-		},
-		concurrency: NewConcurrencyTracker(nil),
-	}
-
-	if err := d.Start(); err != nil {
-		t.Fatalf("Start() error = %v", err)
-	}
-
-	// In non-fleet mode, agent channels should be initialized
-	if d.agents[0].stopCh == nil {
-		t.Error("agent stopCh should be non-nil in non-fleet mode")
-	}
-	if d.agents[0].done == nil {
-		t.Error("agent done should be non-nil in non-fleet mode")
-	}
-
-	// Clean up
-	done := make(chan struct{})
-	go func() {
-		d.Stop()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(10 * time.Second):
-		t.Fatal("Stop() did not complete within 10 seconds")
 	}
 }

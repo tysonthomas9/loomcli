@@ -84,39 +84,9 @@ func runUsage(cmd *cobra.Command, _ []string) {
 		os.Exit(1)
 	}
 
-	// Build filter from flags
-	var f usage.Filter
-	f.AgentName = usageAgent
-	f.Backend = usageBackend
-	f.EpicID = usageEpic
-
-	now := time.Now()
-
-	// --today and --week take precedence over --since
-	if usageToday {
-		f.Since = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	} else if usageWeek {
-		f.Since = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).AddDate(0, 0, -7)
-	} else if usageSince != "" {
-		t, err := time.Parse("2006-01-02", usageSince)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: invalid --since date format, expected YYYY-MM-DD: %v\n", err)
-			os.Exit(1)
-		}
-		f.Since = t
-	}
-
-	if usageUntil != "" {
-		t, err := time.Parse("2006-01-02", usageUntil)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: invalid --until date format, expected YYYY-MM-DD: %v\n", err)
-			os.Exit(1)
-		}
-		f.Until = t.Add(24*time.Hour - time.Nanosecond)
-	}
-
-	if !f.Since.IsZero() && !f.Until.IsZero() && f.Until.Before(f.Since) {
-		fmt.Fprintf(os.Stderr, "Error: --until must be after --since\n")
+	f, err := buildUsageFilter()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -137,6 +107,43 @@ func runUsage(cmd *cobra.Command, _ []string) {
 	}
 
 	renderUsageTable(records, f)
+}
+
+// buildUsageFilter constructs a usage.Filter from command-line flags.
+func buildUsageFilter() (usage.Filter, error) {
+	var f usage.Filter
+	f.AgentName = usageAgent
+	f.Backend = usageBackend
+	f.EpicID = usageEpic
+
+	now := time.Now()
+
+	// --today and --week take precedence over --since
+	if usageToday {
+		f.Since = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	} else if usageWeek {
+		f.Since = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).AddDate(0, 0, -7)
+	} else if usageSince != "" {
+		t, err := time.Parse("2006-01-02", usageSince)
+		if err != nil {
+			return f, fmt.Errorf("invalid --since date format, expected YYYY-MM-DD: %v", err)
+		}
+		f.Since = t
+	}
+
+	if usageUntil != "" {
+		t, err := time.Parse("2006-01-02", usageUntil)
+		if err != nil {
+			return f, fmt.Errorf("invalid --until date format, expected YYYY-MM-DD: %v", err)
+		}
+		f.Until = t.Add(24*time.Hour - time.Nanosecond)
+	}
+
+	if !f.Since.IsZero() && !f.Until.IsZero() && f.Until.Before(f.Since) {
+		return f, fmt.Errorf("--until must be after --since")
+	}
+
+	return f, nil
 }
 
 // usageAggregation holds aggregated usage data.
@@ -229,7 +236,20 @@ func renderUsageTable(records []usage.SessionUsage, f usage.Filter) {
 	dateRange := formatDateRange(f, records)
 	sb.WriteString(monitor.RenderBoxLine(monitor.CenterText(dateRange, monitor.DashboardWidth-4)))
 
-	// Totals section
+	renderUsageTotals(&sb, &agg)
+	renderUsageByAgent(&sb, agg.ByAgent)
+	renderUsageByBackend(&sb, agg.ByBackend)
+
+	if usageVerbose {
+		renderUsageSessions(&sb, records)
+	}
+
+	sb.WriteString(monitor.RenderBoxBottom())
+	fmt.Print(sb.String())
+}
+
+// renderUsageTotals writes the TOTALS section into the string builder.
+func renderUsageTotals(sb *strings.Builder, agg *usageAggregation) {
 	sb.WriteString(monitor.RenderBoxSeparator())
 	sb.WriteString(monitor.RenderBoxLine(" TOTALS"))
 	sb.WriteString(monitor.RenderBoxLine(fmt.Sprintf("   Input tokens:  %s    Output tokens:    %s",
@@ -238,11 +258,13 @@ func renderUsageTable(records []usage.SessionUsage, f usage.Filter) {
 		monitor.PadRight(formatTokenCount(agg.TotalCacheRead), 12), formatTokenCount(agg.TotalCacheWrite))))
 	sb.WriteString(monitor.RenderBoxLine(fmt.Sprintf("   Estimated cost:  %-12s  Sessions:  %d",
 		formatCost(agg.TotalCost), agg.SessionCount)))
+}
 
-	// By Agent section
+// renderUsageByAgent writes the BY AGENT section into the string builder.
+func renderUsageByAgent(sb *strings.Builder, agents []agentUsageSummary) {
 	sb.WriteString(monitor.RenderBoxSeparator())
 	sb.WriteString(monitor.RenderBoxLine(" BY AGENT"))
-	for _, a := range agg.ByAgent {
+	for _, a := range agents {
 		line := fmt.Sprintf("   %-12s %s  %2d sessions   input: %s  output: %s",
 			monitor.TruncateToWidth(a.Name, 12),
 			monitor.PadRight(formatCost(a.Cost), 8),
@@ -251,48 +273,47 @@ func renderUsageTable(records []usage.SessionUsage, f usage.Filter) {
 			formatTokenCountShort(a.OutputTokens))
 		sb.WriteString(monitor.RenderBoxLine(line))
 	}
+}
 
-	// By Backend section
+// renderUsageByBackend writes the BY BACKEND section into the string builder.
+func renderUsageByBackend(sb *strings.Builder, backends []backendUsageSummary) {
 	sb.WriteString(monitor.RenderBoxSeparator())
 	sb.WriteString(monitor.RenderBoxLine(" BY BACKEND"))
-	for _, b := range agg.ByBackend {
+	for _, b := range backends {
 		line := fmt.Sprintf("   %-12s %s  %2d sessions",
 			monitor.TruncateToWidth(b.Name, 12),
 			monitor.PadRight(formatCost(b.Cost), 8),
 			b.Sessions)
 		sb.WriteString(monitor.RenderBoxLine(line))
 	}
+}
 
-	// Verbose: per-session detail
-	if usageVerbose {
-		sb.WriteString(monitor.RenderBoxSeparator())
-		sb.WriteString(monitor.RenderBoxLine(" SESSIONS"))
-		// Sort by start time descending (most recent first)
-		sorted := make([]usage.SessionUsage, len(records))
-		copy(sorted, records)
-		sort.Slice(sorted, func(i, j int) bool {
-			return sorted[i].StartedAt.After(sorted[j].StartedAt)
-		})
-		for _, rec := range sorted {
-			duration := rec.EndedAt.Sub(rec.StartedAt)
-			taskID := rec.TaskID
-			if taskID == "" {
-				taskID = "-"
-			}
-			line := fmt.Sprintf("   %s  %-10s %-8s %-12s %s  %s  exit:%d",
-				rec.StartedAt.Format("2006-01-02 15:04"),
-				monitor.TruncateToWidth(rec.AgentName, 10),
-				monitor.TruncateToWidth(rec.Backend, 8),
-				monitor.TruncateToWidth(taskID, 12),
-				monitor.PadRight(formatCost(rec.EstimatedCostUSD), 7),
-				monitor.PadRight(formatUsageDuration(duration), 4),
-				rec.ExitCode)
-			sb.WriteString(monitor.RenderBoxLine(line))
+// renderUsageSessions writes the verbose per-session detail section.
+func renderUsageSessions(sb *strings.Builder, records []usage.SessionUsage) {
+	sb.WriteString(monitor.RenderBoxSeparator())
+	sb.WriteString(monitor.RenderBoxLine(" SESSIONS"))
+	// Sort by start time descending (most recent first)
+	sorted := make([]usage.SessionUsage, len(records))
+	copy(sorted, records)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].StartedAt.After(sorted[j].StartedAt)
+	})
+	for _, rec := range sorted {
+		duration := rec.EndedAt.Sub(rec.StartedAt)
+		taskID := rec.TaskID
+		if taskID == "" {
+			taskID = "-"
 		}
+		line := fmt.Sprintf("   %s  %-10s %-8s %-12s %s  %s  exit:%d",
+			rec.StartedAt.Format("2006-01-02 15:04"),
+			monitor.TruncateToWidth(rec.AgentName, 10),
+			monitor.TruncateToWidth(rec.Backend, 8),
+			monitor.TruncateToWidth(taskID, 12),
+			monitor.PadRight(formatCost(rec.EstimatedCostUSD), 7),
+			monitor.PadRight(formatUsageDuration(duration), 4),
+			rec.ExitCode)
+		sb.WriteString(monitor.RenderBoxLine(line))
 	}
-
-	sb.WriteString(monitor.RenderBoxBottom())
-	fmt.Print(sb.String())
 }
 
 func renderUsageJSON(records []usage.SessionUsage) {

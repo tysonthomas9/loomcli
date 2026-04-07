@@ -45,6 +45,11 @@ func New(code Code, msg string, cause error) *CreateError {
 	return &CreateError{Code: code, Message: msg, Cause: cause}
 }
 
+// CreateMessage returns the user-facing error message.
+func (e *CreateError) CreateMessage() string {
+	return e.Message
+}
+
 func (e *CreateError) Error() string {
 	if e.Cause != nil {
 		return fmt.Sprintf("workspaceerrors [%s]: %s: %s", e.Code, e.Message, e.Cause)

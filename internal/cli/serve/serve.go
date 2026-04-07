@@ -1,38 +1,30 @@
 package serve
 
 import (
-	"bufio"
 	"context"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"log"
 	"log/slog"
-	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
-	"sort"
 	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/circuitbreaker"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
-	"github.com/tysonthomas9/loomcli/internal/cli/daemon"
-	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
-	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
-	"github.com/tysonthomas9/loomcli/internal/kv"
-	"github.com/tysonthomas9/loomcli/internal/sessions"
-	"github.com/tysonthomas9/loomcli/internal/usage"
+	"github.com/tysonthomas9/loomcli/internal/cli/serve/daemonwire"
+	"github.com/tysonthomas9/loomcli/internal/cli/serve/metricscmd"
+	"github.com/tysonthomas9/loomcli/internal/cli/serve/observability"
+	"github.com/tysonthomas9/loomcli/internal/cli/serve/opsimpl"
+	"github.com/tysonthomas9/loomcli/internal/cli/serve/usagecmd"
+	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
 	"github.com/tysonthomas9/loomcli/internal/webui"
-	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
-	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agentcontrol"
+	webuiapp "github.com/tysonthomas9/loomcli/internal/webui/app"
 )
 
 var (
@@ -53,15 +45,8 @@ var (
 	serveDev               bool
 	serveDevFrontDir       string
 
-	// collectDataFunc is the function used to collect monitor data.
-	// This is a package-level variable to allow tests to inject mock data.
-	collectDataFunc = func() *monitor.MonitorData { return monitor.CollectMonitorData(50, "") }
-
-	// staleDetectorInstance holds the running stale detector for status queries.
-	staleDetectorInstance *kv.StaleDetector
-
-	// usageStoreInstance holds the usage store for the /api/usage endpoint.
-	usageStoreInstance *usage.Store
+	// usageHandler holds the initialized usage HTTP handler.
+	usageHandler http.HandlerFunc
 )
 
 var serveCmd = &cobra.Command{
@@ -140,295 +125,220 @@ func init() {
 }
 
 func runServe(cmd *cobra.Command, args []string) {
-	// Check tmux is installed (required for terminal relay)
-	if _, err := exec.LookPath("tmux"); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: tmux is required but not found in PATH.\nInstall it with: brew install tmux (macOS) or apt install tmux (Linux)\n")
-		os.Exit(1)
-	}
+	checkTmuxInstalled()
 
-	// Cache collectMonitorData results to avoid redundant shell-outs from
-	// concurrent API requests. The frontend polls 3 endpoints every 5s;
-	// without this cache each poll cycle spawns ~60-90 subprocesses.
-	collector := newCachedValue[*monitor.MonitorData](2*time.Second, func() *monitor.MonitorData {
-		return monitor.CollectMonitorData(50, "")
-	})
-	collectDataFunc = collector.get
+	collectDataFn := metricscmd.NewCollector(2 * time.Second)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Signal handling
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
-	// Auto-start issue backend if needed (unless --no-daemon)
-	var daemonWeStarted bool
-	if !serveNoDaemon {
-		started, err := cli.EnsureIssueBackendRunning(cli.GetDeps(nil), 5*time.Second)
-		if err != nil {
-			log.Printf("Warning: failed to auto-start issue backend: %v (endpoints may return incomplete data)", err)
-		} else if started {
-			daemonWeStarted = true
-			log.Printf("Auto-started issue backend daemon")
-		} else {
-			log.Printf("Issue backend daemon already running")
-		}
-	}
+	daemonWeStarted := ensureIssueBackend()
 	if daemonWeStarted {
-		defer func() {
-			result := cli.GetDeps(nil).Exec.Run(cli.GetBeadsDir(), "bd", "daemon", "stop")
-			if result.Err != nil {
-				log.Printf("Warning: failed to stop issue backend daemon: %v", result.Err)
-			}
-		}()
+		defer stopIssueBackend()
 	}
 
-	// Fall back to daemon config for Redis/API key; detect fleet mode for ServerConfig.
-	var fleetModeDetected bool
-	var daemonSettings *config.DaemonSettings
+	fleetState := resolveFleetState(ctx)
+	applyAuthDefaults()
+	warnNonLocalBind()
+
+	staleDetectorHandler := daemonwire.InitStaleDetectorHandler(ctx, serveRedisAddr, serveRedisPassword)
+	initUsageStore()
+	go workspacemgr.PurgeOldSessions()
+
+	monitorHandlers := buildMonitorHandlers(collectDataFn, staleDetectorHandler)
+	workspacemgr.EnsureProjectRegistered()
+
+	webuiErr := make(chan error, 1)
+	go func() {
+		cfg := buildServerConfig(monitorHandlers, fleetState)
+		webuiErr <- webuiapp.StartServer(ctx, cfg)
+	}()
+
+	logServerStartup()
+	awaitShutdown(cmd, stop, webuiErr, cancel)
+}
+
+func checkTmuxInstalled() {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: tmux is required but not found in PATH.\nInstall it with: brew install tmux (macOS) or apt install tmux (Linux)\n")
+		os.Exit(1)
+	}
+}
+
+func ensureIssueBackend() bool {
+	if serveNoDaemon {
+		return false
+	}
+	started, err := cli.EnsureIssueBackendRunning(cli.GetDeps(nil), 5*time.Second)
+	if err != nil {
+		log.Printf("Warning: failed to auto-start issue backend: %v (endpoints may return incomplete data)", err)
+		return false
+	}
+	if started {
+		log.Printf("Auto-started issue backend daemon")
+		return true
+	}
+	log.Printf("Issue backend daemon already running")
+	return false
+}
+
+func stopIssueBackend() {
+	result := cli.GetDeps(nil).Exec.Run(cli.GetBeadsDir(), "bd", "daemon", "stop")
+	if result.Err != nil {
+		log.Printf("Warning: failed to stop issue backend daemon: %v", result.Err)
+	}
+}
+
+// fleetState bundles fleet-related configuration resolved during startup.
+type fleetState struct {
+	modeDetected   bool
+	clientCfg      config.FleetClientConfig
+	jwtKey         []byte
+	redisConfig    *daemonwire.FleetRedisConfig
+	daemonSettings *config.DaemonSettings
+}
+
+func resolveFleetState(ctx context.Context) fleetState {
+	fs := fleetState{}
 	if dc, dcErr := config.LoadDaemonConfig("."); dcErr == nil {
 		if serveRedisAddr == "" && dc.Daemon.RedisURL != "" {
 			serveRedisAddr = dc.Daemon.RedisURL
 		}
-		fleetModeDetected = cli.IsFleetMode(dc)
-		daemonSettings = &dc.Daemon
+		fs.modeDetected = cli.IsFleetMode(dc)
+		fs.daemonSettings = &dc.Daemon
 	} else {
-		fleetModeDetected = cli.IsFleetModeFromEnv()
+		fs.modeDetected = cli.IsFleetModeFromEnv()
 	}
-	var fleetClientCfg config.FleetClientConfig
-	if fleetModeDetected {
-		fleetClientCfg = config.ResolveFleetConfig(daemonSettings)
-	}
-
-	// Provision shared JWT signing key from Redis (if configured) or environment
-	var fleetJWTKey []byte
-	var fleetRedisConfig *fleet.RedisConfig
-	if serveRedisAddr != "" {
-		fleetRedisConfig = &fleet.RedisConfig{Address: serveRedisAddr, Password: serveRedisPassword}
-
-		if envKey := os.Getenv("LOOM_FLEET_JWT_KEY"); envKey != "" {
-			decoded, err := hex.DecodeString(envKey)
-			if err != nil || len(decoded) < 32 {
-				log.Fatalf("LOOM_FLEET_JWT_KEY must be a hex-encoded string of at least 32 bytes")
-			}
-			fleetJWTKey = decoded
-			log.Printf("Using JWT signing key from LOOM_FLEET_JWT_KEY environment variable")
-		} else {
-			// Get or create shared signing key from Redis
-			redisClient := fleet.NewRedisClient(serveRedisAddr, serveRedisPassword, 0)
-			mgr := fleet.NewSigningKeyManager(redisClient, nil)
-			key, err := mgr.GetOrCreateSigningKey(ctx)
-			_ = redisClient.Close()
-			if err != nil {
-				log.Printf("Warning: failed to provision JWT signing key from Redis: %v", err)
-				log.Printf("Fleet auth will use an ephemeral key (tokens won't validate on other servers)")
-			} else {
-				fleetJWTKey = key
-				log.Printf("JWT signing key provisioned from Redis")
-			}
-		}
-	} else if envKey := os.Getenv("LOOM_FLEET_JWT_KEY"); envKey != "" {
-		decoded, err := hex.DecodeString(envKey)
-		if err != nil || len(decoded) < 32 {
-			log.Fatalf("LOOM_FLEET_JWT_KEY must be a hex-encoded string of at least 32 bytes")
-		}
-		fleetJWTKey = decoded
-		log.Printf("Using JWT signing key from LOOM_FLEET_JWT_KEY environment variable")
+	if fs.modeDetected {
+		fs.clientCfg = config.ResolveFleetConfig(fs.daemonSettings)
 	}
 
-	// Validate --auth-url and apply issuer/audience defaults
-	if serveAuthURL != "" {
-		validateAuthURL(serveAuthURL, serveAuthAllowInsecure)
-		if serveAuthIssuer == "" {
-			serveAuthIssuer = serveAuthURL
-		}
-		if serveAuthAudience == "" {
-			serveAuthAudience = "loom"
-		}
-	}
+	fs.jwtKey, fs.redisConfig = daemonwire.ResolveFleetJWTKey(ctx, serveRedisAddr, serveRedisPassword)
+	return fs
+}
 
-	// Warn if binding to non-localhost address
+func applyAuthDefaults() {
+	if serveAuthURL == "" {
+		return
+	}
+	validateAuthURL(serveAuthURL, serveAuthAllowInsecure)
+	if serveAuthIssuer == "" {
+		serveAuthIssuer = serveAuthURL
+	}
+	if serveAuthAudience == "" {
+		serveAuthAudience = "loom"
+	}
+}
+
+func warnNonLocalBind() {
 	if serveBindAddr != "127.0.0.1" && serveBindAddr != "::1" {
 		log.Printf("WARNING: Server bound to %s — exposed to network. Ensure this is intentional.", serveBindAddr)
 	}
+}
 
-	// Create backend ops for health checking.
-	backendOps := NewBackendOps()
+func initUsageStore() {
+	dir := cli.GetBeadsDir()
+	if dir == "" {
+		dir = "."
+	}
+	usageHandler = usagecmd.HandleUsage(usagecmd.InitStore(dir))
+}
 
-	// Resolve backend name for terminal sessions.
-	// cli.ResolveBackendName() checks: flag > env > project-local loom.yaml > global config > default.
+func buildMonitorHandlers(collectDataFn metricscmd.CollectDataFn, staleDetectorHandler http.HandlerFunc) webui.MonitorHandlers {
+	eventsDir := observability.ResolveEventsDir()
+	return webui.MonitorHandlers{
+		Status:               metricscmd.HandleStatus(collectDataFn),
+		Agents:               metricscmd.HandleAgents(collectDataFn),
+		Tasks:                metricscmd.HandleTasks(collectDataFn),
+		Stats:                metricscmd.HandleStats(collectDataFn),
+		Sync:                 metricscmd.HandleSync(collectDataFn),
+		Workspaces:           metricscmd.HandleWorkspaces(),
+		StaleDetector:        staleDetectorHandler,
+		Usage:                usageHandler,
+		Metrics:              metricscmd.HandleMetrics(collectDataFn),
+		ObservabilityMetrics: observability.HandleMetrics(eventsDir, observability.NewMetricsCache(eventsDir)),
+		ObservabilityEvents:  observability.HandleEvents(eventsDir),
+	}
+}
+
+func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState) webui.ServerConfig {
+	gitOps := opsimpl.NewGitOps()
 	resolvedBackend := cli.ResolveBackendName()
 	log.Printf("Terminal backend: %s", resolvedBackend)
-	terminalCmd := fmt.Sprintf("loom lead --backend %s", resolvedBackend)
 
-	// Start stale detector if Redis is configured
-	var kvClient *kv.Client
-	if serveRedisAddr != "" {
-		kvClient = kv.NewClient(serveRedisAddr, serveRedisPassword, 0)
-		defer func() {
-			if err := kvClient.Close(); err != nil {
-				log.Printf("Error closing Redis client: %v", err)
-			}
-		}()
+	cfg := buildCoreServerConfig(monitorHandlers, gitOps, resolvedBackend)
+	applyFleetConfig(&cfg, fs)
+	applyWorkspaceConfig(&cfg)
+	applyCORSConfig(&cfg)
+	return cfg
+}
 
-		breaker := circuitbreaker.NewBreaker("redis-stale-detector", circuitbreaker.Config{
-			FailureThreshold: 5,
-			OpenTimeout:      30 * time.Second,
-			ShouldTrip:       kv.RedisShouldTrip,
-		})
-		kvClient.SetCircuitBreaker(breaker)
+func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimpl.GitOpsImpl, backend string) webui.ServerConfig {
+	sessStore := workspacemgr.NewSessionStore()
 
-		cfg := kv.DefaultStaleDetectorConfig()
-		serverID := kv.GenerateServerID()
-		reconciler := kv.NewReconciler("")
-
-		detector := kv.NewStaleDetector(kvClient, cfg, serverID, reconciler)
-		staleDetectorInstance = detector
-
-		go func() {
-			if err := detector.Run(ctx); err != nil && ctx.Err() == nil {
-				log.Printf("Stale detector error: %v", err)
-			}
-		}()
-		log.Printf("Stale detector enabled (redis=%s, server=%s)", serveRedisAddr, serverID)
+	return webui.ServerConfig{
+		Port:                 servePort,
+		BindAddress:          serveBindAddr,
+		SocketPath:           serveWebUISocket,
+		SkipFrontend:         serveNoWebUI,
+		MonitorHandlers:      monitorHandlers,
+		AgentControlFn:       daemonwire.BuildAgentControlFn(),
+		DaemonSupervisorFn:   daemonwire.BuildDaemonSupervisorFn(),
+		DaemonConfigFn:       daemonwire.BuildDaemonConfigFn(),
+		AgentQueueFn:         daemonwire.BuildAgentQueueFn(),
+		TerminalCmd:          fmt.Sprintf("loom lead --backend %s", backend),
+		HSTSEnabled:          serveHSTS,
+		ExtAuthURL:           serveAuthURL,
+		ExtAuthIssuer:        serveAuthIssuer,
+		ExtAuthAudience:      serveAuthAudience,
+		ExtAuthAllowInsecure: serveAuthAllowInsecure,
+		DevMode:              serveDev,
+		DevFrontendDir:       serveDevFrontDir,
+		GitOps:               gitOps,
+		FileOps:              gitOps,
+		BackendOps:           opsimpl.NewBackendOps(),
+		SessionsStore:        sessStore,
+		NotifyTokenDir:       cli.GetBeadsDir(),
+		Logger:               slog.Default(),
 	}
+}
 
-	// Initialize usage store for /api/usage endpoint
-	if dir := cli.GetBeadsDir(); dir != "" {
-		if s, err := usage.NewStore(dir); err == nil {
-			usageStoreInstance = s
-		} else {
-			log.Printf("Warning: failed to create usage store: %v", err)
-		}
-	} else if s, err := usage.NewStore("."); err == nil {
-		usageStoreInstance = s
+func applyFleetConfig(cfg *webui.ServerConfig, fs fleetState) {
+	cfg.FleetEnabled = serveRedisAddr != ""
+	cfg.FleetRedis = fs.redisConfig
+	cfg.FleetJWTKey = fs.jwtKey
+	cfg.FleetAPIKey = serveFleetAPIKey
+	cfg.FleetMode = fs.modeDetected
+	cfg.FleetClientURL = fs.clientCfg.URL
+	cfg.FleetClientWorkspace = fs.clientCfg.Workspace
+	cfg.FleetClientAPIKey = fs.clientCfg.APIKey
+}
+
+func applyWorkspaceConfig(cfg *webui.ServerConfig) {
+	cfg.WorkspaceConfigFn = workspacemgr.BuildWorkspaceInfo
+	cfg.WorkspaceConfigByIDFn = workspacemgr.BuildWorkspaceInfoForID
+	cfg.WorkspaceDeleteFn = workspacemgr.DeleteWorkspace
+	cfg.SetDefaultWorkspaceFn = workspacemgr.SetDefaultWorkspace
+	cfg.ClearDefaultWorkspaceFn = workspacemgr.ClearDefaultWorkspace
+	cfg.WorkspaceCreateFn = workspacemgr.CreateWorkspace
+	cfg.WorkspaceListFn = daemonwire.ListWorkspaces
+	cfg.InitialWorkspaceID = workspacemgr.ResolveInitialWorkspaceID()
+	cfg.WorkspaceIDResolverFn = workspacemgr.ResolveWorkspaceID
+}
+
+func applyCORSConfig(cfg *webui.ServerConfig) {
+	if serveCorsOrigin != "" {
+		cfg.CORSEnabled = true
+		cfg.CORSOrigins = []string{serveCorsOrigin}
+	} else if serveDev {
+		cfg.CORSEnabled = true
 	}
+}
 
-	// Purge old sessions in background (non-blocking)
-	go func() {
-		sessStore, err := sessions.NewStore(cli.GetBeadsDir())
-		if err != nil {
-			return
-		}
-		// Sweep orphaned sessions first, then purge old ones.
-		if healed, err := sessStore.SweepOrphans(); err != nil {
-			log.Printf("[serve] session orphan sweep error: %v", err)
-		} else if healed > 0 {
-			log.Printf("[serve] healed %d orphaned sessions on startup", healed)
-		}
-		count, err := sessStore.PurgeOlderThan(30 * 24 * time.Hour)
-		if err != nil {
-			log.Printf("[serve] session purge error: %v", err)
-		} else if count > 0 {
-			log.Printf("[serve] purged %d old sessions", count)
-		}
-	}()
-
-	// Build monitor handlers — these reference cli package-level variables
-	// (collectDataFunc, staleDetectorInstance, usageStoreInstance) and are
-	// passed to the webui server as pre-built http.HandlerFunc values.
-	eventsDir := ResolveEventsDir()
-	monitorHandlers := webui.MonitorHandlers{
-		Status:               handleStatus,
-		Agents:               handleAgents,
-		Tasks:                handleTasks,
-		Stats:                handleStats,
-		Sync:                 handleSync,
-		Workspaces:           handleWorkspaces,
-		StaleDetector:        handleStaleDetector,
-		Usage:                handleUsage,
-		Metrics:              handleMetrics,
-		ObservabilityMetrics: handleObservabilityMetrics(eventsDir, newMetricsCache(eventsDir)),
-		ObservabilityEvents:  handleObservabilityEvents(eventsDir),
-	}
-
-	// Register the current project as a workspace in the config so it
-	// appears in the sidebar alongside workspaces created via the UI.
-	workspace.EnsureCurrentProjectRegistered()
-
-	// Start the consolidated server
-	webuiErr := make(chan error, 1)
-	go func() {
-		gitOps := NewGitOps()
-		// Initialize session audit trail store (best-effort; nil disables endpoints).
-		var sessStore *sessions.Store
-		if dir := cli.GetBeadsDir(); dir != "" {
-			if s, err := sessions.NewStore(dir); err == nil {
-				sessStore = s
-			}
-		}
-		cfg := webui.ServerConfig{
-			Port:                    servePort,
-			BindAddress:             serveBindAddr,
-			SocketPath:              serveWebUISocket,
-			SkipFrontend:            serveNoWebUI,
-			MonitorHandlers:         monitorHandlers,
-			AgentControlFn:          buildAgentControlFn(),
-			DaemonSupervisorFn:      buildDaemonSupervisorFn(),
-			DaemonConfigFn:          buildDaemonConfigFn(),
-			AgentQueueFn:            buildAgentQueueFn(),
-			TerminalCmd:             terminalCmd,
-			FleetEnabled:            serveRedisAddr != "",
-			FleetRedis:              fleetRedisConfig,
-			FleetJWTKey:             fleetJWTKey,
-			FleetAPIKey:             serveFleetAPIKey,
-			HSTSEnabled:             serveHSTS,
-			ExtAuthURL:              serveAuthURL,
-			ExtAuthIssuer:           serveAuthIssuer,
-			ExtAuthAudience:         serveAuthAudience,
-			ExtAuthAllowInsecure:    serveAuthAllowInsecure,
-			DevMode:                 serveDev,
-			DevFrontendDir:          serveDevFrontDir,
-			GitOps:                  gitOps,
-			FileOps:                 gitOps, // GitOpsImpl satisfies FileOps (same ResolveAgentWorktree)
-			WorkspaceConfigFn:       buildWorkspaceInfo,
-			WorkspaceConfigByIDFn:   buildWorkspaceInfoForID,
-			WorkspaceDeleteFn:       deleteWorkspace,
-			SetDefaultWorkspaceFn:   setDefaultWorkspace,
-			ClearDefaultWorkspaceFn: clearDefaultWorkspace,
-			WorkspaceCreateFn:       createWorkspace,
-			WorkspaceListFn: func() (map[string]string, error) {
-				cfg, err := config.LoadConfig()
-				if err != nil {
-					return nil, err
-				}
-				if cfg == nil || len(cfg.Workspaces) == 0 {
-					return nil, nil
-				}
-				result := make(map[string]string, len(cfg.Workspaces))
-				for name, ws := range cfg.Workspaces {
-					// Use stable UUID as map key so MultiPool is keyed
-					// by UUID (matches InitialWorkspaceID). Fall back to
-					// config name for pre-migration workspaces.
-					key := name
-					if ws.ID != "" {
-						key = ws.ID
-					}
-					result[key] = ws.Path
-				}
-				return result, nil
-			},
-			InitialWorkspaceID:    resolveInitialWorkspaceID(),
-			WorkspaceIDResolverFn: resolveWorkspaceID,
-			BackendOps:            backendOps,
-			SessionsStore:         sessStore,
-			NotifyTokenDir:        cli.GetBeadsDir(),
-			FleetMode:             fleetModeDetected,
-			FleetClientURL:        fleetClientCfg.URL,
-			FleetClientWorkspace:  fleetClientCfg.Workspace,
-			FleetClientAPIKey:     fleetClientCfg.APIKey,
-			Logger:                slog.Default(),
-		}
-		if serveCorsOrigin != "" {
-			cfg.CORSEnabled = true
-			cfg.CORSOrigins = []string{serveCorsOrigin}
-		} else if serveDev {
-			cfg.CORSEnabled = true
-			// Uses default origin (http://localhost:3000) in server.go
-		}
-		webuiErr <- webui.StartServer(ctx, cfg)
-	}()
-
+func logServerStartup() {
 	log.Printf("Server starting on %s:%d", serveBindAddr, servePort)
 	if serveNoWebUI {
 		log.Printf("Frontend disabled (--no-webui): API-only mode")
@@ -443,8 +353,9 @@ func runServe(cmd *cobra.Command, args []string) {
 	if serveCorsOrigin != "" {
 		log.Printf("CORS enabled for origin: %s", serveCorsOrigin)
 	}
+}
 
-	// Wait for signal or server error
+func awaitShutdown(cmd *cobra.Command, stop chan os.Signal, webuiErr chan error, cancel context.CancelFunc) {
 	select {
 	case <-stop:
 		log.Println("Shutting down server...")
@@ -456,242 +367,13 @@ func runServe(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	// Cancel context to trigger graceful shutdown
 	cancel()
 
-	// Wait for server goroutine to finish its shutdown
 	select {
 	case <-webuiErr:
 	case <-time.After(10 * time.Second):
 		log.Printf("Warning: server did not shut down within timeout")
 	}
-}
-
-// buildAgentControlFn returns a callback that sends control commands to the
-// daemon control socket. Returns nil if the socket path cannot be resolved
-// (e.g., no daemon config). The socket path is resolved on each call to handle
-// daemon restarts that may change the PID file location.
-func buildAgentControlFn() agentcontrol.AgentControlFn {
-	projectDir, err := os.Getwd()
-	if err != nil {
-		return nil
-	}
-
-	// Per-operation socket read deadlines.
-	opDeadline := map[string]time.Duration{
-		"agent_yield":   5 * time.Second,
-		"agent_list":    5 * time.Second,
-		"agent_start":   10 * time.Second,
-		"agent_stop":    35 * time.Second, // daemon write deadline is 20s; 15s buffer
-		"agent_restart": 80 * time.Second, // yieldTimeout(default 60s) + 20s buffer
-	}
-
-	return func(op, agentName string, force bool) (*agentcontrol.AgentControlResult, error) {
-		socketPath := resolveControlSocketPath(projectDir)
-		deadline := opDeadline[op]
-		if deadline == 0 {
-			deadline = 30 * time.Second
-		}
-		return sendControlRequest(socketPath, op, agentName, force, deadline)
-	}
-}
-
-// resolveControlSocketPath returns the daemon control socket path for the
-// given project directory. Re-resolves on each call because the daemon may
-// restart with a different config.
-func resolveControlSocketPath(projectDir string) string {
-	dc, err := config.LoadDaemonConfig(projectDir)
-	if err != nil {
-		dc = &config.DaemonConfig{
-			Daemon: config.DaemonSettings{PIDFile: ".loom/daemon.pid"},
-		}
-	}
-	pidFilePath := dc.Daemon.PIDFile
-	if !filepath.IsAbs(pidFilePath) {
-		pidFilePath = filepath.Join(projectDir, pidFilePath)
-	}
-	return filepath.Join(filepath.Dir(pidFilePath), "daemon.sock")
-}
-
-// sendControlRequest dials the daemon control socket, sends a JSON request,
-// and reads the JSON response. The readDeadline sets the per-operation timeout.
-func sendControlRequest(socketPath, op, agentName string, force bool, readDeadline time.Duration) (*agentcontrol.AgentControlResult, error) {
-	conn, err := net.DialTimeout("unix", socketPath, 5*time.Second)
-	if err != nil {
-		return nil, fmt.Errorf("daemon is not running (no control socket at %s)", socketPath)
-	}
-	defer func() { _ = conn.Close() }()
-
-	reqData, err := json.Marshal(struct {
-		Operation string `json:"operation"`
-		AgentName string `json:"agent_name,omitempty"`
-		Force     bool   `json:"force,omitempty"`
-	}{Operation: op, AgentName: agentName, Force: force})
-	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
-	}
-	reqData = append(reqData, '\n')
-
-	_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-	if _, err := conn.Write(reqData); err != nil {
-		return nil, fmt.Errorf("send request: %w", err)
-	}
-
-	_ = conn.SetReadDeadline(time.Now().Add(readDeadline))
-	scanner := bufio.NewScanner(conn)
-	if !scanner.Scan() {
-		if scanErr := scanner.Err(); scanErr != nil {
-			return nil, fmt.Errorf("read response: %w", scanErr)
-		}
-		return nil, fmt.Errorf("empty response from daemon")
-	}
-
-	var result agentcontrol.AgentControlResult
-	if err := json.Unmarshal(scanner.Bytes(), &result); err != nil {
-		return nil, fmt.Errorf("unmarshal response: %w", err)
-	}
-	return &result, nil
-}
-
-// buildDaemonSupervisorFn returns a callback that reads the daemon state file
-// and converts it to webui DTO types. Returns nil if the working directory
-// cannot be resolved.
-func buildDaemonSupervisorFn() func() (*webui.DaemonSupervisorData, error) {
-	projectDir, err := os.Getwd()
-	if err != nil {
-		return nil
-	}
-
-	return func() (*webui.DaemonSupervisorData, error) {
-		statePath := config.ResolveDaemonStatePath(projectDir)
-		state, err := daemon.ReadStateFile(statePath)
-		if err != nil {
-			return nil, err // os.ErrNotExist if file missing
-		}
-		agents := make([]webui.DaemonAgentEntry, len(state.Agents))
-		for i, a := range state.Agents {
-			agents[i] = webui.DaemonAgentEntry{
-				Worktree:       a.Worktree,
-				Role:           a.Role,
-				Repo:           a.Repo,
-				PID:            a.PID,
-				Status:         a.Status,
-				TaskID:         a.TaskID,
-				EpicID:         a.EpicID,
-				CurrentBackend: a.CurrentBackend,
-				RestartCount:   a.RestartCount,
-				LastStart:      a.LastStart,
-				LastExit:       a.LastExit,
-				LastExitCode:   a.LastExitCode,
-				StopReason:     a.StopReason,
-				StoppedAt:      a.StoppedAt,
-				WorktreePath:   a.WorktreePath,
-				LastErrorClass: a.LastErrorClass,
-				NoWorkCount:    a.NoWorkCount,
-				BackoffUntil:   a.BackoffUntil,
-				RemoteBranch:   a.RemoteBranch,
-			}
-		}
-		return &webui.DaemonSupervisorData{
-			PID:           state.PID,
-			StartedAt:     state.StartedAt,
-			UptimeSeconds: time.Since(state.StartedAt).Seconds(),
-			Agents:        agents,
-		}, nil
-	}
-}
-
-// buildDaemonConfigFn returns a callback that loads and marshals the daemon
-// config to JSON. Returns nil if the working directory cannot be resolved.
-func buildDaemonConfigFn() func() (json.RawMessage, error) {
-	projectDir, err := os.Getwd()
-	if err != nil {
-		return nil
-	}
-
-	return func() (json.RawMessage, error) {
-		cfg, err := config.LoadDaemonConfig(projectDir)
-		if err != nil {
-			return nil, err
-		}
-		data, err := json.Marshal(cfg)
-		if err != nil {
-			return nil, fmt.Errorf("marshal daemon config: %w", err)
-		}
-		return json.RawMessage(data), nil
-	}
-}
-
-// buildAgentQueueFn returns a callback that fetches and scores ready issues
-// for a named agent using the task router. Returns nil if the working
-// directory cannot be resolved.
-func buildAgentQueueFn() func(string) ([]webui.AgentQueueEntry, error) {
-	projectDir, err := os.Getwd()
-	if err != nil {
-		return nil
-	}
-
-	return func(agentName string) ([]webui.AgentQueueEntry, error) {
-		cfg, err := config.LoadDaemonConfig(projectDir)
-		if err != nil {
-			return nil, fmt.Errorf("load daemon config: %w", err)
-		}
-
-		// Find agent entry by worktree name
-		var agent *config.AgentEntry
-		for i := range cfg.Agents {
-			if cfg.Agents[i].Worktree == agentName {
-				agent = &cfg.Agents[i]
-				break
-			}
-		}
-		if agent == nil {
-			return nil, webui.ErrAgentNotFound
-		}
-
-		// Resolve role constraints
-		roleConfig, ok := cfg.ResolveRole(agent.Role)
-		if !ok {
-			roleConfig = config.RoleConfig{TaskFilter: "has_design"}
-		}
-		constraints := cli.MergeRoleConstraints(roleConfig, *agent)
-
-		issues, err := cli.FetchReadyIssues(agent.Parent, agent.Repo)
-		if err != nil {
-			return nil, fmt.Errorf("fetch ready issues: %w", err)
-		}
-
-		return scoreAndSortQueue(issues, constraints), nil
-	}
-}
-
-// scoreAndSortQueue scores issues against constraints and returns sorted entries.
-func scoreAndSortQueue(issues []backend.IssueData, constraints cli.RoleConstraints) []webui.AgentQueueEntry {
-	var entries []webui.AgentQueueEntry
-	for _, issue := range issues {
-		m := cli.MatchTask(issue, constraints)
-		if m.Score > 0 {
-			entries = append(entries, webui.AgentQueueEntry{
-				IssueID:  m.Issue.ID,
-				Title:    m.Issue.Title,
-				Priority: m.Issue.Priority,
-				Score:    m.Score,
-				Reason:   m.Reason,
-				Labels:   m.Issue.Labels,
-				Parent:   m.Issue.Parent,
-			})
-		}
-	}
-	sort.Slice(entries, func(i, j int) bool {
-		if entries[i].Score != entries[j].Score {
-			return entries[i].Score > entries[j].Score
-		}
-		if entries[i].Priority != entries[j].Priority {
-			return entries[i].Priority < entries[j].Priority
-		}
-		return entries[i].IssueID < entries[j].IssueID
-	})
-	return entries
 }
 
 // backendProvider maps backend names to their provider labels.

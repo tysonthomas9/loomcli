@@ -58,9 +58,9 @@ type AgentQueueEntry struct {
 	Parent   string   `json:"parent,omitempty"`
 }
 
-// handleDaemonSupervisor returns a handler for GET /api/daemon/supervisor.
+// HandleDaemonSupervisor returns a handler for GET /api/daemon/supervisor.
 // Maps os.ErrNotExist to 503 (daemon not running), other errors to 500.
-func handleDaemonSupervisor(fn func() (*DaemonSupervisorData, error)) http.HandlerFunc {
+func HandleDaemonSupervisor(fn func() (*DaemonSupervisorData, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		data, err := fn()
 		if err != nil {
@@ -87,9 +87,9 @@ type configResponse struct {
 	Data    json.RawMessage `json:"data"`
 }
 
-// handleDaemonConfig returns a handler for GET /api/daemon/config.
+// HandleDaemonConfig returns a handler for GET /api/daemon/config.
 // Returns the effective resolved config as raw JSON. Maps errors to 503.
-func handleDaemonConfig(fn func() (json.RawMessage, error)) http.HandlerFunc {
+func HandleDaemonConfig(fn func() (json.RawMessage, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		data, err := fn()
 		if err != nil {
@@ -101,9 +101,9 @@ func handleDaemonConfig(fn func() (json.RawMessage, error)) http.HandlerFunc {
 	}
 }
 
-// handleAgentQueue returns a handler for GET /api/workspaces/{ws}/agents/{name}/queue.
+// HandleAgentQueue returns a handler for GET /api/workspaces/{ws}/agents/{name}/queue.
 // Maps ErrAgentNotFound to 404, other errors to 503.
-func handleAgentQueue(fn func(string) ([]AgentQueueEntry, error)) http.HandlerFunc {
+func HandleAgentQueue(fn func(string) ([]AgentQueueEntry, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		name := r.PathValue("name")
 		entries, err := fn(name)

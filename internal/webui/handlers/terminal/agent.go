@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"time"
 
-	"nhooyr.io/websocket"
+	"nhooyr.io/websocket" //nolint:staticcheck // SA1019: websocket migration tracked separately
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -121,128 +121,162 @@ func HandleGetAgentTerminalToken(svc service.AgentService) http.HandlerFunc {
 }
 
 // HandleAgentTerminalWS streams a live read-only tmux session for an agent.
-func HandleAgentTerminalWS(manager *webuterminal.TerminalManager, auth *realtime.TerminalAuth, allowedOrigins []string) http.HandlerFunc { //nolint:funlen
+func HandleAgentTerminalWS(manager *webuterminal.TerminalManager, auth *realtime.TerminalAuth, allowedOrigins []string) http.HandlerFunc {
 	patterns := originHosts(allowedOrigins)
 
 	return func(w http.ResponseWriter, r *http.Request) {
-		agentName := r.PathValue("name")
-		if agentName == "" {
-			handler.WriteJSON(w, http.StatusBadRequest, map[string]interface{}{
-				"success": false,
-				"error":   "missing agent name",
-			})
+		agentName, ok := validateAgentWSRequest(w, r, manager, auth)
+		if !ok {
 			return
-		}
-		if !validAgentName.MatchString(agentName) {
-			handler.WriteJSON(w, http.StatusBadRequest, map[string]interface{}{
-				"success": false,
-				"error":   "invalid agent name: must match [a-zA-Z0-9_-]+",
-			})
-			return
-		}
-		if manager == nil {
-			handler.WriteJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
-				"success": false,
-				"error":   "terminal manager not initialized",
-			})
-			return
-		}
-		if auth == nil {
-			handler.WriteJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
-				"success": false,
-				"error":   "terminal authentication not initialized",
-			})
-			return
-		}
-
-		token := r.URL.Query().Get("token")
-		userID, err := auth.ValidateToken(token, agentLogTokenScope(agentName))
-		if err != nil {
-			handler.WriteJSON(w, http.StatusUnauthorized, map[string]interface{}{
-				"success": false,
-				"error":   "terminal authentication failed",
-			})
-			slog.Warn("agent terminal auth failed", "agent", agentName, "err", err)
-			return
-		}
-		if userID != "" {
-			slog.Info("agent terminal authenticated", "agent", agentName, "user_id", userID)
 		}
 
 		wsID := middleware.WorkspaceFromContext(r.Context())
-
-		sessionName, found, err := manager.FindLatestAgentSession(wsID, agentName)
+		sessionName, err := resolveAgentSession(w, manager, wsID, agentName)
 		if err != nil {
-			handler.WriteJSON(w, http.StatusInternalServerError, map[string]interface{}{
-				"success": false,
-				"error":   "failed to inspect terminal sessions",
-			})
-			return
-		}
-		if !found {
-			handler.WriteJSON(w, http.StatusNotFound, map[string]interface{}{
-				"success": false,
-				"error":   "no active terminal session for agent",
-			})
 			return
 		}
 
-		if manager.SessionCount() >= manager.MaxSessions() {
-			handler.WriteJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
-				"success": false,
-				"error":   "maximum terminal sessions reached",
-			})
+		conn, ok := upgradeAgentWS(w, r, patterns)
+		if !ok {
 			return
 		}
-
-		rc := http.NewResponseController(w)
-		if err := rc.SetWriteDeadline(time.Time{}); err != nil {
-			slog.Warn("agent terminal ws: failed to disable write deadline", "err", err)
-		}
-
-		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-			OriginPatterns: patterns,
-		})
-		if err != nil {
-			slog.Error("failed to accept agent terminal websocket", "err", err)
-			return
-		}
-		conn.SetReadLimit(realtime.WSReadLimit)
 
 		closeStatus := websocket.StatusInternalError
 		closeReason := "connection closed"
 		defer func() {
-			_ = conn.Close(closeStatus, closeReason)
+			_ = conn.Close(closeStatus, closeReason) //nolint:staticcheck // SA1019: websocket migration tracked separately
 		}()
 
-		termSession, err := manager.AttachExistingRaw(sessionName, 80, 24)
-		if err != nil {
-			if errors.Is(err, webuterminal.ErrMaxSessionsReached) {
-				slog.Info("agent terminal session limit reached", "agent", agentName)
-			} else {
-				slog.Error("failed to attach agent terminal session", "agent", agentName, "session", sessionName, "err", err)
-			}
-			closeReason = err.Error()
-			return
-		}
-		connID := termSession.ConnID
-
-		ctx, cancel := context.WithCancel(r.Context())
-		defer cancel()
-
-		monitor := &terminalMonitor{mgr: manager}
-		crashCh := make(chan realtime.CrashInfo, 1)
-		go func() {
-			result := realtime.PtyToWS(ctx, cancel, conn, termSession.PTY, termSession.Name, monitor, nil)
-			crashCh <- result
-		}()
-
-		realtime.WSToPTY(ctx, conn, termSession.PTY, manager, connID)
-
-		if err := manager.Detach(connID); err != nil {
-			slog.Error("failed to detach agent terminal connection", "conn_id", connID, "err", err)
-		}
-
-		closeStatus, closeReason = (<-crashCh).WSClose()
+		closeStatus, closeReason = runAgentTerminalRelay(r.Context(), conn, manager, sessionName, agentName)
 	}
+}
+
+// validateAgentWSRequest validates the agent name, manager, auth, and token.
+// Returns the agent name and true on success, or writes an error response and returns false.
+func validateAgentWSRequest(w http.ResponseWriter, r *http.Request, manager *webuterminal.TerminalManager, auth *realtime.TerminalAuth) (string, bool) {
+	agentName := r.PathValue("name")
+	if agentName == "" {
+		handler.WriteJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "missing agent name",
+		})
+		return "", false
+	}
+	if !validAgentName.MatchString(agentName) {
+		handler.WriteJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "invalid agent name: must match [a-zA-Z0-9_-]+",
+		})
+		return "", false
+	}
+	if manager == nil {
+		handler.WriteJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
+			"success": false,
+			"error":   "terminal manager not initialized",
+		})
+		return "", false
+	}
+	if auth == nil {
+		handler.WriteJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
+			"success": false,
+			"error":   "terminal authentication not initialized",
+		})
+		return "", false
+	}
+
+	token := r.URL.Query().Get("token")
+	userID, err := auth.ValidateToken(token, agentLogTokenScope(agentName))
+	if err != nil {
+		handler.WriteJSON(w, http.StatusUnauthorized, map[string]interface{}{
+			"success": false,
+			"error":   "terminal authentication failed",
+		})
+		slog.Warn("agent terminal auth failed", "agent", agentName, "err", err)
+		return "", false
+	}
+	if userID != "" {
+		slog.Info("agent terminal authenticated", "agent", agentName, "user_id", userID)
+	}
+	return agentName, true
+}
+
+// resolveAgentSession finds the tmux session for an agent and checks the session limit.
+// Returns the session name on success, or writes an error response and returns an error.
+func resolveAgentSession(w http.ResponseWriter, manager *webuterminal.TerminalManager, wsID, agentName string) (string, error) {
+	sessionName, found, err := manager.FindLatestAgentSession(wsID, agentName)
+	if err != nil {
+		handler.WriteJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false,
+			"error":   "failed to inspect terminal sessions",
+		})
+		return "", err
+	}
+	if !found {
+		handler.WriteJSON(w, http.StatusNotFound, map[string]interface{}{
+			"success": false,
+			"error":   "no active terminal session for agent",
+		})
+		return "", errors.New("no active terminal session for agent")
+	}
+
+	if manager.SessionCount() >= manager.MaxSessions() {
+		handler.WriteJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
+			"success": false,
+			"error":   "maximum terminal sessions reached",
+		})
+		return "", errors.New("maximum terminal sessions reached")
+	}
+	return sessionName, nil
+}
+
+// upgradeAgentWS performs the WebSocket upgrade for an agent terminal connection.
+// Returns the connection and true on success, or false on failure.
+func upgradeAgentWS(w http.ResponseWriter, r *http.Request, patterns []string) (*websocket.Conn, bool) { //nolint:staticcheck // SA1019: websocket migration tracked separately
+	rc := http.NewResponseController(w)
+	if err := rc.SetWriteDeadline(time.Time{}); err != nil {
+		slog.Warn("agent terminal ws: failed to disable write deadline", "err", err)
+	}
+
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{ //nolint:staticcheck // SA1019: websocket migration tracked separately
+		OriginPatterns: patterns,
+	})
+	if err != nil {
+		slog.Error("failed to accept agent terminal websocket", "err", err)
+		return nil, false
+	}
+	conn.SetReadLimit(realtime.WSReadLimit) //nolint:staticcheck // SA1019: websocket migration tracked separately
+	return conn, true
+}
+
+// runAgentTerminalRelay attaches to the tmux session and runs the bidirectional relay.
+// Returns the WebSocket close status and reason.
+func runAgentTerminalRelay(reqCtx context.Context, conn *websocket.Conn, manager *webuterminal.TerminalManager, sessionName, agentName string) (websocket.StatusCode, string) { //nolint:staticcheck // SA1019: websocket migration tracked separately
+	termSession, err := manager.AttachExistingRaw(sessionName, 80, 24)
+	if err != nil {
+		if errors.Is(err, webuterminal.ErrMaxSessionsReached) {
+			slog.Info("agent terminal session limit reached", "agent", agentName)
+		} else {
+			slog.Error("failed to attach agent terminal session", "agent", agentName, "session", sessionName, "err", err)
+		}
+		return websocket.StatusInternalError, err.Error()
+	}
+	connID := termSession.ConnID
+
+	ctx, cancel := context.WithCancel(reqCtx)
+	defer cancel()
+
+	monitor := &terminalMonitor{mgr: manager}
+	crashCh := make(chan realtime.CrashInfo, 1)
+	go func() {
+		result := realtime.PtyToWS(ctx, cancel, conn, termSession.PTY, termSession.Name, monitor, nil)
+		crashCh <- result
+	}()
+
+	realtime.WSToPTY(ctx, conn, termSession.PTY, manager, connID)
+
+	if err := manager.Detach(connID); err != nil {
+		slog.Error("failed to detach agent terminal connection", "conn_id", connID, "err", err)
+	}
+
+	return (<-crashCh).WSClose()
 }

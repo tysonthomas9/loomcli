@@ -1,7 +1,6 @@
 package backends
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -39,11 +38,7 @@ var codexNonInteractiveInvoker func(workDir, prompt, agentName string, shutdown 
 func buildCodexInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
 	cmd := exec.Command("codex", "--dangerously-bypass-approvals-and-sandbox", prompt)
 	cmd.Dir = workDir
-	env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
-	if agentName != "" {
-		env = append(env, "BD_ACTOR="+agentName)
-	}
-	cmd.Env = env
+	cmd.Env = buildBackendEnv(workDir, agentName)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -69,11 +64,7 @@ func defaultCodexInvoker(workDir, prompt, agentName string) error {
 
 		cmd := exec.Command("codex", "exec", "--dangerously-bypass-approvals-and-sandbox", prompt)
 		cmd.Dir = workDir
-		env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
-		if agentName != "" {
-			env = append(env, "BD_ACTOR="+agentName)
-		}
-		cmd.Env = env
+		cmd.Env = buildBackendEnv(workDir, agentName)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		return cmd.Run()
@@ -90,33 +81,19 @@ func defaultCodexInvoker(workDir, prompt, agentName string) error {
 func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
 	cmd := exec.Command("codex", "exec", "--json", "--dangerously-bypass-approvals-and-sandbox")
 	cmd.Dir = workDir
-	env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
-	if agentName != "" {
-		env = append(env, "BD_ACTOR="+agentName)
-	}
-	cmd.Env = env
+	cmd.Env = buildBackendEnv(workDir, agentName)
 
-	// Pass prompt via stdin pipe (not CLI args) to avoid exposure in process listings
-	r, w, err := os.Pipe()
+	r, err := pipePromptToCmd(cmd, prompt)
 	if err != nil {
-		return fmt.Errorf("failed to create pipe: %w", err)
+		return err
 	}
-	if _, err := io.WriteString(w, prompt); err != nil {
-		w.Close()
-		r.Close()
-		return fmt.Errorf("failed to write prompt to stdin: %w", err)
-	}
-	w.Close()
-	cmd.Stdin = r
 
-	// Pipe stdout directly (no stream-json parsing for Codex in v1)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		r.Close()
 		return fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
 	cmd.Stderr = os.Stderr
-
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	fmt.Println("Launching Codex agent (non-interactive)...")
@@ -127,7 +104,6 @@ func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdo
 		return fmt.Errorf("failed to start codex: %w", err)
 	}
 
-	// Monitor for shutdown signal
 	guard := newProcessGuard(cmd.Process)
 	go func() {
 		select {
@@ -137,22 +113,43 @@ func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdo
 		}
 	}()
 
-	// Parse stdout lines: display and collect usage if available
-	scanner := bufio.NewScanner(stdout)
-	buf := make([]byte, 0, 1024*1024)
-	scanner.Buffer(buf, 10*1024*1024)
-	for scanner.Scan() {
-		line := scanner.Text()
+	scanStreamOutput(stdout, func(line string) {
 		fmt.Println(line)
 		if collector != nil {
 			collectCodexStreamUsage(line, collector)
 		}
-	}
+	})
 
 	runErr := cmd.Wait()
 	guard.WaitAndMark()
 	r.Close()
 	return runErr
+}
+
+// buildBackendEnv constructs the standard environment for backend subprocess invocations.
+func buildBackendEnv(workDir, agentName string) []string {
+	env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
+	if agentName != "" {
+		env = append(env, "BD_ACTOR="+agentName)
+	}
+	return env
+}
+
+// pipePromptToCmd writes the prompt to a pipe and attaches it to cmd.Stdin.
+// Returns the read end (caller must close) or an error.
+func pipePromptToCmd(cmd *exec.Cmd, prompt string) (*os.File, error) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create pipe: %w", err)
+	}
+	if _, err := io.WriteString(w, prompt); err != nil {
+		w.Close()
+		r.Close()
+		return nil, fmt.Errorf("failed to write prompt to stdin: %w", err)
+	}
+	w.Close()
+	cmd.Stdin = r
+	return r, nil
 }
 
 // Meta returns descriptive metadata about the Codex backend.

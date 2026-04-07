@@ -132,43 +132,47 @@ func pushBranchInRepo(deps *cli.Deps, repoPath, sourceBranch, targetBranch, remo
 	fmt.Printf("Push: %s -> %s (repo: %s, remote: %s)\n", sourceBranch, targetBranch, repoPath, r)
 	fmt.Println("=========================================")
 
-	// Fetch latest
 	if err := gitFetchRemote(deps, repoPath, remote); err != nil {
 		return fmt.Errorf("fetching: %v", err)
 	}
 
-	// Stash local changes if working tree is dirty
 	stashCleanup, err := stashIfDirtyDeps(deps, repoPath)
 	if err != nil {
 		return fmt.Errorf("stashing changes: %v", err)
 	}
 	defer stashCleanup()
 
-	// Checkout target branch, with deferred restore of original branch
 	restoreBranch, err := checkoutTargetDeps(deps, repoPath, targetBranch)
 	defer restoreBranch()
 	if err != nil {
-		if isWorktreeConflictErr(err) {
-			fmt.Printf("⚠ Target branch %s is checked out in another worktree\n", targetBranch)
-			fmt.Println("⚠ Using detached HEAD approach")
-			return pushBranchInRepoDetached(deps, repoPath, sourceBranch, targetBranch, remote)
-		}
-		return fmt.Errorf("checking out %s: %v", targetBranch, err)
+		return handlePushCheckoutErr(deps, err, repoPath, sourceBranch, targetBranch, remote)
 	}
 
-	// Pull latest
+	return pushAfterCheckoutInRepo(deps, repoPath, sourceBranch, targetBranch, remote, r)
+}
+
+// handlePushCheckoutErr handles checkout errors during pushBranchInRepo.
+func handlePushCheckoutErr(deps *cli.Deps, err error, repoPath, sourceBranch, targetBranch, remote string) error {
+	if isWorktreeConflictErr(err) {
+		fmt.Printf("⚠ Target branch %s is checked out in another worktree\n", targetBranch)
+		fmt.Println("⚠ Using detached HEAD approach")
+		return pushBranchInRepoDetached(deps, repoPath, sourceBranch, targetBranch, remote)
+	}
+	return fmt.Errorf("checking out %s: %v", targetBranch, err)
+}
+
+// pushAfterCheckoutInRepo performs pull, merge, and push after successful checkout.
+func pushAfterCheckoutInRepo(deps *cli.Deps, repoPath, sourceBranch, targetBranch, remote, r string) error {
 	if err := gitPullRemote(deps, repoPath, remote, targetBranch); err != nil {
 		return fmt.Errorf("pulling %s: %v", targetBranch, err)
 	}
 
-	// Check if there are commits to merge
 	hasCommits, err := hasCommitsBetweenRemoteDeps(deps, repoPath, remote, targetBranch, sourceBranch)
 	if err == nil && !hasCommits {
 		fmt.Printf("✓ Already up to date (no new commits in %s)\n", sourceBranch)
 		return nil
 	}
 
-	// Attempt merge
 	conflicts, mergeErr := mergeSourceDeps(deps, repoPath, sourceBranch, targetBranch)
 	if mergeErr != nil {
 		if len(conflicts) > 0 {
@@ -181,12 +185,9 @@ func pushBranchInRepo(deps *cli.Deps, repoPath, sourceBranch, targetBranch, remo
 	}
 
 	fmt.Println("✓ Push completed successfully (no conflicts)")
-
-	// Push
 	if err := gitPushRemote(deps, repoPath, remote, targetBranch); err != nil {
 		return fmt.Errorf("pushing: %v", err)
 	}
-
 	fmt.Printf("✓ Pushed to %s/%s\n", r, targetBranch)
 	return nil
 }
@@ -302,13 +303,11 @@ func pushBranch(deps *cli.Deps, sourceBranch, targetBranch string) {
 	fmt.Printf("Push: %s -> %s\n", sourceBranch, targetBranch)
 	fmt.Println("=========================================")
 
-	// Fetch latest
 	if err := gitFetch(deps, scriptDir); err != nil {
 		fmt.Fprintf(os.Stderr, "Error fetching: %v\n", err)
 		return
 	}
 
-	// Stash local changes if working tree is dirty
 	stashCleanup, err := stashIfDirtyDeps(deps, scriptDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error stashing: %v\n", err)
@@ -316,36 +315,40 @@ func pushBranch(deps *cli.Deps, sourceBranch, targetBranch string) {
 	}
 	defer stashCleanup()
 
-	// Checkout target branch, with deferred restore of original branch
 	restoreBranch, err := checkoutTargetDeps(deps, scriptDir, targetBranch)
 	defer restoreBranch()
 	if err != nil {
-		if isWorktreeConflictErr(err) {
-			fmt.Printf("⚠ Target branch %s is checked out in another worktree\n", targetBranch)
-			fmt.Println("⚠ Using detached HEAD approach")
-			if err := pushBranchDetached(deps, scriptDir, sourceBranch, targetBranch); err != nil {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			}
-			return
-		}
-		fmt.Fprintf(os.Stderr, "Error checking out %s: %v\n", targetBranch, err)
+		handleCheckoutError(deps, err, scriptDir, sourceBranch, targetBranch)
 		return
 	}
 
-	// Pull latest
+	pushBranchAfterCheckout(deps, scriptDir, sourceBranch, targetBranch)
+}
+
+func handleCheckoutError(deps *cli.Deps, err error, scriptDir, sourceBranch, targetBranch string) {
+	if isWorktreeConflictErr(err) {
+		fmt.Printf("⚠ Target branch %s is checked out in another worktree\n", targetBranch)
+		fmt.Println("⚠ Using detached HEAD approach")
+		if err := pushBranchDetached(deps, scriptDir, sourceBranch, targetBranch); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		}
+		return
+	}
+	fmt.Fprintf(os.Stderr, "Error checking out %s: %v\n", targetBranch, err)
+}
+
+func pushBranchAfterCheckout(deps *cli.Deps, scriptDir, sourceBranch, targetBranch string) {
 	if err := gitPull(deps, scriptDir, targetBranch); err != nil {
 		fmt.Fprintf(os.Stderr, "Error pulling %s: %v\n", targetBranch, err)
 		return
 	}
 
-	// Check if there are commits to merge
 	hasCommits, err := hasCommitsBetweenDeps(deps, scriptDir, targetBranch, sourceBranch)
 	if err == nil && !hasCommits {
 		fmt.Printf("✓ Already up to date (no new commits in %s)\n", sourceBranch)
 		return
 	}
 
-	// Attempt merge
 	conflicts, mergeErr := mergeSourceDeps(deps, scriptDir, sourceBranch, targetBranch)
 	if mergeErr != nil {
 		if len(conflicts) > 0 {
@@ -359,13 +362,10 @@ func pushBranch(deps *cli.Deps, sourceBranch, targetBranch string) {
 	}
 
 	fmt.Println("✓ Push completed successfully (no conflicts)")
-
-	// Push
 	if err := gitPush(deps, scriptDir, targetBranch); err != nil {
 		fmt.Fprintf(os.Stderr, "Error pushing: %v\n", err)
 		return
 	}
-
 	fmt.Printf("✓ Pushed to origin/%s\n", targetBranch)
 }
 

@@ -1,9 +1,12 @@
 package daemon
 
-import "github.com/tysonthomas9/loomcli/internal/cli/config"
+import (
+	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
+)
 
 // applyRestartPolicyDefaults fills nil config.RestartPolicy fields with runtime defaults
-// matching the getter functions in daemon_restart.go.
+// matching the getter functions in supervisor/restart.go.
 func applyRestartPolicyDefaults(rp *config.RestartPolicy) {
 	if rp.MaxRetries == nil {
 		rp.MaxRetries = config.IntPtr(3)
@@ -36,10 +39,10 @@ func applyRestartPolicyDefaults(rp *config.RestartPolicy) {
 		rp.IdlePollInterval = config.IntPtr(30)
 	}
 	if rp.YieldTimeout == nil {
-		rp.YieldTimeout = config.IntPtr(DefaultYieldTimeout)
+		rp.YieldTimeout = config.IntPtr(supervisor.DefaultYieldTimeout)
 	}
 	if rp.SigtermTimeout == nil {
-		rp.SigtermTimeout = config.IntPtr(DefaultSigtermTimeout)
+		rp.SigtermTimeout = config.IntPtr(supervisor.DefaultSigtermTimeout)
 	}
 }
 

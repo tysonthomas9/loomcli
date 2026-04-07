@@ -69,7 +69,7 @@ func defaultListLoomTmuxSessions() ([]loomTmuxSession, error) {
 
 // killTmuxSession kills a tmux session by name. Package-level variable for testability.
 var killTmuxSession = func(name string) error {
-	return exec.Command("tmux", "kill-session", "-t", name).Run()
+	return exec.Command("tmux", "kill-session", "-t", name).Run() //nolint:gosec // G204: intentional tmux session cleanup
 }
 
 func checkOrphanedTmuxSessions() CheckResult {

@@ -161,7 +161,7 @@ func WithConfigLock(fn func() error) error {
 // WithConfigLock) or by LoadConfig which acquires its own lock.
 func LoadConfigUnlocked() (*LoomConfig, error) {
 	path := GetConfigPath()
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path is from known config directory
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -169,38 +169,18 @@ func LoadConfigUnlocked() (*LoomConfig, error) {
 		return nil, fmt.Errorf("reading config %s: %w", path, err)
 	}
 
-	// Auto-migrate non-destructive config changes before parsing
-	data, err = autoMigrateFile(path, data)
+	data, err = preprocessConfigBytes(path, data)
 	if err != nil {
 		return nil, err
-	}
-
-	data, err = ExpandConfigBytes(data)
-	if err != nil {
-		return nil, fmt.Errorf("expanding env vars in %s: %w", path, err)
-	}
-
-	resolver := NewSecretResolver()
-	data, err = ResolveSecretsInBytes(data, resolver)
-	if err != nil {
-		return nil, fmt.Errorf("resolving secrets in %s: %w", path, err)
 	}
 
 	var cfg LoomConfig
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parsing config %s: %w", path, err)
 	}
-	for wsName, ws := range cfg.Workspaces {
-		for i, repo := range ws.Repos {
-			if err := ValidateRemoteName(repo.Remote); err != nil {
-				return nil, fmt.Errorf("invalid config %s: workspace %q repo %d (%q): %w", path, wsName, i, repo.Name, err)
-			}
-			// Default SourceRepoID to Name if not explicitly set
-			if repo.SourceRepoID == "" {
-				ws.Repos[i].SourceRepoID = repo.Name
-			}
-		}
-		cfg.Workspaces[wsName] = ws
+
+	if err := validateWorkspaceRepos(&cfg, path); err != nil {
+		return nil, err
 	}
 
 	// Resolve DefaultWorkspaceID from the default workspace name
@@ -218,6 +198,45 @@ func LoadConfigUnlocked() (*LoomConfig, error) {
 	}
 
 	return &cfg, nil
+}
+
+// preprocessConfigBytes runs auto-migration, env expansion, and secret resolution on raw config bytes.
+func preprocessConfigBytes(path string, data []byte) ([]byte, error) {
+	// Auto-migrate non-destructive config changes before parsing
+	data, err := autoMigrateFile(path, data)
+	if err != nil {
+		return nil, err
+	}
+
+	data, err = ExpandConfigBytes(data)
+	if err != nil {
+		return nil, fmt.Errorf("expanding env vars in %s: %w", path, err)
+	}
+
+	resolver := NewSecretResolver()
+	data, err = ResolveSecretsInBytes(data, resolver)
+	if err != nil {
+		return nil, fmt.Errorf("resolving secrets in %s: %w", path, err)
+	}
+
+	return data, nil
+}
+
+// validateWorkspaceRepos validates remote names and defaults SourceRepoID for all workspace repos.
+func validateWorkspaceRepos(cfg *LoomConfig, path string) error {
+	for wsName, ws := range cfg.Workspaces {
+		for i, repo := range ws.Repos {
+			if err := ValidateRemoteName(repo.Remote); err != nil {
+				return fmt.Errorf("invalid config %s: workspace %q repo %d (%q): %w", path, wsName, i, repo.Name, err)
+			}
+			// Default SourceRepoID to Name if not explicitly set
+			if repo.SourceRepoID == "" {
+				ws.Repos[i].SourceRepoID = repo.Name
+			}
+		}
+		cfg.Workspaces[wsName] = ws
+	}
+	return nil
 }
 
 // LoadConfig reads and parses the loom config file.

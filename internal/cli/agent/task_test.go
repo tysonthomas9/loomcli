@@ -1,5 +1,3 @@
-//go:build ignore
-
 package agent
 
 import (
@@ -113,8 +111,8 @@ func TestRunTask_SingleTask_Success(t *testing.T) {
 	}
 
 	// Verify Claude was invoked
-	if len(recorder.Invocations) != 1 {
-		t.Fatalf("expected 1 Claude invocation, got %d", len(recorder.Invocations))
+	if len(recorder.InteractiveCalls) != 1 {
+		t.Fatalf("expected 1 Claude invocation, got %d", len(recorder.InteractiveCalls))
 	}
 
 	// Verify lock was created and released
@@ -159,8 +157,8 @@ func TestRunTask_DaemonMode_AcquiresLock(t *testing.T) {
 	buf.ReadFrom(r)
 
 	// Verify Claude was invoked
-	if len(recorder.Invocations) != 1 {
-		t.Fatalf("expected 1 Claude invocation in daemon mode, got %d", len(recorder.Invocations))
+	if len(recorder.InteractiveCalls) != 1 {
+		t.Fatalf("expected 1 Claude invocation in daemon mode, got %d", len(recorder.InteractiveCalls))
 	}
 
 	// In daemon mode, lock is intentionally NOT released (for parent to read)

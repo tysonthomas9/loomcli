@@ -14,7 +14,7 @@ import (
 // openLogFileSecure opens a log file with O_NOFOLLOW to prevent symlink attacks,
 // and performs post-open fd-based path verification on Linux.
 func openLogFileSecure(path, allowedDir string) (*os.File, error) {
-	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0) //nolint:gosec // G304: path is validated by caller
 	if err != nil {
 		// Check for ELOOP which indicates a symlink was encountered
 		if errors.Is(err, syscall.ELOOP) {

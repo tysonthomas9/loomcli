@@ -1,5 +1,3 @@
-//go:build ignore
-
 package config
 
 import (
@@ -25,8 +23,8 @@ func TestGetConfigVersion(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := getConfigVersion(tt.data); got != tt.want {
-				t.Errorf("getConfigVersion() = %d, want %d", got, tt.want)
+			if got := GetConfigVersion(tt.data); got != tt.want {
+				t.Errorf("GetConfigVersion() = %d, want %d", got, tt.want)
 			}
 		})
 	}
@@ -41,7 +39,7 @@ func TestMigrateConfigData_V0ToV1(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MigrateConfigData() error = %v", err)
 	}
-	if v := getConfigVersion(result); v != CurrentConfigVersion {
+	if v := GetConfigVersion(result); v != CurrentConfigVersion {
 		t.Errorf("version = %d, want %d", v, CurrentConfigVersion)
 	}
 	if result["default_workspace"] != "myws" {
@@ -197,7 +195,7 @@ func TestMigrateV1ToV2_AddsUUIDs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("migrateV1ToV2() error = %v", err)
 	}
-	if v := getConfigVersion(result); v != 2 {
+	if v := GetConfigVersion(result); v != 2 {
 		t.Errorf("version = %d, want 2", v)
 	}
 	workspaces := result["workspaces"].(map[string]interface{})
@@ -272,7 +270,7 @@ func TestMigrateV1ToV2_NoWorkspaces(t *testing.T) {
 	if err != nil {
 		t.Fatalf("migrateV1ToV2() error = %v", err)
 	}
-	if v := getConfigVersion(result); v != 2 {
+	if v := GetConfigVersion(result); v != 2 {
 		t.Errorf("version = %d, want 2", v)
 	}
 	if result["backend"] != "claude" {
@@ -289,7 +287,7 @@ func TestMigrateV1ToV2_EmptyWorkspaces(t *testing.T) {
 	if err != nil {
 		t.Fatalf("migrateV1ToV2() error = %v", err)
 	}
-	if v := getConfigVersion(result); v != 2 {
+	if v := GetConfigVersion(result); v != 2 {
 		t.Errorf("version = %d, want 2", v)
 	}
 }
@@ -310,7 +308,7 @@ func TestMigrationChain_V0ToV2(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MigrateConfigData() error = %v", err)
 	}
-	if v := getConfigVersion(result); v != 2 {
+	if v := GetConfigVersion(result); v != 2 {
 		t.Errorf("version = %d, want 2", v)
 	}
 	workspaces := result["workspaces"].(map[string]interface{})
@@ -343,7 +341,7 @@ func TestAutoMigrateConfigData_AllNonDestructive(t *testing.T) {
 	if reachedVersion != CurrentConfigVersion {
 		t.Errorf("reachedVersion = %d, want %d", reachedVersion, CurrentConfigVersion)
 	}
-	if v := getConfigVersion(result); v != CurrentConfigVersion {
+	if v := GetConfigVersion(result); v != CurrentConfigVersion {
 		t.Errorf("data version = %d, want %d", v, CurrentConfigVersion)
 	}
 	if result["default_workspace"] != "myws" {
@@ -413,8 +411,8 @@ func TestAutoMigrateConfigData_StopsAtDestructive(t *testing.T) {
 	if reachedVersion != 1 {
 		t.Errorf("reachedVersion = %d, want 1 (should stop before destructive v1→v2)", reachedVersion)
 	}
-	if getConfigVersion(result) != 1 {
-		t.Errorf("data version = %d, want 1", getConfigVersion(result))
+	if GetConfigVersion(result) != 1 {
+		t.Errorf("data version = %d, want 1", GetConfigVersion(result))
 	}
 }
 
@@ -438,8 +436,8 @@ func TestAutoMigrateConfigData_FirstMigrationDestructive(t *testing.T) {
 	if reachedVersion != 0 {
 		t.Errorf("reachedVersion = %d, want 0 (no migrations applied)", reachedVersion)
 	}
-	if getConfigVersion(result) != 0 {
-		t.Errorf("data version = %d, want 0", getConfigVersion(result))
+	if GetConfigVersion(result) != 0 {
+		t.Errorf("data version = %d, want 0", GetConfigVersion(result))
 	}
 }
 
@@ -456,8 +454,8 @@ func TestAutoMigrateConfigData_NilMap(t *testing.T) {
 	if reachedVersion != CurrentConfigVersion {
 		t.Errorf("reachedVersion = %d, want %d", reachedVersion, CurrentConfigVersion)
 	}
-	if getConfigVersion(result) != CurrentConfigVersion {
-		t.Errorf("data version = %d, want %d", getConfigVersion(result), CurrentConfigVersion)
+	if GetConfigVersion(result) != CurrentConfigVersion {
+		t.Errorf("data version = %d, want %d", GetConfigVersion(result), CurrentConfigVersion)
 	}
 }
 
@@ -478,7 +476,7 @@ func TestMigrateConfigData_UnchangedBehavior(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MigrateConfigData() error = %v", err)
 	}
-	if v := getConfigVersion(result); v != CurrentConfigVersion {
+	if v := GetConfigVersion(result); v != CurrentConfigVersion {
 		t.Errorf("version = %d, want %d (MigrateConfigData should apply all, including destructive)", v, CurrentConfigVersion)
 	}
 }
@@ -495,7 +493,7 @@ func TestMigrationChain_Idempotent(t *testing.T) {
 		t.Fatalf("second migration error = %v", err)
 	}
 
-	if getConfigVersion(first) != getConfigVersion(second) {
+	if GetConfigVersion(first) != GetConfigVersion(second) {
 		t.Error("version should be the same after re-migration")
 	}
 	if first["backend"] != second["backend"] {

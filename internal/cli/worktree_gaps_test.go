@@ -1,5 +1,3 @@
-//go:build ignore
-
 package cli
 
 import (
@@ -216,54 +214,8 @@ func TestDiscoverWorkspace_MultipleWorkspaces_SwitchAndDiscover(t *testing.T) {
 	}
 }
 
-// --- Group 3: ResolveAgentTarget() legacy mode paths ---
-
-func TestResolveAgentTarget_LegacyMode_InvalidWorktree(t *testing.T) {
-	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
-
-	tmpDir := t.TempDir()
-	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
-
-	origDir, _ := os.Getwd()
-	defer os.Chdir(origDir)
-	os.Chdir(tmpDir)
-
-	// Create worktrees directory but no worktree named "nonexistent"
-	os.MkdirAll(filepath.Join(tmpDir, "worktrees"), 0755)
-
-	_, err := ResolveAgentTarget("nonexistent", "")
-	if err == nil {
-		t.Fatal("expected error for nonexistent worktree in legacy mode")
-	}
-}
-
-func TestResolveAgentTarget_LegacyMode_AbsolutePath(t *testing.T) {
-	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
-
-	tmpDir := t.TempDir()
-	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
-	absTarget := filepath.Join(tmpDir, "my-project")
-	os.MkdirAll(absTarget, 0755)
-
-	target, err := ResolveAgentTarget(absTarget, "")
-	if err != nil {
-		t.Fatalf("ResolveAgentTarget: %v", err)
-	}
-	if target.WorkDir != absTarget {
-		t.Errorf("expected WorkDir %q, got %q", absTarget, target.WorkDir)
-	}
-	if target.AgentName != "my-project" {
-		t.Errorf("expected AgentName 'my-project', got %q", target.AgentName)
-	}
-}
+// ResolveAgentTarget tests have been moved to internal/cli/workspace/workspace_resolve_test.go
+// where ResolveAgentTarget lives.
 
 // --- Group 4: DiscoverWorktrees() public API delegation ---
 

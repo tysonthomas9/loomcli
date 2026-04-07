@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -320,6 +323,146 @@ func assertEnvelopeSuccess(t *testing.T, body map[string]interface{}) {
 			t.Errorf("unexpected 'error' field in success response: %v", errVal)
 		}
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Test-local SessionService (for session_history_test.go)
+// ---------------------------------------------------------------------------
+
+type testSessionServiceImpl struct {
+	sessStore *sessions.Store
+	histStore *sessionhistory.Store
+}
+
+// NewSessionService creates a test-local SessionService, mirroring
+// svcimpl.NewSessionService to avoid a circular import.
+func NewSessionService(sessStore *sessions.Store, histStore *sessionhistory.Store) service.SessionService {
+	return &testSessionServiceImpl{sessStore: sessStore, histStore: histStore}
+}
+
+func (s *testSessionServiceImpl) ListTaskSessions(_ context.Context, taskID string) ([]service.SessionListItem, error) {
+	if s.sessStore == nil {
+		return nil, service.ErrUnavailable("session store not available")
+	}
+	records, err := s.sessStore.SessionsByTask(taskID)
+	if err != nil {
+		return nil, service.ErrInternal("failed to list sessions", err)
+	}
+	items := make([]service.SessionListItem, 0, len(records))
+	for _, rec := range records {
+		item := service.SessionListItem{SessionRecord: rec, IsActive: rec.Status == sessions.StatusRunning}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
+func (s *testSessionServiceImpl) GetSession(_ context.Context, _, sessionID string) (*service.SessionDetailData, error) {
+	if s.sessStore == nil {
+		return nil, service.ErrUnavailable("session store not available")
+	}
+	meta, err := s.sessStore.LoadMetadata(sessionID)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, service.ErrNotFound("session not found")
+		}
+		return nil, service.ErrInternal("failed to load session", err)
+	}
+	return &service.SessionDetailData{SessionMetadata: *meta, IsActive: meta.Status == sessions.StatusRunning}, nil
+}
+
+func (s *testSessionServiceImpl) GetSessionTranscript(_ context.Context, _, sessionID string) ([]sessions.TranscriptEntry, error) {
+	if s.sessStore == nil {
+		return nil, service.ErrUnavailable("session store not available")
+	}
+	entries, err := s.sessStore.LoadTranscript(sessionID)
+	if err != nil {
+		return nil, service.ErrInternal("failed to load transcript", err)
+	}
+	if entries == nil {
+		entries = []sessions.TranscriptEntry{}
+	}
+	return entries, nil
+}
+
+func (s *testSessionServiceImpl) GetSessionDiff(_ context.Context, _, sessionID string) (string, error) {
+	if s.sessStore == nil {
+		return "", service.ErrUnavailable("session store not available")
+	}
+	diff, err := s.sessStore.ReadDiff(sessionID)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", service.ErrNotFound("diff not found")
+		}
+		return "", service.ErrInternal("failed to read diff", err)
+	}
+	return diff, nil
+}
+
+func (s *testSessionServiceImpl) ListSessionHistory(ctx context.Context, wsID, issueID string) ([]sessionhistory.SessionRecord, error) {
+	if s.histStore == nil {
+		return nil, service.ErrUnavailable("session history not available (no Redis)")
+	}
+	if err := sessionhistory.ValidateIssueID(issueID); err != nil {
+		return nil, service.ErrValidation(err.Error())
+	}
+	records, err := s.histStore.List(ctx, wsID, issueID)
+	if err != nil {
+		return nil, service.ErrInternal("failed to list session history", err)
+	}
+	return records, nil
+}
+
+func (s *testSessionServiceImpl) GetSessionScrollback(ctx context.Context, wsID, issueID, recordID string) (*service.SessionScrollbackResult, error) {
+	if s.histStore == nil {
+		return nil, service.ErrUnavailable("session history not available (no Redis)")
+	}
+	if err := sessionhistory.ValidateIssueID(issueID); err != nil {
+		return nil, service.ErrValidation(err.Error())
+	}
+	if recordID == "" {
+		return nil, service.ErrValidation("record ID is required")
+	}
+	records, err := s.histStore.List(ctx, wsID, issueID)
+	if err != nil {
+		return nil, service.ErrInternal("failed to get session history", err)
+	}
+	var found *sessionhistory.SessionRecord
+	for i := range records {
+		if records[i].ID == recordID {
+			found = &records[i]
+			break
+		}
+	}
+	if found == nil {
+		return nil, service.ErrNotFound("session record not found")
+	}
+	if found.ScrollbackPath == "" {
+		return nil, service.ErrNotFound("no scrollback available for this session")
+	}
+	homeDir, _ := os.UserHomeDir()
+	expectedPrefix := filepath.Clean(homeDir+"/.loom/session-scrollback") + string(os.PathSeparator)
+	cleanPath := filepath.Clean(found.ScrollbackPath)
+	if !strings.HasPrefix(cleanPath+string(os.PathSeparator), expectedPrefix) {
+		return nil, service.ErrValidation("invalid scrollback path")
+	}
+	f, err := os.Open(cleanPath) //nolint:gosec
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, service.ErrNotFound("scrollback file not found")
+		}
+		return nil, service.ErrInternal("failed to read scrollback", err)
+	}
+	defer f.Close()
+	content, err := io.ReadAll(f)
+	if err != nil {
+		return nil, service.ErrInternal("failed to read scrollback", err)
+	}
+	text := string(content)
+	lines := 0
+	if text != "" {
+		lines = strings.Count(text, "\n") + 1
+	}
+	return &service.SessionScrollbackResult{Content: text, Lines: lines}, nil
 }
 
 func assertPlainError(t *testing.T, body map[string]interface{}) {

@@ -1,17 +1,36 @@
-//go:build ignore
-
 package cli
 
 import (
 	"bufio"
 	"encoding/json"
 	"net"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 )
+
+// shortSocketDir creates a short temp directory suitable for Unix socket paths,
+// which are limited to 104 bytes on macOS. t.TempDir() paths can exceed this.
+func shortSocketDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "loom-sock-")
+	if err != nil {
+		t.Fatalf("creating short socket dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	return dir
+}
+
+// ipcClaimArgs mirrors daemon.ipcClaimArgs for test assertions.
+type ipcClaimArgs struct {
+	LockTTLSeconds int `json:"lock_ttl_seconds,omitempty"`
+}
+
+// ipcOpClaim mirrors the daemon IPC operation constant.
+const ipcOpClaim = "claim"
 
 // startTestIPCServer starts a minimal Unix socket server that accepts
 // connections, reads one AgentIPCRequest per connection, calls the handler,

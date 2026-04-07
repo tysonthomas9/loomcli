@@ -360,3 +360,16 @@ func GetDefaultResolver() *Resolver {
 	}
 	return defaultResolver
 }
+
+// TestingResetDefaultResolver clears the cached default resolver so NewResolver
+// will be re-invoked. Returns the old resolver for restoring in cleanup.
+func TestingResetDefaultResolver() *Resolver {
+	old := defaultResolver
+	defaultResolver = nil
+	return old
+}
+
+// TestingSetDefaultResolver sets the cached default resolver.
+func TestingSetDefaultResolver(r *Resolver) {
+	defaultResolver = r
+}

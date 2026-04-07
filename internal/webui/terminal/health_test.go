@@ -1,5 +1,3 @@
-//go:build ignore
-
 // This file tests HandleTerminalKill and HandleTerminalSessionStatus which
 // have been moved to handlers/terminal package. It cannot import that package
 // from here without creating an import cycle. The handlers are tested via

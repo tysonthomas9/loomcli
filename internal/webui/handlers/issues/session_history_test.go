@@ -1,5 +1,3 @@
-//go:build ignore
-
 // This file references NewSessionService from the root webui package which
 // cannot be imported from this sub-package without creating a cycle.
 

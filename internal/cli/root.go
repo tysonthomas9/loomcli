@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -126,4 +127,126 @@ func init() {
 func Execute() error {
 	registerPendingCommands()
 	return rootCmd.Execute()
+}
+
+// --- Command registration (merged from register.go) ---
+
+// pendingCmds accumulates commands registered by sub-packages via init().
+var pendingCmds []*cobra.Command
+
+// RegisterCommand adds a command to the pending list.
+// Sub-packages call this in their init() functions.
+func RegisterCommand(cmd *cobra.Command) {
+	pendingCmds = append(pendingCmds, cmd)
+}
+
+// registerPendingCommands adds all pending commands to rootCmd.
+func registerPendingCommands() {
+	rootCmd.AddCommand(pendingCmds...)
+}
+
+// GetRootCmd returns the root cobra command for sub-packages that need
+// to add command groups or other root-level configuration.
+func GetRootCmd() *cobra.Command {
+	return rootCmd
+}
+
+// worktreeCompletion provides completion for worktree and workspace names
+func WorktreeCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	// Only complete the first argument (worktree/workspace name)
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+
+	seen := make(map[string]bool)
+	var completions []string
+
+	// In workspace mode, include workspace names first
+	resolver, _ := NewResolver()
+	for _, name := range resolver.WorkspaceNames() {
+		completions = append(completions, name+"\tworkspace")
+		seen[name] = true
+	}
+
+	worktrees, err := resolver.DiscoverWorktrees()
+	if err != nil {
+		if len(completions) > 0 {
+			return completions, cobra.ShellCompDirectiveNoFileComp
+		}
+		return nil, cobra.ShellCompDirectiveError
+	}
+
+	for _, wt := range worktrees {
+		if seen[wt.Name] {
+			continue // Skip if already added as workspace name
+		}
+		// Format: "name\tdescription" for shell completion
+		completions = append(completions, wt.Name+"\t"+wt.Branch)
+	}
+	return completions, cobra.ShellCompDirectiveNoFileComp
+}
+
+// branchCompletion provides completion for git branch names
+func BranchCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	branches, err := GetGitBranches()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveError
+	}
+	return branches, cobra.ShellCompDirectiveNoFileComp
+}
+
+// worktreeThenBranchCompletion provides worktree names for first arg, branches for second
+func WorktreeThenBranchCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) == 0 {
+		return WorktreeCompletion(cmd, args, toComplete)
+	}
+	if len(args) == 1 {
+		return BranchCompletion(cmd, args, toComplete)
+	}
+	return nil, cobra.ShellCompDirectiveNoFileComp
+}
+
+// getGitBranchesDeps is the deps-aware implementation of GetGitBranches.
+func getGitBranchesDeps(deps *Deps) ([]string, error) {
+	output, err := RunGit(deps, ".", "branch", "-a", "--format=%(refname:short)")
+	if err != nil {
+		return nil, err
+	}
+
+	return parseGitBranches(output), nil
+}
+
+// GetGitBranches returns all local and remote branch names
+func GetGitBranches() ([]string, error) {
+	return getGitBranchesDeps(defaultDeps)
+}
+
+// parseGitBranches parses the output of git branch -a into unique branch names.
+func parseGitBranches(output string) []string {
+
+	var branches []string
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		if line == "" {
+			continue
+		}
+		// Clean up remote branch names (origin/branch -> branch for display)
+		branch := strings.TrimPrefix(line, "origin/")
+		// Skip HEAD references
+		if strings.Contains(branch, "HEAD") {
+			continue
+		}
+		branches = append(branches, branch)
+	}
+
+	// Remove duplicates (local and remote versions of same branch)
+	seen := make(map[string]bool)
+	var unique []string
+	for _, b := range branches {
+		if !seen[b] {
+			seen[b] = true
+			unique = append(unique, b)
+		}
+	}
+
+	return unique
 }

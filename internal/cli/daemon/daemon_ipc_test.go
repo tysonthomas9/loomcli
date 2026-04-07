@@ -1,5 +1,3 @@
-//go:build ignore
-
 package daemon
 
 import (
@@ -14,6 +12,8 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
+	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/notify"
 )
 
@@ -132,14 +132,19 @@ func (m *mockIPCBackend) BackendName() string { return "mock" }
 
 // newTestIPCDaemon constructs a Daemon with a mock backend for IPC server tests.
 func newTestIPCDaemon(mb *mockIPCBackend) *Daemon {
-	return &Daemon{
-		config:        makeDaemonConfig(nil, nil),
-		agents:        make([]*AgentProcess, 0),
-		stoppedAgents: make(map[string]struct{}),
-		shutdown:      make(chan struct{}),
-		concurrency:   NewConcurrencyTracker(nil),
-		issueBackend:  mb,
+	d := &Daemon{
+		config:       makeDaemonConfig(nil, nil),
+		issueBackend: mb,
 	}
+	d.sup = &supervisor.Supervisor{
+		ConfigSnapshot: d.configSnapshot,
+		Agents:         make([]*supervisor.AgentProcess, 0),
+		StoppedAgents:  make(map[string]struct{}),
+		Shutdown:       make(chan struct{}),
+		Concurrency:    supervisor.NewConcurrencyTracker(nil),
+		EmitEvent:      func(events.Event) {},
+	}
+	return d
 }
 
 // sendIPCRequest connects to the IPC socket, sends a request, reads the response.
@@ -180,7 +185,7 @@ func sendIPCRequest(t *testing.T, socketPath string, req AgentIPCRequest) AgentI
 func TestIPCServer_ClaimSuccess(t *testing.T) {
 	mb := &mockIPCBackend{}
 	d := newTestIPCDaemon(mb)
-	defer close(d.shutdown)
+	defer close(d.sup.Shutdown)
 
 	resp := d.handleIPCClaim(AgentIPCRequest{
 		Operation: ipcOpClaim,
@@ -205,7 +210,7 @@ func TestIPCServer_ClaimSuccess(t *testing.T) {
 func TestIPCServer_ClaimWithTTL(t *testing.T) {
 	mb := &mockIPCBackend{}
 	d := newTestIPCDaemon(mb)
-	defer close(d.shutdown)
+	defer close(d.sup.Shutdown)
 
 	resp := d.handleIPCClaim(AgentIPCRequest{
 		Operation: ipcOpClaim,
@@ -227,7 +232,7 @@ func TestIPCServer_ClaimConflict(t *testing.T) {
 		claimErr: backend.ErrConflict("ClaimIssue", "already claimed by nova"),
 	}
 	d := newTestIPCDaemon(mb)
-	defer close(d.shutdown)
+	defer close(d.sup.Shutdown)
 
 	resp := d.handleIPCClaim(AgentIPCRequest{
 		Operation: ipcOpClaim,
@@ -251,7 +256,7 @@ func TestIPCServer_ClaimNotFound(t *testing.T) {
 		claimErr: backend.ErrNotFound("ClaimIssue", "issue not found"),
 	}
 	d := newTestIPCDaemon(mb)
-	defer close(d.shutdown)
+	defer close(d.sup.Shutdown)
 
 	resp := d.handleIPCClaim(AgentIPCRequest{
 		Operation: ipcOpClaim,
@@ -270,7 +275,7 @@ func TestIPCServer_ClaimNotFound(t *testing.T) {
 func TestIPCServer_UpdateSuccess(t *testing.T) {
 	mb := &mockIPCBackend{}
 	d := newTestIPCDaemon(mb)
-	defer close(d.shutdown)
+	defer close(d.sup.Shutdown)
 
 	status := "in_progress"
 	args, _ := json.Marshal(backend.UpdateParams{Status: &status})
@@ -301,7 +306,7 @@ func TestIPCServer_UpdateNotFound(t *testing.T) {
 		updateErr: backend.ErrNotFound("Update", "issue not found"),
 	}
 	d := newTestIPCDaemon(mb)
-	defer close(d.shutdown)
+	defer close(d.sup.Shutdown)
 
 	resp := d.handleIPCUpdate(AgentIPCRequest{
 		Operation: ipcOpUpdate,
@@ -326,7 +331,7 @@ func TestIPCServer_CompleteSuccess(t *testing.T) {
 		},
 	}
 	d := newTestIPCDaemon(mb)
-	defer close(d.shutdown)
+	defer close(d.sup.Shutdown)
 
 	args, _ := json.Marshal(backend.CloseParams{Reason: "implemented", Session: "sess-123"})
 
@@ -371,7 +376,7 @@ func TestIPCServer_CompleteNotFound(t *testing.T) {
 		closeErr: backend.ErrNotFound("Close", "issue not found"),
 	}
 	d := newTestIPCDaemon(mb)
-	defer close(d.shutdown)
+	defer close(d.sup.Shutdown)
 
 	resp := d.handleIPCComplete(AgentIPCRequest{
 		Operation: ipcOpComplete,
@@ -390,7 +395,7 @@ func TestIPCServer_CompleteNotFound(t *testing.T) {
 func TestIPCServer_UnknownOperation(t *testing.T) {
 	mb := &mockIPCBackend{}
 	d := newTestIPCDaemon(mb)
-	defer close(d.shutdown)
+	defer close(d.sup.Shutdown)
 
 	tmpDir := shortSocketDir(t)
 	socketPath := filepath.Join(tmpDir, "ipc.sock")
@@ -416,7 +421,7 @@ func TestIPCServer_UnknownOperation(t *testing.T) {
 func TestIPCServer_MissingAgentName(t *testing.T) {
 	mb := &mockIPCBackend{}
 	d := newTestIPCDaemon(mb)
-	defer close(d.shutdown)
+	defer close(d.sup.Shutdown)
 
 	tmpDir := shortSocketDir(t)
 	socketPath := filepath.Join(tmpDir, "ipc.sock")
@@ -450,7 +455,7 @@ func TestIPCServer_MissingAgentName(t *testing.T) {
 func TestIPCServer_MissingIssueID(t *testing.T) {
 	mb := &mockIPCBackend{}
 	d := newTestIPCDaemon(mb)
-	defer close(d.shutdown)
+	defer close(d.sup.Shutdown)
 
 	tmpDir := shortSocketDir(t)
 	socketPath := filepath.Join(tmpDir, "ipc.sock")
@@ -479,7 +484,7 @@ func TestIPCServer_MissingIssueID(t *testing.T) {
 func TestIPCServer_InvalidJSON(t *testing.T) {
 	mb := &mockIPCBackend{}
 	d := newTestIPCDaemon(mb)
-	defer close(d.shutdown)
+	defer close(d.sup.Shutdown)
 
 	tmpDir := shortSocketDir(t)
 	socketPath := filepath.Join(tmpDir, "ipc.sock")
@@ -524,7 +529,7 @@ func TestIPCServer_SocketRoundTrip(t *testing.T) {
 	}
 	d := newTestIPCDaemon(mb)
 	defer func() {
-		close(d.shutdown)
+		close(d.sup.Shutdown)
 		if d.ipcListener != nil {
 			_ = d.ipcListener.Close()
 		}
@@ -587,7 +592,7 @@ func TestIPCServer_InternalError(t *testing.T) {
 		claimErr: fmt.Errorf("unexpected database error"),
 	}
 	d := newTestIPCDaemon(mb)
-	defer close(d.shutdown)
+	defer close(d.sup.Shutdown)
 
 	resp := d.handleIPCClaim(AgentIPCRequest{
 		Operation: ipcOpClaim,
@@ -609,7 +614,7 @@ func TestIPCServer_InternalError(t *testing.T) {
 func TestIPCServer_InvalidClaimArgs(t *testing.T) {
 	mb := &mockIPCBackend{}
 	d := newTestIPCDaemon(mb)
-	defer close(d.shutdown)
+	defer close(d.sup.Shutdown)
 
 	resp := d.handleIPCClaim(AgentIPCRequest{
 		Operation: ipcOpClaim,
@@ -637,12 +642,12 @@ func TestResolveAgentIPCSocketPath(t *testing.T) {
 func TestIPCServer_ClaimPublishesMutation(t *testing.T) {
 	mb := &mockIPCBackend{}
 	d := newTestIPCDaemon(mb)
-	defer close(d.shutdown)
+	defer close(d.sup.Shutdown)
 
 	bus := notify.New()
 	defer bus.Close()
 	d.notifyBus = bus
-	d.workspaceID = "ws-test"
+	d.sup.WorkspaceID = "ws-test"
 
 	sub := bus.Subscribe("ws-test", "issue")
 	defer sub.Close()
@@ -682,12 +687,12 @@ func TestIPCServer_ClaimPublishesMutation(t *testing.T) {
 func TestIPCServer_UpdatePublishesMutation(t *testing.T) {
 	mb := &mockIPCBackend{}
 	d := newTestIPCDaemon(mb)
-	defer close(d.shutdown)
+	defer close(d.sup.Shutdown)
 
 	bus := notify.New()
 	defer bus.Close()
 	d.notifyBus = bus
-	d.workspaceID = "ws-test"
+	d.sup.WorkspaceID = "ws-test"
 
 	sub := bus.Subscribe("ws-test", "issue")
 	defer sub.Close()
@@ -732,12 +737,12 @@ func TestIPCServer_CompletePublishesMutation(t *testing.T) {
 		},
 	}
 	d := newTestIPCDaemon(mb)
-	defer close(d.shutdown)
+	defer close(d.sup.Shutdown)
 
 	bus := notify.New()
 	defer bus.Close()
 	d.notifyBus = bus
-	d.workspaceID = "ws-test"
+	d.sup.WorkspaceID = "ws-test"
 
 	sub := bus.Subscribe("ws-test", "issue")
 	defer sub.Close()
@@ -791,12 +796,12 @@ func TestIPCServer_ClaimError_NoMutation(t *testing.T) {
 		claimErr: fmt.Errorf("database unavailable"),
 	}
 	d := newTestIPCDaemon(mb)
-	defer close(d.shutdown)
+	defer close(d.sup.Shutdown)
 
 	bus := notify.New()
 	defer bus.Close()
 	d.notifyBus = bus
-	d.workspaceID = "ws-test"
+	d.sup.WorkspaceID = "ws-test"
 
 	sub := bus.Subscribe("ws-test", "issue")
 	defer sub.Close()

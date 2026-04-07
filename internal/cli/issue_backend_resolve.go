@@ -4,7 +4,9 @@ import (
 	"log/slog"
 	"os"
 	"strconv"
+	"sync"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
@@ -126,3 +128,55 @@ func IsFleetActive() bool {
 func IsFleetDBActive() bool {
 	return ResolveIssueBackendType() == IssueBackendFleetDB
 }
+
+// --- Package-level IssueBackend state (merged from issue_backend.go) ---
+
+var (
+	trackerMu   sync.RWMutex
+	trackerInst backend.IssueBackend
+)
+
+// defaultIssueBackend returns the package-level IssueBackend, lazily initializing
+// from defaultDeps.IssueBackend if not explicitly set.
+func DefaultIssueBackend() backend.IssueBackend {
+	trackerMu.RLock()
+	t := trackerInst
+	trackerMu.RUnlock()
+	if t != nil {
+		return t
+	}
+	trackerMu.Lock()
+	defer trackerMu.Unlock()
+	if trackerInst == nil {
+		// In fleet mode, use the fleet backend directly — skip IPC wrapping
+		// since the fleet server (not a local daemon) manages issues.
+		if IsFleetActive() {
+			trackerInst = resolveFallbackBackend()
+		} else if sock := os.Getenv("LOOM_DAEMON_SOCKET"); sock != "" {
+			agentName := os.Getenv("BD_ACTOR")
+			fallback := resolveFallbackBackend()
+			ipcClient := NewAgentIPCClient(sock, agentName)
+			trackerInst = newIPCIssueBackend(ipcClient, fallback)
+		} else {
+			trackerInst = resolveFallbackBackend()
+		}
+	}
+	return trackerInst
+}
+
+// setDefaultIssueBackend overrides the package-level IssueBackend (for testing).
+func SetDefaultIssueBackend(ib backend.IssueBackend) {
+	trackerMu.Lock()
+	defer trackerMu.Unlock()
+	trackerInst = ib
+}
+
+// ResetDefaultIssueBackend clears the override so DefaultIssueBackend() re-initializes.
+func ResetDefaultIssueBackend() {
+	trackerMu.Lock()
+	defer trackerMu.Unlock()
+	trackerInst = nil
+}
+
+// resetDefaultIssueBackend is the unexported alias for backward compatibility.
+var resetDefaultIssueBackend = ResetDefaultIssueBackend

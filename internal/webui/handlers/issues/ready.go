@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"time"
 
+	"net/url"
+
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
@@ -229,26 +231,14 @@ func parseReadyParams(r *http.Request) (*rpc.ReadyArgs, error) {
 	args := &rpc.ReadyArgs{}
 	q := r.URL.Query()
 
-	// String parameters
 	args.Assignee = handler.ParseStringParam(q, "assignee")
 	args.Type = handler.ParseStringParam(q, "type")
 	args.ParentID = handler.ParseStringParam(q, "parent_id")
 
-	// Validated string parameters
-	if v := handler.ParseStringParam(q, "mol_type"); v != "" {
-		if !types.MolType(v).IsValid() {
-			return nil, fmt.Errorf("invalid mol_type: %s (must be swarm, patrol, or work)", v)
-		}
-		args.MolType = v
-	}
-	if v := handler.ParseStringParam(q, "sort"); v != "" {
-		if !types.SortPolicy(v).IsValid() {
-			return nil, fmt.Errorf("invalid sort policy: %s (must be hybrid, priority, or oldest)", v)
-		}
-		args.SortPolicy = v
+	if err := parseReadyValidatedStrings(q, args); err != nil {
+		return nil, err
 	}
 
-	// Boolean parameters
 	var err error
 	if args.Unassigned, err = handler.ParseBoolParam(q, "unassigned"); err != nil {
 		return nil, err
@@ -256,30 +246,52 @@ func parseReadyParams(r *http.Request) (*rpc.ReadyArgs, error) {
 	if args.IncludeDeferred, err = handler.ParseBoolParam(q, "include_deferred"); err != nil {
 		return nil, err
 	}
-
-	// Integer parameters
-	if args.Priority, err = handler.ParseIntParam(q, "priority"); err != nil {
+	if err := parseReadyIntParams(q, args); err != nil {
 		return nil, err
 	}
-	if args.Priority != nil && (*args.Priority < 0 || *args.Priority > 4) {
-		return nil, fmt.Errorf("priority must be between 0 and 4 (got %d)", *args.Priority)
-	}
 
-	limitPtr, err := handler.ParseIntParam(q, "limit")
-	if err != nil {
-		return nil, err
-	}
-	if limitPtr != nil {
-		if *limitPtr < 0 {
-			return nil, fmt.Errorf("limit must be non-negative (got %d)", *limitPtr)
-		}
-		args.Limit = *limitPtr
-	}
-
-	// Array parameters
 	args.Labels = handler.ParseArrayParam(q, "labels")
 	args.LabelsAny = handler.ParseArrayParam(q, "labels_any")
 	args.SourceRepos = handler.ParseArrayParam(q, "source_repos")
 
 	return args, nil
+}
+
+// parseReadyValidatedStrings parses and validates mol_type and sort parameters.
+func parseReadyValidatedStrings(q url.Values, args *rpc.ReadyArgs) error {
+	if v := handler.ParseStringParam(q, "mol_type"); v != "" {
+		if !types.MolType(v).IsValid() {
+			return fmt.Errorf("invalid mol_type: %s (must be swarm, patrol, or work)", v)
+		}
+		args.MolType = v
+	}
+	if v := handler.ParseStringParam(q, "sort"); v != "" {
+		if !types.SortPolicy(v).IsValid() {
+			return fmt.Errorf("invalid sort policy: %s (must be hybrid, priority, or oldest)", v)
+		}
+		args.SortPolicy = v
+	}
+	return nil
+}
+
+// parseReadyIntParams parses priority and limit integer parameters.
+func parseReadyIntParams(q url.Values, args *rpc.ReadyArgs) error {
+	var err error
+	if args.Priority, err = handler.ParseIntParam(q, "priority"); err != nil {
+		return err
+	}
+	if args.Priority != nil && (*args.Priority < 0 || *args.Priority > 4) {
+		return fmt.Errorf("priority must be between 0 and 4 (got %d)", *args.Priority)
+	}
+	limitPtr, err := handler.ParseIntParam(q, "limit")
+	if err != nil {
+		return err
+	}
+	if limitPtr != nil {
+		if *limitPtr < 0 {
+			return fmt.Errorf("limit must be non-negative (got %d)", *limitPtr)
+		}
+		args.Limit = *limitPtr
+	}
+	return nil
 }

@@ -93,117 +93,108 @@ func collectAgentStatusDeps(deps *cli.Deps, agentTasks map[string]TaskInfo, bran
 		return nil, nil
 	}
 
-	// Load daemon-managed agents (if any)
 	var daemonManaged map[string]DaemonAgentInfo
 	if projectDir, err2 := os.Getwd(); err2 == nil {
 		daemonStatePath := config.ResolveDaemonStatePath(projectDir)
-		daemonManaged = loadDaemonManagedAgents(daemonStatePath)
+		daemonManaged = LoadDaemonManagedAgents(daemonStatePath)
 	}
 
-	var agents []AgentStatus
-	taskIDToAgents := make(map[string][]string) // Track which agents claim which tasks
-
-	// Global defaults for legacy mode; per-worktree values resolved in loop for workspace mode.
+	taskIDToAgents := make(map[string][]string)
 	globalDefaultBranch := cli.GetDefaultBranchForWorktrees(worktrees)
 	githubURL := ""
 	if len(worktrees) > 0 && worktrees[0].Repo == nil {
 		githubURL = getGitHubRemoteURLDeps(deps, worktrees[0].Path)
 	}
 
+	agents := make([]AgentStatus, 0, len(worktrees))
 	for _, wt := range worktrees {
-		daemonInfo := daemonManaged[wt.Name]
-		agent := AgentStatus{
-			Name:          wt.Name,
-			Branch:        wt.Branch,
-			Workspace:     wt.Workspace,
-			Role:          daemonInfo.Role,
-			Repo:          daemonInfo.Repo,
-			DaemonManaged: daemonInfo.Managed,
-		}
-
-		// Check for running agent (lock status)
-		lockStatus := cli.GetLockStatus(wt.Path)
-
-		// Also check lock file directly to get TaskID for conflict detection
-		if lockInfo, running, _ := cli.CheckLock(wt.Path); running && lockInfo != nil && lockInfo.TaskID != "" {
-			taskIDToAgents[lockInfo.TaskID] = append(taskIDToAgents[lockInfo.TaskID], wt.Name)
-		}
-
-		if lockStatus != "" {
-			// Lock file has status - check if it needs task ID from fallback
-			if strings.Contains(lockStatus, "...") {
-				if task, ok := agentTasks[wt.Name]; ok {
-					// Get actual task status to determine correct state
-					taskStatus := cli.GetTaskStatusDeps(deps, task.ID)
-					// Extract duration part (e.g., " (2m8s)")
-					durationIdx := strings.Index(lockStatus, " (")
-					durationPart := ""
-					if durationIdx != -1 {
-						durationPart = lockStatus[durationIdx:]
-					}
-					// Update state based on task status and agent type
-					switch taskStatus {
-					case "needs_review":
-						// Only show "review" for planning agents
-						if strings.HasPrefix(lockStatus, "planning:") {
-							lockStatus = fmt.Sprintf("review: %s%s", task.ID, durationPart)
-						} else {
-							// Implementation agents show "working"
-							lockStatus = fmt.Sprintf("working: %s%s", task.ID, durationPart)
-						}
-					case "closed":
-						lockStatus = fmt.Sprintf("done: %s%s", task.ID, durationPart)
-					default:
-						// Keep original state prefix, just replace "..."
-						lockStatus = strings.Replace(lockStatus, "...", task.ID, 1)
-					}
-				}
-			}
-			agent.Status = lockStatus
-		} else if task, ok := agentTasks[wt.Name]; ok && task.Status == "in_progress" {
-			// Task still in_progress but no lock - agent died
-			agent.Status = fmt.Sprintf("error: %s", task.ID)
-		} else {
-			// No lock and no in_progress task - check git status
-			// (closed tasks don't trigger "done" fallback - "done" only shows while agent is running)
-			clean, _ := git.IsCleanWorkingTreeDeps(deps, wt.Path)
-			if clean {
-				agent.Status = "ready"
-			} else {
-				changes := getUncommittedChanges(deps, wt.Path)
-				if changes > 0 {
-					agent.Status = fmt.Sprintf("%d changes", changes)
-				} else {
-					agent.Status = "dirty"
-				}
-			}
-		}
-
-		// Use per-worktree default branch in workspace mode
-		wtDefaultBranch := globalDefaultBranch
-		if wt.Repo != nil {
-			wtDefaultBranch = cli.DefaultBranchForWorktree(wt)
-		}
-
-		// Check ahead/behind integration branch
-		agent.Ahead, agent.Behind = GetWorktreeGitSyncStatusDeps(deps, wt.Path, wtDefaultBranch, branch)
-
-		// Populate commit details when ahead > 0
-		if agent.Ahead > 0 {
-			wtGithubURL := githubURL
-			if wt.Repo != nil {
-				wtGithubURL = getGitHubRemoteURLDeps(deps, wt.Path)
-			}
-			agent.Commits = getWorktreeCommitDetailsDeps(deps, wt.Path, wtDefaultBranch, 10, wtGithubURL, branch)
-		}
-
-		// Populate file changes (returns nil for clean trees)
-		agent.Changes = getWorktreeFileChangesDeps(deps, wt.Path)
-
+		agent := buildAgentStatus(deps, wt, daemonManaged, agentTasks, taskIDToAgents, globalDefaultBranch, githubURL, branch)
 		agents = append(agents, agent)
 	}
-
 	return agents, taskIDToAgents
+}
+
+// buildAgentStatus constructs the status for a single worktree agent.
+func buildAgentStatus(deps *cli.Deps, wt cli.WorktreeInfo, daemonManaged map[string]DaemonAgentInfo, agentTasks map[string]TaskInfo, taskIDToAgents map[string][]string, globalDefaultBranch, githubURL, branch string) AgentStatus {
+	daemonInfo := daemonManaged[wt.Name]
+	agent := AgentStatus{
+		Name: wt.Name, Branch: wt.Branch, Workspace: wt.Workspace,
+		Role: daemonInfo.Role, Repo: daemonInfo.Repo, DaemonManaged: daemonInfo.Managed,
+	}
+
+	if lockInfo, running, _ := cli.CheckLock(wt.Path); running && lockInfo != nil && lockInfo.TaskID != "" {
+		taskIDToAgents[lockInfo.TaskID] = append(taskIDToAgents[lockInfo.TaskID], wt.Name)
+	}
+
+	agent.Status = resolveAgentStatus(deps, wt, agentTasks)
+
+	wtDefaultBranch := globalDefaultBranch
+	if wt.Repo != nil {
+		wtDefaultBranch = cli.DefaultBranchForWorktree(wt)
+	}
+	agent.Ahead, agent.Behind = GetWorktreeGitSyncStatusDeps(deps, wt.Path, wtDefaultBranch, branch)
+
+	if agent.Ahead > 0 {
+		wtGithubURL := githubURL
+		if wt.Repo != nil {
+			wtGithubURL = getGitHubRemoteURLDeps(deps, wt.Path)
+		}
+		agent.Commits = getWorktreeCommitDetailsDeps(deps, wt.Path, wtDefaultBranch, 10, wtGithubURL, branch)
+	}
+	agent.Changes = getWorktreeFileChangesDeps(deps, wt.Path)
+	return agent
+}
+
+// resolveAgentStatus determines the status string for a worktree.
+func resolveAgentStatus(deps *cli.Deps, wt cli.WorktreeInfo, agentTasks map[string]TaskInfo) string {
+	lockStatus := cli.GetLockStatus(wt.Path)
+	if lockStatus != "" {
+		return refineLockStatus(deps, lockStatus, wt.Name, agentTasks)
+	}
+	if task, ok := agentTasks[wt.Name]; ok && task.Status == "in_progress" {
+		return fmt.Sprintf("error: %s", task.ID)
+	}
+	return resolveIdleStatus(deps, wt.Path)
+}
+
+// refineLockStatus enriches a lock status with task details when needed.
+func refineLockStatus(deps *cli.Deps, lockStatus, agentName string, agentTasks map[string]TaskInfo) string {
+	if !strings.Contains(lockStatus, "...") {
+		return lockStatus
+	}
+	task, ok := agentTasks[agentName]
+	if !ok {
+		return lockStatus
+	}
+	taskStatus := cli.GetTaskStatusDeps(deps, task.ID)
+	durationPart := ""
+	if idx := strings.Index(lockStatus, " ("); idx != -1 {
+		durationPart = lockStatus[idx:]
+	}
+	switch taskStatus {
+	case "needs_review":
+		if strings.HasPrefix(lockStatus, "planning:") {
+			return fmt.Sprintf("review: %s%s", task.ID, durationPart)
+		}
+		return fmt.Sprintf("working: %s%s", task.ID, durationPart)
+	case "closed":
+		return fmt.Sprintf("done: %s%s", task.ID, durationPart)
+	default:
+		return strings.Replace(lockStatus, "...", task.ID, 1)
+	}
+}
+
+// resolveIdleStatus determines the status for an agent with no lock and no in-progress task.
+func resolveIdleStatus(deps *cli.Deps, wtPath string) string {
+	clean, _ := git.IsCleanWorkingTreeDeps(deps, wtPath)
+	if clean {
+		return "ready"
+	}
+	changes := getUncommittedChanges(deps, wtPath)
+	if changes > 0 {
+		return fmt.Sprintf("%d changes", changes)
+	}
+	return "dirty"
 }
 
 func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, map[string]TaskInfo) {
@@ -212,170 +203,146 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 	return collectTaskStatusDeps(&d, readyLimit)
 }
 
+// taskQueryResults holds the raw results from parallel issue queries.
+type taskQueryResults struct {
+	readyIssues, inProgressIssues, reviewIssues, backlogIssues, closedIssues []backend.IssueData
+	readyErr, inProgressErr, reviewErr, backlogErr, closedErr                error
+}
+
 func collectTaskStatusDeps(deps *cli.Deps, readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, map[string]TaskInfo) {
+	qr := runParallelTaskQueries(deps, readyLimit)
+
 	var summary TaskSummary
-	var needsPlanningTasks []TaskInfo
-	var readyToImplementTasks []TaskInfo
-	var reviewTasks []TaskInfo
-	var inProgressTasks []TaskInfo
-	var backlogTasks []TaskInfo
-	var closedTasks []TaskInfo
 	agentTasks := make(map[string]TaskInfo)
 
-	// Run all 5 typed IssueBackend queries in parallel
-	var (
-		readyIssues, inProgressIssues, reviewIssues, backlogIssues, closedIssues []backend.IssueData
-		readyErr, inProgressErr, reviewErr, backlogErr, closedErr                error
-		wg                                                                       sync.WaitGroup
-	)
+	needsPlanningTasks, readyToImplementTasks := processReadyIssues(qr.readyIssues, qr.readyErr, &summary)
+	inProgressTasks := processInProgressIssues(qr.inProgressIssues, qr.inProgressErr, &summary, agentTasks)
+	reviewTasks := processReviewIssues(qr.reviewIssues, qr.reviewErr, &summary)
+	backlogTasks := processBacklogIssues(qr.backlogIssues, qr.backlogErr, &summary)
+	closedTasks := processClosedIssues(qr.closedIssues, qr.closedErr)
 
+	return summary, needsPlanningTasks, readyToImplementTasks, reviewTasks, inProgressTasks, backlogTasks, closedTasks, agentTasks
+}
+
+func runParallelTaskQueries(deps *cli.Deps, readyLimit int) taskQueryResults {
+	var qr taskQueryResults
+	var wg sync.WaitGroup
 	ib := deps.IssueBackend
 	ctx := context.Background()
 
 	wg.Add(5)
-
 	go func() {
 		defer wg.Done()
-		readyIssues, readyErr = ib.Ready(ctx, backend.ReadyOpts{Limit: readyLimit})
+		qr.readyIssues, qr.readyErr = ib.Ready(ctx, backend.ReadyOpts{Limit: readyLimit})
 	}()
-
 	go func() {
 		defer wg.Done()
-		inProgressIssues, inProgressErr = ib.List(ctx, backend.ListOpts{Status: "in_progress"})
+		qr.inProgressIssues, qr.inProgressErr = ib.List(ctx, backend.ListOpts{Status: "in_progress"})
 	}()
-
 	go func() {
 		defer wg.Done()
-		reviewIssues, reviewErr = ib.List(ctx, backend.ListOpts{Status: "review"})
+		qr.reviewIssues, qr.reviewErr = ib.List(ctx, backend.ListOpts{Status: "review"})
 	}()
-
+	go func() { defer wg.Done(); qr.backlogIssues, qr.backlogErr = ib.Blocked(ctx, backend.BlockedOpts{}) }()
 	go func() {
 		defer wg.Done()
-		backlogIssues, backlogErr = ib.Blocked(ctx, backend.BlockedOpts{})
+		qr.closedIssues, qr.closedErr = ib.List(ctx, backend.ListOpts{Status: "closed", Limit: 50})
 	}()
-
-	go func() {
-		defer wg.Done()
-		closedIssues, closedErr = ib.List(ctx, backend.ListOpts{Status: "closed", Limit: 50})
-	}()
-
 	wg.Wait()
 
-	// Process ready tasks, split by workflow stage
-	// Note: bd ready returns tasks not blocked by dependencies (open, in_progress, review)
-	if readyErr == nil {
-		needsPlanningCount := 0
-		readyToImplementCount := 0
-		for _, issue := range readyIssues {
-			// Skip non-open tasks - they appear in their own sections
-			if !cli.IsOpen(issue) {
-				continue
-			}
-			if cli.IsEpic(issue) {
-				summary.Epics++
-				continue
-			}
-			if cli.IsNonWorkType(issue) {
-				continue
-			}
+	return qr
+}
 
-			// Split by workflow stage using shared predicates
-			// SYNC: Must match taskfilter.go NeedsPlan() / cli.ReadyToImplement()
-			if cli.ReadyToImplement(issue) {
-				summary.ReadyToImplement++
-				if readyToImplementCount < 5 {
-					readyToImplementTasks = append(readyToImplementTasks, TaskInfo{
-						ID:       issue.ID,
-						Title:    issue.Title,
-						Priority: issue.Priority,
-					})
-					readyToImplementCount++
-				}
-			} else {
-				// NeedsPlan: no design OR needs-revision label
-				summary.NeedsPlanning++
-				if needsPlanningCount < 5 {
-					needsPlanningTasks = append(needsPlanningTasks, TaskInfo{
-						ID:       issue.ID,
-						Title:    issue.Title,
-						Priority: issue.Priority,
-					})
-					needsPlanningCount++
-				}
+func processReadyIssues(issues []backend.IssueData, err error, summary *TaskSummary) ([]TaskInfo, []TaskInfo) {
+	if err != nil {
+		return nil, nil
+	}
+	var needsPlanning, readyToImpl []TaskInfo
+	for _, issue := range issues {
+		if !cli.IsOpen(issue) {
+			continue
+		}
+		if cli.IsEpic(issue) {
+			summary.Epics++
+			continue
+		}
+		if cli.IsNonWorkType(issue) {
+			continue
+		}
+		ti := TaskInfo{ID: issue.ID, Title: issue.Title, Priority: issue.Priority}
+		if cli.ReadyToImplement(issue) {
+			summary.ReadyToImplement++
+			if len(readyToImpl) < 5 {
+				readyToImpl = append(readyToImpl, ti)
+			}
+		} else {
+			summary.NeedsPlanning++
+			if len(needsPlanning) < 5 {
+				needsPlanning = append(needsPlanning, ti)
 			}
 		}
 	}
+	return needsPlanning, readyToImpl
+}
 
-	// Process in_progress tasks and build agent-task map
-	if inProgressErr == nil {
-		summary.InProgress = len(inProgressIssues)
-		for _, issue := range inProgressIssues {
-			taskInfo := TaskInfo{
-				ID:       issue.ID,
-				Title:    issue.Title,
-				Priority: issue.Priority,
-				Status:   "in_progress",
-			}
-			inProgressTasks = append(inProgressTasks, taskInfo)
-			// Build agent-task map from assignee field
-			if issue.Assignee != "" {
-				agentTasks[issue.Assignee] = taskInfo
-			}
+func processInProgressIssues(issues []backend.IssueData, err error, summary *TaskSummary, agentTasks map[string]TaskInfo) []TaskInfo {
+	if err != nil {
+		return nil
+	}
+	summary.InProgress = len(issues)
+	var tasks []TaskInfo
+	for _, issue := range issues {
+		ti := TaskInfo{ID: issue.ID, Title: issue.Title, Priority: issue.Priority, Status: "in_progress"}
+		tasks = append(tasks, ti)
+		if issue.Assignee != "" {
+			agentTasks[issue.Assignee] = ti
 		}
 	}
+	return tasks
+}
 
-	// Process need review tasks (top 5)
-	// Note: Don't add to agentTasks - these tasks have status=review meaning
-	// the planning agent finished and released its lock. The assignee field
-	// still points to the planning agent but it's no longer running.
-	if reviewErr == nil {
-		// All tasks with status=review are review tasks
-		summary.NeedReview = len(reviewIssues)
-		for i, issue := range reviewIssues {
-			if i >= 5 {
-				break
-			}
-			reviewTasks = append(reviewTasks, TaskInfo{
-				ID:       issue.ID,
-				Title:    issue.Title,
-				Priority: issue.Priority,
-			})
-		}
+func processReviewIssues(issues []backend.IssueData, err error, summary *TaskSummary) []TaskInfo {
+	if err != nil {
+		return nil
 	}
-
-	// Process backlog tasks
-	if backlogErr == nil {
-		summary.Backlog += len(backlogIssues)
-		// Store up to 20 backlog tasks for display
-		for i, issue := range backlogIssues {
-			if i >= 20 {
-				break
-			}
-			backlogTasks = append(backlogTasks, TaskInfo{
-				ID:       issue.ID,
-				Title:    issue.Title,
-				Priority: issue.Priority,
-				Status:   issue.Status,
-			})
+	summary.NeedReview = len(issues)
+	var tasks []TaskInfo
+	for i, issue := range issues {
+		if i >= 5 {
+			break
 		}
+		tasks = append(tasks, TaskInfo{ID: issue.ID, Title: issue.Title, Priority: issue.Priority})
 	}
+	return tasks
+}
 
-	// Process closed tasks (top 50)
-	if closedErr == nil {
-		for i, issue := range closedIssues {
-			if i >= 50 {
-				break
-			}
-			closedTasks = append(closedTasks, TaskInfo{
-				ID:       issue.ID,
-				Title:    issue.Title,
-				Priority: issue.Priority,
-				Status:   issue.Status,
-			})
+func processBacklogIssues(issues []backend.IssueData, err error, summary *TaskSummary) []TaskInfo {
+	if err != nil {
+		return nil
+	}
+	summary.Backlog += len(issues)
+	var tasks []TaskInfo
+	for i, issue := range issues {
+		if i >= 20 {
+			break
 		}
+		tasks = append(tasks, TaskInfo{ID: issue.ID, Title: issue.Title, Priority: issue.Priority, Status: issue.Status})
 	}
+	return tasks
+}
 
-	return summary, needsPlanningTasks, readyToImplementTasks, reviewTasks, inProgressTasks, backlogTasks, closedTasks, agentTasks
+func processClosedIssues(issues []backend.IssueData, err error) []TaskInfo {
+	if err != nil {
+		return nil
+	}
+	var tasks []TaskInfo
+	for i, issue := range issues {
+		if i >= 50 {
+			break
+		}
+		tasks = append(tasks, TaskInfo{ID: issue.ID, Title: issue.Title, Priority: issue.Priority, Status: issue.Status})
+	}
+	return tasks
 }
 
 // collectSyncBdStatus runs the bd sync --status command (safe to call concurrently).

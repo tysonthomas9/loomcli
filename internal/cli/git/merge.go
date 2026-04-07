@@ -48,7 +48,7 @@ func checkoutTarget(repoPath, targetBranch string) (restoreOrigBranch func(), er
 
 // checkoutTargetDeps is the deps-aware variant of checkoutTarget.
 func checkoutTargetDeps(deps *cli.Deps, repoPath, targetBranch string) (restoreOrigBranch func(), err error) {
-	origBranch, _ := GetCurrentBranch(repoPath)
+	origBranch, _ := getCurrentBranchViaDeps(deps, repoPath)
 
 	restore := func() {
 		if origBranch != "" {
@@ -94,4 +94,12 @@ func mergeSourceDeps(deps *cli.Deps, repoPath, sourceBranch, targetBranch string
 	return nil, nil
 }
 
-// getCurrentBranchDeps is defined in worktree.go
+// getCurrentBranchViaDeps resolves the current branch using the injected deps,
+// so tests can mock the git command.
+func getCurrentBranchViaDeps(deps *cli.Deps, path string) (string, error) {
+	output, err := cli.RunGit(deps, path, "branch", "--show-current")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(output), nil
+}

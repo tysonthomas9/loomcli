@@ -100,8 +100,7 @@ func handleSaveIssueTabs(store *issuetabs.Store, hub *realtime.Hub) http.Handler
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			handler.WriteJSON(w, http.StatusServiceUnavailable, issueTabResponse{
-				Success: false,
-				Error:   "issue tab state not available (no Redis)",
+				Success: false, Error: "issue tab state not available (no Redis)",
 			})
 			return
 		}
@@ -109,51 +108,54 @@ func handleSaveIssueTabs(store *issuetabs.Store, hub *realtime.Hub) http.Handler
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		issueID := r.PathValue("issueId")
 		if err := issuetabs.ValidateIssueID(issueID); err != nil {
-			handler.WriteJSON(w, http.StatusBadRequest, issueTabResponse{
-				Success: false,
-				Error:   err.Error(),
-			})
+			handler.WriteJSON(w, http.StatusBadRequest, issueTabResponse{Success: false, Error: err.Error()})
 			return
 		}
 
-		r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
-		var req issueTabSaveRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			handler.WriteJSON(w, http.StatusBadRequest, issueTabResponse{
-				Success: false,
-				Error:   "invalid request body",
-			})
-			return
+		state, err := decodeAndSaveTabState(store, r, w, wsID, issueID)
+		if err != nil {
+			return // response already written
 		}
 
-		state := &issuetabs.IssueTabState{
+		broadcastTabChange(hub, wsID, issueID)
+		handler.WriteJSON(w, http.StatusOK, issueTabResponse{Success: true, Data: state})
+	}
+}
+
+// decodeAndSaveTabState decodes the request body and persists the tab state.
+// Returns the saved state, or writes an error response and returns an error.
+func decodeAndSaveTabState(store *issuetabs.Store, r *http.Request, w http.ResponseWriter, wsID, issueID string) (*issuetabs.IssueTabState, error) {
+	r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
+	var req issueTabSaveRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		handler.WriteJSON(w, http.StatusBadRequest, issueTabResponse{Success: false, Error: "invalid request body"})
+		return nil, err
+	}
+
+	state := &issuetabs.IssueTabState{
+		IssueID:     issueID,
+		Tabs:        req.Tabs,
+		ActiveTabID: req.ActiveTabID,
+	}
+
+	if err := store.Save(r.Context(), wsID, state); err != nil {
+		slog.Error("failed to save issue tab state", "issue_id", issueID, "err", err)
+		handler.WriteJSON(w, http.StatusInternalServerError, issueTabResponse{
+			Success: false, Error: "failed to save issue tab state",
+		})
+		return nil, err
+	}
+	return state, nil
+}
+
+// broadcastTabChange sends an SSE event for real-time tab sync.
+func broadcastTabChange(hub *realtime.Hub, wsID, issueID string) {
+	if hub != nil {
+		hub.Broadcast(&realtime.MutationPayload{
+			Type:        "issue_tabs",
 			IssueID:     issueID,
-			Tabs:        req.Tabs,
-			ActiveTabID: req.ActiveTabID,
-		}
-
-		if err := store.Save(r.Context(), wsID, state); err != nil {
-			slog.Error("failed to save issue tab state", "issue_id", issueID, "err", err)
-			handler.WriteJSON(w, http.StatusInternalServerError, issueTabResponse{
-				Success: false,
-				Error:   "failed to save issue tab state",
-			})
-			return
-		}
-
-		// Broadcast SSE event for real-time sync — workspace derived from middleware context.
-		if hub != nil {
-			hub.Broadcast(&realtime.MutationPayload{
-				Type:        "issue_tabs",
-				IssueID:     issueID,
-				Timestamp:   time.Now().UTC().Format(time.RFC3339),
-				WorkspaceID: wsID,
-			})
-		}
-
-		handler.WriteJSON(w, http.StatusOK, issueTabResponse{
-			Success: true,
-			Data:    state,
+			Timestamp:   time.Now().UTC().Format(time.RFC3339),
+			WorkspaceID: wsID,
 		})
 	}
 }

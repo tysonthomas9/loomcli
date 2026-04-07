@@ -81,35 +81,60 @@ func InstallClaudeHooks(worktreePath string) error {
 	claudeDir := filepath.Join(worktreePath, ".claude")
 	settingsPath := filepath.Join(claudeDir, claudeSettingsFile)
 
-	// Ensure .claude/ directory exists
 	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create .claude directory: %w", err)
 	}
 
-	// Read existing settings (or start fresh)
-	var rawSettings map[string]json.RawMessage
-	existingData, readErr := os.ReadFile(settingsPath) //nolint:gosec
-	if readErr == nil {
-		if err := json.Unmarshal(existingData, &rawSettings); err != nil {
-			return fmt.Errorf("failed to parse existing settings.json: %w", err)
-		}
-	} else {
-		rawSettings = make(map[string]json.RawMessage)
+	rawSettings, err := loadSettingsJSON(settingsPath)
+	if err != nil {
+		return err
 	}
 
-	// Parse hooks key preserving unknown hook types
+	rawHooks, err := parseHooksFromSettings(rawSettings)
+	if err != nil {
+		return err
+	}
+
+	if err := addManagedHooks(rawHooks); err != nil {
+		return err
+	}
+
+	if err := installYieldHooks(rawHooks); err != nil {
+		return err
+	}
+
+	return writeSettingsJSON(settingsPath, rawSettings, rawHooks)
+}
+
+// loadSettingsJSON reads and parses a Claude settings file, returning empty map if absent.
+func loadSettingsJSON(path string) (map[string]json.RawMessage, error) {
+	data, readErr := os.ReadFile(path) //nolint:gosec
+	if readErr != nil {
+		return make(map[string]json.RawMessage), nil
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("failed to parse existing settings.json: %w", err)
+	}
+	return raw, nil
+}
+
+// parseHooksFromSettings extracts the hooks map from rawSettings.
+func parseHooksFromSettings(rawSettings map[string]json.RawMessage) (map[string]json.RawMessage, error) {
 	var rawHooks map[string]json.RawMessage
 	if hooksRaw, ok := rawSettings["hooks"]; ok {
 		if err := json.Unmarshal(hooksRaw, &rawHooks); err != nil {
-			return fmt.Errorf("failed to parse hooks in settings.json: %w", err)
+			return nil, fmt.Errorf("failed to parse hooks in settings.json: %w", err)
 		}
 	}
 	if rawHooks == nil {
 		rawHooks = make(map[string]json.RawMessage)
 	}
+	return rawHooks, nil
+}
 
-	// For each managed hook type, parse its array of matchers, check for
-	// existing loom entry, and append if missing.
+// addManagedHooks adds loom hook entries for each managed hook type if not already present.
+func addManagedHooks(rawHooks map[string]json.RawMessage) error {
 	for _, hookType := range managedHookTypes {
 		var matchers []claudeHookMatcher
 		if data, ok := rawHooks[hookType]; ok {
@@ -117,55 +142,38 @@ func InstallClaudeHooks(worktreePath string) error {
 				return fmt.Errorf("failed to parse %s hooks: %w", hookType, err)
 			}
 		}
-
-		// Check if a loom hook already exists in any matcher (prefix match for idempotency)
 		if hasLoomHook(matchers) {
 			continue
 		}
-
-		// Append a new matcher with the loom hook entry.
-		// Use the tool-specific matcher for PreToolUse/PostToolUse hooks.
-		cmd := hookCommands[hookType]
-		matcher := hookMatchers[hookType]
 		matchers = append(matchers, claudeHookMatcher{
-			Matcher: matcher,
-			Hooks: []claudeHookEntry{{
-				Type:    "command",
-				Command: cmd,
-			}},
+			Matcher: hookMatchers[hookType],
+			Hooks:   []claudeHookEntry{{Type: "command", Command: hookCommands[hookType]}},
 		})
-
-		// Marshal back into rawHooks
 		data, err := json.Marshal(matchers)
 		if err != nil {
 			return fmt.Errorf("failed to marshal %s hooks: %w", hookType, err)
 		}
 		rawHooks[hookType] = data
 	}
+	return nil
+}
 
-	// Install yield-specific hooks (separate pass to avoid interfering with hasLoomHook)
-	if err := installYieldHooks(rawHooks); err != nil {
-		return err
-	}
-
-	// Marshal hooks back into rawSettings
+// writeSettingsJSON marshals hooks back into settings and writes the file.
+func writeSettingsJSON(path string, rawSettings map[string]json.RawMessage, rawHooks map[string]json.RawMessage) error {
 	hooksJSON, err := json.Marshal(rawHooks)
 	if err != nil {
 		return fmt.Errorf("failed to marshal hooks: %w", err)
 	}
 	rawSettings["hooks"] = hooksJSON
 
-	// Write back with indentation and trailing newline
 	output, err := json.MarshalIndent(rawSettings, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal settings: %w", err)
 	}
 	output = append(output, '\n')
-
-	if err := os.WriteFile(settingsPath, output, 0o600); err != nil {
+	if err := os.WriteFile(path, output, 0o600); err != nil {
 		return fmt.Errorf("failed to write settings.json: %w", err)
 	}
-
 	return nil
 }
 
@@ -184,63 +192,57 @@ func UninstallClaudeHooks(worktreePath string) error {
 		return fmt.Errorf("failed to parse settings.json: %w", err)
 	}
 
-	var rawHooks map[string]json.RawMessage
-	if hooksRaw, ok := rawSettings["hooks"]; ok {
-		if err := json.Unmarshal(hooksRaw, &rawHooks); err != nil {
-			return fmt.Errorf("failed to parse hooks: %w", err)
-		}
+	rawHooks, err := parseHooksFromSettings(rawSettings)
+	if err != nil {
+		return err
 	}
-	if rawHooks == nil {
-		return nil // No hooks section, nothing to remove
+	if len(rawHooks) == 0 {
+		return nil
 	}
 
-	// For each managed hook type, remove loom entries from matchers
-	for _, hookType := range managedHookTypes {
-		data, ok := rawHooks[hookType]
-		if !ok {
-			continue
-		}
+	removeLoomHookEntries(rawHooks)
+	updateSettingsHooks(rawSettings, rawHooks)
 
-		var matchers []claudeHookMatcher
-		if err := json.Unmarshal(data, &matchers); err != nil {
-			continue // Skip unparseable hook types
-		}
-
-		filtered := removeLoomMatchers(matchers)
-		if len(filtered) == 0 {
-			delete(rawHooks, hookType)
-		} else {
-			marshaled, err := json.Marshal(filtered)
-			if err != nil {
-				return fmt.Errorf("failed to marshal %s hooks: %w", hookType, err)
-			}
-			rawHooks[hookType] = marshaled
-		}
-	}
-
-	// Update or remove hooks from settings
-	if len(rawHooks) > 0 {
-		hooksJSON, err := json.Marshal(rawHooks)
-		if err != nil {
-			return fmt.Errorf("failed to marshal hooks: %w", err)
-		}
-		rawSettings["hooks"] = hooksJSON
-	} else {
-		delete(rawSettings, "hooks")
-	}
-
-	// Write back
 	output, err := json.MarshalIndent(rawSettings, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal settings: %w", err)
 	}
 	output = append(output, '\n')
-
 	if err := os.WriteFile(settingsPath, output, 0o600); err != nil {
 		return fmt.Errorf("failed to write settings.json: %w", err)
 	}
-
 	return nil
+}
+
+// removeLoomHookEntries removes all loom commands from each managed hook type.
+func removeLoomHookEntries(rawHooks map[string]json.RawMessage) {
+	for _, hookType := range managedHookTypes {
+		data, ok := rawHooks[hookType]
+		if !ok {
+			continue
+		}
+		var matchers []claudeHookMatcher
+		if err := json.Unmarshal(data, &matchers); err != nil {
+			continue
+		}
+		filtered := removeLoomMatchers(matchers)
+		if len(filtered) == 0 {
+			delete(rawHooks, hookType)
+		} else {
+			marshaled, _ := json.Marshal(filtered)
+			rawHooks[hookType] = marshaled
+		}
+	}
+}
+
+// updateSettingsHooks updates or removes the hooks key from rawSettings.
+func updateSettingsHooks(rawSettings map[string]json.RawMessage, rawHooks map[string]json.RawMessage) {
+	if len(rawHooks) > 0 {
+		hooksJSON, _ := json.Marshal(rawHooks)
+		rawSettings["hooks"] = hooksJSON
+	} else {
+		delete(rawSettings, "hooks")
+	}
 }
 
 // ClaudeHooksStatus checks whether loom hooks are present in .claude/settings.json

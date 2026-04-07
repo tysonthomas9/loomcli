@@ -13,9 +13,12 @@ import (
 
 var projectConfigVersionWarnOnce sync.Once
 
-func resetProjectConfigVersionWarnOnce() {
+// ResetProjectConfigVersionWarnOnce resets the once guard for testing.
+func ResetProjectConfigVersionWarnOnce() {
 	projectConfigVersionWarnOnce = sync.Once{}
 }
+
+var resetProjectConfigVersionWarnOnce = ResetProjectConfigVersionWarnOnce
 
 // DaemonSettings holds daemon-specific config fields.
 type DaemonSettings struct {
@@ -137,7 +140,7 @@ type DaemonConfig struct {
 // Returns (nil, nil) if the file does not exist.
 func LoadProjectFile(dir string) (*ProjectFile, error) {
 	path := filepath.Join(dir, "loom.yaml")
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path is from project config directory
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -183,8 +186,31 @@ func LoadDaemonConfig(projectDir string) (*DaemonConfig, error) {
 		return nil, fmt.Errorf("loading project config: %w", err)
 	}
 
-	// Start with defaults
-	dc := &DaemonConfig{
+	dc := newDefaultDaemonConfig()
+	overlayGlobalConfig(dc, globalCfg)
+	overlayProjectFile(dc, projectFile)
+
+	if err := validateAgents(dc.Agents, dc.Daemon.MaxAgents); err != nil {
+		return nil, err
+	}
+
+	if err := ValidateAgentRepos(dc.Agents); err != nil {
+		return nil, err
+	}
+
+	// Run comprehensive validation if a validator is registered.
+	if projectConfigValidator != nil {
+		if err := projectConfigValidator(dc, projectDir); err != nil {
+			return nil, err
+		}
+	}
+
+	return dc, nil
+}
+
+// newDefaultDaemonConfig returns a DaemonConfig with sensible defaults.
+func newDefaultDaemonConfig() *DaemonConfig {
+	return &DaemonConfig{
 		Daemon: DaemonSettings{
 			PIDFile:   ".loom/daemon.pid",
 			LogDir:    ".loom/logs",
@@ -199,52 +225,40 @@ func LoadDaemonConfig(projectDir string) (*DaemonConfig, error) {
 		},
 		Roles: make(map[string]RoleConfig),
 	}
+}
 
-	// Overlay global backend setting
-	if globalCfg != nil && globalCfg.Backend != "" {
+// overlayGlobalConfig applies global config settings onto the daemon config.
+func overlayGlobalConfig(dc *DaemonConfig, globalCfg *LoomConfig) {
+	if globalCfg == nil {
+		return
+	}
+	if globalCfg.Backend != "" {
 		dc.Backend = globalCfg.Backend
 	}
+	if globalCfg.Daemon != nil {
+		OverlayDaemonSettings(&dc.Daemon, globalCfg.Daemon)
+	}
+}
 
-	// Overlay global daemon settings
-	if globalCfg != nil && globalCfg.Daemon != nil {
-		overlayDaemonSettings(&dc.Daemon, globalCfg.Daemon)
+// overlayProjectFile applies project-local settings onto the daemon config.
+func overlayProjectFile(dc *DaemonConfig, projectFile *ProjectFile) {
+	if projectFile == nil {
+		return
+	}
+	if projectFile.Backend != "" {
+		dc.Backend = projectFile.Backend
+	}
+	if projectFile.Daemon != nil {
+		OverlayDaemonSettings(&dc.Daemon, projectFile.Daemon)
 	}
 
-	// Overlay local daemon settings (local wins)
-	if projectFile != nil {
-		if projectFile.Backend != "" {
-			dc.Backend = projectFile.Backend
-		}
-		if projectFile.Daemon != nil {
-			overlayDaemonSettings(&dc.Daemon, projectFile.Daemon)
-		}
-
-		// Merge roles: local replaces entire role entry by key
-		for k, v := range projectFile.Roles {
-			dc.Roles[k] = v
-		}
-
-		// Agents come from local only
-		dc.Agents = projectFile.Agents
+	// Merge roles: local replaces entire role entry by key
+	for k, v := range projectFile.Roles {
+		dc.Roles[k] = v
 	}
 
-	if err := validateAgents(dc.Agents, dc.Daemon.MaxAgents); err != nil {
-		return nil, err
-	}
-
-	// Validate repo references against workspace config
-	if err := validateAgentRepos(dc.Agents); err != nil {
-		return nil, err
-	}
-
-	// Run comprehensive validation if a validator is registered.
-	if projectConfigValidator != nil {
-		if err := projectConfigValidator(dc, projectDir); err != nil {
-			return nil, err
-		}
-	}
-
-	return dc, nil
+	// Agents come from local only
+	dc.Agents = projectFile.Agents
 }
 
 // validateAgents checks that agent entries and max_agents limits are valid.
@@ -271,10 +285,10 @@ func validateAgents(agents []AgentEntry, maxAgents *int) error {
 	return nil
 }
 
-// validateAgentRepos checks that agent Repo fields reference valid repos in the workspace config.
+// ValidateAgentRepos checks that agent Repo fields reference valid repos in the workspace config.
 // In workspace mode, unknown repo names are hard errors. Outside workspace mode, Repo fields
 // trigger a warning but are not blocking.
-func validateAgentRepos(agents []AgentEntry) error {
+func ValidateAgentRepos(agents []AgentEntry) error {
 	// Check if any agent uses Repo
 	hasRepo := false
 	for _, a := range agents {
@@ -344,8 +358,8 @@ func resolveRepoPath(repoName string) (string, error) {
 	return "", fmt.Errorf("repo %q not found in workspace", repoName)
 }
 
-// overlayDaemonSettings applies explicitly-set values from src onto dst.
-func overlayDaemonSettings(dst *DaemonSettings, src *DaemonSettings) {
+// OverlayDaemonSettings applies explicitly-set values from src onto dst.
+func OverlayDaemonSettings(dst *DaemonSettings, src *DaemonSettings) {
 	if src.PIDFile != "" {
 		dst.PIDFile = src.PIDFile
 	}

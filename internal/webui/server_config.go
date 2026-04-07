@@ -18,10 +18,10 @@ import (
 )
 
 const (
-	defaultPort            = 8080
-	defaultPoolSize        = 100
-	defaultShutdownTimeout = 5 * time.Second
-	defaultMaxPortAttempts = 10
+	DefaultPort            = 8080
+	DefaultPoolSize        = 100
+	DefaultShutdownTimeout = 5 * time.Second
+	DefaultMaxPortAttempts = 10
 )
 
 // MonitorHandlers holds pre-built HTTP handlers for the monitor/metrics
@@ -92,21 +92,25 @@ type ServerConfig struct {
 	Logger                  *slog.Logger                                      // Structured logger (optional; nil falls back to slog.Default())
 }
 
+// WorkspaceIDResolverFn resolves a workspace name to its stable UUID.
+// Returns ("", error) if the workspace is not found or config cannot be loaded.
+type WorkspaceIDResolverFn func(name string) (string, error)
+
 // DefaultConfig returns a ServerConfig with sensible defaults.
 func DefaultConfig() ServerConfig {
 	return ServerConfig{
-		Port:            defaultPort,
+		Port:            DefaultPort,
 		BindAddress:     "127.0.0.1",
-		PoolSize:        defaultPoolSize,
-		ShutdownTimeout: defaultShutdownTimeout,
-		MaxPortAttempts: defaultMaxPortAttempts,
+		PoolSize:        DefaultPoolSize,
+		ShutdownTimeout: DefaultShutdownTimeout,
+		MaxPortAttempts: DefaultMaxPortAttempts,
 	}
 }
 
-// findAvailablePort attempts to find an available port starting from startPort.
+// FindAvailablePort attempts to find an available port starting from startPort.
 // It tries up to maxAttempts consecutive ports and returns a listener on the first
 // available port. The caller is responsible for closing the listener.
-func findAvailablePort(bindAddr string, startPort, maxAttempts int) (net.Listener, int, error) {
+func FindAvailablePort(bindAddr string, startPort, maxAttempts int) (net.Listener, int, error) {
 	for i := 0; i < maxAttempts; i++ {
 		port := startPort + i
 		addr := net.JoinHostPort(bindAddr, strconv.Itoa(port))
@@ -120,7 +124,7 @@ func findAvailablePort(bindAddr string, startPort, maxAttempts int) (net.Listene
 	return nil, 0, fmt.Errorf("no available port found on %s in range %d-%d", bindAddr, startPort, startPort+maxAttempts-1)
 }
 
-// getCwd returns the current working directory.
-func getCwd() (string, error) {
+// GetCwd returns the current working directory.
+func GetCwd() (string, error) {
 	return os.Getwd()
 }

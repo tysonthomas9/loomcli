@@ -1,5 +1,3 @@
-//go:build ignore
-
 package agent
 
 import (
@@ -79,9 +77,9 @@ func TestGetUncommittedChangesCount(t *testing.T) {
 			})
 			mock.InstallOn(deps)
 
-			got := getUncommittedChangesCountDeps(deps, "/some/path")
+			got := GetUncommittedChangesCountDeps(deps, "/some/path")
 			if got != tc.expected {
-				t.Errorf("getUncommittedChangesCountDeps() = %d, want %d", got, tc.expected)
+				t.Errorf("GetUncommittedChangesCountDeps() = %d, want %d", got, tc.expected)
 			}
 		})
 	}
@@ -630,6 +628,8 @@ func TestRunListWorkspaceMode(t *testing.T) {
 
 func TestRunListWorkspaceModeDetection(t *testing.T) {
 	resetIntegrationBranchCache()
+	// Set default branch to avoid background goroutine for branch detection
+	t.Setenv("LOOM_DEFAULT_BRANCH", "main")
 	// Verify that runList detects workspace mode when any worktree has Workspace set.
 	// We test this by setting up real worktree dirs with workspace config.
 
@@ -653,7 +653,7 @@ func TestRunListWorkspaceModeDetection(t *testing.T) {
 		}
 	}
 
-	// Build stubs: branch for each, then porcelain x2 for each, then auto-detect
+	// Build stubs: branch for each, then porcelain x2 for each
 	stubs := []CommandStub{
 		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "alpha"},
 		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "beta"},
@@ -663,8 +663,6 @@ func TestRunListWorkspaceModeDetection(t *testing.T) {
 		// beta: IsCleanWorkingTree + getUncommittedChangesCount
 		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
-		// Auto-detect integration branch
-		{Name: "git", Args: []string{"branch", "-r", "--format=%(refname:short)"}, Stdout: "", Err: fmt.Errorf("no remote")},
 	}
 
 	mock := NewCommandMock(t, stubs)
@@ -694,19 +692,20 @@ func TestRunListWorkspaceModeDetection(t *testing.T) {
 
 func TestRenderListLegacy(t *testing.T) {
 	resetIntegrationBranchCache()
+	// Set default branch to avoid background goroutine for branch detection
+	t.Setenv("LOOM_DEFAULT_BRANCH", "main")
 	// Test that renderListLegacy produces the expected format
 	worktrees := []WorktreeInfo{
 		{Name: "falcon", Path: "/tmp/falcon", Branch: "falcon"},
 		{Name: "nova", Path: "/tmp/nova", Branch: "feature-x"},
 	}
 
-	// Mock git commands: 2 worktrees x 2 porcelain calls, plus auto-detect
+	// Mock git commands: 2 worktrees x 2 porcelain calls
 	stubs := []CommandStub{
 		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: "M dirty.go\n"},
 		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: "M dirty.go\n"},
-		{Name: "git", Args: []string{"branch", "-r", "--format=%(refname:short)"}, Stdout: "", Err: fmt.Errorf("no remote")},
 	}
 	mock := NewCommandMock(t, stubs)
 	mock.Install()

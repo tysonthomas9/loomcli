@@ -1,11 +1,11 @@
-//go:build ignore
-
 package daemon
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 )
 
 func TestResolveRoleConfigStatic_BuiltinPlan(t *testing.T) {
@@ -108,7 +108,7 @@ func TestFindAgentEntry_Found(t *testing.T) {
 		},
 	}
 
-	agent, err := findAgentEntry(config, "nova")
+	agent, err := findAgentEntryStatic(config, "nova")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestFindAgentEntry_NotFound(t *testing.T) {
 		},
 	}
 
-	_, err := findAgentEntry(config, "spark")
+	_, err := findAgentEntryStatic(config, "spark")
 	if err == nil {
 		t.Fatal("expected error for unknown agent")
 	}
@@ -159,13 +159,9 @@ func TestResolveRoleConfigStatic_MatchesDaemonMethod(t *testing.T) {
 		},
 	}
 
-	d := &Daemon{
-		config:     config,
-		projectDir: "/tmp",
-	}
-
 	staticRC, staticErr := ResolveRoleConfigStatic("plan", config, "/tmp")
-	daemonRC, daemonErr := d.resolveRoleConfig("plan", 0)
+	// resolveRoleConfig moved to supervisor (unexported); use static version for comparison
+	daemonRC, daemonErr := supervisor.ResolveRoleConfigStatic("plan", config, "/tmp")
 
 	if staticErr != nil {
 		t.Fatalf("static error: %v", staticErr)

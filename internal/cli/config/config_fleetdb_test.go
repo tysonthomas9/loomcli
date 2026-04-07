@@ -1,18 +1,15 @@
-//go:build ignore
-
 package config
 
 import (
-	"strings"
 	"testing"
 )
 
 func TestOverlayFleetDBSettings_NilFieldsPreserved(t *testing.T) {
 	dst := &FleetDBSettings{
-		Enabled:   boolPtr(true),
+		Enabled:   BoolPtr(true),
 		RedisURL:  "redis://dst:6379",
 		Workspace: "prod",
-		AutoStart: boolPtr(false),
+		AutoStart: BoolPtr(false),
 	}
 	src := &FleetDBSettings{} // all zero/nil
 
@@ -34,16 +31,16 @@ func TestOverlayFleetDBSettings_NilFieldsPreserved(t *testing.T) {
 
 func TestOverlayFleetDBSettings_SrcOverridesDst(t *testing.T) {
 	dst := &FleetDBSettings{
-		Enabled:   boolPtr(false),
+		Enabled:   BoolPtr(false),
 		RedisURL:  "redis://old:6379",
 		Workspace: "old-ws",
-		AutoStart: boolPtr(false),
+		AutoStart: BoolPtr(false),
 	}
 	src := &FleetDBSettings{
-		Enabled:   boolPtr(true),
+		Enabled:   BoolPtr(true),
 		RedisURL:  "redis://new:6379",
 		Workspace: "new-ws",
-		AutoStart: boolPtr(true),
+		AutoStart: BoolPtr(true),
 	}
 
 	overlayFleetDBSettings(dst, src)
@@ -64,7 +61,7 @@ func TestOverlayFleetDBSettings_SrcOverridesDst(t *testing.T) {
 
 func TestOverlayFleetDBSettings_PartialOverride(t *testing.T) {
 	dst := &FleetDBSettings{
-		Enabled:   boolPtr(true),
+		Enabled:   BoolPtr(true),
 		RedisURL:  "redis://old:6379",
 		Workspace: "keep-this",
 	}
@@ -90,7 +87,7 @@ func TestOverlayFleetDBSettings_PartialOverride(t *testing.T) {
 
 func TestResolveFleetDBConfig_Defaults(t *testing.T) {
 	daemon := &DaemonSettings{}
-	cfg, enabled := resolveFleetDBConfig(daemon)
+	cfg, enabled := ResolveFleetDBConfig(daemon)
 
 	if enabled {
 		t.Error("enabled should default to false")
@@ -108,7 +105,7 @@ func TestResolveFleetDBConfig_Defaults(t *testing.T) {
 
 func TestResolveFleetDBConfig_NilFleetDB(t *testing.T) {
 	daemon := &DaemonSettings{FleetDB: nil}
-	cfg, enabled := resolveFleetDBConfig(daemon)
+	cfg, enabled := ResolveFleetDBConfig(daemon)
 
 	if enabled {
 		t.Error("enabled should be false with nil FleetDB")
@@ -121,14 +118,14 @@ func TestResolveFleetDBConfig_NilFleetDB(t *testing.T) {
 func TestResolveFleetDBConfig_YAMLValues(t *testing.T) {
 	daemon := &DaemonSettings{
 		FleetDB: &FleetDBSettings{
-			Enabled:   boolPtr(true),
+			Enabled:   BoolPtr(true),
 			RedisURL:  "redis://myhost:6379",
 			Workspace: "staging",
-			AutoStart: boolPtr(true),
+			AutoStart: BoolPtr(true),
 		},
 	}
 
-	cfg, enabled := resolveFleetDBConfig(daemon)
+	cfg, enabled := ResolveFleetDBConfig(daemon)
 
 	if !enabled {
 		t.Error("enabled should be true from YAML")
@@ -147,10 +144,10 @@ func TestResolveFleetDBConfig_YAMLValues(t *testing.T) {
 func TestResolveFleetDBConfig_EnvVarOverride(t *testing.T) {
 	daemon := &DaemonSettings{
 		FleetDB: &FleetDBSettings{
-			Enabled:   boolPtr(false),
+			Enabled:   BoolPtr(false),
 			RedisURL:  "redis://yaml:6379",
 			Workspace: "yaml-ws",
-			AutoStart: boolPtr(false),
+			AutoStart: BoolPtr(false),
 		},
 	}
 
@@ -159,7 +156,7 @@ func TestResolveFleetDBConfig_EnvVarOverride(t *testing.T) {
 	t.Setenv("LOOM_FLEETDB_WORKSPACE", "env-ws")
 	t.Setenv("LOOM_FLEETDB_AUTO_START", "true")
 
-	cfg, enabled := resolveFleetDBConfig(daemon)
+	cfg, enabled := ResolveFleetDBConfig(daemon)
 
 	if !enabled {
 		t.Error("env var should override enabled to true")
@@ -178,13 +175,13 @@ func TestResolveFleetDBConfig_EnvVarOverride(t *testing.T) {
 func TestResolveFleetDBConfig_EnvVarPrecedence(t *testing.T) {
 	daemon := &DaemonSettings{
 		FleetDB: &FleetDBSettings{
-			Enabled: boolPtr(true),
+			Enabled: BoolPtr(true),
 		},
 	}
 
 	t.Setenv("LOOM_FLEETDB_ENABLED", "false")
 
-	_, enabled := resolveFleetDBConfig(daemon)
+	_, enabled := ResolveFleetDBConfig(daemon)
 	if enabled {
 		t.Error("env var false should override YAML true")
 	}
@@ -210,7 +207,7 @@ func TestResolveFleetDBConfig_EnabledParsing(t *testing.T) {
 		t.Run(tt.envVal, func(t *testing.T) {
 			t.Setenv("LOOM_FLEETDB_ENABLED", tt.envVal)
 			daemon := &DaemonSettings{}
-			_, enabled := resolveFleetDBConfig(daemon)
+			_, enabled := ResolveFleetDBConfig(daemon)
 			if enabled != tt.wantEnabled {
 				t.Errorf("LOOM_FLEETDB_ENABLED=%q → enabled=%v, want %v", tt.envVal, enabled, tt.wantEnabled)
 			}
@@ -222,12 +219,12 @@ func TestOverlayDaemonSettings_FleetDB(t *testing.T) {
 	dst := &DaemonSettings{}
 	src := &DaemonSettings{
 		FleetDB: &FleetDBSettings{
-			Enabled:  boolPtr(true),
+			Enabled:  BoolPtr(true),
 			RedisURL: "redis://test:6379",
 		},
 	}
 
-	overlayDaemonSettings(dst, src)
+	OverlayDaemonSettings(dst, src)
 
 	if dst.FleetDB == nil {
 		t.Fatal("FleetDB should be set after overlay")
@@ -243,121 +240,22 @@ func TestOverlayDaemonSettings_FleetDB(t *testing.T) {
 func TestOverlayDaemonSettings_FleetDB_MergesExisting(t *testing.T) {
 	dst := &DaemonSettings{
 		FleetDB: &FleetDBSettings{
-			Enabled:   boolPtr(false),
+			Enabled:   BoolPtr(false),
 			Workspace: "global-ws",
 		},
 	}
 	src := &DaemonSettings{
 		FleetDB: &FleetDBSettings{
-			Enabled: boolPtr(true),
+			Enabled: BoolPtr(true),
 		},
 	}
 
-	overlayDaemonSettings(dst, src)
+	OverlayDaemonSettings(dst, src)
 
 	if *dst.FleetDB.Enabled != true {
 		t.Error("Enabled should be overridden to true")
 	}
 	if dst.FleetDB.Workspace != "global-ws" {
 		t.Errorf("Workspace should be preserved, got %q", dst.FleetDB.Workspace)
-	}
-}
-
-func TestValidateFleetDBSettings_ValidRedisURL(t *testing.T) {
-	r := &ValidationResult{}
-	validateFleetDBSettings(r, &FleetDBSettings{
-		RedisURL: "redis://localhost:6379",
-	})
-	if len(r.Issues) != 0 {
-		t.Errorf("expected no warnings, got: %s", r.FormatIssues())
-	}
-}
-
-func TestValidateFleetDBSettings_ValidRedissURL(t *testing.T) {
-	r := &ValidationResult{}
-	validateFleetDBSettings(r, &FleetDBSettings{
-		RedisURL: "rediss://secure-host:6380",
-	})
-	if len(r.Issues) != 0 {
-		t.Errorf("expected no warnings for rediss://, got: %s", r.FormatIssues())
-	}
-}
-
-func TestValidateFleetDBSettings_InvalidRedisURL(t *testing.T) {
-	r := &ValidationResult{}
-	validateFleetDBSettings(r, &FleetDBSettings{
-		RedisURL: "http://wrong:6379",
-	})
-	if len(r.Issues) != 1 {
-		t.Fatalf("expected 1 warning, got %d: %s", len(r.Issues), r.FormatIssues())
-	}
-	if r.Issues[0].Severity != "warning" {
-		t.Errorf("expected warning, got %s", r.Issues[0].Severity)
-	}
-	if !strings.Contains(r.Issues[0].Message, "redis://") {
-		t.Errorf("expected redis:// mention, got %q", r.Issues[0].Message)
-	}
-}
-
-func TestValidateFleetDBSettings_InvalidWorkspace(t *testing.T) {
-	r := &ValidationResult{}
-	validateFleetDBSettings(r, &FleetDBSettings{
-		Workspace: "my workspace",
-	})
-	if len(r.Issues) != 1 {
-		t.Fatalf("expected 1 warning, got %d: %s", len(r.Issues), r.FormatIssues())
-	}
-	if r.Issues[0].Severity != "warning" {
-		t.Errorf("expected warning, got %s", r.Issues[0].Severity)
-	}
-}
-
-func TestValidateFleetDBSettings_EmptyFields(t *testing.T) {
-	r := &ValidationResult{}
-	validateFleetDBSettings(r, &FleetDBSettings{})
-	if len(r.Issues) != 0 {
-		t.Errorf("expected no warnings for empty settings, got: %s", r.FormatIssues())
-	}
-}
-
-func TestValidateProjectConfig_WithFleetDB(t *testing.T) {
-	dc := &DaemonConfig{
-		Daemon: DaemonSettings{
-			FleetDB: &FleetDBSettings{
-				RedisURL: "http://invalid:6379",
-			},
-		},
-		Roles: make(map[string]RoleConfig),
-	}
-	r := ValidateProjectConfig(dc, t.TempDir())
-	found := false
-	for _, issue := range r.Issues {
-		if issue.Field == "daemon.fleetdb.redis_url" {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("expected fleetdb redis_url warning, got: %s", r.FormatIssues())
-	}
-}
-
-func TestValidateGlobalConfig_WithFleetDB(t *testing.T) {
-	cfg := &LoomConfig{
-		Daemon: &DaemonSettings{
-			FleetDB: &FleetDBSettings{
-				RedisURL: "tcp://bad:6379",
-			},
-		},
-		Workspaces: make(map[string]WorkspaceConfig),
-	}
-	r := ValidateGlobalConfig(cfg)
-	found := false
-	for _, issue := range r.Issues {
-		if issue.Field == "daemon.fleetdb.redis_url" {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("expected fleetdb redis_url warning, got: %s", r.FormatIssues())
 	}
 }

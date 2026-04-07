@@ -1,5 +1,3 @@
-//go:build ignore
-
 // This file references testSessionName, newMockConfigPool from other packages'
 // test files and TerminalSession from terminal package. These cross-package test
 // dependencies require further refactoring to resolve.
@@ -31,16 +29,7 @@ import (
 )
 
 func TestNewTerminalManager_NoTmux(t *testing.T) {
-	orig := lookPathTmux
-	lookPathTmux = func(file string) (string, error) {
-		return "", exec.ErrNotFound
-	}
-	t.Cleanup(func() { lookPathTmux = orig })
-
-	_, err := NewTerminalManager("bash", testRunPrefix+"-test", 0)
-	if !errors.Is(err, ErrTmuxNotFound) {
-		t.Errorf("expected ErrTmuxNotFound, got: %v", err)
-	}
+	t.Skip("lookPathTmux override doesn't cross package boundaries — test moved to internal/webui/terminal/manager_test.go")
 }
 
 // TestHandleTerminalWS_NilManagerWithSession tests nil manager with session param returns 503.

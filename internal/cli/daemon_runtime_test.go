@@ -1,5 +1,3 @@
-//go:build ignore
-
 package cli
 
 import (
@@ -11,6 +9,16 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
+
+// testDaemonState mirrors daemon.DaemonState for test serialization (avoids import cycle).
+type testDaemonState struct {
+	PID    int `json:"pid"`
+	Agents []struct {
+		Name   string `json:"name"`
+		PID    int    `json:"pid"`
+		Status string `json:"status"`
+	} `json:"agents"`
+}
 
 // ---------- IsProtectedRuntimePath ----------
 
@@ -208,7 +216,7 @@ func TestDetectFromStateFile_LivePID(t *testing.T) {
 	statePath := filepath.Join(dir, "daemon-agents.json")
 
 	livePID := os.Getpid()
-	state := DaemonState{PID: livePID}
+	state := testDaemonState{PID: livePID}
 	data, err := json.Marshal(state)
 	if err != nil {
 		t.Fatal(err)
@@ -236,7 +244,7 @@ func TestDetectFromStateFile_DeadPID(t *testing.T) {
 	dir := t.TempDir()
 	statePath := filepath.Join(dir, "daemon-agents.json")
 
-	state := DaemonState{PID: 999999999}
+	state := testDaemonState{PID: 999999999}
 	data, err := json.Marshal(state)
 	if err != nil {
 		t.Fatal(err)
@@ -404,7 +412,7 @@ func TestDetectDaemonRuntime_LockTakesPrecedence(t *testing.T) {
 
 	// Also create state file with same live PID
 	statePath := filepath.Join(loomDir, "daemon-agents.json")
-	stateData, _ := json.Marshal(DaemonState{PID: livePID})
+	stateData, _ := json.Marshal(testDaemonState{PID: livePID})
 	if err := os.WriteFile(statePath, stateData, 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -438,7 +446,7 @@ func TestDetectDaemonRuntime_StateFallback(t *testing.T) {
 
 	// No lock file — state file with live PID
 	statePath := filepath.Join(loomDir, "daemon-agents.json")
-	stateData, _ := json.Marshal(DaemonState{PID: livePID})
+	stateData, _ := json.Marshal(testDaemonState{PID: livePID})
 	if err := os.WriteFile(statePath, stateData, 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -498,7 +506,7 @@ func TestDetectDaemonRuntime_StaleLockFallsThrough(t *testing.T) {
 	// State file with live PID
 	livePID := os.Getpid()
 	statePath := filepath.Join(loomDir, "daemon-agents.json")
-	stateData, _ := json.Marshal(DaemonState{PID: livePID})
+	stateData, _ := json.Marshal(testDaemonState{PID: livePID})
 	if err := os.WriteFile(statePath, stateData, 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -524,7 +532,7 @@ func TestDetectDaemonRuntime_DeadStateFallsThroughToPID(t *testing.T) {
 
 	// State file with dead PID
 	statePath := filepath.Join(loomDir, "daemon-agents.json")
-	stateData, _ := json.Marshal(DaemonState{PID: deadPID})
+	stateData, _ := json.Marshal(testDaemonState{PID: deadPID})
 	if err := os.WriteFile(statePath, stateData, 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -564,7 +572,7 @@ func TestDetectDaemonRuntime_AllDeadNotRunning(t *testing.T) {
 
 	// State file with dead PID
 	statePath := filepath.Join(loomDir, "daemon-agents.json")
-	stateData, _ := json.Marshal(DaemonState{PID: deadPID})
+	stateData, _ := json.Marshal(testDaemonState{PID: deadPID})
 	if err := os.WriteFile(statePath, stateData, 0644); err != nil {
 		t.Fatal(err)
 	}

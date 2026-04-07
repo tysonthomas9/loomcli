@@ -1,7 +1,6 @@
 package doctor
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,12 +9,10 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon"
-	"github.com/tysonthomas9/loomcli/internal/kv"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 )
 
@@ -469,35 +466,5 @@ func checkLoomDaemon() CheckResult {
 		Status:  StatusWarn,
 		Summary: "loom daemon not running",
 		Detail:  "Start with: loom daemon (optional)",
-	}
-}
-
-func checkRedis() CheckResult {
-	addr := os.Getenv("LOOM_REDIS_ADDR")
-	if addr == "" {
-		// Redis not configured -- skip silently
-		return CheckResult{}
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	password := os.Getenv("LOOM_REDIS_PASSWORD")
-	client := kv.NewClient(addr, password, 0)
-	defer func() { _ = client.Close() }()
-
-	if err := client.Ping(ctx); err != nil {
-		return CheckResult{
-			Name:    "redis",
-			Status:  StatusFail,
-			Summary: fmt.Sprintf("Redis not reachable at %s", addr),
-			Detail:  err.Error(),
-		}
-	}
-
-	return CheckResult{
-		Name:    "redis",
-		Status:  StatusPass,
-		Summary: fmt.Sprintf("Redis reachable at %s", addr),
 	}
 }

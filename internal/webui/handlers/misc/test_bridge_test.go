@@ -3,9 +3,15 @@ package misc
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
@@ -71,6 +77,192 @@ type clientErrorLimiter = ClientErrorLimiter
 
 // AgentLogResult → service.AgentLogResult
 type AgentLogResult = service.AgentLogResult
+
+// FileReadResult → service.FileReadResult (used by files_coverage_test.go)
+type FileReadResult = service.FileReadResult
+
+// FileTreeResult → service.FileTreeResult
+type FileTreeResult = service.FileTreeResult
+
+// FileTreeEntry → service.FileTreeEntry
+type FileTreeEntry = service.FileTreeEntry
+
+// ---------------------------------------------------------------------------
+// Test-local FileService implementation (mirrors svcimpl.fileServiceImpl)
+// ---------------------------------------------------------------------------
+
+// testFileServiceImpl implements service.FileService for handler-level tests.
+// This duplicates the essential logic from svcimpl to avoid the import cycle
+// svcimpl → handlers/misc → svcimpl.
+type testFileServiceImpl struct {
+	fileOps ops.FileOps
+}
+
+// NewFileService creates a test-local FileService implementation.
+func NewFileService(fileOps ops.FileOps) service.FileService {
+	return &testFileServiceImpl{fileOps: fileOps}
+}
+
+func (s *testFileServiceImpl) resolveAgent(wsID, agentName string) (*ops.AgentWorktree, error) {
+	if agentName == "" || !service.ValidAgentName.MatchString(agentName) {
+		return nil, service.ErrValidation("invalid agent name")
+	}
+	wt, err := s.fileOps.ResolveAgentWorktree(wsID, agentName)
+	if err != nil {
+		return nil, service.ErrNotFound(fmt.Sprintf("agent worktree %q not found", agentName))
+	}
+	return wt, nil
+}
+
+func (s *testFileServiceImpl) ListDirectory(_ context.Context, wsID, agentName, path string) (*service.FileTreeResult, error) {
+	wt, err := s.resolveAgent(wsID, agentName)
+	if err != nil {
+		return nil, err
+	}
+	if path == "" {
+		path = "."
+	}
+	fullPath := filepath.Join(wt.Path, filepath.Clean("/"+path))
+	if err := validatePathWithinDir(fullPath, wt.Path); err != nil {
+		return nil, service.ErrForbidden("path outside worktree")
+	}
+	fi, err := os.Lstat(fullPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, service.ErrNotFound("directory not found")
+		}
+		return nil, service.ErrInternal("failed to stat path", err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return nil, service.ErrForbidden("refusing to follow symlink")
+	}
+	if !fi.IsDir() {
+		return nil, service.ErrValidation("path is not a directory")
+	}
+	dirEntries, err := os.ReadDir(fullPath)
+	if err != nil {
+		return nil, service.ErrInternal("failed to read directory", err)
+	}
+	sort.Slice(dirEntries, func(i, j int) bool {
+		iDir := dirEntries[i].IsDir()
+		jDir := dirEntries[j].IsDir()
+		if iDir != jDir {
+			return iDir
+		}
+		return dirEntries[i].Name() < dirEntries[j].Name()
+	})
+	entries := make([]service.FileTreeEntry, 0, len(dirEntries))
+	for _, de := range dirEntries {
+		if de.Type()&os.ModeSymlink != 0 {
+			continue
+		}
+		info, infoErr := de.Info()
+		if infoErr != nil {
+			continue
+		}
+		entries = append(entries, service.FileTreeEntry{
+			Name:    de.Name(),
+			IsDir:   de.IsDir(),
+			Size:    info.Size(),
+			ModTime: info.ModTime().UTC().Format(time.RFC3339),
+		})
+	}
+	relPath, _ := filepath.Rel(wt.Path, fullPath)
+	if relPath == "" {
+		relPath = "."
+	}
+	return &service.FileTreeResult{Path: relPath, Entries: entries}, nil
+}
+
+func (s *testFileServiceImpl) ReadFile(_ context.Context, wsID, agentName, path string) (*service.FileReadResult, error) {
+	wt, err := s.resolveAgent(wsID, agentName)
+	if err != nil {
+		return nil, err
+	}
+	if path == "" {
+		return nil, service.ErrValidation("path parameter is required")
+	}
+	if isDeniedPath(path) {
+		return nil, service.ErrForbidden("access to this file type is denied")
+	}
+	fullPath := filepath.Join(wt.Path, filepath.Clean("/"+path))
+	if err := validatePathWithinDir(fullPath, wt.Path); err != nil {
+		return nil, service.ErrForbidden("path outside worktree")
+	}
+	if isDeniedPath(fullPath) {
+		return nil, service.ErrForbidden("access to this file type is denied")
+	}
+	fi, err := os.Lstat(fullPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, service.ErrNotFound("file not found")
+		}
+		return nil, service.ErrInternal("failed to stat file", err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return nil, service.ErrForbidden("refusing to follow symlink")
+	}
+	if fi.IsDir() {
+		return nil, service.ErrValidation("path is a directory, not a file")
+	}
+	if fi.Size() > maxRequestBody {
+		return nil, service.ErrPayloadTooLarge(fmt.Sprintf("file too large: %d bytes (max %d)", fi.Size(), maxRequestBody))
+	}
+	f, err := OpenLogFileSecure(fullPath, wt.Path)
+	if err != nil {
+		if strings.Contains(err.Error(), "symlink") {
+			return nil, service.ErrForbidden("refusing to follow symlink")
+		}
+		return nil, service.ErrInternal("failed to open file", err)
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxRequestBody+1))
+	if err != nil {
+		return nil, service.ErrInternal("failed to read file", err)
+	}
+	if IsBinaryContent(data) {
+		return &service.FileReadResult{Path: path, Size: fi.Size(), Binary: true}, nil
+	}
+	return &service.FileReadResult{Path: path, Content: string(data), Size: fi.Size()}, nil
+}
+
+func (s *testFileServiceImpl) WriteFile(_ context.Context, wsID, agentName, path, content string) error {
+	wt, err := s.resolveAgent(wsID, agentName)
+	if err != nil {
+		return err
+	}
+	if path == "" {
+		return service.ErrValidation("path parameter is required")
+	}
+	if isDeniedPath(path) {
+		return service.ErrForbidden("access to this file type is denied")
+	}
+	fullPath := filepath.Join(wt.Path, filepath.Clean("/"+path))
+	if err := validatePathWithinDir(fullPath, wt.Path); err != nil {
+		return service.ErrForbidden("path outside worktree")
+	}
+	if isDeniedPath(fullPath) {
+		return service.ErrForbidden("access to this file type is denied")
+	}
+	if writeErr := ValidateParentDir(fullPath, wt.Path); writeErr != nil {
+		switch writeErr.Message {
+		case "parent directory does not exist":
+			return service.ErrNotFound(writeErr.Message)
+		case "parent directory is a symlink", "parent directory outside worktree":
+			return service.ErrForbidden(writeErr.Message)
+		default:
+			return service.ErrInternal(writeErr.Message, nil)
+		}
+	}
+	perm, writeErr := ResolveWritePermissions(fullPath)
+	if writeErr != nil {
+		return service.ErrForbidden(writeErr.Message)
+	}
+	if err := AtomicWriteFile(fullPath, content, perm); err != nil {
+		return service.ErrInternal("failed to save file", err)
+	}
+	return nil
+}
 
 // ReadLastNLines wraps the package-internal readLastNLinesFromFile without
 // secure-directory restrictions — suitable for unit tests only.

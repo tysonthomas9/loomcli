@@ -12,13 +12,13 @@ import (
 )
 
 //go:embed all:frontend/dist
-var frontendFS embed.FS
+var FrontendFS embed.FS
 
-// logFrontendBuildMeta reads the embedded .build-meta file and logs when the
+// LogFrontendBuildMeta reads the embedded .build-meta file and logs when the
 // frontend was built. This makes it immediately obvious when the embedded
 // frontend is stale (e.g., developer ran `go install` without `npm run build`).
-func logFrontendBuildMeta() {
-	data, err := frontendFS.ReadFile("frontend/dist/.build-meta")
+func LogFrontendBuildMeta() {
+	data, err := FrontendFS.ReadFile("frontend/dist/.build-meta")
 	if err != nil {
 		logger.Warn("frontend build metadata not found — frontend may be stale (run 'make install' to rebuild)")
 		return
@@ -34,12 +34,12 @@ func logFrontendBuildMeta() {
 	logger.Info("embedded frontend", "built_at", meta.BuiltAt, "git_hash", meta.GitHash)
 }
 
-// frontendHandler returns an http.Handler that serves the embedded frontend assets.
+// FrontendHandler returns an http.Handler that serves the embedded frontend assets.
 // It implements SPA routing by returning index.html for paths that don't match
 // any existing file in the embedded filesystem.
-func frontendHandler() http.Handler {
+func FrontendHandler() http.Handler {
 	// Strip the "frontend/dist" prefix to serve files from the root
-	distFS, err := fs.Sub(frontendFS, "frontend/dist")
+	distFS, err := fs.Sub(FrontendFS, "frontend/dist")
 	if err != nil {
 		// This should never happen since we embed the directory at compile time
 		panic("failed to create sub filesystem: " + err.Error())
@@ -76,26 +76,26 @@ func frontendHandler() http.Handler {
 		if err != nil {
 			// Static assets (JS, CSS, images, fonts) should 404, not get SPA fallback.
 			// SPA routing only applies to extensionless paths (e.g. /ws/abc/settings).
-			if isStaticAsset(urlPath) {
+			if IsStaticAsset(urlPath) {
 				http.NotFound(w, r)
 				return
 			}
 			// File doesn't exist - serve index.html for SPA routing
 			r.URL.Path = "/"
-			setCacheHeaders(w, false)
+			SetCacheHeaders(w, false)
 			fileServer.ServeHTTP(w, r)
 			return
 		}
 
 		// File exists - serve it with appropriate cache headers
-		setCacheHeaders(w, shouldCache(urlPath))
+		SetCacheHeaders(w, ShouldCache(urlPath))
 		fileServer.ServeHTTP(w, r)
 	})
 }
 
-// setCacheHeaders sets appropriate cache headers based on whether the file
+// SetCacheHeaders sets appropriate cache headers based on whether the file
 // should be cached (hashed assets) or not (index.html).
-func setCacheHeaders(w http.ResponseWriter, cache bool) {
+func SetCacheHeaders(w http.ResponseWriter, cache bool) {
 	if cache {
 		// Long cache for hashed assets (1 year)
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
@@ -107,9 +107,9 @@ func setCacheHeaders(w http.ResponseWriter, cache bool) {
 	}
 }
 
-// isStaticAsset returns true if the URL path looks like a static asset
+// IsStaticAsset returns true if the URL path looks like a static asset
 // (JS, CSS, image, font, etc.) that should 404 rather than get SPA fallback.
-func isStaticAsset(urlPath string) bool {
+func IsStaticAsset(urlPath string) bool {
 	ext := path.Ext(urlPath)
 	switch ext {
 	case ".js", ".css", ".map",
@@ -121,9 +121,9 @@ func isStaticAsset(urlPath string) bool {
 	return false
 }
 
-// shouldCache returns true if the file should have long cache headers.
+// ShouldCache returns true if the file should have long cache headers.
 // Vite adds content hashes to asset filenames, so they can be cached forever.
-func shouldCache(urlPath string) bool {
+func ShouldCache(urlPath string) bool {
 	// index.html should never be cached
 	if urlPath == "/index.html" || urlPath == "/" {
 		return false
@@ -135,11 +135,11 @@ func shouldCache(urlPath string) bool {
 	return false
 }
 
-// devFrontendHandler returns an http.Handler that serves frontend assets from
+// DevFrontendHandler returns an http.Handler that serves frontend assets from
 // a directory on disk instead of the embedded filesystem. This enables
 // development without recompiling the Go binary. It preserves SPA routing
 // by serving index.html for paths that don't match existing files.
-func devFrontendHandler(dir string) http.Handler {
+func DevFrontendHandler(dir string) http.Handler {
 	if dir == "" {
 		dir = "internal/webui/frontend/dist"
 	}
@@ -188,7 +188,7 @@ func devFrontendHandler(dir string) http.Handler {
 		cleanFile := filepath.Clean(filePath)
 		_, err = os.Stat(cleanFile)
 		if err != nil {
-			if isStaticAsset(urlPath) {
+			if IsStaticAsset(urlPath) {
 				http.NotFound(w, r)
 				return
 			}

@@ -220,7 +220,7 @@ func collectBackendInfo() BackendInfo {
 }
 
 func resolveBackendSource() string {
-	if os.Getenv("LOOM_BACKEND") != "" {
+	if cli.GetBackendFlag() != "" {
 		return "flag"
 	}
 	if os.Getenv("LOOM_BACKEND") != "" {
@@ -309,79 +309,84 @@ func isActiveStatus(status string) bool {
 }
 
 func renderStatusHuman(data StatusData) {
-	// Daemon
+	renderStatusDaemon(data.Daemon)
+	fmt.Printf("Backend:    %s (via %s)\n", data.Backend.Name, data.Backend.Source)
+	fmt.Printf("Issues:     %s\n", data.IssueBackend)
+	renderStatusWorktrees(data.Worktrees)
+	fmt.Printf("Beads:      %d open, %d in-progress, %d review, %d closed\n",
+		data.Beads.Open, data.Beads.InProgress, data.Beads.Review, data.Beads.Closed)
+	renderStatusGit(data.Git)
+	renderStatusRedis(data.Redis)
+	renderStatusIssues(data.Issues)
+}
+
+func renderStatusDaemon(d DaemonInfo) {
 	switch {
-	case data.Daemon.Running:
-		uptime := data.Daemon.Uptime
+	case d.Running:
+		uptime := d.Uptime
 		if uptime == "" {
 			uptime = "unknown"
 		}
-		fmt.Printf("Daemon:     running (pid %d, uptime %s)\n", data.Daemon.PID, uptime)
-	case data.Daemon.StalePID:
+		fmt.Printf("Daemon:     running (pid %d, uptime %s)\n", d.PID, uptime)
+	case d.StalePID:
 		fmt.Println("Daemon:     not running (stale pid file)")
 	default:
 		fmt.Println("Daemon:     not running")
 	}
+}
 
-	// Backend
-	fmt.Printf("Backend:    %s (via %s)\n", data.Backend.Name, data.Backend.Source)
-
-	// Issue Backend
-	fmt.Printf("Issues:     %s\n", data.IssueBackend)
-
-	// Worktrees
-	total := len(data.Worktrees.List)
-	if total == 0 {
+func renderStatusWorktrees(wt WorktreesSummary) {
+	if len(wt.List) == 0 {
 		fmt.Println("Worktrees:  none")
-	} else {
-		fmt.Printf("Worktrees:  %d active, %d idle\n", data.Worktrees.Active, data.Worktrees.Idle)
-		for i, wt := range data.Worktrees.List {
-			prefix := "  \u251c\u2500\u2500 "
-			if i == len(data.Worktrees.List)-1 {
-				prefix = "  \u2514\u2500\u2500 "
-			}
-			fmt.Printf("%s%-14s %s\n", prefix, wt.Name, wt.Status)
-		}
+		return
 	}
-
-	// Beads
-	fmt.Printf("Beads:      %d open, %d in-progress, %d review, %d closed\n",
-		data.Beads.Open, data.Beads.InProgress, data.Beads.Review, data.Beads.Closed)
-
-	// Git
-	if data.Git.NeedsPush > 0 || data.Git.NeedsPull > 0 {
-		parts := []string{}
-		if data.Git.NeedsPush > 0 {
-			parts = append(parts, fmt.Sprintf("%d need push", data.Git.NeedsPush))
+	fmt.Printf("Worktrees:  %d active, %d idle\n", wt.Active, wt.Idle)
+	for i, item := range wt.List {
+		prefix := "  \u251c\u2500\u2500 "
+		if i == len(wt.List)-1 {
+			prefix = "  \u2514\u2500\u2500 "
 		}
-		if data.Git.NeedsPull > 0 {
-			parts = append(parts, fmt.Sprintf("%d need pull", data.Git.NeedsPull))
-		}
-		fmt.Printf("Git:        %s\n", strings.Join(parts, ", "))
-	} else {
+		fmt.Printf("%s%-14s %s\n", prefix, item.Name, item.Status)
+	}
+}
+
+func renderStatusGit(g GitSummary) {
+	if g.NeedsPush == 0 && g.NeedsPull == 0 {
 		fmt.Println("Git:        all synced")
+		return
 	}
+	var parts []string
+	if g.NeedsPush > 0 {
+		parts = append(parts, fmt.Sprintf("%d need push", g.NeedsPush))
+	}
+	if g.NeedsPull > 0 {
+		parts = append(parts, fmt.Sprintf("%d need pull", g.NeedsPull))
+	}
+	fmt.Printf("Git:        %s\n", strings.Join(parts, ", "))
+}
 
-	// Redis
+func renderStatusRedis(r RedisInfo) {
 	switch {
-	case !data.Redis.Configured:
+	case !r.Configured:
 		fmt.Println("Redis:      not configured")
-	case data.Redis.Connected:
+	case r.Connected:
 		fmt.Println("Redis:      connected (fleet mode)")
 	default:
-		fmt.Printf("Redis:      error (%s)\n", data.Redis.Error)
+		fmt.Printf("Redis:      error (%s)\n", r.Error)
 	}
+}
 
-	// Issues
-	if len(data.Issues) > 0 {
-		fmt.Printf("Issues:     %d detected\n", len(data.Issues))
-		for _, issue := range data.Issues {
-			icon := "\u26a0"
-			if issue.Level == "error" {
-				icon = "\u2717"
-			}
-			fmt.Printf("  %s %s\n", icon, issue.Message)
+func renderStatusIssues(issues []StatusIssue) {
+	if len(issues) == 0 {
+		return
+	}
+	fmt.Printf("Issues:     %d detected\n", len(issues))
+	for _, issue := range issues {
+		icon := "\u26a0"
+		if issue.Level == "error" {
+			icon = "\u2717"
 		}
+		fmt.Printf("  %s %s\n", icon, issue.Message)
 	}
 }
 

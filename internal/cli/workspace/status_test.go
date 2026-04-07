@@ -1,5 +1,3 @@
-//go:build ignore
-
 package workspace
 
 import (
@@ -10,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
 )
 
 // ============================================================================
@@ -102,9 +102,9 @@ func TestStatusDaemonStalePID(t *testing.T) {
 
 func TestStatusBackendDefault(t *testing.T) {
 	// Save and restore backendFlag
-	origFlag := backendFlag
-	t.Cleanup(func() { backendFlag = origFlag })
-	backendFlag = ""
+	origFlag := *backendFlagPtr
+	t.Cleanup(func() { *backendFlagPtr = origFlag })
+	*backendFlagPtr = ""
 
 	origEnv := os.Getenv("LOOM_BACKEND")
 	t.Cleanup(func() { os.Setenv("LOOM_BACKEND", origEnv) })
@@ -121,9 +121,9 @@ func TestStatusBackendDefault(t *testing.T) {
 }
 
 func TestStatusBackendFromFlag(t *testing.T) {
-	origFlag := backendFlag
-	t.Cleanup(func() { backendFlag = origFlag })
-	backendFlag = "codex"
+	origFlag := *backendFlagPtr
+	t.Cleanup(func() { *backendFlagPtr = origFlag })
+	*backendFlagPtr = "codex"
 
 	info := collectBackendInfo()
 
@@ -136,9 +136,9 @@ func TestStatusBackendFromFlag(t *testing.T) {
 }
 
 func TestStatusBackendFromEnv(t *testing.T) {
-	origFlag := backendFlag
-	t.Cleanup(func() { backendFlag = origFlag })
-	backendFlag = ""
+	origFlag := *backendFlagPtr
+	t.Cleanup(func() { *backendFlagPtr = origFlag })
+	*backendFlagPtr = ""
 
 	origEnv := os.Getenv("LOOM_BACKEND")
 	t.Cleanup(func() { os.Setenv("LOOM_BACKEND", origEnv) })
@@ -423,22 +423,22 @@ func TestFormatDuration(t *testing.T) {
 
 func TestResolveBackendSourcePrecedence(t *testing.T) {
 	// Save and restore
-	origFlag := backendFlag
+	origFlag := *backendFlagPtr
 	origEnv := os.Getenv("LOOM_BACKEND")
 	t.Cleanup(func() {
-		backendFlag = origFlag
+		*backendFlagPtr = origFlag
 		os.Setenv("LOOM_BACKEND", origEnv)
 	})
 
 	// Flag takes precedence
-	backendFlag = "codex"
+	*backendFlagPtr = "codex"
 	os.Setenv("LOOM_BACKEND", "opencode")
 	if got := resolveBackendSource(); got != "flag" {
 		t.Errorf("with flag+env, source = %q, want %q", got, "flag")
 	}
 
 	// Env next
-	backendFlag = ""
+	*backendFlagPtr = ""
 	if got := resolveBackendSource(); got != "env" {
 		t.Errorf("with env only, source = %q, want %q", got, "env")
 	}
@@ -551,7 +551,7 @@ func writeDaemonStateFile(t *testing.T, dir string, pid int, agents []DaemonAgen
 	if err := os.WriteFile(stateFilePath, data, 0644); err != nil {
 		t.Fatalf("failed to write daemon-agents.json: %v", err)
 	}
-	return loadDaemonManagedAgents(stateFilePath)
+	return monitor.LoadDaemonManagedAgents(stateFilePath)
 }
 
 // ============================================================================
@@ -562,10 +562,10 @@ func TestLoadDaemonManagedAgents_NoFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	stateFilePath := filepath.Join(tmpDir, "daemon-agents.json")
 
-	result := loadDaemonManagedAgents(stateFilePath)
+	result := monitor.LoadDaemonManagedAgents(stateFilePath)
 
 	if result != nil {
-		t.Errorf("loadDaemonManagedAgents() = %v, want nil when file doesn't exist", result)
+		t.Errorf("monitor.LoadDaemonManagedAgents() = %v, want nil when file doesn't exist", result)
 	}
 }
 
@@ -579,7 +579,7 @@ func TestLoadDaemonManagedAgents_ValidFile(t *testing.T) {
 	})
 
 	if result == nil {
-		t.Fatal("loadDaemonManagedAgents() returned nil, want non-nil map")
+		t.Fatal("monitor.LoadDaemonManagedAgents() returned nil, want non-nil map")
 	}
 	if len(result) != 3 {
 		t.Errorf("len(result) = %d, want 3", len(result))
@@ -603,10 +603,10 @@ func TestLoadDaemonManagedAgents_InvalidJSON(t *testing.T) {
 		t.Fatalf("failed to write daemon-agents.json: %v", err)
 	}
 
-	result := loadDaemonManagedAgents(stateFilePath)
+	result := monitor.LoadDaemonManagedAgents(stateFilePath)
 
 	if result != nil {
-		t.Errorf("loadDaemonManagedAgents() = %v, want nil for invalid JSON", result)
+		t.Errorf("monitor.LoadDaemonManagedAgents() = %v, want nil for invalid JSON", result)
 	}
 }
 
@@ -618,7 +618,7 @@ func TestLoadDaemonManagedAgents_StaleDaemon(t *testing.T) {
 	})
 
 	if result != nil {
-		t.Errorf("loadDaemonManagedAgents() = %v, want nil for stale daemon (non-existent PID)", result)
+		t.Errorf("monitor.LoadDaemonManagedAgents() = %v, want nil for stale daemon (non-existent PID)", result)
 	}
 }
 
@@ -628,7 +628,7 @@ func TestLoadDaemonManagedAgents_EmptyAgents(t *testing.T) {
 	result := collectDaemonStatusForDirHelper(t, tmpDir, []DaemonAgentStateEntry{})
 
 	if result == nil {
-		t.Fatal("loadDaemonManagedAgents() returned nil, want empty map for empty agents")
+		t.Fatal("monitor.LoadDaemonManagedAgents() returned nil, want empty map for empty agents")
 	}
 	if len(result) != 0 {
 		t.Errorf("len(result) = %d, want 0", len(result))
@@ -645,7 +645,7 @@ func TestLoadDaemonManagedAgents_SkipsEmptyWorktreeNames(t *testing.T) {
 	})
 
 	if result == nil {
-		t.Fatal("loadDaemonManagedAgents() returned nil, want non-nil map")
+		t.Fatal("monitor.LoadDaemonManagedAgents() returned nil, want non-nil map")
 	}
 	if len(result) != 2 {
 		t.Errorf("len(result) = %d, want 2 (should skip empty worktree name)", len(result))
@@ -671,7 +671,7 @@ func TestLoadDaemonManagedAgents_WithRole(t *testing.T) {
 	})
 
 	if result == nil {
-		t.Fatal("loadDaemonManagedAgents() returned nil, want non-nil map")
+		t.Fatal("monitor.LoadDaemonManagedAgents() returned nil, want non-nil map")
 	}
 	if result["falcon"].Role != "task" {
 		t.Errorf("result[falcon].Role = %q, want %q", result["falcon"].Role, "task")
@@ -695,7 +695,7 @@ func TestRenderAgentLine_WithDaemonMarker(t *testing.T) {
 	}
 
 	var sb strings.Builder
-	renderAgentLine(&sb, agent, "  ")
+	monitor.RenderAgentLine(&sb, agent, "  ")
 	output := sb.String()
 
 	if !strings.Contains(output, "[D]") {
@@ -717,7 +717,7 @@ func TestRenderAgentLine_WithoutDaemonMarker(t *testing.T) {
 	}
 
 	var sb strings.Builder
-	renderAgentLine(&sb, agent, "  ")
+	monitor.RenderAgentLine(&sb, agent, "  ")
 	output := sb.String()
 
 	if strings.Contains(output, "[D]") {
@@ -739,7 +739,7 @@ func TestRenderAgentLine_DaemonManagedWithSyncIndicators(t *testing.T) {
 	}
 
 	var sb strings.Builder
-	renderAgentLine(&sb, agent, "  ")
+	monitor.RenderAgentLine(&sb, agent, "  ")
 	output := sb.String()
 
 	if !strings.Contains(output, "[D]") {
@@ -845,7 +845,7 @@ func TestLoadDaemonManagedAgents_WithRepo(t *testing.T) {
 	})
 
 	if result == nil {
-		t.Fatal("loadDaemonManagedAgents() returned nil, want non-nil map")
+		t.Fatal("monitor.LoadDaemonManagedAgents() returned nil, want non-nil map")
 	}
 	if result["falcon"].Repo != "github.com/org/repo-a" {
 		t.Errorf("result[falcon].Repo = %q, want %q", result["falcon"].Repo, "github.com/org/repo-a")

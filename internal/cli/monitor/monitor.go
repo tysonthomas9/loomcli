@@ -54,9 +54,9 @@ func init() {
 	cli.RegisterCommand(monitorCmd)
 }
 
-// loadDaemonManagedAgents reads the daemon state file and returns metadata for
+// LoadDaemonManagedAgents reads the daemon state file and returns metadata for
 // worktrees under daemon supervision. Returns nil if unavailable or daemon died.
-func loadDaemonManagedAgents(stateFilePath string) map[string]DaemonAgentInfo {
+func LoadDaemonManagedAgents(stateFilePath string) map[string]DaemonAgentInfo {
 	data, err := os.ReadFile(stateFilePath)
 	if err != nil {
 		return nil // File doesn't exist or can't be read

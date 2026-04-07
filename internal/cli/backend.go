@@ -153,3 +153,53 @@ func InvokeAgentNonInteractive(workDir, prompt, agentName string, shutdown <-cha
 	}
 	return b.InvokeNonInteractive(workDir, prompt, agentName, shutdown, collector)
 }
+
+// GetBackendFlag returns the current value of the --backend CLI flag.
+func GetBackendFlag() string { return backendFlag }
+
+// TestingBackendFlag returns a pointer to the backendFlag string for test packages.
+func TestingBackendFlag() *string { return &backendFlag }
+
+// TestingBackendMu returns the backend registry mutex for test packages.
+func TestingBackendMu() *sync.RWMutex { return &backendMu }
+
+// TestingBackends returns the backend registry map for test packages.
+func TestingBackends() map[string]Backend { return backends }
+
+// TestingActiveBackend returns a pointer to the activeBackend string for test packages.
+func TestingActiveBackend() *string { return &activeBackend }
+
+// TestingResetBackendState saves and restores backend registry state for tests.
+// It clears the current registry so the test starts with an empty map, and
+// restores the original entries on cleanup.
+func TestingResetBackendState(t interface {
+	Helper()
+	Cleanup(func())
+}) {
+	t.Helper()
+	backendMu.Lock()
+	origBackends := make(map[string]Backend, len(backends))
+	for k, v := range backends {
+		origBackends[k] = v
+	}
+	origActive := activeBackend
+	// Clear the map in-place so tests start with an empty registry.
+	for k := range backends {
+		delete(backends, k)
+	}
+	activeBackend = ""
+	backendMu.Unlock()
+	t.Cleanup(func() {
+		backendMu.Lock()
+		// Clear any test-added entries.
+		for k := range backends {
+			delete(backends, k)
+		}
+		// Restore original entries.
+		for k, v := range origBackends {
+			backends[k] = v
+		}
+		activeBackend = origActive
+		backendMu.Unlock()
+	})
+}

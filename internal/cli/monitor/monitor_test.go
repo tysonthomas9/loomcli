@@ -1,5 +1,3 @@
-//go:build ignore
-
 package monitor
 
 import (
@@ -60,14 +58,14 @@ func TestTruncateToWidth(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := truncateToWidth(tc.input, tc.maxWidth)
+			got := TruncateToWidth(tc.input, tc.maxWidth)
 			gotWidth := displayWidth(got)
 			if gotWidth > tc.maxWidth {
-				t.Errorf("truncateToWidth(%q, %d) display width = %d, exceeds max",
+				t.Errorf("TruncateToWidth(%q, %d) display width = %d, exceeds max",
 					tc.input, tc.maxWidth, gotWidth)
 			}
 			if got != tc.expected {
-				t.Errorf("truncateToWidth(%q, %d) = %q, want %q",
+				t.Errorf("TruncateToWidth(%q, %d) = %q, want %q",
 					tc.input, tc.maxWidth, got, tc.expected)
 			}
 		})
@@ -91,10 +89,10 @@ func TestPadRight(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := padRight(tc.input, tc.width)
+			got := PadRight(tc.input, tc.width)
 			gotWidth := displayWidth(got)
 			if gotWidth != tc.expected {
-				t.Errorf("padRight(%q, %d) display width = %d, want %d (result: %q)",
+				t.Errorf("PadRight(%q, %d) display width = %d, want %d (result: %q)",
 					tc.input, tc.width, gotWidth, tc.expected, got)
 			}
 		})
@@ -103,31 +101,31 @@ func TestPadRight(t *testing.T) {
 
 func TestRenderBoxTop(t *testing.T) {
 	t.Parallel()
-	// Uses dashboardWidth (70) constant
-	result := renderBoxTop()
-	expected := "╔" + strings.Repeat("═", dashboardWidth-2) + "╗\n"
+	// Uses DashboardWidth (70) constant
+	result := RenderBoxTop()
+	expected := "╔" + strings.Repeat("═", DashboardWidth-2) + "╗\n"
 	if result != expected {
-		t.Errorf("renderBoxTop() = %q, want %q", result, expected)
+		t.Errorf("RenderBoxTop() = %q, want %q", result, expected)
 	}
 }
 
 func TestRenderBoxBottom(t *testing.T) {
 	t.Parallel()
-	// Uses dashboardWidth (70) constant
-	result := renderBoxBottom()
-	expected := "╚" + strings.Repeat("═", dashboardWidth-2) + "╝\n"
+	// Uses DashboardWidth (70) constant
+	result := RenderBoxBottom()
+	expected := "╚" + strings.Repeat("═", DashboardWidth-2) + "╝\n"
 	if result != expected {
-		t.Errorf("renderBoxBottom() = %q, want %q", result, expected)
+		t.Errorf("RenderBoxBottom() = %q, want %q", result, expected)
 	}
 }
 
 func TestRenderBoxSeparator(t *testing.T) {
 	t.Parallel()
-	// Uses dashboardWidth (70) constant
-	result := renderBoxSeparator()
-	expected := "╠" + strings.Repeat("═", dashboardWidth-2) + "╣\n"
+	// Uses DashboardWidth (70) constant
+	result := RenderBoxSeparator()
+	expected := "╠" + strings.Repeat("═", DashboardWidth-2) + "╣\n"
 	if result != expected {
-		t.Errorf("renderBoxSeparator() = %q, want %q", result, expected)
+		t.Errorf("RenderBoxSeparator() = %q, want %q", result, expected)
 	}
 }
 
@@ -147,9 +145,9 @@ func TestCenterText(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := centerText(tc.text, tc.width)
+			got := CenterText(tc.text, tc.width)
 			if got != tc.expected {
-				t.Errorf("centerText(%q, %d) = %q, want %q",
+				t.Errorf("CenterText(%q, %d) = %q, want %q",
 					tc.text, tc.width, got, tc.expected)
 			}
 		})
@@ -1168,7 +1166,7 @@ func TestCollectAgentStatus(t *testing.T) {
 			}
 			return CommandResult{}
 		}}
-		deps.Git = &execBridgeGitRunner{exec: deps.Exec}
+		deps.Git = &execBridgeGitRunner{Exec: deps.Exec}
 
 		agents, _ := collectAgentStatusDeps(deps, nil, "")
 
@@ -1215,7 +1213,7 @@ func TestCollectAgentStatus(t *testing.T) {
 			}
 			return CommandResult{}
 		}}
-		deps.Git = &execBridgeGitRunner{exec: deps.Exec}
+		deps.Git = &execBridgeGitRunner{Exec: deps.Exec}
 
 		agents, _ := collectAgentStatusDeps(deps, nil, "")
 
@@ -1261,7 +1259,7 @@ func TestCollectAgentStatus(t *testing.T) {
 			}
 			return CommandResult{}
 		}}
-		deps.Git = &execBridgeGitRunner{exec: deps.Exec}
+		deps.Git = &execBridgeGitRunner{Exec: deps.Exec}
 
 		agentTasks := map[string]TaskInfo{
 			"spark": {ID: "T-123", Status: "in_progress"},
@@ -1312,7 +1310,7 @@ func TestCollectAgentStatus(t *testing.T) {
 			}
 			return CommandResult{}
 		}}
-		deps.Git = &execBridgeGitRunner{exec: deps.Exec}
+		deps.Git = &execBridgeGitRunner{Exec: deps.Exec}
 
 		agents, _ := collectAgentStatusDeps(deps, nil, "")
 
@@ -1377,7 +1375,7 @@ func TestCollectAgentStatus(t *testing.T) {
 			}
 			return CommandResult{}
 		}}
-		deps.Git = &execBridgeGitRunner{exec: deps.Exec}
+		deps.Git = &execBridgeGitRunner{Exec: deps.Exec}
 
 		_, taskIDToAgents := collectAgentStatusDeps(deps, nil, "")
 
@@ -1422,7 +1420,7 @@ func TestCollectMonitorData(t *testing.T) {
 		}
 		return CommandResult{}
 	}}
-	deps.Git = &execBridgeGitRunner{exec: deps.Exec}
+	deps.Git = &execBridgeGitRunner{Exec: deps.Exec}
 
 	mock := NewMockIssueBackend()
 	mock.ReadyResult = []backend.IssueData{
@@ -1510,7 +1508,7 @@ func TestCollectMonitorDataExported(t *testing.T) {
 	setDefaultIssueBackend(mock)
 	t.Cleanup(func() { resetDefaultIssueBackend() })
 
-	data := CollectMonitorData("")
+	data := CollectMonitorData(0, "")
 	if data == nil {
 		t.Fatal("CollectMonitorData returned nil")
 	}
@@ -2024,9 +2022,9 @@ func TestRenderDashboardWithData(t *testing.T) {
 
 func TestRenderBoxLineLongContent(t *testing.T) {
 	t.Parallel()
-	// Content longer than dashboardWidth - 4 should not cause negative padding
-	longContent := strings.Repeat("x", dashboardWidth+10)
-	result := renderBoxLine(longContent)
+	// Content longer than DashboardWidth - 4 should not cause negative padding
+	longContent := strings.Repeat("x", DashboardWidth+10)
+	result := RenderBoxLine(longContent)
 
 	if !strings.HasPrefix(result, "║ ") {
 		t.Error("expected box line to start with '║ '")
@@ -2042,7 +2040,7 @@ func TestRenderBoxLineLongContent(t *testing.T) {
 
 func TestRenderBoxLineEmptyContent(t *testing.T) {
 	t.Parallel()
-	result := renderBoxLine("")
+	result := RenderBoxLine("")
 
 	if !strings.HasPrefix(result, "║ ") {
 		t.Error("expected box line to start with '║ '")
@@ -2051,7 +2049,7 @@ func TestRenderBoxLineEmptyContent(t *testing.T) {
 		t.Error("expected box line to end with ' ║\\n'")
 	}
 	// Empty content should get full padding
-	expectedLen := dashboardWidth + len("║") + len("║") + len("\n") - 2 // account for unicode chars
+	expectedLen := DashboardWidth + len("║") + len("║") + len("\n") - 2 // account for unicode chars
 	_ = expectedLen                                                     // just verify it doesn't panic
 }
 
@@ -2085,11 +2083,11 @@ func TestRenderTaskLineAlignment(t *testing.T) {
 			renderTaskLine(&sb, tc.task)
 			line := sb.String()
 
-			// Every rendered line should have display width = dashboardWidth (70) + newline
+			// Every rendered line should have display width = DashboardWidth (70) + newline
 			lineNoNewline := strings.TrimSuffix(line, "\n")
 			width := displayWidth(lineNoNewline)
-			if width != dashboardWidth {
-				t.Errorf("renderTaskLine display width = %d, want %d\nline: %s", width, dashboardWidth, lineNoNewline)
+			if width != DashboardWidth {
+				t.Errorf("renderTaskLine display width = %d, want %d\nline: %s", width, DashboardWidth, lineNoNewline)
 			}
 
 			// Must start with "║ " and end with " ║"
@@ -2114,13 +2112,13 @@ func TestRenderAgentLineAlignment(t *testing.T) {
 	for _, agent := range agents {
 		t.Run(agent.Name, func(t *testing.T) {
 			var sb strings.Builder
-			renderAgentLine(&sb, agent, "  ")
+			RenderAgentLine(&sb, agent, "  ")
 			line := sb.String()
 
 			lineNoNewline := strings.TrimSuffix(line, "\n")
 			width := displayWidth(lineNoNewline)
-			if width != dashboardWidth {
-				t.Errorf("renderAgentLine display width = %d, want %d\nline: %s", width, dashboardWidth, lineNoNewline)
+			if width != DashboardWidth {
+				t.Errorf("renderAgentLine display width = %d, want %d\nline: %s", width, DashboardWidth, lineNoNewline)
 			}
 		})
 	}
@@ -2673,7 +2671,7 @@ func TestRenderAgentLine(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var sb strings.Builder
-			renderAgentLine(&sb, tc.agent, tc.indent)
+			RenderAgentLine(&sb, tc.agent, tc.indent)
 			output := sb.String()
 
 			for _, expected := range tc.expectContains {

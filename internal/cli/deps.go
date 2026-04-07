@@ -192,3 +192,9 @@ func GetDeps(cmd *cobra.Command) *Deps {
 	}
 	return defaultDeps
 }
+
+// TestingGetDefaultDeps returns the package-level defaultDeps for use by test
+// packages that need to swap global state. Production code should use GetDeps.
+func TestingGetDefaultDeps() *Deps {
+	return defaultDeps
+}

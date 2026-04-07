@@ -1,5 +1,3 @@
-//go:build ignore
-
 package cli
 
 import (
@@ -64,8 +62,8 @@ func TestNewResolver_LegacyMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
-	if r.Mode() != ModeLegacy {
-		t.Errorf("expected ModeLegacy, got %d", r.Mode())
+	if r.GetMode() != ModeLegacy {
+		t.Errorf("expected ModeLegacy, got %d", r.GetMode())
 	}
 	if r.WorkspaceName() != "" {
 		t.Errorf("expected empty workspace name, got %q", r.WorkspaceName())
@@ -92,8 +90,8 @@ func TestNewResolver_WorkspaceMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
-	if r.Mode() != ModeWorkspace {
-		t.Errorf("expected ModeWorkspace, got %d", r.Mode())
+	if r.GetMode() != ModeWorkspace {
+		t.Errorf("expected ModeWorkspace, got %d", r.GetMode())
 	}
 	if r.WorkspaceName() != "myws" {
 		t.Errorf("expected workspace 'myws', got %q", r.WorkspaceName())
@@ -118,8 +116,8 @@ func TestNewResolver_WorkspaceMode_NoDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
-	if r.Mode() != ModeWorkspace {
-		t.Errorf("expected ModeWorkspace, got %d", r.Mode())
+	if r.GetMode() != ModeWorkspace {
+		t.Errorf("expected ModeWorkspace, got %d", r.GetMode())
 	}
 	if r.WorkspaceName() != "alpha" {
 		t.Errorf("expected workspace 'alpha', got %q", r.WorkspaceName())
@@ -158,7 +156,7 @@ func TestResolver_SetWorkspace(t *testing.T) {
 	}
 
 	// No config (legacy resolver)
-	legacyR := &Resolver{mode: ModeLegacy}
+	legacyR := &Resolver{Mode: ModeLegacy}
 	if err := legacyR.SetWorkspace("any"); err == nil {
 		t.Error("expected error when no config loaded")
 	}
@@ -185,7 +183,7 @@ func TestResolver_DiscoverWorktrees_Legacy(t *testing.T) {
 	// Create a non-git directory (should be skipped)
 	os.MkdirAll(filepath.Join(wtDir, "notgit"), 0755)
 
-	r := &Resolver{mode: ModeLegacy}
+	r := &Resolver{Mode: ModeLegacy}
 	worktrees, err := r.DiscoverWorktrees()
 	if err != nil {
 		t.Fatalf("DiscoverWorktrees: %v", err)
@@ -284,7 +282,7 @@ func TestResolver_ResolveWorktreePath_Legacy(t *testing.T) {
 	wtPath := filepath.Join(tmpDir, "worktrees", "falcon")
 	os.MkdirAll(wtPath, 0755)
 
-	r := &Resolver{mode: ModeLegacy}
+	r := &Resolver{Mode: ModeLegacy}
 	path, err := r.ResolveWorktreePath("falcon")
 	if err != nil {
 		t.Fatalf("ResolveWorktreePath: %v", err)

@@ -34,17 +34,27 @@ func PadRight(s string, width int) string {
 func renderDashboard(data *MonitorData) string {
 	var sb strings.Builder
 
-	// Header
+	renderDashboardHeader(&sb, data)
+	renderDashboardAgents(&sb, data)
+	renderDashboardTasks(&sb, data)
+	renderDashboardSync(&sb, data)
+	renderDashboardStats(&sb, data)
+	sb.WriteString(RenderBoxBottom())
+
+	return sb.String()
+}
+
+func renderDashboardHeader(sb *strings.Builder, data *MonitorData) {
 	sb.WriteString(RenderBoxTop())
 	sb.WriteString(RenderBoxLine(CenterText("LOOM", DashboardWidth-4)))
 	sb.WriteString(RenderBoxLine(CenterText(fmt.Sprintf("Last updated: %s", data.Timestamp.Format("15:04:05")), DashboardWidth-4)))
+}
 
-	// Agents section
+func renderDashboardAgents(sb *strings.Builder, data *MonitorData) {
 	sb.WriteString(RenderBoxSeparator())
 	sb.WriteString(RenderBoxLine(" AGENTS"))
 	sb.WriteString(RenderBoxSeparator())
 
-	// Detect workspace mode from agent data
 	hasWorkspace := false
 	for _, agent := range data.Agents {
 		if agent.Workspace != "" {
@@ -52,17 +62,17 @@ func renderDashboard(data *MonitorData) string {
 			break
 		}
 	}
-
 	if hasWorkspace {
-		renderAgentsWorkspace(&sb, data.Agents)
+		renderAgentsWorkspace(sb, data.Agents)
 	} else {
-		renderAgentsLegacy(&sb, data.Agents)
+		renderAgentsLegacy(sb, data.Agents)
 	}
 	if len(data.Agents) == 0 {
 		sb.WriteString(RenderBoxLine("  No agents found"))
 	}
+}
 
-	// Tasks section
+func renderDashboardTasks(sb *strings.Builder, data *MonitorData) {
 	sb.WriteString(RenderBoxSeparator())
 	sb.WriteString(RenderBoxLine(" WORK QUEUE"))
 	sb.WriteString(RenderBoxSeparator())
@@ -70,27 +80,21 @@ func renderDashboard(data *MonitorData) string {
 		data.Tasks.NeedsPlanning, data.Tasks.ReadyToImplement, data.Tasks.NeedReview, data.Tasks.InProgress, data.Tasks.Backlog)
 	sb.WriteString(RenderBoxLine(taskSummary))
 
-	// Needs Planning tasks
 	sb.WriteString(RenderBoxLine(""))
 	sb.WriteString(RenderBoxLine(fmt.Sprintf("  NEEDS PLANNING (%d):", data.Tasks.NeedsPlanning)))
-	renderTaskSection(&sb, data.NeedsPlanningTasks)
-
-	// Need review tasks
+	renderTaskSection(sb, data.NeedsPlanningTasks)
 	sb.WriteString(RenderBoxLine(""))
 	sb.WriteString(RenderBoxLine(fmt.Sprintf("  NEEDS REVIEW (%d):", data.Tasks.NeedReview)))
-	renderTaskSection(&sb, data.ReviewTasks)
-
-	// Ready to Implement tasks
+	renderTaskSection(sb, data.ReviewTasks)
 	sb.WriteString(RenderBoxLine(""))
 	sb.WriteString(RenderBoxLine(fmt.Sprintf("  READY TO IMPLEMENT (%d):", data.Tasks.ReadyToImplement)))
-	renderTaskSection(&sb, data.ReadyToImplement)
-
-	// In progress tasks
+	renderTaskSection(sb, data.ReadyToImplement)
 	sb.WriteString(RenderBoxLine(""))
 	sb.WriteString(RenderBoxLine(fmt.Sprintf("  IN PROGRESS (%d):", data.Tasks.InProgress)))
-	renderTaskSection(&sb, data.InProgressTasks)
+	renderTaskSection(sb, data.InProgressTasks)
+}
 
-	// Sync section
+func renderDashboardSync(sb *strings.Builder, data *MonitorData) {
 	sb.WriteString(RenderBoxSeparator())
 	sb.WriteString(RenderBoxLine(" SYNC STATUS"))
 	sb.WriteString(RenderBoxSeparator())
@@ -100,32 +104,30 @@ func renderDashboard(data *MonitorData) string {
 		dbStatus = "⚠ " + data.SyncStatus.DBError
 	}
 	sb.WriteString(RenderBoxLine(fmt.Sprintf("  Database:  %s", dbStatus)))
+	sb.WriteString(RenderBoxLine(fmt.Sprintf("  Git:       %s", formatGitSyncStatus(data.SyncStatus))))
+}
 
-	gitStatus := "✓ all synced"
-	if data.SyncStatus.GitNeedsPush > 0 || data.SyncStatus.GitNeedsPull > 0 {
-		parts := []string{}
-		if data.SyncStatus.GitNeedsPush > 0 {
-			parts = append(parts, fmt.Sprintf("%d need push", data.SyncStatus.GitNeedsPush))
-		}
-		if data.SyncStatus.GitNeedsPull > 0 {
-			parts = append(parts, fmt.Sprintf("%d need pull", data.SyncStatus.GitNeedsPull))
-		}
-		gitStatus = "⚠ " + strings.Join(parts, ", ")
+func formatGitSyncStatus(sync SyncInfo) string {
+	if sync.GitNeedsPush == 0 && sync.GitNeedsPull == 0 {
+		return "✓ all synced"
 	}
-	sb.WriteString(RenderBoxLine(fmt.Sprintf("  Git:       %s", gitStatus)))
+	var parts []string
+	if sync.GitNeedsPush > 0 {
+		parts = append(parts, fmt.Sprintf("%d need push", sync.GitNeedsPush))
+	}
+	if sync.GitNeedsPull > 0 {
+		parts = append(parts, fmt.Sprintf("%d need pull", sync.GitNeedsPull))
+	}
+	return "⚠ " + strings.Join(parts, ", ")
+}
 
-	// Stats section
+func renderDashboardStats(sb *strings.Builder, data *MonitorData) {
 	sb.WriteString(RenderBoxSeparator())
 	sb.WriteString(RenderBoxLine(" STATS"))
 	sb.WriteString(RenderBoxSeparator())
 	statsLine := fmt.Sprintf("  Remaining: %-4d  Closed: %-4d  Total: %-4d  Done: %.0f%%",
 		data.Stats.Remaining, data.Stats.Closed, data.Stats.Total, data.Stats.Completion)
 	sb.WriteString(RenderBoxLine(statsLine))
-
-	// Footer
-	sb.WriteString(RenderBoxBottom())
-
-	return sb.String()
 }
 
 // renderTaskSection renders a list of tasks, showing at most 10 in the CLI.
@@ -155,7 +157,7 @@ func renderTaskLine(sb *strings.Builder, task TaskInfo) {
 	sb.WriteString(RenderBoxLine(prefix + title))
 }
 
-func renderAgentLine(sb *strings.Builder, agent AgentStatus, indent string) {
+func RenderAgentLine(sb *strings.Builder, agent AgentStatus, indent string) {
 	statusIcon := "✓"
 	if strings.HasPrefix(agent.Status, "planning:") ||
 		strings.HasPrefix(agent.Status, "working:") ||
@@ -211,7 +213,7 @@ func renderAgentLine(sb *strings.Builder, agent AgentStatus, indent string) {
 
 func renderAgentsLegacy(sb *strings.Builder, agents []AgentStatus) {
 	for _, agent := range agents {
-		renderAgentLine(sb, agent, "  ")
+		RenderAgentLine(sb, agent, "  ")
 	}
 }
 
@@ -236,7 +238,7 @@ func renderAgentsWorkspace(sb *strings.Builder, agents []AgentStatus) {
 	for _, ws := range wsNames {
 		sb.WriteString(RenderBoxLine(fmt.Sprintf("  [%s]", ws)))
 		for _, agent := range groups[ws] {
-			renderAgentLine(sb, agent, "   ")
+			RenderAgentLine(sb, agent, "   ")
 		}
 	}
 }
@@ -253,11 +255,14 @@ func RenderBoxSeparator() string {
 	return "╠" + strings.Repeat("═", DashboardWidth-2) + "╣\n"
 }
 
-// displayWidth returns the terminal display width of a string
-// accounting for Unicode characters that may display as double width
-func displayWidth(s string) int {
+// DisplayWidth returns the terminal display width of a string
+// accounting for Unicode characters that may display as double width.
+func DisplayWidth(s string) int {
 	return runewidth.StringWidth(s)
 }
+
+// displayWidth is an unexported alias for backward compatibility within the package.
+var displayWidth = DisplayWidth
 
 func RenderBoxLine(content string) string {
 	// Use display width instead of byte length for padding calculation

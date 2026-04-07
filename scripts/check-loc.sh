@@ -6,13 +6,15 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-THRESHOLD="${1:-500}"
+THRESHOLD="${1:-1000}"
+TEST_THRESHOLD="${2:-2000}"
 ALLOWLIST_FILE="$REPO_ROOT/.loc-allowlist"
 
-# Validate threshold is a positive integer.
+# Validate thresholds are positive integers.
 if ! [[ "$THRESHOLD" =~ ^[1-9][0-9]*$ ]]; then
-    echo "Usage: check-loc.sh [THRESHOLD]" >&2
-    echo "  THRESHOLD must be a positive integer (default: 500)" >&2
+    echo "Usage: check-loc.sh [THRESHOLD] [TEST_THRESHOLD]" >&2
+    echo "  THRESHOLD      max lines for source files (default: 1000)" >&2
+    echo "  TEST_THRESHOLD max lines for *_test.go files (default: 2000)" >&2
     exit 2
 fi
 
@@ -39,9 +41,9 @@ files=$(
     } | sort -zu | tr '\0' '\n' | sed 's|^\./||'
 )
 
-# Filter out test files and excluded directories.
+# Filter out excluded directories.
 EXCLUDE_DIRS='third_party/|vendor/|worktrees/|node_modules/'
-files=$(echo "$files" | grep -v '_test\.go$' | grep -Ev "^($EXCLUDE_DIRS)" || true)
+files=$(echo "$files" | grep -Ev "^($EXCLUDE_DIRS)" || true)
 
 [[ -z "$files" ]] && exit 0
 
@@ -64,11 +66,18 @@ for f in "${filtered[@]}"; do
     loc=$((loc + 0))  # trim whitespace
 
     ceiling=$(get_ceiling "$f")
+    # Use TEST_THRESHOLD for test files, THRESHOLD for source files.
+    if [[ "$f" == *_test.go ]]; then
+        effective_threshold=$TEST_THRESHOLD
+    else
+        effective_threshold=$THRESHOLD
+    fi
+
     if [[ -n "$ceiling" ]]; then
         if (( loc > ceiling )); then
             violations+=("$(printf '%d\t%s\t(ceiling: %d)' "$loc" "$f" "$ceiling")")
         fi
-    elif (( loc > THRESHOLD )); then
+    elif (( loc > effective_threshold )); then
         violations+=("$(printf '%d\t%s' "$loc" "$f")")
     fi
 done

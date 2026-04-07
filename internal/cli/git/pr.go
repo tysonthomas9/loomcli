@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
@@ -82,64 +83,70 @@ func runPR(cmd *cobra.Command, args []string) error {
 	}
 
 	if config.IsWorkspaceMode() {
-		if all && ws != "" {
-			fmt.Fprintln(os.Stderr, "Error: --all and --workspace are mutually exclusive")
-			os.Exit(1)
-		}
+		return runPRWorkspaceMode(deps, args, all, ws)
+	}
 
+	return runPRLegacyMode(deps, args, all)
+}
+
+func runPRWorkspaceMode(deps *cli.Deps, args []string, all bool, ws string) error {
+	if all && ws != "" {
+		fmt.Fprintln(os.Stderr, "Error: --all and --workspace are mutually exclusive")
+		os.Exit(1)
+	}
+
+	if all {
 		targetBranch := ""
-		sourceBranch := ""
-
-		if all {
-			if len(args) == 1 {
-				targetBranch = args[0]
-			}
-			prAllWorkspaces(deps, targetBranch)
-		} else {
-			sourceBranch = args[0]
-			if len(args) == 2 {
-				targetBranch = args[1]
-			}
-
-			resolver, err := cli.NewResolver()
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error creating resolver: %v\n", err)
-				os.Exit(1)
-			}
-
-			wsName := ws
-			if wsName != "" {
-				if err := resolver.SetWorkspace(wsName); err != nil {
-					available := resolver.WorkspaceNames()
-					fmt.Fprintf(os.Stderr, "Error: workspace %q not found. Available: %v\n", wsName, available)
-					os.Exit(1)
-				}
-			}
-
-			prWorkspaceRepos(deps, resolver, sourceBranch, targetBranch)
+		if len(args) == 1 {
+			targetBranch = args[0]
 		}
+		prAllWorkspaces(deps, targetBranch)
 		return nil
 	}
 
-	// Legacy mode
+	sourceBranch := args[0]
 	targetBranch := ""
-	sourceBranch := ""
+	if len(args) == 2 {
+		targetBranch = args[1]
+	}
 
+	resolver, err := cli.NewResolver()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating resolver: %v\n", err)
+		os.Exit(1)
+	}
+
+	if ws != "" {
+		if err := resolver.SetWorkspace(ws); err != nil {
+			available := resolver.WorkspaceNames()
+			fmt.Fprintf(os.Stderr, "Error: workspace %q not found. Available: %v\n", ws, available)
+			os.Exit(1)
+		}
+	}
+
+	prWorkspaceRepos(deps, resolver, sourceBranch, targetBranch)
+	return nil
+}
+
+func runPRLegacyMode(deps *cli.Deps, args []string, all bool) error {
 	if all {
+		targetBranch := ""
 		if len(args) == 1 {
 			targetBranch = args[0]
 		}
 		prAllWorktrees(deps, targetBranch)
-	} else {
-		sourceBranch = args[0]
-		if len(args) == 2 {
-			targetBranch = args[1]
-		}
-		if targetBranch == "" {
-			targetBranch = "main"
-		}
-		prWorktree(deps, sourceBranch, targetBranch)
+		return nil
 	}
+
+	sourceBranch := args[0]
+	targetBranch := ""
+	if len(args) == 2 {
+		targetBranch = args[1]
+	}
+	if targetBranch == "" {
+		targetBranch = "main"
+	}
+	prWorktree(deps, sourceBranch, targetBranch)
 	return nil
 }
 

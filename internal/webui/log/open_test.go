@@ -1,5 +1,3 @@
-//go:build ignore
-
 // This file tests functions (getWorkspaceLogDir, listTaskPhases, fileExists)
 // that have been moved to the handlers/misc package. These tests should be
 // migrated to handlers/misc or adapted to use the misc package's exports.

@@ -1,5 +1,3 @@
-//go:build ignore
-
 package config
 
 import (
@@ -33,7 +31,7 @@ func TestFormatYAMLDiagnostic(t *testing.T) {
 		}
 		wrappedErr := fmt.Errorf("parsing project file %s: %w", path, rawErr)
 
-		result := formatYAMLDiagnostic(path, wrappedErr)
+		result := FormatYAMLDiagnostic(path, wrappedErr)
 
 		if !strings.Contains(result, ">>>") {
 			t.Errorf("expected >>> marker in output, got:\n%s", result)
@@ -68,7 +66,7 @@ func TestFormatYAMLDiagnostic(t *testing.T) {
 		}
 		wrappedErr := fmt.Errorf("parsing project file %s: %w", path, rawErr)
 
-		result := formatYAMLDiagnostic(path, wrappedErr)
+		result := FormatYAMLDiagnostic(path, wrappedErr)
 
 		if !strings.Contains(result, "tab character") {
 			t.Errorf("expected 'tab character' mention, got:\n%s", result)
@@ -82,7 +80,7 @@ func TestFormatYAMLDiagnostic(t *testing.T) {
 	t.Run("NonYAMLError", func(t *testing.T) {
 		t.Parallel()
 		err := fmt.Errorf("permission denied")
-		result := formatYAMLDiagnostic("/some/path", err)
+		result := FormatYAMLDiagnostic("/some/path", err)
 
 		if result != "permission denied" {
 			t.Errorf("expected exact error string, got: %q", result)
@@ -107,7 +105,7 @@ func TestFormatYAMLDiagnostic(t *testing.T) {
 		}
 
 		// Should not panic or produce negative line numbers
-		result := formatYAMLDiagnostic(path, rawErr)
+		result := FormatYAMLDiagnostic(path, rawErr)
 		if strings.Contains(result, "-1 |") || strings.Contains(result, " 0 |") {
 			t.Errorf("got negative or zero line number in output:\n%s", result)
 		}
@@ -131,7 +129,7 @@ func TestFormatYAMLDiagnostic(t *testing.T) {
 		}
 
 		// Should not panic or produce out-of-bounds access
-		result := formatYAMLDiagnostic(path, rawErr)
+		result := FormatYAMLDiagnostic(path, rawErr)
 		if result == "" {
 			t.Error("expected non-empty output")
 		}
@@ -142,7 +140,7 @@ func TestFormatYAMLDiagnostic(t *testing.T) {
 		t.Parallel()
 		err := fmt.Errorf("yaml: line 5: could not find expected ':'")
 
-		result := formatYAMLDiagnostic("/nonexistent/path/to/file.yaml", err)
+		result := FormatYAMLDiagnostic("/nonexistent/path/to/file.yaml", err)
 
 		// Should not panic; should still contain the original error
 		if !strings.Contains(result, "yaml: line 5") {
@@ -166,7 +164,7 @@ func TestFormatYAMLDiagnostic(t *testing.T) {
 
 		// Error that mentions yaml: but without a line number
 		err := fmt.Errorf("yaml: unmarshal errors: something went wrong")
-		result := formatYAMLDiagnostic(path, err)
+		result := FormatYAMLDiagnostic(path, err)
 
 		// Should not contain context lines (no >>> marker)
 		if strings.Contains(result, ">>>") {
@@ -191,7 +189,7 @@ func TestFormatYAMLDiagnostic(t *testing.T) {
 
 		// Use a synthetic error pointing at line 1
 		err := fmt.Errorf("yaml: line 1: could not find expected ':'")
-		result := formatYAMLDiagnostic(path, err)
+		result := FormatYAMLDiagnostic(path, err)
 
 		if !strings.Contains(result, "...") {
 			t.Errorf("expected truncation with '...' for long line, got:\n%s", result)
@@ -214,7 +212,7 @@ func TestFormatYAMLDiagnostic(t *testing.T) {
 		}
 
 		err := fmt.Errorf("yaml: line 1: found character that cannot start any token")
-		result := formatYAMLDiagnostic(path, err)
+		result := FormatYAMLDiagnostic(path, err)
 
 		if !strings.Contains(result, "tab character") {
 			t.Errorf("expected tab character mention, got:\n%s", result)
@@ -248,7 +246,7 @@ func TestFormatYAMLDiagnostic(t *testing.T) {
 		// The yaml.TypeError error message contains "cannot unmarshal"
 		// We need to make sure the error string contains "yaml:" for the
 		// function to process it. yaml.TypeError messages start with "yaml:"
-		result := formatYAMLDiagnostic(path, rawErr)
+		result := FormatYAMLDiagnostic(path, rawErr)
 
 		if !strings.Contains(result, "cannot unmarshal") {
 			t.Errorf("expected 'cannot unmarshal' in output, got:\n%s", result)
@@ -276,7 +274,7 @@ func TestFormatYAMLDiagnostic(t *testing.T) {
 			t.Skip("yaml.v3 does not report duplicate keys as an error; skipping")
 		}
 
-		result := formatYAMLDiagnostic(path, rawErr)
+		result := FormatYAMLDiagnostic(path, rawErr)
 		if !strings.Contains(result, "already defined") && !strings.Contains(result, "duplicate") {
 			t.Errorf("expected duplicate key indication, got:\n%s", result)
 		}

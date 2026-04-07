@@ -116,7 +116,10 @@ func (b *MutationBridge) Start() {
 	ctx, cancel := context.WithCancel(context.Background())
 	b.cancel = cancel
 	b.wg.Add(1)
-	go b.run(ctx)
+	go func() {
+		defer cancel() // idempotent; also called by Stop()
+		b.run(ctx)
+	}()
 
 	b.logger.Info("mutation bridge started", "workspace_id", b.cfg.WorkspaceID)
 }

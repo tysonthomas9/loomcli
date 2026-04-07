@@ -1,5 +1,3 @@
-//go:build ignore
-
 package agent
 
 import (
@@ -19,7 +17,11 @@ func TestRunLead_InvokesClaude(t *testing.T) {
 	os.Chdir(tmpDir)
 	t.Cleanup(func() { os.Chdir(origDir) })
 
-	recorder := SetupMockClaudeInvoker(t, nil)
+	// Reset backend registry and install a mock backend that records calls.
+	resetBackendState(t)
+	mock := &mockBackend{name: "claude"}
+	RegisterBackend(mock)
+	_ = SetBackend("claude")
 
 	// Capture stdout to suppress banner output
 	oldStdout := os.Stdout
@@ -40,23 +42,23 @@ func TestRunLead_InvokesClaude(t *testing.T) {
 	}
 
 	// Verify Claude was invoked
-	if len(recorder.Invocations) != 1 {
-		t.Fatalf("expected 1 Claude invocation, got %d", len(recorder.Invocations))
+	if len(mock.interactiveCalls) != 1 {
+		t.Fatalf("expected 1 Claude invocation, got %d", len(mock.interactiveCalls))
 	}
 
-	inv := recorder.Invocations[0]
+	inv := mock.interactiveCalls[0]
 	// WorkDir should be the temp directory
-	if inv.WorkDir != tmpDir {
-		t.Errorf("expected workDir %q, got %q", tmpDir, inv.WorkDir)
+	if inv.workDir != tmpDir {
+		t.Errorf("expected workDir %q, got %q", tmpDir, inv.workDir)
 	}
 	// Prompt should be the lead prompt
 	leadPrompt := GenerateLeadPrompt()
-	if inv.Prompt != leadPrompt {
-		t.Errorf("expected lead prompt, got %q", inv.Prompt)
+	if inv.prompt != leadPrompt {
+		t.Errorf("expected lead prompt, got %q", inv.prompt)
 	}
 	// AgentName should be empty for lead mode (not claiming tasks)
-	if inv.AgentName != "" {
-		t.Errorf("expected empty agentName for lead mode, got %q", inv.AgentName)
+	if inv.agentName != "" {
+		t.Errorf("expected empty agentName for lead mode, got %q", inv.agentName)
 	}
 }
 
@@ -89,7 +91,7 @@ func TestRunLead_ClaudeError(t *testing.T) {
 	// The mock will return an error, but runLead calls os.Exit(1)
 	// which we can't capture in a unit test without subprocess
 	// So we verify the setup is correct
-	if recorder.ReturnErr != expectedErr {
+	if recorder.InteractiveErr != expectedErr {
 		t.Errorf("mock not configured correctly")
 	}
 }

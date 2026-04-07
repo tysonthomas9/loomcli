@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/events/otelexport"
 )
@@ -113,4 +114,10 @@ func printDryRunInfo(config *config.DaemonConfig, pidFile, logDir, stateFile str
 	fmt.Println("  MemoryMax=4G           # memory ceiling")
 	fmt.Println("  CPUQuota=200%          # CPU limit (200% = 2 cores)")
 	fmt.Println("  TasksMax=256           # max tasks (processes+threads)")
+}
+
+// ResolveDaemonPath delegates to supervisor.ResolveDaemonPath for backward compatibility
+// with external callers (serve, doctor packages).
+func ResolveDaemonPath(projectDir, path string) string {
+	return supervisor.ResolveDaemonPath(projectDir, path)
 }

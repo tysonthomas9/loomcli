@@ -1,5 +1,3 @@
-//go:build ignore
-
 // This file references NewFileService from the root webui package which
 // cannot be imported without creating a cycle.
 

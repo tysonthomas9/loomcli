@@ -1,10 +1,8 @@
 package backends
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"syscall"
@@ -37,11 +35,7 @@ var openCodeNonInteractiveInvoker func(workDir, prompt, agentName string, shutdo
 func buildOpenCodeInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
 	cmd := exec.Command("opencode", "run", prompt)
 	cmd.Dir = workDir
-	env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
-	if agentName != "" {
-		env = append(env, "BD_ACTOR="+agentName)
-	}
-	cmd.Env = env
+	cmd.Env = buildBackendEnv(workDir, agentName)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -60,33 +54,19 @@ func defaultOpenCodeInvoker(workDir, prompt, agentName string) error {
 func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
 	cmd := exec.Command("opencode", "run", "--format", "json")
 	cmd.Dir = workDir
-	env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
-	if agentName != "" {
-		env = append(env, "BD_ACTOR="+agentName)
-	}
-	cmd.Env = env
+	cmd.Env = buildBackendEnv(workDir, agentName)
 
-	// Pass prompt via stdin pipe (not CLI args) to avoid exposure in process listings
-	r, w, err := os.Pipe()
+	r, err := pipePromptToCmd(cmd, prompt)
 	if err != nil {
-		return fmt.Errorf("failed to create pipe: %w", err)
+		return err
 	}
-	if _, err := io.WriteString(w, prompt); err != nil {
-		w.Close()
-		r.Close()
-		return fmt.Errorf("failed to write prompt to stdin: %w", err)
-	}
-	w.Close()
-	cmd.Stdin = r
 
-	// Pipe stdout directly (no stream-json parsing for OpenCode in v1)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		r.Close()
 		return fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
 	cmd.Stderr = os.Stderr
-
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	fmt.Println("Launching OpenCode agent (non-interactive)...")
@@ -97,7 +77,6 @@ func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shu
 		return fmt.Errorf("failed to start opencode: %w", err)
 	}
 
-	// Monitor for shutdown signal
 	guard := newProcessGuard(cmd.Process)
 	go func() {
 		select {
@@ -107,17 +86,12 @@ func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shu
 		}
 	}()
 
-	// Parse stdout lines: display and collect usage if available
-	scanner := bufio.NewScanner(stdout)
-	buf := make([]byte, 0, 1024*1024)
-	scanner.Buffer(buf, 10*1024*1024)
-	for scanner.Scan() {
-		line := scanner.Text()
+	scanStreamOutput(stdout, func(line string) {
 		fmt.Println(line)
 		if collector != nil {
 			collectOpenCodeStreamUsage(line, collector)
 		}
-	}
+	})
 
 	runErr := cmd.Wait()
 	guard.WaitAndMark()

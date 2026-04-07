@@ -19,201 +19,220 @@ var IsTmuxAvailable = func() bool {
 }
 
 // RunAutoModeTmux runs auto mode with tmux session management and live streaming
-func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
-	// Canonicalize worktree path to handle symlinks and relative paths
-	// This ensures consistent paths between parent and daemon processes
-	if absPath, err := filepath.Abs(opts.WorktreePath); err == nil {
-		if resolved, err := filepath.EvalSymlinks(absPath); err == nil {
-			opts.WorktreePath = resolved
-		} else {
-			opts.WorktreePath = absPath
-		}
-	}
+// tmuxLoopCtx holds state for the tmux auto mode loop.
+type tmuxLoopCtx struct {
+	opts                  AutoModeOptions
+	sessionName           string
+	logFile               string
+	yieldFile             string
+	hasAvailableTasks     func() (bool, error)
+	taskCount             int
+	consecutiveNoProgress int
+	idleStart             time.Time
+}
 
-	// Resolve workspace ID for session naming and log isolation.
+func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
+	opts.WorktreePath = canonicalizePath(opts.WorktreePath)
+	ctx := initTmuxLoop(opts)
+	printTmuxHeader(ctx)
+
+	fmt.Print("\x1b[?1004l")
+	defer fmt.Print("\x1b[?1004h")
+
+	attachChan := make(chan struct{}, 1)
+	go listenForAttachKey(attachChan, shutdown)
+
+	for {
+		if exitReason := tmuxCheckExit(ctx, shutdown); exitReason != "" {
+			cleanupTmuxSession(ctx.sessionName)
+			printTmuxSummary(ctx.taskCount)
+			return
+		}
+
+		if !tmuxWaitForTasks(ctx, shutdown) {
+			return
+		}
+
+		ctx.idleStart = time.Now()
+		_ = os.Remove(filepath.Join(opts.WorktreePath, cli.LockFileName))
+
+		if !tmuxRunSession(ctx, attachChan, shutdown) {
+			return
+		}
+
+		if !tmuxHandlePostSession(ctx, shutdown) {
+			return
+		}
+		time.Sleep(2 * time.Second)
+	}
+}
+
+func canonicalizePath(path string) string {
+	if absPath, err := filepath.Abs(path); err == nil {
+		if resolved, err := filepath.EvalSymlinks(absPath); err == nil {
+			return resolved
+		}
+		return absPath
+	}
+	return path
+}
+
+func initTmuxLoop(opts AutoModeOptions) *tmuxLoopCtx {
 	wsID := workspace.ResolveWorkspaceID(opts.WorkspaceID)
 	wsPrefix := workspace.ShortWorkspaceID(wsID)
-
-	// Include workspace prefix and PID to prevent session name collisions
 	sessionName := fmt.Sprintf("loom-%s-%s-%s-%d", wsPrefix, opts.AgentType, opts.AgentName, os.Getpid())
+	logFile := resolveTmuxLogFile(wsID, opts.AgentName)
 
-	// Setup log file — store outside worktree to avoid polluting git status
+	return &tmuxLoopCtx{
+		opts:              opts,
+		sessionName:       sessionName,
+		logFile:           logFile,
+		yieldFile:         os.Getenv("LOOM_YIELD_FILE"),
+		hasAvailableTasks: resolveTaskChecker(opts),
+		idleStart:         time.Now(),
+	}
+}
+
+func resolveTmuxLogFile(wsID, agentName string) string {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		fmt.Printf("[auto] Warning: could not get home directory: %v\n", err)
 		homeDir = os.TempDir()
 	}
-	// Namespace log directory by workspace ID to prevent collisions between
-	// same-named agents in different workspaces.
 	workspaceID := wsID
 	if workspaceID == "" {
 		workspaceID = "_default"
 	}
-	logDir := filepath.Join(homeDir, ".loom", "logs", workspaceID)
-	agentLogDir := filepath.Join(logDir, "agents")
+	agentLogDir := filepath.Join(homeDir, ".loom", "logs", workspaceID, "agents")
 	if err := os.MkdirAll(agentLogDir, 0700); err != nil {
 		fmt.Printf("[auto] Warning: could not create log directory: %v\n", err)
 	}
-	logFile := filepath.Join(agentLogDir, fmt.Sprintf("%s.log", opts.AgentName))
+	return filepath.Join(agentLogDir, fmt.Sprintf("%s.log", agentName))
+}
 
-	yieldFile := os.Getenv("LOOM_YIELD_FILE")
-
-	// Choose task checker based on agent type (CustomPromptGen not used — tmux delegates to daemon).
-	var hasAvailableTasks func() (bool, error)
-	repoLabel := os.Getenv("LOOM_AGENT_REPO")
-	if opts.CustomTaskCheck != nil {
-		hasAvailableTasks = opts.CustomTaskCheck
-	} else if opts.AgentType == "plan" {
-		hasAvailableTasks = func() (bool, error) { return HasAvailablePlanningTasks(opts.ParentID, repoLabel) }
-	} else {
-		hasAvailableTasks = func() (bool, error) { return HasAvailableImplementationTasks(opts.ParentID, repoLabel) }
-	}
-
-	// Print header
+func printTmuxHeader(ctx *tmuxLoopCtx) {
 	fmt.Println("═══════════════════════════════════════════════════════════════")
-	fmt.Printf("Running %s agent in AUTO MODE (tmux)\n", strings.ToUpper(opts.AgentType))
-	fmt.Printf("Worktree: %s\n", opts.WorktreePath)
-	fmt.Printf("Session: %s\n", sessionName)
+	fmt.Printf("Running %s agent in AUTO MODE (tmux)\n", strings.ToUpper(ctx.opts.AgentType))
+	fmt.Printf("Worktree: %s\n", ctx.opts.WorktreePath)
+	fmt.Printf("Session: %s\n", ctx.sessionName)
 	fmt.Println("")
 	fmt.Println("Press ENTER to attach (Ctrl+B D to detach)")
 	fmt.Println("Press Ctrl+C to stop")
 	fmt.Println("═══════════════════════════════════════════════════════════════")
 	fmt.Println("")
+}
 
-	// Disable terminal focus reporting to prevent ^[[I and ^[[O in output
-	fmt.Print("\x1b[?1004l")
-	defer fmt.Print("\x1b[?1004h") // Re-enable on exit
-
-	// Start non-blocking input listener
-	attachChan := make(chan struct{}, 1)
-	go listenForAttachKey(attachChan, shutdown)
-
-	taskCount := 0
-	consecutiveNoProgress := 0
-	idleStart := time.Now()
-	for {
-		select {
-		case <-shutdown:
-			cleanupTmuxSession(sessionName)
-			printTmuxSummary(taskCount)
-			return
-		default:
-		}
-
-		// Check for yield file (cooperative preemption from daemon)
-		if reason, yielded := checkYieldFile(yieldFile); yielded {
-			fmt.Printf("[auto] Yield requested (reason: %s), exiting gracefully...\n", reason)
-			cleanupTmuxSession(sessionName)
-			printTmuxSummary(taskCount)
-			return
-		}
-
-		// Check max tasks
-		if opts.MaxTasks > 0 && taskCount >= opts.MaxTasks {
-			fmt.Printf("[auto] Reached max tasks (%d)\n", opts.MaxTasks)
-			cleanupTmuxSession(sessionName)
-			printTmuxSummary(taskCount)
-			return
-		}
-
-		// Check for available tasks before spawning session
-		available, err := hasAvailableTasks()
-		if err != nil {
-			fmt.Printf("[auto] Error checking tasks: %v\n", err)
-			if interruptibleSleep(5*time.Second, shutdown) {
-				cleanupTmuxSession(sessionName)
-				printTmuxSummary(taskCount)
-				return
-			}
-			continue
-		}
-		if !available {
-			// Check idle timeout
-			if opts.IdleTimeout > 0 && time.Since(idleStart) >= time.Duration(opts.IdleTimeout)*time.Minute {
-				fmt.Printf("[auto] Idle timeout exceeded (%d minutes)\n", opts.IdleTimeout)
-				cleanupTmuxSession(sessionName)
-				printTmuxSummary(taskCount)
-				return
-			}
-			fmt.Printf("[auto] No tasks available, waiting %ds...\n", opts.Interval)
-			if interruptibleSleep(time.Duration(opts.Interval)*time.Second, shutdown) {
-				cleanupTmuxSession(sessionName)
-				printTmuxSummary(taskCount)
-				return
-			}
-			continue
-		}
-
-		// Reset idle timer when tasks are available
-		idleStart = time.Now()
-
-		// Remove leftover lock from previous cycle. The daemon intentionally
-		// does not delete its lock on exit so agentClaimedTask() can read it.
-		// We clean up here before the next daemon acquires a fresh lock.
-		lockPath := filepath.Join(opts.WorktreePath, cli.LockFileName)
-		_ = os.Remove(lockPath)
-
-		fmt.Printf("═══════════════════════════════════════════════════════════════\n")
-		fmt.Printf("[Session] Starting...\n")
-		fmt.Printf("═══════════════════════════════════════════════════════════════\n")
-
-		if err := startTmuxSession(sessionName, opts, logFile); err != nil {
-			fmt.Printf("[auto] Failed to start session: %v\n", err)
-			if interruptibleSleep(5*time.Second, shutdown) {
-				cleanupTmuxSession(sessionName)
-				printTmuxSummary(taskCount)
-				return
-			}
-			continue
-		}
-
-		// Stream output and wait for session to exit
-		streamUntilExit(sessionName, logFile, opts.WorktreePath, attachChan, shutdown)
-
-		select {
-		case <-shutdown:
-			cleanupTmuxSession(sessionName)
-			printTmuxSummary(taskCount)
-			return
-		default:
-		}
-
-		// Check for yield after agent subprocess exit
-		if reason, yielded := checkYieldFile(yieldFile); yielded {
-			fmt.Printf("[auto] Yield requested after task (reason: %s), exiting gracefully...\n", reason)
-			cleanupTmuxSession(sessionName)
-			printTmuxSummary(taskCount)
-			return
-		}
-
-		// Check if agent actually claimed a task
-		if agentClaimedTask(opts.WorktreePath, opts.AgentName, opts.LockBridge) {
-			taskCount++
-			consecutiveNoProgress = 0
-			fmt.Printf("[Session #%d] Completed, cycling...\n", taskCount)
-		} else {
-			consecutiveNoProgress++
-			fmt.Printf("[auto] Agent exited without claiming a task (%d consecutive)\n", consecutiveNoProgress)
-			if consecutiveNoProgress >= 3 {
-				fmt.Printf("[auto] No tasks claimed in %d consecutive sessions, exiting\n", consecutiveNoProgress)
-				cleanupTmuxSession(sessionName)
-				printTmuxSummary(taskCount)
-				return
-			}
-			// Exponential backoff: 30s, 60s, 120s (capped)
-			backoff := time.Duration(30<<(consecutiveNoProgress-1)) * time.Second
-			if backoff > 120*time.Second {
-				backoff = 120 * time.Second
-			}
-			fmt.Printf("[auto] Backing off for %s before retry...\n", backoff)
-			if interruptibleSleep(backoff, shutdown) {
-				cleanupTmuxSession(sessionName)
-				printTmuxSummary(taskCount)
-				return
-			}
-		}
-		time.Sleep(2 * time.Second)
+// tmuxCheckExit returns a non-empty reason string if the loop should exit.
+func tmuxCheckExit(ctx *tmuxLoopCtx, shutdown chan struct{}) string {
+	select {
+	case <-shutdown:
+		return "shutdown"
+	default:
 	}
+	if reason, yielded := checkYieldFile(ctx.yieldFile); yielded {
+		fmt.Printf("[auto] Yield requested (reason: %s), exiting gracefully...\n", reason)
+		return reason
+	}
+	if ctx.opts.MaxTasks > 0 && ctx.taskCount >= ctx.opts.MaxTasks {
+		fmt.Printf("[auto] Reached max tasks (%d)\n", ctx.opts.MaxTasks)
+		return "max tasks"
+	}
+	return ""
+}
+
+// tmuxWaitForTasks waits until tasks are available. Returns false if loop should exit.
+func tmuxWaitForTasks(ctx *tmuxLoopCtx, shutdown chan struct{}) bool {
+	available, err := ctx.hasAvailableTasks()
+	if err != nil {
+		fmt.Printf("[auto] Error checking tasks: %v\n", err)
+		if interruptibleSleep(5*time.Second, shutdown) {
+			cleanupTmuxSession(ctx.sessionName)
+			printTmuxSummary(ctx.taskCount)
+			return false
+		}
+		return true
+	}
+	if available {
+		return true
+	}
+
+	if ctx.opts.IdleTimeout > 0 && time.Since(ctx.idleStart) >= time.Duration(ctx.opts.IdleTimeout)*time.Minute {
+		fmt.Printf("[auto] Idle timeout exceeded (%d minutes)\n", ctx.opts.IdleTimeout)
+		cleanupTmuxSession(ctx.sessionName)
+		printTmuxSummary(ctx.taskCount)
+		return false
+	}
+	fmt.Printf("[auto] No tasks available, waiting %ds...\n", ctx.opts.Interval)
+	if interruptibleSleep(time.Duration(ctx.opts.Interval)*time.Second, shutdown) {
+		cleanupTmuxSession(ctx.sessionName)
+		printTmuxSummary(ctx.taskCount)
+		return false
+	}
+	return true
+}
+
+// tmuxRunSession starts and streams a single tmux session. Returns false if loop should exit.
+func tmuxRunSession(ctx *tmuxLoopCtx, attachChan chan struct{}, shutdown chan struct{}) bool {
+	fmt.Printf("═══════════════════════════════════════════════════════════════\n")
+	fmt.Printf("[Session] Starting...\n")
+	fmt.Printf("═══════════════════════════════════════════════════════════════\n")
+
+	if err := startTmuxSession(ctx.sessionName, ctx.opts, ctx.logFile); err != nil {
+		fmt.Printf("[auto] Failed to start session: %v\n", err)
+		if interruptibleSleep(5*time.Second, shutdown) {
+			cleanupTmuxSession(ctx.sessionName)
+			printTmuxSummary(ctx.taskCount)
+			return false
+		}
+		return true
+	}
+
+	streamUntilExit(ctx.sessionName, ctx.logFile, ctx.opts.WorktreePath, attachChan, shutdown)
+
+	select {
+	case <-shutdown:
+		cleanupTmuxSession(ctx.sessionName)
+		printTmuxSummary(ctx.taskCount)
+		return false
+	default:
+	}
+	return true
+}
+
+// tmuxHandlePostSession processes results after session exit. Returns false if loop should exit.
+func tmuxHandlePostSession(ctx *tmuxLoopCtx, shutdown chan struct{}) bool {
+	if reason, yielded := checkYieldFile(ctx.yieldFile); yielded {
+		fmt.Printf("[auto] Yield requested after task (reason: %s), exiting gracefully...\n", reason)
+		cleanupTmuxSession(ctx.sessionName)
+		printTmuxSummary(ctx.taskCount)
+		return false
+	}
+
+	if agentClaimedTask(ctx.opts.WorktreePath, ctx.opts.AgentName, ctx.opts.LockBridge) {
+		ctx.taskCount++
+		ctx.consecutiveNoProgress = 0
+		fmt.Printf("[Session #%d] Completed, cycling...\n", ctx.taskCount)
+		return true
+	}
+
+	ctx.consecutiveNoProgress++
+	fmt.Printf("[auto] Agent exited without claiming a task (%d consecutive)\n", ctx.consecutiveNoProgress)
+	if ctx.consecutiveNoProgress >= 3 {
+		fmt.Printf("[auto] No tasks claimed in %d consecutive sessions, exiting\n", ctx.consecutiveNoProgress)
+		cleanupTmuxSession(ctx.sessionName)
+		printTmuxSummary(ctx.taskCount)
+		return false
+	}
+	backoff := time.Duration(30<<(ctx.consecutiveNoProgress-1)) * time.Second
+	if backoff > 120*time.Second {
+		backoff = 120 * time.Second
+	}
+	fmt.Printf("[auto] Backing off for %s before retry...\n", backoff)
+	if interruptibleSleep(backoff, shutdown) {
+		cleanupTmuxSession(ctx.sessionName)
+		printTmuxSummary(ctx.taskCount)
+		return false
+	}
+	return true
 }
 
 // printTmuxSummary prints the auto mode completion summary

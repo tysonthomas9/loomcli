@@ -197,12 +197,7 @@ func (m *TerminalManager) Attach(name, command string, cols, rows uint16) (*Term
 	if !validSessionName.MatchString(name) {
 		return nil, fmt.Errorf("invalid session name %q: must match [a-zA-Z0-9_-]+", name)
 	}
-	if cols == 0 {
-		cols = m.defaultCols
-	}
-	if rows == 0 {
-		rows = m.defaultRows
-	}
+	cols, rows = m.normalizeDimensions(cols, rows)
 	if command == "" {
 		command = m.defaultCommand
 	}
@@ -210,35 +205,50 @@ func (m *TerminalManager) Attach(name, command string, cols, rows uint16) (*Term
 	// Cancel any pending deferred kill for this session.
 	m.CancelPendingKill(name)
 
-	// Apply prefix to get the actual tmux session name.
 	internalName := m.tmuxName(name)
-
-	// Generate unique connection ID using internal name for debuggability.
-	connNum := m.connCounter.Add(1)
-	connID := fmt.Sprintf("%s:%d", internalName, connNum)
+	connID := m.nextConnID(internalName)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Enforce concurrent session limit.
 	if m.maxSessions > 0 && len(m.sessions) >= m.maxSessions {
 		return nil, ErrMaxSessionsReached
 	}
 
-	// Create tmux session if it doesn't exist.
 	if !m.tmuxHasSession(internalName) {
 		if err := m.tmuxNewSession(internalName, command, cols, rows); err != nil {
 			return nil, fmt.Errorf("tmux new-session: %w", err)
 		}
 	}
 
-	// Attach with a fresh PTY.
+	return m.attachPTY(connID, internalName, command, cols, rows)
+}
+
+// normalizeDimensions returns cols/rows with defaults applied for zero values.
+func (m *TerminalManager) normalizeDimensions(cols, rows uint16) (uint16, uint16) {
+	if cols == 0 {
+		cols = m.defaultCols
+	}
+	if rows == 0 {
+		rows = m.defaultRows
+	}
+	return cols, rows
+}
+
+// nextConnID generates a unique connection ID for the given internal session name.
+func (m *TerminalManager) nextConnID(internalName string) string {
+	connNum := m.connCounter.Add(1)
+	return fmt.Sprintf("%s:%d", internalName, connNum)
+}
+
+// attachPTY creates a PTY attachment to an existing tmux session and registers it.
+// Must be called with m.mu held.
+func (m *TerminalManager) attachPTY(connID, internalName, command string, cols, rows uint16) (*TerminalSession, error) {
 	cmd, ptmx, err := m.tmuxAttach(internalName)
 	if err != nil {
 		return nil, err
 	}
 
-	// Set initial size.
 	if err := pty.Setsize(ptmx, &pty.Winsize{Cols: cols, Rows: rows}); err != nil {
 		ptmx.Close()
 		_ = cmd.Wait()
@@ -284,7 +294,7 @@ func (m *TerminalManager) AttachExistingRaw(tmuxSessionName string, cols, rows u
 	}
 
 	// Mirror Talk-to-Lead behavior so wheel/input interactions are consistent.
-	mouseCmd := exec.Command(m.tmuxPath, "set-option", "-t", tmuxSessionName, "mouse", "on")
+	mouseCmd := exec.Command(m.tmuxPath, "set-option", "-t", tmuxSessionName, "mouse", "on") //nolint:gosec // G204: tmuxPath is validated at init
 	if err := mouseCmd.Run(); err != nil {
 		slog.Warn("failed to enable mouse mode for session", "session", tmuxSessionName, "err", err)
 	}
@@ -316,7 +326,7 @@ type tmuxSessionMeta struct {
 }
 
 func (m *TerminalManager) listTmuxSessions() ([]tmuxSessionMeta, error) {
-	cmd := exec.Command(m.tmuxPath, "list-sessions", "-F", "#{session_name}\t#{session_created}")
+	cmd := exec.Command(m.tmuxPath, "list-sessions", "-F", "#{session_name}\t#{session_created}") //nolint:gosec // G204: tmuxPath is validated at init
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		msg := strings.ToLower(string(out))
@@ -442,7 +452,7 @@ func (m *TerminalManager) Resize(connID string, cols, rows uint16) error {
 	}
 
 	// Also tell tmux to resize the window so content reflows properly.
-	cmd := exec.Command(m.tmuxPath, "resize-window", "-t", session.Name, "-x", fmt.Sprintf("%d", cols), "-y", fmt.Sprintf("%d", rows))
+	cmd := exec.Command(m.tmuxPath, "resize-window", "-t", session.Name, "-x", fmt.Sprintf("%d", cols), "-y", fmt.Sprintf("%d", rows)) //nolint:gosec // G204: tmuxPath is validated at init
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("tmux resize-window: %w", err)
 	}

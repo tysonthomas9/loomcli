@@ -191,49 +191,49 @@ func handleWorkerState(registry *WorkerRegistry, resolveWorktreePath func(worksp
 			return
 		}
 
-		// Resolve the worktree path from workspace + agent
 		worktreePath := resolveWorktreePath(worker.Workspace, worker.Agent)
 		if worktreePath == "" {
 			handler.RespondError(w, http.StatusInternalServerError, "cannot resolve worktree path")
 			return
 		}
 
-		switch req.Action {
-		case "update_state":
-			if err := updateWorkerLockState(worktreePath, req.State); err != nil {
-				slog.Warn("worker state update failed", "worker_id", workerID, "err", err)
-				handler.RespondError(w, http.StatusInternalServerError, "failed to update state")
-				return
-			}
-			w.WriteHeader(http.StatusOK)
+		dispatchWorkerAction(w, workerID, worktreePath, &req)
+	}
+}
 
-		case "update_task":
-			if err := updateWorkerLockTask(worktreePath, req.TaskID, req.TaskTitle); err != nil {
-				slog.Warn("worker task update failed", "worker_id", workerID, "err", err)
-				handler.RespondError(w, http.StatusInternalServerError, "failed to update task")
-				return
-			}
-			w.WriteHeader(http.StatusOK)
-
-		case "clear_task":
-			if err := clearWorkerLockTask(worktreePath); err != nil {
-				slog.Warn("worker clear task failed", "worker_id", workerID, "err", err)
-				handler.RespondError(w, http.StatusInternalServerError, "failed to clear task")
-				return
-			}
-			w.WriteHeader(http.StatusOK)
-
-		case "read":
-			info, err := readWorkerLock(worktreePath)
-			if err != nil {
-				handler.RespondError(w, http.StatusNotFound, "lock file not found")
-				return
-			}
-			handler.WriteJSON(w, http.StatusOK, info)
-
-		default:
-			handler.RespondError(w, http.StatusBadRequest, fmt.Sprintf("unknown action %q", req.Action))
+// dispatchWorkerAction executes the requested worker state action.
+func dispatchWorkerAction(w http.ResponseWriter, workerID, worktreePath string, req *workerStateRequest) {
+	switch req.Action {
+	case "update_state":
+		if err := updateWorkerLockState(worktreePath, req.State); err != nil {
+			slog.Warn("worker state update failed", "worker_id", workerID, "err", err)
+			handler.RespondError(w, http.StatusInternalServerError, "failed to update state")
+			return
 		}
+		w.WriteHeader(http.StatusOK)
+	case "update_task":
+		if err := updateWorkerLockTask(worktreePath, req.TaskID, req.TaskTitle); err != nil {
+			slog.Warn("worker task update failed", "worker_id", workerID, "err", err)
+			handler.RespondError(w, http.StatusInternalServerError, "failed to update task")
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	case "clear_task":
+		if err := clearWorkerLockTask(worktreePath); err != nil {
+			slog.Warn("worker clear task failed", "worker_id", workerID, "err", err)
+			handler.RespondError(w, http.StatusInternalServerError, "failed to clear task")
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	case "read":
+		info, err := readWorkerLock(worktreePath)
+		if err != nil {
+			handler.RespondError(w, http.StatusNotFound, "lock file not found")
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, info)
+	default:
+		handler.RespondError(w, http.StatusBadRequest, fmt.Sprintf("unknown action %q", req.Action))
 	}
 }
 

@@ -7,9 +7,10 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
+
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
-	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -169,68 +170,64 @@ func stepDetectBackendsWithDeps(deps *cli.Deps, backend string, yes bool) string
 func stepGenerateLoomYaml(backend string, worktreeNames []string) {
 	loomYamlPath := filepath.Join(".", "loom.yaml")
 
-	// Check for existing loom.yaml
 	existing, err := config.LoadProjectFile(".")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "  Warning: error reading existing loom.yaml: %v\n", err)
 		existing = nil
 	}
 
-	if existing != nil {
-		fmt.Println("  Existing loom.yaml found.")
-		if !setupYes {
-			if !promptYesNo("Update loom.yaml with new settings?", true) {
-				fmt.Println("  -> Skipping loom.yaml update")
-				return
-			}
-		}
+	if existing != nil && !confirmLoomYamlUpdate() {
+		return
 	}
 
-	// Build project file: start from existing to preserve customizations, or create fresh
+	pf := buildProjectFile(existing, backend, worktreeNames)
+	writeLoomYamlFile(loomYamlPath, pf)
+}
+
+// confirmLoomYamlUpdate asks the user to confirm updating an existing loom.yaml.
+func confirmLoomYamlUpdate() bool {
+	fmt.Println("  Existing loom.yaml found.")
+	if !setupYes && !promptYesNo("Update loom.yaml with new settings?", true) {
+		fmt.Println("  -> Skipping loom.yaml update")
+		return false
+	}
+	return true
+}
+
+// buildProjectFile creates or updates a ProjectFile with backend and agent entries.
+func buildProjectFile(existing *config.ProjectFile, backend string, worktreeNames []string) *config.ProjectFile {
 	var pf *config.ProjectFile
 	if existing != nil {
 		pf = existing
 	} else {
 		pf = &config.ProjectFile{
 			Daemon: &config.DaemonSettings{
-				PIDFile:   ".loom/daemon.pid",
-				LogDir:    ".loom/logs",
-				EventsDir: ".loom/events",
+				PIDFile: ".loom/daemon.pid", LogDir: ".loom/logs", EventsDir: ".loom/events",
 				RestartPolicy: config.RestartPolicy{
-					MaxRetries:     config.IntPtr(3),
-					BackoffInitial: config.IntPtr(2),
-					BackoffMax:     config.IntPtr(300),
+					MaxRetries: config.IntPtr(3), BackoffInitial: config.IntPtr(2), BackoffMax: config.IntPtr(300),
 				},
 			},
 		}
 	}
-
-	// Update fields managed by setup
 	pf.Version = config.CurrentConfigVersion
 	pf.Backend = backend
-
-	// Merge agent entries: add new worktrees without duplicating existing ones
 	for _, name := range worktreeNames {
 		if !agentEntryExists(pf.Agents, name) {
-			pf.Agents = append(pf.Agents, config.AgentEntry{
-				Worktree: name,
-				Role:     "task",
-				Auto:     true,
-			})
+			pf.Agents = append(pf.Agents, config.AgentEntry{Worktree: name, Role: "task", Auto: true})
 		}
 	}
+	return pf
+}
 
-	// Marshal to YAML
+// writeLoomYamlFile marshals and writes the project file.
+func writeLoomYamlFile(path string, pf *config.ProjectFile) {
 	data, err := yaml.Marshal(pf)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "  Error: failed to marshal loom.yaml: %v\n", err)
 		return
 	}
-
 	header := "# loom.yaml - Project configuration for loom daemon\n# See: loom help setup\n"
-	content := header + string(data)
-
-	if err := os.WriteFile(loomYamlPath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(header+string(data)), 0644); err != nil {
 		fmt.Fprintf(os.Stderr, "  Error: failed to write loom.yaml: %v\n", err)
 		return
 	}

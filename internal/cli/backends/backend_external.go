@@ -1,7 +1,6 @@
 package backends
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -36,25 +35,15 @@ func (e *ExternalBackend) Name() string { return e.name }
 func (e *ExternalBackend) InvokeInteractive(workDir, prompt, agentName string) error {
 	cmd := exec.Command(e.binPath, "invoke", "--interactive")
 	cmd.Dir = workDir
-	env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
-	if agentName != "" {
-		env = append(env, "BD_ACTOR="+agentName)
-	}
-	cmd.Env = env
+	cmd.Env = buildBackendEnv(workDir, agentName)
 
 	// Pass prompt via stdin pipe (not CLI args) to avoid exposure in process listings.
 	// MultiReader delivers the prompt first, then falls through to os.Stdin
 	// for interactive terminal input.
-	r, w, err := os.Pipe()
+	r, err := pipePromptToCmd(cmd, prompt)
 	if err != nil {
-		return fmt.Errorf("failed to create pipe: %w", err)
+		return err
 	}
-	if _, err := io.WriteString(w, prompt); err != nil {
-		w.Close()
-		r.Close()
-		return fmt.Errorf("failed to write prompt to stdin: %w", err)
-	}
-	w.Close()
 	cmd.Stdin = io.MultiReader(r, os.Stdin)
 
 	cmd.Stdout = os.Stdout
@@ -68,24 +57,12 @@ func (e *ExternalBackend) InvokeInteractive(workDir, prompt, agentName string) e
 func (e *ExternalBackend) InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 	cmd := exec.Command(e.binPath, "invoke", "--non-interactive")
 	cmd.Dir = workDir
-	env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
-	if agentName != "" {
-		env = append(env, "BD_ACTOR="+agentName)
-	}
-	cmd.Env = env
+	cmd.Env = buildBackendEnv(workDir, agentName)
 
-	// Pass prompt via stdin pipe
-	r, w, err := os.Pipe()
+	r, err := pipePromptToCmd(cmd, prompt)
 	if err != nil {
-		return fmt.Errorf("failed to create pipe: %w", err)
+		return err
 	}
-	if _, err := io.WriteString(w, prompt); err != nil {
-		w.Close()
-		r.Close()
-		return fmt.Errorf("failed to write prompt to stdin: %w", err)
-	}
-	w.Close()
-	cmd.Stdin = r
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -93,7 +70,6 @@ func (e *ExternalBackend) InvokeNonInteractive(workDir, prompt, agentName string
 		return fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
 	cmd.Stderr = os.Stderr
-
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	if err := cmd.Start(); err != nil {
@@ -101,7 +77,6 @@ func (e *ExternalBackend) InvokeNonInteractive(workDir, prompt, agentName string
 		return fmt.Errorf("failed to start %s: %w", e.binPath, err)
 	}
 
-	// Monitor for shutdown signal
 	guard := newProcessGuard(cmd.Process)
 	go func() {
 		select {
@@ -111,13 +86,7 @@ func (e *ExternalBackend) InvokeNonInteractive(workDir, prompt, agentName string
 		}
 	}()
 
-	// Forward stdout line-by-line
-	scanner := bufio.NewScanner(stdout)
-	buf := make([]byte, 0, 1024*1024)
-	scanner.Buffer(buf, 10*1024*1024)
-	for scanner.Scan() {
-		fmt.Println(scanner.Text())
-	}
+	scanStreamOutput(stdout, func(line string) { fmt.Println(line) })
 
 	runErr := cmd.Wait()
 	guard.WaitAndMark()
@@ -196,60 +165,40 @@ func DiscoverExternalBackends() {
 	}
 
 	seen := make(map[string]bool)
-	dirs := filepath.SplitList(pathEnv)
+	for _, dir := range filepath.SplitList(pathEnv) {
+		discoverBackendsInDir(dir, seen)
+	}
+}
 
-	for _, dir := range dirs {
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			continue // permission denied, non-existent, etc.
+// discoverBackendsInDir scans a single directory for loom-backend-* executables.
+func discoverBackendsInDir(dir string, seen map[string]bool) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return // permission denied, non-existent, etc.
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasPrefix(entry.Name(), "loom-backend-") {
+			continue
 		}
-
-		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
-			}
-
-			name := entry.Name()
-			if !strings.HasPrefix(name, "loom-backend-") {
-				continue
-			}
-
-			backendName := strings.TrimPrefix(name, "loom-backend-")
-			if backendName == "" {
-				continue
-			}
-
-			// First PATH entry wins for duplicate names
-			if seen[backendName] {
-				continue
-			}
-
-			// Built-in backends take priority
-			if cli.IsRegistered(backendName) {
-				seen[backendName] = true
-				continue
-			}
-
-			absPath := filepath.Join(dir, name)
-
-			// Verify file is executable
-			info, err := entry.Info()
-			if err != nil {
-				continue
-			}
-			if info.Mode()&0111 == 0 {
-				continue
-			}
-
+		backendName := strings.TrimPrefix(entry.Name(), "loom-backend-")
+		if backendName == "" || seen[backendName] {
+			continue
+		}
+		// Built-in backends take priority
+		if cli.IsRegistered(backendName) {
 			seen[backendName] = true
-			cli.RegisterBackend(&ExternalBackend{
-				name:    backendName,
-				binPath: absPath,
-			})
-
-			if os.Getenv("LOOM_DEBUG") != "" {
-				fmt.Fprintf(os.Stderr, "[debug] Discovered external backend %q at %s\n", backendName, absPath)
-			}
+			continue
+		}
+		absPath := filepath.Join(dir, entry.Name())
+		info, err := entry.Info()
+		if err != nil || info.Mode()&0111 == 0 {
+			continue
+		}
+		seen[backendName] = true
+		cli.RegisterBackend(&ExternalBackend{name: backendName, binPath: absPath})
+		if os.Getenv("LOOM_DEBUG") != "" {
+			fmt.Fprintf(os.Stderr, "[debug] Discovered external backend %q at %s\n", backendName, absPath)
 		}
 	}
 }

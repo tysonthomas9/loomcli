@@ -92,190 +92,6 @@ func NewLogStreamer(fp string) (*LogStreamer, error) {
 	}, nil
 }
 
-// ReadLastNLines reads the last N lines from the file.
-// Returns lines and the starting line number.
-func ReadLastNLines(filepath string, n int) ([]string, int64, error) {
-	return readLastNLinesFromFile(filepath, n, nil, 0)
-}
-
-// readLastNLinesFromFile reads the last N lines using seek-from-end to avoid
-// loading the entire file into memory. If secureDir is non-nil,
-// uses openLogFileSecure to prevent symlink attacks.
-//
-// When beforeLine > 0, reads the last N lines that appear before the given
-// line number (i.e., lines ending at beforeLine-1). This enables paginated
-// backward scrolling through large log files.
-func readLastNLinesFromFile(filepath string, n int, secureDir *string, beforeLine int64) ([]string, int64, error) {
-	if n <= 0 {
-		n = LogReadDefaultLines
-	}
-	if n > LogReadMaxLines {
-		n = LogReadMaxLines
-	}
-
-	var file *os.File
-	var err error
-	if secureDir != nil {
-		file, err = openLogFileSecure(filepath, *secureDir)
-	} else {
-		file, err = os.Open(filepath)
-	}
-	if err != nil {
-		return nil, 0, err
-	}
-	defer file.Close()
-
-	stat, err := file.Stat()
-	if err != nil {
-		return nil, 0, err
-	}
-	fileSize := stat.Size()
-
-	// Empty file
-	if fileSize == 0 {
-		return nil, 1, nil
-	}
-
-	// Determine effective end position for backward scan
-	effectiveEnd := fileSize
-	if beforeLine > 0 {
-		if beforeLine <= 1 {
-			// Nothing before line 1
-			return nil, 1, nil
-		}
-		offset, err := findLineByteOffset(file, beforeLine)
-		if err != nil {
-			return nil, 0, err
-		}
-		if offset < 0 {
-			// beforeLine exceeds total lines in file — nothing to return
-			return nil, beforeLine, nil
-		}
-		effectiveEnd = offset
-		if effectiveEnd == 0 {
-			// beforeLine is 1, nothing before it
-			return nil, 1, nil
-		}
-	}
-
-	// Phase 1: Backward scan to find byte offset of last N lines
-	readOffset := int64(0)
-	newlineCount := 0
-	buf := make([]byte, readChunkSize)
-	pos := effectiveEnd
-	firstChunk := true
-
-	for pos > 0 && newlineCount < n {
-		chunkSize := int64(readChunkSize)
-		if chunkSize > pos {
-			chunkSize = pos
-		}
-		pos -= chunkSize
-
-		nRead, err := file.ReadAt(buf[:chunkSize], pos)
-		if err != nil && err != io.EOF {
-			return nil, 0, err
-		}
-
-		// Scan backward through the chunk
-		for i := nRead - 1; i >= 0; i-- {
-			if buf[i] == '\n' {
-				// Skip trailing newline at end of range
-				if firstChunk && pos+int64(i) == effectiveEnd-1 {
-					firstChunk = false
-					continue
-				}
-				firstChunk = false
-				newlineCount++
-				if newlineCount == n {
-					readOffset = pos + int64(i) + 1
-					break
-				}
-			} else {
-				firstChunk = false
-			}
-		}
-	}
-
-	// Phase 2: Count lines before readOffset to compute startLine
-	var startLine int64
-	if readOffset == 0 {
-		startLine = 1
-	} else {
-		linesBeforeOffset := int64(0)
-		countPos := int64(0)
-		for countPos < readOffset {
-			chunkSize := int64(readChunkSize)
-			if countPos+chunkSize > readOffset {
-				chunkSize = readOffset - countPos
-			}
-			nRead, err := file.ReadAt(buf[:chunkSize], countPos)
-			if err != nil && err != io.EOF {
-				return nil, 0, err
-			}
-			for i := 0; i < nRead; i++ {
-				if buf[i] == '\n' {
-					linesBeforeOffset++
-				}
-			}
-			countPos += int64(nRead)
-		}
-		startLine = linesBeforeOffset + 1
-	}
-
-	// Phase 3: Read lines from readOffset to effectiveEnd using Scanner
-	if _, err := file.Seek(readOffset, io.SeekStart); err != nil {
-		return nil, 0, err
-	}
-	reader := io.LimitReader(file, effectiveEnd-readOffset)
-	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-	var lines []string
-	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, 0, err
-	}
-
-	return lines, startLine, nil
-}
-
-// findLineByteOffset returns the byte offset where the given 1-based line
-// number starts in the file. Returns -1 if lineNum exceeds the total number
-// of lines in the file.
-func findLineByteOffset(file *os.File, lineNum int64) (int64, error) {
-	if lineNum <= 1 {
-		return 0, nil
-	}
-
-	buf := make([]byte, readChunkSize)
-	pos := int64(0)
-	nlCount := int64(0)
-	targetNL := lineNum - 1 // number of newlines before lineNum
-
-	for {
-		nRead, err := file.ReadAt(buf, pos)
-		if nRead > 0 {
-			for i := 0; i < nRead; i++ {
-				if buf[i] == '\n' {
-					nlCount++
-					if nlCount == targetNL {
-						return pos + int64(i) + 1, nil
-					}
-				}
-			}
-		}
-		pos += int64(nRead)
-		if err == io.EOF {
-			return -1, nil // lineNum exceeds total lines
-		}
-		if err != nil {
-			return 0, err
-		}
-	}
-}
-
 // Stream starts SSE streaming to the ResponseWriter.
 // startOffset is the byte offset to begin replay from.
 // Blocks until context canceled or error.
@@ -285,71 +101,93 @@ func (s *LogStreamer) Stream(ctx context.Context, w http.ResponseWriter, startOf
 		return fmt.Errorf("streaming unsupported")
 	}
 
-	// Set SSE headers
+	writeSSEHeaders(w)
+	_, _ = fmt.Fprintf(w, "retry: %d\n\n", realtime.RetryMs)
+	flusher.Flush()
+
+	currentOffset, err := s.replayExistingContent(ctx, w, flusher, startOffset)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	s.currentSize = currentOffset
+	s.mu.Unlock()
+
+	return s.streamEventLoop(ctx, w, flusher)
+}
+
+// writeSSEHeaders sets standard Server-Sent Events headers.
+func writeSSEHeaders(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
+}
 
-	// Send retry interval
-	_, _ = fmt.Fprintf(w, "retry: %d\n\n", realtime.RetryMs)
-	flusher.Flush()
-
-	// Open file and seek to position
+// replayExistingContent opens the log file and replays content from startOffset.
+// Returns the final byte offset after replay.
+func (s *LogStreamer) replayExistingContent(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, startOffset int64) (int64, error) {
 	logDir, dirErr := GetLogDir()
 	if dirErr != nil {
-		return dirErr
+		return 0, dirErr
 	}
 	file, err := openLogFileSecure(s.logFilePath, logDir)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer file.Close()
 
 	stat, err := file.Stat()
 	if err != nil {
-		return err
+		return 0, err
 	}
 
-	if startOffset < 0 {
-		startOffset = 0
-	}
-	if startOffset > stat.Size() {
-		startOffset = stat.Size()
-	}
-
-	// Read initial content and emit existing entries from offset.
+	startOffset = clampOffset(startOffset, stat.Size())
 	if _, err := file.Seek(startOffset, io.SeekStart); err != nil {
-		return err
+		return 0, err
 	}
+
+	return s.readAndEmitChunks(ctx, w, flusher, file, startOffset)
+}
+
+// clampOffset ensures offset is within [0, fileSize].
+func clampOffset(offset, fileSize int64) int64 {
+	if offset < 0 {
+		return 0
+	}
+	if offset > fileSize {
+		return fileSize
+	}
+	return offset
+}
+
+// readAndEmitChunks reads the file from current position and emits SSE chunks.
+func (s *LogStreamer) readAndEmitChunks(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, file *os.File, currentOffset int64) (int64, error) {
 	reader := bufio.NewReaderSize(file, readChunkSize)
-	currentOffset := startOffset
 	buf := make([]byte, readChunkSize)
 	for {
-		// Check for cancellation periodically during large file scans
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return currentOffset, ctx.Err()
 		default:
 		}
-
 		nRead, readErr := reader.Read(buf)
 		if nRead > 0 {
 			currentOffset += int64(nRead)
 			s.sendLogChunk(w, flusher, buf[:nRead], currentOffset)
 		}
+		if readErr == io.EOF {
+			return currentOffset, nil
+		}
 		if readErr != nil {
-			if readErr == io.EOF {
-				break
-			}
-			return readErr
+			return currentOffset, readErr
 		}
 	}
-	s.mu.Lock()
-	s.currentSize = currentOffset
-	s.mu.Unlock()
+}
 
-	// Start streaming new lines
+// streamEventLoop handles the watcher-based live streaming loop.
+func (s *LogStreamer) streamEventLoop(ctx context.Context, w http.ResponseWriter, flusher http.Flusher) error {
 	heartbeat := time.NewTicker(logHeartbeatInterval)
 	defer heartbeat.Stop()
 
@@ -363,40 +201,24 @@ func (s *LogStreamer) Stream(ctx context.Context, w http.ResponseWriter, startOf
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-
 		case event, ok := <-s.watcher.Events:
 			if !ok {
 				return nil
 			}
-			// Only process events for our file
-			if event.Name != s.logFilePath {
-				continue
-			}
-			if event.Has(fsnotify.Write) || event.Has(fsnotify.Create) {
+			if event.Name == s.logFilePath && (event.Has(fsnotify.Write) || event.Has(fsnotify.Create)) {
 				if !pendingRead {
 					pendingRead = true
 					debounce.Reset(logDebounceInterval)
 				}
 			}
-
 		case <-debounce.C:
 			pendingRead = false
-			if err := s.readNewChunks(w, flusher); err != nil {
-				// File might have been truncated or rotated
-				if err == errFileTruncated {
-					s.sendTruncatedEvent(w, flusher)
-					s.mu.Lock()
-					s.currentSize = 0
-					s.mu.Unlock()
-				}
-			}
-
+			s.handleDebouncedRead(w, flusher)
 		case err, ok := <-s.watcher.Errors:
 			if !ok {
 				return nil
 			}
 			return fmt.Errorf("watcher error: %w", err)
-
 		case <-heartbeat.C:
 			if _, err := fmt.Fprint(w, ": heartbeat\n\n"); err != nil {
 				return err
@@ -406,65 +228,98 @@ func (s *LogStreamer) Stream(ctx context.Context, w http.ResponseWriter, startOf
 	}
 }
 
+// handleDebouncedRead reads new chunks and handles file truncation.
+func (s *LogStreamer) handleDebouncedRead(w http.ResponseWriter, flusher http.Flusher) {
+	if err := s.readNewChunks(w, flusher); err != nil {
+		if err == errFileTruncated {
+			s.sendTruncatedEvent(w, flusher)
+			s.mu.Lock()
+			s.currentSize = 0
+			s.mu.Unlock()
+		}
+	}
+}
+
 var errFileTruncated = fmt.Errorf("file truncated")
 
 // readNewChunks reads new bytes appended since the last read and emits them.
 func (s *LogStreamer) readNewChunks(w http.ResponseWriter, flusher http.Flusher) error {
-	logDir, dirErr := GetLogDir()
-	if dirErr != nil {
-		return dirErr
-	}
-	file, err := openLogFileSecure(s.logFilePath, logDir)
+	file, currentSize, err := s.openAndCheckTruncation()
 	if err != nil {
 		return err
+	}
+	if file == nil {
+		return nil // no new data
 	}
 	defer file.Close()
-
-	// Check for truncation
-	stat, err := file.Stat()
-	if err != nil {
-		return err
-	}
-
-	s.mu.Lock()
-	if stat.Size() < s.currentSize {
-		s.mu.Unlock()
-		return errFileTruncated
-	}
-	currentSize := s.currentSize
-	s.mu.Unlock()
-
-	if stat.Size() == currentSize {
-		return nil
-	}
 
 	if _, err := file.Seek(currentSize, io.SeekStart); err != nil {
 		return err
 	}
 
-	reader := bufio.NewReaderSize(file, readChunkSize)
-	newSize := currentSize
-	buf := make([]byte, readChunkSize)
+	newSize, err := s.emitNewData(w, flusher, file, currentSize)
+	if err != nil {
+		return err
+	}
 
+	s.mu.Lock()
+	s.currentSize = newSize
+	s.mu.Unlock()
+	return nil
+}
+
+// openAndCheckTruncation opens the log file and checks if it was truncated.
+// Returns (nil, 0, nil) if no new data is available.
+func (s *LogStreamer) openAndCheckTruncation() (*os.File, int64, error) {
+	logDir, dirErr := GetLogDir()
+	if dirErr != nil {
+		return nil, 0, dirErr
+	}
+	file, err := openLogFileSecure(s.logFilePath, logDir)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	stat, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil, 0, err
+	}
+
+	s.mu.Lock()
+	if stat.Size() < s.currentSize {
+		s.mu.Unlock()
+		file.Close()
+		return nil, 0, errFileTruncated
+	}
+	currentSize := s.currentSize
+	s.mu.Unlock()
+
+	if stat.Size() == currentSize {
+		file.Close()
+		return nil, 0, nil
+	}
+	return file, currentSize, nil
+}
+
+// emitNewData reads from the file at the current position and sends SSE chunks.
+func (s *LogStreamer) emitNewData(w http.ResponseWriter, flusher http.Flusher, file *os.File, offset int64) (int64, error) {
+	reader := bufio.NewReaderSize(file, readChunkSize)
+	buf := make([]byte, readChunkSize)
+	newSize := offset
 	for {
 		nRead, readErr := reader.Read(buf)
 		if nRead > 0 {
 			newSize += int64(nRead)
 			s.sendLogChunk(w, flusher, buf[:nRead], newSize)
 		}
+		if readErr == io.EOF {
+			return newSize, nil
+		}
 		if readErr != nil {
-			if readErr == io.EOF {
-				break
-			}
-			return readErr
+			return newSize, readErr
 		}
 	}
-
-	s.mu.Lock()
-	s.currentSize = newSize
-	s.mu.Unlock()
-
-	return nil
 }
 
 // sendLogChunk sends a raw log byte chunk as an SSE event.

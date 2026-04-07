@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
 	"github.com/tysonthomas9/loomcli/internal/cli"
 )
 
@@ -94,6 +95,39 @@ func init() {
 type checkFunc func() CheckResult
 
 func runDoctor(cmd *cobra.Command, args []string) error {
+	checks := collectDoctorChecks(cmd)
+
+	var results []CheckResult
+	for _, check := range checks {
+		result := check()
+		if result.Name == "" {
+			continue
+		}
+		results = append(results, result)
+	}
+
+	summary := tallyResults(results)
+	output := DoctorOutput{Checks: results, Summary: summary}
+
+	if doctorJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(output); err != nil {
+			return err
+		}
+	} else {
+		renderDoctorHuman(output)
+	}
+
+	if summary.Fail > 0 {
+		cmd.SilenceErrors = true
+		return fmt.Errorf("doctor found %d failure(s)", summary.Fail)
+	}
+	return nil
+}
+
+// collectDoctorChecks assembles the list of checks based on active backends.
+func collectDoctorChecks(cmd *cobra.Command) []checkFunc {
 	deps := cli.GetDeps(cmd)
 	checks := []checkFunc{
 		func() CheckResult { return checkGit(deps) },
@@ -114,18 +148,12 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	checks = append(checks, checkBackendCLI, checkProjectConfig, checkGlobalConfig,
 		checkWorktrees, checkStaleLocks, checkStaleSignalFiles, checkStaleSessionRecords,
 		checkOrphanedTmuxSessions, checkLoomDaemon, checkRedis)
+	return checks
+}
 
-	var results []CheckResult
-	for _, check := range checks {
-		result := check()
-		// Skip checks that returned empty (conditional checks that don't apply)
-		if result.Name == "" {
-			continue
-		}
-		results = append(results, result)
-	}
-
-	summary := DoctorSummary{}
+// tallyResults counts pass/warn/fail across all check results.
+func tallyResults(results []CheckResult) DoctorSummary {
+	var summary DoctorSummary
 	for _, r := range results {
 		switch r.Status {
 		case StatusPass:
@@ -136,24 +164,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 			summary.Fail++
 		}
 	}
-
-	output := DoctorOutput{Checks: results, Summary: summary}
-
-	if doctorJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(output); err != nil {
-			return err
-		}
-	} else {
-		renderDoctorHuman(output)
-	}
-
-	if summary.Fail > 0 {
-		cmd.SilenceErrors = true
-		return fmt.Errorf("doctor found %d failure(s)", summary.Fail)
-	}
-	return nil
+	return summary
 }
 
 func renderDoctorHuman(output DoctorOutput) {

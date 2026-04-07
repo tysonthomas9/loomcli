@@ -1,5 +1,3 @@
-//go:build ignore
-
 package cli
 
 import (
@@ -319,7 +317,7 @@ func TestDiscoverLegacy_NonDirEntry(t *testing.T) {
 	// Create a plain file in the worktrees directory (should be skipped)
 	os.WriteFile(filepath.Join(wtDir, "not-a-dir.txt"), []byte("text"), 0644)
 
-	r := &Resolver{mode: ModeLegacy}
+	r := &Resolver{Mode: ModeLegacy}
 	worktrees, err := r.DiscoverWorktrees()
 	if err != nil {
 		t.Fatalf("DiscoverWorktrees: %v", err)
@@ -354,7 +352,7 @@ func TestDiscoverLegacy_BranchErrorFallback(t *testing.T) {
 	brokenRepo := filepath.Join(wtDir, "broken")
 	os.MkdirAll(filepath.Join(brokenRepo, ".git"), 0755)
 
-	r := &Resolver{mode: ModeLegacy}
+	r := &Resolver{Mode: ModeLegacy}
 	worktrees, err := r.DiscoverWorktrees()
 	if err != nil {
 		t.Fatalf("DiscoverWorktrees: %v", err)
@@ -383,7 +381,7 @@ func TestDiscoverLegacy_WorktreesDirMissing(t *testing.T) {
 	os.Chdir(tmpDir)
 
 	// Don't create the worktrees directory
-	r := &Resolver{mode: ModeLegacy}
+	r := &Resolver{Mode: ModeLegacy}
 	_, err := r.DiscoverWorktrees()
 	if err == nil {
 		t.Fatal("expected error when worktrees directory missing")
@@ -418,7 +416,7 @@ func TestDiscoverLegacy_ReadDirError(t *testing.T) {
 	os.Chmod(wtDir, 0000)
 	t.Cleanup(func() { os.Chmod(wtDir, 0755) })
 
-	r := &Resolver{mode: ModeLegacy}
+	r := &Resolver{Mode: ModeLegacy}
 	_, err := r.DiscoverWorktrees()
 	if err == nil {
 		t.Fatal("expected error when worktrees directory is unreadable")
@@ -443,9 +441,9 @@ func TestDiscoverWorkspace_WorkspaceNotFound(t *testing.T) {
 
 	// Manually create a resolver with a workspace name not in config
 	r := &Resolver{
-		mode:      ModeWorkspace,
-		config:    cfg,
-		workspace: "nonexistent",
+		Mode:      ModeWorkspace,
+		Config:    cfg,
+		Workspace: "nonexistent",
 	}
 
 	_, err := r.discoverWorkspace()
@@ -512,12 +510,12 @@ func TestResolveWorkspacePath_WorkspaceNotFound(t *testing.T) {
 	}
 
 	r := &Resolver{
-		mode:      ModeWorkspace,
-		config:    cfg,
-		workspace: "nonexistent",
+		Mode:      ModeWorkspace,
+		Config:    cfg,
+		Workspace: "nonexistent",
 	}
 
-	_, err := r.resolveWorkspacePath("some-repo")
+	_, err := r.ResolveWorkspacePath("some-repo")
 	if err == nil {
 		t.Fatal("expected error for nonexistent workspace")
 	}
@@ -544,12 +542,12 @@ func TestResolveWorkspacePath_RepoPathNotExist(t *testing.T) {
 	}
 
 	r := &Resolver{
-		mode:      ModeWorkspace,
-		config:    cfg,
-		workspace: "ws",
+		Mode:      ModeWorkspace,
+		Config:    cfg,
+		Workspace: "ws",
 	}
 
-	_, err := r.resolveWorkspacePath("missing-repo")
+	_, err := r.ResolveWorkspacePath("missing-repo")
 	if err == nil {
 		t.Fatal("expected error for missing repo path")
 	}
@@ -558,93 +556,5 @@ func TestResolveWorkspacePath_RepoPathNotExist(t *testing.T) {
 	}
 }
 
-func TestResolveAgentTarget_WorkspaceMode_AbsolutePath(t *testing.T) {
-	tmpDir := t.TempDir()
-	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
-
-	cfg := &LoomConfig{
-		DefaultWorkspace: "ws",
-		Workspaces: map[string]WorkspaceConfig{
-			"ws": {
-				Path: tmpDir,
-				Repos: []RepoConfig{
-					{Name: "repo1", Path: filepath.Join(tmpDir, "repo1")},
-				},
-			},
-		},
-	}
-	setupWorkspaceConfig(t, cfg)
-
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
-
-	// Create a target directory for the absolute path
-	absTarget := filepath.Join(tmpDir, "custom-target")
-	os.MkdirAll(absTarget, 0755)
-
-	target, err := ResolveAgentTarget(absTarget, "")
-	if err != nil {
-		t.Fatalf("ResolveAgentTarget: %v", err)
-	}
-	if target.WorkDir != absTarget {
-		t.Errorf("expected WorkDir %q, got %q", absTarget, target.WorkDir)
-	}
-	if target.AgentName != "custom-target" {
-		t.Errorf("expected AgentName 'custom-target', got %q", target.AgentName)
-	}
-}
-
-func TestResolveAgentTarget_WorkspaceMode_AbsolutePathNotExist(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	cfg := &LoomConfig{
-		DefaultWorkspace: "ws",
-		Workspaces: map[string]WorkspaceConfig{
-			"ws": {
-				Path: tmpDir,
-				Repos: []RepoConfig{
-					{Name: "repo1", Path: filepath.Join(tmpDir, "repo1")},
-				},
-			},
-		},
-	}
-	setupWorkspaceConfig(t, cfg)
-
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
-
-	_, err := ResolveAgentTarget("/nonexistent/absolute/path", "")
-	if err == nil {
-		t.Fatal("expected error for nonexistent absolute path")
-	}
-	if got := err.Error(); !strings.Contains(got, "path does not exist") {
-		t.Errorf("expected error containing 'path does not exist', got %q", got)
-	}
-}
-
-func TestResolveAgentTarget_WorkspaceMode_NoWorkspacePath(t *testing.T) {
-	cfg := &LoomConfig{
-		DefaultWorkspace: "ws",
-		Workspaces: map[string]WorkspaceConfig{
-			"ws": {
-				Path:  "", // empty path
-				Repos: []RepoConfig{},
-			},
-		},
-	}
-	setupWorkspaceConfig(t, cfg)
-
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
-
-	_, err := ResolveAgentTarget("", "")
-	if err == nil {
-		t.Fatal("expected error when workspace has no path")
-	}
-	if got := err.Error(); !strings.Contains(got, "has no path configured") {
-		t.Errorf("expected error containing 'has no path configured', got %q", got)
-	}
-}
+// TestResolveAgentTarget_WorkspaceMode_* tests have been moved to
+// internal/cli/workspace/workspace_resolve_test.go where ResolveAgentTarget lives.

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
@@ -110,15 +111,25 @@ func runInitWorkspace(cmd *cobra.Command, _ []string) {
 	fmt.Println("=========================")
 	fmt.Println("")
 
-	// Step 1: Check prerequisites
 	fmt.Println("Step 1: Prerequisites")
 	if !checkPrerequisites(deps) {
 		os.Exit(1)
 	}
 	fmt.Println("")
 
-	// Step 2: Validate workspace exists
 	fmt.Println("Step 2: Validate workspace")
+	ws := validateWorkspaceExists()
+	fmt.Println("")
+
+	fmt.Println("Step 3: Issue backend")
+	initWorkspaceBeads(deps, ws)
+	fmt.Println("")
+
+	showWorkspaceSummary(ws)
+}
+
+// validateWorkspaceExists loads config and validates the workspace exists.
+func validateWorkspaceExists() config.WorkspaceConfig {
 	cfg, err := config.LoadConfig()
 	if err != nil || cfg == nil {
 		fmt.Fprintf(os.Stderr, "✗ No loom config found. Create a workspace first with:\n")
@@ -144,10 +155,11 @@ func runInitWorkspace(cmd *cobra.Command, _ []string) {
 	for _, repo := range ws.Repos {
 		fmt.Printf("    - %s\n", repo.Name)
 	}
-	fmt.Println("")
+	return ws
+}
 
-	// Step 3: Initialize beads in workspace root (skip when fleet or fleet-db is active)
-	fmt.Println("Step 3: Issue backend")
+// initWorkspaceBeads handles beads initialization for workspace setup.
+func initWorkspaceBeads(deps *cli.Deps, ws config.WorkspaceConfig) {
 	if cli.IsFleetActive() {
 		fmt.Println("→ Skipping beads init (fleet backend active)")
 	} else if cli.IsFleetDBActive() {
@@ -159,10 +171,6 @@ func runInitWorkspace(cmd *cobra.Command, _ []string) {
 	} else {
 		fmt.Println("→ Skipping beads initialization")
 	}
-	fmt.Println("")
-
-	// Step 4: Show workspace ready summary
-	showWorkspaceSummary(ws)
 }
 
 func initBeadsInWorkspace(deps *cli.Deps, wsPath string) {

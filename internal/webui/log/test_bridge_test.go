@@ -19,6 +19,17 @@ type LogModule = Module
 // NewLogModule → NewModule
 var NewLogModule = NewModule
 
+// ---------------------------------------------------------------------------
+// Lowercase aliases for exported functions (tests use pre-refactor names)
+// ---------------------------------------------------------------------------
+
+var fileExists = FileExists
+var getWorkspaceLogDir = GetWorkspaceLogDir
+var getAgentLogPath = GetAgentLogPath
+var getTaskLogPath = GetTaskLogPath
+var getTaskLogDir = GetTaskLogDir
+var listTaskPhases = ListTaskPhases
+
 // mockAgentService implements service.AgentService with no-op defaults for module tests.
 type mockAgentService struct {
 	getTerminalInfoFunc       func(ctx context.Context, wsID, agentName string) (*service.AgentTerminalInfoResult, error)

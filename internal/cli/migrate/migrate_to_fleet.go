@@ -19,7 +19,7 @@ type bdRunner interface {
 type execBDRunner struct{}
 
 func (e *execBDRunner) Run(args ...string) ([]byte, error) {
-	cmd := exec.Command("bd", args...)
+	cmd := exec.Command("bd", args...) //nolint:gosec // G204: intentional bd CLI invocation
 	return cmd.Output()
 }
 

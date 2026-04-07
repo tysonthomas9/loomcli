@@ -6,6 +6,7 @@ import (
 	"log"
 	"log/slog"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"syscall"
 	"time"
@@ -14,8 +15,8 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/cli/automode"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
@@ -160,27 +161,32 @@ func init() {
 	cli.RegisterCommand(daemonCmd)
 }
 
-func runDaemon(cmd *cobra.Command, args []string) {
-	// 0. Create own process group so signals to the parent's group don't kill us.
-	// This is critical when the daemon is launched via `loom daemon &` from a
-	// script — without this, the daemon shares the script's PGID and any
-	// process-group-wide signal can take down the daemon.
-	if err := syscall.Setpgid(0, 0); err != nil {
-		// Setpgid can fail if we're already a session leader or after exec in
-		// some configurations. Fall back to setsid which creates a new session.
-		if _, err2 := syscall.Setsid(); err2 != nil {
-			fmt.Fprintf(os.Stderr, "Warning: could not isolate process group (setpgid: %v, setsid: %v)\n", err, err2)
-		}
-	}
+// setupSignalHandler sets up a signal handler that closes the returned channel on SIGINT/SIGTERM/SIGHUP.
+func setupSignalHandler() chan struct{} {
+	shutdown := make(chan struct{})
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 
-	// 1. Get project directory (current working directory)
+	go func() {
+		sig := <-sigChan
+		signal.Stop(sigChan)
+		log.Printf("[daemon] Shutdown signal received: %v (PID=%d, PGID=%d)", sig, os.Getpid(), syscall.Getpgrp())
+		fmt.Printf("\n[daemon] Shutdown signal received (%v), stopping gracefully...\n", sig)
+		close(shutdown)
+	}()
+
+	return shutdown
+}
+
+func runDaemon(cmd *cobra.Command, args []string) {
+	isolateProcessGroup()
+
 	projectDir, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: cannot determine working directory: %v\n", err)
 		os.Exit(1)
 	}
 
-	// 2. Load and validate configuration
 	config, err := cfgpkg.LoadDaemonConfig(projectDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: loading config: %v\n", err)
@@ -192,39 +198,122 @@ func runDaemon(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	// 3. Resolve paths (PID file, log dir, state file)
-	pidFilePath := ResolveDaemonPath(projectDir, config.Daemon.PIDFile)
-	logDir := ResolveDaemonPath(projectDir, config.Daemon.LogDir)
-	stateFilePath := cfgpkg.ResolveDaemonStatePath(projectDir)
-	lockFilePath := filepath.Join(filepath.Dir(pidFilePath), "daemon.lock")
+	paths := resolveDaemonPaths(projectDir, config)
+	ValidateDaemonPaths(projectDir, paths.pidFile, paths.logDir)
 
-	// 3.5. Validate paths stay within expected boundaries
-	ValidateDaemonPaths(projectDir, pidFilePath, logDir)
-
-	// 4. Dry-run mode: print config and exit (before acquiring lock)
 	if daemonDryRun {
-		printDryRunInfo(config, pidFilePath, logDir, stateFilePath)
+		printDryRunInfo(config, paths.pidFile, paths.logDir, paths.stateFile)
 		return
 	}
 
-	// 5. Create directories (needed for lock file and PID file)
-	if err := os.MkdirAll(filepath.Dir(pidFilePath), 0755); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: creating PID directory: %v\n", err)
+	prepareDaemonDirs(paths.pidFile, paths.logDir)
+	lockFile := acquireDaemonLock(paths.lockFile)
+	defer lockFile.Close()
+	defer os.Remove(paths.lockFile)
+
+	initPIDFile(paths.pidFile)
+	defer os.Remove(paths.pidFile)
+	defer os.Remove(paths.stateFile)
+
+	shutdown, daemon, fleetDBSrv := initDaemonServices(config, projectDir, paths)
+	if fleetDBSrv != nil {
+		defer fleetDBSrv.Stop()
+	}
+
+	runDaemonMainLoop(config, projectDir, paths, shutdown, daemon, lockFile, fleetDBSrv)
+}
+
+// daemonPaths holds resolved filesystem paths for the daemon.
+type daemonPaths struct {
+	pidFile   string
+	logDir    string
+	stateFile string
+	lockFile  string
+	eventsDir string
+}
+
+// resolveDaemonPaths resolves all daemon-related filesystem paths.
+func resolveDaemonPaths(projectDir string, config *cfgpkg.DaemonConfig) daemonPaths {
+	pidFile := supervisor.ResolveDaemonPath(projectDir, config.Daemon.PIDFile)
+	return daemonPaths{
+		pidFile:   pidFile,
+		logDir:    supervisor.ResolveDaemonPath(projectDir, config.Daemon.LogDir),
+		stateFile: cfgpkg.ResolveDaemonStatePath(projectDir),
+		lockFile:  filepath.Join(filepath.Dir(pidFile), "daemon.lock"),
+		eventsDir: supervisor.ResolveDaemonPath(projectDir, config.Daemon.EventsDir),
+	}
+}
+
+// initPIDFile removes any stale PID file and writes the current PID.
+func initPIDFile(pidFilePath string) {
+	os.Remove(pidFilePath)
+	if err := writePIDFile(pidFilePath, os.Getpid()); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: writing PID file: %v\n", err)
 		os.Exit(1)
 	}
-	if err := os.MkdirAll(logDir, 0700); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: creating log directory: %v\n", err)
+}
+
+// initDaemonServices sets up shutdown handler, event bus, fleet DB, and creates the daemon.
+func initDaemonServices(config *cfgpkg.DaemonConfig, projectDir string, paths daemonPaths) (chan struct{}, *Daemon, *cli.FleetDBServer) {
+	shutdown := setupSignalHandler()
+
+	eventBus := events.NewBus(paths.eventsDir)
+
+	if otelExp := initOTelExporter(config, eventBus); otelExp != nil {
+		// Caller cannot defer this, but otel exporter registers its own shutdown hook
+		_ = otelExp
+	}
+
+	fleetDBSrv := maybeStartFleetDB(config, projectDir)
+
+	daemon, err := NewDaemon(config, projectDir, eventBus, cli.DefaultIssueBackend())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: creating daemon: %v\n", err)
 		os.Exit(1)
 	}
 
-	// 6. Acquire exclusive lock to prevent concurrent daemon startup
-	lockFile, err := os.OpenFile(lockFilePath, os.O_CREATE|os.O_RDWR, 0644)
+	return shutdown, daemon, fleetDBSrv
+}
+
+// runDaemonMainLoop starts the daemon, state updater, and waits for shutdown.
+func runDaemonMainLoop(config *cfgpkg.DaemonConfig, projectDir string, paths daemonPaths, shutdown chan struct{}, daemon *Daemon, lockFile *os.File, fleetDBSrv *cli.FleetDBServer) {
+	cli.PrintDaemonBanner(config, projectDir)
+
+	maxRetries := 3
+	if config.Daemon.RestartPolicy.MaxRetries != nil {
+		maxRetries = *config.Daemon.RestartPolicy.MaxRetries
+	}
+
+	startedAt := time.Now()
+	if err := writeStateFile(paths.stateFile, startedAt, daemon.Agents(), maxRetries); err != nil {
+		fmt.Printf("Warning: failed to write initial state file: %v\n", err)
+	}
+
+	if err := daemon.Start(); err != nil {
+		cleanupOnStartFailure(fleetDBSrv, paths.pidFile, paths.stateFile, lockFile, paths.lockFile)
+		fmt.Fprintf(os.Stderr, "Error: starting daemon: %v\n", err)
+		os.Exit(1)
+	}
+
+	startDaemonSockets(daemon, projectDir, config)
+	stateUpdateDone := startStateUpdater(shutdown, paths.stateFile, startedAt, daemon, maxRetries)
+
+	<-shutdown
+	fmt.Println("\nShutting down...")
+	daemon.Stop()
+	<-stateUpdateDone
+	fmt.Println("Daemon stopped.")
+}
+
+// acquireDaemonLock opens and locks the daemon lock file, writing lock info.
+func acquireDaemonLock(lockFilePath string) *os.File {
+	lf, err := os.OpenFile(lockFilePath, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: opening lock file: %v\n", err)
 		os.Exit(1)
 	}
-	if err := lockfile.TryLockExclusive(lockFile); err != nil {
-		lockFile.Close()
+	if err := lockfile.TryLockExclusive(lf); err != nil {
+		lf.Close()
 		if err == lockfile.ErrLocked {
 			fmt.Fprintf(os.Stderr, "Error: daemon already running (lock held on %s)\n", lockFilePath)
 			os.Exit(1)
@@ -232,127 +321,52 @@ func runDaemon(cmd *cobra.Command, args []string) {
 		fmt.Fprintf(os.Stderr, "Error: acquiring daemon lock: %v\n", err)
 		os.Exit(1)
 	}
-	// Lock is released when the file descriptor is closed (including on process crash)
-	defer lockFile.Close()
-	defer os.Remove(lockFilePath)
 
-	// Write daemon info into the lock file
 	lockInfo, _ := json.Marshal(lockfile.LockInfo{
 		PID:       os.Getpid(),
 		StartedAt: time.Now(),
 	})
-	_, _ = lockFile.Seek(0, 0)
-	_ = lockFile.Truncate(0)
-	_, _ = lockFile.Write(lockInfo)
+	_, _ = lf.Seek(0, 0)
+	_ = lf.Truncate(0)
+	_, _ = lf.Write(lockInfo)
 
-	// 7. Clean up any stale PID file from a previous daemon (we hold the lock,
-	// so no other daemon is running — any existing PID file is stale)
-	os.Remove(pidFilePath)
+	return lf
+}
 
-	// 8. Write PID file
-	if err := writePIDFile(pidFilePath, os.Getpid()); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: writing PID file: %v\n", err)
-		os.Exit(1)
-	}
-	defer os.Remove(pidFilePath)
-	defer os.Remove(stateFilePath)
-
-	// 9. Setup signal handler
-	shutdown := automode.SetupSignalHandler()
-
-	// 9.5. Initialize event bus for structured observability
-	eventsDir := ResolveDaemonPath(projectDir, config.Daemon.EventsDir)
-	eventBus := events.NewBus(eventsDir)
-	defer func() { _ = eventBus.Close() }()
-
-	// 9.6. Initialize OTel exporter if enabled
-	if otelExp := initOTelExporter(config, eventBus); otelExp != nil {
-		defer stopOTelExporter(otelExp)
-	}
-
-	// 9.7. Start fleet-db backend if enabled (soft-failure, like OTel)
-	var fleetDBSrv *cli.FleetDBServer
+// maybeStartFleetDB starts the fleet-db backend if enabled. Returns nil on soft failure.
+func maybeStartFleetDB(config *cfgpkg.DaemonConfig, projectDir string) *cli.FleetDBServer {
 	fleetCfg, fleetEnabled := cfgpkg.ResolveFleetDBConfig(&config.Daemon)
-	if fleetEnabled {
-		fleetCfg.DBPath = filepath.Join(projectDir, ".loom", "fleetdb.sqlite")
-		fleetCfg.SocketPath = filepath.Join(projectDir, ".loom", "fleetdb.sock")
-		var fleetErr error
-		fleetDBSrv, fleetErr = cli.NewFleetDBServer(fleetCfg, slog.Default())
-		if fleetErr != nil {
-			log.Printf("warning: failed to start fleet-db server: %v (continuing without fleet-db)", fleetErr)
-			fleetDBSrv = nil
-		} else {
-			cli.SetDefaultIssueBackend(fleetDBSrv.Backend())
-			defer fleetDBSrv.Stop()
-			log.Printf("fleet-db backend active (workspace: %s)", fleetCfg.Workspace)
-		}
+	if !fleetEnabled {
+		return nil
 	}
 
-	// 10. Create and start daemon (from daemon.go)
-	daemon, err := NewDaemon(config, projectDir, eventBus, cli.DefaultIssueBackend())
+	fleetCfg.DBPath = filepath.Join(projectDir, ".loom", "fleetdb.sqlite")
+	fleetCfg.SocketPath = filepath.Join(projectDir, ".loom", "fleetdb.sock")
+	srv, err := cli.NewFleetDBServer(fleetCfg, slog.Default())
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: creating daemon: %v\n", err)
-		os.Exit(1)
+		log.Printf("warning: failed to start fleet-db server: %v (continuing without fleet-db)", err)
+		return nil
 	}
+	cli.SetDefaultIssueBackend(srv.Backend())
+	log.Printf("fleet-db backend active (workspace: %s)", fleetCfg.Workspace)
+	return srv
+}
 
-	// 11. Print startup banner
-	cli.PrintDaemonBanner(config, projectDir)
-
-	// Extract configured max retries (default 3)
-	maxRetries := 3
-	if config.Daemon.RestartPolicy.MaxRetries != nil {
-		maxRetries = *config.Daemon.RestartPolicy.MaxRetries
-	}
-
-	// Write initial state file
-	startedAt := time.Now()
-	if err := writeStateFile(stateFilePath, startedAt, daemon.Agents(), maxRetries); err != nil {
-		fmt.Printf("Warning: failed to write initial state file: %v\n", err)
-	}
-
-	// 12. Start daemon
-	if err := daemon.Start(); err != nil {
-		// Clean up before exiting (os.Exit doesn't run defers)
-		if fleetDBSrv != nil {
-			fleetDBSrv.Stop()
-		}
-		os.Remove(pidFilePath)
-		os.Remove(stateFilePath)
-		lockFile.Close()
-		os.Remove(lockFilePath)
-		fmt.Fprintf(os.Stderr, "Error: starting daemon: %v\n", err)
-		os.Exit(1)
-	}
-
-	// 12.5. Start control socket server for per-agent stop/start/restart
+// startDaemonSockets starts the control socket and IPC socket servers.
+func startDaemonSockets(daemon *Daemon, projectDir string, config *cfgpkg.DaemonConfig) {
 	socketPath := resolveDaemonSocketPath(projectDir, config.Daemon.PIDFile)
 	if err := daemon.startControlServer(socketPath); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: control socket unavailable: %v\n", err)
-	} else {
-		defer os.Remove(socketPath)
 	}
 
-	// 12.55. Create notification bus for IPC mutation events → SSE push
 	wireDaemonNotifyBus(daemon)
 
-	// 12.6. Start agent IPC socket server for issue mutations from agent subprocesses
 	ipcSocketPath := resolveAgentIPCSocketPath(projectDir, config.Daemon.PIDFile)
 	if err := daemon.startIPCServer(ipcSocketPath); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: agent IPC socket unavailable: %v\n", err)
 	} else {
-		daemon.ipcSocketPath = ipcSocketPath
-		defer os.Remove(ipcSocketPath)
+		daemon.sup.IpcSocketPath = ipcSocketPath
 	}
-
-	// Start state file updater goroutine
-	stateUpdateDone := startStateUpdater(shutdown, stateFilePath, startedAt, daemon, maxRetries)
-
-	// 13. Wait for shutdown signal
-	<-shutdown
-	fmt.Println("\nShutting down...")
-	daemon.Stop()
-	<-stateUpdateDone
-	fmt.Println("Daemon stopped.")
 }
 
 func runDaemonStatus(cmd *cobra.Command, args []string) {
@@ -362,7 +376,7 @@ func runDaemonStatus(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	// Use shared runtime detection (lockfile → state → PID fallback)
+	// Use shared runtime detection (lockfile -> state -> PID fallback)
 	rt := cli.DetectDaemonRuntime(projectDir)
 	if !rt.Running {
 		fmt.Println("Daemon: not running")
@@ -389,21 +403,6 @@ func runDaemonStatus(cmd *cobra.Command, args []string) {
 	}
 }
 
-func statusToIcon(status string) string {
-	switch status {
-	case "running":
-		return "●"
-	case "starting":
-		return "◐"
-	case "stopped":
-		return "○"
-	case "failed":
-		return "✗"
-	default:
-		return "?"
-	}
-}
-
 func runDaemonStop(cmd *cobra.Command, args []string) {
 	// If an agent name is provided, stop that single agent via control socket
 	if len(args) > 0 {
@@ -422,7 +421,7 @@ func runDaemonStop(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	// Use shared runtime detection (lockfile → state → PID fallback)
+	// Use shared runtime detection (lockfile -> state -> PID fallback)
 	rt := cli.DetectDaemonRuntime(projectDir)
 	if !rt.Running {
 		fmt.Println("Daemon is not running.")

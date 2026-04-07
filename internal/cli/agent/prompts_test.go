@@ -1,5 +1,3 @@
-//go:build ignore
-
 package agent
 
 import (
@@ -595,7 +593,7 @@ func TestGenerateConflictResolutionPromptWithPush(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			prompt := generateConflictResolutionPromptWithPush(tc.sourceBranch, tc.targetBranch, tc.conflicts, tc.pushRef)
+			prompt := GenerateConflictResolutionPromptWithPush(tc.sourceBranch, tc.targetBranch, tc.conflicts, tc.pushRef)
 
 			for _, part := range tc.wantParts {
 				if !strings.Contains(prompt, part) {
@@ -613,14 +611,14 @@ func TestGenerateConflictResolutionPromptWithPush(t *testing.T) {
 
 func TestGenerateConflictResolutionPrompt_DelegatesToInternal(t *testing.T) {
 	// Verify that GenerateConflictResolutionPrompt delegates to
-	// generateConflictResolutionPromptWithPush with pushRef = targetBranch
+	// GenerateConflictResolutionPromptWithPush with pushRef = targetBranch
 	conflicts := []string{"file.go"}
 
 	publicPrompt := GenerateConflictResolutionPrompt("feature", "main", conflicts)
-	internalPrompt := generateConflictResolutionPromptWithPush("feature", "main", conflicts, "main")
+	internalPrompt := GenerateConflictResolutionPromptWithPush("feature", "main", conflicts, "main")
 
 	if publicPrompt != internalPrompt {
-		t.Error("GenerateConflictResolutionPrompt should produce identical output to generateConflictResolutionPromptWithPush with pushRef=targetBranch")
+		t.Error("GenerateConflictResolutionPrompt should produce identical output to GenerateConflictResolutionPromptWithPush with pushRef=targetBranch")
 	}
 
 	// The public function should use targetBranch as the push ref

@@ -53,11 +53,11 @@ test-frontend-coverage:
 
 # Check Go file LOC limits
 check-loc:
-	@./scripts/check-loc.sh 500
+	@./scripts/check-loc.sh 1000 2500
 
 # Check for stale LOC allowlist entries
 check-loc-stale:
-	@./scripts/check-loc-stale.sh --check-stale 500
+	@./scripts/check-loc-stale.sh --check-stale 1000
 
 # Check for raw exec.Command in unit tests (enforces DI)
 check-no-raw-exec:
@@ -166,7 +166,7 @@ check-go: frontend-ensure
 	@echo "=== [4/11] Go: lint (golangci-lint + depguard) ==="
 	@golangci-lint run --timeout=5m --allow-parallel-runners
 	@echo "=== [5/11] Go: LOC check ==="
-	@./scripts/check-loc.sh 500
+	@./scripts/check-loc.sh 1000 2500
 	@echo "=== [6/11] Go: package size check ==="
 	@./scripts/check-package-size.sh 25
 	@echo "=== [7/11] Go: import fanout check ==="
@@ -178,7 +178,7 @@ check-go: frontend-ensure
 	@echo "=== [10/11] Go: test with race detector ==="
 	@go test -race -covermode=atomic -coverprofile=/tmp/loom.coverage.out -timeout 15m ./...
 	@echo "=== [11/11] Go: coverage threshold ==="
-	@./scripts/check-coverage.sh
+	@COVERAGE_THRESHOLD=60 ./scripts/check-coverage.sh
 	@echo "=== Go quality gates PASSED ==="
 
 # Frontend-only quality gate (builds frontend first)

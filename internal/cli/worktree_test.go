@@ -1,5 +1,3 @@
-//go:build ignore
-
 package cli
 
 import (
@@ -96,24 +94,8 @@ func TestGetDefaultBranch(t *testing.T) {
 	}
 }
 
-func TestGetWorktreeName(t *testing.T) {
-	tests := []struct {
-		path     string
-		expected string
-	}{
-		{"/path/to/worktrees/falcon", "falcon"},
-		{"worktrees/nova", "nova"},
-		{"single", "single"},
-		{"/absolute/path", "path"},
-	}
-
-	for _, tc := range tests {
-		got := GetWorktreeName(tc.path)
-		if got != tc.expected {
-			t.Errorf("GetWorktreeName(%q) = %q, want %q", tc.path, got, tc.expected)
-		}
-	}
-}
+// TestGetWorktreeName has been moved to internal/cli/workspace/ where
+// GetWorktreeName lives (it wraps filepath.Base).
 
 func TestResolveWorktreePathAbsolute(t *testing.T) {
 	tmpDir := t.TempDir()

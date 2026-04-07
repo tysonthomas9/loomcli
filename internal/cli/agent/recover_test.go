@@ -1,5 +1,3 @@
-//go:build ignore
-
 package agent
 
 import (
@@ -14,6 +12,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
@@ -494,9 +493,6 @@ func TestHandleOrphanedTask_NoAnalyze(t *testing.T) {
 }
 
 func TestCleanUntrackedFiles_NoFiles(t *testing.T) {
-	t.Parallel()
-	deps, _, _, _, _ := NewTestDeps(t)
-
 	// Dry run returns empty — no clean should be called
 	mock := NewCommandMock(t, []CommandStub{{
 		Dir:    "/test/worktree",
@@ -505,16 +501,13 @@ func TestCleanUntrackedFiles_NoFiles(t *testing.T) {
 		Stdout: "",
 		Err:    nil,
 	}})
-	mock.InstallOn(deps)
+	mock.Install()
 
 	// No output command mock needed — GitClean should not be called
-	cleanUntrackedFiles(deps, "/test/worktree", false)
+	cleanUntrackedFiles("/test/worktree", false)
 }
 
 func TestCleanUntrackedFiles_WithForce(t *testing.T) {
-	t.Parallel()
-	deps, _, _, _, _ := NewTestDeps(t)
-
 	// Dry run returns files, force=true -> clean is called without prompt
 	mock := NewCommandMock(t, []CommandStub{{
 		Dir:    "/test/worktree",
@@ -523,22 +516,19 @@ func TestCleanUntrackedFiles_WithForce(t *testing.T) {
 		Stdout: "Would remove test.txt\nWould remove screenshots/\n",
 		Err:    nil,
 	}})
-	mock.InstallOn(deps)
+	mock.Install()
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{{
 		Dir:  "/test/worktree",
 		Args: []string{"clean", "-fd", "--exclude=.beads", "--exclude=.loom", "--exclude=sessions", "--exclude=loom.yaml", "--exclude=AGENTS.md"},
 		Err:  nil,
 	}})
-	outputMock.InstallOn(deps)
+	outputMock.Install()
 
-	cleanUntrackedFiles(deps, "/test/worktree", true)
+	cleanUntrackedFiles("/test/worktree", true)
 }
 
 func TestCleanUntrackedFiles_DryRunFails(t *testing.T) {
-	t.Parallel()
-	deps, _, _, _, _ := NewTestDeps(t)
-
 	// Dry run fails -- prints warning, no clean called
 	mock := NewCommandMock(t, []CommandStub{{
 		Dir:    "/test/worktree",
@@ -548,15 +538,12 @@ func TestCleanUntrackedFiles_DryRunFails(t *testing.T) {
 		Stderr: "error: not a git repo\n",
 		Err:    errors.New("exit status 128"),
 	}})
-	mock.InstallOn(deps)
+	mock.Install()
 
-	cleanUntrackedFiles(deps, "/test/worktree", true)
+	cleanUntrackedFiles("/test/worktree", true)
 }
 
 func TestCleanUntrackedFiles_CleanFails(t *testing.T) {
-	t.Parallel()
-	deps, _, _, _, _ := NewTestDeps(t)
-
 	// Dry run succeeds but actual clean fails -- prints warning
 	mock := NewCommandMock(t, []CommandStub{{
 		Dir:    "/test/worktree",
@@ -565,16 +552,16 @@ func TestCleanUntrackedFiles_CleanFails(t *testing.T) {
 		Stdout: "Would remove test.txt\n",
 		Err:    nil,
 	}})
-	mock.InstallOn(deps)
+	mock.Install()
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{{
 		Dir:  "/test/worktree",
 		Args: []string{"clean", "-fd", "--exclude=.beads", "--exclude=.loom", "--exclude=sessions", "--exclude=loom.yaml", "--exclude=AGENTS.md"},
 		Err:  errors.New("Permission denied"),
 	}})
-	outputMock.InstallOn(deps)
+	outputMock.Install()
 
-	cleanUntrackedFiles(deps, "/test/worktree", true)
+	cleanUntrackedFiles("/test/worktree", true)
 }
 
 func TestKillProcess_Success(t *testing.T) {
@@ -985,9 +972,8 @@ func TestAnalyzeTaskCompletion_WorkspaceMode(t *testing.T) {
 	}
 	setupWorkspaceConfig(t, cfg)
 
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
+	old := cli.TestingResetDefaultResolver()
+	defer func() { cli.TestingSetDefaultResolver(old) }()
 
 	tracker := NewMockIssueBackend()
 	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{Title: "Cross-repo feature\nStatus: in_progress", Status: "in_progress"}}
@@ -1062,9 +1048,8 @@ func TestAnalyzeTaskCompletion_WorkspaceMode_NoCommitsInAnyRepo(t *testing.T) {
 	}
 	setupWorkspaceConfig(t, cfg)
 
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
+	old := cli.TestingResetDefaultResolver()
+	defer func() { cli.TestingSetDefaultResolver(old) }()
 
 	tracker := NewMockIssueBackend()
 	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{Title: "Nothing done\nStatus: in_progress", Status: "in_progress"}}
@@ -1131,9 +1116,8 @@ func TestAnalyzeTaskCompletion_WorkspaceMode_PartialResults(t *testing.T) {
 	}
 	setupWorkspaceConfig(t, cfg)
 
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
+	old := cli.TestingResetDefaultResolver()
+	defer func() { cli.TestingSetDefaultResolver(old) }()
 
 	tracker := NewMockIssueBackend()
 	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{Title: "Partial work\nStatus: in_progress", Status: "in_progress"}}
@@ -1207,9 +1191,8 @@ func TestCleanUntrackedFiles_WorkspaceMode(t *testing.T) {
 	}
 	setupWorkspaceConfig(t, cfg)
 
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
+	old := cli.TestingResetDefaultResolver()
+	defer func() { cli.TestingSetDefaultResolver(old) }()
 
 	// DiscoverWorktrees calls GetCurrentBranch for each repo, then
 	// GitCleanDryRun (via RunGitCommand/execCommand) for each.
@@ -1229,7 +1212,7 @@ func TestCleanUntrackedFiles_WorkspaceMode(t *testing.T) {
 	})
 	outputMock.Install()
 
-	cleanUntrackedFiles(defaultDeps, "/some/path", true)
+	cleanUntrackedFiles("/some/path", true)
 }
 
 func TestCleanUntrackedFiles_WorkspaceMode_NoUntrackedInAnyRepo(t *testing.T) {
@@ -1257,9 +1240,8 @@ func TestCleanUntrackedFiles_WorkspaceMode_NoUntrackedInAnyRepo(t *testing.T) {
 	}
 	setupWorkspaceConfig(t, cfg)
 
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
+	old := cli.TestingResetDefaultResolver()
+	defer func() { cli.TestingSetDefaultResolver(old) }()
 
 	mock := NewCommandMock(t, []CommandStub{
 		// DiscoverWorktrees: GetCurrentBranch
@@ -1272,7 +1254,7 @@ func TestCleanUntrackedFiles_WorkspaceMode_NoUntrackedInAnyRepo(t *testing.T) {
 	mock.Install()
 
 	// No OutputCommandMock needed -- GitClean should not be called
-	cleanUntrackedFiles(defaultDeps, "/some/path", true)
+	cleanUntrackedFiles("/some/path", true)
 }
 
 func TestCleanUntrackedFiles_WorkspaceMode_PartialUntracked(t *testing.T) {
@@ -1302,9 +1284,8 @@ func TestCleanUntrackedFiles_WorkspaceMode_PartialUntracked(t *testing.T) {
 	}
 	setupWorkspaceConfig(t, cfg)
 
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
+	old := cli.TestingResetDefaultResolver()
+	defer func() { cli.TestingSetDefaultResolver(old) }()
 
 	// Both repos have untracked files so that GitClean is definitively called for both
 	mock := NewCommandMock(t, []CommandStub{
@@ -1323,7 +1304,7 @@ func TestCleanUntrackedFiles_WorkspaceMode_PartialUntracked(t *testing.T) {
 	})
 	outputMock.Install()
 
-	cleanUntrackedFiles(defaultDeps, "/some/path", true)
+	cleanUntrackedFiles("/some/path", true)
 }
 
 func TestRecoverWorktree_WorkspaceStaleLock(t *testing.T) {
@@ -1349,9 +1330,8 @@ func TestRecoverWorktree_WorkspaceStaleLock(t *testing.T) {
 	}
 	setupWorkspaceConfig(t, cfg)
 
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
+	old := cli.TestingResetDefaultResolver()
+	defer func() { cli.TestingSetDefaultResolver(old) }()
 
 	// Create lock file at repo dir (per-worktree lock)
 	lockPath := filepath.Join(repoDir, LockFileName)
