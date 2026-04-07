@@ -31,7 +31,7 @@ func (s *SQLiteStorage) MarkIssuesDirty(ctx context.Context, issueIDs []string) 
 		return nil
 	}
 
-	return s.withTx(ctx, func(tx *sql.Tx) error {
+	return s.withTx(ctx, func(tx *sql.Conn) error {
 		now := time.Now()
 		stmt, err := tx.PrepareContext(ctx, `
 			INSERT INTO dirty_issues (issue_id, marked_at)
@@ -117,7 +117,7 @@ func (s *SQLiteStorage) ClearDirtyIssuesByID(ctx context.Context, issueIDs []str
 		return nil
 	}
 
-	return s.withTx(ctx, func(tx *sql.Tx) error {
+	return s.withTx(ctx, func(tx *sql.Conn) error {
 		stmt, err := tx.PrepareContext(ctx, `DELETE FROM dirty_issues WHERE issue_id = ?`)
 		if err != nil {
 			return fmt.Errorf("failed to prepare statement: %w", err)
@@ -152,9 +152,16 @@ func (s *SQLiteStorage) GetDirtyIssueCount(ctx context.Context) (int, error) {
 	return count, nil
 }
 
+// dbExecer is satisfied by both *sql.Tx and *sql.Conn, allowing helpers
+// to work inside withTx (which uses *sql.Conn) and raw BeginTx (which uses *sql.Tx).
+type dbExecer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	PrepareContext(ctx context.Context, query string) (*sql.Stmt, error)
+}
+
 // markIssuesDirtyTx marks multiple issues as dirty within an existing transaction
 // This is a helper for operations that need to mark issues dirty as part of a larger transaction
-func markIssuesDirtyTx(ctx context.Context, tx *sql.Tx, issueIDs []string) error {
+func markIssuesDirtyTx(ctx context.Context, tx dbExecer, issueIDs []string) error {
 	if len(issueIDs) == 0 {
 		return nil
 	}

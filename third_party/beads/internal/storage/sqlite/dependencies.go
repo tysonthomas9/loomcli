@@ -75,7 +75,7 @@ func (s *SQLiteStorage) AddDependency(ctx context.Context, dep *types.Dependency
 		dep.CreatedBy = actor
 	}
 
-	return s.withTx(ctx, func(tx *sql.Tx) error {
+	return s.withTx(ctx, func(tx *sql.Conn) error {
 		// Cycle Detection and Prevention
 		//
 		// We prevent cycles across most dependency types to maintain a directed acyclic graph (DAG).
@@ -183,7 +183,7 @@ func (s *SQLiteStorage) AddDependency(ctx context.Context, dep *types.Dependency
 
 // RemoveDependency removes a dependency
 func (s *SQLiteStorage) RemoveDependency(ctx context.Context, issueID, dependsOnID string, actor string) error {
-	return s.withTx(ctx, func(tx *sql.Tx) error {
+	return s.withTx(ctx, func(tx *sql.Conn) error {
 		// First, check what type of dependency is being removed
 		var depType types.DependencyType
 		err := tx.QueryRowContext(ctx, `
