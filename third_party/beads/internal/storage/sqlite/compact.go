@@ -275,7 +275,7 @@ func (s *SQLiteStorage) CheckEligibility(ctx context.Context, issueID string, ti
 func (s *SQLiteStorage) ApplyCompaction(ctx context.Context, issueID string, level int, originalSize int, compressedSize int, commitHash string) error {
 	now := time.Now().UTC()
 
-	return s.withTx(ctx, func(tx *sql.Tx) error {
+	return s.withTx(ctx, func(tx *sql.Conn) error {
 		var commitHashPtr *string
 		if commitHash != "" {
 			commitHashPtr = &commitHash

@@ -13,7 +13,7 @@ const limitClause = " LIMIT ?"
 
 // AddComment adds a comment to an issue
 func (s *SQLiteStorage) AddComment(ctx context.Context, issueID, actor, comment string) error {
-	return s.withTx(ctx, func(tx *sql.Tx) error {
+	return s.withTx(ctx, func(tx *sql.Conn) error {
 		// Update issue updated_at timestamp first to verify issue exists
 		now := time.Now()
 		res, err := tx.ExecContext(ctx, `

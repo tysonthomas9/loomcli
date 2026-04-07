@@ -19,7 +19,7 @@ func (s *SQLiteStorage) executeLabelOperation(
 	eventComment string,
 	operationError string,
 ) error {
-	return s.withTx(ctx, func(tx *sql.Tx) error {
+	return s.withTx(ctx, func(tx *sql.Conn) error {
 		result, err := tx.ExecContext(ctx, labelSQL, labelSQLArgs...)
 		if err != nil {
 			return fmt.Errorf("%s: %w", operationError, err)

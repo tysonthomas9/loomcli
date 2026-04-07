@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -18,29 +19,42 @@ func (s *SQLiteStorage) BeginTx(ctx context.Context) (*sql.Tx, error) {
 	return s.db.BeginTx(ctx, nil)
 }
 
-// withTx executes a function within a database transaction.
-// If the function returns an error, the transaction is rolled back.
-// Otherwise, the transaction is committed.
-func (s *SQLiteStorage) withTx(ctx context.Context, fn func(*sql.Tx) error) error {
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+// withTx executes a function within a BEGIN IMMEDIATE transaction.
+// Uses a dedicated connection + beginImmediateWithRetry to acquire the
+// write lock upfront, preventing SQLITE_BUSY upgrade races under
+// concurrent write load (see loomcli-0o1il).
+func (s *SQLiteStorage) withTx(ctx context.Context, fn func(*sql.Conn) error) error {
+	conn, err := s.db.Conn(ctx)
 	if err != nil {
-		return wrapDBError("begin transaction", err)
+		return fmt.Errorf("acquire connection: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer func() { _ = conn.Close() }()
 
-	if err := fn(tx); err != nil {
+	if err := beginImmediateWithRetry(ctx, conn, 5, 10*time.Millisecond); err != nil {
+		return fmt.Errorf("begin immediate transaction: %w", err)
+	}
+
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+		}
+	}()
+
+	if err := fn(conn); err != nil {
 		return err
 	}
 
-	if err := tx.Commit(); err != nil {
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 		return wrapDBError("commit transaction", err)
 	}
+	committed = true
 
 	return nil
 }
 
 // ExecInTransaction is deprecated. Use withTx instead.
-func (s *SQLiteStorage) ExecInTransaction(ctx context.Context, fn func(*sql.Tx) error) error {
+func (s *SQLiteStorage) ExecInTransaction(ctx context.Context, fn func(*sql.Conn) error) error {
 	return s.withTx(ctx, fn)
 }
 
