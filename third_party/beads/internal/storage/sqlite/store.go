@@ -168,19 +168,8 @@ func NewWithTimeout(ctx context.Context, path string, busyTimeout time.Duration)
 		db.SetMaxIdleConns(1)
 	} else {
 		// For file-based databases in daemon mode, size the connection pool for
-		// WAL-mode concurrency: 1 writer + many readers. NumCPU*4 allows enough
-		// concurrent readers to avoid starving under high RPC fan-in while still
-		// bounding goroutine pile-up on write lock contention.
-		maxConns := runtime.NumCPU() * 4
-		if maxConns < 8 {
-			maxConns = 8
-		}
-		if env := os.Getenv("BEADS_SQLITE_MAX_CONNS"); env != "" {
-			if n, err := strconv.Atoi(env); err == nil && n > 0 {
-				maxConns = n
-			}
-		}
-		db.SetMaxOpenConns(maxConns)
+		// WAL-mode concurrency: 1 writer + many readers.
+		db.SetMaxOpenConns(fileDBMaxConns())
 		db.SetMaxIdleConns(2)
 		db.SetConnMaxLifetime(0)              // SQLite doesn't need connection recycling
 		db.SetConnMaxIdleTime(5 * time.Minute) // Reclaim idle WASM module memory
@@ -343,6 +332,23 @@ func (s *SQLiteStorage) Close() error {
 	return s.db.Close()
 }
 
+// fileDBMaxConns returns the connection pool size for file-based databases.
+// WAL mode supports 1 writer + many concurrent readers; NumCPU*4 allows
+// enough readers to avoid starving under high RPC fan-in.
+// Respects the BEADS_SQLITE_MAX_CONNS env var override.
+func fileDBMaxConns() int {
+	maxConns := runtime.NumCPU() * 4
+	if maxConns < 8 {
+		maxConns = 8
+	}
+	if env := os.Getenv("BEADS_SQLITE_MAX_CONNS"); env != "" {
+		if n, err := strconv.Atoi(env); err == nil && n > 0 {
+			maxConns = n
+		}
+	}
+	return maxConns
+}
+
 // configureConnectionPool sets up the connection pool based on database type.
 // In-memory databases use a single connection (SQLite isolation requirement).
 // File-based databases use a pool sized for concurrent access.
@@ -353,11 +359,10 @@ func (s *SQLiteStorage) configureConnectionPool(db *sql.DB) {
 		db.SetMaxOpenConns(1)
 		db.SetMaxIdleConns(1)
 	} else {
-		// SQLite WAL mode: 1 writer + N readers. Limit to prevent goroutine pile-up.
-		maxConns := runtime.NumCPU() + 1
-		db.SetMaxOpenConns(maxConns)
+		db.SetMaxOpenConns(fileDBMaxConns())
 		db.SetMaxIdleConns(2)
-		db.SetConnMaxLifetime(0) // SQLite doesn't need connection recycling
+		db.SetConnMaxLifetime(0)              // SQLite doesn't need connection recycling
+		db.SetConnMaxIdleTime(5 * time.Minute) // Reclaim idle WASM module memory
 	}
 }
 
