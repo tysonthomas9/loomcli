@@ -69,8 +69,8 @@ func (h *BeadsPoolHook) OnRegister(ctx *coordinator.RegistrationContext) error {
 
 		breaker := circuitbreaker.NewBreaker("ws-"+shortBreakerName(id), circuitbreaker.Config{
 			FailureThreshold:  3,
-			OpenTimeout:       8 * time.Second,
-			HalfOpenMaxProbes: 1,
+			OpenTimeout:       30 * time.Second,
+			HalfOpenMaxProbes: 3,
 			ShouldTrip:        daemon.DaemonShouldTrip,
 			OnStateChange: func(from, to circuitbreaker.State) {
 				h.logger.Info("circuit breaker state change",

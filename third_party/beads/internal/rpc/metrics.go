@@ -45,13 +45,15 @@ func (m *Metrics) RecordRequest(operation string, latency time.Duration) {
 
 	m.requestCounts[operation]++
 
-	// Add latency sample to bounded slice
+	// Add latency sample to bounded ring buffer
 	samples := m.requestLatency[operation]
 	if len(samples) >= m.maxSamples {
-		// Drop oldest sample to maintain max size
-		samples = samples[1:]
+		// Shift left and truncate to actually free the backing array slot
+		copy(samples, samples[1:])
+		samples[len(samples)-1] = latency
+	} else {
+		samples = append(samples, latency)
 	}
-	samples = append(samples, latency)
 	m.requestLatency[operation] = samples
 }
 

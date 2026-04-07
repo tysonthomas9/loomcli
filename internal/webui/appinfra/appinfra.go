@@ -75,8 +75,8 @@ func NewWorkspaceRegistry(logger *slog.Logger) *WorkspaceRegistry {
 func InitProtectedPool(rawPool *daemon.ConnectionPool, logger *slog.Logger) daemon.Pool {
 	breaker := circuitbreaker.NewBreaker("daemon", circuitbreaker.Config{
 		FailureThreshold:  3,
-		OpenTimeout:       8 * time.Second,
-		HalfOpenMaxProbes: 1,
+		OpenTimeout:       30 * time.Second,
+		HalfOpenMaxProbes: 3,
 		ShouldTrip:        daemon.DaemonShouldTrip,
 		OnStateChange: func(from, to circuitbreaker.State) {
 			logger.Info("circuit breaker state change", "component", "circuit_breaker", "from", from, "to", to)

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -166,14 +167,23 @@ func NewWithTimeout(ctx context.Context, path string, busyTimeout time.Duration)
 		db.SetMaxOpenConns(1)
 		db.SetMaxIdleConns(1)
 	} else {
-		// For file-based databases in daemon mode, limit connection pool to prevent
-		// connection exhaustion under concurrent load. SQLite WAL mode supports
-		// 1 writer + unlimited readers, but we limit to prevent goroutine pile-up
-		// on write lock contention.
-		maxConns := runtime.NumCPU() + 1 // 1 writer + N readers
+		// For file-based databases in daemon mode, size the connection pool for
+		// WAL-mode concurrency: 1 writer + many readers. NumCPU*4 allows enough
+		// concurrent readers to avoid starving under high RPC fan-in while still
+		// bounding goroutine pile-up on write lock contention.
+		maxConns := runtime.NumCPU() * 4
+		if maxConns < 8 {
+			maxConns = 8
+		}
+		if env := os.Getenv("BEADS_SQLITE_MAX_CONNS"); env != "" {
+			if n, err := strconv.Atoi(env); err == nil && n > 0 {
+				maxConns = n
+			}
+		}
 		db.SetMaxOpenConns(maxConns)
 		db.SetMaxIdleConns(2)
-		db.SetConnMaxLifetime(0) // SQLite doesn't need connection recycling
+		db.SetConnMaxLifetime(0)               // SQLite doesn't need connection recycling
+		db.SetConnMaxIdleTime(5 * time.Minute) // Reclaim idle WASM module memory
 	}
 
 	// For file-based databases, enable WAL mode once after opening the connection.

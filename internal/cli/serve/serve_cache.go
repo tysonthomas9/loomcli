@@ -95,11 +95,16 @@ func (c *cachedValue[T]) get() T {
 		return data
 	}
 
-	// If another goroutine is already collecting, wait for it
+	// If another goroutine is already collecting, wait for it (with timeout)
 	if c.inflight {
 		ch := c.waitCh
 		c.mu.Unlock()
-		<-ch // block until collection finishes
+		timer := time.NewTimer(5 * time.Second)
+		select {
+		case <-ch: // collection finished
+		case <-timer.C: // don't block HTTP handler indefinitely
+		}
+		timer.Stop()
 		c.mu.Lock()
 		data := c.cached
 		c.mu.Unlock()

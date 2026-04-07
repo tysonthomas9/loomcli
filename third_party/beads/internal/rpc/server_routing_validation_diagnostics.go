@@ -156,9 +156,8 @@ func (s *Server) handleRequest(req *Request, connCtx ...context.Context) Respons
 		}
 	}
 
-	// Check for stale JSONL and auto-import if needed
-	// Skip for write operations that will trigger export anyway
-	// Skip for import operation itself to avoid recursion
+	// Check for stale JSONL and auto-import if needed.
+	// Rate-limited to once per 5 seconds to avoid spawning a goroutine per request.
 	if req.Operation != OpPing && req.Operation != OpHealth && req.Operation != OpMetrics &&
 		req.Operation != OpImport && req.Operation != OpExport {
 		// CAS first — only spawn a goroutine if we actually acquired the
