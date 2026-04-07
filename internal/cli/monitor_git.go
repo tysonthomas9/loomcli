@@ -4,7 +4,21 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
+
+// monitorGitTimeout is the per-command timeout for git subprocesses in the
+// monitor collection path. Prevents indefinite hangs from git index locks.
+const monitorGitTimeout = 10 * time.Second
+
+// runMonitorGitCommand runs a git command with a timeout, scoped to monitor collection.
+func runMonitorGitCommand(dir string, args ...string) (string, error) {
+	result := execCommandWithTimeout(monitorGitTimeout, dir, "git", args...)
+	if result.Err != nil {
+		return "", fmt.Errorf("git %s failed: %s", strings.Join(args, " "), result.Stderr)
+	}
+	return result.Stdout, nil
+}
 
 func getWorktreeGitSyncStatus(path, defaultBranch string, overrideBranch string) (ahead, behind int) {
 	branch := overrideBranch
@@ -14,7 +28,7 @@ func getWorktreeGitSyncStatus(path, defaultBranch string, overrideBranch string)
 
 	// Count commits ahead/behind integration branch
 	// Format: "behind\tahead" (from HEAD's perspective)
-	output, err := RunGitCommand(path, "rev-list", "--left-right", "--count",
+	output, err := runMonitorGitCommand(path, "rev-list", "--left-right", "--count",
 		fmt.Sprintf("origin/%s...HEAD", branch))
 	if err != nil {
 		return 0, 0
@@ -32,7 +46,7 @@ func getWorktreeGitSyncStatus(path, defaultBranch string, overrideBranch string)
 // getGitHubRemoteURL returns the GitHub HTTPS URL for the origin remote.
 // Returns empty string if not a GitHub remote or on error.
 func getGitHubRemoteURL(path string) string {
-	output, err := RunGitCommand(path, "remote", "get-url", "origin")
+	output, err := runMonitorGitCommand(path, "remote", "get-url", "origin")
 	if err != nil {
 		return ""
 	}
@@ -61,7 +75,7 @@ func getWorktreeCommitDetails(path, defaultBranch string, limit int, githubURL s
 		branch = defaultBranch
 	}
 
-	output, err := RunGitCommand(path, "log",
+	output, err := runMonitorGitCommand(path, "log",
 		fmt.Sprintf("origin/%s..HEAD", branch),
 		fmt.Sprintf("--format=%%h|%%s"),
 		"-n", strconv.Itoa(limit))
@@ -98,7 +112,7 @@ func getWorktreeCommitDetails(path, defaultBranch string, limit int, githubURL s
 // Replaces the previous pattern of calling IsCleanWorkingTree + getUncommittedChangesCount +
 // getWorktreeFileChanges as three separate git subprocesses.
 func getWorktreeStatus(path string) (clean bool, uncommittedCount int, fileChanges []FileChange) {
-	output, err := RunGitCommand(path, "status", "--porcelain")
+	output, err := runMonitorGitCommand(path, "status", "--porcelain")
 	if err != nil || strings.TrimSpace(output) == "" {
 		return true, 0, nil
 	}
@@ -121,7 +135,7 @@ func getWorktreeStatus(path string) (clean bool, uncommittedCount int, fileChang
 
 // getWorktreeFileChanges returns uncommitted file changes from git status.
 func getWorktreeFileChanges(path string) []FileChange {
-	output, err := RunGitCommand(path, "status", "--porcelain")
+	output, err := runMonitorGitCommand(path, "status", "--porcelain")
 	if err != nil {
 		return nil
 	}

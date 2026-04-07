@@ -2,7 +2,10 @@ package cli
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"os/exec"
+	"time"
 )
 
 // CommandResult represents the output of a command execution
@@ -34,5 +37,26 @@ func defaultExecCommand(dir, name string, args ...string) CommandResult {
 		Stdout: stdout.String(),
 		Stderr: stderr.String(),
 		Err:    err,
+	}
+}
+
+// execCommandWithTimeout runs a command through execCommand with a deadline.
+// Routes through the mockable execCommand variable so tests that swap it
+// automatically get the timeout variant too.
+func execCommandWithTimeout(timeout time.Duration, dir, name string, args ...string) CommandResult {
+	ch := make(chan CommandResult, 1)
+	go func() {
+		ch <- execCommand(dir, name, args...)
+	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case result := <-ch:
+		return result
+	case <-timer.C:
+		return CommandResult{
+			Err:    context.DeadlineExceeded,
+			Stderr: fmt.Sprintf("command timed out after %v", timeout),
+		}
 	}
 }

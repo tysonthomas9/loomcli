@@ -1350,11 +1350,8 @@ func (s *Server) handleList(req *Request) Response {
 		}
 	}
 
-	// Populate labels for each issue
-	for _, issue := range issues {
-		labels, _ := store.GetLabels(ctx, issue.ID)
-		issue.Labels = labels
-	}
+	// Labels are already batch-loaded by scanIssues via GetLabelsForIssues.
+	// No per-issue GetLabels loop needed.
 
 	// Get dependency counts in bulk (single query instead of N queries)
 	issueIDs := make([]string, len(issues))

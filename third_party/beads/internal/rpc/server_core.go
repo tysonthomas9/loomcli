@@ -58,7 +58,8 @@ type Server struct {
 	// Ready channel signals when server is listening
 	readyChan chan struct{}
 	// Auto-import single-flight guard
-	importInProgress atomic.Bool
+	importInProgress   atomic.Bool
+	lastStalenessCheck atomic.Int64 // UnixMilli of last staleness check (rate-limit to 1/5s)
 	// Mutation events for event-driven daemon
 	mutationChan  chan MutationEvent
 	droppedEvents atomic.Int64 // Counter for dropped mutation events
@@ -139,7 +140,7 @@ func NewServer(socketPath string, store storage.Storage, workspacePath string, d
 		}
 	}
 
-	mutationBufferSize := 512 // default (increased from 100 for better burst handling)
+	mutationBufferSize := 4096 // default (sized for sustained load without triggering export cascades)
 	if env := os.Getenv("BEADS_MUTATION_BUFFER"); env != "" {
 		var bufSize int
 		if _, err := fmt.Sscanf(env, "%d", &bufSize); err == nil && bufSize > 0 {
@@ -201,12 +202,13 @@ func (s *Server) emitRichMutation(event MutationEvent) {
 		s.droppedEvents.Add(1)
 	}
 
-	// Store in recent mutations buffer for polling
+	// Store in recent mutations buffer (bounded ring buffer)
 	s.recentMutationsMu.Lock()
-	s.recentMutations = append(s.recentMutations, event)
-	// Keep buffer size limited (circular buffer behavior)
-	if len(s.recentMutations) > s.maxMutationBuffer {
-		s.recentMutations = s.recentMutations[1:]
+	if len(s.recentMutations) >= s.maxMutationBuffer {
+		copy(s.recentMutations, s.recentMutations[1:])
+		s.recentMutations[len(s.recentMutations)-1] = event
+	} else {
+		s.recentMutations = append(s.recentMutations, event)
 	}
 	s.recentMutationsMu.Unlock()
 

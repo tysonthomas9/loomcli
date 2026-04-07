@@ -153,8 +153,8 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		// Wrap pool with circuit breaker for resilience
 		breaker := circuitbreaker.NewBreaker("daemon", circuitbreaker.Config{
 			FailureThreshold:  3,
-			OpenTimeout:       8 * time.Second,
-			HalfOpenMaxProbes: 1,
+			OpenTimeout:       30 * time.Second,
+			HalfOpenMaxProbes: 3,
 			ShouldTrip:        daemon.DaemonShouldTrip,
 			OnStateChange: func(from, to circuitbreaker.State) {
 				slog.Info("circuit breaker state change", "component", "circuit_breaker", "from", from, "to", to)

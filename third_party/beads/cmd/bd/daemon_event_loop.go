@@ -123,6 +123,7 @@ func runEventDrivenLoop(
 	// Dropped events safety net (faster recovery than health check)
 	droppedEventsTicker := time.NewTicker(1 * time.Second)
 	defer droppedEventsTicker.Stop()
+	var lastDropExport time.Time // rate-limit drop-triggered exports to 1 per 5s
 
 	for {
 		select {
@@ -130,8 +131,12 @@ func runEventDrivenLoop(
 			// Check for dropped mutation events every second
 			dropped := server.ResetDroppedEventsCount()
 			if dropped > 0 {
-				log.log("WARNING: %d mutation events were dropped, triggering export", dropped)
-				exportDebouncer.Trigger()
+				log.log("WARNING: %d mutation events were dropped", dropped)
+				if time.Since(lastDropExport) >= 5*time.Second {
+					log.log("Triggering export for dropped events")
+					exportDebouncer.Trigger()
+					lastDropExport = time.Now()
+				}
 			}
 
 		case <-healthTicker.C:
