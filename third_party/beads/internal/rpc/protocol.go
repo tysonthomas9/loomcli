@@ -48,6 +48,7 @@ const (
 	OpMolStale            = "mol_stale"
 	OpGetParentIDs        = "get_parent_ids"
 	OpGetGraphData        = "get_graph_data"
+	OpListKanban          = "list_kanban"
 	OpWaitForMutations    = "wait_for_mutations"
 
 	// Gate operations
@@ -719,4 +720,29 @@ type GraphDependency struct {
 // GetGraphDataResponse represents the response from get_graph_data operation.
 type GetGraphDataResponse struct {
 	Issues []GraphIssueSummary `json:"issues"`
+}
+
+// ListKanbanArgs combines issue list filters with kanban-specific options.
+// This allows a single RPC to replace the 3-call sequence (List + GetParentIDs + Blocked).
+type ListKanbanArgs struct {
+	ListArgs
+	IncludeBlocked bool     `json:"include_blocked,omitempty"` // Include blocked-by info per issue
+	ExcludeStatus  []string `json:"exclude_status,omitempty"`  // Statuses to exclude (post-filter)
+}
+
+// KanbanIssueRPC is the per-issue response from OpListKanban.
+type KanbanIssueRPC struct {
+	*types.IssueWithCounts
+	ParentID         string            `json:"parent_id,omitempty"`
+	ParentTitle      string            `json:"parent_title,omitempty"`
+	Repo             string            `json:"repo,omitempty"`
+	IsBlocked        bool              `json:"is_blocked,omitempty"`
+	BlockedByCount   int               `json:"blocked_by_count,omitempty"`
+	BlockedBy        []string          `json:"blocked_by,omitempty"`
+	BlockedByDetails []types.BlockerRef `json:"blocked_by_details,omitempty"`
+}
+
+// ListKanbanResponse is the response from OpListKanban.
+type ListKanbanResponse struct {
+	Issues []*KanbanIssueRPC `json:"issues"`
 }

@@ -222,6 +222,9 @@ func handleGetIssueWithPool(pool connectionGetter) http.HandlerFunc {
 }
 
 // handleListIssues returns a handler that lists issues from the daemon.
+// Uses the composite ListKanban RPC (1 round-trip) when available,
+// falling back to the legacy 3-call path (List + GetParentIDs + Blocked)
+// for old daemons.
 func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if pool == nil {
@@ -235,8 +238,6 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 			writeIssuesError(w, http.StatusBadRequest, err.Error(), "INVALID_PARAMS")
 			return
 		}
-		// List views don't need full issue bodies — use lightweight mode
-		// to avoid allocating multi-KB description/design/notes per issue.
 		args.Lightweight = true
 
 		// Parse kanban-specific parameters
@@ -273,182 +274,222 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 			}
 		}()
 
-		// Execute List RPC call
-		resp, err := client.List(args)
-		if err != nil {
-			log.Printf("RPC error: %v", err)
+		// Try composite ListKanban RPC (single round-trip)
+		kanbanArgs := &rpc.ListKanbanArgs{
+			ListArgs:       *args,
+			IncludeBlocked: kp.IncludeBlocked,
+			ExcludeStatus:  kp.ExcludeStatus,
+		}
+		kanbanResp, kanbanErr := client.ListKanban(kanbanArgs)
+		if kanbanErr != nil && (strings.Contains(kanbanErr.Error(), "unknown operation") || strings.Contains(kanbanErr.Error(), "unknown:")) {
+			// Old daemon: fall back to legacy 3-call path
+			handleListIssuesLegacy(w, client, args, kp, &rpcOK)
+			return
+		}
+		if kanbanErr != nil {
+			log.Printf("ListKanban RPC error: %v", kanbanErr)
 			writeIssuesError(w, http.StatusInternalServerError, "failed to list issues", "RPC_ERROR")
 			return
 		}
-
 		rpcOK = true
 
-		if !resp.Success {
-			writeIssuesError(w, http.StatusInternalServerError, resp.Error, "DAEMON_ERROR")
-			return
-		}
-
-		// Parse IssueWithCounts from response to extract issue IDs
-		var issuesWithCounts []*types.IssueWithCounts
-		if err := json.Unmarshal(resp.Data, &issuesWithCounts); err != nil {
-			log.Printf("Failed to parse issues: %v", err)
-			writeIssuesError(w, http.StatusInternalServerError, "failed to parse issues", "PARSE_ERROR")
-			return
-		}
-
-		// Filter out excluded statuses (server-side, since ListArgs.Status only supports one value)
-		if len(kp.ExcludeStatus) > 0 {
-			excludeSet := make(map[types.Status]bool, len(kp.ExcludeStatus))
-			for _, s := range kp.ExcludeStatus {
-				excludeSet[types.Status(s)] = true
-			}
-			filtered := make([]*types.IssueWithCounts, 0, len(issuesWithCounts))
-			for _, iwc := range issuesWithCounts {
-				if !excludeSet[iwc.Issue.Status] {
-					filtered = append(filtered, iwc)
-				}
-			}
-			issuesWithCounts = filtered
-		}
-
-		// If no issues, return empty response
-		if len(issuesWithCounts) == 0 {
-			var data []byte
-			if kp.IncludeBlocked {
-				data, err = json.Marshal([]*KanbanIssue{})
-			} else {
-				data, err = json.Marshal([]*IssueWithParent{})
-			}
-			if err != nil {
-				log.Printf("Failed to marshal empty response: %v", err)
-				writeIssuesError(w, http.StatusInternalServerError, "failed to encode response", "ENCODE_ERROR")
-				return
-			}
-			respondJSON(w, http.StatusOK, IssuesResponse{
-				Success: true,
-				Data:    data,
-			})
-			return
-		}
-
-		// Extract issue IDs for parent lookup
-		issueIDs := make([]string, len(issuesWithCounts))
-		for i, iwc := range issuesWithCounts {
-			issueIDs[i] = iwc.Issue.ID
-		}
-
-		// Get parent info for all issues (batched to stay within RPC limit of 1000)
-		parentResp := &rpc.GetParentIDsResponse{Parents: make(map[string]*rpc.ParentInfo)}
-		const parentBatchSize = 1000
-		for i := 0; i < len(issueIDs); i += parentBatchSize {
-			end := i + parentBatchSize
-			if end > len(issueIDs) {
-				end = len(issueIDs)
-			}
-			batch, err := client.GetParentIDs(&rpc.GetParentIDsArgs{IssueIDs: issueIDs[i:end]})
-			if err != nil {
-				log.Printf("Failed to get parent IDs (batch %d-%d): %v", i, end, err)
-				rpcOK = false
-				continue
-			}
-			for k, v := range batch.Parents {
-				parentResp.Parents[k] = v
-			}
-		}
-
+		// Convert KanbanIssueRPC → KanbanIssue/IssueWithParent for the HTTP response
 		if kp.IncludeBlocked {
-			// Build blocked info map
-			blockedMap := make(map[string]*types.BlockedIssue)
-			blockedResp, blockedErr := client.Blocked(&rpc.BlockedArgs{})
-			if blockedErr != nil {
-				// Non-fatal: log and continue without blocked info
-				rpcOK = false
-				log.Printf("Failed to get blocked issues: %v", blockedErr)
-			} else if blockedResp.Success {
-				var blockedIssues []*types.BlockedIssue
-				if jsonErr := json.Unmarshal(blockedResp.Data, &blockedIssues); jsonErr != nil {
-					log.Printf("Failed to parse blocked issues: %v", jsonErr)
-				} else {
-					for _, bi := range blockedIssues {
-						blockedMap[bi.Issue.ID] = bi
-					}
-				}
+			// Build unclosed sets for client-side blocker refinement
+			iwcSlice := make([]*types.IssueWithCounts, len(kanbanResp.Issues))
+			for i, ki := range kanbanResp.Issues {
+				iwcSlice[i] = ki.IssueWithCounts
 			}
+			unclosedIDs, issueMap := buildUnclosedSetsFromFetched(iwcSlice)
 
-			// Build unclosed-ID set from already-fetched data for accurate blocker detection.
-			// The daemon's Blocked() RPC considers in_progress/review as resolved,
-			// but blockers should only clear when closed.
-			unclosedIDs, issueMap := buildUnclosedSetsFromFetched(issuesWithCounts)
-
-			// Build KanbanIssue response with blocked info merged
-			kanbanIssues := make([]*KanbanIssue, len(issuesWithCounts))
-			for i, iwc := range issuesWithCounts {
-				ki := &KanbanIssue{
-					IssueWithCounts: iwc,
+			kanbanIssues := make([]*KanbanIssue, len(kanbanResp.Issues))
+			for i, ki := range kanbanResp.Issues {
+				out := &KanbanIssue{
+					IssueWithCounts: ki.IssueWithCounts,
 				}
-				if parentInfo, ok := parentResp.Parents[iwc.Issue.ID]; ok {
-					ki.Parent = &parentInfo.ParentID
-					ki.ParentTitle = &parentInfo.ParentTitle
+				if ki.ParentID != "" {
+					out.Parent = &ki.ParentID
+					out.ParentTitle = &ki.ParentTitle
 				}
-				if iwc.Issue.SourceRepo != "" {
-					ki.Repo = &iwc.Issue.SourceRepo
+				if ki.Repo != "" {
+					out.Repo = &ki.Repo
 				}
-				// Client-side blocker check (considers only closed blockers as
-				// resolved). For filtered views, blocker targets may be outside
-				// the result set, so fall back to daemon blocked data.
-				refs := getUnclosedBlockerRefs(iwc.Issue.Dependencies, unclosedIDs, issueMap)
+				// Client-side blocker refinement: check unclosed deps first
+				refs := getUnclosedBlockerRefs(ki.Issue.Dependencies, unclosedIDs, issueMap)
 				if len(refs) > 0 {
-					ki.IsBlocked = true
-					ki.BlockedByCount = len(refs)
-					ki.BlockedBy = extractBlockerIDs(refs)
-					ki.BlockedByDetails = refs
-				} else if bi, ok := blockedMap[iwc.Issue.ID]; ok {
-					ki.IsBlocked = true
-					ki.BlockedByCount = bi.BlockedByCount
-					ki.BlockedBy = bi.BlockedBy
-					ki.BlockedByDetails = bi.BlockedByDetails
+					out.IsBlocked = true
+					out.BlockedByCount = len(refs)
+					out.BlockedBy = extractBlockerIDs(refs)
+					out.BlockedByDetails = refs
+				} else if ki.IsBlocked {
+					out.IsBlocked = true
+					out.BlockedByCount = ki.BlockedByCount
+					out.BlockedBy = ki.BlockedBy
+					out.BlockedByDetails = ki.BlockedByDetails
 				}
-				kanbanIssues[i] = ki
+				kanbanIssues[i] = out
 			}
 
 			data, err := json.Marshal(kanbanIssues)
 			if err != nil {
-				log.Printf("Failed to marshal kanban issues: %v", err)
 				writeIssuesError(w, http.StatusInternalServerError, "failed to encode response", "ENCODE_ERROR")
 				return
 			}
-			respondJSON(w, http.StatusOK, IssuesResponse{
-				Success: true,
-				Data:    data,
-			})
-			return
+			respondJSON(w, http.StatusOK, IssuesResponse{Success: true, Data: data})
+		} else {
+			issuesWithParent := make([]*IssueWithParent, len(kanbanResp.Issues))
+			for i, ki := range kanbanResp.Issues {
+				iwp := &IssueWithParent{
+					IssueWithCounts: ki.IssueWithCounts,
+				}
+				if ki.ParentID != "" {
+					iwp.Parent = &ki.ParentID
+					iwp.ParentTitle = &ki.ParentTitle
+				}
+				if ki.Repo != "" {
+					iwp.Repo = &ki.Repo
+				}
+				issuesWithParent[i] = iwp
+			}
+
+			data, err := json.Marshal(issuesWithParent)
+			if err != nil {
+				writeIssuesError(w, http.StatusInternalServerError, "failed to encode response", "ENCODE_ERROR")
+				return
+			}
+			respondJSON(w, http.StatusOK, IssuesResponse{Success: true, Data: data})
+		}
+	}
+}
+
+// handleListIssuesLegacy is the pre-ListKanban 3-call path for old daemons.
+func handleListIssuesLegacy(w http.ResponseWriter, client *rpc.Client, args *rpc.ListArgs, kp *kanbanParams, rpcOK *bool) {
+	resp, err := client.List(args)
+	if err != nil {
+		log.Printf("RPC error: %v", err)
+		writeIssuesError(w, http.StatusInternalServerError, "failed to list issues", "RPC_ERROR")
+		return
+	}
+	*rpcOK = true
+
+	if !resp.Success {
+		writeIssuesError(w, http.StatusInternalServerError, resp.Error, "DAEMON_ERROR")
+		return
+	}
+
+	var issuesWithCounts []*types.IssueWithCounts
+	if err := json.Unmarshal(resp.Data, &issuesWithCounts); err != nil {
+		writeIssuesError(w, http.StatusInternalServerError, "failed to parse issues", "PARSE_ERROR")
+		return
+	}
+
+	if len(kp.ExcludeStatus) > 0 {
+		excludeSet := make(map[types.Status]bool, len(kp.ExcludeStatus))
+		for _, s := range kp.ExcludeStatus {
+			excludeSet[types.Status(s)] = true
+		}
+		filtered := make([]*types.IssueWithCounts, 0, len(issuesWithCounts))
+		for _, iwc := range issuesWithCounts {
+			if !excludeSet[iwc.Issue.Status] {
+				filtered = append(filtered, iwc)
+			}
+		}
+		issuesWithCounts = filtered
+	}
+
+	if len(issuesWithCounts) == 0 {
+		var data []byte
+		if kp.IncludeBlocked {
+			data, _ = json.Marshal([]*KanbanIssue{})
+		} else {
+			data, _ = json.Marshal([]*IssueWithParent{})
+		}
+		respondJSON(w, http.StatusOK, IssuesResponse{Success: true, Data: data})
+		return
+	}
+
+	issueIDs := make([]string, len(issuesWithCounts))
+	for i, iwc := range issuesWithCounts {
+		issueIDs[i] = iwc.Issue.ID
+	}
+
+	parentResp := &rpc.GetParentIDsResponse{Parents: make(map[string]*rpc.ParentInfo)}
+	const parentBatchSize = 1000
+	for i := 0; i < len(issueIDs); i += parentBatchSize {
+		end := i + parentBatchSize
+		if end > len(issueIDs) {
+			end = len(issueIDs)
+		}
+		batch, err := client.GetParentIDs(&rpc.GetParentIDsArgs{IssueIDs: issueIDs[i:end]})
+		if err != nil {
+			log.Printf("Failed to get parent IDs (batch %d-%d): %v", i, end, err)
+			*rpcOK = false
+			continue
+		}
+		for k, v := range batch.Parents {
+			parentResp.Parents[k] = v
+		}
+	}
+
+	if kp.IncludeBlocked {
+		blockedMap := make(map[string]*types.BlockedIssue)
+		blockedResp, blockedErr := client.Blocked(&rpc.BlockedArgs{})
+		if blockedErr != nil {
+			*rpcOK = false
+			log.Printf("Failed to get blocked issues: %v", blockedErr)
+		} else if blockedResp.Success {
+			var blockedIssues []*types.BlockedIssue
+			if jsonErr := json.Unmarshal(blockedResp.Data, &blockedIssues); jsonErr == nil {
+				for _, bi := range blockedIssues {
+					blockedMap[bi.Issue.ID] = bi
+				}
+			}
 		}
 
-		// Standard path: Build response with parent info
-		issuesWithParent := make([]*IssueWithParent, len(issuesWithCounts))
+		unclosedIDs, issueMap := buildUnclosedSetsFromFetched(issuesWithCounts)
+		kanbanIssues := make([]*KanbanIssue, len(issuesWithCounts))
 		for i, iwc := range issuesWithCounts {
-			iwp := &IssueWithParent{
-				IssueWithCounts: iwc,
-			}
+			ki := &KanbanIssue{IssueWithCounts: iwc}
 			if parentInfo, ok := parentResp.Parents[iwc.Issue.ID]; ok {
-				iwp.Parent = &parentInfo.ParentID
-				iwp.ParentTitle = &parentInfo.ParentTitle
+				ki.Parent = &parentInfo.ParentID
+				ki.ParentTitle = &parentInfo.ParentTitle
 			}
 			if iwc.Issue.SourceRepo != "" {
-				iwp.Repo = &iwc.Issue.SourceRepo
+				ki.Repo = &iwc.Issue.SourceRepo
 			}
-			issuesWithParent[i] = iwp
+			refs := getUnclosedBlockerRefs(iwc.Issue.Dependencies, unclosedIDs, issueMap)
+			if len(refs) > 0 {
+				ki.IsBlocked = true
+				ki.BlockedByCount = len(refs)
+				ki.BlockedBy = extractBlockerIDs(refs)
+				ki.BlockedByDetails = refs
+			} else if bi, ok := blockedMap[iwc.Issue.ID]; ok {
+				ki.IsBlocked = true
+				ki.BlockedByCount = bi.BlockedByCount
+				ki.BlockedBy = bi.BlockedBy
+				ki.BlockedByDetails = bi.BlockedByDetails
+			}
+			kanbanIssues[i] = ki
 		}
 
-		data, err := json.Marshal(issuesWithParent)
-		if err != nil {
-			log.Printf("Failed to marshal issues: %v", err)
-			writeIssuesError(w, http.StatusInternalServerError, "failed to encode response", "ENCODE_ERROR")
-			return
-		}
-		respondJSON(w, http.StatusOK, IssuesResponse{
-			Success: true,
-			Data:    data,
-		})
+		data, _ := json.Marshal(kanbanIssues)
+		respondJSON(w, http.StatusOK, IssuesResponse{Success: true, Data: data})
+		return
 	}
+
+	issuesWithParent := make([]*IssueWithParent, len(issuesWithCounts))
+	for i, iwc := range issuesWithCounts {
+		iwp := &IssueWithParent{IssueWithCounts: iwc}
+		if parentInfo, ok := parentResp.Parents[iwc.Issue.ID]; ok {
+			iwp.Parent = &parentInfo.ParentID
+			iwp.ParentTitle = &parentInfo.ParentTitle
+		}
+		if iwc.Issue.SourceRepo != "" {
+			iwp.Repo = &iwc.Issue.SourceRepo
+		}
+		issuesWithParent[i] = iwp
+	}
+
+	data, _ := json.Marshal(issuesWithParent)
+	respondJSON(w, http.StatusOK, IssuesResponse{Success: true, Data: data})
 }

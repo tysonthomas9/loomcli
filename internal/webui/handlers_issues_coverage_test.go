@@ -56,7 +56,14 @@ func startIssuesMockRPCServer(t *testing.T, handler issuesMockRPCHandler) string
 					if err := json.Unmarshal(scanner.Bytes(), &req); err != nil {
 						continue
 					}
-					resp := handler(req)
+					// Return unknown-operation for list_kanban so tests exercise
+					// the legacy fallback path unless the handler explicitly handles it.
+					var resp rpc.Response
+					if req.Operation == "list_kanban" {
+						resp = rpc.Response{Success: false, Error: "unknown operation: list_kanban"}
+					} else {
+						resp = handler(req)
+					}
 					data, _ := json.Marshal(resp)
 					data = append(data, '\n')
 					_, _ = c.Write(data)
