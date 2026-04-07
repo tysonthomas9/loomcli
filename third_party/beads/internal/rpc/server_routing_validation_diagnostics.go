@@ -259,6 +259,8 @@ func (s *Server) handleRequest(req *Request, connCtx ...context.Context) Respons
 		resp = s.handleGetParentIDs(req)
 	case OpGetGraphData:
 		resp = s.handleGetGraphData(req)
+	case OpListKanban:
+		resp = s.handleListKanban(req)
 	case OpShutdown:
 		resp = s.handleShutdown(req)
 	// Gate operations

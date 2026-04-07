@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
@@ -30,6 +31,23 @@ func (s *issueServiceImpl) ListIssues(ctx context.Context, params ListIssuesPara
 	rpcOK := false
 	defer s.releaseClient(client, &rpcOK)
 
+	// Try the composite ListKanban RPC first — 1 round-trip instead of 3.
+	kanbanArgs := &rpc.ListKanbanArgs{
+		ListArgs:       *params.Args,
+		IncludeBlocked: params.IncludeBlocked,
+		ExcludeStatus:  params.ExcludeStatus,
+	}
+	kanbanResp, kanbanErr := client.ListKanban(kanbanArgs)
+	if kanbanErr == nil {
+		rpcOK = true
+		return buildResultFromKanbanRPC(kanbanResp, params.IncludeBlocked), nil
+	}
+	if !isUnknownOperation(kanbanErr) {
+		slog.Error("ListKanban RPC error", "err", kanbanErr)
+		return nil, ErrInternal("failed to list issues", kanbanErr)
+	}
+
+	// Old daemon: fall back to the legacy 3-call path.
 	issuesWithCounts, err := s.fetchAndFilterIssues(client, params)
 	if err != nil {
 		return nil, err
@@ -53,6 +71,82 @@ func (s *issueServiceImpl) ListIssues(ctx context.Context, params ListIssuesPara
 
 	rpcOK = parentClean
 	return s.buildStandardResult(issuesWithCounts, parentResp), nil
+}
+
+// isUnknownOperation returns true when the daemon rejects an op it doesn't know.
+// Used to detect old daemons that don't implement ListKanban yet.
+func isUnknownOperation(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "unknown operation") || strings.Contains(msg, "unknown:")
+}
+
+// buildResultFromKanbanRPC converts the composite RPC response into the
+// service-layer result shape. When includeBlocked is true, client-side blocker
+// refinement runs against the fetched set (blockers are only considered
+// resolved when closed, matching the legacy path).
+func buildResultFromKanbanRPC(resp *rpc.ListKanbanResponse, includeBlocked bool) *ListIssuesResult {
+	if !includeBlocked {
+		issuesWithParent := make([]IssueWithParent, len(resp.Issues))
+		for i, ki := range resp.Issues {
+			issuesWithParent[i] = kanbanRPCToIssueWithParent(ki)
+		}
+		return &ListIssuesResult{Issues: issuesWithParent}
+	}
+
+	iwcSlice := make([]*types.IssueWithCounts, len(resp.Issues))
+	for i, ki := range resp.Issues {
+		iwcSlice[i] = ki.IssueWithCounts
+	}
+	unclosedIDs, issueMap := buildUnclosedSetsFromFetched(iwcSlice)
+
+	kanbanIssues := make([]KanbanIssue, len(resp.Issues))
+	for i, ki := range resp.Issues {
+		kanbanIssues[i] = kanbanRPCToKanbanIssue(ki, unclosedIDs, issueMap)
+	}
+	return &ListIssuesResult{KanbanIssues: kanbanIssues}
+}
+
+func kanbanRPCToIssueWithParent(ki *rpc.KanbanIssueRPC) IssueWithParent {
+	iwp := IssueWithParent{IssueWithCounts: ki.IssueWithCounts}
+	if ki.ParentID != "" {
+		pid, pt := ki.ParentID, ki.ParentTitle
+		iwp.Parent = &pid
+		iwp.ParentTitle = &pt
+	}
+	if ki.Repo != "" {
+		repo := ki.Repo
+		iwp.Repo = &repo
+	}
+	return iwp
+}
+
+func kanbanRPCToKanbanIssue(ki *rpc.KanbanIssueRPC, unclosedIDs map[string]bool, issueMap map[string]*types.IssueWithCounts) KanbanIssue {
+	out := KanbanIssue{IssueWithCounts: ki.IssueWithCounts}
+	if ki.ParentID != "" {
+		pid, pt := ki.ParentID, ki.ParentTitle
+		out.Parent = &pid
+		out.ParentTitle = &pt
+	}
+	if ki.Repo != "" {
+		repo := ki.Repo
+		out.Repo = &repo
+	}
+	refs := getUnclosedBlockerRefs(ki.Issue.Dependencies, unclosedIDs, issueMap)
+	if len(refs) > 0 {
+		out.IsBlocked = true
+		out.BlockedByCount = len(refs)
+		out.BlockedBy = extractBlockerIDs(refs)
+		out.BlockedByDetails = refs
+	} else if ki.IsBlocked {
+		out.IsBlocked = true
+		out.BlockedByCount = ki.BlockedByCount
+		out.BlockedBy = ki.BlockedBy
+		out.BlockedByDetails = ki.BlockedByDetails
+	}
+	return out
 }
 
 func (s *issueServiceImpl) fetchAndFilterIssues(client *rpc.Client, params ListIssuesParams) ([]*types.IssueWithCounts, error) {

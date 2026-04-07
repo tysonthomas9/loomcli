@@ -299,3 +299,18 @@ func (c *Client) GetGraphData(args *GetGraphDataArgs) (*GetGraphDataResponse, er
 
 	return &result, nil
 }
+
+// ListKanban fetches issues with parent info and blocked status in a single RPC.
+func (c *Client) ListKanban(args *ListKanbanArgs) (*ListKanbanResponse, error) {
+	resp, err := c.Execute(OpListKanban, args)
+	if err != nil {
+		return nil, err
+	}
+
+	var result ListKanbanResponse
+	if err := json.Unmarshal(resp.Data, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal list_kanban response: %w", err)
+	}
+
+	return &result, nil
+}

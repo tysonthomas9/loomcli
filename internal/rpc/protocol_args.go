@@ -490,5 +490,12 @@ type GetGraphDataArgs struct {
 	SourceRepos   []string `json:"source_repos,omitempty"`   // Filter by source repository
 }
 
+// ListKanbanArgs combines issue list filters with kanban-specific options.
+type ListKanbanArgs struct {
+	ListArgs
+	IncludeBlocked bool     `json:"include_blocked,omitempty"`
+	ExcludeStatus  []string `json:"exclude_status,omitempty"`
+}
+
 // GraphIssueSummary is a slim issue representation for graph visualization.
 // Contains only the fields needed to render the dependency graph.
