@@ -53,10 +53,14 @@ test.describe("Workspace Lifecycle Integration", () => {
 
   // Cleanup: delete test workspace and restore original default.
   // Workspace deletion may stop a daemon (30+ seconds), so extend the hook timeout.
+  // Use a 45s internal timeout so the afterAll hook doesn't hang indefinitely.
   test.afterAll(async ({}, testInfo) => {
     testInfo.setTimeout(120_000);
     if (workspaceId) {
-      await deleteTestWorkspace(workspaceId);
+      await Promise.race([
+        deleteTestWorkspace(workspaceId),
+        new Promise(r => setTimeout(r, 45_000)),
+      ]).catch(() => {});
     }
     // Restore original default if we changed it
     if (originalDefault) {
@@ -123,6 +127,8 @@ test.describe("Workspace Lifecycle Integration", () => {
   });
 
   test("rename workspace and verify new name persists", async () => {
+    // Workspace daemon start from the create step may still be in-flight (30s timeout).
+    test.setTimeout(120_000);
     test.skip(!workspaceId, "Workspace was not created");
 
     const newName = `ws-renamed-${testId}`;

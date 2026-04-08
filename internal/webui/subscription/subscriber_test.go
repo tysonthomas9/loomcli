@@ -380,8 +380,10 @@ drained:
 		t.Fatalf("expected 2 broadcasts, got %d", broadcastCount)
 	}
 
-	// The expected lastSince after update is maxTimestamp + 1
-	expectedLastSince := ts2.UnixMilli() + 1
+	// The expected lastSince after update is maxTimestamp (strict ">" comparison
+	// in daemon's GetRecentMutations means we don't need +1 and adding it would
+	// skip mutations created at maxTimestamp+1).
+	expectedLastSince := ts2.UnixMilli()
 
 	// Verify lastSince was already updated when the FIRST broadcast was observed.
 	// Verify the final lastSince value is correct

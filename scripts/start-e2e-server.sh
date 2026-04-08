@@ -16,12 +16,31 @@ E2E_WORKSPACE="$REPO_ROOT/tmp/e2e-workspace"
 DAEMON_STARTED=""
 
 cleanup() {
+    echo "[e2e] Cleaning up..."
     if [[ -n "$DAEMON_STARTED" ]]; then
         echo "[e2e] Stopping bd daemon..."
         (cd "$E2E_WORKSPACE" && bd daemon stop 2>/dev/null) || true
     fi
+    # Kill any orphaned bd daemons spawned under the e2e workspace tree.
+    # This catches workspace-lifecycle daemons that the server auto-starts.
+    if [[ -d "$E2E_WORKSPACE" ]]; then
+        for pidfile in "$E2E_WORKSPACE"/.beads/bd.pid "$E2E_WORKSPACE"/.loom-config/workspaces/*/beads/bd.pid; do
+            [[ -f "$pidfile" ]] || continue
+            pid=$(cat "$pidfile" 2>/dev/null) && kill "$pid" 2>/dev/null || true
+        done
+    fi
 }
 trap cleanup EXIT INT TERM
+
+# --- 0. Kill orphaned processes from previous runs ---
+# Previous test runs may have left daemon/server processes that hold file
+# descriptors. Kill any loom-e2e serve and bd daemons rooted under E2E_WORKSPACE.
+if [[ -f "$E2E_WORKSPACE/.beads/bd.pid" ]]; then
+    old_pid=$(cat "$E2E_WORKSPACE/.beads/bd.pid" 2>/dev/null)
+    [[ -n "$old_pid" ]] && kill "$old_pid" 2>/dev/null || true
+fi
+# Also kill any loom-e2e serve still running on our port.
+fuser -k "${E2E_PORT:-8080}/tcp" 2>/dev/null || true
 
 # --- 1. Build loom binary (skip if fresh) ---
 # Prefer the pre-built binary from `make build` when available and newer.

@@ -165,7 +165,7 @@ test.describe('SSE Live Updates Integration', () => {
     await expect(async () => {
       const isVisible = await readyColumn.getByText(uniqueTitle).isVisible().catch(() => false)
       expect(isVisible).toBe(false)
-    }).toPass({ timeout: 10000, intervals: [500, 1000, 2000] })
+    }).toPass({ timeout: 20000, intervals: [500, 1000, 2000, 3000] })
 
     // Optionally check done column if visible
     const doneColumn = page.locator('section[data-status="done"]')

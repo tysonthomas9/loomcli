@@ -139,7 +139,8 @@ test.describe("Daemon error recovery", () => {
     await page.route("**/events/token", daemon503);
     await page.route("**/events", daemon503);
 
-    // Break the existing EventSource connection by going offline briefly.
+    // Break the existing EventSource connection by going offline long enough for
+    // the browser to detect the disconnection (SSE heartbeat/timeout varies).
     // When the connection drops, the SSE client reconnects, hitting our 503 routes.
     // The token fetch via fetchApi gets 503 → notifyDaemonUnavailable() → health
     // check fails → debounce (2000ms) → overlay appears.
@@ -147,7 +148,7 @@ test.describe("Daemon error recovery", () => {
     await cdp.send("Network.emulateNetworkConditions", {
       offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0,
     });
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(3000);
     await cdp.send("Network.emulateNetworkConditions", {
       offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1,
     });

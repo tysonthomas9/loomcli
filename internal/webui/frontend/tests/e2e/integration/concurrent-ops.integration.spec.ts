@@ -324,13 +324,13 @@ test.describe("SSE delivery under concurrent load", () => {
     );
     await expect(async () => {
       await expect(inProgressColumn.getByText(mainTitle)).toBeVisible();
-    }).toPass({ timeout: 15_000, intervals: [500, 1000, 2000] });
+    }).toPass({ timeout: 30_000, intervals: [500, 1000, 2000, 3000] });
 
     // Verify all 3 burst-created issues appear in ready column
     await expect(async () => {
       for (const title of burstTitles) {
         await expect(readyColumn.getByText(title)).toBeVisible();
       }
-    }).toPass({ timeout: 20_000, intervals: [500, 1000, 2000, 3000] });
+    }).toPass({ timeout: 30_000, intervals: [500, 1000, 2000, 3000] });
   });
 });

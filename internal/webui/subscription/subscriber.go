@@ -266,10 +266,13 @@ func (s *DaemonSubscriber) processMutationResponse(resp *rpc.Response) {
 
 	// Update lastSince BEFORE broadcasting to prevent concurrent goroutines
 	// from requesting duplicate mutations with a stale since value.
+	// The daemon's GetRecentMutations uses strict ">" comparison, so setting
+	// lastSince = maxTimestamp ensures the next call returns mutations
+	// strictly after maxTimestamp without skipping anything at maxTimestamp+1.
 	if maxTimestamp > 0 {
 		s.mu.Lock()
-		if maxTimestamp >= s.lastSince {
-			s.lastSince = maxTimestamp + 1
+		if maxTimestamp > s.lastSince {
+			s.lastSince = maxTimestamp
 		}
 		s.mu.Unlock()
 	}

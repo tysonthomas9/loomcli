@@ -113,6 +113,7 @@ export default defineConfig({
       globalSetup: "./tests/e2e/global-setup.ts",
       globalTeardown: "./tests/e2e/integration/global-teardown.ts",
       timeout: 60000,
+      workers: 1,
     },
     {
       name: "local-integration",
