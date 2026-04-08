@@ -131,14 +131,26 @@ test.describe("Daemon error recovery", () => {
     // Navigate and establish healthy connected state
     await navigateAndWaitForConnected(page);
 
-    // Block health endpoint and SSE events to simulate daemon unavailability
-    await page.route("**/api/health", (route) => route.abort());
-    await page.route("**/events", (route) => route.abort());
+    // Set up route intercepts that return 503 for health and SSE endpoints.
+    const daemon503 = (route: import("@playwright/test").Route) =>
+      route.fulfill({ status: 503, contentType: "application/json", body: '{"error":"daemon unavailable"}' });
+    await page.route("**/api/health", daemon503);
+    await page.route("**/api/daemon/status", daemon503);
+    await page.route("**/events/token", daemon503);
+    await page.route("**/events", daemon503);
 
-    // Route blocking triggers the cascade: SSE EventSource error → reconnect →
-    // token fetch via fetchApi fails → notifyDaemonUnavailable() → health check →
-    // health fails → debounce (2000ms) → overlay appears.
-    // No explicit trigger needed — the natural failure cascade handles it.
+    // Break the existing EventSource connection by going offline briefly.
+    // When the connection drops, the SSE client reconnects, hitting our 503 routes.
+    // The token fetch via fetchApi gets 503 → notifyDaemonUnavailable() → health
+    // check fails → debounce (2000ms) → overlay appears.
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Network.emulateNetworkConditions", {
+      offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0,
+    });
+    await page.waitForTimeout(1000);
+    await cdp.send("Network.emulateNetworkConditions", {
+      offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1,
+    });
 
     // Wait for DaemonUnavailableOverlay to appear
     // Must exceed the 2000ms debounce (useDaemonHealth.ts: UNAVAILABLE_DEBOUNCE_MS = 2000)
@@ -156,6 +168,8 @@ test.describe("Daemon error recovery", () => {
 
     // Unroute all blocked endpoints — simulate daemon recovery
     await page.unroute("**/api/health");
+    await page.unroute("**/api/daemon/status");
+    await page.unroute("**/events/token");
     await page.unroute("**/events");
 
     // Wait for overlay to disappear (daemon recovers on next poll)

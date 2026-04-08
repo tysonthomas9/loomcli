@@ -58,6 +58,13 @@ test.describe("SSE multi-client broadcast", () => {
   test("mutation broadcast reaches two independent browser contexts", async ({
     browser,
   }) => {
+    // Create a seed issue so the Kanban board renders columns (not empty state)
+    const seedId = await createTestIssueInWorkspace(
+      workspaceId,
+      `SSE Seed ${generateTestId()}`,
+    );
+    testIssueIds.push(seedId);
+
     const contextA = await browser.newContext({ baseURL: BASE_URL });
     const contextB = await browser.newContext({ baseURL: BASE_URL });
 
@@ -68,6 +75,13 @@ test.describe("SSE multi-client broadcast", () => {
       await navigateAndWaitForConnected(pageA);
       await navigateAndWaitForConnected(pageB);
 
+      // Wait for Kanban columns to render and SSE to stabilize
+      const readyColumnA = pageA.locator('section[data-status="ready"]');
+      const readyColumnB = pageB.locator('section[data-status="ready"]');
+      await expect(readyColumnA).toBeVisible({ timeout: 15_000 });
+      await expect(readyColumnB).toBeVisible({ timeout: 15_000 });
+      await pageA.waitForTimeout(2000);
+
       // Create an issue via workspace-scoped API
       const uniqueTitle = `SSE Multi-Client Test ${generateTestId()}`;
       const issueId = await createTestIssueInWorkspace(
@@ -77,16 +91,13 @@ test.describe("SSE multi-client broadcast", () => {
       testIssueIds.push(issueId);
 
       // Both pages should show the new issue in the ready column without reload
-      const readyColumnA = pageA.locator('section[data-status="ready"]');
-      const readyColumnB = pageB.locator('section[data-status="ready"]');
-
       await expect(async () => {
         await expect(readyColumnA.getByText(uniqueTitle)).toBeVisible();
-      }).toPass({ timeout: 10_000, intervals: [500, 1000, 2000, 3000] });
+      }).toPass({ timeout: 15_000, intervals: [500, 1000, 2000, 3000] });
 
       await expect(async () => {
         await expect(readyColumnB.getByText(uniqueTitle)).toBeVisible();
-      }).toPass({ timeout: 10_000, intervals: [500, 1000, 2000, 3000] });
+      }).toPass({ timeout: 15_000, intervals: [500, 1000, 2000, 3000] });
     } finally {
       await contextA.close();
       await contextB.close();

@@ -31,6 +31,11 @@ const apiBaseURL = isSelfContained
   : process.env.LOOM_BASE_URL || "http://localhost:8080"
 const authHeaders: Record<string, string> = apiKey ? { Authorization: `Bearer ${apiKey}` } : {}
 
+// Propagate base URL to helpers.ts which reads process.env.LOOM_BASE_URL at module load
+if (isSelfContained) {
+  process.env.LOOM_BASE_URL = apiBaseURL
+}
+
 /**
  * Determine webServer config:
  * - Self-contained API e2e: start loom serve via script on dedicated port

@@ -68,6 +68,7 @@ async function globalSetup(config: FullConfig): Promise<void> {
   // Just write state file so teardown doesn't error.
   if (!process.env.PODMAN_COMPOSE) {
     console.log('webServer mode — Playwright manages server lifecycle')
+
     await fs.writeFile(STATE_FILE, JSON.stringify({
       startedAt: new Date().toISOString(),
       webUrl: baseURL,

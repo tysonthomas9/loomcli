@@ -87,6 +87,7 @@ type IssueCreateRequest struct {
 	Dependencies       []string `json:"dependencies,omitempty"`
 	DueAt              string   `json:"due_at,omitempty"`
 	DeferUntil         string   `json:"defer_until,omitempty"`
+	SourceRepo         string   `json:"source_repo,omitempty"`
 }
 
 // writeIssuesError writes a JSON error response for the issues endpoint.

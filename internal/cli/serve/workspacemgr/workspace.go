@@ -190,11 +190,7 @@ func resolveSecureWorkspaceDir(reqPath, wsName string) (string, error) {
 	}
 	wsDir = filepath.Clean(wsDir)
 
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("cannot determine home directory: %w", err)
-	}
-	allowedBase := filepath.Join(homeDir, ".loom", "workspaces")
+	allowedBase := filepath.Join(config.GetConfigDir(), "workspaces")
 	if !strings.HasPrefix(wsDir, allowedBase+string(filepath.Separator)) && wsDir != allowedBase {
 		return "", workspaceerrors.New(workspaceerrors.SecurityViolation, fmt.Sprintf("workspace path must be under %s", allowedBase), nil)
 	}
@@ -350,11 +346,7 @@ func cleanupWorktrees(wsDir string, created []createdWorktree) {
 
 // validateWorkspacePath ensures the workspace directory is under the allowed base.
 func validateWorkspacePath(wsDir string) error {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("cannot determine home directory: %w", err)
-	}
-	allowedBase := filepath.Join(homeDir, ".loom", "workspaces")
+	allowedBase := filepath.Join(config.GetConfigDir(), "workspaces")
 	if !strings.HasPrefix(wsDir, allowedBase+string(filepath.Separator)) && wsDir != allowedBase {
 		return workspaceerrors.New(workspaceerrors.SecurityViolation, fmt.Sprintf("workspace path must be under %s", allowedBase), nil)
 	}

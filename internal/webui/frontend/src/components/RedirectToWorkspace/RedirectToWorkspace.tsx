@@ -39,7 +39,7 @@ export function RedirectToWorkspace() {
 
         // If localStorage has a valid workspace, use it
         if (lastId && workspaces.some((ws) => ws.id === lastId)) {
-          navigate(`/ws/${lastId}/`, { replace: true });
+          navigate(`/ws/${lastId}/kanban`, { replace: true });
           return;
         }
 
@@ -48,7 +48,7 @@ export function RedirectToWorkspace() {
         const defaultWs =
           workspaces.find((ws) => ws.is_default) ?? workspaces[0];
         if (defaultWs) {
-          navigate(`/ws/${defaultWs.id}/`, { replace: true });
+          navigate(`/ws/${defaultWs.id}/kanban`, { replace: true });
         } else {
           setResolving(false);
         }

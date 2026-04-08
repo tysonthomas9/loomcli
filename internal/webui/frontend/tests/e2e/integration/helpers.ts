@@ -47,32 +47,14 @@ export function generateTestId(): string {
 
 /**
  * Create a test issue via the API.
+ * Automatically resolves the active workspace for workspace-scoped endpoints.
  */
 export async function createTestIssue(
   title: string,
   options?: { priority?: number },
 ): Promise<string> {
-  const response = await fetch(`${BASE_URL}/api/issues`, {
-    method: "POST",
-    headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({
-      title,
-      issue_type: "task",
-      priority: options?.priority ?? 2,
-    }),
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Failed to create issue: ${response.status} - ${text}`);
-  }
-
-  const result = await response.json();
-  if (!result.success) {
-    throw new Error(`API error: ${result.error}`);
-  }
-
-  return result.data.id;
+  const wsId = await resolveWorkspaceId();
+  return createTestIssueInWorkspace(wsId, title, options);
 }
 
 /**
@@ -82,33 +64,16 @@ export async function updateIssueStatus(
   id: string,
   status: string,
 ): Promise<void> {
-  const response = await fetch(`${BASE_URL}/api/issues/${id}`, {
-    method: "PATCH",
-    headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ status }),
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Failed to update issue: ${response.status} - ${text}`);
-  }
+  const wsId = await resolveWorkspaceId();
+  return updateIssueStatusInWorkspace(wsId, id, status);
 }
 
 /**
  * Close an issue via the API.
  */
 export async function closeTestIssue(id: string): Promise<void> {
-  try {
-    const response = await fetch(`${BASE_URL}/api/issues/${id}/close`, {
-      method: "POST",
-      headers: authHeaders(),
-    });
-    if (!response.ok && response.status !== 404) {
-      console.warn(`Failed to close issue ${id}: ${response.status}`);
-    }
-  } catch {
-    // Ignore network errors during cleanup
-  }
+  const wsId = await resolveWorkspaceId();
+  return closeTestIssueInWorkspace(wsId, id);
 }
 
 // ---------------------------------------------------------------------------
@@ -394,6 +359,28 @@ export async function resolveWorkspaceId(): Promise<string> {
   throw new Error("Could not resolve workspace ID — no workspaces found");
 }
 
+/** Cache for resolved default source repo per workspace. */
+const defaultSourceRepoCache = new Map<string, string>();
+
+/**
+ * Resolve the default source_repo name for a workspace.
+ * Issues must be created with source_repo so they appear in filtered Kanban views.
+ */
+async function resolveDefaultSourceRepo(
+  workspaceId: string,
+): Promise<string | undefined> {
+  const cached = defaultSourceRepoCache.get(workspaceId);
+  if (cached) return cached;
+  try {
+    const ws = await getWorkspaceById(workspaceId);
+    const repo = ws.data?.repos?.[0]?.name;
+    if (repo) defaultSourceRepoCache.set(workspaceId, repo);
+    return repo;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Create a test issue via workspace-scoped API.
  */
@@ -402,6 +389,7 @@ export async function createTestIssueInWorkspace(
   title: string,
   options?: { priority?: number },
 ): Promise<string> {
+  const sourceRepo = await resolveDefaultSourceRepo(workspaceId);
   const response = await fetch(
     `${BASE_URL}/api/workspaces/${encodeURIComponent(workspaceId)}/issues`,
     {
@@ -411,6 +399,7 @@ export async function createTestIssueInWorkspace(
         title,
         issue_type: "task",
         priority: options?.priority ?? 2,
+        ...(sourceRepo && { source_repo: sourceRepo }),
       }),
     },
   );
@@ -494,10 +483,12 @@ export async function createWsIssue(
     owner?: string;
   },
 ): Promise<string> {
+  const sourceRepo = await resolveDefaultSourceRepo(wsId);
   const body: Record<string, unknown> = {
     title,
     issue_type: "task",
     priority: options?.priority ?? 2,
+    ...(sourceRepo && { source_repo: sourceRepo }),
   };
   if (options?.description) body.description = options.description;
   if (options?.labels) body.labels = options.labels;

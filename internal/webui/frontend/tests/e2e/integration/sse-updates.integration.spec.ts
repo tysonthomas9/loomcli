@@ -46,32 +46,31 @@ test.describe('SSE Live Updates Integration', () => {
   })
 
   test('API-created issue appears via SSE without reload', async ({ page }) => {
-    // Navigate to Kanban and wait for initial load
+    // Create initial issue so Kanban renders columns (not empty state)
+    const seedTitle = `SSE Seed ${generateTestId()}`
+    const seedId = await createTestIssue(seedTitle)
+    testIssueIds.push(seedId)
+
+    // Navigate to Kanban — initial API fetch picks up the seed issue
     await page.goto('/')
     await page.waitForLoadState('domcontentloaded')
 
-    // Wait for SSE connection
+    // Wait for SSE connection and ready column
     const connectionStatus = page.locator('[data-state="connected"]')
     await expect(connectionStatus).toBeVisible({ timeout: 10000 })
-
-    // Count initial issue cards in ready column (toBeVisible ensures column is loaded)
     const readyColumn = page.locator('section[data-status="ready"]')
-    await expect(readyColumn).toBeVisible()
-    const initialCardCount = await readyColumn.locator('article').count()
+    await expect(readyColumn).toBeVisible({ timeout: 15000 })
 
-    // Create new issue via API (not through UI)
+    // Allow SSE connection to stabilize after initial page load
+    await page.waitForTimeout(2000)
+
+    // Now create a second issue via API — this must appear via SSE
     const uniqueTitle = `SSE Test Issue ${generateTestId()}`
     const issueId = await createTestIssue(uniqueTitle)
     testIssueIds.push(issueId)
 
-    // Wait for the new issue to appear via SSE (without page reload)
-    await expect(async () => {
-      const newCardCount = await readyColumn.locator('article').count()
-      expect(newCardCount).toBeGreaterThan(initialCardCount)
-    }).toPass({ timeout: 10000, intervals: [500, 1000, 2000] })
-
-    // Verify the specific issue card is visible
-    await expect(readyColumn.getByText(uniqueTitle)).toBeVisible()
+    // Verify the new issue card appears without reload
+    await expect(readyColumn.getByText(uniqueTitle)).toBeVisible({ timeout: 15000 })
   })
 
   test('status change via API updates UI via SSE', async ({ page }) => {

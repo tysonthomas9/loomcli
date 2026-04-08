@@ -43,7 +43,9 @@ fi
 # Fresh workspace each run so tests start with a clean database.
 rm -rf "$E2E_WORKSPACE"
 mkdir -p "$E2E_WORKSPACE"
-(cd "$E2E_WORKSPACE" && git init -q && bd init --prefix loomcli --skip-hooks -q)
+export LOOM_CONFIG_DIR="$E2E_WORKSPACE/.loom-config"
+mkdir -p "$LOOM_CONFIG_DIR"
+(cd "$E2E_WORKSPACE" && git init -q && git commit --allow-empty -m "e2e seed" -q && bd init --prefix loomcli --skip-hooks -q)
 echo "[e2e] Created isolated workspace: $E2E_WORKSPACE"
 
 # --- 4. Start bd daemon in isolated workspace ---
@@ -61,12 +63,11 @@ if [[ ! -S "$E2E_SOCKET" ]]; then
     exit 1
 fi
 
-WEBUI_PORT="${E2E_PORT:-8080}"
-API_PORT=$((WEBUI_PORT + 1))
-echo "[e2e] Starting loom serve (webui :${WEBUI_PORT}, api :${API_PORT})..."
+
+PORT="${E2E_PORT:-8080}"
+echo "[e2e] Starting loom serve (port :${PORT})..."
 # Run from E2E workspace so the Loom API server also discovers the isolated daemon.
 cd "$E2E_WORKSPACE"
 exec "$LOOM_BIN" serve \
     --webui-socket "$E2E_SOCKET" \
-    --webui-port "${WEBUI_PORT}" \
-    --port "${API_PORT}"
+    --port "${PORT}"

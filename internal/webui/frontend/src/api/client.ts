@@ -188,8 +188,10 @@ const apiMiddleware: Middleware = {
         notifyAuthTokenExpired();
       }
 
-      // 503 daemon unavailable
-      if (response.status === 503) {
+      // 503 daemon unavailable — skip for terminal endpoints which return 503
+      // when Redis is absent (the daemon itself is still healthy)
+      const url503 = new URL(request.url, "http://localhost");
+      if (response.status === 503 && !url503.pathname.includes("/terminal/")) {
         notifyDaemonUnavailable();
       }
 
@@ -357,8 +359,9 @@ async function fetchApi<T>(
   } catch (error) {
     clearTimeoutCleanup();
     if (error instanceof ApiError) {
-      // Notify daemon-unavailable for 503 (Service Unavailable)
-      if (error.status === 503) {
+      // Notify daemon-unavailable for 503, but not for terminal endpoints
+      // which return 503 when Redis is absent (daemon itself is still healthy)
+      if (error.status === 503 && !path.includes("/terminal/")) {
         notifyDaemonUnavailable();
       }
       throw error;

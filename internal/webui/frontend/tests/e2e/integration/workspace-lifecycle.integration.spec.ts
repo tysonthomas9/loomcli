@@ -32,6 +32,7 @@ test.skip(skipIntegration, "Integration tests require RUN_INTEGRATION_TESTS=1");
 // Run tests serially — workspace mutations are global (modify ~/.loom/config.yaml)
 test.describe.configure({ mode: "serial" });
 
+
 test.describe("Workspace Lifecycle Integration", () => {
   const testId = generateTestId();
   let workspaceName = `ws-${testId}`;
@@ -50,8 +51,10 @@ test.describe("Workspace Lifecycle Integration", () => {
     }
   });
 
-  // Cleanup: delete test workspace and restore original default
-  test.afterAll(async () => {
+  // Cleanup: delete test workspace and restore original default.
+  // Workspace deletion may stop a daemon (30+ seconds), so extend the hook timeout.
+  test.afterAll(async ({}, testInfo) => {
+    testInfo.setTimeout(120_000);
     if (workspaceId) {
       await deleteTestWorkspace(workspaceId);
     }
@@ -223,42 +226,6 @@ test.describe("Workspace Lifecycle Integration", () => {
     workspaceId = "";
   });
 
-  // --- Validation / error tests ---
-
-  test("create workspace with invalid name returns 400", async () => {
-    const response = await createTestWorkspace("invalid name with spaces", {
-      type: "empty",
-      repos: [repoPath || "/tmp"],
-    });
-    expect(response.status).toBe(400);
-
-    const body: WorkspaceResponse = await response.json();
-    expect(body.success).toBe(false);
-    expect(body.error).toBeTruthy();
-  });
-
-  test("create workspace with missing type returns 400", async () => {
-    const response = await createTestWorkspace(`ws-notype-${testId}`, {
-      type: "",
-      repos: [repoPath || "/tmp"],
-    });
-    expect(response.status).toBe(400);
-
-    const body: WorkspaceResponse = await response.json();
-    expect(body.success).toBe(false);
-    expect(body.error).toContain("type");
-  });
-
-  test("delete non-existent workspace returns 404", async () => {
-    const fakeId = `nonexistent-${testId}`;
-    const response = await fetch(
-      `${BASE_URL}/api/workspaces/${encodeURIComponent(fakeId)}`,
-      { method: "DELETE", headers: authHeaders() },
-    );
-    // The middleware validates workspace existence — expect 404
-    expect(response.status).toBe(404);
-  });
-
   test("rename to existing workspace name returns 409", async () => {
     test.setTimeout(240_000);
     test.skip(!repoPath, "No repo path available");
@@ -298,5 +265,42 @@ test.describe("Workspace Lifecycle Integration", () => {
       if (idA) await deleteTestWorkspace(idA);
       if (idB) await deleteTestWorkspace(idB);
     }
+  });
+});
+
+// --- Validation / error tests (independent, not serial) ---
+
+test.describe("Workspace Validation", () => {
+  test("create workspace with invalid name returns 400", async () => {
+    const response = await createTestWorkspace("invalid name with spaces", {
+      type: "empty",
+      repos: ["/tmp"],
+    });
+    expect(response.status).toBe(400);
+
+    const body: WorkspaceResponse = await response.json();
+    expect(body.success).toBe(false);
+    expect(body.error).toBeTruthy();
+  });
+
+  test("create workspace with missing type returns 400", async () => {
+    const response = await createTestWorkspace(`ws-notype-${generateTestId()}`, {
+      type: "",
+      repos: ["/tmp"],
+    });
+    expect(response.status).toBe(400);
+
+    const body: WorkspaceResponse = await response.json();
+    expect(body.success).toBe(false);
+    expect(body.error).toContain("type");
+  });
+
+  test("delete non-existent workspace returns 404", async () => {
+    const fakeId = `nonexistent-${generateTestId()}`;
+    const response = await fetch(
+      `${BASE_URL}/api/workspaces/${encodeURIComponent(fakeId)}`,
+      { method: "DELETE", headers: authHeaders() },
+    );
+    expect(response.status).toBe(404);
   });
 });

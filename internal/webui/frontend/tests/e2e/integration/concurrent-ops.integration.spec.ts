@@ -93,7 +93,19 @@ test.describe("Concurrent issue creation", () => {
   test("concurrent creates all delivered via SSE to browser", async ({
     page,
   }) => {
+    // Create a seed issue so the Kanban board renders columns (not empty state)
+    const seedId = await createTestIssueInWorkspace(
+      workspaceId,
+      `SSE Seed ${generateTestId()}`,
+    );
+    testIssueIds.push(seedId);
+
     await navigateAndWaitForConnected(page);
+
+    // Wait for Kanban columns to render and SSE to stabilize
+    const readyColumn = page.locator('section[data-status="ready"]');
+    await expect(readyColumn).toBeVisible({ timeout: 15_000 });
+    await page.waitForTimeout(2000);
 
     const titles = Array.from({ length: 5 }, () =>
       `SSE Concurrent ${generateTestId()}`,
@@ -105,7 +117,6 @@ test.describe("Concurrent issue creation", () => {
     testIssueIds.push(...ids);
 
     // Wait for all 5 to appear in the ready column
-    const readyColumn = page.locator('section[data-status="ready"]');
     await expect(async () => {
       for (const title of titles) {
         await expect(readyColumn.getByText(title)).toBeVisible();

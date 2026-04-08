@@ -92,6 +92,7 @@ type CreateIssueParams struct {
 	Dependencies       []string
 	DueAt              string
 	DeferUntil         string
+	SourceRepo         string
 }
 
 // PatchIssueParams mirrors PatchIssueRequest but is not HTTP-bound.

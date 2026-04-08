@@ -46,6 +46,7 @@ func HandleCreateIssue(svc service.IssueService) http.HandlerFunc {
 			Dependencies:       req.Dependencies,
 			DueAt:              req.DueAt,
 			DeferUntil:         req.DeferUntil,
+			SourceRepo:         req.SourceRepo,
 		}
 
 		data, err := svc.CreateIssue(r.Context(), params)

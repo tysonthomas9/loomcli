@@ -91,11 +91,11 @@ export async function fetchWorkspaceApi(
       params: { path: { ws: workspaceId } },
     });
     if (error) throw apiErrorFromResponse(error, response);
-    return data as unknown as WorkspaceData;
+    return unwrap(data as unknown as ApiResult<WorkspaceData>);
   }
   const { data, error, response } = await api.GET("/api/workspaces/active");
   if (error) throw apiErrorFromResponse(error, response);
-  return data as unknown as WorkspaceData;
+  return unwrap(data as unknown as ApiResult<WorkspaceData>);
 }
 
 /**

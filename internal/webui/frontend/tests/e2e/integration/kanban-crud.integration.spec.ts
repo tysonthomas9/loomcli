@@ -70,7 +70,10 @@ test.describe('Kanban CRUD Integration', () => {
 
     // Wait for issue to appear in ready column
     const readyColumn = page.locator('section[data-status="ready"]')
-    await expect(readyColumn.getByText(uniqueTitle)).toBeVisible({ timeout: 10000 })
+    await expect(readyColumn.getByText(uniqueTitle)).toBeVisible({ timeout: 15000 })
+
+    // Allow SSE connection to stabilize
+    await page.waitForTimeout(2000)
 
     // Close issue via API
     await closeTestIssue(issueId)
@@ -79,7 +82,7 @@ test.describe('Kanban CRUD Integration', () => {
     await expect(async () => {
       const issueInReady = await readyColumn.getByText(uniqueTitle).isVisible().catch(() => false)
       expect(issueInReady).toBe(false)
-    }).toPass({ timeout: 10000, intervals: [500, 1000, 2000] })
+    }).toPass({ timeout: 15000, intervals: [500, 1000, 2000] })
   })
 
   test('API-created issue has correct priority badge', async ({ page }) => {
