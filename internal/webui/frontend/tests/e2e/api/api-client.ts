@@ -327,7 +327,7 @@ export interface SSEMetrics {
 /** Graph response */
 export interface GraphResponse {
   success: boolean
-  issues?: GraphIssue[]
+  data?: GraphIssue[]
   error?: string
 }
 
@@ -575,7 +575,7 @@ export class LoomApiClient {
     if (!result.success) {
       throw new Error(`Graph query failed: ${result.error}`)
     }
-    return result.issues || []
+    return result.data || []
   }
 
   // ===========================================================================

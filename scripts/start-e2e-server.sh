@@ -39,8 +39,12 @@ if [[ -f "$E2E_WORKSPACE/.beads/bd.pid" ]]; then
     old_pid=$(cat "$E2E_WORKSPACE/.beads/bd.pid" 2>/dev/null)
     [[ -n "$old_pid" ]] && kill "$old_pid" 2>/dev/null || true
 fi
-# Also kill any loom-e2e serve still running on our port.
-fuser -k "${E2E_PORT:-8080}/tcp" 2>/dev/null || true
+# Kill any stale loom-e2e serve still listening on the e2e port.
+# Only do this for non-default ports to avoid killing unrelated services on 8080.
+_e2e_port="${E2E_PORT:-8090}"
+if [[ "$_e2e_port" != "8080" ]]; then
+    fuser -k "$_e2e_port/tcp" 2>/dev/null || true
+fi
 
 # --- 1. Build loom binary (skip if fresh) ---
 # Prefer the pre-built binary from `make build` when available and newer.

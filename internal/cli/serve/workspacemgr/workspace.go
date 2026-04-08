@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
@@ -170,8 +171,11 @@ func CreateWorkspace(ctx context.Context, req service.WorkspaceCreateRequest) (s
 	// Start daemon AFTER config lock is released to prevent deadlock.
 	// The daemon start goroutine polls for the socket which can take 30+ seconds;
 	// holding the lock during that time blocks all other config operations.
+	// Copy the timeout value before launching the goroutine to avoid racing
+	// on the config pointer which may be reloaded by concurrent callers.
 	if err == nil && result.DeferDaemonStart {
-		startDaemonAsync(daemonCfg, req.Name, result.WorkspacePath)
+		daemonTimeout := daemonCfg.Daemon.GetStartupTimeout(workspace.DefaultDaemonStartupTimeout)
+		startDaemonAsync(daemonTimeout, req.Name, result.WorkspacePath)
 	}
 
 	return result, err
@@ -363,8 +367,7 @@ func validateWorkspacePath(wsDir string) error {
 }
 
 // startDaemonAsync starts the bd daemon for a workspace in the background.
-func startDaemonAsync(cfg *config.LoomConfig, wsName, wsDir string) {
-	timeout := cfg.Daemon.GetStartupTimeout(workspace.DefaultDaemonStartupTimeout)
+func startDaemonAsync(timeout time.Duration, wsName, wsDir string) {
 	go func() { //nolint:gosec // G118 — intentional: daemon outlives request
 		if err := workspace.EnsureDaemonForWorkspace(cli.GetDeps(nil), context.Background(), wsDir, timeout); err != nil {
 			slog.Warn("failed to start daemon for workspace", "workspace", wsName, "err", err)

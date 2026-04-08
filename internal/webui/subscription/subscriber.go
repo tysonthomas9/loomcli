@@ -42,7 +42,7 @@ type DaemonSubscriber struct {
 	mu          sync.RWMutex
 	useFallback bool      // true if wait_for_mutations is not supported
 	workspaceID string    // workspace ID to tag on all outgoing MutationPayloads
-	started     bool      // guard against double-start
+	startOnce   sync.Once // guard against double-start
 	stopOnce    sync.Once // guard against double-close of done channel
 
 	// External change detection fields
@@ -67,14 +67,12 @@ func NewDaemonSubscriber(pool daemon.Pool, hub *realtime.Hub) *DaemonSubscriber 
 // Start begins the subscription loop in a goroutine.
 // Safe to call multiple times — only the first call starts goroutines.
 func (s *DaemonSubscriber) Start() {
-	if s.started {
-		return
-	}
-	s.started = true
-	s.wg.Add(2)
-	go s.subscriptionLoop()
-	go s.externalChangeLoop()
-	slog.Info("daemon subscription started")
+	s.startOnce.Do(func() {
+		s.wg.Add(2)
+		go s.subscriptionLoop()
+		go s.externalChangeLoop()
+		slog.Info("daemon subscription started")
+	})
 }
 
 // Stop gracefully stops the subscription loop.
