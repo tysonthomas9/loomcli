@@ -313,6 +313,12 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 		go config.DaemonStartupFn(ctx, onReady)
 	}
 
+	// Start health doctor to auto-restart daemons with stuck circuit breakers.
+	if config.WorkspaceListFn != nil {
+		doctor := webui.NewHealthDoctor(app.multiPool, config.WorkspaceListFn, config.Logger, webui.DefaultHealthDoctorConfig())
+		go doctor.Run(ctx)
+	}
+
 	// Build fleet registration config.
 	if config.FleetAPIKey != "" && app.fleetRegistry != nil {
 		var regCleanup func()
