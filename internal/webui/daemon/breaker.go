@@ -69,6 +69,12 @@ func (p *ProtectedPool) SocketPath() string {
 	return p.pool.SocketPath()
 }
 
+// ResetBreaker manually resets the circuit breaker to closed state.
+// Use this after a daemon restart to allow requests to flow again immediately.
+func (p *ProtectedPool) ResetBreaker() {
+	p.breaker.Reset()
+}
+
 // DaemonShouldTrip classifies daemon errors for the circuit breaker.
 // Transport/availability errors trip the breaker; application errors do not.
 // ErrPoolExhausted does NOT trip — it indicates the daemon is alive but

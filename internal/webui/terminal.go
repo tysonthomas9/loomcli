@@ -341,7 +341,7 @@ func (m *TerminalManager) listTmuxSessions() ([]tmuxSessionMeta, error) {
 	if err != nil {
 		msg := strings.ToLower(string(out))
 		// No tmux server/sessions is a normal state for archive fallback.
-		if strings.Contains(msg, "failed to connect to server") || strings.Contains(msg, "no server running") {
+		if strings.Contains(msg, "failed to connect to server") || strings.Contains(msg, "no server running") || strings.Contains(msg, "error connecting to") {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("tmux list-sessions failed: %w: %s", err, strings.TrimSpace(string(out)))

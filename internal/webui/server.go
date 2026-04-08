@@ -305,6 +305,12 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		go config.DaemonStartupFn(ctx, onReady)
 	}
 
+	// Start health doctor to auto-restart daemons with stuck circuit breakers.
+	if config.WorkspaceListFn != nil {
+		doctor := NewHealthDoctor(multiPool, config.WorkspaceListFn, config.Logger, DefaultHealthDoctorConfig())
+		go doctor.Run(ctx)
+	}
+
 	// Build fleet registration config (API key + rate limiter)
 	var fleetRegCfg *FleetRegisterConfig
 	if config.FleetAPIKey != "" && fleetRegistry != nil {
