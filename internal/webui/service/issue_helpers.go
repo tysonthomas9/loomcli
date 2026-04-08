@@ -53,6 +53,7 @@ func toCreateArgs(params *CreateIssueParams) *rpc.CreateArgs {
 		Owner:              params.Owner,
 		DueAt:              params.DueAt,
 		DeferUntil:         params.DeferUntil,
+		SourceRepo:         params.SourceRepo,
 	}
 }
 

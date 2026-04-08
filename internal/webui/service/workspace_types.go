@@ -19,8 +19,9 @@ type WorkspaceCreateRequest struct {
 // WorkspaceCreateResult carries data produced during workspace creation,
 // eliminating the need for a post-creation config re-read.
 type WorkspaceCreateResult struct {
-	WorkspaceID   string // stable UUID assigned during creation
-	WorkspacePath string // absolute path to the workspace directory
+	WorkspaceID      string // stable UUID assigned during creation
+	WorkspacePath    string // absolute path to the workspace directory
+	DeferDaemonStart bool   // if true, caller should start daemon after releasing locks
 }
 
 // WorkspaceCreateFn is the function signature for creating a workspace.

@@ -141,6 +141,7 @@ func ClearDefaultWorkspace() error {
 // to prevent concurrent creates from clobbering each other.
 func CreateWorkspace(ctx context.Context, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
 	var result service.WorkspaceCreateResult
+	var daemonCfg *config.LoomConfig
 	err := config.WithConfigLock(func() error {
 		cfg, err := loadOrCreateConfig()
 		if err != nil {
@@ -162,8 +163,17 @@ func CreateWorkspace(ctx context.Context, req service.WorkspaceCreateRequest) (s
 		}
 
 		result, err = dispatchWorkspaceCreate(ctx, cfg, req, wsDir, branch)
+		daemonCfg = cfg
 		return err
 	})
+
+	// Start daemon AFTER config lock is released to prevent deadlock.
+	// The daemon start goroutine polls for the socket which can take 30+ seconds;
+	// holding the lock during that time blocks all other config operations.
+	if err == nil && result.DeferDaemonStart {
+		startDaemonAsync(daemonCfg, req.Name, result.WorkspacePath)
+	}
+
 	return result, err
 }
 
@@ -331,8 +341,7 @@ func finalizeWorkspace(cfg *config.LoomConfig, wsName, wsDir string, repos []con
 		return service.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.ConfigFailed, "failed to save config", err)
 	}
 
-	startDaemonAsync(cfg, wsName, wsDir)
-	return service.WorkspaceCreateResult{WorkspaceID: wsID, WorkspacePath: wsDir}, nil
+	return service.WorkspaceCreateResult{WorkspaceID: wsID, WorkspacePath: wsDir, DeferDaemonStart: true}, nil
 }
 
 // cleanupWorktrees removes created worktrees and the workspace directory on failure.
