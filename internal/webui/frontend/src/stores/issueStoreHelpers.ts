@@ -166,6 +166,7 @@ function createIssueFromMutation(mutation: MutationPayload): Issue {
   };
   if (mutation.assignee != null) issue.assignee = mutation.assignee;
   if (mutation.new_status != null) issue.status = mutation.new_status as Status;
+  if (mutation.source_repo != null) issue.repo = mutation.source_repo;
   return issue;
 }
 
@@ -183,6 +184,8 @@ function applyUpdateToIssue(issue: Issue, mutation: MutationPayload): Issue {
     ) {
       draft.priority = mutation.priority as typeof draft.priority;
     }
+    if (mutation.source_repo != null && !draft.repo)
+      draft.repo = mutation.source_repo;
   });
 }
 

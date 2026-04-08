@@ -955,14 +955,17 @@ describe("issueStore", () => {
       vi.advanceTimersByTime(60000);
     });
 
-    it("unsubscribes from events", () => {
+    it("does not unsubscribe from events (managed by StoreWiring)", () => {
       const mockUnsubscribe = vi.fn();
       const mockSubscribe = vi.fn(() => mockUnsubscribe);
       store.getState().connectToEvents(mockSubscribe);
 
       store.getState().reset();
 
-      expect(mockUnsubscribe).toHaveBeenCalled();
+      // SSE subscription lifecycle is managed by StoreWiring's useEffect,
+      // not by reset(). Calling eventUnsubscribe in reset() breaks SSE
+      // after workspace changes because the subscription is never re-established.
+      expect(mockUnsubscribe).not.toHaveBeenCalled();
     });
   });
 

@@ -24,8 +24,13 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # --- 1. Build loom binary (skip if fresh) ---
-MAIN_PKG="$REPO_ROOT/cmd/loom"
-if [[ ! -x "$LOOM_BIN" ]] || [[ "$MAIN_PKG/main.go" -nt "$LOOM_BIN" ]]; then
+# Prefer the pre-built binary from `make build` when available and newer.
+MAIN_BIN="$REPO_ROOT/loom"
+if [[ -x "$MAIN_BIN" ]] && { [[ ! -x "$LOOM_BIN" ]] || [[ "$MAIN_BIN" -nt "$LOOM_BIN" ]]; }; then
+    echo "[e2e] Copying pre-built loom binary..."
+    mkdir -p "$(dirname "$LOOM_BIN")"
+    cp "$MAIN_BIN" "$LOOM_BIN"
+elif [[ ! -x "$LOOM_BIN" ]]; then
     echo "[e2e] Building loom binary..."
     mkdir -p "$(dirname "$LOOM_BIN")"
     (cd "$REPO_ROOT" && go build -o "$LOOM_BIN" ./cmd/loom)

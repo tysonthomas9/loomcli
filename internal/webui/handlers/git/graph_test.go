@@ -485,7 +485,7 @@ func TestHandleGraph(t *testing.T) {
 			url:           "/api/issues/graph",
 			wantStatus:    http.StatusOK,
 			wantSuccess:   true,
-			wantDataField: "issues",
+			wantDataField: "data",
 		},
 	}
 
@@ -569,10 +569,10 @@ func TestHandleGraph_ResponseStructure(t *testing.T) {
 	if !resp.Success {
 		t.Fatal("expected success=true")
 	}
-	if len(resp.Issues) != 1 {
-		t.Fatalf("issues length = %d, want 1", len(resp.Issues))
+	if len(resp.Data) != 1 {
+		t.Fatalf("issues length = %d, want 1", len(resp.Data))
 	}
-	issue := resp.Issues[0]
+	issue := resp.Data[0]
 	if issue.ID != "bd-1" {
 		t.Errorf("ID = %q, want %q", issue.ID, "bd-1")
 	}

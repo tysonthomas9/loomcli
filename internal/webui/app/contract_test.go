@@ -587,12 +587,9 @@ func TestContractEnvelope_GraphDeviation(t *testing.T) {
 
 	body := assertJSONResponse(t, w)
 
-	// Verify it uses "issues" NOT "data"
-	if _, ok := body["issues"]; !ok {
-		t.Error("GraphResponse must use 'issues' field, not 'data'")
-	}
-	if _, ok := body["data"]; ok {
-		t.Error("GraphResponse should NOT have 'data' field -- it uses 'issues' instead")
+	// Verify it uses standard "data" envelope (aligned with OpenAPI spec)
+	if _, ok := body["data"]; !ok {
+		t.Error("GraphResponse must use 'data' field (standard envelope)")
 	}
 
 	// Verify standard envelope fields
@@ -604,13 +601,13 @@ func TestContractEnvelope_GraphDeviation(t *testing.T) {
 		t.Errorf("success = %v, want true", success)
 	}
 
-	// Verify issues is an array
-	issues, ok := body["issues"].([]interface{})
+	// Verify data is an array (graph issues)
+	issues, ok := body["data"].([]interface{})
 	if !ok {
-		t.Fatalf("'issues' field is %T, want array", body["issues"])
+		t.Fatalf("'data' field is %T, want array", body["data"])
 	}
 	if len(issues) != 1 {
-		t.Errorf("len(issues) = %d, want 1", len(issues))
+		t.Errorf("len(data) = %d, want 1", len(issues))
 	}
 }
 

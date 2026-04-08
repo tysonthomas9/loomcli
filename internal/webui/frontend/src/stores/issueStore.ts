@@ -243,7 +243,6 @@ export function createIssueStore(
 
     applyMutation(mutation: MutationPayload): void {
       const { issue_id } = mutation;
-
       // Optimistic gate: buffer mutations for pending issues
       if (issue_id && optimisticEntries.has(issue_id)) {
         optimisticEntries.get(issue_id)!.bufferedMutations.push(mutation);
@@ -451,10 +450,9 @@ export function createIssueStore(
         staleBannerTimeout = null;
       }
 
-      if (eventUnsubscribe) {
-        eventUnsubscribe();
-        eventUnsubscribe = null;
-      }
+      // Note: eventUnsubscribe is NOT called here. The SSE subscription
+      // lifecycle is managed by StoreWiring's useEffect, not by reset().
+      // Calling eventUnsubscribe() here would break SSE after workspace changes.
 
       fetchTimestamp = 0;
       isFetching = false;

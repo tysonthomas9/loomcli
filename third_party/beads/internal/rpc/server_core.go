@@ -327,15 +327,17 @@ func (s *Server) handleWaitForMutations(req *Request, connCtx context.Context) R
 		timeout = time.Duration(args.Timeout) * time.Millisecond
 	}
 
-	// First check for existing mutations since the timestamp
+	// Subscribe BEFORE checking for existing mutations to avoid a TOCTOU race:
+	// if a mutation occurs between the check and the subscribe, it would be missed
+	// and the caller would block for up to 30s until the next timeout cycle.
+	notifyCh, unsubscribe := s.subscribeMutations()
+	defer unsubscribe()
+
+	// Check for existing mutations since the timestamp
 	mutations := s.GetRecentMutations(args.Since)
 	if len(mutations) > 0 {
 		return marshalMutations(mutations)
 	}
-
-	// Subscribe to mutation broadcasts (per-subscriber channel, not shared)
-	notifyCh, unsubscribe := s.subscribeMutations()
-	defer unsubscribe()
 
 	// No existing mutations, wait for new ones
 	timer := time.NewTimer(timeout)

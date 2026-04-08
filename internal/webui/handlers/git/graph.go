@@ -73,7 +73,7 @@ type GraphIssue struct {
 // GraphResponse wraps the graph data for JSON response.
 type GraphResponse struct {
 	Success bool          `json:"success"`
-	Issues  []*GraphIssue `json:"issues,omitempty"`
+	Data    []*GraphIssue `json:"data,omitempty"`
 	Error   string        `json:"error,omitempty"`
 }
 
@@ -291,7 +291,7 @@ func HandleGraphWithPool(pool GraphConnectionGetter) http.HandlerFunc { //nolint
 
 		handler.WriteJSON(w, http.StatusOK, GraphResponse{
 			Success: true,
-			Issues:  graphIssues,
+			Data:    graphIssues,
 		})
 	}
 }
