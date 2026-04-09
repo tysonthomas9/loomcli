@@ -5,7 +5,6 @@
  */
 
 import { IssueDetailPanel, ToastContainer } from "@/components";
-import { AgentsSidebar } from "@/components/AgentsSidebar";
 import { WorkspaceTree } from "@/components/WorkspaceTree";
 import { SplitDetailSummary } from "@/components/IssueDetailPanel";
 import { PasteConfirmDialog } from "@/components/TerminalView/controls";
@@ -425,49 +424,6 @@ export function SearchBarFixture(): JSX.Element {
         onToggleRegex={() => {}}
       />
     </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// AgentsSidebarFixture
-// URL: /test/agents-sidebar (uses window.__fixtureData for context)
-// ---------------------------------------------------------------------------
-export function AgentsSidebarFixture(): JSX.Element {
-  const agents = readFixtureData("agents", []);
-  const tasks = readFixtureData("tasks", AGENT_INITIAL.tasks);
-  const agentTasks = readFixtureData("agentTasks", {});
-  const taskLists = readFixtureData("taskLists", AGENT_INITIAL.taskLists);
-
-  const agentStore = createAgentStore();
-  agentStore.setState({
-    agents,
-    tasks,
-    agentTasks,
-    taskLists,
-    isConnected: true,
-    connectionState: "connected",
-    wasEverConnected: true,
-  });
-
-  const storeContextValue = {
-    ...NO_STORE_CONTEXT,
-    agentStore,
-    issueStore: createIssueStore(),
-  };
-
-  const wsContextValue: WorkspaceContextValue = {
-    ...NO_WORKSPACE_CONTEXT,
-    workspaceId: "fixture-workspace",
-  };
-
-  return (
-    <WorkspaceContext.Provider value={wsContextValue}>
-      <StoreContext.Provider value={storeContextValue}>
-        <div data-testid="fixture-root" style={FIXTURE_ROOT_STYLE}>
-          <AgentsSidebar />
-        </div>
-      </StoreContext.Provider>
-    </WorkspaceContext.Provider>
   );
 }
 

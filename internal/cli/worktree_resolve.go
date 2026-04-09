@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
@@ -17,10 +18,56 @@ type Resolver struct {
 	Workspace string // active workspace name (workspace mode only)
 }
 
+// configCache caches the parsed LoomConfig to avoid re-reading the YAML file
+// on every request. The config changes rarely (workspace create/delete).
+// Cache is keyed by config path so test isolation works automatically.
+var configCache struct {
+	sync.RWMutex
+	cfg     *config.LoomConfig
+	err     error
+	path    string // config path when cached — invalidates on path change
+	expires time.Time
+}
+
+const configCacheTTL = 5 * time.Second
+
+// loadConfigCached returns a cached config or reloads from disk if stale.
+func loadConfigCached() (*config.LoomConfig, error) {
+	curPath := config.GetConfigPath()
+	configCache.RLock()
+	if configCache.path == curPath && time.Now().Before(configCache.expires) {
+		cfg, err := configCache.cfg, configCache.err
+		configCache.RUnlock()
+		return cfg, err
+	}
+	configCache.RUnlock()
+
+	configCache.Lock()
+	defer configCache.Unlock()
+	// Double-check after acquiring write lock
+	if configCache.path == curPath && time.Now().Before(configCache.expires) {
+		return configCache.cfg, configCache.err
+	}
+	configCache.cfg, configCache.err = config.LoadConfig()
+	configCache.path = curPath
+	configCache.expires = time.Now().Add(configCacheTTL)
+	return configCache.cfg, configCache.err
+}
+
+// InvalidateConfigCache forces the next loadConfigCached call to re-read disk.
+// Call after config mutations (workspace create/delete/rename) and in tests.
+func InvalidateConfigCache() {
+	configCache.Lock()
+	configCache.cfg = nil
+	configCache.err = nil
+	configCache.expires = time.Time{}
+	configCache.Unlock()
+}
+
 // NewResolver creates a Resolver, selecting workspace mode if a config with
 // workspaces exists, otherwise falling back to legacy mode.
 func NewResolver() (*Resolver, error) {
-	cfg, err := config.LoadConfig()
+	cfg, err := loadConfigCached()
 	if err != nil {
 		return &Resolver{Mode: ModeLegacy}, nil
 	}
@@ -122,6 +169,8 @@ func (r *Resolver) discoverLegacy() ([]WorktreeInfo, error) {
 }
 
 // discoverWorkspace reads repos from the active workspace config.
+// Returns repo-level entries only — agent worktrees are discovered
+// separately via DiscoverAgentWorktrees.
 func (r *Resolver) discoverWorkspace() ([]WorktreeInfo, error) {
 	ws, ok := r.Config.Workspaces[r.Workspace]
 	if !ok {
@@ -157,6 +206,111 @@ func (r *Resolver) discoverWorkspace() ([]WorktreeInfo, error) {
 	}
 
 	return worktrees, nil
+}
+
+// DiscoverAgentWorktrees returns agent worktrees under
+// <wsPath>/worktrees/<repo>/<agent> for the resolver's active workspace.
+// Only valid in workspace mode; returns an error in legacy mode.
+// Each returned WorktreeInfo has Repo set to the parent repo's config,
+// giving callers access to DefaultBranch and Remote.
+// funlen: the 2-pass scan + parallel git dispatch is intentionally one
+// function to keep the candidate lifecycle in scope.
+//
+//nolint:funlen
+func (r *Resolver) DiscoverAgentWorktrees() ([]WorktreeInfo, error) {
+	if r.Mode != ModeWorkspace || r.Config == nil {
+		return nil, fmt.Errorf("agent worktree discovery requires workspace mode")
+	}
+	ws, ok := r.Config.Workspaces[r.Workspace]
+	if !ok {
+		return nil, fmt.Errorf("workspace %q not found in config", r.Workspace)
+	}
+
+	// Pass 1: collect candidates with cheap OS reads (no subprocesses).
+	type candidate struct {
+		name string
+		path string
+		repo *config.RepoConfig
+	}
+	var candidates []candidate
+	for i := range ws.Repos {
+		repo := &ws.Repos[i]
+		agentsDir := filepath.Join(ws.Path, "worktrees", repo.Name)
+		entries, err := os.ReadDir(agentsDir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			agentPath := filepath.Join(agentsDir, entry.Name())
+			if _, err := os.Stat(filepath.Join(agentPath, ".git")); err != nil {
+				continue
+			}
+			candidates = append(candidates, candidate{entry.Name(), agentPath, repo})
+		}
+	}
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+
+	// Pass 2: fan out git calls in parallel.
+	agents := make([]WorktreeInfo, len(candidates))
+	var wg sync.WaitGroup
+	wg.Add(len(candidates))
+	for i, c := range candidates {
+		go func(idx int, cand candidate) {
+			defer wg.Done()
+			branch, err := GetCurrentBranch(cand.path)
+			if err != nil {
+				branch = "unknown"
+			}
+			agents[idx] = WorktreeInfo{
+				Name:      cand.name,
+				Path:      cand.path,
+				Branch:    branch,
+				Workspace: r.Workspace,
+				Repo:      cand.repo,
+			}
+		}(i, c)
+	}
+	wg.Wait()
+	return agents, nil
+}
+
+// ResolveAgentByName finds a single agent worktree by name via direct path
+// lookup. Iterates repos and checks <wsPath>/worktrees/<repo>/<name>/.git,
+// avoiding a full scan of all agents. Only spawns one git subprocess.
+func (r *Resolver) ResolveAgentByName(name string) (WorktreeInfo, error) {
+	if r.Mode != ModeWorkspace || r.Config == nil {
+		return WorktreeInfo{}, fmt.Errorf("agent worktree resolution requires workspace mode")
+	}
+	ws, ok := r.Config.Workspaces[r.Workspace]
+	if !ok {
+		return WorktreeInfo{}, fmt.Errorf("workspace %q not found in config", r.Workspace)
+	}
+
+	for i := range ws.Repos {
+		repo := &ws.Repos[i]
+		agentPath := filepath.Join(ws.Path, "worktrees", repo.Name, name)
+		if _, err := os.Stat(filepath.Join(agentPath, ".git")); err != nil {
+			continue
+		}
+		branch, err := GetCurrentBranch(agentPath)
+		if err != nil {
+			branch = "unknown"
+		}
+		return WorktreeInfo{
+			Name:      name,
+			Path:      agentPath,
+			Branch:    branch,
+			Workspace: r.Workspace,
+			Repo:      repo,
+		}, nil
+	}
+
+	return WorktreeInfo{}, fmt.Errorf("agent worktree %q not found", name)
 }
 
 // ResolveWorktreePath converts a worktree name to its full path using the

@@ -39,7 +39,6 @@ const devRoutes = import.meta.env.DEV
             WelcomeBannerFixture,
             HelpPopoverFixture,
             SearchBarFixture,
-            AgentsSidebarFixture,
             WorkspaceTreeFixture,
             SplitDetailSummaryFixture,
             PasteConfirmDialogFixture,
@@ -61,8 +60,6 @@ const devRoutes = import.meta.env.DEV
                 fixture = <HelpPopoverFixture />;
               else if (path === "/test/search-bar")
                 fixture = <SearchBarFixture />;
-              else if (path === "/test/agents-sidebar")
-                fixture = <AgentsSidebarFixture />;
               else if (path === "/test/workspace-tree")
                 fixture = <WorkspaceTreeFixture />;
               else if (path === "/test/split-detail-summary")

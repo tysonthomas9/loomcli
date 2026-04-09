@@ -626,7 +626,7 @@ function App() {
     [refetch, handlePanelClose, showToast],
   );
 
-  // Handle agent click from AgentsSidebar or MonitorDashboard
+  // Handle agent click from MonitorDashboard
   const handleAgentClick = useCallback(
     (agentName: string) => {
       const hadIssuePanel = isOpen("issue");
@@ -988,9 +988,9 @@ function App() {
       disconnectedSince={staleBannerDisconnectedSince}
       onRetryConnection={staleBannerRetry}
       workQueueCounts={workQueueCounts}
-      onTalkToLead={handleTreeTalkToLead}
       onTreeSelect={handleTreeIssueSelect}
       onTaskTerminalOpen={handleTreeTaskTerminalOpen}
+      onTalkToLead={handleTreeTalkToLead}
     />
   );
 

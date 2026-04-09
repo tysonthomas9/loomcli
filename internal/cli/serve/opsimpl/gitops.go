@@ -61,32 +61,14 @@ func (g *GitOpsImpl) ResolveAgentWorktree(workspaceID, name string) (*ops.AgentW
 		return nil, err
 	}
 
-	worktrees, err := resolver.DiscoverWorktrees()
+	// Direct path lookup: O(repos) with 1 git subprocess instead of O(agents).
+	wt, err := resolver.ResolveAgentByName(name)
 	if err != nil {
-		return nil, fmt.Errorf("discovering worktrees: %v", err)
+		return nil, err
 	}
 
-	for _, wt := range worktrees {
-		if wt.Name == name {
-			aw := &ops.AgentWorktree{
-				Name:          wt.Name,
-				Path:          wt.Path,
-				Branch:        wt.Branch,
-				DefaultBranch: "main",
-			}
-			if wt.Repo != nil {
-				if wt.Repo.DefaultBranch != "" {
-					aw.DefaultBranch = wt.Repo.DefaultBranch
-				}
-				aw.Remote = wt.Repo.Remote
-				aw.RepoName = wt.Repo.Name
-				aw.IsWorkspace = true
-			}
-			return aw, nil
-		}
-	}
-
-	return nil, fmt.Errorf("worktree %q not found", name)
+	aw := toAgentWorktree(wt)
+	return &aw, nil
 }
 
 func (g *GitOpsImpl) Push(worktreePath, sourceBranch, targetBranch, remote string) (*ops.GitPushResult, error) {
@@ -197,30 +179,35 @@ func (g *GitOpsImpl) ListAgentWorktrees(workspaceID string) ([]ops.AgentWorktree
 		return nil, err
 	}
 
-	worktrees, err := resolver.DiscoverWorktrees()
+	worktrees, err := resolver.DiscoverAgentWorktrees()
 	if err != nil {
-		return nil, fmt.Errorf("discovering worktrees: %v", err)
+		return nil, fmt.Errorf("discovering agent worktrees: %v", err)
 	}
 
 	result := make([]ops.AgentWorktree, 0, len(worktrees))
 	for _, wt := range worktrees {
-		aw := ops.AgentWorktree{
-			Name:          wt.Name,
-			Path:          wt.Path,
-			Branch:        wt.Branch,
-			DefaultBranch: "main",
-		}
-		if wt.Repo != nil {
-			if wt.Repo.DefaultBranch != "" {
-				aw.DefaultBranch = wt.Repo.DefaultBranch
-			}
-			aw.Remote = wt.Repo.Remote
-			aw.RepoName = wt.Repo.Name
-			aw.IsWorkspace = true
-		}
-		result = append(result, aw)
+		result = append(result, toAgentWorktree(wt))
 	}
 	return result, nil
+}
+
+// toAgentWorktree converts a cli.WorktreeInfo to an ops.AgentWorktree.
+func toAgentWorktree(wt cli.WorktreeInfo) ops.AgentWorktree {
+	aw := ops.AgentWorktree{
+		Name:          wt.Name,
+		Path:          wt.Path,
+		Branch:        wt.Branch,
+		DefaultBranch: "main",
+	}
+	if wt.Repo != nil {
+		if wt.Repo.DefaultBranch != "" {
+			aw.DefaultBranch = wt.Repo.DefaultBranch
+		}
+		aw.Remote = wt.Repo.Remote
+		aw.RepoName = wt.Repo.Name
+		aw.IsWorkspace = true
+	}
+	return aw
 }
 
 func (g *GitOpsImpl) DiffStat(worktreePath, fromRef string) ops.DiffStatResult {

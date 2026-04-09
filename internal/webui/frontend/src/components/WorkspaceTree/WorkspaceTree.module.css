@@ -78,6 +78,22 @@
   border: 1px solid var(--color-border-light);
 }
 
+/* Selector row: workspace selector + collapse toggle side by side */
+.selectorRow {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.selectorRow .toggleButton {
+  flex-shrink: 0;
+  width: 32px;
+  border-bottom: none;
+  border-left: 1px solid var(--color-border);
+  padding: 0;
+  justify-content: center;
+}
+
 .content {
   flex: 1;
   display: flex;

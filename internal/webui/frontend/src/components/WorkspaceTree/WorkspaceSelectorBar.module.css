@@ -1,0 +1,48 @@
+/**
+ * WorkspaceSelectorBar styles.
+ * Top-of-sidebar workspace name button that opens the switcher.
+ */
+
+.selector {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.75rem 1rem;
+  background: var(--color-bg);
+  border: none;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  text-align: left;
+  transition: background-color 0.15s ease;
+}
+
+.selector:hover {
+  background: var(--color-bg-hover);
+}
+
+.selector:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
+}
+
+.icon {
+  color: var(--color-primary, #6366f1);
+  font-size: 0.75rem;
+  flex-shrink: 0;
+}
+
+.name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chevron {
+  color: var(--color-text-tertiary);
+  font-size: 0.75rem;
+  flex-shrink: 0;
+}
