@@ -215,6 +215,7 @@ func SaveConfig(cfg *LoomConfig) error {
 	if err := os.WriteFile(path, data, 0644); err != nil {
 		return fmt.Errorf("writing config %s: %w", path, err)
 	}
+	InvalidateConfigCache()
 	return nil
 }
 
