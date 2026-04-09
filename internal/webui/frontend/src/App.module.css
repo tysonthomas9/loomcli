@@ -90,7 +90,8 @@
   flex-direction: column;
   flex: 1 1 0; /* Fill available space to constrain column height */
   min-height: 0; /* Allow flex item to shrink below content height */
-  overflow: hidden; /* Columns handle their own scrolling */
+  overflow-x: hidden;
+  overflow-y: auto; /* SwimLaneBoard needs vertical scroll */
 }
 
 @media (width <= 1024px) {
