@@ -10,7 +10,7 @@ import { getWorkspaceColor } from "@/utils/workspaceColor";
 import styles from "./WorkspaceBreadcrumb.module.css";
 
 const VIEW_LABELS: Record<ViewMode, string> = {
-  kanban: "Kanban",
+  kanban: "Aether Project",
   table: "List",
   graph: "Graph",
   monitor: "Monitor",
@@ -50,8 +50,6 @@ export function WorkspaceBreadcrumb({
   return (
     <span className={rootClassName}>
       <span className={styles.dot} style={{ backgroundColor: color }} />
-      <span className={styles.workspaceName}>{workspaceName}</span>
-      <span className={styles.separator}>/</span>
       <span className={styles.viewLabel}>{viewLabel}</span>
     </span>
   );
