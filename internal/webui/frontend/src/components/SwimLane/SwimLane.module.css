@@ -8,7 +8,7 @@
   flex-direction: column;
   background-color: transparent;
   border-radius: var(--radius-lg);
-  overflow: hidden;
+  overflow: visible;
   border: 1px solid var(--color-border);
   flex: 0 0 auto; /* Size to content, don't grow or shrink */
 }
@@ -92,12 +92,23 @@
   gap: 0;
   padding: var(--space-3);
   overflow-x: auto;
-  --column-content-overflow: visible;
+  overflow-y: visible;
   flex: 0 0 auto; /* Size to content instead of filling space */
   opacity: 1;
   transition:
     opacity 0.15s ease-out,
     padding 0.2s ease-out;
+}
+
+/* Inside swim lanes, columns should size to content (not clip) */
+.laneContent > section {
+  overflow: visible;
+}
+
+/* Column content in swim lanes should not scroll — show all cards */
+.laneContent > section > div[role="list"] {
+  overflow: visible;
+  flex: 0 0 auto;
 }
 
 .laneContent > :last-child {
