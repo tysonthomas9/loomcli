@@ -131,27 +131,21 @@ test.describe("Daemon error recovery", () => {
     // Navigate and establish healthy connected state
     await navigateAndWaitForConnected(page);
 
-    // Set up route intercepts that return 503 for health and SSE endpoints.
+    // Set up route intercepts: abort the SSE events endpoint to break the
+    // existing EventSource connection (route.fulfill only affects new requests),
+    // and return 503 for health/token so the reconnection cascade detects
+    // daemon unavailability.
     const daemon503 = (route: import("@playwright/test").Route) =>
       route.fulfill({ status: 503, contentType: "application/json", body: '{"error":"daemon unavailable"}' });
     await page.route("**/api/health", daemon503);
     await page.route("**/api/daemon/status", daemon503);
     await page.route("**/events/token", daemon503);
-    await page.route("**/events", daemon503);
+    await page.route("**/events", (route) => route.abort());
 
-    // Break the existing EventSource connection by going offline long enough for
-    // the browser to detect the disconnection (SSE heartbeat/timeout varies).
-    // When the connection drops, the SSE client reconnects, hitting our 503 routes.
-    // The token fetch via fetchApi gets 503 → notifyDaemonUnavailable() → health
-    // check fails → debounce (2000ms) → overlay appears.
-    const cdp = await page.context().newCDPSession(page);
-    await cdp.send("Network.emulateNetworkConditions", {
-      offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0,
-    });
-    await page.waitForTimeout(3000);
-    await cdp.send("Network.emulateNetworkConditions", {
-      offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1,
-    });
+    // The abort on **/events terminates the active SSE streaming connection.
+    // EventSource fires onerror → schedules reconnect → token fetch gets 503 →
+    // notifyDaemonUnavailable() → health check gets 503 → debounce (2000ms) →
+    // overlay appears. No CDP offline needed.
 
     // Wait for DaemonUnavailableOverlay to appear
     // Must exceed the 2000ms debounce (useDaemonHealth.ts: UNAVAILABLE_DEBOUNCE_MS = 2000)
