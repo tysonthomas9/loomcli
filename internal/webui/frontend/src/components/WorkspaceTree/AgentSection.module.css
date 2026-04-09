@@ -25,6 +25,20 @@
 .agentRow {
   display: flex;
   flex-direction: column;
+  transition: background-color 0.15s ease;
+}
+
+.agentRow[role="button"] {
+  cursor: pointer;
+}
+
+.agentRow[role="button"]:hover {
+  background: var(--color-bg-hover);
+}
+
+.agentRow[role="button"]:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
 }
 
 /* Override AgentCard padding for compact sidebar use.

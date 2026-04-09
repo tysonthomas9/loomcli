@@ -55,35 +55,54 @@ export function AgentSection({
     <div className={styles.section}>
       <div className={styles.header}>Agents</div>
       <div className={styles.list}>
-        {agents.map((agent) => (
-          <div key={agent.name} className={styles.agentRow}>
-            <AgentCard
-              agent={agent}
-              showRepoBadge={false}
-              taskTitle={agentTasks?.[agent.name]?.title}
-              {...(onAgentClick
-                ? { onClick: () => onAgentClick(agent.name) }
-                : {})}
-            />
-            <div className={styles.scopeLine}>
-              {agent.cross_repo ? (
-                <span className={styles.scopeLabel}>workspace</span>
-              ) : agent.repo ? (
-                <span className={styles.scopeLabel}>
-                  {agent.repo}
-                  {agent.branch ? (
-                    <>
-                      {" "}
-                      <span className={styles.scopeBranch}>
-                        &middot; {agent.branch}
-                      </span>
-                    </>
-                  ) : null}
-                </span>
-              ) : null}
+        {agents.map((agent) => {
+          const handleClick = onAgentClick
+            ? () => onAgentClick(agent.name)
+            : undefined;
+          return (
+            <div
+              key={agent.name}
+              className={styles.agentRow}
+              onClick={handleClick}
+              role={handleClick ? "button" : undefined}
+              tabIndex={handleClick ? 0 : undefined}
+              aria-label={handleClick ? `Agent: ${agent.name}` : undefined}
+              onKeyDown={
+                handleClick
+                  ? (e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        handleClick();
+                      }
+                    }
+                  : undefined
+              }
+            >
+              <AgentCard
+                agent={agent}
+                showRepoBadge={false}
+                taskTitle={agentTasks?.[agent.name]?.title}
+              />
+              <div className={styles.scopeLine}>
+                {agent.cross_repo ? (
+                  <span className={styles.scopeLabel}>workspace</span>
+                ) : agent.repo ? (
+                  <span className={styles.scopeLabel}>
+                    {agent.repo}
+                    {agent.branch ? (
+                      <>
+                        {" "}
+                        <span className={styles.scopeBranch}>
+                          &middot; {agent.branch}
+                        </span>
+                      </>
+                    ) : null}
+                  </span>
+                ) : null}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
       {onAddClick && (
         <button type="button" className={styles.addButton} onClick={onAddClick}>
