@@ -294,6 +294,7 @@ func SaveConfigUnlocked(cfg *LoomConfig) error {
 	if err := atomicfile.WriteFile(path, data, 0644); err != nil {
 		return fmt.Errorf("writing config %s: %w", path, err)
 	}
+	InvalidateConfigCache()
 	return nil
 }
 
