@@ -48,15 +48,8 @@ export type {
 // Event API functions
 export { getIssueEvents } from "./events";
 
-// Agent API functions (loom server)
-export {
-  fetchAgents,
-  fetchWorkspaceAgents,
-  checkLoomHealth,
-  fetchStatus,
-  fetchTasks,
-} from "./agents";
-export type { FetchStatusResult } from "./agents";
+// Agent API functions (workspace-scoped)
+export { fetchWorkspaceAgents } from "./agents";
 
 // Backend config API functions
 export { getBackendConfig, updateBackendConfig } from "./config";

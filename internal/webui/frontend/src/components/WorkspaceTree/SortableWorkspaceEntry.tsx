@@ -199,12 +199,7 @@ export function SortableWorkspaceEntry({
       {ws.state && ws.state !== "ready" && ws.state !== "error" && (
         <span className={styles.stateSpinner} title={`${ws.state}...`} />
       )}
-      <span className={styles.workspaceEntryMeta}>
-        <span className={styles.workspaceRepoCount}>{ws.repo_count}</span>
-        {ws.active && (
-          <span className={styles.workspaceActiveBadge}>active</span>
-        )}
-      </span>
+      <span className={styles.workspaceEntryMeta} />
       {!isEditing && (
         <button
           type="button"

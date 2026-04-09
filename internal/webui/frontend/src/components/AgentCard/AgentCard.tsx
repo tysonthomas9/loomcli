@@ -25,6 +25,8 @@ export interface AgentCardProps {
   className?: string;
   /** Click handler */
   onClick?: () => void;
+  /** Whether to show the repo badge (default: true). Set false when already inside a repo group. */
+  showRepoBadge?: boolean;
 }
 
 /**
@@ -85,6 +87,7 @@ export function AgentCard({
   taskTitle,
   className,
   onClick,
+  showRepoBadge = true,
 }: AgentCardProps): JSX.Element {
   const parsed = parseLoomStatus(agent.status);
   const avatarColor = getAvatarColor(agent.name);
@@ -137,7 +140,7 @@ export function AgentCard({
       <div className={styles.info}>
         <span className={styles.name}>{agent.name}</span>
         <span className={styles.role}>{roleLabel}</span>
-        {agent.repo && (
+        {agent.repo && showRepoBadge && (
           <span className={styles.repoLine}>
             <RepoBadge repoName={agent.repo} />
             {agent.cross_repo && (

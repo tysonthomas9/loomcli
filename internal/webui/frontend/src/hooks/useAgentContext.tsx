@@ -36,37 +36,27 @@ export interface AgentProviderProps {
 }
 
 /**
- * AgentProvider wraps the app and provides agent data to all children.
+ * AgentProvider wraps the app and provides workspace-scoped agent data to all children.
  * Internally manages a single useAgents() polling loop (5s interval).
  */
 export function AgentProvider({ children }: AgentProviderProps): JSX.Element {
   const { workspaceId } = useWorkspaceContext();
-  // Workspace agents are fetched concurrently in the same poll cycle (a7swy fix).
   const agentsResult = useAgents({ pollInterval: 5000, workspaceId });
-
-  // Merge: workspace agents take priority (they have repo-specific data),
-  // then append global agents not already present by name.
-  const mergedAgents = useMemo(() => {
-    const byName = new Map<string, LoomAgentStatus>();
-    for (const a of agentsResult.workspaceAgents) byName.set(a.name, a);
-    for (const a of agentsResult.agents) {
-      if (!byName.has(a.name)) byName.set(a.name, a);
-    }
-    return Array.from(byName.values());
-  }, [agentsResult.workspaceAgents, agentsResult.agents]);
 
   const getAgentByName = useCallback(
     (name: string): LoomAgentStatus | undefined => {
-      return mergedAgents.find((a) => a.name === name);
+      return agentsResult.agents.find((a) => a.name === name);
     },
-    [mergedAgents],
+    [agentsResult.agents],
   );
 
-  const value: AgentContextValue = {
-    ...agentsResult,
-    agents: mergedAgents,
-    getAgentByName,
-  };
+  const value: AgentContextValue = useMemo(
+    () => ({
+      ...agentsResult,
+      getAgentByName,
+    }),
+    [agentsResult, getAgentByName],
+  );
 
   return (
     <AgentContext.Provider value={value}>{children}</AgentContext.Provider>
@@ -76,39 +66,6 @@ export function AgentProvider({ children }: AgentProviderProps): JSX.Element {
 /** Default no-op value returned when useAgentContext is called outside a provider. */
 const NO_AGENT_CONTEXT: AgentContextValue = {
   agents: [],
-  workspaceAgents: [],
-  tasks: {
-    needs_planning: 0,
-    ready_to_implement: 0,
-    in_progress: 0,
-    need_review: 0,
-    backlog: 0,
-  },
-  taskLists: {
-    needsPlanning: [],
-    readyToImplement: [],
-    needsReview: [],
-    inProgress: [],
-    backlog: [],
-    done: [],
-  },
-  agentTasks: {},
-  sync: {
-    db_synced: true,
-    db_last_sync: "",
-    git_needs_push: 0,
-    git_needs_pull: 0,
-  },
-  stats: {
-    open: 0,
-    closed: 0,
-    total: 0,
-    completion: 0,
-    remaining: 0,
-    in_progress: 0,
-    review: 0,
-    blocked: 0,
-  },
   isLoading: false,
   isConnected: false,
   connectionState: "never_connected",
@@ -125,10 +82,9 @@ const NO_AGENT_CONTEXT: AgentContextValue = {
 };
 
 /**
- * Hook to access agent context.
- * Returns safe defaults when used outside an AgentProvider (e.g., in tests).
+ * useAgentContext returns the shared agent context.
+ * Safe to call outside AgentProvider — returns no-op defaults.
  */
 export function useAgentContext(): AgentContextValue {
-  const context = useContext(AgentContext);
-  return context ?? NO_AGENT_CONTEXT;
+  return useContext(AgentContext) ?? NO_AGENT_CONTEXT;
 }

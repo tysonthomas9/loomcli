@@ -100,35 +100,7 @@ describe("SortableWorkspaceEntry", () => {
       expect(link).toHaveAttribute("href", "/ws/ws-custom/");
     });
 
-    it("displays repo count", () => {
-      render(
-        <SortableWorkspaceEntry
-          {...defaultProps({ ws: makeWorkspace({ repo_count: 5 }) })}
-        />,
-      );
-
-      expect(screen.getByText("5")).toBeInTheDocument();
-    });
-
-    it("shows active badge when workspace is active", () => {
-      render(
-        <SortableWorkspaceEntry
-          {...defaultProps({ ws: makeWorkspace({ active: true }) })}
-        />,
-      );
-
-      expect(screen.getByText("active")).toBeInTheDocument();
-    });
-
-    it("does not show active badge when workspace is inactive", () => {
-      render(
-        <SortableWorkspaceEntry
-          {...defaultProps({ ws: makeWorkspace({ active: false }) })}
-        />,
-      );
-
-      expect(screen.queryByText("active")).not.toBeInTheDocument();
-    });
+    // Repo count and active badge removed in loomcli-8uy0o sidebar redesign
 
     it("shows default star when isDefault is true", () => {
       render(<SortableWorkspaceEntry {...defaultProps({ isDefault: true })} />);

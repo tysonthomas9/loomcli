@@ -51,7 +51,6 @@ export * from "./SwimLaneBoard";
 export * from "./BackendSelectorDropdown";
 export * from "./AgentCard";
 export * from "./AgentDetailPanel";
-export * from "./AgentsSidebar";
 export * from "./NavRail";
 export * from "./TaskDrawer";
 export * from "./Toast";

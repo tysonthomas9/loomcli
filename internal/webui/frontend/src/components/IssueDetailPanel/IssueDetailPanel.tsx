@@ -35,6 +35,7 @@ import type {
   DependencyType,
   Comment,
   Event,
+  LoomTaskInfo,
 } from "@/types";
 import type { Status } from "@/types/status";
 import { getReviewType, isPRUrl } from "@/utils/issueCategory";
@@ -457,9 +458,11 @@ function DefaultContent({
   // Agent data for StartWorkButton (shared context, no duplicate polling)
   const {
     agents,
-    agentTasks,
     isConnected: isLoomConnected,
   } = useAgentContext();
+
+  // Agent task titles — placeholder until workspace-scoped agent task API exists
+  const agentTasks: Record<string, LoomTaskInfo> = {};
 
   // Agent-based log connection
   const agentName = issue?.assignee || null;

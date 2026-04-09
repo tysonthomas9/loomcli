@@ -119,8 +119,18 @@ vi.mock("@/hooks", () => ({
   LAYER_AGENT_PANEL: 20,
   LAYER_ISSUE_PANEL: 10,
   LAYER_TERMINAL_SEARCH: 5,
+  LAYER_WORKSPACE_SWITCHER: 42,
+  useFocusTrap: vi.fn(),
+  useFocusReturn: vi.fn(),
 }));
 
+vi.mock("@/components/WorkspaceSwitcher", () => ({
+  WorkspaceSwitcher: () => null,
+}));
+
+vi.mock("@/hooks/useWorkspaceRepos", () => ({
+  useWorkspaceRepos: () => ({ ...defaultReposReturn, ...reposOverride }),
+}));
 vi.mock("@/hooks/useWorkspaceTree", () => ({
   useWorkspaceTree: () => ({
     epics: [],
@@ -422,30 +432,9 @@ describe("WorkspaceTree connection state", () => {
       ).toBeInTheDocument();
     });
 
-    it("renders repo list with staleOverlay class applied", () => {
-      reposOverride = {
-        repos: [
-          {
-            name: "alpha",
-            path: "/repos/alpha",
-            default_branch: "main",
-            remote: "origin",
-          },
-        ],
-        isLoading: false,
-        error: "Server down",
-        connectionState: "error_lost_connection",
-        retryCountdown: null,
-        retryNow: vi.fn(),
-      };
+    // staleOverlay test removed — redesigned sidebar uses staleBanner instead (loomcli-8uy0o)
 
-      const { container } = render(<WorkspaceTree defaultCollapsed={false} />);
-
-      const repoList = container.querySelector('[class*="staleOverlay"]');
-      expect(repoList).toBeInTheDocument();
-    });
-
-    it("still shows repo names in dimmed repo list", () => {
+    it("still shows repo names when connection lost", () => {
       reposOverride = {
         repos: [
           {

@@ -4,8 +4,8 @@
 
 /**
  * Unit tests for WorkspaceTree delete-undo flow.
- * Covers: double-delete guard, undo before/after timer, error reset,
- * and deleteTimerRef cleanup inside setTimeout callback.
+ * SKIPPED: Workspace entries removed from sidebar in loomcli-8uy0o.
+ * Delete/undo logic lives in OtherWorkspacesSection (not currently rendered).
  */
 
 import { render, screen, fireEvent, act } from "@testing-library/react";
@@ -127,8 +127,18 @@ vi.mock("@/hooks", () => ({
   LAYER_AGENT_PANEL: 20,
   LAYER_ISSUE_PANEL: 10,
   LAYER_TERMINAL_SEARCH: 5,
+  LAYER_WORKSPACE_SWITCHER: 42,
+  useFocusTrap: vi.fn(),
+  useFocusReturn: vi.fn(),
 }));
 
+vi.mock("@/components/WorkspaceSwitcher", () => ({
+  WorkspaceSwitcher: () => null,
+}));
+
+vi.mock("@/hooks/useWorkspaceRepos", () => ({
+  useWorkspaceRepos: () => ({ ...defaultReposReturn, ...reposOverride }),
+}));
 vi.mock("@/hooks/useWorkspaceTree", () => ({
   useWorkspaceTree: () => ({
     epics: [],
@@ -205,7 +215,7 @@ function captureOnUndo(): () => void {
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 
-describe("WorkspaceTree – delete-undo flow", () => {
+describe.skip("WorkspaceTree – delete-undo flow", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     localStorage.clear();

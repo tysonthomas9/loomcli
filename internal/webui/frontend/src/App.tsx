@@ -76,7 +76,7 @@ import {
   usePanelManager,
   KeyboardShortcutProvider,
 } from "@/hooks";
-import type { Issue, IssueDetails, Status } from "@/types";
+import type { Issue, IssueDetails, LoomTaskInfo, Status } from "@/types";
 
 import styles from "./App.module.css";
 
@@ -407,12 +407,14 @@ function App() {
   // Agent data (shared via AgentProvider — single polling loop)
   const {
     agents,
-    agentTasks,
     showStaleBanner: agentShowStaleBanner,
     connectionLost: agentConnectionLost,
     disconnectedSince: agentDisconnectedSince,
     retryNow: agentRetryNow,
   } = useAgentContext();
+
+  // Agent task titles — placeholder until workspace-scoped agent task API exists
+  const agentTasks: Record<string, LoomTaskInfo> = {};
 
   // Combine SSE and agent stale data states (show banner if either is stale)
   const showStaleBanner = sseShowStaleBanner || agentShowStaleBanner;
@@ -698,7 +700,7 @@ function App() {
     [refetch, handlePanelClose, showToast],
   );
 
-  // Handle agent click from AgentsSidebar or MonitorDashboard
+  // Handle agent click from MonitorDashboard
   const handleAgentClick = useCallback(
     (agentName: string) => {
       const hadIssuePanel = isOpen("issue");
@@ -802,13 +804,7 @@ function App() {
     [openPanel, fetchIssue],
   );
 
-  // Handle Talk to Lead from workspace tree
-  const handleTreeTalkToLead = useCallback(
-    (_workspaceName: string) => {
-      setActiveView("terminal");
-    },
-    [setActiveView],
-  );
+
 
   // Handle task terminal open from workspace tree (task with active agent)
   const handleTreeTaskTerminalOpen = useCallback(
@@ -973,7 +969,6 @@ function App() {
       disconnectedSince={staleBannerDisconnectedSince}
       onRetryConnection={staleBannerRetry}
       workQueueCounts={workQueueCounts}
-      onTalkToLead={handleTreeTalkToLead}
       onTreeSelect={handleTreeIssueSelect}
       onTaskTerminalOpen={handleTreeTaskTerminalOpen}
     />

@@ -11,9 +11,9 @@ import { lazy, Suspense } from "react";
 
 import { LoadingSkeleton } from "@/components";
 import type { ViewMode } from "@/components/ViewSwitcher";
-import { useAgents, useBlockedIssues } from "@/hooks";
+import { useAgentContext, useBlockedIssues } from "@/hooks";
 import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
-import type { Issue } from "@/types";
+import type { Issue, LoomStats } from "@/types";
 
 import { AgentActivityPanel } from "./AgentActivityPanel";
 import { ConnectionBanner } from "./ConnectionBanner";
@@ -49,22 +49,21 @@ export function MonitorDashboard({
   onAgentClick,
 }: MonitorDashboardProps): JSX.Element {
   const { workspaceId } = useWorkspaceContext();
-  // Fetch agent status and stats
   const {
     agents,
-    agentTasks,
-    sync,
-    stats,
     isLoading,
     isConnected,
     connectionState,
     retryCountdown,
     lastUpdated,
     retryNow,
-  } = useAgents({ pollInterval: 5000 });
+  } = useAgentContext();
 
   // Show stale data warning when disconnected but have cached data
   const showStaleBanner = !isConnected && agents.length > 0;
+
+  // Stats placeholder — will be replaced with workspace-scoped stats API
+  const stats: LoomStats = { open: 0, closed: 0, total: 0, completion: 0, remaining: 0, in_progress: 0, review: 0, blocked: 0 };
 
   // Fetch blocked issues for bottleneck detection
   const { data: blockedIssues, loading: isLoadingBlocked } = useBlockedIssues({
@@ -141,8 +140,8 @@ export function MonitorDashboard({
         <div className={styles.panelContent}>
           <AgentActivityPanel
             agents={agents}
-            agentTasks={agentTasks}
-            sync={sync}
+            agentTasks={{}}
+            sync={{ db_synced: true, db_last_sync: "", git_needs_push: 0, git_needs_pull: 0 }}
             isLoading={isLoading}
             isConnected={isConnected}
             connectionState={connectionState}

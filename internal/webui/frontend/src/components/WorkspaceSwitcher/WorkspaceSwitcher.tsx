@@ -31,6 +31,8 @@ export interface WorkspaceSwitcherProps {
   /** Called with workspace ID on selection */
   onSelect: (id: string) => void;
   onClose: () => void;
+  /** Called when "+ New Workspace" is clicked. Omit to hide the button. */
+  onAddWorkspace?: (() => void) | undefined;
 }
 
 const isMac =
@@ -44,6 +46,7 @@ export function WorkspaceSwitcher({
   activeWorkspaceId,
   onSelect,
   onClose,
+  onAddWorkspace,
 }: WorkspaceSwitcherProps) {
   const [search, setSearch] = useState("");
   const [highlightIndex, setHighlightIndex] = useState(0);
@@ -194,6 +197,18 @@ export function WorkspaceSwitcher({
             })
           )}
         </div>
+        {onAddWorkspace && (
+          <button
+            type="button"
+            className={styles.addButton}
+            onClick={() => {
+              onClose();
+              onAddWorkspace();
+            }}
+          >
+            + New Workspace
+          </button>
+        )}
       </div>
     </div>,
     document.body,

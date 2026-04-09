@@ -1,10 +1,9 @@
 export { WorkspaceTree } from "./WorkspaceTree";
 export type { WorkspaceTreeProps } from "./WorkspaceTree";
-export { WorkQueueSection } from "./WorkQueueSection";
-export type {
-  WorkQueueCounts,
-  WorkQueueSectionProps,
-} from "./WorkQueueSection";
+export { QueueStatsBar } from "./QueueStatsBar";
+export type { WorkQueueCounts, QueueStatsBarProps } from "./QueueStatsBar";
+// Re-export WorkQueueSection type alias for backwards compatibility
+export type { WorkQueueCounts as WorkQueueSectionCounts } from "./QueueStatsBar";
 export type { ActiveFilter } from "./ActiveAllToggle";
 export { EpicTaskTree } from "./EpicTaskTree";
 export type { EpicTaskTreeProps } from "./EpicTaskTree";

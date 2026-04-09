@@ -157,6 +157,7 @@ export function RepoGroupList({
                   <AgentCard
                     key={agent.name}
                     agent={agent}
+                    showRepoBadge={false}
                     taskTitle={agentTasks?.[agent.name]?.title}
                     {...(onAgentClick
                       ? {
