@@ -47,3 +47,17 @@
   outline: 2px solid var(--color-primary);
   outline-offset: 2px;
 }
+
+/**
+ * State shown when all epic lanes are completed and hidden.
+ */
+.allCompleteState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-8);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}

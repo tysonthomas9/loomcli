@@ -233,6 +233,10 @@ function SwimLaneBoardContent({
   const { workspaceId } = useWorkspaceContext();
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
   const [sourceColumnId, setSourceColumnId] = useState<string | null>(null);
+  const [showCompletedLanes, setShowCompletedLanes] = useState(() => {
+    if (!workspaceId) return false;
+    return wsGet(workspaceId, "swimlane-show-completed") === "true";
+  });
   // Track lanes that have been toggled from their default state.
   // When defaultCollapsed=true, this tracks lanes that were EXPANDED (toggled to open).
   // When defaultCollapsed=false, this tracks lanes that were COLLAPSED (toggled to closed).
@@ -240,6 +244,13 @@ function SwimLaneBoardContent({
   const [toggledLanes, setToggledLanes] = useState<Set<string>>(() =>
     loadCollapsedLanes(groupBy, workspaceId),
   );
+
+  // Persist showCompletedLanes to scoped localStorage
+  useEffect(() => {
+    if (workspaceId) {
+      wsSet(workspaceId, "swimlane-show-completed", String(showCompletedLanes));
+    }
+  }, [showCompletedLanes, workspaceId]);
 
   // Persist toggledLanes to scoped localStorage when it changes
   useEffect(() => {
@@ -266,10 +277,29 @@ function SwimLaneBoardContent({
   }, [issues, showBlocked, blockedIssues]);
 
   // Group and sort lanes
-  const lanes = useMemo((): LaneGroup[] => {
+  const allLanes = useMemo((): LaneGroup[] => {
     const grouped = groupIssuesByField(filteredIssues, groupBy);
     return sortLanes(grouped, sortLanesBy ?? "title");
   }, [filteredIssues, groupBy, sortLanesBy]);
+
+  // Split lanes into active and completed (all issues closed)
+  const { lanes, completedLaneCount } = useMemo(() => {
+    if (groupBy !== "epic") return { lanes: allLanes, completedLaneCount: 0 };
+    const active: LaneGroup[] = [];
+    let completed = 0;
+    for (const lane of allLanes) {
+      const allClosed =
+        lane.issues.length > 0 &&
+        lane.issues.every((i) => i.status === "closed");
+      if (allClosed) {
+        completed++;
+        if (showCompletedLanes) active.push(lane);
+      } else {
+        active.push(lane);
+      }
+    }
+    return { lanes: active, completedLaneCount: completed };
+  }, [allLanes, groupBy, showCompletedLanes]);
 
   // Toggle lane collapse state - adds/removes from toggled set
   const toggleLaneCollapse = useCallback((laneId: string) => {
@@ -388,6 +418,24 @@ function SwimLaneBoardContent({
     );
   }
 
+  // All epic lanes completed and hidden — show a reveal prompt instead of empty board
+  if (lanes.length === 0 && groupBy === "epic" && completedLaneCount > 0) {
+    return (
+      <div className={styles.allCompleteState} data-testid="all-epics-complete">
+        <p>All epics are complete.</p>
+        <button
+          type="button"
+          className={styles.toolbarButton}
+          onClick={() => setShowCompletedLanes(true)}
+          data-testid="toggle-completed-lanes"
+        >
+          Show {completedLaneCount} completed{" "}
+          {completedLaneCount !== 1 ? "epics" : "epic"}
+        </button>
+      </div>
+    );
+  }
+
   const rootClassName = [styles.swimLaneBoard, className]
     .filter(Boolean)
     .join(" ");
@@ -400,31 +448,48 @@ function SwimLaneBoardContent({
       onDragEnd={handleDragEnd}
     >
       <div className={rootClassName} data-testid="swim-lane-board">
-        {/* Expand/Collapse All toolbar - only show when there are multiple lanes */}
-        {lanes.length > 1 && (
+        {/* Toolbar: Expand/Collapse All + completed epic toggle */}
+        {(lanes.length > 1 ||
+          (groupBy === "epic" && completedLaneCount > 0)) && (
           <div
             className={styles.toolbar}
             role="toolbar"
             aria-label="Lane controls"
           >
-            <button
-              type="button"
-              className={styles.toolbarButton}
-              onClick={expandAll}
-              aria-label="Expand all lanes"
-              data-testid="expand-all-lanes"
-            >
-              Expand All
-            </button>
-            <button
-              type="button"
-              className={styles.toolbarButton}
-              onClick={collapseAll}
-              aria-label="Collapse all lanes"
-              data-testid="collapse-all-lanes"
-            >
-              Collapse All
-            </button>
+            {lanes.length > 1 && (
+              <>
+                <button
+                  type="button"
+                  className={styles.toolbarButton}
+                  onClick={expandAll}
+                  aria-label="Expand all lanes"
+                  data-testid="expand-all-lanes"
+                >
+                  Expand All
+                </button>
+                <button
+                  type="button"
+                  className={styles.toolbarButton}
+                  onClick={collapseAll}
+                  aria-label="Collapse all lanes"
+                  data-testid="collapse-all-lanes"
+                >
+                  Collapse All
+                </button>
+              </>
+            )}
+            {groupBy === "epic" && completedLaneCount > 0 && (
+              <button
+                type="button"
+                className={styles.toolbarButton}
+                onClick={() => setShowCompletedLanes((v) => !v)}
+                data-testid="toggle-completed-lanes"
+              >
+                {showCompletedLanes
+                  ? "Hide Completed"
+                  : `${completedLaneCount} Completed`}
+              </button>
+            )}
           </div>
         )}
         {lanes.map((lane) => {
