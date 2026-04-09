@@ -82,7 +82,7 @@ export type UseFilterStateReturn = [FilterState, FilterActions];
 /**
  * Default group by option for swim lane display.
  */
-export const DEFAULT_GROUP_BY: GroupByOption = "none";
+export const DEFAULT_GROUP_BY: GroupByOption = "epic";
 
 /**
  * Filter-specific URL param keys.
