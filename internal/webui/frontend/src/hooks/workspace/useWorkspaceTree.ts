@@ -23,6 +23,8 @@ export interface UseWorkspaceTreeReturn {
   epics: EpicWithTasks[];
   /** Tasks that have no parent or whose parent is not in the epic set. */
   orphanTasks: Issue[];
+  /** Number of closed epics (filtered out when includeClosedEpics=false). */
+  closedEpicCount: number;
   /** Whether data is being fetched. */
   isLoading: boolean;
   /** Fetch error, null if ok. */
@@ -37,11 +39,13 @@ export interface UseWorkspaceTreeReturn {
  * @param workspaceName - workspace identifier (used as cache key)
  * @param activeFilter - 'active' shows only epics with in_progress/review tasks, 'all' shows everything
  * @param sourceRepos - repos in the workspace for issue filtering
+ * @param includeClosedEpics - when false (default), epics with status 'closed' are excluded in 'all' mode
  */
 export function useWorkspaceTree(
   _workspaceName: string,
   activeFilter: "active" | "all",
   sourceRepos?: string[],
+  includeClosedEpics = false,
 ): UseWorkspaceTreeReturn {
   const { workspaceId } = useWorkspaceContext();
   const [issues, setIssues] = useState<Issue[]>([]);
@@ -132,10 +136,19 @@ export function useWorkspaceTree(
     return { grouped: result, orphanTasks: orphans };
   }, [epicIssues, taskIssues]);
 
+  // Count closed epics for the toggle UI.
+  const closedEpicCount = useMemo(
+    () => grouped.filter((e) => e.epic.status === "closed").length,
+    [grouped],
+  );
+
   // Apply active filter: only show epics containing tasks with status in_progress or review.
   const { epics: filteredEpics, orphanTasks: filteredOrphans } = useMemo(() => {
     if (activeFilter === "all") {
-      return { epics: grouped, orphanTasks: allOrphans };
+      const epics = includeClosedEpics
+        ? grouped
+        : grouped.filter((e) => e.epic.status !== "closed");
+      return { epics, orphanTasks: allOrphans };
     }
 
     // Per design: 'active' filter shows only tasks with active statuses,
@@ -154,11 +167,12 @@ export function useWorkspaceTree(
     );
 
     return { epics, orphanTasks: orphans };
-  }, [grouped, allOrphans, activeFilter]);
+  }, [grouped, allOrphans, activeFilter, includeClosedEpics]);
 
   return {
     epics: filteredEpics,
     orphanTasks: filteredOrphans,
+    closedEpicCount,
     isLoading,
     error,
     refetch,

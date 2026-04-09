@@ -25,6 +25,8 @@ import styles from "./EpicTaskTree.module.css";
 
 // Scoped key suffix for epic collapse state
 const SK_EPIC_COLLAPSED = "tree-epic-collapsed";
+// Scoped key suffix for showing completed epics
+const SK_SHOW_COMPLETED_EPICS = "tree-show-completed-epics";
 
 export interface EpicTaskTreeProps {
   workspaceName: string;
@@ -82,11 +84,25 @@ export function EpicTaskTree({
   onTaskTerminalOpen,
 }: EpicTaskTreeProps): JSX.Element {
   const { workspaceId } = useWorkspaceContext();
-  const { epics, orphanTasks, isLoading, refetch } = useWorkspaceTree(
-    workspaceName,
-    activeFilter,
-    sourceRepos,
-  );
+
+  const [showCompletedEpics, setShowCompletedEpics] = useState(() => {
+    if (!workspaceId) return false;
+    return wsGet(workspaceId, SK_SHOW_COMPLETED_EPICS) === "true";
+  });
+
+  useEffect(() => {
+    if (workspaceId) {
+      wsSet(workspaceId, SK_SHOW_COMPLETED_EPICS, String(showCompletedEpics));
+    }
+  }, [showCompletedEpics, workspaceId]);
+
+  const { epics, orphanTasks, closedEpicCount, isLoading, refetch } =
+    useWorkspaceTree(
+      workspaceName,
+      activeFilter,
+      sourceRepos,
+      showCompletedEpics,
+    );
 
   const { showToast } = useToast();
 
@@ -318,7 +334,11 @@ export function EpicTaskTree({
 
       {!hasContent && (
         <div className={styles.emptyTree}>
-          {activeFilter === "active" ? "No active tasks" : "No epics or tasks"}
+          {activeFilter === "active"
+            ? "No active tasks"
+            : closedEpicCount > 0
+              ? "All epics complete"
+              : "No epics or tasks"}
         </div>
       )}
 
@@ -381,6 +401,20 @@ export function EpicTaskTree({
           data-testid="add-epic"
         >
           + Add epic
+        </button>
+      )}
+
+      {/* Show/hide completed epics toggle */}
+      {closedEpicCount > 0 && activeFilter === "all" && (
+        <button
+          type="button"
+          className={styles.showCompletedButton}
+          onClick={() => setShowCompletedEpics((v) => !v)}
+          data-testid="toggle-completed-epics"
+        >
+          {showCompletedEpics
+            ? "Hide completed"
+            : `${closedEpicCount} completed`}
         </button>
       )}
 

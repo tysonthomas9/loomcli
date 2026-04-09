@@ -427,3 +427,21 @@
   color: var(--color-text-tertiary);
   margin-top: 2px;
 }
+
+/* Show/hide completed epics toggle */
+.showCompletedButton {
+  display: block;
+  width: 100%;
+  padding: var(--space-1, 4px) 1rem;
+  margin-top: var(--space-1, 4px);
+  font-size: 0.75rem;
+  color: var(--color-text-tertiary);
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.showCompletedButton:hover {
+  color: var(--color-text-secondary);
+}
