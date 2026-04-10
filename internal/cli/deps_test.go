@@ -389,8 +389,8 @@ func TestFetchReadyIssues_UsesTracker(t *testing.T) {
 	if capturedOpts.ParentID != "epic-1" {
 		t.Errorf("opts.ParentID = %q, want epic-1", capturedOpts.ParentID)
 	}
-	if capturedOpts.Limit != 100 {
-		t.Errorf("opts.Limit = %d, want 100", capturedOpts.Limit)
+	if capturedOpts.Limit != 10000 {
+		t.Errorf("opts.Limit = %d, want 10000", capturedOpts.Limit)
 	}
 }
 
@@ -413,8 +413,8 @@ func TestFetchReadyIssues_NoParentViaTracker(t *testing.T) {
 	if capturedOpts.ParentID != "" {
 		t.Errorf("opts.ParentID = %q, want empty", capturedOpts.ParentID)
 	}
-	if capturedOpts.Limit != 100 {
-		t.Errorf("opts.Limit = %d, want 100", capturedOpts.Limit)
+	if capturedOpts.Limit != 10000 {
+		t.Errorf("opts.Limit = %d, want 10000", capturedOpts.Limit)
 	}
 }
 

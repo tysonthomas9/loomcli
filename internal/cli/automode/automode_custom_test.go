@@ -1173,8 +1173,8 @@ func TestGetAvailablePlanningTasks_WithParentID(t *testing.T) {
 			if capturedOpts.ParentID != tt.wantParentID {
 				t.Errorf("ReadyOpts.ParentID = %q, want %q", capturedOpts.ParentID, tt.wantParentID)
 			}
-			if capturedOpts.Limit != 100 {
-				t.Errorf("ReadyOpts.Limit = %d, want 100", capturedOpts.Limit)
+			if capturedOpts.Limit != 10000 {
+				t.Errorf("ReadyOpts.Limit = %d, want 10000", capturedOpts.Limit)
 			}
 		})
 	}
@@ -1223,8 +1223,8 @@ func TestGetAvailableImplementationTasks_WithParentID(t *testing.T) {
 			if capturedOpts.ParentID != tt.wantParentID {
 				t.Errorf("ReadyOpts.ParentID = %q, want %q", capturedOpts.ParentID, tt.wantParentID)
 			}
-			if capturedOpts.Limit != 100 {
-				t.Errorf("ReadyOpts.Limit = %d, want 100", capturedOpts.Limit)
+			if capturedOpts.Limit != 10000 {
+				t.Errorf("ReadyOpts.Limit = %d, want 10000", capturedOpts.Limit)
 			}
 		})
 	}

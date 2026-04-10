@@ -282,7 +282,10 @@ func countSkillMatches(labels []string, skills []string) int {
 // FetchReadyIssues fetches issues ready for work.
 func FetchReadyIssues(parentID string, repoLabel string) ([]backend.IssueData, error) {
 	ib := DefaultIssueBackend()
-	opts := backend.ReadyOpts{Limit: 100, ParentID: parentID}
+	// Limit 10000: bd ready mixes open + review + in_progress, and review items
+	// can crowd out the few truly-workable open tasks past a small cutoff,
+	// causing agents to starve. See monitor_collect.go for the same pattern.
+	opts := backend.ReadyOpts{Limit: 10000, ParentID: parentID}
 	if repoLabel != "" {
 		opts.Labels = []string{"repo:" + repoLabel}
 	}

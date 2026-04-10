@@ -21,7 +21,7 @@ func HandleMetrics(collectDataFn func() *monitor.MonitorData) http.HandlerFunc {
 		data := collectDataFn()
 
 		// Get ready tasks broken down by priority
-		readyByPriority := monitor.CollectReadyTasksByPriority(50)
+		readyByPriority := monitor.CollectReadyTasksByPriority(10000)
 
 		// Get in-progress count
 		inProgress := 0

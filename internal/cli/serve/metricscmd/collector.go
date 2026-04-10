@@ -15,7 +15,7 @@ type CollectDataFn = func() *monitor.MonitorData
 func NewCollector(ttl time.Duration) CollectDataFn {
 	cv := &cachedCollector{
 		ttl:       ttl,
-		collectFn: func() *monitor.MonitorData { return monitor.CollectMonitorData(50, "") },
+		collectFn: func() *monitor.MonitorData { return monitor.CollectMonitorData(10000, "") },
 	}
 	return cv.get
 }

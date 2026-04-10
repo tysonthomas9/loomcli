@@ -94,8 +94,10 @@ func runMonitor(cmd *cobra.Command, args []string) {
 		fmt.Print("Loading...")
 		fmt.Print("\033[?25h") // Show cursor
 
-		// Collect first batch before entering loop (loading message visible during this)
-		data := CollectMonitorData(100, monitorBranch)
+		// Collect first batch before entering loop (loading message visible during this).
+		// Limit 10000: bd ready mixes open + review + in_progress; a small limit can
+		// push the few truly-open tasks past the cutoff when review items are dense.
+		data := CollectMonitorData(10000, monitorBranch)
 		output := renderDashboard(data)
 		fullOutput := output + fmt.Sprintf("\nPress Ctrl+C to exit (refreshing every %ds)", monitorInterval)
 		fmt.Print("\033[?25l")
@@ -107,7 +109,7 @@ func runMonitor(cmd *cobra.Command, args []string) {
 		// Watch mode - refresh in place without flickering
 		for {
 			time.Sleep(time.Duration(monitorInterval) * time.Second)
-			data = CollectMonitorData(100, monitorBranch)
+			data = CollectMonitorData(10000, monitorBranch)
 			output = renderDashboard(data)
 
 			// Build complete output including status line (no trailing newline)
@@ -122,7 +124,7 @@ func runMonitor(cmd *cobra.Command, args []string) {
 	} else {
 		// One-shot mode - show loading message on stderr
 		fmt.Fprint(os.Stderr, "Loading...")
-		data := CollectMonitorData(100, monitorBranch)
+		data := CollectMonitorData(10000, monitorBranch)
 		fmt.Fprint(os.Stderr, "\r          \r") // Clear loading message
 		fmt.Print(renderDashboard(data))
 	}
@@ -131,7 +133,7 @@ func runMonitor(cmd *cobra.Command, args []string) {
 // CollectMonitorDataForServer gathers all dashboard data with default limit.
 // Exported for use by the HTTP server.
 func CollectMonitorDataForServer(branch string) *MonitorData {
-	return CollectMonitorData(100, branch)
+	return CollectMonitorData(10000, branch)
 }
 
 // CollectAgentStatusOnly returns just agent status without task context.

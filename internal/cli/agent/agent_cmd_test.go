@@ -93,56 +93,56 @@ func TestMapTaskFilter_WithParentID(t *testing.T) {
 			name:           "needs_design with parent ID",
 			filter:         "needs_design",
 			parentID:       "EPIC-111",
-			expectedArgs:   []string{"bd", "ready", "--json", "--limit", "100", "--parent", "EPIC-111"},
+			expectedArgs:   []string{"bd", "ready", "--json", "--limit", "10000", "--parent", "EPIC-111"},
 			expectedResult: true,
 		},
 		{
 			name:           "needs_design without parent ID",
 			filter:         "needs_design",
 			parentID:       "",
-			expectedArgs:   []string{"bd", "ready", "--json", "--limit", "100"},
+			expectedArgs:   []string{"bd", "ready", "--json", "--limit", "10000"},
 			expectedResult: true,
 		},
 		{
 			name:           "has_design with parent ID",
 			filter:         "has_design",
 			parentID:       "EPIC-222",
-			expectedArgs:   []string{"bd", "ready", "--json", "--limit", "100", "--parent", "EPIC-222"},
+			expectedArgs:   []string{"bd", "ready", "--json", "--limit", "10000", "--parent", "EPIC-222"},
 			expectedResult: true,
 		},
 		{
 			name:           "has_design without parent ID",
 			filter:         "has_design",
 			parentID:       "",
-			expectedArgs:   []string{"bd", "ready", "--json", "--limit", "100"},
+			expectedArgs:   []string{"bd", "ready", "--json", "--limit", "10000"},
 			expectedResult: true,
 		},
 		{
 			name:           "any with parent ID",
 			filter:         "any",
 			parentID:       "EPIC-333",
-			expectedArgs:   []string{"bd", "ready", "--json", "--limit", "100", "--parent", "EPIC-333"},
+			expectedArgs:   []string{"bd", "ready", "--json", "--limit", "10000", "--parent", "EPIC-333"},
 			expectedResult: true,
 		},
 		{
 			name:           "any without parent ID",
 			filter:         "any",
 			parentID:       "",
-			expectedArgs:   []string{"bd", "ready", "--json", "--limit", "100"},
+			expectedArgs:   []string{"bd", "ready", "--json", "--limit", "10000"},
 			expectedResult: true,
 		},
 		{
 			name:           "empty filter defaults to any with parent ID",
 			filter:         "",
 			parentID:       "EPIC-444",
-			expectedArgs:   []string{"bd", "ready", "--json", "--limit", "100", "--parent", "EPIC-444"},
+			expectedArgs:   []string{"bd", "ready", "--json", "--limit", "10000", "--parent", "EPIC-444"},
 			expectedResult: true,
 		},
 		{
 			name:           "empty filter defaults to any without parent ID",
 			filter:         "",
 			parentID:       "",
-			expectedArgs:   []string{"bd", "ready", "--json", "--limit", "100"},
+			expectedArgs:   []string{"bd", "ready", "--json", "--limit", "10000"},
 			expectedResult: true,
 		},
 	}
@@ -246,7 +246,7 @@ func TestMapTaskFilter_ParentIDCapturedInClosure(t *testing.T) {
 	}
 
 	// Verify all bd ready calls included the parentID
-	expectedArgs := []string{"bd", "ready", "--json", "--limit", "100", "--parent", "EPIC-555"}
+	expectedArgs := []string{"bd", "ready", "--json", "--limit", "10000", "--parent", "EPIC-555"}
 	for i, capturedArgs := range readyCapturedArgs {
 		if len(capturedArgs) != len(expectedArgs) {
 			t.Errorf("Call %d: args length = %d, want %d", i, len(capturedArgs), len(expectedArgs))

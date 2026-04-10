@@ -235,13 +235,16 @@ func runParallelTaskQueries(deps *cli.Deps, readyLimit int) taskQueryResults {
 		defer wg.Done()
 		qr.readyIssues, qr.readyErr = ib.Ready(ctx, backend.ReadyOpts{Limit: readyLimit})
 	}()
+	// NOTE: cliBeadsAdapter.List omits --limit when opts.Limit == 0, which makes
+	// bd list fall back to its CLI default of 50. Pass an explicit large limit
+	// so the monitor counts and displayed slices reflect the full queue.
 	go func() {
 		defer wg.Done()
-		qr.inProgressIssues, qr.inProgressErr = ib.List(ctx, backend.ListOpts{Status: "in_progress"})
+		qr.inProgressIssues, qr.inProgressErr = ib.List(ctx, backend.ListOpts{Status: "in_progress", Limit: 10000})
 	}()
 	go func() {
 		defer wg.Done()
-		qr.reviewIssues, qr.reviewErr = ib.List(ctx, backend.ListOpts{Status: "review"})
+		qr.reviewIssues, qr.reviewErr = ib.List(ctx, backend.ListOpts{Status: "review", Limit: 10000})
 	}()
 	go func() { defer wg.Done(); qr.backlogIssues, qr.backlogErr = ib.Blocked(ctx, backend.BlockedOpts{}) }()
 	go func() {
