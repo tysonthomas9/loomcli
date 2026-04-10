@@ -221,8 +221,8 @@ func TestContractEnvelope_SuccessResponses(t *testing.T) {
 		path          string
 		body          string
 		wantStatus    int
-		dataFieldName string // "data" or "issues" for graph
-		expectData    bool   // whether data/issues field is expected to be present
+		dataFieldName string // standard envelope field name (always "data")
+		expectData    bool   // whether the data field is expected to be present
 	}{
 		{
 			name: "GET /api/issues/{id} success",
@@ -283,7 +283,7 @@ func TestContractEnvelope_SuccessResponses(t *testing.T) {
 			method:        http.MethodGet,
 			path:          "/api/issues/graph",
 			wantStatus:    http.StatusOK,
-			dataFieldName: "issues",
+			dataFieldName: "data",
 			expectData:    true,
 		},
 		{
@@ -468,7 +468,7 @@ func TestContractEnvelope_ErrorResponses(t *testing.T) {
 			method:        http.MethodGet,
 			path:          "/api/issues/graph",
 			wantStatus:    http.StatusServiceUnavailable,
-			dataFieldName: "issues",
+			dataFieldName: "data",
 			isPlainError:  false,
 		},
 		{
@@ -477,7 +477,7 @@ func TestContractEnvelope_ErrorResponses(t *testing.T) {
 			method:        http.MethodGet,
 			path:          "/api/issues/graph",
 			wantStatus:    http.StatusServiceUnavailable,
-			dataFieldName: "issues",
+			dataFieldName: "data",
 			isPlainError:  false,
 		},
 
@@ -557,14 +557,14 @@ func TestContractEnvelope_ErrorResponses(t *testing.T) {
 }
 
 // =============================================================================
-// Contract Tests: Graph Deviation (issues instead of data)
+// Contract Tests: Graph Envelope (aligned with standard "data" envelope)
 // =============================================================================
 
-func TestContractEnvelope_GraphDeviation(t *testing.T) {
+func TestContractEnvelope_GraphEnvelope(t *testing.T) {
 	t.Parallel()
 
-	// The /api/issues/graph endpoint uses "issues" instead of "data" in its response.
-	// This test explicitly documents and validates this deviation.
+	// The /api/issues/graph endpoint uses the standard "data" envelope,
+	// aligned with the OpenAPI spec. This test validates that contract.
 	handler := githandlers.HandleGraphWithPool(&contractMockGraphPool{
 		client: &contractMockGraphClient{
 			getGraphDataFunc: func(args *rpc.GetGraphDataArgs) (*rpc.GetGraphDataResponse, error) {

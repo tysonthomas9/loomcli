@@ -253,34 +253,40 @@ func (s *workspaceServiceImpl) RenameWorkspace(_ context.Context, wsID string, n
 	if lockErr != nil {
 		return nil, ErrInternal("failed to acquire config lock", lockErr)
 	}
-	defer unlock()
 
 	cfg, err := loadLoomConfigUnlocked()
 	if err != nil {
+		unlock()
 		return nil, ErrInternal("failed to load config", err)
 	}
 	if cfg == nil {
+		unlock()
 		return nil, ErrNotFound("no config found")
 	}
 
 	oldName, ws, found := resolveWorkspaceNameByID(cfg, wsID)
 	if !found {
+		unlock()
 		return nil, ErrNotFound(fmt.Sprintf("workspace with ID %q not found", wsID))
 	}
 
 	if oldName == newName {
+		unlock()
 		return s.refreshWorkspaceData()
 	}
 
 	if _, exists := cfg.Workspaces[newName]; exists {
+		unlock()
 		return nil, ErrConflict("workspace name already exists")
 	}
 
 	applyWorkspaceRename(cfg, oldName, newName, ws)
 
 	if err := saveLoomConfigUnlocked(cfg); err != nil {
+		unlock()
 		return nil, ErrInternal("failed to save config", err)
 	}
+	unlock() // Release before refreshWorkspaceData which also acquires the lock
 
 	return s.refreshWorkspaceData()
 }
@@ -291,13 +297,14 @@ func (s *workspaceServiceImpl) ReorderWorkspaces(_ context.Context, order []stri
 	if lockErr != nil {
 		return nil, ErrInternal("failed to acquire config lock", lockErr)
 	}
-	defer unlock()
 
 	cfg, err := loadLoomConfigUnlocked()
 	if err != nil {
+		unlock()
 		return nil, ErrInternal("failed to load config", err)
 	}
 	if cfg == nil {
+		unlock()
 		return nil, ErrNotFound("no config found")
 	}
 
@@ -319,8 +326,10 @@ func (s *workspaceServiceImpl) ReorderWorkspaces(_ context.Context, order []stri
 	cfg.WorkspaceOrder = validOrder
 
 	if err := saveLoomConfigUnlocked(cfg); err != nil {
+		unlock()
 		return nil, ErrInternal("failed to save config", err)
 	}
+	unlock() // Release before refreshWorkspaceData which also acquires the lock
 
 	return s.refreshWorkspaceData()
 }
@@ -359,18 +368,20 @@ func (s *workspaceServiceImpl) PatchWorkspaceBackend(_ context.Context, wsID str
 	if lockErr != nil {
 		return nil, ErrInternal("failed to acquire config lock", lockErr)
 	}
-	defer unlock()
 
 	cfg, err := loadLoomConfigForBackendUnlocked()
 	if err != nil {
+		unlock()
 		return nil, ErrInternal("failed to load config", err)
 	}
 	if cfg == nil {
+		unlock()
 		return nil, ErrNotFound("no config found")
 	}
 
 	name, ws, found := resolveWorkspaceNameByIDForBackend(cfg, wsID)
 	if !found {
+		unlock()
 		return nil, ErrNotFound(fmt.Sprintf("workspace with ID %q not found", wsID))
 	}
 
@@ -378,8 +389,10 @@ func (s *workspaceServiceImpl) PatchWorkspaceBackend(_ context.Context, wsID str
 	cfg.Workspaces[name] = ws
 
 	if err := saveLoomConfigForBackendUnlocked(cfg); err != nil {
+		unlock()
 		return nil, ErrInternal("failed to save config", err)
 	}
+	unlock() // Release before refreshWorkspaceData which also acquires the lock
 
 	return s.refreshWorkspaceData()
 }

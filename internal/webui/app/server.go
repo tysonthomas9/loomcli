@@ -229,7 +229,12 @@ func (app *Server) run(ctx context.Context) error { //nolint:funlen // server li
 		authMW,
 		middleware.CORS(app.corsConfig),
 	)
-	handler := h2c.NewHandler(chain(app.mux), &http2.Server{})
+	var handler http.Handler
+	if os.Getenv("LOOM_DISABLE_H2C") == "1" {
+		handler = chain(app.mux)
+	} else {
+		handler = h2c.NewHandler(chain(app.mux), &http2.Server{})
+	}
 
 	// Shutdown context: when canceled, in-flight handlers abort quickly.
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())

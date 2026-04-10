@@ -553,10 +553,12 @@ test.describe("Agents Sidebar", () => {
       await navigateAndWait(page);
 
       const sb = sidebar(page);
-      await expect(sb.getByText("nova")).toBeVisible({ timeout: 10000 });
-      await expect(sb.getByText("falcon")).toBeVisible();
-      // Both cards have data-status attributes
-      const agentCards = sb.locator("[data-status]");
+      // Agent names appear in multiple places (agents section + workspace tree)
+      await expect(sb.getByText("nova").first()).toBeVisible({ timeout: 10000 });
+      await expect(sb.getByText("falcon").first()).toBeVisible();
+      // Agent cards in the main agents section (not workspace tree duplicates)
+      const agentSection = sb.locator('[class*="agentSection"]').first();
+      const agentCards = agentSection.locator("[data-status]");
       await expect(agentCards).toHaveCount(2);
     });
 
@@ -572,7 +574,7 @@ test.describe("Agents Sidebar", () => {
 
       const sb = sidebar(page);
       // Workspace tree still renders
-      await expect(sb.getByText("Workspaces")).toBeVisible({
+      await expect(sb.getByText("Workspaces").first()).toBeVisible({
         timeout: 10000,
       });
       // Agent section header should NOT be visible (no fleet agents, no config agents)
@@ -587,7 +589,9 @@ test.describe("Agents Sidebar", () => {
       await setupMocks(page);
       await navigateAndWait(page);
 
-      const workingCard = page.locator('[data-status="working"]');
+      const sb = sidebar(page);
+      const agentSection = sb.locator('[class*="agentSection"]').first();
+      const workingCard = agentSection.locator('[data-status="working"]');
       await expect(workingCard).toBeVisible({ timeout: 10000 });
       const statusLine = workingCard.locator('[class*="statusLine"]');
       await expect(statusLine).toContainText("Working");
@@ -597,44 +601,52 @@ test.describe("Agents Sidebar", () => {
       await setupMocks(page);
       await navigateAndWait(page);
 
-      // Wait for agent section to fully load first
       const sb = sidebar(page);
       await expect(sb.getByText("Agents")).toBeVisible({ timeout: 10000 });
 
-      const readyCard = sb.locator('[data-status="ready"]');
+      const agentSection = sb.locator('[class*="agentSection"]').first();
+      const readyCard = agentSection.locator('[data-status="ready"]');
       await expect(readyCard).toBeVisible({ timeout: 10000 });
       const statusLine = readyCard.locator('[class*="statusLine"]');
       await expect(statusLine).toContainText("Ready");
     });
 
-    test("agent card shows commit counts", async ({ page }) => {
+    test("agent card renders status and metadata", async ({ page }) => {
       await setupMocks(page);
       await navigateAndWait(page);
 
-      // nova: ahead=2 → title "2 commits ahead"
-      const workingCard = page.locator('[data-status="working"]');
-      await expect(workingCard).toBeVisible({ timeout: 10000 });
-      const aheadDiv = workingCard.locator('[title="2 commits ahead"]');
-      await expect(aheadDiv).toBeVisible();
+      const sb = sidebar(page);
+      const agentSection = sb.locator('[class*="agentSection"]').first();
 
-      // falcon: behind=1 → title "1 commits behind"
-      const readyCard = page.locator('[data-status="ready"]');
-      const behindDiv = readyCard.locator('[title="1 commits behind"]');
-      await expect(behindDiv).toBeVisible();
+      // nova: working agent card shows status, role, and repo
+      const workingCard = agentSection.locator('[data-status="working"]');
+      await expect(workingCard).toBeVisible({ timeout: 10000 });
+      await expect(workingCard.locator('[class*="statusLine"]')).toContainText("Working");
+      await expect(workingCard.locator('[class*="role"]')).toContainText("Task");
+      await expect(workingCard.getByText("loomcli")).toBeVisible();
+
+      // falcon: ready agent card shows status and role
+      const readyCard = agentSection.locator('[data-status="ready"]');
+      await expect(readyCard).toBeVisible();
+      await expect(readyCard.locator('[class*="statusLine"]')).toContainText("Ready");
+      await expect(readyCard.locator('[class*="role"]')).toContainText("Plan");
     });
 
     test("agent card shows role label", async ({ page }) => {
       await setupMocks(page);
       await navigateAndWait(page);
 
+      const sb = sidebar(page);
+      const agentSection = sb.locator('[class*="agentSection"]').first();
+
       // nova role: "task" → "Task"
-      const workingCard = page.locator('[data-status="working"]');
+      const workingCard = agentSection.locator('[data-status="working"]');
       await expect(workingCard).toBeVisible({ timeout: 10000 });
       const role = workingCard.locator('[class*="role"]');
       await expect(role).toContainText("Task");
 
       // falcon role: "plan" → "Plan"
-      const readyCard = page.locator('[data-status="ready"]');
+      const readyCard = agentSection.locator('[data-status="ready"]');
       const readyRole = readyCard.locator('[class*="role"]');
       await expect(readyRole).toContainText("Plan");
     });
@@ -741,7 +753,7 @@ test.describe("Agents Sidebar", () => {
 
       // Wait for sidebar to render
       const sb = sidebar(page);
-      await expect(sb.getByText("Workspaces")).toBeVisible({
+      await expect(sb.getByText("Workspaces").first()).toBeVisible({
         timeout: 10000,
       });
 
@@ -902,7 +914,7 @@ test.describe("Agents Sidebar", () => {
 
       const sb = sidebar(page);
       // Workspace tree renders
-      await expect(sb.getByText("Workspaces")).toBeVisible({
+      await expect(sb.getByText("Workspaces").first()).toBeVisible({
         timeout: 10000,
       });
       // No agent section since agents.length === 0

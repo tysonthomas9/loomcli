@@ -297,28 +297,28 @@ test.describe("SSE delivery under concurrent load", () => {
       await expect(readyColumn.getByText(mainTitle)).toBeVisible();
     }).toPass({ timeout: 10_000, intervals: [500, 1000, 2000] });
 
-    // Start 3 concurrent creates
+    // Create 3 issues sequentially with small gaps to avoid rate-limit
+    // token exhaustion (20 req/s mutate, burst 40).
     const burstTitles = Array.from({ length: 3 }, () =>
       `SSE Burst ${generateTestId()}`,
     );
-    const burstPromise = Promise.all(
-      burstTitles.map((t) => createTestIssueInWorkspace(workspaceId, t)),
-    );
+    const burstIds: string[] = [];
+    for (const t of burstTitles) {
+      burstIds.push(await createTestIssueInWorkspace(workspaceId, t));
+    }
+    testIssueIds.push(...burstIds);
 
-    // Fire 3 sequential status toggles on the main issue (reduced from 5
-    // to stay under the 20 req/s mutate rate limit when combined with
-    // concurrent creates above). Small delay prevents token exhaustion.
+    // Fire 3 sequential status toggles with small delays between them
+    // to let SSE propagate each change before firing the next.
     for (let i = 0; i < 3; i++) {
       await updateIssueStatusInWorkspace(
         workspaceId,
         mainId,
         i % 2 === 0 ? "in_progress" : "open",
       );
+      await page.waitForTimeout(300);
     }
     // Final status after 3 iterations (0,1,2): in_progress
-
-    const burstIds = await burstPromise;
-    testIssueIds.push(...burstIds);
 
     // Verify the main issue ended up in in_progress column.
     // Under burst load, SSE delivery may lag — reload to pick up final state.

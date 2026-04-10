@@ -30,11 +30,15 @@ export interface SSEMockController {
  *   sse.sendMutation({ type: 'update', issue_id: 'test-001', timestamp: '...' });
  *   sse.close();
  */
+const SSE_PATTERN = '**/workspaces/*/events**';
+
 export function createSSEMock(page: Page): SSEMockController {
   let pendingRoutes: Array<{ route: Route; resolve: () => void }> = [];
   let buffer: string[] = [];
   let connected = false;
   let connectionCount = 0;
+  // Store handler ref so close() can unroute to prevent handler accumulation
+  let routeHandler: ((route: Route) => Promise<void>) | null = null;
 
   function flushBuffer(): void {
     if (pendingRoutes.length === 0 || buffer.length === 0) return;
@@ -73,8 +77,20 @@ export function createSSEMock(page: Page): SSEMockController {
     connectionCount: 0,
 
     async connect(): Promise<void> {
+      // Unroute previous handler if connect() is called again after close()
+      if (routeHandler) {
+        await page.unroute(SSE_PATTERN, routeHandler);
+        routeHandler = null;
+      }
+
       connected = true;
-      await page.route('**/api/events**', async (route) => {
+      routeHandler = async (route: Route) => {
+        // Let events/token requests fall through to the mockSseToken handler
+        if (route.request().url().includes('/events/token')) {
+          await route.fallback();
+          return;
+        }
+
         connectionCount++;
         controller.connectionCount = connectionCount;
 
@@ -92,7 +108,8 @@ export function createSSEMock(page: Page): SSEMockController {
         flushBuffer();
 
         await routePromise;
-      });
+      };
+      await page.route(SSE_PATTERN, routeHandler);
     },
 
     sendMutation(payload: MutationPayload): void {
@@ -119,6 +136,8 @@ export function createSSEMock(page: Page): SSEMockController {
       }
       pendingRoutes = [];
       buffer = [];
+      // Note: routeHandler is cleaned up in connect() if called again.
+      // Page teardown automatically cleans up all routes.
     },
   };
 

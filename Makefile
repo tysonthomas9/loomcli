@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build test test-integration test-all lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-api-local test-e2e-integration test-e2e-integration-local clean install install-bd help frontend frontend-ensure sync-beads update-beads check check-go check-frontend gate gate-e2e gate-e2e-full hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec test-coverage test-frontend-coverage test-race-cover test-integration-race-cover
+.PHONY: all build test test-integration test-all lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-api-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install install-bd help frontend frontend-ensure sync-beads update-beads check check-go check-frontend gate gate-e2e gate-e2e-full hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec test-coverage test-frontend-coverage test-race-cover test-integration-race-cover
 
 # Default target
 all: build
@@ -101,6 +101,11 @@ test-e2e-integration:
 test-e2e-integration-local:
 	@echo "Running Playwright integration e2e tests (local server)..."
 	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 LOOM_LOCAL_SERVER=1 npx playwright test --project=integration
+
+# Run ALL Playwright integration e2e tests including cross-workspace and terminal-parity
+test-e2e-integration-full:
+	@echo "Running full Playwright integration e2e tests (self-contained)..."
+	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 RUN_LOCAL_INTEGRATION_TESTS=1 npx playwright test --project=integration --project=local-integration
 
 # Run auth service unit + security tests
 test-auth-service:
@@ -294,6 +299,7 @@ help:
 	@echo "  make test-e2e-api-local - Run Playwright API e2e tests (needs loom serve)"
 	@echo "  make test-e2e-integration - Run Playwright integration e2e tests (self-contained)"
 	@echo "  make test-e2e-integration-local - Run Playwright integration e2e tests (needs loom serve)"
+	@echo "  make test-e2e-integration-full - Run ALL integration e2e tests (cross-workspace + terminal-parity)"
 	@echo "  make install    - Install loom + bd to GOPATH/bin"
 	@echo "  make install-bd - Install bd (beads CLI) from vendored source"
 	@echo "  make frontend  - Build frontend (requires Node.js >= 20)"

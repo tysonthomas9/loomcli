@@ -35,14 +35,12 @@ func NewWorkspaceOpsModule(workspaceSvc service.WorkspaceService, multiPool daem
 
 // Register implements Module.
 func (m *WorkspaceOpsModule) Register(mux *http.ServeMux) {
-	mux.HandleFunc("PATCH /api/workspaces/{ws}/name", workspace.HandleWorkspaceRename(m.workspaceSvc))
 	mux.HandleFunc("GET /api/workspaces/{ws}/stats", healthhandlers.HandleStats(m.multiPool))
 	mux.HandleFunc("GET /api/workspaces/{ws}/ready", issues.HandleReady(m.multiPool))
 	mux.HandleFunc("GET /api/workspaces/{ws}/blocked", githandlers.HandleBlocked(m.multiPool))
 	mux.HandleFunc("GET /api/workspaces/{ws}/issues/graph", githandlers.HandleGraph(m.multiPool))
 	mux.HandleFunc("GET /api/workspaces/{ws}/daemon/status", healthhandlers.HandleDaemonStatus(m.multiPool))
 	mux.HandleFunc("GET /api/workspaces/{ws}/config/backend", misc.HandleGetBackendConfig(m.multiPool))
-	mux.HandleFunc("PATCH /api/workspaces/{ws}/config/backend", workspace.HandleWorkspaceBackendPatch(m.workspaceSvc))
 	if m.agentQueueH != nil {
 		mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/queue", m.agentQueueH)
 	}
@@ -73,6 +71,12 @@ func HandleClearDefaultWorkspace(svc service.WorkspaceService) http.HandlerFunc 
 }
 func HandleWorkspaceDelete(svc service.WorkspaceService) http.HandlerFunc {
 	return workspace.HandleWorkspaceDelete(svc)
+}
+func HandleWorkspaceRename(svc service.WorkspaceService) http.HandlerFunc {
+	return workspace.HandleWorkspaceRename(svc)
+}
+func HandleWorkspaceBackendPatch(svc service.WorkspaceService) http.HandlerFunc {
+	return workspace.HandleWorkspaceBackendPatch(svc)
 }
 func HandleActiveWorkspace(svc service.WorkspaceService) http.HandlerFunc {
 	return workspace.HandleActiveWorkspace(svc)

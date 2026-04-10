@@ -29,6 +29,8 @@ cleanup() {
             pid=$(cat "$pidfile" 2>/dev/null) && kill "$pid" 2>/dev/null || true
         done
     fi
+    # Clean up second workspace
+    rm -rf "$REPO_ROOT/tmp/e2e-workspace-2" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 
@@ -76,6 +78,15 @@ mkdir -p "$LOOM_CONFIG_DIR"
 (cd "$E2E_WORKSPACE" && git init -q && git commit --allow-empty -m "e2e seed" -q && bd init --prefix loomcli --skip-hooks -q)
 echo "[e2e] Created isolated workspace: $E2E_WORKSPACE"
 
+# --- 3b. Create a second workspace for cross-workspace tests ---
+E2E_WORKSPACE_2="$REPO_ROOT/tmp/e2e-workspace-2"
+rm -rf "$E2E_WORKSPACE_2"
+mkdir -p "$E2E_WORKSPACE_2"
+(cd "$E2E_WORKSPACE_2" && git init -q && git commit --allow-empty -m "e2e seed 2" -q)
+LOOM_CONFIG_DIR="$E2E_WORKSPACE/.loom-config" "$LOOM_BIN" workspace create e2e-ws-2 \
+    --repos "$E2E_WORKSPACE_2" --path "$E2E_WORKSPACE_2" 2>/dev/null || true
+echo "[e2e] Created second workspace: $E2E_WORKSPACE_2"
+
 # --- 4. Start bd daemon in isolated workspace ---
 (cd "$E2E_WORKSPACE" && bd daemon start)
 DAEMON_STARTED=1
@@ -94,6 +105,9 @@ fi
 
 PORT="${E2E_PORT:-8080}"
 echo "[e2e] Starting loom serve (port :${PORT})..."
+# Disable h2c (HTTP/2 cleartext) wrapping — Node.js HTTP clients used by
+# Playwright helpers hang on PATCH requests when the server uses h2c.
+export LOOM_DISABLE_H2C=1
 # Run from E2E workspace so the Loom API server also discovers the isolated daemon.
 cd "$E2E_WORKSPACE"
 exec "$LOOM_BIN" serve \

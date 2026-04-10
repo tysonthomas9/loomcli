@@ -79,12 +79,12 @@ describe("fetchWorkspaceApi", () => {
     const wsData1 = createMockWorkspaceData({ name: "first" });
     const wsData2 = createMockWorkspaceData({ name: "second" });
     mockApiGet.mockResolvedValueOnce({
-      data: wsData1,
+      data: { success: true, data: wsData1 },
       error: undefined,
       response: new Response(),
     } as never);
     mockApiGet.mockResolvedValueOnce({
-      data: wsData2,
+      data: { success: true, data: wsData2 },
       error: undefined,
       response: new Response(),
     } as never);
@@ -102,7 +102,7 @@ describe("fetchWorkspaceApi", () => {
   it("calls the active workspace endpoint when no workspaceId given", async () => {
     const wsData = createMockWorkspaceData();
     mockApiGet.mockResolvedValueOnce({
-      data: wsData,
+      data: { success: true, data: wsData },
       error: undefined,
       response: new Response(),
     } as never);
@@ -115,7 +115,7 @@ describe("fetchWorkspaceApi", () => {
   it("calls the specific workspace endpoint when workspaceId given", async () => {
     const wsData = createMockWorkspaceData();
     mockApiGet.mockResolvedValueOnce({
-      data: wsData,
+      data: { success: true, data: wsData },
       error: undefined,
       response: new Response(),
     } as never);
@@ -140,7 +140,7 @@ describe("fetchWorkspaceApi", () => {
   it("passes workspaceId as path param", async () => {
     const wsData = createMockWorkspaceData();
     mockApiGet.mockResolvedValueOnce({
-      data: wsData,
+      data: { success: true, data: wsData },
       error: undefined,
       response: new Response(),
     } as never);

@@ -113,6 +113,11 @@ func (app *Server) registerWorkspaceRoutes() {
 	app.mux.HandleFunc("PUT /api/workspaces/default", handlermux.HandleSetDefaultWorkspace(app.workspaceSvc))
 	app.mux.HandleFunc("DELETE /api/workspaces/default", handlermux.HandleClearDefaultWorkspace(app.workspaceSvc))
 	app.mux.Handle("DELETE /api/workspaces/{ws}", middleware.Workspace(app.wsExistsFn)(handlermux.HandleWorkspaceDelete(app.workspaceSvc)))
+	// PATCH handlers are registered on the outer mux (not the nested wsMux)
+	// because Go 1.22+ http.ServeMux has a bug where r.Body.Read() hangs for
+	// PATCH requests routed through a nested mux via wildcard subtree pattern.
+	app.mux.Handle("PATCH /api/workspaces/{ws}/name", middleware.Workspace(app.wsExistsFn)(handlermux.HandleWorkspaceRename(app.workspaceSvc)))
+	app.mux.Handle("PATCH /api/workspaces/{ws}/config/backend", middleware.Workspace(app.wsExistsFn)(handlermux.HandleWorkspaceBackendPatch(app.workspaceSvc)))
 
 	wsMux := http.NewServeMux()
 	for _, mod := range app.wsModules {

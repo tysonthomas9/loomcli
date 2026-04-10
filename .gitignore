@@ -37,3 +37,5 @@ services/auth/dist/
 
 # Local worktrees
 worktrees/
+.agent.yield
+node_modules/

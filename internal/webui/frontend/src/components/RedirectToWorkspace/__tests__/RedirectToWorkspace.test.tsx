@@ -104,7 +104,7 @@ describe("RedirectToWorkspace", () => {
       renderComponent();
 
       await waitFor(() => {
-        expect(mockNavigate).toHaveBeenCalledWith("/ws/ws-default/", {
+        expect(mockNavigate).toHaveBeenCalledWith("/ws/ws-default/kanban", {
           replace: true,
         });
       });
@@ -121,7 +121,7 @@ describe("RedirectToWorkspace", () => {
       renderComponent();
 
       await waitFor(() => {
-        expect(mockNavigate).toHaveBeenCalledWith("/ws/ws-first/", {
+        expect(mockNavigate).toHaveBeenCalledWith("/ws/ws-first/kanban", {
           replace: true,
         });
       });
@@ -139,7 +139,7 @@ describe("RedirectToWorkspace", () => {
 
       await waitFor(() => {
         expect(mockClearLastWorkspaceId).toHaveBeenCalledWith("ws-stale");
-        expect(mockNavigate).toHaveBeenCalledWith("/ws/ws-default/", {
+        expect(mockNavigate).toHaveBeenCalledWith("/ws/ws-default/kanban", {
           replace: true,
         });
       });
@@ -157,7 +157,7 @@ describe("RedirectToWorkspace", () => {
       renderComponent();
 
       await waitFor(() => {
-        expect(mockNavigate).toHaveBeenCalledWith("/ws/ws-known/", {
+        expect(mockNavigate).toHaveBeenCalledWith("/ws/ws-known/kanban", {
           replace: true,
         });
         expect(mockClearLastWorkspaceId).not.toHaveBeenCalled();
@@ -178,7 +178,7 @@ describe("RedirectToWorkspace", () => {
       renderComponent();
 
       await waitFor(() => {
-        expect(mockNavigate).toHaveBeenCalledWith("/ws/ws-2/", {
+        expect(mockNavigate).toHaveBeenCalledWith("/ws/ws-2/kanban", {
           replace: true,
         });
         // Must NOT navigate to the failed workspace
@@ -202,7 +202,7 @@ describe("RedirectToWorkspace", () => {
       renderComponent();
 
       await waitFor(() => {
-        expect(mockNavigate).toHaveBeenCalledWith("/ws/ws-default/", {
+        expect(mockNavigate).toHaveBeenCalledWith("/ws/ws-default/kanban", {
           replace: true,
         });
       });
@@ -293,7 +293,7 @@ describe("RedirectToWorkspace", () => {
 
       await waitFor(() => {
         // All workspaces available, should pick the default
-        expect(mockNavigate).toHaveBeenCalledWith("/ws/ws-b/", {
+        expect(mockNavigate).toHaveBeenCalledWith("/ws/ws-b/kanban", {
           replace: true,
         });
       });
@@ -308,7 +308,7 @@ describe("RedirectToWorkspace", () => {
       renderComponent();
 
       await waitFor(() => {
-        expect(mockNavigate).toHaveBeenCalledWith("/ws/ws-only/", {
+        expect(mockNavigate).toHaveBeenCalledWith("/ws/ws-only/kanban", {
           replace: true,
         });
       });

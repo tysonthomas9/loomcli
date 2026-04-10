@@ -1531,6 +1531,109 @@ func TestSetupRoutes_WorkspaceBackendPatchEndpoint(t *testing.T) {
 	}
 }
 
+// TestSetupRoutes_WorkspaceRenamePatchEndpoint verifies that
+// PATCH /api/workspaces/{ws}/name is registered on the outer mux and that the
+// request body reaches the handler. The latter is a regression guard: these
+// PATCH routes are deliberately registered on the outer mux (not via the
+// nested wsMux subtree) because Go 1.22+ http.ServeMux has a bug where
+// r.Body.Read() hangs for PATCH requests routed through a nested mux via
+// wildcard subtree pattern. If someone moves these routes back into wsMux,
+// body decoding would break and this test would catch it.
+func TestSetupRoutes_WorkspaceRenamePatchEndpoint(t *testing.T) {
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
+	_ = multiPool.Register("test-ws", &stubPool{})
+
+	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
+	workspaceConfigFn := func() (*ops.WorkspaceData, error) {
+		return &ops.WorkspaceData{Name: "test-ws", Path: "/tmp/test"}, nil
+	}
+
+	var capturedNewName string
+	wsSvc := &mockWorkspaceService{
+		renameWorkspaceFn: func(_ context.Context, _ string, newName string) (*ops.WorkspaceData, error) {
+			capturedNewName = newName
+			return &ops.WorkspaceData{Name: newName, Path: "/tmp/test"}, nil
+		},
+	}
+	app := &Server{multiPool: multiPool, config: webui.ServerConfig{WorkspaceConfigFn: workspaceConfigFn}, wsExistsFn: wsExistsFn, workspaceSvc: wsSvc}
+	app.sessSvc = svcimpl.NewSessionService(nil, nil)
+	setupTestRoutes(t, app)
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/workspaces/test-ws/name",
+		strings.NewReader(`{"new_name":"renamed-ws"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	app.mux.ServeHTTP(rr, req)
+
+	// The route must be registered (not fall through to SPA catch-all)
+	ct := rr.Header().Get("Content-Type")
+	if ct == "text/html; charset=utf-8" {
+		t.Fatal("expected workspace rename PATCH route to be registered, but request fell through to frontend handler")
+	}
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d, body=%s", rr.Code, rr.Body.String())
+	}
+
+	// The body must have been decoded and passed to the service — if it was
+	// lost (e.g., nested mux body-read bug), capturedNewName would be empty.
+	if capturedNewName != "renamed-ws" {
+		t.Errorf("handler did not receive new_name from body; got %q, want %q", capturedNewName, "renamed-ws")
+	}
+
+	var body map[string]interface{}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to parse response JSON: %v", err)
+	}
+	if success, _ := body["success"].(bool); !success {
+		t.Errorf("response success = false, want true; body=%v", body)
+	}
+	if data, ok := body["data"].(map[string]interface{}); !ok {
+		t.Error("expected 'data' field in successful response")
+	} else if name, _ := data["name"].(string); name != "renamed-ws" {
+		t.Errorf("data.name = %q, want %q", name, "renamed-ws")
+	}
+}
+
+// TestSetupRoutes_WorkspaceBackendPatchReadsBody is a regression guard that
+// verifies the PATCH /config/backend route not only registers but actually
+// receives the request body at the handler. Complements
+// TestSetupRoutes_WorkspaceBackendPatchEndpoint which only asserts the shape.
+func TestSetupRoutes_WorkspaceBackendPatchReadsBody(t *testing.T) {
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
+	_ = multiPool.Register("test-ws", &stubPool{})
+
+	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
+	workspaceConfigFn := func() (*ops.WorkspaceData, error) {
+		return &ops.WorkspaceData{Name: "test-ws", Path: "/tmp/test"}, nil
+	}
+
+	var capturedBackend string
+	wsSvc := &mockWorkspaceService{
+		patchWorkspaceBackendFn: func(_ context.Context, _ string, backend string) (*ops.WorkspaceData, error) {
+			capturedBackend = backend
+			return &ops.WorkspaceData{Name: "test-ws", Path: "/tmp/test"}, nil
+		},
+	}
+	app := &Server{multiPool: multiPool, config: webui.ServerConfig{WorkspaceConfigFn: workspaceConfigFn}, wsExistsFn: wsExistsFn, workspaceSvc: wsSvc}
+	app.sessSvc = svcimpl.NewSessionService(nil, nil)
+	setupTestRoutes(t, app)
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/workspaces/test-ws/config/backend",
+		strings.NewReader(`{"backend":"codex"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	app.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d, body=%s", rr.Code, rr.Body.String())
+	}
+
+	if capturedBackend != "codex" {
+		t.Errorf("handler did not receive backend from body; got %q, want %q", capturedBackend, "codex")
+	}
+}
+
 // --- Terminal token route conditional registration tests ---
 
 // TestSetupRoutes_FlatTerminalTokenReturns404 verifies that GET /api/terminal/token

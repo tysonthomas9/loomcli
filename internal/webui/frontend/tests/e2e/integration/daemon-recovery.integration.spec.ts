@@ -102,6 +102,52 @@ async function navigateAndWaitForConnected(
   ).toBeVisible({ timeout: 15_000 });
 }
 
+/**
+ * Register an addInitScript that wraps EventSource to track instances.
+ * Must be called BEFORE any page.goto(). Allows injectSSEError() to
+ * dispatch an error event on the live EventSource, triggering the
+ * onerror → reconnect → overlay cascade. route.abort() alone cannot
+ * break an existing SSE streaming connection.
+ */
+async function setupEventSourceTracking(
+  page: import("@playwright/test").Page,
+) {
+  await page.addInitScript(() => {
+    (window as any).__eventSources = [];
+    const Orig = window.EventSource;
+    window.EventSource = function (url: string | URL, init?: EventSourceInit) {
+      const es = new Orig(url, init);
+      (window as any).__eventSources.push(es);
+      return es;
+    } as unknown as typeof EventSource;
+    window.EventSource.prototype = Orig.prototype;
+    Object.defineProperty(window.EventSource, "CONNECTING", { value: 0 });
+    Object.defineProperty(window.EventSource, "OPEN", { value: 1 });
+    Object.defineProperty(window.EventSource, "CLOSED", { value: 2 });
+  });
+}
+
+/** Dispatch error events on all tracked EventSource instances. */
+async function injectSSEError(page: import("@playwright/test").Page) {
+  await page.evaluate(() => {
+    for (const es of (window as any).__eventSources || []) {
+      if (es.readyState !== 2) es.dispatchEvent(new Event("error"));
+    }
+  });
+}
+
+/**
+ * Block the health, SSE token, and SSE events endpoints so that the
+ * reconnection cascade triggers notifyDaemonUnavailable → overlay.
+ * The token endpoint must be blocked — otherwise the SSE client
+ * silently reconnects without triggering the health check cascade.
+ */
+async function blockDaemonEndpoints(page: import("@playwright/test").Page) {
+  await page.route("**/api/health", (route) => route.abort());
+  await page.route("**/events/token", (route) => route.abort());
+  await page.route("**/events", (route) => route.abort());
+}
+
 test.describe("Daemon error recovery", () => {
   let workspaceId = "";
   const testIssueIds: string[] = [];
@@ -128,27 +174,13 @@ test.describe("Daemon error recovery", () => {
   test("health check failure shows daemon unavailable overlay", async ({
     page,
   }) => {
-    // Navigate and establish healthy connected state
+    await setupEventSourceTracking(page);
     await navigateAndWaitForConnected(page);
-
-    // Set up route intercepts: abort the SSE events endpoint to break the
-    // existing EventSource connection (route.fulfill only affects new requests),
-    // and return 503 for health/token so the reconnection cascade detects
-    // daemon unavailability.
-    const daemon503 = (route: import("@playwright/test").Route) =>
-      route.fulfill({ status: 503, contentType: "application/json", body: '{"error":"daemon unavailable"}' });
-    await page.route("**/api/health", daemon503);
-    await page.route("**/api/daemon/status", daemon503);
-    await page.route("**/events/token", daemon503);
-    await page.route("**/events", (route) => route.abort());
-
-    // The abort on **/events terminates the active SSE streaming connection.
-    // EventSource fires onerror → schedules reconnect → token fetch gets 503 →
-    // notifyDaemonUnavailable() → health check gets 503 → debounce (2000ms) →
-    // overlay appears. No CDP offline needed.
+    await blockDaemonEndpoints(page);
+    await injectSSEError(page);
 
     // Wait for DaemonUnavailableOverlay to appear
-    // Must exceed the 2000ms debounce (useDaemonHealth.ts: UNAVAILABLE_DEBOUNCE_MS = 2000)
+    // Must exceed the 2000ms debounce + 1s initial reconnect delay + token fetch
     const overlay = page.locator('[aria-labelledby="daemon-overlay-title"]');
     await expect(overlay).toBeVisible({ timeout: 15_000 });
 
@@ -163,12 +195,16 @@ test.describe("Daemon error recovery", () => {
 
     // Unroute all blocked endpoints — simulate daemon recovery
     await page.unroute("**/api/health");
-    await page.unroute("**/api/daemon/status");
     await page.unroute("**/events/token");
     await page.unroute("**/events");
 
-    // Wait for overlay to disappear (daemon recovers on next poll)
+    // Wait for overlay to disappear (daemon recovers on next health poll)
     await expect(overlay).not.toBeVisible({ timeout: 20_000 });
+
+    // Reload page to reset SSE client backoff and establish fresh connection
+    // (without reload, the SSE exponential backoff can delay reconnection 30s+)
+    await page.reload();
+    await page.waitForLoadState("domcontentloaded");
 
     // Verify connected state returns
     await expect(
@@ -207,17 +243,10 @@ test.describe("Daemon error recovery", () => {
   test("retry now button triggers immediate reconnection", async ({
     page,
   }) => {
-    // Navigate and establish healthy connected state (ensures mode is not never_connected)
+    await setupEventSourceTracking(page);
     await navigateAndWaitForConnected(page);
-
-    // Block health endpoint and SSE events
-    await page.route("**/api/health", (route) => route.abort());
-    await page.route("**/events", (route) => route.abort());
-
-    // Route blocking triggers the cascade: SSE EventSource error → reconnect →
-    // token fetch via fetchApi fails → notifyDaemonUnavailable() → health check →
-    // health fails → debounce (2000ms) → overlay appears.
-    // No explicit trigger needed — the natural failure cascade handles it.
+    await blockDaemonEndpoints(page);
+    await injectSSEError(page);
 
     // Wait for overlay to appear (must wait >2000ms debounce)
     const overlay = page.locator('[aria-labelledby="daemon-overlay-title"]');
@@ -228,8 +257,9 @@ test.describe("Daemon error recovery", () => {
     const retryButton = overlay.locator("button", { hasText: "Retry Now" });
     await expect(retryButton).toBeVisible();
 
-    // Unroute health endpoint (simulate daemon recovery), keep SSE blocked for now
+    // Unroute health + token (simulate daemon recovery), keep SSE blocked for now
     await page.unroute("**/api/health");
+    await page.unroute("**/events/token");
 
     // Click "Retry Now" — triggers immediate health check bypassing backoff timer
     await retryButton.click();
@@ -239,6 +269,10 @@ test.describe("Daemon error recovery", () => {
 
     // Unroute SSE endpoint
     await page.unroute("**/events");
+
+    // Reload to reset SSE backoff and re-establish connection
+    await page.reload();
+    await page.waitForLoadState("domcontentloaded");
 
     // Verify connected state returns
     await expect(
@@ -250,7 +284,7 @@ test.describe("Daemon error recovery", () => {
     page,
     request,
   }) => {
-    // Navigate and establish healthy connected state
+    await setupEventSourceTracking(page);
     await navigateAndWaitForConnected(page);
 
     // Create a test issue via API
@@ -264,14 +298,9 @@ test.describe("Daemon error recovery", () => {
       await expect(readyColumn.getByText(uniqueTitle)).toBeVisible();
     }).toPass({ timeout: 10_000, intervals: [500, 1000, 2000] });
 
-    // Block health + SSE endpoints (simulate daemon down)
-    await page.route("**/api/health", (route) => route.abort());
-    await page.route("**/events", (route) => route.abort());
-
-    // Route blocking triggers the cascade: SSE EventSource error → reconnect →
-    // token fetch via fetchApi fails → notifyDaemonUnavailable() → health check →
-    // health fails → debounce (2000ms) → overlay appears.
-    // No explicit trigger needed — the natural failure cascade handles it.
+    // Block daemon endpoints and inject SSE error to trigger overlay
+    await blockDaemonEndpoints(page);
+    await injectSSEError(page);
 
     // Wait for overlay to appear (>2000ms debounce)
     const overlay = page.locator('[aria-labelledby="daemon-overlay-title"]');
@@ -279,16 +308,22 @@ test.describe("Daemon error recovery", () => {
 
     // Unblock all endpoints (simulate recovery)
     await page.unroute("**/api/health");
+    await page.unroute("**/events/token");
     await page.unroute("**/events");
 
-    // Wait for overlay to disappear and connected state returns
+    // Wait for overlay to disappear
     await expect(overlay).not.toBeVisible({ timeout: 20_000 });
+
+    // Reload to reset SSE backoff and re-establish connection
+    await page.reload();
+    await page.waitForLoadState("domcontentloaded");
     await expect(
       page.locator('[role="status"][data-state="connected"]'),
     ).toBeVisible({ timeout: 15_000 });
 
     // Assert the previously created issue is STILL visible (page didn't lose data)
-    await expect(readyColumn.getByText(uniqueTitle)).toBeVisible();
+    const readyAfterReload = page.locator('section[data-status="ready"]');
+    await expect(readyAfterReload.getByText(uniqueTitle)).toBeVisible();
 
     // Create another issue while the UI is reconnected — proves SSE pipeline is functional
     const secondTitle = `Recovery Post-Data Test ${generateTestId()}`;
@@ -337,22 +372,19 @@ test.describe("Daemon error recovery", () => {
     page,
     request,
   }) => {
-    // Navigate and establish healthy connected state
+    await setupEventSourceTracking(page);
     await navigateAndWaitForConnected(page);
 
-    // Block health endpoint + SSE endpoint on the page
-    await page.route("**/api/health", (route) => route.abort());
-    await page.route("**/events", (route) => route.abort());
+    // Block daemon endpoints on the page
+    await blockDaemonEndpoints(page);
 
     // Verify the real server health endpoint returns OK (via Playwright request, not page)
     // This confirms route blocking only affects the browser page, not the actual server
     const response = await request.get("/api/health");
     expect(response.ok()).toBe(true);
 
-    // Route blocking triggers the cascade: SSE EventSource error → reconnect →
-    // token fetch via fetchApi fails → notifyDaemonUnavailable() → health check →
-    // health fails → debounce (2000ms) → overlay appears.
-    // No explicit trigger needed — the natural failure cascade handles it.
+    // Inject SSE error to trigger the overlay cascade
+    await injectSSEError(page);
 
     // Wait for overlay to appear on the page (>2000ms debounce)
     const overlay = page.locator('[aria-labelledby="daemon-overlay-title"]');
@@ -360,10 +392,15 @@ test.describe("Daemon error recovery", () => {
 
     // Unroute all endpoints
     await page.unroute("**/api/health");
+    await page.unroute("**/events/token");
     await page.unroute("**/events");
 
     // Verify recovery
     await expect(overlay).not.toBeVisible({ timeout: 20_000 });
+
+    // Reload to reset SSE backoff and re-establish connection
+    await page.reload();
+    await page.waitForLoadState("domcontentloaded");
     await expect(
       page.locator('[role="status"][data-state="connected"]'),
     ).toBeVisible({ timeout: 15_000 });

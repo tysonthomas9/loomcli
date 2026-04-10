@@ -272,6 +272,28 @@ function ok<T>(data: T): string {
  * Set up all baseline API mocks required for the app to boot.
  */
 async function setupBaseMocks(page: Page) {
+  // Boot-time mocks: /api/config and /api/auth/token must succeed for app to render
+  await page.route("**/api/config", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname !== "/api/config") {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ mode: "open" }),
+    });
+  });
+
+  await page.route("**/api/auth/token", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ token: "test-token" }),
+    });
+  });
+
   // Workspace metadata
   await page.route("**/api/workspaces/active", async (route) => {
     await route.fulfill({

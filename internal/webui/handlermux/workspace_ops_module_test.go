@@ -15,18 +15,20 @@ func TestWorkspaceOpsModule_RegisterRoutes(t *testing.T) {
 	mux := http.NewServeMux()
 	mod.Register(mux)
 
+	// Note: PATCH /api/workspaces/{ws}/name and PATCH /api/workspaces/{ws}/config/backend
+	// are deliberately registered on the outer mux (in app/routes.go), not via this
+	// module, because Go 1.22+ http.ServeMux has a bug where r.Body.Read() hangs for
+	// PATCH requests routed through a nested mux via wildcard subtree pattern.
 	routes := []struct {
 		method string
 		path   string
 	}{
-		{"PATCH", "/api/workspaces/test-ws/name"},
 		{"GET", "/api/workspaces/test-ws/stats"},
 		{"GET", "/api/workspaces/test-ws/ready"},
 		{"GET", "/api/workspaces/test-ws/blocked"},
 		{"GET", "/api/workspaces/test-ws/issues/graph"},
 		{"GET", "/api/workspaces/test-ws/daemon/status"},
 		{"GET", "/api/workspaces/test-ws/config/backend"},
-		{"PATCH", "/api/workspaces/test-ws/config/backend"},
 	}
 
 	for _, rt := range routes {

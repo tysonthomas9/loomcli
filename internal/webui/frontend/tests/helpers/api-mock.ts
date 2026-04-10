@@ -57,6 +57,8 @@ export interface ApiMockHandler {
     session: { session: object | null; user: object | null } | null,
   ): Promise<MockTracker>;
   mockSseToken(token: string | null): Promise<MockTracker>;
+  /** Mock workspace-scoped routes needed for the app to render (/api/workspaces/*, stats, blocked, terminal sessions, monitor). */
+  mockWorkspace(): Promise<void>;
   mockAll(options?: MockAllOptions): Promise<MockAllTrackers>;
 }
 
@@ -289,6 +291,114 @@ export function createApiMockHandler(page: Page): ApiMockHandler {
         }
       });
       return tracker;
+    },
+
+    async mockWorkspace(): Promise<void> {
+      const wsData = {
+        id: "default",
+        name: "default",
+        path: "/tmp/ws",
+        repos: [],
+        groups: [],
+        agents: [],
+        workspaces: [
+          {
+            id: "default",
+            name: "default",
+            path: "/tmp/ws",
+            active: true,
+            repo_count: 0,
+            is_default: true,
+          },
+        ],
+        workspace_order: ["default"],
+        default_workspace: "default",
+      };
+
+      await page.route(
+        (url) =>
+          url.toString().includes("/api/workspaces/") &&
+          !url.toString().includes("/events"),
+        async (route) => {
+          const url = route.request().url();
+          if (url.includes("/ready")) {
+            await route.fulfill({
+              status: 200,
+              contentType: "application/json",
+              body: apiResponse([]),
+            });
+            return;
+          }
+          if (url.includes("/stats")) {
+            await route.fulfill({
+              status: 200,
+              contentType: "application/json",
+              body: apiResponse({
+                total_issues: 0,
+                open_issues: 0,
+                in_progress_issues: 0,
+                closed_issues: 0,
+                blocked_issues: 0,
+                deferred_issues: 0,
+                ready_issues: 0,
+                tombstone_issues: 0,
+                pinned_issues: 0,
+                epics_eligible_for_closure: 0,
+                average_lead_time_hours: 0,
+              }),
+            });
+            return;
+          }
+          if (url.includes("/blocked")) {
+            await route.fulfill({
+              status: 200,
+              contentType: "application/json",
+              body: apiResponse([]),
+            });
+            return;
+          }
+          if (url.includes("/issues/graph")) {
+            await route.fulfill({
+              status: 200,
+              contentType: "application/json",
+              body: JSON.stringify({ success: true, issues: [] }),
+            });
+            return;
+          }
+          if (url.includes("/issues")) {
+            await route.fulfill({
+              status: 200,
+              contentType: "application/json",
+              body: apiResponse([]),
+            });
+            return;
+          }
+          if (url.includes("/terminal/sessions")) {
+            await route.fulfill({
+              status: 200,
+              contentType: "application/json",
+              body: apiResponse({}),
+            });
+            return;
+          }
+
+          // Default: return workspace data
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: apiResponse(wsData),
+          });
+        },
+      );
+
+      // Monitor endpoints
+      await page.route("**/api/monitor/**", async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({}),
+        });
+      });
     },
 
     async mockAll(options: MockAllOptions = {}): Promise<MockAllTrackers> {
