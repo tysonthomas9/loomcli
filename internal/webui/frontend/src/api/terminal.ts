@@ -31,15 +31,15 @@ function unwrap<T>(response: ApiResult<T>): T {
 
 // ============= API Functions =============
 
-// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 /**
- * List active terminal sessions from GET /api/terminal/sessions.
+ * List active terminal sessions for the workspace.
+ * GET /api/workspaces/{ws}/terminal/sessions
  */
 export async function listTerminalSessions(
-  _workspaceId: string,
+  workspaceId: string,
 ): Promise<TerminalSessionInfo[]> {
   const response = await get<ApiResult<{ sessions: TerminalSessionInfo[] }>>(
-    "/api/terminal/sessions",
+    wsUrl(workspaceId, "/terminal/sessions"),
   );
   return unwrap(response).sessions;
 }
@@ -47,15 +47,18 @@ export async function listTerminalSessions(
 /**
  * Fetch a one-time terminal auth token for the given session.
  * Returns null on failure (WebSocket will be rejected by server).
+ * GET /api/workspaces/{ws}/terminal/token?session=X
  */
-// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export async function fetchTerminalToken(
-  _workspaceId: string,
+  workspaceId: string,
   sessionName: string,
 ): Promise<string | null> {
   try {
     const resp = await get<{ token: string }>(
-      `/api/terminal/token?session=${encodeURIComponent(sessionName)}`, // allow-url
+      wsUrl(
+        workspaceId,
+        `/terminal/token?session=${encodeURIComponent(sessionName)}`,
+      ),
     );
     return resp.token;
   } catch {
@@ -65,8 +68,9 @@ export async function fetchTerminalToken(
 
 /**
  * Build the WebSocket URL for the terminal relay endpoint.
+ * The workspace is now carried in the URL path rather than a query param,
+ * so WorkspaceMiddleware can gate access on the server side.
  */
-// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export function buildTerminalWsUrl(
   workspaceId: string,
   sessionName: string,
@@ -78,12 +82,9 @@ export function buildTerminalWsUrl(
       : (globalThis as { location?: Location }).location;
   const proto = location?.protocol === "https:" ? "wss:" : "ws:";
   const host = location?.host ?? "localhost";
-  let url = `${proto}//${host}/api/terminal/ws?session=${encodeURIComponent(sessionName)}`; // allow-url
+  let url = `${proto}//${host}/api/workspaces/${encodeURIComponent(workspaceId)}/terminal/ws?session=${encodeURIComponent(sessionName)}`; // allow-url
   if (token) {
     url += `&token=${encodeURIComponent(token)}`;
-  }
-  if (workspaceId) {
-    url += `&workspace=${encodeURIComponent(workspaceId)}`;
   }
   return url;
 }
@@ -91,17 +92,17 @@ export function buildTerminalWsUrl(
 // ============= Spawn Session =============
 
 /**
- * Pre-create a tmux session for the given backend via POST /api/terminal/spawn.
+ * Pre-create a tmux session for the given backend.
+ * POST /api/workspaces/{ws}/terminal/spawn
  * Used for shell tabs to ensure the correct command before WebSocket connects.
  */
-// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export async function spawnTerminalSession(
-  _workspaceId: string,
+  workspaceId: string,
   sessionName: string,
   backend: string,
 ): Promise<void> {
   await post<{ success: boolean; data?: unknown; error?: string }>(
-    "/api/terminal/spawn",
+    wsUrl(workspaceId, "/terminal/spawn"),
     { session_name: sessionName, backend },
   );
 }
@@ -110,53 +111,56 @@ export async function spawnTerminalSession(
 
 /**
  * Restart a terminal session with the current backend.
- * POST /api/terminal/restart?session=<name>&token=<token>
+ * POST /api/workspaces/{ws}/terminal/restart?session=X&token=Y
  */
-// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export async function restartTerminalSession(
-  _workspaceId: string,
+  workspaceId: string,
   sessionName: string,
   token: string | null,
 ): Promise<{ success: boolean; backend: string }> {
-  let url = `/api/terminal/restart?session=${encodeURIComponent(sessionName)}`; // allow-url
+  let path = `/terminal/restart?session=${encodeURIComponent(sessionName)}`;
   if (token) {
-    url += `&token=${encodeURIComponent(token)}`;
+    path += `&token=${encodeURIComponent(token)}`;
   }
-  return post<{ success: boolean; backend: string }>(url, {});
+  return post<{ success: boolean; backend: string }>(
+    wsUrl(workspaceId, path),
+    {},
+  );
 }
 
 // ============= Kill Session =============
 
 /**
  * Forcibly kill a terminal session (for hung backends).
- * POST /api/terminal/kill?session=<name>&token=<token>
+ * POST /api/workspaces/{ws}/terminal/kill?session=X&token=Y
  */
-// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export async function killTerminalSession(
-  _workspaceId: string,
+  workspaceId: string,
   sessionName: string,
   token: string | null,
 ): Promise<void> {
-  let url = `/api/terminal/kill?session=${encodeURIComponent(sessionName)}`; // allow-url
+  let path = `/terminal/kill?session=${encodeURIComponent(sessionName)}`;
   if (token) {
-    url += `&token=${encodeURIComponent(token)}`;
+    path += `&token=${encodeURIComponent(token)}`;
   }
-  await post<{ success: boolean }>(url, {});
+  await post<{ success: boolean }>(wsUrl(workspaceId, path), {});
 }
 
 // ============= Session Status =============
 
 /**
  * Check whether a terminal session's backend is alive.
- * GET /api/terminal/session-status?session=<name>
+ * GET /api/workspaces/{ws}/terminal/session-status?session=X
  */
-// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export async function getSessionStatus(
-  _workspaceId: string,
+  workspaceId: string,
   sessionName: string,
 ): Promise<{ alive: boolean; exit_reason?: string }> {
   return get<{ alive: boolean; exit_reason?: string }>(
-    `/api/terminal/session-status?session=${encodeURIComponent(sessionName)}`, // allow-url
+    wsUrl(
+      workspaceId,
+      `/terminal/session-status?session=${encodeURIComponent(sessionName)}`,
+    ),
   );
 }
 
@@ -171,15 +175,19 @@ export interface LeadSessionResult {
  * Create a new tmux session running `loom lead --backend <backend> --message <text>`.
  * The user's message is baked into the loom-lead invocation so the agent receives it
  * as part of its initial prompt — no post-hoc send-keys or readiness polling needed.
+ *
+ * POST /api/workspaces/{ws}/terminal/lead-session. The workspace ID now comes
+ * from the URL path (via WorkspaceMiddleware) rather than a body field, and
+ * the backend resolves it to an on-disk path so the tmux session starts with
+ * its cwd at that workspace instead of inheriting the loom service's cwd.
  */
-// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export async function createLeadSession(
-  _workspaceId: string,
+  workspaceId: string,
   message: string,
   backend: string,
 ): Promise<LeadSessionResult> {
   const response = await post<ApiResult<LeadSessionResult>>(
-    "/api/terminal/lead-session",
+    wsUrl(workspaceId, "/terminal/lead-session"),
     { message, backend },
   );
   return unwrap(response);
@@ -196,16 +204,19 @@ export interface IssueContext {
 }
 
 /**
- * Seed a terminal session with issue context via POST /api/terminal/sessions/{name}/seed.
+ * Seed a terminal session with issue context.
+ * POST /api/workspaces/{ws}/terminal/sessions/{name}/seed
  */
-// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export async function seedTerminalSession(
-  _workspaceId: string,
+  workspaceId: string,
   sessionName: string,
   context: IssueContext,
 ): Promise<void> {
   await post<{ success: boolean }>(
-    `/api/terminal/sessions/${encodeURIComponent(sessionName)}/seed`,
+    wsUrl(
+      workspaceId,
+      `/terminal/sessions/${encodeURIComponent(sessionName)}/seed`,
+    ),
     context,
   );
 }
@@ -311,18 +322,20 @@ export async function deleteTabMetadata(
 
 /**
  * Schedule a deferred tmux session kill with grace period.
- * POST /api/terminal/sessions/{session}/kill
+ * POST /api/workspaces/{ws}/terminal/sessions/{session}/kill
  * Pass force=true to kill immediately (for explicit user close).
  */
-// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
 export async function scheduleSessionKill(
-  _workspaceId: string,
+  workspaceId: string,
   sessionName: string,
   force = false,
 ): Promise<void> {
   const qs = force ? "?force=true" : "";
   await post<{ success: boolean }>(
-    `/api/terminal/sessions/${encodeURIComponent(sessionName)}/kill${qs}`, // allow-url
+    wsUrl(
+      workspaceId,
+      `/terminal/sessions/${encodeURIComponent(sessionName)}/kill${qs}`,
+    ),
     {},
   );
 }
@@ -354,12 +367,17 @@ export async function listSessionsByIssue(
 }
 
 /**
- * Close all terminal sessions via POST /api/terminal/sessions/close-all.
- * Kills all tmux sessions and clears all tab metadata.
+ * Close all terminal sessions belonging to the workspace.
+ * POST /api/workspaces/{ws}/terminal/sessions/close-all
+ * Kills the workspace's tmux sessions and clears its tab metadata.
+ * Sessions in other workspaces are untouched — important for multi-VM
+ * deployments where each loom instance only sees its own workspaces.
  */
-// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
-export async function closeAllSessions(_workspaceId: string): Promise<void> {
-  await post<{ success: boolean }>("/api/terminal/sessions/close-all", {});
+export async function closeAllSessions(workspaceId: string): Promise<void> {
+  await post<{ success: boolean }>(
+    wsUrl(workspaceId, "/terminal/sessions/close-all"),
+    {},
+  );
 }
 
 // ============= Scrollback API =============

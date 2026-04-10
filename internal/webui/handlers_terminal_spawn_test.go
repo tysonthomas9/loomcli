@@ -13,9 +13,16 @@ import (
 type mockSpawner struct {
 	spawnCreated bool
 	spawnErr     error
+	// Captured on the last call, for workspace-cwd assertions.
+	lastName    string
+	lastCommand string
+	lastWorkDir string
 }
 
-func (m *mockSpawner) Spawn(name, command string, cols, rows uint16) (bool, error) {
+func (m *mockSpawner) SpawnInDir(name, command string, cols, rows uint16, workDir string) (bool, error) {
+	m.lastName = name
+	m.lastCommand = command
+	m.lastWorkDir = workDir
 	if m.spawnErr != nil {
 		return false, m.spawnErr
 	}
@@ -222,7 +229,7 @@ func TestHandleTerminalSpawn_InvalidBackend(t *testing.T) {
 }
 
 func TestHandleTerminalSpawn_NilManager(t *testing.T) {
-	handler := handleTerminalSpawn(nil, nil, "")
+	handler := handleTerminalSpawn(nil, nil, nil)
 
 	body := `{"session_name":"my-session","backend":"claude"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/spawn", strings.NewReader(body))
@@ -390,6 +397,62 @@ func TestExtractIssueID(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("extractIssueID(%q) = %q, want %q", tt.sessionName, got, tt.want)
 		}
+	}
+}
+
+func TestHandleTerminalSpawn_WorkspaceCwd(t *testing.T) {
+	// When the request is routed through WorkspaceMiddleware, the handler
+	// reads the workspace ID from the context and resolves it to an on-disk
+	// path, which flows through to SpawnInDir as the tmux session's cwd.
+	mock := &mockSpawner{spawnCreated: true}
+	cfg := func(id string) (*WorkspaceData, error) {
+		if id == "ws-paperclip" {
+			return &WorkspaceData{ID: id, Path: "/home/loom/.loom/workspaces/paperclip"}, nil
+		}
+		return nil, fmt.Errorf("unknown workspace %q", id)
+	}
+	handler := handleTerminalSpawnImplWithHistory(mock, nil, cfg)
+
+	body := `{"session_name":"my-session","backend":"claude"}`
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodPost, "/api/workspaces/ws-paperclip/terminal/spawn", strings.NewReader(body)),
+		"ws-paperclip",
+	)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	if mock.lastWorkDir != "/home/loom/.loom/workspaces/paperclip" {
+		t.Errorf("workDir = %q, want %q", mock.lastWorkDir, "/home/loom/.loom/workspaces/paperclip")
+	}
+	if mock.lastCommand != "claude" {
+		t.Errorf("command = %q, want %q", mock.lastCommand, "claude")
+	}
+}
+
+func TestHandleTerminalSpawn_NoWorkspaceContext(t *testing.T) {
+	// When no workspace context is present (e.g., handler called without
+	// middleware), the config lookup is skipped and workDir is empty. The
+	// spawn still succeeds so tests that don't care about cwd keep working.
+	mock := &mockSpawner{spawnCreated: true}
+	cfg := func(id string) (*WorkspaceData, error) {
+		t.Errorf("workspace lookup should not be called when context has no wsID; got %q", id)
+		return nil, nil
+	}
+	handler := handleTerminalSpawnImplWithHistory(mock, nil, cfg)
+
+	body := `{"session_name":"my-session","backend":"claude"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/terminal/spawn", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	if mock.lastWorkDir != "" {
+		t.Errorf("workDir = %q, want empty", mock.lastWorkDir)
 	}
 }
 

@@ -1951,10 +1951,11 @@ func TestHandleTerminalWS_NoSSEBroadcastWhenMetadataNotFound(t *testing.T) {
 	}
 }
 
-// TestHandleTerminalWS_SSEBroadcastNonDefaultWorkspace verifies that when a
-// WebSocket connects with a non-default workspace parameter, the handler looks
-// up metadata in that workspace (not scanning all workspaces) and broadcasts
-// an SSE event with the correct WorkspaceID.
+// TestHandleTerminalWS_SSEBroadcastNonDefaultWorkspace verifies that when the
+// WebSocket endpoint runs under WorkspaceMiddleware (which injects a
+// non-default workspace ID into the request context), the handler looks up
+// metadata in that workspace and broadcasts an SSE event with the correct
+// WorkspaceID.
 func TestHandleTerminalWS_SSEBroadcastNonDefaultWorkspace(t *testing.T) {
 	if os.Getenv("CI") != "" {
 		t.Skip("skipping in CI: tmux PTY lifecycle is unreliable in GitHub Actions")
@@ -1998,12 +1999,18 @@ func TestHandleTerminalWS_SSEBroadcastNonDefaultWorkspace(t *testing.T) {
 	// Give hub.Run() a moment to process registration.
 	time.Sleep(50 * time.Millisecond)
 
-	handler := handleTerminalWS(manager, nil, nil, "", nil, store, hub)
+	// Wrap the handler to inject a "myproject" workspace context, simulating
+	// what WorkspaceMiddleware does on the real wsMux route.
+	inner := handleTerminalWS(manager, nil, nil, "", nil, store, hub)
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(WithWorkspace(r.Context(), "myproject"))
+		inner.ServeHTTP(w, r)
+	})
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	// Connect with explicit workspace parameter.
-	wsURL := "ws" + server.URL[4:] + "?session=issue-session&workspace=myproject"
+	// Connect — the workspace now comes from the (injected) context, not the query param.
+	wsURL := "ws" + server.URL[4:] + "?session=issue-session"
 	dialCtx, dialCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer dialCancel()
 

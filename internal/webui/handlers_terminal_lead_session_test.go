@@ -17,17 +17,27 @@ type mockArgvSpawner struct {
 	spawnCreated bool
 	spawnErr     error
 	// Captured on the last call, for argv assertions.
-	lastName string
-	lastArgv []string
-	lastCols uint16
-	lastRows uint16
+	lastName    string
+	lastArgv    []string
+	lastCols    uint16
+	lastRows    uint16
+	lastWorkDir string
 }
 
-func (m *mockArgvSpawner) SpawnArgv(name string, argv []string, cols, rows uint16) (bool, error) {
+// stubWorkspaceConfig returns a fixed path for any workspace ID — used by most
+// tests to assert the lookup gets plumbed into SpawnArgv.
+func stubWorkspaceConfig(path string) func(string) (*WorkspaceData, error) {
+	return func(id string) (*WorkspaceData, error) {
+		return &WorkspaceData{ID: id, Path: path}, nil
+	}
+}
+
+func (m *mockArgvSpawner) SpawnArgv(name string, argv []string, cols, rows uint16, workDir string) (bool, error) {
 	m.lastName = name
 	m.lastArgv = argv
 	m.lastCols = cols
 	m.lastRows = rows
+	m.lastWorkDir = workDir
 	if m.spawnErr != nil {
 		return false, m.spawnErr
 	}
@@ -35,7 +45,22 @@ func (m *mockArgvSpawner) SpawnArgv(name string, argv []string, cols, rows uint1
 }
 
 func postLeadSession(handler http.HandlerFunc, body string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(http.MethodPost, "/api/terminal/lead-session", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/ws-test/terminal/lead-session", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	return rr
+}
+
+// postLeadSessionWithWS sends a lead-session request with the given workspace
+// ID injected into the request context, simulating what WorkspaceMiddleware
+// does for workspace-scoped routes. Delegates to withWorkspaceCtx (defined in
+// handlers_terminal_tabs_test.go) so all test files share one injection
+// pattern.
+func postLeadSessionWithWS(handler http.HandlerFunc, wsID, body string) *httptest.ResponseRecorder {
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodPost, "/api/workspaces/"+wsID+"/terminal/lead-session", strings.NewReader(body)),
+		wsID,
+	)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 	return rr
@@ -43,7 +68,7 @@ func postLeadSession(handler http.HandlerFunc, body string) *httptest.ResponseRe
 
 func TestHandleCreateLeadSession_HappyPath(t *testing.T) {
 	mock := &mockArgvSpawner{spawnCreated: true}
-	handler := handleCreateLeadSessionImpl(mock)
+	handler := handleCreateLeadSessionImpl(mock, stubWorkspaceConfig("/home/loom/.loom/workspaces/demo"))
 
 	rr := postLeadSession(handler, `{"message":"add dark mode toggle","backend":"claude"}`)
 
@@ -80,7 +105,7 @@ func TestHandleCreateLeadSession_HappyPath(t *testing.T) {
 }
 
 func TestHandleCreateLeadSession_NilManager(t *testing.T) {
-	handler := handleCreateLeadSession(nil)
+	handler := handleCreateLeadSession(nil, nil)
 
 	rr := postLeadSession(handler, `{"message":"hi","backend":"claude"}`)
 
@@ -96,7 +121,7 @@ func TestHandleCreateLeadSession_NilManager(t *testing.T) {
 
 func TestHandleCreateLeadSession_MalformedJSON(t *testing.T) {
 	mock := &mockArgvSpawner{spawnCreated: true}
-	handler := handleCreateLeadSessionImpl(mock)
+	handler := handleCreateLeadSessionImpl(mock, stubWorkspaceConfig("/home/loom/.loom/workspaces/demo"))
 
 	rr := postLeadSession(handler, `{not json`)
 
@@ -107,7 +132,7 @@ func TestHandleCreateLeadSession_MalformedJSON(t *testing.T) {
 
 func TestHandleCreateLeadSession_MissingMessage(t *testing.T) {
 	mock := &mockArgvSpawner{spawnCreated: true}
-	handler := handleCreateLeadSessionImpl(mock)
+	handler := handleCreateLeadSessionImpl(mock, stubWorkspaceConfig("/home/loom/.loom/workspaces/demo"))
 
 	rr := postLeadSession(handler, `{"backend":"claude"}`)
 
@@ -123,7 +148,7 @@ func TestHandleCreateLeadSession_MissingMessage(t *testing.T) {
 
 func TestHandleCreateLeadSession_WhitespaceMessage(t *testing.T) {
 	mock := &mockArgvSpawner{spawnCreated: true}
-	handler := handleCreateLeadSessionImpl(mock)
+	handler := handleCreateLeadSessionImpl(mock, stubWorkspaceConfig("/home/loom/.loom/workspaces/demo"))
 
 	rr := postLeadSession(handler, `{"message":"   \t  ","backend":"claude"}`)
 
@@ -134,7 +159,7 @@ func TestHandleCreateLeadSession_WhitespaceMessage(t *testing.T) {
 
 func TestHandleCreateLeadSession_MissingBackend(t *testing.T) {
 	mock := &mockArgvSpawner{spawnCreated: true}
-	handler := handleCreateLeadSessionImpl(mock)
+	handler := handleCreateLeadSessionImpl(mock, stubWorkspaceConfig("/home/loom/.loom/workspaces/demo"))
 
 	rr := postLeadSession(handler, `{"message":"hello"}`)
 
@@ -150,7 +175,7 @@ func TestHandleCreateLeadSession_MissingBackend(t *testing.T) {
 
 func TestHandleCreateLeadSession_InvalidBackend(t *testing.T) {
 	mock := &mockArgvSpawner{spawnCreated: true}
-	handler := handleCreateLeadSessionImpl(mock)
+	handler := handleCreateLeadSessionImpl(mock, stubWorkspaceConfig("/home/loom/.loom/workspaces/demo"))
 
 	rr := postLeadSession(handler, `{"message":"hello","backend":"nonexistent"}`)
 
@@ -166,7 +191,7 @@ func TestHandleCreateLeadSession_InvalidBackend(t *testing.T) {
 
 func TestHandleCreateLeadSession_MessageTooLong(t *testing.T) {
 	mock := &mockArgvSpawner{spawnCreated: true}
-	handler := handleCreateLeadSessionImpl(mock)
+	handler := handleCreateLeadSessionImpl(mock, stubWorkspaceConfig("/home/loom/.loom/workspaces/demo"))
 
 	// leadMessageMaxLen+1 bytes of 'a', JSON-encoded
 	longMsg := strings.Repeat("a", leadMessageMaxLen+1)
@@ -186,7 +211,7 @@ func TestHandleCreateLeadSession_MessageTooLong(t *testing.T) {
 
 func TestHandleCreateLeadSession_BodyTooLarge(t *testing.T) {
 	mock := &mockArgvSpawner{spawnCreated: true}
-	handler := handleCreateLeadSessionImpl(mock)
+	handler := handleCreateLeadSessionImpl(mock, stubWorkspaceConfig("/home/loom/.loom/workspaces/demo"))
 
 	// Build a JSON body larger than maxRequestBody.
 	payload := make([]byte, maxRequestBody+1024)
@@ -206,7 +231,7 @@ func TestHandleCreateLeadSession_BodyTooLarge(t *testing.T) {
 
 func TestHandleCreateLeadSession_SpawnError(t *testing.T) {
 	mock := &mockArgvSpawner{spawnErr: errors.New("tmux failed")}
-	handler := handleCreateLeadSessionImpl(mock)
+	handler := handleCreateLeadSessionImpl(mock, stubWorkspaceConfig("/home/loom/.loom/workspaces/demo"))
 
 	rr := postLeadSession(handler, `{"message":"hi","backend":"claude"}`)
 
@@ -225,7 +250,7 @@ func TestHandleCreateLeadSession_SessionAlreadyExists(t *testing.T) {
 	// timestamp-based session name this should be vanishingly rare, but the
 	// handler treats it as a conflict rather than success.
 	mock := &mockArgvSpawner{spawnCreated: false}
-	handler := handleCreateLeadSessionImpl(mock)
+	handler := handleCreateLeadSessionImpl(mock, stubWorkspaceConfig("/home/loom/.loom/workspaces/demo"))
 
 	rr := postLeadSession(handler, `{"message":"hi","backend":"claude"}`)
 
@@ -240,7 +265,7 @@ func TestHandleCreateLeadSession_AllBackends(t *testing.T) {
 	for _, backend := range validBackends {
 		t.Run(backend, func(t *testing.T) {
 			mock := &mockArgvSpawner{spawnCreated: true}
-			handler := handleCreateLeadSessionImpl(mock)
+			handler := handleCreateLeadSessionImpl(mock, stubWorkspaceConfig("/home/loom/.loom/workspaces/demo"))
 
 			body := fmt.Sprintf(`{"message":"test","backend":%q}`, backend)
 			rr := postLeadSession(handler, body)
@@ -261,5 +286,70 @@ func TestHandleCreateLeadSession_AllBackends(t *testing.T) {
 				t.Errorf("argv[5] = %q, want %q", mock.lastArgv[5], "test")
 			}
 		})
+	}
+}
+
+func TestHandleCreateLeadSession_WorkspaceCwd(t *testing.T) {
+	// When the request is routed through WorkspaceMiddleware, the handler
+	// reads the workspace ID from the context and resolves it to an on-disk
+	// path, which flows through to SpawnArgv as the tmux session's cwd.
+	mock := &mockArgvSpawner{spawnCreated: true}
+	cfg := func(id string) (*WorkspaceData, error) {
+		if id == "ws-paperclip" {
+			return &WorkspaceData{ID: id, Path: "/home/loom/.loom/workspaces/paperclip"}, nil
+		}
+		return nil, fmt.Errorf("unknown workspace %q", id)
+	}
+	handler := handleCreateLeadSessionImpl(mock, cfg)
+
+	rr := postLeadSessionWithWS(handler, "ws-paperclip", `{"message":"hi","backend":"claude"}`)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	if mock.lastWorkDir != "/home/loom/.loom/workspaces/paperclip" {
+		t.Errorf("workDir = %q, want %q", mock.lastWorkDir, "/home/loom/.loom/workspaces/paperclip")
+	}
+}
+
+func TestHandleCreateLeadSession_WorkspaceCwd_FallbackOnLookupErr(t *testing.T) {
+	// WorkspaceMiddleware validated the workspace exists, but the config
+	// lookup can still return an error (e.g., transient disk read failure).
+	// The handler falls back to an empty workDir rather than failing the spawn.
+	mock := &mockArgvSpawner{spawnCreated: true}
+	cfg := func(id string) (*WorkspaceData, error) {
+		return nil, fmt.Errorf("not found")
+	}
+	handler := handleCreateLeadSessionImpl(mock, cfg)
+
+	rr := postLeadSessionWithWS(handler, "ws-missing", `{"message":"hi","backend":"claude"}`)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	if mock.lastWorkDir != "" {
+		t.Errorf("workDir = %q, want empty (fallback)", mock.lastWorkDir)
+	}
+}
+
+func TestHandleCreateLeadSession_WorkspaceCwd_NoContext(t *testing.T) {
+	// When the handler is called without a workspace context (e.g., test
+	// invocation without middleware), WorkspaceFromContext returns "" and
+	// the config lookup is skipped. Spawner sees an empty workDir.
+	mock := &mockArgvSpawner{spawnCreated: true}
+	cfg := func(id string) (*WorkspaceData, error) {
+		t.Errorf("workspace lookup should not be called when context has no wsID; got %q", id)
+		return nil, nil
+	}
+	handler := handleCreateLeadSessionImpl(mock, cfg)
+
+	// Use plain postLeadSession — no workspace context injected.
+	rr := postLeadSession(handler, `{"message":"hi","backend":"claude"}`)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	if mock.lastWorkDir != "" {
+		t.Errorf("workDir = %q, want empty", mock.lastWorkDir)
 	}
 }

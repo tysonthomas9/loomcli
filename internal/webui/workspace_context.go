@@ -43,3 +43,20 @@ func WorkspaceMiddleware(wsExists func(id string) bool, next http.Handler) http.
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
+
+// resolveWorkDirFromContext returns the on-disk path for the workspace stored
+// in ctx. Returns "" when the context has no workspace ID, the resolver is
+// nil, the lookup errors, or the resolved WorkspaceData has no path. This is
+// the fallback semantics used by terminal spawn handlers: an empty workDir
+// means "inherit the loom service's cwd", matching legacy behavior.
+func resolveWorkDirFromContext(ctx context.Context, fn func(string) (*WorkspaceData, error)) string {
+	wsID := WorkspaceFromContext(ctx)
+	if wsID == "" || fn == nil {
+		return ""
+	}
+	ws, err := fn(wsID)
+	if err != nil || ws == nil {
+		return ""
+	}
+	return ws.Path
+}

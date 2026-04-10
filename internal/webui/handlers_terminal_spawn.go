@@ -27,16 +27,19 @@ type terminalSpawnData struct {
 	Created     bool   `json:"created"`
 }
 
-// terminalSpawnResponse is the JSON response for POST /api/terminal/spawn.
+// terminalSpawnResponse is the JSON response for POST /api/workspaces/{ws}/terminal/spawn.
 type terminalSpawnResponse struct {
 	Success bool               `json:"success"`
 	Data    *terminalSpawnData `json:"data,omitempty"`
 	Error   string             `json:"error,omitempty"`
 }
 
-// terminalSpawner is an interface for the subset of TerminalManager used by the spawn handler.
+// terminalSpawner is an interface for the subset of TerminalManager used by
+// the spawn handler. SpawnInDir starts the tmux session in workDir (via tmux
+// -c) so the "+ Tab" flow lands in the active workspace's path rather than
+// the loom service's cwd.
 type terminalSpawner interface {
-	Spawn(name, command string, cols, rows uint16) (bool, error)
+	SpawnInDir(name, command string, cols, rows uint16, workDir string) (bool, error)
 }
 
 // issueSessionPattern matches issue-linked session names: "issue-{project}-{number}".
@@ -52,8 +55,12 @@ func extractIssueID(sessionName string) string {
 	return m[1] + "." + m[2]
 }
 
-// handleTerminalSpawn returns a handler that creates a tmux session for a given issue and backend.
-func handleTerminalSpawn(manager *TerminalManager, sessionHistoryStore *sessionhistory.Store, initialWorkspaceID string) http.HandlerFunc {
+// handleTerminalSpawn returns a handler that creates a tmux session for a
+// given issue and backend. Registered on wsMux at
+// POST /api/workspaces/{ws}/terminal/spawn — the workspace ID is read from
+// the request context, resolved to an on-disk path via workspaceConfigByIDFn,
+// and passed to SpawnInDir so the tmux session starts in that directory.
+func handleTerminalSpawn(manager *TerminalManager, sessionHistoryStore *sessionhistory.Store, workspaceConfigByIDFn func(string) (*WorkspaceData, error)) http.HandlerFunc {
 	if manager == nil {
 		return func(w http.ResponseWriter, r *http.Request) {
 			respondJSON(w, http.StatusServiceUnavailable, terminalSpawnResponse{
@@ -61,11 +68,13 @@ func handleTerminalSpawn(manager *TerminalManager, sessionHistoryStore *sessionh
 			})
 		}
 	}
-	return handleTerminalSpawnImplWithHistory(manager, sessionHistoryStore, initialWorkspaceID)
+	return handleTerminalSpawnImplWithHistory(manager, sessionHistoryStore, workspaceConfigByIDFn)
 }
 
-// handleTerminalSpawnImplWithHistory is the implementation that accepts an interface and optional session history store.
-func handleTerminalSpawnImplWithHistory(manager terminalSpawner, sessionHistoryStore *sessionhistory.Store, initialWorkspaceID string) http.HandlerFunc {
+// handleTerminalSpawnImplWithHistory is the implementation that accepts an
+// interface and optional session history store plus a workspace config
+// resolver for cwd lookup.
+func handleTerminalSpawnImplWithHistory(manager terminalSpawner, sessionHistoryStore *sessionhistory.Store, workspaceConfigByIDFn func(string) (*WorkspaceData, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
 
@@ -120,7 +129,13 @@ func handleTerminalSpawnImplWithHistory(manager terminalSpawner, sessionHistoryS
 			command = req.Backend
 		}
 
-		created, err := manager.Spawn(sanitizedName, command, 120, 40)
+		// Resolve workspace cwd from the request context (injected by
+		// WorkspaceMiddleware). Falls back to "" (inherit loom service cwd)
+		// when no context is present or the lookup fails.
+		wsID := WorkspaceFromContext(r.Context())
+		workDir := resolveWorkDirFromContext(r.Context(), workspaceConfigByIDFn)
+
+		created, err := manager.SpawnInDir(sanitizedName, command, 120, 40, workDir)
 		if err != nil {
 			respondJSON(w, http.StatusInternalServerError, terminalSpawnResponse{
 				Error: fmt.Sprintf("failed to spawn terminal session: %v", err),
@@ -128,8 +143,12 @@ func handleTerminalSpawnImplWithHistory(manager terminalSpawner, sessionHistoryS
 			return
 		}
 
-		// Record session creation in session history (only for issue-linked sessions).
-		if created && sessionHistoryStore != nil {
+		// Record session creation in session history (only for issue-linked
+		// sessions). Skip when the workspace context is missing — the store
+		// would otherwise write to a malformed key. Production requests
+		// always go through WorkspaceMiddleware so wsID is set; the guard
+		// only matters for direct-handler test invocations.
+		if created && sessionHistoryStore != nil && wsID != "" {
 			if issueID := extractIssueID(sanitizedName); issueID != "" {
 				now := time.Now().UTC()
 				record := sessionhistory.SessionRecord{
@@ -141,8 +160,11 @@ func handleTerminalSpawnImplWithHistory(manager terminalSpawner, sessionHistoryS
 					Launcher:    "user",
 					StartedAt:   now,
 				}
-				// TODO(T41): derive workspace from request context when terminal spawn moves to wsMux
-				if err := sessionHistoryStore.Add(r.Context(), initialWorkspaceID, record); err != nil {
+				// Workspace comes from the request context thanks to
+				// WorkspaceMiddleware — resolves the old TODO(T41) that said
+				// "derive workspace from request context when terminal spawn
+				// moves to wsMux".
+				if err := sessionHistoryStore.Add(r.Context(), wsID, record); err != nil {
 					log.Printf("Warning: failed to record session history for %s: %v", sanitizedName, err)
 				}
 			}
@@ -160,7 +182,8 @@ func handleTerminalSpawnImplWithHistory(manager terminalSpawner, sessionHistoryS
 	}
 }
 
-// handleTerminalSpawnImpl is the internal testable implementation that accepts an interface (no session history).
+// handleTerminalSpawnImpl is the internal testable implementation that accepts
+// an interface (no session history, no workspace resolver).
 func handleTerminalSpawnImpl(manager terminalSpawner) http.HandlerFunc {
-	return handleTerminalSpawnImplWithHistory(manager, nil, "")
+	return handleTerminalSpawnImplWithHistory(manager, nil, nil)
 }

@@ -167,7 +167,7 @@ func formatSeedPrompt(req *seedRequest) string {
 const sessionKillGracePeriod = 30 * time.Second
 
 // handleScheduleSessionKill schedules a deferred tmux session kill with a grace period.
-// POST /api/terminal/sessions/{session}/kill
+// POST /api/workspaces/{ws}/terminal/sessions/{session}/kill
 func handleScheduleSessionKill(manager *TerminalManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if manager == nil {
@@ -207,7 +207,7 @@ func handleScheduleSessionKill(manager *TerminalManager) http.HandlerFunc {
 }
 
 // handleListSessionsByIssue returns a map of issue_id → session_names for all sessions linked to issues.
-// GET /api/terminal/sessions/by-issue
+// GET /api/workspaces/{ws}/terminal/sessions/by-issue
 func handleListSessionsByIssue(tabMetaStore *tabmeta.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if tabMetaStore == nil {
@@ -235,8 +235,16 @@ func handleListSessionsByIssue(tabMetaStore *tabmeta.Store) http.HandlerFunc {
 	}
 }
 
-// handleCloseAllSessions kills all tmux sessions, deletes all tab metadata, and broadcasts SSE event.
-// POST /api/terminal/sessions/close-all
+// handleCloseAllSessions kills every tmux session belonging to the request's
+// workspace, deletes that workspace's tab metadata, and broadcasts a single
+// SSE event to the workspace.
+//
+// Registered on wsMux at POST /api/workspaces/{ws}/terminal/sessions/close-all.
+// The workspace is derived from the request context (injected by
+// WorkspaceMiddleware). Sessions in other workspaces are untouched — this
+// matters in multi-VM deployments where each loom instance only sees its own
+// workspaces anyway, and it makes the button's semantics consistent ("close
+// all" = "close all in this workspace").
 func handleCloseAllSessions(manager *TerminalManager, tabMetaStore *tabmeta.Store, hub *SSEHub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if manager == nil {
@@ -247,48 +255,71 @@ func handleCloseAllSessions(manager *TerminalManager, tabMetaStore *tabmeta.Stor
 			return
 		}
 
-		// Kill all tmux sessions
-		if err := manager.KillAllSessions(); err != nil {
-			log.Printf("Failed to kill all sessions: %v", err)
-			respondJSON(w, http.StatusInternalServerError, map[string]interface{}{
-				"success": false,
-				"error":   "failed to kill all sessions",
-			})
+		wsID := WorkspaceFromContext(r.Context())
+
+		// No Redis means no tab metadata, which means no way to scope
+		// sessions to a workspace. Fall back to killing every tmux session
+		// the manager knows about — doing nothing would leave user-visible
+		// sessions running after "close all", which is worse than the
+		// scoping loss. No-Redis deployments are single-workspace by
+		// assumption anyway, so the scope difference is moot.
+		if tabMetaStore == nil {
+			if err := manager.KillAllSessions(); err != nil {
+				log.Printf("Failed to kill all sessions: %v", err)
+				respondJSON(w, http.StatusInternalServerError, map[string]interface{}{
+					"success": false,
+					"error":   "failed to kill all sessions",
+				})
+				return
+			}
+			if hub != nil {
+				hub.Broadcast(&MutationPayload{
+					Type:        "terminal_session_change",
+					Timestamp:   time.Now().UTC().Format(time.RFC3339),
+					WorkspaceID: wsID,
+				})
+			}
+			respondJSON(w, http.StatusOK, map[string]interface{}{"success": true})
 			return
 		}
 
-		// Delete all tab metadata (across all workspaces), collecting workspace IDs
-		// for SSE broadcast.
+		// List this workspace's sessions via tab metadata. Sessions without
+		// metadata will be missed — in multi-VM deployments this is the
+		// correct behavior: if it's not in the workspace's metadata, it's
+		// not the workspace's session to kill.
 		metaCleanupFailed := false
-		affectedWorkspaces := make(map[string]bool)
-		if tabMetaStore != nil {
-			allTabs, err := tabMetaStore.ListAll(r.Context())
+		var sessionNames []string
+		if wsID != "" {
+			tabs, err := tabMetaStore.List(r.Context(), wsID)
 			if err != nil {
-				log.Printf("Failed to list tab metadata for cleanup: %v", err)
+				log.Printf("Failed to list tab metadata for workspace %q: %v", wsID, err)
 				metaCleanupFailed = true
 			} else {
-				for _, tab := range allTabs {
-					if tab.Workspace != "" {
-						affectedWorkspaces[tab.Workspace] = true
-					}
-					if err := tabMetaStore.Delete(r.Context(), tab.Workspace, tab.SessionName); err != nil {
-						log.Printf("Failed to delete tab metadata for %s: %v", tab.SessionName, err)
-						metaCleanupFailed = true
-					}
+				sessionNames = make([]string, 0, len(tabs))
+				for _, tab := range tabs {
+					sessionNames = append(sessionNames, tab.SessionName)
 				}
 			}
 		}
 
-		// Broadcast SSE event per affected workspace so each workspace's clients update.
-		if hub != nil {
-			now := time.Now().UTC().Format(time.RFC3339)
-			for ws := range affectedWorkspaces {
-				hub.Broadcast(&MutationPayload{
-					Type:        "terminal_session_change",
-					Timestamp:   now,
-					WorkspaceID: ws,
-				})
+		// Kill each session's tmux process and delete its metadata.
+		for _, name := range sessionNames {
+			if err := manager.KillSessionByName(name); err != nil {
+				log.Printf("Failed to kill session %q: %v", name, err)
 			}
+			if err := tabMetaStore.Delete(r.Context(), wsID, name); err != nil {
+				log.Printf("Failed to delete tab metadata for %s: %v", name, err)
+				metaCleanupFailed = true
+			}
+		}
+
+		// Single SSE broadcast for this workspace.
+		if hub != nil {
+			hub.Broadcast(&MutationPayload{
+				Type:        "terminal_session_change",
+				Timestamp:   time.Now().UTC().Format(time.RFC3339),
+				WorkspaceID: wsID,
+			})
 		}
 
 		if metaCleanupFailed {

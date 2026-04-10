@@ -9,7 +9,8 @@ import (
 	"time"
 )
 
-// leadSessionRequest is the JSON body for POST /api/terminal/lead-session.
+// leadSessionRequest is the JSON body for POST /api/workspaces/{ws}/terminal/lead-session.
+// The workspace is read from the URL path via WorkspaceMiddleware, not the body.
 type leadSessionRequest struct {
 	Message string `json:"message"`
 	Backend string `json:"backend"`
@@ -23,7 +24,7 @@ type leadSessionData struct {
 	Backend     string `json:"backend"`
 }
 
-// leadSessionResponse is the JSON response for POST /api/terminal/lead-session.
+// leadSessionResponse is the JSON response for POST /api/workspaces/{ws}/terminal/lead-session.
 type leadSessionResponse struct {
 	Success bool             `json:"success"`
 	Data    *leadSessionData `json:"data,omitempty"`
@@ -40,7 +41,7 @@ const leadMessageMaxLen = 16 * 1024
 // tmux binary — matching the `terminalSpawner` pattern in
 // handlers_terminal_spawn.go.
 type argvSpawner interface {
-	SpawnArgv(name string, argv []string, cols, rows uint16) (bool, error)
+	SpawnArgv(name string, argv []string, cols, rows uint16, workDir string) (bool, error)
 }
 
 // handleCreateLeadSession creates a detached tmux session running
@@ -50,7 +51,13 @@ type argvSpawner interface {
 // readiness polling, no TUI scraping. Works for any backend loom supports
 // (claude, codex, cursor, opencode, gemini) since they all accept a positional
 // prompt argument.
-func handleCreateLeadSession(manager *TerminalManager) http.HandlerFunc {
+//
+// Registered on wsMux at POST /api/workspaces/{ws}/terminal/lead-session.
+// WorkspaceMiddleware validates the workspace and injects its ID into the
+// request context. workspaceConfigByIDFn resolves that ID to an on-disk path
+// so the tmux session starts with its cwd at the active workspace instead of
+// the loom service's own cwd.
+func handleCreateLeadSession(manager *TerminalManager, workspaceConfigByIDFn func(string) (*WorkspaceData, error)) http.HandlerFunc {
 	if manager == nil {
 		return func(w http.ResponseWriter, r *http.Request) {
 			respondJSON(w, http.StatusServiceUnavailable, leadSessionResponse{
@@ -58,12 +65,12 @@ func handleCreateLeadSession(manager *TerminalManager) http.HandlerFunc {
 			})
 		}
 	}
-	return handleCreateLeadSessionImpl(manager)
+	return handleCreateLeadSessionImpl(manager, workspaceConfigByIDFn)
 }
 
 // handleCreateLeadSessionImpl is the testable implementation that accepts an
 // interface. Tests use this directly with a mock spawner.
-func handleCreateLeadSessionImpl(spawner argvSpawner) http.HandlerFunc {
+func handleCreateLeadSessionImpl(spawner argvSpawner, workspaceConfigByIDFn func(string) (*WorkspaceData, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
 
@@ -126,7 +133,14 @@ func handleCreateLeadSessionImpl(spawner argvSpawner) http.HandlerFunc {
 		// interpretation of the user's message — no quoting bugs, no injection.
 		argv := []string{"loom", "lead", "--backend", backend, "--message", message}
 
-		created, err := spawner.SpawnArgv(sessionName, argv, 120, 40)
+		// Resolve the workspace path from the request context so the tmux
+		// session starts in that directory. Falls back to "" (inherit the
+		// loom service's cwd) when the context has no workspace ID or the
+		// lookup fails — matches legacy behavior for handlers invoked
+		// without middleware in tests.
+		workDir := resolveWorkDirFromContext(r.Context(), workspaceConfigByIDFn)
+
+		created, err := spawner.SpawnArgv(sessionName, argv, 120, 40, workDir)
 		if err != nil {
 			respondJSON(w, http.StatusInternalServerError, leadSessionResponse{
 				Error: fmt.Sprintf("failed to spawn lead session: %v", err),

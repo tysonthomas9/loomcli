@@ -17,6 +17,11 @@ import (
 // conditions for a terminal WebSocket connection. It returns the session name,
 // workspace name, and true on success. On validation failure it writes an HTTP
 // error response and returns ("", "", false).
+//
+// The workspace comes from the request context (injected by WorkspaceMiddleware
+// from the URL path) now that this endpoint lives on wsMux under
+// /api/workspaces/{ws}/terminal/ws. Falls back to "default" when context is
+// absent so test harnesses that bypass middleware keep working.
 func validateTerminalWSParams(w http.ResponseWriter, r *http.Request, manager *TerminalManager, auth *terminalAuth) (session, workspace string, ok bool) {
 	// Check if manager is available
 	if manager == nil {
@@ -27,17 +32,11 @@ func validateTerminalWSParams(w http.ResponseWriter, r *http.Request, manager *T
 		return "", "", false
 	}
 
-	// Parse and validate session and workspace parameters.
+	// Parse and validate session parameter.
 	session = r.URL.Query().Get("session")
-	workspace = r.URL.Query().Get("workspace")
+	workspace = WorkspaceFromContext(r.Context())
 	if workspace == "" {
 		workspace = "default"
-	} else if !validWorkspaceName(workspace) {
-		respondJSON(w, http.StatusBadRequest, map[string]interface{}{
-			"success": false,
-			"error":   "invalid workspace name: must contain only alphanumeric, hyphen, or underscore",
-		})
-		return "", "", false
 	}
 	if session == "" {
 		respondJSON(w, http.StatusBadRequest, map[string]interface{}{

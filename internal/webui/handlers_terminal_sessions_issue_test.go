@@ -189,7 +189,11 @@ func TestHandleCloseAllSessions_DeletesTabMetadata(t *testing.T) {
 	}
 
 	handler := handleCloseAllSessions(mgr, store, hub)
-	req := httptest.NewRequest(http.MethodPost, "/api/terminal/sessions/close-all", nil)
+	// Inject workspace context as WorkspaceMiddleware would on the real route.
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodPost, "/api/workspaces/default/terminal/sessions/close-all", nil),
+		"default",
+	)
 	rr := httptest.NewRecorder()
 	handler(rr, req)
 
@@ -205,7 +209,7 @@ func TestHandleCloseAllSessions_DeletesTabMetadata(t *testing.T) {
 		t.Errorf("expected success=true, got %v", resp["success"])
 	}
 
-	// Verify all metadata was deleted
+	// Verify the workspace's metadata was deleted.
 	after, err := store.ListAll(ctx)
 	if err != nil {
 		t.Fatalf("ListAll after: %v", err)
