@@ -87,8 +87,9 @@ type TerminalManager struct {
 	scrollbackBuffers  map[string]*ScrollbackBuffer  // keyed by tmux session name (internal)
 	mu                 sync.RWMutex
 	tmuxPath           string
-	sessionPrefix      string // prepended to tmux session names for isolation between server instances
-	defaultCommand     string // command to run in all terminal sessions
+	tmuxEnv            []string // cached environment for tmux subprocesses
+	sessionPrefix      string   // prepended to tmux session names for isolation between server instances
+	defaultCommand     string   // command to run in all terminal sessions
 	defaultCols        uint16
 	defaultRows        uint16
 	maxSessions        int // maximum concurrent connections (immutable after construction)
@@ -110,12 +111,26 @@ func NewTerminalManager(defaultCommand, sessionPrefix string, maxSessions int) (
 	if maxSessions <= 0 {
 		maxSessions = defaultMaxTerminalSessions
 	}
+	// Cache environment for tmux subprocesses, adding TMUX_TMPDIR if absent
+	// so all tmux processes use the same socket path.
+	env := os.Environ()
+	hasTmpDir := false
+	for _, e := range env {
+		if strings.HasPrefix(e, "TMUX_TMPDIR=") {
+			hasTmpDir = true
+			break
+		}
+	}
+	if !hasTmpDir {
+		env = append(env, "TMUX_TMPDIR=/tmp")
+	}
 	return &TerminalManager{
 		sessions:           make(map[string]*TerminalSession),
 		pendingKills:       make(map[string]context.CancelFunc),
 		killingSet:         make(map[string]time.Time),
 		scrollbackBuffers:  make(map[string]*ScrollbackBuffer),
 		tmuxPath:           tmuxPath,
+		tmuxEnv:            env,
 		sessionPrefix:      sessionPrefix,
 		defaultCommand:     defaultCommand,
 		defaultCols:        80,
@@ -133,16 +148,38 @@ func (m *TerminalManager) tmuxName(name string) string {
 	return m.sessionPrefix + "-" + name
 }
 
+// checkAttachPreconditionsLocked verifies a session is not being killed
+// (tombstone, 30s TTL) and that the concurrent session limit is not exceeded.
+// Caller must hold m.mu.
+func (m *TerminalManager) checkAttachPreconditionsLocked(killKey string) error {
+	if killTime, beingKilled := m.killingSet[killKey]; beingKilled {
+		if time.Since(killTime) < 30*time.Second {
+			return ErrSessionBeingKilled
+		}
+		delete(m.killingSet, killKey)
+	}
+	if m.maxSessions > 0 && len(m.sessions) >= m.maxSessions {
+		return ErrMaxSessionsReached
+	}
+	return nil
+}
+
 // SessionExists reports whether the named tmux session already exists.
 // The session prefix is applied automatically.
 func (m *TerminalManager) SessionExists(name string) bool {
 	return m.tmuxHasSession(m.tmuxName(name))
 }
 
+// tmuxCmd creates an exec.Cmd for a tmux subcommand with the cached environment.
+func (m *TerminalManager) tmuxCmd(args ...string) *exec.Cmd {
+	cmd := exec.Command(m.tmuxPath, args...)
+	cmd.Env = m.tmuxEnv
+	return cmd
+}
+
 // tmuxHasSession checks whether a tmux session with the given name exists.
 func (m *TerminalManager) tmuxHasSession(name string) bool {
-	cmd := exec.Command(m.tmuxPath, "has-session", "-t", name)
-	return cmd.Run() == nil
+	return m.tmuxCmd("has-session", "-t", name).Run() == nil
 }
 
 // tmuxNewSession creates a new detached tmux session with the given name, size, and command.
@@ -157,8 +194,7 @@ func (m *TerminalManager) tmuxNewSession(name, command string, cols, rows uint16
 	if command != "" {
 		args = append(args, command)
 	}
-	cmd := exec.Command(m.tmuxPath, args...)
-	if err := cmd.Run(); err != nil {
+	if err := m.tmuxCmd(args...).Run(); err != nil {
 		return err
 	}
 
@@ -167,9 +203,9 @@ func (m *TerminalManager) tmuxNewSession(name, command string, cols, rows uint16
 		{"mouse", "on"},
 		{"history-limit", fmt.Sprintf("%d", m.scrollbackMaxLines)},
 	} {
-		c := exec.Command(m.tmuxPath, "set-option", "-t", name, opt[0], opt[1])
-		if err := c.Run(); err != nil {
-			log.Printf("Warning: failed to set %s for session %q: %v", opt[0], name, err)
+		optCmd := m.tmuxCmd("set-option", "-t", name, opt[0], opt[1])
+		if out, err := optCmd.CombinedOutput(); err != nil {
+			log.Printf("Warning: failed to set %s for session %q: %v: %s", opt[0], name, err, strings.TrimSpace(string(out)))
 		}
 	}
 	return nil
@@ -177,11 +213,11 @@ func (m *TerminalManager) tmuxNewSession(name, command string, cols, rows uint16
 
 // tmuxAttach spawns a tmux attach-session process with a PTY.
 func (m *TerminalManager) tmuxAttach(name string) (*exec.Cmd, *os.File, error) {
-	cmd := exec.Command(m.tmuxPath, "attach-session", "-t", name)
+	cmd := m.tmuxCmd("attach-session", "-t", name)
 	// Always set TERM to a capable terminal type for the subprocess.
 	// tmux 3.6+ exits immediately with "open terminal failed" when TERM is
 	// unset, "dumb", "unknown", or any other value it doesn't recognize.
-	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+	cmd.Env = append(cmd.Env, "TERM=xterm-256color")
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
 		return nil, nil, fmt.Errorf("pty.Start tmux attach: %w", err)
@@ -221,17 +257,8 @@ func (m *TerminalManager) Attach(name, command string, cols, rows uint16) (*Term
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Reject attach if session is being killed (tombstone, 30s TTL).
-	if killTime, beingKilled := m.killingSet[name]; beingKilled {
-		if time.Since(killTime) < 30*time.Second {
-			return nil, ErrSessionBeingKilled
-		}
-		delete(m.killingSet, name)
-	}
-
-	// Enforce concurrent session limit.
-	if m.maxSessions > 0 && len(m.sessions) >= m.maxSessions {
-		return nil, ErrMaxSessionsReached
+	if err := m.checkAttachPreconditionsLocked(name); err != nil {
+		return nil, err
 	}
 
 	// Create tmux session if it doesn't exist.
@@ -285,17 +312,9 @@ func (m *TerminalManager) AttachExistingRaw(tmuxSessionName string, cols, rows u
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Reject attach if session is being killed (tombstone).
-	// AttachExistingRaw uses raw names, so check both with and without prefix.
-	if killTime, beingKilled := m.killingSet[tmuxSessionName]; beingKilled {
-		if time.Since(killTime) < 30*time.Second {
-			return nil, ErrSessionBeingKilled
-		}
-		delete(m.killingSet, tmuxSessionName)
-	}
-
-	if m.maxSessions > 0 && len(m.sessions) >= m.maxSessions {
-		return nil, ErrMaxSessionsReached
+	// AttachExistingRaw uses raw names, so the tombstone is keyed on the raw name.
+	if err := m.checkAttachPreconditionsLocked(tmuxSessionName); err != nil {
+		return nil, err
 	}
 
 	if !m.tmuxHasSession(tmuxSessionName) {
@@ -303,9 +322,8 @@ func (m *TerminalManager) AttachExistingRaw(tmuxSessionName string, cols, rows u
 	}
 
 	// Mirror Talk-to-Lead behavior so wheel/input interactions are consistent.
-	mouseCmd := exec.Command(m.tmuxPath, "set-option", "-t", tmuxSessionName, "mouse", "on")
-	if err := mouseCmd.Run(); err != nil {
-		log.Printf("Warning: failed to enable mouse mode for session %q: %v", tmuxSessionName, err)
+	if out, err := m.tmuxCmd("set-option", "-t", tmuxSessionName, "mouse", "on").CombinedOutput(); err != nil {
+		log.Printf("Warning: failed to enable mouse mode for session %q: %v: %s", tmuxSessionName, err, strings.TrimSpace(string(out)))
 	}
 
 	cmd, ptmx, err := m.tmuxAttach(tmuxSessionName)
@@ -336,7 +354,7 @@ type tmuxSessionMeta struct {
 }
 
 func (m *TerminalManager) listTmuxSessions() ([]tmuxSessionMeta, error) {
-	cmd := exec.Command(m.tmuxPath, "list-sessions", "-F", "#{session_name}\t#{session_created}")
+	cmd := m.tmuxCmd("list-sessions", "-F", "#{session_name}\t#{session_created}")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		msg := strings.ToLower(string(out))
@@ -445,28 +463,21 @@ func (m *TerminalManager) Resize(connID string, cols, rows uint16) error {
 	m.mu.RLock()
 	session, ok := m.sessions[connID]
 	m.mu.RUnlock()
-
 	if !ok {
 		return fmt.Errorf("connection %q not found", connID)
 	}
-
 	session.mu.Lock()
 	defer session.mu.Unlock()
-
 	if session.closed {
 		return fmt.Errorf("connection %q is closed", connID)
 	}
-
 	if err := pty.Setsize(session.PTY, &pty.Winsize{Cols: cols, Rows: rows}); err != nil {
 		return fmt.Errorf("pty.Setsize: %w", err)
 	}
-
 	// Also tell tmux to resize the window so content reflows properly.
-	cmd := exec.Command(m.tmuxPath, "resize-window", "-t", session.Name, "-x", fmt.Sprintf("%d", cols), "-y", fmt.Sprintf("%d", rows))
-	if err := cmd.Run(); err != nil {
+	if err := m.tmuxCmd("resize-window", "-t", session.Name, "-x", fmt.Sprintf("%d", cols), "-y", fmt.Sprintf("%d", rows)).Run(); err != nil {
 		return fmt.Errorf("tmux resize-window: %w", err)
 	}
-
 	return nil
 }
 
@@ -478,10 +489,8 @@ func (m *TerminalManager) Detach(connID string) error {
 		delete(m.sessions, connID)
 	}
 	m.mu.Unlock()
-
 	if !ok {
 		return fmt.Errorf("connection %q not found", connID)
 	}
-
 	return session.Close()
 }

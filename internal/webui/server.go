@@ -473,30 +473,19 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	}
 
 	slog.Info("shutting down server")
-
-	// Cancel server-wide context so in-flight handlers abort quickly.
-	shutdownCancel()
-
-	// Drain in-flight requests (most abort quickly due to canceled context).
+	shutdownCancel() // abort in-flight handlers
 	drainCtx, drainCancel := context.WithTimeout(context.Background(), config.ShutdownTimeout)
 	defer drainCancel()
-
 	if err := server.Shutdown(drainCtx); err != nil {
 		return fmt.Errorf("server forced to shutdown: %w", err)
 	}
 	slog.Info("server stopped")
 
 	// Stop components in reverse-initialization order.
-
-	// Stop rate limiter cleanup goroutine
 	rl.Stop()
-
-	// Stop terminal auth cleanup goroutine
 	if termAuth != nil {
 		termAuth.Stop()
 	}
-
-	// Stop terminal manager (kill tmux sessions and close PTYs)
 	if termMgr != nil {
 		if err := termMgr.Shutdown(); err != nil {
 			slog.Warn("error shutting down terminal manager", "component", "terminal", "err", err)
@@ -504,22 +493,15 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 			slog.Info("terminal manager stopped", "component", "terminal")
 		}
 	}
-
 	_ = registry.Close() // prevent new registrations during shutdown
-
-	// Stop multi-workspace subscriber (no more handlers need it)
 	if multiSub != nil {
 		multiSub.Stop()
 		slog.Info("multi-workspace subscriber stopped")
 	}
-
-	// Stop SSE hub (all SSE handlers have exited)
 	if hub != nil {
 		hub.Stop()
 		slog.Info("SSE hub stopped")
 	}
-
-	// Close MultiPool (closes all per-workspace pools including the initial one)
 	if multiPool != nil {
 		if err := multiPool.Close(); err != nil {
 			slog.Warn("error closing multi-pool", "err", err)
@@ -527,6 +509,5 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 			slog.Info("multi-pool closed")
 		}
 	}
-
 	return nil
 }

@@ -35,43 +35,6 @@ var (
 	)
 )
 
-// statusRecorder wraps http.ResponseWriter to capture the status code
-// for metrics reporting. Not safe for concurrent use (matches net/http contract).
-type statusRecorder struct {
-	http.ResponseWriter
-	status      int
-	wroteHeader bool
-}
-
-func (r *statusRecorder) WriteHeader(code int) {
-	if r.wroteHeader {
-		return
-	}
-	r.wroteHeader = true
-	r.status = code
-	r.ResponseWriter.WriteHeader(code)
-}
-
-func (r *statusRecorder) Write(b []byte) (int, error) {
-	if !r.wroteHeader {
-		r.wroteHeader = true
-		r.status = http.StatusOK
-	}
-	return r.ResponseWriter.Write(b)
-}
-
-// Flush delegates to the inner writer if it implements http.Flusher.
-func (r *statusRecorder) Flush() {
-	if f, ok := r.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-	}
-}
-
-// Unwrap returns the inner ResponseWriter for http.ResponseController compatibility.
-func (r *statusRecorder) Unwrap() http.ResponseWriter {
-	return r.ResponseWriter
-}
-
 type promRouteCtxKey struct{}
 
 // promRouteStore holds the canonical route pattern, written by the inner
@@ -88,7 +51,7 @@ type promRouteStore struct{ pattern string }
 func PromMetricsMiddleware() (outer, inner func(http.Handler) http.Handler) {
 	outer = func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			rec := &statusRecorder{ResponseWriter: w}
+			rec := newRWRecorder(w)
 			start := time.Now()
 
 			store := &promRouteStore{}
@@ -102,7 +65,7 @@ func PromMetricsMiddleware() (outer, inner func(http.Handler) http.Handler) {
 			elapsed := time.Since(start).Seconds()
 			httpRequestDuration.WithLabelValues(r.Method, route).Observe(elapsed)
 			httpRequestsTotal.WithLabelValues(
-				r.Method, route, strconv.Itoa(rec.status),
+				r.Method, route, strconv.Itoa(rec.Status()),
 			).Inc()
 		})
 	}

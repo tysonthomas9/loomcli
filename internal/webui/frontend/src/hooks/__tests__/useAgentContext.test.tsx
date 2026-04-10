@@ -125,57 +125,6 @@ describe("useAgentContext", () => {
       // Should not throw
       expect(() => result.current.retryNow()).not.toThrow();
     });
-
-    it("returns default tasks object outside provider", () => {
-      const { result } = renderHook(() => useAgentContext());
-
-      expect(result.current.tasks).toEqual({
-        needs_planning: 0,
-        ready_to_implement: 0,
-        in_progress: 0,
-        need_review: 0,
-        backlog: 0,
-      });
-    });
-
-    it("returns default taskLists outside provider", () => {
-      const { result } = renderHook(() => useAgentContext());
-
-      expect(result.current.taskLists).toEqual({
-        needsPlanning: [],
-        readyToImplement: [],
-        needsReview: [],
-        inProgress: [],
-        backlog: [],
-        done: [],
-      });
-    });
-
-    it("returns default sync object outside provider", () => {
-      const { result } = renderHook(() => useAgentContext());
-
-      expect(result.current.sync).toEqual({
-        db_synced: true,
-        db_last_sync: "",
-        git_needs_push: 0,
-        git_needs_pull: 0,
-      });
-    });
-
-    it("returns default stats outside provider", () => {
-      const { result } = renderHook(() => useAgentContext());
-
-      expect(result.current.stats).toEqual({
-        open: 0,
-        closed: 0,
-        total: 0,
-        completion: 0,
-        remaining: 0,
-        in_progress: 0,
-        review: 0,
-        blocked: 0,
-      });
-    });
   });
 
   describe("inside provider", () => {

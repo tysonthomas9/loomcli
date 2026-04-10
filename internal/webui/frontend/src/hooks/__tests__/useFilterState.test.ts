@@ -447,13 +447,13 @@ describe("useFilterState", () => {
       });
 
       act(() => {
-        result.current[1].setGroupBy("epic");
+        result.current[1].setGroupBy("assignee");
       });
       act(() => {
         result.current[1].setPriority(2 as Priority);
       });
 
-      expect(result.current[0].groupBy).toBe("epic");
+      expect(result.current[0].groupBy).toBe("assignee");
       expect(result.current[0].priority).toBe(2);
 
       act(() => {
@@ -472,16 +472,16 @@ describe("useFilterState", () => {
       });
 
       act(() => {
-        result.current[1].setGroupBy("epic");
+        result.current[1].setGroupBy("assignee");
       });
 
-      expect(result.current[0].groupBy).toBe("epic");
+      expect(result.current[0].groupBy).toBe("assignee");
     });
 
     it("handles all known groupBy options", () => {
-      // "none" is the default and is not stored in URL, so setGroupBy("none") clears it
+      // "none" and the default ("epic") are not stored in URL —
+      // setting either clears the groupBy param.
       const storedOptions: GroupByOption[] = [
-        "epic",
         "assignee",
         "priority",
         "type",
@@ -498,7 +498,17 @@ describe("useFilterState", () => {
         expect(result.current[0].groupBy).toBe(option);
       }
 
-      // "none" clears the groupBy param (becomes undefined)
+      // "epic" is the default — setting it clears the groupBy param
+      act(() => {
+        result.current[1].setGroupBy("epic");
+      });
+      expect(result.current[0].groupBy).toBeUndefined();
+
+      // Seed a non-default first, then "none" clears the groupBy param
+      act(() => {
+        result.current[1].setGroupBy("assignee");
+      });
+      expect(result.current[0].groupBy).toBe("assignee");
       act(() => {
         result.current[1].setGroupBy("none");
       });
@@ -511,9 +521,9 @@ describe("useFilterState", () => {
       });
 
       act(() => {
-        result.current[1].setGroupBy("epic");
+        result.current[1].setGroupBy("assignee");
       });
-      expect(result.current[0].groupBy).toBe("epic");
+      expect(result.current[0].groupBy).toBe("assignee");
 
       act(() => {
         result.current[1].setGroupBy(undefined);
@@ -703,9 +713,9 @@ describe("toQueryString", () => {
     expect(result).toBe("");
   });
 
-  it("serializes groupBy when value is epic (no longer default)", () => {
+  it("omits groupBy when value is epic (now the default)", () => {
     const result = toQueryString({ groupBy: "epic" });
-    expect(result).toBe("groupBy=epic");
+    expect(result).toBe("");
   });
 
   it("serializes all groupBy options except none and epic", () => {
@@ -931,8 +941,8 @@ describe("isEmptyFilter", () => {
     expect(isEmptyFilter({ groupBy: undefined })).toBe(true);
   });
 
-  it("returns false when groupBy is epic (no longer default)", () => {
-    expect(isEmptyFilter({ groupBy: "epic" })).toBe(false);
+  it("returns true when groupBy is epic (now the default)", () => {
+    expect(isEmptyFilter({ groupBy: "epic" })).toBe(true);
   });
 
   it("returns false when groupBy is set to a non-default value", () => {

@@ -3,7 +3,6 @@ package webui
 import (
 	"fmt"
 	"net/http"
-	"os/exec"
 	"strings"
 	"time"
 )
@@ -114,7 +113,7 @@ func (m *TerminalManager) ExportSession(name string) (string, error) {
 
 // runTmuxCapture runs tmux capture-pane for the full history of a session.
 func (m *TerminalManager) runTmuxCapture(internalName string) ([]byte, error) {
-	cmd := exec.Command(m.tmuxPath, "capture-pane", "-p", "-t", internalName, "-S", "-") //nolint:gosec // tmuxPath from LookPath, name validated
+	cmd := m.tmuxCmd("capture-pane", "-p", "-t", internalName, "-S", "-")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("tmux capture-pane: %w: %s", err, strings.TrimSpace(string(out)))

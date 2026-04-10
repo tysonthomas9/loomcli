@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"strings"
 )
 
@@ -27,7 +26,7 @@ func (m *TerminalManager) captureScrollbackToFile(name string) string {
 		return ""
 	}
 
-	cmd := exec.Command(m.tmuxPath, "capture-pane", "-p", "-t", internalName, "-S", "-10000") //nolint:gosec // tmuxPath from LookPath
+	cmd := m.tmuxCmd("capture-pane", "-p", "-t", internalName, "-S", "-10000")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("Warning: failed to capture scrollback for session %q: %v", name, err)
@@ -101,8 +100,7 @@ func (m *TerminalManager) KillAllSessions() error {
 			continue
 		}
 		killed[session.Name] = true
-		cmd := exec.Command(m.tmuxPath, "kill-session", "-t", session.Name) //nolint:gosec // tmuxPath is set at construction from LookPath
-		if err := cmd.Run(); err != nil {
+		if err := m.tmuxCmd("kill-session", "-t", session.Name).Run(); err != nil {
 			log.Printf("Warning: error killing tmux session %q: %v", session.Name, err)
 		}
 	}
@@ -124,7 +122,7 @@ func (m *TerminalManager) CaptureScrollback(name string) (string, error) {
 		return "", fmt.Errorf("tmux session %q not found", name)
 	}
 
-	cmd := exec.Command(m.tmuxPath, "capture-pane", "-p", "-t", internalName, "-S", "-5000") //nolint:gosec // tmuxPath from LookPath, name validated
+	cmd := m.tmuxCmd("capture-pane", "-p", "-t", internalName, "-S", "-5000")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("tmux capture-pane: %w: %s", err, strings.TrimSpace(string(out)))

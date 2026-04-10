@@ -16,7 +16,9 @@ import styles from "./RunningSection.module.css";
 
 export interface RunningSectionProps {
   onSelect?: ((issueId: string) => void) | undefined;
-  onTaskTerminalOpen?: ((issueId: string, agentName: string) => void) | undefined;
+  onTaskTerminalOpen?:
+    | ((issueId: string, agentName: string) => void)
+    | undefined;
 }
 
 const ACTIVE_STATUSES = new Set(["in_progress", "review"]);
@@ -89,46 +91,48 @@ export function RunningSection({
     <div className={styles.section}>
       <div className={styles.header}>Running</div>
       <div className={styles.list}>
-        {runningEpics.map(({ epic, activeTasks, completedCount, totalCount }) => (
-          <div key={epic.id} className={styles.epicGroup}>
-            <div className={styles.epicRow}>
-              <span className={styles.epicIcon}>&#x25CE;</span>
-              <span className={styles.epicTitle}>{epic.title}</span>
-              <span className={styles.epicProgress}>
-                {completedCount}/{totalCount}
-              </span>
+        {runningEpics.map(
+          ({ epic, activeTasks, completedCount, totalCount }) => (
+            <div key={epic.id} className={styles.epicGroup}>
+              <div className={styles.epicRow}>
+                <span className={styles.epicIcon}>&#x25CE;</span>
+                <span className={styles.epicTitle}>{epic.title}</span>
+                <span className={styles.epicProgress}>
+                  {completedCount}/{totalCount}
+                </span>
+              </div>
+              {activeTasks.map((task) => {
+                const elapsed = formatElapsed(task.updated_at);
+                const handleClick = () => {
+                  if (task.assignee && onTaskTerminalOpen) {
+                    onTaskTerminalOpen(task.id, task.assignee);
+                  } else {
+                    onSelect?.(task.id);
+                  }
+                };
+                return (
+                  <button
+                    key={task.id}
+                    type="button"
+                    className={styles.taskRow}
+                    onClick={handleClick}
+                  >
+                    <span className={styles.taskIcon}>&#x25D0;</span>
+                    <span className={styles.taskTitle}>{task.title}</span>
+                    {task.assignee && (
+                      <span className={styles.taskAssignee}>
+                        {task.assignee}
+                      </span>
+                    )}
+                    {elapsed && (
+                      <span className={styles.taskElapsed}>{elapsed}</span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
-            {activeTasks.map((task) => {
-              const elapsed = formatElapsed(task.updated_at);
-              const handleClick = () => {
-                if (task.assignee && onTaskTerminalOpen) {
-                  onTaskTerminalOpen(task.id, task.assignee);
-                } else {
-                  onSelect?.(task.id);
-                }
-              };
-              return (
-                <button
-                  key={task.id}
-                  type="button"
-                  className={styles.taskRow}
-                  onClick={handleClick}
-                >
-                  <span className={styles.taskIcon}>&#x25D0;</span>
-                  <span className={styles.taskTitle}>{task.title}</span>
-                  {task.assignee && (
-                    <span className={styles.taskAssignee}>
-                      {task.assignee}
-                    </span>
-                  )}
-                  {elapsed && (
-                    <span className={styles.taskElapsed}>{elapsed}</span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        ))}
+          ),
+        )}
       </div>
     </div>
   );

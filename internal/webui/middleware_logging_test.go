@@ -157,9 +157,9 @@ func TestRequestLogMiddleware_NilLogger(t *testing.T) {
 	}
 }
 
-func TestResponseRecorder_Unwrap(t *testing.T) {
+func TestRWRecorder_Unwrap(t *testing.T) {
 	inner := httptest.NewRecorder()
-	rec := &responseRecorder{ResponseWriter: inner, statusCode: http.StatusOK}
+	rec := newRWRecorder(inner)
 
 	unwrapped := rec.Unwrap()
 	if unwrapped != inner {
@@ -167,13 +167,13 @@ func TestResponseRecorder_Unwrap(t *testing.T) {
 	}
 }
 
-func TestResponseRecorder_ImplementsFlusher(t *testing.T) {
+func TestRWRecorder_ImplementsFlusher(t *testing.T) {
 	inner := httptest.NewRecorder()
-	rec := &responseRecorder{ResponseWriter: inner, statusCode: http.StatusOK}
+	rec := newRWRecorder(inner)
 
 	flusher, ok := interface{}(rec).(http.Flusher)
 	if !ok {
-		t.Fatal("responseRecorder does not implement http.Flusher")
+		t.Fatal("rwRecorder does not implement http.Flusher")
 	}
 	// Should not panic
 	flusher.Flush()

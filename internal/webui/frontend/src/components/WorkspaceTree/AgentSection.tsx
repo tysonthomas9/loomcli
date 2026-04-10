@@ -102,11 +102,7 @@ export function AgentSection({
         })}
       </div>
       {onAddClick && (
-        <button
-          type="button"
-          className={styles.addButton}
-          onClick={onAddClick}
-        >
+        <button type="button" className={styles.addButton} onClick={onAddClick}>
           + Add agent
         </button>
       )}

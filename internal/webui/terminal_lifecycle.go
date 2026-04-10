@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os/exec"
 	"strings"
 	"time"
 )
@@ -39,8 +38,7 @@ func (m *TerminalManager) Shutdown() error {
 			continue
 		}
 		killed[session.Name] = true
-		cmd := exec.Command(m.tmuxPath, "kill-session", "-t", session.Name) //nolint:gosec // tmuxPath validated at init; session.Name is internal
-		if err := cmd.Run(); err != nil {
+		if err := m.tmuxCmd("kill-session", "-t", session.Name).Run(); err != nil {
 			slog.Warn("error killing tmux session", "session", session.Name, "err", err)
 		}
 	}
@@ -109,8 +107,7 @@ func (m *TerminalManager) KillSessionByName(name string) error {
 	m.captureScrollbackToFile(name)
 
 	// Kill the tmux session. Ignore errors (session may not exist).
-	cmd := exec.Command(m.tmuxPath, "kill-session", "-t", internalName) //nolint:gosec // tmuxPath validated at init; internalName is prefixed internal name
-	_ = cmd.Run()
+	_ = m.tmuxCmd("kill-session", "-t", internalName).Run()
 
 	// Clean up the scrollback buffer for this session.
 	m.mu.Lock()
@@ -139,7 +136,7 @@ func (m *TerminalManager) SendKeys(sessionName string, text string) error {
 		return fmt.Errorf("tmux session %q not found", sessionName)
 	}
 
-	cmd := exec.Command(m.tmuxPath, "send-keys", "-t", internalName, "-l", text) //nolint:gosec // tmuxPath validated at init; name regex-validated
+	cmd := m.tmuxCmd("send-keys", "-t", internalName, "-l", text)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux send-keys failed: %w: %s", err, strings.TrimSpace(string(out)))
 	}

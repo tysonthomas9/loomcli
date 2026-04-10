@@ -16,10 +16,10 @@ import { wsGet, wsSet } from "@/utils/scopedStorage";
 
 import { TalkToLeadEntry } from "./TalkToLeadEntry";
 import { EpicRow } from "./EpicRow";
-import { TaskRow } from "./TaskRow";
 import { EpicContextMenu } from "./EpicContextMenu";
 import { TaskContextMenu } from "./TaskContextMenu";
 import { InlineAddInput } from "./InlineAddInput";
+import { OrphanTasksSection } from "./OrphanTasksSection";
 import styles from "./EpicTaskTree.module.css";
 
 // Scoped key suffix for epic collapse state
@@ -125,9 +125,6 @@ export function EpicTaskTree({
     },
     [workspaceId],
   );
-
-  // Show orphan tasks in an "Ungrouped" collapsible section
-  const [orphansCollapsed, setOrphansCollapsed] = useState(false);
 
   // Context menu state
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -418,101 +415,24 @@ export function EpicTaskTree({
         </button>
       )}
 
-      {orphanTasks.length > 0 && (
-        <div className={styles.epicGroup}>
-          <div className={styles.epicRow}>
-            <button
-              type="button"
-              className={styles.epicRowButton}
-              onClick={() => setOrphansCollapsed((p) => !p)}
-              title="Ungrouped tasks"
-            >
-              <span className={styles.epicIcon}>
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  xmlns="http://www.w3.org/2000/svg"
-                >
-                  <rect
-                    x="2"
-                    y="3"
-                    width="12"
-                    height="10"
-                    rx="1.5"
-                    stroke="currentColor"
-                    strokeWidth="1.3"
-                    strokeDasharray="2 1.5"
-                  />
-                </svg>
-              </span>
-              <span className={styles.titleText}>Ungrouped</span>
-            </button>
-            <span
-              className={styles.collapseChevron}
-              data-expanded={!orphansCollapsed}
-              role="img"
-              aria-label={
-                orphansCollapsed ? "Expand ungrouped" : "Collapse ungrouped"
-              }
-              onClick={() => setOrphansCollapsed((p) => !p)}
-            >
-              &rsaquo;
-            </span>
-          </div>
-          {!orphansCollapsed && (
-            <div className={styles.epicChildren}>
-              {orphanTasks.map((task) => (
-                <TaskRow
-                  key={task.id}
-                  task={task}
-                  isSelected={selectedId === task.id}
-                  onSelect={onSelect}
-                  onOverflowClick={handleTaskOverflowClick}
-                  onTaskTerminalOpen={onTaskTerminalOpen}
-                  isEditing={editingId === task.id && editingType === "task"}
-                  draftTitle={
-                    editingId === task.id && editingType === "task"
-                      ? draftTitle
-                      : undefined
-                  }
-                  onDraftChange={
-                    editingId === task.id && editingType === "task"
-                      ? setDraftTitle
-                      : undefined
-                  }
-                  onSaveRename={
-                    editingId === task.id && editingType === "task"
-                      ? handleSaveRename
-                      : undefined
-                  }
-                  onCancelRename={
-                    editingId === task.id && editingType === "task"
-                      ? handleCancelRename
-                      : undefined
-                  }
-                  renameInputRef={
-                    editingId === task.id && editingType === "task"
-                      ? renameInputRef
-                      : undefined
-                  }
-                  renameError={
-                    editingId === task.id && editingType === "task"
-                      ? renameError
-                      : undefined
-                  }
-                  isSaving={
-                    editingId === task.id && editingType === "task"
-                      ? isSaving
-                      : undefined
-                  }
-                />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+      <OrphanTasksSection
+        orphanTasks={orphanTasks}
+        selectedId={selectedId}
+        onSelect={onSelect}
+        onOverflowClick={handleTaskOverflowClick}
+        onTaskTerminalOpen={onTaskTerminalOpen}
+        renameState={{
+          editingId,
+          editingType,
+          draftTitle,
+          setDraftTitle,
+          onSaveRename: handleSaveRename,
+          onCancelRename: handleCancelRename,
+          renameInputRef,
+          renameError,
+          isSaving,
+        }}
+      />
 
       {/* Context menus */}
       {contextMenu?.type === "epic" && (

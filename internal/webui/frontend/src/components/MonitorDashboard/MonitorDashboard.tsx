@@ -63,7 +63,16 @@ export function MonitorDashboard({
   const showStaleBanner = !isConnected && agents.length > 0;
 
   // Stats placeholder — will be replaced with workspace-scoped stats API
-  const stats: LoomStats = { open: 0, closed: 0, total: 0, completion: 0, remaining: 0, in_progress: 0, review: 0, blocked: 0 };
+  const stats: LoomStats = {
+    open: 0,
+    closed: 0,
+    total: 0,
+    completion: 0,
+    remaining: 0,
+    in_progress: 0,
+    review: 0,
+    blocked: 0,
+  };
 
   // Fetch blocked issues for bottleneck detection
   const { data: blockedIssues, loading: isLoadingBlocked } = useBlockedIssues({
@@ -141,7 +150,12 @@ export function MonitorDashboard({
           <AgentActivityPanel
             agents={agents}
             agentTasks={{}}
-            sync={{ db_synced: true, db_last_sync: "", git_needs_push: 0, git_needs_pull: 0 }}
+            sync={{
+              db_synced: true,
+              db_last_sync: "",
+              git_needs_push: 0,
+              git_needs_pull: 0,
+            }}
             isLoading={isLoading}
             isConnected={isConnected}
             connectionState={connectionState}

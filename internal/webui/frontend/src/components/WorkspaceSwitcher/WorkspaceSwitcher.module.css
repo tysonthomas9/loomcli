@@ -128,7 +128,9 @@
   font-size: 13px;
   color: var(--color-text-tertiary);
   font-family: var(--font-family-base);
-  transition: background var(--transition-fast), color var(--transition-fast);
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast);
 }
 
 .addButton:hover {

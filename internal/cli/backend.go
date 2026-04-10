@@ -129,6 +129,20 @@ func ValidBackendNames() string {
 	return strings.Join(ListBackends(), ", ")
 }
 
+// CheckBackendHealth returns the health status of the named backend.
+// Returns (status, true) if the backend supports health checks, or (zero, false) if not.
+func CheckBackendHealth(name string) (HealthStatus, bool) {
+	b, ok := GetBackendByName(name)
+	if !ok {
+		return HealthStatus{}, false
+	}
+	caps := InspectCapabilities(b)
+	if !caps.HasHealthCheck {
+		return HealthStatus{}, false
+	}
+	return caps.Health.HealthCheck(), true
+}
+
 // InvokeAgent dispatches an interactive invocation to the active backend.
 func InvokeAgent(workDir, prompt, agentName string) error {
 	backendMu.RLock()

@@ -2,7 +2,6 @@ package webui
 
 import (
 	"fmt"
-	"os/exec"
 	"strings"
 )
 
@@ -20,7 +19,7 @@ func (m *TerminalManager) CapturePane(name string, lineCount int) (string, error
 	if lineCount <= 0 {
 		lineCount = 50
 	}
-	cmd := exec.Command(m.tmuxPath, "capture-pane", "-t", internalName, "-p", "-S", fmt.Sprintf("-%d", lineCount)) //nolint:gosec // tmuxPath from LookPath, name validated
+	cmd := m.tmuxCmd("capture-pane", "-t", internalName, "-p", "-S", fmt.Sprintf("-%d", lineCount))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("tmux capture-pane failed: %w: %s", err, strings.TrimSpace(string(out)))
@@ -36,8 +35,7 @@ func (m *TerminalManager) PaneDead(name string) bool {
 
 // paneDead checks pane_dead using the raw internal tmux session name (no prefix applied).
 func (m *TerminalManager) paneDead(internalName string) bool {
-	cmd := exec.Command(m.tmuxPath, "list-panes", "-t", internalName, "-F", "#{pane_dead}") //nolint:gosec // tmuxPath from LookPath, name validated
-	out, err := cmd.CombinedOutput()
+	out, err := m.tmuxCmd("list-panes", "-t", internalName, "-F", "#{pane_dead}").CombinedOutput()
 	if err != nil {
 		return true // If we can't check, assume dead
 	}
@@ -49,8 +47,7 @@ func (m *TerminalManager) capturePaneRaw(internalName string, lineCount int) str
 	if lineCount <= 0 {
 		lineCount = 50
 	}
-	cmd := exec.Command(m.tmuxPath, "capture-pane", "-t", internalName, "-p", "-S", fmt.Sprintf("-%d", lineCount)) //nolint:gosec // tmuxPath from LookPath, name validated
-	out, err := cmd.CombinedOutput()
+	out, err := m.tmuxCmd("capture-pane", "-t", internalName, "-p", "-S", fmt.Sprintf("-%d", lineCount)).CombinedOutput()
 	if err != nil {
 		return ""
 	}

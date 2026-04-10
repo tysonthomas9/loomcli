@@ -355,17 +355,13 @@ export function OtherWorkspacesSection({
                   isSaving={isSaving}
                   renameError={renameError}
                   renameInputRef={renameInputRef}
-                  {...(onWorkspaceSwitch
-                    ? { onClick: onWorkspaceSwitch }
-                    : {})}
+                  {...(onWorkspaceSwitch ? { onClick: onWorkspaceSwitch } : {})}
                   onDraftChange={setDraftName}
                   onSaveRename={handleSaveRename}
                   onRenameKeyDown={handleRenameKeyDown}
                   onContextMenu={handleContextMenu}
                   onOverflowClick={handleOverflowClick}
-                  onMoveUp={
-                    idx > 0 ? () => handleMoveUp(name) : undefined
-                  }
+                  onMoveUp={idx > 0 ? () => handleMoveUp(name) : undefined}
                   onMoveDown={
                     idx < workspaceOrder.length - 1
                       ? () => handleMoveDown(name)

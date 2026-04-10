@@ -804,8 +804,6 @@ function App() {
     [openPanel, fetchIssue],
   );
 
-
-
   // Handle task terminal open from workspace tree (task with active agent)
   const handleTreeTaskTerminalOpen = useCallback(
     async (_issueId: string, agentName: string) => {

@@ -12,5 +12,5 @@ export type {
   IssueStatusChangeCallback,
 } from "./useDragEnd";
 
-export { DEFAULT_COLUMNS } from "./columnConfigs";
+export { DEFAULT_COLUMNS, createColumns } from "./columnConfigs";
 export type { KanbanColumnConfig } from "./types";

@@ -28,9 +28,10 @@
   outline-offset: -2px;
 }
 
-.icon {
-  color: var(--color-primary, #6366f1);
-  font-size: 0.75rem;
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
   flex-shrink: 0;
 }
 

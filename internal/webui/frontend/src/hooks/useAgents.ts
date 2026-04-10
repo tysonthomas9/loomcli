@@ -6,10 +6,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 
 import { fetchWorkspaceAgents } from "@/api";
-import type {
-  LoomAgentStatus,
-  LoomConnectionState,
-} from "@/types";
+import type { LoomAgentStatus, LoomConnectionState } from "@/types";
 
 /**
  * Options for the useAgents hook.

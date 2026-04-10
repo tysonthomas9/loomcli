@@ -33,7 +33,9 @@ export function ReposSection({ repos }: ReposSectionProps): JSX.Element | null {
               />
             </svg>
             <span className={styles.name}>{repo.name}</span>
-            <span className={styles.branch}>{repo.default_branch || "main"}</span>
+            <span className={styles.branch}>
+              {repo.default_branch || "main"}
+            </span>
           </div>
         ))}
       </div>

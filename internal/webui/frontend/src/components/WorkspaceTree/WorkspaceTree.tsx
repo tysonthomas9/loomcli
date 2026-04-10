@@ -13,10 +13,7 @@ import {
   useWorkspaceContext,
 } from "@/hooks";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
-import {
-  computeRepoHealth,
-  worstHealthColor,
-} from "@/utils/workspaceHealth";
+import { computeRepoHealth, worstHealthColor } from "@/utils/workspaceHealth";
 import { ErrorDisplay } from "@/components/ErrorDisplay";
 
 import { AgentSection } from "./AgentSection";
@@ -178,12 +175,12 @@ export function WorkspaceTree({
           {/* Workspace selector at top with collapse button */}
           <div className={styles.selectorRow}>
             <WorkspaceSelectorBar
-            workspaceName={activeWorkspaceName ?? workspace?.name ?? ""}
-            workspaces={workspaces}
-            activeWorkspaceId={workspaceId}
-            onWorkspaceSwitch={onWorkspaceSwitch ?? (() => {})}
-            onAddWorkspace={onAddClick}
-          />
+              workspaceName={activeWorkspaceName ?? workspace?.name ?? ""}
+              workspaces={workspaces}
+              activeWorkspaceId={workspaceId}
+              onWorkspaceSwitch={onWorkspaceSwitch ?? (() => {})}
+              onAddWorkspace={onAddClick}
+            />
             <button
               type="button"
               className={styles.toggleButton}
@@ -262,7 +259,9 @@ export function WorkspaceTree({
       )}
 
       {/* Stats pinned to bottom when expanded */}
-      {!isCollapsed && workQueueCounts && <QueueStatsBar counts={workQueueCounts} />}
+      {!isCollapsed && workQueueCounts && (
+        <QueueStatsBar counts={workQueueCounts} />
+      )}
       {!isCollapsed && <SidebarStatusBar agents={agents} />}
 
       {/* Daemon disconnection prompt */}
