@@ -1462,7 +1462,7 @@ func TestHandleTerminalRestart_Success(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "loom.yaml"), []byte("backend: codex\n"), 0644)
 
 	pool := newMockConfigPool(dir)
-	handler := handleTerminalRestart(NewTerminalService(manager, nil, pool, nil, nil, nil, nil), nil)
+	handler := handleTerminalRestart(NewTerminalService(manager, nil, pool, nil, nil, nil, nil, nil), nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/restart?session=test-session", nil)
 	rec := httptest.NewRecorder()
@@ -1506,7 +1506,7 @@ func TestHandleTerminalRestart_DefaultBackend(t *testing.T) {
 	// No loom.yaml — loadProjectFile returns empty projectFile with Backend=""
 
 	pool := newMockConfigPool(dir)
-	handler := handleTerminalRestart(NewTerminalService(manager, nil, pool, nil, nil, nil, nil), nil)
+	handler := handleTerminalRestart(NewTerminalService(manager, nil, pool, nil, nil, nil, nil, nil), nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/restart?session=test-session", nil)
 	rec := httptest.NewRecorder()
@@ -1546,7 +1546,7 @@ func TestHandleTerminalRestart_InvalidSession(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	handler := handleTerminalRestart(NewTerminalService(manager, nil, nil, nil, nil, nil, nil), nil)
+	handler := handleTerminalRestart(NewTerminalService(manager, nil, nil, nil, nil, nil, nil, nil), nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/restart?session=bad%2Fsession", nil)
 	rec := httptest.NewRecorder()
@@ -1581,7 +1581,7 @@ func TestHandleTerminalRestart_MissingSession(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	handler := handleTerminalRestart(NewTerminalService(manager, nil, nil, nil, nil, nil, nil), nil)
+	handler := handleTerminalRestart(NewTerminalService(manager, nil, nil, nil, nil, nil, nil, nil), nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/restart", nil)
 	rec := httptest.NewRecorder()
@@ -1621,7 +1621,7 @@ func TestHandleTerminalRestart_GetRequestSuccess(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	handler := handleTerminalRestart(NewTerminalService(manager, nil, nil, nil, nil, nil, nil), nil)
+	handler := handleTerminalRestart(NewTerminalService(manager, nil, nil, nil, nil, nil, nil, nil), nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/restart?session=test-session", nil)
 	rec := httptest.NewRecorder()
@@ -1649,7 +1649,7 @@ func TestHandleTerminalRestart_ShellSession(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "loom.yaml"), []byte("backend: codex\n"), 0644)
 
 	pool := newMockConfigPool(dir)
-	handler := handleTerminalRestart(NewTerminalService(manager, nil, pool, nil, nil, nil, nil), nil)
+	handler := handleTerminalRestart(NewTerminalService(manager, nil, pool, nil, nil, nil, nil, nil), nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/restart?session=lead-shell-1", nil)
 	rec := httptest.NewRecorder()
@@ -1689,7 +1689,7 @@ func TestHandleTerminalRestart_ShellSession_NilPool(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	handler := handleTerminalRestart(NewTerminalService(manager, nil, nil, nil, nil, nil, nil), nil)
+	handler := handleTerminalRestart(NewTerminalService(manager, nil, nil, nil, nil, nil, nil, nil), nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/restart?session=lead-shell-3", nil)
 	rec := httptest.NewRecorder()
@@ -1942,10 +1942,11 @@ func TestHandleTerminalWS_NoSSEBroadcastWhenMetadataNotFound(t *testing.T) {
 	}
 }
 
-// TestHandleTerminalWS_SSEBroadcastNonDefaultWorkspace verifies that when a
-// WebSocket connects with a non-default workspace parameter, the handler looks
-// up metadata in that workspace (not scanning all workspaces) and broadcasts
-// an SSE event with the correct WorkspaceID.
+// TestHandleTerminalWS_SSEBroadcastNonDefaultWorkspace verifies that when the
+// WebSocket endpoint runs under WorkspaceMiddleware (which injects a
+// non-default workspace ID into the request context), the handler looks up
+// metadata in that workspace and broadcasts an SSE event with the correct
+// WorkspaceID.
 func TestHandleTerminalWS_SSEBroadcastNonDefaultWorkspace(t *testing.T) {
 	if os.Getenv("CI") != "" {
 		t.Skip("skipping in CI: tmux PTY lifecycle is unreliable in GitHub Actions")
@@ -1984,16 +1985,17 @@ func TestHandleTerminalWS_SSEBroadcastNonDefaultWorkspace(t *testing.T) {
 	// Give hub.Run() a moment to process registration.
 	time.Sleep(50 * time.Millisecond)
 
-	innerHandler := handleTerminalWS(manager, nil, nil, "", nil, store, hub)
-	// Inject workspace into context (WorkspaceMiddleware does this in production).
+	// Wrap the handler to inject a "myproject" workspace context, simulating
+	// what WorkspaceMiddleware does on the real wsMux route.
+	inner := handleTerminalWS(manager, nil, nil, "", nil, store, hub)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := middleware.WithWorkspace(r.Context(), "myproject")
-		innerHandler.ServeHTTP(w, r.WithContext(ctx))
+		r = r.WithContext(middleware.WithWorkspace(r.Context(), "myproject"))
+		inner.ServeHTTP(w, r)
 	})
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	// Connect to the workspace-scoped terminal WebSocket.
+	// Connect — the workspace now comes from the (injected) context, not the query param.
 	wsURL := "ws" + server.URL[4:] + "?session=issue-session"
 	dialCtx, dialCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer dialCancel()

@@ -20,7 +20,7 @@ type TerminalService interface {
 	CreateLeadSession(ctx context.Context, wsID string, params *LeadSessionParams) (*LeadSessionResult, error)
 	SeedSession(ctx context.Context, session string, params *SeedParams) error
 	ScheduleKill(ctx context.Context, session string) error
-	CloseAllSessions(ctx context.Context) (*CloseAllResult, error)
+	CloseAllSessions(ctx context.Context, wsID string) (*CloseAllResult, error)
 
 	// --- Scrollback & export ---
 	ExportSession(ctx context.Context, session string) (string, error)

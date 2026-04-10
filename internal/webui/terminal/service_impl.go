@@ -9,6 +9,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
@@ -19,16 +20,20 @@ const terminalUIStateKeyImpl = "terminal:ui-state"
 
 // terminalServiceImpl is the concrete implementation of TerminalService.
 type terminalServiceImpl struct {
-	termMgr     *TerminalManager
-	termAuth    *realtime.TerminalAuth
-	configPool  ConfigConnectionGetter
-	tabStore    *tabmeta.Store
-	hub         *realtime.Hub
-	histStore   *sessionhistory.Store
-	redisClient *redis.Client
+	termMgr        *TerminalManager
+	termAuth       *realtime.TerminalAuth
+	configPool     ConfigConnectionGetter
+	tabStore       *tabmeta.Store
+	hub            *realtime.Hub
+	histStore      *sessionhistory.Store
+	redisClient    *redis.Client
+	workspaceByIDF func(string) (*ops.WorkspaceData, error)
 }
 
 // NewTerminalService creates a new TerminalService implementation.
+// workspaceByIDF (optional) resolves a workspace ID to its on-disk path so
+// spawned tmux sessions start in the active workspace's directory; if nil,
+// sessions inherit the loom service's cwd.
 func NewTerminalService(
 	termMgr *TerminalManager,
 	termAuth *realtime.TerminalAuth,
@@ -37,16 +42,33 @@ func NewTerminalService(
 	hub *realtime.Hub,
 	histStore *sessionhistory.Store,
 	redisClient *redis.Client,
+	workspaceByIDF func(string) (*ops.WorkspaceData, error),
 ) service.TerminalService {
 	return &terminalServiceImpl{
-		termMgr:     termMgr,
-		termAuth:    termAuth,
-		configPool:  configPool,
-		tabStore:    tabStore,
-		hub:         hub,
-		histStore:   histStore,
-		redisClient: redisClient,
+		termMgr:        termMgr,
+		termAuth:       termAuth,
+		configPool:     configPool,
+		tabStore:       tabStore,
+		hub:            hub,
+		histStore:      histStore,
+		redisClient:    redisClient,
+		workspaceByIDF: workspaceByIDF,
 	}
+}
+
+// workspacePath returns the on-disk path for wsID. Returns "" when the ID is
+// empty, the resolver is nil, the lookup errors, or the resolved data has no
+// path. An empty result means "inherit the loom service's cwd", matching the
+// legacy (pre-workspace-scoped) spawn behavior.
+func (s *terminalServiceImpl) workspacePath(wsID string) string {
+	if wsID == "" || s.workspaceByIDF == nil {
+		return ""
+	}
+	ws, err := s.workspaceByIDF(wsID)
+	if err != nil || ws == nil {
+		return ""
+	}
+	return ws.Path
 }
 
 func (s *terminalServiceImpl) GenerateToken(_ context.Context, session, userID string) (string, error) {
@@ -168,7 +190,12 @@ func (s *terminalServiceImpl) SpawnSession(_ context.Context, wsID string, param
 		command = params.Backend
 	}
 
-	created, err := s.termMgr.Spawn(sanitizedName, command, 120, 40)
+	// Resolve the workspace's on-disk path so tmux -c lands the new session
+	// in the active workspace instead of the loom service's cwd. Empty when
+	// unresolvable; SpawnInDir then falls back to the inherited cwd.
+	workDir := s.workspacePath(wsID)
+
+	created, err := s.termMgr.SpawnInDir(sanitizedName, command, 120, 40, workDir)
 	if err != nil {
 		return nil, service.ErrInternal("failed to spawn terminal session", err)
 	}
@@ -249,7 +276,12 @@ func (s *terminalServiceImpl) CreateLeadSession(_ context.Context, wsID string, 
 	// user's message — no quoting bugs, no injection.
 	argv := []string{"loom", "lead", "--backend", backend, "--message", message}
 
-	created, err := s.termMgr.SpawnArgv(sessionName, argv, 120, 40)
+	// Workspace cwd: SpawnArgv -c <workDir> starts the tmux session in the
+	// active workspace's path (e.g., fixes the paperclip-in-loom cwd bug).
+	// Empty falls back to the loom service's cwd.
+	workDir := s.workspacePath(wsID)
+
+	created, err := s.termMgr.SpawnArgv(sessionName, argv, 120, 40, workDir)
 	if err != nil {
 		return nil, service.ErrInternal("failed to spawn lead session", err)
 	}
@@ -298,53 +330,84 @@ func (s *terminalServiceImpl) ScheduleKill(_ context.Context, session string) er
 	return nil
 }
 
-func (s *terminalServiceImpl) CloseAllSessions(ctx context.Context) (*service.CloseAllResult, error) {
+// CloseAllSessions kills every tmux session belonging to wsID, deletes that
+// workspace's tab metadata, and broadcasts one SSE event to the workspace.
+// Sessions in other workspaces are untouched — multi-VM deployments must not
+// accidentally kill a sibling workspace's sessions.
+//
+// When tabStore is nil (no Redis, single-workspace deployment) the workspace
+// membership is unknown, so fall back to KillAllSessions — doing nothing
+// would leave user-visible sessions running after "close all", worse than the
+// scoping loss.
+func (s *terminalServiceImpl) CloseAllSessions(ctx context.Context, wsID string) (*service.CloseAllResult, error) {
 	if s.termMgr == nil {
 		return nil, service.ErrUnavailable("terminal manager not initialized")
 	}
 
+	result := &service.CloseAllResult{}
+
+	if s.tabStore == nil {
+		return s.closeAllUnscoped(wsID, result)
+	}
+
+	sessionNames := s.workspaceSessionNames(ctx, wsID, result)
+
+	for _, name := range sessionNames {
+		if err := s.termMgr.KillSessionByName(name); err != nil {
+			slog.Error("failed to kill session", "session", name, "err", err)
+		}
+		if err := s.tabStore.Delete(ctx, wsID, name); err != nil {
+			slog.Error("failed to delete tab metadata", "session", name, "err", err)
+			result.MetaCleanupIncomplete = true
+		}
+	}
+
+	s.broadcastSessionChange(wsID)
+	if wsID != "" {
+		result.AffectedWorkspaces = append(result.AffectedWorkspaces, wsID)
+	}
+	return result, nil
+}
+
+// closeAllUnscoped kills every tmux session the manager knows about — used as
+// the no-Redis fallback since workspace membership is unknown without the tab
+// store.
+func (s *terminalServiceImpl) closeAllUnscoped(wsID string, result *service.CloseAllResult) (*service.CloseAllResult, error) {
 	if err := s.termMgr.KillAllSessions(); err != nil {
 		return nil, service.ErrInternal("failed to kill all sessions", err)
 	}
-
-	result := &service.CloseAllResult{}
-	affectedWorkspaces := make(map[string]bool)
-
-	if s.tabStore != nil {
-		allTabs, err := s.tabStore.ListAll(ctx)
-		if err != nil {
-			slog.Error("failed to list tab metadata for cleanup", "err", err)
-			result.MetaCleanupIncomplete = true
-		} else {
-			for _, tab := range allTabs {
-				if tab.Workspace != "" {
-					affectedWorkspaces[tab.Workspace] = true
-				}
-				if err := s.tabStore.Delete(ctx, tab.Workspace, tab.SessionName); err != nil {
-					slog.Error("failed to delete tab metadata", "session", tab.SessionName, "err", err)
-					result.MetaCleanupIncomplete = true
-				}
-			}
-		}
-	}
-
-	// Broadcast SSE event per affected workspace
-	if s.hub != nil {
-		now := time.Now().UTC().Format(time.RFC3339)
-		for ws := range affectedWorkspaces {
-			s.hub.Broadcast(&realtime.MutationPayload{
-				Type:        "terminal_session_change",
-				Timestamp:   now,
-				WorkspaceID: ws,
-			})
-		}
-	}
-
-	for ws := range affectedWorkspaces {
-		result.AffectedWorkspaces = append(result.AffectedWorkspaces, ws)
-	}
-
+	s.broadcastSessionChange(wsID)
 	return result, nil
+}
+
+// workspaceSessionNames lists session names owned by wsID via the tab store.
+// Marks result.MetaCleanupIncomplete on listing error.
+func (s *terminalServiceImpl) workspaceSessionNames(ctx context.Context, wsID string, result *service.CloseAllResult) []string {
+	if wsID == "" {
+		return nil
+	}
+	tabs, err := s.tabStore.List(ctx, wsID)
+	if err != nil {
+		slog.Error("failed to list tab metadata for workspace", "ws", wsID, "err", err)
+		result.MetaCleanupIncomplete = true
+		return nil
+	}
+	names := make([]string, 0, len(tabs))
+	for _, tab := range tabs {
+		names = append(names, tab.SessionName)
+	}
+	return names
+}
+
+func (s *terminalServiceImpl) broadcastSessionChange(wsID string) {
+	if s.hub == nil {
+		return
+	}
+	s.hub.Broadcast(&realtime.MutationPayload{
+		Type:        "terminal_session_change",
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		WorkspaceID: wsID,
+	})
 }
 
 func (s *terminalServiceImpl) ExportSession(_ context.Context, session string) (string, error) {

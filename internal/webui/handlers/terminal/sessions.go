@@ -141,10 +141,14 @@ func HandleListSessionsByIssue(svc service.TerminalService) http.HandlerFunc {
 	}
 }
 
-// HandleCloseAllSessions kills all tmux sessions and metadata.
+// HandleCloseAllSessions kills tmux sessions in the request's workspace and
+// deletes that workspace's tab metadata. Scoped to the workspace in the path
+// (injected via WorkspaceMiddleware) so multi-VM deployments can't kill a
+// sibling workspace's sessions.
 func HandleCloseAllSessions(svc service.TerminalService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		result, err := svc.CloseAllSessions(r.Context())
+		wsID := middleware.WorkspaceFromContext(r.Context())
+		result, err := svc.CloseAllSessions(r.Context(), wsID)
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return

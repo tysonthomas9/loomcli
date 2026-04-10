@@ -16,10 +16,10 @@ import (
 // mockSpawnService implements TerminalService for spawn handler tests.
 // Only SpawnSession is used by handleTerminalSpawn; all other methods panic.
 type mockSpawnService struct {
-	spawnFunc func(ctx context.Context, wsID string, params *SpawnParams) (*SpawnResult, error)
+	spawnFunc func(ctx context.Context, wsID string, params *service.SpawnParams) (*service.SpawnResult, error)
 }
 
-func (m *mockSpawnService) SpawnSession(ctx context.Context, wsID string, params *SpawnParams) (*SpawnResult, error) {
+func (m *mockSpawnService) SpawnSession(ctx context.Context, wsID string, params *service.SpawnParams) (*service.SpawnResult, error) {
 	if m.spawnFunc != nil {
 		return m.spawnFunc(ctx, wsID, params)
 	}
@@ -27,40 +27,40 @@ func (m *mockSpawnService) SpawnSession(ctx context.Context, wsID string, params
 }
 
 // --- Stub methods required by TerminalService interface ---
-func (m *mockSpawnService) CreateLeadSession(_ context.Context, _ string, _ *LeadSessionParams) (*LeadSessionResult, error) {
+func (m *mockSpawnService) CreateLeadSession(_ context.Context, _ string, _ *service.LeadSessionParams) (*service.LeadSessionResult, error) {
 	panic("not implemented")
 }
 func (m *mockSpawnService) GenerateToken(_ context.Context, _, _ string) (string, error) {
 	panic("not implemented")
 }
-func (m *mockSpawnService) RestartSession(_ context.Context, _, _ string) (*TerminalRestartResult, error) {
+func (m *mockSpawnService) RestartSession(_ context.Context, _, _ string) (*service.TerminalRestartResult, error) {
 	panic("not implemented")
 }
 func (m *mockSpawnService) KillSession(_ context.Context, _ string) error {
 	panic("not implemented")
 }
-func (m *mockSpawnService) GetSessionStatus(_ context.Context, _ string) (*TerminalStatusResult, error) {
+func (m *mockSpawnService) GetSessionStatus(_ context.Context, _ string) (*service.TerminalStatusResult, error) {
 	panic("not implemented")
 }
-func (m *mockSpawnService) ListSessions(_ context.Context, _ string) ([]TerminalSessionInfo, error) {
+func (m *mockSpawnService) ListSessions(_ context.Context, _ string) ([]service.TerminalSessionInfo, error) {
 	panic("not implemented")
 }
-func (m *mockSpawnService) SeedSession(_ context.Context, _ string, _ *SeedParams) error {
+func (m *mockSpawnService) SeedSession(_ context.Context, _ string, _ *service.SeedParams) error {
 	panic("not implemented")
 }
 func (m *mockSpawnService) ScheduleKill(_ context.Context, _ string) error {
 	panic("not implemented")
 }
-func (m *mockSpawnService) CloseAllSessions(_ context.Context) (*CloseAllResult, error) {
+func (m *mockSpawnService) CloseAllSessions(_ context.Context, _ string) (*service.CloseAllResult, error) {
 	panic("not implemented")
 }
 func (m *mockSpawnService) ExportSession(_ context.Context, _ string) (string, error) {
 	panic("not implemented")
 }
-func (m *mockSpawnService) GetScrollbackInfo(_ context.Context, _ string) (*ScrollbackInfoResult, error) {
+func (m *mockSpawnService) GetScrollbackInfo(_ context.Context, _ string) (*service.ScrollbackInfoResult, error) {
 	panic("not implemented")
 }
-func (m *mockSpawnService) GetScrollback(_ context.Context, _ string) (*ScrollbackResult, error) {
+func (m *mockSpawnService) GetScrollback(_ context.Context, _ string) (*service.ScrollbackResult, error) {
 	panic("not implemented")
 }
 func (m *mockSpawnService) ListTabs(_ context.Context, _ string) ([]tabmeta.TabMetadata, error) {
@@ -69,7 +69,7 @@ func (m *mockSpawnService) ListTabs(_ context.Context, _ string) ([]tabmeta.TabM
 func (m *mockSpawnService) GetTab(_ context.Context, _, _ string) (*tabmeta.TabMetadata, error) {
 	panic("not implemented")
 }
-func (m *mockSpawnService) PatchTab(_ context.Context, _, _ string, _ map[string]string) (*PatchTabResult, error) {
+func (m *mockSpawnService) PatchTab(_ context.Context, _, _ string, _ map[string]string) (*service.PatchTabResult, error) {
 	panic("not implemented")
 }
 func (m *mockSpawnService) PutTab(_ context.Context, _ string, _ *tabmeta.TabMetadata) error {
@@ -91,9 +91,9 @@ func (m *mockSpawnService) PatchTerminalState(_ context.Context, _, _ string) er
 // newMockSpawnService creates a mock that delegates spawn to the service impl
 // (which handles validation) but uses a custom spawner function for the actual
 // tmux spawn step. This simulates the old mockSpawner pattern.
-func newMockSpawnService(spawnCreated bool, spawnErr error) TerminalService {
+func newMockSpawnService(spawnCreated bool, spawnErr error) service.TerminalService {
 	return &mockSpawnService{
-		spawnFunc: func(_ context.Context, _ string, params *SpawnParams) (*SpawnResult, error) {
+		spawnFunc: func(_ context.Context, _ string, params *service.SpawnParams) (*service.SpawnResult, error) {
 			// Replicate the service's validation logic
 			if params.SessionName == "" {
 				return nil, service.ErrValidation("missing required field: session_name")
@@ -120,7 +120,7 @@ func newMockSpawnService(spawnCreated bool, spawnErr error) TerminalService {
 				return nil, service.ErrInternal("failed to spawn terminal session", spawnErr)
 			}
 
-			return &SpawnResult{
+			return &service.SpawnResult{
 				SessionName: sanitizedName,
 				Backend:     params.Backend,
 				Command:     command,
@@ -306,7 +306,7 @@ func TestHandleTerminalSpawn_InvalidBackend(t *testing.T) {
 }
 
 func TestHandleTerminalSpawn_NilManager(t *testing.T) {
-	handler := handleTerminalSpawn(NewTerminalService(nil, nil, nil, nil, nil, nil, nil))
+	handler := handleTerminalSpawn(NewTerminalService(nil, nil, nil, nil, nil, nil, nil, nil))
 
 	body := `{"session_name":"my-session","backend":"claude"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/spawn", strings.NewReader(body))

@@ -53,7 +53,7 @@ func (m *mockLeadService) SeedSession(_ context.Context, _ string, _ *SeedParams
 func (m *mockLeadService) ScheduleKill(_ context.Context, _ string) error {
 	panic("not implemented")
 }
-func (m *mockLeadService) CloseAllSessions(_ context.Context) (*CloseAllResult, error) {
+func (m *mockLeadService) CloseAllSessions(_ context.Context, _ string) (*CloseAllResult, error) {
 	panic("not implemented")
 }
 func (m *mockLeadService) ExportSession(_ context.Context, _ string) (string, error) {

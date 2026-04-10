@@ -28,7 +28,7 @@ func TestHandleExportSession_Success(t *testing.T) {
 	}
 	defer mgr.Detach(session.ConnID)
 
-	handler := handleExportSession(NewTerminalService(mgr, nil, nil, nil, nil, nil, nil))
+	handler := handleExportSession(NewTerminalService(mgr, nil, nil, nil, nil, nil, nil, nil))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/sessions/export-ok/export?format=txt", nil)
 	req.SetPathValue("session", "export-ok")
@@ -74,7 +74,7 @@ func TestHandleExportSession_MarkdownFormat(t *testing.T) {
 	}
 	defer mgr.Detach(session.ConnID)
 
-	handler := handleExportSession(NewTerminalService(mgr, nil, nil, nil, nil, nil, nil))
+	handler := handleExportSession(NewTerminalService(mgr, nil, nil, nil, nil, nil, nil, nil))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/sessions/export-md/export?format=md", nil)
 	req.SetPathValue("session", "export-md")
@@ -110,7 +110,7 @@ func TestHandleExportSession_SessionNotFound(t *testing.T) {
 	}
 	t.Cleanup(func() { mgr.Shutdown() })
 
-	handler := handleExportSession(NewTerminalService(mgr, nil, nil, nil, nil, nil, nil))
+	handler := handleExportSession(NewTerminalService(mgr, nil, nil, nil, nil, nil, nil, nil))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/sessions/nonexistent/export", nil)
 	req.SetPathValue("session", "nonexistent")
@@ -132,7 +132,7 @@ func TestHandleExportSession_InvalidFormat(t *testing.T) {
 	}
 	t.Cleanup(func() { mgr.Shutdown() })
 
-	handler := handleExportSession(NewTerminalService(mgr, nil, nil, nil, nil, nil, nil))
+	handler := handleExportSession(NewTerminalService(mgr, nil, nil, nil, nil, nil, nil, nil))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/sessions/any/export?format=pdf", nil)
 	req.SetPathValue("session", "any")
@@ -154,7 +154,7 @@ func TestHandleExportSession_InvalidSessionName(t *testing.T) {
 	}
 	t.Cleanup(func() { mgr.Shutdown() })
 
-	handler := handleExportSession(NewTerminalService(mgr, nil, nil, nil, nil, nil, nil))
+	handler := handleExportSession(NewTerminalService(mgr, nil, nil, nil, nil, nil, nil, nil))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/sessions/inv@lid/export", nil)
 	req.SetPathValue("session", "inv@lid")
@@ -181,7 +181,7 @@ func TestHandleScrollbackInfo_WithBuffer(t *testing.T) {
 	buf := mgr.GetScrollbackBuffer("sbinfo-test")
 	buf.Append([]byte("line1\nline2\nline3\n"))
 
-	handler := handleScrollbackInfo(NewTerminalService(mgr, nil, nil, nil, nil, nil, nil))
+	handler := handleScrollbackInfo(NewTerminalService(mgr, nil, nil, nil, nil, nil, nil, nil))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/sessions/sbinfo-test/scrollback-info", nil)
 	req.SetPathValue("session", "sbinfo-test")
@@ -222,7 +222,7 @@ func TestHandleScrollbackInfo_NoBuffer(t *testing.T) {
 	}
 	t.Cleanup(func() { mgr.Shutdown() })
 
-	handler := handleScrollbackInfo(NewTerminalService(mgr, nil, nil, nil, nil, nil, nil))
+	handler := handleScrollbackInfo(NewTerminalService(mgr, nil, nil, nil, nil, nil, nil, nil))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/sessions/no-buffer/scrollback-info", nil)
 	req.SetPathValue("session", "no-buffer")

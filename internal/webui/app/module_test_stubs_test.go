@@ -52,7 +52,7 @@ func (s *stubTerminalService) SeedSession(_ context.Context, _ string, _ *servic
 	return nil
 }
 func (s *stubTerminalService) ScheduleKill(_ context.Context, _ string) error { return nil }
-func (s *stubTerminalService) CloseAllSessions(_ context.Context) (*service.CloseAllResult, error) {
+func (s *stubTerminalService) CloseAllSessions(_ context.Context, _ string) (*service.CloseAllResult, error) {
 	return &service.CloseAllResult{}, nil
 }
 func (s *stubTerminalService) ExportSession(_ context.Context, _ string) (string, error) {

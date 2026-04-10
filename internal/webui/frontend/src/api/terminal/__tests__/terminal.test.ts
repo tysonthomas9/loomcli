@@ -448,6 +448,8 @@ describe("terminal API", () => {
 
       const url = buildTerminalWsUrl("test-ws-id", "my-session", "tok123");
 
+      // Workspace now lives in the URL path (not a query param) so the server
+      // can route the request through WorkspaceMiddleware for auth.
       expect(url).toBe(
         "ws://localhost:8080/api/workspaces/test-ws-id/terminal/ws?session=my-session&token=tok123",
       );

@@ -401,6 +401,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 		app.termSvc = terminal.NewTerminalService(
 			app.termMgr, app.termAuth, configPool,
 			app.tabMetaStore, app.hub, app.sessionHistoryStore, rc,
+			config.WorkspaceConfigByIDFn,
 		)
 	}
 

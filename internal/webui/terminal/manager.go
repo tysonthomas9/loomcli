@@ -471,7 +471,9 @@ func (m *TerminalManager) Spawn(name, command string, cols, rows uint16) (bool, 
 // tmuxNewSessionArgv creates a new detached tmux session that execs argv directly
 // instead of passing the command through a shell. Use this when any argument may
 // contain user-supplied text, to avoid shell-injection risk.
-func (m *TerminalManager) tmuxNewSessionArgv(name string, argv []string, cols, rows uint16) error {
+// If workDir is non-empty it is passed to tmux via -c, so the child process
+// starts in that directory instead of the parent's cwd.
+func (m *TerminalManager) tmuxNewSessionArgv(name string, argv []string, cols, rows uint16, workDir string) error {
 	if len(argv) == 0 {
 		return fmt.Errorf("tmuxNewSessionArgv: argv must not be empty")
 	}
@@ -480,8 +482,11 @@ func (m *TerminalManager) tmuxNewSessionArgv(name string, argv []string, cols, r
 		"-s", name,
 		"-x", fmt.Sprintf("%d", cols),
 		"-y", fmt.Sprintf("%d", rows),
-		"--",
 	}
+	if workDir != "" {
+		args = append(args, "-c", workDir)
+	}
+	args = append(args, "--")
 	args = append(args, argv...)
 	if err := m.tmuxCmd(args...).Run(); err != nil {
 		return err
@@ -490,11 +495,52 @@ func (m *TerminalManager) tmuxNewSessionArgv(name string, argv []string, cols, r
 	return nil
 }
 
+// SpawnInDir is like Spawn but starts the tmux session in the given working
+// directory via tmux -c. If workDir is empty, the session inherits the loom
+// service's cwd (same as Spawn). Idempotent: if a session with this name
+// already exists, returns (false, nil).
+//
+// Used by the terminal spawn handler to land new "+ Tab" sessions in the
+// active workspace's path rather than the loom service's cwd.
+func (m *TerminalManager) SpawnInDir(name, command string, cols, rows uint16, workDir string) (bool, error) {
+	if !validSessionName.MatchString(name) {
+		return false, fmt.Errorf("invalid session name %q: must match [a-zA-Z0-9_-]+", name)
+	}
+	if command == "" {
+		return false, fmt.Errorf("command must not be empty")
+	}
+	if cols == 0 {
+		cols = m.defaultCols
+	}
+	if rows == 0 {
+		rows = m.defaultRows
+	}
+
+	internalName := m.tmuxName(name)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.tmuxHasSession(internalName) {
+		return false, nil
+	}
+
+	// Pass as single-element argv so tmux execs the command directly with the
+	// cwd set via -c. For single-binary commands (claude, /bin/bash, etc.) this
+	// is behaviorally identical to Spawn but with workDir support.
+	if err := m.tmuxNewSessionArgv(internalName, []string{command}, cols, rows, workDir); err != nil {
+		return false, fmt.Errorf("tmux new-session: %w", err)
+	}
+	return true, nil
+}
+
 // SpawnArgv creates a tmux session whose command is execv'd directly from argv,
 // bypassing shell interpretation. Use this for commands containing user-supplied
 // text (e.g. an initial agent prompt) to avoid shell-injection risks.
-// It is idempotent: if the session already exists, it returns (false, nil).
-func (m *TerminalManager) SpawnArgv(name string, argv []string, cols, rows uint16) (bool, error) {
+// If workDir is non-empty, the session starts in that directory (via tmux -c);
+// otherwise it inherits the loom service's cwd. Idempotent: if the session
+// already exists it returns (false, nil).
+func (m *TerminalManager) SpawnArgv(name string, argv []string, cols, rows uint16, workDir string) (bool, error) {
 	if !validSessionName.MatchString(name) {
 		return false, fmt.Errorf("invalid session name %q: must match [a-zA-Z0-9_-]+", name)
 	}
@@ -517,7 +563,7 @@ func (m *TerminalManager) SpawnArgv(name string, argv []string, cols, rows uint1
 		return false, nil
 	}
 
-	if err := m.tmuxNewSessionArgv(internalName, argv, cols, rows); err != nil {
+	if err := m.tmuxNewSessionArgv(internalName, argv, cols, rows, workDir); err != nil {
 		return false, fmt.Errorf("tmux new-session: %w", err)
 	}
 	return true, nil

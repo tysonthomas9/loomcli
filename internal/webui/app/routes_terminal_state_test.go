@@ -43,7 +43,7 @@ func TestTerminalStateRouteMigration_OldFlatRoutesReturn404(t *testing.T) {
 	t.Cleanup(func() { termMgr.Shutdown() })
 
 	app := &Server{multiPool: multiPool, termMgr: termMgr, tabMetaStore: tms, wsExistsFn: wsExistsFn}
-	app.termSvc = terminal.NewTerminalService(termMgr, nil, nil, tms, nil, nil, tms.RedisClient())
+	app.termSvc = terminal.NewTerminalService(termMgr, nil, nil, tms, nil, nil, tms.RedisClient(), nil)
 	setupTestRoutes(t, app)
 
 	// Old flat routes that should have been removed — each must return 404.
@@ -101,7 +101,7 @@ func TestTerminalStateRouteMigration_NewWorkspaceScopedRoutesRegistered(t *testi
 	t.Cleanup(func() { termMgr.Shutdown() })
 
 	app := &Server{multiPool: multiPool, termMgr: termMgr, tabMetaStore: tms, wsExistsFn: wsExistsFn}
-	app.termSvc = terminal.NewTerminalService(termMgr, nil, nil, tms, nil, nil, tms.RedisClient())
+	app.termSvc = terminal.NewTerminalService(termMgr, nil, nil, tms, nil, nil, tms.RedisClient(), nil)
 	setupTestRoutes(t, app)
 
 	// New workspace-scoped routes that should be registered.
@@ -165,7 +165,7 @@ func TestTerminalStateRouteMigration_UnknownWorkspaceReturns404(t *testing.T) {
 	t.Cleanup(func() { termMgr.Shutdown() })
 
 	app := &Server{multiPool: multiPool, termMgr: termMgr, tabMetaStore: tms, wsExistsFn: wsExistsFn}
-	app.termSvc = terminal.NewTerminalService(termMgr, nil, nil, tms, nil, nil, tms.RedisClient())
+	app.termSvc = terminal.NewTerminalService(termMgr, nil, nil, tms, nil, nil, tms.RedisClient(), nil)
 	setupTestRoutes(t, app)
 
 	// Routes with a non-existent workspace should return 404 from WorkspaceMiddleware.
@@ -209,7 +209,7 @@ func TestTerminalStateRouteMigration_StateEndpointsReturnJSON(t *testing.T) {
 
 	// termManager is nil here since state routes only need tabMetaStore.
 	app := &Server{multiPool: multiPool, tabMetaStore: tms, wsExistsFn: wsExistsFn}
-	app.termSvc = terminal.NewTerminalService(nil, nil, nil, tms, nil, nil, tms.RedisClient())
+	app.termSvc = terminal.NewTerminalService(nil, nil, nil, tms, nil, nil, tms.RedisClient(), nil)
 	setupTestRoutes(t, app)
 
 	// GET /api/workspaces/{ws}/terminal/state should return 200 with an

@@ -26,7 +26,7 @@ func TestHandleTerminalKill_GetRequest(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	handler := handleTerminalKill(NewTerminalService(manager, nil, nil, nil, nil, nil, nil), nil)
+	handler := handleTerminalKill(NewTerminalService(manager, nil, nil, nil, nil, nil, nil, nil), nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/kill?session=test-session", nil)
 	rec := httptest.NewRecorder()
@@ -50,7 +50,7 @@ func TestHandleTerminalKill_MissingSession(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	handler := handleTerminalKill(NewTerminalService(manager, nil, nil, nil, nil, nil, nil), nil)
+	handler := handleTerminalKill(NewTerminalService(manager, nil, nil, nil, nil, nil, nil, nil), nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/kill", nil)
 	rec := httptest.NewRecorder()
@@ -85,7 +85,7 @@ func TestHandleTerminalKill_InvalidSession(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	handler := handleTerminalKill(NewTerminalService(manager, nil, nil, nil, nil, nil, nil), nil)
+	handler := handleTerminalKill(NewTerminalService(manager, nil, nil, nil, nil, nil, nil, nil), nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/kill?session=bad%2Fsession", nil)
 	rec := httptest.NewRecorder()
@@ -110,7 +110,7 @@ func TestHandleTerminalKill_InvalidSession(t *testing.T) {
 
 // TestHandleTerminalKill_NilManager tests that a nil manager returns 503.
 func TestHandleTerminalKill_NilManager(t *testing.T) {
-	handler := handleTerminalKill(NewTerminalService(nil, nil, nil, nil, nil, nil, nil), nil)
+	handler := handleTerminalKill(NewTerminalService(nil, nil, nil, nil, nil, nil, nil, nil), nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/kill?session=test-session", nil)
 	rec := httptest.NewRecorder()
@@ -148,7 +148,7 @@ func TestHandleTerminalKill_AuthRequired(t *testing.T) {
 	}
 	defer auth.Stop()
 
-	handler := handleTerminalKill(NewTerminalService(manager, nil, nil, nil, nil, nil, nil), auth)
+	handler := handleTerminalKill(NewTerminalService(manager, nil, nil, nil, nil, nil, nil, nil), auth)
 
 	// Request without a token
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/kill?session=test-session", nil)
@@ -195,7 +195,7 @@ func TestHandleTerminalKill_AuthWithValidToken(t *testing.T) {
 		t.Fatalf("failed to generate token: %v", err)
 	}
 
-	handler := handleTerminalKill(NewTerminalService(manager, nil, nil, nil, nil, nil, nil), auth)
+	handler := handleTerminalKill(NewTerminalService(manager, nil, nil, nil, nil, nil, nil, nil), auth)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/kill?session=test-session&token="+token, nil)
 	rec := httptest.NewRecorder()
@@ -227,7 +227,7 @@ func TestHandleTerminalKill_Success(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	handler := handleTerminalKill(NewTerminalService(manager, nil, nil, nil, nil, nil, nil), nil)
+	handler := handleTerminalKill(NewTerminalService(manager, nil, nil, nil, nil, nil, nil, nil), nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/kill?session=test-session", nil)
 	rec := httptest.NewRecorder()
@@ -263,7 +263,7 @@ func TestHandleTerminalSessionStatus_MissingSession(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	handler := handleTerminalSessionStatus(NewTerminalService(manager, nil, nil, nil, nil, nil, nil), nil)
+	handler := handleTerminalSessionStatus(NewTerminalService(manager, nil, nil, nil, nil, nil, nil, nil), nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/session-status", nil)
 	rec := httptest.NewRecorder()
@@ -295,7 +295,7 @@ func TestHandleTerminalSessionStatus_InvalidSession(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	handler := handleTerminalSessionStatus(NewTerminalService(manager, nil, nil, nil, nil, nil, nil), nil)
+	handler := handleTerminalSessionStatus(NewTerminalService(manager, nil, nil, nil, nil, nil, nil, nil), nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/session-status?session=bad%2Fsession", nil)
 	rec := httptest.NewRecorder()
@@ -317,7 +317,7 @@ func TestHandleTerminalSessionStatus_InvalidSession(t *testing.T) {
 
 // TestHandleTerminalSessionStatus_NilManager tests that a nil manager returns 503.
 func TestHandleTerminalSessionStatus_NilManager(t *testing.T) {
-	handler := handleTerminalSessionStatus(NewTerminalService(nil, nil, nil, nil, nil, nil, nil), nil)
+	handler := handleTerminalSessionStatus(NewTerminalService(nil, nil, nil, nil, nil, nil, nil, nil), nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/session-status?session=test-session", nil)
 	rec := httptest.NewRecorder()
@@ -349,7 +349,7 @@ func TestHandleTerminalSessionStatus_DeadSession(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	handler := handleTerminalSessionStatus(NewTerminalService(manager, nil, nil, nil, nil, nil, nil), nil)
+	handler := handleTerminalSessionStatus(NewTerminalService(manager, nil, nil, nil, nil, nil, nil, nil), nil)
 
 	// Query a session that does not exist
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/session-status?session=nonexistent-session", nil)
@@ -397,7 +397,7 @@ func TestHandleTerminalSessionStatus_AliveSession(t *testing.T) {
 		t.Fatalf("failed to attach session: %v", err)
 	}
 
-	handler := handleTerminalSessionStatus(NewTerminalService(manager, nil, nil, nil, nil, nil, nil), nil)
+	handler := handleTerminalSessionStatus(NewTerminalService(manager, nil, nil, nil, nil, nil, nil, nil), nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/session-status?session="+sessionName, nil)
 	rec := httptest.NewRecorder()
@@ -434,7 +434,7 @@ func TestHandleTerminalSessionStatus_ResponseFormat(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	handler := handleTerminalSessionStatus(NewTerminalService(manager, nil, nil, nil, nil, nil, nil), nil)
+	handler := handleTerminalSessionStatus(NewTerminalService(manager, nil, nil, nil, nil, nil, nil, nil), nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/session-status?session=format-test", nil)
 	rec := httptest.NewRecorder()

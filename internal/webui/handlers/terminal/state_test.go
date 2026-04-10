@@ -23,7 +23,7 @@ func setupTerminalStateTest(t *testing.T) *redis.Client {
 // an empty active_tab when no state has been set.
 func TestHandleGetTerminalState_Empty(t *testing.T) {
 	rdb := setupTerminalStateTest(t)
-	handler := handleGetTerminalState(NewTerminalService(nil, nil, nil, nil, nil, nil, rdb))
+	handler := handleGetTerminalState(NewTerminalService(nil, nil, nil, nil, nil, nil, rdb, nil))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/state", nil)
 	rr := httptest.NewRecorder()
@@ -49,8 +49,8 @@ func TestHandleGetTerminalState_Empty(t *testing.T) {
 // a subsequent GET reads back the same value.
 func TestHandlePatchTerminalState_WriteAndRead(t *testing.T) {
 	rdb := setupTerminalStateTest(t)
-	getHandler := handleGetTerminalState(NewTerminalService(nil, nil, nil, nil, nil, nil, rdb))
-	patchHandler := handlePatchTerminalState(NewTerminalService(nil, nil, nil, nil, nil, nil, rdb))
+	getHandler := handleGetTerminalState(NewTerminalService(nil, nil, nil, nil, nil, nil, rdb, nil))
+	patchHandler := handlePatchTerminalState(NewTerminalService(nil, nil, nil, nil, nil, nil, rdb, nil))
 
 	// PATCH to set active_tab.
 	body := `{"active_tab": "session-abc"}`
@@ -93,7 +93,7 @@ func TestHandlePatchTerminalState_WriteAndRead(t *testing.T) {
 // invalid JSON body.
 func TestHandlePatchTerminalState_InvalidBody(t *testing.T) {
 	rdb := setupTerminalStateTest(t)
-	handler := handlePatchTerminalState(NewTerminalService(nil, nil, nil, nil, nil, nil, rdb))
+	handler := handlePatchTerminalState(NewTerminalService(nil, nil, nil, nil, nil, nil, rdb, nil))
 
 	body := `{not valid json}`
 	req := httptest.NewRequest(http.MethodPatch, "/api/terminal/state", strings.NewReader(body))
@@ -118,8 +118,8 @@ func TestHandlePatchTerminalState_InvalidBody(t *testing.T) {
 // the previous value.
 func TestHandlePatchTerminalState_Overwrite(t *testing.T) {
 	rdb := setupTerminalStateTest(t)
-	getHandler := handleGetTerminalState(NewTerminalService(nil, nil, nil, nil, nil, nil, rdb))
-	patchHandler := handlePatchTerminalState(NewTerminalService(nil, nil, nil, nil, nil, nil, rdb))
+	getHandler := handleGetTerminalState(NewTerminalService(nil, nil, nil, nil, nil, nil, rdb, nil))
+	patchHandler := handlePatchTerminalState(NewTerminalService(nil, nil, nil, nil, nil, nil, rdb, nil))
 
 	// First PATCH.
 	body1 := `{"active_tab": "first-tab"}`
@@ -165,8 +165,8 @@ func TestHandlePatchTerminalState_Overwrite(t *testing.T) {
 // to an empty string (clearing the state).
 func TestHandlePatchTerminalState_EmptyString(t *testing.T) {
 	rdb := setupTerminalStateTest(t)
-	getHandler := handleGetTerminalState(NewTerminalService(nil, nil, nil, nil, nil, nil, rdb))
-	patchHandler := handlePatchTerminalState(NewTerminalService(nil, nil, nil, nil, nil, nil, rdb))
+	getHandler := handleGetTerminalState(NewTerminalService(nil, nil, nil, nil, nil, nil, rdb, nil))
+	patchHandler := handlePatchTerminalState(NewTerminalService(nil, nil, nil, nil, nil, nil, rdb, nil))
 
 	// First set a value.
 	body1 := `{"active_tab": "some-tab"}`
