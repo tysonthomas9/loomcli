@@ -197,8 +197,14 @@ func (m *TerminalManager) tmuxNewSession(name, command string, cols, rows uint16
 	if err := m.tmuxCmd(args...).Run(); err != nil {
 		return err
 	}
+	m.applySessionOptions(name)
+	return nil
+}
 
-	// Enable mouse mode and set scrollback history limit.
+// applySessionOptions enables mouse mode and sets the scrollback history limit
+// on an existing tmux session. Failures are logged but not returned — these are
+// best-effort ergonomic tweaks, not correctness requirements.
+func (m *TerminalManager) applySessionOptions(name string) {
 	for _, opt := range [][2]string{
 		{"mouse", "on"},
 		{"history-limit", fmt.Sprintf("%d", m.scrollbackMaxLines)},
@@ -208,7 +214,6 @@ func (m *TerminalManager) tmuxNewSession(name, command string, cols, rows uint16
 			log.Printf("Warning: failed to set %s for session %q: %v: %s", opt[0], name, err, strings.TrimSpace(string(out)))
 		}
 	}
-	return nil
 }
 
 // tmuxAttach spawns a tmux attach-session process with a PTY.
@@ -453,6 +458,60 @@ func (m *TerminalManager) Spawn(name, command string, cols, rows uint16) (bool, 
 	}
 
 	if err := m.tmuxNewSession(internalName, command, cols, rows); err != nil {
+		return false, fmt.Errorf("tmux new-session: %w", err)
+	}
+	return true, nil
+}
+
+// tmuxNewSessionArgv creates a new detached tmux session that execs argv directly
+// instead of passing the command through a shell. Use this when any argument may
+// contain user-supplied text, to avoid shell-injection risk.
+func (m *TerminalManager) tmuxNewSessionArgv(name string, argv []string, cols, rows uint16) error {
+	if len(argv) == 0 {
+		return fmt.Errorf("tmuxNewSessionArgv: argv must not be empty")
+	}
+	args := []string{
+		"new-session", "-d",
+		"-s", name,
+		"-x", fmt.Sprintf("%d", cols),
+		"-y", fmt.Sprintf("%d", rows),
+	}
+	args = append(args, argv...)
+	if err := m.tmuxCmd(args...).Run(); err != nil {
+		return err
+	}
+	m.applySessionOptions(name)
+	return nil
+}
+
+// SpawnArgv creates a tmux session whose command is execv'd directly from argv,
+// bypassing shell interpretation. Use this for commands containing user-supplied
+// text (e.g. an initial agent prompt) to avoid shell-injection risks.
+// It is idempotent: if the session already exists, it returns (false, nil).
+func (m *TerminalManager) SpawnArgv(name string, argv []string, cols, rows uint16) (bool, error) {
+	if !validSessionName.MatchString(name) {
+		return false, fmt.Errorf("invalid session name %q: must match [a-zA-Z0-9_-]+", name)
+	}
+	if len(argv) == 0 {
+		return false, fmt.Errorf("argv must not be empty")
+	}
+	if cols == 0 {
+		cols = m.defaultCols
+	}
+	if rows == 0 {
+		rows = m.defaultRows
+	}
+
+	internalName := m.tmuxName(name)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.tmuxHasSession(internalName) {
+		return false, nil
+	}
+
+	if err := m.tmuxNewSessionArgv(internalName, argv, cols, rows); err != nil {
 		return false, fmt.Errorf("tmux new-session: %w", err)
 	}
 	return true, nil

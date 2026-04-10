@@ -160,6 +160,31 @@ export async function getSessionStatus(
   );
 }
 
+// ============= Lead Session (--message) =============
+
+export interface LeadSessionResult {
+  session_name: string;
+  backend: string;
+}
+
+/**
+ * Create a new tmux session running `loom lead --backend <backend> --message <text>`.
+ * The user's message is baked into the loom-lead invocation so the agent receives it
+ * as part of its initial prompt — no post-hoc send-keys or readiness polling needed.
+ */
+// TODO(workspace-routing): migrate to wsUrl when workspace-scoped route lands
+export async function createLeadSession(
+  _workspaceId: string,
+  message: string,
+  backend: string,
+): Promise<LeadSessionResult> {
+  const response = await post<ApiResult<LeadSessionResult>>(
+    "/api/terminal/lead-session",
+    { message, backend },
+  );
+  return unwrap(response);
+}
+
 // ============= Issue Context Seeding =============
 
 export interface IssueContext {

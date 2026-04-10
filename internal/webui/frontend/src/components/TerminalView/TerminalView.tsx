@@ -8,6 +8,7 @@ import {
   restartTerminalSession,
   fetchTerminalToken,
   getExportUrl,
+  scheduleSessionKill,
 } from "@/api/terminal";
 import { LoadingSkeleton } from "@/components";
 import { useBackendConfig } from "@/hooks/useBackendConfig";
@@ -59,6 +60,17 @@ import { useTabInit } from "./useTabInit";
 import { useWorkspaceTabState } from "./useWorkspaceTabState";
 import styles from "./TerminalView.module.css";
 
+/**
+ * Descriptor for a tmux session that was pre-spawned on the backend (e.g. via
+ * the /api/terminal/lead-session endpoint). TerminalView consumes this to
+ * create a matching tab and attach to the existing session. The tab label is
+ * derived from `sessionName`.
+ */
+export interface PendingLeadSession {
+  sessionName: string;
+  backend: string;
+}
+
 interface TerminalViewProps {
   isActive?: boolean;
   pendingIssueContext?: IssueContext | undefined;
@@ -72,6 +84,14 @@ interface TerminalViewProps {
   pendingAgentName?: string | undefined;
   /** Called after pendingAgentName has been processed. */
   onAgentNameConsumed?: (() => void) | undefined;
+  /**
+   * When set, creates (or focuses) a tab for a lead session that was already
+   * pre-spawned on the backend. The session runs `loom lead --backend X
+   * --message <user text>` so no client-side seeding is required.
+   */
+  pendingLeadSession?: PendingLeadSession | undefined;
+  /** Called after pendingLeadSession has been processed. */
+  onLeadSessionConsumed?: (() => void) | undefined;
 }
 
 export function TerminalView({
@@ -85,6 +105,8 @@ export function TerminalView({
   onNavigateToSettings,
   pendingAgentName,
   onAgentNameConsumed,
+  pendingLeadSession,
+  onLeadSessionConsumed,
 }: TerminalViewProps): JSX.Element {
   const [tabs, setTabs] = useState<TabState[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>("");
@@ -281,41 +303,94 @@ export function TerminalView({
   // Store pending seed context by session name (survives across renders)
   const pendingSeedRef = useRef<Map<string, IssueContext>>(new Map());
 
+  /**
+   * Open or focus a tab for a pending session (issue context, agent terminal,
+   * or lead-session). All three pending-prop effects share this skeleton:
+   *   1. If a tab for sessionName already exists → switch to it.
+   *   2. If the tab limit has been reached → call onOrphan (e.g. kill a
+   *      backend-spawned session to avoid leaking it).
+   *   3. Otherwise → run an optional pre-create hook (for seed state),
+   *      push a new TabState, activate it, and persist metadata.
+   *
+   * Reads `tabs` via `tabsRef.current` so callers don't need to include `tabs`
+   * in their effect dep arrays — this avoids a re-run storm where `setTabs`
+   * inside the effect triggers the effect again before the parent has cleared
+   * its pending-prop state.
+   */
+  const openOrFocusPendingTab = useCallback(
+    (params: {
+      sessionName: string;
+      label: string;
+      backendName: string;
+      agentName?: string;
+      onBeforeCreate?: () => void;
+      onOrphan?: () => void;
+    }): void => {
+      const {
+        sessionName,
+        label,
+        backendName,
+        agentName,
+        onBeforeCreate,
+        onOrphan,
+      } = params;
+      const currentTabs = tabsRef.current;
+
+      const existingTab = currentTabs.find(
+        (t) => t.sessionName === sessionName,
+      );
+      if (existingTab) {
+        setActiveTabId(existingTab.id);
+        return;
+      }
+
+      if (currentTabs.length >= MAX_TABS) {
+        onOrphan?.();
+        return;
+      }
+
+      onBeforeCreate?.();
+
+      const newTab: TabState = {
+        id: sessionName,
+        label,
+        sessionName,
+        connectionState: "disconnected" as ConnectionState,
+        backendName,
+        ...(agentName ? { agentName } : {}),
+      };
+      setTabs((prev) => [...prev, newTab]);
+      setActiveTabId(sessionName);
+
+      createTab(sessionName, label, currentTabs.length).catch((err) =>
+        console.error(`Failed to persist tab ${sessionName}:`, err),
+      );
+    },
+    [createTab],
+  );
+
   // Handle pending issue context: create or switch to issue tab, then seed
   useEffect(() => {
     if (!pendingIssueContext || !initializedRef.current) return;
 
     const sessionName = `issue-${sanitizeSessionName(pendingIssueContext.issue_id)}`;
 
-    // Check if tab already exists — switch to it without re-seeding
-    const existingTab = tabs.find((t) => t.sessionName === sessionName);
-    if (existingTab) {
-      setActiveTabId(existingTab.id);
-      onIssueContextConsumed?.();
-      return;
-    }
-
-    // Store seed context in ref before consuming the prop
-    pendingSeedRef.current.set(sessionName, pendingIssueContext);
-
-    // Create new tab
-    const newTab: TabState = {
-      id: sessionName,
-      label: `issue-${sanitizeSessionName(pendingIssueContext.issue_id)}`,
+    openOrFocusPendingTab({
       sessionName,
-      connectionState: "disconnected" as ConnectionState,
+      label: sessionName,
       backendName: config?.backend ?? "unknown",
-    };
-    setTabs((prev) => [...prev, newTab]);
-    setActiveTabId(sessionName);
-
-    // Persist tab metadata (fire-and-forget)
-    createTab(sessionName, newTab.label, tabs.length).catch((err) =>
-      console.error(`Failed to persist issue tab ${sessionName}:`, err),
-    );
+      onBeforeCreate: () => {
+        pendingSeedRef.current.set(sessionName, pendingIssueContext);
+      },
+    });
 
     onIssueContextConsumed?.();
-  }, [pendingIssueContext, tabs, createTab, onIssueContextConsumed]);
+  }, [
+    pendingIssueContext,
+    openOrFocusPendingTab,
+    onIssueContextConsumed,
+    config?.backend,
+  ]);
 
   // Handle pending agent name: create or switch to agent terminal tab
   useEffect(() => {
@@ -323,39 +398,47 @@ export function TerminalView({
 
     const sessionName = `agent-${sanitizeSessionName(pendingAgentName)}`;
 
-    // Check if tab already exists — switch to it
-    const existingTab = tabs.find((t) => t.sessionName === sessionName);
-    if (existingTab) {
-      setActiveTabId(existingTab.id);
-      onAgentNameConsumed?.();
-      return;
-    }
-
-    // Max tabs check
-    if (tabs.length >= MAX_TABS) {
-      onAgentNameConsumed?.();
-      return;
-    }
-
-    // Create new agent terminal tab
-    const newTab: TabState = {
-      id: sessionName,
-      label: `agent-${pendingAgentName}`,
+    openOrFocusPendingTab({
       sessionName,
-      connectionState: "disconnected" as ConnectionState,
+      label: `agent-${pendingAgentName}`,
       backendName: "agent",
       agentName: pendingAgentName,
-    };
-    setTabs((prev) => [...prev, newTab]);
-    setActiveTabId(sessionName);
-
-    // Persist tab metadata (fire-and-forget)
-    createTab(sessionName, newTab.label, tabs.length).catch((err) =>
-      console.error(`Failed to persist agent tab ${sessionName}:`, err),
-    );
+    });
 
     onAgentNameConsumed?.();
-  }, [pendingAgentName, tabs, createTab, onAgentNameConsumed]);
+  }, [pendingAgentName, openOrFocusPendingTab, onAgentNameConsumed]);
+
+  // Handle pending lead session: create or focus a tab for a backend-spawned
+  // `loom lead --message <...>` session. The backend already started tmux with
+  // the user's request in the invocation, so no seeding is required here.
+  // If the tab limit has been reached, tear down the orphaned tmux session so
+  // it does not leak — the backend spawned it before we knew the limit was hit.
+  useEffect(() => {
+    if (!pendingLeadSession || !initializedRef.current) return;
+
+    const { sessionName, backend } = pendingLeadSession;
+
+    openOrFocusPendingTab({
+      sessionName,
+      label: sessionName,
+      backendName: backend,
+      onOrphan: () => {
+        scheduleSessionKill(workspaceId, sessionName, true).catch((err) =>
+          console.error(
+            `Failed to kill orphaned lead session ${sessionName}:`,
+            err,
+          ),
+        );
+      },
+    });
+
+    onLeadSessionConsumed?.();
+  }, [
+    pendingLeadSession,
+    openOrFocusPendingTab,
+    onLeadSessionConsumed,
+    workspaceId,
+  ]);
 
   // Seed the session when it connects for the first time
   const handleConnectionStateChange = useCallback(

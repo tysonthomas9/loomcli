@@ -13,6 +13,7 @@ export type {
 export { TerminalTabBar } from "./TerminalTabBar";
 export type { TerminalTabBarProps, TerminalTab } from "./TerminalTabBar";
 export { TerminalView } from "./TerminalView";
+export type { PendingLeadSession } from "./TerminalView";
 export { useClipboard } from "./useClipboard";
 export { SessionNamePrompt } from "./SessionNamePrompt";
 export type { SessionNamePromptProps } from "./SessionNamePrompt";
