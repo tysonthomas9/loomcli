@@ -13,14 +13,6 @@ import ts from "typescript";
 // target = the internal import path (e.g. "@/components/KanbanBoard/columnConfigs")
 export const ALLOWLIST = [
   {
-    source: "src/components/SwimLaneBoard/SwimLaneBoard.tsx",
-    target: "@/components/KanbanBoard/columnConfigs",
-  },
-  {
-    source: "src/components/SwimLaneBoard/SwimLaneBoard.tsx",
-    target: "@/components/KanbanBoard/types",
-  },
-  {
     source: "src/components/SwimLane/SwimLane.tsx",
     target: "@/components/KanbanBoard/types",
   },

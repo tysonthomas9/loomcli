@@ -52,10 +52,16 @@ func (s *TerminalSession) Close() error {
 // the tmux-internal name (e.g., realtime.SessionMonitor adapters).
 func (m *TerminalManager) HasSession(name string) bool { return m.tmuxHasSession(name) }
 
+// tmuxCmd creates an exec.Cmd for a tmux subcommand with the cached environment.
+func (m *TerminalManager) tmuxCmd(args ...string) *exec.Cmd {
+	cmd := exec.Command(m.tmuxPath, args...) //nolint:gosec // tmuxPath from LookPath, args are controlled
+	cmd.Env = m.tmuxEnv
+	return cmd
+}
+
 // tmuxHasSession checks whether a tmux session with the given name exists.
 func (m *TerminalManager) tmuxHasSession(name string) bool {
-	cmd := exec.Command(m.tmuxPath, "has-session", "-t", name) //nolint:gosec // tmuxPath from LookPath, name validated by caller
-	return cmd.Run() == nil
+	return m.tmuxCmd("has-session", "-t", name).Run() == nil
 }
 
 // tmuxNewSession creates a new detached tmux session with the given name, size, and command.
@@ -70,8 +76,7 @@ func (m *TerminalManager) tmuxNewSession(name, command string, cols, rows uint16
 	if command != "" {
 		args = append(args, command)
 	}
-	cmd := exec.Command(m.tmuxPath, args...) //nolint:gosec // tmuxPath from LookPath, args are controlled
-	if err := cmd.Run(); err != nil {
+	if err := m.tmuxCmd(args...).Run(); err != nil {
 		return err
 	}
 
@@ -80,8 +85,7 @@ func (m *TerminalManager) tmuxNewSession(name, command string, cols, rows uint16
 		{"mouse", "on"},
 		{"history-limit", fmt.Sprintf("%d", m.scrollbackMaxLines)},
 	} {
-		c := exec.Command(m.tmuxPath, "set-option", "-t", name, opt[0], opt[1]) //nolint:gosec // tmuxPath from LookPath, opt values are string literals
-		if err := c.Run(); err != nil {
+		if err := m.tmuxCmd("set-option", "-t", name, opt[0], opt[1]).Run(); err != nil {
 			slog.Warn("failed to set tmux option", "option", opt[0], "session", name, "err", err)
 		}
 	}
@@ -90,12 +94,10 @@ func (m *TerminalManager) tmuxNewSession(name, command string, cols, rows uint16
 
 // tmuxAttach spawns a tmux attach-session process with a PTY.
 func (m *TerminalManager) tmuxAttach(name string) (*exec.Cmd, *os.File, error) {
-	cmd := exec.Command(m.tmuxPath, "attach-session", "-t", name) //nolint:gosec // tmuxPath from LookPath, name validated by caller
-	// Ensure TERM is set to a capable terminal type so tmux can operate.
-	// With TERM unset or set to "dumb", tmux 3.6+ exits immediately with status 1.
-	if term := os.Getenv("TERM"); term == "" || term == "dumb" {
-		cmd.Env = append(os.Environ(), "TERM=xterm-256color")
-	}
+	cmd := m.tmuxCmd("attach-session", "-t", name)
+	// Always ensure TERM is a capable value. tmux 3.6+ exits immediately
+	// when TERM is unset, "dumb", or unrecognized.
+	cmd.Env = append(cmd.Env, "TERM=xterm-256color")
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
 		return nil, nil, fmt.Errorf("pty.Start tmux attach: %w", err)

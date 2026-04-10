@@ -985,14 +985,14 @@ describe("App", () => {
   });
 
   describe("AppLayout integration", () => {
-    it("renders with Cortex title in header", () => {
+    it("renders with Aether title in header", () => {
       const mockReturn = createMockUseIssuesReturn({});
       mockStoreState = mockReturn;
 
       render(<App />);
 
       expect(
-        screen.getByRole("heading", { name: "Cortex", level: 1 }),
+        screen.getByRole("heading", { name: "Aether", level: 1 }),
       ).toBeInTheDocument();
     });
 
@@ -2880,7 +2880,7 @@ describe("App", () => {
   });
 
   describe("WorkspaceBreadcrumb isMultiRepo guard", () => {
-    it("renders Cortex fallback in breadcrumb when isMultiRepo is false", () => {
+    it("renders Aether fallback in breadcrumb when isMultiRepo is false", () => {
       vi.mocked(useWorkspaceContext).mockReturnValue({
         workspace: { name: "my-workspace" },
         repos: [],
@@ -2911,14 +2911,18 @@ describe("App", () => {
       render(<App />);
 
       // Even though workspace has a name, isMultiRepo=false passes null to WorkspaceBreadcrumb
-      // which renders "Cortex" fallback
+      // which renders "Aether" fallback
       expect(
-        screen.getByRole("heading", { name: "Cortex", level: 1 }),
+        screen.getByRole("heading", { name: "Aether", level: 1 }),
       ).toBeInTheDocument();
-      expect(screen.queryByText("my-workspace")).not.toBeInTheDocument();
+      // Breadcrumb should NOT show workspace name (Aether fallback instead).
+      // Note: workspace name may still appear in the sidebar WorkspaceSelectorBar.
+      expect(
+        screen.queryByRole("heading", { name: "my-workspace", level: 1 }),
+      ).not.toBeInTheDocument();
     });
 
-    it("renders workspace name in breadcrumb when isMultiRepo is true", () => {
+    it("renders view label in breadcrumb when isMultiRepo is true", () => {
       vi.mocked(useWorkspaceContext).mockReturnValue({
         workspace: { name: "my-workspace" },
         repos: [],
@@ -2948,13 +2952,16 @@ describe("App", () => {
 
       render(<App />);
 
-      // isMultiRepo=true passes workspace.name to WorkspaceBreadcrumb, which renders
-      // the view label (with color dot) instead of the Cortex fallback. The workspace
-      // name itself is no longer shown in the breadcrumb; it lives in the sidebar.
+      // isMultiRepo=true passes workspace.name to WorkspaceBreadcrumb which
+      // renders the active view label ("Aether Project" for kanban).
+      // The workspace name itself is not shown in the breadcrumb; it lives
+      // in the sidebar WorkspaceSelectorBar.
       expect(
         screen.queryByRole("heading", { name: "Cortex", level: 1 }),
       ).not.toBeInTheDocument();
-      expect(screen.getByText("Aether Project")).toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { name: "Aether Project", level: 1 }),
+      ).toBeInTheDocument();
     });
   });
 

@@ -498,7 +498,17 @@ describe("useFilterState", () => {
         expect(result.current[0].groupBy).toBe(option);
       }
 
-      // "none" clears the groupBy param (becomes undefined)
+      // "epic" is the default — setting it clears the groupBy param
+      act(() => {
+        result.current[1].setGroupBy("epic");
+      });
+      expect(result.current[0].groupBy).toBeUndefined();
+
+      // Seed a non-default first, then "none" clears the groupBy param
+      act(() => {
+        result.current[1].setGroupBy("assignee");
+      });
+      expect(result.current[0].groupBy).toBe("assignee");
       act(() => {
         result.current[1].setGroupBy("none");
       });

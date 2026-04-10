@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -52,8 +53,9 @@ type TerminalManager struct {
 	sessionOwners      map[string]string             // user-facing session name -> workspace ID, guarded by mu
 	mu                 sync.RWMutex
 	tmuxPath           string
-	sessionPrefix      string // prepended to tmux session names for isolation between server instances
-	defaultCommand     string // command to run in all terminal sessions
+	tmuxEnv            []string // cached environment for tmux subprocesses (TMUX_TMPDIR pinned)
+	sessionPrefix      string   // prepended to tmux session names for isolation between server instances
+	defaultCommand     string   // command to run in all terminal sessions
 	defaultCols        uint16
 	defaultRows        uint16
 	maxSessions        int // maximum concurrent connections (immutable after construction)
@@ -75,6 +77,19 @@ func NewTerminalManager(defaultCommand, sessionPrefix string, maxSessions int) (
 	if maxSessions <= 0 {
 		maxSessions = defaultMaxTerminalSessions
 	}
+	// Cache environment for tmux subprocesses, adding TMUX_TMPDIR if absent
+	// so all tmux processes use the same socket path.
+	env := os.Environ()
+	hasTmpDir := false
+	for _, e := range env {
+		if strings.HasPrefix(e, "TMUX_TMPDIR=") {
+			hasTmpDir = true
+			break
+		}
+	}
+	if !hasTmpDir {
+		env = append(env, "TMUX_TMPDIR=/tmp")
+	}
 	return &TerminalManager{
 		sessions:           make(map[string]*TerminalSession),
 		pendingKills:       make(map[string]context.CancelFunc),
@@ -82,6 +97,7 @@ func NewTerminalManager(defaultCommand, sessionPrefix string, maxSessions int) (
 		scrollbackBuffers:  make(map[string]*ScrollbackBuffer),
 		sessionOwners:      make(map[string]string),
 		tmuxPath:           tmuxPath,
+		tmuxEnv:            env,
 		sessionPrefix:      sessionPrefix,
 		defaultCommand:     defaultCommand,
 		defaultCols:        80,
@@ -103,6 +119,22 @@ func (m *TerminalManager) tmuxName(name string) string {
 // The session prefix is applied automatically.
 func (m *TerminalManager) SessionExists(name string) bool {
 	return m.tmuxHasSession(m.tmuxName(name))
+}
+
+// checkAttachPreconditionsLocked verifies a session is not being killed
+// (tombstone, 30s TTL) and that the concurrent session limit is not exceeded.
+// Caller must hold m.mu.
+func (m *TerminalManager) checkAttachPreconditionsLocked(killKey string) error {
+	if killTime, beingKilled := m.killingSet[killKey]; beingKilled {
+		if time.Since(killTime) < 30*time.Second {
+			return ErrSessionBeingKilled
+		}
+		delete(m.killingSet, killKey)
+	}
+	if m.maxSessions > 0 && len(m.sessions) >= m.maxSessions {
+		return ErrMaxSessionsReached
+	}
+	return nil
 }
 
 // SetSessionOwner records which workspace owns a session.
@@ -217,16 +249,8 @@ func (m *TerminalManager) Attach(name, command string, cols, rows uint16) (*Term
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Reject attach if session is being killed (tombstone, 30s TTL).
-	if killTime, beingKilled := m.killingSet[name]; beingKilled {
-		if time.Since(killTime) < 30*time.Second {
-			return nil, ErrSessionBeingKilled
-		}
-		delete(m.killingSet, name)
-	}
-
-	if m.maxSessions > 0 && len(m.sessions) >= m.maxSessions {
-		return nil, ErrMaxSessionsReached
+	if err := m.checkAttachPreconditionsLocked(name); err != nil {
+		return nil, err
 	}
 
 	if !m.tmuxHasSession(internalName) {
@@ -283,36 +307,20 @@ func (m *TerminalManager) attachPTY(connID, internalName, command string, cols, 
 
 // AttachExistingRaw attaches a PTY connection to an already-running tmux session
 // name without applying session prefix rewriting and without creating a new session.
-//
-//nolint:funlen // sequential attach flow; splitting hurts readability
 func (m *TerminalManager) AttachExistingRaw(tmuxSessionName string, cols, rows uint16) (*TerminalSession, error) {
 	if !validSessionName.MatchString(tmuxSessionName) {
 		return nil, fmt.Errorf("invalid session name %q: must match [a-zA-Z0-9_-]+", tmuxSessionName)
 	}
-	if cols == 0 {
-		cols = m.defaultCols
-	}
-	if rows == 0 {
-		rows = m.defaultRows
-	}
+	cols, rows = m.normalizeDimensions(cols, rows)
 
-	connNum := m.connCounter.Add(1)
-	connID := fmt.Sprintf("%s:%d", tmuxSessionName, connNum)
+	connID := m.nextConnID(tmuxSessionName)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Reject attach if session is being killed (tombstone).
-	// AttachExistingRaw uses raw names, so check both with and without prefix.
-	if killTime, beingKilled := m.killingSet[tmuxSessionName]; beingKilled {
-		if time.Since(killTime) < 30*time.Second {
-			return nil, ErrSessionBeingKilled
-		}
-		delete(m.killingSet, tmuxSessionName)
-	}
-
-	if m.maxSessions > 0 && len(m.sessions) >= m.maxSessions {
-		return nil, ErrMaxSessionsReached
+	// AttachExistingRaw uses raw names, so the tombstone is keyed on the raw name.
+	if err := m.checkAttachPreconditionsLocked(tmuxSessionName); err != nil {
+		return nil, err
 	}
 
 	if !m.tmuxHasSession(tmuxSessionName) {
@@ -320,9 +328,8 @@ func (m *TerminalManager) AttachExistingRaw(tmuxSessionName string, cols, rows u
 	}
 
 	// Mirror Talk-to-Lead behavior so wheel/input interactions are consistent.
-	mouseCmd := exec.Command(m.tmuxPath, "set-option", "-t", tmuxSessionName, "mouse", "on") //nolint:gosec // G204: tmuxPath is validated at init
-	if err := mouseCmd.Run(); err != nil {
-		slog.Warn("failed to enable mouse mode for session", "session", tmuxSessionName, "err", err)
+	if out, err := m.tmuxCmd("set-option", "-t", tmuxSessionName, "mouse", "on").CombinedOutput(); err != nil {
+		slog.Warn("failed to enable mouse mode for session", "session", tmuxSessionName, "err", err, "output", strings.TrimSpace(string(out)))
 	}
 
 	cmd, ptmx, err := m.tmuxAttach(tmuxSessionName)
@@ -353,7 +360,7 @@ type tmuxSessionMeta struct {
 }
 
 func (m *TerminalManager) listTmuxSessions() ([]tmuxSessionMeta, error) {
-	cmd := exec.Command(m.tmuxPath, "list-sessions", "-F", "#{session_name}\t#{session_created}") //nolint:gosec // G204: tmuxPath is validated at init
+	cmd := m.tmuxCmd("list-sessions", "-F", "#{session_name}\t#{session_created}")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		msg := strings.ToLower(string(out))
@@ -479,8 +486,7 @@ func (m *TerminalManager) Resize(connID string, cols, rows uint16) error {
 	}
 
 	// Also tell tmux to resize the window so content reflows properly.
-	cmd := exec.Command(m.tmuxPath, "resize-window", "-t", session.Name, "-x", fmt.Sprintf("%d", cols), "-y", fmt.Sprintf("%d", rows)) //nolint:gosec // G204: tmuxPath is validated at init
-	if err := cmd.Run(); err != nil {
+	if err := m.tmuxCmd("resize-window", "-t", session.Name, "-x", fmt.Sprintf("%d", cols), "-y", fmt.Sprintf("%d", rows)).Run(); err != nil {
 		return fmt.Errorf("tmux resize-window: %w", err)
 	}
 

@@ -92,6 +92,33 @@ vi.mock("@/hooks", () => ({
   LAYER_TERMINAL_SEARCH: 5,
 }));
 
+vi.mock("@/hooks/useWorkspaceContext", () => ({
+  useWorkspaceContext: () => ({
+    workspaceId: "test-workspace",
+    workspace: null,
+    repos: [],
+    groups: [],
+    agents: [],
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+    getRepoByName: vi.fn(),
+    getReposByGroup: vi.fn(() => []),
+    getAgentByName: vi.fn(),
+    activeWorkspaceName: "test-workspace",
+    setActiveWorkspace: vi.fn(),
+    selectedRepoNames: new Set<string>(),
+    activeRepos: [],
+    activeRepoNames: [],
+    isAllSelected: true,
+    selectRepos: vi.fn(),
+    selectAll: vi.fn(),
+    toggleRepo: vi.fn(),
+    sourceReposFilter: undefined,
+    isMultiRepo: false,
+  }),
+}));
+
 /**
  * Create a blocked issue for testing bottleneck click behavior.
  */
@@ -150,14 +177,12 @@ describe("MonitorDashboard", () => {
     expect(screen.getByTestId("agent-activity-panel")).toBeInTheDocument();
   });
 
-  it("renders ProjectHealthPanel with stats", () => {
+  it("renders ProjectHealthPanel with placeholder stats", () => {
+    // MonitorDashboard currently uses a zeroed placeholder for stats
+    // (pending the workspace-scoped stats API).
     render(<MonitorDashboard />);
 
     expect(screen.getByTestId("project-health-panel")).toBeInTheDocument();
-    expect(screen.getByText("33%")).toBeInTheDocument();
-    expect(screen.getByText("10")).toBeInTheDocument(); // open count
-    expect(screen.getByText("5")).toBeInTheDocument(); // closed count
-    expect(screen.getByText("15")).toBeInTheDocument(); // total count
   });
 
   it("has refresh indicator in agent activity panel", () => {

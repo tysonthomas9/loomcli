@@ -147,3 +147,19 @@ func InspectCapabilities(b cli.Backend) BackendCapabilities {
 
 	return caps
 }
+
+// CheckBackendHealth returns the health status of the named backend.
+// Returns (status, true) if the backend supports health checks, or
+// (zero, false) if the backend is not registered or does not implement
+// HealthCheckableBackend.
+func CheckBackendHealth(name string) (HealthStatus, bool) {
+	b, ok := cli.GetBackendByName(name)
+	if !ok {
+		return HealthStatus{}, false
+	}
+	caps := InspectCapabilities(b)
+	if !caps.HasHealthCheck {
+		return HealthStatus{}, false
+	}
+	return caps.Health.HealthCheck(), true
+}

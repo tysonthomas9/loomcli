@@ -7,6 +7,7 @@ import { useState, useCallback } from "react";
 
 import type { WorkspaceSummary } from "@/api/workspace";
 import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher";
+import { getWorkspaceColor } from "@/utils/workspace";
 
 import styles from "./WorkspaceSelectorBar.module.css";
 
@@ -61,7 +62,10 @@ export function WorkspaceSelectorBar({
         aria-expanded={isSwitcherOpen}
         aria-label={`Active workspace: ${workspaceName}. Click to switch.`}
       >
-        <span className={styles.icon}>&#x25C6;</span>
+        <span
+          className={styles.dot}
+          style={{ backgroundColor: getWorkspaceColor(workspaceName) }}
+        />
         <span className={styles.name}>{workspaceName}</span>
         <span className={styles.chevron}>&#x25BE;</span>
       </button>

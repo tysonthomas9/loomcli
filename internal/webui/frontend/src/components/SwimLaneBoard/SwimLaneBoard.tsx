@@ -22,14 +22,11 @@ import { useWorkspaceContext } from "@/hooks/workspace";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
 import { DraggableIssueCard } from "@/components/DraggableIssueCard";
 import { EmptyWorkspaceBoard } from "@/components/EmptyWorkspaceBoard";
-import type { BlockedInfo } from "@/components/KanbanBoard";
-import { KanbanBoard } from "@/components/KanbanBoard";
 import {
-  DEFAULT_COLUMNS,
-  createColumns,
-} from "@/components/KanbanBoard/columnConfigs";
-import type { KanbanColumnConfig } from "@/components/KanbanBoard/types";
-import { formatStatusLabel } from "@/utils/issue";
+  KanbanBoard,
+  type BlockedInfo,
+  type KanbanColumnConfig,
+} from "@/components/KanbanBoard";
 import { SwimLane } from "@/components/SwimLane";
 import type { FilterState } from "@/hooks/issues";
 import type { Issue, Status } from "@/types";
@@ -40,68 +37,12 @@ import {
   type GroupByField,
   type LaneGroup,
 } from "./groupingUtils";
+import {
+  loadCollapsedLanes,
+  saveCollapsedLanes,
+  resolveColumns,
+} from "./swimLaneStorage";
 import styles from "./SwimLaneBoard.module.css";
-
-/**
- * Scoped key suffix for collapsed lanes state.
- * Combined with groupBy for unique key per grouping mode.
- */
-function scopedLaneKey(groupBy: GroupByField): string {
-  return `swimlane-collapsed-${groupBy}`;
-}
-
-/**
- * Helper to load collapsed lanes from scoped localStorage.
- */
-function loadCollapsedLanes(
-  groupBy: GroupByField,
-  wsId: string | null,
-): Set<string> {
-  if (groupBy === "none" || !wsId) return new Set();
-  try {
-    const stored = wsGet(wsId, scopedLaneKey(groupBy));
-    if (stored) {
-      const parsed: unknown = JSON.parse(stored);
-      if (
-        Array.isArray(parsed) &&
-        parsed.every((item): item is string => typeof item === "string")
-      ) {
-        return new Set(parsed);
-      }
-    }
-  } catch {
-    // Silently fail if localStorage unavailable or invalid JSON
-  }
-  return new Set();
-}
-
-/**
- * Helper to save collapsed lanes to scoped localStorage.
- */
-function saveCollapsedLanes(
-  groupBy: GroupByField,
-  lanes: Set<string>,
-  wsId: string | null,
-): void {
-  if (groupBy === "none" || !wsId) return;
-  wsSet(wsId, scopedLaneKey(groupBy), JSON.stringify([...lanes]));
-}
-
-/**
- * Convert legacy statuses to column configs for backward compatibility.
- * Handles undefined status as 'open' for backward compatibility.
- */
-function statusesToColumns(statuses: Status[]): KanbanColumnConfig[] {
-  return statuses.map((s) => ({
-    id: s,
-    label: formatStatusLabel(s),
-    filter: (issue: Issue) =>
-      s === "open"
-        ? issue.status === s || issue.status === undefined
-        : issue.status === s,
-    targetStatus: s,
-  }));
-}
 
 /**
  * Props for the SwimLaneBoard component.
@@ -161,14 +102,10 @@ export function SwimLaneBoard({
   pendingIds,
   isMultiRepo,
 }: SwimLaneBoardProps): JSX.Element {
-  // Resolve columns: props.columns > props.statuses (legacy) > default
-  // In swim lane mode (groupBy !== 'none'), include epics in columns so they appear in lanes
-  const columns = useMemo(() => {
-    if (propColumns) return propColumns;
-    if (statuses) return statusesToColumns(statuses);
-    if (groupBy !== "none") return createColumns({ includeEpics: true });
-    return DEFAULT_COLUMNS;
-  }, [propColumns, statuses, groupBy]);
+  const columns = useMemo(
+    () => resolveColumns(propColumns, statuses, groupBy),
+    [propColumns, statuses, groupBy],
+  );
 
   // When groupBy='none', delegate to KanbanBoard
   if (groupBy === "none") {
