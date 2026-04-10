@@ -153,6 +153,33 @@ export async function getSessionStatus(
   return result;
 }
 
+export interface LeadSessionResult {
+  session_name: string;
+  backend: string;
+}
+
+/**
+ * Create a new tmux session running `loom lead --backend <backend> --message <text>`.
+ * The user's message is baked into the loom-lead invocation so the agent receives it
+ * as part of its initial prompt — no post-hoc send-keys or readiness polling needed.
+ */
+export async function createLeadSession(
+  workspaceId: string,
+  message: string,
+  backend: string,
+): Promise<LeadSessionResult> {
+  const { post } = await import("@/api/common");
+  const response = await post<{
+    success: boolean;
+    data?: LeadSessionResult;
+    error?: string;
+  }>(wsUrl(workspaceId, "/terminal/lead-session"), { message, backend });
+  if (!response.success || !response.data) {
+    throw new ApiError(500, response.error ?? "failed to create lead session");
+  }
+  return response.data;
+}
+
 export interface IssueContext {
   issue_id: string;
   title: string;

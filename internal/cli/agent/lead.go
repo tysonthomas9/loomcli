@@ -12,6 +12,11 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 )
 
+// leadMessage is an optional initial user request appended to the lead system
+// prompt so the agent starts with a concrete task to address. Populated by the
+// --message flag.
+var leadMessage string
+
 var leadCmd = &cobra.Command{
 	Use:     "lead",
 	Short:   "Interactive project management with AI agent",
@@ -26,13 +31,18 @@ human-collaborative mode where the AI agent helps you:
   - Manage dependencies between tickets
 
 This command does not require a worktree - it can run from the main
-repository or any worktree.`,
+repository or any worktree.
+
+Use --message to seed the session with an initial user request. The message
+is appended to the lead system prompt, so the agent performs its normal
+lead-mode startup and then addresses the request using lead-mode conventions.`,
 	Args: cobra.NoArgs,
 	Run:  runLead,
 }
 
 func init() {
 	cli.RegisterCommand(leadCmd)
+	leadCmd.Flags().StringVar(&leadMessage, "message", "", "Initial user request to address in lead mode")
 }
 
 func runLead(cmd *cobra.Command, args []string) {
@@ -58,8 +68,12 @@ func runLead(cmd *cobra.Command, args []string) {
 	fmt.Println("=========================================")
 	fmt.Println()
 
-	// Generate the lead prompt
+	// Generate the lead prompt and append the user's initial request if provided.
 	prompt := GenerateLeadPrompt()
+	if leadMessage != "" {
+		prompt += "\n\n## User's Initial Request\n\n" + leadMessage +
+			"\n\nAddress this request using the lead mode conventions above."
+	}
 
 	// Invoke agent interactively (no agent name needed - lead mode doesn't claim tasks)
 	if err := cli.InvokeAgent(workDir, prompt, ""); err != nil {

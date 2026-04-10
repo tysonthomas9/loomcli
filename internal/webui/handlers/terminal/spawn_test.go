@@ -27,6 +27,9 @@ func (m *mockSpawnService) SpawnSession(ctx context.Context, wsID string, params
 }
 
 // --- Stub methods required by TerminalService interface ---
+func (m *mockSpawnService) CreateLeadSession(_ context.Context, _ string, _ *LeadSessionParams) (*LeadSessionResult, error) {
+	panic("not implemented")
+}
 func (m *mockSpawnService) GenerateToken(_ context.Context, _, _ string) (string, error) {
 	panic("not implemented")
 }

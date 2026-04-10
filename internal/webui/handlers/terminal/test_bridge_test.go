@@ -35,6 +35,8 @@ type TerminalTabModule = TabModule
 type TerminalService = service.TerminalService
 type SpawnParams = service.SpawnParams
 type SpawnResult = service.SpawnResult
+type LeadSessionParams = service.LeadSessionParams
+type LeadSessionResult = service.LeadSessionResult
 type TerminalRestartResult = service.TerminalRestartResult
 type TerminalStatusResult = service.TerminalStatusResult
 type TerminalSessionInfo = service.TerminalSessionInfo
@@ -327,6 +329,9 @@ func (s *stubTerminalService) ListSessions(_ context.Context, _ string) ([]servi
 }
 func (s *stubTerminalService) SpawnSession(_ context.Context, _ string, _ *service.SpawnParams) (*service.SpawnResult, error) {
 	return &service.SpawnResult{}, nil
+}
+func (s *stubTerminalService) CreateLeadSession(_ context.Context, _ string, _ *service.LeadSessionParams) (*service.LeadSessionResult, error) {
+	return &service.LeadSessionResult{}, nil
 }
 func (s *stubTerminalService) SeedSession(_ context.Context, _ string, _ *service.SeedParams) error {
 	return nil

@@ -78,6 +78,7 @@ func (m *Module) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/workspaces/{ws}/terminal/kill", HandleTerminalKill(m.termSvc, m.termAuth))
 	mux.HandleFunc("GET /api/workspaces/{ws}/terminal/session-status", HandleTerminalSessionStatus(m.termSvc, m.termAuth))
 	mux.HandleFunc("POST /api/workspaces/{ws}/terminal/spawn", HandleTerminalSpawn(m.termSvc))
+	mux.HandleFunc("POST /api/workspaces/{ws}/terminal/lead-session", HandleCreateLeadSession(m.termSvc))
 	mux.HandleFunc("POST /api/workspaces/{ws}/terminal/sessions/{name}/seed", HandleSeedTerminalSession(m.termSvc))
 	mux.HandleFunc("POST /api/workspaces/{ws}/terminal/sessions/{session}/kill", HandleScheduleSessionKill(m.termSvc))
 	mux.HandleFunc("POST /api/workspaces/{ws}/terminal/sessions/close-all", HandleCloseAllSessions(m.termSvc))

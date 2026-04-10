@@ -207,6 +207,65 @@ func (s *terminalServiceImpl) SpawnSession(_ context.Context, wsID string, param
 	}, nil
 }
 
+// leadMessageMaxLen caps the user-supplied message to avoid comically large argv
+// payloads. tmux and the backend agent handle long prompts, but we draw a
+// reasonable line here to protect against accidental pastes or abuse.
+const leadMessageMaxLen = 16 * 1024
+
+// CreateLeadSession spawns a detached tmux session running
+// `loom lead --backend <backend> --message <message>`. Because the message is
+// baked into the argv, the backend agent receives the user's request as part
+// of its initial prompt — no send-keys, no readiness polling, no TUI scraping.
+func (s *terminalServiceImpl) CreateLeadSession(_ context.Context, wsID string, params *service.LeadSessionParams) (*service.LeadSessionResult, error) {
+	if s.termMgr == nil {
+		return nil, service.ErrUnavailable("terminal manager not initialized")
+	}
+
+	message := strings.TrimSpace(params.Message)
+	if message == "" {
+		return nil, service.ErrValidation("message is required")
+	}
+	if len(message) > leadMessageMaxLen {
+		return nil, service.ErrValidation(fmt.Sprintf("message too long (max %d bytes)", leadMessageMaxLen))
+	}
+
+	backend := strings.TrimSpace(params.Backend)
+	if backend == "" {
+		return nil, service.ErrValidation("backend is required")
+	}
+	if !isValidBackend(backend) {
+		return nil, service.ErrValidation(fmt.Sprintf("invalid backend %q; valid: %s", backend, strings.Join(validBackends, ", ")))
+	}
+
+	// "lead-<backend>-<unix_ms>" — timestamp-based so concurrent submissions
+	// get unique names without inspecting existing sessions.
+	sessionName := fmt.Sprintf("lead-%s-%d", backend, time.Now().UnixMilli())
+	if !validSessionName.MatchString(sessionName) {
+		// Defensive: backend name and digits should always satisfy the regex.
+		return nil, service.ErrInternal("generated session name failed validation", nil)
+	}
+
+	// Passing argv as separate elements avoids shell interpretation of the
+	// user's message — no quoting bugs, no injection.
+	argv := []string{"loom", "lead", "--backend", backend, "--message", message}
+
+	created, err := s.termMgr.SpawnArgv(sessionName, argv, 120, 40)
+	if err != nil {
+		return nil, service.ErrInternal("failed to spawn lead session", err)
+	}
+	if !created {
+		return nil, service.ErrConflict("session already exists")
+	}
+	if wsID != "" {
+		s.termMgr.SetSessionOwner(sessionName, wsID)
+	}
+
+	return &service.LeadSessionResult{
+		SessionName: sessionName,
+		Backend:     backend,
+	}, nil
+}
+
 func (s *terminalServiceImpl) SeedSession(_ context.Context, session string, params *service.SeedParams) error {
 	if s.termMgr == nil {
 		return service.ErrUnavailable("terminal manager not initialized")

@@ -1,9 +1,10 @@
 import { useEffect, useRef, useCallback } from "react";
 
 import type { IssueContext } from "@/api/terminal";
-import { seedTerminalSession } from "@/hooks/api";
+import { seedTerminalSession, scheduleSessionKill } from "@/hooks/api";
 
 import type { ConnectionState } from "./TerminalInstance";
+import type { PendingLeadSession } from "@/components/TerminalView/TerminalView";
 import {
   MAX_TABS,
   type TabState,
@@ -15,6 +16,8 @@ interface UseSessionSeedingOptions {
   onIssueContextConsumed?: (() => void) | undefined;
   pendingAgentName: string | undefined;
   onAgentNameConsumed?: (() => void) | undefined;
+  pendingLeadSession?: PendingLeadSession | undefined;
+  onLeadSessionConsumed?: (() => void) | undefined;
   tabs: TabState[];
   setTabs: React.Dispatch<React.SetStateAction<TabState[]>>;
   setActiveTabId: React.Dispatch<React.SetStateAction<string>>;
@@ -38,6 +41,8 @@ export function useSessionSeeding({
   onIssueContextConsumed,
   pendingAgentName,
   onAgentNameConsumed,
+  pendingLeadSession,
+  onLeadSessionConsumed,
   tabs,
   setTabs,
   setActiveTabId,
@@ -141,6 +146,61 @@ export function useSessionSeeding({
     initializedRef,
     setTabs,
     setActiveTabId,
+  ]);
+
+  // Handle pending lead session: create or focus a tab for a backend-spawned
+  // `loom lead --message <...>` session. The backend already seeded the
+  // user's request as part of the tmux invocation, so no client-side
+  // send-keys seeding is required. If the tab limit has been reached, tear
+  // down the orphaned tmux session so it does not leak.
+  useEffect(() => {
+    if (!pendingLeadSession || !initializedRef.current) return;
+
+    const { sessionName, backend } = pendingLeadSession;
+
+    const existingTab = tabs.find((t) => t.sessionName === sessionName);
+    if (existingTab) {
+      setActiveTabId(existingTab.id);
+      onLeadSessionConsumed?.();
+      return;
+    }
+
+    if (tabs.length >= MAX_TABS) {
+      scheduleSessionKill(workspaceIdRef.current, sessionName, true).catch(
+        (err) =>
+          console.error(
+            `Failed to kill orphaned lead session ${sessionName}:`,
+            err,
+          ),
+      );
+      onLeadSessionConsumed?.();
+      return;
+    }
+
+    const newTab: TabState = {
+      id: sessionName,
+      label: sessionName,
+      sessionName,
+      connectionState: "disconnected" as ConnectionState,
+      backendName: backend,
+    };
+    setTabs((prev) => [...prev, newTab]);
+    setActiveTabId(sessionName);
+
+    createTab(sessionName, newTab.label, tabs.length).catch((err) =>
+      console.error(`Failed to persist lead tab ${sessionName}:`, err),
+    );
+
+    onLeadSessionConsumed?.();
+  }, [
+    pendingLeadSession,
+    tabs,
+    createTab,
+    onLeadSessionConsumed,
+    initializedRef,
+    setTabs,
+    setActiveTabId,
+    workspaceIdRef,
   ]);
 
   const trySeedOnConnect = useCallback(

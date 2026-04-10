@@ -79,8 +79,14 @@ func (m *TerminalManager) tmuxNewSession(name, command string, cols, rows uint16
 	if err := m.tmuxCmd(args...).Run(); err != nil {
 		return err
 	}
+	m.applySessionOptions(name)
+	return nil
+}
 
-	// Enable mouse mode and set scrollback history limit.
+// applySessionOptions enables mouse mode and sets the scrollback history limit
+// on an existing tmux session. Failures are logged but not returned — these are
+// best-effort ergonomic tweaks, not correctness requirements.
+func (m *TerminalManager) applySessionOptions(name string) {
 	for _, opt := range [][2]string{
 		{"mouse", "on"},
 		{"history-limit", fmt.Sprintf("%d", m.scrollbackMaxLines)},
@@ -89,7 +95,6 @@ func (m *TerminalManager) tmuxNewSession(name, command string, cols, rows uint16
 			slog.Warn("failed to set tmux option", "option", opt[0], "session", name, "err", err)
 		}
 	}
-	return nil
 }
 
 // tmuxAttach spawns a tmux attach-session process with a PTY.

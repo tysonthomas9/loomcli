@@ -32,6 +32,7 @@ export type { SessionRecord } from "@/api/terminal";
 // Terminal sub-module functions not in the @/api barrel.
 export {
   spawnTerminalSession,
+  createLeadSession,
   patchTerminalState,
   getExportUrl,
   restartTerminalSession,

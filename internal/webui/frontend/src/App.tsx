@@ -19,7 +19,8 @@ import { useStore } from "zustand";
 import { useParams, useNavigate, useLocation, Outlet } from "react-router-dom";
 
 import { updateIssue, addComment, closeIssue } from "@/api";
-import type { IssueContext } from "@/api/terminal";
+import type { IssueContext, LeadSessionResult } from "@/api/terminal";
+import { createLeadSession } from "@/hooks/api";
 import { getAgentTerminalInfo } from "@/api/terminal";
 import { buildShareUrl } from "@/utils/buildShareUrl";
 import { getReviewType } from "@/utils/issue";
@@ -44,10 +45,11 @@ import {
   ThemeToggle,
   KeyboardCheatsheet,
   WorkspaceSwitcher,
-  CreateIssueModal,
   CreateWorkspaceModal,
   UserMenu,
+  NewRequestPopover,
 } from "@/components";
+import type { PendingLeadSession } from "@/components/TerminalView";
 import { SearchTermProvider } from "@/contexts/SearchTermContext";
 import {
   WorkspaceViewProvider,
@@ -67,6 +69,7 @@ import {
   useBlockedIssues,
   useIssueDetail,
   useToast,
+  useBackendConfig,
   useTheme,
   useWorkspaceContext,
   useWorkspaceState,
@@ -410,8 +413,13 @@ function App() {
   // Create workspace modal state
   const [showCreateWorkspace, setShowCreateWorkspace] = useState(false);
 
-  // Create issue modal state
-  const [showCreateIssue, setShowCreateIssue] = useState(false);
+  // New-request modal (replaces the old "Create Issue" modal: submitting the
+  // free-text form spawns a new `loom lead --message <text>` terminal).
+  const [isNewRequestOpen, setIsNewRequestOpen] = useState(false);
+  const [pendingLeadSession, setPendingLeadSession] = useState<
+    PendingLeadSession | undefined
+  >(undefined);
+  const { config: backendConfig } = useBackendConfig();
 
   // Track mount state for async operations (must set true in setup for StrictMode compatibility)
   useEffect(() => {
@@ -746,6 +754,40 @@ function App() {
     setPendingAgentName(undefined);
   }, []);
 
+  const handleLeadSessionConsumed = useCallback(() => {
+    setPendingLeadSession(undefined);
+  }, []);
+
+  // Submit handler for the NewRequestPopover. Spawns a fresh `loom lead
+  // --backend X --message <text>` tmux session on the backend, then sets
+  // pendingLeadSession so TerminalView creates a tab and attaches to it.
+  // On failure, rethrows so the popover surfaces an inline error and keeps
+  // the user's text intact for retry.
+  const handleNewRequestSubmit = useCallback(
+    async (text: string) => {
+      const backend = backendConfig?.backend;
+      if (!backend) {
+        // The popover is disabled while backendConfig is loading, so this is a
+        // defensive guard against a race where the button was enabled but the
+        // config flipped back to undefined before submit.
+        throw new Error("Backend configuration not loaded yet");
+      }
+      const result: LeadSessionResult = await createLeadSession(
+        workspaceId,
+        text,
+        backend,
+      );
+      if (!mountedRef.current) return;
+      setPendingLeadSession({
+        sessionName: result.session_name,
+        backend: result.backend,
+      });
+      setActiveView("terminal");
+      setIsNewRequestOpen(false);
+    },
+    [backendConfig?.backend, workspaceId, setActiveView],
+  );
+
   // Focus search input (for Cmd/Ctrl+K shortcut in single-repo mode)
   const handleSearchFocus = useCallback(() => {
     searchInputRef.current?.focus();
@@ -934,7 +976,8 @@ function App() {
         />
         <button
           className={styles.newIssueButton}
-          onClick={() => setShowCreateIssue(true)}
+          onClick={() => setIsNewRequestOpen(true)}
+          aria-haspopup="dialog"
           data-testid="new-issue-button"
         >
           + New Issue
@@ -1072,6 +1115,8 @@ function App() {
                 onIssueContextConsumed={handleIssueContextConsumed}
                 pendingAgentName={pendingAgentName}
                 onAgentNameConsumed={handleAgentNameConsumed}
+                pendingLeadSession={pendingLeadSession}
+                onLeadSessionConsumed={handleLeadSessionConsumed}
                 onActiveSessionCountChange={setActiveSessionCount}
                 onUnreadChange={setHasTerminalUnread}
                 onEscape={() => {
@@ -1120,12 +1165,11 @@ function App() {
           }
         }}
       />
-      <CreateIssueModal
-        isOpen={showCreateIssue}
-        onClose={() => setShowCreateIssue(false)}
-        onSuccess={() => {
-          refetch();
-        }}
+      <NewRequestPopover
+        isOpen={isNewRequestOpen}
+        onClose={() => setIsNewRequestOpen(false)}
+        onSubmit={handleNewRequestSubmit}
+        disabled={!backendConfig?.backend}
       />
     </KeyboardShortcutProvider>
   );

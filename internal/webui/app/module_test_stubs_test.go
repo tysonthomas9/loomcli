@@ -45,6 +45,9 @@ func (s *stubTerminalService) ListSessions(_ context.Context, _ string) ([]servi
 func (s *stubTerminalService) SpawnSession(_ context.Context, _ string, _ *service.SpawnParams) (*service.SpawnResult, error) {
 	return &service.SpawnResult{}, nil
 }
+func (s *stubTerminalService) CreateLeadSession(_ context.Context, _ string, _ *service.LeadSessionParams) (*service.LeadSessionResult, error) {
+	return &service.LeadSessionResult{}, nil
+}
 func (s *stubTerminalService) SeedSession(_ context.Context, _ string, _ *service.SeedParams) error {
 	return nil
 }

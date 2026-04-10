@@ -17,6 +17,7 @@ type TerminalService interface {
 	GetSessionStatus(ctx context.Context, session string) (*TerminalStatusResult, error)
 	ListSessions(ctx context.Context, wsID string) ([]TerminalSessionInfo, error)
 	SpawnSession(ctx context.Context, wsID string, params *SpawnParams) (*SpawnResult, error)
+	CreateLeadSession(ctx context.Context, wsID string, params *LeadSessionParams) (*LeadSessionResult, error)
 	SeedSession(ctx context.Context, session string, params *SeedParams) error
 	ScheduleKill(ctx context.Context, session string) error
 	CloseAllSessions(ctx context.Context) (*CloseAllResult, error)
@@ -70,6 +71,18 @@ type SpawnResult struct {
 	Backend     string
 	Command     string
 	Created     bool
+}
+
+// LeadSessionParams are the domain-level parameters for creating a lead session.
+type LeadSessionParams struct {
+	Message string
+	Backend string
+}
+
+// LeadSessionResult contains the created lead session identifiers.
+type LeadSessionResult struct {
+	SessionName string
+	Backend     string
 }
 
 // SeedParams are the domain-level parameters for seeding a terminal session.

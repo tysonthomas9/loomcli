@@ -48,6 +48,17 @@ import {
 } from "./tabs";
 import styles from "./TerminalView.module.css";
 
+/**
+ * Descriptor for a tmux session that was pre-spawned on the backend (e.g. via
+ * the /api/terminal/lead-session endpoint). TerminalView consumes this to
+ * create a matching tab and attach to the existing session. The tab label is
+ * derived from `sessionName`.
+ */
+export interface PendingLeadSession {
+  sessionName: string;
+  backend: string;
+}
+
 interface TerminalViewProps {
   isActive?: boolean;
   pendingIssueContext?: IssueContext | undefined;
@@ -61,6 +72,14 @@ interface TerminalViewProps {
   pendingAgentName?: string | undefined;
   /** Called after pendingAgentName has been processed. */
   onAgentNameConsumed?: (() => void) | undefined;
+  /**
+   * When set, creates (or focuses) a tab for a lead session that was already
+   * pre-spawned on the backend. The session runs `loom lead --backend X
+   * --message <user text>` so no client-side seeding is required.
+   */
+  pendingLeadSession?: PendingLeadSession | undefined;
+  /** Called after pendingLeadSession has been processed. */
+  onLeadSessionConsumed?: (() => void) | undefined;
 }
 
 export function TerminalView({
@@ -74,6 +93,8 @@ export function TerminalView({
   onNavigateToSettings,
   pendingAgentName,
   onAgentNameConsumed,
+  pendingLeadSession,
+  onLeadSessionConsumed,
 }: TerminalViewProps): JSX.Element {
   const [tabs, setTabs] = useState<TabState[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>("");
@@ -184,6 +205,8 @@ export function TerminalView({
     onIssueContextConsumed,
     pendingAgentName,
     onAgentNameConsumed,
+    pendingLeadSession,
+    onLeadSessionConsumed,
     tabs,
     setTabs,
     setActiveTabId,
