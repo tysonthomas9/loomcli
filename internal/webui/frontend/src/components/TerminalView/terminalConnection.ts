@@ -6,7 +6,7 @@
 import type { FitAddon } from "@xterm/addon-fit";
 import type { Terminal } from "@xterm/xterm";
 
-import { get } from "@/api/client";
+import { get, getWsBaseUrl } from "@/api/client";
 import { getAgentTerminalToken, getAgentTerminalWsUrl } from "@/api/logs";
 
 import type { ConnectionState } from "./TerminalInstance";
@@ -36,8 +36,7 @@ function buildWsUrl(
   sessionName: string,
   token: string | null,
 ): string {
-  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  let url = `${proto}//${window.location.host}/api/terminal/ws?session=${encodeURIComponent(sessionName)}`; // allow-url
+  let url = `${getWsBaseUrl()}/api/terminal/ws?session=${encodeURIComponent(sessionName)}`; // allow-url
   if (token) {
     url += `&token=${encodeURIComponent(token)}`;
   }

@@ -6,6 +6,8 @@ import {
   unwrapResponse,
   get,
   wsUrl,
+  getApiOrigin,
+  getWsBaseUrl,
 } from "./client";
 
 export interface TerminalSessionInfo {
@@ -59,13 +61,7 @@ export function buildTerminalWsUrl(
   sessionName: string,
   token: string | null,
 ): string {
-  const location =
-    typeof window !== "undefined"
-      ? window.location
-      : (globalThis as { location?: Location }).location;
-  const proto = location?.protocol === "https:" ? "wss:" : "ws:";
-  const host = location?.host ?? "localhost";
-  let url = `${proto}//${host}/api/workspaces/${encodeURIComponent(workspaceId)}/terminal/ws?session=${encodeURIComponent(sessionName)}`; // allow-url
+  let url = `${getWsBaseUrl()}${wsUrl(workspaceId, "/terminal/ws")}?session=${encodeURIComponent(sessionName)}`;
   if (token) {
     url += `&token=${encodeURIComponent(token)}`;
   }
@@ -424,17 +420,19 @@ export async function getScrollbackInfo(
 
 /**
  * Export session scrollback as a downloadable file.
- * Returns the URL for direct browser download.
+ * Returns the URL for direct browser download. Absolute when VITE_API_BASE_URL
+ * is set so window.open() reaches the API server on a cross-origin deployment.
  */
 export function getExportUrl(
   workspaceId: string,
   sessionName: string,
   format: "txt" | "md" = "txt",
 ): string {
-  return wsUrl(
+  const path = wsUrl(
     workspaceId,
     `/terminal/sessions/${encodeURIComponent(sessionName)}/export?format=${format}`,
   );
+  return `${getApiOrigin()}${path}`;
 }
 
 /**

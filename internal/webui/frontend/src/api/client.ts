@@ -3,6 +3,39 @@ import type { paths } from "@/types/generated/openapi";
 
 const DEFAULT_TIMEOUT = 30000;
 
+/**
+ * API server base URL, set at build time via VITE_API_BASE_URL.
+ * Empty string = same-origin deployment (reverse proxy or Vite dev proxy).
+ * Trailing slashes are stripped to avoid double slashes in constructed URLs.
+ */
+export const API_BASE_URL: string = (
+  (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? ""
+).replace(/\/$/, "");
+
+/**
+ * Return the API origin for use in absolute URLs (SSE EventSource, etc.).
+ * Falls back to window.location.origin for same-origin deployments.
+ * In non-browser environments (Node-based unit tests) where window is
+ * unavailable, falls back to "http://localhost" — matching the legacy
+ * behavior the old helpers exposed to tests.
+ */
+export function getApiOrigin(): string {
+  if (API_BASE_URL) return API_BASE_URL;
+  if (typeof window !== "undefined" && window.location) {
+    return window.location.origin;
+  }
+  return "http://localhost";
+}
+
+/**
+ * Derive the WebSocket base URL from the API origin.
+ * Converts http: → ws:, https: → wss:.
+ */
+export function getWsBaseUrl(): string {
+  const origin = getApiOrigin();
+  return origin.replace(/^http/, "ws");
+}
+
 // Auth token stored in memory (not localStorage) for XSS safety
 let authToken: string | null = null;
 
@@ -217,7 +250,7 @@ const apiMiddleware: Middleware = {
 };
 
 /** Typed openapi-fetch client for all REST API calls. */
-export const api = createClient<paths>({ baseUrl: "" });
+export const api = createClient<paths>({ baseUrl: API_BASE_URL });
 api.use(apiMiddleware);
 
 // ============= Helpers for facade layer =============
@@ -306,7 +339,7 @@ async function fetchApi<T>(
 
     const requestBody = body !== undefined ? JSON.stringify(body) : null;
 
-    const response = await fetch(`${path}`, {
+    const response = await fetch(`${API_BASE_URL}${path}`, {
       method,
       headers,
       body: requestBody,

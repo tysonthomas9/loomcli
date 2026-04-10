@@ -3,6 +3,10 @@ import { defineConfig } from "vite"
 import react from "@vitejs/plugin-react"
 import path from "path"
 
+// Dev proxy target: forward /api and /health requests to this URL.
+// Defaults to the local Go server when VITE_API_BASE_URL is unset.
+const apiProxyTarget = process.env.VITE_API_BASE_URL || "http://localhost:8080";
+
 export default defineConfig(({ mode }) => ({
   plugins: [react()],
 
@@ -15,14 +19,14 @@ export default defineConfig(({ mode }) => ({
   build: {
     outDir: "dist",
     emptyOutDir: true,
-    // Optimize for Go embedding
+    // Static asset organization
     assetsDir: "assets",
     // Generate source maps for production debugging
     sourcemap: mode === "development",
     // Rollup options for chunking
     rollupOptions: {
       output: {
-        // Predictable asset names for Go embedding
+        // Predictable asset names for cache busting
         entryFileNames: "assets/[name]-[hash].js",
         chunkFileNames: "assets/[name]-[hash].js",
         assetFileNames: "assets/[name]-[hash][extname]",
@@ -57,11 +61,11 @@ export default defineConfig(({ mode }) => ({
       ? undefined
       : {
           "/api": {
-            target: "http://localhost:8080",
+            target: apiProxyTarget,
             changeOrigin: true,
           },
           "/health": {
-            target: "http://localhost:8080",
+            target: apiProxyTarget,
             changeOrigin: true,
           },
         },

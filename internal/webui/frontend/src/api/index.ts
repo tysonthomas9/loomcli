@@ -1,6 +1,9 @@
 export {
   api,
   ApiError,
+  API_BASE_URL,
+  getApiOrigin,
+  getWsBaseUrl,
   get,
   getText,
   post,

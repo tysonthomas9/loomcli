@@ -14,6 +14,9 @@ import {
   wsUrl,
   onAuthTokenExpired,
   onDaemonUnavailable,
+  API_BASE_URL,
+  getApiOrigin,
+  getWsBaseUrl,
 } from "./client";
 
 describe("API Client", () => {
@@ -744,6 +747,82 @@ describe("API Client", () => {
 
     it("handles slashes in workspace ID", () => {
       expect(wsUrl("ws/id", "/issues")).toBe("/api/workspaces/ws%2Fid/issues");
+    });
+  });
+
+  describe("API_BASE_URL helpers", () => {
+    // Save/restore window.location across tests that mutate it.
+    let savedLocation: Location | undefined;
+    const hasWindow = typeof window !== "undefined";
+
+    beforeEach(() => {
+      if (hasWindow) {
+        savedLocation = window.location;
+      }
+    });
+
+    afterEach(() => {
+      if (hasWindow && savedLocation) {
+        Object.defineProperty(window, "location", {
+          value: savedLocation,
+          writable: true,
+          configurable: true,
+        });
+      }
+    });
+
+    it("exposes API_BASE_URL as a string (empty by default in test env)", () => {
+      expect(typeof API_BASE_URL).toBe("string");
+      // No VITE_API_BASE_URL is set for Vitest, so this should be "".
+      expect(API_BASE_URL).toBe("");
+    });
+
+    it("getApiOrigin falls back when API_BASE_URL is empty", () => {
+      // API_BASE_URL is empty → either window.location.origin (browser/jsdom)
+      // or the "http://localhost" fallback (Node env).
+      const origin = getApiOrigin();
+      if (hasWindow && window.location) {
+        expect(origin).toBe(window.location.origin);
+      } else {
+        expect(origin).toBe("http://localhost");
+      }
+    });
+
+    it("getWsBaseUrl converts http → ws", () => {
+      if (!hasWindow) {
+        // Node env: fallback is http://localhost → ws://localhost
+        expect(getWsBaseUrl()).toBe("ws://localhost");
+        return;
+      }
+      Object.defineProperty(window, "location", {
+        value: { origin: "http://example.com:8080" },
+        writable: true,
+        configurable: true,
+      });
+      expect(getWsBaseUrl()).toBe("ws://example.com:8080");
+    });
+
+    it("getWsBaseUrl converts https → wss", () => {
+      if (!hasWindow) {
+        // Can't exercise https path without a window mock; skip.
+        return;
+      }
+      Object.defineProperty(window, "location", {
+        value: { origin: "https://secure.example.com" },
+        writable: true,
+        configurable: true,
+      });
+      expect(getWsBaseUrl()).toBe("wss://secure.example.com");
+    });
+
+    it("getWsBaseUrl preserves port and path after http→ws conversion", () => {
+      if (!hasWindow) return;
+      Object.defineProperty(window, "location", {
+        value: { origin: "https://host.example.com:1234" },
+        writable: true,
+        configurable: true,
+      });
+      expect(getWsBaseUrl()).toBe("wss://host.example.com:1234");
     });
   });
 });

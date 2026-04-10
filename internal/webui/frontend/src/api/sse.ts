@@ -4,7 +4,7 @@
  * with configurable exponential backoff.
  */
 
-import { get, ApiError, wsUrl } from "./client";
+import { get, ApiError, wsUrl, getApiOrigin } from "./client";
 
 // SSE token exchange: fetch opaque token to avoid exposing JWT in URL
 export type SseTokenResult =
@@ -423,7 +423,7 @@ export function getSSEUrl(
   sourceRepos?: string[],
   opaqueToken?: string,
 ): string {
-  const base = `${window.location.origin}${wsUrl(workspaceId, "/events")}`;
+  const base = `${getApiOrigin()}${wsUrl(workspaceId, "/events")}`;
   const params = new URLSearchParams();
   if (since !== undefined) {
     params.set("since", String(since));

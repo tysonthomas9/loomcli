@@ -37,6 +37,7 @@ const shared = vi.hoisted(() => {
 
 vi.mock("@/api/client", () => ({
   get: shared.getMock,
+  getWsBaseUrl: () => "ws://localhost",
 }));
 
 // ── Mock @/api/logs (agent terminal endpoints) ──────────────────────────────

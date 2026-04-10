@@ -88,6 +88,40 @@ jobs:
       - name: Check frontend coverage threshold
         run: cd internal/webui/frontend && npm run test:coverage
 
+  # Frontend independently deployable: build + test without Go toolchain.
+  frontend-standalone:
+    name: Frontend (standalone)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: cd internal/webui/frontend && npm ci
+
+      - name: Build with VITE_API_BASE_URL
+        run: cd internal/webui/frontend && VITE_API_BASE_URL=https://api.ci-test.example.com npm run build
+
+      - name: Verify build output
+        run: test -f internal/webui/frontend/dist/index.html
+
+      - name: Verify VITE_API_BASE_URL was baked into the bundle
+        run: grep -r "api.ci-test.example.com" internal/webui/frontend/dist/ > /dev/null
+
+      - name: Unit tests
+        run: cd internal/webui/frontend && npm run test:unit
+
+      - name: Coverage threshold
+        run: cd internal/webui/frontend && npm run test:coverage
+
+      - name: Architectural checks
+        run: cd internal/webui/frontend && npm run check:arch
+
   # Cross-platform verification (lightweight — Go tests only)
   test-macos:
     name: Test (macOS)

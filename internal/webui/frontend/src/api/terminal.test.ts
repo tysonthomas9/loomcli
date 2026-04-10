@@ -442,7 +442,7 @@ describe("terminal API", () => {
 
     it("builds ws: URL for http: protocol", () => {
       Object.defineProperty(window, "location", {
-        value: { protocol: "http:", host: "localhost:8080" },
+        value: { origin: "http://localhost:8080" },
         writable: true,
       });
 
@@ -455,7 +455,7 @@ describe("terminal API", () => {
 
     it("builds wss: URL for https: protocol", () => {
       Object.defineProperty(window, "location", {
-        value: { protocol: "https:", host: "example.com" },
+        value: { origin: "https://example.com" },
         writable: true,
       });
 
@@ -468,7 +468,7 @@ describe("terminal API", () => {
 
     it("omits token parameter when token is null", () => {
       Object.defineProperty(window, "location", {
-        value: { protocol: "http:", host: "localhost:3000" },
+        value: { origin: "http://localhost:3000" },
         writable: true,
       });
 
@@ -482,7 +482,7 @@ describe("terminal API", () => {
 
     it("URL-encodes session name, token, and workspace", () => {
       Object.defineProperty(window, "location", {
-        value: { protocol: "http:", host: "localhost:8080" },
+        value: { origin: "http://localhost:8080" },
         writable: true,
       });
 
@@ -499,7 +499,7 @@ describe("terminal API", () => {
 
     it("includes empty workspace in URL path when workspaceId is empty", () => {
       Object.defineProperty(window, "location", {
-        value: { protocol: "http:", host: "localhost:8080" },
+        value: { origin: "http://localhost:8080" },
         writable: true,
       });
 

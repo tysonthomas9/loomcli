@@ -130,6 +130,7 @@ vi.mock("@xterm/xterm/css/xterm.css", () => ({}));
 
 vi.mock("@/api/client", () => ({
   get: vi.fn(() => Promise.resolve({ token: "test-token" })),
+  getWsBaseUrl: () => "ws://localhost",
 }));
 
 vi.mock("@/utils/reconnectBackoff", () => ({

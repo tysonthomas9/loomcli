@@ -4,7 +4,14 @@
  * legacy fetch wrapper for untyped endpoints.
  */
 
-import { api, ApiError, apiErrorFromResponse, get, wsUrl } from "./client";
+import {
+  api,
+  ApiError,
+  apiErrorFromResponse,
+  get,
+  wsUrl,
+  getWsBaseUrl,
+} from "./client";
 
 /**
  * Fetch available log phases for a task.
@@ -114,17 +121,11 @@ export function getAgentTerminalWsUrl(
   agentName: string,
   token: string,
 ): string {
-  const location =
-    typeof window !== "undefined"
-      ? window.location
-      : (globalThis as { location?: Location }).location;
-  const proto = location?.protocol === "https:" ? "wss:" : "ws:";
-  const host = location?.host || "localhost";
   const path = wsUrl(
     workspaceId,
     `/agents/${encodeURIComponent(agentName)}/terminal/ws`,
   );
-  return `${proto}//${host}${path}?token=${encodeURIComponent(token)}`;
+  return `${getWsBaseUrl()}${path}?token=${encodeURIComponent(token)}`;
 }
 
 /**
