@@ -110,9 +110,20 @@ func handleTerminalRestartWithPool(manager *TerminalManager, configPool configCo
 			respondJSON(w, http.StatusServiceUnavailable, map[string]interface{}{"success": false, "error": "terminal manager not initialized"})
 			return
 		}
+
+		// Derive workspace from request context (injected by WorkspaceMiddleware).
+		// All terminal routes live on wsMux, so this is always set in production;
+		// missing context indicates a direct test invocation or a misconfigured
+		// route — respond 400 rather than silently routing to a shared bucket.
+		wsID := WorkspaceFromContext(r.Context())
+		if wsID == "" {
+			respondJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "error": "workspace context required"})
+			return
+		}
+
 		// Shell tabs: kill and return without changing defaultCommand.
 		if strings.HasPrefix(session, "lead-shell-") {
-			_ = manager.KillSessionByName(session)
+			_ = manager.KillSession(wsID, session)
 			respondJSON(w, http.StatusOK, map[string]interface{}{"success": true, "backend": "shell"})
 			return
 		}
@@ -144,7 +155,7 @@ func handleTerminalRestartWithPool(manager *TerminalManager, configPool configCo
 
 		// Kill existing session first, then update command. This ordering ensures
 		// racing Attach calls either get killed or use the new backend.
-		_ = manager.KillSessionByName(session)
+		_ = manager.KillSession(wsID, session)
 		manager.SetDefaultCommand(termCmd)
 
 		respondJSON(w, http.StatusOK, map[string]interface{}{"success": true, "backend": backend})
@@ -180,7 +191,13 @@ func handleTerminalKill(manager *TerminalManager, auth *terminalAuth) http.Handl
 			return
 		}
 
-		_ = manager.KillSessionByName(session)
+		wsID := WorkspaceFromContext(r.Context())
+		if wsID == "" {
+			respondJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "error": "workspace context required"})
+			return
+		}
+
+		_ = manager.KillSession(wsID, session)
 		respondJSON(w, http.StatusOK, map[string]interface{}{"success": true})
 	}
 }
@@ -208,19 +225,25 @@ func handleTerminalSessionStatus(manager *TerminalManager, auth *terminalAuth) h
 			return
 		}
 
-		alive := manager.SessionAlive(session)
+		wsID := WorkspaceFromContext(r.Context())
+		if wsID == "" {
+			respondJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "workspace context required"})
+			return
+		}
+
+		alive := manager.SessionAlive(wsID, session)
 		result := map[string]interface{}{
 			"alive": alive,
 		}
 
 		if !alive {
 			// Try to capture last lines of output for error context
-			if captured, err := manager.CapturePane(session, 10); err == nil && captured != "" {
+			if captured, err := manager.CapturePane(wsID, session, 10); err == nil && captured != "" {
 				result["exit_reason"] = captured
 			}
-		} else if manager.PaneDead(session) {
+		} else if manager.PaneDead(wsID, session) {
 			result["alive"] = false
-			if captured, err := manager.CapturePane(session, 10); err == nil && captured != "" {
+			if captured, err := manager.CapturePane(wsID, session, 10); err == nil && captured != "" {
 				result["exit_reason"] = captured
 			}
 		}

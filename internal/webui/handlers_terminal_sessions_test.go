@@ -56,12 +56,13 @@ func TestHandleListTerminalSessions_Success(t *testing.T) {
 	defer manager.Shutdown()
 	defer func() {
 		// Ensure the underlying tmux session is killed even if Shutdown misses it.
-		killCmd := exec.Command("tmux", "kill-session", "-t", "testsuc-talk-to-lead") //nolint:norawexec
+		// Internal name is "<serverPrefix>-<wsShort>-<userName>".
+		killCmd := exec.Command("tmux", "kill-session", "-t", testRunPrefix+"-testsuc-testws-talk-to-lead") //nolint:norawexec
 		_ = killCmd.Run()
 	}()
 
 	// Create the talk-to-lead session by attaching to it.
-	session, err := manager.Attach("talk-to-lead", "", 80, 24)
+	session, err := manager.Attach("testws", "talk-to-lead", "", 80, 24)
 	if err != nil {
 		t.Fatalf("failed to attach talk-to-lead session: %v", err)
 	}
@@ -69,7 +70,10 @@ func TestHandleListTerminalSessions_Success(t *testing.T) {
 
 	handler := handleListTerminalSessions(manager)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/terminal/sessions", nil)
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodGet, "/api/terminal/sessions", nil),
+		"testws",
+	)
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -137,7 +141,10 @@ func TestHandleListTerminalSessions_AlwaysIncludesTalkToLead(t *testing.T) {
 
 	handler := handleListTerminalSessions(manager)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/terminal/sessions", nil)
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodGet, "/api/terminal/sessions", nil),
+		"testws",
+	)
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -216,7 +223,10 @@ func TestHandleListTerminalSessions_FiltersOtherSessions(t *testing.T) {
 
 	handler := handleListTerminalSessions(manager)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/terminal/sessions", nil)
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodGet, "/api/terminal/sessions", nil),
+		"testws",
+	)
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -257,9 +267,11 @@ func TestHandleListTerminalSessions_FiltersOtherSessions(t *testing.T) {
 	}
 }
 
-// TestListActiveSessions_NoPrefixFallback tests that when sessionPrefix is empty,
-// all sessions are returned with their original names.
-func TestListActiveSessions_NoPrefixFallback(t *testing.T) {
+// TestListWorkspaceSessions_NoServerPrefix tests that when sessionPrefix is
+// empty, the manager's workspace scoping still works: sessions are prefixed
+// only by the workspace short ID, and listing by workspace strips that prefix
+// to recover the user-facing name.
+func TestListWorkspaceSessions_NoServerPrefix(t *testing.T) {
 	manager, err := NewTerminalManager("bash", "", 0)
 	if err == ErrTmuxNotFound {
 		t.Skip("tmux not installed, skipping test")
@@ -269,24 +281,26 @@ func TestListActiveSessions_NoPrefixFallback(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	// Create a session with a PID-scoped name to avoid collisions across parallel runs.
-	sessName := testRunPrefix + "-nopfx"
-	session, err := manager.Attach(sessName, "", 80, 24)
+	// Use a test-unique workspace ID so cleanup won't collide with parallel runs.
+	wsID := testRunPrefix + "-ws1"
+	// Use a test-unique user-facing name so the test can locate its own session.
+	sessName := "nopfx"
+	session, err := manager.Attach(wsID, sessName, "", 80, 24)
 	if err != nil {
 		t.Fatalf("failed to attach session: %v", err)
 	}
 	defer func() {
 		manager.Detach(session.ConnID)
-		manager.KillSessionByName(sessName)
+		manager.KillSession(wsID, sessName)
 	}()
 
-	sessions, err := manager.ListActiveSessions()
+	sessions, err := manager.ListWorkspaceSessions(wsID)
 	if err != nil {
-		t.Fatalf("ListActiveSessions failed: %v", err)
+		t.Fatalf("ListWorkspaceSessions failed: %v", err)
 	}
 
-	// With no prefix, all tmux sessions are returned as-is.
-	// We should find our session with its original name.
+	// ListWorkspaceSessions returns user-facing names with the workspace
+	// prefix stripped. We should find our session under its original name.
 	var found bool
 	for _, s := range sessions {
 		if s.Name == sessName {
@@ -551,7 +565,10 @@ func TestHandleScheduleSessionKill_ValidSession(t *testing.T) {
 
 	handler := handleScheduleSessionKill(mgr)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/terminal/sessions/test-session/kill", nil)
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodPost, "/api/terminal/sessions/test-session/kill", nil),
+		"testws",
+	)
 	req.SetPathValue("session", "test-session")
 	rr := httptest.NewRecorder()
 	handler(rr, req)
@@ -643,7 +660,10 @@ func TestHandleSeedTerminalSession_MissingName(t *testing.T) {
 	handler := handleSeedTerminalSession(mgr)
 
 	body := strings.NewReader(`{"issue_id":"X-1","title":"Test"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/terminal/sessions//seed", body)
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodPost, "/api/terminal/sessions//seed", body),
+		"testws",
+	)
 	// PathValue("name") returns "" when name is not set in the route pattern.
 	w := httptest.NewRecorder()
 
@@ -670,7 +690,10 @@ func TestHandleSeedTerminalSession_InvalidJSON(t *testing.T) {
 	handler := handleSeedTerminalSession(mgr)
 
 	body := strings.NewReader(`{invalid json}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/terminal/sessions/{name}/seed", body)
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodPost, "/api/terminal/sessions/{name}/seed", body),
+		"testws",
+	)
 	req.SetPathValue("name", "test-session")
 	w := httptest.NewRecorder()
 
@@ -709,7 +732,10 @@ func TestHandleSeedTerminalSession_MissingRequiredFields(t *testing.T) {
 			handler := handleSeedTerminalSession(mgr)
 
 			body := strings.NewReader(tt.body)
-			req := httptest.NewRequest(http.MethodPost, "/api/terminal/sessions/{name}/seed", body)
+			req := withWorkspaceCtx(
+				httptest.NewRequest(http.MethodPost, "/api/terminal/sessions/{name}/seed", body),
+				"testws",
+			)
 			req.SetPathValue("name", "test-session")
 			w := httptest.NewRecorder()
 

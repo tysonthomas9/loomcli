@@ -32,10 +32,10 @@ func handleListTerminalTabs(store *tabmeta.Store, manager *TerminalManager) http
 
 		workspace := WorkspaceFromContext(r.Context())
 
-		// Get active sessions from tmux
+		// Get active sessions from tmux, scoped to this workspace.
 		var activeNames []string
-		if manager != nil {
-			sessions, err := manager.ListActiveSessions()
+		if manager != nil && workspace != "" {
+			sessions, err := manager.ListWorkspaceSessions(workspace)
 			if err != nil {
 				log.Printf("Failed to list active sessions for tab metadata: %v", err)
 			} else {

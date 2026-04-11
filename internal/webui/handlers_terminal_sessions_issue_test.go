@@ -228,9 +228,13 @@ func TestHandleCloseAllSessions_WorksWithNilStore(t *testing.T) {
 	}
 	t.Cleanup(func() { mgr.Shutdown() })
 
-	// Pass nil store and nil hub — should still succeed
+	// Pass nil store and nil hub — should still succeed because the manager
+	// itself is workspace-aware and KillWorkspaceSessions doesn't touch Redis.
 	handler := handleCloseAllSessions(mgr, nil, nil)
-	req := httptest.NewRequest(http.MethodPost, "/api/terminal/sessions/close-all", nil)
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodPost, "/api/workspaces/default/terminal/sessions/close-all", nil),
+		"default",
+	)
 	rr := httptest.NewRecorder()
 	handler(rr, req)
 

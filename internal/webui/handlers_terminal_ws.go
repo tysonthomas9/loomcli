@@ -20,8 +20,9 @@ import (
 //
 // The workspace comes from the request context (injected by WorkspaceMiddleware
 // from the URL path) now that this endpoint lives on wsMux under
-// /api/workspaces/{ws}/terminal/ws. Falls back to "default" when context is
-// absent so test harnesses that bypass middleware keep working.
+// /api/workspaces/{ws}/terminal/ws. Missing workspace context is treated as a
+// 400 error — the sibling REST handlers all do the same, and in production
+// every request goes through WorkspaceMiddleware so the context is always set.
 func validateTerminalWSParams(w http.ResponseWriter, r *http.Request, manager *TerminalManager, auth *terminalAuth) (session, workspace string, ok bool) {
 	// Check if manager is available
 	if manager == nil {
@@ -34,10 +35,6 @@ func validateTerminalWSParams(w http.ResponseWriter, r *http.Request, manager *T
 
 	// Parse and validate session parameter.
 	session = r.URL.Query().Get("session")
-	workspace = WorkspaceFromContext(r.Context())
-	if workspace == "" {
-		workspace = "default"
-	}
 	if session == "" {
 		respondJSON(w, http.StatusBadRequest, map[string]interface{}{
 			"success": false,
@@ -67,8 +64,23 @@ func validateTerminalWSParams(w http.ResponseWriter, r *http.Request, manager *T
 		}
 	}
 
-	// Pre-upgrade check: reject if session is being killed (tombstone).
-	if manager.SessionIsBeingKilled(session) {
+	// Require workspace context (injected by WorkspaceMiddleware). Checked
+	// after session-level validation so missing-session tests see the
+	// expected "missing session parameter" error rather than this guard.
+	// Production requests always have workspace set because the endpoint
+	// lives on wsMux; only misconfigured tests hit this path.
+	workspace = WorkspaceFromContext(r.Context())
+	if workspace == "" {
+		respondJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "workspace context required",
+		})
+		return "", "", false
+	}
+
+	// Pre-upgrade check: reject if session is being killed (tombstone) in
+	// this workspace.
+	if manager.SessionIsBeingKilled(workspace, session) {
 		respondJSON(w, http.StatusConflict, map[string]interface{}{
 			"success": false,
 			"error":   "session is being killed",
@@ -137,11 +149,11 @@ func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigi
 
 		// Check whether the tmux session already exists before Attach creates it.
 		// Only inject the context banner for freshly created talk-to-lead sessions.
-		isNewSession := session == "talk-to-lead" && !manager.SessionExists(session)
+		isNewSession := session == "talk-to-lead" && !manager.SessionExists(workspace, session)
 
 		// Attach to terminal session with default 80x24 size
 		// (frontend sends resize immediately after connect)
-		termSession, err := manager.Attach(session, attachCommandForSession(session), 80, 24)
+		termSession, err := manager.Attach(workspace, session, attachCommandForSession(session), 80, 24)
 		if err != nil {
 			if errors.Is(err, ErrSessionBeingKilled) {
 				closeStatus = websocket.StatusCode(wsCloseSessionKilled)
@@ -183,7 +195,7 @@ func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigi
 		}()
 
 		// Start PTY -> WebSocket goroutine (with scrollback capture)
-		scrollback := manager.GetScrollbackBuffer(session)
+		scrollback := manager.GetScrollbackBuffer(workspace, session)
 		go func() {
 			result := ptyToWS(ctx, cancel, conn, termSession, manager, scrollback)
 			crashCh <- result

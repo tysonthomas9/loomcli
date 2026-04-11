@@ -37,9 +37,11 @@ type terminalSpawnResponse struct {
 // terminalSpawner is an interface for the subset of TerminalManager used by
 // the spawn handler. SpawnInDir starts the tmux session in workDir (via tmux
 // -c) so the "+ Tab" flow lands in the active workspace's path rather than
-// the loom service's cwd.
+// the loom service's cwd. The wsID parameter scopes the session to a
+// workspace so two workspaces with the same user-facing session name don't
+// collide in TerminalManager's internal state.
 type terminalSpawner interface {
-	SpawnInDir(name, command string, cols, rows uint16, workDir string) (bool, error)
+	SpawnInDir(wsID, name, command string, cols, rows uint16, workDir string) (bool, error)
 }
 
 // issueSessionPattern matches issue-linked session names: "issue-{project}-{number}".
@@ -130,12 +132,21 @@ func handleTerminalSpawnImplWithHistory(manager terminalSpawner, sessionHistoryS
 		}
 
 		// Resolve workspace cwd from the request context (injected by
-		// WorkspaceMiddleware). Falls back to "" (inherit loom service cwd)
-		// when no context is present or the lookup fails.
+		// WorkspaceMiddleware). The workspace ID is required because
+		// TerminalManager's public API is workspace-scoped; missing
+		// context indicates a direct test invocation or a misconfigured
+		// route — respond 400 rather than silently routing to a shared
+		// bucket.
 		wsID := WorkspaceFromContext(r.Context())
+		if wsID == "" {
+			respondJSON(w, http.StatusBadRequest, terminalSpawnResponse{
+				Error: "workspace context required",
+			})
+			return
+		}
 		workDir := resolveWorkDirFromContext(r.Context(), workspaceConfigByIDFn)
 
-		created, err := manager.SpawnInDir(sanitizedName, command, 120, 40, workDir)
+		created, err := manager.SpawnInDir(wsID, sanitizedName, command, 120, 40, workDir)
 		if err != nil {
 			respondJSON(w, http.StatusInternalServerError, terminalSpawnResponse{
 				Error: fmt.Sprintf("failed to spawn terminal session: %v", err),

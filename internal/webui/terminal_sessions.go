@@ -13,15 +13,21 @@ func (m *TerminalManager) SetOnSessionKilled(fn func(sessionName string)) {
 	m.onSessionKilled = fn
 }
 
-// captureScrollbackToFile captures the scrollback buffer of a tmux session and writes
-// it to ~/.loom/session-scrollback/{sessionName}.log. Returns the file path on success.
-// Best-effort: failure does not prevent the kill.
-func (m *TerminalManager) captureScrollbackToFile(name string) string {
-	if !validSessionName.MatchString(name) {
-		log.Printf("Warning: rejecting scrollback capture for invalid session name %q", name)
+// captureScrollbackToFileByInternal captures the scrollback buffer of a tmux
+// session and writes it to ~/.loom/session-scrollback/<internalName>.log.
+// Returns the file path on success. Best-effort: failure does not prevent
+// the kill.
+//
+// The file is named by the fully-qualified internal tmux name (which embeds
+// workspace and server-instance prefixes) so two workspaces with the same
+// user-facing session name don't clobber each other's scrollback files. The
+// userName parameter is kept for log message clarity — operators debugging a
+// scrollback file look up the UI session name, which maps to userName.
+func (m *TerminalManager) captureScrollbackToFileByInternal(userName, internalName string) string {
+	if !validSessionName.MatchString(userName) {
+		log.Printf("Warning: rejecting scrollback capture for invalid session name %q", userName)
 		return ""
 	}
-	internalName := m.tmuxName(name)
 	if !m.tmuxHasSession(internalName) {
 		return ""
 	}
@@ -29,7 +35,7 @@ func (m *TerminalManager) captureScrollbackToFile(name string) string {
 	cmd := m.tmuxCmd("capture-pane", "-p", "-t", internalName, "-S", "-10000")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Printf("Warning: failed to capture scrollback for session %q: %v", name, err)
+		log.Printf("Warning: failed to capture scrollback for session %q: %v", userName, err)
 		return ""
 	}
 
@@ -45,7 +51,10 @@ func (m *TerminalManager) captureScrollbackToFile(name string) string {
 		return ""
 	}
 
-	path := dir + "/" + name + ".log"
+	// Use the internal (qualified) name as the file name component to prevent
+	// two workspaces with the same user-facing session name from clobbering
+	// each other's scrollback files.
+	path := dir + "/" + internalName + ".log"
 	if err := os.WriteFile(path, out, 0o600); err != nil {
 		log.Printf("Warning: failed to write scrollback file %s: %v", path, err)
 		return ""
@@ -54,69 +63,75 @@ func (m *TerminalManager) captureScrollbackToFile(name string) string {
 	return path
 }
 
-// KillAllSessions closes all PTY connections and kills all prefixed tmux sessions.
-// Unlike Shutdown, it does not reset the manager itself — it remains usable for new sessions.
-func (m *TerminalManager) KillAllSessions() error {
-	m.mu.Lock()
-	// Cancel all pending deferred kills.
-	for name, cancel := range m.pendingKills {
-		cancel()
-		delete(m.pendingKills, name)
-	}
-	// Collect and clear all sessions.
-	sessions := make(map[string]*TerminalSession, len(m.sessions))
-	for k, v := range m.sessions {
-		sessions[k] = v
-	}
-	m.sessions = make(map[string]*TerminalSession)
-	m.scrollbackBuffers = make(map[string]*ScrollbackBuffer)
-	m.mu.Unlock()
-
-	// Mark all sessions as killing and signal WS handlers before closing PTYs.
-	markedNames := make(map[string]bool)
-	for _, session := range sessions {
-		if !markedNames[session.Name] {
-			markedNames[session.Name] = true
-			userFacing := session.Name
-			if prefix := m.sessionPrefix + "-"; m.sessionPrefix != "" && strings.HasPrefix(session.Name, prefix) {
-				userFacing = strings.TrimPrefix(session.Name, prefix)
-			}
-			m.MarkKilling(userFacing)
-		}
-		close(session.killCh)
+// KillWorkspaceSessions closes all PTY connections and kills every tmux
+// session that belongs to the given workspace. Sessions are identified by the
+// shared "<serverPrefix>-<wsShort>-" prefix on their internal tmux name, so
+// this catches both sessions with active PTY connections and detached
+// spawned-only sessions (created via Spawn/SpawnArgv without a PTY).
+//
+// Unlike Shutdown, it does not reset the manager itself — it remains usable
+// for new sessions in this or other workspaces. wsID must be non-empty.
+func (m *TerminalManager) KillWorkspaceSessions(wsID string) error {
+	if wsID == "" {
+		return fmt.Errorf("wsID must not be empty")
 	}
 
-	// Close all PTYs.
-	for connID, session := range sessions {
-		if err := session.Close(); err != nil {
-			log.Printf("Warning: error closing connection %q: %v", connID, err)
+	prefix := m.workspacePrefix(wsID)
+
+	// Enumerate tmux's view of sessions so we catch detached ones too.
+	// Fall back gracefully if tmux reports no sessions.
+	tmuxSessions, err := m.listTmuxSessions()
+	if err != nil {
+		return fmt.Errorf("list tmux sessions: %w", err)
+	}
+
+	// Collect the internal names we need to kill. Using a set because the
+	// same internal name can't appear twice in list-sessions, but this
+	// guards against any future list-sessions quirks.
+	toKill := make(map[string]struct{})
+	for _, s := range tmuxSessions {
+		if strings.HasPrefix(s.name, prefix) {
+			toKill[s.name] = struct{}{}
 		}
 	}
 
-	// Kill tmux sessions (deduplicate by session name).
-	killed := make(map[string]bool)
-	for _, session := range sessions {
-		if killed[session.Name] {
-			continue
+	// Also sweep the in-memory sessions map in case a session is mid-setup
+	// and doesn't yet appear in list-sessions output.
+	m.mu.RLock()
+	for _, sess := range m.sessions {
+		if strings.HasPrefix(sess.Name, prefix) {
+			toKill[sess.Name] = struct{}{}
 		}
-		killed[session.Name] = true
-		if err := m.tmuxCmd("kill-session", "-t", session.Name).Run(); err != nil {
-			log.Printf("Warning: error killing tmux session %q: %v", session.Name, err)
+	}
+	m.mu.RUnlock()
+
+	// Kill each one via the shared helper. killByInternal also handles the
+	// tombstone marking, PTY close, scrollback capture, tmux kill-session,
+	// scrollback buffer cleanup, and onSessionKilled callback.
+	for internalName := range toKill {
+		userName := strings.TrimPrefix(internalName, prefix)
+		if err := m.killByInternal(userName, internalName); err != nil {
+			log.Printf("Warning: error killing session %q: %v", internalName, err)
 		}
 	}
 
 	return nil
 }
 
-// CaptureScrollback captures the scrollback buffer of a tmux session using `tmux capture-pane`.
-// Returns up to 5000 lines of scrollback text. Returns error if the session doesn't exist.
-// The session name should be the user-facing name (prefix is applied internally).
-func (m *TerminalManager) CaptureScrollback(name string) (string, error) {
+// CaptureScrollback captures the scrollback buffer of a tmux session using
+// `tmux capture-pane`. Returns up to 5000 lines of scrollback text. Returns
+// error if the session doesn't exist. The session name should be the
+// user-facing name (prefix and workspace are applied internally). wsID must
+// be non-empty.
+func (m *TerminalManager) CaptureScrollback(wsID, name string) (string, error) {
+	if wsID == "" {
+		return "", fmt.Errorf("wsID must not be empty")
+	}
 	if !validSessionName.MatchString(name) {
 		return "", fmt.Errorf("invalid session name %q: must match [a-zA-Z0-9_-]+", name)
 	}
 
-	internalName := m.tmuxName(name)
+	internalName := m.tmuxName(wsID, name)
 
 	if !m.tmuxHasSession(internalName) {
 		return "", fmt.Errorf("tmux session %q not found", name)
@@ -135,11 +150,21 @@ func (m *TerminalManager) CaptureScrollback(name string) (string, error) {
 }
 
 // HasActiveConnections reports whether there are any active PTY connections
-// to the named session (using the user-facing name, prefix applied internally).
-func (m *TerminalManager) HasActiveConnections(name string) bool {
+// to the named session in the given workspace (using the user-facing name;
+// prefix and workspace short ID are applied internally).
+func (m *TerminalManager) HasActiveConnections(wsID, name string) bool {
+	if wsID == "" {
+		return false
+	}
+	return m.hasActiveConnectionsByInternal(m.tmuxName(wsID, name))
+}
+
+// hasActiveConnectionsByInternal is the lock-held helper used by
+// HasActiveConnections and by ScheduleKill's deferred goroutine, both of
+// which already have the qualified internal name.
+func (m *TerminalManager) hasActiveConnectionsByInternal(internalName string) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	internalName := m.tmuxName(name)
 	for _, sess := range m.sessions {
 		if sess.Name == internalName {
 			return true

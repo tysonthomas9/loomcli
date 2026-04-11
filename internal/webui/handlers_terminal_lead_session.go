@@ -39,9 +39,11 @@ const leadMessageMaxLen = 16 * 1024
 // argvSpawner is the narrow interface used by handleCreateLeadSession. Keeping
 // it separate from *TerminalManager lets tests inject a fake without a real
 // tmux binary — matching the `terminalSpawner` pattern in
-// handlers_terminal_spawn.go.
+// handlers_terminal_spawn.go. wsID scopes the session to a workspace so two
+// workspaces with the same generated session name don't collide in
+// TerminalManager's internal state.
 type argvSpawner interface {
-	SpawnArgv(name string, argv []string, cols, rows uint16, workDir string) (bool, error)
+	SpawnArgv(wsID, name string, argv []string, cols, rows uint16, workDir string) (bool, error)
 }
 
 // handleCreateLeadSession creates a detached tmux session running
@@ -133,14 +135,23 @@ func handleCreateLeadSessionImpl(spawner argvSpawner, workspaceConfigByIDFn func
 		// interpretation of the user's message — no quoting bugs, no injection.
 		argv := []string{"loom", "lead", "--backend", backend, "--message", message}
 
-		// Resolve the workspace path from the request context so the tmux
-		// session starts in that directory. Falls back to "" (inherit the
-		// loom service's cwd) when the context has no workspace ID or the
-		// lookup fails — matches legacy behavior for handlers invoked
-		// without middleware in tests.
+		// Resolve the workspace ID from the request context. Required
+		// because TerminalManager's public API is workspace-scoped;
+		// missing context means the handler was invoked without
+		// WorkspaceMiddleware, which is an error in production.
+		wsID := WorkspaceFromContext(r.Context())
+		if wsID == "" {
+			respondJSON(w, http.StatusBadRequest, leadSessionResponse{
+				Error: "workspace context required",
+			})
+			return
+		}
+		// Resolve the workspace path to an on-disk cwd for the tmux
+		// session. Falls back to "" (inherit the loom service's cwd)
+		// when the lookup fails.
 		workDir := resolveWorkDirFromContext(r.Context(), workspaceConfigByIDFn)
 
-		created, err := spawner.SpawnArgv(sessionName, argv, 120, 40, workDir)
+		created, err := spawner.SpawnArgv(wsID, sessionName, argv, 120, 40, workDir)
 		if err != nil {
 			respondJSON(w, http.StatusInternalServerError, leadSessionResponse{
 				Error: fmt.Sprintf("failed to spawn lead session: %v", err),

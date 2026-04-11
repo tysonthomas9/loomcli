@@ -19,10 +19,10 @@ func TestHandleExportSession_Success(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		mgr.Shutdown()
-		killTmuxSession(t, testRunPrefix+"-testexport-export-ok")
+		killTmuxSession(t, testRunPrefix+"-testexport-testws-export-ok")
 	})
 
-	session, err := mgr.Attach("export-ok", "", 80, 24)
+	session, err := mgr.Attach("testws", "export-ok", "", 80, 24)
 	if err != nil {
 		t.Fatalf("Attach() error: %v", err)
 	}
@@ -30,7 +30,10 @@ func TestHandleExportSession_Success(t *testing.T) {
 
 	handler := handleExportSession(mgr)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/terminal/sessions/export-ok/export?format=txt", nil)
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodGet, "/api/terminal/sessions/export-ok/export?format=txt", nil),
+		"testws",
+	)
 	req.SetPathValue("session", "export-ok")
 	rr := httptest.NewRecorder()
 	handler(rr, req)
@@ -65,10 +68,10 @@ func TestHandleExportSession_MarkdownFormat(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		mgr.Shutdown()
-		killTmuxSession(t, testRunPrefix+"-testexportmd-export-md")
+		killTmuxSession(t, testRunPrefix+"-testexportmd-testws-export-md")
 	})
 
-	session, err := mgr.Attach("export-md", "", 80, 24)
+	session, err := mgr.Attach("testws", "export-md", "", 80, 24)
 	if err != nil {
 		t.Fatalf("Attach() error: %v", err)
 	}
@@ -76,7 +79,10 @@ func TestHandleExportSession_MarkdownFormat(t *testing.T) {
 
 	handler := handleExportSession(mgr)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/terminal/sessions/export-md/export?format=md", nil)
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodGet, "/api/terminal/sessions/export-md/export?format=md", nil),
+		"testws",
+	)
 	req.SetPathValue("session", "export-md")
 	rr := httptest.NewRecorder()
 	handler(rr, req)
@@ -112,7 +118,10 @@ func TestHandleExportSession_SessionNotFound(t *testing.T) {
 
 	handler := handleExportSession(mgr)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/terminal/sessions/nonexistent/export", nil)
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodGet, "/api/terminal/sessions/nonexistent/export", nil),
+		"testws",
+	)
 	req.SetPathValue("session", "nonexistent")
 	rr := httptest.NewRecorder()
 	handler(rr, req)
@@ -134,7 +143,10 @@ func TestHandleExportSession_InvalidFormat(t *testing.T) {
 
 	handler := handleExportSession(mgr)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/terminal/sessions/any/export?format=pdf", nil)
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodGet, "/api/terminal/sessions/any/export?format=pdf", nil),
+		"testws",
+	)
 	req.SetPathValue("session", "any")
 	rr := httptest.NewRecorder()
 	handler(rr, req)
@@ -156,7 +168,10 @@ func TestHandleExportSession_InvalidSessionName(t *testing.T) {
 
 	handler := handleExportSession(mgr)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/terminal/sessions/inv@lid/export", nil)
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodGet, "/api/terminal/sessions/inv@lid/export", nil),
+		"testws",
+	)
 	req.SetPathValue("session", "inv@lid")
 	rr := httptest.NewRecorder()
 	handler(rr, req)
@@ -178,12 +193,15 @@ func TestHandleScrollbackInfo_WithBuffer(t *testing.T) {
 	t.Cleanup(func() { mgr.Shutdown() })
 
 	// Create a scrollback buffer and add some data.
-	buf := mgr.GetScrollbackBuffer("sbinfo-test")
+	buf := mgr.GetScrollbackBuffer("testws", "sbinfo-test")
 	buf.Append([]byte("line1\nline2\nline3\n"))
 
 	handler := handleScrollbackInfo(mgr)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/terminal/sessions/sbinfo-test/scrollback-info", nil)
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodGet, "/api/terminal/sessions/sbinfo-test/scrollback-info", nil),
+		"testws",
+	)
 	req.SetPathValue("session", "sbinfo-test")
 	rr := httptest.NewRecorder()
 	handler(rr, req)
@@ -224,7 +242,10 @@ func TestHandleScrollbackInfo_NoBuffer(t *testing.T) {
 
 	handler := handleScrollbackInfo(mgr)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/terminal/sessions/no-buffer/scrollback-info", nil)
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodGet, "/api/terminal/sessions/no-buffer/scrollback-info", nil),
+		"testws",
+	)
 	req.SetPathValue("session", "no-buffer")
 	rr := httptest.NewRecorder()
 	handler(rr, req)

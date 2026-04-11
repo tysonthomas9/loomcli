@@ -29,12 +29,18 @@ func handleExportSession(manager *TerminalManager) http.HandlerFunc {
 			return
 		}
 
-		if !manager.SessionAlive(session) {
+		wsID := WorkspaceFromContext(r.Context())
+		if wsID == "" {
+			respondError(w, http.StatusBadRequest, "workspace context required")
+			return
+		}
+
+		if !manager.SessionAlive(wsID, session) {
 			respondError(w, http.StatusNotFound, "session not found")
 			return
 		}
 
-		content, err := manager.ExportSession(session)
+		content, err := manager.ExportSession(wsID, session)
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, "failed to capture scrollback")
 			return
@@ -73,7 +79,13 @@ func handleScrollbackInfo(manager *TerminalManager) http.HandlerFunc {
 			return
 		}
 
-		buf := manager.LookupScrollbackBuffer(session)
+		wsID := WorkspaceFromContext(r.Context())
+		if wsID == "" {
+			respondError(w, http.StatusBadRequest, "workspace context required")
+			return
+		}
+
+		buf := manager.LookupScrollbackBuffer(wsID, session)
 		var lineCount int
 		var truncatedCount int64
 		if buf != nil {
@@ -89,14 +101,18 @@ func handleScrollbackInfo(manager *TerminalManager) http.HandlerFunc {
 	}
 }
 
-// ExportSession captures the full tmux scrollback buffer for a session.
-// Uses `tmux capture-pane -p -S -` to get the complete history.
-func (m *TerminalManager) ExportSession(name string) (string, error) {
+// ExportSession captures the full tmux scrollback buffer for a session in
+// the given workspace. Uses `tmux capture-pane -p -S -` to get the complete
+// history. wsID must be non-empty.
+func (m *TerminalManager) ExportSession(wsID, name string) (string, error) {
+	if wsID == "" {
+		return "", fmt.Errorf("wsID must not be empty")
+	}
 	if !validSessionName.MatchString(name) {
 		return "", fmt.Errorf("invalid session name %q", name)
 	}
 
-	internalName := m.tmuxName(name)
+	internalName := m.tmuxName(wsID, name)
 
 	if !m.tmuxHasSession(internalName) {
 		return "", fmt.Errorf("tmux session %q not found", name)

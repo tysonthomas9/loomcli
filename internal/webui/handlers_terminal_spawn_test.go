@@ -14,12 +14,14 @@ type mockSpawner struct {
 	spawnCreated bool
 	spawnErr     error
 	// Captured on the last call, for workspace-cwd assertions.
+	lastWSID    string
 	lastName    string
 	lastCommand string
 	lastWorkDir string
 }
 
-func (m *mockSpawner) SpawnInDir(name, command string, cols, rows uint16, workDir string) (bool, error) {
+func (m *mockSpawner) SpawnInDir(wsID, name, command string, cols, rows uint16, workDir string) (bool, error) {
+	m.lastWSID = wsID
 	m.lastName = name
 	m.lastCommand = command
 	m.lastWorkDir = workDir
@@ -34,7 +36,10 @@ func TestHandleTerminalSpawn_HappyPath(t *testing.T) {
 	handler := handleTerminalSpawnImpl(mock)
 
 	body := `{"session_name":"my-session","backend":"claude"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/terminal/spawn", strings.NewReader(body))
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodPost, "/api/terminal/spawn", strings.NewReader(body)),
+		"ws-test",
+	)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 
@@ -71,7 +76,10 @@ func TestHandleTerminalSpawn_Idempotent(t *testing.T) {
 	handler := handleTerminalSpawnImpl(mock)
 
 	body := `{"session_name":"existing-session","backend":"claude"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/terminal/spawn", strings.NewReader(body))
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodPost, "/api/terminal/spawn", strings.NewReader(body)),
+		"ws-test",
+	)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 
@@ -99,7 +107,10 @@ func TestHandleTerminalSpawn_DotSanitization(t *testing.T) {
 	handler := handleTerminalSpawnImpl(mock)
 
 	body := `{"session_name":"issue-abc.5-claude-1","backend":"claude"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/terminal/spawn", strings.NewReader(body))
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodPost, "/api/terminal/spawn", strings.NewReader(body)),
+		"ws-test",
+	)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 
@@ -259,7 +270,10 @@ func TestHandleTerminalSpawn_TmuxFailure(t *testing.T) {
 	handler := handleTerminalSpawnImpl(mock)
 
 	body := `{"session_name":"my-session","backend":"claude"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/terminal/spawn", strings.NewReader(body))
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodPost, "/api/terminal/spawn", strings.NewReader(body)),
+		"ws-test",
+	)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 
@@ -339,7 +353,10 @@ func TestHandleTerminalSpawn_ShellBackend(t *testing.T) {
 	handler := handleTerminalSpawnImpl(mock)
 
 	body := `{"session_name":"lead-shell-1","backend":"shell"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/terminal/spawn", strings.NewReader(body))
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodPost, "/api/terminal/spawn", strings.NewReader(body)),
+		"ws-test",
+	)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 
@@ -433,9 +450,11 @@ func TestHandleTerminalSpawn_WorkspaceCwd(t *testing.T) {
 }
 
 func TestHandleTerminalSpawn_NoWorkspaceContext(t *testing.T) {
-	// When no workspace context is present (e.g., handler called without
-	// middleware), the config lookup is skipped and workDir is empty. The
-	// spawn still succeeds so tests that don't care about cwd keep working.
+	// When the handler is called without a workspace context (e.g., tests
+	// that bypass WorkspaceMiddleware), the new workspace-aware
+	// TerminalManager API requires a non-empty wsID, so the handler rejects
+	// the request with 400 before touching the spawner or the workspace
+	// config lookup.
 	mock := &mockSpawner{spawnCreated: true}
 	cfg := func(id string) (*WorkspaceData, error) {
 		t.Errorf("workspace lookup should not be called when context has no wsID; got %q", id)
@@ -448,11 +467,18 @@ func TestHandleTerminalSpawn_NoWorkspaceContext(t *testing.T) {
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body: %s", rr.Code, http.StatusBadRequest, rr.Body.String())
 	}
-	if mock.lastWorkDir != "" {
-		t.Errorf("workDir = %q, want empty", mock.lastWorkDir)
+	var resp terminalSpawnResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !strings.Contains(resp.Error, "workspace context required") {
+		t.Errorf("error = %q, want to contain %q", resp.Error, "workspace context required")
+	}
+	if mock.lastName != "" {
+		t.Errorf("spawner should not have been called; lastName = %q", mock.lastName)
 	}
 }
 
@@ -461,7 +487,10 @@ func TestHandleTerminalSpawn_ShellBackendUsesShellCommand(t *testing.T) {
 	handler := handleTerminalSpawnImpl(mock)
 
 	body := `{"session_name":"lead-shell-2","backend":"shell"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/terminal/spawn", strings.NewReader(body))
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodPost, "/api/terminal/spawn", strings.NewReader(body)),
+		"ws-test",
+	)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 

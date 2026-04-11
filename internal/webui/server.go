@@ -25,7 +25,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
-	"github.com/tysonthomas9/loomcli/internal/workspace"
 )
 
 // StartServer starts the web UI server with the given configuration.
@@ -196,8 +195,13 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 
 	// NOTE: reconcileConfigWorkspaces called below after fleet registry init.
 
-	// Terminal manager for WebSocket sessions (workspace-scoped prefix prevents collisions).
-	termSessionPrefix := fmt.Sprintf("%d-%s", actualPort, workspace.ShortWorkspaceID(initialWorkspaceID))
+	// Terminal manager for WebSocket sessions. The session prefix is just
+	// the listen port — that's enough to isolate multiple loom server
+	// instances sharing the same tmux socket. The workspace short ID is
+	// added per-session by TerminalManager.tmuxName, so we must NOT include
+	// it here or the workspace would appear twice in the qualified name
+	// (e.g. "8080-abc12345-abc12345-talk-to-lead").
+	termSessionPrefix := fmt.Sprintf("%d", actualPort)
 	var termMgr *TerminalManager
 	if termMgr, err = NewTerminalManager(config.TerminalCmd, termSessionPrefix, config.MaxTerminalSessions); err != nil {
 		if errors.Is(err, ErrTmuxNotFound) {

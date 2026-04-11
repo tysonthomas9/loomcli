@@ -29,33 +29,36 @@ type terminalSessionsData struct {
 	Sessions []terminalSessionInfo `json:"sessions"`
 }
 
-// ListActiveSessions returns sessions owned by this server instance.
-// It filters tmux sessions by the manager's sessionPrefix and always
-// includes "talk-to-lead" as the default session.
-func (m *TerminalManager) ListActiveSessions() ([]terminalSessionInfo, error) {
-	m.mu.RLock()
-	sessionPrefix := m.sessionPrefix
-	m.mu.RUnlock()
+// ListWorkspaceSessions returns the sessions owned by this server instance
+// that belong to the given workspace. It filters tmux sessions by the
+// "<serverPrefix>-<wsShort>-" prefix and always includes "talk-to-lead" as
+// the default session for that workspace, whether or not it exists yet.
+// wsID must be non-empty.
+func (m *TerminalManager) ListWorkspaceSessions(wsID string) ([]terminalSessionInfo, error) {
+	if wsID == "" {
+		return nil, fmt.Errorf("wsID must not be empty")
+	}
 
 	allSessions, err := m.listTmuxSessions()
 	if err != nil {
 		return nil, err
 	}
 
-	prefix := sessionPrefix + "-"
+	prefix := m.workspacePrefix(wsID)
 	hasTalkToLead := false
 	var result []terminalSessionInfo
 
 	for _, s := range allSessions {
-		var name string
-		if sessionPrefix == "" {
-			name = s.name
-		} else if strings.HasPrefix(s.name, prefix) {
-			name = strings.TrimPrefix(s.name, prefix)
-		} else {
+		if !strings.HasPrefix(s.name, prefix) {
 			continue
 		}
-
+		name := strings.TrimPrefix(s.name, prefix)
+		if name == "" {
+			// Defensive: an internal name equal to the prefix has no
+			// user-facing component — should be impossible but skip just
+			// in case tmux ever returns something unexpected.
+			continue
+		}
 		result = append(result, terminalSessionInfo{
 			Name:    name,
 			Label:   name,
@@ -87,7 +90,16 @@ func handleListTerminalSessions(manager *TerminalManager) http.HandlerFunc {
 			return
 		}
 
-		sessions, err := manager.ListActiveSessions()
+		wsID := WorkspaceFromContext(r.Context())
+		if wsID == "" {
+			respondJSON(w, http.StatusBadRequest, terminalSessionsResponse{
+				Success: false,
+				Error:   "workspace context required",
+			})
+			return
+		}
+
+		sessions, err := manager.ListWorkspaceSessions(wsID)
 		if err != nil {
 			log.Printf("Failed to list terminal sessions: %v", err)
 			respondJSON(w, http.StatusInternalServerError, terminalSessionsResponse{
@@ -178,6 +190,15 @@ func handleScheduleSessionKill(manager *TerminalManager) http.HandlerFunc {
 			return
 		}
 
+		wsID := WorkspaceFromContext(r.Context())
+		if wsID == "" {
+			respondJSON(w, http.StatusBadRequest, map[string]interface{}{
+				"success": false,
+				"error":   "workspace context required",
+			})
+			return
+		}
+
 		session := r.PathValue("session")
 		if err := tabmeta.ValidateSessionName(session); err != nil {
 			respondJSON(w, http.StatusBadRequest, map[string]interface{}{
@@ -189,7 +210,7 @@ func handleScheduleSessionKill(manager *TerminalManager) http.HandlerFunc {
 
 		if r.URL.Query().Get("force") == "true" {
 			// Force kill: close all connections and destroy the tmux session immediately.
-			if err := manager.KillSessionByName(session); err != nil {
+			if err := manager.KillSession(wsID, session); err != nil {
 				respondJSON(w, http.StatusInternalServerError, map[string]interface{}{
 					"success": false,
 					"error":   err.Error(),
@@ -197,7 +218,7 @@ func handleScheduleSessionKill(manager *TerminalManager) http.HandlerFunc {
 				return
 			}
 		} else {
-			manager.ScheduleKill(session, sessionKillGracePeriod)
+			manager.ScheduleKill(wsID, session, sessionKillGracePeriod)
 		}
 
 		respondJSON(w, http.StatusOK, map[string]interface{}{
@@ -236,15 +257,16 @@ func handleListSessionsByIssue(tabMetaStore *tabmeta.Store) http.HandlerFunc {
 }
 
 // handleCloseAllSessions kills every tmux session belonging to the request's
-// workspace, deletes that workspace's tab metadata, and broadcasts a single
-// SSE event to the workspace.
+// workspace and broadcasts a single SSE event. If a tab metadata store is
+// configured, this workspace's metadata entries are also deleted so the UI
+// doesn't show phantom tabs after the kill.
 //
 // Registered on wsMux at POST /api/workspaces/{ws}/terminal/sessions/close-all.
 // The workspace is derived from the request context (injected by
-// WorkspaceMiddleware). Sessions in other workspaces are untouched — this
-// matters in multi-VM deployments where each loom instance only sees its own
-// workspaces anyway, and it makes the button's semantics consistent ("close
-// all" = "close all in this workspace").
+// WorkspaceMiddleware). Sessions in other workspaces are untouched — the
+// kill is scoped via TerminalManager.KillWorkspaceSessions, which filters by
+// the "<serverPrefix>-<wsShort>-" prefix on tmux session names. This works
+// with or without Redis because the scoping lives inside TerminalManager.
 func handleCloseAllSessions(manager *TerminalManager, tabMetaStore *tabmeta.Store, hub *SSEHub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if manager == nil {
@@ -256,60 +278,43 @@ func handleCloseAllSessions(manager *TerminalManager, tabMetaStore *tabmeta.Stor
 		}
 
 		wsID := WorkspaceFromContext(r.Context())
-
-		// No Redis means no tab metadata, which means no way to scope
-		// sessions to a workspace. Fall back to killing every tmux session
-		// the manager knows about — doing nothing would leave user-visible
-		// sessions running after "close all", which is worse than the
-		// scoping loss. No-Redis deployments are single-workspace by
-		// assumption anyway, so the scope difference is moot.
-		if tabMetaStore == nil {
-			if err := manager.KillAllSessions(); err != nil {
-				log.Printf("Failed to kill all sessions: %v", err)
-				respondJSON(w, http.StatusInternalServerError, map[string]interface{}{
-					"success": false,
-					"error":   "failed to kill all sessions",
-				})
-				return
-			}
-			if hub != nil {
-				hub.Broadcast(&MutationPayload{
-					Type:        "terminal_session_change",
-					Timestamp:   time.Now().UTC().Format(time.RFC3339),
-					WorkspaceID: wsID,
-				})
-			}
-			respondJSON(w, http.StatusOK, map[string]interface{}{"success": true})
+		if wsID == "" {
+			respondJSON(w, http.StatusBadRequest, map[string]interface{}{
+				"success": false,
+				"error":   "workspace context required",
+			})
 			return
 		}
 
-		// List this workspace's sessions via tab metadata. Sessions without
-		// metadata will be missed — in multi-VM deployments this is the
-		// correct behavior: if it's not in the workspace's metadata, it's
-		// not the workspace's session to kill.
+		// Kill every tmux session in this workspace via the manager's
+		// prefix-scoped helper. This catches both sessions with active PTY
+		// connections and detached spawned-only sessions — no need to list
+		// via tabmeta first.
+		if err := manager.KillWorkspaceSessions(wsID); err != nil {
+			log.Printf("Failed to kill workspace sessions for %q: %v", wsID, err)
+			respondJSON(w, http.StatusInternalServerError, map[string]interface{}{
+				"success": false,
+				"error":   "failed to kill workspace sessions",
+			})
+			return
+		}
+
+		// Delete this workspace's tab metadata (best-effort). Kept on the
+		// request path rather than inside the manager so TerminalManager
+		// stays oblivious to Redis.
 		metaCleanupFailed := false
-		var sessionNames []string
-		if wsID != "" {
+		if tabMetaStore != nil {
 			tabs, err := tabMetaStore.List(r.Context(), wsID)
 			if err != nil {
 				log.Printf("Failed to list tab metadata for workspace %q: %v", wsID, err)
 				metaCleanupFailed = true
 			} else {
-				sessionNames = make([]string, 0, len(tabs))
 				for _, tab := range tabs {
-					sessionNames = append(sessionNames, tab.SessionName)
+					if err := tabMetaStore.Delete(r.Context(), wsID, tab.SessionName); err != nil {
+						log.Printf("Failed to delete tab metadata for %s: %v", tab.SessionName, err)
+						metaCleanupFailed = true
+					}
 				}
-			}
-		}
-
-		// Kill each session's tmux process and delete its metadata.
-		for _, name := range sessionNames {
-			if err := manager.KillSessionByName(name); err != nil {
-				log.Printf("Failed to kill session %q: %v", name, err)
-			}
-			if err := tabMetaStore.Delete(r.Context(), wsID, name); err != nil {
-				log.Printf("Failed to delete tab metadata for %s: %v", name, err)
-				metaCleanupFailed = true
 			}
 		}
 
@@ -346,6 +351,15 @@ func handleSeedTerminalSession(manager *TerminalManager) http.HandlerFunc {
 			return
 		}
 
+		wsID := WorkspaceFromContext(r.Context())
+		if wsID == "" {
+			respondJSON(w, http.StatusBadRequest, map[string]interface{}{
+				"success": false,
+				"error":   "workspace context required",
+			})
+			return
+		}
+
 		sessionName := r.PathValue("name")
 		if sessionName == "" {
 			respondJSON(w, http.StatusBadRequest, map[string]interface{}{
@@ -375,7 +389,7 @@ func handleSeedTerminalSession(manager *TerminalManager) http.HandlerFunc {
 
 		prompt := formatSeedPrompt(&req)
 
-		if err := manager.SendKeys(sessionName, prompt); err != nil {
+		if err := manager.SendKeys(wsID, sessionName, prompt); err != nil {
 			if strings.Contains(err.Error(), "not found") {
 				respondJSON(w, http.StatusNotFound, map[string]interface{}{
 					"success": false,

@@ -1,7 +1,6 @@
 package webui
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -9,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -41,7 +39,7 @@ type TerminalSession struct {
 	Command string   // command running in the session
 	PTY     *os.File // PTY master fd from creack/pty
 	cmd     *exec.Cmd
-	killCh  chan struct{} // closed by KillSessionByName to signal WS handlers
+	killCh  chan struct{} // closed by KillSession to signal WS handlers
 	mu      sync.Mutex
 	closed  bool
 }
@@ -77,14 +75,24 @@ const defaultMaxTerminalSessions = 20
 // ErrSessionBeingKilled is returned by Attach when a session is in the killing set.
 var ErrSessionBeingKilled = errors.New("session is being killed")
 
+// pendingKill wraps a cancel function with a unique identity token. The
+// identity is the pointer to the pendingKill struct itself, which is used by
+// the ScheduleKill goroutine to detect whether a later ScheduleKill has
+// replaced its entry. Comparing CancelFunc values directly (or via fmt.Sprintf
+// "%p") does not work because Go prints the underlying code PC rather than
+// the closure heap address, so two distinct WithCancel closures compare equal.
+type pendingKill struct {
+	cancel context.CancelFunc
+}
+
 // TerminalManager manages tmux session lifecycles.
 // Multiple WebSocket connections can attach to the same tmux session simultaneously,
 // each tracked by a unique connection ID.
 type TerminalManager struct {
-	sessions           map[string]*TerminalSession   // keyed by connection ID
-	pendingKills       map[string]context.CancelFunc // deferred session kills, guarded by mu
-	killingSet         map[string]time.Time          // sessions being killed (user-initiated), tombstone with timestamp
-	scrollbackBuffers  map[string]*ScrollbackBuffer  // keyed by tmux session name (internal)
+	sessions           map[string]*TerminalSession  // keyed by connection ID
+	pendingKills       map[string]*pendingKill      // deferred session kills, guarded by mu; pointer identity distinguishes a replaced entry from the original
+	killingSet         map[string]time.Time         // sessions being killed (user-initiated), tombstone with timestamp
+	scrollbackBuffers  map[string]*ScrollbackBuffer // keyed by tmux session name (internal)
 	mu                 sync.RWMutex
 	tmuxPath           string
 	tmuxEnv            []string // cached environment for tmux subprocesses
@@ -126,7 +134,7 @@ func NewTerminalManager(defaultCommand, sessionPrefix string, maxSessions int) (
 	}
 	return &TerminalManager{
 		sessions:           make(map[string]*TerminalSession),
-		pendingKills:       make(map[string]context.CancelFunc),
+		pendingKills:       make(map[string]*pendingKill),
 		killingSet:         make(map[string]time.Time),
 		scrollbackBuffers:  make(map[string]*ScrollbackBuffer),
 		tmuxPath:           tmuxPath,
@@ -140,16 +148,38 @@ func NewTerminalManager(defaultCommand, sessionPrefix string, maxSessions int) (
 	}, nil
 }
 
-// tmuxName returns the internal tmux session name with the prefix applied.
-func (m *TerminalManager) tmuxName(name string) string {
+// tmuxName returns the internal tmux session name qualified by the server
+// instance prefix and the workspace short ID. Both the server prefix and the
+// workspace short ID are embedded so two workspaces with the same user-facing
+// session name never collide in tmux, and two loom instances on the same host
+// stay isolated from each other.
+//
+// Format: "<serverPrefix>-<wsShort>-<name>" (or "<wsShort>-<name>" if the
+// server prefix is empty — currently only possible in tests).
+//
+// Callers must have validated wsID is non-empty; an empty wsID silently maps
+// to the literal "default" via workspace.ShortWorkspaceID, but public methods
+// reject empty wsID before reaching this helper so the fallback is defensive.
+func (m *TerminalManager) tmuxName(wsID, name string) string {
+	wsShort := workspace.ShortWorkspaceID(wsID)
 	if m.sessionPrefix == "" {
-		return name
+		return wsShort + "-" + name
 	}
-	return m.sessionPrefix + "-" + name
+	return m.sessionPrefix + "-" + wsShort + "-" + name
+}
+
+// workspacePrefix returns the prefix that all tmux session names for a given
+// workspace share, including the trailing dash. Used by KillWorkspaceSessions
+// and ListWorkspaceSessions to filter tmux's list-sessions output. Equivalent
+// to tmuxName(wsID, "") — tmuxName always appends "-<name>" so passing an
+// empty name leaves the trailing dash that callers rely on.
+func (m *TerminalManager) workspacePrefix(wsID string) string {
+	return m.tmuxName(wsID, "")
 }
 
 // checkAttachPreconditionsLocked verifies a session is not being killed
 // (tombstone, 30s TTL) and that the concurrent session limit is not exceeded.
+// killKey must be the already-qualified internal tmux session name.
 // Caller must hold m.mu.
 func (m *TerminalManager) checkAttachPreconditionsLocked(killKey string) error {
 	if killTime, beingKilled := m.killingSet[killKey]; beingKilled {
@@ -164,10 +194,14 @@ func (m *TerminalManager) checkAttachPreconditionsLocked(killKey string) error {
 	return nil
 }
 
-// SessionExists reports whether the named tmux session already exists.
-// The session prefix is applied automatically.
-func (m *TerminalManager) SessionExists(name string) bool {
-	return m.tmuxHasSession(m.tmuxName(name))
+// SessionExists reports whether the named tmux session already exists in the
+// given workspace. The server prefix and workspace short ID are applied
+// automatically.
+func (m *TerminalManager) SessionExists(wsID, name string) bool {
+	if wsID == "" {
+		return false
+	}
+	return m.tmuxHasSession(m.tmuxName(wsID, name))
 }
 
 // tmuxCmd creates an exec.Cmd for a tmux subcommand with the cached environment.
@@ -230,12 +264,18 @@ func (m *TerminalManager) tmuxAttach(name string) (*exec.Cmd, *os.File, error) {
 	return cmd, ptmx, nil
 }
 
-// Attach creates a new PTY connection to a tmux session.
+// Attach creates a new PTY connection to a tmux session in the given workspace.
 // If the tmux session doesn't exist, it creates one with the given command.
 // If command is empty, uses the manager's default command.
 // Multiple connections can attach to the same tmux session simultaneously.
 // Re-attaching cancels any pending deferred kill for this session.
-func (m *TerminalManager) Attach(name, command string, cols, rows uint16) (*TerminalSession, error) {
+//
+// wsID must be non-empty; the caller is expected to derive it from the
+// request's workspace context.
+func (m *TerminalManager) Attach(wsID, name, command string, cols, rows uint16) (*TerminalSession, error) {
+	if wsID == "" {
+		return nil, fmt.Errorf("wsID must not be empty")
+	}
 	if !validSessionName.MatchString(name) {
 		return nil, fmt.Errorf("invalid session name %q: must match [a-zA-Z0-9_-]+", name)
 	}
@@ -249,11 +289,11 @@ func (m *TerminalManager) Attach(name, command string, cols, rows uint16) (*Term
 		command = m.defaultCommand
 	}
 
-	// Cancel any pending deferred kill for this session.
-	m.CancelPendingKill(name)
-
-	// Apply prefix to get the actual tmux session name.
-	internalName := m.tmuxName(name)
+	// Apply prefix scheme to get the qualified tmux session name. All in-memory
+	// state (pendingKills, killingSet, scrollbackBuffers) is keyed by this
+	// qualified name so two workspaces with the same user-facing session name
+	// never collide.
+	internalName := m.tmuxName(wsID, name)
 
 	// Generate unique connection ID using internal name for debuggability.
 	connNum := m.connCounter.Add(1)
@@ -262,7 +302,17 @@ func (m *TerminalManager) Attach(name, command string, cols, rows uint16) (*Term
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if err := m.checkAttachPreconditionsLocked(name); err != nil {
+	// Cancel any pending deferred kill and check preconditions inside the
+	// same critical section. Doing the cancel before the lock left a window
+	// where a scheduled-kill goroutine's timer could fire after the cancel
+	// but before the preconditions check, marking the session as killing
+	// even though we were trying to reconnect to it.
+	if entry, ok := m.pendingKills[internalName]; ok {
+		entry.cancel()
+		delete(m.pendingKills, internalName)
+	}
+
+	if err := m.checkAttachPreconditionsLocked(internalName); err != nil {
 		return nil, err
 	}
 
@@ -351,216 +401,6 @@ func (m *TerminalManager) AttachExistingRaw(tmuxSessionName string, cols, rows u
 	}
 	m.sessions[connID] = session
 	return session, nil
-}
-
-type tmuxSessionMeta struct {
-	name    string
-	created int64
-}
-
-func (m *TerminalManager) listTmuxSessions() ([]tmuxSessionMeta, error) {
-	cmd := m.tmuxCmd("list-sessions", "-F", "#{session_name}\t#{session_created}")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		msg := strings.ToLower(string(out))
-		// No tmux server/sessions is a normal state for archive fallback.
-		if strings.Contains(msg, "failed to connect to server") || strings.Contains(msg, "no server running") || strings.Contains(msg, "error connecting to") {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("tmux list-sessions failed: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-
-	var sessions []tmuxSessionMeta
-	scanner := bufio.NewScanner(strings.NewReader(string(out)))
-	for scanner.Scan() {
-		line := scanner.Text()
-		parts := strings.SplitN(line, "\t", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		created, err := strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 64)
-		if err != nil {
-			continue
-		}
-		name := strings.TrimSpace(parts[0])
-		if name == "" {
-			continue
-		}
-		sessions = append(sessions, tmuxSessionMeta{name: name, created: created})
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-	return sessions, nil
-}
-
-// FindLatestAgentSession returns the newest tmux session matching the auto-mode
-// naming convention for an agent: loom-<wsPrefix>-<role>-<agent>-<pid>.
-// When workspaceID is non-empty, only sessions for that workspace are matched.
-// When workspaceID is empty, returns no match (fail-closed).
-func (m *TerminalManager) FindLatestAgentSession(workspaceID, agentName string) (string, bool, error) {
-	if !validSessionName.MatchString(agentName) {
-		return "", false, fmt.Errorf("invalid agent name %q", agentName)
-	}
-
-	sessions, err := m.listTmuxSessions()
-	if err != nil {
-		return "", false, err
-	}
-
-	// When workspace ID is empty, fail closed — no match rather than match-all.
-	if workspaceID == "" {
-		return "", false, nil
-	}
-	wsPrefix := workspace.ShortWorkspaceID(workspaceID)
-	pattern := regexp.MustCompile(fmt.Sprintf(`^loom-%s-[a-zA-Z0-9_-]+-%s-[0-9]+$`, regexp.QuoteMeta(wsPrefix), regexp.QuoteMeta(agentName)))
-
-	var bestName string
-	var bestCreated int64
-	found := false
-	for _, session := range sessions {
-		if !pattern.MatchString(session.name) {
-			continue
-		}
-		if !found || session.created > bestCreated || (session.created == bestCreated && session.name > bestName) {
-			bestName = session.name
-			bestCreated = session.created
-			found = true
-		}
-	}
-	if !found {
-		return "", false, nil
-	}
-	return bestName, true, nil
-}
-
-// Spawn creates a tmux session without attaching a PTY connection.
-// It is idempotent: if the session already exists, it returns (false, nil).
-// The returned bool indicates whether a new session was created.
-func (m *TerminalManager) Spawn(name, command string, cols, rows uint16) (bool, error) {
-	if !validSessionName.MatchString(name) {
-		return false, fmt.Errorf("invalid session name %q: must match [a-zA-Z0-9_-]+", name)
-	}
-	if cols == 0 {
-		cols = m.defaultCols
-	}
-	if rows == 0 {
-		rows = m.defaultRows
-	}
-
-	internalName := m.tmuxName(name)
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.tmuxHasSession(internalName) {
-		return false, nil
-	}
-
-	if err := m.tmuxNewSession(internalName, command, cols, rows); err != nil {
-		return false, fmt.Errorf("tmux new-session: %w", err)
-	}
-	return true, nil
-}
-
-// tmuxNewSessionArgv creates a new detached tmux session that execs argv directly
-// instead of passing the command through a shell. Use this when any argument may
-// contain user-supplied text, to avoid shell-injection risk.
-// If workDir is non-empty it is passed to tmux via -c, so the child process
-// starts in that directory instead of the parent's cwd.
-func (m *TerminalManager) tmuxNewSessionArgv(name string, argv []string, cols, rows uint16, workDir string) error {
-	if len(argv) == 0 {
-		return fmt.Errorf("tmuxNewSessionArgv: argv must not be empty")
-	}
-	args := []string{
-		"new-session", "-d",
-		"-s", name,
-		"-x", fmt.Sprintf("%d", cols),
-		"-y", fmt.Sprintf("%d", rows),
-	}
-	if workDir != "" {
-		args = append(args, "-c", workDir)
-	}
-	args = append(args, argv...)
-	if err := m.tmuxCmd(args...).Run(); err != nil {
-		return err
-	}
-	m.applySessionOptions(name)
-	return nil
-}
-
-// SpawnInDir is like Spawn but starts the tmux session in the given working
-// directory via tmux -c. If workDir is empty, the session inherits the loom
-// service's cwd (same as Spawn). Idempotent: if a session with this name
-// already exists, returns (false, nil).
-//
-// Used by the terminal spawn handler to land new "+ Tab" sessions in the
-// active workspace's path rather than the loom service's cwd.
-func (m *TerminalManager) SpawnInDir(name, command string, cols, rows uint16, workDir string) (bool, error) {
-	if !validSessionName.MatchString(name) {
-		return false, fmt.Errorf("invalid session name %q: must match [a-zA-Z0-9_-]+", name)
-	}
-	if command == "" {
-		return false, fmt.Errorf("command must not be empty")
-	}
-	if cols == 0 {
-		cols = m.defaultCols
-	}
-	if rows == 0 {
-		rows = m.defaultRows
-	}
-
-	internalName := m.tmuxName(name)
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.tmuxHasSession(internalName) {
-		return false, nil
-	}
-
-	// Pass as single-element argv so tmux execs the command directly with the
-	// cwd set via -c. For single-binary commands (claude, /bin/bash, etc.) this
-	// is behaviorally identical to Spawn but with workDir support.
-	if err := m.tmuxNewSessionArgv(internalName, []string{command}, cols, rows, workDir); err != nil {
-		return false, fmt.Errorf("tmux new-session: %w", err)
-	}
-	return true, nil
-}
-
-// SpawnArgv creates a tmux session whose command is execv'd directly from argv,
-// bypassing shell interpretation. Use this for commands containing user-supplied
-// text (e.g. an initial agent prompt) to avoid shell-injection risks.
-// If workDir is non-empty, the session starts in that directory (via tmux -c);
-// otherwise it inherits the loom service's cwd. Idempotent: if the session
-// already exists it returns (false, nil).
-func (m *TerminalManager) SpawnArgv(name string, argv []string, cols, rows uint16, workDir string) (bool, error) {
-	if !validSessionName.MatchString(name) {
-		return false, fmt.Errorf("invalid session name %q: must match [a-zA-Z0-9_-]+", name)
-	}
-	if len(argv) == 0 {
-		return false, fmt.Errorf("argv must not be empty")
-	}
-	if cols == 0 {
-		cols = m.defaultCols
-	}
-	if rows == 0 {
-		rows = m.defaultRows
-	}
-
-	internalName := m.tmuxName(name)
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.tmuxHasSession(internalName) {
-		return false, nil
-	}
-
-	if err := m.tmuxNewSessionArgv(internalName, argv, cols, rows, workDir); err != nil {
-		return false, fmt.Errorf("tmux new-session: %w", err)
-	}
-	return true, nil
 }
 
 // Resize changes the PTY and tmux window dimensions for a connection.

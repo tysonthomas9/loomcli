@@ -17,6 +17,7 @@ type mockArgvSpawner struct {
 	spawnCreated bool
 	spawnErr     error
 	// Captured on the last call, for argv assertions.
+	lastWSID    string
 	lastName    string
 	lastArgv    []string
 	lastCols    uint16
@@ -32,7 +33,8 @@ func stubWorkspaceConfig(path string) func(string) (*WorkspaceData, error) {
 	}
 }
 
-func (m *mockArgvSpawner) SpawnArgv(name string, argv []string, cols, rows uint16, workDir string) (bool, error) {
+func (m *mockArgvSpawner) SpawnArgv(wsID, name string, argv []string, cols, rows uint16, workDir string) (bool, error) {
+	m.lastWSID = wsID
 	m.lastName = name
 	m.lastArgv = argv
 	m.lastCols = cols
@@ -44,8 +46,16 @@ func (m *mockArgvSpawner) SpawnArgv(name string, argv []string, cols, rows uint1
 	return m.spawnCreated, nil
 }
 
+// postLeadSession sends a lead-session request with a default "ws-test"
+// workspace injected into the request context, matching what
+// WorkspaceMiddleware does for workspace-scoped routes in production. Tests
+// that need to exercise the no-workspace-context path should construct the
+// request inline and skip this helper.
 func postLeadSession(handler http.HandlerFunc, body string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/ws-test/terminal/lead-session", strings.NewReader(body))
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodPost, "/api/workspaces/ws-test/terminal/lead-session", strings.NewReader(body)),
+		"ws-test",
+	)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 	return rr
@@ -220,7 +230,12 @@ func TestHandleCreateLeadSession_BodyTooLarge(t *testing.T) {
 	}
 	body := fmt.Sprintf(`{"message":%q,"backend":"claude"}`, payload)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/terminal/lead-session", bytes.NewReader([]byte(body)))
+	// Inject workspace context so the body-size check is what rejects this
+	// request, not the new workspace-context requirement.
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodPost, "/api/terminal/lead-session", bytes.NewReader([]byte(body))),
+		"ws-test",
+	)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 
@@ -333,9 +348,11 @@ func TestHandleCreateLeadSession_WorkspaceCwd_FallbackOnLookupErr(t *testing.T) 
 }
 
 func TestHandleCreateLeadSession_WorkspaceCwd_NoContext(t *testing.T) {
-	// When the handler is called without a workspace context (e.g., test
-	// invocation without middleware), WorkspaceFromContext returns "" and
-	// the config lookup is skipped. Spawner sees an empty workDir.
+	// When the handler is called without a workspace context (e.g., a test
+	// invocation that bypasses WorkspaceMiddleware), the new workspace-aware
+	// TerminalManager API requires a non-empty wsID, so the handler rejects
+	// the request with 400 before touching the spawner or the workspace
+	// config lookup.
 	mock := &mockArgvSpawner{spawnCreated: true}
 	cfg := func(id string) (*WorkspaceData, error) {
 		t.Errorf("workspace lookup should not be called when context has no wsID; got %q", id)
@@ -343,13 +360,25 @@ func TestHandleCreateLeadSession_WorkspaceCwd_NoContext(t *testing.T) {
 	}
 	handler := handleCreateLeadSessionImpl(mock, cfg)
 
-	// Use plain postLeadSession — no workspace context injected.
-	rr := postLeadSession(handler, `{"message":"hi","backend":"claude"}`)
+	// Construct the request WITHOUT injecting workspace context, bypassing
+	// the postLeadSession helper which now always injects one.
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/terminal/lead-session",
+		strings.NewReader(`{"message":"hi","backend":"claude"}`),
+	)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d; body: %s", rr.Code, http.StatusOK, rr.Body.String())
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body: %s", rr.Code, http.StatusBadRequest, rr.Body.String())
 	}
-	if mock.lastWorkDir != "" {
-		t.Errorf("workDir = %q, want empty", mock.lastWorkDir)
+	var resp leadSessionResponse
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	if !strings.Contains(resp.Error, "workspace context required") {
+		t.Errorf("error = %q, want to contain %q", resp.Error, "workspace context required")
+	}
+	if mock.lastName != "" {
+		t.Errorf("spawner should not have been called; lastName = %q", mock.lastName)
 	}
 }

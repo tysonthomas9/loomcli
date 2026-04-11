@@ -237,8 +237,10 @@ func TestHandleTerminalWS_WebSocketUpgrade(t *testing.T) {
 
 	handler := handleTerminalWS(manager, nil, nil, "", nil, nil, nil)
 
-	// Create a test server for WebSocket testing
-	server := httptest.NewServer(handler)
+	// Create a test server for WebSocket testing, wrapping the handler so it
+	// sees a workspace context (production requests go through
+	// WorkspaceMiddleware; httptest.NewServer bypasses the mux tree entirely).
+	server := httptest.NewServer(wrapWithWorkspace(handler, "testws"))
 	defer server.Close()
 
 	// Convert http URL to ws URL
@@ -283,7 +285,7 @@ func TestHandleTerminalWS_CommandParameterIgnored(t *testing.T) {
 	manager.SetDefaultCommand(defaultCmd)
 	handler := handleTerminalWS(manager, nil, nil, "", nil, nil, nil)
 
-	server := httptest.NewServer(handler)
+	server := httptest.NewServer(wrapWithWorkspace(handler, "testws"))
 	defer server.Close()
 
 	// Connect with an injected command parameter that should be ignored.
@@ -301,19 +303,25 @@ func TestHandleTerminalWS_CommandParameterIgnored(t *testing.T) {
 	// Give the tmux session a moment to start.
 	time.Sleep(500 * time.Millisecond)
 
+	// Under the new workspace-aware naming, the internal tmux name is
+	// "<serverPrefix>-<wsShort>-<userName>". With empty server prefix and
+	// wsID="testws", the actual tmux session is "testws-cmd-inject-test".
+	internalName := "testws-cmd-inject-test"
+	t.Cleanup(func() { killTmuxSession(t, internalName) })
+
 	// Verify the tmux session exists.
 	listOut, err := exec.CommandContext(ctx, "tmux", "list-sessions", "-F", "#{session_name}").CombinedOutput() //nolint:norawexec
 	if err != nil {
 		t.Fatalf("tmux list-sessions failed: %v\n%s", err, listOut)
 	}
-	if !strings.Contains(string(listOut), "cmd-inject-test") {
-		t.Fatalf("tmux session 'cmd-inject-test' not found in output:\n%s", listOut)
+	if !strings.Contains(string(listOut), internalName) {
+		t.Fatalf("tmux session %q not found in output:\n%s", internalName, listOut)
 	}
 
 	// Check the pane's current command. If the injected command "echo" had been
 	// used, the pane would run "echo INJECTED" (pane_current_command = "echo").
 	// With the default "bash", the pane_current_command should be "bash".
-	paneCmd, err := exec.CommandContext(ctx, "tmux", "display-message", "-t", "cmd-inject-test", "-p", "#{pane_current_command}").CombinedOutput() //nolint:norawexec
+	paneCmd, err := exec.CommandContext(ctx, "tmux", "display-message", "-t", internalName, "-p", "#{pane_current_command}").CombinedOutput() //nolint:norawexec
 	if err != nil {
 		t.Fatalf("tmux display-message failed: %v\n%s", err, paneCmd)
 	}
@@ -1194,7 +1202,7 @@ func TestTerminalWebSocket_E2E(t *testing.T) {
 	defer manager.Shutdown()
 
 	handler := handleTerminalWS(manager, nil, nil, "", nil, nil, nil)
-	server := httptest.NewServer(handler)
+	server := httptest.NewServer(wrapWithWorkspace(handler, "testws"))
 	defer server.Close()
 
 	wsURL := "ws" + server.URL[4:] + "?session=e2e-test"
@@ -1409,11 +1417,12 @@ func TestHandleTerminalWS_MaxSessionsReached(t *testing.T) {
 	name := testSessionName(t)
 	t.Cleanup(func() {
 		manager.Shutdown()
-		killTmuxSession(t, name)
+		// Internal name is "testws-<name>" under the new prefix scheme.
+		killTmuxSession(t, "testws-"+name)
 	})
 
 	// Fill the single slot by attaching directly.
-	_, err = manager.Attach(name, "", 80, 24)
+	_, err = manager.Attach("testws", name, "", 80, 24)
 	if err != nil {
 		t.Fatalf("Attach() error: %v", err)
 	}
@@ -1421,7 +1430,10 @@ func TestHandleTerminalWS_MaxSessionsReached(t *testing.T) {
 	handler := handleTerminalWS(manager, nil, nil, "", nil, nil, nil)
 
 	// Send a plain HTTP request — it should be rejected before WebSocket upgrade.
-	req := httptest.NewRequest(http.MethodGet, "/api/terminal/ws?session=another", nil)
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodGet, "/api/terminal/ws?session=another", nil),
+		"testws",
+	)
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -1467,7 +1479,10 @@ func TestHandleTerminalRestart_Success(t *testing.T) {
 	pool := newMockConfigPool(dir)
 	handler := handleTerminalRestartWithPool(manager, pool, nil)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/terminal/restart?session=test-session", nil)
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodPost, "/api/terminal/restart?session=test-session", nil),
+		"testws",
+	)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -1511,7 +1526,10 @@ func TestHandleTerminalRestart_DefaultBackend(t *testing.T) {
 	pool := newMockConfigPool(dir)
 	handler := handleTerminalRestartWithPool(manager, pool, nil)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/terminal/restart?session=test-session", nil)
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodPost, "/api/terminal/restart?session=test-session", nil),
+		"testws",
+	)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -1660,7 +1678,10 @@ func TestHandleTerminalRestart_ShellSession(t *testing.T) {
 	pool := newMockConfigPool(dir)
 	handler := handleTerminalRestartWithPool(manager, pool, nil)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/terminal/restart?session=lead-shell-1", nil)
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodPost, "/api/terminal/restart?session=lead-shell-1", nil),
+		"testws",
+	)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -1700,7 +1721,10 @@ func TestHandleTerminalRestart_ShellSession_NilPool(t *testing.T) {
 
 	handler := handleTerminalRestartWithPool(manager, nil, nil)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/terminal/restart?session=lead-shell-3", nil)
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodPost, "/api/terminal/restart?session=lead-shell-3", nil),
+		"testws",
+	)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -1768,8 +1792,10 @@ func TestHandleTerminalWS_SSEBroadcastOnIssueSession(t *testing.T) {
 	// Give hub.Run() a moment to process registration.
 	time.Sleep(50 * time.Millisecond)
 
+	// Handler sees workspace="default" via the wrapper so its tabMetaStore
+	// lookup hits the metadata set above.
 	handler := handleTerminalWS(manager, nil, nil, "", nil, store, hub)
-	server := httptest.NewServer(handler)
+	server := httptest.NewServer(wrapWithWorkspace(handler, "default"))
 	defer server.Close()
 
 	wsURL := "ws" + server.URL[4:] + "?session=issue-PROJ-42"
@@ -1843,7 +1869,7 @@ func TestHandleTerminalWS_NoSSEBroadcastWithoutIssueID(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	handler := handleTerminalWS(manager, nil, nil, "", nil, store, hub)
-	server := httptest.NewServer(handler)
+	server := httptest.NewServer(wrapWithWorkspace(handler, "testws"))
 	defer server.Close()
 
 	wsURL := "ws" + server.URL[4:] + "?session=plain-session"
@@ -1883,7 +1909,7 @@ func TestHandleTerminalWS_NoSSEBroadcastWithNilStoreAndHub(t *testing.T) {
 
 	// Pass nil for both tabMetaStore and hub — should not panic.
 	handler := handleTerminalWS(manager, nil, nil, "", nil, nil, nil)
-	server := httptest.NewServer(handler)
+	server := httptest.NewServer(wrapWithWorkspace(handler, "testws"))
 	defer server.Close()
 
 	wsURL := "ws" + server.URL[4:] + "?session=no-sse-test"
@@ -1929,7 +1955,7 @@ func TestHandleTerminalWS_NoSSEBroadcastWhenMetadataNotFound(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	handler := handleTerminalWS(manager, nil, nil, "", nil, store, hub)
-	server := httptest.NewServer(handler)
+	server := httptest.NewServer(wrapWithWorkspace(handler, "testws"))
 	defer server.Close()
 
 	wsURL := "ws" + server.URL[4:] + "?session=unknown-session"
@@ -2040,10 +2066,11 @@ func TestHandleTerminalWS_SSEBroadcastNonDefaultWorkspace(t *testing.T) {
 	}
 }
 
-// TestHandleTerminalWS_SSEBroadcastNoWorkspaceParamUsesDefault verifies backward
-// compatibility: when a WebSocket connects WITHOUT a workspace query parameter,
-// the handler falls back to "default" and still broadcasts the SSE event.
-func TestHandleTerminalWS_SSEBroadcastNoWorkspaceParamUsesDefault(t *testing.T) {
+// TestHandleTerminalWS_SSEBroadcastDefaultWorkspace verifies that SSE
+// broadcasts work end-to-end when the handler's workspace context is
+// "default" — the bucket used by single-workspace deployments and by test
+// harnesses that don't spin up multiple workspaces.
+func TestHandleTerminalWS_SSEBroadcastDefaultWorkspace(t *testing.T) {
 	if os.Getenv("CI") != "" {
 		t.Skip("skipping in CI: tmux PTY lifecycle is unreliable in GitHub Actions")
 	}
@@ -2086,11 +2113,11 @@ func TestHandleTerminalWS_SSEBroadcastNoWorkspaceParamUsesDefault(t *testing.T) 
 	// Give hub.Run() a moment to process registration.
 	time.Sleep(50 * time.Millisecond)
 
+	// Handler sees workspace="default" via the wrapper, matching the metadata.
 	handler := handleTerminalWS(manager, nil, nil, "", nil, store, hub)
-	server := httptest.NewServer(handler)
+	server := httptest.NewServer(wrapWithWorkspace(handler, "default"))
 	defer server.Close()
 
-	// Connect WITHOUT workspace param — should fall back to "default".
 	wsURL := "ws" + server.URL[4:] + "?session=issue-DEFAULT-7"
 	dialCtx, dialCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer dialCancel()
@@ -2173,7 +2200,7 @@ func TestHandleTerminalWS_OriginValidation(t *testing.T) {
 			defer manager.Shutdown()
 
 			handler := handleTerminalWS(manager, nil, tt.allowedOrigins, "", nil, nil, nil)
-			server := httptest.NewServer(handler)
+			server := httptest.NewServer(wrapWithWorkspace(handler, "testws"))
 			defer server.Close()
 
 			wsURL := "ws" + server.URL[4:] + "?session=origin-test"

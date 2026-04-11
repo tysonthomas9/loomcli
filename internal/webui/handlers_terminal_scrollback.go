@@ -15,7 +15,13 @@ func handleGetScrollback(termManager *TerminalManager) http.HandlerFunc {
 			return
 		}
 
-		content, err := termManager.CaptureScrollback(session)
+		wsID := WorkspaceFromContext(r.Context())
+		if wsID == "" {
+			respondError(w, http.StatusBadRequest, "workspace context required")
+			return
+		}
+
+		content, err := termManager.CaptureScrollback(wsID, session)
 		if err != nil {
 			if strings.Contains(err.Error(), "not found") {
 				respondError(w, http.StatusNotFound, "session not found")

@@ -34,6 +34,16 @@ func withWorkspaceCtx(r *http.Request, ws string) *http.Request {
 	return r.WithContext(WithWorkspace(r.Context(), ws))
 }
 
+// wrapWithWorkspace wraps an http.Handler so every request passing through
+// it has the given workspace injected into its context. Used by tests that
+// spin up httptest.NewServer — those bypass WorkspaceMiddleware entirely,
+// so the handler would otherwise see an empty workspace context.
+func wrapWithWorkspace(handler http.Handler, ws string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler.ServeHTTP(w, r.WithContext(WithWorkspace(r.Context(), ws)))
+	})
+}
+
 func TestHandleListTerminalTabs_NilStore(t *testing.T) {
 	handler := handleListTerminalTabs(nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/tabs", nil)

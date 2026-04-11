@@ -56,10 +56,10 @@ func handleGetIssueTabs(store *issuetabs.Store, manager *TerminalManager) http.H
 			return
 		}
 
-		// Validate terminal tabs against active tmux sessions
+		// Validate terminal tabs against active tmux sessions in this workspace.
 		var activeNames []string
-		if manager != nil {
-			sessions, err := manager.ListActiveSessions()
+		if manager != nil && wsID != "" {
+			sessions, err := manager.ListWorkspaceSessions(wsID)
 			if err != nil {
 				log.Printf("Failed to list active sessions for issue tab validation: %v", err)
 			} else {

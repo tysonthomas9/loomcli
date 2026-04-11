@@ -204,7 +204,10 @@ func TestHandleTerminalKill_AuthWithValidToken(t *testing.T) {
 
 	handler := handleTerminalKill(manager, auth)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/terminal/kill?session=test-session&token="+token, nil)
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodPost, "/api/terminal/kill?session=test-session&token="+token, nil),
+		"testws",
+	)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -236,7 +239,10 @@ func TestHandleTerminalKill_Success(t *testing.T) {
 
 	handler := handleTerminalKill(manager, nil)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/terminal/kill?session=test-session", nil)
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodPost, "/api/terminal/kill?session=test-session", nil),
+		"testws",
+	)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -359,7 +365,10 @@ func TestHandleTerminalSessionStatus_DeadSession(t *testing.T) {
 	handler := handleTerminalSessionStatus(manager, nil)
 
 	// Query a session that does not exist
-	req := httptest.NewRequest(http.MethodGet, "/api/terminal/session-status?session=nonexistent-session", nil)
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodGet, "/api/terminal/session-status?session=nonexistent-session", nil),
+		"testws",
+	)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -395,18 +404,22 @@ func TestHandleTerminalSessionStatus_AliveSession(t *testing.T) {
 	sessionName := "health-alive-test"
 	t.Cleanup(func() {
 		manager.Shutdown()
-		killTmuxSession(t, sessionName)
+		// Internal name is "testws-<name>" under the new prefix scheme.
+		killTmuxSession(t, "testws-"+sessionName)
 	})
 
 	// Create a tmux session via Attach so it's tracked
-	_, err = manager.Attach(sessionName, "", 80, 24)
+	_, err = manager.Attach("testws", sessionName, "", 80, 24)
 	if err != nil {
 		t.Fatalf("failed to attach session: %v", err)
 	}
 
 	handler := handleTerminalSessionStatus(manager, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/terminal/session-status?session="+sessionName, nil)
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodGet, "/api/terminal/session-status?session="+sessionName, nil),
+		"testws",
+	)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -443,7 +456,10 @@ func TestHandleTerminalSessionStatus_ResponseFormat(t *testing.T) {
 
 	handler := handleTerminalSessionStatus(manager, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/terminal/session-status?session=format-test", nil)
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodGet, "/api/terminal/session-status?session=format-test", nil),
+		"testws",
+	)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 

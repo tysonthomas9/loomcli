@@ -130,9 +130,13 @@ func (m *TerminalManager) ScrollbackMaxLines() int {
 }
 
 // GetScrollbackBuffer returns the scrollback buffer for the given user-facing
-// session name, creating one if it does not already exist.
-func (m *TerminalManager) GetScrollbackBuffer(name string) *ScrollbackBuffer {
-	internalName := m.tmuxName(name)
+// session name in the given workspace, creating one if it does not already
+// exist. Returns nil if wsID is empty.
+func (m *TerminalManager) GetScrollbackBuffer(wsID, name string) *ScrollbackBuffer {
+	if wsID == "" {
+		return nil
+	}
+	internalName := m.tmuxName(wsID, name)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	buf, ok := m.scrollbackBuffers[internalName]
@@ -144,9 +148,13 @@ func (m *TerminalManager) GetScrollbackBuffer(name string) *ScrollbackBuffer {
 }
 
 // LookupScrollbackBuffer returns the scrollback buffer for the given session
-// name if one exists, or nil if no buffer has been created for this session.
-func (m *TerminalManager) LookupScrollbackBuffer(name string) *ScrollbackBuffer {
-	internalName := m.tmuxName(name)
+// name in the given workspace if one exists, or nil if no buffer has been
+// created for this session.
+func (m *TerminalManager) LookupScrollbackBuffer(wsID, name string) *ScrollbackBuffer {
+	if wsID == "" {
+		return nil
+	}
+	internalName := m.tmuxName(wsID, name)
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.scrollbackBuffers[internalName]
