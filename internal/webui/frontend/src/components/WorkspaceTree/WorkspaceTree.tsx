@@ -49,7 +49,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ErrorDisplay } from "@/components/ErrorDisplay";
 
 import { ActiveAllToggle, type ActiveFilter } from "./ActiveAllToggle";
-import { EpicTaskTree } from "./EpicTaskTree";
+import { EpicTaskTree } from "./tree";
 import { RepoGroupList } from "./RepoGroupList";
 import { SidebarStatusBar } from "./SidebarStatusBar";
 import { SortableWorkspaceEntry } from "./SortableWorkspaceEntry";
