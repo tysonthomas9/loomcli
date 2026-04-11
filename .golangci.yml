@@ -122,6 +122,8 @@ linters:
               desc: "SDK-layer packages must not import infra packages"
             - pkg: github.com/tysonthomas9/loomcli/internal/backend/agentipc
               desc: "SDK-layer packages must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/backend/api
+              desc: "SDK-layer packages must not import infra packages"
             - pkg: github.com/tysonthomas9/loomcli/internal/events/otelexport
               desc: "SDK-layer packages must not import infra packages"
             - pkg: github.com/tysonthomas9/loomcli/internal/backend/mapping
@@ -151,6 +153,7 @@ linters:
             - "**/internal/backend/beads/**"
             - "**/internal/backend/fleet/**"
             - "**/internal/backend/agentipc/**"
+            - "**/internal/backend/api/**"
             - "**/internal/events/otelexport/**"
           deny:
             - pkg: github.com/tysonthomas9/loomcli/internal/webui
@@ -189,6 +192,7 @@ linters:
   exclusions:
     paths:
       - third_party
+      - internal/backend/api/gen
     rules:
       # === Package naming exclusions ===
       # "misc" is a domain sub-package name within the webui handler hierarchy.
@@ -591,3 +595,4 @@ formatters:
   exclusions:
     paths:
       - third_party
+      - internal/backend/api/gen

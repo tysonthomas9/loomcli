@@ -126,12 +126,20 @@ func (defaultExecContextRunner) Run(ctx context.Context, dir, name string, args 
 func DefaultDeps() *Deps {
 	var issueBackend backend.IssueBackend
 
-	if ResolveIssueBackendType() == IssueBackendFleet {
+	switch ResolveIssueBackendType() {
+	case IssueBackendFleet:
 		fb, err := createFleetIssueBackend()
 		if err != nil {
 			slog.Warn("fleet backend creation failed, falling back to beads", "err", err)
 		} else {
 			issueBackend = fb
+		}
+	case IssueBackendAPI:
+		ab, err := createAPIIssueBackend()
+		if err != nil {
+			slog.Warn("api backend creation failed, falling back to beads", "err", err)
+		} else {
+			issueBackend = ab
 		}
 	}
 	if issueBackend == nil {

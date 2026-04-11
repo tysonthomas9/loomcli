@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -15,6 +16,17 @@ var (
 
 // worktreesFlag stores the --worktrees flag value for override
 var worktreesFlag string
+
+// serverFlag stores the --server flag value (remote loom server base URL).
+// When non-empty, the CLI routes issue operations through the api backend
+// instead of the local beads backend. Mirrored into LOOM_SERVER_URL in
+// PersistentPreRun so env-based resolution sees the value consistently.
+var serverFlag string
+
+// workspaceFlag stores the --workspace flag value (target workspace ID for
+// --server mode). No shorthand — `-w` is already taken by --worktrees at
+// rootCmd.PersistentFlags below.
+var workspaceFlag string
 
 var rootCmd = &cobra.Command{
 	Use:   "loom",
@@ -101,12 +113,27 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&backendFlag, "backend", "", "AI backend CLI to use (claude, codex, opencode). Env: LOOM_BACKEND")
 	rootCmd.PersistentFlags().StringVar(&logFormat, "log-format", "text", "Log format (text|json)")
 	rootCmd.PersistentFlags().StringVar(&logOutput, "log-output", "stderr", "Log output destination (stderr|<filepath>)")
+	rootCmd.PersistentFlags().StringVar(&serverFlag, "server", "", "Remote loom server base URL. When set, CLI uses HTTP API backend instead of local beads. Env: LOOM_SERVER_URL")
+	rootCmd.PersistentFlags().StringVar(&workspaceFlag, "workspace", "", "Workspace ID (for --server mode). Env: LOOM_WORKSPACE")
 
 	// Resolve and set active backend before any subcommand runs,
 	// then inject the Deps container into the command context.
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
 		if err := InitLogger(logFormat, logOutput); err != nil {
 			return err
+		}
+		// Mirror --server / --workspace flags into env vars so that
+		// resolveIssueBackendFromEnv and the factory helpers see the same
+		// value whether the caller used the flag or the env var directly.
+		if serverFlag != "" {
+			if err := os.Setenv("LOOM_SERVER_URL", serverFlag); err != nil {
+				return err
+			}
+		}
+		if workspaceFlag != "" {
+			if err := os.Setenv("LOOM_WORKSPACE", workspaceFlag); err != nil {
+				return err
+			}
 		}
 		if err := ResolveAndSetBackend(); err != nil {
 			return err

@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build test test-integration test-all lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-api-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install install-bd help frontend frontend-ensure sync-beads update-beads check check-go check-frontend gate gate-e2e gate-e2e-full hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec test-coverage test-frontend-coverage test-race-cover test-integration-race-cover
+.PHONY: all build test test-integration test-all lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-api-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install install-bd help frontend frontend-ensure sync-beads update-beads check check-go check-frontend gate gate-e2e gate-e2e-full hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
 
 # Default target
 all: build
@@ -63,6 +63,21 @@ check-loc-stale:
 check-no-raw-exec:
 	@echo "Checking for raw exec.Command in unit tests..."
 	@./scripts/check-no-raw-exec.sh
+
+# Generate Go types from api/openapi.yaml using oapi-codegen (via a 3.1->3.0
+# preprocessor since oapi-codegen v2.6 does not yet fully support 3.1).
+OAPI_CODEGEN_VERSION := v2.6.0
+gen-go-api:
+	@echo "Generating Go types from api/openapi.yaml..."
+	@mkdir -p tmp
+	@go run ./scripts/openapi-to-30 api/openapi.yaml > tmp/openapi-3.0.yaml
+	@go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@$(OAPI_CODEGEN_VERSION) --config api/oapi-codegen.yaml tmp/openapi-3.0.yaml
+	@rm -f tmp/openapi-3.0.yaml
+	@echo "Generated: internal/backend/api/gen/types.gen.go"
+
+# Check that committed types.gen.go is in sync with api/openapi.yaml
+check-go-api-staleness:
+	@./scripts/check-go-api-staleness.sh
 
 # Run frontend linter + typecheck
 lint-frontend:
@@ -166,28 +181,30 @@ update-beads:
 
 # Go-only quality gate (skips frontend rebuild if dist/ exists)
 check-go: frontend-ensure
-	@echo "=== [1/11] Go: format check ==="
+	@echo "=== [1/12] Go: format check ==="
 	@bad=$$(gofmt -l . 2>/dev/null | grep -v third_party | grep -v worktrees | grep -v vendor | grep -v node_modules | head -20); \
 	if [ -n "$$bad" ]; then echo "gofmt violations:"; echo "$$bad"; exit 1; fi
-	@echo "=== [2/11] Go: vet ==="
+	@echo "=== [2/12] Go: vet ==="
 	@go vet ./...
-	@echo "=== [3/11] Go: build ==="
+	@echo "=== [3/12] Go: build ==="
 	@go build -buildvcs=false ./...
-	@echo "=== [4/11] Go: lint (golangci-lint + depguard) ==="
+	@echo "=== [4/12] Go: lint (golangci-lint + depguard) ==="
 	@golangci-lint run --timeout=5m --allow-parallel-runners
-	@echo "=== [5/11] Go: LOC check ==="
+	@echo "=== [5/12] Go: LOC check ==="
 	@./scripts/check-loc.sh 1000 2500
-	@echo "=== [6/11] Go: package size check ==="
+	@echo "=== [6/12] Go: package size check ==="
 	@./scripts/check-package-size.sh 25
-	@echo "=== [7/11] Go: import fanout check ==="
+	@echo "=== [7/12] Go: import fanout check ==="
 	@./scripts/check-import-fanout.sh 10
-	@echo "=== [8/11] Go: exec.Command guard ==="
+	@echo "=== [8/12] Go: exec.Command guard ==="
 	@./scripts/check-no-raw-exec.sh
-	@echo "=== [9/11] Go: log.Printf guard ==="
+	@echo "=== [9/12] Go: log.Printf guard ==="
 	@./scripts/check-no-log-printf.sh
-	@echo "=== [10/11] Go: test with race detector ==="
+	@echo "=== [10/12] Go: generated API staleness ==="
+	@./scripts/check-go-api-staleness.sh
+	@echo "=== [11/12] Go: test with race detector ==="
 	@go test -race -covermode=atomic -coverprofile=/tmp/loom.coverage.out -timeout 15m ./...
-	@echo "=== [11/11] Go: coverage threshold ==="
+	@echo "=== [12/12] Go: coverage threshold ==="
 	@COVERAGE_THRESHOLD=60 ./scripts/check-coverage.sh
 	@echo "=== Go quality gates PASSED ==="
 
