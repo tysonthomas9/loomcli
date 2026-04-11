@@ -7,7 +7,7 @@
 // api.Backend talks to the regular loom server and uses types generated from
 // api/openapi.yaml for request/response wire format. Authentication is
 // layered in via an injected *http.Client (typically wrapping
-// internal/cli/httpclient.Client for OIDC device-flow support).
+// internal/httpclient.Client for OIDC device-flow support).
 package api
 
 import (

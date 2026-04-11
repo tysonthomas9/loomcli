@@ -15,7 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/api"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
-	"github.com/tysonthomas9/loomcli/internal/cli/httpclient"
+	"github.com/tysonthomas9/loomcli/internal/httpclient"
 )
 
 // Issue backend type constants.

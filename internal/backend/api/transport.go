@@ -3,7 +3,7 @@ package api
 import "net/http"
 
 // authRoundTripper is an http.RoundTripper interface that mirrors the Do()
-// signature used by internal/cli/httpclient.Client. Any type that implements
+// signature used by internal/httpclient.Client. Any type that implements
 // this interface can back the api.Backend's authenticated HTTP client.
 //
 // Defining the interface here (rather than importing httpclient) keeps the
@@ -32,7 +32,7 @@ func (t *AuthTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 // NewAuthHTTPClient constructs an http.Client whose Transport delegates to
 // the given Do-capable client. Pass in an httpclient.Client from
-// internal/cli/httpclient to get OIDC device-flow and token-cache behavior.
+// internal/httpclient to get OIDC device-flow and token-cache behavior.
 func NewAuthHTTPClient(client authRoundTripper) *http.Client {
 	return &http.Client{
 		Transport: &AuthTransport{Client: client},

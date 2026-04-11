@@ -89,6 +89,7 @@ linters:
             - "**/internal/workspaceerrors/**"
             - "**/internal/events/*.go"        # root only — otelexport is infra
             - "**/internal/ops/**"             # future: created by loomcli-rir82.2
+            - "**/internal/httpclient/**"      # auth-aware HTTP client — sdk layer
           deny:
             # Infra-layer packages (SDK must not import infra)
             - pkg: github.com/tysonthomas9/loomcli/internal/rpc
@@ -167,6 +168,52 @@ linters:
           deny:
             - pkg: github.com/tysonthomas9/loomcli/internal/cli
               desc: "WebUI must not import cli"
+        # cli/data is an sdk-only command package. It talks to a loom server over
+        # HTTP exclusively using the generated OpenAPI client via api.APIBackend
+        # and internal/httpclient for auth. It MUST NOT import cli root, cli
+        # sub-packages, webui, or any infra package. Enforced by prefix match —
+        # see the flat-layout note in loomcli-rir82.24 design.
+        data-isolation:
+          list-mode: lax
+          files:
+            - "**/internal/cli/data/**"
+          deny:
+            - pkg: github.com/tysonthomas9/loomcli/internal/cli
+              desc: "cli/data must not import cli root or cli sub-packages (sdk-only; flat layout prevents prefix-match self-collision)"
+            - pkg: github.com/tysonthomas9/loomcli/internal/webui
+              desc: "cli/data must not import webui"
+            - pkg: github.com/tysonthomas9/loomcli/internal/rpc
+              desc: "cli/data must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/sessions
+              desc: "cli/data must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/lockfile
+              desc: "cli/data must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/circuitbreaker
+              desc: "cli/data must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/kv
+              desc: "cli/data must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/configlock
+              desc: "cli/data must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/usage
+              desc: "cli/data must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/logrouter
+              desc: "cli/data must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/atomicfile
+              desc: "cli/data must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/debug
+              desc: "cli/data must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/testutil
+              desc: "cli/data must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/backend/beads
+              desc: "cli/data must not use the beads backend (HTTP only)"
+            - pkg: github.com/tysonthomas9/loomcli/internal/backend/fleet
+              desc: "cli/data must not use the fleet backend (HTTP only)"
+            - pkg: github.com/tysonthomas9/loomcli/internal/backend/agentipc
+              desc: "cli/data must not use the agentipc backend (HTTP only)"
+            - pkg: github.com/tysonthomas9/loomcli/internal/backend/mapping
+              desc: "cli/data must not import infra backend mapping"
+            - pkg: github.com/tysonthomas9/loomcli/internal/events/otelexport
+              desc: "cli/data must not import infra packages"
     staticcheck:
       checks:
         - "all"
@@ -481,6 +528,11 @@ linters:
         linters:
           - errcheck
         text: 'Fprintf'
+      # errcheck: cli/data formatters write to os.Stdout; write errors are non-actionable
+      - path: 'internal/cli/data/'
+        linters:
+          - errcheck
+        text: 'Fprint'
       # errcheck: Terminal session cleanup is best-effort
       - path: 'internal/webui/handlers_terminal\.go'
         linters:
