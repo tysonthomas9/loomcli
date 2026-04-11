@@ -187,6 +187,8 @@ export {
   MutationBonded,
   MutationSquashed,
   MutationBurned,
+  MutationRefresh,
+  MutationSessionChange,
   createMutationEvent,
   isCreateMutation,
   isUpdateMutation,
@@ -196,6 +198,7 @@ export {
   isBondedMutation,
   isSquashedMutation,
   isBurnedMutation,
+  isRefreshMutation,
 } from "./mutation";
 
 // Usage types
