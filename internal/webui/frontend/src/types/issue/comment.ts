@@ -3,7 +3,7 @@
  * Aliased from generated OpenAPI schema: components.schemas.Comment
  */
 
-import type { components } from "./generated/openapi";
+import type { components } from "@/types/generated/openapi";
 
 /**
  * Comment on an issue.

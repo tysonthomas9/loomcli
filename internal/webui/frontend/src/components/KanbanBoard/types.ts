@@ -6,7 +6,7 @@
 import type { ReactNode } from "react";
 
 import type { Issue, Status } from "@/types";
-import type { BlockedInfo } from "@/types/blocked";
+import type { BlockedInfo } from "@/types/issue";
 
 /**
  * Configuration for a kanban column.

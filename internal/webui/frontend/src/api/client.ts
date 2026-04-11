@@ -60,8 +60,8 @@ const authStateListeners: AuthStateListener[] = [];
 // ApiError lives in src/types/errors.ts so components can render error UIs
 // without crossing the frontend layer DAG back into the api layer. Re-export
 // here so existing @/api/client call sites continue to work.
-export { ApiError } from "@/types/errors";
-import { ApiError } from "@/types/errors";
+export { ApiError } from "@/types/common";
+import { ApiError } from "@/types/common";
 
 export type RequestOptions = {
   headers?: Record<string, string>;

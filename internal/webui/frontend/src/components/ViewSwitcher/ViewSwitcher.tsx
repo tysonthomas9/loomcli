@@ -5,15 +5,15 @@
 
 import { useCallback, useRef } from "react";
 
-import type { ViewMode } from "@/types/view";
+import type { ViewMode } from "@/types/common";
 
 import styles from "./ViewSwitcher.module.css";
 
 // Re-export from the canonical source so existing consumers that imported
 // ViewMode via ViewSwitcher (pre-Phase 7) continue to compile. New code
 // should import from "@/types" directly.
-export type { ViewMode } from "@/types/view";
-export { DEFAULT_VIEW } from "@/types/view";
+export type { ViewMode } from "@/types/common";
+export { DEFAULT_VIEW } from "@/types/common";
 
 /**
  * View configuration.

@@ -12,7 +12,7 @@ import type {
   GraphNodeType,
   GraphEdgeType,
 } from "../graph";
-import type { Issue } from "../issue";
+import type { Issue } from "@/types/issue";
 
 describe("Graph types", () => {
   describe("IssueNode", () => {

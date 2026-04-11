@@ -7,8 +7,8 @@ import { useCallback } from "react";
 
 import { useAnnounce } from "@/hooks/ui";
 import { formatStatusLabel } from "@/utils/statusFormat";
-import type { Status, KnownStatus } from "@/types/status";
-import { USER_SELECTABLE_STATUSES } from "@/types/status";
+import type { Status, KnownStatus } from "@/types/issue";
+import { USER_SELECTABLE_STATUSES } from "@/types/issue";
 
 import styles from "./StatusDropdown.module.css";
 

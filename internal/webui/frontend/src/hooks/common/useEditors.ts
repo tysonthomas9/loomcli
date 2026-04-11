@@ -3,7 +3,7 @@ import { useStore } from "zustand";
 
 import { editorStore } from "@/stores";
 import { openInEditor } from "@/api/editors";
-import type { EditorInfo } from "@/types/editor";
+import type { EditorInfo } from "@/types/common";
 
 export interface UseEditorsResult {
   editors: EditorInfo[];

@@ -39,7 +39,7 @@ import type {
   Comment,
   Event,
 } from "@/types";
-import type { Status } from "@/types/status";
+import type { Status } from "@/types/issue";
 import { getReviewType, isPRUrl } from "@/utils/issueCategory";
 
 import {

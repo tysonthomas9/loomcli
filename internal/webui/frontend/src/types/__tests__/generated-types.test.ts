@@ -10,25 +10,25 @@
 import { describe, it, expect } from "vitest";
 
 import type { components, paths } from "../generated/openapi";
-import type { Comment } from "../comment";
-import type { EditorInfo } from "../editor";
-import type { SessionRecord, TranscriptEntry } from "../session";
-import type { Statistics } from "../statistics";
+import type { Comment } from "@/types/issue";
+import type { EditorInfo } from "@/types/common";
+import type { SessionRecord, TranscriptEntry } from "@/types/agent";
+import type { Statistics } from "@/types/issue";
 import type {
   UsageSession,
   UsageAgentSummary,
   UsageBackendSummary,
   UsageDailyCost,
   UsageResponse,
-} from "../usage";
+} from "@/types/agent";
 import type {
   HourlyBucket,
   MetricsSnapshot,
   ObservabilityMetricsResponse,
-} from "../observability";
-import type { Dependency } from "../dependency";
-import type { Event } from "../event";
-import type { Issue, BlockerRef } from "../issue";
+} from "@/types/agent";
+import type { Dependency } from "@/types/issue";
+import type { Event } from "@/types/workspace";
+import type { Issue, BlockerRef } from "@/types/issue";
 import type {
   LoomCommitDetail,
   LoomFileChange,
@@ -41,7 +41,7 @@ import type {
   LoomStats,
   LoomStatusResponse,
   LoomTasksResponse,
-} from "../agent";
+} from "@/types/agent";
 
 // ---------------------------------------------------------------------------
 // 1. Generated openapi.ts exports `components` and `paths`

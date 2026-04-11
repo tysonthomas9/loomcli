@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createIssueStore, issuesAreEqual } from "../issueStore";
 import type { IssueStore } from "../issueStore";
 import type { StoreApi } from "zustand/vanilla";
-import type { Issue } from "../../types/issue";
+import type { Issue } from "@/types/issue";
 import type { MutationPayload } from "../../api/sse";
 
 // ---------------------------------------------------------------------------

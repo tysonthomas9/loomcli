@@ -4,7 +4,7 @@
  */
 
 import { api, apiErrorFromResponse } from "./client";
-import type { EditorInfo } from "@/types/editor";
+import type { EditorInfo } from "@/types/common";
 
 // ============= API Functions =============
 

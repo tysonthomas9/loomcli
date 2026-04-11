@@ -9,9 +9,9 @@
  */
 
 import type { Issue, Status, Priority, IssueType } from "@/types";
-import type { ColumnDef } from "@/types/table";
+import type { ColumnDef } from "@/types/common";
 
-export type { ColumnDef } from "@/types/table";
+export type { ColumnDef } from "@/types/common";
 export { getCellValue } from "@/utils/tableCells";
 
 /**

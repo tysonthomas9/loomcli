@@ -3,7 +3,7 @@
  * Shows agent name, phase badge, status dot, duration, token count, and cost.
  */
 
-import type { SessionRecord } from "@/types/session";
+import type { SessionRecord } from "@/types/agent";
 
 import styles from "./SessionsTab.module.css";
 

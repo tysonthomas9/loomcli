@@ -8,7 +8,7 @@
  * layer DAG.
  */
 
-import type { ISODateString } from "./common";
+import type { ISODateString } from "@/types/common";
 
 /**
  * Kinds of mutation events emitted by the backend over SSE.

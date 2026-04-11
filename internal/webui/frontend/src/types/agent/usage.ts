@@ -6,7 +6,7 @@
  * UsageParams kept hand-written (query params type, not a schema).
  */
 
-import type { components } from "./generated/openapi";
+import type { components } from "@/types/generated/openapi";
 
 /** A single agent session's usage record. Aliased from generated UsageSessionRecord schema. */
 export type UsageSession = components["schemas"]["UsageSessionRecord"];

@@ -11,7 +11,7 @@ import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { getSessionTranscript } from "@/api/sessions";
-import type { TranscriptEntry } from "@/types/session";
+import type { TranscriptEntry } from "@/types/agent";
 
 import { useSessionTranscript } from "../useSessionTranscript";
 

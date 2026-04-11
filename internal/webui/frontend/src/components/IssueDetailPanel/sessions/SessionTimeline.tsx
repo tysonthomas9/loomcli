@@ -2,7 +2,7 @@
  * SessionTimeline - Vertical list of session rows, sorted newest-first.
  */
 
-import type { SessionRecord } from "@/types/session";
+import type { SessionRecord } from "@/types/agent";
 
 import { SessionTimelineRow } from "./SessionTimelineRow";
 import styles from "./SessionsTab.module.css";

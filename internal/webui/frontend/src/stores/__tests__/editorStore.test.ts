@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import type { StoreApi } from "zustand/vanilla";
 import type { EditorStore } from "../editorStore";
-import type { EditorInfo } from "../../types/editor";
+import type { EditorInfo } from "@/types/common";
 
 // Mock the editors API module
 vi.mock("../../api/editors", () => ({

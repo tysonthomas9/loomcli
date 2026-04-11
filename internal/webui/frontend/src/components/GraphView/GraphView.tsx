@@ -38,7 +38,7 @@ import type {
   IssueNode as IssueNodeType,
   DependencyType,
 } from "@/types";
-import type { Status } from "@/types/status";
+import type { Status } from "@/types/issue";
 
 import styles from "./GraphView.module.css";
 

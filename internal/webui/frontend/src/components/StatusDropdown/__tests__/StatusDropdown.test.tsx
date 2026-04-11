@@ -10,8 +10,8 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom";
 
-import type { Status } from "@/types/status";
-import { USER_SELECTABLE_STATUSES } from "@/types/status";
+import type { Status } from "@/types/issue";
+import { USER_SELECTABLE_STATUSES } from "@/types/issue";
 import { expectNoA11yViolations } from "@/test-utils/a11y-helpers";
 
 import { StatusDropdown } from "../StatusDropdown";

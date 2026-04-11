@@ -10,7 +10,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
-import type { SessionRecord, TranscriptEntry } from "@/types/session";
+import type { SessionRecord, TranscriptEntry } from "@/types/agent";
 
 import { SessionDetailView } from "../SessionDetailView";
 

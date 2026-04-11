@@ -36,11 +36,11 @@ export type ConnectionState =
   | "connected"
   | "reconnecting";
 
-// Mutation types: definitions live in src/types/mutation.ts (the canonical
+// Mutation types: definitions live in src/types/workspace/mutation.ts (the canonical
 // source per the Phase 7 frontend layer DAG). Re-exported here so existing
 // code that imports them from @/api/sse continues to compile.
-import type { MutationPayload } from "@/types/mutation";
-export type { MutationType, MutationPayload } from "@/types/mutation";
+import type { MutationPayload } from "@/types/workspace";
+export type { MutationType, MutationPayload } from "@/types/workspace";
 
 /**
  * Options for the BeadsSSEClient.

@@ -7,7 +7,7 @@
  * DAG forbidding hooks → components.
  */
 
-import type { ColumnDef } from "@/types/table";
+import type { ColumnDef } from "@/types/common";
 
 /**
  * Get cell value from a row using the column accessor.

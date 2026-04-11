@@ -2,8 +2,8 @@
  * Filter types for list/query operations.
  */
 
-import type { MolType } from "./agent";
-import type { Status } from "./status";
+import type { MolType } from "@/types/agent";
+import type { Status } from "@/types/issue";
 
 /**
  * Sort policy for ready work.

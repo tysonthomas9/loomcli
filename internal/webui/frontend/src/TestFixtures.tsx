@@ -29,7 +29,7 @@ import {
 } from "@/stores/agentStore";
 import { createIssueStore } from "@/stores/issueStore";
 import type { IssueDetails, Priority, Issue } from "@/types";
-import type { Status } from "@/types/status";
+import type { Status } from "@/types/issue";
 import { useState, useCallback } from "react";
 
 /**

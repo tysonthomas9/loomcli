@@ -5,7 +5,7 @@
  * Envelope response types (SessionListResponse, SessionDetailResponse, TranscriptResponse) kept hand-written.
  */
 
-import type { components } from "./generated/openapi";
+import type { components } from "@/types/generated/openapi";
 
 /** Lifecycle state of a session. */
 export type SessionStatus = "running" | "completed" | "failed" | "aborted";

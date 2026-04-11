@@ -3,7 +3,7 @@
  * Uses openapi-fetch generated client.
  */
 
-import type { SessionRecord, TranscriptEntry } from "../types/session";
+import type { SessionRecord, TranscriptEntry } from "@/types/agent";
 
 import { api, ApiError, apiErrorFromResponse } from "./client";
 

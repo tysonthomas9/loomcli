@@ -8,7 +8,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 
 import type { LoomAgentStatus, LoomTaskInfo } from "@/types";
 import { parseLoomStatus } from "@/types/agent";
-import type { Status } from "@/types/status";
+import type { Status } from "@/types/issue";
 
 import styles from "./StartWorkButton.module.css";
 

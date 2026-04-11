@@ -27,7 +27,7 @@ import { StatusColumn, VirtualizedCardList } from "@/components/StatusColumn";
 import { formatStatusLabel } from "@/utils/statusFormat";
 import type { FilterState } from "@/hooks/issues";
 import type { Issue, Status } from "@/types";
-import type { BlockedInfo } from "@/types/blocked";
+import type { BlockedInfo } from "@/types/issue";
 
 import { DEFAULT_COLUMNS } from "./columnConfigs";
 import styles from "./KanbanBoard.module.css";
@@ -35,7 +35,7 @@ import type { KanbanColumnConfig } from "./types";
 
 // Re-export so consumers that imported BlockedInfo from KanbanBoard
 // (pre-Phase 7) keep compiling. New code should import from @/types.
-export type { BlockedInfo } from "@/types/blocked";
+export type { BlockedInfo } from "@/types/issue";
 
 const LOAD_MORE_BATCH = 50;
 

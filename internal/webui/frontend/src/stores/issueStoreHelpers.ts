@@ -19,7 +19,7 @@ import {
   MutationStatus,
   MutationBonded,
   MutationRefresh,
-} from "../types/mutation";
+} from "@/types/workspace";
 
 // ---------------------------------------------------------------------------
 // Constants

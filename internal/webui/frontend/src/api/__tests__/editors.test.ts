@@ -8,7 +8,7 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
-import type { EditorInfo } from "@/types/editor";
+import type { EditorInfo } from "@/types/common";
 
 // Mock the API client module
 vi.mock("../client", () => ({

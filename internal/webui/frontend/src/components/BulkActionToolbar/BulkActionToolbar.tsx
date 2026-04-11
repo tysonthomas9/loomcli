@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useRef } from "react";
 
-import type { BulkAction } from "@/types/bulkActions";
+import type { BulkAction } from "@/types/common";
 import { useAnnounce } from "@/hooks/ui";
 
 import styles from "./BulkActionToolbar.module.css";
@@ -14,7 +14,7 @@ import styles from "./BulkActionToolbar.module.css";
 // Re-export so existing consumers that imported BulkAction from the
 // BulkActionToolbar module (pre-Phase 7) keep compiling. New code should
 // import from @/types directly.
-export type { BulkAction } from "@/types/bulkActions";
+export type { BulkAction } from "@/types/common";
 
 /**
  * Props for the BulkActionToolbar component.

@@ -19,15 +19,11 @@ export {
   AUTH_MODE_OIDC,
   type AuthMode,
   type AppConfig,
-} from "@/types/authMode";
-import {
-  AUTH_MODE_OPEN,
-  AUTH_MODE_OIDC,
-  type AppConfig,
-} from "@/types/authMode";
+} from "@/types/common";
+import { AUTH_MODE_OPEN, AUTH_MODE_OIDC, type AppConfig } from "@/types/common";
 
-export { AppConfigError } from "@/types/errors";
-import { AppConfigError } from "@/types/errors";
+export { AppConfigError } from "@/types/common";
+import { AppConfigError } from "@/types/common";
 
 // ============= Module-level Cache =============
 

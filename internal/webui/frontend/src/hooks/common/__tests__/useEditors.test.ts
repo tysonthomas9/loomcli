@@ -13,7 +13,7 @@
 import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import type { EditorInfo } from "@/types/editor";
+import type { EditorInfo } from "@/types/common";
 import { openInEditor } from "@/api/editors";
 
 // Mock the editors API module (used by the store internally and directly by the hook)

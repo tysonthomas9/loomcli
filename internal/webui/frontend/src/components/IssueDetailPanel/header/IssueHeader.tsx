@@ -4,7 +4,7 @@
  */
 
 import type { Issue, IssueDetails, Priority } from "@/types";
-import type { Status } from "@/types/status";
+import type { Status } from "@/types/issue";
 
 import { EditableTitle } from "@/components/EditableTitle";
 import { formatStatusLabel } from "@/utils/statusFormat";

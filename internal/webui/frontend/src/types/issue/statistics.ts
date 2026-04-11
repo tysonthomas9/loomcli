@@ -4,7 +4,7 @@
  * EpicStatus kept hand-written (no standalone schema in spec).
  */
 
-import type { components } from "./generated/openapi";
+import type { components } from "@/types/generated/openapi";
 import type { Issue } from "./issue";
 
 /**

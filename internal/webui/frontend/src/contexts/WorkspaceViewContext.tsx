@@ -9,7 +9,7 @@
 
 import { createContext, useContext, type ReactNode } from "react";
 
-import type { BlockedInfo } from "@/types/blocked";
+import type { BlockedInfo } from "@/types/issue";
 import type { GroupByOption, FilterState } from "@/hooks/issues";
 import type { ViewMode } from "@/types";
 import type { PanelState, ToastOptions } from "@/hooks/ui";

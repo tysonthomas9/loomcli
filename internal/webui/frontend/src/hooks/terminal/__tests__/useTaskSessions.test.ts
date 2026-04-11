@@ -11,7 +11,7 @@ import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { getTaskSessions } from "@/api/sessions";
-import type { SessionRecord } from "@/types/session";
+import type { SessionRecord } from "@/types/agent";
 
 import { useTaskSessions } from "../useTaskSessions";
 

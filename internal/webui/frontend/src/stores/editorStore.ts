@@ -7,7 +7,7 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 
 import { fetchEditors as fetchEditorsApi } from "../api/editors";
-import type { EditorInfo } from "../types/editor";
+import type { EditorInfo } from "@/types/common";
 
 // ---------------------------------------------------------------------------
 // Types

@@ -10,7 +10,7 @@
  * Runtime constants, ParsedLoomStatus, LoomConnectionState, parseLoomStatus kept hand-written.
  */
 
-import type { components } from "./generated/openapi";
+import type { components } from "@/types/generated/openapi";
 
 /**
  * Agent state values.

@@ -7,12 +7,12 @@
  * MoleculeProgressStats kept hand-written (no standalone schemas or different shapes).
  */
 
-import type { components } from "./generated/openapi";
-import type { AgentState, WorkType } from "./agent";
+import type { components } from "@/types/generated/openapi";
+import type { AgentState, WorkType } from "@/types/agent";
 import type { Comment } from "./comment";
-import type { ISODateString, Priority, Duration } from "./common";
+import type { ISODateString, Priority, Duration } from "@/types/common";
 import type { Dependency, DependencyType } from "./dependency";
-import type { EntityRef, Validation, BondRef } from "./entity";
+import type { EntityRef, Validation, BondRef } from "@/types/common";
 import type { IssueType } from "./issueType";
 import type { Status } from "./status";
 

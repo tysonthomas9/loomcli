@@ -4,7 +4,7 @@
  * EventType union and constants kept hand-written (runtime values).
  */
 
-import type { components } from "./generated/openapi";
+import type { components } from "@/types/generated/openapi";
 
 /**
  * Event type values for audit trail.

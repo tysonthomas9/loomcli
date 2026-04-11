@@ -5,7 +5,7 @@
 
 import { useState, useMemo, useCallback } from "react";
 
-import type { ColumnDef } from "@/types/table";
+import type { ColumnDef } from "@/types/common";
 import { getCellValue } from "@/utils/tableCells";
 
 /**

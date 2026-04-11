@@ -5,7 +5,7 @@
  * Preserves existing filter params from the current URL.
  */
 
-import { DEFAULT_VIEW } from "@/types/view";
+import { DEFAULT_VIEW } from "@/types/common";
 
 /**
  * Parameters for building a share URL.

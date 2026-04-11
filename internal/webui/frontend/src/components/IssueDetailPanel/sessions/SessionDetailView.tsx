@@ -7,7 +7,7 @@ import { useState } from "react";
 
 import { CodeMirrorEditor } from "@/components/CodeMirrorEditor";
 import { useSessionTranscript, useSessionDiff } from "@/hooks/terminal";
-import type { SessionRecord } from "@/types/session";
+import type { SessionRecord } from "@/types/agent";
 
 import styles from "./SessionsTab.module.css";
 
