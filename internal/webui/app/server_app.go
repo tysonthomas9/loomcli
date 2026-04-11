@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -165,8 +166,12 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	app.multiSub = appstores.NewMultiSub(app.hub, app.multiPool, config.Logger)
 	cleanups = append(cleanups, func() { app.multiSub.Stop() })
 
-	// Terminal manager for WebSocket sessions (workspace-scoped prefix prevents collisions).
-	termSessionPrefix := fmt.Sprintf("%d-%s", app.actualPort, appinfra.ShortWorkspaceID(app.initialWorkspaceID))
+	// Terminal manager for WebSocket sessions. The session prefix is just the
+	// listen port — enough to isolate multiple loom server instances sharing
+	// the same tmux socket. The workspace short ID is added per-session by
+	// TerminalManager.tmuxName, so including it here would cause the workspace
+	// short to appear twice in every qualified tmux session name.
+	termSessionPrefix := strconv.Itoa(app.actualPort)
 	if app.termMgr, err = terminal.NewTerminalManager(config.TerminalCmd, termSessionPrefix, config.MaxTerminalSessions); err != nil {
 		if errors.Is(err, terminal.ErrTmuxNotFound) {
 			logger.Warn("tmux not found, terminal feature disabled")
@@ -183,7 +188,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 
 	// Wire session history callback.
 	if app.termMgr != nil {
-		app.termMgr.SetOnSessionKilled(func(sessionName string) {
+		app.termMgr.SetOnSessionKilled(func(wsID, sessionName, scrollbackPath string) {
 			store := app.sessionHistoryStore
 			if store == nil {
 				return
@@ -192,15 +197,21 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 			if issueID == "" {
 				return
 			}
-			homeDir, err := os.UserHomeDir()
-			if err != nil {
-				return
+			// The manager passes the qualified on-disk path; verify it still
+			// exists before recording it (capture may have failed quietly).
+			if scrollbackPath != "" {
+				if _, err := os.Stat(scrollbackPath); err != nil {
+					scrollbackPath = ""
+				}
 			}
-			scrollbackPath := homeDir + "/.loom/session-scrollback/" + sessionName + ".log"
-			if _, err := os.Stat(scrollbackPath); err != nil {
-				scrollbackPath = ""
+			// Fall back to the initial workspace when the manager can't supply
+			// a wsID (legacy callers / raw-name paths). Any workspace-scoped
+			// kill now routes to the actual owning workspace.
+			storeWS := wsID
+			if storeWS == "" {
+				storeWS = app.initialWorkspaceID
 			}
-			if err := store.Complete(context.Background(), app.initialWorkspaceID, issueID, sessionName, scrollbackPath); err != nil {
+			if err := store.Complete(context.Background(), storeWS, issueID, sessionName, scrollbackPath); err != nil {
 				logger.Warn("failed to complete session history", "session", sessionName, "err", err)
 			}
 		})

@@ -5,6 +5,9 @@ import (
 	"time"
 )
 
+// Tests in this file use termTestWS and termTestInternal from terminal_test.go
+// (same package) for workspace-qualified tmux session name management.
+
 // TestScheduleKill_FiresAfterDelay verifies that ScheduleKill schedules a
 // deferred kill that executes after the specified delay.
 func TestScheduleKill_FiresAfterDelay(t *testing.T) {
@@ -18,24 +21,24 @@ func TestScheduleKill_FiresAfterDelay(t *testing.T) {
 	name := testSessionName(t)
 	t.Cleanup(func() {
 		mgr.Shutdown()
-		killTmuxSession(t, name)
+		killTmuxSession(t, termTestInternal(name))
 	})
 
 	// Spawn a tmux session so there is something to kill.
-	if _, err := mgr.Spawn(name, "", 80, 24); err != nil {
+	if _, err := mgr.Spawn(termTestWS, name, "", 80, 24); err != nil {
 		t.Fatalf("Spawn() error: %v", err)
 	}
-	if !mgr.SessionExists(name) {
+	if !mgr.SessionExists(termTestWS, name) {
 		t.Fatal("expected tmux session to exist after Spawn")
 	}
 
 	// Schedule kill with a short delay.
-	mgr.ScheduleKill(name, 100*time.Millisecond)
+	mgr.ScheduleKill(termTestWS, name, 100*time.Millisecond)
 
 	// Wait for the kill to fire.
 	time.Sleep(400 * time.Millisecond)
 
-	if mgr.SessionExists(name) {
+	if mgr.SessionExists(termTestWS, name) {
 		t.Error("expected tmux session to be killed after ScheduleKill delay elapsed")
 	}
 }
@@ -53,19 +56,19 @@ func TestCancelPendingKill_CancelsPendingKill(t *testing.T) {
 	name := testSessionName(t)
 	t.Cleanup(func() {
 		mgr.Shutdown()
-		killTmuxSession(t, name)
+		killTmuxSession(t, termTestInternal(name))
 	})
 
 	// Spawn a tmux session.
-	if _, err := mgr.Spawn(name, "", 80, 24); err != nil {
+	if _, err := mgr.Spawn(termTestWS, name, "", 80, 24); err != nil {
 		t.Fatalf("Spawn() error: %v", err)
 	}
 
 	// Schedule kill with a longer delay.
-	mgr.ScheduleKill(name, 2*time.Second)
+	mgr.ScheduleKill(termTestWS, name, 2*time.Second)
 
 	// Cancel it immediately.
-	cancelled := mgr.CancelPendingKill(name)
+	cancelled := mgr.CancelPendingKill(termTestWS, name)
 	if !cancelled {
 		t.Error("expected CancelPendingKill to return true for pending kill")
 	}
@@ -73,7 +76,7 @@ func TestCancelPendingKill_CancelsPendingKill(t *testing.T) {
 	// Wait past the original delay to confirm the session is still alive.
 	time.Sleep(300 * time.Millisecond)
 
-	if !mgr.SessionExists(name) {
+	if !mgr.SessionExists(termTestWS, name) {
 		t.Error("expected tmux session to still exist after CancelPendingKill")
 	}
 }
@@ -88,7 +91,7 @@ func TestCancelPendingKill_ReturnsFalseWhenNoPending(t *testing.T) {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
 
-	cancelled := mgr.CancelPendingKill("nonexistent-session")
+	cancelled := mgr.CancelPendingKill(termTestWS, "nonexistent-session")
 	if cancelled {
 		t.Error("expected CancelPendingKill to return false when no pending kill exists")
 	}
@@ -107,11 +110,11 @@ func TestAttach_CancelsPendingKill(t *testing.T) {
 	name := testSessionName(t)
 	t.Cleanup(func() {
 		mgr.Shutdown()
-		killTmuxSession(t, name)
+		killTmuxSession(t, termTestInternal(name))
 	})
 
 	// Create a session then detach so it has no active connections.
-	session, err := mgr.Attach(name, "", 80, 24)
+	session, err := mgr.Attach(termTestWS, name, "", 80, 24)
 	if err != nil {
 		t.Fatalf("Attach() error: %v", err)
 	}
@@ -120,17 +123,17 @@ func TestAttach_CancelsPendingKill(t *testing.T) {
 	}
 
 	// Schedule a kill.
-	mgr.ScheduleKill(name, 200*time.Millisecond)
+	mgr.ScheduleKill(termTestWS, name, 200*time.Millisecond)
 
 	// Re-attach, which should cancel the pending kill.
-	session2, err := mgr.Attach(name, "", 80, 24)
+	session2, err := mgr.Attach(termTestWS, name, "", 80, 24)
 	if err != nil {
 		t.Fatalf("second Attach() error: %v", err)
 	}
 	_ = session2
 
 	// Verify the pending kill was cancelled.
-	cancelled := mgr.CancelPendingKill(name)
+	cancelled := mgr.CancelPendingKill(termTestWS, name)
 	if cancelled {
 		t.Error("expected no pending kill after Attach cancelled it")
 	}
@@ -138,7 +141,7 @@ func TestAttach_CancelsPendingKill(t *testing.T) {
 	// Wait past the original delay to confirm the session is still alive.
 	time.Sleep(400 * time.Millisecond)
 
-	if !mgr.SessionExists(name) {
+	if !mgr.SessionExists(termTestWS, name) {
 		t.Error("expected tmux session to still exist after Attach cancelled pending kill")
 	}
 }
@@ -156,30 +159,30 @@ func TestScheduleKill_ReplacesExistingPending(t *testing.T) {
 	name := testSessionName(t)
 	t.Cleanup(func() {
 		mgr.Shutdown()
-		killTmuxSession(t, name)
+		killTmuxSession(t, termTestInternal(name))
 	})
 
 	// Spawn a tmux session.
-	if _, err := mgr.Spawn(name, "", 80, 24); err != nil {
+	if _, err := mgr.Spawn(termTestWS, name, "", 80, 24); err != nil {
 		t.Fatalf("Spawn() error: %v", err)
 	}
 
 	// Schedule a kill with a short delay.
-	mgr.ScheduleKill(name, 100*time.Millisecond)
+	mgr.ScheduleKill(termTestWS, name, 100*time.Millisecond)
 
 	// Replace it with a much longer delay.
-	mgr.ScheduleKill(name, 5*time.Second)
+	mgr.ScheduleKill(termTestWS, name, 5*time.Second)
 
 	// Wait past the first delay — session should still be alive because
 	// the second ScheduleKill replaced the first.
 	time.Sleep(300 * time.Millisecond)
 
-	if !mgr.SessionExists(name) {
+	if !mgr.SessionExists(termTestWS, name) {
 		t.Error("expected tmux session to still exist after first ScheduleKill delay (replaced by second)")
 	}
 
 	// Cancel the second pending kill to clean up.
-	mgr.CancelPendingKill(name)
+	mgr.CancelPendingKill(termTestWS, name)
 }
 
 // TestHasActiveConnections verifies that HasActiveConnections returns
@@ -195,21 +198,21 @@ func TestHasActiveConnections(t *testing.T) {
 	name := testSessionName(t)
 	t.Cleanup(func() {
 		mgr.Shutdown()
-		killTmuxSession(t, name)
+		killTmuxSession(t, termTestInternal(name))
 	})
 
 	// No connections initially.
-	if mgr.HasActiveConnections(name) {
+	if mgr.HasActiveConnections(termTestWS, name) {
 		t.Error("expected HasActiveConnections to return false with no connections")
 	}
 
 	// Attach a connection.
-	session, err := mgr.Attach(name, "", 80, 24)
+	session, err := mgr.Attach(termTestWS, name, "", 80, 24)
 	if err != nil {
 		t.Fatalf("Attach() error: %v", err)
 	}
 
-	if !mgr.HasActiveConnections(name) {
+	if !mgr.HasActiveConnections(termTestWS, name) {
 		t.Error("expected HasActiveConnections to return true after Attach")
 	}
 
@@ -218,7 +221,7 @@ func TestHasActiveConnections(t *testing.T) {
 		t.Fatalf("Detach() error: %v", err)
 	}
 
-	if mgr.HasActiveConnections(name) {
+	if mgr.HasActiveConnections(termTestWS, name) {
 		t.Error("expected HasActiveConnections to return false after Detach")
 	}
 }
@@ -236,24 +239,24 @@ func TestScheduleKill_DoesNotKillWithActiveConnections(t *testing.T) {
 	name := testSessionName(t)
 	t.Cleanup(func() {
 		mgr.Shutdown()
-		killTmuxSession(t, name)
+		killTmuxSession(t, termTestInternal(name))
 	})
 
 	// Attach a connection (creates the tmux session and has an active connection).
-	session, err := mgr.Attach(name, "", 80, 24)
+	session, err := mgr.Attach(termTestWS, name, "", 80, 24)
 	if err != nil {
 		t.Fatalf("Attach() error: %v", err)
 	}
 	_ = session
 
 	// Schedule a kill with a short delay. The active connection should prevent the kill.
-	mgr.ScheduleKill(name, 100*time.Millisecond)
+	mgr.ScheduleKill(termTestWS, name, 100*time.Millisecond)
 
 	// Wait for the timer to fire.
 	time.Sleep(400 * time.Millisecond)
 
 	// Session should still exist because there's an active connection.
-	if !mgr.SessionExists(name) {
+	if !mgr.SessionExists(termTestWS, name) {
 		t.Error("expected tmux session to still exist because of active connections")
 	}
 }

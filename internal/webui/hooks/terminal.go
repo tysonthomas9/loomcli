@@ -58,41 +58,19 @@ func (h *TerminalHook) OnRollback(ctx coordinator.DeregistrationContext) {
 	h.cleanupWorkspaceSessions(ctx.WorkspaceID)
 }
 
-// cleanupWorkspaceSessions kills all terminal sessions confirmed owned by the
-// given workspace. Unowned sessions are skipped. Errors on individual session
-// kills are logged but do not abort the loop.
+// cleanupWorkspaceSessions kills every terminal session that belongs to the
+// given workspace. With v2's workspace-qualified tmux names, KillWorkspaceSessions
+// filters by the shared "<serverPrefix>-<wsShort>-" prefix so it catches all
+// sessions (attached, detached, and mid-setup) without needing the ownership
+// map as a scoping mechanism.
 func (h *TerminalHook) cleanupWorkspaceSessions(wsID string) {
-	sessions, err := h.termMgr.ListActiveSessionsForWorkspace(wsID)
-	if err != nil {
-		h.logger.Warn("failed to list terminal sessions for workspace cleanup",
+	if wsID == "" {
+		return
+	}
+	if err := h.termMgr.KillWorkspaceSessions(wsID); err != nil {
+		h.logger.Warn("failed to kill terminal sessions for workspace cleanup",
 			"workspace", wsID, "err", err)
 		return
 	}
-
-	killed := 0
-	for _, s := range sessions {
-		// Only kill sessions confirmed owned by this workspace.
-		// ListActiveSessionsForWorkspace includes unowned sessions for backward
-		// compatibility, but we must not kill them during workspace cleanup —
-		// they may belong to another workspace.
-		owner, hasOwner := h.termMgr.SessionOwner(s.Name)
-		if !hasOwner || owner != wsID {
-			continue
-		}
-
-		if err := h.termMgr.KillSessionByName(s.Name); err != nil {
-			h.logger.Warn("failed to kill terminal session during workspace cleanup",
-				"workspace", wsID, "session", s.Name, "err", err)
-			continue
-		}
-		killed++
-	}
-
-	if killed > 0 {
-		h.logger.Info("killed terminal sessions for workspace",
-			"workspace", wsID, "count", killed)
-	} else {
-		h.logger.Debug("no terminal sessions to clean up for workspace",
-			"workspace", wsID)
-	}
+	h.logger.Info("killed terminal sessions for workspace", "workspace", wsID)
 }

@@ -89,10 +89,13 @@ func (s *terminalServiceImpl) RestartSession(ctx context.Context, wsID, session 
 	if s.termMgr == nil {
 		return nil, service.ErrUnavailable("terminal manager not initialized")
 	}
+	if wsID == "" {
+		return nil, service.ErrValidation("wsID is required")
+	}
 
 	// Shell tabs: kill and return without changing defaultCommand.
 	if strings.HasPrefix(session, "lead-shell-") {
-		_ = s.termMgr.KillSessionByName(session)
+		_ = s.termMgr.KillSession(wsID, session)
 		return &service.TerminalRestartResult{Backend: "shell"}, nil
 	}
 
@@ -116,35 +119,41 @@ func (s *terminalServiceImpl) RestartSession(ctx context.Context, wsID, session 
 	}
 
 	termCmd := fmt.Sprintf("loom lead --backend %s", backend)
-	_ = s.termMgr.KillSessionByName(session)
+	_ = s.termMgr.KillSession(wsID, session)
 	s.termMgr.SetDefaultCommand(termCmd)
 
 	return &service.TerminalRestartResult{Backend: backend}, nil
 }
 
-func (s *terminalServiceImpl) KillSession(_ context.Context, session string) error {
+func (s *terminalServiceImpl) KillSession(_ context.Context, wsID, session string) error {
 	if s.termMgr == nil {
 		return service.ErrUnavailable("terminal manager not initialized")
 	}
-	_ = s.termMgr.KillSessionByName(session)
+	if wsID == "" {
+		return service.ErrValidation("wsID is required")
+	}
+	_ = s.termMgr.KillSession(wsID, session)
 	return nil
 }
 
-func (s *terminalServiceImpl) GetSessionStatus(_ context.Context, session string) (*service.TerminalStatusResult, error) {
+func (s *terminalServiceImpl) GetSessionStatus(_ context.Context, wsID, session string) (*service.TerminalStatusResult, error) {
 	if s.termMgr == nil {
 		return nil, service.ErrUnavailable("terminal manager not initialized")
 	}
+	if wsID == "" {
+		return nil, service.ErrValidation("wsID is required")
+	}
 
-	alive := s.termMgr.SessionAlive(session)
+	alive := s.termMgr.SessionAlive(wsID, session)
 	result := &service.TerminalStatusResult{Alive: alive}
 
 	if !alive {
-		if captured, err := s.termMgr.CapturePane(session, 10); err == nil && captured != "" {
+		if captured, err := s.termMgr.CapturePane(wsID, session, 10); err == nil && captured != "" {
 			result.ExitReason = captured
 		}
-	} else if s.termMgr.PaneDead(session) {
+	} else if s.termMgr.PaneDead(wsID, session) {
 		result.Alive = false
-		if captured, err := s.termMgr.CapturePane(session, 10); err == nil && captured != "" {
+		if captured, err := s.termMgr.CapturePane(wsID, session, 10); err == nil && captured != "" {
 			result.ExitReason = captured
 		}
 	}
@@ -166,6 +175,9 @@ func (s *terminalServiceImpl) ListSessions(_ context.Context, wsID string) ([]se
 func (s *terminalServiceImpl) SpawnSession(_ context.Context, wsID string, params *service.SpawnParams) (*service.SpawnResult, error) { //nolint:funlen
 	if s.termMgr == nil {
 		return nil, service.ErrUnavailable("terminal manager not initialized")
+	}
+	if wsID == "" {
+		return nil, service.ErrValidation("wsID is required")
 	}
 
 	if params.SessionName == "" {
@@ -195,16 +207,14 @@ func (s *terminalServiceImpl) SpawnSession(_ context.Context, wsID string, param
 	// unresolvable; SpawnInDir then falls back to the inherited cwd.
 	workDir := s.workspacePath(wsID)
 
-	created, err := s.termMgr.SpawnInDir(sanitizedName, command, 120, 40, workDir)
+	created, err := s.termMgr.SpawnInDir(wsID, sanitizedName, command, 120, 40, workDir)
 	if err != nil {
 		return nil, service.ErrInternal("failed to spawn terminal session", err)
 	}
 
 	if created {
 		// Record workspace ownership
-		if wsID != "" {
-			s.termMgr.SetSessionOwner(sanitizedName, wsID)
-		}
+		s.termMgr.SetSessionOwner(sanitizedName, wsID)
 		// Record session history for issue-linked sessions
 		if s.histStore != nil {
 			issueID := ExtractIssueID(sanitizedName)
@@ -247,6 +257,9 @@ func (s *terminalServiceImpl) CreateLeadSession(_ context.Context, wsID string, 
 	if s.termMgr == nil {
 		return nil, service.ErrUnavailable("terminal manager not initialized")
 	}
+	if wsID == "" {
+		return nil, service.ErrValidation("wsID is required")
+	}
 
 	message := strings.TrimSpace(params.Message)
 	if message == "" {
@@ -281,16 +294,14 @@ func (s *terminalServiceImpl) CreateLeadSession(_ context.Context, wsID string, 
 	// Empty falls back to the loom service's cwd.
 	workDir := s.workspacePath(wsID)
 
-	created, err := s.termMgr.SpawnArgv(sessionName, argv, 120, 40, workDir)
+	created, err := s.termMgr.SpawnArgv(wsID, sessionName, argv, 120, 40, workDir)
 	if err != nil {
 		return nil, service.ErrInternal("failed to spawn lead session", err)
 	}
 	if !created {
 		return nil, service.ErrConflict("session already exists")
 	}
-	if wsID != "" {
-		s.termMgr.SetSessionOwner(sessionName, wsID)
-	}
+	s.termMgr.SetSessionOwner(sessionName, wsID)
 
 	return &service.LeadSessionResult{
 		SessionName: sessionName,
@@ -298,9 +309,12 @@ func (s *terminalServiceImpl) CreateLeadSession(_ context.Context, wsID string, 
 	}, nil
 }
 
-func (s *terminalServiceImpl) SeedSession(_ context.Context, session string, params *service.SeedParams) error {
+func (s *terminalServiceImpl) SeedSession(_ context.Context, wsID, session string, params *service.SeedParams) error {
 	if s.termMgr == nil {
 		return service.ErrUnavailable("terminal manager not initialized")
+	}
+	if wsID == "" {
+		return service.ErrValidation("wsID is required")
 	}
 	if session == "" {
 		return service.ErrValidation("missing session name")
@@ -310,7 +324,7 @@ func (s *terminalServiceImpl) SeedSession(_ context.Context, session string, par
 	}
 
 	prompt := formatSeedPromptFromParams(params)
-	if err := s.termMgr.SendKeys(session, prompt); err != nil {
+	if err := s.termMgr.SendKeys(wsID, session, prompt); err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			return service.ErrNotFound("session not found: " + session)
 		}
@@ -319,84 +333,57 @@ func (s *terminalServiceImpl) SeedSession(_ context.Context, session string, par
 	return nil
 }
 
-func (s *terminalServiceImpl) ScheduleKill(_ context.Context, session string) error {
+func (s *terminalServiceImpl) ScheduleKill(_ context.Context, wsID, session string) error {
 	if s.termMgr == nil {
 		return service.ErrUnavailable("terminal manager not initialized")
+	}
+	if wsID == "" {
+		return service.ErrValidation("wsID is required")
 	}
 	if err := tabmeta.ValidateSessionName(session); err != nil {
 		return service.ErrValidation(err.Error())
 	}
-	s.termMgr.ScheduleKill(session, sessionKillGracePeriod)
+	s.termMgr.ScheduleKill(wsID, session, sessionKillGracePeriod)
 	return nil
 }
 
-// CloseAllSessions kills every tmux session belonging to wsID, deletes that
-// workspace's tab metadata, and broadcasts one SSE event to the workspace.
-// Sessions in other workspaces are untouched — multi-VM deployments must not
-// accidentally kill a sibling workspace's sessions.
-//
-// When tabStore is nil (no Redis, single-workspace deployment) the workspace
-// membership is unknown, so fall back to KillAllSessions — doing nothing
-// would leave user-visible sessions running after "close all", worse than the
-// scoping loss.
+// CloseAllSessions kills every tmux session belonging to wsID. Sessions in
+// other workspaces are untouched — multi-VM deployments must not accidentally
+// kill a sibling workspace's sessions. Scoping lives in the manager via
+// KillWorkspaceSessions, so this works with or without Redis tab metadata.
 func (s *terminalServiceImpl) CloseAllSessions(ctx context.Context, wsID string) (*service.CloseAllResult, error) {
 	if s.termMgr == nil {
 		return nil, service.ErrUnavailable("terminal manager not initialized")
 	}
+	if wsID == "" {
+		return nil, service.ErrValidation("wsID is required")
+	}
 
 	result := &service.CloseAllResult{}
 
-	if s.tabStore == nil {
-		return s.closeAllUnscoped(wsID, result)
+	if err := s.termMgr.KillWorkspaceSessions(wsID); err != nil {
+		return nil, service.ErrInternal("failed to kill workspace sessions", err)
 	}
 
-	sessionNames := s.workspaceSessionNames(ctx, wsID, result)
-
-	for _, name := range sessionNames {
-		if err := s.termMgr.KillSessionByName(name); err != nil {
-			slog.Error("failed to kill session", "session", name, "err", err)
-		}
-		if err := s.tabStore.Delete(ctx, wsID, name); err != nil {
-			slog.Error("failed to delete tab metadata", "session", name, "err", err)
+	// Clean tab metadata for this workspace (best-effort).
+	if s.tabStore != nil {
+		tabs, err := s.tabStore.List(ctx, wsID)
+		if err != nil {
+			slog.Error("failed to list tab metadata for workspace", "ws", wsID, "err", err)
 			result.MetaCleanupIncomplete = true
+		} else {
+			for _, tab := range tabs {
+				if err := s.tabStore.Delete(ctx, wsID, tab.SessionName); err != nil {
+					slog.Error("failed to delete tab metadata", "session", tab.SessionName, "err", err)
+					result.MetaCleanupIncomplete = true
+				}
+			}
 		}
 	}
 
 	s.broadcastSessionChange(wsID)
-	if wsID != "" {
-		result.AffectedWorkspaces = append(result.AffectedWorkspaces, wsID)
-	}
+	result.AffectedWorkspaces = append(result.AffectedWorkspaces, wsID)
 	return result, nil
-}
-
-// closeAllUnscoped kills every tmux session the manager knows about — used as
-// the no-Redis fallback since workspace membership is unknown without the tab
-// store.
-func (s *terminalServiceImpl) closeAllUnscoped(wsID string, result *service.CloseAllResult) (*service.CloseAllResult, error) {
-	if err := s.termMgr.KillAllSessions(); err != nil {
-		return nil, service.ErrInternal("failed to kill all sessions", err)
-	}
-	s.broadcastSessionChange(wsID)
-	return result, nil
-}
-
-// workspaceSessionNames lists session names owned by wsID via the tab store.
-// Marks result.MetaCleanupIncomplete on listing error.
-func (s *terminalServiceImpl) workspaceSessionNames(ctx context.Context, wsID string, result *service.CloseAllResult) []string {
-	if wsID == "" {
-		return nil
-	}
-	tabs, err := s.tabStore.List(ctx, wsID)
-	if err != nil {
-		slog.Error("failed to list tab metadata for workspace", "ws", wsID, "err", err)
-		result.MetaCleanupIncomplete = true
-		return nil
-	}
-	names := make([]string, 0, len(tabs))
-	for _, tab := range tabs {
-		names = append(names, tab.SessionName)
-	}
-	return names
 }
 
 func (s *terminalServiceImpl) broadcastSessionChange(wsID string) {
@@ -410,18 +397,21 @@ func (s *terminalServiceImpl) broadcastSessionChange(wsID string) {
 	})
 }
 
-func (s *terminalServiceImpl) ExportSession(_ context.Context, session string) (string, error) {
+func (s *terminalServiceImpl) ExportSession(_ context.Context, wsID, session string) (string, error) {
 	if session == "" || !validTerminalSession.MatchString(session) {
 		return "", service.ErrValidation("invalid session name")
 	}
 	if s.termMgr == nil {
 		return "", service.ErrUnavailable("terminal manager not initialized")
 	}
-	if !s.termMgr.SessionAlive(session) {
+	if wsID == "" {
+		return "", service.ErrValidation("wsID is required")
+	}
+	if !s.termMgr.SessionAlive(wsID, session) {
 		return "", service.ErrNotFound("session not found")
 	}
 
-	content, err := s.termMgr.ExportSession(session)
+	content, err := s.termMgr.ExportSession(wsID, session)
 	if err != nil {
 		return "", service.ErrInternal("failed to capture scrollback", err)
 	}
@@ -431,15 +421,18 @@ func (s *terminalServiceImpl) ExportSession(_ context.Context, session string) (
 	return content, nil
 }
 
-func (s *terminalServiceImpl) GetScrollbackInfo(_ context.Context, session string) (*service.ScrollbackInfoResult, error) {
+func (s *terminalServiceImpl) GetScrollbackInfo(_ context.Context, wsID, session string) (*service.ScrollbackInfoResult, error) {
 	if session == "" || !validTerminalSession.MatchString(session) {
 		return nil, service.ErrValidation("invalid session name")
 	}
 	if s.termMgr == nil {
 		return nil, service.ErrUnavailable("terminal manager not initialized")
 	}
+	if wsID == "" {
+		return nil, service.ErrValidation("wsID is required")
+	}
 
-	buf := s.termMgr.LookupScrollbackBuffer(session)
+	buf := s.termMgr.LookupScrollbackBuffer(wsID, session)
 	result := &service.ScrollbackInfoResult{
 		MaxLines: s.termMgr.ScrollbackMaxLines(),
 	}
@@ -450,15 +443,18 @@ func (s *terminalServiceImpl) GetScrollbackInfo(_ context.Context, session strin
 	return result, nil
 }
 
-func (s *terminalServiceImpl) GetScrollback(_ context.Context, session string) (*service.ScrollbackResult, error) {
+func (s *terminalServiceImpl) GetScrollback(_ context.Context, wsID, session string) (*service.ScrollbackResult, error) {
 	if s.termMgr == nil {
 		return nil, service.ErrUnavailable("terminal manager not initialized")
+	}
+	if wsID == "" {
+		return nil, service.ErrValidation("wsID is required")
 	}
 	if session == "" {
 		return nil, service.ErrValidation("session name is required")
 	}
 
-	content, err := s.termMgr.CaptureScrollback(session)
+	content, err := s.termMgr.CaptureScrollback(wsID, session)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			return nil, service.ErrNotFound("session not found")

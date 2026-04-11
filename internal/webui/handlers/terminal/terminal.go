@@ -111,7 +111,8 @@ func HandleTerminalKill(svc service.TerminalService, auth *realtime.TerminalAuth
 			}
 		}
 
-		if err := svc.KillSession(r.Context(), session); err != nil {
+		wsID := middleware.WorkspaceFromContext(r.Context())
+		if err := svc.KillSession(r.Context(), wsID, session); err != nil {
 			handler.HandleServiceError(w, err)
 			return
 		}
@@ -137,7 +138,8 @@ func HandleTerminalSessionStatus(svc service.TerminalService, auth *realtime.Ter
 			}
 		}
 
-		result, err := svc.GetSessionStatus(r.Context(), session)
+		wsID := middleware.WorkspaceFromContext(r.Context())
+		result, err := svc.GetSessionStatus(r.Context(), wsID, session)
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return

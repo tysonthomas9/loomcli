@@ -58,7 +58,7 @@ func TestHandleListTerminalSessions_Success(t *testing.T) {
 	}()
 
 	// Create the talk-to-lead session by attaching to it.
-	session, err := manager.Attach("talk-to-lead", "", 80, 24)
+	session, err := manager.Attach("test-ws", "talk-to-lead", "", 80, 24)
 	if err != nil {
 		t.Fatalf("failed to attach talk-to-lead session: %v", err)
 	}
@@ -271,13 +271,13 @@ func TestListActiveSessions_NoPrefixFallback(t *testing.T) {
 
 	// Create a session with a PID-scoped name to avoid collisions across parallel runs.
 	sessName := testRunPrefix + "-nopfx"
-	session, err := manager.Attach(sessName, "", 80, 24)
+	session, err := manager.Attach("testws", sessName, "", 80, 24)
 	if err != nil {
 		t.Fatalf("failed to attach session: %v", err)
 	}
 	defer func() {
 		manager.Detach(session.ConnID)
-		manager.KillSessionByName(sessName)
+		_ = manager.KillSession("testws", sessName)
 	}()
 
 	sessions, err := manager.ListActiveSessions()
@@ -545,7 +545,10 @@ func TestHandleScheduleSessionKill_ValidSession(t *testing.T) {
 
 	handler := handleScheduleSessionKill(NewTerminalService(mgr, nil, nil, nil, nil, nil, nil, nil))
 
-	req := httptest.NewRequest(http.MethodPost, "/api/terminal/sessions/test-session/kill", nil)
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodPost, "/api/terminal/sessions/test-session/kill", nil),
+		"testws",
+	)
 	req.SetPathValue("session", "test-session")
 	rr := httptest.NewRecorder()
 	handler(rr, req)
@@ -638,7 +641,10 @@ func TestHandleSeedTerminalSession_MissingName(t *testing.T) {
 	handler := handleSeedTerminalSession(NewTerminalService(mgr, nil, nil, nil, nil, nil, nil, nil))
 
 	body := strings.NewReader(`{"issue_id":"X-1","title":"Test"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/terminal/sessions//seed", body)
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodPost, "/api/terminal/sessions//seed", body),
+		"testws",
+	)
 	// PathValue("name") returns "" when name is not set in the route pattern.
 	w := httptest.NewRecorder()
 

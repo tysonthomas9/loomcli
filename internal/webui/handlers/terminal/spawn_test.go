@@ -36,31 +36,31 @@ func (m *mockSpawnService) GenerateToken(_ context.Context, _, _ string) (string
 func (m *mockSpawnService) RestartSession(_ context.Context, _, _ string) (*service.TerminalRestartResult, error) {
 	panic("not implemented")
 }
-func (m *mockSpawnService) KillSession(_ context.Context, _ string) error {
+func (m *mockSpawnService) KillSession(_ context.Context, _, _ string) error {
 	panic("not implemented")
 }
-func (m *mockSpawnService) GetSessionStatus(_ context.Context, _ string) (*service.TerminalStatusResult, error) {
+func (m *mockSpawnService) GetSessionStatus(_ context.Context, _, _ string) (*service.TerminalStatusResult, error) {
 	panic("not implemented")
 }
 func (m *mockSpawnService) ListSessions(_ context.Context, _ string) ([]service.TerminalSessionInfo, error) {
 	panic("not implemented")
 }
-func (m *mockSpawnService) SeedSession(_ context.Context, _ string, _ *service.SeedParams) error {
+func (m *mockSpawnService) SeedSession(_ context.Context, _, _ string, _ *service.SeedParams) error {
 	panic("not implemented")
 }
-func (m *mockSpawnService) ScheduleKill(_ context.Context, _ string) error {
+func (m *mockSpawnService) ScheduleKill(_ context.Context, _, _ string) error {
 	panic("not implemented")
 }
 func (m *mockSpawnService) CloseAllSessions(_ context.Context, _ string) (*service.CloseAllResult, error) {
 	panic("not implemented")
 }
-func (m *mockSpawnService) ExportSession(_ context.Context, _ string) (string, error) {
+func (m *mockSpawnService) ExportSession(_ context.Context, _, _ string) (string, error) {
 	panic("not implemented")
 }
-func (m *mockSpawnService) GetScrollbackInfo(_ context.Context, _ string) (*service.ScrollbackInfoResult, error) {
+func (m *mockSpawnService) GetScrollbackInfo(_ context.Context, _, _ string) (*service.ScrollbackInfoResult, error) {
 	panic("not implemented")
 }
-func (m *mockSpawnService) GetScrollback(_ context.Context, _ string) (*service.ScrollbackResult, error) {
+func (m *mockSpawnService) GetScrollback(_ context.Context, _, _ string) (*service.ScrollbackResult, error) {
 	panic("not implemented")
 }
 func (m *mockSpawnService) ListTabs(_ context.Context, _ string) ([]tabmeta.TabMetadata, error) {

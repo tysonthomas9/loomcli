@@ -305,7 +305,10 @@ func TestHandleCloseAllSessions_WorksWithNilStore(t *testing.T) {
 
 	// Pass nil store and nil hub — should still succeed
 	handler := handleCloseAllSessions(NewTerminalService(mgr, nil, nil, nil, nil, nil, nil, nil))
-	req := httptest.NewRequest(http.MethodPost, "/api/terminal/sessions/close-all", nil)
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodPost, "/api/terminal/sessions/close-all", nil),
+		"testws",
+	)
 	rr := httptest.NewRecorder()
 	handler(rr, req)
 

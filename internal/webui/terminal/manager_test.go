@@ -55,6 +55,20 @@ func testSessionName(t *testing.T, suffix ...string) string {
 	return name
 }
 
+// termTestWS is the workspace ID used by terminal_test.go. Keeping it short
+// and literal ("testws") makes the test bodies easy to read. Its wsShortID
+// is unchanged (it's only 6 chars), so the internal tmux name for a session
+// with no server prefix is "testws-<userName>".
+const termTestWS = "testws"
+
+// termTestInternal returns the internal tmux session name for a session
+// created with termTestWS and no server prefix — matching the default test
+// configuration. Tests that use a custom serverPrefix compose the internal
+// name themselves.
+func termTestInternal(userName string) string {
+	return termTestWS + "-" + userName
+}
+
 // TestTerminalNewManagerTmuxNotFound verifies that NewTerminalManager returns
 // ErrTmuxNotFound when tmux is not in PATH, or succeeds when it is.
 func TestTerminalNewManagerTmuxNotFound(t *testing.T) {
@@ -109,10 +123,10 @@ func TestTerminalAttach(t *testing.T) {
 	name := testSessionName(t)
 	t.Cleanup(func() {
 		mgr.Shutdown()
-		killTmuxSession(t, name)
+		killTmuxSession(t, termTestInternal(name))
 	})
 
-	session, err := mgr.Attach(name, "", 80, 24)
+	session, err := mgr.Attach(termTestWS, name, "", 80, 24)
 	if err != nil {
 		t.Fatalf("Attach() error: %v", err)
 	}
@@ -122,15 +136,18 @@ func TestTerminalAttach(t *testing.T) {
 	if session.PTY == nil {
 		t.Error("expected PTY to be non-nil")
 	}
-	if session.Name != name {
-		t.Errorf("expected session name %q, got %q", name, session.Name)
+	// session.Name is the internal (workspace-qualified) tmux name, not the
+	// user-facing name — TerminalSession.Name has always meant "the string we
+	// pass to tmux", which under the new naming scheme includes the workspace.
+	if session.Name != termTestInternal(name) {
+		t.Errorf("expected session name %q, got %q", termTestInternal(name), session.Name)
 	}
 	if session.ConnID == "" {
 		t.Error("expected ConnID to be set")
 	}
 
 	// Verify the tmux session exists.
-	if !tmuxSessionExists(name) {
+	if !tmuxSessionExists(termTestInternal(name)) {
 		t.Error("expected tmux session to exist after Attach")
 	}
 }
@@ -148,10 +165,10 @@ func TestTerminalMultipleAttach(t *testing.T) {
 	name := testSessionName(t)
 	t.Cleanup(func() {
 		mgr.Shutdown()
-		killTmuxSession(t, name)
+		killTmuxSession(t, termTestInternal(name))
 	})
 
-	session1, err := mgr.Attach(name, "", 80, 24)
+	session1, err := mgr.Attach(termTestWS, name, "", 80, 24)
 	if err != nil {
 		t.Fatalf("first Attach() error: %v", err)
 	}
@@ -159,7 +176,7 @@ func TestTerminalMultipleAttach(t *testing.T) {
 	// Give tmux a moment to settle.
 	time.Sleep(100 * time.Millisecond)
 
-	session2, err := mgr.Attach(name, "", 80, 24)
+	session2, err := mgr.Attach(termTestWS, name, "", 80, 24)
 	if err != nil {
 		t.Fatalf("second Attach() error: %v", err)
 	}
@@ -185,7 +202,7 @@ func TestTerminalMultipleAttach(t *testing.T) {
 	}
 
 	// The tmux session should still exist.
-	if !tmuxSessionExists(name) {
+	if !tmuxSessionExists(termTestInternal(name)) {
 		t.Error("expected tmux session to still exist with multiple attachments")
 	}
 }
@@ -202,10 +219,10 @@ func TestTerminalResize(t *testing.T) {
 	name := testSessionName(t)
 	t.Cleanup(func() {
 		mgr.Shutdown()
-		killTmuxSession(t, name)
+		killTmuxSession(t, termTestInternal(name))
 	})
 
-	session, err := mgr.Attach(name, "", 80, 24)
+	session, err := mgr.Attach(termTestWS, name, "", 80, 24)
 	if err != nil {
 		t.Fatalf("Attach() error: %v", err)
 	}
@@ -230,10 +247,10 @@ func TestTerminalDetach(t *testing.T) {
 
 	name := testSessionName(t)
 	t.Cleanup(func() {
-		killTmuxSession(t, name)
+		killTmuxSession(t, termTestInternal(name))
 	})
 
-	session, err := mgr.Attach(name, "", 80, 24)
+	session, err := mgr.Attach(termTestWS, name, "", 80, 24)
 	if err != nil {
 		t.Fatalf("Attach() error: %v", err)
 	}
@@ -243,7 +260,7 @@ func TestTerminalDetach(t *testing.T) {
 	}
 
 	// The tmux session should still exist.
-	if !tmuxSessionExists(name) {
+	if !tmuxSessionExists(termTestInternal(name)) {
 		t.Error("expected tmux session to still exist after Detach")
 	}
 
@@ -266,17 +283,17 @@ func TestTerminalDetachOneOfMany(t *testing.T) {
 	name := testSessionName(t)
 	t.Cleanup(func() {
 		mgr.Shutdown()
-		killTmuxSession(t, name)
+		killTmuxSession(t, termTestInternal(name))
 	})
 
-	session1, err := mgr.Attach(name, "", 80, 24)
+	session1, err := mgr.Attach(termTestWS, name, "", 80, 24)
 	if err != nil {
 		t.Fatalf("first Attach() error: %v", err)
 	}
 
 	time.Sleep(100 * time.Millisecond)
 
-	session2, err := mgr.Attach(name, "", 80, 24)
+	session2, err := mgr.Attach(termTestWS, name, "", 80, 24)
 	if err != nil {
 		t.Fatalf("second Attach() error: %v", err)
 	}
@@ -292,7 +309,7 @@ func TestTerminalDetachOneOfMany(t *testing.T) {
 	}
 
 	// The tmux session should still exist.
-	if !tmuxSessionExists(name) {
+	if !tmuxSessionExists(termTestInternal(name)) {
 		t.Error("expected tmux session to still exist after detaching one connection")
 	}
 }
@@ -310,15 +327,15 @@ func TestTerminalShutdown(t *testing.T) {
 	name1 := testSessionName(t, "1")
 	name2 := testSessionName(t, "2")
 	t.Cleanup(func() {
-		killTmuxSession(t, name1)
-		killTmuxSession(t, name2)
+		killTmuxSession(t, termTestInternal(name1))
+		killTmuxSession(t, termTestInternal(name2))
 	})
 
-	_, err = mgr.Attach(name1, "", 80, 24)
+	_, err = mgr.Attach(termTestWS, name1, "", 80, 24)
 	if err != nil {
 		t.Fatalf("Attach(%q) error: %v", name1, err)
 	}
-	_, err = mgr.Attach(name2, "", 80, 24)
+	_, err = mgr.Attach(termTestWS, name2, "", 80, 24)
 	if err != nil {
 		t.Fatalf("Attach(%q) error: %v", name2, err)
 	}
@@ -330,10 +347,10 @@ func TestTerminalShutdown(t *testing.T) {
 	// Give tmux a moment to clean up.
 	time.Sleep(200 * time.Millisecond)
 
-	if tmuxSessionExists(name1) {
+	if tmuxSessionExists(termTestInternal(name1)) {
 		t.Errorf("expected tmux session %q to be killed after Shutdown", name1)
 	}
-	if tmuxSessionExists(name2) {
+	if tmuxSessionExists(termTestInternal(name2)) {
 		t.Errorf("expected tmux session %q to be killed after Shutdown", name2)
 	}
 }
@@ -386,11 +403,11 @@ func TestTerminalDefaultCommand(t *testing.T) {
 	name := testSessionName(t)
 	t.Cleanup(func() {
 		mgr.Shutdown()
-		killTmuxSession(t, name)
+		killTmuxSession(t, termTestInternal(name))
 	})
 
 	// Call Attach with empty command - should use default "bash"
-	session, err := mgr.Attach(name, "", 80, 24)
+	session, err := mgr.Attach(termTestWS, name, "", 80, 24)
 	if err != nil {
 		t.Fatalf("Attach() error: %v", err)
 	}
@@ -415,24 +432,24 @@ func TestTerminalMaxSessionsReached(t *testing.T) {
 	name3 := testSessionName(t, "3")
 	t.Cleanup(func() {
 		mgr.Shutdown()
-		killTmuxSession(t, name1)
-		killTmuxSession(t, name2)
-		killTmuxSession(t, name3)
+		killTmuxSession(t, termTestInternal(name1))
+		killTmuxSession(t, termTestInternal(name2))
+		killTmuxSession(t, termTestInternal(name3))
 	})
 
 	// Fill both slots.
-	session1, err := mgr.Attach(name1, "", 80, 24)
+	session1, err := mgr.Attach(termTestWS, name1, "", 80, 24)
 	if err != nil {
 		t.Fatalf("first Attach() error: %v", err)
 	}
 
-	_, err = mgr.Attach(name2, "", 80, 24)
+	_, err = mgr.Attach(termTestWS, name2, "", 80, 24)
 	if err != nil {
 		t.Fatalf("second Attach() error: %v", err)
 	}
 
 	// Third attach should fail with ErrMaxSessionsReached.
-	_, err = mgr.Attach(name3, "", 80, 24)
+	_, err = mgr.Attach(termTestWS, name3, "", 80, 24)
 	if !errors.Is(err, ErrMaxSessionsReached) {
 		t.Fatalf("expected ErrMaxSessionsReached, got: %v", err)
 	}
@@ -443,7 +460,7 @@ func TestTerminalMaxSessionsReached(t *testing.T) {
 	}
 
 	// Now the third attach should succeed.
-	_, err = mgr.Attach(name3, "", 80, 24)
+	_, err = mgr.Attach(termTestWS, name3, "", 80, 24)
 	if err != nil {
 		t.Fatalf("Attach after Detach should succeed, got: %v", err)
 	}
@@ -463,8 +480,8 @@ func TestTerminalSessionCount(t *testing.T) {
 	name2 := testSessionName(t, "2")
 	t.Cleanup(func() {
 		mgr.Shutdown()
-		killTmuxSession(t, name1)
-		killTmuxSession(t, name2)
+		killTmuxSession(t, termTestInternal(name1))
+		killTmuxSession(t, termTestInternal(name2))
 	})
 
 	// Initially zero.
@@ -473,7 +490,7 @@ func TestTerminalSessionCount(t *testing.T) {
 	}
 
 	// Attach first session.
-	session1, err := mgr.Attach(name1, "", 80, 24)
+	session1, err := mgr.Attach(termTestWS, name1, "", 80, 24)
 	if err != nil {
 		t.Fatalf("first Attach() error: %v", err)
 	}
@@ -482,7 +499,7 @@ func TestTerminalSessionCount(t *testing.T) {
 	}
 
 	// Attach second session (different name).
-	_, err = mgr.Attach(name2, "", 80, 24)
+	_, err = mgr.Attach(termTestWS, name2, "", 80, 24)
 	if err != nil {
 		t.Fatalf("second Attach() error: %v", err)
 	}
@@ -556,9 +573,9 @@ func TestDefaultCommand_Initial(t *testing.T) {
 	}
 }
 
-// TestKillSessionByName_NoSuchSession verifies that KillSessionByName returns
+// TestKillSession_NoSuchSession verifies that KillSession returns
 // nil (no error) when the named session does not exist.
-func TestKillSessionByName_NoSuchSession(t *testing.T) {
+func TestKillSession_NoSuchSession(t *testing.T) {
 	skipIfNoTmux(t)
 
 	mgr, err := NewTerminalManager("", "", 0)
@@ -566,9 +583,9 @@ func TestKillSessionByName_NoSuchSession(t *testing.T) {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
 
-	err = mgr.KillSessionByName("nonexistent-session")
+	err = mgr.KillSession(termTestWS, "nonexistent-session")
 	if err != nil {
-		t.Errorf("expected KillSessionByName to return nil for nonexistent session, got: %v", err)
+		t.Errorf("expected KillSession to return nil for nonexistent session, got: %v", err)
 	}
 }
 
@@ -591,19 +608,24 @@ func TestTerminalMultipleManagersWithPrefixes(t *testing.T) {
 	}
 
 	sessionName := "isolation"
+	// Under the new workspace-aware naming, the internal tmux name is
+	// "<serverPrefix>-<wsShort>-<userName>" so both managers' sessions are
+	// prefixed with the same workspace but different server instances.
+	internal1 := prefix1 + "-" + termTestWS + "-" + sessionName
+	internal2 := prefix2 + "-" + termTestWS + "-" + sessionName
 	t.Cleanup(func() {
-		killTmuxSession(t, prefix1+"-"+sessionName)
-		killTmuxSession(t, prefix2+"-"+sessionName)
+		killTmuxSession(t, internal1)
+		killTmuxSession(t, internal2)
 	})
 
-	sess1, err := mgr1.Attach(sessionName, "", 80, 24)
+	sess1, err := mgr1.Attach(termTestWS, sessionName, "", 80, 24)
 	if err != nil {
 		t.Fatalf("mgr1.Attach() error: %v", err)
 	}
 
 	time.Sleep(100 * time.Millisecond)
 
-	sess2, err := mgr2.Attach(sessionName, "", 80, 24)
+	sess2, err := mgr2.Attach(termTestWS, sessionName, "", 80, 24)
 	if err != nil {
 		t.Fatalf("mgr2.Attach() error: %v", err)
 	}
@@ -612,19 +634,19 @@ func TestTerminalMultipleManagersWithPrefixes(t *testing.T) {
 	if sess1.Name == sess2.Name {
 		t.Errorf("expected different tmux session names, both are %q", sess1.Name)
 	}
-	if sess1.Name != prefix1+"-"+sessionName {
-		t.Errorf("expected session1 name %q, got %q", prefix1+"-"+sessionName, sess1.Name)
+	if sess1.Name != internal1 {
+		t.Errorf("expected session1 name %q, got %q", internal1, sess1.Name)
 	}
-	if sess2.Name != prefix2+"-"+sessionName {
-		t.Errorf("expected session2 name %q, got %q", prefix2+"-"+sessionName, sess2.Name)
+	if sess2.Name != internal2 {
+		t.Errorf("expected session2 name %q, got %q", internal2, sess2.Name)
 	}
 
 	// Both tmux sessions should exist.
-	if !tmuxSessionExists(prefix1 + "-" + sessionName) {
-		t.Errorf("expected %s to exist", prefix1+"-"+sessionName)
+	if !tmuxSessionExists(internal1) {
+		t.Errorf("expected %s to exist", internal1)
 	}
-	if !tmuxSessionExists(prefix2 + "-" + sessionName) {
-		t.Errorf("expected %s to exist", prefix2+"-"+sessionName)
+	if !tmuxSessionExists(internal2) {
+		t.Errorf("expected %s to exist", internal2)
 	}
 
 	// Shutdown mgr1 — should only kill prefix1 sessions.
@@ -633,11 +655,11 @@ func TestTerminalMultipleManagersWithPrefixes(t *testing.T) {
 	}
 	time.Sleep(200 * time.Millisecond)
 
-	if tmuxSessionExists(prefix1 + "-" + sessionName) {
-		t.Errorf("expected %s to be killed after mgr1.Shutdown()", prefix1+"-"+sessionName)
+	if tmuxSessionExists(internal1) {
+		t.Errorf("expected %s to be killed after mgr1.Shutdown()", internal1)
 	}
-	if !tmuxSessionExists(prefix2 + "-" + sessionName) {
-		t.Errorf("expected %s to still exist after mgr1.Shutdown()", prefix2+"-"+sessionName)
+	if !tmuxSessionExists(internal2) {
+		t.Errorf("expected %s to still exist after mgr1.Shutdown()", internal2)
 	}
 
 	// Cleanup mgr2.
@@ -665,7 +687,7 @@ func TestTerminalShutdownConcurrentWithAttach(t *testing.T) {
 	// Attach a few initial sessions.
 	for i := 0; i < 3; i++ {
 		name := fmt.Sprintf("%s-%d", baseName, i)
-		if _, err := mgr.Attach(name, "", 80, 24); err != nil {
+		if _, err := mgr.Attach(termTestWS, name, "", 80, 24); err != nil {
 			t.Fatalf("initial Attach(%q) error: %v", name, err)
 		}
 	}
@@ -679,7 +701,7 @@ func TestTerminalShutdownConcurrentWithAttach(t *testing.T) {
 			defer wg.Done()
 			name := fmt.Sprintf("%s-%d", baseName, idx)
 			// Attach may succeed or fail — both are acceptable.
-			_, _ = mgr.Attach(name, "", 80, 24)
+			_, _ = mgr.Attach(termTestWS, name, "", 80, 24)
 		}(i)
 	}
 
@@ -714,10 +736,10 @@ func TestTerminalShutdownIdempotent(t *testing.T) {
 
 	name := testSessionName(t)
 	t.Cleanup(func() {
-		killTmuxSession(t, name)
+		killTmuxSession(t, termTestInternal(name))
 	})
 
-	if _, err := mgr.Attach(name, "", 80, 24); err != nil {
+	if _, err := mgr.Attach(termTestWS, name, "", 80, 24); err != nil {
 		t.Fatalf("Attach() error: %v", err)
 	}
 
@@ -738,9 +760,9 @@ func TestTerminalShutdownIdempotent(t *testing.T) {
 	}
 }
 
-// TestTerminalKillSessionByNameConcurrentWithAttach verifies that calling
-// KillSessionByName concurrently with Attach does not cause panics or data races.
-func TestTerminalKillSessionByNameConcurrentWithAttach(t *testing.T) {
+// TestTerminalKillSessionConcurrentWithAttach verifies that calling
+// KillSession concurrently with Attach does not cause panics or data races.
+func TestTerminalKillSessionConcurrentWithAttach(t *testing.T) {
 	skipIfNoTmux(t)
 
 	mgr, err := NewTerminalManager("", "", 20)
@@ -751,11 +773,11 @@ func TestTerminalKillSessionByNameConcurrentWithAttach(t *testing.T) {
 	name := testSessionName(t)
 	t.Cleanup(func() {
 		mgr.Shutdown()
-		killTmuxSession(t, name)
+		killTmuxSession(t, termTestInternal(name))
 	})
 
 	// Create initial session.
-	if _, err := mgr.Attach(name, "", 80, 24); err != nil {
+	if _, err := mgr.Attach(termTestWS, name, "", 80, 24); err != nil {
 		t.Fatalf("initial Attach() error: %v", err)
 	}
 
@@ -766,7 +788,7 @@ func TestTerminalKillSessionByNameConcurrentWithAttach(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_ = mgr.KillSessionByName(name)
+			_ = mgr.KillSession(termTestWS, name)
 		}()
 	}
 
@@ -775,7 +797,7 @@ func TestTerminalKillSessionByNameConcurrentWithAttach(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, _ = mgr.Attach(name, "", 80, 24)
+			_, _ = mgr.Attach(termTestWS, name, "", 80, 24)
 		}()
 	}
 
@@ -801,10 +823,10 @@ func TestTerminalPTYWriteAfterClose(t *testing.T) {
 	name := testSessionName(t)
 	t.Cleanup(func() {
 		mgr.Shutdown()
-		killTmuxSession(t, name)
+		killTmuxSession(t, termTestInternal(name))
 	})
 
-	session, err := mgr.Attach(name, "", 80, 24)
+	session, err := mgr.Attach(termTestWS, name, "", 80, 24)
 	if err != nil {
 		t.Fatalf("Attach() error: %v", err)
 	}
@@ -836,10 +858,10 @@ func TestTerminalPTYWriteCloseConcurrent(t *testing.T) {
 	name := testSessionName(t)
 	t.Cleanup(func() {
 		mgr.Shutdown()
-		killTmuxSession(t, name)
+		killTmuxSession(t, termTestInternal(name))
 	})
 
-	session, err := mgr.Attach(name, "", 80, 24)
+	session, err := mgr.Attach(termTestWS, name, "", 80, 24)
 	if err != nil {
 		t.Fatalf("Attach() error: %v", err)
 	}
@@ -895,7 +917,7 @@ func TestTerminalMaxSessionsExactBoundary(t *testing.T) {
 	sessions := make([]*TerminalSession, 0, maxSess)
 	for i := 0; i < maxSess; i++ {
 		name := fmt.Sprintf("%s-%d", baseName, i)
-		sess, err := mgr.Attach(name, "", 80, 24)
+		sess, err := mgr.Attach(termTestWS, name, "", 80, 24)
 		if err != nil {
 			t.Fatalf("Attach(%q) error at slot %d: %v", name, i, err)
 		}
@@ -908,7 +930,7 @@ func TestTerminalMaxSessionsExactBoundary(t *testing.T) {
 
 	// The (maxSess+1)th attach must fail.
 	overflowName := fmt.Sprintf("%s-%d", baseName, maxSess)
-	_, err = mgr.Attach(overflowName, "", 80, 24)
+	_, err = mgr.Attach(termTestWS, overflowName, "", 80, 24)
 	if !errors.Is(err, ErrMaxSessionsReached) {
 		t.Fatalf("expected ErrMaxSessionsReached for session %d, got: %v", maxSess+1, err)
 	}
@@ -920,7 +942,7 @@ func TestTerminalMaxSessionsExactBoundary(t *testing.T) {
 
 	// Now a new attach should succeed.
 	replaceName := fmt.Sprintf("%s-%d", baseName, maxSess+1)
-	_, err = mgr.Attach(replaceName, "", 80, 24)
+	_, err = mgr.Attach(termTestWS, replaceName, "", 80, 24)
 	if err != nil {
 		t.Fatalf("Attach after Detach should succeed, got: %v", err)
 	}
@@ -962,7 +984,7 @@ func TestTerminalMaxSessionsConcurrentAttach(t *testing.T) {
 		go func(idx int) {
 			defer wg.Done()
 			name := fmt.Sprintf("%s-%d", baseName, idx)
-			_, err := mgr.Attach(name, "", 80, 24)
+			_, err := mgr.Attach(termTestWS, name, "", 80, 24)
 			results <- result{err: err}
 		}(i)
 	}
@@ -1013,7 +1035,7 @@ func TestTerminalDetachDuringShutdown(t *testing.T) {
 	var connIDs []string
 	for i := 0; i < 5; i++ {
 		name := fmt.Sprintf("%s-%d", baseName, i)
-		sess, err := mgr.Attach(name, "", 80, 24)
+		sess, err := mgr.Attach(termTestWS, name, "", 80, 24)
 		if err != nil {
 			t.Fatalf("Attach(%q) error: %v", name, err)
 		}

@@ -84,8 +84,8 @@ func TestSessionOwner_Unset(t *testing.T) {
 }
 
 // TestListActiveSessionsForWorkspace_FiltersCorrectly verifies that
-// ListActiveSessionsForWorkspace returns only sessions owned by the
-// specified workspace and excludes sessions owned by other workspaces.
+// ListActiveSessionsForWorkspace returns only sessions whose qualified tmux
+// name carries the workspace's prefix.
 func TestListActiveSessionsForWorkspace_FiltersCorrectly(t *testing.T) {
 	skipIfNoTmux(t)
 
@@ -96,22 +96,20 @@ func TestListActiveSessionsForWorkspace_FiltersCorrectly(t *testing.T) {
 	}
 	defer mgr.Shutdown()
 
-	// Spawn three sessions.
-	for _, name := range []string{"alpha", "beta", "gamma"} {
-		if _, err := mgr.Spawn(name, "", 80, 24); err != nil {
+	// Spawn two sessions in ws-1 and one in ws-2.
+	for _, name := range []string{"alpha", "gamma"} {
+		if _, err := mgr.Spawn("ws-1", name, "", 80, 24); err != nil {
 			t.Fatalf("Spawn(%q) error: %v", name, err)
 		}
-		t.Cleanup(func() {
-			killTmuxSession(t, prefix+"-"+name)
-		})
 	}
+	if _, err := mgr.Spawn("ws-2", "beta", "", 80, 24); err != nil {
+		t.Fatalf("Spawn(beta) error: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = mgr.KillWorkspaceSessions("ws-1")
+		_ = mgr.KillWorkspaceSessions("ws-2")
+	})
 
-	// Assign owners: alpha -> ws-1, beta -> ws-2, gamma -> ws-1.
-	mgr.SetSessionOwner("alpha", "ws-1")
-	mgr.SetSessionOwner("beta", "ws-2")
-	mgr.SetSessionOwner("gamma", "ws-1")
-
-	// Filter for ws-1: should include alpha and gamma, exclude beta.
 	sessions, err := mgr.ListActiveSessionsForWorkspace("ws-1")
 	if err != nil {
 		t.Fatalf("ListActiveSessionsForWorkspace() error: %v", err)
@@ -129,54 +127,13 @@ func TestListActiveSessionsForWorkspace_FiltersCorrectly(t *testing.T) {
 		t.Error("expected gamma to be included for ws-1")
 	}
 	if names["beta"] {
-		t.Error("expected beta to be excluded for ws-1")
+		t.Error("expected beta (ws-2) to be excluded for ws-1")
 	}
 }
 
-// TestListActiveSessionsForWorkspace_UnownedIncluded verifies that sessions
-// with no recorded owner appear in the results for any workspace.
-func TestListActiveSessionsForWorkspace_UnownedIncluded(t *testing.T) {
-	skipIfNoTmux(t)
-
-	prefix := testRunPrefix + "-tesdown05"
-	mgr, err := NewTerminalManager("bash", prefix, 0)
-	if err != nil {
-		t.Fatalf("NewTerminalManager() error: %v", err)
-	}
-	defer mgr.Shutdown()
-
-	// Spawn two sessions without setting any owners.
-	for _, name := range []string{"unowned1", "unowned2"} {
-		if _, err := mgr.Spawn(name, "", 80, 24); err != nil {
-			t.Fatalf("Spawn(%q) error: %v", name, err)
-		}
-		t.Cleanup(func() {
-			killTmuxSession(t, prefix+"-"+name)
-		})
-	}
-
-	// Both unowned sessions should appear for any workspace.
-	sessions, err := mgr.ListActiveSessionsForWorkspace("ws-arbitrary")
-	if err != nil {
-		t.Fatalf("ListActiveSessionsForWorkspace() error: %v", err)
-	}
-
-	names := make(map[string]bool)
-	for _, s := range sessions {
-		names[s.Name] = true
-	}
-
-	if !names["unowned1"] {
-		t.Error("expected unowned1 to be included for arbitrary workspace")
-	}
-	if !names["unowned2"] {
-		t.Error("expected unowned2 to be included for arbitrary workspace")
-	}
-}
-
-// TestKillSessionByName_CleansOwnership verifies that KillSessionByName
-// removes the ownership entry for the killed session.
-func TestKillSessionByName_CleansOwnership(t *testing.T) {
+// TestKillSession_CleansOwnership verifies that KillSession removes the
+// ownership entry for the killed session.
+func TestKillSession_CleansOwnership(t *testing.T) {
 	skipIfNoTmux(t)
 
 	prefix := testRunPrefix + "-tesdown06"
@@ -187,58 +144,21 @@ func TestKillSessionByName_CleansOwnership(t *testing.T) {
 	defer mgr.Shutdown()
 
 	name := "ownkill"
-	if _, err := mgr.Spawn(name, "", 80, 24); err != nil {
+	if _, err := mgr.Spawn("ws-doomed", name, "", 80, 24); err != nil {
 		t.Fatalf("Spawn() error: %v", err)
 	}
-	t.Cleanup(func() {
-		killTmuxSession(t, prefix+"-"+name)
-	})
-
 	mgr.SetSessionOwner(name, "ws-doomed")
 
-	// Verify ownership is set.
 	if owner, ok := mgr.SessionOwner(name); !ok || owner != "ws-doomed" {
 		t.Fatalf("expected owner %q before kill, got (%q, %v)", "ws-doomed", owner, ok)
 	}
 
-	// Kill the session.
-	if err := mgr.KillSessionByName(name); err != nil {
-		t.Fatalf("KillSessionByName() error: %v", err)
+	if err := mgr.KillSession("ws-doomed", name); err != nil {
+		t.Fatalf("KillSession() error: %v", err)
 	}
 
-	// Ownership should be cleared.
 	owner, ok := mgr.SessionOwner(name)
 	if ok {
 		t.Errorf("expected SessionOwner to return false after kill, got (%q, true)", owner)
-	}
-}
-
-// TestKillAllSessions_ClearsOwnership verifies that KillAllSessions resets
-// the sessionOwners map so all previous ownership entries are gone.
-func TestKillAllSessions_ClearsOwnership(t *testing.T) {
-	skipIfNoTmux(t)
-
-	prefix := testRunPrefix + "-tesdown07"
-	mgr, err := NewTerminalManager("bash", prefix, 0)
-	if err != nil {
-		t.Fatalf("NewTerminalManager() error: %v", err)
-	}
-	defer mgr.Shutdown()
-
-	// Set several ownership entries (no actual tmux sessions needed for the
-	// ownership map, but KillAllSessions also cleans PTY state so we keep it
-	// simple by just recording ownership).
-	mgr.SetSessionOwner("x1", "ws-1")
-	mgr.SetSessionOwner("x2", "ws-2")
-	mgr.SetSessionOwner("x3", "ws-3")
-
-	if err := mgr.KillAllSessions(); err != nil {
-		t.Fatalf("KillAllSessions() error: %v", err)
-	}
-
-	for _, name := range []string{"x1", "x2", "x3"} {
-		if owner, ok := mgr.SessionOwner(name); ok {
-			t.Errorf("expected SessionOwner(%q) to return false after KillAllSessions, got (%q, true)", name, owner)
-		}
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -23,7 +24,8 @@ func HandleExportSession(svc service.TerminalService) http.HandlerFunc {
 			return
 		}
 
-		content, err := svc.ExportSession(r.Context(), session)
+		wsID := middleware.WorkspaceFromContext(r.Context())
+		content, err := svc.ExportSession(r.Context(), wsID, session)
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
@@ -52,7 +54,8 @@ func HandleScrollbackInfo(svc service.TerminalService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		session := r.PathValue("session")
 
-		result, err := svc.GetScrollbackInfo(r.Context(), session)
+		wsID := middleware.WorkspaceFromContext(r.Context())
+		result, err := svc.GetScrollbackInfo(r.Context(), wsID, session)
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return

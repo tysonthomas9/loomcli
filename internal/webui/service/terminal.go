@@ -13,19 +13,19 @@ type TerminalService interface {
 	// --- Core lifecycle ---
 	GenerateToken(ctx context.Context, session, userID string) (string, error)
 	RestartSession(ctx context.Context, wsID, session string) (*TerminalRestartResult, error)
-	KillSession(ctx context.Context, session string) error
-	GetSessionStatus(ctx context.Context, session string) (*TerminalStatusResult, error)
+	KillSession(ctx context.Context, wsID, session string) error
+	GetSessionStatus(ctx context.Context, wsID, session string) (*TerminalStatusResult, error)
 	ListSessions(ctx context.Context, wsID string) ([]TerminalSessionInfo, error)
 	SpawnSession(ctx context.Context, wsID string, params *SpawnParams) (*SpawnResult, error)
 	CreateLeadSession(ctx context.Context, wsID string, params *LeadSessionParams) (*LeadSessionResult, error)
-	SeedSession(ctx context.Context, session string, params *SeedParams) error
-	ScheduleKill(ctx context.Context, session string) error
+	SeedSession(ctx context.Context, wsID, session string, params *SeedParams) error
+	ScheduleKill(ctx context.Context, wsID, session string) error
 	CloseAllSessions(ctx context.Context, wsID string) (*CloseAllResult, error)
 
 	// --- Scrollback & export ---
-	ExportSession(ctx context.Context, session string) (string, error)
-	GetScrollbackInfo(ctx context.Context, session string) (*ScrollbackInfoResult, error)
-	GetScrollback(ctx context.Context, session string) (*ScrollbackResult, error)
+	ExportSession(ctx context.Context, wsID, session string) (string, error)
+	GetScrollbackInfo(ctx context.Context, wsID, session string) (*ScrollbackInfoResult, error)
+	GetScrollback(ctx context.Context, wsID, session string) (*ScrollbackResult, error)
 
 	// --- Tab metadata ---
 	ListTabs(ctx context.Context, wsID string) ([]tabmeta.TabMetadata, error)

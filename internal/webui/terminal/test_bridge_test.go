@@ -5,9 +5,17 @@ import (
 	"net/http"
 	"regexp"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
+
+// withWorkspaceCtx returns a new request whose context has the workspace
+// attached under the same key as middleware.WithWorkspace. Used by tests to
+// simulate requests that reached a handler via the workspace router.
+func withWorkspaceCtx(req *http.Request, wsID string) *http.Request {
+	return req.WithContext(middleware.WithWorkspace(req.Context(), wsID))
+}
 
 // validTerminalSessionTest is a local copy for test-only handler wrappers.
 var validTerminalSessionTest = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
@@ -31,7 +39,8 @@ func handleTerminalKill(svc service.TerminalService, auth *realtime.TerminalAuth
 			}
 		}
 
-		if err := svc.KillSession(r.Context(), session); err != nil {
+		wsID := middleware.WorkspaceFromContext(r.Context())
+		if err := svc.KillSession(r.Context(), wsID, session); err != nil {
 			handleTestServiceError(w, err)
 			return
 		}
@@ -58,7 +67,8 @@ func handleTerminalSessionStatus(svc service.TerminalService, auth *realtime.Ter
 			}
 		}
 
-		result, err := svc.GetSessionStatus(r.Context(), session)
+		wsID := middleware.WorkspaceFromContext(r.Context())
+		result, err := svc.GetSessionStatus(r.Context(), wsID, session)
 		if err != nil {
 			handleTestServiceError(w, err)
 			return

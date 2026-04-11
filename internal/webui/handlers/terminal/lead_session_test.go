@@ -38,31 +38,31 @@ func (m *mockLeadService) GenerateToken(_ context.Context, _, _ string) (string,
 func (m *mockLeadService) RestartSession(_ context.Context, _, _ string) (*TerminalRestartResult, error) {
 	panic("not implemented")
 }
-func (m *mockLeadService) KillSession(_ context.Context, _ string) error {
+func (m *mockLeadService) KillSession(_ context.Context, _, _ string) error {
 	panic("not implemented")
 }
-func (m *mockLeadService) GetSessionStatus(_ context.Context, _ string) (*TerminalStatusResult, error) {
+func (m *mockLeadService) GetSessionStatus(_ context.Context, _, _ string) (*TerminalStatusResult, error) {
 	panic("not implemented")
 }
 func (m *mockLeadService) ListSessions(_ context.Context, _ string) ([]TerminalSessionInfo, error) {
 	panic("not implemented")
 }
-func (m *mockLeadService) SeedSession(_ context.Context, _ string, _ *SeedParams) error {
+func (m *mockLeadService) SeedSession(_ context.Context, _, _ string, _ *SeedParams) error {
 	panic("not implemented")
 }
-func (m *mockLeadService) ScheduleKill(_ context.Context, _ string) error {
+func (m *mockLeadService) ScheduleKill(_ context.Context, _, _ string) error {
 	panic("not implemented")
 }
 func (m *mockLeadService) CloseAllSessions(_ context.Context, _ string) (*CloseAllResult, error) {
 	panic("not implemented")
 }
-func (m *mockLeadService) ExportSession(_ context.Context, _ string) (string, error) {
+func (m *mockLeadService) ExportSession(_ context.Context, _, _ string) (string, error) {
 	panic("not implemented")
 }
-func (m *mockLeadService) GetScrollbackInfo(_ context.Context, _ string) (*ScrollbackInfoResult, error) {
+func (m *mockLeadService) GetScrollbackInfo(_ context.Context, _, _ string) (*ScrollbackInfoResult, error) {
 	panic("not implemented")
 }
-func (m *mockLeadService) GetScrollback(_ context.Context, _ string) (*ScrollbackResult, error) {
+func (m *mockLeadService) GetScrollback(_ context.Context, _, _ string) (*ScrollbackResult, error) {
 	panic("not implemented")
 }
 func (m *mockLeadService) ListTabs(_ context.Context, _ string) ([]tabmeta.TabMetadata, error) {

@@ -69,13 +69,14 @@ func TestTerminalHook_OnDeregister_KillsOwnedSessions(t *testing.T) {
 
 	prefix := testRunPrefix + "-thook"
 
-	// Spawn sessions and assign ownership.
-	for _, name := range []string{"sess-a", "sess-b"} {
-		if _, err := mgr.Spawn(name, "", 80, 24); err != nil {
-			t.Fatalf("Spawn(%q) error: %v", name, err)
-		}
-		t.Cleanup(func() { killTmuxSession(t, prefix+"-"+name) })
+	// Spawn sessions in their respective workspaces.
+	if _, err := mgr.Spawn("ws-target", "sess-a", "", 80, 24); err != nil {
+		t.Fatalf("Spawn(sess-a) error: %v", err)
 	}
+	if _, err := mgr.Spawn("ws-other", "sess-b", "", 80, 24); err != nil {
+		t.Fatalf("Spawn(sess-b) error: %v", err)
+	}
+	_ = prefix
 
 	mgr.SetSessionOwner("sess-a", "ws-target")
 	mgr.SetSessionOwner("sess-b", "ws-other")
@@ -83,36 +84,33 @@ func TestTerminalHook_OnDeregister_KillsOwnedSessions(t *testing.T) {
 	// Deregister ws-target — should kill sess-a but leave sess-b.
 	hook.OnDeregister(deregCtx("ws-target"))
 
-	// sess-a should have been killed (ownership cleared).
-	if _, ok := mgr.SessionOwner("sess-a"); ok {
-		t.Error("expected sess-a ownership to be cleared after deregister")
+	// sess-b should survive (different workspace prefix).
+	if !mgr.SessionExists("ws-other", "sess-b") {
+		t.Error("expected sess-b to survive deregister of ws-target")
 	}
 
-	// sess-b should be untouched.
-	owner, ok := mgr.SessionOwner("sess-b")
-	if !ok || owner != "ws-other" {
-		t.Errorf("expected sess-b owner to be %q, got (%q, %v)", "ws-other", owner, ok)
+	// sess-a should be gone.
+	if mgr.SessionExists("ws-target", "sess-a") {
+		t.Error("expected sess-a to be killed by deregister of ws-target")
 	}
 }
 
 func TestTerminalHook_OnDeregister_SkipsUnownedSessions(t *testing.T) {
 	hook, mgr := newTestTerminalHookEnv(t)
 
-	prefix := testRunPrefix + "-thook"
-
-	// Spawn a session without setting an owner.
-	if _, err := mgr.Spawn("unowned-1", "", 80, 24); err != nil {
+	// With v2's workspace-qualified prefix scheme, a session spawned for
+	// ws-alpha lives under the "<prefix>-<wsShort(ws-alpha)>-" namespace and
+	// is untouched when a different workspace is deregistered.
+	if _, err := mgr.Spawn("ws-alpha", "unowned-1", "", 80, 24); err != nil {
 		t.Fatalf("Spawn error: %v", err)
 	}
-	t.Cleanup(func() { killTmuxSession(t, prefix+"-unowned-1") })
 
-	// Deregister a workspace — the unowned session should survive.
 	hook.OnDeregister(deregCtx("ws-whatever"))
 
-	// Verify the tmux session still exists.
-	if !tmuxSessionExists(prefix + "-unowned-1") {
-		t.Error("expected unowned session to survive deregister")
+	if !mgr.SessionExists("ws-alpha", "unowned-1") {
+		t.Error("expected session in ws-alpha to survive deregister of ws-whatever")
 	}
+	_ = mgr.KillSession("ws-alpha", "unowned-1")
 }
 
 func TestTerminalHook_OnDeregister_NoSessions_NoOp(t *testing.T) {
@@ -125,64 +123,55 @@ func TestTerminalHook_OnDeregister_NoSessions_NoOp(t *testing.T) {
 func TestTerminalHook_OnDeregister_MixedOwnership(t *testing.T) {
 	hook, mgr := newTestTerminalHookEnv(t)
 
-	prefix := testRunPrefix + "-thook"
-
-	// Create 4 sessions: A(ws-1), B(ws-2), C(ws-1), D(unowned).
+	// Spawn sessions in distinct workspaces so the workspace prefix filter
+	// kills only ws-1's sessions on deregister.
 	sessions := []struct {
-		name  string
-		owner string
+		name string
+		ws   string
 	}{
 		{"mix-a", "ws-1"},
 		{"mix-b", "ws-2"},
 		{"mix-c", "ws-1"},
-		{"mix-d", ""},
+		{"mix-d", "ws-3"},
 	}
 	for _, s := range sessions {
-		if _, err := mgr.Spawn(s.name, "", 80, 24); err != nil {
+		if _, err := mgr.Spawn(s.ws, s.name, "", 80, 24); err != nil {
 			t.Fatalf("Spawn(%q) error: %v", s.name, err)
 		}
-		t.Cleanup(func() { killTmuxSession(t, prefix+"-"+s.name) })
-		if s.owner != "" {
-			mgr.SetSessionOwner(s.name, s.owner)
-		}
 	}
 
-	// Deregister ws-1 — should kill A and C, leave B and D.
 	hook.OnDeregister(deregCtx("ws-1"))
 
-	// A and C should be killed (ownership cleared by KillSessionByName).
+	// A and C (ws-1) should be gone.
 	for _, name := range []string{"mix-a", "mix-c"} {
-		if _, ok := mgr.SessionOwner(name); ok {
-			t.Errorf("expected %q ownership to be cleared after deregister", name)
+		if mgr.SessionExists("ws-1", name) {
+			t.Errorf("expected %q in ws-1 to be killed", name)
 		}
 	}
 
-	// B should still be owned by ws-2.
-	if owner, ok := mgr.SessionOwner("mix-b"); !ok || owner != "ws-2" {
-		t.Errorf("expected mix-b owner %q, got (%q, %v)", "ws-2", owner, ok)
+	// B (ws-2) and D (ws-3) should still exist.
+	if !mgr.SessionExists("ws-2", "mix-b") {
+		t.Error("expected mix-b in ws-2 to survive")
 	}
-
-	// D (unowned) tmux session should still exist.
-	if !tmuxSessionExists(prefix + "-mix-d") {
-		t.Error("expected unowned session mix-d to survive deregister")
+	if !mgr.SessionExists("ws-3", "mix-d") {
+		t.Error("expected mix-d in ws-3 to survive")
 	}
+	_ = mgr.KillSession("ws-2", "mix-b")
+	_ = mgr.KillSession("ws-3", "mix-d")
 }
 
 func TestTerminalHook_OnRollback_SameAsDeregister(t *testing.T) {
 	hook, mgr := newTestTerminalHookEnv(t)
 
-	prefix := testRunPrefix + "-thook"
-
-	if _, err := mgr.Spawn("rollback-s", "", 80, 24); err != nil {
+	if _, err := mgr.Spawn("ws-rb", "rollback-s", "", 80, 24); err != nil {
 		t.Fatalf("Spawn error: %v", err)
 	}
-	t.Cleanup(func() { killTmuxSession(t, prefix+"-rollback-s") })
 	mgr.SetSessionOwner("rollback-s", "ws-rb")
 
 	hook.OnRollback(deregCtx("ws-rb"))
 
-	if _, ok := mgr.SessionOwner("rollback-s"); ok {
-		t.Error("expected rollback-s ownership to be cleared after rollback")
+	if mgr.SessionExists("ws-rb", "rollback-s") {
+		t.Error("expected rollback-s to be killed by OnRollback")
 	}
 }
 
@@ -233,17 +222,16 @@ func TestTerminalHook_IntegrationWithCoordinatorRegistry(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 
-	// Spawn a session owned by this workspace.
-	if _, err := mgr.Spawn("int-sess", "", 80, 24); err != nil {
+	// Spawn a session in this workspace.
+	if _, err := mgr.Spawn("ws-int", "int-sess", "", 80, 24); err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
-	t.Cleanup(func() { killTmuxSession(t, prefix+"-int-sess") })
 	mgr.SetSessionOwner("int-sess", "ws-int")
 
 	// Deregister — terminal session should be cleaned up.
 	registry.Deregister("ws-int")
 
-	if _, ok := mgr.SessionOwner("int-sess"); ok {
-		t.Error("expected int-sess ownership to be cleared after deregister via registry")
+	if mgr.SessionExists("ws-int", "int-sess") {
+		t.Error("expected int-sess to be killed after deregister via registry")
 	}
 }

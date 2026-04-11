@@ -108,11 +108,12 @@ func HandleScheduleSessionKill(svc service.TerminalService) http.HandlerFunc {
 		session := r.PathValue("session")
 		force := r.URL.Query().Get("force") == "true"
 
+		wsID := middleware.WorkspaceFromContext(r.Context())
 		var err error
 		if force {
-			err = svc.KillSession(r.Context(), session)
+			err = svc.KillSession(r.Context(), wsID, session)
 		} else {
-			err = svc.ScheduleKill(r.Context(), session)
+			err = svc.ScheduleKill(r.Context(), wsID, session)
 		}
 		if err != nil {
 			handler.HandleServiceError(w, err)
@@ -188,7 +189,8 @@ func HandleSeedTerminalSession(svc service.TerminalService) http.HandlerFunc {
 			params.Blockers = append(params.Blockers, service.SeedBlocker(b))
 		}
 
-		if err := svc.SeedSession(r.Context(), sessionName, params); err != nil {
+		wsID := middleware.WorkspaceFromContext(r.Context())
+		if err := svc.SeedSession(r.Context(), wsID, sessionName, params); err != nil {
 			handler.HandleServiceError(w, err)
 			return
 		}

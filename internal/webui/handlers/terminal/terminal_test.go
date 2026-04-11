@@ -1190,7 +1190,11 @@ func TestTerminalWebSocket_E2E(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	handler := handleTerminalWS(manager, nil, nil, "", nil, nil, nil)
+	innerHandler := handleTerminalWS(manager, nil, nil, "", nil, nil, nil)
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := middleware.WithWorkspace(r.Context(), "testws")
+		innerHandler.ServeHTTP(w, r.WithContext(ctx))
+	})
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
@@ -1410,7 +1414,7 @@ func TestHandleTerminalWS_MaxSessionsReached(t *testing.T) {
 	})
 
 	// Fill the single slot by attaching directly.
-	_, err = manager.Attach(name, "", 80, 24)
+	_, err = manager.Attach("default", name, "", 80, 24)
 	if err != nil {
 		t.Fatalf("Attach() error: %v", err)
 	}
@@ -1464,7 +1468,10 @@ func TestHandleTerminalRestart_Success(t *testing.T) {
 	pool := newMockConfigPool(dir)
 	handler := handleTerminalRestart(NewTerminalService(manager, nil, pool, nil, nil, nil, nil, nil), nil)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/terminal/restart?session=test-session", nil)
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodPost, "/api/terminal/restart?session=test-session", nil),
+		"testws",
+	)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -1508,7 +1515,10 @@ func TestHandleTerminalRestart_DefaultBackend(t *testing.T) {
 	pool := newMockConfigPool(dir)
 	handler := handleTerminalRestart(NewTerminalService(manager, nil, pool, nil, nil, nil, nil, nil), nil)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/terminal/restart?session=test-session", nil)
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodPost, "/api/terminal/restart?session=test-session", nil),
+		"testws",
+	)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -1623,7 +1633,10 @@ func TestHandleTerminalRestart_GetRequestSuccess(t *testing.T) {
 
 	handler := handleTerminalRestart(NewTerminalService(manager, nil, nil, nil, nil, nil, nil, nil), nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/terminal/restart?session=test-session", nil)
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodGet, "/api/terminal/restart?session=test-session", nil),
+		"testws",
+	)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -1651,7 +1664,10 @@ func TestHandleTerminalRestart_ShellSession(t *testing.T) {
 	pool := newMockConfigPool(dir)
 	handler := handleTerminalRestart(NewTerminalService(manager, nil, pool, nil, nil, nil, nil, nil), nil)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/terminal/restart?session=lead-shell-1", nil)
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodPost, "/api/terminal/restart?session=lead-shell-1", nil),
+		"testws",
+	)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -1691,7 +1707,10 @@ func TestHandleTerminalRestart_ShellSession_NilPool(t *testing.T) {
 
 	handler := handleTerminalRestart(NewTerminalService(manager, nil, nil, nil, nil, nil, nil, nil), nil)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/terminal/restart?session=lead-shell-3", nil)
+	req := withWorkspaceCtx(
+		httptest.NewRequest(http.MethodPost, "/api/terminal/restart?session=lead-shell-3", nil),
+		"testws",
+	)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 

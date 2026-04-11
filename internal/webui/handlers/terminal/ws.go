@@ -131,7 +131,7 @@ func validateTerminalWSRequest(w http.ResponseWriter, r *http.Request, manager *
 		return "", "", false
 	}
 
-	if manager.SessionIsBeingKilled(session) {
+	if manager.SessionIsBeingKilled(workspace, session) {
 		handler.WriteJSON(w, http.StatusConflict, map[string]interface{}{
 			"success": false, "error": "session is being killed",
 		})
@@ -190,9 +190,9 @@ func upgradeTerminalWS(w http.ResponseWriter, r *http.Request, patterns []string
 func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalWSParams, session, workspace string) (websocket.StatusCode, string) { //nolint:staticcheck // SA1019: websocket migration tracked separately
 	// Check whether the tmux session already exists before Attach creates it.
 	// Only inject the context banner for freshly created talk-to-lead sessions.
-	isNewSession := session == "talk-to-lead" && !p.manager.SessionExists(session)
+	isNewSession := session == "talk-to-lead" && !p.manager.SessionExists(workspace, session)
 
-	termSession, err := p.manager.Attach(session, attachCommandForSession(session), 80, 24)
+	termSession, err := p.manager.Attach(workspace, session, attachCommandForSession(session), 80, 24)
 	if err != nil {
 		if errors.Is(err, webuterminal.ErrSessionBeingKilled) {
 			return websocket.StatusCode(wsCloseSessionKilled), "session is being killed" //nolint:staticcheck // SA1019: websocket migration tracked separately
@@ -224,7 +224,7 @@ func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalW
 	watchSessionKill(ctx, cancel, conn, termSession)
 
 	crashCh := make(chan realtime.CrashInfo, 1)
-	scrollback := p.manager.GetScrollbackBuffer(session)
+	scrollback := p.manager.GetScrollbackBuffer(workspace, session)
 	monitor := &terminalMonitor{mgr: p.manager}
 	go func() {
 		result := realtime.PtyToWS(ctx, cancel, conn, termSession.PTY, termSession.Name, monitor, scrollback)
