@@ -19,6 +19,7 @@ import type {
 import { type TabState, getNextDuplicateName } from "./terminalTabUtils";
 
 interface UseTabActionsOptions {
+  workspaceId: string;
   tabs: TabState[];
   setTabs: Dispatch<SetStateAction<TabState[]>>;
   setActiveTabId: Dispatch<SetStateAction<string>>;
@@ -40,6 +41,7 @@ interface UseTabActionsReturn {
 }
 
 export function useTabActions({
+  workspaceId,
   tabs,
   setTabs,
   setActiveTabId,
@@ -91,8 +93,12 @@ export function useTabActions({
       // The backend tombstone (killingSet) prevents any stray reconnect from
       // recreating the session.
       const doKill = () =>
-        scheduleSessionKill("", sessionNameToDelete, true).catch((err) =>
-          console.error(`Failed to kill session ${sessionNameToDelete}:`, err),
+        scheduleSessionKill(workspaceId, sessionNameToDelete, true).catch(
+          (err) =>
+            console.error(
+              `Failed to kill session ${sessionNameToDelete}:`,
+              err,
+            ),
         );
       if (handle?.disconnect) {
         handle.disconnect().then(doKill);
@@ -100,7 +106,15 @@ export function useTabActions({
         doKill();
       }
     },
-    [deleteTab, tabs, setTabs, setActiveTabId, activeTabIdRef, instanceRefs],
+    [
+      workspaceId,
+      deleteTab,
+      tabs,
+      setTabs,
+      setActiveTabId,
+      activeTabIdRef,
+      instanceRefs,
+    ],
   );
 
   const handleDuplicateTab = useCallback(

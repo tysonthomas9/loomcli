@@ -8,6 +8,7 @@ import type { Terminal } from "@xterm/xterm";
 
 import {
   get,
+  wsUrl,
   getWsBaseUrl,
   getAgentTerminalToken,
   getAgentTerminalWsUrl,
@@ -16,15 +17,21 @@ import {
 import type { ConnectionState } from "./TerminalInstance";
 
 /**
- * Fetch a one-time terminal auth token from the server.
+ * Fetch a one-time terminal auth token from the server. The token endpoint
+ * is workspace-scoped — the server's WorkspaceMiddleware injects the wsID
+ * from the URL path into the request context, and the handler refuses
+ * requests without one.
  */
 async function fetchTerminalToken(
-  _workspaceId: string,
+  workspaceId: string,
   sessionName: string,
 ): Promise<string | null> {
   try {
     const resp = await get<{ token: string }>(
-      `/api/terminal/token?session=${encodeURIComponent(sessionName)}`, // allow-url
+      wsUrl(
+        workspaceId,
+        `/terminal/token?session=${encodeURIComponent(sessionName)}`,
+      ),
     );
     return resp.token;
   } catch {
@@ -33,19 +40,23 @@ async function fetchTerminalToken(
 }
 
 /**
- * Build the WebSocket URL for the terminal relay endpoint.
+ * Build the WebSocket URL for the terminal relay endpoint. The workspace ID
+ * lives in the URL path (not a query parameter) since the workspace-scoped
+ * routing migration: WorkspaceMiddleware reads it from the path and injects
+ * it into the handler context.
  */
 function buildWsUrl(
   workspaceId: string,
   sessionName: string,
   token: string | null,
 ): string {
-  let url = `${getWsBaseUrl()}/api/terminal/ws?session=${encodeURIComponent(sessionName)}`; // allow-url
+  const path = wsUrl(
+    workspaceId,
+    `/terminal/ws?session=${encodeURIComponent(sessionName)}`,
+  );
+  let url = `${getWsBaseUrl()}${path}`; // allow-url
   if (token) {
     url += `&token=${encodeURIComponent(token)}`;
-  }
-  if (workspaceId) {
-    url += `&workspace=${encodeURIComponent(workspaceId)}`;
   }
   return url;
 }

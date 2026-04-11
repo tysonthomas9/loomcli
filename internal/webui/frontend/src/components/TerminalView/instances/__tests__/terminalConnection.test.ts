@@ -38,6 +38,10 @@ const shared = vi.hoisted(() => {
 vi.mock("@/api/common", () => ({
   get: shared.getMock,
   getWsBaseUrl: () => "ws://localhost",
+  // Mirror the real wsUrl helper so terminalConnection.ts builds the same
+  // workspace-scoped path it would in production: "/api/workspaces/<id><path>".
+  wsUrl: (workspaceId: string, path: string) =>
+    `/api/workspaces/${encodeURIComponent(workspaceId)}${path}`,
 }));
 
 // ── Mock @/api/logs (agent terminal endpoints) ──────────────────────────────
