@@ -3,7 +3,7 @@ testdata_dir = "testdata"
 tmp_dir = "tmp"
 
 [build]
-  args_bin = ["serve", "--no-daemon"]
+  args_bin = ["serve", "--no-daemon", "--frontend-url", "http://localhost:3000"]
   bin = "./tmp/loom"
   cmd = "go build -o ./tmp/loom ./cmd/loom"
   delay = 1000

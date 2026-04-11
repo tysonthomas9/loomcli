@@ -1,4 +1,19 @@
 #!/usr/bin/env bash
+#
+# scripts/dev.sh — single dev entry point post-Phase 5.
+#
+# Starts the Go API server (via air, on :8080) and the Vite dev server
+# (on :3000) in parallel. Vite proxies /api/* and /health → :8080, so the
+# browser sees a same-origin app at http://localhost:3000.
+#
+# CORS-mode dev: set VITE_API_BASE_URL=http://localhost:8080 to bundle
+# absolute URLs and exercise CORS preflights. .air.toml passes
+# `--frontend-url http://localhost:3000` so the Go server allows the
+# Vite dev origin in that mode (inert when same-origin).
+#
+# Cleanup is handled via a trap on EXIT — Ctrl-C kills both processes
+# and stops bd daemon if this script started it.
+
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -62,6 +77,7 @@ echo ""
 echo "Starting loom dev environment..."
 echo "  API:      http://localhost:8080"
 echo "  Frontend: http://localhost:3000"
+echo "  Note:     /api/* and /health are proxied through Vite → :8080"
 echo ""
 
 # Start air (Go hot-reload) from repo root

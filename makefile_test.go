@@ -193,14 +193,14 @@ func TestMakeHelp_IncludesDevTargets(t *testing.T) {
 }
 
 // TestMakeDryRun_Dev verifies that `make -n dev` invokes the dev-check
-// prerequisite and then runs ./scripts/run-web-ui-with-loom.sh.
+// prerequisite and then runs ./scripts/dev.sh.
 func TestMakeDryRun_Dev(t *testing.T) {
 	t.Parallel()
 
 	out := runMake(t, "-n", "dev")
 
-	if !strings.Contains(out, "./scripts/run-web-ui-with-loom.sh") {
-		t.Errorf("make -n dev should reference ./scripts/run-web-ui-with-loom.sh\nOutput:\n%s", out)
+	if !strings.Contains(out, "./scripts/dev.sh") {
+		t.Errorf("make -n dev should reference ./scripts/dev.sh\nOutput:\n%s", out)
 	}
 }
 
@@ -627,5 +627,96 @@ func TestDevShExists(t *testing.T) {
 	// Check executable bit (owner)
 	if info.Mode()&0100 == 0 {
 		t.Errorf("scripts/dev.sh should be executable (mode: %o)", info.Mode())
+	}
+}
+
+// TestAirToml_NoLegacyDevFlag verifies that .air.toml's args_bin line no
+// longer passes the legacy --dev flag and instead passes --frontend-url
+// pointing at the local Vite dev server.
+func TestAirToml_NoLegacyDevFlag(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile(repoRoot(t) + "/.air.toml")
+	if err != nil {
+		t.Fatalf("reading .air.toml: %v", err)
+	}
+
+	var argsLine string
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "args_bin") {
+			argsLine = line
+			break
+		}
+	}
+	if argsLine == "" {
+		t.Fatalf(".air.toml should contain an args_bin line")
+	}
+	if strings.Contains(argsLine, `"--dev"`) {
+		t.Errorf("args_bin should not contain legacy --dev flag: %s", argsLine)
+	}
+	if !strings.Contains(argsLine, "--frontend-url") {
+		t.Errorf("args_bin should contain --frontend-url: %s", argsLine)
+	}
+	if !strings.Contains(argsLine, "http://localhost:3000") {
+		t.Errorf("args_bin should contain http://localhost:3000: %s", argsLine)
+	}
+}
+
+// TestMakeDryRun_DevLoom_Deprecated verifies that `make -n dev-loom` prints
+// a deprecation warning and still invokes ./scripts/dev.sh.
+func TestMakeDryRun_DevLoom_Deprecated(t *testing.T) {
+	t.Parallel()
+
+	out := runMake(t, "-n", "dev-loom")
+
+	if !strings.Contains(strings.ToLower(out), "deprecated") {
+		t.Errorf("make -n dev-loom should mention 'deprecated'\nOutput:\n%s", out)
+	}
+	if !strings.Contains(out, "./scripts/dev.sh") {
+		t.Errorf("make -n dev-loom should reference ./scripts/dev.sh\nOutput:\n%s", out)
+	}
+}
+
+// TestMakeDryRun_DevVite_Deprecated verifies that `make -n dev-vite` prints
+// a deprecation warning and still invokes ./scripts/dev.sh.
+func TestMakeDryRun_DevVite_Deprecated(t *testing.T) {
+	t.Parallel()
+
+	out := runMake(t, "-n", "dev-vite")
+
+	if !strings.Contains(strings.ToLower(out), "deprecated") {
+		t.Errorf("make -n dev-vite should mention 'deprecated'\nOutput:\n%s", out)
+	}
+	if !strings.Contains(out, "./scripts/dev.sh") {
+		t.Errorf("make -n dev-vite should reference ./scripts/dev.sh\nOutput:\n%s", out)
+	}
+}
+
+// TestRunWebUiWithLoomScript_Deleted verifies that the legacy
+// scripts/run-web-ui-with-loom.sh script has been removed.
+func TestRunWebUiWithLoomScript_Deleted(t *testing.T) {
+	t.Parallel()
+
+	path := repoRoot(t) + "/scripts/run-web-ui-with-loom.sh"
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("scripts/run-web-ui-with-loom.sh should not exist (err=%v)", err)
+	}
+}
+
+// TestDockerComposeDevYml_Exists verifies that docker-compose.dev.yml exists
+// at repo root and defines the expected services and profile.
+func TestDockerComposeDevYml_Exists(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile(repoRoot(t) + "/docker-compose.dev.yml")
+	if err != nil {
+		t.Fatalf("reading docker-compose.dev.yml: %v", err)
+	}
+	content := string(data)
+
+	for _, needle := range []string{"services:", "server:", "frontend:", "redis:", "profiles:", "fleet"} {
+		if !strings.Contains(content, needle) {
+			t.Errorf("docker-compose.dev.yml should contain %q", needle)
+		}
 	}
 }

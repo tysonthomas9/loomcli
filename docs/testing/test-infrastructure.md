@@ -99,25 +99,16 @@ TEST_VERBOSE=1 ./scripts/test.sh
 
 ### `scripts/dev.sh`
 
-**Purpose**: Hot-reload development environment with parallel Go + frontend servers.
+**Purpose**: The single dev entry point post-Phase 5. Hot-reload development
+environment with parallel Go + frontend servers.
 
 **Components**:
-1. **Air** (Go hot-reload): Watches Go files, rebuilds, runs `loom serve --dev --no-daemon`
-2. **Vite** (Frontend HMR): Watches frontend files, serves on port 3000
+1. **Air** (Go hot-reload): Watches Go files, rebuilds, runs `loom serve --no-daemon --frontend-url http://localhost:3000`
+2. **Vite** (Frontend HMR): Watches frontend files, serves on port 3000, proxies `/api/*` and `/health` to `:8080`
 
 **Dependency checks**: Validates `air`, `node`, `npm` exist with install instructions.
 
 **Cleanup**: Kills both processes on exit via trap; stops `bd` daemon if started.
-
-### `scripts/run-web-ui-with-loom.sh`
-
-**Purpose**: Runs `loom serve --dev` with automatic frontend `dist/` rebuilds.
-
-**Components**:
-1. **Air** (Go hot-reload): Watches Go files and restarts `loom serve --dev --no-daemon`
-2. **Vite build watcher**: Rebuilds `internal/webui/frontend/dist` on source changes
-
-**Use case**: Validate the same UI path users hit at `http://localhost:8080` while preserving auto-reload behavior.
 
 ### `scripts/dev_test.sh`
 
@@ -154,9 +145,9 @@ make gate
 
 | Target | Command | Purpose |
 |--------|---------|---------|
-| `dev` | `./scripts/run-web-ui-with-loom.sh` | Default Loom-served auto-reload environment |
-| `dev-loom` | `./scripts/run-web-ui-with-loom.sh` | Loom-served UI with frontend dist watcher |
-| `dev-vite` | `./scripts/dev.sh` | Air + Vite HMR workflow |
+| `dev` | `./scripts/dev.sh` | Go API server on `:8080` + Vite dev server on `:3000` (the canonical dev path post-Phase 5) |
+| `dev-loom` | `./scripts/dev.sh` | DEPRECATED alias for `make dev`; prints a warning and forwards |
+| `dev-vite` | `./scripts/dev.sh` | DEPRECATED alias for `make dev`; prints a warning and forwards |
 | `dev-check` | Validates air, node, npm | Check dev dependencies |
 | `hooks` | Copy pre-push hook | Install git hooks |
 
@@ -203,7 +194,7 @@ tmp_dir = "tmp"
 [build]
   bin = "./tmp/loom"
   cmd = "go build -o ./tmp/loom ./cmd/loom"
-  args_bin = ["serve", "--dev", "--no-daemon"]
+  args_bin = ["serve", "--no-daemon", "--frontend-url", "http://localhost:3000"]
   exclude_dir = ["tmp", "internal/webui/frontend", "node_modules",
                  "vendor", "testdata", ".git", "third_party", ".beads"]
   exclude_regex = ["_test\\.go$"]
@@ -404,9 +395,7 @@ func BenchmarkOperation(b *testing.B) {
 
 ### Recommended Workflow
 
-1. **Start dev servers**:
-   - `make dev` (default, Loom-served UI on :8080 with auto dist rebuild)
-   - `make dev-vite` (Vite HMR on :3000)
+1. **Start dev servers**: `make dev` (Go API on :8080 + Vite HMR on :3000)
 2. **Write tests first**: Create `*_test.go` or `*.test.ts(x)` files
 3. **Run tests in watch mode**:
    - Go: `go test -v ./internal/cli/... -run TestMyFeature`

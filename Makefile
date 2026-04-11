@@ -285,16 +285,20 @@ dev-check:
 	@command -v node >/dev/null 2>&1 || { echo "Error: node not found. Install Node.js >= 20"; exit 1; }
 	@echo "All dev dependencies found."
 
-# Run default dev environment (loom serve --dev + frontend dist watcher)
+# Run dev environment: Go API server on :8080 + Vite dev server on :3000
 dev: dev-check .git/hooks/pre-push
-	@./scripts/run-web-ui-with-loom.sh
+	@./scripts/dev.sh
 
-# Run loom serve --dev with auto frontend dist rebuild + Go hot-restart
+# Deprecated alias — 'make dev-loom' is removed in a follow-up task.
+# Post-Phase-5 there is no Loom-served UI; use `make dev` (Vite on :3000).
 dev-loom: dev-check
-	@./scripts/run-web-ui-with-loom.sh
+	@echo "Note: 'make dev-loom' is deprecated — use 'make dev'."
+	@./scripts/dev.sh
 
-# Run Vite HMR workflow (frontend at :3000)
+# Deprecated alias — 'make dev-vite' is removed in a follow-up task.
+# Post-Phase-5 this is the only dev path; use `make dev`.
 dev-vite: dev-check
+	@echo "Note: 'make dev-vite' is deprecated — use 'make dev'."
 	@./scripts/dev.sh
 
 # Show help
@@ -333,9 +337,9 @@ help:
 	@echo "  make gate-e2e     - Quality gate + Playwright API e2e tests (no Docker)"
 	@echo "  make gate-e2e-full - Quality gate + API e2e + Docker container tests"
 	@echo "  make hooks        - Install git hooks (pre-push gate)"
-	@echo "  make dev          - Start default dev flow (same as make dev-loom)"
-	@echo "  make dev-loom     - Start loom serve --dev + frontend dist watcher"
-	@echo "  make dev-vite     - Start air + Vite hot-reload workflow"
+	@echo "  make dev          - Start dev environment (Go API :8080 + Vite :3000)"
+	@echo "  make dev-loom     - DEPRECATED alias for make dev"
+	@echo "  make dev-vite     - DEPRECATED alias for make dev"
 	@echo "  make dev-check    - Check dev dependencies (air, node)"
 	@echo "  make clean        - Remove build artifacts"
 	@echo "  make help         - Show this help message"
