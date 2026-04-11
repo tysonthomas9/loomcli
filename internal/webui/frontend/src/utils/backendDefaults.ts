@@ -1,5 +1,11 @@
 /**
  * Fallback metadata for known backends until GET /api/backends is available.
+ *
+ * Lives in src/utils/ because it is pure data + a pure merge function with
+ * no React or component dependencies — callable from hooks and components
+ * alike. Moved out of src/components/BackendSelectorDropdown/ in Phase 7 so
+ * the frontend layer DAG (hooks → utils OK, hooks → components forbidden)
+ * stays consistent.
  */
 
 export interface BackendInfo {

@@ -57,16 +57,11 @@ type AuthStateListener = {
 };
 const authStateListeners: AuthStateListener[] = [];
 
-export class ApiError extends Error {
-  constructor(
-    public status: number,
-    public statusText: string,
-    public body?: unknown,
-  ) {
-    super(`API Error: ${status} ${statusText}`);
-    this.name = "ApiError";
-  }
-}
+// ApiError lives in src/types/errors.ts so components can render error UIs
+// without crossing the frontend layer DAG back into the api layer. Re-export
+// here so existing @/api/client call sites continue to work.
+export { ApiError } from "@/types/errors";
+import { ApiError } from "@/types/errors";
 
 export type RequestOptions = {
   headers?: Record<string, string>;

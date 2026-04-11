@@ -26,7 +26,7 @@ import {
   type ReactNode,
 } from "react";
 
-import type { ViewMode } from "@/components/ViewSwitcher";
+import type { ViewMode } from "@/types";
 
 // ---------------------------------------------------------------------------
 // Layer priorities (higher = closes first on Escape)

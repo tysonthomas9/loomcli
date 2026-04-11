@@ -36,39 +36,11 @@ export type ConnectionState =
   | "connected"
   | "reconnecting";
 
-// Mutation types from the backend
-export type MutationType =
-  | "create"
-  | "update"
-  | "delete"
-  | "comment"
-  | "status"
-  | "bonded"
-  | "squashed"
-  | "burned"
-  | "refresh"
-  | "terminal_metadata"
-  | "terminal_session_change"
-  | "issue_tabs"
-  | "session_change";
-
-// Server → Client: Mutation payload
-export interface MutationPayload {
-  type: MutationType;
-  issue_id: string;
-  title?: string;
-  assignee?: string;
-  owner?: string;
-  actor?: string;
-  timestamp: string;
-  old_status?: string;
-  new_status?: string;
-  parent_id?: string;
-  step_count?: number;
-  priority?: number;
-  source_repo?: string;
-  workspace_id?: string;
-}
+// Mutation types: definitions live in src/types/mutation.ts (the canonical
+// source per the Phase 7 frontend layer DAG). Re-exported here so existing
+// code that imports them from @/api/sse continues to compile.
+import type { MutationPayload } from "@/types/mutation";
+export type { MutationType, MutationPayload } from "@/types/mutation";
 
 /**
  * Options for the BeadsSSEClient.

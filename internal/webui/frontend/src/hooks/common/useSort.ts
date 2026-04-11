@@ -5,8 +5,8 @@
 
 import { useState, useMemo, useCallback } from "react";
 
-import type { ColumnDef } from "@/components/table/columns";
-import { getCellValue } from "@/components/table/columns";
+import type { ColumnDef } from "@/types/table";
+import { getCellValue } from "@/utils/tableCells";
 
 /**
  * Sort direction type.

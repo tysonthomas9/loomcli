@@ -4,7 +4,7 @@
  *
  * Usage:
  *   import { Issue, Status, IssueType } from '@/types';
- *   import type { ApiResponse, ApiError } from '@/types';
+ *   import type { ApiResponse, ApiErrorResponse } from '@/types';
  */
 
 // Common types
@@ -154,7 +154,7 @@ export {
 // API types
 export type {
   ApiResponse,
-  ApiError,
+  ApiErrorResponse,
   ApiResult,
   PaginatedResponse,
 } from "./api";
@@ -245,3 +245,27 @@ export type {
   GraphNodeType,
   GraphEdgeType,
 } from "./graph";
+
+// View mode types
+export type { ViewMode } from "./view";
+export { DEFAULT_VIEW } from "./view";
+
+// Bulk action types
+export type { BulkAction } from "./bulkActions";
+
+// Blocked-issue types
+export type { BlockedInfo } from "./blocked";
+
+// Table column types
+export type { ColumnDef } from "./table";
+
+// Auth mode constants and types
+export {
+  AUTH_MODE_OPEN,
+  AUTH_MODE_OIDC,
+  type AuthMode,
+  type AppConfig,
+} from "./authMode";
+
+// Shared error classes
+export { ApiError, AppConfigError } from "./errors";

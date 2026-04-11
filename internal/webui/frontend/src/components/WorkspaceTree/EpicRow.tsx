@@ -7,7 +7,7 @@ import type React from "react";
 import { useCallback } from "react";
 
 import type { Issue } from "@/types";
-import { createWorkspaceTask } from "@/api/workspace";
+import { createWorkspaceTask } from "@/hooks/api";
 import { useToast } from "@/hooks/ui";
 import { useWorkspaceContext } from "@/hooks/workspace";
 import { useInlineCreate } from "@/hooks/issues";

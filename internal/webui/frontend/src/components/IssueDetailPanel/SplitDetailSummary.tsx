@@ -4,7 +4,7 @@
  * Shows metadata dropdowns, description, and design panel.
  */
 
-import { updateIssue } from "@/api";
+import { updateIssue } from "@/hooks/api";
 import { useWorkspaceContext } from "@/hooks/workspace";
 import type { Issue, IssueDetails, Priority, IssueType } from "@/types";
 import type { LoomAgentStatus, LoomTaskInfo } from "@/types";

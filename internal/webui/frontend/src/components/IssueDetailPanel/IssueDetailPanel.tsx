@@ -13,8 +13,9 @@ import {
   removeDependency,
   getIssueEvents,
   moveIssue,
-} from "@/api";
-import { deleteTabMetadata, scheduleSessionKill } from "@/api/terminal";
+  deleteTabMetadata,
+  scheduleSessionKill,
+} from "@/hooks/api";
 import type { IssueTab } from "@/api/issueTabs";
 import {
   useAgentTerminalLogs,

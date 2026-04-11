@@ -5,7 +5,7 @@
  * Preserves existing filter params from the current URL.
  */
 
-import { DEFAULT_VIEW } from "@/components/ViewSwitcher";
+import { DEFAULT_VIEW } from "@/types/view";
 
 /**
  * Parameters for building a share URL.

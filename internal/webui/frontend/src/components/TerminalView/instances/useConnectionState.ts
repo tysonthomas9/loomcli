@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from "react";
 
-import { fetchTerminalToken, restartTerminalSession } from "@/api/terminal";
+import { fetchTerminalToken, restartTerminalSession } from "@/hooks/api";
 
 import type {
   ConnectionState,

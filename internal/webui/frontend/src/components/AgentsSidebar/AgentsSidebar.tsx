@@ -4,8 +4,8 @@
 import type { ReactNode } from "react";
 import { useState, useCallback, useEffect } from "react";
 
-import { ApiError } from "@/api/client";
-import { gitPush, gitPushAll } from "@/api/git";
+import { ApiError } from "@/types";
+import { gitPush, gitPushAll } from "@/hooks/api";
 import { ConfirmDialog, ErrorDisplay, LoadingSkeleton } from "@/components";
 import { useStore } from "zustand";
 

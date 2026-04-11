@@ -14,7 +14,7 @@ import { useRegisterEscapeLayer, LAYER_ISSUE_PANEL } from "@/hooks";
 import { getReviewType } from "@/utils/issueCategory";
 import { StatusDropdown } from "@/components/StatusDropdown";
 import { ErrorToast } from "@/components/ErrorToast";
-import { updateIssue } from "@/api";
+import { updateIssue } from "@/hooks/api";
 import { useWorkspaceContext } from "@/hooks/workspace";
 
 import styles from "./IssueDetailView.module.css";

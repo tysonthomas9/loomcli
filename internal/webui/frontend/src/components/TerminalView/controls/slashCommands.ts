@@ -4,7 +4,7 @@
  * Calls existing REST API endpoints.
  */
 
-import { createIssue, updateIssue, getIssue, getStats } from "@/api/issues";
+import { createIssue, updateIssue, getIssue, getStats } from "@/hooks/api";
 import { KNOWN_ISSUE_TYPES } from "@/types";
 import type { Priority, IssueType } from "@/types";
 

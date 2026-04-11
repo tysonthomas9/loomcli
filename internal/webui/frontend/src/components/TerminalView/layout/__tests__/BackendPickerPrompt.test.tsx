@@ -40,7 +40,7 @@ vi.mock("@/hooks", () => ({
 }));
 
 // Mock KNOWN_BACKEND_DEFAULTS
-vi.mock("@/components/BackendSelectorDropdown", () => ({
+vi.mock("@/utils/backendDefaults", () => ({
   KNOWN_BACKEND_DEFAULTS: {
     claude: {
       displayName: "Claude",

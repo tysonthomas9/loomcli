@@ -6,7 +6,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 
 import { closeIssue } from "@/api";
-import type { BulkAction } from "@/components/BulkActionToolbar";
+import type { BulkAction } from "@/types/bulkActions";
 
 import { useWorkspaceContext } from "@/hooks/workspace";
 

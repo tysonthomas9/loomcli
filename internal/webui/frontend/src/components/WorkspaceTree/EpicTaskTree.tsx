@@ -6,8 +6,7 @@
 import type React from "react";
 import { useState, useCallback, useRef, useEffect } from "react";
 
-import { updateIssue, closeIssue } from "@/api/issues";
-import { createWorkspaceEpic } from "@/api/workspace";
+import { updateIssue, closeIssue, createWorkspaceEpic } from "@/hooks/api";
 import { useWorkspaceTree, useWorkspaceContext } from "@/hooks/workspace";
 import { useToast } from "@/hooks/ui";
 import { useInlineCreate } from "@/hooks/issues";

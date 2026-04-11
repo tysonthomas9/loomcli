@@ -4,7 +4,7 @@ import {
   listSessionHistory,
   getSessionScrollback,
   type SessionRecord,
-} from "@/api/sessionHistory";
+} from "@/hooks/api";
 import { useWorkspaceContext } from "@/hooks/workspace";
 
 import styles from "./SessionHistorySection.module.css";

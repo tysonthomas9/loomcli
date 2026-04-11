@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, type MutableRefObject } from "react";
 
-import { closeAllSessions } from "@/api/terminal";
+import { closeAllSessions } from "@/hooks/api";
 
 import type {
   ConnectionState,

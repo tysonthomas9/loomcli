@@ -1,13 +1,54 @@
 /**
  * Mutation types for real-time sync via SSE.
  * Provides strongly-typed representation of mutation events for the React layer.
+ *
+ * The canonical definitions of MutationType and MutationPayload live here
+ * in src/types/ so that the api layer (src/api/sse.ts) and the rest of the
+ * app can share them without crossing a types → api edge in the frontend
+ * layer DAG.
  */
 
 import type { ISODateString } from "./common";
-import type { MutationType, MutationPayload } from "../api/sse";
 
-// Re-export mutation types from SSE for convenient imports
-export type { MutationType, MutationPayload } from "../api/sse";
+/**
+ * Kinds of mutation events emitted by the backend over SSE.
+ * Kept in sync with the Go mutation types in the server.
+ */
+export type MutationType =
+  | "create"
+  | "update"
+  | "delete"
+  | "comment"
+  | "status"
+  | "bonded"
+  | "squashed"
+  | "burned"
+  | "refresh"
+  | "terminal_metadata"
+  | "terminal_session_change"
+  | "issue_tabs"
+  | "session_change";
+
+/**
+ * Server → Client mutation payload shape.
+ * Matches the JSON delivered by GET /api/sse mutation events.
+ */
+export interface MutationPayload {
+  type: MutationType;
+  issue_id: string;
+  title?: string;
+  assignee?: string;
+  owner?: string;
+  actor?: string;
+  timestamp: string;
+  old_status?: string;
+  new_status?: string;
+  parent_id?: string;
+  step_count?: number;
+  priority?: number;
+  source_repo?: string;
+  workspace_id?: string;
+}
 
 /**
  * Mutation type constants.

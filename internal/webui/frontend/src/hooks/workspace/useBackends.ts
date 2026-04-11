@@ -3,10 +3,7 @@ import { useStore } from "zustand";
 
 import { backendsStore } from "@/stores";
 import type { BackendHealthData } from "@/api/backends";
-import {
-  toBackendInfo,
-  type BackendInfo,
-} from "@/components/BackendSelectorDropdown/backendDefaults";
+import { toBackendInfo, type BackendInfo } from "@/utils/backendDefaults";
 
 export interface UseBackendsReturn {
   backends: BackendInfo[];

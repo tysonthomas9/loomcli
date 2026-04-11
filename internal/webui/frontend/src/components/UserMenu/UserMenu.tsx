@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 
 import { useAuth } from "@/contexts/AuthContext";
-import { AUTH_MODE_OIDC } from "@/api/appConfig";
+import { AUTH_MODE_OIDC } from "@/types";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 
 import styles from "./UserMenu.module.css";

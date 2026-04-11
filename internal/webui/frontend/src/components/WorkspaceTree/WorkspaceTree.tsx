@@ -25,7 +25,7 @@ import {
   renameWorkspace,
   deleteWorkspace,
   reorderWorkspaces,
-} from "@/api/workspace";
+} from "@/hooks/api";
 import type { WorkspaceSummary } from "@/api/workspace";
 import type { ConnectionState } from "@/api/sse";
 import type { LoomAgentStatus } from "@/types";

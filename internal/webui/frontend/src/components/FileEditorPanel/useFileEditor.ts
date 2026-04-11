@@ -12,7 +12,7 @@ import {
   useWorkspaceContext,
 } from "@/hooks";
 import type { UseFileTreeReturn, UseFileContentReturn } from "@/hooks";
-import { writeWorktreeFile } from "@/api/files";
+import { writeWorktreeFile } from "@/hooks/api";
 
 interface PendingAction {
   type: "switch";

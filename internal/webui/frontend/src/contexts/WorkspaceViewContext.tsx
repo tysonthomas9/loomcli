@@ -9,9 +9,9 @@
 
 import { createContext, useContext, type ReactNode } from "react";
 
-import type { BlockedInfo } from "@/components/KanbanBoard";
+import type { BlockedInfo } from "@/types/blocked";
 import type { GroupByOption, FilterState } from "@/hooks/issues";
-import type { ViewMode } from "@/components/ViewSwitcher";
+import type { ViewMode } from "@/types";
 import type { PanelState, ToastOptions } from "@/hooks/ui";
 import type { Issue, IssueDetails, Status } from "@/types";
 import type { LoomAgentStatus, LoomTaskInfo } from "@/types/agent";

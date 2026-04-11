@@ -6,7 +6,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 
-import { fetchGitStatus } from "@/api/git";
+import { fetchGitStatus } from "@/hooks/api";
 import { useStore } from "zustand";
 
 import { useAgentStoreInstance } from "@/hooks/common";

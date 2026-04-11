@@ -7,7 +7,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 
-import type { BackendInfo } from "./backendDefaults";
+import type { BackendInfo } from "@/utils/backendDefaults";
 
 import styles from "./BackendSelectorDropdown.module.css";
 

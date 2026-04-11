@@ -7,7 +7,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { createPortal } from "react-dom";
 
-import { createWorkspace } from "@/api/workspace";
+import { createWorkspace } from "@/hooks/api";
 import type { CreateWorkspaceRequest, WorkspaceData } from "@/api/workspace";
 import { useRegisterEscapeLayer, LAYER_MODAL, useJobPolling } from "@/hooks";
 import { useFocusTrap, useFocusReturn } from "@/hooks/ui";

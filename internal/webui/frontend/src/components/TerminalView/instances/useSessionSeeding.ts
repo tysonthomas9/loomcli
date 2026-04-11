@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback } from "react";
 
 import type { IssueContext } from "@/api/terminal";
-import { seedTerminalSession } from "@/api/terminal";
+import { seedTerminalSession } from "@/hooks/api";
 
 import type { ConnectionState } from "./TerminalInstance";
 import {

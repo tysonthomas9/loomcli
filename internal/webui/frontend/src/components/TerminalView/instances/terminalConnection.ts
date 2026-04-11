@@ -6,8 +6,12 @@
 import type { FitAddon } from "@xterm/addon-fit";
 import type { Terminal } from "@xterm/xterm";
 
-import { get, getWsBaseUrl } from "@/api/client";
-import { getAgentTerminalToken, getAgentTerminalWsUrl } from "@/api/logs";
+import {
+  get,
+  getWsBaseUrl,
+  getAgentTerminalToken,
+  getAgentTerminalWsUrl,
+} from "@/hooks/api";
 
 import type { ConnectionState } from "./TerminalInstance";
 

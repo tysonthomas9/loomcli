@@ -9,7 +9,7 @@ import { useEffect, useState } from "react";
 
 import { WorkspaceProvider, StoreProvider, useIssueSessionMap } from "@/hooks";
 import { IssueSessionProvider } from "@/contexts/IssueSessionContext";
-import { fetchWorkspaceApi } from "@/api/workspace";
+import { fetchWorkspaceApi } from "@/hooks/api";
 import { clearLastWorkspaceId } from "@/utils/scopedStorage";
 
 function IssueSessionWrapper({ children }: { children: React.ReactNode }) {

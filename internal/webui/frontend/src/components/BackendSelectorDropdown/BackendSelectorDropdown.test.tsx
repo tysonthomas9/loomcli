@@ -7,7 +7,7 @@ import { describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom";
 import { MemoryRouter } from "react-router-dom";
 
-import type { BackendInfo } from "./backendDefaults";
+import type { BackendInfo } from "@/utils/backendDefaults";
 import { BackendSelectorDropdown } from "./BackendSelectorDropdown";
 
 function makeBackend(overrides: Partial<BackendInfo> = {}): BackendInfo {

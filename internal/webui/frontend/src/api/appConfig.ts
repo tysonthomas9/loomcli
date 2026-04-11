@@ -7,28 +7,27 @@
  * The check-no-raw-fetch linter excludes src/api/ via EXCLUDE_DIRS.
  */
 
-// ============= Constants =============
+// ============= Constants and Types =============
+//
+// AUTH_MODE_*, AuthMode, AppConfig, and AppConfigError live in src/types/
+// so components and hooks can reference them without crossing the frontend
+// layer DAG back into the api layer. Re-export here so existing @/api
+// consumers continue to work.
 
-export const AUTH_MODE_OPEN = "open" as const;
-export const AUTH_MODE_OIDC = "oidc" as const;
+export {
+  AUTH_MODE_OPEN,
+  AUTH_MODE_OIDC,
+  type AuthMode,
+  type AppConfig,
+} from "@/types/authMode";
+import {
+  AUTH_MODE_OPEN,
+  AUTH_MODE_OIDC,
+  type AppConfig,
+} from "@/types/authMode";
 
-export type AuthMode = typeof AUTH_MODE_OPEN | typeof AUTH_MODE_OIDC;
-
-// ============= Types =============
-
-export type AppConfig =
-  | { mode: typeof AUTH_MODE_OPEN }
-  | { mode: typeof AUTH_MODE_OIDC; auth_url: string };
-
-export class AppConfigError extends Error {
-  constructor(
-    message: string,
-    public cause?: unknown,
-  ) {
-    super(message);
-    this.name = "AppConfigError";
-  }
-}
+export { AppConfigError } from "@/types/errors";
+import { AppConfigError } from "@/types/errors";
 
 // ============= Module-level Cache =============
 

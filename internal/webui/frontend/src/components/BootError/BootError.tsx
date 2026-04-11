@@ -1,4 +1,4 @@
-import { AppConfigError } from "@/api/appConfig";
+import { AppConfigError } from "@/types";
 
 import styles from "./BootError.module.css";
 

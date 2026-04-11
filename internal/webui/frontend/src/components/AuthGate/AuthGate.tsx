@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 
 import { useAuth } from "@/contexts/AuthContext";
-import { AUTH_MODE_OIDC } from "@/api/appConfig";
+import { AUTH_MODE_OIDC } from "@/types";
 import { LoginPage } from "@/components/LoginPage";
 
 export function AuthGate({

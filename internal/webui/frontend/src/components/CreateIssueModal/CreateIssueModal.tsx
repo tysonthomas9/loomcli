@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { createPortal } from "react-dom";
 
-import { createIssue } from "@/api/issues";
+import { createIssue } from "@/hooks/api";
 import type { CreateIssueRequest } from "@/api/issues";
 import { useRegisterEscapeLayer, LAYER_MODAL } from "@/hooks";
 import { useWorkspaceContext } from "@/hooks/workspace";

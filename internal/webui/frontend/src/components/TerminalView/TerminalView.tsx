@@ -5,7 +5,7 @@ import {
   spawnTerminalSession,
   patchTerminalState,
   getExportUrl,
-} from "@/api/terminal";
+} from "@/hooks/api";
 import { LoadingSkeleton } from "@/components";
 import { useBackendConfig } from "@/hooks/workspace";
 import { useSessionRestore, useTerminalMetadata } from "@/hooks/terminal";

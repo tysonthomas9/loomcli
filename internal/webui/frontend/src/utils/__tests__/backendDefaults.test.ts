@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from "vitest";
 
-import { toBackendInfo, KNOWN_BACKEND_DEFAULTS } from "./backendDefaults";
+import { toBackendInfo, KNOWN_BACKEND_DEFAULTS } from "../backendDefaults";
 
 describe("backendDefaults", () => {
   describe("KNOWN_BACKEND_DEFAULTS", () => {

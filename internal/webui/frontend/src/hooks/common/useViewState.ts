@@ -6,7 +6,7 @@
  * (e.g. /ws/:id/kanban instead of /ws/:id/?view=kanban).
  */
 
-import type { ViewMode } from "@/components/ViewSwitcher";
+import type { ViewMode } from "@/types";
 
 import { useRouteView } from "./useRouteView";
 

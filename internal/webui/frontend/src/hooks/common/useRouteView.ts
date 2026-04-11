@@ -10,7 +10,7 @@
 import { useCallback, useMemo } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
-import { type ViewMode, DEFAULT_VIEW } from "@/components/ViewSwitcher";
+import { type ViewMode, DEFAULT_VIEW } from "@/types";
 
 /**
  * Valid route segments that map 1:1 to ViewMode values.

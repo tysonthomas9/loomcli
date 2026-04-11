@@ -6,7 +6,7 @@
 
 import { useState, useEffect } from "react";
 
-import { fetchDiffCommits } from "@/api/diff";
+import { fetchDiffCommits } from "@/hooks/api";
 import type { DiffCommit } from "@/api/diff";
 import {
   useGitStatus,

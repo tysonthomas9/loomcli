@@ -19,7 +19,7 @@ import {
   useCallback,
 } from "react";
 
-import { fetchScrollback } from "@/api/terminal";
+import { fetchScrollback } from "@/hooks/api";
 import { useWorkspaceContext } from "@/hooks/workspace";
 import { stripAnsi } from "@/utils/stripAnsi";
 import {

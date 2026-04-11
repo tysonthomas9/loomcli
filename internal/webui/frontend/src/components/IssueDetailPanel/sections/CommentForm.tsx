@@ -11,7 +11,7 @@ import {
   type KeyboardEvent,
 } from "react";
 
-import { addComment } from "@/api";
+import { addComment } from "@/hooks/api";
 import { useWorkspaceContext } from "@/hooks/workspace";
 import type { Comment } from "@/types";
 

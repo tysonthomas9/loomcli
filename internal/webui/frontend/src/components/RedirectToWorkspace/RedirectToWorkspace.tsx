@@ -12,7 +12,7 @@ import {
   getLastWorkspaceId,
   clearLastWorkspaceId,
 } from "@/utils/scopedStorage";
-import { fetchWorkspaceApi } from "@/api/workspace";
+import { fetchWorkspaceApi } from "@/hooks/api";
 
 export function RedirectToWorkspace() {
   const navigate = useNavigate();

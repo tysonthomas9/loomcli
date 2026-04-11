@@ -14,7 +14,7 @@ export interface ApiResponse<T> {
 /**
  * API error response structure.
  */
-export interface ApiError {
+export interface ApiErrorResponse {
   error: string;
   code?: string;
   details?: Record<string, unknown>;
@@ -24,7 +24,7 @@ export interface ApiError {
 /**
  * Union type for API responses.
  */
-export type ApiResult<T> = ApiResponse<T> | ApiError;
+export type ApiResult<T> = ApiResponse<T> | ApiErrorResponse;
 
 /**
  * Type guard to check if result is successful.
@@ -38,7 +38,9 @@ export function isApiSuccess<T>(
 /**
  * Type guard to check if result is an error.
  */
-export function isApiError<T>(result: ApiResult<T>): result is ApiError {
+export function isApiError<T>(
+  result: ApiResult<T>,
+): result is ApiErrorResponse {
   return result.success === false;
 }
 
