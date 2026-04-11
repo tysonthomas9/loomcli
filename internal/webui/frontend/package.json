@@ -16,6 +16,7 @@
     "check:no-raw-fetch": "node scripts/check-no-raw-fetch.mjs",
     "check:no-hardcoded-urls": "node scripts/check-no-hardcoded-urls.mjs",
     "check:boundaries": "node scripts/check-component-boundaries.mjs",
+    "check:dir-size": "node scripts/check-dir-size.mjs",
     "check:arch": "npm run check:loc && npm run check:no-raw-fetch && npm run check:no-hardcoded-urls && npm run check:boundaries",
     "check:generated": "node scripts/check-openapi-staleness.mjs",
     "test": "vitest run && playwright test",
