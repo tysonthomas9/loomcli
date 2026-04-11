@@ -8,7 +8,7 @@ import { useSortable } from "@dnd-kit/sortable";
 
 import type { WorkspaceSummary } from "@/api/workspace";
 
-import styles from "./WorkspaceTree.module.css";
+import styles from "../WorkspaceTree.module.css";
 
 export interface SortableWorkspaceEntryProps {
   ws: WorkspaceSummary;

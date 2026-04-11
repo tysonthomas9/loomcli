@@ -9,7 +9,7 @@ import { AgentCard } from "@/components/AgentCard";
 import type { WorkspaceHealthSummary } from "@/utils/workspaceHealth";
 
 import { ConnectionIndicator } from "./ConnectionIndicator";
-import styles from "./WorkspaceTree.module.css";
+import styles from "../WorkspaceTree.module.css";
 
 interface RepoInfo {
   name: string;

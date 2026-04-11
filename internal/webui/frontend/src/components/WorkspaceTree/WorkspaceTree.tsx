@@ -48,15 +48,18 @@ import { AgentCard } from "@/components/AgentCard";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ErrorDisplay } from "@/components/ErrorDisplay";
 
-import { ActiveAllToggle, type ActiveFilter } from "./ActiveAllToggle";
-import { EpicTaskTree } from "./tree";
-import { RepoGroupList } from "./RepoGroupList";
-import { SidebarStatusBar } from "./SidebarStatusBar";
-import { SortableWorkspaceEntry } from "./SortableWorkspaceEntry";
-import { WorkQueueSection } from "./WorkQueueSection";
-import type { WorkQueueCounts } from "./WorkQueueSection";
-import styles from "./WorkspaceTree.module.css";
 import { WorkspaceContextMenu } from "./menus";
+import {
+  ActiveAllToggle,
+  type ActiveFilter,
+  RepoGroupList,
+  SidebarStatusBar,
+  SortableWorkspaceEntry,
+  WorkQueueSection,
+  type WorkQueueCounts,
+} from "./nav";
+import { EpicTaskTree } from "./tree";
+import styles from "./WorkspaceTree.module.css";
 
 /**
  * Props for the WorkspaceTree component.
