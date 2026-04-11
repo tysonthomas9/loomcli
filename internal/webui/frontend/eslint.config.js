@@ -173,11 +173,12 @@ export default tseslint.config(
       // a layer is added to `boundaries/elements` above.
       "boundaries/no-unknown-files": "error",
 
-      // Boundaries: dependency DAG. Starts at "warn" in commit 1 so the
-      // existing runtime violations surface without blocking CI; commit 3
-      // flips this to "error" after the violations are fixed.
+      // Boundaries: dependency DAG. Enforced at error severity with no
+      // allowlist. Every edge not listed in `rules` below is forbidden
+      // (default: disallow). Type-only imports are allowed across every
+      // edge via a separate escape-hatch rule.
       "boundaries/dependencies": [
-        "warn",
+        "error",
         {
           default: "disallow",
           rules: [
