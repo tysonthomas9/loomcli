@@ -1,12 +1,12 @@
 # Makefile for loomcli project
 
-.PHONY: all build test test-integration test-all lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-api-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install install-bd help frontend frontend-ensure sync-beads update-beads check check-go check-frontend gate gate-e2e gate-e2e-full hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
+.PHONY: all build build-frontend build-all test test-integration test-all lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-api-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install install-bd help frontend sync-beads update-beads check check-go check-frontend gate gate-e2e gate-e2e-full hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
 
 # Default target
 all: build
 
-# Build the loom binary
-build: frontend
+# Build the loom binary (Go-only; no frontend dependency)
+build:
 	@echo "Building loom..."
 	go build -ldflags="-X github.com/tysonthomas9/loomcli/internal/cli.Build=$$(git rev-parse --short HEAD)" -o loom ./cmd/loom
 
@@ -132,8 +132,8 @@ test-auth-e2e:
 	@echo "Running full-stack auth E2E smoke test..."
 	@bash e2e/auth/run_test.sh
 
-# Install loom to GOPATH/bin
-install: frontend
+# Install loom to GOPATH/bin (Go-only; no frontend dependency)
+install:
 	@echo "Installing loom to $$(go env GOPATH)/bin..."
 	@bash -c 'build=$$(git rev-parse --short HEAD 2>/dev/null || echo "unknown"); \
 		go install -ldflags="-X github.com/tysonthomas9/loomcli/internal/cli.Build=$$build" ./cmd/loom'
@@ -158,15 +158,17 @@ BEADS_REMOTE := https://github.com/tysonthomas9/beads
 BEADS_BRANCH := feature/web-ui
 BEADS_PREFIX := third_party/beads
 
-# Build frontend (requires Node.js >= 20)
-# Required: dist/ must exist for go:embed at compile time
-frontend:
+# Build the frontend dist (requires Node.js >= 20). Go-free.
+build-frontend:
 	@echo "Building frontend..."
 	cd $(FRONTEND_DIR) && npm install && npm run build
 
-# Ensure frontend dist exists for go:embed (skip rebuild if already present)
-frontend-ensure:
-	@if [ ! -f $(FRONTEND_DIR)/dist/index.html ]; then echo "frontend/dist/index.html missing — building..."; $(MAKE) frontend; fi
+# Build both Go binary and frontend dist
+build-all: build build-frontend
+
+# Deprecated alias — use 'make build-frontend'
+frontend: build-frontend
+	@echo "Note: 'make frontend' is deprecated. Use 'make build-frontend'."
 
 # Sync beads library packages (rewrite imports from vendored copy)
 sync-beads:
@@ -179,8 +181,8 @@ update-beads:
 	git subtree pull --prefix=$(BEADS_PREFIX) $(BEADS_REMOTE) $(BEADS_BRANCH) --squash
 	$(MAKE) sync-beads
 
-# Go-only quality gate (skips frontend rebuild if dist/ exists)
-check-go: frontend-ensure
+# Go-only quality gate (no Node, no frontend dist)
+check-go:
 	@echo "=== [1/12] Go: format check ==="
 	@bad=$$(gofmt -l . 2>/dev/null | grep -v third_party | grep -v worktrees | grep -v vendor | grep -v node_modules | head -20); \
 	if [ -n "$$bad" ]; then echo "gofmt violations:"; echo "$$bad"; exit 1; fi
@@ -208,8 +210,8 @@ check-go: frontend-ensure
 	@COVERAGE_THRESHOLD=60 ./scripts/check-coverage.sh
 	@echo "=== Go quality gates PASSED ==="
 
-# Frontend-only quality gate (builds frontend first)
-check-frontend: frontend-ensure
+# Frontend-only quality gate (no Go toolchain, no dist prerequisite)
+check-frontend:
 	@echo "=== [1/6] Frontend: format check ==="
 	@cd $(FRONTEND_DIR) && npm run format:check
 	@echo "=== [2/6] Frontend: typecheck ==="
@@ -225,7 +227,7 @@ check-frontend: frontend-ensure
 	@echo "=== Frontend quality gates PASSED ==="
 
 # Unified quality gate — runs Go + frontend checks in parallel
-check: frontend
+check:
 	@echo "=== Running Go and Frontend checks in parallel ==="
 	@go_log=$$(mktemp); fe_log=$$(mktemp); \
 	$(MAKE) check-go >"$$go_log" 2>&1 & go_pid=$$!; \
@@ -298,7 +300,9 @@ dev-vite: dev-check
 # Show help
 help:
 	@echo "Loomcli Makefile targets:"
-	@echo "  make build   - Build the loom binary (builds frontend first)"
+	@echo "  make build            - Build the loom Go binary (no frontend)"
+	@echo "  make build-frontend   - Build the frontend dist (no Go)"
+	@echo "  make build-all        - Build both Go binary and frontend dist"
 	@echo "  make test              - Run unit tests with coverage"
 	@echo "  make test-integration  - Run unit + integration tests"
 	@echo "  make test-all          - Run all tests (unit + integration + e2e)"
@@ -319,11 +323,11 @@ help:
 	@echo "  make test-e2e-integration-full - Run ALL integration e2e tests (cross-workspace + terminal-parity)"
 	@echo "  make install    - Install loom + bd to GOPATH/bin"
 	@echo "  make install-bd - Install bd (beads CLI) from vendored source"
-	@echo "  make frontend  - Build frontend (requires Node.js >= 20)"
+	@echo "  make frontend         - DEPRECATED alias for make build-frontend"
 	@echo "  make sync-beads   - Sync beads packages (rewrite imports)"
 	@echo "  make update-beads - Pull latest beads + sync"
 	@echo "  make check        - Unified quality gate (all 14 checks)"
-	@echo "  make check-go     - Go-only quality gate (skips frontend rebuild if dist/ exists)"
+	@echo "  make check-go     - Go-only quality gate (no Node, no frontend dist)"
 	@echo "  make check-frontend - Frontend-only quality gate"
 	@echo "  make gate         - Alias for make check"
 	@echo "  make gate-e2e     - Quality gate + Playwright API e2e tests (no Docker)"

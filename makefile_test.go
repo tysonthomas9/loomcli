@@ -531,7 +531,9 @@ func TestGoCoverageScriptDefaultThreshold(t *testing.T) {
 }
 
 // TestCIWorkflowHasFrontendCoverageStep verifies that the CI workflow
-// includes a step to check frontend coverage thresholds.
+// includes a dedicated job that runs frontend coverage. After Phase 5 the
+// check moved out of the shared coverage job into a standalone
+// coverage-frontend job, so we look for the job name and the npm command.
 func TestCIWorkflowHasFrontendCoverageStep(t *testing.T) {
 	t.Parallel()
 
@@ -541,13 +543,13 @@ func TestCIWorkflowHasFrontendCoverageStep(t *testing.T) {
 	}
 	content := string(data)
 
-	if !strings.Contains(content, "Check frontend coverage threshold") {
-		t.Errorf("ci.yml should have a 'Check frontend coverage threshold' step")
+	if !strings.Contains(content, "coverage-frontend:") {
+		t.Errorf("ci.yml should define a 'coverage-frontend' job")
 	}
 
 	// Verify it runs npm run test:coverage
 	if !strings.Contains(content, "npm run test:coverage") {
-		t.Errorf("ci.yml frontend coverage step should run 'npm run test:coverage'")
+		t.Errorf("ci.yml frontend coverage job should run 'npm run test:coverage'")
 	}
 }
 

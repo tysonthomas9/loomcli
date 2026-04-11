@@ -11,9 +11,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Single quality gate — runs the same 12-step check as local dev
-  quality-gate:
-    name: Quality Gate
+  # Go-only quality gate — installs Go toolchain only, no Node.
+  go-quality-gate:
+    name: Go Quality Gate
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -23,11 +23,6 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
 
       - name: Install golangci-lint
         uses: golangci/golangci-lint-action@v9
@@ -40,15 +35,36 @@ jobs:
           git config --global user.name "CI Bot"
           git config --global user.email "ci@loomcli.test"
 
+      - name: Decoupling smoke (no frontend dist)
+        run: |
+          rm -rf internal/webui/frontend/dist
+          make build
+
+      - name: make check-go
+        run: make check-go
+
+  # Frontend-only quality gate — installs Node toolchain only, no Go.
+  frontend-quality-gate:
+    name: Frontend Quality Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
       - name: Install frontend dependencies
         run: cd internal/webui/frontend && npm ci
 
-      - name: make check
-        run: make check
+      - name: make check-frontend
+        run: make check-frontend
 
-  # Coverage reporting (separate from quality gate)
-  coverage:
-    name: Coverage
+  # Go coverage reporting (separate from quality gate)
+  coverage-go:
+    name: Go Coverage
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -59,18 +75,10 @@ jobs:
         with:
           go-version-file: 'go.mod'
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
       - name: Configure Git
         run: |
           git config --global user.name "CI Bot"
           git config --global user.email "ci@loomcli.test"
-
-      - name: Build frontend
-        run: cd internal/webui/frontend && npm ci && npm run build
 
       - name: Run tests with coverage
         run: go test -race -coverprofile=coverage.out -tags=integration -timeout 15m ./...
@@ -85,7 +93,23 @@ jobs:
           file: ./coverage.out
           fail_ci_if_error: false
 
-      - name: Check frontend coverage threshold
+  # Frontend coverage reporting (separate from quality gate)
+  coverage-frontend:
+    name: Frontend Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install frontend dependencies
+        run: cd internal/webui/frontend && npm ci
+
+      - name: Run frontend tests with coverage
         run: cd internal/webui/frontend && npm run test:coverage
 
   # Frontend independently deployable: build + test without Go toolchain.
@@ -122,9 +146,9 @@ jobs:
       - name: Architectural checks
         run: cd internal/webui/frontend && npm run check:arch
 
-  # Cross-platform verification (lightweight — Go tests only)
-  test-macos:
-    name: Test (macOS)
+  # Cross-platform verification (lightweight — Go tests only, no frontend)
+  test-macos-go:
+    name: Test (macOS, Go)
     runs-on: macos-latest
     timeout-minutes: 20
     steps:
@@ -135,18 +159,10 @@ jobs:
         with:
           go-version-file: 'go.mod'
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
       - name: Configure Git
         run: |
           git config --global user.name "CI Bot"
           git config --global user.email "ci@loomcli.test"
-
-      - name: Build frontend
-        run: cd internal/webui/frontend && npm ci && npm run build
 
       - name: Test
         run: go test -v -race -timeout 15m ./...
