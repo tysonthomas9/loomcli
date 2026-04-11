@@ -16,7 +16,6 @@ func baseCfg() serviceConfig {
 		WorkingDirectory: "/home/user/project",
 		Port:             8080,
 		BindAddr:         "127.0.0.1",
-		NoWebUI:          false,
 		LogDir:           "/home/user/project/.loom/logs",
 		ExtraEnv:         nil,
 	}
@@ -50,23 +49,9 @@ func TestRenderSystemdTemplate(t *testing.T) {
 		}
 	}
 
-	// --no-webui should NOT appear
+	// --no-webui flag was removed; the generated unit file must not reference it.
 	if strings.Contains(out, "--no-webui") {
-		t.Errorf("--no-webui should not appear when NoWebUI=false")
-	}
-}
-
-func TestRenderSystemdTemplate_NoWebUI(t *testing.T) {
-	cfg := baseCfg()
-	cfg.NoWebUI = true
-
-	out, err := renderTemplate(systemdTemplate, cfg)
-	if err != nil {
-		t.Fatalf("renderTemplate(systemd) error: %v", err)
-	}
-
-	if !strings.Contains(out, "--no-webui") {
-		t.Errorf("expected --no-webui in ExecStart line, got:\n%s", out)
+		t.Errorf("--no-webui should not appear in generated unit file (flag removed)")
 	}
 }
 
@@ -134,24 +119,9 @@ func TestRenderLaunchdTemplate(t *testing.T) {
 		}
 	}
 
-	// --no-webui should NOT appear
+	// --no-webui flag was removed; the generated plist must not reference it.
 	if strings.Contains(out, "--no-webui") {
-		t.Errorf("--no-webui should not appear when NoWebUI=false")
-	}
-}
-
-func TestRenderLaunchdTemplate_NoWebUI(t *testing.T) {
-	cfg := baseCfg()
-	cfg.Name = "com.loom.serve"
-	cfg.NoWebUI = true
-
-	out, err := renderTemplate(launchdTemplate, cfg)
-	if err != nil {
-		t.Fatalf("renderTemplate(launchd) error: %v", err)
-	}
-
-	if !strings.Contains(out, "<string>--no-webui</string>") {
-		t.Errorf("expected <string>--no-webui</string> in ProgramArguments, got:\n%s", out)
+		t.Errorf("--no-webui should not appear in generated plist (flag removed)")
 	}
 }
 

@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 )
 
@@ -605,27 +607,106 @@ func TestServeFlags_Defaults(t *testing.T) {
 		t.Errorf("webui-socket default = %q, want %q", webuiSocket, "")
 	}
 
-	noWebUI, err := f.GetBool("no-webui")
+	frontendURLs, err := f.GetStringSlice("frontend-url")
 	if err != nil {
-		t.Fatalf("failed to get no-webui flag: %v", err)
+		t.Fatalf("failed to get frontend-url flag: %v", err)
 	}
-	if noWebUI != false {
-		t.Errorf("no-webui default = %v, want %v", noWebUI, false)
+	if len(frontendURLs) != 0 {
+		t.Errorf("frontend-url default = %v, want empty", frontendURLs)
 	}
 }
 
-func TestServeFlags_NoWebUI(t *testing.T) {
-	f := serveCmd.Flags().Lookup("no-webui")
+func TestServeFlags_FrontendURL(t *testing.T) {
+	f := serveCmd.Flags().Lookup("frontend-url")
 	if f == nil {
-		t.Fatal("no-webui flag not registered on serveCmd")
+		t.Fatal("frontend-url flag not registered on serveCmd")
 	}
 
-	if f.DefValue != "false" {
-		t.Errorf("no-webui DefValue = %q, want %q", f.DefValue, "false")
+	if f.Value.Type() != "stringSlice" {
+		t.Errorf("frontend-url type = %q, want %q", f.Value.Type(), "stringSlice")
+	}
+}
+
+func TestApplyCORSConfig_FrontendURL(t *testing.T) {
+	origCors := serveCorsOrigin
+	origFrontendURLs := serveFrontendURLs
+	t.Cleanup(func() {
+		serveCorsOrigin = origCors
+		serveFrontendURLs = origFrontendURLs
+	})
+
+	tests := []struct {
+		name         string
+		cors         string
+		frontendURLs []string
+		wantEnabled  bool
+		wantOrigins  []string
+	}{
+		{
+			name:         "single frontend-url",
+			frontendURLs: []string{"https://app.example.com"},
+			wantEnabled:  true,
+			wantOrigins:  []string{"https://app.example.com"},
+		},
+		{
+			name:         "trailing slash stripped",
+			frontendURLs: []string{"https://a.example.com/", "https://b.example.com"},
+			wantEnabled:  true,
+			wantOrigins:  []string{"https://a.example.com", "https://b.example.com"},
+		},
+		{
+			name:        "cors only",
+			cors:        "https://c.example.com",
+			wantEnabled: true,
+			wantOrigins: []string{"https://c.example.com"},
+		},
+		{
+			name:         "union of cors and frontend-url",
+			cors:         "https://c.example.com",
+			frontendURLs: []string{"https://a.example.com"},
+			wantEnabled:  true,
+			wantOrigins:  []string{"https://c.example.com", "https://a.example.com"},
+		},
+		{
+			name:        "neither set disables CORS",
+			wantEnabled: false,
+			wantOrigins: nil,
+		},
+		{
+			name:         "empty value skipped",
+			frontendURLs: []string{"", "https://a.example.com"},
+			wantEnabled:  true,
+			wantOrigins:  []string{"https://a.example.com"},
+		},
 	}
 
-	if f.Value.Type() != "bool" {
-		t.Errorf("no-webui type = %q, want %q", f.Value.Type(), "bool")
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			serveCorsOrigin = tc.cors
+			serveFrontendURLs = tc.frontendURLs
+
+			cfg := webui.ServerConfig{}
+			applyCORSConfig(&cfg)
+
+			if cfg.CORSEnabled != tc.wantEnabled {
+				t.Errorf("CORSEnabled = %v, want %v", cfg.CORSEnabled, tc.wantEnabled)
+			}
+			if !reflect.DeepEqual(cfg.CORSOrigins, tc.wantOrigins) {
+				t.Errorf("CORSOrigins = %v, want %v", cfg.CORSOrigins, tc.wantOrigins)
+			}
+		})
+	}
+}
+
+func TestServeFlags_NoWebUIRemoved(t *testing.T) {
+	if f := serveCmd.Flags().Lookup("no-webui"); f != nil {
+		t.Error("no-webui flag should be removed, but is still registered on serveCmd")
+	}
+	if f := serveCmd.Flags().Lookup("dev"); f != nil {
+		t.Error("dev flag should be removed, but is still registered on serveCmd")
+	}
+	if f := serveCmd.Flags().Lookup("dev-frontend-dir"); f != nil {
+		t.Error("dev-frontend-dir flag should be removed, but is still registered on serveCmd")
 	}
 }
 

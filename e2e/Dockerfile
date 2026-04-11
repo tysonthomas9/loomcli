@@ -15,7 +15,8 @@ RUN npm ci
 COPY internal/webui/frontend/ .
 RUN npm run build
 
-# ─── Stage 2: Build Go binaries (needs frontend/dist for go:embed) ───────────
+# ─── Stage 2: Build Go binaries ──────────────────────────────────────────────
+# Go binary is pure API; frontend dist is used only by Stage 3 e2e tests.
 FROM golang:${GO_VERSION}-bookworm AS builder
 
 WORKDIR /src
@@ -23,7 +24,6 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-COPY --from=frontend /app/internal/webui/frontend/dist/ ./internal/webui/frontend/dist/
 RUN go build -o /out/loom ./cmd/loom
 
 # Build bd CLI from vendored source (separate go.mod)

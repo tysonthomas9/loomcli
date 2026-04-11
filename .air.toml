@@ -3,7 +3,7 @@ testdata_dir = "testdata"
 tmp_dir = "tmp"
 
 [build]
-  args_bin = ["serve", "--dev", "--no-daemon"]
+  args_bin = ["serve", "--no-daemon"]
   bin = "./tmp/loom"
   cmd = "go build -o ./tmp/loom ./cmd/loom"
   delay = 1000

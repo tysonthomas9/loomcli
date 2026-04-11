@@ -355,7 +355,7 @@ linters:
         linters: [funlen]
       - path: "internal/webui/fleet_handlers_heartbeat\\.go"
         linters: [funlen]
-      - path: "internal/webui/(agent_service_impl|embed|file_service_impl|loom_proxy|server_workspace|session_service_impl|terminal|terminal_context|terminal_service_impl|workspace_registry)\\.go"
+      - path: "internal/webui/(agent_service_impl|file_service_impl|server_workspace|session_service_impl|terminal|terminal_context|terminal_service_impl|workspace_registry)\\.go"
         linters: [funlen]
       - path: "internal/webui/subscription(_poll)?\\.go"
         linters: [funlen]

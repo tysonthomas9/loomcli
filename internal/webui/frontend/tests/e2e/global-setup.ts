@@ -46,6 +46,7 @@ async function globalSetup(config: FullConfig): Promise<void> {
 
   const localServer = !!process.env.LOOM_LOCAL_SERVER
   const baseURL = process.env.LOOM_BASE_URL || 'http://localhost:8080'
+  const frontendBaseURL = process.env.LOOM_FRONTEND_BASE_URL || baseURL
 
   if (localServer) {
     // Local mode: just health-check the running loom serve instance
@@ -54,7 +55,7 @@ async function globalSetup(config: FullConfig): Promise<void> {
 
     await fs.writeFile(STATE_FILE, JSON.stringify({
       startedAt: new Date().toISOString(),
-      webUrl: baseURL,
+      webUrl: frontendBaseURL,
       loomUrl: baseURL,
       composeDir: COMPOSE_DIR,
       localMode: true,
@@ -71,7 +72,7 @@ async function globalSetup(config: FullConfig): Promise<void> {
 
     await fs.writeFile(STATE_FILE, JSON.stringify({
       startedAt: new Date().toISOString(),
-      webUrl: baseURL,
+      webUrl: frontendBaseURL,
       loomUrl: baseURL,
       composeDir: COMPOSE_DIR,
       localMode: true,

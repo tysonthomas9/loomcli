@@ -25,7 +25,6 @@ var (
 	installServiceName      string
 	installServicePort      int
 	installServiceBind      string
-	installServiceNoWebUI   bool
 	installServiceEnv       []string
 )
 
@@ -57,7 +56,6 @@ func init() {
 	installServiceCmd.Flags().StringVar(&installServiceName, "name", "", "Service name suffix for multi-project setups (e.g. my-project)")
 	installServiceCmd.Flags().IntVar(&installServicePort, "port", 8080, "Port for loom serve")
 	installServiceCmd.Flags().StringVar(&installServiceBind, "bind", "127.0.0.1", "Bind address for loom serve")
-	installServiceCmd.Flags().BoolVar(&installServiceNoWebUI, "no-webui", false, "Disable the web UI in the service")
 	installServiceCmd.Flags().StringArrayVar(&installServiceEnv, "env", nil, "Extra environment variables (KEY=VALUE, repeatable)")
 	cli.RegisterCommand(installServiceCmd)
 }
@@ -70,7 +68,6 @@ type serviceConfig struct {
 	WorkingDirectory string
 	Port             int
 	BindAddr         string
-	NoWebUI          bool
 	LogDir           string
 	ExtraEnv         []string
 }
@@ -89,7 +86,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory={{.WorkingDirectory}}
-ExecStart={{.BinaryPath}} serve --port {{.Port}} --bind {{.BindAddr}}{{if .NoWebUI}} --no-webui{{end}}
+ExecStart={{.BinaryPath}} serve --port {{.Port}} --bind {{.BindAddr}}
 Restart=on-failure
 RestartSec=5
 {{- range .ExtraEnv}}
@@ -133,9 +130,6 @@ var launchdTemplate = template.Must(template.New("launchd").Funcs(template.FuncM
         <string>{{.Port}}</string>
         <string>--bind</string>
         <string>{{.BindAddr | xmlEscape}}</string>
-        {{- if .NoWebUI}}
-        <string>--no-webui</string>
-        {{- end}}
     </array>
     <key>WorkingDirectory</key>
     <string>{{.WorkingDirectory | xmlEscape}}</string>
@@ -215,7 +209,6 @@ func buildServiceConfig() (serviceConfig, error) {
 		WorkingDirectory: cwd,
 		Port:             installServicePort,
 		BindAddr:         installServiceBind,
-		NoWebUI:          installServiceNoWebUI,
 		LogDir:           resolveServiceLogDir(cwd),
 		ExtraEnv:         installServiceEnv,
 	}, nil

@@ -14,9 +14,19 @@ LOOM_BIN="$REPO_ROOT/tmp/loom-e2e"
 E2E_WORKSPACE="$REPO_ROOT/tmp/e2e-workspace"
 
 DAEMON_STARTED=""
+LOOM_PID=""
+PREVIEW_PID=""
 
 cleanup() {
     echo "[e2e] Cleaning up..."
+    if [[ -n "$PREVIEW_PID" ]]; then
+        kill "$PREVIEW_PID" 2>/dev/null || true
+        wait "$PREVIEW_PID" 2>/dev/null || true
+    fi
+    if [[ -n "$LOOM_PID" ]]; then
+        kill "$LOOM_PID" 2>/dev/null || true
+        wait "$LOOM_PID" 2>/dev/null || true
+    fi
     if [[ -n "$DAEMON_STARTED" ]]; then
         echo "[e2e] Stopping bd daemon..."
         (cd "$E2E_WORKSPACE" && bd daemon stop 2>/dev/null) || true
@@ -46,6 +56,12 @@ fi
 _e2e_port="${E2E_PORT:-8090}"
 if [[ "$_e2e_port" != "8080" ]]; then
     fuser -k "$_e2e_port/tcp" 2>/dev/null || true
+fi
+
+# Same cleanup for the Vite preview port (used to back integration tests).
+_e2e_frontend_port="${E2E_FRONTEND_PORT:-3100}"
+if [[ "$_e2e_frontend_port" != "3000" ]]; then
+    fuser -k "$_e2e_frontend_port/tcp" 2>/dev/null || true
 fi
 
 # --- 1. Build loom binary (skip if fresh) ---
@@ -104,12 +120,62 @@ fi
 
 
 PORT="${E2E_PORT:-8080}"
+FRONTEND_PORT="${E2E_FRONTEND_PORT:-3100}"
 echo "[e2e] Starting loom serve (port :${PORT})..."
 # Disable h2c (HTTP/2 cleartext) wrapping — Node.js HTTP clients used by
 # Playwright helpers hang on PATCH requests when the server uses h2c.
 export LOOM_DISABLE_H2C=1
 # Run from E2E workspace so the Loom API server also discovers the isolated daemon.
 cd "$E2E_WORKSPACE"
-exec "$LOOM_BIN" serve \
+"$LOOM_BIN" serve \
     --webui-socket "$E2E_SOCKET" \
-    --port "${PORT}"
+    --port "${PORT}" \
+    --frontend-url "http://127.0.0.1:${FRONTEND_PORT}" \
+    --frontend-url "http://localhost:${FRONTEND_PORT}" &
+LOOM_PID=$!
+
+# Wait for loom serve to become ready.
+echo "[e2e] Waiting for loom serve on :${PORT}..."
+for i in $(seq 1 20); do
+    if curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
+        break
+    fi
+    sleep 0.5
+done
+if ! curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
+    echo "[e2e] ERROR: loom serve did not become ready on :${PORT}"
+    exit 1
+fi
+
+echo "[e2e] Starting vite preview (port :${FRONTEND_PORT})..."
+(
+    cd "$FRONTEND_DIR"
+    E2E_API_URL="http://127.0.0.1:${PORT}" \
+        npx vite preview --port "${FRONTEND_PORT}" --strictPort --host 127.0.0.1
+) &
+PREVIEW_PID=$!
+
+# Wait for the Vite preview server to become ready.
+echo "[e2e] Waiting for vite preview on :${FRONTEND_PORT}..."
+for i in $(seq 1 20); do
+    if curl -fsS "http://127.0.0.1:${FRONTEND_PORT}/" >/dev/null 2>&1; then
+        break
+    fi
+    sleep 0.5
+done
+if ! curl -fsS "http://127.0.0.1:${FRONTEND_PORT}/" >/dev/null 2>&1; then
+    echo "[e2e] ERROR: vite preview did not become ready on :${FRONTEND_PORT}"
+    exit 1
+fi
+
+echo "[e2e] E2E server stack ready (api :${PORT}, frontend :${FRONTEND_PORT})"
+
+# Keep the script attached to loom serve's lifetime. Playwright sends SIGTERM
+# to the script on shutdown, which fires the cleanup trap. `wait` is used
+# instead of `wait -n` for bash 3.2 compatibility (macOS system bash).
+wait "$LOOM_PID"
+# If loom serve exited on its own, make sure preview is also torn down.
+if [[ -n "${PREVIEW_PID}" ]]; then
+    kill "$PREVIEW_PID" 2>/dev/null || true
+    wait "$PREVIEW_PID" 2>/dev/null || true
+fi

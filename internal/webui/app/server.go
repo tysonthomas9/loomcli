@@ -109,9 +109,6 @@ type Server struct {
 
 	// Pre-built top-level handlers (built by handlermux.BuildHandlers)
 	handlers *handlermux.Handlers
-
-	// Pre-built top-level handlers (optional; built inline)
-	frontendH http.Handler // embedded FS handler or dev-mode handler
 }
 
 // buildHandlers constructs all top-level HTTP handlers from the current dependency
@@ -128,12 +125,6 @@ func (app *Server) buildHandlers() {
 	}
 	if app.config.DaemonConfigFn != nil {
 		daemonConfigH = webui.HandleDaemonConfig(app.config.DaemonConfigFn)
-	}
-
-	if app.config.DevMode {
-		app.frontendH = webui.DevFrontendHandler(app.config.DevFrontendDir)
-	} else {
-		app.frontendH = webui.FrontendHandler()
 	}
 
 	var backendsHealthH http.HandlerFunc

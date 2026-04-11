@@ -62,10 +62,7 @@ type ServerConfig struct {
 	ExtAuthIssuer           string                                            // Expected JWT issuer (validated against "iss" claim; defaults to ExtAuthURL)
 	ExtAuthAudience         string                                            // Expected JWT audience (validated against "aud" claim; defaults to "loom")
 	ExtAuthAllowInsecure    bool                                              // Allow HTTP for non-loopback --auth-url (escape hatch for Docker networks)
-	SkipFrontend            bool                                              // When true, skip static file serving and SPA routing (headless API-only mode)
 	MonitorHandlers         MonitorHandlers                                   // Pre-built handlers for monitor/metrics endpoints (injected by cli)
-	DevMode                 bool                                              // Serve frontend from disk instead of embedded FS
-	DevFrontendDir          string                                            // Directory to serve in dev mode (default: internal/webui/frontend/dist)
 	GitOps                  ops.GitOps                                        // Git operations interface (optional; nil disables git endpoints)
 	FileOps                 ops.FileOps                                       // File operations interface (optional; nil disables file endpoints)
 	WorkspaceConfigFn       func() (*ops.WorkspaceData, error)                // Workspace topology supplier; nil = single-repo mode

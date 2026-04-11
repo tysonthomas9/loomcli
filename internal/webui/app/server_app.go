@@ -90,15 +90,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	if config.ExtAuthURL == "" && config.BindAddress != "127.0.0.1" && config.BindAddress != "::1" {
 		logger.Warn("no authentication configured and server is exposed to network", "bind_address", config.BindAddress)
 	}
-	if config.DevMode {
-		dir := config.DevFrontendDir
-		if dir == "" {
-			dir = "internal/webui/frontend/dist"
-		}
-		logger.Info("dev mode enabled", "frontend_dir", dir)
-	} else {
-		webui.LogFrontendBuildMeta()
-	}
+	logger.Info("api-only mode — frontend served externally")
 	if config.FleetEnabled {
 		logger.Info("fleet routes enabled")
 	}

@@ -54,7 +54,9 @@ if [[ ! -d "$FRONTEND_DIR/node_modules" ]]; then
     (cd "$FRONTEND_DIR" && npm install)
 fi
 
-# Ensure dist exists before loom serve --dev starts.
+# Build the frontend dist once so the Vite preview / static host has something
+# to serve alongside the API server. loom serve itself no longer embeds or
+# serves static files — it's a pure JSON API.
 echo "Building frontend once..."
 (cd "$FRONTEND_DIR" && npm run build >/dev/null)
 
@@ -73,7 +75,7 @@ cd "$FRONTEND_DIR"
 npm run build -- --watch --emptyOutDir false &
 BUILD_WATCH_PID=$!
 
-# Run loom serve --dev through air for Go/backend hot-restart.
+# Run loom serve through air for Go/backend hot-restart.
 cd "$REPO_ROOT"
 air &
 AIR_PID=$!

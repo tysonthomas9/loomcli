@@ -12,6 +12,8 @@ const isLocalServer = !!process.env.LOOM_LOCAL_SERVER
 // Uses port 8090 to avoid conflict with dev server on 8080.
 const isSelfContained = isIntegration && !isLocalServer
 const selfContainedPort = 8090
+// Vite preview serves the frontend for integration tests (backed by preview.proxy).
+const selfContainedFrontendPort = 3100
 
 /** Resolve API key from env or key file for authenticated test projects. */
 function resolveApiKey(): string {
@@ -29,6 +31,11 @@ const apiKey = resolveApiKey()
 const apiBaseURL = isSelfContained
   ? `http://localhost:${selfContainedPort}`
   : process.env.LOOM_BASE_URL || "http://localhost:8080"
+// Integration tests navigate to the frontend via Vite preview (self-contained)
+// or the dev server / user-managed frontend (local modes).
+const frontendBaseURL = isSelfContained
+  ? `http://localhost:${selfContainedFrontendPort}`
+  : process.env.LOOM_FRONTEND_BASE_URL || process.env.LOOM_BASE_URL || "http://localhost:3000"
 const authHeaders: Record<string, string> = apiKey ? { Authorization: `Bearer ${apiKey}` } : {}
 
 // Propagate base URL to helpers.ts which reads process.env.LOOM_BASE_URL at module load
@@ -45,8 +52,11 @@ if (isSelfContained) {
 function resolveWebServer() {
   if (isSelfContained) {
     return {
-      command: `E2E_PORT=${selfContainedPort} bash ../../../scripts/start-e2e-server.sh`,
-      url: `http://localhost:${selfContainedPort}/health`,
+      command: `E2E_PORT=${selfContainedPort} E2E_FRONTEND_PORT=${selfContainedFrontendPort} bash ../../../scripts/start-e2e-server.sh`,
+      // Wait for the Vite preview server — start-e2e-server.sh only starts it
+      // after loom serve is healthy, so this single probe confirms both
+      // servers are reachable before tests dispatch.
+      url: `http://localhost:${selfContainedFrontendPort}/`,
       reuseExistingServer: false,
       timeout: 120_000,
       stdout: "pipe" as const,
@@ -107,7 +117,7 @@ export default defineConfig({
       testMatch: "**/*.integration.spec.ts",
       use: {
         ...devices["Desktop Chrome"],
-        baseURL: apiBaseURL,
+        baseURL: frontendBaseURL,
         extraHTTPHeaders: authHeaders,
       },
       globalSetup: "./tests/e2e/global-setup.ts",
@@ -122,7 +132,7 @@ export default defineConfig({
       testIgnore: isLocalIntegration ? undefined : "**/terminal-parity.integration.spec.ts",
       use: {
         ...devices["Desktop Chrome"],
-        baseURL: apiBaseURL,
+        baseURL: frontendBaseURL,
         extraHTTPHeaders: authHeaders,
       },
       timeout: 60000,

@@ -1854,34 +1854,45 @@ func TestSetupRoutes_FleetEndpoints_AllFlatRoutesReturn404(t *testing.T) {
 	}
 }
 
-// --- Dev mode frontend handler test ---
+// --- Unregistered /api/ catch-all test ---
 
-// TestSetupRoutes_DevMode_FrontendHandler verifies that the catch-all handler
-// uses devFrontendHandler when devMode=true and doesn't panic.
-func TestSetupRoutes_DevMode_FrontendHandler(t *testing.T) {
-	// Pass devMode=true with a non-existent dir; the handler should not panic
-	app := &Server{config: webui.ServerConfig{DevMode: true, DevFrontendDir: "/nonexistent/dev/dir"}}
+// TestUnregisteredAPIPathReturnsJSONNotFound verifies that any unmatched path
+// under /api/ returns a JSON 404 with {"error":"not found"}, replacing the
+// former SPA catch-all's API guard now that the frontend is served externally.
+func TestUnregisteredAPIPathReturnsJSONNotFound(t *testing.T) {
+	app := &Server{}
 	setupTestRoutes(t, app)
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
+	paths := []string{"/api/nonexistent", "/api/some/deep/path", "/api/auth/token"}
+	for _, p := range paths {
+		t.Run(p, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, p, nil)
+			rr := httptest.NewRecorder()
+			app.mux.ServeHTTP(rr, req)
 
-	// This should not panic
-	app.mux.ServeHTTP(rr, req)
-
-	// The dev handler will try to serve from the directory; since it doesn't exist,
-	// it will attempt SPA fallback. Either way, we get a response (no crash).
-	if rr.Code == 0 {
-		t.Error("expected a non-zero status code")
+			if rr.Code != http.StatusNotFound {
+				t.Errorf("status = %d, want 404", rr.Code)
+			}
+			if ct := rr.Header().Get("Content-Type"); ct != "application/json" {
+				t.Errorf("Content-Type = %q, want application/json", ct)
+			}
+			var body map[string]string
+			if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+				t.Fatalf("response is not JSON: %v", err)
+			}
+			if body["error"] != "not found" {
+				t.Errorf("error = %q, want %q", body["error"], "not found")
+			}
+		})
 	}
 }
 
 // --- Tab metadata route conditional registration tests ---
 
 // TestSetupRoutes_TabMetadataReturns404WhenStoreNil verifies that GET /api/terminal/tabs
-// returns a 404 JSON response (not SPA HTML) when tabMetaStore is nil.
-// When Redis is not configured the tab metadata routes are not registered,
-// so the request falls through to the SPA catch-all which rejects /api/* with 404 JSON.
+// returns a 404 JSON response when tabMetaStore is nil. When Redis is not
+// configured the tab metadata routes are not registered, so the request falls
+// through to the /api/ JSON-404 catch-all.
 func TestSetupRoutes_TabMetadataReturns404WhenStoreNil(t *testing.T) {
 	// All nil params — tabMetaStore (param 21) is nil, so tab metadata routes are not registered.
 	app := &Server{}
@@ -1891,7 +1902,7 @@ func TestSetupRoutes_TabMetadataReturns404WhenStoreNil(t *testing.T) {
 	rr := httptest.NewRecorder()
 	app.mux.ServeHTTP(rr, req)
 
-	// Route is not registered; SPA catch-all rejects /api/* with 404 JSON
+	// Route is not registered; /api/ catch-all rejects with 404 JSON
 	if rr.Code != http.StatusNotFound {
 		t.Errorf("expected /api/terminal/tabs to return %d when tabMetaStore is nil, got %d",
 			http.StatusNotFound, rr.Code)

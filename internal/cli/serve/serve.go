@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -31,8 +32,8 @@ var (
 	servePort              int
 	serveBindAddr          string
 	serveCorsOrigin        string
+	serveFrontendURLs      []string
 	serveWebUISocket       string
-	serveNoWebUI           bool
 	serveNoDaemon          bool
 	serveRedisAddr         string
 	serveRedisPassword     string
@@ -42,17 +43,36 @@ var (
 	serveAuthIssuer        string
 	serveAuthAudience      string
 	serveAuthAllowInsecure bool
-	serveDev               bool
-	serveDevFrontDir       string
 
 	// usageHandler holds the initialized usage HTTP handler.
 	usageHandler http.HandlerFunc
 )
 
+// parseFrontendURLsEnv reads LOOM_FRONTEND_URL and returns a list of origins
+// split on commas and whitespace-trimmed. Returns nil if the env var is unset
+// or empty.
+func parseFrontendURLsEnv() []string {
+	raw := os.Getenv("LOOM_FRONTEND_URL")
+	if raw == "" {
+		return nil
+	}
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start HTTP server for agent status API",
-	Long: `Start an HTTP server that exposes agent status via REST API and web UI.
+	Long: `Start a pure JSON API / SSE / WebSocket server.
+
+The frontend is served externally (reverse proxy, CDN, Vite preview, etc.).
+Use --frontend-url (repeatable) to allow cross-origin frontend deployments
+via CORS.
 
 Auto-starts the bd daemon if not running (disable with --no-daemon).
 
@@ -60,6 +80,7 @@ ENVIRONMENT VARIABLES
   LOOM_SERVER_PORT     Server port (default: 8080)
   LOOM_BIND_ADDR       Bind address (default: 127.0.0.1)
   LOOM_CORS_ORIGIN     CORS allowed origin
+  LOOM_FRONTEND_URL    Allowed frontend origin(s) for CORS (comma-separated)
   LOOM_REDIS_PASSWORD  Redis password (avoids exposure in process list)
   LOOM_AUTH_URL         External auth service base URL (enables JWT auth)
   LOOM_AUTH_ISSUER      Expected JWT issuer (defaults to LOOM_AUTH_URL)
@@ -68,7 +89,7 @@ ENVIRONMENT VARIABLES
 EXAMPLES
   loom serve                                              # Default port 8080
   loom serve --bind 0.0.0.0 --auth-url https://auth.co   # Exposed with JWT auth
-  loom serve --dev                                        # Frontend from disk`,
+  loom serve --frontend-url https://app.example.com       # Cross-origin frontend`,
 	Args: cobra.NoArgs,
 	Run:  runServe,
 }
@@ -92,8 +113,8 @@ func init() {
 	serveCmd.Flags().IntVarP(&servePort, "port", "p", defaultPort, "Server port")
 	serveCmd.Flags().StringVar(&serveBindAddr, "bind", defaultBind, "Bind address (use 0.0.0.0 for all interfaces)")
 	serveCmd.Flags().StringVar(&serveCorsOrigin, "cors", defaultCors, "CORS allowed origin")
+	serveCmd.Flags().StringSliceVar(&serveFrontendURLs, "frontend-url", parseFrontendURLsEnv(), "Allowed frontend origin(s) for CORS. Repeatable or comma-separated. Env: LOOM_FRONTEND_URL")
 	serveCmd.Flags().StringVar(&serveWebUISocket, "webui-socket", "", "Daemon socket path for webui (auto-detect if empty)")
-	serveCmd.Flags().BoolVar(&serveNoWebUI, "no-webui", false, "Skip frontend static file serving (API-only/headless mode)")
 	serveCmd.Flags().BoolVar(&serveNoDaemon, "no-daemon", false, "Skip auto-starting the bd daemon")
 
 	defaultRedisAddr := os.Getenv("LOOM_REDIS_ADDR")
@@ -117,9 +138,6 @@ func init() {
 	serveCmd.Flags().StringVar(&serveAuthAudience, "auth-audience", defaultAuthAudience, "Expected JWT audience (defaults to \"loom\")")
 
 	serveCmd.Flags().BoolVar(&serveAuthAllowInsecure, "auth-allow-insecure", false, "Allow HTTP for non-loopback --auth-url (INSECURE, for Docker internal networks only)")
-
-	serveCmd.Flags().BoolVar(&serveDev, "dev", false, "Development mode: serve frontend from disk, enable CORS for Vite dev server")
-	serveCmd.Flags().StringVar(&serveDevFrontDir, "dev-frontend-dir", "", "Frontend directory to serve in dev mode (default: internal/webui/frontend/dist)")
 
 	cli.RegisterCommand(serveCmd)
 }
@@ -283,7 +301,6 @@ func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimp
 		Port:                 servePort,
 		BindAddress:          serveBindAddr,
 		SocketPath:           serveWebUISocket,
-		SkipFrontend:         serveNoWebUI,
 		MonitorHandlers:      monitorHandlers,
 		AgentControlFn:       daemonwire.BuildAgentControlFn(),
 		DaemonSupervisorFn:   daemonwire.BuildDaemonSupervisorFn(),
@@ -295,8 +312,6 @@ func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimp
 		ExtAuthIssuer:        serveAuthIssuer,
 		ExtAuthAudience:      serveAuthAudience,
 		ExtAuthAllowInsecure: serveAuthAllowInsecure,
-		DevMode:              serveDev,
-		DevFrontendDir:       serveDevFrontDir,
 		GitOps:               gitOps,
 		FileOps:              gitOps,
 		BackendOps:           opsimpl.NewBackendOps(),
@@ -330,28 +345,33 @@ func applyWorkspaceConfig(cfg *webui.ServerConfig) {
 }
 
 func applyCORSConfig(cfg *webui.ServerConfig) {
+	origins := cfg.CORSOrigins
 	if serveCorsOrigin != "" {
+		origins = append(origins, serveCorsOrigin)
+	}
+	for _, u := range serveFrontendURLs {
+		u = strings.TrimSpace(u)
+		// Strip a single trailing slash — origins are scheme+host+port only,
+		// so only the root `/` suffix is normalized. Paths or repeated slashes
+		// stay intact and, if present, simply never match an Origin header.
+		u = strings.TrimSuffix(u, "/")
+		if u != "" {
+			origins = append(origins, u)
+		}
+	}
+	if len(origins) > 0 {
 		cfg.CORSEnabled = true
-		cfg.CORSOrigins = []string{serveCorsOrigin}
-	} else if serveDev {
-		cfg.CORSEnabled = true
+		cfg.CORSOrigins = origins
 	}
 }
 
 func logServerStartup() {
 	log.Printf("Server starting on %s:%d", serveBindAddr, servePort)
-	if serveNoWebUI {
-		log.Printf("Frontend disabled (--no-webui): API-only mode")
-	}
-	if serveDev {
-		dir := serveDevFrontDir
-		if dir == "" {
-			dir = "internal/webui/frontend/dist"
-		}
-		log.Printf("Development mode enabled: serving frontend from %s", dir)
-	}
 	if serveCorsOrigin != "" {
 		log.Printf("CORS enabled for origin: %s", serveCorsOrigin)
+	}
+	if len(serveFrontendURLs) > 0 {
+		log.Printf("Frontend URLs (CORS): %v", serveFrontendURLs)
 	}
 }
 
