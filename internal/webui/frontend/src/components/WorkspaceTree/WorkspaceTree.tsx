@@ -56,7 +56,7 @@ import { SortableWorkspaceEntry } from "./SortableWorkspaceEntry";
 import { WorkQueueSection } from "./WorkQueueSection";
 import type { WorkQueueCounts } from "./WorkQueueSection";
 import styles from "./WorkspaceTree.module.css";
-import { WorkspaceContextMenu } from "./WorkspaceContextMenu";
+import { WorkspaceContextMenu } from "./menus";
 
 /**
  * Props for the WorkspaceTree component.

@@ -12,11 +12,14 @@ import { useToast } from "@/hooks/ui";
 import { useInlineCreate } from "@/hooks/issues";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
 
+import {
+  EpicContextMenu,
+  TaskContextMenu,
+} from "@/components/WorkspaceTree/menus";
+
 import { TalkToLeadEntry } from "./TalkToLeadEntry";
 import { EpicRow } from "./EpicRow";
 import { TaskRow } from "./TaskRow";
-import { EpicContextMenu } from "./EpicContextMenu";
-import { TaskContextMenu } from "./TaskContextMenu";
 import { InlineAddInput } from "./InlineAddInput";
 import styles from "./EpicTaskTree.module.css";
 

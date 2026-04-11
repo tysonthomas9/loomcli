@@ -26,7 +26,7 @@ vi.mock("@/api/workspace", () => ({
 
 // ── Mock CSS modules ────────────────────────────────────────────────────────
 
-vi.mock("../WorkspaceContextMenu.module.css", () => ({
+vi.mock("../menus/WorkspaceContextMenu.module.css", () => ({
   default: {
     menu: "menu",
     menuItem: "menuItem",
