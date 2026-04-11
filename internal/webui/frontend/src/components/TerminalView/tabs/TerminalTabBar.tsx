@@ -185,7 +185,7 @@ export const TerminalTabBar = forwardRef<HTMLDivElement, TerminalTabBarProps>(
         el.removeEventListener("scroll", update);
         obs.disconnect();
       };
-    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    }, []);
 
     useEffect(() => {
       const el = tabListRef.current;

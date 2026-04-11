@@ -88,7 +88,6 @@ export function useSessionManagement(args: SessionMgmtArgs) {
       );
     // tabs.length ensures re-evaluation after initialization (when tabs populate
     // and initializedRef.current becomes true), since initializedRef is not reactive.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [issueId, isActive, initializedRef, setTabs, setActiveTabId, tabs.length]);
 
   return handleCloseAll;

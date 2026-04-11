@@ -821,7 +821,6 @@ describe("CreateWorkspaceModal", () => {
         target: { value: url },
       });
 
-      // eslint-disable-next-line @typescript-eslint/require-await
       await act(async () => {
         fireEvent.click(screen.getByTestId("create-workspace-submit"));
       });

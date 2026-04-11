@@ -8,8 +8,8 @@ import { describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom";
 import type { Issue, Status } from "@/types";
 
+import type { ColumnDef } from "./columns";
 import {
-  ColumnDef,
   DEFAULT_ISSUE_COLUMNS,
   formatPriority,
   getPriorityClassName,
@@ -19,7 +19,8 @@ import {
   formatDate,
   getCellValue,
 } from "./columns";
-import { IssueTable, IssueTableProps } from "./IssueTable";
+import type { IssueTableProps } from "./IssueTable";
+import { IssueTable } from "./IssueTable";
 
 // Mock useWorkspaceContext — default to multi-repo so all columns render
 vi.mock("@/hooks/workspace", async () => {

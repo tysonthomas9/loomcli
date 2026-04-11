@@ -14,8 +14,10 @@ import "@testing-library/jest-dom";
 
 import type { Issue, Status } from "@/types";
 
-import { DEFAULT_ISSUE_COLUMNS, ColumnDef } from "../columns";
-import { IssueRow, IssueRowProps } from "../IssueRow";
+import type { ColumnDef } from "../columns";
+import { DEFAULT_ISSUE_COLUMNS } from "../columns";
+import type { IssueRowProps } from "../IssueRow";
+import { IssueRow } from "../IssueRow";
 
 // Helper to create mock issues for testing
 function createMockIssue(overrides: Partial<Issue> = {}): Issue {

@@ -6,13 +6,16 @@
 import { useMemo, useRef } from "react";
 
 import type { BlockedInfo } from "@/components/KanbanBoard";
-import { useSort, SortDirection } from "@/hooks";
+import type { SortDirection } from "@/hooks";
+import { useSort } from "@/hooks";
 import { useWorkspaceContext } from "@/hooks/workspace";
 import type { Issue } from "@/types";
 
-import { ColumnDef, DEFAULT_ISSUE_COLUMNS } from "./columns";
+import type { ColumnDef } from "./columns";
+import { DEFAULT_ISSUE_COLUMNS } from "./columns";
 import { IssueRow } from "./IssueRow";
-import { TableHeader, SortState } from "./TableHeader";
+import type { SortState } from "./TableHeader";
+import { TableHeader } from "./TableHeader";
 import { VirtualizedTableBody } from "./VirtualizedTableBody";
 import "./IssueTable.css";
 
