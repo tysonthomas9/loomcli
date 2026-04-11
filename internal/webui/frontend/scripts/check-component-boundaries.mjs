@@ -25,7 +25,7 @@ export const ALLOWLIST = [
     target: "@/components/KanbanBoard/types",
   },
   {
-    source: "src/components/IssueDetailPanel/CommentsSection.tsx",
+    source: "src/components/IssueDetailPanel/sections/CommentsSection.tsx",
     target: "@/components/table/columns",
   },
   {
@@ -33,7 +33,7 @@ export const ALLOWLIST = [
     target: "../FilterBar/FilterBar.module.css",
   },
   {
-    source: "src/components/IssueDetailPanel/PriorityDropdown.tsx",
+    source: "src/components/IssueDetailPanel/fields/PriorityDropdown.tsx",
     target: "@/components/VisuallyHidden/VisuallyHidden",
   },
   {

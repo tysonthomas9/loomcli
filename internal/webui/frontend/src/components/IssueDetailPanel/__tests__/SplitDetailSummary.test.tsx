@@ -20,8 +20,8 @@ import type {
 
 import { SplitDetailSummary } from "../SplitDetailSummary";
 
-// Mock child components
-vi.mock("../EditableDescription", () => ({
+// Mock child components (located in sub-barrels)
+vi.mock("../sections", () => ({
   EditableDescription: ({
     description,
     onSave,
@@ -37,15 +37,12 @@ vi.mock("../EditableDescription", () => ({
       </button>
     </div>
   ),
-}));
-
-vi.mock("../DesignPanel", () => ({
   DesignPanel: ({ content }: { content: string }) => (
     <div data-testid="design-panel">{content}</div>
   ),
 }));
 
-vi.mock("../PriorityDropdown", () => ({
+vi.mock("../fields", () => ({
   PriorityDropdown: ({
     priority,
     isSaving,
@@ -58,9 +55,6 @@ vi.mock("../PriorityDropdown", () => ({
       Priority: {priority}
     </div>
   ),
-}));
-
-vi.mock("../TypeDropdown", () => ({
   TypeDropdown: ({
     type,
     isSaving,
@@ -73,9 +67,6 @@ vi.mock("../TypeDropdown", () => ({
       Type: {type}
     </div>
   ),
-}));
-
-vi.mock("../AssigneeDropdown", () => ({
   AssigneeDropdown: ({
     assignee,
     isSaving,

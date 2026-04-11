@@ -7,12 +7,13 @@
 import { IssueDetailPanel, ToastContainer } from "@/components";
 import { AgentsSidebar } from "@/components/AgentsSidebar";
 import { WorkspaceTree } from "@/components/WorkspaceTree";
-import { SplitDetailSummary } from "@/components/IssueDetailPanel/SplitDetailSummary";
-import { PasteConfirmDialog } from "@/components/TerminalView/PasteConfirmDialog";
-import { SessionNamePrompt } from "@/components/TerminalView/SessionNamePrompt";
-import { WelcomeBanner } from "@/components/TerminalView/WelcomeBanner";
-import { HelpPopover } from "@/components/TerminalView/HelpPopover";
-import { SearchBar } from "@/components/TerminalView/SearchBar";
+import { SplitDetailSummary } from "@/components/IssueDetailPanel";
+import { PasteConfirmDialog } from "@/components/TerminalView/controls";
+import {
+  SessionNamePrompt,
+  WelcomeBanner,
+} from "@/components/TerminalView/layout";
+import { HelpPopover, SearchBar } from "@/components/TerminalView/controls";
 import {
   useToast,
   ToastProvider,

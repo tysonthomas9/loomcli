@@ -46,33 +46,35 @@ import {
   type ConnectionState,
 } from "@/components/TerminalView";
 
-import { ActivityLog } from "./ActivityLog";
-import { AgentStatusBadge } from "./AgentStatusBadge";
-import { AssigneeDropdown } from "./AssigneeDropdown";
-import { OwnerDropdown } from "./OwnerDropdown";
-import { StartWorkButton } from "./StartWorkButton";
-import { CommentForm } from "./CommentForm";
-import { DependencySection } from "./DependencySection";
-import { LabelEditor } from "./LabelEditor";
-import { EditableDescription } from "./EditableDescription";
-import { IssueHeader } from "./IssueHeader";
-import { DesignPanel } from "./DesignPanel";
-import { MarkdownRenderer } from "./MarkdownRenderer";
-import { PriorityDropdown } from "./PriorityDropdown";
-import { RejectCommentForm } from "./RejectCommentForm";
-import { RepoDropdown } from "./RepoDropdown";
-import { TypeDropdown } from "./TypeDropdown";
+import {
+  ActivityLog,
+  CommentForm,
+  DependencySection,
+  EditableDescription,
+  DesignPanel,
+  MarkdownRenderer,
+  RejectCommentForm,
+} from "./sections";
+import { AgentStatusBadge, IssueHeader } from "./header";
+import {
+  AssigneeDropdown,
+  OwnerDropdown,
+  PriorityDropdown,
+  RepoDropdown,
+  TypeDropdown,
+  LabelEditor,
+} from "./fields";
+import { StartWorkButton } from "./actions";
 import { ConfirmDialog } from "../ConfirmDialog";
-import { MoveIssueDialog } from "./MoveIssueDialog";
+import { MoveIssueDialog } from "./actions";
 import { SplitDetailSummary } from "./SplitDetailSummary";
 import { EmbeddedTerminal } from "../EmbeddedTerminal";
-import { ResizeDivider } from "./ResizeDivider";
+import { ResizeDivider } from "./actions";
 import { ErrorToast } from "../ErrorToast";
 import { LogViewer } from "../LogViewer";
 import { useSplitRatio } from "@/hooks/ui";
 import { CollapsibleSection } from "./CollapsibleSection";
-import { SessionHistorySection } from "./SessionHistorySection";
-import { SessionsTab } from "./SessionsTab";
+import { SessionHistorySection, SessionsTab } from "./sessions";
 import styles from "./IssueDetailPanel.module.css";
 import { formatDate, formatIssueType, isIssueDetails } from "./utils";
 

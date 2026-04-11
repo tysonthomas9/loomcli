@@ -21,9 +21,9 @@ export const ALLOWLIST = new Map([
   ["src/api/issues.ts", 514],
   ["src/components/IssueDetailView/IssueDetailView.tsx", 666],
   ["src/components/TerminalView/TerminalView.tsx", 1130],
-  ["src/components/TerminalView/TerminalTabBar.tsx", 583],
-  ["src/components/TerminalView/TerminalInstance.tsx", 765],
-  ["src/components/IssueDetailPanel/AssigneeDropdown.tsx", 535],
+  ["src/components/TerminalView/tabs/TerminalTabBar.tsx", 583],
+  ["src/components/TerminalView/instances/TerminalInstance.tsx", 765],
+  ["src/components/IssueDetailPanel/fields/AssigneeDropdown.tsx", 535],
   ["src/components/WorkspaceTree/WorkspaceTree.tsx", 985],
   ["src/components/WorkspaceTree/EpicTaskTree.tsx", 510],
   ["src/stores/agentStore.ts", 525],
@@ -38,12 +38,12 @@ export const ALLOWLIST = new Map([
   ["src/hooks/ui/useKeyboardShortcuts.tsx", 364],
   ["src/components/BackendSelectorDropdown/BackendSelectorDropdown.tsx", 345],
   ["src/components/GraphControls/GraphControls.tsx", 345],
-  ["src/components/IssueDetailPanel/DependencySection.tsx", 323],
+  ["src/components/IssueDetailPanel/sections/DependencySection.tsx", 323],
   ["src/components/SettingsView/SettingsView.tsx", 315],
   ["src/components/IssueCard/IssueCard.tsx", 311],
-  ["src/components/IssueDetailPanel/StartWorkButton.tsx", 311],
+  ["src/components/IssueDetailPanel/actions/StartWorkButton.tsx", 311],
   ["src/hooks/common/useEventProvider.tsx", 311],
-  ["src/components/IssueDetailPanel/PriorityDropdown.tsx", 307],
+  ["src/components/IssueDetailPanel/fields/PriorityDropdown.tsx", 307],
 ]);
 
 // Patterns to skip (test files, generated files, fixtures).

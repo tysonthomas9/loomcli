@@ -9,11 +9,8 @@ import { useWorkspaceContext } from "@/hooks/workspace";
 import type { Issue, IssueDetails, Priority, IssueType } from "@/types";
 import type { LoomAgentStatus, LoomTaskInfo } from "@/types";
 
-import { EditableDescription } from "./EditableDescription";
-import { DesignPanel } from "./DesignPanel";
-import { PriorityDropdown } from "./PriorityDropdown";
-import { TypeDropdown } from "./TypeDropdown";
-import { AssigneeDropdown } from "./AssigneeDropdown";
+import { EditableDescription, DesignPanel } from "./sections";
+import { PriorityDropdown, TypeDropdown, AssigneeDropdown } from "./fields";
 import styles from "./IssueDetailPanel.module.css";
 
 export interface SplitDetailSummaryProps {

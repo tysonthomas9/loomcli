@@ -10,7 +10,7 @@ import { render, screen, fireEvent, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
-import type { ConnectionState } from "@/components/TerminalView/TerminalInstance";
+import type { ConnectionState } from "@/components/TerminalView/instances";
 import type { UseGitActionsReturn } from "@/hooks/workspace";
 
 import { TerminalHeader } from "../TerminalHeader";
@@ -59,7 +59,7 @@ const hoisted = vi.hoisted(() => {
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
 // Mock TerminalInstance since it uses xterm.js / WebSocket
-vi.mock("@/components/TerminalView/TerminalInstance", () => ({
+vi.mock("@/components/TerminalView/instances/TerminalInstance", () => ({
   TerminalInstance: vi.fn(
     ({
       sessionName,

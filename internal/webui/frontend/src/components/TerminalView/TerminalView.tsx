@@ -10,36 +10,42 @@ import { LoadingSkeleton } from "@/components";
 import { useBackendConfig } from "@/hooks/workspace";
 import { useSessionRestore, useTerminalMetadata } from "@/hooks/terminal";
 
-import { BackendPickerPrompt } from "./BackendPickerPrompt";
-import { HelpPopover } from "./HelpPopover";
-import { NoBackendsEmptyState } from "./NoBackendsEmptyState";
-import { CopyToast } from "./CopyToast";
-import { PasteConfirmDialog } from "./PasteConfirmDialog";
-import { SearchBar } from "./SearchBar";
-import { TerminalContextMenu } from "./TerminalContextMenu";
-import type { TerminalInstanceHandle } from "./TerminalInstance";
-import { TerminalPane } from "./TerminalPane";
-import { TerminalPaneArea } from "./TerminalPaneArea";
-import { TerminalTabBar } from "./TerminalTabBar";
 import {
+  BackendPickerPrompt,
+  NoBackendsEmptyState,
+  useSplitView,
+} from "./layout";
+import {
+  HelpPopover,
+  CopyToast,
+  PasteConfirmDialog,
+  SearchBar,
+  TerminalContextMenu,
+  useContextMenuActions,
+  useTerminalKeyboardShortcuts,
+  useTerminalSearch,
+} from "./controls";
+import {
+  TerminalPane,
+  TerminalPaneArea,
+  useClipboard,
+  useConnectionState,
+  useSessionSeeding,
+} from "./instances";
+import type { TerminalInstanceHandle } from "./instances";
+import {
+  TerminalTabBar,
   MAX_TABS,
   BACKEND_BRAND_COLORS,
   type TabState,
   generateTabName,
-} from "./terminalTabUtils";
-import { useTabOrdering } from "./useTabOrdering";
-import { useClipboard } from "./useClipboard";
-import { useSessionManagement } from "./useCloseAllSessions";
-import { useConnectionState } from "./useConnectionState";
-import { useContextMenuActions } from "./useContextMenuActions";
-import { useSessionSeeding } from "./useSessionSeeding";
-import { useSplitView } from "./useSplitView";
-import { useTabActions } from "./useTabActions";
-import { useTabInit } from "./useTabInit";
-import { useTerminalKeyboardShortcuts } from "./useTerminalKeyboardShortcuts";
-import { useTerminalSearch } from "./useTerminalSearch";
-import { useUnreadTracking } from "./useUnreadTracking";
-import { useWorkspaceTabState } from "./useWorkspaceTabState";
+  useTabOrdering,
+  useSessionManagement,
+  useTabActions,
+  useTabInit,
+  useUnreadTracking,
+  useWorkspaceTabState,
+} from "./tabs";
 import styles from "./TerminalView.module.css";
 
 interface TerminalViewProps {

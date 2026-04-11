@@ -19,8 +19,10 @@ import "@testing-library/jest-dom";
 import { KeyboardShortcutProvider } from "@/hooks/ui";
 
 import { TerminalView } from "../TerminalView";
-import { BackendPickerPrompt } from "../BackendPickerPrompt";
-import { SessionNamePrompt } from "../SessionNamePrompt";
+import {
+  BackendPickerPrompt,
+  SessionNamePrompt,
+} from "@/components/TerminalView/layout";
 
 // ── Mock shared state ────────────────────────────────────────────────────────
 
@@ -87,7 +89,7 @@ const mockSessionRestoreHook = vi.hoisted(() => ({
 
 // ── Mock sibling components ──────────────────────────────────────────────────
 
-vi.mock("../TerminalInstance", () => ({
+vi.mock("../instances/TerminalInstance", () => ({
   TerminalInstance: vi.fn(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (props: any) => (
@@ -98,7 +100,7 @@ vi.mock("../TerminalInstance", () => ({
   ),
 }));
 
-vi.mock("../TerminalTabBar", () => ({
+vi.mock("../tabs/TerminalTabBar", () => ({
   TerminalTabBar: vi.fn(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (props: any) => (
@@ -132,78 +134,6 @@ vi.mock("../TerminalTabBar", () => ({
       </div>
     ),
   ),
-}));
-
-// Mock CSS modules
-vi.mock("../NotesBar.module.css", () => ({
-  default: {
-    notesBar: "notesBar",
-    collapsed: "collapsed",
-    noteIcon: "noteIcon",
-    summaryText: "summaryText",
-    placeholder: "placeholder",
-    expanded: "expanded",
-    textarea: "textarea",
-    hint: "hint",
-    savingIndicator: "savingIndicator",
-  },
-}));
-
-vi.mock("../TerminalView.module.css", () => ({
-  default: {
-    container: "container",
-    fullHeight: "fullHeight",
-    loading: "loading",
-    terminalsContainer: "terminalsContainer",
-    terminalPane: "terminalPane",
-    searchOverlay: "searchOverlay",
-    searchInput: "searchInput",
-    searchButton: "searchButton",
-    searchToggle: "searchToggle",
-    searchToggleActive: "searchToggleActive",
-    searchCounter: "searchCounter",
-    noResults: "noResults",
-  },
-}));
-
-vi.mock("../BackendPickerPrompt.module.css", () => ({
-  default: {
-    overlay: "overlay",
-    open: "open",
-    modal: "modal",
-    header: "header",
-    title: "title",
-    subtitle: "subtitle",
-    content: "content",
-    selectGroup: "selectGroup",
-    label: "label",
-    select: "select",
-    loadingText: "loadingText",
-    emptyText: "emptyText",
-    footer: "footer",
-    buttonPrimary: "buttonPrimary",
-    buttonSecondary: "buttonSecondary",
-  },
-}));
-
-vi.mock("../SessionNamePrompt.module.css", () => ({
-  default: {
-    overlay: "overlay",
-    open: "open",
-    modal: "modal",
-    header: "header",
-    title: "title",
-    subtitle: "subtitle",
-    content: "content",
-    inputGroup: "inputGroup",
-    label: "label",
-    input: "input",
-    inputError: "inputError",
-    errorText: "errorText",
-    footer: "footer",
-    buttonPrimary: "buttonPrimary",
-    buttonSecondary: "buttonSecondary",
-  },
 }));
 
 // ── Render wrapper (provides KeyboardShortcutProvider for escape layers) ─────
@@ -1117,7 +1047,7 @@ describe("TerminalView", () => {
       setMetadata([]);
       render(<TerminalView />);
 
-      const { TerminalTabBar } = await import("../TerminalTabBar");
+      const { TerminalTabBar } = await import("../tabs/TerminalTabBar");
       const mockTabBar = vi.mocked(TerminalTabBar);
       const lastCallProps =
         mockTabBar.mock.calls[mockTabBar.mock.calls.length - 1][0];
@@ -1141,7 +1071,7 @@ describe("TerminalView", () => {
       ]);
       render(<TerminalView />);
 
-      const { TerminalTabBar } = await import("../TerminalTabBar");
+      const { TerminalTabBar } = await import("../tabs/TerminalTabBar");
       const mockTabBar = vi.mocked(TerminalTabBar);
       const lastCallProps =
         mockTabBar.mock.calls[mockTabBar.mock.calls.length - 1][0];
@@ -1168,7 +1098,7 @@ describe("TerminalView", () => {
       setMetadata([{ session_name: "lead-gemini-1", label: "lead-gemini-1" }]);
       render(<TerminalView />);
 
-      const { TerminalTabBar } = await import("../TerminalTabBar");
+      const { TerminalTabBar } = await import("../tabs/TerminalTabBar");
       const mockTabBar = vi.mocked(TerminalTabBar);
       const lastCallProps =
         mockTabBar.mock.calls[mockTabBar.mock.calls.length - 1][0];
@@ -1182,7 +1112,7 @@ describe("TerminalView", () => {
       setMetadata([{ session_name: "lead-foobar-1", label: "lead-foobar-1" }]);
       render(<TerminalView />);
 
-      const { TerminalTabBar } = await import("../TerminalTabBar");
+      const { TerminalTabBar } = await import("../tabs/TerminalTabBar");
       const mockTabBar = vi.mocked(TerminalTabBar);
       const lastCallProps =
         mockTabBar.mock.calls[mockTabBar.mock.calls.length - 1][0];
