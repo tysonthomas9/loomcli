@@ -5,7 +5,7 @@
 
 import { useState, useCallback, useMemo, useEffect } from "react";
 
-import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
+import { useWorkspaceContext } from "@/hooks/workspace";
 import type { LoomAgentStatus } from "@/types";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
 

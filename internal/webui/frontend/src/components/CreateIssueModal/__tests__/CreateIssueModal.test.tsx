@@ -29,17 +29,22 @@ vi.mock("@/hooks", () => ({
   LAYER_MODAL: "modal",
 }));
 
-vi.mock("@/hooks/useFocusTrap", () => ({
-  useFocusTrap: vi.fn(),
-}));
+vi.mock("@/hooks/ui", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/ui")>("@/hooks/ui");
+  return { ...actual, useFocusTrap: vi.fn(), useFocusReturn: vi.fn() };
+});
 
-vi.mock("@/hooks/useFocusReturn", () => ({
-  useFocusReturn: vi.fn(),
-}));
-
-vi.mock("@/hooks/useWorkspaceContext", () => ({
-  useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
-}));
+vi.mock("@/hooks/workspace", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/workspace")>(
+      "@/hooks/workspace",
+    );
+  return {
+    ...actual,
+    useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
+  };
+});
 
 import { createIssue } from "@/api/issues";
 import type { Issue } from "@/types";

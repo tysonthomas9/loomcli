@@ -17,10 +17,11 @@ import {
 import type { TerminalInstanceHandle } from "../TerminalInstance";
 
 // Mock the escape layer registration so it doesn't require a React context
-vi.mock("@/hooks/useKeyboardShortcuts", () => ({
-  useRegisterEscapeLayer: vi.fn(),
-  LAYER_TERMINAL_SEARCH: 5,
-}));
+vi.mock("@/hooks/ui", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/ui")>("@/hooks/ui");
+  return { ...actual, useRegisterEscapeLayer: vi.fn() };
+});
 
 function createMockInstance(): TerminalInstanceHandle {
   return {

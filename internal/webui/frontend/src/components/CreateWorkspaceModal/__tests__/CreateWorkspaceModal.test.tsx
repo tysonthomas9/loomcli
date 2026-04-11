@@ -26,9 +26,11 @@ vi.mock("@/api/workspace", () => ({
   fetchWorkspaceApi: vi.fn(),
 }));
 
-vi.mock("@/hooks/useElapsedTime", () => ({
-  useElapsedTime: vi.fn(() => "5s"),
-}));
+vi.mock("@/hooks/common", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/common")>("@/hooks/common");
+  return { ...actual, useElapsedTime: vi.fn(() => "5s") };
+});
 
 vi.mock("@/hooks", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/hooks")>();
@@ -39,13 +41,15 @@ vi.mock("@/hooks", async (importOriginal) => {
   };
 });
 
-vi.mock("@/hooks/useFocusTrap", () => ({
-  useFocusTrap: vi.fn(),
-}));
-
-vi.mock("@/hooks/useFocusReturn", () => ({
-  useFocusReturn: vi.fn(),
-}));
+vi.mock("@/hooks/ui", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/ui")>("@/hooks/ui");
+  return {
+    ...actual,
+    useFocusTrap: vi.fn(),
+    useFocusReturn: vi.fn(),
+  };
+});
 
 import {
   createWorkspace,

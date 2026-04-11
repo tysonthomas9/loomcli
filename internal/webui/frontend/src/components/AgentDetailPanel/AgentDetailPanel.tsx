@@ -21,7 +21,7 @@ import {
   useRegisterEscapeLayer,
   LAYER_AGENT_PANEL,
 } from "@/hooks";
-import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
+import { useWorkspaceContext } from "@/hooks/workspace";
 import type { LoomAgentStatus, LoomTaskInfo } from "@/types";
 import { parseLoomStatus } from "@/types";
 

@@ -6,10 +6,7 @@ import {
   type MutableRefObject,
 } from "react";
 
-import {
-  useRegisterEscapeLayer,
-  LAYER_TERMINAL_SEARCH,
-} from "@/hooks/useKeyboardShortcuts";
+import { useRegisterEscapeLayer, LAYER_TERMINAL_SEARCH } from "@/hooks/ui";
 
 import type {
   SearchResultInfo,

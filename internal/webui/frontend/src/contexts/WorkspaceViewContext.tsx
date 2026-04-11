@@ -10,13 +10,11 @@
 import { createContext, useContext, type ReactNode } from "react";
 
 import type { BlockedInfo } from "@/components/KanbanBoard";
-import type { GroupByOption } from "@/hooks/useFilterState";
+import type { GroupByOption, FilterState } from "@/hooks/issues";
 import type { ViewMode } from "@/components/ViewSwitcher";
-import type { PanelState } from "@/hooks/usePanelManager";
-import type { FilterState } from "@/hooks/useFilterState";
+import type { PanelState, ToastOptions } from "@/hooks/ui";
 import type { Issue, IssueDetails, Status } from "@/types";
 import type { LoomAgentStatus, LoomTaskInfo } from "@/types/agent";
-import type { ToastOptions } from "@/hooks/useToast";
 import type { IssueContext } from "@/api/terminal";
 
 // ---------------------------------------------------------------------------

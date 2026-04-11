@@ -7,9 +7,8 @@ import {
   getExportUrl,
 } from "@/api/terminal";
 import { LoadingSkeleton } from "@/components";
-import { useBackendConfig } from "@/hooks/useBackendConfig";
-import { useSessionRestore } from "@/hooks/useSessionRestore";
-import { useTerminalMetadata } from "@/hooks/useTerminalMetadata";
+import { useBackendConfig } from "@/hooks/workspace";
+import { useSessionRestore, useTerminalMetadata } from "@/hooks/terminal";
 
 import { BackendPickerPrompt } from "./BackendPickerPrompt";
 import { HelpPopover } from "./HelpPopover";

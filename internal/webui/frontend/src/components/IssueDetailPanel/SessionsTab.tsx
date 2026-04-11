@@ -6,7 +6,7 @@
 
 import { useMemo, useState } from "react";
 
-import { useTaskSessions } from "@/hooks/useTaskSessions";
+import { useTaskSessions } from "@/hooks/terminal";
 
 import type { SessionRecord } from "@/types/session";
 

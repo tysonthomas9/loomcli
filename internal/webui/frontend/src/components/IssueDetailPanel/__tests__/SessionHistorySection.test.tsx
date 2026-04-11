@@ -24,9 +24,16 @@ vi.mock("@/api/sessionHistory", () => ({
   getSessionScrollback: vi.fn(),
 }));
 
-vi.mock("@/hooks/useWorkspaceContext", () => ({
-  useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
-}));
+vi.mock("@/hooks/workspace", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/workspace")>(
+      "@/hooks/workspace",
+    );
+  return {
+    ...actual,
+    useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
+  };
+});
 
 import { listSessionHistory, getSessionScrollback } from "@/api/sessionHistory";
 

@@ -6,7 +6,7 @@
 
 import { useState, useEffect } from "react";
 
-import { onAnnounce } from "@/hooks/useAnnounce";
+import { onAnnounce } from "@/hooks/ui";
 
 /**
  * LiveRegion renders hidden aria-live regions (polite + assertive).

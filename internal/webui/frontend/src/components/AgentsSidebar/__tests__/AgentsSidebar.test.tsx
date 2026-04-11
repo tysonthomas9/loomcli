@@ -116,9 +116,16 @@ vi.mock("@/api/client", () => ({
   },
 }));
 
-vi.mock("@/hooks/useWorkspaceContext", () => ({
-  useWorkspaceContext: () => ({ workspaceId: TEST_WS_ID }),
-}));
+vi.mock("@/hooks/workspace", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/workspace")>(
+      "@/hooks/workspace",
+    );
+  return {
+    ...actual,
+    useWorkspaceContext: () => ({ workspaceId: TEST_WS_ID }),
+  };
+});
 
 describe("AgentsSidebar", () => {
   beforeEach(() => {

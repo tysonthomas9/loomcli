@@ -22,31 +22,38 @@ import {
 import { IssueTable, IssueTableProps } from "./IssueTable";
 
 // Mock useWorkspaceContext — default to multi-repo so all columns render
-vi.mock("@/hooks/useWorkspaceContext", () => ({
-  useWorkspaceContext: () => ({
-    workspace: null,
-    repos: [],
-    isMultiRepo: true,
-    activeRepos: [],
-    activeRepoNames: [],
-    selectedRepoNames: new Set(),
-    isAllSelected: true,
-    selectRepos: vi.fn(),
-    selectAll: vi.fn(),
-    toggleRepo: vi.fn(),
-    sourceReposFilter: undefined,
-    isLoading: false,
-    error: null,
-    refetch: vi.fn(),
-    getRepoByName: vi.fn(),
-    getReposByGroup: vi.fn(() => []),
-    getAgentByName: vi.fn(),
-    groups: [],
-    agents: [],
-    activeWorkspaceName: null,
-    setActiveWorkspace: vi.fn(),
-  }),
-}));
+vi.mock("@/hooks/workspace", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/workspace")>(
+      "@/hooks/workspace",
+    );
+  return {
+    ...actual,
+    useWorkspaceContext: () => ({
+      workspace: null,
+      repos: [],
+      isMultiRepo: true,
+      activeRepos: [],
+      activeRepoNames: [],
+      selectedRepoNames: new Set(),
+      isAllSelected: true,
+      selectRepos: vi.fn(),
+      selectAll: vi.fn(),
+      toggleRepo: vi.fn(),
+      sourceReposFilter: undefined,
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+      getRepoByName: vi.fn(),
+      getReposByGroup: vi.fn(() => []),
+      getAgentByName: vi.fn(),
+      groups: [],
+      agents: [],
+      activeWorkspaceName: null,
+      setActiveWorkspace: vi.fn(),
+    }),
+  };
+});
 
 // Helper to create mock issues for testing
 function createMockIssue(overrides: Partial<Issue> = {}): Issue {

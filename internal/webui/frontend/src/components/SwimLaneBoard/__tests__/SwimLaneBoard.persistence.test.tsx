@@ -18,9 +18,16 @@ import { SwimLaneBoard } from "../SwimLaneBoard";
 const TEST_WS_ID = "test-ws-uuid-1234";
 
 // Mock useWorkspaceContext to provide workspace ID
-vi.mock("@/hooks/useWorkspaceContext", () => ({
-  useWorkspaceContext: () => ({ workspaceId: TEST_WS_ID }),
-}));
+vi.mock("@/hooks/workspace", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/workspace")>(
+      "@/hooks/workspace",
+    );
+  return {
+    ...actual,
+    useWorkspaceContext: () => ({ workspaceId: TEST_WS_ID }),
+  };
+});
 
 /**
  * Create a mock issue for testing.

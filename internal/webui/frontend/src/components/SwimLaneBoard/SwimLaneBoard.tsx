@@ -18,7 +18,7 @@ import {
 } from "@dnd-kit/core";
 import { useState, useMemo, useCallback, useEffect } from "react";
 
-import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
+import { useWorkspaceContext } from "@/hooks/workspace";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
 import { DraggableIssueCard } from "@/components/DraggableIssueCard";
 import { EmptyWorkspaceBoard } from "@/components/EmptyWorkspaceBoard";
@@ -31,7 +31,7 @@ import {
 import type { KanbanColumnConfig } from "@/components/KanbanBoard/types";
 import { formatStatusLabel } from "@/utils/statusFormat";
 import { SwimLane } from "@/components/SwimLane";
-import type { FilterState } from "@/hooks/useFilterState";
+import type { FilterState } from "@/hooks/issues";
 import type { Issue, Status } from "@/types";
 
 import {

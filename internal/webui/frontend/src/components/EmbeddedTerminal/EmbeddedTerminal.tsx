@@ -7,7 +7,7 @@
 
 import { forwardRef, useState, useCallback, useRef } from "react";
 
-import { useGitActions } from "@/hooks/useGitActions";
+import { useGitActions } from "@/hooks/workspace";
 
 import {
   TerminalInstance,

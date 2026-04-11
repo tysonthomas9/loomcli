@@ -5,7 +5,7 @@
  */
 
 import type { ConnectionState } from "@/components/TerminalView";
-import type { UseGitActionsReturn } from "@/hooks/useGitActions";
+import type { UseGitActionsReturn } from "@/hooks/workspace";
 
 import styles from "./EmbeddedTerminal.module.css";
 

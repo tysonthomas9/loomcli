@@ -6,8 +6,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import type { FileEntry, FileReadData } from "@/api/files";
-import type { UseFileTreeReturn } from "@/hooks/useFileTree";
-import type { UseFileContentReturn } from "@/hooks/useFileContent";
+import type { UseFileTreeReturn, UseFileContentReturn } from "@/hooks/common";
 
 import { FileExplorer } from "../FileExplorer";
 import { FileTree } from "../FileTree";
@@ -46,13 +45,15 @@ vi.mock("@/hooks", () => ({
   LAYER_TERMINAL_SEARCH: 5,
 }));
 
-vi.mock("@/hooks/useFileTree", () => ({
-  useFileTree: vi.fn(),
-}));
-
-vi.mock("@/hooks/useFileContent", () => ({
-  useFileContent: vi.fn(),
-}));
+vi.mock("@/hooks/common", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/common")>("@/hooks/common");
+  return {
+    ...actual,
+    useFileTree: vi.fn(),
+    useFileContent: vi.fn(),
+  };
+});
 
 vi.mock("@/components/CodeMirrorEditor", () => ({
   CodeMirrorEditor: ({
@@ -68,8 +69,7 @@ vi.mock("@/components/CodeMirrorEditor", () => ({
   ),
 }));
 
-import { useFileTree } from "@/hooks/useFileTree";
-import { useFileContent } from "@/hooks/useFileContent";
+import { useFileTree, useFileContent } from "@/hooks/common";
 
 const mockUseFileTree = vi.mocked(useFileTree);
 const mockUseFileContent = vi.mocked(useFileContent);

@@ -6,7 +6,7 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 
-import { useRecentOwners } from "@/hooks/useRecentOwners";
+import { useRecentOwners } from "@/hooks/issues";
 
 import styles from "./OwnerDropdown.module.css";
 

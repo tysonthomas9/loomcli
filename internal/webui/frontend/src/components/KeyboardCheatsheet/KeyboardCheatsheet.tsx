@@ -10,7 +10,7 @@ import {
   useKeyboardShortcuts,
   useRegisterEscapeLayer,
   LAYER_CHEATSHEET,
-} from "@/hooks/useKeyboardShortcuts";
+} from "@/hooks/ui";
 
 import styles from "./KeyboardCheatsheet.module.css";
 

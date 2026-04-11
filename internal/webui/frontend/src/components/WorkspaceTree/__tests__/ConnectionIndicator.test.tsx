@@ -17,9 +17,11 @@ import { ConnectionIndicator } from "../ConnectionIndicator";
 // Mock useElapsedTime to return a deterministic value
 let mockElapsedReturn = "";
 
-vi.mock("@/hooks/useElapsedTime", () => ({
-  useElapsedTime: () => mockElapsedReturn,
-}));
+vi.mock("@/hooks/common", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/common")>("@/hooks/common");
+  return { ...actual, useElapsedTime: () => mockElapsedReturn };
+});
 
 describe("ConnectionIndicator", () => {
   beforeEach(() => {

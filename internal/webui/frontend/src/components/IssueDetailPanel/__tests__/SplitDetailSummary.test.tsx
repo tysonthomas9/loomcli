@@ -97,9 +97,16 @@ vi.mock("@/api", () => ({
   updateIssue: vi.fn(),
 }));
 
-vi.mock("@/hooks/useWorkspaceContext", () => ({
-  useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
-}));
+vi.mock("@/hooks/workspace", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/workspace")>(
+      "@/hooks/workspace",
+    );
+  return {
+    ...actual,
+    useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
+  };
+});
 
 import { updateIssue } from "@/api";
 

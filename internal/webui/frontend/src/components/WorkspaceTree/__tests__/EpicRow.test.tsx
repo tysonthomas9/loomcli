@@ -26,24 +26,34 @@ vi.mock("@/hooks", () => ({
   })),
 }));
 
-vi.mock("@/hooks/useToast", () => ({
-  useToast: vi.fn(() => ({
-    showToast: vi.fn(),
-    dismissToast: vi.fn(),
-    toasts: [],
-  })),
-}));
+vi.mock("@/hooks/ui", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/ui")>("@/hooks/ui");
+  return {
+    ...actual,
+    useToast: vi.fn(() => ({
+      showToast: vi.fn(),
+      dismissToast: vi.fn(),
+      toasts: [],
+    })),
+  };
+});
 
-vi.mock("@/hooks/useInlineCreate", () => ({
-  useInlineCreate: vi.fn(() => ({
-    isAdding: false,
-    isSubmitting: false,
-    error: null,
-    startAdding: vi.fn(),
-    cancelAdding: vi.fn(),
-    submitTitle: vi.fn(),
-  })),
-}));
+vi.mock("@/hooks/issues", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/issues")>("@/hooks/issues");
+  return {
+    ...actual,
+    useInlineCreate: vi.fn(() => ({
+      isAdding: false,
+      isSubmitting: false,
+      error: null,
+      startAdding: vi.fn(),
+      cancelAdding: vi.fn(),
+      submitTitle: vi.fn(),
+    })),
+  };
+});
 
 /** Helper to create a test Issue. */
 function makeIssue(

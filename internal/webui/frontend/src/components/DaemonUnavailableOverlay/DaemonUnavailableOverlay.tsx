@@ -6,7 +6,7 @@
 
 import { useRef } from "react";
 
-import type { DaemonConnectionMode } from "@/hooks/useDaemonHealth";
+import type { DaemonConnectionMode } from "@/hooks/workspace";
 import { useFocusTrap } from "@/hooks";
 
 import styles from "./DaemonUnavailableOverlay.module.css";

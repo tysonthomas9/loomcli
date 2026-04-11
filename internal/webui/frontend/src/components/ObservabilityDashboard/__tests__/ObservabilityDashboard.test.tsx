@@ -11,7 +11,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
 import type { MetricsSnapshot } from "@/types";
-import type { UseObservabilityMetricsResult } from "@/hooks/useObservabilityMetrics";
+import type { UseObservabilityMetricsResult } from "@/hooks/agents";
 
 // vi.mock() is hoisted by Vitest above all imports, so the mock is guaranteed
 // to be in place before ObservabilityDashboard resolves its dependencies.

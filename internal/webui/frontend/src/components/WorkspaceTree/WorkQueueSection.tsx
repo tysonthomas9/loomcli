@@ -6,7 +6,7 @@
 
 import { useState, useCallback, useEffect } from "react";
 
-import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
+import { useWorkspaceContext } from "@/hooks/workspace";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
 
 import styles from "./WorkQueueSection.module.css";

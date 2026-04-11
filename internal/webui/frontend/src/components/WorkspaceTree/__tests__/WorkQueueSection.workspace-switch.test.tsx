@@ -32,9 +32,16 @@ import { WorkQueueSection } from "../WorkQueueSection";
 // SPA navigation between workspaces.
 let mockWorkspaceId = "ws-aaa-1111";
 
-vi.mock("@/hooks/useWorkspaceContext", () => ({
-  useWorkspaceContext: () => ({ workspaceId: mockWorkspaceId }),
-}));
+vi.mock("@/hooks/workspace", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/workspace")>(
+      "@/hooks/workspace",
+    );
+  return {
+    ...actual,
+    useWorkspaceContext: () => ({ workspaceId: mockWorkspaceId }),
+  };
+});
 
 // --- Helpers ---
 

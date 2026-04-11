@@ -11,29 +11,35 @@ import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 import "@testing-library/jest-dom";
 
 // Import mocks after vi.mock calls
-import { useAutoLayout } from "@/hooks/useAutoLayout";
-import { useBlockedIssues } from "@/hooks/useBlockedIssues";
-import { useGraphData } from "@/hooks/useGraphData";
+import { useAutoLayout, useGraphData } from "@/hooks/ui";
+import { useBlockedIssues } from "@/hooks/issues";
 import type { Issue, IssueNode, DependencyEdge, BlockedIssue } from "@/types";
 
 import { BlockingDependenciesCanvas } from "../BlockingDependenciesCanvas";
 
 // Mock the hooks
-vi.mock("@/hooks/useGraphData", () => ({
-  useGraphData: vi.fn(),
-}));
+vi.mock("@/hooks/ui", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/ui")>("@/hooks/ui");
+  return { ...actual, useGraphData: vi.fn(), useAutoLayout: vi.fn() };
+});
 
-vi.mock("@/hooks/useAutoLayout", () => ({
-  useAutoLayout: vi.fn(),
-}));
+vi.mock("@/hooks/issues", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/issues")>("@/hooks/issues");
+  return { ...actual, useBlockedIssues: vi.fn() };
+});
 
-vi.mock("@/hooks/useBlockedIssues", () => ({
-  useBlockedIssues: vi.fn(),
-}));
-
-vi.mock("@/hooks/useWorkspaceContext", () => ({
-  useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
-}));
+vi.mock("@/hooks/workspace", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/workspace")>(
+      "@/hooks/workspace",
+    );
+  return {
+    ...actual,
+    useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
+  };
+});
 
 // Mock React Flow components
 vi.mock("@xyflow/react", () => ({

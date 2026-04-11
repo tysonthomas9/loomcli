@@ -12,7 +12,7 @@ import {
 } from "react";
 
 import { addComment } from "@/api";
-import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
+import { useWorkspaceContext } from "@/hooks/workspace";
 import type { Comment } from "@/types";
 
 import styles from "./CommentForm.module.css";

@@ -10,7 +10,7 @@ import {
   type FilterState,
   type FilterActions,
   isEmptyFilter,
-} from "@/hooks/useFilterState";
+} from "@/hooks/issues";
 import type { Priority, IssueType } from "@/types";
 
 import { RepoSelector } from "../RepoSelector";

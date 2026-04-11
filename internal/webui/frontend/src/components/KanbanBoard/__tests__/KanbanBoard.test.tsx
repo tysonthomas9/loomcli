@@ -10,7 +10,7 @@ import { render, screen, within, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
-import type { FilterState } from "@/hooks/useFilterState";
+import type { FilterState } from "@/hooks/issues";
 import type { Issue, Status, IssueType } from "@/types";
 
 import { DEFAULT_COLUMNS as _DEFAULT_COLUMNS } from "../columnConfigs";

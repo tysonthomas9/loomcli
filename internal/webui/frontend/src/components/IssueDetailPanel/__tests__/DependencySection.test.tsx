@@ -24,14 +24,19 @@ import {
 } from "../DependencySection";
 
 // Mock useIssueSearch used by DependencySearchPicker
-vi.mock("@/hooks/useIssueSearch", () => ({
-  useIssueSearch: () => ({
-    results: [],
-    isLoading: false,
-    search: vi.fn(),
-    query: "",
-  }),
-}));
+vi.mock("@/hooks/issues", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/issues")>("@/hooks/issues");
+  return {
+    ...actual,
+    useIssueSearch: () => ({
+      results: [],
+      isLoading: false,
+      search: vi.fn(),
+      query: "",
+    }),
+  };
+});
 
 // Helper to create test dependencies
 function createDependency(

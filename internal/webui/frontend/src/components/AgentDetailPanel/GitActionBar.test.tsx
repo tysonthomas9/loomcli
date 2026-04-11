@@ -14,7 +14,7 @@ import "@testing-library/jest-dom";
 
 import type { GitStatus } from "@/api/git";
 import type { ParsedLoomStatus } from "@/types";
-import type { UseGitActionsReturn } from "@/hooks/useGitActions";
+import type { UseGitActionsReturn } from "@/hooks/workspace";
 
 import { GitActionBar } from "./GitActionBar";
 

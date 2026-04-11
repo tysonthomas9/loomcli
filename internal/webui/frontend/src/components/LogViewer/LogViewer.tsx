@@ -7,7 +7,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { useRef, useEffect, useCallback, useState } from "react";
 
-import type { LogChunk, LogStreamState } from "@/hooks/logTypes";
+import type { LogChunk, LogStreamState } from "@/hooks/terminal";
 
 import "@xterm/xterm/css/xterm.css";
 import styles from "./LogViewer.module.css";

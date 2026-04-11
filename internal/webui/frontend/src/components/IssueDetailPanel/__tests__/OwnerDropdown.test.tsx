@@ -24,13 +24,18 @@ const mockAddRecentOwner = vi.fn();
 const mockClearRecentOwners = vi.fn();
 let mockRecentOwners: string[] = [];
 
-vi.mock("@/hooks/useRecentOwners", () => ({
-  useRecentOwners: () => ({
-    recentOwners: mockRecentOwners,
-    addRecentOwner: mockAddRecentOwner,
-    clearRecentOwners: mockClearRecentOwners,
-  }),
-}));
+vi.mock("@/hooks/issues", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/issues")>("@/hooks/issues");
+  return {
+    ...actual,
+    useRecentOwners: () => ({
+      recentOwners: mockRecentOwners,
+      addRecentOwner: mockAddRecentOwner,
+      clearRecentOwners: mockClearRecentOwners,
+    }),
+  };
+});
 
 describe("OwnerDropdown", () => {
   const defaultProps = {

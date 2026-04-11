@@ -25,9 +25,9 @@ import {
 } from "@/hooks";
 import { useStore } from "zustand";
 
-import { useAgentStoreInstance } from "@/hooks/useStoreContext";
-import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
-import { useIssueTabPersistence } from "@/hooks/useIssueTabPersistence";
+import { useAgentStoreInstance } from "@/hooks/common";
+import { useWorkspaceContext } from "@/hooks/workspace";
+import { useIssueTabPersistence } from "@/hooks/issues";
 import type {
   Issue,
   IssueDetails,
@@ -69,7 +69,7 @@ import { EmbeddedTerminal } from "../EmbeddedTerminal";
 import { ResizeDivider } from "./ResizeDivider";
 import { ErrorToast } from "../ErrorToast";
 import { LogViewer } from "../LogViewer";
-import { useSplitRatio } from "@/hooks/useSplitRatio";
+import { useSplitRatio } from "@/hooks/ui";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { SessionHistorySection } from "./SessionHistorySection";
 import { SessionsTab } from "./SessionsTab";

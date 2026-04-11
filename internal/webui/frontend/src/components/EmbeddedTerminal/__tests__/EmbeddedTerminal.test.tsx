@@ -11,7 +11,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
 import type { ConnectionState } from "@/components/TerminalView/TerminalInstance";
-import type { UseGitActionsReturn } from "@/hooks/useGitActions";
+import type { UseGitActionsReturn } from "@/hooks/workspace";
 
 import { TerminalHeader } from "../TerminalHeader";
 
@@ -82,13 +82,19 @@ vi.mock("@/components/TerminalView/TerminalInstance", () => ({
   ),
 }));
 
-vi.mock("@/hooks/useGitActions", () => ({
-  useGitActions: hoisted.mockUseGitActions,
-}));
+vi.mock("@/hooks/workspace", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/workspace")>(
+      "@/hooks/workspace",
+    );
+  return { ...actual, useGitActions: hoisted.mockUseGitActions };
+});
 
-vi.mock("@/hooks/useToast", () => ({
-  useToast: hoisted.mockUseToast,
-}));
+vi.mock("@/hooks/ui", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/ui")>("@/hooks/ui");
+  return { ...actual, useToast: hoisted.mockUseToast };
+});
 
 // ── Lazy import after mocks are set up ────────────────────────────────────────
 

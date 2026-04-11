@@ -8,9 +8,11 @@ import { useState, useEffect } from "react";
 
 import { fetchDiffCommits } from "@/api/diff";
 import type { DiffCommit } from "@/api/diff";
-import { useGitStatus } from "@/hooks/useGitStatus";
-import { useGitActions } from "@/hooks/useGitActions";
-import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
+import {
+  useGitStatus,
+  useGitActions,
+  useWorkspaceContext,
+} from "@/hooks/workspace";
 import type { LoomAgentStatus } from "@/types";
 import { parseLoomStatus } from "@/types";
 

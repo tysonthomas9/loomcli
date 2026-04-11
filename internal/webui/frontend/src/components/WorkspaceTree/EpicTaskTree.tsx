@@ -8,10 +8,9 @@ import { useState, useCallback, useRef, useEffect } from "react";
 
 import { updateIssue, closeIssue } from "@/api/issues";
 import { createWorkspaceEpic } from "@/api/workspace";
-import { useWorkspaceTree } from "@/hooks/useWorkspaceTree";
-import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
-import { useToast } from "@/hooks/useToast";
-import { useInlineCreate } from "@/hooks/useInlineCreate";
+import { useWorkspaceTree, useWorkspaceContext } from "@/hooks/workspace";
+import { useToast } from "@/hooks/ui";
+import { useInlineCreate } from "@/hooks/issues";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
 
 import { TalkToLeadEntry } from "./TalkToLeadEntry";

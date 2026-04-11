@@ -9,8 +9,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { fetchGitStatus } from "@/api/git";
 import { useStore } from "zustand";
 
-import { useAgentStoreInstance } from "@/hooks/useStoreContext";
-import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
+import { useAgentStoreInstance } from "@/hooks/common";
+import { useWorkspaceContext } from "@/hooks/workspace";
 import { parseLoomStatus } from "@/types";
 import { getStatusDotColor, getStatusLabel } from "@/components/AgentCard";
 

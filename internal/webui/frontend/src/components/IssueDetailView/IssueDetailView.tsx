@@ -15,7 +15,7 @@ import { getReviewType } from "@/utils/issueCategory";
 import { StatusDropdown } from "@/components/StatusDropdown";
 import { ErrorToast } from "@/components/ErrorToast";
 import { updateIssue } from "@/api";
-import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
+import { useWorkspaceContext } from "@/hooks/workspace";
 
 import styles from "./IssueDetailView.module.css";
 

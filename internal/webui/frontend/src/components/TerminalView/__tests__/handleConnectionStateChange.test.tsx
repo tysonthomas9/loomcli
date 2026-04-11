@@ -10,7 +10,7 @@
 import { render as rtlRender, act } from "@testing-library/react";
 import type { RenderOptions } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { KeyboardShortcutProvider } from "@/hooks/useKeyboardShortcuts";
+import { KeyboardShortcutProvider } from "@/hooks/ui";
 
 import { TerminalView } from "../TerminalView";
 
@@ -71,9 +71,13 @@ const mockMetadataHook = vi.hoisted(() => ({
   handleMutation: vi.fn(),
 }));
 
-vi.mock("@/hooks/useTerminalMetadata", () => ({
-  useTerminalMetadata: () => mockMetadataHook,
-}));
+vi.mock("@/hooks/terminal", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/terminal")>(
+      "@/hooks/terminal",
+    );
+  return { ...actual, useTerminalMetadata: () => mockMetadataHook };
+});
 
 // ── Mock useBackendConfig ───────────────────────────────────────────────────
 
@@ -91,9 +95,13 @@ const mockBackendConfigHook = vi.hoisted(() => ({
   refetch: vi.fn(),
 }));
 
-vi.mock("@/hooks/useBackendConfig", () => ({
-  useBackendConfig: () => mockBackendConfigHook,
-}));
+vi.mock("@/hooks/workspace", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/workspace")>(
+      "@/hooks/workspace",
+    );
+  return { ...actual, useBackendConfig: () => mockBackendConfigHook };
+});
 
 // ── Mock TerminalInstance to capture onConnectionStateChange ─────────────────
 

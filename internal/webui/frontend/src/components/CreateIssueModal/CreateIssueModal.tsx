@@ -4,9 +4,8 @@ import { createPortal } from "react-dom";
 import { createIssue } from "@/api/issues";
 import type { CreateIssueRequest } from "@/api/issues";
 import { useRegisterEscapeLayer, LAYER_MODAL } from "@/hooks";
-import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
-import { useFocusTrap } from "@/hooks/useFocusTrap";
-import { useFocusReturn } from "@/hooks/useFocusReturn";
+import { useWorkspaceContext } from "@/hooks/workspace";
+import { useFocusTrap, useFocusReturn } from "@/hooks/ui";
 import type { Issue, IssueType, Priority } from "@/types";
 import styles from "./CreateIssueModal.module.css";
 

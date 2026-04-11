@@ -5,7 +5,7 @@
  */
 
 import { updateIssue } from "@/api";
-import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
+import { useWorkspaceContext } from "@/hooks/workspace";
 import type { Issue, IssueDetails, Priority, IssueType } from "@/types";
 import type { LoomAgentStatus, LoomTaskInfo } from "@/types";
 

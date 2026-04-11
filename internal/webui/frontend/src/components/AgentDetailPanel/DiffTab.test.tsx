@@ -14,7 +14,7 @@ import "@testing-library/jest-dom";
 
 import type { DiffFile, DiffFilePatch } from "@/api/diff";
 import type { LoomAgentStatus } from "@/types";
-import type { UseDiffReturn } from "@/hooks/useDiff";
+import type { UseDiffReturn } from "@/hooks/terminal";
 
 import { DiffTab } from "./DiffTab";
 
@@ -30,16 +30,23 @@ let mockUseDiffReturn: UseDiffReturn;
 const mockFetchPatch = vi.fn();
 const mockMarkViewed = vi.fn();
 
-vi.mock("@/hooks/useDiff", () => ({
-  useDiff: (opts: {
-    agentName: string | null;
-    enabled: boolean;
-    commitSignal?: number;
-  }) => {
-    lastUseDiffOptions = opts;
-    return mockUseDiffReturn;
-  },
-}));
+vi.mock("@/hooks/terminal", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/terminal")>(
+      "@/hooks/terminal",
+    );
+  return {
+    ...actual,
+    useDiff: (opts: {
+      agentName: string | null;
+      enabled: boolean;
+      commitSignal?: number;
+    }) => {
+      lastUseDiffOptions = opts;
+      return mockUseDiffReturn;
+    },
+  };
+});
 
 // Mock sub-components to isolate DiffTab orchestration
 vi.mock("./DiffFileRow", () => ({

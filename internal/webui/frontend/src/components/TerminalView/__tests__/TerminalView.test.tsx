@@ -16,7 +16,7 @@ import {
 import type { RenderOptions } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
-import { KeyboardShortcutProvider } from "@/hooks/useKeyboardShortcuts";
+import { KeyboardShortcutProvider } from "@/hooks/ui";
 
 import { TerminalView } from "../TerminalView";
 import { BackendPickerPrompt } from "../BackendPickerPrompt";
@@ -44,9 +44,17 @@ const mockMetadataHook = vi.hoisted(() => ({
   handleMutation: vi.fn(),
 }));
 
-vi.mock("@/hooks/useTerminalMetadata", () => ({
-  useTerminalMetadata: () => mockMetadataHook,
-}));
+vi.mock("@/hooks/terminal", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/terminal")>(
+      "@/hooks/terminal",
+    );
+  return {
+    ...actual,
+    useTerminalMetadata: () => mockMetadataHook,
+    useSessionRestore: () => mockSessionRestoreHook,
+  };
+});
 
 const mockBackendConfigHook = vi.hoisted(() => ({
   config: {
@@ -62,18 +70,20 @@ const mockBackendConfigHook = vi.hoisted(() => ({
   refetch: vi.fn(),
 }));
 
-vi.mock("@/hooks/useBackendConfig", () => ({
-  useBackendConfig: () => mockBackendConfigHook,
-}));
+vi.mock("@/hooks/workspace", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/workspace")>(
+      "@/hooks/workspace",
+    );
+  return { ...actual, useBackendConfig: () => mockBackendConfigHook };
+});
 
 const mockSessionRestoreHook = vi.hoisted(() => ({
   activeTabId: null as string | null,
   isRestoring: true,
 }));
 
-vi.mock("@/hooks/useSessionRestore", () => ({
-  useSessionRestore: () => mockSessionRestoreHook,
-}));
+// useSessionRestore is mocked above via @/hooks/terminal
 
 // ── Mock sibling components ──────────────────────────────────────────────────
 

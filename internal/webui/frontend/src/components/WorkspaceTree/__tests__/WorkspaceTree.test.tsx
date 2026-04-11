@@ -137,15 +137,22 @@ vi.mock("@/hooks", () => ({
   LAYER_TERMINAL_SEARCH: 5,
 }));
 
-vi.mock("@/hooks/useWorkspaceTree", () => ({
-  useWorkspaceTree: () => ({
-    epics: [],
-    orphanTasks: [],
-    isLoading: false,
-    error: null,
-    refetch: vi.fn(),
-  }),
-}));
+vi.mock("@/hooks/workspace", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/workspace")>(
+      "@/hooks/workspace",
+    );
+  return {
+    ...actual,
+    useWorkspaceTree: () => ({
+      epics: [],
+      orphanTasks: [],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    }),
+  };
+});
 
 describe("WorkspaceTree", () => {
   beforeEach(() => {

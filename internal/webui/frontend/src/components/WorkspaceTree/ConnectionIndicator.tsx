@@ -4,7 +4,7 @@
  */
 
 import type { ConnectionState } from "@/api/sse";
-import { useElapsedTime } from "@/hooks/useElapsedTime";
+import { useElapsedTime } from "@/hooks/common";
 
 import styles from "./WorkspaceTree.module.css";
 

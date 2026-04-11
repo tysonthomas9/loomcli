@@ -87,14 +87,20 @@ vi.mock("@/api/terminal", () => ({
 }));
 
 // Mock tab persistence hook for terminal tab restoration tests
-vi.mock("@/hooks/useIssueTabPersistence", () => ({
-  useIssueTabPersistence: mockUseIssueTabPersistence,
-}));
+vi.mock("@/hooks/issues", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/issues")>("@/hooks/issues");
+  return { ...actual, useIssueTabPersistence: mockUseIssueTabPersistence };
+});
 
 // Mock workspace context for cleanup tests needing workspace ID
-vi.mock("@/hooks/useWorkspaceContext", () => ({
-  useWorkspaceContext: mockUseWorkspaceContext,
-}));
+vi.mock("@/hooks/workspace", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/workspace")>(
+      "@/hooks/workspace",
+    );
+  return { ...actual, useWorkspaceContext: mockUseWorkspaceContext };
+});
 
 // Mock the agent terminal logs hook
 vi.mock("@/hooks", async (importOriginal) => {

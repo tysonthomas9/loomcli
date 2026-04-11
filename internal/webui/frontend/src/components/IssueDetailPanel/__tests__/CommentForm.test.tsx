@@ -28,9 +28,16 @@ vi.mock("@/api", () => ({
   addComment: vi.fn(),
 }));
 
-vi.mock("@/hooks/useWorkspaceContext", () => ({
-  useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
-}));
+vi.mock("@/hooks/workspace", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/workspace")>(
+      "@/hooks/workspace",
+    );
+  return {
+    ...actual,
+    useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
+  };
+});
 const mockAddComment = vi.mocked(addComment);
 
 /**

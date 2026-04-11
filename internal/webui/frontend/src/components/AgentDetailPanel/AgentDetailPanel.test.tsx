@@ -94,9 +94,16 @@ vi.mock("@/components/FileEditorPanel", () => ({
 }));
 
 // Mock useWorkspaceContext
-vi.mock("@/hooks/useWorkspaceContext", () => ({
-  useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
-}));
+vi.mock("@/hooks/workspace", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/workspace")>(
+      "@/hooks/workspace",
+    );
+  return {
+    ...actual,
+    useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
+  };
+});
 
 // Mock fetchDiffCommits from @/api for "Show all commits" tests
 const mockFetchDiffCommits = vi.fn();

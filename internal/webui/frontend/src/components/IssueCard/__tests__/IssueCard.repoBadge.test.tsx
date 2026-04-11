@@ -12,15 +12,14 @@ import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom";
 
-import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
+import { useWorkspaceContext } from "@/hooks/workspace";
 import type { Issue } from "@/types";
 
 import { IssueCard } from "../IssueCard";
 
 // Mock useWorkspaceContext to control isMultiRepo
-vi.mock("@/hooks/useWorkspaceContext", async (importOriginal) => {
-  const orig =
-    await importOriginal<typeof import("@/hooks/useWorkspaceContext")>();
+vi.mock("@/hooks/workspace", async (importOriginal) => {
+  const orig = await importOriginal<typeof import("@/hooks/workspace")>();
   return {
     ...orig,
     useWorkspaceContext: vi.fn(() => ({

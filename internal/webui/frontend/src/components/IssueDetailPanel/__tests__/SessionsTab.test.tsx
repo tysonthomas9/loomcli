@@ -54,16 +54,27 @@ vi.mock("../SessionDetailView", () => ({
   ),
 }));
 
-vi.mock("@/hooks/useWorkspaceContext", () => ({
-  useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
-}));
+vi.mock("@/hooks/workspace", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/workspace")>(
+      "@/hooks/workspace",
+    );
+  return {
+    ...actual,
+    useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
+  };
+});
 
 // Mock the hook
-vi.mock("@/hooks/useTaskSessions", () => ({
-  useTaskSessions: vi.fn(),
-}));
+vi.mock("@/hooks/terminal", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/terminal")>(
+      "@/hooks/terminal",
+    );
+  return { ...actual, useTaskSessions: vi.fn() };
+});
 
-import { useTaskSessions } from "@/hooks/useTaskSessions";
+import { useTaskSessions } from "@/hooks/terminal";
 
 const mockUseTaskSessions = vi.mocked(useTaskSessions);
 

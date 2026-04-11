@@ -8,9 +8,9 @@ import { useCallback } from "react";
 
 import type { Issue } from "@/types";
 import { createWorkspaceTask } from "@/api/workspace";
-import { useToast } from "@/hooks/useToast";
-import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
-import { useInlineCreate } from "@/hooks/useInlineCreate";
+import { useToast } from "@/hooks/ui";
+import { useWorkspaceContext } from "@/hooks/workspace";
+import { useInlineCreate } from "@/hooks/issues";
 
 import { TaskRow, type TaskRowProps } from "./TaskRow";
 import { InlineAddInput } from "./InlineAddInput";

@@ -15,7 +15,7 @@ import {
 import { useState, useMemo, useCallback, useEffect } from "react";
 
 import "@xyflow/react/dist/style.css";
-import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
+import { useWorkspaceContext } from "@/hooks/workspace";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
 import {
   IssueNode,
@@ -28,10 +28,11 @@ import type { DependencyTypeGroup } from "@/components/GraphControls";
 import type { TooltipPosition } from "@/components/NodeTooltip";
 import {
   useAutoLayout,
+  useGraphData,
   type UseAutoLayoutOptions,
-} from "@/hooks/useAutoLayout";
-import { useBlockedIssues } from "@/hooks/useBlockedIssues";
-import { useGraphData, type UseGraphDataOptions } from "@/hooks/useGraphData";
+  type UseGraphDataOptions,
+} from "@/hooks/ui";
+import { useBlockedIssues } from "@/hooks/issues";
 import type {
   Issue,
   IssueNode as IssueNodeType,

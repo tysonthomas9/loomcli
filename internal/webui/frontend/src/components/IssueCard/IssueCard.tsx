@@ -19,7 +19,7 @@ import { useSearchTerm } from "@/contexts/SearchTermContext";
 import { useStore } from "zustand";
 
 import { useAgentStoreInstance } from "@/hooks";
-import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
+import { useWorkspaceContext } from "@/hooks/workspace";
 import type { BlockerRef, Issue } from "@/types";
 import { isKnownIssueType, parseLoomStatus } from "@/types";
 import { formatIssueId } from "@/utils/formatIssueId";

@@ -3,7 +3,7 @@
  * Renders a sun/moon icon button to toggle between light and dark themes.
  */
 
-import type { Theme } from "@/hooks/useTheme";
+import type { Theme } from "@/hooks/ui";
 import styles from "./ThemeToggle.module.css";
 
 export interface ThemeToggleProps {

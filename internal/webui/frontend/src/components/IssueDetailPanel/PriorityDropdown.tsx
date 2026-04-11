@@ -6,7 +6,7 @@
 import { useState, useCallback, useRef, useEffect, useId } from "react";
 
 import { VisuallyHidden } from "@/components/VisuallyHidden/VisuallyHidden";
-import { useAnnounce } from "@/hooks/useAnnounce";
+import { useAnnounce } from "@/hooks/ui";
 import type { Priority } from "@/types";
 
 import styles from "./PriorityDropdown.module.css";

@@ -8,15 +8,15 @@ import { useState } from "react";
 import { ErrorDisplay } from "@/components/ErrorDisplay";
 import { LoadingSkeleton } from "@/components/LoadingSkeleton";
 import type { ViewMode } from "@/components/ViewSwitcher";
-import { useBackendConfig } from "@/hooks/useBackendConfig";
+import { useBackendConfig } from "@/hooks/workspace";
 import {
   useTerminalFont,
   FONT_FAMILY_OPTIONS,
   FONT_SIZE_OPTIONS,
   CUSTOM_FONT_SENTINEL,
   DEFAULT_FONT_FAMILY,
-} from "@/hooks/useTerminalFont";
-import { useToast } from "@/hooks/useToast";
+} from "@/hooks/terminal";
+import { useToast } from "@/hooks/ui";
 
 import styles from "./SettingsView.module.css";
 

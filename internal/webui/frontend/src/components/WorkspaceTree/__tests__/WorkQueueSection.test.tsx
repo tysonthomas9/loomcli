@@ -17,9 +17,16 @@ import { WorkQueueSection } from "../WorkQueueSection";
 
 const TEST_WS_ID = "test-ws-uuid-1234";
 
-vi.mock("@/hooks/useWorkspaceContext", () => ({
-  useWorkspaceContext: () => ({ workspaceId: TEST_WS_ID }),
-}));
+vi.mock("@/hooks/workspace", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/workspace")>(
+      "@/hooks/workspace",
+    );
+  return {
+    ...actual,
+    useWorkspaceContext: () => ({ workspaceId: TEST_WS_ID }),
+  };
+});
 
 const STORAGE_KEY = `loom:${TEST_WS_ID}:work-queue-expanded`;
 

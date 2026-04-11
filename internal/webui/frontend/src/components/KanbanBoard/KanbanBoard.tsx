@@ -25,7 +25,7 @@ import { EmptyColumn } from "@/components/EmptyColumn";
 import { EmptyWorkspaceBoard } from "@/components/EmptyWorkspaceBoard";
 import { StatusColumn, VirtualizedCardList } from "@/components/StatusColumn";
 import { formatStatusLabel } from "@/utils/statusFormat";
-import type { FilterState } from "@/hooks/useFilterState";
+import type { FilterState } from "@/hooks/issues";
 import type { BlockerRef, Issue, Status } from "@/types";
 
 import { DEFAULT_COLUMNS } from "./columnConfigs";

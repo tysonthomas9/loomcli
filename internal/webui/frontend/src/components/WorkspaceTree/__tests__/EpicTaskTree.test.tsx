@@ -13,22 +13,29 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
 import type { Issue } from "@/types";
-import type { EpicWithTasks } from "@/hooks/useWorkspaceTree";
+import type { EpicWithTasks } from "@/hooks/workspace";
 
 import { EpicTaskTree } from "../EpicTaskTree";
 
 // Mock useWorkspaceTree which the component uses internally.
 const mockRefetch = vi.fn().mockResolvedValue(undefined);
 
-vi.mock("@/hooks/useWorkspaceTree", () => ({
-  useWorkspaceTree: vi.fn(() => ({
-    epics: [] as EpicWithTasks[],
-    orphanTasks: [] as Issue[],
-    isLoading: false,
-    error: null,
-    refetch: mockRefetch,
-  })),
-}));
+vi.mock("@/hooks/workspace", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/workspace")>(
+      "@/hooks/workspace",
+    );
+  return {
+    ...actual,
+    useWorkspaceTree: vi.fn(() => ({
+      epics: [] as EpicWithTasks[],
+      orphanTasks: [] as Issue[],
+      isLoading: false,
+      error: null,
+      refetch: mockRefetch,
+    })),
+  };
+});
 
 // Mock useIssueDiffStat and useToast since TaskRow and EpicTaskTree use them.
 vi.mock("@/hooks", () => ({
@@ -40,13 +47,18 @@ vi.mock("@/hooks", () => ({
   })),
 }));
 
-vi.mock("@/hooks/useToast", () => ({
-  useToast: vi.fn(() => ({
-    showToast: vi.fn(),
-  })),
-}));
+vi.mock("@/hooks/ui", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/ui")>("@/hooks/ui");
+  return {
+    ...actual,
+    useToast: vi.fn(() => ({
+      showToast: vi.fn(),
+    })),
+  };
+});
 
-import { useWorkspaceTree } from "@/hooks/useWorkspaceTree";
+import { useWorkspaceTree } from "@/hooks/workspace";
 
 const mockUseWorkspaceTree = vi.mocked(useWorkspaceTree);
 

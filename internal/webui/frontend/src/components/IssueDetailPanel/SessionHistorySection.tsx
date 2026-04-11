@@ -5,7 +5,7 @@ import {
   getSessionScrollback,
   type SessionRecord,
 } from "@/api/sessionHistory";
-import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
+import { useWorkspaceContext } from "@/hooks/workspace";
 
 import styles from "./IssueDetailPanel.module.css";
 

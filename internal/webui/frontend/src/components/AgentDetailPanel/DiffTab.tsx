@@ -7,7 +7,7 @@
 import { useState, useEffect } from "react";
 
 import type { LoomAgentStatus } from "@/types";
-import { useDiff } from "@/hooks/useDiff";
+import { useDiff } from "@/hooks/terminal";
 
 import { DiffFileRow } from "./DiffFileRow";
 import { DiffFileViewer } from "./DiffFileViewer";

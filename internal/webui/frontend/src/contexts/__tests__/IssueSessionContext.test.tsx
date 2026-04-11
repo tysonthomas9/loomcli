@@ -9,7 +9,7 @@ import {
   IssueSessionProvider,
   useHasActiveSession,
 } from "../IssueSessionContext";
-import type { UseIssueSessionMapReturn } from "@/hooks/useIssueSessionMap";
+import type { UseIssueSessionMapReturn } from "@/hooks/agents";
 
 function createMockValue(
   overrides: Partial<UseIssueSessionMapReturn> = {},

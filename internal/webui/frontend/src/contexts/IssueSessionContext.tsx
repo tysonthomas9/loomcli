@@ -1,6 +1,6 @@
 import { createContext, useContext, type ReactNode } from "react";
 
-import type { UseIssueSessionMapReturn } from "@/hooks/useIssueSessionMap";
+import type { UseIssueSessionMapReturn } from "@/hooks/agents";
 
 type HasActiveSessionFn = (issueId: string) => boolean;
 

@@ -3,8 +3,7 @@ import { ErrorDisplay, LoadingSkeleton } from "@/components";
 import { useStore } from "zustand";
 
 import { useAgentStoreInstance } from "@/hooks";
-import { useFileTree } from "@/hooks/useFileTree";
-import { useFileContent } from "@/hooks/useFileContent";
+import { useFileTree, useFileContent } from "@/hooks/common";
 import { FileTree } from "./FileTree";
 import { FileViewer } from "./FileViewer";
 import styles from "./FileExplorer.module.css";

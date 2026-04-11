@@ -7,7 +7,7 @@ import { useMemo, useRef } from "react";
 
 import type { BlockedInfo } from "@/components/KanbanBoard";
 import { useSort, SortDirection } from "@/hooks";
-import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
+import { useWorkspaceContext } from "@/hooks/workspace";
 import type { Issue } from "@/types";
 
 import { ColumnDef, DEFAULT_ISSUE_COLUMNS } from "./columns";

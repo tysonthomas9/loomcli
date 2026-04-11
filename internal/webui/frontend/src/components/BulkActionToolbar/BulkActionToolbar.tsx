@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useRef } from "react";
 
-import { useAnnounce } from "@/hooks/useAnnounce";
+import { useAnnounce } from "@/hooks/ui";
 
 import styles from "./BulkActionToolbar.module.css";
 

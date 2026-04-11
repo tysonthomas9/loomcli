@@ -7,7 +7,7 @@ import { useState, useCallback } from "react";
 
 import type { GitStatus } from "@/api/git";
 import type { ParsedLoomStatus } from "@/types";
-import type { UseGitActionsReturn } from "@/hooks/useGitActions";
+import type { UseGitActionsReturn } from "@/hooks/workspace";
 
 import styles from "./GitActionBar.module.css";
 

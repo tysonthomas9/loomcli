@@ -11,17 +11,21 @@ import { KeyboardCheatsheet } from "../KeyboardCheatsheet";
 
 const mockCloseCheatsheet = vi.fn();
 
-vi.mock("@/hooks/useKeyboardShortcuts", () => ({
-  useKeyboardShortcuts: vi.fn(() => ({
-    isCheatsheetOpen: false,
-    toggleCheatsheet: vi.fn(),
-    closeCheatsheet: mockCloseCheatsheet,
-  })),
-  useRegisterEscapeLayer: vi.fn(),
-  LAYER_CHEATSHEET: 45,
-}));
+vi.mock("@/hooks/ui", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/ui")>("@/hooks/ui");
+  return {
+    ...actual,
+    useKeyboardShortcuts: vi.fn(() => ({
+      isCheatsheetOpen: false,
+      toggleCheatsheet: vi.fn(),
+      closeCheatsheet: mockCloseCheatsheet,
+    })),
+    useRegisterEscapeLayer: vi.fn(),
+  };
+});
 
-import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
+import { useKeyboardShortcuts } from "@/hooks/ui";
 
 const mockUseKeyboardShortcuts = vi.mocked(useKeyboardShortcuts);
 

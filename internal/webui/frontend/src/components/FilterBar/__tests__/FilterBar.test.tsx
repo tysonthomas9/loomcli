@@ -17,7 +17,7 @@ import {
 } from "vitest";
 import "@testing-library/jest-dom";
 
-import type { FilterState, FilterActions } from "@/hooks/useFilterState";
+import type { FilterState, FilterActions } from "@/hooks/issues";
 import type { IssueType } from "@/types";
 
 import { FilterBar } from "../FilterBar";

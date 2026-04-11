@@ -15,17 +15,28 @@ import type { SessionRecord, TranscriptEntry } from "@/types/session";
 import { SessionDetailView } from "../SessionDetailView";
 
 // Mock hooks
-vi.mock("@/hooks/useSessionTranscript", () => ({
-  useSessionTranscript: vi.fn(),
-}));
+vi.mock("@/hooks/terminal", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/terminal")>(
+      "@/hooks/terminal",
+    );
+  return {
+    ...actual,
+    useSessionTranscript: vi.fn(),
+    useSessionDiff: vi.fn(),
+  };
+});
 
-vi.mock("@/hooks/useSessionDiff", () => ({
-  useSessionDiff: vi.fn(),
-}));
-
-vi.mock("@/hooks/useWorkspaceContext", () => ({
-  useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
-}));
+vi.mock("@/hooks/workspace", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/workspace")>(
+      "@/hooks/workspace",
+    );
+  return {
+    ...actual,
+    useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
+  };
+});
 
 // Mock CodeMirrorEditor
 vi.mock("@/components/CodeMirrorEditor/CodeMirrorEditor", () => ({
@@ -34,8 +45,7 @@ vi.mock("@/components/CodeMirrorEditor/CodeMirrorEditor", () => ({
   ),
 }));
 
-import { useSessionTranscript } from "@/hooks/useSessionTranscript";
-import { useSessionDiff } from "@/hooks/useSessionDiff";
+import { useSessionTranscript, useSessionDiff } from "@/hooks/terminal";
 
 const mockUseSessionTranscript = vi.mocked(useSessionTranscript);
 const mockUseSessionDiff = vi.mocked(useSessionDiff);

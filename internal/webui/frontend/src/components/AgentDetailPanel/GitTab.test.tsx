@@ -28,13 +28,6 @@ let mockGitStatusReturn: {
 
 const mockRefetch = vi.fn().mockResolvedValue(undefined);
 
-vi.mock("@/hooks/useGitStatus", () => ({
-  useGitStatus: (opts: { agentName: string | null; enabled: boolean }) => {
-    lastGitStatusOptions = opts;
-    return mockGitStatusReturn;
-  },
-}));
-
 // Mock useGitActions to provide a no-op actions object
 const mockActions = {
   push: vi.fn(),
@@ -52,9 +45,20 @@ const mockActions = {
   anyLoading: false,
 };
 
-vi.mock("@/hooks/useGitActions", () => ({
-  useGitActions: () => mockActions,
-}));
+vi.mock("@/hooks/workspace", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/workspace")>(
+      "@/hooks/workspace",
+    );
+  return {
+    ...actual,
+    useGitStatus: (opts: { agentName: string | null; enabled: boolean }) => {
+      lastGitStatusOptions = opts;
+      return mockGitStatusReturn;
+    },
+    useGitActions: () => mockActions,
+  };
+});
 
 // Mock fetchDiffCommits to avoid real API calls
 let mockDiffCommitsResult: Promise<unknown>;

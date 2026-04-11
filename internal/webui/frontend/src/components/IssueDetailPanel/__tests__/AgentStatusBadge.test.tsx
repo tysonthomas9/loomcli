@@ -24,9 +24,11 @@ vi.mock("zustand", () => ({
     selector({ agents: mockAgents }),
 }));
 
-vi.mock("@/hooks/useStoreContext", () => ({
-  useAgentStoreInstance: () => ({}),
-}));
+vi.mock("@/hooks/common", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/common")>("@/hooks/common");
+  return { ...actual, useAgentStoreInstance: () => ({}) };
+});
 
 // Compatibility helper — tests call mockGetAgentByName.mockReturnValue(agent)
 const mockGetAgentByName = {

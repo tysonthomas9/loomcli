@@ -164,14 +164,19 @@ vi.mock("@/api/terminal", () => ({
   listIssueSessions: vi.fn().mockImplementation(() => new Promise(() => {})),
 }));
 
-vi.mock("@/hooks/useIssueTabPersistence", () => ({
-  useIssueTabPersistence: vi.fn(() => ({
-    savedState: null,
-    isLoading: false,
-    saveTabs: vi.fn(),
-    clearTabs: vi.fn(),
-  })),
-}));
+vi.mock("@/hooks/issues", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/issues")>("@/hooks/issues");
+  return {
+    ...actual,
+    useIssueTabPersistence: vi.fn(() => ({
+      savedState: null,
+      isLoading: false,
+      saveTabs: vi.fn(),
+      clearTabs: vi.fn(),
+    })),
+  };
+});
 
 // Create hoisted mock for useRouteView to allow per-test control
 const { mockUseRouteView, mockSetActiveView, mockNavigateToView } = vi.hoisted(
@@ -382,9 +387,8 @@ vi.mock("@/hooks", () => ({
   }),
 }));
 
-vi.mock("@/hooks/useKeyboardShortcuts", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("@/hooks/useKeyboardShortcuts")>();
+vi.mock("@/hooks/ui", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks/ui")>();
   return { ...actual, useRegisterEscapeLayer: vi.fn() };
 });
 

@@ -22,9 +22,16 @@ const mockDiffStat = vi.fn().mockReturnValue({
 vi.mock("@/hooks", () => ({
   useAgentDiffStat: (...args: unknown[]) => mockDiffStat(...args),
 }));
-vi.mock("@/hooks/useWorkspaceContext", () => ({
-  useWorkspaceContext: () => ({ workspaceId: "ws-test-123" }),
-}));
+vi.mock("@/hooks/workspace", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/workspace")>(
+      "@/hooks/workspace",
+    );
+  return {
+    ...actual,
+    useWorkspaceContext: () => ({ workspaceId: "ws-test-123" }),
+  };
+});
 
 import { AgentCard } from "./AgentCard";
 

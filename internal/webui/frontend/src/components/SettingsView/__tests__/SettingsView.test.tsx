@@ -13,37 +13,46 @@ import { render, screen, fireEvent, within, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
-import type { UseBackendConfigReturn } from "@/hooks/useBackendConfig";
-import type { UseTerminalFontReturn } from "@/hooks/useTerminalFont";
+import type { UseBackendConfigReturn } from "@/hooks/workspace";
+import type { UseTerminalFontReturn } from "@/hooks/terminal";
 import type { BackendConfigData } from "@/api/config";
 
 import { SettingsView } from "../SettingsView";
 
 // Mock the hooks used by SettingsView
-vi.mock("@/hooks/useBackendConfig", () => ({
-  useBackendConfig: vi.fn(),
-}));
+vi.mock("@/hooks/workspace", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/workspace")>(
+      "@/hooks/workspace",
+    );
+  return { ...actual, useBackendConfig: vi.fn() };
+});
 
-vi.mock("@/hooks/useTerminalFont", async () => {
-  const actual = await vi.importActual("@/hooks/useTerminalFont");
+vi.mock("@/hooks/terminal", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/terminal")>(
+      "@/hooks/terminal",
+    );
+  return { ...actual, useTerminalFont: vi.fn() };
+});
+
+vi.mock("@/hooks/ui", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/ui")>("@/hooks/ui");
   return {
     ...actual,
-    useTerminalFont: vi.fn(),
+    useToast: vi.fn(() => ({
+      showToast: vi.fn(),
+      toasts: [],
+      dismissToast: vi.fn(),
+      dismissAll: vi.fn(),
+    })),
   };
 });
 
-vi.mock("@/hooks/useToast", () => ({
-  useToast: vi.fn(() => ({
-    showToast: vi.fn(),
-    toasts: [],
-    dismissToast: vi.fn(),
-    dismissAll: vi.fn(),
-  })),
-}));
-
-import { useBackendConfig } from "@/hooks/useBackendConfig";
-import { useTerminalFont } from "@/hooks/useTerminalFont";
-import { useToast } from "@/hooks/useToast";
+import { useBackendConfig } from "@/hooks/workspace";
+import { useTerminalFont } from "@/hooks/terminal";
+import { useToast } from "@/hooks/ui";
 
 const mockUseBackendConfig = vi.mocked(useBackendConfig);
 const mockUseTerminalFont = vi.mocked(useTerminalFont);
