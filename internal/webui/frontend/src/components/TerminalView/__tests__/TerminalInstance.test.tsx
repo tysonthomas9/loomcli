@@ -130,6 +130,10 @@ vi.mock("@xterm/xterm/css/xterm.css", () => ({}));
 
 vi.mock("@/api/client", () => ({
   get: vi.fn(() => Promise.resolve({ token: "test-token" })),
+  // Mirror the real wsUrl helper so terminalConnection.ts builds the same
+  // workspace-scoped path it would in production.
+  wsUrl: (workspaceId: string, path: string) =>
+    `/api/workspaces/${encodeURIComponent(workspaceId)}${path}`,
 }));
 
 vi.mock("@/utils/reconnectBackoff", () => ({

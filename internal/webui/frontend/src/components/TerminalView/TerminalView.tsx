@@ -698,6 +698,7 @@ export function TerminalView({
 
   const { handleTabClose, handleDuplicateTab, handleTabRename } = useTabActions(
     {
+      workspaceId,
       tabs,
       setTabs,
       setActiveTabId,
