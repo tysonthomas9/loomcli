@@ -11,7 +11,7 @@ import type { Issue, IssueDetails, IssueWithDependencyMetadata } from "@/types";
 import type { ViewMode } from "@/components/ViewSwitcher";
 import type { Status } from "@/types/issue";
 import { useRegisterEscapeLayer, LAYER_ISSUE_PANEL } from "@/hooks";
-import { getReviewType } from "@/utils/issueCategory";
+import { getReviewType } from "@/utils/issue";
 import { StatusDropdown } from "@/components/StatusDropdown";
 import { ErrorToast } from "@/components/ErrorToast";
 import { updateIssue } from "@/hooks/api";

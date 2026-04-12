@@ -221,7 +221,7 @@ describe("BACKEND_BRAND_COLORS", () => {
   });
 
   it("keys match KNOWN_BACKEND_DEFAULTS keys exactly", async () => {
-    const { KNOWN_BACKEND_DEFAULTS } = await import("@/utils/backendDefaults");
+    const { KNOWN_BACKEND_DEFAULTS } = await import("@/utils/workspace");
     expect(Object.keys(BACKEND_BRAND_COLORS).sort()).toEqual(
       Object.keys(KNOWN_BACKEND_DEFAULTS).sort(),
     );

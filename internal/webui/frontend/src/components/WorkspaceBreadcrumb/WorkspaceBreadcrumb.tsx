@@ -5,7 +5,7 @@
  */
 
 import type { ViewMode } from "@/components/ViewSwitcher";
-import { getWorkspaceColor } from "@/utils/workspaceColor";
+import { getWorkspaceColor } from "@/utils/workspace";
 
 import styles from "./WorkspaceBreadcrumb.module.css";
 

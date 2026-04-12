@@ -43,7 +43,7 @@ import {
   computeRepoHealth,
   worstHealthColor,
   type WorkspaceHealthSummary,
-} from "@/utils/workspaceHealth";
+} from "@/utils/workspace";
 import { AgentCard } from "@/components/AgentCard";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ErrorDisplay } from "@/components/ErrorDisplay";

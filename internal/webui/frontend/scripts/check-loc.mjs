@@ -40,7 +40,7 @@ export const ALLOWLIST = new Map([
   ["src/components/GraphControls/GraphControls.tsx", 345],
   ["src/components/IssueDetailPanel/sections/DependencySection.tsx", 323],
   ["src/components/SettingsView/SettingsView.tsx", 315],
-  ["src/components/IssueCard/IssueCard.tsx", 311],
+  ["src/components/IssueCard/IssueCard.tsx", 316],
   ["src/components/IssueDetailPanel/actions/StartWorkButton.tsx", 311],
   ["src/hooks/common/useEventProvider.tsx", 311],
   ["src/components/IssueDetailPanel/fields/PriorityDropdown.tsx", 307],

@@ -10,7 +10,7 @@ import { BlockedBadge } from "@/components/BlockedBadge";
 import { HighlightText } from "@/components/HighlightText";
 import { useSearchTerm } from "@/contexts/SearchTermContext";
 import type { IssueNode as IssueNodeType } from "@/types";
-import { formatIssueId } from "@/utils/formatIssueId";
+import { formatIssueId } from "@/utils/issue";
 
 import styles from "./IssueNode.module.css";
 

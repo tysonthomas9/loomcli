@@ -3,7 +3,7 @@
  * Constants and helpers for tab naming, backend detection, and session naming.
  */
 
-import { KNOWN_BACKEND_DEFAULTS } from "@/utils/backendDefaults";
+import { KNOWN_BACKEND_DEFAULTS } from "@/utils/workspace";
 
 import type { ConnectionState } from "@/components/TerminalView/instances";
 

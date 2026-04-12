@@ -11,7 +11,7 @@ import { describe, it, expect } from "vitest";
 import "@testing-library/jest-dom";
 
 import type { ViewMode } from "@/components/ViewSwitcher";
-import { getWorkspaceColor } from "@/utils/workspaceColor";
+import { getWorkspaceColor } from "@/utils/workspace";
 
 import { WorkspaceBreadcrumb } from "../WorkspaceBreadcrumb";
 

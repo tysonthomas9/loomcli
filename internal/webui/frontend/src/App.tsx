@@ -22,7 +22,7 @@ import { updateIssue, addComment, closeIssue } from "@/api";
 import type { IssueContext } from "@/api/terminal";
 import { getAgentTerminalInfo } from "@/api/logs";
 import { buildShareUrl } from "@/utils/buildShareUrl";
-import { getReviewType } from "@/utils/issueCategory";
+import { getReviewType } from "@/utils/issue";
 import {
   AppLayout,
   WorkspaceBreadcrumb,

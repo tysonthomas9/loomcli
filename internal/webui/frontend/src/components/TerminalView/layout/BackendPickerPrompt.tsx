@@ -6,7 +6,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 
-import { KNOWN_BACKEND_DEFAULTS } from "@/utils/backendDefaults";
+import { KNOWN_BACKEND_DEFAULTS } from "@/utils/workspace";
 import { useRegisterEscapeLayer, LAYER_MODAL } from "@/hooks";
 import styles from "./BackendPickerPrompt.module.css";
 

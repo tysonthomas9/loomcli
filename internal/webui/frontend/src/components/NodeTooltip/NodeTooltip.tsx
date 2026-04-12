@@ -8,7 +8,7 @@
 import { memo, useMemo } from "react";
 
 import type { Issue } from "@/types";
-import { formatIssueId } from "@/utils/formatIssueId";
+import { formatIssueId } from "@/utils/issue";
 
 import styles from "./NodeTooltip.module.css";
 

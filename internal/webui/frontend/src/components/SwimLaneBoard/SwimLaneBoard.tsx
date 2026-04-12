@@ -29,7 +29,7 @@ import {
   createColumns,
 } from "@/components/KanbanBoard/columnConfigs";
 import type { KanbanColumnConfig } from "@/components/KanbanBoard/types";
-import { formatStatusLabel } from "@/utils/statusFormat";
+import { formatStatusLabel } from "@/utils/issue";
 import { SwimLane } from "@/components/SwimLane";
 import type { FilterState } from "@/hooks/issues";
 import type { Issue, Status } from "@/types";

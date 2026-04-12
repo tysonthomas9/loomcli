@@ -6,7 +6,7 @@
 import type { ConnectionState } from "@/api/sse";
 import type { LoomAgentStatus } from "@/types";
 import { AgentCard } from "@/components/AgentCard";
-import type { WorkspaceHealthSummary } from "@/utils/workspaceHealth";
+import type { WorkspaceHealthSummary } from "@/utils/workspace";
 
 import { ConnectionIndicator } from "./ConnectionIndicator";
 import styles from "../WorkspaceTree.module.css";

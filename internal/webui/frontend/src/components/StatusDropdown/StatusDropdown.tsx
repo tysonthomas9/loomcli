@@ -6,7 +6,7 @@
 import { useCallback } from "react";
 
 import { useAnnounce } from "@/hooks/ui";
-import { formatStatusLabel } from "@/utils/statusFormat";
+import { formatStatusLabel } from "@/utils/issue";
 import type { Status, KnownStatus } from "@/types/issue";
 import { USER_SELECTABLE_STATUSES } from "@/types/issue";
 

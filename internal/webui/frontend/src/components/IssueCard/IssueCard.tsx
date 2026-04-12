@@ -22,9 +22,14 @@ import { useAgentStoreInstance } from "@/hooks";
 import { useWorkspaceContext } from "@/hooks/workspace";
 import type { BlockerRef, Issue } from "@/types";
 import { isKnownIssueType, parseLoomStatus } from "@/types";
-import { formatIssueId } from "@/utils/formatIssueId";
-import { getOpenStatus, getReviewType, isPRUrl } from "@/utils/issueCategory";
-import type { OpenStatus, ReviewType } from "@/utils/issueCategory";
+import {
+  formatIssueId,
+  getOpenStatus,
+  getReviewType,
+  isPRUrl,
+  type OpenStatus,
+  type ReviewType,
+} from "@/utils/issue";
 
 import { AgentRow } from "./AgentRow";
 import styles from "./IssueCard.module.css";

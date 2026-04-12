@@ -40,7 +40,7 @@ import type {
   Event,
 } from "@/types";
 import type { Status } from "@/types/issue";
-import { getReviewType, isPRUrl } from "@/utils/issueCategory";
+import { getReviewType, isPRUrl } from "@/utils/issue";
 
 import {
   getBackendFromSessionName,

@@ -24,7 +24,7 @@ import { DraggableIssueCard } from "@/components/DraggableIssueCard";
 import { EmptyColumn } from "@/components/EmptyColumn";
 import { EmptyWorkspaceBoard } from "@/components/EmptyWorkspaceBoard";
 import { StatusColumn, VirtualizedCardList } from "@/components/StatusColumn";
-import { formatStatusLabel } from "@/utils/statusFormat";
+import { formatStatusLabel } from "@/utils/issue";
 import type { FilterState } from "@/hooks/issues";
 import type { Issue, Status } from "@/types";
 import type { BlockedInfo } from "@/types/issue";

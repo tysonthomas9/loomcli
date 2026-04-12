@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { getOpenStatus, hasNeedsRevision } from "../issueCategory";
-import fixture from "../../../testdata/plan_status_parity_cases.json";
+import fixture from "../../../../testdata/plan_status_parity_cases.json";
 
 describe("issueCategory parity with Go taskfilter.go", () => {
   for (const c of fixture) {

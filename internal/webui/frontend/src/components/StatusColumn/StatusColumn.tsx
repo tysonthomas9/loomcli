@@ -10,7 +10,7 @@ import { useCallback, type ReactNode, type RefObject } from "react";
 import type { Status } from "@/types";
 
 import styles from "./StatusColumn.module.css";
-import { formatStatusLabel } from "@/utils/statusFormat";
+import { formatStatusLabel } from "@/utils/issue";
 
 /**
  * Column type for visual variants (different from status value).
