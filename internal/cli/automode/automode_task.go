@@ -30,7 +30,7 @@ func createAutoSession(ctx *autoLoopCtx, prompt string) *sessions.Session {
 	return sess
 }
 
-func finalizeAutoSession(ctx *autoLoopCtx, sess *sessions.Session, beforeRef string, err error) {
+func finalizeAutoSession(ctx *autoLoopCtx, sess *sessions.Session, beforeRef string, err error, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens int64, estimatedCostUSD float64) {
 	if sess == nil {
 		return
 	}
@@ -43,7 +43,7 @@ func finalizeAutoSession(ctx *autoLoopCtx, sess *sessions.Session, beforeRef str
 		}
 	}
 	taskID := ""
-	if info, lockErr := cli.ReadLockFile(ctx.opts.WorktreePath); lockErr == nil {
+	if info, lockErr := ctx.readLock(); lockErr == nil && info != nil {
 		taskID = info.TaskID
 	}
 	diffStats := git.ComputeDiffStats(ctx.opts.WorktreePath, beforeRef)
@@ -52,6 +52,11 @@ func finalizeAutoSession(ctx *autoLoopCtx, sess *sessions.Session, beforeRef str
 		DiffStats: sessions.DiffStats{
 			FilesChanged: diffStats.FilesChanged, LinesAdded: diffStats.LinesAdded, LinesRemoved: diffStats.LinesRemoved,
 		},
+		InputTokens:      inputTokens,
+		OutputTokens:     outputTokens,
+		CacheReadTokens:  cacheReadTokens,
+		CacheWriteTokens: cacheWriteTokens,
+		EstimatedCostUSD: estimatedCostUSD,
 	})
 	backends.ClearActiveSessionEnv()
 	go sessions.NotifyWebUI(context.Background(), backends.ResolveWebUIURL(), taskID, sess.SessionID(), sess.Meta.Status, backends.ResolveNotifyToken())

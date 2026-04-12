@@ -356,7 +356,16 @@ func runAutoTask(ctx *autoLoopCtx, shutdown chan struct{}) bool {
 
 	endedAt := time.Now()
 	recordSessionUsage(ctx.usageStore, collector, ctx.opts.WorktreePath, ctx.opts.AgentName, ctx.opts.ParentID, startedAt, endedAt, err, ctx.opts.LockBridge)
-	finalizeAutoSession(ctx, sess, beforeRef, err)
+
+	inTok, outTok, cacheRead, cacheWrite := collector.Totals()
+	tier := usage.ResolvePricing(backendName)
+	costUSD := usage.EstimateCost(tier, usage.SessionUsage{
+		InputTokens:      inTok,
+		OutputTokens:     outTok,
+		CacheReadTokens:  cacheRead,
+		CacheWriteTokens: cacheWrite,
+	})
+	finalizeAutoSession(ctx, sess, beforeRef, err, inTok, outTok, cacheRead, cacheWrite, costUSD)
 
 	if updateErr := ctx.updateState(cli.StateIdle); updateErr != nil {
 		fmt.Printf("[auto] Warning: failed to update state: %v\n", updateErr)
