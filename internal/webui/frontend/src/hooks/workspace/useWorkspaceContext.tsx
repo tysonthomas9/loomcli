@@ -58,6 +58,7 @@ import {
 } from "@/api/workspace";
 import { setLastWorkspaceId } from "@/utils/scopedStorage";
 import { createWorkspaceStore } from "@/stores";
+import { buildWorkspaceSwitchUrl } from "@/utils/workspaceUrl";
 
 import type { UseWorkspaceReturn } from "./useWorkspace";
 import {
@@ -273,10 +274,9 @@ export function WorkspaceProvider({
     [],
   );
 
-  // Workspace switch: navigate to /ws/{id}/, preserving the current `view=`
-  // search param (the only search param that's workspace-independent).
-  // `issue=`, `repo=`, and filter params are dropped — they would leak stale
-  // IDs into the new workspace.
+  // Workspace switch: build the destination URL via buildWorkspaceSwitchUrl
+  // (preserves `view=`, drops everything else) and navigate with
+  // flushSync: true.
   //
   // flushSync: true is REQUIRED here, not optional. React Router v7 wraps
   // navigate() in startTransition by default. When the user is on the
@@ -291,10 +291,7 @@ export function WorkspaceProvider({
       const workspaces = workspaceRef.current?.workspaces ?? [];
       const target = workspaces.find((w) => w.name === name);
       if (!target || target.id === workspaceRef.current?.id) return;
-      const currentParams = new URLSearchParams(window.location.search);
-      const view = currentParams.get("view");
-      const qs = view ? `?view=${encodeURIComponent(view)}` : "";
-      navigate(`/ws/${target.id}/${qs}`, { flushSync: true });
+      navigate(buildWorkspaceSwitchUrl(target.id), { flushSync: true });
     },
     // navigate is stable; workspaceRef is read at call time, not create time.
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -24,6 +24,7 @@ import { createLeadSession } from "@/hooks/api";
 import { getAgentTerminalInfo } from "@/api/terminal";
 import { buildShareUrl } from "@/utils/buildShareUrl";
 import { getReviewType } from "@/utils/issue";
+import { buildWorkspaceSwitchUrl } from "@/utils/workspaceUrl";
 import {
   AppLayout,
   WorkspaceBreadcrumb,
@@ -798,24 +799,28 @@ function App() {
     setIsWorkspaceSwitcherOpen((prev) => !prev);
   }, []);
 
-  // Handle workspace switcher selection (receives workspace ID, navigates to it)
+  // Handle workspace switcher selection (receives workspace ID, navigates to it).
+  // Preserves `view=` query param + uses flushSync to escape React Router v7's
+  // startTransition starvation when switching from terminal view. See
+  // useWorkspaceContext.setActiveWorkspace for the full rationale.
   const handleWorkspaceSwitcherSelect = useCallback(
     (wsId: string) => {
       if (wsId === workspaceId) return;
       closeAllPanels();
-      navigate(`/ws/${wsId}/`);
+      navigate(buildWorkspaceSwitchUrl(wsId), { flushSync: true });
     },
     [workspaceId, closeAllPanels, navigate],
   );
 
-  // Direct workspace switching via Cmd/Ctrl+Shift+1-9
+  // Direct workspace switching via Cmd/Ctrl+Shift+1-9. Same semantics as the
+  // explicit switcher above — preserve view, flushSync.
   const handleWorkspacePositionalSwitch = useCallback(
     (index: number) => {
       const workspaces = workspace?.workspaces ?? [];
       const ws = workspaces[index];
       if (ws && ws.id !== workspaceId) {
         closeAllPanels();
-        navigate(`/ws/${ws.id}/`);
+        navigate(buildWorkspaceSwitchUrl(ws.id), { flushSync: true });
       }
     },
     [workspace, workspaceId, closeAllPanels, navigate],
@@ -1155,7 +1160,7 @@ function App() {
           setShowCreateWorkspace(false);
           const newWs = data.workspaces?.find((ws) => ws.name === createdName);
           if (newWs) {
-            navigate(`/ws/${newWs.id}/`);
+            navigate(buildWorkspaceSwitchUrl(newWs.id), { flushSync: true });
           }
           if (warnings && warnings.length > 0) {
             showToast(
