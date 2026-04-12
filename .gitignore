@@ -23,6 +23,7 @@ loom.yaml
 
 # Runtime / dev artifacts
 .agent.lock
+.beads/issues.jsonl
 .beads/rpc-token
 .loom-dev.log
 .loom-dev.pid
