@@ -367,6 +367,97 @@ func TestMakeHelp_IncludesGateE2EFullTarget(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Worktree-safe hooks tests (loomcli-pbu1k)
+// ---------------------------------------------------------------------------
+
+// TestMakefileEnsureHooksIsPhony verifies that ensure-hooks is declared
+// as a .PHONY target.
+func TestMakefileEnsureHooksIsPhony(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile(repoRoot(t) + "/Makefile")
+	if err != nil {
+		t.Fatalf("reading Makefile: %v", err)
+	}
+
+	found := false
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, ".PHONY") && strings.Contains(line, "ensure-hooks") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf(".PHONY declaration missing target %q", "ensure-hooks")
+	}
+}
+
+// TestMakefileDevDependsOnEnsureHooks verifies that the dev target has
+// ensure-hooks as a prerequisite (not the old .git/hooks/pre-push file target).
+func TestMakefileDevDependsOnEnsureHooks(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile(repoRoot(t) + "/Makefile")
+	if err != nil {
+		t.Fatalf("reading Makefile: %v", err)
+	}
+
+	found := false
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "dev:") {
+			if strings.Contains(line, "ensure-hooks") {
+				found = true
+			}
+			if strings.Contains(line, ".git/hooks") {
+				t.Errorf("Makefile 'dev' target should not use .git/hooks/ as a prerequisite: %s", line)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("Makefile 'dev' target should depend on 'ensure-hooks'")
+	}
+}
+
+// TestMakefileHooksUsesGitHooksDir verifies that the hooks target uses
+// the GIT_HOOKS_DIR variable (not hardcoded .git/hooks/).
+func TestMakefileHooksUsesGitHooksDir(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile(repoRoot(t) + "/Makefile")
+	if err != nil {
+		t.Fatalf("reading Makefile: %v", err)
+	}
+	content := string(data)
+
+	// Verify GIT_HOOKS_DIR is defined with git rev-parse
+	if !strings.Contains(content, "GIT_HOOKS_DIR := $(shell git rev-parse --git-path hooks)") {
+		t.Errorf("Makefile should define GIT_HOOKS_DIR using git rev-parse --git-path hooks")
+	}
+}
+
+// TestMakefileNoHardcodedGitHooks verifies that no recipe lines in the
+// Makefile contain hardcoded .git/hooks/ paths.
+func TestMakefileNoHardcodedGitHooks(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile(repoRoot(t) + "/Makefile")
+	if err != nil {
+		t.Fatalf("reading Makefile: %v", err)
+	}
+
+	for i, line := range strings.Split(string(data), "\n") {
+		// Skip comment lines
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if strings.Contains(line, ".git/hooks/") {
+			t.Errorf("line %d contains hardcoded .git/hooks/ path: %s", i+1, line)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
 // .gitignore tests
 // ---------------------------------------------------------------------------
 

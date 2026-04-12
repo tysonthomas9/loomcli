@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-integration test-all lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-api-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install install-bd help frontend sync-beads update-beads check check-go check-frontend gate gate-e2e gate-e2e-full hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
+.PHONY: all build build-frontend build-all test test-integration test-all lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-api-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install install-bd help frontend sync-beads update-beads check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
 
 # Default target
 all: build
@@ -153,6 +153,9 @@ clean:
 # Frontend directory
 FRONTEND_DIR := internal/webui/frontend
 
+# Git hooks directory (resolves correctly in both regular repos and worktrees)
+GIT_HOOKS_DIR := $(shell git rev-parse --git-path hooks)
+
 # Beads subtree config
 BEADS_REMOTE := https://github.com/tysonthomas9/beads
 BEADS_BRANCH := feature/web-ui
@@ -267,8 +270,10 @@ gate-e2e-full: gate-e2e
 
 # Install git hooks (pre-push quality gate + pre-commit checks, applies to all worktrees)
 hooks:
-	@cp scripts/hooks/pre-push .git/hooks/pre-push
-	@chmod +x .git/hooks/pre-push
+	@test -n '$(GIT_HOOKS_DIR)' || { echo "Error: not inside a git repository"; exit 1; }
+	@mkdir -p '$(GIT_HOOKS_DIR)'
+	@cp scripts/hooks/pre-push '$(GIT_HOOKS_DIR)/pre-push'
+	@chmod +x '$(GIT_HOOKS_DIR)/pre-push'
 	@echo "Pre-push hook installed (applies to all worktrees)"
 	@command -v pre-commit >/dev/null 2>&1 || { echo "Error: pre-commit not found. Install: brew install pre-commit"; exit 1; }
 	@command -v golangci-lint >/dev/null 2>&1 || { echo "Error: golangci-lint not found. Install: brew install golangci-lint"; exit 1; }
@@ -276,8 +281,8 @@ hooks:
 	@echo "Pre-commit hooks installed"
 
 # Ensure hooks are installed (runs once — skips if pre-push hook already exists)
-.git/hooks/pre-push: scripts/hooks/pre-push
-	@$(MAKE) hooks
+ensure-hooks:
+	@test -f '$(GIT_HOOKS_DIR)/pre-push' || $(MAKE) hooks
 
 # Check dev dependencies
 dev-check:
@@ -286,7 +291,7 @@ dev-check:
 	@echo "All dev dependencies found."
 
 # Run dev environment: Go API server on :8080 + Vite dev server on :3000
-dev: dev-check .git/hooks/pre-push
+dev: dev-check ensure-hooks
 	@./scripts/dev.sh
 
 # Deprecated alias — 'make dev-loom' is removed in a follow-up task.

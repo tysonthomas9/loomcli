@@ -127,7 +127,7 @@ echo "[pre-push] Running quality gate..."
 make gate
 ```
 
-**Installation**: `make hooks` copies to `.git/hooks/pre-push`
+**Installation**: `make hooks` copies to the git hooks directory (works in worktrees)
 
 ---
 
