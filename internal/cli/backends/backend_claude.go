@@ -193,12 +193,27 @@ func buildClaudeEnv(workDir, agentName string) []string {
 	return append(env, activeSessionEnvVars()...)
 }
 
-// defaultClaudeNonInteractiveInvoker is the real non-interactive Claude invocation
-func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
-	cmd := exec.Command("claude", "-p", "--verbose", "--output-format", "stream-json",
-		"--dangerously-skip-permissions")
+// buildClaudeNonInteractiveCmd constructs the exec.Cmd for non-interactive Claude invocation.
+// When resumeSessionID is non-empty, the command includes --resume --session-id flags.
+func buildClaudeNonInteractiveCmd(workDir, agentName, resumeSessionID string) *exec.Cmd {
+	var args []string
+	if resumeSessionID != "" {
+		args = []string{"--resume", "--session-id", resumeSessionID, "-p", "--verbose",
+			"--output-format", "stream-json", "--dangerously-skip-permissions"}
+	} else {
+		args = []string{"-p", "--verbose", "--output-format", "stream-json",
+			"--dangerously-skip-permissions"}
+	}
+	cmd := exec.Command("claude", args...) //nolint:gosec // G204: intentional subprocess launch for claude CLI
 	cmd.Dir = workDir
 	cmd.Env = buildClaudeEnv(workDir, agentName)
+	return cmd
+}
+
+// defaultClaudeNonInteractiveInvoker is the real non-interactive Claude invocation
+func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
+	resumeID := consumeResumeSessionID()
+	cmd := buildClaudeNonInteractiveCmd(workDir, agentName, resumeID)
 
 	r, err := pipePromptToCmd(cmd, prompt)
 	if err != nil {
@@ -213,8 +228,12 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 	cmd.Stderr = os.Stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
-	fmt.Println("Launching Claude agent (non-interactive)...")
-	fmt.Println("")
+	if resumeID != "" {
+		fmt.Printf("[auto] Resuming Claude session %s...\n\n", resumeID)
+	} else {
+		fmt.Println("Launching Claude agent (non-interactive)...")
+		fmt.Println("")
+	}
 
 	if err := cmd.Start(); err != nil {
 		r.Close()
@@ -230,6 +249,7 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 		}
 	}()
 
+	ClearLastCapturedSessionID()
 	scanStreamOutput(stdout, newStreamLineHandler(workDir, collector))
 
 	runErr := cmd.Wait()
@@ -250,6 +270,7 @@ func newStreamLineHandler(workDir string, collector *usage.Collector) func(strin
 	return func(line string) {
 		if sid, ok := extractClaudeSessionID(line); ok {
 			sessionOnce.Do(func() {
+				SetLastCapturedSessionID(sid)
 				if err := cli.UpdateLockClaudeSessionID(workDir, sid); err != nil {
 					fmt.Fprintf(os.Stderr, "[loom] failed to persist claude session ID: %v\n", err)
 				}

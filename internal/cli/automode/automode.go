@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
@@ -133,6 +134,14 @@ type autoLoopCtx struct {
 	updateState       func(string) error
 	clearTaskID       func() error
 	readLock          func() (*cli.LockInfo, error)
+
+	// lastClaudeSessionID holds the Claude session UUID from the previous
+	// invocation. Used to resume the session on error-retry instead of
+	// cold-starting with a fresh prompt.
+	lastClaudeSessionID string
+	// resumeFailures counts consecutive resume failures on the same session ID.
+	// After 2 failures, we clear the session ID and fall back to cold-start.
+	resumeFailures int
 }
 
 // RunAutoModeLoop runs the auto mode loop for either plan or task agents.
@@ -325,11 +334,25 @@ func runAutoTask(ctx *autoLoopCtx, shutdown chan struct{}) bool {
 	prompt := ctx.generatePrompt(ctx.opts.AgentName, workspace)
 	sess := createAutoSession(ctx, prompt)
 
+	// If we have a session ID from a previous failed invocation, set it so
+	// the Claude invoker builds a --resume command instead of cold-starting.
+	if ctx.lastClaudeSessionID != "" {
+		backends.SetResumeSessionID(ctx.lastClaudeSessionID)
+	}
+	defer backends.ClearResumeSessionID() // no-op if consumed; cleans up on mock/non-Claude paths
+
 	backendName := cli.GetBackendName()
 	collector := usage.NewCollector(backendName, ctx.opts.AgentName)
 	startedAt := time.Now()
 
 	err := ctx.deps.Agent.InvokeNonInteractive(ctx.opts.WorktreePath, prompt, ctx.opts.AgentName, shutdown, collector)
+
+	// Capture the session ID from this invocation for potential resume on retry.
+	capturedID := backends.GetLastCapturedSessionID()
+	if capturedID != "" {
+		ctx.lastClaudeSessionID = capturedID
+		ctx.resumeFailures = 0 // new session ID, reset failure count
+	}
 
 	endedAt := time.Now()
 	recordSessionUsage(ctx.usageStore, collector, ctx.opts.WorktreePath, ctx.opts.AgentName, ctx.opts.ParentID, startedAt, endedAt, err, ctx.opts.LockBridge)

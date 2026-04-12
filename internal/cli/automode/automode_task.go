@@ -61,6 +61,18 @@ func handleAutoTaskError(ctx *autoLoopCtx, err error, shutdown chan struct{}) bo
 	fmt.Printf("[auto] Agent exited with error: %v\n", err)
 	ctx.state.ConsecutiveErrors++
 
+	// Track resume failures: if we attempted a resume (session ID was set) and
+	// it failed, increment the counter. After 2 consecutive resume failures on
+	// the same session ID, clear it so the next attempt is a cold-start.
+	if ctx.lastClaudeSessionID != "" {
+		ctx.resumeFailures++
+		if ctx.resumeFailures >= 2 {
+			fmt.Printf("[auto] Resume failed %d times, falling back to cold-start\n", ctx.resumeFailures)
+			ctx.lastClaudeSessionID = ""
+			ctx.resumeFailures = 0
+		}
+	}
+
 	failedTaskID := ""
 	if info, readErr := ctx.readLock(); readErr == nil && info != nil {
 		failedTaskID = info.TaskID
@@ -99,6 +111,8 @@ func handleTaskClaimed(ctx *autoLoopCtx, beforeRef string, startedAt, endedAt ti
 	ctx.state.TasksCompleted++
 	ctx.state.ConsecutiveNoProgress = 0
 	ctx.state.LastTaskTime = time.Now()
+	ctx.lastClaudeSessionID = "" // new task = fresh prompt, no resume
+	ctx.resumeFailures = 0
 
 	taskID := ""
 	if info, readErr := ctx.readLock(); readErr == nil && info != nil {
@@ -126,6 +140,8 @@ func handleTaskClaimed(ctx *autoLoopCtx, beforeRef string, startedAt, endedAt ti
 
 func handleNoProgress(ctx *autoLoopCtx, shutdown chan struct{}) bool {
 	ctx.state.ConsecutiveNoProgress++
+	ctx.lastClaudeSessionID = "" // no task claimed, resuming won't help
+	ctx.resumeFailures = 0
 	fmt.Printf("\n[auto] Agent exited without claiming a task (%d consecutive)\n", ctx.state.ConsecutiveNoProgress)
 
 	if ctx.state.ConsecutiveNoProgress >= 3 {
