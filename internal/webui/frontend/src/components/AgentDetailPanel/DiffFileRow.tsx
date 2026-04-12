@@ -3,7 +3,7 @@
  * Shows status badge, file path, +/- stats, viewed checkbox, expand chevron.
  */
 
-import type { DiffFile } from "@/api/diff";
+import type { DiffFile } from "@/api/issues";
 
 import styles from "./DiffTab.module.css";
 

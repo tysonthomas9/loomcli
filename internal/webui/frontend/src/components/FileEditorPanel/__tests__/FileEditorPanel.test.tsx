@@ -30,7 +30,7 @@ vi.mock("@/components/CodeMirrorEditor", () => ({
 import { useFileEditor } from "../useFileEditor";
 import type { UseFileEditorReturn } from "../useFileEditor";
 import type { UseFileTreeReturn, UseFileContentReturn } from "@/hooks";
-import type { FileEntry, FileReadData } from "@/api/files";
+import type { FileEntry, FileReadData } from "@/api/workspace";
 import { FileEditorPanel } from "../FileEditorPanel";
 
 const mockUseFileEditor = vi.mocked(useFileEditor);

@@ -7,7 +7,7 @@ import type React from "react";
 
 import { useTabInit } from "../useTabInit";
 import type { TabMetadata } from "@/api/terminal";
-import type { BackendConfigData } from "@/api/config";
+import type { BackendConfigData } from "@/api/common";
 import type { TabState } from "../terminalTabUtils";
 
 function createArgs(overrides: Partial<Parameters<typeof useTabInit>[0]> = {}) {

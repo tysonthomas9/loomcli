@@ -3,7 +3,7 @@
  * Extracted from WorkspaceTree to keep file sizes manageable.
  */
 
-import type { ConnectionState } from "@/api/sse";
+import type { ConnectionState } from "@/api/common";
 import type { LoomAgentStatus } from "@/types";
 import { AgentCard } from "@/components/AgentCard";
 import type { WorkspaceHealthSummary } from "@/utils/workspace";

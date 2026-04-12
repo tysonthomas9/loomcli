@@ -18,7 +18,7 @@ import {
   deleteTabMetadata,
 } from "@/api/terminal";
 import type { TabMetadata } from "@/api/terminal";
-import type { MutationPayload } from "@/api/sse";
+import type { MutationPayload } from "@/api/common";
 
 import { useTerminalMetadata } from "../useTerminalMetadata";
 

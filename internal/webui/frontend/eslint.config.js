@@ -162,6 +162,7 @@ export default tseslint.config(
             "src/hooks/index.ts",
             "src/hooks/*/index.ts",
             "src/api/index.ts",
+            "src/api/*/index.ts",
             "src/types/index.ts",
             "src/types/*/index.ts",
             "src/styles/index.ts",

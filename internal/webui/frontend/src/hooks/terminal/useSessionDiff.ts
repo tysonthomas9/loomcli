@@ -5,7 +5,7 @@
 
 import { useState, useEffect } from "react";
 
-import { getSessionDiff } from "@/api/sessions";
+import { getSessionDiff } from "@/api/terminal";
 import { useWorkspaceContext } from "@/hooks/workspace";
 
 /** Return type for the useSessionDiff hook. */

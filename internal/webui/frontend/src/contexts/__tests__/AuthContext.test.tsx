@@ -41,9 +41,13 @@ const mockSignOut = vi.fn();
 
 const mockGetAuthClient = vi.fn();
 
-vi.mock("@/api/authClient", () => ({
-  getAuthClient: (...args: unknown[]) => mockGetAuthClient(...args),
-}));
+vi.mock(import("@/api/common"), async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    getAuthClient: (...args: unknown[]) => mockGetAuthClient(...args),
+  };
+});
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -1,5 +1,5 @@
 import { useMemo, useEffect, useRef, lazy, Suspense } from "react";
-import type { FileReadData } from "@/api/files";
+import type { FileReadData } from "@/api/workspace";
 import styles from "./FileExplorer.module.css";
 
 const CodeMirrorEditor = lazy(() =>

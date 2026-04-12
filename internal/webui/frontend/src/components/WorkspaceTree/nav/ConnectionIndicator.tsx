@@ -3,7 +3,7 @@
  * Renders only for disconnected/reconnecting states.
  */
 
-import type { ConnectionState } from "@/api/sse";
+import type { ConnectionState } from "@/api/common";
 import { useElapsedTime } from "@/hooks/common";
 
 import styles from "../WorkspaceTree.module.css";

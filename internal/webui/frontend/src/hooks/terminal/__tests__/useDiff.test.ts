@@ -4,12 +4,12 @@
 import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { fetchDiffFiles, fetchDiffFile } from "@/api/diff";
-import type { DiffFile, DiffFilePatch } from "@/api/diff";
+import { fetchDiffFiles, fetchDiffFile } from "@/api/issues";
+import type { DiffFile, DiffFilePatch } from "@/api/issues";
 
 import { useDiff } from "../useDiff";
 
-vi.mock("@/api/diff", () => ({
+vi.mock("@/api/issues", () => ({
   fetchDiffFiles: vi.fn(),
   fetchDiffFile: vi.fn(),
 }));

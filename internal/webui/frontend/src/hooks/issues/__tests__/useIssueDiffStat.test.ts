@@ -11,12 +11,12 @@
 import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { fetchIssueDiffStat } from "@/api/diff-stat";
-import type { IssueDiffStat } from "@/api/diff-stat";
+import { fetchIssueDiffStat } from "@/api/issues";
+import type { IssueDiffStat } from "@/api/issues";
 
 import { useIssueDiffStat } from "../useIssueDiffStat";
 
-vi.mock("@/api/diff-stat", () => ({
+vi.mock("@/api/issues", () => ({
   fetchIssueDiffStat: vi.fn(),
 }));
 

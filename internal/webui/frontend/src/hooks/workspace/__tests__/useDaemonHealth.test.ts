@@ -13,15 +13,19 @@
 import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { notifyDaemonUnavailable } from "@/api/client";
-import { checkDaemonHealth } from "@/api/health";
+import { notifyDaemonUnavailable } from "@/api/common";
+import { checkDaemonHealth } from "@/api/common";
 
 import { useDaemonHealth } from "../useDaemonHealth";
 
 // Mock the health API
-vi.mock("@/api/health", () => ({
-  checkDaemonHealth: vi.fn(),
-}));
+vi.mock(import("@/api/common"), async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    checkDaemonHealth: vi.fn(),
+  };
+});
 
 const mockGet = vi.mocked(checkDaemonHealth);
 

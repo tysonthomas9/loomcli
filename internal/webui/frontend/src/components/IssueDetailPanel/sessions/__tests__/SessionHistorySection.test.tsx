@@ -19,7 +19,7 @@ import "@testing-library/jest-dom";
 import { SessionHistorySection } from "../SessionHistorySection";
 
 // Mock API calls
-vi.mock("@/api/sessionHistory", () => ({
+vi.mock("@/api/terminal", () => ({
   listSessionHistory: vi.fn(),
   getSessionScrollback: vi.fn(),
 }));
@@ -35,7 +35,7 @@ vi.mock("@/hooks/workspace", async () => {
   };
 });
 
-import { listSessionHistory, getSessionScrollback } from "@/api/sessionHistory";
+import { listSessionHistory, getSessionScrollback } from "@/api/terminal";
 
 const mockListSessionHistory = vi.mocked(listSessionHistory);
 const mockGetSessionScrollback = vi.mocked(getSessionScrollback);

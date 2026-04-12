@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useRef } from "react";
 
-import { getSessionTranscript } from "@/api/sessions";
+import { getSessionTranscript } from "@/api/terminal";
 import type { TranscriptEntry } from "@/types/agent";
 import { useWorkspaceContext } from "@/hooks/workspace";
 

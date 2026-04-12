@@ -9,8 +9,8 @@ import {
   getBackendConfig,
   updateBackendConfig,
   getCachedBackendConfig,
-} from "@/api/config";
-import type { BackendConfigData } from "@/api/config";
+} from "@/api/common";
+import type { BackendConfigData } from "@/api/common";
 
 /**
  * Return type for the useBackendConfig hook.

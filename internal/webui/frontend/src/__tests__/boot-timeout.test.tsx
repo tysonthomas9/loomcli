@@ -15,7 +15,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom";
 
-import { AppConfigError } from "@/api/appConfig";
+import { AppConfigError } from "@/api/common";
 import { BootError } from "@/components/BootError";
 
 // ---------------------------------------------------------------------------

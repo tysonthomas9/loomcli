@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 
 import { listSessionsByIssue } from "@/api/terminal";
-import type { MutationPayload } from "@/api/sse";
+import type { MutationPayload } from "@/api/common";
 import { useEventSubscription } from "@/hooks/common";
 import { useWorkspaceContext } from "@/hooks/workspace";
 

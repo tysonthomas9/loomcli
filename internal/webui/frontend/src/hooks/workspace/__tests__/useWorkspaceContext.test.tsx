@@ -30,7 +30,7 @@ vi.mock("@/api/workspace", () => ({
   clearDefaultWorkspace: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock("@/api/client", () => ({
+vi.mock("@/api/common", () => ({
   setActiveWorkspace: vi.fn(),
 }));
 

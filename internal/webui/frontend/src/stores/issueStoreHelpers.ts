@@ -9,7 +9,7 @@ import type {
   ConnectionState,
   MutationPayload,
   MutationType,
-} from "../api/sse";
+} from "../api/common";
 import type { GraphFilter } from "../api/issues";
 import type { Issue, WorkFilter, Status } from "../types";
 import {

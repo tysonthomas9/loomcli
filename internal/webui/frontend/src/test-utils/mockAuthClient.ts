@@ -3,7 +3,7 @@
  * Used by test files that mock @/api/authClient.
  *
  * This is a factory, NOT a vi.mock() setup. Each test file still owns
- * its own vi.mock("@/api/authClient") call (Vitest hoisting requires it
+ * its own vi.mock("@/api/common") call (Vitest hoisting requires it
  * at the call site).
  */
 

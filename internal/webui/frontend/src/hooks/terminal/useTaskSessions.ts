@@ -6,8 +6,8 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 
-import { getTaskSessions } from "@/api/sessions";
-import type { MutationPayload } from "@/api/sse";
+import { getTaskSessions } from "@/api/terminal";
+import type { MutationPayload } from "@/api/common";
 import type { SessionRecord } from "@/types/agent";
 import { useEventSubscription } from "@/hooks/common";
 import { useWorkspaceContext } from "@/hooks/workspace";

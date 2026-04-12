@@ -7,7 +7,7 @@ import {
   deleteTabMetadata,
 } from "@/api/terminal";
 import type { TabMetadata } from "@/api/terminal";
-import type { MutationPayload } from "@/api/sse";
+import type { MutationPayload } from "@/api/common";
 
 export interface UseTerminalMetadataReturn {
   tabs: TabMetadata[];

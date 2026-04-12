@@ -27,7 +27,7 @@ import {
   reorderWorkspaces,
 } from "@/hooks/api";
 import type { WorkspaceSummary } from "@/api/workspace";
-import type { ConnectionState } from "@/api/sse";
+import type { ConnectionState } from "@/api/common";
 import type { LoomAgentStatus } from "@/types";
 import { useStore } from "zustand";
 

@@ -16,7 +16,7 @@ import {
   deleteTabMetadata,
   scheduleSessionKill,
 } from "@/hooks/api";
-import type { IssueTab } from "@/api/issueTabs";
+import type { IssueTab } from "@/api/issues";
 import {
   useAgentTerminalLogs,
   useFocusReturn,

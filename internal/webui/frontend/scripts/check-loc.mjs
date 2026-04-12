@@ -18,7 +18,7 @@ export const ALLOWLIST = new Map([
   ["src/components/AgentsSidebar/AgentsSidebar.tsx", 657],
   ["src/components/AgentDetailPanel/AgentDetailPanel.tsx", 595],
   ["src/hooks/terminal/useAgentTerminalLogs.ts", 541],
-  ["src/api/issues.ts", 514],
+  ["src/api/issues/issues.ts", 514],
   ["src/components/IssueDetailView/IssueDetailView.tsx", 666],
   ["src/components/TerminalView/TerminalView.tsx", 1130],
   ["src/components/TerminalView/tabs/TerminalTabBar.tsx", 583],

@@ -9,18 +9,22 @@ import { createIssueStore, issuesAreEqual } from "../issueStore";
 import type { IssueStore } from "../issueStore";
 import type { StoreApi } from "zustand/vanilla";
 import type { Issue } from "@/types/issue";
-import type { MutationPayload } from "../../api/sse";
+import type { MutationPayload } from "../../api/common";
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
 
-vi.mock("../../api/issues", () => ({
-  getReadyIssues: vi.fn(),
-  getKanbanIssues: vi.fn(),
-  fetchGraphIssues: vi.fn(),
-  updateIssue: vi.fn(),
-}));
+vi.mock(import("../../api/issues"), async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    getReadyIssues: vi.fn(),
+    getKanbanIssues: vi.fn(),
+    fetchGraphIssues: vi.fn(),
+    updateIssue: vi.fn(),
+  };
+});
 
 import {
   getReadyIssues,

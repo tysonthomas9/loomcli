@@ -3,7 +3,7 @@
  * Provides file browsing, editing, dirty tracking, save (Cmd+S), and discard confirmation.
  */
 
-import type { FileEntry } from "@/api/files";
+import type { FileEntry } from "@/api/workspace";
 import type { UseFileTreeReturn } from "@/hooks";
 import { CodeMirrorEditor } from "@/components/CodeMirrorEditor";
 import { useFileEditor } from "./useFileEditor";

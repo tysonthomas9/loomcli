@@ -5,8 +5,8 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { listWorktreeDir } from "@/api/files";
-import type { FileEntry } from "@/api/files";
+import { listWorktreeDir } from "@/api/workspace";
+import type { FileEntry } from "@/api/workspace";
 import { useDebounce } from "./useDebounce";
 import { useWorkspaceContext } from "@/hooks/workspace";
 

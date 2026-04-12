@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import type { FileEntry } from "@/api/files";
+import type { FileEntry } from "@/api/workspace";
 import styles from "./FileExplorer.module.css";
 
 interface FileTreeProps {

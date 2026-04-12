@@ -5,7 +5,7 @@ import "@testing-library/jest-dom";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-import type { DiffFile } from "@/api/diff";
+import type { DiffFile } from "@/api/issues";
 
 import { DiffFileRow } from "../DiffFileRow";
 

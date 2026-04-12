@@ -14,10 +14,10 @@ import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import type { EditorInfo } from "@/types/common";
-import { openInEditor } from "@/api/editors";
+import { openInEditor } from "@/api/workspace";
 
 // Mock the editors API module (used by the store internally and directly by the hook)
-vi.mock("@/api/editors", () => ({
+vi.mock("@/api/workspace", () => ({
   fetchEditors: vi.fn(),
   openInEditor: vi.fn(),
 }));
@@ -33,7 +33,7 @@ vi.mock("@/stores", async (importOriginal) => {
 });
 
 import { editorStore } from "@/stores";
-import { fetchEditors as apiFetchEditors } from "@/api/editors";
+import { fetchEditors as apiFetchEditors } from "@/api/workspace";
 
 const mockApiFetchEditors = vi.mocked(apiFetchEditors);
 const mockOpenInEditor = vi.mocked(openInEditor);

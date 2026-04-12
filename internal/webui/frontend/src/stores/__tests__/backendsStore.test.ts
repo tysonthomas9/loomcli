@@ -8,14 +8,18 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import type { StoreApi } from "zustand/vanilla";
 import type { BackendsStore } from "../backendsStore";
-import type { BackendHealthData } from "../../api/backends";
+import type { BackendHealthData } from "../../api/workspace";
 
 // Mock the backends API module
-vi.mock("../../api/backends", () => ({
-  fetchBackends: vi.fn(),
-}));
+vi.mock(import("../../api/workspace"), async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    fetchBackends: vi.fn(),
+  };
+});
 
-import { fetchBackends as apiFetchBackends } from "../../api/backends";
+import { fetchBackends as apiFetchBackends } from "../../api/workspace";
 import { createBackendsStore, INITIAL_BACKENDS_STATE } from "../backendsStore";
 
 const mockApiFetchBackends = vi.mocked(apiFetchBackends);

@@ -12,13 +12,13 @@
 import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { getBackendConfig, updateBackendConfig } from "@/api/config";
-import type { BackendConfigData } from "@/api/config";
+import { getBackendConfig, updateBackendConfig } from "@/api/common";
+import type { BackendConfigData } from "@/api/common";
 
 import { useBackendConfig } from "../useBackendConfig";
 
 // Mock the config API module
-vi.mock("@/api/config", () => ({
+vi.mock("@/api/common", () => ({
   getBackendConfig: vi.fn(),
   updateBackendConfig: vi.fn(),
   getCachedBackendConfig: vi.fn().mockReturnValue(null),

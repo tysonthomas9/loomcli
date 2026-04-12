@@ -10,8 +10,8 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 
-import { fetchDiffFiles, fetchDiffFile } from "@/api/diff";
-import type { DiffFile, DiffFilePatch } from "@/api/diff";
+import { fetchDiffFiles, fetchDiffFile } from "@/api/issues";
+import type { DiffFile, DiffFilePatch } from "@/api/issues";
 
 import { useWorkspaceContext } from "@/hooks/workspace";
 

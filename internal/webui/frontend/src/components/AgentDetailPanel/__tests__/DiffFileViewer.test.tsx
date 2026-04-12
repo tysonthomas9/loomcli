@@ -5,7 +5,7 @@ import "@testing-library/jest-dom";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import type { DiffFilePatch } from "@/api/diff";
+import type { DiffFilePatch } from "@/api/issues";
 
 import { DiffFileViewer, parsePatch } from "../DiffFileViewer";
 

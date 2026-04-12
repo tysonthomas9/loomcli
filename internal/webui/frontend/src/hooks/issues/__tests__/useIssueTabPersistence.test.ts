@@ -14,13 +14,13 @@ import {
   fetchIssueTabState,
   saveIssueTabState,
   deleteIssueTabState,
-} from "@/api/issueTabs";
-import type { IssueTabState, IssueTab } from "@/api/issueTabs";
-import type { MutationPayload } from "@/api/sse";
+} from "@/api/issues";
+import type { IssueTabState, IssueTab } from "@/api/issues";
+import type { MutationPayload } from "@/api/common";
 
 import { useIssueTabPersistence } from "../useIssueTabPersistence";
 
-vi.mock("@/api/issueTabs", () => ({
+vi.mock("@/api/issues", () => ({
   fetchIssueTabState: vi.fn(),
   saveIssueTabState: vi.fn(),
   deleteIssueTabState: vi.fn(),

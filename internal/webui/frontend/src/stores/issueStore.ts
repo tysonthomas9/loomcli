@@ -6,8 +6,8 @@
 
 import { createStore, type StoreApi } from "zustand/vanilla";
 
-import type { ConnectionState, MutationPayload } from "../api/sse";
-import type { RequestOptions } from "../api/client";
+import type { ConnectionState, MutationPayload } from "../api/common";
+import type { RequestOptions } from "../api/common";
 import type { GraphFilter } from "../api/issues";
 import {
   getReadyIssues,

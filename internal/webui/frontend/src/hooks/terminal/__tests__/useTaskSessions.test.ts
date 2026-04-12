@@ -10,12 +10,12 @@
 import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { getTaskSessions } from "@/api/sessions";
+import { getTaskSessions } from "@/api/terminal";
 import type { SessionRecord } from "@/types/agent";
 
 import { useTaskSessions } from "../useTaskSessions";
 
-vi.mock("@/api/sessions", () => ({
+vi.mock("@/api/terminal", () => ({
   getTaskSessions: vi.fn(),
 }));
 

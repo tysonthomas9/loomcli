@@ -5,7 +5,7 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 
-import { ApiError } from "@/api/client";
+import { ApiError } from "@/api/common";
 import {
   gitPush,
   gitPull,
@@ -13,8 +13,8 @@ import {
   gitCreatePR,
   gitReset,
   gitUpdateTarget,
-} from "@/api/git";
-import type { GitResetLockedResponse } from "@/api/git";
+} from "@/api/workspace";
+import type { GitResetLockedResponse } from "@/api/workspace";
 import { useToast } from "@/hooks/ui";
 import { useWorkspaceContext } from "./useWorkspaceContext";
 

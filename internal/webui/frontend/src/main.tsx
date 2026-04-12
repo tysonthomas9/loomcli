@@ -6,7 +6,7 @@ import "@/styles/index.css";
 import { migrateLocalStorage } from "@/utils/migrateLocalStorage";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { BootError } from "@/components/BootError";
-import { initErrorReporter, reportError } from "@/api/errorReporter";
+import { initErrorReporter, reportError } from "@/api/common";
 import { ToastProvider } from "@/hooks";
 import { router } from "@/router";
 import {
@@ -14,8 +14,8 @@ import {
   AppConfigError,
   AUTH_MODE_OIDC,
   type AppConfig,
-} from "@/api/appConfig";
-import { initExternalAuth } from "@/api/authClient";
+} from "@/api/common";
+import { initExternalAuth } from "@/api/common";
 import { ExternalAuthProvider, NoAuthProvider } from "@/contexts/AuthContext";
 import { AuthGate } from "@/components/AuthGate";
 

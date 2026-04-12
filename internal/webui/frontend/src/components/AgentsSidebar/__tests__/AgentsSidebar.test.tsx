@@ -101,20 +101,28 @@ vi.mock("@/hooks", () => ({
 
 const mockGitPushAll = vi.fn();
 const mockGitPush = vi.fn();
-vi.mock("@/api/git", () => ({
-  gitPush: (...args: unknown[]) => mockGitPush(...args),
-  gitPushAll: (...args: unknown[]) => mockGitPushAll(...args),
-}));
+vi.mock(import("@/api/workspace"), async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    gitPush: (...args: unknown[]) => mockGitPush(...args),
+    gitPushAll: (...args: unknown[]) => mockGitPushAll(...args),
+  };
+});
 
-vi.mock("@/api/client", () => ({
-  ApiError: class ApiError extends Error {
-    statusText: string;
-    constructor(status: number, statusText: string) {
-      super(statusText);
-      this.statusText = statusText;
-    }
-  },
-}));
+vi.mock(import("@/api/common"), async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    ApiError: class ApiError extends Error {
+      statusText: string;
+      constructor(status: number, statusText: string) {
+        super(statusText);
+        this.statusText = statusText;
+      }
+    },
+  };
+});
 
 vi.mock("@/hooks/workspace", async () => {
   const actual =

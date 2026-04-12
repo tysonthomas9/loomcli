@@ -15,7 +15,7 @@ import "@testing-library/jest-dom";
 
 import type { UseBackendConfigReturn } from "@/hooks/workspace";
 import type { UseTerminalFontReturn } from "@/hooks/terminal";
-import type { BackendConfigData } from "@/api/config";
+import type { BackendConfigData } from "@/api/common";
 
 import { SettingsView } from "../SettingsView";
 

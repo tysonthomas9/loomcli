@@ -3,7 +3,7 @@
  * Parses patch string into hunks and renders colored lines.
  */
 
-import type { DiffFilePatch } from "@/api/diff";
+import type { DiffFilePatch } from "@/api/issues";
 
 import styles from "./DiffTab.module.css";
 

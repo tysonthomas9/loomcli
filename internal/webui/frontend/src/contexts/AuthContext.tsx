@@ -8,9 +8,9 @@ import {
   type ReactNode,
 } from "react";
 
-import { getAuthClient } from "@/api/authClient";
+import { getAuthClient } from "@/api/common";
 import { setAuthToken, setAuthState, onAuthTokenExpired } from "@/api";
-import { AUTH_MODE_OPEN, AUTH_MODE_OIDC, type AuthMode } from "@/api/appConfig";
+import { AUTH_MODE_OPEN, AUTH_MODE_OIDC, type AuthMode } from "@/api/common";
 
 // ============= Types =============
 

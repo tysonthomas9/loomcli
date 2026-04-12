@@ -4,12 +4,12 @@
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { listWorktreeDir } from "@/api/files";
-import type { FileEntry, DirListData } from "@/api/files";
+import { listWorktreeDir } from "@/api/workspace";
+import type { FileEntry, DirListData } from "@/api/workspace";
 
 import { useFileTree } from "../useFileTree";
 
-vi.mock("@/api/files", () => ({
+vi.mock("@/api/workspace", () => ({
   listWorktreeDir: vi.fn(),
 }));
 

@@ -6,8 +6,8 @@
 
 import { createStore, type StoreApi } from "zustand/vanilla";
 
-import { fetchBackends as fetchBackendsApi } from "../api/backends";
-import type { BackendHealthData } from "../api/backends";
+import { fetchBackends as fetchBackendsApi } from "../api/workspace";
+import type { BackendHealthData } from "../api/workspace";
 
 // ---------------------------------------------------------------------------
 // Types

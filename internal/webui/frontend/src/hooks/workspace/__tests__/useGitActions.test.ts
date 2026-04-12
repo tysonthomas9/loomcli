@@ -13,7 +13,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ReactNode } from "react";
 import { createElement } from "react";
 
-import { ApiError } from "@/api/client";
+import { ApiError } from "@/api/common";
 import { ToastProvider } from "@/hooks/ui";
 
 import { useGitActions } from "@/hooks/workspace";
@@ -26,7 +26,7 @@ const mockGitCreatePR = vi.fn();
 const mockGitReset = vi.fn();
 const mockGitUpdateTarget = vi.fn();
 
-vi.mock("@/api/git", () => ({
+vi.mock("@/api/workspace", () => ({
   gitPush: (...args: unknown[]) => mockGitPush(...args),
   gitPull: (...args: unknown[]) => mockGitPull(...args),
   gitSync: (...args: unknown[]) => mockGitSync(...args),

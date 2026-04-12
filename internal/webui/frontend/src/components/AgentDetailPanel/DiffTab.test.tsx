@@ -12,7 +12,7 @@ import { render, screen, fireEvent, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
-import type { DiffFile, DiffFilePatch } from "@/api/diff";
+import type { DiffFile, DiffFilePatch } from "@/api/issues";
 import type { LoomAgentStatus } from "@/types";
 import type { UseDiffReturn } from "@/hooks/terminal";
 

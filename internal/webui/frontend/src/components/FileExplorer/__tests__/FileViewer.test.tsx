@@ -5,7 +5,7 @@ import "@testing-library/jest-dom";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-import type { FileReadData } from "@/api/files";
+import type { FileReadData } from "@/api/workspace";
 
 import { FileViewer } from "../FileViewer";
 

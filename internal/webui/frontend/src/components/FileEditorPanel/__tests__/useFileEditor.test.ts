@@ -29,14 +29,14 @@ vi.mock("@/hooks", () => ({
   LAYER_TERMINAL_SEARCH: 5,
 }));
 
-vi.mock("@/api/files", () => ({
+vi.mock("@/api/workspace", () => ({
   writeWorktreeFile: vi.fn(),
 }));
 
 import { useFileTree, useFileContent, useToast } from "@/hooks";
-import { writeWorktreeFile } from "@/api/files";
+import { writeWorktreeFile } from "@/api/workspace";
 import type { UseFileTreeReturn, UseFileContentReturn } from "@/hooks";
-import type { FileReadData } from "@/api/files";
+import type { FileReadData } from "@/api/workspace";
 import { useFileEditor } from "../useFileEditor";
 
 const mockUseFileTree = vi.mocked(useFileTree);

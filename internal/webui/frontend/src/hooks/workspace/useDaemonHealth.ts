@@ -7,8 +7,8 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 
-import { onDaemonUnavailable } from "@/api/client";
-import { checkDaemonHealth } from "@/api/health";
+import { onDaemonUnavailable } from "@/api/common";
+import { checkDaemonHealth } from "@/api/common";
 
 import { usePollingWithBackoff } from "@/hooks/common";
 

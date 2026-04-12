@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 
 import { fetchDiffCommits } from "@/hooks/api";
-import type { DiffCommit } from "@/api/diff";
+import type { DiffCommit } from "@/api/issues";
 import type { LoomCommitDetail } from "@/types/agent";
 
 /**

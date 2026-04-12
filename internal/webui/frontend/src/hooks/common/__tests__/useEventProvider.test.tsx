@@ -10,11 +10,11 @@ import {
   useEventContext,
   useEventSubscription,
 } from "../useEventProvider";
-import type { MutationPayload } from "@/api/sse";
+import type { MutationPayload } from "@/api/common";
 
 // Mock the get function from client.ts — default to 404 (open mode, no SSE token endpoint)
-vi.mock("@/api/client", async (importOriginal) => {
-  const mod = await importOriginal<typeof import("@/api/client")>();
+vi.mock("@/api/common/client", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("@/api/common/client")>();
   return {
     ...mod,
     get: vi.fn().mockRejectedValue(new mod.ApiError(404, "Not Found")),

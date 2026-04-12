@@ -13,10 +13,10 @@
 import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import type { BackendHealthData } from "@/api/backends";
+import type { BackendHealthData } from "@/api/workspace";
 
 // Mock the backends API module (used by the store internally)
-vi.mock("@/api/backends", () => ({
+vi.mock("@/api/workspace", () => ({
   fetchBackends: vi.fn(),
   refreshBackends: vi.fn(),
 }));
@@ -31,7 +31,7 @@ vi.mock("@/stores", async (importOriginal) => {
 });
 
 import { backendsStore } from "@/stores";
-import { fetchBackends } from "@/api/backends";
+import { fetchBackends } from "@/api/workspace";
 
 const mockFetchBackends = vi.mocked(fetchBackends);
 

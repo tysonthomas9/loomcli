@@ -12,7 +12,7 @@ import { render, screen, fireEvent, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
-import type { GitStatus } from "@/api/git";
+import type { GitStatus } from "@/api/workspace";
 import type { LoomAgentStatus } from "@/types";
 
 import { GitTab } from "./GitTab";
@@ -63,7 +63,7 @@ vi.mock("@/hooks/workspace", async () => {
 // Mock fetchDiffCommits to avoid real API calls
 let mockDiffCommitsResult: Promise<unknown>;
 
-vi.mock("@/api/diff", () => ({
+vi.mock("@/api/issues", () => ({
   fetchDiffCommits: () => mockDiffCommitsResult,
 }));
 

@@ -20,7 +20,7 @@ import { useParams, useNavigate, useLocation, Outlet } from "react-router-dom";
 
 import { updateIssue, addComment, closeIssue } from "@/api";
 import type { IssueContext } from "@/api/terminal";
-import { getAgentTerminalInfo } from "@/api/logs";
+import { getAgentTerminalInfo } from "@/api/terminal";
 import { buildShareUrl } from "@/utils/buildShareUrl";
 import { getReviewType } from "@/utils/issue";
 import {

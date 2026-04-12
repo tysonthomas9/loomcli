@@ -5,8 +5,8 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 
-import type { GitStatus } from "@/api/git";
-import { fetchGitStatus } from "@/api/git";
+import type { GitStatus } from "@/api/workspace";
+import { fetchGitStatus } from "@/api/workspace";
 
 import { useWorkspaceContext } from "./useWorkspaceContext";
 

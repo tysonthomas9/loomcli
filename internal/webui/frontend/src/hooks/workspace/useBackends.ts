@@ -2,7 +2,7 @@ import { useEffect, useMemo, useCallback } from "react";
 import { useStore } from "zustand";
 
 import { backendsStore } from "@/stores";
-import type { BackendHealthData } from "@/api/backends";
+import type { BackendHealthData } from "@/api/workspace";
 import { toBackendInfo, type BackendInfo } from "@/utils/workspace";
 
 export interface UseBackendsReturn {

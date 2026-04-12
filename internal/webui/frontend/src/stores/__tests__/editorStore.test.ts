@@ -11,11 +11,15 @@ import type { EditorStore } from "../editorStore";
 import type { EditorInfo } from "@/types/common";
 
 // Mock the editors API module
-vi.mock("../../api/editors", () => ({
-  fetchEditors: vi.fn(),
-}));
+vi.mock(import("../../api/workspace"), async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    fetchEditors: vi.fn(),
+  };
+});
 
-import { fetchEditors as apiFetchEditors } from "../../api/editors";
+import { fetchEditors as apiFetchEditors } from "../../api/workspace";
 import { createEditorStore, INITIAL_EDITOR_STATE } from "../editorStore";
 
 const mockApiFetchEditors = vi.mocked(apiFetchEditors);

@@ -128,7 +128,7 @@ vi.mock("@xterm/xterm/css/xterm.css", () => ({}));
 
 // ── API mocks ────────────────────────────────────────────────────────────────
 
-vi.mock("@/api/client", () => ({
+vi.mock("@/api/common", () => ({
   get: vi.fn(() => Promise.resolve({ token: "test-token" })),
   getWsBaseUrl: () => "ws://localhost",
 }));

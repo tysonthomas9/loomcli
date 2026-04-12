@@ -16,7 +16,7 @@ import {
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
-import type { ConnectionState } from "@/api/sse";
+import type { ConnectionState } from "@/api/common";
 import {
   useFilterState,
   useIssueDetail,

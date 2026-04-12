@@ -2,7 +2,7 @@ import { useEffect, useMemo, useCallback } from "react";
 import { useStore } from "zustand";
 
 import { editorStore } from "@/stores";
-import { openInEditor } from "@/api/editors";
+import { openInEditor } from "@/api/workspace";
 import type { EditorInfo } from "@/types/common";
 
 export interface UseEditorsResult {

@@ -1,7 +1,7 @@
 import { useEffect, type MutableRefObject } from "react";
 
 import type { TabMetadata } from "@/api/terminal";
-import type { BackendConfigData } from "@/api/config";
+import type { BackendConfigData } from "@/api/common";
 
 import type { ConnectionState } from "@/components/TerminalView/instances";
 import { getBackendFromSessionName, type TabState } from "./terminalTabUtils";

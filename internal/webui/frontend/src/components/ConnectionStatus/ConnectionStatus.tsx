@@ -3,7 +3,7 @@
  * Provides visual feedback about whether the application is connected to the beads daemon.
  */
 
-import type { ConnectionState } from "@/api/sse";
+import type { ConnectionState } from "@/api/common";
 
 import styles from "./ConnectionStatus.module.css";
 

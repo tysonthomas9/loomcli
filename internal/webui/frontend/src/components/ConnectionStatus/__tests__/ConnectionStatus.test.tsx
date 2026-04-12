@@ -10,7 +10,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom";
 
-import type { ConnectionState } from "@/api/sse";
+import type { ConnectionState } from "@/api/common";
 
 import { ConnectionStatus } from "../ConnectionStatus";
 

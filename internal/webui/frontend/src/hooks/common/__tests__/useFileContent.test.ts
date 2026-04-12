@@ -4,12 +4,12 @@
 import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { readWorktreeFile } from "@/api/files";
-import type { FileReadData } from "@/api/files";
+import { readWorktreeFile } from "@/api/workspace";
+import type { FileReadData } from "@/api/workspace";
 
 import { useFileContent } from "../useFileContent";
 
-vi.mock("@/api/files", () => ({
+vi.mock("@/api/workspace", () => ({
   readWorktreeFile: vi.fn(),
 }));
 

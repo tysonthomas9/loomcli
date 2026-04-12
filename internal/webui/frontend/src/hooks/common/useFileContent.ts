@@ -4,8 +4,8 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { readWorktreeFile } from "@/api/files";
-import type { FileReadData } from "@/api/files";
+import { readWorktreeFile } from "@/api/workspace";
+import type { FileReadData } from "@/api/workspace";
 import { useWorkspaceContext } from "@/hooks/workspace";
 
 export interface UseFileContentReturn {

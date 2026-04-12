@@ -38,7 +38,7 @@ const mockGetAgentByName = {
 };
 
 // Mock fetchGitStatus
-vi.mock("@/api/git", () => ({
+vi.mock("@/api/workspace", () => ({
   fetchGitStatus: vi.fn().mockRejectedValue(new Error("not available")),
 }));
 

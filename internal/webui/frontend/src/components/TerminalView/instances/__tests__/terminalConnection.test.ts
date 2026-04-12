@@ -35,7 +35,7 @@ const shared = vi.hoisted(() => {
 
 // ── Mock @/api/client ────────────────────────────────────────────────────────
 
-vi.mock("@/api/client", () => ({
+vi.mock("@/api/common", () => ({
   get: shared.getMock,
   getWsBaseUrl: () => "ws://localhost",
 }));
@@ -69,7 +69,7 @@ const agentMocks = vi.hoisted(() => {
   };
 });
 
-vi.mock("@/api/logs", () => ({
+vi.mock("@/api/terminal", () => ({
   getAgentTerminalToken: agentMocks.getAgentTerminalToken,
   getAgentTerminalWsUrl: agentMocks.getAgentTerminalWsUrl,
 }));

@@ -10,12 +10,12 @@
 import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { fetchGitStatus } from "@/api/git";
-import type { GitStatus } from "@/api/git";
+import { fetchGitStatus } from "@/api/workspace";
+import type { GitStatus } from "@/api/workspace";
 
 import { useGitStatus } from "../useGitStatus";
 
-vi.mock("@/api/git", () => ({
+vi.mock("@/api/workspace", () => ({
   fetchGitStatus: vi.fn(),
 }));
 

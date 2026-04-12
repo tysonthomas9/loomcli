@@ -4,9 +4,9 @@ import {
   fetchIssueTabState,
   saveIssueTabState,
   deleteIssueTabState,
-} from "@/api/issueTabs";
-import type { IssueTabState, IssueTab } from "@/api/issueTabs";
-import type { MutationPayload } from "@/api/sse";
+} from "@/api/issues";
+import type { IssueTabState, IssueTab } from "@/api/issues";
+import type { MutationPayload } from "@/api/common";
 
 import { useWorkspaceContext } from "@/hooks/workspace";
 

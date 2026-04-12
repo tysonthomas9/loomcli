@@ -22,7 +22,7 @@ import {
   type ConnectionState,
   type MutationPayload,
   type MutationType,
-} from "@/api/sse";
+} from "@/api/common";
 import { useWorkspaceContext } from "@/hooks/workspace";
 
 /**
