@@ -422,6 +422,18 @@ vi.mock("@/hooks", () => ({
     lastError: null,
     retryNow: vi.fn(),
   })),
+  useBackendConfig: vi.fn(() => ({
+    config: {
+      backend: "claude",
+      backends: ["claude"],
+    },
+    isLoading: false,
+    error: null,
+    isSaving: false,
+    isCached: false,
+    updateBackend: vi.fn(),
+    refetch: vi.fn(),
+  })),
   usePanelManager: mockUsePanelManager,
   useRegisterEscapeLayer: vi.fn(),
   useKeyboardShortcuts: vi.fn(() => ({
