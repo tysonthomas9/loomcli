@@ -80,6 +80,8 @@ echo "  Frontend: http://localhost:3000"
 echo "  Note:     /api/* and /health are proxied through Vite → :8080"
 echo ""
 
+trap cleanup EXIT
+
 # Start air (Go hot-reload) from repo root
 cd "$REPO_ROOT"
 air &
@@ -89,9 +91,6 @@ AIR_PID=$!
 cd "$FRONTEND_DIR"
 npm run dev &
 VITE_PID=$!
-
-# Register trap after PIDs are set to avoid race condition
-trap cleanup EXIT
 
 # Wait for either process to exit
 wait "$AIR_PID" "$VITE_PID" 2>/dev/null || true

@@ -197,6 +197,20 @@ test_cleanup_kills_processes() {
 }
 
 # ---------------------------------------------------------------------------
+# Test 16: Cleanup trap is registered before background launches
+# ---------------------------------------------------------------------------
+test_cleanup_trap_before_background() {
+    local trap_line air_line
+    trap_line=$(grep -n 'trap cleanup EXIT' "$SCRIPT_DIR/dev.sh" | head -1 | cut -d: -f1)
+    air_line=$(grep -n 'air &' "$SCRIPT_DIR/dev.sh" | head -1 | cut -d: -f1)
+    if [[ -n "$trap_line" && -n "$air_line" && "$trap_line" -lt "$air_line" ]]; then
+        pass "cleanup trap is registered before background launches"
+    else
+        fail "cleanup trap must be registered before air & launch (trap=$trap_line, air=$air_line)"
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # Run all tests
 # ---------------------------------------------------------------------------
 
@@ -218,6 +232,7 @@ test_check_deps_air_install_hint
 test_air_config_exists
 test_air_tmp_dir
 test_cleanup_kills_processes
+test_cleanup_trap_before_background
 
 echo ""
 echo "=== Results: $PASS_COUNT passed, $FAIL_COUNT failed ==="
