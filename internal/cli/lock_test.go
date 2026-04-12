@@ -1171,3 +1171,77 @@ func TestSingleTaskModeLockStatePattern_Agent(t *testing.T) {
 		t.Errorf("ReadLockFile: expected AgentName 'spark', got %q", readInfo.AgentName)
 	}
 }
+
+func TestUpdateLockClaudeSessionID(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	err := AcquireLock(tmpDir, "task", "agent1")
+	if err != nil {
+		t.Fatalf("AcquireLock failed: %v", err)
+	}
+	defer ReleaseLock(tmpDir)
+
+	if err := UpdateLockClaudeSessionID(tmpDir, "sess-abc-123"); err != nil {
+		t.Fatalf("UpdateLockClaudeSessionID: %v", err)
+	}
+
+	info, err := ReadLockFile(tmpDir)
+	if err != nil {
+		t.Fatalf("ReadLockFile: %v", err)
+	}
+	if info.ClaudeSessionID != "sess-abc-123" {
+		t.Errorf("ClaudeSessionID = %q, want %q", info.ClaudeSessionID, "sess-abc-123")
+	}
+}
+
+func TestUpdateLockClaudeSessionID_PIDMismatch(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	otherLock := `{"pid":999999999,"command":"task","agent_name":"agent1","started_at":"2024-01-01T00:00:00Z"}`
+	lockPath := filepath.Join(tmpDir, LockFileName)
+	if err := os.WriteFile(lockPath, []byte(otherLock), 0644); err != nil {
+		t.Fatalf("failed to write lock: %v", err)
+	}
+
+	err := UpdateLockClaudeSessionID(tmpDir, "sess-abc-123")
+	if err == nil {
+		t.Error("Expected error when PID doesn't match")
+	}
+	if !strings.Contains(err.Error(), "different process") {
+		t.Errorf("Expected 'different process' in error, got: %v", err)
+	}
+}
+
+func TestClearLockClaudeSessionID(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	err := AcquireLock(tmpDir, "task", "agent1")
+	if err != nil {
+		t.Fatalf("AcquireLock failed: %v", err)
+	}
+	defer ReleaseLock(tmpDir)
+
+	// Set then clear
+	if err := UpdateLockClaudeSessionID(tmpDir, "sess-abc-123"); err != nil {
+		t.Fatalf("UpdateLockClaudeSessionID: %v", err)
+	}
+	if err := ClearLockClaudeSessionID(tmpDir); err != nil {
+		t.Fatalf("ClearLockClaudeSessionID: %v", err)
+	}
+
+	info, err := ReadLockFile(tmpDir)
+	if err != nil {
+		t.Fatalf("ReadLockFile: %v", err)
+	}
+	if info.ClaudeSessionID != "" {
+		t.Errorf("ClaudeSessionID after clear = %q, want empty", info.ClaudeSessionID)
+	}
+
+	// Verify omitempty: field should not appear in JSON
+	data, _ := os.ReadFile(filepath.Join(tmpDir, LockFileName))
+	var raw map[string]interface{}
+	json.Unmarshal(data, &raw)
+	if _, exists := raw["claude_session_id"]; exists {
+		t.Error("claude_session_id should not be in JSON after clear (omitempty)")
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
@@ -229,17 +230,36 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 		}
 	}()
 
-	scanStreamOutput(stdout, func(line string) {
-		displayStreamEvent(line)
-		if collector != nil {
-			collectClaudeStreamUsage(line, collector)
-		}
-	})
+	scanStreamOutput(stdout, newStreamLineHandler(workDir, collector))
 
 	runErr := cmd.Wait()
 	guard.WaitAndMark()
 	r.Close()
+
+	if err := cli.ClearLockClaudeSessionID(workDir); err != nil {
+		fmt.Fprintf(os.Stderr, "[loom] failed to clear claude session ID: %v\n", err)
+	}
+
 	return runErr
+}
+
+// newStreamLineHandler returns a line handler that captures the Claude session ID
+// (once) and forwards lines to displayStreamEvent and the usage collector.
+func newStreamLineHandler(workDir string, collector *usage.Collector) func(string) {
+	var sessionOnce sync.Once
+	return func(line string) {
+		if sid, ok := extractClaudeSessionID(line); ok {
+			sessionOnce.Do(func() {
+				if err := cli.UpdateLockClaudeSessionID(workDir, sid); err != nil {
+					fmt.Fprintf(os.Stderr, "[loom] failed to persist claude session ID: %v\n", err)
+				}
+			})
+		}
+		displayStreamEvent(line)
+		if collector != nil {
+			collectClaudeStreamUsage(line, collector)
+		}
+	}
 }
 
 // scanStreamOutput reads stdout line by line through a buffered scanner and
@@ -283,6 +303,26 @@ type StreamUsage struct {
 	OutputTokens             int64 `json:"output_tokens"`
 	CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
 	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+}
+
+// extractClaudeSessionID parses a stream-json line and returns the session_id
+// if the line is a system init event (type:"system", subtype:"init").
+func extractClaudeSessionID(line string) (string, bool) {
+	var event struct {
+		Type      string `json:"type"`
+		Subtype   string `json:"subtype"`
+		SessionID string `json:"session_id"`
+	}
+	if err := json.Unmarshal([]byte(line), &event); err != nil {
+		return "", false
+	}
+	if event.Type != "system" || event.Subtype != "init" {
+		return "", false
+	}
+	if event.SessionID == "" {
+		return "", false
+	}
+	return event.SessionID, true
 }
 
 // displayStreamEvent parses JSON event and displays relevant content

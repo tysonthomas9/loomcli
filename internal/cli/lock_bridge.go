@@ -14,6 +14,8 @@ type LockBridge interface {
 	UpdateState(agentName, state string) error
 	UpdateTask(agentName, taskID, title string) error
 	ClearTaskID(agentName string) error
+	UpdateClaudeSessionID(agentName, claudeSessionID string) error
+	ClearClaudeSessionID(agentName string) error
 	ReadLock(agentName string) (*LockInfo, error)
 }
 
@@ -39,6 +41,14 @@ func (b *LocalLockBridge) ClearTaskID(agentName string) error {
 	return ClearLockTaskID(b.WorktreePath)
 }
 
+func (b *LocalLockBridge) UpdateClaudeSessionID(agentName, claudeSessionID string) error {
+	return UpdateLockClaudeSessionID(b.WorktreePath, claudeSessionID)
+}
+
+func (b *LocalLockBridge) ClearClaudeSessionID(agentName string) error {
+	return ClearLockClaudeSessionID(b.WorktreePath)
+}
+
 func (b *LocalLockBridge) ReadLock(agentName string) (*LockInfo, error) {
 	return ReadLockFile(b.WorktreePath)
 }
@@ -54,11 +64,12 @@ type HTTPLockBridge struct {
 
 // lockStateRequest is the JSON body for state updates.
 type lockStateRequest struct {
-	State     string `json:"state"`
-	AgentName string `json:"agent_name"`
-	TaskID    string `json:"task_id,omitempty"`
-	TaskTitle string `json:"task_title,omitempty"`
-	Action    string `json:"action"` // "update_state", "update_task", "clear_task", "read"
+	State           string `json:"state"`
+	AgentName       string `json:"agent_name"`
+	TaskID          string `json:"task_id,omitempty"`
+	TaskTitle       string `json:"task_title,omitempty"`
+	ClaudeSessionID string `json:"claude_session_id,omitempty"`
+	Action          string `json:"action"` // "update_state", "update_task", "clear_task", "update_claude_session_id", "clear_claude_session_id", "read"
 }
 
 func (b *HTTPLockBridge) client() *http.Client {
@@ -135,6 +146,37 @@ func (b *HTTPLockBridge) ClearTaskID(agentName string) error {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("control plane returned %d for clear task", resp.StatusCode)
+	}
+	return nil
+}
+
+func (b *HTTPLockBridge) UpdateClaudeSessionID(agentName, claudeSessionID string) error {
+	resp, err := b.doRequest(lockStateRequest{
+		Action:          "update_claude_session_id",
+		AgentName:       agentName,
+		ClaudeSessionID: claudeSessionID,
+	})
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("control plane returned %d for claude session ID update", resp.StatusCode)
+	}
+	return nil
+}
+
+func (b *HTTPLockBridge) ClearClaudeSessionID(agentName string) error {
+	resp, err := b.doRequest(lockStateRequest{
+		Action:    "clear_claude_session_id",
+		AgentName: agentName,
+	})
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("control plane returned %d for clear claude session ID", resp.StatusCode)
 	}
 	return nil
 }

@@ -28,15 +28,16 @@ const (
 
 // LockInfo holds information about a running agent
 type LockInfo struct {
-	PID           int       `json:"pid"`
-	Command       string    `json:"command"`
-	StartedAt     time.Time `json:"started_at"`
-	AgentName     string    `json:"agent_name"`
-	TaskID        string    `json:"task_id,omitempty"`
-	TaskTitle     string    `json:"task_title,omitempty"`
-	TaskStartedAt time.Time `json:"task_started_at,omitempty"` // Per-task timing (reset when new task claimed)
-	State         string    `json:"state,omitempty"`           // Execution state (active/idle) for auto mode
-	Workspace     string    `json:"workspace,omitempty"`       // Workspace name when in workspace mode
+	PID             int       `json:"pid"`
+	Command         string    `json:"command"`
+	StartedAt       time.Time `json:"started_at"`
+	AgentName       string    `json:"agent_name"`
+	TaskID          string    `json:"task_id,omitempty"`
+	TaskTitle       string    `json:"task_title,omitempty"`
+	TaskStartedAt   time.Time `json:"task_started_at,omitempty"`   // Per-task timing (reset when new task claimed)
+	State           string    `json:"state,omitempty"`             // Execution state (active/idle) for auto mode
+	ClaudeSessionID string    `json:"claude_session_id,omitempty"` // Claude CLI session UUID for resume
+	Workspace       string    `json:"workspace,omitempty"`         // Workspace name when in workspace mode
 }
 
 // ResolveLockDir determines the correct directory for the lock file.
@@ -319,6 +320,67 @@ func ClearLockTaskID(worktreePath string) error {
 	info.TaskID = ""
 	info.TaskTitle = ""
 	info.TaskStartedAt = time.Time{}
+
+	data, err = json.MarshalIndent(info, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal lock info: %w", err)
+	}
+
+	return os.WriteFile(lockPath, data, 0600)
+}
+
+// UpdateLockClaudeSessionID updates the lock file with the Claude CLI session UUID.
+// Used by auto mode to persist the session ID for --resume on restart.
+func UpdateLockClaudeSessionID(worktreePath, claudeSessionID string) error {
+	lockPath := filepath.Join(ResolveLockDir(worktreePath), LockFileName)
+
+	data, err := os.ReadFile(lockPath)
+	if err != nil {
+		return fmt.Errorf("no active lock to update: %w", err)
+	}
+
+	var info LockInfo
+	if err := json.Unmarshal(data, &info); err != nil {
+		return fmt.Errorf("invalid lock file: %w", err)
+	}
+
+	if info.PID != os.Getpid() {
+		return fmt.Errorf("lock belongs to different process (PID %d)", info.PID)
+	}
+
+	info.ClaudeSessionID = claudeSessionID
+
+	data, err = json.MarshalIndent(info, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal lock info: %w", err)
+	}
+
+	return os.WriteFile(lockPath, data, 0600)
+}
+
+// ClearLockClaudeSessionID clears the Claude session UUID from the lock file.
+// Called after a Claude process exits to prevent stale session IDs.
+func ClearLockClaudeSessionID(worktreePath string) error {
+	lockPath := filepath.Join(ResolveLockDir(worktreePath), LockFileName)
+
+	data, err := os.ReadFile(lockPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // lock already released, nothing to clear
+		}
+		return fmt.Errorf("no active lock to update: %w", err)
+	}
+
+	var info LockInfo
+	if err := json.Unmarshal(data, &info); err != nil {
+		return fmt.Errorf("invalid lock file: %w", err)
+	}
+
+	if info.PID != os.Getpid() {
+		return fmt.Errorf("lock belongs to different process (PID %d)", info.PID)
+	}
+
+	info.ClaudeSessionID = ""
 
 	data, err = json.MarshalIndent(info, "", "  ")
 	if err != nil {

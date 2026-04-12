@@ -508,3 +508,59 @@ func TestCollectClaudeStreamUsage_TopLevelUsagePreferred(t *testing.T) {
 		t.Errorf("OutputTokens = %d, want 200 (top-level usage preferred)", su.OutputTokens)
 	}
 }
+
+func TestExtractClaudeSessionID_SystemInit(t *testing.T) {
+	t.Parallel()
+	line := `{"type":"system","subtype":"init","session_id":"sess-abc-123-def"}`
+	sid, ok := extractClaudeSessionID(line)
+	if !ok {
+		t.Fatal("expected ok=true for system init event")
+	}
+	if sid != "sess-abc-123-def" {
+		t.Errorf("session_id = %q, want %q", sid, "sess-abc-123-def")
+	}
+}
+
+func TestExtractClaudeSessionID_NonSystemEvent(t *testing.T) {
+	t.Parallel()
+	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"hello"}]}}`
+	_, ok := extractClaudeSessionID(line)
+	if ok {
+		t.Error("expected ok=false for non-system event")
+	}
+}
+
+func TestExtractClaudeSessionID_MalformedJSON(t *testing.T) {
+	t.Parallel()
+	_, ok := extractClaudeSessionID("not valid json at all")
+	if ok {
+		t.Error("expected ok=false for malformed JSON")
+	}
+}
+
+func TestExtractClaudeSessionID_MissingSessionID(t *testing.T) {
+	t.Parallel()
+	line := `{"type":"system","subtype":"init"}`
+	_, ok := extractClaudeSessionID(line)
+	if ok {
+		t.Error("expected ok=false when session_id is missing")
+	}
+}
+
+func TestExtractClaudeSessionID_EmptySessionID(t *testing.T) {
+	t.Parallel()
+	line := `{"type":"system","subtype":"init","session_id":""}`
+	_, ok := extractClaudeSessionID(line)
+	if ok {
+		t.Error("expected ok=false when session_id is empty string")
+	}
+}
+
+func TestExtractClaudeSessionID_WrongSubtype(t *testing.T) {
+	t.Parallel()
+	line := `{"type":"system","subtype":"error","session_id":"sess-123"}`
+	_, ok := extractClaudeSessionID(line)
+	if ok {
+		t.Error("expected ok=false for non-init subtype")
+	}
+}
