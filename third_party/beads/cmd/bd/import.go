@@ -138,6 +138,7 @@ NOTE: Import requires direct database access and does not work with daemon mode.
 		// Phase 1: Read and parse all JSONL
 		ctx := rootCtx
 		scanner := bufio.NewScanner(in)
+		scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 
 		var allIssues []*types.Issue
 		lineNum := 0
@@ -195,6 +196,7 @@ NOTE: Import requires direct database access and does not work with daemon mode.
 					}()
 					in = f
 					scanner = bufio.NewScanner(in)
+					scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 					allIssues = nil // Reset issues list
 					lineNum = 0     // Reset line counter
 					continue        // Restart parsing from beginning
@@ -630,6 +632,7 @@ func countLines(filePath string) int {
 	defer func() { _ = f.Close() }()
 
 	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	lines := 0
 	for scanner.Scan() {
 		lines++
