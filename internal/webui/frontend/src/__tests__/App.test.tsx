@@ -360,6 +360,20 @@ vi.mock("@/hooks", () => ({
     lastError: null,
     retryNow: vi.fn(),
   })),
+  useBackendConfig: vi.fn(() => ({
+    config: {
+      backend: "claude",
+      source: "project",
+      available: ["claude"],
+      agents: [],
+    },
+    isLoading: false,
+    error: null,
+    isSaving: false,
+    isCached: false,
+    updateBackend: vi.fn(),
+    refetch: vi.fn(),
+  })),
   usePanelManager: mockUsePanelManager,
   useRegisterEscapeLayer: vi.fn(),
   useKeyboardShortcuts: vi.fn(() => ({
@@ -385,7 +399,6 @@ vi.mock("@/hooks", () => ({
     error: null,
     refetch: vi.fn(),
   }),
-  useBackendConfig: () => ({ config: { backend: "claude" }, error: null }),
 }));
 
 vi.mock("@/hooks/ui", async (importOriginal) => {
