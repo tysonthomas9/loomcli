@@ -31,6 +31,11 @@ type promptTemplateData struct {
 	TargetBranch    string
 	ConflictList    string
 	PushRef         string
+	// Epic run orchestrator fields
+	EpicID       string
+	WorktreeName string
+	RunDir       string
+	ResumeFlag   string
 }
 
 // renderPrompt loads a template by name, checks for per-project override,
@@ -295,6 +300,43 @@ func generateConflictResolutionPromptWithPush(sourceBranch, targetBranch string,
 func GenerateLeadPrompt() string {
 	return renderPrompt("lead", promptTemplateData{
 		SafetyBlock: buildSafetyGuardrailsBlock(),
+	})
+}
+
+// GenerateEpicRunPrompt creates the prompt for the epic run orchestrator.
+func GenerateEpicRunPrompt(epicID, worktree, runDir string, resume bool) string {
+	resumeFlag := ""
+	if resume {
+		resumeFlag = "--resume"
+	}
+	return renderPrompt("epic_run", promptTemplateData{
+		EpicID:       epicID,
+		WorktreeName: worktree,
+		RunDir:       runDir,
+		ResumeFlag:   resumeFlag,
+		SafetyBlock:  buildSafetyGuardrailsBlock(),
+	})
+}
+
+// GenerateEpicRunPlanningPrompt creates the prompt for an epic run planning agent with a pre-assigned task.
+func GenerateEpicRunPlanningPrompt(agentName, taskID string, workspace *WorkspaceConfig) string {
+	return renderPrompt("epic_run_planning", promptTemplateData{
+		AgentName:      agentName,
+		WorkspaceBlock: buildWorkspaceContextBlock(workspace),
+		SafetyBlock:    buildSafetyGuardrailsBlock(),
+		TaskID:         taskID,
+	})
+}
+
+// GenerateEpicRunTaskPrompt creates the prompt for an epic run implementation agent with a pre-assigned task.
+func GenerateEpicRunTaskPrompt(agentName, taskID string, workspace *WorkspaceConfig, backendName string) string {
+	return renderPrompt("epic_run_task", promptTemplateData{
+		AgentName:      agentName,
+		WorkspaceBlock: buildWorkspaceContextBlock(workspace),
+		SafetyBlock:    buildSafetyGuardrailsBlock(),
+		TaskID:         taskID,
+		TestStep:       buildTestStep(backendName),
+		ReviewStep:     buildReviewStep(backendName),
 	})
 }
 
