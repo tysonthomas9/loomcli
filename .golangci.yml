@@ -247,6 +247,12 @@ linters:
         linters:
           - revive
         text: "var-naming: avoid meaningless package names"
+      # "api" is the HTTP-API backend implementation, sibling to backend/beads,
+      # backend/fleet, etc. The full import path is self-describing.
+      - path: 'internal/backend/api/'
+        linters:
+          - revive
+        text: "var-naming: avoid meaningless package names"
       # "log" is a domain sub-package (log streaming), distinct from stdlib log.
       - path: 'internal/webui/log/'
         linters:
