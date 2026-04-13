@@ -113,8 +113,12 @@ func exportToJSONLWithStore(ctx context.Context, store storage.Storage, jsonlPat
 			}
 		}
 
-		// Write page to JSONL
+		// Write page to JSONL — skip wisps (ephemeral issues live only in
+		// SQLite and are shared via .beads/redirect, not JSONL).
 		for _, issue := range page {
+			if issue.Ephemeral {
+				continue
+			}
 			data, marshalErr := json.Marshal(issue)
 			if marshalErr != nil {
 				writeErr = fmt.Errorf("failed to marshal issue %s: %w", issue.ID, marshalErr)

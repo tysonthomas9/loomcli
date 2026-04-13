@@ -341,7 +341,8 @@ export function WorkspaceProvider({
   const activeRepoNamesKey = activeRepoNames.join(",");
   const sourceReposFilter = useMemo(() => {
     if (isAllSelected) return undefined;
-    return activeRepoNamesKey.split(",");
+    // Empty string would split to [""], not [] — guard explicitly.
+    return activeRepoNamesKey === "" ? [] : activeRepoNamesKey.split(",");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAllSelected, activeRepoNamesKey]);
 

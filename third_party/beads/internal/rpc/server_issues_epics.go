@@ -1329,6 +1329,9 @@ func (s *Server) handleList(req *Request) Response {
 	}
 	filter.Overdue = listArgs.Overdue
 
+	// Lightweight mode: skip heavy text fields for list views
+	filter.Lightweight = listArgs.Lightweight
+
 	// Guard against excessive ID lists to avoid SQLite parameter limits
 	const maxIDs = 1000
 	if len(filter.IDs) > maxIDs {
