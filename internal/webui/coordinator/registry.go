@@ -231,26 +231,39 @@ type subscriberActivator interface {
 }
 
 // ActivateSubscriber activates the deferred SSE subscriber for a registered
-// workspace by delegating to any hook that implements subscriberActivator
+// workspace by delegating to every hook that implements subscriberActivator
 // (typically the notification subscriber hook). Returns nil if no activator
-// hook is present — activation is best-effort.
+// hook is present or the workspace is not currently registered — activation
+// is best-effort and must not resurrect a deregistered workspace.
 func (r *WorkspaceRegistry) ActivateSubscriber(id string) error {
 	if id == "" {
 		return ErrEmptyWorkspaceID
 	}
 	r.mu.RLock()
-	hooks := append([]LifecycleHook(nil), r.hooks...)
-	closed := r.closed
-	r.mu.RUnlock()
-	if closed {
+	if r.closed {
+		r.mu.RUnlock()
 		return ErrRegistryClosed
 	}
+	// Skip silently if the workspace was deregistered before the caller
+	// (e.g., DaemonStartupFn's onReady callback) fired. Otherwise we'd
+	// resurrect a torn-down workspace by starting a subscriber with no pool.
+	if _, ok := r.active[id]; !ok {
+		r.mu.RUnlock()
+		return nil
+	}
+	hooks := append([]LifecycleHook(nil), r.hooks...)
+	r.mu.RUnlock()
+	var firstErr error
 	for _, h := range hooks {
-		if activator, ok := h.(subscriberActivator); ok {
-			return activator.Activate(id)
+		activator, ok := h.(subscriberActivator)
+		if !ok {
+			continue
+		}
+		if err := activator.Activate(id); err != nil && firstErr == nil {
+			firstErr = err
 		}
 	}
-	return nil
+	return firstErr
 }
 
 // WorkspaceIDs returns the IDs of all currently registered workspaces.
