@@ -39,16 +39,15 @@ func NewMultiWorkspaceSubscriber(hub *realtime.Hub, multiPool *daemon.MultiPool,
 
 // AddWorkspace creates and starts a DaemonSubscriber for the given workspace.
 // The subscriber uses the pool from MultiPool and tags all MutationPayloads
-// with the workspace ID. Returns an error if the workspace pool is not registered.
+// with the workspace ID. Idempotent: if a subscriber already exists for wsID,
+// returns nil without replacing it (safe to call on every request from the
+// workspace middleware). Returns an error if the workspace pool is not registered.
 func (m *MultiWorkspaceSubscriber) AddWorkspace(wsID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// If a subscriber already exists for this workspace, stop it first
-	if existing, ok := m.subscribers[wsID]; ok {
-		m.logger.Info("replacing existing subscriber for workspace", "workspace", wsID)
-		existing.Stop()
-		delete(m.subscribers, wsID)
+	if _, ok := m.subscribers[wsID]; ok {
+		return nil
 	}
 
 	pool := m.multiPool.PoolForWorkspace(wsID)
