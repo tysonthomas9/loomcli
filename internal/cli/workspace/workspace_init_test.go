@@ -300,6 +300,66 @@ func TestStopDaemonForWorkspace_EmptyDir(t *testing.T) {
 	}
 }
 
+func TestWriteLoomYaml_ReturnsAgentNames(t *testing.T) {
+	t.Parallel()
+	wsDir := t.TempDir()
+
+	names, err := WriteLoomYaml(wsDir)
+	if err != nil {
+		t.Fatalf("WriteLoomYaml() error = %v", err)
+	}
+	if len(names) != 2 {
+		t.Fatalf("len(names) = %d, want 2", len(names))
+	}
+	for i, n := range names {
+		if n == "" {
+			t.Errorf("names[%d] is empty", i)
+		}
+	}
+	if names[0] == names[1] {
+		t.Errorf("names should be unique, got duplicates: %q", names[0])
+	}
+
+	// Verify loom.yaml was actually written and contains both agent names.
+	yamlPath := filepath.Join(wsDir, "loom.yaml")
+	data, err := os.ReadFile(yamlPath)
+	if err != nil {
+		t.Fatalf("ReadFile(loom.yaml) error = %v", err)
+	}
+	for _, n := range names {
+		if !strings.Contains(string(data), "worktree: "+n) {
+			t.Errorf("loom.yaml missing agent %q; content:\n%s", n, string(data))
+		}
+	}
+}
+
+func TestCreateAgentWorktrees_CreatesWorktreesForEachAgent(t *testing.T) {
+	// not parallel: CreateAgentWorktrees calls ensureRepoWorktree which uses defaultDeps.
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+
+	repoPath := filepath.Join(tmpDir, "myrepo")
+	createGitRepo(t, repoPath)
+
+	wsDir := filepath.Join(tmpDir, "ws")
+	if err := os.MkdirAll(wsDir, 0755); err != nil {
+		t.Fatalf("MkdirAll(wsDir) error = %v", err)
+	}
+
+	repos := []RepoConfig{{Name: "myrepo", Path: repoPath}}
+	agentNames := []string{"alpha", "bravo"}
+
+	CreateAgentWorktrees(wsDir, repos, agentNames)
+
+	for _, agent := range agentNames {
+		wtPath := filepath.Join(wsDir, "worktrees", "myrepo", agent)
+		gitFile := filepath.Join(wtPath, ".git")
+		if _, err := os.Stat(gitFile); err != nil {
+			t.Errorf("expected worktree .git at %s, got err = %v", gitFile, err)
+		}
+	}
+}
+
 func TestEnsureCurrentProjectRegistered_RefusesToSaveOnReadError(t *testing.T) {
 	if os.Getuid() == 0 {
 		t.Skip("skipping: root can read anything")
