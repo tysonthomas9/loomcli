@@ -14,8 +14,8 @@ import (
 	"github.com/steveyegge/beads/internal/lockfile"
 )
 
-// maxClientMessageSize is the maximum size of a single RPC response the client will read (10 MB).
-const maxClientMessageSize int64 = 10 * 1024 * 1024
+// maxClientMessageSize is the maximum size of a single RPC response the client will read (100 MB).
+const maxClientMessageSize int64 = 100 * 1024 * 1024
 
 // rpcDebugEnabled returns true if BD_DEBUG_RPC environment variable is set
 func rpcDebugEnabled() bool {

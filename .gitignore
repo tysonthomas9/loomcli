@@ -30,7 +30,7 @@ loom.yaml
 .make-dev.log
 .make-dev.pid
 usage.jsonl
-sessions/
+/sessions/
 
 # Auth service
 services/auth/node_modules/
