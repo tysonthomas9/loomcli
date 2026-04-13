@@ -114,4 +114,33 @@ describe("env-schema extra coverage", () => {
     const paths = err.issues.map((i) => i.path.join("."));
     assert.ok(paths.includes("METRICS_PORT"), `expected METRICS_PORT error, got paths: ${paths.join(", ")}`);
   });
+
+  // -------------------------------------------------------------------------
+  // EMAIL_PASSWORD_ENABLED
+  // -------------------------------------------------------------------------
+
+  it("defaults EMAIL_PASSWORD_ENABLED to false when unset", () => {
+    const data = expectSuccess(validEnv());
+    assert.equal(data.EMAIL_PASSWORD_ENABLED, false);
+  });
+
+  it("parses EMAIL_PASSWORD_ENABLED='true' as true", () => {
+    const data = expectSuccess(validEnv({ EMAIL_PASSWORD_ENABLED: "true" }));
+    assert.equal(data.EMAIL_PASSWORD_ENABLED, true);
+  });
+
+  it("parses EMAIL_PASSWORD_ENABLED='1' as true", () => {
+    const data = expectSuccess(validEnv({ EMAIL_PASSWORD_ENABLED: "1" }));
+    assert.equal(data.EMAIL_PASSWORD_ENABLED, true);
+  });
+
+  it("parses EMAIL_PASSWORD_ENABLED='false' as false", () => {
+    const data = expectSuccess(validEnv({ EMAIL_PASSWORD_ENABLED: "false" }));
+    assert.equal(data.EMAIL_PASSWORD_ENABLED, false);
+  });
+
+  it("parses EMAIL_PASSWORD_ENABLED with arbitrary value as false", () => {
+    const data = expectSuccess(validEnv({ EMAIL_PASSWORD_ENABLED: "yes" }));
+    assert.equal(data.EMAIL_PASSWORD_ENABLED, false);
+  });
 });
