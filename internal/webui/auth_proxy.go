@@ -105,11 +105,16 @@ func stripCookieAttr(cookie, attr string) string {
 // replaceCookieAttr replaces a named attribute's value in a Set-Cookie header.
 func replaceCookieAttr(cookie, attr, newVal string) string {
 	parts := strings.Split(cookie, ";")
+	found := false
 	for i, p := range parts {
 		trimmed := strings.TrimSpace(p)
 		if strings.HasPrefix(strings.ToLower(trimmed), strings.ToLower(attr)+"=") {
 			parts[i] = " " + attr + "=" + newVal
+			found = true
 		}
+	}
+	if !found {
+		parts = append(parts, " "+attr+"="+newVal)
 	}
 	return strings.Join(parts, ";")
 }
