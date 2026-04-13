@@ -330,17 +330,17 @@ func addWorktrees(ctx context.Context, resolved []resolvedRepo, wsDir, branch st
 // initWorkspaceBeads initializes beads in each repo and at the workspace root,
 // then registers repos with relative paths for correct source_repo values.
 func initWorkspaceBeads(wsDir string, repos []config.RepoConfig) {
-	exec := cli.GetDeps(nil).Exec
+	runner := cli.GetDeps(nil).Exec
 	for _, repo := range repos {
-		if result := exec.Run(repo.Path, "bd", "init", "--quiet"); result.Err != nil {
+		if result := runner.Run(repo.Path, "bd", "init", "--quiet"); result.Err != nil {
 			slog.Warn("bd init failed for repo", "repo", repo.Name, "path", repo.Path, "err", result.Err)
 		}
 	}
-	if result := exec.Run(wsDir, "bd", "init", "--quiet"); result.Err != nil {
+	if result := runner.Run(wsDir, "bd", "init", "--quiet"); result.Err != nil {
 		slog.Warn("bd init failed for workspace root", "path", wsDir, "err", result.Err)
 	}
 	for _, repo := range repos {
-		if result := exec.Run(wsDir, "bd", "repo", "add", repo.Name); result.Err != nil {
+		if result := runner.Run(wsDir, "bd", "repo", "add", repo.Name); result.Err != nil {
 			slog.Warn("failed to add repo to workspace beads", "repo", repo.Name, "err", result.Err)
 		}
 	}
@@ -392,6 +392,7 @@ func startDaemonAsync(timeout time.Duration, wsName, wsDir string) {
 		deps := cli.GetDeps(nil)
 		if err := workspace.EnsureDaemonForWorkspace(deps, context.Background(), wsDir, timeout); err != nil {
 			slog.Warn("failed to start daemon for workspace", "workspace", wsName, "err", err)
+			return
 		}
 		if result := deps.Exec.Run(wsDir, "bd", "repo", "sync"); result.Err != nil {
 			slog.Warn("bd repo sync failed", "workspace", wsName, "err", result.Err)
