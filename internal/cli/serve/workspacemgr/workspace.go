@@ -382,6 +382,9 @@ func finalizeWorkspace(cfg *config.LoomConfig, wsName, wsDir, wsID string, repos
 
 	if err := save(cfg); err != nil {
 		cleanupWorktrees(wsDir, created)
+		// Best-effort: surface the failure on disk so the frontend reflects
+		// reality without waiting for a process restart + RecoverIncompleteWorkspaces.
+		makeErrorMarker(cfg, wsName, save)(fmt.Sprintf("failed to save config: %v", err))
 		return service.WorkspaceCreateResult{}, nil, nil, workspaceerrors.New(workspaceerrors.ConfigFailed, "failed to save config", err)
 	}
 
@@ -399,24 +402,42 @@ func beginWorkspaceCreate(cfg *config.LoomConfig, wsName, wsDir string, cloneURL
 	if len(cfg.Workspaces) == 1 {
 		cfg.DefaultWorkspace = wsName
 	}
+	if !containsString(cfg.WorkspaceOrder, wsName) {
+		cfg.WorkspaceOrder = append([]string{wsName}, cfg.WorkspaceOrder...)
+	}
 	if err := save(cfg); err != nil {
+		delete(cfg.Workspaces, wsName)
 		return "", workspaceerrors.New(workspaceerrors.ConfigFailed, "failed to save config", err)
 	}
 	return wsID, nil
 }
 
+// containsString reports whether s appears in xs.
+func containsString(xs []string, s string) bool {
+	for _, x := range xs {
+		if x == s {
+			return true
+		}
+	}
+	return false
+}
+
 // transitionState updates the workspace state in cfg and saves. Logs and
-// continues on save failure — state transitions are best-effort progress
-// markers, not load-bearing for correctness of the create flow itself.
+// continues on save failure, rolling back the in-memory mutation so a later
+// whole-config save (e.g. finalizeWorkspace) does not silently rewrite the
+// failed transition to disk.
 func transitionState(cfg *config.LoomConfig, wsName string, state config.WorkspaceState, save func(*config.LoomConfig) error) {
 	ws, ok := cfg.Workspaces[wsName]
 	if !ok {
 		return
 	}
+	prev := ws.State
 	ws.State = state
 	cfg.Workspaces[wsName] = ws
 	if err := save(cfg); err != nil {
 		slog.Error("workspace state transition save failed", "workspace", wsName, "state", state, "err", err)
+		ws.State = prev
+		cfg.Workspaces[wsName] = ws
 		return
 	}
 	slog.Info("workspace state transition", "workspace", wsName, "state", state)
