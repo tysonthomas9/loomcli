@@ -114,7 +114,10 @@ func getWorktreeCommitDetailsDeps(deps *cli.Deps, path, defaultBranch string, li
 func getWorktreeStatus(deps *cli.Deps, path string) (clean bool, uncommittedCount int, fileChanges []FileChange) {
 	output, err := cli.RunGit(deps, path, "status", "--porcelain")
 	if err != nil {
-		return true, 0, nil
+		// Match prior IsCleanWorkingTreeDeps behavior: a git error means we
+		// can't confirm cleanliness, so report "not clean" rather than silently
+		// labeling a broken worktree as ready.
+		return false, 0, nil
 	}
 	trimmed := strings.TrimRight(output, " \t\n\r")
 	if trimmed == "" {
