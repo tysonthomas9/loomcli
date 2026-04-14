@@ -90,6 +90,10 @@ func NewTerminalManager(defaultCommand, sessionPrefix string, maxSessions int) (
 	if !hasTmpDir {
 		env = append(env, "TMUX_TMPDIR=/tmp")
 	}
+	// Clamp capacity so per-command `append(cmd.Env, ...)` (e.g. TERM in
+	// tmuxAttach) allocates a new backing array instead of racing on this
+	// shared slice's spare capacity.
+	env = env[:len(env):len(env)]
 	return &TerminalManager{
 		sessions:           make(map[string]*TerminalSession),
 		pendingKills:       make(map[string]context.CancelFunc),
