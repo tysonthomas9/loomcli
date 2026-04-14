@@ -125,9 +125,15 @@ func PromMetricsMiddleware() (outer, inner func(http.Handler) http.Handler) {
 	return
 }
 
-// PromHandler returns the standard Prometheus metrics HTTP handler.
+// PromHandler returns the Prometheus metrics HTTP handler with compression
+// disabled. Compression is disabled because /metrics is a composite endpoint:
+// loom-specific gauges are written first as plaintext, then this handler
+// appends auto-registered Prometheus metrics. With compression enabled, the
+// scraper would receive plaintext followed by a gzip blob and fail to parse.
 func PromHandler() http.Handler {
-	return promhttp.Handler()
+	return promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{
+		DisableCompression: true,
+	})
 }
 
 // PromRouteCaptureByPath wraps a handler to set the promRouteStore pattern

@@ -3,6 +3,7 @@ package webui
 import (
 	"context"
 	"log/slog"
+	"net/url"
 	"time"
 
 	"github.com/getsentry/sentry-go"
@@ -42,7 +43,11 @@ func InitSentry(logger *slog.Logger, dsn, release string) *slog.Logger {
 		secondary: sentryHandler,
 	}
 
-	logger.Info("sentry error tracking enabled", "dsn_host", dsn[:min(len(dsn), 30)]+"...")
+	host := "unknown"
+	if u, err := url.Parse(dsn); err == nil && u.Host != "" {
+		host = u.Host
+	}
+	logger.Info("sentry error tracking enabled", "dsn_host", host)
 	return slog.New(handler)
 }
 

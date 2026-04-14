@@ -67,10 +67,12 @@ func (app *Server) registerDaemonRoutes(h *handlermux.Handlers) {
 // restrictions that block SameSite cookies over HTTP.
 func (app *Server) registerAuthProxy() {
 	if proxy := webui.NewAuthProxy(app.config.ExtAuthURL, logger); proxy != nil {
-		// Wrap with metrics route capture so prefix-mounted proxy requests
-		// show the actual proxied path (e.g., /api/auth/sign-in/email) instead
-		// of the lumped /api/auth/ prefix bucket.
-		app.mux.Handle("/api/auth/", webui.PromRouteCaptureByPath(proxy))
+		// Mount under the prefix pattern. Metrics will bucket all auth proxy
+		// requests under "/api/auth/" — we deliberately do NOT use
+		// PromRouteCaptureByPath here because BetterAuth paths may embed
+		// opaque tokens or IDs (verify-email, callbacks), which would explode
+		// metric label cardinality.
+		app.mux.Handle("/api/auth/", proxy)
 	}
 }
 
