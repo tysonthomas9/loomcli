@@ -161,12 +161,18 @@ func (s *Server) handleRequest(req *Request, connCtx ...context.Context) Respons
 	// Skip for import operation itself to avoid recursion
 	if req.Operation != OpPing && req.Operation != OpHealth && req.Operation != OpMetrics &&
 		req.Operation != OpImport && req.Operation != OpExport {
-		go func() {
-			if err := s.checkAndAutoImportIfStale(req); err != nil {
-				// Log warning but continue - don't fail the request
-				fmt.Fprintf(os.Stderr, "Warning: staleness check failed: %v\n", err)
-			}
-		}()
+		// CAS first — only spawn a goroutine if we actually acquired the
+		// single-flight lock. Prevents unbounded goroutine fan-out when many
+		// requests race to check staleness, and avoids sharing the per-request
+		// *Request pointer with background work.
+		if s.importInProgress.CompareAndSwap(false, true) {
+			go func() {
+				if err := s.checkAndAutoImportIfStale(); err != nil {
+					// Log warning but continue - don't fail the request
+					fmt.Fprintf(os.Stderr, "Warning: staleness check failed: %v\n", err)
+				}
+			}()
+		}
 	}
 
 	// Update last activity timestamp

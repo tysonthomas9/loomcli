@@ -253,11 +253,11 @@ func (s *Server) handleImport(req *Request) Response {
 // checkAndAutoImportIfStale checks if JSONL is newer than last import and triggers auto-import
 // This fixes bd-132: daemon shows stale data after git pull
 // This fixes bd-8931: daemon gets stuck when auto-import blocked by git conflicts
-func (s *Server) checkAndAutoImportIfStale(req *Request) error {
+func (s *Server) checkAndAutoImportIfStale() error {
 	// Get storage for this request
 	store := s.storage
 
-	ctx, cancel := s.reqCtx(req)
+	ctx, cancel := s.reqCtx(nil)
 	defer cancel()
 
 	// Get database path from storage
@@ -279,15 +279,8 @@ func (s *Server) checkAndAutoImportIfStale(req *Request) error {
 		return nil
 	}
 
-	// Single-flight guard: Only allow one import at a time
-	// If import is already running, skip and let the request proceed (bd-8931)
-	// This prevents blocking RPC requests when import is in progress
-	if !s.importInProgress.CompareAndSwap(false, true) {
-		return nil
-	}
-
-	// Track whether we should release the lock via defer
-	// Set to false if we manually release early to avoid double-release bug
+	// Lock already acquired by caller via CompareAndSwap before launching the
+	// background goroutine, so we always own the release here.
 	shouldDeferRelease := true
 	defer func() {
 		if shouldDeferRelease {
