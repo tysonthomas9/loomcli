@@ -34,23 +34,24 @@ func (s *issueServiceImpl) ListIssues(ctx context.Context, params ListIssuesPara
 	if err != nil {
 		return nil, err
 	}
-	// List succeeded; downstream batchGetParentIDs / Blocked calls log on
-	// error and continue, so we accept the connection back at this point.
-	rpcOK = true
 
 	if len(issuesWithCounts) == 0 {
+		rpcOK = true
 		if params.IncludeBlocked {
 			return &ListIssuesResult{KanbanIssues: []KanbanIssue{}}, nil
 		}
 		return &ListIssuesResult{Issues: []IssueWithParent{}}, nil
 	}
 
-	parentResp := s.batchGetParentIDs(client, issuesWithCounts)
+	parentResp, parentClean := s.batchGetParentIDs(client, issuesWithCounts)
 
 	if params.IncludeBlocked {
-		return s.buildKanbanResult(client, issuesWithCounts, parentResp), nil
+		result, kanbanClean := s.buildKanbanResult(client, issuesWithCounts, parentResp)
+		rpcOK = parentClean && kanbanClean
+		return result, nil
 	}
 
+	rpcOK = parentClean
 	return s.buildStandardResult(issuesWithCounts, parentResp), nil
 }
 
@@ -87,12 +88,16 @@ func (s *issueServiceImpl) fetchAndFilterIssues(client *rpc.Client, params ListI
 	return issuesWithCounts, nil
 }
 
-func (s *issueServiceImpl) batchGetParentIDs(client *rpc.Client, issues []*types.IssueWithCounts) *rpc.GetParentIDsResponse {
+// batchGetParentIDs fetches parent IDs in batches. The second return is false
+// if any batch hit a transport error — callers should not return the connection
+// to the pool in that case (stale bytes may remain in the read buffer).
+func (s *issueServiceImpl) batchGetParentIDs(client *rpc.Client, issues []*types.IssueWithCounts) (*rpc.GetParentIDsResponse, bool) {
 	issueIDs := make([]string, len(issues))
 	for i, iwc := range issues {
 		issueIDs[i] = iwc.Issue.ID
 	}
 
+	clean := true
 	parentResp := &rpc.GetParentIDsResponse{Parents: make(map[string]*rpc.ParentInfo)}
 	for i := 0; i < len(issueIDs); i += parentBatchSize {
 		end := i + parentBatchSize
@@ -102,13 +107,14 @@ func (s *issueServiceImpl) batchGetParentIDs(client *rpc.Client, issues []*types
 		batch, err := client.GetParentIDs(&rpc.GetParentIDsArgs{IssueIDs: issueIDs[i:end]})
 		if err != nil {
 			slog.Error("failed to get parent IDs", "batch_start", i, "batch_end", end, "err", err)
+			clean = false
 			continue
 		}
 		for k, v := range batch.Parents {
 			parentResp.Parents[k] = v
 		}
 	}
-	return parentResp
+	return parentResp, clean
 }
 
 func (s *issueServiceImpl) buildStandardResult(issuesWithCounts []*types.IssueWithCounts, parentResp *rpc.GetParentIDsResponse) *ListIssuesResult {
@@ -127,11 +133,16 @@ func (s *issueServiceImpl) buildStandardResult(issuesWithCounts []*types.IssueWi
 	return &ListIssuesResult{Issues: issues}
 }
 
-func (s *issueServiceImpl) buildKanbanResult(client *rpc.Client, issuesWithCounts []*types.IssueWithCounts, parentResp *rpc.GetParentIDsResponse) *ListIssuesResult {
+// buildKanbanResult builds the kanban response. The second return is false
+// if the Blocked RPC hit a transport error — callers should not return the
+// connection to the pool in that case.
+func (s *issueServiceImpl) buildKanbanResult(client *rpc.Client, issuesWithCounts []*types.IssueWithCounts, parentResp *rpc.GetParentIDsResponse) (*ListIssuesResult, bool) {
+	clean := true
 	blockedMap := make(map[string]*types.BlockedIssue)
 	blockedResp, blockedErr := client.Blocked(&rpc.BlockedArgs{})
 	if blockedErr != nil {
 		slog.Error("failed to get blocked issues", "err", blockedErr)
+		clean = false
 	} else if blockedResp.Success {
 		var blockedIssues []*types.BlockedIssue
 		if jsonErr := json.Unmarshal(blockedResp.Data, &blockedIssues); jsonErr != nil {
@@ -173,5 +184,5 @@ func (s *issueServiceImpl) buildKanbanResult(client *rpc.Client, issuesWithCount
 		}
 		kanbanIssues[i] = ki
 	}
-	return &ListIssuesResult{KanbanIssues: kanbanIssues}
+	return &ListIssuesResult{KanbanIssues: kanbanIssues}, clean
 }

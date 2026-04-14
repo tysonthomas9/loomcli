@@ -183,8 +183,9 @@ func (m *mockReadyClient) GetParentIDs(args *rpc.GetParentIDsArgs) (*rpc.Respons
 
 // mockReadyPool implements readyConnectionGetter for testing.
 type mockReadyPool struct {
-	getFunc func(ctx context.Context) (readyClient, error)
-	putFunc func(client readyClient)
+	getFunc     func(ctx context.Context) (readyClient, error)
+	putFunc     func(client readyClient)
+	discardFunc func(client readyClient)
 }
 
 func (m *mockReadyPool) Get(ctx context.Context) (readyClient, error) {
@@ -197,6 +198,12 @@ func (m *mockReadyPool) Get(ctx context.Context) (readyClient, error) {
 func (m *mockReadyPool) Put(client readyClient) {
 	if m.putFunc != nil {
 		m.putFunc(client)
+	}
+}
+
+func (m *mockReadyPool) Discard(client readyClient) {
+	if m.discardFunc != nil {
+		m.discardFunc(client)
 	}
 }
 

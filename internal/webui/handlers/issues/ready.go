@@ -138,6 +138,11 @@ func buildReadyResponse(client readyClient, issues []*types.Issue) []*ReadyIssue
 }
 
 // handleReadyWithPool is the internal implementation that accepts an interface for testing.
+//
+// Put/Discard closure) adds ~7 lines of ceremony; extraction would obscure the
+// happy path. The transport-corruption fix (LOOM-SERVER-3) is the reason.
+//
+//nolint:funlen // Conditional pool.Discard defer pattern (rpcOK flag + deferred
 func handleReadyWithPool(pool readyConnectionGetter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if pool == nil {
