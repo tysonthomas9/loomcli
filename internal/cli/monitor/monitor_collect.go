@@ -201,11 +201,15 @@ func refineLockStatus(deps *cli.Deps, lockStatus, agentName string, agentTasks m
 // Falls through to getWorktreeStatus on cache miss or when the gitdir cannot be resolved.
 func resolveIdleStatus(deps *cli.Deps, wtPath string) (string, []FileChange) {
 	if gitDir, err := resolveGitDir(wtPath); err == nil {
-		if hit, cachedClean, cachedCount, cachedChanges := globalChangeDetector.CheckStatus(gitDir); hit {
+		hit, cachedClean, cachedCount, cachedChanges, headMtime, indexMtime := globalChangeDetector.CheckStatus(gitDir)
+		if hit {
 			return idleStatusFromValues(cachedClean, cachedCount, cachedChanges)
 		}
 		clean, count, fileChanges := getWorktreeStatus(deps, wtPath)
-		globalChangeDetector.UpdateStatus(gitDir, clean, count, fileChanges)
+		// Store under the mtimes observed before the subprocess ran so a
+		// concurrent index update doesn't get our stale snapshot keyed under
+		// its newer mtime.
+		globalChangeDetector.UpdateStatus(gitDir, headMtime, indexMtime, clean, count, fileChanges)
 		return idleStatusFromValues(clean, count, fileChanges)
 	}
 	clean, count, fileChanges := getWorktreeStatus(deps, wtPath)
@@ -241,11 +245,14 @@ func collectAgentAheadBehind(deps *cli.Deps, wt cli.WorktreeInfo, agentBranch, d
 	if err != nil {
 		return GetWorktreeGitSyncStatusDeps(deps, wt.Path, defaultBranch, overrideBranch)
 	}
-	if hit, cachedAhead, cachedBehind := globalChangeDetector.CheckAheadBehind(commonDir, agentBranch, abBranch); hit {
+	hit, cachedAhead, cachedBehind, localSHA, remoteSHA := globalChangeDetector.CheckAheadBehind(commonDir, agentBranch, abBranch)
+	if hit {
 		return cachedAhead, cachedBehind
 	}
 	ahead, behind = GetWorktreeGitSyncStatusDeps(deps, wt.Path, defaultBranch, overrideBranch)
-	globalChangeDetector.UpdateAheadBehind(commonDir, agentBranch, abBranch, ahead, behind)
+	// Store under the SHAs observed before the subprocess ran so a ref advance
+	// during the rev-list call doesn't pin a stale count under the new SHA.
+	globalChangeDetector.UpdateAheadBehind(commonDir, agentBranch, abBranch, localSHA, remoteSHA, ahead, behind)
 	return ahead, behind
 }
 
@@ -265,11 +272,20 @@ func collectAgentCommits(deps *cli.Deps, wt cli.WorktreeInfo, agentBranch, defau
 	if err != nil {
 		return getWorktreeCommitDetailsDeps(deps, wt.Path, defaultBranch, 10, githubURL, overrideBranch)
 	}
-	if commits, ok := globalCommitCache.Get(headSHA); ok {
+	// The commit list depends on `origin/<integrationBranch>..HEAD`, the
+	// integration-branch selection, and the github URL embedded in each
+	// CommitDetail — all participate in the cache key.
+	integrationBranch := overrideBranch
+	if integrationBranch == "" {
+		integrationBranch = defaultBranch
+	}
+	remoteSHA, _ := ReadRefSHA(commonDir, "refs/remotes/origin/"+integrationBranch)
+	key := commitCacheKey(headSHA, remoteSHA, integrationBranch, githubURL)
+	if commits, ok := globalCommitCache.Get(key); ok {
 		return commits
 	}
 	commits := getWorktreeCommitDetailsDeps(deps, wt.Path, defaultBranch, 10, githubURL, overrideBranch)
-	globalCommitCache.Set(headSHA, commits)
+	globalCommitCache.Set(key, commits)
 	return commits
 }
 

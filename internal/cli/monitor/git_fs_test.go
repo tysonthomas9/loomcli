@@ -257,16 +257,16 @@ func TestWorktreeChangeDetector_StatusCacheHit(t *testing.T) {
 	}
 
 	// Initially should be a miss
-	hit, _, _, _ := detector.CheckStatus(gitDir)
+	hit, _, _, _, headMtime, indexMtime := detector.CheckStatus(gitDir)
 	if hit {
 		t.Error("expected cache miss on first check")
 	}
 
 	// Update the cache
-	detector.UpdateStatus(gitDir, true, 0, nil)
+	detector.UpdateStatus(gitDir, headMtime, indexMtime, true, 0, nil)
 
 	// Should be a hit now
-	hit, clean, count, changes := detector.CheckStatus(gitDir)
+	hit, clean, count, changes, _, _ := detector.CheckStatus(gitDir)
 	if !hit {
 		t.Error("expected cache hit after update")
 	}
@@ -294,9 +294,11 @@ func TestWorktreeChangeDetector_StatusCacheDirty(t *testing.T) {
 		{Status: "M", Path: "foo.go"},
 		{Status: "A", Path: "bar.go"},
 	}
-	detector.UpdateStatus(gitDir, false, 2, testChanges)
+	headMtime := readMtime(filepath.Join(gitDir, "HEAD"))
+	indexMtime := readMtime(filepath.Join(gitDir, "index"))
+	detector.UpdateStatus(gitDir, headMtime, indexMtime, false, 2, testChanges)
 
-	hit, clean, count, changes := detector.CheckStatus(gitDir)
+	hit, clean, count, changes, _, _ := detector.CheckStatus(gitDir)
 	if !hit {
 		t.Error("expected cache hit after update")
 	}
@@ -320,11 +322,13 @@ func TestWorktreeChangeDetector_StatusCacheInvalidation(t *testing.T) {
 		t.Fatalf("resolveGitDir failed: %v", err)
 	}
 
-	// Populate cache
-	detector.UpdateStatus(gitDir, true, 0, nil)
+	// Populate cache using the current mtimes
+	headMtime := readMtime(filepath.Join(gitDir, "HEAD"))
+	indexMtime := readMtime(filepath.Join(gitDir, "index"))
+	detector.UpdateStatus(gitDir, headMtime, indexMtime, true, 0, nil)
 
 	// Verify cache hit
-	hit, _, _, _ := detector.CheckStatus(gitDir)
+	hit, _, _, _, _, _ := detector.CheckStatus(gitDir)
 	if !hit {
 		t.Fatal("expected cache hit")
 	}
@@ -340,7 +344,7 @@ func TestWorktreeChangeDetector_StatusCacheInvalidation(t *testing.T) {
 	}
 
 	// Now the index mtime has changed, so cache should miss
-	hit, _, _, _ = detector.CheckStatus(gitDir)
+	hit, _, _, _, _, _ = detector.CheckStatus(gitDir)
 	if hit {
 		t.Error("expected cache miss after index modification")
 	}
