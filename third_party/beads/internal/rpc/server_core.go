@@ -58,8 +58,7 @@ type Server struct {
 	// Ready channel signals when server is listening
 	readyChan chan struct{}
 	// Auto-import single-flight guard
-	importInProgress   atomic.Bool
-	lastStalenessCheck atomic.Int64 // UnixMilli of last staleness check (rate-limit to 1/5s)
+	importInProgress atomic.Bool
 	// Mutation events for event-driven daemon
 	mutationChan  chan MutationEvent
 	droppedEvents atomic.Int64 // Counter for dropped mutation events

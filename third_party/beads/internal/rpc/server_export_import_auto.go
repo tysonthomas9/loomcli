@@ -254,6 +254,12 @@ func (s *Server) handleImport(req *Request) Response {
 // This fixes bd-132: daemon shows stale data after git pull
 // This fixes bd-8931: daemon gets stuck when auto-import blocked by git conflicts
 func (s *Server) checkAndAutoImportIfStale() error {
+	// Lock was acquired by caller via CompareAndSwap before launching the
+	// background goroutine; release it on every exit path so the single-flight
+	// guard does not get permanently stuck (which would silently disable
+	// staleness detection for the lifetime of the daemon).
+	defer s.importInProgress.Store(false)
+
 	// Get storage for this request
 	store := s.storage
 
@@ -279,25 +285,12 @@ func (s *Server) checkAndAutoImportIfStale() error {
 		return nil
 	}
 
-	// Lock already acquired by caller via CompareAndSwap before launching the
-	// background goroutine, so we always own the release here.
-	shouldDeferRelease := true
-	defer func() {
-		if shouldDeferRelease {
-			s.importInProgress.Store(false)
-		}
-	}()
-
 	// Check if git has uncommitted changes that include beads files (bd-8931)
 	// If JSONL files are uncommitted, skip auto-import to avoid conflicts
 	// This prevents daemon corruption when workspace is dirty
 	dbDir := filepath.Dir(dbPath)
 	workspaceRoot := filepath.Dir(dbDir) // Go up from .beads to workspace root
 	if hasUncommittedBeadsFiles(workspaceRoot) {
-		// CRITICAL: Release lock and disable defer to avoid double-release race
-		s.importInProgress.Store(false)
-		shouldDeferRelease = false
-
 		fmt.Fprintf(os.Stderr, "Warning: auto-import skipped - .beads files have uncommitted changes. Run 'bd sync' after committing.\n")
 		return nil
 	}
