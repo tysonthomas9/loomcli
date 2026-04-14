@@ -17,12 +17,12 @@ import { WorkspaceBreadcrumb } from "../WorkspaceBreadcrumb";
 
 describe("WorkspaceBreadcrumb", () => {
   describe("with workspace name", () => {
-    it("renders the workspace name", () => {
+    it("does not render the workspace name (shown in sidebar instead)", () => {
       render(
         <WorkspaceBreadcrumb workspaceName="my-project" activeView="kanban" />,
       );
 
-      expect(screen.getByText("my-project")).toBeInTheDocument();
+      expect(screen.queryByText("my-project")).not.toBeInTheDocument();
     });
 
     it("renders the color dot", () => {
@@ -44,12 +44,12 @@ describe("WorkspaceBreadcrumb", () => {
       expect(dot).toHaveStyle({ backgroundColor: expectedColor });
     });
 
-    it("renders the separator", () => {
+    it("does not render a separator", () => {
       render(
         <WorkspaceBreadcrumb workspaceName="my-project" activeView="kanban" />,
       );
 
-      expect(screen.getByText("/")).toBeInTheDocument();
+      expect(screen.queryByText("/")).not.toBeInTheDocument();
     });
 
     it("renders the view label", () => {
@@ -57,7 +57,7 @@ describe("WorkspaceBreadcrumb", () => {
         <WorkspaceBreadcrumb workspaceName="my-project" activeView="kanban" />,
       );
 
-      expect(screen.getByText("Kanban")).toBeInTheDocument();
+      expect(screen.getByText("Aether Project")).toBeInTheDocument();
     });
 
     it("applies the breadcrumb CSS class to root span", () => {
@@ -83,26 +83,6 @@ describe("WorkspaceBreadcrumb", () => {
       expect(root).toHaveClass("custom-class");
     });
 
-    it("renders workspace name in element with workspaceName CSS class", () => {
-      const { container } = render(
-        <WorkspaceBreadcrumb workspaceName="my-project" activeView="kanban" />,
-      );
-
-      const nameEl = container.querySelector('[class*="workspaceName"]');
-      expect(nameEl).toBeInTheDocument();
-      expect(nameEl).toHaveTextContent("my-project");
-    });
-
-    it("renders separator in element with separator CSS class", () => {
-      const { container } = render(
-        <WorkspaceBreadcrumb workspaceName="my-project" activeView="kanban" />,
-      );
-
-      const separator = container.querySelector('[class*="separator"]');
-      expect(separator).toBeInTheDocument();
-      expect(separator).toHaveTextContent("/");
-    });
-
     it("renders view label in element with viewLabel CSS class", () => {
       const { container } = render(
         <WorkspaceBreadcrumb workspaceName="my-project" activeView="kanban" />,
@@ -110,7 +90,7 @@ describe("WorkspaceBreadcrumb", () => {
 
       const viewLabel = container.querySelector('[class*="viewLabel"]');
       expect(viewLabel).toBeInTheDocument();
-      expect(viewLabel).toHaveTextContent("Kanban");
+      expect(viewLabel).toHaveTextContent("Aether Project");
     });
   });
 
@@ -139,7 +119,7 @@ describe("WorkspaceBreadcrumb", () => {
     it("does not render a view label when workspaceName is null", () => {
       render(<WorkspaceBreadcrumb workspaceName={null} activeView="kanban" />);
 
-      expect(screen.queryByText("Kanban")).not.toBeInTheDocument();
+      expect(screen.queryByText("Aether Project")).not.toBeInTheDocument();
     });
 
     it("applies breadcrumb CSS class when workspaceName is null for layout consistency", () => {
@@ -167,7 +147,7 @@ describe("WorkspaceBreadcrumb", () => {
 
   describe("view labels", () => {
     const viewLabelMap: Record<ViewMode, string> = {
-      kanban: "Kanban",
+      kanban: "Aether Project",
       table: "List",
       graph: "Graph",
       monitor: "Monitor",
@@ -246,7 +226,7 @@ describe("WorkspaceBreadcrumb", () => {
       expect(root.tagName).toBe("SPAN");
     });
 
-    it("contains dot, name, separator, and label as children", () => {
+    it("contains dot and label as children", () => {
       const { container } = render(
         <WorkspaceBreadcrumb workspaceName="test" activeView="graph" />,
       );
@@ -254,11 +234,9 @@ describe("WorkspaceBreadcrumb", () => {
       const root = container.firstChild as HTMLElement;
       const children = Array.from(root.children);
 
-      expect(children).toHaveLength(4);
+      expect(children).toHaveLength(2);
       expect(children[0]?.className).toMatch(/dot/);
-      expect(children[1]?.className).toMatch(/workspaceName/);
-      expect(children[2]?.className).toMatch(/separator/);
-      expect(children[3]?.className).toMatch(/viewLabel/);
+      expect(children[1]?.className).toMatch(/viewLabel/);
     });
   });
 });

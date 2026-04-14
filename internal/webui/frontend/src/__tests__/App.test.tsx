@@ -2948,8 +2948,13 @@ describe("App", () => {
 
       render(<App />);
 
-      // isMultiRepo=true passes workspace.name to WorkspaceBreadcrumb
-      expect(screen.getByText("my-workspace")).toBeInTheDocument();
+      // isMultiRepo=true passes workspace.name to WorkspaceBreadcrumb, which renders
+      // the view label (with color dot) instead of the Cortex fallback. The workspace
+      // name itself is no longer shown in the breadcrumb; it lives in the sidebar.
+      expect(
+        screen.queryByRole("heading", { name: "Cortex", level: 1 }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText("Aether Project")).toBeInTheDocument();
     });
   });
 

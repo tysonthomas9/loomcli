@@ -1,7 +1,7 @@
 /**
- * WorkspaceBreadcrumb - Displays workspace name with color dot and active view label.
- * Shows "● WorkspaceName / ViewLabel" in the AppLayout header.
- * Falls back to "Cortex" when no workspace is available.
+ * WorkspaceBreadcrumb - Displays a workspace color dot and the active view label.
+ * Shows "● ViewLabel" in the AppLayout header; the workspace name is shown in the
+ * sidebar's WorkspaceSelectorBar. Falls back to "Cortex" when no workspace is available.
  */
 
 import type { ViewMode } from "@/components/ViewSwitcher";
@@ -41,7 +41,7 @@ export function WorkspaceBreadcrumb({
   }
 
   const color = getWorkspaceColor(workspaceName);
-  const viewLabel = VIEW_LABELS[activeView] ?? "Kanban";
+  const viewLabel = VIEW_LABELS[activeView] ?? "Aether Project";
 
   const rootClassName = className
     ? `${styles.breadcrumb} ${className}`

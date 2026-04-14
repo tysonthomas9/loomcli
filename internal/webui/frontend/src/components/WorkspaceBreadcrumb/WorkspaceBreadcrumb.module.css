@@ -11,21 +11,6 @@
   flex-shrink: 0;
 }
 
-.workspaceName {
-  font-weight: 600;
-  color: var(--color-text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 200px;
-}
-
-.separator {
-  color: var(--color-text-tertiary);
-  margin: 0 2px;
-  user-select: none;
-}
-
 .viewLabel {
   font-weight: 400;
   color: var(--color-text-secondary);
