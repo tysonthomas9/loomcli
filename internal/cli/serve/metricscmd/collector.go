@@ -52,14 +52,23 @@ type cachedCollector struct {
 // the cache every interval, ensuring get() always finds warm data.
 // The goroutine exits when ctx is canceled.
 func (c *cachedCollector) startBackground(ctx context.Context, interval time.Duration) {
-	// Run an immediate first collection to warm the cache on startup
-	result := c.collectFn()
-	c.mu.Lock()
-	c.cached = result
-	c.cachedAt = time.Now()
-	c.mu.Unlock()
-
+	// Run the first collection and all subsequent ones in the background goroutine.
+	// The first HTTP request hitting get() will trigger a singleflight collection
+	// if the background hasn't finished yet — this avoids blocking server startup.
 	go func() {
+		// Immediate first collection to warm the cache
+		result := c.collectFn()
+		collectedAt := time.Now()
+		c.mu.Lock()
+		// Don't roll back fresher data written by an in-flight get().
+		// Don't touch inflight/waitCh — those are owned by the get()
+		// collector and double-closing waitCh would panic.
+		if collectedAt.After(c.cachedAt) {
+			c.cached = result
+			c.cachedAt = collectedAt
+		}
+		c.mu.Unlock()
+
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {

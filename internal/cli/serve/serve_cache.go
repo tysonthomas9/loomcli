@@ -38,12 +38,14 @@ func (c *cachedValue[T]) startBackground(ctx context.Context, interval time.Dura
 	go func() {
 		// Immediate first collection to warm the cache
 		result := c.collectFn()
+		collectedAt := time.Now()
 		c.mu.Lock()
-		c.cached = result
-		c.cachedAt = time.Now()
-		if c.inflight {
-			c.inflight = false
-			close(c.waitCh)
+		// Don't roll back fresher data written by an in-flight get().
+		// Don't touch inflight/waitCh — those are owned by the get()
+		// collector and double-closing waitCh would panic.
+		if collectedAt.After(c.cachedAt) {
+			c.cached = result
+			c.cachedAt = collectedAt
 		}
 		c.mu.Unlock()
 
