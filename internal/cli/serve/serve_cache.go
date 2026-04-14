@@ -48,13 +48,14 @@ func (c *cachedValue[T]) startBackground(ctx context.Context, interval time.Dura
 				return
 			case <-ticker.C:
 				result := c.collectFn()
+				collectedAt := time.Now()
 				c.mu.Lock()
-				c.cached = result
-				c.cachedAt = time.Now()
-				// If anyone is waiting on inflight, signal them
-				if c.inflight {
-					c.inflight = false
-					close(c.waitCh)
+				// Don't roll back fresher data written by an in-flight get().
+				// Don't touch inflight/waitCh — those are owned by the get()
+				// collector and double-closing waitCh would panic.
+				if collectedAt.After(c.cachedAt) {
+					c.cached = result
+					c.cachedAt = collectedAt
 				}
 				c.mu.Unlock()
 			}
@@ -101,10 +102,17 @@ func (c *cachedValue[T]) get() T {
 
 	// Perform collection outside the lock
 	data := c.collectFn()
+	collectedAt := time.Now()
 
 	c.mu.Lock()
-	c.cached = data
-	c.cachedAt = time.Now()
+	// Only write if our result is newer than what's cached — a concurrent
+	// background ticker may have written a fresher value while we were running.
+	if collectedAt.After(c.cachedAt) {
+		c.cached = data
+		c.cachedAt = collectedAt
+	} else {
+		data = c.cached
+	}
 	c.mu.Unlock()
 
 	return data
