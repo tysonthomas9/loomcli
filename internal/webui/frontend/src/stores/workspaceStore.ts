@@ -83,7 +83,19 @@ export function createWorkspaceStore(): StoreApi<WorkspaceStore> {
       try {
         const data = await promise;
         if (gen === generation) {
-          set({ workspace: data, isLoading: false, error: null });
+          // Preserve workspace reference when payload is unchanged so downstream
+          // useMemo chains (sourceReposFilter, activeRepos, etc.) don't churn on
+          // every poll tick. The cherry-pick of v2's polling-bug fix removed the
+          // join/split string-key dedup workaround on the assumption that this
+          // upstream equality guard exists.
+          const prev = get().workspace;
+          const sameRef =
+            prev !== null && JSON.stringify(prev) === JSON.stringify(data);
+          if (sameRef) {
+            set({ isLoading: false, error: null });
+          } else {
+            set({ workspace: data, isLoading: false, error: null });
+          }
         }
       } catch (err) {
         // AbortError — silently ignore (but still clear isLoading)
