@@ -385,6 +385,7 @@ vi.mock("@/hooks", () => ({
     error: null,
     refetch: vi.fn(),
   }),
+  useBackendConfig: () => ({ config: { backend: "claude" }, error: null }),
 }));
 
 vi.mock("@/hooks/ui", async (importOriginal) => {

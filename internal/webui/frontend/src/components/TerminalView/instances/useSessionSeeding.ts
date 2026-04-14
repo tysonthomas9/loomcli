@@ -157,15 +157,16 @@ export function useSessionSeeding({
     if (!pendingLeadSession || !initializedRef.current) return;
 
     const { sessionName, backend } = pendingLeadSession;
+    const currentTabs = tabsRef.current;
 
-    const existingTab = tabs.find((t) => t.sessionName === sessionName);
+    const existingTab = currentTabs.find((t) => t.sessionName === sessionName);
     if (existingTab) {
       setActiveTabId(existingTab.id);
       onLeadSessionConsumed?.();
       return;
     }
 
-    if (tabs.length >= MAX_TABS) {
+    if (currentTabs.length >= MAX_TABS) {
       scheduleSessionKill(workspaceIdRef.current, sessionName, true).catch(
         (err) =>
           console.error(
@@ -187,19 +188,19 @@ export function useSessionSeeding({
     setTabs((prev) => [...prev, newTab]);
     setActiveTabId(sessionName);
 
-    createTab(sessionName, newTab.label, tabs.length).catch((err) =>
+    createTab(sessionName, newTab.label, currentTabs.length).catch((err) =>
       console.error(`Failed to persist lead tab ${sessionName}:`, err),
     );
 
     onLeadSessionConsumed?.();
   }, [
     pendingLeadSession,
-    tabs,
     createTab,
     onLeadSessionConsumed,
     initializedRef,
     setTabs,
     setActiveTabId,
+    tabsRef,
     workspaceIdRef,
   ]);
 

@@ -480,6 +480,7 @@ func (m *TerminalManager) tmuxNewSessionArgv(name string, argv []string, cols, r
 		"-s", name,
 		"-x", fmt.Sprintf("%d", cols),
 		"-y", fmt.Sprintf("%d", rows),
+		"--",
 	}
 	args = append(args, argv...)
 	if err := m.tmuxCmd(args...).Run(); err != nil {
