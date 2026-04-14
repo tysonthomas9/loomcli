@@ -111,6 +111,8 @@ print_phase_result() {
     if [ "$QUIET" -eq 1 ]; then return; fi
     if [ "$_status" = "PASS" ]; then
         printf "✓ %s passed (%ss)\n" "$_name" "$_secs"
+    elif [ "$_status" = "SKIP" ]; then
+        printf "⊘ %s skipped (%ss)\n" "$_name" "$_secs"
     else
         printf "✗ %s FAILED (%ss)\n" "$_name" "$_secs"
     fi
@@ -147,6 +149,8 @@ print_summary() {
     echo "$RESULTS" | while IFS=: read -r _name _status _secs; do
         if [ "$_status" = "PASS" ]; then
             printf "  ✓ %-20s PASS (%ss)\n" "$_name" "$_secs"
+        elif [ "$_status" = "SKIP" ]; then
+            printf "  ⊘ %-20s SKIP (%ss)\n" "$_name" "$_secs"
         else
             printf "  ✗ %-20s FAIL (%ss)\n" "$_name" "$_secs"
         fi
@@ -156,6 +160,8 @@ print_summary() {
         echo "$E2E_BACKEND_RESULTS" | while IFS=: read -r _be _st; do
             if [ "$_st" = "PASS" ]; then
                 printf "    - %-18s PASS\n" "$_be"
+            elif [ "$_st" = "SKIP" ]; then
+                printf "    - %-18s SKIP\n" "$_be"
             else
                 printf "    - %-18s FAIL\n" "$_be"
             fi
@@ -249,8 +255,19 @@ phase_smoke() {
 
 # ── Phase: Unit Tests ──────────────────────────────────────────────────────
 # Args: none (extra go test args are not passed to unit tests)
+# Note: In container mode (no Go toolchain), unit tests are skipped.
+# Run unit tests on the host or in CI with `go test ./...`.
 phase_unit() {
     _start=$(date +%s)
+
+    if ! command -v go >/dev/null 2>&1; then
+        if [ "$QUIET" -eq 0 ]; then
+            printf "Skipping unit tests (no Go toolchain in container; run on host)\n"
+        fi
+        add_result "Unit Tests" "SKIP" "0"
+        print_phase_result "Unit Tests" "SKIP" "0"
+        return 0
+    fi
 
     if [ "$QUIET" -eq 0 ]; then
         if [ "$VERBOSE" -eq 1 ]; then
@@ -291,6 +308,17 @@ phase_unit() {
 # Args: "$@" = extra go test args forwarded from the command line
 phase_e2e() {
     _start=$(date +%s)
+
+    # Need either pre-compiled test binary or Go toolchain
+    if ! command -v cli-e2e.test >/dev/null 2>&1 && ! command -v go >/dev/null 2>&1; then
+        if [ "$QUIET" -eq 0 ]; then
+            printf "Skipping E2E tests (no test binary or Go toolchain; build with go test -c)\n"
+        fi
+        add_result "E2E Tests" "SKIP" "0"
+        print_phase_result "E2E Tests" "SKIP" "0"
+        return 0
+    fi
+
     _backends="$ALL_BACKENDS"
     if [ -n "$BACKEND" ]; then
         _backends="$BACKEND"
@@ -311,13 +339,22 @@ phase_e2e() {
         _be_start=$(date +%s)
 
         if [ "$QUIET" -eq 0 ]; then
-            printf "\n  Backend: %s\n  Running LOOM_BACKEND=%s go test -tags e2e -timeout %s -count=1 -v ./internal/cli/ %s\n" "$_be" "$_be" "$TIMEOUT" "$*"
+            printf "\n  Backend: %s\n" "$_be"
         fi
 
-        if [ "$QUIET" -eq 1 ]; then
-            LOOM_BACKEND="$_be" go test -tags e2e -timeout "$TIMEOUT" -count=1 -v ./internal/cli/ "$@" >/dev/null 2>&1
+        # Use pre-compiled test binary if available, else fall back to go test
+        if command -v cli-e2e.test >/dev/null 2>&1; then
+            if [ "$QUIET" -eq 1 ]; then
+                LOOM_BACKEND="$_be" cli-e2e.test -test.timeout "$TIMEOUT" -test.count=1 -test.v "$@" >/dev/null 2>&1
+            else
+                LOOM_BACKEND="$_be" cli-e2e.test -test.timeout "$TIMEOUT" -test.count=1 -test.v "$@"
+            fi
         else
-            LOOM_BACKEND="$_be" go test -tags e2e -timeout "$TIMEOUT" -count=1 -v ./internal/cli/ "$@"
+            if [ "$QUIET" -eq 1 ]; then
+                LOOM_BACKEND="$_be" go test -tags e2e -timeout "$TIMEOUT" -count=1 -v ./internal/cli/ "$@" >/dev/null 2>&1
+            else
+                LOOM_BACKEND="$_be" go test -tags e2e -timeout "$TIMEOUT" -count=1 -v ./internal/cli/ "$@"
+            fi
         fi
         _rc=$?
         _be_secs=$(elapsed "$_be_start")
