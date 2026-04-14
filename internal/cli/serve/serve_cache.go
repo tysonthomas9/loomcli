@@ -56,7 +56,13 @@ func (c *cachedValue[T]) startBackground(ctx context.Context, interval time.Dura
 				c.cached = result
 				c.cachedAt = collectedAt
 			}
-			c.inflight = false
+			// Only clear inflight if we still own the current claim. A concurrent
+			// get() collector may have overwritten c.waitCh with its own channel;
+			// in that case we must not prematurely clear inflight or new callers
+			// could start a third competing collection.
+			if c.waitCh == ch {
+				c.inflight = false
+			}
 			close(ch)
 			c.mu.Unlock()
 		}
@@ -107,9 +113,13 @@ func (c *cachedValue[T]) get() T {
 	c.mu.Unlock()
 
 	// Ensure waiters are always unblocked, even if collectFn panics.
+	// Only clear inflight if we still own the current claim — a background
+	// refresh() may have overwritten c.waitCh while we were collecting.
 	defer func() {
 		c.mu.Lock()
-		c.inflight = false
+		if c.waitCh == ch {
+			c.inflight = false
+		}
 		close(ch)
 		c.mu.Unlock()
 	}()
