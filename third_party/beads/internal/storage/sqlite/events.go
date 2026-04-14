@@ -146,7 +146,7 @@ func (s *SQLiteStorage) GetStatistics(ctx context.Context) (*types.Statistics, e
 		JOIN issues blocker ON d.depends_on_id = blocker.id
 		WHERE i.status IN ('open', 'in_progress', 'blocked', 'deferred', 'hooked')
 		  AND d.type = 'blocks'
-		  AND blocker.status IN ('open', 'in_progress', 'blocked', 'deferred', 'hooked')
+		  AND blocker.status IN ('open', 'in_progress', 'blocked', 'deferred', 'hooked', 'review')
 	`).Scan(&stats.BlockedIssues)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get blocked count: %w", err)
@@ -162,7 +162,7 @@ func (s *SQLiteStorage) GetStatistics(ctx context.Context) (*types.Statistics, e
 		    JOIN issues blocker ON d.depends_on_id = blocker.id
 		    WHERE d.issue_id = i.id
 		      AND d.type = 'blocks'
-		      AND blocker.status IN ('open', 'in_progress', 'blocked', 'deferred', 'hooked')
+		      AND blocker.status IN ('open', 'in_progress', 'blocked', 'deferred', 'hooked', 'review')
 		  )
 	`).Scan(&stats.ReadyIssues)
 	if err != nil {
@@ -188,7 +188,7 @@ func (s *SQLiteStorage) GetStatistics(ctx context.Context) (*types.Statistics, e
 	// Get epics eligible for closure count
 	err = s.db.QueryRowContext(ctx, `
 		WITH epic_children AS (
-			SELECT 
+			SELECT
 				d.depends_on_id AS epic_id,
 				i.status AS child_status
 			FROM dependencies d
@@ -196,7 +196,7 @@ func (s *SQLiteStorage) GetStatistics(ctx context.Context) (*types.Statistics, e
 			WHERE d.type = 'parent-child'
 		),
 		epic_stats AS (
-			SELECT 
+			SELECT
 				epic_id,
 				COUNT(*) AS total_children,
 				SUM(CASE WHEN child_status = 'closed' THEN 1 ELSE 0 END) AS closed_children

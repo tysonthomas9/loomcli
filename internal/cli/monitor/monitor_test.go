@@ -2911,3 +2911,55 @@ func TestCompleteSyncStatusDetails(t *testing.T) {
 		})
 	}
 }
+
+// TestProcessReadyIssuesSkipsBlockedIDs verifies the defense-in-depth check:
+// issues whose ID appears in the blockedIDs set are excluded from the ready output.
+func TestProcessReadyIssuesSkipsBlockedIDs(t *testing.T) {
+	t.Parallel()
+
+	issues := []backend.IssueData{
+		{ID: "T-1", Title: "Ready task", Status: "open", Design: "plan", IssueType: "task"},
+		{ID: "T-2", Title: "Blocked task", Status: "open", Design: "plan", IssueType: "task"},
+		{ID: "T-3", Title: "Also ready", Status: "open", Design: "plan", IssueType: "task"},
+	}
+
+	blockedIDs := map[string]bool{"T-2": true}
+
+	var summary TaskSummary
+	needsPlanning, readyToImpl := processReadyIssues(issues, nil, &summary, blockedIDs)
+
+	// T-2 should be skipped; T-1 and T-3 should be ready-to-implement
+	if summary.ReadyToImplement != 2 {
+		t.Errorf("expected ReadyToImplement=2 (T-2 blocked), got %d", summary.ReadyToImplement)
+	}
+
+	allReady := make([]TaskInfo, 0, len(needsPlanning)+len(readyToImpl))
+	allReady = append(allReady, needsPlanning...)
+	allReady = append(allReady, readyToImpl...)
+	for _, ti := range allReady {
+		if ti.ID == "T-2" {
+			t.Errorf("T-2 should have been filtered out by blockedIDs but was included")
+		}
+	}
+}
+
+// TestProcessReadyIssuesNilBlockedIDs verifies graceful degradation:
+// when blockedIDs is nil (e.g. Blocked() query failed), all issues pass through.
+func TestProcessReadyIssuesNilBlockedIDs(t *testing.T) {
+	t.Parallel()
+
+	issues := []backend.IssueData{
+		{ID: "T-1", Title: "Task 1", Status: "open", Design: "plan", IssueType: "task"},
+		{ID: "T-2", Title: "Task 2", Status: "open", Design: "plan", IssueType: "task"},
+	}
+
+	var summary TaskSummary
+	_, readyToImpl := processReadyIssues(issues, nil, &summary, nil)
+
+	if summary.ReadyToImplement != 2 {
+		t.Errorf("expected ReadyToImplement=2 with nil blockedIDs, got %d", summary.ReadyToImplement)
+	}
+	if len(readyToImpl) != 2 {
+		t.Errorf("expected 2 ready tasks with nil blockedIDs, got %d", len(readyToImpl))
+	}
+}

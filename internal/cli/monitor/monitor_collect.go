@@ -307,7 +307,18 @@ func collectTaskStatusDeps(deps *cli.Deps, readyLimit int) (TaskSummary, []TaskI
 	var summary TaskSummary
 	agentTasks := make(map[string]TaskInfo)
 
-	needsPlanningTasks, readyToImplementTasks := processReadyIssues(qr.readyIssues, qr.readyErr, &summary)
+	// Defense-in-depth: build a set of blocked issue IDs from the Blocked() query.
+	// If a ready issue also appears in the blocked set, skip it — bd ready may have
+	// leaked it through due to a missing status in its SQL blocker filter.
+	var blockedIDs map[string]bool
+	if qr.backlogErr == nil {
+		blockedIDs = make(map[string]bool, len(qr.backlogIssues))
+		for _, issue := range qr.backlogIssues {
+			blockedIDs[issue.ID] = true
+		}
+	}
+
+	needsPlanningTasks, readyToImplementTasks := processReadyIssues(qr.readyIssues, qr.readyErr, &summary, blockedIDs)
 	inProgressTasks := processInProgressIssues(qr.inProgressIssues, qr.inProgressErr, &summary, agentTasks)
 	reviewTasks := processReviewIssues(qr.reviewIssues, qr.reviewErr, &summary)
 	backlogTasks := processBacklogIssues(qr.backlogIssues, qr.backlogErr, &summary)
@@ -348,7 +359,7 @@ func runParallelTaskQueries(deps *cli.Deps, readyLimit int) taskQueryResults {
 	return qr
 }
 
-func processReadyIssues(issues []backend.IssueData, err error, summary *TaskSummary) ([]TaskInfo, []TaskInfo) {
+func processReadyIssues(issues []backend.IssueData, err error, summary *TaskSummary, blockedIDs map[string]bool) ([]TaskInfo, []TaskInfo) {
 	if err != nil {
 		return nil, nil
 	}
@@ -362,6 +373,12 @@ func processReadyIssues(issues []backend.IssueData, err error, summary *TaskSumm
 			continue
 		}
 		if cli.IsNonWorkType(issue) {
+			continue
+		}
+		// Defense-in-depth: skip issues that the Blocked() query identifies as
+		// blocked, even if bd ready returned them (e.g. due to missing status
+		// in the ready SQL blocker filter).
+		if blockedIDs != nil && blockedIDs[issue.ID] {
 			continue
 		}
 		ti := TaskInfo{ID: issue.ID, Title: issue.Title, Priority: issue.Priority}

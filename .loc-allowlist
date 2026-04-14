@@ -6,4 +6,4 @@
 # NOTE: No new entries allowed. Split large files instead.
 
 # Test files above 2500 LOC ceiling
-2950 internal/cli/monitor/monitor_test.go
+2965 internal/cli/monitor/monitor_test.go

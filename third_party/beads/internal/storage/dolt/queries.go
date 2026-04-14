@@ -288,7 +288,7 @@ func (s *DoltStore) GetReadyWork(ctx context.Context, filter types.WorkFilter) (
 			FROM dependencies d
 			JOIN issues blocker ON d.depends_on_id = blocker.id
 			WHERE d.type = 'blocks'
-			  AND blocker.status IN ('open', 'in_progress', 'blocked', 'deferred', 'hooked')
+			  AND blocker.status IN ('open', 'in_progress', 'blocked', 'deferred', 'hooked', 'review')
 		)
 	`)
 
@@ -328,7 +328,7 @@ func (s *DoltStore) GetBlockedIssues(ctx context.Context, _ types.WorkFilter) ([
 		JOIN issues blocker ON d.depends_on_id = blocker.id
 		WHERE i.status IN ('open', 'in_progress', 'blocked', 'deferred', 'hooked')
 		  AND d.type = 'blocks'
-		  AND blocker.status IN ('open', 'in_progress', 'blocked', 'deferred', 'hooked')
+		  AND blocker.status IN ('open', 'in_progress', 'blocked', 'deferred', 'hooked', 'review')
 		GROUP BY i.id
 		ORDER BY i.priority ASC, i.created_at DESC
 	`)
@@ -359,7 +359,7 @@ func (s *DoltStore) GetBlockedIssues(ctx context.Context, _ types.WorkFilter) ([
 			JOIN issues blocker ON d.depends_on_id = blocker.id
 			WHERE d.issue_id = ?
 			  AND d.type = 'blocks'
-			  AND blocker.status IN ('open', 'in_progress', 'blocked', 'deferred', 'hooked')
+			  AND blocker.status IN ('open', 'in_progress', 'blocked', 'deferred', 'hooked', 'review')
 		`, id)
 		if err != nil {
 			return nil, err
@@ -506,7 +506,7 @@ func (s *DoltStore) GetStatistics(ctx context.Context) (*types.Statistics, error
 		JOIN issues blocker ON d.depends_on_id = blocker.id
 		WHERE i.status IN ('open', 'in_progress', 'blocked', 'deferred', 'hooked')
 		  AND d.type = 'blocks'
-		  AND blocker.status IN ('open', 'in_progress', 'blocked', 'deferred', 'hooked')
+		  AND blocker.status IN ('open', 'in_progress', 'blocked', 'deferred', 'hooked', 'review')
 	`).Scan(&stats.BlockedIssues)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get blocked count: %w", err)

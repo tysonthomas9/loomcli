@@ -643,3 +643,105 @@ func TestWaitsForDynamicChildrenAdded(t *testing.T) {
 		t.Errorf("Expected waiter to be unblocked (dynamic child closed)")
 	}
 }
+
+// TestBlockerInReviewStatusStillBlocks verifies that a blocker in 'review' status
+// still blocks dependent issues (Bug 1: 'review' added to blocker status IN clauses).
+func TestBlockerInReviewStatusStillBlocks(t *testing.T) {
+	store, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create A (blocker) and B (blocked by A)
+	issueA := &types.Issue{Title: "Blocker in review", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}
+	issueB := &types.Issue{Title: "Blocked by A", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}
+
+	store.CreateIssue(ctx, issueA, "test-user")
+	store.CreateIssue(ctx, issueB, "test-user")
+
+	// B depends on A (blocks dependency)
+	dep := &types.Dependency{IssueID: issueB.ID, DependsOnID: issueA.ID, Type: types.DepBlocks}
+	store.AddDependency(ctx, dep, "test-user")
+
+	// Move A to 'review' status
+	updates := map[string]interface{}{"status": string(types.StatusReview)}
+	if err := store.UpdateIssue(ctx, issueA.ID, updates, "test-user"); err != nil {
+		t.Fatalf("UpdateIssue to review failed: %v", err)
+	}
+
+	// B should still be in the blocked cache (review is not closed)
+	cached := getCachedBlockedIssues(t, store)
+	if !cached[issueB.ID] {
+		t.Errorf("Expected %s to be blocked (blocker A is in review, not closed)", issueB.ID)
+	}
+
+	// Also verify B is NOT returned by GetReadyWork
+	ready, err := store.GetReadyWork(ctx, types.WorkFilter{})
+	if err != nil {
+		t.Fatalf("GetReadyWork failed: %v", err)
+	}
+	for _, r := range ready {
+		if r.ID == issueB.ID {
+			t.Errorf("Expected %s NOT to appear in GetReadyWork (blocked by review-status blocker)", issueB.ID)
+		}
+	}
+}
+
+// TestBlockerInReviewStatusReleasesOnClose verifies that closing a review-status blocker
+// unblocks the dependent issue.
+func TestBlockerInReviewStatusReleasesOnClose(t *testing.T) {
+	store, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create A (blocker) and B (blocked by A)
+	issueA := &types.Issue{Title: "Blocker in review", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}
+	issueB := &types.Issue{Title: "Blocked by A", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}
+
+	store.CreateIssue(ctx, issueA, "test-user")
+	store.CreateIssue(ctx, issueB, "test-user")
+
+	// B depends on A (blocks dependency)
+	dep := &types.Dependency{IssueID: issueB.ID, DependsOnID: issueA.ID, Type: types.DepBlocks}
+	store.AddDependency(ctx, dep, "test-user")
+
+	// Move A to 'review' status
+	updates := map[string]interface{}{"status": string(types.StatusReview)}
+	if err := store.UpdateIssue(ctx, issueA.ID, updates, "test-user"); err != nil {
+		t.Fatalf("UpdateIssue to review failed: %v", err)
+	}
+
+	// Verify B is blocked
+	cached := getCachedBlockedIssues(t, store)
+	if !cached[issueB.ID] {
+		t.Fatalf("Setup failed: expected %s in cache while A is in review", issueB.ID)
+	}
+
+	// Close A
+	if err := store.CloseIssue(ctx, issueA.ID, "Review complete", "test-user", ""); err != nil {
+		t.Fatalf("CloseIssue failed: %v", err)
+	}
+
+	// B should no longer be blocked
+	cached = getCachedBlockedIssues(t, store)
+	if cached[issueB.ID] {
+		t.Errorf("Expected %s to be unblocked after closing review-status blocker", issueB.ID)
+	}
+
+	// B should now appear in GetReadyWork
+	ready, err := store.GetReadyWork(ctx, types.WorkFilter{})
+	if err != nil {
+		t.Fatalf("GetReadyWork failed: %v", err)
+	}
+	found := false
+	for _, r := range ready {
+		if r.ID == issueB.ID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected %s to appear in GetReadyWork after blocker closed", issueB.ID)
+	}
+}

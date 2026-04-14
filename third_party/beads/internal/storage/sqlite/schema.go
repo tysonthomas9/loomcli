@@ -229,7 +229,7 @@ WITH RECURSIVE
     FROM dependencies d
     JOIN issues blocker ON d.depends_on_id = blocker.id
     WHERE d.type = 'blocks'
-      AND blocker.status IN ('open', 'in_progress', 'blocked', 'deferred', 'hooked')
+      AND blocker.status IN ('open', 'in_progress', 'blocked', 'deferred', 'hooked', 'review')
   ),
   -- Propagate blockage to all descendants via parent-child
   blocked_transitively AS (
@@ -262,6 +262,6 @@ JOIN dependencies d ON i.id = d.issue_id
 JOIN issues blocker ON d.depends_on_id = blocker.id
 WHERE i.status IN ('open', 'in_progress', 'blocked', 'deferred', 'hooked')
   AND d.type = 'blocks'
-  AND blocker.status IN ('open', 'in_progress', 'blocked', 'deferred', 'hooked')
+  AND blocker.status IN ('open', 'in_progress', 'blocked', 'deferred', 'hooked', 'review')
 GROUP BY i.id;
 `
