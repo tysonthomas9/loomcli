@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 	"time"
@@ -297,6 +298,9 @@ func (p *ConnectionPool) SocketPath() string {
 func (p *ConnectionPool) createConnection() (*rpc.Client, error) {
 	client, err := rpc.TryConnectWithTimeout(p.socketPath, p.dialTimeout)
 	if err != nil {
+		if errors.Is(err, rpc.ErrDaemonStarting) {
+			return nil, ErrDaemonStarting
+		}
 		return nil, ErrConnectionTimeout
 	}
 	if client == nil {

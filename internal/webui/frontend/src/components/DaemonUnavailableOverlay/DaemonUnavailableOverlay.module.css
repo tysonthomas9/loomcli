@@ -66,6 +66,15 @@
   color: var(--color-text);
 }
 
+/* Description (e.g., "starting" mode explanatory text) */
+.description {
+  color: var(--color-text-muted);
+  font-size: 13px;
+  margin: 0;
+  line-height: 1.5;
+  max-width: 320px;
+}
+
 /* Error detail */
 .errorDetail {
   color: var(--color-text-muted);

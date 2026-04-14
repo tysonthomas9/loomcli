@@ -47,11 +47,12 @@ export function IssueViewGuard({
   }
 
   if (error) {
+    const isStarting = error.includes("workspace is loading");
     return (
       <ErrorDisplay
-        variant="fetch-error"
+        variant={isStarting ? "loading" : "fetch-error"}
         error={new Error(error)}
-        showDetails
+        showDetails={!isStarting}
         onRetry={onRetry}
       />
     );

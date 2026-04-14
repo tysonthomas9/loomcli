@@ -37,6 +37,17 @@ export function DaemonUnavailableOverlay({
   useFocusTrap(overlayRef, true);
 
   const isNeverConnected = mode === "never_connected";
+  const isStarting = mode === "starting";
+
+  const titleText = isStarting
+    ? "Workspace loading\u2026"
+    : isNeverConnected
+      ? "Connecting to daemon\u2026"
+      : "Connection to daemon lost";
+
+  const descriptionText = isStarting
+    ? "The workspace daemon is starting up. This may take a few minutes for large repositories."
+    : null;
 
   return (
     <div
@@ -53,12 +64,14 @@ export function DaemonUnavailableOverlay({
         </div>
 
         <h2 id="daemon-overlay-title" className={styles.title}>
-          {isNeverConnected
-            ? "Connecting to daemon\u2026"
-            : "Connection to daemon lost"}
+          {titleText}
         </h2>
 
-        {!isNeverConnected && lastError && (
+        {descriptionText && (
+          <p className={styles.description}>{descriptionText}</p>
+        )}
+
+        {!isNeverConnected && !isStarting && lastError && (
           <p className={styles.errorDetail}>{lastError}</p>
         )}
 
@@ -67,11 +80,11 @@ export function DaemonUnavailableOverlay({
             Retrying in {retryCountdown}s\u2026
           </p>
         )}
-        {retryCountdown === 0 && !isNeverConnected && (
+        {retryCountdown === 0 && !isNeverConnected && !isStarting && (
           <p className={styles.countdown}>Retrying\u2026</p>
         )}
 
-        {!isNeverConnected && (
+        {!isNeverConnected && !isStarting && (
           <button
             className={styles.retryButton}
             onClick={onRetry}

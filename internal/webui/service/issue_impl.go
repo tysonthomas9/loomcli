@@ -51,6 +51,9 @@ func (s *issueServiceImpl) acquireClient(ctx context.Context) (*rpc.Client, erro
 	}
 	client, err := s.pool.Get(ctx)
 	if err != nil {
+		if errors.Is(err, daemon.ErrDaemonStarting) {
+			return nil, ErrStarting("workspace is loading")
+		}
 		if errors.Is(err, context.DeadlineExceeded) {
 			return nil, ErrTimeout("timeout connecting to daemon")
 		}

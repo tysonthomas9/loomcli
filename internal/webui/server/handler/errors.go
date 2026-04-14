@@ -24,6 +24,7 @@ var kindToStatus = map[service.ErrorKind]int{
 	service.KindRateLimited:     http.StatusTooManyRequests,
 	service.KindBadGateway:      http.StatusBadGateway,
 	service.KindNotImplemented:  http.StatusNotImplemented,
+	service.KindStarting:        http.StatusServiceUnavailable,
 }
 
 // HandleServiceError extracts a *service.ServiceError from err, maps its
@@ -52,6 +53,9 @@ func HandleServiceError(w http.ResponseWriter, err error) {
 			"msg", svcErr.Message,
 			"err", err,
 		)
+		if svcErr.Kind == service.KindStarting {
+			w.Header().Set("Retry-After", "5")
+		}
 		WriteJSON(w, status, map[string]string{"error": svcErr.Message})
 		return
 	}

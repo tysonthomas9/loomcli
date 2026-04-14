@@ -3,7 +3,7 @@
  * Displays error messages with optional retry functionality.
  */
 
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 
 import styles from "./ErrorDisplay.module.css";
 
@@ -14,6 +14,7 @@ export type ErrorDisplayVariant =
   | "fetch-error"
   | "connection-error"
   | "unknown-error"
+  | "loading"
   | "custom";
 
 /**
@@ -62,11 +63,38 @@ const VARIANT_DEFAULTS: Record<
     title: "Something went wrong",
     description: "An unexpected error occurred. Please try again later.",
   },
+  loading: {
+    title: "Workspace loading...",
+    description:
+      "The workspace daemon is starting up. This may take a few minutes for large repositories.",
+  },
   custom: {
     title: "Error",
     description: "",
   },
 };
+
+/**
+ * Spinner icon for the loading variant.
+ */
+function SpinnerIcon(): JSX.Element {
+  return (
+    <svg
+      className={`${styles.icon} ${styles.spinner}`}
+      width="48"
+      height="48"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+    </svg>
+  );
+}
 
 /**
  * Default error icon SVG (circle with exclamation).
@@ -133,20 +161,37 @@ export function ErrorDisplay({
   const defaults = VARIANT_DEFAULTS[variant];
   const displayTitle = title ?? defaults.title;
   const displayDescription = description ?? defaults.description;
+  const isLoading = variant === "loading";
+
+  // Auto-retry every 5 seconds when in loading state
+  const onRetryRef = useRef(onRetry);
+  onRetryRef.current = onRetry;
+  useEffect(() => {
+    if (!isLoading || !onRetryRef.current) return;
+    const interval = setInterval(() => {
+      onRetryRef.current?.();
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [isLoading]);
 
   const rootClassName = className
     ? `${styles.errorDisplay} ${className}`
     : styles.errorDisplay;
 
+  const iconElement = isLoading ? <SpinnerIcon /> : (icon ?? <DefaultIcon />);
+  const iconWrapperClass = isLoading
+    ? `${styles.iconWrapper} ${styles.iconWrapperLoading}`
+    : styles.iconWrapper;
+
   return (
     <div
       className={rootClassName}
-      role="alert"
-      aria-live="assertive"
+      role={isLoading ? "status" : "alert"}
+      aria-live={isLoading ? "polite" : "assertive"}
       data-testid="error-display"
       data-variant={variant}
     >
-      <div className={styles.iconWrapper}>{icon ?? <DefaultIcon />}</div>
+      <div className={iconWrapperClass}>{iconElement}</div>
       <h3 className={styles.title}>{displayTitle}</h3>
       {displayDescription && (
         <p className={styles.description}>{displayDescription}</p>

@@ -29,6 +29,11 @@ var (
 
 	// ErrPoolClosed indicates the pool has been closed.
 	ErrPoolClosed = errors.New("connection pool closed")
+
+	// ErrDaemonStarting indicates the daemon is starting up (hydrating).
+	// The daemon lock is held but the RPC socket is not yet available.
+	// This is a transient state, not a failure.
+	ErrDaemonStarting = errors.New("daemon starting up")
 )
 
 // IsRetryable determines if an operation can be retried.
@@ -43,5 +48,6 @@ func IsRetryable(err error) bool {
 	}
 	return errors.Is(err, ErrDaemonNotRunning) ||
 		errors.Is(err, ErrConnectionTimeout) ||
-		errors.Is(err, ErrDaemonUnhealthy)
+		errors.Is(err, ErrDaemonUnhealthy) ||
+		errors.Is(err, ErrDaemonStarting)
 }

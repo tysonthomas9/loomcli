@@ -559,6 +559,77 @@ describe("useDaemonHealth", () => {
     });
   });
 
+  describe("starting health response", () => {
+    it('sets connectionMode to "starting" when health returns status=starting', async () => {
+      mockGet.mockResolvedValueOnce({
+        status: "starting" as const,
+        daemon: { connected: false, error: "daemon is starting up" },
+      });
+
+      const { result } = renderHook(() => useDaemonHealth());
+
+      await flushPromises();
+
+      expect(result.current.connectionMode).toBe("starting");
+      expect(result.current.isDaemonAvailable).toBe(false);
+      expect(result.current.lastError).toBe("daemon is starting up");
+    });
+
+    it("uses default error message when starting response has no error field", async () => {
+      mockGet.mockResolvedValueOnce({
+        status: "starting" as const,
+        daemon: { connected: false },
+      });
+
+      const { result } = renderHook(() => useDaemonHealth());
+
+      await flushPromises();
+
+      expect(result.current.connectionMode).toBe("starting");
+      expect(result.current.lastError).toBe("Daemon is starting up");
+    });
+
+    it("schedules retry after starting response", async () => {
+      mockGet.mockResolvedValueOnce({
+        status: "starting" as const,
+        daemon: { connected: false, error: "daemon is starting up" },
+      });
+
+      const { result } = renderHook(() => useDaemonHealth());
+
+      await flushPromises();
+
+      // Retry should be scheduled (countdown > 0)
+      expect(result.current.retryCountdown).toBeGreaterThan(0);
+    });
+
+    it("transitions from starting to connected when daemon finishes hydrating", async () => {
+      // First check: starting
+      mockGet.mockResolvedValueOnce({
+        status: "starting" as const,
+        daemon: { connected: false, error: "daemon is starting up" },
+      });
+
+      const { result } = renderHook(() => useDaemonHealth());
+
+      await flushPromises();
+
+      expect(result.current.connectionMode).toBe("starting");
+
+      // Retry with healthy response
+      mockGet.mockResolvedValueOnce(healthOk());
+
+      await act(async () => {
+        result.current.retryNow();
+      });
+      await flushPromises();
+
+      expect(result.current.connectionMode).toBe("connected");
+      expect(result.current.isDaemonAvailable).toBe(true);
+      expect(result.current.lastError).toBeNull();
+    });
+  });
+
   describe("error messages", () => {
     it("extracts message from Error instances", async () => {
       mockGet.mockRejectedValueOnce(new Error("ECONNREFUSED"));

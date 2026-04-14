@@ -28,7 +28,8 @@ export type DaemonConnectionMode =
   | "never_connected"
   | "connected"
   | "lost_connection"
-  | "reconnecting";
+  | "reconnecting"
+  | "starting";
 
 /** Return type for the useDaemonHealth hook. */
 export interface UseDaemonHealthReturn {
@@ -139,6 +140,13 @@ export function useDaemonHealth(): UseDaemonHealthReturn {
         unavailableSinceRef.current = null;
         initialCheckDoneRef.current = true;
         reportSuccessRef.current();
+      } else if (response.status === "starting") {
+        // Daemon is starting up (hydrating) — show loading state, not error
+        setIsDaemonAvailable(false);
+        setConnectionMode("starting");
+        setLastError(response.daemon.error ?? "Daemon is starting up");
+        initialCheckDoneRef.current = true;
+        reportFailureRef.current({ forceRetry: true });
       } else {
         // Daemon responded but degraded/unhealthy
         handleUnavailable(response.daemon.error ?? "Daemon is degraded");
