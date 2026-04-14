@@ -88,7 +88,7 @@ export const NO_WORKSPACE_VIEW_DATA: WorkspaceViewData = {
   pendingIds: undefined,
   blockedIssuesMap: undefined,
   filters: {},
-  groupBy: "none",
+  groupBy: "epic",
   debouncedSearch: "",
   activeView: "kanban",
   selectedIssueId: null,

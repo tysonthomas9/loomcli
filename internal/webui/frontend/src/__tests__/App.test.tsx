@@ -215,7 +215,7 @@ vi.mock("@/hooks", () => ({
   useIssueDetail: mockUseIssueDetail,
   useToast: mockUseToast,
   useRouteView: mockUseRouteView,
-  DEFAULT_GROUP_BY: "none",
+  DEFAULT_GROUP_BY: "epic",
   useFilterState: vi.fn(() => [
     {}, // FilterState - empty means App.tsx will apply DEFAULT_GROUP_BY fallback
     {
@@ -1285,7 +1285,7 @@ describe("App", () => {
       const mockReturn = createMockUseIssuesReturn({ issues });
       mockStoreState = mockReturn;
 
-      // Mock FilterState with no groupBy (App.tsx applies DEFAULT_GROUP_BY = 'none')
+      // Mock FilterState with no groupBy (App.tsx applies DEFAULT_GROUP_BY = 'epic')
       vi.mocked(useFilterState).mockReturnValue([
         {},
         {
