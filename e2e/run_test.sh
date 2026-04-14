@@ -1,6 +1,6 @@
 #!/bin/sh
 # run_test.sh — Orchestrate the loomcli E2E test suite inside the Docker container.
-# Runs: smoke test, unit tests, and E2E tests across all backends (claude, codex, opencode).
+# Runs: smoke test, unit tests, E2E tests, and Playwright browser tests.
 #
 # Usage: run_test.sh [OPTIONS] [-- GO_TEST_ARGS...]
 # Exit codes: 0 = all passed, 1 = test failure, 2 = usage/environment error
@@ -29,7 +29,7 @@ usage() {
 Usage: run_test.sh [OPTIONS] [-- GO_TEST_ARGS...]
 
 Options:
-  --phase PHASE      Run only this phase (smoke, unit, e2e)
+  --phase PHASE      Run only this phase (smoke, unit, e2e, playwright)
   --backend NAME     Run E2E tests for only this backend (claude, codex, opencode)
   --no-fail-fast     Continue running phases after a failure
   --timeout DURATION Go test timeout (default: 5m)
@@ -52,8 +52,8 @@ while [ $# -gt 0 ]; do
                 exit 2
             fi
             case "$2" in
-                smoke|unit|e2e) PHASE="$2" ;;
-                *) printf "Error: unknown phase '%s' (must be smoke, unit, or e2e)\n" "$2" >&2; exit 2 ;;
+                smoke|unit|e2e|playwright) PHASE="$2" ;;
+                *) printf "Error: unknown phase '%s' (must be smoke, unit, e2e, or playwright)\n" "$2" >&2; exit 2 ;;
             esac
             shift 2 ;;
         --backend)
@@ -386,6 +386,83 @@ phase_e2e() {
     fi
 }
 
+# ── Phase: Playwright Tests ────────────────────────────────────────────────
+# Runs mocked chromium tests and self-contained API e2e tests.
+phase_playwright() {
+    _start=$(date +%s)
+
+    if ! command -v npx >/dev/null 2>&1; then
+        if [ "$QUIET" -eq 0 ]; then
+            printf "Skipping Playwright tests (Node.js/npx not available)\n"
+        fi
+        add_result "Playwright" "SKIP" "0"
+        print_phase_result "Playwright" "SKIP" "0"
+        return 0
+    fi
+
+    _frontend_dir=""
+    if [ -d /src/internal/webui/frontend ]; then
+        _frontend_dir="/src/internal/webui/frontend"
+    elif [ -d internal/webui/frontend ]; then
+        _frontend_dir="internal/webui/frontend"
+    else
+        if [ "$QUIET" -eq 0 ]; then
+            printf "Skipping Playwright tests (frontend directory not found)\n"
+        fi
+        add_result "Playwright" "SKIP" "0"
+        print_phase_result "Playwright" "SKIP" "0"
+        return 0
+    fi
+
+    _pw_fail=0
+
+    # 1. Mocked chromium tests (no server needed)
+    if [ "$QUIET" -eq 0 ]; then
+        printf "\n  Running mocked Playwright tests...\n"
+    fi
+    (cd "$_frontend_dir" && npx playwright test --project=chromium)
+    _rc=$?
+    if [ "$_rc" -ne 0 ]; then
+        _pw_fail=1
+        if [ "$QUIET" -eq 0 ]; then
+            printf "  ✗ Mocked chromium tests FAILED\n"
+        fi
+    else
+        if [ "$QUIET" -eq 0 ]; then
+            printf "  ✓ Mocked chromium tests passed\n"
+        fi
+    fi
+
+    # 2. Self-contained API e2e tests (starts loom serve automatically)
+    if [ "$QUIET" -eq 0 ]; then
+        printf "\n  Running API e2e tests (self-contained)...\n"
+    fi
+    (cd "$_frontend_dir" && RUN_INTEGRATION_TESTS=1 npx playwright test --project=api)
+    _rc=$?
+    if [ "$_rc" -ne 0 ]; then
+        _pw_fail=1
+        if [ "$QUIET" -eq 0 ]; then
+            printf "  ✗ API e2e tests FAILED\n"
+        fi
+    else
+        if [ "$QUIET" -eq 0 ]; then
+            printf "  ✓ API e2e tests passed\n"
+        fi
+    fi
+
+    _secs=$(elapsed "$_start")
+
+    if [ "$_pw_fail" -eq 0 ]; then
+        add_result "Playwright" "PASS" "$_secs"
+        print_phase_result "Playwright" "PASS" "$_secs"
+        return 0
+    else
+        add_result "Playwright" "FAIL" "$_secs"
+        print_phase_result "Playwright" "FAIL" "$_secs"
+        return 1
+    fi
+}
+
 # ── Main ────────────────────────────────────────────────────────────────────
 OVERALL_START=$(date +%s)
 print_banner
@@ -394,7 +471,7 @@ print_banner
 if [ -n "$PHASE" ]; then
     PHASES="$PHASE"
 else
-    PHASES="smoke unit e2e"
+    PHASES="smoke unit e2e playwright"
 fi
 
 # Count phases for header numbering
@@ -431,6 +508,16 @@ for _p in $PHASES; do
         e2e)
             print_phase_header "$_phase_num" "$_total_phases" "E2E Tests"
             phase_e2e "$@" || {
+                OVERALL_FAIL=1
+                if [ "$FAIL_FAST" -eq 1 ]; then
+                    print_summary
+                    exit 1
+                fi
+            }
+            ;;
+        playwright)
+            print_phase_header "$_phase_num" "$_total_phases" "Playwright Tests"
+            phase_playwright || {
                 OVERALL_FAIL=1
                 if [ "$FAIL_FAST" -eq 1 ]; then
                     print_summary
