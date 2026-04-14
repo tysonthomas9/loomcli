@@ -46,15 +46,18 @@ func (s *issueServiceImpl) ListIssues(ctx context.Context, params ListIssuesPara
 		slog.Error("ListKanban RPC error", "err", kanbanErr)
 		return nil, ErrInternal("failed to list issues", kanbanErr)
 	}
+	return s.listIssuesLegacy(client, params, &rpcOK)
+}
 
-	// Old daemon: fall back to the legacy 3-call path.
+// listIssuesLegacy is the pre-ListKanban 3-call path for old daemons.
+func (s *issueServiceImpl) listIssuesLegacy(client *rpc.Client, params ListIssuesParams, rpcOK *bool) (*ListIssuesResult, error) {
 	issuesWithCounts, err := s.fetchAndFilterIssues(client, params)
 	if err != nil {
 		return nil, err
 	}
 
 	if len(issuesWithCounts) == 0 {
-		rpcOK = true
+		*rpcOK = true
 		if params.IncludeBlocked {
 			return &ListIssuesResult{KanbanIssues: []KanbanIssue{}}, nil
 		}
@@ -65,11 +68,11 @@ func (s *issueServiceImpl) ListIssues(ctx context.Context, params ListIssuesPara
 
 	if params.IncludeBlocked {
 		result, kanbanClean := s.buildKanbanResult(client, issuesWithCounts, parentResp)
-		rpcOK = parentClean && kanbanClean
+		*rpcOK = parentClean && kanbanClean
 		return result, nil
 	}
 
-	rpcOK = parentClean
+	*rpcOK = parentClean
 	return s.buildStandardResult(issuesWithCounts, parentResp), nil
 }
 
