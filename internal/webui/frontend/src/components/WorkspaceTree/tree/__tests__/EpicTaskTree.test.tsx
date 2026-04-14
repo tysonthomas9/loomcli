@@ -30,6 +30,7 @@ vi.mock("@/hooks/workspace", async () => {
     useWorkspaceTree: vi.fn(() => ({
       epics: [] as EpicWithTasks[],
       orphanTasks: [] as Issue[],
+      closedEpicCount: 0,
       isLoading: false,
       error: null,
       refetch: mockRefetch,
@@ -79,10 +80,12 @@ function setMockTree(
   orphanTasks: Issue[],
   isLoading = false,
   error: string | null = null,
+  closedEpicCount = 0,
 ): void {
   mockUseWorkspaceTree.mockReturnValue({
     epics,
     orphanTasks,
+    closedEpicCount,
     isLoading,
     error,
     refetch: mockRefetch,

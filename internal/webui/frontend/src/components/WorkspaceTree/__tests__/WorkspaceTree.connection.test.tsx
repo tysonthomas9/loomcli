@@ -136,6 +136,7 @@ vi.mock("@/hooks/workspace", async () => {
     useWorkspaceTree: () => ({
       epics: [],
       orphanTasks: [],
+      closedEpicCount: 0,
       isLoading: false,
       error: null,
       refetch: vi.fn(),

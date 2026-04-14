@@ -49,6 +49,7 @@ export function RunningSection({
     workspace?.name ?? "",
     "all",
     repoNames,
+    true,
   );
 
   // Build set of agent names that are actively working/planning.
