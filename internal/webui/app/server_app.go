@@ -427,7 +427,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	}
 
 	// Initialize session service layer (always constructed; stores may be nil internally)
-	app.sessSvc = svcimpl.NewSessionService(config.SessionsStore, app.sessionHistoryStore)
+	app.sessSvc = svcimpl.NewSessionService(config.WorkspaceConfigByIDFn, app.sessionHistoryStore)
 
 	app.buildHandlers()
 	app.buildModules()

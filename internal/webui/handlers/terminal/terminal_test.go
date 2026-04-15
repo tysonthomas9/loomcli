@@ -26,6 +26,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
+	"github.com/tysonthomas9/loomcli/internal/workspace"
 )
 
 func TestNewTerminalManager_NoTmux(t *testing.T) {
@@ -280,11 +281,20 @@ func TestHandleTerminalWS_CommandParameterIgnored(t *testing.T) {
 	manager.SetDefaultCommand(defaultCmd)
 	handler := handleTerminalWS(manager, nil, nil, "", nil, nil, nil)
 
-	server := httptest.NewServer(handler)
+	// Wrap handler to inject workspace context (required by validateTerminalWSRequest).
+	wrappedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := middleware.WithWorkspace(r.Context(), "test-ws")
+		handler.ServeHTTP(w, r.WithContext(ctx))
+	})
+	server := httptest.NewServer(wrappedHandler)
 	defer server.Close()
 
 	// Connect with an injected command parameter that should be ignored.
-	wsURL := "ws" + server.URL[4:] + "?session=cmd-inject-test&command=echo+INJECTED"
+	sessionName := "cmd-inject-test"
+	wsURL := "ws" + server.URL[4:] + "?session=" + sessionName + "&command=echo+INJECTED"
+
+	// The tmux session name is prefixed with the workspace short ID.
+	tmuxSessionName := workspace.ShortWorkspaceID("test-ws") + "-" + sessionName
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -303,14 +313,14 @@ func TestHandleTerminalWS_CommandParameterIgnored(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tmux list-sessions failed: %v\n%s", err, listOut)
 	}
-	if !strings.Contains(string(listOut), "cmd-inject-test") {
-		t.Fatalf("tmux session 'cmd-inject-test' not found in output:\n%s", listOut)
+	if !strings.Contains(string(listOut), tmuxSessionName) {
+		t.Fatalf("tmux session %q not found in output:\n%s", tmuxSessionName, listOut)
 	}
 
 	// Check the pane's current command. If the injected command "echo" had been
 	// used, the pane would run "echo INJECTED" (pane_current_command = "echo").
 	// With the default "bash", the pane_current_command should be "bash".
-	paneCmd, err := exec.CommandContext(ctx, "tmux", "display-message", "-t", "cmd-inject-test", "-p", "#{pane_current_command}").CombinedOutput() //nolint:norawexec
+	paneCmd, err := exec.CommandContext(ctx, "tmux", "display-message", "-t", tmuxSessionName, "-p", "#{pane_current_command}").CombinedOutput() //nolint:norawexec
 	if err != nil {
 		t.Fatalf("tmux display-message failed: %v\n%s", err, paneCmd)
 	}

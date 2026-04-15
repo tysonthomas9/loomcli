@@ -21,7 +21,6 @@ import { useParams, useNavigate, useLocation, Outlet } from "react-router-dom";
 import { updateIssue, addComment, closeIssue } from "@/api";
 import type { IssueContext, LeadSessionResult } from "@/api/terminal";
 import { createLeadSession } from "@/hooks/api";
-import { getAgentTerminalInfo } from "@/api/terminal";
 import { buildShareUrl } from "@/utils/buildShareUrl";
 import { getReviewType } from "@/utils/issue";
 import { buildWorkspaceSwitchUrl } from "@/utils/workspaceUrl";
@@ -128,7 +127,7 @@ function App() {
   } = useWorkspaceContext();
 
   // Repo filter URL param sync (deep linking for repo selection)
-  const [repoFilterParam, setRepoFilterParam] = useRepoFilterParam();
+  const [repoFilterParam] = useRepoFilterParam();
 
   // Available repo names for repo selector
   const availableRepoNames = useMemo(
@@ -657,12 +656,6 @@ function App() {
     closePanel();
   }, [closePanel]);
 
-  // Derive activeRepoName: null = "All Workspaces", string = specific repo
-  const activeRepoName = useMemo(
-    () => (selectedRepoNames.size === 1 ? [...selectedRepoNames][0] : null),
-    [selectedRepoNames],
-  );
-
   // Close all panels synchronously (no animation) for workspace switch
   const closeAllPanels = useCallback(() => {
     closePanel();
@@ -676,23 +669,6 @@ function App() {
     restorePanel: openPanel,
     closeAllPanels,
   });
-
-  // Handle workspace/repo selection from WorkspaceTree
-  const handleWorkspaceSelect = useCallback(
-    (repoName: string | null) => {
-      // Skip if same workspace
-      if (repoName === activeRepoName) return;
-      // Update repo filter
-      if (repoName === null) {
-        selectAll();
-      } else {
-        selectRepos([repoName]);
-      }
-      // Sync workspace URL param
-      setRepoFilterParam(repoName);
-    },
-    [activeRepoName, selectAll, selectRepos, setRepoFilterParam],
-  );
 
   // Handle workspace entry click to switch to a different workspace.
   // SPA navigation via React Router — no page reload.
@@ -721,34 +697,6 @@ function App() {
       fetchIssue(issueId);
     },
     [openPanel, fetchIssue],
-  );
-
-  // Handle Talk to Lead from workspace tree
-  const handleTreeTalkToLead = useCallback(
-    (_workspaceName: string) => {
-      navigateToView("terminal");
-    },
-    [navigateToView],
-  );
-
-  // Handle task terminal open from workspace tree (task with active agent)
-  const handleTreeTaskTerminalOpen = useCallback(
-    async (_issueId: string, agentName: string) => {
-      try {
-        const mode = await getAgentTerminalInfo(workspaceId, agentName);
-        if (mode === "tmux") {
-          setPendingAgentName(agentName);
-          navigateToView("terminal");
-        } else {
-          // Archive mode — open agent detail panel instead
-          openPanel({ type: "agent", name: agentName });
-        }
-      } catch {
-        // Network error — fall back to agent detail panel
-        openPanel({ type: "agent", name: agentName });
-      }
-    },
-    [workspaceId, navigateToView, openPanel],
   );
 
   const handleAgentNameConsumed = useCallback(() => {
@@ -1025,8 +973,6 @@ function App() {
   // The tree includes agent list per workspace plus "+ New Workspace" button.
   const sidebarContent = (
     <WorkspaceTree
-      activeRepoName={activeRepoName}
-      onWorkspaceSelect={handleWorkspaceSelect}
       onWorkspaceSwitch={handleWorkspaceSwitch}
       onAgentClick={handleAgentClick}
       agentTasks={agentTasks}
@@ -1037,8 +983,6 @@ function App() {
       onRetryConnection={staleBannerRetry}
       workQueueCounts={workQueueCounts}
       onTreeSelect={handleTreeIssueSelect}
-      onTaskTerminalOpen={handleTreeTaskTerminalOpen}
-      onTalkToLead={handleTreeTalkToLead}
     />
   );
 

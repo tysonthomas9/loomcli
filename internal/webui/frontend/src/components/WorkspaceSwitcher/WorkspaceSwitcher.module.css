@@ -73,6 +73,7 @@
 .itemName {
   font-size: 14px;
   font-weight: 500;
+  text-transform: capitalize;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

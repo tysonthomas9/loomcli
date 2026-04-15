@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
-	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agentcontrol"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
@@ -77,7 +76,6 @@ type ServerConfig struct {
 	WorkspaceIDResolverFn   WorkspaceIDResolverFn                                // Resolves workspace name → UUID; nil = no resolution available
 	BackendOps              ops.BackendOps                                       // Backend health operations interface (optional; nil disables backend health endpoint)
 	ScrollbackMaxLines      int                                                  // Maximum lines per scrollback buffer (0 = default 10000)
-	SessionsStore           *sessions.Store                                      // File-based session audit trail store (optional; nil disables session endpoints)
 	NotifyTokenDir          string                                               // Directory to write notify.token (typically beads dir); empty = token file not written
 	AgentControlFn          agentcontrol.AgentControlFn                          // Sends agent lifecycle commands to the daemon control socket; nil in fleet mode or --no-daemon
 	DaemonSupervisorFn      func() (*DaemonSupervisorData, error)                // Returns daemon supervisor state from state file; nil = endpoint unavailable

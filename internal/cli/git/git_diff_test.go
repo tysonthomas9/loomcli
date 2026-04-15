@@ -120,9 +120,9 @@ func TestDiffCommits_Success(t *testing.T) {
 		t.Fatalf("got %d commits, want 2", len(commits))
 	}
 
-	// First commit (--reverse)
-	if commits[0].Subject != "feature changes" {
-		t.Errorf("first commit subject = %q, want %q", commits[0].Subject, "feature changes")
+	// First commit (newest first)
+	if commits[0].Subject != "second feature change" {
+		t.Errorf("first commit subject = %q, want %q", commits[0].Subject, "second feature change")
 	}
 	if commits[0].Author != "test" {
 		t.Errorf("author = %q, want %q", commits[0].Author, "test")
@@ -134,9 +134,9 @@ func TestDiffCommits_Success(t *testing.T) {
 		t.Error("hash, short_hash, or date is empty")
 	}
 
-	// Second commit
-	if commits[1].Subject != "second feature change" {
-		t.Errorf("second commit subject = %q, want %q", commits[1].Subject, "second feature change")
+	// Second commit (oldest)
+	if commits[1].Subject != "feature changes" {
+		t.Errorf("second commit subject = %q, want %q", commits[1].Subject, "feature changes")
 	}
 }
 

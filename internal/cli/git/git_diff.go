@@ -32,7 +32,7 @@ func DiffCommits(worktreePath, mergeBase string, limit int) ([]ops.DiffCommitRes
 	if err := validateGitRef(mergeBase); err != nil {
 		return nil, err
 	}
-	args := []string{"log", mergeBase + "..HEAD", "--format=%H|%h|%an|%ae|%aI|%s", "--reverse"}
+	args := []string{"log", mergeBase + "..HEAD", "--format=%H|%h|%an|%ae|%aI|%s"}
 	if limit > 0 {
 		args = append(args, fmt.Sprintf("--max-count=%d", limit))
 	}

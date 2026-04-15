@@ -3,6 +3,7 @@ package workspacemgr
 import (
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"sort"
 
@@ -82,6 +83,7 @@ func buildRepoList(cfgRepos []config.RepoConfig) ([]ops.WorkspaceRepo, []string)
 		repos = append(repos, ops.WorkspaceRepo{
 			Name: r.Name, Path: r.Path, DefaultBranch: db,
 			Remote: remote, SourceRepoID: r.SourceRepoID, Groups: r.Groups,
+			IsLinkedWorktree: isGitLinkedWorktree(r.Path),
 		})
 		for _, g := range r.Groups {
 			groupSet[g] = true
@@ -93,6 +95,16 @@ func buildRepoList(cfgRepos []config.RepoConfig) ([]ops.WorkspaceRepo, []string)
 	}
 	sort.Strings(groups)
 	return repos, groups
+}
+
+// isGitLinkedWorktree reports whether path has a .git file (linked worktree)
+// rather than a .git directory (source repo).
+func isGitLinkedWorktree(repoPath string) bool {
+	fi, err := os.Lstat(filepath.Join(repoPath, ".git"))
+	if err != nil {
+		return false
+	}
+	return !fi.IsDir()
 }
 
 // loadWorkspaceAgents loads agent info from the daemon config for a workspace path.
@@ -119,9 +131,15 @@ func loadWorkspaceAgents(wsPath string) []ops.WorkspaceAgentInfo {
 func buildWorkspaceSummaries(cfg *config.LoomConfig, activeWS string) []ops.WorkspaceSummary {
 	summaries := make([]ops.WorkspaceSummary, 0, len(cfg.Workspaces))
 	for name, w := range cfg.Workspaces {
+		repoCount := 0
+		for _, r := range w.Repos {
+			if !isGitLinkedWorktree(r.Path) {
+				repoCount++
+			}
+		}
 		summaries = append(summaries, ops.WorkspaceSummary{
 			ID: w.ID, Name: name, Path: w.Path, Active: name == activeWS,
-			RepoCount: len(w.Repos), IsDefault: name == cfg.DefaultWorkspace, Backend: w.Backend,
+			RepoCount: repoCount, IsDefault: name == cfg.DefaultWorkspace, Backend: w.Backend,
 			State: workspace.WSState(w.State), ErrorMessage: w.ErrorMessage,
 		})
 	}

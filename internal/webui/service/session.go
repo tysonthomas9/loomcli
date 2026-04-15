@@ -11,16 +11,16 @@ import (
 // Handlers call this interface and map returned errors to HTTP responses.
 type SessionService interface {
 	// ListTaskSessions returns all sessions for a given task with computed fields.
-	ListTaskSessions(ctx context.Context, taskID string) ([]SessionListItem, error)
+	ListTaskSessions(ctx context.Context, wsID, taskID string) ([]SessionListItem, error)
 
 	// GetSession returns metadata for a single session, enforcing task ownership.
-	GetSession(ctx context.Context, taskID, sessionID string) (*SessionDetailData, error)
+	GetSession(ctx context.Context, wsID, taskID, sessionID string) (*SessionDetailData, error)
 
 	// GetSessionTranscript returns transcript entries for a session, enforcing task ownership.
-	GetSessionTranscript(ctx context.Context, taskID, sessionID string) ([]sessions.TranscriptEntry, error)
+	GetSessionTranscript(ctx context.Context, wsID, taskID, sessionID string) ([]sessions.TranscriptEntry, error)
 
 	// GetSessionDiff returns the diff.patch content for a session as plain text.
-	GetSessionDiff(ctx context.Context, taskID, sessionID string) (string, error)
+	GetSessionDiff(ctx context.Context, wsID, taskID, sessionID string) (string, error)
 
 	// ListSessionHistory returns session history records for an issue.
 	ListSessionHistory(ctx context.Context, wsID, issueID string) ([]sessionhistory.SessionRecord, error)

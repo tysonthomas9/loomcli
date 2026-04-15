@@ -112,9 +112,10 @@ func (r *Resolver) discoverLegacy() ([]WorktreeInfo, error) {
 		}
 
 		worktrees = append(worktrees, WorktreeInfo{
-			Name:   entry.Name(),
-			Path:   worktreePath,
-			Branch: branch,
+			Name:             entry.Name(),
+			Path:             worktreePath,
+			Branch:           branch,
+			IsLinkedWorktree: IsGitLinkedWorktree(worktreePath),
 		})
 	}
 
@@ -150,11 +151,12 @@ func (r *Resolver) discoverWorkspace() ([]WorktreeInfo, error) {
 		}
 
 		worktrees = append(worktrees, WorktreeInfo{
-			Name:      repo.Name,
-			Path:      repoPath,
-			Branch:    branch,
-			Workspace: r.Workspace,
-			Repo:      repo,
+			Name:             repo.Name,
+			Path:             repoPath,
+			Branch:           branch,
+			Workspace:        r.Workspace,
+			Repo:             repo,
+			IsLinkedWorktree: IsGitLinkedWorktree(repoPath),
 		})
 	}
 
@@ -204,6 +206,26 @@ func (r *Resolver) DiscoverAgentWorktrees() ([]WorktreeInfo, error) {
 			candidates = append(candidates, candidate{entry.Name(), agentPath, repo})
 		}
 	}
+	// Flat-layout pass: repos registered directly as linked worktrees.
+	seen := make(map[string]struct{}, len(candidates))
+	for _, c := range candidates {
+		seen[c.path] = struct{}{}
+	}
+	for i := range ws.Repos {
+		repo := &ws.Repos[i]
+		repoPath := repo.Path
+		if !filepath.IsAbs(repoPath) {
+			repoPath = filepath.Join(ws.Path, repoPath)
+		}
+		if _, alreadySeen := seen[repoPath]; alreadySeen {
+			continue
+		}
+		if !IsGitLinkedWorktree(repoPath) {
+			continue
+		}
+		candidates = append(candidates, candidate{repo.Name, repoPath, repo})
+	}
+
 	if len(candidates) == 0 {
 		return nil, nil
 	}
@@ -220,11 +242,12 @@ func (r *Resolver) DiscoverAgentWorktrees() ([]WorktreeInfo, error) {
 				branch = "unknown"
 			}
 			agents[idx] = WorktreeInfo{
-				Name:      cand.name,
-				Path:      cand.path,
-				Branch:    branch,
-				Workspace: r.Workspace,
-				Repo:      cand.repo,
+				Name:             cand.name,
+				Path:             cand.path,
+				Branch:           branch,
+				Workspace:        r.Workspace,
+				Repo:             cand.repo,
+				IsLinkedWorktree: true,
 			}
 		}(i, c)
 	}
@@ -235,6 +258,8 @@ func (r *Resolver) DiscoverAgentWorktrees() ([]WorktreeInfo, error) {
 // ResolveAgentByName finds a single agent worktree by name via direct path
 // lookup. Iterates repos and checks <wsPath>/worktrees/<repo>/<name>/.git,
 // avoiding a full scan of all agents. Only spawns one git subprocess.
+//
+//nolint:funlen
 func (r *Resolver) ResolveAgentByName(name string) (WorktreeInfo, error) {
 	if r.Mode != ModeWorkspace || r.Config == nil {
 		return WorktreeInfo{}, fmt.Errorf("agent worktree resolution requires workspace mode")
@@ -244,6 +269,7 @@ func (r *Resolver) ResolveAgentByName(name string) (WorktreeInfo, error) {
 		return WorktreeInfo{}, fmt.Errorf("workspace %q not found in config", r.Workspace)
 	}
 
+	// First: check nested agent worktrees at <wsPath>/worktrees/<repo>/<name>/
 	for i := range ws.Repos {
 		repo := &ws.Repos[i]
 		agentPath := filepath.Join(ws.Path, "worktrees", repo.Name, name)
@@ -255,11 +281,40 @@ func (r *Resolver) ResolveAgentByName(name string) (WorktreeInfo, error) {
 			branch = "unknown"
 		}
 		return WorktreeInfo{
-			Name:      name,
-			Path:      agentPath,
-			Branch:    branch,
-			Workspace: r.Workspace,
-			Repo:      repo,
+			Name:             name,
+			Path:             agentPath,
+			Branch:           branch,
+			Workspace:        r.Workspace,
+			Repo:             repo,
+			IsLinkedWorktree: IsGitLinkedWorktree(agentPath),
+		}, nil
+	}
+
+	// Fallback: check if the name matches a linked worktree registered as a repo.
+	// This handles configs where agent worktrees are listed directly as repos.
+	for i := range ws.Repos {
+		repo := &ws.Repos[i]
+		if repo.Name != name {
+			continue
+		}
+		repoPath := repo.Path
+		if !filepath.IsAbs(repoPath) {
+			repoPath = filepath.Join(ws.Path, repoPath)
+		}
+		if !IsGitLinkedWorktree(repoPath) {
+			continue // source repo, not an agent
+		}
+		branch, err := GetCurrentBranch(repoPath)
+		if err != nil {
+			branch = "unknown"
+		}
+		return WorktreeInfo{
+			Name:             name,
+			Path:             repoPath,
+			Branch:           branch,
+			Workspace:        r.Workspace,
+			Repo:             repo,
+			IsLinkedWorktree: true,
 		}, nil
 	}
 

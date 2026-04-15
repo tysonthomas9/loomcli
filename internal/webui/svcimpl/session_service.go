@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
@@ -18,58 +19,105 @@ var _ service.SessionService = (*sessionServiceImpl)(nil)
 
 // sessionServiceImpl is the concrete implementation of SessionService.
 type sessionServiceImpl struct {
-	sessStore *sessions.Store
-	histStore *sessionhistory.Store
+	configByIDFn func(string) (*ops.WorkspaceData, error)
+	histStore    *sessionhistory.Store
 }
 
 // NewSessionService creates a new SessionService implementation.
-func NewSessionService(sessStore *sessions.Store, histStore *sessionhistory.Store) service.SessionService {
-	return &sessionServiceImpl{sessStore: sessStore, histStore: histStore}
+func NewSessionService(configByIDFn func(string) (*ops.WorkspaceData, error), histStore *sessionhistory.Store) service.SessionService {
+	return &sessionServiceImpl{configByIDFn: configByIDFn, histStore: histStore}
 }
 
-func (s *sessionServiceImpl) ListTaskSessions(_ context.Context, taskID string) ([]service.SessionListItem, error) {
-	if s.sessStore == nil {
+// storesForWorkspace returns session stores for all repos in the workspace.
+// Agent worktrees store sessions in their own directories, so we need to
+// search across all repos to find sessions for a given task.
+func (s *sessionServiceImpl) storesForWorkspace(wsID string) ([]*sessions.Store, error) {
+	if s.configByIDFn == nil {
 		return nil, service.ErrUnavailable("session store not available")
+	}
+	wsData, err := s.configByIDFn(wsID)
+	if err != nil || wsData == nil {
+		return nil, service.ErrNotFound("workspace not found")
+	}
+	var stores []*sessions.Store
+	// Include workspace root
+	if st, err := sessions.NewStore(wsData.Path); err == nil {
+		stores = append(stores, st)
+	}
+	// Include each repo (agent worktrees have their own sessions dir)
+	for _, repo := range wsData.Repos {
+		if repo.Path == wsData.Path {
+			continue // already added
+		}
+		if st, err := sessions.NewStore(repo.Path); err == nil {
+			stores = append(stores, st)
+		}
+	}
+	if len(stores) == 0 {
+		return nil, service.ErrInternal("no session stores available", nil)
+	}
+	return stores, nil
+}
+
+// findStoreForSession returns the first store that has metadata for the given session.
+func (s *sessionServiceImpl) findStoreForSession(wsID, sessionID string) (*sessions.Store, error) {
+	stores, err := s.storesForWorkspace(wsID)
+	if err != nil {
+		return nil, err
+	}
+	for _, store := range stores {
+		if _, err := store.LoadMetadata(sessionID); err == nil {
+			return store, nil
+		}
+	}
+	return nil, service.ErrNotFound("session not found")
+}
+
+func (s *sessionServiceImpl) ListTaskSessions(_ context.Context, wsID, taskID string) ([]service.SessionListItem, error) {
+	stores, err := s.storesForWorkspace(wsID)
+	if err != nil {
+		return nil, err
 	}
 	if taskID == "" || !validTaskID.MatchString(taskID) {
 		return nil, service.ErrValidation("invalid task ID: must match [a-zA-Z0-9._-]+")
 	}
 
-	records, err := s.sessStore.SessionsByTask(taskID)
-	if err != nil {
-		logger.Error("failed to list sessions", "task_id", taskID, "err", err)
-		return nil, service.ErrInternal("failed to list sessions", err)
-	}
-
-	items := make([]service.SessionListItem, 0, len(records))
-	for _, rec := range records {
-		item := service.SessionListItem{
-			SessionRecord: rec,
-			IsActive:      rec.Status == sessions.StatusRunning,
+	var items []service.SessionListItem
+	for _, store := range stores {
+		records, err := store.SessionsByTask(taskID)
+		if err != nil {
+			continue
 		}
-		if entries, err := s.sessStore.LoadTranscript(rec.SessionID); err == nil && len(entries) > 0 {
-			item.HasTranscript = true
+		for _, rec := range records {
+			item := service.SessionListItem{
+				SessionRecord: rec,
+				IsActive:      rec.Status == sessions.StatusRunning,
+			}
+			if entries, err := store.LoadTranscript(rec.SessionID); err == nil && len(entries) > 0 {
+				item.HasTranscript = true
+			}
+			if diff, err := store.ReadDiff(rec.SessionID); err == nil && diff != "" {
+				item.HasDiff = true
+			}
+			items = append(items, item)
 		}
-		if diff, err := s.sessStore.ReadDiff(rec.SessionID); err == nil && diff != "" {
-			item.HasDiff = true
-		}
-		items = append(items, item)
 	}
 	return items, nil
 }
 
-func (s *sessionServiceImpl) GetSession(_ context.Context, taskID, sessionID string) (*service.SessionDetailData, error) {
-	if s.sessStore == nil {
-		return nil, service.ErrUnavailable("session store not available")
-	}
+func (s *sessionServiceImpl) GetSession(_ context.Context, wsID, taskID, sessionID string) (*service.SessionDetailData, error) {
 	if taskID == "" || !validTaskID.MatchString(taskID) {
 		return nil, service.ErrValidation("invalid task ID")
 	}
 	if sessionID == "" || !validSessionID.MatchString(sessionID) {
 		return nil, service.ErrValidation("invalid session ID")
 	}
+	store, err := s.findStoreForSession(wsID, sessionID)
+	if err != nil {
+		return nil, err
+	}
 
-	meta, err := s.sessStore.LoadMetadata(sessionID)
+	meta, err := store.LoadMetadata(sessionID)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, service.ErrNotFound("session not found")
@@ -89,19 +137,20 @@ func (s *sessionServiceImpl) GetSession(_ context.Context, taskID, sessionID str
 	}, nil
 }
 
-func (s *sessionServiceImpl) GetSessionTranscript(_ context.Context, taskID, sessionID string) ([]sessions.TranscriptEntry, error) {
-	if s.sessStore == nil {
-		return nil, service.ErrUnavailable("session store not available")
-	}
+func (s *sessionServiceImpl) GetSessionTranscript(_ context.Context, wsID, taskID, sessionID string) ([]sessions.TranscriptEntry, error) {
 	if taskID == "" || !validTaskID.MatchString(taskID) {
 		return nil, service.ErrValidation("invalid task ID")
 	}
 	if sessionID == "" || !validSessionID.MatchString(sessionID) {
 		return nil, service.ErrValidation("invalid session ID")
 	}
+	store, err := s.findStoreForSession(wsID, sessionID)
+	if err != nil {
+		return nil, err
+	}
 
 	// Enforce task ownership
-	meta, err := s.sessStore.LoadMetadata(sessionID)
+	meta, err := store.LoadMetadata(sessionID)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, service.ErrNotFound("session not found")
@@ -113,7 +162,7 @@ func (s *sessionServiceImpl) GetSessionTranscript(_ context.Context, taskID, ses
 		return nil, service.ErrNotFound("session not found")
 	}
 
-	entries, loadErr := s.sessStore.LoadTranscript(sessionID)
+	entries, loadErr := store.LoadTranscript(sessionID)
 	if loadErr != nil {
 		logger.Error("failed to load transcript", "session_id", sessionID, "err", loadErr)
 		return nil, service.ErrInternal("failed to load transcript", loadErr)
@@ -126,19 +175,20 @@ func (s *sessionServiceImpl) GetSessionTranscript(_ context.Context, taskID, ses
 	return entries, nil
 }
 
-func (s *sessionServiceImpl) GetSessionDiff(_ context.Context, taskID, sessionID string) (string, error) {
-	if s.sessStore == nil {
-		return "", service.ErrUnavailable("session store not available")
-	}
+func (s *sessionServiceImpl) GetSessionDiff(_ context.Context, wsID, taskID, sessionID string) (string, error) {
 	if taskID == "" || !validTaskID.MatchString(taskID) {
 		return "", service.ErrValidation("invalid task ID")
 	}
 	if sessionID == "" || !validSessionID.MatchString(sessionID) {
 		return "", service.ErrValidation("invalid session ID")
 	}
+	store, err := s.findStoreForSession(wsID, sessionID)
+	if err != nil {
+		return "", err
+	}
 
 	// Enforce task ownership
-	meta, err := s.sessStore.LoadMetadata(sessionID)
+	meta, err := store.LoadMetadata(sessionID)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", service.ErrNotFound("session not found")
@@ -150,7 +200,7 @@ func (s *sessionServiceImpl) GetSessionDiff(_ context.Context, taskID, sessionID
 		return "", service.ErrNotFound("session not found")
 	}
 
-	diff, diffErr := s.sessStore.ReadDiff(sessionID)
+	diff, diffErr := store.ReadDiff(sessionID)
 	if diffErr != nil {
 		if errors.Is(diffErr, os.ErrNotExist) {
 			return "", service.ErrNotFound("diff not found")

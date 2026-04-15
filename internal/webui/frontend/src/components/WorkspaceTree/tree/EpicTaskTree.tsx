@@ -1,6 +1,6 @@
 /**
  * EpicTaskTree renders a hierarchical epic/task tree for a workspace.
- * Root component: TalkToLeadEntry, EpicRows with nested TaskRows, and orphan tasks.
+ * Root component: EpicRows with nested TaskRows, and orphan tasks.
  */
 
 import type React from "react";
@@ -17,7 +17,6 @@ import {
   TaskContextMenu,
 } from "@/components/WorkspaceTree/menus";
 
-import { TalkToLeadEntry } from "./TalkToLeadEntry";
 import { EpicRow } from "./EpicRow";
 import { InlineAddInput } from "./InlineAddInput";
 import { OrphanTasksSection } from "./OrphanTasksSection";
@@ -34,10 +33,6 @@ export interface EpicTaskTreeProps {
   selectedId?: string | undefined;
   onSelect?: ((issueId: string) => void) | undefined;
   sourceRepos?: string[] | undefined;
-  /** Backend name for TalkToLeadEntry display. */
-  backend?: string | undefined;
-  /** Callback when Talk to Lead is clicked. */
-  onTalkToLead?: ((workspaceName: string) => void) | undefined;
   /** Callback when a task with an active agent is clicked for terminal. */
   onTaskTerminalOpen?:
     | ((issueId: string, agentName: string) => void)
@@ -79,8 +74,6 @@ export function EpicTaskTree({
   selectedId,
   onSelect,
   sourceRepos,
-  backend,
-  onTalkToLead,
   onTaskTerminalOpen,
 }: EpicTaskTreeProps): JSX.Element {
   const { workspaceId } = useWorkspaceContext();
@@ -307,11 +300,6 @@ export function EpicTaskTree({
   if (isLoading) {
     return (
       <div className={styles.treeSection}>
-        <TalkToLeadEntry
-          workspaceName={workspaceName}
-          backend={backend}
-          onTalkToLead={onTalkToLead}
-        />
         <div className={styles.loadingSkeleton}>
           <div className={styles.skeletonRow} />
           <div className={styles.skeletonRow} />
@@ -323,12 +311,6 @@ export function EpicTaskTree({
 
   return (
     <div className={styles.treeSection}>
-      <TalkToLeadEntry
-        workspaceName={workspaceName}
-        backend={backend}
-        onTalkToLead={onTalkToLead}
-      />
-
       {!hasContent && (
         <div className={styles.emptyTree}>
           {activeFilter === "active"

@@ -310,6 +310,14 @@ vi.mock("@/hooks", () => ({
     error: null,
     refetch: vi.fn(),
   })),
+  useWorkspaceTree: vi.fn(() => ({
+    epics: [],
+    orphanTasks: [],
+    closedEpicCount: 0,
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  })),
   useWorkspaceContext: vi.fn(() => ({
     workspaceId: "test-ws-id",
     workspace: null,

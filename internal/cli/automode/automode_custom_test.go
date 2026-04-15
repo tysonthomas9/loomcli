@@ -1049,13 +1049,17 @@ func TestStartTmuxSession_CodexBackend_NoTermDumb(t *testing.T) {
 		t.Fatalf("startTmuxSession failed: %v", err)
 	}
 
-	// Give tmux a moment to set up
-	time.Sleep(300 * time.Millisecond)
-
-	// Capture the tmux pane start command
-	out, err := exec.Command("tmux", "list-panes", "-t", sessionName, "-F", "#{pane_start_command}").Output() //nolint:norawexec
+	// Wait for tmux to set up — retry a few times under race detector.
+	var out []byte
+	for i := 0; i < 5; i++ {
+		time.Sleep(300 * time.Millisecond)
+		out, err = exec.Command("tmux", "list-panes", "-t", sessionName, "-F", "#{pane_start_command}").Output() //nolint:norawexec
+		if err == nil && strings.TrimSpace(string(out)) != "" {
+			break
+		}
+	}
 	if err != nil {
-		t.Fatalf("failed to get tmux pane start command: %v", err)
+		t.Fatalf("failed to get tmux pane start command after retries: %v", err)
 	}
 	paneCmd := strings.TrimSpace(string(out))
 

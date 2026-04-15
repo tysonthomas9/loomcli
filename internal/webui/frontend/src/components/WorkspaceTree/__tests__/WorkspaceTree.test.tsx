@@ -77,6 +77,15 @@ vi.mock("@/hooks", () => ({
     defaultWorkspaceName: null,
     setDefaultWorkspace: vi.fn(),
     agents: [],
+    workspace: null,
+  }),
+  useWorkspaceTree: () => ({
+    epics: [],
+    orphanTasks: [],
+    closedEpicCount: 0,
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
   }),
   useToast: () => ({ showToast: vi.fn() }),
   useIssueDiffStat: () => ({
@@ -324,60 +333,22 @@ describe("WorkspaceTree", () => {
   });
 
   describe("collapsed badge", () => {
-    it("shows total active agent count when collapsed", () => {
-      reposOverride = {
-        repos: [
-          {
-            name: "alpha",
-            path: "/repos/alpha",
-            default_branch: "main",
-            remote: "origin",
-          },
-          {
-            name: "beta",
-            path: "/repos/beta",
-            default_branch: "main",
-            remote: "origin",
-          },
-        ],
-      };
-      agentOverride = {
-        agents: [
-          {
-            name: "a1",
-            branch: "main",
-            status: "ready",
-            ahead: 0,
-            behind: 0,
-            repo: "alpha",
-          },
-          {
-            name: "a2",
-            branch: "main",
-            status: "ready",
-            ahead: 0,
-            behind: 0,
-            repo: "beta",
-          },
-          {
-            name: "a3",
-            branch: "main",
-            status: "ready",
-            ahead: 0,
-            behind: 0,
-            repo: "beta",
-          },
-        ],
-      };
-
-      const { container } = render(<WorkspaceTree defaultCollapsed={true} />);
+    it("shows disconnected badge when collapsed and disconnected", () => {
+      const { container } = render(
+        <WorkspaceTree
+          defaultCollapsed={true}
+          connectionState="disconnected"
+          disconnectedSince={Date.now() - 5000}
+        />,
+      );
 
       const badge = container.querySelector('[class*="collapsedBadge"]');
       expect(badge).toBeInTheDocument();
-      expect(badge!.textContent).toBe("3");
+      expect(badge!.textContent).toBe("!");
+      expect(badge!.getAttribute("data-disconnected")).toBe("true");
     });
 
-    it("does not show collapsed badge when no active agents", () => {
+    it("does not show collapsed badge when connected and no disconnected state", () => {
       reposOverride = {
         repos: [
           {
@@ -389,7 +360,9 @@ describe("WorkspaceTree", () => {
         ],
       };
 
-      const { container } = render(<WorkspaceTree defaultCollapsed={true} />);
+      const { container } = render(
+        <WorkspaceTree defaultCollapsed={true} connectionState="connected" />,
+      );
 
       const badge = container.querySelector('[class*="collapsedBadge"]');
       expect(badge).not.toBeInTheDocument();

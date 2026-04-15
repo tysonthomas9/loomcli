@@ -305,8 +305,6 @@ func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState) web
 }
 
 func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimpl.GitOpsImpl, backend string) webui.ServerConfig {
-	sessStore := workspacemgr.NewSessionStore()
-
 	return webui.ServerConfig{
 		Port:                 servePort,
 		BindAddress:          serveBindAddr,
@@ -325,7 +323,6 @@ func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimp
 		GitOps:               gitOps,
 		FileOps:              gitOps,
 		BackendOps:           opsimpl.NewBackendOps(),
-		SessionsStore:        sessStore,
 		NotifyTokenDir:       cli.GetBeadsDir(),
 		Logger:               slog.Default(),
 		SentryDSN:            serveSentryDSN,

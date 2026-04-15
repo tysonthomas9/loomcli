@@ -28,12 +28,14 @@ type WorkspaceSummary struct {
 
 // WorkspaceRepo represents a repository within a workspace.
 type WorkspaceRepo struct {
-	Name          string   `json:"name"`
-	Path          string   `json:"path"`
-	DefaultBranch string   `json:"default_branch"`
-	Remote        string   `json:"remote"`
-	SourceRepoID  string   `json:"source_repo_id,omitempty"`
-	Groups        []string `json:"groups"`
+	Name             string   `json:"name"`
+	Path             string   `json:"path"`
+	DefaultBranch    string   `json:"default_branch"`
+	CurrentBranch    string   `json:"current_branch,omitempty"`
+	Remote           string   `json:"remote"`
+	SourceRepoID     string   `json:"source_repo_id,omitempty"`
+	Groups           []string `json:"groups"`
+	IsLinkedWorktree bool     `json:"is_linked_worktree,omitempty"`
 }
 
 // WorkspaceAgentInfo represents an agent's repo/group assignments.

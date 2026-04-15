@@ -96,6 +96,7 @@
   font-size: 28px;
   font-weight: 700;
   color: var(--color-text-primary);
+  text-transform: capitalize;
   line-height: 1.15;
   margin: 0;
 }

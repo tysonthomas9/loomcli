@@ -466,11 +466,15 @@ describe("useWorkspaceTree", () => {
       expect(result.current.epics).toHaveLength(0);
     });
 
-    it("does not fetch when sourceRepos is undefined", () => {
+    it("fetches when sourceRepos is undefined (no repo filter)", async () => {
+      setMockIssues([]);
+
       const { result } = renderHook(() => useWorkspaceTree("ws-1", "all"));
 
-      expect(mockGetKanbanIssues).not.toHaveBeenCalled();
-      expect(result.current.isLoading).toBe(false);
+      await waitFor(() => {
+        expect(mockGetKanbanIssues).toHaveBeenCalledTimes(1);
+      });
+      expect(result.current.epics).toHaveLength(0);
     });
   });
 });
