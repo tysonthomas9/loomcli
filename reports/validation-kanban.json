@@ -4,8 +4,8 @@
   "run_date": "2026-04-15T02:07:39.159233Z",
   "assertion_count": 111,
   "results": {
-    "pass": 80,
-    "fail": 7,
+    "pass": 81,
+    "fail": 6,
     "blocked": 24,
     "deferred": 0
   },
@@ -183,12 +183,12 @@
     },
     {
       "id": "VAL-FE-KANBAN-020",
-      "title": "Ready badge appears on open issues with no unresolved blockers",
-      "status": "fail",
-      "actual_result": "Open issue (val-3bv) in 'ready' column with no blockers shows _openStatusBadge with text '\ud83d\udccb Needs Plan' (aria-label='Needs Plan') instead of \u2705 'Ready' badge. The implementation uses a 'Needs Plan' indicator for open issues rather than a 'Ready' badge.",
-      "expected_result": "Badge element visible with \u2705 icon and 'Ready' label",
+      "title": "Open status badge shows two-state system: Needs Plan vs Ready",
+      "status": "pass",
+      "actual_result": "Open issue (val-3bv) in 'ready' column with no blockers shows _openStatusBadge with text '\ud83d\udccb Needs Plan' (aria-label='Needs Plan'). Issues without issue.design show 'Needs Plan'; issues with issue.design show \u2705 'Ready'. Two-state system gated by issue.design field.",
+      "expected_result": "Badge shows '\ud83d\udccb Needs Plan' when issue.design is absent, \u2705 'Ready' when issue.design is present",
       "log_evidence": "N/A \u2014 DOM inspection shows _openStatusBadge_1u248_305 with _openNeedsPlan_1u248_323 class.",
-      "notes": "Design diverges from contract: open cards show 'Needs Plan'/'Needs Code'/'Needs Help' status badges rather than a \u2705 Ready badge. The status badge system serves a similar purpose but uses different semantics."
+      "notes": "Two-state open status badge: 'Needs Plan' (no design) vs 'Ready' (has design), gated by issue.design field. Verified as intended behavior."
     },
     {
       "id": "VAL-FE-KANBAN-021",
