@@ -98,6 +98,12 @@ func (m *mockIPCBackend) Create(context.Context, backend.CreateParams) (*backend
 func (m *mockIPCBackend) Reopen(context.Context, string, backend.ReopenParams) error {
 	panic("not implemented")
 }
+func (m *mockIPCBackend) DeferIssue(context.Context, string, time.Time) error {
+	panic("not implemented")
+}
+func (m *mockIPCBackend) UndeferIssue(context.Context, string) error {
+	panic("not implemented")
+}
 func (m *mockIPCBackend) Delete(context.Context, backend.DeleteParams) error {
 	panic("not implemented")
 }

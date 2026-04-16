@@ -328,6 +328,35 @@ func (b *APIBackend) ClaimIssue(_ context.Context, _ string, _ time.Duration) er
 	return backend.ErrNotImplemented("ClaimIssue", "server has no per-issue claim endpoint (tracked in loomcli-j7qcq)")
 }
 
+// DeferIssue defers an issue via PATCH with status="deferred" and optional
+// defer_until. A zero `until` means status-only defer with no end date.
+func (b *APIBackend) DeferIssue(ctx context.Context, id string, until time.Time) error {
+	if id == "" {
+		return backend.ErrValidation("DeferIssue", "id must not be empty")
+	}
+	status := gen.PatchIssueRequestStatus("deferred")
+	req := gen.PatchIssueRequest{Status: &status}
+	if !until.IsZero() {
+		formatted := until.Format(time.RFC3339)
+		req.DeferUntil = &formatted
+	}
+	_, err := b.exec(ctx, "DeferIssue", http.MethodPatch, "/issues/"+url.PathEscape(id), req)
+	return err
+}
+
+// UndeferIssue restores a deferred issue to "open" status and clears the
+// defer_until field by sending an empty string.
+func (b *APIBackend) UndeferIssue(ctx context.Context, id string) error {
+	if id == "" {
+		return backend.ErrValidation("UndeferIssue", "id must not be empty")
+	}
+	status := gen.PatchIssueRequestStatus("open")
+	emptyStr := ""
+	req := gen.PatchIssueRequest{Status: &status, DeferUntil: &emptyStr}
+	_, err := b.exec(ctx, "UndeferIssue", http.MethodPatch, "/issues/"+url.PathEscape(id), req)
+	return err
+}
+
 func (b *APIBackend) Close(ctx context.Context, id string, params backend.CloseParams) (*backend.CloseResult, error) {
 	req := gen.CloseRequest{}
 	if params.Reason != "" {

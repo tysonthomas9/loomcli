@@ -111,6 +111,14 @@ func (b *ipcIssueBackend) Reopen(ctx context.Context, id string, params backend.
 	return b.fallback.Reopen(ctx, id, params)
 }
 
+func (b *ipcIssueBackend) DeferIssue(ctx context.Context, id string, until time.Time) error {
+	return b.fallback.DeferIssue(ctx, id, until)
+}
+
+func (b *ipcIssueBackend) UndeferIssue(ctx context.Context, id string) error {
+	return b.fallback.UndeferIssue(ctx, id)
+}
+
 func (b *ipcIssueBackend) Delete(ctx context.Context, params backend.DeleteParams) error {
 	return b.fallback.Delete(ctx, params)
 }

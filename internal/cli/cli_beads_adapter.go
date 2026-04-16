@@ -263,6 +263,27 @@ func (a *cliBeadsAdapter) ClaimIssue(_ context.Context, id string, lockTTL time.
 	return a.runMutation("ClaimIssue", "update", id, "--claim")
 }
 
+// DeferIssue defers an issue by shelling out to bd defer <id> [--until <RFC3339>].
+// A zero `until` defers without a specific end date.
+func (a *cliBeadsAdapter) DeferIssue(_ context.Context, id string, until time.Time) error {
+	if id == "" {
+		return backend.ErrValidation("DeferIssue", "id must not be empty")
+	}
+	args := []string{"defer", id}
+	if !until.IsZero() {
+		args = append(args, "--until", until.Format(time.RFC3339))
+	}
+	return a.runMutation("DeferIssue", args...)
+}
+
+// UndeferIssue restores a deferred issue to open by shelling out to bd undefer <id>.
+func (a *cliBeadsAdapter) UndeferIssue(_ context.Context, id string) error {
+	if id == "" {
+		return backend.ErrValidation("UndeferIssue", "id must not be empty")
+	}
+	return a.runMutation("UndeferIssue", "undefer", id)
+}
+
 func (a *cliBeadsAdapter) Close(_ context.Context, id string, params backend.CloseParams) (*backend.CloseResult, error) {
 	args := []string{"close", id, "--suggest-next", "--json"}
 	if params.Reason != "" {

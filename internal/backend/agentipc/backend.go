@@ -180,6 +180,14 @@ func (b *Backend) Reopen(_ context.Context, _ string, _ backend.ReopenParams) er
 	return backend.ErrNotImplemented("AgentIPC.Reopen", "not supported by agent IPC backend")
 }
 
+func (b *Backend) DeferIssue(_ context.Context, _ string, _ time.Time) error {
+	return backend.ErrNotImplemented("AgentIPC.DeferIssue", "not supported by agent IPC backend")
+}
+
+func (b *Backend) UndeferIssue(_ context.Context, _ string) error {
+	return backend.ErrNotImplemented("AgentIPC.UndeferIssue", "not supported by agent IPC backend")
+}
+
 func (b *Backend) Delete(_ context.Context, _ backend.DeleteParams) error {
 	return backend.ErrNotImplemented("AgentIPC.Delete", "not supported by agent IPC backend")
 }

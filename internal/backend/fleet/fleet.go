@@ -326,6 +326,37 @@ func (b *FleetBackend) ClaimIssue(ctx context.Context, id string, _ time.Duratio
 	return err
 }
 
+// DeferIssue defers an issue via PATCH with status="deferred" and optional
+// defer_until. A zero until means status-only defer with no end date. The
+// fleet server has no dedicated defer route; PATCH /issues/{id} is used.
+func (b *FleetBackend) DeferIssue(ctx context.Context, id string, until time.Time) error {
+	if id == "" {
+		return backend.ErrValidation("DeferIssue", "id must not be empty")
+	}
+	req := map[string]interface{}{
+		"status": "deferred",
+	}
+	if !until.IsZero() {
+		req["defer_until"] = until.Format(time.RFC3339)
+	}
+	_, callErr := b.exec(ctx, "DeferIssue", "PATCH", "/issues/"+url.PathEscape(id), req)
+	return callErr
+}
+
+// UndeferIssue restores a deferred issue to "open" status and clears the
+// defer_until field by sending an empty string (matching bd undefer behavior).
+func (b *FleetBackend) UndeferIssue(ctx context.Context, id string) error {
+	if id == "" {
+		return backend.ErrValidation("UndeferIssue", "id must not be empty")
+	}
+	req := map[string]interface{}{
+		"status":      "open",
+		"defer_until": "",
+	}
+	_, callErr := b.exec(ctx, "UndeferIssue", "PATCH", "/issues/"+url.PathEscape(id), req)
+	return callErr
+}
+
 func (b *FleetBackend) Close(ctx context.Context, id string, params backend.CloseParams) (*backend.CloseResult, error) {
 	type closeReq struct {
 		Reason      string `json:"reason,omitempty"`

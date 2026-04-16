@@ -1346,3 +1346,102 @@ func TestListComments_NoComments(t *testing.T) {
 		t.Errorf("len = %d, want 0", len(result))
 	}
 }
+
+// --- DeferIssue / UndeferIssue ---
+
+func TestDeferIssue_WithUntil(t *testing.T) {
+	until := time.Date(2026, 4, 10, 0, 0, 0, 0, time.UTC)
+	wantUntil := until.Format(time.RFC3339)
+
+	var gotPath, gotMethod string
+	var gotBody map[string]interface{}
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotMethod = r.Method
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		respondOK(w, map[string]interface{}{})
+	})
+	defer ts.Close()
+
+	if err := fb.DeferIssue(context.Background(), "bd-1", until); err != nil {
+		t.Fatalf("DeferIssue: %v", err)
+	}
+	if gotMethod != "PATCH" {
+		t.Errorf("method = %q, want PATCH", gotMethod)
+	}
+	if !strings.HasSuffix(gotPath, "/issues/bd-1") {
+		t.Errorf("path = %q, want suffix /issues/bd-1", gotPath)
+	}
+	if gotBody["status"] != "deferred" {
+		t.Errorf("status = %v, want deferred", gotBody["status"])
+	}
+	if gotBody["defer_until"] != wantUntil {
+		t.Errorf("defer_until = %v, want %q", gotBody["defer_until"], wantUntil)
+	}
+}
+
+func TestDeferIssue_ZeroUntil(t *testing.T) {
+	var gotBody map[string]interface{}
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		respondOK(w, map[string]interface{}{})
+	})
+	defer ts.Close()
+
+	if err := fb.DeferIssue(context.Background(), "bd-1", time.Time{}); err != nil {
+		t.Fatalf("DeferIssue: %v", err)
+	}
+	if gotBody["status"] != "deferred" {
+		t.Errorf("status = %v, want deferred", gotBody["status"])
+	}
+	if _, ok := gotBody["defer_until"]; ok {
+		t.Errorf("defer_until should not be set for zero until, got %v", gotBody["defer_until"])
+	}
+}
+
+func TestDeferIssue_EmptyID(t *testing.T) {
+	fb, err := New(Config{BaseURL: "http://x", WorkspaceID: "ws"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = fb.DeferIssue(context.Background(), "", time.Time{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Errorf("expected KindValidation, got %v", err)
+	}
+}
+
+func TestUndeferIssue_Success(t *testing.T) {
+	var gotBody map[string]interface{}
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		respondOK(w, map[string]interface{}{})
+	})
+	defer ts.Close()
+
+	if err := fb.UndeferIssue(context.Background(), "bd-1"); err != nil {
+		t.Fatalf("UndeferIssue: %v", err)
+	}
+	if gotBody["status"] != "open" {
+		t.Errorf("status = %v, want open", gotBody["status"])
+	}
+	if gotBody["defer_until"] != "" {
+		t.Errorf("defer_until = %v, want empty string", gotBody["defer_until"])
+	}
+}
+
+func TestUndeferIssue_EmptyID(t *testing.T) {
+	fb, err := New(Config{BaseURL: "http://x", WorkspaceID: "ws"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = fb.UndeferIssue(context.Background(), "")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Errorf("expected KindValidation, got %v", err)
+	}
+}

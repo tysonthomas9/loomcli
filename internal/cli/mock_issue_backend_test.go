@@ -73,6 +73,14 @@ type MockIssueBackend struct {
 	ClaimIssueErr error
 	ClaimIssueFn  func(ctx context.Context, id string, lockTTL time.Duration) error
 
+	// DeferIssue
+	DeferIssueErr error
+	DeferIssueFn  func(ctx context.Context, id string, until time.Time) error
+
+	// UndeferIssue
+	UndeferIssueErr error
+	UndeferIssueFn  func(ctx context.Context, id string) error
+
 	// Close
 	CloseResult *backend.CloseResult
 	CloseErr    error
@@ -277,6 +285,32 @@ func (m *MockIssueBackend) ClaimIssue(ctx context.Context, id string, lockTTL ti
 	m.mu.Unlock()
 	if fn != nil {
 		return fn(ctx, id, lockTTL)
+	}
+	return resultErr
+}
+
+// DeferIssue implements backend.IssueBackend.
+func (m *MockIssueBackend) DeferIssue(ctx context.Context, id string, until time.Time) error {
+	m.mu.Lock()
+	m.record("DeferIssue", id, until)
+	fn := m.DeferIssueFn
+	resultErr := m.DeferIssueErr
+	m.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, id, until)
+	}
+	return resultErr
+}
+
+// UndeferIssue implements backend.IssueBackend.
+func (m *MockIssueBackend) UndeferIssue(ctx context.Context, id string) error {
+	m.mu.Lock()
+	m.record("UndeferIssue", id)
+	fn := m.UndeferIssueFn
+	resultErr := m.UndeferIssueErr
+	m.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, id)
 	}
 	return resultErr
 }

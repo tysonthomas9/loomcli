@@ -396,6 +396,8 @@ func TestBackend_NotImplemented_Mutations(t *testing.T) {
 		{"Create", func() error { _, err := b.Create(ctx, backend.CreateParams{}); return err }},
 		{"Reopen", func() error { return b.Reopen(ctx, "x", backend.ReopenParams{}) }},
 		{"Delete", func() error { return b.Delete(ctx, backend.DeleteParams{}) }},
+		{"DeferIssue", func() error { return b.DeferIssue(ctx, "x", time.Time{}) }},
+		{"UndeferIssue", func() error { return b.UndeferIssue(ctx, "x") }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

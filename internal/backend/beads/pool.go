@@ -140,6 +140,20 @@ func (pb *PooledBackend) ClaimIssue(ctx context.Context, id string, lockTTL time
 	return err
 }
 
+func (pb *PooledBackend) DeferIssue(ctx context.Context, id string, until time.Time) error {
+	_, err := execPool(ctx, pb, "DeferIssue", func(b *BeadsBackend) (struct{}, error) {
+		return struct{}{}, b.DeferIssue(ctx, id, until)
+	})
+	return err
+}
+
+func (pb *PooledBackend) UndeferIssue(ctx context.Context, id string) error {
+	_, err := execPool(ctx, pb, "UndeferIssue", func(b *BeadsBackend) (struct{}, error) {
+		return struct{}{}, b.UndeferIssue(ctx, id)
+	})
+	return err
+}
+
 func (pb *PooledBackend) Close(ctx context.Context, id string, params backend.CloseParams) (*backend.CloseResult, error) {
 	return execPool(ctx, pb, "Close", func(b *BeadsBackend) (*backend.CloseResult, error) {
 		return b.Close(ctx, id, params)

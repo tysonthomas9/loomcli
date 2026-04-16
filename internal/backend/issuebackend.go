@@ -69,6 +69,17 @@ type IssueBackend interface {
 	// already claimed by another agent.
 	ClaimIssue(ctx context.Context, id string, lockTTL time.Duration) error
 
+	// DeferIssue defers an issue by setting status to "deferred" and
+	// optionally setting defer_until. A zero `until` (time.Time{}) means
+	// status-only defer with no end date. Returns KindValidation if id is
+	// empty, KindNotFound if the issue does not exist.
+	DeferIssue(ctx context.Context, id string, until time.Time) error
+
+	// UndeferIssue restores a deferred issue to "open" status and clears its
+	// defer_until field. Returns KindValidation if id is empty, KindNotFound
+	// if the issue does not exist.
+	UndeferIssue(ctx context.Context, id string) error
+
 	// Close marks an issue as closed and returns the closed issue along with
 	// any issues that became unblocked as a result. Returns KindNotFound if
 	// the issue does not exist.

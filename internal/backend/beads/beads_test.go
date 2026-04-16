@@ -1696,6 +1696,160 @@ func TestList_OptsMapping(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// DeferIssue / UndeferIssue
+// ---------------------------------------------------------------------------
+
+func TestDeferIssue_WithUntil(t *testing.T) {
+	until := time.Date(2026, 4, 10, 0, 0, 0, 0, time.UTC)
+	wantStatus := "deferred"
+	wantUntil := until.Format(time.RFC3339)
+	mc := &mockClient{
+		UpdateFn: func(args *rpc.UpdateArgs) (*rpc.Response, error) {
+			if args.ID != "bd-1" {
+				t.Errorf("ID = %q, want bd-1", args.ID)
+			}
+			if args.Status == nil || *args.Status != wantStatus {
+				t.Errorf("Status = %v, want %q", args.Status, wantStatus)
+			}
+			if args.DeferUntil == nil || *args.DeferUntil != wantUntil {
+				t.Errorf("DeferUntil = %v, want %q", args.DeferUntil, wantUntil)
+			}
+			return successResponse(t, struct{}{}), nil
+		},
+	}
+	b := New(mc)
+	if err := b.DeferIssue(context.Background(), "bd-1", until); err != nil {
+		t.Fatalf("DeferIssue error = %v", err)
+	}
+}
+
+func TestDeferIssue_ZeroUntil(t *testing.T) {
+	mc := &mockClient{
+		UpdateFn: func(args *rpc.UpdateArgs) (*rpc.Response, error) {
+			if args.Status == nil || *args.Status != "deferred" {
+				t.Errorf("Status = %v, want deferred", args.Status)
+			}
+			if args.DeferUntil != nil {
+				t.Errorf("DeferUntil = %v, want nil for zero until", args.DeferUntil)
+			}
+			return successResponse(t, struct{}{}), nil
+		},
+	}
+	b := New(mc)
+	if err := b.DeferIssue(context.Background(), "bd-1", time.Time{}); err != nil {
+		t.Fatalf("DeferIssue error = %v", err)
+	}
+}
+
+func TestDeferIssue_EmptyID(t *testing.T) {
+	called := false
+	mc := &mockClient{
+		UpdateFn: func(_ *rpc.UpdateArgs) (*rpc.Response, error) {
+			called = true
+			return nil, nil
+		},
+	}
+	b := New(mc)
+	err := b.DeferIssue(context.Background(), "", time.Time{})
+	if err == nil {
+		t.Fatal("expected error for empty ID")
+	}
+	if called {
+		t.Error("UpdateFn should not have been called")
+	}
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Errorf("error kind = %v, want KindValidation", err)
+	}
+	if msg := err.Error(); !strings.Contains(msg, "id must not be empty") {
+		t.Errorf("error message = %q, want it to contain %q", msg, "id must not be empty")
+	}
+}
+
+func TestDeferIssue_RPCError(t *testing.T) {
+	mc := &mockClient{
+		UpdateFn: func(_ *rpc.UpdateArgs) (*rpc.Response, error) {
+			return nil, errors.New("connection reset")
+		},
+	}
+	b := New(mc)
+	err := b.DeferIssue(context.Background(), "bd-1", time.Time{})
+	if err == nil {
+		t.Fatal("expected transport error")
+	}
+}
+
+func TestDeferIssue_ServerError(t *testing.T) {
+	mc := &mockClient{
+		UpdateFn: func(_ *rpc.UpdateArgs) (*rpc.Response, error) {
+			return errorResponse("issue not found"), nil
+		},
+	}
+	b := New(mc)
+	err := b.DeferIssue(context.Background(), "bd-1", time.Time{})
+	if err == nil {
+		t.Fatal("expected server error")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("error = %q, want it to contain 'not found'", err.Error())
+	}
+}
+
+func TestUndeferIssue_Success(t *testing.T) {
+	mc := &mockClient{
+		UpdateFn: func(args *rpc.UpdateArgs) (*rpc.Response, error) {
+			if args.ID != "bd-1" {
+				t.Errorf("ID = %q, want bd-1", args.ID)
+			}
+			if args.Status == nil || *args.Status != "open" {
+				t.Errorf("Status = %v, want open", args.Status)
+			}
+			if args.DeferUntil == nil || *args.DeferUntil != "" {
+				t.Errorf("DeferUntil = %v, want empty string (clear)", args.DeferUntil)
+			}
+			return successResponse(t, struct{}{}), nil
+		},
+	}
+	b := New(mc)
+	if err := b.UndeferIssue(context.Background(), "bd-1"); err != nil {
+		t.Fatalf("UndeferIssue error = %v", err)
+	}
+}
+
+func TestUndeferIssue_EmptyID(t *testing.T) {
+	called := false
+	mc := &mockClient{
+		UpdateFn: func(_ *rpc.UpdateArgs) (*rpc.Response, error) {
+			called = true
+			return nil, nil
+		},
+	}
+	b := New(mc)
+	err := b.UndeferIssue(context.Background(), "")
+	if err == nil {
+		t.Fatal("expected error for empty ID")
+	}
+	if called {
+		t.Error("UpdateFn should not have been called")
+	}
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Errorf("error kind = %v, want KindValidation", err)
+	}
+}
+
+func TestUndeferIssue_RPCError(t *testing.T) {
+	mc := &mockClient{
+		UpdateFn: func(_ *rpc.UpdateArgs) (*rpc.Response, error) {
+			return nil, errors.New("connection reset")
+		},
+	}
+	b := New(mc)
+	err := b.UndeferIssue(context.Background(), "bd-1")
+	if err == nil {
+		t.Fatal("expected transport error")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Interface compliance
 // ---------------------------------------------------------------------------
 

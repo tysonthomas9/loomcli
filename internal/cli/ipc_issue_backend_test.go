@@ -312,6 +312,33 @@ func TestIPCIssueBackend_GetChildren_DelegatesToFallback(t *testing.T) {
 	}
 }
 
+func TestIPCIssueBackend_DeferIssue_DelegatesToFallback(t *testing.T) {
+	ipc := &mockIPCMutator{}
+	fb := NewMockIssueBackend()
+	b := newIPCIssueBackend(ipc, fb)
+
+	until := time.Date(2026, 4, 10, 0, 0, 0, 0, time.UTC)
+	if err := b.DeferIssue(context.Background(), "bd-1", until); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !fb.Called("DeferIssue") {
+		t.Error("fallback DeferIssue should have been called")
+	}
+}
+
+func TestIPCIssueBackend_UndeferIssue_DelegatesToFallback(t *testing.T) {
+	ipc := &mockIPCMutator{}
+	fb := NewMockIssueBackend()
+	b := newIPCIssueBackend(ipc, fb)
+
+	if err := b.UndeferIssue(context.Background(), "bd-1"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !fb.Called("UndeferIssue") {
+		t.Error("fallback UndeferIssue should have been called")
+	}
+}
+
 func TestIPCIssueBackend_Create_DelegatesToFallback(t *testing.T) {
 	ipc := &mockIPCMutator{}
 	fb := NewMockIssueBackend()
