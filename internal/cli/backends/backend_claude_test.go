@@ -3,6 +3,7 @@ package backends
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -562,5 +563,103 @@ func TestExtractClaudeSessionID_WrongSubtype(t *testing.T) {
 	_, ok := extractClaudeSessionID(line)
 	if ok {
 		t.Error("expected ok=false for non-init subtype")
+	}
+}
+
+func TestOutputRingBuffer(t *testing.T) {
+	t.Parallel()
+
+	t.Run("basic add and string", func(t *testing.T) {
+		t.Parallel()
+		buf := newOutputRingBuffer(5)
+		buf.Add("line1")
+		buf.Add("line2")
+		buf.Add("line3")
+
+		got := buf.String()
+		want := "line1\nline2\nline3"
+		if got != want {
+			t.Errorf("String() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("cap enforcement drops oldest", func(t *testing.T) {
+		t.Parallel()
+		buf := newOutputRingBuffer(3)
+		buf.Add("a")
+		buf.Add("b")
+		buf.Add("c")
+		buf.Add("d")
+		buf.Add("e")
+
+		got := buf.String()
+		want := "c\nd\ne"
+		if got != want {
+			t.Errorf("String() = %q, want %q (oldest should be dropped)", got, want)
+		}
+	})
+
+	t.Run("50 line cap", func(t *testing.T) {
+		t.Parallel()
+		buf := newOutputRingBuffer(50)
+		for i := 0; i < 75; i++ {
+			buf.Add(fmt.Sprintf("line-%d", i))
+		}
+
+		lines := strings.Split(buf.String(), "\n")
+		if len(lines) != 50 {
+			t.Errorf("got %d lines, want 50", len(lines))
+		}
+		// First line should be line-25 (oldest 25 were dropped)
+		if lines[0] != "line-25" {
+			t.Errorf("first line = %q, want %q", lines[0], "line-25")
+		}
+		// Last line should be line-74
+		if lines[49] != "line-74" {
+			t.Errorf("last line = %q, want %q", lines[49], "line-74")
+		}
+	})
+
+	t.Run("empty buffer", func(t *testing.T) {
+		t.Parallel()
+		buf := newOutputRingBuffer(10)
+		if got := buf.String(); got != "" {
+			t.Errorf("String() on empty buffer = %q, want empty", got)
+		}
+	})
+
+	t.Run("single element", func(t *testing.T) {
+		t.Parallel()
+		buf := newOutputRingBuffer(5)
+		buf.Add("only-line")
+		if got := buf.String(); got != "only-line" {
+			t.Errorf("String() = %q, want %q", got, "only-line")
+		}
+	})
+}
+
+func TestLastCapturedOutput_SetAndGet(t *testing.T) {
+	// Not parallel: mutates global state.
+	t.Cleanup(func() { SetLastCapturedOutput("") })
+
+	SetLastCapturedOutput("test output content")
+	got := GetLastCapturedOutput()
+	if got != "test output content" {
+		t.Errorf("GetLastCapturedOutput() = %q, want %q", got, "test output content")
+	}
+}
+
+func TestLastCapturedOutput_ClearedBetweenCalls(t *testing.T) {
+	// Not parallel: mutates global state.
+	t.Cleanup(func() { SetLastCapturedOutput("") })
+
+	SetLastCapturedOutput("first value")
+	if got := GetLastCapturedOutput(); got != "first value" {
+		t.Errorf("GetLastCapturedOutput() = %q, want %q", got, "first value")
+	}
+
+	SetLastCapturedOutput("")
+	if got := GetLastCapturedOutput(); got != "" {
+		t.Errorf("GetLastCapturedOutput() after clear = %q, want empty", got)
 	}
 }
