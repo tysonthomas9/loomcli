@@ -18,12 +18,20 @@ import {
 
 export type WriteFn = (data: string) => void;
 
+/**
+ * ANSI escape-sequence state. Entered on ESC (0x1b); exits when a terminator
+ * is seen. Tracking this as a state machine (instead of a fixed-byte skip)
+ * is necessary for parameterised CSI sequences like Ctrl+Arrow
+ * (ESC [ 1 ; 5 C) whose length varies.
+ */
+type EscState = "none" | "esc" | "csi" | "ss3";
+
 export class SlashCommandInterceptor {
   private buffer = "";
   private commandMode = false;
   private executing = false;
   private disposed = false;
-  private escapeSeqRemaining = 0;
+  private escState: EscState = "none";
   private write: WriteFn;
   private workspaceId: string;
 
@@ -74,17 +82,29 @@ export class SlashCommandInterceptor {
     ch: string,
     sendToWs: (data: string) => void,
   ): void {
-    // Skip remaining bytes of an escape sequence
-    if (this.escapeSeqRemaining > 0) {
-      this.escapeSeqRemaining--;
+    // Consume an in-progress escape sequence.
+    //   CSI (ESC [): params are 0x20–0x3F, terminator is 0x40–0x7E.
+    //                Covers ESC[A (arrow), ESC[1;5C (Ctrl+Right), etc.
+    //   SS3 (ESC O): single-byte parameter follows, e.g. ESC O P (F1).
+    //   Bare ESC:    next byte is a single-byte intermediate/terminator.
+    if (this.escState !== "none") {
+      if (this.escState === "esc") {
+        if (ch === "[") this.escState = "csi";
+        else if (ch === "O") this.escState = "ss3";
+        else this.escState = "none";
+      } else if (this.escState === "ss3") {
+        this.escState = "none";
+      } else {
+        // "csi" — stay until we see a final byte (0x40–0x7E).
+        const code = ch.charCodeAt(0);
+        if (code >= 0x40 && code <= 0x7e) this.escState = "none";
+      }
       return;
     }
 
-    // Detect escape sequence start and skip the full sequence
-    // CSI sequences: ESC [ ... <letter> (typically 2 more bytes, e.g. \x1b[A)
-    // SS3 sequences: ESC O <letter> (2 more bytes)
+    // Detect escape sequence start.
     if (ch === "\x1b") {
-      this.escapeSeqRemaining = 2;
+      this.escState = "esc";
       return;
     }
 
@@ -185,6 +205,6 @@ export class SlashCommandInterceptor {
     this.buffer = "";
     this.commandMode = false;
     this.executing = false;
-    this.escapeSeqRemaining = 0;
+    this.escState = "none";
   }
 }

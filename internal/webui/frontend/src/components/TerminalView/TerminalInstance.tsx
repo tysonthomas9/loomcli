@@ -165,6 +165,11 @@ export const TerminalInstance = forwardRef<
   const interceptorRef = useRef<SlashCommandInterceptor | null>(null);
   const suppressCopyOnSelectRef = useRef(false);
   const copyDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Captured synchronously before each remount so handleReady can restore
+  // focus. Cannot be recomputed inside handleReady — the old wterm DOM is
+  // already gone by the time WTerm.init() resolves, so document.activeElement
+  // has fallen back to <body>.
+  const wasFocusedBeforeRemountRef = useRef(false);
 
   const [mountKey, setMountKey] = useState(0);
   const [connectionState, setConnectionState] =
@@ -258,6 +263,9 @@ export const TerminalInstance = forwardRef<
           () =>
             new Promise<boolean>((resolve) => {
               reconnectResolveRef.current = resolve;
+              // Capture focus before the remount tears down the old DOM.
+              wasFocusedBeforeRemountRef.current =
+                wrapperRef.current?.contains(document.activeElement) ?? false;
               // Force wterm remount — handleReady will fetch scrollback + restart WS.
               setMountKey((k) => k + 1);
             }),
@@ -298,12 +306,12 @@ export const TerminalInstance = forwardRef<
       workspaceId,
     );
 
-    // Refocus if user was previously inside the terminal. Remount on
-    // reconnect discards focus by default.
-    const wasFocused =
-      wrapperRef.current !== null &&
-      wrapperRef.current.contains(document.activeElement);
-    if (wasFocused) wtermFocus();
+    // Refocus if user was inside the terminal when the remount was triggered.
+    // The flag is captured synchronously before setMountKey by the caller.
+    if (wasFocusedBeforeRemountRef.current) {
+      wasFocusedBeforeRemountRef.current = false;
+      wtermFocus();
+    }
 
     if (hasConnectedRef.current) {
       // Reconnect path: fetch and replay scrollback into the fresh grid.
@@ -400,6 +408,8 @@ export const TerminalInstance = forwardRef<
         reconnectCancelRef.current = null;
         wsCleanupRef.current?.();
         wsCleanupRef.current = null;
+        wasFocusedBeforeRemountRef.current =
+          wrapperRef.current?.contains(document.activeElement) ?? false;
         setMountKey((k) => k + 1);
       },
       pasteText(text: string) {

@@ -229,25 +229,35 @@ export function LogViewer({
     const afterWtermPaint = (fn: () => void) =>
       requestAnimationFrame(() => requestAnimationFrame(fn));
 
+    // Keep top-detection suppressed until after the rAF callback has actually
+    // restored scrollTop — clearing it synchronously here would let a scroll
+    // event fired during the 2-frame paint window (while scrollTop === 0)
+    // trigger a redundant onScrollToTop.
     if (autoScrollRef.current) {
       afterWtermPaint(() => {
         const scrollEl = getScrollEl();
         if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
+        suppressTopDetectionRef.current = false;
       });
     } else if (prevScrollHeightRef.current > 0) {
       // Prepended content — restore visual position so the view doesn't jump.
       afterWtermPaint(() => {
         const scrollEl = getScrollEl();
-        if (!scrollEl) return;
+        if (!scrollEl) {
+          suppressTopDetectionRef.current = false;
+          return;
+        }
         const added = scrollEl.scrollHeight - prevScrollHeightRef.current;
         if (added > 0) {
           scrollEl.scrollTop = prevScrollTopRef.current + added;
         }
         prevScrollHeightRef.current = 0;
         prevScrollTopRef.current = 0;
+        suppressTopDetectionRef.current = false;
       });
+    } else {
+      suppressTopDetectionRef.current = false;
     }
-    suppressTopDetectionRef.current = false;
   }, [chunks, resetVersion, isReady, getScrollEl]);
 
   const handleScrollToBottom = useCallback(() => {

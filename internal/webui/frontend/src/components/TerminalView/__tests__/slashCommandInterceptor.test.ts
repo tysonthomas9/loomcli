@@ -339,8 +339,8 @@ describe("SlashCommandInterceptor", () => {
       interceptor.handleData("/hel", sendToWs);
       (terminal.write as any).mockClear();
 
-      // Send a full CSI escape sequence: ESC [ A (arrow up, 3 bytes)
-      // ESC sets escapeSeqRemaining=2, so '[' and 'A' are also consumed
+      // Send a full CSI escape sequence: ESC [ A (arrow up).
+      // The state machine transitions esc→csi→none on the terminator 'A'.
       interceptor.handleData("\x1b", sendToWs);
       interceptor.handleData("[", sendToWs);
       interceptor.handleData("A", sendToWs);
@@ -369,7 +369,7 @@ describe("SlashCommandInterceptor", () => {
       interceptor.handleData("/a", sendToWs);
       (terminal.write as any).mockClear();
 
-      // Send two full CSI escape sequences (ESC + 2 trailing bytes each)
+      // Send two back-to-back CSI sequences.
       // Sequence 1: ESC [ B (arrow down)
       interceptor.handleData("\x1b", sendToWs);
       interceptor.handleData("[", sendToWs);
@@ -378,6 +378,40 @@ describe("SlashCommandInterceptor", () => {
       interceptor.handleData("\x1b", sendToWs);
       interceptor.handleData("[", sendToWs);
       interceptor.handleData("C", sendToWs);
+
+      expect(terminal.write as any).not.toHaveBeenCalled();
+      expect(sendToWs).not.toHaveBeenCalled();
+    });
+
+    it("ignores parameterised CSI sequences (e.g. Ctrl+Right = ESC [ 1 ; 5 C)", async () => {
+      interceptor.handleData("/help", sendToWs);
+      (terminal.write as any).mockClear();
+
+      // ESC [ 1 ; 5 C — a 6-byte CSI with two parameters. A fixed 2-byte
+      // skip would leak "1;5C" into the buffer and corrupt the command.
+      for (const b of "\x1b[1;5C") {
+        interceptor.handleData(b, sendToWs);
+      }
+
+      expect(terminal.write as any).not.toHaveBeenCalled();
+      expect(sendToWs).not.toHaveBeenCalled();
+
+      // Buffer should still be /help — Enter executes it cleanly.
+      interceptor.handleData("\r", sendToWs);
+      await vi.waitFor(() => {
+        expect(terminal.write as any).toHaveBeenCalledWith(
+          expect.stringContaining("[info] Available commands:"),
+        );
+      });
+    });
+
+    it("ignores SS3 sequences (e.g. F1 = ESC O P)", () => {
+      interceptor.handleData("/s", sendToWs);
+      (terminal.write as any).mockClear();
+
+      interceptor.handleData("\x1b", sendToWs);
+      interceptor.handleData("O", sendToWs);
+      interceptor.handleData("P", sendToWs);
 
       expect(terminal.write as any).not.toHaveBeenCalled();
       expect(sendToWs).not.toHaveBeenCalled();

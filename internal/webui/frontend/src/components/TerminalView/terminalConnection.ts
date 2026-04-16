@@ -168,8 +168,10 @@ export function connectWebSocket(
       };
 
       ws.onerror = () => {
-        if (cancelled) return;
-        setConnectionState("disconnected");
+        // No state change here — the spec guarantees onclose fires after
+        // onerror for the same WebSocket, and that handler owns state
+        // transitions (including 4001/4002 which must not degrade to
+        // "disconnected" first).
       };
 
       wsCleanupInner = () => {
