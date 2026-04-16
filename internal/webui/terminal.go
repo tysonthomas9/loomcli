@@ -235,13 +235,23 @@ func (m *TerminalManager) tmuxNewSession(name, command string, cols, rows uint16
 	return nil
 }
 
-// applySessionOptions enables mouse mode and sets the scrollback history limit
-// on an existing tmux session. Failures are logged but not returned — these are
-// best-effort ergonomic tweaks, not correctness requirements.
+// applySessionOptions enables mouse mode, sets the scrollback history limit,
+// and configures per-session window sizing for multi-viewport attach.
+// Failures are logged but not returned — these are best-effort ergonomic
+// tweaks, not correctness requirements.
+//
+// window-size=latest: when the same session is attached in two browser
+// viewports of different sizes, tmux's default (`smallest`) clamps the
+// session to the smaller viewport and the larger one renders tmux's grid in
+// a top-left sub-rectangle with the rest of the cells showing leftover /
+// dotted pane-border characters. `latest` sizes the window to whichever
+// client most recently interacted, so moving focus into a viewport resizes
+// to match it.
 func (m *TerminalManager) applySessionOptions(name string) {
 	for _, opt := range [][2]string{
 		{"mouse", "on"},
 		{"history-limit", fmt.Sprintf("%d", m.scrollbackMaxLines)},
+		{"window-size", "latest"},
 	} {
 		optCmd := m.tmuxCmd("set-option", "-t", name, opt[0], opt[1])
 		if out, err := optCmd.CombinedOutput(); err != nil {
