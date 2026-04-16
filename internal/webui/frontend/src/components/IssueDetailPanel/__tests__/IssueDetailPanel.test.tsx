@@ -116,37 +116,23 @@ vi.mock("@/hooks", async (importOriginal) => {
     LAYER_MODAL: 40,
     LAYER_TERMINAL_PANEL: 30,
     LAYER_AGENT_PANEL: 20,
-    LAYER_ISSUE_PANEL: 10,
-    LAYER_TERMINAL_SEARCH: 5,
-  };
+    LAYER_ISSUE_PANEL: 10,  };
 });
 
-// Mock xterm.js (used by LogViewer)
-vi.mock("@xterm/xterm", () => {
-  class MockTerminal {
-    options: Record<string, unknown> = { disableStdin: true };
-    open = vi.fn();
-    dispose = vi.fn();
-    write = vi.fn();
-    clear = vi.fn();
-    loadAddon = vi.fn();
-    scrollToBottom = vi.fn();
-    onScroll = vi.fn(() => ({ dispose: vi.fn() }));
-    onData = vi.fn(() => ({ dispose: vi.fn() }));
-    buffer = { active: { viewportY: 0, baseY: 0 } };
-  }
-  return { Terminal: MockTerminal };
+// Mock @wterm/react (used by LogViewer) — wterm's real module loads WASM,
+// which jsdom can't execute. The mock renders a plain div and stubs the hook.
+vi.mock("@wterm/react", () => {
+  const Terminal = () => null;
+  const useTerminal = () => ({
+    ref: { current: null },
+    write: vi.fn(),
+    resize: vi.fn(),
+    focus: vi.fn(),
+  });
+  return { Terminal, useTerminal };
 });
 
-vi.mock("@xterm/addon-fit", () => {
-  class MockFitAddon {
-    fit = vi.fn();
-    dispose = vi.fn();
-  }
-  return { FitAddon: MockFitAddon };
-});
-
-vi.mock("@xterm/xterm/css/xterm.css", () => ({}));
+vi.mock("@wterm/react/css", () => ({}));
 
 // Mock ResizeObserver (not available in jsdom, needed by LogViewer)
 if (typeof globalThis.ResizeObserver === "undefined") {

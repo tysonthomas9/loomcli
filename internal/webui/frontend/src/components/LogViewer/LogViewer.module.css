@@ -1,6 +1,6 @@
 /**
  * LogViewer component styles.
- * Terminal-style log display with dark background using xterm.js.
+ * Terminal-style log display backed by wterm.
  */
 
 .container {
@@ -143,20 +143,20 @@
   background-color: var(--terminal-bg);
 }
 
-/* xterm v6 uses a custom scrollbar (.scrollbar.vertical) instead of native
-   browser scroll on .xterm-viewport. The scrollbar is hidden by default via
-   the .invisible class (opacity:0, pointer-events:none). Override to keep it
-   always visible and interactive so users can scroll through log content. */
-.terminalContainer :global(.xterm-scrollable-element > .scrollbar.vertical) {
-  opacity: 1 !important;
-  pointer-events: auto !important;
+/* wterm scrollbar: native browser scrollbar on the .wterm element's overflow. */
+.terminalContainer :global(.wterm)::-webkit-scrollbar {
+  width: 8px;
 }
 
-.terminalContainer :global(.scrollbar.vertical > .slider) {
-  background: var(--terminal-scrollbar-thumb) !important;
+.terminalContainer :global(.wterm)::-webkit-scrollbar-track {
+  background: var(--terminal-bg);
+}
+
+.terminalContainer :global(.wterm)::-webkit-scrollbar-thumb {
+  background: var(--terminal-scrollbar-thumb);
   border-radius: 4px;
 }
 
-.terminalContainer :global(.scrollbar.vertical > .slider:hover) {
-  background: var(--terminal-scrollbar-thumb-hover) !important;
+.terminalContainer :global(.wterm)::-webkit-scrollbar-thumb:hover {
+  background: var(--terminal-scrollbar-thumb-hover);
 }

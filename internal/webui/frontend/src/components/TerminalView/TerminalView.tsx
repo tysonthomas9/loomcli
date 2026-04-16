@@ -12,10 +12,6 @@ import {
 } from "@/api/terminal";
 import { LoadingSkeleton } from "@/components";
 import { useBackendConfig } from "@/hooks/useBackendConfig";
-import {
-  useRegisterEscapeLayer,
-  LAYER_TERMINAL_SEARCH,
-} from "@/hooks/useKeyboardShortcuts";
 import { useSessionRestore } from "@/hooks/useSessionRestore";
 import { useTerminalMetadata } from "@/hooks/useTerminalMetadata";
 
@@ -31,13 +27,11 @@ import {
   ReconnectingOverlay,
   type ReconnectOverlayState,
 } from "./ReconnectingOverlay";
-import { SearchBar } from "./SearchBar";
 import { TerminalConnectionOverlay } from "./TerminalConnectionOverlay";
 import { TerminalContextMenu } from "./TerminalContextMenu";
 import type {
   ConnectionState,
   ContextMenuEvent,
-  SearchResultInfo,
   TerminalInstanceHandle,
 } from "./TerminalInstance";
 import { TerminalInstance } from "./TerminalInstance";
@@ -138,7 +132,6 @@ export function TerminalView({
     isSplitView,
     splitRatio,
     rightPaneTabId,
-    focusedPane,
     setFocusedPane,
     canSplit,
     handleToggleSplit,
@@ -146,13 +139,6 @@ export function TerminalView({
     handleRightPaneTabChange,
   } = useSplitView({ tabs, activeTabId });
   const splitContainerRef = useRef<HTMLDivElement>(null);
-  const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [caseSensitive, setCaseSensitive] = useState(false);
-  const [useRegex, setUseRegex] = useState(false);
-  const [searchResult, setSearchResult] = useState<SearchResultInfo | null>(
-    null,
-  );
   const [isSessionPromptOpen, setIsSessionPromptOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<ContextMenuEvent | null>(null);
   const [tabHasConnected, setTabHasConnected] = useState<Map<string, boolean>>(
@@ -516,7 +502,6 @@ export function TerminalView({
       // Escape: return to previous view when nothing else to dismiss
       if (
         e.key === "Escape" &&
-        !isSearchOpen &&
         !isSessionPromptOpen &&
         pendingPasteText === null &&
         dismissedWelcome
@@ -578,51 +563,19 @@ export function TerminalView({
         return;
       }
 
-      // Cmd+F / Ctrl+F: toggle search
-      if ((e.metaKey || e.ctrlKey) && e.key === "f") {
-        e.preventDefault();
-        setIsSearchOpen((prev) => !prev);
-      }
+      // Cmd+F / Ctrl+F falls through to browser-native find (wterm renders
+      // to DOM so the page's built-in search works across terminal content).
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
   }, [
     isActive,
-    isSearchOpen,
     isSessionPromptOpen,
     pendingPasteText,
     onEscape,
     announce,
     dismissedWelcome,
   ]);
-
-  // The tab targeted by search: in split mode, use the focused pane's tab
-  const searchTargetTabId =
-    isSplitView && focusedPane === "right" ? rightPaneTabId : activeTabId;
-  const searchTargetTabIdRef = useRef(searchTargetTabId);
-  searchTargetTabIdRef.current = searchTargetTabId;
-
-  const closeTerminalSearch = useCallback(() => {
-    setIsSearchOpen(false);
-    instanceRefs.current.get(searchTargetTabId)?.clearSearch();
-    setSearchTerm("");
-    setSearchResult(null);
-  }, [searchTargetTabId]);
-
-  useRegisterEscapeLayer(
-    LAYER_TERMINAL_SEARCH,
-    closeTerminalSearch,
-    isActive && isSearchOpen,
-  );
-
-  // Re-run search on tab switch while search is open
-  useEffect(() => {
-    if (isSearchOpen && searchTerm) {
-      instanceRefs.current
-        .get(searchTargetTabId)
-        ?.search(searchTerm, { caseSensitive, regex: useRegex });
-    }
-  }, [searchTargetTabId, isSearchOpen, searchTerm, caseSensitive, useRegex]);
 
   // Body scroll lock for full-height mode
   useEffect(() => {
@@ -757,66 +710,6 @@ export function TerminalView({
     setIsSessionPromptOpen(false);
   }, []);
 
-  // Search handlers
-  const handleSearch = useCallback(
-    (term: string) => {
-      setSearchTerm(term);
-      instanceRefs.current
-        .get(searchTargetTabId)
-        ?.search(term, { caseSensitive, regex: useRegex });
-    },
-    [searchTargetTabId, caseSensitive, useRegex],
-  );
-
-  const handleFindNext = useCallback(() => {
-    instanceRefs.current.get(searchTargetTabId)?.findNext();
-  }, [searchTargetTabId]);
-
-  const handleFindPrevious = useCallback(() => {
-    instanceRefs.current.get(searchTargetTabId)?.findPrevious();
-  }, [searchTargetTabId]);
-
-  const handleSearchClose = useCallback(() => {
-    setIsSearchOpen(false);
-    instanceRefs.current.get(searchTargetTabId)?.clearSearch();
-    setSearchTerm("");
-    setSearchResult(null);
-  }, [searchTargetTabId]);
-
-  const handleToggleCaseSensitive = useCallback(() => {
-    const next = !caseSensitive;
-    setCaseSensitive(next);
-    if (searchTerm) {
-      instanceRefs.current
-        .get(searchTargetTabId)
-        ?.search(searchTerm, { caseSensitive: next, regex: useRegex });
-    }
-  }, [searchTargetTabId, searchTerm, caseSensitive, useRegex]);
-
-  const handleToggleRegex = useCallback(() => {
-    const next = !useRegex;
-    setUseRegex(next);
-    if (searchTerm) {
-      instanceRefs.current
-        .get(searchTargetTabId)
-        ?.search(searchTerm, { caseSensitive, regex: next });
-    }
-  }, [searchTargetTabId, searchTerm, caseSensitive, useRegex]);
-
-  // Only process search result changes from the search-targeted tab
-  const handleSearchResultChange = useCallback(
-    (tabId: string, result: SearchResultInfo | null) => {
-      if (tabId === searchTargetTabIdRef.current) {
-        setSearchResult(result);
-      }
-    },
-    [],
-  );
-
-  // Search request from terminal (Ctrl+Shift+F)
-  const handleSearchRequest = useCallback(() => {
-    setIsSearchOpen((prev) => !prev);
-  }, []);
 
   // Context menu handlers
   const handleContextMenu = useCallback((event: ContextMenuEvent) => {
@@ -938,15 +831,11 @@ export function TerminalView({
           }
           onCopyNotify={handleCopyNotify}
           onPasteRequest={handlePasteRequest}
-          onSearchRequest={handleSearchRequest}
           onContextMenu={handleContextMenu}
           onReconnectStateChange={(state) =>
             handleReconnectStateChange(tab.id, state)
           }
           onOutput={() => handleOutput(tab.id)}
-          onSearchResultChange={(result) =>
-            handleSearchResultChange(tab.id, result)
-          }
           onBackendCrash={(reason) => handleBackendCrash(tab.id, reason)}
           onTerminalFocus={
             pane === "left"
@@ -1008,11 +897,9 @@ export function TerminalView({
       handleConnectionStateChange,
       handleCopyNotify,
       handlePasteRequest,
-      handleSearchRequest,
       handleContextMenu,
       handleReconnectStateChange,
       handleOutput,
-      handleSearchResultChange,
       handleBackendCrash,
       handleCrashRestart,
       handleTabClose,
@@ -1185,21 +1072,6 @@ export function TerminalView({
               })
             )}
           </div>
-          {isSearchOpen && (
-            <SearchBar
-              value={searchTerm}
-              onSearch={handleSearch}
-              onFindNext={handleFindNext}
-              onFindPrevious={handleFindPrevious}
-              onClose={handleSearchClose}
-              matchIndex={searchResult?.resultIndex ?? null}
-              matchCount={searchResult?.resultCount ?? null}
-              caseSensitive={caseSensitive}
-              regex={useRegex}
-              onToggleCaseSensitive={handleToggleCaseSensitive}
-              onToggleRegex={handleToggleRegex}
-            />
-          )}
         </>
       )}
       <BackendPickerPrompt

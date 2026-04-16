@@ -40,7 +40,6 @@ export const LAYER_MODAL = 40;
 export const LAYER_TERMINAL_PANEL = 30;
 export const LAYER_AGENT_PANEL = 20;
 export const LAYER_ISSUE_PANEL = 10;
-export const LAYER_TERMINAL_SEARCH = 5;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -96,7 +95,7 @@ function isInputFocused(event: KeyboardEvent): boolean {
 
   if (target.isContentEditable) return true;
   if (target.closest(".cm-editor")) return true;
-  if (target.closest(".xterm")) return true;
+  if (target.closest(".wterm")) return true;
 
   return false;
 }

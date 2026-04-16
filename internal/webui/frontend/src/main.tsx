@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { RouterProvider } from "react-router-dom";
 
 import "@/styles/index.css";
+import "@wterm/react/css";
 import { migrateLocalStorage } from "@/utils/migrateLocalStorage";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { initErrorReporter, reportError } from "@/api/errorReporter";

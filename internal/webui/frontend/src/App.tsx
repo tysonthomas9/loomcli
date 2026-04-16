@@ -110,7 +110,7 @@ const ObservabilityDashboard = lazy(() =>
   })),
 );
 
-// Lazy load TerminalView (xterm.js ~100KB)
+// Lazy load TerminalView (wterm + WASM)
 const TerminalView = lazy(() =>
   import("@/components/TerminalView").then((m) => ({
     default: m.TerminalView,

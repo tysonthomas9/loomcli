@@ -17,7 +17,7 @@ func TestSecurityHeaders_AllHeadersSet(t *testing.T) {
 	handler.ServeHTTP(w, req)
 
 	expected := map[string]string{
-		"Content-Security-Policy": "default-src 'self'; script-src 'self' 'sha256-E907z9SPF4o7blRe1MXfQVC2tBrJopXOXrMYZvksy/o='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; report-uri /api/csp-report",
+		"Content-Security-Policy": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-E907z9SPF4o7blRe1MXfQVC2tBrJopXOXrMYZvksy/o='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; report-uri /api/csp-report",
 		"X-Content-Type-Options":  "nosniff",
 		"Referrer-Policy":         "strict-origin-when-cross-origin",
 		"X-Frame-Options":         "DENY",

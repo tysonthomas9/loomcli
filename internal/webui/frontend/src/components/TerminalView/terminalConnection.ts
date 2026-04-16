@@ -3,13 +3,19 @@
  * Handles token fetching, URL building, resize encoding, and WebSocket lifecycle.
  */
 
-import type { FitAddon } from "@xterm/addon-fit";
-import type { Terminal } from "@xterm/xterm";
-
 import { get, wsUrl } from "@/api/client";
 import { getAgentTerminalToken, getAgentTerminalWsUrl } from "@/api/logs";
 
 import type { ConnectionState } from "./TerminalInstance";
+
+/**
+ * Renderer-agnostic sink. The caller owns a terminal (wterm, or whatever
+ * renders today) and exposes just the two hooks this module needs.
+ */
+export interface TerminalSink {
+  write: (data: string | Uint8Array) => void;
+  getSize: () => { cols: number; rows: number };
+}
 
 /**
  * Fetch a one-time terminal auth token from the server. The token endpoint
@@ -78,24 +84,20 @@ const WS_CLOSE_BACKEND_EXITED = 4001;
 const WS_CLOSE_SESSION_KILLED = 4002;
 
 /**
- * Connect a Terminal instance to a WebSocket, returning a cleanup function.
+ * Connect a terminal sink to the backend WebSocket, returning a cleanup function.
+ * The caller is responsible for wiring user input (onData) directly — this
+ * function owns the WS lifecycle, incoming bytes, and the initial resize frame.
  */
 export function connectWebSocket(
   workspaceId: string,
   sessionName: string,
-  terminal: Terminal,
-  fitAddon: FitAddon,
+  sink: TerminalSink,
   wsRef: React.MutableRefObject<WebSocket | null>,
   setConnectionState: (s: ConnectionState) => void,
   onConnected?: () => void,
   onDisconnected?: () => void,
   onOutput?: () => void,
   onBackendCrash?: (reason: string) => void,
-  onInput?: (
-    data: string,
-    sendToWs: (data: string) => void,
-    terminal: Terminal,
-  ) => void,
   agentName?: string,
   onSessionKilled?: () => void,
 ): () => void {
@@ -132,17 +134,17 @@ export function connectWebSocket(
       ws.onopen = () => {
         if (cancelled) return;
         setConnectionState("connected");
-        fitAddon.fit();
-        ws.send(encodeResize(terminal.cols, terminal.rows));
+        const { cols, rows } = sink.getSize();
+        ws.send(encodeResize(cols, rows));
         onConnected?.();
       };
 
       ws.onmessage = (ev: MessageEvent) => {
         if (cancelled) return;
         if (typeof ev.data === "string") {
-          terminal.write(ev.data);
+          sink.write(ev.data);
         } else if (ev.data instanceof ArrayBuffer) {
-          terminal.write(new Uint8Array(ev.data));
+          sink.write(new Uint8Array(ev.data));
         }
         onOutput?.();
       };
@@ -170,21 +172,7 @@ export function connectWebSocket(
         setConnectionState("disconnected");
       };
 
-      const sendToWs = (data: string) => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(data);
-        }
-      };
-      const onDataDisposable = terminal.onData((data: string) => {
-        if (onInput) {
-          onInput(data, sendToWs, terminal);
-        } else {
-          sendToWs(data);
-        }
-      });
-
       wsCleanupInner = () => {
-        onDataDisposable.dispose();
         if (
           ws.readyState === WebSocket.OPEN ||
           ws.readyState === WebSocket.CONNECTING

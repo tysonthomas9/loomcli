@@ -125,15 +125,9 @@ class MockWebSocket {
 // ── Test helpers ─────────────────────────────────────────────────────────────
 
 function makeMocks() {
-  const terminal = {
-    onData: vi.fn(() => ({ dispose: vi.fn() })),
+  const sink = {
     write: vi.fn(),
-    cols: 80,
-    rows: 24,
-  };
-
-  const fitAddon = {
-    fit: vi.fn(),
+    getSize: () => ({ cols: 80, rows: 24 }),
   };
 
   const wsRef = { current: null as WebSocket | null };
@@ -143,8 +137,7 @@ function makeMocks() {
   const onOutput = vi.fn();
 
   return {
-    terminal,
-    fitAddon,
+    sink,
     wsRef,
     setConnectionState,
     onConnected,
@@ -183,8 +176,7 @@ describe("connectWebSocket", () => {
     const cleanup = connectWebSocket(
       "ws1",
       "session1",
-      m.terminal as any,
-      m.fitAddon as any,
+      m.sink,
       m.wsRef,
       m.setConnectionState,
       m.onConnected,
@@ -213,8 +205,7 @@ describe("connectWebSocket", () => {
     const cleanup = connectWebSocket(
       "ws1",
       "session1",
-      m.terminal as any,
-      m.fitAddon as any,
+      m.sink,
       m.wsRef,
       m.setConnectionState,
     );
@@ -237,8 +228,7 @@ describe("connectWebSocket", () => {
     const cleanup = connectWebSocket(
       "ws1",
       "session1",
-      m.terminal as any,
-      m.fitAddon as any,
+      m.sink,
       m.wsRef,
       m.setConnectionState,
       m.onConnected,
@@ -267,8 +257,7 @@ describe("connectWebSocket", () => {
     const cleanup = connectWebSocket(
       "ws1",
       "session1",
-      m.terminal as any,
-      m.fitAddon as any,
+      m.sink,
       m.wsRef,
       m.setConnectionState,
       undefined,
@@ -286,12 +275,12 @@ describe("connectWebSocket", () => {
 
     // Call cleanup
     cleanup();
-    m.terminal.write.mockClear();
+    m.sink.write.mockClear();
 
     // Simulate message after cleanup — should be ignored
     ws.simulateMessage("hello");
 
-    expect(m.terminal.write).not.toHaveBeenCalled();
+    expect(m.sink.write).not.toHaveBeenCalled();
   });
 
   it("normal lifecycle: connects, receives data, and cleans up", async () => {
@@ -299,8 +288,7 @@ describe("connectWebSocket", () => {
     const cleanup = connectWebSocket(
       "ws1",
       "session1",
-      m.terminal as any,
-      m.fitAddon as any,
+      m.sink,
       m.wsRef,
       m.setConnectionState,
       m.onConnected,
@@ -323,7 +311,7 @@ describe("connectWebSocket", () => {
 
     // Receive data
     ws.simulateMessage("output text");
-    expect(m.terminal.write).toHaveBeenCalledWith("output text");
+    expect(m.sink.write).toHaveBeenCalledWith("output text");
     expect(m.onOutput).toHaveBeenCalled();
 
     // Clean up
@@ -341,8 +329,7 @@ describe("connectWebSocket", () => {
     connectWebSocket(
       "ws1",
       "session1",
-      m.terminal as any,
-      m.fitAddon as any,
+      m.sink,
       m.wsRef,
       m.setConnectionState,
       undefined,
@@ -370,8 +357,7 @@ describe("connectWebSocket", () => {
     const cleanup = connectWebSocket(
       "ws1",
       "session1",
-      m.terminal as any,
-      m.fitAddon as any,
+      m.sink,
       m.wsRef,
       m.setConnectionState,
       m.onConnected,
@@ -398,8 +384,7 @@ describe("connectWebSocket", () => {
     const cleanup = connectWebSocket(
       "ws1",
       "session1",
-      m.terminal as any,
-      m.fitAddon as any,
+      m.sink,
       m.wsRef,
       m.setConnectionState,
       undefined,
@@ -431,8 +416,7 @@ describe("connectWebSocket", () => {
     const cleanup = connectWebSocket(
       "ws1",
       "session1",
-      m.terminal as any,
-      m.fitAddon as any,
+      m.sink,
       m.wsRef,
       m.setConnectionState,
       undefined,
@@ -461,13 +445,11 @@ describe("connectWebSocket", () => {
       connectWebSocket(
         "ws1",
         "session1",
-        m.terminal as any,
-        m.fitAddon as any,
+      m.sink,
         m.wsRef,
         m.setConnectionState,
         m.onConnected,
         m.onDisconnected,
-        undefined,
         undefined,
         undefined,
         "agent-fox",
@@ -486,13 +468,11 @@ describe("connectWebSocket", () => {
       connectWebSocket(
         "ws1",
         "session1",
-        m.terminal as any,
-        m.fitAddon as any,
+      m.sink,
         m.wsRef,
         m.setConnectionState,
         m.onConnected,
         m.onDisconnected,
-        undefined,
         undefined,
         undefined,
         "agent-fox",
@@ -520,14 +500,12 @@ describe("connectWebSocket", () => {
       const cleanup = connectWebSocket(
         "ws1",
         "session1",
-        m.terminal as any,
-        m.fitAddon as any,
+      m.sink,
         m.wsRef,
         m.setConnectionState,
         m.onConnected,
         m.onDisconnected,
         m.onOutput,
-        undefined,
         undefined,
         "agent-fox",
       );
@@ -546,7 +524,7 @@ describe("connectWebSocket", () => {
       expect(m.onConnected).toHaveBeenCalled();
 
       ws.simulateMessage("agent output");
-      expect(m.terminal.write).toHaveBeenCalledWith("agent output");
+      expect(m.sink.write).toHaveBeenCalledWith("agent output");
       expect(m.onOutput).toHaveBeenCalled();
 
       cleanup();
@@ -560,13 +538,11 @@ describe("connectWebSocket", () => {
       connectWebSocket(
         "ws1",
         "session1",
-        m.terminal as any,
-        m.fitAddon as any,
+      m.sink,
         m.wsRef,
         m.setConnectionState,
         undefined,
         m.onDisconnected,
-        undefined,
         undefined,
         undefined,
         "agent-fox",

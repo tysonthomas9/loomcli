@@ -58,15 +58,10 @@ import { COMMAND_REGISTRY, formatSystemMessage } from "../slashCommands";
 const mockedFormatSystemMessage = vi.mocked(formatSystemMessage);
 
 /**
- * Minimal fake Terminal with a write spy.
+ * Minimal fake terminal with a write spy.
  */
 function createFakeTerminal() {
-  return {
-    write: vi.fn(),
-    // Provide other properties xterm Terminal type might reference
-    onData: vi.fn(),
-    dispose: vi.fn(),
-  } as unknown as import("@xterm/xterm").Terminal;
+  return { write: vi.fn() };
 }
 
 describe("SlashCommandInterceptor", () => {
@@ -77,7 +72,10 @@ describe("SlashCommandInterceptor", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     terminal = createFakeTerminal();
-    interceptor = new SlashCommandInterceptor(terminal);
+    interceptor = new SlashCommandInterceptor(
+      (data) => terminal.write(data),
+      "test-ws",
+    );
     sendToWs = vi.fn();
   });
 

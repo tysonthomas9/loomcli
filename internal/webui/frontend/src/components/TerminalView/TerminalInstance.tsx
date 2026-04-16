@@ -1,47 +1,36 @@
 /**
  * TerminalInstance component.
- * Single xterm.js terminal pane with WebSocket connection, WebGL rendering,
- * SearchAddon, FitAddon, and auto-reconnect. Designed to be mounted inside
- * a tabbed TerminalView container.
+ * Single wterm terminal pane with WebSocket connection, backoff reconnect,
+ * scrollback replay, and copy/paste UX. Mounted inside a tabbed TerminalView.
  */
 
-import { FitAddon } from "@xterm/addon-fit";
-import { SearchAddon } from "@xterm/addon-search";
-import { WebLinksAddon } from "@xterm/addon-web-links";
-import { WebglAddon } from "@xterm/addon-webgl";
-import { Terminal } from "@xterm/xterm";
+import { Terminal, useTerminal } from "@wterm/react";
 import {
   forwardRef,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useRef,
   useState,
-  useCallback,
 } from "react";
 
 import { fetchScrollback } from "@/api/terminal";
 import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
-import { stripAnsi } from "@/utils/stripAnsi";
 import {
   startAutoReconnect,
   type ReconnectConfig,
   type ReconnectState,
 } from "@/utils/reconnectBackoff";
-import type { ReconnectOverlayState } from "./ReconnectingOverlay";
-import styles from "./TerminalInstance.module.css";
-import { SlashCommandInterceptor } from "./slashCommandInterceptor";
-import { connectWebSocket, encodeResize } from "./terminalConnection";
-import { getTerminalTheme } from "./terminalTheme";
-import "@xterm/xterm/css/xterm.css";
+import { stripAnsi } from "@/utils/stripAnsi";
 
-const SEARCH_DECORATIONS = {
-  matchBackground: "#515C6A",
-  matchBorder: "#515C6A",
-  matchOverviewRuler: "#d186167e",
-  activeMatchBackground: "#EE8B17",
-  activeMatchBorder: "#EE8B17",
-  activeMatchColorOverviewRuler: "#ee8b17ff",
-};
+import type { ReconnectOverlayState } from "./ReconnectingOverlay";
+import { SlashCommandInterceptor } from "./slashCommandInterceptor";
+import {
+  connectWebSocket,
+  encodeResize,
+  type TerminalSink,
+} from "./terminalConnection";
+import styles from "./TerminalInstance.module.css";
 
 /** Stricter backoff for initial connection failures (e.g. 501 when session doesn't exist). */
 const INITIAL_CONNECT_CONFIG: ReconnectConfig = {
@@ -51,17 +40,14 @@ const INITIAL_CONNECT_CONFIG: ReconnectConfig = {
   jitterFactor: 0.5,
 };
 
+const RECONNECT_TIMEOUT_MS = 30_000;
+
 export type ConnectionState =
   | "disconnected"
   | "connecting"
   | "connected"
   | "error"
   | "crashed";
-
-export interface SearchResultInfo {
-  resultIndex: number;
-  resultCount: number;
-}
 
 export interface ContextMenuEvent {
   x: number;
@@ -80,11 +66,9 @@ export interface TerminalInstanceProps {
   ) => void;
   onCopyNotify?: () => void;
   onPasteRequest?: () => void;
-  onSearchRequest?: () => void;
   onContextMenu?: (event: ContextMenuEvent) => void;
   onReconnectStateChange?: (state: ReconnectOverlayState) => void;
   onOutput?: () => void;
-  onSearchResultChange?: (result: SearchResultInfo | null) => void;
   onBackendCrash?: (reason: string) => void;
   onTerminalFocus?: (() => void) | undefined;
   /** When set, connects to agent terminal WebSocket instead of regular terminal. */
@@ -94,23 +78,48 @@ export interface TerminalInstanceProps {
 export interface TerminalInstanceHandle {
   /** Gracefully disconnect the WebSocket and cancel reconnect. Returns when WS is closed. */
   disconnect: () => Promise<void>;
-  search: (
-    term: string,
-    options?: {
-      caseSensitive?: boolean;
-      wholeWord?: boolean;
-      regex?: boolean;
-    },
-  ) => boolean;
-  findNext: () => boolean;
-  findPrevious: () => boolean;
-  clearSearch: () => void;
   reconnect: () => void;
   pasteText: (text: string) => void;
   getSelection: () => string;
   hasSelection: () => boolean;
   selectAll: () => void;
   focus: () => void;
+}
+
+function selectionInside(node: Node | null, container: HTMLElement | null) {
+  if (!container || !node) return false;
+  return container.contains(node);
+}
+
+function wrapperSelectionText(container: HTMLElement | null): string {
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed) return "";
+  if (!selectionInside(sel.anchorNode, container)) return "";
+  return sel.toString();
+}
+
+function writeToClipboard(text: string): Promise<boolean> {
+  if (navigator.clipboard?.writeText) {
+    return navigator.clipboard
+      .writeText(text)
+      .then(() => true)
+      .catch(() => execCommandCopy(text));
+  }
+  return Promise.resolve(execCommandCopy(text));
+}
+
+function execCommandCopy(text: string): boolean {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  try {
+    ta.select();
+    return document.execCommand("copy");
+  } finally {
+    document.body.removeChild(ta);
+  }
 }
 
 export const TerminalInstance = forwardRef<
@@ -120,16 +129,14 @@ export const TerminalInstance = forwardRef<
   {
     sessionName,
     isActive,
-    fontFamily = 'Menlo, Monaco, "Courier New", monospace',
-    fontSize = 14,
+    fontFamily,
+    fontSize,
     onConnectionStateChange,
     onCopyNotify,
     onPasteRequest,
-    onSearchRequest,
     onContextMenu,
     onReconnectStateChange,
     onOutput,
-    onSearchResultChange,
     onBackendCrash,
     onTerminalFocus,
     agentName,
@@ -137,34 +144,67 @@ export const TerminalInstance = forwardRef<
   ref,
 ) {
   const { workspaceId } = useWorkspaceContext();
-  const termRef = useRef<HTMLDivElement>(null);
-  const terminalRef = useRef<Terminal | null>(null);
-  const fitAddonRef = useRef<FitAddon | null>(null);
-  const searchAddonRef = useRef<SearchAddon | null>(null);
+  const { ref: wtermRef, write, focus: wtermFocus } = useTerminal();
+
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const writeRef = useRef(write);
+  writeRef.current = write;
+
   const wsRef = useRef<WebSocket | null>(null);
   const wsCleanupRef = useRef<(() => void) | null>(null);
   const reconnectCancelRef = useRef<(() => void) | null>(null);
-  const beingKilledRef = useRef(false);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
   const reconnectAttemptRef = useRef(0);
-  const reconnectResolveRef = useRef<((result: boolean) => void) | null>(null);
-  const interceptorRef = useRef<SlashCommandInterceptor | null>(null);
-
-  // Scroll-tracking and new output pill
+  const reconnectResolveRef = useRef<((ok: boolean) => void) | null>(null);
+  const beingKilledRef = useRef(false);
+  const hasConnectedRef = useRef(false);
   const isAtBottomRef = useRef(true);
+  const sizeRef = useRef({ cols: 80, rows: 24 });
+  const interceptorRef = useRef<SlashCommandInterceptor | null>(null);
+  const suppressCopyOnSelectRef = useRef(false);
+  const copyDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [mountKey, setMountKey] = useState(0);
+  const [connectionState, setConnectionState] =
+    useState<ConnectionState>("disconnected");
   const [showNewOutputPill, setShowNewOutputPill] = useState(false);
+
+  // Stable callback refs
+  const onCopyNotifyRef = useRef(onCopyNotify);
+  onCopyNotifyRef.current = onCopyNotify;
+  const onPasteRequestRef = useRef(onPasteRequest);
+  onPasteRequestRef.current = onPasteRequest;
+  const onContextMenuRef = useRef(onContextMenu);
+  onContextMenuRef.current = onContextMenu;
   const onOutputRef = useRef(onOutput);
   onOutputRef.current = onOutput;
-  const onSearchResultChangeRef = useRef(onSearchResultChange);
-  onSearchResultChangeRef.current = onSearchResultChange;
   const onBackendCrashRef = useRef(onBackendCrash);
   onBackendCrashRef.current = onBackendCrash;
+  const onTerminalFocusRef = useRef(onTerminalFocus);
+  onTerminalFocusRef.current = onTerminalFocus;
+  const onReconnectStateChangeRef = useRef(onReconnectStateChange);
+  onReconnectStateChangeRef.current = onReconnectStateChange;
+  const onConnectionStateChangeRef = useRef(onConnectionStateChange);
+  onConnectionStateChangeRef.current = onConnectionStateChange;
 
-  // Track current search term and options so findNext/findPrevious can reuse them
-  const lastSearchTermRef = useRef("");
-  const lastSearchOptsRef = useRef<Record<string, unknown>>({});
+  // Mirror connection state to parent
+  useEffect(() => {
+    if (connectionState === "connected") {
+      hasConnectedRef.current = true;
+    }
+    onConnectionStateChangeRef.current?.(connectionState, hasConnectedRef.current);
+  }, [connectionState]);
+
+  const clearReconnectState = useCallback(() => {
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+    reconnectAttemptRef.current = 0;
+    onReconnectStateChangeRef.current?.(null);
+  }, []);
 
   const handleWsOutput = useCallback(() => {
     onOutputRef.current?.();
@@ -173,110 +213,139 @@ export const TerminalInstance = forwardRef<
     }
   }, []);
 
+  // Connect the WebSocket. Caller has already ensured the wterm instance is
+  // mounted and (optionally) has replayed scrollback.
+  const startWs = useCallback(() => {
+    wsCleanupRef.current?.();
+    const sink: TerminalSink = {
+      write: (data) => writeRef.current(data),
+      getSize: () => sizeRef.current,
+    };
+    const cleanup = connectWebSocket(
+      workspaceId,
+      sessionName,
+      sink,
+      wsRef,
+      setConnectionState,
+      () => {
+        reconnectResolveRef.current?.(true);
+        reconnectResolveRef.current = null;
+        reconnectCancelRef.current?.();
+        reconnectCancelRef.current = null;
+        clearReconnectState();
+      },
+      () => {
+        reconnectResolveRef.current?.(false);
+        reconnectResolveRef.current = null;
+        if (beingKilledRef.current) return;
+        if (reconnectCancelRef.current) return;
+        onReconnectStateChangeRef.current?.("reconnecting");
+        // Wall-clock timeout only for mid-session disconnects; initial
+        // connect uses its own tight backoff window.
+        if (hasConnectedRef.current && !reconnectTimeoutRef.current) {
+          reconnectTimeoutRef.current = setTimeout(() => {
+            reconnectTimeoutRef.current = null;
+            reconnectCancelRef.current?.();
+            reconnectCancelRef.current = null;
+            onReconnectStateChangeRef.current?.("expired");
+            setConnectionState("error");
+          }, RECONNECT_TIMEOUT_MS);
+        }
+        const reconnectConfig = hasConnectedRef.current
+          ? undefined
+          : INITIAL_CONNECT_CONFIG;
+        const cancel = startAutoReconnect(
+          () =>
+            new Promise<boolean>((resolve) => {
+              reconnectResolveRef.current = resolve;
+              // Force wterm remount — handleReady will fetch scrollback + restart WS.
+              setMountKey((k) => k + 1);
+            }),
+          (state: ReconnectState) => {
+            reconnectAttemptRef.current = state.attempt;
+            if (state.gaveUp) {
+              clearReconnectState();
+              onReconnectStateChangeRef.current?.("expired");
+              setConnectionState("error");
+            }
+          },
+          reconnectConfig,
+        );
+        reconnectCancelRef.current = cancel;
+      },
+      handleWsOutput,
+      (reason) => onBackendCrashRef.current?.(reason),
+      agentName,
+      () => {
+        beingKilledRef.current = true;
+      },
+    );
+    wsCleanupRef.current = cleanup;
+  }, [
+    workspaceId,
+    sessionName,
+    agentName,
+    clearReconnectState,
+    handleWsOutput,
+  ]);
+
+  // wterm is mounted (or remounted). Replay scrollback if reconnecting,
+  // then start the WS.
+  const handleReady = useCallback(() => {
+    interceptorRef.current?.dispose();
+    interceptorRef.current = new SlashCommandInterceptor(
+      (data) => writeRef.current(data),
+      workspaceId,
+    );
+
+    // Refocus if user was previously inside the terminal. Remount on
+    // reconnect discards focus by default.
+    const wasFocused =
+      wrapperRef.current !== null &&
+      wrapperRef.current.contains(document.activeElement);
+    if (wasFocused) wtermFocus();
+
+    if (hasConnectedRef.current) {
+      // Reconnect path: fetch and replay scrollback into the fresh grid.
+      fetchScrollback(workspaceId, sessionName)
+        .then(({ content }) => {
+          if (content) writeRef.current(content);
+        })
+        .catch(() => {})
+        .finally(() => startWs());
+    } else {
+      startWs();
+    }
+  }, [workspaceId, sessionName, startWs, wtermFocus]);
+
+  const handleData = useCallback((data: string) => {
+    const ws = wsRef.current;
+    const sendToWs = (d: string) => {
+      if (ws?.readyState === WebSocket.OPEN) ws.send(d);
+    };
+    const interceptor = interceptorRef.current;
+    if (interceptor) {
+      interceptor.handleData(data, sendToWs);
+    } else {
+      sendToWs(data);
+    }
+  }, []);
+
+  const handleResize = useCallback((cols: number, rows: number) => {
+    sizeRef.current = { cols, rows };
+    const ws = wsRef.current;
+    if (ws?.readyState === WebSocket.OPEN) {
+      ws.send(encodeResize(cols, rows));
+    }
+  }, []);
+
   const handleScrollToBottom = useCallback(() => {
-    terminalRef.current?.scrollToBottom();
+    const el = wrapperRef.current?.querySelector(".wterm") as HTMLElement | null;
+    if (el) el.scrollTop = el.scrollHeight;
     setShowNewOutputPill(false);
   }, []);
 
-  const [connectionState, setConnectionState] =
-    useState<ConnectionState>("disconnected");
-  const hasConnectedRef = useRef(false);
-
-  // Mirror connection state to parent via callback
-  const connectionStateRef = useRef(connectionState);
-  useEffect(() => {
-    connectionStateRef.current = connectionState;
-    if (connectionState === "connected") {
-      hasConnectedRef.current = true;
-    }
-    onConnectionStateChange?.(connectionState, hasConnectedRef.current);
-  }, [connectionState, onConnectionStateChange]);
-
-  const onReconnectStateChangeRef = useRef(onReconnectStateChange);
-  onReconnectStateChangeRef.current = onReconnectStateChange;
-
-  const clearReconnectState = useCallback(() => {
-    if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
-    reconnectTimeoutRef.current = null;
-    reconnectAttemptRef.current = 0;
-    onReconnectStateChangeRef.current?.(null);
-  }, []);
-
-  // Reconnect handler — fetches scrollback before re-establishing WebSocket
-  const handleReconnect = useCallback(() => {
-    const terminal = terminalRef.current;
-    const fitAddon = fitAddonRef.current;
-    if (!terminal || !fitAddon) return;
-
-    reconnectResolveRef.current = null;
-    clearReconnectState();
-    reconnectCancelRef.current?.();
-    reconnectCancelRef.current = null;
-    wsCleanupRef.current?.();
-
-    const doWsConnect = () => {
-      const cleanupWs = connectWebSocket(
-        workspaceId,
-        sessionName,
-        terminal,
-        fitAddon,
-        wsRef,
-        setConnectionState,
-        () => {
-          reconnectCancelRef.current?.();
-          reconnectCancelRef.current = null;
-          clearReconnectState();
-        },
-        () => {
-          if (beingKilledRef.current) return; // user closed tab — don't reconnect
-          if (reconnectCancelRef.current) return;
-          const reconnectConfig = hasConnectedRef.current
-            ? undefined
-            : INITIAL_CONNECT_CONFIG;
-          const cancel = startAutoReconnect(
-            () => {
-              handleReconnect();
-              return false;
-            },
-            (state: ReconnectState) => {
-              reconnectAttemptRef.current = state.attempt;
-              if (state.gaveUp) {
-                clearReconnectState();
-                onReconnectStateChangeRef.current?.("expired");
-                setConnectionState("error");
-              }
-            },
-            reconnectConfig,
-          );
-          reconnectCancelRef.current = cancel;
-        },
-        handleWsOutput,
-        (reason: string) => onBackendCrashRef.current?.(reason),
-        (data, sendToWs) => interceptorRef.current?.handleData(data, sendToWs),
-        agentName,
-        () => {
-          beingKilledRef.current = true;
-        }, // onSessionKilled (code 4002)
-      );
-      wsCleanupRef.current = cleanupWs;
-    };
-
-    if (hasConnectedRef.current) {
-      fetchScrollback(workspaceId, sessionName)
-        .then(({ content }) => {
-          if (content) {
-            terminal.clear();
-            terminal.write(content);
-          }
-        })
-        .catch(() => {})
-        .finally(() => doWsConnect());
-    } else {
-      doWsConnect();
-    }
-  }, [sessionName, clearReconnectState, handleWsOutput]);
-
-  // Expose search methods and reconnect via imperative handle
+  // Imperative handle
   useImperativeHandle(
     ref,
     () => ({
@@ -291,7 +360,7 @@ export const TerminalInstance = forwardRef<
             ws.readyState === WebSocket.CONNECTING)
         ) {
           return new Promise<void>((resolve) => {
-            const timeout = setTimeout(resolve, 2000); // fallback if close hangs
+            const timeout = setTimeout(resolve, 2000);
             ws.addEventListener(
               "close",
               () => {
@@ -308,504 +377,204 @@ export const TerminalInstance = forwardRef<
         wsCleanupRef.current = null;
         return Promise.resolve();
       },
-      search(term, options) {
-        const addon = searchAddonRef.current;
-        if (!addon) return false;
-        lastSearchTermRef.current = term;
-        const opts: Record<string, unknown> = {};
-        if (options?.caseSensitive != null)
-          opts.caseSensitive = options.caseSensitive;
-        if (options?.wholeWord != null) opts.wholeWord = options.wholeWord;
-        if (options?.regex != null) opts.regex = options.regex;
-        lastSearchOptsRef.current = opts;
-        if (!term) {
-          addon.clearDecorations();
-          onSearchResultChangeRef.current?.(null);
-          return false;
-        }
-        return addon.findNext(term, {
-          ...opts,
-          decorations: SEARCH_DECORATIONS,
-        });
-      },
-      findNext() {
-        const addon = searchAddonRef.current;
-        if (!addon) return false;
-        const term = lastSearchTermRef.current;
-        if (!term) return false;
-        return addon.findNext(term, {
-          ...lastSearchOptsRef.current,
-          decorations: SEARCH_DECORATIONS,
-        });
-      },
-      findPrevious() {
-        const addon = searchAddonRef.current;
-        if (!addon) return false;
-        const term = lastSearchTermRef.current;
-        if (!term) return false;
-        return addon.findPrevious(term, {
-          ...lastSearchOptsRef.current,
-          decorations: SEARCH_DECORATIONS,
-        });
-      },
-      clearSearch() {
-        searchAddonRef.current?.clearDecorations();
-        lastSearchTermRef.current = "";
-        lastSearchOptsRef.current = {};
-        onSearchResultChangeRef.current?.(null);
-      },
       reconnect() {
         reconnectCancelRef.current?.();
         reconnectCancelRef.current = null;
         wsCleanupRef.current?.();
         wsCleanupRef.current = null;
-        handleReconnect();
+        setMountKey((k) => k + 1);
       },
       pasteText(text: string) {
-        terminalRef.current?.paste(text);
+        const ws = wsRef.current;
+        if (ws?.readyState === WebSocket.OPEN) ws.send(text);
       },
       getSelection() {
-        const sel = terminalRef.current?.getSelection() ?? "";
-        return stripAnsi(sel);
+        return stripAnsi(wrapperSelectionText(wrapperRef.current));
       },
       hasSelection() {
-        return terminalRef.current?.hasSelection() ?? false;
+        return wrapperSelectionText(wrapperRef.current).length > 0;
       },
       selectAll() {
-        terminalRef.current?.selectAll();
+        const el = wrapperRef.current;
+        if (!el) return;
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        const sel = window.getSelection();
+        sel?.removeAllRanges();
+        sel?.addRange(range);
       },
       focus() {
-        terminalRef.current?.focus();
+        wtermFocus();
       },
     }),
-    [handleReconnect],
+    [wtermFocus],
   );
 
-  // Stable refs for callbacks used inside terminal lifecycle effect
-  const onCopyNotifyRef = useRef(onCopyNotify);
-  onCopyNotifyRef.current = onCopyNotify;
-  const onPasteRequestRef = useRef(onPasteRequest);
-  onPasteRequestRef.current = onPasteRequest;
-  const onSearchRequestRef = useRef(onSearchRequest);
-  onSearchRequestRef.current = onSearchRequest;
-  const onContextMenuRef = useRef(onContextMenu);
-  onContextMenuRef.current = onContextMenu;
-  const onTerminalFocusRef = useRef(onTerminalFocus);
-  onTerminalFocusRef.current = onTerminalFocus;
-
-  // Terminal lifecycle: create terminal and connect WebSocket
+  // Copy-on-select — scoped to the wrapper via selection containment check.
   useEffect(() => {
-    const container = termRef.current;
-    if (!container) return;
-
-    let mounted = true;
-
-    const terminal = new Terminal({
-      cursorBlink: true,
-      fontSize,
-      fontFamily,
-      scrollback: 10000,
-      smoothScrollDuration: 120,
-      rightClickSelectsWord: true,
-      theme: getTerminalTheme(),
-    });
-
-    const fitAddon = new FitAddon();
-    const webLinksAddon = new WebLinksAddon();
-    const searchAddon = new SearchAddon();
-
-    terminal.loadAddon(fitAddon);
-    terminal.loadAddon(webLinksAddon);
-    terminal.loadAddon(searchAddon);
-
-    // Try loading WebGL addon — fall back to canvas on failure
-    let webglAddon: WebglAddon | null = null;
-    try {
-      webglAddon = new WebglAddon();
-      webglAddon.onContextLoss(() => {
-        console.warn(
-          "TerminalInstance: WebGL context lost, falling back to canvas renderer",
-        );
-        webglAddon?.dispose();
-        webglAddon = null;
-      });
-      terminal.loadAddon(webglAddon);
-    } catch {
-      // WebGL not available — canvas renderer is the default
-      webglAddon = null;
-    }
-
-    terminalRef.current = terminal;
-    fitAddonRef.current = fitAddon;
-    searchAddonRef.current = searchAddon;
-
-    // Create slash command interceptor for this terminal instance
-    const interceptor = new SlashCommandInterceptor(terminal, workspaceId);
-    interceptorRef.current = interceptor;
-
-    // Forward search result changes (N of M counter)
-    const searchResultDisposable = searchAddon.onDidChangeResults(
-      (e: { resultIndex: number; resultCount: number }) => {
-        onSearchResultChangeRef.current?.(e);
-      },
-    );
-
-    // Clipboard helper: async API with execCommand fallback for HTTP contexts.
-    // Resolves to true if copy succeeded, false otherwise.
-    function writeToClipboard(text: string): Promise<boolean> {
-      if (navigator.clipboard?.writeText) {
-        return navigator.clipboard
-          .writeText(text)
-          .then(() => true)
-          .catch(() => execCommandCopy(text));
-      }
-      return Promise.resolve(execCommandCopy(text));
-    }
-    function execCommandCopy(text: string): boolean {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      try {
-        ta.select();
-        return document.execCommand("copy");
-      } finally {
-        document.body.removeChild(ta);
-      }
-    }
-
-    // Copy-on-select: strip ANSI codes and write clean text to clipboard
-    let copyDebounce: ReturnType<typeof setTimeout> | undefined;
-    let suppressCopyOnSelect = false;
-    const selectionDisposable = terminal.onSelectionChange(() => {
-      if (suppressCopyOnSelect) {
-        suppressCopyOnSelect = false;
+    const handler = () => {
+      if (suppressCopyOnSelectRef.current) {
+        suppressCopyOnSelectRef.current = false;
         return;
       }
-      const text = terminal.getSelection();
+      const text = wrapperSelectionText(wrapperRef.current);
       if (!text) return;
       const clean = stripAnsi(text);
-      clearTimeout(copyDebounce);
-      copyDebounce = setTimeout(() => {
+      if (copyDebounceRef.current) clearTimeout(copyDebounceRef.current);
+      copyDebounceRef.current = setTimeout(() => {
         writeToClipboard(clean).then((ok) => {
           if (ok) onCopyNotifyRef.current?.();
         });
       }, 100);
-    });
+    };
+    document.addEventListener("selectionchange", handler);
+    return () => {
+      document.removeEventListener("selectionchange", handler);
+      if (copyDebounceRef.current) clearTimeout(copyDebounceRef.current);
+    };
+  }, []);
 
-    // Custom key handler for clipboard shortcuts and search
-    terminal.attachCustomKeyEventHandler((e: KeyboardEvent) => {
-      if (e.type !== "keydown") return true;
+  // Wrapper DOM event bindings: keydown (paste + tab shortcuts), focusin,
+  // contextmenu, paste, scroll-tracking.
+  useEffect(() => {
+    const el = wrapperRef.current;
+    if (!el) return;
 
-      // Ctrl+C — smart copy/interrupt
-      if (
-        e.ctrlKey &&
-        !e.shiftKey &&
-        !e.altKey &&
-        !e.metaKey &&
-        e.key === "c"
-      ) {
-        if (terminal.hasSelection()) {
-          clearTimeout(copyDebounce); // cancel pending copy-on-select debounce
-          const clean = stripAnsi(terminal.getSelection());
-          writeToClipboard(clean).then((ok) => {
-            if (ok) onCopyNotifyRef.current?.();
-          });
-          terminal.clearSelection();
-          return false; // suppress SIGINT
-        }
-        return true; // no selection — send SIGINT
-      }
-
-      // Ctrl+V — paste with multi-line check
-      if (
-        e.ctrlKey &&
-        !e.shiftKey &&
-        !e.altKey &&
-        !e.metaKey &&
-        e.key === "v"
-      ) {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const mod = e.ctrlKey || e.metaKey;
+      // Ctrl/Cmd+V — paste with multi-line confirm
+      if (mod && !e.shiftKey && !e.altKey && e.key === "v") {
         if (window.isSecureContext) {
           e.preventDefault();
+          e.stopPropagation();
           onPasteRequestRef.current?.();
-          return false;
         }
-        // Non-secure context (HTTP) — let xterm send \x16 to PTY
-        return true;
+        return;
       }
-
-      // Ctrl+Shift+V — request paste from parent (legacy)
-      if (e.ctrlKey && e.shiftKey && e.key === "V") {
+      // Ctrl/Cmd+Shift+V — legacy paste request
+      if (mod && e.shiftKey && e.key === "V") {
         e.preventDefault();
+        e.stopPropagation();
         onPasteRequestRef.current?.();
-        return false;
+        return;
       }
-
-      // Ctrl+Shift+F — request search from parent
-      if (e.ctrlKey && e.shiftKey && e.key === "F") {
-        e.preventDefault();
-        onSearchRequestRef.current?.();
-        return false;
-      }
-
-      // Cmd/Ctrl+1-9, Cmd/Ctrl+T, Cmd/Ctrl+W — suppress xterm processing
-      // so the events bubble to the document handler in TerminalView
+      // Cmd/Ctrl+T, Cmd/Ctrl+W, Cmd/Ctrl+1-9 — suppress wterm handling so the
+      // document-level handler in TerminalView sees them for tab management.
       if (
-        (e.metaKey || e.ctrlKey) &&
+        mod &&
         !e.shiftKey &&
         !e.altKey &&
-        (e.key === "t" || e.key === "w" || (e.key >= "1" && e.key <= "9"))
+        (e.key === "t" ||
+          e.key === "w" ||
+          (e.key >= "1" && e.key <= "9"))
       ) {
-        return false;
+        e.stopPropagation();
       }
+    };
 
-      return true;
-    });
-
-    terminal.open(container);
-
-    // Focus tracking for split view — fires when user clicks into terminal
-    const textarea = terminal.textarea;
-    const focusHandler = () => onTerminalFocusRef.current?.();
-    textarea?.addEventListener("focus", focusHandler);
-
-    // Right-click context menu — suppress copy-on-select for word selection
     const handleContextMenu = (e: MouseEvent) => {
       e.preventDefault();
-      suppressCopyOnSelect = true;
+      suppressCopyOnSelectRef.current = true;
       onContextMenuRef.current?.({
         x: e.clientX,
         y: e.clientY,
-        hasSelection: terminal.hasSelection(),
+        hasSelection: wrapperSelectionText(el).length > 0,
       });
     };
-    container.addEventListener("contextmenu", handleContextMenu);
 
-    // Capture-phase paste listener for macOS Cmd+V
     const handleBrowserPaste = (e: ClipboardEvent) => {
       e.preventDefault();
       e.stopPropagation();
       onPasteRequestRef.current?.();
     };
-    container.addEventListener("paste", handleBrowserPaste, { capture: true });
 
-    // Track scroll position to show "New output" pill when scrolled up
-    const scrollDisposable = terminal.onScroll(() => {
-      const buffer = terminal.buffer.active;
-      const atBottom = buffer.viewportY >= buffer.baseY - 1;
+    const handleFocusIn = () => {
+      onTerminalFocusRef.current?.();
+    };
+
+    el.addEventListener("keydown", handleKeyDown, { capture: true });
+    el.addEventListener("contextmenu", handleContextMenu);
+    el.addEventListener("paste", handleBrowserPaste, { capture: true });
+    el.addEventListener("focusin", handleFocusIn);
+
+    return () => {
+      el.removeEventListener("keydown", handleKeyDown, { capture: true });
+      el.removeEventListener("contextmenu", handleContextMenu);
+      el.removeEventListener("paste", handleBrowserPaste, { capture: true });
+      el.removeEventListener("focusin", handleFocusIn);
+    };
+  }, []);
+
+  // Scroll tracking for "New output" pill — re-bound after each remount.
+  useEffect(() => {
+    const el = wrapperRef.current?.querySelector(".wterm") as HTMLElement | null;
+    if (!el) return;
+    const handleScroll = () => {
+      const atBottom =
+        el.scrollHeight - el.scrollTop - el.clientHeight < 10;
       isAtBottomRef.current = atBottom;
-      if (atBottom) {
-        setShowNewOutputPill(false);
-      }
-    });
+      if (atBottom) setShowNewOutputPill(false);
+    };
+    el.addEventListener("scroll", handleScroll);
+    return () => el.removeEventListener("scroll", handleScroll);
+  }, [mountKey]);
 
-    // Initial fit — container always has real dimensions (hidden tabs use
-    // visibility:hidden instead of display:none so layout is preserved).
-    fitAddon.fit();
-
-    const RECONNECT_TIMEOUT = 30_000;
-
-    function doConnect(withScrollback = false): void {
-      wsCleanupRef.current?.();
-      const startWs = () => {
-        const cleanup = connectWebSocket(
-          workspaceId,
-          sessionName,
-          terminal,
-          fitAddon,
-          wsRef,
-          setConnectionState,
-          () => {
-            reconnectResolveRef.current?.(true);
-            reconnectResolveRef.current = null;
-            reconnectCancelRef.current?.();
-            reconnectCancelRef.current = null;
-            clearReconnectState();
-          },
-          () => {
-            reconnectResolveRef.current?.(false);
-            reconnectResolveRef.current = null;
-            if (beingKilledRef.current) return; // user closed tab — don't reconnect
-            if (!mounted || reconnectCancelRef.current) return;
-            onReconnectStateChangeRef.current?.("reconnecting");
-            // Only start the wall-clock timeout for mid-session disconnects.
-            // For initial connection failures (501), the tight 3-attempt backoff
-            // is the sole timeout mechanism — no redundant 30s timer.
-            if (hasConnectedRef.current && !reconnectTimeoutRef.current) {
-              reconnectTimeoutRef.current = setTimeout(() => {
-                reconnectTimeoutRef.current = null;
-                reconnectCancelRef.current?.();
-                reconnectCancelRef.current = null;
-                onReconnectStateChangeRef.current?.("expired");
-                setConnectionState("error");
-              }, RECONNECT_TIMEOUT);
-            }
-            const reconnectConfig = hasConnectedRef.current
-              ? undefined
-              : INITIAL_CONNECT_CONFIG;
-            const cancel = startAutoReconnect(
-              () => {
-                if (!mounted) return true;
-                return new Promise<boolean>((resolve) => {
-                  reconnectResolveRef.current = resolve;
-                  doConnect(true);
-                });
-              },
-              (state: ReconnectState) => {
-                reconnectAttemptRef.current = state.attempt;
-                if (state.gaveUp) {
-                  clearReconnectState();
-                  onReconnectStateChangeRef.current?.("expired");
-                  setConnectionState("error");
-                }
-              },
-              reconnectConfig,
-            );
-            reconnectCancelRef.current = cancel;
-          },
-          handleWsOutput,
-          (reason: string) => onBackendCrashRef.current?.(reason),
-          (data, sendToWs) =>
-            interceptorRef.current?.handleData(data, sendToWs),
-          agentName,
-          () => {
-            beingKilledRef.current = true;
-          }, // onSessionKilled (code 4002)
-        );
-        wsCleanupRef.current = cleanup;
-      };
-      if (withScrollback && hasConnectedRef.current) {
-        fetchScrollback(workspaceId, sessionName)
-          .then(({ content }) => {
-            if (mounted && content) {
-              terminal.clear();
-              terminal.write(content);
-            }
-          })
-          .catch(() => {})
-          .finally(() => {
-            if (mounted) startWs();
-          });
-      } else {
-        startWs();
-      }
-    }
-
-    doConnect();
-
-    // Close WebSocket on sign-out to free resources
+  // Sign-out: close WebSocket so a fresh login can reconnect cleanly.
+  useEffect(() => {
     const handleSignOut = () => {
       wsCleanupRef.current?.();
       wsCleanupRef.current = null;
     };
     window.addEventListener("auth-sign-out", handleSignOut);
+    return () => window.removeEventListener("auth-sign-out", handleSignOut);
+  }, []);
 
-    // ResizeObserver with debounce
-    let resizeTimer: ReturnType<typeof setTimeout>;
-    const observer = new ResizeObserver(() => {
-      clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(() => {
-        if (fitAddonRef.current && terminalRef.current) {
-          fitAddonRef.current.fit();
-          const currentWs = wsRef.current;
-          if (currentWs && currentWs.readyState === WebSocket.OPEN) {
-            currentWs.send(
-              encodeResize(terminalRef.current.cols, terminalRef.current.rows),
-            );
-          }
-        }
-      }, 100);
-    });
-    observer.observe(container);
+  // Tab activate — resend current size so tmux notices if we were hidden.
+  useEffect(() => {
+    if (!isActive) return;
+    const ws = wsRef.current;
+    if (ws?.readyState === WebSocket.OPEN) {
+      ws.send(encodeResize(sizeRef.current.cols, sizeRef.current.rows));
+    }
+  }, [isActive]);
 
+  // Cleanup on unmount or sessionName change.
+  useEffect(() => {
     return () => {
-      mounted = false;
-
-      clearTimeout(resizeTimer);
-      clearTimeout(copyDebounce);
-      observer.disconnect();
-      container.removeEventListener("contextmenu", handleContextMenu);
-      container.removeEventListener("paste", handleBrowserPaste, {
-        capture: true,
-      });
-      textarea?.removeEventListener("focus", focusHandler);
-      window.removeEventListener("auth-sign-out", handleSignOut);
-      selectionDisposable.dispose();
-      scrollDisposable.dispose();
-      searchResultDisposable.dispose();
-
       reconnectCancelRef.current?.();
       reconnectCancelRef.current = null;
+      // Settle any pending reconnect promise so startAutoReconnect's .then
+      // chain doesn't strand waiting on a dead fiber.
+      reconnectResolveRef.current?.(false);
       reconnectResolveRef.current = null;
-
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
         reconnectTimeoutRef.current = null;
       }
-
       wsCleanupRef.current?.();
       wsCleanupRef.current = null;
-
       interceptorRef.current?.dispose();
       interceptorRef.current = null;
-
-      webglAddon?.dispose();
-      terminal.dispose();
-      terminalRef.current = null;
-      fitAddonRef.current = null;
-      searchAddonRef.current = null;
-
-      setConnectionState("disconnected");
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fontSize/fontFamily handled by separate sync effect
-  }, [sessionName]);
-
-  // Re-fit when tab becomes active — send the current size to the backend
-  // so tmux adjusts. No layout recalc needed since hidden tabs use
-  // visibility:hidden (container always has correct dimensions).
-  useEffect(() => {
-    if (!isActive) return;
-    if (fitAddonRef.current && terminalRef.current) {
-      fitAddonRef.current.fit();
-      const currentWs = wsRef.current;
-      if (currentWs && currentWs.readyState === WebSocket.OPEN) {
-        currentWs.send(
-          encodeResize(terminalRef.current.cols, terminalRef.current.rows),
-        );
-      }
-    }
-  }, [isActive]);
-
-  // Dynamic font changes without terminal recreation
-  useEffect(() => {
-    const terminal = terminalRef.current;
-    if (!terminal) return;
-    terminal.options.fontSize = fontSize;
-    terminal.options.fontFamily = fontFamily;
-    fitAddonRef.current?.fit();
-  }, [fontSize, fontFamily]);
-
-  // Sync terminal theme when data-theme attribute changes
-  useEffect(() => {
-    const t = terminalRef.current;
-    if (!t) return;
-    const obs = new MutationObserver(() => {
-      t.options.theme = getTerminalTheme();
-    });
-    obs.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["data-theme"],
-    });
-    return () => obs.disconnect();
   }, [sessionName]);
 
   return (
-    <div className={styles.wrapper}>
-      <div
+    <div ref={wrapperRef} className={styles.wrapper}>
+      <Terminal
+        key={mountKey}
+        ref={wtermRef as React.RefObject<React.ComponentRef<typeof Terminal>>}
+        cols={80}
+        rows={24}
+        autoResize
+        cursorBlink
+        onData={handleData}
+        onResize={handleResize}
+        onReady={handleReady}
         className={styles.container}
-        ref={termRef}
-        role="application"
+        style={{
+          ...(fontSize ? { fontSize: `${fontSize}px` } : {}),
+          ...(fontFamily ? { fontFamily } : {}),
+        }}
         data-testid="terminal-instance"
       />
       {showNewOutputPill && (

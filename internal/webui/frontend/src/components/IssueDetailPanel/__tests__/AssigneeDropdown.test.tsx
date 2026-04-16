@@ -46,9 +46,7 @@ vi.mock("@/hooks", () => ({
   LAYER_MODAL: 40,
   LAYER_TERMINAL_PANEL: 30,
   LAYER_AGENT_PANEL: 20,
-  LAYER_ISSUE_PANEL: 10,
-  LAYER_TERMINAL_SEARCH: 5,
-}));
+  LAYER_ISSUE_PANEL: 10,}));
 
 describe("AssigneeDropdown", () => {
   const defaultProps = {

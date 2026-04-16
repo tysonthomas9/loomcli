@@ -1,20 +1,19 @@
 /**
  * LogViewer component.
- * Terminal-style log display using xterm.js for proper ANSI rendering.
+ * Terminal-style streaming log display using wterm for ANSI rendering.
  */
 
-import { FitAddon } from "@xterm/addon-fit";
-import { Terminal } from "@xterm/xterm";
-import { useRef, useEffect, useCallback, useState } from "react";
+import { Terminal, useTerminal } from "@wterm/react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { LogChunk, LogStreamState } from "@/hooks/logTypes";
 
-import "@xterm/xterm/css/xterm.css";
 import styles from "./LogViewer.module.css";
 
-/**
- * Props for the LogViewer component.
- */
+/** Static-mode cap — keeps tmux pipe-pane archives producing scrollback
+ *  regardless of the container height. */
+const STATIC_MAX_ROWS = 30;
+
 export interface LogViewerProps {
   /** Raw log chunks to display */
   chunks: LogChunk[];
@@ -24,7 +23,7 @@ export interface LogViewerProps {
   autoScroll?: boolean;
   /** Callback when auto-scroll preference changes */
   onAutoScrollChange?: (enabled: boolean) => void;
-  /** Whether to show line numbers (kept for backward compat, not used with xterm) */
+  /** Whether to show line numbers (unused — kept for back-compat) */
   showLineNumbers?: boolean;
   /** Additional CSS class name */
   className?: string;
@@ -38,7 +37,7 @@ export interface LogViewerProps {
   onTerminalResize?: (cols: number, rows: number) => void;
   /** Optional callback to forward terminal data to the backend stream */
   onTerminalData?: (data: string) => void;
-  /** Terminal mode: 'interactive' resizes with container, 'static' fixes cols at initial fit. Default: 'interactive' */
+  /** Terminal mode: 'interactive' autosizes; 'static' caps rows for archive replay. */
   mode?: "interactive" | "static";
   /** Callback when user scrolls to the top of the buffer (for loading older content) */
   onScrollToTop?: (() => void) | undefined;
@@ -48,9 +47,6 @@ export interface LogViewerProps {
   hasMoreOlder?: boolean;
 }
 
-/**
- * Get connection status display info.
- */
 function getStatusInfo(state: LogStreamState): {
   label: string;
   color: string;
@@ -77,9 +73,6 @@ function getStatusInfo(state: LogStreamState): {
   }
 }
 
-/**
- * LogViewer displays streaming logs using xterm.js for proper terminal rendering.
- */
 export function LogViewer({
   chunks,
   connectionState,
@@ -96,44 +89,47 @@ export function LogViewer({
   isLoadingMore = false,
   hasMoreOlder = false,
 }: LogViewerProps): JSX.Element {
-  const terminalContainerRef = useRef<HTMLDivElement>(null);
-  const terminalRef = useRef<Terminal | null>(null);
-  const fitAddonRef = useRef<FitAddon | null>(null);
+  const { ref: wtermRef, write, resize } = useTerminal();
+  const writeRef = useRef(write);
+  writeRef.current = write;
+  const resizeRef = useRef(resize);
+  resizeRef.current = resize;
+
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  const [mountKey, setMountKey] = useState(0);
+  const [isReady, setIsReady] = useState(false);
+
   const lastWrittenIndexRef = useRef(0);
   const lastResetVersionRef = useRef(resetVersion);
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(autoScrollProp);
   const autoScrollRef = useRef(autoScrollEnabled);
-  useEffect(() => {
-    autoScrollRef.current = autoScrollEnabled;
-  }, [autoScrollEnabled]);
+  autoScrollRef.current = autoScrollEnabled;
   const modeRef = useRef(mode);
-  useEffect(() => {
-    modeRef.current = mode;
-  }, [mode]);
+  modeRef.current = mode;
 
-  // Refs for scroll-to-top detection (stable across renders)
+  // Scroll-to-top detection refs
   const scrollToTopTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const onScrollToTopRef = useRef(onScrollToTop);
-  useEffect(() => {
-    onScrollToTopRef.current = onScrollToTop;
-  }, [onScrollToTop]);
+  onScrollToTopRef.current = onScrollToTop;
   const hasMoreOlderRef = useRef(hasMoreOlder);
-  useEffect(() => {
-    hasMoreOlderRef.current = hasMoreOlder;
-  }, [hasMoreOlder]);
+  hasMoreOlderRef.current = hasMoreOlder;
   const isLoadingMoreRef = useRef(isLoadingMore);
-  useEffect(() => {
-    isLoadingMoreRef.current = isLoadingMore;
-  }, [isLoadingMore]);
+  isLoadingMoreRef.current = isLoadingMore;
 
-  // Track previous buffer length for scroll position restoration after prepend
-  const prevBufferLengthRef = useRef(0);
-  const prevViewportYRef = useRef(0);
-  // Suppress scroll-to-top detection immediately after a prepend reset to prevent re-trigger loops
+  // Track scroll geometry for prepend-restoration
+  const prevScrollHeightRef = useRef(0);
+  const prevScrollTopRef = useRef(0);
   const suppressTopDetectionRef = useRef(false);
 
-  // Re-sync auto-scroll only when the prop value actually changes (e.g. archive → tmux transition).
-  // Do NOT sync on mount — useState(autoScrollProp) handles the initial value.
+  const onTerminalDataRef = useRef(onTerminalData);
+  onTerminalDataRef.current = onTerminalData;
+  const onTerminalResizeRef = useRef(onTerminalResize);
+  onTerminalResizeRef.current = onTerminalResize;
+  const onAutoScrollChangeRef = useRef(onAutoScrollChange);
+  onAutoScrollChangeRef.current = onAutoScrollChange;
+
+  // Re-sync auto-scroll when the prop value changes.
   const prevAutoScrollPropRef = useRef(autoScrollProp);
   useEffect(() => {
     if (autoScrollProp !== prevAutoScrollPropRef.current) {
@@ -142,231 +138,124 @@ export function LogViewer({
     }
   }, [autoScrollProp]);
 
-  // Create terminal on mount, destroy on unmount
+  // Find the wterm element after mount/remount so we can attach scroll tracking.
+  const getScrollEl = useCallback((): HTMLElement | null => {
+    return wrapperRef.current?.querySelector(".wterm") as HTMLElement | null;
+  }, []);
+
+  // Scroll listener for auto-scroll toggle + scroll-to-top infinite-loading trigger.
   useEffect(() => {
-    const container = terminalContainerRef.current;
-    if (!container) return;
+    if (!isReady) return;
+    const el = getScrollEl();
+    if (!el) return;
 
-    const terminal = new Terminal({
-      disableStdin: true,
-      fontSize: 14,
-      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-      scrollback: 50000,
-      cursorBlink: false,
-      cursorStyle: "bar",
-      theme: {
-        background: "#1e1e1e",
-        foreground: "#d4d4d4",
-      },
-    });
-
-    const fitAddon = new FitAddon();
-    terminal.loadAddon(fitAddon);
-
-    terminalRef.current = terminal;
-    fitAddonRef.current = fitAddon;
-
-    terminal.open(container);
-
-    // In static (archive) mode, cap rows so cursor-positioning sequences in
-    // tmux pipe-pane output always produce scrollback regardless of viewport height.
-    const STATIC_MAX_ROWS = 30;
-
-    const runFit = () => {
-      if (!fitAddonRef.current || !terminalRef.current) return;
-      fitAddonRef.current.fit();
-      if (
-        modeRef.current === "static" &&
-        terminalRef.current.rows > STATIC_MAX_ROWS
-      ) {
-        terminalRef.current.resize(terminalRef.current.cols, STATIC_MAX_ROWS);
-      }
-      onTerminalResize?.(terminalRef.current.cols, terminalRef.current.rows);
-    };
-
-    // Fit once immediately, then again after layout settles (panel slide-in/resize).
-    runFit();
-    const initialFitFrame = requestAnimationFrame(runFit);
-    const initialFitTimeoutA = setTimeout(runFit, 180);
-    const initialFitTimeoutB = setTimeout(runFit, 360);
-    const initialFitTimeoutC = setTimeout(runFit, 720);
-
-    // Detect user scroll for auto-scroll toggle and scroll-to-top detection
-    const scrollDisposable = terminal.onScroll(() => {
-      if (!terminalRef.current) return;
-      const term = terminalRef.current;
-      const buffer = term.buffer.active;
-      const isAtBottom = buffer.viewportY >= buffer.baseY;
-
-      if (!isAtBottom) {
+    const handleScroll = () => {
+      const atBottom =
+        el.scrollHeight - el.scrollTop - el.clientHeight < 4;
+      if (!atBottom && autoScrollRef.current) {
         setAutoScrollEnabled(false);
-        onAutoScrollChange?.(false);
+        onAutoScrollChangeRef.current?.(false);
       }
-
-      // Scroll-to-top detection for infinite scroll
-      const isAtTop = buffer.viewportY === 0;
+      const atTop = el.scrollTop === 0;
       if (
-        isAtTop &&
+        atTop &&
         hasMoreOlderRef.current &&
         !isLoadingMoreRef.current &&
         !suppressTopDetectionRef.current
       ) {
-        clearTimeout(scrollToTopTimerRef.current);
+        if (scrollToTopTimerRef.current)
+          clearTimeout(scrollToTopTimerRef.current);
         scrollToTopTimerRef.current = setTimeout(() => {
           onScrollToTopRef.current?.();
         }, 300);
       }
-    });
-
-    // ResizeObserver for dynamic sizing (skipped in static mode to prevent re-wrapping)
-    let resizeTimer: ReturnType<typeof setTimeout>;
-    const observer = new ResizeObserver(() => {
-      if (modeRef.current === "static") return;
-      clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(() => {
-        runFit();
-      }, 100);
-    });
-    observer.observe(container);
-
-    // Reset write index since terminal is fresh
-    lastWrittenIndexRef.current = 0;
-
-    return () => {
-      cancelAnimationFrame(initialFitFrame);
-      clearTimeout(initialFitTimeoutA);
-      clearTimeout(initialFitTimeoutB);
-      clearTimeout(initialFitTimeoutC);
-      clearTimeout(resizeTimer);
-      clearTimeout(scrollToTopTimerRef.current);
-      observer.disconnect();
-      scrollDisposable.dispose();
-      terminal.dispose();
-      terminalRef.current = null;
-      fitAddonRef.current = null;
-      lastWrittenIndexRef.current = 0;
     };
-    // onAutoScrollChange/onTerminalResize/onTerminalData excluded from deps — terminal is created once.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
+    el.addEventListener("scroll", handleScroll);
+    return () => el.removeEventListener("scroll", handleScroll);
+  }, [isReady, mountKey, getScrollEl]);
+
+  // Static-mode row cap — when the wterm reports a resize above STATIC_MAX_ROWS,
+  // force rows back down so archive content becomes scrollback.
+  const handleResize = useCallback((cols: number, rows: number) => {
+    let effectiveRows = rows;
+    if (modeRef.current === "static" && rows > STATIC_MAX_ROWS) {
+      effectiveRows = STATIC_MAX_ROWS;
+      resizeRef.current(cols, STATIC_MAX_ROWS);
+    }
+    onTerminalResizeRef.current?.(cols, effectiveRows);
   }, []);
 
-  // Dynamic stdin & input handler — registers/unregisters onData listener when
-  // onTerminalData changes (e.g. loading → tmux transition). The terminal is
-  // created once with disableStdin:true; this effect enables input when needed.
+  const handleReady = useCallback(() => {
+    setIsReady(true);
+    lastWrittenIndexRef.current = 0;
+  }, []);
+
+  const handleData = useCallback((data: string) => {
+    onTerminalDataRef.current?.(data);
+  }, []);
+
+  // Write new chunks to terminal incrementally; handle reset / buffer-replace
+  // by forcing a remount so wterm's grid starts fresh.
   useEffect(() => {
-    const terminal = terminalRef.current;
-    if (!terminal) return;
+    if (!isReady) return;
+    const el = getScrollEl();
+    if (!el) return;
 
-    terminal.options.disableStdin = !onTerminalData;
+    const isReset =
+      resetVersion !== lastResetVersionRef.current ||
+      chunks.length < lastWrittenIndexRef.current;
 
-    if (onTerminalData) {
-      const disposable = terminal.onData((data: string) =>
-        onTerminalData(data),
-      );
-      return () => {
-        disposable.dispose();
-      };
-    }
-  }, [onTerminalData]);
-
-  // Refit when stream resets/reconnects to keep wrapping in sync with panel layout changes.
-  // Skip in static mode — archive content should keep its initial column width.
-  useEffect(() => {
-    if (modeRef.current === "static") return;
-    const fitAddon = fitAddonRef.current;
-    const terminal = terminalRef.current;
-    if (!fitAddon || !terminal) return;
-
-    const runFit = () => {
-      fitAddon.fit();
-      onTerminalResize?.(terminal.cols, terminal.rows);
-    };
-
-    const frame = requestAnimationFrame(runFit);
-    const timeout = setTimeout(runFit, 80);
-    return () => {
-      cancelAnimationFrame(frame);
-      clearTimeout(timeout);
-    };
-  }, [connectionState, onTerminalResize, resetVersion]);
-
-  // Write new chunks to terminal incrementally
-  useEffect(() => {
-    const terminal = terminalRef.current;
-    if (!terminal) return;
-
-    if (resetVersion !== lastResetVersionRef.current) {
-      // Capture previous buffer state before reset (for scroll position restoration)
-      prevBufferLengthRef.current = terminal.buffer.active.length;
-      prevViewportYRef.current = terminal.buffer.active.viewportY;
+    if (isReset) {
+      prevScrollHeightRef.current = el.scrollHeight;
+      prevScrollTopRef.current = el.scrollTop;
       suppressTopDetectionRef.current = true;
-      terminal.reset();
-      lastWrittenIndexRef.current = 0;
       lastResetVersionRef.current = resetVersion;
-    }
-
-    // Stream was reset by replacing buffered chunks
-    if (chunks.length < lastWrittenIndexRef.current) {
-      prevBufferLengthRef.current = terminal.buffer.active.length;
-      prevViewportYRef.current = terminal.buffer.active.viewportY;
-      suppressTopDetectionRef.current = true;
-      terminal.reset();
       lastWrittenIndexRef.current = 0;
+      setIsReady(false);
+      setMountKey((k) => k + 1);
+      return;
     }
 
-    // Finalize scroll position after xterm processes all writes
-    const finalize = () => {
-      if (autoScrollRef.current) {
-        terminal.scrollToBottom();
-      } else if (prevBufferLengthRef.current > 0) {
-        // Content was prepended — restore scroll position so the view doesn't jump
-        const newBufferLength = terminal.buffer.active.length;
-        const addedLines = newBufferLength - prevBufferLengthRef.current;
-        if (addedLines > 0) {
-          const targetViewportY = Math.max(
-            0,
-            Math.min(
-              prevViewportYRef.current + addedLines,
-              terminal.buffer.active.baseY,
-            ),
-          );
-          terminal.scrollToLine(targetViewportY);
-        }
-        prevBufferLengthRef.current = 0;
-        prevViewportYRef.current = 0;
-      }
-      suppressTopDetectionRef.current = false;
-    };
-
-    // Write only new chunks, deferring finalization to the last write callback
     const newChunks = chunks.slice(lastWrittenIndexRef.current);
     lastWrittenIndexRef.current = chunks.length;
 
-    if (newChunks.length === 0) {
-      finalize();
-    } else {
-      for (let i = 0; i < newChunks.length; i++) {
-        const logChunk = newChunks[i];
-        if (!logChunk) continue;
-        if (i === newChunks.length - 1) {
-          // Final chunk — restore after xterm processes it
-          terminal.write(logChunk.chunk, finalize);
-        } else {
-          terminal.write(logChunk.chunk);
-        }
-      }
+    for (const logChunk of newChunks) {
+      if (logChunk) writeRef.current(logChunk.chunk);
     }
-  }, [chunks, resetVersion]);
 
-  // Re-enable auto-scroll
+    // Finalize scroll position. Double-RAF: wterm commits its DOM on its own
+    // RAF, so we must wait a full frame past the write to measure height.
+    const afterWtermPaint = (fn: () => void) =>
+      requestAnimationFrame(() => requestAnimationFrame(fn));
+
+    if (autoScrollRef.current) {
+      afterWtermPaint(() => {
+        const scrollEl = getScrollEl();
+        if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
+      });
+    } else if (prevScrollHeightRef.current > 0) {
+      // Prepended content — restore visual position so the view doesn't jump.
+      afterWtermPaint(() => {
+        const scrollEl = getScrollEl();
+        if (!scrollEl) return;
+        const added = scrollEl.scrollHeight - prevScrollHeightRef.current;
+        if (added > 0) {
+          scrollEl.scrollTop = prevScrollTopRef.current + added;
+        }
+        prevScrollHeightRef.current = 0;
+        prevScrollTopRef.current = 0;
+      });
+    }
+    suppressTopDetectionRef.current = false;
+  }, [chunks, resetVersion, isReady, getScrollEl]);
+
   const handleScrollToBottom = useCallback(() => {
     setAutoScrollEnabled(true);
-    onAutoScrollChange?.(true);
-
-    if (terminalRef.current) {
-      terminalRef.current.scrollToBottom();
-    }
-  }, [onAutoScrollChange]);
+    onAutoScrollChangeRef.current?.(true);
+    const el = getScrollEl();
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [getScrollEl]);
 
   const statusInfo = getStatusInfo(connectionState);
   const isPulsing =
@@ -376,13 +265,14 @@ export function LogViewer({
     .filter(Boolean)
     .join(" ");
 
+  const isStatic = mode === "static";
+
   return (
     <div
       className={containerClassName}
       style={{ height }}
       data-testid="log-viewer"
     >
-      {/* Header with status and controls */}
       <div className={styles.header}>
         <div className={styles.statusContainer}>
           <span
@@ -417,7 +307,6 @@ export function LogViewer({
         </div>
       </div>
 
-      {/* Loading older logs banner (always mounted to avoid terminal height shifts) */}
       <div
         className={styles.loadingBanner}
         data-visible={isLoadingMore ? "true" : "false"}
@@ -429,19 +318,29 @@ export function LogViewer({
         Loading older logs...
       </div>
 
-      {/* Error banner */}
       {error && (
         <div className={styles.errorBanner} role="alert">
           {error}
         </div>
       )}
 
-      {/* Terminal container for xterm.js */}
       <div
-        ref={terminalContainerRef}
+        ref={wrapperRef}
         className={styles.terminalContainer}
         data-testid="terminal-container"
-      />
+      >
+        <Terminal
+          key={mountKey}
+          ref={wtermRef as React.RefObject<React.ComponentRef<typeof Terminal>>}
+          cols={80}
+          rows={isStatic ? STATIC_MAX_ROWS : 24}
+          autoResize={!isStatic}
+          cursorBlink={false}
+          {...(onTerminalData ? { onData: handleData } : {})}
+          onResize={handleResize}
+          onReady={handleReady}
+        />
+      </div>
     </div>
   );
 }

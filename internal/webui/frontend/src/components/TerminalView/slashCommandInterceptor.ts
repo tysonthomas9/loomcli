@@ -10,13 +10,13 @@
  * immediately with zero overhead.
  */
 
-import type { Terminal } from "@xterm/xterm";
-
 import {
   COMMAND_REGISTRY,
   formatSystemMessage,
   parseSlashCommand,
 } from "./slashCommands";
+
+export type WriteFn = (data: string) => void;
 
 export class SlashCommandInterceptor {
   private buffer = "";
@@ -24,17 +24,17 @@ export class SlashCommandInterceptor {
   private executing = false;
   private disposed = false;
   private escapeSeqRemaining = 0;
-  private terminal: Terminal;
+  private write: WriteFn;
   private workspaceId: string;
 
-  constructor(terminal: Terminal, workspaceId: string) {
-    this.terminal = terminal;
+  constructor(write: WriteFn, workspaceId: string) {
+    this.write = write;
     this.workspaceId = workspaceId;
   }
 
   /**
    * Handle incoming terminal data. Called from the onInput callback.
-   * @param data - Raw input data from xterm onData
+   * @param data - Raw input data from the terminal's onData
    * @param sendToWs - Function to send data to the WebSocket
    */
   handleData(data: string, sendToWs: (data: string) => void): void {
@@ -90,7 +90,7 @@ export class SlashCommandInterceptor {
 
     // Ctrl+C — cancel command mode
     if (ch === "\x03") {
-      this.terminal.write("^C\r\n");
+      this.write("^C\r\n");
       this.exitCommandMode();
       return;
     }
@@ -100,7 +100,7 @@ export class SlashCommandInterceptor {
       if (this.buffer.length > 0) {
         this.buffer = this.buffer.slice(0, -1);
         // Erase character on screen
-        this.terminal.write("\b \b");
+        this.write("\b \b");
         // If we backspaced past everything, exit command mode
         if (this.buffer.length === 0) {
           this.exitCommandMode();
@@ -111,14 +111,14 @@ export class SlashCommandInterceptor {
 
     // Enter — execute command
     if (ch === "\r" || ch === "\n") {
-      this.terminal.write("\r\n");
+      this.write("\r\n");
       this.executeCommand(sendToWs);
       return;
     }
 
     // Printable character — buffer and echo
     this.buffer += ch;
-    this.terminal.write(ch);
+    this.write(ch);
   }
 
   private async executeCommand(
@@ -133,7 +133,7 @@ export class SlashCommandInterceptor {
       if (!parsed) {
         // Should not happen (buffer starts with '/'), but handle gracefully
         if (!this.disposed) {
-          this.terminal.write(
+          this.write(
             formatSystemMessage("Invalid command.", "error") + "\r\n",
           );
         }
@@ -141,7 +141,7 @@ export class SlashCommandInterceptor {
         const cmd = COMMAND_REGISTRY.get(parsed.name);
         if (!cmd) {
           if (!this.disposed) {
-            this.terminal.write(
+            this.write(
               formatSystemMessage(
                 `Unknown command '/${parsed.name}'. Type /help for available commands.`,
                 "error",
@@ -152,12 +152,12 @@ export class SlashCommandInterceptor {
           try {
             const result = await cmd.execute(parsed.args, this.workspaceId);
             if (!this.disposed) {
-              this.terminal.write(result + "\r\n");
+              this.write(result + "\r\n");
             }
           } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : "Command failed";
             if (!this.disposed) {
-              this.terminal.write(formatSystemMessage(msg, "error") + "\r\n");
+              this.write(formatSystemMessage(msg, "error") + "\r\n");
             }
           }
         }
