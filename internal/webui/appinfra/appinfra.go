@@ -93,7 +93,7 @@ type HookConfig struct {
 	MultiPool *daemon.MultiPool
 	PoolSize  int
 	MultiSub  *subscription.MultiWorkspaceSubscriber
-	TermMgr   *terminal.TerminalManager
+	TermMgr   *terminal.AgentTmuxManager
 	FleetReg  *fleet.StoreRegistry
 	FleetURL  string
 	FleetWS   string

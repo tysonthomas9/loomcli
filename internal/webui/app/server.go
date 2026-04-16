@@ -72,8 +72,9 @@ type Server struct {
 	initialWorkspaceID string
 
 	// Terminal
-	termMgr  *terminal.TerminalManager // nil if tmux unavailable
-	termAuth *appstores.TerminalAuth   // nil if termMgr is nil
+	ptyMgr       *terminal.PTYManager       // main web terminal (PTY-backed)
+	agentTmuxMgr *terminal.AgentTmuxManager // agent-view only; nil if tmux unavailable
+	termAuth     *appstores.TerminalAuth    // one-time token issuer (nil disables auth)
 
 	// SSE token exchange (external auth mode only)
 	sseTokens *appstores.TokenStore // nil if ExtAuthURL is empty
@@ -305,12 +306,19 @@ func (app *Server) run(ctx context.Context) error { //nolint:funlen // server li
 		app.sseTokens.Stop()
 	}
 
-	// Stop terminal manager (kill tmux sessions and close PTYs)
-	if app.termMgr != nil {
-		if err := app.termMgr.Shutdown(); err != nil {
-			logger.Warn("error shutting down terminal manager", "component", "terminal", "err", err)
+	// Stop terminal managers (close PTYs; detach agent-view tmux attaches)
+	if app.ptyMgr != nil {
+		if err := app.ptyMgr.Shutdown(); err != nil {
+			logger.Warn("error shutting down pty manager", "component", "terminal", "err", err)
 		} else {
-			logger.Info("terminal manager stopped", "component", "terminal")
+			logger.Info("pty manager stopped", "component", "terminal")
+		}
+	}
+	if app.agentTmuxMgr != nil {
+		if err := app.agentTmuxMgr.Shutdown(); err != nil {
+			logger.Warn("error shutting down agent tmux manager", "component", "terminal", "err", err)
+		} else {
+			logger.Info("agent tmux manager stopped", "component", "terminal")
 		}
 	}
 

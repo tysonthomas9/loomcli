@@ -17,14 +17,14 @@ var _ service.AgentService = (*agentServiceImpl)(nil)
 // agentServiceImpl is the concrete implementation of AgentService.
 type agentServiceImpl struct {
 	gitOps   ops.GitOps
-	termMgr  *terminal.TerminalManager
+	termMgr  *terminal.AgentTmuxManager
 	termAuth *realtime.TerminalAuth
 }
 
 // NewAgentService creates a new AgentService implementation.
-// gitOps must be non-nil. termMgr and termAuth may be nil (methods
-// that require them return service.ErrUnavailable).
-func NewAgentService(gitOps ops.GitOps, termMgr *terminal.TerminalManager, termAuth *realtime.TerminalAuth) service.AgentService {
+// gitOps must be non-nil. termMgr (AgentTmuxManager) and termAuth may be nil;
+// methods that require them return service.ErrUnavailable.
+func NewAgentService(gitOps ops.GitOps, termMgr *terminal.AgentTmuxManager, termAuth *realtime.TerminalAuth) service.AgentService {
 	return &agentServiceImpl{
 		gitOps:   gitOps,
 		termMgr:  termMgr,

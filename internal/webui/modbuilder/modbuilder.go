@@ -31,11 +31,14 @@ func NewIssueModules(issueSvc service.IssueService, sessSvc service.SessionServi
 	}
 }
 
-// TerminalModuleDeps holds dependencies for terminal modules.
+// TerminalModuleDeps holds dependencies for the (now tmux-free) terminal
+// modules. PTYMgr drives the main terminal WS; AgentTmuxMgr is kept only for
+// the live agent-view WS, which still reads auto-mode tmux sessions.
 type TerminalModuleDeps struct {
 	TermSvc      service.TerminalService
 	AgentSvc     service.AgentService
-	TermMgr      *terminal.TerminalManager
+	PTYMgr       *terminal.PTYManager
+	AgentTmuxMgr *terminal.AgentTmuxManager // may be nil when tmux is missing
 	TermAuth     *realtime.TerminalAuth
 	CORSOrigins  []string
 	SelfURL      string
@@ -49,7 +52,7 @@ func NewTerminalModules(deps TerminalModuleDeps) []interface{ Register(*http.Ser
 	return []interface{ Register(*http.ServeMux) }{
 		hterminal.NewTabModule(deps.TermSvc),
 		hterminal.NewModule(
-			deps.TermSvc, deps.AgentSvc, deps.TermMgr,
+			deps.TermSvc, deps.AgentSvc, deps.PTYMgr, deps.AgentTmuxMgr,
 			deps.TermAuth, deps.CORSOrigins,
 			deps.SelfURL, deps.ConfigByIDFn,
 			deps.TabMetaStore, deps.Hub),
@@ -57,8 +60,8 @@ func NewTerminalModules(deps TerminalModuleDeps) []interface{ Register(*http.Ser
 }
 
 // NewIssueTabModule creates the issue tab module.
-func NewIssueTabModule(issueTabStore *issuetabs.Store, termMgr *terminal.TerminalManager, hub *realtime.Hub) interface{ Register(*http.ServeMux) } {
-	return issues.NewIssueTabModule(issueTabStore, termMgr, hub)
+func NewIssueTabModule(issueTabStore *issuetabs.Store, hub *realtime.Hub) interface{ Register(*http.ServeMux) } {
+	return issues.NewIssueTabModule(issueTabStore, hub)
 }
 
 // NewDiffModule creates the git diff module.

@@ -51,6 +51,18 @@ type agentTerminalTokenData struct {
 	Token string `json:"token"`
 }
 
+// agentTmuxMonitor adapts AgentTmuxManager to the realtime.SessionMonitor
+// interface used by the shared PtyToWS relay.
+type agentTmuxMonitor struct {
+	mgr *webuterminal.AgentTmuxManager
+}
+
+func (m *agentTmuxMonitor) HasSession(name string) bool { return m.mgr.HasSession(name) }
+func (m *agentTmuxMonitor) PaneDead(name string) bool   { return m.mgr.PaneDead(name) }
+func (m *agentTmuxMonitor) CapturePaneRaw(name string, lines int) string {
+	return m.mgr.CapturePane(name, lines)
+}
+
 // HandleGetAgentTerminalInfo reports whether an agent has a live tmux session
 // suitable for terminal streaming, or should fall back to archive logs.
 func HandleGetAgentTerminalInfo(svc service.AgentService) http.HandlerFunc {
@@ -121,7 +133,11 @@ func HandleGetAgentTerminalToken(svc service.AgentService) http.HandlerFunc {
 }
 
 // HandleAgentTerminalWS streams a live read-only tmux session for an agent.
-func HandleAgentTerminalWS(manager *webuterminal.TerminalManager, auth *realtime.TerminalAuth, allowedOrigins []string) http.HandlerFunc {
+// The auto-mode CLI creates those tmux sessions; this handler lets the web
+// UI attach to them via pty.Start("tmux attach -t ..."). Unlike the main
+// terminal path (which is tmux-free), this route retains tmux because agent
+// processes need to outlive the CLI invocation that spawned them.
+func HandleAgentTerminalWS(manager *webuterminal.AgentTmuxManager, auth *realtime.TerminalAuth, allowedOrigins []string) http.HandlerFunc {
 	patterns := originHosts(allowedOrigins)
 
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -152,8 +168,7 @@ func HandleAgentTerminalWS(manager *webuterminal.TerminalManager, auth *realtime
 }
 
 // validateAgentWSRequest validates the agent name, manager, auth, and token.
-// Returns the agent name and true on success, or writes an error response and returns false.
-func validateAgentWSRequest(w http.ResponseWriter, r *http.Request, manager *webuterminal.TerminalManager, auth *realtime.TerminalAuth) (string, bool) {
+func validateAgentWSRequest(w http.ResponseWriter, r *http.Request, manager *webuterminal.AgentTmuxManager, auth *realtime.TerminalAuth) (string, bool) {
 	agentName := r.PathValue("name")
 	if agentName == "" {
 		handler.WriteJSON(w, http.StatusBadRequest, map[string]interface{}{
@@ -172,7 +187,7 @@ func validateAgentWSRequest(w http.ResponseWriter, r *http.Request, manager *web
 	if manager == nil {
 		handler.WriteJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
 			"success": false,
-			"error":   "terminal manager not initialized",
+			"error":   "agent terminal manager not initialized",
 		})
 		return "", false
 	}
@@ -201,8 +216,7 @@ func validateAgentWSRequest(w http.ResponseWriter, r *http.Request, manager *web
 }
 
 // resolveAgentSession finds the tmux session for an agent and checks the session limit.
-// Returns the session name on success, or writes an error response and returns an error.
-func resolveAgentSession(w http.ResponseWriter, manager *webuterminal.TerminalManager, wsID, agentName string) (string, error) {
+func resolveAgentSession(w http.ResponseWriter, manager *webuterminal.AgentTmuxManager, wsID, agentName string) (string, error) {
 	sessionName, found, err := manager.FindLatestAgentSession(wsID, agentName)
 	if err != nil {
 		handler.WriteJSON(w, http.StatusInternalServerError, map[string]interface{}{
@@ -230,7 +244,6 @@ func resolveAgentSession(w http.ResponseWriter, manager *webuterminal.TerminalMa
 }
 
 // upgradeAgentWS performs the WebSocket upgrade for an agent terminal connection.
-// Returns the connection and true on success, or false on failure.
 func upgradeAgentWS(w http.ResponseWriter, r *http.Request, patterns []string) (*websocket.Conn, bool) { //nolint:staticcheck // SA1019: websocket migration tracked separately
 	rc := http.NewResponseController(w)
 	if err := rc.SetWriteDeadline(time.Time{}); err != nil {
@@ -249,8 +262,7 @@ func upgradeAgentWS(w http.ResponseWriter, r *http.Request, patterns []string) (
 }
 
 // runAgentTerminalRelay attaches to the tmux session and runs the bidirectional relay.
-// Returns the WebSocket close status and reason.
-func runAgentTerminalRelay(reqCtx context.Context, conn *websocket.Conn, manager *webuterminal.TerminalManager, sessionName, agentName string) (websocket.StatusCode, string) { //nolint:staticcheck // SA1019: websocket migration tracked separately
+func runAgentTerminalRelay(reqCtx context.Context, conn *websocket.Conn, manager *webuterminal.AgentTmuxManager, sessionName, agentName string) (websocket.StatusCode, string) { //nolint:staticcheck // SA1019: websocket migration tracked separately
 	termSession, err := manager.AttachExistingRaw(sessionName, 80, 24)
 	if err != nil {
 		if errors.Is(err, webuterminal.ErrMaxSessionsReached) {
@@ -265,10 +277,20 @@ func runAgentTerminalRelay(reqCtx context.Context, conn *websocket.Conn, manager
 	ctx, cancel := context.WithCancel(reqCtx)
 	defer cancel()
 
-	monitor := &terminalMonitor{mgr: manager}
+	// Watch for an external kill of the tmux session so we can close the WS.
+	go func() {
+		select {
+		case <-termSession.KillCh():
+			_ = conn.Close(websocket.StatusCode(4002), "session killed") //nolint:staticcheck // SA1019: websocket migration tracked separately
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+
+	monitor := &agentTmuxMonitor{mgr: manager}
 	crashCh := make(chan realtime.CrashInfo, 1)
 	go func() {
-		result := realtime.PtyToWS(ctx, cancel, conn, termSession.PTY, termSession.Name, monitor, nil)
+		result := realtime.PtyToWS(ctx, cancel, conn, termSession.PTY, termSession.SessionName, monitor, nil)
 		crashCh <- result
 	}()
 

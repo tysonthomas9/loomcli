@@ -8,26 +8,32 @@ import (
 )
 
 // TerminalHook implements coordinator.LifecycleHook for per-workspace terminal
-// session lifecycle. On workspace registration, it provides the TerminalManager
-// to the resource bag. On workspace deregistration, it kills all terminal
-// sessions owned by that workspace.
+// session lifecycle.
+//
+// On workspace registration it publishes the AgentTmuxManager to the resource
+// bag (so other hooks and handlers can reach it through the WorkspaceHandle).
+// On workspace deregistration it kills every tmux session whose name is
+// prefixed by the workspace — this reaps long-lived auto-mode agent
+// processes that outlive their workspace. The main web terminal path
+// doesn't need cleanup here: PTY shells are WebSocket-scoped and die with
+// their connection.
+//
+// When tmux is not installed, agentTmuxMgr will be nil; the hook then simply
+// provides nil to the bag and no-ops on cleanup.
 type TerminalHook struct {
-	termMgr *terminal.TerminalManager
-	logger  *slog.Logger
+	agentTmuxMgr *terminal.AgentTmuxManager
+	logger       *slog.Logger
 }
 
-// NewTerminalHook creates a TerminalHook. termMgr must not be nil (panics).
-// A nil logger defaults to slog.Default().
-func NewTerminalHook(termMgr *terminal.TerminalManager, logger *slog.Logger) *TerminalHook {
-	if termMgr == nil {
-		panic("NewTerminalHook: termMgr must not be nil")
-	}
+// NewTerminalHook creates a TerminalHook. agentTmuxMgr may be nil (tmux not
+// installed). A nil logger defaults to slog.Default().
+func NewTerminalHook(agentTmuxMgr *terminal.AgentTmuxManager, logger *slog.Logger) *TerminalHook {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &TerminalHook{
-		termMgr: termMgr,
-		logger:  logger,
+		agentTmuxMgr: agentTmuxMgr,
+		logger:       logger,
 	}
 }
 
@@ -38,17 +44,14 @@ func (h *TerminalHook) Name() string { return "terminal" }
 // registration. The workspace is fully functional without it.
 func (h *TerminalHook) Critical() bool { return false }
 
-// OnRegister provides the TerminalManager to the resource bag so downstream
-// hooks and handlers can discover it via the WorkspaceHandle.
+// OnRegister provides the AgentTmuxManager to the resource bag.
 func (h *TerminalHook) OnRegister(ctx *coordinator.RegistrationContext) error {
-	ctx.Provide(coordinator.ResourceKeyTerminal, h.termMgr)
-	h.logger.Debug("provided terminal manager for workspace", "workspace", ctx.WorkspaceID)
+	ctx.Provide(coordinator.ResourceKeyTerminal, h.agentTmuxMgr)
+	h.logger.Debug("provided agent tmux manager for workspace", "workspace", ctx.WorkspaceID)
 	return nil
 }
 
-// OnDeregister kills all terminal sessions owned by the workspace being removed.
-// Sessions with no recorded owner are skipped (they may belong to another workspace
-// that predates ownership tracking). Errors are logged but never propagated.
+// OnDeregister kills all tmux sessions owned by the workspace being removed.
 func (h *TerminalHook) OnDeregister(ctx coordinator.DeregistrationContext) {
 	h.cleanupWorkspaceSessions(ctx.WorkspaceID)
 }
@@ -58,19 +61,14 @@ func (h *TerminalHook) OnRollback(ctx coordinator.DeregistrationContext) {
 	h.cleanupWorkspaceSessions(ctx.WorkspaceID)
 }
 
-// cleanupWorkspaceSessions kills every terminal session that belongs to the
-// given workspace. With v2's workspace-qualified tmux names, KillWorkspaceSessions
-// filters by the shared "<serverPrefix>-<wsShort>-" prefix so it catches all
-// sessions (attached, detached, and mid-setup) without needing the ownership
-// map as a scoping mechanism.
 func (h *TerminalHook) cleanupWorkspaceSessions(wsID string) {
-	if wsID == "" {
+	if wsID == "" || h.agentTmuxMgr == nil {
 		return
 	}
-	if err := h.termMgr.KillWorkspaceSessions(wsID); err != nil {
-		h.logger.Warn("failed to kill terminal sessions for workspace cleanup",
+	if err := h.agentTmuxMgr.KillWorkspaceSessions(wsID); err != nil {
+		h.logger.Warn("failed to kill tmux sessions for workspace cleanup",
 			"workspace", wsID, "err", err)
 		return
 	}
-	h.logger.Info("killed terminal sessions for workspace", "workspace", wsID)
+	h.logger.Info("killed tmux sessions for workspace", "workspace", wsID)
 }

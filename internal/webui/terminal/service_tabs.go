@@ -16,19 +16,10 @@ func (s *terminalServiceImpl) ListTabs(ctx context.Context, wsID string) ([]tabm
 		return nil, service.ErrUnavailable("tab metadata not available (no Redis)")
 	}
 
-	var activeNames []string
-	if s.termMgr != nil {
-		sessions, err := s.termMgr.ListActiveSessionsForWorkspace(wsID)
-		if err != nil {
-			slog.Error("failed to list active sessions for tab metadata", "err", err)
-		} else {
-			for _, sess := range sessions {
-				activeNames = append(activeNames, sess.Name)
-			}
-		}
-	}
-
-	tabs, err := s.tabStore.EnsureDefaults(ctx, wsID, activeNames)
+	// No active-session filter: without tmux, the backend no longer tracks
+	// long-lived sessions, so EnsureDefaults is called with an empty list
+	// and returns whatever tabs are persisted in Redis.
+	tabs, err := s.tabStore.EnsureDefaults(ctx, wsID, nil)
 	if err != nil {
 		return nil, service.ErrInternal("failed to list tab metadata", err)
 	}
