@@ -118,6 +118,12 @@ func (pb *PooledBackend) GetChildren(ctx context.Context, id string) ([]backend.
 	})
 }
 
+func (pb *PooledBackend) SearchIssues(ctx context.Context, query string, limit int) ([]backend.IssueData, error) {
+	return execPool(ctx, pb, "SearchIssues", func(b *BeadsBackend) ([]backend.IssueData, error) {
+		return b.SearchIssues(ctx, query, limit)
+	})
+}
+
 // --- Mutation operations ---
 
 func (pb *PooledBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error) {

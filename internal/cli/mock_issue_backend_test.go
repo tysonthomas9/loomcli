@@ -60,6 +60,11 @@ type MockIssueBackend struct {
 	GetChildrenErr    error
 	GetChildrenFn     func(ctx context.Context, id string) ([]backend.IssueData, error)
 
+	// SearchIssues
+	SearchIssuesResult []backend.IssueData
+	SearchIssuesErr    error
+	SearchIssuesFn     func(ctx context.Context, query string, limit int) ([]backend.IssueData, error)
+
 	// Create
 	CreateResult *backend.IssueData
 	CreateErr    error
@@ -246,6 +251,19 @@ func (m *MockIssueBackend) GetChildren(ctx context.Context, id string) ([]backen
 	m.mu.Unlock()
 	if fn != nil {
 		return fn(ctx, id)
+	}
+	return result, resultErr
+}
+
+// SearchIssues implements backend.IssueBackend.
+func (m *MockIssueBackend) SearchIssues(ctx context.Context, query string, limit int) ([]backend.IssueData, error) {
+	m.mu.Lock()
+	m.record("SearchIssues", query, limit)
+	fn := m.SearchIssuesFn
+	result, resultErr := m.SearchIssuesResult, m.SearchIssuesErr
+	m.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, query, limit)
 	}
 	return result, resultErr
 }

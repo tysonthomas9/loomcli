@@ -103,6 +103,10 @@ func (b *ipcIssueBackend) GetChildren(ctx context.Context, id string) ([]backend
 	return b.fallback.GetChildren(ctx, id)
 }
 
+func (b *ipcIssueBackend) SearchIssues(ctx context.Context, query string, limit int) ([]backend.IssueData, error) {
+	return b.fallback.SearchIssues(ctx, query, limit)
+}
+
 func (b *ipcIssueBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error) {
 	return b.fallback.Create(ctx, params)
 }

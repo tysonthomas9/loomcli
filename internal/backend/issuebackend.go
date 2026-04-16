@@ -48,6 +48,14 @@ type IssueBackend interface {
 	// status. Returns KindValidation if id is empty.
 	GetChildren(ctx context.Context, id string) ([]IssueData, error)
 
+	// SearchIssues performs a full-text relevance-ranked search across issue
+	// title, description, and ID. Unlike List with a Query filter (substring
+	// matching among other filters), this is a dedicated search operation;
+	// backends with a ranked search endpoint (e.g., fleet-db FT.SEARCH, beads
+	// SQLite FTS) use it here. Pass limit=0 to use the backend default. Returns
+	// KindValidation if query is empty or limit is negative.
+	SearchIssues(ctx context.Context, query string, limit int) ([]IssueData, error)
+
 	// --- Mutation operations ---
 
 	// Create creates a new issue and returns the slim projection of the

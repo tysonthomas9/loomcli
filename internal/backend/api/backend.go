@@ -292,6 +292,39 @@ func (b *APIBackend) GetChildren(ctx context.Context, id string) ([]backend.Issu
 	return result, nil
 }
 
+// SearchIssues performs a full-text search via the /issues endpoint using the
+// q query parameter. Returns an empty slice if no results match.
+// Note: the loom server uses "q" (not "query") for its search param — see
+// internal/backend/api/params.go addListSearchFilters.
+func (b *APIBackend) SearchIssues(ctx context.Context, query string, limit int) ([]backend.IssueData, error) {
+	if query == "" {
+		return nil, backend.ErrValidation("SearchIssues", "query must not be empty")
+	}
+	if limit < 0 {
+		return nil, backend.ErrValidation("SearchIssues", "limit must not be negative")
+	}
+	path := "/issues?q=" + url.QueryEscape(query)
+	if limit > 0 {
+		path += "&limit=" + strconv.Itoa(limit)
+	}
+	resp, apiErr := b.exec(ctx, "SearchIssues", http.MethodGet, path, nil)
+	if apiErr != nil {
+		return nil, apiErr
+	}
+	if !hasData(resp) {
+		return []backend.IssueData{}, nil
+	}
+	var issues []gen.Issue
+	if jsonErr := json.Unmarshal(resp.Data, &issues); jsonErr != nil {
+		return nil, backend.ErrInternal("SearchIssues", "unmarshal response", jsonErr)
+	}
+	result := make([]backend.IssueData, 0, len(issues))
+	for _, i := range issues {
+		result = append(result, issueToData(i))
+	}
+	return result, nil
+}
+
 // --- Mutation operations ---
 
 func (b *APIBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error) {

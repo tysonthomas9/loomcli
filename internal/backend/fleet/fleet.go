@@ -282,6 +282,36 @@ func (b *FleetBackend) GetChildren(ctx context.Context, id string) ([]backend.Is
 	return issuesWithCountsToData(issues), nil
 }
 
+// SearchIssues performs a full-text search via the fleet-db list endpoint with
+// the query parameter set. Future fleet-db work can route this to a dedicated
+// FT.SEARCH endpoint.
+// Note: fleet-db uses "query" (not "q") for its search param — see
+// internal/backend/fleet/params.go addListSearchFilters.
+func (b *FleetBackend) SearchIssues(ctx context.Context, query string, limit int) ([]backend.IssueData, error) {
+	if query == "" {
+		return nil, backend.ErrValidation("SearchIssues", "query must not be empty")
+	}
+	if limit < 0 {
+		return nil, backend.ErrValidation("SearchIssues", "limit must not be negative")
+	}
+	path := "/issues?query=" + url.QueryEscape(query)
+	if limit > 0 {
+		path += "&limit=" + strconv.Itoa(limit)
+	}
+	resp, callErr := b.exec(ctx, "SearchIssues", "GET", path, nil)
+	if callErr != nil {
+		return nil, callErr
+	}
+	if !hasData(resp) {
+		return []backend.IssueData{}, nil
+	}
+	var issues []*types.IssueWithCounts
+	if jsonErr := json.Unmarshal(resp.Data, &issues); jsonErr != nil {
+		return nil, backend.ErrInternal("SearchIssues", "unmarshal response", jsonErr)
+	}
+	return issuesWithCountsToData(issues), nil
+}
+
 // --- Mutation operations ---
 
 func (b *FleetBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error) {

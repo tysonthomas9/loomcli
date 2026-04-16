@@ -480,6 +480,103 @@ func TestGetChildren_Empty(t *testing.T) {
 	}
 }
 
+func TestSearchIssues_HappyPath(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	var gotPath string
+	var gotQuery string
+	ab, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		if r.Method != http.MethodGet {
+			t.Errorf("method = %s", r.Method)
+		}
+		status := gen.IssueStatus("open")
+		issueType := gen.IssueIssueType("task")
+		respondOK(w, []gen.Issue{
+			{Id: "s1", Title: "Auth bug in login", Status: &status, IssueType: &issueType, Priority: 2, CreatedAt: now, UpdatedAt: now},
+			{Id: "s2", Title: "Auth bug: refresh token", Status: &status, IssueType: &issueType, Priority: 1, CreatedAt: now, UpdatedAt: now},
+		})
+	})
+	defer ts.Close()
+
+	result, err := ab.SearchIssues(context.Background(), "auth bug", 10)
+	if err != nil {
+		t.Fatalf("SearchIssues: %v", err)
+	}
+	if !strings.HasSuffix(gotPath, "/issues") {
+		t.Errorf("path = %q, want suffix /issues", gotPath)
+	}
+	if !strings.Contains(gotQuery, "q=auth+bug") {
+		t.Errorf("query = %q, want q=auth+bug", gotQuery)
+	}
+	if !strings.Contains(gotQuery, "limit=10") {
+		t.Errorf("query = %q, want limit=10", gotQuery)
+	}
+	if len(result) != 2 {
+		t.Fatalf("len = %d, want 2", len(result))
+	}
+	if result[0].ID != "s1" || result[1].ID != "s2" {
+		t.Errorf("IDs: %q %q", result[0].ID, result[1].ID)
+	}
+}
+
+func TestSearchIssues_EmptyQuery(t *testing.T) {
+	ab, err := New(Config{BaseURL: "http://x", WorkspaceID: "ws"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = ab.SearchIssues(context.Background(), "", 10)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Errorf("expected KindValidation, got %v", err)
+	}
+}
+
+func TestSearchIssues_NegativeLimit(t *testing.T) {
+	ab, err := New(Config{BaseURL: "http://x", WorkspaceID: "ws"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = ab.SearchIssues(context.Background(), "q", -1)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Errorf("expected KindValidation, got %v", err)
+	}
+}
+
+func TestSearchIssues_ServerError(t *testing.T) {
+	ab, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		respondErr(w, 500, "search index unavailable")
+	})
+	defer ts.Close()
+	_, err := ab.SearchIssues(context.Background(), "q", 0)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !backend.IsKind(err, backend.KindInternal) {
+		t.Errorf("expected KindInternal, got %v", err)
+	}
+}
+
+func TestSearchIssues_UnmarshalError(t *testing.T) {
+	ab, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true,"data":"not-an-array"}`))
+	})
+	defer ts.Close()
+	_, err := ab.SearchIssues(context.Background(), "q", 0)
+	if err == nil {
+		t.Fatal("expected unmarshal error")
+	}
+	if !backend.IsKind(err, backend.KindInternal) {
+		t.Errorf("expected KindInternal, got %v", err)
+	}
+}
+
 func TestCount_NotImplemented(t *testing.T) {
 	ab, err := New(Config{BaseURL: "http://x", WorkspaceID: "ws"})
 	if err != nil {

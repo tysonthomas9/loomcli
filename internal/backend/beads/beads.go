@@ -188,6 +188,28 @@ func (b *BeadsBackend) GetChildren(_ context.Context, id string) ([]backend.Issu
 	return issuesWithCountsToData(issues), nil
 }
 
+// SearchIssues performs a full-text relevance-ranked search via the beads
+// daemon's List RPC, which routes to SQLite FTS when Query is set.
+func (b *BeadsBackend) SearchIssues(_ context.Context, query string, limit int) ([]backend.IssueData, error) {
+	if query == "" {
+		return nil, backend.ErrValidation("SearchIssues", "query must not be empty")
+	}
+	if limit < 0 {
+		return nil, backend.ErrValidation("SearchIssues", "limit must not be negative")
+	}
+	resp, err := b.execAndCheck("SearchIssues", func() (*rpc.Response, error) {
+		return b.client.List(&rpc.ListArgs{Query: query, Limit: limit})
+	})
+	if err != nil {
+		return nil, err
+	}
+	var issues []*types.IssueWithCounts
+	if err := json.Unmarshal(resp.Data, &issues); err != nil {
+		return nil, backend.ErrInternal("SearchIssues", "unmarshal response", err)
+	}
+	return issuesWithCountsToData(issues), nil
+}
+
 // Count returns the number of issues matching the given filters.
 func (b *BeadsBackend) Count(_ context.Context, opts backend.CountOpts) (int, error) {
 	rpcArgs := &rpc.CountArgs{

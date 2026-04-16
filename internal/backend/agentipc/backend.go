@@ -172,6 +172,10 @@ func (b *Backend) GetChildren(_ context.Context, _ string) ([]backend.IssueData,
 	return nil, backend.ErrNotImplemented("AgentIPC.GetChildren", "not supported by agent IPC backend")
 }
 
+func (b *Backend) SearchIssues(_ context.Context, _ string, _ int) ([]backend.IssueData, error) {
+	return nil, backend.ErrNotImplemented("AgentIPC.SearchIssues", "not supported by agent IPC backend")
+}
+
 func (b *Backend) Create(_ context.Context, _ backend.CreateParams) (*backend.IssueData, error) {
 	return nil, backend.ErrNotImplemented("AgentIPC.Create", "not supported by agent IPC backend")
 }

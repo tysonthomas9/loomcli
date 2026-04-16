@@ -222,6 +222,22 @@ func (a *cliBeadsAdapter) GetChildren(_ context.Context, id string) ([]backend.I
 	return a.queryIssues("GetChildren", []string{"list", "--json", "--parent", id})
 }
 
+// SearchIssues performs a full-text search by shelling out to
+// bd search <query> --json [--limit N].
+func (a *cliBeadsAdapter) SearchIssues(_ context.Context, query string, limit int) ([]backend.IssueData, error) {
+	if query == "" {
+		return nil, backend.ErrValidation("SearchIssues", "query must not be empty")
+	}
+	if limit < 0 {
+		return nil, backend.ErrValidation("SearchIssues", "limit must not be negative")
+	}
+	args := []string{"search", query, "--json"}
+	if limit > 0 {
+		args = append(args, "--limit", strconv.Itoa(limit))
+	}
+	return a.queryIssues("SearchIssues", args)
+}
+
 // --- Mutation methods ---
 
 func (a *cliBeadsAdapter) Create(_ context.Context, _ backend.CreateParams) (*backend.IssueData, error) {

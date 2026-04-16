@@ -496,6 +496,174 @@ func TestGetChildren_UnmarshalError(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// SearchIssues
+// ---------------------------------------------------------------------------
+
+func TestSearchIssues_HappyPath(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
+	issues := []*types.IssueWithCounts{
+		{
+			Issue: &types.Issue{
+				ID:        "bd-s1",
+				Title:     "Auth bug in login",
+				Status:    types.StatusOpen,
+				CreatedAt: now,
+				UpdatedAt: now,
+			},
+			DependencyCount: 0,
+			DependentCount:  0,
+		},
+		{
+			Issue: &types.Issue{
+				ID:        "bd-s2",
+				Title:     "Auth bug: refresh token",
+				Status:    types.StatusInProgress,
+				CreatedAt: now,
+				UpdatedAt: now,
+			},
+			DependencyCount: 1,
+			DependentCount:  0,
+		},
+	}
+
+	mc := &mockClient{
+		ListFn: func(args *rpc.ListArgs) (*rpc.Response, error) {
+			if args.Query != "auth bug" {
+				t.Errorf("ListArgs.Query = %q, want %q", args.Query, "auth bug")
+			}
+			if args.Limit != 10 {
+				t.Errorf("ListArgs.Limit = %d, want 10", args.Limit)
+			}
+			return successResponse(t, issues), nil
+		},
+	}
+
+	b := New(mc)
+	got, err := b.SearchIssues(context.Background(), "auth bug", 10)
+	if err != nil {
+		t.Fatalf("SearchIssues() error = %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("SearchIssues() returned %d items, want 2", len(got))
+	}
+	if got[0].ID != "bd-s1" {
+		t.Errorf("got[0].ID = %q, want %q", got[0].ID, "bd-s1")
+	}
+	if got[1].ID != "bd-s2" {
+		t.Errorf("got[1].ID = %q, want %q", got[1].ID, "bd-s2")
+	}
+}
+
+func TestSearchIssues_ZeroLimit(t *testing.T) {
+	mc := &mockClient{
+		ListFn: func(args *rpc.ListArgs) (*rpc.Response, error) {
+			if args.Limit != 0 {
+				t.Errorf("ListArgs.Limit = %d, want 0", args.Limit)
+			}
+			if args.Query != "auth bug" {
+				t.Errorf("ListArgs.Query = %q, want %q", args.Query, "auth bug")
+			}
+			return successResponse(t, []*types.IssueWithCounts{}), nil
+		},
+	}
+	b := New(mc)
+	_, err := b.SearchIssues(context.Background(), "auth bug", 0)
+	if err != nil {
+		t.Fatalf("SearchIssues() error = %v", err)
+	}
+}
+
+func TestSearchIssues_EmptyQuery(t *testing.T) {
+	called := false
+	mc := &mockClient{
+		ListFn: func(_ *rpc.ListArgs) (*rpc.Response, error) {
+			called = true
+			return nil, nil
+		},
+	}
+	b := New(mc)
+	_, err := b.SearchIssues(context.Background(), "", 10)
+	if err == nil {
+		t.Fatal("expected error for empty query")
+	}
+	if called {
+		t.Error("ListFn should not have been called")
+	}
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Errorf("error kind = %v, want %v", err, backend.KindValidation)
+	}
+}
+
+func TestSearchIssues_NegativeLimit(t *testing.T) {
+	called := false
+	mc := &mockClient{
+		ListFn: func(_ *rpc.ListArgs) (*rpc.Response, error) {
+			called = true
+			return nil, nil
+		},
+	}
+	b := New(mc)
+	_, err := b.SearchIssues(context.Background(), "q", -1)
+	if err == nil {
+		t.Fatal("expected error for negative limit")
+	}
+	if called {
+		t.Error("ListFn should not have been called")
+	}
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Errorf("error kind = %v, want %v", err, backend.KindValidation)
+	}
+}
+
+func TestSearchIssues_Empty(t *testing.T) {
+	mc := &mockClient{
+		ListFn: func(_ *rpc.ListArgs) (*rpc.Response, error) {
+			return successResponse(t, []*types.IssueWithCounts{}), nil
+		},
+	}
+	b := New(mc)
+	got, err := b.SearchIssues(context.Background(), "nothing", 10)
+	if err != nil {
+		t.Fatalf("SearchIssues() error = %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("SearchIssues() returned %d items, want 0", len(got))
+	}
+}
+
+func TestSearchIssues_ServerError(t *testing.T) {
+	mc := &mockClient{
+		ListFn: func(_ *rpc.ListArgs) (*rpc.Response, error) {
+			return errorResponse("fts index unavailable"), nil
+		},
+	}
+	b := New(mc)
+	_, err := b.SearchIssues(context.Background(), "auth bug", 10)
+	if err == nil {
+		t.Fatal("expected error from server")
+	}
+	if !strings.Contains(err.Error(), "fts index unavailable") {
+		t.Errorf("error message = %q, want it to contain %q", err.Error(), "fts index unavailable")
+	}
+}
+
+func TestSearchIssues_UnmarshalError(t *testing.T) {
+	mc := &mockClient{
+		ListFn: func(_ *rpc.ListArgs) (*rpc.Response, error) {
+			return &rpc.Response{Success: true, Data: []byte("not json")}, nil
+		},
+	}
+	b := New(mc)
+	_, err := b.SearchIssues(context.Background(), "auth bug", 10)
+	if err == nil {
+		t.Fatal("expected unmarshal error")
+	}
+	if !backend.IsKind(err, backend.KindInternal) {
+		t.Errorf("error kind = %v, want %v", err, backend.KindInternal)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Ready (happy path)
 // ---------------------------------------------------------------------------
 

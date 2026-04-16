@@ -377,6 +377,87 @@ func TestGetChildren_Empty(t *testing.T) {
 	}
 }
 
+// --- SearchIssues ---
+
+func TestSearchIssues_HappyPath(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	issues := []*types.IssueWithCounts{
+		{Issue: &types.Issue{ID: "s1", Title: "Auth bug in login", Status: types.StatusOpen, CreatedAt: now, UpdatedAt: now}},
+		{Issue: &types.Issue{ID: "s2", Title: "Auth bug: refresh token", Status: types.StatusOpen, CreatedAt: now, UpdatedAt: now}},
+	}
+
+	var gotPath string
+	var gotQuery string
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		if r.Method != "GET" {
+			t.Errorf("Method = %q, want GET", r.Method)
+		}
+		respondOK(w, issues)
+	})
+	defer ts.Close()
+
+	result, err := fb.SearchIssues(context.Background(), "auth bug", 10)
+	if err != nil {
+		t.Fatalf("SearchIssues: %v", err)
+	}
+	if !strings.HasSuffix(gotPath, "/issues") {
+		t.Errorf("path = %q, want suffix /issues", gotPath)
+	}
+	if !strings.Contains(gotQuery, "query=auth+bug") {
+		t.Errorf("query = %q, want to contain query=auth+bug", gotQuery)
+	}
+	if !strings.Contains(gotQuery, "limit=10") {
+		t.Errorf("query = %q, want to contain limit=10", gotQuery)
+	}
+	if len(result) != 2 || result[0].ID != "s1" || result[1].ID != "s2" {
+		t.Errorf("got %v, want [s1 s2]", result)
+	}
+}
+
+func TestSearchIssues_EmptyQuery(t *testing.T) {
+	fb, err := New(Config{BaseURL: "http://x", WorkspaceID: "ws"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = fb.SearchIssues(context.Background(), "", 10)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Errorf("expected KindValidation, got %v", err)
+	}
+}
+
+func TestSearchIssues_NegativeLimit(t *testing.T) {
+	fb, err := New(Config{BaseURL: "http://x", WorkspaceID: "ws"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = fb.SearchIssues(context.Background(), "q", -1)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Errorf("expected KindValidation, got %v", err)
+	}
+}
+
+func TestSearchIssues_Empty(t *testing.T) {
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		respondOK(w, []*types.IssueWithCounts{})
+	})
+	defer ts.Close()
+	result, err := fb.SearchIssues(context.Background(), "nothing", 10)
+	if err != nil {
+		t.Fatalf("SearchIssues: %v", err)
+	}
+	if len(result) != 0 {
+		t.Errorf("expected 0, got %d", len(result))
+	}
+}
+
 // TestCheckFleetUnsupportedFilters_EachField sets each unsupported ListOpts
 // field individually and verifies that (a) the error wraps
 // ErrFilterNotSupported and (b) the error message contains the field name.
