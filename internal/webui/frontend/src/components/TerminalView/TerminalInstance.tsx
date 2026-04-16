@@ -211,11 +211,22 @@ export const TerminalInstance = forwardRef<
     onReconnectStateChangeRef.current?.(null);
   }, []);
 
+  // Dedup rAF so a burst of WS messages in a single frame only schedules
+  // one pill check.
+  const pillCheckScheduledRef = useRef(false);
   const handleWsOutput = useCallback(() => {
     onOutputRef.current?.();
-    if (!isAtBottomRef.current) {
-      setShowNewOutputPill(true);
-    }
+    if (pillCheckScheduledRef.current) return;
+    pillCheckScheduledRef.current = true;
+    // Defer the decision to after wterm's rAF render; sticky-autoscroll
+    // runs inside that render and the resulting scroll event updates
+    // isAtBottomRef before we read it here.
+    requestAnimationFrame(() => {
+      pillCheckScheduledRef.current = false;
+      if (!isAtBottomRef.current) {
+        setShowNewOutputPill(true);
+      }
+    });
   }, []);
 
   // Connect the WebSocket. Caller has already ensured the wterm instance is
@@ -312,6 +323,13 @@ export const TerminalInstance = forwardRef<
       wasFocusedBeforeRemountRef.current = false;
       wtermFocus();
     }
+
+    // Fresh wterm starts at scrollTop=0 with no content; reset scroll-tracking
+    // state so stale pre-disconnect values don't leak into the new instance.
+    // Replay writes (if any) will sticky-autoscroll and scroll events will
+    // keep isAtBottomRef accurate from here on.
+    isAtBottomRef.current = true;
+    setShowNewOutputPill(false);
 
     if (hasConnectedRef.current) {
       // Reconnect path: fetch and replay scrollback into the fresh grid.
@@ -580,8 +598,12 @@ export const TerminalInstance = forwardRef<
     const el = wrapperRef.current?.querySelector(".wterm") as HTMLElement | null;
     if (!el) return;
     const handleScroll = () => {
+      // Match wterm's own at-bottom threshold (wterm.ts `_isScrolledToBottom`).
+      // A wider slack here would hide the "New output" pill in a band where
+      // wterm refuses to sticky-autoscroll, making new output silently land
+      // below the fold.
       const atBottom =
-        el.scrollHeight - el.scrollTop - el.clientHeight < 10;
+        el.scrollHeight - el.scrollTop - el.clientHeight < 5;
       isAtBottomRef.current = atBottom;
       if (atBottom) setShowNewOutputPill(false);
     };

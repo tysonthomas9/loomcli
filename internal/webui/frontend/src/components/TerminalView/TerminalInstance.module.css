@@ -16,14 +16,15 @@
 
 /* Override wterm's opinionated chrome (padding, shadow, border-radius)
  * and map its theme vars onto loom's --terminal-* tokens so the terminal
- * follows :root / [data-theme="light"] automatically. */
+ * follows :root / [data-theme="light"] automatically. Note: we intentionally
+ * do NOT set overflow-y here — wterm toggles .has-scrollback on its own
+ * element and its base CSS handles overflow based on that class. */
 .container:global(.wterm) {
   padding: 0;
   border-radius: 0;
   box-shadow: none;
   background: var(--terminal-bg);
   color: var(--terminal-fg);
-  overflow-y: auto;
   --term-bg: var(--terminal-bg);
   --term-fg: var(--terminal-fg);
   --term-cursor: var(--terminal-cursor);
