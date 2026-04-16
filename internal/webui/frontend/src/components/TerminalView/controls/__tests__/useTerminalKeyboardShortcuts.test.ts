@@ -328,7 +328,6 @@ describe("useTerminalKeyboardShortcuts", () => {
       const onSwitchTabByIndex = vi.fn();
       const onNewTab = vi.fn();
       const onCloseTab = vi.fn();
-      const onToggleSearch = vi.fn();
       const onEscape = vi.fn();
 
       renderHook(() =>
@@ -339,7 +338,6 @@ describe("useTerminalKeyboardShortcuts", () => {
             onSwitchTabByIndex,
             onNewTab,
             onCloseTab,
-            onToggleSearch,
             onEscape,
           }),
         ),
@@ -349,14 +347,12 @@ describe("useTerminalKeyboardShortcuts", () => {
       fireEvent.keyDown(document, { key: "1", metaKey: true });
       fireEvent.keyDown(document, { key: "t", metaKey: true });
       fireEvent.keyDown(document, { key: "w", metaKey: true });
-      fireEvent.keyDown(document, { key: "f", metaKey: true });
       fireEvent.keyDown(document, { key: "Escape" });
 
       expect(onCycleTab).not.toHaveBeenCalled();
       expect(onSwitchTabByIndex).not.toHaveBeenCalled();
       expect(onNewTab).not.toHaveBeenCalled();
       expect(onCloseTab).not.toHaveBeenCalled();
-      expect(onToggleSearch).not.toHaveBeenCalled();
       expect(onEscape).not.toHaveBeenCalled();
     });
   });

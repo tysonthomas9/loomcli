@@ -147,6 +147,14 @@ export const TerminalInstance = forwardRef<
     }
   }, []);
 
+  // doConnect is defined below but `startReconnectLoop` needs a stable
+  // reference to it. A ref avoids the circular-dep dance and keeps the
+  // reconnect loop calling the latest doConnect even if its closure over
+  // workspaceId / sessionName / agentName re-memoises.
+  const doConnectRef = useRef<
+    ((opts?: { onOutcome?: (ok: boolean) => void }) => void) | null
+  >(null);
+
   const startReconnectLoop = useCallback(
     (config?: ReconnectConfig) => {
       clearReconnectTimers();
@@ -161,7 +169,7 @@ export const TerminalInstance = forwardRef<
       const cancel = startAutoReconnect(
         () =>
           new Promise<boolean>((resolve) => {
-            doConnect({ onOutcome: resolve });
+            doConnectRef.current?.({ onOutcome: resolve });
           }),
         (state: ReconnectState) => {
           if (state.gaveUp) {
@@ -173,10 +181,6 @@ export const TerminalInstance = forwardRef<
       );
       reconnectCancelRef.current = cancel;
     },
-    // doConnect is declared below; captured via closure. We intentionally
-    // don't include it in deps — its identity doesn't matter here since we
-    // always read the latest via ref-free closure capture inside setTimeout.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [clearReconnectTimers],
   );
 
@@ -226,7 +230,7 @@ export const TerminalInstance = forwardRef<
             startReconnectLoop(config);
           }
         },
-        onOutputRef.current,
+        () => onOutputRef.current?.(),
         (reason) => onBackendCrashRef.current?.(reason),
         agentName,
         // onSessionKilled — server told us the session is gone; do not reconnect.
@@ -247,6 +251,9 @@ export const TerminalInstance = forwardRef<
       startReconnectLoop,
     ],
   );
+
+  // Keep the reconnect loop pointing at the latest doConnect closure.
+  doConnectRef.current = doConnect;
 
   // Mount / teardown per session.
   useEffect(() => {

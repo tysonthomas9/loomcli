@@ -10,8 +10,6 @@ import type { TabState } from "@/components/TerminalView/tabs";
 interface UseConnectionStateOptions {
   setTabs: React.Dispatch<React.SetStateAction<TabState[]>>;
   instanceRefs: React.MutableRefObject<Map<string, TerminalInstanceHandle>>;
-  /** Retained in the options for call-site stability; no longer used. */
-  workspaceId: string;
   onTabConnected?: (tabId: string) => void;
 }
 

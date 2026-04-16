@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 
-import type { IssueContext } from "@/api/terminal";
+import type { IssueContext } from "@/hooks/api";
 import { patchTerminalState } from "@/hooks/api";
 import { LoadingSkeleton } from "@/components";
 import { useBackendConfig } from "@/hooks/workspace";
@@ -160,7 +160,6 @@ export function TerminalView({
   } = useConnectionState({
     setTabs,
     instanceRefs,
-    workspaceId,
     onTabConnected: trySeedOnConnect,
   });
 

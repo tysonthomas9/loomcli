@@ -1,6 +1,6 @@
 import { useEffect, useCallback } from "react";
 
-import type { IssueContext } from "@/api/terminal";
+import type { IssueContext } from "@/hooks/api";
 
 import type { ConnectionState } from "./TerminalInstance";
 import {

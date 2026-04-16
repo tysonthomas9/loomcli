@@ -44,7 +44,6 @@ function createOptions(
     instanceRefs: {
       current: new Map<string, TerminalInstanceHandle>(),
     } as React.MutableRefObject<Map<string, TerminalInstanceHandle>>,
-    workspaceId: "ws-1",
     onTabConnected: undefined as ((tabId: string) => void) | undefined,
     ...overrides,
   };
@@ -178,15 +177,9 @@ describe("useConnectionState", () => {
         [
           "tab-1",
           {
+            disconnect: vi.fn(() => Promise.resolve()),
             reconnect: reconnectFn,
-            search: vi.fn(),
-            findNext: vi.fn(),
-            findPrevious: vi.fn(),
-            clearSearch: vi.fn(),
             pasteText: vi.fn(),
-            getSelection: vi.fn(),
-            hasSelection: vi.fn(),
-            selectAll: vi.fn(),
             focus: vi.fn(),
           },
         ],
@@ -242,7 +235,7 @@ describe("useConnectionState", () => {
       ]),
     } as React.MutableRefObject<Map<string, TerminalInstanceHandle>>;
 
-    const opts = createOptions({ setTabs, instanceRefs, workspaceId: "ws-1" });
+    const opts = createOptions({ setTabs, instanceRefs });
     const { result } = renderHook(() => useConnectionState(opts));
 
     result.current.handleCrashRestart("tab-1", "session-1");
