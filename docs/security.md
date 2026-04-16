@@ -4,15 +4,21 @@
 
 ### Redis Passwords
 
-Loom connects to Redis for fleet coordination and stale detection. **Never store Redis passwords in committed config files.**
+Loom connects to Redis for terminal-state persistence and — when fleet mode is enabled — fleet coordination and stale detection. **Never store Redis passwords in committed config files.**
 
-Fleet Redis is configured via `loom serve` flags and environment variables:
+Redis is configured via `loom serve` flags and environment variables:
 
 | Flag | Env Var | Description |
 |------|---------|-------------|
-| `--redis-addr` | `LOOM_REDIS_ADDR` | Redis address for fleet coordination and stale detection |
+| `--redis-addr` | `LOOM_REDIS_ADDR` | Redis address for terminal-state storage (and fleet coordination when `--fleet-mode` is set) |
+| `--redis-password` | `LOOM_REDIS_PASSWORD` | Redis password (prefer env var to avoid leaking in process list) |
+| `--fleet-mode` | `LOOM_FLEET_MODE=true` | Enable fleet coordination (task claims, stale detector, fleet worker API, JWT signing). Off by default. |
 
-Redis password authentication is supported at the library level (`internal/kv` and `internal/webui/fleet`) but is not yet exposed via CLI flags or environment variables. If your Redis instance requires password authentication, use network-level access controls (localhost binding, firewall rules) until CLI password support is added.
+When `--redis-addr` is empty, terminal state persists to an in-process
+miniredis and is dumped to `~/.loom/terminal-state/snapshot.json`. When
+fleet mode is on without an external Redis, the snapshot also contains
+the JWT signing key and is written with `0o600` permissions. Plain
+UI-only snapshots use `0o644`.
 
 ### Config File Security
 

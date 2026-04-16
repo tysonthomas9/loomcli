@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
@@ -23,6 +24,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/usage"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
+	"github.com/tysonthomas9/loomcli/internal/webui/localredis"
 )
 
 var (
@@ -35,6 +37,7 @@ var (
 	serveNoDaemon          bool
 	serveRedisAddr         string
 	serveRedisPassword     string
+	serveFleetMode         bool
 	serveAPIKey            string
 	serveFleetAPIKey       string
 	serveAuth              bool
@@ -111,6 +114,9 @@ func init() {
 
 	defaultRedisPassword := os.Getenv("LOOM_REDIS_PASSWORD")
 	serveCmd.Flags().StringVar(&serveRedisPassword, "redis-password", defaultRedisPassword, "Redis password (prefer LOOM_REDIS_PASSWORD env var to avoid leaking in process list)")
+
+	defaultFleetMode := os.Getenv("LOOM_FLEET_MODE") == "true"
+	serveCmd.Flags().BoolVar(&serveFleetMode, "fleet-mode", defaultFleetMode, "Enable fleet coordination features (stale detector, task claims, fleet routes). Default off for local dev.")
 
 	defaultAPIKey := os.Getenv("LOOM_WEBUI_API_KEY")
 	serveCmd.Flags().StringVar(&serveAPIKey, "api-key", defaultAPIKey, "API key for WebUI authentication (auto-generated if empty)")
@@ -204,40 +210,67 @@ func runServe(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	// Provision shared JWT signing key from Redis (if configured) or environment
+	// Provision the KV backend that powers the terminal-state stores
+	// (tabmeta, issuetabs, sessionhistory, terminal:ui-state) and — if
+	// fleet-mode is on — fleet coordination. When --redis-addr is empty,
+	// start an in-process miniredis and persist its keyspace to
+	// ~/.loom/terminal-state/snapshot.json so tab labels/notes/pin/order
+	// survive restarts.
 	var fleetJWTKey []byte
 	var fleetRedisConfig *fleet.RedisConfig
+	var localRedis *localredis.Manager
+
 	if serveRedisAddr != "" {
 		fleetRedisConfig = &fleet.RedisConfig{Address: serveRedisAddr, Password: serveRedisPassword}
-
-		if envKey := os.Getenv("LOOM_FLEET_JWT_KEY"); envKey != "" {
-			decoded, err := hex.DecodeString(envKey)
-			if err != nil || len(decoded) < 32 {
-				log.Fatalf("LOOM_FLEET_JWT_KEY must be a hex-encoded string of at least 32 bytes")
-			}
-			fleetJWTKey = decoded
-			log.Printf("Using JWT signing key from LOOM_FLEET_JWT_KEY environment variable")
+		log.Printf("Redis: using external server at %s", serveRedisAddr)
+	} else {
+		snapshotPath := ""
+		if dir := GetConfigDir(); dir != "" {
+			snapshotPath = filepath.Join(dir, "terminal-state", "snapshot.json")
+		}
+		mgr, err := localredis.NewManager(snapshotPath, serveFleetMode, nil)
+		if err != nil {
+			log.Printf("Warning: failed to start in-process Redis: %v", err)
+			log.Printf("Tab metadata and terminal state will not persist across restarts")
 		} else {
-			// Get or create shared signing key from Redis
-			redisClient := fleet.NewRedisClient(serveRedisAddr, serveRedisPassword, 0)
-			mgr := fleet.NewSigningKeyManager(redisClient, nil)
-			key, err := mgr.GetOrCreateSigningKey(ctx)
-			_ = redisClient.Close()
-			if err != nil {
-				log.Printf("Warning: failed to provision JWT signing key from Redis: %v", err)
-				log.Printf("Fleet auth will use an ephemeral key (tokens won't validate on other servers)")
+			localRedis = mgr
+			mgr.Start(ctx)
+			defer func() {
+				if err := localRedis.Close(); err != nil {
+					log.Printf("Warning: local Redis shutdown error: %v", err)
+				}
+			}()
+			fleetRedisConfig = &fleet.RedisConfig{Address: mgr.Addr()}
+			if snapshotPath != "" {
+				log.Printf("Redis: using in-process miniredis at %s (snapshot: %s)", mgr.Addr(), snapshotPath)
 			} else {
-				fleetJWTKey = key
-				log.Printf("JWT signing key provisioned from Redis")
+				log.Printf("Redis: using in-process miniredis at %s (no snapshot path — state is ephemeral)", mgr.Addr())
 			}
 		}
-	} else if envKey := os.Getenv("LOOM_FLEET_JWT_KEY"); envKey != "" {
+	}
+
+	// JWT signing key provisioning — only matters when fleet-mode is on.
+	// With real multi-node Redis, persist the key so tokens validate across
+	// servers. With miniredis (single-node), an ephemeral key is fine.
+	if envKey := os.Getenv("LOOM_FLEET_JWT_KEY"); envKey != "" {
 		decoded, err := hex.DecodeString(envKey)
 		if err != nil || len(decoded) < 32 {
 			log.Fatalf("LOOM_FLEET_JWT_KEY must be a hex-encoded string of at least 32 bytes")
 		}
 		fleetJWTKey = decoded
 		log.Printf("Using JWT signing key from LOOM_FLEET_JWT_KEY environment variable")
+	} else if serveFleetMode && serveRedisAddr != "" {
+		redisClient := fleet.NewRedisClient(serveRedisAddr, serveRedisPassword, 0)
+		mgr := fleet.NewSigningKeyManager(redisClient, nil)
+		key, err := mgr.GetOrCreateSigningKey(ctx)
+		_ = redisClient.Close()
+		if err != nil {
+			log.Printf("Warning: failed to provision JWT signing key from Redis: %v", err)
+			log.Printf("Fleet auth will use an ephemeral key (tokens won't validate on other servers)")
+		} else {
+			fleetJWTKey = key
+			log.Printf("JWT signing key provisioned from Redis")
+		}
 	}
 
 	// Validate --auth-url and apply issuer/audience defaults
@@ -287,7 +320,7 @@ func runServe(cmd *cobra.Command, args []string) {
 				SocketPath:              serveWebUISocket,
 				LoomServerURL:           fmt.Sprintf("http://localhost:%d", servePort),
 				TerminalCmd:             terminalCmd,
-				FleetEnabled:            serveRedisAddr != "",
+				FleetEnabled:            serveFleetMode,
 				FleetRedis:              fleetRedisConfig,
 				FleetJWTKey:             fleetJWTKey,
 				FleetAPIKey:             serveFleetAPIKey,
@@ -358,9 +391,11 @@ func runServe(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	// Start stale detector if Redis is configured
+	// Start stale detector only with fleet-mode + real Redis. Single-node
+	// (miniredis) has no peer servers to detect as stale, so the detector
+	// would be a no-op.
 	var kvClient *kv.Client
-	if serveRedisAddr != "" {
+	if serveFleetMode && serveRedisAddr != "" {
 		kvClient = kv.NewClient(serveRedisAddr, serveRedisPassword, 0)
 		defer func() {
 			if err := kvClient.Close(); err != nil {

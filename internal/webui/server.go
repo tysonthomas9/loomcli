@@ -255,9 +255,13 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	}
 
 	// Fleet store registry and JWT config for worker registration.
+	// Gate on both FleetRedis (a KV exists) AND FleetEnabled (user opted into
+	// multi-node fleet features). Without this guard, a loom serve running in
+	// default local mode (miniredis fallback) would spin up fleet registry
+	// for no reason.
 	var fleetRegistry *fleet.StoreRegistry
 	var tokenCfg *TokenConfig
-	if config.FleetRedis != nil {
+	if config.FleetRedis != nil && config.FleetEnabled {
 		var err error
 		fleetRegistry, err = fleet.NewStoreRegistry(*config.FleetRedis, fleet.DefaultTimeoutConfig(), nil)
 		if err != nil {
