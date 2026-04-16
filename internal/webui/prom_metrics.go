@@ -1,7 +1,9 @@
 package webui
 
 import (
+	"bufio"
 	"context"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -70,6 +72,17 @@ func (r *statusRecorder) Flush() {
 // Unwrap returns the inner ResponseWriter for http.ResponseController compatibility.
 func (r *statusRecorder) Unwrap() http.ResponseWriter {
 	return r.ResponseWriter
+}
+
+// Hijack delegates to the inner writer if it implements http.Hijacker.
+// Required for WebSocket upgrades — nhooyr.io/websocket calls w.(http.Hijacker)
+// directly rather than going through http.ResponseController, so we can't
+// rely on the Unwrap chain here.
+func (r *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if h, ok := r.ResponseWriter.(http.Hijacker); ok {
+		return h.Hijack()
+	}
+	return nil, nil, http.ErrNotSupported
 }
 
 type promRouteCtxKey struct{}
