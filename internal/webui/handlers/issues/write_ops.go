@@ -108,6 +108,30 @@ func HandleCloseIssue(svc service.IssueService) http.HandlerFunc {
 	}
 }
 
+// HandleClaimIssue returns a handler that atomically claims an issue by ID
+// for the server-side actor. Returns 409 if the issue is already claimed by
+// another agent.
+func HandleClaimIssue(svc service.IssueService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		issueID := r.PathValue("id")
+		if issueID == "" {
+			handler.RespondError(w, http.StatusBadRequest, "missing issue ID")
+			return
+		}
+
+		data, err := svc.ClaimIssue(r.Context(), service.ClaimIssueParams{IssueID: issueID})
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+
+		handler.WriteJSON(w, http.StatusOK, IssuesResponse{
+			Success: true,
+			Data:    data,
+		})
+	}
+}
+
 // handleDeleteIssue returns a handler that permanently deletes an issue by ID.
 func HandleDeleteIssue(svc service.IssueService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

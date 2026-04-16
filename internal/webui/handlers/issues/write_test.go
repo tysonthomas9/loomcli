@@ -990,3 +990,126 @@ func TestHandlePatchIssueW_AgentState_NilWhenAbsent(t *testing.T) {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
 	}
 }
+
+// ===========================================================================
+// handleClaimIssue tests
+// ===========================================================================
+
+func TestHandleClaimIssueW_Success(t *testing.T) {
+	svc := &mockIssueService{
+		claimIssueFunc: func(_ context.Context, params service.ClaimIssueParams) (json.RawMessage, error) {
+			if params.IssueID != "claim-1" {
+				t.Errorf("ClaimIssue IssueID = %q, want claim-1", params.IssueID)
+			}
+			return json.RawMessage(`{"id":"claim-1","assignee":"server","status":"in_progress"}`), nil
+		},
+	}
+	h := handleClaimIssue(svc)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/ws/issues/claim-1/claim", nil)
+	req.SetPathValue("id", "claim-1")
+	w := httptest.NewRecorder()
+
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	var resp IssuesResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if !resp.Success {
+		t.Error("expected success=true")
+	}
+	if !strings.Contains(string(resp.Data), `"assignee":"server"`) {
+		t.Errorf("data should include assignee, got %s", string(resp.Data))
+	}
+}
+
+func TestHandleClaimIssueW_MissingID(t *testing.T) {
+	svc := &mockIssueService{
+		claimIssueFunc: func(_ context.Context, _ service.ClaimIssueParams) (json.RawMessage, error) {
+			t.Fatal("service should not be called with empty ID")
+			return nil, nil
+		},
+	}
+	h := handleClaimIssue(svc)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/ws/issues//claim", nil)
+	req.SetPathValue("id", "")
+	w := httptest.NewRecorder()
+
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+	result := assertJSONResponse(t, w)
+	errMsg, _ := result["error"].(string)
+	if !strings.Contains(errMsg, "missing") {
+		t.Errorf("error = %q, want to contain 'missing'", errMsg)
+	}
+}
+
+func TestHandleClaimIssueW_AlreadyClaimed(t *testing.T) {
+	svc := &mockIssueService{
+		claimIssueFunc: func(_ context.Context, _ service.ClaimIssueParams) (json.RawMessage, error) {
+			return nil, service.ErrConflict("already claimed by other-agent")
+		},
+	}
+	h := handleClaimIssue(svc)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/ws/issues/claim-2/claim", nil)
+	req.SetPathValue("id", "claim-2")
+	w := httptest.NewRecorder()
+
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusConflict)
+	}
+	result := assertJSONResponse(t, w)
+	errMsg, _ := result["error"].(string)
+	if !strings.Contains(errMsg, "already claimed") {
+		t.Errorf("error = %q, want to contain 'already claimed'", errMsg)
+	}
+}
+
+func TestHandleClaimIssueW_NotFound(t *testing.T) {
+	svc := &mockIssueService{
+		claimIssueFunc: func(_ context.Context, _ service.ClaimIssueParams) (json.RawMessage, error) {
+			return nil, service.ErrNotFound("issue not found: ghost")
+		},
+	}
+	h := handleClaimIssue(svc)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/ws/issues/ghost/claim", nil)
+	req.SetPathValue("id", "ghost")
+	w := httptest.NewRecorder()
+
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+}
+
+func TestHandleClaimIssueW_ServiceUnavailable(t *testing.T) {
+	svc := &mockIssueService{
+		claimIssueFunc: func(_ context.Context, _ service.ClaimIssueParams) (json.RawMessage, error) {
+			return nil, service.ErrUnavailable("daemon not available")
+		},
+	}
+	h := handleClaimIssue(svc)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/ws/issues/x/claim", nil)
+	req.SetPathValue("id", "x")
+	w := httptest.NewRecorder()
+
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusServiceUnavailable)
+	}
+}

@@ -346,19 +346,29 @@ func (b *APIBackend) Create(ctx context.Context, params backend.CreateParams) (*
 
 func (b *APIBackend) Update(ctx context.Context, id string, params backend.UpdateParams) error {
 	if params.Claim {
-		return backend.ErrValidation("Update", "Claim field is not supported in APIBackend.Update; server has no per-issue claim endpoint (loomcli-j7qcq)")
+		return backend.ErrValidation("Update", "Claim field is not supported in APIBackend.Update; use APIBackend.ClaimIssue instead")
 	}
 	req := updateParamsToPatchRequest(params)
 	_, err := b.exec(ctx, "Update", http.MethodPatch, "/issues/"+url.PathEscape(id), req)
 	return err
 }
 
-// ClaimIssue returns ErrNotImplemented because the loom server has no
-// per-issue claim endpoint yet. PatchIssueRequest has no `claim` field and
-// /fleet/claim is a queue-pull endpoint with different auth. A dedicated
-// claim endpoint is tracked in loomcli-j7qcq.
-func (b *APIBackend) ClaimIssue(_ context.Context, _ string, _ time.Duration) error {
-	return backend.ErrNotImplemented("ClaimIssue", "server has no per-issue claim endpoint (tracked in loomcli-j7qcq)")
+// ClaimIssue atomically claims an issue via POST /issues/{id}/claim. The
+// lockTTL parameter is accepted per the IssueBackend contract but is not
+// forwarded to the server — beads SQLite has no TTL support, matching
+// BeadsBackend.ClaimIssue and FleetBackend.ClaimIssue behavior. Returns
+// KindConflict when the issue is already claimed by a different agent and
+// KindNotFound when the issue does not exist.
+func (b *APIBackend) ClaimIssue(ctx context.Context, id string, lockTTL time.Duration) error {
+	if id == "" {
+		return backend.ErrValidation("ClaimIssue", "id must not be empty")
+	}
+	if lockTTL < 0 {
+		return backend.ErrValidation("ClaimIssue", "lockTTL must not be negative")
+	}
+	path := "/issues/" + url.PathEscape(id) + "/claim"
+	_, err := b.exec(ctx, "ClaimIssue", http.MethodPost, path, nil)
+	return err
 }
 
 // DeferIssue defers an issue via PATCH with status="deferred" and optional

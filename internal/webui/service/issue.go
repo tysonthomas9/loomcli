@@ -72,6 +72,11 @@ type CloseIssueParams struct {
 	Force       bool
 }
 
+// ClaimIssueParams holds the parameters for atomically claiming an issue.
+type ClaimIssueParams struct {
+	IssueID string
+}
+
 // CreateIssueParams mirrors IssueCreateRequest but is not HTTP-bound.
 type CreateIssueParams struct {
 	Title              string
@@ -153,6 +158,7 @@ type IssueService interface {
 	CreateIssue(ctx context.Context, params CreateIssueParams) (json.RawMessage, error)
 	PatchIssue(ctx context.Context, params PatchIssueParams) error
 	CloseIssue(ctx context.Context, params CloseIssueParams) (json.RawMessage, error)
+	ClaimIssue(ctx context.Context, params ClaimIssueParams) (json.RawMessage, error)
 	DeleteIssue(ctx context.Context, issueID string) (json.RawMessage, error)
 	AddComment(ctx context.Context, params AddCommentParams) (*types.Comment, error)
 	AddDependency(ctx context.Context, params AddDependencyParams) error

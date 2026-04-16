@@ -804,6 +804,51 @@ paths:
         "404":
           description: Issue not found
 
+  /api/workspaces/{ws}/issues/{id}/claim:
+    post:
+      operationId: claimIssue
+      tags: [issues]
+      summary: Atomically claim an issue for the server-side actor
+      description: |
+        Claims an issue for the BD_ACTOR configured on the server. Returns 409
+        Conflict if the issue is already claimed by another agent. The claim
+        operation is atomic — only one of N concurrent callers will succeed.
+        Sets assignee and transitions status to in_progress in a single step.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/IssueId"
+      responses:
+        "200":
+          description: Issue claimed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: "#/components/schemas/IssueResponse"
+        "400":
+          description: Missing issue ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Issue not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Issue already claimed by another agent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/workspaces/{ws}/issues/{id}/move:
     post:
       operationId: moveIssue

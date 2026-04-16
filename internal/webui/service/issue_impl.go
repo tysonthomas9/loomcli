@@ -210,6 +210,53 @@ func (s *issueServiceImpl) CloseIssue(ctx context.Context, params CloseIssuePara
 	return resp.Data, nil
 }
 
+// ClaimIssue atomically claims an issue by ID for the server-side actor.
+// Returns 409-equivalent ErrConflict if the issue is already claimed by a
+// different agent. Re-claim by the same actor is idempotent and returns the
+// issue without error (beads ClaimIssue SQL treats self-reclaim as success).
+func (s *issueServiceImpl) ClaimIssue(ctx context.Context, params ClaimIssueParams) (json.RawMessage, error) {
+	if strings.TrimSpace(params.IssueID) == "" {
+		return nil, ErrValidation("issue ID is required")
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	client, err := s.acquireClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rpcOK := false
+	defer s.releaseClient(client, &rpcOK)
+
+	inProgress := "in_progress"
+	resp, err := client.Update(&rpc.UpdateArgs{
+		ID:     params.IssueID,
+		Claim:  true,
+		Status: &inProgress,
+	})
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return nil, ErrNotFound(fmt.Sprintf("issue not found: %s", params.IssueID))
+		}
+		slog.Error("RPC error in ClaimIssue", "issue_id", params.IssueID, "err", err)
+		return nil, ErrInternal("internal server error", err)
+	}
+	rpcOK = true
+
+	if !resp.Success {
+		if strings.Contains(resp.Error, "already claimed") {
+			return nil, ErrConflict(resp.Error)
+		}
+		if strings.Contains(resp.Error, "not found") {
+			return nil, ErrNotFound(resp.Error)
+		}
+		return nil, ErrInternal(resp.Error, nil)
+	}
+
+	return resp.Data, nil
+}
+
 func (s *issueServiceImpl) DeleteIssue(ctx context.Context, issueID string) (json.RawMessage, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()

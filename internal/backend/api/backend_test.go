@@ -591,17 +591,96 @@ func TestCount_NotImplemented(t *testing.T) {
 	}
 }
 
-func TestClaimIssue_NotImplemented(t *testing.T) {
-	ab, err := New(Config{BaseURL: "http://x", WorkspaceID: "ws"})
-	if err != nil {
-		t.Fatal(err)
+func TestClaimIssue_Success(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	var gotMethod, gotPath string
+	ab, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		respondOK(w, gen.IssueResponse{
+			Id:        "abc",
+			Title:     "claim test",
+			Status:    gen.IssueResponseStatus("in_progress"),
+			IssueType: gen.IssueResponseIssueType("task"),
+			Priority:  2,
+			CreatedAt: now,
+			UpdatedAt: now,
+			Labels:    []string{},
+		})
+	})
+	defer ts.Close()
+
+	if err := ab.ClaimIssue(context.Background(), "abc", 0); err != nil {
+		t.Fatalf("ClaimIssue: %v", err)
 	}
-	err = ab.ClaimIssue(context.Background(), "id", time.Minute)
+	if gotMethod != http.MethodPost {
+		t.Errorf("method = %s, want POST", gotMethod)
+	}
+	if !strings.HasSuffix(gotPath, "/issues/abc/claim") {
+		t.Errorf("path = %q, want suffix /issues/abc/claim", gotPath)
+	}
+}
+
+func TestClaimIssue_AlreadyClaimed(t *testing.T) {
+	ab, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		respondErr(w, http.StatusConflict, "already claimed by other-agent")
+	})
+	defer ts.Close()
+
+	err := ab.ClaimIssue(context.Background(), "abc", 0)
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !backend.IsKind(err, backend.KindNotImplemented) {
-		t.Errorf("expected KindNotImplemented, got %v", err)
+	if !backend.IsKind(err, backend.KindConflict) {
+		t.Errorf("expected KindConflict, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "already claimed") {
+		t.Errorf("error should preserve daemon message, got %v", err)
+	}
+}
+
+func TestClaimIssue_NotFound(t *testing.T) {
+	ab, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		respondErr(w, http.StatusNotFound, "issue not found: abc")
+	})
+	defer ts.Close()
+
+	err := ab.ClaimIssue(context.Background(), "abc", 0)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !backend.IsKind(err, backend.KindNotFound) {
+		t.Errorf("expected KindNotFound, got %v", err)
+	}
+}
+
+func TestClaimIssue_EmptyID(t *testing.T) {
+	ab, ts := newTestServer(t, func(_ http.ResponseWriter, _ *http.Request) {
+		t.Fatal("server should not be contacted when ID is empty")
+	})
+	defer ts.Close()
+
+	err := ab.ClaimIssue(context.Background(), "", 0)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Errorf("expected KindValidation, got %v", err)
+	}
+}
+
+func TestClaimIssue_NegativeTTL(t *testing.T) {
+	ab, ts := newTestServer(t, func(_ http.ResponseWriter, _ *http.Request) {
+		t.Fatal("server should not be contacted for negative TTL")
+	})
+	defer ts.Close()
+
+	err := ab.ClaimIssue(context.Background(), "abc", -1*time.Second)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Errorf("expected KindValidation, got %v", err)
 	}
 }
 

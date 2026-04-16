@@ -41,6 +41,7 @@ var handleListIssues = HandleListIssues
 var handleCreateIssue = HandleCreateIssue
 var handlePatchIssue = HandlePatchIssue
 var handleCloseIssue = HandleCloseIssue
+var handleClaimIssue = HandleClaimIssue
 var handleDeleteIssue = HandleDeleteIssue
 var handleMoveIssue = HandleMoveIssue
 var handleGetIssueEvents = HandleGetIssueEvents
@@ -156,6 +157,7 @@ type mockIssueService struct {
 	createIssueFunc      func(ctx context.Context, params service.CreateIssueParams) (json.RawMessage, error)
 	patchIssueFunc       func(ctx context.Context, params service.PatchIssueParams) error
 	closeIssueFunc       func(ctx context.Context, params service.CloseIssueParams) (json.RawMessage, error)
+	claimIssueFunc       func(ctx context.Context, params service.ClaimIssueParams) (json.RawMessage, error)
 	deleteIssueFunc      func(ctx context.Context, issueID string) (json.RawMessage, error)
 	addCommentFunc       func(ctx context.Context, params service.AddCommentParams) (*types.Comment, error)
 	addDependencyFunc    func(ctx context.Context, params service.AddDependencyParams) error
@@ -191,6 +193,12 @@ func (m *mockIssueService) PatchIssue(ctx context.Context, params service.PatchI
 func (m *mockIssueService) CloseIssue(ctx context.Context, params service.CloseIssueParams) (json.RawMessage, error) {
 	if m.closeIssueFunc != nil {
 		return m.closeIssueFunc(ctx, params)
+	}
+	return nil, nil
+}
+func (m *mockIssueService) ClaimIssue(ctx context.Context, params service.ClaimIssueParams) (json.RawMessage, error) {
+	if m.claimIssueFunc != nil {
+		return m.claimIssueFunc(ctx, params)
 	}
 	return nil, nil
 }
