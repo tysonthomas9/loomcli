@@ -9,6 +9,23 @@ import type { Issue } from "@/types";
 
 import styles from "./IssueViewGuard.module.css";
 
+function buildAutoRetryDescription(
+  retryCount: number,
+  nextRetryAt: number | null,
+): string {
+  if (nextRetryAt === null) {
+    return `Retrying automatically (attempt ${retryCount})...`;
+  }
+  const secondsRemaining = Math.max(
+    0,
+    Math.ceil((nextRetryAt - Date.now()) / 1000),
+  );
+  if (secondsRemaining === 0) {
+    return `Retrying automatically (attempt ${retryCount})...`;
+  }
+  return `Retrying automatically in ${secondsRemaining}s (attempt ${retryCount})...`;
+}
+
 interface IssueViewGuardProps {
   issues: Issue[];
   isLoading: boolean;
@@ -18,6 +35,10 @@ interface IssueViewGuardProps {
   loadingVariant: "columns" | "table";
   children: ReactNode;
   showEmptyState?: boolean;
+  /** Current auto-retry attempt (0 = not retrying). */
+  retryCount?: number;
+  /** Timestamp (ms) when next auto-retry fires, or null. */
+  nextRetryAt?: number | null;
 }
 
 export function IssueViewGuard({
@@ -29,6 +50,8 @@ export function IssueViewGuard({
   loadingVariant,
   children,
   showEmptyState = true,
+  retryCount = 0,
+  nextRetryAt = null,
 }: IssueViewGuardProps) {
   if (isLoading) {
     return (
@@ -48,12 +71,22 @@ export function IssueViewGuard({
 
   if (error) {
     const isStarting = error.includes("workspace is loading");
+    // Only mark as "retrying" while a retry is actually scheduled
+    // (nextRetryAt is non-null). Once the budget is exhausted, retryCount
+    // stays > 0 but nextRetryAt is null — the UI should fall back to the
+    // default fetch-error message with a manual retry button.
+    const isAutoRetrying =
+      retryCount > 0 && nextRetryAt !== null && !isStarting;
     return (
       <ErrorDisplay
         variant={isStarting ? "loading" : "fetch-error"}
         error={new Error(error)}
         showDetails={!isStarting}
         onRetry={onRetry}
+        {...(isAutoRetrying && {
+          isRetrying: true,
+          description: buildAutoRetryDescription(retryCount, nextRetryAt),
+        })}
       />
     );
   }

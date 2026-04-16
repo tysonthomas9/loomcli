@@ -126,7 +126,7 @@ describe("issueStore", () => {
       expect(mockGetReadyIssues).toHaveBeenCalledWith(
         "ws1",
         undefined,
-        undefined,
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
       );
     });
 
@@ -275,29 +275,40 @@ describe("issueStore", () => {
       expect(s.issuesMap.has("b")).toBe(true);
     });
 
-    it("prevents concurrent fetches", async () => {
-      let resolveFn: (v: Issue[]) => void;
-      mockGetReadyIssues.mockReturnValue(
-        new Promise<Issue[]>((resolve) => {
-          resolveFn = resolve;
-        }),
+    it("aborts in-flight fetch when a new fetch starts (no silent drop)", async () => {
+      // First call: never resolves on its own, but its signal should be
+      // aborted when the second call starts. Reject with AbortError when
+      // signalled, simulating what a real HTTP client does.
+      mockGetReadyIssues.mockImplementationOnce(
+        (_ws, _filter, opts) =>
+          new Promise<Issue[]>((_resolve, reject) => {
+            opts?.signal?.addEventListener("abort", () => {
+              reject(new DOMException("Aborted", "AbortError"));
+            });
+          }),
       );
+      // Second call: resolves immediately with a known result.
+      const expected = [makeIssue({ id: "from-second" })];
+      mockGetReadyIssues.mockResolvedValueOnce(expected);
 
       const promise1 = store.getState().fetchIssues({
         workspaceId: "ws1",
         mode: "ready",
       });
-
-      // Second call should be a no-op
       const promise2 = store.getState().fetchIssues({
         workspaceId: "ws1",
         mode: "ready",
       });
 
-      resolveFn!([]);
       await Promise.all([promise1, promise2]);
 
-      expect(mockGetReadyIssues).toHaveBeenCalledTimes(1);
+      // Both fetches were invoked — no silent drop.
+      expect(mockGetReadyIssues).toHaveBeenCalledTimes(2);
+      // Only the second fetch's data is applied; the first was aborted.
+      const s = store.getState();
+      expect(s.issuesMap.has("from-second")).toBe(true);
+      expect(s.isLoading).toBe(false);
+      expect(s.error).toBeNull();
     });
 
     it("passes sourceRepos to filter", async () => {
@@ -313,8 +324,233 @@ describe("issueStore", () => {
       expect(mockGetReadyIssues).toHaveBeenCalledWith(
         "ws1",
         expect.objectContaining({ source_repos: ["repo-a"], status: "open" }),
-        undefined,
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
       );
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Auto-retry with exponential backoff
+  // -----------------------------------------------------------------------
+
+  describe("auto-retry", () => {
+    it("schedules an auto-retry when fetch fails with a non-abort error", async () => {
+      mockGetReadyIssues.mockRejectedValueOnce(new Error("boom"));
+
+      await store.getState().fetchIssues({
+        workspaceId: "ws1",
+        mode: "ready",
+      });
+
+      const s = store.getState();
+      expect(s.error).toBe("boom");
+      expect(s.retryCount).toBe(1);
+      expect(s.nextRetryAt).not.toBeNull();
+      expect(s.isLoading).toBe(false);
+    });
+
+    it("auto-retry succeeds on recovery and clears error + retryCount", async () => {
+      mockGetReadyIssues
+        .mockRejectedValueOnce(new Error("transient"))
+        .mockResolvedValueOnce([makeIssue({ id: "recovered" })]);
+
+      await store.getState().fetchIssues({
+        workspaceId: "ws1",
+        mode: "ready",
+      });
+
+      // After first failure
+      expect(store.getState().retryCount).toBe(1);
+      expect(store.getState().error).toBe("transient");
+
+      // Advance past the 1s base delay
+      await vi.advanceTimersByTimeAsync(1_500);
+
+      const s = store.getState();
+      expect(s.error).toBeNull();
+      expect(s.retryCount).toBe(0);
+      expect(s.nextRetryAt).toBeNull();
+      expect(s.issuesMap.has("recovered")).toBe(true);
+      expect(mockGetReadyIssues).toHaveBeenCalledTimes(2);
+    });
+
+    it("stops retrying after MAX_AUTO_RETRIES failures and leaves error visible", async () => {
+      mockGetReadyIssues.mockRejectedValue(new Error("persistent failure"));
+
+      await store.getState().fetchIssues({
+        workspaceId: "ws1",
+        mode: "ready",
+      });
+
+      // Advance through all 5 retries: 1s + 2s + 4s + 8s + 16s = 31s total
+      await vi.advanceTimersByTimeAsync(35_000);
+
+      const s = store.getState();
+      expect(s.error).toBe("persistent failure");
+      expect(s.retryCount).toBe(5);
+      expect(s.nextRetryAt).toBeNull();
+      // Initial call + 5 auto-retries = 6 total
+      expect(mockGetReadyIssues).toHaveBeenCalledTimes(6);
+    });
+
+    it("cancels pending auto-retry when a new fetch starts", async () => {
+      mockGetReadyIssues.mockRejectedValueOnce(new Error("fail"));
+
+      await store.getState().fetchIssues({
+        workspaceId: "ws1",
+        mode: "ready",
+      });
+      expect(store.getState().retryCount).toBe(1);
+
+      // Start a new (successful) fetch before the retry timer fires
+      mockGetReadyIssues.mockResolvedValueOnce([makeIssue({ id: "manual" })]);
+      await store.getState().fetchIssues({
+        workspaceId: "ws1",
+        mode: "ready",
+      });
+
+      // retryCount is reset by the new non-retry fetch
+      expect(store.getState().retryCount).toBe(0);
+      expect(store.getState().nextRetryAt).toBeNull();
+
+      // Advance time — the cancelled retry should NOT fire
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(mockGetReadyIssues).toHaveBeenCalledTimes(2);
+    });
+
+    it("cancels pending auto-retry on reset()", async () => {
+      mockGetReadyIssues.mockRejectedValueOnce(new Error("fail"));
+
+      await store.getState().fetchIssues({
+        workspaceId: "ws1",
+        mode: "ready",
+      });
+      expect(store.getState().retryCount).toBe(1);
+
+      store.getState().reset();
+
+      expect(store.getState().retryCount).toBe(0);
+      expect(store.getState().nextRetryAt).toBeNull();
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      // Only the initial (failed) call; no retry fired.
+      expect(mockGetReadyIssues).toHaveBeenCalledTimes(1);
+    });
+
+    it("refetch() cancels pending auto-retry and starts fresh (resets retryCount)", async () => {
+      mockGetReadyIssues
+        .mockRejectedValueOnce(new Error("first fail"))
+        .mockResolvedValueOnce([makeIssue({ id: "manual-refetch" })]);
+
+      await store.getState().fetchIssues({
+        workspaceId: "ws1",
+        mode: "ready",
+      });
+      expect(store.getState().retryCount).toBe(1);
+
+      // Manual refetch before auto-retry fires
+      await store.getState().refetch();
+
+      const s = store.getState();
+      expect(s.retryCount).toBe(0);
+      expect(s.error).toBeNull();
+      expect(s.issuesMap.has("manual-refetch")).toBe(true);
+
+      // Cancelled auto-retry must not fire later
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(mockGetReadyIssues).toHaveBeenCalledTimes(2);
+    });
+
+    it("uses exponential backoff for successive failures (1s, 2s, 4s)", async () => {
+      mockGetReadyIssues.mockRejectedValue(new Error("fail"));
+
+      const t0 = Date.now();
+      await store.getState().fetchIssues({
+        workspaceId: "ws1",
+        mode: "ready",
+      });
+
+      const afterFirst = store.getState();
+      expect(afterFirst.retryCount).toBe(1);
+      // Delay for retry #1 uses index 0: 1000ms
+      expect(afterFirst.nextRetryAt).toBe(t0 + 1_000);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      const afterSecond = store.getState();
+      expect(afterSecond.retryCount).toBe(2);
+      // Delay for retry #2 uses index 1: 2000ms
+      expect(afterSecond.nextRetryAt).toBe(Date.now() + 2_000);
+
+      await vi.advanceTimersByTimeAsync(2_000);
+      const afterThird = store.getState();
+      expect(afterThird.retryCount).toBe(3);
+      // Delay for retry #3 uses index 2: 4000ms
+      expect(afterThird.nextRetryAt).toBe(Date.now() + 4_000);
+    });
+
+    it("isAutoRetry=true preserves retryCount from prior failure", async () => {
+      mockGetReadyIssues.mockRejectedValue(new Error("fail"));
+
+      await store.getState().fetchIssues({
+        workspaceId: "ws1",
+        mode: "ready",
+      });
+      expect(store.getState().retryCount).toBe(1);
+
+      // Manually call fetchIssues with isAutoRetry=true — simulates the
+      // scheduled retry callback. retryCount should NOT reset to 0.
+      await store.getState().fetchIssues({
+        workspaceId: "ws1",
+        mode: "ready",
+        isAutoRetry: true,
+      });
+
+      // The auto-retry also failed, so count should be 2 now
+      expect(store.getState().retryCount).toBe(2);
+    });
+
+    it("successful initial fetch does not schedule a retry", async () => {
+      mockGetReadyIssues.mockResolvedValue([makeIssue({ id: "a" })]);
+
+      await store.getState().fetchIssues({
+        workspaceId: "ws1",
+        mode: "ready",
+      });
+
+      const s = store.getState();
+      expect(s.retryCount).toBe(0);
+      expect(s.nextRetryAt).toBeNull();
+      expect(s.error).toBeNull();
+    });
+
+    it("does not reuse the caller's external signal for scheduled retries", async () => {
+      // Simulate the App.tsx pattern: caller passes an AbortSignal and
+      // aborts it later (e.g., useEffect cleanup on view switch). If the
+      // retry reused that aborted signal, the retry would be dropped.
+      const externalController = new AbortController();
+      mockGetReadyIssues
+        .mockRejectedValueOnce(new Error("transient"))
+        .mockResolvedValueOnce([makeIssue({ id: "recovered" })]);
+
+      await store.getState().fetchIssues({
+        workspaceId: "ws1",
+        mode: "ready",
+        signal: externalController.signal,
+      });
+      expect(store.getState().retryCount).toBe(1);
+
+      // Caller cleans up (e.g. component remount, view switch).
+      externalController.abort();
+
+      // Advance past the 1s backoff — retry should still fire and succeed,
+      // despite the external signal being aborted.
+      await vi.advanceTimersByTimeAsync(1_500);
+
+      const s = store.getState();
+      expect(s.error).toBeNull();
+      expect(s.retryCount).toBe(0);
+      expect(s.issuesMap.has("recovered")).toBe(true);
+      expect(mockGetReadyIssues).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -1208,7 +1444,7 @@ describe("issueStore", () => {
       expect(mockGetReadyIssues).toHaveBeenCalledWith(
         "ws1",
         expect.objectContaining({ status: "open" }),
-        undefined,
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
       );
     });
   });

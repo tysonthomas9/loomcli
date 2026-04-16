@@ -172,6 +172,8 @@ function App() {
   const issues = useMemo(() => [...issuesMap.values()], [issuesMap]);
   const isLoading = useStore(issueStore, (s) => s.isLoading);
   const error = useStore(issueStore, (s) => s.error);
+  const retryCount = useStore(issueStore, (s) => s.retryCount);
+  const nextRetryAt = useStore(issueStore, (s) => s.nextRetryAt);
   const pendingIds = useStore(issueStore, (s) => s.pendingIds);
 
   const connectionState = useStore(issueStore, (s) => s.connectionState);
@@ -846,6 +848,8 @@ function App() {
       filteredIssues,
       isLoading,
       error,
+      retryCount,
+      nextRetryAt,
       connectionState,
       reconnectAttempts,
       pendingIds,
@@ -869,6 +873,8 @@ function App() {
       filteredIssues,
       isLoading,
       error,
+      retryCount,
+      nextRetryAt,
       connectionState,
       reconnectAttempts,
       pendingIds,

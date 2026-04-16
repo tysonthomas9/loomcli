@@ -11,8 +11,16 @@ const GraphView = lazy(() =>
 );
 
 export function GraphPage() {
-  const { filteredIssues, issues, isLoading, error, isMultiRepo, activeView } =
-    useWorkspaceViewData();
+  const {
+    filteredIssues,
+    issues,
+    isLoading,
+    error,
+    retryCount,
+    nextRetryAt,
+    isMultiRepo,
+    activeView,
+  } = useWorkspaceViewData();
 
   const { handleIssueClick, refetch } = useWorkspaceViewActions();
 
@@ -22,6 +30,8 @@ export function GraphPage() {
         issues={issues}
         isLoading={isLoading}
         error={error}
+        retryCount={retryCount}
+        nextRetryAt={nextRetryAt}
         isMultiRepo={isMultiRepo}
         onRetry={refetch}
         loadingVariant="columns"

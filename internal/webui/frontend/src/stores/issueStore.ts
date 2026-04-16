@@ -23,6 +23,9 @@ import {
   STALE_BANNER_DELAY_MS,
   AUTO_ROLLBACK_TIMEOUT_MS,
   REFRESH_DEBOUNCE_MS,
+  MAX_AUTO_RETRIES,
+  RETRY_BASE_DELAY_MS,
+  RETRY_MAX_DELAY_MS,
   INITIAL_STATE,
   issuesAreEqual,
   processMutation as applyMutationPure,
@@ -52,10 +55,18 @@ export function createIssueStore(
   // --- Closure state (not in Zustand — doesn't trigger re-renders) ---
   const optimisticEntries = new Map<string, OptimisticEntry>();
   let fetchTimestamp = 0;
-  let isFetching = false;
+  /**
+   * Controller for the in-flight fetchIssues call. New calls abort it and
+   * install their own. Used to distinguish "currently fetching" from "stale
+   * fetch completing late" — replaces the previous `isFetching` boolean,
+   * which could silently drop retry attempts.
+   */
+  let activeController: AbortController | null = null;
   const deletedDuringFetch = new Set<string>();
   let refreshTimeout: ReturnType<typeof setTimeout> | null = null;
   let staleBannerTimeout: ReturnType<typeof setTimeout> | null = null;
+  /** Pending auto-retry timer; cleared on new fetch, reset, or success. */
+  let retryTimeout: ReturnType<typeof setTimeout> | null = null;
   let activeWorkspaceId: string | null = null;
   let activeSourceRepos: string[] | null = null;
   let activeMode: "ready" | "graph" | "kanban" = "ready";
@@ -75,7 +86,11 @@ export function createIssueStore(
     set: (partial: Partial<IssueStore>) => void,
     get: () => IssueStore,
   ): void {
-    const result = applyMutationPure(get().issuesMap, mutation, isFetching);
+    const result = applyMutationPure(
+      get().issuesMap,
+      mutation,
+      activeController !== null,
+    );
 
     if (result.scheduleRefresh) {
       if (refreshTimeout) clearTimeout(refreshTimeout);
@@ -96,6 +111,14 @@ export function createIssueStore(
     if (result.incrementCount) {
       set({ mutationCount: get().mutationCount + 1 });
     }
+  }
+
+  /** Compute the exponential-backoff delay (ms) for the given retry attempt. */
+  function computeRetryDelay(attempt: number): number {
+    return Math.min(
+      RETRY_BASE_DELAY_MS * Math.pow(2, attempt),
+      RETRY_MAX_DELAY_MS,
+    );
   }
 
   /** Remove an optimistic entry and update pendingIds */
@@ -124,20 +147,58 @@ export function createIssueStore(
     },
 
     async fetchIssues(params: FetchIssuesParams): Promise<void> {
-      if (isFetching) return;
-
-      const { workspaceId, mode, filter, graphFilter, sourceRepos, signal } =
-        params;
+      const {
+        workspaceId,
+        mode,
+        filter,
+        graphFilter,
+        sourceRepos,
+        signal,
+        isAutoRetry = false,
+      } = params;
       activeWorkspaceId = workspaceId;
       activeMode = mode;
       activeFilter = filter;
       activeGraphFilter = graphFilter;
       activeSourceRepos = sourceRepos ?? null;
 
-      isFetching = true;
+      // Cancel any in-flight fetch so the new call always proceeds.
+      // This replaces the previous `if (isFetching) return` guard, which
+      // silently dropped manual retries and view-switch fetches.
+      if (activeController) {
+        activeController.abort();
+      }
+      const internalController = new AbortController();
+      activeController = internalController;
+
+      // Cancel any pending auto-retry timer. If this call IS an auto-retry,
+      // preserve retryCount (the retry logic already incremented it when
+      // scheduling). Otherwise, reset retry state — user-initiated or
+      // view-switch fetches start a fresh retry window.
+      if (retryTimeout !== null) {
+        clearTimeout(retryTimeout);
+        retryTimeout = null;
+      }
+      if (!isAutoRetry) {
+        set({
+          isLoading: true,
+          error: null,
+          retryCount: 0,
+          nextRetryAt: null,
+        });
+      } else {
+        set({ isLoading: true, error: null, nextRetryAt: null });
+      }
+
       fetchTimestamp = Date.now();
       deletedDuringFetch.clear();
-      set({ isLoading: true, error: null });
+
+      // Merge the internal controller with any external signal — either can
+      // abort the fetch. External signals come from useEffect cleanup on
+      // unmount/dependency change.
+      const mergedSignal: AbortSignal = signal
+        ? AbortSignal.any([internalController.signal, signal])
+        : internalController.signal;
 
       try {
         const effectiveFilter: WorkFilter | undefined = sourceRepos?.length
@@ -148,9 +209,9 @@ export function createIssueStore(
             ? { ...graphFilter, source_repos: sourceRepos }
             : graphFilter;
 
-        const reqOpts: Pick<RequestOptions, "signal"> | undefined = signal
-          ? { signal }
-          : undefined;
+        const reqOpts: Pick<RequestOptions, "signal"> = {
+          signal: mergedSignal,
+        };
 
         let data: Issue[];
         if (mode === "kanban") {
@@ -196,18 +257,81 @@ export function createIssueStore(
           }
         }
 
-        set({ issuesMap: mergedMap, isLoading: false });
+        // Success: clear error and reset retry state
+        set({
+          issuesMap: mergedMap,
+          isLoading: false,
+          error: null,
+          retryCount: 0,
+          nextRetryAt: null,
+        });
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") {
-          set({ isLoading: false });
+          // Aborted fetch. If a newer call superseded us, leave isLoading
+          // alone — the newer call has already set it true and is in flight.
+          // If we're still the active controller, the abort came from the
+          // external signal (e.g., useEffect cleanup on unmount); clear
+          // isLoading so the UI doesn't stay in a spinner forever. Either
+          // way, do NOT schedule an auto-retry for user-driven aborts.
+          if (activeController === internalController) {
+            set({ isLoading: false });
+          }
+          return;
+        }
+        // A non-abort error from a superseded fetch must not mutate the
+        // newer fetch's state or schedule a retry. Parallels the
+        // AbortError and `finally` branches.
+        if (activeController !== internalController) {
           return;
         }
         const message =
           err instanceof Error ? err.message : "Failed to fetch issues";
-        set({ error: message, isLoading: false });
+
+        // Schedule exponential-backoff auto-retry if we haven't exhausted
+        // the budget. The retry calls fetchIssues({ isAutoRetry: true }),
+        // which preserves retryCount for subsequent attempts.
+        const currentRetryCount = get().retryCount;
+        if (currentRetryCount < MAX_AUTO_RETRIES) {
+          const nextAttempt = currentRetryCount + 1;
+          const delay = computeRetryDelay(currentRetryCount);
+          set({
+            error: message,
+            isLoading: false,
+            retryCount: nextAttempt,
+            nextRetryAt: Date.now() + delay,
+          });
+          // Strip the external signal before retrying: by the time this
+          // timer fires, the caller's AbortController (e.g. the one from
+          // App.tsx's useEffect) may have been aborted by a cleanup (view
+          // switch, StrictMode double-invoke). Reusing that aborted signal
+          // would abort the retry before it starts, silently eating the
+          // recovery attempt. The internal controller still provides
+          // cancellation for the retry itself.
+          const { signal: _externalSignal, ...retryParams } = params;
+          void _externalSignal;
+          retryTimeout = setTimeout(() => {
+            retryTimeout = null;
+            void get().fetchIssues({
+              ...retryParams,
+              isAutoRetry: true,
+            });
+          }, delay);
+        } else {
+          // Exhausted retries — leave error displayed, stop retrying.
+          set({
+            error: message,
+            isLoading: false,
+            nextRetryAt: null,
+          });
+        }
       } finally {
-        isFetching = false;
-        deletedDuringFetch.clear();
+        // Only clear activeController if it's still ours. A newer call
+        // may have replaced it; clearing blindly would erase the new call's
+        // controller and re-enable concurrent fetches.
+        if (activeController === internalController) {
+          activeController = null;
+          deletedDuringFetch.clear();
+        }
       }
     },
 
@@ -449,13 +573,20 @@ export function createIssueStore(
         clearTimeout(staleBannerTimeout);
         staleBannerTimeout = null;
       }
+      if (retryTimeout) {
+        clearTimeout(retryTimeout);
+        retryTimeout = null;
+      }
+      if (activeController) {
+        activeController.abort();
+        activeController = null;
+      }
 
       // Note: eventUnsubscribe is NOT called here. The SSE subscription
       // lifecycle is managed by StoreWiring's useEffect, not by reset().
       // Calling eventUnsubscribe() here would break SSE after workspace changes.
 
       fetchTimestamp = 0;
-      isFetching = false;
       deletedDuringFetch.clear();
       activeWorkspaceId = null;
       activeSourceRepos = null;

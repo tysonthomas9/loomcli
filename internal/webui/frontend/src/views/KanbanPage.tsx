@@ -18,6 +18,8 @@ export function KanbanPage() {
     issues,
     isLoading,
     error,
+    retryCount,
+    nextRetryAt,
     isMultiRepo,
     activeView,
     blockedIssuesMap,
@@ -105,6 +107,8 @@ export function KanbanPage() {
         issues={issues}
         isLoading={isLoading}
         error={error}
+        retryCount={retryCount}
+        nextRetryAt={nextRetryAt}
         isMultiRepo={isMultiRepo}
         onRetry={refetch}
         loadingVariant="columns"
