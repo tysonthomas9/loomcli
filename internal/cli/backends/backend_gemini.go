@@ -1,7 +1,6 @@
 package backends
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -110,17 +109,12 @@ func defaultGeminiNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 		}
 	}()
 
-	// Parse stdout lines: display and collect usage if available
-	scanner := bufio.NewScanner(stdout)
-	buf := make([]byte, 0, 1024*1024)
-	scanner.Buffer(buf, 10*1024*1024)
-	for scanner.Scan() {
-		line := scanner.Text()
+	scanStreamOutput(stdout, func(line string) {
 		fmt.Println(line)
 		if collector != nil {
 			collectGeminiStreamUsage(line, collector)
 		}
-	}
+	})
 
 	runErr := cmd.Wait()
 	guard.WaitAndMark()

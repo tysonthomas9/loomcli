@@ -2,14 +2,17 @@ package automode
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
@@ -44,6 +47,7 @@ type AutoModeOptions struct {
 type AutoModeState struct {
 	TasksCompleted        int
 	ConsecutiveErrors     int
+	ConsecutiveRateLimits int // separate counter for rate-limit errors (threshold: 5)
 	ConsecutiveNoProgress int // sessions that completed without claiming a task
 	LastTaskTime          time.Time
 	IdleStartTime         time.Time
@@ -334,43 +338,24 @@ func runAutoTask(ctx *autoLoopCtx, shutdown chan struct{}) bool {
 	prompt := ctx.generatePrompt(ctx.opts.AgentName, workspace)
 	sess := createAutoSession(ctx, prompt)
 
-	// If we have a session ID from a previous failed invocation, set it so
-	// the Claude invoker builds a --resume command instead of cold-starting.
 	if ctx.lastClaudeSessionID != "" {
 		backends.SetResumeSessionID(ctx.lastClaudeSessionID)
 	}
-	defer backends.ClearResumeSessionID() // no-op if consumed; cleans up on mock/non-Claude paths
+	defer backends.ClearResumeSessionID()
 
 	backendName := cli.GetBackendName()
 	collector := usage.NewCollector(backendName, ctx.opts.AgentName)
 	startedAt := time.Now()
 
 	err := ctx.deps.Agent.InvokeNonInteractive(ctx.opts.WorktreePath, prompt, ctx.opts.AgentName, shutdown, collector)
-
-	// Capture the session ID from this invocation for potential resume on retry.
-	capturedID := backends.GetLastCapturedSessionID()
-	if capturedID != "" {
-		ctx.lastClaudeSessionID = capturedID
-		ctx.resumeFailures = 0 // new session ID, reset failure count
-	}
-
+	captureSessionID(ctx)
 	endedAt := time.Now()
-	recordSessionUsage(ctx.usageStore, collector, ctx.opts.WorktreePath, ctx.opts.AgentName, ctx.opts.ParentID, startedAt, endedAt, err, ctx.opts.LockBridge)
 
-	inTok, outTok, cacheRead, cacheWrite := collector.Totals()
-	tier := usage.ResolvePricing(backendName)
-	costUSD := usage.EstimateCost(tier, usage.SessionUsage{
-		InputTokens:      inTok,
-		OutputTokens:     outTok,
-		CacheReadTokens:  cacheRead,
-		CacheWriteTokens: cacheWrite,
-	})
-	finalizeAutoSession(ctx, sess, beforeRef, err, inTok, outTok, cacheRead, cacheWrite, costUSD)
+	recordAndFinalize(ctx, collector, sess, beforeRef, backendName, startedAt, endedAt, err)
 
 	if updateErr := ctx.updateState(cli.StateIdle); updateErr != nil {
 		fmt.Printf("[auto] Warning: failed to update state: %v\n", updateErr)
 	}
-
 	if reason, yielded := checkYieldFile(ctx.yieldFile); yielded {
 		fmt.Printf("[auto] Yield requested after task (reason: %s), exiting gracefully...\n", reason)
 		ctx.state.ShouldExit = true
@@ -379,9 +364,39 @@ func runAutoTask(ctx *autoLoopCtx, shutdown chan struct{}) bool {
 	}
 
 	if err != nil {
-		return handleAutoTaskError(ctx, err, shutdown)
+		ae := classifyInvokeError(err, backendName)
+		return handleAutoTaskError(ctx, ae, err, shutdown)
 	}
 	return handleAutoTaskSuccess(ctx, beforeRef, startedAt, endedAt, shutdown)
+}
+
+func captureSessionID(ctx *autoLoopCtx) {
+	capturedID := backends.GetLastCapturedSessionID()
+	if capturedID != "" {
+		ctx.lastClaudeSessionID = capturedID
+		ctx.resumeFailures = 0
+	}
+}
+
+func recordAndFinalize(ctx *autoLoopCtx, collector *usage.Collector, sess *sessions.Session, beforeRef, backendName string, startedAt, endedAt time.Time, err error) {
+	recordSessionUsage(ctx.usageStore, collector, ctx.opts.WorktreePath, ctx.opts.AgentName, ctx.opts.ParentID, startedAt, endedAt, err, ctx.opts.LockBridge)
+
+	inTok, outTok, cacheRead, cacheWrite := collector.Totals()
+	tier := usage.ResolvePricing(backendName)
+	costUSD := usage.EstimateCost(tier, usage.SessionUsage{
+		InputTokens: inTok, OutputTokens: outTok,
+		CacheReadTokens: cacheRead, CacheWriteTokens: cacheWrite,
+	})
+	finalizeAutoSession(ctx, sess, beforeRef, err, inTok, outTok, cacheRead, cacheWrite, costUSD)
+}
+
+func classifyInvokeError(err error, backendName string) *agenterr.AgentError {
+	exitCode := 1
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		exitCode = exitErr.ExitCode()
+	}
+	return agenterr.ClassifyFromOutput(backends.GetLastCapturedOutput(), exitCode, backendName)
 }
 
 func printAutoModeSummary(state *AutoModeState) {
@@ -393,6 +408,9 @@ func printAutoModeSummary(state *AutoModeState) {
 	fmt.Printf("Tasks completed: %d\n", state.TasksCompleted)
 	if state.ConsecutiveErrors > 0 {
 		fmt.Printf("Errors at exit: %d consecutive\n", state.ConsecutiveErrors)
+	}
+	if state.ConsecutiveRateLimits > 0 {
+		fmt.Printf("Rate limits at exit: %d consecutive\n", state.ConsecutiveRateLimits)
 	}
 	if state.ConsecutiveNoProgress > 0 {
 		fmt.Printf("No-progress sessions at exit: %d consecutive\n", state.ConsecutiveNoProgress)

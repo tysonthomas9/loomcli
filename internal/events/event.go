@@ -140,8 +140,10 @@ type TaskCompletedData struct {
 }
 
 type TaskFailedData struct {
-	TaskID string `json:"task_id"`
-	Error  string `json:"error"`
+	TaskID     string `json:"task_id"`
+	Error      string `json:"error"`
+	ErrorClass string `json:"error_class,omitempty"`
+	RetryAfter string `json:"retry_after,omitempty"`
 }
 
 type AgentStartedData struct {

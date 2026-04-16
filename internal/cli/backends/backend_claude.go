@@ -215,29 +215,9 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 	resumeID := consumeResumeSessionID()
 	cmd := buildClaudeNonInteractiveCmd(workDir, agentName, resumeID)
 
-	r, err := pipePromptToCmd(cmd, prompt)
+	r, stdout, err := setupNonInteractivePipes(cmd, prompt, resumeID)
 	if err != nil {
 		return err
-	}
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		r.Close()
-		return fmt.Errorf("failed to create stdout pipe: %w", err)
-	}
-	cmd.Stderr = os.Stderr
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-
-	if resumeID != "" {
-		fmt.Printf("[auto] Resuming Claude session %s...\n\n", resumeID)
-	} else {
-		fmt.Println("Launching Claude agent (non-interactive)...")
-		fmt.Println("")
-	}
-
-	if err := cmd.Start(); err != nil {
-		r.Close()
-		return fmt.Errorf("failed to start claude: %w", err)
 	}
 
 	guard := newProcessGuard(cmd.Process)
@@ -263,6 +243,56 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 	return runErr
 }
 
+// setupNonInteractivePipes configures stdin/stdout pipes, starts the process,
+// and prints the launch message. Returns the stdin pipe file and stdout reader.
+func setupNonInteractivePipes(cmd *exec.Cmd, prompt, resumeID string) (*os.File, io.Reader, error) {
+	r, err := pipePromptToCmd(cmd, prompt)
+	if err != nil {
+		return nil, nil, err
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		r.Close()
+		return nil, nil, fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
+	cmd.Stderr = os.Stderr
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
+	if resumeID != "" {
+		fmt.Printf("[auto] Resuming Claude session %s...\n\n", resumeID)
+	} else {
+		fmt.Println("Launching Claude agent (non-interactive)...")
+		fmt.Println("")
+	}
+
+	if err := cmd.Start(); err != nil {
+		r.Close()
+		return nil, nil, fmt.Errorf("failed to start claude: %w", err)
+	}
+	return r, stdout, nil
+}
+
+// outputRingBuffer keeps the last N lines of stream output for error classification.
+type outputRingBuffer struct {
+	lines []string
+	cap   int
+}
+
+func newOutputRingBuffer(cap int) *outputRingBuffer {
+	return &outputRingBuffer{lines: make([]string, 0, cap), cap: cap}
+}
+
+func (b *outputRingBuffer) Add(line string) {
+	if len(b.lines) >= b.cap {
+		b.lines = b.lines[1:]
+	}
+	b.lines = append(b.lines, line)
+}
+
+func (b *outputRingBuffer) String() string {
+	return strings.Join(b.lines, "\n")
+}
+
 // newStreamLineHandler returns a line handler that captures the Claude session ID
 // (once) and forwards lines to displayStreamEvent and the usage collector.
 func newStreamLineHandler(workDir string, collector *usage.Collector) func(string) {
@@ -285,13 +315,20 @@ func newStreamLineHandler(workDir string, collector *usage.Collector) func(strin
 
 // scanStreamOutput reads stdout line by line through a buffered scanner and
 // calls handler for each line. Shared by Claude, Codex, and OpenCode backends.
+// It automatically captures the last 50 lines into lastCapturedOutput for
+// error classification by agenterr.ClassifyFromOutput.
 func scanStreamOutput(stdout io.Reader, handler func(string)) {
+	SetLastCapturedOutput("")
+	outputBuf := newOutputRingBuffer(50)
 	scanner := bufio.NewScanner(stdout)
 	buf := make([]byte, 0, 1024*1024) // 1MB buffer for large tool results
 	scanner.Buffer(buf, 10*1024*1024)
 	for scanner.Scan() {
-		handler(scanner.Text())
+		line := scanner.Text()
+		outputBuf.Add(line)
+		handler(line)
 	}
+	SetLastCapturedOutput(outputBuf.String())
 }
 
 // StreamEvent represents a Claude stream-json event.

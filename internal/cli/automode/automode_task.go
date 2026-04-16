@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
@@ -62,49 +63,116 @@ func finalizeAutoSession(ctx *autoLoopCtx, sess *sessions.Session, beforeRef str
 	go sessions.NotifyWebUI(context.Background(), backends.ResolveWebUIURL(), taskID, sess.SessionID(), sess.Meta.Status, backends.ResolveNotifyToken())
 }
 
-func handleAutoTaskError(ctx *autoLoopCtx, err error, shutdown chan struct{}) bool {
-	fmt.Printf("[auto] Agent exited with error: %v\n", err)
-	ctx.state.ConsecutiveErrors++
+func handleAutoTaskError(ctx *autoLoopCtx, ae *agenterr.AgentError, rawErr error, shutdown chan struct{}) bool {
+	fmt.Printf("[auto] Agent error: [%s] %s\n", ae.Class, ae.Message)
+	trackResumeFailures(ctx)
+	emitTaskFailedEvent(ctx, ae, rawErr)
 
-	// Track resume failures: if we attempted a resume (session ID was set) and
-	// it failed, increment the counter. After 2 consecutive resume failures on
-	// the same session ID, clear it so the next attempt is a cold-start.
-	if ctx.lastClaudeSessionID != "" {
-		ctx.resumeFailures++
-		if ctx.resumeFailures >= 2 {
-			fmt.Printf("[auto] Resume failed %d times, falling back to cold-start\n", ctx.resumeFailures)
-			ctx.lastClaudeSessionID = ""
-			ctx.resumeFailures = 0
-		}
+	// Fatal errors (auth, billing) and non-retryable specifics: exit immediately.
+	if ae.IsFatal() || ae.Class == agenterr.ModelNotFound {
+		return exitWithReason(ctx, fmt.Sprintf("fatal error: %s", ae.Message))
+	}
+	if ae.Class == agenterr.NoWork {
+		return exitWithReason(ctx, "no work available")
 	}
 
+	// Rate limit: separate counter, generous retry.
+	if ae.Class == agenterr.RateLimited {
+		return handleRateLimitError(ctx, ae, shutdown)
+	}
+
+	// Retryable transient errors: exponential backoff.
+	if ae.IsRetryable() {
+		return handleTransientError(ctx, shutdown)
+	}
+
+	// Default: Unknown, ContextOverflow — use fixed interval, 3-error exit.
+	return handleDefaultError(ctx, shutdown)
+}
+
+func trackResumeFailures(ctx *autoLoopCtx) {
+	if ctx.lastClaudeSessionID == "" {
+		return
+	}
+	ctx.resumeFailures++
+	if ctx.resumeFailures >= 2 {
+		fmt.Printf("[auto] Resume failed %d times, falling back to cold-start\n", ctx.resumeFailures)
+		ctx.lastClaudeSessionID = ""
+		ctx.resumeFailures = 0
+	}
+}
+
+func emitTaskFailedEvent(ctx *autoLoopCtx, ae *agenterr.AgentError, rawErr error) {
 	failedTaskID := ""
 	if info, readErr := ctx.readLock(); readErr == nil && info != nil {
 		failedTaskID = info.TaskID
 	}
-	if evt, evtErr := events.NewEvent(events.TaskFailed, ctx.opts.AgentName, "", "", events.TaskFailedData{TaskID: failedTaskID, Error: err.Error()}); evtErr == nil {
+	evtData := events.TaskFailedData{
+		TaskID:     failedTaskID,
+		Error:      rawErr.Error(),
+		ErrorClass: ae.Class.String(),
+	}
+	if ae.RetryAfter > 0 {
+		evtData.RetryAfter = ae.RetryAfter.String()
+	}
+	if evt, evtErr := events.NewEvent(events.TaskFailed, ctx.opts.AgentName, "", "", evtData); evtErr == nil {
 		if emitErr := ctx.opts.EventBus.Emit(evt); emitErr != nil {
 			log.Printf("[auto] Failed to emit task_failed event: %v", emitErr)
 		}
 	}
+}
 
-	if ctx.state.ConsecutiveErrors >= 3 {
-		ctx.state.ShouldExit = true
-		ctx.state.ExitReason = "too many consecutive errors"
-		return false
+func exitWithReason(ctx *autoLoopCtx, reason string) bool {
+	ctx.state.ShouldExit = true
+	ctx.state.ExitReason = reason
+	return false
+}
+
+func handleRateLimitError(ctx *autoLoopCtx, ae *agenterr.AgentError, shutdown chan struct{}) bool {
+	ctx.state.ConsecutiveRateLimits++
+	if ctx.state.ConsecutiveRateLimits >= 5 {
+		return exitWithReason(ctx, "too many consecutive rate limits")
 	}
+	wait := 60 * time.Second
+	if ae.RetryAfter > 0 {
+		wait = ae.RetryAfter
+	}
+	fmt.Printf("[auto] Rate limited, waiting %s before retry...\n", wait)
+	return sleepOrShutdown(ctx, wait, shutdown)
+}
 
+func handleTransientError(ctx *autoLoopCtx, shutdown chan struct{}) bool {
+	ctx.state.ConsecutiveErrors++
+	if ctx.state.ConsecutiveErrors >= 3 {
+		return exitWithReason(ctx, "too many consecutive errors")
+	}
+	backoff := ctx.opts.BackoffBase << (ctx.state.ConsecutiveErrors - 1)
+	if cap := 4 * ctx.opts.BackoffBase; backoff > cap {
+		backoff = cap
+	}
+	fmt.Printf("[auto] Transient error, backing off %s before retry...\n", backoff)
+	return sleepOrShutdown(ctx, backoff, shutdown)
+}
+
+func handleDefaultError(ctx *autoLoopCtx, shutdown chan struct{}) bool {
+	ctx.state.ConsecutiveErrors++
+	if ctx.state.ConsecutiveErrors >= 3 {
+		return exitWithReason(ctx, "too many consecutive errors")
+	}
 	fmt.Printf("[auto] Waiting %ds before retry...\n", ctx.opts.Interval)
-	if interruptibleSleep(time.Duration(ctx.opts.Interval)*time.Second, shutdown) {
-		ctx.state.ShouldExit = true
-		ctx.state.ExitReason = "shutdown signal received"
-		return false
+	return sleepOrShutdown(ctx, time.Duration(ctx.opts.Interval)*time.Second, shutdown)
+}
+
+func sleepOrShutdown(ctx *autoLoopCtx, d time.Duration, shutdown chan struct{}) bool {
+	if interruptibleSleep(d, shutdown) {
+		return exitWithReason(ctx, "shutdown signal received")
 	}
 	return true
 }
 
 func handleAutoTaskSuccess(ctx *autoLoopCtx, beforeRef string, startedAt, endedAt time.Time, shutdown chan struct{}) bool {
 	ctx.state.ConsecutiveErrors = 0
+	ctx.state.ConsecutiveRateLimits = 0
 
 	if agentClaimedTask(ctx.opts.WorktreePath, ctx.opts.AgentName, ctx.opts.LockBridge) {
 		return handleTaskClaimed(ctx, beforeRef, startedAt, endedAt, shutdown)
