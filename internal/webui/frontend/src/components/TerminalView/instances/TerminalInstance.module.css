@@ -1,6 +1,11 @@
 /**
  * TerminalInstance component styles.
- * Single xterm.js terminal pane filling its parent container.
+ * wterm-backed terminal pane filling its parent container.
+ *
+ * Theming flows through CSS custom properties: wterm reads `--term-*`
+ * vars; we map them onto loom's existing `--terminal-*` palette so the
+ * light/dark switcher in variables.css drives the terminal colors with
+ * zero JavaScript.
  */
 
 .wrapper {
@@ -12,64 +17,12 @@
 .container {
   width: 100%;
   height: 100%;
-  background: var(--terminal-bg);
-  overflow: hidden;
-}
 
-/* Visible scrollbar for the xterm viewport (dark theme) */
-.container :global(.xterm-viewport)::-webkit-scrollbar {
-  width: 8px;
-}
-
-.container :global(.xterm-viewport)::-webkit-scrollbar-track {
-  background: var(--terminal-bg);
-}
-
-.container :global(.xterm-viewport)::-webkit-scrollbar-thumb {
-  background: var(--terminal-scrollbar-thumb);
-  border-radius: 4px;
-}
-
-.container :global(.xterm-viewport)::-webkit-scrollbar-thumb:hover {
-  background: var(--terminal-scrollbar-thumb-hover);
-}
-
-/* "New output ↓" pill — shown when scrolled up and new output arrives */
-.newOutputPill {
-  position: absolute;
-  bottom: 16px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(59, 130, 246, 0.9);
-  color: #fff;
-  border: none;
-  border-radius: 16px;
-  padding: 4px 14px;
-  font-size: 12px;
-  font-family: var(--font-family-base);
-  cursor: pointer;
-  z-index: 10;
-  animation: slideUp 0.2s ease-out;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-}
-
-.newOutputPill:hover {
-  background: rgba(59, 130, 246, 1);
-}
-
-@keyframes slideUp {
-  from {
-    transform: translateX(-50%) translateY(8px);
-    opacity: 0;
-  }
-  to {
-    transform: translateX(-50%) translateY(0);
-    opacity: 1;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .newOutputPill {
-    animation: none;
-  }
+  --term-bg: var(--terminal-bg);
+  --term-fg: var(--terminal-fg);
+  --term-cursor: var(--terminal-cursor);
+  --term-selection-bg: var(--terminal-selection);
+  --term-font-family: var(--font-family-mono);
+  --term-font-size: 14px;
+  --term-line-height: 1.2;
 }

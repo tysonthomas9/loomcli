@@ -10,8 +10,6 @@ import {
   type MutableRefObject,
 } from "react";
 
-import { scheduleSessionKill } from "@/hooks/api";
-
 import type {
   ConnectionState,
   TerminalInstanceHandle,
@@ -34,6 +32,11 @@ interface UseTabActionsOptions {
   deleteTab: (session: string) => Promise<void>;
 }
 
+// workspaceId is retained in the options for symmetry with sibling hooks
+// even though the tmux-kill API path that consumed it is gone — keeping the
+// signature stable minimizes churn at call sites and leaves a clean slot if
+// per-close server work needs to be reintroduced.
+
 interface UseTabActionsReturn {
   handleTabClose: (tabId: string) => void;
   handleDuplicateTab: (tabId: string) => void;
@@ -41,7 +44,6 @@ interface UseTabActionsReturn {
 }
 
 export function useTabActions({
-  workspaceId,
   tabs,
   setTabs,
   setActiveTabId,
@@ -57,10 +59,8 @@ export function useTabActions({
       if (!sourceTab || tabs.length <= 1) return;
       const sessionNameToDelete = sourceTab.sessionName;
 
-      // Get handle before removing from refs — we need it for disconnect().
       const handle = instanceRefs.current.get(tabId);
 
-      // Immediately update UI — tab disappears.
       setTabs((prev) => {
         if (prev.length <= 1) return prev;
         const idx = prev.findIndex((t) => t.id === tabId);
@@ -79,7 +79,6 @@ export function useTabActions({
       });
       instanceRefs.current.delete(tabId);
 
-      // Delete tab metadata from Redis.
       deleteTab(sessionNameToDelete).catch((err) =>
         console.error(
           `Failed to delete tab metadata ${sessionNameToDelete}:`,
@@ -87,27 +86,11 @@ export function useTabActions({
         ),
       );
 
-      // Gracefully disconnect WS, then kill the tmux session.
-      // disconnect() sets beingKilledRef to block reconnect, closes the WS,
-      // and resolves when ws.onclose fires (or after 2s timeout).
-      // The backend tombstone (killingSet) prevents any stray reconnect from
-      // recreating the session.
-      const doKill = () =>
-        scheduleSessionKill(workspaceId, sessionNameToDelete, true).catch(
-          (err) =>
-            console.error(
-              `Failed to kill session ${sessionNameToDelete}:`,
-              err,
-            ),
-        );
-      if (handle?.disconnect) {
-        handle.disconnect().then(doKill);
-      } else {
-        doKill();
-      }
+      // Close the WebSocket. On the server side, closing the WS kills the
+      // PTY — there's no separate server-side "kill session" RPC anymore.
+      handle?.disconnect?.().catch(() => {});
     },
     [
-      workspaceId,
       deleteTab,
       tabs,
       setTabs,

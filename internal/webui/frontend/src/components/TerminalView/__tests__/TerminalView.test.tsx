@@ -651,108 +651,8 @@ describe("TerminalView", () => {
     });
   });
 
-  // ── Search overlay ─────────────────────────────────────────────────────────
-
-  describe("search overlay", () => {
-    it("search overlay hidden by default", () => {
-      setMetadata(DEFAULT_METADATA);
-      render(<TerminalView />);
-
-      expect(
-        screen.queryByTestId("terminal-search-bar"),
-      ).not.toBeInTheDocument();
-    });
-
-    it("Cmd+F toggles search overlay open", () => {
-      setMetadata(DEFAULT_METADATA);
-      render(<TerminalView />);
-
-      fireEvent.keyDown(document, { key: "f", metaKey: true });
-
-      expect(screen.getByTestId("terminal-search-bar")).toBeInTheDocument();
-    });
-
-    it("Escape closes search overlay", () => {
-      setMetadata(DEFAULT_METADATA);
-      render(<TerminalView />);
-
-      fireEvent.keyDown(document, { key: "f", metaKey: true });
-      expect(screen.getByTestId("terminal-search-bar")).toBeInTheDocument();
-
-      fireEvent.keyDown(document, { key: "Escape" });
-      expect(
-        screen.queryByTestId("terminal-search-bar"),
-      ).not.toBeInTheDocument();
-    });
-
-    it("search input auto-focuses on open", () => {
-      setMetadata(DEFAULT_METADATA);
-      render(<TerminalView />);
-
-      fireEvent.keyDown(document, { key: "f", metaKey: true });
-
-      const input = screen.getByTestId("terminal-search-input");
-      expect(input).toHaveFocus();
-    });
-
-    it("search bar shows case-sensitive toggle button", () => {
-      setMetadata(DEFAULT_METADATA);
-      render(<TerminalView />);
-
-      fireEvent.keyDown(document, { key: "f", metaKey: true });
-
-      const toggle = screen.getByTestId("search-toggle-case");
-      expect(toggle).toBeInTheDocument();
-      expect(toggle).toHaveTextContent("Aa");
-      expect(toggle).toHaveAttribute("aria-pressed", "false");
-    });
-
-    it("search bar shows regex toggle button", () => {
-      setMetadata(DEFAULT_METADATA);
-      render(<TerminalView />);
-
-      fireEvent.keyDown(document, { key: "f", metaKey: true });
-
-      const toggle = screen.getByTestId("search-toggle-regex");
-      expect(toggle).toBeInTheDocument();
-      expect(toggle).toHaveTextContent(".*");
-      expect(toggle).toHaveAttribute("aria-pressed", "false");
-    });
-
-    it("toggling case-sensitive updates aria-pressed", () => {
-      setMetadata(DEFAULT_METADATA);
-      render(<TerminalView />);
-
-      fireEvent.keyDown(document, { key: "f", metaKey: true });
-
-      const toggle = screen.getByTestId("search-toggle-case");
-      fireEvent.click(toggle);
-
-      expect(toggle).toHaveAttribute("aria-pressed", "true");
-    });
-
-    it("toggling regex updates aria-pressed", () => {
-      setMetadata(DEFAULT_METADATA);
-      render(<TerminalView />);
-
-      fireEvent.keyDown(document, { key: "f", metaKey: true });
-
-      const toggle = screen.getByTestId("search-toggle-regex");
-      fireEvent.click(toggle);
-
-      expect(toggle).toHaveAttribute("aria-pressed", "true");
-    });
-
-    it("no match counter when search input is empty", () => {
-      setMetadata(DEFAULT_METADATA);
-      render(<TerminalView />);
-
-      fireEvent.keyDown(document, { key: "f", metaKey: true });
-
-      expect(screen.queryByText(/of/)).not.toBeInTheDocument();
-      expect(screen.queryByText("No results")).not.toBeInTheDocument();
-    });
-  });
+  // Search overlay removed with the wterm migration — native browser
+  // find-in-page (Cmd+F) operates on the DOM-rendered cells.
 
   // ── Full-height ────────────────────────────────────────────────────────────
 
@@ -1310,21 +1210,6 @@ describe("TerminalView", () => {
       fireEvent.keyDown(document, { key: "Escape" });
 
       expect(onEscape).toHaveBeenCalledTimes(1);
-    });
-
-    it("Escape does NOT call onEscape when search is open", () => {
-      const onEscape = vi.fn();
-      setMetadata(DEFAULT_METADATA);
-      render(<TerminalView onEscape={onEscape} />);
-
-      // Open search overlay
-      fireEvent.keyDown(document, { key: "f", metaKey: true });
-      expect(screen.getByTestId("terminal-search-bar")).toBeInTheDocument();
-
-      // Press Escape — should close search, not call onEscape
-      fireEvent.keyDown(document, { key: "Escape" });
-
-      expect(onEscape).not.toHaveBeenCalled();
     });
 
     it("Escape does NOT call onEscape when isActive=false", () => {

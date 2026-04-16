@@ -5,8 +5,6 @@
 export { TerminalInstance } from "./TerminalInstance";
 export type {
   ConnectionState,
-  ContextMenuEvent,
-  SearchResultInfo,
   TerminalInstanceProps,
   TerminalInstanceHandle,
 } from "./TerminalInstance";
@@ -17,11 +15,9 @@ export type { TerminalPaneProps } from "./TerminalPane";
 export { TerminalPaneArea } from "./TerminalPaneArea";
 
 export { connectWebSocket, encodeResize } from "./terminalConnection";
-export { getTerminalTheme } from "./terminalTheme";
 
 export { useConnectionState } from "./useConnectionState";
 export { useSessionSeeding } from "./useSessionSeeding";
-export { useClipboard } from "./useClipboard";
 
 export { ReconnectingOverlay } from "./ReconnectingOverlay";
 export type {

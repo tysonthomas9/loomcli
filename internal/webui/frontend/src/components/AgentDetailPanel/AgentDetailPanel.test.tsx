@@ -15,21 +15,7 @@ import type { LoomAgentStatus, LoomTaskInfo } from "@/types";
 
 import { AgentDetailPanel } from "./AgentDetailPanel";
 
-// Mock the useAgentTerminalLogs hook to prevent WebSocket/API calls in tests
 vi.mock("@/hooks", () => ({
-  useAgentTerminalLogs: () => ({
-    mode: "idle",
-    chunks: [],
-    state: "disconnected",
-    error: null,
-    resetVersion: 0,
-    refresh: vi.fn(),
-    resize: vi.fn(),
-    sendInput: vi.fn(),
-    loadOlderLogs: vi.fn(),
-    hasMoreLines: false,
-    isLoadingMore: false,
-  }),
   useFocusReturn: vi.fn(),
   useFocusTrap: vi.fn(),
   useRegisterEscapeLayer: vi.fn(),
@@ -48,11 +34,6 @@ vi.mock("@/hooks", () => ({
   LAYER_AGENT_PANEL: 20,
   LAYER_ISSUE_PANEL: 10,
   LAYER_TERMINAL_SEARCH: 5,
-}));
-
-// Mock LogViewer to avoid terminal rendering complexity
-vi.mock("../LogViewer", () => ({
-  LogViewer: () => <div data-testid="log-viewer-mock" />,
 }));
 
 // Mock OpenInEditor to avoid its hook dependencies (useEditors)
@@ -197,11 +178,10 @@ describe("AgentDetailPanel", () => {
       expect(gitTab).toBeInTheDocument();
     });
 
-    it("renders all five tabs: Info, Logs, Git, Diff, Files", () => {
+    it("renders all four tabs: Info, Git, Diff, Files", () => {
       renderPanel();
 
       expect(screen.getByRole("tab", { name: "Info" })).toBeInTheDocument();
-      expect(screen.getByRole("tab", { name: "Logs" })).toBeInTheDocument();
       expect(screen.getByRole("tab", { name: "Git" })).toBeInTheDocument();
       expect(screen.getByRole("tab", { name: "Diff" })).toBeInTheDocument();
       expect(screen.getByRole("tab", { name: "Files" })).toBeInTheDocument();
@@ -344,11 +324,10 @@ describe("AgentDetailPanel", () => {
       expect(filesTab).toBeInTheDocument();
     });
 
-    it("renders all five tabs: Info, Logs, Git, Diff, Files", () => {
+    it("renders all four tabs: Info, Git, Diff, Files", () => {
       renderPanel();
 
       expect(screen.getByRole("tab", { name: "Info" })).toBeInTheDocument();
-      expect(screen.getByRole("tab", { name: "Logs" })).toBeInTheDocument();
       expect(screen.getByRole("tab", { name: "Git" })).toBeInTheDocument();
       expect(screen.getByRole("tab", { name: "Diff" })).toBeInTheDocument();
       expect(screen.getByRole("tab", { name: "Files" })).toBeInTheDocument();

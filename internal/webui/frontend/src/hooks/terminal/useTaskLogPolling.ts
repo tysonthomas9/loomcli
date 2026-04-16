@@ -4,7 +4,17 @@ import { getTaskLogContent } from "@/api";
 
 import { useWorkspaceContext } from "@/hooks/workspace";
 
-import type { LogChunk, LogStreamState } from "./logTypes";
+export interface LogChunk {
+  chunk: Uint8Array;
+  byteOffset: number;
+  timestamp: string;
+}
+
+export type LogStreamState =
+  | "disconnected"
+  | "connecting"
+  | "connected"
+  | "reconnecting";
 
 export interface UseTaskLogPollingOptions {
   taskId: string | null;

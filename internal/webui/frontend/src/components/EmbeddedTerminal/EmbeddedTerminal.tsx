@@ -3,23 +3,20 @@
  * Wraps TerminalInstance with a header bar showing backend info,
  * connection state, worktree breadcrumb, and optional git actions.
  * Designed to be rendered inside terminal-type tabs in IssueDetailPanel.
+ *
+ * Selection, copy, and paste are handled natively by wterm's DOM renderer
+ * + the browser's built-in clipboard API, so no JS interception layer is
+ * needed here.
  */
 
-import { forwardRef, useState, useCallback, useRef } from "react";
+import { forwardRef, useState, useCallback } from "react";
 
 import { useGitActions } from "@/hooks/workspace";
 
 import {
   TerminalInstance,
   type ConnectionState,
-  type ContextMenuEvent,
   type TerminalInstanceHandle,
-} from "@/components/TerminalView";
-import {
-  CopyToast,
-  PasteConfirmDialog,
-  TerminalContextMenu,
-  useClipboard,
 } from "@/components/TerminalView";
 
 import { TerminalHeader } from "./TerminalHeader";
@@ -54,42 +51,6 @@ export const EmbeddedTerminal = forwardRef<
 ) {
   const [connectionState, setConnectionState] =
     useState<ConnectionState>("disconnected");
-  const [contextMenu, setContextMenu] = useState<ContextMenuEvent | null>(null);
-
-  // Set up clipboard hooks — needs instanceRefs and activeTabIdRef
-  const localRef = useRef<TerminalInstanceHandle | null>(null);
-  const instanceRefs = useRef<Map<string, TerminalInstanceHandle>>(new Map());
-  const activeTabIdRef = useRef(sessionName);
-  activeTabIdRef.current = sessionName;
-
-  // Keep instanceRefs map in sync with the local ref
-  const setLocalRef = useCallback(
-    (handle: TerminalInstanceHandle | null) => {
-      localRef.current = handle;
-      if (handle) {
-        instanceRefs.current.set(sessionName, handle);
-      } else {
-        instanceRefs.current.delete(sessionName);
-      }
-      // Forward to parent ref
-      if (typeof ref === "function") {
-        ref(handle);
-      } else if (ref) {
-        (ref as React.MutableRefObject<TerminalInstanceHandle | null>).current =
-          handle;
-      }
-    },
-    [sessionName, ref],
-  );
-
-  const {
-    showCopyToast,
-    pendingPasteText,
-    handleCopyNotify,
-    handlePasteRequest,
-    handlePasteConfirm,
-    handlePasteCancel,
-  } = useClipboard(instanceRefs, activeTabIdRef);
 
   const handleConnectionStateChange = useCallback(
     (state: ConnectionState) => {
@@ -98,39 +59,6 @@ export const EmbeddedTerminal = forwardRef<
     },
     [onExternalStateChange],
   );
-
-  const handleContextMenu = useCallback((event: ContextMenuEvent) => {
-    setContextMenu(event);
-  }, []);
-
-  const handleContextMenuClose = useCallback(() => {
-    setContextMenu(null);
-  }, []);
-
-  const handleContextMenuCopy = useCallback(() => {
-    const instance = instanceRefs.current.get(sessionName);
-    if (instance) {
-      const sel = instance.getSelection();
-      if (sel) {
-        navigator.clipboard
-          .writeText(sel)
-          .then(() => handleCopyNotify())
-          .catch(() => {});
-      }
-    }
-    setContextMenu(null);
-    instanceRefs.current.get(sessionName)?.focus();
-  }, [sessionName, handleCopyNotify]);
-
-  const handleContextMenuPaste = useCallback(() => {
-    setContextMenu(null);
-    handlePasteRequest();
-  }, [handlePasteRequest]);
-
-  const handleContextMenuSelectAll = useCallback(() => {
-    instanceRefs.current.get(sessionName)?.selectAll();
-    setContextMenu(null);
-  }, [sessionName]);
 
   const gitActions = useGitActions({ agentName });
 
@@ -147,33 +75,12 @@ export const EmbeddedTerminal = forwardRef<
       />
       <div className={styles.terminalContainer}>
         <TerminalInstance
-          ref={setLocalRef}
+          ref={ref}
           sessionName={sessionName}
           isActive={isActive}
           onConnectionStateChange={handleConnectionStateChange}
-          onCopyNotify={handleCopyNotify}
-          onPasteRequest={handlePasteRequest}
-          onContextMenu={handleContextMenu}
         />
       </div>
-      <PasteConfirmDialog
-        isOpen={pendingPasteText !== null}
-        text={pendingPasteText ?? ""}
-        onConfirm={handlePasteConfirm}
-        onCancel={handlePasteCancel}
-      />
-      <CopyToast visible={showCopyToast} />
-      {contextMenu && (
-        <TerminalContextMenu
-          x={contextMenu.x}
-          y={contextMenu.y}
-          hasSelection={contextMenu.hasSelection}
-          onCopy={handleContextMenuCopy}
-          onPaste={handleContextMenuPaste}
-          onSelectAll={handleContextMenuSelectAll}
-          onClose={handleContextMenuClose}
-        />
-      )}
     </div>
   );
 });

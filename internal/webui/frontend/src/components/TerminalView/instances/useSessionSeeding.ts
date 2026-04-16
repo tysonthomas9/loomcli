@@ -1,10 +1,8 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useCallback } from "react";
 
 import type { IssueContext } from "@/api/terminal";
-import { seedTerminalSession, scheduleSessionKill } from "@/hooks/api";
 
 import type { ConnectionState } from "./TerminalInstance";
-import type { PendingLeadSession } from "@/components/TerminalView/TerminalView";
 import {
   MAX_TABS,
   type TabState,
@@ -16,8 +14,6 @@ interface UseSessionSeedingOptions {
   onIssueContextConsumed?: (() => void) | undefined;
   pendingAgentName: string | undefined;
   onAgentNameConsumed?: (() => void) | undefined;
-  pendingLeadSession?: PendingLeadSession | undefined;
-  onLeadSessionConsumed?: (() => void) | undefined;
   tabs: TabState[];
   setTabs: React.Dispatch<React.SetStateAction<TabState[]>>;
   setActiveTabId: React.Dispatch<React.SetStateAction<string>>;
@@ -36,32 +32,33 @@ interface UseSessionSeedingReturn {
   trySeedOnConnect: (tabId: string) => void;
 }
 
+/**
+ * Manages pending issue / agent context delivery into the terminal tab
+ * system. The backend "seed" flow that used to inject issue prompts via
+ * tmux send-keys is gone with the tmux removal; this hook now only
+ * handles the tab-opening half (create or switch to the appropriate tab).
+ * `trySeedOnConnect` is retained as a stable no-op so callers don't need
+ * to change — it's the natural extension point if client-side seeding is
+ * re-introduced later.
+ */
 export function useSessionSeeding({
   pendingIssueContext,
   onIssueContextConsumed,
   pendingAgentName,
   onAgentNameConsumed,
-  pendingLeadSession,
-  onLeadSessionConsumed,
   tabs,
   setTabs,
   setActiveTabId,
   createTab,
   config,
   initializedRef,
-  tabsRef,
-  workspaceIdRef,
 }: UseSessionSeedingOptions): UseSessionSeedingReturn {
-  const seededSessionsRef = useRef<Set<string>>(new Set());
-  const pendingSeedRef = useRef<Map<string, IssueContext>>(new Map());
-
-  // Handle pending issue context: create or switch to issue tab, then seed
+  // Handle pending issue context: create or switch to issue tab.
   useEffect(() => {
     if (!pendingIssueContext || !initializedRef.current) return;
 
     const sessionName = `issue-${sanitizeSessionName(pendingIssueContext.issue_id)}`;
 
-    // Check if tab already exists — switch to it without re-seeding
     const existingTab = tabs.find((t) => t.sessionName === sessionName);
     if (existingTab) {
       setActiveTabId(existingTab.id);
@@ -69,10 +66,6 @@ export function useSessionSeeding({
       return;
     }
 
-    // Store seed context in ref before consuming the prop
-    pendingSeedRef.current.set(sessionName, pendingIssueContext);
-
-    // Create new tab
     const newTab: TabState = {
       id: sessionName,
       label: `issue-${sanitizeSessionName(pendingIssueContext.issue_id)}`,
@@ -83,7 +76,6 @@ export function useSessionSeeding({
     setTabs((prev) => [...prev, newTab]);
     setActiveTabId(sessionName);
 
-    // Persist tab metadata (fire-and-forget)
     createTab(sessionName, newTab.label, tabs.length).catch((err) =>
       console.error(`Failed to persist issue tab ${sessionName}:`, err),
     );
@@ -100,13 +92,12 @@ export function useSessionSeeding({
     config,
   ]);
 
-  // Handle pending agent name: create or switch to agent terminal tab
+  // Handle pending agent name: create or switch to agent terminal tab.
   useEffect(() => {
     if (!pendingAgentName || !initializedRef.current) return;
 
     const sessionName = `agent-${sanitizeSessionName(pendingAgentName)}`;
 
-    // Check if tab already exists — switch to it
     const existingTab = tabs.find((t) => t.sessionName === sessionName);
     if (existingTab) {
       setActiveTabId(existingTab.id);
@@ -114,13 +105,11 @@ export function useSessionSeeding({
       return;
     }
 
-    // Max tabs check
     if (tabs.length >= MAX_TABS) {
       onAgentNameConsumed?.();
       return;
     }
 
-    // Create new agent terminal tab
     const newTab: TabState = {
       id: sessionName,
       label: `agent-${pendingAgentName}`,
@@ -132,7 +121,6 @@ export function useSessionSeeding({
     setTabs((prev) => [...prev, newTab]);
     setActiveTabId(sessionName);
 
-    // Persist tab metadata (fire-and-forget)
     createTab(sessionName, newTab.label, tabs.length).catch((err) =>
       console.error(`Failed to persist agent tab ${sessionName}:`, err),
     );
@@ -148,85 +136,10 @@ export function useSessionSeeding({
     setActiveTabId,
   ]);
 
-  // Handle pending lead session: create or focus a tab for a backend-spawned
-  // `loom lead --message <...>` session. The backend already seeded the
-  // user's request as part of the tmux invocation, so no client-side
-  // send-keys seeding is required. If the tab limit has been reached, tear
-  // down the orphaned tmux session so it does not leak.
-  useEffect(() => {
-    if (!pendingLeadSession || !initializedRef.current) return;
-
-    const { sessionName, backend } = pendingLeadSession;
-    const currentTabs = tabsRef.current;
-
-    const existingTab = currentTabs.find((t) => t.sessionName === sessionName);
-    if (existingTab) {
-      setActiveTabId(existingTab.id);
-      onLeadSessionConsumed?.();
-      return;
-    }
-
-    if (currentTabs.length >= MAX_TABS) {
-      scheduleSessionKill(workspaceIdRef.current, sessionName, true).catch(
-        (err) =>
-          console.error(
-            `Failed to kill orphaned lead session ${sessionName}:`,
-            err,
-          ),
-      );
-      onLeadSessionConsumed?.();
-      return;
-    }
-
-    const newTab: TabState = {
-      id: sessionName,
-      label: sessionName,
-      sessionName,
-      connectionState: "disconnected" as ConnectionState,
-      backendName: backend,
-    };
-    setTabs((prev) => [...prev, newTab]);
-    setActiveTabId(sessionName);
-
-    createTab(sessionName, newTab.label, currentTabs.length).catch((err) =>
-      console.error(`Failed to persist lead tab ${sessionName}:`, err),
-    );
-
-    onLeadSessionConsumed?.();
-  }, [
-    pendingLeadSession,
-    createTab,
-    onLeadSessionConsumed,
-    initializedRef,
-    setTabs,
-    setActiveTabId,
-    tabsRef,
-    workspaceIdRef,
-  ]);
-
-  const trySeedOnConnect = useCallback(
-    (tabId: string) => {
-      const tab = tabsRef.current.find((t) => t.id === tabId);
-      if (!tab) return;
-      if (seededSessionsRef.current.has(tab.sessionName)) return;
-      const seedCtx = pendingSeedRef.current.get(tab.sessionName);
-      if (!seedCtx) return;
-
-      seededSessionsRef.current.add(tab.sessionName);
-      pendingSeedRef.current.delete(tab.sessionName);
-      seedTerminalSession(
-        workspaceIdRef.current,
-        tab.sessionName,
-        seedCtx,
-      ).catch((err) =>
-        console.error(
-          `Failed to seed terminal session ${tab.sessionName}:`,
-          err,
-        ),
-      );
-    },
-    [tabsRef, workspaceIdRef],
-  );
+  const trySeedOnConnect = useCallback((_tabId: string) => {
+    // No-op: backend-side seeding was removed with the tmux migration.
+    // Extension point for future client-side prompt injection.
+  }, []);
 
   return { trySeedOnConnect };
 }

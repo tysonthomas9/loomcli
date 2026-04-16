@@ -100,8 +100,11 @@ export function useTerminalMetadata(
       });
       try {
         await putTabMetadata(workspace, session, {
+          session_name: session,
           label,
           sort_order: sortOrder,
+          notes: "",
+          pinned: false,
         });
       } catch (err) {
         if (mountedRef.current) {

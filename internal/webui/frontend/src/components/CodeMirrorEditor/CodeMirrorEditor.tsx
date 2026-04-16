@@ -75,7 +75,7 @@ export function CodeMirrorEditor({
   const readOnlyCompartmentRef = useRef(new Compartment());
   const lineNumbersCompartmentRef = useRef(new Compartment());
 
-  // Sync onChange to ref following LogViewer pattern (avoid stale closures)
+  // Sync onChange to ref to avoid stale closures
   const onChangeRef = useRef(onChange);
   useEffect(() => {
     onChangeRef.current = onChange;

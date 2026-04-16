@@ -2,13 +2,6 @@
  * Terminal/session hooks barrel.
  */
 
-export { useAgentTerminalLogs } from "./useAgentTerminalLogs";
-export type {
-  AgentLogTransportMode,
-  UseAgentTerminalLogsOptions,
-  UseAgentTerminalLogsReturn,
-} from "./useAgentTerminalLogs";
-
 export { useDiff } from "./useDiff";
 export type { UseDiffOptions, UseDiffReturn, SummaryStats } from "./useDiff";
 
@@ -24,6 +17,8 @@ export { useTaskLogPolling } from "./useTaskLogPolling";
 export type {
   UseTaskLogPollingOptions,
   UseTaskLogPollingReturn,
+  LogChunk,
+  LogStreamState,
 } from "./useTaskLogPolling";
 
 export { useTaskSessions } from "./useTaskSessions";
@@ -41,8 +36,3 @@ export type { UseTerminalFontReturn } from "./useTerminalFont";
 
 export { useTerminalMetadata } from "./useTerminalMetadata";
 export type { UseTerminalMetadataReturn } from "./useTerminalMetadata";
-
-export { useTerminalSessions } from "./useTerminalSessions";
-export type { UseTerminalSessionsReturn } from "./useTerminalSessions";
-
-export type { LogChunk, LogStreamState } from "./logTypes";

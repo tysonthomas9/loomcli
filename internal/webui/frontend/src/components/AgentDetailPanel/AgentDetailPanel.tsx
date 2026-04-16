@@ -15,7 +15,6 @@ import {
 
 import { ErrorDisplay } from "@/components";
 import {
-  useAgentTerminalLogs,
   useFocusReturn,
   useFocusTrap,
   useRegisterEscapeLayer,
@@ -36,7 +35,6 @@ const DiffTab = lazy(() =>
   })),
 );
 
-import { LogViewer } from "../LogViewer";
 import { OpenInEditor } from "../OpenInEditor";
 import { RepoBadge } from "../RepoBadge";
 import styles from "./AgentDetailPanel.module.css";
@@ -70,7 +68,7 @@ export interface AgentDetailPanelProps {
 /**
  * AgentDetailPanel displays detailed agent information in a slide-out panel.
  */
-type TabType = "info" | "logs" | "git" | "diff" | "files";
+type TabType = "info" | "git" | "diff" | "files";
 
 export function AgentDetailPanel({
   isOpen,
@@ -82,23 +80,6 @@ export function AgentDetailPanel({
 }: AgentDetailPanelProps): JSX.Element {
   const panelRef = useRef<HTMLElement>(null);
   const [activeTab, setActiveTab] = useState<TabType>("info");
-
-  const {
-    mode: logMode,
-    chunks: logChunks,
-    state: logConnectionState,
-    error: logError,
-    resetVersion: logResetVersion,
-    refresh: refreshLogs,
-    resize: resizeLogs,
-    sendInput: sendLogInput,
-    loadOlderLogs,
-    hasMoreLines,
-    isLoadingMore,
-  } = useAgentTerminalLogs({
-    agentName,
-    enabled: isOpen && activeTab === "logs" && agentName !== null,
-  });
 
   // Reset to info tab when agent changes
   useEffect(() => {
@@ -239,17 +220,6 @@ export function AgentDetailPanel({
                 </button>
                 <button
                   type="button"
-                  className={`${styles.tab} ${activeTab === "logs" ? styles.activeTab : ""}`}
-                  onClick={() => setActiveTab("logs")}
-                  aria-selected={activeTab === "logs"}
-                  role="tab"
-                  id="agent-panel-tab-logs"
-                  aria-controls="agent-panel-tabpanel-logs"
-                >
-                  Logs
-                </button>
-                <button
-                  type="button"
                   className={`${styles.tab} ${activeTab === "git" ? styles.activeTab : ""}`}
                   onClick={() => setActiveTab("git")}
                   aria-selected={activeTab === "git"}
@@ -366,53 +336,6 @@ export function AgentDetailPanel({
                     </div>
                   )}
                 </div>
-              </div>
-            ) : activeTab === "logs" ? (
-              /* Logs Tab */
-              <div
-                className={styles.logsContainer}
-                id="agent-panel-tabpanel-logs"
-                role="tabpanel"
-                aria-labelledby="agent-panel-tab-logs"
-              >
-                <div className={styles.logsMetaRow}>
-                  <span className={styles.logsModeBadge} data-mode={logMode}>
-                    {logMode === "tmux"
-                      ? "Live (tmux)"
-                      : logMode === "archive"
-                        ? "Archive snapshot"
-                        : logMode === "loading"
-                          ? "Loading logs..."
-                          : "Idle"}
-                  </span>
-                  {logMode === "archive" && (
-                    <button
-                      type="button"
-                      className={styles.logsRefreshButton}
-                      onClick={refreshLogs}
-                    >
-                      Refresh
-                    </button>
-                  )}
-                </div>
-                <LogViewer
-                  chunks={logChunks}
-                  connectionState={logConnectionState}
-                  error={logError}
-                  height="100%"
-                  autoScroll={logMode !== "tmux"}
-                  resetVersion={logResetVersion}
-                  mode={logMode === "tmux" ? "interactive" : "static"}
-                  onTerminalResize={resizeLogs}
-                  onScrollToTop={
-                    logMode === "archive" ? loadOlderLogs : undefined
-                  }
-                  isLoadingMore={isLoadingMore}
-                  hasMoreOlder={logMode === "archive" ? hasMoreLines : false}
-                  {...(logMode === "tmux"
-                    ? { onTerminalData: sendLogInput }
-                    : {})}
-                />
               </div>
             ) : activeTab === "git" ? (
               /* Git Tab */

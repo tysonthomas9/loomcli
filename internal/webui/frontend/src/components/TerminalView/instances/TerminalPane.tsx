@@ -1,7 +1,5 @@
 import type {
   ConnectionState,
-  ContextMenuEvent,
-  SearchResultInfo,
   TerminalInstanceHandle,
 } from "./TerminalInstance";
 import { TerminalInstance } from "./TerminalInstance";
@@ -23,13 +21,8 @@ export interface TerminalPaneProps {
     state: ConnectionState,
     hasConnected: boolean,
   ) => void;
-  onCopyNotify: () => void;
-  onPasteRequest: () => void;
-  onSearchRequest: () => void;
-  onContextMenu: (event: ContextMenuEvent) => void;
   onReconnectStateChange: (state: ReconnectOverlayState) => void;
   onOutput: () => void;
-  onSearchResultChange: (result: SearchResultInfo | null) => void;
   onBackendCrash: (reason: string) => void;
   onCrashRestart: () => void;
   onCloseTab: () => void;
@@ -50,13 +43,8 @@ export function TerminalPane({
   isActive,
   instanceRef,
   onConnectionStateChange,
-  onCopyNotify,
-  onPasteRequest,
-  onSearchRequest,
-  onContextMenu,
   onReconnectStateChange,
   onOutput,
-  onSearchResultChange,
   onBackendCrash,
   onCrashRestart,
   onCloseTab,
@@ -78,13 +66,8 @@ export function TerminalPane({
         sessionName={tab.sessionName}
         isActive={isActive}
         onConnectionStateChange={onConnectionStateChange}
-        onCopyNotify={onCopyNotify}
-        onPasteRequest={onPasteRequest}
-        onSearchRequest={onSearchRequest}
-        onContextMenu={onContextMenu}
         onReconnectStateChange={onReconnectStateChange}
         onOutput={onOutput}
-        onSearchResultChange={onSearchResultChange}
         onBackendCrash={onBackendCrash}
         onTerminalFocus={onTerminalFocus}
         agentName={tab.agentName}

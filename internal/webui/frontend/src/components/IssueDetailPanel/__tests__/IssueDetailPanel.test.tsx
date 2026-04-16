@@ -23,26 +23,12 @@ import { IssueDetailPanel } from "../IssueDetailPanel";
 
 // Create hoisted mocks
 const {
-  mockUseAgentTerminalLogs,
   mockUseRegisterEscapeLayer,
   mockDeleteTabMetadata,
   mockScheduleSessionKill,
   mockUseIssueTabPersistence,
   mockUseWorkspaceContext,
 } = vi.hoisted(() => ({
-  mockUseAgentTerminalLogs: vi.fn(() => ({
-    mode: "idle" as const,
-    chunks: [],
-    state: "disconnected" as const,
-    error: null,
-    resetVersion: 0,
-    refresh: vi.fn(),
-    resize: vi.fn(),
-    sendInput: vi.fn(),
-    loadOlderLogs: vi.fn(),
-    hasMoreLines: false,
-    isLoadingMore: false,
-  })),
   mockUseRegisterEscapeLayer: vi.fn(),
   mockDeleteTabMetadata: vi.fn(() => Promise.resolve()),
   mockScheduleSessionKill: vi.fn(() => Promise.resolve()),
@@ -102,12 +88,10 @@ vi.mock("@/hooks/workspace", async () => {
   return { ...actual, useWorkspaceContext: mockUseWorkspaceContext };
 });
 
-// Mock the agent terminal logs hook
 vi.mock("@/hooks", async (importOriginal) => {
   const orig = await importOriginal<typeof import("@/hooks")>();
   return {
     ...orig,
-    useAgentTerminalLogs: mockUseAgentTerminalLogs,
     useRegisterEscapeLayer: mockUseRegisterEscapeLayer,
     useKeyboardShortcuts: vi.fn(() => ({
       isCheatsheetOpen: false,
@@ -126,42 +110,6 @@ vi.mock("@/hooks", async (importOriginal) => {
     LAYER_TERMINAL_SEARCH: 5,
   };
 });
-
-// Mock xterm.js (used by LogViewer)
-vi.mock("@xterm/xterm", () => {
-  class MockTerminal {
-    options: Record<string, unknown> = { disableStdin: true };
-    open = vi.fn();
-    dispose = vi.fn();
-    write = vi.fn();
-    clear = vi.fn();
-    loadAddon = vi.fn();
-    scrollToBottom = vi.fn();
-    onScroll = vi.fn(() => ({ dispose: vi.fn() }));
-    onData = vi.fn(() => ({ dispose: vi.fn() }));
-    buffer = { active: { viewportY: 0, baseY: 0 } };
-  }
-  return { Terminal: MockTerminal };
-});
-
-vi.mock("@xterm/addon-fit", () => {
-  class MockFitAddon {
-    fit = vi.fn();
-    dispose = vi.fn();
-  }
-  return { FitAddon: MockFitAddon };
-});
-
-vi.mock("@xterm/xterm/css/xterm.css", () => ({}));
-
-// Mock ResizeObserver (not available in jsdom, needed by LogViewer)
-if (typeof globalThis.ResizeObserver === "undefined") {
-  globalThis.ResizeObserver = class {
-    observe = vi.fn();
-    unobserve = vi.fn();
-    disconnect = vi.fn();
-  } as unknown as typeof ResizeObserver;
-}
 
 /**
  * Create a minimal test issue with required fields.
@@ -979,7 +927,7 @@ describe("IssueDetailPanel", () => {
     });
   });
 
-  describe("Details/Logs tabs", () => {
+  describe("Details tab", () => {
     it("always shows Details tab", () => {
       const mockIssue = createTestIssueDetails({
         description: "Test description",
@@ -988,26 +936,6 @@ describe("IssueDetailPanel", () => {
         <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
       );
       expect(screen.getByRole("tab", { name: "Details" })).toBeInTheDocument();
-    });
-
-    it("shows + button when issue has an assignee", () => {
-      const mockIssue = createTestIssueDetails({
-        assignee: "agent-1",
-      });
-      render(
-        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
-      );
-      expect(screen.getByTestId("add-tab-button")).toBeInTheDocument();
-    });
-
-    it("does not show + button when issue has no assignee", () => {
-      const mockIssue = createTestIssueDetails({
-        assignee: undefined,
-      });
-      render(
-        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
-      );
-      expect(screen.queryByTestId("add-tab-button")).not.toBeInTheDocument();
     });
 
     it("defaults to Details tab and shows detail content", () => {
@@ -1022,104 +950,6 @@ describe("IssueDetailPanel", () => {
 
       const detailsTab = screen.getByRole("tab", { name: "Details" });
       expect(detailsTab).toHaveAttribute("aria-selected", "true");
-      expect(screen.queryByTestId("log-viewer")).not.toBeInTheDocument();
-    });
-
-    it("adds Logs tab via + dropdown and shows LogViewer", () => {
-      const mockIssue = createTestIssueDetails({
-        assignee: "agent-1",
-      });
-      render(
-        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
-      );
-
-      // Click + button to open dropdown
-      fireEvent.click(screen.getByTestId("add-tab-button"));
-      expect(screen.getByTestId("add-tab-dropdown")).toBeInTheDocument();
-
-      // Click Logs option
-      fireEvent.click(screen.getByTestId("add-tab-logs"));
-      expect(screen.getByRole("tab", { name: "Logs" })).toBeInTheDocument();
-      expect(screen.getByTestId("log-viewer")).toBeInTheDocument();
-    });
-
-    it("hides + button when Logs tab is already open", () => {
-      const mockIssue = createTestIssueDetails({
-        assignee: "agent-1",
-      });
-      render(
-        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
-      );
-
-      // Add Logs tab
-      fireEvent.click(screen.getByTestId("add-tab-button"));
-      fireEvent.click(screen.getByTestId("add-tab-logs"));
-
-      // + button should be hidden (no remaining options)
-      expect(screen.queryByTestId("add-tab-button")).not.toBeInTheDocument();
-    });
-
-    it("closes Logs tab and switches back to Details", () => {
-      const mockIssue = createTestIssueDetails({
-        assignee: "agent-1",
-        design: "# My Design",
-      });
-      render(
-        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
-      );
-
-      // Add Logs tab via dropdown
-      fireEvent.click(screen.getByTestId("add-tab-button"));
-      fireEvent.click(screen.getByTestId("add-tab-logs"));
-      expect(screen.getByTestId("log-viewer")).toBeInTheDocument();
-
-      // Close the Logs tab
-      fireEvent.click(screen.getByTestId("close-tab-logs"));
-      expect(screen.queryByTestId("log-viewer")).not.toBeInTheDocument();
-      expect(screen.getByTestId("design-section")).toBeInTheDocument();
-
-      // Details tab should be active
-      const detailsTab = screen.getByRole("tab", { name: "Details" });
-      expect(detailsTab).toHaveAttribute("aria-selected", "true");
-    });
-
-    it("shows + button for all issue types with an assignee", () => {
-      const issueTypes = ["bug", "feature", "task", "epic"] as const;
-      for (const type of issueTypes) {
-        const mockIssue = createTestIssueDetails({
-          issue_type: type,
-          assignee: "agent-1",
-        });
-        const { unmount } = render(
-          <IssueDetailPanel
-            isOpen={true}
-            issue={mockIssue}
-            onClose={() => {}}
-          />,
-        );
-        expect(screen.getByTestId("add-tab-button")).toBeInTheDocument();
-        unmount();
-      }
-    });
-
-    it("passes agentName from assignee to useAgentTerminalLogs", () => {
-      const mockIssue = createTestIssueDetails({
-        assignee: "my-agent",
-      });
-      render(
-        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
-      );
-
-      // Add Logs tab via dropdown to enable the hook
-      fireEvent.click(screen.getByTestId("add-tab-button"));
-      fireEvent.click(screen.getByTestId("add-tab-logs"));
-
-      expect(mockUseAgentTerminalLogs).toHaveBeenCalledWith(
-        expect.objectContaining({
-          agentName: "my-agent",
-          enabled: true,
-        }),
-      );
     });
 
     it("Details tab close button is not shown", () => {
@@ -1434,7 +1264,6 @@ describe("IssueDetailPanel", () => {
 
       await waitFor(() => {
         expect(mockDeleteTabMetadata).toHaveBeenCalledWith("ws-1", "sess-1");
-        expect(mockScheduleSessionKill).toHaveBeenCalledWith("ws-1", "sess-1");
       });
     });
 
@@ -1459,7 +1288,6 @@ describe("IssueDetailPanel", () => {
       unmount();
 
       expect(mockDeleteTabMetadata).toHaveBeenCalledWith("ws-1", "sess-1");
-      expect(mockScheduleSessionKill).toHaveBeenCalledWith("ws-1", "sess-1");
     });
 
     it("does not call cleanup when no terminal tabs exist", () => {
@@ -1485,85 +1313,8 @@ describe("IssueDetailPanel", () => {
       );
 
       expect(mockDeleteTabMetadata).not.toHaveBeenCalled();
-      expect(mockScheduleSessionKill).not.toHaveBeenCalled();
     });
 
-    it("cleans up terminal sessions when agent is removed while on logs tab", async () => {
-      // Persisted state: terminal tab + logs tab active
-      const logsAndTerminal = {
-        savedState: {
-          issue_id: "test-123",
-          tabs: [
-            {
-              id: "details",
-              type: "details" as const,
-              label: "Details",
-              sort_order: 0,
-            },
-            {
-              id: "sessions",
-              type: "sessions" as const,
-              label: "Sessions",
-              sort_order: 1,
-            },
-            { id: "logs", type: "logs" as const, label: "Logs", sort_order: 2 },
-            {
-              id: "terminal-sess-1",
-              type: "terminal" as const,
-              label: "Terminal (shell)",
-              session_name: "sess-1",
-              sort_order: 3,
-            },
-          ],
-          active_tab_id: "logs",
-          updated_at: "2026-01-23T00:00:00Z",
-        },
-        isLoading: false,
-        saveTabs: vi.fn(),
-        clearTabs: vi.fn(),
-      };
-      mockUseIssueTabPersistence.mockReturnValue(logsAndTerminal);
-
-      // Issue with an assignee (hasAgent = true)
-      const issueWithAgent = createTestIssue({
-        id: "test-123",
-        assignee: "agent-1",
-      });
-      const { rerender } = render(
-        <IssueDetailPanel
-          isOpen={true}
-          issue={issueWithAgent}
-          onClose={() => {}}
-        />,
-      );
-
-      // Wait for tabs to be restored
-      await waitFor(() => {
-        expect(
-          screen.getByRole("tab", { name: /Terminal/ }),
-        ).toBeInTheDocument();
-      });
-
-      mockDeleteTabMetadata.mockClear();
-      mockScheduleSessionKill.mockClear();
-
-      // Remove the agent — triggers the agent-removed effect
-      const issueWithoutAgent = createTestIssue({
-        id: "test-123",
-        assignee: undefined,
-      });
-      rerender(
-        <IssueDetailPanel
-          isOpen={true}
-          issue={issueWithoutAgent}
-          onClose={() => {}}
-        />,
-      );
-
-      await waitFor(() => {
-        expect(mockScheduleSessionKill).toHaveBeenCalledWith("ws-1", "sess-1");
-      });
-    });
 
     it("cleans up multiple terminal tabs on issue change", async () => {
       const multiTerminalPersisted = {
@@ -1626,8 +1377,6 @@ describe("IssueDetailPanel", () => {
       await waitFor(() => {
         expect(mockDeleteTabMetadata).toHaveBeenCalledWith("ws-1", "sess-1");
         expect(mockDeleteTabMetadata).toHaveBeenCalledWith("ws-1", "sess-2");
-        expect(mockScheduleSessionKill).toHaveBeenCalledWith("ws-1", "sess-1");
-        expect(mockScheduleSessionKill).toHaveBeenCalledWith("ws-1", "sess-2");
       });
     });
   });
@@ -1695,57 +1444,5 @@ describe("IssueDetailPanel", () => {
       expect(screen.getByRole("tab", { name: "Sessions" })).toBeInTheDocument();
     });
 
-    it("resets tabs to include Sessions when agent is removed while on Logs", () => {
-      const mockIssue = createTestIssueDetails({
-        assignee: "agent-1",
-      });
-
-      // Mock terminal logs to simulate having an agent
-      mockUseAgentTerminalLogs.mockReturnValue({
-        mode: "idle" as const,
-        chunks: [],
-        state: "disconnected" as const,
-        error: null,
-        resetVersion: 0,
-        refresh: vi.fn(),
-        resize: vi.fn(),
-        sendInput: vi.fn(),
-        loadOlderLogs: vi.fn(),
-        hasMoreLines: false,
-        isLoadingMore: false,
-      });
-
-      const { rerender } = render(
-        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
-      );
-
-      // Add Logs tab and switch to it
-      fireEvent.click(screen.getByTestId("add-tab-button"));
-      fireEvent.click(screen.getByTestId("add-tab-logs"));
-      expect(screen.getByRole("tab", { name: "Logs" })).toBeInTheDocument();
-
-      // Remove the agent (no assignee)
-      const issueNoAgent = createTestIssueDetails({
-        assignee: undefined,
-      });
-      rerender(
-        <IssueDetailPanel
-          isOpen={true}
-          issue={issueNoAgent}
-          onClose={() => {}}
-        />,
-      );
-
-      // Logs tab should be removed, Sessions tab still present
-      expect(
-        screen.queryByRole("tab", { name: "Logs" }),
-      ).not.toBeInTheDocument();
-      expect(screen.getByRole("tab", { name: "Sessions" })).toBeInTheDocument();
-      // Details should be active
-      expect(screen.getByRole("tab", { name: "Details" })).toHaveAttribute(
-        "aria-selected",
-        "true",
-      );
-    });
   });
 });
