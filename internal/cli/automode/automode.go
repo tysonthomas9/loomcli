@@ -37,6 +37,13 @@ type AutoModeOptions struct {
 	TaskPause       time.Duration                                // Pause after task completion before checking for next (default 2s)
 	EventBus        events.Emitter                               // Event emission for observability (nil = no events)
 
+	// Rate-limit circuit breaker configuration. If any is 0, defaults are applied
+	// (10m window, 5 threshold, 5m cooldown). Set RateLimitThreshold to a
+	// negative value to disable the breaker entirely.
+	RateLimitWindow    time.Duration // Sliding window for rate-limit tracking (default 10m)
+	RateLimitThreshold int           // Rate limits within window to trip breaker (default 5)
+	RateLimitCooldown  time.Duration // Pause duration when breaker trips (default 5m)
+
 	// Interface abstractions for remote agent support (nil = local filesystem).
 	LockBridge   cli.LockBridge
 	EventEmitter EventEmitter
@@ -49,6 +56,7 @@ type AutoModeState struct {
 	ConsecutiveErrors     int
 	ConsecutiveRateLimits int // separate counter for rate-limit errors (threshold: 5)
 	ConsecutiveNoProgress int // sessions that completed without claiming a task
+	CircuitBreakerTrips   int // lifetime count of rate-limit circuit breaker trips
 	LastTaskTime          time.Time
 	IdleStartTime         time.Time
 	ShouldExit            bool
@@ -161,6 +169,11 @@ type autoLoopCtx struct {
 	// should be skipped if the agent re-claims them. Persists for the lifetime
 	// of the auto-mode loop.
 	stuckTaskIDs map[string]bool
+
+	// rateLimitBreaker is a sliding-window circuit breaker that trips when
+	// rate-limit errors accumulate within a time window. It pauses auto-mode
+	// for a cooldown period before allowing a single probe invocation.
+	rateLimitBreaker *rateLimitBreaker
 }
 
 // RunAutoModeLoop runs the auto mode loop for either plan or task agents.
@@ -196,13 +209,16 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 		}
 	}
 
+	if ctx.rateLimitBreaker != nil {
+		ctx.state.CircuitBreakerTrips = ctx.rateLimitBreaker.totalTrips
+	}
 	printAutoModeSummary(ctx.state)
 }
 
-func initAutoLoop(opts AutoModeOptions) *autoLoopCtx {
-	d := opts.Deps
-	if d == nil {
-		d = cli.GetDeps(nil)
+// applyAutoModeDefaults fills zero-value fields in opts with sensible defaults.
+func applyAutoModeDefaults(opts *AutoModeOptions) {
+	if opts.Deps == nil {
+		opts.Deps = cli.GetDeps(nil)
 	}
 	if opts.BackoffBase == 0 {
 		opts.BackoffBase = 30 * time.Second
@@ -213,6 +229,20 @@ func initAutoLoop(opts AutoModeOptions) *autoLoopCtx {
 	if opts.EventBus == nil {
 		opts.EventBus = events.NopBus{}
 	}
+	if opts.RateLimitWindow == 0 {
+		opts.RateLimitWindow = 10 * time.Minute
+	}
+	if opts.RateLimitThreshold == 0 {
+		opts.RateLimitThreshold = 5
+	}
+	if opts.RateLimitCooldown == 0 {
+		opts.RateLimitCooldown = 5 * time.Minute
+	}
+}
+
+func initAutoLoop(opts AutoModeOptions) *autoLoopCtx {
+	applyAutoModeDefaults(&opts)
+	d := opts.Deps
 
 	ctx := &autoLoopCtx{
 		opts:      opts,
@@ -222,7 +252,8 @@ func initAutoLoop(opts AutoModeOptions) *autoLoopCtx {
 			LastTaskTime:  time.Now(),
 			IdleStartTime: time.Now(),
 		},
-		stuckTaskIDs: make(map[string]bool),
+		stuckTaskIDs:     make(map[string]bool),
+		rateLimitBreaker: newRateLimitBreaker(opts.RateLimitWindow, opts.RateLimitCooldown, opts.RateLimitThreshold),
 	}
 
 	ctx.hasAvailableTasks = resolveTaskChecker(opts)
@@ -347,6 +378,10 @@ func waitForAvailableTasks(ctx *autoLoopCtx, shutdown chan struct{}) bool {
 
 // runAutoTask invokes the agent for one task and handles the result. Returns false if loop should exit.
 func runAutoTask(ctx *autoLoopCtx, shutdown chan struct{}) bool {
+	if !waitForCircuitBreaker(ctx, shutdown) {
+		return false
+	}
+
 	fmt.Printf("\n[auto] === Starting task %d ===\n\n", ctx.state.TasksCompleted+1)
 
 	beforeRef := CaptureHEADRef(ctx.opts.WorktreePath)
@@ -386,6 +421,38 @@ func runAutoTask(ctx *autoLoopCtx, shutdown chan struct{}) bool {
 		return handleAutoTaskError(ctx, ae, err, shutdown)
 	}
 	return handleAutoTaskSuccess(ctx, beforeRef, startedAt, endedAt, shutdown)
+}
+
+// waitForCircuitBreaker blocks while the rate-limit circuit breaker is open,
+// returning false if the shutdown signal fires during the cooldown. When the
+// breaker transitions Open→HalfOpen, a single probe invocation is allowed to
+// proceed. Returns true if the loop should continue.
+//
+// The loop re-checks ShouldBlock after each sleep: a monotonic clock jump or a
+// refactor that adds a second callsite could otherwise leave the breaker Open
+// while the caller proceeds, letting the probe run "uncounted".
+func waitForCircuitBreaker(ctx *autoLoopCtx, shutdown chan struct{}) bool {
+	if ctx.rateLimitBreaker == nil {
+		return true
+	}
+	wasBlocked := false
+	for {
+		blocked, remaining := ctx.rateLimitBreaker.ShouldBlock()
+		if !blocked {
+			break
+		}
+		wasBlocked = true
+		fmt.Printf("[auto] Rate-limit circuit breaker OPEN, pausing for %s...\n", remaining.Round(time.Second))
+		if interruptibleSleep(remaining, shutdown) {
+			ctx.state.ShouldExit = true
+			ctx.state.ExitReason = "shutdown signal received"
+			return false
+		}
+	}
+	if wasBlocked && ctx.rateLimitBreaker.State() == breakerHalfOpen {
+		fmt.Println("[auto] Rate-limit circuit breaker: cooldown elapsed, allowing probe invocation...")
+	}
+	return true
 }
 
 func captureSessionID(ctx *autoLoopCtx) {
@@ -441,6 +508,9 @@ func printAutoModeSummary(state *AutoModeState) {
 	}
 	if state.ConsecutiveNoProgress > 0 {
 		fmt.Printf("No-progress sessions at exit: %d consecutive\n", state.ConsecutiveNoProgress)
+	}
+	if state.CircuitBreakerTrips > 0 {
+		fmt.Printf("Rate-limit circuit breaker trips: %d\n", state.CircuitBreakerTrips)
 	}
 	fmt.Println("=========================================")
 }

@@ -236,6 +236,12 @@ func exitWithReason(ctx *autoLoopCtx, reason string) bool {
 func handleRateLimitError(ctx *autoLoopCtx, ae *agenterr.AgentError, shutdown chan struct{}) bool {
 	ctx.state.ConsecutiveErrors = 0
 	ctx.state.ConsecutiveRateLimits++
+	recordRateLimitOnBreaker(ctx)
+	// ConsecutiveRateLimits is a process-wide safety net: if five consecutive
+	// invocations hit rate limits despite the breaker's cooldowns, the API is
+	// sustained-overloaded and we should stop spending retry budget. The
+	// breaker's cooldown for the most recent trip is abandoned on exit — this
+	// is intentional, the process-exit is the ultimate form of backoff.
 	if ctx.state.ConsecutiveRateLimits >= 5 {
 		return exitWithReason(ctx, "too many consecutive rate limits")
 	}
@@ -245,6 +251,33 @@ func handleRateLimitError(ctx *autoLoopCtx, ae *agenterr.AgentError, shutdown ch
 	}
 	fmt.Printf("[auto] Rate limited, waiting %s before retry...\n", wait)
 	return sleepOrShutdown(ctx, wait, shutdown)
+}
+
+// recordRateLimitOnBreaker drives the sliding-window circuit breaker on each
+// rate-limit error. When the breaker trips (Closed→Open or HalfOpen→Open), it
+// emits a circuit.opened event and logs the window count / cooldown so the
+// operator can see why auto-mode is about to pause.
+func recordRateLimitOnBreaker(ctx *autoLoopCtx) {
+	if ctx.rateLimitBreaker == nil {
+		return
+	}
+	prevState := ctx.rateLimitBreaker.State()
+	newState := ctx.rateLimitBreaker.RecordRateLimit()
+	if newState != breakerOpen || prevState == breakerOpen {
+		return
+	}
+	count := ctx.rateLimitBreaker.WindowCount()
+	fmt.Printf("[auto] Rate-limit circuit breaker OPEN: %d rate limits in last %s, pausing for %s\n",
+		count, ctx.opts.RateLimitWindow, ctx.opts.RateLimitCooldown)
+	if evt, evtErr := events.NewEvent(events.CircuitOpened, ctx.opts.AgentName, "", "", events.CircuitOpenedData{
+		RateLimitCount:   count,
+		WindowDuration:   events.Duration{Duration: ctx.opts.RateLimitWindow},
+		CooldownDuration: events.Duration{Duration: ctx.opts.RateLimitCooldown},
+	}); evtErr == nil {
+		if emitErr := ctx.opts.EventBus.Emit(evt); emitErr != nil {
+			log.Printf("[auto] Failed to emit circuit_opened event: %v", emitErr)
+		}
+	}
 }
 
 func handleTransientError(ctx *autoLoopCtx, shutdown chan struct{}) bool {
@@ -278,6 +311,7 @@ func sleepOrShutdown(ctx *autoLoopCtx, d time.Duration, shutdown chan struct{}) 
 func handleAutoTaskSuccess(ctx *autoLoopCtx, beforeRef string, startedAt, endedAt time.Time, shutdown chan struct{}) bool {
 	ctx.state.ConsecutiveErrors = 0
 	ctx.state.ConsecutiveRateLimits = 0
+	recordProbeSuccessOnBreaker(ctx)
 
 	if !agentClaimedTask(ctx.opts.WorktreePath, ctx.opts.AgentName, ctx.opts.LockBridge) {
 		return handleNoProgress(ctx, shutdown)
@@ -343,6 +377,28 @@ func handleTaskClaimed(ctx *autoLoopCtx, beforeRef string, startedAt, endedAt ti
 		return false
 	}
 	return true
+}
+
+// recordProbeSuccessOnBreaker closes the circuit breaker when a HalfOpen probe
+// succeeds. Emits a circuit.closed event so observers (web UI, metrics) see the
+// transition. A Closed breaker ignores this call — only a HalfOpen→Closed
+// transition is informative.
+func recordProbeSuccessOnBreaker(ctx *autoLoopCtx) {
+	if ctx.rateLimitBreaker == nil {
+		return
+	}
+	if ctx.rateLimitBreaker.State() != breakerHalfOpen {
+		return
+	}
+	ctx.rateLimitBreaker.RecordSuccess()
+	fmt.Println("[auto] Rate-limit circuit breaker CLOSED: probe succeeded, resuming normal operation")
+	if evt, evtErr := events.NewEvent(events.CircuitClosed, ctx.opts.AgentName, "", "", events.CircuitClosedData{
+		Reason: "probe_success",
+	}); evtErr == nil {
+		if emitErr := ctx.opts.EventBus.Emit(evt); emitErr != nil {
+			log.Printf("[auto] Failed to emit circuit_closed event: %v", emitErr)
+		}
+	}
 }
 
 func handleNoProgress(ctx *autoLoopCtx, shutdown chan struct{}) bool {

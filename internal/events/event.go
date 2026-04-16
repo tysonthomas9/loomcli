@@ -44,6 +44,8 @@ const (
 	ConflictResolved EventType = "conflict.resolved"
 	HealthCheck      EventType = "system.health_check"
 	ConfigReloaded   EventType = "system.config_reloaded"
+	CircuitOpened    EventType = "circuit.opened"
+	CircuitClosed    EventType = "circuit.closed"
 )
 
 // Event is the envelope written to JSONL files. Data is stored as json.RawMessage
@@ -114,6 +116,10 @@ func (e *Event) DecodeData() (interface{}, error) {
 		target = &HealthCheckData{}
 	case ConfigReloaded:
 		target = &ConfigReloadedData{}
+	case CircuitOpened:
+		target = &CircuitOpenedData{}
+	case CircuitClosed:
+		target = &CircuitClosedData{}
 	default:
 		return nil, fmt.Errorf("unknown event type: %s", e.Type)
 	}
@@ -201,4 +207,18 @@ type ConfigReloadedData struct {
 	Removed  int    `json:"removed"`
 	Modified int    `json:"modified"`
 	Error    string `json:"error,omitempty"`
+}
+
+// CircuitOpenedData reports that a rate-limit circuit breaker has tripped and
+// work is being paused for a cooldown period.
+type CircuitOpenedData struct {
+	RateLimitCount   int      `json:"rate_limit_count"`
+	WindowDuration   Duration `json:"window_duration"`
+	CooldownDuration Duration `json:"cooldown_duration"`
+}
+
+// CircuitClosedData reports that a rate-limit circuit breaker has reset after
+// a successful probe invocation.
+type CircuitClosedData struct {
+	Reason string `json:"reason,omitempty"`
 }

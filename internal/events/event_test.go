@@ -26,6 +26,8 @@ func TestEventType_Constants(t *testing.T) {
 		{ConflictResolved, "conflict.resolved"},
 		{HealthCheck, "system.health_check"},
 		{ConfigReloaded, "system.config_reloaded"},
+		{CircuitOpened, "circuit.opened"},
+		{CircuitClosed, "circuit.closed"},
 	}
 	for _, tt := range tests {
 		if string(tt.et) != tt.want {
@@ -81,6 +83,32 @@ func TestNewEvent_And_DecodeData(t *testing.T) {
 			checkFn: func(t *testing.T, decoded interface{}) {
 				d := decoded.(*HealthCheckData)
 				if d.AgentCount != 5 || d.HealthyCount != 4 {
+					t.Errorf("unexpected: %+v", d)
+				}
+			},
+		},
+		{
+			name: "circuit.opened",
+			et:   CircuitOpened,
+			data: CircuitOpenedData{
+				RateLimitCount:   5,
+				WindowDuration:   Duration{10 * time.Minute},
+				CooldownDuration: Duration{5 * time.Minute},
+			},
+			checkFn: func(t *testing.T, decoded interface{}) {
+				d := decoded.(*CircuitOpenedData)
+				if d.RateLimitCount != 5 || d.WindowDuration.Duration != 10*time.Minute || d.CooldownDuration.Duration != 5*time.Minute {
+					t.Errorf("unexpected: %+v", d)
+				}
+			},
+		},
+		{
+			name: "circuit.closed",
+			et:   CircuitClosed,
+			data: CircuitClosedData{Reason: "probe_success"},
+			checkFn: func(t *testing.T, decoded interface{}) {
+				d := decoded.(*CircuitClosedData)
+				if d.Reason != "probe_success" {
 					t.Errorf("unexpected: %+v", d)
 				}
 			},
