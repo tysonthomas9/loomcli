@@ -3,6 +3,7 @@ package backends
 import (
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -255,5 +256,82 @@ func TestCollectOpenCodeStreamUsage_InvalidJSON(t *testing.T) {
 	su := c.Finalize("", "", time.Now(), time.Now(), 0)
 	if su.InputTokens != 0 {
 		t.Errorf("InputTokens = %d, want 0", su.InputTokens)
+	}
+}
+
+func TestExtractOpenCodeStreamError_DataMessage(t *testing.T) {
+	t.Parallel()
+
+	line := `{"type":"error","error":{"name":"UnknownError","data":{"message":"Model not found: fake/fake-model."}}}`
+	got, ok := extractOpenCodeStreamError(line)
+	if !ok {
+		t.Fatal("extractOpenCodeStreamError() = not found, want found")
+	}
+	if got != "Model not found: fake/fake-model." {
+		t.Fatalf("extractOpenCodeStreamError() = %q", got)
+	}
+}
+
+func TestExtractOpenCodeStreamError_Message(t *testing.T) {
+	t.Parallel()
+
+	line := `{"type":"error","error":{"message":"401 Unauthorized"}}`
+	got, ok := extractOpenCodeStreamError(line)
+	if !ok {
+		t.Fatal("extractOpenCodeStreamError() = not found, want found")
+	}
+	if got != "401 Unauthorized" {
+		t.Fatalf("extractOpenCodeStreamError() = %q", got)
+	}
+}
+
+func TestExtractOpenCodeStreamError_NonErrorEvent(t *testing.T) {
+	t.Parallel()
+
+	line := `{"type":"text","text":"hello"}`
+	if got, ok := extractOpenCodeStreamError(line); ok {
+		t.Fatalf("extractOpenCodeStreamError() = (%q, true), want not found", got)
+	}
+}
+
+func TestFinalizeOpenCodeRun_StreamErrorWithoutExitFailure(t *testing.T) {
+	t.Parallel()
+
+	outputTail := `{"type":"error","error":{"data":{"message":"Model not found: fake/fake-model."}}}`
+	err := finalizeOpenCodeRun(nil, outputTail, "Model not found: fake/fake-model.")
+	if err == nil {
+		t.Fatal("finalizeOpenCodeRun() = nil, want error")
+	}
+
+	var invErr *InvocationError
+	if !errors.As(err, &invErr) {
+		t.Fatalf("finalizeOpenCodeRun() returned %T, want *InvocationError", err)
+	}
+	if invErr.ExitCode != 1 {
+		t.Fatalf("ExitCode = %d, want 1", invErr.ExitCode)
+	}
+	if !strings.Contains(invErr.OutputTail, "Model not found: fake/fake-model.") {
+		t.Fatalf("OutputTail = %q, want streamed error evidence", invErr.OutputTail)
+	}
+}
+
+func TestFinalizeOpenCodeRun_PreservesEarlyStreamErrorOnExitFailure(t *testing.T) {
+	t.Parallel()
+
+	outputTail := `{"type":"text","text":"later output only"}`
+	err := finalizeOpenCodeRun(errors.New("exit status 1"), outputTail, "Model not found: fake/fake-model.")
+	if err == nil {
+		t.Fatal("finalizeOpenCodeRun() = nil, want error")
+	}
+
+	var invErr *InvocationError
+	if !errors.As(err, &invErr) {
+		t.Fatalf("finalizeOpenCodeRun() returned %T, want *InvocationError", err)
+	}
+	if !strings.Contains(invErr.OutputTail, "Model not found: fake/fake-model.") {
+		t.Fatalf("OutputTail = %q, want preserved streamed error evidence", invErr.OutputTail)
+	}
+	if !strings.Contains(invErr.OutputTail, "later output only") {
+		t.Fatalf("OutputTail = %q, want later output retained", invErr.OutputTail)
 	}
 }

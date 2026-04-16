@@ -24,7 +24,6 @@ var (
 	resumeMu              sync.RWMutex
 	resumeSessionID       string
 	lastCapturedSessionID string
-	lastCapturedOutput    string
 )
 
 // SetResumeSessionID sets the Claude session ID to resume on the next
@@ -79,22 +78,6 @@ func ClearLastCapturedSessionID() {
 	resumeMu.Lock()
 	defer resumeMu.Unlock()
 	lastCapturedSessionID = ""
-}
-
-// SetLastCapturedOutput stores the tail of stream-json output captured from
-// the most recent non-interactive invocation. Thread-safe.
-func SetLastCapturedOutput(output string) {
-	resumeMu.Lock()
-	defer resumeMu.Unlock()
-	lastCapturedOutput = output
-}
-
-// GetLastCapturedOutput returns the captured stream-json output tail from the
-// most recent non-interactive invocation. Thread-safe.
-func GetLastCapturedOutput() string {
-	resumeMu.RLock()
-	defer resumeMu.RUnlock()
-	return lastCapturedOutput
 }
 
 // SetActiveSessionEnv sets the beads directory and session ID that will be

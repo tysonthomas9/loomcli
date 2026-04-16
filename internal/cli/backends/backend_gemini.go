@@ -86,7 +86,7 @@ func defaultGeminiNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 	// Pipe stdout for JSON stream parsing
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return fmt.Errorf("failed to create stdout pipe: %w", err)
+		return wrapInvocationError(fmt.Errorf("failed to create stdout pipe: %w", err), "")
 	}
 	cmd.Stderr = os.Stderr
 
@@ -96,7 +96,7 @@ func defaultGeminiNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 	fmt.Println("")
 
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start gemini: %w", err)
+		return wrapInvocationError(fmt.Errorf("failed to start gemini: %w", err), "")
 	}
 
 	// Monitor for shutdown signal
@@ -109,7 +109,7 @@ func defaultGeminiNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 		}
 	}()
 
-	scanStreamOutput(stdout, func(line string) {
+	outputTail := scanStreamOutput(stdout, func(line string) {
 		fmt.Println(line)
 		if collector != nil {
 			collectGeminiStreamUsage(line, collector)
@@ -118,7 +118,7 @@ func defaultGeminiNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 
 	runErr := cmd.Wait()
 	guard.WaitAndMark()
-	return runErr
+	return wrapInvocationError(runErr, outputTail)
 }
 
 // Meta returns descriptive metadata about the Gemini backend.

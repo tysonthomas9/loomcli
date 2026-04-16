@@ -56,6 +56,18 @@ func TestClassifyClaude(t *testing.T) {
 			wantClass: ModelNotFound,
 		},
 		{
+			name:      "model not found selected model wording",
+			log:       `There's an issue with the selected model (definitely-not-a-real-model). It may not exist or you may not have access to it. Run --model to pick a different model.`,
+			exitCode:  1,
+			wantClass: ModelNotFound,
+		},
+		{
+			name:      "generic access wording is not model not found",
+			log:       `You may not have access to it in your current region.`,
+			exitCode:  1,
+			wantClass: Unknown,
+		},
+		{
 			name:      "context overflow",
 			log:       "Error: context_length_exceeded: max tokens 200000",
 			exitCode:  1,
@@ -317,6 +329,180 @@ func TestClassifyOpenCode(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			result := classifyOpenCode(tt.log)
+			if tt.wantClass == Unknown && result == nil {
+				return
+			}
+			if result == nil {
+				t.Fatalf("expected class %s, got nil", tt.wantClass)
+			}
+			if result.Class != tt.wantClass {
+				t.Errorf("class = %s, want %s", result.Class, tt.wantClass)
+			}
+			if result.RetryAfter != tt.wantRetry {
+				t.Errorf("retryAfter = %v, want %v", result.RetryAfter, tt.wantRetry)
+			}
+		})
+	}
+}
+
+func TestClassifyGemini(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		log       string
+		exitCode  int
+		wantClass ErrorClass
+		wantRetry time.Duration
+	}{
+		{
+			name:      "rate limit",
+			log:       "Error: 429 RESOURCE_EXHAUSTED: rate limit exceeded",
+			exitCode:  1,
+			wantClass: RateLimited,
+		},
+		{
+			name:      "rate limit with retry-after",
+			log:       "Error: too many requests\nretry-after: 25",
+			exitCode:  1,
+			wantClass: RateLimited,
+			wantRetry: 25 * time.Second,
+		},
+		{
+			name:      "auth failure env var",
+			log:       "Error: GEMINI_API_KEY is not set",
+			exitCode:  1,
+			wantClass: AuthFailure,
+		},
+		{
+			name:      "billing error",
+			log:       "Error: quota exceeded for billing project",
+			exitCode:  1,
+			wantClass: BillingError,
+		},
+		{
+			name:      "model not found",
+			log:       "Error: unsupported model gemini-99",
+			exitCode:  1,
+			wantClass: ModelNotFound,
+		},
+		{
+			name:      "context length",
+			log:       "Error: prompt too long, max tokens exceeded",
+			exitCode:  1,
+			wantClass: ContextOverflow,
+		},
+		{
+			name:      "timeout",
+			log:       "Error: deadline exceeded",
+			exitCode:  1,
+			wantClass: Timeout,
+		},
+		{
+			name:      "server error",
+			log:       "Error: backend error",
+			exitCode:  1,
+			wantClass: Transient,
+		},
+		{
+			name:      "unknown",
+			log:       "bus error",
+			exitCode:  1,
+			wantClass: Unknown,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result := classifyGemini(tt.log)
+			if tt.wantClass == Unknown && result == nil {
+				return
+			}
+			if result == nil {
+				t.Fatalf("expected class %s, got nil", tt.wantClass)
+			}
+			if result.Class != tt.wantClass {
+				t.Errorf("class = %s, want %s", result.Class, tt.wantClass)
+			}
+			if result.RetryAfter != tt.wantRetry {
+				t.Errorf("retryAfter = %v, want %v", result.RetryAfter, tt.wantRetry)
+			}
+		})
+	}
+}
+
+func TestClassifyCursor(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		log       string
+		exitCode  int
+		wantClass ErrorClass
+		wantRetry time.Duration
+	}{
+		{
+			name:      "rate limit",
+			log:       "Error: 429 too many requests",
+			exitCode:  1,
+			wantClass: RateLimited,
+		},
+		{
+			name:      "rate limit with retry-after",
+			log:       "Error: rate limit exceeded\nretry-after: 15",
+			exitCode:  1,
+			wantClass: RateLimited,
+			wantRetry: 15 * time.Second,
+		},
+		{
+			name:      "auth failure env var",
+			log:       "Error: CURSOR_API_KEY is invalid",
+			exitCode:  1,
+			wantClass: AuthFailure,
+		},
+		{
+			name:      "billing error",
+			log:       "Error: insufficient credits",
+			exitCode:  1,
+			wantClass: BillingError,
+		},
+		{
+			name:      "model not found",
+			log:       "Error: invalid model selected",
+			exitCode:  1,
+			wantClass: ModelNotFound,
+		},
+		{
+			name:      "context length",
+			log:       "Error: token limit reached",
+			exitCode:  1,
+			wantClass: ContextOverflow,
+		},
+		{
+			name:      "timeout",
+			log:       "Error: connection timed out",
+			exitCode:  1,
+			wantClass: Timeout,
+		},
+		{
+			name:      "server error",
+			log:       "Error: service unavailable",
+			exitCode:  1,
+			wantClass: Transient,
+		},
+		{
+			name:      "unknown",
+			log:       "bus error",
+			exitCode:  1,
+			wantClass: Unknown,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result := classifyCursor(tt.log)
 			if tt.wantClass == Unknown && result == nil {
 				return
 			}
@@ -698,6 +884,13 @@ func TestClassifyFromOutput(t *testing.T) {
 			wantClass: ModelNotFound,
 		},
 		{
+			name:      "claude selected model wording",
+			output:    `{"type":"assistant","message":{"content":[{"type":"text","text":"There's an issue with the selected model (definitely-not-a-real-model). It may not exist or you may not have access to it. Run --model to pick a different model."}]},"error":"invalid_request"}`,
+			exitCode:  1,
+			backend:   "claude",
+			wantClass: ModelNotFound,
+		},
+		{
 			name:      "claude context overflow",
 			output:    "Error: context_length_exceeded: max tokens 200000",
 			exitCode:  1,
@@ -731,6 +924,20 @@ func TestClassifyFromOutput(t *testing.T) {
 			output:    "Error: 401 unauthorized",
 			exitCode:  1,
 			backend:   "opencode",
+			wantClass: AuthFailure,
+		},
+		{
+			name:      "gemini rate limit",
+			output:    "Error: 429 RESOURCE_EXHAUSTED: rate limit exceeded",
+			exitCode:  1,
+			backend:   "gemini",
+			wantClass: RateLimited,
+		},
+		{
+			name:      "cursor auth failure",
+			output:    "Error: CURSOR_API_KEY is invalid",
+			exitCode:  1,
+			backend:   "cursor",
 			wantClass: AuthFailure,
 		},
 		{

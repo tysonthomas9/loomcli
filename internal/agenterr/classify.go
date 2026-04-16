@@ -41,6 +41,10 @@ func classifyFromText(text string, exitCode int, backend string) *AgentError {
 		result = classifyClaude(text)
 	case "codex":
 		result = classifyCodex(text)
+	case "cursor":
+		result = classifyCursor(text)
+	case "gemini":
+		result = classifyGemini(text)
 	case "opencode":
 		result = classifyOpenCode(text)
 	}

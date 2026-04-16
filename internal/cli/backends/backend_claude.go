@@ -217,7 +217,7 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 
 	r, stdout, err := setupNonInteractivePipes(cmd, prompt, resumeID)
 	if err != nil {
-		return err
+		return wrapInvocationError(err, "")
 	}
 
 	guard := newProcessGuard(cmd.Process)
@@ -230,7 +230,7 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 	}()
 
 	ClearLastCapturedSessionID()
-	scanStreamOutput(stdout, newStreamLineHandler(workDir, collector))
+	outputTail := scanStreamOutput(stdout, newStreamLineHandler(workDir, collector))
 
 	runErr := cmd.Wait()
 	guard.WaitAndMark()
@@ -240,7 +240,7 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 		fmt.Fprintf(os.Stderr, "[loom] failed to clear claude session ID: %v\n", err)
 	}
 
-	return runErr
+	return wrapInvocationError(runErr, outputTail)
 }
 
 // setupNonInteractivePipes configures stdin/stdout pipes, starts the process,
@@ -315,10 +315,9 @@ func newStreamLineHandler(workDir string, collector *usage.Collector) func(strin
 
 // scanStreamOutput reads stdout line by line through a buffered scanner and
 // calls handler for each line. Shared by Claude, Codex, and OpenCode backends.
-// It automatically captures the last 50 lines into lastCapturedOutput for
-// error classification by agenterr.ClassifyFromOutput.
-func scanStreamOutput(stdout io.Reader, handler func(string)) {
-	SetLastCapturedOutput("")
+// It returns the last 50 lines so callers can classify invocation failures
+// from invocation-local output rather than shared package state.
+func scanStreamOutput(stdout io.Reader, handler func(string)) string {
 	outputBuf := newOutputRingBuffer(50)
 	scanner := bufio.NewScanner(stdout)
 	buf := make([]byte, 0, 1024*1024) // 1MB buffer for large tool results
@@ -328,7 +327,7 @@ func scanStreamOutput(stdout io.Reader, handler func(string)) {
 		outputBuf.Add(line)
 		handler(line)
 	}
-	SetLastCapturedOutput(outputBuf.String())
+	return outputBuf.String()
 }
 
 // StreamEvent represents a Claude stream-json event.

@@ -20,7 +20,7 @@ var claudePatterns = []struct {
 	{regexp.MustCompile(`(?i)ANTHROPIC_API_KEY`), AuthFailure, "ANTHROPIC_API_KEY not set or invalid"},
 	{regexp.MustCompile(`(?i)\b402\b|payment.?required|insufficient.?credits|quota.?exceeded`), BillingError, "billing error"},
 	{regexp.MustCompile(`(?i)billing`), BillingError, "billing error"},
-	{regexp.MustCompile(`(?i)model.?not.?found|model.*does not exist|invalid.?model`), ModelNotFound, "model not found"},
+	{regexp.MustCompile(`(?i)model.?not.?found|model.*does not exist|invalid.?model|issue with the selected model|selected model.*may not exist|selected model.*may not have access to it`), ModelNotFound, "model not found"},
 	{regexp.MustCompile(`(?i)\b404\b.*model`), ModelNotFound, "model not found (404)"},
 	{regexp.MustCompile(`(?i)context.?length.?exceeded|max.?tokens|token.?limit|context.?window`), ContextOverflow, "context length exceeded"},
 	{regexp.MustCompile(`(?i)timeout|ETIMEDOUT|ECONNRESET|connection.?timed?.?out`), Timeout, "connection timeout"},

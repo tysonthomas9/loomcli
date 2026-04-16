@@ -91,7 +91,7 @@ func handleAutoTaskError(ctx *autoLoopCtx, ae *agenterr.AgentError, rawErr error
 }
 
 func trackResumeFailures(ctx *autoLoopCtx) {
-	if ctx.lastClaudeSessionID == "" {
+	if !ctx.resumeAttempted {
 		return
 	}
 	ctx.resumeFailures++
@@ -129,6 +129,7 @@ func exitWithReason(ctx *autoLoopCtx, reason string) bool {
 }
 
 func handleRateLimitError(ctx *autoLoopCtx, ae *agenterr.AgentError, shutdown chan struct{}) bool {
+	ctx.state.ConsecutiveErrors = 0
 	ctx.state.ConsecutiveRateLimits++
 	if ctx.state.ConsecutiveRateLimits >= 5 {
 		return exitWithReason(ctx, "too many consecutive rate limits")
@@ -142,19 +143,18 @@ func handleRateLimitError(ctx *autoLoopCtx, ae *agenterr.AgentError, shutdown ch
 }
 
 func handleTransientError(ctx *autoLoopCtx, shutdown chan struct{}) bool {
+	ctx.state.ConsecutiveRateLimits = 0
 	ctx.state.ConsecutiveErrors++
 	if ctx.state.ConsecutiveErrors >= 3 {
 		return exitWithReason(ctx, "too many consecutive errors")
 	}
 	backoff := ctx.opts.BackoffBase << (ctx.state.ConsecutiveErrors - 1)
-	if cap := 4 * ctx.opts.BackoffBase; backoff > cap {
-		backoff = cap
-	}
 	fmt.Printf("[auto] Transient error, backing off %s before retry...\n", backoff)
 	return sleepOrShutdown(ctx, backoff, shutdown)
 }
 
 func handleDefaultError(ctx *autoLoopCtx, shutdown chan struct{}) bool {
+	ctx.state.ConsecutiveRateLimits = 0
 	ctx.state.ConsecutiveErrors++
 	if ctx.state.ConsecutiveErrors >= 3 {
 		return exitWithReason(ctx, "too many consecutive errors")
@@ -224,9 +224,6 @@ func handleNoProgress(ctx *autoLoopCtx, shutdown chan struct{}) bool {
 	}
 
 	backoff := ctx.opts.BackoffBase << (ctx.state.ConsecutiveNoProgress - 1)
-	if cap := 4 * ctx.opts.BackoffBase; backoff > cap {
-		backoff = cap
-	}
 	fmt.Printf("[auto] Backing off for %s before retry...\n\n", backoff)
 	if interruptibleSleep(backoff, shutdown) {
 		ctx.state.ShouldExit = true

@@ -1,6 +1,7 @@
 package automode
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/events"
 )
 
@@ -196,8 +198,8 @@ func TestHandleAutoTaskError_MixedErrors(t *testing.T) {
 		Backend: "claude",
 	}
 	handleAutoTaskError(ctx, aeTrans, fmt.Errorf("transient"), shutdown)
-	if ctx.state.ConsecutiveRateLimits != 1 {
-		t.Errorf("ConsecutiveRateLimits = %d, want 1 (unchanged)", ctx.state.ConsecutiveRateLimits)
+	if ctx.state.ConsecutiveRateLimits != 0 {
+		t.Errorf("ConsecutiveRateLimits = %d, want 0 after non-rate-limit error", ctx.state.ConsecutiveRateLimits)
 	}
 	if ctx.state.ConsecutiveErrors != 1 {
 		t.Errorf("ConsecutiveErrors = %d, want 1", ctx.state.ConsecutiveErrors)
@@ -205,11 +207,11 @@ func TestHandleAutoTaskError_MixedErrors(t *testing.T) {
 
 	// Third: another rate-limit error.
 	handleAutoTaskError(ctx, aeRL, fmt.Errorf("rate limit again"), shutdown)
-	if ctx.state.ConsecutiveRateLimits != 2 {
-		t.Errorf("ConsecutiveRateLimits = %d, want 2", ctx.state.ConsecutiveRateLimits)
+	if ctx.state.ConsecutiveRateLimits != 1 {
+		t.Errorf("ConsecutiveRateLimits = %d, want 1 after reset", ctx.state.ConsecutiveRateLimits)
 	}
-	if ctx.state.ConsecutiveErrors != 1 {
-		t.Errorf("ConsecutiveErrors = %d, want 1 (unchanged by rate limit)", ctx.state.ConsecutiveErrors)
+	if ctx.state.ConsecutiveErrors != 0 {
+		t.Errorf("ConsecutiveErrors = %d, want 0 after rate limit", ctx.state.ConsecutiveErrors)
 	}
 }
 
@@ -232,5 +234,127 @@ func TestHandleAutoTaskError_NoWork(t *testing.T) {
 	}
 	if !strings.Contains(ctx.state.ExitReason, "no work") {
 		t.Errorf("ExitReason = %q, want to contain 'no work'", ctx.state.ExitReason)
+	}
+}
+
+func TestClassifyInvokeError_UsesInvocationLocalOutput(t *testing.T) {
+	err := &backends.InvocationError{
+		Err:        errors.New("agent failed"),
+		OutputTail: "Error: 429 Too Many Requests\nretry-after: 60",
+		ExitCode:   1,
+	}
+
+	got := classifyInvokeError(err, "claude")
+	if got.Class != agenterr.RateLimited {
+		t.Fatalf("Class = %s, want %s", got.Class, agenterr.RateLimited)
+	}
+	if got.RetryAfter.Seconds() != 60 {
+		t.Fatalf("RetryAfter = %s, want 60s", got.RetryAfter)
+	}
+	if !strings.Contains(got.RawOutput, "429") {
+		t.Fatalf("RawOutput = %q, want invocation-local output", got.RawOutput)
+	}
+}
+
+func TestClassifyInvokeError_FallsBackToRawErrorText(t *testing.T) {
+	got := classifyInvokeError(errors.New("OPENAI_API_KEY not set"), "codex")
+	if got.Class != agenterr.AuthFailure {
+		t.Fatalf("Class = %s, want %s", got.Class, agenterr.AuthFailure)
+	}
+}
+
+func TestHandleTransientError_ResetsRateLimitCounter(t *testing.T) {
+	t.Parallel()
+
+	ctx := &autoLoopCtx{
+		opts: AutoModeOptions{BackoffBase: 10 * time.Millisecond},
+		state: &AutoModeState{
+			ConsecutiveRateLimits: 2,
+		},
+	}
+
+	if !handleTransientError(ctx, make(chan struct{})) {
+		t.Fatalf("handleTransientError() returned false, want retry")
+	}
+	if ctx.state.ConsecutiveRateLimits != 0 {
+		t.Fatalf("ConsecutiveRateLimits = %d, want 0", ctx.state.ConsecutiveRateLimits)
+	}
+	if ctx.state.ConsecutiveErrors != 1 {
+		t.Fatalf("ConsecutiveErrors = %d, want 1", ctx.state.ConsecutiveErrors)
+	}
+}
+
+func TestHandleRateLimitError_ResetsErrorCounter(t *testing.T) {
+	t.Parallel()
+
+	ctx := &autoLoopCtx{
+		opts: AutoModeOptions{BackoffBase: 10 * time.Millisecond},
+		state: &AutoModeState{
+			ConsecutiveErrors: 2,
+		},
+	}
+
+	ae := &agenterr.AgentError{Class: agenterr.RateLimited, RetryAfter: time.Millisecond}
+	if !handleRateLimitError(ctx, ae, make(chan struct{})) {
+		t.Fatalf("handleRateLimitError() returned false, want retry")
+	}
+	if ctx.state.ConsecutiveErrors != 0 {
+		t.Fatalf("ConsecutiveErrors = %d, want 0", ctx.state.ConsecutiveErrors)
+	}
+	if ctx.state.ConsecutiveRateLimits != 1 {
+		t.Fatalf("ConsecutiveRateLimits = %d, want 1", ctx.state.ConsecutiveRateLimits)
+	}
+}
+
+func TestHandleDefaultError_ResetsRateLimitCounter(t *testing.T) {
+	t.Parallel()
+
+	ctx := &autoLoopCtx{
+		opts: AutoModeOptions{Interval: 0},
+		state: &AutoModeState{
+			ConsecutiveRateLimits: 2,
+		},
+	}
+
+	if !handleDefaultError(ctx, make(chan struct{})) {
+		t.Fatalf("handleDefaultError() returned false, want retry")
+	}
+	if ctx.state.ConsecutiveRateLimits != 0 {
+		t.Fatalf("ConsecutiveRateLimits = %d, want 0", ctx.state.ConsecutiveRateLimits)
+	}
+	if ctx.state.ConsecutiveErrors != 1 {
+		t.Fatalf("ConsecutiveErrors = %d, want 1", ctx.state.ConsecutiveErrors)
+	}
+}
+
+func TestTrackResumeFailures_IgnoresNonResumeErrors(t *testing.T) {
+	t.Parallel()
+
+	ctx := &autoLoopCtx{
+		lastClaudeSessionID: "sess-123",
+		resumeFailures:      1,
+		resumeAttempted:     false,
+	}
+
+	trackResumeFailures(ctx)
+	if ctx.resumeFailures != 1 {
+		t.Fatalf("resumeFailures = %d, want unchanged", ctx.resumeFailures)
+	}
+	if ctx.lastClaudeSessionID != "sess-123" {
+		t.Fatalf("lastClaudeSessionID = %q, want unchanged", ctx.lastClaudeSessionID)
+	}
+}
+
+func TestTrackResumeFailures_OnlyCountsAttemptedResume(t *testing.T) {
+	t.Parallel()
+
+	ctx := &autoLoopCtx{
+		lastClaudeSessionID: "sess-123",
+		resumeAttempted:     true,
+	}
+
+	trackResumeFailures(ctx)
+	if ctx.resumeFailures != 1 {
+		t.Fatalf("resumeFailures = %d, want 1", ctx.resumeFailures)
 	}
 }

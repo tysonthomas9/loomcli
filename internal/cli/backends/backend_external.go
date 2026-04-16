@@ -61,20 +61,20 @@ func (e *ExternalBackend) InvokeNonInteractive(workDir, prompt, agentName string
 
 	r, err := pipePromptToCmd(cmd, prompt)
 	if err != nil {
-		return err
+		return wrapInvocationError(err, "")
 	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		r.Close()
-		return fmt.Errorf("failed to create stdout pipe: %w", err)
+		return wrapInvocationError(fmt.Errorf("failed to create stdout pipe: %w", err), "")
 	}
 	cmd.Stderr = os.Stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	if err := cmd.Start(); err != nil {
 		r.Close()
-		return fmt.Errorf("failed to start %s: %w", e.binPath, err)
+		return wrapInvocationError(fmt.Errorf("failed to start %s: %w", e.binPath, err), "")
 	}
 
 	guard := newProcessGuard(cmd.Process)
@@ -86,12 +86,12 @@ func (e *ExternalBackend) InvokeNonInteractive(workDir, prompt, agentName string
 		}
 	}()
 
-	scanStreamOutput(stdout, func(line string) { fmt.Println(line) })
+	outputTail := scanStreamOutput(stdout, func(line string) { fmt.Println(line) })
 
 	runErr := cmd.Wait()
 	guard.WaitAndMark()
 	r.Close()
-	return runErr
+	return wrapInvocationError(runErr, outputTail)
 }
 
 // Meta returns descriptive metadata about the external backend by invoking

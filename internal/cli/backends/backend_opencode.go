@@ -2,9 +2,12 @@ package backends
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
@@ -58,13 +61,13 @@ func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shu
 
 	r, err := pipePromptToCmd(cmd, prompt)
 	if err != nil {
-		return err
+		return wrapInvocationError(err, "")
 	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		r.Close()
-		return fmt.Errorf("failed to create stdout pipe: %w", err)
+		return wrapInvocationError(fmt.Errorf("failed to create stdout pipe: %w", err), "")
 	}
 	cmd.Stderr = os.Stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -74,7 +77,7 @@ func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shu
 
 	if err := cmd.Start(); err != nil {
 		r.Close()
-		return fmt.Errorf("failed to start opencode: %w", err)
+		return wrapInvocationError(fmt.Errorf("failed to start opencode: %w", err), "")
 	}
 
 	guard := newProcessGuard(cmd.Process)
@@ -86,17 +89,12 @@ func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shu
 		}
 	}()
 
-	scanStreamOutput(stdout, func(line string) {
-		fmt.Println(line)
-		if collector != nil {
-			collectOpenCodeStreamUsage(line, collector)
-		}
-	})
+	outputTail, streamErrMsg := scanOpenCodeStream(stdout, collector)
 
 	runErr := cmd.Wait()
 	guard.WaitAndMark()
 	r.Close()
-	return runErr
+	return finalizeOpenCodeRun(runErr, outputTail, streamErrMsg)
 }
 
 // Meta returns descriptive metadata about the OpenCode backend.
@@ -142,6 +140,66 @@ type openCodeUsageEvent struct {
 		InputTokens  int64 `json:"input_tokens"`
 		OutputTokens int64 `json:"output_tokens"`
 	} `json:"usage,omitempty"`
+}
+
+type openCodeErrorEvent struct {
+	Type  string `json:"type"`
+	Error *struct {
+		Message string `json:"message,omitempty"`
+		Data    *struct {
+			Message string `json:"message,omitempty"`
+		} `json:"data,omitempty"`
+	} `json:"error,omitempty"`
+}
+
+func extractOpenCodeStreamError(line string) (string, bool) {
+	var event openCodeErrorEvent
+	if err := json.Unmarshal([]byte(line), &event); err != nil {
+		return "", false
+	}
+	if event.Type != "error" || event.Error == nil {
+		return "", false
+	}
+	if msg := strings.TrimSpace(event.Error.Message); msg != "" {
+		return msg, true
+	}
+	if event.Error.Data != nil {
+		if msg := strings.TrimSpace(event.Error.Data.Message); msg != "" {
+			return msg, true
+		}
+	}
+	return "opencode reported an error", true
+}
+
+func finalizeOpenCodeRun(runErr error, outputTail, streamErrMsg string) error {
+	streamErrMsg = strings.TrimSpace(streamErrMsg)
+	if streamErrMsg != "" && !strings.Contains(outputTail, streamErrMsg) {
+		if strings.TrimSpace(outputTail) == "" {
+			outputTail = streamErrMsg
+		} else {
+			outputTail = streamErrMsg + "\n" + outputTail
+		}
+	}
+	if runErr == nil && streamErrMsg != "" {
+		runErr = errors.New(streamErrMsg)
+	}
+	return wrapInvocationError(runErr, outputTail)
+}
+
+func scanOpenCodeStream(stdout io.Reader, collector *usage.Collector) (string, string) {
+	var streamErrMsg string
+	outputTail := scanStreamOutput(stdout, func(line string) {
+		fmt.Println(line)
+		if streamErrMsg == "" {
+			if msg, ok := extractOpenCodeStreamError(line); ok {
+				streamErrMsg = msg
+			}
+		}
+		if collector != nil {
+			collectOpenCodeStreamUsage(line, collector)
+		}
+	})
+	return outputTail, streamErrMsg
 }
 
 // collectOpenCodeStreamUsage is best-effort: parse JSON lines for a usage field.

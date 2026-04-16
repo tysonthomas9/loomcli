@@ -146,6 +146,9 @@ type autoLoopCtx struct {
 	// resumeFailures counts consecutive resume failures on the same session ID.
 	// After 2 failures, we clear the session ID and fall back to cold-start.
 	resumeFailures int
+	// resumeAttempted is set for a single invocation when we actually asked the
+	// backend to resume a previous Claude session.
+	resumeAttempted bool
 }
 
 // RunAutoModeLoop runs the auto mode loop for either plan or task agents.
@@ -338,7 +341,9 @@ func runAutoTask(ctx *autoLoopCtx, shutdown chan struct{}) bool {
 	prompt := ctx.generatePrompt(ctx.opts.AgentName, workspace)
 	sess := createAutoSession(ctx, prompt)
 
+	ctx.resumeAttempted = false
 	if ctx.lastClaudeSessionID != "" {
+		ctx.resumeAttempted = true
 		backends.SetResumeSessionID(ctx.lastClaudeSessionID)
 	}
 	defer backends.ClearResumeSessionID()
@@ -392,11 +397,20 @@ func recordAndFinalize(ctx *autoLoopCtx, collector *usage.Collector, sess *sessi
 
 func classifyInvokeError(err error, backendName string) *agenterr.AgentError {
 	exitCode := 1
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		exitCode = exitErr.ExitCode()
+	evidence := err.Error()
+	var invErr *backends.InvocationError
+	if errors.As(err, &invErr) {
+		exitCode = invErr.ExitCode
+		if strings.TrimSpace(invErr.OutputTail) != "" {
+			evidence = invErr.OutputTail
+		}
+	} else {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			exitCode = exitErr.ExitCode()
+		}
 	}
-	return agenterr.ClassifyFromOutput(backends.GetLastCapturedOutput(), exitCode, backendName)
+	return agenterr.ClassifyFromOutput(evidence, exitCode, backendName)
 }
 
 func printAutoModeSummary(state *AutoModeState) {

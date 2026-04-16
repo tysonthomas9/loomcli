@@ -638,28 +638,34 @@ func TestOutputRingBuffer(t *testing.T) {
 	})
 }
 
-func TestLastCapturedOutput_SetAndGet(t *testing.T) {
-	// Not parallel: mutates global state.
-	t.Cleanup(func() { SetLastCapturedOutput("") })
+func TestWrapInvocationError(t *testing.T) {
+	baseErr := errors.New("process exited with failure")
+	err := wrapInvocationError(baseErr, "Error: 429 too many requests")
 
-	SetLastCapturedOutput("test output content")
-	got := GetLastCapturedOutput()
-	if got != "test output content" {
-		t.Errorf("GetLastCapturedOutput() = %q, want %q", got, "test output content")
+	var invErr *InvocationError
+	if !errors.As(err, &invErr) {
+		t.Fatalf("wrapInvocationError() did not return *InvocationError: %T", err)
+	}
+	if invErr.OutputTail != "process exited with failure\nError: 429 too many requests" {
+		t.Errorf("OutputTail = %q", invErr.OutputTail)
+	}
+	if invErr.ExitCode != 1 {
+		t.Errorf("ExitCode = %d, want 1", invErr.ExitCode)
 	}
 }
 
-func TestLastCapturedOutput_ClearedBetweenCalls(t *testing.T) {
-	// Not parallel: mutates global state.
-	t.Cleanup(func() { SetLastCapturedOutput("") })
+func TestScanStreamOutputReturnsTail(t *testing.T) {
+	stdout := strings.NewReader("line-1\nline-2\nline-3\n")
+	var seen []string
 
-	SetLastCapturedOutput("first value")
-	if got := GetLastCapturedOutput(); got != "first value" {
-		t.Errorf("GetLastCapturedOutput() = %q, want %q", got, "first value")
+	got := scanStreamOutput(stdout, func(line string) {
+		seen = append(seen, line)
+	})
+
+	if got != "line-1\nline-2\nline-3" {
+		t.Errorf("scanStreamOutput() = %q", got)
 	}
-
-	SetLastCapturedOutput("")
-	if got := GetLastCapturedOutput(); got != "" {
-		t.Errorf("GetLastCapturedOutput() after clear = %q, want empty", got)
+	if strings.Join(seen, "\n") != got {
+		t.Errorf("seen lines = %q, want %q", strings.Join(seen, "\n"), got)
 	}
 }
