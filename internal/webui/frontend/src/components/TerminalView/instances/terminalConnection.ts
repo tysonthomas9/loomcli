@@ -62,16 +62,16 @@ function buildWsUrl(
 }
 
 /**
- * Encode a resize message per the binary frame protocol.
- * Byte 0 = 0x01, then cols as uint16 BE, then rows as uint16 BE.
+ * Encode a resize message per the wterm wire format: an in-band escape
+ * sequence "\x1b[RESIZE:<cols>;<rows>]" sent as a WebSocket string message.
+ * Matches the server-side regex in internal/webui/server/realtime/terminal_relay.go.
+ *
+ * Returned as a string (not ArrayBuffer) because WebSocket.send accepts both;
+ * using a string keeps this function symmetric with the server's string-prefix
+ * check and removes the need for the caller to distinguish message types.
  */
-export function encodeResize(cols: number, rows: number): ArrayBuffer {
-  const buf = new ArrayBuffer(5);
-  const view = new DataView(buf);
-  view.setUint8(0, 0x01);
-  view.setUint16(1, cols, false);
-  view.setUint16(3, rows, false);
-  return buf;
+export function encodeResize(cols: number, rows: number): string {
+  return `\x1b[RESIZE:${cols};${rows}]`;
 }
 
 /** WebSocket close code sent by the backend when the process exits. */

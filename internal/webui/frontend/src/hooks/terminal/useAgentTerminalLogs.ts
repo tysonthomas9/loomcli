@@ -44,13 +44,10 @@ function clampTerminalSize(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.floor(value)));
 }
 
-function buildResizeFrame(cols: number, rows: number): ArrayBuffer {
-  const buf = new ArrayBuffer(5);
-  const view = new DataView(buf);
-  view.setUint8(0, 0x01);
-  view.setUint16(1, cols, false);
-  view.setUint16(3, rows, false);
-  return buf;
+// Match the wterm in-band resize escape consumed by
+// internal/webui/server/realtime/terminal_relay.go.
+function buildResizeFrame(cols: number, rows: number): string {
+  return `\x1b[RESIZE:${cols};${rows}]`;
 }
 
 const ARCHIVE_RECHECK_INTERVAL_MS = 5000;
