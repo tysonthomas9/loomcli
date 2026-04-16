@@ -63,17 +63,51 @@ func finalizeAutoSession(ctx *autoLoopCtx, sess *sessions.Session, beforeRef str
 	go sessions.NotifyWebUI(context.Background(), backends.ResolveWebUIURL(), taskID, sess.SessionID(), sess.Meta.Status, backends.ResolveNotifyToken())
 }
 
+// maxSameTaskFailures is the consecutive same-task-ID failure threshold that
+// triggers stuck-task detection: skip the task and continue the loop instead
+// of treating each failure as a generic ConsecutiveErrors strike.
+const maxSameTaskFailures = 3
+
 func handleAutoTaskError(ctx *autoLoopCtx, ae *agenterr.AgentError, rawErr error, shutdown chan struct{}) bool {
 	fmt.Printf("[auto] Agent error: [%s] %s\n", ae.Class, ae.Message)
 	trackResumeFailures(ctx)
-	emitTaskFailedEvent(ctx, ae, rawErr)
+	failedTaskID := readFailedTaskID(ctx)
+	emitTaskFailedEvent(ctx, ae, rawErr, failedTaskID)
 
 	// Fatal errors (auth, billing) and non-retryable specifics: exit immediately.
+	// These never retry, so per-task tracking would only accumulate stale state.
 	if ae.IsFatal() || ae.Class == agenterr.ModelNotFound {
 		return exitWithReason(ctx, fmt.Sprintf("fatal error: %s", ae.Message))
 	}
 	if ae.Class == agenterr.NoWork {
 		return exitWithReason(ctx, "no work available")
+	}
+
+	// If the failed task is already in the skip set (agent re-claimed it after
+	// a prior stuck classification), don't re-run per-task tracking or
+	// re-emit task.stuck. Mirror handleAutoTaskSuccess's no-progress handling:
+	// clear the lock's TaskID and let the loop try a different task.
+	if failedTaskID != "" && ctx.stuckTaskIDs[failedTaskID] {
+		fmt.Printf("[auto] Stuck task %s failed again, skipping without re-classification\n", failedTaskID)
+		if ctx.clearTaskID != nil {
+			if clearErr := ctx.clearTaskID(); clearErr != nil {
+				fmt.Printf("[auto] Warning: failed to clear stuck task ID: %v\n", clearErr)
+			}
+		}
+		return true
+	}
+
+	// Only update per-task tracking for errors that will lead to a retry —
+	// otherwise sameTaskFailures can advance past the threshold without ever
+	// triggering skipStuckTask, leaving inconsistent state for any future
+	// invocation that shares the ctx.
+	trackSameTaskFailures(ctx, failedTaskID)
+
+	// Stuck task detection: same task ID failed maxSameTaskFailures times in a
+	// row. Skip the task, reset error counters, and continue the loop so other
+	// tasks can still make progress.
+	if isStuckTaskThresholdReached(ctx, failedTaskID) {
+		return skipStuckTask(ctx, failedTaskID, rawErr)
 	}
 
 	// Rate limit: separate counter, generous retry.
@@ -90,6 +124,81 @@ func handleAutoTaskError(ctx *autoLoopCtx, ae *agenterr.AgentError, rawErr error
 	return handleDefaultError(ctx, shutdown)
 }
 
+// readFailedTaskID returns the TaskID recorded in the lock file, or "" if no
+// lock is available (agent crashed before claiming, or readLock not wired up).
+func readFailedTaskID(ctx *autoLoopCtx) string {
+	if ctx.readLock == nil {
+		return ""
+	}
+	info, err := ctx.readLock()
+	if err != nil || info == nil {
+		return ""
+	}
+	return info.TaskID
+}
+
+// trackSameTaskFailures updates the per-task-ID consecutive failure counter.
+// When the same task fails repeatedly, sameTaskFailures grows; when a different
+// task fails (or no task ID is available) the counter resets.
+func trackSameTaskFailures(ctx *autoLoopCtx, failedTaskID string) {
+	if failedTaskID == "" {
+		// Agent crashed before claiming a task — systemic failure, not a
+		// stuck-task condition. Don't touch per-task tracking.
+		return
+	}
+	if failedTaskID == ctx.lastFailedTaskID {
+		ctx.sameTaskFailures++
+		return
+	}
+	ctx.lastFailedTaskID = failedTaskID
+	ctx.sameTaskFailures = 1
+}
+
+// isStuckTaskThresholdReached reports whether sameTaskFailures has hit the
+// stuck-task threshold for a non-empty task ID.
+func isStuckTaskThresholdReached(ctx *autoLoopCtx, failedTaskID string) bool {
+	return failedTaskID != "" && ctx.sameTaskFailures >= maxSameTaskFailures
+}
+
+// skipStuckTask records the task as stuck, emits a TaskStuck event, resets the
+// generic error counters (skipping a stuck task is recovery, not a strike),
+// clears the lock file's TaskID, and returns true so the loop continues with a
+// fresh task on the next iteration.
+func skipStuckTask(ctx *autoLoopCtx, failedTaskID string, rawErr error) bool {
+	failures := ctx.sameTaskFailures
+	fmt.Printf("[auto] Task %s is stuck (%d consecutive failures), skipping\n", failedTaskID, failures)
+
+	lastErr := ""
+	if rawErr != nil {
+		lastErr = rawErr.Error()
+	}
+	if evt, evtErr := events.NewEvent(events.TaskStuck, ctx.opts.AgentName, "", "", events.TaskStuckData{
+		TaskID:              failedTaskID,
+		ConsecutiveFailures: failures,
+		LastError:           lastErr,
+	}); evtErr == nil {
+		if emitErr := ctx.opts.EventBus.Emit(evt); emitErr != nil {
+			log.Printf("[auto] Failed to emit task_stuck event: %v", emitErr)
+		}
+	}
+
+	if ctx.stuckTaskIDs == nil {
+		ctx.stuckTaskIDs = make(map[string]bool)
+	}
+	ctx.stuckTaskIDs[failedTaskID] = true
+	ctx.sameTaskFailures = 0
+	ctx.lastFailedTaskID = ""
+	ctx.state.ConsecutiveErrors = 0
+	ctx.state.ConsecutiveRateLimits = 0
+
+	if ctx.clearTaskID != nil {
+		if clearErr := ctx.clearTaskID(); clearErr != nil {
+			fmt.Printf("[auto] Warning: failed to clear stuck task ID: %v\n", clearErr)
+		}
+	}
+	return true
+}
+
 func trackResumeFailures(ctx *autoLoopCtx) {
 	if !ctx.resumeAttempted {
 		return
@@ -102,11 +211,7 @@ func trackResumeFailures(ctx *autoLoopCtx) {
 	}
 }
 
-func emitTaskFailedEvent(ctx *autoLoopCtx, ae *agenterr.AgentError, rawErr error) {
-	failedTaskID := ""
-	if info, readErr := ctx.readLock(); readErr == nil && info != nil {
-		failedTaskID = info.TaskID
-	}
+func emitTaskFailedEvent(ctx *autoLoopCtx, ae *agenterr.AgentError, rawErr error, failedTaskID string) {
 	evtData := events.TaskFailedData{
 		TaskID:     failedTaskID,
 		Error:      rawErr.Error(),
@@ -174,10 +279,37 @@ func handleAutoTaskSuccess(ctx *autoLoopCtx, beforeRef string, startedAt, endedA
 	ctx.state.ConsecutiveErrors = 0
 	ctx.state.ConsecutiveRateLimits = 0
 
-	if agentClaimedTask(ctx.opts.WorktreePath, ctx.opts.AgentName, ctx.opts.LockBridge) {
-		return handleTaskClaimed(ctx, beforeRef, startedAt, endedAt, shutdown)
+	if !agentClaimedTask(ctx.opts.WorktreePath, ctx.opts.AgentName, ctx.opts.LockBridge) {
+		return handleNoProgress(ctx, shutdown)
 	}
-	return handleNoProgress(ctx, shutdown)
+
+	// If the agent re-claimed a task we've already declared stuck, treat the
+	// session as no-progress: clear the lock's TaskID so the next iteration
+	// gets a fresh chance, and don't count this as a completed task.
+	if isStuckTaskClaimed(ctx) {
+		fmt.Printf("[auto] Agent re-claimed stuck task, treating as no-progress\n")
+		if ctx.clearTaskID != nil {
+			if clearErr := ctx.clearTaskID(); clearErr != nil {
+				fmt.Printf("[auto] Warning: failed to clear stuck task ID: %v\n", clearErr)
+			}
+		}
+		return handleNoProgress(ctx, shutdown)
+	}
+
+	return handleTaskClaimed(ctx, beforeRef, startedAt, endedAt, shutdown)
+}
+
+// isStuckTaskClaimed reports whether the task currently recorded in the lock
+// file is in the stuckTaskIDs skip set.
+func isStuckTaskClaimed(ctx *autoLoopCtx) bool {
+	if len(ctx.stuckTaskIDs) == 0 || ctx.readLock == nil {
+		return false
+	}
+	info, err := ctx.readLock()
+	if err != nil || info == nil || info.TaskID == "" {
+		return false
+	}
+	return ctx.stuckTaskIDs[info.TaskID]
 }
 
 func handleTaskClaimed(ctx *autoLoopCtx, beforeRef string, startedAt, endedAt time.Time, shutdown chan struct{}) bool {
@@ -186,6 +318,8 @@ func handleTaskClaimed(ctx *autoLoopCtx, beforeRef string, startedAt, endedAt ti
 	ctx.state.LastTaskTime = time.Now()
 	ctx.lastClaudeSessionID = "" // new task = fresh prompt, no resume
 	ctx.resumeFailures = 0
+	ctx.lastFailedTaskID = "" // task succeeded, clear per-task failure tracking
+	ctx.sameTaskFailures = 0
 
 	taskID := ""
 	if info, readErr := ctx.readLock(); readErr == nil && info != nil {

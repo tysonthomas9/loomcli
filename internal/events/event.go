@@ -34,6 +34,7 @@ const (
 	TaskStarted      EventType = "task.started"
 	TaskCompleted    EventType = "task.completed"
 	TaskFailed       EventType = "task.failed"
+	TaskStuck        EventType = "task.stuck"
 	AgentStarted     EventType = "agent.started"
 	AgentRestarted   EventType = "agent.restarted"
 	AgentStopped     EventType = "agent.stopped"
@@ -93,6 +94,8 @@ func (e *Event) DecodeData() (interface{}, error) {
 		target = &TaskCompletedData{}
 	case TaskFailed:
 		target = &TaskFailedData{}
+	case TaskStuck:
+		target = &TaskStuckData{}
 	case AgentStarted:
 		target = &AgentStartedData{}
 	case AgentRestarted:
@@ -144,6 +147,15 @@ type TaskFailedData struct {
 	Error      string `json:"error"`
 	ErrorClass string `json:"error_class,omitempty"`
 	RetryAfter string `json:"retry_after,omitempty"`
+}
+
+// TaskStuckData reports a task that failed repeatedly across consecutive
+// auto-mode invocations and was skipped to allow the loop to make progress on
+// other tasks.
+type TaskStuckData struct {
+	TaskID              string `json:"task_id"`
+	ConsecutiveFailures int    `json:"consecutive_failures"`
+	LastError           string `json:"last_error"`
 }
 
 type AgentStartedData struct {

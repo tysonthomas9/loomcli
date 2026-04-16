@@ -149,6 +149,18 @@ type autoLoopCtx struct {
 	// resumeAttempted is set for a single invocation when we actually asked the
 	// backend to resume a previous Claude session.
 	resumeAttempted bool
+
+	// lastFailedTaskID is the task ID from the previous failed invocation.
+	// Used to detect when the same task is failing repeatedly.
+	lastFailedTaskID string
+	// sameTaskFailures counts consecutive failures on lastFailedTaskID.
+	// Reset to 1 when a different task ID fails, reset to 0 on success.
+	// When this reaches maxSameTaskFailures, the task is added to stuckTaskIDs.
+	sameTaskFailures int
+	// stuckTaskIDs is the set of task IDs that have been declared stuck and
+	// should be skipped if the agent re-claims them. Persists for the lifetime
+	// of the auto-mode loop.
+	stuckTaskIDs map[string]bool
 }
 
 // RunAutoModeLoop runs the auto mode loop for either plan or task agents.
@@ -210,6 +222,7 @@ func initAutoLoop(opts AutoModeOptions) *autoLoopCtx {
 			LastTaskTime:  time.Now(),
 			IdleStartTime: time.Now(),
 		},
+		stuckTaskIDs: make(map[string]bool),
 	}
 
 	ctx.hasAvailableTasks = resolveTaskChecker(opts)

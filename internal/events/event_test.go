@@ -16,6 +16,7 @@ func TestEventType_Constants(t *testing.T) {
 		{TaskStarted, "task.started"},
 		{TaskCompleted, "task.completed"},
 		{TaskFailed, "task.failed"},
+		{TaskStuck, "task.stuck"},
 		{AgentStarted, "agent.started"},
 		{AgentRestarted, "agent.restarted"},
 		{AgentStopped, "agent.stopped"},

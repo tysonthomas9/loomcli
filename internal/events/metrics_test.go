@@ -72,6 +72,49 @@ func TestMetricsStore_HandleTaskFailed(t *testing.T) {
 	}
 }
 
+// TestMetricsStore_HandleTaskStuck verifies that a task.stuck event on its own
+// does NOT increment totalTasksFailed — in the real flow, task.stuck is always
+// preceded by a task.failed that already recorded the failure.
+func TestMetricsStore_HandleTaskStuck(t *testing.T) {
+	ms := newTestStore()
+	e := mustEvent(t, TaskStuck, "agent1", "dev", "", TaskStuckData{
+		TaskID:              "t-stuck",
+		ConsecutiveFailures: 3,
+		LastError:           "context canceled",
+	})
+	e.Timestamp = ms.now()
+	ms.handleEvent(e)
+
+	snap := ms.Snapshot()
+	if snap.TotalTasksFailed != 0 {
+		t.Errorf("TotalTasksFailed = %d, want 0 (TaskStuck must not double-count the preceding TaskFailed)", snap.TotalTasksFailed)
+	}
+}
+
+// TestMetricsStore_TaskStuckAfterFailures verifies the realistic sequence: 3
+// task.failed events followed by 1 task.stuck event should count as exactly 3
+// failures, not 4.
+func TestMetricsStore_TaskStuckAfterFailures(t *testing.T) {
+	ms := newTestStore()
+	for i := 0; i < 3; i++ {
+		e := mustEvent(t, TaskFailed, "agent1", "dev", "", TaskFailedData{
+			TaskID: "t-stuck", Error: "exit code 1",
+		})
+		e.Timestamp = ms.now()
+		ms.handleEvent(e)
+	}
+	stuck := mustEvent(t, TaskStuck, "agent1", "dev", "", TaskStuckData{
+		TaskID: "t-stuck", ConsecutiveFailures: 3, LastError: "exit code 1",
+	})
+	stuck.Timestamp = ms.now()
+	ms.handleEvent(stuck)
+
+	snap := ms.Snapshot()
+	if snap.TotalTasksFailed != 3 {
+		t.Errorf("TotalTasksFailed = %d, want 3 (3 failures + stuck classification, no double-count)", snap.TotalTasksFailed)
+	}
+}
+
 func TestMetricsStore_HandleAgentLifecycle(t *testing.T) {
 	ms := newTestStore()
 	base := ms.now().Add(-30 * time.Minute)
