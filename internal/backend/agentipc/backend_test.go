@@ -370,6 +370,7 @@ func TestBackend_NotImplemented_Queries(t *testing.T) {
 		{"Blocked", func() error { _, err := b.Blocked(ctx, backend.BlockedOpts{}); return err }},
 		{"Stats", func() error { _, err := b.Stats(ctx); return err }},
 		{"Count", func() error { _, err := b.Count(ctx, backend.CountOpts{}); return err }},
+		{"GetChildren", func() error { _, err := b.GetChildren(ctx, "x"); return err }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -112,6 +112,12 @@ func (pb *PooledBackend) Count(ctx context.Context, opts backend.CountOpts) (int
 	})
 }
 
+func (pb *PooledBackend) GetChildren(ctx context.Context, id string) ([]backend.IssueData, error) {
+	return execPool(ctx, pb, "GetChildren", func(b *BeadsBackend) ([]backend.IssueData, error) {
+		return b.GetChildren(ctx, id)
+	})
+}
+
 // --- Mutation operations ---
 
 func (pb *PooledBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error) {

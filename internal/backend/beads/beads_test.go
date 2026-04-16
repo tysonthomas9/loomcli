@@ -346,6 +346,156 @@ func TestList_HappyPath(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// GetChildren
+// ---------------------------------------------------------------------------
+
+func TestGetChildren_HappyPath(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
+	issues := []*types.IssueWithCounts{
+		{
+			Issue: &types.Issue{
+				ID:        "bd-child-1",
+				Title:     "Child One",
+				Status:    types.StatusOpen,
+				CreatedAt: now,
+				UpdatedAt: now,
+			},
+			DependencyCount: 0,
+			DependentCount:  1,
+		},
+		{
+			Issue: &types.Issue{
+				ID:        "bd-child-2",
+				Title:     "Child Two",
+				Status:    types.StatusInProgress,
+				CreatedAt: now,
+				UpdatedAt: now,
+			},
+			DependencyCount: 1,
+			DependentCount:  0,
+		},
+	}
+
+	mc := &mockClient{
+		ListFn: func(args *rpc.ListArgs) (*rpc.Response, error) {
+			if args.ParentID != "epic-1" {
+				t.Errorf("ListArgs.ParentID = %q, want %q", args.ParentID, "epic-1")
+			}
+			// Verify no other filters are set.
+			if args.Status != "" {
+				t.Errorf("ListArgs.Status = %q, want empty", args.Status)
+			}
+			if args.Assignee != "" {
+				t.Errorf("ListArgs.Assignee = %q, want empty", args.Assignee)
+			}
+			if args.IssueType != "" {
+				t.Errorf("ListArgs.IssueType = %q, want empty", args.IssueType)
+			}
+			if args.Limit != 0 {
+				t.Errorf("ListArgs.Limit = %d, want 0", args.Limit)
+			}
+			if args.Priority != nil {
+				t.Errorf("ListArgs.Priority = %v, want nil", args.Priority)
+			}
+			if len(args.Labels) != 0 {
+				t.Errorf("ListArgs.Labels = %v, want empty", args.Labels)
+			}
+			if len(args.IDs) != 0 {
+				t.Errorf("ListArgs.IDs = %v, want empty", args.IDs)
+			}
+			return successResponse(t, issues), nil
+		},
+	}
+
+	b := New(mc)
+	got, err := b.GetChildren(context.Background(), "epic-1")
+	if err != nil {
+		t.Fatalf("GetChildren() error = %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("GetChildren() returned %d items, want 2", len(got))
+	}
+	if got[0].ID != "bd-child-1" {
+		t.Errorf("got[0].ID = %q, want %q", got[0].ID, "bd-child-1")
+	}
+	if got[1].ID != "bd-child-2" {
+		t.Errorf("got[1].ID = %q, want %q", got[1].ID, "bd-child-2")
+	}
+}
+
+func TestGetChildren_EmptyID(t *testing.T) {
+	called := false
+	mc := &mockClient{
+		ListFn: func(_ *rpc.ListArgs) (*rpc.Response, error) {
+			called = true
+			return nil, nil
+		},
+	}
+	b := New(mc)
+	_, err := b.GetChildren(context.Background(), "")
+	if err == nil {
+		t.Fatal("expected error for empty ID")
+	}
+	if called {
+		t.Error("ListFn should not have been called")
+	}
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Errorf("error kind = %v, want %v", err, backend.KindValidation)
+	}
+	if msg := err.Error(); !strings.Contains(msg, "id must not be empty") {
+		t.Errorf("error message = %q, want it to contain %q", msg, "id must not be empty")
+	}
+}
+
+func TestGetChildren_Empty(t *testing.T) {
+	mc := &mockClient{
+		ListFn: func(_ *rpc.ListArgs) (*rpc.Response, error) {
+			return successResponse(t, []*types.IssueWithCounts{}), nil
+		},
+	}
+	b := New(mc)
+	got, err := b.GetChildren(context.Background(), "epic-empty")
+	if err != nil {
+		t.Fatalf("GetChildren() error = %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("GetChildren() returned %d items, want 0", len(got))
+	}
+}
+
+func TestGetChildren_ServerError(t *testing.T) {
+	mc := &mockClient{
+		ListFn: func(_ *rpc.ListArgs) (*rpc.Response, error) {
+			return errorResponse("db error"), nil
+		},
+	}
+	b := New(mc)
+	_, err := b.GetChildren(context.Background(), "epic-1")
+	if err == nil {
+		t.Fatal("expected error from server")
+	}
+	if !strings.Contains(err.Error(), "db error") {
+		t.Errorf("error message = %q, want it to contain %q", err.Error(), "db error")
+	}
+}
+
+func TestGetChildren_UnmarshalError(t *testing.T) {
+	mc := &mockClient{
+		ListFn: func(_ *rpc.ListArgs) (*rpc.Response, error) {
+			return &rpc.Response{Success: true, Data: []byte("not json")}, nil
+		},
+	}
+	b := New(mc)
+	_, err := b.GetChildren(context.Background(), "epic-1")
+	if err == nil {
+		t.Fatal("expected unmarshal error")
+	}
+	if !backend.IsKind(err, backend.KindInternal) {
+		t.Errorf("error kind = %v, want %v", err, backend.KindInternal)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Ready (happy path)
 // ---------------------------------------------------------------------------
 

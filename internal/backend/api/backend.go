@@ -267,6 +267,31 @@ func (b *APIBackend) Count(_ context.Context, _ backend.CountOpts) (int, error) 
 	return 0, backend.ErrNotImplemented("Count", "server has no count endpoint")
 }
 
+// GetChildren returns the direct children of an issue by calling /issues with
+// a parent filter. Returns an empty slice if the issue has no children.
+func (b *APIBackend) GetChildren(ctx context.Context, id string) ([]backend.IssueData, error) {
+	if id == "" {
+		return nil, backend.ErrValidation("GetChildren", "id must not be empty")
+	}
+	path := "/issues?parent_id=" + url.QueryEscape(id)
+	resp, apiErr := b.exec(ctx, "GetChildren", http.MethodGet, path, nil)
+	if apiErr != nil {
+		return nil, apiErr
+	}
+	if !hasData(resp) {
+		return []backend.IssueData{}, nil
+	}
+	var issues []gen.Issue
+	if jsonErr := json.Unmarshal(resp.Data, &issues); jsonErr != nil {
+		return nil, backend.ErrInternal("GetChildren", "unmarshal response", jsonErr)
+	}
+	result := make([]backend.IssueData, 0, len(issues))
+	for _, i := range issues {
+		result = append(result, issueToData(i))
+	}
+	return result, nil
+}
+
 // --- Mutation operations ---
 
 func (b *APIBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error) {

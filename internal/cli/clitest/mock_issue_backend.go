@@ -39,6 +39,9 @@ type MockIssueBackend struct {
 	CountResult            int
 	CountErr               error
 	CountFn                func(ctx context.Context, opts backend.CountOpts) (int, error)
+	GetChildrenResult      []backend.IssueData
+	GetChildrenErr         error
+	GetChildrenFn          func(ctx context.Context, id string) ([]backend.IssueData, error)
 	CreateResult           *backend.IssueData
 	CreateErr              error
 	CreateFn               func(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error)
@@ -145,6 +148,16 @@ func (m *MockIssueBackend) Count(ctx context.Context, opts backend.CountOpts) (i
 	m.mu.Unlock()
 	if fn != nil {
 		return fn(ctx, opts)
+	}
+	return r, e
+}
+func (m *MockIssueBackend) GetChildren(ctx context.Context, id string) ([]backend.IssueData, error) {
+	m.mu.Lock()
+	m.record("GetChildren", id)
+	fn, r, e := m.GetChildrenFn, m.GetChildrenResult, m.GetChildrenErr
+	m.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, id)
 	}
 	return r, e
 }

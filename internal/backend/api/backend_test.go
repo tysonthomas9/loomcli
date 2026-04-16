@@ -415,6 +415,71 @@ func TestStats_ServerError(t *testing.T) {
 
 // --- Count / ClaimIssue / Batch / Mutations ---
 
+func TestGetChildren_HappyPath(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	var gotPath string
+	var gotQuery string
+	ab, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		if r.Method != http.MethodGet {
+			t.Errorf("method = %s", r.Method)
+		}
+		status := gen.IssueStatus("open")
+		issueType := gen.IssueIssueType("task")
+		respondOK(w, []gen.Issue{
+			{Id: "c1", Title: "Child 1", Status: &status, IssueType: &issueType, Priority: 1, CreatedAt: now, UpdatedAt: now},
+			{Id: "c2", Title: "Child 2", Status: &status, IssueType: &issueType, Priority: 2, CreatedAt: now, UpdatedAt: now},
+		})
+	})
+	defer ts.Close()
+
+	result, err := ab.GetChildren(context.Background(), "epic-1")
+	if err != nil {
+		t.Fatalf("GetChildren: %v", err)
+	}
+	if !strings.HasSuffix(gotPath, "/issues") {
+		t.Errorf("path = %q, want suffix /issues", gotPath)
+	}
+	if !strings.Contains(gotQuery, "parent_id=epic-1") {
+		t.Errorf("query = %q, want parent_id=epic-1", gotQuery)
+	}
+	if len(result) != 2 {
+		t.Fatalf("len = %d, want 2", len(result))
+	}
+	if result[0].ID != "c1" || result[1].ID != "c2" {
+		t.Errorf("IDs: %q %q", result[0].ID, result[1].ID)
+	}
+}
+
+func TestGetChildren_EmptyID(t *testing.T) {
+	ab, err := New(Config{BaseURL: "http://x", WorkspaceID: "ws"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = ab.GetChildren(context.Background(), "")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Errorf("expected KindValidation, got %v", err)
+	}
+}
+
+func TestGetChildren_Empty(t *testing.T) {
+	ab, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		respondOK(w, []gen.Issue{})
+	})
+	defer ts.Close()
+	result, err := ab.GetChildren(context.Background(), "epic-1")
+	if err != nil {
+		t.Fatalf("GetChildren: %v", err)
+	}
+	if len(result) != 0 {
+		t.Errorf("expected 0, got %d", len(result))
+	}
+}
+
 func TestCount_NotImplemented(t *testing.T) {
 	ab, err := New(Config{BaseURL: "http://x", WorkspaceID: "ws"})
 	if err != nil {

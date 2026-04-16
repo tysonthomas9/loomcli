@@ -294,6 +294,24 @@ func TestIPCIssueBackend_List_DelegatesToFallback(t *testing.T) {
 	}
 }
 
+func TestIPCIssueBackend_GetChildren_DelegatesToFallback(t *testing.T) {
+	ipc := &mockIPCMutator{}
+	fb := NewMockIssueBackend()
+	fb.GetChildrenResult = []backend.IssueData{{ID: "child-1"}}
+	b := newIPCIssueBackend(ipc, fb)
+
+	got, err := b.GetChildren(context.Background(), "epic-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "child-1" {
+		t.Errorf("got %v, want [{ID:child-1}]", got)
+	}
+	if !fb.Called("GetChildren") {
+		t.Error("fallback GetChildren should have been called")
+	}
+}
+
 func TestIPCIssueBackend_Create_DelegatesToFallback(t *testing.T) {
 	ipc := &mockIPCMutator{}
 	fb := NewMockIssueBackend()

@@ -1100,3 +1100,70 @@ func TestCliBeadsAdapter_Update_NilAgentState(t *testing.T) {
 		t.Fatalf("expected 1 call, got %d", len(runner.calls))
 	}
 }
+
+// --- GetChildren tests ---
+
+func TestCliBeadsAdapter_GetChildren_Success(t *testing.T) {
+	jsonOut := `[
+		{"id": "child-1", "title": "Child One", "status": "open", "priority": 2, "issue_type": "task"},
+		{"id": "child-2", "title": "Child Two", "status": "in_progress", "priority": 1, "issue_type": "bug"}
+	]`
+	runner := &mockBDRunner{
+		fn: func(_ string, _ ...string) CommandResult {
+			return CommandResult{Stdout: jsonOut}
+		},
+	}
+	a := newCliBeadsAdapter(runner, "/tmp/test")
+
+	got, err := a.GetChildren(context.Background(), "epic-1")
+	if err != nil {
+		t.Fatalf("GetChildren() error = %v", err)
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(runner.calls))
+	}
+	gotArgs := strings.Join(runner.calls[0].Args, " ")
+	wantArgs := "list --json --parent epic-1"
+	if gotArgs != wantArgs {
+		t.Errorf("args = %q, want %q", gotArgs, wantArgs)
+	}
+	if len(got) != 2 {
+		t.Fatalf("GetChildren() returned %d items, want 2", len(got))
+	}
+	if got[0].ID != "child-1" {
+		t.Errorf("got[0].ID = %q, want %q", got[0].ID, "child-1")
+	}
+	if got[1].ID != "child-2" {
+		t.Errorf("got[1].ID = %q, want %q", got[1].ID, "child-2")
+	}
+}
+
+func TestCliBeadsAdapter_GetChildren_EmptyID(t *testing.T) {
+	runner := &mockBDRunner{}
+	a := newCliBeadsAdapter(runner, "/tmp/test")
+
+	_, err := a.GetChildren(context.Background(), "")
+	if err == nil {
+		t.Fatal("expected error for empty ID")
+	}
+	if len(runner.calls) != 0 {
+		t.Errorf("runner should not be called for empty ID, got %d calls", len(runner.calls))
+	}
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Errorf("error kind = %v, want %v", err, backend.KindValidation)
+	}
+}
+
+func TestCliBeadsAdapter_GetChildren_RunnerError(t *testing.T) {
+	runner := &mockBDRunner{
+		fn: func(_ string, _ ...string) CommandResult {
+			return CommandResult{Err: fmt.Errorf("runner failed")}
+		},
+	}
+	a := newCliBeadsAdapter(runner, "/tmp/test")
+
+	_, err := a.GetChildren(context.Background(), "epic-1")
+	if err == nil {
+		t.Fatal("expected error for runner failure")
+	}
+}

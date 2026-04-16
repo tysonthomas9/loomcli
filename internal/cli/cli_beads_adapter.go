@@ -213,6 +213,15 @@ func (a *cliBeadsAdapter) Count(_ context.Context, _ backend.CountOpts) (int, er
 	return 0, backend.ErrNotImplemented("Count", "not supported via CLI adapter")
 }
 
+// GetChildren returns the direct children of the given issue by shelling out to
+// bd list --parent <id> --json.
+func (a *cliBeadsAdapter) GetChildren(_ context.Context, id string) ([]backend.IssueData, error) {
+	if id == "" {
+		return nil, backend.ErrValidation("GetChildren", "id must not be empty")
+	}
+	return a.queryIssues("GetChildren", []string{"list", "--json", "--parent", id})
+}
+
 // --- Mutation methods ---
 
 func (a *cliBeadsAdapter) Create(_ context.Context, _ backend.CreateParams) (*backend.IssueData, error) {

@@ -313,6 +313,70 @@ func TestList_EmptyOpts_NoError(t *testing.T) {
 	}
 }
 
+// --- GetChildren ---
+
+func TestGetChildren_HappyPath(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	issues := []*types.IssueWithCounts{
+		{Issue: &types.Issue{ID: "c1", Title: "Child 1", Status: types.StatusOpen, CreatedAt: now, UpdatedAt: now}},
+		{Issue: &types.Issue{ID: "c2", Title: "Child 2", Status: types.StatusOpen, CreatedAt: now, UpdatedAt: now}},
+	}
+
+	var gotPath string
+	var gotQuery string
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		if r.Method != "GET" {
+			t.Errorf("Method = %q, want GET", r.Method)
+		}
+		respondOK(w, issues)
+	})
+	defer ts.Close()
+
+	result, err := fb.GetChildren(context.Background(), "epic-1")
+	if err != nil {
+		t.Fatalf("GetChildren: %v", err)
+	}
+	if !strings.HasSuffix(gotPath, "/issues") {
+		t.Errorf("path = %q, want suffix /issues", gotPath)
+	}
+	if !strings.Contains(gotQuery, "parent_id=epic-1") {
+		t.Errorf("query = %q, want parent_id=epic-1", gotQuery)
+	}
+	if len(result) != 2 || result[0].ID != "c1" || result[1].ID != "c2" {
+		t.Errorf("got %v, want [c1 c2]", result)
+	}
+}
+
+func TestGetChildren_EmptyID(t *testing.T) {
+	fb, err := New(Config{BaseURL: "http://x", WorkspaceID: "ws"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = fb.GetChildren(context.Background(), "")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Errorf("expected KindValidation, got %v", err)
+	}
+}
+
+func TestGetChildren_Empty(t *testing.T) {
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		respondOK(w, []*types.IssueWithCounts{})
+	})
+	defer ts.Close()
+	result, err := fb.GetChildren(context.Background(), "epic-1")
+	if err != nil {
+		t.Fatalf("GetChildren: %v", err)
+	}
+	if len(result) != 0 {
+		t.Errorf("expected 0, got %d", len(result))
+	}
+}
+
 // TestCheckFleetUnsupportedFilters_EachField sets each unsupported ListOpts
 // field individually and verifies that (a) the error wraps
 // ErrFilterNotSupported and (b) the error message contains the field name.

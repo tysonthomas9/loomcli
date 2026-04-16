@@ -261,6 +261,27 @@ func (b *FleetBackend) Count(_ context.Context, _ backend.CountOpts) (int, error
 	return 0, backend.ErrNotImplemented("Count", "fleet server has no count endpoint")
 }
 
+// GetChildren returns the direct children of the given issue (typically an epic)
+// by calling the fleet-db list endpoint with a parent filter.
+func (b *FleetBackend) GetChildren(ctx context.Context, id string) ([]backend.IssueData, error) {
+	if id == "" {
+		return nil, backend.ErrValidation("GetChildren", "id must not be empty")
+	}
+	path := "/issues?parent_id=" + url.QueryEscape(id)
+	resp, callErr := b.exec(ctx, "GetChildren", "GET", path, nil)
+	if callErr != nil {
+		return nil, callErr
+	}
+	if !hasData(resp) {
+		return []backend.IssueData{}, nil
+	}
+	var issues []*types.IssueWithCounts
+	if jsonErr := json.Unmarshal(resp.Data, &issues); jsonErr != nil {
+		return nil, backend.ErrInternal("GetChildren", "unmarshal response", jsonErr)
+	}
+	return issuesWithCountsToData(issues), nil
+}
+
 // --- Mutation operations ---
 
 func (b *FleetBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error) {

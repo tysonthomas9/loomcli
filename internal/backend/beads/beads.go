@@ -169,6 +169,25 @@ func (b *BeadsBackend) Stats(_ context.Context) (*backend.StatsData, error) {
 	return &result, nil
 }
 
+// GetChildren returns the direct children of the given issue (typically an epic).
+// Implemented via the existing List RPC with ParentID filter.
+func (b *BeadsBackend) GetChildren(_ context.Context, id string) ([]backend.IssueData, error) {
+	if id == "" {
+		return nil, backend.ErrValidation("GetChildren", "id must not be empty")
+	}
+	resp, err := b.execAndCheck("GetChildren", func() (*rpc.Response, error) {
+		return b.client.List(&rpc.ListArgs{ParentID: id})
+	})
+	if err != nil {
+		return nil, err
+	}
+	var issues []*types.IssueWithCounts
+	if err := json.Unmarshal(resp.Data, &issues); err != nil {
+		return nil, backend.ErrInternal("GetChildren", "unmarshal response", err)
+	}
+	return issuesWithCountsToData(issues), nil
+}
+
 // Count returns the number of issues matching the given filters.
 func (b *BeadsBackend) Count(_ context.Context, opts backend.CountOpts) (int, error) {
 	rpcArgs := &rpc.CountArgs{

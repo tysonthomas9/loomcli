@@ -42,6 +42,12 @@ type IssueBackend interface {
 	// backends that don't support grouping return KindNotImplemented.
 	Count(ctx context.Context, opts CountOpts) (int, error)
 
+	// GetChildren returns the direct children of the given issue (typically an
+	// epic). Returns an empty slice if the issue has no children or does not
+	// exist. This is a hierarchy query — it returns all children regardless of
+	// status. Returns KindValidation if id is empty.
+	GetChildren(ctx context.Context, id string) ([]IssueData, error)
+
 	// --- Mutation operations ---
 
 	// Create creates a new issue and returns the slim projection of the

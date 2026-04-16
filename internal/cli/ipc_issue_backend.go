@@ -99,6 +99,10 @@ func (b *ipcIssueBackend) Count(ctx context.Context, opts backend.CountOpts) (in
 	return b.fallback.Count(ctx, opts)
 }
 
+func (b *ipcIssueBackend) GetChildren(ctx context.Context, id string) ([]backend.IssueData, error) {
+	return b.fallback.GetChildren(ctx, id)
+}
+
 func (b *ipcIssueBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error) {
 	return b.fallback.Create(ctx, params)
 }
