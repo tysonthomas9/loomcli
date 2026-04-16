@@ -318,18 +318,36 @@ export const TerminalInstance = forwardRef<
     }
   }, [workspaceId, sessionName, startWs, wtermFocus]);
 
-  const handleData = useCallback((data: string) => {
-    const ws = wsRef.current;
-    const sendToWs = (d: string) => {
-      if (ws?.readyState === WebSocket.OPEN) ws.send(d);
-    };
-    const interceptor = interceptorRef.current;
-    if (interceptor) {
-      interceptor.handleData(data, sendToWs);
-    } else {
-      sendToWs(data);
-    }
-  }, []);
+  // True when the underlying program is driving the alt-screen (tmux,
+  // Claude Code, vim, less, htop…). Used to gate loom's terminal-UI
+  // extensions (slash-command interceptor, mouse-wheel forwarder) so they
+  // step aside while a TUI is active. Piercing wterm's internals is
+  // isolated here — if @wterm/react restructures `instance.bridge`, only
+  // this helper breaks.
+  const isInAltScreen = useCallback(
+    () => wtermRef.current?.instance?.bridge?.usingAltScreen() ?? false,
+    [wtermRef],
+  );
+
+  const handleData = useCallback(
+    (data: string) => {
+      const ws = wsRef.current;
+      const sendToWs = (d: string) => {
+        if (ws?.readyState === WebSocket.OPEN) ws.send(d);
+      };
+      // Loom's slash-command interceptor only runs at a normal-mode shell
+      // prompt. When a TUI is driving the alt-screen, pass keystrokes
+      // through unmodified so the app's own slash commands work (Claude's
+      // /status, /clear, /compact, less's /search, vim's /-search, etc.).
+      const interceptor = interceptorRef.current;
+      if (interceptor && !isInAltScreen()) {
+        interceptor.handleData(data, sendToWs);
+      } else {
+        sendToWs(data);
+      }
+    },
+    [isInAltScreen],
+  );
 
   const handleResize = useCallback((cols: number, rows: number) => {
     sizeRef.current = { cols, rows };
@@ -492,18 +510,60 @@ export const TerminalInstance = forwardRef<
       onTerminalFocusRef.current?.();
     };
 
+    // Wheel: forward as SGR mouse escape only when the app is in alt-screen
+    // mode (tmux, vim, less). In normal shells, let the native DOM scroll
+    // wterm's own scrollback. loom's backend sets `set -g mouse on` on every
+    // tmux session so copy-mode engages on wheel events automatically.
+    const handleWheel = (e: WheelEvent) => {
+      if (!isInAltScreen()) return;
+
+      const ws = wsRef.current;
+      if (ws?.readyState !== WebSocket.OPEN) return;
+
+      const wtermEl = el.querySelector(".wterm") as HTMLElement | null;
+      if (!wtermEl) return;
+      const rect = wtermEl.getBoundingClientRect();
+      const { cols, rows } = sizeRef.current;
+      if (!cols || !rows || !rect.width || !rect.height) return;
+
+      // SGR mouse protocol — 64/65 wheel up/down, 66/67 wheel left/right.
+      let btn: number | null = null;
+      if (Math.abs(e.deltaY) >= Math.abs(e.deltaX)) {
+        if (e.deltaY < 0) btn = 64;
+        else if (e.deltaY > 0) btn = 65;
+      } else {
+        if (e.deltaX < 0) btn = 66;
+        else if (e.deltaX > 0) btn = 67;
+      }
+      if (btn === null) return;
+
+      const col = Math.max(
+        1,
+        Math.min(cols, Math.floor((e.clientX - rect.left) / (rect.width / cols)) + 1),
+      );
+      const row = Math.max(
+        1,
+        Math.min(rows, Math.floor((e.clientY - rect.top) / (rect.height / rows)) + 1),
+      );
+
+      e.preventDefault();
+      ws.send(`\x1b[<${btn};${col};${row}M`);
+    };
+
     el.addEventListener("keydown", handleKeyDown, { capture: true });
     el.addEventListener("contextmenu", handleContextMenu);
     el.addEventListener("paste", handleBrowserPaste, { capture: true });
     el.addEventListener("focusin", handleFocusIn);
+    el.addEventListener("wheel", handleWheel, { capture: true, passive: false });
 
     return () => {
       el.removeEventListener("keydown", handleKeyDown, { capture: true });
       el.removeEventListener("contextmenu", handleContextMenu);
       el.removeEventListener("paste", handleBrowserPaste, { capture: true });
       el.removeEventListener("focusin", handleFocusIn);
+      el.removeEventListener("wheel", handleWheel, { capture: true });
     };
-  }, []);
+  }, [isInAltScreen]);
 
   // Scroll tracking for "New output" pill — re-bound after each remount.
   useEffect(() => {
