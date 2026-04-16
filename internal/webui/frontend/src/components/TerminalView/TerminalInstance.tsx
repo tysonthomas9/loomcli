@@ -358,6 +358,16 @@ export const TerminalInstance = forwardRef<
   );
 
   const handleResize = useCallback((cols: number, rows: number) => {
+    // Ignore degenerate sizes from wterm's ResizeObserver. When the wrapper
+    // is briefly 0×0 (initial mount before layout, a pane that just switched
+    // from display:none, or a full-page reflow), wterm's observer does
+    // Math.max(1, Math.floor(0 / charW)) → 1 and fires onResize(1, 1).
+    // Forwarding that to the PTY makes tmux clamp to its 10×6 minimum and
+    // the session is stuck small even after the real geometry arrives,
+    // because tmux won't grow a client past the smallest attached client
+    // (the one we just reported as 1×1). A real resize follows within a
+    // frame once layout settles, so dropping the bogus value is safe.
+    if (cols < 2 || rows < 2) return;
     sizeRef.current = { cols, rows };
     const ws = wsRef.current;
     if (ws?.readyState === WebSocket.OPEN) {
