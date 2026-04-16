@@ -67,10 +67,15 @@ fi
 # --- 1. Build loom binary (skip if fresh) ---
 # Prefer the pre-built binary from `make build` when available and newer.
 MAIN_BIN="$REPO_ROOT/loom"
+SYSTEM_LOOM_BIN="$(command -v loom 2>/dev/null || true)"
 if [[ -x "$MAIN_BIN" ]] && { [[ ! -x "$LOOM_BIN" ]] || [[ "$MAIN_BIN" -nt "$LOOM_BIN" ]]; }; then
     echo "[e2e] Copying pre-built loom binary..."
     mkdir -p "$(dirname "$LOOM_BIN")"
     cp "$MAIN_BIN" "$LOOM_BIN"
+elif [[ -n "$SYSTEM_LOOM_BIN" ]] && [[ ! -x "$LOOM_BIN" ]]; then
+    echo "[e2e] Copying system loom binary..."
+    mkdir -p "$(dirname "$LOOM_BIN")"
+    cp "$SYSTEM_LOOM_BIN" "$LOOM_BIN"
 elif [[ ! -x "$LOOM_BIN" ]]; then
     echo "[e2e] Building loom binary..."
     mkdir -p "$(dirname "$LOOM_BIN")"
@@ -91,14 +96,27 @@ rm -rf "$E2E_WORKSPACE"
 mkdir -p "$E2E_WORKSPACE"
 export LOOM_CONFIG_DIR="$E2E_WORKSPACE/.loom-config"
 mkdir -p "$LOOM_CONFIG_DIR"
-(cd "$E2E_WORKSPACE" && git init -q && git commit --allow-empty -m "e2e seed" -q && bd init --prefix loomcli --skip-hooks -q)
+(
+    cd "$E2E_WORKSPACE" &&
+        git init -q &&
+        git config user.name "Loom E2E" &&
+        git config user.email "loom-e2e@example.test" &&
+        git commit --allow-empty -m "e2e seed" -q &&
+        bd init --prefix loomcli --skip-hooks -q
+)
 echo "[e2e] Created isolated workspace: $E2E_WORKSPACE"
 
 # --- 3b. Create a second workspace for cross-workspace tests ---
 E2E_WORKSPACE_2="$REPO_ROOT/tmp/e2e-workspace-2"
 rm -rf "$E2E_WORKSPACE_2"
 mkdir -p "$E2E_WORKSPACE_2"
-(cd "$E2E_WORKSPACE_2" && git init -q && git commit --allow-empty -m "e2e seed 2" -q)
+(
+    cd "$E2E_WORKSPACE_2" &&
+        git init -q &&
+        git config user.name "Loom E2E" &&
+        git config user.email "loom-e2e@example.test" &&
+        git commit --allow-empty -m "e2e seed 2" -q
+)
 LOOM_CONFIG_DIR="$E2E_WORKSPACE/.loom-config" "$LOOM_BIN" workspace create e2e-ws-2 \
     --repos "$E2E_WORKSPACE_2" --path "$E2E_WORKSPACE_2" 2>/dev/null || true
 echo "[e2e] Created second workspace: $E2E_WORKSPACE_2"
