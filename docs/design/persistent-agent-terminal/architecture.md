@@ -135,6 +135,23 @@ Same as today, with annotations showing which functions changed:
 
 ## 3. Part 2 — persistent agents in Firecracker
 
+### Persistent vs ephemeral agents
+
+Two classes of agent with different lifecycles and different terminal guarantees:
+
+| | **Persistent agent** | **Ephemeral agent** |
+|---|---|---|
+| Lifecycle | long-lived; owns its own state dir / repo / env | spun up for a task, torn down when done |
+| Terminal expectation | survives web-pod restart, network blips, page refresh | exists only while the agent pod is alive |
+| State survival | shell process + scrollback + cwd + running jobs | ephemeral, same as today |
+| Who owns the shell | `loom-agentd` inside a Firecracker VM (separate lifecycle from the webui pod) | the webui pod (ephemeral) |
+| Snapshot-able | yes — Firecracker memory + device snapshot | no |
+| `PTYSource` impl | `AgentdClient` (gRPC-over-vsock) | `LocalPTYHost` (in-process `TerminalManager`) |
+
+The Part 1 work covers the **ephemeral** column end-to-end (WS-reconnect durability within pod
+lifetime). Part 2 adds the **persistent** column — a different code path that points *out* of
+`loom serve`.
+
 ### Topology
 
 ```
@@ -332,3 +349,36 @@ Snapshot restore time on NVMe: ~100–300 ms for a 1–2 GB VM. Cold S3 pull add
 - Route traffic to the new host once its daemon heartbeats.
 
 The stateful unit is the microVM. Only microVMs are snapshotted.
+
+## 7. Alternatives considered
+
+### Why Firecracker (and not the other options)
+
+The only way terminal state survives a host / pod restart is if the process tree lives outside the
+failure domain you're trying to survive. Ranked options:
+
+| Option | Survives WS blip | Survives pod restart | Complexity | Notes |
+|---|---|---|---|---|
+| Detach PTY from WS (Part 1) | yes | no | low | what Part 1 is |
+| tmux inside the same pod | yes | **no** — pod dies → tmux dies | low | **does not help** for pod restart |
+| tmux in a separate pod | yes | only if the tmux pod doesn't restart too | medium | still dies on that pod's eviction |
+| CRIU checkpoint of a single container | yes | yes-ish | **high** | painful with TTYs, external sockets, seccomp; fails loudly |
+| Kubernetes native checkpoint | yes | yes-ish | high | still alpha (1.30+); no transport story |
+| **Firecracker microVM snapshots** | yes | **yes** | medium | snapshot = full VM RAM + CPU + device state; ~100–300 ms restore on NVMe; used at scale by AWS Lambda SnapStart, Fly.io |
+| Dedicated VM per agent (Codespaces-style) | yes | yes | high (infra) | strictly more expensive than Firecracker for the same effect |
+
+**Key correction we worked through in design discussion:** tmux does *not* solve pod-restart
+durability when it lives inside the pod. The tmux server is a process; the socket is its address.
+Killing the pod kills the process. This is why Part 2 uses a separate lifecycle bucket
+(Firecracker microVMs) rather than tmux-in-pod.
+
+### Why not CRIU directly in `loom serve`
+
+- CRIU doesn't know which processes matter. Every transient subprocess gets snapshotted.
+  Snapshots become enormous and restore becomes flaky.
+- Network-socket handling is painful: hand-classifying every external connection is required.
+- PTY + seccomp + cgroup edge cases.
+
+Firecracker sidesteps all of these by treating the VM as one atomic unit with a well-defined
+outside world (virtio devices). `loom serve` only has to care whether the VM is paused or running.
+

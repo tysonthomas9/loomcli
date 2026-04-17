@@ -9,6 +9,20 @@ three ways:
 3. **Scrollback files** — inside the microVM's own filesystem (PV-backed), on the same disk as
    the agent's workspace files. Never Redis.
 
+## 0. What lives where (summary)
+
+| Data | Where | Why |
+|---|---|---|
+| microVM snapshot blobs | **S3** (durable) + NVMe (pull-through cache) | must survive host loss; large; read rarely |
+| microVM rootfs base image | **S3** + NVMe cache | shared across agents, versioned, immutable |
+| microVM rootfs deltas (per-agent writes) | **S3** + NVMe cache, or block storage (EBS / RBD / Longhorn) | user-editable state; fsync semantics matter — block storage optional |
+| Scrollback files (per session) | **inside the microVM's rootfs** | colocated with the shell that writes them; snapshotted automatically |
+| Tab metadata (labels, notes, pins) | **Redis** | small, cross-pod reads, already in use |
+| Terminal routing owner keys | **Redis** (TTL) | small, cross-pod reads + writes, fleet coordination |
+| Auth tokens | **Redis** (short TTL) | small, short-lived |
+| Host VM image | **image registry** (Packer / cloud AMI) | built offline, immutable |
+| Host VM runtime state | — | stateless; hosts are replaceable cattle |
+
 ## 1. Snapshot storage tiers
 
 ```
@@ -115,7 +129,33 @@ Two viable approaches. Pick per deployment, not per loom release.
 Default recommendation: S3 for rootfs + snapshots. Upgrade to block storage later for
 agents that need strict fsync durability.
 
-## 3. Scrollback files
+## 3. Scrollback files — why files, not Redis
+
+Reasons scrollback lives in a file inside the microVM rather than Redis (or any central store):
+
+- **Volume pattern.** Shell output is a high-rate append-only byte stream. Every chunk via Redis
+  = network RTT + serialization + RAM allocation. Redis is engineered for small-value low-latency
+  lookups, not log ingestion. A chatty build log is megabytes; a `tail -f` is unbounded.
+- **Access pattern.** Scrollback is read exactly once per reattach, from exactly one reader.
+  Zero need for cross-process coordination.
+- **Lifecycle.** Scrollback belongs with the shell. Shell runs on host X → scrollback lives on
+  host X. Putting it in a separate service adds a round trip with no benefit.
+- **Colocation with snapshots.** When the VM is snapshotted, the scrollback file is part of the
+  rootfs that gets snapshotted. Resume → scrollback picks up exactly where it was. No separate
+  sync protocol needed.
+- **Replay is a file seek.** No network hop on reattach.
+- **Debuggable.** `tail -f ~/.loom/sessions/lead-claude-1.log` just works. Postmortem on a
+  crashed agent: read the file.
+
+Redis **would** be right only if the webui pod wanted to read scrollback without proxying
+through the shell host. We explicitly do not do that, because:
+- it creates a permissions problem (webui reads every agent's scrollback directly);
+- it creates a consistency problem (Redis and shell-host fd output can drift);
+- it creates a capacity problem (Redis doesn't love GBs of log bytes).
+
+All three are avoided by routing scrollback reads through the same `Attach` RPC the PTY uses.
+
+### Layout
 
 Per-session scrollback lives **inside the microVM**, on the agent's PV/rootfs:
 

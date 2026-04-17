@@ -265,20 +265,20 @@ All keys namespaced with `loom:`.
 TTL on `term:owner` intentionally exceeds the PTY detach grace (60 s) so a reconnecting client
 always lands on the same owner. Longer if snapshot policies are relaxed.
 
-## 6. Auth surfaces
+## 6. Protocols and auth across boundaries
 
-| Boundary | Auth |
-|---|---|
-| browser ↔ loom-webui | user session (existing cookie / JWT) |
-| loom-webui ↔ loom-control-plane | service mTLS, cluster root CA |
-| loom-webui ↔ loom-agentd | short-lived mTLS cert issued by control-plane, scoped to `(workspace, agent)` |
-| loom-control-plane ↔ loom-vm-host | service mTLS |
-| loom-vm-host ↔ Firecracker | local UNIX socket (file perms) |
-| loom-agentd ↔ loom-control-plane heartbeat | agent mTLS cert baked into rootfs or injected at boot |
+| Boundary | Protocol | Auth |
+|---|---|---|
+| browser ↔ loom-webui | HTTPS + WSS | user session (existing cookie / JWT) |
+| loom-webui ↔ loom-control-plane | gRPC | service mTLS, cluster root CA |
+| loom-webui ↔ loom-agentd | gRPC over vsock (tunnelled through loom-vm-host) or TCP | short-lived mTLS cert issued by control-plane, scoped to `(workspace, agent)` |
+| loom-control-plane ↔ loom-vm-host | gRPC | service mTLS, cluster-scoped |
+| loom-vm-host ↔ Firecracker | Firecracker API (local UNIX socket) | local file perms only |
+| loom-agentd ↔ loom-control-plane (heartbeat) | gRPC (long-lived stream) | agent mTLS cert baked into rootfs or injected at boot |
 
-Short-lived certs for `webui ↔ agentd` are the mechanism that prevents a compromised webui pod
-from talking to agents it shouldn't — the cert's Common Name includes `(workspace, agent)` and
-`loom-agentd` rejects requests whose `AttachOpen.session` is outside the cert's scope.
+Short-lived certs for `webui ↔ agentd` prevent a compromised webui pod from talking to agents
+outside its scope — the cert's Common Name includes `(workspace, agent)` and `loom-agentd` rejects
+requests whose `AttachOpen.session` falls outside the cert's scope.
 
 ## 7. Versioning & compatibility
 
