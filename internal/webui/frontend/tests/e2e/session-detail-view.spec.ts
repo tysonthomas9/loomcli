@@ -139,45 +139,45 @@ const MOCK_SESSIONS = [
   }),
 ];
 
-// TranscriptEntry[] — covers user, assistant, tool_use, tool_result, and tool_input fallback
+// TranscriptEntry[] — covers user, assistant, tool_use, and tool_result
+// in the canonical transcript.Event wire format (text/tool_input/output).
 const MOCK_TRANSCRIPT = [
   {
     seq: 1,
-    ts: "2026-01-20T10:00:01Z",
+    timestamp: "2026-01-20T10:00:01Z",
     role: "user",
     type: "text",
-    content: "Please fix the login bug",
+    text: "Please fix the login bug",
   },
   {
     seq: 2,
-    ts: "2026-01-20T10:00:05Z",
+    timestamp: "2026-01-20T10:00:05Z",
     role: "assistant",
     type: "text",
-    content: "I will investigate the login handler",
+    text: "I will investigate the login handler",
   },
   {
     seq: 3,
-    ts: "2026-01-20T10:00:10Z",
+    timestamp: "2026-01-20T10:00:10Z",
     role: "assistant",
     type: "tool_use",
     tool_name: "Read",
-    content: "src/auth.ts",
+    tool_input: { file_path: "src/auth.ts" },
   },
   {
     seq: 4,
-    ts: "2026-01-20T10:00:15Z",
+    timestamp: "2026-01-20T10:00:15Z",
     role: "tool",
     type: "tool_result",
-    content: "function login() { ... }",
+    output: "function login() { ... }",
   },
   {
     seq: 5,
-    ts: "2026-01-20T10:00:20Z",
+    timestamp: "2026-01-20T10:00:20Z",
     role: "assistant",
     type: "tool_use",
     tool_name: "Bash",
-    tool_input: "npm test",
-    // NO content field — tests fallback to tool_input rendering
+    tool_input: { command: "npm test" },
   },
 ];
 

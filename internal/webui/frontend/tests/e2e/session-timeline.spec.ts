@@ -191,32 +191,32 @@ const mockSessions = [
 const mockTranscriptSess1 = [
   {
     seq: 1,
-    ts: "2026-03-28T01:00:10Z",
+    timestamp: "2026-03-28T01:00:10Z",
     role: "user",
     type: "text",
-    content: "Implement the session timeline component",
+    text: "Implement the session timeline component",
   },
   {
     seq: 2,
-    ts: "2026-03-28T01:00:30Z",
+    timestamp: "2026-03-28T01:00:30Z",
     role: "assistant",
     type: "text",
-    content: "I'll start by reading the existing components.",
+    text: "I'll start by reading the existing components.",
   },
   {
     seq: 3,
-    ts: "2026-03-28T01:01:00Z",
+    timestamp: "2026-03-28T01:01:00Z",
     role: "assistant",
     type: "tool_use",
     tool_name: "Read",
-    tool_input: '{"file_path": "src/api.ts"}',
+    tool_input: { file_path: "src/api.ts" },
   },
   {
     seq: 4,
-    ts: "2026-03-28T01:02:00Z",
-    role: "system",
-    type: "text",
-    content: "Tool execution completed successfully.",
+    timestamp: "2026-03-28T01:02:00Z",
+    role: "tool",
+    type: "tool_result",
+    output: "Tool execution completed successfully.",
   },
 ];
 

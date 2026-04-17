@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
-	"github.com/tysonthomas9/loomcli/internal/sessions"
+	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
@@ -52,10 +52,23 @@ type TranscriptResponse struct {
 	Error   string          `json:"error,omitempty"`
 }
 
-// TranscriptData contains the session ID and its transcript entries.
+// TranscriptData contains the session ID and its canonical event stream.
 type TranscriptData struct {
-	SessionID string                     `json:"session_id"`
-	Entries   []sessions.TranscriptEntry `json:"entries"`
+	SessionID string             `json:"session_id"`
+	Entries   []transcript.Event `json:"entries"`
+}
+
+// SubagentListResponse is the JSON envelope for listing subagents on a session.
+type SubagentListResponse struct {
+	Success bool              `json:"success"`
+	Data    *SubagentListData `json:"data,omitempty"`
+	Error   string            `json:"error,omitempty"`
+}
+
+// SubagentListData contains captured subagent IDs for a session.
+type SubagentListData struct {
+	SessionID   string   `json:"session_id"`
+	SubagentIDs []string `json:"subagent_ids"`
 }
 
 // --- Handlers ---
@@ -209,6 +222,63 @@ func HandleNotifySessionChange(hub *realtime.Hub, notifyToken string) http.Handl
 		})
 
 		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// HandleListSessionSubagents returns the list of captured subagent IDs for a session.
+func HandleListSessionSubagents(svc service.SessionService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		wsID := middleware.WorkspaceFromContext(r.Context())
+		taskID := r.PathValue("taskId")
+		sessionID := r.PathValue("sessionId")
+
+		ids, err := svc.ListSessionSubagents(r.Context(), wsID, taskID, sessionID)
+		if err != nil {
+			var svcErr *service.ServiceError
+			status := http.StatusInternalServerError
+			msg := "internal server error"
+			if errors.As(err, &svcErr) {
+				status = handler.StatusForKind(svcErr.Kind)
+				msg = svcErr.Message
+			}
+			handler.WriteJSON(w, status, SubagentListResponse{Success: false, Error: msg})
+			return
+		}
+		if ids == nil {
+			ids = []string{}
+		}
+		handler.WriteJSON(w, http.StatusOK, SubagentListResponse{
+			Success: true,
+			Data:    &SubagentListData{SessionID: sessionID, SubagentIDs: ids},
+		})
+	}
+}
+
+// HandleGetSessionSubagentTranscript returns the canonical event stream for a
+// captured subagent transcript.
+func HandleGetSessionSubagentTranscript(svc service.SessionService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		wsID := middleware.WorkspaceFromContext(r.Context())
+		taskID := r.PathValue("taskId")
+		sessionID := r.PathValue("sessionId")
+		subagentID := r.PathValue("subagentId")
+
+		events, err := svc.GetSessionSubagentTranscript(r.Context(), wsID, taskID, sessionID, subagentID)
+		if err != nil {
+			var svcErr *service.ServiceError
+			status := http.StatusInternalServerError
+			msg := "internal server error"
+			if errors.As(err, &svcErr) {
+				status = handler.StatusForKind(svcErr.Kind)
+				msg = svcErr.Message
+			}
+			handler.WriteJSON(w, status, TranscriptResponse{Success: false, Error: msg})
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, TranscriptResponse{
+			Success: true,
+			Data:    &TranscriptData{SessionID: sessionID + "/" + subagentID, Entries: events},
+		})
 	}
 }
 

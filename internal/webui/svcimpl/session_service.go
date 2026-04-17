@@ -10,6 +10,8 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
+	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
+	"github.com/tysonthomas9/loomcli/internal/sessions/transcript/backends"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 )
@@ -93,7 +95,7 @@ func (s *sessionServiceImpl) ListTaskSessions(_ context.Context, wsID, taskID st
 				SessionRecord: rec,
 				IsActive:      rec.Status == sessions.StatusRunning,
 			}
-			if entries, err := store.LoadTranscript(rec.SessionID); err == nil && len(entries) > 0 {
+			if info, err := os.Stat(store.NativeTranscriptPath(rec.SessionID)); err == nil && info.Size() > 0 {
 				item.HasTranscript = true
 			}
 			if diff, err := store.ReadDiff(rec.SessionID); err == nil && diff != "" {
@@ -137,42 +139,94 @@ func (s *sessionServiceImpl) GetSession(_ context.Context, wsID, taskID, session
 	}, nil
 }
 
-func (s *sessionServiceImpl) GetSessionTranscript(_ context.Context, wsID, taskID, sessionID string) ([]sessions.TranscriptEntry, error) {
-	if taskID == "" || !validTaskID.MatchString(taskID) {
-		return nil, service.ErrValidation("invalid task ID")
-	}
-	if sessionID == "" || !validSessionID.MatchString(sessionID) {
-		return nil, service.ErrValidation("invalid session ID")
-	}
-	store, err := s.findStoreForSession(wsID, sessionID)
+func (s *sessionServiceImpl) GetSessionTranscript(_ context.Context, wsID, taskID, sessionID string) ([]transcript.Event, error) {
+	store, _, err := s.authorizedSessionStore(wsID, taskID, sessionID)
 	if err != nil {
 		return nil, err
 	}
+	events, loadErr := store.LoadNativeEvents(sessionID)
+	if loadErr != nil {
+		logger.Error("failed to load native transcript", "session_id", sessionID, "err", loadErr)
+		return nil, service.ErrInternal("failed to load transcript", loadErr)
+	}
+	if events == nil {
+		events = []transcript.Event{}
+	}
+	return events, nil
+}
 
-	// Enforce task ownership
+func (s *sessionServiceImpl) ListSessionSubagents(_ context.Context, wsID, taskID, sessionID string) ([]string, error) {
+	store, _, err := s.authorizedSessionStore(wsID, taskID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	names, err := store.ListSubagentTranscripts(sessionID)
+	if err != nil {
+		logger.Error("failed to list subagent transcripts", "session_id", sessionID, "err", err)
+		return nil, service.ErrInternal("failed to list subagents", err)
+	}
+	ids := make([]string, 0, len(names))
+	for _, name := range names {
+		// Format: agent-<id>.jsonl
+		stripped := strings.TrimSuffix(strings.TrimPrefix(name, "agent-"), ".jsonl")
+		if stripped != "" {
+			ids = append(ids, stripped)
+		}
+	}
+	return ids, nil
+}
+
+func (s *sessionServiceImpl) GetSessionSubagentTranscript(_ context.Context, wsID, taskID, sessionID, subagentID string) ([]transcript.Event, error) {
+	store, meta, err := s.authorizedSessionStore(wsID, taskID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if subagentID == "" {
+		return nil, service.ErrValidation("subagent ID is required")
+	}
+	path := store.SubagentTranscriptPath(sessionID, subagentID)
+	if _, statErr := os.Stat(path); statErr != nil {
+		if os.IsNotExist(statErr) {
+			return nil, service.ErrNotFound("subagent transcript not found")
+		}
+		return nil, service.ErrInternal("stat subagent transcript", statErr)
+	}
+	events, parseErr := backends.ParseEventsFromFile(meta.Backend, path)
+	if parseErr != nil {
+		return nil, service.ErrInternal("parse subagent transcript", parseErr)
+	}
+	if events == nil {
+		events = []transcript.Event{}
+	}
+	return events, nil
+}
+
+// authorizedSessionStore looks up the session's store and metadata, enforces
+// task ownership, and validates the IDs. Shared by transcript and diff
+// endpoints to cut boilerplate.
+func (s *sessionServiceImpl) authorizedSessionStore(wsID, taskID, sessionID string) (*sessions.Store, *sessions.SessionMetadata, error) {
+	if taskID == "" || !validTaskID.MatchString(taskID) {
+		return nil, nil, service.ErrValidation("invalid task ID")
+	}
+	if sessionID == "" || !validSessionID.MatchString(sessionID) {
+		return nil, nil, service.ErrValidation("invalid session ID")
+	}
+	store, err := s.findStoreForSession(wsID, sessionID)
+	if err != nil {
+		return nil, nil, err
+	}
 	meta, err := store.LoadMetadata(sessionID)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, service.ErrNotFound("session not found")
+			return nil, nil, service.ErrNotFound("session not found")
 		}
 		logger.Error("failed to load session metadata", "session_id", sessionID, "err", err)
-		return nil, service.ErrInternal("failed to load session", err)
+		return nil, nil, service.ErrInternal("failed to load session", err)
 	}
 	if meta.TaskID != taskID {
-		return nil, service.ErrNotFound("session not found")
+		return nil, nil, service.ErrNotFound("session not found")
 	}
-
-	entries, loadErr := store.LoadTranscript(sessionID)
-	if loadErr != nil {
-		logger.Error("failed to load transcript", "session_id", sessionID, "err", loadErr)
-		return nil, service.ErrInternal("failed to load transcript", loadErr)
-	}
-
-	// Ensure empty array instead of null in JSON output.
-	if entries == nil {
-		entries = []sessions.TranscriptEntry{}
-	}
-	return entries, nil
+	return store, meta, nil
 }
 
 func (s *sessionServiceImpl) GetSessionDiff(_ context.Context, wsID, taskID, sessionID string) (string, error) {

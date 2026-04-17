@@ -154,26 +154,25 @@ const defaultSessions = [completedSession, activeSession, failedSession];
 const mockTranscript = [
   {
     seq: 1,
-    ts: "2026-03-20T10:00:05Z",
+    timestamp: "2026-03-20T10:00:05Z",
     role: "user",
     type: "text",
-    content: "Fix the login bug",
+    text: "Fix the login bug",
   },
   {
     seq: 2,
-    ts: "2026-03-20T10:00:10Z",
+    timestamp: "2026-03-20T10:00:10Z",
     role: "assistant",
     type: "text",
-    content: "I will investigate the auth module",
+    text: "I will investigate the auth module",
   },
   {
     seq: 3,
-    ts: "2026-03-20T10:00:30Z",
-    role: "tool",
+    timestamp: "2026-03-20T10:00:30Z",
+    role: "assistant",
     type: "tool_use",
     tool_name: "Read",
-    tool_input: "src/auth.ts",
-    content: null,
+    tool_input: { file_path: "src/auth.ts" },
   },
 ];
 

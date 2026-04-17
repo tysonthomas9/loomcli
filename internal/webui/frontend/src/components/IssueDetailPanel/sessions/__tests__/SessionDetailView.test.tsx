@@ -83,10 +83,10 @@ function createTranscriptEntry(
 ): TranscriptEntry {
   return {
     seq: 1,
-    ts: "2026-01-20T10:00:00Z",
+    timestamp: "2026-01-20T10:00:00Z",
     role: "assistant",
     type: "text",
-    content: "Hello world",
+    text: "Hello world",
     ...overrides,
   };
 }
@@ -284,11 +284,11 @@ describe("SessionDetailView", () => {
 
     it("renders transcript entries", () => {
       const entries = [
-        createTranscriptEntry({ seq: 1, role: "user", content: "Hello" }),
+        createTranscriptEntry({ seq: 1, role: "user", text: "Hello" }),
         createTranscriptEntry({
           seq: 2,
           role: "assistant",
-          content: "Hi there",
+          text: "Hi there",
         }),
       ];
       mockUseSessionTranscript.mockReturnValue({
@@ -303,7 +303,7 @@ describe("SessionDetailView", () => {
 
     it("renders role labels for entries", () => {
       const entries = [
-        createTranscriptEntry({ seq: 1, role: "user", content: "test" }),
+        createTranscriptEntry({ seq: 1, role: "user", text: "test" }),
       ];
       mockUseSessionTranscript.mockReturnValue({
         entries,
@@ -321,7 +321,8 @@ describe("SessionDetailView", () => {
           role: "assistant",
           type: "tool_use",
           tool_name: "Read",
-          content: "file content",
+          text: undefined,
+          tool_input: { file_path: "/tmp/x" },
         }),
       ];
       mockUseSessionTranscript.mockReturnValue({
@@ -333,15 +334,15 @@ describe("SessionDetailView", () => {
       expect(screen.getByText("Tool: Read")).toBeInTheDocument();
     });
 
-    it("renders tool_input when content is absent", () => {
+    it("renders tool_input JSON for tool_use entries", () => {
       const entries = [
         createTranscriptEntry({
           seq: 1,
           role: "assistant",
           type: "tool_use",
           tool_name: "Bash",
-          content: undefined,
-          tool_input: "ls -la",
+          text: undefined,
+          tool_input: { command: "ls -la" },
         }),
       ];
       mockUseSessionTranscript.mockReturnValue({
@@ -350,11 +351,11 @@ describe("SessionDetailView", () => {
         error: null,
       });
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
-      expect(screen.getByText("ls -la")).toBeInTheDocument();
+      expect(screen.getByText(/"command": "ls -la"/)).toBeInTheDocument();
     });
 
     it("does not show loading text when entries exist during loading", () => {
-      const entries = [createTranscriptEntry({ seq: 1, content: "existing" })];
+      const entries = [createTranscriptEntry({ seq: 1, text: "existing" })];
       mockUseSessionTranscript.mockReturnValue({
         entries,
         isLoading: true,
@@ -425,7 +426,7 @@ describe("SessionDetailView", () => {
           role: "assistant",
           type: "tool_use",
           tool_name: "Read",
-          content: undefined,
+          text: undefined,
           tool_input: longInput,
         }),
       ];
@@ -449,7 +450,7 @@ describe("SessionDetailView", () => {
           role: "assistant",
           type: "tool_use",
           tool_name: "Read",
-          content: undefined,
+          text: undefined,
           tool_input: shortInput,
         }),
       ];
@@ -471,7 +472,7 @@ describe("SessionDetailView", () => {
           role: "assistant",
           type: "tool_use",
           tool_name: "Read",
-          content: undefined,
+          text: undefined,
           tool_input: exactInput,
         }),
       ];
@@ -493,7 +494,7 @@ describe("SessionDetailView", () => {
           role: "assistant",
           type: "tool_use",
           tool_name: "Read",
-          content: undefined,
+          text: undefined,
           tool_input: longInput,
         }),
       ];
@@ -517,7 +518,7 @@ describe("SessionDetailView", () => {
           role: "assistant",
           type: "tool_use",
           tool_name: "Read",
-          content: undefined,
+          text: undefined,
           tool_input: longInput,
         }),
       ];
@@ -533,13 +534,14 @@ describe("SessionDetailView", () => {
       expect(screen.getByTestId("show-full-input")).toBeInTheDocument();
     });
 
-    it("does not truncate entry.content (only tool_input)", () => {
-      const longContent = "c".repeat(10000);
+    it("does not truncate text entries (only tool_use inputs and tool_result outputs)", () => {
+      const longText = "c".repeat(10000);
       const entries = [
         createTranscriptEntry({
           seq: 1,
           role: "assistant",
-          content: longContent,
+          type: "text",
+          text: longText,
         }),
       ];
       mockUseSessionTranscript.mockReturnValue({
@@ -548,7 +550,7 @@ describe("SessionDetailView", () => {
         error: null,
       });
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
-      expect(screen.getByText(longContent)).toBeInTheDocument();
+      expect(screen.getByText(longText)).toBeInTheDocument();
       expect(screen.queryByTestId("show-full-input")).not.toBeInTheDocument();
     });
   });
