@@ -27,6 +27,10 @@ type Line struct {
 	Role    string          `json:"role,omitempty"`
 	UUID    string          `json:"uuid"`
 	Message json.RawMessage `json:"message"`
+	// Timestamp is the top-level RFC3339 timestamp Claude writes on each
+	// line (e.g. "2026-04-17T18:43:16.594Z"). Optional — not every backend
+	// provides it.
+	Timestamp string `json:"timestamp,omitempty"`
 }
 
 // UserMessage represents a user message in the transcript.

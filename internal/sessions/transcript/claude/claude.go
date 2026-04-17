@@ -209,17 +209,30 @@ func Events(data []byte) ([]transcript.Event, error) {
 	seq := 0
 
 	for _, line := range lines {
+		ts := parseLineTimestamp(line.Timestamp)
 		switch line.Type {
 		case transcript.TypeUser:
-			events = append(events, userLineEvents(line, &seq)...)
+			events = append(events, userLineEvents(line, ts, &seq)...)
 		case transcript.TypeAssistant:
-			events = append(events, assistantLineEvents(line, &seq)...)
+			events = append(events, assistantLineEvents(line, ts, &seq)...)
 		}
 	}
 	return events, nil
 }
 
-func userLineEvents(line transcript.Line, seq *int) []transcript.Event {
+// parseLineTimestamp parses the optional top-level timestamp string Claude
+// writes on every JSONL line. Returns the zero time if empty or malformed.
+func parseLineTimestamp(s string) time.Time {
+	if s == "" {
+		return time.Time{}
+	}
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		return t
+	}
+	return time.Time{}
+}
+
+func userLineEvents(line transcript.Line, ts time.Time, seq *int) []transcript.Event {
 	// User line content is either a string prompt or an array that may
 	// contain text + tool_result blocks.
 	var msgEnvelope struct {
@@ -238,11 +251,11 @@ func userLineEvents(line transcript.Line, seq *int) []transcript.Event {
 		}
 		e := transcript.Event{
 			Seq:       *seq,
+			Timestamp: ts,
 			Role:      transcript.RoleUser,
 			Type:      transcript.EventText,
 			Text:      text,
 			UUID:      line.UUID,
-			Timestamp: time.Time{},
 		}
 		*seq++
 		return []transcript.Event{e}
@@ -268,16 +281,18 @@ func userLineEvents(line transcript.Line, seq *int) []transcript.Event {
 				continue
 			}
 			out = append(out, transcript.Event{
-				Seq:  *seq,
-				Role: transcript.RoleUser,
-				Type: transcript.EventText,
-				Text: txt,
-				UUID: line.UUID,
+				Seq:       *seq,
+				Timestamp: ts,
+				Role:      transcript.RoleUser,
+				Type:      transcript.EventText,
+				Text:      txt,
+				UUID:      line.UUID,
 			})
 			*seq++
 		case "tool_result":
 			out = append(out, transcript.Event{
 				Seq:       *seq,
+				Timestamp: ts,
 				Role:      transcript.RoleTool,
 				Type:      transcript.EventToolResult,
 				Output:    extractToolResultText(b.Content),
@@ -290,33 +305,51 @@ func userLineEvents(line transcript.Line, seq *int) []transcript.Event {
 	return out
 }
 
-func assistantLineEvents(line transcript.Line, seq *int) []transcript.Event {
+func assistantLineEvents(line transcript.Line, ts time.Time, seq *int) []transcript.Event {
 	var msg transcript.AssistantMessage
 	if err := json.Unmarshal(line.Message, &msg); err != nil {
 		return nil
 	}
 
+	// Find the block-level tool_use id (Claude emits it on the block,
+	// mirroring the user's later tool_result.tool_use_id).
+	var toolUseIDs []struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal(line.Message, &struct {
+		Content *[]struct {
+			ID string `json:"id"`
+		} `json:"content"`
+	}{Content: &toolUseIDs})
+
 	var out []transcript.Event
-	for _, block := range msg.Content {
+	for i, block := range msg.Content {
 		switch block.Type {
 		case transcript.ContentTypeText:
 			if block.Text == "" {
 				continue
 			}
 			out = append(out, transcript.Event{
-				Seq:  *seq,
-				Role: transcript.RoleAssistant,
-				Type: transcript.EventText,
-				Text: block.Text,
-				UUID: line.UUID,
+				Seq:       *seq,
+				Timestamp: ts,
+				Role:      transcript.RoleAssistant,
+				Type:      transcript.EventText,
+				Text:      block.Text,
+				UUID:      line.UUID,
 			})
 			*seq++
 		case transcript.ContentTypeToolUse:
+			var id string
+			if i < len(toolUseIDs) {
+				id = toolUseIDs[i].ID
+			}
 			out = append(out, transcript.Event{
 				Seq:       *seq,
+				Timestamp: ts,
 				Role:      transcript.RoleAssistant,
 				Type:      transcript.EventToolUse,
 				ToolName:  block.Name,
+				ToolUseID: id,
 				ToolInput: block.Input,
 				UUID:      line.UUID,
 			})
