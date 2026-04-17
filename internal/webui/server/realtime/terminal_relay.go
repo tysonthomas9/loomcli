@@ -157,6 +157,32 @@ func WSToPTY(ctx context.Context, conn *websocket.Conn, pty io.Writer, resizer R
 	}
 }
 
+// AttachmentToWS pumps byte frames from a session-attachment output channel
+// into the WebSocket. Exits when the channel closes (session killed or the
+// attachment was replaced by a newer WS), when the context is cancelled, or
+// when a WS write fails. Unlike PtyToWS, this function does not read from
+// the PTY directly — that work is done once by the session's drain goroutine
+// and fanned out to the currently-attached channel.
+func AttachmentToWS(ctx context.Context, cancel context.CancelFunc, conn *websocket.Conn, output <-chan []byte) CrashInfo {
+	for {
+		select {
+		case <-ctx.Done():
+			return CrashInfo{}
+		case data, ok := <-output:
+			if !ok {
+				// Session gone (child exited or explicit kill) or the
+				// attachment was replaced.
+				cancel()
+				return CrashInfo{}
+			}
+			if err := conn.Write(ctx, websocket.MessageBinary, data); err != nil {
+				cancel()
+				return CrashInfo{}
+			}
+		}
+	}
+}
+
 // TruncateUTF8 truncates s to at most maxBytes bytes, keeping the last portion
 // and ensuring the result is valid UTF-8 (doesn't split multi-byte characters).
 func TruncateUTF8(s string, maxBytes int) string {
