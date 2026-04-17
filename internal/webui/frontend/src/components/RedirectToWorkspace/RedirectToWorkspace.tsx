@@ -18,6 +18,7 @@ import {
 import { fetchWorkspaceApi } from "@/hooks/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { CreateWorkspaceModal } from "@/components/CreateWorkspaceModal";
+import { KeyboardShortcutProvider } from "@/hooks";
 import { AUTH_MODE_OPEN } from "@/types/common";
 
 export function RedirectToWorkspace() {
@@ -76,8 +77,11 @@ export function RedirectToWorkspace() {
   }, [mode, isAuthenticated, isLoading, resolveWorkspace]);
 
   if (!resolving) {
+    // CreateWorkspaceModal uses useRegisterEscapeLayer which requires a
+    // KeyboardShortcutProvider ancestor. The root "/" route renders
+    // outside App's provider, so wrap locally.
     return (
-      <>
+      <KeyboardShortcutProvider>
         <div
           style={{
             display: "flex",
@@ -119,7 +123,7 @@ export function RedirectToWorkspace() {
             }
           }}
         />
-      </>
+      </KeyboardShortcutProvider>
     );
   }
 

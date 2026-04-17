@@ -62,7 +62,8 @@ async function doFetch(): Promise<AppConfig> {
 
     const { mode } = data;
 
-    if (mode === AUTH_MODE_OPEN) {
+    // Backend emits "none" when auth is disabled; treat as open.
+    if (mode === AUTH_MODE_OPEN || mode === "none") {
       return { mode: AUTH_MODE_OPEN };
     }
 
