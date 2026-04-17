@@ -12,7 +12,7 @@ import (
 //     running inside a persistent-agent Firecracker microVM.
 //
 // Keeping this interface narrow means `handlers/terminal/ws.go` never grows
-// knowledge of how the backend is realised — it just Attaches, Detaches, and
+// knowledge of how the backend is realized — it just Attaches, Detaches, and
 // Kills sessions.
 type PTYSource interface {
 	// AttachSession opens or re-opens a session. reattached is true when an
@@ -25,6 +25,19 @@ type PTYSource interface {
 
 	// Kill immediately terminates the session. Idempotent.
 	Kill(key SessionKey) error
+
+	// HasSession reports whether a live (possibly detached) session exists for
+	// key. Used by callers that need to distinguish "tab metadata is stale
+	// from a prior server process" from "session is still running and the
+	// client is reconnecting".
+	HasSession(key SessionKey) bool
+
+	// AttachmentCount reports the number of concurrent clients currently
+	// attached to the session identified by key. Returns 0 for unknown
+	// sessions and for sessions that exist but have no live WebSockets
+	// (within the grace window). Used to surface "N viewers" on the tab
+	// DTO so the UI can warn before destructive tab-close actions.
+	AttachmentCount(key SessionKey) int
 
 	// SessionCount returns the number of live sessions, including detached
 	// ones still within the grace/idle windows.

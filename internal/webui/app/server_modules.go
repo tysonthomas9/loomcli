@@ -50,16 +50,17 @@ func (app *Server) buildTerminalModules() {
 	if app.termSvc != nil {
 		app.wsModules = append(app.wsModules,
 			modbuilder.NewTerminalModules(modbuilder.TerminalModuleDeps{
-				TermSvc:      app.termSvc,
-				AgentSvc:     app.agentSvc,
-				PTYMgr:       app.ptyMgr,
-				AgentTmuxMgr: app.agentTmuxMgr,
-				TermAuth:     app.termAuth,
-				CORSOrigins:  app.corsConfig.AllowedOrigins,
-				SelfURL:      fmt.Sprintf("http://localhost:%d", app.actualPort),
-				ConfigByIDFn: app.config.WorkspaceConfigByIDFn,
-				TabMetaStore: app.tabMetaStore,
-				Hub:          app.hub,
+				TermSvc:         app.termSvc,
+				AgentSvc:        app.agentSvc,
+				PTYMgr:          app.ptyMgr,
+				AgentTmuxMgr:    app.agentTmuxMgr,
+				TermAuth:        app.termAuth,
+				CORSOrigins:     app.corsConfig.AllowedOrigins,
+				SelfURL:         fmt.Sprintf("http://localhost:%d", app.actualPort),
+				ConfigByIDFn:    app.config.WorkspaceConfigByIDFn,
+				TabMetaStore:    app.tabMetaStore,
+				Hub:             app.hub,
+				ServerStartedAt: app.startedAt,
 			})...)
 	}
 

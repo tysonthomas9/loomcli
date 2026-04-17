@@ -4,7 +4,6 @@ import (
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
-	webuterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 // TerminalLifecycleConfig is the JSON shape returned by GET /api/config/terminal.
@@ -16,22 +15,15 @@ type TerminalLifecycleConfig struct {
 	MaxSessions   int   `json:"max_sessions"`
 }
 
-// HandleGetTerminalConfig returns a handler that exposes the local PTY
-// manager's lifecycle configuration. The frontend uses this to decide how
-// long to keep retrying an auto-reconnect before giving up — the ceiling
-// must stay ≤ the server's grace period, or the client gives up while the
-// server still holds the shell open.
-//
-// When ptyMgr is nil (e.g. tests with no terminal backend), zero values are
-// returned, which the client interprets as "no timeout".
-func HandleGetTerminalConfig(ptyMgr *webuterminal.PTYManager) http.HandlerFunc {
+// HandleGetTerminalConfig returns a handler that serves the supplied
+// lifecycle config snapshot. The frontend uses this to decide how long to
+// keep retrying an auto-reconnect — the ceiling must stay ≤ the server's
+// grace period, or the client gives up while the server still holds the
+// shell open. The snapshot is passed by value (not via a PTYManager
+// pointer) so this handler package does not need to import the PTY
+// implementation, preserving the handlers → services → terminal DAG.
+func HandleGetTerminalConfig(cfg TerminalLifecycleConfig) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
-		cfg := TerminalLifecycleConfig{}
-		if ptyMgr != nil {
-			cfg.GracePeriodMS = ptyMgr.GracePeriod().Milliseconds()
-			cfg.IdleTimeoutMS = ptyMgr.IdleTimeout().Milliseconds()
-			cfg.MaxSessions = ptyMgr.MaxSessions()
-		}
 		handler.WriteJSON(w, http.StatusOK, map[string]any{
 			"success": true,
 			"data":    cfg,

@@ -69,6 +69,20 @@ export interface TabMetadata {
   issue_id?: string;
   created_at: string;
   updated_at: string;
+  /**
+   * Whether the backend PTY for this tab is currently alive in the server
+   * process. false means the tab survived (e.g. a server restart) but its
+   * backing shell did not — connecting will spawn a fresh session, so the
+   * UI should render the tab as "session ended" and prompt before
+   * reconnecting.
+   */
+  pty_alive: boolean;
+  /**
+   * Number of concurrent WebSocket clients currently viewing this session.
+   * 0 = no one attached; ≥2 = multi-viewer state the UI can surface before
+   * destructive tab-close actions.
+   */
+  attached_clients: number;
 }
 
 /**
@@ -142,7 +156,10 @@ export async function patchTabMetadata(
 export async function putTabMetadata(
   workspaceId: string,
   session: string,
-  meta: Omit<TabMetadata, "created_at" | "updated_at">,
+  meta: Omit<
+    TabMetadata,
+    "created_at" | "updated_at" | "pty_alive" | "attached_clients"
+  >,
 ): Promise<void> {
   const { error, response } = await api.PUT(
     "/api/workspaces/{ws}/terminal/tabs/{session}",

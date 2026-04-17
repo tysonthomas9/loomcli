@@ -26,6 +26,12 @@ type terminalWSParams struct {
 	workspaceConfigByIDFn func(string) (*ops.WorkspaceData, error)
 	tabMetaStore          *tabmeta.Store
 	hub                   *realtime.Hub
+	// serverStartedAt is used to distinguish "tab metadata from a prior
+	// server process whose PTY is long gone" from "tab metadata just
+	// created in this process that hasn't spawned yet". Only the former
+	// triggers a 4410 close; the latter proceeds to AttachSession as
+	// normal.
+	serverStartedAt time.Time
 }
 
 // HandleTerminalWS returns a WebSocket handler for terminal relay. It upgrades
@@ -38,7 +44,7 @@ type terminalWSParams struct {
 // on disconnect the PTY and child process stay alive for a grace period so a
 // reconnecting client gets its shell and scrollback back. See PTYManager for
 // the lifecycle details.
-func HandleTerminalWS(manager webuterminal.PTYSource, auth *realtime.TerminalAuth, allowedOrigins []string, loomServerURL string, workspaceConfigByIDFn func(string) (*ops.WorkspaceData, error), tabMetaStore *tabmeta.Store, hub *realtime.Hub) http.HandlerFunc {
+func HandleTerminalWS(manager webuterminal.PTYSource, auth *realtime.TerminalAuth, allowedOrigins []string, loomServerURL string, workspaceConfigByIDFn func(string) (*ops.WorkspaceData, error), tabMetaStore *tabmeta.Store, hub *realtime.Hub, serverStartedAt time.Time) http.HandlerFunc {
 	p := &terminalWSParams{
 		manager:               manager,
 		auth:                  auth,
@@ -47,6 +53,7 @@ func HandleTerminalWS(manager webuterminal.PTYSource, auth *realtime.TerminalAut
 		workspaceConfigByIDFn: workspaceConfigByIDFn,
 		tabMetaStore:          tabMetaStore,
 		hub:                   hub,
+		serverStartedAt:       serverStartedAt,
 	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -179,6 +186,10 @@ func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalW
 
 	realtime.BroadcastSessionIssueEvent(p.tabMetaStore, p.hub, workspace, session)
 
+	if !reattach {
+		maybeEmitStaleRestartBanner(reqCtx, conn, p, workspace, session)
+	}
+
 	// Emit scrollback replay (reset escape + ring bytes) before going live.
 	if replay := att.Scrollback(); len(replay) > 0 {
 		if err := conn.Write(reqCtx, websocket.MessageBinary, replay); err != nil { //nolint:staticcheck // SA1019
@@ -212,6 +223,25 @@ func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalW
 type attachmentWriter struct{ a webuterminal.Attachment }
 
 func (w attachmentWriter) Write(p []byte) (int, error) { return w.a.WriteInput(p) }
+
+// maybeEmitStaleRestartBanner writes a visible notice to the freshly-spawned
+// shell when the tab's metadata pre-dates the current server process — i.e.
+// the prior PTY died with a previous server. The frontend's pty_alive gate
+// on the tab DTO is the authoritative block, but browsers drop app-defined
+// WebSocket close codes right after upgrade, so this in-band banner is the
+// reliable fallback for any client that reached this path anyway.
+func maybeEmitStaleRestartBanner(reqCtx context.Context, conn *websocket.Conn, p *terminalWSParams, workspace, session string) { //nolint:staticcheck // SA1019
+	if p.tabMetaStore == nil {
+		return
+	}
+	meta, err := p.tabMetaStore.Get(reqCtx, workspace, session)
+	if err != nil || meta == nil || !meta.CreatedAt.Before(p.serverStartedAt) {
+		return
+	}
+	slog.Info("terminal session stale across server restart; spawning fresh",
+		"session", session, "workspace", workspace, "created_at", meta.CreatedAt)
+	_ = conn.Write(reqCtx, websocket.MessageBinary, []byte("\r\n\x1b[33m[loom] Previous shell did not survive a server restart. This is a fresh session.\x1b[0m\r\n")) //nolint:staticcheck // SA1019
+}
 
 // injectTerminalContextBanner fetches project context from the loom server
 // and writes a formatted banner to the newly attached session.

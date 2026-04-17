@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 
 import type { IssueContext } from "@/hooks/api";
 import { patchTerminalState } from "@/hooks/api";
@@ -314,7 +314,12 @@ export function TerminalView({
     (backend: string) => {
       setIsSessionPromptOpen(false);
       const { sessionName, label } = generateTabName(backend, tabs, workspace);
-      // The WS handler auto-spawns a fresh PTY on connect — no pre-spawn call.
+      // Persist the tab so it survives a refresh. The WS handler spawns
+      // the PTY on connect; this PUT is just metadata so the server can
+      // return the tab in ListTabs on reload.
+      createTab(sessionName, label, tabs.length).catch((err) =>
+        console.error(`Failed to persist new tab ${sessionName}:`, err),
+      );
       setTabs((prev) => [
         ...prev,
         {
@@ -328,7 +333,7 @@ export function TerminalView({
       setActiveTabId(sessionName);
       announce(`New tab ${label} created`);
     },
-    [tabs, workspace, announce],
+    [createTab, tabs, workspace, announce],
   );
 
   const handleSessionPromptCancel = useCallback(() => {
@@ -389,15 +394,24 @@ export function TerminalView({
     [setFocusedPane],
   );
 
+  const metaBySession = useMemo(
+    () => new Map(tabMetadata.map((m) => [m.session_name, m])),
+    [tabMetadata],
+  );
   const renderTerminalPane = useCallback(
     (tab: TabState, pane: "left" | "right" | null) => {
       const paneIsActive =
         pane === "right" ? tab.id === rightPaneTabId : tab.id === activeTabId;
+      const meta = metaBySession.get(tab.sessionName);
+      // Undefined while metadata is still loading — preserves connect-on-
+      // mount. Only concrete `false` gates auto-attach.
+      const ptyAlive = meta?.pty_alive;
       return (
         <TerminalPane
           tab={tab}
           isActive={paneIsActive}
           instanceRef={setInstanceRef(tab.id)}
+          ptyAlive={ptyAlive}
           onConnectionStateChange={(state, hasConnected) =>
             handleConnectionStateChange(tab.id, state, hasConnected)
           }
@@ -424,10 +438,7 @@ export function TerminalView({
             instanceRefs.current.get(tab.id)?.pasteText(text);
             handleDismissWelcome();
           }}
-          notes={
-            tabMetadata.find((m) => m.session_name === tab.sessionName)
-              ?.notes ?? ""
-          }
+          notes={meta?.notes ?? ""}
           onSaveNotes={(text) => updateNotes(tab.sessionName, text)}
           isMetaLoading={metaLoading}
         />
@@ -446,7 +457,7 @@ export function TerminalView({
       handleReconnect,
       tabHasConnected,
       tabReconnectState,
-      tabMetadata,
+      metaBySession,
       updateNotes,
       metaLoading,
       setFocusedLeft,

@@ -44,7 +44,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 
 	initLogger(config.Logger)
 
-	app := &Server{config: config}
+	app := &Server{config: config, startedAt: time.Now()}
 
 	var cleanups []func()
 	defer func() {
@@ -377,7 +377,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 			rc = app.tabMetaStore.RedisClient()
 		}
 		app.termSvc = terminal.NewTerminalService(
-			app.termAuth, app.tabMetaStore, app.hub, rc,
+			app.termAuth, app.tabMetaStore, app.hub, rc, app.ptyMgr,
 		)
 	}
 

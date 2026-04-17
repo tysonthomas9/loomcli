@@ -15,6 +15,50 @@ export interface TerminalConnectionOverlayProps {
   onReconnect: () => void;
 }
 
+// ActionableState variants share the same "message + button + optional
+// subtext" shell; only copy, styling, and test IDs vary.
+type ActionableState = "session_ended" | "error" | "disconnected";
+const actionableStates: Record<
+  ActionableState,
+  {
+    backdrop: string | undefined;
+    role: "alert";
+    message: string;
+    buttonLabel: string;
+    buttonAriaLabel: string;
+    buttonTestId: string;
+    subtext?: string;
+  }
+> = {
+  session_ended: {
+    backdrop: styles.backdrop,
+    role: "alert",
+    message: "Session ended",
+    buttonLabel: "Start new session",
+    buttonAriaLabel: "Start new terminal session",
+    buttonTestId: "terminal-restart-button",
+    subtext:
+      "The shell backing this tab is no longer running. Starting a new session will spawn a fresh shell (scrollback is lost).",
+  },
+  error: {
+    backdrop: styles.errorBackdrop,
+    role: "alert",
+    message: "Connection failed",
+    buttonLabel: "Reconnect",
+    buttonAriaLabel: "Reconnect to terminal",
+    buttonTestId: "terminal-reconnect-button",
+  },
+  disconnected: {
+    backdrop: styles.backdrop,
+    role: "alert",
+    message: "Disconnected",
+    buttonLabel: "Reconnect",
+    buttonAriaLabel: "Reconnect to terminal",
+    buttonTestId: "terminal-reconnect-button",
+    subtext: "Auto-reconnecting...",
+  },
+};
+
 export function TerminalConnectionOverlay({
   connectionState,
   hasConnected,
@@ -22,11 +66,12 @@ export function TerminalConnectionOverlay({
 }: TerminalConnectionOverlayProps): JSX.Element | null {
   const reconnectButtonRef = useRef<HTMLButtonElement>(null);
 
-  // Auto-focus reconnect button when entering error/disconnected state.
-  // Only focus if the button is visible (offsetParent is null for display:none ancestors,
-  // which is how inactive tabs are hidden — prevents stealing focus from the active tab).
+  // Auto-focus reconnect button when entering an actionable state. Only
+  // focus if the button is visible (offsetParent null for display:none
+  // ancestors — how inactive tabs hide — prevents stealing focus from the
+  // active tab).
   useEffect(() => {
-    if (connectionState === "error" || connectionState === "disconnected") {
+    if (connectionState in actionableStates) {
       const btn = reconnectButtonRef.current;
       if (btn && btn.offsetParent !== null) {
         btn.focus();
@@ -37,10 +82,10 @@ export function TerminalConnectionOverlay({
   if (connectionState === "connected" || connectionState === "crashed")
     return null;
 
-  // Reconnecting in background — let terminal remain visible, tab dot shows status
+  // Reconnecting in background — leave the terminal visible; tab dot shows status.
   if (connectionState === "connecting" && hasConnected) return null;
 
-  if (connectionState === "connecting" && !hasConnected) {
+  if (connectionState === "connecting") {
     return (
       <div
         className={`${styles.overlay} ${styles.backdrop}`}
@@ -56,50 +101,26 @@ export function TerminalConnectionOverlay({
     );
   }
 
-  if (connectionState === "error") {
-    return (
-      <div
-        className={`${styles.overlay} ${styles.errorBackdrop}`}
-        role="alert"
-        data-testid="terminal-connection-overlay"
-      >
-        <div className={styles.content}>
-          <div className={styles.message}>Connection failed</div>
-          <button
-            ref={reconnectButtonRef}
-            type="button"
-            className={styles.reconnectButton}
-            onClick={onReconnect}
-            aria-label="Reconnect to terminal"
-            data-testid="terminal-reconnect-button"
-          >
-            Reconnect
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // disconnected
+  const cfg = actionableStates[connectionState];
   return (
     <div
-      className={`${styles.overlay} ${styles.backdrop}`}
-      role="alert"
+      className={`${styles.overlay} ${cfg.backdrop}`}
+      role={cfg.role}
       data-testid="terminal-connection-overlay"
     >
       <div className={styles.content}>
-        <div className={styles.message}>Disconnected</div>
+        <div className={styles.message}>{cfg.message}</div>
         <button
           ref={reconnectButtonRef}
           type="button"
           className={styles.reconnectButton}
           onClick={onReconnect}
-          aria-label="Reconnect to terminal"
-          data-testid="terminal-reconnect-button"
+          aria-label={cfg.buttonAriaLabel}
+          data-testid={cfg.buttonTestId}
         >
-          Reconnect
+          {cfg.buttonLabel}
         </button>
-        <div className={styles.subtext}>Auto-reconnecting...</div>
+        {cfg.subtext && <div className={styles.subtext}>{cfg.subtext}</div>}
       </div>
     </div>
   );

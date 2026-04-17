@@ -53,8 +53,11 @@ export function useTerminalMetadata(
 
   const fetchTabs = useCallback(async () => {
     if (!workspace) {
-      setIsLoading(false);
-      return; // Wait until workspace ID is known
+      // Workspace not resolved yet — stay in the loading state so
+      // downstream consumers (e.g. useTabInit) don't see
+      // "ready with zero tabs" and auto-create a default, locking out
+      // the real tab list that arrives when workspace resolves.
+      return;
     }
     setIsLoading(true);
     setError(null);
@@ -92,6 +95,9 @@ export function useTerminalMetadata(
         pinned: false,
         created_at: now,
         updated_at: now,
+        // Optimistic; next ListTabs refresh returns the server's truth.
+        pty_alive: true,
+        attached_clients: 0,
       };
       let prev: TabMetadata[] = [];
       setTabs((current) => {

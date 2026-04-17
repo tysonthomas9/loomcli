@@ -33,16 +33,23 @@ type localAttachment struct {
 	scrollback []byte
 }
 
-func (a *localAttachment) ConnID() string                             { return a.connID }
-func (a *localAttachment) Output() <-chan []byte                      { return a.output }
-func (a *localAttachment) WriteInput(p []byte) (int, error)           { return a.pty.Write(p) }
-func (a *localAttachment) Scrollback() []byte                         { return a.scrollback }
+func (a *localAttachment) ConnID() string        { return a.connID }
+func (a *localAttachment) Output() <-chan []byte { return a.output }
+
+// WriteInput writes keystrokes to the shared PTY fd. Multiple attachments
+// share the same *os.File; POSIX guarantees concurrent write(2) calls up
+// to PIPE_BUF (4096 bytes) are atomic, and terminal keystrokes are far
+// below that, so no mutex is needed on this path.
+func (a *localAttachment) WriteInput(p []byte) (int, error) { return a.pty.Write(p) }
+func (a *localAttachment) Scrollback() []byte               { return a.scrollback }
 func (a *localAttachment) Resize(_ string, cols, rows uint16) error {
 	return pty.Setsize(a.pty, &pty.Winsize{Cols: cols, Rows: rows})
 }
 
-// ptySession owns the PTY fd, child process, scrollback ring, and current
-// attachment for one (workspace, session) pair.
+// ptySession owns the PTY fd, child process, scrollback ring, and the set
+// of concurrent attachments (multi-client) for one (workspace, session)
+// pair. Each attachment is a separate WebSocket / viewer that sees the
+// same output and can write input into the shared PTY.
 type ptySession struct {
 	key        SessionKey
 	pty        *os.File
@@ -53,7 +60,7 @@ type ptySession struct {
 	lastOutput atomic.Int64 // unix nanos, updated by drain
 
 	attachMu sync.Mutex
-	attach   *attachmentState
+	attaches map[string]*attachmentState // keyed by connID
 
 	killMu    sync.Mutex
 	killTimer *time.Timer
@@ -62,13 +69,20 @@ type ptySession struct {
 	done      chan struct{}
 }
 
-// attachmentState is the internal mutable half of an Attachment. `ch` is
-// owned here and closed exactly once via closeOnce; callers detect the
-// closed state by the channel being closed, not a separate bool.
+// attachmentState is the internal mutable half of an Attachment.
+//
+// Concurrency: drain fans output to every attachment outside attachMu, so a
+// Detach / Kill can race with an in-flight send. Guard the channel with an
+// RWMutex — RLock per send (multiple senders allowed in parallel for
+// different attachments), Lock to close (waits for any in-flight send,
+// then closes the channel under the flag set). This also replaces the
+// old recover-on-send-to-closed-channel hack, which worked at runtime but
+// tripped the race detector.
 type attachmentState struct {
-	connID    string
-	ch        chan []byte
-	closeOnce sync.Once
+	connID  string
+	ch      chan []byte
+	closeMu sync.RWMutex
+	closed  bool // guarded by closeMu
 }
 
 func newPtySession(key SessionKey, f *os.File, cmd *exec.Cmd) *ptySession {
@@ -78,16 +92,21 @@ func newPtySession(key SessionKey, f *os.File, cmd *exec.Cmd) *ptySession {
 		cmd:        cmd,
 		scrollback: newRingBuffer(defaultRingCapacity),
 		createdAt:  time.Now().UnixNano(),
+		attaches:   make(map[string]*attachmentState),
 		done:       make(chan struct{}),
 	}
 }
 
 // drain reads from the PTY forever: bytes go into the ring buffer and a
-// best-effort copy is sent to the current attachment. Exits when the PTY
-// returns an error (child exit, fd close). On exit it asks the manager to
-// clean up the session unless close() has already marked it done.
+// best-effort copy is fanned out to every current attachment. Exits when
+// the PTY returns an error (child exit, fd close). On exit it asks the
+// manager to clean up the session unless close() has already marked it
+// done.
 func (s *ptySession) drain(m *PTYManager) {
 	buf := make([]byte, realtime.TerminalReadBufSize)
+	// Reused across iterations to avoid per-chunk allocation. Sized once
+	// to a typical attachment count; grows naturally if needed.
+	snapshot := make([]*attachmentState, 0, 4)
 	for {
 		n, err := s.pty.Read(buf)
 		if n > 0 {
@@ -96,11 +115,17 @@ func (s *ptySession) drain(m *PTYManager) {
 			s.scrollback.Append(chunk)
 			s.lastOutput.Store(time.Now().UnixNano())
 
+			// Hold attachMu only for the map copy — sending outside the
+			// lock means a slow client's backed-up channel can never block
+			// the drain goroutine or any other attachment's delivery.
 			s.attachMu.Lock()
-			cur := s.attach
+			snapshot = snapshot[:0]
+			for _, st := range s.attaches {
+				snapshot = append(snapshot, st)
+			}
 			s.attachMu.Unlock()
-			if cur != nil {
-				cur.send(chunk)
+			for _, st := range snapshot {
+				st.send(chunk)
 			}
 		}
 		if err != nil {
@@ -115,21 +140,24 @@ func (s *ptySession) drain(m *PTYManager) {
 	}
 }
 
-// attachNew replaces any existing attachment with a fresh one. Returns a
-// localAttachment preloaded with the replay bytes (reset escape + current
-// scrollback) if this is a reattach.
+// attachNew adds a fresh attachment to the session without disturbing any
+// existing ones (multi-client). Returns a localAttachment preloaded with
+// the replay bytes (reset escape + current scrollback) so the new client
+// starts from the same grid state as the existing ones.
+//
+// connID must be unique; PTYManager generates it from a monotonic counter.
+// A defensive same-connID check closes any prior attachment under that ID
+// — this is guard-rail against a caller bug, not an expected code path.
 func (s *ptySession) attachNew(connID string) *localAttachment {
 	ch := make(chan []byte, attachBufferSize)
 	st := &attachmentState{connID: connID, ch: ch}
 
 	s.attachMu.Lock()
-	old := s.attach
-	s.attach = st
-	s.attachMu.Unlock()
-
-	if old != nil {
-		old.close()
+	if existing, ok := s.attaches[connID]; ok {
+		existing.close()
 	}
+	s.attaches[connID] = st
+	s.attachMu.Unlock()
 
 	var replay []byte
 	if body := s.scrollback.Bytes(); len(body) > 0 {
@@ -142,22 +170,32 @@ func (s *ptySession) attachNew(connID string) *localAttachment {
 }
 
 // detach releases the attachment identified by connID and reports whether
-// the session is now fully detached.
+// the session has no remaining clients. The caller (PTYManager.Detach)
+// arms the grace-period kill timer only when empty=true.
 func (s *ptySession) detach(connID string) (empty bool) {
 	s.attachMu.Lock()
 	defer s.attachMu.Unlock()
-	if s.attach != nil && s.attach.connID == connID {
-		s.attach.close()
-		s.attach = nil
+	if st, ok := s.attaches[connID]; ok {
+		st.close()
+		delete(s.attaches, connID)
 	}
-	return s.attach == nil
+	return len(s.attaches) == 0
 }
 
-// attached reports whether a WebSocket is currently attached.
+// attached reports whether at least one client is currently attached.
 func (s *ptySession) attached() bool {
 	s.attachMu.Lock()
 	defer s.attachMu.Unlock()
-	return s.attach != nil
+	return len(s.attaches) > 0
+}
+
+// attachmentCount returns the number of concurrent clients attached to this
+// session. Used by the service layer to expose attached_clients on the tab
+// DTO for multi-viewer UI treatment.
+func (s *ptySession) attachmentCount() int {
+	s.attachMu.Lock()
+	defer s.attachMu.Unlock()
+	return len(s.attaches)
 }
 
 func (s *ptySession) lastOutputUnixNano() int64 { return s.lastOutput.Load() }
@@ -189,10 +227,10 @@ func (s *ptySession) close() error {
 		s.cancelKillTimer()
 
 		s.attachMu.Lock()
-		if s.attach != nil {
-			s.attach.close()
-			s.attach = nil
+		for _, st := range s.attaches {
+			st.close()
 		}
+		s.attaches = nil
 		s.attachMu.Unlock()
 
 		if s.pty != nil {
@@ -210,14 +248,14 @@ func (s *ptySession) close() error {
 
 // send attempts a non-blocking copy to the attachment's channel. Dropped
 // frames are fine — the scrollback ring always has the ground truth and a
-// reattach will replay it.
+// reattach will replay it. Holds closeMu.RLock so a concurrent close()
+// sees all in-flight sends complete before the channel is closed.
 func (a *attachmentState) send(data []byte) {
-	defer func() {
-		// Send on a closed channel panics; recover rather than guarding
-		// every send under a mutex. Close happens exactly once, so this
-		// is a bounded, rare event (at most one panic per attachment).
-		_ = recover()
-	}()
+	a.closeMu.RLock()
+	defer a.closeMu.RUnlock()
+	if a.closed {
+		return
+	}
 	select {
 	case a.ch <- data:
 	default:
@@ -225,7 +263,14 @@ func (a *attachmentState) send(data []byte) {
 }
 
 // close closes the attachment's output channel exactly once so a waiting
-// pump goroutine exits.
+// pump goroutine exits. Takes closeMu exclusively, which blocks briefly
+// for any in-flight sends (each is non-blocking, so the wait is bounded).
 func (a *attachmentState) close() {
-	a.closeOnce.Do(func() { close(a.ch) })
+	a.closeMu.Lock()
+	defer a.closeMu.Unlock()
+	if a.closed {
+		return
+	}
+	a.closed = true
+	close(a.ch)
 }

@@ -707,7 +707,7 @@ func TestSetupRoutes_FlatTerminalRoutesReturn404(t *testing.T) {
 // calling handleTerminalWS directly with nil manager returns 503.
 // This complements the route registration test by verifying handler behavior.
 func TestSetupRoutes_TerminalEndpointNilManagerReturns503(t *testing.T) {
-	handler := hterminal.HandleTerminalWS(nil, nil, nil, "", nil, nil, nil)
+	handler := hterminal.HandleTerminalWS(nil, nil, nil, "", nil, nil, nil, time.Time{})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/ws?session=test", nil)
 	rr := httptest.NewRecorder()

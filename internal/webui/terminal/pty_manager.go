@@ -225,7 +225,7 @@ func (m *PTYManager) Detach(key SessionKey, connID string) {
 		return
 	}
 	if sess.detach(connID) && grace > 0 {
-		sess.armKillTimer(grace, func() { m.killSession(key) })
+		sess.armKillTimer(grace, func() { _ = m.killSession(key) })
 	}
 }
 
@@ -253,6 +253,29 @@ func (m *PTYManager) SessionCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return len(m.sessions)
+}
+
+// HasSession reports whether a (live or gracefully-detached) session exists
+// for key. "Live" means not yet killed by Kill / Shutdown / reaper — it does
+// not guarantee the underlying child process is still running, only that the
+// manager has not released it.
+func (m *PTYManager) HasSession(key SessionKey) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_, ok := m.sessions[key]
+	return ok
+}
+
+// AttachmentCount returns the number of concurrent clients attached to the
+// session identified by key, or 0 if the session is unknown.
+func (m *PTYManager) AttachmentCount(key SessionKey) int {
+	m.mu.Lock()
+	sess, ok := m.sessions[key]
+	m.mu.Unlock()
+	if !ok {
+		return 0
+	}
+	return sess.attachmentCount()
 }
 
 // MaxSessions returns the configured concurrent-session cap.

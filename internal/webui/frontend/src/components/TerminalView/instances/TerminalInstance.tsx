@@ -22,7 +22,7 @@ import {
   useState,
 } from "react";
 
-import { getTerminalConfig } from "@/api/common/terminalConfig";
+import { getTerminalConfig } from "@/hooks/api";
 import { useWorkspaceContext } from "@/hooks/workspace";
 import {
   startAutoReconnect,
@@ -58,7 +58,11 @@ export type ConnectionState =
   | "connecting"
   | "connected"
   | "error"
-  | "crashed";
+  | "crashed"
+  // The backend tab metadata survived a server restart but the PTY did
+  // not. We deliberately did not auto-respawn — the overlay prompts the
+  // user before opening a fresh shell so scrollback loss is explicit.
+  | "session_ended";
 
 export interface TerminalInstanceProps {
   sessionName: string;
@@ -73,6 +77,14 @@ export interface TerminalInstanceProps {
   onTerminalFocus?: (() => void) | undefined;
   /** When set, connects to the agent terminal WebSocket instead of the regular terminal. */
   agentName?: string | undefined;
+  /**
+   * Liveness hint from the backend's tab metadata. When explicitly
+   * `false`, the auto-connect on mount is skipped and the overlay goes
+   * directly to "session_ended" so the user opts into spawning a fresh
+   * shell (losing prior scrollback). `undefined` or `true` preserves
+   * the pre-liveness behavior of connecting immediately.
+   */
+  ptyAlive?: boolean | undefined;
 }
 
 export interface TerminalInstanceHandle {
@@ -99,6 +111,7 @@ export const TerminalInstance = forwardRef<
     onBackendCrash,
     onTerminalFocus,
     agentName,
+    ptyAlive,
   },
   ref,
 ) {
@@ -281,20 +294,38 @@ export const TerminalInstance = forwardRef<
   useEffect(() => {
     beingKilledRef.current = false;
     hasConnectedRef.current = false;
-    // Connection begins in the onReady handler (once wterm's WASM is loaded).
+    // Connection normally begins in the onReady handler. If we're in a
+    // StrictMode remount (wterm already fired onReady, and its cached
+    // WASM means it won't fire again), re-kick the connection here —
+    // otherwise the tab would stay stuck at "connecting" because the
+    // prior cleanup cancelled its in-flight WebSocket.
+    if (wtermReadyRef.current && ptyAlive !== false) {
+      doConnectRef.current?.();
+    }
     return () => {
       clearReconnectTimers();
       wsCleanupRef.current?.();
       wsCleanupRef.current = null;
     };
-  }, [sessionName, clearReconnectTimers]);
+  }, [sessionName, clearReconnectTimers, ptyAlive]);
 
   // handleReady and the reconnect imperative method both read the latest
   // doConnect via doConnectRef so neither hands the wterm <Terminal> a new
   // onReady identity on every render.
+  // Track wterm readiness so the mount effect can re-kick the connection
+  // when React StrictMode double-invokes mount → unmount → remount. Without
+  // this, the unmount cancels the in-flight connect but wterm's onReady
+  // never fires again on remount (same component instance), leaving the tab
+  // stuck in "connecting".
+  const wtermReadyRef = useRef(false);
   const handleReady = useCallback(() => {
+    wtermReadyRef.current = true;
+    if (ptyAlive === false) {
+      setConnectionState("session_ended");
+      return;
+    }
     doConnectRef.current?.();
-  }, []);
+  }, [ptyAlive]);
 
   const handleData = useCallback((data: string) => {
     const ws = wsRef.current;
