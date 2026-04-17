@@ -8,15 +8,22 @@
  * zero JavaScript.
  */
 
+/* wterm renders its entire scrollback ring buffer inline in the DOM (so
+ * browser-native find + selection work). The wrapper must be a bounded
+ * flex container with overflow:hidden so the Terminal element can size
+ * itself to the visible pane and scroll its own contents, not push the
+ * whole page down. */
 .wrapper {
   flex: 1;
   min-height: 0;
   position: relative;
+  display: flex;
+  overflow: hidden;
 }
 
 .container {
-  width: 100%;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
 
   --term-bg: var(--terminal-bg);
   --term-fg: var(--terminal-fg);
