@@ -22,6 +22,7 @@ import {
   useState,
 } from "react";
 
+import { getTerminalConfig } from "@/api/common/terminalConfig";
 import { useWorkspaceContext } from "@/hooks/workspace";
 import {
   startAutoReconnect,
@@ -41,8 +42,16 @@ const INITIAL_CONNECT_CONFIG: ReconnectConfig = {
   jitterFactor: 0.5,
 };
 
-/** Wall-clock ceiling: if a reconnect doesn't succeed within this window, give up. */
-const RECONNECT_TIMEOUT_MS = 30_000;
+/**
+ * Wall-clock ceiling: if a reconnect doesn't succeed within this window,
+ * give up and surface the `expired` overlay. The ceiling is clamped to the
+ * server's advertised grace period (`/api/config/terminal`) so the client
+ * never keeps retrying past the point where the server has already killed
+ * the shell. A server value of 0 means "no timeout" (local `loom serve`),
+ * in which case we fall back to a long but finite ceiling so the retry
+ * loop doesn't run forever unnoticed.
+ */
+const UNBOUNDED_RECONNECT_TIMEOUT_MS = 60 * 60 * 1000; // 1 h when server disables its own timeout
 
 export type ConnectionState =
   | "disconnected"
@@ -101,6 +110,28 @@ export const TerminalInstance = forwardRef<
   }, []);
   const focus = useCallback(() => {
     wtermRef.current?.focus();
+  }, []);
+
+  // Start pessimistic: until the server's config arrives, prefer the long
+  // ceiling over the old 30-second default. This matters for loom-agentd
+  // deployments where the real grace is minutes — a client falling back to
+  // 30 s would give up while the server still held the shell open. The
+  // config promise is memoised so the fetch runs at most once per app load.
+  const reconnectCeilingMsRef = useRef<number>(UNBOUNDED_RECONNECT_TIMEOUT_MS);
+  useEffect(() => {
+    let cancelled = false;
+    void getTerminalConfig().then((cfg) => {
+      if (cancelled) return;
+      // grace_period_ms == 0 on the server means "disabled". Translate into
+      // a long-but-finite client ceiling. Otherwise honour the server value.
+      reconnectCeilingMsRef.current =
+        cfg.gracePeriodMs > 0
+          ? cfg.gracePeriodMs
+          : UNBOUNDED_RECONNECT_TIMEOUT_MS;
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -162,7 +193,7 @@ export const TerminalInstance = forwardRef<
         reconnectCancelRef.current?.();
         reconnectCancelRef.current = null;
         onReconnectStateChangeRef.current?.("expired");
-      }, RECONNECT_TIMEOUT_MS);
+      }, reconnectCeilingMsRef.current);
 
       const cancel = startAutoReconnect(
         () =>

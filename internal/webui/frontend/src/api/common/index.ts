@@ -5,3 +5,4 @@ export * from "./config";
 export * from "./errorReporter";
 export * from "./health";
 export * from "./sse";
+export * from "./terminalConfig";

@@ -46,6 +46,7 @@ func (app *Server) registerCoreAPIRoutes(h *handlermux.Handlers) {
 	app.mux.HandleFunc("GET /api/metrics", h.Metrics)
 	app.mux.HandleFunc("GET /api/config/backend", h.GetBackendConfig)
 	app.mux.HandleFunc("PATCH /api/config/backend", h.PatchBackendConfig)
+	app.mux.HandleFunc("GET /api/config/terminal", h.GetTerminalConfig)
 	if h.GetBackendsHealth != nil {
 		app.mux.HandleFunc("GET /api/backends", h.GetBackendsHealth)
 	}

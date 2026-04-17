@@ -41,9 +41,14 @@ var ErrPTYMaxSessionsReached = errors.New("maximum terminal sessions reached")
 
 const (
 	defaultPTYMaxSessions = 40
-	defaultGracePeriod    = 60 * time.Second
-	defaultIdleTimeout    = 30 * time.Minute
-	defaultReaperTick     = 60 * time.Second
+	// Local `loom serve` keeps detached sessions alive indefinitely: no
+	// grace-period kill and no idle reap. The assumption is one developer
+	// per server, so leaking a few PTYs is cheaper than surprising the
+	// user with a killed shell. Remote `loom-agentd` (Firecracker) sets
+	// non-zero values.
+	defaultGracePeriod = 0
+	defaultIdleTimeout = 0
+	defaultReaperTick  = 60 * time.Second
 )
 
 // termEnv is the TERM environment value injected for every PTY-backed
@@ -219,7 +224,7 @@ func (m *PTYManager) Detach(key SessionKey, connID string) {
 	if sess == nil {
 		return
 	}
-	if sess.detach(connID) {
+	if sess.detach(connID) && grace > 0 {
 		sess.armKillTimer(grace, func() { m.killSession(key) })
 	}
 }
@@ -252,6 +257,22 @@ func (m *PTYManager) SessionCount() int {
 
 // MaxSessions returns the configured concurrent-session cap.
 func (m *PTYManager) MaxSessions() int { return m.max }
+
+// GracePeriod returns the post-detach kill delay. Zero means disabled —
+// detached sessions live until explicit Kill or Shutdown.
+func (m *PTYManager) GracePeriod() time.Duration {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.gracePeriod
+}
+
+// IdleTimeout returns the idle-reap threshold. Zero means disabled — the
+// reaper never kills sessions based on inactivity.
+func (m *PTYManager) IdleTimeout() time.Duration {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.idleTimeout
+}
 
 // Shutdown terminates every live session and stops the reaper.
 func (m *PTYManager) Shutdown() error {
@@ -296,6 +317,10 @@ func (m *PTYManager) reapIdle() {
 		snapshot[k] = s
 	}
 	m.mu.Unlock()
+
+	if idle <= 0 {
+		return
+	}
 
 	now := time.Now().UnixNano()
 	var victims []SessionKey

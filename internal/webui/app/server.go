@@ -143,6 +143,7 @@ func (app *Server) buildHandlers() {
 		DaemonConfig:     daemonConfigH,
 		FleetTimeoutsFn:  getFleetTimeouts,
 		ClaimMetrics:     app.claimMetrics,
+		PTYMgr:           app.ptyMgr,
 	})
 }
 

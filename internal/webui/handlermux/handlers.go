@@ -12,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
 	hterminal "github.com/tysonthomas9/loomcli/internal/webui/handlers/terminal"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
+	webuterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 // Handlers holds all pre-built top-level HTTP handlers.
@@ -26,6 +27,7 @@ type Handlers struct {
 	DaemonStatus        http.HandlerFunc
 	GetBackendConfig    http.HandlerFunc
 	PatchBackendConfig  http.HandlerFunc
+	GetTerminalConfig   http.HandlerFunc
 	GetBackendsHealth   http.HandlerFunc // pre-built by caller (requires ops types), may be nil
 	ListEditors         http.HandlerFunc
 	OpenEditor          http.HandlerFunc
@@ -55,6 +57,7 @@ type HandlerDeps struct {
 	DaemonConfig     http.HandlerFunc    // pre-built; nil = disabled
 	FleetTimeoutsFn  func() int64        // nil = no fleet
 	ClaimMetrics     *fleet.ClaimMetrics // nil = no fleet
+	PTYMgr           *webuterminal.PTYManager
 }
 
 // BuildHandlers constructs all top-level HTTP handlers.
@@ -76,6 +79,7 @@ func BuildHandlers(deps HandlerDeps) *Handlers {
 		DaemonStatus:       healthhandlers.HandleDaemonStatus(deps.Pool),
 		GetBackendConfig:   hterminal.HandleGetBackendConfig(deps.Pool),
 		PatchBackendConfig: hterminal.HandlePatchBackendConfig(deps.Pool),
+		GetTerminalConfig:  hterminal.HandleGetTerminalConfig(deps.PTYMgr),
 		ListEditors:        misc.HandleListEditors(editorCache),
 		OpenEditor:         misc.HandleOpenEditorDefault(editorCache),
 		DaemonSupervisor:   deps.DaemonSupervisor,
