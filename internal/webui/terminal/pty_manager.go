@@ -36,13 +36,8 @@ import (
 )
 
 // ErrPTYMaxSessionsReached is returned by AttachSession when the concurrent-
-// session limit has been hit. Handlers should reject the WebSocket upgrade
-// with 503 before reaching AttachSession; this is a belt-and-braces check.
+// session limit has been hit.
 var ErrPTYMaxSessionsReached = errors.New("maximum terminal sessions reached")
-
-// ErrSessionGone is returned when an operation targets a session that has
-// been killed and removed from the manager.
-var ErrSessionGone = errors.New("session gone")
 
 const (
 	defaultPTYMaxSessions = 40
@@ -52,9 +47,8 @@ const (
 )
 
 // termEnv is the TERM environment value injected for every PTY-backed
-// child process (both fresh shells via PTYManager and tmux attaches via
-// AgentTmuxManager). tmux 3.6+ refuses to start without a recognized TERM,
-// and xterm-256color gives child shells color support by default.
+// child process. xterm-256color gives child shells color support by default
+// and is what tmux 3.6+ requires to start.
 const termEnv = "TERM=xterm-256color"
 
 // SessionKey identifies a persistent terminal session. Two WebSockets opened
@@ -76,11 +70,6 @@ func (k SessionKey) String() string {
 type PTYManager struct {
 	mu       sync.Mutex
 	sessions map[SessionKey]*ptySession
-
-	// Per-attach connID lookup for the Resizer interface.
-	// The WS relay sends resize escapes tagged with a connID; we map it
-	// back to the session whose current attachment uses that connID.
-	connToSession map[string]SessionKey
 
 	shell string   // absolute path to the login shell (e.g. /bin/bash)
 	argv  []string // default args when a session's argv is nil
@@ -125,16 +114,15 @@ func NewPTYManager(command string, maxSessions int) *PTYManager {
 	env := append(os.Environ(), termEnv)
 
 	m := &PTYManager{
-		sessions:      make(map[SessionKey]*ptySession),
-		connToSession: make(map[string]SessionKey),
-		shell:         shell,
-		argv:          argv,
-		env:           env,
-		cwd:           cwd,
-		max:           maxSessions,
-		gracePeriod:   defaultGracePeriod,
-		idleTimeout:   defaultIdleTimeout,
-		reaperStop:    make(chan struct{}),
+		sessions:    make(map[SessionKey]*ptySession),
+		shell:       shell,
+		argv:        argv,
+		env:         env,
+		cwd:         cwd,
+		max:         maxSessions,
+		gracePeriod: defaultGracePeriod,
+		idleTimeout: defaultIdleTimeout,
+		reaperStop:  make(chan struct{}),
 	}
 	m.reaperWG.Add(1)
 	go m.reapLoop()
@@ -164,7 +152,7 @@ func (m *PTYManager) SetIdleTimeout(d time.Duration) {
 //
 // reattached is true when the returned attachment is to a session that
 // existed before this call (typical for page refresh or network blip).
-// Callers should check attachment.Scrollback() for replay bytes.
+// Callers should check Attachment.Scrollback() for replay bytes.
 func (m *PTYManager) AttachSession(key SessionKey, cols, rows uint16, argv []string) (att *Attachment, reattached bool, err error) {
 	if cols == 0 {
 		cols = 80
@@ -191,20 +179,13 @@ func (m *PTYManager) AttachSession(key SessionKey, cols, rows uint16, argv []str
 	m.mu.Unlock()
 
 	if existed {
-		// Resize the existing PTY to the new client's terminal geometry.
 		_ = pty.Setsize(sess.pty, &pty.Winsize{Cols: cols, Rows: rows})
 	}
 
 	sess.cancelKillTimer()
 
 	connID := fmt.Sprintf("pty-%d", m.counter.Add(1))
-	newAtt := sess.attachNew(connID)
-
-	m.mu.Lock()
-	m.connToSession[connID] = key
-	m.mu.Unlock()
-
-	return newAtt, existed, nil
+	return sess.attachNew(connID), existed, nil
 }
 
 // spawnSession must be called with m.mu held.
@@ -223,74 +204,46 @@ func (m *PTYManager) spawnSession(key SessionKey, cols, rows uint16, argv []stri
 	}
 
 	sess := newPtySession(key, ptmx, cmd)
-	go sess.drain(m, key)
+	go sess.drain(m)
 	return sess, nil
 }
 
-// Detach releases the attachment identified by connID and arms the grace
-// timer if the session has no other attachments. Does not close the PTY.
-func (m *PTYManager) Detach(connID string) {
+// Detach releases the connID attached to key and arms the grace timer if
+// the session has no other attachments. Does not close the PTY.
+func (m *PTYManager) Detach(key SessionKey, connID string) {
 	m.mu.Lock()
-	key, ok := m.connToSession[connID]
-	if ok {
-		delete(m.connToSession, connID)
-	}
 	sess := m.sessions[key]
 	grace := m.gracePeriod
 	m.mu.Unlock()
 
-	if !ok || sess == nil {
+	if sess == nil {
 		return
 	}
-
 	if sess.detach(connID) {
-		// No attachments left — arm the grace kill.
-		sess.armKillTimer(grace, func() { m.killSession(key, "grace_expired") })
+		sess.armKillTimer(grace, func() { m.killSession(key) })
 	}
-}
-
-// Resize satisfies realtime.Resizer for the WS relay. The resize escape is
-// tagged with a connID; we look up the owning session and resize its PTY.
-func (m *PTYManager) Resize(connID string, cols, rows uint16) error {
-	m.mu.Lock()
-	key, ok := m.connToSession[connID]
-	sess := m.sessions[key]
-	m.mu.Unlock()
-
-	if !ok || sess == nil {
-		return fmt.Errorf("connection %q not found", connID)
-	}
-	if err := pty.Setsize(sess.pty, &pty.Winsize{Cols: cols, Rows: rows}); err != nil {
-		return fmt.Errorf("pty.Setsize: %w", err)
-	}
-	return nil
 }
 
 // Kill immediately terminates the session for key. Idempotent.
 func (m *PTYManager) Kill(key SessionKey) error {
-	return m.killSession(key, "explicit_kill")
+	return m.killSession(key)
 }
 
-func (m *PTYManager) killSession(key SessionKey, reason string) error {
+func (m *PTYManager) killSession(key SessionKey) error {
 	m.mu.Lock()
 	sess, ok := m.sessions[key]
 	if ok {
 		delete(m.sessions, key)
-		for connID, k := range m.connToSession {
-			if k == key {
-				delete(m.connToSession, connID)
-			}
-		}
 	}
 	m.mu.Unlock()
 	if !ok {
 		return nil
 	}
-	return sess.close(reason)
+	return sess.close()
 }
 
 // SessionCount returns the number of live sessions, including detached ones
-// that are still within the grace/idle windows.
+// still within the grace/idle windows.
 func (m *PTYManager) SessionCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -308,12 +261,11 @@ func (m *PTYManager) Shutdown() error {
 	m.mu.Lock()
 	sessions := m.sessions
 	m.sessions = make(map[SessionKey]*ptySession)
-	m.connToSession = make(map[string]SessionKey)
 	m.mu.Unlock()
 
 	var firstErr error
 	for _, s := range sessions {
-		if err := s.close("shutdown"); err != nil && firstErr == nil {
+		if err := s.close(); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
@@ -335,12 +287,20 @@ func (m *PTYManager) reapLoop() {
 }
 
 func (m *PTYManager) reapIdle() {
-	now := time.Now().UnixNano()
+	// Snapshot under the manager lock, evaluate per-session state outside it
+	// to avoid lock-ordering dependencies with ptySession.attachMu.
 	m.mu.Lock()
 	idle := m.idleTimeout
-	victims := make([]SessionKey, 0)
-	for key, sess := range m.sessions {
-		if sess.attachedCount() > 0 {
+	snapshot := make(map[SessionKey]*ptySession, len(m.sessions))
+	for k, s := range m.sessions {
+		snapshot[k] = s
+	}
+	m.mu.Unlock()
+
+	now := time.Now().UnixNano()
+	var victims []SessionKey
+	for key, sess := range snapshot {
+		if sess.attached() {
 			continue
 		}
 		last := sess.lastOutputUnixNano()
@@ -351,14 +311,13 @@ func (m *PTYManager) reapIdle() {
 			victims = append(victims, key)
 		}
 	}
-	m.mu.Unlock()
 	for _, key := range victims {
-		_ = m.killSession(key, "idle_reap")
+		_ = m.killSession(key)
 	}
 }
 
 // onSessionExited is invoked by a session's drain goroutine when the child
 // process exits on its own (PTY EOF). Cleans up manager-side state.
 func (m *PTYManager) onSessionExited(key SessionKey) {
-	_ = m.killSession(key, "child_exited")
+	_ = m.killSession(key)
 }

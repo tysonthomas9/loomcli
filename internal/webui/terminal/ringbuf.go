@@ -23,8 +23,9 @@ func newRingBuffer(capacity int) *ringBuffer {
 	return &ringBuffer{cap: capacity, buf: make([]byte, 0, capacity)}
 }
 
-// Write appends p to the ring, dropping oldest bytes as needed.
-func (r *ringBuffer) Write(p []byte) {
+// Append writes p to the ring, dropping oldest bytes as needed. Satisfies
+// realtime.ScrollbackAppender so the drain path can stay interface-shaped.
+func (r *ringBuffer) Append(p []byte) {
 	if len(p) == 0 {
 		return
 	}

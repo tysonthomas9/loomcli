@@ -9,11 +9,11 @@ import (
 
 func TestRingBuffer_AppendUnderCapacity(t *testing.T) {
 	r := newRingBuffer(16)
-	r.Write([]byte("hello"))
+	r.Append([]byte("hello"))
 	if got, want := string(r.Bytes()), "hello"; got != want {
 		t.Fatalf("Bytes=%q want %q", got, want)
 	}
-	r.Write([]byte(" world"))
+	r.Append([]byte(" world"))
 	if got, want := string(r.Bytes()), "hello world"; got != want {
 		t.Fatalf("Bytes=%q want %q", got, want)
 	}
@@ -24,11 +24,11 @@ func TestRingBuffer_AppendUnderCapacity(t *testing.T) {
 
 func TestRingBuffer_EvictsOldestOnOverflow(t *testing.T) {
 	r := newRingBuffer(8)
-	r.Write([]byte("abcdefgh")) // exactly fills
+	r.Append([]byte("abcdefgh")) // exactly fills
 	if got := string(r.Bytes()); got != "abcdefgh" {
 		t.Fatalf("Bytes=%q want abcdefgh", got)
 	}
-	r.Write([]byte("ij")) // evicts "ab"
+	r.Append([]byte("ij")) // evicts "ab"
 	if got := string(r.Bytes()); got != "cdefghij" {
 		t.Fatalf("Bytes=%q want cdefghij", got)
 	}
@@ -36,7 +36,7 @@ func TestRingBuffer_EvictsOldestOnOverflow(t *testing.T) {
 
 func TestRingBuffer_WriteLargerThanCapacityKeepsTail(t *testing.T) {
 	r := newRingBuffer(4)
-	r.Write([]byte("abcdefgh"))
+	r.Append([]byte("abcdefgh"))
 	if got := string(r.Bytes()); got != "efgh" {
 		t.Fatalf("Bytes=%q want efgh", got)
 	}
@@ -47,8 +47,8 @@ func TestRingBuffer_WriteLargerThanCapacityKeepsTail(t *testing.T) {
 
 func TestRingBuffer_ZeroWriteNoop(t *testing.T) {
 	r := newRingBuffer(8)
-	r.Write(nil)
-	r.Write([]byte{})
+	r.Append(nil)
+	r.Append([]byte{})
 	if got := r.Len(); got != 0 {
 		t.Fatalf("Len=%d want 0", got)
 	}
@@ -59,7 +59,7 @@ func TestRingBuffer_DefaultCapacityWhenNonPositive(t *testing.T) {
 	// Write one byte more than the default to force an evict and confirm the
 	// cap is the documented default.
 	big := bytes.Repeat([]byte{'x'}, defaultRingCapacity+1)
-	r.Write(big)
+	r.Append(big)
 	if got, want := r.Len(), defaultRingCapacity; got != want {
 		t.Fatalf("Len=%d want %d", got, want)
 	}
@@ -73,7 +73,7 @@ func TestRingBuffer_ConcurrentWritesDoNotRace(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			r.Write(payload)
+			r.Append(payload)
 		}()
 	}
 	wg.Wait()
@@ -86,7 +86,7 @@ func TestRingBuffer_ConcurrentWritesDoNotRace(t *testing.T) {
 
 func TestRingBuffer_BytesReturnsCopy(t *testing.T) {
 	r := newRingBuffer(16)
-	r.Write([]byte("hello"))
+	r.Append([]byte("hello"))
 	snap := r.Bytes()
 	snap[0] = 'H'
 	if got := string(r.Bytes()); got != "hello" {

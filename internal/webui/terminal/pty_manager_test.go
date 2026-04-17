@@ -66,7 +66,7 @@ func TestAttach_SpawnsFreshSession(t *testing.T) {
 	if got := m.SessionCount(); got != 1 {
 		t.Errorf("SessionCount=%d want 1", got)
 	}
-	m.Detach(att.ConnID())
+	m.Detach(key, att.ConnID())
 }
 
 func TestDetachDoesNotKillImmediately(t *testing.T) {
@@ -77,7 +77,7 @@ func TestDetachDoesNotKillImmediately(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AttachSession: %v", err)
 	}
-	m.Detach(att.ConnID())
+	m.Detach(key, att.ConnID())
 
 	// Session should still be live during the grace window.
 	if got := m.SessionCount(); got != 1 {
@@ -105,7 +105,7 @@ func TestReattachWithinGraceReplaysScrollback(t *testing.T) {
 	}
 
 	// Detach and immediately reattach.
-	m.Detach(att1.ConnID())
+	m.Detach(key, att1.ConnID())
 	att2, reattach, err := m.AttachSession(key, 80, 24, nil)
 	if err != nil {
 		t.Fatalf("reattach: %v", err)
@@ -120,7 +120,7 @@ func TestReattachWithinGraceReplaysScrollback(t *testing.T) {
 	if !bytes.Contains(replay, []byte("hello-world")) {
 		t.Errorf("replay missing prior output; got %q", string(replay))
 	}
-	m.Detach(att2.ConnID())
+	m.Detach(key, att2.ConnID())
 }
 
 func TestGracePeriodExpiryKillsSession(t *testing.T) {
@@ -132,7 +132,7 @@ func TestGracePeriodExpiryKillsSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AttachSession: %v", err)
 	}
-	m.Detach(att.ConnID())
+	m.Detach(key, att.ConnID())
 	waitUntil(t, func() bool { return m.SessionCount() == 0 }, time.Second,
 		"session count to reach 0 after grace expiry")
 }
@@ -180,7 +180,7 @@ func TestIdleReapClosesDetachedSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AttachSession: %v", err)
 	}
-	m.Detach(att.ConnID())
+	m.Detach(key, att.ConnID())
 
 	// The reaper wakes every defaultReaperTick (60 s) so triggering it by
 	// time alone would be slow. Poke reapIdle directly.
@@ -194,19 +194,23 @@ func TestSessionCountIncludesDetachedUpToMax(t *testing.T) {
 	m := newTestManager(t)
 	m.SetGracePeriod(5 * time.Second)
 
-	var attachments []*Attachment
+	type attached struct {
+		key SessionKey
+		att *Attachment
+	}
+	var all []attached
 	for i := 0; i < m.MaxSessions(); i++ {
-		key := SessionKey{Workspace: "ws", Name: fmt.Sprintf("s-%d", i)}
-		att, _, err := m.AttachSession(key, 80, 24, []string{"-c", "cat"})
+		k := SessionKey{Workspace: "ws", Name: fmt.Sprintf("s-%d", i)}
+		att, _, err := m.AttachSession(k, 80, 24, []string{"-c", "cat"})
 		if err != nil {
 			t.Fatalf("attach %d: %v", i, err)
 		}
-		attachments = append(attachments, att)
+		all = append(all, attached{k, att})
 	}
 	// Detach every second one. Detached sessions still count toward the cap.
-	for i, att := range attachments {
+	for i, a := range all {
 		if i%2 == 0 {
-			m.Detach(att.ConnID())
+			m.Detach(a.key, a.att.ConnID())
 		}
 	}
 	if got := m.SessionCount(); got != m.MaxSessions() {
@@ -257,7 +261,7 @@ func TestSecondAttachReplacesFirstAndReceivesScrollback(t *testing.T) {
 		}
 	}, time.Second, "first attachment channel to close after replacement")
 
-	m.Detach(att2.ConnID())
+	m.Detach(key, att2.ConnID())
 }
 
 func TestChildExitRemovesSession(t *testing.T) {
@@ -273,9 +277,3 @@ func TestChildExitRemovesSession(t *testing.T) {
 		"session to be removed after child exits")
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

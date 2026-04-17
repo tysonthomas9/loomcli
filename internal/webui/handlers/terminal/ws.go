@@ -196,12 +196,14 @@ func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalW
 		crashCh <- realtime.AttachmentToWS(ctx, cancel, conn, att.Output())
 	}()
 
-	// WS → PTY until the client disconnects.
-	realtime.WSToPTY(ctx, conn, attachmentWriter{att}, p.manager, connID)
+	// WS → PTY until the client disconnects. The attachment satisfies
+	// realtime.Resizer directly so the manager doesn't need a connID → PTY
+	// lookup table.
+	realtime.WSToPTY(ctx, conn, attachmentWriter{att}, att, connID)
 
 	// WebSocket gone — detach the attachment. PTY stays alive for the
 	// manager's grace period.
-	p.manager.Detach(connID)
+	p.manager.Detach(key, connID)
 
 	return (<-crashCh).WSClose()
 }
