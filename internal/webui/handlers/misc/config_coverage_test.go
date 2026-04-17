@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	webuterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 // --- handlePatchBackendConfigWithPool coverage ---
@@ -199,7 +201,7 @@ func TestHandlePatchBackendConfig_RequestBodyTooLarge(t *testing.T) {
 }
 
 func TestHandlePatchBackendConfig_AllValidBackends(t *testing.T) {
-	for _, backend := range validBackends {
+	for _, backend := range webuterminal.ValidBackends {
 		t.Run(backend, func(t *testing.T) {
 			dir := t.TempDir()
 			pool := newMockConfigPool(dir)
@@ -218,91 +220,6 @@ func TestHandlePatchBackendConfig_AllValidBackends(t *testing.T) {
 			json.NewDecoder(rec.Body).Decode(&resp)
 			if resp.Data.Backend != backend {
 				t.Errorf("expected backend %s, got %s", backend, resp.Data.Backend)
-			}
-		})
-	}
-}
-
-// --- shellCommand coverage ---
-
-func TestShellCommand_EnvSet(t *testing.T) {
-	original := os.Getenv("SHELL")
-	defer os.Setenv("SHELL", original)
-
-	os.Setenv("SHELL", "/bin/zsh")
-	got := shellCommand()
-	if got != "/bin/zsh" {
-		t.Errorf("shellCommand() = %q, want %q", got, "/bin/zsh")
-	}
-}
-
-func TestShellCommand_EnvUnset(t *testing.T) {
-	original := os.Getenv("SHELL")
-	defer os.Setenv("SHELL", original)
-
-	os.Unsetenv("SHELL")
-	got := shellCommand()
-	if got != "/bin/bash" {
-		t.Errorf("shellCommand() = %q when SHELL unset, want %q", got, "/bin/bash")
-	}
-}
-
-func TestShellCommand_EnvEmpty(t *testing.T) {
-	original := os.Getenv("SHELL")
-	defer os.Setenv("SHELL", original)
-
-	os.Setenv("SHELL", "")
-	got := shellCommand()
-	if got != "/bin/bash" {
-		t.Errorf("shellCommand() = %q when SHELL empty, want %q", got, "/bin/bash")
-	}
-}
-
-// --- attachCommandForSession coverage ---
-
-func TestAttachCommandForSession_LeadShell(t *testing.T) {
-	original := os.Getenv("SHELL")
-	defer os.Setenv("SHELL", original)
-	os.Setenv("SHELL", "/bin/zsh")
-
-	tests := []struct {
-		name    string
-		session string
-		want    string
-	}{
-		{"lead-shell prefix", "lead-shell-1", "/bin/zsh"},
-		{"lead-shell prefix with id", "lead-shell-abc-123", "/bin/zsh"},
-		{"lead-shell exact prefix", "lead-shell-", "/bin/zsh"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := attachCommandForSession(tt.session)
-			if got != tt.want {
-				t.Errorf("attachCommandForSession(%q) = %q, want %q", tt.session, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestAttachCommandForSession_NonLeadShell(t *testing.T) {
-	tests := []struct {
-		name    string
-		session string
-	}{
-		{"agent session", "agent-worker-1"},
-		{"claude session", "claude-session-abc"},
-		{"empty string", ""},
-		{"lead-shell without dash", "lead-shell"},
-		{"partial prefix", "lead-shel-1"},
-		{"different prefix", "other-shell-1"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := attachCommandForSession(tt.session)
-			if got != "" {
-				t.Errorf("attachCommandForSession(%q) = %q, want empty string", tt.session, got)
 			}
 		})
 	}

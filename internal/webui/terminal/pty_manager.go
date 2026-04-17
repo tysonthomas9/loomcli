@@ -103,9 +103,11 @@ func NewPTYManager(command string, maxSessions int) *PTYManager {
 }
 
 // Open spawns a fresh shell, attaches it to a new PTY sized cols×rows,
-// registers it under a unique connID, and returns it. Callers must pair Open
-// with exactly one Detach (or PTYConn.Close).
-func (m *PTYManager) Open(cols, rows uint16) (*PTYConn, error) {
+// registers it under a unique connID, and returns it. When argv is nil the
+// manager's default argv is used; pass a non-nil slice to override per-open
+// (e.g. when a session name encodes a specific backend). Callers must pair
+// Open with exactly one Detach (or PTYConn.Close).
+func (m *PTYManager) Open(cols, rows uint16, argv []string) (*PTYConn, error) {
 	if cols == 0 {
 		cols = 80
 	}
@@ -121,7 +123,11 @@ func (m *PTYManager) Open(cols, rows uint16) (*PTYConn, error) {
 	connID := fmt.Sprintf("pty-%d", m.counter.Add(1))
 	m.mu.Unlock()
 
-	cmd := exec.Command(m.shell, m.argv...) //nolint:gosec // shell + argv sourced from server config, not request data
+	useArgv := argv
+	if useArgv == nil {
+		useArgv = m.argv
+	}
+	cmd := exec.Command(m.shell, useArgv...) //nolint:gosec // shell + argv sourced from server config, not request data
 	cmd.Env = m.env
 	cmd.Dir = m.cwd
 

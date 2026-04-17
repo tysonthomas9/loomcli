@@ -148,7 +148,7 @@ func upgradeTerminalWS(w http.ResponseWriter, r *http.Request, patterns []string
 // runTerminalRelay opens a fresh PTY and runs the bidirectional relay until
 // the WebSocket or the shell exits.
 func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalWSParams, session, workspace string) (websocket.StatusCode, string) { //nolint:staticcheck // SA1019: websocket migration tracked separately
-	ptyConn, err := p.manager.Open(80, 24)
+	ptyConn, err := p.manager.Open(80, 24, webuterminal.ArgvForSession(session))
 	if err != nil {
 		if errors.Is(err, webuterminal.ErrPTYMaxSessionsReached) {
 			slog.Info("terminal session limit reached", "session", session)
