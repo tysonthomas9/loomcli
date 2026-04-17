@@ -51,6 +51,8 @@ files=$(echo "$files" | grep -Ev "^($EXCLUDE_DIRS)" || true)
 filtered=()
 while IFS= read -r f; do
     [[ -z "$f" ]] && continue
+    # Skip files tracked in the index but missing on disk (pending deletions).
+    [[ -f "$f" ]] || continue
     if head -3 "$f" | grep -q '// Code generated'; then
         continue
     fi

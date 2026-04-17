@@ -10,18 +10,21 @@ import (
 	webuterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
-// Module registers the workspace-scoped terminal management routes
-// on a [*http.ServeMux]. This covers agent terminal endpoints, core session
-// management, and scrollback/export.
+// Module registers the surviving workspace-scoped terminal routes: the
+// PTY-backed terminal WebSocket, a one-time auth token endpoint, and the
+// tmux-backed agent terminal viewer (which still uses tmux because
+// auto-mode CLI hosts agents there).
 //
-// The module is only constructed when termSvc is non-nil. Agent terminal
-// routes are conditional on agentSvc; token routes are conditional on
-// termAuth.
+// All tmux-specific session lifecycle routes (spawn, kill, restart, seed,
+// lead-session, export, scrollback, close-all, list-sessions,
+// session-status) are gone — each WebSocket now owns a fresh PTY with
+// wterm-style wire, so there are no persistent sessions to manage.
 type Module struct {
 	termSvc               service.TerminalService
 	agentSvc              service.AgentService // may be nil — agent routes skipped
-	termMgr               *webuterminal.TerminalManager
-	termAuth              *realtime.TerminalAuth // may be nil — token routes skipped
+	ptyMgr                *webuterminal.PTYManager
+	agentTmuxMgr          *webuterminal.AgentTmuxManager // may be nil — tmux missing
+	termAuth              *realtime.TerminalAuth         // may be nil — token routes skipped
 	allowedOrigins        []string
 	loomServerURL         string
 	workspaceConfigByIDFn func(string) (*ops.WorkspaceData, error)
@@ -29,12 +32,13 @@ type Module struct {
 	hub                   *realtime.Hub
 }
 
-// NewModule returns a Module. agentSvc and termAuth may be
-// nil — their conditional routes will simply not be registered.
+// NewModule returns a Module. Any of agentSvc, agentTmuxMgr, and termAuth
+// may be nil — routes that depend on them will simply not be registered.
 func NewModule(
 	termSvc service.TerminalService,
 	agentSvc service.AgentService,
-	termMgr *webuterminal.TerminalManager,
+	ptyMgr *webuterminal.PTYManager,
+	agentTmuxMgr *webuterminal.AgentTmuxManager,
 	termAuth *realtime.TerminalAuth,
 	allowedOrigins []string,
 	loomServerURL string,
@@ -45,7 +49,8 @@ func NewModule(
 	return &Module{
 		termSvc:               termSvc,
 		agentSvc:              agentSvc,
-		termMgr:               termMgr,
+		ptyMgr:                ptyMgr,
+		agentTmuxMgr:          agentTmuxMgr,
 		termAuth:              termAuth,
 		allowedOrigins:        allowedOrigins,
 		loomServerURL:         loomServerURL,
@@ -55,36 +60,24 @@ func NewModule(
 	}
 }
 
-// Register implements [Module] by registering 12–16 terminal management routes.
-// Agent info/token routes are conditional on agentSvc != nil. The general
-// terminal token route is conditional on termAuth != nil.
+// Register registers the surviving terminal routes on mux.
 func (m *Module) Register(mux *http.ServeMux) {
-	// Agent terminal endpoints — conditional on agentSvc
+	// Agent terminal (tmux-backed, for live view of auto-mode agent sessions).
 	if m.agentSvc != nil {
 		mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/terminal/info", HandleGetAgentTerminalInfo(m.agentSvc))
 		if m.termAuth != nil {
 			mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/terminal/token", HandleGetAgentTerminalToken(m.agentSvc))
 		}
 	}
-	mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/terminal/ws", HandleAgentTerminalWS(m.termMgr, m.termAuth, m.allowedOrigins))
+	if m.agentTmuxMgr != nil {
+		mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/terminal/ws", HandleAgentTerminalWS(m.agentTmuxMgr, m.termAuth, m.allowedOrigins))
+	}
 
-	// Core terminal session management
-	mux.HandleFunc("GET /api/workspaces/{ws}/terminal/sessions", HandleListTerminalSessions(m.termSvc))
+	// Main web terminal (PTY-backed, wterm wire format).
 	if m.termAuth != nil {
 		mux.HandleFunc("GET /api/workspaces/{ws}/terminal/token", HandleTerminalToken(m.termSvc))
 	}
-	mux.HandleFunc("GET /api/workspaces/{ws}/terminal/ws", HandleTerminalWS(m.termMgr, m.termAuth, m.allowedOrigins, m.loomServerURL, m.workspaceConfigByIDFn, m.tabMetaStore, m.hub))
-	mux.HandleFunc("POST /api/workspaces/{ws}/terminal/restart", HandleTerminalRestart(m.termSvc, m.termAuth))
-	mux.HandleFunc("POST /api/workspaces/{ws}/terminal/kill", HandleTerminalKill(m.termSvc, m.termAuth))
-	mux.HandleFunc("GET /api/workspaces/{ws}/terminal/session-status", HandleTerminalSessionStatus(m.termSvc, m.termAuth))
-	mux.HandleFunc("POST /api/workspaces/{ws}/terminal/spawn", HandleTerminalSpawn(m.termSvc))
-	mux.HandleFunc("POST /api/workspaces/{ws}/terminal/lead-session", HandleCreateLeadSession(m.termSvc))
-	mux.HandleFunc("POST /api/workspaces/{ws}/terminal/sessions/{name}/seed", HandleSeedTerminalSession(m.termSvc))
-	mux.HandleFunc("POST /api/workspaces/{ws}/terminal/sessions/{session}/kill", HandleScheduleSessionKill(m.termSvc))
-	mux.HandleFunc("POST /api/workspaces/{ws}/terminal/sessions/close-all", HandleCloseAllSessions(m.termSvc))
-
-	// Scrollback, export, and scrollback-info
-	mux.HandleFunc("GET /api/workspaces/{ws}/terminal/sessions/{session}/scrollback", HandleGetScrollback(m.termSvc))
-	mux.HandleFunc("GET /api/workspaces/{ws}/terminal/sessions/{session}/export", HandleExportSession(m.termSvc))
-	mux.HandleFunc("GET /api/workspaces/{ws}/terminal/sessions/{session}/scrollback-info", HandleScrollbackInfo(m.termSvc))
+	if m.ptyMgr != nil {
+		mux.HandleFunc("GET /api/workspaces/{ws}/terminal/ws", HandleTerminalWS(m.ptyMgr, m.termAuth, m.allowedOrigins, m.loomServerURL, m.workspaceConfigByIDFn, m.tabMetaStore, m.hub))
+	}
 }

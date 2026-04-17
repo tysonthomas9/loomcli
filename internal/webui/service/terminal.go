@@ -6,28 +6,17 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
-// TerminalService defines business logic for terminal session management,
-// tab metadata CRUD, scrollback/export, and terminal UI state persistence.
-// Handlers call this interface and map returned errors to HTTP responses.
+// TerminalService defines the surviving terminal-related business logic after
+// the tmux backend was removed. What remains is the WebSocket auth token
+// endpoint, tab metadata CRUD (Redis-backed, not tmux-backed), and the
+// terminal UI state key-value. Session lifecycle (spawn, kill, restart,
+// scrollback, seed, lead-session, export, close-all) is gone — each
+// WebSocket now owns a fresh PTY managed directly by PTYManager.
 type TerminalService interface {
-	// --- Core lifecycle ---
+	// --- WebSocket auth ---
 	GenerateToken(ctx context.Context, session, userID string) (string, error)
-	RestartSession(ctx context.Context, wsID, session string) (*TerminalRestartResult, error)
-	KillSession(ctx context.Context, wsID, session string) error
-	GetSessionStatus(ctx context.Context, wsID, session string) (*TerminalStatusResult, error)
-	ListSessions(ctx context.Context, wsID string) ([]TerminalSessionInfo, error)
-	SpawnSession(ctx context.Context, wsID string, params *SpawnParams) (*SpawnResult, error)
-	CreateLeadSession(ctx context.Context, wsID string, params *LeadSessionParams) (*LeadSessionResult, error)
-	SeedSession(ctx context.Context, wsID, session string, params *SeedParams) error
-	ScheduleKill(ctx context.Context, wsID, session string) error
-	CloseAllSessions(ctx context.Context, wsID string) (*CloseAllResult, error)
 
-	// --- Scrollback & export ---
-	ExportSession(ctx context.Context, wsID, session string) (string, error)
-	GetScrollbackInfo(ctx context.Context, wsID, session string) (*ScrollbackInfoResult, error)
-	GetScrollback(ctx context.Context, wsID, session string) (*ScrollbackResult, error)
-
-	// --- Tab metadata ---
+	// --- Tab metadata (Redis) ---
 	ListTabs(ctx context.Context, wsID string) ([]tabmeta.TabMetadata, error)
 	GetTab(ctx context.Context, wsID, session string) (*tabmeta.TabMetadata, error)
 	PatchTab(ctx context.Context, wsID, session string, fields map[string]string) (*PatchTabResult, error)
@@ -35,88 +24,9 @@ type TerminalService interface {
 	DeleteTab(ctx context.Context, wsID, session string) error
 	ListSessionsByIssue(ctx context.Context) (map[string][]string, error)
 
-	// --- Terminal UI state ---
+	// --- Terminal UI state (Redis) ---
 	GetTerminalState(ctx context.Context, wsID string) (string, error)
 	PatchTerminalState(ctx context.Context, wsID, activeTab string) error
-}
-
-// TerminalSessionInfo contains summary info for a terminal session.
-type TerminalSessionInfo struct {
-	Name    string `json:"name"`
-	Label   string `json:"label"`
-	Created int64  `json:"created"`
-	IssueID string `json:"issue_id,omitempty"`
-}
-
-// TerminalRestartResult contains the backend name after a restart.
-type TerminalRestartResult struct {
-	Backend string
-}
-
-// TerminalStatusResult contains session liveness information.
-type TerminalStatusResult struct {
-	Alive      bool
-	ExitReason string
-}
-
-// SpawnParams are the domain-level parameters for spawning a terminal session.
-type SpawnParams struct {
-	SessionName string
-	Backend     string
-}
-
-// SpawnResult contains the result of spawning a terminal session.
-type SpawnResult struct {
-	SessionName string
-	Backend     string
-	Command     string
-	Created     bool
-}
-
-// LeadSessionParams are the domain-level parameters for creating a lead session.
-type LeadSessionParams struct {
-	Message string
-	Backend string
-}
-
-// LeadSessionResult contains the created lead session identifiers.
-type LeadSessionResult struct {
-	SessionName string
-	Backend     string
-}
-
-// SeedParams are the domain-level parameters for seeding a terminal session.
-type SeedParams struct {
-	IssueID     string
-	Title       string
-	Description string
-	Design      string
-	Blockers    []SeedBlocker
-}
-
-// SeedBlocker represents a blocking issue in a seed prompt.
-type SeedBlocker struct {
-	ID    string
-	Title string
-}
-
-// CloseAllResult contains the result of closing all terminal sessions.
-type CloseAllResult struct {
-	MetaCleanupIncomplete bool
-	AffectedWorkspaces    []string
-}
-
-// ScrollbackInfoResult contains scrollback buffer statistics.
-type ScrollbackInfoResult struct {
-	LineCount      int
-	MaxLines       int
-	TruncatedCount int64
-}
-
-// ScrollbackResult contains scrollback buffer content.
-type ScrollbackResult struct {
-	Content string
-	Lines   int
 }
 
 // PatchTabResult contains the patched tab and whether the issue ID changed.

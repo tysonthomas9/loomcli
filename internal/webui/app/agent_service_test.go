@@ -89,12 +89,12 @@ func TestAgentService_GetTerminalInfo(t *testing.T) {
 	})
 
 	t.Run("valid agent returns archive mode when no session found", func(t *testing.T) {
-		mgr, err := terminal.NewTerminalManager("bash", "test-svc-archive", 0)
+		mgr, err := terminal.NewAgentTmuxManager(0)
 		if err == terminal.ErrTmuxNotFound {
 			t.Skip("tmux not installed, skipping test")
 		}
 		if err != nil {
-			t.Fatalf("NewTerminalManager: %v", err)
+			t.Fatalf("NewAgentTmuxManager: %v", err)
 		}
 		defer mgr.Shutdown()
 

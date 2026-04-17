@@ -7,10 +7,10 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
-	"github.com/tysonthomas9/loomcli/internal/webui/editor"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	healthhandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/health"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
+	hterminal "github.com/tysonthomas9/loomcli/internal/webui/handlers/terminal"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
@@ -74,10 +74,10 @@ func BuildHandlers(deps HandlerDeps) *Handlers {
 		Stats:              healthhandlers.HandleStats(deps.Pool),
 		Metrics:            healthhandlers.HandleMetrics(deps.Hub, deps.FleetTimeoutsFn, deps.ClaimMetrics),
 		DaemonStatus:       healthhandlers.HandleDaemonStatus(deps.Pool),
-		GetBackendConfig:   misc.HandleGetBackendConfig(deps.Pool),
-		PatchBackendConfig: misc.HandlePatchBackendConfig(deps.Pool),
+		GetBackendConfig:   hterminal.HandleGetBackendConfig(deps.Pool),
+		PatchBackendConfig: hterminal.HandlePatchBackendConfig(deps.Pool),
 		ListEditors:        misc.HandleListEditors(editorCache),
-		OpenEditor:         misc.HandleOpenEditor(editorCache, editor.LaunchEditor),
+		OpenEditor:         misc.HandleOpenEditorDefault(editorCache),
 		DaemonSupervisor:   deps.DaemonSupervisor,
 		DaemonConfig:       deps.DaemonConfig,
 		ClientErrLimiter:   clientErrLimiter,

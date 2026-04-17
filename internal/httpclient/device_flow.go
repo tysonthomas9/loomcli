@@ -31,7 +31,7 @@ type DeviceCodeResponse struct {
 
 // deviceTokenResponse is the response from the device token polling endpoint.
 type deviceTokenResponse struct {
-	AccessToken string `json:"access_token"`
+	AccessToken string `json:"access_token"` //nolint:gosec // OAuth2 token field name
 	TokenType   string `json:"token_type"`
 	ExpiresIn   int    `json:"expires_in"`
 	Error       string `json:"error,omitempty"`

@@ -32,38 +32,6 @@ type stubTerminalService struct{}
 func (s *stubTerminalService) GenerateToken(_ context.Context, _, _ string) (string, error) {
 	return "tok", nil
 }
-func (s *stubTerminalService) RestartSession(_ context.Context, _, _ string) (*service.TerminalRestartResult, error) {
-	return &service.TerminalRestartResult{}, nil
-}
-func (s *stubTerminalService) KillSession(_ context.Context, _, _ string) error { return nil }
-func (s *stubTerminalService) GetSessionStatus(_ context.Context, _, _ string) (*service.TerminalStatusResult, error) {
-	return &service.TerminalStatusResult{}, nil
-}
-func (s *stubTerminalService) ListSessions(_ context.Context, _ string) ([]service.TerminalSessionInfo, error) {
-	return nil, nil
-}
-func (s *stubTerminalService) SpawnSession(_ context.Context, _ string, _ *service.SpawnParams) (*service.SpawnResult, error) {
-	return &service.SpawnResult{}, nil
-}
-func (s *stubTerminalService) CreateLeadSession(_ context.Context, _ string, _ *service.LeadSessionParams) (*service.LeadSessionResult, error) {
-	return &service.LeadSessionResult{}, nil
-}
-func (s *stubTerminalService) SeedSession(_ context.Context, _, _ string, _ *service.SeedParams) error {
-	return nil
-}
-func (s *stubTerminalService) ScheduleKill(_ context.Context, _, _ string) error { return nil }
-func (s *stubTerminalService) CloseAllSessions(_ context.Context, _ string) (*service.CloseAllResult, error) {
-	return &service.CloseAllResult{}, nil
-}
-func (s *stubTerminalService) ExportSession(_ context.Context, _, _ string) (string, error) {
-	return "", nil
-}
-func (s *stubTerminalService) GetScrollbackInfo(_ context.Context, _, _ string) (*service.ScrollbackInfoResult, error) {
-	return &service.ScrollbackInfoResult{}, nil
-}
-func (s *stubTerminalService) GetScrollback(_ context.Context, _, _ string) (*service.ScrollbackResult, error) {
-	return &service.ScrollbackResult{}, nil
-}
 func (s *stubTerminalService) ListTabs(_ context.Context, _ string) ([]tabmeta.TabMetadata, error) {
 	return nil, nil
 }

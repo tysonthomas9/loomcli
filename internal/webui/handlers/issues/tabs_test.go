@@ -39,7 +39,7 @@ func withWSContext(r *http.Request, wsID string) *http.Request {
 // ── GET handler tests ─────────────────────────────────────────────────────────
 
 func TestHandleGetIssueTabs_NilStore(t *testing.T) {
-	handler := handleGetIssueTabs(nil, nil)
+	handler := handleGetIssueTabs(nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testWSID+"/issues/PROJ-1/tabs", nil)
 	req.SetPathValue("issueId", "PROJ-1")
 	req = withWSContext(req, testWSID)
@@ -53,7 +53,7 @@ func TestHandleGetIssueTabs_NilStore(t *testing.T) {
 
 func TestHandleGetIssueTabs_MissingIssueID(t *testing.T) {
 	store, _ := setupIssueTabsTest(t)
-	handler := handleGetIssueTabs(store, nil)
+	handler := handleGetIssueTabs(store)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testWSID+"/issues//tabs", nil)
 	req = withWSContext(req, testWSID)
@@ -68,7 +68,7 @@ func TestHandleGetIssueTabs_MissingIssueID(t *testing.T) {
 
 func TestHandleGetIssueTabs_NoSavedState(t *testing.T) {
 	store, _ := setupIssueTabsTest(t)
-	handler := handleGetIssueTabs(store, nil)
+	handler := handleGetIssueTabs(store)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testWSID+"/issues/PROJ-1/tabs", nil)
 	req.SetPathValue("issueId", "PROJ-1")
@@ -110,7 +110,7 @@ func TestHandleGetIssueTabs_ReturnsSavedState(t *testing.T) {
 	}
 
 	// No terminal manager means no session filtering
-	handler := handleGetIssueTabs(store, nil)
+	handler := handleGetIssueTabs(store)
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testWSID+"/issues/PROJ-2/tabs", nil)
 	req.SetPathValue("issueId", "PROJ-2")
 	req = withWSContext(req, testWSID)
@@ -419,7 +419,7 @@ func TestHandleDeleteIssueTabs_NonExistentIssue(t *testing.T) {
 
 func TestHandleGetIssueTabs_InvalidIssueID(t *testing.T) {
 	store, _ := setupIssueTabsTest(t)
-	handler := handleGetIssueTabs(store, nil)
+	handler := handleGetIssueTabs(store)
 
 	// Issue ID with invalid characters should fail validation
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testWSID+"/issues/PROJ@!#/tabs", nil)
@@ -446,7 +446,7 @@ func TestHandleGetIssueTabs_InvalidIssueID(t *testing.T) {
 
 func TestHandleGetIssueTabs_EmptyIssueID(t *testing.T) {
 	store, _ := setupIssueTabsTest(t)
-	handler := handleGetIssueTabs(store, nil)
+	handler := handleGetIssueTabs(store)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testWSID+"/issues//tabs", nil)
 	req.SetPathValue("issueId", "")
@@ -468,7 +468,7 @@ func TestHandleGetIssueTabs_PoolError(t *testing.T) {
 	// Close Redis to simulate connection failure
 	mr.Close()
 
-	handler := handleGetIssueTabs(store, nil)
+	handler := handleGetIssueTabs(store)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testWSID+"/issues/POOL-ERR/tabs", nil)
 	req.SetPathValue("issueId", "POOL-ERR")
@@ -508,7 +508,7 @@ func TestHandleGetIssueTabs_EmptyTabs(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	handler := handleGetIssueTabs(store, nil)
+	handler := handleGetIssueTabs(store)
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testWSID+"/issues/EMPTY-TABS/tabs", nil)
 	req.SetPathValue("issueId", "EMPTY-TABS")
 	req = withWSContext(req, testWSID)

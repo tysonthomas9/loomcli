@@ -14,11 +14,9 @@ import {
   getIssueEvents,
   moveIssue,
   deleteTabMetadata,
-  scheduleSessionKill,
 } from "@/hooks/api";
 import type { IssueTab } from "@/api/issues";
 import {
-  useAgentTerminalLogs,
   useFocusReturn,
   useFocusTrap,
   useRegisterEscapeLayer,
@@ -72,7 +70,6 @@ import { SplitDetailSummary } from "./SplitDetailSummary";
 import { EmbeddedTerminal } from "../EmbeddedTerminal";
 import { ResizeDivider } from "./actions";
 import { ErrorToast } from "../ErrorToast";
-import { LogViewer } from "../LogViewer";
 import { useSplitRatio } from "@/hooks/ui";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { SessionHistorySection, SessionsTab } from "./sessions";
@@ -213,7 +210,6 @@ function renderDependencyChip(
  */
 interface DefaultContentProps {
   issue: Issue | IssueDetails | null;
-  isOpen: boolean;
   isLoading: boolean;
   error: string | null;
   onClose: () => void;
@@ -242,7 +238,7 @@ interface DetailTabMetadata {
 
 interface DetailTab {
   id: string;
-  type: "details" | "logs" | "terminal" | "sessions";
+  type: "details" | "terminal" | "sessions";
   label: string;
   closable: boolean;
   metadata?: DetailTabMetadata | undefined;
@@ -268,7 +264,6 @@ const SESSIONS_TAB: DetailTab = {
  */
 function DefaultContent({
   issue,
-  isOpen,
   isLoading,
   error,
   onClose,
@@ -322,8 +317,6 @@ function DefaultContent({
   // Tab state - managed tab array with dynamic add/remove
   const [tabs, setTabs] = useState<DetailTab[]>([DETAILS_TAB, SESSIONS_TAB]);
   const [activeTabId, setActiveTabId] = useState("details");
-  const [showAddTabDropdown, setShowAddTabDropdown] = useState(false);
-  const addTabRef = useRef<HTMLDivElement>(null);
   // Track whether we've already restored tabs from persistence for this issue
   const restoredIssueIdRef = useRef<string | null>(null);
   // Ref mirroring tabs for cleanup effects (avoids adding tabs as dependency)
@@ -331,42 +324,6 @@ function DefaultContent({
   useEffect(() => {
     tabsRef.current = tabs;
   }, [tabs]);
-
-  const addTab = useCallback(
-    (type: "logs" | "terminal", metadata?: DetailTabMetadata) => {
-      setTabs((prev) => {
-        // For logs, prevent duplicates
-        if (type === "logs") {
-          const existing = prev.find((t) => t.type === type);
-          if (existing) {
-            setActiveTabId(existing.id);
-            return prev;
-          }
-        }
-        const id =
-          type === "terminal"
-            ? `terminal-${metadata?.sessionName ?? Date.now()}`
-            : type;
-        const label =
-          type === "logs"
-            ? "Logs"
-            : type === "terminal"
-              ? `Terminal (${metadata?.backend ?? "shell"})`
-              : type;
-        const newTab: DetailTab = {
-          id,
-          type,
-          label,
-          closable: true,
-          metadata,
-        };
-        setActiveTabId(newTab.id);
-        return [...prev, newTab];
-      });
-      setShowAddTabDropdown(false);
-    },
-    [],
-  );
 
   // Pending close confirmation state
   const [pendingCloseTabId, setPendingCloseTabId] = useState<string | null>(
@@ -379,11 +336,12 @@ function DefaultContent({
       for (const tab of tabList) {
         if (tab.type !== "terminal" || !tab.metadata?.sessionName) continue;
         const sn = tab.metadata.sessionName;
+        // Only tab metadata cleanup remains — PTYs die with their WS so no
+        // server-side kill call is needed.
         if (workspace?.id) deleteTabMetadata(workspace.id, sn).catch(() => {});
-        scheduleSessionKill(workspaceId, sn).catch(() => {});
       }
     },
-    [workspace?.id, workspaceId],
+    [workspace?.id],
   );
 
   // Close a tab: remove from state, clean up backend resources
@@ -431,27 +389,6 @@ function DefaultContent({
   const agentTasks = useStore(agentStore, (s) => s.agentTasks);
   const isLoomConnected = useStore(agentStore, (s) => s.isConnected);
 
-  // Agent-based log connection
-  const agentName = issue?.assignee || null;
-  const hasAgent = !!agentName;
-
-  const {
-    mode: logMode,
-    chunks: logChunks,
-    state: logConnectionState,
-    error: logError,
-    resetVersion: logResetVersion,
-    refresh: refreshLogs,
-    resize: resizeLogs,
-    sendInput: sendLogInput,
-    loadOlderLogs,
-    hasMoreLines,
-    isLoadingMore,
-  } = useAgentTerminalLogs({
-    agentName,
-    enabled: isOpen && activeTabId === "logs" && hasAgent,
-  });
-
   // Reset tabs when issue changes — clean up orphaned terminal sessions first
   useEffect(() => {
     cleanupTerminalTabs(tabsRef.current);
@@ -475,7 +412,7 @@ function DefaultContent({
     }
     restoredIssueIdRef.current = issue.id;
 
-    const validTypes = new Set(["details", "logs", "terminal", "sessions"]);
+    const validTypes = new Set(["details", "terminal", "sessions"]);
     const restoredTabs: DetailTab[] = persistedTabState.tabs
       .filter((t) => validTypes.has(t.type))
       .map((t) => ({
@@ -556,16 +493,6 @@ function DefaultContent({
     persistTabs(tabsToSave, activeTabId);
   }, [tabs, activeTabId, issue?.id, isLoadingPersistedTabs, persistTabs]);
 
-  // Reset to details when agent removed while on logs tab — clean up terminal sessions
-  useEffect(() => {
-    if (activeTabId === "logs" && !hasAgent) {
-      cleanupTerminalTabs(tabsRef.current);
-      tabsRef.current = [DETAILS_TAB, SESSIONS_TAB];
-      setTabs([DETAILS_TAB, SESSIONS_TAB]);
-      setActiveTabId("details");
-    }
-  }, [activeTabId, hasAgent, cleanupTerminalTabs]);
-
   // Ref to cleanupTerminalTabs so unmount cleanup uses latest without re-registering
   const cleanupRef = useRef(cleanupTerminalTabs);
   useEffect(() => {
@@ -577,27 +504,6 @@ function DefaultContent({
     },
     [],
   );
-
-  // Close add-tab dropdown on outside click
-  useEffect(() => {
-    if (!showAddTabDropdown) return;
-    const handleMouseDown = (e: MouseEvent) => {
-      if (addTabRef.current && !addTabRef.current.contains(e.target as Node)) {
-        setShowAddTabDropdown(false);
-      }
-    };
-    document.addEventListener("mousedown", handleMouseDown);
-    return () => document.removeEventListener("mousedown", handleMouseDown);
-  }, [showAddTabDropdown]);
-
-  // Close add-tab dropdown on Escape — handled via onKeyDown on the dropdown
-  // element with stopPropagation to prevent the global handler from also firing.
-  const handleAddTabKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === "Escape") {
-      e.stopPropagation();
-      setShowAddTabDropdown(false);
-    }
-  }, []);
 
   // Local state for comments to enable optimistic updates
   const hasDetails = issue && isIssueDetails(issue);
@@ -1117,43 +1023,6 @@ function DefaultContent({
             </div>
           ))}
         </div>
-        {/* "+" dropdown for adding tabs */}
-        {hasAgent && !tabs.some((t) => t.type === "logs") && (
-          <div className={styles.addTabContainer} ref={addTabRef}>
-            <button
-              type="button"
-              className={styles.addTabButton}
-              onClick={() => setShowAddTabDropdown((prev) => !prev)}
-              aria-label="Add tab"
-              data-testid="add-tab-button"
-            >
-              <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path
-                  d="M8 3v10M3 8h10"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                />
-              </svg>
-            </button>
-            {showAddTabDropdown && (
-              <div
-                className={styles.addTabDropdown}
-                data-testid="add-tab-dropdown"
-                onKeyDown={handleAddTabKeyDown}
-              >
-                <button
-                  type="button"
-                  className={styles.addTabOption}
-                  onClick={() => addTab("logs")}
-                  data-testid="add-tab-logs"
-                >
-                  Logs
-                </button>
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
       {/* Terminal tab content — split view: details on top, terminal on bottom */}
@@ -1215,50 +1084,6 @@ function DefaultContent({
           );
         })()}
 
-      {activeTabId === "logs" && (
-        <div
-          className={styles.logsContainer}
-          role="tabpanel"
-          id="issue-panel-tabpanel-logs"
-          aria-labelledby="issue-panel-tab-logs"
-        >
-          <div className={styles.logsMetaRow}>
-            <span className={styles.logsModeBadge} data-mode={logMode}>
-              {logMode === "tmux"
-                ? "Live (tmux)"
-                : logMode === "archive"
-                  ? "Archive snapshot"
-                  : logMode === "loading"
-                    ? "Loading logs..."
-                    : "Idle"}
-            </span>
-            {logMode === "archive" && (
-              <button
-                type="button"
-                className={styles.logsRefreshButton}
-                onClick={refreshLogs}
-              >
-                Refresh
-              </button>
-            )}
-          </div>
-          <LogViewer
-            chunks={logChunks}
-            connectionState={logConnectionState}
-            error={logError}
-            height="100%"
-            autoScroll={logMode !== "tmux"}
-            resetVersion={logResetVersion}
-            mode={logMode === "tmux" ? "interactive" : "static"}
-            onTerminalResize={resizeLogs}
-            onScrollToTop={logMode === "archive" ? loadOlderLogs : undefined}
-            isLoadingMore={isLoadingMore}
-            hasMoreOlder={logMode === "archive" ? hasMoreLines : false}
-            {...(logMode === "tmux" ? { onTerminalData: sendLogInput } : {})}
-          />
-        </div>
-      )}
-
       {activeTabId === "details" && (
         <div
           className={styles.scrollableContent}
@@ -1306,7 +1131,7 @@ function DefaultContent({
                   {issue.assignee && !issue.assignee.startsWith("[H]") && (
                     <AgentStatusBadge
                       agentName={issue.assignee}
-                      onOpenTerminal={() => setActiveTabId("logs")}
+                      onOpenTerminal={() => setActiveTabId("terminal")}
                     />
                   )}
                   <StartWorkButton
@@ -1543,7 +1368,6 @@ export function IssueDetailPanel({
   const content = children ?? (
     <DefaultContent
       issue={issue}
-      isOpen={isOpen}
       isLoading={isLoading ?? false}
       error={error ?? null}
       onClose={onClose}

@@ -1,11 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 
-import type { IssueContext } from "@/api/terminal";
-import {
-  spawnTerminalSession,
-  patchTerminalState,
-  getExportUrl,
-} from "@/hooks/api";
+import type { IssueContext } from "@/hooks/api";
+import { patchTerminalState } from "@/hooks/api";
 import { LoadingSkeleton } from "@/components";
 import { useBackendConfig } from "@/hooks/workspace";
 import { useSessionRestore, useTerminalMetadata } from "@/hooks/terminal";
@@ -15,20 +11,10 @@ import {
   NoBackendsEmptyState,
   useSplitView,
 } from "./layout";
-import {
-  HelpPopover,
-  CopyToast,
-  PasteConfirmDialog,
-  SearchBar,
-  TerminalContextMenu,
-  useContextMenuActions,
-  useTerminalKeyboardShortcuts,
-  useTerminalSearch,
-} from "./controls";
+import { HelpPopover, useTerminalKeyboardShortcuts } from "./controls";
 import {
   TerminalPane,
   TerminalPaneArea,
-  useClipboard,
   useConnectionState,
   useSessionSeeding,
 } from "./instances";
@@ -40,24 +26,12 @@ import {
   type TabState,
   generateTabName,
   useTabOrdering,
-  useSessionManagement,
   useTabActions,
   useTabInit,
   useUnreadTracking,
   useWorkspaceTabState,
 } from "./tabs";
 import styles from "./TerminalView.module.css";
-
-/**
- * Descriptor for a tmux session that was pre-spawned on the backend (e.g. via
- * the /api/terminal/lead-session endpoint). TerminalView consumes this to
- * create a matching tab and attach to the existing session. The tab label is
- * derived from `sessionName`.
- */
-export interface PendingLeadSession {
-  sessionName: string;
-  backend: string;
-}
 
 interface TerminalViewProps {
   isActive?: boolean;
@@ -66,20 +40,11 @@ interface TerminalViewProps {
   onActiveSessionCountChange?: (count: number) => void;
   onUnreadChange?: (hasAnyUnread: boolean) => void;
   onEscape?: () => void;
-  issueId?: string;
   onNavigateToSettings?: () => void;
   /** When set, opens or focuses an agent's terminal tab. */
   pendingAgentName?: string | undefined;
   /** Called after pendingAgentName has been processed. */
   onAgentNameConsumed?: (() => void) | undefined;
-  /**
-   * When set, creates (or focuses) a tab for a lead session that was already
-   * pre-spawned on the backend. The session runs `loom lead --backend X
-   * --message <user text>` so no client-side seeding is required.
-   */
-  pendingLeadSession?: PendingLeadSession | undefined;
-  /** Called after pendingLeadSession has been processed. */
-  onLeadSessionConsumed?: (() => void) | undefined;
 }
 
 export function TerminalView({
@@ -89,12 +54,9 @@ export function TerminalView({
   onActiveSessionCountChange,
   onUnreadChange,
   onEscape,
-  issueId,
   onNavigateToSettings,
   pendingAgentName,
   onAgentNameConsumed,
-  pendingLeadSession,
-  onLeadSessionConsumed,
 }: TerminalViewProps): JSX.Element {
   const [tabs, setTabs] = useState<TabState[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>("");
@@ -113,7 +75,6 @@ export function TerminalView({
     updateNotes,
     updatePinned,
     deleteTab,
-    linkToIssue,
     reorderTabs: reorderTabMeta,
     isLoading: metaLoading,
   } = useTerminalMetadata(workspaceId);
@@ -125,7 +86,7 @@ export function TerminalView({
     isSplitView,
     splitRatio,
     rightPaneTabId,
-    focusedPane,
+    focusedPane: _focusedPane,
     setFocusedPane,
     canSplit,
     handleToggleSplit,
@@ -138,7 +99,6 @@ export function TerminalView({
     try {
       if (localStorage.getItem("terminal-onboarding-dismissed") === "1")
         return true;
-      // Backward compat: migrate old per-backend keys
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
         if (key?.startsWith("terminal-welcome-dismissed-")) {
@@ -160,53 +120,19 @@ export function TerminalView({
   const workspaceIdRef = useRef(workspaceId);
   workspaceIdRef.current = workspaceId;
 
-  // ARIA live region for screen reader announcements (useRef avoids re-renders)
+  // ARIA live region for screen reader announcements
   const liveRegionRef = useRef<HTMLDivElement>(null);
   const announce = useCallback((msg: string) => {
     if (liveRegionRef.current) liveRegionRef.current.textContent = msg;
   }, []);
 
-  const {
-    showCopyToast,
-    pendingPasteText,
-    handleCopyNotify,
-    handlePasteRequest,
-    handlePasteConfirm,
-    handlePasteCancel,
-  } = useClipboard(instanceRefs, activeTabIdRef);
-
-  const {
-    isSearchOpen,
-    searchTerm,
-    caseSensitive,
-    useRegex,
-    searchResult,
-    handleSearch,
-    handleFindNext,
-    handleFindPrevious,
-    handleSearchClose,
-    handleToggleCaseSensitive,
-    handleToggleRegex,
-    handleSearchResultChange,
-    handleSearchRequest,
-  } = useTerminalSearch({
-    instanceRefs,
-    activeTabId,
-    isSplitView,
-    focusedPane,
-    rightPaneTabId,
-    isActive,
-  });
-
-  // Hook ordering: useSessionSeeding before useConnectionState
-  // so trySeedOnConnect is available as the onTabConnected callback.
+  // Hook ordering: useSessionSeeding before useConnectionState so
+  // trySeedOnConnect is available as the onTabConnected callback.
   const { trySeedOnConnect } = useSessionSeeding({
     pendingIssueContext,
     onIssueContextConsumed,
     pendingAgentName,
     onAgentNameConsumed,
-    pendingLeadSession,
-    onLeadSessionConsumed,
     tabs,
     setTabs,
     setActiveTabId,
@@ -228,7 +154,6 @@ export function TerminalView({
   } = useConnectionState({
     setTabs,
     instanceRefs,
-    workspaceId,
     onTabConnected: trySeedOnConnect,
   });
 
@@ -236,20 +161,6 @@ export function TerminalView({
     activeTabIdRef,
     isActive,
     onUnreadChange,
-  });
-
-  const {
-    contextMenu,
-    handleContextMenu,
-    handleContextMenuClose,
-    handleContextMenuCopy,
-    handleContextMenuPaste,
-    handleContextMenuSelectAll,
-  } = useContextMenuActions({
-    instanceRefs,
-    activeTabId,
-    handleCopyNotify,
-    handlePasteRequest,
   });
 
   useTabInit({
@@ -265,14 +176,12 @@ export function TerminalView({
     isViewActive: isActive ?? false,
   });
 
-  // Apply server-restored active tab after initialization (only if restore completed before user interaction)
+  // Apply server-restored active tab after initialization.
   const appliedRestoreRef = useRef(false);
   useEffect(() => {
     if (appliedRestoreRef.current || isRestoring || !restoredTabId) return;
     if (!initializedRef.current || tabs.length === 0) return;
     appliedRestoreRef.current = true;
-    // If useTabInit already set the correct tab (from sessionStorage), skip
-    // the redundant setActiveTabId to avoid a flicker-causing re-render.
     if (restoredTabId === activeTabId) return;
     const match = tabs.find((t) => t.id === restoredTabId);
     if (match) setActiveTabId(restoredTabId);
@@ -300,7 +209,6 @@ export function TerminalView({
     onActiveSessionCountChange?.(count);
   }, [tabs, onActiveSessionCountChange]);
 
-  // Reset count on unmount
   useEffect(() => {
     return () => {
       onActiveSessionCountChange?.(0);
@@ -392,15 +300,12 @@ export function TerminalView({
     isActive,
     tabsRef,
     activeTabIdRef,
-    isSearchOpen,
     isSessionPromptOpen,
-    pendingPasteText,
     dismissedWelcome,
     onCycleTab: handleCycleTab,
     onSwitchTabByIndex: handleSwitchTabByIndex,
     onNewTab: handleNewTabClick,
     onCloseTab: handleCloseActiveTab,
-    onToggleSearch: handleSearchRequest,
     onEscape,
     announce,
   });
@@ -409,9 +314,7 @@ export function TerminalView({
     (backend: string) => {
       setIsSessionPromptOpen(false);
       const { sessionName, label } = generateTabName(backend, tabs, workspace);
-      // Pre-create tmux session for shell tabs (WS handler also detects lead-shell-* as fallback)
-      if (backend === "shell")
-        spawnTerminalSession(workspaceId, sessionName, backend).catch(() => {});
+      // The WS handler auto-spawns a fresh PTY on connect — no pre-spawn call.
       setTabs((prev) => [
         ...prev,
         {
@@ -432,20 +335,6 @@ export function TerminalView({
     setIsSessionPromptOpen(false);
   }, []);
 
-  const handleCloseAll = useSessionManagement({
-    workspaceId,
-    setTabs,
-    setActiveTabId,
-    instanceRefs,
-    initializedRef,
-    isActive,
-    issueId,
-    tabs,
-    createTab,
-    linkToIssue,
-    backendName: config?.backend ?? "unknown",
-  });
-
   const handleDismissWelcome = useCallback(() => {
     setDismissedWelcome(true);
     try {
@@ -455,9 +344,7 @@ export function TerminalView({
     }
   }, []);
 
-  // Auto-dismiss the welcome banner if terminal sessions already exist.
-  // This prevents the popup from blocking the terminal on first visit when
-  // sessions are already running from a previous page load.
+  // Auto-dismiss the welcome banner when sessions already exist.
   useEffect(() => {
     if (
       !dismissedWelcome &&
@@ -514,17 +401,10 @@ export function TerminalView({
           onConnectionStateChange={(state, hasConnected) =>
             handleConnectionStateChange(tab.id, state, hasConnected)
           }
-          onCopyNotify={handleCopyNotify}
-          onPasteRequest={handlePasteRequest}
-          onSearchRequest={handleSearchRequest}
-          onContextMenu={handleContextMenu}
           onReconnectStateChange={(state) =>
             handleReconnectStateChange(tab.id, state)
           }
           onOutput={() => handleOutput(tab.id)}
-          onSearchResultChange={(result) =>
-            handleSearchResultChange(tab.id, result)
-          }
           onBackendCrash={(reason) => handleBackendCrash(tab.id, reason)}
           onCrashRestart={() => handleCrashRestart(tab.id, tab.sessionName)}
           onCloseTab={() => handleTabClose(tab.id)}
@@ -558,13 +438,8 @@ export function TerminalView({
       rightPaneTabId,
       setInstanceRef,
       handleConnectionStateChange,
-      handleCopyNotify,
-      handlePasteRequest,
-      handleSearchRequest,
-      handleContextMenu,
       handleReconnectStateChange,
       handleOutput,
-      handleSearchResultChange,
       handleBackendCrash,
       handleCrashRestart,
       handleTabClose,
@@ -618,7 +493,6 @@ export function TerminalView({
             onNewTab={handleNewTabClick}
             onToggleFullHeight={handleToggleFullHeight}
             isFullHeight={isFullHeight}
-            onCloseAll={handleCloseAll}
             onTabRename={handleTabRename}
             onDuplicateTab={handleDuplicateTab}
             maxTabsReached={tabs.length >= MAX_TABS}
@@ -628,15 +502,6 @@ export function TerminalView({
             isSplitView={isSplitView}
             canSplit={canSplit}
             onToggleSplit={handleToggleSplit}
-            onExport={() => {
-              const t = tabs.find((x) => x.id === activeTabId);
-              if (t)
-                window.open(
-                  getExportUrl(workspaceId, t.sessionName),
-                  "_blank",
-                  "noopener",
-                );
-            }}
             onHelpClick={handleToggleHelp}
           />
           <HelpPopover
@@ -654,22 +519,6 @@ export function TerminalView({
             onRightPaneTabChange={handleRightPaneTabChange}
             renderPane={renderTerminalPane}
           />
-
-          {isSearchOpen && (
-            <SearchBar
-              value={searchTerm}
-              onSearch={handleSearch}
-              onFindNext={handleFindNext}
-              onFindPrevious={handleFindPrevious}
-              onClose={handleSearchClose}
-              matchIndex={searchResult?.resultIndex ?? null}
-              matchCount={searchResult?.resultCount ?? null}
-              caseSensitive={caseSensitive}
-              regex={useRegex}
-              onToggleCaseSensitive={handleToggleCaseSensitive}
-              onToggleRegex={handleToggleRegex}
-            />
-          )}
         </>
       )}
       <BackendPickerPrompt
@@ -679,24 +528,6 @@ export function TerminalView({
         onSelect={handleBackendSelect}
         onCancel={handleSessionPromptCancel}
       />
-      <PasteConfirmDialog
-        isOpen={pendingPasteText !== null}
-        text={pendingPasteText ?? ""}
-        onConfirm={handlePasteConfirm}
-        onCancel={handlePasteCancel}
-      />
-      <CopyToast visible={showCopyToast} />
-      {contextMenu && (
-        <TerminalContextMenu
-          x={contextMenu.x}
-          y={contextMenu.y}
-          hasSelection={contextMenu.hasSelection}
-          onCopy={handleContextMenuCopy}
-          onPaste={handleContextMenuPaste}
-          onSelectAll={handleContextMenuSelectAll}
-          onClose={handleContextMenuClose}
-        />
-      )}
       <div
         ref={liveRegionRef}
         className={styles.visuallyHidden}

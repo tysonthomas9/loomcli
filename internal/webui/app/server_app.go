@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -166,72 +165,42 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	app.multiSub = appstores.NewMultiSub(app.hub, app.multiPool, config.Logger)
 	cleanups = append(cleanups, func() { app.multiSub.Stop() })
 
-	// Terminal manager for WebSocket sessions. The session prefix is just the
-	// listen port — enough to isolate multiple loom server instances sharing
-	// the same tmux socket. The workspace short ID is added per-session by
-	// TerminalManager.tmuxName, so including it here would cause the workspace
-	// short to appear twice in every qualified tmux session name.
-	termSessionPrefix := strconv.Itoa(app.actualPort)
-	if app.termMgr, err = terminal.NewTerminalManager(config.TerminalCmd, termSessionPrefix, config.MaxTerminalSessions); err != nil {
-		if errors.Is(err, terminal.ErrTmuxNotFound) {
-			logger.Warn("tmux not found, terminal feature disabled")
+	// Main web terminal manager: one fresh PTY per WebSocket connection, no
+	// tmux. Mirrors wterm/examples/local/server.ts on the Go side.
+	app.ptyMgr = terminal.NewPTYManager(config.TerminalCmd, config.MaxTerminalSessions)
+	cleanups = append(cleanups, func() { _ = app.ptyMgr.Shutdown() })
+	logger.Info("pty manager initialized", "component", "terminal", "default_command", config.TerminalCmd)
+
+	// Agent-view tmux manager: kept only so the web UI can attach to tmux
+	// sessions that the CLI auto-mode creates for agents. Missing tmux is a
+	// soft failure — the agent-terminal live view is disabled, archive logs
+	// still work.
+	if mgr, agentErr := terminal.NewAgentTmuxManager(config.MaxTerminalSessions); agentErr != nil {
+		if errors.Is(agentErr, terminal.ErrTmuxNotFound) {
+			logger.Warn("tmux not found, agent terminal live view disabled")
 		} else {
-			logger.Warn("failed to initialize terminal manager", "err", err)
+			logger.Warn("failed to initialize agent tmux manager", "err", agentErr)
 		}
 	} else {
-		if config.ScrollbackMaxLines > 0 {
-			app.termMgr.SetScrollbackMaxLines(config.ScrollbackMaxLines)
-		}
-		cleanups = append(cleanups, func() { _ = app.termMgr.Shutdown() })
-		logger.Info("terminal manager initialized", "component", "terminal", "default_command", config.TerminalCmd)
+		app.agentTmuxMgr = mgr
+		cleanups = append(cleanups, func() { _ = app.agentTmuxMgr.Shutdown() })
+		logger.Info("agent tmux manager initialized", "component", "terminal")
 	}
 
-	// Wire session history callback.
-	if app.termMgr != nil {
-		app.termMgr.SetOnSessionKilled(func(wsID, sessionName, scrollbackPath string) {
-			store := app.sessionHistoryStore
-			if store == nil {
-				return
-			}
-			issueID := terminal.ExtractIssueID(sessionName)
-			if issueID == "" {
-				return
-			}
-			// The manager passes the qualified on-disk path; verify it still
-			// exists before recording it (capture may have failed quietly).
-			if scrollbackPath != "" {
-				if _, err := os.Stat(scrollbackPath); err != nil {
-					scrollbackPath = ""
-				}
-			}
-			// Fall back to the initial workspace when the manager can't supply
-			// a wsID (legacy callers / raw-name paths). Any workspace-scoped
-			// kill now routes to the actual owning workspace.
-			storeWS := wsID
-			if storeWS == "" {
-				storeWS = app.initialWorkspaceID
-			}
-			if err := store.Complete(context.Background(), storeWS, issueID, sessionName, scrollbackPath); err != nil {
-				logger.Warn("failed to complete session history", "session", sessionName, "err", err)
-			}
-		})
-	}
-
-	// Initialize terminal auth for one-time WebSocket tokens
-	if app.termMgr != nil {
+	// Terminal auth for one-time WebSocket tokens.
+	{
 		var authErr error
 		app.termAuth, authErr = appstores.NewTerminalAuth()
 		if authErr != nil {
-			logger.Warn("failed to initialize terminal auth, terminal feature disabled", "err", authErr)
-			app.termMgr = nil
+			logger.Warn("failed to initialize terminal auth; token endpoint disabled", "err", authErr)
 		} else {
 			cleanups = append(cleanups, func() { app.termAuth.Stop() })
 		}
 	}
 
-	// Initialize agent service layer (requires ops.GitOps; termMgr/termAuth may be nil)
+	// Initialize agent service layer (requires ops.GitOps; agentTmuxMgr/termAuth may be nil)
 	if config.GitOps != nil {
-		app.agentSvc = svcimpl.NewAgentService(config.GitOps, app.termMgr, app.termAuth)
+		app.agentSvc = svcimpl.NewAgentService(config.GitOps, app.agentTmuxMgr, app.termAuth)
 	}
 
 	// Initialize SSE token exchange store (external auth mode only).
@@ -283,7 +252,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 		MultiPool: app.multiPool,
 		PoolSize:  config.PoolSize,
 		MultiSub:  app.multiSub,
-		TermMgr:   app.termMgr,
+		TermMgr:   app.agentTmuxMgr,
 		FleetReg:  app.fleetRegistry,
 		FleetURL:  config.FleetClientURL,
 		FleetWS:   config.FleetClientWorkspace,
@@ -399,20 +368,16 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	// Generate and persist notify token for session change endpoint auth.
 	app.notifyToken, app.notifyTokenFile = generateNotifyToken(config.NotifyTokenDir)
 
-	// Initialize terminal service layer (requires termMgr, stores)
-	if app.termMgr != nil {
-		var configPool terminal.ConfigConnectionGetter
-		if app.multiPool != nil {
-			configPool = &svcimpl.TermConfigPoolAdapter{Pool: app.multiPool}
-		}
+	// Initialize terminal service layer. The surviving methods are tab
+	// metadata CRUD, terminal UI state, and the WS auth token issuer — all
+	// backed by Redis / in-memory state, no tmux required.
+	{
 		var rc *redis.Client
 		if app.tabMetaStore != nil {
 			rc = app.tabMetaStore.RedisClient()
 		}
 		app.termSvc = terminal.NewTerminalService(
-			app.termMgr, app.termAuth, configPool,
-			app.tabMetaStore, app.hub, app.sessionHistoryStore, rc,
-			config.WorkspaceConfigByIDFn,
+			app.termAuth, app.tabMetaStore, app.hub, rc,
 		)
 	}
 

@@ -52,7 +52,8 @@ func (app *Server) buildTerminalModules() {
 			modbuilder.NewTerminalModules(modbuilder.TerminalModuleDeps{
 				TermSvc:      app.termSvc,
 				AgentSvc:     app.agentSvc,
-				TermMgr:      app.termMgr,
+				PTYMgr:       app.ptyMgr,
+				AgentTmuxMgr: app.agentTmuxMgr,
 				TermAuth:     app.termAuth,
 				CORSOrigins:  app.corsConfig.AllowedOrigins,
 				SelfURL:      fmt.Sprintf("http://localhost:%d", app.actualPort),
@@ -64,7 +65,7 @@ func (app *Server) buildTerminalModules() {
 
 	if app.issueTabStore != nil {
 		app.wsModules = append(app.wsModules,
-			modbuilder.NewIssueTabModule(app.issueTabStore, app.termMgr, app.hub))
+			modbuilder.NewIssueTabModule(app.issueTabStore, app.hub))
 	}
 }
 

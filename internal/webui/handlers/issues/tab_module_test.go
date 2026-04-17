@@ -10,7 +10,7 @@ import (
 var _ Module = (*IssueTabModule)(nil)
 
 func TestIssueTabModule_RegisterRoutes(t *testing.T) {
-	mod := NewIssueTabModule(nil, nil, nil)
+	mod := NewIssueTabModule(nil, nil)
 
 	mux := http.NewServeMux()
 	mod.Register(mux)
@@ -39,7 +39,7 @@ func TestIssueTabModule_RegisterRoutes(t *testing.T) {
 }
 
 func TestIssueTabModule_WrongMethod_Returns405(t *testing.T) {
-	mod := NewIssueTabModule(nil, nil, nil)
+	mod := NewIssueTabModule(nil, nil)
 
 	mux := http.NewServeMux()
 	mod.Register(mux)

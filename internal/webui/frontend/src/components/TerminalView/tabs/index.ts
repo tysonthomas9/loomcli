@@ -28,4 +28,3 @@ export { useTabInit } from "./useTabInit";
 export { useTabOrdering } from "./useTabOrdering";
 export { useWorkspaceTabState } from "./useWorkspaceTabState";
 export { useUnreadTracking } from "./useUnreadTracking";
-export { useSessionManagement } from "./useCloseAllSessions";

@@ -3,7 +3,6 @@
  */
 
 export { TerminalView } from "./TerminalView";
-export type { PendingLeadSession } from "./TerminalView";
 export * from "./controls";
 export * from "./instances";
 export * from "./layout";

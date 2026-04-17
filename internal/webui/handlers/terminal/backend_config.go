@@ -1,4 +1,4 @@
-package misc
+package terminal
 
 import (
 	"context"
@@ -6,60 +6,18 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
-
 	"gopkg.in/yaml.v3"
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
+	webuterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
-
-// shellCommand returns the user's default shell, falling back to /bin/bash.
-func shellCommand() string {
-	if sh := os.Getenv("SHELL"); sh != "" {
-		return sh
-	}
-	return "/bin/bash"
-}
-
-// attachCommandForSession returns the command for a terminal session based on
-// its name. Session names encode the backend: "lead-{backend}-{n}".
-// Returns empty string to use the manager's defaultCommand only if no backend
-// can be extracted from the session name.
-func attachCommandForSession(session string) string {
-	if strings.HasPrefix(session, "lead-shell-") {
-		return shellCommand()
-	}
-	// Extract backend from "lead-{backend}-{n}" pattern.
-	// Session names may have a workspace prefix: "ws--lead-{backend}-{n}".
-	name := session
-	if idx := strings.LastIndex(name, "--lead-"); idx >= 0 {
-		name = name[idx+2:] // strip workspace prefix, keep "lead-..."
-	}
-	if strings.HasPrefix(name, "lead-") {
-		// "lead-codex-1" → "codex"
-		rest := strings.TrimPrefix(name, "lead-")
-		// Strip trailing "-{n}" (the counter)
-		if dashIdx := strings.LastIndex(rest, "-"); dashIdx > 0 {
-			backend := rest[:dashIdx]
-			for _, valid := range validBackends {
-				if backend == valid {
-					return fmt.Sprintf("loom lead --backend %s", backend)
-				}
-			}
-		}
-	}
-	return ""
-}
-
-// validBackends is the list of supported AI backend names.
-var validBackends = []string{"claude", "codex", "opencode", "gemini", "cursor"}
 
 // BackendConfigResponse wraps the backend config data for JSON response.
 type BackendConfigResponse struct {
@@ -72,7 +30,7 @@ type BackendConfigResponse struct {
 type BackendConfigData struct {
 	Backend   string                 `json:"backend"`
 	Source    string                 `json:"source"`
-	Available []string               `json:"available"` // All backends available for tab creation (includes "shell"); PATCH only accepts AI backends (validBackends).
+	Available []string               `json:"available"` // All backends available for tab creation (includes "shell"); PATCH only accepts AI backends (webuterminal.ValidBackends).
 	Agents    []AgentBackendOverride `json:"agents"`
 }
 
@@ -252,7 +210,7 @@ func decodePatchBackendRequest(r *http.Request, w http.ResponseWriter) (string, 
 	}
 	if !isValidBackend(req.Backend) {
 		err := fmt.Errorf("invalid backend %q", req.Backend)
-		handler.WriteJSON(w, http.StatusBadRequest, BackendConfigResponse{Success: false, Error: fmt.Sprintf("invalid backend %q; valid options: %s", req.Backend, strings.Join(validBackends, ", "))})
+		handler.WriteJSON(w, http.StatusBadRequest, BackendConfigResponse{Success: false, Error: fmt.Sprintf("invalid backend %q; valid options: %s", req.Backend, strings.Join(webuterminal.ValidBackends, ", "))})
 		return "", err
 	}
 	return req.Backend, nil
@@ -266,7 +224,7 @@ func buildBackendConfigData(backend, source string, agents []agentEntry) *Backen
 			Worktree: a.Worktree, Role: a.Role, Backend: a.Backend,
 		})
 	}
-	available := append(append([]string(nil), validBackends...), "shell")
+	available := append(append([]string(nil), webuterminal.ValidBackends...), "shell")
 	return &BackendConfigData{
 		Backend: backend, Source: source, Available: available, Agents: overrides,
 	}
@@ -274,7 +232,7 @@ func buildBackendConfigData(backend, source string, agents []agentEntry) *Backen
 
 // isValidBackend checks if the backend name is in the allowed list.
 func isValidBackend(name string) bool {
-	for _, b := range validBackends {
+	for _, b := range webuterminal.ValidBackends {
 		if b == name {
 			return true
 		}

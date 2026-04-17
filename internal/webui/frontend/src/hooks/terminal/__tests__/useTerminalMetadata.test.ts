@@ -147,8 +147,11 @@ describe("useTerminalMetadata", () => {
       });
 
       expect(mockPut).toHaveBeenCalledWith("test-ws", "new-sess", {
+        session_name: "new-sess",
         label: "New Tab",
         sort_order: 0,
+        notes: "",
+        pinned: false,
       });
       expect(result.current.tabs).toHaveLength(1);
       expect(result.current.tabs[0].session_name).toBe("new-sess");

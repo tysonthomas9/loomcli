@@ -35,15 +35,12 @@ interface CreateOptionsOverrides {
   isActive?: boolean;
   tabs?: TabState[];
   activeTabId?: string;
-  isSearchOpen?: boolean;
   isSessionPromptOpen?: boolean;
-  pendingPasteText?: string | null;
   dismissedWelcome?: boolean;
   onCycleTab?: (direction: "forward" | "backward") => void;
   onSwitchTabByIndex?: (index: number) => void;
   onNewTab?: () => void;
   onCloseTab?: () => void;
-  onToggleSearch?: () => void;
   onEscape?: (() => void) | undefined;
   announce?: (msg: string) => void;
 }
@@ -55,15 +52,12 @@ function createOptions(overrides: CreateOptionsOverrides = {}) {
     isActive: overrides.isActive ?? true,
     tabsRef: { current: tabs } as MutableRefObject<TabState[]>,
     activeTabIdRef: { current: activeTabId } as MutableRefObject<string>,
-    isSearchOpen: overrides.isSearchOpen ?? false,
     isSessionPromptOpen: overrides.isSessionPromptOpen ?? false,
-    pendingPasteText: overrides.pendingPasteText ?? null,
     dismissedWelcome: overrides.dismissedWelcome ?? true,
     onCycleTab: overrides.onCycleTab ?? vi.fn(),
     onSwitchTabByIndex: overrides.onSwitchTabByIndex ?? vi.fn(),
     onNewTab: overrides.onNewTab ?? vi.fn(),
     onCloseTab: overrides.onCloseTab ?? vi.fn(),
-    onToggleSearch: overrides.onToggleSearch ?? vi.fn(),
     onEscape: overrides.onEscape ?? vi.fn(),
     announce: overrides.announce ?? vi.fn(),
   };
@@ -260,16 +254,16 @@ describe("useTerminalKeyboardShortcuts", () => {
     });
   });
 
-  describe("Cmd/Ctrl+F: toggle search", () => {
-    it("fires onToggleSearch", () => {
-      const onToggleSearch = vi.fn();
-      renderHook(() =>
-        useTerminalKeyboardShortcuts(createOptions({ onToggleSearch })),
-      );
-
-      fireEvent.keyDown(document, { key: "f", metaKey: true });
-
-      expect(onToggleSearch).toHaveBeenCalledTimes(1);
+  describe("Cmd/Ctrl+F: not intercepted (browser find-in-page)", () => {
+    it("does NOT intercept Cmd+F so the browser's native find-in-page runs", () => {
+      renderHook(() => useTerminalKeyboardShortcuts(createOptions()));
+      const ev = new KeyboardEvent("keydown", {
+        key: "f",
+        metaKey: true,
+        cancelable: true,
+      });
+      document.dispatchEvent(ev);
+      expect(ev.defaultPrevented).toBe(false);
     });
   });
 
@@ -280,9 +274,7 @@ describe("useTerminalKeyboardShortcuts", () => {
         useTerminalKeyboardShortcuts(
           createOptions({
             onEscape,
-            isSearchOpen: false,
             isSessionPromptOpen: false,
-            pendingPasteText: null,
             dismissedWelcome: true,
           }),
         ),
@@ -293,37 +285,11 @@ describe("useTerminalKeyboardShortcuts", () => {
       expect(onEscape).toHaveBeenCalledTimes(1);
     });
 
-    it("does not fire onEscape when isSearchOpen is true", () => {
-      const onEscape = vi.fn();
-      renderHook(() =>
-        useTerminalKeyboardShortcuts(
-          createOptions({ onEscape, isSearchOpen: true }),
-        ),
-      );
-
-      fireEvent.keyDown(document, { key: "Escape" });
-
-      expect(onEscape).not.toHaveBeenCalled();
-    });
-
     it("does not fire onEscape when isSessionPromptOpen is true", () => {
       const onEscape = vi.fn();
       renderHook(() =>
         useTerminalKeyboardShortcuts(
           createOptions({ onEscape, isSessionPromptOpen: true }),
-        ),
-      );
-
-      fireEvent.keyDown(document, { key: "Escape" });
-
-      expect(onEscape).not.toHaveBeenCalled();
-    });
-
-    it("does not fire onEscape when pendingPasteText is not null", () => {
-      const onEscape = vi.fn();
-      renderHook(() =>
-        useTerminalKeyboardShortcuts(
-          createOptions({ onEscape, pendingPasteText: "some text" }),
         ),
       );
 
@@ -362,7 +328,6 @@ describe("useTerminalKeyboardShortcuts", () => {
       const onSwitchTabByIndex = vi.fn();
       const onNewTab = vi.fn();
       const onCloseTab = vi.fn();
-      const onToggleSearch = vi.fn();
       const onEscape = vi.fn();
 
       renderHook(() =>
@@ -373,7 +338,6 @@ describe("useTerminalKeyboardShortcuts", () => {
             onSwitchTabByIndex,
             onNewTab,
             onCloseTab,
-            onToggleSearch,
             onEscape,
           }),
         ),
@@ -383,14 +347,12 @@ describe("useTerminalKeyboardShortcuts", () => {
       fireEvent.keyDown(document, { key: "1", metaKey: true });
       fireEvent.keyDown(document, { key: "t", metaKey: true });
       fireEvent.keyDown(document, { key: "w", metaKey: true });
-      fireEvent.keyDown(document, { key: "f", metaKey: true });
       fireEvent.keyDown(document, { key: "Escape" });
 
       expect(onCycleTab).not.toHaveBeenCalled();
       expect(onSwitchTabByIndex).not.toHaveBeenCalled();
       expect(onNewTab).not.toHaveBeenCalled();
       expect(onCloseTab).not.toHaveBeenCalled();
-      expect(onToggleSearch).not.toHaveBeenCalled();
       expect(onEscape).not.toHaveBeenCalled();
     });
   });

@@ -7,15 +7,12 @@ export interface UseTerminalKeyboardShortcutsOptions {
   isActive: boolean;
   tabsRef: MutableRefObject<TabState[]>;
   activeTabIdRef: MutableRefObject<string>;
-  isSearchOpen: boolean;
   isSessionPromptOpen: boolean;
-  pendingPasteText: string | null;
   dismissedWelcome: boolean;
   onCycleTab: (direction: "forward" | "backward") => void;
   onSwitchTabByIndex: (index: number) => void;
   onNewTab: () => void;
   onCloseTab: () => void;
-  onToggleSearch: () => void;
   onEscape: (() => void) | undefined;
   announce: (msg: string) => void;
 }
@@ -24,19 +21,15 @@ export function useTerminalKeyboardShortcuts({
   isActive,
   tabsRef,
   activeTabIdRef,
-  isSearchOpen,
   isSessionPromptOpen,
-  pendingPasteText,
   dismissedWelcome,
   onCycleTab,
   onSwitchTabByIndex,
   onNewTab,
   onCloseTab,
-  onToggleSearch,
   onEscape,
   announce,
 }: UseTerminalKeyboardShortcutsOptions): void {
-  // Store action callbacks in refs to avoid re-attaching the listener every render
   const onCycleTabRef = useRef(onCycleTab);
   onCycleTabRef.current = onCycleTab;
   const onSwitchTabByIndexRef = useRef(onSwitchTabByIndex);
@@ -45,8 +38,6 @@ export function useTerminalKeyboardShortcuts({
   onNewTabRef.current = onNewTab;
   const onCloseTabRef = useRef(onCloseTab);
   onCloseTabRef.current = onCloseTab;
-  const onToggleSearchRef = useRef(onToggleSearch);
-  onToggleSearchRef.current = onToggleSearch;
   const onEscapeRef = useRef(onEscape);
   onEscapeRef.current = onEscape;
   const announceRef = useRef(announce);
@@ -69,13 +60,7 @@ export function useTerminalKeyboardShortcuts({
       }
 
       // Escape: return to previous view when nothing else to dismiss
-      if (
-        e.key === "Escape" &&
-        !isSearchOpen &&
-        !isSessionPromptOpen &&
-        pendingPasteText === null &&
-        dismissedWelcome
-      ) {
+      if (e.key === "Escape" && !isSessionPromptOpen && dismissedWelcome) {
         e.preventDefault();
         onEscapeRef.current?.();
         return;
@@ -133,19 +118,14 @@ export function useTerminalKeyboardShortcuts({
         return;
       }
 
-      // Cmd+F / Ctrl+F: toggle search
-      if ((e.metaKey || e.ctrlKey) && e.key === "f") {
-        e.preventDefault();
-        onToggleSearchRef.current();
-      }
+      // Cmd+F / Ctrl+F intentionally NOT intercepted — browser's native
+      // find-in-page works against wterm's DOM-rendered cells.
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
   }, [
     isActive,
-    isSearchOpen,
     isSessionPromptOpen,
-    pendingPasteText,
     dismissedWelcome,
     tabsRef,
     activeTabIdRef,
