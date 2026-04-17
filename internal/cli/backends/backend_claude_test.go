@@ -654,6 +654,58 @@ func TestWrapInvocationError(t *testing.T) {
 	}
 }
 
+func TestResolveMaxBudgetUSD_Default(t *testing.T) {
+	// Not parallel: mutates env vars.
+	// Use t.Setenv to register cleanup, then unset so the var is truly absent.
+	t.Setenv("LOOM_MAX_BUDGET_USD", "placeholder")
+	os.Unsetenv("LOOM_MAX_BUDGET_USD")
+
+	got := resolveMaxBudgetUSD()
+	if got != "5.00" {
+		t.Errorf("resolveMaxBudgetUSD() = %q, want %q", got, "5.00")
+	}
+}
+
+func TestResolveMaxBudgetUSD_CustomValue(t *testing.T) {
+	// Not parallel: mutates env vars.
+	t.Setenv("LOOM_MAX_BUDGET_USD", "10.50")
+
+	got := resolveMaxBudgetUSD()
+	if got != "10.50" {
+		t.Errorf("resolveMaxBudgetUSD() = %q, want %q", got, "10.50")
+	}
+}
+
+func TestResolveMaxBudgetUSD_ZeroOptOut(t *testing.T) {
+	// Not parallel: mutates env vars.
+	t.Setenv("LOOM_MAX_BUDGET_USD", "0")
+
+	got := resolveMaxBudgetUSD()
+	if got != "" {
+		t.Errorf("resolveMaxBudgetUSD() = %q, want empty string (opt-out)", got)
+	}
+}
+
+func TestResolveMaxBudgetUSD_Invalid(t *testing.T) {
+	// Not parallel: mutates env vars.
+	t.Setenv("LOOM_MAX_BUDGET_USD", "abc")
+
+	got := resolveMaxBudgetUSD()
+	if got != "5.00" {
+		t.Errorf("resolveMaxBudgetUSD() = %q, want %q (default fallback)", got, "5.00")
+	}
+}
+
+func TestResolveMaxBudgetUSD_Negative(t *testing.T) {
+	// Not parallel: mutates env vars.
+	t.Setenv("LOOM_MAX_BUDGET_USD", "-1")
+
+	got := resolveMaxBudgetUSD()
+	if got != "5.00" {
+		t.Errorf("resolveMaxBudgetUSD() = %q, want %q (default fallback)", got, "5.00")
+	}
+}
+
 func TestScanStreamOutputReturnsTail(t *testing.T) {
 	stdout := strings.NewReader("line-1\nline-2\nline-3\n")
 	var seen []string

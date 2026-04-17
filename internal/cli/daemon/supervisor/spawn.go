@@ -94,6 +94,9 @@ func appendRoleEnv(env []string, ap *AgentProcess) []string {
 	if ap.RoleConfig.ReadOnly {
 		env = append(env, "LOOM_READ_ONLY=1")
 	}
+	if ap.RoleConfig.MaxBudgetUSD != nil {
+		env = append(env, fmt.Sprintf("LOOM_MAX_BUDGET_USD=%.2f", *ap.RoleConfig.MaxBudgetUSD))
+	}
 	return env
 }
 

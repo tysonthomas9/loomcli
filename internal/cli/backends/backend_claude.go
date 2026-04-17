@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -16,6 +17,33 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
+
+// DefaultMaxBudgetUSD is the default per-session budget ceiling for non-interactive
+// Claude invocations. Analysis of 287 sessions shows median session cost well under $2;
+// $5 provides 2.5x headroom to prevent mid-response truncation.
+const DefaultMaxBudgetUSD = 5.0
+
+// resolveMaxBudgetUSD reads LOOM_MAX_BUDGET_USD from the environment and returns the
+// value to pass as --max-budget-usd. Returns "" if the flag should be omitted (opt-out).
+func resolveMaxBudgetUSD() string {
+	raw := os.Getenv("LOOM_MAX_BUDGET_USD")
+	if raw == "" {
+		return fmt.Sprintf("%.2f", DefaultMaxBudgetUSD)
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[warn] invalid LOOM_MAX_BUDGET_USD=%q, using default\n", raw)
+		return fmt.Sprintf("%.2f", DefaultMaxBudgetUSD)
+	}
+	if v < 0 {
+		fmt.Fprintf(os.Stderr, "[warn] negative LOOM_MAX_BUDGET_USD=%q, using default\n", raw)
+		return fmt.Sprintf("%.2f", DefaultMaxBudgetUSD)
+	}
+	if v == 0 {
+		return "" // explicit opt-out
+	}
+	return fmt.Sprintf("%.2f", v)
+}
 
 // ClaudeBackend implements the Backend interface for the Claude CLI.
 type ClaudeBackend struct{}
@@ -73,8 +101,12 @@ func (c *ClaudeBackend) HealthCheck() HealthStatus {
 // of JSON events. The caller is responsible for closing the returned ReadCloser,
 // which also terminates the subprocess.
 func (c *ClaudeBackend) InvokeStreaming(ctx context.Context, workDir, prompt, agentName string) (io.ReadCloser, error) {
-	cmd := exec.Command("claude", "-p", "--verbose", "--output-format", "stream-json",
-		"--dangerously-skip-permissions")
+	args := []string{"-p", "--verbose", "--output-format", "stream-json",
+		"--dangerously-skip-permissions"}
+	if budget := resolveMaxBudgetUSD(); budget != "" {
+		args = append(args, "--max-budget-usd", budget)
+	}
+	cmd := exec.Command("claude", args...) //nolint:gosec // G204: intentional subprocess launch for claude CLI
 	cmd.Dir = workDir
 	cmd.Env = buildClaudeEnv(workDir, agentName)
 
@@ -195,6 +227,7 @@ func buildClaudeEnv(workDir, agentName string) []string {
 
 // buildClaudeNonInteractiveCmd constructs the exec.Cmd for non-interactive Claude invocation.
 // When resumeSessionID is non-empty, the command includes --resume --session-id flags.
+// Appends --max-budget-usd when resolveMaxBudgetUSD returns a non-empty value.
 func buildClaudeNonInteractiveCmd(workDir, agentName, resumeSessionID string) *exec.Cmd {
 	var args []string
 	if resumeSessionID != "" {
@@ -203,6 +236,9 @@ func buildClaudeNonInteractiveCmd(workDir, agentName, resumeSessionID string) *e
 	} else {
 		args = []string{"-p", "--verbose", "--output-format", "stream-json",
 			"--dangerously-skip-permissions"}
+	}
+	if budget := resolveMaxBudgetUSD(); budget != "" {
+		args = append(args, "--max-budget-usd", budget)
 	}
 	cmd := exec.Command("claude", args...) //nolint:gosec // G204: intentional subprocess launch for claude CLI
 	cmd.Dir = workDir
