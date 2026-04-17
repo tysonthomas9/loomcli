@@ -38,13 +38,9 @@ type terminalWSParams struct {
 // on disconnect the PTY and child process stay alive for a grace period so a
 // reconnecting client gets its shell and scrollback back. See PTYManager for
 // the lifecycle details.
-func HandleTerminalWS(manager *webuterminal.PTYManager, auth *realtime.TerminalAuth, allowedOrigins []string, loomServerURL string, workspaceConfigByIDFn func(string) (*ops.WorkspaceData, error), tabMetaStore *tabmeta.Store, hub *realtime.Hub) http.HandlerFunc {
-	var source webuterminal.PTYSource
-	if manager != nil {
-		source = manager
-	}
+func HandleTerminalWS(manager webuterminal.PTYSource, auth *realtime.TerminalAuth, allowedOrigins []string, loomServerURL string, workspaceConfigByIDFn func(string) (*ops.WorkspaceData, error), tabMetaStore *tabmeta.Store, hub *realtime.Hub) http.HandlerFunc {
 	p := &terminalWSParams{
-		manager:               source,
+		manager:               manager,
 		auth:                  auth,
 		patterns:              originHosts(allowedOrigins),
 		loomServerURL:         loomServerURL,
