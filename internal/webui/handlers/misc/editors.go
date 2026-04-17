@@ -159,6 +159,13 @@ func findDetectedEditor(editorID string, detected []editor.DetectedEditor) (*edi
 	return nil, http.StatusNotFound, "unknown editor: " + editorID
 }
 
+// HandleOpenEditorDefault is the production constructor that wires the real
+// editor.LaunchEditor. Callers that inject a custom launcher (tests, alternate
+// deployments) should use HandleOpenEditor directly.
+func HandleOpenEditorDefault(cache *EditorCache) http.HandlerFunc {
+	return HandleOpenEditor(cache, editor.LaunchEditor)
+}
+
 // HandleOpenEditor returns a handler for POST /api/editors/open.
 // It validates the request, looks up the editor, and launches it.
 func HandleOpenEditor(cache *EditorCache, launch editorLaunchFunc) http.HandlerFunc { //nolint:funlen

@@ -1,4 +1,4 @@
-package misc
+package terminal
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	srvhandler "github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	webuterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
@@ -169,9 +170,9 @@ func TestHandlePatchBackendConfig_RequestBodyTooLarge(t *testing.T) {
 	pool := newMockConfigPool(dir)
 	handler := handlePatchBackendConfigWithPool(pool)
 
-	// Create a body larger than maxRequestBody (1MB).
+	// Create a body larger than handler.MaxRequestBody (1MB).
 	// Use valid-looking JSON prefix so the decoder reads enough to hit the limit.
-	largeData := make([]byte, maxRequestBody+1)
+	largeData := make([]byte, srvhandler.MaxRequestBody+1)
 	largeData[0] = '{'
 	largeData[1] = '"'
 	largeData[2] = 'b'

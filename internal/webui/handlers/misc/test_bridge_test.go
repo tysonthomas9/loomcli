@@ -52,7 +52,6 @@ var handleFileTree = HandleFileTree
 var handleFileWrite = HandleFileWrite
 var handleGetAgentLog = HandleGetAgentLog
 var handleGetBackendsHealth = HandleGetBackendsHealth
-var handleGetBackendConfig = HandleGetBackendConfig
 var handleListEditors = HandleListEditors
 var handleOpenEditor = HandleOpenEditor
 var handleGetTaskLog = HandleGetTaskLog
@@ -62,7 +61,6 @@ var handleGetSessionDiff = HandleGetSessionDiff
 var handleGetSessionTranscript = HandleGetSessionTranscript
 var handleListTaskSessions = HandleListTaskSessions
 var handleNotifySessionChange = HandleNotifySessionChange
-var handlePatchBackendConfig = HandlePatchBackendConfig
 var handleWorkerRegister = HandleWorkerRegister
 
 // ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-package misc
+package terminal
 
 import (
 	"context"
@@ -6,18 +6,16 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
-
 	"gopkg.in/yaml.v3"
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	webuterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 

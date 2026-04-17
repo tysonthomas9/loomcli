@@ -275,7 +275,7 @@ linters:
           - gosec
         text: "G302"
       # G304: File inclusion via variable - these are intentional file operations
-      - path: 'internal/(cli/(automode/automode(_tmux)?|lock|agent/agent_cmd|config/(config|project)|daemon/daemon(_cmd|_config|_spawn|_supervisor)?|monitor/monitor|workspace/workspace_cmd)|rpc/auth|webui/(handlers/misc/config|log/(open_unix|streamer)))\.go'
+      - path: 'internal/(cli/(automode/automode(_tmux)?|lock|agent/agent_cmd|config/(config|project)|daemon/daemon(_cmd|_config|_spawn|_supervisor)?|monitor/monitor|workspace/workspace_cmd)|rpc/auth|webui/(handlers/(misc/config|terminal/backend_config)|log/(open_unix|streamer)))\.go'
         linters:
           - gosec
         text: "G304"
