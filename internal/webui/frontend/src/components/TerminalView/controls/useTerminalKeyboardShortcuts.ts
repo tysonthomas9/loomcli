@@ -60,11 +60,7 @@ export function useTerminalKeyboardShortcuts({
       }
 
       // Escape: return to previous view when nothing else to dismiss
-      if (
-        e.key === "Escape" &&
-        !isSessionPromptOpen &&
-        dismissedWelcome
-      ) {
+      if (e.key === "Escape" && !isSessionPromptOpen && dismissedWelcome) {
         e.preventDefault();
         onEscapeRef.current?.();
         return;

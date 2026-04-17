@@ -64,9 +64,9 @@ type AgentTmuxManager struct {
 
 // AgentTmuxConn is one browser-side PTY attached to a running tmux session.
 type AgentTmuxConn struct {
-	ConnID     string
+	ConnID      string
 	SessionName string // raw tmux session name (no prefix rewriting)
-	PTY        *os.File
+	PTY         *os.File
 
 	cmd    *exec.Cmd
 	killCh chan struct{}
@@ -258,6 +258,8 @@ func (m *AgentTmuxManager) FindLatestAgentSession(wsID, agentName string) (strin
 
 // AttachExistingRaw spawns a tmux attach-session child process bound to a new
 // PTY and tracks it under a synthetic connID.
+//
+//nolint:funlen // tmux attach flow is linear setup; splitting hurts readability
 func (m *AgentTmuxManager) AttachExistingRaw(sessionName string, cols, rows uint16) (*AgentTmuxConn, error) {
 	if !validTmuxName.MatchString(sessionName) {
 		return nil, fmt.Errorf("invalid session name %q", sessionName)
@@ -361,6 +363,8 @@ func (m *AgentTmuxManager) Detach(connID string) error {
 // auto-mode prefix "loom-<wsShort>-". Used when a workspace is deleted to
 // stop lingering agent processes. Detached sessions and sessions with
 // in-progress browser attaches are both covered.
+//
+//nolint:funlen // workspace teardown requires enumerating + killing multiple session classes
 func (m *AgentTmuxManager) KillWorkspaceSessions(wsID string) error {
 	if wsID == "" {
 		return fmt.Errorf("wsID must not be empty")

@@ -121,7 +121,9 @@ export async function getTabMetadata(
 export async function patchTabMetadata(
   workspaceId: string,
   session: string,
-  fields: Partial<Pick<TabMetadata, "label" | "notes" | "pinned" | "sort_order" | "issue_id">>,
+  fields: Partial<
+    Pick<TabMetadata, "label" | "notes" | "pinned" | "sort_order" | "issue_id">
+  >,
 ): Promise<TabMetadata> {
   const { data, error, response } = await api.PATCH(
     "/api/workspaces/{ws}/terminal/tabs/{session}",

@@ -30,7 +30,7 @@ const defaultPTYMaxSessions = 20
 
 // termEnv is the TERM environment value injected for every PTY-backed
 // child process (both fresh shells via PTYManager and tmux attaches via
-// AgentTmuxManager). tmux 3.6+ refuses to start without a recognised TERM,
+// AgentTmuxManager). tmux 3.6+ refuses to start without a recognized TERM,
 // and xterm-256color gives child shells color support by default.
 const termEnv = "TERM=xterm-256color"
 

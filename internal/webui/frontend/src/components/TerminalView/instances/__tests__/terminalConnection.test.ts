@@ -447,7 +447,9 @@ describe("connectWebSocket", () => {
         m.setConnectionState,
         m.onConnected,
         m.onDisconnected,
-        undefined, undefined, "agent-fox",
+        undefined,
+        undefined,
+        "agent-fox",
       );
 
       // Should call getAgentTerminalToken, not the regular get()
@@ -468,7 +470,9 @@ describe("connectWebSocket", () => {
         m.setConnectionState,
         m.onConnected,
         m.onDisconnected,
-        undefined, undefined, "agent-fox",
+        undefined,
+        undefined,
+        "agent-fox",
       );
 
       agentMocks.resolveAgentToken!("agent-tok-123");
@@ -498,7 +502,9 @@ describe("connectWebSocket", () => {
         m.setConnectionState,
         m.onConnected,
         m.onDisconnected,
-        m.onOutput, undefined, "agent-fox",
+        m.onOutput,
+        undefined,
+        "agent-fox",
       );
 
       expect(m.setConnectionState).toHaveBeenCalledWith("connecting");
@@ -534,7 +540,9 @@ describe("connectWebSocket", () => {
         m.setConnectionState,
         undefined,
         m.onDisconnected,
-        undefined, undefined, "agent-fox",
+        undefined,
+        undefined,
+        "agent-fox",
       );
 
       // Reject the agent token — the .catch(() => null) converts to null

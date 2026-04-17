@@ -90,14 +90,7 @@ export function useTabActions({
       // PTY — there's no separate server-side "kill session" RPC anymore.
       handle?.disconnect?.().catch(() => {});
     },
-    [
-      deleteTab,
-      tabs,
-      setTabs,
-      setActiveTabId,
-      activeTabIdRef,
-      instanceRefs,
-    ],
+    [deleteTab, tabs, setTabs, setActiveTabId, activeTabIdRef, instanceRefs],
   );
 
   const handleDuplicateTab = useCallback(

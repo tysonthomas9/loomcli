@@ -142,7 +142,7 @@ func WSToPTY(ctx context.Context, conn *websocket.Conn, pty io.Writer, resizer R
 					cols, _ := strconv.Atoi(m[1])
 					rows, _ := strconv.Atoi(m[2])
 					if cols > 0 && rows > 0 && cols <= MaxTerminalCols && rows <= MaxTerminalRows {
-						if err := resizer.Resize(connID, uint16(cols), uint16(rows)); err != nil {
+						if err := resizer.Resize(connID, uint16(cols), uint16(rows)); err != nil { //nolint:gosec // bounds checked above
 							slog.Error("failed to resize terminal session", "conn_id", connID, "err", err)
 						}
 					}

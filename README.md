@@ -42,7 +42,34 @@ loom task falcon              # Implementation agent builds it
 loom serve                                              # http://localhost:8080
 loom serve --auth-url https://auth.example.com          # Enable JWT auth
 loom serve --bind 0.0.0.0                               # All interfaces
+loom serve --fleet-mode                                 # Enable fleet coordination (requires real Redis for multi-node)
 ```
+
+### Terminal state persistence
+
+`loom serve` persists terminal tab labels, pinning, ordering, notes, and
+per-issue tab layouts so they survive restarts.
+
+- **Default** (no `--redis-addr`): state lives in an in-process miniredis
+  and is dumped to `~/.loom/terminal-state/snapshot.json` every 30s and
+  on shutdown. No external dependency.
+- **With `--redis-addr=<host:port>`**: state lives in the external Redis
+  (shared across multiple `loom serve` instances).
+
+### Fleet coordination (`--fleet-mode`)
+
+Fleet mode enables multi-server task coordination (cross-node task
+claims, shared JWT signing keys, stale server detection, fleet worker
+API routes). It is off by default; most users never need it.
+
+| `--fleet-mode` | `--redis-addr` | Behavior |
+|---|---|---|
+| off (default) | empty | Local in-process miniredis. Terminal state works. No fleet. |
+| off | set | External Redis for terminal state. No fleet. |
+| on | empty | Local miniredis; single-node fleet (useful for testing). |
+| on | set | External Redis; full multi-node fleet. |
+
+The `LOOM_FLEET_MODE=true` env var is equivalent to `--fleet-mode`.
 
 **Views:**
 - **Kanban** — drag-and-drop swim-lane board grouped by status, priority, or type

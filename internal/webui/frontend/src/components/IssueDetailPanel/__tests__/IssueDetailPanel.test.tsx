@@ -1315,7 +1315,6 @@ describe("IssueDetailPanel", () => {
       expect(mockDeleteTabMetadata).not.toHaveBeenCalled();
     });
 
-
     it("cleans up multiple terminal tabs on issue change", async () => {
       const multiTerminalPersisted = {
         ...TERMINAL_TABS_PERSISTED,
@@ -1443,6 +1442,5 @@ describe("IssueDetailPanel", () => {
       expect(screen.getByRole("tab", { name: "Details" })).toBeInTheDocument();
       expect(screen.getByRole("tab", { name: "Sessions" })).toBeInTheDocument();
     });
-
   });
 });

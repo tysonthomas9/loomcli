@@ -409,7 +409,6 @@ function App() {
   // Create workspace modal state
   const [showCreateWorkspace, setShowCreateWorkspace] = useState(false);
 
-
   // Track mount state for async operations (must set true in setup for StrictMode compatibility)
   useEffect(() => {
     mountedRef.current = true;

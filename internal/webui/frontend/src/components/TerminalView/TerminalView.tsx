@@ -11,10 +11,7 @@ import {
   NoBackendsEmptyState,
   useSplitView,
 } from "./layout";
-import {
-  HelpPopover,
-  useTerminalKeyboardShortcuts,
-} from "./controls";
+import { HelpPopover, useTerminalKeyboardShortcuts } from "./controls";
 import {
   TerminalPane,
   TerminalPaneArea,

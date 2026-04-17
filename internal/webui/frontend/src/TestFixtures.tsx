@@ -504,4 +504,3 @@ export function SplitDetailSummaryFixture(): JSX.Element {
     </WorkspaceContext.Provider>
   );
 }
-
