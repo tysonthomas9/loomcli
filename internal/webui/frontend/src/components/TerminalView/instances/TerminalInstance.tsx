@@ -111,8 +111,6 @@ export const TerminalInstance = forwardRef<
   );
   const beingKilledRef = useRef(false);
   const hasConnectedRef = useRef(false);
-  const sizeRef = useRef<{ cols: number; rows: number }>({ cols: 80, rows: 24 });
-
   const [connectionState, setConnectionState] =
     useState<ConnectionState>("disconnected");
 
@@ -201,25 +199,18 @@ export const TerminalInstance = forwardRef<
         (data) => write(data),
         wsRef,
         setConnectionState,
-        // onConnected
+        // onConnected — wterm's autoResize will fire onResize with the true
+        // container size, which sends the first encodeResize. Don't preempt
+        // with a stale 80×24 seed.
         () => {
           clearReconnectTimers();
           onReconnectStateChangeRef.current?.(null);
-          // Send initial size — subsequent resizes flow through onResize below.
-          const ws = wsRef.current;
-          if (ws?.readyState === WebSocket.OPEN) {
-            const { cols, rows } = sizeRef.current;
-            ws.send(encodeResize(cols, rows));
-          }
           opts?.onOutcome?.(true);
         },
         // onDisconnected — schedule a reconnect unless we're being killed.
         () => {
-          if (beingKilledRef.current) {
-            opts?.onOutcome?.(false);
-            return;
-          }
           opts?.onOutcome?.(false);
+          if (beingKilledRef.current) return;
           // Only start a fresh reconnect loop if none is running. If one is
           // already running, startAutoReconnect's own backoff handles the
           // retry — we just wait for the next attempt.
@@ -267,9 +258,12 @@ export const TerminalInstance = forwardRef<
     };
   }, [sessionName, clearReconnectTimers]);
 
+  // handleReady and the reconnect imperative method both read the latest
+  // doConnect via doConnectRef so neither hands the wterm <Terminal> a new
+  // onReady identity on every render.
   const handleReady = useCallback(() => {
-    doConnect();
-  }, [doConnect]);
+    doConnectRef.current?.();
+  }, []);
 
   const handleData = useCallback((data: string) => {
     const ws = wsRef.current;
@@ -279,7 +273,6 @@ export const TerminalInstance = forwardRef<
   }, []);
 
   const handleResize = useCallback((cols: number, rows: number) => {
-    sizeRef.current = { cols, rows };
     const ws = wsRef.current;
     if (ws?.readyState === WebSocket.OPEN) {
       ws.send(encodeResize(cols, rows));
@@ -327,7 +320,7 @@ export const TerminalInstance = forwardRef<
         beingKilledRef.current = false;
         clearReconnectTimers();
         onReconnectStateChangeRef.current?.(null);
-        doConnect();
+        doConnectRef.current?.();
       },
       focus: () => {
         focus();
@@ -340,7 +333,7 @@ export const TerminalInstance = forwardRef<
         }
       },
     }),
-    [doConnect, focus, clearReconnectTimers],
+    [focus, clearReconnectTimers],
   );
 
   return (

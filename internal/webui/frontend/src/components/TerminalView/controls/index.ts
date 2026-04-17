@@ -10,8 +10,6 @@
 export { HelpPopover } from "./HelpPopover";
 export { NotesBar } from "./NotesBar";
 export type { NotesBarProps } from "./NotesBar";
-export { TerminalContextMenu } from "./TerminalContextMenu";
-export type { TerminalContextMenuProps } from "./TerminalContextMenu";
 
 export { useTerminalKeyboardShortcuts } from "./useTerminalKeyboardShortcuts";
 export type { UseTerminalKeyboardShortcutsOptions } from "./useTerminalKeyboardShortcuts";

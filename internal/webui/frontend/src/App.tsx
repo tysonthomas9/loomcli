@@ -1028,7 +1028,6 @@ function App() {
                   }
                 }}
                 onNavigateToSettings={() => navigateToView("settings")}
-                {...(selectedIssueId != null && { issueId: selectedIssueId })}
               />
             </Suspense>
           </div>

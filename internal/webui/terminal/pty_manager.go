@@ -28,6 +28,12 @@ var ErrPTYMaxSessionsReached = errors.New("maximum terminal sessions reached")
 
 const defaultPTYMaxSessions = 20
 
+// termEnv is the TERM environment value injected for every PTY-backed
+// child process (both fresh shells via PTYManager and tmux attaches via
+// AgentTmuxManager). tmux 3.6+ refuses to start without a recognised TERM,
+// and xterm-256color gives child shells color support by default.
+const termEnv = "TERM=xterm-256color"
+
 // PTYManager is the connection-scoped PTY lifecycle owner used by the web
 // terminal WebSocket handler. A single instance is shared across all
 // connections; the per-connection state lives in PTYConn.
@@ -84,7 +90,7 @@ func NewPTYManager(command string, maxSessions int) *PTYManager {
 		cwd = "/"
 	}
 
-	env := append(os.Environ(), "TERM=xterm-256color")
+	env := append(os.Environ(), termEnv)
 
 	return &PTYManager{
 		conns: make(map[string]*PTYConn),

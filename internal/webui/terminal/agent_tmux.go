@@ -269,6 +269,13 @@ func (m *AgentTmuxManager) AttachExistingRaw(sessionName string, cols, rows uint
 		rows = 24
 	}
 
+	// HasSession shells out to tmux — check before the lock + connID allocation
+	// so rejected attach attempts don't inflate the monotonic counter and a
+	// concurrent Shutdown isn't blocked on the tmux exec.
+	if !m.HasSession(sessionName) {
+		return nil, fmt.Errorf("tmux session %q not found", sessionName)
+	}
+
 	m.mu.Lock()
 	if len(m.conns) >= m.max {
 		m.mu.Unlock()
@@ -276,10 +283,6 @@ func (m *AgentTmuxManager) AttachExistingRaw(sessionName string, cols, rows uint
 	}
 	connID := fmt.Sprintf("agent-%s-%d", sessionName, m.counter.Add(1))
 	m.mu.Unlock()
-
-	if !m.HasSession(sessionName) {
-		return nil, fmt.Errorf("tmux session %q not found", sessionName)
-	}
 
 	// Mouse-mode keeps wheel/input behavior consistent with how auto-mode
 	// would see its own sessions. Best-effort — log on failure.
@@ -289,8 +292,7 @@ func (m *AgentTmuxManager) AttachExistingRaw(sessionName string, cols, rows uint
 	}
 
 	cmd := m.tmuxCmd("attach-session", "-t", sessionName)
-	// tmux 3.6+ refuses to start without a TERM it recognises.
-	cmd.Env = append(cmd.Env, "TERM=xterm-256color")
+	cmd.Env = append(cmd.Env, termEnv)
 
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
@@ -396,19 +398,33 @@ func (m *AgentTmuxManager) KillWorkspaceSessions(wsID string) error {
 		}
 	}
 	m.mu.Unlock()
+	// Close attaches in parallel — each Close shells out to wait for the
+	// tmux-attach child process.
+	var closeWg sync.WaitGroup
 	for _, c := range toCloseConns {
-		close(c.killCh)
-		if err := c.Close(); err != nil {
-			slog.Warn("error closing agent tmux attach", "session", c.SessionName, "err", err)
-		}
+		closeWg.Add(1)
+		go func(c *AgentTmuxConn) {
+			defer closeWg.Done()
+			close(c.killCh)
+			if err := c.Close(); err != nil {
+				slog.Warn("error closing agent tmux attach", "session", c.SessionName, "err", err)
+			}
+		}(c)
 	}
+	closeWg.Wait()
 
-	// Kill each tmux session. Ignore per-session errors — best effort.
+	// Kill each tmux session in parallel (each one forks a tmux client).
+	var killWg sync.WaitGroup
 	for name := range toKill {
-		if err := m.tmuxCmd("kill-session", "-t", name).Run(); err != nil {
-			slog.Warn("error killing tmux session", "session", name, "err", err)
-		}
+		killWg.Add(1)
+		go func(name string) {
+			defer killWg.Done()
+			if err := m.tmuxCmd("kill-session", "-t", name).Run(); err != nil {
+				slog.Warn("error killing tmux session", "session", name, "err", err)
+			}
+		}(name)
 	}
+	killWg.Wait()
 	return nil
 }
 

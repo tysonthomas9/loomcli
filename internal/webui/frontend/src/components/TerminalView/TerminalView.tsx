@@ -43,8 +43,6 @@ interface TerminalViewProps {
   onActiveSessionCountChange?: (count: number) => void;
   onUnreadChange?: (hasAnyUnread: boolean) => void;
   onEscape?: () => void;
-  /** Reserved for future issue-scoped tabs. Currently ignored. */
-  issueId?: string;
   onNavigateToSettings?: () => void;
   /** When set, opens or focuses an agent's terminal tab. */
   pendingAgentName?: string | undefined;
@@ -59,7 +57,6 @@ export function TerminalView({
   onActiveSessionCountChange,
   onUnreadChange,
   onEscape,
-  issueId: _issueId,
   onNavigateToSettings,
   pendingAgentName,
   onAgentNameConsumed,
