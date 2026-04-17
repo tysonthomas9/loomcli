@@ -2,28 +2,39 @@
  * TerminalInstance component styles.
  * wterm-backed terminal pane filling its parent container.
  *
- * Theming flows through CSS custom properties: wterm reads `--term-*`
- * vars; we map them onto loom's existing `--terminal-*` palette so the
- * light/dark switcher in variables.css drives the terminal colors with
- * zero JavaScript.
+ * Layout comes from the flex chain:
+ *   .terminalsContainer (flex column, min-height:0)
+ *     → .terminalPane (display:flex, height:100%)
+ *       → .wrapper (flex:1, min-height:0)
+ *         → .container / .wterm (height:100%)
+ *
+ * wterm adds its own `.wterm` class on mount and toggles `.has-scrollback`
+ * when scrollback accumulates; wterm's base CSS flips `overflow-y: auto`
+ * at that point. We intentionally do NOT set overflow on the .wterm
+ * element here — wterm's own base CSS already handles it based on
+ * scrollback presence.
  */
 
-/* wterm renders its entire scrollback ring buffer inline in the DOM (so
- * browser-native find + selection work). The wrapper must be a bounded
- * flex container with overflow:hidden so the Terminal element can size
- * itself to the visible pane and scroll its own contents, not push the
- * whole page down. */
 .wrapper {
   flex: 1;
   min-height: 0;
   position: relative;
-  display: flex;
-  overflow: hidden;
 }
 
 .container {
-  flex: 1;
-  min-height: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* Override wterm's opinionated chrome and map its theme vars onto loom's
+ * --terminal-* tokens so the terminal follows :root / [data-theme="light"]
+ * automatically. */
+.container:global(.wterm) {
+  padding: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--terminal-bg);
+  color: var(--terminal-fg);
 
   --term-bg: var(--terminal-bg);
   --term-fg: var(--terminal-fg);
@@ -32,4 +43,25 @@
   --term-font-family: var(--font-family-mono);
   --term-font-size: 14px;
   --term-line-height: 1.2;
+}
+
+.container:global(.wterm) ::selection {
+  background: var(--terminal-selection);
+}
+
+.container:global(.wterm)::-webkit-scrollbar {
+  width: 8px;
+}
+
+.container:global(.wterm)::-webkit-scrollbar-track {
+  background: var(--terminal-bg);
+}
+
+.container:global(.wterm)::-webkit-scrollbar-thumb {
+  background: var(--terminal-scrollbar-thumb);
+  border-radius: 4px;
+}
+
+.container:global(.wterm)::-webkit-scrollbar-thumb:hover {
+  background: var(--terminal-scrollbar-thumb-hover);
 }
