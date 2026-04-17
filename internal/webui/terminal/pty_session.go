@@ -23,39 +23,23 @@ var screenResetSeq = []byte("\x1b[2J\x1b[H")
 // the ground truth.
 const attachBufferSize = 64
 
-// Attachment is the handle returned to the WebSocket handler. The handler
-// reads output frames from Output() and writes input to WriteInput(). Calling
-// manager.Detach(connID) releases the attachment.
-type Attachment struct {
+// localAttachment is the in-process Attachment implementation. It wraps the
+// session's PTY fd directly. An Attachment interface exists in source.go so
+// a future gRPC-backed implementation can plug into the WS handler unchanged.
+type localAttachment struct {
 	connID     string
 	pty        *os.File
 	output     chan []byte
 	scrollback []byte
 }
 
-// ConnID returns the opaque per-attach identifier used by the resize path.
-func (a *Attachment) ConnID() string { return a.connID }
-
-// Output returns the channel from which the WS handler reads live output.
-// Closed when the attachment is released.
-func (a *Attachment) Output() <-chan []byte { return a.output }
-
-// WriteInput sends user input bytes to the underlying PTY. Thread-safe w.r.t.
-// the drain goroutine because read and write ends of a PTY are independent.
-func (a *Attachment) WriteInput(p []byte) (int, error) { return a.pty.Write(p) }
-
-// Scrollback returns the reset-sequence + ring contents the handler should
-// emit before live output. nil on the first attach to a brand-new session.
-func (a *Attachment) Scrollback() []byte { return a.scrollback }
-
-// Resize satisfies realtime.Resizer so the WS handler can pass the
-// Attachment directly to WSToPTY; no per-session lookup table needed.
-// The connID argument is ignored because an attachment already knows its PTY.
-func (a *Attachment) Resize(_ string, cols, rows uint16) error {
+func (a *localAttachment) ConnID() string                             { return a.connID }
+func (a *localAttachment) Output() <-chan []byte                      { return a.output }
+func (a *localAttachment) WriteInput(p []byte) (int, error)           { return a.pty.Write(p) }
+func (a *localAttachment) Scrollback() []byte                         { return a.scrollback }
+func (a *localAttachment) Resize(_ string, cols, rows uint16) error {
 	return pty.Setsize(a.pty, &pty.Winsize{Cols: cols, Rows: rows})
 }
-
-var _ realtime.Resizer = (*Attachment)(nil)
 
 // ptySession owns the PTY fd, child process, scrollback ring, and current
 // attachment for one (workspace, session) pair.
@@ -131,10 +115,10 @@ func (s *ptySession) drain(m *PTYManager) {
 	}
 }
 
-// attachNew replaces any existing attachment with a fresh one. Returns an
-// Attachment preloaded with the replay bytes (reset escape + current
+// attachNew replaces any existing attachment with a fresh one. Returns a
+// localAttachment preloaded with the replay bytes (reset escape + current
 // scrollback) if this is a reattach.
-func (s *ptySession) attachNew(connID string) *Attachment {
+func (s *ptySession) attachNew(connID string) *localAttachment {
 	ch := make(chan []byte, attachBufferSize)
 	st := &attachmentState{connID: connID, ch: ch}
 
@@ -154,7 +138,7 @@ func (s *ptySession) attachNew(connID string) *Attachment {
 		replay = append(replay, body...)
 	}
 
-	return &Attachment{connID: connID, pty: s.pty, output: ch, scrollback: replay}
+	return &localAttachment{connID: connID, pty: s.pty, output: ch, scrollback: replay}
 }
 
 // detach releases the attachment identified by connID and reports whether

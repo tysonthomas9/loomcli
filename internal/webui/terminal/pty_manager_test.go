@@ -20,7 +20,7 @@ func newTestManager(t *testing.T) *PTYManager {
 
 // readChunk drains up to 500 ms of output from an attachment, returning the
 // accumulated bytes. Used to synchronize with the PTY echo.
-func readChunk(t *testing.T, att *Attachment, deadline time.Duration) []byte {
+func readChunk(t *testing.T, att Attachment, deadline time.Duration) []byte {
 	t.Helper()
 	out := make([]byte, 0, 256)
 	timeout := time.After(deadline)
@@ -196,7 +196,7 @@ func TestSessionCountIncludesDetachedUpToMax(t *testing.T) {
 
 	type attached struct {
 		key SessionKey
-		att *Attachment
+		att Attachment
 	}
 	var all []attached
 	for i := 0; i < m.MaxSessions(); i++ {

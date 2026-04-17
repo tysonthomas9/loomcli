@@ -153,7 +153,7 @@ func (m *PTYManager) SetIdleTimeout(d time.Duration) {
 // reattached is true when the returned attachment is to a session that
 // existed before this call (typical for page refresh or network blip).
 // Callers should check Attachment.Scrollback() for replay bytes.
-func (m *PTYManager) AttachSession(key SessionKey, cols, rows uint16, argv []string) (att *Attachment, reattached bool, err error) {
+func (m *PTYManager) AttachSession(key SessionKey, cols, rows uint16, argv []string) (att Attachment, reattached bool, err error) {
 	if cols == 0 {
 		cols = 80
 	}

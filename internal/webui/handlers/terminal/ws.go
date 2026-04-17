@@ -19,7 +19,7 @@ import (
 
 // terminalWSParams holds the dependencies for a terminal WebSocket handler.
 type terminalWSParams struct {
-	manager               *webuterminal.PTYManager
+	manager               webuterminal.PTYSource
 	auth                  *realtime.TerminalAuth
 	patterns              []string
 	loomServerURL         string
@@ -39,8 +39,12 @@ type terminalWSParams struct {
 // reconnecting client gets its shell and scrollback back. See PTYManager for
 // the lifecycle details.
 func HandleTerminalWS(manager *webuterminal.PTYManager, auth *realtime.TerminalAuth, allowedOrigins []string, loomServerURL string, workspaceConfigByIDFn func(string) (*ops.WorkspaceData, error), tabMetaStore *tabmeta.Store, hub *realtime.Hub) http.HandlerFunc {
+	var source webuterminal.PTYSource
+	if manager != nil {
+		source = manager
+	}
 	p := &terminalWSParams{
-		manager:               manager,
+		manager:               source,
 		auth:                  auth,
 		patterns:              originHosts(allowedOrigins),
 		loomServerURL:         loomServerURL,
@@ -72,7 +76,7 @@ func HandleTerminalWS(manager *webuterminal.PTYManager, auth *realtime.TerminalA
 
 // validateTerminalWSRequest validates the session parameter, auth token, and
 // session limit. Returns (session, workspace, true) on success.
-func validateTerminalWSRequest(w http.ResponseWriter, r *http.Request, manager *webuterminal.PTYManager, auth *realtime.TerminalAuth) (string, string, bool) {
+func validateTerminalWSRequest(w http.ResponseWriter, r *http.Request, manager webuterminal.PTYSource, auth *realtime.TerminalAuth) (string, string, bool) {
 	if manager == nil {
 		handler.WriteJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
 			"success": false, "error": "terminal manager not initialized",
@@ -208,14 +212,14 @@ func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalW
 	return (<-crashCh).WSClose()
 }
 
-// attachmentWriter adapts *Attachment to realtime.WSToPTY's io.Writer input.
-type attachmentWriter struct{ a *webuterminal.Attachment }
+// attachmentWriter adapts Attachment to realtime.WSToPTY's io.Writer input.
+type attachmentWriter struct{ a webuterminal.Attachment }
 
 func (w attachmentWriter) Write(p []byte) (int, error) { return w.a.WriteInput(p) }
 
 // injectTerminalContextBanner fetches project context from the loom server
 // and writes a formatted banner to the newly attached session.
-func injectTerminalContextBanner(att *webuterminal.Attachment, loomServerURL string, workspaceConfigFn func() (*ops.WorkspaceData, error)) {
+func injectTerminalContextBanner(att webuterminal.Attachment, loomServerURL string, workspaceConfigFn func() (*ops.WorkspaceData, error)) {
 	tc, err := webuterminal.FetchTerminalContext(loomServerURL)
 	if err != nil {
 		slog.Error("terminal context fetch failed, skipping banner", "err", err)
