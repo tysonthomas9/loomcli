@@ -37,6 +37,30 @@ func readChunk(t *testing.T, att Attachment, deadline time.Duration) []byte {
 	}
 }
 
+// readChunkContains reads from the attachment until the accumulated bytes
+// contain `needle`, or the deadline elapses. Unlike readChunk (which drains
+// a fixed window), this is synchronization-by-content so multi-attach tests
+// don't race on drain-chunk boundaries.
+func readChunkContains(t *testing.T, att Attachment, needle []byte, deadline time.Duration) bool {
+	t.Helper()
+	out := make([]byte, 0, 256)
+	timeout := time.After(deadline)
+	for {
+		select {
+		case chunk, ok := <-att.Output():
+			if !ok {
+				return bytes.Contains(out, needle)
+			}
+			out = append(out, chunk...)
+			if bytes.Contains(out, needle) {
+				return true
+			}
+		case <-timeout:
+			return bytes.Contains(out, needle)
+		}
+	}
+}
+
 func waitUntil(t *testing.T, cond func() bool, deadline time.Duration, msg string) {
 	t.Helper()
 	start := time.Now()
@@ -224,7 +248,11 @@ func TestSessionCountIncludesDetachedUpToMax(t *testing.T) {
 	}
 }
 
-func TestSecondAttachReplacesFirstAndReceivesScrollback(t *testing.T) {
+// TestSecondAttachCoexistsAndReceivesScrollback verifies the multi-client
+// contract: a second AttachSession for the same key joins the existing
+// session (does NOT kick the first), and its replay includes output the
+// first client has already seen.
+func TestSecondAttachCoexistsAndReceivesScrollback(t *testing.T) {
 	m := newTestManager(t)
 	m.SetGracePeriod(5 * time.Second)
 	key := SessionKey{Workspace: "ws1", Name: "lead-shell-1"}
@@ -237,31 +265,146 @@ func TestSecondAttachReplacesFirstAndReceivesScrollback(t *testing.T) {
 	if _, err := att1.WriteInput([]byte("marker-abc\n")); err != nil {
 		t.Fatalf("WriteInput: %v", err)
 	}
-	readChunk(t, att1, 500*time.Millisecond) // drain
+	readChunk(t, att1, 500*time.Millisecond) // ensure drain observed the echo
 
-	// Second attach without an intervening Detach should kick out the first.
 	att2, reattach, err := m.AttachSession(key, 80, 24, nil)
 	if err != nil {
 		t.Fatalf("second attach: %v", err)
 	}
 	if !reattach {
-		t.Errorf("reattach=false after second Attach")
+		t.Errorf("reattach=false; want true for second concurrent attach")
 	}
 	if !bytes.Contains(att2.Scrollback(), []byte("marker-abc")) {
 		t.Errorf("second attach replay missing marker; got %q", string(att2.Scrollback()))
 	}
 
-	// First attachment's channel should be closed.
-	waitUntil(t, func() bool {
-		select {
-		case _, ok := <-att1.Output():
-			return !ok
-		default:
-			return false
+	// First attachment must stay open; check that a round-trip input→output
+	// after the second attach reaches BOTH clients' channels.
+	if _, err := att1.WriteInput([]byte("post-second\n")); err != nil {
+		t.Fatalf("WriteInput post-second: %v", err)
+	}
+	got1 := readChunkContains(t, att1, []byte("post-second"), time.Second)
+	got2 := readChunkContains(t, att2, []byte("post-second"), time.Second)
+	if !got1 {
+		t.Errorf("first attachment did not receive post-second output")
+	}
+	if !got2 {
+		t.Errorf("second attachment did not receive post-second output")
+	}
+
+	m.Detach(key, att1.ConnID())
+	m.Detach(key, att2.ConnID())
+}
+
+// TestMultiAttach_DetachToZeroArmsKillTimer verifies the grace-period
+// invariant for multi-client: detaching one of N clients does NOT arm the
+// kill timer; only the last detach does.
+func TestMultiAttach_DetachToZeroArmsKillTimer(t *testing.T) {
+	m := newTestManager(t)
+	m.SetGracePeriod(100 * time.Millisecond)
+	key := SessionKey{Workspace: "ws1", Name: "multi"}
+
+	att1, _, err := m.AttachSession(key, 80, 24, []string{"-c", "cat"})
+	if err != nil {
+		t.Fatalf("first attach: %v", err)
+	}
+	att2, _, err := m.AttachSession(key, 80, 24, nil)
+	if err != nil {
+		t.Fatalf("second attach: %v", err)
+	}
+
+	m.Detach(key, att1.ConnID())
+	// One client still attached — session must NOT be reaped.
+	time.Sleep(250 * time.Millisecond)
+	if m.SessionCount() != 1 {
+		t.Fatalf("session killed while one client still attached; SessionCount=%d", m.SessionCount())
+	}
+
+	// Last detach — grace timer arms and fires within the grace window.
+	m.Detach(key, att2.ConnID())
+	waitUntil(t, func() bool { return m.SessionCount() == 0 }, 2*time.Second,
+		"session to be reaped after last client detaches")
+}
+
+// TestMultiAttach_SlowClientDoesNotStallFast exercises the slow-client
+// policy: a client whose output channel has backed up must not block the
+// drain goroutine or starve other attached clients. Drain fan-out happens
+// outside the attach mutex and uses non-blocking sends, so a full channel
+// on one attachment just drops frames for that attachment.
+func TestMultiAttach_SlowClientDoesNotStallFast(t *testing.T) {
+	m := newTestManager(t)
+	m.SetGracePeriod(5 * time.Second)
+	key := SessionKey{Workspace: "ws1", Name: "slow"}
+
+	slow, _, err := m.AttachSession(key, 80, 24, []string{"-c", "cat"})
+	if err != nil {
+		t.Fatalf("slow attach: %v", err)
+	}
+	fast, _, err := m.AttachSession(key, 80, 24, nil)
+	if err != nil {
+		t.Fatalf("fast attach: %v", err)
+	}
+
+	// Never read from `slow` — its channel will saturate at attachBufferSize.
+	// Pump enough input to overflow it several times over.
+	for i := 0; i < attachBufferSize*3; i++ {
+		if _, err := fast.WriteInput([]byte("x\n")); err != nil {
+			t.Fatalf("WriteInput: %v", err)
 		}
-	}, time.Second, "first attachment channel to close after replacement")
+	}
+
+	// Fast client must still receive output within the deadline — if the
+	// drain goroutine were blocked on the slow channel this would time out.
+	if !readChunkContains(t, fast, []byte("x"), 2*time.Second) {
+		t.Fatalf("fast client did not receive output (drain may be blocked by slow client)")
+	}
+
+	// Slow client is still attached — not kicked.
+	if m.SessionCount() != 1 {
+		t.Errorf("expected session still live; SessionCount=%d", m.SessionCount())
+	}
+
+	m.Detach(key, slow.ConnID())
+	m.Detach(key, fast.ConnID())
+}
+
+// TestMultiAttach_AttachmentCount verifies the count exposed on PTYSource
+// tracks the map size through attach / detach / Kill.
+func TestMultiAttach_AttachmentCount(t *testing.T) {
+	m := newTestManager(t)
+	m.SetGracePeriod(5 * time.Second)
+	key := SessionKey{Workspace: "ws1", Name: "count"}
+
+	if got := m.AttachmentCount(key); got != 0 {
+		t.Errorf("initial AttachmentCount=%d; want 0", got)
+	}
+
+	att1, _, err := m.AttachSession(key, 80, 24, []string{"-c", "cat"})
+	if err != nil {
+		t.Fatalf("attach1: %v", err)
+	}
+	if got := m.AttachmentCount(key); got != 1 {
+		t.Errorf("after att1 AttachmentCount=%d; want 1", got)
+	}
+
+	att2, _, err := m.AttachSession(key, 80, 24, nil)
+	if err != nil {
+		t.Fatalf("attach2: %v", err)
+	}
+	if got := m.AttachmentCount(key); got != 2 {
+		t.Errorf("after att2 AttachmentCount=%d; want 2", got)
+	}
+
+	m.Detach(key, att1.ConnID())
+	if got := m.AttachmentCount(key); got != 1 {
+		t.Errorf("after detach1 AttachmentCount=%d; want 1", got)
+	}
 
 	m.Detach(key, att2.ConnID())
+	// Session still alive in the grace window but with zero attachments.
+	if got := m.AttachmentCount(key); got != 0 {
+		t.Errorf("after detach2 AttachmentCount=%d; want 0", got)
+	}
 }
 
 func TestChildExitRemovesSession(t *testing.T) {
@@ -276,4 +419,3 @@ func TestChildExitRemovesSession(t *testing.T) {
 	waitUntil(t, func() bool { return m.SessionCount() == 0 }, 2*time.Second,
 		"session to be removed after child exits")
 }
-

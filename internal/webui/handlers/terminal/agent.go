@@ -281,7 +281,7 @@ func runAgentTerminalRelay(reqCtx context.Context, conn *websocket.Conn, manager
 	go func() {
 		select {
 		case <-termSession.KillCh():
-			_ = conn.Close(websocket.StatusCode(4002), "session killed") //nolint:staticcheck // SA1019: websocket migration tracked separately
+			_ = conn.Close(websocket.StatusCode(realtime.WSCloseSessionKilled), "session killed") //nolint:staticcheck // SA1019: websocket migration tracked separately
 			cancel()
 		case <-ctx.Done():
 		}

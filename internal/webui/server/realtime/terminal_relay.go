@@ -36,6 +36,12 @@ const (
 	// WSCloseBackendExited is the WebSocket close code for backend process exit (4000-4999 range).
 	WSCloseBackendExited = 4001
 
+	// WSCloseSessionKilled is the WebSocket close code for an explicit
+	// server-side kill (e.g. DeleteTab → PTYManager.Kill). Distinct from
+	// 4001 so the frontend can skip its reconnect path and avoid
+	// resurrecting a session the user just destroyed.
+	WSCloseSessionKilled = 4002
+
 	// TerminalReadBufSize is the buffer size for reading from PTY.
 	TerminalReadBufSize = 4096
 	// MaxTerminalCols is the maximum allowed terminal columns.
@@ -50,9 +56,13 @@ const (
 // (matches the wterm local example server/client wire format verbatim).
 var resizeRE = regexp.MustCompile(`^\x1b\[RESIZE:(\d+);(\d+)\]$`)
 
-// CrashInfo communicates crash state from PtyToWS so the handler sets the right close code.
+// CrashInfo communicates session-exit state from the relay so the handler
+// sets the right WebSocket close code. At most one of Crashed / Killed is
+// set; when neither is, the relay exited for a benign reason (ctx cancel,
+// attachment replaced) and WSClose returns a normal 1000.
 type CrashInfo struct {
 	Crashed bool
+	Killed  bool
 	Reason  string
 }
 
@@ -60,6 +70,13 @@ type CrashInfo struct {
 func (c CrashInfo) WSClose() (websocket.StatusCode, string) {
 	if c.Crashed {
 		return websocket.StatusCode(WSCloseBackendExited), c.Reason
+	}
+	if c.Killed {
+		reason := c.Reason
+		if reason == "" {
+			reason = "session killed"
+		}
+		return websocket.StatusCode(WSCloseSessionKilled), reason
 	}
 	return websocket.StatusNormalClosure, "session detached"
 }
@@ -157,23 +174,62 @@ func WSToPTY(ctx context.Context, conn *websocket.Conn, pty io.Writer, resizer R
 	}
 }
 
+// AttachmentExitReader is the subset of terminal.Attachment that
+// AttachmentToWS consults after the output channel closes so it can pick
+// the right WebSocket close code. Declared here to avoid pulling the
+// terminal package into realtime (terminal already imports realtime).
+type AttachmentExitReader interface {
+	Output() <-chan []byte
+	// ExitReason reports why the session closed; empty means "still live
+	// or attachment was replaced by a newer WS — close as a benign detach".
+	ExitReason() string
+}
+
 // AttachmentToWS pumps byte frames from a session-attachment output channel
-// into the WebSocket. Exits when the channel closes (session killed or the
-// attachment was replaced by a newer WS), when the context is cancelled, or
-// when a WS write fails. Unlike PtyToWS, this function does not read from
-// the PTY directly — that work is done once by the session's drain goroutine
-// and fanned out to the currently-attached channel.
-func AttachmentToWS(ctx context.Context, cancel context.CancelFunc, conn *websocket.Conn, output <-chan []byte) CrashInfo {
+// into the WebSocket. Exits when the channel closes (session killed, child
+// exited, or the attachment was replaced by a newer WS), when the context
+// is cancelled, or when a WS write fails. Unlike PtyToWS, this function
+// does not read from the PTY directly — that work is done once by the
+// session's drain goroutine and fanned out to the currently-attached
+// channel. On channel close it consults att.ExitReason so the handler can
+// distinguish an explicit kill (4002) from a backend crash (4001) or a
+// benign detach (1000).
+//
+// When an ExitReason is set (killed / exited), this function eagerly
+// writes the close frame via conn.Close *before* canceling ctx. That
+// ordering matters: canceling first poisons nhooyr's internal conn state,
+// after which the handler's deferred Close runs as a no-op TCP drop and
+// the browser sees 1006 instead of the intended 4002 / 4001. Mirrors the
+// agent-terminal path (handlers/terminal/agent.go).
+func AttachmentToWS(ctx context.Context, cancel context.CancelFunc, conn *websocket.Conn, att AttachmentExitReader) CrashInfo {
+	output := att.Output()
 	for {
 		select {
 		case <-ctx.Done():
 			return CrashInfo{}
 		case data, ok := <-output:
 			if !ok {
-				// Session gone (child exited or explicit kill) or the
-				// attachment was replaced.
-				cancel()
-				return CrashInfo{}
+				// Values mirror terminal.ExitReason* — kept as string
+				// literals to avoid importing terminal from realtime
+				// (terminal already imports realtime).
+				switch att.ExitReason() {
+				case "killed":
+					_ = conn.Close(websocket.StatusCode(WSCloseSessionKilled), "session killed") //nolint:staticcheck // SA1019: websocket migration tracked separately
+					cancel()
+					return CrashInfo{Killed: true, Reason: "session killed"}
+				case "exited":
+					_ = conn.Close(websocket.StatusCode(WSCloseBackendExited), "backend process exited") //nolint:staticcheck // SA1019
+					cancel()
+					return CrashInfo{Crashed: true, Reason: "backend process exited"}
+				default:
+					// Attachment replaced by a newer WS, manager-wide
+					// Shutdown, or the session is still live and we lost a
+					// race to a teardown that didn't set a reason. Treat
+					// as benign detach — let the handler's defer close
+					// with 1000.
+					cancel()
+					return CrashInfo{}
+				}
 			}
 			if err := conn.Write(ctx, websocket.MessageBinary, data); err != nil {
 				cancel()

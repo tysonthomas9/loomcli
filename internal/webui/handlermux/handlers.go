@@ -12,7 +12,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
 	hterminal "github.com/tysonthomas9/loomcli/internal/webui/handlers/terminal"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
-	webuterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 // Handlers holds all pre-built top-level HTTP handlers.
@@ -48,16 +47,18 @@ type Stopper interface {
 
 // HandlerDeps holds the dependencies for building top-level handlers.
 type HandlerDeps struct {
-	Pool             daemon.Pool
-	Hub              *realtime.Hub // may be nil
-	ExtAuthURL       string
-	BackendsHealthH  http.HandlerFunc // pre-built; nil disables endpoint
-	NotifyToken      string
-	DaemonSupervisor http.HandlerFunc    // pre-built; nil = disabled
-	DaemonConfig     http.HandlerFunc    // pre-built; nil = disabled
-	FleetTimeoutsFn  func() int64        // nil = no fleet
-	ClaimMetrics     *fleet.ClaimMetrics // nil = no fleet
-	PTYMgr           *webuterminal.PTYManager
+	Pool               daemon.Pool
+	Hub                *realtime.Hub // may be nil
+	ExtAuthURL         string
+	BackendsHealthH    http.HandlerFunc // pre-built; nil disables endpoint
+	NotifyToken        string
+	DaemonSupervisor   http.HandlerFunc    // pre-built; nil = disabled
+	DaemonConfig       http.HandlerFunc    // pre-built; nil = disabled
+	FleetTimeoutsFn    func() int64        // nil = no fleet
+	ClaimMetrics       *fleet.ClaimMetrics // nil = no fleet
+	TerminalGraceMS    int64               // 0 = disabled
+	TerminalIdleMS     int64               // 0 = disabled
+	TerminalMaxSession int                 // 0 = unknown
 }
 
 // BuildHandlers constructs all top-level HTTP handlers.
@@ -79,14 +80,18 @@ func BuildHandlers(deps HandlerDeps) *Handlers {
 		DaemonStatus:       healthhandlers.HandleDaemonStatus(deps.Pool),
 		GetBackendConfig:   hterminal.HandleGetBackendConfig(deps.Pool),
 		PatchBackendConfig: hterminal.HandlePatchBackendConfig(deps.Pool),
-		GetTerminalConfig:  hterminal.HandleGetTerminalConfig(deps.PTYMgr),
-		ListEditors:        misc.HandleListEditors(editorCache),
-		OpenEditor:         misc.HandleOpenEditorDefault(editorCache),
-		DaemonSupervisor:   deps.DaemonSupervisor,
-		DaemonConfig:       deps.DaemonConfig,
-		ClientErrLimiter:   clientErrLimiter,
-		CSPLimiter:         cspLimiter,
-		AuthCfgLimiter:     authCfgLimiter,
+		GetTerminalConfig: hterminal.HandleGetTerminalConfig(hterminal.TerminalLifecycleConfig{
+			GracePeriodMS: deps.TerminalGraceMS,
+			IdleTimeoutMS: deps.TerminalIdleMS,
+			MaxSessions:   deps.TerminalMaxSession,
+		}),
+		ListEditors:      misc.HandleListEditors(editorCache),
+		OpenEditor:       misc.HandleOpenEditorDefault(editorCache),
+		DaemonSupervisor: deps.DaemonSupervisor,
+		DaemonConfig:     deps.DaemonConfig,
+		ClientErrLimiter: clientErrLimiter,
+		CSPLimiter:       cspLimiter,
+		AuthCfgLimiter:   authCfgLimiter,
 	}
 
 	h.GetBackendsHealth = deps.BackendsHealthH

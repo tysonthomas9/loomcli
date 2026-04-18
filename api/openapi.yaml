@@ -4110,7 +4110,7 @@ components:
     TabMetadata:
       type: object
       description: Terminal tab metadata (Redis-backed)
-      required: [session_name, label, notes, sort_order, pinned, created_at, updated_at]
+      required: [session_name, label, notes, sort_order, pinned, created_at, updated_at, pty_alive, attached_clients]
       properties:
         session_name:
           type: string
@@ -4132,6 +4132,22 @@ components:
         updated_at:
           type: string
           format: date-time
+        pty_alive:
+          type: boolean
+          description: |
+            Whether the backend PTY for this tab is currently alive in the
+            server process. False means the tab metadata survived (e.g. a
+            server restart) but the PTY did not; clients should render the
+            tab as "session ended" and prompt before reconnecting (which
+            will spawn a fresh session).
+        attached_clients:
+          type: integer
+          description: |
+            Count of concurrent WebSocket clients currently viewing this
+            session. 0 means no one is attached (but the PTY may still be
+            live, within its grace window). Values ≥2 can be surfaced as
+            a "multiple viewers" indicator so users can be warned before
+            destructive tab-close actions.
 
     TabPutRequest:
       type: object

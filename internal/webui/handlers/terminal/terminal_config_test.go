@@ -5,9 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
-
-	webuterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 // decodeTerminalConfigResponse extracts the typed payload from the wrapped
@@ -24,8 +21,9 @@ func decodeTerminalConfigResponse(t *testing.T, body []byte) (success bool, cfg 
 	return envelope.Success, envelope.Data
 }
 
-func TestHandleGetTerminalConfig_NilManager(t *testing.T) {
-	handler := HandleGetTerminalConfig(nil)
+func TestHandleGetTerminalConfig_ZeroValues(t *testing.T) {
+	// Zero-value config: caller has no PTY manager wired.
+	handler := HandleGetTerminalConfig(TerminalLifecycleConfig{})
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/config/terminal", nil)
@@ -39,52 +37,39 @@ func TestHandleGetTerminalConfig_NilManager(t *testing.T) {
 		t.Errorf("success=false; body=%s", rec.Body.String())
 	}
 	if cfg.GracePeriodMS != 0 || cfg.IdleTimeoutMS != 0 || cfg.MaxSessions != 0 {
-		t.Errorf("nil-manager should return zero values; got %+v", cfg)
+		t.Errorf("zero-value config should round-trip to zeros; got %+v", cfg)
 	}
 }
 
-func TestHandleGetTerminalConfig_LocalDefaultsDisabled(t *testing.T) {
-	mgr := webuterminal.NewPTYManager("", 0)
-	t.Cleanup(func() { _ = mgr.Shutdown() })
-
-	handler := HandleGetTerminalConfig(mgr)
+func TestHandleGetTerminalConfig_ServesSuppliedSnapshot(t *testing.T) {
+	// Typical local-serve snapshot: grace/idle disabled, cap at 40.
+	in := TerminalLifecycleConfig{GracePeriodMS: 0, IdleTimeoutMS: 0, MaxSessions: 40}
+	handler := HandleGetTerminalConfig(in)
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/config/terminal", nil)
-	handler.ServeHTTP(rec, req)
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/config/terminal", nil))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d; body=%s", rec.Code, rec.Body.String())
 	}
 	_, cfg := decodeTerminalConfigResponse(t, rec.Body.Bytes())
-	// Local `loom serve` defaults: both timeouts disabled (0), cap = manager's MaxSessions.
-	if cfg.GracePeriodMS != 0 {
-		t.Errorf("GracePeriodMS=%d want 0 (disabled for local)", cfg.GracePeriodMS)
-	}
-	if cfg.IdleTimeoutMS != 0 {
-		t.Errorf("IdleTimeoutMS=%d want 0 (disabled for local)", cfg.IdleTimeoutMS)
-	}
-	if cfg.MaxSessions != mgr.MaxSessions() {
-		t.Errorf("MaxSessions=%d want %d", cfg.MaxSessions, mgr.MaxSessions())
+	if cfg != in {
+		t.Errorf("snapshot not round-tripped: got %+v want %+v", cfg, in)
 	}
 }
 
-func TestHandleGetTerminalConfig_ReflectsOverrides(t *testing.T) {
-	mgr := webuterminal.NewPTYManager("", 0)
-	t.Cleanup(func() { _ = mgr.Shutdown() })
-
-	mgr.SetGracePeriod(15 * time.Minute)
-	mgr.SetIdleTimeout(45 * time.Minute)
-
-	handler := HandleGetTerminalConfig(mgr)
+func TestHandleGetTerminalConfig_ReflectsNonZeroSnapshot(t *testing.T) {
+	in := TerminalLifecycleConfig{
+		GracePeriodMS: 15 * 60 * 1000,
+		IdleTimeoutMS: 45 * 60 * 1000,
+		MaxSessions:   128,
+	}
+	handler := HandleGetTerminalConfig(in)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/config/terminal", nil))
 
 	_, cfg := decodeTerminalConfigResponse(t, rec.Body.Bytes())
-	if got, want := cfg.GracePeriodMS, (15 * time.Minute).Milliseconds(); got != want {
-		t.Errorf("GracePeriodMS=%d want %d", got, want)
-	}
-	if got, want := cfg.IdleTimeoutMS, (45 * time.Minute).Milliseconds(); got != want {
-		t.Errorf("IdleTimeoutMS=%d want %d", got, want)
+	if cfg != in {
+		t.Errorf("non-zero snapshot not round-tripped: got %+v want %+v", cfg, in)
 	}
 }

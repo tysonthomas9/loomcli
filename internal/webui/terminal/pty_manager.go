@@ -166,31 +166,46 @@ func (m *PTYManager) AttachSession(key SessionKey, cols, rows uint16, argv []str
 		rows = 24
 	}
 
-	m.mu.Lock()
-	sess, existed := m.sessions[key]
-	if !existed {
-		if len(m.sessions) >= m.max {
-			m.mu.Unlock()
-			return nil, false, ErrPTYMaxSessionsReached
+	// Between the manager-lock lookup and sess.attachNew below, a concurrent
+	// Kill / grace-timer fire / idle reaper / child-exit can close the
+	// session. attachNew signals that race by returning nil; we then retry
+	// the full lookup so a fresh session is spawned instead of writing into
+	// a closed one (nil-map panic). A small bound is enough — each retry
+	// either observes the session gone from m.sessions and spawns a new
+	// one, or finds a freshly-spawned session that isn't concurrently
+	// closing.
+	const maxAttachRetries = 3
+	for attempt := 0; attempt < maxAttachRetries; attempt++ {
+		m.mu.Lock()
+		sess, existed := m.sessions[key]
+		if !existed {
+			if len(m.sessions) >= m.max {
+				m.mu.Unlock()
+				return nil, false, ErrPTYMaxSessionsReached
+			}
+			newSess, spawnErr := m.spawnSession(key, cols, rows, argv)
+			if spawnErr != nil {
+				m.mu.Unlock()
+				return nil, false, spawnErr
+			}
+			m.sessions[key] = newSess
+			sess = newSess
 		}
-		newSess, spawnErr := m.spawnSession(key, cols, rows, argv)
-		if spawnErr != nil {
-			m.mu.Unlock()
-			return nil, false, spawnErr
+		m.mu.Unlock()
+
+		if existed {
+			_ = pty.Setsize(sess.pty, &pty.Winsize{Cols: cols, Rows: rows})
 		}
-		m.sessions[key] = newSess
-		sess = newSess
+
+		sess.cancelKillTimer()
+
+		connID := fmt.Sprintf("pty-%d", m.counter.Add(1))
+		if local := sess.attachNew(connID); local != nil {
+			return local, existed, nil
+		}
+		// Session was closed between lookup and attach. Retry.
 	}
-	m.mu.Unlock()
-
-	if existed {
-		_ = pty.Setsize(sess.pty, &pty.Winsize{Cols: cols, Rows: rows})
-	}
-
-	sess.cancelKillTimer()
-
-	connID := fmt.Sprintf("pty-%d", m.counter.Add(1))
-	return sess.attachNew(connID), existed, nil
+	return nil, false, fmt.Errorf("terminal attach: session %q repeatedly closed during attach", key)
 }
 
 // spawnSession must be called with m.mu held.
@@ -225,16 +240,16 @@ func (m *PTYManager) Detach(key SessionKey, connID string) {
 		return
 	}
 	if sess.detach(connID) && grace > 0 {
-		sess.armKillTimer(grace, func() { m.killSession(key) })
+		sess.armKillTimer(grace, func() { _ = m.killSession(key, ExitReasonKilled) })
 	}
 }
 
 // Kill immediately terminates the session for key. Idempotent.
 func (m *PTYManager) Kill(key SessionKey) error {
-	return m.killSession(key)
+	return m.killSession(key, ExitReasonKilled)
 }
 
-func (m *PTYManager) killSession(key SessionKey) error {
+func (m *PTYManager) killSession(key SessionKey, reason string) error {
 	m.mu.Lock()
 	sess, ok := m.sessions[key]
 	if ok {
@@ -244,7 +259,7 @@ func (m *PTYManager) killSession(key SessionKey) error {
 	if !ok {
 		return nil
 	}
-	return sess.close()
+	return sess.close(reason)
 }
 
 // SessionCount returns the number of live sessions, including detached ones
@@ -253,6 +268,29 @@ func (m *PTYManager) SessionCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return len(m.sessions)
+}
+
+// HasSession reports whether a (live or gracefully-detached) session exists
+// for key. "Live" means not yet killed by Kill / Shutdown / reaper — it does
+// not guarantee the underlying child process is still running, only that the
+// manager has not released it.
+func (m *PTYManager) HasSession(key SessionKey) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_, ok := m.sessions[key]
+	return ok
+}
+
+// AttachmentCount returns the number of concurrent clients attached to the
+// session identified by key, or 0 if the session is unknown.
+func (m *PTYManager) AttachmentCount(key SessionKey) int {
+	m.mu.Lock()
+	sess, ok := m.sessions[key]
+	m.mu.Unlock()
+	if !ok {
+		return 0
+	}
+	return sess.attachmentCount()
 }
 
 // MaxSessions returns the configured concurrent-session cap.
@@ -286,7 +324,7 @@ func (m *PTYManager) Shutdown() error {
 
 	var firstErr error
 	for _, s := range sessions {
-		if err := s.close(); err != nil && firstErr == nil {
+		if err := s.close(ExitReasonShutdown); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
@@ -337,12 +375,12 @@ func (m *PTYManager) reapIdle() {
 		}
 	}
 	for _, key := range victims {
-		_ = m.killSession(key)
+		_ = m.killSession(key, ExitReasonKilled)
 	}
 }
 
 // onSessionExited is invoked by a session's drain goroutine when the child
 // process exits on its own (PTY EOF). Cleans up manager-side state.
 func (m *PTYManager) onSessionExited(key SessionKey) {
-	_ = m.killSession(key)
+	_ = m.killSession(key, ExitReasonExited)
 }
