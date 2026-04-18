@@ -68,6 +68,11 @@ func finalizeAutoSession(ctx *autoLoopCtx, sess *sessions.Session, beforeRef str
 // of treating each failure as a generic ConsecutiveErrors strike.
 const maxSameTaskFailures = 3
 
+// maxConsecutiveRateLimits is the process-wide safety net: if this many
+// consecutive invocations hit rate limits despite the breaker's cooldowns,
+// auto-mode exits entirely.
+const maxConsecutiveRateLimits = 5
+
 func handleAutoTaskError(ctx *autoLoopCtx, ae *agenterr.AgentError, rawErr error, shutdown chan struct{}) bool {
 	fmt.Printf("[auto] Agent error: [%s] %s\n", ae.Class, ae.Message)
 	trackResumeFailures(ctx)
@@ -89,11 +94,7 @@ func handleAutoTaskError(ctx *autoLoopCtx, ae *agenterr.AgentError, rawErr error
 	// clear the lock's TaskID and let the loop try a different task.
 	if failedTaskID != "" && ctx.stuckTaskIDs[failedTaskID] {
 		fmt.Printf("[auto] Stuck task %s failed again, skipping without re-classification\n", failedTaskID)
-		if ctx.clearTaskID != nil {
-			if clearErr := ctx.clearTaskID(); clearErr != nil {
-				fmt.Printf("[auto] Warning: failed to clear stuck task ID: %v\n", clearErr)
-			}
-		}
+		tryClearTaskID(ctx)
 		return true
 	}
 
@@ -185,17 +186,22 @@ func skipStuckTask(ctx *autoLoopCtx, failedTaskID string, rawErr error) bool {
 	if ctx.stuckTaskIDs == nil {
 		ctx.stuckTaskIDs = make(map[string]bool)
 	}
+	// Cap the skip set to prevent unbounded growth in long-lived loops.
+	const maxStuckTasks = 100
+	if len(ctx.stuckTaskIDs) >= maxStuckTasks {
+		// Evict an arbitrary entry to make room.
+		for k := range ctx.stuckTaskIDs {
+			delete(ctx.stuckTaskIDs, k)
+			break
+		}
+	}
 	ctx.stuckTaskIDs[failedTaskID] = true
 	ctx.sameTaskFailures = 0
 	ctx.lastFailedTaskID = ""
 	ctx.state.ConsecutiveErrors = 0
 	ctx.state.ConsecutiveRateLimits = 0
 
-	if ctx.clearTaskID != nil {
-		if clearErr := ctx.clearTaskID(); clearErr != nil {
-			fmt.Printf("[auto] Warning: failed to clear stuck task ID: %v\n", clearErr)
-		}
-	}
+	tryClearTaskID(ctx)
 	return true
 }
 
@@ -227,6 +233,15 @@ func emitTaskFailedEvent(ctx *autoLoopCtx, ae *agenterr.AgentError, rawErr error
 	}
 }
 
+// tryClearTaskID clears the lock file's TaskID if the clearer is wired up.
+func tryClearTaskID(ctx *autoLoopCtx) {
+	if ctx.clearTaskID != nil {
+		if clearErr := ctx.clearTaskID(); clearErr != nil {
+			fmt.Printf("[auto] Warning: failed to clear stuck task ID: %v\n", clearErr)
+		}
+	}
+}
+
 func exitWithReason(ctx *autoLoopCtx, reason string) bool {
 	ctx.state.ShouldExit = true
 	ctx.state.ExitReason = reason
@@ -242,7 +257,7 @@ func handleRateLimitError(ctx *autoLoopCtx, ae *agenterr.AgentError, shutdown ch
 	// sustained-overloaded and we should stop spending retry budget. The
 	// breaker's cooldown for the most recent trip is abandoned on exit — this
 	// is intentional, the process-exit is the ultimate form of backoff.
-	if ctx.state.ConsecutiveRateLimits >= 5 {
+	if ctx.state.ConsecutiveRateLimits >= maxConsecutiveRateLimits {
 		return exitWithReason(ctx, "too many consecutive rate limits")
 	}
 	wait := 60 * time.Second
@@ -280,25 +295,27 @@ func recordRateLimitOnBreaker(ctx *autoLoopCtx) {
 	}
 }
 
-func handleTransientError(ctx *autoLoopCtx, shutdown chan struct{}) bool {
+// maxConsecutiveErrors is the threshold at which consecutive non-rate-limit
+// errors cause auto-mode to exit.
+const maxConsecutiveErrors = 3
+
+func handleRetryableError(ctx *autoLoopCtx, backoff time.Duration, label string, shutdown chan struct{}) bool {
 	ctx.state.ConsecutiveRateLimits = 0
 	ctx.state.ConsecutiveErrors++
-	if ctx.state.ConsecutiveErrors >= 3 {
+	if ctx.state.ConsecutiveErrors >= maxConsecutiveErrors {
 		return exitWithReason(ctx, "too many consecutive errors")
 	}
-	backoff := ctx.opts.BackoffBase << (ctx.state.ConsecutiveErrors - 1)
-	fmt.Printf("[auto] Transient error, backing off %s before retry...\n", backoff)
+	fmt.Printf("[auto] %s, retrying in %s...\n", label, backoff)
 	return sleepOrShutdown(ctx, backoff, shutdown)
 }
 
+func handleTransientError(ctx *autoLoopCtx, shutdown chan struct{}) bool {
+	backoff := ctx.opts.BackoffBase << (ctx.state.ConsecutiveErrors)
+	return handleRetryableError(ctx, backoff, "Transient error", shutdown)
+}
+
 func handleDefaultError(ctx *autoLoopCtx, shutdown chan struct{}) bool {
-	ctx.state.ConsecutiveRateLimits = 0
-	ctx.state.ConsecutiveErrors++
-	if ctx.state.ConsecutiveErrors >= 3 {
-		return exitWithReason(ctx, "too many consecutive errors")
-	}
-	fmt.Printf("[auto] Waiting %ds before retry...\n", ctx.opts.Interval)
-	return sleepOrShutdown(ctx, time.Duration(ctx.opts.Interval)*time.Second, shutdown)
+	return handleRetryableError(ctx, time.Duration(ctx.opts.Interval)*time.Second, fmt.Sprintf("Waiting %ds", ctx.opts.Interval), shutdown)
 }
 
 func sleepOrShutdown(ctx *autoLoopCtx, d time.Duration, shutdown chan struct{}) bool {
@@ -322,11 +339,7 @@ func handleAutoTaskSuccess(ctx *autoLoopCtx, beforeRef string, startedAt, endedA
 	// gets a fresh chance, and don't count this as a completed task.
 	if isStuckTaskClaimed(ctx) {
 		fmt.Printf("[auto] Agent re-claimed stuck task, treating as no-progress\n")
-		if ctx.clearTaskID != nil {
-			if clearErr := ctx.clearTaskID(); clearErr != nil {
-				fmt.Printf("[auto] Warning: failed to clear stuck task ID: %v\n", clearErr)
-			}
-		}
+		tryClearTaskID(ctx)
 		return handleNoProgress(ctx, shutdown)
 	}
 

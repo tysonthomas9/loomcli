@@ -60,9 +60,17 @@ func handleGetIssueTabs(store *issuetabs.Store, manager *terminal.TerminalManage
 			return
 		}
 
-		// Validate terminal tabs against active tmux sessions (filtered by workspace ownership)
+		// Only query tmux when there are terminal tabs to validate.
+		hasTerminalTab := false
+		for _, tab := range state.Tabs {
+			if tab.Type == "terminal" {
+				hasTerminalTab = true
+				break
+			}
+		}
+
 		var activeNames []string
-		if manager != nil {
+		if manager != nil && hasTerminalTab {
 			sessions, err := manager.ListActiveSessionsForWorkspace(wsID)
 			if err != nil {
 				slog.Error("failed to list active sessions for issue tab validation", "err", err)

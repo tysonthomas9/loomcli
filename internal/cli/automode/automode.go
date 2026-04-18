@@ -54,7 +54,7 @@ type AutoModeOptions struct {
 type AutoModeState struct {
 	TasksCompleted        int
 	ConsecutiveErrors     int
-	ConsecutiveRateLimits int // separate counter for rate-limit errors (threshold: 5)
+	ConsecutiveRateLimits int
 	ConsecutiveNoProgress int // sessions that completed without claiming a task
 	CircuitBreakerTrips   int // lifetime count of rate-limit circuit breaker trips
 	LastTaskTime          time.Time

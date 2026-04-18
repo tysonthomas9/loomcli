@@ -16,6 +16,10 @@ import {
   fetchGraphIssues,
 } from "../api/issues";
 import type { Issue, WorkFilter, Status } from "../types";
+import {
+  calculateBackoffDelay,
+  type ReconnectConfig,
+} from "../utils/reconnectBackoff";
 
 import {
   TOO_FAR_BEHIND_THRESHOLD,
@@ -113,13 +117,12 @@ export function createIssueStore(
     }
   }
 
-  /** Compute the exponential-backoff delay (ms) for the given retry attempt. */
-  function computeRetryDelay(attempt: number): number {
-    return Math.min(
-      RETRY_BASE_DELAY_MS * Math.pow(2, attempt),
-      RETRY_MAX_DELAY_MS,
-    );
-  }
+  const retryBackoffConfig: ReconnectConfig = {
+    baseDelay: RETRY_BASE_DELAY_MS,
+    maxDelay: RETRY_MAX_DELAY_MS,
+    maxAttempts: MAX_AUTO_RETRIES,
+    jitterFactor: 0,
+  };
 
   /** Remove an optimistic entry and update pendingIds */
   function removeOptimisticEntry(
@@ -293,7 +296,10 @@ export function createIssueStore(
         const currentRetryCount = get().retryCount;
         if (currentRetryCount < MAX_AUTO_RETRIES) {
           const nextAttempt = currentRetryCount + 1;
-          const delay = computeRetryDelay(currentRetryCount);
+          const delay = calculateBackoffDelay(
+            currentRetryCount,
+            retryBackoffConfig,
+          );
           set({
             error: message,
             isLoading: false,

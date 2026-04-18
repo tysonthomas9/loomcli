@@ -144,6 +144,23 @@ func hasData(resp *apiResponse) bool {
 	return resp != nil && resp.Data != nil && string(resp.Data) != "null"
 }
 
+// unmarshalIssueList unmarshals a []gen.Issue response and converts to
+// []backend.IssueData. Used by List, Ready, GetChildren, and SearchIssues.
+func unmarshalIssueList(resp *apiResponse, op string) ([]backend.IssueData, error) {
+	if !hasData(resp) {
+		return []backend.IssueData{}, nil
+	}
+	var issues []gen.Issue
+	if err := json.Unmarshal(resp.Data, &issues); err != nil {
+		return nil, backend.ErrInternal(op, "unmarshal response", err)
+	}
+	result := make([]backend.IssueData, 0, len(issues))
+	for _, i := range issues {
+		result = append(result, issueToData(i))
+	}
+	return result, nil
+}
+
 // --- Query operations ---
 
 func (b *APIBackend) Get(ctx context.Context, id string) (*backend.IssueDetailData, error) {
@@ -171,18 +188,7 @@ func (b *APIBackend) List(ctx context.Context, opts backend.ListOpts) ([]backend
 	if err != nil {
 		return nil, err
 	}
-	if !hasData(resp) {
-		return []backend.IssueData{}, nil
-	}
-	var issues []gen.Issue
-	if err := json.Unmarshal(resp.Data, &issues); err != nil {
-		return nil, backend.ErrInternal("List", "unmarshal response", err)
-	}
-	result := make([]backend.IssueData, 0, len(issues))
-	for _, i := range issues {
-		result = append(result, issueToData(i))
-	}
-	return result, nil
+	return unmarshalIssueList(resp, "List")
 }
 
 func (b *APIBackend) Ready(ctx context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
@@ -194,18 +200,7 @@ func (b *APIBackend) Ready(ctx context.Context, opts backend.ReadyOpts) ([]backe
 	if err != nil {
 		return nil, err
 	}
-	if !hasData(resp) {
-		return []backend.IssueData{}, nil
-	}
-	var issues []gen.Issue
-	if err := json.Unmarshal(resp.Data, &issues); err != nil {
-		return nil, backend.ErrInternal("Ready", "unmarshal response", err)
-	}
-	result := make([]backend.IssueData, 0, len(issues))
-	for _, i := range issues {
-		result = append(result, issueToData(i))
-	}
-	return result, nil
+	return unmarshalIssueList(resp, "Ready")
 }
 
 func (b *APIBackend) Blocked(ctx context.Context, opts backend.BlockedOpts) ([]backend.IssueData, error) {
@@ -274,22 +269,11 @@ func (b *APIBackend) GetChildren(ctx context.Context, id string) ([]backend.Issu
 		return nil, backend.ErrValidation("GetChildren", "id must not be empty")
 	}
 	path := "/issues?parent_id=" + url.QueryEscape(id)
-	resp, apiErr := b.exec(ctx, "GetChildren", http.MethodGet, path, nil)
-	if apiErr != nil {
-		return nil, apiErr
+	resp, err := b.exec(ctx, "GetChildren", http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
 	}
-	if !hasData(resp) {
-		return []backend.IssueData{}, nil
-	}
-	var issues []gen.Issue
-	if jsonErr := json.Unmarshal(resp.Data, &issues); jsonErr != nil {
-		return nil, backend.ErrInternal("GetChildren", "unmarshal response", jsonErr)
-	}
-	result := make([]backend.IssueData, 0, len(issues))
-	for _, i := range issues {
-		result = append(result, issueToData(i))
-	}
-	return result, nil
+	return unmarshalIssueList(resp, "GetChildren")
 }
 
 // SearchIssues performs a full-text search via the /issues endpoint using the
@@ -307,22 +291,11 @@ func (b *APIBackend) SearchIssues(ctx context.Context, query string, limit int) 
 	if limit > 0 {
 		path += "&limit=" + strconv.Itoa(limit)
 	}
-	resp, apiErr := b.exec(ctx, "SearchIssues", http.MethodGet, path, nil)
-	if apiErr != nil {
-		return nil, apiErr
+	resp, err := b.exec(ctx, "SearchIssues", http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
 	}
-	if !hasData(resp) {
-		return []backend.IssueData{}, nil
-	}
-	var issues []gen.Issue
-	if jsonErr := json.Unmarshal(resp.Data, &issues); jsonErr != nil {
-		return nil, backend.ErrInternal("SearchIssues", "unmarshal response", jsonErr)
-	}
-	result := make([]backend.IssueData, 0, len(issues))
-	for _, i := range issues {
-		result = append(result, issueToData(i))
-	}
-	return result, nil
+	return unmarshalIssueList(resp, "SearchIssues")
 }
 
 // --- Mutation operations ---

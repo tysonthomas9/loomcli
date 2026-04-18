@@ -156,6 +156,19 @@ func hasData(resp *apiResponse) bool {
 	return resp != nil && resp.Data != nil && string(resp.Data) != "null"
 }
 
+// unmarshalIssueList unmarshals a []*types.IssueWithCounts response and
+// converts to []backend.IssueData. Used by List, GetChildren, and SearchIssues.
+func unmarshalIssueList(resp *apiResponse, op string) ([]backend.IssueData, error) {
+	if !hasData(resp) {
+		return []backend.IssueData{}, nil
+	}
+	var issues []*types.IssueWithCounts
+	if err := json.Unmarshal(resp.Data, &issues); err != nil {
+		return nil, backend.ErrInternal(op, "unmarshal response", err)
+	}
+	return issuesWithCountsToData(issues), nil
+}
+
 // --- Query operations ---
 
 func (b *FleetBackend) Get(ctx context.Context, id string) (*backend.IssueDetailData, error) {
@@ -183,14 +196,7 @@ func (b *FleetBackend) List(ctx context.Context, opts backend.ListOpts) ([]backe
 	if err != nil {
 		return nil, err
 	}
-	if !hasData(resp) {
-		return []backend.IssueData{}, nil
-	}
-	var issues []*types.IssueWithCounts
-	if err := json.Unmarshal(resp.Data, &issues); err != nil {
-		return nil, backend.ErrInternal("List", "unmarshal response", err)
-	}
-	return issuesWithCountsToData(issues), nil
+	return unmarshalIssueList(resp, "List")
 }
 
 func (b *FleetBackend) Ready(ctx context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
@@ -268,18 +274,11 @@ func (b *FleetBackend) GetChildren(ctx context.Context, id string) ([]backend.Is
 		return nil, backend.ErrValidation("GetChildren", "id must not be empty")
 	}
 	path := "/issues?parent_id=" + url.QueryEscape(id)
-	resp, callErr := b.exec(ctx, "GetChildren", "GET", path, nil)
-	if callErr != nil {
-		return nil, callErr
+	resp, err := b.exec(ctx, "GetChildren", "GET", path, nil)
+	if err != nil {
+		return nil, err
 	}
-	if !hasData(resp) {
-		return []backend.IssueData{}, nil
-	}
-	var issues []*types.IssueWithCounts
-	if jsonErr := json.Unmarshal(resp.Data, &issues); jsonErr != nil {
-		return nil, backend.ErrInternal("GetChildren", "unmarshal response", jsonErr)
-	}
-	return issuesWithCountsToData(issues), nil
+	return unmarshalIssueList(resp, "GetChildren")
 }
 
 // SearchIssues performs a full-text search via the fleet-db list endpoint with
@@ -298,18 +297,11 @@ func (b *FleetBackend) SearchIssues(ctx context.Context, query string, limit int
 	if limit > 0 {
 		path += "&limit=" + strconv.Itoa(limit)
 	}
-	resp, callErr := b.exec(ctx, "SearchIssues", "GET", path, nil)
-	if callErr != nil {
-		return nil, callErr
+	resp, err := b.exec(ctx, "SearchIssues", "GET", path, nil)
+	if err != nil {
+		return nil, err
 	}
-	if !hasData(resp) {
-		return []backend.IssueData{}, nil
-	}
-	var issues []*types.IssueWithCounts
-	if jsonErr := json.Unmarshal(resp.Data, &issues); jsonErr != nil {
-		return nil, backend.ErrInternal("SearchIssues", "unmarshal response", jsonErr)
-	}
-	return issuesWithCountsToData(issues), nil
+	return unmarshalIssueList(resp, "SearchIssues")
 }
 
 // --- Mutation operations ---

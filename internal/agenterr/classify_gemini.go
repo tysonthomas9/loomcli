@@ -1,17 +1,9 @@
 package agenterr
 
-import (
-	"regexp"
-	"strconv"
-	"time"
-)
+import "regexp"
 
 // Gemini-specific error patterns, ordered most-specific first.
-var geminiPatterns = []struct {
-	re    *regexp.Regexp
-	class ErrorClass
-	msg   string
-}{
+var geminiPatterns = []errorPattern{
 	{regexp.MustCompile(`(?i)rate.?limit|too many requests|resource_exhausted`), RateLimited, "rate limit exceeded"},
 	{regexp.MustCompile(`(?i)\b429\b`), RateLimited, "rate limit exceeded (429)"},
 	{regexp.MustCompile(`(?i)invalid.?api.?key|authentication.?failed`), AuthFailure, "invalid API key"},
@@ -26,29 +18,6 @@ var geminiPatterns = []struct {
 	{regexp.MustCompile(`(?i)\b50[023]\b`), Transient, "server error"},
 }
 
-var geminiRetryAfterRe = regexp.MustCompile(`(?i)retry.?after[:\s]+(\d+)`)
-
 func classifyGemini(logTail string) *classifyResult {
-	if logTail == "" {
-		return nil
-	}
-
-	for _, p := range geminiPatterns {
-		if p.re.MatchString(logTail) {
-			r := &classifyResult{
-				Class:   p.class,
-				Message: p.msg,
-			}
-			if p.class == RateLimited {
-				if m := geminiRetryAfterRe.FindStringSubmatch(logTail); len(m) > 1 {
-					if secs, err := strconv.Atoi(m[1]); err == nil {
-						r.RetryAfter = time.Duration(secs) * time.Second
-					}
-				}
-			}
-			return r
-		}
-	}
-
-	return nil
+	return classifyWithPatterns(logTail, geminiPatterns)
 }

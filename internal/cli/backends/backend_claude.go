@@ -309,24 +309,37 @@ func setupNonInteractivePipes(cmd *exec.Cmd, prompt, resumeID string) (*os.File,
 }
 
 // outputRingBuffer keeps the last N lines of stream output for error classification.
+// Uses an index-based circular buffer to avoid pinning evicted strings.
 type outputRingBuffer struct {
 	lines []string
-	cap   int
+	idx   int
+	count int
 }
 
 func newOutputRingBuffer(cap int) *outputRingBuffer {
-	return &outputRingBuffer{lines: make([]string, 0, cap), cap: cap}
+	return &outputRingBuffer{lines: make([]string, cap)}
 }
 
 func (b *outputRingBuffer) Add(line string) {
-	if len(b.lines) >= b.cap {
-		b.lines = b.lines[1:]
+	b.lines[b.idx] = line
+	b.idx = (b.idx + 1) % len(b.lines)
+	if b.count < len(b.lines) {
+		b.count++
 	}
-	b.lines = append(b.lines, line)
 }
 
 func (b *outputRingBuffer) String() string {
-	return strings.Join(b.lines, "\n")
+	if b.count == 0 {
+		return ""
+	}
+	if b.count < len(b.lines) {
+		return strings.Join(b.lines[:b.count], "\n")
+	}
+	// Buffer is full: oldest entry is at b.idx, wrap around.
+	result := make([]string, 0, len(b.lines))
+	result = append(result, b.lines[b.idx:]...)
+	result = append(result, b.lines[:b.idx]...)
+	return strings.Join(result, "\n")
 }
 
 // newStreamLineHandler returns a line handler that captures the Claude session ID
