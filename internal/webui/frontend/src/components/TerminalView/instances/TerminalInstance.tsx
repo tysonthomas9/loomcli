@@ -22,6 +22,7 @@ import {
   useState,
 } from "react";
 
+import { getTerminalConfig } from "@/hooks/api";
 import { useWorkspaceContext } from "@/hooks/workspace";
 import {
   startAutoReconnect,
@@ -41,15 +42,27 @@ const INITIAL_CONNECT_CONFIG: ReconnectConfig = {
   jitterFactor: 0.5,
 };
 
-/** Wall-clock ceiling: if a reconnect doesn't succeed within this window, give up. */
-const RECONNECT_TIMEOUT_MS = 30_000;
+/**
+ * Wall-clock ceiling: if a reconnect doesn't succeed within this window,
+ * give up and surface the `expired` overlay. The ceiling is clamped to the
+ * server's advertised grace period (`/api/config/terminal`) so the client
+ * never keeps retrying past the point where the server has already killed
+ * the shell. A server value of 0 means "no timeout" (local `loom serve`),
+ * in which case we fall back to a long but finite ceiling so the retry
+ * loop doesn't run forever unnoticed.
+ */
+const UNBOUNDED_RECONNECT_TIMEOUT_MS = 60 * 60 * 1000; // 1 h when server disables its own timeout
 
 export type ConnectionState =
   | "disconnected"
   | "connecting"
   | "connected"
   | "error"
-  | "crashed";
+  | "crashed"
+  // The backend tab metadata survived a server restart but the PTY did
+  // not. We deliberately did not auto-respawn — the overlay prompts the
+  // user before opening a fresh shell so scrollback loss is explicit.
+  | "session_ended";
 
 export interface TerminalInstanceProps {
   sessionName: string;
@@ -64,6 +77,14 @@ export interface TerminalInstanceProps {
   onTerminalFocus?: (() => void) | undefined;
   /** When set, connects to the agent terminal WebSocket instead of the regular terminal. */
   agentName?: string | undefined;
+  /**
+   * Liveness hint from the backend's tab metadata. When explicitly
+   * `false`, the auto-connect on mount is skipped and the overlay goes
+   * directly to "session_ended" so the user opts into spawning a fresh
+   * shell (losing prior scrollback). `undefined` or `true` preserves
+   * the pre-liveness behavior of connecting immediately.
+   */
+  ptyAlive?: boolean | undefined;
 }
 
 export interface TerminalInstanceHandle {
@@ -90,6 +111,7 @@ export const TerminalInstance = forwardRef<
     onBackendCrash,
     onTerminalFocus,
     agentName,
+    ptyAlive,
   },
   ref,
 ) {
@@ -101,6 +123,28 @@ export const TerminalInstance = forwardRef<
   }, []);
   const focus = useCallback(() => {
     wtermRef.current?.focus();
+  }, []);
+
+  // Start pessimistic: until the server's config arrives, prefer the long
+  // ceiling over the old 30-second default. This matters for loom-agentd
+  // deployments where the real grace is minutes — a client falling back to
+  // 30 s would give up while the server still held the shell open. The
+  // config promise is memoised so the fetch runs at most once per app load.
+  const reconnectCeilingMsRef = useRef<number>(UNBOUNDED_RECONNECT_TIMEOUT_MS);
+  useEffect(() => {
+    let cancelled = false;
+    void getTerminalConfig().then((cfg) => {
+      if (cancelled) return;
+      // grace_period_ms == 0 on the server means "disabled". Translate into
+      // a long-but-finite client ceiling. Otherwise honour the server value.
+      reconnectCeilingMsRef.current =
+        cfg.gracePeriodMs > 0
+          ? cfg.gracePeriodMs
+          : UNBOUNDED_RECONNECT_TIMEOUT_MS;
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -162,7 +206,7 @@ export const TerminalInstance = forwardRef<
         reconnectCancelRef.current?.();
         reconnectCancelRef.current = null;
         onReconnectStateChangeRef.current?.("expired");
-      }, RECONNECT_TIMEOUT_MS);
+      }, reconnectCeilingMsRef.current);
 
       const cancel = startAutoReconnect(
         () =>
@@ -250,20 +294,38 @@ export const TerminalInstance = forwardRef<
   useEffect(() => {
     beingKilledRef.current = false;
     hasConnectedRef.current = false;
-    // Connection begins in the onReady handler (once wterm's WASM is loaded).
+    // Connection normally begins in the onReady handler. If we're in a
+    // StrictMode remount (wterm already fired onReady, and its cached
+    // WASM means it won't fire again), re-kick the connection here —
+    // otherwise the tab would stay stuck at "connecting" because the
+    // prior cleanup cancelled its in-flight WebSocket.
+    if (wtermReadyRef.current && ptyAlive !== false) {
+      doConnectRef.current?.();
+    }
     return () => {
       clearReconnectTimers();
       wsCleanupRef.current?.();
       wsCleanupRef.current = null;
     };
-  }, [sessionName, clearReconnectTimers]);
+  }, [sessionName, clearReconnectTimers, ptyAlive]);
 
   // handleReady and the reconnect imperative method both read the latest
   // doConnect via doConnectRef so neither hands the wterm <Terminal> a new
   // onReady identity on every render.
+  // Track wterm readiness so the mount effect can re-kick the connection
+  // when React StrictMode double-invokes mount → unmount → remount. Without
+  // this, the unmount cancels the in-flight connect but wterm's onReady
+  // never fires again on remount (same component instance), leaving the tab
+  // stuck in "connecting".
+  const wtermReadyRef = useRef(false);
   const handleReady = useCallback(() => {
+    wtermReadyRef.current = true;
+    if (ptyAlive === false) {
+      setConnectionState("session_ended");
+      return;
+    }
     doConnectRef.current?.();
-  }, []);
+  }, [ptyAlive]);
 
   const handleData = useCallback((data: string) => {
     const ws = wsRef.current;

@@ -49,9 +49,6 @@ func shellCommand() string {
 	return "/bin/bash"
 }
 
-// sessionKillGracePeriod is the delay before a scheduled session kill executes.
-const sessionKillGracePeriod = 30 * time.Second
-
 // Seed prompt limits.
 const (
 	maxDescriptionLen = 800

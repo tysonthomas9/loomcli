@@ -110,6 +110,11 @@ type Server struct {
 
 	// Pre-built top-level handlers (built by handlermux.BuildHandlers)
 	handlers *handlermux.Handlers
+
+	// startedAt captures server-process boot time. Used to distinguish
+	// "tab metadata from a prior server process" (PTY is gone) from
+	// "tab metadata just created in this process" (PTY about to spawn).
+	startedAt time.Time
 }
 
 // buildHandlers constructs all top-level HTTP handlers from the current dependency
@@ -133,16 +138,26 @@ func (app *Server) buildHandlers() {
 		backendsHealthH = webui.HandleBackendsHealth(app.config.BackendOps)
 	}
 
+	var graceMS, idleMS int64
+	var maxSess int
+	if app.ptyMgr != nil {
+		graceMS = app.ptyMgr.GracePeriod().Milliseconds()
+		idleMS = app.ptyMgr.IdleTimeout().Milliseconds()
+		maxSess = app.ptyMgr.MaxSessions()
+	}
 	app.handlers = handlermux.BuildHandlers(handlermux.HandlerDeps{
-		Pool:             app.pool,
-		Hub:              app.hub,
-		ExtAuthURL:       app.config.ExtAuthURL,
-		BackendsHealthH:  backendsHealthH,
-		NotifyToken:      app.notifyToken,
-		DaemonSupervisor: daemonSupervisorH,
-		DaemonConfig:     daemonConfigH,
-		FleetTimeoutsFn:  getFleetTimeouts,
-		ClaimMetrics:     app.claimMetrics,
+		Pool:               app.pool,
+		Hub:                app.hub,
+		ExtAuthURL:         app.config.ExtAuthURL,
+		BackendsHealthH:    backendsHealthH,
+		NotifyToken:        app.notifyToken,
+		DaemonSupervisor:   daemonSupervisorH,
+		DaemonConfig:       daemonConfigH,
+		FleetTimeoutsFn:    getFleetTimeouts,
+		ClaimMetrics:       app.claimMetrics,
+		TerminalGraceMS:    graceMS,
+		TerminalIdleMS:     idleMS,
+		TerminalMaxSession: maxSess,
 	})
 }
 

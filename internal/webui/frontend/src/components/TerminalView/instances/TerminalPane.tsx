@@ -36,6 +36,15 @@ export interface TerminalPaneProps {
   notes: string;
   onSaveNotes: (text: string) => Promise<void>;
   isMetaLoading: boolean;
+  /**
+   * False when the backend reports this tab's PTY is not running — either
+   * metadata survived a server restart without the shell, or the shell
+   * exited mid-session. Undefined (or true) means the normal "try to
+   * connect" path is fine. When false, TerminalInstance should skip its
+   * auto-connect and render the session-ended overlay so the user opts
+   * in to spawning a new shell.
+   */
+  ptyAlive?: boolean | undefined;
 }
 
 export function TerminalPane({
@@ -58,6 +67,7 @@ export function TerminalPane({
   notes,
   onSaveNotes,
   isMetaLoading,
+  ptyAlive,
 }: TerminalPaneProps) {
   return (
     <>
@@ -71,6 +81,7 @@ export function TerminalPane({
         onBackendCrash={onBackendCrash}
         onTerminalFocus={onTerminalFocus}
         agentName={tab.agentName}
+        ptyAlive={ptyAlive}
       />
       {tab.crashReason != null ? (
         <CrashOverlay

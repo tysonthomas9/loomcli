@@ -1647,11 +1647,24 @@ type Statistics struct {
 
 // TabMetadata Terminal tab metadata (Redis-backed)
 type TabMetadata struct {
-	CreatedAt   time.Time `json:"created_at"`
-	IssueId     *string   `json:"issue_id,omitempty"`
-	Label       string    `json:"label"`
-	Notes       string    `json:"notes"`
-	Pinned      bool      `json:"pinned"`
+	// AttachedClients Count of concurrent WebSocket clients currently viewing this
+	// session. 0 means no one is attached (but the PTY may still be
+	// live, within its grace window). Values ≥2 can be surfaced as
+	// a "multiple viewers" indicator so users can be warned before
+	// destructive tab-close actions.
+	AttachedClients int       `json:"attached_clients"`
+	CreatedAt       time.Time `json:"created_at"`
+	IssueId         *string   `json:"issue_id,omitempty"`
+	Label           string    `json:"label"`
+	Notes           string    `json:"notes"`
+	Pinned          bool      `json:"pinned"`
+
+	// PtyAlive Whether the backend PTY for this tab is currently alive in the
+	// server process. False means the tab metadata survived (e.g. a
+	// server restart) but the PTY did not; clients should render the
+	// tab as "session ended" and prompt before reconnecting (which
+	// will spawn a fresh session).
+	PtyAlive    bool      `json:"pty_alive"`
 	SessionName string    `json:"session_name"`
 	SortOrder   int       `json:"sort_order"`
 	UpdatedAt   time.Time `json:"updated_at"`

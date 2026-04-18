@@ -5,6 +5,7 @@ package modbuilder
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
@@ -35,16 +36,17 @@ func NewIssueModules(issueSvc service.IssueService, sessSvc service.SessionServi
 // modules. PTYMgr drives the main terminal WS; AgentTmuxMgr is kept only for
 // the live agent-view WS, which still reads auto-mode tmux sessions.
 type TerminalModuleDeps struct {
-	TermSvc      service.TerminalService
-	AgentSvc     service.AgentService
-	PTYMgr       *terminal.PTYManager
-	AgentTmuxMgr *terminal.AgentTmuxManager // may be nil when tmux is missing
-	TermAuth     *realtime.TerminalAuth
-	CORSOrigins  []string
-	SelfURL      string
-	ConfigByIDFn func(string) (*ops.WorkspaceData, error)
-	TabMetaStore *tabmeta.Store
-	Hub          *realtime.Hub
+	TermSvc         service.TerminalService
+	AgentSvc        service.AgentService
+	PTYMgr          *terminal.PTYManager
+	AgentTmuxMgr    *terminal.AgentTmuxManager // may be nil when tmux is missing
+	TermAuth        *realtime.TerminalAuth
+	CORSOrigins     []string
+	SelfURL         string
+	ConfigByIDFn    func(string) (*ops.WorkspaceData, error)
+	TabMetaStore    *tabmeta.Store
+	Hub             *realtime.Hub
+	ServerStartedAt time.Time
 }
 
 // NewTerminalModules creates the terminal tab and main terminal modules.
@@ -55,7 +57,7 @@ func NewTerminalModules(deps TerminalModuleDeps) []interface{ Register(*http.Ser
 			deps.TermSvc, deps.AgentSvc, deps.PTYMgr, deps.AgentTmuxMgr,
 			deps.TermAuth, deps.CORSOrigins,
 			deps.SelfURL, deps.ConfigByIDFn,
-			deps.TabMetaStore, deps.Hub),
+			deps.TabMetaStore, deps.Hub, deps.ServerStartedAt),
 	}
 }
 

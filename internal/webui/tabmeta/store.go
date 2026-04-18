@@ -26,16 +26,24 @@ const keyPrefix = "terminal:meta:"
 var validSessionName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 // TabMetadata represents persisted metadata for a single terminal tab.
+//
+// PTYAlive and AttachedClients are NOT persisted to Redis — they are
+// populated by the service layer at read time from the in-process
+// PTYManager. PTYAlive=false means the tab survived a server restart but
+// its backing shell did not. AttachedClients>1 means the same session is
+// being viewed by multiple WebSocket clients concurrently.
 type TabMetadata struct {
-	SessionName string    `json:"session_name"`
-	Workspace   string    `json:"workspace,omitempty"`
-	Label       string    `json:"label"`
-	Notes       string    `json:"notes"`
-	SortOrder   int       `json:"sort_order"`
-	Pinned      bool      `json:"pinned"`
-	IssueID     string    `json:"issue_id,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	SessionName     string    `json:"session_name"`
+	Workspace       string    `json:"workspace,omitempty"`
+	Label           string    `json:"label"`
+	Notes           string    `json:"notes"`
+	SortOrder       int       `json:"sort_order"`
+	Pinned          bool      `json:"pinned"`
+	IssueID         string    `json:"issue_id,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+	PTYAlive        bool      `json:"pty_alive"`
+	AttachedClients int       `json:"attached_clients"`
 }
 
 // Store provides Redis-backed persistence for terminal tab metadata.

@@ -2,6 +2,7 @@ package terminal
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
@@ -30,6 +31,7 @@ type Module struct {
 	workspaceConfigByIDFn func(string) (*ops.WorkspaceData, error)
 	tabMetaStore          *tabmeta.Store
 	hub                   *realtime.Hub
+	serverStartedAt       time.Time
 }
 
 // NewModule returns a Module. Any of agentSvc, agentTmuxMgr, and termAuth
@@ -45,6 +47,7 @@ func NewModule(
 	workspaceConfigByIDFn func(string) (*ops.WorkspaceData, error),
 	tabMetaStore *tabmeta.Store,
 	hub *realtime.Hub,
+	serverStartedAt time.Time,
 ) *Module {
 	return &Module{
 		termSvc:               termSvc,
@@ -57,6 +60,7 @@ func NewModule(
 		workspaceConfigByIDFn: workspaceConfigByIDFn,
 		tabMetaStore:          tabMetaStore,
 		hub:                   hub,
+		serverStartedAt:       serverStartedAt,
 	}
 }
 
@@ -78,6 +82,6 @@ func (m *Module) Register(mux *http.ServeMux) {
 		mux.HandleFunc("GET /api/workspaces/{ws}/terminal/token", HandleTerminalToken(m.termSvc))
 	}
 	if m.ptyMgr != nil {
-		mux.HandleFunc("GET /api/workspaces/{ws}/terminal/ws", HandleTerminalWS(m.ptyMgr, m.termAuth, m.allowedOrigins, m.loomServerURL, m.workspaceConfigByIDFn, m.tabMetaStore, m.hub))
+		mux.HandleFunc("GET /api/workspaces/{ws}/terminal/ws", HandleTerminalWS(m.ptyMgr, m.termAuth, m.allowedOrigins, m.loomServerURL, m.workspaceConfigByIDFn, m.tabMetaStore, m.hub, m.serverStartedAt))
 	}
 }
