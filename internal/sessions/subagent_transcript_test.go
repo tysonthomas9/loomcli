@@ -54,6 +54,48 @@ func TestSyncSubagentTranscript_RejectsBadSubagentID(t *testing.T) {
 	}
 }
 
+// SubagentTranscriptPath is an unvalidated primitive — it interpolates the
+// ID straight into the filename. Callers must gate on SubagentIDPattern.
+// This test pins the escape behaviour so anyone calling the primitive
+// without validation inherits a path traversal.
+func TestSubagentTranscriptPath_UnvalidatedPrimitiveCanEscapeStoreDir(t *testing.T) {
+	store := &Store{dir: "/var/loom/sessions"}
+	got := store.SubagentTranscriptPath("sess-abc", "../../../../../../etc/passwd")
+	cleaned := filepath.Clean(got)
+	storePrefix := filepath.Clean("/var/loom/sessions") + "/"
+	if len(cleaned) >= len(storePrefix) && cleaned[:len(storePrefix)] == storePrefix {
+		t.Errorf("primitive unexpectedly stayed inside store dir; traversal blocked: %q", cleaned)
+	}
+}
+
+func TestSubagentIDPattern_RejectsUnsafeInputs(t *testing.T) {
+	bad := []string{
+		"../../../etc/passwd",
+		"..",
+		".",
+		"foo/bar",
+		"foo\\bar",
+		"foo-bar",
+		"foo.jsonl",
+		"",
+		"foo\x00bar",
+	}
+	for _, s := range bad {
+		if SubagentIDPattern.MatchString(s) {
+			t.Errorf("SubagentIDPattern accepted %q (should reject)", s)
+		}
+	}
+}
+
+func TestSubagentIDPattern_AcceptsValidIDs(t *testing.T) {
+	good := []string{"abc123", "deadbeef", "A1B2C3", "0"}
+	for _, s := range good {
+		if !SubagentIDPattern.MatchString(s) {
+			t.Errorf("SubagentIDPattern rejected valid ID %q", s)
+		}
+	}
+}
+
 func TestListSubagentTranscripts_ReturnsEmpty(t *testing.T) {
 	const sid = "20260417-120000-nova-abcd-0123abcd"
 	store, _ := newStoreWithSession(t, sid)

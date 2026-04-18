@@ -15,9 +15,11 @@ import (
 // copies of Claude Code subagent transcripts (one per spawned Task).
 const subagentsSubdir = "subagents"
 
-// subagentIDPattern matches Claude Code's subagent ID format (alphanumeric
+// SubagentIDPattern matches Claude Code's subagent ID format (alphanumeric
 // hex-ish). Restricts to a safe character set before using in a filename.
-var subagentIDPattern = regexp.MustCompile(`^[a-zA-Z0-9]+$`)
+// Exported so upstream callers (e.g., the web service read path) can apply
+// the same validation the write path uses.
+var SubagentIDPattern = regexp.MustCompile(`^[a-zA-Z0-9]+$`)
 
 // SyncSubagentTranscript copies a subagent's JSONL transcript into the
 // session directory at sessions/<sid>/subagents/agent-<subagentID>.jsonl.
@@ -33,7 +35,7 @@ func (s *Store) SyncSubagentTranscript(sessionID, subagentID, srcPath string) er
 	if strings.ContainsAny(sessionID, "/\\") {
 		return fmt.Errorf("invalid session ID %q: contains path separator", sessionID)
 	}
-	if !subagentIDPattern.MatchString(subagentID) {
+	if !SubagentIDPattern.MatchString(subagentID) {
 		return fmt.Errorf("invalid subagent ID %q", subagentID)
 	}
 
@@ -49,8 +51,7 @@ func (s *Store) SyncSubagentTranscript(sessionID, subagentID, srcPath string) er
 		return fmt.Errorf("stat session dir: %w", err)
 	}
 
-	srcInfo, err := os.Stat(srcPath)
-	if err != nil {
+	if _, err := os.Stat(srcPath); err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
@@ -63,11 +64,6 @@ func (s *Store) SyncSubagentTranscript(sessionID, subagentID, srcPath string) er
 	}
 
 	dstPath := filepath.Join(dstDir, "agent-"+subagentID+".jsonl")
-	if dstInfo, err := os.Stat(dstPath); err == nil {
-		if dstInfo.Size() == srcInfo.Size() && dstInfo.ModTime().Equal(srcInfo.ModTime()) {
-			return nil
-		}
-	}
 
 	// #nosec G304 — srcPath comes from the agent hook payload (trusted)
 	data, err := os.ReadFile(srcPath)

@@ -184,6 +184,9 @@ func (s *sessionServiceImpl) GetSessionSubagentTranscript(_ context.Context, wsI
 	if subagentID == "" {
 		return nil, service.ErrValidation("subagent ID is required")
 	}
+	if !sessions.SubagentIDPattern.MatchString(subagentID) {
+		return nil, service.ErrValidation("invalid subagent ID")
+	}
 	path := store.SubagentTranscriptPath(sessionID, subagentID)
 	if _, statErr := os.Stat(path); statErr != nil {
 		if os.IsNotExist(statErr) {

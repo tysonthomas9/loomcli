@@ -33,8 +33,7 @@ const NativeTranscriptFile = "agent_transcript.jsonl"
 // Returns nil if srcPath is empty or does not exist (the hook subprocess
 // must never exit nonzero; errors are informational only).
 //
-// Skips the write when the destination already has the same size as the
-// source. Full re-copy otherwise. Atomic via atomicfile.WriteFile.
+// Always re-reads and re-writes atomically via atomicfile.WriteFile.
 func (s *Store) SyncNativeTranscript(sessionID, srcPath string) error {
 	if srcPath == "" {
 		return nil
@@ -55,8 +54,7 @@ func (s *Store) SyncNativeTranscript(sessionID, srcPath string) error {
 		return fmt.Errorf("stat session dir: %w", err)
 	}
 
-	srcInfo, err := os.Stat(srcPath)
-	if err != nil {
+	if _, err := os.Stat(srcPath); err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
@@ -64,11 +62,6 @@ func (s *Store) SyncNativeTranscript(sessionID, srcPath string) error {
 	}
 
 	dstPath := filepath.Join(sessDir, NativeTranscriptFile)
-	if dstInfo, err := os.Stat(dstPath); err == nil {
-		if dstInfo.Size() == srcInfo.Size() && dstInfo.ModTime().Equal(srcInfo.ModTime()) {
-			return nil
-		}
-	}
 
 	// #nosec G304 — srcPath comes from the agent hook payload (trusted)
 	data, err := os.ReadFile(srcPath)

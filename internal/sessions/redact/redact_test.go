@@ -86,3 +86,42 @@ func TestString_RedactsHighEntropy(t *testing.T) {
 		t.Errorf("want REDACTED; got %q", got)
 	}
 }
+
+// Regression: shouldSkipJSONLField previously used HasSuffix("id"), which
+// wrongly matched "kid", "credential_id", "paid", "avoid", etc. and let
+// high-entropy secrets pass through unredacted. Now uses an explicit
+// allowlist of known structural-ID field names.
+func TestJSONLContent_RedactsSecretInKidField(t *testing.T) {
+	input := `{"kid":"` + highEntropySecret + `"}`
+	got, err := JSONLContent(input)
+	if err != nil {
+		t.Fatalf("JSONLContent: %v", err)
+	}
+	if strings.Contains(got, highEntropySecret) {
+		t.Errorf("secret leaked under kid field: got %q", got)
+	}
+}
+
+func TestJSONLContent_RedactsSecretInCredentialIDField(t *testing.T) {
+	input := `{"credential_id":"` + highEntropySecret + `"}`
+	got, err := JSONLContent(input)
+	if err != nil {
+		t.Fatalf("JSONLContent: %v", err)
+	}
+	if strings.Contains(got, highEntropySecret) {
+		t.Errorf("secret leaked under credential_id field: got %q", got)
+	}
+}
+
+// Positive control: session_id is a structural ID in the allowlist and must
+// still pass through untouched.
+func TestJSONLContent_PreservesSessionID(t *testing.T) {
+	input := `{"session_id":"abc-123"}`
+	got, err := JSONLContent(input)
+	if err != nil {
+		t.Fatalf("JSONLContent: %v", err)
+	}
+	if !strings.Contains(got, "abc-123") {
+		t.Errorf("session_id value was incorrectly modified: got %q", got)
+	}
+}

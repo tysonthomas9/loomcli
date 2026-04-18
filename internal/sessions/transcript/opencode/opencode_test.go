@@ -56,6 +56,38 @@ func TestExtractModifiedFiles(t *testing.T) {
 	}
 }
 
+// Regression: Events previously dereferenced part.State for "tool" parts
+// without nil-checking it, so a {"type":"tool","state":null} part crashed
+// the transcript handler. Now emits a tool_use event with no input.
+func TestEvents_ToolPartWithNilState_NoPanic(t *testing.T) {
+	input := []byte(`{
+		"info": {"id":"sess-x","createdAt":1700000000000},
+		"messages": [
+			{
+				"info": {"id":"m1","role":"assistant","time":{"created":1700000001000}},
+				"parts": [{"type":"tool","tool":"write","callID":"c1","state":null}]
+			}
+		]
+	}`)
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("Events panicked on tool part with nil state: %v", r)
+		}
+	}()
+
+	events, err := Events(input)
+	if err != nil {
+		t.Fatalf("Events: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("want 1 event (tool_use, no tool_result for nil-state), got %d", len(events))
+	}
+	if events[0].Type != transcript.EventToolUse || events[0].ToolName != "write" || events[0].ToolUseID != "c1" {
+		t.Errorf("unexpected event: %+v", events[0])
+	}
+}
+
 func TestParseExportSession_Empty(t *testing.T) {
 	session, err := ParseExportSession(nil)
 	if err != nil {

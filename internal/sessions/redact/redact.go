@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -45,6 +46,8 @@ func getDetector() *detect.Detector {
 	gitleaksDetectorOnce.Do(func() {
 		d, err := detect.NewDetectorDefaultConfig()
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "redact: gitleaks detector init failed: %v; "+
+				"falling back to entropy-only detection\n", err)
 			return
 		}
 		gitleaksDetector = d
@@ -228,16 +231,30 @@ func collectJSONLReplacements(v any) [][2]string {
 	return repls
 }
 
-// shouldSkipJSONLField: structural fields that are never secrets.
+// shouldSkipJSONLField: structural fields that are never secrets. Uses an
+// explicit allowlist of field names known to hold IDs/paths in the native
+// transcripts we parse (Claude Code, Codex, OpenCode). Avoid loose suffix
+// matches like HasSuffix("id") — those incorrectly match kid, paid, avoid,
+// hybrid, etc. and let real secrets through when stuffed under those fields.
 func shouldSkipJSONLField(key string) bool {
-	if key == "signature" {
-		return true
-	}
 	lower := strings.ToLower(key)
-	if strings.HasSuffix(lower, "id") || strings.HasSuffix(lower, "ids") {
-		return true
-	}
 	switch lower {
+	case "signature":
+		return true
+	case "id", "uuid":
+		return true
+	case "sessionid", "session_id",
+		"messageid", "message_id",
+		"parentuuid", "parent_uuid",
+		"tooluseid", "tool_use_id",
+		"callid", "call_id",
+		"requestid", "request_id",
+		"traceid", "trace_id",
+		"spanid", "span_id",
+		"taskid", "task_id",
+		"threadid", "thread_id",
+		"eventid", "event_id":
+		return true
 	case "filepath", "file_path", "cwd", "root", "directory", "dir", "path":
 		return true
 	}

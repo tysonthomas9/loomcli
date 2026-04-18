@@ -231,7 +231,10 @@ func Events(data []byte) ([]transcript.Event, error) {
 				})
 				seq++
 			case "tool":
-				input, _ := json.Marshal(part.State.Input)
+				var input json.RawMessage
+				if part.State != nil {
+					input, _ = json.Marshal(part.State.Input)
+				}
 				out = append(out, transcript.Event{
 					Seq:       seq,
 					Timestamp: ts,
