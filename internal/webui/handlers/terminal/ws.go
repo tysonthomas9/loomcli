@@ -106,7 +106,12 @@ func validateTerminalWSRequest(w http.ResponseWriter, r *http.Request, manager w
 		return "", "", false
 	}
 
-	if manager.SessionCount() >= manager.MaxSessions() {
+	// Reject only when we'd have to spawn a *new* session past the cap.
+	// Reconnects to an existing (workspace, session) must still pass —
+	// AttachSession doesn't count them against the cap, and a 503 here
+	// would lock users out of live sessions until one is killed.
+	key := webuterminal.SessionKey{Workspace: workspace, Name: session}
+	if !manager.HasSession(key) && manager.SessionCount() >= manager.MaxSessions() {
 		handler.WriteJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
 			"success": false, "error": "maximum terminal sessions reached",
 		})
@@ -204,7 +209,7 @@ func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalW
 	go func() {
 		// Pump attachment output → WS. Exits when the channel closes
 		// (session killed or replaced) or the context is cancelled.
-		crashCh <- realtime.AttachmentToWS(ctx, cancel, conn, att.Output())
+		crashCh <- realtime.AttachmentToWS(ctx, cancel, conn, att)
 	}()
 
 	// WS → PTY until the client disconnects. The attachment satisfies

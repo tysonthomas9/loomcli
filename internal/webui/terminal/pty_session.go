@@ -17,6 +17,17 @@ import (
 // contents interleaved with the replayed bytes.
 var screenResetSeq = []byte("\x1b[2J\x1b[H")
 
+// Exit reasons stored on ptySession.closeReason and reported by
+// Attachment.ExitReason() after the output channel closes. The WS handler
+// maps these to WebSocket close codes so the frontend can distinguish an
+// explicit server-side Kill (e.g. DeleteTab) from a backend crash or a
+// benign detach.
+const (
+	ExitReasonKilled   = "killed"   // explicit PTYManager.Kill
+	ExitReasonExited   = "exited"   // child process exited on its own
+	ExitReasonShutdown = "shutdown" // manager-wide Shutdown
+)
+
 // attachBufferSize is the capacity of an Attachment's output channel.
 // Non-blocking sends from the drain goroutine mean a slow WebSocket drops
 // frames rather than back-pressuring the shell. The ring buffer always has
@@ -31,6 +42,12 @@ type localAttachment struct {
 	pty        *os.File
 	output     chan []byte
 	scrollback []byte
+	// session is held so ExitReason can report *why* the output channel
+	// closed (the reason is stored on the session). Keeping a pointer after
+	// close() is safe — closeReason is written before the channel is closed,
+	// and the attachment is only consulted by a goroutine that already
+	// observed the close.
+	session *ptySession
 }
 
 func (a *localAttachment) ConnID() string        { return a.connID }
@@ -44,6 +61,21 @@ func (a *localAttachment) WriteInput(p []byte) (int, error) { return a.pty.Write
 func (a *localAttachment) Scrollback() []byte               { return a.scrollback }
 func (a *localAttachment) Resize(_ string, cols, rows uint16) error {
 	return pty.Setsize(a.pty, &pty.Winsize{Cols: cols, Rows: rows})
+}
+
+// ExitReason returns the reason the owning session closed, or "" if the
+// session is still live (or was never given a reason). Only meaningful
+// after Output() has been observed closed.
+func (a *localAttachment) ExitReason() string {
+	if a.session == nil {
+		return ""
+	}
+	if v := a.session.closeReason.Load(); v != nil {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
 }
 
 // ptySession owns the PTY fd, child process, scrollback ring, and the set
@@ -65,8 +97,9 @@ type ptySession struct {
 	killMu    sync.Mutex
 	killTimer *time.Timer
 
-	closeOnce sync.Once
-	done      chan struct{}
+	closeOnce   sync.Once
+	closeReason atomic.Value // string; stored before the output channels close
+	done        chan struct{}
 }
 
 // attachmentState is the internal mutable half of an Attachment.
@@ -145,6 +178,10 @@ func (s *ptySession) drain(m *PTYManager) {
 // the replay bytes (reset escape + current scrollback) so the new client
 // starts from the same grid state as the existing ones.
 //
+// Returns nil if the session was closed concurrently (close() nils
+// s.attaches). The caller (PTYManager.AttachSession) is expected to retry
+// the lookup/spawn in that case.
+//
 // connID must be unique; PTYManager generates it from a monotonic counter.
 // A defensive same-connID check closes any prior attachment under that ID
 // — this is guard-rail against a caller bug, not an expected code path.
@@ -153,6 +190,13 @@ func (s *ptySession) attachNew(connID string) *localAttachment {
 	st := &attachmentState{connID: connID, ch: ch}
 
 	s.attachMu.Lock()
+	if s.attaches == nil {
+		// Session was closed between the manager-level lookup and this
+		// attach. Signal the caller to retry.
+		s.attachMu.Unlock()
+		close(ch)
+		return nil
+	}
 	if existing, ok := s.attaches[connID]; ok {
 		existing.close()
 	}
@@ -166,7 +210,7 @@ func (s *ptySession) attachNew(connID string) *localAttachment {
 		replay = append(replay, body...)
 	}
 
-	return &localAttachment{connID: connID, pty: s.pty, output: ch, scrollback: replay}
+	return &localAttachment{connID: connID, pty: s.pty, output: ch, scrollback: replay, session: s}
 }
 
 // detach releases the attachment identified by connID and reports whether
@@ -219,10 +263,16 @@ func (s *ptySession) cancelKillTimer() {
 	}
 }
 
-// close tears down the PTY and child process. Idempotent.
-func (s *ptySession) close() error {
+// close tears down the PTY and child process. Idempotent. reason is
+// recorded (first-writer-wins via closeOnce) so attached clients can
+// distinguish an explicit kill from a child exit or shutdown via
+// Attachment.ExitReason().
+func (s *ptySession) close(reason string) error {
 	var firstErr error
 	s.closeOnce.Do(func() {
+		if reason != "" {
+			s.closeReason.Store(reason)
+		}
 		close(s.done)
 		s.cancelKillTimer()
 

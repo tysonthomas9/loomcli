@@ -72,6 +72,13 @@ type Attachment interface {
 	// Attachment directly to realtime.WSToPTY. connID is accepted for
 	// interface compatibility; implementations may ignore it.
 	Resize(connID string, cols, rows uint16) error
+
+	// ExitReason returns the reason the owning session closed. Values are
+	// drawn from the ExitReason* constants in pty_session.go
+	// (ExitReasonKilled, ExitReasonExited, ExitReasonShutdown). Returns
+	// the empty string when the session is still live or no reason was
+	// recorded. Only meaningful after Output() has been observed closed.
+	ExitReason() string
 }
 
 // Compile-time assertions.
