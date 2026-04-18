@@ -22,9 +22,11 @@ export interface RepoInfo {
   name: string;
   path: string;
   default_branch: string;
+  current_branch?: string;
   remote: string;
   source_repo_id?: string;
   groups: string[];
+  is_linked_worktree?: boolean;
 }
 
 export interface WorkspaceAgentInfo {

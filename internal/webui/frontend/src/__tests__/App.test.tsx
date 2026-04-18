@@ -288,16 +288,6 @@ vi.mock("@/hooks", () => ({
     resetVersion: 0,
     refresh: vi.fn(),
   })),
-  useAgentTerminalLogs: vi.fn(() => ({
-    mode: "idle" as const,
-    chunks: [],
-    state: "disconnected" as const,
-    error: null,
-    resetVersion: 0,
-    refresh: vi.fn(),
-    resize: vi.fn(),
-    sendInput: vi.fn(),
-  })),
   useTheme: vi.fn(() => ({
     theme: "light" as const,
     toggleTheme: vi.fn(),
@@ -306,6 +296,14 @@ vi.mock("@/hooks", () => ({
   useRepoFilter: vi.fn(() => [[], vi.fn()]),
   useWorkspaceRepos: vi.fn(() => ({
     repos: [],
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  })),
+  useWorkspaceTree: vi.fn(() => ({
+    epics: [],
+    orphanTasks: [],
+    closedEpicCount: 0,
     isLoading: false,
     error: null,
     refetch: vi.fn(),

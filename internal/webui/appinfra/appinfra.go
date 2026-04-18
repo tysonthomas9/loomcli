@@ -73,6 +73,9 @@ func NewWorkspaceRegistry(logger *slog.Logger) *WorkspaceRegistry {
 // InitProtectedPool creates a daemon connection pool with a circuit breaker.
 // Returns the pool and a nil error on success.
 func InitProtectedPool(rawPool *daemon.ConnectionPool, logger *slog.Logger) daemon.Pool {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	breaker := circuitbreaker.NewBreaker("daemon", circuitbreaker.Config{
 		FailureThreshold:  3,
 		OpenTimeout:       30 * time.Second,
@@ -90,7 +93,7 @@ type HookConfig struct {
 	MultiPool *daemon.MultiPool
 	PoolSize  int
 	MultiSub  *subscription.MultiWorkspaceSubscriber
-	TermMgr   *terminal.TerminalManager
+	TermMgr   *terminal.AgentTmuxManager
 	FleetReg  *fleet.StoreRegistry
 	FleetURL  string
 	FleetWS   string

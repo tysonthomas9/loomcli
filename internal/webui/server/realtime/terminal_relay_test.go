@@ -88,3 +88,22 @@ func TestCrashInfo_WSClose_Normal(t *testing.T) {
 		t.Errorf("expected 'session detached', got %q", reason)
 	}
 }
+
+func TestCrashInfo_WSClose_Killed(t *testing.T) {
+	ci := CrashInfo{Killed: true, Reason: "session killed"}
+	code, reason := ci.WSClose()
+	if code != websocket.StatusCode(WSCloseSessionKilled) {
+		t.Errorf("expected status %d, got %d", WSCloseSessionKilled, code)
+	}
+	if reason != "session killed" {
+		t.Errorf("expected 'session killed', got %q", reason)
+	}
+}
+
+func TestCrashInfo_WSClose_KilledDefaultsReason(t *testing.T) {
+	ci := CrashInfo{Killed: true}
+	_, reason := ci.WSClose()
+	if reason != "session killed" {
+		t.Errorf("expected default reason 'session killed', got %q", reason)
+	}
+}

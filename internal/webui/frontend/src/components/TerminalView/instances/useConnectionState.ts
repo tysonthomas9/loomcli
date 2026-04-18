@@ -1,7 +1,5 @@
 import { useState, useCallback, useRef } from "react";
 
-import { fetchTerminalToken, restartTerminalSession } from "@/hooks/api";
-
 import type {
   ConnectionState,
   TerminalInstanceHandle,
@@ -12,7 +10,6 @@ import type { TabState } from "@/components/TerminalView/tabs";
 interface UseConnectionStateOptions {
   setTabs: React.Dispatch<React.SetStateAction<TabState[]>>;
   instanceRefs: React.MutableRefObject<Map<string, TerminalInstanceHandle>>;
-  workspaceId: string;
   onTabConnected?: (tabId: string) => void;
 }
 
@@ -36,7 +33,6 @@ interface UseConnectionStateReturn {
 export function useConnectionState({
   setTabs,
   instanceRefs,
-  workspaceId,
   onTabConnected,
 }: UseConnectionStateOptions): UseConnectionStateReturn {
   const [tabHasConnected, setTabHasConnected] = useState<Map<string, boolean>>(
@@ -45,10 +41,6 @@ export function useConnectionState({
   const [tabReconnectState, setTabReconnectState] = useState<
     Map<string, ReconnectOverlayState>
   >(() => new Map());
-
-  // Capture workspaceId in a ref to avoid stale closures in handleCrashRestart
-  const workspaceIdRef = useRef(workspaceId);
-  workspaceIdRef.current = workspaceId;
 
   // Capture onTabConnected in a ref for stable callbacks
   const onTabConnectedRef = useRef(onTabConnected);
@@ -108,28 +100,14 @@ export function useConnectionState({
   );
 
   const handleCrashRestart = useCallback(
-    (tabId: string, sessionName: string) => {
+    (tabId: string, _sessionName: string) => {
       setTabs((prev) =>
         prev.map((t) => (t.id === tabId ? { ...t, crashReason: null } : t)),
       );
-      fetchTerminalToken(workspaceIdRef.current, sessionName)
-        .then((token) => {
-          if (!token) {
-            instanceRefs.current.get(tabId)?.reconnect();
-            return;
-          }
-          return restartTerminalSession(
-            workspaceIdRef.current,
-            sessionName,
-            token,
-          ).then(() => {
-            instanceRefs.current.get(tabId)?.reconnect();
-          });
-        })
-        .catch((err) => {
-          console.error(`Failed to restart session ${sessionName}:`, err);
-          instanceRefs.current.get(tabId)?.reconnect();
-        });
+      // With the PTY model, "restart" is just opening a fresh WebSocket.
+      // The server-side tmux restart flow no longer exists; each new WS
+      // connect spawns a fresh shell.
+      instanceRefs.current.get(tabId)?.reconnect();
     },
     [setTabs, instanceRefs],
   );

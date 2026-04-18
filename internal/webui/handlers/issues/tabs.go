@@ -10,7 +10,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 // issueTabResponse wraps issue tab API responses.
@@ -20,9 +19,12 @@ type issueTabResponse struct {
 	Error   string      `json:"error,omitempty"`
 }
 
-// handleGetIssueTabs returns the persisted tab state for an issue,
-// filtering out terminal tabs whose tmux sessions have expired.
-func handleGetIssueTabs(store *issuetabs.Store, manager *terminal.TerminalManager) http.HandlerFunc { //nolint:funlen
+// handleGetIssueTabs returns the persisted tab state for an issue.
+//
+// The tmux-session-aliveness filter that used to live here is gone: without
+// tmux, there are no persistent sessions to validate against. Stale tab
+// entries are the client's responsibility to reap on render.
+func handleGetIssueTabs(store *issuetabs.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			handler.WriteJSON(w, http.StatusServiceUnavailable, issueTabResponse{
@@ -60,39 +62,9 @@ func handleGetIssueTabs(store *issuetabs.Store, manager *terminal.TerminalManage
 			return
 		}
 
-		// Only query tmux when there are terminal tabs to validate.
-		hasTerminalTab := false
-		for _, tab := range state.Tabs {
-			if tab.Type == "terminal" {
-				hasTerminalTab = true
-				break
-			}
-		}
-
-		var activeNames []string
-		if manager != nil && hasTerminalTab {
-			sessions, err := manager.ListActiveSessionsForWorkspace(wsID)
-			if err != nil {
-				slog.Error("failed to list active sessions for issue tab validation", "err", err)
-			} else {
-				for _, s := range sessions {
-					activeNames = append(activeNames, s.Name)
-				}
-			}
-		}
-
-		filtered := issuetabs.ValidateAndFilter(state, activeNames)
-
-		// Save back filtered state if tabs were removed or active tab changed
-		if len(filtered.Tabs) != len(state.Tabs) || filtered.ActiveTabID != state.ActiveTabID {
-			if err := store.Save(r.Context(), wsID, filtered); err != nil {
-				slog.Error("failed to save filtered issue tab state", "issue_id", issueID, "err", err)
-			}
-		}
-
 		handler.WriteJSON(w, http.StatusOK, issueTabResponse{
 			Success: true,
-			Data:    filtered,
+			Data:    state,
 		})
 	}
 }

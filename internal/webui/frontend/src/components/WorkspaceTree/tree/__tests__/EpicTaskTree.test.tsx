@@ -4,8 +4,8 @@
 
 /**
  * Unit tests for EpicTaskTree component.
- * Covers TalkToLeadEntry rendering, EpicRow rendering,
- * empty state messages, ungrouped orphan tasks, and loading skeleton.
+ * Covers EpicRow rendering, empty state messages, ungrouped orphan tasks,
+ * and loading skeleton.
  */
 
 import { render, screen, fireEvent } from "@testing-library/react";
@@ -99,30 +99,6 @@ describe("EpicTaskTree", () => {
     setMockTree([], [], false);
     // Clear localStorage to avoid persisted collapse state leaking between tests
     localStorage.clear();
-  });
-
-  describe("TalkToLeadEntry rendering", () => {
-    it("renders TalkToLeadEntry", () => {
-      render(<EpicTaskTree workspaceName="ws-1" activeFilter="all" />);
-      expect(screen.getByText("Talk to Lead")).toBeInTheDocument();
-    });
-
-    it("renders TalkToLeadEntry with custom backend", () => {
-      render(
-        <EpicTaskTree
-          workspaceName="ws-1"
-          activeFilter="all"
-          backend="gemini"
-        />,
-      );
-      expect(screen.getByText("gemini")).toBeInTheDocument();
-    });
-
-    it("renders TalkToLeadEntry even during loading", () => {
-      setMockTree([], [], true);
-      render(<EpicTaskTree workspaceName="ws-1" activeFilter="all" />);
-      expect(screen.getByText("Talk to Lead")).toBeInTheDocument();
-    });
   });
 
   describe("EpicRow rendering", () => {
@@ -297,19 +273,6 @@ describe("EpicTaskTree", () => {
   });
 
   describe("callbacks", () => {
-    it("calls onTalkToLead on TalkToLeadEntry click", () => {
-      const onTalkToLead = vi.fn();
-      render(
-        <EpicTaskTree
-          workspaceName="ws-1"
-          activeFilter="all"
-          onTalkToLead={onTalkToLead}
-        />,
-      );
-      fireEvent.click(screen.getByText("Talk to Lead"));
-      expect(onTalkToLead).toHaveBeenCalledWith("ws-1");
-    });
-
     it("calls onSelect when a task is clicked", () => {
       const epics: EpicWithTasks[] = [
         {

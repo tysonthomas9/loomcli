@@ -1,10 +1,11 @@
 /**
  * Terminal WebSocket connection utilities.
  * Handles token fetching, URL building, resize encoding, and WebSocket lifecycle.
+ *
+ * Renderer-agnostic: the caller provides a `write` function (for output) and
+ * wires input directly (e.g. wterm's `onData` → ws.send). No xterm Terminal
+ * / FitAddon / interceptor references live here after the wterm migration.
  */
-
-import type { FitAddon } from "@xterm/addon-fit";
-import type { Terminal } from "@xterm/xterm";
 
 import {
   get,
@@ -41,9 +42,8 @@ async function fetchTerminalToken(
 
 /**
  * Build the WebSocket URL for the terminal relay endpoint. The workspace ID
- * lives in the URL path (not a query parameter) since the workspace-scoped
- * routing migration: WorkspaceMiddleware reads it from the path and injects
- * it into the handler context.
+ * lives in the URL path (not a query parameter): WorkspaceMiddleware reads it
+ * from the path and injects it into the handler context.
  */
 function buildWsUrl(
   workspaceId: string,
@@ -62,16 +62,12 @@ function buildWsUrl(
 }
 
 /**
- * Encode a resize message per the binary frame protocol.
- * Byte 0 = 0x01, then cols as uint16 BE, then rows as uint16 BE.
+ * Encode a resize message per the wterm wire format: an in-band escape
+ * sequence "\x1b[RESIZE:<cols>;<rows>]" sent as a WebSocket string message.
+ * Matches the server-side regex in internal/webui/server/realtime/terminal_relay.go.
  */
-export function encodeResize(cols: number, rows: number): ArrayBuffer {
-  const buf = new ArrayBuffer(5);
-  const view = new DataView(buf);
-  view.setUint8(0, 0x01);
-  view.setUint16(1, cols, false);
-  view.setUint16(3, rows, false);
-  return buf;
+export function encodeResize(cols: number, rows: number): string {
+  return `\x1b[RESIZE:${cols};${rows}]`;
 }
 
 /** WebSocket close code sent by the backend when the process exits. */
@@ -80,32 +76,31 @@ const WS_CLOSE_BACKEND_EXITED = 4001;
 const WS_CLOSE_SESSION_KILLED = 4002;
 
 /**
- * Connect a Terminal instance to a WebSocket, returning a cleanup function.
+ * Connect a WebSocket, wiring received bytes into `write` and announcing
+ * lifecycle transitions. The caller owns input (wterm's `onData` → ws.send)
+ * and resize (wterm's `onResize` → encodeResize → ws.send).
+ *
+ * Returns a cleanup function that closes the WS and marks the connect
+ * attempt cancelled (idempotent; safe to call before or after onopen).
  */
 export function connectWebSocket(
   workspaceId: string,
   sessionName: string,
-  terminal: Terminal,
-  fitAddon: FitAddon,
+  write: (data: string | Uint8Array) => void,
   wsRef: React.MutableRefObject<WebSocket | null>,
   setConnectionState: (s: ConnectionState) => void,
   onConnected?: () => void,
   onDisconnected?: () => void,
   onOutput?: () => void,
   onBackendCrash?: (reason: string) => void,
-  onInput?: (
-    data: string,
-    sendToWs: (data: string) => void,
-    terminal: Terminal,
-  ) => void,
   agentName?: string,
   onSessionKilled?: () => void,
 ): () => void {
   setConnectionState("connecting");
 
   let cancelled = false;
+  let wsCleanupInner: (() => void) | null = null;
 
-  // Use agent terminal endpoint when agentName is provided
   const tokenPromise = agentName
     ? getAgentTerminalToken(workspaceId, agentName).catch(() => null)
     : fetchTerminalToken(workspaceId, sessionName);
@@ -114,17 +109,16 @@ export function connectWebSocket(
     .then((token) => {
       if (cancelled) return;
 
-      const wsUrl =
+      const url =
         agentName && token
           ? getAgentTerminalWsUrl(workspaceId, agentName, token)
           : buildWsUrl(workspaceId, sessionName, token);
-      const ws = new WebSocket(wsUrl);
+      const ws = new WebSocket(url);
       wsRef.current = ws;
       ws.binaryType = "arraybuffer";
 
-      // Defense-in-depth: if a future refactor introduces an async step
-      // between the check at line 88 and here, this guard prevents leaking
-      // the WebSocket.
+      // Defense-in-depth: if a future refactor adds an async step between
+      // the check above and here, don't leak the fresh WebSocket.
       if (cancelled) {
         ws.close(1000);
         wsRef.current = null;
@@ -134,17 +128,15 @@ export function connectWebSocket(
       ws.onopen = () => {
         if (cancelled) return;
         setConnectionState("connected");
-        fitAddon.fit();
-        ws.send(encodeResize(terminal.cols, terminal.rows));
         onConnected?.();
       };
 
       ws.onmessage = (ev: MessageEvent) => {
         if (cancelled) return;
         if (typeof ev.data === "string") {
-          terminal.write(ev.data);
+          write(ev.data);
         } else if (ev.data instanceof ArrayBuffer) {
-          terminal.write(new Uint8Array(ev.data));
+          write(new Uint8Array(ev.data));
         }
         onOutput?.();
       };
@@ -152,13 +144,11 @@ export function connectWebSocket(
       ws.onclose = (event: CloseEvent) => {
         if (cancelled) return;
         if (event.code === WS_CLOSE_BACKEND_EXITED) {
-          // Backend process exited — show crash overlay, do NOT auto-reconnect
           setConnectionState("crashed");
           onBackendCrash?.(event.reason || "backend process exited");
           return;
         }
         if (event.code === WS_CLOSE_SESSION_KILLED) {
-          // User killed the session — do NOT auto-reconnect
           setConnectionState("disconnected");
           onSessionKilled?.();
           return;
@@ -172,21 +162,7 @@ export function connectWebSocket(
         setConnectionState("disconnected");
       };
 
-      const sendToWs = (data: string) => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(data);
-        }
-      };
-      const onDataDisposable = terminal.onData((data: string) => {
-        if (onInput) {
-          onInput(data, sendToWs, terminal);
-        } else {
-          sendToWs(data);
-        }
-      });
-
       wsCleanupInner = () => {
-        onDataDisposable.dispose();
         if (
           ws.readyState === WebSocket.OPEN ||
           ws.readyState === WebSocket.CONNECTING
@@ -203,8 +179,6 @@ export function connectWebSocket(
       }
     });
 
-  let wsCleanupInner: (() => void) | null = null;
-
   return () => {
     cancelled = true;
     if (wsCleanupInner) {
@@ -212,8 +186,6 @@ export function connectWebSocket(
       wsCleanupInner = null;
       fn();
     } else {
-      // wsCleanupInner not yet assigned, but WebSocket may already exist
-      // via wsRef.current (assigned before handler setup).
       const ws = wsRef.current;
       if (
         ws &&

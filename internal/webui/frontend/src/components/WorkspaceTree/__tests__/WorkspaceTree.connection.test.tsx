@@ -27,6 +27,14 @@ const defaultReposReturn = {
   isLoading: false,
   error: null as string | null,
   refetch: vi.fn(),
+  connectionState: "connected" as
+    | "loading"
+    | "connected"
+    | "error_never_connected"
+    | "error_lost_connection",
+  retryCountdown: null as number | null,
+  retryNow: vi.fn(),
+  hasEverConnected: false,
 };
 
 const defaultAgentContext = {
@@ -90,10 +98,20 @@ vi.mock("@/hooks", () => ({
   useWorkspaceRepos: () => ({ ...defaultReposReturn, ...reposOverride }),
   useAgentStoreInstance: () => ({}),
   useWorkspaceContext: () => ({
+    workspaceId: "test-ws-uuid",
     activeWorkspaceName: null,
     defaultWorkspaceName: null,
     setDefaultWorkspace: vi.fn(),
     agents: [],
+    workspace: null,
+  }),
+  useWorkspaceTree: () => ({
+    epics: [],
+    orphanTasks: [],
+    closedEpicCount: 0,
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
   }),
   useToast: () => ({ showToast: vi.fn() }),
   useIssueDiffStat: () => ({
@@ -284,7 +302,7 @@ describe("WorkspaceTree connection status", () => {
       expect(badge!.getAttribute("data-disconnected")).toBe("true");
     });
 
-    it("shows agent count (not !) when collapsed and connected with agents", () => {
+    it("does not show collapsed badge when collapsed and connected (even with agents)", () => {
       reposOverride = { repos: oneRepo };
       agentOverride = {
         agents: [
@@ -304,9 +322,7 @@ describe("WorkspaceTree connection status", () => {
       );
 
       const badge = container.querySelector('[class*="collapsedBadge"]');
-      expect(badge).toBeInTheDocument();
-      expect(badge!.textContent).toBe("1");
-      expect(badge!.getAttribute("data-disconnected")).toBe("false");
+      expect(badge).not.toBeInTheDocument();
     });
   });
 

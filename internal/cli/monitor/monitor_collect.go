@@ -87,9 +87,28 @@ func collectAgentStatus(agentTasks map[string]TaskInfo, branch string) ([]AgentS
 }
 
 func collectAgentStatusDeps(deps *cli.Deps, agentTasks map[string]TaskInfo, branch string) ([]AgentStatus, map[string][]string) {
-	worktrees, err := cli.DiscoverWorktrees()
+	allWorktrees, err := cli.DiscoverWorktrees()
 	if err != nil {
 		return nil, nil
+	}
+	// In workspace mode, the config may list both source repos and agent
+	// worktrees. Exclude source repos (non-linked) when linked worktrees
+	// exist. In legacy mode all entries are regular repos — keep them all.
+	hasLinked := false
+	for _, wt := range allWorktrees {
+		if wt.IsLinkedWorktree {
+			hasLinked = true
+			break
+		}
+	}
+	worktrees := allWorktrees
+	if hasLinked {
+		worktrees = make([]cli.WorktreeInfo, 0, len(allWorktrees))
+		for _, wt := range allWorktrees {
+			if wt.IsLinkedWorktree {
+				worktrees = append(worktrees, wt)
+			}
+		}
 	}
 
 	var daemonManaged map[string]DaemonAgentInfo

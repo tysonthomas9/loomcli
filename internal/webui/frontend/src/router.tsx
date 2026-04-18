@@ -38,10 +38,8 @@ const devRoutes = import.meta.env.DEV
             SessionNamePromptFixture,
             WelcomeBannerFixture,
             HelpPopoverFixture,
-            SearchBarFixture,
             WorkspaceTreeFixture,
             SplitDetailSummaryFixture,
-            PasteConfirmDialogFixture,
           } = await import("@/TestFixtures");
           return {
             Component: () => {
@@ -58,14 +56,10 @@ const devRoutes = import.meta.env.DEV
                 fixture = <WelcomeBannerFixture />;
               else if (path === "/test/help-popover")
                 fixture = <HelpPopoverFixture />;
-              else if (path === "/test/search-bar")
-                fixture = <SearchBarFixture />;
               else if (path === "/test/workspace-tree")
                 fixture = <WorkspaceTreeFixture />;
               else if (path === "/test/split-detail-summary")
                 fixture = <SplitDetailSummaryFixture />;
-              else if (path === "/test/paste-confirm")
-                fixture = <PasteConfirmDialogFixture />;
               else return <NotFound />;
               return (
                 <KeyboardShortcutProvider>{fixture}</KeyboardShortcutProvider>

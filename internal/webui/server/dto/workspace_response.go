@@ -35,11 +35,13 @@ type WorkspaceSummary struct {
 
 // WorkspaceRepo represents a repository within a workspace.
 type WorkspaceRepo struct {
-	Name          string `json:"name"`
-	Path          string `json:"path"`
-	DefaultBranch string `json:"default_branch"`
-	Remote        string `json:"remote"`
-	SourceRepoID  string `json:"source_repo_id,omitempty"`
+	Name             string `json:"name"`
+	Path             string `json:"path"`
+	DefaultBranch    string `json:"default_branch"`
+	CurrentBranch    string `json:"current_branch,omitempty"`
+	Remote           string `json:"remote"`
+	SourceRepoID     string `json:"source_repo_id,omitempty"`
+	IsLinkedWorktree bool   `json:"is_linked_worktree,omitempty"`
 	// Initialized to empty slice by mapper; must serialize as [] not null.
 	Groups []string `json:"groups"`
 }

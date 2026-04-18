@@ -5,8 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"os"
-	"strings"
 	"time"
 
 	"nhooyr.io/websocket" //nolint:staticcheck // SA1019: websocket migration tracked separately
@@ -19,58 +17,34 @@ import (
 	webuterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
-// terminalMonitor adapts TerminalManager to the realtime.SessionMonitor interface.
-// Uses the raw internal tmux session name (no prefix applied).
-type terminalMonitor struct {
-	mgr *webuterminal.TerminalManager
-}
-
-func (m *terminalMonitor) HasSession(name string) bool { return m.mgr.HasSession(name) }
-func (m *terminalMonitor) PaneDead(name string) bool   { return m.mgr.PaneDeadRaw(name) }
-func (m *terminalMonitor) CapturePaneRaw(name string, lines int) string {
-	return m.mgr.CapturePaneRaw(name, lines)
-}
-
-// shellCommand returns the user's default shell, falling back to /bin/bash.
-func shellCommand() string {
-	if sh := os.Getenv("SHELL"); sh != "" {
-		return sh
-	}
-	return "/bin/bash"
-}
-
-// attachCommandForSession returns the shell command for plain terminal tabs,
-// or empty string (use manager's defaultCommand) for AI backend sessions.
-func attachCommandForSession(session string) string {
-	if strings.HasPrefix(session, "lead-shell-") {
-		return shellCommand()
-	}
-	return ""
-}
-
 // terminalWSParams holds the dependencies for a terminal WebSocket handler.
 type terminalWSParams struct {
-	manager               *webuterminal.TerminalManager
+	manager               webuterminal.PTYSource
 	auth                  *realtime.TerminalAuth
 	patterns              []string
 	loomServerURL         string
 	workspaceConfigByIDFn func(string) (*ops.WorkspaceData, error)
 	tabMetaStore          *tabmeta.Store
 	hub                   *realtime.Hub
+	// serverStartedAt is used to distinguish "tab metadata from a prior
+	// server process whose PTY is long gone" from "tab metadata just
+	// created in this process that hasn't spawned yet". Only the former
+	// triggers a 4410 close; the latter proceeds to AttachSession as
+	// normal.
+	serverStartedAt time.Time
 }
 
-// HandleTerminalWS returns a WebSocket handler for terminal relay.
-// It upgrades HTTP connections to WebSocket, bridges them to tmux sessions
-// via the TerminalManager, and handles bidirectional binary data relay
-// plus an in-band resize protocol. The manager's current default command
-// is used for new terminal sessions.
+// HandleTerminalWS returns a WebSocket handler for terminal relay. It upgrades
+// the HTTP connection to a WebSocket, attaches to (or creates) the persistent
+// session identified by the (workspace, session) pair, and bridges
+// stdin/stdout bidirectionally using the wterm wire format: binary output
+// frames and a \x1b[RESIZE:cols;rows] escape for resize.
 //
-// allowedOrigins is a list of full origin URLs (e.g. "http://localhost:3000")
-// whose host portions are used as OriginPatterns for the WebSocket upgrade.
-// When nil or empty, only same-origin and non-browser (no Origin header)
-// connections are accepted.
-func HandleTerminalWS(manager *webuterminal.TerminalManager, auth *realtime.TerminalAuth, allowedOrigins []string, loomServerURL string, workspaceConfigByIDFn func(string) (*ops.WorkspaceData, error), tabMetaStore *tabmeta.Store, hub *realtime.Hub) http.HandlerFunc {
-	// Compute origin host patterns once at construction time.
+// Unlike the previous PTY-per-WS model, the session outlives the WebSocket:
+// on disconnect the PTY and child process stay alive for a grace period so a
+// reconnecting client gets its shell and scrollback back. See PTYManager for
+// the lifecycle details.
+func HandleTerminalWS(manager webuterminal.PTYSource, auth *realtime.TerminalAuth, allowedOrigins []string, loomServerURL string, workspaceConfigByIDFn func(string) (*ops.WorkspaceData, error), tabMetaStore *tabmeta.Store, hub *realtime.Hub, serverStartedAt time.Time) http.HandlerFunc {
 	p := &terminalWSParams{
 		manager:               manager,
 		auth:                  auth,
@@ -79,6 +53,7 @@ func HandleTerminalWS(manager *webuterminal.TerminalManager, auth *realtime.Term
 		workspaceConfigByIDFn: workspaceConfigByIDFn,
 		tabMetaStore:          tabMetaStore,
 		hub:                   hub,
+		serverStartedAt:       serverStartedAt,
 	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -102,9 +77,9 @@ func HandleTerminalWS(manager *webuterminal.TerminalManager, auth *realtime.Term
 	}
 }
 
-// validateTerminalWSRequest validates the session parameter, auth token, and session limit.
-// Returns the session name, workspace ID, and true on success.
-func validateTerminalWSRequest(w http.ResponseWriter, r *http.Request, manager *webuterminal.TerminalManager, auth *realtime.TerminalAuth) (string, string, bool) {
+// validateTerminalWSRequest validates the session parameter, auth token, and
+// session limit. Returns (session, workspace, true) on success.
+func validateTerminalWSRequest(w http.ResponseWriter, r *http.Request, manager webuterminal.PTYSource, auth *realtime.TerminalAuth) (string, string, bool) {
 	if manager == nil {
 		handler.WriteJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
 			"success": false, "error": "terminal manager not initialized",
@@ -131,14 +106,12 @@ func validateTerminalWSRequest(w http.ResponseWriter, r *http.Request, manager *
 		return "", "", false
 	}
 
-	if manager.SessionIsBeingKilled(workspace, session) {
-		handler.WriteJSON(w, http.StatusConflict, map[string]interface{}{
-			"success": false, "error": "session is being killed",
-		})
-		return "", "", false
-	}
-
-	if manager.SessionCount() >= manager.MaxSessions() {
+	// Reject only when we'd have to spawn a *new* session past the cap.
+	// Reconnects to an existing (workspace, session) must still pass —
+	// AttachSession doesn't count them against the cap, and a 503 here
+	// would lock users out of live sessions until one is killed.
+	key := webuterminal.SessionKey{Workspace: workspace, Name: session}
+	if !manager.HasSession(key) && manager.SessionCount() >= manager.MaxSessions() {
 		handler.WriteJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
 			"success": false, "error": "maximum terminal sessions reached",
 		})
@@ -148,7 +121,6 @@ func validateTerminalWSRequest(w http.ResponseWriter, r *http.Request, manager *
 }
 
 // authenticateTerminalSession validates the one-time terminal token if auth is configured.
-// Returns true if authentication succeeds or auth is nil, false otherwise.
 func authenticateTerminalSession(w http.ResponseWriter, r *http.Request, auth *realtime.TerminalAuth, session string) bool {
 	if auth == nil {
 		return true
@@ -186,78 +158,99 @@ func upgradeTerminalWS(w http.ResponseWriter, r *http.Request, patterns []string
 	return conn, true
 }
 
-// runTerminalRelay attaches to the tmux session and runs the bidirectional relay.
+// runTerminalRelay attaches to the (workspace, session) PTY session and runs
+// the bidirectional relay until the WebSocket closes. On WS close the session
+// is detached (grace period armed); the PTY and child process stay alive.
 func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalWSParams, session, workspace string) (websocket.StatusCode, string) { //nolint:staticcheck // SA1019: websocket migration tracked separately
-	// Check whether the tmux session already exists before Attach creates it.
-	// Only inject the context banner for freshly created talk-to-lead sessions.
-	isNewSession := session == "talk-to-lead" && !p.manager.SessionExists(workspace, session)
+	key := webuterminal.SessionKey{Workspace: workspace, Name: session}
 
-	termSession, err := p.manager.Attach(workspace, session, attachCommandForSession(session), 80, 24)
+	att, reattach, err := p.manager.AttachSession(key, 80, 24, webuterminal.ArgvForSession(session))
 	if err != nil {
-		if errors.Is(err, webuterminal.ErrSessionBeingKilled) {
-			return websocket.StatusCode(wsCloseSessionKilled), "session is being killed" //nolint:staticcheck // SA1019: websocket migration tracked separately
-		}
-		if errors.Is(err, webuterminal.ErrMaxSessionsReached) {
+		if errors.Is(err, webuterminal.ErrPTYMaxSessionsReached) {
 			slog.Info("terminal session limit reached", "session", session)
 		} else {
 			slog.Error("failed to attach terminal session", "session", session, "err", err)
 		}
 		return websocket.StatusInternalError, err.Error()
 	}
-	connID := termSession.ConnID
+	connID := att.ConnID()
 
-	if workspace != "" {
-		p.manager.SetSessionOwner(session, workspace)
-	}
-
-	if isNewSession && p.loomServerURL != "" {
+	// Freshly spawned "talk-to-lead" sessions get a project-context banner
+	// written before the shell's prompt. On reattach the banner is already
+	// part of the scrollback replay.
+	if !reattach && session == "talk-to-lead" && p.loomServerURL != "" {
 		wsID := middleware.WorkspaceFromContext(reqCtx)
-		wsConfigFn := func() (*ops.WorkspaceData, error) { return p.workspaceConfigByIDFn(wsID) }
-		injectTerminalContextBanner(termSession, p.loomServerURL, wsConfigFn)
+		wsConfigFn := func() (*ops.WorkspaceData, error) {
+			if p.workspaceConfigByIDFn == nil {
+				return nil, errors.New("no workspace config resolver")
+			}
+			return p.workspaceConfigByIDFn(wsID)
+		}
+		injectTerminalContextBanner(att, p.loomServerURL, wsConfigFn)
 	}
 
 	realtime.BroadcastSessionIssueEvent(p.tabMetaStore, p.hub, workspace, session)
 
+	if !reattach {
+		maybeEmitStaleRestartBanner(reqCtx, conn, p, workspace, session)
+	}
+
+	// Emit scrollback replay (reset escape + ring bytes) before going live.
+	if replay := att.Scrollback(); len(replay) > 0 {
+		if err := conn.Write(reqCtx, websocket.MessageBinary, replay); err != nil { //nolint:staticcheck // SA1019
+			slog.Warn("scrollback replay write failed", "session", session, "err", err)
+		}
+	}
+
 	ctx, cancel := context.WithCancel(reqCtx)
 	defer cancel()
 
-	watchSessionKill(ctx, cancel, conn, termSession)
-
 	crashCh := make(chan realtime.CrashInfo, 1)
-	scrollback := p.manager.GetScrollbackBuffer(workspace, session)
-	monitor := &terminalMonitor{mgr: p.manager}
 	go func() {
-		result := realtime.PtyToWS(ctx, cancel, conn, termSession.PTY, termSession.Name, monitor, scrollback)
-		crashCh <- result
+		// Pump attachment output → WS. Exits when the channel closes
+		// (session killed or replaced) or the context is cancelled.
+		crashCh <- realtime.AttachmentToWS(ctx, cancel, conn, att)
 	}()
 
-	realtime.WSToPTY(ctx, conn, termSession.PTY, p.manager, connID)
+	// WS → PTY until the client disconnects. The attachment satisfies
+	// realtime.Resizer directly so the manager doesn't need a connID → PTY
+	// lookup table.
+	realtime.WSToPTY(ctx, conn, attachmentWriter{att}, att, connID)
 
-	if err := p.manager.Detach(connID); err != nil {
-		slog.Error("failed to detach terminal connection", "conn_id", connID, "err", err)
-	}
+	// WebSocket gone — detach the attachment. PTY stays alive for the
+	// manager's grace period.
+	p.manager.Detach(key, connID)
 
 	return (<-crashCh).WSClose()
 }
 
-// wsCloseSessionKilled is the WebSocket close code for a user-initiated session kill.
-const wsCloseSessionKilled = 4002
+// attachmentWriter adapts Attachment to realtime.WSToPTY's io.Writer input.
+type attachmentWriter struct{ a webuterminal.Attachment }
 
-// watchSessionKill closes the WebSocket when the tmux session is killed server-side.
-func watchSessionKill(ctx context.Context, cancel context.CancelFunc, conn *websocket.Conn, termSession *webuterminal.TerminalSession) { //nolint:staticcheck // SA1019: websocket migration tracked separately
-	go func() {
-		select {
-		case <-termSession.KillCh():
-			_ = conn.Close(websocket.StatusCode(wsCloseSessionKilled), "session killed") //nolint:staticcheck // SA1019: websocket migration tracked separately
-			cancel()
-		case <-ctx.Done():
-		}
-	}()
+func (w attachmentWriter) Write(p []byte) (int, error) { return w.a.WriteInput(p) }
+
+// maybeEmitStaleRestartBanner writes a visible notice to the freshly-spawned
+// shell when the tab's metadata pre-dates the current server process — i.e.
+// the prior PTY died with a previous server. The frontend's pty_alive gate
+// on the tab DTO is the authoritative block, but browsers drop app-defined
+// WebSocket close codes right after upgrade, so this in-band banner is the
+// reliable fallback for any client that reached this path anyway.
+func maybeEmitStaleRestartBanner(reqCtx context.Context, conn *websocket.Conn, p *terminalWSParams, workspace, session string) { //nolint:staticcheck // SA1019
+	if p.tabMetaStore == nil {
+		return
+	}
+	meta, err := p.tabMetaStore.Get(reqCtx, workspace, session)
+	if err != nil || meta == nil || !meta.CreatedAt.Before(p.serverStartedAt) {
+		return
+	}
+	slog.Info("terminal session stale across server restart; spawning fresh",
+		"session", session, "workspace", workspace, "created_at", meta.CreatedAt)
+	_ = conn.Write(reqCtx, websocket.MessageBinary, []byte("\r\n\x1b[33m[loom] Previous shell did not survive a server restart. This is a fresh session.\x1b[0m\r\n")) //nolint:staticcheck // SA1019
 }
 
 // injectTerminalContextBanner fetches project context from the loom server
-// and writes a formatted banner to the terminal session's PTY.
-func injectTerminalContextBanner(session *webuterminal.TerminalSession, loomServerURL string, workspaceConfigFn func() (*ops.WorkspaceData, error)) {
+// and writes a formatted banner to the newly attached session.
+func injectTerminalContextBanner(att webuterminal.Attachment, loomServerURL string, workspaceConfigFn func() (*ops.WorkspaceData, error)) {
 	tc, err := webuterminal.FetchTerminalContext(loomServerURL)
 	if err != nil {
 		slog.Error("terminal context fetch failed, skipping banner", "err", err)
@@ -274,7 +267,7 @@ func injectTerminalContextBanner(session *webuterminal.TerminalSession, loomServ
 	}
 
 	banner := webuterminal.FormatContextBanner(tc, wsName)
-	if _, writeErr := session.PTY.Write([]byte(banner)); writeErr != nil {
+	if _, writeErr := att.WriteInput([]byte(banner)); writeErr != nil {
 		slog.Warn("failed to write context banner to pty", "err", writeErr)
 	}
 }

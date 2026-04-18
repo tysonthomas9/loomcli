@@ -1,6 +1,6 @@
 import { useEffect, type MutableRefObject } from "react";
 
-import type { TabMetadata } from "@/api/terminal";
+import type { TabMetadata } from "@/hooks/api";
 import type { BackendConfigData } from "@/api/common";
 
 import type { ConnectionState } from "@/components/TerminalView/instances";

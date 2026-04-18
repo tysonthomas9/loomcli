@@ -19,9 +19,7 @@ import { useStore } from "zustand";
 import { useParams, useNavigate, useLocation, Outlet } from "react-router-dom";
 
 import { updateIssue, addComment, closeIssue } from "@/api";
-import type { IssueContext, LeadSessionResult } from "@/api/terminal";
-import { createLeadSession } from "@/hooks/api";
-import { getAgentTerminalInfo } from "@/api/terminal";
+import type { IssueContext } from "@/api/terminal";
 import { buildShareUrl } from "@/utils/buildShareUrl";
 import { getReviewType } from "@/utils/issue";
 import { buildWorkspaceSwitchUrl } from "@/utils/workspaceUrl";
@@ -48,9 +46,7 @@ import {
   WorkspaceSwitcher,
   CreateWorkspaceModal,
   UserMenu,
-  NewRequestPopover,
 } from "@/components";
-import type { PendingLeadSession } from "@/components/TerminalView";
 import { SearchTermProvider } from "@/contexts/SearchTermContext";
 import {
   WorkspaceViewProvider,
@@ -70,7 +66,6 @@ import {
   useBlockedIssues,
   useIssueDetail,
   useToast,
-  useBackendConfig,
   useTheme,
   useWorkspaceContext,
   useWorkspaceState,
@@ -128,7 +123,7 @@ function App() {
   } = useWorkspaceContext();
 
   // Repo filter URL param sync (deep linking for repo selection)
-  const [repoFilterParam, setRepoFilterParam] = useRepoFilterParam();
+  const [repoFilterParam] = useRepoFilterParam();
 
   // Available repo names for repo selector
   const availableRepoNames = useMemo(
@@ -416,14 +411,6 @@ function App() {
   // Create workspace modal state
   const [showCreateWorkspace, setShowCreateWorkspace] = useState(false);
 
-  // New-request modal (replaces the old "Create Issue" modal: submitting the
-  // free-text form spawns a new `loom lead --message <text>` terminal).
-  const [isNewRequestOpen, setIsNewRequestOpen] = useState(false);
-  const [pendingLeadSession, setPendingLeadSession] = useState<
-    PendingLeadSession | undefined
-  >(undefined);
-  const { config: backendConfig } = useBackendConfig();
-
   // Track mount state for async operations (must set true in setup for StrictMode compatibility)
   useEffect(() => {
     mountedRef.current = true;
@@ -659,12 +646,6 @@ function App() {
     closePanel();
   }, [closePanel]);
 
-  // Derive activeRepoName: null = "All Workspaces", string = specific repo
-  const activeRepoName = useMemo(
-    () => (selectedRepoNames.size === 1 ? [...selectedRepoNames][0] : null),
-    [selectedRepoNames],
-  );
-
   // Close all panels synchronously (no animation) for workspace switch
   const closeAllPanels = useCallback(() => {
     closePanel();
@@ -678,23 +659,6 @@ function App() {
     restorePanel: openPanel,
     closeAllPanels,
   });
-
-  // Handle workspace/repo selection from WorkspaceTree
-  const handleWorkspaceSelect = useCallback(
-    (repoName: string | null) => {
-      // Skip if same workspace
-      if (repoName === activeRepoName) return;
-      // Update repo filter
-      if (repoName === null) {
-        selectAll();
-      } else {
-        selectRepos([repoName]);
-      }
-      // Sync workspace URL param
-      setRepoFilterParam(repoName);
-    },
-    [activeRepoName, selectAll, selectRepos, setRepoFilterParam],
-  );
 
   // Handle workspace entry click to switch to a different workspace.
   // SPA navigation via React Router — no page reload.
@@ -725,71 +689,9 @@ function App() {
     [openPanel, fetchIssue],
   );
 
-  // Handle Talk to Lead from workspace tree
-  const handleTreeTalkToLead = useCallback(
-    (_workspaceName: string) => {
-      navigateToView("terminal");
-    },
-    [navigateToView],
-  );
-
-  // Handle task terminal open from workspace tree (task with active agent)
-  const handleTreeTaskTerminalOpen = useCallback(
-    async (_issueId: string, agentName: string) => {
-      try {
-        const mode = await getAgentTerminalInfo(workspaceId, agentName);
-        if (mode === "tmux") {
-          setPendingAgentName(agentName);
-          navigateToView("terminal");
-        } else {
-          // Archive mode — open agent detail panel instead
-          openPanel({ type: "agent", name: agentName });
-        }
-      } catch {
-        // Network error — fall back to agent detail panel
-        openPanel({ type: "agent", name: agentName });
-      }
-    },
-    [workspaceId, navigateToView, openPanel],
-  );
-
   const handleAgentNameConsumed = useCallback(() => {
     setPendingAgentName(undefined);
   }, []);
-
-  const handleLeadSessionConsumed = useCallback(() => {
-    setPendingLeadSession(undefined);
-  }, []);
-
-  // Submit handler for the NewRequestPopover. Spawns a fresh `loom lead
-  // --backend X --message <text>` tmux session on the backend, then sets
-  // pendingLeadSession so TerminalView creates a tab and attaches to it.
-  // On failure, rethrows so the popover surfaces an inline error and keeps
-  // the user's text intact for retry.
-  const handleNewRequestSubmit = useCallback(
-    async (text: string) => {
-      const backend = backendConfig?.backend;
-      if (!backend) {
-        // The popover is disabled while backendConfig is loading, so this is a
-        // defensive guard against a race where the button was enabled but the
-        // config flipped back to undefined before submit.
-        throw new Error("Backend configuration not loaded yet");
-      }
-      const result: LeadSessionResult = await createLeadSession(
-        workspaceId,
-        text,
-        backend,
-      );
-      if (!mountedRef.current) return;
-      setPendingLeadSession({
-        sessionName: result.session_name,
-        backend: result.backend,
-      });
-      setActiveView("terminal");
-      setIsNewRequestOpen(false);
-    },
-    [backendConfig?.backend, workspaceId, setActiveView],
-  );
 
   // Focus search input (for Cmd/Ctrl+K shortcut in single-repo mode)
   const handleSearchFocus = useCallback(() => {
@@ -987,8 +889,7 @@ function App() {
         />
         <button
           className={styles.newIssueButton}
-          onClick={() => setIsNewRequestOpen(true)}
-          aria-haspopup="dialog"
+          onClick={() => setActiveView("terminal")}
           data-testid="new-issue-button"
         >
           + New Issue
@@ -1031,8 +932,6 @@ function App() {
   // The tree includes agent list per workspace plus "+ New Workspace" button.
   const sidebarContent = (
     <WorkspaceTree
-      activeRepoName={activeRepoName}
-      onWorkspaceSelect={handleWorkspaceSelect}
       onWorkspaceSwitch={handleWorkspaceSwitch}
       onAgentClick={handleAgentClick}
       agentTasks={agentTasks}
@@ -1043,8 +942,6 @@ function App() {
       onRetryConnection={staleBannerRetry}
       workQueueCounts={workQueueCounts}
       onTreeSelect={handleTreeIssueSelect}
-      onTaskTerminalOpen={handleTreeTaskTerminalOpen}
-      onTalkToLead={handleTreeTalkToLead}
     />
   );
 
@@ -1126,8 +1023,6 @@ function App() {
                 onIssueContextConsumed={handleIssueContextConsumed}
                 pendingAgentName={pendingAgentName}
                 onAgentNameConsumed={handleAgentNameConsumed}
-                pendingLeadSession={pendingLeadSession}
-                onLeadSessionConsumed={handleLeadSessionConsumed}
                 onActiveSessionCountChange={setActiveSessionCount}
                 onUnreadChange={setHasTerminalUnread}
                 onEscape={() => {
@@ -1138,7 +1033,6 @@ function App() {
                   }
                 }}
                 onNavigateToSettings={() => navigateToView("settings")}
-                {...(selectedIssueId != null && { issueId: selectedIssueId })}
               />
             </Suspense>
           </div>
@@ -1175,12 +1069,6 @@ function App() {
             );
           }
         }}
-      />
-      <NewRequestPopover
-        isOpen={isNewRequestOpen}
-        onClose={() => setIsNewRequestOpen(false)}
-        onSubmit={handleNewRequestSubmit}
-        disabled={!backendConfig?.backend}
       />
     </KeyboardShortcutProvider>
   );

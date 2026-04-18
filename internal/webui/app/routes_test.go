@@ -669,16 +669,10 @@ func TestSetupRoutes_FlatTerminalWSEndpointReturns404(t *testing.T) {
 // return 404 even when termManager is non-nil (they have been removed in favor
 // of workspace-scoped equivalents).
 func TestSetupRoutes_FlatTerminalRoutesReturn404(t *testing.T) {
-	termMgr, err := terminal.NewTerminalManager("bash", "", 0)
-	if err == terminal.ErrTmuxNotFound {
-		t.Skip("tmux not installed, skipping test")
-	}
-	if err != nil {
-		t.Fatalf("failed to create terminal manager: %v", err)
-	}
-	defer termMgr.Shutdown()
+	ptyMgr := terminal.NewPTYManager("bash", 0)
+	defer ptyMgr.Shutdown()
 
-	app := &Server{termMgr: termMgr}
+	app := &Server{ptyMgr: ptyMgr}
 	setupTestRoutes(t, app)
 
 	flatRoutes := []struct {
@@ -713,7 +707,7 @@ func TestSetupRoutes_FlatTerminalRoutesReturn404(t *testing.T) {
 // calling handleTerminalWS directly with nil manager returns 503.
 // This complements the route registration test by verifying handler behavior.
 func TestSetupRoutes_TerminalEndpointNilManagerReturns503(t *testing.T) {
-	handler := hterminal.HandleTerminalWS(nil, nil, nil, "", nil, nil, nil)
+	handler := hterminal.HandleTerminalWS(nil, nil, nil, "", nil, nil, nil, time.Time{})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/ws?session=test", nil)
 	rr := httptest.NewRecorder()
@@ -1643,14 +1637,8 @@ func TestSetupRoutes_WorkspaceBackendPatchReadsBody(t *testing.T) {
 // TestSetupRoutes_FlatTerminalTokenReturns404 verifies that GET /api/terminal/token
 // returns 404 (flat route removed, only workspace-scoped route exists).
 func TestSetupRoutes_FlatTerminalTokenReturns404(t *testing.T) {
-	termMgr, err := terminal.NewTerminalManager("bash", "", 0)
-	if err == terminal.ErrTmuxNotFound {
-		t.Skip("tmux not installed, skipping test")
-	}
-	if err != nil {
-		t.Fatalf("failed to create terminal manager: %v", err)
-	}
-	t.Cleanup(func() { termMgr.Shutdown() })
+	ptyMgr := terminal.NewPTYManager("bash", 0)
+	t.Cleanup(func() { ptyMgr.Shutdown() })
 
 	termAuth, err := realtime.NewTerminalAuth()
 	if err != nil {
@@ -1658,7 +1646,7 @@ func TestSetupRoutes_FlatTerminalTokenReturns404(t *testing.T) {
 	}
 	t.Cleanup(func() { termAuth.Stop() })
 
-	app := &Server{termMgr: termMgr, termAuth: termAuth}
+	app := &Server{ptyMgr: ptyMgr, termAuth: termAuth}
 	setupTestRoutes(t, app)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/token?session=test", nil)

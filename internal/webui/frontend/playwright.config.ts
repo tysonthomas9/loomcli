@@ -7,6 +7,8 @@ const isCI = !!process.env.CI
 const isIntegration = !!process.env.RUN_INTEGRATION_TESTS
 const isLocalIntegration = !!process.env.RUN_LOCAL_INTEGRATION_TESTS
 const isLocalServer = !!process.env.LOOM_LOCAL_SERVER
+const chromiumExecutablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+const useFailureVideo = chromiumExecutablePath ? "off" : "retain-on-failure"
 
 // Self-contained mode: Playwright starts loom serve on a dedicated port (auth disabled by default).
 // Uses port 8090 to avoid conflict with dev server on 8080.
@@ -102,13 +104,18 @@ export default defineConfig({
     baseURL: "http://localhost:3000",
     trace: "on-first-retry",
     screenshot: "only-on-failure",
-    video: "retain-on-failure",
+    video: useFailureVideo,
   },
 
   projects: [
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
+      use: {
+        ...devices["Desktop Chrome"],
+        ...(chromiumExecutablePath
+          ? { launchOptions: { executablePath: chromiumExecutablePath } }
+          : {}),
+      },
       testIgnore: isIntegration ? undefined : "**/*.integration.spec.ts",
     },
     {
@@ -117,6 +124,9 @@ export default defineConfig({
       testMatch: "**/*.integration.spec.ts",
       use: {
         ...devices["Desktop Chrome"],
+        ...(chromiumExecutablePath
+          ? { launchOptions: { executablePath: chromiumExecutablePath } }
+          : {}),
         baseURL: frontendBaseURL,
         extraHTTPHeaders: authHeaders,
       },
@@ -132,6 +142,9 @@ export default defineConfig({
       testIgnore: isLocalIntegration ? undefined : "**/terminal-parity.integration.spec.ts",
       use: {
         ...devices["Desktop Chrome"],
+        ...(chromiumExecutablePath
+          ? { launchOptions: { executablePath: chromiumExecutablePath } }
+          : {}),
         baseURL: frontendBaseURL,
         extraHTTPHeaders: authHeaders,
       },

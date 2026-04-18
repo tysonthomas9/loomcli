@@ -72,8 +72,9 @@ type Server struct {
 	initialWorkspaceID string
 
 	// Terminal
-	termMgr  *terminal.TerminalManager // nil if tmux unavailable
-	termAuth *appstores.TerminalAuth   // nil if termMgr is nil
+	ptyMgr       *terminal.PTYManager       // main web terminal (PTY-backed)
+	agentTmuxMgr *terminal.AgentTmuxManager // agent-view only; nil if tmux unavailable
+	termAuth     *appstores.TerminalAuth    // one-time token issuer (nil disables auth)
 
 	// SSE token exchange (external auth mode only)
 	sseTokens *appstores.TokenStore // nil if ExtAuthURL is empty
@@ -109,6 +110,11 @@ type Server struct {
 
 	// Pre-built top-level handlers (built by handlermux.BuildHandlers)
 	handlers *handlermux.Handlers
+
+	// startedAt captures server-process boot time. Used to distinguish
+	// "tab metadata from a prior server process" (PTY is gone) from
+	// "tab metadata just created in this process" (PTY about to spawn).
+	startedAt time.Time
 }
 
 // buildHandlers constructs all top-level HTTP handlers from the current dependency
@@ -132,16 +138,26 @@ func (app *Server) buildHandlers() {
 		backendsHealthH = webui.HandleBackendsHealth(app.config.BackendOps)
 	}
 
+	var graceMS, idleMS int64
+	var maxSess int
+	if app.ptyMgr != nil {
+		graceMS = app.ptyMgr.GracePeriod().Milliseconds()
+		idleMS = app.ptyMgr.IdleTimeout().Milliseconds()
+		maxSess = app.ptyMgr.MaxSessions()
+	}
 	app.handlers = handlermux.BuildHandlers(handlermux.HandlerDeps{
-		Pool:             app.pool,
-		Hub:              app.hub,
-		ExtAuthURL:       app.config.ExtAuthURL,
-		BackendsHealthH:  backendsHealthH,
-		NotifyToken:      app.notifyToken,
-		DaemonSupervisor: daemonSupervisorH,
-		DaemonConfig:     daemonConfigH,
-		FleetTimeoutsFn:  getFleetTimeouts,
-		ClaimMetrics:     app.claimMetrics,
+		Pool:               app.pool,
+		Hub:                app.hub,
+		ExtAuthURL:         app.config.ExtAuthURL,
+		BackendsHealthH:    backendsHealthH,
+		NotifyToken:        app.notifyToken,
+		DaemonSupervisor:   daemonSupervisorH,
+		DaemonConfig:       daemonConfigH,
+		FleetTimeoutsFn:    getFleetTimeouts,
+		ClaimMetrics:       app.claimMetrics,
+		TerminalGraceMS:    graceMS,
+		TerminalIdleMS:     idleMS,
+		TerminalMaxSession: maxSess,
 	})
 }
 
@@ -305,12 +321,19 @@ func (app *Server) run(ctx context.Context) error { //nolint:funlen // server li
 		app.sseTokens.Stop()
 	}
 
-	// Stop terminal manager (kill tmux sessions and close PTYs)
-	if app.termMgr != nil {
-		if err := app.termMgr.Shutdown(); err != nil {
-			logger.Warn("error shutting down terminal manager", "component", "terminal", "err", err)
+	// Stop terminal managers (close PTYs; detach agent-view tmux attaches)
+	if app.ptyMgr != nil {
+		if err := app.ptyMgr.Shutdown(); err != nil {
+			logger.Warn("error shutting down pty manager", "component", "terminal", "err", err)
 		} else {
-			logger.Info("terminal manager stopped", "component", "terminal")
+			logger.Info("pty manager stopped", "component", "terminal")
+		}
+	}
+	if app.agentTmuxMgr != nil {
+		if err := app.agentTmuxMgr.Shutdown(); err != nil {
+			logger.Warn("error shutting down agent tmux manager", "component", "terminal", "err", err)
+		} else {
+			logger.Info("agent tmux manager stopped", "component", "terminal")
 		}
 	}
 

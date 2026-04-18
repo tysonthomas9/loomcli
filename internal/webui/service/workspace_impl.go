@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -73,7 +75,26 @@ func (s *workspaceServiceImpl) GetActiveWorkspace(_ context.Context) (*ops.Works
 		data = &ops.WorkspaceData{}
 	}
 	normalizeWorkspaceData(data)
+	for i := range data.Repos {
+		if b := readGitHeadBranch(data.Repos[i].Path); b != "" {
+			data.Repos[i].CurrentBranch = b
+		}
+	}
 	return data, nil
+}
+
+// readGitHeadBranch reads the current branch from .git/HEAD.
+// Returns empty string on error or detached HEAD.
+func readGitHeadBranch(repoPath string) string {
+	data, err := os.ReadFile(filepath.Join(repoPath, ".git", "HEAD")) //nolint:gosec // repoPath comes from workspace config, not user input
+	if err != nil {
+		return ""
+	}
+	after, ok := strings.CutPrefix(strings.TrimSpace(string(data)), "ref: refs/heads/")
+	if !ok {
+		return ""
+	}
+	return after
 }
 
 func (s *workspaceServiceImpl) ListWorkspaces(_ context.Context) ([]WorkspaceListItem, error) {
@@ -146,6 +167,11 @@ func (s *workspaceServiceImpl) GetWorkspace(_ context.Context, wsID string) (*op
 	}
 
 	normalizeWorkspaceData(data)
+	for i := range data.Repos {
+		if b := readGitHeadBranch(data.Repos[i].Path); b != "" {
+			data.Repos[i].CurrentBranch = b
+		}
+	}
 	for i := range data.Workspaces {
 		data.Workspaces[i].Active = data.Workspaces[i].ID == wsID
 	}

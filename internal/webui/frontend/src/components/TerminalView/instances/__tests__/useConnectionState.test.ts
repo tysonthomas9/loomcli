@@ -44,7 +44,6 @@ function createOptions(
     instanceRefs: {
       current: new Map<string, TerminalInstanceHandle>(),
     } as React.MutableRefObject<Map<string, TerminalInstanceHandle>>,
-    workspaceId: "ws-1",
     onTabConnected: undefined as ((tabId: string) => void) | undefined,
     ...overrides,
   };
@@ -178,15 +177,9 @@ describe("useConnectionState", () => {
         [
           "tab-1",
           {
+            disconnect: vi.fn(() => Promise.resolve()),
             reconnect: reconnectFn,
-            search: vi.fn(),
-            findNext: vi.fn(),
-            findPrevious: vi.fn(),
-            clearSearch: vi.fn(),
             pasteText: vi.fn(),
-            getSelection: vi.fn(),
-            hasSelection: vi.fn(),
-            selectAll: vi.fn(),
             focus: vi.fn(),
           },
         ],
@@ -222,8 +215,10 @@ describe("useConnectionState", () => {
     expect(next[0].crashReason).toBe("OOM killed");
   });
 
-  // 10. handleCrashRestart clears crash, fetches token, restarts, reconnects
-  it("handleCrashRestart clears crash, fetches token, restarts, reconnects", async () => {
+  // 10. handleCrashRestart clears crash and reconnects.
+  // The tmux restart flow (fetch token + restartTerminalSession) is gone; a
+  // "restart" is now just a fresh WebSocket — the server spawns a new PTY.
+  it("handleCrashRestart clears crash and reconnects", () => {
     const setTabs = vi.fn();
     const reconnectFn = vi.fn();
     const instanceRefs = {
@@ -231,31 +226,20 @@ describe("useConnectionState", () => {
         [
           "tab-1",
           {
+            disconnect: vi.fn(),
             reconnect: reconnectFn,
-            search: vi.fn(),
-            findNext: vi.fn(),
-            findPrevious: vi.fn(),
-            clearSearch: vi.fn(),
             pasteText: vi.fn(),
-            getSelection: vi.fn(),
-            hasSelection: vi.fn(),
-            selectAll: vi.fn(),
             focus: vi.fn(),
-          },
+          } as unknown as TerminalInstanceHandle,
         ],
       ]),
     } as React.MutableRefObject<Map<string, TerminalInstanceHandle>>;
 
-    const opts = createOptions({ setTabs, instanceRefs, workspaceId: "ws-1" });
+    const opts = createOptions({ setTabs, instanceRefs });
     const { result } = renderHook(() => useConnectionState(opts));
 
-    await act(async () => {
-      result.current.handleCrashRestart("tab-1", "session-1");
-      // Allow promise chain to settle
-      await new Promise((r) => setTimeout(r, 0));
-    });
+    result.current.handleCrashRestart("tab-1", "session-1");
 
-    // Crash cleared via setTabs
     expect(setTabs).toHaveBeenCalledTimes(1);
     const updater = setTabs.mock.calls[0][0] as (
       prev: TabState[],
@@ -263,96 +247,6 @@ describe("useConnectionState", () => {
     const prev = [{ ...makeTab("tab-1"), crashReason: "OOM" }];
     const next = updater(prev);
     expect(next[0].crashReason).toBeNull();
-
-    // Token fetched
-    expect(mockFetchTerminalToken).toHaveBeenCalledWith("ws-1", "session-1");
-
-    // Session restarted
-    expect(mockRestartTerminalSession).toHaveBeenCalledWith(
-      "ws-1",
-      "session-1",
-      "fake-token",
-    );
-
-    // Reconnected
     expect(reconnectFn).toHaveBeenCalledTimes(1);
-  });
-
-  it("handleCrashRestart reconnects directly when token is null", async () => {
-    mockFetchTerminalToken.mockResolvedValue(null);
-
-    const reconnectFn = vi.fn();
-    const instanceRefs = {
-      current: new Map<string, TerminalInstanceHandle>([
-        [
-          "tab-1",
-          {
-            reconnect: reconnectFn,
-            search: vi.fn(),
-            findNext: vi.fn(),
-            findPrevious: vi.fn(),
-            clearSearch: vi.fn(),
-            pasteText: vi.fn(),
-            getSelection: vi.fn(),
-            hasSelection: vi.fn(),
-            selectAll: vi.fn(),
-            focus: vi.fn(),
-          },
-        ],
-      ]),
-    } as React.MutableRefObject<Map<string, TerminalInstanceHandle>>;
-
-    const opts = createOptions({ setTabs: vi.fn(), instanceRefs });
-    const { result } = renderHook(() => useConnectionState(opts));
-
-    await act(async () => {
-      result.current.handleCrashRestart("tab-1", "session-1");
-      await new Promise((r) => setTimeout(r, 0));
-    });
-
-    // Should still reconnect even though token was null
-    expect(reconnectFn).toHaveBeenCalledTimes(1);
-    // Should NOT call restartTerminalSession
-    expect(mockRestartTerminalSession).not.toHaveBeenCalled();
-  });
-
-  it("handleCrashRestart reconnects on error", async () => {
-    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    mockFetchTerminalToken.mockRejectedValue(new Error("network error"));
-
-    const reconnectFn = vi.fn();
-    const instanceRefs = {
-      current: new Map<string, TerminalInstanceHandle>([
-        [
-          "tab-1",
-          {
-            reconnect: reconnectFn,
-            search: vi.fn(),
-            findNext: vi.fn(),
-            findPrevious: vi.fn(),
-            clearSearch: vi.fn(),
-            pasteText: vi.fn(),
-            getSelection: vi.fn(),
-            hasSelection: vi.fn(),
-            selectAll: vi.fn(),
-            focus: vi.fn(),
-          },
-        ],
-      ]),
-    } as React.MutableRefObject<Map<string, TerminalInstanceHandle>>;
-
-    const opts = createOptions({ setTabs: vi.fn(), instanceRefs });
-    const { result } = renderHook(() => useConnectionState(opts));
-
-    await act(async () => {
-      result.current.handleCrashRestart("tab-1", "session-1");
-      await new Promise((r) => setTimeout(r, 0));
-    });
-
-    expect(consoleSpy).toHaveBeenCalled();
-    // Still reconnects as fallback
-    expect(reconnectFn).toHaveBeenCalledTimes(1);
-
-    consoleSpy.mockRestore();
   });
 });

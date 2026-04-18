@@ -95,6 +95,17 @@ func newTestSessionStore(t *testing.T) *sessions.Store {
 	return store
 }
 
+// newTestSessionStoreWithDir creates a sessions.Store and returns the base dir (for configByIDFn).
+func newTestSessionStoreWithDir(t *testing.T) (*sessions.Store, string) {
+	t.Helper()
+	dir := t.TempDir()
+	store, err := sessions.NewStore(dir)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	return store, dir
+}
+
 // createTestSession creates a session via the store and finalizes it.
 func createTestSession(t *testing.T, store *sessions.Store, taskID string) *sessions.Session {
 	t.Helper()

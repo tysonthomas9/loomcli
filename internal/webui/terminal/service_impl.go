@@ -2,73 +2,67 @@ package terminal
 
 import (
 	"context"
-	"fmt"
-	"log/slog"
-	"strings"
-	"time"
 
 	"github.com/redis/go-redis/v9"
 
-	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
-	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
 const terminalUIStateKeyImpl = "terminal:ui-state"
 
 // terminalServiceImpl is the concrete implementation of TerminalService.
+// After the tmux removal, the service only handles Redis-backed tab
+// metadata, Redis-backed UI state, and WebSocket auth token generation.
+// All session lifecycle (spawn, kill, restart, etc.) is gone with tmux.
+//
+// ptyMgr keeps tab metadata in sync with the in-process PTY set: consulted
+// at read time to annotate pty_alive, and used by PutTab / DeleteTab to
+// reject clobbers of live sessions and kill the PTY when its tab goes
+// away. nil is acceptable for callers without a PTY backend.
 type terminalServiceImpl struct {
-	termMgr        *TerminalManager
-	termAuth       *realtime.TerminalAuth
-	configPool     ConfigConnectionGetter
-	tabStore       *tabmeta.Store
-	hub            *realtime.Hub
-	histStore      *sessionhistory.Store
-	redisClient    *redis.Client
-	workspaceByIDF func(string) (*ops.WorkspaceData, error)
+	termAuth    *realtime.TerminalAuth
+	tabStore    *tabmeta.Store
+	hub         *realtime.Hub
+	redisClient *redis.Client
+	ptyMgr      PTYSource
 }
 
 // NewTerminalService creates a new TerminalService implementation.
-// workspaceByIDF (optional) resolves a workspace ID to its on-disk path so
-// spawned tmux sessions start in the active workspace's directory; if nil,
-// sessions inherit the loom service's cwd.
 func NewTerminalService(
-	termMgr *TerminalManager,
 	termAuth *realtime.TerminalAuth,
-	configPool ConfigConnectionGetter,
 	tabStore *tabmeta.Store,
 	hub *realtime.Hub,
-	histStore *sessionhistory.Store,
 	redisClient *redis.Client,
-	workspaceByIDF func(string) (*ops.WorkspaceData, error),
+	ptyMgr PTYSource,
 ) service.TerminalService {
 	return &terminalServiceImpl{
-		termMgr:        termMgr,
-		termAuth:       termAuth,
-		configPool:     configPool,
-		tabStore:       tabStore,
-		hub:            hub,
-		histStore:      histStore,
-		redisClient:    redisClient,
-		workspaceByIDF: workspaceByIDF,
+		termAuth:    termAuth,
+		tabStore:    tabStore,
+		hub:         hub,
+		redisClient: redisClient,
+		ptyMgr:      ptyMgr,
 	}
 }
 
-// workspacePath returns the on-disk path for wsID. Returns "" when the ID is
-// empty, the resolver is nil, the lookup errors, or the resolved data has no
-// path. An empty result means "inherit the loom service's cwd", matching the
-// legacy (pre-workspace-scoped) spawn behavior.
-func (s *terminalServiceImpl) workspacePath(wsID string) string {
-	if wsID == "" || s.workspaceByIDF == nil {
-		return ""
+// ptyAlive reports whether the named session has a live PTY in this server
+// process. Returns false when no PTY backend is wired (e.g. auth-only tests).
+func (s *terminalServiceImpl) ptyAlive(wsID, session string) bool {
+	if s.ptyMgr == nil {
+		return false
 	}
-	ws, err := s.workspaceByIDF(wsID)
-	if err != nil || ws == nil {
-		return ""
+	return s.ptyMgr.HasSession(SessionKey{Workspace: wsID, Name: session})
+}
+
+// attachedClients reports the number of WebSocket clients currently
+// attached to the named session. Zero when no PTY backend is wired or the
+// session has no live PTY.
+func (s *terminalServiceImpl) attachedClients(wsID, session string) int {
+	if s.ptyMgr == nil {
+		return 0
 	}
-	return ws.Path
+	return s.ptyMgr.AttachmentCount(SessionKey{Workspace: wsID, Name: session})
 }
 
 func (s *terminalServiceImpl) GenerateToken(_ context.Context, session, userID string) (string, error) {
@@ -83,425 +77,4 @@ func (s *terminalServiceImpl) GenerateToken(_ context.Context, session, userID s
 		return "", service.ErrInternal("failed to generate token", err)
 	}
 	return token, nil
-}
-
-func (s *terminalServiceImpl) RestartSession(ctx context.Context, wsID, session string) (*service.TerminalRestartResult, error) {
-	if s.termMgr == nil {
-		return nil, service.ErrUnavailable("terminal manager not initialized")
-	}
-	if wsID == "" {
-		return nil, service.ErrValidation("wsID is required")
-	}
-
-	// Shell tabs: kill and return without changing defaultCommand.
-	if strings.HasPrefix(session, "lead-shell-") {
-		_ = s.termMgr.KillSession(wsID, session)
-		return &service.TerminalRestartResult{Backend: "shell"}, nil
-	}
-
-	// Read current backend from loom.yaml via daemon
-	backend := s.termMgr.DefaultCommand() // fallback to current
-	if s.configPool != nil {
-		wsPath, err := getWorkspacePath(s.configPool, ctx)
-		if err == nil {
-			pf, err := loadProjectFile(wsPath)
-			if err == nil {
-				b := pf.Backend
-				if b == "" {
-					b = "claude"
-				}
-				if !isValidBackend(b) {
-					return nil, service.ErrValidation(fmt.Sprintf("invalid backend %q; valid: %s", b, strings.Join(validBackends, ", ")))
-				}
-				backend = b
-			}
-		}
-	}
-
-	termCmd := fmt.Sprintf("loom lead --backend %s", backend)
-	_ = s.termMgr.KillSession(wsID, session)
-	s.termMgr.SetDefaultCommand(termCmd)
-
-	return &service.TerminalRestartResult{Backend: backend}, nil
-}
-
-func (s *terminalServiceImpl) KillSession(_ context.Context, wsID, session string) error {
-	if s.termMgr == nil {
-		return service.ErrUnavailable("terminal manager not initialized")
-	}
-	if wsID == "" {
-		return service.ErrValidation("wsID is required")
-	}
-	_ = s.termMgr.KillSession(wsID, session)
-	return nil
-}
-
-func (s *terminalServiceImpl) GetSessionStatus(_ context.Context, wsID, session string) (*service.TerminalStatusResult, error) {
-	if s.termMgr == nil {
-		return nil, service.ErrUnavailable("terminal manager not initialized")
-	}
-	if wsID == "" {
-		return nil, service.ErrValidation("wsID is required")
-	}
-
-	alive := s.termMgr.SessionAlive(wsID, session)
-	result := &service.TerminalStatusResult{Alive: alive}
-
-	if !alive {
-		if captured, err := s.termMgr.CapturePane(wsID, session, 10); err == nil && captured != "" {
-			result.ExitReason = captured
-		}
-	} else if s.termMgr.PaneDead(wsID, session) {
-		result.Alive = false
-		if captured, err := s.termMgr.CapturePane(wsID, session, 10); err == nil && captured != "" {
-			result.ExitReason = captured
-		}
-	}
-
-	return result, nil
-}
-
-func (s *terminalServiceImpl) ListSessions(_ context.Context, wsID string) ([]service.TerminalSessionInfo, error) {
-	if s.termMgr == nil {
-		return nil, service.ErrUnavailable("terminal manager not initialized")
-	}
-	sessions, err := s.termMgr.ListActiveSessionsForWorkspace(wsID)
-	if err != nil {
-		return nil, service.ErrInternal("failed to list terminal sessions", err)
-	}
-	return sessions, nil
-}
-
-func (s *terminalServiceImpl) SpawnSession(_ context.Context, wsID string, params *service.SpawnParams) (*service.SpawnResult, error) { //nolint:funlen
-	if s.termMgr == nil {
-		return nil, service.ErrUnavailable("terminal manager not initialized")
-	}
-	if wsID == "" {
-		return nil, service.ErrValidation("wsID is required")
-	}
-
-	if params.SessionName == "" {
-		return nil, service.ErrValidation("missing required field: session_name")
-	}
-	if params.Backend == "" {
-		return nil, service.ErrValidation("missing required field: backend")
-	}
-
-	// Sanitize dots to dashes (issue IDs like loomcli-fghge.1 contain dots)
-	sanitizedName := strings.ReplaceAll(params.SessionName, ".", "-")
-	if !validSessionName.MatchString(sanitizedName) {
-		return nil, service.ErrValidation(fmt.Sprintf("invalid session name %q after sanitization: must match [a-zA-Z0-9_-]+", sanitizedName))
-	}
-
-	var command string
-	if params.Backend == "shell" {
-		command = shellCommand()
-	} else if !isValidBackend(params.Backend) {
-		return nil, service.ErrValidation(fmt.Sprintf("invalid backend %q; valid: %s", params.Backend, strings.Join(validBackends, ", ")))
-	} else {
-		command = params.Backend
-	}
-
-	// Resolve the workspace's on-disk path so tmux -c lands the new session
-	// in the active workspace instead of the loom service's cwd. Empty when
-	// unresolvable; SpawnInDir then falls back to the inherited cwd.
-	workDir := s.workspacePath(wsID)
-
-	created, err := s.termMgr.SpawnInDir(wsID, sanitizedName, command, 120, 40, workDir)
-	if err != nil {
-		return nil, service.ErrInternal("failed to spawn terminal session", err)
-	}
-
-	if created {
-		// Record workspace ownership
-		s.termMgr.SetSessionOwner(sanitizedName, wsID)
-		// Record session history for issue-linked sessions
-		if s.histStore != nil {
-			issueID := ExtractIssueID(sanitizedName)
-			if issueID != "" {
-				now := time.Now().UTC()
-				record := sessionhistory.SessionRecord{
-					ID:          fmt.Sprintf("%s:%d", sanitizedName, now.Unix()),
-					SessionName: sanitizedName,
-					IssueID:     issueID,
-					Backend:     params.Backend,
-					Status:      "active",
-					Launcher:    "user",
-					StartedAt:   now,
-				}
-				if err := s.histStore.Add(context.Background(), wsID, record); err != nil {
-					slog.Warn("failed to record session history", "session", sanitizedName, "err", err)
-				}
-			}
-		}
-	}
-
-	return &service.SpawnResult{
-		SessionName: sanitizedName,
-		Backend:     params.Backend,
-		Command:     command,
-		Created:     created,
-	}, nil
-}
-
-// leadMessageMaxLen caps the user-supplied message to avoid comically large argv
-// payloads. tmux and the backend agent handle long prompts, but we draw a
-// reasonable line here to protect against accidental pastes or abuse.
-const leadMessageMaxLen = 16 * 1024
-
-// CreateLeadSession spawns a detached tmux session running
-// `loom lead --backend <backend> --message <message>`. Because the message is
-// baked into the argv, the backend agent receives the user's request as part
-// of its initial prompt — no send-keys, no readiness polling, no TUI scraping.
-func (s *terminalServiceImpl) CreateLeadSession(_ context.Context, wsID string, params *service.LeadSessionParams) (*service.LeadSessionResult, error) {
-	if s.termMgr == nil {
-		return nil, service.ErrUnavailable("terminal manager not initialized")
-	}
-	if wsID == "" {
-		return nil, service.ErrValidation("wsID is required")
-	}
-
-	message := strings.TrimSpace(params.Message)
-	if message == "" {
-		return nil, service.ErrValidation("message is required")
-	}
-	if len(message) > leadMessageMaxLen {
-		return nil, service.ErrValidation(fmt.Sprintf("message too long (max %d bytes)", leadMessageMaxLen))
-	}
-
-	backend := strings.TrimSpace(params.Backend)
-	if backend == "" {
-		return nil, service.ErrValidation("backend is required")
-	}
-	if !isValidBackend(backend) {
-		return nil, service.ErrValidation(fmt.Sprintf("invalid backend %q; valid: %s", backend, strings.Join(validBackends, ", ")))
-	}
-
-	// "lead-<backend>-<unix_ms>" — timestamp-based so concurrent submissions
-	// get unique names without inspecting existing sessions.
-	sessionName := fmt.Sprintf("lead-%s-%d", backend, time.Now().UnixMilli())
-	if !validSessionName.MatchString(sessionName) {
-		// Defensive: backend name and digits should always satisfy the regex.
-		return nil, service.ErrInternal("generated session name failed validation", nil)
-	}
-
-	// Passing argv as separate elements avoids shell interpretation of the
-	// user's message — no quoting bugs, no injection.
-	argv := []string{"loom", "lead", "--backend", backend, "--message", message}
-
-	// Workspace cwd: SpawnArgv -c <workDir> starts the tmux session in the
-	// active workspace's path (e.g., fixes the paperclip-in-loom cwd bug).
-	// Empty falls back to the loom service's cwd.
-	workDir := s.workspacePath(wsID)
-
-	created, err := s.termMgr.SpawnArgv(wsID, sessionName, argv, 120, 40, workDir)
-	if err != nil {
-		return nil, service.ErrInternal("failed to spawn lead session", err)
-	}
-	if !created {
-		return nil, service.ErrConflict("session already exists")
-	}
-	s.termMgr.SetSessionOwner(sessionName, wsID)
-
-	return &service.LeadSessionResult{
-		SessionName: sessionName,
-		Backend:     backend,
-	}, nil
-}
-
-func (s *terminalServiceImpl) SeedSession(_ context.Context, wsID, session string, params *service.SeedParams) error {
-	if s.termMgr == nil {
-		return service.ErrUnavailable("terminal manager not initialized")
-	}
-	if wsID == "" {
-		return service.ErrValidation("wsID is required")
-	}
-	if session == "" {
-		return service.ErrValidation("missing session name")
-	}
-	if params.IssueID == "" || params.Title == "" {
-		return service.ErrValidation("issue_id and title are required")
-	}
-
-	prompt := formatSeedPromptFromParams(params)
-	if err := s.termMgr.SendKeys(wsID, session, prompt); err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			return service.ErrNotFound("session not found: " + session)
-		}
-		return service.ErrInternal("failed to seed terminal session", err)
-	}
-	return nil
-}
-
-func (s *terminalServiceImpl) ScheduleKill(_ context.Context, wsID, session string) error {
-	if s.termMgr == nil {
-		return service.ErrUnavailable("terminal manager not initialized")
-	}
-	if wsID == "" {
-		return service.ErrValidation("wsID is required")
-	}
-	if err := tabmeta.ValidateSessionName(session); err != nil {
-		return service.ErrValidation(err.Error())
-	}
-	s.termMgr.ScheduleKill(wsID, session, sessionKillGracePeriod)
-	return nil
-}
-
-// CloseAllSessions kills every tmux session belonging to wsID. Sessions in
-// other workspaces are untouched — multi-VM deployments must not accidentally
-// kill a sibling workspace's sessions. Scoping lives in the manager via
-// KillWorkspaceSessions, so this works with or without Redis tab metadata.
-func (s *terminalServiceImpl) CloseAllSessions(ctx context.Context, wsID string) (*service.CloseAllResult, error) {
-	if s.termMgr == nil {
-		return nil, service.ErrUnavailable("terminal manager not initialized")
-	}
-	if wsID == "" {
-		return nil, service.ErrValidation("wsID is required")
-	}
-
-	result := &service.CloseAllResult{}
-
-	if err := s.termMgr.KillWorkspaceSessions(wsID); err != nil {
-		return nil, service.ErrInternal("failed to kill workspace sessions", err)
-	}
-
-	// Clean tab metadata for this workspace (best-effort).
-	if s.tabStore != nil {
-		tabs, err := s.tabStore.List(ctx, wsID)
-		if err != nil {
-			slog.Error("failed to list tab metadata for workspace", "ws", wsID, "err", err)
-			result.MetaCleanupIncomplete = true
-		} else {
-			for _, tab := range tabs {
-				if err := s.tabStore.Delete(ctx, wsID, tab.SessionName); err != nil {
-					slog.Error("failed to delete tab metadata", "session", tab.SessionName, "err", err)
-					result.MetaCleanupIncomplete = true
-				}
-			}
-		}
-	}
-
-	s.broadcastSessionChange(wsID)
-	result.AffectedWorkspaces = append(result.AffectedWorkspaces, wsID)
-	return result, nil
-}
-
-func (s *terminalServiceImpl) broadcastSessionChange(wsID string) {
-	if s.hub == nil {
-		return
-	}
-	s.hub.Broadcast(&realtime.MutationPayload{
-		Type:        "terminal_session_change",
-		Timestamp:   time.Now().UTC().Format(time.RFC3339),
-		WorkspaceID: wsID,
-	})
-}
-
-func (s *terminalServiceImpl) ExportSession(_ context.Context, wsID, session string) (string, error) {
-	if session == "" || !validTerminalSession.MatchString(session) {
-		return "", service.ErrValidation("invalid session name")
-	}
-	if s.termMgr == nil {
-		return "", service.ErrUnavailable("terminal manager not initialized")
-	}
-	if wsID == "" {
-		return "", service.ErrValidation("wsID is required")
-	}
-	if !s.termMgr.SessionAlive(wsID, session) {
-		return "", service.ErrNotFound("session not found")
-	}
-
-	content, err := s.termMgr.ExportSession(wsID, session)
-	if err != nil {
-		return "", service.ErrInternal("failed to capture scrollback", err)
-	}
-
-	// Strip ANSI escape codes for clean export.
-	content = StripANSI(content)
-	return content, nil
-}
-
-func (s *terminalServiceImpl) GetScrollbackInfo(_ context.Context, wsID, session string) (*service.ScrollbackInfoResult, error) {
-	if session == "" || !validTerminalSession.MatchString(session) {
-		return nil, service.ErrValidation("invalid session name")
-	}
-	if s.termMgr == nil {
-		return nil, service.ErrUnavailable("terminal manager not initialized")
-	}
-	if wsID == "" {
-		return nil, service.ErrValidation("wsID is required")
-	}
-
-	buf := s.termMgr.LookupScrollbackBuffer(wsID, session)
-	result := &service.ScrollbackInfoResult{
-		MaxLines: s.termMgr.ScrollbackMaxLines(),
-	}
-	if buf != nil {
-		result.LineCount = buf.LineCount()
-		result.TruncatedCount = buf.TruncatedCount()
-	}
-	return result, nil
-}
-
-func (s *terminalServiceImpl) GetScrollback(_ context.Context, wsID, session string) (*service.ScrollbackResult, error) {
-	if s.termMgr == nil {
-		return nil, service.ErrUnavailable("terminal manager not initialized")
-	}
-	if wsID == "" {
-		return nil, service.ErrValidation("wsID is required")
-	}
-	if session == "" {
-		return nil, service.ErrValidation("session name is required")
-	}
-
-	content, err := s.termMgr.CaptureScrollback(wsID, session)
-	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			return nil, service.ErrNotFound("session not found")
-		}
-		return nil, service.ErrInternal("failed to capture scrollback", err)
-	}
-
-	lines := 0
-	if content != "" {
-		lines = strings.Count(content, "\n") + 1
-	}
-	return &service.ScrollbackResult{Content: content, Lines: lines}, nil
-}
-
-// formatSeedPromptFromParams builds the context prompt string from SeedParams.
-func formatSeedPromptFromParams(params *service.SeedParams) string {
-	var b strings.Builder
-
-	fmt.Fprintf(&b, "I need help with issue %s: %s", params.IssueID, params.Title)
-
-	if params.Description != "" {
-		fmt.Fprintf(&b, "\n\nDescription: %s", truncateSvc(params.Description, maxDescriptionLen))
-	}
-
-	if params.Design != "" {
-		fmt.Fprintf(&b, "\n\nDesign: %s", truncateSvc(params.Design, maxDesignLen))
-	}
-
-	if len(params.Blockers) > 0 {
-		b.WriteString("\n\nBlockers:")
-		limit := len(params.Blockers)
-		if limit > maxBlockers {
-			limit = maxBlockers
-		}
-		for _, blocker := range params.Blockers[:limit] {
-			fmt.Fprintf(&b, "\n- %s: %s", blocker.ID, blocker.Title)
-		}
-	}
-
-	return b.String()
-}
-
-// truncateSvc returns s truncated to maxLen runes with "..." suffix if needed.
-func truncateSvc(s string, maxLen int) string {
-	runes := []rune(s)
-	if len(runes) <= maxLen {
-		return s
-	}
-	return string(runes[:maxLen]) + "..."
 }

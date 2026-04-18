@@ -33,12 +33,11 @@
   align-items: center;
   gap: 0.375rem;
   padding: 0.25rem 1rem;
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
 }
 
 .epicIcon {
   flex-shrink: 0;
-  font-size: 0.75rem;
   color: var(--color-primary, #6366f1);
 }
 
@@ -53,17 +52,17 @@
 
 .epicProgress {
   flex-shrink: 0;
-  font-size: 0.6875rem;
   font-weight: 600;
   color: var(--color-text-tertiary);
   font-variant-numeric: tabular-nums;
 }
 
-.taskRow {
+/* Shared task row base */
+.taskRow,
+.taskRowOrphan {
   display: flex;
   align-items: center;
   gap: 0.375rem;
-  padding: 0.25rem 1rem 0.25rem 2rem;
   background: transparent;
   border: none;
   cursor: pointer;
@@ -73,18 +72,29 @@
   transition: background-color 0.15s ease;
 }
 
-.taskRow:hover {
+/* Indented under epic */
+.taskRow {
+  padding: 0.25rem 1rem 0.25rem 2rem;
+}
+
+/* Orphan tasks align with epic headers */
+.taskRowOrphan {
+  padding: 0.25rem 1rem;
+}
+
+.taskRow:hover,
+.taskRowOrphan:hover {
   background: var(--color-bg-hover);
 }
 
-.taskRow:focus-visible {
+.taskRow:focus-visible,
+.taskRowOrphan:focus-visible {
   outline: 2px solid var(--color-focus);
   outline-offset: -2px;
 }
 
 .taskIcon {
   flex-shrink: 0;
-  font-size: 0.625rem;
   color: var(--color-status-working, #facc15);
 }
 
@@ -96,16 +106,8 @@
   text-overflow: ellipsis;
 }
 
-.taskAssignee {
-  flex-shrink: 0;
-  font-size: 0.6875rem;
-  color: var(--color-text-tertiary);
-  font-family: monospace;
-}
-
 .taskElapsed {
   flex-shrink: 0;
-  font-size: 0.6875rem;
   color: var(--color-text-tertiary);
   font-variant-numeric: tabular-nums;
   min-width: 2em;

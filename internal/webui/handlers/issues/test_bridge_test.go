@@ -348,7 +348,7 @@ func NewSessionService(sessStore *sessions.Store, histStore *sessionhistory.Stor
 	return &testSessionServiceImpl{sessStore: sessStore, histStore: histStore}
 }
 
-func (s *testSessionServiceImpl) ListTaskSessions(_ context.Context, taskID string) ([]service.SessionListItem, error) {
+func (s *testSessionServiceImpl) ListTaskSessions(_ context.Context, _, taskID string) ([]service.SessionListItem, error) {
 	if s.sessStore == nil {
 		return nil, service.ErrUnavailable("session store not available")
 	}
@@ -364,7 +364,7 @@ func (s *testSessionServiceImpl) ListTaskSessions(_ context.Context, taskID stri
 	return items, nil
 }
 
-func (s *testSessionServiceImpl) GetSession(_ context.Context, _, sessionID string) (*service.SessionDetailData, error) {
+func (s *testSessionServiceImpl) GetSession(_ context.Context, _, _, sessionID string) (*service.SessionDetailData, error) {
 	if s.sessStore == nil {
 		return nil, service.ErrUnavailable("session store not available")
 	}
@@ -378,7 +378,7 @@ func (s *testSessionServiceImpl) GetSession(_ context.Context, _, sessionID stri
 	return &service.SessionDetailData{SessionMetadata: *meta, IsActive: meta.Status == sessions.StatusRunning}, nil
 }
 
-func (s *testSessionServiceImpl) GetSessionTranscript(_ context.Context, _, sessionID string) ([]sessions.TranscriptEntry, error) {
+func (s *testSessionServiceImpl) GetSessionTranscript(_ context.Context, _, _, sessionID string) ([]sessions.TranscriptEntry, error) {
 	if s.sessStore == nil {
 		return nil, service.ErrUnavailable("session store not available")
 	}
@@ -392,7 +392,7 @@ func (s *testSessionServiceImpl) GetSessionTranscript(_ context.Context, _, sess
 	return entries, nil
 }
 
-func (s *testSessionServiceImpl) GetSessionDiff(_ context.Context, _, sessionID string) (string, error) {
+func (s *testSessionServiceImpl) GetSessionDiff(_ context.Context, _, _, sessionID string) (string, error) {
 	if s.sessStore == nil {
 		return "", service.ErrUnavailable("session store not available")
 	}
@@ -490,16 +490,16 @@ func assertPlainError(t *testing.T, body map[string]interface{}) {
 
 type stubSessionService struct{}
 
-func (s *stubSessionService) ListTaskSessions(_ context.Context, _ string) ([]service.SessionListItem, error) {
+func (s *stubSessionService) ListTaskSessions(_ context.Context, _, _ string) ([]service.SessionListItem, error) {
 	return nil, nil
 }
-func (s *stubSessionService) GetSession(_ context.Context, _, _ string) (*service.SessionDetailData, error) {
+func (s *stubSessionService) GetSession(_ context.Context, _, _, _ string) (*service.SessionDetailData, error) {
 	return &service.SessionDetailData{}, nil
 }
-func (s *stubSessionService) GetSessionTranscript(_ context.Context, _, _ string) ([]sessions.TranscriptEntry, error) {
+func (s *stubSessionService) GetSessionTranscript(_ context.Context, _, _, _ string) ([]sessions.TranscriptEntry, error) {
 	return nil, nil
 }
-func (s *stubSessionService) GetSessionDiff(_ context.Context, _, _ string) (string, error) {
+func (s *stubSessionService) GetSessionDiff(_ context.Context, _, _, _ string) (string, error) {
 	return "", nil
 }
 func (s *stubSessionService) ListSessionHistory(_ context.Context, _, _ string) ([]sessionhistory.SessionRecord, error) {

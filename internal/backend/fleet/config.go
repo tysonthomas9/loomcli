@@ -12,10 +12,10 @@ type Config struct {
 	WorkspaceID string
 
 	// AuthToken is a JWT bearer token for authenticated requests.
-	AuthToken string
+	AuthToken string //nolint:gosec // field name describes its purpose; value comes from caller config
 
 	// APIKey is sent as X-Fleet-API-Key for registration endpoints.
-	APIKey string
+	APIKey string //nolint:gosec // field name describes its purpose; value comes from caller config
 
 	// HTTPClient is an optional override for the HTTP client.
 	// If nil, a default client with 30s timeout is created.

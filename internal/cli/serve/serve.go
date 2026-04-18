@@ -28,6 +28,11 @@ import (
 	webuiapp "github.com/tysonthomas9/loomcli/internal/webui/app"
 )
 
+// envLoomFleetMode is the env var that toggles --fleet-mode when no flag is
+// passed. Intentionally separate from LOOM_ISSUE_BACKEND=fleet, which gates
+// fleet-aware issue routing at a different layer.
+const envLoomFleetMode = "LOOM_FLEET_MODE"
+
 var (
 	servePort              int
 	serveBindAddr          string
@@ -37,6 +42,7 @@ var (
 	serveNoDaemon          bool
 	serveRedisAddr         string
 	serveRedisPassword     string
+	serveFleetMode         bool
 	serveFleetAPIKey       string
 	serveHSTS              bool
 	serveAuthURL           string
@@ -124,6 +130,9 @@ func init() {
 	defaultRedisPassword := os.Getenv("LOOM_REDIS_PASSWORD")
 	serveCmd.Flags().StringVar(&serveRedisPassword, "redis-password", defaultRedisPassword, "Redis password (prefer LOOM_REDIS_PASSWORD env var to avoid leaking in process list)")
 
+	defaultFleetMode := os.Getenv(envLoomFleetMode) == "true"
+	serveCmd.Flags().BoolVar(&serveFleetMode, "fleet-mode", defaultFleetMode, "Enable fleet coordination features (stale detector, task claims, fleet routes). Default off for local dev. Env: "+envLoomFleetMode)
+
 	defaultFleetAPIKey := os.Getenv("LOOM_FLEET_API_KEY")
 	serveCmd.Flags().StringVar(&serveFleetAPIKey, "fleet-api-key", defaultFleetAPIKey, "API key for fleet worker registration (required for fleet register endpoint)")
 
@@ -166,10 +175,29 @@ func runServe(cmd *cobra.Command, args []string) {
 	}
 
 	fleetState := resolveFleetState(ctx)
+
+	// When no external Redis address is configured, run an in-process
+	// miniredis so the terminal-state stores (tabmeta, issuetabs,
+	// sessionhistory, terminal:ui-state) keep working. State is snapshotted
+	// to ~/.loom/terminal-state/snapshot.json every 30s and on shutdown.
+	if serveRedisAddr == "" {
+		if mgr := daemonwire.StartLocalRedis(ctx, serveFleetMode); mgr != nil {
+			fleetState.redisConfig = &daemonwire.FleetRedisConfig{Address: mgr.Addr()}
+		}
+	} else {
+		slog.Info("Redis: using external server", "addr", serveRedisAddr)
+	}
+
 	applyAuthDefaults()
 	warnNonLocalBind()
 
-	staleDetectorHandler := daemonwire.InitStaleDetectorHandler(ctx, serveRedisAddr, serveRedisPassword)
+	// Stale detector is only meaningful with fleet-mode AND a real multi-node
+	// Redis (miniredis is single-node, so there are no peer servers to mark
+	// stale). When either is missing, the /stale-detector endpoint returns 404.
+	var staleDetectorHandler http.HandlerFunc
+	if serveFleetMode && serveRedisAddr != "" {
+		staleDetectorHandler = daemonwire.InitStaleDetectorHandler(ctx, serveRedisAddr, serveRedisPassword)
+	}
 	initUsageStore()
 	go workspacemgr.PurgeOldSessions()
 
@@ -305,8 +333,6 @@ func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState) web
 }
 
 func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimpl.GitOpsImpl, backend string) webui.ServerConfig {
-	sessStore := workspacemgr.NewSessionStore()
-
 	return webui.ServerConfig{
 		Port:                 servePort,
 		BindAddress:          serveBindAddr,
@@ -325,7 +351,6 @@ func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimp
 		GitOps:               gitOps,
 		FileOps:              gitOps,
 		BackendOps:           opsimpl.NewBackendOps(),
-		SessionsStore:        sessStore,
 		NotifyTokenDir:       cli.GetBeadsDir(),
 		Logger:               slog.Default(),
 		SentryDSN:            serveSentryDSN,
@@ -333,7 +358,7 @@ func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimp
 }
 
 func applyFleetConfig(cfg *webui.ServerConfig, fs fleetState) {
-	cfg.FleetEnabled = serveRedisAddr != ""
+	cfg.FleetEnabled = serveFleetMode
 	cfg.FleetRedis = fs.redisConfig
 	cfg.FleetJWTKey = fs.jwtKey
 	cfg.FleetAPIKey = serveFleetAPIKey

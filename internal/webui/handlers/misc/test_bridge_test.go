@@ -52,7 +52,6 @@ var handleFileTree = HandleFileTree
 var handleFileWrite = HandleFileWrite
 var handleGetAgentLog = HandleGetAgentLog
 var handleGetBackendsHealth = HandleGetBackendsHealth
-var handleGetBackendConfig = HandleGetBackendConfig
 var handleListEditors = HandleListEditors
 var handleOpenEditor = HandleOpenEditor
 var handleGetTaskLog = HandleGetTaskLog
@@ -62,7 +61,6 @@ var handleGetSessionDiff = HandleGetSessionDiff
 var handleGetSessionTranscript = HandleGetSessionTranscript
 var handleListTaskSessions = HandleListTaskSessions
 var handleNotifySessionChange = HandleNotifySessionChange
-var handlePatchBackendConfig = HandlePatchBackendConfig
 var handleWorkerRegister = HandleWorkerRegister
 
 // ---------------------------------------------------------------------------
@@ -364,7 +362,7 @@ func NewSessionService(sessStore *sessions.Store, histStore *sessionhistory.Stor
 	return &testSessionServiceImpl{sessStore: sessStore, histStore: histStore}
 }
 
-func (s *testSessionServiceImpl) ListTaskSessions(_ context.Context, taskID string) ([]service.SessionListItem, error) {
+func (s *testSessionServiceImpl) ListTaskSessions(_ context.Context, _, taskID string) ([]service.SessionListItem, error) {
 	if s.sessStore == nil {
 		return nil, service.ErrUnavailable("session store not available")
 	}
@@ -392,7 +390,7 @@ func (s *testSessionServiceImpl) ListTaskSessions(_ context.Context, taskID stri
 	return items, nil
 }
 
-func (s *testSessionServiceImpl) GetSession(_ context.Context, taskID, sessionID string) (*service.SessionDetailData, error) {
+func (s *testSessionServiceImpl) GetSession(_ context.Context, _, taskID, sessionID string) (*service.SessionDetailData, error) {
 	if s.sessStore == nil {
 		return nil, service.ErrUnavailable("session store not available")
 	}
@@ -418,7 +416,7 @@ func (s *testSessionServiceImpl) GetSession(_ context.Context, taskID, sessionID
 	}, nil
 }
 
-func (s *testSessionServiceImpl) GetSessionTranscript(_ context.Context, taskID, sessionID string) ([]sessions.TranscriptEntry, error) {
+func (s *testSessionServiceImpl) GetSessionTranscript(_ context.Context, _, taskID, sessionID string) ([]sessions.TranscriptEntry, error) {
 	if s.sessStore == nil {
 		return nil, service.ErrUnavailable("session store not available")
 	}
@@ -448,7 +446,7 @@ func (s *testSessionServiceImpl) GetSessionTranscript(_ context.Context, taskID,
 	return entries, nil
 }
 
-func (s *testSessionServiceImpl) GetSessionDiff(_ context.Context, taskID, sessionID string) (string, error) {
+func (s *testSessionServiceImpl) GetSessionDiff(_ context.Context, _, taskID, sessionID string) (string, error) {
 	if s.sessStore == nil {
 		return "", service.ErrUnavailable("session store not available")
 	}

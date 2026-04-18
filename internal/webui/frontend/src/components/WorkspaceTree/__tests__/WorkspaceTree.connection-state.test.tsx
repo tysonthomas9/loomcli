@@ -99,10 +99,20 @@ vi.mock("@/hooks", () => ({
   useWorkspaceRepos: () => ({ ...defaultReposReturn, ...reposOverride }),
   useAgentStoreInstance: () => ({}),
   useWorkspaceContext: () => ({
+    workspaceId: "test-ws-uuid",
     activeWorkspaceName: null,
     defaultWorkspaceName: null,
     setDefaultWorkspace: vi.fn(),
     agents: [],
+    workspace: null,
+  }),
+  useWorkspaceTree: () => ({
+    epics: [],
+    orphanTasks: [],
+    closedEpicCount: 0,
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
   }),
   useToast: () => ({ showToast: vi.fn() }),
   useIssueDiffStat: () => ({
@@ -444,30 +454,7 @@ describe("WorkspaceTree connection state", () => {
       ).toBeInTheDocument();
     });
 
-    it("renders repo list with staleOverlay class applied", () => {
-      reposOverride = {
-        repos: [
-          {
-            name: "alpha",
-            path: "/repos/alpha",
-            default_branch: "main",
-            remote: "origin",
-          },
-        ],
-        isLoading: false,
-        error: "Server down",
-        connectionState: "error_lost_connection",
-        retryCountdown: null,
-        retryNow: vi.fn(),
-      };
-
-      const { container } = render(<WorkspaceTree defaultCollapsed={false} />);
-
-      const repoList = container.querySelector('[class*="staleOverlay"]');
-      expect(repoList).toBeInTheDocument();
-    });
-
-    it("still shows repo names in dimmed repo list", () => {
+    it("still shows repo names when connection is lost", () => {
       reposOverride = {
         repos: [
           {
@@ -494,27 +481,6 @@ describe("WorkspaceTree connection state", () => {
 
       expect(screen.getByText("alpha")).toBeInTheDocument();
       expect(screen.getByText("beta")).toBeInTheDocument();
-    });
-
-    it("does not render staleOverlay when connected", () => {
-      reposOverride = {
-        repos: [
-          {
-            name: "alpha",
-            path: "/repos/alpha",
-            default_branch: "main",
-            remote: "origin",
-          },
-        ],
-        isLoading: false,
-        error: null,
-        connectionState: "connected",
-      };
-
-      const { container } = render(<WorkspaceTree defaultCollapsed={false} />);
-
-      const staleOverlay = container.querySelector('[class*="staleOverlay"]');
-      expect(staleOverlay).not.toBeInTheDocument();
     });
 
     it("does not render stale banner when connected", () => {

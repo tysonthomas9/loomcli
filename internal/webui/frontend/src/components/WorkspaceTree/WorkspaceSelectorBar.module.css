@@ -39,6 +39,7 @@
   flex: 1;
   white-space: nowrap;
   overflow: hidden;
+  text-transform: capitalize;
   text-overflow: ellipsis;
 }
 

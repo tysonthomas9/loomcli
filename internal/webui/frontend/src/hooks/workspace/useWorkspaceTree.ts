@@ -52,7 +52,7 @@ export function useWorkspaceTree(
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const shouldFetch = sourceRepos !== undefined && sourceRepos.length > 0;
+  const shouldFetch = sourceRepos === undefined || sourceRepos.length > 0;
 
   // Stable key for sourceRepos to prevent infinite re-renders from array identity changes
   const sourceReposKey = useMemo(

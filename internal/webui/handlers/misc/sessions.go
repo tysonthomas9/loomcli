@@ -13,6 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
@@ -62,9 +63,10 @@ type TranscriptData struct {
 // HandleListTaskSessions returns all sessions for a given task.
 func HandleListTaskSessions(svc service.SessionService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		wsID := middleware.WorkspaceFromContext(r.Context())
 		taskID := r.PathValue("taskId")
 
-		items, err := svc.ListTaskSessions(r.Context(), taskID)
+		items, err := svc.ListTaskSessions(r.Context(), wsID, taskID)
 		if err != nil {
 			var svcErr *service.ServiceError
 			status := http.StatusInternalServerError
@@ -93,10 +95,11 @@ func HandleListTaskSessions(svc service.SessionService) http.HandlerFunc {
 // HandleGetSession returns metadata for a single session.
 func HandleGetSession(svc service.SessionService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		wsID := middleware.WorkspaceFromContext(r.Context())
 		taskID := r.PathValue("taskId")
 		sessionID := r.PathValue("sessionId")
 
-		result, err := svc.GetSession(r.Context(), taskID, sessionID)
+		result, err := svc.GetSession(r.Context(), wsID, taskID, sessionID)
 		if err != nil {
 			var svcErr *service.ServiceError
 			status := http.StatusInternalServerError
@@ -122,10 +125,11 @@ func HandleGetSession(svc service.SessionService) http.HandlerFunc {
 // HandleGetSessionTranscript returns the transcript entries for a session.
 func HandleGetSessionTranscript(svc service.SessionService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		wsID := middleware.WorkspaceFromContext(r.Context())
 		taskID := r.PathValue("taskId")
 		sessionID := r.PathValue("sessionId")
 
-		entries, err := svc.GetSessionTranscript(r.Context(), taskID, sessionID)
+		entries, err := svc.GetSessionTranscript(r.Context(), wsID, taskID, sessionID)
 		if err != nil {
 			var svcErr *service.ServiceError
 			status := http.StatusInternalServerError
@@ -211,10 +215,11 @@ func HandleNotifySessionChange(hub *realtime.Hub, notifyToken string) http.Handl
 // HandleGetSessionDiff returns the diff.patch file for a session as plain text.
 func HandleGetSessionDiff(svc service.SessionService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		wsID := middleware.WorkspaceFromContext(r.Context())
 		taskID := r.PathValue("taskId")
 		sessionID := r.PathValue("sessionId")
 
-		diff, err := svc.GetSessionDiff(r.Context(), taskID, sessionID)
+		diff, err := svc.GetSessionDiff(r.Context(), wsID, taskID, sessionID)
 		if err != nil {
 			var svcErr *service.ServiceError
 			status := http.StatusInternalServerError

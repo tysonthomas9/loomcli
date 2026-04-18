@@ -1,7 +1,5 @@
 import type {
   ConnectionState,
-  ContextMenuEvent,
-  SearchResultInfo,
   TerminalInstanceHandle,
 } from "./TerminalInstance";
 import { TerminalInstance } from "./TerminalInstance";
@@ -23,13 +21,8 @@ export interface TerminalPaneProps {
     state: ConnectionState,
     hasConnected: boolean,
   ) => void;
-  onCopyNotify: () => void;
-  onPasteRequest: () => void;
-  onSearchRequest: () => void;
-  onContextMenu: (event: ContextMenuEvent) => void;
   onReconnectStateChange: (state: ReconnectOverlayState) => void;
   onOutput: () => void;
-  onSearchResultChange: (result: SearchResultInfo | null) => void;
   onBackendCrash: (reason: string) => void;
   onCrashRestart: () => void;
   onCloseTab: () => void;
@@ -43,6 +36,15 @@ export interface TerminalPaneProps {
   notes: string;
   onSaveNotes: (text: string) => Promise<void>;
   isMetaLoading: boolean;
+  /**
+   * False when the backend reports this tab's PTY is not running — either
+   * metadata survived a server restart without the shell, or the shell
+   * exited mid-session. Undefined (or true) means the normal "try to
+   * connect" path is fine. When false, TerminalInstance should skip its
+   * auto-connect and render the session-ended overlay so the user opts
+   * in to spawning a new shell.
+   */
+  ptyAlive?: boolean | undefined;
 }
 
 export function TerminalPane({
@@ -50,13 +52,8 @@ export function TerminalPane({
   isActive,
   instanceRef,
   onConnectionStateChange,
-  onCopyNotify,
-  onPasteRequest,
-  onSearchRequest,
-  onContextMenu,
   onReconnectStateChange,
   onOutput,
-  onSearchResultChange,
   onBackendCrash,
   onCrashRestart,
   onCloseTab,
@@ -70,6 +67,7 @@ export function TerminalPane({
   notes,
   onSaveNotes,
   isMetaLoading,
+  ptyAlive,
 }: TerminalPaneProps) {
   return (
     <>
@@ -78,16 +76,12 @@ export function TerminalPane({
         sessionName={tab.sessionName}
         isActive={isActive}
         onConnectionStateChange={onConnectionStateChange}
-        onCopyNotify={onCopyNotify}
-        onPasteRequest={onPasteRequest}
-        onSearchRequest={onSearchRequest}
-        onContextMenu={onContextMenu}
         onReconnectStateChange={onReconnectStateChange}
         onOutput={onOutput}
-        onSearchResultChange={onSearchResultChange}
         onBackendCrash={onBackendCrash}
         onTerminalFocus={onTerminalFocus}
         agentName={tab.agentName}
+        ptyAlive={ptyAlive}
       />
       {tab.crashReason != null ? (
         <CrashOverlay

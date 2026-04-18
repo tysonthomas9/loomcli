@@ -10,7 +10,7 @@ import (
 type FleetSettings struct {
 	URL       string `yaml:"url,omitempty"`
 	Workspace string `yaml:"workspace,omitempty"`
-	APIKey    string `yaml:"api_key,omitempty"`
+	APIKey    string `yaml:"api_key,omitempty"` //nolint:gosec // YAML-provided pre-shared key
 }
 
 // overlayFleetSettings merges src into dst, copying only non-empty string fields.
@@ -33,7 +33,7 @@ func overlayFleetSettings(dst, src *FleetSettings) {
 type FleetClientConfig struct {
 	URL       string // Fleet server base URL (required in fleet mode)
 	Workspace string // Workspace identifier (default: "default")
-	APIKey    string // Pre-shared API key for fleet worker registration
+	APIKey    string //nolint:gosec // Pre-shared API key for fleet worker registration
 }
 
 // resolveFleetConfig produces the final resolved FleetClientConfig from

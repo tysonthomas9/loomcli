@@ -104,7 +104,7 @@ func getWorktreeCommitDetailsDeps(deps *cli.Deps, path, defaultBranch string, li
 
 	output, err := runMonitorGit(deps, path, "log",
 		fmt.Sprintf("origin/%s..HEAD", branch),
-		fmt.Sprintf("--format=%%h|%%s"),
+		fmt.Sprintf("--format=%%H|%%s"),
 		"-n", strconv.Itoa(limit))
 	if err != nil {
 		return nil

@@ -61,6 +61,14 @@ export function GitTab({ agent, isActive }: GitTabProps): JSX.Element {
 
   const parsedStatus = parseLoomStatus(agent.status);
 
+  // Derive GitHub base URL from agent's monitor commit URLs (e.g., ".../commit/abc123" → "...")
+  const githubBaseUrl = (() => {
+    const url = agent.commits?.[0]?.url;
+    if (!url) return undefined;
+    const idx = url.lastIndexOf("/commit/");
+    return idx > 0 ? url.slice(0, idx) : undefined;
+  })();
+
   // Rich commit data from diff endpoint
   const [diffCommits, setDiffCommits] = useState<DiffCommit[] | null>(null);
   const [showAllCommits, setShowAllCommits] = useState(false);
@@ -82,7 +90,7 @@ export function GitTab({ agent, isActive }: GitTabProps): JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [agent.name]);
+  }, [agent.name, workspaceId]);
 
   // Determine data sources — prefer gitStatus, fall back to agent data
   const branch = gitStatus?.branch ?? agent.branch;
@@ -99,10 +107,6 @@ export function GitTab({ agent, isActive }: GitTabProps): JSX.Element {
     ? commits
     : commits.slice(0, INITIAL_COMMIT_LIMIT);
   const hasMoreCommits = commits.length > INITIAL_COMMIT_LIMIT;
-
-  // Build change list — prefer gitStatus changed_files, fall back to agent.changes
-  const agentChanges = agent.changes ?? [];
-  const gitChangedFiles = gitStatus?.changed_files ?? [];
 
   return (
     <>
@@ -174,13 +178,21 @@ export function GitTab({ agent, isActive }: GitTabProps): JSX.Element {
               {visibleCommits.map((commit) => {
                 // Handle both DiffCommit and LoomCommitDetail shapes
                 const isDiff = "short_hash" in commit;
-                const hash = isDiff
+                const shortHash = isDiff
                   ? (commit as DiffCommit).short_hash
                   : commit.hash;
+                const fullHash = isDiff
+                  ? (commit as DiffCommit).hash
+                  : undefined;
                 const message = isDiff
                   ? (commit as DiffCommit).subject
                   : commit.message;
-                const url = isDiff ? undefined : commit.url;
+                // Build URL: use full hash from DiffCommit, or existing URL from monitor
+                const url = isDiff
+                  ? githubBaseUrl && fullHash
+                    ? `${githubBaseUrl}/commit/${fullHash}`
+                    : undefined
+                  : commit.url;
                 const date = isDiff ? (commit as DiffCommit).date : undefined;
 
                 return (
@@ -195,10 +207,12 @@ export function GitTab({ agent, isActive }: GitTabProps): JSX.Element {
                         rel="noopener noreferrer"
                         className={panelStyles.commitHashLink}
                       >
-                        {hash}
+                        {shortHash}
                       </a>
                     ) : (
-                      <span className={panelStyles.commitHash}>{hash}</span>
+                      <span className={panelStyles.commitHash}>
+                        {shortHash}
+                      </span>
                     )}
                     <span className={panelStyles.commitMessage}>{message}</span>
                     {date && (
@@ -226,48 +240,6 @@ export function GitTab({ agent, isActive }: GitTabProps): JSX.Element {
           </span>
         ) : (
           <span className={panelStyles.emptyState}>No commit data</span>
-        )}
-      </div>
-
-      {/* Working Tree Changes */}
-      <div className={panelStyles.section}>
-        <h3 className={panelStyles.sectionTitle}>Working Tree</h3>
-        {agentChanges.length > 0 ? (
-          <div className={panelStyles.changesList}>
-            {agentChanges.map((change) => (
-              <div key={change.path} className={panelStyles.changeItem}>
-                <span
-                  className={panelStyles.changeStatus}
-                  data-status={change.status}
-                >
-                  {change.status === "M"
-                    ? "M"
-                    : change.status === "A"
-                      ? "+"
-                      : change.status === "D"
-                        ? "-"
-                        : change.status === "??"
-                          ? "?"
-                          : change.status}
-                </span>
-                <span className={panelStyles.changePath}>{change.path}</span>
-              </div>
-            ))}
-          </div>
-        ) : gitChangedFiles.length > 0 ? (
-          // Fallback: git status returns flat file list without status type
-          <div className={panelStyles.changesList}>
-            {gitChangedFiles.map((file) => (
-              <div key={file} className={panelStyles.changeItem}>
-                <span className={panelStyles.changeStatus} data-status="M">
-                  M
-                </span>
-                <span className={panelStyles.changePath}>{file}</span>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <span className={panelStyles.emptyState}>Clean working tree</span>
         )}
       </div>
     </>

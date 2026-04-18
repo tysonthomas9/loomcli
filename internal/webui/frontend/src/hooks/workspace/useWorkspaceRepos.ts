@@ -203,7 +203,13 @@ export function useWorkspaceRepos(): UseWorkspaceReposReturn {
     };
   }, [clearTimers]);
 
-  const repos = workspace?.repos ?? EMPTY_REPOS;
+  // Exclude agent worktrees from repos — the config lists them as repos for
+  // backend routing, but consumers should only see actual source repos.
+  const repos = useMemo(
+    () =>
+      (workspace?.repos ?? EMPTY_REPOS).filter((r) => !r.is_linked_worktree),
+    [workspace?.repos],
+  );
 
   return useMemo(
     () => ({

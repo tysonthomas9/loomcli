@@ -15,13 +15,11 @@ import {
 
 import { ErrorDisplay } from "@/components";
 import {
-  useAgentTerminalLogs,
   useFocusReturn,
   useFocusTrap,
   useRegisterEscapeLayer,
   LAYER_AGENT_PANEL,
 } from "@/hooks";
-import { useWorkspaceContext } from "@/hooks/workspace";
 import type { LoomAgentStatus, LoomTaskInfo } from "@/types";
 import { parseLoomStatus } from "@/types";
 
@@ -37,12 +35,10 @@ const DiffTab = lazy(() =>
   })),
 );
 
-import { LogViewer } from "../LogViewer";
 import { OpenInEditor } from "../OpenInEditor";
 import { RepoBadge } from "../RepoBadge";
 import styles from "./AgentDetailPanel.module.css";
 import { GitTab } from "./GitTab";
-import { useExpandedCommits } from "./useExpandedCommits";
 import {
   getAvatarColor,
   shouldUseWhiteText,
@@ -72,7 +68,7 @@ export interface AgentDetailPanelProps {
 /**
  * AgentDetailPanel displays detailed agent information in a slide-out panel.
  */
-type TabType = "info" | "logs" | "git" | "diff" | "files";
+type TabType = "info" | "git" | "diff" | "files";
 
 export function AgentDetailPanel({
   isOpen,
@@ -82,26 +78,8 @@ export function AgentDetailPanel({
   onClose,
   onTaskClick,
 }: AgentDetailPanelProps): JSX.Element {
-  const { workspaceId } = useWorkspaceContext();
   const panelRef = useRef<HTMLElement>(null);
   const [activeTab, setActiveTab] = useState<TabType>("info");
-
-  const {
-    mode: logMode,
-    chunks: logChunks,
-    state: logConnectionState,
-    error: logError,
-    resetVersion: logResetVersion,
-    refresh: refreshLogs,
-    resize: resizeLogs,
-    sendInput: sendLogInput,
-    loadOlderLogs,
-    hasMoreLines,
-    isLoadingMore,
-  } = useAgentTerminalLogs({
-    agentName,
-    enabled: isOpen && activeTab === "logs" && agentName !== null,
-  });
 
   // Reset to info tab when agent changes
   useEffect(() => {
@@ -132,13 +110,6 @@ export function AgentDetailPanel({
     },
     [onTaskClick],
   );
-
-  const {
-    expandedCommits,
-    loadingCommits,
-    handleShowAll: handleShowAllCommits,
-    handleShowLess,
-  } = useExpandedCommits(workspaceId, agentName);
 
   // Find the agent from the array
   const agent = agentName
@@ -249,17 +220,6 @@ export function AgentDetailPanel({
                 </button>
                 <button
                   type="button"
-                  className={`${styles.tab} ${activeTab === "logs" ? styles.activeTab : ""}`}
-                  onClick={() => setActiveTab("logs")}
-                  aria-selected={activeTab === "logs"}
-                  role="tab"
-                  id="agent-panel-tab-logs"
-                  aria-controls="agent-panel-tabpanel-logs"
-                >
-                  Logs
-                </button>
-                <button
-                  type="button"
                   className={`${styles.tab} ${activeTab === "git" ? styles.activeTab : ""}`}
                   onClick={() => setActiveTab("git")}
                   aria-selected={activeTab === "git"}
@@ -330,110 +290,6 @@ export function AgentDetailPanel({
                   )}
                 </div>
 
-                {/* Commit Status Section */}
-                <div className={styles.section}>
-                  <h3 className={styles.sectionTitle}>Commit Status</h3>
-                  <div className={styles.commitRow}>
-                    {agent.ahead > 0 ? (
-                      <span className={styles.commitBadge} data-type="ahead">
-                        +{agent.ahead} ahead
-                      </span>
-                    ) : null}
-                    {agent.behind > 0 ? (
-                      <span className={styles.commitBadge} data-type="behind">
-                        -{agent.behind} behind
-                      </span>
-                    ) : null}
-                    {agent.ahead === 0 && agent.behind === 0 && (
-                      <span className={styles.commitBadge} data-type="synced">
-                        In sync
-                      </span>
-                    )}
-                  </div>
-                  {agent.commits && agent.commits.length > 0 && (
-                    <div className={styles.commitList}>
-                      {(expandedCommits ?? agent.commits).map((commit) => (
-                        <div key={commit.hash} className={styles.commitItem}>
-                          {commit.url ? (
-                            <a
-                              href={commit.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className={styles.commitHashLink}
-                            >
-                              {commit.hash}
-                            </a>
-                          ) : (
-                            <span className={styles.commitHash}>
-                              {commit.hash}
-                            </span>
-                          )}
-                          <span className={styles.commitMessage}>
-                            {commit.message}
-                          </span>
-                        </div>
-                      ))}
-                      {agent.commits &&
-                        agent.commits.length < agent.ahead &&
-                        !expandedCommits && (
-                          <button
-                            type="button"
-                            className={styles.showAllCommitsBtn}
-                            onClick={handleShowAllCommits}
-                            disabled={loadingCommits}
-                          >
-                            {loadingCommits
-                              ? "Loading..."
-                              : `Show all ${agent.ahead} commits`}
-                          </button>
-                        )}
-                      {expandedCommits && (
-                        <button
-                          type="button"
-                          className={styles.showAllCommitsBtn}
-                          onClick={handleShowLess}
-                        >
-                          Show less
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* Changes Section */}
-                <div className={styles.section}>
-                  <h3 className={styles.sectionTitle}>Changes</h3>
-                  {agent.changes && agent.changes.length > 0 ? (
-                    <div className={styles.changesList}>
-                      {agent.changes.map((change) => (
-                        <div key={change.path} className={styles.changeItem}>
-                          <span
-                            className={styles.changeStatus}
-                            data-status={change.status}
-                          >
-                            {change.status === "M"
-                              ? "M"
-                              : change.status === "A"
-                                ? "+"
-                                : change.status === "D"
-                                  ? "-"
-                                  : change.status === "??"
-                                    ? "?"
-                                    : change.status}
-                          </span>
-                          <span className={styles.changePath}>
-                            {change.path}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <span className={styles.emptyState}>
-                      Clean working tree
-                    </span>
-                  )}
-                </div>
-
                 {/* Agent Info Section */}
                 <div className={styles.section}>
                   <h3 className={styles.sectionTitle}>Agent Info</h3>
@@ -480,53 +336,6 @@ export function AgentDetailPanel({
                     </div>
                   )}
                 </div>
-              </div>
-            ) : activeTab === "logs" ? (
-              /* Logs Tab */
-              <div
-                className={styles.logsContainer}
-                id="agent-panel-tabpanel-logs"
-                role="tabpanel"
-                aria-labelledby="agent-panel-tab-logs"
-              >
-                <div className={styles.logsMetaRow}>
-                  <span className={styles.logsModeBadge} data-mode={logMode}>
-                    {logMode === "tmux"
-                      ? "Live (tmux)"
-                      : logMode === "archive"
-                        ? "Archive snapshot"
-                        : logMode === "loading"
-                          ? "Loading logs..."
-                          : "Idle"}
-                  </span>
-                  {logMode === "archive" && (
-                    <button
-                      type="button"
-                      className={styles.logsRefreshButton}
-                      onClick={refreshLogs}
-                    >
-                      Refresh
-                    </button>
-                  )}
-                </div>
-                <LogViewer
-                  chunks={logChunks}
-                  connectionState={logConnectionState}
-                  error={logError}
-                  height="100%"
-                  autoScroll={logMode !== "tmux"}
-                  resetVersion={logResetVersion}
-                  mode={logMode === "tmux" ? "interactive" : "static"}
-                  onTerminalResize={resizeLogs}
-                  onScrollToTop={
-                    logMode === "archive" ? loadOlderLogs : undefined
-                  }
-                  isLoadingMore={isLoadingMore}
-                  hasMoreOlder={logMode === "archive" ? hasMoreLines : false}
-                  {...(logMode === "tmux"
-                    ? { onTerminalData: sendLogInput }
-                    : {})}
-                />
               </div>
             ) : activeTab === "git" ? (
               /* Git Tab */

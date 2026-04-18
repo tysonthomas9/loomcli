@@ -16,24 +16,16 @@ func (s *terminalServiceImpl) ListTabs(ctx context.Context, wsID string) ([]tabm
 		return nil, service.ErrUnavailable("tab metadata not available (no Redis)")
 	}
 
-	var activeNames []string
-	if s.termMgr != nil {
-		sessions, err := s.termMgr.ListActiveSessionsForWorkspace(wsID)
-		if err != nil {
-			slog.Error("failed to list active sessions for tab metadata", "err", err)
-		} else {
-			for _, sess := range sessions {
-				activeNames = append(activeNames, sess.Name)
-			}
-		}
-	}
-
-	tabs, err := s.tabStore.EnsureDefaults(ctx, wsID, activeNames)
+	tabs, err := s.tabStore.EnsureDefaults(ctx, wsID, nil)
 	if err != nil {
 		return nil, service.ErrInternal("failed to list tab metadata", err)
 	}
 	if tabs == nil {
 		tabs = []tabmeta.TabMetadata{}
+	}
+	for i := range tabs {
+		tabs[i].PTYAlive = s.ptyAlive(wsID, tabs[i].SessionName)
+		tabs[i].AttachedClients = s.attachedClients(wsID, tabs[i].SessionName)
 	}
 	return tabs, nil
 }
@@ -53,6 +45,8 @@ func (s *terminalServiceImpl) GetTab(ctx context.Context, wsID, session string) 
 	if meta == nil {
 		return nil, service.ErrNotFound("tab metadata not found")
 	}
+	meta.PTYAlive = s.ptyAlive(wsID, session)
+	meta.AttachedClients = s.attachedClients(wsID, session)
 	return meta, nil
 }
 
@@ -70,6 +64,10 @@ func (s *terminalServiceImpl) PatchTab(ctx context.Context, wsID, session string
 			return nil, service.ErrNotFound("tab metadata not found")
 		}
 		return nil, service.ErrInternal("failed to update tab metadata", err)
+	}
+	if meta != nil {
+		meta.PTYAlive = s.ptyAlive(wsID, session)
+		meta.AttachedClients = s.attachedClients(wsID, session)
 	}
 
 	_, issueIDChanged := fields["issue_id"]
@@ -99,6 +97,14 @@ func (s *terminalServiceImpl) PutTab(ctx context.Context, wsID string, meta *tab
 		return service.ErrValidation(err.Error())
 	}
 
+	// Reject replace when a live PTY owns the name so label/pinning
+	// changes can't happen under a running shell; callers use PATCH for
+	// that. Replace is still allowed when the PTY is already dead — lets
+	// users recycle a name after a restart.
+	if s.ptyAlive(wsID, meta.SessionName) {
+		return service.ErrConflict("tab metadata already exists with a live PTY; use PATCH to update")
+	}
+
 	if err := s.tabStore.Set(ctx, meta); err != nil {
 		return service.ErrInternal("failed to create/replace tab metadata", err)
 	}
@@ -125,6 +131,17 @@ func (s *terminalServiceImpl) DeleteTab(ctx context.Context, wsID, session strin
 		return service.ErrInternal("failed to delete tab metadata", err)
 	}
 
+	// Metadata is gone, but a child PTY keyed by the same name could still
+	// be running (especially with grace_period=0 on local serve). Kill it
+	// so no orphaned shell outlives its tab. Best-effort: a Kill failure
+	// is logged but doesn't undo the metadata delete.
+	if s.ptyMgr != nil {
+		if err := s.ptyMgr.Kill(SessionKey{Workspace: wsID, Name: session}); err != nil {
+			slog.Warn("failed to kill PTY on tab delete",
+				"workspace", wsID, "session", session, "err", err)
+		}
+	}
+
 	if s.hub != nil {
 		s.hub.Broadcast(&realtime.MutationPayload{
 			Type:        "terminal_metadata",
@@ -146,7 +163,7 @@ func (s *terminalServiceImpl) ListSessionsByIssue(ctx context.Context) (map[stri
 	return sessionMap, nil
 }
 
-func (s *terminalServiceImpl) GetTerminalState(ctx context.Context, _ string) (string, error) {
+func (s *terminalServiceImpl) GetTerminalState(ctx context.Context, wsID string) (string, error) {
 	if s.redisClient == nil {
 		return "", service.ErrUnavailable("terminal state not available (no Redis)")
 	}
@@ -155,7 +172,25 @@ func (s *terminalServiceImpl) GetTerminalState(ctx context.Context, _ string) (s
 		slog.Warn("failed to get terminal state", "err", err)
 		return "", nil // graceful degradation
 	}
-	return vals["active_tab"], nil
+	activeTab := vals["active_tab"]
+	if activeTab == "" {
+		return "", nil
+	}
+	// active_tab is persisted across restarts (miniredis snapshot), so a
+	// prior session's active tab can point at a name whose PTY is long
+	// gone. Keep the reference when either the PTY is live *or* the tab
+	// metadata still exists (so the UI can render a "session ended" state
+	// on that tab). Clear it only when both are gone — otherwise the
+	// frontend would open the page and try to attach to a pure ghost.
+	if s.ptyAlive(wsID, activeTab) {
+		return activeTab, nil
+	}
+	if s.tabStore != nil {
+		if meta, metaErr := s.tabStore.Get(ctx, wsID, activeTab); metaErr == nil && meta != nil {
+			return activeTab, nil
+		}
+	}
+	return "", nil
 }
 
 func (s *terminalServiceImpl) PatchTerminalState(ctx context.Context, _ string, activeTab string) error {

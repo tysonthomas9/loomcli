@@ -91,6 +91,7 @@
   font-weight: var(--font-weight-bold, 700);
   font-size: 0.94rem;
   color: var(--color-text-primary);
+  text-transform: capitalize;
   line-height: 1.2;
 }
 
