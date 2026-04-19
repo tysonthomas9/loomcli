@@ -167,8 +167,10 @@ type autoLoopCtx struct {
 	sameTaskFailures int
 	// stuckTaskIDs is the set of task IDs that have been declared stuck and
 	// should be skipped if the agent re-claims them. Persists for the lifetime
-	// of the auto-mode loop.
-	stuckTaskIDs map[string]bool
+	// of the auto-mode loop. Bounded at maxStuckTasks; when full, the
+	// oldest-inserted entry (tracked via stuckTaskOrder) is evicted.
+	stuckTaskIDs   map[string]bool
+	stuckTaskOrder []string
 
 	// rateLimitBreaker is a sliding-window circuit breaker that trips when
 	// rate-limit errors accumulate within a time window. It pauses auto-mode

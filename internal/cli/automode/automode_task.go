@@ -98,6 +98,14 @@ func handleAutoTaskError(ctx *autoLoopCtx, ae *agenterr.AgentError, rawErr error
 		return true
 	}
 
+	// Rate limits are global API throttling, not per-task failures. Route
+	// them before per-task tracking so a sustained rate limit against a
+	// single task doesn't drain its stuck-task budget — and so the rate-
+	// limit breaker and ConsecutiveRateLimits counter record every hit.
+	if ae.Class == agenterr.RateLimited {
+		return handleRateLimitError(ctx, ae, shutdown)
+	}
+
 	// Only update per-task tracking for errors that will lead to a retry —
 	// otherwise sameTaskFailures can advance past the threshold without ever
 	// triggering skipStuckTask, leaving inconsistent state for any future
@@ -109,11 +117,6 @@ func handleAutoTaskError(ctx *autoLoopCtx, ae *agenterr.AgentError, rawErr error
 	// tasks can still make progress.
 	if isStuckTaskThresholdReached(ctx, failedTaskID) {
 		return skipStuckTask(ctx, failedTaskID, rawErr)
-	}
-
-	// Rate limit: separate counter, generous retry.
-	if ae.Class == agenterr.RateLimited {
-		return handleRateLimitError(ctx, ae, shutdown)
 	}
 
 	// Retryable transient errors: exponential backoff.
@@ -187,13 +190,16 @@ func skipStuckTask(ctx *autoLoopCtx, failedTaskID string, rawErr error) bool {
 		ctx.stuckTaskIDs = make(map[string]bool)
 	}
 	// Cap the skip set to prevent unbounded growth in long-lived loops.
+	// Evict the oldest-inserted entry (FIFO) so eviction is deterministic
+	// and predictable in tests — Go map iteration order is randomized.
 	const maxStuckTasks = 100
-	if len(ctx.stuckTaskIDs) >= maxStuckTasks {
-		// Evict an arbitrary entry to make room.
-		for k := range ctx.stuckTaskIDs {
-			delete(ctx.stuckTaskIDs, k)
-			break
-		}
+	if len(ctx.stuckTaskIDs) >= maxStuckTasks && len(ctx.stuckTaskOrder) > 0 {
+		oldest := ctx.stuckTaskOrder[0]
+		ctx.stuckTaskOrder = ctx.stuckTaskOrder[1:]
+		delete(ctx.stuckTaskIDs, oldest)
+	}
+	if !ctx.stuckTaskIDs[failedTaskID] {
+		ctx.stuckTaskOrder = append(ctx.stuckTaskOrder, failedTaskID)
 	}
 	ctx.stuckTaskIDs[failedTaskID] = true
 	ctx.sameTaskFailures = 0
