@@ -56,7 +56,7 @@ func TestSyncSubagentTranscript_RejectsBadSubagentID(t *testing.T) {
 
 // SubagentTranscriptPath is an unvalidated primitive — it interpolates the
 // ID straight into the filename. Callers must gate on SubagentIDPattern.
-// This test pins the escape behaviour so anyone calling the primitive
+// This test pins the escape behavior so anyone calling the primitive
 // without validation inherits a path traversal.
 func TestSubagentTranscriptPath_UnvalidatedPrimitiveCanEscapeStoreDir(t *testing.T) {
 	store := &Store{dir: "/var/loom/sessions"}

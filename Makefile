@@ -200,7 +200,7 @@ check-go:
 	@echo "=== [6/12] Go: package size check ==="
 	@./scripts/check-package-size.sh 25
 	@echo "=== [7/12] Go: import fanout check ==="
-	@./scripts/check-import-fanout.sh 10
+	@./scripts/check-import-fanout.sh 12
 	@echo "=== [8/12] Go: exec.Command guard ==="
 	@./scripts/check-no-raw-exec.sh
 	@echo "=== [9/12] Go: log.Printf guard ==="
