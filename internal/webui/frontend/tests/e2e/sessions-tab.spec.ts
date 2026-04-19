@@ -190,6 +190,20 @@ function ok<T>(data: T): string {
 // -- Mock setup --
 
 async function setupBaseMocks(page: Page) {
+  // App config (auth mode discovery) — bootstrap fetch in main.tsx.
+  await page.route("**/api/config", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname !== "/api/config") {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ mode: "open" }),
+    });
+  });
+
   await page.route("**/api/workspaces/active", async (route) => {
     await route.fulfill({
       status: 200,
@@ -300,7 +314,14 @@ async function installIssuesMock(page: Page, issues: unknown[]) {
       input: RequestInfo | URL,
       init?: RequestInit,
     ): Promise<Response> {
-      const url = typeof input === "string" ? input : input.toString();
+      // Request.toString() → "[object Request]", not the URL. openapi-fetch
+      // passes Request objects, so extract `.url` explicitly.
+      const url =
+        input instanceof Request
+          ? input.url
+          : typeof input === "string"
+            ? input
+            : String(input);
       if (
         /\/api\/workspaces\/[^/]+\/issues(\?|$)/.test(url) &&
         (init?.method ?? "GET") === "GET"

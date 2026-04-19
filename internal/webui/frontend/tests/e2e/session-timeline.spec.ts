@@ -202,6 +202,7 @@ const mockTranscriptSess1 = [
     role: "assistant",
     type: "text",
     text: "I'll start by reading the existing components.",
+    uuid: "asst-t1",
   },
   {
     seq: 3,
@@ -210,12 +211,15 @@ const mockTranscriptSess1 = [
     type: "tool_use",
     tool_name: "Read",
     tool_input: { file_path: "src/api.ts" },
+    tool_use_id: "tu-read",
+    uuid: "asst-t1",
   },
   {
     seq: 4,
     timestamp: "2026-03-28T01:02:00Z",
     role: "tool",
     type: "tool_result",
+    tool_use_id: "tu-read",
     output: "Tool execution completed successfully.",
   },
 ];
@@ -243,6 +247,20 @@ function ok<T>(data: T): string {
 // -- Mock setup --
 
 async function setupBaseMocks(page: Page) {
+  // App config (auth mode discovery) — bootstrap fetch in main.tsx.
+  await page.route("**/api/config", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname !== "/api/config") {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ mode: "open" }),
+    });
+  });
+
   await page.route("**/api/workspaces/active", async (route) => {
     await route.fulfill({
       status: 200,
@@ -352,7 +370,14 @@ async function installIssuesMock(page: Page, issues: unknown[]) {
       input: RequestInfo | URL,
       init?: RequestInit,
     ): Promise<Response> {
-      const url = typeof input === "string" ? input : input.toString();
+      // Request.toString() → "[object Request]", not the URL. openapi-fetch
+      // passes Request objects, so extract `.url` explicitly.
+      const url =
+        input instanceof Request
+          ? input.url
+          : typeof input === "string"
+            ? input
+            : String(input);
       if (
         /\/api\/workspaces\/[^/]+\/issues(\?|$)/.test(url) &&
         (init?.method ?? "GET") === "GET"
@@ -795,7 +820,9 @@ test.describe("Session Timeline", () => {
       await expect(page.getByTestId("session-transcript")).toBeVisible();
     });
 
-    test("transcript entries render with role labels", async ({ page }) => {
+    test("transcript renders assistant turns and surfaces prompt in masthead", async ({
+      page,
+    }) => {
       await installIssuesMock(page, [testIssue]);
       await setupBaseMocks(page);
       await setupSessionMocks(page);
@@ -804,18 +831,21 @@ test.describe("Session Timeline", () => {
 
       await page.getByTestId("session-row-sess-1").click();
 
+      // Transcript region contains assistant turn(s); first user text is
+      // pulled up into the masthead Prompt block.
       const transcript = page.getByTestId("session-transcript");
       await expect(transcript).toBeVisible();
-
-      // Check role labels
-      await expect(transcript.locator('[data-role="user"]')).toBeVisible();
       await expect(
-        transcript.locator('[data-role="assistant"]').first(),
+        transcript.locator('article[data-role="assistant"]').first(),
       ).toBeVisible();
-      await expect(transcript.locator('[data-role="system"]')).toBeVisible();
+      await expect(page.getByTestId("session-detail-view")).toContainText(
+        "Prompt",
+      );
     });
 
-    test("tool entries show Tool: {tool_name} label", async ({ page }) => {
+    test("tool pill shows tool name and expands to reveal paired result", async ({
+      page,
+    }) => {
       await installIssuesMock(page, [testIssue]);
       await setupBaseMocks(page);
       await setupSessionMocks(page);
@@ -825,7 +855,11 @@ test.describe("Session Timeline", () => {
       await page.getByTestId("session-row-sess-1").click();
 
       const transcript = page.getByTestId("session-transcript");
-      await expect(transcript).toContainText("Tool: Read");
+      // Pill label shows just the tool name (no "Tool:" prefix)
+      await expect(transcript).toContainText("Read");
+      // Expanding reveals the tool_result paired by tool_use_id
+      await page.getByTestId("tool-pill").first().click();
+      await expect(transcript).toContainText("Tool execution completed");
     });
 
     test("empty transcript shows message", async ({ page }) => {

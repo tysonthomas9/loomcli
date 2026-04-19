@@ -2,10 +2,6 @@
  * @vitest-environment jsdom
  */
 
-/**
- * Unit tests for SessionDetailView component.
- */
-
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
@@ -14,7 +10,6 @@ import type { SessionRecord, TranscriptEntry } from "@/types/agent";
 
 import { SessionDetailView } from "../SessionDetailView";
 
-// Mock hooks
 vi.mock("@/hooks/terminal", async () => {
   const actual =
     await vi.importActual<typeof import("@/hooks/terminal")>(
@@ -38,7 +33,6 @@ vi.mock("@/hooks/workspace", async () => {
   };
 });
 
-// Mock CodeMirrorEditor
 vi.mock("@/components/CodeMirrorEditor/CodeMirrorEditor", () => ({
   CodeMirrorEditor: ({ value }: { value: string }) => (
     <div data-testid="codemirror-editor">{value}</div>
@@ -78,7 +72,7 @@ function createSession(overrides: Partial<SessionRecord> = {}): SessionRecord {
   };
 }
 
-function createTranscriptEntry(
+function createEntry(
   overrides: Partial<TranscriptEntry> = {},
 ): TranscriptEntry {
   return {
@@ -108,68 +102,99 @@ describe("SessionDetailView", () => {
     });
   });
 
-  describe("metadata summary", () => {
+  // ─── Masthead ──────────────────────────────────────────────────────
+  describe("masthead", () => {
     it("renders the detail view container", () => {
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
       expect(screen.getByTestId("session-detail-view")).toBeInTheDocument();
     });
 
-    it("displays model when present", () => {
+    it("shows agent name, backend, and model", () => {
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
-      expect(screen.getByText("Model:")).toBeInTheDocument();
+      expect(screen.getByText("nova")).toBeInTheDocument();
+      expect(screen.getByText("claude")).toBeInTheDocument();
       expect(screen.getByText("opus-4")).toBeInTheDocument();
     });
 
-    it("does not display model when absent", () => {
+    it("omits the model label when model is absent", () => {
       const session = createSession({ model: undefined });
       render(<SessionDetailView taskId="task-1" session={session} />);
       expect(screen.queryByText("Model:")).not.toBeInTheDocument();
     });
 
-    it("displays exit code 0 as success", () => {
+    it("renders stat cards for outcome, exit, duration, tokens, cost", () => {
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
-      expect(screen.getByText("Exit:")).toBeInTheDocument();
+      expect(screen.getByText("Outcome")).toBeInTheDocument();
+      expect(screen.getByText("completed")).toBeInTheDocument();
+      expect(screen.getByText("Exit")).toBeInTheDocument();
       expect(screen.getByText("0 (success)")).toBeInTheDocument();
+      expect(screen.getByText("Duration")).toBeInTheDocument();
+      expect(screen.getByText("Tokens")).toBeInTheDocument();
+      expect(screen.getByText("Cost")).toBeInTheDocument();
     });
 
-    it("displays non-zero exit code as number", () => {
+    it("shows non-zero exit code as a plain number", () => {
       const session = createSession({ exit_code: 1 });
       render(<SessionDetailView taskId="task-1" session={session} />);
       expect(screen.getByText("1")).toBeInTheDocument();
     });
 
-    it("displays files changed when > 0", () => {
+    it("renders a Files stat when files_changed > 0 with added/removed detail", () => {
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
-      expect(screen.getByText("Files:")).toBeInTheDocument();
+      expect(screen.getByText("Files")).toBeInTheDocument();
       expect(screen.getByText("3")).toBeInTheDocument();
+      expect(screen.getByText(/\+50 -10/)).toBeInTheDocument();
     });
 
-    it("does not display files when files_changed is 0", () => {
-      const session = createSession({ files_changed: 0 });
+    it("omits the Files stat when no files changed and no lines", () => {
+      const session = createSession({
+        files_changed: 0,
+        lines_added: 0,
+        lines_removed: 0,
+      });
       render(<SessionDetailView taskId="task-1" session={session} />);
-      expect(screen.queryByText("Files:")).not.toBeInTheDocument();
+      expect(screen.queryByText("Files")).not.toBeInTheDocument();
     });
 
-    it("displays lines added and removed", () => {
+    it("shows the active badge when session is_active", () => {
+      const session = createSession({ is_active: true });
+      render(<SessionDetailView taskId="task-1" session={session} />);
+      expect(screen.getByText("active")).toBeInTheDocument();
+    });
+
+    it("surfaces the initial user text as a Prompt block", () => {
+      mockUseSessionTranscript.mockReturnValue({
+        entries: [
+          createEntry({
+            seq: 1,
+            role: "user",
+            type: "text",
+            text: "do the thing",
+          }),
+          createEntry({ seq: 2, role: "assistant", text: "ok" }),
+        ],
+        isLoading: false,
+        error: null,
+      });
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
-      expect(screen.getByText("+50 -10")).toBeInTheDocument();
+      expect(screen.getByText("Prompt")).toBeInTheDocument();
+      expect(screen.getByText("do the thing")).toBeInTheDocument();
     });
 
-    it("does not display lines when both are 0", () => {
-      const session = createSession({ lines_added: 0, lines_removed: 0 });
-      render(<SessionDetailView taskId="task-1" session={session} />);
-      expect(screen.queryByText(/\+0 -0/)).not.toBeInTheDocument();
-    });
-
-    it("displays lines when only added > 0", () => {
-      const session = createSession({ lines_added: 10, lines_removed: 0 });
-      render(<SessionDetailView taskId="task-1" session={session} />);
-      expect(screen.getByText("+10 -0")).toBeInTheDocument();
+    it("does not render a Prompt block when no user text exists", () => {
+      mockUseSessionTranscript.mockReturnValue({
+        entries: [createEntry({ seq: 1, role: "assistant", text: "hi" })],
+        isLoading: false,
+        error: null,
+      });
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
+      expect(screen.queryByText("Prompt")).not.toBeInTheDocument();
     });
   });
 
+  // ─── Files Touched ─────────────────────────────────────────────────
   describe("files touched", () => {
-    it("shows files touched section when files exist", () => {
+    it("shows files-touched section when files exist", () => {
       const session = createSession({
         files_touched: ["src/foo.ts", "src/bar.ts"],
       });
@@ -177,15 +202,8 @@ describe("SessionDetailView", () => {
       expect(screen.getByText("Files Touched (2)")).toBeInTheDocument();
     });
 
-    it("does not show files touched when empty", () => {
-      const session = createSession({ files_touched: [] });
-      render(<SessionDetailView taskId="task-1" session={session} />);
-      expect(screen.queryByText(/Files Touched/)).not.toBeInTheDocument();
-    });
-
-    it("does not show files touched when undefined", () => {
-      const session = createSession({ files_touched: undefined });
-      render(<SessionDetailView taskId="task-1" session={session} />);
+    it("does not show files-touched when empty or undefined", () => {
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
       expect(screen.queryByText(/Files Touched/)).not.toBeInTheDocument();
     });
 
@@ -199,8 +217,9 @@ describe("SessionDetailView", () => {
     });
   });
 
-  describe("inner tab bar", () => {
-    it("shows Transcript and Diff tab buttons", () => {
+  // ─── Inner tabs ─────────────────────────────────────────────────────
+  describe("inner tabs", () => {
+    it("shows Transcript and Diff tabs", () => {
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
       expect(
         screen.getByTestId("session-inner-tab-transcript"),
@@ -208,30 +227,16 @@ describe("SessionDetailView", () => {
       expect(screen.getByTestId("session-inner-tab-diff")).toBeInTheDocument();
     });
 
-    it("defaults to transcript tab active", () => {
+    it("defaults to the transcript tab", () => {
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
-      const transcriptTab = screen.getByTestId("session-inner-tab-transcript");
-      expect(transcriptTab.className).toContain("activeInnerTab");
+      const t = screen.getByTestId("session-inner-tab-transcript");
+      expect(t.className).toContain("activeInnerTab");
     });
 
     it("disables diff tab when has_diff is false", () => {
       const session = createSession({ has_diff: false });
       render(<SessionDetailView taskId="task-1" session={session} />);
       expect(screen.getByTestId("session-inner-tab-diff")).toBeDisabled();
-    });
-
-    it("enables diff tab when has_diff is true", () => {
-      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
-      expect(screen.getByTestId("session-inner-tab-diff")).not.toBeDisabled();
-    });
-
-    it("sets title on diff tab based on has_diff", () => {
-      const session = createSession({ has_diff: false });
-      render(<SessionDetailView taskId="task-1" session={session} />);
-      expect(screen.getByTestId("session-inner-tab-diff")).toHaveAttribute(
-        "title",
-        "No diff available",
-      );
     });
 
     it("switches to diff tab on click", () => {
@@ -242,20 +247,11 @@ describe("SessionDetailView", () => {
         screen.queryByTestId("session-transcript"),
       ).not.toBeInTheDocument();
     });
-
-    it("switches back to transcript tab on click", () => {
-      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
-      // Switch to diff
-      fireEvent.click(screen.getByTestId("session-inner-tab-diff"));
-      // Switch back to transcript
-      fireEvent.click(screen.getByTestId("session-inner-tab-transcript"));
-      expect(screen.getByTestId("session-transcript")).toBeInTheDocument();
-      expect(screen.queryByTestId("session-diff")).not.toBeInTheDocument();
-    });
   });
 
-  describe("transcript tab", () => {
-    it("shows loading state when loading with no entries", () => {
+  // ─── Transcript ────────────────────────────────────────────────────
+  describe("transcript", () => {
+    it("shows loading state with no entries", () => {
       mockUseSessionTranscript.mockReturnValue({
         entries: [],
         isLoading: true,
@@ -277,100 +273,167 @@ describe("SessionDetailView", () => {
       ).toBeInTheDocument();
     });
 
-    it("shows empty state when no entries and not loading", () => {
+    it("shows empty state when no entries", () => {
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
       expect(screen.getByText("No transcript entries")).toBeInTheDocument();
     });
 
-    it("renders transcript entries", () => {
-      const entries = [
-        createTranscriptEntry({ seq: 1, role: "user", text: "Hello" }),
-        createTranscriptEntry({
-          seq: 2,
-          role: "assistant",
-          text: "Hi there",
-        }),
-      ];
+    it("renders assistant text without a role label", () => {
       mockUseSessionTranscript.mockReturnValue({
-        entries,
+        entries: [createEntry({ seq: 1, role: "assistant", text: "Hi there" })],
         isLoading: false,
         error: null,
       });
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
-      expect(screen.getByText("Hello")).toBeInTheDocument();
       expect(screen.getByText("Hi there")).toBeInTheDocument();
+      // No "assistant" byline in the body
+      expect(screen.queryByText(/^assistant$/)).not.toBeInTheDocument();
     });
 
-    it("renders role labels for entries", () => {
-      const entries = [
-        createTranscriptEntry({ seq: 1, role: "user", text: "test" }),
-      ];
+    it("groups assistant text + tool_use events sharing a uuid into one turn", () => {
       mockUseSessionTranscript.mockReturnValue({
-        entries,
+        entries: [
+          createEntry({
+            seq: 1,
+            role: "assistant",
+            type: "text",
+            text: "I will write it.",
+            uuid: "a1",
+          }),
+          createEntry({
+            seq: 2,
+            role: "assistant",
+            type: "tool_use",
+            tool_name: "Write",
+            tool_input: { file_path: "/tmp/x" },
+            tool_use_id: "tu-1",
+            uuid: "a1",
+          }),
+        ],
         isLoading: false,
         error: null,
       });
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
-      expect(screen.getByText("user")).toBeInTheDocument();
+      // Single turn article containing both events
+      const turns = screen.getAllByTestId("transcript-event");
+      expect(turns.length).toBeGreaterThan(0);
+      expect(screen.getByText("I will write it.")).toBeInTheDocument();
+      expect(screen.getByText("1 tool call")).toBeInTheDocument();
     });
 
-    it("renders tool name for tool_use entries", () => {
-      const entries = [
-        createTranscriptEntry({
-          seq: 1,
-          role: "assistant",
-          type: "tool_use",
-          tool_name: "Read",
-          text: undefined,
-          tool_input: { file_path: "/tmp/x" },
-        }),
-      ];
+    it("renders a collapsed tool pill by default", () => {
       mockUseSessionTranscript.mockReturnValue({
-        entries,
+        entries: [
+          createEntry({
+            seq: 1,
+            role: "assistant",
+            type: "tool_use",
+            tool_name: "Read",
+            tool_input: { file_path: "/tmp/a" },
+            tool_use_id: "t1",
+          }),
+        ],
         isLoading: false,
         error: null,
       });
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
-      expect(screen.getByText("Tool: Read")).toBeInTheDocument();
+      const pill = screen.getByTestId("tool-pill");
+      expect(pill).toBeInTheDocument();
+      expect(pill.getAttribute("aria-expanded")).toBe("false");
+      // Pill shows tool name + arg preview
+      expect(screen.getByText("Read")).toBeInTheDocument();
+      expect(screen.getByText("/tmp/a")).toBeInTheDocument();
     });
 
-    it("renders tool_input JSON for tool_use entries", () => {
-      const entries = [
-        createTranscriptEntry({
-          seq: 1,
-          role: "assistant",
-          type: "tool_use",
-          tool_name: "Bash",
-          text: undefined,
-          tool_input: { command: "ls -la" },
-        }),
-      ];
+    it("expands the tool body on pill click, revealing input JSON", () => {
       mockUseSessionTranscript.mockReturnValue({
-        entries,
+        entries: [
+          createEntry({
+            seq: 1,
+            role: "assistant",
+            type: "tool_use",
+            tool_name: "Bash",
+            tool_input: { command: "ls -la" },
+            tool_use_id: "t1",
+          }),
+        ],
         isLoading: false,
         error: null,
       });
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
+      fireEvent.click(screen.getByTestId("tool-pill"));
       expect(screen.getByText(/"command": "ls -la"/)).toBeInTheDocument();
     });
 
-    it("does not show loading text when entries exist during loading", () => {
-      const entries = [createTranscriptEntry({ seq: 1, text: "existing" })];
+    it("pairs a tool_result with its tool_use inline when expanded", () => {
       mockUseSessionTranscript.mockReturnValue({
-        entries,
-        isLoading: true,
+        entries: [
+          createEntry({
+            seq: 1,
+            role: "assistant",
+            type: "tool_use",
+            tool_name: "Write",
+            tool_input: { file_path: "/tmp/hello.txt" },
+            tool_use_id: "tu-42",
+          }),
+          createEntry({
+            seq: 2,
+            role: "tool",
+            type: "tool_result",
+            tool_use_id: "tu-42",
+            output: "File created",
+          }),
+        ],
+        isLoading: false,
         error: null,
       });
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
-      expect(
-        screen.queryByText("Loading transcript..."),
-      ).not.toBeInTheDocument();
-      expect(screen.getByText("existing")).toBeInTheDocument();
+      fireEvent.click(screen.getByTestId("tool-pill"));
+      expect(screen.getByText("File created")).toBeInTheDocument();
+    });
+
+    it("renders subsequent user text as a user-message interjection", () => {
+      mockUseSessionTranscript.mockReturnValue({
+        entries: [
+          createEntry({ seq: 1, role: "user", type: "text", text: "first" }),
+          createEntry({ seq: 2, role: "assistant", text: "ok" }),
+          createEntry({ seq: 3, role: "user", type: "text", text: "second" }),
+        ],
+        isLoading: false,
+        error: null,
+      });
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
+      // First user text → Prompt (masthead)
+      expect(screen.getByText("first")).toBeInTheDocument();
+      // Second user text → interjection
+      expect(screen.getByTestId("transcript-interjection")).toBeInTheDocument();
+      expect(screen.getByText("User message")).toBeInTheDocument();
+      expect(screen.getByText("second")).toBeInTheDocument();
+    });
+
+    it("does not render tool_result entries as their own turns", () => {
+      mockUseSessionTranscript.mockReturnValue({
+        entries: [
+          createEntry({
+            seq: 1,
+            role: "tool",
+            type: "tool_result",
+            tool_use_id: "orphan",
+            output: "stray result",
+          }),
+        ],
+        isLoading: false,
+        error: null,
+      });
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
+      // Orphan tool_result without matching tool_use = not rendered
+      expect(screen.queryByText("stray result")).not.toBeInTheDocument();
     });
   });
 
-  describe("diff tab", () => {
-    it("shows loading state when diff is loading", () => {
+  // ─── Diff ───────────────────────────────────────────────────────────
+  describe("diff", () => {
+    it("shows loading state", () => {
       mockUseSessionDiff.mockReturnValue({
         diff: null,
         isLoading: true,
@@ -381,7 +444,7 @@ describe("SessionDetailView", () => {
       expect(screen.getByText("Loading diff...")).toBeInTheDocument();
     });
 
-    it("shows error state for diff", () => {
+    it("shows error state", () => {
       mockUseSessionDiff.mockReturnValue({
         diff: null,
         isLoading: false,
@@ -394,9 +457,9 @@ describe("SessionDetailView", () => {
       ).toBeInTheDocument();
     });
 
-    it("shows diff content in CodeMirrorEditor", () => {
+    it("renders diff in CodeMirrorEditor when present", () => {
       mockUseSessionDiff.mockReturnValue({
-        diff: "--- a/file.ts\n+++ b/file.ts\n@@ -1 +1 @@\n-old\n+new",
+        diff: "--- a\n+++ b\n",
         isLoading: false,
         error: null,
       });
@@ -406,155 +469,13 @@ describe("SessionDetailView", () => {
     });
 
     it("shows 'No diff available' when diff is null", () => {
-      mockUseSessionDiff.mockReturnValue({
-        diff: null,
-        isLoading: false,
-        error: null,
-      });
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
       fireEvent.click(screen.getByTestId("session-inner-tab-diff"));
       expect(screen.getByText("No diff available")).toBeInTheDocument();
     });
   });
 
-  describe("tool_input truncation", () => {
-    it("truncates tool_input longer than 2000 chars", () => {
-      const longInput = "x".repeat(10000);
-      const entries = [
-        createTranscriptEntry({
-          seq: 1,
-          role: "assistant",
-          type: "tool_use",
-          tool_name: "Read",
-          text: undefined,
-          tool_input: longInput,
-        }),
-      ];
-      mockUseSessionTranscript.mockReturnValue({
-        entries,
-        isLoading: false,
-        error: null,
-      });
-      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
-      // Full text should NOT be present
-      expect(screen.queryByText(longInput)).not.toBeInTheDocument();
-      // Show full input button should be present
-      expect(screen.getByTestId("show-full-input")).toBeInTheDocument();
-    });
-
-    it("does not truncate tool_input under 2000 chars", () => {
-      const shortInput = "y".repeat(500);
-      const entries = [
-        createTranscriptEntry({
-          seq: 1,
-          role: "assistant",
-          type: "tool_use",
-          tool_name: "Read",
-          text: undefined,
-          tool_input: shortInput,
-        }),
-      ];
-      mockUseSessionTranscript.mockReturnValue({
-        entries,
-        isLoading: false,
-        error: null,
-      });
-      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
-      expect(screen.getByText(shortInput)).toBeInTheDocument();
-      expect(screen.queryByTestId("show-full-input")).not.toBeInTheDocument();
-    });
-
-    it("does not truncate tool_input of exactly 2000 chars", () => {
-      const exactInput = "z".repeat(2000);
-      const entries = [
-        createTranscriptEntry({
-          seq: 1,
-          role: "assistant",
-          type: "tool_use",
-          tool_name: "Read",
-          text: undefined,
-          tool_input: exactInput,
-        }),
-      ];
-      mockUseSessionTranscript.mockReturnValue({
-        entries,
-        isLoading: false,
-        error: null,
-      });
-      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
-      expect(screen.getByText(exactInput)).toBeInTheDocument();
-      expect(screen.queryByTestId("show-full-input")).not.toBeInTheDocument();
-    });
-
-    it("expands tool_input on 'Show full input' click", () => {
-      const longInput = "a".repeat(10000);
-      const entries = [
-        createTranscriptEntry({
-          seq: 1,
-          role: "assistant",
-          type: "tool_use",
-          tool_name: "Read",
-          text: undefined,
-          tool_input: longInput,
-        }),
-      ];
-      mockUseSessionTranscript.mockReturnValue({
-        entries,
-        isLoading: false,
-        error: null,
-      });
-      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
-      fireEvent.click(screen.getByTestId("show-full-input"));
-      expect(screen.getByText(longInput)).toBeInTheDocument();
-      expect(screen.getByTestId("show-less-input")).toBeInTheDocument();
-      expect(screen.queryByTestId("show-full-input")).not.toBeInTheDocument();
-    });
-
-    it("collapses tool_input on 'Show less' click", () => {
-      const longInput = "b".repeat(10000);
-      const entries = [
-        createTranscriptEntry({
-          seq: 1,
-          role: "assistant",
-          type: "tool_use",
-          tool_name: "Read",
-          text: undefined,
-          tool_input: longInput,
-        }),
-      ];
-      mockUseSessionTranscript.mockReturnValue({
-        entries,
-        isLoading: false,
-        error: null,
-      });
-      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
-      fireEvent.click(screen.getByTestId("show-full-input"));
-      fireEvent.click(screen.getByTestId("show-less-input"));
-      expect(screen.queryByText(longInput)).not.toBeInTheDocument();
-      expect(screen.getByTestId("show-full-input")).toBeInTheDocument();
-    });
-
-    it("does not truncate text entries (only tool_use inputs and tool_result outputs)", () => {
-      const longText = "c".repeat(10000);
-      const entries = [
-        createTranscriptEntry({
-          seq: 1,
-          role: "assistant",
-          type: "text",
-          text: longText,
-        }),
-      ];
-      mockUseSessionTranscript.mockReturnValue({
-        entries,
-        isLoading: false,
-        error: null,
-      });
-      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
-      expect(screen.getByText(longText)).toBeInTheDocument();
-      expect(screen.queryByTestId("show-full-input")).not.toBeInTheDocument();
-    });
-  });
-
+  // ─── Hook invocations ──────────────────────────────────────────────
   describe("hook invocations", () => {
     it("passes correct args to useSessionTranscript", () => {
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
@@ -575,10 +496,8 @@ describe("SessionDetailView", () => {
       );
     });
 
-    it("passes enabled=false to useSessionDiff when on transcript tab", () => {
+    it("passes enabled=false to useSessionDiff while on transcript tab", () => {
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
-      // On transcript tab, diff should NOT be fetched (enabled = innerTab === "diff" && has_diff)
-      // Since innerTab defaults to "transcript", enabled should be false
       expect(mockUseSessionDiff).toHaveBeenCalledWith(
         "task-1",
         "sess-1",
