@@ -64,7 +64,10 @@ log "session_id=$SID"
 SESS_DIR="$WS_PATH/sessions/$SID"
 podman exec "$CONTAINER" mkdir -p "$SESS_DIR"
 
-METADATA=$(jq -n \
+# -c compact: one-line JSON. index.jsonl requires one object per line;
+# pretty-printed multi-line output breaks the parser silently and the
+# session is treated as if it doesn't exist.
+METADATA=$(jq -nc \
     --arg sid "$SID" --arg task "$TASK_ID" \
     --arg started "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     '{schema_version:1, session_id:$sid, task_id:$task,
