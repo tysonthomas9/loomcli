@@ -154,26 +154,25 @@ const defaultSessions = [completedSession, activeSession, failedSession];
 const mockTranscript = [
   {
     seq: 1,
-    ts: "2026-03-20T10:00:05Z",
+    timestamp: "2026-03-20T10:00:05Z",
     role: "user",
     type: "text",
-    content: "Fix the login bug",
+    text: "Fix the login bug",
   },
   {
     seq: 2,
-    ts: "2026-03-20T10:00:10Z",
+    timestamp: "2026-03-20T10:00:10Z",
     role: "assistant",
     type: "text",
-    content: "I will investigate the auth module",
+    text: "I will investigate the auth module",
   },
   {
     seq: 3,
-    ts: "2026-03-20T10:00:30Z",
-    role: "tool",
+    timestamp: "2026-03-20T10:00:30Z",
+    role: "assistant",
     type: "tool_use",
     tool_name: "Read",
-    tool_input: "src/auth.ts",
-    content: null,
+    tool_input: { file_path: "src/auth.ts" },
   },
 ];
 
@@ -191,6 +190,20 @@ function ok<T>(data: T): string {
 // -- Mock setup --
 
 async function setupBaseMocks(page: Page) {
+  // App config (auth mode discovery) — bootstrap fetch in main.tsx.
+  await page.route("**/api/config", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname !== "/api/config") {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ mode: "open" }),
+    });
+  });
+
   await page.route("**/api/workspaces/active", async (route) => {
     await route.fulfill({
       status: 200,
@@ -301,7 +314,14 @@ async function installIssuesMock(page: Page, issues: unknown[]) {
       input: RequestInfo | URL,
       init?: RequestInit,
     ): Promise<Response> {
-      const url = typeof input === "string" ? input : input.toString();
+      // Request.toString() → "[object Request]", not the URL. openapi-fetch
+      // passes Request objects, so extract `.url` explicitly.
+      const url =
+        input instanceof Request
+          ? input.url
+          : typeof input === "string"
+            ? input
+            : String(input);
       if (
         /\/api\/workspaces\/[^/]+\/issues(\?|$)/.test(url) &&
         (init?.method ?? "GET") === "GET"

@@ -4,12 +4,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 
-	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -287,18 +288,19 @@ func TestSessionRouteMigration_WorkspaceScopedDiffEndpoint(t *testing.T) {
 // TestSessionRouteMigration_WorkspaceScopedTranscriptEndpoint verifies that
 // the workspace-scoped transcript endpoint is wired through the mux correctly.
 func TestSessionRouteMigration_WorkspaceScopedTranscriptEndpoint(t *testing.T) {
+	t.Setenv("LOOM_REDACT_TRANSCRIPTS", "off")
+
 	sessStore, sessDir := newTestSessionStoreWithDir(t)
 	sess := createTestSession(t, sessStore, "bd-transrouted")
 
-	// Append a transcript entry.
-	err := sessStore.AppendTranscript(sess.SessionID(), sessions.TranscriptEntry{
-		Seq:     1,
-		Role:    "user",
-		Type:    "text",
-		Content: "Hello via workspace route",
-	})
-	if err != nil {
-		t.Fatalf("AppendTranscript: %v", err)
+	// Seed a Claude Code native transcript and sync it into the session.
+	nativePath := filepath.Join(t.TempDir(), "native.jsonl")
+	payload := []byte(`{"type":"user","uuid":"u1","message":{"content":"Hello via workspace route"}}` + "\n")
+	if err := os.WriteFile(nativePath, payload, 0o600); err != nil {
+		t.Fatalf("write native: %v", err)
+	}
+	if err := sessStore.SyncNativeTranscript(sess.SessionID(), nativePath); err != nil {
+		t.Fatalf("SyncNativeTranscript: %v", err)
 	}
 
 	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
@@ -330,7 +332,7 @@ func TestSessionRouteMigration_WorkspaceScopedTranscriptEndpoint(t *testing.T) {
 	if len(resp.Data.Entries) != 1 {
 		t.Fatalf("entries length = %d, want 1", len(resp.Data.Entries))
 	}
-	if resp.Data.Entries[0].Content != "Hello via workspace route" {
-		t.Errorf("content = %q, want %q", resp.Data.Entries[0].Content, "Hello via workspace route")
+	if resp.Data.Entries[0].Text != "Hello via workspace route" {
+		t.Errorf("text = %q, want %q", resp.Data.Entries[0].Text, "Hello via workspace route")
 	}
 }

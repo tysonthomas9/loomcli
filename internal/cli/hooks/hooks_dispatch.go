@@ -3,29 +3,24 @@ package hooks
 import (
 	"fmt"
 	"os"
-	"time"
+	"path/filepath"
 
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
-// dispatchHookEvent maps a parsed HookEvent to a sessions.TranscriptEntry
-// and appends it to the session's transcript. It is designed for use inside
-// hook handlers: errors are logged to stderr and the function always returns
-// nil so the hook process exits 0.
+// dispatchHookEvent captures the backend's native transcript (and any
+// completed subagent transcripts) into the loom session directory, and on
+// SessionEnd patches the session metadata with token usage.
 //
-// Returns nil immediately (no-op) when:
-//   - event is nil (unhandled hook type)
-//   - beadsDir or sessionID is empty (non-loom Claude session)
+// Designed for use inside hook subprocesses: errors are logged to stderr and
+// the function always returns nil so the hook process exits 0. Returns nil
+// immediately (no-op) when event is nil, or when beadsDir / sessionID are
+// missing (non-loom agent session).
 func dispatchHookEvent(event *HookEvent, beadsDir, sessionID string) error { //nolint:unparam // always nil by design: hooks must exit 0
-	// Nil event means ParseClaudeHookInput returned nil for an unrecognized
-	// hook name. This is expected and not an error.
 	if event == nil {
 		return nil
 	}
-
-	// If either env var is missing, this Claude session was not started by
-	// loom (e.g., a developer using Claude Code directly). Exit silently.
 	if beadsDir == "" || sessionID == "" {
 		return nil
 	}
@@ -36,20 +31,28 @@ func dispatchHookEvent(event *HookEvent, beadsDir, sessionID string) error { //n
 		return nil
 	}
 
-	entry, ok := mapEventToEntry(event)
-	if !ok {
-		fmt.Fprintf(os.Stderr, "loom hook: unhandled event type %v, skipping\n", event.Type)
-		return nil
+	// Mirror the backend's native JSONL transcript into the session directory.
+	// The capture is idempotent (full snapshot copy, skip-if-unchanged), so
+	// calling on every hook event is safe and keeps the UI's view close to
+	// the agent's live progress.
+	if event.SessionRef != "" {
+		if err := store.SyncNativeTranscript(sessionID, event.SessionRef); err != nil {
+			fmt.Fprintf(os.Stderr, "loom hook: failed to sync native transcript: %v\n", err)
+		}
 	}
 
-	if err := store.AppendTranscript(sessionID, entry); err != nil {
-		fmt.Fprintf(os.Stderr, "loom hook: failed to append transcript: %v\n", err)
-		return nil
+	// When a Task subagent completes, Claude Code has written its transcript
+	// at <parent_dir>/subagents/agent-<subagentID>.jsonl. Mirror that into
+	// sessions/<sid>/subagents/ so the UI can render nested subagent work.
+	if event.Type == HookSubagentEnd && event.SubagentID != "" && event.SessionRef != "" {
+		subPath := deriveSubagentPath(event.SessionRef, event.SubagentID)
+		if err := store.SyncSubagentTranscript(sessionID, event.SubagentID, subPath); err != nil {
+			fmt.Fprintf(os.Stderr, "loom hook: failed to sync subagent transcript: %v\n", err)
+		}
 	}
 
 	// On SessionEnd, capture token usage from Claude's transcript and patch
-	// session metadata. This runs inside the hook process so errors are
-	// logged but never returned.
+	// session metadata.
 	if event.Type == HookSessionEnd && event.SessionRef != "" {
 		captureTokenUsage(store, sessionID, event.SessionRef, event.Backend)
 	}
@@ -57,16 +60,25 @@ func dispatchHookEvent(event *HookEvent, beadsDir, sessionID string) error { //n
 	return nil
 }
 
-// captureTokenUsage reads the Claude transcript, sums token usage, and patches
-// the session metadata. All errors are logged to stderr and never propagated.
+// deriveSubagentPath returns the on-disk path to a spawned subagent's JSONL
+// transcript. Claude Code writes them to
+//
+//	<parent_transcript_dir>/subagents/agent-<subagentID>.jsonl
+func deriveSubagentPath(parentTranscriptPath, subagentID string) string {
+	if parentTranscriptPath == "" || subagentID == "" {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(parentTranscriptPath), "subagents", "agent-"+subagentID+".jsonl")
+}
+
+// captureTokenUsage reads the Claude transcript, sums token usage, and
+// patches session metadata. Errors are logged to stderr and never propagated.
 func captureTokenUsage(store *sessions.Store, sessionID, transcriptPath, backend string) {
 	tok, err := sessions.SumTranscriptUsage(transcriptPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "loom hook: failed to sum transcript usage: %v\n", err)
 		return
 	}
-
-	// Nothing to write if there was no usage at all.
 	if tok.InputTokens == 0 && tok.OutputTokens == 0 &&
 		tok.CacheReadTokens == 0 && tok.CacheWriteTokens == 0 {
 		return
@@ -94,57 +106,4 @@ func captureTokenUsage(store *sessions.Store, sessionID, transcriptPath, backend
 	if err := store.SaveMetadata(sessionID, meta); err != nil {
 		fmt.Fprintf(os.Stderr, "loom hook: failed to save metadata with token usage: %v\n", err)
 	}
-}
-
-// mapEventToEntry converts a backend-agnostic HookEvent into a TranscriptEntry.
-// Returns false if the event type is unrecognized (caller should skip).
-func mapEventToEntry(event *HookEvent) (sessions.TranscriptEntry, bool) {
-	entry := sessions.TranscriptEntry{
-		Timestamp: time.Now().UTC(),
-	}
-
-	switch event.Type {
-	case HookSessionStart:
-		entry.Role = "system"
-		entry.Type = "session_start"
-		entry.Content = fmt.Sprintf("Session started (model: %s)", event.Model)
-
-	case HookTurnStart:
-		entry.Role = "user"
-		entry.Type = "text"
-		entry.Content = event.Prompt
-
-	case HookTurnEnd:
-		entry.Role = "assistant"
-		entry.Type = "turn_end"
-		entry.Content = "Turn completed"
-
-	case HookSessionEnd:
-		entry.Role = "system"
-		entry.Type = "session_end"
-		entry.Content = "Session ended"
-
-	case HookSubagentStart:
-		entry.Role = "system"
-		entry.Type = "subagent_start"
-		entry.ToolName = "Task"
-		entry.ToolInput = string(event.ToolInput)
-		entry.Content = fmt.Sprintf("Subagent started (tool_use_id: %s)", event.ToolUseID)
-
-	case HookSubagentEnd:
-		entry.Role = "system"
-		entry.Type = "subagent_end"
-		entry.ToolName = "Task"
-		entry.ToolInput = string(event.ToolInput)
-		if event.SubagentID != "" {
-			entry.Content = fmt.Sprintf("Subagent completed (tool_use_id: %s, agent_id: %s)", event.ToolUseID, event.SubagentID)
-		} else {
-			entry.Content = fmt.Sprintf("Subagent completed (tool_use_id: %s)", event.ToolUseID)
-		}
-
-	default:
-		return entry, false
-	}
-
-	return entry, true
 }

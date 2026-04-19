@@ -1,11 +1,9 @@
 package hooks
 
 import (
-	"bufio"
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -40,177 +38,6 @@ func TestDispatchHookEvent_EmptySessionID(t *testing.T) {
 	err := dispatchHookEvent(event, "/tmp/beads", "")
 	if err != nil {
 		t.Fatalf("expected nil error for empty sessionID, got: %v", err)
-	}
-}
-
-func TestDispatchHookEvent_TurnStart(t *testing.T) {
-	beadsDir := t.TempDir()
-	sessionID := "test-session-turn-start"
-
-	// Create the session directory so AppendTranscript can find it.
-	sessDir := filepath.Join(beadsDir, "sessions", sessionID)
-	if err := os.MkdirAll(sessDir, 0o700); err != nil {
-		t.Fatalf("create session dir: %v", err)
-	}
-
-	event := &HookEvent{
-		Type:      HookTurnStart,
-		Prompt:    "implement the feature",
-		Timestamp: time.Now(),
-	}
-
-	err := dispatchHookEvent(event, beadsDir, sessionID)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	entry := readSingleTranscriptEntry(t, sessDir)
-	if entry.Role != "user" {
-		t.Errorf("expected role %q, got %q", "user", entry.Role)
-	}
-	if entry.Type != "text" {
-		t.Errorf("expected type %q, got %q", "text", entry.Type)
-	}
-	if entry.Content != "implement the feature" {
-		t.Errorf("expected content %q, got %q", "implement the feature", entry.Content)
-	}
-}
-
-func TestDispatchHookEvent_TurnEnd(t *testing.T) {
-	beadsDir := t.TempDir()
-	sessionID := "test-session-turn-end"
-
-	sessDir := filepath.Join(beadsDir, "sessions", sessionID)
-	if err := os.MkdirAll(sessDir, 0o700); err != nil {
-		t.Fatalf("create session dir: %v", err)
-	}
-
-	event := &HookEvent{
-		Type:      HookTurnEnd,
-		Timestamp: time.Now(),
-	}
-
-	err := dispatchHookEvent(event, beadsDir, sessionID)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	entry := readSingleTranscriptEntry(t, sessDir)
-	if entry.Role != "assistant" {
-		t.Errorf("expected role %q, got %q", "assistant", entry.Role)
-	}
-	if entry.Type != "turn_end" {
-		t.Errorf("expected type %q, got %q", "turn_end", entry.Type)
-	}
-	if entry.Content != "Turn completed" {
-		t.Errorf("expected content %q, got %q", "Turn completed", entry.Content)
-	}
-}
-
-func TestDispatchHookEvent_SessionStart(t *testing.T) {
-	beadsDir := t.TempDir()
-	sessionID := "test-session-start"
-
-	sessDir := filepath.Join(beadsDir, "sessions", sessionID)
-	if err := os.MkdirAll(sessDir, 0o700); err != nil {
-		t.Fatalf("create session dir: %v", err)
-	}
-
-	event := &HookEvent{
-		Type:      HookSessionStart,
-		Model:     "claude-sonnet-4-20250514",
-		Timestamp: time.Now(),
-	}
-
-	err := dispatchHookEvent(event, beadsDir, sessionID)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	entry := readSingleTranscriptEntry(t, sessDir)
-	if entry.Role != "system" {
-		t.Errorf("expected role %q, got %q", "system", entry.Role)
-	}
-	if entry.Type != "session_start" {
-		t.Errorf("expected type %q, got %q", "session_start", entry.Type)
-	}
-	if !strings.Contains(entry.Content, "claude-sonnet-4-20250514") {
-		t.Errorf("expected content to contain model name, got %q", entry.Content)
-	}
-}
-
-func TestDispatchHookEvent_SessionEnd(t *testing.T) {
-	beadsDir := t.TempDir()
-	sessionID := "test-session-end"
-
-	sessDir := filepath.Join(beadsDir, "sessions", sessionID)
-	if err := os.MkdirAll(sessDir, 0o700); err != nil {
-		t.Fatalf("create session dir: %v", err)
-	}
-
-	event := &HookEvent{
-		Type:      HookSessionEnd,
-		Timestamp: time.Now(),
-	}
-
-	err := dispatchHookEvent(event, beadsDir, sessionID)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	entry := readSingleTranscriptEntry(t, sessDir)
-	if entry.Role != "system" {
-		t.Errorf("expected role %q, got %q", "system", entry.Role)
-	}
-	if entry.Type != "session_end" {
-		t.Errorf("expected type %q, got %q", "session_end", entry.Type)
-	}
-	if entry.Content != "Session ended" {
-		t.Errorf("expected content %q, got %q", "Session ended", entry.Content)
-	}
-}
-
-func TestDispatchHookEvent_StoreError(t *testing.T) {
-	// Use a valid beads dir but a session ID that doesn't have a directory.
-	// AppendTranscript will fail because the session dir doesn't exist.
-	// dispatchHookEvent should log to stderr and still return nil.
-	beadsDir := t.TempDir()
-
-	// Create the sessions/ directory (NewStore needs it) but NOT the session subdirectory.
-	if err := os.MkdirAll(filepath.Join(beadsDir, "sessions"), 0o700); err != nil {
-		t.Fatalf("create sessions dir: %v", err)
-	}
-
-	event := &HookEvent{
-		Type:      HookTurnStart,
-		Prompt:    "this will fail",
-		Timestamp: time.Now(),
-	}
-
-	// Capture stderr to verify the error is logged.
-	oldStderr := os.Stderr
-	r, w, _ := os.Pipe()
-	os.Stderr = w
-
-	err := dispatchHookEvent(event, beadsDir, "nonexistent-session")
-
-	_ = w.Close()
-	os.Stderr = oldStderr
-
-	if err != nil {
-		t.Fatalf("expected nil error even on store failure, got: %v", err)
-	}
-
-	// Read stderr output.
-	scanner := bufio.NewScanner(r)
-	var stderrOutput string
-	for scanner.Scan() {
-		stderrOutput += scanner.Text()
-	}
-	_ = r.Close()
-
-	if !strings.Contains(stderrOutput, "failed to append transcript") {
-		t.Errorf("expected stderr to contain error message, got: %q", stderrOutput)
 	}
 }
 
@@ -401,26 +228,108 @@ func TestDispatchHookEvent_SessionEndEmptySessionRef(t *testing.T) {
 	}
 }
 
-// readSingleTranscriptEntry reads the first (and expected only) entry from
-// transcript.jsonl in the given session directory.
-func readSingleTranscriptEntry(t *testing.T, sessDir string) sessions.TranscriptEntry {
-	t.Helper()
+func TestDispatchHookEvent_SyncsNativeTranscript(t *testing.T) {
+	beadsDir := t.TempDir()
+	sessionID := "20260417-120000-nova-abcd-0123abcd"
 
-	txPath := filepath.Join(sessDir, "transcript.jsonl")
-	data, err := os.ReadFile(txPath)
+	sessDir := filepath.Join(beadsDir, "sessions", sessionID)
+	if err := os.MkdirAll(sessDir, 0o700); err != nil {
+		t.Fatalf("create session dir: %v", err)
+	}
+
+	// Native transcript file that Claude (or another backend) is writing.
+	native := filepath.Join(t.TempDir(), "native.jsonl")
+	payload := `{"type":"user","uuid":"u1","message":{"content":"hello"}}` + "\n" +
+		`{"type":"assistant","uuid":"a1","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
+	if err := os.WriteFile(native, []byte(payload), 0o600); err != nil {
+		t.Fatalf("write native: %v", err)
+	}
+
+	event := &HookEvent{
+		Type:       HookTurnStart,
+		Prompt:     "hello",
+		SessionRef: native,
+		Backend:    "claude",
+		Timestamp:  time.Now(),
+	}
+	if err := dispatchHookEvent(event, beadsDir, sessionID); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(sessDir, sessions.NativeTranscriptFile))
 	if err != nil {
-		t.Fatalf("read transcript.jsonl: %v", err)
+		t.Fatalf("read synced native transcript: %v", err)
+	}
+	if string(got) != payload {
+		t.Errorf("native transcript mismatch: got %q, want %q", got, payload)
+	}
+}
+
+func TestDispatchHookEvent_SyncsSubagentTranscript(t *testing.T) {
+	beadsDir := t.TempDir()
+	sessionID := "20260417-120000-nova-abcd-0123abcd"
+
+	sessDir := filepath.Join(beadsDir, "sessions", sessionID)
+	if err := os.MkdirAll(sessDir, 0o700); err != nil {
+		t.Fatalf("create session dir: %v", err)
 	}
 
-	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	if len(lines) != 1 {
-		t.Fatalf("expected 1 transcript entry, got %d", len(lines))
+	// Stage a parent transcript + subagent transcript in the layout Claude Code uses.
+	parentDir := t.TempDir()
+	parent := filepath.Join(parentDir, "parent.jsonl")
+	if err := os.WriteFile(parent, []byte(`{"type":"user","uuid":"u1","message":{"content":"hi"}}`+"\n"), 0o600); err != nil {
+		t.Fatalf("write parent: %v", err)
+	}
+	subDir := filepath.Join(parentDir, "subagents")
+	if err := os.MkdirAll(subDir, 0o700); err != nil {
+		t.Fatalf("mkdir subagents: %v", err)
+	}
+	subID := "abc123xyz"
+	subPayload := []byte(`{"type":"assistant","uuid":"a1","message":{"content":[{"type":"text","text":"sub work"}]}}` + "\n")
+	if err := os.WriteFile(filepath.Join(subDir, "agent-"+subID+".jsonl"), subPayload, 0o600); err != nil {
+		t.Fatalf("write sub: %v", err)
 	}
 
-	var entry sessions.TranscriptEntry
-	if err := json.Unmarshal([]byte(lines[0]), &entry); err != nil {
-		t.Fatalf("unmarshal transcript entry: %v", err)
+	event := &HookEvent{
+		Type:       HookSubagentEnd,
+		SessionRef: parent,
+		SubagentID: subID,
+		Backend:    "claude",
+		Timestamp:  time.Now(),
+	}
+	if err := dispatchHookEvent(event, beadsDir, sessionID); err != nil {
+		t.Fatalf("dispatch: %v", err)
 	}
 
-	return entry
+	got, err := os.ReadFile(filepath.Join(sessDir, "subagents", "agent-"+subID+".jsonl"))
+	if err != nil {
+		t.Fatalf("read captured subagent transcript: %v", err)
+	}
+	if string(got) != string(subPayload) {
+		t.Errorf("subagent capture mismatch: got %q, want %q", got, subPayload)
+	}
+}
+
+func TestDispatchHookEvent_NoSessionRefSkipsSync(t *testing.T) {
+	beadsDir := t.TempDir()
+	sessionID := "20260417-120000-nova-abcd-0123abcd"
+
+	sessDir := filepath.Join(beadsDir, "sessions", sessionID)
+	if err := os.MkdirAll(sessDir, 0o700); err != nil {
+		t.Fatalf("create session dir: %v", err)
+	}
+
+	event := &HookEvent{
+		Type:      HookTurnStart,
+		Prompt:    "hello",
+		Backend:   "claude",
+		Timestamp: time.Now(),
+	}
+	if err := dispatchHookEvent(event, beadsDir, sessionID); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(sessDir, sessions.NativeTranscriptFile)); !os.IsNotExist(err) {
+		t.Errorf("expected no native transcript file, got err=%v", err)
+	}
 }

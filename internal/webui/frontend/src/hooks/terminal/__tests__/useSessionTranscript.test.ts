@@ -37,10 +37,10 @@ function createMockEntry(
 ): TranscriptEntry {
   return {
     seq: 1,
-    ts: "2026-01-01T00:00:00Z",
+    timestamp: "2026-01-01T00:00:00Z",
     role: "assistant",
     type: "text",
-    content: "Hello world",
+    text: "Hello world",
     ...overrides,
   };
 }
@@ -90,8 +90,8 @@ describe("useSessionTranscript", () => {
   describe("fetching", () => {
     it("fetches transcript on mount with valid IDs", async () => {
       const entries = [
-        createMockEntry({ seq: 1, role: "user", content: "Plan this" }),
-        createMockEntry({ seq: 2, role: "assistant", content: "Sure" }),
+        createMockEntry({ seq: 1, role: "user", text: "Plan this" }),
+        createMockEntry({ seq: 2, role: "assistant", text: "Sure" }),
       ];
       mockGetTranscript.mockResolvedValueOnce(entries);
 

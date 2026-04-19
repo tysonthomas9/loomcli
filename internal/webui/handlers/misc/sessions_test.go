@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
@@ -183,19 +182,19 @@ func TestGetSession_Found(t *testing.T) {
 }
 
 func TestGetSessionTranscript(t *testing.T) {
+	t.Setenv("LOOM_REDACT_TRANSCRIPTS", "off")
+
 	store := newTestSessionStore(t)
 	sess := createTestSession(t, store, "bd-task2")
 
-	// Append a transcript entry.
-	err := store.AppendTranscript(sess.SessionID(), sessions.TranscriptEntry{
-		Seq:       1,
-		Timestamp: time.Now().UTC(),
-		Role:      "user",
-		Type:      "text",
-		Content:   "Hello agent",
-	})
-	if err != nil {
-		t.Fatalf("AppendTranscript: %v", err)
+	// Seed a Claude Code native transcript and sync it into the session.
+	native := filepath.Join(t.TempDir(), "native.jsonl")
+	payload := []byte(`{"type":"user","uuid":"u1","message":{"content":"Hello agent"}}` + "\n")
+	if err := os.WriteFile(native, payload, 0o600); err != nil {
+		t.Fatalf("write native: %v", err)
+	}
+	if err := store.SyncNativeTranscript(sess.SessionID(), native); err != nil {
+		t.Fatalf("SyncNativeTranscript: %v", err)
 	}
 
 	handler := handleGetSessionTranscript(NewSessionService(store, nil))
@@ -224,8 +223,8 @@ func TestGetSessionTranscript(t *testing.T) {
 	if len(resp.Data.Entries) != 1 {
 		t.Fatalf("entries length = %d, want 1", len(resp.Data.Entries))
 	}
-	if resp.Data.Entries[0].Content != "Hello agent" {
-		t.Errorf("content = %q, want %q", resp.Data.Entries[0].Content, "Hello agent")
+	if resp.Data.Entries[0].Text != "Hello agent" {
+		t.Errorf("text = %q, want %q", resp.Data.Entries[0].Text, "Hello agent")
 	}
 }
 
