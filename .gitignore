@@ -30,7 +30,8 @@ loom.yaml
 .make-dev.log
 .make-dev.pid
 usage.jsonl
-sessions/
+/sessions/
+internal/cli/sessions/
 notify.token
 
 # Auth service

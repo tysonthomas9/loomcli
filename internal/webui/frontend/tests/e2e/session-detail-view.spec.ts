@@ -139,45 +139,52 @@ const MOCK_SESSIONS = [
   }),
 ];
 
-// TranscriptEntry[] — covers user, assistant, tool_use, tool_result, and tool_input fallback
+// TranscriptEntry[] — covers user text (→ prompt), assistant text + tool_use,
+// and tool_result paired by tool_use_id. Assistant events share a uuid so
+// they group into a single turn in the redesigned view.
 const MOCK_TRANSCRIPT = [
   {
     seq: 1,
-    ts: "2026-01-20T10:00:01Z",
+    timestamp: "2026-01-20T10:00:01Z",
     role: "user",
     type: "text",
-    content: "Please fix the login bug",
+    text: "Please fix the login bug",
   },
   {
     seq: 2,
-    ts: "2026-01-20T10:00:05Z",
+    timestamp: "2026-01-20T10:00:05Z",
     role: "assistant",
     type: "text",
-    content: "I will investigate the login handler",
+    text: "I will investigate the login handler",
+    uuid: "asst-1",
   },
   {
     seq: 3,
-    ts: "2026-01-20T10:00:10Z",
+    timestamp: "2026-01-20T10:00:10Z",
     role: "assistant",
     type: "tool_use",
     tool_name: "Read",
-    content: "src/auth.ts",
+    tool_input: { file_path: "src/auth.ts" },
+    tool_use_id: "tu-read",
+    uuid: "asst-1",
   },
   {
     seq: 4,
-    ts: "2026-01-20T10:00:15Z",
+    timestamp: "2026-01-20T10:00:15Z",
     role: "tool",
     type: "tool_result",
-    content: "function login() { ... }",
+    tool_use_id: "tu-read",
+    output: "function login() { ... }",
   },
   {
     seq: 5,
-    ts: "2026-01-20T10:00:20Z",
+    timestamp: "2026-01-20T10:00:20Z",
     role: "assistant",
     type: "tool_use",
     tool_name: "Bash",
-    tool_input: "npm test",
-    // NO content field — tests fallback to tool_input rendering
+    tool_input: { command: "npm test" },
+    tool_use_id: "tu-bash",
+    uuid: "asst-2",
   },
 ];
 
@@ -198,6 +205,20 @@ function ok<T>(data: T): string {
 // -- Mock setup --
 
 async function setupBaseMocks(page: Page) {
+  // App config (auth mode discovery) — bootstrap fetch in main.tsx.
+  await page.route("**/api/config", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname !== "/api/config") {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ mode: "open" }),
+    });
+  });
+
   await page.route("**/api/workspaces/active", async (route) => {
     await route.fulfill({
       status: 200,
@@ -309,7 +330,14 @@ async function installIssuesMock(page: Page, issues: unknown[]) {
       input: RequestInfo | URL,
       init?: RequestInit,
     ): Promise<Response> {
-      const url = typeof input === "string" ? input : input.toString();
+      // Request.toString() → "[object Request]", not the URL. openapi-fetch
+      // passes Request objects, so extract `.url` explicitly.
+      const url =
+        input instanceof Request
+          ? input.url
+          : typeof input === "string"
+            ? input
+            : String(input);
       if (
         /\/api\/workspaces\/[^/]+\/issues(\?|$)/.test(url) &&
         (init?.method ?? "GET") === "GET"
@@ -474,7 +502,7 @@ async function navigateToSessionDetail(
 
 test.describe("Session Detail View - Transcript and Diff Tabs", () => {
   test.describe("transcript tab", () => {
-    test("transcript tab is active by default and shows entries", async ({
+    test("transcript tab is active by default and renders turns", async ({
       page,
     }) => {
       await installIssuesMock(page, [MOCK_ISSUE]);
@@ -486,51 +514,19 @@ test.describe("Session Detail View - Transcript and Diff Tabs", () => {
       await expect(
         page.getByTestId("session-inner-tab-transcript"),
       ).toHaveClass(/activeInnerTab/);
-      // Transcript container is visible
       await expect(page.getByTestId("session-transcript")).toBeVisible();
-      // 5 transcript entries rendered (matching MOCK_TRANSCRIPT length)
-      const roleElements = page
+
+      // Two assistant turns: asst-1 (text + Read tool, same uuid → one turn)
+      // and asst-2 (Bash tool). First user text → prompt (masthead), not a turn.
+      // Tool results render inline inside their tool_use when expanded, not
+      // as their own turn.
+      const turns = page
         .getByTestId("session-transcript")
-        .locator("[data-role]");
-      await expect(roleElements).toHaveCount(5);
+        .locator('article[data-role="assistant"]');
+      await expect(turns).toHaveCount(2);
     });
 
-    test("renders role labels for each entry type", async ({ page }) => {
-      await installIssuesMock(page, [MOCK_ISSUE]);
-      await setupBaseMocks(page);
-      await setupSessionMocks(page);
-      await navigateToSessionDetail(page);
-
-      const transcript = page.getByTestId("session-transcript");
-      // data-role attributes: 1 user, 3 assistant (seq 2, 3, 5), 1 tool (seq 4)
-      await expect(transcript.locator('[data-role="user"]')).toHaveCount(1);
-      await expect(transcript.locator('[data-role="assistant"]')).toHaveCount(
-        3,
-      );
-      await expect(transcript.locator('[data-role="tool"]')).toHaveCount(1);
-      // Role text content is rendered
-      await expect(transcript.locator('[data-role="user"]')).toContainText(
-        "user",
-      );
-      await expect(transcript.locator('[data-role="tool"]')).toContainText(
-        "tool",
-      );
-    });
-
-    test("renders tool name for tool_use entries", async ({ page }) => {
-      await installIssuesMock(page, [MOCK_ISSUE]);
-      await setupBaseMocks(page);
-      await setupSessionMocks(page);
-      await navigateToSessionDetail(page);
-
-      const transcript = page.getByTestId("session-transcript");
-      // "Tool: Read" from seq 3
-      await expect(transcript).toContainText("Tool: Read");
-      // "Tool: Bash" from seq 5
-      await expect(transcript).toContainText("Tool: Bash");
-    });
-
-    test("shows tool_input as fallback when content is absent on tool_use entry", async ({
+    test("first user text surfaces as Prompt in the masthead", async ({
       page,
     }) => {
       await installIssuesMock(page, [MOCK_ISSUE]);
@@ -538,24 +534,17 @@ test.describe("Session Detail View - Transcript and Diff Tabs", () => {
       await setupSessionMocks(page);
       await navigateToSessionDetail(page);
 
-      // seq 5: tool_use with tool_name="Bash", tool_input="npm test", NO content
-      await expect(page.getByTestId("session-transcript")).toContainText(
-        "npm test",
-      );
-    });
-
-    test("shows user message content", async ({ page }) => {
-      await installIssuesMock(page, [MOCK_ISSUE]);
-      await setupBaseMocks(page);
-      await setupSessionMocks(page);
-      await navigateToSessionDetail(page);
-
-      await expect(page.getByTestId("session-transcript")).toContainText(
+      const detail = page.getByTestId("session-detail-view");
+      // Label is in the masthead, above the transcript region
+      await expect(detail).toContainText("Prompt");
+      await expect(detail).toContainText("Please fix the login bug");
+      // And NOT duplicated inside the transcript body
+      await expect(page.getByTestId("session-transcript")).not.toContainText(
         "Please fix the login bug",
       );
     });
 
-    test("shows assistant message content", async ({ page }) => {
+    test("assistant text renders without a role byline", async ({ page }) => {
       await installIssuesMock(page, [MOCK_ISSUE]);
       await setupBaseMocks(page);
       await setupSessionMocks(page);
@@ -566,15 +555,57 @@ test.describe("Session Detail View - Transcript and Diff Tabs", () => {
       );
     });
 
-    test("shows tool_result content", async ({ page }) => {
+    test("tool calls render as collapsed pills with tool name and arg preview", async ({
+      page,
+    }) => {
       await installIssuesMock(page, [MOCK_ISSUE]);
       await setupBaseMocks(page);
       await setupSessionMocks(page);
       await navigateToSessionDetail(page);
 
-      await expect(page.getByTestId("session-transcript")).toContainText(
-        "function login() { ... }",
-      );
+      const pills = page.getByTestId("tool-pill");
+      await expect(pills).toHaveCount(2);
+      const transcript = page.getByTestId("session-transcript");
+      // Pill icon shows just the tool name (no "Tool:" prefix)
+      await expect(transcript).toContainText("Read");
+      await expect(transcript).toContainText("Bash");
+      // Arg preview shows the salient field (file_path for Read, command for Bash)
+      await expect(transcript).toContainText("src/auth.ts");
+      await expect(transcript).toContainText("npm test");
+      // Collapsed by default — JSON input body NOT yet visible
+      await expect(transcript).not.toContainText('"file_path"');
+    });
+
+    test("expanding a tool pill reveals input JSON and paired tool_result", async ({
+      page,
+    }) => {
+      await installIssuesMock(page, [MOCK_ISSUE]);
+      await setupBaseMocks(page);
+      await setupSessionMocks(page);
+      await navigateToSessionDetail(page);
+
+      const readPill = page.getByTestId("tool-pill").first();
+      await readPill.click();
+      await expect(readPill).toHaveAttribute("aria-expanded", "true");
+
+      const transcript = page.getByTestId("session-transcript");
+      // Input JSON visible
+      await expect(transcript).toContainText('"file_path"');
+      await expect(transcript).toContainText("src/auth.ts");
+      // Paired tool_result visible under the pill
+      await expect(transcript).toContainText("Result");
+      await expect(transcript).toContainText("function login() { ... }");
+    });
+
+    test("turn header shows a tool-call count indicator", async ({ page }) => {
+      await installIssuesMock(page, [MOCK_ISSUE]);
+      await setupBaseMocks(page);
+      await setupSessionMocks(page);
+      await navigateToSessionDetail(page);
+
+      const transcript = page.getByTestId("session-transcript");
+      // asst-1 turn groups one tool call
+      await expect(transcript).toContainText("1 tool call");
     });
 
     test("shows empty state when transcript has no entries", async ({

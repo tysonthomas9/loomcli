@@ -400,6 +400,19 @@ linters:
         linters: [funlen]
       - path: "internal/sessions/(finalize|transcript_usage)\\.go"
         linters: [funlen]
+      # Pre-existing funlen/gocognit in the native transcript capture paths.
+      # These are shaped by backend JSONL formats and carry their own
+      # branchiness; refactoring tracked as follow-up.
+      - path: "internal/sessions/subagent_transcript\\.go"
+        linters: [funlen]
+      - path: "internal/sessions/transcript/claude/claude\\.go"
+        linters: [funlen]
+      - path: "internal/sessions/transcript/codex/codex\\.go"
+        linters: [funlen]
+      - path: "internal/sessions/transcript/opencode/opencode\\.go"
+        linters: [funlen]
+      - path: "internal/sessions/redact/redact\\.go"
+        linters: [funlen, gocognit]
       - path: "internal/types/issue_hash\\.go"
         linters: [funlen]
       - path: "internal/webui/server/realtime/sse_token\\.go"
