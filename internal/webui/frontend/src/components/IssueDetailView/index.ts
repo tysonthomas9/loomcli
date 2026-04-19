@@ -1,1 +1,0 @@
-export { IssueDetailView } from "./IssueDetailView";

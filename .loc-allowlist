@@ -1,9 +1,0 @@
-# Go files grandfathered above the LOC limits (source: 1000, test: 2500).
-# Format: <ceiling> <repo-relative-path>
-# Files may shrink but never grow past their recorded ceiling.
-# Remove entries as files are refactored below threshold.
-#
-# NOTE: No new entries allowed. Split large files instead.
-
-# Test files above 2500 LOC ceiling
-2965 internal/cli/monitor/monitor_test.go

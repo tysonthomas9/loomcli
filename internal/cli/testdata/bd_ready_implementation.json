@@ -1,4 +1,0 @@
-[
-  {"id":"TASK-10","title":"Implement feature X","status":"open","priority":1,"issue_type":"task","design":"## Summary\nImplement feature X using pattern Y."},
-  {"id":"TASK-11","title":"Add API endpoint","status":"open","priority":2,"issue_type":"task","design":"## Technical Approach\nCreate REST endpoint at /api/v1/resource."}
-]

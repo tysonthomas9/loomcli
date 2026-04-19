@@ -1,1 +1,0 @@
-export { AuthGate } from "./AuthGate";

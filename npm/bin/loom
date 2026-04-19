@@ -1,4 +1,0 @@
-#!/bin/sh
-# This file is replaced by the actual binary during install
-echo "loom binary not installed. Run: npm rebuild loomcli"
-exit 1

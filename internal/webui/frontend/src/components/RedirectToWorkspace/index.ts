@@ -1,1 +1,0 @@
-export { RedirectToWorkspace } from "./RedirectToWorkspace";
