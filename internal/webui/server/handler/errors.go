@@ -56,7 +56,13 @@ func HandleServiceError(w http.ResponseWriter, err error) {
 		if svcErr.Kind == service.KindStarting {
 			w.Header().Set("Retry-After", "5")
 		}
-		WriteJSON(w, status, map[string]string{"error": svcErr.Message})
+		// Include the kind in the body so frontends can branch on a
+		// structured signal (e.g., "starting" vs. generic 503) instead of
+		// substring-matching the English message.
+		WriteJSON(w, status, map[string]string{
+			"error": svcErr.Message,
+			"kind":  string(svcErr.Kind),
+		})
 		return
 	}
 	slog.Error("unexpected error", "err", err)

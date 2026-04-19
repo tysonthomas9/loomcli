@@ -12,6 +12,7 @@ import type {
 } from "../api/common";
 import type { GraphFilter } from "../api/issues";
 import type { Issue, WorkFilter, Status } from "../types";
+import { ApiError } from "@/types/common";
 import {
   MutationCreate,
   MutationUpdate,
@@ -20,6 +21,32 @@ import {
   MutationBonded,
   MutationRefresh,
 } from "@/types/workspace";
+
+/**
+ * Extract a user-facing error message from a fetch failure.
+ *
+ * Prefers the server's original body.error text over the generic HTTP
+ * status text baked into ApiError.message, so UI branches that key off
+ * server-authored phrases (e.g. IssueViewGuard's "workspace is loading"
+ * check that switches to the loading-spinner variant) actually receive
+ * the text the server sent.
+ */
+export function extractErrorMessage(err: unknown): string {
+  if (err instanceof ApiError) {
+    const body = err.body;
+    if (body && typeof body === "object") {
+      const { error } = body as { error?: unknown };
+      if (typeof error === "string" && error.length > 0) {
+        return error;
+      }
+    }
+    return err.message;
+  }
+  if (err instanceof Error) {
+    return err.message;
+  }
+  return "Failed to fetch issues";
+}
 
 // ---------------------------------------------------------------------------
 // Constants

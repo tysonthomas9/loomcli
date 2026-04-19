@@ -32,6 +32,7 @@ import {
   RETRY_MAX_DELAY_MS,
   INITIAL_STATE,
   issuesAreEqual,
+  extractErrorMessage,
   processMutation as applyMutationPure,
 } from "./issueStoreHelpers";
 import type {
@@ -287,8 +288,12 @@ export function createIssueStore(
         if (activeController !== internalController) {
           return;
         }
-        const message =
-          err instanceof Error ? err.message : "Failed to fetch issues";
+        // Prefer the server's original error text (from ApiError.body.error)
+        // over the generic HTTP status text baked into ApiError.message. This
+        // lets IssueViewGuard distinguish "workspace is loading" (daemon
+        // starting, 503+kind=starting) from other 503s like "daemon
+        // unavailable" and route to the loading-variant UX accordingly.
+        const message = extractErrorMessage(err);
 
         // Schedule exponential-backoff auto-retry if we haven't exhausted
         // the budget. The retry calls fetchIssues({ isAutoRetry: true }),

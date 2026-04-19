@@ -188,6 +188,43 @@ describe("issueStore", () => {
       expect(s.isLoading).toBe(false);
     });
 
+    it("surfaces ApiError.body.error instead of the generic status text", async () => {
+      // Reproduces the fix for the daemon-loading UX: IssueViewGuard decides
+      // between the "loading" and "fetch-error" variants by checking the
+      // error string for the server's phrase. Prior to the fix the store
+      // surfaced ApiError.message ("API Error: 503 Service Unavailable"),
+      // which never matched the phrase — the loading-spinner path was
+      // unreachable. The store must now extract body.error.
+      const { ApiError } = await import("@/types/common");
+      const body = { error: "workspace is loading", kind: "starting" };
+      mockGetKanbanIssues.mockRejectedValue(
+        new ApiError(503, "Service Unavailable", body),
+      );
+
+      await store.getState().fetchIssues({
+        workspaceId: "ws1",
+        mode: "kanban",
+      });
+
+      const s = store.getState();
+      expect(s.error).toBe("workspace is loading");
+      expect(s.isLoading).toBe(false);
+    });
+
+    it("falls back to ApiError.message when body.error is missing", async () => {
+      const { ApiError } = await import("@/types/common");
+      mockGetKanbanIssues.mockRejectedValue(
+        new ApiError(502, "Bad Gateway", "plain text body"),
+      );
+
+      await store.getState().fetchIssues({
+        workspaceId: "ws1",
+        mode: "kanban",
+      });
+
+      expect(store.getState().error).toBe("API Error: 502 Bad Gateway");
+    });
+
     it("suppresses AbortError", async () => {
       mockGetReadyIssues.mockRejectedValue(
         new DOMException("Aborted", "AbortError"),

@@ -239,6 +239,11 @@ func (s *issueServiceImpl) ClaimIssue(ctx context.Context, params ClaimIssuePara
 		if strings.Contains(err.Error(), "not found") {
 			return nil, ErrNotFound(fmt.Sprintf("issue not found: %s", params.IssueID))
 		}
+		// bd daemon surfaces claim conflicts as a Go error (not resp.Success=false),
+		// so map them to 409 here as well as in the resp.Error branch below.
+		if strings.Contains(err.Error(), "already claimed") {
+			return nil, ErrConflict(err.Error())
+		}
 		slog.Error("RPC error in ClaimIssue", "issue_id", params.IssueID, "err", err)
 		return nil, ErrInternal("internal server error", err)
 	}
