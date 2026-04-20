@@ -23,6 +23,17 @@ type DaemonSupervisorData struct {
 	Agents        []DaemonAgentEntry `json:"agents"`
 }
 
+// WorkspaceDaemonPaths is the set of filesystem paths for a workspace's loom daemon.
+// SocketPath and StatePath are resolved via the workspace's daemon config (honoring
+// PID file overrides). ConfigPath and WorkDir are derived directly from the
+// workspace's projectDir; ConfigPath is the default workspace config location.
+type WorkspaceDaemonPaths struct {
+	SocketPath string // daemon control socket (daemon.sock)
+	StatePath  string // daemon agent state file (daemon-agents.json)
+	ConfigPath string // workspace loom.yaml (default location)
+	WorkDir    string // workspace root directory
+}
+
 // DaemonAgentEntry represents a single supervised agent in the supervisor response.
 // Mirrors cli/daemon.DaemonAgentStatus fields without importing cli.
 type DaemonAgentEntry struct {

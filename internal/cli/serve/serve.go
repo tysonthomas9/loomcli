@@ -378,6 +378,10 @@ func applyWorkspaceConfig(cfg *webui.ServerConfig) {
 	cfg.WorkspaceListFn = daemonwire.ListWorkspaces
 	cfg.InitialWorkspaceID = workspacemgr.ResolveInitialWorkspaceID()
 	cfg.WorkspaceIDResolverFn = workspacemgr.ResolveWorkspaceID
+	cfg.WorkspaceDaemonResolver = daemonwire.BuildWorkspaceDaemonResolver(
+		workspacemgr.BuildWorkspaceInfoForID,
+		daemonwire.ListWorkspaces,
+	)
 }
 
 func applyCORSConfig(cfg *webui.ServerConfig) {

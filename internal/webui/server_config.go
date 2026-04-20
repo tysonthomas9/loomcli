@@ -87,8 +87,11 @@ type ServerConfig struct {
 	FleetClientWorkspace    string                                               // Fleet server workspace ID (e.g., "default"); empty = use "default"
 	FleetClientAPIKey       string                                               // Pre-shared API key for fleet worker backend auth
 	DaemonStartupFn         func(ctx context.Context, onReady func(wsID string)) // Starts daemons for secondary workspaces; calls onReady(wsID) when each is reachable
-	Logger                  *slog.Logger                                         // Structured logger (optional; nil falls back to slog.Default())
-	SentryDSN               string                                               // Sentry/GlitchTip DSN for error tracking (optional; empty disables)
+	// WorkspaceDaemonResolver resolves a workspace ID to its daemon paths
+	// (socket, state, config, workdir); nil = workspace-scoped daemon routes unavailable.
+	WorkspaceDaemonResolver func(wsID string) (*WorkspaceDaemonPaths, error)
+	Logger                  *slog.Logger // Structured logger (optional; nil falls back to slog.Default())
+	SentryDSN               string       // Sentry/GlitchTip DSN for error tracking (optional; empty disables)
 }
 
 // WorkspaceIDResolverFn resolves a workspace name to its stable UUID.

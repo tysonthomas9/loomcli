@@ -14,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon"
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agentcontrol"
 )
@@ -243,6 +244,42 @@ func scoreAndSortQueue(issues []backend.IssueData, constraints cli.RoleConstrain
 		return entries[i].IssueID < entries[j].IssueID
 	})
 	return entries
+}
+
+// BuildWorkspaceDaemonResolver returns a closure that maps a workspace ID to its
+// daemon paths (socket, state file, config file, work dir). The closure uses
+// wsConfigByIDFn to look up the workspace's projectDir, then delegates to the
+// existing path-resolution helpers.
+//
+// The wsListFn argument is accepted for use by downstream callers (e.g., iterating
+// all workspaces for auto-start) but is not used within the resolver closure itself.
+// Taking it here avoids a breaking signature change later.
+func BuildWorkspaceDaemonResolver(
+	wsConfigByIDFn func(string) (*ops.WorkspaceData, error),
+	wsListFn func() (map[string]string, error),
+) func(wsID string) (*webui.WorkspaceDaemonPaths, error) {
+	if wsConfigByIDFn == nil {
+		return nil
+	}
+	_ = wsListFn // reserved for future use
+	return func(wsID string) (*webui.WorkspaceDaemonPaths, error) {
+		if wsID == "" {
+			return nil, fmt.Errorf("resolve workspace daemon paths: empty workspace ID")
+		}
+		wsData, err := wsConfigByIDFn(wsID)
+		if err != nil {
+			return nil, fmt.Errorf("resolve workspace %q daemon paths: %w", wsID, err)
+		}
+		if wsData == nil || wsData.Path == "" {
+			return nil, fmt.Errorf("resolve workspace %q daemon paths: workspace has no path", wsID)
+		}
+		return &webui.WorkspaceDaemonPaths{
+			SocketPath: resolveControlSocketPath(wsData.Path),
+			StatePath:  config.ResolveDaemonStatePath(wsData.Path),
+			ConfigPath: filepath.Join(wsData.Path, "loom.yaml"),
+			WorkDir:    wsData.Path,
+		}, nil
+	}
 }
 
 // ListWorkspaces returns a map of workspace key (ID or name) to path.
