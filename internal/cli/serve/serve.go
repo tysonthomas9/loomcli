@@ -47,6 +47,7 @@ var (
 	serveFleetAPIKey       string
 	serveHSTS              bool
 	serveAuthURL           string
+	serveAuthJWKSURL       string
 	serveAuthIssuer        string
 	serveAuthAudience      string
 	serveAuthAllowInsecure bool
@@ -99,6 +100,7 @@ ENVIRONMENT VARIABLES
   LOOM_FRONTEND_URL    Allowed frontend origin(s) for CORS (comma-separated)
   LOOM_REDIS_PASSWORD  Redis password (avoids exposure in process list)
   LOOM_AUTH_URL         External auth service base URL (enables JWT auth)
+  LOOM_AUTH_JWKS_URL    Override JWKS endpoint URL (default: derived from LOOM_AUTH_URL)
   LOOM_AUTH_ISSUER      Expected JWT issuer (defaults to LOOM_AUTH_URL)
   LOOM_AUTH_AUDIENCE    Expected JWT audience (defaults to "loom")
 
@@ -144,6 +146,7 @@ func registerServeFlags() {
 
 	serveCmd.Flags().BoolVar(&serveHSTS, "hsts", false, "Enable HSTS header (use when behind TLS-terminating proxy)")
 	serveCmd.Flags().StringVar(&serveAuthURL, "auth-url", os.Getenv("LOOM_AUTH_URL"), "External auth service base URL (enables JWT auth)")
+	serveCmd.Flags().StringVar(&serveAuthJWKSURL, "auth-jwks-url", os.Getenv("LOOM_AUTH_JWKS_URL"), "Override JWKS endpoint URL (default: derived from --auth-url)")
 	serveCmd.Flags().StringVar(&serveAuthIssuer, "auth-issuer", os.Getenv("LOOM_AUTH_ISSUER"), "Expected JWT issuer (defaults to --auth-url)")
 	serveCmd.Flags().StringVar(&serveAuthAudience, "auth-audience", os.Getenv("LOOM_AUTH_AUDIENCE"), "Expected JWT audience (defaults to \"loom\")")
 	serveCmd.Flags().BoolVar(&serveAuthAllowInsecure, "auth-allow-insecure", false, "Allow HTTP for non-loopback --auth-url (INSECURE, for Docker internal networks only)")
@@ -277,6 +280,9 @@ func applyAuthDefaults() {
 		return
 	}
 	validateAuthURL(serveAuthURL, serveAuthAllowInsecure)
+	if serveAuthJWKSURL != "" {
+		validateAuthJWKSURL(serveAuthJWKSURL, serveAuthAllowInsecure)
+	}
 	if serveAuthIssuer == "" {
 		serveAuthIssuer = serveAuthURL
 	}
@@ -345,6 +351,7 @@ func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimp
 		TerminalCmd:          fmt.Sprintf("loom lead --backend %s", backend),
 		HSTSEnabled:          serveHSTS,
 		ExtAuthURL:           serveAuthURL,
+		ExtAuthJWKSURL:       serveAuthJWKSURL,
 		ExtAuthIssuer:        serveAuthIssuer,
 		ExtAuthAudience:      serveAuthAudience,
 		ExtAuthAllowInsecure: serveAuthAllowInsecure,
