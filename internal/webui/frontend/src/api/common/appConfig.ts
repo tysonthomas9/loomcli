@@ -24,6 +24,7 @@ import { AUTH_MODE_OPEN, AUTH_MODE_OIDC, type AppConfig } from "@/types/common";
 
 export { AppConfigError } from "@/types/common";
 import { AppConfigError } from "@/types/common";
+import { API_BASE_URL } from "./client";
 
 // ============= Module-level Cache =============
 
@@ -40,7 +41,7 @@ async function doFetch(): Promise<AppConfig> {
   }, 5000);
 
   try {
-    const response = await fetch("/api/config", {
+    const response = await fetch(`${API_BASE_URL}/api/config`, {
       headers: { Accept: "application/json" },
       signal: controller.signal,
     });

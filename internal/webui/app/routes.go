@@ -25,14 +25,19 @@ func (app *Server) registerRoutes() {
 
 	// Unregistered /api/* paths return JSON 404. Must run after all specific
 	// /api/... routes are registered so Go 1.22+ longest-match prefers real
-	// handlers. Non-/api paths fall through to Go's default text 404 — the
-	// frontend is served externally (reverse proxy / Vite preview), not by
-	// this server.
+	// handlers. When the embedded frontend is enabled, non-/api paths fall
+	// through to the frontend handler below (which serves static assets and
+	// SPA fallback). When --api-only or --frontend-url is set, frontendH is
+	// nil and non-/api paths fall through to Go's default text 404.
 	app.mux.Handle("/api/", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = w.Write([]byte(`{"error":"not found"}`))
 	}))
+
+	if app.frontendH != nil {
+		app.mux.Handle("/", app.frontendH)
+	}
 }
 
 // registerCoreAPIRoutes registers health, config, stats, and error reporting endpoints.

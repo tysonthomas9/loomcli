@@ -90,7 +90,11 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	if config.ExtAuthURL == "" && config.BindAddress != "127.0.0.1" && config.BindAddress != "::1" {
 		logger.Warn("no authentication configured and server is exposed to network", "bind_address", config.BindAddress)
 	}
-	logger.Info("api-only mode — frontend served externally")
+	if config.APIOnly {
+		logger.Info("api-only mode — frontend served externally")
+	} else {
+		webui.LogFrontendBuildMeta()
+	}
 	if config.FleetEnabled {
 		logger.Info("fleet routes enabled")
 	}

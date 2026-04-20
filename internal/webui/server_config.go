@@ -62,6 +62,7 @@ type ServerConfig struct {
 	ExtAuthIssuer           string                                               // Expected JWT issuer (validated against "iss" claim; defaults to ExtAuthURL)
 	ExtAuthAudience         string                                               // Expected JWT audience (validated against "aud" claim; defaults to "loom")
 	ExtAuthAllowInsecure    bool                                                 // Allow HTTP for non-loopback --auth-url (escape hatch for Docker networks)
+	APIOnly                 bool                                                 // When true, skip embedded frontend serving (pure API mode). --frontend-url also implies this.
 	MonitorHandlers         MonitorHandlers                                      // Pre-built handlers for monitor/metrics endpoints (injected by cli)
 	GitOps                  ops.GitOps                                           // Git operations interface (optional; nil disables git endpoints)
 	FileOps                 ops.FileOps                                          // File operations interface (optional; nil disables file endpoints)

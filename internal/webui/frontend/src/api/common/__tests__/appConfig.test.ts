@@ -221,6 +221,17 @@ describe("appConfig", () => {
     });
   });
 
+  it("fetches /api/config at same-origin when API_BASE_URL is empty", async () => {
+    const mockFetch = vi.fn().mockResolvedValue(jsonResponse({ mode: "open" }));
+    global.fetch = mockFetch;
+
+    await fetchAppConfig();
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    // API_BASE_URL defaults to "" so the URL stays /api/config (same-origin).
+    expect(mockFetch.mock.calls[0][0]).toBe("/api/config");
+  });
+
   it("strips unexpected fields from open response", async () => {
     global.fetch = vi
       .fn()

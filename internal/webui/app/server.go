@@ -111,6 +111,10 @@ type Server struct {
 	// Pre-built top-level handlers (built by handlermux.BuildHandlers)
 	handlers *handlermux.Handlers
 
+	// Embedded frontend handler. Nil when config.APIOnly is true (including
+	// when --frontend-url is set; the serve CLI maps that to APIOnly).
+	frontendH http.Handler
+
 	// startedAt captures server-process boot time. Used to distinguish
 	// "tab metadata from a prior server process" (PTY is gone) from
 	// "tab metadata just created in this process" (PTY about to spawn).
@@ -144,6 +148,9 @@ func (app *Server) buildHandlers() {
 		graceMS = app.ptyMgr.GracePeriod().Milliseconds()
 		idleMS = app.ptyMgr.IdleTimeout().Milliseconds()
 		maxSess = app.ptyMgr.MaxSessions()
+	}
+	if !app.config.APIOnly {
+		app.frontendH = webui.FrontendHandler()
 	}
 	app.handlers = handlermux.BuildHandlers(handlermux.HandlerDeps{
 		Pool:               app.pool,

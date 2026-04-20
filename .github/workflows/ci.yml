@@ -35,10 +35,17 @@ jobs:
           git config --global user.name "CI Bot"
           git config --global user.email "ci@loomcli.test"
 
-      - name: Decoupling smoke (no frontend dist)
+      # The frontend is embedded via //go:embed, so `go build` needs
+      # frontend/dist to exist. Create a minimal stub so the Go toolchain
+      # can build independently of Node (no `npm install` needed here).
+      - name: Frontend dist stub (decoupling smoke — no Node)
         run: |
           rm -rf internal/webui/frontend/dist
-          make build
+          mkdir -p internal/webui/frontend/dist
+          printf '%s' '<!DOCTYPE html><html><body>stub</body></html>' > internal/webui/frontend/dist/index.html
+
+      - name: make build (Go toolchain only)
+        run: make build
 
       - name: make check-go
         run: make check-go

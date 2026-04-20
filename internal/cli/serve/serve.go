@@ -38,6 +38,7 @@ var (
 	serveBindAddr          string
 	serveCorsOrigin        string
 	serveFrontendURLs      []string
+	serveAPIOnly           bool
 	serveWebUISocket       string
 	serveNoDaemon          bool
 	serveRedisAddr         string
@@ -75,11 +76,19 @@ func parseFrontendURLsEnv() []string {
 var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start HTTP server for agent status API",
-	Long: `Start a pure JSON API / SSE / WebSocket server.
+	Long: `Start an HTTP server with embedded React frontend and JSON API / SSE / WebSocket.
 
-The frontend is served externally (reverse proxy, CDN, Vite preview, etc.).
-Use --frontend-url (repeatable) to allow cross-origin frontend deployments
-via CORS.
+By default, loom serve embeds the built frontend (internal/webui/frontend/dist)
+in the binary and serves it at / — single-binary deployment with no reverse
+proxy required.
+
+Use --api-only to disable the embedded frontend and serve API only.
+Use --frontend-url (repeatable) for cross-origin frontend deployments via CORS;
+this also implicitly disables embedded frontend serving.
+
+NOTE: 'make build' produces a binary whose embedded frontend reflects whatever
+is on disk at internal/webui/frontend/dist when go build runs. Use
+'make build-all' to rebuild the frontend first.
 
 Auto-starts the bd daemon if not running (disable with --no-daemon).
 
@@ -94,24 +103,26 @@ ENVIRONMENT VARIABLES
   LOOM_AUTH_AUDIENCE    Expected JWT audience (defaults to "loom")
 
 EXAMPLES
-  loom serve                                              # Default port 8080
+  loom serve                                              # Default port 8080, embedded frontend
+  loom serve --api-only                                   # API only, no embedded frontend
   loom serve --bind 0.0.0.0 --auth-url https://auth.co   # Exposed with JWT auth
-  loom serve --frontend-url https://app.example.com       # Cross-origin frontend`,
+  loom serve --frontend-url https://app.example.com       # Cross-origin frontend + CORS`,
 	Args: cobra.NoArgs,
 	Run:  runServe,
 }
 
 func init() {
-	// Get defaults from environment
+	registerServeFlags()
+	cli.RegisterCommand(serveCmd)
+}
+
+func registerServeFlags() {
 	defaultPort := 8080
 	if envPort := os.Getenv("LOOM_SERVER_PORT"); envPort != "" {
 		if p, err := strconv.Atoi(envPort); err == nil {
 			defaultPort = p
 		}
 	}
-
-	defaultCors := os.Getenv("LOOM_CORS_ORIGIN")
-
 	defaultBind := os.Getenv("LOOM_BIND_ADDR")
 	if defaultBind == "" {
 		defaultBind = "127.0.0.1"
@@ -119,40 +130,25 @@ func init() {
 
 	serveCmd.Flags().IntVarP(&servePort, "port", "p", defaultPort, "Server port")
 	serveCmd.Flags().StringVar(&serveBindAddr, "bind", defaultBind, "Bind address (use 0.0.0.0 for all interfaces)")
-	serveCmd.Flags().StringVar(&serveCorsOrigin, "cors", defaultCors, "CORS allowed origin")
-	serveCmd.Flags().StringSliceVar(&serveFrontendURLs, "frontend-url", parseFrontendURLsEnv(), "Allowed frontend origin(s) for CORS. Repeatable or comma-separated. Env: LOOM_FRONTEND_URL")
+	serveCmd.Flags().StringVar(&serveCorsOrigin, "cors", os.Getenv("LOOM_CORS_ORIGIN"), "CORS allowed origin")
+	serveCmd.Flags().StringSliceVar(&serveFrontendURLs, "frontend-url", parseFrontendURLsEnv(), "Allowed frontend origin(s) for CORS. Repeatable or comma-separated. Implies --api-only. Env: LOOM_FRONTEND_URL")
+	serveCmd.Flags().BoolVar(&serveAPIOnly, "api-only", false, "Disable embedded frontend serving (API-only mode)")
 	serveCmd.Flags().StringVar(&serveWebUISocket, "webui-socket", "", "Daemon socket path for webui (auto-detect if empty)")
 	serveCmd.Flags().BoolVar(&serveNoDaemon, "no-daemon", false, "Skip auto-starting the bd daemon")
 
-	defaultRedisAddr := os.Getenv("LOOM_REDIS_ADDR")
-	serveCmd.Flags().StringVar(&serveRedisAddr, "redis-addr", defaultRedisAddr, "Redis address for fleet coordination (enables stale detector)")
+	serveCmd.Flags().StringVar(&serveRedisAddr, "redis-addr", os.Getenv("LOOM_REDIS_ADDR"), "Redis address for fleet coordination (enables stale detector)")
+	serveCmd.Flags().StringVar(&serveRedisPassword, "redis-password", os.Getenv("LOOM_REDIS_PASSWORD"), "Redis password (prefer LOOM_REDIS_PASSWORD env var to avoid leaking in process list)")
 
-	defaultRedisPassword := os.Getenv("LOOM_REDIS_PASSWORD")
-	serveCmd.Flags().StringVar(&serveRedisPassword, "redis-password", defaultRedisPassword, "Redis password (prefer LOOM_REDIS_PASSWORD env var to avoid leaking in process list)")
-
-	defaultFleetMode := os.Getenv(envLoomFleetMode) == "true"
-	serveCmd.Flags().BoolVar(&serveFleetMode, "fleet-mode", defaultFleetMode, "Enable fleet coordination features (stale detector, task claims, fleet routes). Default off for local dev. Env: "+envLoomFleetMode)
-
-	defaultFleetAPIKey := os.Getenv("LOOM_FLEET_API_KEY")
-	serveCmd.Flags().StringVar(&serveFleetAPIKey, "fleet-api-key", defaultFleetAPIKey, "API key for fleet worker registration (required for fleet register endpoint)")
+	serveCmd.Flags().BoolVar(&serveFleetMode, "fleet-mode", os.Getenv(envLoomFleetMode) == "true", "Enable fleet coordination features (stale detector, task claims, fleet routes). Default off for local dev. Env: "+envLoomFleetMode)
+	serveCmd.Flags().StringVar(&serveFleetAPIKey, "fleet-api-key", os.Getenv("LOOM_FLEET_API_KEY"), "API key for fleet worker registration (required for fleet register endpoint)")
 
 	serveCmd.Flags().BoolVar(&serveHSTS, "hsts", false, "Enable HSTS header (use when behind TLS-terminating proxy)")
-
-	defaultAuthURL := os.Getenv("LOOM_AUTH_URL")
-	serveCmd.Flags().StringVar(&serveAuthURL, "auth-url", defaultAuthURL, "External auth service base URL (enables JWT auth)")
-
-	defaultAuthIssuer := os.Getenv("LOOM_AUTH_ISSUER")
-	serveCmd.Flags().StringVar(&serveAuthIssuer, "auth-issuer", defaultAuthIssuer, "Expected JWT issuer (defaults to --auth-url)")
-
-	defaultAuthAudience := os.Getenv("LOOM_AUTH_AUDIENCE")
-	serveCmd.Flags().StringVar(&serveAuthAudience, "auth-audience", defaultAuthAudience, "Expected JWT audience (defaults to \"loom\")")
-
+	serveCmd.Flags().StringVar(&serveAuthURL, "auth-url", os.Getenv("LOOM_AUTH_URL"), "External auth service base URL (enables JWT auth)")
+	serveCmd.Flags().StringVar(&serveAuthIssuer, "auth-issuer", os.Getenv("LOOM_AUTH_ISSUER"), "Expected JWT issuer (defaults to --auth-url)")
+	serveCmd.Flags().StringVar(&serveAuthAudience, "auth-audience", os.Getenv("LOOM_AUTH_AUDIENCE"), "Expected JWT audience (defaults to \"loom\")")
 	serveCmd.Flags().BoolVar(&serveAuthAllowInsecure, "auth-allow-insecure", false, "Allow HTTP for non-loopback --auth-url (INSECURE, for Docker internal networks only)")
 
-	defaultSentryDSN := os.Getenv("LOOM_SENTRY_DSN")
-	serveCmd.Flags().StringVar(&serveSentryDSN, "sentry-dsn", defaultSentryDSN, "Sentry/GlitchTip DSN for error tracking (or LOOM_SENTRY_DSN)")
-
-	cli.RegisterCommand(serveCmd)
+	serveCmd.Flags().StringVar(&serveSentryDSN, "sentry-dsn", os.Getenv("LOOM_SENTRY_DSN"), "Sentry/GlitchTip DSN for error tracking (or LOOM_SENTRY_DSN)")
 }
 
 func runServe(cmd *cobra.Command, args []string) {
@@ -333,10 +329,14 @@ func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState) web
 }
 
 func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimpl.GitOpsImpl, backend string) webui.ServerConfig {
+	// --frontend-url means the frontend is deployed separately (CDN, Vite
+	// preview, etc.), so we should not also serve the embedded copy.
+	apiOnly := serveAPIOnly || len(serveFrontendURLs) > 0
 	return webui.ServerConfig{
 		Port:                 servePort,
 		BindAddress:          serveBindAddr,
 		SocketPath:           serveWebUISocket,
+		APIOnly:              apiOnly,
 		MonitorHandlers:      monitorHandlers,
 		AgentControlFn:       daemonwire.BuildAgentControlFn(),
 		DaemonSupervisorFn:   daemonwire.BuildDaemonSupervisorFn(),

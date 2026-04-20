@@ -166,8 +166,10 @@ build-frontend:
 	@echo "Building frontend..."
 	cd $(FRONTEND_DIR) && npm install && npm run build
 
-# Build both Go binary and frontend dist
-build-all: build build-frontend
+# Build both Go binary and frontend dist.
+# build-frontend must run first so internal/webui/frontend/dist exists when
+# go build processes the //go:embed directive in internal/webui/embed.go.
+build-all: build-frontend build
 
 # Deprecated alias — use 'make build-frontend'
 frontend: build-frontend
