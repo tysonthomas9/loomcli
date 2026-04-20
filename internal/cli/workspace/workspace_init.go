@@ -7,8 +7,10 @@ import (
 	"log/slog"
 	"math/rand"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
@@ -139,6 +141,140 @@ func isDaemonStatusRunning(jsonOutput string) bool {
 		return false
 	}
 	return status.Status == "running"
+}
+
+// EnsureLoomDaemonRunning starts the loom daemon (agent supervisor) in the
+// given workspace directory if it's not already running. Skips silently when:
+//   - no loom.yaml exists (workspace has no agents configured)
+//   - loom.yaml exists but has zero agents
+//   - a loom daemon is already running (PID file points at a live process)
+//
+// The started daemon is detached from loom serve's process group so it survives
+// loom serve exit — loom daemons are long-lived infrastructure, not children.
+// Readiness is detected by polling for daemon-agents.json, which the daemon
+// writes after initial agent setup.
+func EnsureLoomDaemonRunning(ctx context.Context, wsDir string, timeout time.Duration) error {
+	if ctx.Err() != nil {
+		return fmt.Errorf("loom daemon startup in %s cancelled: %w", wsDir, ctx.Err())
+	}
+	if skip, err := shouldSkipLoomDaemonStart(wsDir); err != nil || skip {
+		return err
+	}
+
+	loomBin, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve loom binary path: %w", err)
+	}
+
+	// Clear any stale daemon-agents.json left by a previously crashed daemon
+	// so the readiness poll only sees the newly-spawned daemon's write.
+	statePath := config.ResolveDaemonStatePath(wsDir)
+	_ = os.Remove(statePath)
+
+	if err := spawnLoomDaemon(loomBin, wsDir, statePath); err != nil {
+		return err
+	}
+
+	return waitForLoomDaemonReady(ctx, wsDir, statePath, timeout)
+}
+
+// shouldSkipLoomDaemonStart returns (true, nil) if the workspace should be
+// skipped (no loom.yaml, zero agents, or daemon already running). Returns
+// (false, err) if config load fails.
+func shouldSkipLoomDaemonStart(wsDir string) (bool, error) {
+	if _, err := os.Stat(filepath.Join(wsDir, "loom.yaml")); err != nil {
+		slog.Debug("skipping loom daemon start: no loom.yaml", "path", wsDir)
+		return true, nil
+	}
+	cfg, err := config.LoadDaemonConfig(wsDir)
+	if err != nil {
+		return false, fmt.Errorf("load daemon config in %s: %w", wsDir, err)
+	}
+	if len(cfg.Agents) == 0 {
+		slog.Debug("skipping loom daemon start: zero agents configured", "path", wsDir)
+		return true, nil
+	}
+	if rt := cli.DetectDaemonRuntime(wsDir); rt.Running {
+		slog.Info("loom daemon already running for workspace", "path", wsDir, "pid", rt.PID)
+		return true, nil
+	}
+	return false, nil
+}
+
+// spawnLoomDaemon launches `loom daemon` as a detached background process.
+// stdout/stderr go to a rotating autostart log so early-crash messages survive.
+// A goroutine reaps the child to prevent zombie accumulation under loom serve.
+func spawnLoomDaemon(loomBin, wsDir, statePath string) error {
+	logPath := filepath.Join(filepath.Dir(statePath), "daemon-autostart.log")
+	_ = os.MkdirAll(filepath.Dir(logPath), 0700)
+	logFile, _ := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600) //nolint:gosec // controlled path
+
+	cmd := exec.Command(loomBin, "daemon") //nolint:gosec // binary path is self-executable
+	cmd.Dir = wsDir
+	if logFile != nil {
+		cmd.Stdout = logFile
+		cmd.Stderr = logFile
+	}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
+	if err := cmd.Start(); err != nil {
+		if logFile != nil {
+			_ = logFile.Close()
+		}
+		return fmt.Errorf("start loom daemon in %s: %w", wsDir, err)
+	}
+	go func() {
+		_ = cmd.Wait()
+		if logFile != nil {
+			_ = logFile.Close()
+		}
+	}()
+	return nil
+}
+
+// waitForLoomDaemonReady polls for daemon-agents.json until it appears, the
+// deadline elapses, or the context is cancelled.
+func waitForLoomDaemonReady(ctx context.Context, wsDir, statePath string, timeout time.Duration) error {
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("loom daemon startup in %s cancelled: %w", wsDir, ctx.Err())
+		case <-deadline.C:
+			return fmt.Errorf("loom daemon in %s did not become ready within %s", wsDir, timeout)
+		case <-ticker.C:
+			if _, err := os.Stat(statePath); err == nil {
+				slog.Info("loom daemon started for workspace", "path", wsDir)
+				return nil
+			}
+		}
+	}
+}
+
+// StopLoomDaemonForWorkspace sends SIGTERM to the loom daemon for the given
+// workspace, if one is running. Best-effort: errors are logged at debug level
+// but never returned. Provided for symmetry with StopDaemonForWorkspace — loom
+// serve shutdown does NOT call this, since loom daemons survive serve restarts.
+func StopLoomDaemonForWorkspace(wsDir string) {
+	if wsDir == "" {
+		return
+	}
+	rt := cli.DetectDaemonRuntime(wsDir)
+	if !rt.Running || rt.PID <= 0 {
+		return
+	}
+	proc, err := os.FindProcess(rt.PID)
+	if err != nil {
+		slog.Debug("StopLoomDaemonForWorkspace: FindProcess failed", "path", wsDir, "pid", rt.PID, "err", err)
+		return
+	}
+	if err := proc.Signal(syscall.SIGTERM); err != nil {
+		slog.Debug("StopLoomDaemonForWorkspace: SIGTERM failed", "path", wsDir, "pid", rt.PID, "err", err)
+	}
 }
 
 // stopDaemonForWorkspace is the cleanup counterpart to ensureDaemonForWorkspace.
@@ -273,6 +409,12 @@ func EnsureDaemonsForAllWorkspaces(deps *cli.Deps, ctx context.Context, onReady 
 			slog.Warn("failed to auto-start daemon for workspace",
 				"workspace", name, "path", ws.Path, "err", err)
 			continue
+		}
+		// Also start loom daemon (agent supervisor). Optional — failures don't
+		// prevent onReady since bd daemon is the hard dependency for SSE.
+		if err := EnsureLoomDaemonRunning(ctx, ws.Path, timeout); err != nil {
+			slog.Warn("failed to auto-start loom daemon for workspace",
+				"workspace", name, "path", ws.Path, "err", err)
 		}
 		if onReady != nil && ws.ID != "" {
 			onReady(ws.ID)

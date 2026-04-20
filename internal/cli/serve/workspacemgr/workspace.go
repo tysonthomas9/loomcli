@@ -492,6 +492,11 @@ func startDaemonAsync(timeout time.Duration, wsName, wsDir string, repos []confi
 		} else if result := deps.Exec.Run(wsDir, "bd", "repo", "sync"); result.Err != nil {
 			slog.Warn("bd repo sync failed", "workspace", wsName, "err", result.Err)
 		}
+		// Also start loom daemon (agent supervisor). Independent of bd daemon —
+		// best-effort so a failure here doesn't block the workspace reaching ready.
+		if err := workspace.EnsureLoomDaemonRunning(context.Background(), wsDir, timeout); err != nil {
+			slog.Warn("failed to start loom daemon for workspace", "workspace", wsName, "err", err)
+		}
 		// Mark ready even if daemon/sync failed — the workspace itself is created.
 		// Daemon health is surfaced separately; trapping a workspace in
 		// "initializing" forever would prevent the user from seeing or fixing it.
