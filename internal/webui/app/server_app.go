@@ -165,18 +165,13 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	app.multiSub = appstores.NewMultiSub(app.hub, app.multiPool, config.Logger)
 	cleanups = append(cleanups, func() { app.multiSub.Stop() })
 
-	// Main web terminal manager: one fresh PTY per WebSocket connection, no
-	// tmux. Mirrors wterm/examples/local/server.ts on the Go side.
-	//
-	// TODO(Step 3 of loomcli-4i00m): replace this call with
-	// terminal.NewMultiPTYManager and dispatch per-workspace. os.TempDir() is
-	// a build-time placeholder so this step compiles in isolation — a PTY
-	// spawned here would cd into /tmp, which is wrong but unreachable once
-	// Step 3 rewires handlers to the multi-manager (flat terminal routes
-	// already return 404, see TestSetupRoutes_FlatTerminalRoutesReturn404).
-	app.ptyMgr = terminal.NewPTYManager(config.TerminalCmd, config.MaxTerminalSessions, os.TempDir())
-	cleanups = append(cleanups, func() { _ = app.ptyMgr.Shutdown() })
-	logger.Info("pty manager initialized", "component", "terminal", "default_command", config.TerminalCmd)
+	// Main web terminal manager: one *PTYManager per workspace, dispatched by
+	// SessionKey.Workspace. Per-workspace managers are created lazily on first
+	// AttachSession and use workspace.Path as the shell's cwd. Workspaces are
+	// registered via PTYHook (see appinfra.RegisterHooks wiring).
+	app.ptyMgr = terminal.NewMultiPTYManager(config.TerminalCmd, config.MaxTerminalSessions)
+	cleanups = append(cleanups, func() { _ = app.ptyMgr.Close() })
+	logger.Info("multi pty manager initialized", "component", "terminal", "default_command", config.TerminalCmd)
 
 	// Agent-view tmux manager: kept only so the web UI can attach to tmux
 	// sessions that the CLI auto-mode creates for agents. Missing tmux is a
