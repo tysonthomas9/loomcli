@@ -124,12 +124,28 @@ func (s *issueServiceImpl) CreateIssue(ctx context.Context, params CreateIssuePa
 	createArgs := toCreateArgs(&params)
 	resp, err := client.Create(createArgs)
 	if err != nil {
+		msg := err.Error()
+		if strings.Contains(msg, "not found") {
+			return nil, ErrNotFound(msg)
+		}
+		if strings.Contains(msg, "already exists") || strings.Contains(msg, "UNIQUE constraint") {
+			return nil, ErrConflict(msg)
+		}
 		slog.Error("RPC error in CreateIssue", "err", err)
 		return nil, ErrInternal("failed to create issue", err)
 	}
 	rpcOK = true
 
 	if !resp.Success {
+		if strings.Contains(resp.Error, "not found") {
+			return nil, ErrNotFound(resp.Error)
+		}
+		if strings.Contains(resp.Error, "already exists") || strings.Contains(resp.Error, "UNIQUE constraint") {
+			return nil, ErrConflict(resp.Error)
+		}
+		if strings.Contains(resp.Error, "invalid") {
+			return nil, ErrValidation(resp.Error)
+		}
 		return nil, ErrInternal(resp.Error, nil)
 	}
 
@@ -137,6 +153,10 @@ func (s *issueServiceImpl) CreateIssue(ctx context.Context, params CreateIssuePa
 }
 
 func (s *issueServiceImpl) PatchIssue(ctx context.Context, params PatchIssueParams) error {
+	if err := validatePatchParams(&params); err != nil {
+		return err
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
@@ -150,8 +170,12 @@ func (s *issueServiceImpl) PatchIssue(ctx context.Context, params PatchIssuePara
 	updateArgs := patchParamsToUpdateArgs(&params)
 	resp, err := client.Update(updateArgs)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		msg := err.Error()
+		if strings.Contains(msg, "not found") {
 			return ErrNotFound(fmt.Sprintf("issue not found: %s", params.IssueID))
+		}
+		if strings.Contains(msg, "cannot update template") {
+			return ErrConflict(msg)
 		}
 		slog.Error("RPC error in PatchIssue", "issue_id", params.IssueID, "err", err)
 		return ErrInternal("internal server error", err)
@@ -164,6 +188,9 @@ func (s *issueServiceImpl) PatchIssue(ctx context.Context, params PatchIssuePara
 		}
 		if strings.Contains(resp.Error, "cannot update template") {
 			return ErrConflict(resp.Error)
+		}
+		if strings.Contains(resp.Error, "invalid") {
+			return ErrValidation(resp.Error)
 		}
 		return ErrInternal(resp.Error, nil)
 	}

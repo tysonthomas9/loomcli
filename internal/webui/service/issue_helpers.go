@@ -31,6 +31,25 @@ func validateCreateParams(params *CreateIssueParams) *ServiceError {
 	return nil
 }
 
+// validatePatchParams performs pre-RPC bounds checking for PatchIssue, catching
+// obviously invalid priority and status values before the RPC round-trip.
+// Status validation uses types.Status.IsValid (built-in statuses only);
+// custom statuses configured via "bd config set status.custom" are rejected
+// here. This matches the web UI's status dropdown which only offers built-ins,
+// and is consistent with the DTO layer which also rejects custom statuses.
+func validatePatchParams(params *PatchIssueParams) *ServiceError {
+	if params.Priority != nil && (*params.Priority < 0 || *params.Priority > 4) {
+		return ErrValidation(fmt.Sprintf("priority must be between 0 and 4 (got %d)", *params.Priority))
+	}
+	if params.Status != nil && *params.Status != "" {
+		s := types.Status(*params.Status)
+		if !s.IsValid() {
+			return ErrValidation(fmt.Sprintf("invalid status: %s", *params.Status))
+		}
+	}
+	return nil
+}
+
 func toCreateArgs(params *CreateIssueParams) *rpc.CreateArgs {
 	return &rpc.CreateArgs{
 		ID:                 params.ID,
