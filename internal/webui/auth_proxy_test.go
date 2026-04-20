@@ -3,6 +3,7 @@ package webui
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -285,6 +286,230 @@ func TestCookieHasFlag(t *testing.T) {
 		})
 	}
 }
+
+func newFakeAuthUpstream(t *testing.T, cookies []string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for _, c := range cookies {
+			w.Header().Add("Set-Cookie", c)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+}
+
+func findCookie(cookies []string, namePrefix string) string {
+	for _, c := range cookies {
+		if strings.HasPrefix(strings.TrimSpace(c), namePrefix) {
+			return c
+		}
+	}
+	return ""
+}
+
+func assertCookieContains(t *testing.T, cookie, substr string) {
+	t.Helper()
+	if !strings.Contains(cookie, substr) {
+		t.Errorf("expected cookie to contain %q, got %q", substr, cookie)
+	}
+}
+
+func assertCookieNotContains(t *testing.T, cookie, substr string) {
+	t.Helper()
+	if strings.Contains(cookie, substr) {
+		t.Errorf("expected cookie NOT to contain %q, got %q", substr, cookie)
+	}
+}
+
+func TestModifyResponse_Integration(t *testing.T) {
+	tests := []struct {
+		name            string
+		upstreamCookies []string
+		isTLS           bool
+		check           func(t *testing.T, resp *http.Response)
+	}{
+		{
+			name:            "TLS_on_preserves_Secure",
+			upstreamCookies: []string{"session=abc; Domain=auth.example.com; Secure; HttpOnly; SameSite=None; Path=/"},
+			isTLS:           true,
+			check: func(t *testing.T, resp *http.Response) {
+				got := resp.Header.Values("Set-Cookie")
+				if len(got) != 1 {
+					t.Fatalf("expected 1 cookie, got %d: %v", len(got), got)
+				}
+				c := got[0]
+				assertCookieNotContains(t, strings.ToLower(c), "domain=")
+				assertCookieContains(t, c, "Secure")
+				assertCookieContains(t, c, "SameSite=Lax")
+				assertCookieNotContains(t, c, "SameSite=None")
+				assertCookieNotContains(t, c, "Partitioned")
+				assertCookieContains(t, c, "HttpOnly")
+				assertCookieContains(t, c, "Path=/")
+				assertCookieContains(t, c, "session=abc")
+			},
+		},
+		{
+			name:            "TLS_off_strips_Secure",
+			upstreamCookies: []string{"session=abc; Domain=auth.example.com; Secure; HttpOnly; SameSite=None; Path=/"},
+			isTLS:           false,
+			check: func(t *testing.T, resp *http.Response) {
+				got := resp.Header.Values("Set-Cookie")
+				if len(got) != 1 {
+					t.Fatalf("expected 1 cookie, got %d: %v", len(got), got)
+				}
+				c := got[0]
+				if hasCookieFlag(c, "Secure") {
+					t.Errorf("expected Secure absent on HTTP, got %q", c)
+				}
+				assertCookieContains(t, c, "SameSite=Lax")
+				assertCookieNotContains(t, strings.ToLower(c), "domain=")
+			},
+		},
+		{
+			name:            "SameSite_None_replaced_with_Lax",
+			upstreamCookies: []string{"token=xyz; SameSite=None"},
+			isTLS:           false,
+			check: func(t *testing.T, resp *http.Response) {
+				got := resp.Header.Values("Set-Cookie")
+				if len(got) != 1 {
+					t.Fatalf("expected 1 cookie, got %d: %v", len(got), got)
+				}
+				assertCookieContains(t, got[0], "SameSite=Lax")
+				assertCookieNotContains(t, got[0], "SameSite=None")
+			},
+		},
+		{
+			name:            "absent_SameSite_appended",
+			upstreamCookies: []string{"token=xyz; HttpOnly"},
+			isTLS:           false,
+			check: func(t *testing.T, resp *http.Response) {
+				got := resp.Header.Values("Set-Cookie")
+				if len(got) != 1 {
+					t.Fatalf("expected 1 cookie, got %d: %v", len(got), got)
+				}
+				assertCookieContains(t, got[0], "SameSite=Lax")
+			},
+		},
+		{
+			name:            "Partitioned_stripped",
+			upstreamCookies: []string{"session=abc; Partitioned; Secure; HttpOnly"},
+			isTLS:           true,
+			check: func(t *testing.T, resp *http.Response) {
+				got := resp.Header.Values("Set-Cookie")
+				if len(got) != 1 {
+					t.Fatalf("expected 1 cookie, got %d: %v", len(got), got)
+				}
+				assertCookieNotContains(t, got[0], "Partitioned")
+				assertCookieContains(t, got[0], "Secure")
+			},
+		},
+		{
+			name: "multiple_cookies_rewritten_independently",
+			upstreamCookies: []string{
+				"a=1; Domain=x.example.com; SameSite=None; HttpOnly",
+				"b=2; Secure; Partitioned",
+				"c=3; Path=/api",
+			},
+			isTLS: false,
+			check: func(t *testing.T, resp *http.Response) {
+				got := resp.Header.Values("Set-Cookie")
+				if len(got) != 3 {
+					t.Fatalf("expected 3 cookies, got %d: %v", len(got), got)
+				}
+				a := findCookie(got, "a=")
+				if a == "" {
+					t.Fatalf("missing cookie a, got %v", got)
+				}
+				assertCookieNotContains(t, strings.ToLower(a), "domain=")
+				assertCookieContains(t, a, "SameSite=Lax")
+				assertCookieContains(t, a, "HttpOnly")
+
+				b := findCookie(got, "b=")
+				if b == "" {
+					t.Fatalf("missing cookie b, got %v", got)
+				}
+				if hasCookieFlag(b, "Secure") {
+					t.Errorf("expected Secure stripped on HTTP for b, got %q", b)
+				}
+				assertCookieNotContains(t, b, "Partitioned")
+				assertCookieContains(t, b, "SameSite=Lax")
+
+				c := findCookie(got, "c=")
+				if c == "" {
+					t.Fatalf("missing cookie c, got %v", got)
+				}
+				assertCookieContains(t, c, "Path=/api")
+				assertCookieContains(t, c, "SameSite=Lax")
+			},
+		},
+		{
+			name:            "no_cookies_passthrough",
+			upstreamCookies: nil,
+			isTLS:           false,
+			check: func(t *testing.T, resp *http.Response) {
+				got := resp.Header.Values("Set-Cookie")
+				if len(got) != 0 {
+					t.Fatalf("expected 0 cookies, got %d: %v", len(got), got)
+				}
+				if resp.StatusCode != http.StatusOK {
+					t.Errorf("expected status 200, got %d", resp.StatusCode)
+				}
+			},
+		},
+		{
+			name:            "TLS_on_adds_Secure_flag_when_missing",
+			upstreamCookies: []string{"session=abc; HttpOnly"},
+			isTLS:           true,
+			check: func(t *testing.T, resp *http.Response) {
+				got := resp.Header.Values("Set-Cookie")
+				if len(got) != 1 {
+					t.Fatalf("expected 1 cookie, got %d: %v", len(got), got)
+				}
+				if !hasCookieFlag(got[0], "Secure") {
+					t.Errorf("expected Secure added on TLS, got %q", got[0])
+				}
+				assertCookieContains(t, got[0], "SameSite=Lax")
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := newFakeAuthUpstream(t, tc.upstreamCookies)
+			defer upstream.Close()
+
+			proxy := NewAuthProxy(upstream.URL, nil)
+			if proxy == nil {
+				t.Fatal("NewAuthProxy returned nil")
+			}
+			proxySrv := httptest.NewServer(proxy)
+			defer proxySrv.Close()
+
+			req, err := http.NewRequest("GET", proxySrv.URL+"/api/auth/session", nil)
+			if err != nil {
+				t.Fatalf("NewRequest: %v", err)
+			}
+			if tc.isTLS {
+				req.Header.Set("X-Forwarded-Proto", "https")
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer resp.Body.Close()
+
+			tc.check(t, resp)
+		})
+	}
+}
+
+// CRLF-injection at the integration level is not testable through the Go
+// HTTP stack: http.ResponseWriter strips CR/LF on write, and http.Response
+// parses CR/LF in upstream header values as new-header delimiters on read.
+// The CRLF guard in rewriteAuthProxyCookies is defense-in-depth and is
+// exercised by TestRewriteAuthProxyCookies_DropsMalformedCRLF at the unit
+// level (direct call on a crafted http.Response).
 
 func TestCookieStripFlag(t *testing.T) {
 	tests := []struct {
