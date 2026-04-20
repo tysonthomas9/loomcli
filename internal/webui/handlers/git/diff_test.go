@@ -156,6 +156,167 @@ func TestDiffCommits_EmptyResult(t *testing.T) {
 	}
 }
 
+func TestDiffCommits_MarksPushedStatus(t *testing.T) {
+	gitOps := resolveOK()
+	gitOps.resolveMergeBaseFunc = func(_, _ string) (string, error) {
+		return "abc123", nil
+	}
+	gitOps.diffCommitsFunc = func(_, _ string, _ int) ([]ops.DiffCommitResult, error) {
+		// Four commits in topo order: newest first.
+		return []ops.DiffCommitResult{
+			{Hash: "n4", ShortHash: "n4", Subject: "newest"},
+			{Hash: "n3", ShortHash: "n3", Subject: "unpushed"},
+			{Hash: "n2", ShortHash: "n2", Subject: "pushed"},
+			{Hash: "n1", ShortHash: "n1", Subject: "oldest"},
+		}, nil
+	}
+	gitOps.unpushedCountFunc = func(_, target string) (int, error) {
+		if target != "main" {
+			t.Errorf("unpushed count called with target=%q, want main", target)
+		}
+		return 2, nil
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/commits", nil)
+	req.SetPathValue("name", "test-agent")
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
+	w := httptest.NewRecorder()
+
+	handleDiffCommits(NewDiffService(gitOps, nil)).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var raw map[string]interface{}
+	if err := json.NewDecoder(w.Body).Decode(&raw); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	data := raw["data"].(map[string]interface{})
+	commits := data["commits"].([]interface{})
+	if len(commits) != 4 {
+		t.Fatalf("expected 4 commits, got %d", len(commits))
+	}
+	// First 2 commits (unpushed count) should have pushed=false, remaining pushed=true.
+	wantPushed := []bool{false, false, true, true}
+	for i, c := range commits {
+		m := c.(map[string]interface{})
+		got, ok := m["pushed"].(bool)
+		if !ok {
+			t.Fatalf("commit %d: missing pushed field: %v", i, m)
+		}
+		if got != wantPushed[i] {
+			t.Errorf("commit %d (%q): pushed=%v, want %v", i, m["hash"], got, wantPushed[i])
+		}
+	}
+}
+
+func TestDiffCommits_UnpushedCountError_AllUnpushed(t *testing.T) {
+	gitOps := resolveOK()
+	gitOps.resolveMergeBaseFunc = func(_, _ string) (string, error) {
+		return "abc123", nil
+	}
+	gitOps.diffCommitsFunc = func(_, _ string, _ int) ([]ops.DiffCommitResult, error) {
+		return []ops.DiffCommitResult{
+			{Hash: "a", ShortHash: "a", Subject: "one"},
+			{Hash: "b", ShortHash: "b", Subject: "two"},
+		}, nil
+	}
+	gitOps.unpushedCountFunc = func(_, _ string) (int, error) {
+		return -1, errors.New("no remote tracking branch")
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/commits", nil)
+	req.SetPathValue("name", "test-agent")
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
+	w := httptest.NewRecorder()
+
+	handleDiffCommits(NewDiffService(gitOps, nil)).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var raw map[string]interface{}
+	if err := json.NewDecoder(w.Body).Decode(&raw); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	commits := raw["data"].(map[string]interface{})["commits"].([]interface{})
+	for i, c := range commits {
+		if c.(map[string]interface{})["pushed"].(bool) {
+			t.Errorf("commit %d: pushed=true, want false on error", i)
+		}
+	}
+}
+
+func TestDiffCommits_UnpushedCountGreaterThanCommits(t *testing.T) {
+	gitOps := resolveOK()
+	gitOps.resolveMergeBaseFunc = func(_, _ string) (string, error) {
+		return "abc123", nil
+	}
+	gitOps.diffCommitsFunc = func(_, _ string, _ int) ([]ops.DiffCommitResult, error) {
+		return []ops.DiffCommitResult{
+			{Hash: "a", ShortHash: "a", Subject: "one"},
+			{Hash: "b", ShortHash: "b", Subject: "two"},
+		}, nil
+	}
+	gitOps.unpushedCountFunc = func(_, _ string) (int, error) {
+		return 10, nil
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/commits?limit=2", nil)
+	req.SetPathValue("name", "test-agent")
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
+	w := httptest.NewRecorder()
+
+	handleDiffCommits(NewDiffService(gitOps, nil)).ServeHTTP(w, req)
+
+	var raw map[string]interface{}
+	if err := json.NewDecoder(w.Body).Decode(&raw); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	commits := raw["data"].(map[string]interface{})["commits"].([]interface{})
+	for i, c := range commits {
+		if c.(map[string]interface{})["pushed"].(bool) {
+			t.Errorf("commit %d: pushed=true, want false when unpushed>len(commits)", i)
+		}
+	}
+}
+
+func TestDiffCommits_AllPushed(t *testing.T) {
+	gitOps := resolveOK()
+	gitOps.resolveMergeBaseFunc = func(_, _ string) (string, error) {
+		return "abc123", nil
+	}
+	gitOps.diffCommitsFunc = func(_, _ string, _ int) ([]ops.DiffCommitResult, error) {
+		return []ops.DiffCommitResult{
+			{Hash: "a", ShortHash: "a", Subject: "one"},
+			{Hash: "b", ShortHash: "b", Subject: "two"},
+		}, nil
+	}
+	gitOps.unpushedCountFunc = func(_, _ string) (int, error) {
+		return 0, nil
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/commits", nil)
+	req.SetPathValue("name", "test-agent")
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
+	w := httptest.NewRecorder()
+
+	handleDiffCommits(NewDiffService(gitOps, nil)).ServeHTTP(w, req)
+
+	var raw map[string]interface{}
+	if err := json.NewDecoder(w.Body).Decode(&raw); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	commits := raw["data"].(map[string]interface{})["commits"].([]interface{})
+	for i, c := range commits {
+		if !c.(map[string]interface{})["pushed"].(bool) {
+			t.Errorf("commit %d: pushed=false, want true when unpushed=0", i)
+		}
+	}
+}
+
 // --- handleDiffFiles tests ---
 
 func TestDiffFiles_Success(t *testing.T) {

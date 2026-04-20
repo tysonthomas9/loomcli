@@ -189,6 +189,117 @@ func TestDiffCommits_NoCommits(t *testing.T) {
 	}
 }
 
+func TestUnpushedCount_InvalidBranch(t *testing.T) {
+	_, err := UnpushedCount("/tmp", "bad ref")
+	if err == nil {
+		t.Fatal("expected error for invalid branch name")
+	}
+}
+
+func TestUnpushedCount_NoRemote(t *testing.T) {
+	clearGitEnvVars(t)
+	dir := t.TempDir()
+	run := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...) //nolint:norawexec
+		cmd.Dir = dir
+		cmd.Env = gitSafeEnv(
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	run("init", "-b", "main")
+	run("config", "user.email", "test@test.com")
+	run("config", "user.name", "test")
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("hi\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	run("add", ".")
+	run("commit", "-m", "init")
+
+	// origin/main doesn't exist — UnpushedCount must return an error and -1.
+	n, err := UnpushedCount(dir, "main")
+	if err == nil {
+		t.Fatal("expected error when origin/main does not exist")
+	}
+	if n != -1 {
+		t.Errorf("count = %d, want -1 on error", n)
+	}
+}
+
+func TestUnpushedCount_WithRemote(t *testing.T) {
+	clearGitEnvVars(t)
+	dir := t.TempDir()
+	run := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...) //nolint:norawexec
+		cmd.Dir = dir
+		cmd.Env = gitSafeEnv(
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	// Create a bare "remote" and a working clone so origin/main is a real ref.
+	remote := t.TempDir()
+	cmdInit := exec.Command("git", "init", "--bare", "-b", "main", remote) //nolint:norawexec
+	cmdInit.Env = gitSafeEnv()
+	if out, err := cmdInit.CombinedOutput(); err != nil {
+		t.Fatalf("git init bare failed: %v\n%s", err, out)
+	}
+
+	run("init", "-b", "main")
+	run("config", "user.email", "test@test.com")
+	run("config", "user.name", "test")
+	run("remote", "add", "origin", remote)
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("a\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	run("add", ".")
+	run("commit", "-m", "first")
+	run("push", "-u", "origin", "main")
+
+	// After push, origin/main == HEAD, so unpushed count = 0.
+	n, err := UnpushedCount(dir, "main")
+	if err != nil {
+		t.Fatalf("UnpushedCount failed: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("count = %d, want 0 after push", n)
+	}
+
+	// Add two local commits — they should show up as unpushed.
+	if err := os.WriteFile(filepath.Join(dir, "g.txt"), []byte("b\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	run("add", ".")
+	run("commit", "-m", "second")
+	if err := os.WriteFile(filepath.Join(dir, "h.txt"), []byte("c\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	run("add", ".")
+	run("commit", "-m", "third")
+
+	n, err = UnpushedCount(dir, "main")
+	if err != nil {
+		t.Fatalf("UnpushedCount failed: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("count = %d, want 2 unpushed", n)
+	}
+}
+
 func TestDiffFiles_Success(t *testing.T) {
 	dir, mergeBase := setupDiffTestRepo(t)
 

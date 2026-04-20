@@ -568,6 +568,101 @@ describe("GitTab", () => {
     });
   });
 
+  describe("pushed/unpushed commit rendering", () => {
+    // Monitor commits need this URL to be derived from them for DiffCommit rendering.
+    // We set agent.commits[0].url so githubBaseUrl is resolvable.
+    const monitorUrlHint = {
+      hash: "monitor",
+      message: "hint",
+      url: "https://github.com/foo/bar/commit/monitor",
+    };
+
+    it("renders pushed DiffCommit hash as clickable link", async () => {
+      mockGitStatusReturn = {
+        status: null,
+        loading: false,
+        error: null,
+      };
+
+      mockDiffCommitsResult = Promise.resolve([
+        {
+          hash: "pushed123",
+          short_hash: "pushed1",
+          subject: "Already on remote",
+          author: "A",
+          email: "a@b",
+          date: "2026-04-20T00:00:00Z",
+          pushed: true,
+        },
+      ]);
+
+      await renderGitTab(makeAgent({ ahead: 1, commits: [monitorUrlHint] }));
+
+      const link = screen.getByText("pushed1").closest("a");
+      expect(link).toHaveAttribute(
+        "href",
+        "https://github.com/foo/bar/commit/pushed123",
+      );
+    });
+
+    it("renders unpushed DiffCommit hash as span with tooltip and dot", async () => {
+      mockGitStatusReturn = {
+        status: null,
+        loading: false,
+        error: null,
+      };
+
+      mockDiffCommitsResult = Promise.resolve([
+        {
+          hash: "unpushed123",
+          short_hash: "unpush1",
+          subject: "Local only",
+          author: "A",
+          email: "a@b",
+          date: "2026-04-20T00:00:00Z",
+          pushed: false,
+        },
+      ]);
+
+      const { container } = await renderGitTab(
+        makeAgent({ ahead: 1, commits: [monitorUrlHint] }),
+      );
+
+      const hashEl = screen.getByText("unpush1");
+      expect(hashEl.tagName).toBe("SPAN");
+      expect(hashEl).toHaveAttribute("title", "Not yet pushed to remote");
+      // unpushed dot rendered adjacent to the hash
+      expect(container.querySelector("[aria-hidden='true']")).not.toBeNull();
+    });
+
+    it("renders DiffCommit without pushed field as clickable link (backward compat)", async () => {
+      mockGitStatusReturn = {
+        status: null,
+        loading: false,
+        error: null,
+      };
+
+      mockDiffCommitsResult = Promise.resolve([
+        {
+          hash: "legacy123",
+          short_hash: "legacy1",
+          subject: "No pushed field",
+          author: "A",
+          email: "a@b",
+          date: "2026-04-20T00:00:00Z",
+        },
+      ]);
+
+      await renderGitTab(makeAgent({ ahead: 1, commits: [monitorUrlHint] }));
+
+      const link = screen.getByText("legacy1").closest("a");
+      expect(link).toHaveAttribute(
+        "href",
+        "https://github.com/foo/bar/commit/legacy123",
+      );
+    });
+  });
+
   describe("hook invocation", () => {
     it("passes agent name and enabled=true to useGitStatus", async () => {
       await renderGitTab(makeAgent({ name: "nova" }));

@@ -47,6 +47,11 @@ type GitOps interface {
 	// DiffCommits returns the list of commits between mergeBase and HEAD.
 	DiffCommits(worktreePath, mergeBase string, limit int) ([]DiffCommitResult, error)
 
+	// UnpushedCount returns the number of commits on HEAD not yet on origin/<targetBranch>.
+	// Returns -1 on error (e.g., missing remote tracking branch) so callers can
+	// distinguish "unknown" from a genuine zero.
+	UnpushedCount(worktreePath, targetBranch string) (int, error)
+
 	// DiffFiles returns the list of changed files between two refs.
 	DiffFiles(worktreePath, from, to string) ([]DiffFileResult, error)
 
@@ -124,6 +129,7 @@ type DiffCommitResult struct {
 	Author    string `json:"author"`
 	Email     string `json:"email"`
 	Date      string `json:"date"`
+	Pushed    bool   `json:"pushed"`
 }
 
 // DiffFileResult contains the status and stats for a changed file.

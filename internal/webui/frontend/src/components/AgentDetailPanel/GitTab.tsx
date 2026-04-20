@@ -187,12 +187,19 @@ export function GitTab({ agent, isActive }: GitTabProps): JSX.Element {
                 const message = isDiff
                   ? (commit as DiffCommit).subject
                   : commit.message;
-                // Build URL: use full hash from DiffCommit, or existing URL from monitor
-                const url = isDiff
-                  ? githubBaseUrl && fullHash
-                    ? `${githubBaseUrl}/commit/${fullHash}`
-                    : undefined
-                  : commit.url;
+                const pushed = isDiff
+                  ? (commit as DiffCommit).pushed
+                  : undefined;
+                // Build URL: use full hash from DiffCommit, or existing URL from monitor.
+                // Suppress the URL for commits known to be unpushed — they 404 on GitHub.
+                const url =
+                  pushed === false
+                    ? undefined
+                    : isDiff
+                      ? githubBaseUrl && fullHash
+                        ? `${githubBaseUrl}/commit/${fullHash}`
+                        : undefined
+                      : commit.url;
                 const date = isDiff ? (commit as DiffCommit).date : undefined;
 
                 return (
@@ -200,6 +207,12 @@ export function GitTab({ agent, isActive }: GitTabProps): JSX.Element {
                     key={isDiff ? (commit as DiffCommit).hash : commit.hash}
                     className={panelStyles.commitItem}
                   >
+                    {pushed === false && (
+                      <span
+                        className={panelStyles.unpushedDot}
+                        aria-hidden="true"
+                      />
+                    )}
                     {url ? (
                       <a
                         href={url}
@@ -210,7 +223,18 @@ export function GitTab({ agent, isActive }: GitTabProps): JSX.Element {
                         {shortHash}
                       </a>
                     ) : (
-                      <span className={panelStyles.commitHash}>
+                      <span
+                        className={
+                          pushed === false
+                            ? `${panelStyles.commitHash} ${panelStyles.commitHashUnpushed}`
+                            : panelStyles.commitHash
+                        }
+                        title={
+                          pushed === false
+                            ? "Not yet pushed to remote"
+                            : undefined
+                        }
+                      >
                         {shortHash}
                       </span>
                     )}

@@ -28,11 +28,15 @@ func ResolveMergeBase(worktreePath, branch string) (string, error) {
 
 // DiffCommits returns the list of commits between mergeBase and HEAD.
 // Format: %H|%h|%an|%ae|%aI|%s — subject is last so pipes in it are preserved.
+//
+// Ordering contract: uses --topo-order so descendants appear before ancestors.
+// This is required by the pushed/unpushed positional split in diff_service.go:
+// unpushed commits (descendants of the last pushed commit) must come first.
 func DiffCommits(worktreePath, mergeBase string, limit int) ([]ops.DiffCommitResult, error) {
 	if err := validateGitRef(mergeBase); err != nil {
 		return nil, err
 	}
-	args := []string{"log", mergeBase + "..HEAD", "--format=%H|%h|%an|%ae|%aI|%s"}
+	args := []string{"log", mergeBase + "..HEAD", "--topo-order", "--format=%H|%h|%an|%ae|%aI|%s"}
 	if limit > 0 {
 		args = append(args, fmt.Sprintf("--max-count=%d", limit))
 	}
@@ -61,6 +65,23 @@ func DiffCommits(worktreePath, mergeBase string, limit int) ([]ops.DiffCommitRes
 		})
 	}
 	return results, nil
+}
+
+// UnpushedCount returns the number of commits on HEAD that are not reachable from
+// origin/<targetBranch>. Returns -1 on error (e.g., no remote tracking branch).
+func UnpushedCount(worktreePath, targetBranch string) (int, error) {
+	if err := validateGitRef(targetBranch); err != nil {
+		return -1, err
+	}
+	out, err := cli.RunGitCommand(worktreePath, "rev-list", "--count", "origin/"+targetBranch+"..HEAD")
+	if err != nil {
+		return -1, fmt.Errorf("counting unpushed commits: %w", err)
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		return -1, fmt.Errorf("parsing unpushed count %q: %w", out, err)
+	}
+	return n, nil
 }
 
 // DiffFiles returns the list of changed files between two refs with status and stats.

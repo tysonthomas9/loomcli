@@ -73,7 +73,29 @@ func (s *diffServiceImpl) DiffCommits(_ context.Context, wsID, agentName, from s
 	if commits == nil {
 		commits = []ops.DiffCommitResult{}
 	}
+	markPushedCommits(commits, s.gitOps, wt.Path, wt.DefaultBranch)
 	return commits, nil
+}
+
+// markPushedCommits annotates each commit with its pushed status using the
+// ahead count against origin/<targetBranch>. Commits come back from git log
+// in --topo-order (descendants before ancestors), so the first N commits
+// (where N = unpushed count) are the unpushed prefix.
+// On error, all commits are left with Pushed=false (safe default — no broken links).
+func markPushedCommits(commits []ops.DiffCommitResult, gitOps ops.GitOps, worktreePath, targetBranch string) {
+	if len(commits) == 0 {
+		return
+	}
+	unpushed, err := gitOps.UnpushedCount(worktreePath, targetBranch)
+	if err != nil || unpushed < 0 {
+		return
+	}
+	if unpushed > len(commits) {
+		unpushed = len(commits)
+	}
+	for i := unpushed; i < len(commits); i++ {
+		commits[i].Pushed = true
+	}
 }
 
 func (s *diffServiceImpl) DiffFiles(_ context.Context, wsID, agentName, from, to string) ([]ops.DiffFileResult, error) {

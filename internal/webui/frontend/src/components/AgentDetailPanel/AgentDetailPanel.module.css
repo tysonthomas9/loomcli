@@ -423,6 +423,22 @@
   flex-shrink: 0;
 }
 
+.commitHashUnpushed {
+  color: var(--color-text-muted);
+  cursor: default;
+}
+
+.unpushedDot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-warning, #f59e0b);
+  margin-right: 4px;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
 .commitHashLink {
   font-family: var(--font-mono);
   font-size: 12px;
