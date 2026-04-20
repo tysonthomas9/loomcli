@@ -84,6 +84,7 @@ type Attachment interface {
 // Compile-time assertions.
 var (
 	_ PTYSource        = (*PTYManager)(nil)
+	_ PTYSource        = (*MultiPTYManager)(nil)
 	_ Attachment       = (*localAttachment)(nil)
 	_ realtime.Resizer = (*localAttachment)(nil)
 )
