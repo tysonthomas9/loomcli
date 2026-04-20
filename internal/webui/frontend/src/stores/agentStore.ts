@@ -80,6 +80,9 @@ export interface AgentStoreConfig {
 
 export interface PollingOptions {
   pollInterval?: number; // ms, default 5000
+  // workspaceId is required for workspace-scoped fetches. Empty or unknown
+  // values result in empty responses rather than cross-workspace data leaks.
+  workspaceId: string;
 }
 
 export interface AgentStoreState {
@@ -205,6 +208,10 @@ export function createAgentStore(
   let consecutiveFailuresAtCeiling = 0;
   let visibilityHandler: (() => void) | null = null;
   let isPolling = false;
+  // Active workspace ID set by startPolling. fetchData reads it per call so
+  // callers don't pass it on every invocation, and so retryNow/visibility
+  // refetches use the same workspace as the polling loop.
+  let activeWorkspaceID = "";
 
   // --- Internal timer helpers ---
 
@@ -327,7 +334,7 @@ export function createAgentStore(
 
       try {
         const agentsResult = await withTimeout(
-          fetchAgents(),
+          fetchAgents(activeWorkspaceID),
           FETCH_TIMEOUT_MS,
           "Agent fetch",
         );
@@ -428,7 +435,17 @@ export function createAgentStore(
         get().stopPolling();
       }
 
+      // Empty workspaceId would cause every poll tick to fire a doomed
+      // /api/workspaces//monitor/agents request — the backend rejects it and
+      // the store would churn state on each tick. The caller hasn't resolved
+      // a workspace yet; wait for the next startPolling call with a real ID.
+      const wsID = options?.workspaceId ?? "";
+      if (wsID === "") {
+        return;
+      }
+
       const interval = options?.pollInterval ?? 5000;
+      activeWorkspaceID = wsID;
       isPolling = true;
 
       // Initial fetch

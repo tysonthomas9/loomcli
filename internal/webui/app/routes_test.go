@@ -732,52 +732,20 @@ func TestSetupRoutes_TerminalEndpointNilManagerReturns503(t *testing.T) {
 	}
 }
 
-// TestSetupRoutes_StatsEndpoint tests that stats endpoint is registered.
-func TestSetupRoutes_StatsEndpoint(t *testing.T) {
+// TestSetupRoutes_GlobalStatsRemoved verifies that the old /api/stats endpoint
+// has been removed. It served per-workspace data from the default pool,
+// leaking one workspace's stats into every workspace's UI — replaced by
+// /api/workspaces/{ws}/stats.
+func TestSetupRoutes_GlobalStatsRemoved(t *testing.T) {
 	app := &Server{}
 	setupTestRoutes(t, app)
 
-	// Test that stats endpoint is registered
 	req := httptest.NewRequest(http.MethodGet, "/api/stats", nil)
 	rr := httptest.NewRecorder()
 	app.mux.ServeHTTP(rr, req)
 
-	// Should return 503 with nil pool
-	if rr.Code != http.StatusServiceUnavailable {
-		t.Errorf("expected /api/stats to return %d with nil pool, got %d", http.StatusServiceUnavailable, rr.Code)
-	}
-
-	// Verify JSON response
-	var resp healthhandlers.StatsResponse
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("failed to parse response: %v", err)
-	}
-
-	if resp.Success {
-		t.Error("expected Success to be false with nil pool")
-	}
-}
-
-// TestSetupRoutes_StatsEndpointPOSTFallsThrough tests that POST to stats returns 404 JSON.
-// Note: Go 1.22's pattern matching means "GET /api/stats" only matches GET requests.
-// A POST to /api/stats doesn't match that route, so it falls through to the
-// catch-all frontend handler which rejects /api/* paths with 404 JSON.
-func TestSetupRoutes_StatsEndpointPOSTFallsThrough(t *testing.T) {
-	app := &Server{}
-	setupTestRoutes(t, app)
-
-	// POST to GET-only endpoint falls through to frontend handler which rejects /api/* paths
-	req := httptest.NewRequest(http.MethodPost, "/api/stats", nil)
-	rr := httptest.NewRecorder()
-	app.mux.ServeHTTP(rr, req)
-
 	if rr.Code != http.StatusNotFound {
-		t.Errorf("expected POST /api/stats to return 404, got %d", rr.Code)
-	}
-
-	ct := rr.Header().Get("Content-Type")
-	if ct != "application/json" {
-		t.Errorf("Content-Type = %q, want %q", ct, "application/json")
+		t.Errorf("/api/stats should be deleted (404), got %d", rr.Code)
 	}
 }
 

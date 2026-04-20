@@ -154,7 +154,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	}
 
 	// Initialize issue service layer
-	app.issueSvc = service.NewIssueService(app.pool, app.multiPool, middleware.WithWorkspace)
+	app.issueSvc = service.NewIssueService(app.multiPool, middleware.WithWorkspace)
 
 	// Create SSE hub for real-time push notifications
 	app.hub = appstores.NewHub()

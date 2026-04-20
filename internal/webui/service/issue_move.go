@@ -15,9 +15,6 @@ import (
 )
 
 func (s *issueServiceImpl) MoveIssue(ctx context.Context, params MoveIssueParams) (*MoveIssueResult, error) {
-	if s.pool == nil {
-		return nil, ErrUnavailable("connection pool not initialized")
-	}
 	if s.multiPool == nil {
 		return nil, ErrValidation("cross-workspace move requires multi-workspace mode")
 	}
@@ -30,14 +27,11 @@ func (s *issueServiceImpl) MoveIssue(ctx context.Context, params MoveIssueParams
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	// Source client
-	client, err := s.pool.Get(ctx)
+	// Source client — workspace ID comes from the request context
+	// (middleware.Workspace populated it from the {ws} path parameter).
+	client, err := s.acquireClient(ctx)
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return nil, ErrTimeout("timeout connecting to daemon")
-		}
-		slog.Error("pool error in MoveIssue", "err", err)
-		return nil, ErrUnavailable("daemon not available")
+		return nil, err
 	}
 	rpcOK := false
 	defer s.releaseClient(client, &rpcOK)

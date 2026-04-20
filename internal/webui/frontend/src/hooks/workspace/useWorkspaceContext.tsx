@@ -60,7 +60,27 @@ import { setLastWorkspaceId } from "@/utils/scopedStorage";
 import { createWorkspaceStore } from "@/stores";
 import { buildWorkspaceSwitchUrl } from "@/utils/workspaceUrl";
 
-import type { UseWorkspaceReturn } from "./useWorkspace";
+// Shape returned by the store; inlined here now that useWorkspace.ts was
+// deleted. Consumers get these fields directly on WorkspaceContextValue.
+interface WorkspaceDataAccessors {
+  workspace: WorkspaceData | null;
+  repos: RepoInfo[];
+  groups: string[];
+  agents: WorkspaceAgentInfo[];
+  isLoading: boolean;
+  error: string | null;
+  refetch: () => void;
+}
+
+// Connection state derived from (workspace, isLoading, error). Used by the
+// sidebar to distinguish a first-load failure ("Workspace unavailable"
+// banner) from a lost-connection refresh failure ("showing last known
+// state" banner), so users see the right reassurance.
+export type WorkspaceConnectionState =
+  | "loading"
+  | "connected"
+  | "error_never_connected"
+  | "error_lost_connection";
 import {
   PerWorkspacePrefsContext,
   PerWorkspacePrefsProvider,
@@ -99,7 +119,10 @@ function lsSet(key: string, value: string): void {
  * outer (workspace data) and inner (per-workspace prefs) contexts, but UI
  * consumers don't care about the split.
  */
-export interface WorkspaceContextValue extends UseWorkspaceReturn {
+export interface WorkspaceContextValue extends WorkspaceDataAccessors {
+  connectionState: WorkspaceConnectionState;
+  retryNow: () => void;
+
   getRepoByName: (name: string) => RepoInfo | undefined;
   getReposByGroup: (group: string) => RepoInfo[];
   getAgentByName: (name: string) => WorkspaceAgentInfo | undefined;
@@ -138,6 +161,8 @@ interface OuterContextValue {
   isLoading: boolean;
   error: string | null;
   refetch: () => void;
+  connectionState: WorkspaceConnectionState;
+  retryNow: () => void;
   getRepoByName: (name: string) => RepoInfo | undefined;
   getReposByGroup: (group: string) => RepoInfo[];
   getAgentByName: (name: string) => WorkspaceAgentInfo | undefined;
@@ -322,6 +347,19 @@ export function WorkspaceProvider({
     [agents],
   );
 
+  // connectionState: derived from (workspace, isLoading, error). workspace
+  // survives errors (the store keeps the last-known payload), so a non-null
+  // workspace plus an error means we successfully connected before and then
+  // lost it — distinct from a never-connected initial failure.
+  const connectionState: WorkspaceConnectionState =
+    wsError !== null
+      ? workspace !== null
+        ? "error_lost_connection"
+        : "error_never_connected"
+      : wsIsLoading && workspace === null
+        ? "loading"
+        : "connected";
+
   const outerValue = useMemo<OuterContextValue>(
     () => ({
       workspace,
@@ -333,6 +371,8 @@ export function WorkspaceProvider({
       isLoading: wsIsLoading,
       error: wsError,
       refetch,
+      connectionState,
+      retryNow: refetch,
       getRepoByName,
       getReposByGroup,
       getAgentByName,
@@ -351,6 +391,7 @@ export function WorkspaceProvider({
       wsIsLoading,
       wsError,
       refetch,
+      connectionState,
       getRepoByName,
       getReposByGroup,
       getAgentByName,
@@ -393,6 +434,8 @@ export const NO_WORKSPACE_CONTEXT: WorkspaceContextValue = {
   isLoading: false,
   error: null,
   refetch: () => {},
+  connectionState: "loading",
+  retryNow: () => {},
   getRepoByName: () => undefined,
   getReposByGroup: () => [],
   getAgentByName: () => undefined,
@@ -435,6 +478,8 @@ export function useWorkspaceContext(): WorkspaceContextValue {
     isLoading: outer.isLoading,
     error: outer.error,
     refetch: outer.refetch,
+    connectionState: outer.connectionState,
+    retryNow: outer.retryNow,
     getRepoByName: outer.getRepoByName,
     getReposByGroup: outer.getReposByGroup,
     getAgentByName: outer.getAgentByName,

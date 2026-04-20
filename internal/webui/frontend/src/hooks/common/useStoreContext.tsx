@@ -118,7 +118,9 @@ function StoreWiring({
     }
     prevWorkspaceIdRef.current = workspaceId;
 
-    agentStore.getState().startPolling({ pollInterval: 5000 });
+    agentStore
+      .getState()
+      .startPolling({ pollInterval: 5000, workspaceId: workspaceId ?? "" });
 
     return () => {
       agentStore.getState().stopPolling();

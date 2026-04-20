@@ -14,13 +14,23 @@ import type {
 import { api, apiErrorFromResponse, get } from "@/api/common";
 
 /**
- * Fetch agents from the loom server.
- * Throws on network errors or non-OK responses so callers can handle connection state.
+ * Fetch agents for a specific workspace. Returns only agents belonging to
+ * that workspace — if wsID is empty or unknown the server returns an empty
+ * list rather than leaking another workspace's agents. The old
+ * /api/monitor/agents (un-scoped) endpoint remains for the cross-workspace
+ * monitor dashboard; per-workspace views must pass wsID here.
+ *
+ * Throws on network errors or non-OK responses so callers can handle
+ * connection state.
  */
-export async function fetchAgents(): Promise<LoomAgentStatus[]> {
-  const { data, error, response } = await api.GET("/api/monitor/agents", {
-    signal: AbortSignal.timeout(15000),
-  });
+export async function fetchAgents(wsID: string): Promise<LoomAgentStatus[]> {
+  const { data, error, response } = await api.GET(
+    "/api/workspaces/{ws}/monitor/agents",
+    {
+      params: { path: { ws: wsID } },
+      signal: AbortSignal.timeout(15000),
+    },
+  );
   if (error) throw apiErrorFromResponse(error, response);
   return (data!.agents ?? []) as unknown as LoomAgentStatus[];
 }

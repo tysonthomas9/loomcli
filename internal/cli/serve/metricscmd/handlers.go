@@ -99,7 +99,10 @@ func HandleStatus(collectDataFn func() *monitor.MonitorData) http.HandlerFunc {
 	}
 }
 
-// HandleAgents returns an HTTP handler for the agents endpoint.
+// HandleAgents returns an HTTP handler for the global agents endpoint. It
+// returns the full agent list across every workspace — used by the
+// cross-workspace monitor dashboard, NOT by per-workspace sidebars. Those
+// must use HandleAgentsScoped via /api/workspaces/{ws}/monitor/agents.
 func HandleAgents(collectDataFn func() *monitor.MonitorData) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		data := collectDataFn()
@@ -124,6 +127,57 @@ func HandleAgents(collectDataFn func() *monitor.MonitorData) http.HandlerFunc {
 
 		writeJSON(w, response)
 	}
+}
+
+// HandleAgentsScoped returns an HTTP handler for
+// GET /api/workspaces/{ws}/monitor/agents. It resolves the workspace ID to a
+// workspace name via nameFn, then filters the global monitor data to only
+// that workspace's agents. An unknown workspace returns an empty list rather
+// than the cross-workspace data that the old global endpoint leaked into
+// every workspace's sidebar.
+func HandleAgentsScoped(
+	collectDataFn func() *monitor.MonitorData,
+	nameFn func(wsID string) string,
+) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		data := collectDataFn()
+		if data == nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":"data collection unavailable"}`))
+			return
+		}
+		wsID := workspaceIDFromPath(r)
+		wsName := nameFn(wsID)
+		agents := filterAgentsByWorkspaceName(data.Agents, wsName)
+		writeJSON(w, AgentsResponse{
+			Workspace: WorkspaceInfo{Mode: "workspace", Name: wsName},
+			Agents:    agents,
+			Timestamp: data.Timestamp,
+		})
+	}
+}
+
+// workspaceIDFromPath reads the {ws} path value. Kept local to avoid pulling
+// the middleware package into metricscmd.
+func workspaceIDFromPath(r *http.Request) string {
+	return r.PathValue("ws")
+}
+
+// filterAgentsByWorkspaceName returns the subset of agents whose Workspace
+// field matches. Empty wsName returns nothing — callers that want all agents
+// must use the unscoped HandleAgents.
+func filterAgentsByWorkspaceName(all []monitor.AgentStatus, wsName string) []monitor.AgentStatus {
+	out := make([]monitor.AgentStatus, 0, len(all))
+	if wsName == "" {
+		return out
+	}
+	for _, a := range all {
+		if a.Workspace == wsName {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 // HandleTasks returns an HTTP handler for the tasks endpoint.
