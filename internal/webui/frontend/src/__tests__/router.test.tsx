@@ -134,11 +134,16 @@ describe("router view routes", () => {
   });
 
   describe("lazy routes resolve to the correct Component", () => {
-    const lazyCases: [string, React.ComponentType][] = [
+    // Panel-supporting views have `children: [{index, lazy}, {issues/:issueId, lazy}]`
+    // so the top-level route has no `lazy` of its own — it's on the index child.
+    const panelLazyCases: [string, React.ComponentType][] = [
       ["kanban", KanbanPage],
       ["table", TablePage],
       ["graph", GraphPage],
       ["monitor", MonitorPage],
+    ];
+
+    const flatLazyCases: [string, React.ComponentType][] = [
       ["observability", ObservabilityPage],
       ["settings", SettingsPage],
       ["workspace", WorkspacePage],
@@ -146,7 +151,7 @@ describe("router view routes", () => {
       ["issues/:issueId", IssueDetailPage],
     ];
 
-    it.each(lazyCases)(
+    it.each(flatLazyCases)(
       "%s route lazy() resolves to its page component",
       async (path, expectedComponent) => {
         const route = findRoute(path);
@@ -155,6 +160,30 @@ describe("router view routes", () => {
 
         const result = await route.lazy!();
         expect(result.Component).toBe(expectedComponent);
+      },
+    );
+
+    it.each(panelLazyCases)(
+      "%s (panel-supporting) has index and issues/:issueId children that lazy-load the page",
+      async (path, expectedComponent) => {
+        const route = findRoute(path);
+        expect(route.lazy).toBeUndefined();
+        expect(route.Component).toBeUndefined();
+        expect(route.children).toBeDefined();
+
+        const indexChild = route.children!.find((c) => c.index === true);
+        expect(indexChild).toBeDefined();
+        expect(indexChild!.lazy).toBeDefined();
+        const indexResult = await indexChild!.lazy!();
+        expect(indexResult.Component).toBe(expectedComponent);
+
+        const panelChild = route.children!.find(
+          (c) => c.path === "issues/:issueId",
+        );
+        expect(panelChild).toBeDefined();
+        expect(panelChild!.lazy).toBeDefined();
+        const panelResult = await panelChild!.lazy!();
+        expect(panelResult.Component).toBe(expectedComponent);
       },
     );
   });

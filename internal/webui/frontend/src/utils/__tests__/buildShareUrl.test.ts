@@ -55,11 +55,18 @@ describe("buildShareUrl", () => {
     expect(url.searchParams.has("view")).toBe(false);
   });
 
-  it("generates URL with issue as query param for non-detail views", () => {
+  it("generates panel URL with issue as path segment for table view", () => {
     const result = buildShareUrl({ view: "table", issue: "TASK-123" });
     const url = new URL(result);
-    expect(url.pathname).toBe("/ws/test-ws/table");
-    expect(url.searchParams.get("issue")).toBe("TASK-123");
+    expect(url.pathname).toBe("/ws/test-ws/table/issues/TASK-123");
+    expect(url.searchParams.has("issue")).toBe(false);
+  });
+
+  it("falls back to default view for issue-detail without an issue", () => {
+    const result = buildShareUrl({ view: "issue-detail" });
+    const url = new URL(result);
+    // No issue id → never emit the invalid /ws/:id/issue-detail path
+    expect(url.pathname).toBe("/ws/test-ws/kanban");
   });
 
   it("generates URL with issue as route segment for issue-detail view", () => {
@@ -73,27 +80,52 @@ describe("buildShareUrl", () => {
     expect(url.searchParams.has("view")).toBe(false);
   });
 
-  it("uses kanban path segment for default view", () => {
+  it("generates panel URL with issue as path segment for kanban view", () => {
     const result = buildShareUrl({ view: "kanban", issue: "TASK-1" });
     const url = new URL(result);
-    expect(url.pathname).toBe("/ws/test-ws/kanban");
-    expect(url.searchParams.get("issue")).toBe("TASK-1");
+    expect(url.pathname).toBe("/ws/test-ws/kanban/issues/TASK-1");
+    expect(url.searchParams.has("issue")).toBe(false);
   });
 
-  it("omits issue param when null", () => {
+  it("generates panel URL for graph view", () => {
+    const result = buildShareUrl({ view: "graph", issue: "T-5" });
+    const url = new URL(result);
+    expect(url.pathname).toBe("/ws/test-ws/graph/issues/T-5");
+    expect(url.searchParams.has("issue")).toBe(false);
+  });
+
+  it("generates panel URL for monitor view", () => {
+    const result = buildShareUrl({ view: "monitor", issue: "T-9" });
+    const url = new URL(result);
+    expect(url.pathname).toBe("/ws/test-ws/monitor/issues/T-9");
+    expect(url.searchParams.has("issue")).toBe(false);
+  });
+
+  it("falls back to query param for non-panel view with issue", () => {
+    // terminal/settings/workspace don't support panel URLs — carry the issue
+    // in the query string so callers that pass those combinations don't break.
+    const result = buildShareUrl({ view: "terminal", issue: "T-5" });
+    const url = new URL(result);
+    expect(url.pathname).toBe("/ws/test-ws/terminal");
+    expect(url.searchParams.get("issue")).toBe("T-5");
+  });
+
+  it("omits issue param when null on panel view", () => {
     const result = buildShareUrl({ view: "table", issue: null });
+    const url = new URL(result);
+    expect(url.searchParams.has("issue")).toBe(false);
+    // null issue → falls back to base view URL, not a panel URL
+    expect(url.pathname).toBe("/ws/test-ws/table");
+  });
+
+  it("omits issue param when empty string on panel view", () => {
+    const result = buildShareUrl({ view: "table", issue: "" });
     const url = new URL(result);
     expect(url.searchParams.has("issue")).toBe(false);
     expect(url.pathname).toBe("/ws/test-ws/table");
   });
 
-  it("omits issue param when empty string", () => {
-    const result = buildShareUrl({ view: "table", issue: "" });
-    const url = new URL(result);
-    expect(url.searchParams.has("issue")).toBe(false);
-  });
-
-  it("preserves existing filter params from current URL", () => {
+  it("preserves existing filter params when building a panel URL", () => {
     mockLocation(
       "http://localhost:3000/ws/test-ws/kanban?priority=2&type=bug&search=deploy",
     );
@@ -102,11 +134,12 @@ describe("buildShareUrl", () => {
       issue: "TASK-5",
     });
     const url = new URL(result);
-    expect(url.pathname).toBe("/ws/test-ws/table");
+    // table is a panel-supporting view → issue moves into the path
+    expect(url.pathname).toBe("/ws/test-ws/table/issues/TASK-5");
     expect(url.searchParams.get("priority")).toBe("2");
     expect(url.searchParams.get("type")).toBe("bug");
     expect(url.searchParams.get("search")).toBe("deploy");
-    expect(url.searchParams.get("issue")).toBe("TASK-5");
+    expect(url.searchParams.has("issue")).toBe(false);
   });
 
   it("changes view path segment when switching views", () => {

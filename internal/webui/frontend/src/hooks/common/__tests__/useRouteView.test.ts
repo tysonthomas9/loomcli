@@ -22,10 +22,34 @@ function createRouterWrapper(initialPath = "/ws/test-ws/kanban") {
           path: "/ws/:workspaceId",
           children: [
             { index: true, element: children },
-            { path: "kanban", element: children },
-            { path: "table", element: children },
-            { path: "graph", element: children },
-            { path: "monitor", element: children },
+            {
+              path: "kanban",
+              children: [
+                { index: true, element: children },
+                { path: "issues/:issueId", element: children },
+              ],
+            },
+            {
+              path: "table",
+              children: [
+                { index: true, element: children },
+                { path: "issues/:issueId", element: children },
+              ],
+            },
+            {
+              path: "graph",
+              children: [
+                { index: true, element: children },
+                { path: "issues/:issueId", element: children },
+              ],
+            },
+            {
+              path: "monitor",
+              children: [
+                { index: true, element: children },
+                { path: "issues/:issueId", element: children },
+              ],
+            },
             { path: "observability", element: children },
             { path: "terminal", element: children },
             { path: "workspace", element: children },
@@ -136,6 +160,40 @@ describe("useRouteView", () => {
       });
 
       expect(result.current.view).toBe("issue-detail");
+    });
+  });
+
+  describe("panel overlay derivation (view/issues/:issueId)", () => {
+    it("returns kanban for /ws/:id/kanban/issues/:issueId (panel overlay)", () => {
+      const { result } = renderHook(() => useRouteView(), {
+        wrapper: createRouterWrapper("/ws/test-ws/kanban/issues/T-5"),
+      });
+
+      expect(result.current.view).toBe("kanban");
+    });
+
+    it("returns table for /ws/:id/table/issues/:issueId", () => {
+      const { result } = renderHook(() => useRouteView(), {
+        wrapper: createRouterWrapper("/ws/test-ws/table/issues/PROJ-123"),
+      });
+
+      expect(result.current.view).toBe("table");
+    });
+
+    it("returns graph for /ws/:id/graph/issues/:issueId", () => {
+      const { result } = renderHook(() => useRouteView(), {
+        wrapper: createRouterWrapper("/ws/test-ws/graph/issues/X"),
+      });
+
+      expect(result.current.view).toBe("graph");
+    });
+
+    it("returns monitor for /ws/:id/monitor/issues/:issueId", () => {
+      const { result } = renderHook(() => useRouteView(), {
+        wrapper: createRouterWrapper("/ws/test-ws/monitor/issues/Y"),
+      });
+
+      expect(result.current.view).toBe("monitor");
     });
   });
 
@@ -256,6 +314,48 @@ describe("useRouteView", () => {
         result.current.navigateToView("settings");
       });
       expect(result.current.view).toBe("settings");
+    });
+  });
+
+  describe("navigateToView preserves panel issue", () => {
+    it("preserves issueId when switching between panel-supporting views", () => {
+      const { result } = renderHook(() => useRouteView(), {
+        wrapper: createRouterWrapper("/ws/test-ws/kanban/issues/T-5"),
+      });
+      expect(result.current.view).toBe("kanban");
+
+      act(() => {
+        result.current.navigateToView("table");
+      });
+      // table is panel-supporting → issue survives the view switch
+      expect(result.current.view).toBe("table");
+    });
+
+    it("drops issueId when switching to a non-panel view", () => {
+      const { result } = renderHook(() => useRouteView(), {
+        wrapper: createRouterWrapper("/ws/test-ws/kanban/issues/T-5"),
+      });
+      expect(result.current.view).toBe("kanban");
+
+      act(() => {
+        result.current.navigateToView("terminal");
+      });
+      // terminal doesn't support panel overlay → issueId is dropped
+      expect(result.current.view).toBe("terminal");
+    });
+
+    it("setView drops issueId even for panel-supporting target", () => {
+      // setView is for redirects (error fallback, single-repo guard) — it
+      // must NOT carry a failing issueId into the new view.
+      const { result } = renderHook(() => useRouteView(), {
+        wrapper: createRouterWrapper("/ws/test-ws/issues/BAD-ID"),
+      });
+      expect(result.current.view).toBe("issue-detail");
+
+      act(() => {
+        result.current.setView("kanban");
+      });
+      expect(result.current.view).toBe("kanban");
     });
   });
 

@@ -28,6 +28,18 @@ const VALID_VIEW_SEGMENTS: ReadonlySet<string> = new Set<ViewMode>([
   "files",
 ]);
 
+/**
+ * Views that support the issue panel overlay via URL
+ * (/ws/:id/{view}/issues/:issueId). When switching between these views
+ * with a panel open, the panel's issue ID is preserved in the new URL.
+ */
+const PANEL_SUPPORTING_VIEWS: ReadonlySet<string> = new Set<ViewMode>([
+  "kanban",
+  "table",
+  "graph",
+  "monitor",
+]);
+
 export interface UseRouteViewReturn {
   /** Current view mode derived from the route path */
   view: ViewMode;
@@ -40,15 +52,18 @@ export interface UseRouteViewReturn {
 /**
  * Extract the view segment from the URL path.
  *
- * /ws/abc/kanban       → "kanban"
- * /ws/abc/terminal     → "terminal"
- * /ws/abc/issues/T-5   → "issue-detail"
- * /ws/abc/             → DEFAULT_VIEW
- * /ws/abc/nonexistent  → DEFAULT_VIEW
+ * /ws/abc/kanban               → "kanban"
+ * /ws/abc/kanban/issues/T-5    → "kanban" (panel overlay mode)
+ * /ws/abc/terminal             → "terminal"
+ * /ws/abc/issues/T-5           → "issue-detail" (full-page)
+ * /ws/abc/                     → DEFAULT_VIEW
+ * /ws/abc/nonexistent          → DEFAULT_VIEW
+ *
+ * View segment at position 3 takes priority over issueId — this lets
+ * panel-overlay URLs keep the view active while the panel shows the issue.
+ * Only falls through to "issue-detail" when position 3 is "issues" (no view prefix).
  */
 function deriveView(pathname: string, issueId: string | undefined): ViewMode {
-  if (issueId) return "issue-detail";
-
   // Path segments: ['', 'ws', workspaceId, viewSegment, ...]
   const segments = pathname.split("/");
   const viewSegment = segments[3];
@@ -56,6 +71,9 @@ function deriveView(pathname: string, issueId: string | undefined): ViewMode {
   if (viewSegment && VALID_VIEW_SEGMENTS.has(viewSegment)) {
     return viewSegment as ViewMode;
   }
+
+  // No valid view prefix — if issueId is present, URL is /ws/:id/issues/:issueId
+  if (issueId) return "issue-detail";
 
   return DEFAULT_VIEW;
 }
@@ -86,7 +104,9 @@ export function useRouteView(): UseRouteViewReturn {
     [location.pathname, issueId],
   );
 
-  // Replace semantics — for programmatic redirects (single-repo guard, error fallback)
+  // Replace semantics — for programmatic redirects (single-repo guard, error
+  // fallback). Drops the issueId so that a redirect away from a bad deep-link
+  // doesn't carry the failing issue into the new view.
   const setView = useCallback(
     (newView: ViewMode) => {
       navigate(buildViewPath(workspaceId, newView, location.search), {
@@ -96,12 +116,22 @@ export function useRouteView(): UseRouteViewReturn {
     [navigate, workspaceId, location.search],
   );
 
-  // Push semantics — for user-initiated view switches (NavRail, keyboard, etc.)
+  // Push semantics — for user-initiated view switches (NavRail, keyboard,
+  // etc.). Preserves the panel issue when switching between panel-supporting
+  // views so the panel stays open across view changes (e.g. kanban → table
+  // with the same issue still visible).
   const navigateToView = useCallback(
     (newView: ViewMode) => {
+      if (issueId && PANEL_SUPPORTING_VIEWS.has(newView)) {
+        const searchSuffix = location.search || "";
+        navigate(
+          `/ws/${workspaceId}/${newView}/issues/${issueId}${searchSuffix}`,
+        );
+        return;
+      }
       navigate(buildViewPath(workspaceId, newView, location.search));
     },
-    [navigate, workspaceId, location.search],
+    [navigate, workspaceId, issueId, location.search],
   );
 
   return { view, setView, navigateToView };

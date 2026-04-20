@@ -5,15 +5,19 @@
  *   /                                      → RedirectToWorkspace (resolve last-used or default)
  *   /ws/:workspaceId/                      → WorkspaceLayout → App (shell/layout)
  *     /kanban                              → KanbanPage (lazy)
+ *     /kanban/issues/:issueId              → KanbanPage (panel overlay mode)
  *     /table                               → TablePage (lazy)
+ *     /table/issues/:issueId               → TablePage (panel overlay mode)
  *     /graph                               → GraphPage (lazy)
+ *     /graph/issues/:issueId               → GraphPage (panel overlay mode)
  *     /monitor                             → MonitorPage (lazy)
+ *     /monitor/issues/:issueId             → MonitorPage (panel overlay mode)
  *     /observability                       → ObservabilityPage (lazy)
  *     /terminal                            → TerminalView (always-mounted in shell, route renders null)
  *     /settings                            → SettingsPage (lazy)
  *     /workspace                           → WorkspacePage (lazy)
  *     /files                               → FilesPage (lazy)
- *     /issues/:issueId                     → IssueDetailPage (lazy)
+ *     /issues/:issueId                     → IssueDetailPage (lazy, full-page)
  *   /test/*                                → TestFixtures (dev only, preserved)
  *   *                                      → NotFound (404 page)
  */
@@ -85,23 +89,79 @@ const viewRoutes = [
   { index: true, element: <Navigate to="kanban" replace /> },
   {
     path: "kanban",
-    lazy: () =>
-      import("@/views/KanbanPage").then((m) => ({ Component: m.KanbanPage })),
+    children: [
+      {
+        index: true,
+        lazy: () =>
+          import("@/views/KanbanPage").then((m) => ({
+            Component: m.KanbanPage,
+          })),
+      },
+      {
+        path: "issues/:issueId",
+        lazy: () =>
+          import("@/views/KanbanPage").then((m) => ({
+            Component: m.KanbanPage,
+          })),
+      },
+    ],
   },
   {
     path: "table",
-    lazy: () =>
-      import("@/views/TablePage").then((m) => ({ Component: m.TablePage })),
+    children: [
+      {
+        index: true,
+        lazy: () =>
+          import("@/views/TablePage").then((m) => ({
+            Component: m.TablePage,
+          })),
+      },
+      {
+        path: "issues/:issueId",
+        lazy: () =>
+          import("@/views/TablePage").then((m) => ({
+            Component: m.TablePage,
+          })),
+      },
+    ],
   },
   {
     path: "graph",
-    lazy: () =>
-      import("@/views/GraphPage").then((m) => ({ Component: m.GraphPage })),
+    children: [
+      {
+        index: true,
+        lazy: () =>
+          import("@/views/GraphPage").then((m) => ({
+            Component: m.GraphPage,
+          })),
+      },
+      {
+        path: "issues/:issueId",
+        lazy: () =>
+          import("@/views/GraphPage").then((m) => ({
+            Component: m.GraphPage,
+          })),
+      },
+    ],
   },
   {
     path: "monitor",
-    lazy: () =>
-      import("@/views/MonitorPage").then((m) => ({ Component: m.MonitorPage })),
+    children: [
+      {
+        index: true,
+        lazy: () =>
+          import("@/views/MonitorPage").then((m) => ({
+            Component: m.MonitorPage,
+          })),
+      },
+      {
+        path: "issues/:issueId",
+        lazy: () =>
+          import("@/views/MonitorPage").then((m) => ({
+            Component: m.MonitorPage,
+          })),
+      },
+    ],
   },
   {
     path: "observability",

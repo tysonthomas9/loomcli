@@ -327,6 +327,12 @@ function App() {
   const { activePanel, pendingPanel, openPanel, closePanel, isOpen } =
     usePanelManager();
 
+  // Mirror of activePanel for reading the current panel inside effects
+  // without re-subscribing when the panel state itself changes — avoids
+  // the URL↔panel sync feedback loop.
+  const activePanelRef = useRef(activePanel);
+  activePanelRef.current = activePanel;
+
   // Derive backwards-compatible booleans from panel state.
   const isPanelOpen = activePanel?.type === "issue";
   const isAgentPanelOpen = activePanel?.type === "agent";
@@ -470,11 +476,40 @@ function App() {
     }
   }, [repoFilterParam]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Deep-link: auto-fetch issue from URL; handle back/forward via popstate → useViewState
+  // URL ↔ panel sync. Single source of truth: the URL drives panel state.
+  //
+  //   - URL has an issueId + view is panel-supporting → open (or swap) issue panel
+  //   - URL drops an issueId while issue panel is open → close panel (back/forward)
+  //   - URL has an issueId + view is "issue-detail"    → full-page, no panel (fetch only)
+  //
+  // Reads activePanel via ref so re-renders triggered by openPanel/closePanel
+  // don't re-fire this effect and cause feedback loops. Eager openPanel calls
+  // in click handlers are still safe because usePanelManager no-ops when the
+  // same panel is already active.
   useEffect(() => {
-    if (selectedIssueId) fetchIssue(selectedIssueId);
-    else if (activeView !== "issue-detail") clearIssue();
-  }, [selectedIssueId]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (selectedIssueId) {
+      fetchIssue(selectedIssueId);
+      if (activeView !== "issue-detail") {
+        openPanel({ type: "issue", id: selectedIssueId });
+      }
+      return;
+    }
+    // No issueId in URL. If an issue panel is still open, the URL change
+    // happened externally (browser back, popstate) — close the panel and
+    // delay issue cleanup until the close animation finishes. When the
+    // panel is already closed (handlePanelClose path), this branch is a no-op
+    // and the cleanup scheduled there runs normally.
+    if (
+      activeView !== "issue-detail" &&
+      activePanelRef.current?.type === "issue"
+    ) {
+      closePanel();
+      setTimeout(() => {
+        if (!mountedRef.current) return;
+        clearIssue();
+      }, 300);
+    }
+  }, [selectedIssueId, activeView]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Deep-link error: toast + navigate away when a deep-linked issue fails to load
   useEffect(() => {
@@ -528,7 +563,9 @@ function App() {
     filterActions.setSearch(undefined);
   }, [filterActions]);
 
-  // Handle issue click from SwimLaneBoard/IssueTable
+  // Handle issue click from SwimLaneBoard/IssueTable or IssueDetailPanel
+  // navigation. Eagerly opens the panel and fetches for snappiness; the
+  // follow-up URL-sync effect no-ops via usePanelManager's same-panel guard.
   const handleIssueClick = useCallback(
     (issue: Issue) => {
       if (activeView === "issue-detail") {
@@ -539,10 +576,23 @@ function App() {
         return;
       }
 
-      // From list/graph/monitor views — open panel overlay
-      // (mutual exclusivity + no-op guard handled by usePanelManager)
-      openPanel({ type: "issue", id: issue.id });
-      fetchIssue(issue.id);
+      const supportsPanel =
+        activeView === "kanban" ||
+        activeView === "table" ||
+        activeView === "graph" ||
+        activeView === "monitor";
+
+      if (supportsPanel) {
+        // Panel-supporting view — open overlay + sync URL.
+        openPanel({ type: "issue", id: issue.id });
+        fetchIssue(issue.id);
+        navigate(`/ws/${workspaceId}/${activeView}/issues/${issue.id}`);
+      } else {
+        // Panel isn't URL-addressable on this view (e.g. opened via the tree
+        // over terminal); route to the full-page detail for a deep-linkable URL.
+        navigate(`/ws/${workspaceId}/issues/${issue.id}`);
+        fetchIssue(issue.id);
+      }
     },
     [activeView, selectedIssueId, workspaceId, navigate, fetchIssue, openPanel],
   );
@@ -550,12 +600,17 @@ function App() {
   // Handle panel close
   const handlePanelClose = useCallback(() => {
     closePanel();
+    // Push the base-view URL (without issueId) so the URL reflects the
+    // closed-panel state and browser Back reopens the panel.
+    if (activeView !== "issue-detail") {
+      navigate(`/ws/${workspaceId}/${activeView}`);
+    }
     // Clear issue details after close animation completes
     setTimeout(() => {
       if (!mountedRef.current) return;
       clearIssue();
     }, 300);
-  }, [closePanel, clearIssue]);
+  }, [closePanel, clearIssue, navigate, workspaceId, activeView]);
 
   // Handle approve button click on review cards
   const handleApprove = useCallback(
@@ -630,15 +685,28 @@ function App() {
       const hadIssuePanel = isOpen("issue");
       // Mutual exclusivity + no-op guard handled by usePanelManager
       openPanel({ type: "agent", name: agentName });
-      // Clear stale issue data after close animation when swapping from issue panel
+      // When swapping from the issue panel, clear the issueId from the URL so
+      // the URL reflects the closed issue panel, then clean up stale issue
+      // data after the close animation.
       if (hadIssuePanel) {
+        if (activeView !== "issue-detail" && selectedIssueId) {
+          navigate(`/ws/${workspaceId}/${activeView}`);
+        }
         setTimeout(() => {
           if (!mountedRef.current) return;
           clearIssue();
         }, 300);
       }
     },
-    [openPanel, isOpen, clearIssue],
+    [
+      openPanel,
+      isOpen,
+      clearIssue,
+      navigate,
+      workspaceId,
+      activeView,
+      selectedIssueId,
+    ],
   );
 
   // Handle agent panel close
@@ -680,13 +748,29 @@ function App() {
     setPendingIssueContext(undefined);
   }, []);
 
-  // Handle tree issue select (wraps handleIssueClick with minimal Issue shape)
+  // Handle tree issue select (sidebar tree is visible across all views).
+  // Navigate to a panel-aware URL when the current view supports panel
+  // overlays; fall back to full-page detail otherwise so the URL stays
+  // deep-linkable.
   const handleTreeIssueSelect = useCallback(
     (issueId: string) => {
-      openPanel({ type: "issue", id: issueId });
-      fetchIssue(issueId);
+      const supportsPanel =
+        activeView === "kanban" ||
+        activeView === "table" ||
+        activeView === "graph" ||
+        activeView === "monitor";
+      if (supportsPanel) {
+        openPanel({ type: "issue", id: issueId });
+        fetchIssue(issueId);
+        navigate(`/ws/${workspaceId}/${activeView}/issues/${issueId}`);
+      } else {
+        // Non-panel views (terminal, settings, workspace, files,
+        // observability) and issue-detail route to the full-page view.
+        navigate(`/ws/${workspaceId}/issues/${issueId}`);
+        fetchIssue(issueId);
+      }
     },
-    [openPanel, fetchIssue],
+    [openPanel, fetchIssue, navigate, workspaceId, activeView],
   );
 
   const handleAgentNameConsumed = useCallback(() => {
@@ -730,14 +814,25 @@ function App() {
     [workspace, workspaceId, closeAllPanels, navigate],
   );
 
-  // Handle task click from agent panel (opens issue panel overlay)
+  // Handle task click from agent panel (opens issue panel overlay).
+  // usePanelManager closes the agent panel first via mutual exclusivity.
   const handleAgentTaskClick = useCallback(
     (taskId: string) => {
-      // Mutual exclusivity handled by usePanelManager (closes agent panel first)
-      openPanel({ type: "issue", id: taskId });
-      fetchIssue(taskId);
+      const supportsPanel =
+        activeView === "kanban" ||
+        activeView === "table" ||
+        activeView === "graph" ||
+        activeView === "monitor";
+      if (supportsPanel) {
+        openPanel({ type: "issue", id: taskId });
+        fetchIssue(taskId);
+        navigate(`/ws/${workspaceId}/${activeView}/issues/${taskId}`);
+      } else {
+        navigate(`/ws/${workspaceId}/issues/${taskId}`);
+        fetchIssue(taskId);
+      }
     },
-    [openPanel, fetchIssue],
+    [openPanel, fetchIssue, navigate, workspaceId, activeView],
   );
 
   // -----------------------------------------------------------------------
