@@ -103,9 +103,11 @@ export function EditableTitle({
     (e: KeyboardEvent<HTMLInputElement>) => {
       if (e.key === "Enter") {
         e.preventDefault();
+        e.stopPropagation();
         saveTitle();
       } else if (e.key === "Escape") {
         e.preventDefault();
+        e.stopPropagation();
         cancelEdit();
       }
     },

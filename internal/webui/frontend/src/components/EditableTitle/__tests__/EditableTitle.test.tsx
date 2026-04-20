@@ -138,6 +138,38 @@ describe("EditableTitle", () => {
       expect(screen.getByTestId("editable-title-display")).toBeInTheDocument();
     });
 
+    describe("Event propagation", () => {
+      it("Escape in edit mode does not propagate to parent", () => {
+        const parentKeyDown = vi.fn();
+        render(
+          <div onKeyDown={parentKeyDown} data-testid="parent">
+            <EditableTitle {...defaultProps} />
+          </div>,
+        );
+        fireEvent.click(screen.getByTestId("editable-title-display"));
+        const input = screen.getByTestId("editable-title-input");
+        fireEvent.keyDown(input, { key: "Escape" });
+        expect(parentKeyDown).not.toHaveBeenCalled();
+      });
+
+      it("Enter in edit mode does not propagate to parent", async () => {
+        const parentKeyDown = vi.fn();
+        const onSave = vi.fn().mockResolvedValue(undefined);
+        render(
+          <div onKeyDown={parentKeyDown} data-testid="parent">
+            <EditableTitle {...defaultProps} onSave={onSave} />
+          </div>,
+        );
+        fireEvent.click(screen.getByTestId("editable-title-display"));
+        const input = screen.getByTestId("editable-title-input");
+        fireEvent.change(input, { target: { value: "New Title" } });
+        await act(async () => {
+          fireEvent.keyDown(input, { key: "Enter" });
+        });
+        expect(parentKeyDown).not.toHaveBeenCalled();
+      });
+    });
+
     it("shows error for empty title", async () => {
       render(<EditableTitle {...defaultProps} />);
       fireEvent.click(screen.getByTestId("editable-title-display"));

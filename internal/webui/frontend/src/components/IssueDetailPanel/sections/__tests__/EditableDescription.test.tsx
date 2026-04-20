@@ -424,6 +424,36 @@ describe("EditableDescription", () => {
       expect(onSave).not.toHaveBeenCalled();
       expect(screen.getByTestId("description-textarea")).toBeInTheDocument();
     });
+
+    it("Escape in edit mode does not propagate to parent", () => {
+      const parentKeyDown = vi.fn();
+      render(
+        <div onKeyDown={parentKeyDown} data-testid="parent">
+          <EditableDescription {...defaultProps} />
+        </div>,
+      );
+      fireEvent.click(screen.getByTestId("description-edit-button"));
+      const textarea = screen.getByTestId("description-textarea");
+      fireEvent.keyDown(textarea, { key: "Escape" });
+      expect(parentKeyDown).not.toHaveBeenCalled();
+    });
+
+    it("Cmd+Enter in edit mode does not propagate to parent", async () => {
+      const parentKeyDown = vi.fn();
+      const onSave = vi.fn().mockResolvedValue(undefined);
+      render(
+        <div onKeyDown={parentKeyDown} data-testid="parent">
+          <EditableDescription {...defaultProps} onSave={onSave} />
+        </div>,
+      );
+      fireEvent.click(screen.getByTestId("description-edit-button"));
+      const textarea = screen.getByTestId("description-textarea");
+      fireEvent.change(textarea, { target: { value: "New description" } });
+      await act(async () => {
+        fireEvent.keyDown(textarea, { key: "Enter", metaKey: true });
+      });
+      expect(parentKeyDown).not.toHaveBeenCalled();
+    });
   });
 
   describe("Props sync", () => {
