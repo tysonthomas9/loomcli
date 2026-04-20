@@ -79,7 +79,7 @@ type PTYManager struct {
 	shell string   // absolute path to the login shell (e.g. /bin/bash)
 	argv  []string // default args when a session's argv is nil
 	env   []string // cached environment including TERM=xterm-256color
-	cwd   string   // initial working directory (HOME if set)
+	cwd   string   // initial working directory for spawned shells (required; no default)
 
 	max     int
 	counter atomic.Uint64
@@ -93,8 +93,15 @@ type PTYManager struct {
 
 // NewPTYManager constructs a manager. command is the default shell command
 // to execute (as `sh -c command`); if empty, the user's login shell is
-// started with `-l`. maxSessions <= 0 falls back to the default.
-func NewPTYManager(command string, maxSessions int) *PTYManager {
+// started with `-l`. maxSessions <= 0 falls back to the default. cwd is the
+// initial working directory for every PTY the manager spawns and is required:
+// an empty cwd is a programmer error and panics. There is no silent fallback
+// to $HOME or any other default — callers must supply a real directory
+// (typically a workspace.Path).
+func NewPTYManager(command string, maxSessions int, cwd string) *PTYManager {
+	if cwd == "" {
+		panic("terminal.NewPTYManager: cwd is required (pass workspace.Path or a concrete directory; no silent HOME fallback)")
+	}
 	if maxSessions <= 0 {
 		maxSessions = defaultPTYMaxSessions
 	}
@@ -109,11 +116,6 @@ func NewPTYManager(command string, maxSessions int) *PTYManager {
 		argv = []string{"-l"}
 	} else {
 		argv = []string{"-c", command}
-	}
-
-	cwd := os.Getenv("HOME")
-	if cwd == "" {
-		cwd = "/"
 	}
 
 	env := append(os.Environ(), termEnv)

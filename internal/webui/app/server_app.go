@@ -167,7 +167,14 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 
 	// Main web terminal manager: one fresh PTY per WebSocket connection, no
 	// tmux. Mirrors wterm/examples/local/server.ts on the Go side.
-	app.ptyMgr = terminal.NewPTYManager(config.TerminalCmd, config.MaxTerminalSessions)
+	//
+	// TODO(Step 3 of loomcli-4i00m): replace this call with
+	// terminal.NewMultiPTYManager and dispatch per-workspace. os.TempDir() is
+	// a build-time placeholder so this step compiles in isolation — a PTY
+	// spawned here would cd into /tmp, which is wrong but unreachable once
+	// Step 3 rewires handlers to the multi-manager (flat terminal routes
+	// already return 404, see TestSetupRoutes_FlatTerminalRoutesReturn404).
+	app.ptyMgr = terminal.NewPTYManager(config.TerminalCmd, config.MaxTerminalSessions, os.TempDir())
 	cleanups = append(cleanups, func() { _ = app.ptyMgr.Shutdown() })
 	logger.Info("pty manager initialized", "component", "terminal", "default_command", config.TerminalCmd)
 
