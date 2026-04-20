@@ -10,27 +10,183 @@ The loom WebUI server exposes a REST API for managing issues, dependencies, flee
 
 ## Authentication
 
-### Bearer Token
+### Operating Modes
 
-All protected endpoints require a bearer token via the `Authorization` header:
+The server runs in one of two authentication modes, determined at startup by whether `ExtAuthURL` is configured. The mode never changes at runtime — switching requires a server restart.
 
-```
-Authorization: Bearer <token>
-```
+- **Open mode** (no `ExtAuthURL`): auth middleware is a passthrough. All non-public routes are served without token validation. The SSE token exchange route (`/api/workspaces/{ws}/events/token`) is not registered in this mode. Terminal token exchange remains functional via its own token manager.
+- **OIDC mode** (`ExtAuthURL` set): auth middleware validates RS256 JWTs issued by the external BetterAuth service. Public keys are fetched from `<ExtAuthURL>/api/auth/jwks`. All non-public routes require a valid bearer JWT.
 
-For WebSocket and SSE connections (which cannot set custom headers from browsers), the token can be passed as a query parameter: `?token=<token>`.
+Clients discover the mode by calling [`GET /api/config`](#get-apiconfig) before any other request. This is the bootstrap endpoint and is always public.
+
+### JWT Validation (OIDC Mode)
+
+Each request carrying a bearer JWT is validated as follows:
+
+- **Algorithm**: `RS256` only. `alg:none`, HMAC, and any other algorithm are rejected — the signing method is checked by pointer identity to prevent algorithm confusion.
+- **Public key lookup**: the token's `kid` header selects a key from the JWKS cache. If `kid` is absent, every cached key is tried.
+- **Required claims**: `exp` (expiration), `iss` (must match configured issuer), `aud` (must match configured audience), and a non-empty `sub` (user identity). `iat` (issued-at) is validated if present but is not required.
+- **Clock skew**: 5 seconds of leeway on `exp` and `iat`.
+- **Token size**: rejected with 400 if the raw token exceeds 8192 bytes.
+- **Identity**: on success, `UserIdentity{UserID, Email, Name}` is derived from `sub`, `email`, and `name` claims and threaded through the request context for downstream handlers.
+
+**Error responses** (all use `{"error": "..."}`):
+
+| Status | Message | Condition |
+|--------|---------|-----------|
+| 400 | `malformed token` | Over 8192 bytes, or JWT structure unparseable |
+| 401 | `authentication required` | Bearer token missing |
+| 401 | `invalid or expired token` | Unknown kid, signature mismatch, expired, wrong issuer/audience |
+| 401 | `invalid token claims` | Missing or empty `sub` claim |
+
+#### JWKS Cache Behavior
+
+The JWKS cache fetches public keys from `<ExtAuthURL>/api/auth/jwks` and maintains them in memory:
+
+- **Background refresh**: every 5 minutes. Failures are logged and retained cache is kept.
+- **Initial fetch**: performed synchronously at startup. Failure is logged as a warning; the server starts anyway and may reject tokens until the first successful fetch.
+- **On-demand refresh**: triggered when a token presents an unknown `kid`. A 10-second cooldown prevents refresh stampedes across concurrent requests; a `singleflight` group coalesces concurrent refreshes.
+- **Negative cache**: still-unknown `kid` values are cached for 30 seconds to prevent repeat fetch attempts. Cleared on the next successful refresh.
+- **Max staleness**: 24 hours. After 24h without a successful refresh, a forced refresh is attempted; if it also fails, all tokens are rejected until refresh succeeds.
+- **Response size limit**: 64 KB. Oversized responses are rejected and the existing cache is retained.
+- **Key count limit**: 10. Extra keys beyond the first 10 are skipped with a warning log.
+- **Key strength**: RSA keys smaller than 2048 bits are skipped with a warning log.
+- **Empty responses**: an empty `keys` array retains the existing cache (defense against a misconfigured auth service returning no keys).
+- **HTTP timeout**: 10 seconds per fetch.
+
+### Middleware Chain
+
+Each request passes through this middleware chain in order (server.go:243-259):
+
+1. **Recover** — catches panics and returns 500.
+2. **RequestLog** — structured request/response logging.
+3. **Prometheus metrics (outer)** — records request duration and status.
+4. **RateLimit** — per-IP request-rate limiting.
+5. **SecurityHeaders** — `X-Content-Type-Options`, `Referrer-Policy`, CSP, HSTS when enabled.
+6. **Auth** — JWT validation (passthrough in open mode).
+7. **CORS** — preflight handling and `Access-Control-*` headers.
+8. **Route capture (inner)** — records route pattern for metrics label.
+
+`OPTIONS` requests skip JWT validation (CORS preflights). Public routes (see table below) also skip validation regardless of method.
+
+### One-Time Token Exchange Pattern
+
+WebSocket and SSE connections cannot set the `Authorization` header from a browser, so the server uses a short-lived opaque token carried in a query parameter. The pattern is the same for SSE and terminal connections; only the lifetime and scope differ.
+
+1. The client, authenticated with a bearer JWT, calls a token-exchange endpoint scoped to the workspace:
+   - [`GET /api/workspaces/{ws}/events/token`](#get-apiworkspaceswseventstoken) for SSE (30-second lifetime, workspace-bound).
+   - `GET /api/workspaces/{ws}/terminal/token` for terminal sessions (60-second lifetime, session-bound — documented in the Terminal Session Lifecycle section).
+2. The server returns `{"token": "<opaque-token>"}`. The token encodes the user ID, workspace (or session) binding, an expiration timestamp, and a single-use nonce.
+3. The client opens the WebSocket/SSE connection with `?token=<opaque-token>`. The server validates the token, marks the nonce consumed, and upgrades the connection.
+
+**Token format**: `base64url(<payload JSON>).base64url(<HMAC-SHA256 signature>)`. The SSE payload is `{"uid": "<user-id>", "wid": "<workspace-id>", "exp": <unix-seconds>, "nonce": "<hex>"}`.
+
+**Validation rules**:
+
+- HMAC signature must match the server's secret (freshly generated on every startup — restart invalidates all outstanding tokens by design).
+- `exp` must be in the future.
+- `uid` must be non-empty.
+- `wid` must equal the workspace ID of the endpoint the token is presented to (cross-workspace replay is rejected before nonce consumption).
+- `nonce` must not have been used before. Once accepted, the nonce is remembered for 2 minutes, then cleaned up by a 5-minute background sweep.
 
 ### Public Routes
 
-These routes do not require bearer token authentication:
+These routes bypass JWT validation. The list matches `isPublicRoute` exactly. Workspace-scoped paths (`/api/workspaces/{ws}/...`) are matched after `isPublicRoute` strips the workspace segment, so both the workspace-scoped form and the bare form resolve to the same public-route rule. The table below shows paths as clients send them.
 
-- `GET /health`
-- `GET /api/health`
-- `GET /api/workspaces/{ws}/terminal/ws` (uses its own one-time token)
-- `POST /api/client-errors` (errors may occur before auth bootstrap)
-- `POST /api/csp-report` (browsers send CSP reports automatically without auth)
-- `POST/GET /api/workspaces/{ws}/fleet/*` (use fleet-specific auth)
-- Frontend static files (non-`/api/` paths)
+| Method | Path | Reason |
+|--------|------|--------|
+| GET | `/health` | Load balancer health check |
+| GET | `/api/health` | Detailed health check |
+| GET | `/metrics` | Prometheus scrape endpoint |
+| GET | `/api/config` | Auth discovery bootstrap — clients must reach this before acquiring a token |
+| GET | `/api/workspaces/{ws}/events` | SSE endpoint — authenticates via one-time token (query param) |
+| GET | `/api/workspaces/{ws}/terminal/ws` | Terminal WebSocket — authenticates via one-time token |
+| GET | `/api/workspaces/{ws}/agents/{name}/terminal/ws` | Agent terminal WebSocket — authenticates via one-time token |
+| ANY | `/api/auth/*` | Reverse-proxied to the external BetterAuth service, which has its own auth |
+| ANY | `/api/fleet/*` and `/api/workspaces/{ws}/fleet/*` | Fleet endpoints use API-key + fleet JWT auth |
+| ANY | `/api/internal/workers/*` | Worker API uses `LOOM_WORKER_TOKEN` pre-shared secret |
+| POST | `/api/client-errors` | Error reporting must work before auth bootstrap completes |
+| POST | `/api/csp-report` | Browsers send CSP reports automatically without credentials |
+| POST | `/api/sessions/notify` | Uses a pre-shared bearer token (not a JWT) |
+| GET | Non-`/api/` paths | Frontend static files and SPA routes |
+
+All other routes, including `OPTIONS`, skip JWT validation only when listed above or when the method is `OPTIONS` (for CORS preflight).
+
+### `GET /api/config`
+
+Auth discovery endpoint. Used by the frontend and CLI to learn whether authentication is required before attempting any other call.
+
+- **Auth:** None (public route).
+- **Rate limit:** per-IP token bucket, 5 requests/second with a burst of 10. Responses carry `Cache-Control: no-store` to prevent a poisoned cached response from downgrading future clients.
+- **Response:** `200 OK`
+
+```json
+{"mode": "open"}
+```
+
+Or, in OIDC mode:
+
+```json
+{"mode": "oidc"}
+```
+
+The `mode` field is always `"open"` or `"oidc"` — no other values are valid. An optional `auth_url` field exists in the response struct but is always empty in current releases (the frontend uses same-origin `/api/auth/*` via the proxy), so it is always omitted from the JSON.
+
+**Error responses:**
+
+| Status | Body | Condition |
+|--------|------|-----------|
+| 405 | Go default | Non-GET method (handled by the mux, not the handler) |
+| 429 | `{"error": "rate limit exceeded", "retry_after": <int>}` | Per-IP rate limit exceeded. A `Retry-After` header carries the same integer (seconds). The value is `ceil(1 / rate_per_sec)` — with the default rate of 5/s it is always `1`, not a dynamic estimate of actual wait time. |
+
+### Auth Proxy: `/api/auth/*`
+
+In OIDC mode the server mounts a reverse proxy at `/api/auth/` that forwards to the external BetterAuth service (`ExtAuthURL`). This makes auth cookies first-party to the frontend origin, avoiding cross-site cookie restrictions (SameSite, `__Secure-`/`__Host-` prefixes, ITP) that break over plain HTTP or from different origins.
+
+- **Auth:** None at the proxy layer — BetterAuth runs its own authentication flows. Public route.
+- **Methods:** all methods and subpaths are forwarded (`/api/auth/sign-in`, `/api/auth/callback/...`, `/api/auth/get-session`, `/api/auth/jwks`, etc.).
+- **Request:** `Host` header is rewritten to the upstream target before forwarding. Path, query, method, body, and remaining headers are forwarded unchanged by `httputil.NewSingleHostReverseProxy`.
+- **Cookie rewriting:** every `Set-Cookie` from the upstream is post-processed before returning to the client:
+  - `Domain` attribute is stripped so cookies are scoped to the frontend origin.
+  - `SameSite` is replaced with (or appended as) `Lax`.
+  - `Partitioned` flag is stripped (not needed for first-party cookies).
+  - `Secure` flag is added when the frontend request arrived over TLS (`req.TLS != nil` or `X-Forwarded-Proto: https`) and stripped otherwise.
+  - Cookies containing `\r` or `\n` are dropped entirely as defense against header injection.
+- **Timeouts:** TLS handshake 5s, response headers 30s, idle conn 30s.
+- **Metrics:** all auth proxy requests are bucketed under the label `"/api/auth/"` to avoid metric cardinality explosion from opaque path segments (verify-email tokens, OAuth state, etc.).
+
+**Error responses:**
+
+| Status | Body | Condition |
+|--------|------|-----------|
+| 502 | `{"error":"auth service unavailable"}` (plain-text `http.Error`, not the standard envelope) | Upstream unreachable, TLS handshake failure, or response header timeout |
+| 404 | Standard `{"error":"not found"}` | In open mode or when `ExtAuthURL` is invalid — the proxy is not registered and the path falls through to the catch-all |
+
+### `GET /api/workspaces/{ws}/events/token`
+
+Exchanges a validated JWT for a one-time opaque token used to authenticate the SSE connection at `GET /api/workspaces/{ws}/events`. Registered only in OIDC mode — in open mode the route is not mounted and requests return 404 from the catch-all.
+
+- **Auth:** Required (bearer JWT). Must pass full JWT validation before reaching this handler.
+- **Path params:** `{ws}` — workspace ID (validated by WorkspaceMiddleware: 400 if empty, 404 if unknown).
+- **Token lifetime:** 30 seconds, single-use, bound to the workspace in the path.
+- **Response headers:** `Cache-Control: no-store`.
+- **Response:** `200 OK`
+
+```json
+{"token": "<base64url-payload>.<base64url-signature>"}
+```
+
+The embedded payload is `{"uid": "<user-id from JWT sub>", "wid": "<ws>", "exp": <now+30s>, "nonce": "<hex-16-bytes>"}`. The token is presented to the SSE endpoint via the `?token=` query parameter. See [One-Time Token Exchange Pattern](#one-time-token-exchange-pattern) for validation rules.
+
+**Error responses:**
+
+| Status | Body | Condition |
+|--------|------|-----------|
+| 400 | `{"error": "workspace ID is required"}` | Empty `{ws}` path segment (from WorkspaceMiddleware) |
+| 401 | `{"error": "authentication required"}` | No `UserIdentity` in context, or `UserID` is empty |
+| 404 | `{"error": "workspace not found: <ws>"}` | Workspace does not exist (from WorkspaceMiddleware) |
+| 404 | `{"error":"not found"}` | Endpoint not mounted (open mode) |
+| 500 | `{"error": "failed to generate token"}` | CSPRNG failure generating the nonce or secret |
 
 ## Response Format
 
