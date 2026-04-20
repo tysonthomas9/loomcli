@@ -99,12 +99,25 @@ function StoreWiring({
     issueStore.getState().setReconnectAttempts(eventContext.reconnectAttempts);
   }, [issueStore, eventContext.reconnectAttempts]);
 
-  // 4. Reset stores on workspace change + start agent polling.
+  // 4. Reset stores on workspace *change* + start agent polling.
   // Issue fetching is driven by App.tsx (mode-aware), not here.
+  // Skip reset on the initial mount: App.tsx's sibling useEffect fires its
+  // fetchIssues(...) call before this parent effect runs (children-first
+  // ordering), and reset() would abort that in-flight fetch via its
+  // activeController.abort(). The aborted fetch hits the AbortError branch,
+  // clears isLoading, and doesn't schedule a retry — leaving the kanban
+  // empty until the user switches tabs. Only reset on actual transitions.
+  const prevWorkspaceIdRef = useRef<string | null>(null);
   useEffect(() => {
-    issueStore.getState().reset();
+    if (
+      prevWorkspaceIdRef.current !== null &&
+      prevWorkspaceIdRef.current !== workspaceId
+    ) {
+      issueStore.getState().reset();
+      agentStore.getState().reset();
+    }
+    prevWorkspaceIdRef.current = workspaceId;
 
-    agentStore.getState().reset();
     agentStore.getState().startPolling({ pollInterval: 5000 });
 
     return () => {
