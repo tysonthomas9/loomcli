@@ -251,16 +251,17 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	cleanups = append(cleanups, func() { _ = app.registry.Close() })
 
 	registeredHooks := appinfra.RegisterHooks(app.registry, appinfra.HookConfig{
-		MultiPool: app.multiPool,
-		PoolSize:  config.PoolSize,
-		MultiSub:  app.multiSub,
-		TermMgr:   app.agentTmuxMgr,
-		FleetReg:  app.fleetRegistry,
-		FleetURL:  config.FleetClientURL,
-		FleetWS:   config.FleetClientWorkspace,
-		FleetKey:  config.FleetClientAPIKey,
-		FleetMode: config.FleetMode,
-		Logger:    config.Logger,
+		MultiPool:   app.multiPool,
+		PoolSize:    config.PoolSize,
+		MultiSub:    app.multiSub,
+		TermMgr:     app.agentTmuxMgr,
+		PTYMultiMgr: app.ptyMgr,
+		FleetReg:    app.fleetRegistry,
+		FleetURL:    config.FleetClientURL,
+		FleetWS:     config.FleetClientWorkspace,
+		FleetKey:    config.FleetClientAPIKey,
+		FleetMode:   config.FleetMode,
+		Logger:      config.Logger,
 	})
 
 	// Register the initial workspace.
