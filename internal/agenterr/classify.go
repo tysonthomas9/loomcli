@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"time"
 )
 
@@ -16,21 +18,73 @@ type classifyResult struct {
 	RetryAfter time.Duration
 }
 
+// errorPattern defines a single regex→ErrorClass mapping used by all backends.
+type errorPattern struct {
+	re    *regexp.Regexp
+	class ErrorClass
+	msg   string
+}
+
+// retryAfterRe extracts a Retry-After header value from log/output text.
+// Shared across all backends — the format is provider-independent.
+var retryAfterRe = regexp.MustCompile(`(?i)retry.?after[:\s]+(\d+)`)
+
+// classifyWithPatterns runs the shared classification logic against a pattern
+// table. Every per-backend classifier delegates to this function.
+func classifyWithPatterns(text string, patterns []errorPattern) *classifyResult {
+	if text == "" {
+		return nil
+	}
+	for _, p := range patterns {
+		if p.re.MatchString(text) {
+			r := &classifyResult{
+				Class:   p.class,
+				Message: p.msg,
+			}
+			if p.class == RateLimited {
+				if m := retryAfterRe.FindStringSubmatch(text); len(m) > 1 {
+					if secs, err := strconv.Atoi(m[1]); err == nil {
+						r.RetryAfter = time.Duration(secs) * time.Second
+					}
+				}
+			}
+			return r
+		}
+	}
+	return nil
+}
+
 // ClassifyFromLog reads the tail of an agent log file and classifies the error.
 // It never returns nil — an Unknown classification is returned if nothing matches.
 func ClassifyFromLog(logPath string, exitCode int, backend string) *AgentError {
-	now := time.Now()
-
 	logTail, _ := readLogTail(logPath, 100)
+	return classifyFromText(logTail, exitCode, backend)
+}
+
+// ClassifyFromOutput classifies an error from raw output text (e.g. captured
+// stream-json lines) instead of reading from a log file. Same classification
+// logic as ClassifyFromLog. Never returns nil.
+func ClassifyFromOutput(output string, exitCode int, backend string) *AgentError {
+	return classifyFromText(output, exitCode, backend)
+}
+
+// classifyFromText is the shared classification implementation used by both
+// ClassifyFromLog and ClassifyFromOutput.
+func classifyFromText(text string, exitCode int, backend string) *AgentError {
+	now := time.Now()
 
 	var result *classifyResult
 	switch backend {
 	case "claude":
-		result = classifyClaude(logTail)
+		result = classifyClaude(text)
 	case "codex":
-		result = classifyCodex(logTail)
+		result = classifyCodex(text)
+	case "cursor":
+		result = classifyCursor(text)
+	case "gemini":
+		result = classifyGemini(text)
 	case "opencode":
-		result = classifyOpenCode(logTail)
+		result = classifyOpenCode(text)
 	}
 
 	if result == nil {
@@ -45,7 +99,7 @@ func ClassifyFromLog(logPath string, exitCode int, backend string) *AgentError {
 		Class:      result.Class,
 		ExitCode:   exitCode,
 		Message:    result.Message,
-		RawOutput:  logTail,
+		RawOutput:  text,
 		Backend:    backend,
 		RetryAfter: result.RetryAfter,
 		Timestamp:  now,

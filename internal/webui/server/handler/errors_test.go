@@ -96,6 +96,12 @@ func TestHandleServiceError_AllKinds(t *testing.T) {
 			wantStatus: http.StatusNotImplemented,
 			wantMsg:    "coming soon",
 		},
+		{
+			name:       "KindStarting",
+			err:        service.ErrStarting("workspace is loading"),
+			wantStatus: http.StatusServiceUnavailable,
+			wantMsg:    "workspace is loading",
+		},
 	}
 
 	for _, tt := range tests {
@@ -213,6 +219,83 @@ func TestHandleServiceError_UnknownKind(t *testing.T) {
 	}
 }
 
+func TestHandleServiceError_KindStarting(t *testing.T) {
+	tests := []struct {
+		name           string
+		err            error
+		wantStatus     int
+		wantRetryAfter string
+		wantMsg        string
+	}{
+		{
+			name:           "KindStarting returns 503 with Retry-After header",
+			err:            service.ErrStarting("workspace is loading"),
+			wantStatus:     http.StatusServiceUnavailable,
+			wantRetryAfter: "5",
+			wantMsg:        "workspace is loading",
+		},
+		{
+			name:           "KindUnavailable does NOT set Retry-After header",
+			err:            service.ErrUnavailable("service down"),
+			wantStatus:     http.StatusServiceUnavailable,
+			wantRetryAfter: "",
+			wantMsg:        "service down",
+		},
+		{
+			name:           "KindTimeout does NOT set Retry-After header",
+			err:            service.ErrTimeout("took too long"),
+			wantStatus:     http.StatusGatewayTimeout,
+			wantRetryAfter: "",
+			wantMsg:        "took too long",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			HandleServiceError(w, tt.err)
+
+			resp := w.Result()
+			defer resp.Body.Close()
+
+			if resp.StatusCode != tt.wantStatus {
+				t.Errorf("expected status %d, got %d", tt.wantStatus, resp.StatusCode)
+			}
+
+			gotRetryAfter := resp.Header.Get("Retry-After")
+			if gotRetryAfter != tt.wantRetryAfter {
+				t.Errorf("Retry-After header = %q, want %q", gotRetryAfter, tt.wantRetryAfter)
+			}
+
+			var body map[string]string
+			if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+				t.Fatalf("failed to decode response: %v", err)
+			}
+			if body["error"] != tt.wantMsg {
+				t.Errorf("expected error message %q, got %q", tt.wantMsg, body["error"])
+			}
+		})
+	}
+}
+
+func TestHandleServiceError_KindStarting_InAllKindsTable(t *testing.T) {
+	// Verify KindStarting is present and correct in the AllKinds table test above
+	w := httptest.NewRecorder()
+	HandleServiceError(w, service.ErrStarting("loading"))
+
+	resp := w.Result()
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("expected 503 for KindStarting, got %d", resp.StatusCode)
+	}
+
+	retryAfter := resp.Header.Get("Retry-After")
+	if retryAfter != "5" {
+		t.Errorf("expected Retry-After=5, got %q", retryAfter)
+	}
+}
+
 func TestStatusForKind(t *testing.T) {
 	tests := []struct {
 		kind service.ErrorKind
@@ -231,6 +314,7 @@ func TestStatusForKind(t *testing.T) {
 		{service.KindRateLimited, http.StatusTooManyRequests},
 		{service.KindBadGateway, http.StatusBadGateway},
 		{service.KindNotImplemented, http.StatusNotImplemented},
+		{service.KindStarting, http.StatusServiceUnavailable},
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.kind), func(t *testing.T) {
@@ -249,7 +333,7 @@ func TestStatusForKind_UnknownKind(t *testing.T) {
 }
 
 func TestKindToStatus_Completeness(t *testing.T) {
-	// All 13 ErrorKind constants defined in service/errors.go.
+	// All 14 ErrorKind constants defined in service/errors.go.
 	allKinds := []service.ErrorKind{
 		service.KindNotFound,
 		service.KindValidation,
@@ -264,6 +348,7 @@ func TestKindToStatus_Completeness(t *testing.T) {
 		service.KindRateLimited,
 		service.KindBadGateway,
 		service.KindNotImplemented,
+		service.KindStarting,
 	}
 
 	for _, kind := range allKinds {

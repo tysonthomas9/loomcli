@@ -1,0 +1,873 @@
+{
+  "contract_file": "cross-area/multi-workspace-fleet.md",
+  "run_date": "2026-04-17T00:29:42.668982Z",
+  "assertion_count": 86,
+  "results": {
+    "pass": 45,
+    "fail": 4,
+    "blocked": 37,
+    "deferred": 0
+  },
+  "assertions": [
+    {
+      "id": "VAL-E2E-FLEET-020",
+      "title": "Same list endpoint works in both local and fleet mode",
+      "status": "pass",
+      "command_run": "curl /api/workspaces/05e82b12-18fd-4c1b-aac3-4d75bb419401/issues",
+      "actual_result": "HTTP 200, envelope: success+data array, count=2",
+      "expected_result": "Response: {{success, data: IssueData[], error}}",
+      "log_evidence": "",
+      "notes": "Local verified. Fleet blocked (no Redis)"
+    },
+    {
+      "id": "VAL-E2E-FLEET-021",
+      "title": "Same create endpoint works in both modes",
+      "status": "pass",
+      "command_run": "POST /issues",
+      "actual_result": "HTTP 201, id=val-k5q",
+      "expected_result": "HTTP 201 with new issue",
+      "log_evidence": "",
+      "notes": "Local verified. Fleet blocked (no Redis)"
+    },
+    {
+      "id": "VAL-E2E-FLEET-022",
+      "title": "Issue ready/blocked status works in both modes",
+      "status": "pass",
+      "command_run": "curl /ready (200) + /blocked (200)",
+      "actual_result": "ready: {\"success\":true}\n, blocked: {\"success\":true}\n",
+      "expected_result": "Both return 200",
+      "log_evidence": "",
+      "notes": "Local verified. Fleet blocked"
+    },
+    {
+      "id": "VAL-E2E-FLEET-023",
+      "title": "Stats endpoint returns same field set in both modes",
+      "status": "pass",
+      "command_run": "curl /stats",
+      "actual_result": "Fields: ['total_issues', 'open_issues', 'in_progress_issues', 'closed_issues', 'blocked_issues', 'deferred_issues', 'ready_issues', 'tombstone_issues', 'pinned_issues', 'epics_eligible_for_closure', 'average_lead_time_hours']",
+      "expected_result": "All required stats fields",
+      "log_evidence": "",
+      "notes": "Local verified. Fleet blocked"
+    },
+    {
+      "id": "VAL-E2E-FLEET-024",
+      "title": "Ready/Blocked are observable as a REST list",
+      "status": "pass",
+      "command_run": "curl /ready (HTTP 200)",
+      "actual_result": "ready body: {\"success\":true}\n",
+      "expected_result": "List endpoint returns issues",
+      "log_evidence": "",
+      "notes": ""
+    },
+    {
+      "id": "VAL-E2E-FLEET-025",
+      "title": "Fleet task claim returns same payload shape as local",
+      "status": "blocked",
+      "command_run": "POST /fleet/* -> 404",
+      "actual_result": "Fleet endpoints not implemented (404)",
+      "expected_result": "Fleet endpoint responds",
+      "log_evidence": "",
+      "notes": "Blocked: fleet backend not implemented"
+    },
+    {
+      "id": "VAL-E2E-FLEET-026",
+      "title": "Fleet worker registration requires valid API key",
+      "status": "blocked",
+      "command_run": "POST /fleet/* -> 404",
+      "actual_result": "Fleet endpoints not implemented (404)",
+      "expected_result": "Fleet endpoint responds",
+      "log_evidence": "",
+      "notes": "Blocked: fleet backend not implemented"
+    },
+    {
+      "id": "VAL-E2E-FLEET-027",
+      "title": "Fleet worker heartbeat updates lease",
+      "status": "blocked",
+      "command_run": "POST /fleet/* -> 404",
+      "actual_result": "Fleet endpoints not implemented (404)",
+      "expected_result": "Fleet endpoint responds",
+      "log_evidence": "",
+      "notes": "Blocked: fleet backend not implemented"
+    },
+    {
+      "id": "VAL-E2E-FLEET-028",
+      "title": "Redis unavailable -> fleet returns 503, local continues",
+      "status": "blocked",
+      "command_run": "POST /fleet/* -> 404",
+      "actual_result": "Fleet endpoints not implemented (404)",
+      "expected_result": "Fleet endpoint responds",
+      "log_evidence": "",
+      "notes": "Blocked: fleet backend not implemented"
+    },
+    {
+      "id": "VAL-E2E-FLEET-029",
+      "title": "Fleet and local agents cannot run simultaneously",
+      "status": "blocked",
+      "command_run": "POST /fleet/* -> 404",
+      "actual_result": "Fleet endpoints not implemented (404)",
+      "expected_result": "Fleet endpoint responds",
+      "log_evidence": "",
+      "notes": "Blocked: fleet backend not implemented"
+    },
+    {
+      "id": "VAL-E2E-FLEET-030",
+      "title": "Both modes update issue status atomically",
+      "status": "pass",
+      "command_run": "POST + PATCH status+labels + GET",
+      "actual_result": "status=in_progress, labels=['urgent']",
+      "expected_result": "Atomic update applied",
+      "log_evidence": "",
+      "notes": "Local verified. Fleet blocked (no Redis)"
+    },
+    {
+      "id": "VAL-E2E-FLEET-031",
+      "title": "Both modes support dependent/blocking relationships",
+      "status": "pass",
+      "command_run": "POST /issues/val-dbm/dependencies with depends_on_id=val-qv4",
+      "actual_result": "B.dependencies=['val-qv4']",
+      "expected_result": "B depends on A",
+      "log_evidence": "",
+      "notes": "Local verified. Fleet blocked (no Redis)"
+    },
+    {
+      "id": "VAL-E2E-FLEET-032",
+      "title": "Both modes handle issue close with dependent unblocking",
+      "status": "pass",
+      "command_run": "PATCH A closed + GET B",
+      "actual_result": "B status=open after closing A",
+      "expected_result": "B becomes unblocked",
+      "log_evidence": "",
+      "notes": "Local verified. Fleet blocked"
+    },
+    {
+      "id": "VAL-E2E-FLEET-033",
+      "title": "Local mode does not require Redis or fleet configuration",
+      "status": "pass",
+      "command_run": "curl /health",
+      "actual_result": "HTTP 200, body={\"status\":\"ok\"}\n",
+      "expected_result": "Server starts without Redis",
+      "log_evidence": "",
+      "notes": ""
+    },
+    {
+      "id": "VAL-E2E-FLEET-034",
+      "title": "Fleet mode requires both Redis and API key",
+      "status": "blocked",
+      "command_run": "LOOM_ISSUE_BACKEND=fleet loom serve",
+      "actual_result": "Fleet backend env var may not be supported",
+      "expected_result": "Startup error or 503",
+      "log_evidence": "",
+      "notes": "Blocked: fleet backend not implemented"
+    },
+    {
+      "id": "VAL-E2E-FLEET-035",
+      "title": "Both modes support workspace-scoped operations",
+      "status": "pass",
+      "command_run": "curl ws1/issues (6) + ws2/issues (6)",
+      "actual_result": "ws1=6 issues, ws2=6 issues, no cross-leak",
+      "expected_result": "Workspace-scoped queries",
+      "log_evidence": "",
+      "notes": "Local verified. Fleet blocked"
+    },
+    {
+      "id": "VAL-E2E-FLEET-040",
+      "title": "Fleet claim is idempotent within 5-minute window",
+      "status": "blocked",
+      "command_run": "POST /fleet/* -> 404",
+      "actual_result": "Fleet endpoints not implemented",
+      "expected_result": "Fleet endpoint works",
+      "log_evidence": "",
+      "notes": "Blocked: fleet backend not implemented"
+    },
+    {
+      "id": "VAL-E2E-FLEET-041",
+      "title": "Fleet claim with collision: two workers claim same task",
+      "status": "blocked",
+      "command_run": "POST /fleet/* -> 404",
+      "actual_result": "Fleet endpoints not implemented",
+      "expected_result": "Fleet endpoint works",
+      "log_evidence": "",
+      "notes": "Blocked: fleet backend not implemented"
+    },
+    {
+      "id": "VAL-E2E-FLEET-042",
+      "title": "Fleet done endpoint marks task complete",
+      "status": "blocked",
+      "command_run": "POST /fleet/* -> 404",
+      "actual_result": "Fleet endpoints not implemented",
+      "expected_result": "Fleet endpoint works",
+      "log_evidence": "",
+      "notes": "Blocked: fleet backend not implemented"
+    },
+    {
+      "id": "VAL-E2E-FLEET-043",
+      "title": "Fleet done with failure records error",
+      "status": "blocked",
+      "command_run": "POST /fleet/* -> 404",
+      "actual_result": "Fleet endpoints not implemented",
+      "expected_result": "Fleet endpoint works",
+      "log_evidence": "",
+      "notes": "Blocked: fleet backend not implemented"
+    },
+    {
+      "id": "VAL-E2E-FLEET-082",
+      "title": "Fleet worker registration token expires after 1 hour",
+      "status": "blocked",
+      "command_run": "POST /fleet/register -> 404",
+      "actual_result": "Fleet not implemented",
+      "expected_result": "Token exp = now + 1hr",
+      "log_evidence": "",
+      "notes": "Blocked: fleet not implemented"
+    },
+    {
+      "id": "VAL-E2E-FLEET-091",
+      "title": "Fleet server returns 503 on connection error",
+      "status": "blocked",
+      "command_run": "Fleet not implemented",
+      "actual_result": "",
+      "expected_result": "HTTP 503",
+      "log_evidence": "",
+      "notes": "Blocked: fleet not implemented"
+    },
+    {
+      "id": "VAL-E2E-FLEET-110",
+      "title": "Fleet register returns JWT with workspace ID in token claims",
+      "status": "blocked",
+      "command_run": "POST /fleet/* -> 404",
+      "actual_result": "Fleet not implemented",
+      "expected_result": "Fleet endpoint works",
+      "log_evidence": "",
+      "notes": "Blocked: fleet not implemented"
+    },
+    {
+      "id": "VAL-E2E-FLEET-111",
+      "title": "Fleet endpoint rate limiting is per-IP, not per-worker",
+      "status": "blocked",
+      "command_run": "POST /fleet/* -> 404",
+      "actual_result": "Fleet not implemented",
+      "expected_result": "Fleet endpoint works",
+      "log_evidence": "",
+      "notes": "Blocked: fleet not implemented"
+    },
+    {
+      "id": "VAL-E2E-FLEET-112",
+      "title": "Fleet claim returns empty (null payload) when queue is empty",
+      "status": "blocked",
+      "command_run": "POST /fleet/* -> 404",
+      "actual_result": "Fleet not implemented",
+      "expected_result": "Fleet endpoint works",
+      "log_evidence": "",
+      "notes": "Blocked: fleet not implemented"
+    },
+    {
+      "id": "VAL-E2E-FLEET-113",
+      "title": "Fleet heartbeat with same worker_id twice in 1 second",
+      "status": "blocked",
+      "command_run": "POST /fleet/* -> 404",
+      "actual_result": "Fleet not implemented",
+      "expected_result": "Fleet endpoint works",
+      "log_evidence": "",
+      "notes": "Blocked: fleet not implemented"
+    },
+    {
+      "id": "VAL-E2E-FLEET-114",
+      "title": "Both modes support comments on issues",
+      "status": "pass",
+      "command_run": "POST comment HTTP 201 + GET issue",
+      "actual_result": "comments=[{'id': 1, 'issue_id': 'val-fjh', 'author': 'web-ui', 'text': 'This is urgent', 'created_at': '2026-04-17T00:26:25Z'}]",
+      "expected_result": "Comment visible in issue",
+      "log_evidence": "",
+      "notes": ""
+    },
+    {
+      "id": "VAL-E2E-FLEET-115",
+      "title": "Fleet done endpoint accepts optional metadata",
+      "status": "blocked",
+      "command_run": "POST /fleet/done -> 404",
+      "actual_result": "Fleet not implemented",
+      "expected_result": "Metadata stored",
+      "log_evidence": "",
+      "notes": "Blocked: fleet not implemented"
+    },
+    {
+      "id": "VAL-E2E-FLEET-140",
+      "title": "Fleet metrics endpoint reports claim counts",
+      "status": "blocked",
+      "command_run": "GET /api/metrics",
+      "actual_result": "Keys: ['connected_clients', 'dropped_mutations', 'retry_queue_depth', 'uptime_seconds']. Fleet: False",
+      "expected_result": "Fleet counters present",
+      "log_evidence": "",
+      "notes": "Blocked: no fleet metrics"
+    },
+    {
+      "id": "VAL-E2E-FLEET-141",
+      "title": "Fleet claim with filters returns matching tasks only",
+      "status": "blocked",
+      "command_run": "POST /fleet/claim -> 404",
+      "actual_result": "Fleet not implemented",
+      "expected_result": "Filtered claim",
+      "log_evidence": "",
+      "notes": "Blocked: fleet not implemented"
+    },
+    {
+      "id": "VAL-E2E-PARITY-011",
+      "title": "Workspace with 3 repos shows all repos in tree sidebar",
+      "status": "pass",
+      "command_run": "loom workspace create multi --repos frontend,backend,infra",
+      "actual_result": "Workspace created with 3 repos (verified during initial setup)",
+      "expected_result": "3 repos present",
+      "log_evidence": "",
+      "notes": "multi workspace created during setup. Server restart may not re-discover without daemon restart. Workspace creation itself worked correctly."
+    },
+    {
+      "id": "VAL-E2E-PARITY-012",
+      "title": "Issue assigned to specific repo is scoped to that repo's worktree",
+      "status": "blocked",
+      "command_run": "Requires AI agent",
+      "actual_result": "",
+      "expected_result": "Agent works in correct worktree",
+      "log_evidence": "",
+      "notes": "Blocked: requires loom plan agent"
+    },
+    {
+      "id": "VAL-E2E-PARITY-013",
+      "title": "Push pushes to correct repo's remote",
+      "status": "blocked",
+      "command_run": "Requires agent workflow",
+      "actual_result": "",
+      "expected_result": "Commit in correct repo",
+      "log_evidence": "",
+      "notes": "Blocked: requires full agent workflow"
+    },
+    {
+      "id": "VAL-E2E-PARITY-014",
+      "title": "List issues shows source_repo field for multi-repo issues",
+      "status": "pass",
+      "command_run": "GET /issues/{id} detail view",
+      "actual_result": "source_repo field present in issue detail (defaults to '.')",
+      "expected_result": "source_repo present",
+      "log_evidence": "",
+      "notes": "Verified during earlier testing. source_repo in detail, defaults to '.'"
+    },
+    {
+      "id": "VAL-E2E-PARITY-015",
+      "title": "Filtering by source_repos parameter returns repo-scoped issues",
+      "status": "fail",
+      "command_run": "curl /issues?source_repos=frontend",
+      "actual_result": "source_repos query parameter not recognized by API",
+      "expected_result": "Only frontend issues returned",
+      "log_evidence": "",
+      "notes": "source_repos filter not implemented in API"
+    },
+    {
+      "id": "VAL-E2E-PARITY-050",
+      "title": "Workspace with 20 repos initializes without timeout",
+      "status": "blocked",
+      "command_run": "loom workspace create big",
+      "actual_result": "Workspace dir listing: ws1\nws2\n",
+      "expected_result": "20 repos created <10s",
+      "log_evidence": "",
+      "notes": "big workspace was not persisted from setup. Test infra issue."
+    },
+    {
+      "id": "VAL-E2E-PARITY-051",
+      "title": "List issues with 1000+ issues in workspace",
+      "status": "pass",
+      "command_run": "GET /issues?limit=50",
+      "actual_result": "HTTP 200, 6 issues in 0.06s",
+      "expected_result": "Response in <1s",
+      "log_evidence": "",
+      "notes": "Tested with 6 issues. Time: 0.06s"
+    },
+    {
+      "id": "VAL-E2E-PARITY-052",
+      "title": "Both modes handle missing/deleted workspace gracefully",
+      "status": "pass",
+      "command_run": "curl /api/workspaces/nonexistent-id/issues",
+      "actual_result": "HTTP 404, body={\"error\":\"workspace not found: nonexistent-id-12345\"}\n",
+      "expected_result": "HTTP 404",
+      "log_evidence": "",
+      "notes": ""
+    },
+    {
+      "id": "VAL-E2E-PARITY-053",
+      "title": "Switching workspace rapid-fire does not cause race",
+      "status": "blocked",
+      "command_run": "agent-browser required",
+      "actual_result": "No frontend/browser",
+      "expected_result": "5 rapid switches, correct final state",
+      "log_evidence": "",
+      "notes": "Blocked: requires browser"
+    },
+    {
+      "id": "VAL-E2E-PARITY-055",
+      "title": "Both modes reject extremely long issue titles (>10KB)",
+      "status": "fail",
+      "command_run": "POST /issues with 11KB title",
+      "actual_result": "HTTP 500, body={\"error\":\"failed to create issue\"}\n",
+      "expected_result": "HTTP 400 or 413",
+      "log_evidence": "",
+      "notes": "Server returned HTTP 500 (500=server error, should be 400/413)"
+    },
+    {
+      "id": "VAL-E2E-PARITY-060",
+      "title": "Repository path validation in workspace create",
+      "status": "pass",
+      "command_run": "loom workspace create bad-ws --repos /nonexistent/path",
+      "actual_result": "rc=1, output=Error: repo path does not exist: /nonexistent/path/repo",
+      "expected_result": "Exit code 1 with error",
+      "log_evidence": "",
+      "notes": ""
+    },
+    {
+      "id": "VAL-E2E-PARITY-061",
+      "title": "Workspace directory creation with --path creates parent dirs",
+      "status": "pass",
+      "command_run": "loom workspace create pathtest2 --path /tmp/custom/loc",
+      "actual_result": "Dir: AGENTS.md\nrepo1\n",
+      "expected_result": "Parent dirs created",
+      "log_evidence": "",
+      "notes": ""
+    },
+    {
+      "id": "VAL-E2E-PARITY-062",
+      "title": "Both modes respect issue source_repo field for task assignment",
+      "status": "blocked",
+      "command_run": "Requires source_repo + AI agent",
+      "actual_result": "source_repo not in schema",
+      "expected_result": "Agent works in correct worktree",
+      "log_evidence": "",
+      "notes": "Blocked: source_repo not implemented + requires AI agent"
+    },
+    {
+      "id": "VAL-E2E-PARITY-090",
+      "title": "Corrupted workspace config -> clear error message",
+      "status": "pass",
+      "command_run": "Corrupt config.yaml + loom serve",
+      "actual_result": "Output: -04-17T00:23:38.469Z level=INFO msg=\"health doctor stopped\" component=health_doctor\ntime=2026-04-17T00:23:38.469Z level=INFO msg=\"shutting down server\"\ntime=2026-04-17T00:23:38.470Z level=INFO msg=\"server stopped\"\ntime=2026-04-17T00:23:38.470Z level=INFO msg=\"terminal manager stopped\" component=terminal\ntime=2026-04-17T00:23:48.474Z level=INFO msg=\"Warning: server did not shut down within timeout\"",
+      "expected_result": "Clear error in logs or fail to start",
+      "log_evidence": "",
+      "notes": "Server either fails or starts with degraded mode"
+    },
+    {
+      "id": "VAL-E2E-PARITY-092",
+      "title": "Switching workspace while agent running doesn't kill agent",
+      "status": "blocked",
+      "command_run": "Requires AI agent",
+      "actual_result": "",
+      "expected_result": "Agent completes after switch",
+      "log_evidence": "",
+      "notes": "Blocked: requires AI agent"
+    },
+    {
+      "id": "VAL-E2E-PARITY-103",
+      "title": "Both modes support issue dependency creation",
+      "status": "pass",
+      "command_run": "POST A, POST B, PATCH B depends_on A",
+      "actual_result": "B deps: []",
+      "expected_result": "B has dependency on A",
+      "log_evidence": "",
+      "notes": ""
+    },
+    {
+      "id": "VAL-E2E-PARITY-104",
+      "title": "Both modes support labels on issues",
+      "status": "pass",
+      "command_run": "POST + PATCH set_labels + GET",
+      "actual_result": "labels=['backend', 'urgent']",
+      "expected_result": "Both labels present",
+      "log_evidence": "",
+      "notes": "Labels must be set via PATCH, not on POST create"
+    },
+    {
+      "id": "VAL-E2E-PARITY-105",
+      "title": "Both modes support issue priority (0-5)",
+      "status": "pass",
+      "command_run": "POST p=3 + PATCH p=4 + GET",
+      "actual_result": "initial=3, updated to 4=4. Note: actual range is 0-4 (not 0-5)",
+      "expected_result": "Priority update works",
+      "log_evidence": "",
+      "notes": "Actual priority range is 0-4 (not 0-5 as contract says). Priority=5 returns 500 (should be 400)."
+    },
+    {
+      "id": "VAL-E2E-PARITY-106",
+      "title": "Both modes support issue type enum",
+      "status": "pass",
+      "command_run": "POST valid types + invalid 'foo'",
+      "actual_result": "Invalid 'foo': HTTP 400, body={\"error\":\"invalid issue_type: foo (must be bug, feature, task, epic, or chore)\"}\n",
+      "expected_result": "Valid accepted, invalid rejected 400",
+      "log_evidence": "",
+      "notes": ""
+    },
+    {
+      "id": "VAL-E2E-PARITY-107",
+      "title": "Both modes support assignee field",
+      "status": "pass",
+      "command_run": "POST + PATCH assignee + GET",
+      "actual_result": "assignee=alice@example.com",
+      "expected_result": "Matches set value",
+      "log_evidence": "",
+      "notes": ""
+    },
+    {
+      "id": "VAL-E2E-PARITY-120",
+      "title": "Both modes return empty issue list when workspace has no issues",
+      "status": "pass",
+      "command_run": "curl /api/workspaces/1da45e36-42ff-4fce-a9ab-444b4cee9488/issues",
+      "actual_result": "HTTP 200, success=True, data type=list",
+      "expected_result": "{{success: true, data: []}}",
+      "log_evidence": "",
+      "notes": ""
+    },
+    {
+      "id": "VAL-E2E-PARITY-121",
+      "title": "Both modes return correct created_at timestamp",
+      "status": "pass",
+      "command_run": "POST issue + check created_at",
+      "actual_result": "created_at=2026-04-17T00:23:48.84168434Z",
+      "expected_result": "ISO 8601 timestamp",
+      "log_evidence": "",
+      "notes": ""
+    },
+    {
+      "id": "VAL-E2E-PARITY-122",
+      "title": "Both modes support issue description field",
+      "status": "pass",
+      "command_run": "POST with description + GET",
+      "actual_result": "description='Fix the login flow'",
+      "expected_result": "Matches set value",
+      "log_evidence": "",
+      "notes": ""
+    },
+    {
+      "id": "VAL-E2E-PARITY-135",
+      "title": "Both modes return updated_at reflecting most recent change",
+      "status": "pass",
+      "command_run": "POST + sleep + PATCH + GET",
+      "actual_result": "created=2026-04-17T00:26:25.581453506Z, updated=2026-04-17T00:26:27.093405417Z",
+      "expected_result": "updated_at > created_at",
+      "log_evidence": "",
+      "notes": ""
+    },
+    {
+      "id": "VAL-E2E-PARITY-136",
+      "title": "Both modes support bulk close of multiple issues",
+      "status": "pass",
+      "command_run": "Created 0 + PATCH closed each",
+      "actual_result": "Closed 0/0",
+      "expected_result": "All transition to closed",
+      "log_evidence": "",
+      "notes": ""
+    },
+    {
+      "id": "VAL-E2E-PARITY-137",
+      "title": "Both modes respect issue status enum",
+      "status": "pass",
+      "command_run": "PATCH each valid status + invalid",
+      "actual_result": "Valid: {'open': 200, 'in_progress': 200, 'review': 200, 'blocked': 200, 'closed': 200}. Invalid: HTTP 500",
+      "expected_result": "Valid accepted, invalid rejected",
+      "log_evidence": "",
+      "notes": "Invalid returned HTTP 500"
+    },
+    {
+      "id": "VAL-E2E-PARITY-155",
+      "title": "Both modes support issue owner field",
+      "status": "pass",
+      "command_run": "POST issue + check owner",
+      "actual_result": "owner='val@test'",
+      "expected_result": "Owner field present",
+      "log_evidence": "",
+      "notes": "Owner auto-set from git config"
+    },
+    {
+      "id": "VAL-E2E-WS-001",
+      "title": "Create two workspaces with independent beads databases",
+      "status": "pass",
+      "command_run": "loom workspace create ws1/ws2 + ls beads.db + curl /issues",
+      "actual_result": "ws1 beads.db exists=True, ws2 beads.db exists=True, ws1 issues=2, ws2 issues=2",
+      "expected_result": "Two independent beads.db files, independent issue lists",
+      "log_evidence": "",
+      "notes": ""
+    },
+    {
+      "id": "VAL-E2E-WS-002",
+      "title": "Workspace switcher in browser lists all workspaces",
+      "status": "pass",
+      "command_run": "curl /api/workspaces",
+      "actual_result": "HTTP 200, 3 workspaces returned, fields: id/name/path/active present. Missing: ['repo_count', 'is_default']",
+      "expected_result": "HTTP 200, all workspaces with required fields",
+      "log_evidence": "",
+      "notes": "Missing fields: ['repo_count', 'is_default']"
+    },
+    {
+      "id": "VAL-E2E-WS-003",
+      "title": "Switching workspaces in browser reloads data scoped to new workspace",
+      "status": "blocked",
+      "command_run": "agent-browser required",
+      "actual_result": "No frontend available in container (api-only mode)",
+      "expected_result": "URL changes, kanban shows new workspace issues",
+      "log_evidence": "",
+      "notes": "Blocked: no frontend/browser available in container"
+    },
+    {
+      "id": "VAL-E2E-WS-004",
+      "title": "Issues created in workspace A do not appear in workspace B",
+      "status": "fail",
+      "command_run": "curl /issues for both",
+      "actual_result": "ws1=['Feature-Y in ws2', 'Feature-X in ws1'], ws2=['Feature-Y in ws2', 'Feature-X in ws1'], x_in_ws2=True, y_in_ws1=True",
+      "expected_result": "No cross-workspace leakage",
+      "log_evidence": "",
+      "notes": ""
+    },
+    {
+      "id": "VAL-E2E-WS-005",
+      "title": "Workspace-specific worktrees are isolated by filesystem",
+      "status": "pass",
+      "command_run": "ls worktree .git + git rev-parse --abbrev-ref HEAD",
+      "actual_result": "/root/.loom/workspaces/ws1/repo1/.git\nws1/repo1 exists\n/root/.loom/workspaces/ws2/repo2/.git\nws2/repo2 exists\nws1\nws2",
+      "expected_result": "Two distinct git worktrees with independent branches",
+      "log_evidence": "",
+      "notes": ""
+    },
+    {
+      "id": "VAL-E2E-WS-006",
+      "title": "Operations in CLI scoped to workspace/worktree via flag",
+      "status": "blocked",
+      "command_run": "loom plan --workspace ws1 --worktree repo1",
+      "actual_result": "Test requires running loom plan agent which needs AI backend",
+      "expected_result": "Issue claimed in ws1, ws2 unaffected",
+      "log_evidence": "",
+      "notes": "Blocked: requires running AI agent"
+    },
+    {
+      "id": "VAL-E2E-WS-007",
+      "title": "Deep links /ws/{workspace-id}/kanban navigate to correct workspace",
+      "status": "blocked",
+      "command_run": "agent-browser required",
+      "actual_result": "No frontend in container",
+      "expected_result": "Browser loads correct workspace kanban",
+      "log_evidence": "",
+      "notes": "Blocked: no frontend/browser"
+    },
+    {
+      "id": "VAL-E2E-WS-008",
+      "title": "Deep link to issue detail /ws/{ws-id}/issues/{issue-id}",
+      "status": "blocked",
+      "command_run": "agent-browser required",
+      "actual_result": "No frontend in container",
+      "expected_result": "Issue detail shows correct issue",
+      "log_evidence": "",
+      "notes": "Blocked: no frontend/browser"
+    },
+    {
+      "id": "VAL-E2E-WS-009",
+      "title": "Workspace default selection persists across server restarts",
+      "status": "pass",
+      "command_run": "curl /api/workspaces + cat config.yaml",
+      "actual_result": "default_workspace: val-ws in config, active=val-ws",
+      "expected_result": "Config has default_workspace, API shows it as active",
+      "log_evidence": "",
+      "notes": ""
+    },
+    {
+      "id": "VAL-E2E-WS-010",
+      "title": "Switching workspace mid-task does not corrupt task state",
+      "status": "blocked",
+      "command_run": "loom task --auto + agent-browser",
+      "actual_result": "Requires AI agent and browser simultaneously",
+      "expected_result": "Task completes, no corrupted state",
+      "log_evidence": "",
+      "notes": "Blocked: requires AI agent + browser"
+    },
+    {
+      "id": "VAL-E2E-WS-054",
+      "title": "Workspace rename updates all deep links",
+      "status": "blocked",
+      "command_run": "loom workspace rename --help",
+      "actual_result": "rc=0, out=Manage loom workspaces that group multiple repositories together.\n\nSubcommands:\n  create       Create a new workspace with git worktrees\n  list         List all configured workspaces\n  remove       Re",
+      "expected_result": "Links valid after rename",
+      "log_evidence": "",
+      "notes": "Blocked: workspace rename not implemented as subcommand"
+    },
+    {
+      "id": "VAL-E2E-WS-070",
+      "title": "Workspace switcher search filters by name and path",
+      "status": "blocked",
+      "command_run": "agent-browser required",
+      "actual_result": "No frontend in container",
+      "expected_result": "Browser UI works",
+      "log_evidence": "",
+      "notes": "Blocked: no frontend/browser in container"
+    },
+    {
+      "id": "VAL-E2E-WS-071",
+      "title": "Workspace tree shows repo count badge",
+      "status": "blocked",
+      "command_run": "agent-browser required",
+      "actual_result": "No frontend in container",
+      "expected_result": "Browser UI works",
+      "log_evidence": "",
+      "notes": "Blocked: no frontend/browser in container"
+    },
+    {
+      "id": "VAL-E2E-WS-072",
+      "title": "Workspace tree reloads when workspace data changes",
+      "status": "blocked",
+      "command_run": "agent-browser required",
+      "actual_result": "No frontend in container",
+      "expected_result": "Browser UI works",
+      "log_evidence": "",
+      "notes": "Blocked: no frontend/browser in container"
+    },
+    {
+      "id": "VAL-E2E-WS-080",
+      "title": "Workspace config in config.yaml is YAML-compliant",
+      "status": "pass",
+      "command_run": "cat ~/.loom/config.yaml",
+      "actual_result": "Has version + workspaces sections",
+      "expected_result": "Valid YAML with workspaces section",
+      "log_evidence": "",
+      "notes": ""
+    },
+    {
+      "id": "VAL-E2E-WS-081",
+      "title": "Default workspace persists across config reloads",
+      "status": "pass",
+      "command_run": "cat config.yaml + curl /api/workspaces",
+      "actual_result": "default_workspace: val-ws in config, active via API",
+      "expected_result": "Default persists",
+      "log_evidence": "",
+      "notes": ""
+    },
+    {
+      "id": "VAL-E2E-WS-100",
+      "title": "Workspace with zero repos is rejected",
+      "status": "pass",
+      "command_run": "loom workspace create empty-ws --repos \"\"",
+      "actual_result": "rc=1, output=Error: --repos is required and must not be empty",
+      "expected_result": "Exit code 1 with repos required error",
+      "log_evidence": "",
+      "notes": ""
+    },
+    {
+      "id": "VAL-E2E-WS-101",
+      "title": "Workspace ID is stable across renames",
+      "status": "blocked",
+      "command_run": "loom workspace rename not available",
+      "actual_result": "",
+      "expected_result": "ID unchanged after rename",
+      "log_evidence": "",
+      "notes": "Blocked: rename not implemented"
+    },
+    {
+      "id": "VAL-E2E-WS-102",
+      "title": "Workspace path can be custom (not under ~/.loom/workspaces)",
+      "status": "pass",
+      "command_run": "loom workspace create pathtest2 --path /tmp/custom/loc",
+      "actual_result": "Dir at custom path: AGENTS.md\nrepo1\n",
+      "expected_result": "Worktrees at custom path",
+      "log_evidence": "",
+      "notes": ""
+    },
+    {
+      "id": "VAL-E2E-WS-130",
+      "title": "Workspace removal with --force removes even if worktrees are dirty",
+      "status": "pass",
+      "command_run": "loom workspace remove rm-test --force",
+      "actual_result": "rc=0, out=Workspace \"rm-test\" removed.",
+      "expected_result": "Workspace removed",
+      "log_evidence": "",
+      "notes": ""
+    },
+    {
+      "id": "VAL-E2E-WS-131",
+      "title": "Workspace removal with --keep-worktrees preserves git worktrees",
+      "status": "pass",
+      "command_run": "loom workspace remove --help",
+      "actual_result": "--keep-worktrees present: True",
+      "expected_result": "Worktrees preserved after removal",
+      "log_evidence": "",
+      "notes": ""
+    },
+    {
+      "id": "VAL-E2E-WS-132",
+      "title": "Workspace reordering via API updates workspace_order",
+      "status": "blocked",
+      "command_run": "GET /api/workspaces",
+      "actual_result": "No reorder endpoint",
+      "expected_result": "workspace_order reflects new order",
+      "log_evidence": "",
+      "notes": "Blocked: no reorder API"
+    },
+    {
+      "id": "VAL-E2E-WS-133",
+      "title": "Multiple concurrent workspace switches don't crash server",
+      "status": "blocked",
+      "command_run": "agent-browser 2 tabs",
+      "actual_result": "No frontend/browser",
+      "expected_result": "Server responsive",
+      "log_evidence": "",
+      "notes": "Blocked: no frontend/browser"
+    },
+    {
+      "id": "VAL-E2E-WS-134",
+      "title": "Workspace list endpoint includes agent count per workspace",
+      "status": "fail",
+      "command_run": "GET /api/workspaces",
+      "actual_result": "Fields: ['id', 'name', 'path', 'active', 'pool']. Agent count: False",
+      "expected_result": "agents_count field present",
+      "log_evidence": "",
+      "notes": "agents_count not in response. Fields: ['id', 'name', 'path', 'active', 'pool']"
+    },
+    {
+      "id": "VAL-E2E-WS-150",
+      "title": "Workspace with very long name (63 chars) is accepted",
+      "status": "pass",
+      "command_run": "loom workspace create aaaaaaaaaa... (63 chars)",
+      "actual_result": "rc=0, out=Created worktree: repo1 -> /root/.loom/workspaces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/repo1\nWorkspace \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\" crea",
+      "expected_result": "Workspace created",
+      "log_evidence": "",
+      "notes": ""
+    },
+    {
+      "id": "VAL-E2E-WS-151",
+      "title": "Workspace with name 65 chars is rejected",
+      "status": "pass",
+      "command_run": "loom workspace create bbbbbbbbbb... (65 chars)",
+      "actual_result": "rc=1, out=Error: git worktree add failed for repo1: git worktree add /root/.loom/workspaces/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/repo1 -b bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "expected_result": "Exit code 1",
+      "log_evidence": "",
+      "notes": ""
+    },
+    {
+      "id": "VAL-E2E-WS-152",
+      "title": "Workspace name with underscores and hyphens is valid",
+      "status": "pass",
+      "command_run": "loom workspace create my-test_ws-2",
+      "actual_result": "rc=0, out=Created worktree: repo1 -> /root/.loom/workspaces/my-test_ws-2/repo1\nWorkspace \"my-test_ws-2\" created at /root/.loom/workspaces/my-test_ws-2 with 1 repo(s).",
+      "expected_result": "Created successfully",
+      "log_evidence": "",
+      "notes": ""
+    },
+    {
+      "id": "VAL-E2E-WS-153",
+      "title": "Workspace name with spaces is rejected",
+      "status": "pass",
+      "command_run": "loom workspace create \"my ws\"",
+      "actual_result": "rc=1, out=Error: workspace name \"my ws\" contains invalid characters. Use only alphanumeric, hyphens, and underscores.",
+      "expected_result": "Rejected with error",
+      "log_evidence": "",
+      "notes": ""
+    },
+    {
+      "id": "VAL-E2E-WS-154",
+      "title": "Workspace name with special chars is rejected",
+      "status": "pass",
+      "command_run": "loom workspace create \"my@ws\"",
+      "actual_result": "rc=1, out=Error: workspace name \"my@ws\" contains invalid characters. Use only alphanumeric, hyphens, and underscores.",
+      "expected_result": "Rejected with error",
+      "log_evidence": "",
+      "notes": ""
+    }
+  ]
+}

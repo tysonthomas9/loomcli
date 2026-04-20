@@ -20,19 +20,20 @@ import { CreateIssueModal } from "../CreateIssueModal";
 
 // ---------- Mocks ----------
 
-vi.mock("@/api/issues", () => ({
+vi.mock("@/hooks/api", () => ({
   createIssue: vi.fn(),
-}));
-
-vi.mock("@/hooks", () => ({
-  useRegisterEscapeLayer: vi.fn(),
-  LAYER_MODAL: "modal",
 }));
 
 vi.mock("@/hooks/ui", async () => {
   const actual =
     await vi.importActual<typeof import("@/hooks/ui")>("@/hooks/ui");
-  return { ...actual, useFocusTrap: vi.fn(), useFocusReturn: vi.fn() };
+  return {
+    ...actual,
+    useRegisterEscapeLayer: vi.fn(),
+    LAYER_MODAL: "modal",
+    useFocusTrap: vi.fn(),
+    useFocusReturn: vi.fn(),
+  };
 });
 
 vi.mock("@/hooks/workspace", async () => {
@@ -46,7 +47,7 @@ vi.mock("@/hooks/workspace", async () => {
   };
 });
 
-import { createIssue } from "@/api/issues";
+import { createIssue } from "@/hooks/api";
 import type { Issue } from "@/types";
 
 const mockCreateIssue = vi.mocked(createIssue);

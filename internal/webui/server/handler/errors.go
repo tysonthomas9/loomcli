@@ -24,6 +24,7 @@ var kindToStatus = map[service.ErrorKind]int{
 	service.KindRateLimited:     http.StatusTooManyRequests,
 	service.KindBadGateway:      http.StatusBadGateway,
 	service.KindNotImplemented:  http.StatusNotImplemented,
+	service.KindStarting:        http.StatusServiceUnavailable,
 }
 
 // HandleServiceError extracts a *service.ServiceError from err, maps its
@@ -52,7 +53,16 @@ func HandleServiceError(w http.ResponseWriter, err error) {
 			"msg", svcErr.Message,
 			"err", err,
 		)
-		WriteJSON(w, status, map[string]string{"error": svcErr.Message})
+		if svcErr.Kind == service.KindStarting {
+			w.Header().Set("Retry-After", "5")
+		}
+		// Include the kind in the body so frontends can branch on a
+		// structured signal (e.g., "starting" vs. generic 503) instead of
+		// substring-matching the English message.
+		WriteJSON(w, status, map[string]string{
+			"error": svcErr.Message,
+			"kind":  string(svcErr.Kind),
+		})
 		return
 	}
 	slog.Error("unexpected error", "err", err)

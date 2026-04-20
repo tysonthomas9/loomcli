@@ -88,6 +88,10 @@ func DaemonShouldTrip(err error) bool {
 	if err == nil {
 		return false
 	}
+	// Daemon starting is a known transient state, not a failure — don't trip.
+	if errors.Is(err, ErrDaemonStarting) {
+		return false
+	}
 	// Trip on daemon availability errors
 	if errors.Is(err, ErrDaemonNotRunning) ||
 		errors.Is(err, ErrConnectionTimeout) ||

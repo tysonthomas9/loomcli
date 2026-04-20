@@ -1,18 +1,10 @@
 package agenterr
 
-import (
-	"regexp"
-	"strconv"
-	"time"
-)
+import "regexp"
 
 // OpenCode-specific error patterns. OpenCode supports multiple providers,
 // so patterns are broader.
-var openCodePatterns = []struct {
-	re    *regexp.Regexp
-	class ErrorClass
-	msg   string
-}{
+var openCodePatterns = []errorPattern{
 	{regexp.MustCompile(`(?i)rate.?limit|too many requests`), RateLimited, "rate limit exceeded"},
 	{regexp.MustCompile(`(?i)\b429\b`), RateLimited, "rate limit exceeded (429)"},
 	{regexp.MustCompile(`(?i)\b401\b|unauthorized|invalid.*key|invalid.?api.?key`), AuthFailure, "authentication failed"},
@@ -25,29 +17,6 @@ var openCodePatterns = []struct {
 	{regexp.MustCompile(`(?i)\b50[023]\b`), Transient, "server error"},
 }
 
-var openCodeRetryAfterRe = regexp.MustCompile(`(?i)retry.?after[:\s]+(\d+)`)
-
 func classifyOpenCode(logTail string) *classifyResult {
-	if logTail == "" {
-		return nil
-	}
-
-	for _, p := range openCodePatterns {
-		if p.re.MatchString(logTail) {
-			r := &classifyResult{
-				Class:   p.class,
-				Message: p.msg,
-			}
-			if p.class == RateLimited {
-				if m := openCodeRetryAfterRe.FindStringSubmatch(logTail); len(m) > 1 {
-					if secs, err := strconv.Atoi(m[1]); err == nil {
-						r.RetryAfter = time.Duration(secs) * time.Second
-					}
-				}
-			}
-			return r
-		}
-	}
-
-	return nil
+	return classifyWithPatterns(logTail, openCodePatterns)
 }

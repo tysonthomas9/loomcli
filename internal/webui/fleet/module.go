@@ -50,35 +50,23 @@ func (m *Module) Register(mux *http.ServeMux) {
 			return handleFleetRegister(s, m.tokenCfg, m.fleetRegCfg)
 		}))
 
-	// Claim — conditional FleetAuthMiddleware
+	// wrap is identity when no signing key; otherwise JWT auth middleware.
+	wrap := func(h http.Handler) http.Handler { return h }
 	if m.tokenCfg != nil && len(m.tokenCfg.SigningKey) > 0 {
-		fleetAuth := NewFleetAuthMiddleware(m.tokenCfg.SigningKey)
-		mux.Handle("POST /api/workspaces/{ws}/fleet/claim",
-			fleetAuth(handleFleetClaim(m.multiPool, m.claimMetrics)))
-	} else {
-		mux.HandleFunc("POST /api/workspaces/{ws}/fleet/claim",
-			handleFleetClaim(m.multiPool, m.claimMetrics))
+		wrap = NewFleetAuthMiddleware(m.tokenCfg.SigningKey)
 	}
 
-	// Done — conditional FleetAuthMiddleware
-	if m.tokenCfg != nil && len(m.tokenCfg.SigningKey) > 0 {
-		fleetAuthDone := NewFleetAuthMiddleware(m.tokenCfg.SigningKey)
-		mux.Handle("POST /api/workspaces/{ws}/fleet/done/{id}",
-			fleetAuthDone(FleetWSHandler(m.fleetStoreFn, handleFleetDone)))
-	} else {
-		mux.HandleFunc("POST /api/workspaces/{ws}/fleet/done/{id}",
-			FleetWSHandler(m.fleetStoreFn, handleFleetDone))
-	}
+	// Claim
+	mux.Handle("POST /api/workspaces/{ws}/fleet/claim",
+		wrap(handleFleetClaim(m.multiPool, m.claimMetrics)))
 
-	// Heartbeat — conditional FleetAuthMiddleware
-	if m.tokenCfg != nil && len(m.tokenCfg.SigningKey) > 0 {
-		fleetAuth := NewFleetAuthMiddleware(m.tokenCfg.SigningKey)
-		mux.Handle("POST /api/workspaces/{ws}/fleet/heartbeat",
-			fleetAuth(FleetWSHandler(m.fleetStoreFn, handleFleetHeartbeat)))
-	} else {
-		mux.HandleFunc("POST /api/workspaces/{ws}/fleet/heartbeat",
-			FleetWSHandler(m.fleetStoreFn, handleFleetHeartbeat))
-	}
+	// Done
+	mux.Handle("POST /api/workspaces/{ws}/fleet/done/{id}",
+		wrap(FleetWSHandler(m.fleetStoreFn, handleFleetDone)))
+
+	// Heartbeat
+	mux.Handle("POST /api/workspaces/{ws}/fleet/heartbeat",
+		wrap(FleetWSHandler(m.fleetStoreFn, handleFleetHeartbeat)))
 }
 
 // FleetWSHandler resolves a per-workspace fleet Store via the provided lookup

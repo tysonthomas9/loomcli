@@ -85,6 +85,7 @@ type RoleConfig struct {
 	ReadOnly       bool     `yaml:"read_only,omitempty"`
 	AllowedTools   []string `yaml:"allowed_tools,omitempty"`
 	DeniedTools    []string `yaml:"denied_tools,omitempty"`
+	MaxBudgetUSD   *float64 `yaml:"max_budget_usd,omitempty"`
 }
 
 // AgentEntry defines a single agent assignment.

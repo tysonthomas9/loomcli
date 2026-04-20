@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -24,6 +25,7 @@ func TestDaemonShouldTrip(t *testing.T) {
 		{"invalid socket path", ErrInvalidSocketPath, false},
 		{"context canceled", context.Canceled, false},
 		{"context deadline exceeded", context.DeadlineExceeded, false},
+		{"daemon starting", ErrDaemonStarting, false},
 		{"unknown error", errors.New("something else"), false},
 	}
 
@@ -41,6 +43,13 @@ func TestDaemonShouldTrip_WrappedErrors(t *testing.T) {
 	wrapped := errors.Join(errors.New("connection failed"), ErrDaemonNotRunning)
 	if !DaemonShouldTrip(wrapped) {
 		t.Error("expected wrapped ErrDaemonNotRunning to trip")
+	}
+}
+
+func TestDaemonShouldTrip_WrappedDaemonStarting(t *testing.T) {
+	wrapped := fmt.Errorf("pool connect: %w", ErrDaemonStarting)
+	if DaemonShouldTrip(wrapped) {
+		t.Error("wrapped ErrDaemonStarting should NOT trip the breaker")
 	}
 }
 
@@ -139,6 +148,7 @@ func TestIsRetryable_WithCircuitOpen(t *testing.T) {
 		{"daemon not running", ErrDaemonNotRunning, true},
 		{"connection timeout", ErrConnectionTimeout, true},
 		{"daemon unhealthy", ErrDaemonUnhealthy, true},
+		{"daemon starting", ErrDaemonStarting, true},
 		{"pool exhausted", ErrPoolExhausted, false},
 		{"pool closed", ErrPoolClosed, false},
 		{"nil", nil, false},

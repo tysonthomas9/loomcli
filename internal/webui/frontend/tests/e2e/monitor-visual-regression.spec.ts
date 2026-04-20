@@ -1,6 +1,33 @@
 import { test, expect, Page } from "@playwright/test"
 
 /**
+ * Workspace fixture for Monitor Dashboard visual regression tests. Shape
+ * matches the WorkspaceData interface. WorkspaceLayout calls
+ * fetchWorkspaceApi() before rendering children, so the mock must return
+ * an object with a non-empty id under `{ success: true, data: ... }`.
+ */
+const mockWorkspaceData = {
+  id: "default",
+  name: "default",
+  path: "/test",
+  repos: [],
+  groups: [],
+  agents: [],
+  workspaces: [
+    {
+      id: "default",
+      name: "default",
+      path: "/test",
+      active: true,
+      repo_count: 0,
+      is_default: true,
+    },
+  ],
+  workspace_order: ["default"],
+  default_workspace: "default",
+}
+
+/**
  * Mock issues for Monitor Dashboard visual regression tests.
  * Consistent data ensures deterministic screenshots.
  */
@@ -206,8 +233,11 @@ const emptyLoomTasks = {
 
 /**
  * Set up all API mocks for Monitor Dashboard visual regression tests.
- * The app uses /api/issues (kanban mode) not /api/ready, and
- * monitor endpoints are served at /api/monitor/* directly.
+ *
+ * Uses workspace-scoped routing: the monitor view lives at
+ * /ws/default/monitor, and issue/stats/blocked endpoints are served under
+ * /api/workspaces/:id/.... The loom /api/monitor/* endpoints are NOT
+ * workspace-scoped, so those mocks remain un-scoped.
  */
 async function setupMocks(
   page: Page,
@@ -221,6 +251,62 @@ async function setupMocks(
   }
 ) {
   const { loomServerAvailable = true, emptyAgents = false, customAgents, customAgentTasks, customBlockedIssues, emptyStats = false } = options ?? {}
+
+  // Neutralize AbortController signals in fetch. React StrictMode (dev mode)
+  // double-fires effects; the cleanup aborts in-flight fetches before they
+  // reach the network. openapi-fetch bakes the signal into the Request
+  // object, so stripping `init.signal` is not enough — we must also
+  // reconstruct Request inputs without their signal. Otherwise page.route
+  // never sees the workspace-scoped issue requests because they're aborted
+  // pre-dispatch.
+  //
+  // Note: the openapi-fetch middleware may have attached a `_timeoutController`
+  // to the incoming Request for its onResponse cleanup. We preserve that
+  // reference on the reconstructed Request so the middleware's timeout
+  // cleanup still runs and doesn't leak 30s timers.
+  await page.addInitScript(() => {
+    const origFetch = window.fetch
+    window.fetch = function (input: RequestInfo | URL, init?: RequestInit) {
+      const strippedInit: RequestInit = init ? { ...init } : {}
+      if ("signal" in strippedInit) delete strippedInit.signal
+      if (input instanceof Request) {
+        const req = input
+        const newInit: RequestInit = {
+          method: req.method,
+          headers: req.headers,
+          credentials: req.credentials,
+          cache: req.cache,
+          redirect: req.redirect,
+          referrer: req.referrer,
+          referrerPolicy: req.referrerPolicy,
+          integrity: req.integrity,
+          keepalive: req.keepalive,
+        }
+        const preserveTimeout = (target: Request) => {
+          const tc = (req as unknown as { _timeoutController?: unknown })
+            ._timeoutController
+          if (tc) {
+            ;(target as unknown as { _timeoutController: unknown })._timeoutController =
+              tc
+          }
+        }
+        if (req.method !== "GET" && req.method !== "HEAD") {
+          return req
+            .clone()
+            .blob()
+            .then((blob) => {
+              const newReq = new Request(req.url, { ...newInit, body: blob })
+              preserveTimeout(newReq)
+              return origFetch.call(this, newReq, {})
+            })
+        }
+        const newReq = new Request(req.url, newInit)
+        preserveTimeout(newReq)
+        return origFetch.call(this, newReq, {})
+      }
+      return origFetch.call(this, input, strippedInit)
+    }
+  })
 
   // Mock app config endpoint (boot process requires this before rendering)
   await page.route("**/api/config", async (route) => {
@@ -240,55 +326,117 @@ async function setupMocks(
     })
   })
 
-  // Mock /api/ready endpoint (monitor view uses mode='ready' → getReadyIssues → /api/ready)
-  await page.route("**/api/ready**", async (route) => {
+  // Mock global health endpoint (App shell fetches on mount)
+  await page.route("**/api/health", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ success: true, data: emptyStats ? [] : mockIssues }),
+      body: JSON.stringify({ status: "ok", daemon: true }),
     })
   })
 
-  // Mock /api/issues endpoint (fallback for any kanban-mode requests)
-  await page.route("**/api/issues?**", async (route) => {
+  // Mock global backend config endpoint
+  await page.route("**/api/config/backend", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ success: true, data: emptyStats ? [] : mockIssues }),
+      body: JSON.stringify({
+        success: true,
+        data: {
+          backend: "shell",
+          source: "default",
+          available: ["shell"],
+          agents: [],
+        },
+      }),
     })
   })
 
-  await page.route("**/api/blocked", async (route) => {
-    const blockedData = emptyStats
-      ? { success: true, data: [] }
-      : (customBlockedIssues ?? mockBlockedIssues)
+  // Mock all /api/workspaces/* endpoints. Dispatches on pathname so a single
+  // handler covers workspace metadata, ready/issues, stats, blocked, graph,
+  // and SSE abort — all workspace-scoped.
+  await page.route("**/api/workspaces/**", async (route) => {
+    const url = new URL(route.request().url())
+    const pathname = url.pathname
+
+    // SSE events — abort so we don't hang waitForLoadState("networkidle")
+    if (/\/api\/workspaces\/[^/]+\/events/.test(pathname)) {
+      await route.abort()
+      return
+    }
+
+    // /api/workspaces/{id}/ready — monitor view hits this via getReadyIssues
+    if (/\/api\/workspaces\/[^/]+\/ready$/.test(pathname)) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, data: emptyStats ? [] : mockIssues }),
+      })
+      return
+    }
+
+    // /api/workspaces/{id}/stats
+    if (/\/api\/workspaces\/[^/]+\/stats$/.test(pathname)) {
+      const statsData = emptyStats
+        ? { open: 0, closed: 0, total: 0, completion: 0 }
+        : { open: 10, closed: 5, total: 15, completion: 33 }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, data: statsData }),
+      })
+      return
+    }
+
+    // /api/workspaces/{id}/blocked
+    if (/\/api\/workspaces\/[^/]+\/blocked$/.test(pathname)) {
+      const blockedData = emptyStats
+        ? { success: true, data: [] }
+        : (customBlockedIssues ?? mockBlockedIssues)
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(blockedData),
+      })
+      return
+    }
+
+    // /api/workspaces/{id}/issues/graph
+    if (/\/api\/workspaces\/[^/]+\/issues\/graph$/.test(pathname)) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, data: emptyStats ? [] : mockIssues }),
+      })
+      return
+    }
+
+    // /api/workspaces/{id}/issues — fallback kanban-mode requests
+    if (/\/api\/workspaces\/[^/]+\/issues$/.test(pathname)) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, data: emptyStats ? [] : mockIssues }),
+      })
+      return
+    }
+
+    // /api/workspaces/{id} — workspace metadata. Must return an object with
+    // a non-empty id, otherwise WorkspaceLayout redirects to "/" and loops.
+    if (/^\/api\/workspaces\/[^/]+\/?$/.test(pathname)) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, data: mockWorkspaceData }),
+      })
+      return
+    }
+
+    // Anything else under /api/workspaces/* — return empty success.
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(blockedData),
-    })
-  })
-
-  await page.route("**/api/issues/graph", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ success: true, data: emptyStats ? [] : mockIssues }),
-    })
-  })
-
-  await page.route("**/api/events**", async (route) => {
-    await route.abort()
-  })
-
-  await page.route("**/api/stats", async (route) => {
-    const statsData = emptyStats
-      ? { open: 0, closed: 0, total: 0, completion: 0 }
-      : { open: 10, closed: 5, total: 15, completion: 33 }
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ success: true, data: statsData }),
+      body: JSON.stringify({ success: true, data: [] }),
     })
   })
 
@@ -361,9 +509,12 @@ async function setupMocks(
 async function navigateAndWait(page: Page) {
   const [response] = await Promise.all([
     page.waitForResponse(
-      (res) => res.url().includes("/api/ready") && res.status() === 200
+      (res) =>
+        res.url().includes("/api/workspaces/") &&
+        res.url().includes("/ready") &&
+        res.status() === 200
     ),
-    page.goto("/?view=monitor"),
+    page.goto("/ws/default/monitor"),
   ])
   expect(response.ok()).toBe(true)
 }
@@ -553,16 +704,17 @@ test.describe("Visual Regression - Agent Activity Panel", () => {
     await setupMocks(page, { loomServerAvailable: false })
     await navigateAndWait(page)
 
-    // Wait for the loom status fetch to complete (returns invalid JSON, triggering error state)
-    await page.waitForResponse(
-      (res) => res.url().includes("/api/monitor/status"),
-      { timeout: 10000 }
-    )
-    await page.waitForTimeout(500)
-    await waitForStableContent(page)
-
+    // With invalid-JSON mocks, the agent store bails on the first failure
+    // and does not poll again, so waitForResponse for /api/monitor/status
+    // here is racy — the only response fires during navigateAndWait. Wait
+    // for the rendered "Loom server not running" state instead, which is
+    // deterministic once the failure lands.
     const agentPanel = page.getByTestId("agent-activity-panel")
-    await expect(agentPanel).toBeVisible()
+    await expect(agentPanel).toBeVisible({ timeout: 10000 })
+    await expect(agentPanel.getByText("Loom server not running")).toBeVisible({
+      timeout: 10000,
+    })
+    await waitForStableContent(page)
 
     await expect(page).toHaveScreenshot(
       "monitor-agent-activity-loom-unavailable.png"

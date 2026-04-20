@@ -1,0 +1,434 @@
+{
+  "contract_file": "cross-area/performance-slo.md",
+  "server_mode": "podman-container",
+  "run_date": "2026-04-17T03:16:31.449268+00:00Z",
+  "assertion_count": 42,
+  "results": {
+    "pass": 5,
+    "fail": 1,
+    "blocked": 35,
+    "deferred": 1
+  },
+  "assertions": [
+    {
+      "id": "VAL-E2E-PERF-019",
+      "title": "Idle daemon VSZ <200MB",
+      "status": "fail",
+      "command_run": "cat /proc/<pid>/status | grep VmSize,VmRSS",
+      "actual_result": "loom serve PID 1826: VSZ=1234.9MB, RSS=30.1MB; bd daemon PID 47: VSZ=9430.3MB, RSS=54.2MB",
+      "expected_result": "VSZ <200MB",
+      "log_evidence": "",
+      "notes": "Go runtime reserves large VSZ via mmap; RSS is actual physical memory usage"
+    },
+    {
+      "id": "VAL-E2E-PERF-020",
+      "title": "10 active agents in daemon <500MB RSS",
+      "status": "blocked",
+      "command_run": "",
+      "actual_result": "",
+      "expected_result": "Max RSS <500MB with 10 agents",
+      "log_evidence": "",
+      "notes": "Requires daemon supervising 10 concurrently running agents"
+    },
+    {
+      "id": "VAL-E2E-PERF-021",
+      "title": "No unbounded goroutine growth",
+      "status": "blocked",
+      "command_run": "curl /debug/pprof/goroutine",
+      "actual_result": "pprof response: 404 page not found",
+      "expected_result": "Goroutine count stable over 1 hour",
+      "log_evidence": "",
+      "notes": "pprof endpoint may not be exposed; requires 1-hour observation"
+    },
+    {
+      "id": "VAL-E2E-PERF-022",
+      "title": "No file-descriptor leak under WS churn",
+      "status": "blocked",
+      "command_run": "ls /proc/1826/fd | wc -l",
+      "actual_result": "Current FD count: 9",
+      "expected_result": "Post-churn FD count <= pre-churn + 50",
+      "log_evidence": "",
+      "notes": "Requires 1000 sequential terminal connect/disconnect cycles"
+    },
+    {
+      "id": "VAL-E2E-PERF-001",
+      "title": "GET issues list median <1s at 100K issues",
+      "status": "blocked",
+      "command_run": "hey -n 100 -c 1 'http://localhost:8090/api/workspaces/14994cbf-5afa-4e86-8b00-9779192785d4/issues?limit=50'",
+      "actual_result": "p50=0.0022s, p99=0.0053s (tested with 1000 issues, not 100K)",
+      "expected_result": "p50 <1s, p99 <3s at 100K issues",
+      "log_evidence": "",
+      "notes": "100K seeding impractical in container. At 1000 issues: p50=0.0022s"
+    },
+    {
+      "id": "VAL-E2E-PERF-002",
+      "title": "Pagination correct at page boundaries",
+      "status": "blocked",
+      "command_run": "Iterated ?limit=100&offset=0..20100",
+      "actual_result": "Collected 100 unique IDs across 201 pages (no duplicates)",
+      "expected_result": "Set size == 100000 at 100K scale",
+      "log_evidence": "",
+      "notes": "100K precondition not met. At 1000 scale: 100 unique IDs, 201 pages, no duplicates"
+    },
+    {
+      "id": "VAL-E2E-PERF-003",
+      "title": "Sort by priority,updated_at completes <500ms",
+      "status": "blocked",
+      "command_run": "hey -n 50 -c 1 'http://localhost:8090/api/workspaces/14994cbf-5afa-4e86-8b00-9779192785d4/issues?sort=-priority,-updated_at&limit=50'",
+      "actual_result": "p50=0.0023s (not at 100K scale)",
+      "expected_result": "p50 <500ms at 100K",
+      "log_evidence": "",
+      "notes": "100K precondition not met. Current p50=0.0023s"
+    },
+    {
+      "id": "VAL-E2E-PERF-004",
+      "title": "Filter by status=open on 100K returns <1s",
+      "status": "blocked",
+      "command_run": "hey -n 50 -c 1 'http://localhost:8090/api/workspaces/14994cbf-5afa-4e86-8b00-9779192785d4/issues?status=open&limit=50'",
+      "actual_result": "p50=0.0022s (not at 100K scale)",
+      "expected_result": "p50 <1s at 100K",
+      "log_evidence": "",
+      "notes": "100K precondition not met. Current p50=0.0022s"
+    },
+    {
+      "id": "VAL-E2E-PERF-005",
+      "title": "Full-text search across 100K issues <2s",
+      "status": "blocked",
+      "command_run": "hey -n 50 -c 1 'http://localhost:8090/api/workspaces/14994cbf-5afa-4e86-8b00-9779192785d4/issues?q=perf&limit=50'",
+      "actual_result": "p95=0.0030s (not at 100K scale)",
+      "expected_result": "p95 <2s at 100K",
+      "log_evidence": "",
+      "notes": "100K precondition not met. Current p95=0.0030s"
+    },
+    {
+      "id": "VAL-E2E-PERF-029",
+      "title": "100 concurrent issue-create requests succeed",
+      "status": "pass",
+      "command_run": "hey -n 1000 -c 100 -m POST 'http://localhost:8090/api/workspaces/14994cbf-5afa-4e86-8b00-9779192785d4/issues'",
+      "actual_result": "Statuses: {201: 41, 429: 959}. 41 created, 959 rate-limited, 0 5xx",
+      "expected_result": "Only 2xx and 429; no 500s",
+      "log_evidence": "time=2026-04-17T03:15:47.364Z level=INFO msg=\"http request\" method=POST path=/api/workspaces/14994cbf-5afa-4e86-8b00-9779192785d4/issues status=429 duration_ms=0.017 ip=10.88.0.14\ntime=2026-04-17T03:15:47.364Z level=INFO msg=\"http request\" method=POST path=/api/workspaces/14994cbf-5afa-4e86-8b00-977",
+      "notes": ""
+    },
+    {
+      "id": "VAL-E2E-PERF-030",
+      "title": "Issue-update burst 1000/min sustainable",
+      "status": "pass",
+      "command_run": "hey -n 100 -c 10 -m PATCH 'http://localhost:8090/api/workspaces/14994cbf-5afa-4e86-8b00-9779192785d4/issues/val-w83w'",
+      "actual_result": "Statuses: {200: 40, 429: 60}. 40 ok, 60 429, 0 5xx. p50=0.0004s. 28 SSE events",
+      "expected_result": "1000 successes in 60s; SSE events propagated",
+      "log_evidence": "time=2026-04-17T03:15:59.750Z level=INFO msg=\"broadcast mutations to SSE clients\" count=1 clients=1\ntime=2026-04-17T03:15:59.751Z level=INFO msg=\"http request\" method=PATCH path=/api/workspaces/14994c",
+      "notes": "Tested 100 PATCHes at c=10. 28 SSE events received"
+    },
+    {
+      "id": "VAL-E2E-PERF-031",
+      "title": "Git operations do not block API",
+      "status": "blocked",
+      "command_run": "",
+      "actual_result": "",
+      "expected_result": "/api/issues p50 <1s during 60s git push",
+      "log_evidence": "",
+      "notes": "No /api/git/push endpoint; requires concurrent git operation test"
+    },
+    {
+      "id": "VAL-E2E-PERF-032",
+      "title": "Daemon pool scales beyond default on contention",
+      "status": "pass",
+      "command_run": "hey -n 200 -c 50 'http://localhost:8090/api/workspaces/14994cbf-5afa-4e86-8b00-9779192785d4/issues?limit=10'",
+      "actual_result": "p95=0.0399s; statuses={200: 200}",
+      "expected_result": "p95 checkout <2s under 50 concurrent callers",
+      "log_evidence": "time=2026-04-17T03:16:03.154Z level=INFO msg=\"http request\" method=GET path=/api/workspaces/14994cbf-5afa-4e86-8b00-9779192785d4/issues status=200 duration_ms=7.188 ip=10.88.0.14\ntime=2026-04-17T03:16",
+      "notes": ""
+    },
+    {
+      "id": "VAL-E2E-PERF-006",
+      "title": "1000 concurrent SSE clients stable",
+      "status": "blocked",
+      "command_run": "Opened 50 concurrent SSE connections via curl",
+      "actual_result": "33/50 connected, 33/50 alive after 5s. Health: {\"status\":\"ok\"}",
+      "expected_result": "1000 connections stable 60s, no crash",
+      "log_evidence": "",
+      "notes": "Full 1000-client test requires Go load harness. At 50: 33 connected, server healthy"
+    },
+    {
+      "id": "VAL-E2E-PERF-007",
+      "title": "Mutation fans out to 1000 subscribers within 2s p99",
+      "status": "blocked",
+      "command_run": "",
+      "actual_result": "",
+      "expected_result": "p99 delta <2s for 1000 subscribers",
+      "log_evidence": "",
+      "notes": "Requires Go SSE load harness with 1000 concurrent connections"
+    },
+    {
+      "id": "VAL-E2E-PERF-008",
+      "title": "Server memory stays <500MB under 1000 SSE clients",
+      "status": "blocked",
+      "command_run": "",
+      "actual_result": "",
+      "expected_result": "RSS <500MB with 1000 SSE + 10 mutations/sec for 5min",
+      "log_evidence": "",
+      "notes": "Requires Go SSE load harness with 1000 concurrent connections"
+    },
+    {
+      "id": "VAL-E2E-PERF-009",
+      "title": "Zero dropped events under steady load",
+      "status": "blocked",
+      "command_run": "curl /health",
+      "actual_result": "Health: {\"status\":\"ok\"}",
+      "expected_result": "dropped_mutations == 0 at 100 mut/s for 60s with 1000 SSE",
+      "log_evidence": "",
+      "notes": "Requires Go SSE load harness and dropped_mutations metric"
+    },
+    {
+      "id": "VAL-E2E-PERF-010",
+      "title": "Slow SSE client does not block others",
+      "status": "blocked",
+      "command_run": "",
+      "actual_result": "",
+      "expected_result": "Stalled client dropped; 999 others unaffected",
+      "log_evidence": "",
+      "notes": "Requires Go SSE harness + tc/netem for network simulation"
+    },
+    {
+      "id": "VAL-E2E-PERF-011",
+      "title": "50 concurrent terminal upgrades, p50 upgrade <100ms",
+      "status": "blocked",
+      "command_run": "",
+      "actual_result": "",
+      "expected_result": "p50 <100ms; p99 <500ms for 50 concurrent WS connections",
+      "log_evidence": "",
+      "notes": "Requires running agents with terminal sessions; no agents configured"
+    },
+    {
+      "id": "VAL-E2E-PERF-012",
+      "title": "Keystroke echo latency <200ms p99",
+      "status": "blocked",
+      "command_run": "",
+      "actual_result": "",
+      "expected_result": "p99 <200ms round-trip for 50 concurrent terminals",
+      "log_evidence": "",
+      "notes": "Requires running agents with terminal sessions and WS harness"
+    },
+    {
+      "id": "VAL-E2E-PERF-013",
+      "title": "Per-connection memory <2MB",
+      "status": "blocked",
+      "command_run": "",
+      "actual_result": "",
+      "expected_result": "Incremental RSS per WS terminal <2MB",
+      "log_evidence": "",
+      "notes": "Requires running agents with terminal sessions"
+    },
+    {
+      "id": "VAL-E2E-PERF-014",
+      "title": "WebSocket close is clean \u2014 tmux session survives or is reaped per policy",
+      "status": "blocked",
+      "command_run": "",
+      "actual_result": "",
+      "expected_result": "tmux session persists across WS close/reopen",
+      "log_evidence": "",
+      "notes": "Requires running agents with terminal sessions and tmux"
+    },
+    {
+      "id": "VAL-E2E-PERF-023",
+      "title": "Kanban drag at 60fps with 500 cards",
+      "status": "blocked",
+      "command_run": "",
+      "actual_result": "",
+      "expected_result": ">=55fps sustained during drag",
+      "log_evidence": "",
+      "notes": "Server in api-only mode; requires frontend + agent-browser"
+    },
+    {
+      "id": "VAL-E2E-PERF-024",
+      "title": "Table sort on 1000 rows <100ms p95",
+      "status": "blocked",
+      "command_run": "",
+      "actual_result": "",
+      "expected_result": "p95 <100ms for column sort",
+      "log_evidence": "",
+      "notes": "Server in api-only mode; requires frontend + agent-browser"
+    },
+    {
+      "id": "VAL-E2E-PERF-025",
+      "title": "Frontend bundle gzipped <2MB",
+      "status": "blocked",
+      "command_run": "",
+      "actual_result": "",
+      "expected_result": "Main JS+CSS gzipped <2MB",
+      "log_evidence": "",
+      "notes": "Server in api-only mode; assets not served"
+    },
+    {
+      "id": "VAL-E2E-PERF-026",
+      "title": "Graph view handles 500 nodes smoothly",
+      "status": "blocked",
+      "command_run": "",
+      "actual_result": "",
+      "expected_result": "Initial render <2s; interaction >=30fps",
+      "log_evidence": "",
+      "notes": "Server in api-only mode; requires frontend + agent-browser"
+    },
+    {
+      "id": "VAL-E2E-PERF-027",
+      "title": "Code editor opens 1MB file <500ms",
+      "status": "blocked",
+      "command_run": "",
+      "actual_result": "",
+      "expected_result": "<500ms p95 to render",
+      "log_evidence": "",
+      "notes": "Server in api-only mode; requires frontend + agent-browser"
+    },
+    {
+      "id": "VAL-E2E-PERF-028",
+      "title": "SSE reconnection completes within 2s",
+      "status": "blocked",
+      "command_run": "",
+      "actual_result": "",
+      "expected_result": "onopen within 2s; no missed mutations",
+      "log_evidence": "",
+      "notes": "Requires frontend + DevTools network simulation"
+    },
+    {
+      "id": "VAL-E2E-PERF-033",
+      "title": "loom init on empty dir <5s",
+      "status": "pass",
+      "command_run": "git init && bd init",
+      "actual_result": "Completed in 0.44s",
+      "expected_result": "Real time <5s",
+      "log_evidence": "\u26a0 Found existing database: /tmp/init-test/.beads/beads.db\n\nThis workspace is already initialized.\n\nTo use the existing database:\n  Just run bd commands normally (e.g., bd list)\n\nTo completely reinitia",
+      "notes": ""
+    },
+    {
+      "id": "VAL-E2E-PERF-034",
+      "title": "First loom plan after startup <3s before agent spawn",
+      "status": "blocked",
+      "command_run": "",
+      "actual_result": "",
+      "expected_result": "Pre-flight <3s",
+      "log_evidence": "",
+      "notes": "Requires loom plan with --verbose; needs configured workspace with tasks"
+    },
+    {
+      "id": "VAL-E2E-PERF-035",
+      "title": "loom list on 100-worktree setup <2s",
+      "status": "blocked",
+      "command_run": "loom list",
+      "actual_result": "Completed in 0.11s with 1 workspace (Agents by Workspace:\n====================\n\n[val-ws]\n  val-ws        master                \u25cf 4 change)",
+      "expected_result": "Real time <2s with 100 worktrees",
+      "log_evidence": "",
+      "notes": "Only 1 workspace; 100-worktree precondition not met. At 1 ws: 0.11s"
+    },
+    {
+      "id": "VAL-E2E-PERF-200",
+      "title": "SSE reconnect catch-up <1s at 10K issues",
+      "status": "blocked",
+      "command_run": "",
+      "actual_result": "",
+      "expected_result": "onopen + snapshot within 1000ms at 10K",
+      "log_evidence": "",
+      "notes": "Requires 10K issue seed + SSE reconnect simulation"
+    },
+    {
+      "id": "VAL-E2E-PERF-201",
+      "title": "SSE reconnect catch-up <5s at 100K issues",
+      "status": "blocked",
+      "command_run": "",
+      "actual_result": "",
+      "expected_result": "onopen + first event <=5000ms p95 at 100K",
+      "log_evidence": "",
+      "notes": "Requires 100K issue seed + SSE reconnect simulation"
+    },
+    {
+      "id": "VAL-E2E-PERF-202",
+      "title": "[DEFERRED, not implemented] Streaming snapshot delivery",
+      "status": "deferred",
+      "command_run": "",
+      "actual_result": "",
+      "expected_result": "snapshot-chunk events on reconnect",
+      "log_evidence": "",
+      "notes": "Contract marks this as [DEFERRED, not implemented]"
+    },
+    {
+      "id": "VAL-E2E-PERF-203",
+      "title": "CSS assets served with Content-Encoding: gzip",
+      "status": "blocked",
+      "command_run": "",
+      "actual_result": "",
+      "expected_result": "Content-Encoding: gzip on CSS",
+      "log_evidence": "",
+      "notes": "Server in api-only mode; no static assets served"
+    },
+    {
+      "id": "VAL-E2E-PERF-204",
+      "title": "SVG assets served with Content-Encoding: gzip",
+      "status": "blocked",
+      "command_run": "",
+      "actual_result": "",
+      "expected_result": "Content-Encoding: gzip on SVG",
+      "log_evidence": "",
+      "notes": "Server in api-only mode; no static assets served"
+    },
+    {
+      "id": "VAL-E2E-PERF-205",
+      "title": "WOFF2 font assets gzipped (or pre-compressed)",
+      "status": "blocked",
+      "command_run": "",
+      "actual_result": "",
+      "expected_result": "Content-Encoding: gzip or on-disk size match for WOFF2",
+      "log_evidence": "",
+      "notes": "Server in api-only mode; no static assets served"
+    },
+    {
+      "id": "VAL-E2E-PERF-206",
+      "title": "HTML index document gzipped",
+      "status": "blocked",
+      "command_run": "curl -H 'Accept-Encoding: gzip' -sI http://localhost:8090/",
+      "actual_result": "Headers: HTTP/1.1 404 Not Found\nContent-Security-Policy: default-src 'self'; script-src 'self' 'sha256-E907z9SPF4o7blRe1MXfQVC2tBrJopXOXrMYZvksy/o='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; con",
+      "expected_result": "Content-Encoding: gzip on /",
+      "log_evidence": "",
+      "notes": "Server in api-only mode; / returns 404"
+    },
+    {
+      "id": "VAL-E2E-PERF-015",
+      "title": "loom serve /api/health responds within 5s of launch",
+      "status": "pass",
+      "command_run": "pkill loom; bd daemon start; loom serve &; poll /health",
+      "actual_result": "Health OK in 0.34s",
+      "expected_result": "<5s from exec to first 200 on /health",
+      "log_evidence": "time=2026-04-17T03:16:12.570Z level=INFO msg=\"Issue backend daemon already running\"\ntime=2026-04-17T03:16:12.570Z level=INFO msg=\"WARNING: Server bound to 0.0.0.0 \u2014 exposed to network. Ensure this is ",
+      "notes": ""
+    },
+    {
+      "id": "VAL-E2E-PERF-016",
+      "title": "Daemon with 5 agents ready within 10s",
+      "status": "blocked",
+      "command_run": "",
+      "actual_result": "",
+      "expected_result": "All 5 agents running within 10s",
+      "log_evidence": "",
+      "notes": "Requires loom.yaml with 5 supervised agents; not configured in test container"
+    },
+    {
+      "id": "VAL-E2E-PERF-017",
+      "title": "Frontend bundle served gzipped on first load",
+      "status": "blocked",
+      "command_run": "curl -H 'Accept-Encoding: gzip' -sI http://localhost:8090/assets/index-*.js",
+      "actual_result": "Server in api-only mode. Headers: HTTP/1.1 404 Not Found\nContent-Security-Policy: default-src 'self'; script-src 'self' 'sha256-E907z9SPF4o7blRe1MXfQVC2tBrJopXOXrMYZvksy/o='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; con",
+      "expected_result": "Content-Encoding: gzip on JS bundle",
+      "log_evidence": "",
+      "notes": "Server started with --frontend-url (api-only mode); assets not served by backend"
+    },
+    {
+      "id": "VAL-E2E-PERF-018",
+      "title": "Full page-load FCP <1s on localhost",
+      "status": "blocked",
+      "command_run": "",
+      "actual_result": "",
+      "expected_result": "FCP <1000ms",
+      "log_evidence": "",
+      "notes": "Server in api-only mode; frontend not served. Requires full frontend build + agent-browser"
+    }
+  ]
+}

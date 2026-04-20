@@ -168,12 +168,28 @@ func (b *Backend) Count(_ context.Context, _ backend.CountOpts) (int, error) {
 	return 0, backend.ErrNotImplemented("AgentIPC.Count", "not supported by agent IPC backend")
 }
 
+func (b *Backend) GetChildren(_ context.Context, _ string) ([]backend.IssueData, error) {
+	return nil, backend.ErrNotImplemented("AgentIPC.GetChildren", "not supported by agent IPC backend")
+}
+
+func (b *Backend) SearchIssues(_ context.Context, _ string, _ int) ([]backend.IssueData, error) {
+	return nil, backend.ErrNotImplemented("AgentIPC.SearchIssues", "not supported by agent IPC backend")
+}
+
 func (b *Backend) Create(_ context.Context, _ backend.CreateParams) (*backend.IssueData, error) {
 	return nil, backend.ErrNotImplemented("AgentIPC.Create", "not supported by agent IPC backend")
 }
 
 func (b *Backend) Reopen(_ context.Context, _ string, _ backend.ReopenParams) error {
 	return backend.ErrNotImplemented("AgentIPC.Reopen", "not supported by agent IPC backend")
+}
+
+func (b *Backend) DeferIssue(_ context.Context, _ string, _ time.Time) error {
+	return backend.ErrNotImplemented("AgentIPC.DeferIssue", "not supported by agent IPC backend")
+}
+
+func (b *Backend) UndeferIssue(_ context.Context, _ string) error {
+	return backend.ErrNotImplemented("AgentIPC.UndeferIssue", "not supported by agent IPC backend")
 }
 
 func (b *Backend) Delete(_ context.Context, _ backend.DeleteParams) error {

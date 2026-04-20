@@ -144,6 +144,23 @@ func hasData(resp *apiResponse) bool {
 	return resp != nil && resp.Data != nil && string(resp.Data) != "null"
 }
 
+// unmarshalIssueList unmarshals a []gen.Issue response and converts to
+// []backend.IssueData. Used by List, Ready, GetChildren, and SearchIssues.
+func unmarshalIssueList(resp *apiResponse, op string) ([]backend.IssueData, error) {
+	if !hasData(resp) {
+		return []backend.IssueData{}, nil
+	}
+	var issues []gen.Issue
+	if err := json.Unmarshal(resp.Data, &issues); err != nil {
+		return nil, backend.ErrInternal(op, "unmarshal response", err)
+	}
+	result := make([]backend.IssueData, 0, len(issues))
+	for _, i := range issues {
+		result = append(result, issueToData(i))
+	}
+	return result, nil
+}
+
 // --- Query operations ---
 
 func (b *APIBackend) Get(ctx context.Context, id string) (*backend.IssueDetailData, error) {
@@ -171,18 +188,7 @@ func (b *APIBackend) List(ctx context.Context, opts backend.ListOpts) ([]backend
 	if err != nil {
 		return nil, err
 	}
-	if !hasData(resp) {
-		return []backend.IssueData{}, nil
-	}
-	var issues []gen.Issue
-	if err := json.Unmarshal(resp.Data, &issues); err != nil {
-		return nil, backend.ErrInternal("List", "unmarshal response", err)
-	}
-	result := make([]backend.IssueData, 0, len(issues))
-	for _, i := range issues {
-		result = append(result, issueToData(i))
-	}
-	return result, nil
+	return unmarshalIssueList(resp, "List")
 }
 
 func (b *APIBackend) Ready(ctx context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
@@ -194,18 +200,7 @@ func (b *APIBackend) Ready(ctx context.Context, opts backend.ReadyOpts) ([]backe
 	if err != nil {
 		return nil, err
 	}
-	if !hasData(resp) {
-		return []backend.IssueData{}, nil
-	}
-	var issues []gen.Issue
-	if err := json.Unmarshal(resp.Data, &issues); err != nil {
-		return nil, backend.ErrInternal("Ready", "unmarshal response", err)
-	}
-	result := make([]backend.IssueData, 0, len(issues))
-	for _, i := range issues {
-		result = append(result, issueToData(i))
-	}
-	return result, nil
+	return unmarshalIssueList(resp, "Ready")
 }
 
 func (b *APIBackend) Blocked(ctx context.Context, opts backend.BlockedOpts) ([]backend.IssueData, error) {
@@ -267,6 +262,42 @@ func (b *APIBackend) Count(_ context.Context, _ backend.CountOpts) (int, error) 
 	return 0, backend.ErrNotImplemented("Count", "server has no count endpoint")
 }
 
+// GetChildren returns the direct children of an issue by calling /issues with
+// a parent filter. Returns an empty slice if the issue has no children.
+func (b *APIBackend) GetChildren(ctx context.Context, id string) ([]backend.IssueData, error) {
+	if id == "" {
+		return nil, backend.ErrValidation("GetChildren", "id must not be empty")
+	}
+	path := "/issues?parent_id=" + url.QueryEscape(id)
+	resp, err := b.exec(ctx, "GetChildren", http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	return unmarshalIssueList(resp, "GetChildren")
+}
+
+// SearchIssues performs a full-text search via the /issues endpoint using the
+// q query parameter. Returns an empty slice if no results match.
+// Note: the loom server uses "q" (not "query") for its search param — see
+// internal/backend/api/params.go addListSearchFilters.
+func (b *APIBackend) SearchIssues(ctx context.Context, query string, limit int) ([]backend.IssueData, error) {
+	if query == "" {
+		return nil, backend.ErrValidation("SearchIssues", "query must not be empty")
+	}
+	if limit < 0 {
+		return nil, backend.ErrValidation("SearchIssues", "limit must not be negative")
+	}
+	path := "/issues?q=" + url.QueryEscape(query)
+	if limit > 0 {
+		path += "&limit=" + strconv.Itoa(limit)
+	}
+	resp, err := b.exec(ctx, "SearchIssues", http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	return unmarshalIssueList(resp, "SearchIssues")
+}
+
 // --- Mutation operations ---
 
 func (b *APIBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error) {
@@ -288,19 +319,58 @@ func (b *APIBackend) Create(ctx context.Context, params backend.CreateParams) (*
 
 func (b *APIBackend) Update(ctx context.Context, id string, params backend.UpdateParams) error {
 	if params.Claim {
-		return backend.ErrValidation("Update", "Claim field is not supported in APIBackend.Update; server has no per-issue claim endpoint (loomcli-j7qcq)")
+		return backend.ErrValidation("Update", "Claim field is not supported in APIBackend.Update; use APIBackend.ClaimIssue instead")
 	}
 	req := updateParamsToPatchRequest(params)
 	_, err := b.exec(ctx, "Update", http.MethodPatch, "/issues/"+url.PathEscape(id), req)
 	return err
 }
 
-// ClaimIssue returns ErrNotImplemented because the loom server has no
-// per-issue claim endpoint yet. PatchIssueRequest has no `claim` field and
-// /fleet/claim is a queue-pull endpoint with different auth. A dedicated
-// claim endpoint is tracked in loomcli-j7qcq.
-func (b *APIBackend) ClaimIssue(_ context.Context, _ string, _ time.Duration) error {
-	return backend.ErrNotImplemented("ClaimIssue", "server has no per-issue claim endpoint (tracked in loomcli-j7qcq)")
+// ClaimIssue atomically claims an issue via POST /issues/{id}/claim. The
+// lockTTL parameter is accepted per the IssueBackend contract but is not
+// forwarded to the server — beads SQLite has no TTL support, matching
+// BeadsBackend.ClaimIssue and FleetBackend.ClaimIssue behavior. Returns
+// KindConflict when the issue is already claimed by a different agent and
+// KindNotFound when the issue does not exist.
+func (b *APIBackend) ClaimIssue(ctx context.Context, id string, lockTTL time.Duration) error {
+	if id == "" {
+		return backend.ErrValidation("ClaimIssue", "id must not be empty")
+	}
+	if lockTTL < 0 {
+		return backend.ErrValidation("ClaimIssue", "lockTTL must not be negative")
+	}
+	path := "/issues/" + url.PathEscape(id) + "/claim"
+	_, err := b.exec(ctx, "ClaimIssue", http.MethodPost, path, nil)
+	return err
+}
+
+// DeferIssue defers an issue via PATCH with status="deferred" and optional
+// defer_until. A zero `until` means status-only defer with no end date.
+func (b *APIBackend) DeferIssue(ctx context.Context, id string, until time.Time) error {
+	if id == "" {
+		return backend.ErrValidation("DeferIssue", "id must not be empty")
+	}
+	status := gen.PatchIssueRequestStatus("deferred")
+	req := gen.PatchIssueRequest{Status: &status}
+	if !until.IsZero() {
+		formatted := until.Format(time.RFC3339)
+		req.DeferUntil = &formatted
+	}
+	_, err := b.exec(ctx, "DeferIssue", http.MethodPatch, "/issues/"+url.PathEscape(id), req)
+	return err
+}
+
+// UndeferIssue restores a deferred issue to "open" status and clears the
+// defer_until field by sending an empty string.
+func (b *APIBackend) UndeferIssue(ctx context.Context, id string) error {
+	if id == "" {
+		return backend.ErrValidation("UndeferIssue", "id must not be empty")
+	}
+	status := gen.PatchIssueRequestStatus("open")
+	emptyStr := ""
+	req := gen.PatchIssueRequest{Status: &status, DeferUntil: &emptyStr}
+	_, err := b.exec(ctx, "UndeferIssue", http.MethodPatch, "/issues/"+url.PathEscape(id), req)
+	return err
 }
 
 func (b *APIBackend) Close(ctx context.Context, id string, params backend.CloseParams) (*backend.CloseResult, error) {

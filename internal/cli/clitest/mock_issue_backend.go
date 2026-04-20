@@ -39,6 +39,12 @@ type MockIssueBackend struct {
 	CountResult            int
 	CountErr               error
 	CountFn                func(ctx context.Context, opts backend.CountOpts) (int, error)
+	GetChildrenResult      []backend.IssueData
+	GetChildrenErr         error
+	GetChildrenFn          func(ctx context.Context, id string) ([]backend.IssueData, error)
+	SearchIssuesResult     []backend.IssueData
+	SearchIssuesErr        error
+	SearchIssuesFn         func(ctx context.Context, query string, limit int) ([]backend.IssueData, error)
 	CreateResult           *backend.IssueData
 	CreateErr              error
 	CreateFn               func(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error)
@@ -46,6 +52,10 @@ type MockIssueBackend struct {
 	UpdateFn               func(ctx context.Context, id string, params backend.UpdateParams) error
 	ClaimIssueErr          error
 	ClaimIssueFn           func(ctx context.Context, id string, lockTTL time.Duration) error
+	DeferIssueErr          error
+	DeferIssueFn           func(ctx context.Context, id string, until time.Time) error
+	UndeferIssueErr        error
+	UndeferIssueFn         func(ctx context.Context, id string) error
 	CloseResult            *backend.CloseResult
 	CloseErr               error
 	CloseFn                func(ctx context.Context, id string, params backend.CloseParams) (*backend.CloseResult, error)
@@ -148,6 +158,26 @@ func (m *MockIssueBackend) Count(ctx context.Context, opts backend.CountOpts) (i
 	}
 	return r, e
 }
+func (m *MockIssueBackend) GetChildren(ctx context.Context, id string) ([]backend.IssueData, error) {
+	m.mu.Lock()
+	m.record("GetChildren", id)
+	fn, r, e := m.GetChildrenFn, m.GetChildrenResult, m.GetChildrenErr
+	m.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, id)
+	}
+	return r, e
+}
+func (m *MockIssueBackend) SearchIssues(ctx context.Context, query string, limit int) ([]backend.IssueData, error) {
+	m.mu.Lock()
+	m.record("SearchIssues", query, limit)
+	fn, r, e := m.SearchIssuesFn, m.SearchIssuesResult, m.SearchIssuesErr
+	m.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, query, limit)
+	}
+	return r, e
+}
 func (m *MockIssueBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error) {
 	m.mu.Lock()
 	m.record("Create", params)
@@ -175,6 +205,26 @@ func (m *MockIssueBackend) ClaimIssue(ctx context.Context, id string, lockTTL ti
 	m.mu.Unlock()
 	if fn != nil {
 		return fn(ctx, id, lockTTL)
+	}
+	return e
+}
+func (m *MockIssueBackend) DeferIssue(ctx context.Context, id string, until time.Time) error {
+	m.mu.Lock()
+	m.record("DeferIssue", id, until)
+	fn, e := m.DeferIssueFn, m.DeferIssueErr
+	m.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, id, until)
+	}
+	return e
+}
+func (m *MockIssueBackend) UndeferIssue(ctx context.Context, id string) error {
+	m.mu.Lock()
+	m.record("UndeferIssue", id)
+	fn, e := m.UndeferIssueFn, m.UndeferIssueErr
+	m.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, id)
 	}
 	return e
 }

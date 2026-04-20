@@ -169,6 +169,47 @@ func (b *BeadsBackend) Stats(_ context.Context) (*backend.StatsData, error) {
 	return &result, nil
 }
 
+// GetChildren returns the direct children of the given issue (typically an epic).
+// Implemented via the existing List RPC with ParentID filter.
+func (b *BeadsBackend) GetChildren(_ context.Context, id string) ([]backend.IssueData, error) {
+	if id == "" {
+		return nil, backend.ErrValidation("GetChildren", "id must not be empty")
+	}
+	resp, err := b.execAndCheck("GetChildren", func() (*rpc.Response, error) {
+		return b.client.List(&rpc.ListArgs{ParentID: id})
+	})
+	if err != nil {
+		return nil, err
+	}
+	var issues []*types.IssueWithCounts
+	if err := json.Unmarshal(resp.Data, &issues); err != nil {
+		return nil, backend.ErrInternal("GetChildren", "unmarshal response", err)
+	}
+	return issuesWithCountsToData(issues), nil
+}
+
+// SearchIssues performs a full-text relevance-ranked search via the beads
+// daemon's List RPC, which routes to SQLite FTS when Query is set.
+func (b *BeadsBackend) SearchIssues(_ context.Context, query string, limit int) ([]backend.IssueData, error) {
+	if query == "" {
+		return nil, backend.ErrValidation("SearchIssues", "query must not be empty")
+	}
+	if limit < 0 {
+		return nil, backend.ErrValidation("SearchIssues", "limit must not be negative")
+	}
+	resp, err := b.execAndCheck("SearchIssues", func() (*rpc.Response, error) {
+		return b.client.List(&rpc.ListArgs{Query: query, Limit: limit})
+	})
+	if err != nil {
+		return nil, err
+	}
+	var issues []*types.IssueWithCounts
+	if err := json.Unmarshal(resp.Data, &issues); err != nil {
+		return nil, backend.ErrInternal("SearchIssues", "unmarshal response", err)
+	}
+	return issuesWithCountsToData(issues), nil
+}
+
 // Count returns the number of issues matching the given filters.
 func (b *BeadsBackend) Count(_ context.Context, opts backend.CountOpts) (int, error) {
 	rpcArgs := &rpc.CountArgs{
@@ -292,6 +333,41 @@ func (b *BeadsBackend) ClaimIssue(_ context.Context, id string, lockTTL time.Dur
 	}
 	_, err := b.execAndCheck("ClaimIssue", func() (*rpc.Response, error) {
 		return b.client.Update(&rpc.UpdateArgs{ID: id, Claim: true})
+	})
+	return err
+}
+
+// DeferIssue defers an issue by setting status to "deferred" and optionally
+// setting defer_until to the given time (formatted as RFC3339). A zero `until`
+// means status-only defer with no end date (DeferUntil remains nil).
+func (b *BeadsBackend) DeferIssue(_ context.Context, id string, until time.Time) error {
+	if id == "" {
+		return backend.ErrValidation("DeferIssue", "id must not be empty")
+	}
+	deferredStatus := "deferred"
+	args := rpc.UpdateArgs{ID: id, Status: &deferredStatus}
+	if !until.IsZero() {
+		formatted := until.Format(time.RFC3339)
+		args.DeferUntil = &formatted
+	}
+	_, err := b.execAndCheck("DeferIssue", func() (*rpc.Response, error) {
+		return b.client.Update(&args)
+	})
+	return err
+}
+
+// UndeferIssue restores a deferred issue to "open" status and clears its
+// defer_until field by sending an empty string for DeferUntil (matching
+// the bd undefer CLI behavior).
+func (b *BeadsBackend) UndeferIssue(_ context.Context, id string) error {
+	if id == "" {
+		return backend.ErrValidation("UndeferIssue", "id must not be empty")
+	}
+	openStatus := "open"
+	emptyStr := ""
+	args := rpc.UpdateArgs{ID: id, Status: &openStatus, DeferUntil: &emptyStr}
+	_, err := b.execAndCheck("UndeferIssue", func() (*rpc.Response, error) {
+		return b.client.Update(&args)
 	})
 	return err
 }

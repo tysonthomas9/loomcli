@@ -31,6 +31,11 @@ func rpcDebugLog(format string, args ...interface{}) {
 	}
 }
 
+// ErrDaemonStarting indicates the daemon lock is held but the RPC socket
+// does not exist yet — the daemon is still hydrating. Callers should treat
+// this as a transient startup state, not a failure.
+var ErrDaemonStarting = fmt.Errorf("daemon starting")
+
 // ClientVersion is the version of this RPC client
 // This should match the bd CLI version for proper compatibility checks
 // It's set dynamically by main.go from cmd/bd/version.go before making RPC calls
@@ -82,10 +87,10 @@ func TryConnectWithTimeout(socketPath string, dialTimeout time.Duration) (*Clien
 		rpcDebugLog("daemon lock held but socket was missing - re-checking socket existence")
 		socketExists = endpointExists(socketPath)
 		if !socketExists {
-			// Lock held but socket still missing after re-check - daemon startup or crash
-			debug.Logf("daemon lock held but socket missing after re-check (startup race or crash): %s", socketPath)
-			rpcDebugLog("connection aborted: socket still missing despite lock being held")
-			return nil, nil
+			// Lock held but socket still missing after re-check — daemon is starting up (hydrating)
+			debug.Logf("daemon lock held but socket missing after re-check (daemon starting): %s", socketPath)
+			rpcDebugLog("daemon starting: lock held but socket not yet created")
+			return nil, ErrDaemonStarting
 		}
 		rpcDebugLog("socket now exists after re-check (daemon startup race resolved)")
 	}

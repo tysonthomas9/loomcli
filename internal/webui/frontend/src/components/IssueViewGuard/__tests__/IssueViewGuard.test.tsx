@@ -31,13 +31,24 @@ vi.mock("@/components", () => ({
     onRetry,
     error,
     variant,
+    isRetrying,
+    description,
   }: {
     onRetry?: () => void;
     error?: Error | null;
     variant?: string;
+    isRetrying?: boolean;
+    description?: string;
   }) => (
-    <div data-testid="error-display" data-variant={variant}>
+    <div
+      data-testid="error-display"
+      data-variant={variant}
+      data-is-retrying={String(!!isRetrying)}
+    >
       {error && <span data-testid="error-message">{error.message}</span>}
+      {description && (
+        <span data-testid="error-description">{description}</span>
+      )}
       {onRetry && (
         <button data-testid="retry-button" onClick={onRetry}>
           Try again
@@ -159,6 +170,79 @@ describe("IssueViewGuard", () => {
       render(<IssueViewGuard {...defaultProps({ error: "fail" })} />);
 
       expect(screen.queryByTestId("children-content")).not.toBeInTheDocument();
+    });
+
+    it("passes isRetrying=true to ErrorDisplay when retryCount > 0", () => {
+      render(
+        <IssueViewGuard
+          {...defaultProps({
+            error: "transient failure",
+            retryCount: 2,
+            nextRetryAt: Date.now() + 3_000,
+          })}
+        />,
+      );
+
+      expect(screen.getByTestId("error-display")).toHaveAttribute(
+        "data-is-retrying",
+        "true",
+      );
+      // Description should mention auto-retry
+      expect(screen.getByTestId("error-description").textContent).toMatch(
+        /[Rr]etrying automatically/,
+      );
+    });
+
+    it("does not mark error as retrying when retryCount is 0", () => {
+      render(
+        <IssueViewGuard {...defaultProps({ error: "fail", retryCount: 0 })} />,
+      );
+
+      expect(screen.getByTestId("error-display")).toHaveAttribute(
+        "data-is-retrying",
+        "false",
+      );
+      expect(screen.queryByTestId("error-description")).not.toBeInTheDocument();
+    });
+
+    it("does not mark as retrying once retry budget is exhausted (nextRetryAt=null)", () => {
+      // After MAX_AUTO_RETRIES the store keeps retryCount > 0 but clears
+      // nextRetryAt. The UI must stop showing the auto-retry indicator and
+      // fall back to the default fetch-error state with a manual retry.
+      render(
+        <IssueViewGuard
+          {...defaultProps({
+            error: "persistent failure",
+            retryCount: 5,
+            nextRetryAt: null,
+          })}
+        />,
+      );
+
+      expect(screen.getByTestId("error-display")).toHaveAttribute(
+        "data-is-retrying",
+        "false",
+      );
+      expect(screen.queryByTestId("error-description")).not.toBeInTheDocument();
+      // Manual "Try again" button still works
+      expect(screen.getByTestId("retry-button")).toBeInTheDocument();
+    });
+
+    it("does not mark as retrying when the error is the workspace-loading variant", () => {
+      render(
+        <IssueViewGuard
+          {...defaultProps({
+            error: "workspace is loading",
+            retryCount: 3,
+            nextRetryAt: Date.now() + 1_000,
+          })}
+        />,
+      );
+
+      // The 'loading' variant has its own auto-retry UX; we don't override it
+      const errorDisplay = screen.getByTestId("error-display");
+      expect(errorDisplay).toHaveAttribute("data-variant", "loading");
+      expect(errorDisplay).toHaveAttribute("data-is-retrying", "false");
     });
   });
 

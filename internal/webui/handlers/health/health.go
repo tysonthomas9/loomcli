@@ -154,8 +154,13 @@ func HandleAPIHealth(pool daemon.Pool) http.HandlerFunc { //nolint:funlen
 
 			client, err := pool.Get(ctx)
 			if err != nil {
-				status.Status = "degraded"
-				status.Daemon.Error = err.Error()
+				if errors.Is(err, daemon.ErrDaemonStarting) {
+					status.Status = "starting"
+					status.Daemon.Error = "daemon is starting up"
+				} else {
+					status.Status = "degraded"
+					status.Daemon.Error = err.Error()
+				}
 			} else {
 				rpcOK := false
 				defer func() {
@@ -190,7 +195,7 @@ func HandleAPIHealth(pool daemon.Pool) http.HandlerFunc { //nolint:funlen
 		}
 
 		httpStatus := http.StatusOK
-		if status.Status != "ok" {
+		if status.Status != "ok" && status.Status != "starting" {
 			httpStatus = http.StatusServiceUnavailable
 		}
 		handler.WriteJSON(w, httpStatus, status)

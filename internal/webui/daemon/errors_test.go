@@ -33,6 +33,16 @@ func TestIsRetryable(t *testing.T) {
 			expected: true,
 		},
 		{
+			name:     "ErrDaemonStarting is retryable",
+			err:      ErrDaemonStarting,
+			expected: true,
+		},
+		{
+			name:     "wrapped ErrDaemonStarting is retryable",
+			err:      fmt.Errorf("connect: %w", ErrDaemonStarting),
+			expected: true,
+		},
+		{
 			name:     "ErrInvalidSocketPath is not retryable",
 			err:      ErrInvalidSocketPath,
 			expected: false,
@@ -119,6 +129,10 @@ func TestErrorMessages(t *testing.T) {
 			err:     ErrPoolClosed,
 			wantMsg: "connection pool closed",
 		},
+		{
+			err:     ErrDaemonStarting,
+			wantMsg: "daemon starting up",
+		},
 	}
 
 	for _, tt := range tests {
@@ -139,6 +153,7 @@ func TestErrorsAreDistinct(t *testing.T) {
 		ErrInvalidSocketPath,
 		ErrPoolExhausted,
 		ErrPoolClosed,
+		ErrDaemonStarting,
 	}
 
 	for i, err1 := range errs {

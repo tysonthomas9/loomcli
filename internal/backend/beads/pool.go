@@ -112,6 +112,18 @@ func (pb *PooledBackend) Count(ctx context.Context, opts backend.CountOpts) (int
 	})
 }
 
+func (pb *PooledBackend) GetChildren(ctx context.Context, id string) ([]backend.IssueData, error) {
+	return execPool(ctx, pb, "GetChildren", func(b *BeadsBackend) ([]backend.IssueData, error) {
+		return b.GetChildren(ctx, id)
+	})
+}
+
+func (pb *PooledBackend) SearchIssues(ctx context.Context, query string, limit int) ([]backend.IssueData, error) {
+	return execPool(ctx, pb, "SearchIssues", func(b *BeadsBackend) ([]backend.IssueData, error) {
+		return b.SearchIssues(ctx, query, limit)
+	})
+}
+
 // --- Mutation operations ---
 
 func (pb *PooledBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error) {
@@ -130,6 +142,20 @@ func (pb *PooledBackend) Update(ctx context.Context, id string, params backend.U
 func (pb *PooledBackend) ClaimIssue(ctx context.Context, id string, lockTTL time.Duration) error {
 	_, err := execPool(ctx, pb, "ClaimIssue", func(b *BeadsBackend) (struct{}, error) {
 		return struct{}{}, b.ClaimIssue(ctx, id, lockTTL)
+	})
+	return err
+}
+
+func (pb *PooledBackend) DeferIssue(ctx context.Context, id string, until time.Time) error {
+	_, err := execPool(ctx, pb, "DeferIssue", func(b *BeadsBackend) (struct{}, error) {
+		return struct{}{}, b.DeferIssue(ctx, id, until)
+	})
+	return err
+}
+
+func (pb *PooledBackend) UndeferIssue(ctx context.Context, id string) error {
+	_, err := execPool(ctx, pb, "UndeferIssue", func(b *BeadsBackend) (struct{}, error) {
+		return struct{}{}, b.UndeferIssue(ctx, id)
 	})
 	return err
 }

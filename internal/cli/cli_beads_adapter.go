@@ -213,6 +213,31 @@ func (a *cliBeadsAdapter) Count(_ context.Context, _ backend.CountOpts) (int, er
 	return 0, backend.ErrNotImplemented("Count", "not supported via CLI adapter")
 }
 
+// GetChildren returns the direct children of the given issue by shelling out to
+// bd list --parent <id> --json.
+func (a *cliBeadsAdapter) GetChildren(_ context.Context, id string) ([]backend.IssueData, error) {
+	if id == "" {
+		return nil, backend.ErrValidation("GetChildren", "id must not be empty")
+	}
+	return a.queryIssues("GetChildren", []string{"list", "--json", "--parent", id})
+}
+
+// SearchIssues performs a full-text search by shelling out to
+// bd search <query> --json [--limit N].
+func (a *cliBeadsAdapter) SearchIssues(_ context.Context, query string, limit int) ([]backend.IssueData, error) {
+	if query == "" {
+		return nil, backend.ErrValidation("SearchIssues", "query must not be empty")
+	}
+	if limit < 0 {
+		return nil, backend.ErrValidation("SearchIssues", "limit must not be negative")
+	}
+	args := []string{"search", query, "--json"}
+	if limit > 0 {
+		args = append(args, "--limit", strconv.Itoa(limit))
+	}
+	return a.queryIssues("SearchIssues", args)
+}
+
 // --- Mutation methods ---
 
 func (a *cliBeadsAdapter) Create(_ context.Context, _ backend.CreateParams) (*backend.IssueData, error) {
@@ -252,6 +277,27 @@ func (a *cliBeadsAdapter) ClaimIssue(_ context.Context, id string, lockTTL time.
 		return backend.ErrValidation("ClaimIssue", "lockTTL must not be negative")
 	}
 	return a.runMutation("ClaimIssue", "update", id, "--claim")
+}
+
+// DeferIssue defers an issue by shelling out to bd defer <id> [--until <RFC3339>].
+// A zero `until` defers without a specific end date.
+func (a *cliBeadsAdapter) DeferIssue(_ context.Context, id string, until time.Time) error {
+	if id == "" {
+		return backend.ErrValidation("DeferIssue", "id must not be empty")
+	}
+	args := []string{"defer", id}
+	if !until.IsZero() {
+		args = append(args, "--until", until.Format(time.RFC3339))
+	}
+	return a.runMutation("DeferIssue", args...)
+}
+
+// UndeferIssue restores a deferred issue to open by shelling out to bd undefer <id>.
+func (a *cliBeadsAdapter) UndeferIssue(_ context.Context, id string) error {
+	if id == "" {
+		return backend.ErrValidation("UndeferIssue", "id must not be empty")
+	}
+	return a.runMutation("UndeferIssue", "undefer", id)
 }
 
 func (a *cliBeadsAdapter) Close(_ context.Context, id string, params backend.CloseParams) (*backend.CloseResult, error) {

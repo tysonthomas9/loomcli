@@ -26,6 +26,8 @@ export interface WorkspaceViewData {
   filteredIssues: Issue[];
   isLoading: boolean;
   error: string | null;
+  retryCount: number;
+  nextRetryAt: number | null;
   connectionState: string;
   reconnectAttempts: number;
   pendingIds: Set<string> | undefined;
@@ -83,6 +85,8 @@ export const NO_WORKSPACE_VIEW_DATA: WorkspaceViewData = {
   filteredIssues: [],
   isLoading: false,
   error: null,
+  retryCount: 0,
+  nextRetryAt: null,
   connectionState: "disconnected",
   reconnectAttempts: 0,
   pendingIds: undefined,

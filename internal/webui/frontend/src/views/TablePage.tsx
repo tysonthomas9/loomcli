@@ -12,6 +12,8 @@ export function TablePage() {
     issues,
     isLoading,
     error,
+    retryCount,
+    nextRetryAt,
     isMultiRepo,
     debouncedSearch,
     activeView,
@@ -34,6 +36,8 @@ export function TablePage() {
         issues={issues}
         isLoading={isLoading}
         error={error}
+        retryCount={retryCount}
+        nextRetryAt={nextRetryAt}
         isMultiRepo={isMultiRepo}
         onRetry={refetch}
         loadingVariant="table"

@@ -89,10 +89,22 @@ func (m *mockIPCBackend) Stats(context.Context) (*backend.StatsData, error) {
 func (m *mockIPCBackend) Count(context.Context, backend.CountOpts) (int, error) {
 	panic("not implemented")
 }
+func (m *mockIPCBackend) GetChildren(context.Context, string) ([]backend.IssueData, error) {
+	panic("not implemented")
+}
+func (m *mockIPCBackend) SearchIssues(context.Context, string, int) ([]backend.IssueData, error) {
+	panic("not implemented")
+}
 func (m *mockIPCBackend) Create(context.Context, backend.CreateParams) (*backend.IssueData, error) {
 	panic("not implemented")
 }
 func (m *mockIPCBackend) Reopen(context.Context, string, backend.ReopenParams) error {
+	panic("not implemented")
+}
+func (m *mockIPCBackend) DeferIssue(context.Context, string, time.Time) error {
+	panic("not implemented")
+}
+func (m *mockIPCBackend) UndeferIssue(context.Context, string) error {
 	panic("not implemented")
 }
 func (m *mockIPCBackend) Delete(context.Context, backend.DeleteParams) error {

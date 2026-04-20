@@ -1100,3 +1100,286 @@ func TestCliBeadsAdapter_Update_NilAgentState(t *testing.T) {
 		t.Fatalf("expected 1 call, got %d", len(runner.calls))
 	}
 }
+
+// --- GetChildren tests ---
+
+func TestCliBeadsAdapter_GetChildren_Success(t *testing.T) {
+	jsonOut := `[
+		{"id": "child-1", "title": "Child One", "status": "open", "priority": 2, "issue_type": "task"},
+		{"id": "child-2", "title": "Child Two", "status": "in_progress", "priority": 1, "issue_type": "bug"}
+	]`
+	runner := &mockBDRunner{
+		fn: func(_ string, _ ...string) CommandResult {
+			return CommandResult{Stdout: jsonOut}
+		},
+	}
+	a := newCliBeadsAdapter(runner, "/tmp/test")
+
+	got, err := a.GetChildren(context.Background(), "epic-1")
+	if err != nil {
+		t.Fatalf("GetChildren() error = %v", err)
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(runner.calls))
+	}
+	gotArgs := strings.Join(runner.calls[0].Args, " ")
+	wantArgs := "list --json --parent epic-1"
+	if gotArgs != wantArgs {
+		t.Errorf("args = %q, want %q", gotArgs, wantArgs)
+	}
+	if len(got) != 2 {
+		t.Fatalf("GetChildren() returned %d items, want 2", len(got))
+	}
+	if got[0].ID != "child-1" {
+		t.Errorf("got[0].ID = %q, want %q", got[0].ID, "child-1")
+	}
+	if got[1].ID != "child-2" {
+		t.Errorf("got[1].ID = %q, want %q", got[1].ID, "child-2")
+	}
+}
+
+func TestCliBeadsAdapter_GetChildren_EmptyID(t *testing.T) {
+	runner := &mockBDRunner{}
+	a := newCliBeadsAdapter(runner, "/tmp/test")
+
+	_, err := a.GetChildren(context.Background(), "")
+	if err == nil {
+		t.Fatal("expected error for empty ID")
+	}
+	if len(runner.calls) != 0 {
+		t.Errorf("runner should not be called for empty ID, got %d calls", len(runner.calls))
+	}
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Errorf("error kind = %v, want %v", err, backend.KindValidation)
+	}
+}
+
+func TestCliBeadsAdapter_GetChildren_RunnerError(t *testing.T) {
+	runner := &mockBDRunner{
+		fn: func(_ string, _ ...string) CommandResult {
+			return CommandResult{Err: fmt.Errorf("runner failed")}
+		},
+	}
+	a := newCliBeadsAdapter(runner, "/tmp/test")
+
+	_, err := a.GetChildren(context.Background(), "epic-1")
+	if err == nil {
+		t.Fatal("expected error for runner failure")
+	}
+}
+
+// --- DeferIssue / UndeferIssue tests ---
+
+func TestCliBeadsAdapter_DeferIssue_WithUntil(t *testing.T) {
+	until := time.Date(2026, 4, 10, 0, 0, 0, 0, time.UTC)
+	runner := &mockBDRunner{}
+	a := newCliBeadsAdapter(runner, "/tmp/test")
+
+	if err := a.DeferIssue(context.Background(), "T-10", until); err != nil {
+		t.Fatalf("DeferIssue error = %v", err)
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(runner.calls))
+	}
+	got := strings.Join(runner.calls[0].Args, " ")
+	want := "defer T-10 --until " + until.Format(time.RFC3339)
+	if got != want {
+		t.Errorf("args = %q, want %q", got, want)
+	}
+}
+
+func TestCliBeadsAdapter_DeferIssue_ZeroUntil(t *testing.T) {
+	runner := &mockBDRunner{}
+	a := newCliBeadsAdapter(runner, "/tmp/test")
+
+	if err := a.DeferIssue(context.Background(), "T-10", time.Time{}); err != nil {
+		t.Fatalf("DeferIssue error = %v", err)
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(runner.calls))
+	}
+	got := strings.Join(runner.calls[0].Args, " ")
+	want := "defer T-10"
+	if got != want {
+		t.Errorf("args = %q, want %q", got, want)
+	}
+}
+
+func TestCliBeadsAdapter_DeferIssue_EmptyID(t *testing.T) {
+	runner := &mockBDRunner{}
+	a := newCliBeadsAdapter(runner, "/tmp/test")
+
+	err := a.DeferIssue(context.Background(), "", time.Time{})
+	if err == nil {
+		t.Fatal("expected error for empty ID")
+	}
+	if len(runner.calls) != 0 {
+		t.Errorf("runner should not be called for empty ID, got %d", len(runner.calls))
+	}
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Errorf("error kind mismatch: %v", err)
+	}
+}
+
+func TestCliBeadsAdapter_DeferIssue_RunnerError(t *testing.T) {
+	runner := &mockBDRunner{
+		fn: func(_ string, _ ...string) CommandResult {
+			return CommandResult{Err: fmt.Errorf("runner failed")}
+		},
+	}
+	a := newCliBeadsAdapter(runner, "/tmp/test")
+
+	err := a.DeferIssue(context.Background(), "T-10", time.Time{})
+	if err == nil {
+		t.Fatal("expected error for runner failure")
+	}
+}
+
+func TestCliBeadsAdapter_UndeferIssue_Success(t *testing.T) {
+	runner := &mockBDRunner{}
+	a := newCliBeadsAdapter(runner, "/tmp/test")
+
+	if err := a.UndeferIssue(context.Background(), "T-10"); err != nil {
+		t.Fatalf("UndeferIssue error = %v", err)
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(runner.calls))
+	}
+	got := strings.Join(runner.calls[0].Args, " ")
+	want := "undefer T-10"
+	if got != want {
+		t.Errorf("args = %q, want %q", got, want)
+	}
+}
+
+func TestCliBeadsAdapter_UndeferIssue_EmptyID(t *testing.T) {
+	runner := &mockBDRunner{}
+	a := newCliBeadsAdapter(runner, "/tmp/test")
+
+	err := a.UndeferIssue(context.Background(), "")
+	if err == nil {
+		t.Fatal("expected error for empty ID")
+	}
+	if len(runner.calls) != 0 {
+		t.Errorf("runner should not be called for empty ID, got %d", len(runner.calls))
+	}
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Errorf("error kind mismatch: %v", err)
+	}
+}
+
+func TestCliBeadsAdapter_UndeferIssue_RunnerError(t *testing.T) {
+	runner := &mockBDRunner{
+		fn: func(_ string, _ ...string) CommandResult {
+			return CommandResult{Err: fmt.Errorf("runner failed")}
+		},
+	}
+	a := newCliBeadsAdapter(runner, "/tmp/test")
+
+	err := a.UndeferIssue(context.Background(), "T-10")
+	if err == nil {
+		t.Fatal("expected error for runner failure")
+	}
+}
+
+// --- SearchIssues tests ---
+
+func TestCliBeadsAdapter_SearchIssues_WithLimit(t *testing.T) {
+	jsonOut := `[{"id":"T-1","title":"Auth bug","status":"open","priority":2}]`
+	runner := &mockBDRunner{
+		fn: func(_ string, _ ...string) CommandResult {
+			return CommandResult{Stdout: jsonOut}
+		},
+	}
+	a := newCliBeadsAdapter(runner, "/tmp/test")
+
+	got, err := a.SearchIssues(context.Background(), "auth bug", 10)
+	if err != nil {
+		t.Fatalf("SearchIssues() error = %v", err)
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(runner.calls))
+	}
+	gotArgs := strings.Join(runner.calls[0].Args, " ")
+	wantArgs := "search auth bug --json --limit 10"
+	if gotArgs != wantArgs {
+		t.Errorf("args = %q, want %q", gotArgs, wantArgs)
+	}
+	if len(got) != 1 {
+		t.Fatalf("SearchIssues() returned %d items, want 1", len(got))
+	}
+	if got[0].ID != "T-1" {
+		t.Errorf("got[0].ID = %q, want %q", got[0].ID, "T-1")
+	}
+}
+
+func TestCliBeadsAdapter_SearchIssues_NoLimit(t *testing.T) {
+	runner := &mockBDRunner{
+		fn: func(_ string, _ ...string) CommandResult {
+			return CommandResult{Stdout: "[]"}
+		},
+	}
+	a := newCliBeadsAdapter(runner, "/tmp/test")
+
+	got, err := a.SearchIssues(context.Background(), "auth bug", 0)
+	if err != nil {
+		t.Fatalf("SearchIssues() error = %v", err)
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(runner.calls))
+	}
+	gotArgs := strings.Join(runner.calls[0].Args, " ")
+	wantArgs := "search auth bug --json"
+	if gotArgs != wantArgs {
+		t.Errorf("args = %q, want %q", gotArgs, wantArgs)
+	}
+	if len(got) != 0 {
+		t.Errorf("SearchIssues() returned %d items, want 0", len(got))
+	}
+}
+
+func TestCliBeadsAdapter_SearchIssues_EmptyQuery(t *testing.T) {
+	runner := &mockBDRunner{}
+	a := newCliBeadsAdapter(runner, "/tmp/test")
+
+	_, err := a.SearchIssues(context.Background(), "", 10)
+	if err == nil {
+		t.Fatal("expected error for empty query")
+	}
+	if len(runner.calls) != 0 {
+		t.Errorf("runner should not be called for empty query, got %d calls", len(runner.calls))
+	}
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Errorf("error kind = %v, want %v", err, backend.KindValidation)
+	}
+}
+
+func TestCliBeadsAdapter_SearchIssues_NegativeLimit(t *testing.T) {
+	runner := &mockBDRunner{}
+	a := newCliBeadsAdapter(runner, "/tmp/test")
+
+	_, err := a.SearchIssues(context.Background(), "auth bug", -1)
+	if err == nil {
+		t.Fatal("expected error for negative limit")
+	}
+	if len(runner.calls) != 0 {
+		t.Errorf("runner should not be called for negative limit, got %d calls", len(runner.calls))
+	}
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Errorf("error kind = %v, want %v", err, backend.KindValidation)
+	}
+}
+
+func TestCliBeadsAdapter_SearchIssues_RunnerError(t *testing.T) {
+	runner := &mockBDRunner{
+		fn: func(_ string, _ ...string) CommandResult {
+			return CommandResult{Err: fmt.Errorf("runner failed")}
+		},
+	}
+	a := newCliBeadsAdapter(runner, "/tmp/test")
+
+	_, err := a.SearchIssues(context.Background(), "auth bug", 10)
+	if err == nil {
+		t.Fatal("expected error for runner failure")
+	}
+}

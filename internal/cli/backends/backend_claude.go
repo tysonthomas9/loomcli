@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -16,6 +17,33 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
+
+// DefaultMaxBudgetUSD is the default per-session budget ceiling for non-interactive
+// Claude invocations. Analysis of 287 sessions shows median session cost well under $2;
+// $5 provides 2.5x headroom to prevent mid-response truncation.
+const DefaultMaxBudgetUSD = 5.0
+
+// resolveMaxBudgetUSD reads LOOM_MAX_BUDGET_USD from the environment and returns the
+// value to pass as --max-budget-usd. Returns "" if the flag should be omitted (opt-out).
+func resolveMaxBudgetUSD() string {
+	raw := os.Getenv("LOOM_MAX_BUDGET_USD")
+	if raw == "" {
+		return fmt.Sprintf("%.2f", DefaultMaxBudgetUSD)
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[warn] invalid LOOM_MAX_BUDGET_USD=%q, using default\n", raw)
+		return fmt.Sprintf("%.2f", DefaultMaxBudgetUSD)
+	}
+	if v < 0 {
+		fmt.Fprintf(os.Stderr, "[warn] negative LOOM_MAX_BUDGET_USD=%q, using default\n", raw)
+		return fmt.Sprintf("%.2f", DefaultMaxBudgetUSD)
+	}
+	if v == 0 {
+		return "" // explicit opt-out
+	}
+	return fmt.Sprintf("%.2f", v)
+}
 
 // ClaudeBackend implements the Backend interface for the Claude CLI.
 type ClaudeBackend struct{}
@@ -73,8 +101,12 @@ func (c *ClaudeBackend) HealthCheck() HealthStatus {
 // of JSON events. The caller is responsible for closing the returned ReadCloser,
 // which also terminates the subprocess.
 func (c *ClaudeBackend) InvokeStreaming(ctx context.Context, workDir, prompt, agentName string) (io.ReadCloser, error) {
-	cmd := exec.Command("claude", "-p", "--verbose", "--output-format", "stream-json",
-		"--dangerously-skip-permissions")
+	args := []string{"-p", "--verbose", "--output-format", "stream-json",
+		"--dangerously-skip-permissions"}
+	if budget := resolveMaxBudgetUSD(); budget != "" {
+		args = append(args, "--max-budget-usd", budget)
+	}
+	cmd := exec.Command("claude", args...) //nolint:gosec // G204: intentional subprocess launch for claude CLI
 	cmd.Dir = workDir
 	cmd.Env = buildClaudeEnv(workDir, agentName)
 
@@ -195,6 +227,7 @@ func buildClaudeEnv(workDir, agentName string) []string {
 
 // buildClaudeNonInteractiveCmd constructs the exec.Cmd for non-interactive Claude invocation.
 // When resumeSessionID is non-empty, the command includes --resume --session-id flags.
+// Appends --max-budget-usd when resolveMaxBudgetUSD returns a non-empty value.
 func buildClaudeNonInteractiveCmd(workDir, agentName, resumeSessionID string) *exec.Cmd {
 	var args []string
 	if resumeSessionID != "" {
@@ -203,6 +236,9 @@ func buildClaudeNonInteractiveCmd(workDir, agentName, resumeSessionID string) *e
 	} else {
 		args = []string{"-p", "--verbose", "--output-format", "stream-json",
 			"--dangerously-skip-permissions"}
+	}
+	if budget := resolveMaxBudgetUSD(); budget != "" {
+		args = append(args, "--max-budget-usd", budget)
 	}
 	cmd := exec.Command("claude", args...) //nolint:gosec // G204: intentional subprocess launch for claude CLI
 	cmd.Dir = workDir
@@ -215,15 +251,45 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 	resumeID := consumeResumeSessionID()
 	cmd := buildClaudeNonInteractiveCmd(workDir, agentName, resumeID)
 
-	r, err := pipePromptToCmd(cmd, prompt)
+	r, stdout, err := setupNonInteractivePipes(cmd, prompt, resumeID)
 	if err != nil {
-		return err
+		return wrapInvocationError(err, "")
 	}
 
+	guard := newProcessGuard(cmd.Process)
+	go func() {
+		select {
+		case <-shutdown:
+			guard.Signal(syscall.SIGTERM)
+		case <-guard.Done():
+		}
+	}()
+
+	ClearLastCapturedSessionID()
+	outputTail := scanStreamOutput(stdout, newStreamLineHandler(workDir, collector))
+
+	runErr := cmd.Wait()
+	guard.WaitAndMark()
+	r.Close()
+
+	if err := cli.ClearLockClaudeSessionID(workDir); err != nil {
+		fmt.Fprintf(os.Stderr, "[loom] failed to clear claude session ID: %v\n", err)
+	}
+
+	return wrapInvocationError(runErr, outputTail)
+}
+
+// setupNonInteractivePipes configures stdin/stdout pipes, starts the process,
+// and prints the launch message. Returns the stdin pipe file and stdout reader.
+func setupNonInteractivePipes(cmd *exec.Cmd, prompt, resumeID string) (*os.File, io.Reader, error) {
+	r, err := pipePromptToCmd(cmd, prompt)
+	if err != nil {
+		return nil, nil, err
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		r.Close()
-		return fmt.Errorf("failed to create stdout pipe: %w", err)
+		return nil, nil, fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
 	cmd.Stderr = os.Stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -237,30 +303,43 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 
 	if err := cmd.Start(); err != nil {
 		r.Close()
-		return fmt.Errorf("failed to start claude: %w", err)
+		return nil, nil, fmt.Errorf("failed to start claude: %w", err)
 	}
+	return r, stdout, nil
+}
 
-	guard := newProcessGuard(cmd.Process)
-	go func() {
-		select {
-		case <-shutdown:
-			guard.Signal(syscall.SIGTERM)
-		case <-guard.Done():
-		}
-	}()
+// outputRingBuffer keeps the last N lines of stream output for error classification.
+// Uses an index-based circular buffer to avoid pinning evicted strings.
+type outputRingBuffer struct {
+	lines []string
+	idx   int
+	count int
+}
 
-	ClearLastCapturedSessionID()
-	scanStreamOutput(stdout, newStreamLineHandler(workDir, collector))
+func newOutputRingBuffer(cap int) *outputRingBuffer {
+	return &outputRingBuffer{lines: make([]string, cap)}
+}
 
-	runErr := cmd.Wait()
-	guard.WaitAndMark()
-	r.Close()
-
-	if err := cli.ClearLockClaudeSessionID(workDir); err != nil {
-		fmt.Fprintf(os.Stderr, "[loom] failed to clear claude session ID: %v\n", err)
+func (b *outputRingBuffer) Add(line string) {
+	b.lines[b.idx] = line
+	b.idx = (b.idx + 1) % len(b.lines)
+	if b.count < len(b.lines) {
+		b.count++
 	}
+}
 
-	return runErr
+func (b *outputRingBuffer) String() string {
+	if b.count == 0 {
+		return ""
+	}
+	if b.count < len(b.lines) {
+		return strings.Join(b.lines[:b.count], "\n")
+	}
+	// Buffer is full: oldest entry is at b.idx, wrap around.
+	result := make([]string, 0, len(b.lines))
+	result = append(result, b.lines[b.idx:]...)
+	result = append(result, b.lines[:b.idx]...)
+	return strings.Join(result, "\n")
 }
 
 // newStreamLineHandler returns a line handler that captures the Claude session ID
@@ -285,13 +364,19 @@ func newStreamLineHandler(workDir string, collector *usage.Collector) func(strin
 
 // scanStreamOutput reads stdout line by line through a buffered scanner and
 // calls handler for each line. Shared by Claude, Codex, and OpenCode backends.
-func scanStreamOutput(stdout io.Reader, handler func(string)) {
+// It returns the last 50 lines so callers can classify invocation failures
+// from invocation-local output rather than shared package state.
+func scanStreamOutput(stdout io.Reader, handler func(string)) string {
+	outputBuf := newOutputRingBuffer(50)
 	scanner := bufio.NewScanner(stdout)
 	buf := make([]byte, 0, 1024*1024) // 1MB buffer for large tool results
 	scanner.Buffer(buf, 10*1024*1024)
 	for scanner.Scan() {
-		handler(scanner.Text())
+		line := scanner.Text()
+		outputBuf.Add(line)
+		handler(line)
 	}
+	return outputBuf.String()
 }
 
 // StreamEvent represents a Claude stream-json event.

@@ -415,6 +415,168 @@ func TestStats_ServerError(t *testing.T) {
 
 // --- Count / ClaimIssue / Batch / Mutations ---
 
+func TestGetChildren_HappyPath(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	var gotPath string
+	var gotQuery string
+	ab, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		if r.Method != http.MethodGet {
+			t.Errorf("method = %s", r.Method)
+		}
+		status := gen.IssueStatus("open")
+		issueType := gen.IssueIssueType("task")
+		respondOK(w, []gen.Issue{
+			{Id: "c1", Title: "Child 1", Status: &status, IssueType: &issueType, Priority: 1, CreatedAt: now, UpdatedAt: now},
+			{Id: "c2", Title: "Child 2", Status: &status, IssueType: &issueType, Priority: 2, CreatedAt: now, UpdatedAt: now},
+		})
+	})
+	defer ts.Close()
+
+	result, err := ab.GetChildren(context.Background(), "epic-1")
+	if err != nil {
+		t.Fatalf("GetChildren: %v", err)
+	}
+	if !strings.HasSuffix(gotPath, "/issues") {
+		t.Errorf("path = %q, want suffix /issues", gotPath)
+	}
+	if !strings.Contains(gotQuery, "parent_id=epic-1") {
+		t.Errorf("query = %q, want parent_id=epic-1", gotQuery)
+	}
+	if len(result) != 2 {
+		t.Fatalf("len = %d, want 2", len(result))
+	}
+	if result[0].ID != "c1" || result[1].ID != "c2" {
+		t.Errorf("IDs: %q %q", result[0].ID, result[1].ID)
+	}
+}
+
+func TestGetChildren_EmptyID(t *testing.T) {
+	ab, err := New(Config{BaseURL: "http://x", WorkspaceID: "ws"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = ab.GetChildren(context.Background(), "")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Errorf("expected KindValidation, got %v", err)
+	}
+}
+
+func TestGetChildren_Empty(t *testing.T) {
+	ab, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		respondOK(w, []gen.Issue{})
+	})
+	defer ts.Close()
+	result, err := ab.GetChildren(context.Background(), "epic-1")
+	if err != nil {
+		t.Fatalf("GetChildren: %v", err)
+	}
+	if len(result) != 0 {
+		t.Errorf("expected 0, got %d", len(result))
+	}
+}
+
+func TestSearchIssues_HappyPath(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	var gotPath string
+	var gotQuery string
+	ab, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		if r.Method != http.MethodGet {
+			t.Errorf("method = %s", r.Method)
+		}
+		status := gen.IssueStatus("open")
+		issueType := gen.IssueIssueType("task")
+		respondOK(w, []gen.Issue{
+			{Id: "s1", Title: "Auth bug in login", Status: &status, IssueType: &issueType, Priority: 2, CreatedAt: now, UpdatedAt: now},
+			{Id: "s2", Title: "Auth bug: refresh token", Status: &status, IssueType: &issueType, Priority: 1, CreatedAt: now, UpdatedAt: now},
+		})
+	})
+	defer ts.Close()
+
+	result, err := ab.SearchIssues(context.Background(), "auth bug", 10)
+	if err != nil {
+		t.Fatalf("SearchIssues: %v", err)
+	}
+	if !strings.HasSuffix(gotPath, "/issues") {
+		t.Errorf("path = %q, want suffix /issues", gotPath)
+	}
+	if !strings.Contains(gotQuery, "q=auth+bug") {
+		t.Errorf("query = %q, want q=auth+bug", gotQuery)
+	}
+	if !strings.Contains(gotQuery, "limit=10") {
+		t.Errorf("query = %q, want limit=10", gotQuery)
+	}
+	if len(result) != 2 {
+		t.Fatalf("len = %d, want 2", len(result))
+	}
+	if result[0].ID != "s1" || result[1].ID != "s2" {
+		t.Errorf("IDs: %q %q", result[0].ID, result[1].ID)
+	}
+}
+
+func TestSearchIssues_EmptyQuery(t *testing.T) {
+	ab, err := New(Config{BaseURL: "http://x", WorkspaceID: "ws"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = ab.SearchIssues(context.Background(), "", 10)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Errorf("expected KindValidation, got %v", err)
+	}
+}
+
+func TestSearchIssues_NegativeLimit(t *testing.T) {
+	ab, err := New(Config{BaseURL: "http://x", WorkspaceID: "ws"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = ab.SearchIssues(context.Background(), "q", -1)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Errorf("expected KindValidation, got %v", err)
+	}
+}
+
+func TestSearchIssues_ServerError(t *testing.T) {
+	ab, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		respondErr(w, 500, "search index unavailable")
+	})
+	defer ts.Close()
+	_, err := ab.SearchIssues(context.Background(), "q", 0)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !backend.IsKind(err, backend.KindInternal) {
+		t.Errorf("expected KindInternal, got %v", err)
+	}
+}
+
+func TestSearchIssues_UnmarshalError(t *testing.T) {
+	ab, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true,"data":"not-an-array"}`))
+	})
+	defer ts.Close()
+	_, err := ab.SearchIssues(context.Background(), "q", 0)
+	if err == nil {
+		t.Fatal("expected unmarshal error")
+	}
+	if !backend.IsKind(err, backend.KindInternal) {
+		t.Errorf("expected KindInternal, got %v", err)
+	}
+}
+
 func TestCount_NotImplemented(t *testing.T) {
 	ab, err := New(Config{BaseURL: "http://x", WorkspaceID: "ws"})
 	if err != nil {
@@ -429,17 +591,195 @@ func TestCount_NotImplemented(t *testing.T) {
 	}
 }
 
-func TestClaimIssue_NotImplemented(t *testing.T) {
+func TestClaimIssue_Success(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	var gotMethod, gotPath string
+	ab, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		respondOK(w, gen.IssueResponse{
+			Id:        "abc",
+			Title:     "claim test",
+			Status:    gen.IssueResponseStatus("in_progress"),
+			IssueType: gen.IssueResponseIssueType("task"),
+			Priority:  2,
+			CreatedAt: now,
+			UpdatedAt: now,
+			Labels:    []string{},
+		})
+	})
+	defer ts.Close()
+
+	if err := ab.ClaimIssue(context.Background(), "abc", 0); err != nil {
+		t.Fatalf("ClaimIssue: %v", err)
+	}
+	if gotMethod != http.MethodPost {
+		t.Errorf("method = %s, want POST", gotMethod)
+	}
+	if !strings.HasSuffix(gotPath, "/issues/abc/claim") {
+		t.Errorf("path = %q, want suffix /issues/abc/claim", gotPath)
+	}
+}
+
+func TestClaimIssue_AlreadyClaimed(t *testing.T) {
+	ab, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		respondErr(w, http.StatusConflict, "already claimed by other-agent")
+	})
+	defer ts.Close()
+
+	err := ab.ClaimIssue(context.Background(), "abc", 0)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !backend.IsKind(err, backend.KindConflict) {
+		t.Errorf("expected KindConflict, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "already claimed") {
+		t.Errorf("error should preserve daemon message, got %v", err)
+	}
+}
+
+func TestClaimIssue_NotFound(t *testing.T) {
+	ab, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		respondErr(w, http.StatusNotFound, "issue not found: abc")
+	})
+	defer ts.Close()
+
+	err := ab.ClaimIssue(context.Background(), "abc", 0)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !backend.IsKind(err, backend.KindNotFound) {
+		t.Errorf("expected KindNotFound, got %v", err)
+	}
+}
+
+func TestClaimIssue_EmptyID(t *testing.T) {
+	ab, ts := newTestServer(t, func(_ http.ResponseWriter, _ *http.Request) {
+		t.Fatal("server should not be contacted when ID is empty")
+	})
+	defer ts.Close()
+
+	err := ab.ClaimIssue(context.Background(), "", 0)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Errorf("expected KindValidation, got %v", err)
+	}
+}
+
+func TestClaimIssue_NegativeTTL(t *testing.T) {
+	ab, ts := newTestServer(t, func(_ http.ResponseWriter, _ *http.Request) {
+		t.Fatal("server should not be contacted for negative TTL")
+	})
+	defer ts.Close()
+
+	err := ab.ClaimIssue(context.Background(), "abc", -1*time.Second)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Errorf("expected KindValidation, got %v", err)
+	}
+}
+
+// --- DeferIssue / UndeferIssue ---
+
+func TestDeferIssue_WithUntil(t *testing.T) {
+	until := time.Date(2026, 4, 10, 0, 0, 0, 0, time.UTC)
+	wantUntil := until.Format(time.RFC3339)
+
+	var gotPath, gotMethod string
+	var gotBody gen.PatchIssueRequest
+	ab, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotMethod = r.Method
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		respondOK(w, map[string]interface{}{})
+	})
+	defer ts.Close()
+
+	if err := ab.DeferIssue(context.Background(), "bd-1", until); err != nil {
+		t.Fatalf("DeferIssue: %v", err)
+	}
+	if gotMethod != http.MethodPatch {
+		t.Errorf("method = %q, want PATCH", gotMethod)
+	}
+	if !strings.HasSuffix(gotPath, "/issues/bd-1") {
+		t.Errorf("path = %q, want suffix /issues/bd-1", gotPath)
+	}
+	if gotBody.Status == nil || string(*gotBody.Status) != "deferred" {
+		t.Errorf("status = %v, want deferred", gotBody.Status)
+	}
+	if gotBody.DeferUntil == nil || *gotBody.DeferUntil != wantUntil {
+		t.Errorf("defer_until = %v, want %q", gotBody.DeferUntil, wantUntil)
+	}
+}
+
+func TestDeferIssue_ZeroUntil(t *testing.T) {
+	var gotBody gen.PatchIssueRequest
+	ab, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		respondOK(w, map[string]interface{}{})
+	})
+	defer ts.Close()
+
+	if err := ab.DeferIssue(context.Background(), "bd-1", time.Time{}); err != nil {
+		t.Fatalf("DeferIssue: %v", err)
+	}
+	if gotBody.Status == nil || string(*gotBody.Status) != "deferred" {
+		t.Errorf("status = %v, want deferred", gotBody.Status)
+	}
+	if gotBody.DeferUntil != nil {
+		t.Errorf("defer_until = %v, want nil for zero until", gotBody.DeferUntil)
+	}
+}
+
+func TestDeferIssue_EmptyID(t *testing.T) {
 	ab, err := New(Config{BaseURL: "http://x", WorkspaceID: "ws"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = ab.ClaimIssue(context.Background(), "id", time.Minute)
+	err = ab.DeferIssue(context.Background(), "", time.Time{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !backend.IsKind(err, backend.KindNotImplemented) {
-		t.Errorf("expected KindNotImplemented, got %v", err)
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Errorf("expected KindValidation, got %v", err)
+	}
+}
+
+func TestUndeferIssue_Success(t *testing.T) {
+	var gotBody gen.PatchIssueRequest
+	ab, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		respondOK(w, map[string]interface{}{})
+	})
+	defer ts.Close()
+
+	if err := ab.UndeferIssue(context.Background(), "bd-1"); err != nil {
+		t.Fatalf("UndeferIssue: %v", err)
+	}
+	if gotBody.Status == nil || string(*gotBody.Status) != "open" {
+		t.Errorf("status = %v, want open", gotBody.Status)
+	}
+	if gotBody.DeferUntil == nil || *gotBody.DeferUntil != "" {
+		t.Errorf("defer_until = %v, want empty string", gotBody.DeferUntil)
+	}
+}
+
+func TestUndeferIssue_EmptyID(t *testing.T) {
+	ab, err := New(Config{BaseURL: "http://x", WorkspaceID: "ws"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = ab.UndeferIssue(context.Background(), "")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Errorf("expected KindValidation, got %v", err)
 	}
 }
 

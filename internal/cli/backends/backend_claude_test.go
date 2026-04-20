@@ -3,6 +3,7 @@ package backends
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -562,5 +563,161 @@ func TestExtractClaudeSessionID_WrongSubtype(t *testing.T) {
 	_, ok := extractClaudeSessionID(line)
 	if ok {
 		t.Error("expected ok=false for non-init subtype")
+	}
+}
+
+func TestOutputRingBuffer(t *testing.T) {
+	t.Parallel()
+
+	t.Run("basic add and string", func(t *testing.T) {
+		t.Parallel()
+		buf := newOutputRingBuffer(5)
+		buf.Add("line1")
+		buf.Add("line2")
+		buf.Add("line3")
+
+		got := buf.String()
+		want := "line1\nline2\nline3"
+		if got != want {
+			t.Errorf("String() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("cap enforcement drops oldest", func(t *testing.T) {
+		t.Parallel()
+		buf := newOutputRingBuffer(3)
+		buf.Add("a")
+		buf.Add("b")
+		buf.Add("c")
+		buf.Add("d")
+		buf.Add("e")
+
+		got := buf.String()
+		want := "c\nd\ne"
+		if got != want {
+			t.Errorf("String() = %q, want %q (oldest should be dropped)", got, want)
+		}
+	})
+
+	t.Run("50 line cap", func(t *testing.T) {
+		t.Parallel()
+		buf := newOutputRingBuffer(50)
+		for i := 0; i < 75; i++ {
+			buf.Add(fmt.Sprintf("line-%d", i))
+		}
+
+		lines := strings.Split(buf.String(), "\n")
+		if len(lines) != 50 {
+			t.Errorf("got %d lines, want 50", len(lines))
+		}
+		// First line should be line-25 (oldest 25 were dropped)
+		if lines[0] != "line-25" {
+			t.Errorf("first line = %q, want %q", lines[0], "line-25")
+		}
+		// Last line should be line-74
+		if lines[49] != "line-74" {
+			t.Errorf("last line = %q, want %q", lines[49], "line-74")
+		}
+	})
+
+	t.Run("empty buffer", func(t *testing.T) {
+		t.Parallel()
+		buf := newOutputRingBuffer(10)
+		if got := buf.String(); got != "" {
+			t.Errorf("String() on empty buffer = %q, want empty", got)
+		}
+	})
+
+	t.Run("single element", func(t *testing.T) {
+		t.Parallel()
+		buf := newOutputRingBuffer(5)
+		buf.Add("only-line")
+		if got := buf.String(); got != "only-line" {
+			t.Errorf("String() = %q, want %q", got, "only-line")
+		}
+	})
+}
+
+func TestWrapInvocationError(t *testing.T) {
+	baseErr := errors.New("process exited with failure")
+	err := wrapInvocationError(baseErr, "Error: 429 too many requests")
+
+	var invErr *InvocationError
+	if !errors.As(err, &invErr) {
+		t.Fatalf("wrapInvocationError() did not return *InvocationError: %T", err)
+	}
+	if invErr.OutputTail != "process exited with failure\nError: 429 too many requests" {
+		t.Errorf("OutputTail = %q", invErr.OutputTail)
+	}
+	if invErr.ExitCode != 1 {
+		t.Errorf("ExitCode = %d, want 1", invErr.ExitCode)
+	}
+}
+
+func TestResolveMaxBudgetUSD_Default(t *testing.T) {
+	// Not parallel: mutates env vars.
+	// Use t.Setenv to register cleanup, then unset so the var is truly absent.
+	t.Setenv("LOOM_MAX_BUDGET_USD", "placeholder")
+	os.Unsetenv("LOOM_MAX_BUDGET_USD")
+
+	got := resolveMaxBudgetUSD()
+	if got != "5.00" {
+		t.Errorf("resolveMaxBudgetUSD() = %q, want %q", got, "5.00")
+	}
+}
+
+func TestResolveMaxBudgetUSD_CustomValue(t *testing.T) {
+	// Not parallel: mutates env vars.
+	t.Setenv("LOOM_MAX_BUDGET_USD", "10.50")
+
+	got := resolveMaxBudgetUSD()
+	if got != "10.50" {
+		t.Errorf("resolveMaxBudgetUSD() = %q, want %q", got, "10.50")
+	}
+}
+
+func TestResolveMaxBudgetUSD_ZeroOptOut(t *testing.T) {
+	// Not parallel: mutates env vars.
+	t.Setenv("LOOM_MAX_BUDGET_USD", "0")
+
+	got := resolveMaxBudgetUSD()
+	if got != "" {
+		t.Errorf("resolveMaxBudgetUSD() = %q, want empty string (opt-out)", got)
+	}
+}
+
+func TestResolveMaxBudgetUSD_Invalid(t *testing.T) {
+	// Not parallel: mutates env vars.
+	t.Setenv("LOOM_MAX_BUDGET_USD", "abc")
+
+	got := resolveMaxBudgetUSD()
+	if got != "5.00" {
+		t.Errorf("resolveMaxBudgetUSD() = %q, want %q (default fallback)", got, "5.00")
+	}
+}
+
+func TestResolveMaxBudgetUSD_Negative(t *testing.T) {
+	// Not parallel: mutates env vars.
+	t.Setenv("LOOM_MAX_BUDGET_USD", "-1")
+
+	got := resolveMaxBudgetUSD()
+	if got != "5.00" {
+		t.Errorf("resolveMaxBudgetUSD() = %q, want %q (default fallback)", got, "5.00")
+	}
+}
+
+func TestScanStreamOutputReturnsTail(t *testing.T) {
+	stdout := strings.NewReader("line-1\nline-2\nline-3\n")
+	var seen []string
+
+	got := scanStreamOutput(stdout, func(line string) {
+		seen = append(seen, line)
+	})
+
+	if got != "line-1\nline-2\nline-3" {
+		t.Errorf("scanStreamOutput() = %q", got)
+	}
+	if strings.Join(seen, "\n") != got {
+		t.Errorf("seen lines = %q, want %q", strings.Join(seen, "\n"), got)
 	}
 }

@@ -370,6 +370,8 @@ func TestBackend_NotImplemented_Queries(t *testing.T) {
 		{"Blocked", func() error { _, err := b.Blocked(ctx, backend.BlockedOpts{}); return err }},
 		{"Stats", func() error { _, err := b.Stats(ctx); return err }},
 		{"Count", func() error { _, err := b.Count(ctx, backend.CountOpts{}); return err }},
+		{"GetChildren", func() error { _, err := b.GetChildren(ctx, "x"); return err }},
+		{"SearchIssues", func() error { _, err := b.SearchIssues(ctx, "q", 0); return err }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -395,6 +397,8 @@ func TestBackend_NotImplemented_Mutations(t *testing.T) {
 		{"Create", func() error { _, err := b.Create(ctx, backend.CreateParams{}); return err }},
 		{"Reopen", func() error { return b.Reopen(ctx, "x", backend.ReopenParams{}) }},
 		{"Delete", func() error { return b.Delete(ctx, backend.DeleteParams{}) }},
+		{"DeferIssue", func() error { return b.DeferIssue(ctx, "x", time.Time{}) }},
+		{"UndeferIssue", func() error { return b.UndeferIssue(ctx, "x") }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

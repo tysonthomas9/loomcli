@@ -12,6 +12,7 @@ import type {
 } from "../api/common";
 import type { GraphFilter } from "../api/issues";
 import type { Issue, WorkFilter, Status } from "../types";
+import { ApiError } from "@/types/common";
 import {
   MutationCreate,
   MutationUpdate,
@@ -20,6 +21,32 @@ import {
   MutationBonded,
   MutationRefresh,
 } from "@/types/workspace";
+
+/**
+ * Extract a user-facing error message from a fetch failure.
+ *
+ * Prefers the server's original body.error text over the generic HTTP
+ * status text baked into ApiError.message, so UI branches that key off
+ * server-authored phrases (e.g. IssueViewGuard's "workspace is loading"
+ * check that switches to the loading-spinner variant) actually receive
+ * the text the server sent.
+ */
+export function extractErrorMessage(err: unknown): string {
+  if (err instanceof ApiError) {
+    const body = err.body;
+    if (body && typeof body === "object") {
+      const { error } = body as { error?: unknown };
+      if (typeof error === "string" && error.length > 0) {
+        return error;
+      }
+    }
+    return err.message;
+  }
+  if (err instanceof Error) {
+    return err.message;
+  }
+  return "Failed to fetch issues";
+}
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -30,6 +57,9 @@ export const MAX_RECONNECT_ATTEMPTS = 10;
 export const STALE_BANNER_DELAY_MS = 5_000;
 export const AUTO_ROLLBACK_TIMEOUT_MS = 30_000;
 export const REFRESH_DEBOUNCE_MS = 1_000;
+export const MAX_AUTO_RETRIES = 5;
+export const RETRY_BASE_DELAY_MS = 1_000;
+export const RETRY_MAX_DELAY_MS = 16_000;
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -42,6 +72,12 @@ export interface FetchIssuesParams {
   graphFilter?: GraphFilter;
   sourceRepos?: string[];
   signal?: AbortSignal;
+  /**
+   * Signals that this fetch is an automatic retry — skip resetting retryCount
+   * at the start of the call. Defaults to false for user-initiated or
+   * view-switch fetches, which reset retry state.
+   */
+  isAutoRetry?: boolean;
 }
 
 export interface IssueStoreConfig {
@@ -61,6 +97,10 @@ export interface IssueStoreState {
   issuesMap: Map<string, Issue>;
   isLoading: boolean;
   error: string | null;
+  /** Current auto-retry attempt: 0 = no retries, 1 = first retry, etc. */
+  retryCount: number;
+  /** Timestamp (ms) when next auto-retry fires, or null if not retrying. */
+  nextRetryAt: number | null;
   connectionState: ConnectionState;
   reconnectAttempts: number;
   lastEventId: number | undefined;
@@ -106,6 +146,8 @@ export const INITIAL_STATE: IssueStoreState = {
   issuesMap: new Map(),
   isLoading: false,
   error: null,
+  retryCount: 0,
+  nextRetryAt: null,
   connectionState: "disconnected",
   reconnectAttempts: 0,
   lastEventId: undefined,

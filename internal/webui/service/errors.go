@@ -21,6 +21,7 @@ const (
 	KindRateLimited     ErrorKind = "rate_limited"
 	KindBadGateway      ErrorKind = "bad_gateway"
 	KindNotImplemented  ErrorKind = "not_implemented"
+	KindStarting        ErrorKind = "starting"
 )
 
 // ServiceError represents a typed service-layer error.
@@ -96,4 +97,8 @@ func ErrBadGateway(msg string) *ServiceError {
 
 func ErrNotImplemented(msg string) *ServiceError {
 	return &ServiceError{Kind: KindNotImplemented, Message: msg}
+}
+
+func ErrStarting(msg string) *ServiceError {
+	return &ServiceError{Kind: KindStarting, Message: msg}
 }

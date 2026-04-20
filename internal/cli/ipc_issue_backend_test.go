@@ -294,6 +294,69 @@ func TestIPCIssueBackend_List_DelegatesToFallback(t *testing.T) {
 	}
 }
 
+func TestIPCIssueBackend_GetChildren_DelegatesToFallback(t *testing.T) {
+	ipc := &mockIPCMutator{}
+	fb := NewMockIssueBackend()
+	fb.GetChildrenResult = []backend.IssueData{{ID: "child-1"}}
+	b := newIPCIssueBackend(ipc, fb)
+
+	got, err := b.GetChildren(context.Background(), "epic-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "child-1" {
+		t.Errorf("got %v, want [{ID:child-1}]", got)
+	}
+	if !fb.Called("GetChildren") {
+		t.Error("fallback GetChildren should have been called")
+	}
+}
+
+func TestIPCIssueBackend_SearchIssues_DelegatesToFallback(t *testing.T) {
+	ipc := &mockIPCMutator{}
+	fb := NewMockIssueBackend()
+	fb.SearchIssuesResult = []backend.IssueData{{ID: "search-1"}}
+	b := newIPCIssueBackend(ipc, fb)
+
+	got, err := b.SearchIssues(context.Background(), "auth bug", 10)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "search-1" {
+		t.Errorf("got %v, want [{ID:search-1}]", got)
+	}
+	if !fb.Called("SearchIssues") {
+		t.Error("fallback SearchIssues should have been called")
+	}
+}
+
+func TestIPCIssueBackend_DeferIssue_DelegatesToFallback(t *testing.T) {
+	ipc := &mockIPCMutator{}
+	fb := NewMockIssueBackend()
+	b := newIPCIssueBackend(ipc, fb)
+
+	until := time.Date(2026, 4, 10, 0, 0, 0, 0, time.UTC)
+	if err := b.DeferIssue(context.Background(), "bd-1", until); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !fb.Called("DeferIssue") {
+		t.Error("fallback DeferIssue should have been called")
+	}
+}
+
+func TestIPCIssueBackend_UndeferIssue_DelegatesToFallback(t *testing.T) {
+	ipc := &mockIPCMutator{}
+	fb := NewMockIssueBackend()
+	b := newIPCIssueBackend(ipc, fb)
+
+	if err := b.UndeferIssue(context.Background(), "bd-1"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !fb.Called("UndeferIssue") {
+		t.Error("fallback UndeferIssue should have been called")
+	}
+}
+
 func TestIPCIssueBackend_Create_DelegatesToFallback(t *testing.T) {
 	ipc := &mockIPCMutator{}
 	fb := NewMockIssueBackend()

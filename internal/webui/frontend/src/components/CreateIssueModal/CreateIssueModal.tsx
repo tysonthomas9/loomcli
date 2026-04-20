@@ -3,9 +3,13 @@ import { createPortal } from "react-dom";
 
 import { createIssue } from "@/hooks/api";
 import type { CreateIssueRequest } from "@/api/issues";
-import { useRegisterEscapeLayer, LAYER_MODAL } from "@/hooks";
+import {
+  useRegisterEscapeLayer,
+  LAYER_MODAL,
+  useFocusTrap,
+  useFocusReturn,
+} from "@/hooks/ui";
 import { useWorkspaceContext } from "@/hooks/workspace";
-import { useFocusTrap, useFocusReturn } from "@/hooks/ui";
 import type { Issue, IssueType, Priority } from "@/types";
 import styles from "./CreateIssueModal.module.css";
 
@@ -64,13 +68,6 @@ export function CreateIssueModal({
       setDescription("");
       setIsSubmitting(false);
       setError("");
-    }
-  }, [isOpen]);
-
-  // Auto-focus title input on open
-  useEffect(() => {
-    if (isOpen && titleRef.current) {
-      titleRef.current.focus();
     }
   }, [isOpen]);
 
@@ -223,7 +220,11 @@ export function CreateIssueModal({
           </div>
 
           {error && (
-            <p className={styles.error} data-testid="create-issue-error">
+            <p
+              className={styles.error}
+              data-testid="create-issue-error"
+              role="alert"
+            >
               {error}
             </p>
           )}

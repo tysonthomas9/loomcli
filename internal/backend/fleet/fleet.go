@@ -156,6 +156,19 @@ func hasData(resp *apiResponse) bool {
 	return resp != nil && resp.Data != nil && string(resp.Data) != "null"
 }
 
+// unmarshalIssueList unmarshals a []*types.IssueWithCounts response and
+// converts to []backend.IssueData. Used by List, GetChildren, and SearchIssues.
+func unmarshalIssueList(resp *apiResponse, op string) ([]backend.IssueData, error) {
+	if !hasData(resp) {
+		return []backend.IssueData{}, nil
+	}
+	var issues []*types.IssueWithCounts
+	if err := json.Unmarshal(resp.Data, &issues); err != nil {
+		return nil, backend.ErrInternal(op, "unmarshal response", err)
+	}
+	return issuesWithCountsToData(issues), nil
+}
+
 // --- Query operations ---
 
 func (b *FleetBackend) Get(ctx context.Context, id string) (*backend.IssueDetailData, error) {
@@ -183,14 +196,7 @@ func (b *FleetBackend) List(ctx context.Context, opts backend.ListOpts) ([]backe
 	if err != nil {
 		return nil, err
 	}
-	if !hasData(resp) {
-		return []backend.IssueData{}, nil
-	}
-	var issues []*types.IssueWithCounts
-	if err := json.Unmarshal(resp.Data, &issues); err != nil {
-		return nil, backend.ErrInternal("List", "unmarshal response", err)
-	}
-	return issuesWithCountsToData(issues), nil
+	return unmarshalIssueList(resp, "List")
 }
 
 func (b *FleetBackend) Ready(ctx context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
@@ -261,6 +267,43 @@ func (b *FleetBackend) Count(_ context.Context, _ backend.CountOpts) (int, error
 	return 0, backend.ErrNotImplemented("Count", "fleet server has no count endpoint")
 }
 
+// GetChildren returns the direct children of the given issue (typically an epic)
+// by calling the fleet-db list endpoint with a parent filter.
+func (b *FleetBackend) GetChildren(ctx context.Context, id string) ([]backend.IssueData, error) {
+	if id == "" {
+		return nil, backend.ErrValidation("GetChildren", "id must not be empty")
+	}
+	path := "/issues?parent_id=" + url.QueryEscape(id)
+	resp, err := b.exec(ctx, "GetChildren", "GET", path, nil)
+	if err != nil {
+		return nil, err
+	}
+	return unmarshalIssueList(resp, "GetChildren")
+}
+
+// SearchIssues performs a full-text search via the fleet-db list endpoint with
+// the query parameter set. Future fleet-db work can route this to a dedicated
+// FT.SEARCH endpoint.
+// Note: fleet-db uses "query" (not "q") for its search param — see
+// internal/backend/fleet/params.go addListSearchFilters.
+func (b *FleetBackend) SearchIssues(ctx context.Context, query string, limit int) ([]backend.IssueData, error) {
+	if query == "" {
+		return nil, backend.ErrValidation("SearchIssues", "query must not be empty")
+	}
+	if limit < 0 {
+		return nil, backend.ErrValidation("SearchIssues", "limit must not be negative")
+	}
+	path := "/issues?query=" + url.QueryEscape(query)
+	if limit > 0 {
+		path += "&limit=" + strconv.Itoa(limit)
+	}
+	resp, err := b.exec(ctx, "SearchIssues", "GET", path, nil)
+	if err != nil {
+		return nil, err
+	}
+	return unmarshalIssueList(resp, "SearchIssues")
+}
+
 // --- Mutation operations ---
 
 func (b *FleetBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error) {
@@ -303,6 +346,37 @@ func (b *FleetBackend) ClaimIssue(ctx context.Context, id string, _ time.Duratio
 	// care about success/error for ClaimIssue (which returns only error).
 	_, err := b.exec(ctx, "ClaimIssue", "POST", "/fleet/claim", claimReq{IssueID: id})
 	return err
+}
+
+// DeferIssue defers an issue via PATCH with status="deferred" and optional
+// defer_until. A zero until means status-only defer with no end date. The
+// fleet server has no dedicated defer route; PATCH /issues/{id} is used.
+func (b *FleetBackend) DeferIssue(ctx context.Context, id string, until time.Time) error {
+	if id == "" {
+		return backend.ErrValidation("DeferIssue", "id must not be empty")
+	}
+	req := map[string]interface{}{
+		"status": "deferred",
+	}
+	if !until.IsZero() {
+		req["defer_until"] = until.Format(time.RFC3339)
+	}
+	_, callErr := b.exec(ctx, "DeferIssue", "PATCH", "/issues/"+url.PathEscape(id), req)
+	return callErr
+}
+
+// UndeferIssue restores a deferred issue to "open" status and clears the
+// defer_until field by sending an empty string (matching bd undefer behavior).
+func (b *FleetBackend) UndeferIssue(ctx context.Context, id string) error {
+	if id == "" {
+		return backend.ErrValidation("UndeferIssue", "id must not be empty")
+	}
+	req := map[string]interface{}{
+		"status":      "open",
+		"defer_until": "",
+	}
+	_, callErr := b.exec(ctx, "UndeferIssue", "PATCH", "/issues/"+url.PathEscape(id), req)
+	return callErr
 }
 
 func (b *FleetBackend) Close(ctx context.Context, id string, params backend.CloseParams) (*backend.CloseResult, error) {

@@ -85,13 +85,13 @@ func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdo
 
 	r, err := pipePromptToCmd(cmd, prompt)
 	if err != nil {
-		return err
+		return wrapInvocationError(err, "")
 	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		r.Close()
-		return fmt.Errorf("failed to create stdout pipe: %w", err)
+		return wrapInvocationError(fmt.Errorf("failed to create stdout pipe: %w", err), "")
 	}
 	cmd.Stderr = os.Stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -101,7 +101,7 @@ func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdo
 
 	if err := cmd.Start(); err != nil {
 		r.Close()
-		return fmt.Errorf("failed to start codex: %w", err)
+		return wrapInvocationError(fmt.Errorf("failed to start codex: %w", err), "")
 	}
 
 	guard := newProcessGuard(cmd.Process)
@@ -113,7 +113,7 @@ func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdo
 		}
 	}()
 
-	scanStreamOutput(stdout, func(line string) {
+	outputTail := scanStreamOutput(stdout, func(line string) {
 		fmt.Println(line)
 		if collector != nil {
 			collectCodexStreamUsage(line, collector)
@@ -123,7 +123,7 @@ func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdo
 	runErr := cmd.Wait()
 	guard.WaitAndMark()
 	r.Close()
-	return runErr
+	return wrapInvocationError(runErr, outputTail)
 }
 
 // buildBackendEnv constructs the standard environment for backend subprocess invocations.

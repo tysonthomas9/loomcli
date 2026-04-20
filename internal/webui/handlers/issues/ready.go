@@ -82,6 +82,9 @@ func executeReadyRPC(ctx context.Context, pool readyConnectionGetter, args *rpc.
 	client, err := pool.Get(ctx)
 	if err != nil {
 		status := http.StatusServiceUnavailable
+		if errors.Is(err, daemon.ErrDaemonStarting) {
+			return nil, nil, http.StatusServiceUnavailable, daemon.ErrDaemonStarting
+		}
 		if errors.Is(err, context.DeadlineExceeded) {
 			status = http.StatusGatewayTimeout
 		}
@@ -168,6 +171,9 @@ func handleReadyWithPool(pool readyConnectionGetter) http.HandlerFunc {
 		client, issues, status, err := executeReadyRPC(ctx, pool, args)
 		if err != nil {
 			slog.Error("handleReady error", "err", err)
+			if errors.Is(err, daemon.ErrDaemonStarting) {
+				w.Header().Set("Retry-After", "5")
+			}
 			handler.WriteJSON(w, status, ReadyResponse{
 				Success: false,
 				Error:   err.Error(),

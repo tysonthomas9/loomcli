@@ -3,9 +3,7 @@ package hooks
 import (
 	"fmt"
 	"log/slog"
-	"sync"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/coordinator"
 )
@@ -13,8 +11,7 @@ import (
 // FleetBackendHook implements coordinator.LifecycleHook for per-workspace fleet
 // backend lifecycle. On workspace registration, it creates a FleetBackend scoped
 // to the configured fleet workspace and provides it to downstream hooks via the
-// resource bag. The hook stores backends internally for consumption via
-// BackendForWorkspace.
+// resource bag.
 //
 // All backends created by this hook use the same fleet workspace ID (from config),
 // not the local workspace UUID. This ensures requests hit the correct fleet server
@@ -24,9 +21,6 @@ type FleetBackendHook struct {
 	workspaceID string // fleet server workspace (e.g., "default"), not local UUID
 	apiKey      string
 	logger      *slog.Logger
-
-	mu       sync.RWMutex
-	backends map[string]backend.IssueBackend
 }
 
 // NewFleetBackendHook creates a FleetBackendHook. baseURL must not be empty.
@@ -44,7 +38,6 @@ func NewFleetBackendHook(baseURL, workspaceID, apiKey string, logger *slog.Logge
 		workspaceID: workspaceID,
 		apiKey:      apiKey,
 		logger:      logger,
-		backends:    make(map[string]backend.IssueBackend),
 	}
 }
 
@@ -68,34 +61,18 @@ func (h *FleetBackendHook) OnRegister(ctx *coordinator.RegistrationContext) erro
 		return fmt.Errorf("create fleet backend for %q: %w", id, err)
 	}
 
-	h.mu.Lock()
-	h.backends[id] = fb
-	h.mu.Unlock()
-
 	ctx.Provide(coordinator.ResourceKeyFleetBackend, fb)
 	h.logger.Info("created fleet backend for workspace", "workspace", id)
 	return nil
 }
 
-// OnDeregister removes the stored backend for the workspace.
+// OnDeregister logs workspace deregistration. Resource cleanup is handled by
+// the registry when the workspace handle is removed.
 func (h *FleetBackendHook) OnDeregister(ctx coordinator.DeregistrationContext) {
-	h.mu.Lock()
-	delete(h.backends, ctx.WorkspaceID)
-	h.mu.Unlock()
-
 	h.logger.Debug("removed fleet backend for workspace", "workspace", ctx.WorkspaceID)
 }
 
 // OnRollback undoes OnRegister — same as OnDeregister.
 func (h *FleetBackendHook) OnRollback(ctx coordinator.DeregistrationContext) {
 	h.OnDeregister(ctx)
-}
-
-// BackendForWorkspace returns the FleetBackend for the given workspace, or
-// (nil, false) if no backend exists for that workspace.
-func (h *FleetBackendHook) BackendForWorkspace(wsID string) (backend.IssueBackend, bool) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	be, ok := h.backends[wsID]
-	return be, ok
 }

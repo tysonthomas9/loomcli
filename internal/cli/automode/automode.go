@@ -2,14 +2,17 @@ package automode
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
@@ -34,6 +37,13 @@ type AutoModeOptions struct {
 	TaskPause       time.Duration                                // Pause after task completion before checking for next (default 2s)
 	EventBus        events.Emitter                               // Event emission for observability (nil = no events)
 
+	// Rate-limit circuit breaker configuration. If any is 0, defaults are applied
+	// (10m window, 5 threshold, 5m cooldown). Set RateLimitThreshold to a
+	// negative value to disable the breaker entirely.
+	RateLimitWindow    time.Duration // Sliding window for rate-limit tracking (default 10m)
+	RateLimitThreshold int           // Rate limits within window to trip breaker (default 5)
+	RateLimitCooldown  time.Duration // Pause duration when breaker trips (default 5m)
+
 	// Interface abstractions for remote agent support (nil = local filesystem).
 	LockBridge   cli.LockBridge
 	EventEmitter EventEmitter
@@ -44,7 +54,9 @@ type AutoModeOptions struct {
 type AutoModeState struct {
 	TasksCompleted        int
 	ConsecutiveErrors     int
+	ConsecutiveRateLimits int
 	ConsecutiveNoProgress int // sessions that completed without claiming a task
+	CircuitBreakerTrips   int // lifetime count of rate-limit circuit breaker trips
 	LastTaskTime          time.Time
 	IdleStartTime         time.Time
 	ShouldExit            bool
@@ -142,6 +154,28 @@ type autoLoopCtx struct {
 	// resumeFailures counts consecutive resume failures on the same session ID.
 	// After 2 failures, we clear the session ID and fall back to cold-start.
 	resumeFailures int
+	// resumeAttempted is set for a single invocation when we actually asked the
+	// backend to resume a previous Claude session.
+	resumeAttempted bool
+
+	// lastFailedTaskID is the task ID from the previous failed invocation.
+	// Used to detect when the same task is failing repeatedly.
+	lastFailedTaskID string
+	// sameTaskFailures counts consecutive failures on lastFailedTaskID.
+	// Reset to 1 when a different task ID fails, reset to 0 on success.
+	// When this reaches maxSameTaskFailures, the task is added to stuckTaskIDs.
+	sameTaskFailures int
+	// stuckTaskIDs is the set of task IDs that have been declared stuck and
+	// should be skipped if the agent re-claims them. Persists for the lifetime
+	// of the auto-mode loop. Bounded at maxStuckTasks; when full, the
+	// oldest-inserted entry (tracked via stuckTaskOrder) is evicted.
+	stuckTaskIDs   map[string]bool
+	stuckTaskOrder []string
+
+	// rateLimitBreaker is a sliding-window circuit breaker that trips when
+	// rate-limit errors accumulate within a time window. It pauses auto-mode
+	// for a cooldown period before allowing a single probe invocation.
+	rateLimitBreaker *rateLimitBreaker
 }
 
 // RunAutoModeLoop runs the auto mode loop for either plan or task agents.
@@ -177,13 +211,16 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 		}
 	}
 
+	if ctx.rateLimitBreaker != nil {
+		ctx.state.CircuitBreakerTrips = ctx.rateLimitBreaker.totalTrips
+	}
 	printAutoModeSummary(ctx.state)
 }
 
-func initAutoLoop(opts AutoModeOptions) *autoLoopCtx {
-	d := opts.Deps
-	if d == nil {
-		d = cli.GetDeps(nil)
+// applyAutoModeDefaults fills zero-value fields in opts with sensible defaults.
+func applyAutoModeDefaults(opts *AutoModeOptions) {
+	if opts.Deps == nil {
+		opts.Deps = cli.GetDeps(nil)
 	}
 	if opts.BackoffBase == 0 {
 		opts.BackoffBase = 30 * time.Second
@@ -194,6 +231,20 @@ func initAutoLoop(opts AutoModeOptions) *autoLoopCtx {
 	if opts.EventBus == nil {
 		opts.EventBus = events.NopBus{}
 	}
+	if opts.RateLimitWindow == 0 {
+		opts.RateLimitWindow = 10 * time.Minute
+	}
+	if opts.RateLimitThreshold == 0 {
+		opts.RateLimitThreshold = 5
+	}
+	if opts.RateLimitCooldown == 0 {
+		opts.RateLimitCooldown = 5 * time.Minute
+	}
+}
+
+func initAutoLoop(opts AutoModeOptions) *autoLoopCtx {
+	applyAutoModeDefaults(&opts)
+	d := opts.Deps
 
 	ctx := &autoLoopCtx{
 		opts:      opts,
@@ -203,6 +254,8 @@ func initAutoLoop(opts AutoModeOptions) *autoLoopCtx {
 			LastTaskTime:  time.Now(),
 			IdleStartTime: time.Now(),
 		},
+		stuckTaskIDs:     make(map[string]bool),
+		rateLimitBreaker: newRateLimitBreaker(opts.RateLimitWindow, opts.RateLimitCooldown, opts.RateLimitThreshold),
 	}
 
 	ctx.hasAvailableTasks = resolveTaskChecker(opts)
@@ -327,6 +380,10 @@ func waitForAvailableTasks(ctx *autoLoopCtx, shutdown chan struct{}) bool {
 
 // runAutoTask invokes the agent for one task and handles the result. Returns false if loop should exit.
 func runAutoTask(ctx *autoLoopCtx, shutdown chan struct{}) bool {
+	if !waitForCircuitBreaker(ctx, shutdown) {
+		return false
+	}
+
 	fmt.Printf("\n[auto] === Starting task %d ===\n\n", ctx.state.TasksCompleted+1)
 
 	beforeRef := CaptureHEADRef(ctx.opts.WorktreePath)
@@ -334,43 +391,26 @@ func runAutoTask(ctx *autoLoopCtx, shutdown chan struct{}) bool {
 	prompt := ctx.generatePrompt(ctx.opts.AgentName, workspace)
 	sess := createAutoSession(ctx, prompt)
 
-	// If we have a session ID from a previous failed invocation, set it so
-	// the Claude invoker builds a --resume command instead of cold-starting.
+	ctx.resumeAttempted = false
 	if ctx.lastClaudeSessionID != "" {
+		ctx.resumeAttempted = true
 		backends.SetResumeSessionID(ctx.lastClaudeSessionID)
 	}
-	defer backends.ClearResumeSessionID() // no-op if consumed; cleans up on mock/non-Claude paths
+	defer backends.ClearResumeSessionID()
 
 	backendName := cli.GetBackendName()
 	collector := usage.NewCollector(backendName, ctx.opts.AgentName)
 	startedAt := time.Now()
 
 	err := ctx.deps.Agent.InvokeNonInteractive(ctx.opts.WorktreePath, prompt, ctx.opts.AgentName, shutdown, collector)
-
-	// Capture the session ID from this invocation for potential resume on retry.
-	capturedID := backends.GetLastCapturedSessionID()
-	if capturedID != "" {
-		ctx.lastClaudeSessionID = capturedID
-		ctx.resumeFailures = 0 // new session ID, reset failure count
-	}
-
+	captureSessionID(ctx)
 	endedAt := time.Now()
-	recordSessionUsage(ctx.usageStore, collector, ctx.opts.WorktreePath, ctx.opts.AgentName, ctx.opts.ParentID, startedAt, endedAt, err, ctx.opts.LockBridge)
 
-	inTok, outTok, cacheRead, cacheWrite := collector.Totals()
-	tier := usage.ResolvePricing(backendName)
-	costUSD := usage.EstimateCost(tier, usage.SessionUsage{
-		InputTokens:      inTok,
-		OutputTokens:     outTok,
-		CacheReadTokens:  cacheRead,
-		CacheWriteTokens: cacheWrite,
-	})
-	finalizeAutoSession(ctx, sess, beforeRef, err, inTok, outTok, cacheRead, cacheWrite, costUSD)
+	recordAndFinalize(ctx, collector, sess, beforeRef, backendName, startedAt, endedAt, err)
 
 	if updateErr := ctx.updateState(cli.StateIdle); updateErr != nil {
 		fmt.Printf("[auto] Warning: failed to update state: %v\n", updateErr)
 	}
-
 	if reason, yielded := checkYieldFile(ctx.yieldFile); yielded {
 		fmt.Printf("[auto] Yield requested after task (reason: %s), exiting gracefully...\n", reason)
 		ctx.state.ShouldExit = true
@@ -379,9 +419,80 @@ func runAutoTask(ctx *autoLoopCtx, shutdown chan struct{}) bool {
 	}
 
 	if err != nil {
-		return handleAutoTaskError(ctx, err, shutdown)
+		ae := classifyInvokeError(err, backendName)
+		return handleAutoTaskError(ctx, ae, err, shutdown)
 	}
 	return handleAutoTaskSuccess(ctx, beforeRef, startedAt, endedAt, shutdown)
+}
+
+// waitForCircuitBreaker blocks while the rate-limit circuit breaker is open,
+// returning false if the shutdown signal fires during the cooldown. When the
+// breaker transitions Open→HalfOpen, a single probe invocation is allowed to
+// proceed. Returns true if the loop should continue.
+//
+// The loop re-checks ShouldBlock after each sleep: a monotonic clock jump or a
+// refactor that adds a second callsite could otherwise leave the breaker Open
+// while the caller proceeds, letting the probe run "uncounted".
+func waitForCircuitBreaker(ctx *autoLoopCtx, shutdown chan struct{}) bool {
+	if ctx.rateLimitBreaker == nil {
+		return true
+	}
+	wasBlocked := false
+	for {
+		blocked, remaining := ctx.rateLimitBreaker.ShouldBlock()
+		if !blocked {
+			break
+		}
+		wasBlocked = true
+		fmt.Printf("[auto] Rate-limit circuit breaker OPEN, pausing for %s...\n", remaining.Round(time.Second))
+		if interruptibleSleep(remaining, shutdown) {
+			ctx.state.ShouldExit = true
+			ctx.state.ExitReason = "shutdown signal received"
+			return false
+		}
+	}
+	if wasBlocked && ctx.rateLimitBreaker.State() == breakerHalfOpen {
+		fmt.Println("[auto] Rate-limit circuit breaker: cooldown elapsed, allowing probe invocation...")
+	}
+	return true
+}
+
+func captureSessionID(ctx *autoLoopCtx) {
+	capturedID := backends.GetLastCapturedSessionID()
+	if capturedID != "" {
+		ctx.lastClaudeSessionID = capturedID
+		ctx.resumeFailures = 0
+	}
+}
+
+func recordAndFinalize(ctx *autoLoopCtx, collector *usage.Collector, sess *sessions.Session, beforeRef, backendName string, startedAt, endedAt time.Time, err error) {
+	recordSessionUsage(ctx.usageStore, collector, ctx.opts.WorktreePath, ctx.opts.AgentName, ctx.opts.ParentID, startedAt, endedAt, err, ctx.opts.LockBridge)
+
+	inTok, outTok, cacheRead, cacheWrite := collector.Totals()
+	tier := usage.ResolvePricing(backendName)
+	costUSD := usage.EstimateCost(tier, usage.SessionUsage{
+		InputTokens: inTok, OutputTokens: outTok,
+		CacheReadTokens: cacheRead, CacheWriteTokens: cacheWrite,
+	})
+	finalizeAutoSession(ctx, sess, beforeRef, err, inTok, outTok, cacheRead, cacheWrite, costUSD)
+}
+
+func classifyInvokeError(err error, backendName string) *agenterr.AgentError {
+	exitCode := 1
+	evidence := err.Error()
+	var invErr *backends.InvocationError
+	if errors.As(err, &invErr) {
+		exitCode = invErr.ExitCode
+		if strings.TrimSpace(invErr.OutputTail) != "" {
+			evidence = invErr.OutputTail
+		}
+	} else {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			exitCode = exitErr.ExitCode()
+		}
+	}
+	return agenterr.ClassifyFromOutput(evidence, exitCode, backendName)
 }
 
 func printAutoModeSummary(state *AutoModeState) {
@@ -394,8 +505,14 @@ func printAutoModeSummary(state *AutoModeState) {
 	if state.ConsecutiveErrors > 0 {
 		fmt.Printf("Errors at exit: %d consecutive\n", state.ConsecutiveErrors)
 	}
+	if state.ConsecutiveRateLimits > 0 {
+		fmt.Printf("Rate limits at exit: %d consecutive\n", state.ConsecutiveRateLimits)
+	}
 	if state.ConsecutiveNoProgress > 0 {
 		fmt.Printf("No-progress sessions at exit: %d consecutive\n", state.ConsecutiveNoProgress)
+	}
+	if state.CircuitBreakerTrips > 0 {
+		fmt.Printf("Rate-limit circuit breaker trips: %d\n", state.CircuitBreakerTrips)
 	}
 	fmt.Println("=========================================")
 }

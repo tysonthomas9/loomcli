@@ -79,6 +79,80 @@ describe("DaemonUnavailableOverlay", () => {
 
       expect(screen.getByText("Connection to daemon lost")).toBeInTheDocument();
     });
+
+    it('renders "Workspace loading\u2026" for starting mode', () => {
+      render(
+        <DaemonUnavailableOverlay
+          mode="starting"
+          retryCountdown={5}
+          lastError={null}
+          onRetry={vi.fn()}
+          onSettingsClick={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByText("Workspace loading\u2026")).toBeInTheDocument();
+    });
+
+    it("shows description text for starting mode", () => {
+      render(
+        <DaemonUnavailableOverlay
+          mode="starting"
+          retryCountdown={5}
+          lastError={null}
+          onRetry={vi.fn()}
+          onSettingsClick={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByText(/starting up/)).toBeInTheDocument();
+    });
+
+    it("does not show Retry Now button for starting mode", () => {
+      render(
+        <DaemonUnavailableOverlay
+          mode="starting"
+          retryCountdown={5}
+          lastError={null}
+          onRetry={vi.fn()}
+          onSettingsClick={vi.fn()}
+        />,
+      );
+
+      expect(
+        screen.queryByRole("button", { name: "Retry Now" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("does not show error detail for starting mode even if lastError exists", () => {
+      render(
+        <DaemonUnavailableOverlay
+          mode="starting"
+          retryCountdown={5}
+          lastError="daemon is starting up"
+          onRetry={vi.fn()}
+          onSettingsClick={vi.fn()}
+        />,
+      );
+
+      expect(
+        screen.queryByText("daemon is starting up"),
+      ).not.toBeInTheDocument();
+    });
+
+    it('does not show "Retrying..." text for starting mode when countdown is 0', () => {
+      render(
+        <DaemonUnavailableOverlay
+          mode="starting"
+          retryCountdown={0}
+          lastError={null}
+          onRetry={vi.fn()}
+          onSettingsClick={vi.fn()}
+        />,
+      );
+
+      expect(screen.queryByText(/Retrying/)).not.toBeInTheDocument();
+    });
   });
 
   describe("error detail display", () => {
