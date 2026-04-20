@@ -22,3 +22,9 @@ func (a *TermConfigPoolAdapter) Put(client terminal.ConfigClient) {
 		a.Pool.Put(c)
 	}
 }
+
+func (a *TermConfigPoolAdapter) Discard(client terminal.ConfigClient) {
+	if c, ok := client.(*rpc.Client); ok {
+		a.Pool.Discard(c)
+	}
+}

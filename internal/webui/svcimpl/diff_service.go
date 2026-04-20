@@ -147,7 +147,7 @@ func (s *diffServiceImpl) DiffFilePatch(_ context.Context, wsID, agentName, from
 	return result, nil
 }
 
-func (s *diffServiceImpl) GetIssueDiffStat(ctx context.Context, wsID, issueID string) (*service.IssueDiffStatResult, error) {
+func (s *diffServiceImpl) GetIssueDiffStat(ctx context.Context, wsID, issueID string) (*service.IssueDiffStatResult, error) { //nolint:funlen // linear pool+RPC flow with conditional Discard guard
 	if issueID == "" {
 		return nil, service.ErrValidation("missing issue ID")
 	}
@@ -162,7 +162,14 @@ func (s *diffServiceImpl) GetIssueDiffStat(ctx context.Context, wsID, issueID st
 	if err != nil {
 		return nil, service.ErrUnavailable("daemon not available")
 	}
-	defer s.pool.Put(client)
+	rpcOK := false
+	defer func() {
+		if rpcOK {
+			s.pool.Put(client)
+		} else {
+			s.pool.Discard(client)
+		}
+	}()
 
 	resp, err := client.Show(&rpc.ShowArgs{ID: issueID})
 	if err != nil {
@@ -181,6 +188,7 @@ func (s *diffServiceImpl) GetIssueDiffStat(ctx context.Context, wsID, issueID st
 	if issue.Assignee == "" {
 		return nil, service.ErrNotFound("issue has no assignee (no agent worktree)")
 	}
+	rpcOK = true
 
 	wt, err := s.gitOps.ResolveAgentWorktree(wsID, issue.Assignee)
 	if err != nil {

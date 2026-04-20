@@ -23,6 +23,7 @@ type ConfigClient interface {
 type ConfigConnectionGetter interface {
 	Get(ctx context.Context) (ConfigClient, error)
 	Put(client ConfigClient)
+	Discard(client ConfigClient)
 }
 
 // validTerminalSession matches alphanumeric characters, hyphens, and underscores.
@@ -86,12 +87,20 @@ func getWorkspacePath(pool ConfigConnectionGetter, ctx context.Context) (string,
 	if err != nil {
 		return "", err
 	}
-	defer pool.Put(client)
+	rpcOK := false
+	defer func() {
+		if rpcOK {
+			pool.Put(client)
+		} else {
+			pool.Discard(client)
+		}
+	}()
 
 	status, err := client.Status()
 	if err != nil {
 		return "", err
 	}
+	rpcOK = true
 	return status.WorkspacePath, nil
 }
 
