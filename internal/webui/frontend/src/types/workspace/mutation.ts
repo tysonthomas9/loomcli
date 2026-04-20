@@ -27,7 +27,8 @@ export type MutationType =
   | "terminal_metadata"
   | "terminal_session_change"
   | "issue_tabs"
-  | "session_change";
+  | "session_change"
+  | "agent_state_change";
 
 /**
  * Server → Client mutation payload shape.
@@ -64,6 +65,7 @@ export const MutationSquashed: MutationType = "squashed";
 export const MutationBurned: MutationType = "burned";
 export const MutationRefresh: MutationType = "refresh";
 export const MutationSessionChange: MutationType = "session_change";
+export const MutationAgentStateChange: MutationType = "agent_state_change";
 
 /**
  * Application-level mutation event.

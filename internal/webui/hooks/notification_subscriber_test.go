@@ -34,7 +34,7 @@ func newTestNotificationHookEnv(t *testing.T) (*NotificationSubscriberHook, *Mul
 	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
 	t.Cleanup(func() { _ = multiPool.Close() })
 
-	multiSub := NewMultiWorkspaceSubscriber(hub, multiPool, slog.Default())
+	multiSub := NewMultiWorkspaceSubscriber(hub, multiPool, nil, slog.Default())
 	t.Cleanup(multiSub.Stop)
 
 	hook := NewNotificationSubscriberHook(multiSub, slog.Default())
@@ -219,7 +219,7 @@ func TestNotificationSubscriberHook_DefaultLogger(t *testing.T) {
 	mp := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
 	defer mp.Close()
 
-	multiSub := NewMultiWorkspaceSubscriber(hub, mp, slog.Default())
+	multiSub := NewMultiWorkspaceSubscriber(hub, mp, nil, slog.Default())
 	defer multiSub.Stop()
 
 	// Should not panic with nil logger.
@@ -237,7 +237,7 @@ func TestNotificationSubscriberHook_IntegrationWithCoordinatorRegistry(t *testin
 	mp := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
 	t.Cleanup(func() { _ = mp.Close() })
 
-	multiSub := NewMultiWorkspaceSubscriber(hub, mp, slog.Default())
+	multiSub := NewMultiWorkspaceSubscriber(hub, mp, nil, slog.Default())
 	t.Cleanup(multiSub.Stop)
 
 	// Set up beads-pool hook first (provides the pool that the subscriber needs).

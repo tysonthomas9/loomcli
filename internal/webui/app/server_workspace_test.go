@@ -27,7 +27,7 @@ func newTestRegistry(t *testing.T) (*coordinator.WorkspaceRegistry, *daemon.Mult
 	go hub.Run()
 	t.Cleanup(func() { hub.Stop() })
 
-	multiSub := subscription.NewMultiWorkspaceSubscriber(hub, multiPool, slog.Default())
+	multiSub := subscription.NewMultiWorkspaceSubscriber(hub, multiPool, nil, slog.Default())
 	t.Cleanup(func() { multiSub.Stop() })
 
 	reg := coordinator.NewWorkspaceRegistry(slog.Default())

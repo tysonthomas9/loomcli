@@ -57,8 +57,11 @@ func NewTerminalAuth() (*TerminalAuth, error) { return realtime.NewTerminalAuth(
 func NewTokenStore() (*TokenStore, error) { return realtime.NewTokenStore() }
 
 // NewMultiSub creates a multi-workspace subscriber bridging daemon mutations to SSE.
-func NewMultiSub(hub *realtime.Hub, multiPool *daemon.MultiPool, logger *slog.Logger) *MultiWorkspaceSubscriber {
-	return subscription.NewMultiWorkspaceSubscriber(hub, multiPool, logger)
+// When agentStatePathFn is non-nil, each workspace subscriber is configured to
+// watch its daemon-agents.json for mtime changes and broadcast agent_state_change
+// events; pass nil to disable the agent state watcher.
+func NewMultiSub(hub *realtime.Hub, multiPool *daemon.MultiPool, agentStatePathFn func(wsID string) string, logger *slog.Logger) *MultiWorkspaceSubscriber {
+	return subscription.NewMultiWorkspaceSubscriber(hub, multiPool, agentStatePathFn, logger)
 }
 
 // GetMutationsSinceFn returns the mutations-since callback from the subscriber.

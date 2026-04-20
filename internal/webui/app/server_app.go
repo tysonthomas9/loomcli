@@ -165,8 +165,23 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	go app.hub.Run()
 	cleanups = append(cleanups, func() { app.hub.Stop() })
 
-	// Bridge per-workspace daemon mutations to SSE clients.
-	app.multiSub = appstores.NewMultiSub(app.hub, app.multiPool, config.Logger)
+	// Bridge per-workspace daemon mutations to SSE clients. The agent state
+	// path resolver is derived from WorkspaceDaemonResolver (task .1) so each
+	// per-workspace subscriber can watch daemon-agents.json for mtime changes
+	// and emit agent_state_change events. If the resolver is unset (e.g.,
+	// tests without workspace wiring), the agent watcher is disabled.
+	var agentStatePathFn func(wsID string) string
+	if config.WorkspaceDaemonResolver != nil {
+		resolver := config.WorkspaceDaemonResolver
+		agentStatePathFn = func(wsID string) string {
+			paths, err := resolver(wsID)
+			if err != nil || paths == nil {
+				return ""
+			}
+			return paths.StatePath
+		}
+	}
+	app.multiSub = appstores.NewMultiSub(app.hub, app.multiPool, agentStatePathFn, config.Logger)
 	cleanups = append(cleanups, func() { app.multiSub.Stop() })
 
 	// Main web terminal manager: one fresh PTY per WebSocket connection, no

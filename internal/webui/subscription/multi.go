@@ -24,25 +24,30 @@ type subscriberEntry struct {
 // MultiWorkspaceSubscriber manages per-workspace DaemonSubscribers, each polling
 // its own daemon and broadcasting workspace-tagged mutations to a shared SSEHub.
 type MultiWorkspaceSubscriber struct {
-	hub         *realtime.Hub
-	multiPool   *daemon.MultiPool
-	logger      *slog.Logger
-	subscribers map[string]*subscriberEntry // workspace ID → entry
-	mu          sync.RWMutex
-	ctx         context.Context
-	cancel      context.CancelFunc
+	hub              *realtime.Hub
+	multiPool        *daemon.MultiPool
+	logger           *slog.Logger
+	subscribers      map[string]*subscriberEntry // workspace ID → entry
+	mu               sync.RWMutex
+	ctx              context.Context
+	cancel           context.CancelFunc
+	agentStatePathFn func(wsID string) string // resolves wsID → daemon-agents.json path; nil = agent watcher disabled
 }
 
-// NewMultiWorkspaceSubscriber creates a new MultiWorkspaceSubscriber.
-func NewMultiWorkspaceSubscriber(hub *realtime.Hub, multiPool *daemon.MultiPool, logger *slog.Logger) *MultiWorkspaceSubscriber {
+// NewMultiWorkspaceSubscriber creates a new MultiWorkspaceSubscriber. If
+// agentStatePathFn is non-nil, each per-workspace subscriber is configured
+// with the resolved daemon-agents.json path so it can broadcast
+// agent_state_change events when the file's mtime changes.
+func NewMultiWorkspaceSubscriber(hub *realtime.Hub, multiPool *daemon.MultiPool, agentStatePathFn func(wsID string) string, logger *slog.Logger) *MultiWorkspaceSubscriber {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &MultiWorkspaceSubscriber{
-		hub:         hub,
-		multiPool:   multiPool,
-		logger:      logger,
-		subscribers: make(map[string]*subscriberEntry),
+		hub:              hub,
+		multiPool:        multiPool,
+		logger:           logger,
+		subscribers:      make(map[string]*subscriberEntry),
+		agentStatePathFn: agentStatePathFn,
 	}
 }
 
@@ -66,6 +71,11 @@ func (m *MultiWorkspaceSubscriber) AddWorkspace(wsID string) error {
 
 	sub := NewDaemonSubscriber(pool, m.hub)
 	sub.workspaceID = wsID
+	if m.agentStatePathFn != nil {
+		if path := m.agentStatePathFn(wsID); path != "" {
+			sub.SetAgentStatePath(path)
+		}
+	}
 	sub.Start()
 	m.subscribers[wsID] = &subscriberEntry{sub: sub}
 

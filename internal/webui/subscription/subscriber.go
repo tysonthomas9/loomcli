@@ -53,6 +53,11 @@ type DaemonSubscriber struct {
 	// Tracks last-known state of issues for granular diff in pollDBChanges.
 	// Key: issue ID, Value: lightweight snapshot used to determine mutation type.
 	knownIssues map[string]knownIssueState
+
+	// Agent state file watcher fields (protected by agentStateMu).
+	agentStatePath  string       // path to daemon-agents.json; empty = watcher is a no-op
+	agentStateMtime time.Time    // last observed mtime of daemon-agents.json
+	agentStateMu    sync.RWMutex // protects agentStatePath and agentStateMtime
 }
 
 // NewDaemonSubscriber creates a new daemon subscriber.
@@ -68,9 +73,10 @@ func NewDaemonSubscriber(pool daemon.Pool, hub *realtime.Hub) *DaemonSubscriber 
 // Safe to call multiple times — only the first call starts goroutines.
 func (s *DaemonSubscriber) Start() {
 	s.startOnce.Do(func() {
-		s.wg.Add(2)
+		s.wg.Add(3)
 		go s.subscriptionLoop()
 		go s.externalChangeLoop()
+		go s.agentStateWatchLoop()
 		slog.Info("daemon subscription started")
 	})
 }
