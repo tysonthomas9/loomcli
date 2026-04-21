@@ -24,7 +24,16 @@ func (s *SQLiteStorage) BeginTx(ctx context.Context) (*sql.Tx, error) {
 // write lock upfront, preventing SQLITE_BUSY upgrade races under
 // concurrent write load (see loomcli-0o1il).
 func (s *SQLiteStorage) withTx(ctx context.Context, fn func(*sql.Conn) error) error {
+	// Hold reconnectMu only for Conn acquisition — not the full transaction.
+	// Transactions can run for hundreds of milliseconds (bulk imports), so
+	// holding reconnectMu for the entire transaction would block reconnect()
+	// for an unbounded duration. Once a *sql.Conn is checked out via
+	// s.db.Conn(), it is detached from the pool and remains valid even if
+	// reconnect() swaps s.db and Close()s the old pool: database/sql keeps
+	// checked-out connections alive until they are returned via conn.Close().
+	s.reconnectMu.RLock()
 	conn, err := s.db.Conn(ctx)
+	s.reconnectMu.RUnlock()
 	if err != nil {
 		return fmt.Errorf("acquire connection: %w", err)
 	}
@@ -45,7 +54,13 @@ func (s *SQLiteStorage) withTx(ctx context.Context, fn func(*sql.Conn) error) er
 		return err
 	}
 
-	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+	// Use a detached context for COMMIT so caller cancellation between fn()
+	// returning nil and COMMIT executing cannot discard fully-applied work.
+	// Mirrors the ROLLBACK convention above. 5s is generous (WAL COMMIT is
+	// typically <1ms) but provides a safety net against pathological hangs.
+	commitCtx, commitCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer commitCancel()
+	if _, err := conn.ExecContext(commitCtx, "COMMIT"); err != nil {
 		return wrapDBError("commit transaction", err)
 	}
 	committed = true

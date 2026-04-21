@@ -10,6 +10,43 @@ import (
 	"github.com/steveyegge/beads/internal/types"
 )
 
+// TestRunInTransaction_CancelledCtxDoesNotDiscardWork verifies that cancelling
+// the caller's ctx AFTER fn() completes successfully but BEFORE COMMIT runs does
+// NOT discard the committed work. RunInTransaction uses a detached background
+// context for COMMIT precisely so caller cancellation cannot abort fully-
+// applied work.
+func TestRunInTransaction_CancelledCtxDoesNotDiscardWork(t *testing.T) {
+	store, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	// Use a separate, non-cancelled context for tx.SetConfig so that cancelling
+	// the outer ctx does not abort fn's internal write — we want to exercise
+	// specifically the post-fn() COMMIT race path.
+	innerCtx := context.Background()
+
+	err := store.RunInTransaction(ctx, func(tx storage.Transaction) error {
+		if err := tx.SetConfig(innerCtx, "cancel_test", "survived"); err != nil {
+			return err
+		}
+		// Cancel AFTER fn's work completes but BEFORE RunInTransaction runs COMMIT.
+		cancel()
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("RunInTransaction should succeed despite ctx cancellation between fn() and COMMIT: %v", err)
+	}
+
+	// Verify the SetConfig was committed via a fresh background context.
+	value, err := store.GetConfig(context.Background(), "cancel_test")
+	if err != nil {
+		t.Fatalf("GetConfig failed: %v", err)
+	}
+	if value != "survived" {
+		t.Errorf("Expected 'survived', got %q", value)
+	}
+}
+
 // TestRunInTransactionBasic verifies the RunInTransaction method exists and
 // can be called.
 func TestRunInTransactionBasic(t *testing.T) {

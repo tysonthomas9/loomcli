@@ -41,7 +41,17 @@ type sqliteTxStorage struct {
 func (s *SQLiteStorage) RunInTransaction(ctx context.Context, fn func(tx storage.Transaction) error) error {
 	// Acquire a dedicated connection for the transaction.
 	// This ensures all operations in the transaction use the same connection.
+	//
+	// Hold reconnectMu only for Conn acquisition — not the full transaction.
+	// Transactions can run for hundreds of milliseconds (bulk imports), so
+	// holding reconnectMu for the entire transaction would block reconnect()
+	// for an unbounded duration. Once a *sql.Conn is checked out via
+	// s.db.Conn(), it is detached from the pool and remains valid even if
+	// reconnect() swaps s.db and Close()s the old pool: database/sql keeps
+	// checked-out connections alive until they are returned via conn.Close().
+	s.reconnectMu.RLock()
 	conn, err := s.db.Conn(ctx)
+	s.reconnectMu.RUnlock()
 	if err != nil {
 		return fmt.Errorf("failed to acquire connection for transaction: %w", err)
 	}
@@ -81,8 +91,13 @@ func (s *SQLiteStorage) RunInTransaction(ctx context.Context, fn func(tx storage
 		return err // Rollback happens in defer
 	}
 
-	// Commit the transaction
-	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+	// Commit the transaction — use a detached context so caller cancellation
+	// between fn() returning nil and COMMIT executing cannot discard fully-
+	// applied work. Mirrors the ROLLBACK convention above. 5s is generous
+	// (WAL COMMIT is typically <1ms) but provides a safety net against hangs.
+	commitCtx, commitCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer commitCancel()
+	if _, err := conn.ExecContext(commitCtx, "COMMIT"); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 	committed = true

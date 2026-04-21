@@ -257,6 +257,44 @@ func TestIsBusyError(t *testing.T) {
 	}
 }
 
+// TestWithTx_CancelledCtxDoesNotDiscardWork verifies that cancelling the
+// caller's ctx AFTER fn() completes successfully but BEFORE COMMIT runs does
+// NOT discard the committed work. withTx uses a detached background context
+// for COMMIT precisely so caller cancellation cannot abort fully-applied work.
+func TestWithTx_CancelledCtxDoesNotDiscardWork(t *testing.T) {
+	store := newTestStore(t, t.TempDir()+"/test.db")
+	defer store.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	// Use a separate, non-cancelled context for fn's internal ExecContext so
+	// that cancelling the outer ctx does not abort fn's INSERT — we want to
+	// exercise specifically the post-fn() COMMIT race path.
+	innerCtx := context.Background()
+
+	err := store.withTx(ctx, func(conn *sql.Conn) error {
+		_, err := conn.ExecContext(innerCtx, "INSERT INTO config (key, value) VALUES (?, ?)", "cancel_test", "survived")
+		if err != nil {
+			return err
+		}
+		// Cancel AFTER fn's work completes but BEFORE withTx runs COMMIT.
+		cancel()
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("withTx should succeed despite ctx cancellation between fn() and COMMIT: %v", err)
+	}
+
+	// Verify the insert was committed via a fresh background context.
+	var value string
+	err = store.db.QueryRowContext(context.Background(), "SELECT value FROM config WHERE key = ?", "cancel_test").Scan(&value)
+	if err != nil {
+		t.Fatalf("Data should be committed despite ctx cancellation: %v", err)
+	}
+	if value != "survived" {
+		t.Errorf("Expected 'survived', got %q", value)
+	}
+}
+
 func TestBeginImmediateWithRetry(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t, t.TempDir()+"/test.db")
