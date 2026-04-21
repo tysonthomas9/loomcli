@@ -38,7 +38,7 @@ export function AgentRow({
   const initial = displayName.charAt(0).toUpperCase() || "?";
 
   return (
-    <div className={styles.agentRow}>
+    <div className={styles.agentRow} data-testid="agent-row">
       <div className={styles.avatarContainer}>
         <div className={styles.avatar} style={{ backgroundColor: avatarColor }}>
           {initial}

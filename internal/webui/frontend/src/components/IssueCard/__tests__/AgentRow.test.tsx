@@ -237,5 +237,12 @@ describe("AgentRow", () => {
       const name = container.querySelector('[class*="name"]');
       expect(name).toBeInTheDocument();
     });
+
+    it("has data-testid for E2E selection", () => {
+      const { container } = render(<AgentRow {...createProps()} />);
+      expect(
+        container.querySelector('[data-testid="agent-row"]'),
+      ).toBeInTheDocument();
+    });
   });
 });
