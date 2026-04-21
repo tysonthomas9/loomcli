@@ -260,6 +260,35 @@
 }
 
 /* =================================
+ * Done column card styling
+ * Cards appear dimmed when in Done column (completed issues)
+ * ================================= */
+
+.issueCard[data-column="done"] {
+  opacity: 0.6;
+  background-color: var(--color-bg);
+  filter: saturate(0.3) grayscale(0.15);
+}
+
+.issueCard[data-column="done"] .title {
+  color: var(--color-text-secondary);
+}
+
+.issueCard[data-column="done"] .id {
+  color: var(--color-text-tertiary);
+}
+
+.issueCard[data-column="done"]:hover {
+  opacity: 0.8;
+}
+
+/* Ensure focus states remain visible on done cards */
+.issueCard[data-column="done"][role="button"]:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* =================================
  * Deferred badge styling
  * Shown on deferred issues in Backlog column
  * ================================= */
