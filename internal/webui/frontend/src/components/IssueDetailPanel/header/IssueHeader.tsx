@@ -149,6 +149,54 @@ export function IssueHeader({
             {formatStatus(issue.status)}
           </span>
         )}
+        {onStatusChange &&
+          (issue.status === "closed" ? (
+            <button
+              type="button"
+              className={styles.reopenButton}
+              onClick={() => onStatusChange("open")}
+              disabled={isSavingStatus}
+              aria-label="Reopen issue"
+              data-testid="header-reopen-button"
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 16 16"
+                fill="none"
+                aria-hidden="true"
+              >
+                <path
+                  d="M2 8a6 6 0 0 1 10.3-4.2L10 6h5.5V.5L13.2 2.8A7.5 7.5 0 0 0 .5 8h1.5Z"
+                  fill="currentColor"
+                />
+              </svg>
+              {isSavingStatus ? "..." : "Reopen"}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className={styles.closeIssueButton}
+              onClick={() => onStatusChange("closed")}
+              disabled={isSavingStatus}
+              aria-label="Close issue"
+              data-testid="header-close-issue-button"
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 16 16"
+                fill="none"
+                aria-hidden="true"
+              >
+                <path
+                  d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"
+                  fill="currentColor"
+                />
+              </svg>
+              {isSavingStatus ? "..." : "Close"}
+            </button>
+          ))}
         {showPriority && (
           <button
             type="button"

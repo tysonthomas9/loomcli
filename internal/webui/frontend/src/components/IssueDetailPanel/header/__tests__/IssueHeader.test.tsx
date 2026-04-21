@@ -447,4 +447,166 @@ describe("IssueHeader", () => {
       expect(header.className).not.toMatch(/_sticky_/);
     });
   });
+
+  describe("close/reopen button", () => {
+    it("renders Close button for non-closed issues when onStatusChange is provided", () => {
+      const openIssue = { ...mockIssue, status: "open" };
+      render(
+        <IssueHeader
+          issue={openIssue}
+          onClose={() => {}}
+          onStatusChange={vi.fn(async () => {})}
+        />,
+      );
+      const closeButton = screen.getByTestId("header-close-issue-button");
+      expect(closeButton).toBeInTheDocument();
+      expect(closeButton).toHaveTextContent("Close");
+      expect(
+        screen.queryByTestId("header-reopen-button"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("renders Reopen button for closed issues when onStatusChange is provided", () => {
+      const closedIssue = { ...mockIssue, status: "closed" };
+      render(
+        <IssueHeader
+          issue={closedIssue}
+          onClose={() => {}}
+          onStatusChange={vi.fn(async () => {})}
+        />,
+      );
+      const reopenButton = screen.getByTestId("header-reopen-button");
+      expect(reopenButton).toBeInTheDocument();
+      expect(reopenButton).toHaveTextContent("Reopen");
+      expect(
+        screen.queryByTestId("header-close-issue-button"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("does not render Close or Reopen button when onStatusChange is not provided", () => {
+      render(<IssueHeader issue={mockIssue} onClose={() => {}} />);
+      expect(
+        screen.queryByTestId("header-close-issue-button"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("header-reopen-button"),
+      ).not.toBeInTheDocument();
+    });
+
+    it('calls onStatusChange with "closed" when Close button is clicked', () => {
+      const onStatusChange = vi.fn(async () => {});
+      const openIssue = { ...mockIssue, status: "open" };
+      render(
+        <IssueHeader
+          issue={openIssue}
+          onClose={() => {}}
+          onStatusChange={onStatusChange}
+        />,
+      );
+      fireEvent.click(screen.getByTestId("header-close-issue-button"));
+      expect(onStatusChange).toHaveBeenCalledWith("closed");
+    });
+
+    it('calls onStatusChange with "open" when Reopen button is clicked', () => {
+      const onStatusChange = vi.fn(async () => {});
+      const closedIssue = { ...mockIssue, status: "closed" };
+      render(
+        <IssueHeader
+          issue={closedIssue}
+          onClose={() => {}}
+          onStatusChange={onStatusChange}
+        />,
+      );
+      fireEvent.click(screen.getByTestId("header-reopen-button"));
+      expect(onStatusChange).toHaveBeenCalledWith("open");
+    });
+
+    it("disables Close button and shows '...' when isSavingStatus is true", () => {
+      const openIssue = { ...mockIssue, status: "open" };
+      render(
+        <IssueHeader
+          issue={openIssue}
+          onClose={() => {}}
+          onStatusChange={vi.fn(async () => {})}
+          isSavingStatus={true}
+        />,
+      );
+      const closeButton = screen.getByTestId("header-close-issue-button");
+      expect(closeButton).toBeDisabled();
+      expect(closeButton).toHaveTextContent("...");
+    });
+
+    it("disables Reopen button and shows '...' when isSavingStatus is true", () => {
+      const closedIssue = { ...mockIssue, status: "closed" };
+      render(
+        <IssueHeader
+          issue={closedIssue}
+          onClose={() => {}}
+          onStatusChange={vi.fn(async () => {})}
+          isSavingStatus={true}
+        />,
+      );
+      const reopenButton = screen.getByTestId("header-reopen-button");
+      expect(reopenButton).toBeDisabled();
+      expect(reopenButton).toHaveTextContent("...");
+    });
+
+    it('Close button has aria-label "Close issue"', () => {
+      const openIssue = { ...mockIssue, status: "open" };
+      render(
+        <IssueHeader
+          issue={openIssue}
+          onClose={() => {}}
+          onStatusChange={vi.fn(async () => {})}
+        />,
+      );
+      expect(screen.getByLabelText("Close issue")).toBeInTheDocument();
+    });
+
+    it('Reopen button has aria-label "Reopen issue"', () => {
+      const closedIssue = { ...mockIssue, status: "closed" };
+      render(
+        <IssueHeader
+          issue={closedIssue}
+          onClose={() => {}}
+          onStatusChange={vi.fn(async () => {})}
+        />,
+      );
+      expect(screen.getByLabelText("Reopen issue")).toBeInTheDocument();
+    });
+
+    it("renders Close button (not Reopen) when status is in_progress", () => {
+      const inProgressIssue = { ...mockIssue, status: "in_progress" };
+      render(
+        <IssueHeader
+          issue={inProgressIssue}
+          onClose={() => {}}
+          onStatusChange={vi.fn(async () => {})}
+        />,
+      );
+      expect(
+        screen.getByTestId("header-close-issue-button"),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("header-reopen-button"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("renders Close button when status is undefined", () => {
+      const undefinedStatusIssue = { ...mockIssue, status: undefined };
+      render(
+        <IssueHeader
+          issue={undefinedStatusIssue}
+          onClose={() => {}}
+          onStatusChange={vi.fn(async () => {})}
+        />,
+      );
+      expect(
+        screen.getByTestId("header-close-issue-button"),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("header-reopen-button"),
+      ).not.toBeInTheDocument();
+    });
+  });
 });
