@@ -10,6 +10,12 @@ import (
 // isPublicRoute returns true if the given method+path combination should be
 // accessible without authentication.
 func isPublicRoute(method, path string) bool {
+	// BetterAuth proxy is only mounted at flat /api/auth/* — never workspace-scoped.
+	// Check against the raw path so /api/workspaces/{ws}/auth/* is NOT treated as public.
+	if strings.HasPrefix(path, "/api/auth/") {
+		return true
+	}
+
 	// Normalize workspace-scoped paths: strip /api/workspaces/{ws}/ prefix
 	// so that workspace-scoped routes match the same patterns as global routes.
 	// e.g. /api/workspaces/my-ws/fleet/... → /api/fleet/...
@@ -22,12 +28,6 @@ func isPublicRoute(method, path string) bool {
 
 	// Worker API routes use their own LOOM_WORKER_TOKEN auth
 	if strings.HasPrefix(normalizedPath, "/api/internal/workers/") {
-		return true
-	}
-
-	// All auth routes are public — the BetterAuth service handles its own auth.
-	// Must be above the GET-only gate because sign-in/sign-up use POST.
-	if strings.HasPrefix(normalizedPath, "/api/auth/") {
 		return true
 	}
 
