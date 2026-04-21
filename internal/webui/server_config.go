@@ -38,17 +38,13 @@ const (
 
 // MonitorHandlers holds pre-built HTTP handlers for the monitor/metrics
 // endpoints injected by the cli package. Nil fields are skipped during
-// route registration.
+// route registration. Only server-wide handlers remain: per-workspace
+// counterparts (status/tasks/stats/sync/usage/agents) live on wsMux and
+// are built via ScopedMonitorHandlersFn + AgentsScoped.
 type MonitorHandlers struct {
-	Status               http.HandlerFunc // GET /api/monitor/status
-	Agents               http.HandlerFunc // GET /api/monitor/agents
 	AgentsScoped         http.HandlerFunc // GET /api/workspaces/{ws}/monitor/agents
-	Tasks                http.HandlerFunc // GET /api/monitor/tasks
-	Stats                http.HandlerFunc // GET /api/monitor/stats
-	Sync                 http.HandlerFunc // GET /api/monitor/sync
 	Workspaces           http.HandlerFunc // GET /api/monitor/workspaces
 	StaleDetector        http.HandlerFunc // GET /api/monitor/stale-detector
-	Usage                http.HandlerFunc // GET /api/monitor/usage
 	Metrics              http.HandlerFunc // GET /metrics (Prometheus)
 	ObservabilityMetrics http.HandlerFunc // GET /api/observability/metrics
 	ObservabilityEvents  http.HandlerFunc // GET /api/observability/events

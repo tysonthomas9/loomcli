@@ -2872,21 +2872,6 @@ paths:
           description: Logs received
 
   # ── Monitor ─────────────────────────────────────────────────────────────
-  /api/monitor/status:
-    get:
-      operationId: getMonitorStatus
-      tags: [monitor]
-      summary: Full monitor dashboard data
-      responses:
-        "200":
-          description: Dashboard status
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MonitorStatusResponse"
-        "503":
-          description: Data collection unavailable
-
   /api/workspaces/{ws}/monitor/agents:
     get:
       operationId: getWorkspaceMonitorAgents
@@ -3045,51 +3030,6 @@ paths:
         "404":
           description: Workspace not found
 
-  /api/monitor/tasks:
-    get:
-      operationId: getMonitorTasks
-      tags: [monitor]
-      summary: Task distribution by status
-      responses:
-        "200":
-          description: Task breakdown
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MonitorTasksResponse"
-        "503":
-          description: Data collection unavailable
-
-  /api/monitor/stats:
-    get:
-      operationId: getMonitorStats
-      tags: [monitor]
-      summary: Monitor statistics (distinct from /api/stats issue stats)
-      responses:
-        "200":
-          description: Monitor stats
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MonitorStatsResponse"
-        "503":
-          description: Data collection unavailable
-
-  /api/monitor/sync:
-    get:
-      operationId: getMonitorSync
-      tags: [monitor]
-      summary: Git sync status
-      responses:
-        "200":
-          description: Sync status
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MonitorSyncResponse"
-        "503":
-          description: Data collection unavailable
-
   /api/monitor/workspaces:
     get:
       operationId: getMonitorWorkspaces
@@ -3115,46 +3055,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/StaleDetectorStatus"
-
-  /api/monitor/usage:
-    get:
-      operationId: getMonitorUsage
-      tags: [monitor]
-      summary: Token usage aggregates
-      parameters:
-        - name: agent
-          in: query
-          schema:
-            type: string
-        - name: backend
-          in: query
-          schema:
-            type: string
-        - name: epic
-          in: query
-          schema:
-            type: string
-        - name: since
-          in: query
-          description: "YYYY-MM-DD"
-          schema:
-            type: string
-        - name: until
-          in: query
-          description: "YYYY-MM-DD"
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Usage data
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/UsageResponse"
-        "400":
-          description: Invalid date parameter
-        "503":
-          description: Usage store not initialized
 
   /metrics:
     get:

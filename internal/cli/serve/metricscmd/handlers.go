@@ -76,59 +76,6 @@ type StatusResponse struct {
 	Timestamp      time.Time                   `json:"timestamp"`
 }
 
-// HandleStatus returns an HTTP handler for the full status endpoint.
-func HandleStatus(collectDataFn func() *monitor.MonitorData) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		data := collectDataFn()
-		if data == nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = w.Write([]byte(`{"error":"data collection unavailable"}`))
-			return
-		}
-		writeJSON(w, StatusResponse{
-			Workspace:      getWorkspaceInfo(),
-			Agents:         data.Agents,
-			Tasks:          data.Tasks,
-			InProgressList: data.InProgressTasks,
-			AgentTasks:     data.AgentTasks,
-			Stats:          data.Stats,
-			Sync:           data.SyncStatus,
-			Timestamp:      data.Timestamp,
-		})
-	}
-}
-
-// HandleAgents returns an HTTP handler for the global agents endpoint. It
-// returns the full agent list across every workspace — used by the
-// cross-workspace monitor dashboard, NOT by per-workspace sidebars. Those
-// must use HandleAgentsScoped via /api/workspaces/{ws}/monitor/agents.
-func HandleAgents(collectDataFn func() *monitor.MonitorData) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		data := collectDataFn()
-		if data == nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = w.Write([]byte(`{"error":"data collection unavailable"}`))
-			return
-		}
-		wsInfo := getWorkspaceInfo()
-
-		response := AgentsResponse{
-			Workspace: wsInfo,
-			Agents:    data.Agents,
-			Timestamp: data.Timestamp,
-		}
-
-		// Group agents by workspace if in workspace mode
-		if wsInfo.Mode == "workspace" {
-			response.ByWorkspace = groupAgentsByWorkspace(data.Agents)
-		}
-
-		writeJSON(w, response)
-	}
-}
-
 // HandleAgentsScoped returns an HTTP handler for
 // GET /api/workspaces/{ws}/monitor/agents. It resolves the workspace ID to a
 // workspace name via nameFn, then filters the global monitor data to only
@@ -178,63 +125,6 @@ func filterAgentsByWorkspaceName(all []monitor.AgentStatus, wsName string) []mon
 		}
 	}
 	return out
-}
-
-// HandleTasks returns an HTTP handler for the tasks endpoint.
-func HandleTasks(collectDataFn func() *monitor.MonitorData) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		data := collectDataFn()
-		if data == nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = w.Write([]byte(`{"error":"data collection unavailable"}`))
-			return
-		}
-		writeJSON(w, TasksResponse{
-			Summary:          data.Tasks,
-			NeedsPlanning:    data.NeedsPlanningTasks,
-			ReadyToImplement: data.ReadyToImplement,
-			NeedsReview:      data.ReviewTasks,
-			InProgress:       data.InProgressTasks,
-			Backlog:          data.BacklogTasks,
-			Closed:           data.ClosedTasks,
-			Timestamp:        data.Timestamp,
-		})
-	}
-}
-
-// HandleStats returns an HTTP handler for the stats endpoint.
-func HandleStats(collectDataFn func() *monitor.MonitorData) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		data := collectDataFn()
-		if data == nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = w.Write([]byte(`{"error":"data collection unavailable"}`))
-			return
-		}
-		writeJSON(w, StatsResponse{
-			Stats:     data.Stats,
-			Timestamp: data.Timestamp,
-		})
-	}
-}
-
-// HandleSync returns an HTTP handler for the sync endpoint.
-func HandleSync(collectDataFn func() *monitor.MonitorData) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		data := collectDataFn()
-		if data == nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = w.Write([]byte(`{"error":"data collection unavailable"}`))
-			return
-		}
-		writeJSON(w, SyncResponse{
-			Sync:      data.SyncStatus,
-			Timestamp: data.Timestamp,
-		})
-	}
 }
 
 // HandleWorkspaces returns an HTTP handler for the workspaces endpoint.

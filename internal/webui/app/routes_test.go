@@ -2099,3 +2099,40 @@ func TestScopedMonitorRoutes_RegisteredAndPerWorkspace(t *testing.T) {
 		}
 	}
 }
+
+// TestLegacyGlobalMonitorRoutesRemoved verifies that the five un-scoped
+// /api/monitor/{status,tasks,stats,sync,usage} endpoints — all of which
+// served per-workspace data from the launch workspace — fall through to
+// the SPA catch-all 404. The workspace-scoped replacements at
+// /api/workspaces/{ws}/monitor/* are exercised by
+// TestScopedMonitorRoutes_RegisteredAndPerWorkspace above.
+func TestLegacyGlobalMonitorRoutesRemoved(t *testing.T) {
+	app := &Server{}
+	setupTestRoutes(t, app)
+
+	paths := []string{
+		"/api/monitor/status",
+		"/api/monitor/tasks",
+		"/api/monitor/stats",
+		"/api/monitor/sync",
+		"/api/monitor/usage",
+	}
+	for _, p := range paths {
+		t.Run(p, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, p, nil)
+			rr := httptest.NewRecorder()
+			app.mux.ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusNotFound {
+				t.Errorf("%s: status = %d, want 404 (route should have been deleted)", p, rr.Code)
+			}
+			var body map[string]string
+			if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+				t.Fatalf("%s: response not JSON: %v", p, err)
+			}
+			if body["error"] != "not found" {
+				t.Errorf("%s: error = %q, want generic 404 from SPA catch-all", p, body["error"])
+			}
+		})
+	}
+}

@@ -186,7 +186,7 @@ func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalW
 			}
 			return p.workspaceConfigByIDFn(wsID)
 		}
-		injectTerminalContextBanner(att, p.loomServerURL, wsConfigFn)
+		injectTerminalContextBanner(att, p.loomServerURL, wsID, wsConfigFn)
 	}
 
 	realtime.BroadcastSessionIssueEvent(p.tabMetaStore, p.hub, workspace, session)
@@ -250,8 +250,8 @@ func maybeEmitStaleRestartBanner(reqCtx context.Context, conn *websocket.Conn, p
 
 // injectTerminalContextBanner fetches project context from the loom server
 // and writes a formatted banner to the newly attached session.
-func injectTerminalContextBanner(att webuterminal.Attachment, loomServerURL string, workspaceConfigFn func() (*ops.WorkspaceData, error)) {
-	tc, err := webuterminal.FetchTerminalContext(loomServerURL)
+func injectTerminalContextBanner(att webuterminal.Attachment, loomServerURL, wsID string, workspaceConfigFn func() (*ops.WorkspaceData, error)) {
+	tc, err := webuterminal.FetchTerminalContext(loomServerURL, wsID)
 	if err != nil {
 		slog.Error("terminal context fetch failed, skipping banner", "err", err)
 		return

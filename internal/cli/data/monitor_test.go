@@ -17,7 +17,9 @@ func monitorStatusServer(t *testing.T, payload *gen.MonitorStatusResponse, statu
 	t.Helper()
 	mux := http.NewServeMux()
 	registerAuthConfig(mux)
-	mux.HandleFunc("/api/monitor/status", func(w http.ResponseWriter, r *http.Request) {
+	// Scoped monitor route — matches the server-side /api/workspaces/{ws}/
+	// monitor/status that replaced the old global /api/monitor/status.
+	mux.HandleFunc("GET /api/workspaces/{ws}/monitor/status", func(w http.ResponseWriter, r *http.Request) {
 		if status != 0 && status != http.StatusOK {
 			w.WriteHeader(status)
 			return
@@ -60,7 +62,7 @@ func fetchAndRender(t *testing.T, srvURL, format string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	status, err := fetchMonitorStatus(ctx, cli, url)
+	status, err := fetchMonitorStatus(ctx, cli, url, "test-ws")
 	if err != nil {
 		return "", err
 	}

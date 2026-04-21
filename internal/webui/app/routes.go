@@ -85,31 +85,19 @@ func (app *Server) registerEditorAndNotifyRoutes(h *handlermux.Handlers) {
 
 // registerMonitorHandlers registers monitor/metrics/observability handlers
 // injected from the cli package via ServerConfig.MonitorHandlers.
+//
+// Per-workspace data (status/tasks/stats/sync/usage/agents) lives under
+// /api/workspaces/{ws}/monitor/* — the old un-scoped routes leaked the
+// launch workspace's data into every per-workspace view. The only /api/
+// monitor/* routes that survive here are genuinely server-wide:
+// workspaces (topology), stale-detector (fleet health), and Prometheus.
 func (app *Server) registerMonitorHandlers() {
 	mh := app.config.MonitorHandlers
-	if mh.Status != nil {
-		app.mux.HandleFunc("GET /api/monitor/status", mh.Status)
-	}
-	// /api/monitor/agents deleted — superseded by /api/workspaces/{ws}/monitor/agents.
-	// Remaining un-scoped /api/monitor/{status,tasks,stats,sync,usage} are tracked
-	// for deletion via loomcli-r3ddn.6 → .9.
-	if mh.Tasks != nil {
-		app.mux.HandleFunc("GET /api/monitor/tasks", mh.Tasks)
-	}
-	if mh.Stats != nil {
-		app.mux.HandleFunc("GET /api/monitor/stats", mh.Stats)
-	}
-	if mh.Sync != nil {
-		app.mux.HandleFunc("GET /api/monitor/sync", mh.Sync)
-	}
 	if mh.Workspaces != nil {
 		app.mux.HandleFunc("GET /api/monitor/workspaces", mh.Workspaces)
 	}
 	if mh.StaleDetector != nil {
 		app.mux.HandleFunc("GET /api/monitor/stale-detector", mh.StaleDetector)
-	}
-	if mh.Usage != nil {
-		app.mux.HandleFunc("GET /api/monitor/usage", mh.Usage)
 	}
 	// /metrics serves both loom-specific monitor metrics and the auto-registered
 	// Prometheus metrics (loom_http_requests_total, loom_http_request_duration_seconds).

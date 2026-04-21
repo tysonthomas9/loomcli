@@ -1674,23 +1674,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/monitor/status": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Full monitor dashboard data */
-    get: operations["getMonitorStatus"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/workspaces/{ws}/monitor/agents": {
     parameters: {
       query?: never;
@@ -1793,57 +1776,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/monitor/tasks": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Task distribution by status */
-    get: operations["getMonitorTasks"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/monitor/stats": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Monitor statistics (distinct from /api/stats issue stats) */
-    get: operations["getMonitorStats"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/monitor/sync": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Git sync status */
-    get: operations["getMonitorSync"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/monitor/workspaces": {
     parameters: {
       query?: never;
@@ -1870,23 +1802,6 @@ export interface paths {
     };
     /** Stale detector status */
     get: operations["getStaleDetector"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/monitor/usage": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Token usage aggregates */
-    get: operations["getMonitorUsage"];
     put?: never;
     post?: never;
     delete?: never;
@@ -6146,33 +6061,6 @@ export interface operations {
       };
     };
   };
-  getMonitorStatus: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Dashboard status */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["MonitorStatusResponse"];
-        };
-      };
-      /** @description Data collection unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-    };
-  };
   getWorkspaceMonitorAgents: {
     parameters: {
       query?: never;
@@ -6375,87 +6263,6 @@ export interface operations {
       };
     };
   };
-  getMonitorTasks: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Task breakdown */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["MonitorTasksResponse"];
-        };
-      };
-      /** @description Data collection unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-    };
-  };
-  getMonitorStats: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Monitor stats */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["MonitorStatsResponse"];
-        };
-      };
-      /** @description Data collection unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-    };
-  };
-  getMonitorSync: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Sync status */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["MonitorSyncResponse"];
-        };
-      };
-      /** @description Data collection unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-    };
-  };
   getMonitorWorkspaces: {
     parameters: {
       query?: never;
@@ -6493,48 +6300,6 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["StaleDetectorStatus"];
         };
-      };
-    };
-  };
-  getMonitorUsage: {
-    parameters: {
-      query?: {
-        agent?: string;
-        backend?: string;
-        epic?: string;
-        /** @description YYYY-MM-DD */
-        since?: string;
-        /** @description YYYY-MM-DD */
-        until?: string;
-      };
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Usage data */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["UsageResponse"];
-        };
-      };
-      /** @description Invalid date parameter */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      /** @description Usage store not initialized */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
       };
     };
   };

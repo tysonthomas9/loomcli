@@ -22,7 +22,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/metricscmd"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/observability"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/opsimpl"
-	"github.com/tysonthomas9/loomcli/internal/cli/serve/usagecmd"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	webuiapp "github.com/tysonthomas9/loomcli/internal/webui/app"
@@ -50,9 +49,6 @@ var (
 	serveAuthAudience      string
 	serveAuthAllowInsecure bool
 	serveSentryDSN         string
-
-	// usageHandler holds the initialized usage HTTP handler.
-	usageHandler http.HandlerFunc
 )
 
 // parseFrontendURLsEnv reads LOOM_FRONTEND_URL and returns a list of origins
@@ -198,7 +194,6 @@ func runServe(cmd *cobra.Command, args []string) {
 	if serveFleetMode && serveRedisAddr != "" {
 		staleDetectorHandler = daemonwire.InitStaleDetectorHandler(ctx, serveRedisAddr, serveRedisPassword)
 	}
-	initUsageStore()
 	go workspacemgr.PurgeOldSessions()
 
 	monitorHandlers := buildMonitorHandlers(collectDataFn, staleDetectorHandler)
@@ -295,26 +290,12 @@ func warnNonLocalBind() {
 	}
 }
 
-func initUsageStore() {
-	dir := cli.GetBeadsDir()
-	if dir == "" {
-		dir = "."
-	}
-	usageHandler = usagecmd.HandleUsage(usagecmd.InitStore(dir))
-}
-
 func buildMonitorHandlers(collectDataFn metricscmd.CollectDataFn, staleDetectorHandler http.HandlerFunc) webui.MonitorHandlers {
 	eventsDir := observability.ResolveEventsDir()
 	return webui.MonitorHandlers{
-		Status:               metricscmd.HandleStatus(collectDataFn),
-		Agents:               metricscmd.HandleAgents(collectDataFn),
 		AgentsScoped:         metricscmd.HandleAgentsScoped(collectDataFn, workspacemgr.ResolveWorkspaceNameByID),
-		Tasks:                metricscmd.HandleTasks(collectDataFn),
-		Stats:                metricscmd.HandleStats(collectDataFn),
-		Sync:                 metricscmd.HandleSync(collectDataFn),
 		Workspaces:           metricscmd.HandleWorkspaces(),
 		StaleDetector:        staleDetectorHandler,
-		Usage:                usageHandler,
 		Metrics:              metricscmd.HandleMetrics(collectDataFn),
 		ObservabilityMetrics: observability.HandleMetrics(eventsDir, observability.NewMetricsCache(eventsDir)),
 		ObservabilityEvents:  observability.HandleEvents(eventsDir),
