@@ -3,7 +3,6 @@ package beads
 import (
 	"context"
 	"log/slog"
-	"strings"
 	"sync"
 	"time"
 
@@ -15,31 +14,26 @@ import (
 // Both BeadsBackend and PooledBackend satisfy this interface.
 type mutationSource interface {
 	WaitForMutations(ctx context.Context, sinceMs int64, timeoutMs int64) ([]backend.MutationData, error)
-	GetMutations(ctx context.Context, sinceMs int64) ([]backend.MutationData, error)
 }
 
 // BridgeConfig configures a MutationBridge.
 type BridgeConfig struct {
-	WorkspaceID  string        // Workspace ID to tag on all published events (required for scoped subscriptions).
-	WaitTimeout  time.Duration // Timeout for WaitForMutations long-poll (default: 30s).
-	RetryDelay   time.Duration // Delay before retrying after an error (default: 2s).
-	PollInterval time.Duration // Interval for GetMutations fallback polling (default: 100ms).
-	Logger       *slog.Logger  // Optional logger; defaults to slog.Default().
+	WorkspaceID string        // Workspace ID to tag on all published events (required for scoped subscriptions).
+	WaitTimeout time.Duration // Timeout for WaitForMutations long-poll (default: 30s).
+	RetryDelay  time.Duration // Delay before retrying after an error (default: 2s).
+	Logger      *slog.Logger  // Optional logger; defaults to slog.Default().
 }
 
 // DefaultBridgeConfig returns a BridgeConfig with production-ready defaults.
 func DefaultBridgeConfig() BridgeConfig {
 	return BridgeConfig{
-		WaitTimeout:  30 * time.Second,
-		RetryDelay:   2 * time.Second,
-		PollInterval: 100 * time.Millisecond,
+		WaitTimeout: 30 * time.Second,
+		RetryDelay:  2 * time.Second,
 	}
 }
 
-// MutationBridge continuously polls a MutationSource for mutations and
-// publishes them as notify.Event values to a notification bus. It supports
-// long-polling via WaitForMutations with automatic fallback to short-polling
-// via GetMutations when the daemon does not support the blocking call.
+// MutationBridge continuously long-polls a MutationSource for mutations via
+// WaitForMutations and publishes them as notify.Event values to a notification bus.
 //
 // In production, the MutationSource is typically a PooledBackend (task .10).
 // WaitForMutations holds one pool connection for up to WaitTimeout (30s by
@@ -51,13 +45,12 @@ type MutationBridge struct {
 	cfg    BridgeConfig
 	logger *slog.Logger
 
-	cancel      context.CancelFunc
-	wg          sync.WaitGroup
-	lastSince   int64
-	mu          sync.RWMutex
-	useFallback bool
-	started     bool
-	stopOnce    sync.Once
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
+	lastSince int64
+	mu        sync.RWMutex
+	started   bool
+	stopOnce  sync.Once
 }
 
 // MutationSource is exported for documentation; the bridge accepts the
@@ -82,9 +75,6 @@ func NewMutationBridge(source MutationSource, pub notify.Publisher, cfg BridgeCo
 	}
 	if cfg.RetryDelay == 0 {
 		cfg.RetryDelay = defaults.RetryDelay
-	}
-	if cfg.PollInterval == 0 {
-		cfg.PollInterval = defaults.PollInterval
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -150,13 +140,6 @@ func (b *MutationBridge) LastSince() int64 {
 	return b.lastSince
 }
 
-// UseFallback reports whether the bridge has fallen back to short-polling mode.
-func (b *MutationBridge) UseFallback() bool {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-	return b.useFallback
-}
-
 // run is the main subscription loop.
 func (b *MutationBridge) run(ctx context.Context) {
 	defer b.wg.Done()
@@ -168,15 +151,7 @@ func (b *MutationBridge) run(ctx context.Context) {
 		default:
 		}
 
-		b.mu.RLock()
-		fallback := b.useFallback
-		b.mu.RUnlock()
-
-		if fallback {
-			b.pollMutations(ctx)
-		} else {
-			b.waitForMutations(ctx)
-		}
+		b.waitForMutations(ctx)
 	}
 }
 
@@ -192,39 +167,12 @@ func (b *MutationBridge) waitForMutations(ctx context.Context) {
 		if ctx.Err() != nil {
 			return // shutting down
 		}
-		if isUnsupportedError(err) {
-			b.logger.Warn("daemon does not support WaitForMutations, falling back to polling")
-			b.mu.Lock()
-			b.useFallback = true
-			b.mu.Unlock()
-			return
-		}
 		b.logger.Error("WaitForMutations error", "err", err)
 		b.waitWithCtx(ctx, b.cfg.RetryDelay)
 		return
 	}
 
 	b.processMutations(mutations)
-}
-
-// pollMutations uses the non-blocking GetMutations call as a fallback.
-func (b *MutationBridge) pollMutations(ctx context.Context) {
-	b.mu.RLock()
-	since := b.lastSince
-	b.mu.RUnlock()
-
-	mutations, err := b.source.GetMutations(ctx, since)
-	if err != nil {
-		if ctx.Err() != nil {
-			return // shutting down
-		}
-		b.logger.Error("GetMutations error", "err", err)
-		b.waitWithCtx(ctx, b.cfg.RetryDelay)
-		return
-	}
-
-	b.processMutations(mutations)
-	b.waitWithCtx(ctx, b.cfg.PollInterval)
 }
 
 // processMutations advances the cursor and publishes events for each mutation.
@@ -294,17 +242,4 @@ func (b *MutationBridge) waitWithCtx(ctx context.Context, d time.Duration) {
 	case <-ctx.Done():
 	case <-time.After(d):
 	}
-}
-
-// isUnsupportedError checks if an error indicates WaitForMutations is not
-// supported by the daemon. This is a string-match heuristic because the daemon
-// protocol does not provide structured error codes for unsupported operations.
-func isUnsupportedError(err error) bool {
-	if err == nil {
-		return false
-	}
-	// Check for KindInternal with "unknown operation" or "unsupported" in the message.
-	// Also check the raw error string for compatibility with non-BackendError errors.
-	msg := err.Error()
-	return strings.Contains(msg, "unknown operation") || strings.Contains(msg, "unsupported")
 }

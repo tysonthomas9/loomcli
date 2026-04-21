@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"strings"
 	"sync"
 	"time"
 
@@ -23,9 +22,6 @@ const (
 	// subscriptionAcquireTimeout is the timeout for acquiring a connection.
 	subscriptionAcquireTimeout = 5 * time.Second
 
-	// fallbackPollInterval is used when wait_for_mutations is not available.
-	fallbackPollInterval = 100 * time.Millisecond
-
 	// externalPollInterval is the interval for polling external DB changes
 	// (writes made by CLI tools that bypass the daemon RPC mutation tracking).
 	externalPollInterval = 3 * time.Second
@@ -40,7 +36,6 @@ type DaemonSubscriber struct {
 	wg          sync.WaitGroup
 	lastSince   int64
 	mu          sync.RWMutex
-	useFallback bool      // true if wait_for_mutations is not supported
 	workspaceID string    // workspace ID to tag on all outgoing MutationPayloads
 	startOnce   sync.Once // guard against double-start
 	stopOnce    sync.Once // guard against double-close of done channel
@@ -136,7 +131,7 @@ func (s *DaemonSubscriber) GetMutationsSince(since int64) []rpc.MutationEvent {
 	return mutations
 }
 
-// subscriptionLoop continuously polls/waits for mutations from the daemon.
+// subscriptionLoop continuously waits for mutations from the daemon.
 func (s *DaemonSubscriber) subscriptionLoop() {
 	defer s.wg.Done()
 
@@ -153,16 +148,7 @@ func (s *DaemonSubscriber) subscriptionLoop() {
 			continue
 		}
 
-		// Try to get mutations using wait_for_mutations or fallback polling
-		s.mu.RLock()
-		useFallback := s.useFallback
-		s.mu.RUnlock()
-
-		if useFallback {
-			s.pollMutations()
-		} else {
-			s.waitForMutations()
-		}
+		s.waitForMutations()
 	}
 }
 
@@ -193,17 +179,6 @@ func (s *DaemonSubscriber) waitForMutations() {
 		// connection may have a stale response in the pipe, making it unsafe
 		// to reuse. Discarding forces a fresh connection next time.
 		s.pool.Discard(client)
-
-		// Check if this is an "unknown operation" error indicating the daemon
-		// doesn't support wait_for_mutations
-		if isUnknownOperationError(err) {
-			slog.Warn("daemon does not support wait_for_mutations, falling back to polling")
-			s.mu.Lock()
-			s.useFallback = true
-			s.mu.Unlock()
-			return
-		}
-
 		slog.Error("wait for mutations error", "err", err)
 		s.waitWithDone(subscriptionRetryDelay)
 		return
@@ -219,48 +194,6 @@ func (s *DaemonSubscriber) waitForMutations() {
 	}
 
 	s.processMutationResponse(resp)
-}
-
-// pollMutations uses the non-blocking get_mutations RPC as a fallback.
-func (s *DaemonSubscriber) pollMutations() {
-	ctx, cancel := context.WithTimeout(context.Background(), subscriptionAcquireTimeout)
-	defer cancel()
-
-	client, err := s.pool.Get(ctx)
-	if err != nil {
-		s.waitWithDone(subscriptionRetryDelay)
-		return
-	}
-	rpcOK := false
-	defer func() {
-		if rpcOK {
-			s.pool.Put(client)
-		} else {
-			s.pool.Discard(client)
-		}
-	}()
-
-	s.mu.RLock()
-	since := s.lastSince
-	s.mu.RUnlock()
-
-	resp, err := client.GetMutations(&rpc.GetMutationsArgs{Since: since})
-	if err != nil {
-		slog.Error("get mutations error", "err", err)
-		s.waitWithDone(subscriptionRetryDelay)
-		return
-	}
-	rpcOK = true
-
-	if !resp.Success {
-		s.waitWithDone(subscriptionRetryDelay)
-		return
-	}
-
-	s.processMutationResponse(resp)
-
-	// Wait for next poll interval
-	s.waitWithDone(fallbackPollInterval)
 }
 
 // processMutationResponse handles the response from get/wait_for_mutations.
@@ -472,14 +405,4 @@ func (s *DaemonSubscriber) waitWithDone(d time.Duration) {
 	case <-s.done:
 	case <-time.After(d):
 	}
-}
-
-// isUnknownOperationError checks if an error indicates the operation is unknown.
-func isUnknownOperationError(err error) bool {
-	if err == nil {
-		return false
-	}
-	errStr := err.Error()
-	return len(errStr) > 0 &&
-		(strings.Contains(errStr, "unknown operation") || strings.Contains(errStr, "unsupported"))
 }

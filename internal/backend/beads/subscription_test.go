@@ -15,7 +15,6 @@ import (
 // mockMutationSource is a test double implementing mutationSource.
 type mockMutationSource struct {
 	waitFn func(ctx context.Context, sinceMs int64, timeoutMs int64) ([]backend.MutationData, error)
-	getFn  func(ctx context.Context, sinceMs int64) ([]backend.MutationData, error)
 }
 
 func (m *mockMutationSource) WaitForMutations(ctx context.Context, sinceMs int64, timeoutMs int64) ([]backend.MutationData, error) {
@@ -26,20 +25,12 @@ func (m *mockMutationSource) WaitForMutations(ctx context.Context, sinceMs int64
 	return nil, ctx.Err()
 }
 
-func (m *mockMutationSource) GetMutations(ctx context.Context, sinceMs int64) ([]backend.MutationData, error) {
-	if m.getFn != nil {
-		return m.getFn(ctx, sinceMs)
-	}
-	return nil, nil
-}
-
 // testBridgeConfig returns a BridgeConfig with short timeouts for fast tests.
 func testBridgeConfig(wsID string) BridgeConfig {
 	return BridgeConfig{
-		WorkspaceID:  wsID,
-		WaitTimeout:  50 * time.Millisecond,
-		RetryDelay:   5 * time.Millisecond,
-		PollInterval: 5 * time.Millisecond,
+		WorkspaceID: wsID,
+		WaitTimeout: 50 * time.Millisecond,
+		RetryDelay:  5 * time.Millisecond,
 	}
 }
 
@@ -147,43 +138,6 @@ func TestMutationBridge_AdvancesLastSince(t *testing.T) {
 	}
 }
 
-func TestMutationBridge_FallbackOnUnsupported(t *testing.T) {
-	bus := notify.New()
-	defer bus.Close()
-
-	ts := time.UnixMilli(50)
-	var getCallCount atomic.Int32
-
-	src := &mockMutationSource{
-		waitFn: func(ctx context.Context, sinceMs int64, timeoutMs int64) ([]backend.MutationData, error) {
-			return nil, backend.ErrInternal("WaitForMutations", "unknown operation: wait_for_mutations", nil)
-		},
-		getFn: func(ctx context.Context, sinceMs int64) ([]backend.MutationData, error) {
-			if getCallCount.Add(1) == 1 {
-				return []backend.MutationData{
-					{Type: "create", IssueID: "x", Timestamp: ts},
-				}, nil
-			}
-			<-ctx.Done()
-			return nil, ctx.Err()
-		},
-	}
-
-	bridge := NewMutationBridge(src, bus, testBridgeConfig("ws-1"))
-	bridge.Start()
-	defer bridge.Stop()
-
-	// Wait for the fallback event.
-	events := collectEvents(bus, "ws-1", 1, time.Second)
-	if len(events) != 1 {
-		t.Fatalf("expected 1 event in fallback mode, got %d", len(events))
-	}
-
-	if !bridge.UseFallback() {
-		t.Error("expected UseFallback() = true")
-	}
-}
-
 func TestMutationBridge_RetriesOnUnavailable(t *testing.T) {
 	bus := notify.New()
 	defer bus.Close()
@@ -214,10 +168,6 @@ func TestMutationBridge_RetriesOnUnavailable(t *testing.T) {
 	events := collectEvents(bus, "ws-1", 1, time.Second)
 	if len(events) != 1 {
 		t.Fatalf("expected 1 event after retries, got %d", len(events))
-	}
-
-	if bridge.UseFallback() {
-		t.Error("expected UseFallback() = false (should retry, not fallback)")
 	}
 }
 
@@ -463,59 +413,6 @@ func TestMutationTopic(t *testing.T) {
 	}
 }
 
-func TestIsUnsupportedError(t *testing.T) {
-	tests := []struct {
-		name string
-		err  error
-		want bool
-	}{
-		{"nil", nil, false},
-		{"unknown operation", fmt.Errorf("unknown operation: wait_for_mutations"), true},
-		{"unsupported", fmt.Errorf("unsupported"), true},
-		{"connection refused", fmt.Errorf("connection refused"), false},
-		{"wrapped unknown", fmt.Errorf("rpc: %w", fmt.Errorf("unknown operation foo")), true},
-		{"backend error internal", backend.ErrInternal("Op", "unknown operation: x", nil), true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := isUnsupportedError(tt.err)
-			if got != tt.want {
-				t.Errorf("isUnsupportedError(%v) = %v, want %v", tt.err, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestMutationBridge_FallbackPollsRepeatedly(t *testing.T) {
-	bus := notify.New()
-	defer bus.Close()
-
-	var getCallCount atomic.Int32
-	src := &mockMutationSource{
-		waitFn: func(ctx context.Context, sinceMs int64, timeoutMs int64) ([]backend.MutationData, error) {
-			return nil, fmt.Errorf("unknown operation: wait_for_mutations")
-		},
-		getFn: func(ctx context.Context, sinceMs int64) ([]backend.MutationData, error) {
-			getCallCount.Add(1)
-			return nil, nil // empty, no mutations
-		},
-	}
-
-	cfg := testBridgeConfig("ws-1")
-	cfg.PollInterval = 5 * time.Millisecond
-	bridge := NewMutationBridge(src, bus, cfg)
-	bridge.Start()
-	defer bridge.Stop()
-
-	// Wait enough time for multiple polls.
-	time.Sleep(100 * time.Millisecond)
-
-	calls := getCallCount.Load()
-	if calls < 3 {
-		t.Errorf("expected at least 3 GetMutations calls, got %d", calls)
-	}
-}
-
 func TestMutationBridge_DefaultConfig(t *testing.T) {
 	cfg := DefaultBridgeConfig()
 	if cfg.WaitTimeout != 30*time.Second {
@@ -523,9 +420,6 @@ func TestMutationBridge_DefaultConfig(t *testing.T) {
 	}
 	if cfg.RetryDelay != 2*time.Second {
 		t.Errorf("RetryDelay = %v, want 2s", cfg.RetryDelay)
-	}
-	if cfg.PollInterval != 100*time.Millisecond {
-		t.Errorf("PollInterval = %v, want 100ms", cfg.PollInterval)
 	}
 }
 
