@@ -68,7 +68,7 @@ func (s *agentServiceImpl) GetTerminalInfo(_ context.Context, wsID, agentName st
 	return &service.AgentTerminalInfoResult{Agent: agentName, Mode: mode}, nil
 }
 
-func (s *agentServiceImpl) GenerateTerminalToken(_ context.Context, agentName, userID string) (string, error) {
+func (s *agentServiceImpl) GenerateTerminalToken(_ context.Context, wsID, agentName, userID string) (string, error) {
 	if err := validateAgentName(agentName); err != nil {
 		return "", err
 	}
@@ -76,7 +76,7 @@ func (s *agentServiceImpl) GenerateTerminalToken(_ context.Context, agentName, u
 		return "", service.ErrUnavailable("terminal authentication not initialized")
 	}
 
-	token, err := s.termAuth.GenerateToken(agentLogTokenScope(agentName), userID)
+	token, err := s.termAuth.GenerateToken(agentLogTokenScope(agentName), wsID, userID)
 	if err != nil {
 		logger.Error("failed to generate agent terminal token", "agent", agentName, "err", err)
 		return "", service.ErrInternal("failed to generate token", err)

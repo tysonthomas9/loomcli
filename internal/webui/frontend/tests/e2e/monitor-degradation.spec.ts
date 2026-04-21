@@ -158,7 +158,7 @@ async function setupBackendMocks(page: Page) {
     await route.abort()
   })
 
-  await page.route("**/api/stats", async (route) => {
+  await page.route("**/api/workspaces/*/stats", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -516,7 +516,7 @@ async function setupEmptyMocks(
     await route.abort()
   })
 
-  await page.route("**/api/stats", async (route) => {
+  await page.route("**/api/workspaces/*/stats", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",

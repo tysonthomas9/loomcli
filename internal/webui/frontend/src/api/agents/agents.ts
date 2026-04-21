@@ -20,16 +20,18 @@ import {
 } from "./defaults";
 
 /**
- * Fetch agents for a specific workspace. Returns only agents belonging to
- * that workspace — if wsID is empty or unknown the server returns an empty
- * list rather than leaking another workspace's agents. The old
- * /api/monitor/agents (un-scoped) endpoint remains for the cross-workspace
- * monitor dashboard; per-workspace views must pass wsID here.
+ * Fetch agents for a specific workspace. Empty or unknown wsID returns an
+ * empty list rather than firing a doomed /api/workspaces//monitor/agents
+ * request — matches fetchStatus / fetchTasks. Callers without an active
+ * workspace must handle the empty case themselves.
  *
  * Throws on network errors or non-OK responses so callers can handle
  * connection state.
  */
 export async function fetchAgents(wsID: string): Promise<LoomAgentStatus[]> {
+  if (wsID === "") {
+    return [];
+  }
   const { data, error, response } = await api.GET(
     "/api/workspaces/{ws}/monitor/agents",
     {

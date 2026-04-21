@@ -100,13 +100,14 @@ func HandleGetAgentTerminalInfo(svc service.AgentService) http.HandlerFunc {
 func HandleGetAgentTerminalToken(svc service.AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentName := r.PathValue("name")
+		wsID := middleware.WorkspaceFromContext(r.Context())
 
 		var userID string
 		if identity, ok := middleware.UserIdentityFromContext(r.Context()); ok {
 			userID = identity.UserID
 		}
 
-		token, err := svc.GenerateTerminalToken(r.Context(), agentName, userID)
+		token, err := svc.GenerateTerminalToken(r.Context(), wsID, agentName, userID)
 		if err != nil {
 			var svcErr *service.ServiceError
 			status := http.StatusInternalServerError
@@ -200,7 +201,8 @@ func validateAgentWSRequest(w http.ResponseWriter, r *http.Request, manager *web
 	}
 
 	token := r.URL.Query().Get("token")
-	userID, err := auth.ValidateToken(token, agentLogTokenScope(agentName))
+	wsID := middleware.WorkspaceFromContext(r.Context())
+	userID, err := auth.ValidateToken(token, agentLogTokenScope(agentName), wsID)
 	if err != nil {
 		handler.WriteJSON(w, http.StatusUnauthorized, map[string]interface{}{
 			"success": false,

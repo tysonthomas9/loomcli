@@ -37,13 +37,14 @@ func originHosts(origins []string) []string {
 func HandleTerminalToken(svc service.TerminalService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		session := r.URL.Query().Get("session")
+		wsID := middleware.WorkspaceFromContext(r.Context())
 
 		var userID string
 		if identity, ok := middleware.UserIdentityFromContext(r.Context()); ok {
 			userID = identity.UserID
 		}
 
-		token, err := svc.GenerateToken(r.Context(), session, userID)
+		token, err := svc.GenerateToken(r.Context(), session, wsID, userID)
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return

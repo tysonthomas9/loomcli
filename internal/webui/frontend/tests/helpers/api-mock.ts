@@ -99,7 +99,7 @@ export function createApiMockHandler(page: Page): ApiMockHandler {
 
     async mockStats(stats: Statistics): Promise<MockTracker> {
       const tracker: MockTracker = { calls: [] };
-      await page.route("**/api/stats", async (route) => {
+      await page.route("**/api/workspaces/*/stats", async (route) => {
         tracker.calls.push(trackRequest(route.request()));
         await route.fulfill({
           status: 200,
@@ -392,7 +392,7 @@ export function createApiMockHandler(page: Page): ApiMockHandler {
       );
 
       // Monitor endpoints
-      await page.route("**/api/monitor/**", async (route) => {
+      await page.route("**/api/workspaces/*/monitor/**", async (route) => {
         await route.fulfill({
           status: 200,
           contentType: "application/json",

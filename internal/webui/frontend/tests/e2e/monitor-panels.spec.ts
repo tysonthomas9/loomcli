@@ -140,7 +140,7 @@ async function setupMocks(page: Page) {
     await route.abort()
   })
 
-  await page.route("**/api/stats", async (route) => {
+  await page.route("**/api/workspaces/*/stats", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -436,7 +436,7 @@ async function setupHealthPanelMocks(
     await route.abort()
   })
 
-  await page.route("**/api/stats", async (route) => {
+  await page.route("**/api/workspaces/*/stats", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -658,7 +658,7 @@ async function setupGraphMocks(
     await route.abort()
   })
 
-  await page.route("**/api/stats", async (route) => {
+  await page.route("**/api/workspaces/*/stats", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",

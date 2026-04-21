@@ -130,7 +130,7 @@ async function setupMocks(
     await route.abort()
   })
 
-  await page.route("**/api/stats", async (route) => {
+  await page.route("**/api/workspaces/*/stats", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",

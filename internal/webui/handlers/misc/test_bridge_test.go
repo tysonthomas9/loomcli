@@ -292,7 +292,7 @@ func (m *mockAgentService) GetTerminalInfo(ctx context.Context, wsID, agentName 
 	}
 	return &service.AgentTerminalInfoResult{Agent: agentName, Mode: "archive"}, nil
 }
-func (m *mockAgentService) GenerateTerminalToken(ctx context.Context, agentName, userID string) (string, error) {
+func (m *mockAgentService) GenerateTerminalToken(ctx context.Context, wsID, agentName, userID string) (string, error) {
 	return "test-token", nil
 }
 func (m *mockAgentService) GetLog(ctx context.Context, wsID, agentName string, lines int, beforeLine int64) (*service.AgentLogResult, error) {

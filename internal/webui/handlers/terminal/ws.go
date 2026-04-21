@@ -126,7 +126,8 @@ func authenticateTerminalSession(w http.ResponseWriter, r *http.Request, auth *r
 		return true
 	}
 	token := r.URL.Query().Get("token")
-	userID, err := auth.ValidateToken(token, session)
+	wsID := middleware.WorkspaceFromContext(r.Context())
+	userID, err := auth.ValidateToken(token, session, wsID)
 	if err != nil {
 		handler.WriteJSON(w, http.StatusUnauthorized, map[string]interface{}{
 			"success": false, "error": "terminal authentication failed",

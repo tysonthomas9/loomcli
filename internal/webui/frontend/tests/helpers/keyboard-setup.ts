@@ -282,7 +282,7 @@ export async function bootApp(
   });
 
   // Monitor server endpoints (global)
-  await page.route("**/api/monitor/**", async function (route) {
+  await page.route("**/api/workspaces/*/monitor/**", async function (route) {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
