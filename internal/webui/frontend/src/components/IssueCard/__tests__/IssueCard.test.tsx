@@ -1017,6 +1017,141 @@ describe("IssueCard", () => {
     });
   });
 
+  describe("assignee badge", () => {
+    it("renders assignee badge when issue has assignee and columnId is open", () => {
+      const issue = createTestIssue({ assignee: "alice" });
+      render(<IssueCard issue={issue} columnId="open" />);
+
+      const badge = screen.getByTestId("issue-card-assignee");
+      expect(badge).toBeInTheDocument();
+      expect(badge).toHaveTextContent("A");
+    });
+
+    it("renders assignee badge with tooltip showing assignee name", () => {
+      const issue = createTestIssue({ assignee: "alice" });
+      render(<IssueCard issue={issue} columnId="open" />);
+
+      const badge = screen.getByTestId("issue-card-assignee");
+      expect(badge).toHaveAttribute("title", "Assignee: alice");
+    });
+
+    it("assignee badge has aria-label for screen readers", () => {
+      const issue = createTestIssue({ assignee: "alice" });
+      render(<IssueCard issue={issue} columnId="open" />);
+
+      expect(screen.getByLabelText("Assignee: alice")).toBeInTheDocument();
+    });
+
+    it("does not render assignee badge in in_progress column (AgentRow handles it)", () => {
+      const issue = createTestIssue({ assignee: "nova" });
+      render(<IssueCard issue={issue} columnId="in_progress" />);
+
+      expect(
+        screen.queryByTestId("issue-card-assignee"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("does not render assignee badge in review column (AgentRow handles it)", () => {
+      const issue = createTestIssue({ assignee: "nova" });
+      render(<IssueCard issue={issue} columnId="review" />);
+
+      expect(
+        screen.queryByTestId("issue-card-assignee"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("renders assignee badge in done column", () => {
+      const issue = createTestIssue({ assignee: "bob" });
+      render(<IssueCard issue={issue} columnId="done" />);
+
+      const badge = screen.getByTestId("issue-card-assignee");
+      expect(badge).toBeInTheDocument();
+      expect(badge).toHaveTextContent("B");
+    });
+
+    it("renders assignee badge in blocked column", () => {
+      const issue = createTestIssue({ assignee: "charlie" });
+      render(<IssueCard issue={issue} columnId="blocked" />);
+
+      const badge = screen.getByTestId("issue-card-assignee");
+      expect(badge).toBeInTheDocument();
+      expect(badge).toHaveTextContent("C");
+    });
+
+    it("does not render assignee badge when assignee is undefined", () => {
+      const issue = createTestIssue();
+      render(<IssueCard issue={issue} columnId="open" />);
+
+      expect(
+        screen.queryByTestId("issue-card-assignee"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("does not render assignee badge when assignee is empty string", () => {
+      const issue = createTestIssue({ assignee: "" });
+      render(<IssueCard issue={issue} columnId="open" />);
+
+      expect(
+        screen.queryByTestId("issue-card-assignee"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("strips [H] prefix from assignee display", () => {
+      const issue = createTestIssue({ assignee: "[H] Alice" });
+      render(<IssueCard issue={issue} columnId="open" />);
+
+      const badge = screen.getByTestId("issue-card-assignee");
+      expect(badge).toHaveTextContent("A");
+      expect(badge).toHaveAttribute("title", "Assignee: Alice");
+    });
+
+    it("renders both owner badge and assignee badge side by side", () => {
+      const issue = createTestIssue({
+        owner: "val@test",
+        assignee: "alice",
+      });
+      render(<IssueCard issue={issue} columnId="open" />);
+
+      expect(screen.getByTestId("issue-card-owner")).toBeInTheDocument();
+      expect(screen.getByTestId("issue-card-assignee")).toBeInTheDocument();
+    });
+
+    it("renders only owner badge when no assignee", () => {
+      const issue = createTestIssue({ owner: "val@test" });
+      render(<IssueCard issue={issue} columnId="open" />);
+
+      expect(screen.getByTestId("issue-card-owner")).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("issue-card-assignee"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("renders only assignee badge when no owner", () => {
+      const issue = createTestIssue({ assignee: "alice" });
+      render(<IssueCard issue={issue} columnId="open" />);
+
+      expect(screen.queryByTestId("issue-card-owner")).not.toBeInTheDocument();
+      expect(screen.getByTestId("issue-card-assignee")).toBeInTheDocument();
+    });
+
+    it("applies a colored background style to the assignee badge", () => {
+      const issue = createTestIssue({ assignee: "alice" });
+      render(<IssueCard issue={issue} columnId="open" />);
+
+      const badge = screen.getByTestId("issue-card-assignee");
+      // backgroundColor inline style is set from getAvatarColor — just verify it's present
+      expect(badge.style.backgroundColor).not.toBe("");
+    });
+
+    it("renders multi-word assignee initials (max 2 chars)", () => {
+      const issue = createTestIssue({ assignee: "Alice Smith" });
+      render(<IssueCard issue={issue} columnId="open" />);
+
+      const badge = screen.getByTestId("issue-card-assignee");
+      expect(badge).toHaveTextContent("AS");
+    });
+  });
+
   describe("TypeIcon integration", () => {
     it('renders TypeIcon with data-type="bug" for issue_type="bug"', () => {
       const issue = createTestIssue({ issue_type: "bug" });

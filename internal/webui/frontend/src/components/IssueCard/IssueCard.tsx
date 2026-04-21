@@ -139,6 +139,10 @@ export const IssueCard = memo(function IssueCard({
   const showAgentRow =
     (columnId === "in_progress" || columnId === "review") && !!issue.assignee;
   const isReviewColumn = columnId === "review";
+  const showAssigneeBadge = !!issue.assignee && !showAgentRow;
+  const assigneeDisplayName = issue.assignee
+    ? issue.assignee.replace(/^\[H\]\s*/, "")
+    : "";
   const assignedAgent = issue.assignee
     ? agents.find((a) => a.name === issue.assignee)
     : undefined;
@@ -271,19 +275,39 @@ export const IssueCard = memo(function IssueCard({
       <h3 className={styles.title}>
         <HighlightText text={displayTitle} searchTerm={searchTerm} />
       </h3>
-      {issue.owner && (
-        <span
-          className={styles.ownerBadge}
-          title={`Owner: ${issue.owner}`}
-          data-testid="issue-card-owner"
-        >
-          {issue.owner
-            .split(/\s+/)
-            .map((w) => w[0])
-            .join("")
-            .toUpperCase()
-            .slice(0, 2)}
-        </span>
+      {(!!issue.owner || showAssigneeBadge) && (
+        <div className={styles.badgeRow}>
+          {issue.owner && (
+            <span
+              className={styles.ownerBadge}
+              title={`Owner: ${issue.owner}`}
+              data-testid="issue-card-owner"
+            >
+              {issue.owner
+                .split(/\s+/)
+                .map((w) => w[0])
+                .join("")
+                .toUpperCase()
+                .slice(0, 2)}
+            </span>
+          )}
+          {showAssigneeBadge && (
+            <span
+              className={styles.assigneeBadge}
+              style={{ backgroundColor: getAvatarColor(assigneeDisplayName) }}
+              title={`Assignee: ${assigneeDisplayName}`}
+              aria-label={`Assignee: ${assigneeDisplayName}`}
+              data-testid="issue-card-assignee"
+            >
+              {assigneeDisplayName
+                .split(/\s+/)
+                .map((w) => w[0])
+                .join("")
+                .toUpperCase()
+                .slice(0, 2)}
+            </span>
+          )}
+        </div>
       )}
       {isMultiRepo && isAllSelected && issue.repo && (
         <div className={styles.cardFooter}>
