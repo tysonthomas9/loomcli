@@ -5,6 +5,7 @@
 
 import type { UsageResponse, UsageParams } from "@/types";
 import { api, apiErrorFromResponse, cleanQuery } from "@/api/common";
+import { DEFAULT_USAGE } from "./defaults";
 
 /**
  * Fetch usage data for a specific workspace with optional filters. Empty or
@@ -17,7 +18,7 @@ export async function fetchUsage(
   params?: UsageParams,
 ): Promise<UsageResponse> {
   if (wsID === "") {
-    return emptyUsage();
+    return DEFAULT_USAGE;
   }
   const query = cleanQuery<{
     agent?: string;
@@ -41,20 +42,4 @@ export async function fetchUsage(
   );
   if (error) throw apiErrorFromResponse(error, response);
   return data as unknown as UsageResponse;
-}
-
-function emptyUsage(): UsageResponse {
-  return {
-    total_input_tokens: 0,
-    total_output_tokens: 0,
-    total_cache_read_tokens: 0,
-    total_cache_write_tokens: 0,
-    total_cost: 0,
-    session_count: 0,
-    by_agent: [],
-    by_backend: [],
-    daily_costs: [],
-    sessions: [],
-    timestamp: "",
-  } as unknown as UsageResponse;
 }

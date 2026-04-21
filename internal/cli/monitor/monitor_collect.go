@@ -73,10 +73,6 @@ func resolverForWorkspace(workspaceName, workspacePath string) *cli.Resolver {
 	return nil
 }
 
-func collectMonitorDataDeps(deps *cli.Deps, readyLimit int, branch string) *MonitorData {
-	return collectMonitorDataDepsScoped(deps, "", nil, readyLimit, branch)
-}
-
 // collectMonitorDataDepsScoped is the single source of truth for monitor
 // collection. When wsPath == "" and resolver == nil, it behaves exactly like
 // the legacy launch-workspace collector (uses cli.DiscoverWorktrees, os.Getwd,
@@ -144,11 +140,7 @@ func collectMonitorDataDepsScoped(deps *cli.Deps, wsPath string, resolver *cli.R
 func collectAgentStatus(agentTasks map[string]TaskInfo, branch string) ([]AgentStatus, map[string][]string) {
 	d := *cli.GetDeps(nil)
 	d.IssueBackend = cli.DefaultIssueBackend()
-	return collectAgentStatusDeps(&d, agentTasks, branch)
-}
-
-func collectAgentStatusDeps(deps *cli.Deps, agentTasks map[string]TaskInfo, branch string) ([]AgentStatus, map[string][]string) {
-	return collectAgentStatusDepsScoped(deps, "", nil, agentTasks, branch)
+	return collectAgentStatusDepsScoped(&d, "", nil, agentTasks, branch)
 }
 
 // collectAgentStatusDepsScoped collects agent status for the worktrees owned
@@ -553,11 +545,7 @@ func processClosedIssues(issues []backend.IssueData, err error) []TaskInfo {
 // collectSyncBdStatus runs the bd sync --status command (safe to call concurrently).
 // Uses execCommand directly since sync is an infrastructure operation, not an issue query.
 func collectSyncBdStatus() SyncInfo {
-	return collectSyncBdStatusDeps(cli.GetDeps(nil))
-}
-
-func collectSyncBdStatusDeps(deps *cli.Deps) SyncInfo {
-	return collectSyncBdStatusDepsScoped(deps, "")
+	return collectSyncBdStatusDepsScoped(cli.GetDeps(nil), "")
 }
 
 // collectSyncBdStatusDepsScoped runs `bd sync --status` in the given workspace

@@ -8,6 +8,12 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 
 import { fetchAgents, fetchStatus, fetchTasks } from "../api/agents";
+import {
+  DEFAULT_TASKS,
+  DEFAULT_SYNC,
+  DEFAULT_STATS,
+  DEFAULT_TASK_LISTS,
+} from "../api/agents/defaults";
 import type {
   LoomAgentStatus,
   LoomTaskSummary,
@@ -33,42 +39,6 @@ const WATCHDOG_TIMEOUT_MS = 20_000;
 // ---------------------------------------------------------------------------
 // Default values (moved from useAgents.ts)
 // ---------------------------------------------------------------------------
-
-const DEFAULT_TASKS: LoomTaskSummary = {
-  needs_planning: 0,
-  ready_to_implement: 0,
-  in_progress: 0,
-  need_review: 0,
-  backlog: 0,
-  epics: 0,
-};
-
-const DEFAULT_SYNC: LoomSyncInfo = {
-  db_synced: true,
-  db_last_sync: "",
-  git_needs_push: 0,
-  git_needs_pull: 0,
-};
-
-const DEFAULT_STATS: LoomStats = {
-  open: 0,
-  closed: 0,
-  total: 0,
-  completion: 0,
-  remaining: 0,
-  in_progress: 0,
-  review: 0,
-  blocked: 0,
-};
-
-const DEFAULT_TASK_LISTS: LoomTaskLists = {
-  needsPlanning: [],
-  readyToImplement: [],
-  needsReview: [],
-  inProgress: [],
-  backlog: [],
-  done: [],
-};
 
 // ---------------------------------------------------------------------------
 // Public types

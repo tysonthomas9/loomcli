@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/cli"
 )
 
 // TestCollectMonitorDataScoped_EmptyPathReturnsZero verifies that an unknown
@@ -122,7 +121,3 @@ func TestCollectSyncBdStatusDepsScoped_UsesWorkspacePath(t *testing.T) {
 		t.Errorf("bd sync was invoked in %q, want %q (scoped path must override cli.GetBeadsDir)", gotDir, wsPath)
 	}
 }
-
-// ensure the cli package import isn't dropped by goimports — NewResolver is
-// not used directly here, but the scoped collector depends on cli.Resolver.
-var _ = cli.NewResolver

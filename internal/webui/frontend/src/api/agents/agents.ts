@@ -12,6 +12,12 @@ import type {
   LoomStats,
 } from "@/types";
 import { api, apiErrorFromResponse, get } from "@/api/common";
+import {
+  DEFAULT_TASKS,
+  DEFAULT_SYNC,
+  DEFAULT_STATS,
+  DEFAULT_TASK_LISTS,
+} from "./defaults";
 
 /**
  * Fetch agents for a specific workspace. Returns only agents belonging to
@@ -122,48 +128,17 @@ export async function fetchTasks(wsID: string): Promise<LoomTaskLists> {
   } as unknown as LoomTaskLists;
 }
 
-// emptyStatus matches FetchStatusResult's shape with zero-valued fields so
-// callers with an empty wsID can treat the return identically to a
-// successful fetch against an empty workspace.
 function emptyStatus(): FetchStatusResult {
   return {
     agents: [],
-    tasks: {
-      needs_planning: 0,
-      ready_to_implement: 0,
-      in_progress: 0,
-      need_review: 0,
-      backlog: 0,
-      epics: 0,
-    } as unknown as LoomTaskSummary,
+    tasks: DEFAULT_TASKS,
     agentTasks: {},
-    sync: {
-      db_synced: true,
-      db_last_sync: "",
-      git_needs_push: 0,
-      git_needs_pull: 0,
-    } as unknown as LoomSyncInfo,
-    stats: {
-      open: 0,
-      closed: 0,
-      total: 0,
-      completion: 0,
-      remaining: 0,
-      in_progress: 0,
-      review: 0,
-      blocked: 0,
-    } as unknown as LoomStats,
+    sync: DEFAULT_SYNC,
+    stats: DEFAULT_STATS,
     timestamp: "",
   };
 }
 
 function emptyTaskLists(): LoomTaskLists {
-  return {
-    needsPlanning: [],
-    readyToImplement: [],
-    needsReview: [],
-    inProgress: [],
-    backlog: [],
-    done: [],
-  } as unknown as LoomTaskLists;
+  return DEFAULT_TASK_LISTS;
 }
