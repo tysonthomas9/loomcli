@@ -24,7 +24,7 @@ import {
 } from "@/hooks";
 import { useStore } from "zustand";
 
-import { useAgentStoreInstance } from "@/hooks/common";
+import { useAgentStoreInstance, useIssueStoreInstance } from "@/hooks/common";
 import { useWorkspaceContext } from "@/hooks/workspace";
 import { useIssueTabPersistence } from "@/hooks/issues";
 import type {
@@ -398,6 +398,26 @@ function DefaultContent({
   const agents = useStore(agentStore, (s) => s.agents);
   const agentTasks = useStore(agentStore, (s) => s.agentTasks);
   const isLoomConnected = useStore(agentStore, (s) => s.isConnected);
+
+  // Human assignee names derived from loaded issues — pre-populates the
+  // AssigneeDropdown "People" section even on a cold browser (no localStorage).
+  // Selector returns a serialized key so useStore can skip re-renders when the
+  // set of names is unchanged. The actual array is built in useMemo below.
+  const issueStore = useIssueStoreInstance();
+  const knownAssigneesKey = useStore(issueStore, (s) => {
+    const names = new Set<string>();
+    for (const existing of s.issuesMap.values()) {
+      const a = existing.assignee;
+      if (a && a.startsWith("[H]")) {
+        names.add(a.replace(/^\[H\]\s*/, ""));
+      }
+    }
+    return JSON.stringify(Array.from(names).sort());
+  });
+  const knownAssignees = useMemo<string[]>(
+    () => JSON.parse(knownAssigneesKey) as string[],
+    [knownAssigneesKey],
+  );
 
   // Reset tabs when issue changes — clean up orphaned terminal sessions first
   useEffect(() => {
@@ -924,6 +944,7 @@ function DefaultContent({
             isSaving={isSavingAssignee}
             agents={agents}
             agentTasks={agentTasks}
+            knownAssignees={knownAssignees}
           />
           {issue.created_at && (
             <span
@@ -1065,6 +1086,7 @@ function DefaultContent({
                   onTypeSave={handleTypeSave}
                   onAssigneeSave={handleAssigneeSave}
                   onIssueUpdate={onIssueUpdate}
+                  knownAssignees={knownAssignees}
                 />
               </div>
               <ResizeDivider
@@ -1130,6 +1152,7 @@ function DefaultContent({
                     isSaving={isSavingAssignee}
                     agents={agents}
                     agentTasks={agentTasks}
+                    knownAssignees={knownAssignees}
                   />
                   {(repos.length > 0 || currentRepo !== null) && (
                     <RepoDropdown

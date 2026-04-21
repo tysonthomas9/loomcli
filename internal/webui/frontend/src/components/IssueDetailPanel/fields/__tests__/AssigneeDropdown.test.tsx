@@ -1557,4 +1557,137 @@ describe("AssigneeDropdown", () => {
       });
     });
   });
+
+  describe("Known assignees", () => {
+    it("shows People section when knownAssignees provided and recentAssignees empty", () => {
+      mockRecentAssignees = [];
+      render(
+        <AssigneeDropdown
+          {...defaultProps}
+          knownAssignees={["Alice", "Bob"]}
+        />,
+      );
+      fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
+
+      expect(screen.getByText("People")).toBeInTheDocument();
+      expect(screen.getByTestId("recent-assignee-Alice")).toBeInTheDocument();
+      expect(screen.getByTestId("recent-assignee-Bob")).toBeInTheDocument();
+    });
+
+    it("merges recent and known assignees with recent first and no duplicates", () => {
+      mockRecentAssignees = ["Charlie"];
+      render(
+        <AssigneeDropdown
+          {...defaultProps}
+          knownAssignees={["Alice", "Charlie"]}
+        />,
+      );
+      fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
+
+      const section = screen.getByText("People").parentElement!;
+      const buttons = section.querySelectorAll("button");
+      const labels = Array.from(buttons).map((b) => b.textContent);
+      expect(labels).toEqual(["Charlie", "Alice"]);
+    });
+
+    it("deduplicates case-insensitively between recent and known", () => {
+      mockRecentAssignees = ["alice"];
+      render(<AssigneeDropdown {...defaultProps} knownAssignees={["Alice"]} />);
+      fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
+
+      const section = screen.getByText("People").parentElement!;
+      const buttons = section.querySelectorAll("button");
+      expect(buttons).toHaveLength(1);
+      expect(buttons[0]).toHaveTextContent("alice");
+    });
+
+    it("filters out agent names from known assignees", () => {
+      const readyAgent: LoomAgentStatus = {
+        name: "nova",
+        branch: "nova",
+        status: "ready",
+        ahead: 0,
+        behind: 0,
+        role: "task",
+      };
+      mockRecentAssignees = [];
+      render(
+        <AssigneeDropdown
+          {...defaultProps}
+          agents={[readyAgent]}
+          knownAssignees={["nova", "Alice"]}
+        />,
+      );
+      fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
+
+      const section = screen.getByText("People").parentElement!;
+      const buttons = section.querySelectorAll("button");
+      expect(buttons).toHaveLength(1);
+      expect(buttons[0]).toHaveTextContent("Alice");
+    });
+
+    it("applies search filter to known assignees", () => {
+      mockRecentAssignees = [];
+      render(
+        <AssigneeDropdown
+          {...defaultProps}
+          knownAssignees={["Alice", "Bob"]}
+        />,
+      );
+      fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
+      fireEvent.change(screen.getByTestId("assignee-input"), {
+        target: { value: "ali" },
+      });
+
+      expect(screen.getByTestId("recent-assignee-Alice")).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("recent-assignee-Bob"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("calls onSave with [H] prefix when clicking a known assignee", async () => {
+      mockRecentAssignees = [];
+      const onSave = vi.fn().mockResolvedValue(undefined);
+      render(
+        <AssigneeDropdown
+          {...defaultProps}
+          onSave={onSave}
+          knownAssignees={["Alice"]}
+        />,
+      );
+      fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("recent-assignee-Alice"));
+      });
+
+      await waitFor(() => {
+        expect(onSave).toHaveBeenCalledWith("[H] Alice");
+      });
+    });
+
+    it("does not show People section when both knownAssignees and recentAssignees are empty", () => {
+      mockRecentAssignees = [];
+      render(<AssigneeDropdown {...defaultProps} knownAssignees={[]} />);
+      fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
+
+      expect(screen.queryByText("People")).not.toBeInTheDocument();
+    });
+
+    it("caps merged list at 10 entries with recent filling first", () => {
+      mockRecentAssignees = ["R1", "R2", "R3"];
+      const known = Array.from({ length: 12 }, (_, i) => `K${i}`);
+      render(<AssigneeDropdown {...defaultProps} knownAssignees={known} />);
+      fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
+
+      const section = screen.getByText("People").parentElement!;
+      const buttons = section.querySelectorAll("button");
+      expect(buttons).toHaveLength(10);
+      expect(buttons[0]).toHaveTextContent("R1");
+      expect(buttons[1]).toHaveTextContent("R2");
+      expect(buttons[2]).toHaveTextContent("R3");
+      expect(buttons[3]).toHaveTextContent("K0");
+      expect(buttons[9]).toHaveTextContent("K6");
+    });
+  });
 });

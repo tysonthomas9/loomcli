@@ -16,6 +16,8 @@ import styles from "./AssigneeDropdown.module.css";
 const AVAILABLE_TYPES = new Set(["ready", "idle", "done"]);
 /** Status types considered busy */
 const BUSY_TYPES = new Set(["working", "planning", "review"]);
+/** Maximum entries shown in the merged People list (recent + known). */
+const MAX_PEOPLE = 10;
 
 /**
  * Props for the AssigneeDropdown component.
@@ -35,6 +37,12 @@ export interface AssigneeDropdownProps {
   agents?: LoomAgentStatus[];
   /** Map of agent name to current task info (for busy status display) */
   agentTasks?: Record<string, LoomTaskInfo>;
+  /**
+   * Human assignee names (without `[H]` prefix) derived from loaded issues.
+   * Merged with localStorage `recentAssignees` to populate the "People" section
+   * even on a cold browser with no localStorage history.
+   */
+  knownAssignees?: string[] | undefined;
 }
 
 /**
@@ -89,6 +97,7 @@ export function AssigneeDropdown({
   className,
   agents,
   agentTasks,
+  knownAssignees,
 }: AssigneeDropdownProps): JSX.Element {
   const [isOpen, setIsOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -151,6 +160,26 @@ export function AssigneeDropdown({
   const filteredRecent = searchFilter
     ? recentAssignees.filter((n) => n.toLowerCase().includes(searchFilter))
     : recentAssignees;
+
+  // Merge filteredRecent (localStorage) with knownAssignees (store-derived)
+  // so the "People" section is populated even on a cold browser. Recent names
+  // come first; known names fill remaining slots. Dedup case-insensitively
+  // against recents and agent names.
+  const mergedPeople = useMemo(() => {
+    // Dedup against the raw recent list (not post-search filteredRecent): a name
+    // that lives in both lists should never render twice, regardless of whether
+    // the current search filter happens to hide the recent variant.
+    const recentLower = new Set(recentAssignees.map((n) => n.toLowerCase()));
+    const agentLower = new Set((agents ?? []).map((a) => a.name.toLowerCase()));
+    const knownFiltered = (knownAssignees ?? []).filter((n) => {
+      const lower = n.toLowerCase();
+      if (recentLower.has(lower)) return false;
+      if (agentLower.has(lower)) return false;
+      if (searchFilter && !lower.includes(searchFilter)) return false;
+      return true;
+    });
+    return [...filteredRecent, ...knownFiltered].slice(0, MAX_PEOPLE);
+  }, [filteredRecent, recentAssignees, knownAssignees, agents, searchFilter]);
 
   const hasFilteredAgents =
     filteredAvailable.length > 0 ||
@@ -480,11 +509,11 @@ export function AssigneeDropdown({
                 </div>
               )}
 
-              {/* People section (recent assignees) */}
-              {filteredRecent.length > 0 && (
+              {/* People section (recent + known assignees) */}
+              {mergedPeople.length > 0 && (
                 <div className={styles.recentSection}>
                   <span className={styles.sectionHeader}>People</span>
-                  {filteredRecent.map((name) => (
+                  {mergedPeople.map((name) => (
                     <button
                       key={name}
                       type="button"

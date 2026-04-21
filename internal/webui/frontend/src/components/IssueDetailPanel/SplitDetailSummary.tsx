@@ -24,6 +24,7 @@ export interface SplitDetailSummaryProps {
   onTypeSave: (type: IssueType) => Promise<void>;
   onAssigneeSave: (assignee: string) => Promise<void>;
   onIssueUpdate?: ((issue: Issue) => void) | undefined;
+  knownAssignees?: string[] | undefined;
 }
 
 export function SplitDetailSummary({
@@ -37,6 +38,7 @@ export function SplitDetailSummary({
   onTypeSave,
   onAssigneeSave,
   onIssueUpdate,
+  knownAssignees,
 }: SplitDetailSummaryProps): JSX.Element {
   const { workspaceId } = useWorkspaceContext();
   return (
@@ -64,6 +66,7 @@ export function SplitDetailSummary({
               isSaving={isSavingAssignee}
               agents={agents}
               agentTasks={agentTasks}
+              knownAssignees={knownAssignees}
             />
           </div>
           <section className={styles.section}>
