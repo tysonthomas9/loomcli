@@ -134,7 +134,16 @@ func collectAgentStatusDeps(deps *cli.Deps, agentTasks map[string]TaskInfo, bran
 
 // buildAgentStatus constructs the status for a single worktree agent.
 func buildAgentStatus(deps *cli.Deps, wt cli.WorktreeInfo, daemonManaged map[string]DaemonAgentInfo, agentTasks map[string]TaskInfo, taskIDToAgents map[string][]string, globalDefaultBranch, githubURL, branch string) AgentStatus {
-	daemonInfo := daemonManaged[wt.Name]
+	// daemonManaged is keyed by compound "repo/worktree" key (see LoadDaemonManagedAgents).
+	// Try the compound key first (multi-repo workspace), falling back to the bare name for
+	// legacy single-repo state files.
+	var daemonInfo DaemonAgentInfo
+	if wt.Repo != nil && wt.Repo.Name != "" {
+		daemonInfo = daemonManaged[config.AgentKey(wt.Repo.Name, wt.Name)]
+	}
+	if !daemonInfo.Managed {
+		daemonInfo = daemonManaged[wt.Name]
+	}
 	agent := AgentStatus{
 		Name: wt.Name, Branch: wt.Branch, Workspace: wt.Workspace,
 		Role: daemonInfo.Role, Repo: daemonInfo.Repo, DaemonManaged: daemonInfo.Managed,

@@ -148,6 +148,46 @@ func TestDiffAgents_EmptyOld(t *testing.T) {
 	}
 }
 
+func TestDiffAgents_SameWorktreeDifferentRepos(t *testing.T) {
+	// The primary bug fix: two agents with the same Worktree name but in
+	// different repos must be treated as distinct entries.
+	old := []AgentEntry{
+		{Worktree: "falcon", Role: "task", Repo: "backend"},
+	}
+	new := []AgentEntry{
+		{Worktree: "falcon", Role: "task", Repo: "backend"},
+		{Worktree: "falcon", Role: "task", Repo: "frontend"},
+	}
+	added, removed, modified := diffAgents(old, new)
+	if len(added) != 1 || added[0].Repo != "frontend" {
+		t.Errorf("expected 1 added (frontend/falcon), got %v", added)
+	}
+	if len(removed) != 0 {
+		t.Errorf("expected 0 removed, got %d", len(removed))
+	}
+	if len(modified) != 0 {
+		t.Errorf("expected 0 modified, got %d", len(modified))
+	}
+}
+
+func TestDiffAgents_RepoChange(t *testing.T) {
+	// Changing an agent's Repo is a remove+add, not a modify, because the
+	// compound key (which identifies the agent) changes.
+	old := []AgentEntry{
+		{Worktree: "falcon", Role: "task", Repo: "backend"},
+	}
+	new := []AgentEntry{
+		{Worktree: "falcon", Role: "task", Repo: "frontend"},
+	}
+	added, removed, _ := diffAgents(old, new)
+	if len(added) != 1 || added[0].Repo != "frontend" {
+		t.Errorf("expected 1 added (frontend/falcon), got %v", added)
+	}
+	if len(removed) != 1 || removed[0].Repo != "backend" {
+		t.Errorf("expected 1 removed (backend/falcon), got %v", removed)
+	}
+}
+
 func TestDiffAgents_EmptyNew(t *testing.T) {
 	old := []AgentEntry{
 		{Worktree: "agent1", Role: "task"},

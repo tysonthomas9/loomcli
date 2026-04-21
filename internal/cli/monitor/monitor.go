@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
@@ -55,7 +56,11 @@ func init() {
 }
 
 // LoadDaemonManagedAgents reads the daemon state file and returns metadata for
-// worktrees under daemon supervision. Returns nil if unavailable or daemon died.
+// worktrees under daemon supervision, keyed by the compound key from
+// config.AgentKey ("repo/worktree" when Repo is set, bare worktree name in
+// legacy single-repo mode). Returns nil if unavailable or daemon died. Using a
+// compound key prevents collisions when two agents in different repos share the
+// same bare worktree name.
 func LoadDaemonManagedAgents(stateFilePath string) map[string]DaemonAgentInfo {
 	data, err := os.ReadFile(stateFilePath)
 	if err != nil {
@@ -75,7 +80,7 @@ func LoadDaemonManagedAgents(stateFilePath string) map[string]DaemonAgentInfo {
 	result := make(map[string]DaemonAgentInfo)
 	for _, agent := range state.Agents {
 		if agent.Worktree != "" {
-			result[agent.Worktree] = DaemonAgentInfo{
+			result[config.AgentKey(agent.Repo, agent.Worktree)] = DaemonAgentInfo{
 				Managed: true,
 				Role:    agent.Role,
 				Repo:    agent.Repo,

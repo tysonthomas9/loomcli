@@ -72,6 +72,12 @@ func loadDaemonLogsConfig(projectDir string) *cfgpkg.DaemonConfig {
 	return config
 }
 
+// agentStateKey returns the compound key (repo/worktree, or bare worktree when Repo
+// is empty) used to identify an agent in log lookups. Mirrors config.AgentKey.
+func agentStateKey(a DaemonAgentStatus) string {
+	return cfgpkg.AgentKey(a.Repo, a.Worktree)
+}
+
 // listAgentLogs prints all available agents and their log paths.
 func listAgentLogs(projectDir string, config *cfgpkg.DaemonConfig, state *DaemonState, stateErr error) {
 	if stateErr != nil || state == nil || len(state.Agents) == 0 {
@@ -85,16 +91,17 @@ func listAgentLogs(projectDir string, config *cfgpkg.DaemonConfig, state *Daemon
 		if _, err := os.Stat(logPath); err == nil {
 			exists = "exists"
 		}
-		fmt.Printf("  %-15s %s (%s)\n", agent.Worktree, logPath, exists)
+		fmt.Printf("  %-30s %s (%s)\n", agentStateKey(agent), logPath, exists)
 	}
 	fmt.Println("\nUse 'loom daemon logs <agent-name>' to view a specific agent's log.")
 }
 
-// findAgent looks up an agent by worktree name in the state file, exiting on failure.
+// findAgent looks up an agent by its compound key (repo/worktree or bare
+// worktree in legacy mode) in the state file, exiting on failure.
 func findAgent(name string, state *DaemonState, stateErr error) *DaemonAgentStatus {
 	if stateErr == nil && state != nil {
 		for i := range state.Agents {
-			if state.Agents[i].Worktree == name {
+			if agentStateKey(state.Agents[i]) == name {
 				return &state.Agents[i]
 			}
 		}
@@ -104,7 +111,7 @@ func findAgent(name string, state *DaemonState, stateErr error) *DaemonAgentStat
 	if stateErr == nil && state != nil && len(state.Agents) > 0 {
 		fmt.Fprintf(os.Stderr, "Available agents:")
 		for _, agent := range state.Agents {
-			fmt.Fprintf(os.Stderr, " %s", agent.Worktree)
+			fmt.Fprintf(os.Stderr, " %s", agentStateKey(agent))
 		}
 		fmt.Fprintf(os.Stderr, "\n")
 	} else {

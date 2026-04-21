@@ -120,6 +120,24 @@ func (a AgentEntry) Equal(b AgentEntry) bool {
 		slices.Equal(a.Repos, b.Repos) && slices.Equal(a.RepoGroups, b.RepoGroups)
 }
 
+// AgentKey returns the compound identity used for agent lookups: "repo/worktree"
+// when repo is non-empty, or bare worktree for single-repo/legacy mode. Two
+// agents with the same worktree name but different repo values have distinct
+// keys; this is the mechanism that prevents the workspace-wide name collision
+// bug. Use this free function when you only have repo + worktree strings (e.g.,
+// reading daemon state file entries); for a persisted AgentEntry, use Key().
+func AgentKey(repo, worktree string) string {
+	if repo != "" {
+		return repo + "/" + worktree
+	}
+	return worktree
+}
+
+// Key returns the compound identity for this agent. See AgentKey.
+func (a AgentEntry) Key() string {
+	return AgentKey(a.Repo, a.Worktree)
+}
+
 // ProjectFile represents the project-local loom.yaml.
 type ProjectFile struct {
 	Version int                   `yaml:"version,omitempty"`
@@ -264,6 +282,7 @@ func overlayProjectFile(dc *DaemonConfig, projectFile *ProjectFile) {
 
 // validateAgents checks that agent entries and max_agents limits are valid.
 func validateAgents(agents []AgentEntry, maxAgents *int) error {
+	seen := make(map[string]int, len(agents))
 	for i, a := range agents {
 		if a.Worktree == "" {
 			return fmt.Errorf("agent[%d]: worktree is required", i)
@@ -276,6 +295,14 @@ func validateAgents(agents []AgentEntry, maxAgents *int) error {
 				return fmt.Errorf("agent[%d]: fallback_backends[%d] is empty", i, j)
 			}
 		}
+		key := a.Key()
+		if prev, ok := seen[key]; ok {
+			if a.Repo != "" {
+				return fmt.Errorf("agent[%d]: worktree %q (repo %q) is a duplicate (also used by agents[%d])", i, a.Worktree, a.Repo, prev)
+			}
+			return fmt.Errorf("agent[%d]: worktree %q is a duplicate (also used by agents[%d])", i, a.Worktree, prev)
+		}
+		seen[key] = i
 	}
 	if maxAgents != nil && *maxAgents < 0 {
 		return fmt.Errorf("max_agents must be non-negative, got %d", *maxAgents)

@@ -121,9 +121,28 @@ func validateBackendName(r *ValidationResult, field, name string) {
 		name, strings.Join(available, ", ")))
 }
 
+// checkAgentDuplicateKey records a duplicate-agent error in r if a.Key() already
+// appears in seenKeys; otherwise it registers the key. Extracted from
+// validateAgentEntries to keep the main loop under the cognitive-complexity cap.
+func checkAgentDuplicateKey(r *ValidationResult, a config.AgentEntry, field string, i int, seenKeys map[string]int) {
+	key := a.Key()
+	prevIdx, ok := seenKeys[key]
+	if !ok {
+		seenKeys[key] = i
+		return
+	}
+	if a.Repo != "" {
+		r.addError(field+".worktree", fmt.Sprintf(
+			"%q (repo %q) is a duplicate (also used by agents[%d])", a.Worktree, a.Repo, prevIdx))
+		return
+	}
+	r.addError(field+".worktree", fmt.Sprintf(
+		"%q is a duplicate (also used by agents[%d])", a.Worktree, prevIdx))
+}
+
 // validateAgentEntries checks all agent entries for worktree validity, role references, and duplicates.
 func validateAgentEntries(r *ValidationResult, agents []config.AgentEntry, roles map[string]config.RoleConfig) {
-	seenWorktrees := make(map[string]int)
+	seenKeys := make(map[string]int)
 	for i, a := range agents {
 		field := fmt.Sprintf("agents[%d]", i)
 
@@ -133,14 +152,9 @@ func validateAgentEntries(r *ValidationResult, agents []config.AgentEntry, roles
 				"%q contains invalid characters; use only alphanumeric, hyphens, and underscores", a.Worktree))
 		}
 
-		// Duplicate worktree detection
+		// Duplicate (worktree, repo) compound-key detection
 		if a.Worktree != "" {
-			if prevIdx, ok := seenWorktrees[a.Worktree]; ok {
-				r.addError(field+".worktree", fmt.Sprintf(
-					"%q is a duplicate (also used by agents[%d])", a.Worktree, prevIdx))
-			} else {
-				seenWorktrees[a.Worktree] = i
-			}
+			checkAgentDuplicateKey(r, a, field, i, seenKeys)
 		}
 
 		// Role name character validation (defense in depth against path traversal)

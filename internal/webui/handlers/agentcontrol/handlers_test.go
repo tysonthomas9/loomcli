@@ -458,3 +458,86 @@ func TestClassifyAgentControlError(t *testing.T) {
 		}
 	}
 }
+
+// --- Repo query-param / compound-key tests ---
+
+func TestHandleAgentControl_RepoQueryParam_BuildsCompoundKey(t *testing.T) {
+	// Each control handler should forward "repo/worktree" to the daemon when
+	// the ?repo= query parameter is present, and bare worktree otherwise.
+	tests := []struct {
+		name    string
+		handler func(AgentControlFn) http.HandlerFunc
+		method  string
+		pattern string
+		path    string
+		wantOp  string
+		wantKey string
+	}{
+		{"stop with repo", handleAgentStop, "POST", "POST /api/workspaces/{ws}/agents/{name}/stop",
+			"/api/workspaces/ws1/agents/falcon/stop?repo=backend", "agent_yield", "backend/falcon"},
+		{"stop without repo", handleAgentStop, "POST", "POST /api/workspaces/{ws}/agents/{name}/stop",
+			"/api/workspaces/ws1/agents/falcon/stop", "agent_yield", "falcon"},
+		{"start with repo", handleAgentStart, "POST", "POST /api/workspaces/{ws}/agents/{name}/start",
+			"/api/workspaces/ws1/agents/falcon/start?repo=backend", "agent_start", "backend/falcon"},
+		{"restart with repo", handleAgentRestart, "POST", "POST /api/workspaces/{ws}/agents/{name}/restart",
+			"/api/workspaces/ws1/agents/falcon/restart?repo=backend", "agent_restart", "backend/falcon"},
+		{"yield with repo", handleAgentYield, "POST", "POST /api/workspaces/{ws}/agents/{name}/yield",
+			"/api/workspaces/ws1/agents/falcon/yield?repo=backend", "agent_yield", "backend/falcon"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fn, calls := newMockControlFn(&AgentControlResult{Success: true}, nil)
+			mux := http.NewServeMux()
+			mux.HandleFunc(tc.pattern, tc.handler(fn))
+
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			mux.ServeHTTP(rec, req)
+
+			if rec.Code >= 400 {
+				t.Fatalf("status = %d, want < 400; body = %s", rec.Code, rec.Body.String())
+			}
+			if len(*calls) != 1 {
+				t.Fatalf("calls = %d, want 1", len(*calls))
+			}
+			c := (*calls)[0]
+			if c.op != tc.wantOp {
+				t.Errorf("op = %q, want %q", c.op, tc.wantOp)
+			}
+			if c.agentName != tc.wantKey {
+				t.Errorf("agentName = %q, want %q", c.agentName, tc.wantKey)
+			}
+		})
+	}
+}
+
+// TestHandleAgentStop_Force_RepoQueryParam_BuildsCompoundKey covers the
+// force-stop branch specifically: with {"force": true} the handler takes the
+// agent_stop path (not agent_yield) and must still pass the compound key.
+func TestHandleAgentStop_Force_RepoQueryParam_BuildsCompoundKey(t *testing.T) {
+	fn, calls := newMockControlFn(&AgentControlResult{Success: true}, nil)
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/stop", handleAgentStop(fn))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/workspaces/ws1/agents/falcon/stop?repo=backend", strings.NewReader(`{"force":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+	if len(*calls) != 1 {
+		t.Fatalf("calls = %d, want 1", len(*calls))
+	}
+	c := (*calls)[0]
+	if c.op != "agent_stop" {
+		t.Errorf("op = %q, want agent_stop", c.op)
+	}
+	if c.agentName != "backend/falcon" {
+		t.Errorf("agentName = %q, want backend/falcon", c.agentName)
+	}
+	if !c.force {
+		t.Error("force = false, want true")
+	}
+}

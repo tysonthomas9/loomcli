@@ -134,43 +134,52 @@ func (d *Daemon) handleControlConnection(conn net.Conn) {
 	writeControlResponse(conn, resp)
 }
 
+// resolveAgentNotFoundError returns the standard "not found" response. Covers
+// both the "no matching agent" and "ambiguous bare name" cases: the daemon
+// cannot tell them apart without leaking config internals, and either way the
+// user must be more specific.
+func resolveAgentNotFoundError(name string) DaemonControlResponse {
+	return DaemonControlResponse{Error: fmt.Sprintf("agent %q not found in daemon config", name)}
+}
+
 // handleAgentControlStop stops a single agent and records it in StoppedAgents.
 // When force is true, it skips DrainWithGrace and sends SIGTERM directly.
+// The input name may be either a compound key ("repo/worktree") or a bare
+// worktree name when unambiguous; resolveToCompoundKey normalises it.
 func (d *Daemon) handleAgentControlStop(name string, force bool) DaemonControlResponse {
 	if name == "" {
 		return DaemonControlResponse{Error: "agent name is required"}
 	}
-
-	// Validate agent exists in config
-	if !d.agentExistsInConfig(name) {
-		return DaemonControlResponse{Error: fmt.Sprintf("agent %q not found in daemon config", name)}
+	key, ok := d.resolveToCompoundKey(name)
+	if !ok {
+		return resolveAgentNotFoundError(name)
 	}
 
 	// Drain the agent and record in StoppedAgents atomically under drainAddMu
 	// to prevent the reconciler from re-adding the agent in the gap.
 	// The isAgentStopped check is inside the lock to avoid TOCTOU races.
 	d.drainAddMu.Lock()
-	if d.isAgentStopped(name) {
+	if d.isAgentStopped(key) {
 		d.drainAddMu.Unlock()
-		return DaemonControlResponse{Error: fmt.Sprintf("agent %q is already stopped", name)}
+		return DaemonControlResponse{Error: fmt.Sprintf("agent %q is already stopped", key)}
 	}
 	var err error
 	if force {
-		err = d.sup.DrainAgentForceful(name, supervisor.StopReasonManualStop)
+		err = d.sup.DrainAgentForceful(key, supervisor.StopReasonManualStop)
 	} else {
-		err = d.sup.DrainAgentWithReason(name, supervisor.StopReasonManualStop)
+		err = d.sup.DrainAgentWithReason(key, supervisor.StopReasonManualStop)
 	}
 	if err == nil {
 		d.sup.AgentsMu.Lock()
-		d.sup.StoppedAgents[name] = struct{}{}
+		d.sup.StoppedAgents[key] = struct{}{}
 		d.sup.AgentsMu.Unlock()
 	}
 	d.drainAddMu.Unlock()
 	if err != nil {
-		return DaemonControlResponse{Error: fmt.Sprintf("failed to stop agent %q: %v", name, err)}
+		return DaemonControlResponse{Error: fmt.Sprintf("failed to stop agent %q: %v", key, err)}
 	}
 
-	slog.Info("agent stopped via control socket", "worktree", name, "force", force)
+	slog.Info("agent stopped via control socket", "agent", key, "force", force)
 	return DaemonControlResponse{Success: true}
 }
 
@@ -179,40 +188,41 @@ func (d *Daemon) handleAgentControlStart(name string) DaemonControlResponse {
 	if name == "" {
 		return DaemonControlResponse{Error: "agent name is required"}
 	}
-
-	// Validate agent exists in config
-	if !d.agentExistsInConfig(name) {
-		return DaemonControlResponse{Error: fmt.Sprintf("agent %q not found in daemon config", name)}
+	key, ok := d.resolveToCompoundKey(name)
+	if !ok {
+		return resolveAgentNotFoundError(name)
 	}
 
 	// Must be in StoppedAgents set
-	if !d.isAgentStopped(name) {
-		return DaemonControlResponse{Error: fmt.Sprintf("agent %q is not stopped (use restart to reset a running agent)", name)}
+	if !d.isAgentStopped(key) {
+		return DaemonControlResponse{Error: fmt.Sprintf("agent %q is not stopped (use restart to reset a running agent)", key)}
 	}
 
 	// Look up the config.AgentEntry from current config
-	entry, ok := d.findAgentEntry(name)
+	entry, ok := d.findAgentEntry(key)
 	if !ok {
-		return DaemonControlResponse{Error: fmt.Sprintf("agent %q not found in current config", name)}
+		return DaemonControlResponse{Error: fmt.Sprintf("agent %q not found in current config", key)}
 	}
 
-	// Remove from StoppedAgents and add agent
+	// Hold drainAddMu across the StoppedAgents delete and AddAgent to prevent
+	// the reconciler's addNewAgents from racing in and re-adding the agent
+	// between the delete and the add (matches handleAgentControlRestart).
+	d.drainAddMu.Lock()
+	defer d.drainAddMu.Unlock()
+
 	d.sup.AgentsMu.Lock()
-	delete(d.sup.StoppedAgents, name)
+	delete(d.sup.StoppedAgents, key)
 	d.sup.AgentsMu.Unlock()
 
-	d.drainAddMu.Lock()
-	err := d.sup.AddAgent(entry)
-	d.drainAddMu.Unlock()
-	if err != nil {
+	if err := d.sup.AddAgent(entry); err != nil {
 		// Re-add to StoppedAgents on failure
 		d.sup.AgentsMu.Lock()
-		d.sup.StoppedAgents[name] = struct{}{}
+		d.sup.StoppedAgents[key] = struct{}{}
 		d.sup.AgentsMu.Unlock()
-		return DaemonControlResponse{Error: fmt.Sprintf("failed to start agent %q: %v", name, err)}
+		return DaemonControlResponse{Error: fmt.Sprintf("failed to start agent %q: %v", key, err)}
 	}
 
-	slog.Info("agent started via control socket", "worktree", name)
+	slog.Info("agent started via control socket", "agent", key)
 	return DaemonControlResponse{Success: true}
 }
 
@@ -221,58 +231,61 @@ func (d *Daemon) handleAgentControlRestart(name string) DaemonControlResponse {
 	if name == "" {
 		return DaemonControlResponse{Error: "agent name is required"}
 	}
-
-	// Validate agent exists in config
-	if !d.agentExistsInConfig(name) {
-		return DaemonControlResponse{Error: fmt.Sprintf("agent %q not found in daemon config", name)}
+	key, ok := d.resolveToCompoundKey(name)
+	if !ok {
+		return resolveAgentNotFoundError(name)
 	}
 
-	isStopped := d.isAgentStopped(name)
-
+	// Hold drainAddMu across the isAgentStopped read, the drain (if running),
+	// the StoppedAgents delete, and the AddAgent. Reading isAgentStopped
+	// outside the lock would create a TOCTOU window where a concurrent stop
+	// could flip the state between the read and the drain attempt.
 	d.drainAddMu.Lock()
 	defer d.drainAddMu.Unlock()
 
 	// If running, drain it first
-	if !isStopped {
-		if err := d.sup.DrainAgentWithReason(name, supervisor.StopReasonManualStop); err != nil {
-			return DaemonControlResponse{Error: fmt.Sprintf("failed to stop agent %q for restart: %v", name, err)}
+	if !d.isAgentStopped(key) {
+		if err := d.sup.DrainAgentWithReason(key, supervisor.StopReasonManualStop); err != nil {
+			return DaemonControlResponse{Error: fmt.Sprintf("failed to stop agent %q for restart: %v", key, err)}
 		}
 	}
 
 	// Remove from StoppedAgents if present
 	d.sup.AgentsMu.Lock()
-	delete(d.sup.StoppedAgents, name)
+	delete(d.sup.StoppedAgents, key)
 	d.sup.AgentsMu.Unlock()
 
 	// Look up the config.AgentEntry from current config
-	entry, ok := d.findAgentEntry(name)
+	entry, ok := d.findAgentEntry(key)
 	if !ok {
-		return DaemonControlResponse{Error: fmt.Sprintf("agent %q not found in current config", name)}
+		return DaemonControlResponse{Error: fmt.Sprintf("agent %q not found in current config", key)}
 	}
 
 	// Add the agent back with fresh state
 	if err := d.sup.AddAgent(entry); err != nil {
-		return DaemonControlResponse{Error: fmt.Sprintf("failed to restart agent %q: %v", name, err)}
+		return DaemonControlResponse{Error: fmt.Sprintf("failed to restart agent %q: %v", key, err)}
 	}
 
-	slog.Info("agent restarted via control socket", "worktree", name)
+	slog.Info("agent restarted via control socket", "agent", key)
 	return DaemonControlResponse{Success: true}
 }
 
 // handleAgentControlList returns a list of all agents with their status.
+// Names returned are compound keys (repo/worktree in workspace mode, bare worktree otherwise).
 func (d *Daemon) handleAgentControlList() DaemonControlResponse {
 	cfg := d.configSnapshot()
 
 	entries := make([]AgentListEntry, 0, len(cfg.Agents))
 	for _, agent := range cfg.Agents {
+		key := agent.Key()
 		status := "running"
-		if d.isAgentStopped(agent.Worktree) {
+		if d.isAgentStopped(key) {
 			status = "stopped"
-		} else if !d.isAgentRunning(agent.Worktree) {
+		} else if !d.isAgentRunning(key) {
 			status = "stopped"
 		}
 		entries = append(entries, AgentListEntry{
-			Name:   agent.Worktree,
+			Name:   key,
 			Role:   agent.Role,
 			Status: status,
 		})
@@ -283,15 +296,20 @@ func (d *Daemon) handleAgentControlList() DaemonControlResponse {
 }
 
 // handleAgentControlYield handles the agent_yield control socket operation.
+// Input name may be either a compound key or a bare worktree when unambiguous.
 func (d *Daemon) handleAgentControlYield(name string) DaemonControlResponse {
 	if name == "" {
 		return DaemonControlResponse{Error: "agent name is required"}
+	}
+	key, ok := d.resolveToCompoundKey(name)
+	if !ok {
+		return resolveAgentNotFoundError(name)
 	}
 
 	d.sup.AgentsMu.RLock()
 	var target *supervisor.AgentProcess
 	for _, ap := range d.sup.Agents {
-		if ap.Entry.Worktree == name {
+		if ap.Entry.Key() == key {
 			target = ap
 			break
 		}
@@ -299,7 +317,7 @@ func (d *Daemon) handleAgentControlYield(name string) DaemonControlResponse {
 	d.sup.AgentsMu.RUnlock()
 
 	if target == nil {
-		return DaemonControlResponse{Error: fmt.Sprintf("agent %q not found", name)}
+		return DaemonControlResponse{Error: fmt.Sprintf("agent %q not found", key)}
 	}
 
 	target.Mu.Lock()
@@ -307,11 +325,11 @@ func (d *Daemon) handleAgentControlYield(name string) DaemonControlResponse {
 	target.Mu.Unlock()
 
 	if pid == 0 {
-		return DaemonControlResponse{Error: fmt.Sprintf("agent %q is not running", name)}
+		return DaemonControlResponse{Error: fmt.Sprintf("agent %q is not running", key)}
 	}
 
 	if err := d.sup.RequestYield(target, "manual_stop"); err != nil {
-		return DaemonControlResponse{Error: fmt.Sprintf("failed to yield agent %q: %v", name, err)}
+		return DaemonControlResponse{Error: fmt.Sprintf("failed to yield agent %q: %v", key, err)}
 	}
 
 	return DaemonControlResponse{Success: true}

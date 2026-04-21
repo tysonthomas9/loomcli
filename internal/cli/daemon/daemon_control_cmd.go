@@ -121,6 +121,8 @@ func forceStopAgent(socketPath, agentName string) {
 }
 
 // isAgentRunningViaSocket checks if an agent is still running by querying agent_list.
+// agentName may be either a compound key ("repo/worktree") or a bare worktree
+// name; e.Name from the daemon is always the compound key.
 func isAgentRunningViaSocket(socketPath, agentName string) bool {
 	resp, err := sendDaemonControlRequest(socketPath, ctrlOpAgentList, "")
 	if err != nil {
@@ -134,7 +136,15 @@ func isAgentRunningViaSocket(socketPath, agentName string) bool {
 		return false
 	}
 	for _, e := range entries {
-		if e.Name == agentName && e.Status == "running" {
+		if e.Status != "running" {
+			continue
+		}
+		// Exact match against compound key, or bare-worktree match against the
+		// suffix after the final "/".
+		if e.Name == agentName {
+			return true
+		}
+		if idx := strings.LastIndex(e.Name, "/"); idx >= 0 && e.Name[idx+1:] == agentName {
 			return true
 		}
 	}

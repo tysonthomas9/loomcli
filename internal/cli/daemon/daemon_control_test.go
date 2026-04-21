@@ -927,3 +927,39 @@ func TestSendDaemonControlRequestFull_RoundTrip(t *testing.T) {
 		t.Error("isAgentRunning(beta) = false, want true")
 	}
 }
+
+func TestResolveToCompoundKey(t *testing.T) {
+	d := newTestDaemonWithAgents([]AgentEntry{
+		{Worktree: "falcon", Role: "task", Repo: "backend"},
+		{Worktree: "falcon", Role: "task", Repo: "frontend"},
+		{Worktree: "nova", Role: "plan", Repo: "backend"},
+		{Worktree: "legacy", Role: "task"},
+	})
+	defer d.sup.ShutdownOnce.Do(func() { close(d.sup.Shutdown) })
+
+	tests := []struct {
+		name    string
+		input   string
+		wantKey string
+		wantOK  bool
+	}{
+		{"empty input", "", "", false},
+		{"exact compound key", "backend/falcon", "backend/falcon", true},
+		{"exact compound key other repo", "frontend/falcon", "frontend/falcon", true},
+		{"bare unambiguous with repo", "nova", "backend/nova", true},
+		{"bare unambiguous legacy", "legacy", "legacy", true},
+		{"bare ambiguous fails", "falcon", "", false},
+		{"unknown", "nonesuch", "", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			key, ok := d.resolveToCompoundKey(tc.input)
+			if ok != tc.wantOK {
+				t.Errorf("resolveToCompoundKey(%q) ok = %v, want %v", tc.input, ok, tc.wantOK)
+			}
+			if key != tc.wantKey {
+				t.Errorf("resolveToCompoundKey(%q) key = %q, want %q", tc.input, key, tc.wantKey)
+			}
+		})
+	}
+}

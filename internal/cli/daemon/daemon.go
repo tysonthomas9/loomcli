@@ -163,7 +163,42 @@ func (d *Daemon) AgentCount() int {
 	return d.sup.AgentCount()
 }
 
-// isAgentStopped returns true if the named agent was stopped via the control socket.
+// resolveToCompoundKey maps a user-provided agent name to the canonical
+// compound key (AgentEntry.Key()). Accepts either an exact compound key
+// ("repo/worktree") or a bare worktree name when the bare name is unambiguous.
+// Returns ("", false) when no agent matches or when a bare name is ambiguous.
+//
+// This preserves `loom daemon stop falcon` for the common non-duplicate case
+// while correctly rejecting the workspace-duplicate case (where two agents
+// share a worktree name in different repos — acceptance criteria #4).
+func (d *Daemon) resolveToCompoundKey(name string) (string, bool) {
+	if name == "" {
+		return "", false
+	}
+	cfg := d.configSnapshot()
+	// Prefer exact compound-key match.
+	for _, agent := range cfg.Agents {
+		if agent.Key() == name {
+			return agent.Key(), true
+		}
+	}
+	// Fall back to bare Worktree match — only when unambiguous.
+	var key string
+	matches := 0
+	for _, agent := range cfg.Agents {
+		if agent.Worktree == name {
+			key = agent.Key()
+			matches++
+		}
+	}
+	if matches == 1 {
+		return key, true
+	}
+	return "", false
+}
+
+// isAgentStopped returns true if the agent with the given compound key was
+// stopped via the control socket. name must be the compound key from AgentEntry.Key().
 func (d *Daemon) isAgentStopped(name string) bool {
 	d.sup.AgentsMu.RLock()
 	_, stopped := d.sup.StoppedAgents[name]
@@ -171,34 +206,35 @@ func (d *Daemon) isAgentStopped(name string) bool {
 	return stopped
 }
 
-// isAgentRunning returns true if the named agent has a running superviseAgent goroutine.
+// isAgentRunning returns true if the agent with the given compound key has a
+// running superviseAgent goroutine.
 func (d *Daemon) isAgentRunning(name string) bool {
 	d.sup.AgentsMu.RLock()
 	defer d.sup.AgentsMu.RUnlock()
 	for _, ap := range d.sup.Agents {
-		if ap.Entry.Worktree == name {
+		if ap.Entry.Key() == name {
 			return true
 		}
 	}
 	return false
 }
 
-// agentExistsInConfig returns true if an agent with the given name exists in the current config.
+// agentExistsInConfig returns true if an agent with the given compound key exists in the current config.
 func (d *Daemon) agentExistsInConfig(name string) bool {
 	cfg := d.configSnapshot()
 	for _, agent := range cfg.Agents {
-		if agent.Worktree == name {
+		if agent.Key() == name {
 			return true
 		}
 	}
 	return false
 }
 
-// findAgentEntry looks up a config.AgentEntry by worktree name in the current config.
+// findAgentEntry looks up a config.AgentEntry by compound key in the current config.
 func (d *Daemon) findAgentEntry(name string) (cfgpkg.AgentEntry, bool) {
 	cfg := d.configSnapshot()
 	for _, agent := range cfg.Agents {
-		if agent.Worktree == name {
+		if agent.Key() == name {
 			return agent, true
 		}
 	}

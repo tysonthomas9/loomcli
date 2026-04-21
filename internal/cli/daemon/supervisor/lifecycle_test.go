@@ -1971,7 +1971,7 @@ func TestDrainAgent_WaitsForDone(t *testing.T) {
 }
 
 // TestAddAgent_DuplicateName verifies that addAgent returns an error when
-// an agent with the same worktree name already exists.
+// an agent with the same compound key already exists.
 func TestAddAgent_DuplicateName(t *testing.T) {
 	s := &Supervisor{
 		ConfigSnapshot: func() *cfgpkg.DaemonConfig { return &cfgpkg.DaemonConfig{} },
@@ -1998,6 +1998,65 @@ func TestAddAgent_DuplicateName(t *testing.T) {
 	// Verify original agent is unchanged
 	if s.AgentCount() != 1 {
 		t.Errorf("AgentCount() = %d, want 1 (unchanged)", s.AgentCount())
+	}
+}
+
+// TestAddAgent_SameWorktreeDifferentRepos verifies that two agents with the
+// same bare worktree name but different Repo fields do not collide — they have
+// distinct compound keys so both can coexist. This is the primary bug fix for
+// the workspace-wide agent name collision.
+func TestAddAgent_SameWorktreeDifferentRepos(t *testing.T) {
+	s := &Supervisor{
+		ConfigSnapshot: func() *cfgpkg.DaemonConfig { return &cfgpkg.DaemonConfig{} },
+		Agents: []*AgentProcess{
+			{
+				Entry:  cfgpkg.AgentEntry{Worktree: "falcon", Role: "task", Repo: "backend"},
+				StopCh: make(chan struct{}),
+				Done:   make(chan struct{}),
+			},
+		},
+		Shutdown:      make(chan struct{}),
+		StoppedAgents: make(map[string]struct{}),
+		EmitEvent:     func(events.Event) {},
+	}
+
+	// An agent with the same bare worktree but a different Repo has a
+	// different compound key, so the duplicate check must NOT trip. The call
+	// will fail later at ResolveAgentTarget (I/O, no real worktree on disk),
+	// so we only assert that the error is NOT the duplicate-name error.
+	err := s.AddAgent(cfgpkg.AgentEntry{Worktree: "falcon", Role: "task", Repo: "frontend"})
+	if err != nil && err.Error() == `agent "backend/falcon" already exists` {
+		t.Errorf("AddAgent() returned duplicate-name error for different Repo, got %q", err.Error())
+	}
+	if err != nil && err.Error() == `agent "frontend/falcon" already exists` {
+		t.Errorf("AddAgent() returned duplicate-name error for different Repo, got %q", err.Error())
+	}
+}
+
+// TestAddAgent_DuplicateCompoundKey verifies that duplicate detection uses the
+// compound key — two agents with the same (Worktree, Repo) pair are rejected.
+func TestAddAgent_DuplicateCompoundKey(t *testing.T) {
+	s := &Supervisor{
+		ConfigSnapshot: func() *cfgpkg.DaemonConfig { return &cfgpkg.DaemonConfig{} },
+		Agents: []*AgentProcess{
+			{
+				Entry:  cfgpkg.AgentEntry{Worktree: "falcon", Role: "plan", Repo: "backend"},
+				StopCh: make(chan struct{}),
+				Done:   make(chan struct{}),
+			},
+		},
+		Shutdown:      make(chan struct{}),
+		StoppedAgents: make(map[string]struct{}),
+		EmitEvent:     func(events.Event) {},
+	}
+
+	err := s.AddAgent(cfgpkg.AgentEntry{Worktree: "falcon", Role: "task", Repo: "backend"})
+	if err == nil {
+		t.Fatal("AddAgent() returned nil, want duplicate-key error")
+	}
+	want := `agent "backend/falcon" already exists`
+	if got := err.Error(); got != want {
+		t.Errorf("AddAgent() error = %q, want %q", got, want)
 	}
 }
 

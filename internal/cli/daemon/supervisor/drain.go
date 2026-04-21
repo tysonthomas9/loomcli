@@ -92,12 +92,14 @@ func (s *Supervisor) drainAllWithGrace(agents []*AgentProcess) {
 // DrainAgent gracefully stops a single agent by name and removes it from the agents slice.
 // It signals the agent's superviseAgent goroutine to exit via StopCh, stops the subprocess
 // via SIGTERM/SIGKILL, waits for the goroutine to finish, then removes the agent.
+// name must be the compound key ("repo/worktree" in workspace mode, bare "worktree" in
+// legacy mode) as produced by AgentEntry.Key().
 func (s *Supervisor) DrainAgent(name string) error {
 	// Find the agent under lock
 	s.AgentsMu.Lock()
 	var target *AgentProcess
 	for _, ap := range s.Agents {
-		if ap.Entry.Worktree == name {
+		if ap.Entry.Key() == name {
 			target = ap
 			break
 		}
@@ -146,12 +148,13 @@ func (s *Supervisor) DrainAgent(name string) error {
 }
 
 // DrainAgentWithReason is like DrainAgent but sets a specific stop reason.
+// name must be the compound key from AgentEntry.Key().
 func (s *Supervisor) DrainAgentWithReason(name string, reason StopReason) error {
 	// Find the agent under lock
 	s.AgentsMu.Lock()
 	var target *AgentProcess
 	for _, ap := range s.Agents {
-		if ap.Entry.Worktree == name {
+		if ap.Entry.Key() == name {
 			target = ap
 			break
 		}
@@ -202,12 +205,13 @@ func (s *Supervisor) DrainAgentWithReason(name string, reason StopReason) error 
 // DrainAgentForceful is like DrainAgentWithReason but skips DrainWithGrace,
 // going directly to SIGTERM/SIGKILL. Used by the CLI force-stop path where
 // the control socket timeout is a concern.
+// name must be the compound key from AgentEntry.Key().
 func (s *Supervisor) DrainAgentForceful(name string, reason StopReason) error {
 	// Find the agent under lock
 	s.AgentsMu.Lock()
 	var target *AgentProcess
 	for _, ap := range s.Agents {
-		if ap.Entry.Worktree == name {
+		if ap.Entry.Key() == name {
 			target = ap
 			break
 		}
@@ -253,18 +257,28 @@ func (s *Supervisor) DrainAgentForceful(name string, reason StopReason) error {
 	return nil
 }
 
+// hasAgentWithKey returns true if any agent currently in s.Agents matches the
+// given compound key. The caller must hold (at least) a read lock on AgentsMu.
+func (s *Supervisor) hasAgentWithKey(key string) bool {
+	for _, ap := range s.Agents {
+		if ap.Entry.Key() == key {
+			return true
+		}
+	}
+	return false
+}
+
 // AddAgent creates and starts a new agent at runtime.
 // The agent begins its superviseAgent loop immediately.
 func (s *Supervisor) AddAgent(entry config.AgentEntry) error {
+	key := entry.Key()
 	// Early duplicate check (avoids unnecessary I/O; authoritative check is below under Lock)
 	s.AgentsMu.RLock()
-	for _, ap := range s.Agents {
-		if ap.Entry.Worktree == entry.Worktree {
-			s.AgentsMu.RUnlock()
-			return fmt.Errorf("agent %q already exists", entry.Worktree)
-		}
-	}
+	dup := s.hasAgentWithKey(key)
 	s.AgentsMu.RUnlock()
+	if dup {
+		return fmt.Errorf("agent %q already exists", key)
+	}
 
 	// Resolve worktree path (outside lock — may do I/O)
 	target, err := workspace.ResolveAgentTarget(entry.Worktree, entry.Repo)
@@ -294,11 +308,9 @@ func (s *Supervisor) AddAgent(entry config.AgentEntry) error {
 	// Check for duplicate, add to slice, and increment WaitGroup atomically
 	// under a single write lock to prevent a race between Wg.Add(1) and Stop()'s Wg.Wait().
 	s.AgentsMu.Lock()
-	for _, existing := range s.Agents {
-		if existing.Entry.Worktree == entry.Worktree {
-			s.AgentsMu.Unlock()
-			return fmt.Errorf("agent %q already exists", entry.Worktree)
-		}
+	if s.hasAgentWithKey(key) {
+		s.AgentsMu.Unlock()
+		return fmt.Errorf("agent %q already exists", key)
 	}
 	s.Agents = append(s.Agents, ap)
 	s.Wg.Add(1)

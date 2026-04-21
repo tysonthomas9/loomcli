@@ -10,12 +10,29 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
+// resolveAgentKey builds the compound agent key ("repo/worktree" or bare worktree)
+// the daemon control socket expects. The worktree name comes from the {name} URL
+// path segment and the optional "repo" query parameter disambiguates two agents
+// that share the same bare worktree name across repos within a workspace. URL
+// patterns cannot embed "/" in a path segment, so the repo travels as a query
+// param rather than an extra segment.
+func resolveAgentKey(r *http.Request) string {
+	name := r.PathValue("name")
+	repo := r.URL.Query().Get("repo")
+	if repo != "" {
+		return repo + "/" + name
+	}
+	return name
+}
+
 // handleAgentStop handles POST /api/workspaces/{ws}/agents/{name}/stop.
 // Without force (or empty body): sends agent_yield, returns 202.
 // With {"force": true}: sends agent_stop(force=true), returns 200.
+// The optional ?repo= query parameter disambiguates duplicate worktree names
+// across repos within a workspace.
 func handleAgentStop(controlFn AgentControlFn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		name := r.PathValue("name")
+		key := resolveAgentKey(r)
 
 		var req stopRequest
 		if r.Body != nil && r.ContentLength > 0 {
@@ -27,7 +44,7 @@ func handleAgentStop(controlFn AgentControlFn) http.HandlerFunc {
 		}
 
 		if req.Force {
-			result, err := controlFn("agent_stop", name, true)
+			result, err := controlFn("agent_stop", key, true)
 			if err != nil {
 				writeDaemonError(w, err)
 				return
@@ -37,12 +54,12 @@ func handleAgentStop(controlFn AgentControlFn) http.HandlerFunc {
 				return
 			}
 			handler.WriteJSON(w, http.StatusOK,
-				dto.NewMessageResponse(fmt.Sprintf("agent %q force-stopped", name)))
+				dto.NewMessageResponse(fmt.Sprintf("agent %q force-stopped", key)))
 			return
 		}
 
 		// Non-force: send yield and return 202.
-		result, err := controlFn("agent_yield", name, false)
+		result, err := controlFn("agent_yield", key, false)
 		if err != nil {
 			writeDaemonError(w, err)
 			return
@@ -52,15 +69,16 @@ func handleAgentStop(controlFn AgentControlFn) http.HandlerFunc {
 			return
 		}
 		handler.WriteJSON(w, http.StatusAccepted,
-			dto.NewMessageResponse(fmt.Sprintf("yield requested for agent %q; poll GET /agents to track status", name)))
+			dto.NewMessageResponse(fmt.Sprintf("yield requested for agent %q; poll GET /agents to track status", key)))
 	}
 }
 
 // handleAgentStart handles POST /api/workspaces/{ws}/agents/{name}/start.
+// Accepts an optional ?repo= query parameter to disambiguate duplicate worktree names.
 func handleAgentStart(controlFn AgentControlFn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		name := r.PathValue("name")
-		result, err := controlFn("agent_start", name, false)
+		key := resolveAgentKey(r)
+		result, err := controlFn("agent_start", key, false)
 		if err != nil {
 			writeDaemonError(w, err)
 			return
@@ -70,15 +88,16 @@ func handleAgentStart(controlFn AgentControlFn) http.HandlerFunc {
 			return
 		}
 		handler.WriteJSON(w, http.StatusOK,
-			dto.NewMessageResponse(fmt.Sprintf("agent %q started", name)))
+			dto.NewMessageResponse(fmt.Sprintf("agent %q started", key)))
 	}
 }
 
 // handleAgentRestart handles POST /api/workspaces/{ws}/agents/{name}/restart.
+// Accepts an optional ?repo= query parameter to disambiguate duplicate worktree names.
 func handleAgentRestart(controlFn AgentControlFn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		name := r.PathValue("name")
-		result, err := controlFn("agent_restart", name, false)
+		key := resolveAgentKey(r)
+		result, err := controlFn("agent_restart", key, false)
 		if err != nil {
 			writeDaemonError(w, err)
 			return
@@ -88,15 +107,16 @@ func handleAgentRestart(controlFn AgentControlFn) http.HandlerFunc {
 			return
 		}
 		handler.WriteJSON(w, http.StatusOK,
-			dto.NewMessageResponse(fmt.Sprintf("agent %q restarted", name)))
+			dto.NewMessageResponse(fmt.Sprintf("agent %q restarted", key)))
 	}
 }
 
 // handleAgentYield handles POST /api/workspaces/{ws}/agents/{name}/yield.
+// Accepts an optional ?repo= query parameter to disambiguate duplicate worktree names.
 func handleAgentYield(controlFn AgentControlFn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		name := r.PathValue("name")
-		result, err := controlFn("agent_yield", name, false)
+		key := resolveAgentKey(r)
+		result, err := controlFn("agent_yield", key, false)
 		if err != nil {
 			writeDaemonError(w, err)
 			return
@@ -106,7 +126,7 @@ func handleAgentYield(controlFn AgentControlFn) http.HandlerFunc {
 			return
 		}
 		handler.WriteJSON(w, http.StatusOK,
-			dto.NewMessageResponse(fmt.Sprintf("yield requested for agent %q", name)))
+			dto.NewMessageResponse(fmt.Sprintf("yield requested for agent %q", key)))
 	}
 }
 

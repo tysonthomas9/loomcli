@@ -847,14 +847,45 @@ func TestLoadDaemonManagedAgents_WithRepo(t *testing.T) {
 	if result == nil {
 		t.Fatal("monitor.LoadDaemonManagedAgents() returned nil, want non-nil map")
 	}
-	if result["falcon"].Repo != "github.com/org/repo-a" {
-		t.Errorf("result[falcon].Repo = %q, want %q", result["falcon"].Repo, "github.com/org/repo-a")
+	// Entries with Repo set are keyed by compound "repo/worktree" key so two
+	// agents with the same worktree name in different repos do not collide.
+	falconKey := "github.com/org/repo-a/falcon"
+	novaKey := "github.com/org/repo-b/nova"
+	if result[falconKey].Repo != "github.com/org/repo-a" {
+		t.Errorf("result[%q].Repo = %q, want %q", falconKey, result[falconKey].Repo, "github.com/org/repo-a")
 	}
-	if result["nova"].Repo != "github.com/org/repo-b" {
-		t.Errorf("result[nova].Repo = %q, want %q", result["nova"].Repo, "github.com/org/repo-b")
+	if result[novaKey].Repo != "github.com/org/repo-b" {
+		t.Errorf("result[%q].Repo = %q, want %q", novaKey, result[novaKey].Repo, "github.com/org/repo-b")
 	}
+	// Legacy entries (no Repo) keep the bare worktree key.
 	if result["spark"].Repo != "" {
 		t.Errorf("result[spark].Repo = %q, want empty string", result["spark"].Repo)
+	}
+}
+
+// TestLoadDaemonManagedAgents_DuplicateWorktreeAcrossRepos verifies that two
+// agents with the same bare worktree name in different repos do NOT collide in
+// the returned map — both entries coexist under distinct compound keys. This is
+// the primary bug fix.
+func TestLoadDaemonManagedAgents_DuplicateWorktreeAcrossRepos(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	result := collectDaemonStatusForDirHelper(t, tmpDir, []DaemonAgentStateEntry{
+		{Worktree: "falcon", Status: "running", Role: "task", Repo: "backend"},
+		{Worktree: "falcon", Status: "idle", Role: "task", Repo: "frontend"},
+	})
+
+	if result == nil {
+		t.Fatal("monitor.LoadDaemonManagedAgents() returned nil, want non-nil map")
+	}
+	if len(result) != 2 {
+		t.Fatalf("len(result) = %d, want 2 (both falcons should coexist)", len(result))
+	}
+	if result["backend/falcon"].Repo != "backend" {
+		t.Errorf(`result["backend/falcon"].Repo = %q, want "backend"`, result["backend/falcon"].Repo)
+	}
+	if result["frontend/falcon"].Repo != "frontend" {
+		t.Errorf(`result["frontend/falcon"].Repo = %q, want "frontend"`, result["frontend/falcon"].Repo)
 	}
 }
 

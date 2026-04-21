@@ -210,8 +210,9 @@ func (d *Daemon) applyAgentChanges(added, removed, modified []config.AgentEntry)
 // drainAgents stops a list of agents, logging errors.
 func (d *Daemon) drainAgents(entries []config.AgentEntry, label string) {
 	for _, entry := range entries {
-		if err := d.sup.DrainAgent(entry.Worktree); err != nil {
-			slog.Error("failed to drain "+label+" agent", "worktree", entry.Worktree, "err", err)
+		key := entry.Key()
+		if err := d.sup.DrainAgent(key); err != nil {
+			slog.Error("failed to drain "+label+" agent", "agent", key, "err", err)
 		}
 	}
 }
@@ -219,37 +220,38 @@ func (d *Daemon) drainAgents(entries []config.AgentEntry, label string) {
 // addNewAgents starts agents, skipping those manually stopped.
 func (d *Daemon) addNewAgents(entries []config.AgentEntry, label string) {
 	for _, entry := range entries {
-		if d.isAgentStopped(entry.Worktree) {
-			slog.Info("skipping "+label+" of manually stopped agent", "worktree", entry.Worktree)
+		key := entry.Key()
+		if d.isAgentStopped(key) {
+			slog.Info("skipping "+label+" of manually stopped agent", "agent", key)
 			continue
 		}
 		if err := d.sup.AddAgent(entry); err != nil {
-			slog.Error("failed to "+label+" agent", "worktree", entry.Worktree, "err", err)
+			slog.Error("failed to "+label+" agent", "agent", key, "err", err)
 		}
 	}
 }
 
 // diffAgents compares old and new agent lists and categorizes changes.
-// Agents are identified by their Worktree name.
+// Agents are identified by their compound key (repo/worktree or bare worktree).
 func diffAgents(old, new []config.AgentEntry) (added, removed, modified []config.AgentEntry) {
 	oldMap := make(map[string]config.AgentEntry, len(old))
 	for _, e := range old {
-		oldMap[e.Worktree] = e
+		oldMap[e.Key()] = e
 	}
 	newMap := make(map[string]config.AgentEntry, len(new))
 	for _, e := range new {
-		newMap[e.Worktree] = e
+		newMap[e.Key()] = e
 	}
 
-	for name, newEntry := range newMap {
-		if oldEntry, exists := oldMap[name]; !exists {
+	for key, newEntry := range newMap {
+		if oldEntry, exists := oldMap[key]; !exists {
 			added = append(added, newEntry)
 		} else if !oldEntry.Equal(newEntry) {
 			modified = append(modified, newEntry)
 		}
 	}
-	for name, oldEntry := range oldMap {
-		if _, exists := newMap[name]; !exists {
+	for key, oldEntry := range oldMap {
+		if _, exists := newMap[key]; !exists {
 			removed = append(removed, oldEntry)
 		}
 	}
