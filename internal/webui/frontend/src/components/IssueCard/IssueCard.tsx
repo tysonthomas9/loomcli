@@ -61,6 +61,8 @@ const OPEN_BADGE_CONFIG: Record<
   ready: { icon: "✅", label: "Ready", className: styles.openReady ?? "" },
 };
 
+const MAX_VISIBLE_LABELS = 3;
+
 /**
  * Props for the IssueCard component.
  */
@@ -275,6 +277,28 @@ export const IssueCard = memo(function IssueCard({
       <h3 className={styles.title}>
         <HighlightText text={displayTitle} searchTerm={searchTerm} />
       </h3>
+      {issue.labels && issue.labels.length > 0 && (
+        <div className={styles.labelRow} data-testid="issue-card-labels">
+          {issue.labels.slice(0, MAX_VISIBLE_LABELS).map((label) => (
+            <span
+              key={label}
+              className={styles.labelPill}
+              data-testid="issue-card-label"
+            >
+              {label}
+            </span>
+          ))}
+          {issue.labels.length > MAX_VISIBLE_LABELS && (
+            <span
+              className={styles.labelOverflow}
+              data-testid="issue-card-labels-overflow"
+              aria-label={`${issue.labels.length - MAX_VISIBLE_LABELS} more labels`}
+            >
+              +{issue.labels.length - MAX_VISIBLE_LABELS}
+            </span>
+          )}
+        </div>
+      )}
       {(!!issue.owner || showAssigneeBadge) && (
         <div className={styles.badgeRow}>
           {issue.owner && (

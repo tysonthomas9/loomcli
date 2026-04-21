@@ -409,6 +409,8 @@ describe("IssueCard", () => {
         screen.getByRole("heading", { name: "Full Issue" }),
       ).toBeInTheDocument();
       expect(screen.getByText("P0")).toBeInTheDocument();
+      expect(screen.getByTestId("issue-card-labels")).toBeInTheDocument();
+      expect(screen.getAllByTestId("issue-card-label")).toHaveLength(2);
     });
   });
 
@@ -1186,5 +1188,72 @@ describe("IssueCard", () => {
       const icon = container.querySelector("svg[data-type]");
       expect(icon).not.toBeInTheDocument();
     });
+  });
+
+  describe("label pills", () => {
+    it("renders label pills when issue has labels", () => {
+      const issue = createTestIssue({ labels: ["bug", "urgent"] });
+      render(<IssueCard issue={issue} columnId="open" />);
+
+      expect(screen.getByTestId("issue-card-labels")).toBeInTheDocument();
+      expect(screen.getAllByTestId("issue-card-label")).toHaveLength(2);
+      expect(screen.getByText("bug")).toBeInTheDocument();
+      expect(screen.getByText("urgent")).toBeInTheDocument();
+    });
+
+    it("does not render labels container when labels is undefined", () => {
+      const issue = createTestIssue();
+      render(<IssueCard issue={issue} columnId="open" />);
+
+      expect(screen.queryByTestId("issue-card-labels")).not.toBeInTheDocument();
+    });
+
+    it("does not render labels container when labels is empty array", () => {
+      const issue = createTestIssue({ labels: [] });
+      render(<IssueCard issue={issue} columnId="open" />);
+
+      expect(screen.queryByTestId("issue-card-labels")).not.toBeInTheDocument();
+    });
+
+    it("shows at most 3 label pills with overflow count", () => {
+      const issue = createTestIssue({ labels: ["a", "b", "c", "d", "e"] });
+      render(<IssueCard issue={issue} columnId="open" />);
+
+      expect(screen.getAllByTestId("issue-card-label")).toHaveLength(3);
+      const overflow = screen.getByTestId("issue-card-labels-overflow");
+      expect(overflow).toBeInTheDocument();
+      expect(overflow).toHaveTextContent("+2");
+    });
+
+    it("does not show overflow indicator when exactly 3 labels", () => {
+      const issue = createTestIssue({ labels: ["a", "b", "c"] });
+      render(<IssueCard issue={issue} columnId="open" />);
+
+      expect(screen.getAllByTestId("issue-card-label")).toHaveLength(3);
+      expect(
+        screen.queryByTestId("issue-card-labels-overflow"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("renders single label without overflow", () => {
+      const issue = createTestIssue({ labels: ["solo"] });
+      render(<IssueCard issue={issue} columnId="open" />);
+
+      expect(screen.getAllByTestId("issue-card-label")).toHaveLength(1);
+      expect(screen.getByText("solo")).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("issue-card-labels-overflow"),
+      ).not.toBeInTheDocument();
+    });
+
+    it.each(["open", "in_progress", "review", "blocked", "done", "backlog"])(
+      "labels render in %s column",
+      (columnId) => {
+        const issue = createTestIssue({ labels: ["tag"] });
+        render(<IssueCard issue={issue} columnId={columnId} />);
+
+        expect(screen.getByTestId("issue-card-labels")).toBeInTheDocument();
+      },
+    );
   });
 });

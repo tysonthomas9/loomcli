@@ -171,6 +171,43 @@
 }
 
 /* =================================
+ * Label pills
+ * Small read-only tags shown below the title
+ * ================================= */
+
+.labelRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.labelPill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  background-color: var(--color-bg-subtle);
+  color: var(--color-text-secondary);
+  font-size: 0.7rem;
+  line-height: 1.4;
+  border-radius: var(--radius-full);
+  white-space: nowrap;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.labelOverflow {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  color: var(--color-text-muted);
+  font-size: 0.7rem;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+/* =================================
  * Blocked issue styling
  * ================================= */
 
