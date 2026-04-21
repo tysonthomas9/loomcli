@@ -1928,19 +1928,6 @@ type PushWorkerEventsJSONBody = map[string]interface{}
 // PushWorkerLogsJSONBody defines parameters for PushWorkerLogs.
 type PushWorkerLogsJSONBody = map[string]interface{}
 
-// GetMonitorUsageParams defines parameters for GetMonitorUsage.
-type GetMonitorUsageParams struct {
-	Agent   *string `form:"agent,omitempty" json:"agent,omitempty"`
-	Backend *string `form:"backend,omitempty" json:"backend,omitempty"`
-	Epic    *string `form:"epic,omitempty" json:"epic,omitempty"`
-
-	// Since YYYY-MM-DD
-	Since *string `form:"since,omitempty" json:"since,omitempty"`
-
-	// Until YYYY-MM-DD
-	Until *string `form:"until,omitempty" json:"until,omitempty"`
-}
-
 // GetObservabilityEventsParams defines parameters for GetObservabilityEvents.
 type GetObservabilityEventsParams struct {
 	Page    *int `form:"page,omitempty" json:"page,omitempty"`
@@ -2122,6 +2109,19 @@ type GetGraphParamsStatus string
 type SaveIssueTabsJSONBody struct {
 	ActiveTabId string     `json:"active_tab_id"`
 	Tabs        []IssueTab `json:"tabs"`
+}
+
+// GetWorkspaceMonitorUsageParams defines parameters for GetWorkspaceMonitorUsage.
+type GetWorkspaceMonitorUsageParams struct {
+	Agent   *string `form:"agent,omitempty" json:"agent,omitempty"`
+	Backend *string `form:"backend,omitempty" json:"backend,omitempty"`
+	Epic    *string `form:"epic,omitempty" json:"epic,omitempty"`
+
+	// Since YYYY-MM-DD
+	Since *string `form:"since,omitempty" json:"since,omitempty"`
+
+	// Until YYYY-MM-DD
+	Until *string `form:"until,omitempty" json:"until,omitempty"`
 }
 
 // ListReadyParams defines parameters for ListReady.

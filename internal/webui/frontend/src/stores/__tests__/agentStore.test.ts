@@ -282,7 +282,9 @@ describe("agentStore", () => {
     it("starts initial fetch and polls on interval", async () => {
       setupSuccessfulMocks();
 
-      store.getState().startPolling({ pollInterval: 5000 });
+      store
+        .getState()
+        .startPolling({ pollInterval: 5000, workspaceId: "ws-1" });
       await vi.advanceTimersByTimeAsync(0); // initial fetch
 
       expect(mockFetchAgents).toHaveBeenCalledOnce();
@@ -297,11 +299,15 @@ describe("agentStore", () => {
     it("restarts polling when called again", async () => {
       setupSuccessfulMocks();
 
-      store.getState().startPolling({ pollInterval: 5000 });
+      store
+        .getState()
+        .startPolling({ pollInterval: 5000, workspaceId: "ws-1" });
       await vi.advanceTimersByTimeAsync(0);
       expect(mockFetchAgents).toHaveBeenCalledOnce();
 
-      store.getState().startPolling({ pollInterval: 10000 });
+      store
+        .getState()
+        .startPolling({ pollInterval: 10000, workspaceId: "ws-1" });
       await vi.advanceTimersByTimeAsync(0); // new initial fetch
       expect(mockFetchAgents).toHaveBeenCalledTimes(2);
 
@@ -313,7 +319,9 @@ describe("agentStore", () => {
     it("stops polling and clears timers", async () => {
       setupSuccessfulMocks();
 
-      store.getState().startPolling({ pollInterval: 5000 });
+      store
+        .getState()
+        .startPolling({ pollInterval: 5000, workspaceId: "ws-1" });
       await vi.advanceTimersByTimeAsync(0);
       expect(mockFetchAgents).toHaveBeenCalledOnce();
 
@@ -326,7 +334,7 @@ describe("agentStore", () => {
     it("starts with pollInterval=0 (initial fetch only)", async () => {
       setupSuccessfulMocks();
 
-      store.getState().startPolling({ pollInterval: 0 });
+      store.getState().startPolling({ pollInterval: 0, workspaceId: "ws-1" });
       await vi.advanceTimersByTimeAsync(0);
       expect(mockFetchAgents).toHaveBeenCalledOnce();
 
@@ -569,7 +577,9 @@ describe("agentStore", () => {
         new Promise<LoomAgentStatus[]>(() => {}),
       );
 
-      store.getState().startPolling({ pollInterval: 5000 });
+      store
+        .getState()
+        .startPolling({ pollInterval: 5000, workspaceId: "ws-1" });
 
       // At 15s, withTimeout fires, rejecting the fetch and resetting fetchInProgress
       // At 20s, next poll fires and should succeed
@@ -592,7 +602,9 @@ describe("agentStore", () => {
     it("refetches on tab focus when polling", async () => {
       setupSuccessfulMocks();
 
-      store.getState().startPolling({ pollInterval: 5000 });
+      store
+        .getState()
+        .startPolling({ pollInterval: 5000, workspaceId: "ws-1" });
       await vi.advanceTimersByTimeAsync(0); // initial fetch
 
       expect(mockFetchAgents).toHaveBeenCalledOnce();
@@ -608,7 +620,9 @@ describe("agentStore", () => {
     it("does not refetch when polling is stopped", async () => {
       setupSuccessfulMocks();
 
-      store.getState().startPolling({ pollInterval: 5000 });
+      store
+        .getState()
+        .startPolling({ pollInterval: 5000, workspaceId: "ws-1" });
       await vi.advanceTimersByTimeAsync(0);
       store.getState().stopPolling();
 
@@ -652,7 +666,9 @@ describe("agentStore", () => {
     it("clears all state and stops polling", async () => {
       setupSuccessfulMocks();
 
-      store.getState().startPolling({ pollInterval: 5000 });
+      store
+        .getState()
+        .startPolling({ pollInterval: 5000, workspaceId: "ws-1" });
       await vi.advanceTimersByTimeAsync(0);
       expect(store.getState().agents).toHaveLength(1);
 
