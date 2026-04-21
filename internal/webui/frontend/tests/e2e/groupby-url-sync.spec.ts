@@ -79,7 +79,7 @@ test.describe("groupBy URL Synchronization", () => {
       }).toPass({ timeout: 2000 })
     })
 
-    test("selecting 'none' removes groupBy from URL", async ({ page }) => {
+    test("selecting 'none' sets groupBy=none in URL", async ({ page }) => {
       // Start with groupBy param
       await navigateAndWait(page, "/?groupBy=priority")
       expect(page.url()).toContain("groupBy=priority")
@@ -88,9 +88,9 @@ test.describe("groupBy URL Synchronization", () => {
       const groupByFilter = page.getByTestId("groupby-filter")
       await groupByFilter.selectOption("none")
 
-      // Verify URL no longer has groupBy param
+      // Verify URL now has groupBy=none (explicit flat view)
       await expect(async () => {
-        expect(page.url()).not.toContain("groupBy=")
+        expect(page.url()).toContain("groupBy=none")
       }).toPass({ timeout: 2000 })
     })
 

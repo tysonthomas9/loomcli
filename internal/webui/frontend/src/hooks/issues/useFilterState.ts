@@ -167,11 +167,7 @@ function toQueryString(state: FilterState): string {
   if (state.search !== undefined && state.search !== "")
     params.set("search", state.search);
   if (state.showBlocked === true) params.set("showBlocked", "true");
-  if (
-    state.groupBy !== undefined &&
-    state.groupBy !== "none" &&
-    state.groupBy !== DEFAULT_GROUP_BY
-  )
+  if (state.groupBy !== undefined && state.groupBy !== DEFAULT_GROUP_BY)
     params.set("groupBy", state.groupBy);
   return params.toString();
 }
@@ -199,9 +195,7 @@ function isEmptyFilter(state: FilterState): boolean {
     state.type === undefined &&
     (state.labels === undefined || state.labels.length === 0) &&
     (state.search === undefined || state.search === "") &&
-    (state.groupBy === undefined ||
-      state.groupBy === "none" ||
-      state.groupBy === DEFAULT_GROUP_BY)
+    (state.groupBy === undefined || state.groupBy === DEFAULT_GROUP_BY)
   );
 }
 
@@ -291,9 +285,7 @@ export function useFilterState(
   const setGroupBy = useCallback(
     (groupBy: GroupByOption | undefined) => {
       const value =
-        groupBy !== undefined &&
-        groupBy !== "none" &&
-        groupBy !== DEFAULT_GROUP_BY
+        groupBy !== undefined && groupBy !== DEFAULT_GROUP_BY
           ? groupBy
           : undefined;
       updateParam("groupBy", value);
