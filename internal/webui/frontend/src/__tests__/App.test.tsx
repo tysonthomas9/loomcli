@@ -62,6 +62,32 @@ const { mockOpenPanel, mockClosePanel, mockIsOpen, mockUsePanelManager } =
     mockUsePanelManager: vi.fn(),
   }));
 
+// Hoisted mock for usePanelHistory — a single shared stack and stable
+// push/pop/clear spies so tests can assert call history across rerenders
+// without losing it when the hook re-runs.
+const { mockUsePanelHistory, panelHistoryStack } = vi.hoisted(() => {
+  const stack: string[] = [];
+  const push = vi.fn((id: string) => {
+    stack.push(id);
+  });
+  const pop = vi.fn((): string | null => {
+    return stack.length > 0 ? (stack.pop() ?? null) : null;
+  });
+  const clear = vi.fn(() => {
+    stack.length = 0;
+  });
+  return {
+    panelHistoryStack: stack,
+    mockUsePanelHistory: vi.fn(() => ({
+      canGoBack: stack.length > 0,
+      depth: stack.length,
+      push,
+      pop,
+      clear,
+    })),
+  };
+});
+
 // Create hoisted mocks that can be shared across mock definitions
 const { mockUseIssueDetail, mockUseToast } = vi.hoisted(() => ({
   mockUseIssueDetail: vi.fn(),
@@ -373,6 +399,7 @@ vi.mock("@/hooks", () => ({
     refetch: vi.fn(),
   })),
   usePanelManager: mockUsePanelManager,
+  usePanelHistory: mockUsePanelHistory,
   useRegisterEscapeLayer: vi.fn(),
   useKeyboardShortcuts: vi.fn(() => ({
     isCheatsheetOpen: false,
@@ -569,6 +596,8 @@ describe("App", () => {
       closePanel: mockClosePanel,
       isOpen: mockIsOpen,
     });
+    // Reset panel history stack between tests
+    panelHistoryStack.length = 0;
     // Set up default API mocks (resolve by default so existing tests aren't affected)
     mockUpdateIssue.mockResolvedValue({});
     mockAddComment.mockResolvedValue({});

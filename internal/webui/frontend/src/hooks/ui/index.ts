@@ -48,6 +48,9 @@ export type {
   UsePanelManagerReturn,
 } from "./usePanelManager";
 
+export { usePanelHistory } from "./usePanelHistory";
+export type { UsePanelHistoryReturn } from "./usePanelHistory";
+
 export { useScrollRestore, clearScrollPositions } from "./useScrollRestore";
 export type { UseScrollRestoreOptions } from "./useScrollRestore";
 

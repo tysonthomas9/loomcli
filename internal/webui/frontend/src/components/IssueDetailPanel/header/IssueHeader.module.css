@@ -65,6 +65,33 @@
   background-color: color-mix(in srgb, var(--color-warning-bg) 88%, black);
 }
 
+.backButton {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.backButton:hover {
+  background-color: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.backButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
 .issueId {
   font-size: 11px;
   color: var(--color-text-tertiary);

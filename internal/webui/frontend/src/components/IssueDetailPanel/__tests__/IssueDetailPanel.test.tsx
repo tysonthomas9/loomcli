@@ -1057,6 +1057,69 @@ describe("IssueDetailPanel", () => {
     });
   });
 
+  describe("back button (panel history)", () => {
+    it("does not render back button when canGoBack is false", () => {
+      const mockIssue = createTestIssueDetails();
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={mockIssue}
+          onClose={() => {}}
+          canGoBack={false}
+          onGoBack={() => {}}
+        />,
+      );
+      expect(
+        screen.queryByTestId("header-back-button"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("does not render back button when onGoBack is not provided", () => {
+      const mockIssue = createTestIssueDetails();
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={mockIssue}
+          onClose={() => {}}
+          canGoBack={true}
+        />,
+      );
+      expect(
+        screen.queryByTestId("header-back-button"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("renders back button when canGoBack is true and onGoBack is provided", () => {
+      const mockIssue = createTestIssueDetails();
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={mockIssue}
+          onClose={() => {}}
+          canGoBack={true}
+          onGoBack={() => {}}
+        />,
+      );
+      expect(screen.getByTestId("header-back-button")).toBeInTheDocument();
+    });
+
+    it("invokes onGoBack when back button is clicked", () => {
+      const mockIssue = createTestIssueDetails();
+      const onGoBack = vi.fn();
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={mockIssue}
+          onClose={() => {}}
+          canGoBack={true}
+          onGoBack={onGoBack}
+        />,
+      );
+      fireEvent.click(screen.getByTestId("header-back-button"));
+      expect(onGoBack).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe("handleTitleSave error handling", () => {
     const mockUpdateIssue = updateIssue as ReturnType<typeof vi.fn>;
 

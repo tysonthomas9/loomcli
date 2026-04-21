@@ -378,6 +378,51 @@ describe("IssueHeader", () => {
     });
   });
 
+  describe("back button", () => {
+    it("does not render back button when onBack is not provided", () => {
+      render(<IssueHeader issue={mockIssue} onClose={() => {}} />);
+      expect(
+        screen.queryByTestId("header-back-button"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("renders back button when onBack is provided", () => {
+      render(
+        <IssueHeader issue={mockIssue} onClose={() => {}} onBack={() => {}} />,
+      );
+      expect(screen.getByTestId("header-back-button")).toBeInTheDocument();
+    });
+
+    it("calls onBack when back button is clicked", () => {
+      const onBack = vi.fn();
+      render(
+        <IssueHeader issue={mockIssue} onClose={() => {}} onBack={onBack} />,
+      );
+      fireEvent.click(screen.getByTestId("header-back-button"));
+      expect(onBack).toHaveBeenCalledTimes(1);
+    });
+
+    it("has accessible aria-label on the back button", () => {
+      render(
+        <IssueHeader issue={mockIssue} onClose={() => {}} onBack={() => {}} />,
+      );
+      expect(
+        screen.getByLabelText("Go back to previous issue"),
+      ).toBeInTheDocument();
+    });
+
+    it("renders back button before the issue ID in the DOM order", () => {
+      render(
+        <IssueHeader issue={mockIssue} onClose={() => {}} onBack={() => {}} />,
+      );
+      const backButton = screen.getByTestId("header-back-button");
+      const issueId = screen.getByTestId("issue-id");
+      // Node.compareDocumentPosition: 4 = DOCUMENT_POSITION_FOLLOWING
+      // (backButton precedes issueId in document order).
+      expect(backButton.compareDocumentPosition(issueId) & 4).toBe(4);
+    });
+  });
+
   describe("sticky mode", () => {
     it("applies sticky class when sticky prop is true", () => {
       render(

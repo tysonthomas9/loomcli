@@ -73,6 +73,7 @@ import {
   useSearchScope,
   useDaemonHealth,
   usePanelManager,
+  usePanelHistory,
   KeyboardShortcutProvider,
 } from "@/hooks";
 import type { Issue, Status } from "@/types";
@@ -327,6 +328,9 @@ function App() {
   const { activePanel, pendingPanel, openPanel, closePanel, isOpen } =
     usePanelManager();
 
+  // In-panel navigation history for the issue detail panel's back button.
+  const panelHistory = usePanelHistory();
+
   // Mirror of activePanel for reading the current panel inside effects
   // without re-subscribing when the panel state itself changes — avoids
   // the URL↔panel sync feedback loop.
@@ -490,6 +494,18 @@ function App() {
     if (selectedIssueId) {
       fetchIssue(selectedIssueId);
       if (activeView !== "issue-detail") {
+        // Externally-driven panel swap (browser back/forward, pasted URL,
+        // programmatic navigate outside the click handlers) lands here with
+        // the URL pointing at a different issue than the panel currently
+        // shows. The in-panel history from the prior context is no longer
+        // meaningful — drop it. In-panel click handlers eagerly call
+        // openPanel before navigate, so activePanelRef already matches
+        // selectedIssueId by the time this effect runs, and the clear is
+        // skipped (preserving the stack entry the handler just pushed).
+        const current = activePanelRef.current;
+        if (current?.type === "issue" && current.id !== selectedIssueId) {
+          panelHistory.clear();
+        }
         openPanel({ type: "issue", id: selectedIssueId });
       }
       return;
@@ -503,6 +519,7 @@ function App() {
       activeView !== "issue-detail" &&
       activePanelRef.current?.type === "issue"
     ) {
+      panelHistory.clear();
       closePanel();
       setTimeout(() => {
         if (!mountedRef.current) return;
@@ -583,7 +600,10 @@ function App() {
         activeView === "monitor";
 
       if (supportsPanel) {
-        // Panel-supporting view — open overlay + sync URL.
+        // Panel-supporting view — open overlay + sync URL. Fresh panel
+        // context from a board/list/graph/monitor click clears any
+        // in-panel history from a previous dependency-chain navigation.
+        panelHistory.clear();
         openPanel({ type: "issue", id: issue.id });
         fetchIssue(issue.id);
         navigate(`/ws/${workspaceId}/${activeView}/issues/${issue.id}`);
@@ -594,12 +614,57 @@ function App() {
         fetchIssue(issue.id);
       }
     },
-    [activeView, selectedIssueId, workspaceId, navigate, fetchIssue, openPanel],
+    [
+      activeView,
+      selectedIssueId,
+      workspaceId,
+      navigate,
+      fetchIssue,
+      openPanel,
+      panelHistory,
+    ],
   );
+
+  // Handle navigation to a different issue from within the panel
+  // (e.g. clicking a dependency chip). Pushes the currently displayed
+  // issue onto the in-panel history stack so the back button can return.
+  const handlePanelNavigateToIssue = useCallback(
+    (issue: Issue) => {
+      if (selectedIssueId && selectedIssueId !== issue.id) {
+        panelHistory.push(selectedIssueId);
+      }
+      openPanel({ type: "issue", id: issue.id });
+      fetchIssue(issue.id);
+      if (activeView !== "issue-detail") {
+        navigate(`/ws/${workspaceId}/${activeView}/issues/${issue.id}`);
+      }
+    },
+    [
+      activeView,
+      selectedIssueId,
+      workspaceId,
+      navigate,
+      fetchIssue,
+      openPanel,
+      panelHistory,
+    ],
+  );
+
+  // Handle back button click inside the issue detail panel.
+  const handlePanelGoBack = useCallback(() => {
+    const prevId = panelHistory.pop();
+    if (!prevId) return;
+    openPanel({ type: "issue", id: prevId });
+    fetchIssue(prevId);
+    if (activeView !== "issue-detail") {
+      navigate(`/ws/${workspaceId}/${activeView}/issues/${prevId}`);
+    }
+  }, [activeView, workspaceId, navigate, fetchIssue, openPanel, panelHistory]);
 
   // Handle panel close
   const handlePanelClose = useCallback(() => {
     closePanel();
+    panelHistory.clear();
     // Push the base-view URL (without issueId) so the URL reflects the
     // closed-panel state and browser Back reopens the panel.
     if (activeView !== "issue-detail") {
@@ -610,7 +675,7 @@ function App() {
       if (!mountedRef.current) return;
       clearIssue();
     }, 300);
-  }, [closePanel, clearIssue, navigate, workspaceId, activeView]);
+  }, [closePanel, clearIssue, navigate, workspaceId, activeView, panelHistory]);
 
   // Handle approve button click on review cards
   const handleApprove = useCallback(
@@ -687,8 +752,10 @@ function App() {
       openPanel({ type: "agent", name: agentName });
       // When swapping from the issue panel, clear the issueId from the URL so
       // the URL reflects the closed issue panel, then clean up stale issue
-      // data after the close animation.
+      // data after the close animation. Issue-panel history is no longer
+      // relevant once the agent panel replaces it.
       if (hadIssuePanel) {
+        panelHistory.clear();
         if (activeView !== "issue-detail" && selectedIssueId) {
           navigate(`/ws/${workspaceId}/${activeView}`);
         }
@@ -706,6 +773,7 @@ function App() {
       workspaceId,
       activeView,
       selectedIssueId,
+      panelHistory,
     ],
   );
 
@@ -717,8 +785,9 @@ function App() {
   // Close all panels synchronously (no animation) for workspace switch
   const closeAllPanels = useCallback(() => {
     closePanel();
+    panelHistory.clear();
     clearIssue();
-  }, [closePanel, clearIssue]);
+  }, [closePanel, clearIssue, panelHistory]);
 
   // Workspace state preservation: save/restore ephemeral per-workspace UI state on switch
   useWorkspaceState({
@@ -760,6 +829,9 @@ function App() {
         activeView === "graph" ||
         activeView === "monitor";
       if (supportsPanel) {
+        // Sidebar tree selection opens a fresh panel context — reset any
+        // in-panel history from a prior dependency-chain navigation.
+        panelHistory.clear();
         openPanel({ type: "issue", id: issueId });
         fetchIssue(issueId);
         navigate(`/ws/${workspaceId}/${activeView}/issues/${issueId}`);
@@ -770,7 +842,7 @@ function App() {
         fetchIssue(issueId);
       }
     },
-    [openPanel, fetchIssue, navigate, workspaceId, activeView],
+    [openPanel, fetchIssue, navigate, workspaceId, activeView, panelHistory],
   );
 
   const handleAgentNameConsumed = useCallback(() => {
@@ -824,6 +896,9 @@ function App() {
         activeView === "graph" ||
         activeView === "monitor";
       if (supportsPanel) {
+        // Fresh issue-panel context from an agent-panel task click — no
+        // meaningful in-panel history to preserve.
+        panelHistory.clear();
         openPanel({ type: "issue", id: taskId });
         fetchIssue(taskId);
         navigate(`/ws/${workspaceId}/${activeView}/issues/${taskId}`);
@@ -832,7 +907,7 @@ function App() {
         fetchIssue(taskId);
       }
     },
-    [openPanel, fetchIssue, navigate, workspaceId, activeView],
+    [openPanel, fetchIssue, navigate, workspaceId, activeView, panelHistory],
   );
 
   // -----------------------------------------------------------------------
@@ -1098,7 +1173,9 @@ function App() {
             onReject={handleReject}
             onIssueUpdate={updateIssueDetails}
             onCopyLink={handleCopyLink}
-            onNavigateToIssue={handleIssueClick}
+            onNavigateToIssue={handlePanelNavigateToIssue}
+            canGoBack={panelHistory.canGoBack}
+            onGoBack={handlePanelGoBack}
           />
           <AgentDetailPanel
             isOpen={isAgentPanelOpen}

@@ -147,6 +147,10 @@ export interface IssueDetailPanelProps {
   onCopyLink?: () => void;
   /** Callback when a dependency/dependent issue is clicked for navigation */
   onNavigateToIssue?: (issue: Issue) => void;
+  /** Whether in-panel back navigation is available (history stack non-empty) */
+  canGoBack?: boolean;
+  /** Callback when the back button in the panel header is clicked */
+  onGoBack?: () => void;
 }
 
 /**
@@ -224,6 +228,10 @@ interface DefaultContentProps {
   onCopyLink?: () => void;
   /** Callback when a dependency/dependent issue is clicked for navigation */
   onNavigateToIssue?: (issue: Issue) => void;
+  /** Whether in-panel back navigation is available */
+  canGoBack?: boolean;
+  /** Callback when the back button in the panel header is clicked */
+  onGoBack?: () => void;
 }
 
 /**
@@ -273,6 +281,8 @@ function DefaultContent({
   onReject,
   onCopyLink,
   onNavigateToIssue,
+  canGoBack,
+  onGoBack,
 }: DefaultContentProps): JSX.Element {
   const { workspaceId, workspace, repos } = useWorkspaceContext();
   const [isSavingTitle, setIsSavingTitle] = useState(false);
@@ -885,6 +895,7 @@ function DefaultContent({
           showPriority={true}
           {...(onCopyLink !== undefined && { onCopyLink })}
           {...(canMove && { onMove: () => setShowMoveDialog(true) })}
+          {...(canGoBack && onGoBack !== undefined && { onBack: onGoBack })}
           {...prProps}
           sticky={true}
         />
@@ -1336,6 +1347,8 @@ export function IssueDetailPanel({
   onIssueUpdate,
   onCopyLink,
   onNavigateToIssue,
+  canGoBack,
+  onGoBack,
 }: IssueDetailPanelProps): JSX.Element {
   const panelRef = useRef<HTMLElement>(null);
 
@@ -1376,6 +1389,8 @@ export function IssueDetailPanel({
       {...(onIssueUpdate !== undefined && { onIssueUpdate })}
       {...(onCopyLink !== undefined && { onCopyLink })}
       {...(onNavigateToIssue !== undefined && { onNavigateToIssue })}
+      {...(canGoBack !== undefined && { canGoBack })}
+      {...(onGoBack !== undefined && { onGoBack })}
     />
   );
 

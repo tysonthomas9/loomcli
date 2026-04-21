@@ -46,6 +46,9 @@ export interface IssueHeaderProps {
   onCopyLink?: () => void;
   /** Callback when move button is clicked */
   onMove?: () => void;
+  /** Callback when the back button is clicked (in-panel history navigation).
+   *  Back button renders only when this prop is provided. */
+  onBack?: () => void;
   /** Full PR URL (e.g., https://github.com/owner/repo/pull/42) */
   prUrl?: string;
   /** Extracted PR number (e.g., "42") */
@@ -85,6 +88,7 @@ export function IssueHeader({
   onPriorityClick,
   onCopyLink,
   onMove,
+  onBack,
   prUrl,
   prNumber,
   sticky,
@@ -101,6 +105,31 @@ export function IssueHeader({
   return (
     <header className={rootClassName} data-testid="issue-header">
       <div className={styles.topRow}>
+        {onBack && (
+          <button
+            type="button"
+            className={styles.backButton}
+            onClick={onBack}
+            aria-label="Go back to previous issue"
+            data-testid="header-back-button"
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 20 20"
+              fill="none"
+              aria-hidden="true"
+            >
+              <path
+                d="M12 4l-6 6 6 6"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+        )}
         <span className={styles.issueId} data-testid="issue-id">
           {issue.id}
         </span>
