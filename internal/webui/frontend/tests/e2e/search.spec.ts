@@ -202,6 +202,54 @@ test.describe("SearchInput filtering", () => {
     await expect(searchInput).toHaveValue("")
   })
 
+  test("search highlights matching text in card titles", async ({ page }) => {
+    await navigateAndWait(page, "/")
+
+    // Wait for cards to render before searching
+    await expect(async () => {
+      expect(await countVisibleCards(page)).toBe(4)
+    }).toPass({ timeout: 5000 })
+
+    const searchInput = page.getByTestId("search-input-field")
+    await searchInput.fill("Auth")
+
+    // Wait for debounce + filter
+    await expect(async () => {
+      expect(await countVisibleCards(page)).toBe(2)
+    }).toPass({ timeout: 2000 })
+
+    // Title "Authentication Bug" should contain a <mark> element with "Auth"
+    const authCard = page
+      .locator("article")
+      .filter({ hasText: "Authentication Bug" })
+    const titleMark = authCard.locator('[data-testid="issue-card-title"] mark')
+    await expect(titleMark).toHaveCount(1)
+    await expect(titleMark).toHaveText(/^Auth$/i)
+  })
+
+  test("clearing search removes highlight marks", async ({ page }) => {
+    await navigateAndWait(page, "/")
+
+    const searchInput = page.getByTestId("search-input-field")
+    await searchInput.fill("Auth")
+
+    // Wait for at least one title highlight to appear
+    await expect(async () => {
+      const count = await page
+        .locator('[data-testid="issue-card-title"] mark')
+        .count()
+      expect(count).toBeGreaterThan(0)
+    }).toPass({ timeout: 2000 })
+
+    // Clear search and verify marks are gone
+    const clearButton = page.getByTestId("search-input-clear")
+    await clearButton.click()
+
+    await expect(page.locator('[data-testid="issue-card-title"] mark')).toHaveCount(0, {
+      timeout: 2000,
+    })
+  })
+
   test("Escape key clears search", async ({ page }) => {
     await navigateAndWait(page, "/")
 

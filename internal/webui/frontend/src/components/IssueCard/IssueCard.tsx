@@ -274,7 +274,7 @@ export const IssueCard = memo(function IssueCard({
           P{priority}
         </span>
       </header>
-      <h3 className={styles.title}>
+      <h3 className={styles.title} data-testid="issue-card-title">
         <HighlightText text={displayTitle} searchTerm={searchTerm} />
       </h3>
       {issue.labels && issue.labels.length > 0 && (

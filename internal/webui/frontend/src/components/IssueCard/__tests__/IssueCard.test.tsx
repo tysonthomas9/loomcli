@@ -10,9 +10,10 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom";
 
+import { SearchTermProvider } from "@/contexts/SearchTermContext";
 import type { BlockerRef, Issue } from "@/types";
 
-import { IssueCard } from "../IssueCard";
+import { IssueCard, type IssueCardProps } from "../IssueCard";
 import styles from "../IssueCard.module.css";
 
 /**
@@ -1187,6 +1188,84 @@ describe("IssueCard", () => {
 
       const icon = container.querySelector("svg[data-type]");
       expect(icon).not.toBeInTheDocument();
+    });
+  });
+
+  describe("search highlighting", () => {
+    /**
+     * Wrap IssueCard in a SearchTermProvider so useSearchTerm() sees the
+     * supplied term — mirrors the App.tsx wiring where the provider pipes
+     * debouncedSearch down to deeply-nested cards.
+     */
+    function renderWithSearch(props: IssueCardProps, searchTerm: string) {
+      return render(
+        <SearchTermProvider value={searchTerm}>
+          <IssueCard {...props} />
+        </SearchTermProvider>,
+      );
+    }
+
+    it("highlights matching text in title when search term matches", () => {
+      const issue = createTestIssue({ title: "Fix seed data" });
+      renderWithSearch({ issue }, "seed");
+
+      const marks = document.querySelectorAll("mark");
+      expect(marks).toHaveLength(1);
+      expect(marks[0]).toHaveTextContent("seed");
+    });
+
+    it("does not highlight when search term is empty", () => {
+      const issue = createTestIssue({ title: "Fix seed data" });
+      renderWithSearch({ issue }, "");
+
+      expect(document.querySelectorAll("mark")).toHaveLength(0);
+    });
+
+    it("does not highlight when search term has no match", () => {
+      const issue = createTestIssue({ title: "Fix bug" });
+      renderWithSearch({ issue }, "xyz");
+
+      expect(document.querySelectorAll("mark")).toHaveLength(0);
+    });
+
+    it("highlights multiple occurrences in the title", () => {
+      const issue = createTestIssue({ title: "fix the fix" });
+      renderWithSearch({ issue }, "fix");
+
+      expect(document.querySelectorAll("mark")).toHaveLength(2);
+    });
+
+    it("highlighting is case-insensitive and preserves original case", () => {
+      const issue = createTestIssue({ title: "Hello World" });
+      renderWithSearch({ issue }, "hello");
+
+      const marks = document.querySelectorAll("mark");
+      expect(marks).toHaveLength(1);
+      expect(marks[0]).toHaveTextContent("Hello");
+    });
+
+    it("highlights the fallback 'Untitled' title when it matches", () => {
+      const issue = createTestIssue({ title: "" });
+      renderWithSearch({ issue }, "untitled");
+
+      const marks = document.querySelectorAll("mark");
+      expect(marks).toHaveLength(1);
+      expect(marks[0]).toHaveTextContent("Untitled");
+    });
+
+    it("renders title marks inside the issue-card-title element", () => {
+      const issue = createTestIssue({ title: "Fix seed data" });
+      renderWithSearch({ issue }, "seed");
+
+      const title = screen.getByTestId("issue-card-title");
+      expect(title.querySelectorAll("mark")).toHaveLength(1);
+    });
+
+    it("defaults to no highlight when no provider is present (empty context default)", () => {
+      const issue = createTestIssue({ title: "Fix seed data" });
+      render(<IssueCard issue={issue} />);
+
+      expect(document.querySelectorAll("mark")).toHaveLength(0);
     });
   });
 
