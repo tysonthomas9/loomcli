@@ -580,402 +580,6 @@ Update backend configuration scoped to a specific workspace in multi-workspace m
 - **Request Body, Response, and Errors:** Same as `PATCH /api/config/backend`
 - Only available when MultiPool is configured (multi-workspace mode)
 
-### `PATCH /api/workspace/{name}/config/backend`
-
-Update a workspace's backend override in the global config (`~/.loom/config.yaml`). This is separate from the project-level endpoints — it sets a per-workspace backend preference in the multi-workspace configuration.
-
-- **Auth:** Required
-- **Path Parameters:**
-
-| Param | Type | Required | Description |
-|-------|------|----------|-------------|
-| name | string | yes | Workspace UUID (resolved to name via config lookup) |
-
-- **Request Body:**
-
-```json
-{
-  "backend": "codex"
-}
-```
-
-`backend` must be non-empty and one of: `"claude"`, `"codex"`, `"opencode"`, `"gemini"`, `"cursor"`.
-
-- **Response:** `200 OK` (with workspace config function)
-
-```json
-{
-  "success": true,
-  "data": {
-    "name": "my-workspace",
-    "path": "/home/user/projects/my-workspace",
-    "repos": [],
-    "groups": [],
-    "agents": [],
-    "workspaces": [
-      {
-        "name": "my-workspace",
-        "path": "/home/user/projects/my-workspace",
-        "active": true,
-        "repo_count": 3,
-        "is_default": false,
-        "backend": "codex"
-      }
-    ],
-    "default_workspace": ""
-  }
-}
-```
-
-The `data` field contains refreshed `WorkspaceData` (all slices normalized to non-nil). If no workspace config function is available, `data` is omitted:
-
-```json
-{
-  "success": true
-}
-```
-
-- **Errors:**
-  - `400` — workspace ID required (empty path param), invalid request body (malformed JSON), backend is required (empty field), invalid backend name
-  - `404` — no config found (`~/.loom/config.yaml` doesn't exist) or `"workspace with ID \"<id>\" not found"` (UUID not in workspaces map)
-  - `413` — request body too large (>1 MB)
-  - `500` — failed to load config (read/parse error) or failed to save config (write error)
-
-- **Behavior Notes:**
-  - Loads `~/.loom/config.yaml` using YAML round-trip preservation (updating one workspace's backend doesn't affect other workspaces, `workspace_order`, `default_workspace`, global `backend`, or `daemon` fields)
-  - Saves atomically via temp file + rename (cleaned up on error)
-  - Resolves the workspace by UUID from the path parameter, not by name
-
-## Issues
-
-> **Note:** All `/api/issues/...` routes documented below have been superseded by workspace-scoped equivalents at `/api/workspaces/{ws}/issues/...`. See [Multi-Workspace Endpoints](#multi-workspace-endpoints) for the workspace-scoped versions, which use identical request/response shapes but route through `WorkspaceMiddleware` for per-workspace isolation.
-
-### `GET /api/issues`
-
-List issues with filtering, pagination, and optional Kanban enrichment.
-
-- **Auth:** Required
-- **Query Parameters:**
-  | Parameter | Type | Description |
-  |-----------|------|-------------|
-  | `status` | string | Filter by status |
-  | `type` | string | Filter by issue type |
-  | `assignee` | string | Filter by assignee |
-  | `q` | string | Search query |
-  | `priority` | int (0-4) | Filter by priority |
-  | `labels` | string | Comma-separated labels (all must match) |
-  | `limit` | int | Max results (max 1000) |
-  | `title_contains` | string | Substring match on title |
-  | `description_contains` | string | Substring match on description |
-  | `notes_contains` | string | Substring match on notes |
-  | `created_after` | string | RFC3339 or YYYY-MM-DD |
-  | `created_before` | string | RFC3339 or YYYY-MM-DD |
-  | `updated_after` | string | RFC3339 or YYYY-MM-DD |
-  | `updated_before` | string | RFC3339 or YYYY-MM-DD |
-  | `empty_description` | bool | Only issues with empty description |
-  | `no_assignee` | bool | Only unassigned issues |
-  | `no_labels` | bool | Only issues without labels |
-  | `pinned` | bool | Filter by pinned status |
-  | `exclude_status` | string | Comma-separated statuses to exclude |
-  | `include_blocked` | bool | Include blocked dependency info |
-
-- **Response:** `200 OK`
-
-Without `include_blocked=true`:
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "issue": { "id": "abc", "title": "...", ... },
-      "comment_count": 2,
-      "dependency_count": 1,
-      "parent": "parent-id",
-      "parent_title": "Parent Issue Title"
-    }
-  ]
-}
-```
-
-With `include_blocked=true`:
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "issue": { ... },
-      "comment_count": 2,
-      "dependency_count": 1,
-      "parent": "parent-id",
-      "parent_title": "Parent Issue Title",
-      "is_blocked": true,
-      "blocked_by_count": 2,
-      "blocked_by": ["dep-1", "dep-2"]
-    }
-  ]
-}
-```
-
-### `GET /api/issues/{id}`
-
-Get a single issue by ID.
-
-- **Auth:** Required
-- **Response:** `200 OK`, `404 Not Found`
-
-```json
-{
-  "success": true,
-  "data": { "id": "abc", "title": "...", ... }
-}
-```
-
-### `POST /api/issues`
-
-Create a new issue.
-
-- **Auth:** Required
-- **Request Body:**
-
-```json
-{
-  "title": "string (required)",
-  "issue_type": "bug|feature|task|epic|chore (required)",
-  "priority": 0,
-  "id": "custom-id (optional)",
-  "parent": "parent-issue-id (optional)",
-  "description": "string",
-  "design": "string",
-  "acceptance_criteria": "string",
-  "notes": "string",
-  "assignee": "string",
-  "owner": "string",
-  "created_by": "string",
-  "external_ref": "string",
-  "estimated_minutes": 60,
-  "labels": ["label1", "label2"],
-  "dependencies": ["issue-id-1"],
-  "due_at": "2024-01-15T00:00:00Z",
-  "defer_until": "2024-01-15T00:00:00Z"
-}
-```
-
-- **Validation:** Max 50 labels, max 100 dependencies, priority 0-4
-- **Response:** `201 Created`, `400 Bad Request`
-
-### `PATCH /api/issues/{id}`
-
-Partial update of an issue. All fields are optional.
-
-- **Auth:** Required
-- **Request Body:**
-
-```json
-{
-  "title": "string",
-  "description": "string",
-  "status": "string",
-  "priority": 0,
-  "assignee": "string",
-  "design": "string",
-  "acceptance_criteria": "string",
-  "notes": "string",
-  "external_ref": "string",
-  "estimated_minutes": 60,
-  "issue_type": "bug|feature|task|epic|chore",
-  "add_labels": ["new-label"],
-  "remove_labels": ["old-label"],
-  "set_labels": ["exact-labels"],
-  "pinned": true,
-  "parent": "parent-id",
-  "due_at": "2024-01-15T00:00:00Z",
-  "defer_until": "2024-01-15T00:00:00Z"
-}
-```
-
-- **Response:** `200 OK`, `404 Not Found`, `409 Conflict`
-
-```json
-{
-  "success": true,
-  "data": {"id": "abc", "status": "updated"}
-}
-```
-
-### `POST /api/issues/{id}/close`
-
-Close an issue.
-
-- **Auth:** Required
-- **Request Body:** (optional)
-
-```json
-{
-  "reason": "string",
-  "session": "string",
-  "suggest_next": false,
-  "force": false
-}
-```
-
-- **Response:** `200 OK`, `404 Not Found`, `409 Conflict` (has open blockers when `force=false`)
-
-### `POST /api/issues/{id}/comments`
-
-Add a comment to an issue.
-
-- **Auth:** Required
-- **Request Body:**
-
-```json
-{"text": "Comment text (required, max 64KB)"}
-```
-
-- **Response:** `201 Created`, `400 Bad Request`, `404 Not Found`
-
-```json
-{
-  "success": true,
-  "data": {
-    "id": "comment-id",
-    "text": "Comment text",
-    "author": "web-ui",
-    "created_at": "2024-01-15T12:00:00Z"
-  }
-}
-```
-
-### `GET /api/ready`
-
-Issues ready to work on (open/in_progress with no blockers).
-
-- **Auth:** Required
-- **Query Parameters:**
-  | Parameter | Type | Description |
-  |-----------|------|-------------|
-  | `assignee` | string | Filter by assignee |
-  | `type` | string | Filter by issue type |
-  | `parent_id` | string | Filter by parent epic |
-  | `mol_type` | string | swarm, patrol, or work |
-  | `sort` | string | hybrid, priority, or oldest |
-  | `unassigned` | bool | Only unassigned issues |
-  | `include_deferred` | bool | Include deferred issues |
-  | `priority` | int (0-4) | Filter by priority |
-  | `limit` | int | Max results |
-  | `labels` | string | Comma-separated labels (all must match) |
-  | `labels_any` | string | Comma-separated labels (any must match) |
-
-- **Response:** `200 OK`
-
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": "abc",
-      "title": "...",
-      "status": "open",
-      "parent": "parent-id",
-      "parent_title": "Parent Title"
-    }
-  ]
-}
-```
-
-### `GET /api/blocked`
-
-Issues that are blocked by other issues.
-
-- **Auth:** Required
-- **Query Parameters:**
-  | Parameter | Type | Description |
-  |-----------|------|-------------|
-  | `parent_id` | string | Filter by parent |
-  | `assignee` | string | Filter by assignee |
-  | `type` | string | Filter by issue type |
-  | `priority` | int (0-4) | Filter by priority |
-  | `limit` | int | Max results (max 1000) |
-
-- **Response:** `200 OK`
-
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": "abc",
-      "title": "...",
-      "blocked_by_count": 2,
-      "blocked_by": ["dep-1", "dep-2"]
-    }
-  ]
-}
-```
-
-### `GET /api/issues/graph`
-
-Dependency graph data for visualization.
-
-- **Auth:** Required
-- **Query Parameters:**
-  | Parameter | Type | Default | Description |
-  |-----------|------|---------|-------------|
-  | `status` | string | `all` | all, open, or closed |
-  | `include_closed` | bool | `true` | Include closed issues; only applies when status=all, ignored otherwise |
-
-- **Response:** `200 OK`
-
-```json
-{
-  "success": true,
-  "issues": [
-    {
-      "id": "abc",
-      "title": "...",
-      "status": "open",
-      "priority": 2,
-      "issue_type": "task",
-      "labels": ["frontend"],
-      "dependencies": [
-        {"depends_on_id": "def", "type": "blocks"}
-      ],
-      "defer_until": "",
-      "due_at": ""
-    }
-  ]
-}
-```
-
-## Dependencies
-
-### `POST /api/issues/{id}/dependencies`
-
-Add a dependency (make `{id}` depend on another issue).
-
-- **Auth:** Required
-- **Request Body:**
-
-```json
-{
-  "depends_on_id": "other-issue-id (required)",
-  "dep_type": "blocks (optional, defaults to 'blocks')"
-}
-```
-
-- **Validation:** No self-dependencies, circular dependency detection
-- **Response:** `200 OK`, `400 Bad Request`, `404 Not Found`, `409 Conflict` (cycle or already exists)
-
-### `DELETE /api/issues/{id}/dependencies/{depId}`
-
-Remove a dependency.
-
-- **Auth:** Required
-- **Response:** `200 OK`, `404 Not Found`
-
-```json
-{"success": true, "data": null}
-```
-
 ## Workspace
 
 Workspace endpoints manage workspace lifecycle: creating (empty or clone), reading topology, renaming, deleting, reordering, setting defaults, and updating per-workspace backend configuration. All workspace config is YAML-backed (`~/.loom/config.yaml`) with atomic temp-file + rename writes.
@@ -1153,6 +757,40 @@ Create a new workspace.
   - `501` — template type not supported, or workspace creation not available
   - `504` — creation timed out (>60 seconds)
   - `500` — creation failed
+
+- **Async completion:** Long-running clone workspaces may be created asynchronously. When that path is taken, the response body includes a `job_id` and the caller polls [`GET /api/workspaces/jobs/{id}`](#get-apiworkspacesjobsid) until `status` is `completed` or `failed`.
+
+### `GET /api/workspaces/jobs/{id}`
+
+Poll the status of an async workspace-creation job.
+
+- **Auth:** Required
+- **Path Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | string | yes | Job ID returned by `POST /api/workspaces` |
+
+- **Response `200 OK`:**
+
+```json
+{
+  "success": true,
+  "status": "in_progress",
+  "progress": 42,
+  "workspace_id": "",
+  "error": ""
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `status` | string | `pending`, `in_progress`, `completed`, or `failed` |
+| `progress` | int | 0–100 completion percentage |
+| `workspace_id` | string | Populated once the job completes successfully |
+| `error` | string | Populated when `status = "failed"` |
+
+- **Errors:** `400` (missing job ID), `404` (unknown job ID)
 
 ### `PATCH /api/workspaces/{ws}/name`
 
@@ -1490,15 +1128,18 @@ Retrieve terminal scrollback content for a completed session.
 
 ## Real-time Events (SSE)
 
-### `GET /api/events`
+### `GET /api/workspaces/{ws}/events`
 
-Server-Sent Events stream for real-time mutation notifications.
+Server-Sent Events stream for real-time mutation notifications, scoped to a workspace.
 
-- **Auth:** Required (via bearer token header or `?token=` query param)
+- **Auth:**
+  - **Open mode:** No auth required.
+  - **OIDC mode:** SSE connections authenticate with a one-time HMAC-signed token (not a JWT). Obtain the token from [`GET /api/workspaces/{ws}/events/token`](#get-apiworkspaceswseventstoken) and present it via the `?token=` query parameter. Tokens are single-use, workspace-bound, and expire after 30 s.
 - **Headers:**
-  - `Last-Event-ID`: Resume from last seen event ID for catch-up
+  - `Last-Event-ID`: Resume from last-seen event ID for catch-up
 - **Query Parameters:**
-  - `since`: Catch-up from specific timestamp (Unix milliseconds)
+  - `token` — one-time SSE token (OIDC mode only)
+  - `since` — catch-up from a specific timestamp (Unix milliseconds)
 
 **Protocol details:**
 
@@ -1521,7 +1162,13 @@ event: mutation
 data: {"type":"update","issue_id":"abc","title":"...","assignee":"user","actor":"web-ui","timestamp":"2024-01-15T12:00:00Z","old_status":"open","new_status":"in_progress","parent_id":"","step_count":0}
 ```
 
-**Mutation types:** `create`, `update`, `delete`, `comment`, `status`, `bonded`, `squashed`, `burned`
+**Mutation types:** `create`, `update`, `delete`, `comment`, `status`, `bonded`, `squashed`, `burned`, `session_change`, `issue_tabs`
+
+**Errors:**
+
+- `400` — workspace ID empty (`{"success": false, "error": "workspace ID is required"}`)
+- `401` — invalid or expired one-time token (OIDC mode)
+- `404` — workspace not found
 
 ## Fleet Coordination
 
@@ -1794,72 +1441,80 @@ All keys use the `fleet:` prefix. When workspace-scoped (`Store.workspaceID` is 
 | Done | 5s main, 2s cleanup | Record result and release claim |
 | Heartbeat | 2s | Update worker TTL in Redis |
 
-## Log Streaming
+## Internal Worker API
 
-### `GET /api/agents/{name}/logs`
+Internal endpoints consumed by remote worker processes. These are distinct from the [Fleet Coordination](#fleet-coordination) endpoints: fleet workers talk to the daemon for task claim/heartbeat, while the internal worker API mirrors a worker's `.agent.lock` file, event journal, and log output so the main loom process can surface them in the UI alongside local agents.
 
-Get recent log lines for an agent.
+### Authentication
 
-- **Auth:** Required
-- **Path Parameters:** `name` — agent name (alphanumeric, hyphens, underscores)
-- **Query Parameters:** `lines` — number of lines (default 200, max 10000)
-- **Response:** `200 OK`, `400` (invalid name), `404` (log not found)
+All endpoints require `Authorization: Bearer <LOOM_WORKER_TOKEN>` using `crypto/subtle.ConstantTimeCompare`. This is a pre-shared token configured via the `LOOM_WORKER_TOKEN` environment variable — completely separate from JWT bearer auth, fleet API keys, and session/terminal one-time tokens.
 
-```json
-{
-  "success": true,
-  "data": {
-    "lines": ["line 1", "line 2"],
-    "line_count": 200
-  }
-}
-```
+- `401` — missing or malformed Authorization header
+- `403` — token does not match
+- `503` — `LOOM_WORKER_TOKEN` not configured on the server (worker API disabled)
 
-### `GET /api/agents/{name}/logs/stream`
+### `POST /api/internal/workers/register`
 
-Real-time agent log streaming via SSE.
+Register a new worker and receive an opaque worker ID.
 
-- **Auth:** Required
-- **Query Parameters:** `since` — start from specific line number
-- **Event Format:**
-
-```
-event: log-line
-data: {"line":"log content","line_number":42,"timestamp":"2024-01-15T12:00:00Z"}
-```
-
-### `GET /api/tasks/{id}/logs`
-
-List available log phases for a task.
-
-- **Auth:** Required
-- **Response:** `200 OK`
+- **Request Body:**
 
 ```json
 {
-  "success": true,
-  "data": {
-    "phases": ["planning", "implementation"]
-  }
+  "workspace": "ws-uuid",
+  "agent": "spark",
+  "backend": "claude"
 }
 ```
 
-### `GET /api/tasks/{id}/logs/{phase}`
+`workspace` and `agent` are required. When the server was started with a workspace validator, unknown workspace UUIDs are rejected with `400`.
 
-Get task log content for a specific phase.
+- **Response `201 Created`:**
 
-- **Auth:** Required
-- **Path Parameters:** `phase` — `planning` or `implementation`
-- **Query Parameters:** `lines` — number of lines (default 200, max 10000)
-- **Response:** Same shape as agent logs
+```json
+{"worker_id": "<32-char hex>"}
+```
 
-### `GET /api/tasks/{id}/logs/{phase}/stream`
+- **Errors:** `400` (missing/invalid fields, unknown workspace), `500` (ID generation failure)
 
-Real-time task log streaming via SSE.
+### `POST /api/internal/workers/{id}/state`
 
-- **Auth:** Required
-- **Query Parameters:** `since` — start from specific line number
-- **Event Format:** Same as agent log stream
+Mirror the worker's `.agent.lock` file. Dispatches on an `action` discriminator in the body.
+
+- **Request Body (discriminated union):**
+
+```json
+{"action": "update_state", "state": "working"}
+{"action": "update_task", "task_id": "loomcli-abc", "task_title": "..."}
+{"action": "clear_task"}
+{"action": "read"}
+```
+
+- **Response:**
+  - `200 OK` (no body) for `update_state` / `update_task` / `clear_task`
+  - `200 OK` with the full lock JSON for `read`
+- **Errors:** `400` (invalid body, unknown action), `404` (worker ID not registered, or `.agent.lock` missing on `read`), `500` (disk I/O)
+
+### `POST /api/internal/workers/{id}/events`
+
+Append raw event data (typically JSONL) to the workspace's events journal. A trailing newline is added if missing. Request body is limited to 1 MB.
+
+- **Response:** `202 Accepted` (no body)
+- **Errors:** `400` (body read failure), `404` (worker not registered), `500` (disk I/O)
+
+### `POST /api/internal/workers/{id}/logs`
+
+Append raw log bytes to the agent's log file so existing log-tail consumers pick up remote output. 1 MB body limit.
+
+- **Response:** `200 OK` (no body)
+- **Errors:** `400`, `404`, `500`
+
+### `DELETE /api/internal/workers/{id}`
+
+Deregister the worker.
+
+- **Response:** `204 No Content`
+- **Errors:** `400` (missing ID), `404` (worker not registered)
 
 ## Session Audit Trail
 
@@ -2038,9 +1693,9 @@ Get the raw diff patch content for a session.
 
 ### `POST /api/sessions/notify`
 
-Push a session status change as an SSE event. Loopback-only — **not workspace-scoped** (stays on the main mux).
+Push a session status change as an SSE event. **Not workspace-scoped** (stays on the main mux).
 
-- **Auth:** Loopback-only — restricted to `127.0.0.1`/`::1` via `RemoteAddr` check. Returns `403` for non-loopback. No bearer token required.
+- **Auth:** `Authorization: Bearer <notifyToken>` where `notifyToken` is a pre-shared secret configured on the server at startup. Validated with `crypto/subtle.ConstantTimeCompare`. Fails closed when the server token is empty. Returns `403 Forbidden` on missing header, wrong prefix, or token mismatch. No JWT, no fleet API key, no loopback check.
 - **Request Body:**
 
 ```json
@@ -2068,7 +1723,7 @@ Push a session status change as an SSE event. Loopback-only — **not workspace-
 - **Response:** `204 No Content` (success)
 - **Errors:**
   - `400` — malformed JSON or missing `task_id`/`session_id` (plain text error)
-  - `403` — non-loopback caller (plain text error)
+  - `403` — missing/invalid `Authorization: Bearer` header, or server `notifyToken` not configured (plain text error)
 - **Registration:** Only when SSE hub is non-nil. Errors use plain text `http.Error`, not JSON envelope.
 
 ## Terminal Session Lifecycle
@@ -2643,6 +2298,139 @@ Update persisted terminal UI state (active tab selection).
 
 - **Note:** Setting `active_tab` to `""` clears the selection. Does not broadcast SSE events.
 
+## Terminal Tabs
+
+Workspace-scoped endpoints for terminal tab *metadata* — label, notes, sort order, pinned flag, and the issue a tab is attached to. Tab metadata is persisted in Redis (key format `terminal:meta:{workspace}:{session}`) and survives session death, so a custom label remains even after the backing PTY exits.
+
+These endpoints are distinct from [Issue Tabs](#issue-tabs) (which track which tabs are open for a given issue detail panel). They are also distinct from terminal UI state (see [`GET /api/workspaces/{ws}/terminal/state`](#get-apiworkspaceswsterminalstate)) which tracks only which tab is currently active.
+
+All endpoints require Redis. When the tab metadata store is not configured, routes return `404`.
+
+### Data Model: TabMetadata
+
+```json
+{
+  "session_name": "s1",
+  "workspace": "ws-uuid",
+  "label": "Build logs",
+  "notes": "watching CI output",
+  "sort_order": 1,
+  "pinned": false,
+  "issue_id": "loomcli-abc",
+  "created_at": "2026-04-20T10:00:00Z",
+  "updated_at": "2026-04-20T10:05:00Z",
+  "pty_alive": true,
+  "attached_clients": 1
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `session_name` | string | Tab/session identifier (validated against `^[a-zA-Z0-9_-]+$`) |
+| `workspace` | string | Workspace UUID |
+| `label` | string | Display name shown in the UI |
+| `notes` | string | Free-form notes |
+| `sort_order` | int | Ordering within the workspace (lower = first) |
+| `pinned` | bool | Pinned tabs sort before unpinned |
+| `issue_id` | string | Issue this tab is associated with (optional) |
+| `created_at` | string | RFC 3339 |
+| `updated_at` | string | RFC 3339 (auto-updated on every write) |
+| `pty_alive` | bool | Populated at read time from the in-process PTYManager; `false` means the backing shell has exited |
+| `attached_clients` | int | Populated at read time; `>1` means concurrent WebSocket viewers |
+
+### `GET /api/workspaces/{ws}/terminal/tabs`
+
+List all tab metadata for the workspace. Auto-creates default records for active sessions that don't yet have metadata.
+
+- **Auth:** Required (workspace middleware)
+- **Response `200 OK`:**
+
+```json
+{
+  "success": true,
+  "data": [ {"session_name": "s1", "label": "...", ...}, ... ]
+}
+```
+
+- **Errors:** `400` (workspace empty), `404` (workspace not found), `500` (Redis error)
+
+### `GET /api/workspaces/{ws}/terminal/tabs/{session}`
+
+Fetch a single tab's metadata.
+
+- **Auth:** Required
+- **Response `200 OK`:** `{"success": true, "data": TabMetadata}`
+- **Errors:** `400` (invalid names), `404` (workspace or session not found)
+
+### `PUT /api/workspaces/{ws}/terminal/tabs/{session}`
+
+Create or replace tab metadata.
+
+- **Auth:** Required
+- **Request Body:**
+
+```json
+{
+  "label": "Build logs",
+  "sort_order": 1,
+  "notes": "",
+  "pinned": false
+}
+```
+
+`label` is required; other fields default to their zero values. Request body limit: 1 MB.
+
+- **Response `200 OK`:** `{"success": true, "data": TabMetadata}`
+- **Errors:** `400` (missing label, invalid body), `404` (workspace not found), `413` (body too large)
+
+### `PATCH /api/workspaces/{ws}/terminal/tabs/{session}`
+
+Partially update tab metadata. Every field is optional but at least one must be provided.
+
+- **Auth:** Required
+- **Request Body:**
+
+```json
+{
+  "label": "...",
+  "notes": "...",
+  "sort_order": 2,
+  "pinned": true,
+  "issue_id": "loomcli-abc"
+}
+```
+
+- **Behavior:** Updates only the fields provided in the body; `updated_at` is set to the current UTC time. Broadcasts an SSE event so other clients re-fetch tab state.
+- **Response `200 OK`:** `{"success": true, "data": TabMetadata}`
+- **Errors:** `400` (invalid body, no fields to update), `404` (workspace or session not found), `413` (body too large)
+
+### `DELETE /api/workspaces/{ws}/terminal/tabs/{session}`
+
+Remove tab metadata.
+
+- **Auth:** Required
+- **Response `200 OK`:** `{"success": true}`
+- **Errors:** `400` (invalid names), `404` (workspace not found)
+
+### `GET /api/workspaces/{ws}/terminal/sessions/by-issue`
+
+Return a map of `issue_id → [session_names]` across all workspaces. The `{ws}` path parameter is required for routing but the response spans the full tab metadata store, not just the requested workspace.
+
+- **Auth:** Required
+- **Response `200 OK`:**
+
+```json
+{
+  "success": true,
+  "data": {
+    "loomcli-abc": ["s1", "s4"],
+    "loomcli-def": ["s2"]
+  }
+}
+```
+
+- **Errors:** `400` (workspace empty), `404` (workspace not found), `500` (Redis scan error)
+
 ## Agent Terminal
 
 Workspace-scoped endpoints for agent terminal access: transport mode discovery, one-time token generation, and live WebSocket relay. These endpoints allow the frontend to determine whether an agent has a live tmux session or should fall back to archive logs, authenticate for WebSocket access, and stream the agent's terminal output in real time.
@@ -2811,6 +2599,191 @@ WebSocket endpoint for live agent terminal relay (tmux-backed). Supports bidirec
 - **Agent session disappears between discovery and attach**: `AttachExistingRaw` returns error, WS closes with reason
 - **Server restart**: new HMAC secret generated, all previously-issued tokens become invalid
 - **Concurrent connections to same agent session**: each gets its own PTY attach with unique connection ID
+
+## Agent Control
+
+Workspace-scoped endpoints that proxy agent lifecycle commands to the daemon control socket. These endpoints are only registered when the daemon control callback is wired in (local-daemon mode). They accept an optional `?repo=<repo>` query parameter to disambiguate duplicate worktree names across repositories within a workspace — the handler composes the compound key as `repo/worktree`.
+
+### `GET /api/workspaces/{ws}/agents`
+
+List all agents registered in the workspace.
+
+- **Auth:** Required (workspace middleware)
+- **Response `200 OK`:**
+
+```json
+{
+  "success": true,
+  "data": [ {"name": "spark", "role": "builder", "status": "running"} ],
+  "total": 1
+}
+```
+
+- **Errors:** `502` (invalid data from daemon), `503` (daemon unavailable), `504` (daemon timeout)
+
+### `POST /api/workspaces/{ws}/agents/{name}/start`
+
+Start the named agent.
+
+- **Auth:** Required
+- **Query Parameters:** `repo` (optional) — disambiguates duplicate worktree names
+- **Response `200 OK`:** `{"success": true, "message": "agent \"<name>\" started"}`
+- **Errors:** `404` (agent not found), `409` (already running), `502`/`503`/`504` (daemon errors)
+
+### `POST /api/workspaces/{ws}/agents/{name}/stop`
+
+Stop the named agent. Without force, sends a yield request and returns `202 Accepted`; with force, sends `agent_stop(force=true)` and returns `200 OK`.
+
+- **Auth:** Required
+- **Query Parameters:** `repo` (optional)
+- **Request Body (optional):**
+
+```json
+{"force": false}
+```
+
+- **Response `202 Accepted`** (graceful yield): `{"success": true, "message": "yield requested for agent \"<name>\"; poll GET /agents to track status"}`
+- **Response `200 OK`** (`force=true`): `{"success": true, "message": "agent \"<name>\" force-stopped"}`
+- **Errors:** `400` (malformed body), `404` (agent not found), `409` (already stopped), `502`/`503`/`504`
+
+### `POST /api/workspaces/{ws}/agents/{name}/restart`
+
+Stop then start the agent.
+
+- **Auth:** Required
+- **Query Parameters:** `repo` (optional)
+- **Response `200 OK`:** `{"success": true, "message": "agent \"<name>\" restarted"}`
+- **Errors:** `404`, `502`/`503`/`504`
+
+### `POST /api/workspaces/{ws}/agents/{name}/yield`
+
+Request a graceful yield. The agent finishes its current step and exits cleanly.
+
+- **Auth:** Required
+- **Query Parameters:** `repo` (optional)
+- **Response `200 OK`:** `{"success": true, "message": "yield requested for agent \"<name>\""}`
+- **Errors:** `404`, `502`/`503`/`504`
+
+## Agent Files
+
+Workspace-scoped endpoints for reading, listing, and writing files inside an agent's worktree. All paths are resolved relative to the agent's worktree root; any path that escapes the worktree (via `..`, absolute paths, or symlinks) is rejected with `403`.
+
+**Security denials:**
+
+- **Denied extensions** (reject read and write): `.key`, `.pem`, `.p12`, `.pfx`, `.env`, `.gpg`, `.asc`
+- **Denied filenames** (exact match, case-insensitive): `id_rsa`, `id_ed25519`, `id_ecdsa`, `id_dsa`, `.env`, `.env.local`, `.env.production`, `.netrc`
+- **Symlinks:** reading a symlinked target is allowed; overwriting an existing symlink returns `403`
+- **Parent directory must exist** and must itself live inside the worktree (no traversal via parent symlinks)
+
+### `GET /api/workspaces/{ws}/agents/{name}/files/tree`
+
+List one directory level (files and subdirectories) inside the agent worktree.
+
+- **Auth:** Required (workspace middleware)
+- **Query Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `path` | string | yes | Directory path relative to the worktree root |
+
+- **Response `200 OK`:** Listing of file metadata (name, type, size, modtime).
+- **Errors:**
+  - `400` — missing path
+  - `403` — path escapes worktree, or path is a symlink
+  - `404` — directory not found
+
+### `GET /api/workspaces/{ws}/agents/{name}/files`
+
+Read file contents. Binary files (non-UTF-8, containing null bytes) are rejected.
+
+- **Auth:** Required
+- **Query Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `path` | string | yes | File path relative to the worktree root |
+
+- **Response `200 OK`:** `{"content": "<file text>"}`
+- **Errors:**
+  - `400` — missing path, or file is binary
+  - `403` — path escapes worktree, symlink, or denied extension/filename
+  - `404` — file not found
+
+### `PUT /api/workspaces/{ws}/agents/{name}/files`
+
+Write file contents. The write is atomic (temp file + rename inside the parent directory). Existing file permissions are preserved; new files default to `0644`.
+
+- **Auth:** Required
+- **Query Parameters:** `path` (required)
+- **Request Body:**
+
+```json
+{"content": "<new file text>"}
+```
+
+- **Response `200 OK`:** `{"success": true}`
+- **Errors:**
+  - `400` — missing body, invalid JSON, path escapes worktree
+  - `403` — symlink overwrite, denied extension/filename
+  - `404` — parent directory does not exist
+  - `413` — request body exceeds 1 MB
+  - `500` — disk I/O failure
+
+## Agent Logs & Queue
+
+### `GET /api/workspaces/{ws}/agents/{name}/logs`
+
+Return recent log lines for the agent from its log file. Agent name must match `^[a-zA-Z0-9_-]+$`.
+
+- **Auth:** Required (workspace middleware)
+- **Query Parameters:**
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `lines` | int | 200 | Number of lines to return. Non-positive/invalid values fall back to the default; no upper bound is enforced by the handler. |
+| `before_line` | int | 0 | Return lines ending at this 1-indexed line number (for pagination); `0` means "from EOF" |
+
+- **Response `200 OK`:**
+
+```json
+{
+  "success": true,
+  "data": {
+    "lines": ["line 1", "line 2", ...],
+    "line_count": 200,
+    "start_line": 1
+  }
+}
+```
+
+- **Errors:** `400` (invalid name), `404` (log file not found), `500` (read failure)
+
+### `GET /api/workspaces/{ws}/agents/{name}/queue`
+
+Return the scored work queue that the agent would pull from next.
+
+- **Auth:** Required
+- **Response `200 OK`:**
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "issue_id": "loomcli-abc",
+      "title": "...",
+      "priority": 2,
+      "score": 87,
+      "reason": "ready, matches role labels",
+      "labels": ["frontend"],
+      "parent": "loomcli-epic"
+    }
+  ],
+  "total": 1
+}
+```
+
+- **Errors:** `404` (agent not found in daemon config), `503` (daemon unavailable)
 
 ## Git Operations
 
@@ -3318,6 +3291,34 @@ Diff statistics (added/removed lines) for an issue's assigned agent worktree.
 
 - **Note:** Uses daemon RPC via `multiPool` (routed to workspace-specific pool) with a 5-second context timeout.
 
+### `GET /api/workspaces/{ws}/agents/{name}/git/diff-stat`
+
+Diff statistics (added/removed lines) for an agent's worktree, resolved directly by agent name rather than issue.
+
+- **Auth:** Required
+- **Path Params:**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `ws` | string | Workspace UUID |
+| `name` | string | Agent name |
+
+- **Response:** `200 OK`
+
+```json
+{
+  "branch": "agent/drift",
+  "added": 142,
+  "removed": 37
+}
+```
+
+- **Errors:**
+  - `400` — missing agent name
+  - `404` — agent worktree not found in this workspace
+  - `500` — git exec failure
+  - `503` — daemon unavailable
+
 ## Agent Diff / Code Review
 
 Workspace-scoped REST API for agent worktree diff and code-review operations. These 3 endpoints allow the frontend to list commits in a diff range, list changed files between two refs, and retrieve a unified diff patch for a single file.
@@ -3640,18 +3641,19 @@ All 3 endpoints require Redis. When the issue tab store is not configured (no Re
 
 **Issue ID validation:** All endpoints validate `issueId` against regex `^[a-zA-Z0-9._-]+$` (allows dots for sub-issue IDs like `"loomcli-abc.1"`). Empty IDs are rejected with `400`.
 
-### `GET /api/issues/{issueId}/tabs`
+### `GET /api/workspaces/{ws}/issues/{issueId}/tabs`
 
 Retrieve the persisted tab state for an issue.
 
-- **Auth:** Required
+- **Auth:** Required (workspace middleware)
 - **Path Parameters:**
 
   | Param | Type | Required | Description |
   |-------|------|----------|-------------|
+  | `ws` | string | yes | Workspace UUID |
   | `issueId` | string | yes | Issue ID (alphanumeric, hyphens, underscores, dots) |
 
-- **Terminal Session Filtering:** If a TerminalManager is available, terminal-type tabs are cross-referenced against active tmux sessions. Tabs whose tmux session no longer exists are filtered out. If the active tab was removed during filtering, `active_tab_id` falls back to `"details"`. The filtered state is transparently saved back to Redis if any tabs were removed or the active tab changed. If the TerminalManager is nil or listing sessions fails, no filtering occurs — all tabs are returned as-is.
+- **Terminal Session Filtering:** If a TerminalManager is available, terminal-type tabs are cross-referenced against active sessions. Tabs whose backing session no longer exists are filtered out. If the active tab was removed during filtering, `active_tab_id` falls back to `"details"`. The filtered state is transparently saved back to Redis if any tabs were removed or the active tab changed. If the TerminalManager is nil or listing sessions fails, no filtering occurs — all tabs are returned as-is.
 
 - **Response `200 OK`** (no saved state):
 
@@ -3678,18 +3680,21 @@ Retrieve the persisted tab state for an issue.
 }
 ```
 
-- **Response `400`:** Invalid issue ID (empty or contains disallowed characters)
-- **Response `500`:** Redis get failure
+- **Errors:**
+  - `400` — workspace ID empty, or invalid issue ID (empty or contains disallowed characters)
+  - `404` — workspace not found
+  - `500` — Redis get failure
 
-### `PUT /api/issues/{issueId}/tabs`
+### `PUT /api/workspaces/{ws}/issues/{issueId}/tabs`
 
 Save or replace the full tab state for an issue.
 
-- **Auth:** Required
+- **Auth:** Required (workspace middleware)
 - **Path Parameters:**
 
   | Param | Type | Required | Description |
   |-------|------|----------|-------------|
+  | `ws` | string | yes | Workspace UUID |
   | `issueId` | string | yes | Issue ID (alphanumeric, hyphens, underscores, dots) |
 
 - **Request Body:**
@@ -3737,18 +3742,21 @@ Save or replace the full tab state for an issue.
 }
 ```
 
-- **Response `400`:** Invalid issue ID, or invalid/malformed request body (including body exceeding 1 MB limit)
-- **Response `500`:** Redis save failure
+- **Errors:**
+  - `400` — workspace ID empty, invalid issue ID, or invalid/malformed request body (including body exceeding 1 MB limit)
+  - `404` — workspace not found
+  - `500` — Redis save failure
 
-### `DELETE /api/issues/{issueId}/tabs`
+### `DELETE /api/workspaces/{ws}/issues/{issueId}/tabs`
 
 Remove the tab state for an issue.
 
-- **Auth:** Required
+- **Auth:** Required (workspace middleware)
 - **Path Parameters:**
 
   | Param | Type | Required | Description |
   |-------|------|----------|-------------|
+  | `ws` | string | yes | Workspace UUID |
   | `issueId` | string | yes | Issue ID (alphanumeric, hyphens, underscores, dots) |
 
 - **Behavior:** Removes the tab state for the given issue from Redis. Deleting a non-existent key is a no-op (returns `200` success, matching Redis DEL semantics). No SSE broadcast.
@@ -3759,12 +3767,14 @@ Remove the tab state for an issue.
 {"success": true}
 ```
 
-- **Response `400`:** Invalid issue ID (empty or contains disallowed characters)
-- **Response `500`:** Redis delete failure
+- **Errors:**
+  - `400` — workspace ID empty, or invalid issue ID (empty or contains disallowed characters)
+  - `404` — workspace not found
+  - `500` — Redis delete failure
 
 ## Monitor Endpoints
 
-Monitor endpoints serve daemon-collected data (agent status, task distribution, metrics). They are injected from the cli package via `ServerConfig.MonitorHandlers`.
+Monitor endpoints serve daemon-collected data (agent status, task distribution, metrics). They are injected from the cli package via `ServerConfig.MonitorHandlers` and only registered when the corresponding handler is non-nil. Each returns `503` when the daemon is unavailable.
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -3775,10 +3785,54 @@ Monitor endpoints serve daemon-collected data (agent status, task distribution, 
 | GET | `/api/monitor/sync` | Git sync status |
 | GET | `/api/monitor/workspaces` | Workspace topology metadata |
 | GET | `/api/monitor/stale-detector` | Stale detector status |
-| GET | `/api/monitor/usage` | Token usage aggregates |
+| GET | `/api/monitor/usage` | Token usage aggregates (supports filtering — see below) |
 | GET | `/metrics` | Prometheus metrics (public, no auth required) |
 | GET | `/api/observability/metrics` | Event metrics snapshot |
-| GET | `/api/observability/events` | Paginated event log |
+| GET | `/api/observability/events` | Paginated event log (supports filtering — see below) |
+| GET | `/api/daemon/supervisor` | Daemon supervisor state (restart count, exit reason, …) |
+| GET | `/api/daemon/config` | Effective resolved daemon config as raw JSON |
+
+### `GET /api/monitor/usage`
+
+- **Auth:** Required
+- **Query Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `agent` | string | Filter by agent name |
+| `backend` | string | Filter by backend (claude, codex, …) |
+| `epic` | string | Filter by epic ID |
+| `since` | string | Start date (`YYYY-MM-DD`) |
+| `until` | string | End date (`YYYY-MM-DD`) |
+
+### `GET /api/observability/events`
+
+- **Auth:** Required
+- **Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `page` | int | 1 | Page number (1-indexed) |
+| `per_page` | int | 50 | Events per page (max 200) |
+| `type` | string | | Filter by event type |
+| `agent` | string | | Filter by agent name |
+| `since` | string | | Earliest event (RFC3339) |
+
+### `GET /metrics`
+
+- **Auth:** None (public). Returns Prometheus text format (`text/plain; version=0.0.4`). Combines loom-specific metrics with auto-registered HTTP metrics (`loom_http_requests_total`, `loom_http_request_duration_seconds`).
+
+### `GET /api/daemon/supervisor`
+
+- **Auth:** Required
+- **Response:** `200 OK` with `{"success": true, "data": {...supervisor state...}}`
+- **Errors:** `503` when the daemon state file does not exist (daemon not running); `500` on read error.
+
+### `GET /api/daemon/config`
+
+- **Auth:** Required
+- **Response:** `200 OK` with `{"success": true, "data": <raw JSON>}` — the resolved daemon config embedded verbatim.
+- **Errors:** `503` on load failure.
 
 ## Multi-Workspace Endpoints
 
@@ -3801,7 +3855,7 @@ All endpoints in this section are registered on the workspace sub-mux (`wsMux`) 
 
 ### Issue Management
 
-These 11 endpoints handle issue lifecycle under `/api/workspaces/{ws}/issues/...`. Request and response shapes are identical to the non-workspace-scoped equivalents documented in the [Issues](#issues) section, with the addition of workspace routing.
+These 11 endpoints handle issue lifecycle under `/api/workspaces/{ws}/issues/...`. They replace legacy flat `/api/issues/*` routes that are no longer registered; the workspace-scoped variants are the only canonical form.
 
 #### `GET /api/workspaces/{ws}/issues`
 
@@ -4126,7 +4180,7 @@ Get workspace issue statistics.
 - **Auth:** Required
 - **Timeout:** 2 seconds
 - **No query params**
-- Same response shape as `GET /api/stats` documented in [Health & Status](#health--status)
+- **Response:** `200 OK` — Same shape as [`GET /api/stats`](#get-apistats): `{"success": true, "data": {"by_status": {...}, "by_priority": {...}, "by_type": {...}, "total": N, "recent_activity": [...]}}`.
 - **Errors:** `503` (pool unavailable), `504` (timeout)
 
 #### `GET /api/workspaces/{ws}/ready`
@@ -4148,7 +4202,23 @@ Get issues ready to work on (unblocked, open).
   | `include_deferred` | bool | Include deferred issues |
   | `source_repos` | string | Comma-separated repo names to filter by |
 
-- Same response shape as `GET /api/ready` documented in [Issues](#issues)
+- **Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "abc",
+      "title": "...",
+      "status": "open",
+      "parent": "parent-id",
+      "parent_title": "Parent Title"
+    }
+  ]
+}
+```
+
 - **Errors:** `400` (invalid params), `503` (pool unavailable), `504` (timeout)
 
 #### `GET /api/workspaces/{ws}/blocked`
@@ -4166,7 +4236,22 @@ Get blocked issues.
   | `priority` | int (0-4) | Filter by priority |
   | `limit` | int | Max results |
 
-- Same response shape as `GET /api/blocked` documented in [Issues](#issues)
+- **Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "abc",
+      "title": "...",
+      "blocked_by_count": 2,
+      "blocked_by": ["dep-1", "dep-2"]
+    }
+  ]
+}
+```
+
 - **Errors:** `400` (invalid params), `503` (pool unavailable), `504` (timeout)
 
 #### `GET /api/workspaces/{ws}/issues/graph`
@@ -4184,7 +4269,29 @@ Get the dependency graph for visualization.
 
 > **Note:** This endpoint lives under `/issues/graph` despite being a view endpoint, following the existing route pattern.
 
-- Same response shape as `GET /api/issues/graph` documented in [Issues](#issues)
+- **Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "issues": [
+    {
+      "id": "abc",
+      "title": "...",
+      "status": "open",
+      "priority": 2,
+      "issue_type": "task",
+      "labels": ["frontend"],
+      "dependencies": [
+        {"depends_on_id": "def", "type": "blocks"}
+      ],
+      "defer_until": "",
+      "due_at": ""
+    }
+  ]
+}
+```
+
 - **Errors:** `400` (invalid params), `503` (pool unavailable), `504` (timeout)
 
 ### Daemon Status
@@ -4196,8 +4303,52 @@ Get daemon runtime status for the workspace.
 - **Auth:** Required
 - **Timeout:** 2 seconds
 - **No query params**
-- Same response shape as `GET /api/daemon/status` documented in [Health & Status](#health--status)
+- **Response:** `200 OK` — Same shape as [`GET /api/daemon/status`](#get-apidaemonstatus): `{"success": true, "data": {"running": bool, "pid": int, "socket_path": string, "started_at": ISO8601, "version": string}}`.
 - **Errors:** `503` (pool unavailable), `504` (timeout)
+
+### Task Logs
+
+#### `GET /api/workspaces/{ws}/tasks/{id}/logs`
+
+List the log phases available for a task.
+
+- **Auth:** Required (workspace middleware)
+- **Path params:** `id` — task/issue ID (alphanumeric, hyphens, underscores, dots)
+- **Response `200 OK`:**
+
+```json
+{
+  "success": true,
+  "data": {"phases": ["planning", "implementation"]}
+}
+```
+
+- **Errors:** `400` (missing or invalid task ID), `500` (directory read failure)
+
+#### `GET /api/workspaces/{ws}/tasks/{id}/logs/{phase}`
+
+Return recent log lines for a specific task phase.
+
+- **Auth:** Required
+- **Path params:**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `id` | string | Task ID |
+| `phase` | string | `planning` or `implementation` |
+
+- **Query Parameters:**
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `lines` | int | 200 | Number of lines to return (max 10000) |
+| `before_line` | int | 0 | Paginate by returning lines ending at this 1-indexed line number |
+
+- **Response `200 OK`:** Same shape as [`GET /api/workspaces/{ws}/agents/{name}/logs`](#get-apiworkspaceswsagentsnamelogs).
+- **Errors:**
+  - `400` — missing/invalid task ID, missing/invalid phase (`planning` or `implementation` only)
+  - `404` — log file not found (task phase may not have started)
+  - `500` — path resolution or read failure
 
 ---
 
@@ -4354,6 +4505,54 @@ The server's `SecurityHeadersMiddleware` sets a `Content-Security-Policy` respon
 - Rate limiters are per-IP using `RemoteAddr` only (`X-Forwarded-For` not trusted to prevent spoofing)
 - Rate limiter entries are cleaned up in a background goroutine: stale entries (no requests for 10 minutes) evicted every 5 minutes
 - Different IPs get independent rate-limit buckets — one client being rate-limited does not affect others
+
+## Editor Endpoints
+
+Endpoints for discovering and launching installed editors. Detection results are cached for 30 seconds; subsequent calls within that window skip the on-disk probe.
+
+### `GET /api/editors`
+
+List all editors in the registry along with their detection status.
+
+- **Auth:** Required
+- **Response `200 OK`:**
+
+```json
+{
+  "success": true,
+  "data": {
+    "editors": [
+      {"id": "vscode", "display_name": "VS Code", "icon_name": "vscode", "detected": true},
+      {"id": "cursor", "display_name": "Cursor", "icon_name": "cursor", "detected": false}
+    ]
+  }
+}
+```
+
+### `POST /api/editors/open`
+
+Launch an editor against a local path. **Restricted to loopback callers** (`127.0.0.1` / `::1`); requests from any other remote address return `403`.
+
+- **Auth:** Required (and loopback-only)
+- **Request Body:**
+
+```json
+{
+  "editor_id": "vscode",
+  "path": "/absolute/path/to/dir-or-file"
+}
+```
+
+- Path must be absolute and must not contain `..` components.
+- `editor_id` must match `^[a-z0-9-]+$`.
+- **Response `200 OK`:** `{"success": true}`
+- **Errors:**
+  - `400` — missing/empty fields, invalid `editor_id`, relative path
+  - `403` — non-loopback caller; `path` contained `..` (returned as `422` when the body is otherwise valid — see below)
+  - `404` — unknown `editor_id`, or path does not exist
+  - `413` — body exceeds 1 MB
+  - `422` — editor not detected on this system, or path contains `..` components
+  - `500` — launch failed
 
 ## Rate Limiting
 
