@@ -39,6 +39,15 @@ func (s *Server) handleListKanban(req *Request) Response {
 		}
 	}
 
+	// Guard against excessive ID lists to avoid SQLite parameter limits
+	const maxIDs = 1000
+	if len(filter.IDs) > maxIDs {
+		return Response{
+			Success: false,
+			Error:   fmt.Sprintf("--id flag supports at most %d issue IDs, got %d", maxIDs, len(filter.IDs)),
+		}
+	}
+
 	ctx, cancel := s.reqCtx(req)
 	defer cancel()
 

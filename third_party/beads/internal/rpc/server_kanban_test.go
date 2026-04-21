@@ -2,6 +2,7 @@ package rpc
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -240,6 +241,114 @@ func TestHandleListKanban_InvalidDate(t *testing.T) {
 	if !strings.Contains(resp.Error, "invalid --created-after date") {
 		t.Errorf("expected Error to contain %q, got %q",
 			"invalid --created-after date", resp.Error)
+	}
+}
+
+// TestBuildIssueFilter_MaxIDsNotEnforced documents that buildIssueFilter does
+// not enforce the maxIDs limit — that policy is the handler's responsibility.
+// The function should accept any number of IDs and propagate them in filter.IDs.
+func TestBuildIssueFilter_MaxIDsNotEnforced(t *testing.T) {
+	ids := make([]string, 1500)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("loomcli-x%05d", i)
+	}
+	args := &ListArgs{IDs: ids}
+	filter, err := buildIssueFilter(args)
+	if err != nil {
+		t.Fatalf("expected no error from buildIssueFilter with 1500 IDs, got: %v", err)
+	}
+	if len(filter.IDs) != 1500 {
+		t.Errorf("expected filter.IDs to contain all 1500 IDs, got %d", len(filter.IDs))
+	}
+}
+
+// TestHandleListKanban_ExcessiveIDs verifies that passing >1000 IDs to the
+// list_kanban RPC surfaces the maxIDs guard error instead of an opaque SQLite
+// error from the IN-clause parameter limit.
+func TestHandleListKanban_ExcessiveIDs(t *testing.T) {
+	_, client, _, cleanup := setupTestServerWithStore(t)
+	defer cleanup()
+
+	ids := make([]string, 1001)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("loomcli-x%04d", i)
+	}
+	args := &ListKanbanArgs{ListArgs: ListArgs{IDs: ids}}
+	resp, _ := client.Execute(OpListKanban, args)
+	if resp == nil {
+		t.Fatalf("expected non-nil response for Success=false path")
+	}
+	if resp.Success {
+		t.Fatalf("expected Success=false for 1001 IDs, got Success=true")
+	}
+	if !strings.Contains(resp.Error, "--id flag supports at most 1000 issue IDs, got 1001") {
+		t.Errorf("expected Error to contain maxIDs guard message, got %q", resp.Error)
+	}
+}
+
+// TestHandleListKanban_ExactlyMaxIDs verifies that passing exactly 1000 IDs
+// does not trigger the guard (len > maxIDs, not >=).
+func TestHandleListKanban_ExactlyMaxIDs(t *testing.T) {
+	_, client, _, cleanup := setupTestServerWithStore(t)
+	defer cleanup()
+
+	ids := make([]string, 1000)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("loomcli-x%04d", i)
+	}
+	args := &ListKanbanArgs{ListArgs: ListArgs{IDs: ids}}
+	resp, err := client.Execute(OpListKanban, args)
+	if err != nil {
+		t.Fatalf("Execute returned transport error for 1000 IDs: %v", err)
+	}
+	if resp == nil || !resp.Success {
+		errStr := ""
+		if resp != nil {
+			errStr = resp.Error
+		}
+		t.Fatalf("expected Success=true for 1000 IDs, got Success=false, Error=%q", errStr)
+	}
+}
+
+// TestHandleListKanban_NoIDs verifies that the guard does not trigger when
+// no IDs are provided.
+func TestHandleListKanban_NoIDs(t *testing.T) {
+	_, client, _, cleanup := setupTestServerWithStore(t)
+	defer cleanup()
+
+	args := &ListKanbanArgs{ListArgs: ListArgs{}}
+	resp, err := client.Execute(OpListKanban, args)
+	if err != nil {
+		t.Fatalf("Execute returned transport error: %v", err)
+	}
+	if resp == nil || !resp.Success {
+		errStr := ""
+		if resp != nil {
+			errStr = resp.Error
+		}
+		t.Fatalf("expected Success=true for empty IDs, got Success=false, Error=%q", errStr)
+	}
+}
+
+// TestHandleListKanban_FewIDs verifies that a small number of IDs (well under
+// the limit) flows through the RPC without triggering the guard.
+func TestHandleListKanban_FewIDs(t *testing.T) {
+	_, client, _, cleanup := setupTestServerWithStore(t)
+	defer cleanup()
+
+	args := &ListKanbanArgs{
+		ListArgs: ListArgs{IDs: []string{"loomcli-a", "loomcli-b", "loomcli-c", "loomcli-d", "loomcli-e"}},
+	}
+	resp, err := client.Execute(OpListKanban, args)
+	if err != nil {
+		t.Fatalf("Execute returned transport error: %v", err)
+	}
+	if resp == nil || !resp.Success {
+		errStr := ""
+		if resp != nil {
+			errStr = resp.Error
+		}
+		t.Fatalf("expected Success=true for 5 IDs, got Success=false, Error=%q", errStr)
 	}
 }
 
