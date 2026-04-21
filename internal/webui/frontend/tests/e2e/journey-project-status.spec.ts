@@ -300,7 +300,7 @@ async function setupBaseMocks(page: Page) {
   });
 
   // Monitor catch-all first (specific routes registered after take LIFO priority)
-  await page.route("**/api/monitor/**", async (route) => {
+  await page.route("**/monitor/**", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -318,7 +318,7 @@ async function setupBaseMocks(page: Page) {
   });
 
   // Specific monitor endpoints (registered last = highest priority in Playwright LIFO)
-  await page.route("**/api/monitor/agents", async (route) => {
+  await page.route("**/api/workspaces/*/monitor/agents", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -326,7 +326,7 @@ async function setupBaseMocks(page: Page) {
     });
   });
 
-  await page.route("**/api/monitor/status", async (route) => {
+  await page.route("**/api/workspaces/*/monitor/status", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -334,7 +334,7 @@ async function setupBaseMocks(page: Page) {
     });
   });
 
-  await page.route("**/api/monitor/tasks", async (route) => {
+  await page.route("**/api/workspaces/*/monitor/tasks", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",

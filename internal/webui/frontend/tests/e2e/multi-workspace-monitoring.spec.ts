@@ -470,24 +470,24 @@ async function setupMocks(
   });
 
   // Consolidated monitor API handler: /api/monitor/**
-  await page.route("**/api/monitor/**", async (route) => {
+  await page.route("**/monitor/**", async (route) => {
     const url = route.request().url();
 
-    if (url.includes("/api/monitor/status")) {
+    if (url.includes("/monitor/status")) {
       const status = currentWsId === WS_A.id ? loomStatusA : loomStatusB;
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify(status),
       });
-    } else if (url.includes("/api/monitor/tasks")) {
+    } else if (url.includes("/monitor/tasks")) {
       const tasks = currentWsId === WS_A.id ? loomTasksA : loomTasksB;
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify(tasks),
       });
-    } else if (url.includes("/api/monitor/agents")) {
+    } else if (url.includes("/monitor/agents")) {
       const ws =
         currentWsId === WS_A.id ? workspaceDataForA : workspaceDataForB;
       const agents = ws.agents.map((a) => ({
@@ -510,7 +510,7 @@ async function setupMocks(
         contentType: "application/json",
         body: JSON.stringify(mockMetrics),
       });
-    } else if (url.includes("/api/monitor/usage")) {
+    } else if (url.includes("/monitor/usage")) {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -709,7 +709,7 @@ test.describe("Multi-Workspace Monitoring Journey", () => {
       // Wait for loom status to load
       await page.waitForResponse(
         (res) =>
-          res.url().includes("/api/monitor/status") && res.status() === 200,
+          res.url().includes("/monitor/status") && res.status() === 200,
         { timeout: 10000 },
       );
       await page.waitForTimeout(500);
@@ -738,7 +738,7 @@ test.describe("Multi-Workspace Monitoring Journey", () => {
       // Wait for loom data
       await page.waitForResponse(
         (res) =>
-          res.url().includes("/api/monitor/status") && res.status() === 200,
+          res.url().includes("/monitor/status") && res.status() === 200,
         { timeout: 10000 },
       );
       await page.waitForTimeout(500);
@@ -847,7 +847,7 @@ test.describe("Multi-Workspace Monitoring Journey", () => {
       await expect(dashboard).toBeVisible({ timeout: 15000 });
       await page.waitForResponse(
         (res) =>
-          res.url().includes("/api/monitor/status") && res.status() === 200,
+          res.url().includes("/monitor/status") && res.status() === 200,
         { timeout: 10000 },
       );
       await page.waitForTimeout(500);

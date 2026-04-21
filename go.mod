@@ -5,6 +5,7 @@ go 1.25.6
 require (
 	github.com/Microsoft/go-winio v0.6.2
 	github.com/alicebob/miniredis/v2 v2.36.1
+	github.com/coder/websocket v1.8.14
 	github.com/creack/pty v1.1.24
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/getsentry/sentry-go v0.44.1
@@ -30,7 +31,6 @@ require (
 	golang.org/x/sys v0.41.0
 	golang.org/x/time v0.14.0
 	gopkg.in/yaml.v3 v3.0.1
-	nhooyr.io/websocket v1.8.17
 )
 
 replace github.com/steveyegge/beads => ./third_party/beads

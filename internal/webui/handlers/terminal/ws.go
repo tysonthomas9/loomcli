@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"nhooyr.io/websocket" //nolint:staticcheck // SA1019: websocket migration tracked separately
+	"github.com/coder/websocket"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
@@ -70,7 +70,7 @@ func HandleTerminalWS(manager webuterminal.PTYSource, auth *realtime.TerminalAut
 		closeStatus := websocket.StatusInternalError
 		closeReason := "connection closed"
 		defer func() {
-			_ = conn.Close(closeStatus, closeReason) //nolint:staticcheck // SA1019: websocket migration tracked separately
+			_ = conn.Close(closeStatus, closeReason)
 		}()
 
 		closeStatus, closeReason = runTerminalRelay(r.Context(), conn, p, session, workspace)
@@ -141,27 +141,27 @@ func authenticateTerminalSession(w http.ResponseWriter, r *http.Request, auth *r
 }
 
 // upgradeTerminalWS performs the WebSocket upgrade for a terminal connection.
-func upgradeTerminalWS(w http.ResponseWriter, r *http.Request, patterns []string) (*websocket.Conn, bool) { //nolint:staticcheck // SA1019: websocket migration tracked separately
+func upgradeTerminalWS(w http.ResponseWriter, r *http.Request, patterns []string) (*websocket.Conn, bool) {
 	rc := http.NewResponseController(w)
 	if err := rc.SetWriteDeadline(time.Time{}); err != nil {
 		slog.Warn("terminal ws: failed to disable write deadline", "err", err)
 	}
 
-	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{ //nolint:staticcheck // SA1019: websocket migration tracked separately
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		OriginPatterns: patterns,
 	})
 	if err != nil {
 		slog.Error("failed to accept websocket", "err", err)
 		return nil, false
 	}
-	conn.SetReadLimit(realtime.WSReadLimit) //nolint:staticcheck // SA1019: websocket migration tracked separately
+	conn.SetReadLimit(realtime.WSReadLimit)
 	return conn, true
 }
 
 // runTerminalRelay attaches to the (workspace, session) PTY session and runs
 // the bidirectional relay until the WebSocket closes. On WS close the session
 // is detached (grace period armed); the PTY and child process stay alive.
-func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalWSParams, session, workspace string) (websocket.StatusCode, string) { //nolint:staticcheck // SA1019: websocket migration tracked separately
+func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalWSParams, session, workspace string) (websocket.StatusCode, string) {
 	key := webuterminal.SessionKey{Workspace: workspace, Name: session}
 
 	att, reattach, err := p.manager.AttachSession(key, 80, 24, webuterminal.ArgvForSession(session))

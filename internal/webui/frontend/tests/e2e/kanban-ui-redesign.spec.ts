@@ -414,7 +414,7 @@ test.describe("Sidebar Rendering", () => {
     await setupMocks(page, { issues })
 
     // Also mock monitor endpoint to prevent connection errors
-    await page.route("**/api/monitor/**", async (route) => {
+    await page.route("**/monitor/**", async (route) => {
       await route.abort()
     })
     await page.route("**/loom/**", async (route) => {

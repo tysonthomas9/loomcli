@@ -132,7 +132,7 @@ async function setupBaseMocks(page: Page) {
   });
 
   // Monitor agent endpoints — return empty data
-  await page.route("**/api/monitor/**", async (route) => {
+  await page.route("**/monitor/**", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",

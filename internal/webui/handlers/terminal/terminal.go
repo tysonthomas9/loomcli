@@ -15,7 +15,7 @@ import (
 var validTerminalSession = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 // originHosts extracts host (with port) from origin URLs for use as
-// nhooyr.io/websocket OriginPatterns. For example, "http://localhost:3000"
+// coder/websocket OriginPatterns. For example, "http://localhost:3000"
 // becomes "localhost:3000". Malformed URLs are logged and skipped.
 func originHosts(origins []string) []string {
 	if len(origins) == 0 {

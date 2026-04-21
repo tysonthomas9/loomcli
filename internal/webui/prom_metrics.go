@@ -75,7 +75,7 @@ func (r *statusRecorder) Unwrap() http.ResponseWriter {
 }
 
 // Hijack delegates to the inner writer if it implements http.Hijacker.
-// Required for WebSocket upgrades — nhooyr.io/websocket calls w.(http.Hijacker)
+// Required for WebSocket upgrades — coder/websocket calls w.(http.Hijacker)
 // directly rather than going through http.ResponseController, so we can't
 // rely on the Unwrap chain here.
 func (r *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {

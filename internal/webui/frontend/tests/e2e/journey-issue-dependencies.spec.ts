@@ -302,7 +302,7 @@ async function setupMocks(page: Page, state: MockState) {
   );
 
   // Monitor server endpoints (global)
-  await page.route("**/api/monitor/**", async (route) => {
+  await page.route("**/monitor/**", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",

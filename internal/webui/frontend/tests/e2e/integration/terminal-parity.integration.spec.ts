@@ -88,7 +88,7 @@ async function mockLoomEndpoints(page: Page): Promise<void> {
     blocked: [],
   };
 
-  await page.route('**/api/monitor/status', async (route) => {
+  await page.route('**/api/workspaces/*/monitor/status', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -103,7 +103,7 @@ async function mockLoomEndpoints(page: Page): Promise<void> {
     });
   });
 
-  await page.route('**/api/monitor/agents', async (route) => {
+  await page.route('**/api/workspaces/*/monitor/agents', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -118,7 +118,7 @@ async function mockLoomEndpoints(page: Page): Promise<void> {
     });
   });
 
-  await page.route('**/api/monitor/tasks', async (route) => {
+  await page.route('**/api/workspaces/*/monitor/tasks', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',

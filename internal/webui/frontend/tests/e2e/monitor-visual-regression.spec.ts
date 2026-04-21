@@ -442,7 +442,7 @@ async function setupMocks(
 
   // Mock monitor server API (/api/monitor/*)
   if (loomServerAvailable) {
-    await page.route("**/api/monitor/status", async (route) => {
+    await page.route("**/api/workspaces/*/monitor/status", async (route) => {
       if (emptyStats) {
         await route.fulfill({
           status: 200,
@@ -461,7 +461,7 @@ async function setupMocks(
       })
     })
 
-    await page.route("**/api/monitor/tasks", async (route) => {
+    await page.route("**/api/workspaces/*/monitor/tasks", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -470,7 +470,7 @@ async function setupMocks(
     })
 
     // Mock /api/monitor/agents - returns { agents: [...] }
-    await page.route("**/api/monitor/agents", async (route) => {
+    await page.route("**/api/workspaces/*/monitor/agents", async (route) => {
       const agents = (emptyAgents || emptyStats) ? [] : (customAgents ?? mockAllAgents)
       await route.fulfill({
         status: 200,
@@ -479,21 +479,21 @@ async function setupMocks(
       })
     })
   } else {
-    await page.route("**/api/monitor/status", async (route) => {
+    await page.route("**/api/workspaces/*/monitor/status", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         body: "invalid json{",
       })
     })
-    await page.route("**/api/monitor/tasks", async (route) => {
+    await page.route("**/api/workspaces/*/monitor/tasks", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         body: "invalid json{",
       })
     })
-    await page.route("**/api/monitor/agents", async (route) => {
+    await page.route("**/api/workspaces/*/monitor/agents", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -542,11 +542,11 @@ test.describe("Visual Regression - Monitor Dashboard Layout", () => {
 
       // Wait for loom API responses so panels are populated
       await page.waitForResponse(
-        (res) => res.url().includes("/api/monitor/status") && res.status() === 200,
+        (res) => res.url().includes("/monitor/status") && res.status() === 200,
         { timeout: 10000 }
       )
       await page.waitForResponse(
-        (res) => res.url().includes("/api/monitor/tasks") && res.status() === 200,
+        (res) => res.url().includes("/monitor/tasks") && res.status() === 200,
         { timeout: 10000 }
       )
 
@@ -582,11 +582,11 @@ test.describe("Visual Regression - Monitor Dashboard Layout", () => {
 
       // Wait for loom API responses
       await page.waitForResponse(
-        (res) => res.url().includes("/api/monitor/status") && res.status() === 200,
+        (res) => res.url().includes("/monitor/status") && res.status() === 200,
         { timeout: 10000 }
       )
       await page.waitForResponse(
-        (res) => res.url().includes("/api/monitor/tasks") && res.status() === 200,
+        (res) => res.url().includes("/monitor/tasks") && res.status() === 200,
         { timeout: 10000 }
       )
 
@@ -618,11 +618,11 @@ test.describe("Visual Regression - Monitor Dashboard Layout", () => {
 
       // Wait for loom API responses
       await page.waitForResponse(
-        (res) => res.url().includes("/api/monitor/status") && res.status() === 200,
+        (res) => res.url().includes("/monitor/status") && res.status() === 200,
         { timeout: 10000 }
       )
       await page.waitForResponse(
-        (res) => res.url().includes("/api/monitor/tasks") && res.status() === 200,
+        (res) => res.url().includes("/monitor/tasks") && res.status() === 200,
         { timeout: 10000 }
       )
 
@@ -653,11 +653,11 @@ test.describe("Visual Regression - Agent Activity Panel", () => {
 
     // Wait for both loom APIs to load
     await page.waitForResponse(
-      (res) => res.url().includes("/api/monitor/status") && res.status() === 200,
+      (res) => res.url().includes("/monitor/status") && res.status() === 200,
       { timeout: 10000 }
     )
     await page.waitForResponse(
-      (res) => res.url().includes("/api/monitor/tasks") && res.status() === 200,
+      (res) => res.url().includes("/monitor/tasks") && res.status() === 200,
       { timeout: 10000 }
     )
     await page.waitForTimeout(500)
@@ -681,11 +681,11 @@ test.describe("Visual Regression - Agent Activity Panel", () => {
     await navigateAndWait(page)
 
     await page.waitForResponse(
-      (res) => res.url().includes("/api/monitor/status") && res.status() === 200,
+      (res) => res.url().includes("/monitor/status") && res.status() === 200,
       { timeout: 10000 }
     )
     await page.waitForResponse(
-      (res) => res.url().includes("/api/monitor/tasks") && res.status() === 200,
+      (res) => res.url().includes("/monitor/tasks") && res.status() === 200,
       { timeout: 10000 }
     )
     await page.waitForTimeout(500)
@@ -736,11 +736,11 @@ test.describe("Visual Regression - Agent Activity Panel", () => {
     await navigateAndWait(page)
 
     await page.waitForResponse(
-      (res) => res.url().includes("/api/monitor/status") && res.status() === 200,
+      (res) => res.url().includes("/monitor/status") && res.status() === 200,
       { timeout: 10000 }
     )
     await page.waitForResponse(
-      (res) => res.url().includes("/api/monitor/tasks") && res.status() === 200,
+      (res) => res.url().includes("/monitor/tasks") && res.status() === 200,
       { timeout: 10000 }
     )
     await page.waitForTimeout(500)
@@ -770,11 +770,11 @@ test.describe("Visual Regression - Project Health Panel", () => {
     await navigateAndWait(page)
 
     await page.waitForResponse(
-      (res) => res.url().includes("/api/monitor/status") && res.status() === 200,
+      (res) => res.url().includes("/monitor/status") && res.status() === 200,
       { timeout: 10000 }
     )
     await page.waitForResponse(
-      (res) => res.url().includes("/api/monitor/tasks") && res.status() === 200,
+      (res) => res.url().includes("/monitor/tasks") && res.status() === 200,
       { timeout: 10000 }
     )
     await page.waitForTimeout(500)
@@ -798,11 +798,11 @@ test.describe("Visual Regression - Project Health Panel", () => {
     await navigateAndWait(page)
 
     await page.waitForResponse(
-      (res) => res.url().includes("/api/monitor/status") && res.status() === 200,
+      (res) => res.url().includes("/monitor/status") && res.status() === 200,
       { timeout: 10000 }
     )
     await page.waitForResponse(
-      (res) => res.url().includes("/api/monitor/tasks") && res.status() === 200,
+      (res) => res.url().includes("/monitor/tasks") && res.status() === 200,
       { timeout: 10000 }
     )
     await page.waitForTimeout(500)
@@ -829,11 +829,11 @@ test.describe("Visual Regression - Interactions", () => {
     await navigateAndWait(page)
 
     await page.waitForResponse(
-      (res) => res.url().includes("/api/monitor/status") && res.status() === 200,
+      (res) => res.url().includes("/monitor/status") && res.status() === 200,
       { timeout: 10000 }
     )
     await page.waitForResponse(
-      (res) => res.url().includes("/api/monitor/tasks") && res.status() === 200,
+      (res) => res.url().includes("/monitor/tasks") && res.status() === 200,
       { timeout: 10000 }
     )
     await page.waitForTimeout(500)
@@ -857,11 +857,11 @@ test.describe("Visual Regression - Interactions", () => {
     await navigateAndWait(page)
 
     await page.waitForResponse(
-      (res) => res.url().includes("/api/monitor/status") && res.status() === 200,
+      (res) => res.url().includes("/monitor/status") && res.status() === 200,
       { timeout: 10000 }
     )
     await page.waitForResponse(
-      (res) => res.url().includes("/api/monitor/tasks") && res.status() === 200,
+      (res) => res.url().includes("/monitor/tasks") && res.status() === 200,
       { timeout: 10000 }
     )
     await page.waitForTimeout(500)
@@ -889,11 +889,11 @@ test.describe("Visual Regression - Degradation Scenarios", () => {
     await navigateAndWait(page)
 
     await page.waitForResponse(
-      (res) => res.url().includes("/api/monitor/status") && res.status() === 200,
+      (res) => res.url().includes("/monitor/status") && res.status() === 200,
       { timeout: 10000 }
     )
     await page.waitForResponse(
-      (res) => res.url().includes("/api/monitor/tasks") && res.status() === 200,
+      (res) => res.url().includes("/monitor/tasks") && res.status() === 200,
       { timeout: 10000 }
     )
     await page.waitForTimeout(500)
@@ -918,35 +918,35 @@ test.describe("Visual Regression - Degradation Scenarios", () => {
     await navigateAndWait(page)
 
     await page.waitForResponse(
-      (res) => res.url().includes("/api/monitor/status") && res.status() === 200,
+      (res) => res.url().includes("/monitor/status") && res.status() === 200,
       { timeout: 10000 }
     )
     await page.waitForResponse(
-      (res) => res.url().includes("/api/monitor/tasks") && res.status() === 200,
+      (res) => res.url().includes("/monitor/tasks") && res.status() === 200,
       { timeout: 10000 }
     )
     await page.waitForTimeout(500)
     await waitForStableContent(page)
 
     // Switch all loom endpoints to unavailable mid-test
-    await page.unroute("**/api/monitor/status")
-    await page.unroute("**/api/monitor/tasks")
-    await page.unroute("**/api/monitor/agents")
-    await page.route("**/api/monitor/agents", async (route) => {
+    await page.unroute("**/api/workspaces/*/monitor/status")
+    await page.unroute("**/api/workspaces/*/monitor/tasks")
+    await page.unroute("**/api/workspaces/*/monitor/agents")
+    await page.route("**/api/workspaces/*/monitor/agents", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         body: "invalid json{",
       })
     })
-    await page.route("**/api/monitor/status", async (route) => {
+    await page.route("**/api/workspaces/*/monitor/status", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         body: "invalid json{",
       })
     })
-    await page.route("**/api/monitor/tasks", async (route) => {
+    await page.route("**/api/workspaces/*/monitor/tasks", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -956,7 +956,7 @@ test.describe("Visual Regression - Degradation Scenarios", () => {
 
     // Wait for next poll cycle to fail and trigger disconnected state
     await page.waitForResponse(
-      (res) => res.url().includes("/api/monitor/agents"),
+      (res) => res.url().includes("/monitor/agents"),
       { timeout: 15000 }
     )
     await page.waitForTimeout(1000)

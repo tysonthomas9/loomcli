@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 )
 
 // SessionMonitor provides methods to check the health of a tmux-backed
@@ -197,7 +197,7 @@ type AttachmentExitReader interface {
 //
 // When an ExitReason is set (killed / exited), this function eagerly
 // writes the close frame via conn.Close *before* canceling ctx. That
-// ordering matters: canceling first poisons nhooyr's internal conn state,
+// ordering matters: canceling first poisons the conn's internal state,
 // after which the handler's deferred Close runs as a no-op TCP drop and
 // the browser sees 1006 instead of the intended 4002 / 4001. Mirrors the
 // agent-terminal path (handlers/terminal/agent.go).

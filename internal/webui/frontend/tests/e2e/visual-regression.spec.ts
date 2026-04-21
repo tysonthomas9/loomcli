@@ -273,7 +273,7 @@ async function setupMocks(
   })
 
   // Abort monitor server requests (loom /api/monitor/* is not workspace-scoped)
-  await page.route("**/api/monitor/**", async (route) => {
+  await page.route("**/monitor/**", async (route) => {
     await route.abort()
   })
 }
