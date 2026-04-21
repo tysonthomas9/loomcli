@@ -242,6 +242,30 @@ func TestHandleListIssues_ServiceUnavailable_503(t *testing.T) {
 	assertPlainError(t, body)
 }
 
+func TestHandleListIssues_DoesNotSetLightweight(t *testing.T) {
+	var capturedArgs *rpc.ListArgs
+	svc := &mockIssueService{
+		listIssuesFunc: func(ctx context.Context, params service.ListIssuesParams) (*service.ListIssuesResult, error) {
+			capturedArgs = params.Args
+			return &service.ListIssuesResult{Issues: []service.IssueWithParent{}}, nil
+		},
+	}
+	handler := handleListIssues(svc)
+	req := httptest.NewRequest(http.MethodGet, "/api/issues", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if capturedArgs == nil {
+		t.Fatal("service was not called")
+	}
+	if capturedArgs.Lightweight {
+		t.Error("HandleListIssues must not set Lightweight=true — frontend depends on description/design/notes fields")
+	}
+}
+
 // --- parseListParams tests ---
 
 func TestHandleListIssues_ParseListParams_Filters(t *testing.T) {
