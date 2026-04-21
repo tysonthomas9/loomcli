@@ -174,6 +174,12 @@ func autoMigrateFile(path string, rawBytes []byte) ([]byte, error) {
 			// Use migrated bytes in-memory anyway
 			return out, nil
 		}
+		// Cache invariant: every successful atomicfile.WriteFile on the config path
+		// must be followed by InvalidateConfigCache so a concurrent LoadConfigCached
+		// caller doesn't continue serving the pre-migration entry until the 5s TTL.
+		// Bound: process-local — a sibling loom process or daemon cannot invalidate
+		// our cache and vice versa; staleness across processes is bounded by the TTL.
+		InvalidateConfigCache()
 
 		slog.Info("auto-migrated config", "path", path, "from_version", origVersion, "to_version", reachedVersion)
 		rawBytes = out
@@ -250,6 +256,7 @@ func MigrateConfigFile(path string) (oldVersion int, backupPath string, err erro
 	if err := atomicfile.WriteFile(path, out, 0644); err != nil {
 		return oldVersion, backupPath, fmt.Errorf("writing migrated config: %w", err)
 	}
+	InvalidateConfigCache()
 
 	return oldVersion, backupPath, nil
 }

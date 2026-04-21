@@ -14,6 +14,11 @@ var configCache struct {
 	err     error
 	path    string // config path when cached — invalidates on path change
 	expires time.Time
+	// invalidations is a monotonic counter bumped on every InvalidateConfigCache.
+	// LoadConfigCached snapshots it before calling LoadConfig (without holding
+	// the cache lock) and refuses to seal a stale result if the counter changed
+	// during the load — see LoadConfigCached for the full race rationale.
+	invalidations uint64
 }
 
 const configCacheTTL = 5 * time.Second
@@ -27,15 +32,31 @@ func LoadConfigCached() (*LoomConfig, error) {
 		configCache.RUnlock()
 		return cfg, err
 	}
+	// Snapshot the invalidations counter under the read lock so we can detect
+	// a concurrent InvalidateConfigCache that fires while we're loading.
+	invalBefore := configCache.invalidations
 	configCache.RUnlock()
+
+	// Load WITHOUT holding the cache lock: LoadConfig may go through
+	// autoMigrateFile, which calls InvalidateConfigCache after a successful
+	// migration write — re-acquiring this RWMutex would deadlock.
+	cfg, err := LoadConfig()
 
 	configCache.Lock()
 	defer configCache.Unlock()
-	// Double-check after acquiring write lock
+	// Double-check: another goroutine may have populated the cache while we
+	// were loading. Prefer the already-cached value to keep the
+	// "same pointer within TTL" invariant for sequential callers.
 	if configCache.path == curPath && time.Now().Before(configCache.expires) {
 		return configCache.cfg, configCache.err
 	}
-	configCache.cfg, configCache.err = LoadConfig()
+	// If anyone invalidated the cache while we were in LoadConfig, our cfg
+	// may be stale relative to whatever was just written. Don't seal it —
+	// return the value to this caller but let the next caller re-load.
+	if configCache.invalidations != invalBefore {
+		return cfg, err
+	}
+	configCache.cfg, configCache.err = cfg, err
 	configCache.path = curPath
 	configCache.expires = time.Now().Add(configCacheTTL)
 	return configCache.cfg, configCache.err
@@ -48,5 +69,6 @@ func InvalidateConfigCache() {
 	configCache.cfg = nil
 	configCache.err = nil
 	configCache.expires = time.Time{}
+	configCache.invalidations++
 	configCache.Unlock()
 }

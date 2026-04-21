@@ -610,3 +610,189 @@ func TestMigrateConfigFile_EmptyFile(t *testing.T) {
 		t.Errorf("migrated empty file should contain 'version:', got:\n%s", content)
 	}
 }
+
+// TestMigrateConfigFile_InvalidatesCache verifies the cache contract:
+// after MigrateConfigFile writes the migrated config to disk, a subsequent
+// LoadConfigCached must reflect the on-disk state, not the pre-migration
+// cache entry. Without InvalidateConfigCache the stale entry can persist
+// for up to configCacheTTL (5s) — this test would fail under that race.
+func TestMigrateConfigFile_InvalidatesCache(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", dir)
+	InvalidateConfigCache()
+
+	path := GetConfigPath()
+	// Prime the cache with a v2 config containing one workspace.
+	primed := []byte("version: 2\nworkspaces:\n  primed:\n    path: /tmp/primed\n    id: aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\n")
+	if err := os.WriteFile(path, primed, 0644); err != nil {
+		t.Fatalf("writing primed config: %v", err)
+	}
+	cached, err := LoadConfigCached()
+	if err != nil {
+		t.Fatalf("LoadConfigCached() priming error = %v", err)
+	}
+	if _, ok := cached.Workspaces["primed"]; !ok {
+		t.Fatalf("expected primed workspace in cache, got %v", cached.Workspaces)
+	}
+
+	// Overwrite the file with a v0 config containing a different workspace
+	// (simulates an external rollback or another process writing legacy data).
+	// The cache still holds the v2 'primed' entry until invalidated.
+	stale := []byte("backend: claude\nworkspaces:\n  fresh:\n    path: /tmp/fresh\n")
+	if err := os.WriteFile(path, stale, 0644); err != nil {
+		t.Fatalf("writing v0 config: %v", err)
+	}
+
+	// Migrate the v0 file to v2 — must invalidate the cache so the next
+	// LoadConfigCached re-reads from disk and returns the 'fresh' workspace.
+	oldVersion, backupPath, err := MigrateConfigFile(path)
+	if err != nil {
+		t.Fatalf("MigrateConfigFile() error = %v", err)
+	}
+	if oldVersion != 0 {
+		t.Errorf("oldVersion = %d, want 0", oldVersion)
+	}
+	if backupPath == "" {
+		t.Error("backupPath should not be empty after migration")
+	}
+
+	got, err := LoadConfigCached()
+	if err != nil {
+		t.Fatalf("LoadConfigCached() post-migrate error = %v", err)
+	}
+	if _, ok := got.Workspaces["fresh"]; !ok {
+		t.Errorf("cache served stale entry: want 'fresh' workspace, got %v", got.Workspaces)
+	}
+	if _, ok := got.Workspaces["primed"]; ok {
+		t.Errorf("cache served stale entry: 'primed' workspace should be gone, got %v", got.Workspaces)
+	}
+}
+
+// TestAutoMigrateFile_InvalidatesCache verifies that calling autoMigrateFile
+// directly (the path used by LoadConfigUnlocked, which can be invoked outside
+// LoadConfigCached and thus not refresh the cache itself) invalidates a
+// previously populated cache entry.
+func TestAutoMigrateFile_InvalidatesCache(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", dir)
+	InvalidateConfigCache()
+
+	path := GetConfigPath()
+	// Prime cache with v2 content for a workspace 'primed'.
+	primed := []byte("version: 2\nworkspaces:\n  primed:\n    path: /tmp/primed\n    id: aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\n")
+	if err := os.WriteFile(path, primed, 0644); err != nil {
+		t.Fatalf("writing primed config: %v", err)
+	}
+	cached, err := LoadConfigCached()
+	if err != nil {
+		t.Fatalf("LoadConfigCached() priming error = %v", err)
+	}
+	if _, ok := cached.Workspaces["primed"]; !ok {
+		t.Fatalf("expected primed workspace in cache, got %v", cached.Workspaces)
+	}
+
+	// Drop a v0 file in place; cache still holds the v2 'primed' entry.
+	stale := []byte("backend: claude\nworkspaces:\n  fresh:\n    path: /tmp/fresh\n")
+	if err := os.WriteFile(path, stale, 0644); err != nil {
+		t.Fatalf("writing v0 config: %v", err)
+	}
+
+	// Invoke autoMigrateFile directly with the v0 bytes — it must persist the
+	// migrated bytes AND invalidate the cache.
+	if _, err := autoMigrateFile(path, stale); err != nil {
+		t.Fatalf("autoMigrateFile() error = %v", err)
+	}
+
+	got, err := LoadConfigCached()
+	if err != nil {
+		t.Fatalf("LoadConfigCached() post-auto-migrate error = %v", err)
+	}
+	if _, ok := got.Workspaces["fresh"]; !ok {
+		t.Errorf("cache served stale entry: want 'fresh' workspace, got %v", got.Workspaces)
+	}
+	if _, ok := got.Workspaces["primed"]; ok {
+		t.Errorf("cache served stale entry: 'primed' workspace should be gone, got %v", got.Workspaces)
+	}
+}
+
+// TestMigrateConfigFile_NoOpKeepsCache verifies that the early-return
+// (already-at-current-version) path of MigrateConfigFile does not disturb
+// the cache pointer — no write occurred, so no invalidation is owed.
+func TestMigrateConfigFile_NoOpKeepsCache(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", dir)
+	InvalidateConfigCache()
+
+	path := GetConfigPath()
+	primed := []byte("version: 2\nworkspaces:\n  primed:\n    path: /tmp/primed\n    id: aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\n")
+	if err := os.WriteFile(path, primed, 0644); err != nil {
+		t.Fatalf("writing primed config: %v", err)
+	}
+	cachedBefore, err := LoadConfigCached()
+	if err != nil {
+		t.Fatalf("LoadConfigCached() priming error = %v", err)
+	}
+
+	if _, _, err := MigrateConfigFile(path); err != nil {
+		t.Fatalf("MigrateConfigFile() error = %v", err)
+	}
+
+	cachedAfter, err := LoadConfigCached()
+	if err != nil {
+		t.Fatalf("LoadConfigCached() post-noop error = %v", err)
+	}
+	if cachedBefore != cachedAfter {
+		t.Error("cache pointer changed after no-op MigrateConfigFile — cache should be untouched when no write occurs")
+	}
+}
+
+// TestMigrateConfigFile_WriteFailureKeepsCache verifies that when MigrateConfigFile
+// fails before the disk write completes (here: the parent directory is read-only,
+// so backup + atomic-write both fail), the cache is NOT invalidated. The on-disk
+// file is unchanged so the cached entry remains valid.
+func TestMigrateConfigFile_WriteFailureKeepsCache(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: chmod-based write-failure cannot be exercised")
+	}
+	dir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", dir)
+	InvalidateConfigCache()
+
+	path := GetConfigPath()
+	// Prime cache with a v2 file — autoMigrateFile takes the early-return path
+	// (no write, no invalidation) so LoadConfigCached can seal the entry.
+	v2 := []byte("version: 2\nworkspaces:\n  primed:\n    path: /tmp/primed\n    id: aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\n")
+	if err := os.WriteFile(path, v2, 0644); err != nil {
+		t.Fatalf("writing primed config: %v", err)
+	}
+	cachedBefore, err := LoadConfigCached()
+	if err != nil {
+		t.Fatalf("LoadConfigCached() priming error = %v", err)
+	}
+
+	// Roll the file back to v0 so MigrateConfigFile attempts a real migration write.
+	v0 := []byte("backend: claude\nworkspaces:\n  fresh:\n    path: /tmp/fresh\n")
+	if err := os.WriteFile(path, v0, 0644); err != nil {
+		t.Fatalf("rewriting v0 config: %v", err)
+	}
+
+	// Make the parent directory read-only so atomicfile.WriteFile (and the
+	// preceding BackupConfig) cannot create files in it. Restore in cleanup
+	// so t.TempDir() can clean up.
+	if err := os.Chmod(dir, 0500); err != nil {
+		t.Fatalf("chmod readonly: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0700) })
+
+	if _, _, err := MigrateConfigFile(path); err == nil {
+		t.Fatal("MigrateConfigFile() unexpectedly succeeded despite read-only parent dir")
+	}
+
+	cachedAfter, err := LoadConfigCached()
+	if err != nil {
+		t.Fatalf("LoadConfigCached() post-failure error = %v", err)
+	}
+	if cachedBefore != cachedAfter {
+		t.Error("cache pointer changed after failed MigrateConfigFile — failed writes must not invalidate the cache")
+	}
+}

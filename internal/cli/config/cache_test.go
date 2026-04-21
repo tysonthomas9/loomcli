@@ -10,7 +10,13 @@ func TestLoadConfigCached_ReturnsCachedValue(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", dir)
 	InvalidateConfigCache()
 
+	// Save a v2-tagged config so autoMigrateFile takes the early-return path
+	// during LoadConfigCached. Otherwise the auto-migration on the first load
+	// triggers an in-flight InvalidateConfigCache that LoadConfigCached
+	// (correctly) refuses to seal under, producing a fresh pointer on the
+	// next call.
 	cfg := &LoomConfig{
+		Version: CurrentConfigVersion,
 		Workspaces: map[string]WorkspaceConfig{
 			"ws1": {Path: "/tmp/ws1"},
 		},
