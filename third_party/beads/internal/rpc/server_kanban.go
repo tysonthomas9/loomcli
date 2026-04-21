@@ -31,7 +31,13 @@ func (s *Server) handleListKanban(req *Request) Response {
 	}
 
 	// Build filter from ListArgs (same logic as handleList)
-	filter := buildIssueFilter(&args.ListArgs)
+	filter, err := buildIssueFilter(&args.ListArgs)
+	if err != nil {
+		return Response{
+			Success: false,
+			Error:   fmt.Sprintf("%v", err),
+		}
+	}
 
 	ctx, cancel := s.reqCtx(req)
 	defer cancel()
@@ -135,7 +141,10 @@ func (s *Server) handleListKanban(req *Request) Response {
 
 // buildIssueFilter converts ListArgs into a types.IssueFilter.
 // Extracted from handleList so both handleList and handleListKanban share the same logic.
-func buildIssueFilter(listArgs *ListArgs) types.IssueFilter {
+// Returns an error when any date filter fails to parse — matching the legacy handleList
+// behavior of surfacing "invalid --X date: <parse error>" to callers instead of silently
+// dropping the filter.
+func buildIssueFilter(listArgs *ListArgs) (types.IssueFilter, error) {
 	filter := types.IssueFilter{
 		Limit: listArgs.Limit,
 	}
@@ -177,34 +186,46 @@ func buildIssueFilter(listArgs *ListArgs) types.IssueFilter {
 	filter.NotesContains = listArgs.NotesContains
 
 	if listArgs.CreatedAfter != "" {
-		if t, err := parseTimeRPC(listArgs.CreatedAfter); err == nil {
-			filter.CreatedAfter = &t
+		t, err := parseTimeRPC(listArgs.CreatedAfter)
+		if err != nil {
+			return filter, fmt.Errorf("invalid --created-after date: %v", err)
 		}
+		filter.CreatedAfter = &t
 	}
 	if listArgs.CreatedBefore != "" {
-		if t, err := parseTimeRPC(listArgs.CreatedBefore); err == nil {
-			filter.CreatedBefore = &t
+		t, err := parseTimeRPC(listArgs.CreatedBefore)
+		if err != nil {
+			return filter, fmt.Errorf("invalid --created-before date: %v", err)
 		}
+		filter.CreatedBefore = &t
 	}
 	if listArgs.UpdatedAfter != "" {
-		if t, err := parseTimeRPC(listArgs.UpdatedAfter); err == nil {
-			filter.UpdatedAfter = &t
+		t, err := parseTimeRPC(listArgs.UpdatedAfter)
+		if err != nil {
+			return filter, fmt.Errorf("invalid --updated-after date: %v", err)
 		}
+		filter.UpdatedAfter = &t
 	}
 	if listArgs.UpdatedBefore != "" {
-		if t, err := parseTimeRPC(listArgs.UpdatedBefore); err == nil {
-			filter.UpdatedBefore = &t
+		t, err := parseTimeRPC(listArgs.UpdatedBefore)
+		if err != nil {
+			return filter, fmt.Errorf("invalid --updated-before date: %v", err)
 		}
+		filter.UpdatedBefore = &t
 	}
 	if listArgs.ClosedAfter != "" {
-		if t, err := parseTimeRPC(listArgs.ClosedAfter); err == nil {
-			filter.ClosedAfter = &t
+		t, err := parseTimeRPC(listArgs.ClosedAfter)
+		if err != nil {
+			return filter, fmt.Errorf("invalid --closed-after date: %v", err)
 		}
+		filter.ClosedAfter = &t
 	}
 	if listArgs.ClosedBefore != "" {
-		if t, err := parseTimeRPC(listArgs.ClosedBefore); err == nil {
-			filter.ClosedBefore = &t
+		t, err := parseTimeRPC(listArgs.ClosedBefore)
+		if err != nil {
+			return filter, fmt.Errorf("invalid --closed-before date: %v", err)
 		}
+		filter.ClosedBefore = &t
 	}
 
 	filter.EmptyDescription = listArgs.EmptyDescription
@@ -242,27 +263,35 @@ func buildIssueFilter(listArgs *ListArgs) types.IssueFilter {
 
 	filter.Deferred = listArgs.Deferred
 	if listArgs.DeferAfter != "" {
-		if t, err := parseTimeRPC(listArgs.DeferAfter); err == nil {
-			filter.DeferAfter = &t
+		t, err := parseTimeRPC(listArgs.DeferAfter)
+		if err != nil {
+			return filter, fmt.Errorf("invalid --defer-after date: %v", err)
 		}
+		filter.DeferAfter = &t
 	}
 	if listArgs.DeferBefore != "" {
-		if t, err := parseTimeRPC(listArgs.DeferBefore); err == nil {
-			filter.DeferBefore = &t
+		t, err := parseTimeRPC(listArgs.DeferBefore)
+		if err != nil {
+			return filter, fmt.Errorf("invalid --defer-before date: %v", err)
 		}
+		filter.DeferBefore = &t
 	}
 	if listArgs.DueAfter != "" {
-		if t, err := parseTimeRPC(listArgs.DueAfter); err == nil {
-			filter.DueAfter = &t
+		t, err := parseTimeRPC(listArgs.DueAfter)
+		if err != nil {
+			return filter, fmt.Errorf("invalid --due-after date: %v", err)
 		}
+		filter.DueAfter = &t
 	}
 	if listArgs.DueBefore != "" {
-		if t, err := parseTimeRPC(listArgs.DueBefore); err == nil {
-			filter.DueBefore = &t
+		t, err := parseTimeRPC(listArgs.DueBefore)
+		if err != nil {
+			return filter, fmt.Errorf("invalid --due-before date: %v", err)
 		}
+		filter.DueBefore = &t
 	}
 	filter.Overdue = listArgs.Overdue
 	filter.Lightweight = listArgs.Lightweight
 
-	return filter
+	return filter, nil
 }
