@@ -25,30 +25,44 @@ func CollectMonitorData(readyLimit int, branch string) *MonitorData {
 // CollectMonitorDataScoped is the workspace-scoped counterpart to
 // CollectMonitorData. All bd RPCs route through `pool` (the target
 // workspace's daemon pool) instead of the default pool; worktrees are
-// discovered under `workspacePath`; and the daemon state path + bd sync
-// working directory are resolved from `workspacePath` rather than os.Getwd().
+// discovered from the workspace entry named `workspaceName`; and the daemon
+// state path + bd sync working directory are resolved from `workspacePath`
+// rather than os.Getwd().
+//
+// workspaceName is required when multiple workspace configs share a Path
+// (e.g. "nova" and "loomcli" both rooted in the loomcli repo) — without it,
+// the resolver would pick a config by path-match alone, which is ambiguous.
+// When workspaceName is empty, falls back to the first config matching
+// workspacePath.
 //
 // An empty workspacePath or nil pool returns a zero-value MonitorData
-// (Timestamp set, everything else empty) rather than silently falling back to
-// cross-workspace data — the whole point of this scoped API is to refuse to
-// leak.
-func CollectMonitorDataScoped(workspacePath string, pool beadsbackend.Pool, readyLimit int, branch string) *MonitorData {
+// (Timestamp set, everything else empty) rather than silently falling back
+// to cross-workspace data — the whole point of this scoped API is to refuse
+// to leak.
+func CollectMonitorDataScoped(workspacePath, workspaceName string, pool beadsbackend.Pool, readyLimit int, branch string) *MonitorData {
 	if workspacePath == "" || pool == nil {
 		return &MonitorData{Timestamp: time.Now()}
 	}
 	d := *cli.GetDeps(nil)
 	d.IssueBackend = beadsbackend.NewPooledBackend(pool)
-	resolver := resolverForPath(workspacePath)
+	resolver := resolverForWorkspace(workspaceName, workspacePath)
 	return collectMonitorDataDepsScoped(&d, workspacePath, resolver, readyLimit, branch)
 }
 
-// resolverForPath returns a workspace-mode Resolver for the workspace whose
-// config Path matches workspacePath. Returns nil when the path cannot be
-// resolved (no config, legacy mode, or path not in config) — callers fall
-// back to treating the absence as "no worktrees to report".
-func resolverForPath(workspacePath string) *cli.Resolver {
+// resolverForWorkspace returns a workspace-mode Resolver bound to
+// workspaceName. Falls back to path-based lookup when name is empty —
+// correct for the common one-config-per-path case, ambiguous when two
+// workspaces share a path (in which case callers should pass the name).
+// Returns nil if no match is found or config cannot be loaded.
+func resolverForWorkspace(workspaceName, workspacePath string) *cli.Resolver {
 	cfg, err := config.LoadConfigCached()
 	if err != nil || cfg == nil || len(cfg.Workspaces) == 0 {
+		return nil
+	}
+	if workspaceName != "" {
+		if _, ok := cfg.Workspaces[workspaceName]; ok {
+			return &cli.Resolver{Mode: cli.ModeWorkspace, Config: cfg, Workspace: workspaceName}
+		}
 		return nil
 	}
 	for name, ws := range cfg.Workspaces {

@@ -3,6 +3,7 @@ package app
 import (
 	"net/http"
 
+	beadsbackend "github.com/tysonthomas9/loomcli/internal/backend/beads"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlermux"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -177,6 +178,21 @@ func (app *Server) registerScopedMonitorAndDaemonRoutes(wsMux *http.ServeMux) {
 
 	pathFn := func(wsID string) string {
 		return service.ResolveWorkspacePath(app.config.WorkspaceConfigFn, wsID)
+	}
+	if app.config.ScopedMonitorHandlersFn != nil && app.multiPool != nil {
+		poolFn := func(wsID string) beadsbackend.Pool {
+			// daemon.Pool structurally satisfies beadsbackend.Pool; nil map
+			// lookup returns a nil interface, which callers check before
+			// invoking CollectMonitorDataScoped.
+			p := app.multiPool.PoolForWorkspace(wsID)
+			if p == nil {
+				return nil
+			}
+			return p
+		}
+		for pattern, handler := range app.config.ScopedMonitorHandlersFn(pathFn, poolFn) {
+			wsMux.Handle(pattern, handler)
+		}
 	}
 	if load := app.config.LoadDaemonSupervisorFn; load != nil {
 		wsMux.Handle("GET /api/workspaces/{ws}/daemon/supervisor",

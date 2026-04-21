@@ -11,11 +11,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/webui"
 
+	beadsbackend "github.com/tysonthomas9/loomcli/internal/backend/beads"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
@@ -1985,5 +1987,115 @@ func TestLegacyFlatAgentRoutesRemoved(t *testing.T) {
 					tc.method, tc.path, errMsg)
 			}
 		})
+	}
+}
+
+// TestScopedMonitorRoutes_RegisteredAndPerWorkspace verifies that the five
+// workspace-scoped monitor routes (status/tasks/stats/sync/usage) are
+// registered via ScopedMonitorHandlersFn and that the wsID→wsPath resolver
+// is invoked per request — so two concurrently-active workspaces do not
+// collide.
+//
+// The handlers themselves run on the cli side and require a real bd pool
+// and workspace config; the factory we inject here records the (pattern,
+// wsPath-seen, pool-seen) tuples and returns a minimal echo handler. If
+// the wiring in registerScopedMonitorAndDaemonRoutes is correct, hitting
+// /api/workspaces/ws-alpha/monitor/status and /api/workspaces/ws-beta/
+// monitor/status each call pathFn("ws-alpha") and pathFn("ws-beta")
+// respectively and reach different handlers.
+func TestScopedMonitorRoutes_RegisteredAndPerWorkspace(t *testing.T) {
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
+	_ = multiPool.Register("ws-alpha", &stubPool{})
+	_ = multiPool.Register("ws-beta", &stubPool{})
+
+	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
+	workspaceConfigFn := func() (*ops.WorkspaceData, error) {
+		return &ops.WorkspaceData{
+			Workspaces: []ops.WorkspaceSummary{
+				{ID: "ws-alpha", Path: "/tmp/ws-alpha"},
+				{ID: "ws-beta", Path: "/tmp/ws-beta"},
+			},
+		}, nil
+	}
+
+	// Record every (pattern, wsPath, poolNonNil) invocation for assertion.
+	type call struct {
+		pattern string
+		wsPath  string
+		pool    bool
+	}
+	var (
+		mu    sync.Mutex
+		calls []call
+	)
+
+	scopedFactory := func(
+		pathFn func(wsID string) string,
+		poolFn func(wsID string) beadsbackend.Pool,
+	) map[string]http.HandlerFunc {
+		handle := func(pattern string) http.HandlerFunc {
+			return func(w http.ResponseWriter, r *http.Request) {
+				wsID := r.PathValue("ws")
+				wsPath := pathFn(wsID)
+				pool := poolFn(wsID)
+				mu.Lock()
+				calls = append(calls, call{pattern: pattern, wsPath: wsPath, pool: pool != nil})
+				mu.Unlock()
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"wsPath":"` + wsPath + `"}`))
+			}
+		}
+		return map[string]http.HandlerFunc{
+			"GET /api/workspaces/{ws}/monitor/status": handle("status"),
+			"GET /api/workspaces/{ws}/monitor/tasks":  handle("tasks"),
+			"GET /api/workspaces/{ws}/monitor/stats":  handle("stats"),
+			"GET /api/workspaces/{ws}/monitor/sync":   handle("sync"),
+			"GET /api/workspaces/{ws}/monitor/usage":  handle("usage"),
+		}
+	}
+
+	app := &Server{
+		multiPool: multiPool,
+		config: webui.ServerConfig{
+			WorkspaceConfigFn:       workspaceConfigFn,
+			ScopedMonitorHandlersFn: scopedFactory,
+		},
+		wsExistsFn: wsExistsFn,
+	}
+	setupTestRoutes(t, app)
+
+	routes := []string{"status", "tasks", "stats", "sync", "usage"}
+	for _, kind := range routes {
+		for _, ws := range []string{"ws-alpha", "ws-beta"} {
+			req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+ws+"/monitor/"+kind, nil)
+			rr := httptest.NewRecorder()
+			app.mux.ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusOK {
+				t.Errorf("%s %s: status = %d, want 200; body=%s", ws, kind, rr.Code, rr.Body.String())
+				continue
+			}
+			var body map[string]string
+			if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+				t.Errorf("%s %s: failed to parse body: %v", ws, kind, err)
+				continue
+			}
+			wantPath := "/tmp/" + ws
+			if body["wsPath"] != wantPath {
+				t.Errorf("%s %s: wsPath = %q, want %q (pathFn resolved wrong workspace)", ws, kind, body["wsPath"], wantPath)
+			}
+		}
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(calls) != len(routes)*2 {
+		t.Fatalf("expected %d handler invocations, got %d", len(routes)*2, len(calls))
+	}
+	// Every invocation should resolve to a non-nil pool for registered workspaces.
+	for _, c := range calls {
+		if !c.pool {
+			t.Errorf("pattern %s wsPath %s: poolFn returned nil for a registered workspace", c.pattern, c.wsPath)
+		}
 	}
 }

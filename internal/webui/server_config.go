@@ -11,11 +11,23 @@ import (
 	"strconv"
 	"time"
 
+	beadsbackend "github.com/tysonthomas9/loomcli/internal/backend/beads"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agentcontrol"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
+
+// ScopedMonitorHandlersFn is invoked once at route-registration time (after
+// the MultiPool is ready) to build the workspace-scoped /api/workspaces/{ws}/
+// monitor/* handlers on the cli side. The webui passes resolvers for wsID→
+// workspace path and wsID→bd pool; the cli closes over monitor.CollectMonitor
+// DataScoped and usage-store helpers it cannot export to webui and returns
+// one handler per URL pattern. Empty return / nil fn skips registration.
+type ScopedMonitorHandlersFn func(
+	pathFn func(wsID string) string,
+	poolFn func(wsID string) beadsbackend.Pool,
+) map[string]http.HandlerFunc
 
 const (
 	DefaultPort            = 8080
@@ -64,6 +76,7 @@ type ServerConfig struct {
 	ExtAuthAudience         string                                                 // Expected JWT audience (validated against "aud" claim; defaults to "loom")
 	ExtAuthAllowInsecure    bool                                                   // Allow HTTP for non-loopback --auth-url (escape hatch for Docker networks)
 	MonitorHandlers         MonitorHandlers                                        // Pre-built handlers for monitor/metrics endpoints (injected by cli)
+	ScopedMonitorHandlersFn ScopedMonitorHandlersFn                                // Factory for workspace-scoped /api/workspaces/{ws}/monitor/* handlers (invoked after MultiPool is ready)
 	GitOps                  ops.GitOps                                             // Git operations interface (optional; nil disables git endpoints)
 	FileOps                 ops.FileOps                                            // File operations interface (optional; nil disables file endpoints)
 	WorkspaceConfigFn       func() (*ops.WorkspaceData, error)                     // Workspace topology supplier; nil = single-repo mode

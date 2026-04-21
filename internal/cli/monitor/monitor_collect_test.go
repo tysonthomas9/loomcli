@@ -14,7 +14,7 @@ import (
 // or empty workspace path yields a zero-value MonitorData with just a
 // Timestamp — no silent fall-back to cross-workspace data.
 func TestCollectMonitorDataScoped_EmptyPathReturnsZero(t *testing.T) {
-	data := CollectMonitorDataScoped("", nil, 10, "")
+	data := CollectMonitorDataScoped("", "", nil, 10, "")
 	if data == nil {
 		t.Fatal("expected non-nil MonitorData, got nil")
 	}

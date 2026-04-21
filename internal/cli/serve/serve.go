@@ -327,6 +327,7 @@ func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState) web
 	log.Printf("Terminal backend: %s", resolvedBackend)
 
 	cfg := buildCoreServerConfig(monitorHandlers, gitOps, resolvedBackend)
+	cfg.ScopedMonitorHandlersFn = metricscmd.BuildScopedMonitorHandlers(workspacemgr.ResolveWorkspaceNameByID)
 	applyFleetConfig(&cfg, fs)
 	applyWorkspaceConfig(&cfg)
 	applyCORSConfig(&cfg)
