@@ -463,13 +463,7 @@ test.describe.skip("Visual Regression - Graph View", () => {
   })
 })
 
-// SKIPPED: Under workspace-scoped routing, React StrictMode double-invokes
-// the reset()/fetchIssues effects so the skeleton window is too short to
-// catch reliably in this harness. The `data-testid="loading-container"`
-// never shows up long enough for `toBeVisible` to pick it up, even with a
-// 3s delayed mock response. This is a timing/harness issue, not a routing
-// one — tracked separately.
-test.describe.skip("Visual Regression - Loading States", () => {
+test.describe("Visual Regression - Loading States", () => {
   test("skeleton loading state", async ({ page }) => {
     // Start from the shared workspace-scoped mocks so WorkspaceLayout can
     // validate the workspace and mount KanbanPage. Then override the ready
@@ -479,13 +473,14 @@ test.describe.skip("Visual Regression - Loading States", () => {
     // Delay the workspace-scoped issues response long enough to capture
     // skeleton state. Registered after setupMocks so Playwright's LIFO route
     // resolution picks this handler first. Kanban mode hits /issues (via
-    // getKanbanIssues), so we delay that path rather than /ready. The 3s
-    // window gives React time to mount + validate the workspace before the
-    // skeleton window closes; the previous 800ms was cutting it close.
+    // getKanbanIssues), so we delay that path rather than /ready. The 5s
+    // delay gives ample time for the skeleton to render after the StrictMode
+    // + resetGeneration recovery cycle completes. The delay must exceed the
+    // time from page load to Phase 3 fetch start (~1-2s on CI).
     await page.route(
       /\/api\/workspaces\/[^/]+\/issues(\?|$)/,
       async (route) => {
-        await new Promise((resolve) => setTimeout(resolve, 3000))
+        await new Promise((resolve) => setTimeout(resolve, 5000))
         await route.fulfill({
           status: 200,
           contentType: "application/json",
@@ -500,9 +495,11 @@ test.describe.skip("Visual Regression - Loading States", () => {
     // Verify the loading container is visible. IssueViewGuard wraps the
     // skeleton columns in <div data-testid="loading-container"> while
     // isLoading is true — more robust than a CSS-hash class selector.
-    await expect(page.getByTestId("loading-container")).toBeVisible()
+    await expect(page.getByTestId("loading-container")).toBeVisible({
+      timeout: 15000,
+    })
 
-    // Take screenshot while skeleton is still visible (before API response at 800ms)
+    // Take screenshot while skeleton is still visible (before delayed API response)
     await expect(page).toHaveScreenshot("loading-skeleton.png", {
       // Disable animations to capture consistent skeleton state
       animations: "disabled",
