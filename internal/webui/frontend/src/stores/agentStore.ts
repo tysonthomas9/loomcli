@@ -366,7 +366,7 @@ export function createAgentStore(
         void (async () => {
           try {
             const statusResult = await withTimeout(
-              fetchStatus(),
+              fetchStatus(activeWorkspaceID),
               FETCH_TIMEOUT_MS,
               "Status fetch",
             );
@@ -389,7 +389,7 @@ export function createAgentStore(
         void (async () => {
           try {
             const tasksResult = await withTimeout(
-              fetchTasks(),
+              fetchTasks(activeWorkspaceID),
               FETCH_TIMEOUT_MS,
               "Tasks fetch",
             );

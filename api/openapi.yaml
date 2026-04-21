@@ -2911,6 +2911,140 @@ paths:
         "503":
           description: Data collection unavailable
 
+  /api/workspaces/{ws}/monitor/status:
+    get:
+      operationId: getWorkspaceMonitorStatus
+      tags: [monitor]
+      summary: Full monitor dashboard data scoped to a single workspace
+      parameters:
+        - name: ws
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Workspace UUID
+      responses:
+        "200":
+          description: Dashboard status for this workspace
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MonitorStatusResponse"
+        "404":
+          description: Workspace not found
+
+  /api/workspaces/{ws}/monitor/tasks:
+    get:
+      operationId: getWorkspaceMonitorTasks
+      tags: [monitor]
+      summary: Task distribution scoped to a single workspace
+      parameters:
+        - name: ws
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Workspace UUID
+      responses:
+        "200":
+          description: Task breakdown for this workspace
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MonitorTasksResponse"
+        "404":
+          description: Workspace not found
+
+  /api/workspaces/{ws}/monitor/stats:
+    get:
+      operationId: getWorkspaceMonitorStats
+      tags: [monitor]
+      summary: Monitor statistics scoped to a single workspace
+      parameters:
+        - name: ws
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Workspace UUID
+      responses:
+        "200":
+          description: Monitor stats for this workspace
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MonitorStatsResponse"
+        "404":
+          description: Workspace not found
+
+  /api/workspaces/{ws}/monitor/sync:
+    get:
+      operationId: getWorkspaceMonitorSync
+      tags: [monitor]
+      summary: Git sync status scoped to a single workspace
+      parameters:
+        - name: ws
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Workspace UUID
+      responses:
+        "200":
+          description: Sync status for this workspace
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MonitorSyncResponse"
+        "404":
+          description: Workspace not found
+
+  /api/workspaces/{ws}/monitor/usage:
+    get:
+      operationId: getWorkspaceMonitorUsage
+      tags: [monitor]
+      summary: Token usage aggregates scoped to a single workspace
+      parameters:
+        - name: ws
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Workspace UUID
+        - name: agent
+          in: query
+          schema:
+            type: string
+        - name: backend
+          in: query
+          schema:
+            type: string
+        - name: epic
+          in: query
+          schema:
+            type: string
+        - name: since
+          in: query
+          description: "YYYY-MM-DD"
+          schema:
+            type: string
+        - name: until
+          in: query
+          description: "YYYY-MM-DD"
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Usage data for this workspace
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsageResponse"
+        "400":
+          description: Invalid date parameter
+        "404":
+          description: Workspace not found
+
   /api/monitor/tasks:
     get:
       operationId: getMonitorTasks

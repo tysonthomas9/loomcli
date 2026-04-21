@@ -6,6 +6,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 
 import { fetchUsage } from "@/api";
+import { useWorkspaceContext } from "@/hooks/workspace";
 import type { UsageResponse, UsageParams } from "@/types";
 
 /** Options for the useUsage hook. */
@@ -36,6 +37,7 @@ export interface UseUsageResult {
 
 export function useUsage(options?: UseUsageOptions): UseUsageResult {
   const { pollInterval = 30000, params, enabled = true } = options ?? {};
+  const { workspaceId } = useWorkspaceContext();
 
   const [data, setData] = useState<UsageResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -55,7 +57,7 @@ export function useUsage(options?: UseUsageOptions): UseUsageResult {
     setIsLoading(true);
 
     try {
-      const result = await fetchUsage(params);
+      const result = await fetchUsage(workspaceId, params);
       if (mountedRef.current) {
         setData(result);
         setError(null);
@@ -74,7 +76,7 @@ export function useUsage(options?: UseUsageOptions): UseUsageResult {
       fetchInProgressRef.current = false;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [paramsKey]);
+  }, [paramsKey, workspaceId]);
 
   const refetch = useCallback(async () => {
     await fetchData();
