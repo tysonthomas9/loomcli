@@ -101,6 +101,15 @@ export interface IssueStoreState {
   retryCount: number;
   /** Timestamp (ms) when next auto-retry fires, or null if not retrying. */
   nextRetryAt: number | null;
+  /**
+   * Monotonic counter incremented on every reset(). Consumers that drive
+   * fetches (e.g. App.tsx's fetchIssues effect) include this in their effect
+   * deps so a reset that lands after the initial fetch (React fires child
+   * effects before parent effects) triggers a follow-up fetch — without this,
+   * the parent's reset aborts the child's fetch and the store is stuck in
+   * INITIAL_STATE forever.
+   */
+  resetGeneration: number;
   connectionState: ConnectionState;
   reconnectAttempts: number;
   lastEventId: number | undefined;
@@ -148,6 +157,7 @@ export const INITIAL_STATE: IssueStoreState = {
   error: null,
   retryCount: 0,
   nextRetryAt: null,
+  resetGeneration: 0,
   connectionState: "disconnected",
   reconnectAttempts: 0,
   lastEventId: undefined,

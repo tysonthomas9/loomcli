@@ -170,6 +170,7 @@ function App() {
   const error = useStore(issueStore, (s) => s.error);
   const retryCount = useStore(issueStore, (s) => s.retryCount);
   const nextRetryAt = useStore(issueStore, (s) => s.nextRetryAt);
+  const resetGeneration = useStore(issueStore, (s) => s.resetGeneration);
   const pendingIds = useStore(issueStore, (s) => s.pendingIds);
 
   const connectionState = useStore(issueStore, (s) => s.connectionState);
@@ -211,7 +212,7 @@ function App() {
     if (sourceReposFilter) params.sourceRepos = sourceReposFilter;
     fetchIssues(params);
     return () => controller.abort();
-  }, [fetchIssues, workspaceId, issueMode, sourceReposFilter]);
+  }, [fetchIssues, workspaceId, issueMode, sourceReposFilter, resetGeneration]);
 
   // Filter state with URL synchronization
   const [filters, filterActions] = useFilterState();

@@ -608,7 +608,12 @@ export function createIssueStore(
       prevConnectionState = "disconnected";
       maxReconnectAttemptsTracked = 0;
 
-      set({ ...INITIAL_STATE, pendingIds: new Set(), issuesMap: new Map() });
+      set({
+        ...INITIAL_STATE,
+        pendingIds: new Set(),
+        issuesMap: new Map(),
+        resetGeneration: get().resetGeneration + 1,
+      });
     },
   }));
 

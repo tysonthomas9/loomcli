@@ -510,15 +510,7 @@ test.describe.skip("Visual Regression - Loading States", () => {
   })
 })
 
-// SKIPPED: The issueStore's auto-retry logic + the strong signal stripper
-// required by workspace-scoped routing interact in a way that prevents the
-// error branch from propagating to the rendered UI in this test harness —
-// the store stays in its initial (empty) state rather than surfacing the
-// 500 as ErrorDisplay. This is a store-behavior/timing issue, not a routing
-// issue; the other workspace-scoped tests in this file exercise the same
-// request-path. Leaving the screenshot baseline (error-display.png) in
-// place for when the underlying flake is fixed.
-test.describe.skip("Visual Regression - Error States", () => {
+test.describe("Visual Regression - Error States", () => {
   test("error display with retry button", async ({ page }) => {
     await setupMocks(page)
 

@@ -100,6 +100,7 @@ describe("issueStore", () => {
       expect(s.disconnectedSince).toBeNull();
       expect(s.pendingIds.size).toBe(0);
       expect(s.mutationCount).toBe(0);
+      expect(s.resetGeneration).toBe(0);
     });
   });
 
@@ -468,6 +469,9 @@ describe("issueStore", () => {
 
       expect(store.getState().retryCount).toBe(0);
       expect(store.getState().nextRetryAt).toBeNull();
+      // reset() increments resetGeneration so App.tsx's fetchIssues effect
+      // re-runs and recovers from the aborted initial fetch.
+      expect(store.getState().resetGeneration).toBeGreaterThan(0);
 
       await vi.advanceTimersByTimeAsync(5_000);
       // Only the initial (failed) call; no retry fired.
@@ -1243,6 +1247,41 @@ describe("issueStore", () => {
       // not by reset(). Calling eventUnsubscribe in reset() breaks SSE
       // after workspace changes because the subscription is never re-established.
       expect(mockUnsubscribe).not.toHaveBeenCalled();
+    });
+
+    it("increments resetGeneration on every call (does not reset to 0)", () => {
+      expect(store.getState().resetGeneration).toBe(0);
+
+      store.getState().reset();
+      expect(store.getState().resetGeneration).toBe(1);
+
+      store.getState().reset();
+      expect(store.getState().resetGeneration).toBe(2);
+
+      store.getState().reset();
+      expect(store.getState().resetGeneration).toBe(3);
+    });
+
+    it("preserves resetGeneration across full state resets", () => {
+      // Populate state so reset has work to do.
+      store.setState({
+        issuesMap: new Map([["a", makeIssue({ id: "a" })]]),
+        error: "some error",
+        connectionState: "connected",
+      });
+
+      store.getState().reset();
+      expect(store.getState().resetGeneration).toBe(1);
+
+      // Populate again and reset again — generation must keep climbing, not
+      // reset to 0 like other fields. App.tsx's fetchIssues effect depends
+      // on this monotonic counter to detect reset() and re-run.
+      store.setState({
+        issuesMap: new Map([["b", makeIssue({ id: "b" })]]),
+        error: "another error",
+      });
+      store.getState().reset();
+      expect(store.getState().resetGeneration).toBe(2);
     });
   });
 
