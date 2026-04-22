@@ -1,0 +1,143 @@
+# docker-compose.parity.yml — side-by-side beads vs fleet-db for manual
+# and automated parity validation.
+#
+# Brings up:
+#   - redis         shared Redis for fleet-db (port 6379, host not exposed)
+#   - fleet-db      fleet-db server on :8080 (exposed as :8080 on host)
+#   - loom-beads    loomcli serve with LOOM_ISSUE_BACKEND=beads (host :8081)
+#   - loom-fleet    loomcli serve with LOOM_ISSUE_BACKEND=fleet pointing at
+#                   fleet-db (host :8082)
+#   - parity-seed   one-shot seeder that populates identical fixtures into
+#                   both backends, then exits
+#
+# Usage (from loomcli repo root):
+#   docker compose -f test/parity/docker-compose.parity.yml up --build -d
+#   docker compose -f test/parity/docker-compose.parity.yml run --rm parity-seed
+#   # open http://localhost:8081 (beads) and http://localhost:8082 (fleet)
+#   docker compose -f test/parity/docker-compose.parity.yml down -v
+#
+# Build contexts are relative to this compose file's directory. The
+# fleet-db context is the sibling repo ~/codebase/fleet-db (accessed as
+# ../../../fleet-db here).
+
+name: loomcli-parity
+
+networks:
+  parity:
+    driver: bridge
+
+volumes:
+  # bd's SQLite lives in loom-beads container; keep ephemeral per-run so
+  # each compose up starts fresh. Uncomment to persist across up/down:
+  # beads-data:
+  #   driver: local
+  redis-data:
+    driver: local
+
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "no", "--save", ""]
+    networks: [parity]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 1s
+      retries: 20
+
+  fleet-db:
+    build:
+      context: ../../../fleet-db
+      dockerfile: deploy/docker/Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      FLEETDB_REDIS_ADDR: redis:6379
+      FLEETDB_BIND: ":8080"
+    command: ["fleet-db", "-redis-addr", "redis:6379", "-bind", ":8080"]
+    networks: [parity]
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+
+  loom-beads:
+    build:
+      context: ../..
+      dockerfile: test/parity/Dockerfile.parity
+    environment:
+      LOOM_ISSUE_BACKEND: beads
+      BD_ACTOR: parity-harness
+    # bd serve path: init a workspace on startup, then loom serve.
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        cd /workspace
+        if [ ! -d .beads ]; then
+          git init -q
+          git config user.email "parity-harness@fixture.local"
+          git config user.name  "parity-harness"
+          bd init
+        fi
+        bd daemon start &
+        exec loom serve --bind 0.0.0.0 --port 8080
+    networks: [parity]
+    ports:
+      - "8081:8080"
+    # volumes:
+    #   - beads-data:/workspace
+
+  loom-fleet:
+    build:
+      context: ../..
+      dockerfile: test/parity/Dockerfile.parity
+    depends_on:
+      fleet-db:
+        condition: service_healthy
+    environment:
+      LOOM_ISSUE_BACKEND: fleet
+      LOOM_FLEET_URL: http://fleet-db:8080
+      LOOM_WORKSPACE: PARITY
+      LOOM_AGENT_NAME: parity-harness
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        cd /workspace
+        exec loom serve --bind 0.0.0.0 --port 8080
+    networks: [parity]
+    ports:
+      - "8082:8080"
+
+  # One-shot fixture seeder. Runs after both loom-* services are up.
+  # Builds a tiny image containing fdb (copied from fleet-db image) and bd
+  # (copied from loom-beads image) so both CLIs are available in one place.
+  parity-seed:
+    build:
+      context: .
+      dockerfile: Dockerfile.seed
+    depends_on:
+      fleet-db:
+        condition: service_healthy
+      loom-beads:
+        condition: service_started
+      loom-fleet:
+        condition: service_started
+    environment:
+      FLEET_URL: http://fleet-db:8080
+      FLEET_WORKSPACE: PARITY
+      BEADS_URL: http://loom-beads:8080
+    networks: [parity]
+    volumes:
+      - ./seed.sh:/seed.sh:ro
+    entrypoint: ["/bin/sh", "/seed.sh"]
+    restart: "no"

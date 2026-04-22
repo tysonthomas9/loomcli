@@ -1,0 +1,44 @@
+# syntax=docker/dockerfile:1.6
+#
+# Dockerfile.parity — slim loom container for side-by-side parity testing.
+#
+# Unlike Dockerfile.dev this image:
+#   - Does NOT install Node / build the frontend / run AI CLIs
+#   - Only produces a loom binary and (optionally) a bd binary for the
+#     beads-backed service variant
+#   - Minimal runtime image so startup and image-push are fast
+#
+# Built twice by docker-compose.parity.yml — once for the beads service and
+# once for the fleet service. Backend selection is at runtime via
+# LOOM_ISSUE_BACKEND env var, not build-time.
+#
+# Build:  docker build -f test/parity/Dockerfile.parity -t loomcli-parity .
+# Context: the loomcli repo root (so `third_party/beads/cmd/bd` is accessible
+# when building the beads variant).
+
+ARG GO_VERSION=1.25.6
+
+# ── Stage 1: build loom + bd ──
+FROM golang:${GO_VERSION}-bookworm AS builder
+WORKDIR /src
+COPY . .
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go mod download && \
+    CGO_ENABLED=0 go build -o /out/loom ./cmd/loom && \
+    if [ -f third_party/beads/cmd/bd/main.go ]; then \
+        cd third_party/beads && CGO_ENABLED=0 go build -o /out/bd ./cmd/bd; \
+    fi
+
+# ── Stage 2: runtime ──
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates git \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /out/loom /usr/local/bin/loom
+COPY --from=builder /out/bd   /usr/local/bin/bd
+WORKDIR /workspace
+# Webui listens on 8080 inside the container; compose maps to host :8081/:8082.
+EXPOSE 8080
+# Entrypoint is set per-service in docker-compose.parity.yml so each variant
+# can pass the right LOOM_ISSUE_BACKEND / LOOM_FLEET_URL / etc.

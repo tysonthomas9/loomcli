@@ -1,0 +1,17 @@
+# Dockerfile.seed — tiny seeder image carrying both fdb and bd.
+#
+# Built in-place by docker-compose.parity.yml to seed identical fixtures
+# into both backends via each backend's native CLI.
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl jq git \
+    && rm -rf /var/lib/apt/lists/*
+
+# fdb + bd binaries are copied in by the multi-stage build above at runtime.
+# At compose time, parity-seed is rebuilt on every up; bake-in the binaries
+# by pulling from the parent images. If a pre-built tag isn't available,
+# fall back to downloading from the loom-beads and fleet-db services at
+# runtime via the seed.sh bootstrap.
+WORKDIR /workspace
+ENTRYPOINT ["/bin/sh"]
