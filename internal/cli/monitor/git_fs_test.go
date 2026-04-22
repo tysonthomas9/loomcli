@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 )
 
 // findRepoRoot walks up from the current directory to find the nearest directory
@@ -34,6 +35,11 @@ func findRepoRoot(t *testing.T) string {
 // makeTempRepo creates a temporary git repo with one commit and returns its path.
 func makeTempRepo(t *testing.T) string {
 	t.Helper()
+	// Defense-in-depth: strip any GIT_DIR / GIT_WORK_TREE inherited from a git
+	// hook (e.g. pre-push). Without this, git subprocesses invoked below would
+	// target the outer repo instead of tmpDir and could write destructive
+	// commits into the worktree.
+	clitest.ClearGitEnvVars(t)
 	tmpDir := t.TempDir()
 	if _, err := cli.RunGitCommand(tmpDir, "init"); err != nil {
 		t.Fatalf("git init failed: %v", err)
@@ -382,5 +388,47 @@ func TestCommitCache_GetSet(t *testing.T) {
 	_, ok = cache.Get("")
 	if ok {
 		t.Error("expected miss on empty SHA even after Set")
+	}
+}
+
+// TestMakeTempRepo_IgnoresInheritedGITDIR verifies that makeTempRepo is
+// immune to GIT_DIR / GIT_WORK_TREE inherited from the parent process (the
+// scenario that occurs when tests run under a pre-push hook). Without the
+// clitest.ClearGitEnvVars call inside makeTempRepo, `git init` + `git add`
+// + `git commit` would target the sentinel directory (or the outer repo)
+// instead of the temp dir, producing a destructive "init" commit.
+func TestMakeTempRepo_IgnoresInheritedGITDIR(t *testing.T) {
+	sentinel := t.TempDir()
+	t.Setenv("GIT_DIR", sentinel)
+	t.Setenv("GIT_WORK_TREE", sentinel)
+
+	tmpDir := makeTempRepo(t)
+
+	// tmpDir must have its own .git directory.
+	gitPath := filepath.Join(tmpDir, ".git")
+	fi, err := os.Stat(gitPath)
+	if err != nil {
+		t.Fatalf("expected .git in tmpDir: %v", err)
+	}
+	if !fi.IsDir() {
+		t.Errorf("expected tmpDir/.git to be a directory, got mode %v", fi.Mode())
+	}
+
+	// Sentinel must be untouched — no git metadata written into it.
+	entries, err := os.ReadDir(sentinel)
+	if err != nil {
+		t.Fatalf("read sentinel: %v", err)
+	}
+	for _, e := range entries {
+		switch e.Name() {
+		case "HEAD", "refs", "objects", "config", "index":
+			t.Errorf("sentinel was polluted with git metadata: %s", e.Name())
+		}
+	}
+
+	// test.txt should be in the tmpDir repo.
+	testFile := filepath.Join(tmpDir, "test.txt")
+	if _, err := os.Stat(testFile); err != nil {
+		t.Errorf("expected test.txt in tmpDir: %v", err)
 	}
 }
