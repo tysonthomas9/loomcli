@@ -201,6 +201,39 @@ describe("IssueDetailView", () => {
       expect(call).toBeDefined();
       expect(call![0]).toBe(10); // LAYER_ISSUE_PANEL
     });
+
+    it("registers escape layer with suppressWhenInputFocused=true", () => {
+      render(<IssueDetailView {...createDefaultProps()} />);
+
+      // The panel must opt in so EditableTitle/EditableDescription (rendered
+      // inside) can cancel their own edits via Escape without the panel
+      // firing handleEscapeBack at the same time.
+      const call = mockUseRegisterEscapeLayer.mock.calls.find(
+        (c: unknown[]) => c[2] === true,
+      );
+      expect(call).toBeDefined();
+      expect(call![3]).toEqual({ suppressWhenInputFocused: true });
+    });
+
+    it("reject textarea has a local Escape handler that closes the form", () => {
+      // Because the panel layer now suppresses when the textarea is focused,
+      // the reject textarea must handle Escape locally — otherwise typing
+      // in the rejection reason and pressing Escape would silently do
+      // nothing (regression found in code review).
+      const onBack = vi.fn();
+      const issue = createTestIssue({ status: "review" });
+      render(<IssueDetailView {...createDefaultProps({ onBack, issue })} />);
+
+      fireEvent.click(screen.getByTestId("detail-reject-button"));
+      const textarea = screen.getByTestId("detail-reject-comment");
+      fireEvent.change(textarea, { target: { value: "some reason" } });
+      fireEvent.keyDown(textarea, { key: "Escape" });
+
+      expect(
+        screen.queryByTestId("detail-reject-comment"),
+      ).not.toBeInTheDocument();
+      expect(onBack).not.toHaveBeenCalled();
+    });
   });
 
   describe("StatusDropdown integration", () => {

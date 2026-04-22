@@ -13,6 +13,26 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import "@testing-library/jest-dom";
 import { EditableTitle } from "../EditableTitle";
+import {
+  KeyboardShortcutProvider,
+  useRegisterEscapeLayer,
+  LAYER_ISSUE_PANEL,
+} from "@/hooks/ui/useKeyboardShortcuts";
+
+/** Test harness that registers a panel-priority escape layer that opts into
+ * input suppression — mirrors IssueDetailPanel's production registration. */
+function PanelLayerHarness({
+  onClose,
+  children,
+}: {
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  useRegisterEscapeLayer(LAYER_ISSUE_PANEL, onClose, true, {
+    suppressWhenInputFocused: true,
+  });
+  return <>{children}</>;
+}
 
 describe("EditableTitle", () => {
   const defaultProps = {
@@ -167,6 +187,30 @@ describe("EditableTitle", () => {
           fireEvent.keyDown(input, { key: "Enter" });
         });
         expect(parentKeyDown).not.toHaveBeenCalled();
+      });
+
+      it("Escape in edit mode cancels locally without firing a suppressed panel layer", () => {
+        // Reproduces the bug fix for loomcli-s3x2h: the surrounding panel
+        // registers an escape layer with suppressWhenInputFocused=true, so
+        // Escape from the input must cancel the edit and NOT close the panel.
+        const onClose = vi.fn();
+        render(
+          <KeyboardShortcutProvider>
+            <PanelLayerHarness onClose={onClose}>
+              <EditableTitle {...defaultProps} />
+            </PanelLayerHarness>
+          </KeyboardShortcutProvider>,
+        );
+        fireEvent.click(screen.getByTestId("editable-title-display"));
+        const input = screen.getByTestId("editable-title-input");
+        fireEvent.change(input, { target: { value: "Changed" } });
+        fireEvent.keyDown(input, { key: "Escape" });
+        // (a) back to display mode
+        expect(
+          screen.getByTestId("editable-title-display"),
+        ).toBeInTheDocument();
+        // (b) panel layer's onClose was NOT invoked
+        expect(onClose).not.toHaveBeenCalled();
       });
     });
 

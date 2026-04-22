@@ -1375,8 +1375,12 @@ export function IssueDetailPanel({
 }: IssueDetailPanelProps): JSX.Element {
   const panelRef = useRef<HTMLElement>(null);
 
-  // Handle Escape key to close panel via global shortcut layer system
-  useRegisterEscapeLayer(LAYER_ISSUE_PANEL, onClose, isOpen);
+  // Handle Escape key to close panel via global shortcut layer system.
+  // Suppress when focus is on an inline-edit input/textarea so EditableTitle
+  // and EditableDescription can cancel their edit without closing the panel.
+  useRegisterEscapeLayer(LAYER_ISSUE_PANEL, onClose, isOpen, {
+    suppressWhenInputFocused: true,
+  });
 
   // Lock body scroll when open, restoring previous value on close.
   // Note: Only ONE panel should be open at a time. Multiple concurrent panels

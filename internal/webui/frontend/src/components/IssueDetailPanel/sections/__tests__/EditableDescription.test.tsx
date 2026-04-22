@@ -17,6 +17,26 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import "@testing-library/jest-dom";
 import { EditableDescription } from "../EditableDescription";
+import {
+  KeyboardShortcutProvider,
+  useRegisterEscapeLayer,
+  LAYER_ISSUE_PANEL,
+} from "@/hooks/ui/useKeyboardShortcuts";
+
+/** Test harness that mirrors IssueDetailPanel's escape-layer registration
+ * (priority=LAYER_ISSUE_PANEL, suppressWhenInputFocused=true). */
+function PanelLayerHarness({
+  onClose,
+  children,
+}: {
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  useRegisterEscapeLayer(LAYER_ISSUE_PANEL, onClose, true, {
+    suppressWhenInputFocused: true,
+  });
+  return <>{children}</>;
+}
 
 // Mock MarkdownRenderer to avoid complexity
 vi.mock("../MarkdownRenderer", () => ({
@@ -453,6 +473,30 @@ describe("EditableDescription", () => {
         fireEvent.keyDown(textarea, { key: "Enter", metaKey: true });
       });
       expect(parentKeyDown).not.toHaveBeenCalled();
+    });
+
+    it("Escape in edit mode cancels locally without firing a suppressed panel layer", () => {
+      // Reproduces the bug fix for loomcli-s3x2h: the surrounding panel
+      // registers an escape layer with suppressWhenInputFocused=true, so
+      // Escape from the textarea must cancel the edit and NOT close the panel.
+      const onClose = vi.fn();
+      render(
+        <KeyboardShortcutProvider>
+          <PanelLayerHarness onClose={onClose}>
+            <EditableDescription {...defaultProps} />
+          </PanelLayerHarness>
+        </KeyboardShortcutProvider>,
+      );
+      fireEvent.click(screen.getByTestId("description-edit-button"));
+      const textarea = screen.getByTestId("description-textarea");
+      fireEvent.change(textarea, { target: { value: "Changed" } });
+      fireEvent.keyDown(textarea, { key: "Escape" });
+      // Edit mode exited — textarea replaced by the display view
+      expect(
+        screen.queryByTestId("description-textarea"),
+      ).not.toBeInTheDocument();
+      // Panel layer's onClose was NOT invoked
+      expect(onClose).not.toHaveBeenCalled();
     });
   });
 

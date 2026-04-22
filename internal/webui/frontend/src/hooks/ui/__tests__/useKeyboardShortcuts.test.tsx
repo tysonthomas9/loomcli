@@ -288,12 +288,21 @@ function EscapeLayerTestComponent({
   handler,
   priority,
   active = true,
+  suppressWhenInputFocused,
 }: {
   handler: () => void;
   priority: number;
   active?: boolean;
+  suppressWhenInputFocused?: boolean;
 }) {
-  useRegisterEscapeLayer(priority, handler, active);
+  useRegisterEscapeLayer(
+    priority,
+    handler,
+    active,
+    suppressWhenInputFocused === undefined
+      ? undefined
+      : { suppressWhenInputFocused },
+  );
   return null;
 }
 
@@ -460,6 +469,263 @@ describe("Escape layer registry isolation", () => {
 
     // After all unmounts, no handler should fire
     fireEvent.keyDown(document, { key: "Escape" });
+    expect(handler).not.toHaveBeenCalled();
+  });
+});
+
+describe("Escape layer registry — suppressWhenInputFocused", () => {
+  it("does NOT fire handler when input is focused and flag is true", () => {
+    const handler = vi.fn();
+
+    const { container } = render(
+      <KeyboardShortcutProvider>
+        <EscapeLayerTestComponent
+          handler={handler}
+          priority={LAYER_ISSUE_PANEL}
+          suppressWhenInputFocused={true}
+        />
+        <input type="text" data-testid="the-input" />
+      </KeyboardShortcutProvider>,
+    );
+
+    const input = container.querySelector("input")!;
+    input.focus();
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("does NOT fire handler when textarea is focused and flag is true", () => {
+    const handler = vi.fn();
+
+    const { container } = render(
+      <KeyboardShortcutProvider>
+        <EscapeLayerTestComponent
+          handler={handler}
+          priority={LAYER_ISSUE_PANEL}
+          suppressWhenInputFocused={true}
+        />
+        <textarea />
+      </KeyboardShortcutProvider>,
+    );
+
+    const textarea = container.querySelector("textarea")!;
+    textarea.focus();
+    fireEvent.keyDown(textarea, { key: "Escape" });
+
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("does NOT fire handler when select is focused and flag is true", () => {
+    const handler = vi.fn();
+
+    const { container } = render(
+      <KeyboardShortcutProvider>
+        <EscapeLayerTestComponent
+          handler={handler}
+          priority={LAYER_ISSUE_PANEL}
+          suppressWhenInputFocused={true}
+        />
+        <select>
+          <option>A</option>
+        </select>
+      </KeyboardShortcutProvider>,
+    );
+
+    const select = container.querySelector("select")!;
+    select.focus();
+    fireEvent.keyDown(select, { key: "Escape" });
+
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("DOES fire handler when a non-input element is focused and flag is true", () => {
+    const handler = vi.fn();
+
+    const { container } = render(
+      <KeyboardShortcutProvider>
+        <EscapeLayerTestComponent
+          handler={handler}
+          priority={LAYER_ISSUE_PANEL}
+          suppressWhenInputFocused={true}
+        />
+        <button type="button">btn</button>
+      </KeyboardShortcutProvider>,
+    );
+
+    const button = container.querySelector("button")!;
+    button.focus();
+    fireEvent.keyDown(button, { key: "Escape" });
+
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it("DOES fire handler when flag is false (default) even with input focused — preserves modal behavior", () => {
+    const handler = vi.fn();
+
+    const { container } = render(
+      <KeyboardShortcutProvider>
+        <EscapeLayerTestComponent
+          handler={handler}
+          priority={LAYER_MODAL}
+          // suppressWhenInputFocused omitted — defaults to false
+        />
+        <input type="text" />
+      </KeyboardShortcutProvider>,
+    );
+
+    const input = container.querySelector("input")!;
+    input.focus();
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it("suppressed top layer does NOT fall through to a lower layer", () => {
+    const topHandler = vi.fn();
+    const lowerHandler = vi.fn();
+
+    const { container } = render(
+      <KeyboardShortcutProvider>
+        <EscapeLayerTestComponent
+          handler={lowerHandler}
+          priority={LAYER_ISSUE_PANEL}
+          suppressWhenInputFocused={false}
+        />
+        <EscapeLayerTestComponent
+          handler={topHandler}
+          priority={LAYER_MODAL}
+          suppressWhenInputFocused={true}
+        />
+        <input type="text" />
+      </KeyboardShortcutProvider>,
+    );
+
+    const input = container.querySelector("input")!;
+    input.focus();
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    // Neither handler fires: top is suppressed, lower is not reached.
+    expect(topHandler).not.toHaveBeenCalled();
+    expect(lowerHandler).not.toHaveBeenCalled();
+  });
+
+  it("does NOT call preventDefault when suppressed so the React onKeyDown can see defaultPrevented=false", () => {
+    const handler = vi.fn();
+
+    const { container } = render(
+      <KeyboardShortcutProvider>
+        <EscapeLayerTestComponent
+          handler={handler}
+          priority={LAYER_ISSUE_PANEL}
+          suppressWhenInputFocused={true}
+        />
+        <input type="text" />
+      </KeyboardShortcutProvider>,
+    );
+
+    const input = container.querySelector("input")!;
+    input.focus();
+
+    const event = new KeyboardEvent("keydown", {
+      key: "Escape",
+      bubbles: true,
+      cancelable: true,
+    });
+    input.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("calls preventDefault when the top layer fires its handler (existing behavior preserved)", () => {
+    const handler = vi.fn();
+
+    const { container } = render(
+      <KeyboardShortcutProvider>
+        <EscapeLayerTestComponent handler={handler} priority={LAYER_MODAL} />
+        <button type="button" data-testid="plain-btn">
+          btn
+        </button>
+      </KeyboardShortcutProvider>,
+    );
+    const btn = container.querySelector('[data-testid="plain-btn"]')!;
+    (btn as HTMLElement).focus();
+
+    const event = new KeyboardEvent("keydown", {
+      key: "Escape",
+      bubbles: true,
+      cancelable: true,
+    });
+    btn.dispatchEvent(event);
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("toggling the flag via re-render updates behavior (deps-array correctness)", () => {
+    const handler = vi.fn();
+
+    const { rerender, container } = render(
+      <KeyboardShortcutProvider>
+        <EscapeLayerTestComponent
+          handler={handler}
+          priority={LAYER_ISSUE_PANEL}
+          suppressWhenInputFocused={false}
+        />
+        <input type="text" />
+      </KeyboardShortcutProvider>,
+    );
+
+    const input = container.querySelector("input")!;
+    input.focus();
+
+    // Initially flag is false: Escape in input fires handler.
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(handler).toHaveBeenCalledTimes(1);
+
+    handler.mockClear();
+
+    // Flip flag to true; the hook should re-register with new flag value.
+    rerender(
+      <KeyboardShortcutProvider>
+        <EscapeLayerTestComponent
+          handler={handler}
+          priority={LAYER_ISSUE_PANEL}
+          suppressWhenInputFocused={true}
+        />
+        <input type="text" />
+      </KeyboardShortcutProvider>,
+    );
+
+    const input2 = container.querySelector("input")!;
+    input2.focus();
+    fireEvent.keyDown(input2, { key: "Escape" });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("suppresses when focus is inside a CodeMirror editor (.cm-editor)", () => {
+    const handler = vi.fn();
+
+    const { container } = render(
+      <KeyboardShortcutProvider>
+        <EscapeLayerTestComponent
+          handler={handler}
+          priority={LAYER_ISSUE_PANEL}
+          suppressWhenInputFocused={true}
+        />
+        <div className="cm-editor">
+          <div contentEditable={true} data-testid="cm-content" />
+        </div>
+      </KeyboardShortcutProvider>,
+    );
+
+    const cm = container.querySelector(
+      '[data-testid="cm-content"]',
+    )! as HTMLElement;
+    cm.focus();
+    fireEvent.keyDown(cm, { key: "Escape" });
+
     expect(handler).not.toHaveBeenCalled();
   });
 });
