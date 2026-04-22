@@ -574,18 +574,14 @@ Registered directly in `registerRoutes()`:
 | GET | `/api/editors` | `listEditorsHandler` |
 | POST | `/api/editors/open` | `openEditorHandler` |
 | POST | `/api/sessions/notify` | `notifySessionChangeHandler` (conditional) |
-| GET | `/api/monitor/status` | Monitor status (injected from cli) |
-| GET | `/api/monitor/agents` | Monitor agents (injected from cli) |
-| GET | `/api/monitor/tasks` | Monitor tasks (injected from cli) |
-| GET | `/api/monitor/stats` | Monitor stats (injected from cli) |
-| GET | `/api/monitor/sync` | Monitor sync (injected from cli) |
-| GET | `/api/monitor/workspaces` | Monitor workspaces (injected from cli) |
+| GET | `/api/monitor/workspaces` | Monitor workspaces topology (injected from cli) |
 | GET | `/api/monitor/stale-detector` | Stale detector (injected from cli) |
-| GET | `/api/monitor/usage` | Usage data (injected from cli) |
 | GET | `/metrics` | Prometheus metrics (injected from cli) |
 | GET | `/api/observability/metrics` | Observability metrics (injected from cli) |
 | GET | `/api/observability/events` | Observability events (injected from cli) |
 | * | `/` | SPA catch-all (embedded FS or dev mode) |
+
+The legacy un-scoped monitor routes (`/api/monitor/{status,agents,tasks,stats,sync,usage}`) have been removed — per-workspace monitor data now lives under `/api/workspaces/{ws}/monitor/*` (see the Scoped Monitor Routes entry in the workspace-scoped module table below). `TestLegacyGlobalMonitorRoutesRemoved` pins the five collector-backed paths; `/api/monitor/agents` is never registered globally (absent from `MonitorHandlers`).
 
 ### Workspace Management Routes (App Mux)
 
@@ -758,6 +754,21 @@ All workspace-scoped routes are registered under `/api/workspaces/{ws}/` via mod
 | POST | `.../fleet/claim` | Fleet task claim (conditional auth) |
 | POST | `.../fleet/done/{id}` | Fleet task done (conditional auth) |
 | POST | `.../fleet/heartbeat` | Fleet heartbeat (conditional auth) |
+
+#### Scoped Monitor Routes (6 routes)
+
+**Files:** `internal/cli/serve/metricscmd/handlers_scoped.go` (handler map), `internal/webui/app/routes.go` (registration via `ScopedMonitorHandlersFn`)
+
+| Method | Pattern | Handler |
+|--------|---------|---------|
+| GET | `.../monitor/status` | Full workspace dashboard (agents, tasks, stats, sync, agent_tasks) |
+| GET | `.../monitor/agents` | Workspace agent list |
+| GET | `.../monitor/tasks` | Workspace task distribution |
+| GET | `.../monitor/stats` | Workspace monitor stats |
+| GET | `.../monitor/sync` | Workspace git + bd sync status |
+| GET | `.../monitor/usage` | Workspace token usage aggregates |
+
+These routes are injected from the cli package when `ScopedMonitorHandlersFn` is set and `multiPool` is non-nil. Each workspace has its own `cachedCollector` entry keyed by `wsID` with a 10s TTL; pool resolution happens inside the collection closure so a daemon restart is picked up on the next cycle. `/monitor/usage` reads per-workspace usage from `usage.jsonl` via a separate `usageStores` map. These routes replace the removed global `/api/monitor/{status,agents,tasks,stats,sync,usage}` endpoints.
 
 ### Static Asset Handling (SPA Routing)
 

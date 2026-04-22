@@ -3774,25 +3774,38 @@ Remove the tab state for an issue.
 
 ## Monitor Endpoints
 
-Monitor endpoints serve daemon-collected data (agent status, task distribution, metrics). They are injected from the cli package via `ServerConfig.MonitorHandlers` and only registered when the corresponding handler is non-nil. Each returns `503` when the daemon is unavailable.
+Monitor endpoints serve daemon-collected data (agent status, task distribution, metrics). Per-workspace data (status, agents, tasks, stats, sync, usage) is served from `/api/workspaces/{ws}/monitor/*` and routed through `daemon.MultiPool.PoolForWorkspace(wsID)` so each workspace sees its own bd daemon's data. The only `/api/monitor/*` routes that remain are genuinely server-wide. Global handlers are injected from the cli package via `ServerConfig.MonitorHandlers` and only registered when the corresponding handler is non-nil; workspace-scoped handlers are injected via `ServerConfig.ScopedMonitorHandlersFn`.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/monitor/status` | Full monitor dashboard data |
-| GET | `/api/monitor/agents` | Agent list with workspace grouping |
-| GET | `/api/monitor/tasks` | Task distribution by status |
-| GET | `/api/monitor/stats` | Monitor statistics |
-| GET | `/api/monitor/sync` | Git sync status |
-| GET | `/api/monitor/workspaces` | Workspace topology metadata |
-| GET | `/api/monitor/stale-detector` | Stale detector status |
-| GET | `/api/monitor/usage` | Token usage aggregates (supports filtering — see below) |
+| GET | `/api/workspaces/{ws}/monitor/status` | Full monitor dashboard data for the workspace |
+| GET | `/api/workspaces/{ws}/monitor/agents` | Agent list for the workspace |
+| GET | `/api/workspaces/{ws}/monitor/tasks` | Task distribution by status for the workspace |
+| GET | `/api/workspaces/{ws}/monitor/stats` | Monitor statistics for the workspace |
+| GET | `/api/workspaces/{ws}/monitor/sync` | Git sync status for the workspace |
+| GET | `/api/workspaces/{ws}/monitor/usage` | Token usage aggregates for the workspace (supports filtering — see below) |
+| GET | `/api/monitor/workspaces` | Workspace topology metadata (server-wide) |
+| GET | `/api/monitor/stale-detector` | Stale detector status (server-wide) |
 | GET | `/metrics` | Prometheus metrics (public, no auth required) |
 | GET | `/api/observability/metrics` | Event metrics snapshot |
 | GET | `/api/observability/events` | Paginated event log (supports filtering — see below) |
 | GET | `/api/daemon/supervisor` | Daemon supervisor state (restart count, exit reason, …) |
 | GET | `/api/daemon/config` | Effective resolved daemon config as raw JSON |
 
-### `GET /api/monitor/usage`
+The legacy un-scoped routes `/api/monitor/{status,agents,tasks,stats,sync,usage}` have been removed — they previously served data from the launch workspace for every caller regardless of which workspace the client was viewing. Requests to those paths fall through to the SPA catch-all 404. `TestLegacyGlobalMonitorRoutesRemoved` in `internal/webui/app/routes_test.go` guards the five collector-backed paths; `/api/monitor/agents` is never registered globally either (no entry in `MonitorHandlers`).
+
+### Workspace-Scoped Monitor Routes
+
+All six routes live under `/api/workspaces/{ws}/monitor/` and are registered on `wsMux`, so they inherit `middleware.Workspace` (validates `{ws}`, returns `400` if empty, `404` if unknown). Each workspace has its own `cachedCollector` with a 10s TTL; the five collector-backed routes share a single collection per poll cycle. Response schemas are defined in `api/openapi.yaml` (`MonitorStatusResponse`, `MonitorAgentsResponse`, `MonitorTasksResponse`, `MonitorStatsResponse`, `MonitorSyncResponse`, `UsageResponse`).
+
+- **Auth:** Required
+- **Responses:**
+  - `200` with the workspace's collected data.
+  - `404` from `middleware.Workspace` if the workspace ID is unknown.
+  - For `/monitor/{status,agents,tasks,stats,sync}`: when the workspace is registered but its bd daemon pool is unavailable, `CollectMonitorDataScoped` short-circuits to a zero-value `MonitorData`, so the handler still returns `200` with empty lists and zero counts. (No per-workspace `503` on collection failure.)
+  - For `/monitor/usage`: `503` if the workspace path fails to resolve and no usage store is registered for it.
+
+#### `GET /api/workspaces/{ws}/monitor/usage`
 
 - **Auth:** Required
 - **Query Parameters:**
@@ -3804,6 +3817,8 @@ Monitor endpoints serve daemon-collected data (agent status, task distribution, 
 | `epic` | string | Filter by epic ID |
 | `since` | string | Start date (`YYYY-MM-DD`) |
 | `until` | string | End date (`YYYY-MM-DD`) |
+
+Usage data is read from the workspace's `usage.jsonl` and cached per-workspace for 10 seconds. An unknown workspace ID returns `404` from `middleware.Workspace`; a registered workspace whose path cannot be resolved returns `503` from `HandleUsage` (no usage store).
 
 ### `GET /api/observability/events`
 
