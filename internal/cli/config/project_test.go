@@ -98,3 +98,94 @@ func TestValidateAgents_BareAndScopedSameWorktreeCoexist(t *testing.T) {
 		t.Errorf("validateAgents() returned error for mixed legacy+workspace agents: %v", err)
 	}
 }
+
+func TestBuildAgentLogFilename(t *testing.T) {
+	tests := []struct {
+		name     string
+		role     string
+		repo     string
+		worktree string
+		want     string
+	}{
+		{
+			name:     "legacy form when repo is empty",
+			role:     "task",
+			repo:     "",
+			worktree: "falcon",
+			want:     "task-falcon.log",
+		},
+		{
+			name:     "workspace form with repo",
+			role:     "task",
+			repo:     "backend",
+			worktree: "falcon",
+			want:     "task-backend-falcon.log",
+		},
+		{
+			name:     "different repo yields distinct filename",
+			role:     "task",
+			repo:     "frontend",
+			worktree: "falcon",
+			want:     "task-frontend-falcon.log",
+		},
+		{
+			name:     "repo path traversal sanitized",
+			role:     "task",
+			repo:     "../../../etc",
+			worktree: "falcon",
+			want:     "task-etc-falcon.log",
+		},
+		{
+			name:     "role path traversal sanitized",
+			role:     "../../../evil",
+			repo:     "backend",
+			worktree: "falcon",
+			want:     "evil-backend-falcon.log",
+		},
+		{
+			name:     "worktree path traversal sanitized",
+			role:     "task",
+			repo:     "backend",
+			worktree: "../../../x",
+			want:     "task-backend-x.log",
+		},
+		{
+			name:     "repo that sanitizes to dotdot falls back to legacy form",
+			role:     "task",
+			repo:     "..",
+			worktree: "falcon",
+			want:     "task-falcon.log",
+		},
+		{
+			name:     "repo that sanitizes to single dot falls back to legacy form",
+			role:     "task",
+			repo:     ".",
+			worktree: "falcon",
+			want:     "task-falcon.log",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := BuildAgentLogFilename(tc.role, tc.repo, tc.worktree)
+			if got != tc.want {
+				t.Errorf("BuildAgentLogFilename(%q,%q,%q) = %q, want %q", tc.role, tc.repo, tc.worktree, got, tc.want)
+			}
+			if strings.Contains(got, "..") {
+				t.Errorf("result contains unsanitized path traversal: %q", got)
+			}
+		})
+	}
+}
+
+func TestBuildAgentLogFilename_CollisionFree(t *testing.T) {
+	// The bug: backend/falcon and frontend/falcon both produced "task-falcon.log"
+	// and interleaved their output. Post-fix they must produce distinct filenames.
+	a := BuildAgentLogFilename("task", "backend", "falcon")
+	b := BuildAgentLogFilename("task", "frontend", "falcon")
+	if a == b {
+		t.Fatalf("same-worktree agents in different repos still collide: a=%s b=%s", a, b)
+	}
+	if a == "task-falcon.log" || b == "task-falcon.log" {
+		t.Errorf("workspace-mode filename must not equal legacy form: a=%s b=%s", a, b)
+	}
+}

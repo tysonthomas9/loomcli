@@ -197,13 +197,19 @@ func (s *Supervisor) setupAgentLogFile(ap *AgentProcess, cmd *exec.Cmd) {
 		return
 	}
 
-	safeWorktree := filepath.Base(ap.Entry.Worktree)
 	safeRole := filepath.Base(ap.Entry.Role)
 	if safeRole != ap.Entry.Role {
 		log.Printf("[daemon] Agent %s: role name %q sanitized to %q for log path",
 			ap.Entry.Worktree, ap.Entry.Role, safeRole)
 	}
-	logFilePath := filepath.Join(logDir, fmt.Sprintf("%s-%s.log", safeRole, safeWorktree))
+	if ap.Entry.Repo != "" {
+		safeRepo := filepath.Base(ap.Entry.Repo)
+		if safeRepo != ap.Entry.Repo {
+			log.Printf("[daemon] Agent %s: repo name %q sanitized to %q for log path",
+				ap.Entry.Worktree, ap.Entry.Repo, safeRepo)
+		}
+	}
+	logFilePath := filepath.Join(logDir, cfgpkg.BuildAgentLogFilename(ap.Entry.Role, ap.Entry.Repo, ap.Entry.Worktree))
 	ap.LogFilePath = logFilePath
 
 	f, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600) //nolint:gosec // G304: log file path from daemon config

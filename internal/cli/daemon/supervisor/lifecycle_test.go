@@ -821,6 +821,64 @@ func TestSpawnAgent_LogFileSetup(t *testing.T) {
 	}
 }
 
+// TestSpawnAgent_LogFileSetup_WithRepo is the regression test for the bug
+// where two agents with the same role+worktree but different repos within a
+// workspace shared the same log file (e.g., backend/falcon and frontend/falcon
+// both wrote to "plan-falcon.log", interleaving their output). After the fix,
+// each produces a distinct filename "{role}-{repo}-{worktree}.log".
+func TestSpawnAgent_LogFileSetup_WithRepo(t *testing.T) {
+	tmpDir := t.TempDir()
+	logDir := filepath.Join(tmpDir, "logs")
+
+	s := &Supervisor{
+		ConfigSnapshot: func() *cfgpkg.DaemonConfig {
+			return &cfgpkg.DaemonConfig{
+				Daemon: cfgpkg.DaemonSettings{
+					LogDir: logDir,
+				},
+			}
+		},
+		ProjectDir:    tmpDir,
+		Shutdown:      make(chan struct{}),
+		StoppedAgents: make(map[string]struct{}),
+		Agents:        make([]*AgentProcess, 0),
+		EmitEvent:     func(events.Event) {},
+	}
+
+	apBackend := &AgentProcess{
+		Entry:        cfgpkg.AgentEntry{Worktree: "falcon", Role: "plan", Repo: "backend"},
+		RoleConfig:   cfgpkg.RoleConfig{Description: "Built-in plan agent"},
+		WorktreePath: tmpDir,
+	}
+	cleanupAgentProcess(t, apBackend)
+	_ = s.spawnAgent(apBackend)
+
+	apFrontend := &AgentProcess{
+		Entry:        cfgpkg.AgentEntry{Worktree: "falcon", Role: "plan", Repo: "frontend"},
+		RoleConfig:   cfgpkg.RoleConfig{Description: "Built-in plan agent"},
+		WorktreePath: tmpDir,
+	}
+	cleanupAgentProcess(t, apFrontend)
+	_ = s.spawnAgent(apFrontend)
+
+	backendLog := filepath.Join(logDir, "plan-backend-falcon.log")
+	frontendLog := filepath.Join(logDir, "plan-frontend-falcon.log")
+	collidedLog := filepath.Join(logDir, "plan-falcon.log")
+
+	if _, err := os.Stat(backendLog); os.IsNotExist(err) {
+		t.Errorf("backend log file %q was not created", backendLog)
+	}
+	if _, err := os.Stat(frontendLog); os.IsNotExist(err) {
+		t.Errorf("frontend log file %q was not created", frontendLog)
+	}
+	if _, err := os.Stat(collidedLog); err == nil {
+		t.Errorf("pre-fix shared log file %q should NOT exist", collidedLog)
+	}
+	if apBackend.LogFilePath == apFrontend.LogFilePath {
+		t.Errorf("AgentProcess.LogFilePath collided: both = %q", apBackend.LogFilePath)
+	}
+}
+
 // TestSpawnAgent_Environment tests that spawnAgent sets BD_ACTOR and
 // LOOM_WORKTREE_PATH in the subprocess environment.
 func TestSpawnAgent_Environment(t *testing.T) {

@@ -138,6 +138,29 @@ func (a AgentEntry) Key() string {
 	return AgentKey(a.Repo, a.Worktree)
 }
 
+// BuildAgentLogFilename returns the canonical log file basename for an agent.
+// Format: "{role}-{worktree}.log" when repo is empty, "{role}-{repo}-{worktree}.log"
+// otherwise. Each segment is sanitized with filepath.Base to prevent path
+// traversal via malicious loom.yaml values. If the sanitized repo is "." or
+// "..", the helper falls back to the two-segment form to avoid filesystem-
+// hostile basenames like "task-..-falcon.log"; empty role or worktree are
+// rejected upstream by validateAgents and intentionally not handled here. This
+// is the single sanctioned producer of the agent log basename — the daemon
+// supervisor (writer) and the daemon logs CLI (reader) both call it to stay
+// in sync.
+func BuildAgentLogFilename(role, repo, worktree string) string {
+	safeRole := filepath.Base(role)
+	safeWorktree := filepath.Base(worktree)
+	if repo == "" {
+		return fmt.Sprintf("%s-%s.log", safeRole, safeWorktree)
+	}
+	safeRepo := filepath.Base(repo)
+	if safeRepo == "." || safeRepo == ".." {
+		return fmt.Sprintf("%s-%s.log", safeRole, safeWorktree)
+	}
+	return fmt.Sprintf("%s-%s-%s.log", safeRole, safeRepo, safeWorktree)
+}
+
 // ProjectFile represents the project-local loom.yaml.
 type ProjectFile struct {
 	Version int                   `yaml:"version,omitempty"`

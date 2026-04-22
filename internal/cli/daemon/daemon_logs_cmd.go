@@ -54,7 +54,7 @@ func runDaemonLogs(cmd *cobra.Command, args []string) {
 	}
 
 	agent := findAgent(args[0], state, stateErr)
-	logPath := resolveAgentLogPath(projectDir, config, agent.Role, agent.Worktree)
+	logPath := resolveAgentLogPath(projectDir, config, agent.Role, agent.Repo, agent.Worktree)
 	showAgentLog(logPath)
 }
 
@@ -86,7 +86,7 @@ func listAgentLogs(projectDir string, config *cfgpkg.DaemonConfig, state *Daemon
 	}
 	fmt.Println("Available agents:")
 	for _, agent := range state.Agents {
-		logPath := resolveAgentLogPath(projectDir, config, agent.Role, agent.Worktree)
+		logPath := resolveAgentLogPath(projectDir, config, agent.Role, agent.Repo, agent.Worktree)
 		exists := "missing"
 		if _, err := os.Stat(logPath); err == nil {
 			exists = "exists"
@@ -157,8 +157,9 @@ func showAgentLog(logPath string) {
 }
 
 // resolveAgentLogPath reconstructs the log file path using the same convention
-// as daemon_spawn.go:spawnAgent.
-func resolveAgentLogPath(projectDir string, config *cfgpkg.DaemonConfig, role, worktree string) string {
+// as supervisor/spawn.go:setupAgentLogFile. role/repo/worktree mirror the fields
+// on DaemonAgentStatus (repo is "" for legacy single-repo mode).
+func resolveAgentLogPath(projectDir string, config *cfgpkg.DaemonConfig, role, repo, worktree string) string {
 	logDir := config.Daemon.LogDir
 	if logDir == "" {
 		logDir = ".loom/logs"
@@ -167,18 +168,21 @@ func resolveAgentLogPath(projectDir string, config *cfgpkg.DaemonConfig, role, w
 		logDir = filepath.Join(projectDir, logDir)
 	}
 
-	// Namespace by workspace ID (same as daemon_spawn.go)
+	// Namespace by workspace ID (same as supervisor/spawn.go)
 	ws, err := cfgpkg.ResolveActiveWorkspace()
 	if err == nil && ws != nil && ws.ID != "" {
 		logDir = filepath.Join(logDir, ws.ID)
 	}
 
-	safeWorktree := filepath.Base(worktree)
-	safeRole := filepath.Base(role)
-	if safeRole != role {
+	if safeRole := filepath.Base(role); safeRole != role {
 		slog.Warn("role name sanitized for log path lookup", "raw", role, "safe", safeRole)
 	}
-	return filepath.Join(logDir, fmt.Sprintf("%s-%s.log", safeRole, safeWorktree))
+	if repo != "" {
+		if safeRepo := filepath.Base(repo); safeRepo != repo {
+			slog.Warn("repo name sanitized for log path lookup", "raw", repo, "safe", safeRepo)
+		}
+	}
+	return filepath.Join(logDir, cfgpkg.BuildAgentLogFilename(role, repo, worktree))
 }
 
 // followLogFile watches a log file for changes and writes new bytes to stdout.

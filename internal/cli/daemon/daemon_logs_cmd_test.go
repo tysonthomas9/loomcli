@@ -16,7 +16,7 @@ func TestResolveAgentLogPath_Basic(t *testing.T) {
 		},
 	}
 
-	got := resolveAgentLogPath(projectDir, config, "task", "falcon")
+	got := resolveAgentLogPath(projectDir, config, "task", "", "falcon")
 	// The path should contain the project dir, log dir, and role-worktree.log
 	if !strings.HasPrefix(got, projectDir) {
 		t.Errorf("expected path to start with %s, got %s", projectDir, got)
@@ -34,7 +34,7 @@ func TestResolveAgentLogPath_AbsoluteLogDir(t *testing.T) {
 		},
 	}
 
-	got := resolveAgentLogPath(projectDir, config, "plan", "nova")
+	got := resolveAgentLogPath(projectDir, config, "plan", "", "nova")
 	// Should use absolute path as-is, not prefix with projectDir
 	if strings.HasPrefix(got, projectDir) {
 		t.Errorf("expected absolute LogDir to be used as-is, got %s", got)
@@ -55,7 +55,7 @@ func TestResolveAgentLogPath_EmptyLogDir(t *testing.T) {
 		},
 	}
 
-	got := resolveAgentLogPath(projectDir, config, "task", "blaze")
+	got := resolveAgentLogPath(projectDir, config, "task", "", "blaze")
 	// Should fall back to default .loom/logs
 	want := filepath.Join(projectDir, ".loom/logs", "task-blaze.log")
 	// Strip workspace ID portion (may or may not be present depending on env)
@@ -74,7 +74,7 @@ func TestResolveAgentLogPath_PathTraversal(t *testing.T) {
 	}
 
 	// filepath.Base should strip path traversal from worktree name
-	got := resolveAgentLogPath(projectDir, config, "task", "../../../etc")
+	got := resolveAgentLogPath(projectDir, config, "task", "", "../../../etc")
 	if strings.Contains(got, "..") {
 		t.Errorf("path traversal not sanitized: %s", got)
 	}
@@ -92,12 +92,50 @@ func TestResolveAgentLogPath_RolePathTraversal(t *testing.T) {
 	}
 
 	// filepath.Base should strip path traversal from role name
-	got := resolveAgentLogPath(projectDir, config, "../../../etc/cron.d/evil", "falcon")
+	got := resolveAgentLogPath(projectDir, config, "../../../etc/cron.d/evil", "", "falcon")
 	if strings.Contains(got, "..") {
 		t.Errorf("role path traversal not sanitized: %s", got)
 	}
 	if !strings.HasSuffix(got, "evil-falcon.log") {
 		t.Errorf("expected sanitized path to end with evil-falcon.log, got %s", got)
+	}
+}
+
+func TestResolveAgentLogPath_WithRepo(t *testing.T) {
+	projectDir := "/tmp/test-project"
+	config := &DaemonConfig{
+		Daemon: DaemonSettings{LogDir: ".loom/logs"},
+	}
+
+	backend := resolveAgentLogPath(projectDir, config, "task", "backend", "falcon")
+	frontend := resolveAgentLogPath(projectDir, config, "task", "frontend", "falcon")
+
+	if !strings.HasSuffix(backend, "task-backend-falcon.log") {
+		t.Errorf("expected backend path to end with task-backend-falcon.log, got %s", backend)
+	}
+	if !strings.HasSuffix(frontend, "task-frontend-falcon.log") {
+		t.Errorf("expected frontend path to end with task-frontend-falcon.log, got %s", frontend)
+	}
+	if backend == frontend {
+		t.Errorf("same-worktree agents in different repos still collide: %s", backend)
+	}
+	if strings.HasSuffix(backend, "task-falcon.log") || strings.HasSuffix(frontend, "task-falcon.log") {
+		t.Errorf("workspace-mode path must not match legacy form: backend=%s frontend=%s", backend, frontend)
+	}
+}
+
+func TestResolveAgentLogPath_RepoPathTraversal(t *testing.T) {
+	projectDir := "/tmp/test-project"
+	config := &DaemonConfig{
+		Daemon: DaemonSettings{LogDir: ".loom/logs"},
+	}
+
+	got := resolveAgentLogPath(projectDir, config, "task", "../../../etc", "falcon")
+	if strings.Contains(got, "..") {
+		t.Errorf("repo path traversal not sanitized: %s", got)
+	}
+	if !strings.HasSuffix(got, "task-etc-falcon.log") {
+		t.Errorf("expected sanitized path to end with task-etc-falcon.log, got %s", got)
 	}
 }
 
@@ -209,7 +247,7 @@ func TestRunDaemonLogs_ReadsLastNLines(t *testing.T) {
 			LogDir: ".loom/logs",
 		},
 	}
-	resolvedPath := resolveAgentLogPath(tmpDir, config, "task", "falcon")
+	resolvedPath := resolveAgentLogPath(tmpDir, config, "task", "", "falcon")
 	// The resolved path may include a workspace ID segment if the env has one.
 	// For this test, verify the basic case works by reading the file directly.
 	_ = resolvedPath
