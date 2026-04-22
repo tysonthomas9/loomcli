@@ -88,9 +88,8 @@ func TestDiscoverWorkspace_EmptyReposList(t *testing.T) {
 	}
 	setupWorkspaceConfig(t, cfg)
 
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
+	old := TestingResetDefaultResolver()
+	defer func() { TestingSetDefaultResolver(old) }()
 
 	r, err := NewResolver()
 	if err != nil {
@@ -122,9 +121,8 @@ func TestDiscoverWorkspace_RelativePathNoWorkspacePath(t *testing.T) {
 	}
 	setupWorkspaceConfig(t, cfg)
 
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
+	old := TestingResetDefaultResolver()
+	defer func() { TestingSetDefaultResolver(old) }()
 
 	r, err := NewResolver()
 	if err != nil {
@@ -170,9 +168,8 @@ func TestDiscoverWorkspace_MultipleWorkspaces_SwitchAndDiscover(t *testing.T) {
 	}
 	setupWorkspaceConfig(t, cfg)
 
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
+	old := TestingResetDefaultResolver()
+	defer func() { TestingSetDefaultResolver(old) }()
 
 	r, err := NewResolver()
 	if err != nil {
@@ -222,9 +219,8 @@ func TestDiscoverWorkspace_MultipleWorkspaces_SwitchAndDiscover(t *testing.T) {
 func TestDiscoverWorktrees_PublicAPI_DelegatesLegacy(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
+	old := TestingResetDefaultResolver()
+	defer func() { TestingSetDefaultResolver(old) }()
 
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
@@ -277,9 +273,8 @@ func TestDiscoverWorktrees_PublicAPI_DelegatesWorkspace(t *testing.T) {
 	}
 	setupWorkspaceConfig(t, cfg)
 
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
+	old := TestingResetDefaultResolver()
+	defer func() { TestingSetDefaultResolver(old) }()
 
 	// Call the package-level function
 	worktrees, err := DiscoverWorktrees()

@@ -298,9 +298,8 @@ func TestResolveWorktreesDir_RelativePath(t *testing.T) {
 func TestDiscoverLegacy_NonDirEntry(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
+	old := TestingResetDefaultResolver()
+	defer func() { TestingSetDefaultResolver(old) }()
 
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
@@ -335,9 +334,8 @@ func TestDiscoverLegacy_BranchErrorFallback(t *testing.T) {
 	clearGitEnvVars(t)
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
+	old := TestingResetDefaultResolver()
+	defer func() { TestingSetDefaultResolver(old) }()
 
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
@@ -369,9 +367,8 @@ func TestDiscoverLegacy_BranchErrorFallback(t *testing.T) {
 func TestDiscoverLegacy_WorktreesDirMissing(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
+	old := TestingResetDefaultResolver()
+	defer func() { TestingSetDefaultResolver(old) }()
 
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
@@ -398,9 +395,8 @@ func TestDiscoverLegacy_ReadDirError(t *testing.T) {
 
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
+	old := TestingResetDefaultResolver()
+	defer func() { TestingSetDefaultResolver(old) }()
 
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
@@ -435,9 +431,8 @@ func TestDiscoverWorkspace_WorkspaceNotFound(t *testing.T) {
 	}
 	setupWorkspaceConfig(t, cfg)
 
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
+	old := TestingResetDefaultResolver()
+	defer func() { TestingSetDefaultResolver(old) }()
 
 	// Manually create a resolver with a workspace name not in config
 	r := &Resolver{
@@ -477,9 +472,8 @@ func TestDiscoverWorkspace_BranchErrorFallback(t *testing.T) {
 	}
 	setupWorkspaceConfig(t, cfg)
 
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
+	old := TestingResetDefaultResolver()
+	defer func() { TestingSetDefaultResolver(old) }()
 
 	r, err := NewResolver()
 	if err != nil {
