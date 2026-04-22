@@ -758,4 +758,113 @@ describe("agentStore", () => {
       expect(state.connectionState).toBe("disconnected");
     });
   });
+
+  describe("workspace snapshot binding", () => {
+    // flushMicrotasks drains promise continuations without advancing the
+    // fake clock. Using runAllTimersAsync here would burn past the 15s
+    // withTimeout inside fetchData, rejecting hung fetches before the test
+    // can resolve them and making the guard untestable.
+    const flushMicrotasks = async (rounds = 4) => {
+      for (let i = 0; i < rounds; i++) {
+        await vi.advanceTimersByTimeAsync(0);
+      }
+    };
+
+    it("drops primary agents result when workspace switches mid-fetch", async () => {
+      let resolvePrimary!: (v: LoomAgentStatus[]) => void;
+      mockFetchAgents.mockImplementationOnce(
+        () =>
+          new Promise<LoomAgentStatus[]>((r) => {
+            resolvePrimary = r;
+          }),
+      );
+      mockFetchStatus.mockResolvedValue({
+        agents: [],
+        tasks: INITIAL_STATE.tasks,
+        agentTasks: {},
+        sync: INITIAL_STATE.sync,
+        stats: INITIAL_STATE.stats,
+        timestamp: "",
+      });
+      mockFetchTasks.mockResolvedValue(INITIAL_STATE.taskLists);
+
+      // Start ws-1 polling — primary fetchAgents hangs.
+      store.getState().startPolling({ pollInterval: 0, workspaceId: "ws-1" });
+      await flushMicrotasks();
+      expect(mockFetchAgents).toHaveBeenCalledWith("ws-1");
+
+      // Switch workspace: startPolling updates activeWorkspaceID but the
+      // in-flight ws-1 primary still holds fetchInProgress, so no new
+      // fetchData fires yet.
+      store.getState().startPolling({ pollInterval: 0, workspaceId: "ws-2" });
+
+      // Resolve the stale ws-1 primary. Without the guard this writes
+      // "ws1-stale" into state.agents.
+      resolvePrimary([makeAgent({ name: "ws1-stale" })]);
+      await flushMicrotasks();
+
+      const state = store.getState();
+      expect(state.agents).toEqual([]);
+      expect(state.isConnected).toBe(false);
+    });
+
+    it("drops secondary status result when workspace switches mid-fetch", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      mockFetchAgents.mockResolvedValue([makeAgent()]);
+
+      // First fetchStatus (ws-1) hangs; default handles ws-2.
+      let resolveStaleStatus!: (v: {
+        agents: LoomAgentStatus[];
+        tasks: typeof INITIAL_STATE.tasks;
+        agentTasks: Record<string, never>;
+        sync: typeof INITIAL_STATE.sync;
+        stats: typeof INITIAL_STATE.stats;
+        timestamp: string;
+      }) => void;
+      mockFetchStatus.mockImplementationOnce(
+        () =>
+          new Promise((r) => {
+            resolveStaleStatus = r;
+          }),
+      );
+      const cleanStatus = {
+        agents: [],
+        tasks: { ...INITIAL_STATE.tasks, needs_planning: 1 },
+        agentTasks: {},
+        sync: INITIAL_STATE.sync,
+        stats: { ...INITIAL_STATE.stats, open: 7 },
+        timestamp: "",
+      };
+      mockFetchStatus.mockResolvedValue(cleanStatus);
+      mockFetchTasks.mockResolvedValue(INITIAL_STATE.taskLists);
+
+      // ws-1: primary resolves, secondary status hangs (keeps the Once-mock
+      // promise pending — its withTimeout would otherwise reject at 15s).
+      store.getState().startPolling({ pollInterval: 0, workspaceId: "ws-1" });
+      await flushMicrotasks();
+
+      // Switch to ws-2 → new fetchData populates stats.open = 7.
+      store.getState().startPolling({ pollInterval: 0, workspaceId: "ws-2" });
+      await flushMicrotasks();
+      expect(store.getState().stats.open).toBe(7);
+
+      // Resolve the stale ws-1 status. Without the guard this overwrites
+      // stats.open with 999.
+      resolveStaleStatus({
+        agents: [],
+        tasks: { ...INITIAL_STATE.tasks, needs_planning: 999 },
+        agentTasks: {},
+        sync: INITIAL_STATE.sync,
+        stats: { ...INITIAL_STATE.stats, open: 999 },
+        timestamp: "",
+      });
+      await flushMicrotasks();
+
+      expect(store.getState().stats.open).toBe(7);
+      expect(store.getState().tasks.needs_planning).toBe(1);
+
+      warnSpy.mockRestore();
+    });
+  });
 });

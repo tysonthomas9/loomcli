@@ -1,8 +1,8 @@
 package metricscmd
 
 import (
+	"bytes"
 	"net/http"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -27,7 +27,9 @@ const scopedCollectorTTL = 10 * time.Second
 // webui.ServerConfig.ScopedMonitorHandlersFn. It wires
 // monitor.CollectMonitorDataScoped behind the five per-workspace routes
 // (status/tasks/stats/sync/usage) so each request talks to the target
-// workspace's bd pool and reads usage from that workspace's usage.jsonl.
+// workspace's bd pool and reads usage from that workspace's
+// {wsPath}/usage.jsonl (the path automode writes through
+// usage.NewStore(cli.GetBeadsDir())).
 //
 // nameFn resolves the URL wsID back to the workspace name used inside
 // MonitorData — mirrors the argument to HandleAgentsScoped so the response
@@ -139,8 +141,9 @@ func (c *scopedCollectorCache) get(
 }
 
 // scopedUsageStores lazily constructs and caches one usage.Store per
-// workspace path. Usage files live at {wsPath}/.loom/usage.jsonl (the same
-// layout usage.NewCollector writes into via initUsageStore in serve.go).
+// workspace path. Usage files live at {wsPath}/usage.jsonl — the same
+// layout automode writes through usage.NewStore(cli.GetBeadsDir()), so a
+// nested .loom/ directory here would silently read an empty file.
 // Caching avoids re-running os.MkdirAll on every poll. The map is bounded
 // by the user's workspace count, so no eviction is wired in.
 type scopedUsageStores struct {
@@ -163,20 +166,93 @@ func (s *scopedUsageStores) storeFor(wsPath string) *usage.Store {
 	if store, ok := s.stores[wsPath]; ok {
 		return store
 	}
-	// Workspace usage lives under <wsPath>/.loom/usage.jsonl so it doesn't
-	// collide with any non-loom files at the workspace root.
-	loomDir := filepath.Join(wsPath, ".loom")
-	store := usagecmd.InitStore(loomDir)
+	store := usagecmd.InitStore(wsPath)
 	s.stores[wsPath] = store
 	return store
 }
 
 // handle returns the HTTP handler for GET /api/workspaces/{ws}/monitor/usage.
-// Delegates to the same HandleUsage that powered the legacy global endpoint,
-// but bound to a workspace-specific store rather than the launch dir.
+// Delegates to HandleUsage but memoizes responses per (wsID, query) for
+// scopedCollectorTTL so 5s polling doesn't re-scan usage.jsonl on every
+// tick — parity with scopedCollectorCache for the other four scoped routes.
+// Only 200-OK bodies are cached so error responses surface fresh.
 func (s *scopedUsageStores) handle(pathFn func(wsID string) string) http.HandlerFunc {
+	cache := newScopedUsageResponseCache(scopedCollectorTTL)
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := workspaceIDFromPath(r)
-		usagecmd.HandleUsage(s.storeFor(pathFn(wsID))).ServeHTTP(w, r)
+		key := wsID + "?" + r.URL.RawQuery
+
+		if body, ok := cache.get(key); ok {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(body)
+			return
+		}
+
+		rec := &responseCapture{header: http.Header{}, status: http.StatusOK}
+		usagecmd.HandleUsage(s.storeFor(pathFn(wsID))).ServeHTTP(rec, r)
+
+		body := rec.body.Bytes()
+		if rec.status == http.StatusOK {
+			cache.put(key, body)
+		}
+
+		for k, vs := range rec.header {
+			for _, v := range vs {
+				w.Header().Add(k, v)
+			}
+		}
+		if rec.status != http.StatusOK {
+			w.WriteHeader(rec.status)
+		}
+		_, _ = w.Write(body)
 	}
 }
+
+// scopedUsageResponseCache memoizes usage endpoint responses per
+// (wsID, query) key for a bounded TTL. Keyed on raw query string so
+// different filter queries each get their own cache slot.
+type scopedUsageResponseCache struct {
+	mu      sync.Mutex
+	ttl     time.Duration
+	entries map[string]*cachedUsageBody
+}
+
+type cachedUsageBody struct {
+	expiresAt time.Time
+	body      []byte
+}
+
+func newScopedUsageResponseCache(ttl time.Duration) *scopedUsageResponseCache {
+	return &scopedUsageResponseCache{ttl: ttl, entries: make(map[string]*cachedUsageBody)}
+}
+
+func (c *scopedUsageResponseCache) get(key string) ([]byte, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry, ok := c.entries[key]
+	if !ok || time.Now().After(entry.expiresAt) {
+		return nil, false
+	}
+	return entry.body, true
+}
+
+func (c *scopedUsageResponseCache) put(key string, body []byte) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.entries[key] = &cachedUsageBody{
+		expiresAt: time.Now().Add(c.ttl),
+		body:      body,
+	}
+}
+
+// responseCapture buffers an HTTP response so the outer handler can
+// inspect the status before deciding whether to cache it.
+type responseCapture struct {
+	header http.Header
+	body   bytes.Buffer
+	status int
+}
+
+func (r *responseCapture) Header() http.Header         { return r.header }
+func (r *responseCapture) WriteHeader(code int)        { r.status = code }
+func (r *responseCapture) Write(b []byte) (int, error) { return r.body.Write(b) }

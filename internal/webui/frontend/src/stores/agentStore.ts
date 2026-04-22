@@ -183,6 +183,25 @@ export function createAgentStore(
   // refetches use the same workspace as the polling loop.
   let activeWorkspaceID = "";
 
+  // Drops entries from `patch` whose serialized value equals the current
+  // store value, so polling ticks that return identical data don't fire a
+  // new reference to subscribers (zustand's default equality is Object.is).
+  // JSON.stringify is fine here: payloads are API responses without
+  // undefineds, functions, or circular refs.
+  function skipIfEqual<K extends keyof AgentStore>(
+    patch: Partial<AgentStore>,
+    current: AgentStore,
+    keys: readonly K[],
+  ): Partial<AgentStore> {
+    const out: Partial<AgentStore> = { ...patch };
+    for (const k of keys) {
+      if (k in out && JSON.stringify(out[k]) === JSON.stringify(current[k])) {
+        delete out[k];
+      }
+    }
+    return out;
+  }
+
   // --- Internal timer helpers ---
 
   function clearRetryTimers(): void {
@@ -302,22 +321,33 @@ export function createAgentStore(
       fetchStartTime = Date.now();
       set({ isLoading: true });
 
+      // Pin wsID so awaits in this cycle can't splice data across a
+      // workspace switch.
+      const wsID = activeWorkspaceID;
+
       try {
         const agentsResult = await withTimeout(
-          fetchAgents(activeWorkspaceID),
+          fetchAgents(wsID),
           FETCH_TIMEOUT_MS,
           "Agent fetch",
         );
+        if (wsID !== activeWorkspaceID) return;
 
         // Primary success
         const now = Date.now();
-        set({
-          agents: agentsResult,
-          isConnected: true,
-          error: null,
-          lastUpdated: now,
-          isLoading: false,
-        });
+        set(
+          skipIfEqual(
+            {
+              agents: agentsResult,
+              isConnected: true,
+              error: null,
+              lastUpdated: now,
+              isLoading: false,
+            },
+            get(),
+            ["agents"] as const,
+          ),
+        );
 
         reportSuccess(set);
 
@@ -336,16 +366,23 @@ export function createAgentStore(
         void (async () => {
           try {
             const statusResult = await withTimeout(
-              fetchStatus(activeWorkspaceID),
+              fetchStatus(wsID),
               FETCH_TIMEOUT_MS,
               "Status fetch",
             );
-            set({
-              tasks: statusResult.tasks,
-              agentTasks: statusResult.agentTasks,
-              sync: statusResult.sync,
-              stats: statusResult.stats,
-            });
+            if (wsID !== activeWorkspaceID) return;
+            set(
+              skipIfEqual(
+                {
+                  tasks: statusResult.tasks,
+                  agentTasks: statusResult.agentTasks,
+                  sync: statusResult.sync,
+                  stats: statusResult.stats,
+                },
+                get(),
+                ["tasks", "agentTasks", "sync", "stats"] as const,
+              ),
+            );
           } catch (statusError) {
             console.warn(
               "Loom status fetch failed:",
@@ -359,11 +396,16 @@ export function createAgentStore(
         void (async () => {
           try {
             const tasksResult = await withTimeout(
-              fetchTasks(activeWorkspaceID),
+              fetchTasks(wsID),
               FETCH_TIMEOUT_MS,
               "Tasks fetch",
             );
-            set({ taskLists: tasksResult });
+            if (wsID !== activeWorkspaceID) return;
+            set(
+              skipIfEqual({ taskLists: tasksResult }, get(), [
+                "taskLists",
+              ] as const),
+            );
           } catch (taskError) {
             console.warn(
               "Loom tasks fetch failed:",
@@ -415,6 +457,14 @@ export function createAgentStore(
       }
 
       const interval = options?.pollInterval ?? 5000;
+
+      // Reset backoff so a new workspace doesn't inherit stale retry delay
+      // from a previous workspace's failure streak.
+      if (wsID !== activeWorkspaceID) {
+        currentRetryDelay = INITIAL_RETRY_DELAY_S;
+        consecutiveFailuresAtCeiling = 0;
+      }
+
       activeWorkspaceID = wsID;
       isPolling = true;
 
