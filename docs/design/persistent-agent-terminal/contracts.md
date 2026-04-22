@@ -30,6 +30,8 @@ service Terminal {
   rpc Attach(stream AttachClientMsg) returns (stream AttachServerMsg);
   rpc Kill(KillRequest) returns (KillResponse);
   rpc List(ListRequest) returns (ListResponse);
+  rpc Quiesce(QuiesceRequest) returns (QuiesceResponse);
+  rpc Resume(ResumeRequest) returns (ResumeResponse);
 }
 
 message AttachClientMsg {
@@ -108,6 +110,48 @@ message SessionInfo {
 ```
 
 Read-only; used by the control plane for diagnostics and idle-snapshot decisions.
+
+### `Quiesce(QuiesceRequest)` — unary
+
+```proto
+message QuiesceRequest  { string session = 1; }
+message QuiesceResponse { bool   quiesced = 1; }  // true if state changed; false if already quiesced
+
+message ResumeRequest   { string session = 1; }
+message ResumeResponse  { bool   resumed  = 1; }  // true if state changed; false if not quiesced
+```
+
+**Semantics.**
+- `Quiesce(session)` flushes the session's scrollback ring to disk and halts further ring writes
+  for that session. Called by `loom-control-plane` before `vm-host.SaveSnapshot` so the snapshot
+  captures a consistent on-disk scrollback. The PTY continues to accept output from the child;
+  those bytes are buffered in kernel PTY buffers and may be read after `Resume`, or lost if the
+  shell generates more than kernel buffer size (bounded — typical limit ~4KB). For long-quiesce
+  scenarios the caller is expected to bound quiesce windows accordingly.
+- `Quiesce` returns only after the flush is durable; the response is the synchronous signal that
+  the session is snapshot-safe.
+- `Resume(session)` re-enables ring writes for a session previously quiesced. Called by
+  `loom-control-plane` after a successful `vm-host.ResumeFromSnapshot`. Any PTY output produced
+  during the quiesce window that is still in kernel buffers will drain into the ring on the next
+  read cycle.
+- Both RPCs are idempotent: `Quiesce` on an already-quiesced session returns OK with
+  `quiesced = false`; `Resume` on a non-quiesced session returns OK with `resumed = false`.
+- These RPCs are session-scoped and share the same mTLS-authenticated channel as `Attach` / `Kill`
+  / `List`. The `loom-control-plane` is the expected caller; `loom-webui` has no use for them and
+  should not invoke them in normal operation.
+
+**Error codes.**
+- `NOT_FOUND` — session does not exist on this agent.
+- `FAILED_PRECONDITION` — scrollback flush target is unwritable (disk full, state dir missing).
+  `Resume` does not currently raise this code, but callers should be prepared for it should a
+  future implementation fail to re-arm ring writes.
+- `UNAVAILABLE` — agent is shutting down.
+- `PERMISSION_DENIED` — mTLS cert doesn't scope to this workspace/agent.
+
+### `Resume(ResumeRequest)` — unary
+
+See the `Quiesce` section above for the request/response protos and semantics; `Resume` is the
+counterpart RPC and is documented together with `Quiesce` for sequence clarity.
 
 ## 2. `loom-webui` → `loom-control-plane`
 
@@ -248,6 +292,24 @@ message HeartbeatAck {
 - Control plane uses `last_user_activity` and `attached_count == 0` to decide when to send
   `REQUEST_SNAPSHOT` for idle suspension.
 - `REQUEST_SHUTDOWN` gives the agent N seconds to quiesce before the vm-host sends `KillVM`.
+
+**Relationship to `Terminal.Quiesce` (§1).** When the control plane decides to snapshot, it sends
+`HeartbeatAck{directive: REQUEST_SNAPSHOT}` as an early-warning signal. Agentd is not required to
+act on this directive; the authoritative trigger is the subsequent `Terminal.Quiesce(session)`
+call per session. The `REQUEST_SNAPSHOT` directive exists so agentd can log, or in future
+prepare, before the blocking `Quiesce` call arrives. The full snapshot sequence from the control
+plane's perspective is therefore:
+
+1. Control plane sends `HeartbeatAck{REQUEST_SNAPSHOT}` on the heartbeat stream (advisory hint).
+2. Control plane calls `Terminal.Quiesce(session)` for each session on the agent (authoritative;
+   blocks until the scrollback flush is durable).
+3. Control plane calls `vm-host.SaveSnapshot`.
+4. Control plane calls `vm-host.ResumeFromSnapshot` (on restore).
+5. Control plane calls `Terminal.Resume(session)` for each session (re-enables ring writes).
+
+Agents MUST NOT treat `REQUEST_SNAPSHOT` as a command to quiesce themselves — quiescing is
+always driven by the explicit `Quiesce` RPC so that the control plane owns the ordering between
+flush completion and `SaveSnapshot`.
 
 ## 5. Redis key schema
 
