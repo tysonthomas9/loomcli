@@ -47,39 +47,57 @@ func BuildScopedMonitorHandlers(nameFn func(wsID string) string) func(
 		collect := func(wsID string) *monitor.MonitorData {
 			return collectors.get(wsID, pathFn, poolFn, nameFn)
 		}
-		return map[string]http.HandlerFunc{
-			"GET /api/workspaces/{ws}/monitor/status": scopedHandler(collect, nameFn, func(data *monitor.MonitorData, wsName string) any {
-				return StatusResponse{
-					Workspace:      WorkspaceInfo{Mode: "workspace", Name: wsName},
-					Agents:         data.Agents,
-					Tasks:          data.Tasks,
-					InProgressList: data.InProgressTasks,
-					AgentTasks:     data.AgentTasks,
-					Stats:          data.Stats,
-					Sync:           data.SyncStatus,
-					Timestamp:      data.Timestamp,
-				}
-			}),
-			"GET /api/workspaces/{ws}/monitor/tasks": scopedHandler(collect, nameFn, func(data *monitor.MonitorData, _ string) any {
-				return TasksResponse{
-					Summary:          data.Tasks,
-					NeedsPlanning:    data.NeedsPlanningTasks,
-					ReadyToImplement: data.ReadyToImplement,
-					NeedsReview:      data.ReviewTasks,
-					InProgress:       data.InProgressTasks,
-					Backlog:          data.BacklogTasks,
-					Closed:           data.ClosedTasks,
-					Timestamp:        data.Timestamp,
-				}
-			}),
-			"GET /api/workspaces/{ws}/monitor/stats": scopedHandler(collect, nameFn, func(data *monitor.MonitorData, _ string) any {
-				return StatsResponse{Stats: data.Stats, Timestamp: data.Timestamp}
-			}),
-			"GET /api/workspaces/{ws}/monitor/sync": scopedHandler(collect, nameFn, func(data *monitor.MonitorData, _ string) any {
-				return SyncResponse{Sync: data.SyncStatus, Timestamp: data.Timestamp}
-			}),
-			"GET /api/workspaces/{ws}/monitor/usage": usageStores.handle(pathFn),
-		}
+		handlers := buildCollectorRoutes(collect, nameFn)
+		handlers["GET /api/workspaces/{ws}/monitor/usage"] = usageStores.handle(pathFn)
+		return handlers
+	}
+}
+
+// buildCollectorRoutes wires the five routes backed by CollectMonitorDataScoped.
+// /monitor/usage lives outside this map because it reads from usage.jsonl
+// rather than the cached MonitorData.
+func buildCollectorRoutes(
+	collect func(wsID string) *monitor.MonitorData,
+	nameFn func(wsID string) string,
+) map[string]http.HandlerFunc {
+	return map[string]http.HandlerFunc{
+		"GET /api/workspaces/{ws}/monitor/agents": scopedHandler(collect, nameFn, func(data *monitor.MonitorData, wsName string) any {
+			return AgentsResponse{
+				Workspace: WorkspaceInfo{Mode: "workspace", Name: wsName},
+				Agents:    data.Agents,
+				Timestamp: data.Timestamp,
+			}
+		}),
+		"GET /api/workspaces/{ws}/monitor/status": scopedHandler(collect, nameFn, func(data *monitor.MonitorData, wsName string) any {
+			return StatusResponse{
+				Workspace:      WorkspaceInfo{Mode: "workspace", Name: wsName},
+				Agents:         data.Agents,
+				Tasks:          data.Tasks,
+				InProgressList: data.InProgressTasks,
+				AgentTasks:     data.AgentTasks,
+				Stats:          data.Stats,
+				Sync:           data.SyncStatus,
+				Timestamp:      data.Timestamp,
+			}
+		}),
+		"GET /api/workspaces/{ws}/monitor/tasks": scopedHandler(collect, nameFn, func(data *monitor.MonitorData, _ string) any {
+			return TasksResponse{
+				Summary:          data.Tasks,
+				NeedsPlanning:    data.NeedsPlanningTasks,
+				ReadyToImplement: data.ReadyToImplement,
+				NeedsReview:      data.ReviewTasks,
+				InProgress:       data.InProgressTasks,
+				Backlog:          data.BacklogTasks,
+				Closed:           data.ClosedTasks,
+				Timestamp:        data.Timestamp,
+			}
+		}),
+		"GET /api/workspaces/{ws}/monitor/stats": scopedHandler(collect, nameFn, func(data *monitor.MonitorData, _ string) any {
+			return StatsResponse{Stats: data.Stats, Timestamp: data.Timestamp}
+		}),
+		"GET /api/workspaces/{ws}/monitor/sync": scopedHandler(collect, nameFn, func(data *monitor.MonitorData, _ string) any {
+			return SyncResponse{Sync: data.SyncStatus, Timestamp: data.Timestamp}
+		}),
 	}
 }
 

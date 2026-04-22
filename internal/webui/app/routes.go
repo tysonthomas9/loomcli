@@ -160,9 +160,11 @@ func (app *Server) registerWorkspaceRoutes() {
 // so they inherit the middleware.Workspace wrapping that validates the {ws}
 // path param and populates the request context.
 func (app *Server) registerScopedMonitorAndDaemonRoutes(wsMux *http.ServeMux) {
-	if h := app.config.MonitorHandlers.AgentsScoped; h != nil {
-		wsMux.Handle("GET /api/workspaces/{ws}/monitor/agents", h)
-	}
+	// /monitor/agents is handled by ScopedMonitorHandlersFn below; it now
+	// uses the same per-workspace CollectMonitorDataScoped path as the other
+	// scoped routes. The global-collector + name-filter handler
+	// (MonitorHandlers.AgentsScoped) returned empty agents for any workspace
+	// that wasn't the one the global collector was initialized against.
 
 	pathFn := func(wsID string) string {
 		return service.ResolveWorkspacePath(app.config.WorkspaceConfigFn, wsID)
