@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"log/slog"
@@ -337,26 +338,24 @@ func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimp
 	// preview, etc.), so we should not also serve the embedded copy.
 	apiOnly := serveAPIOnly || len(serveFrontendURLs) > 0
 	return webui.ServerConfig{
-		Port:                   servePort,
-		BindAddress:            serveBindAddr,
-		SocketPath:             serveWebUISocket,
-		APIOnly:                apiOnly,
-		MonitorHandlers:        monitorHandlers,
-		LoadDaemonSupervisorFn: daemonwire.LoadDaemonSupervisor,
-		LoadDaemonConfigFn:     daemonwire.LoadDaemonConfigRaw,
-		TerminalCmd:            fmt.Sprintf("loom lead --backend %s", backend),
-		HSTSEnabled:            serveHSTS,
-		ExtAuthURL:             serveAuthURL,
-		ExtAuthJWKSURL:         serveAuthJWKSURL,
-		ExtAuthIssuer:          serveAuthIssuer,
-		ExtAuthAudience:        serveAuthAudience,
-		ExtAuthAllowInsecure:   serveAuthAllowInsecure,
-		GitOps:                 gitOps,
-		FileOps:                gitOps,
-		BackendOps:             opsimpl.NewBackendOps(),
-		NotifyTokenDir:         cli.GetBeadsDir(),
-		Logger:                 slog.Default(),
-		SentryDSN:              serveSentryDSN,
+		Port:                 servePort,
+		BindAddress:          serveBindAddr,
+		SocketPath:           serveWebUISocket,
+		APIOnly:              apiOnly,
+		MonitorHandlers:      monitorHandlers,
+		TerminalCmd:          fmt.Sprintf("loom lead --backend %s", backend),
+		HSTSEnabled:          serveHSTS,
+		ExtAuthURL:           serveAuthURL,
+		ExtAuthJWKSURL:       serveAuthJWKSURL,
+		ExtAuthIssuer:        serveAuthIssuer,
+		ExtAuthAudience:      serveAuthAudience,
+		ExtAuthAllowInsecure: serveAuthAllowInsecure,
+		GitOps:               gitOps,
+		FileOps:              gitOps,
+		BackendOps:           opsimpl.NewBackendOps(),
+		NotifyTokenDir:       cli.GetBeadsDir(),
+		Logger:               slog.Default(),
+		SentryDSN:            serveSentryDSN,
 	}
 }
 
@@ -386,7 +385,22 @@ func applyWorkspaceConfig(cfg *webui.ServerConfig) {
 		daemonwire.ListWorkspaces,
 	)
 	if cfg.WorkspaceDaemonResolver != nil {
-		cfg.AgentQueueFn = daemonwire.BuildWorkspaceAgentQueueFn(cfg.WorkspaceDaemonResolver)
+		resolver := cfg.WorkspaceDaemonResolver
+		cfg.AgentQueueFn = daemonwire.BuildWorkspaceAgentQueueFn(resolver)
+		cfg.WsDaemonSupervisorFn = func(wsID string) (*webui.DaemonSupervisorData, error) {
+			resolved, err := resolver(wsID)
+			if err != nil {
+				return nil, err
+			}
+			return daemonwire.LoadDaemonSupervisor(resolved.WorkDir)
+		}
+		cfg.WsDaemonConfigFn = func(wsID string) (json.RawMessage, error) {
+			resolved, err := resolver(wsID)
+			if err != nil {
+				return nil, err
+			}
+			return daemonwire.LoadDaemonConfigRaw(resolved.WorkDir)
+		}
 	}
 }
 

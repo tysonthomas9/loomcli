@@ -70,8 +70,8 @@ func (app *Server) buildTerminalModules() {
 	}
 }
 
-// buildInfraModules adds fleet, diff, file, and agent control modules
-// when their dependencies are available.
+// buildInfraModules adds fleet, diff, file, agent control, and daemon
+// inspection modules when their dependencies are available.
 func (app *Server) buildInfraModules() {
 	if app.fleetRegistry != nil {
 		app.wsModules = append(app.wsModules,
@@ -89,5 +89,10 @@ func (app *Server) buildInfraModules() {
 
 	if app.config.AgentControlFn != nil {
 		app.wsModules = append(app.wsModules, webui.NewAgentControlModule(app.config.AgentControlFn))
+	}
+
+	if app.config.WsDaemonSupervisorFn != nil || app.config.WsDaemonConfigFn != nil {
+		app.wsModules = append(app.wsModules,
+			webui.NewDaemonModule(app.config.WsDaemonSupervisorFn, app.config.WsDaemonConfigFn))
 	}
 }

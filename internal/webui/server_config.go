@@ -92,8 +92,8 @@ type ServerConfig struct {
 	AgentControlFn          agentcontrol.AgentControlFn                             // Sends agent lifecycle commands to the daemon control socket; nil in fleet mode or --no-daemon
 	DaemonSupervisorFn      func() (*DaemonSupervisorData, error)                   // Returns daemon supervisor state from state file; nil = endpoint unavailable
 	DaemonConfigFn          func() (json.RawMessage, error)                         // Returns effective merged daemon config as JSON; nil = endpoint unavailable
-	LoadDaemonSupervisorFn  func(projectDir string) (*DaemonSupervisorData, error)  // Workspace-scoped counterpart to DaemonSupervisorFn; used by /api/workspaces/{ws}/daemon/supervisor
-	LoadDaemonConfigFn      func(projectDir string) (json.RawMessage, error)        // Workspace-scoped counterpart to DaemonConfigFn; used by /api/workspaces/{ws}/daemon/config
+	WsDaemonSupervisorFn    func(wsID string) (*DaemonSupervisorData, error)        // Workspace-scoped daemon supervisor state; nil = /api/workspaces/{ws}/daemon/supervisor unavailable
+	WsDaemonConfigFn        func(wsID string) (json.RawMessage, error)              // Workspace-scoped daemon config; nil = /api/workspaces/{ws}/daemon/config unavailable
 	AgentQueueFn            func(wsID, agentName string) ([]AgentQueueEntry, error) // Returns scored work queue for named agent in the given workspace; nil = endpoint unavailable
 	FleetMode               bool                                                    // When true, skip beads-specific lifecycle hooks (pools, subscribers); fleet server manages agents
 	FleetClientURL          string                                                  // Fleet server URL for fleet-mode workers (e.g., "http://fleet.example.com"); empty = no fleet client

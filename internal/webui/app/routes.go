@@ -162,9 +162,11 @@ func (app *Server) registerWorkspaceRoutes() {
 }
 
 // registerScopedMonitorAndDaemonRoutes installs the workspace-scoped
-// counterparts of global /api/monitor/* and /api/daemon/* routes onto wsMux
-// so they inherit the middleware.Workspace wrapping that validates the {ws}
-// path param and populates the request context.
+// counterparts of /api/monitor/* routes onto wsMux so they inherit the
+// middleware.Workspace wrapping that validates the {ws} path param and
+// populates the request context. Daemon inspection routes
+// (/api/workspaces/{ws}/daemon/*) live in DaemonModule and are wired through
+// buildInfraModules() instead.
 func (app *Server) registerScopedMonitorAndDaemonRoutes(wsMux *http.ServeMux) {
 	// /monitor/agents is handled by ScopedMonitorHandlersFn below; it now
 	// uses the same per-workspace CollectMonitorDataScoped path as the other
@@ -172,30 +174,23 @@ func (app *Server) registerScopedMonitorAndDaemonRoutes(wsMux *http.ServeMux) {
 	// (MonitorHandlers.AgentsScoped) returned empty agents for any workspace
 	// that wasn't the one the global collector was initialized against.
 
+	if app.config.ScopedMonitorHandlersFn == nil || app.multiPool == nil {
+		return
+	}
 	pathFn := func(wsID string) string {
 		return service.ResolveWorkspacePath(app.config.WorkspaceConfigFn, wsID)
 	}
-	if app.config.ScopedMonitorHandlersFn != nil && app.multiPool != nil {
-		poolFn := func(wsID string) beadsbackend.Pool {
-			// daemon.Pool structurally satisfies beadsbackend.Pool; nil map
-			// lookup returns a nil interface, which callers check before
-			// invoking CollectMonitorDataScoped.
-			p := app.multiPool.PoolForWorkspace(wsID)
-			if p == nil {
-				return nil
-			}
-			return p
+	poolFn := func(wsID string) beadsbackend.Pool {
+		// daemon.Pool structurally satisfies beadsbackend.Pool; nil map
+		// lookup returns a nil interface, which callers check before
+		// invoking CollectMonitorDataScoped.
+		p := app.multiPool.PoolForWorkspace(wsID)
+		if p == nil {
+			return nil
 		}
-		for pattern, handler := range app.config.ScopedMonitorHandlersFn(pathFn, poolFn) {
-			wsMux.Handle(pattern, handler)
-		}
+		return p
 	}
-	if load := app.config.LoadDaemonSupervisorFn; load != nil {
-		wsMux.Handle("GET /api/workspaces/{ws}/daemon/supervisor",
-			webui.HandleDaemonSupervisorScoped(pathFn, load))
-	}
-	if load := app.config.LoadDaemonConfigFn; load != nil {
-		wsMux.Handle("GET /api/workspaces/{ws}/daemon/config",
-			webui.HandleDaemonConfigScoped(pathFn, load))
+	for pattern, handler := range app.config.ScopedMonitorHandlersFn(pathFn, poolFn) {
+		wsMux.Handle(pattern, handler)
 	}
 }
