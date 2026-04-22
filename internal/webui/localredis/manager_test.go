@@ -47,6 +47,13 @@ func TestDumpLoad_RoundTrip(t *testing.T) {
 	}).Err(); err != nil {
 		t.Fatalf("HSet ui-state: %v", err)
 	}
+	// Workspace-scoped ui-state (the production key shape) — covered by the
+	// same "terminal:ui-state" prefix via strings.HasPrefix.
+	if err := m1.Client().HSet(ctx, "terminal:ui-state:ws1", map[string]any{
+		"active_tab": "t1",
+	}).Err(); err != nil {
+		t.Fatalf("HSet scoped ui-state: %v", err)
+	}
 	if err := m1.Client().Set(ctx, "ws:ws1:issue:tabs:loomcli-abc.1", `{"tabs":[]}`, 24*time.Hour).Err(); err != nil {
 		t.Fatalf("Set issuetabs: %v", err)
 	}
@@ -106,6 +113,14 @@ func TestDumpLoad_RoundTrip(t *testing.T) {
 	}
 	if active != "sess1" {
 		t.Errorf("active_tab = %q, want %q", active, "sess1")
+	}
+
+	scopedActive, err := m2.Client().HGet(ctx, "terminal:ui-state:ws1", "active_tab").Result()
+	if err != nil {
+		t.Fatalf("HGet scoped ui-state: %v", err)
+	}
+	if scopedActive != "t1" {
+		t.Errorf("scoped active_tab = %q, want %q", scopedActive, "t1")
 	}
 
 	tabs, err := m2.Client().Get(ctx, "ws:ws1:issue:tabs:loomcli-abc.1").Result()

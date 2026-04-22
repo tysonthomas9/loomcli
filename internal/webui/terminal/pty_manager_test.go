@@ -2,16 +2,51 @@ package terminal
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
+
+// TestNewPTYManager_EmptyCwdPanics verifies the constructor refuses an empty
+// cwd instead of silently falling back to $HOME or any other default. The
+// panic is load-bearing — a silent fallback is the bug class that the
+// MultiPTYManager epic exists to eliminate.
+func TestNewPTYManager_EmptyCwdPanics(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic on empty cwd")
+		}
+		msg, ok := r.(string)
+		if !ok {
+			t.Fatalf("panic value = %#v, want string", r)
+		}
+		if !strings.Contains(msg, "cwd is required") {
+			t.Errorf("panic message = %q, want contains 'cwd is required'", msg)
+		}
+	}()
+	_ = NewPTYManager("", 0, "")
+}
+
+// TestNewPTYManager_CwdIsRespected verifies the constructor threads the cwd
+// argument straight through to the manager's cwd field (the value later
+// assigned to cmd.Dir at spawn time).
+func TestNewPTYManager_CwdIsRespected(t *testing.T) {
+	dir := t.TempDir()
+	m := NewPTYManager("cat", 0, dir)
+	t.Cleanup(func() { _ = m.Shutdown() })
+	if m.cwd != dir {
+		t.Errorf("m.cwd = %q, want %q", m.cwd, dir)
+	}
+}
 
 // newTestManager returns a manager configured to spawn `/bin/bash -c "cat"`.
 // cat echoes stdin to stdout so tests can deterministically drive the PTY.
 func newTestManager(t *testing.T) *PTYManager {
 	t.Helper()
-	m := NewPTYManager("cat", 0)
+	m := NewPTYManager("cat", 0, t.TempDir())
 	m.SetGracePeriod(200 * time.Millisecond)
 	m.SetIdleTimeout(200 * time.Millisecond)
 	t.Cleanup(func() { _ = m.Shutdown() })
@@ -418,4 +453,32 @@ func TestChildExitRemovesSession(t *testing.T) {
 	}
 	waitUntil(t, func() bool { return m.SessionCount() == 0 }, 2*time.Second,
 		"session to be removed after child exits")
+}
+
+// TestShutdown_RejectsFutureAttach — MultiPTYManager.Deregister relies on
+// this contract to prevent orphan sessions after the entry is dropped.
+func TestShutdown_RejectsFutureAttach(t *testing.T) {
+	m := NewPTYManager("cat", 0, t.TempDir())
+	if err := m.Shutdown(); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	_, _, err := m.AttachSession(SessionKey{Workspace: "ws1", Name: "s"}, 80, 24, []string{"-c", "cat"})
+	if !errors.Is(err, ErrPTYManagerClosed) {
+		t.Errorf("post-Shutdown AttachSession err = %v, want ErrPTYManagerClosed", err)
+	}
+	if got := m.SessionCount(); got != 0 {
+		t.Errorf("post-Shutdown SessionCount=%d want 0 (attach must not have spawned)", got)
+	}
+}
+
+// TestShutdown_Idempotent — called from both Deregister and Close paths;
+// a naive implementation would panic on the second close(reaperStop).
+func TestShutdown_Idempotent(t *testing.T) {
+	m := NewPTYManager("cat", 0, t.TempDir())
+	if err := m.Shutdown(); err != nil {
+		t.Fatalf("first Shutdown: %v", err)
+	}
+	if err := m.Shutdown(); err != nil {
+		t.Errorf("second Shutdown: %v, want nil", err)
+	}
 }

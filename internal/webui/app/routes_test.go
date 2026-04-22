@@ -669,8 +669,8 @@ func TestSetupRoutes_FlatTerminalWSEndpointReturns404(t *testing.T) {
 // return 404 even when termManager is non-nil (they have been removed in favor
 // of workspace-scoped equivalents).
 func TestSetupRoutes_FlatTerminalRoutesReturn404(t *testing.T) {
-	ptyMgr := terminal.NewPTYManager("bash", 0)
-	defer ptyMgr.Shutdown()
+	ptyMgr := terminal.NewMultiPTYManager("bash", 0)
+	defer ptyMgr.Close()
 
 	app := &Server{ptyMgr: ptyMgr}
 	setupTestRoutes(t, app)
@@ -1637,8 +1637,8 @@ func TestSetupRoutes_WorkspaceBackendPatchReadsBody(t *testing.T) {
 // TestSetupRoutes_FlatTerminalTokenReturns404 verifies that GET /api/terminal/token
 // returns 404 (flat route removed, only workspace-scoped route exists).
 func TestSetupRoutes_FlatTerminalTokenReturns404(t *testing.T) {
-	ptyMgr := terminal.NewPTYManager("bash", 0)
-	t.Cleanup(func() { ptyMgr.Shutdown() })
+	ptyMgr := terminal.NewMultiPTYManager("bash", 0)
+	t.Cleanup(func() { ptyMgr.Close() })
 
 	termAuth, err := realtime.NewTerminalAuth()
 	if err != nil {

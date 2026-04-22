@@ -111,7 +111,7 @@ func validateTerminalWSRequest(w http.ResponseWriter, r *http.Request, manager w
 	// AttachSession doesn't count them against the cap, and a 503 here
 	// would lock users out of live sessions until one is killed.
 	key := webuterminal.SessionKey{Workspace: workspace, Name: session}
-	if !manager.HasSession(key) && manager.SessionCount() >= manager.MaxSessions() {
+	if !manager.HasSession(key) && manager.SessionCountFor(workspace) >= manager.MaxSessions() {
 		handler.WriteJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
 			"success": false, "error": "maximum terminal sessions reached",
 		})
@@ -158,6 +158,25 @@ func upgradeTerminalWS(w http.ResponseWriter, r *http.Request, patterns []string
 	return conn, true
 }
 
+// classifyAttachErr maps an AttachSession error to a WebSocket close code
+// and log line. ErrPTYManagerClosed / ErrWorkspaceNotRegistered are
+// expected outcomes when a workspace is deregistered mid-flight; they
+// close with StatusGoingAway at INFO level rather than StatusInternalError
+// at ERROR level, so on-call noise doesn't spike on every workspace delete.
+func classifyAttachErr(err error, session, workspace string) (websocket.StatusCode, string) { //nolint:staticcheck // SA1019: websocket migration tracked separately
+	switch {
+	case errors.Is(err, webuterminal.ErrPTYMaxSessionsReached):
+		slog.Info("terminal session limit reached", "session", session)
+		return websocket.StatusInternalError, err.Error() //nolint:staticcheck // SA1019
+	case errors.Is(err, webuterminal.ErrPTYManagerClosed), errors.Is(err, webuterminal.ErrWorkspaceNotRegistered):
+		slog.Info("terminal attach after workspace unavailable", "session", session, "workspace", workspace, "err", err)
+		return websocket.StatusGoingAway, "workspace unavailable" //nolint:staticcheck // SA1019
+	default:
+		slog.Error("failed to attach terminal session", "session", session, "err", err)
+		return websocket.StatusInternalError, err.Error() //nolint:staticcheck // SA1019
+	}
+}
+
 // runTerminalRelay attaches to the (workspace, session) PTY session and runs
 // the bidirectional relay until the WebSocket closes. On WS close the session
 // is detached (grace period armed); the PTY and child process stay alive.
@@ -166,12 +185,7 @@ func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalW
 
 	att, reattach, err := p.manager.AttachSession(key, 80, 24, webuterminal.ArgvForSession(session))
 	if err != nil {
-		if errors.Is(err, webuterminal.ErrPTYMaxSessionsReached) {
-			slog.Info("terminal session limit reached", "session", session)
-		} else {
-			slog.Error("failed to attach terminal session", "session", session, "err", err)
-		}
-		return websocket.StatusInternalError, err.Error()
+		return classifyAttachErr(err, session, workspace)
 	}
 	connID := att.ConnID()
 

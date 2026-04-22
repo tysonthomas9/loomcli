@@ -34,8 +34,8 @@ const (
 // includedPrefixes are key patterns always persisted.
 var includedPrefixes = []string{
 	"terminal:meta:",
-	"terminal:ui-state",
-	"ws:", // matches ws:{wsID}:issue:tabs:* and ws:{wsID}:issue:sessions:*
+	"terminal:ui-state", // matches per-workspace "terminal:ui-state:{wsID}" hashes via HasPrefix
+	"ws:",               // matches ws:{wsID}:issue:tabs:* and ws:{wsID}:issue:sessions:*
 }
 
 // fleetPrefixes are key patterns persisted only when fleet mode is on.
