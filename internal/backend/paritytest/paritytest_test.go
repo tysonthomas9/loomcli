@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/backend"
 )
 
 // TestParityTest_PackageBuilds is a smoke test confirming the package
@@ -89,6 +91,42 @@ func TestParityTest_FixtureLoader(t *testing.T) {
 	// Error paths.
 	if _, err := LoadFixture("testdata/fixtures/does_not_exist.json"); err == nil {
 		t.Error("expected error for missing fixture")
+	}
+}
+
+// TestIssueDataToMap_NilReturnsNoData exercises the nil-in/nil-out path —
+// a nil IssueData is "nothing to report", not an error.
+func TestIssueDataToMap_NilReturnsNoData(t *testing.T) {
+	m, err := issueDataToMap(nil)
+	if err != nil {
+		t.Fatalf("nil input should not error: %v", err)
+	}
+	if m != nil {
+		t.Errorf("nil input should yield nil map; got %v", m)
+	}
+}
+
+// TestIssueDataToMap_RoundTrip confirms the normal path emits a flat
+// JSON-shaped map with expected keys. If the shape ever changes the
+// diff layer's field list has to change with it, so this test is the
+// canary.
+func TestIssueDataToMap_RoundTrip(t *testing.T) {
+	prio := 2
+	d := &backend.IssueData{
+		ID:       "PARITY-1",
+		Title:    "hello",
+		Priority: prio,
+		Status:   "open",
+	}
+	m, err := issueDataToMap(d)
+	if err != nil {
+		t.Fatalf("round-trip: %v", err)
+	}
+	if m["title"] != "hello" {
+		t.Errorf("title: got %v want hello", m["title"])
+	}
+	if m["id"] != "PARITY-1" {
+		t.Errorf("id: got %v want PARITY-1", m["id"])
 	}
 }
 

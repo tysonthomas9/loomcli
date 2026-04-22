@@ -81,8 +81,15 @@ func NewReport(contractVersion, mode string) *Report {
 	}
 }
 
-// AddFixture appends a fixture result and updates summary counts. Safe for
-// concurrent use.
+// AddFixture appends a fixture result to the report. Safe for concurrent
+// use.
+//
+// Only the structural counters (FixturesRun, StepsExecuted) are advanced
+// here — diff-derived counters (TotalComparisons, DiffsFound,
+// UnapprovedDiffs, etc.) are computed in Finalize by walking the
+// accumulated Fixtures. This mirrors fleet-db's canonical report pattern
+// and avoids the bug where TotalComparisons and DiffsFound always moved
+// in lockstep (since both were `+= len(diffs)`).
 func (r *Report) AddFixture(fixtureID, title string, diffs []DiffEntry, stepsExecuted int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -103,18 +110,6 @@ func (r *Report) AddFixture(fixtureID, title string, diffs []DiffEntry, stepsExe
 
 	r.Summary.FixturesRun++
 	r.Summary.StepsExecuted += stepsExecuted
-	r.Summary.TotalComparisons += len(diffs)
-	r.Summary.DiffsFound += len(diffs)
-	for _, d := range diffs {
-		switch d.Verdict {
-		case "fail":
-			r.Summary.UnapprovedDiffs++
-		case "waived":
-			r.Summary.WaivedDiffs++
-		case "normalized":
-			r.Summary.NormalizedDiffs++
-		}
-	}
 }
 
 // AddWarning appends a non-fatal warning (e.g. expired waiver). Safe for
@@ -125,10 +120,35 @@ func (r *Report) AddWarning(msg string) {
 	r.Warnings = append(r.Warnings, msg)
 }
 
-// Finalize stamps the overall verdict based on accumulated counts.
+// Finalize recomputes diff-derived summary counters by walking the
+// accumulated fixtures, then stamps the overall verdict. Idempotent —
+// callers may invoke it multiple times without skewing the counts.
 func (r *Report) Finalize() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	// Reset diff-derived counters so Finalize is safely idempotent.
+	r.Summary.TotalComparisons = 0
+	r.Summary.DiffsFound = 0
+	r.Summary.UnapprovedDiffs = 0
+	r.Summary.WaivedDiffs = 0
+	r.Summary.NormalizedDiffs = 0
+
+	for _, fr := range r.Fixtures {
+		for _, d := range fr.Diffs {
+			r.Summary.TotalComparisons++
+			r.Summary.DiffsFound++
+			switch d.Verdict {
+			case "fail":
+				r.Summary.UnapprovedDiffs++
+			case "waived":
+				r.Summary.WaivedDiffs++
+			case "normalized":
+				r.Summary.NormalizedDiffs++
+			}
+		}
+	}
+
 	if r.Summary.UnapprovedDiffs > 0 {
 		r.Verdict = "fail"
 	} else {

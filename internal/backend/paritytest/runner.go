@@ -7,9 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"reflect"
 	"regexp"
-	"sort"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 )
@@ -118,7 +116,7 @@ func (r *DualRunner) executeStep(ctx context.Context, be backend.IssueBackend, m
 		if err != nil {
 			return nil, err
 		}
-		return issueDataToMap(data), nil
+		return issueDataToMap(data)
 
 	case "issue.show":
 		var p struct {
@@ -131,7 +129,7 @@ func (r *DualRunner) executeStep(ctx context.Context, be backend.IssueBackend, m
 		if err != nil {
 			return nil, err
 		}
-		return issueDataToMap(&details.IssueData), nil
+		return issueDataToMap(&details.IssueData)
 
 	case "issue.update":
 		// Fixtures send flat params (e.g. {"id": "...", "title": "new",
@@ -208,7 +206,7 @@ func (r *DualRunner) executeStep(ctx context.Context, be backend.IssueBackend, m
 			// keeps the runner defensive) still get a sane response map.
 			return map[string]any{"id": p.ID}, nil
 		}
-		return issueDataToMap(cr.Closed), nil
+		return issueDataToMap(cr.Closed)
 
 	case "issue.reopen":
 		var p struct {
@@ -269,19 +267,25 @@ func captureID(resp map[string]any, key string, vars map[string]string) {
 // field-accessible map[string]any by round-tripping through JSON. This
 // exactly matches the JSON shape that fixtures reason about and keeps the
 // diff logic backend-agnostic.
-func issueDataToMap(d *backend.IssueData) map[string]any {
+//
+// Returns (nil, nil) for a nil input — that's "no data to convert", not an
+// error. Returns (nil, err) on marshal/unmarshal failure so callers surface
+// the problem as an _outcome diff rather than silently producing a zero
+// map that would compare equal to whatever the other backend reported (a
+// false-pass).
+func issueDataToMap(d *backend.IssueData) (map[string]any, error) {
 	if d == nil {
-		return nil
+		return nil, nil
 	}
 	b, err := json.Marshal(d)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("marshal IssueData: %w", err)
 	}
 	var m map[string]any
 	if err := json.Unmarshal(b, &m); err != nil {
-		return nil
+		return nil, fmt.Errorf("unmarshal IssueData: %w", err)
 	}
-	return m
+	return m, nil
 }
 
 // diffResponses compares two normalized responses (or their errors) and
@@ -336,92 +340,28 @@ func diffResponses(fixtureID, stepID, method string, fleetResp, beadsResp map[st
 	return diffMaps(fixtureID, stepID, method, fleetResp, beadsResp)
 }
 
-// diffMaps returns one DiffEntry per field where the two backends disagree.
-// Fields that are present on only one side are emitted with a null on the
-// missing side so downstream tooling can distinguish "different value" from
-// "missing field".
-//
-// Fields considered equal-by-design (created_at, updated_at timestamps) are
-// skipped since their values will always drift between backends that issued
-// the mutation at microsecond-different times. These ignores are the only
-// normalization in the MVP — all other drift surfaces as strict diffs.
-func diffMaps(fixtureID, stepID, method string, fleetMap, beadsMap map[string]any) []DiffEntry {
-	if fleetMap == nil && beadsMap == nil {
-		return nil
-	}
-
-	// Fields whose values are expected to diverge by design. created_at /
-	// updated_at drift by microseconds between backends. id drifts because
-	// each backend assigns its own ID generator. If future fixtures need to
-	// lock down ID shape (e.g. PARITY-123 prefix check) they should add a
-	// dedicated assertion step instead of re-enabling id here.
-	ignored := map[string]bool{
-		"created_at": true,
-		"updated_at": true,
-		"id":         true,
-	}
-
-	keys := map[string]bool{}
-	for k := range fleetMap {
-		keys[k] = true
-	}
-	for k := range beadsMap {
-		keys[k] = true
-	}
-
-	// Deterministic order for reproducible reports.
-	sorted := make([]string, 0, len(keys))
-	for k := range keys {
-		sorted = append(sorted, k)
-	}
-	sort.Strings(sorted)
-
-	var diffs []DiffEntry
-	for _, k := range sorted {
-		if ignored[k] {
-			continue
-		}
-		fv := fleetMap[k]
-		bv := beadsMap[k]
-		if fieldsEqual(fv, bv) {
-			continue
-		}
-		diffs = append(diffs, DiffEntry{
-			FixtureID: fixtureID,
-			StepID:    stepID,
-			Method:    method,
-			Field:     k,
-			DriftTag:  "strict",
-			FleetDB:   fv,
-			Beads:     bv,
-			Verdict:   "fail",
-		})
-	}
-	return diffs
+// rpcDiffIgnored is the RPC-level diff ignore set. created_at / updated_at
+// drift by microseconds between backends. id drifts because each backend
+// assigns its own ID generator. If future fixtures need to lock down ID
+// shape (e.g. PARITY-123 prefix check) they should add a dedicated
+// assertion step instead of re-enabling id here.
+var rpcDiffIgnored = map[string]bool{
+	"created_at": true,
+	"updated_at": true,
+	"id":         true,
 }
 
-// fieldsEqual checks deep equality on two unmarshaled JSON values, with one
-// minor accommodation: empty strings and nil are treated identically (both
-// backends serialize a missing string field inconsistently). This matches
-// fleet-db's normalizer behavior for string fields.
-func fieldsEqual(a, b any) bool {
-	if a == nil && b == nil {
-		return true
-	}
-	if aStr, aOK := a.(string); aOK {
-		if bStr, bOK := b.(string); bOK {
-			return aStr == bStr
-		}
-		if b == nil && aStr == "" {
-			return true
-		}
-	}
-	if bStr, bOK := b.(string); bOK {
-		if a == nil && bStr == "" {
-			return true
-		}
-	}
-	return reflect.DeepEqual(a, b)
+// diffMaps delegates to the shared DiffMaps routine with the RPC-level
+// ignore set. Fields present on only one side are emitted with nil on the
+// missing side so downstream tooling can distinguish "different value"
+// from "missing field". DriftTag is "strict" — normalization/waivers are
+// reserved for future fixtures.
+//
+// The field-equality semantics (nil/empty-string equivalence) live in
+// diffcore.go's defaultFieldsEqual; callers that need additional
+// normalization should supply DiffOpts.Equal directly.
+func diffMaps(fixtureID, stepID, method string, fleetMap, beadsMap map[string]any) []DiffEntry {
+	return DiffMaps(DiffOpts{Ignored: rpcDiffIgnored}, fixtureID, stepID, method, fleetMap, beadsMap)
 }
 
 // describeOutcome formats a human-readable string for an outcome mismatch

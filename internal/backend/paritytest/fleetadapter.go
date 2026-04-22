@@ -24,10 +24,14 @@ import (
 // does not produce. See spawnFleetDB for the full rationale.
 //
 // Scope: only the methods exercised by the MVP fixture (crud_create_show) are
-// implemented. Unimplemented methods return backend.ErrNotImplemented so
-// fixtures that hit them produce an informative diff rather than panicking.
-// Each method added here should be paired with a fixture that covers it.
+// implemented. Everything else is delegated to the embedded
+// notImplementedBackend, which returns backend.ErrNotImplemented — so
+// fixtures that hit an unwired method produce an informative diff rather
+// than panicking. Each real method added here overrides the embedded stub
+// via method set shadowing.
 type fleetDBAdapter struct {
+	notImplementedBackend
+
 	client      *http.Client
 	baseURL     string // e.g., "http://127.0.0.1:8080"
 	workspaceID string
@@ -193,37 +197,6 @@ func (a *fleetDBAdapter) Get(ctx context.Context, id string) (*backend.IssueDeta
 	return &backend.IssueDetailData{IssueData: *slim}, nil
 }
 
-// --- Unimplemented methods: return ErrNotImplemented so fixtures that try
-// them produce a clean diff rather than crashing. ---
-
-func (a *fleetDBAdapter) List(_ context.Context, _ backend.ListOpts) ([]backend.IssueData, error) {
-	return nil, notImpl("List")
-}
-
-func (a *fleetDBAdapter) Ready(_ context.Context, _ backend.ReadyOpts) ([]backend.IssueData, error) {
-	return nil, notImpl("Ready")
-}
-
-func (a *fleetDBAdapter) Blocked(_ context.Context, _ backend.BlockedOpts) ([]backend.IssueData, error) {
-	return nil, notImpl("Blocked")
-}
-
-func (a *fleetDBAdapter) Stats(_ context.Context) (*backend.StatsData, error) {
-	return nil, notImpl("Stats")
-}
-
-func (a *fleetDBAdapter) Count(_ context.Context, _ backend.CountOpts) (int, error) {
-	return 0, notImpl("Count")
-}
-
-func (a *fleetDBAdapter) GetChildren(_ context.Context, _ string) ([]backend.IssueData, error) {
-	return nil, notImpl("GetChildren")
-}
-
-func (a *fleetDBAdapter) SearchIssues(_ context.Context, _ string, _ int) ([]backend.IssueData, error) {
-	return nil, notImpl("SearchIssues")
-}
-
 // Update issues PATCH /api/v1/{ws}/issues/{id}. fleet-db's PATCH body is a
 // narrow subset of UpdateParams (title, description, priority, type, design,
 // notes, owner, due_at) and rejects unknown fields with 400 — so we only
@@ -287,18 +260,6 @@ func (a *fleetDBAdapter) Update(ctx context.Context, id string, params backend.U
 	return nil
 }
 
-func (a *fleetDBAdapter) ClaimIssue(_ context.Context, _ string, _ time.Duration) error {
-	return notImpl("ClaimIssue")
-}
-
-func (a *fleetDBAdapter) DeferIssue(_ context.Context, _ string, _ time.Time) error {
-	return notImpl("DeferIssue")
-}
-
-func (a *fleetDBAdapter) UndeferIssue(_ context.Context, _ string) error {
-	return notImpl("UndeferIssue")
-}
-
 // Close issues POST /api/v1/{ws}/issues/{id}/close with an optional
 // {"reason": "..."} body. fleet-db returns the closed Issue object — we
 // wrap it in a backend.CloseResult with Unblocked left empty (fleet-db
@@ -352,54 +313,6 @@ func (a *fleetDBAdapter) Reopen(ctx context.Context, id string, params backend.R
 		_, _, _ = a.doJSON(ctx, http.MethodPost, a.wsPath("/issues/"+url.PathEscape(id)+"/comments"), commentBody)
 	}
 	return nil
-}
-
-func (a *fleetDBAdapter) Delete(_ context.Context, _ backend.DeleteParams) error {
-	return notImpl("Delete")
-}
-
-func (a *fleetDBAdapter) AddDependency(_ context.Context, _ backend.DepAddParams) error {
-	return notImpl("AddDependency")
-}
-
-func (a *fleetDBAdapter) RemoveDependency(_ context.Context, _ backend.DepRemoveParams) error {
-	return notImpl("RemoveDependency")
-}
-
-func (a *fleetDBAdapter) AddLabel(_ context.Context, _, _ string) error {
-	return notImpl("AddLabel")
-}
-
-func (a *fleetDBAdapter) RemoveLabel(_ context.Context, _, _ string) error {
-	return notImpl("RemoveLabel")
-}
-
-func (a *fleetDBAdapter) ListComments(_ context.Context, _ string) ([]backend.CommentData, error) {
-	return nil, notImpl("ListComments")
-}
-
-func (a *fleetDBAdapter) AddComment(_ context.Context, _ backend.CommentAddParams) (*backend.CommentData, error) {
-	return nil, notImpl("AddComment")
-}
-
-func (a *fleetDBAdapter) ListEvents(_ context.Context, _ string, _ int) ([]backend.EventData, error) {
-	return nil, notImpl("ListEvents")
-}
-
-func (a *fleetDBAdapter) Batch(_ context.Context, _ []backend.BatchOp) ([]backend.BatchResult, error) {
-	return nil, notImpl("Batch")
-}
-
-func (a *fleetDBAdapter) GetMutations(_ context.Context, _ int64) ([]backend.MutationData, error) {
-	return nil, notImpl("GetMutations")
-}
-
-func (a *fleetDBAdapter) WaitForMutations(_ context.Context, _ int64, _ int64) ([]backend.MutationData, error) {
-	return nil, notImpl("WaitForMutations")
-}
-
-func notImpl(op string) error {
-	return backend.ErrNotImplemented(op, "not implemented in paritytest fleetDBAdapter MVP")
 }
 
 // createFleetWorkspace POSTs /api/v1/admin/workspaces to create the default

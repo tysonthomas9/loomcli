@@ -4,13 +4,13 @@ package paritytest
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"os/exec" //nolint:norawexec // parity harness must spawn real bd + fleet-db subprocesses
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -56,9 +56,12 @@ func spawnBeads(t *testing.T) (backend.IssueBackend, func()) {
 	checkBeadsPrereqs(t)
 	initBeadsWorkspace(t, dir)
 
-	// Start the daemon in foreground so killing the context terminates it.
-	ctx, cancel := context.WithCancel(context.Background())
-	daemonCmd := startBeadsDaemon(t, ctx, dir, cancel)
+	// Plain exec.Command (not CommandContext) — we manage the process's
+	// lifecycle ourselves via signals + Wait. exec.CommandContext would
+	// spawn its own goroutine that calls cmd.Wait() on ctx cancellation,
+	// and waitForProcessExit would then race with it (double-Wait panics
+	// on Go 1.20+ with "wait: no child processes").
+	daemonCmd := startBeadsDaemon(t, dir)
 
 	socketPath := rpc.ShortSocketPath(dir)
 	client, err := waitForBeadsSocket(socketPath, beadsSpawnTimeout)
@@ -66,8 +69,7 @@ func spawnBeads(t *testing.T) (backend.IssueBackend, func()) {
 		if buf, ok := daemonCmd.Stderr.(*bytes.Buffer); ok && buf.Len() > 0 {
 			t.Logf("bd daemon stderr: %s", buf.String())
 		}
-		cancel()
-		_ = daemonCmd.Wait()
+		terminateProcess(daemonCmd, 2*time.Second)
 		t.Fatalf("bd daemon did not become ready in %s: %v", beadsSpawnTimeout, err)
 	}
 	client.SetActor(parityActor)
@@ -75,8 +77,7 @@ func spawnBeads(t *testing.T) (backend.IssueBackend, func()) {
 	be := beadsbackend.New(client)
 	cleanup := func() {
 		_ = client.Close()
-		cancel()
-		waitForProcessExit(daemonCmd, 2*time.Second)
+		terminateProcess(daemonCmd, 2*time.Second)
 	}
 	t.Cleanup(cleanup)
 
@@ -95,46 +96,74 @@ func checkBeadsPrereqs(t *testing.T) {
 }
 
 // initBeadsWorkspace sets up the directory as a git repo + beads workspace.
+// The bd init step inherits the full ambient env (PATH, HOME, XDG_*, etc.)
+// and then layers BD_ACTOR on top — mirroring the pattern used by
+// startBeadsDaemon. A prior version of this helper passed only a tiny
+// map[string]string to envFromMap, which dropped every inherited variable
+// and caused bd to fail to find its config dirs in non-default HOMEs.
 func initBeadsWorkspace(t *testing.T, dir string) {
 	t.Helper()
 	runOrFail(t, "git", []string{"-C", dir, "init", "-q"}, nil)
 	runOrFail(t, "git", []string{"-C", dir, "config", "user.email", parityActor}, nil)
 	runOrFail(t, "git", []string{"-C", dir, "config", "user.name", parityActor}, nil)
-	runOrFail(t, "bd", []string{"init"}, map[string]string{
-		"BD_ACTOR": parityActor,
-		"HOME":     os.Getenv("HOME"),
-		"PATH":     os.Getenv("PATH"),
-	}, withDir(dir))
+	runOrFail(t, "bd", []string{"init"}, append(os.Environ(), "BD_ACTOR="+parityActor), withDir(dir))
 }
 
-// startBeadsDaemon launches bd daemon in the given workspace. Caller owns
-// the ctx cancel — it will SIGKILL the daemon when cancelled.
-func startBeadsDaemon(t *testing.T, ctx context.Context, dir string, cancel context.CancelFunc) *exec.Cmd {
+// startBeadsDaemon launches bd daemon in the given workspace. Lifecycle
+// (SIGTERM/SIGKILL + Wait) is caller-managed via terminateProcess — we
+// intentionally avoid exec.CommandContext so there's no hidden goroutine
+// racing with us on cmd.Wait().
+func startBeadsDaemon(t *testing.T, dir string) *exec.Cmd {
 	t.Helper()
-	daemonCmd := exec.CommandContext(ctx, "bd", "daemon", "start", "--foreground", "--local") //nolint:norawexec
+	daemonCmd := exec.Command("bd", "daemon", "start", "--foreground", "--local") //nolint:norawexec
 	daemonCmd.Dir = dir
 	daemonCmd.Env = append(os.Environ(), "BD_ACTOR="+parityActor)
 	daemonCmd.Stdout = &bytes.Buffer{}
 	daemonCmd.Stderr = &bytes.Buffer{}
 	if err := daemonCmd.Start(); err != nil {
-		cancel()
 		t.Fatalf("bd daemon start: %v", err)
 	}
 	return daemonCmd
 }
 
-// waitForProcessExit blocks up to timeout for cmd.Wait() to return, then
-// returns unconditionally. Used to give SIGKILL'd subprocesses a moment to
-// tear down cleanly before the test function returns.
-func waitForProcessExit(cmd *exec.Cmd, timeout time.Duration) {
+// terminateProcess gracefully shuts down a child process started with
+// plain exec.Command: send SIGTERM, wait up to `timeout` for a clean exit,
+// then SIGKILL and give the OS a short window to reap so we don't leave
+// zombies. cmd.Wait() is called exactly once via a single goroutine — the
+// outer select guards against a process that refuses to die, but we still
+// hand the OS enough time to clean the PID.
+//
+// The Wait error is intentionally discarded: the process was being
+// terminated, so a non-zero exit is expected and not actionable here.
+func terminateProcess(cmd *exec.Cmd, timeout time.Duration) {
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+
 	done := make(chan struct{})
 	go func() {
 		_ = cmd.Wait()
 		close(done)
 	}()
+
+	// Best-effort graceful shutdown — ignore errors (process may already
+	// have exited between Start and our signal).
+	_ = cmd.Process.Signal(syscall.SIGTERM)
+
 	select {
 	case <-done:
+		return
 	case <-time.After(timeout):
+	}
+
+	// Graceful window expired — escalate to SIGKILL and give the OS a
+	// short window to reap. If the process still doesn't go away we return
+	// anyway; the goroutine stays alive but the child is definitely dead
+	// per OS semantics of SIGKILL.
+	_ = cmd.Process.Kill()
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
 	}
 }
 
@@ -184,27 +213,23 @@ func spawnFleetDB(t *testing.T) (backend.IssueBackend, func()) {
 	port := pickFreePortOrFatal(t)
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	cmd, logPath := startFleetDBProcess(t, ctx, binary, addr, mr.Addr())
+	cmd, logPath := startFleetDBProcess(t, binary, addr, mr.Addr())
 
 	baseURL := "http://" + addr
 	if err := waitForHealthz(baseURL, fleetSpawnTimeout); err != nil {
 		logDump, _ := os.ReadFile(logPath) // #nosec G304 — test log diagnostic
 		t.Logf("fleet-db log:\n%s", string(logDump))
-		cancel()
-		_ = cmd.Wait()
+		terminateProcess(cmd, 3*time.Second)
 		t.Fatalf("fleet-db did not become healthy in %s: %v", fleetSpawnTimeout, err)
 	}
 	if err := createFleetWorkspace(baseURL, defaultWorkspaceID); err != nil {
-		cancel()
-		_ = cmd.Wait()
+		terminateProcess(cmd, 3*time.Second)
 		t.Fatalf("create workspace: %v", err)
 	}
 
 	be := newFleetDBAdapter(baseURL, defaultWorkspaceID, parityActor)
 	cleanup := func() {
-		cancel()
-		waitForProcessExit(cmd, 3*time.Second)
+		terminateProcess(cmd, 3*time.Second)
 	}
 	t.Cleanup(cleanup)
 
@@ -251,7 +276,11 @@ func pickFreePortOrFatal(t *testing.T) int {
 // retention, archive, authz, rate-limit) disabled so we aren't diffing
 // cron-driven noise. Output goes to a log file in t.TempDir() so the test
 // can dump it on failure without polluting test output on success.
-func startFleetDBProcess(t *testing.T, ctx context.Context, binary, addr, redisAddr string) (*exec.Cmd, string) {
+//
+// Lifecycle is caller-managed via terminateProcess — we avoid
+// exec.CommandContext to prevent racing on cmd.Wait() from its internal
+// goroutine.
+func startFleetDBProcess(t *testing.T, binary, addr, redisAddr string) (*exec.Cmd, string) {
 	t.Helper()
 	logPath := filepath.Join(t.TempDir(), "fleet-db.log")
 	logFile, err := os.Create(logPath) // #nosec G304 — log path is inside t.TempDir()
@@ -278,7 +307,7 @@ func startFleetDBProcess(t *testing.T, ctx context.Context, binary, addr, redisA
 		"--retention-enabled=false",
 		"--archive-enabled=false",
 	}
-	cmd := exec.CommandContext(ctx, binary, args...) //nolint:norawexec,gosec
+	cmd := exec.Command(binary, args...) //nolint:norawexec,gosec
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	if err := cmd.Start(); err != nil {
@@ -339,7 +368,12 @@ func withDir(dir string) func(*runCmdOpts) {
 // runOrFail executes a command and t.Fatals on error. Used only in the
 // spawn helpers; each caller explicitly opts in via //nolint:norawexec on
 // the exec.Command line above.
-func runOrFail(t *testing.T, bin string, args []string, env map[string]string, opts ...func(*runCmdOpts)) {
+//
+// env is passed verbatim to cmd.Env. Callers that need ambient inheritance
+// must pass `append(os.Environ(), "KEY=val")` — there is no implicit merge
+// here because silently inheriting the parent's env (or silently not) is
+// exactly the bug this signature now makes explicit.
+func runOrFail(t *testing.T, bin string, args []string, env []string, opts ...func(*runCmdOpts)) {
 	t.Helper()
 
 	o := runCmdOpts{}
@@ -352,7 +386,7 @@ func runOrFail(t *testing.T, bin string, args []string, env map[string]string, o
 		cmd.Dir = o.dir
 	}
 	if env != nil {
-		cmd.Env = envFromMap(env)
+		cmd.Env = env
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -360,12 +394,4 @@ func runOrFail(t *testing.T, bin string, args []string, env map[string]string, o
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("%s %v: %v\nstdout: %s\nstderr: %s", bin, args, err, stdout.String(), stderr.String())
 	}
-}
-
-func envFromMap(m map[string]string) []string {
-	env := make([]string, 0, len(m))
-	for k, v := range m {
-		env = append(env, k+"="+v)
-	}
-	return env
 }

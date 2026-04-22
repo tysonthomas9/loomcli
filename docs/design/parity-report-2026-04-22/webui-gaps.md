@@ -165,6 +165,105 @@ and not accidentally falling through to beads:
 3. Labels with no entries — bd renders `[]`, fleet-db pre-B1-fix renders
    nothing. After B1 lands (in flight) both should render `[]`.
 
+## CLI parity
+
+First baseline run: 2026-04-22. Harness: `make test-parity-cli`. Report
+path: `test/parity/ui/cli-report.json`; baseline copy:
+`after-b1b2/cli-report.json`. Full flag audit:
+[cli-flag-parity.md](./cli-flag-parity.md).
+
+### Summary of first run
+
+- **Fixtures:** 15
+- **Steps executed:** 62
+- **Diffs reported:** 26 (all logged as data; harness does not fail on
+  diffs, only on infra errors)
+- **Normalization applied:**
+  - `issue_type` (bd) ↔ `type` (fdb) collapsed to one field
+  - `parent` (bd) ↔ `parent_id` (fdb) collapsed (then ignored because
+    per-backend IDs drift by construction)
+  - `text` (bd comment) ↔ `body` (fdb comment) collapsed
+  - bd's `[{...}]` singleton `show` output unwrapped to `{...}`
+  - fdb's blocked-queue `{issue:{}, blockers:[]}` wrapper hoisted so
+    top-level issue fields line up
+  - Known per-backend-noise fields ignored: `source_repo`,
+    `dependency_count`, `dependent_count`, `blocked_by*`,
+    `workspace`, `created_by`, `updated_by`, `closed_by`, `issue`,
+    `blockers`, `parent_id`, `parent`
+
+### Remaining legitimate diffs (26)
+
+Grouped by kind:
+
+1. **CLI echo-message drift (9 diffs)** — `close`, `reopen`, `dep add`,
+   `dep remove`, `label add/remove`, `comment add` emit different human-
+   readable success strings. No machine readers consume these, but the
+   diff is recorded so shell-script integrations can see how to match.
+
+2. **`count` output shape (5 diffs)** — bd: `{count: N, ...}`; fdb:
+   `{total: N, groups: {...}}`; groups array-of-objects on bd vs map on
+   fdb. This is a genuine UX gap worth aligning upstream.
+
+3. **`stats` / `status` schema (5 diffs)** — bd emits derived metrics
+   (average_lead_time_hours, epics_eligible_for_closure, ready_issues,
+   pinned_issues, tombstone_issues, in_progress_issues, etc.) that fdb
+   does not compute. See the flag-parity doc §13 for the full list.
+
+4. **`ready` queue count (2 diffs)** — bd includes issues that fdb does
+   not when computing "ready". bd's count was 10; fdb's was 8 on the
+   same seeded workspace. Investigation pending; likely bd is including
+   in_progress / review status items while fdb is stricter.
+
+5. **`create` labels round-trip (1 diff)** — bd's `--json create
+   --labels a,b` response omits the `labels` field. A follow-up `show`
+   does include them. Minor bd-side gap.
+
+6. **Owner diff in blocked queue (2 diffs)** — bd emits `owner:
+   parity-harness` in some blocked-queue rows; fdb does not. Likely
+   because fdb's blocked-queue projection is narrower than bd's.
+
+7. **Label round-trip on show (1 diff)** — after `--set-labels` the
+   labels round-trip differently. See `cli_label_add_remove` fixture
+   step_05.
+
+8. **Miscellaneous field value drift (1 diff)** — one-off diffs in
+   fixture-specific steps; see `cli-report.json`.
+
+### How to re-run
+
+```bash
+cd /home/admin/codebase/2/loomcli
+
+# Build both binaries (idempotent; cached from earlier runs)
+( cd ~/codebase/fleet-db && go build -o /tmp/fleet-db ./cmd/fleet-db )
+( cd ~/codebase/fleet-db && go build -o /tmp/fdb      ./cmd/fdb )
+
+make test-parity-cli   # or: go test -tags parity -run TestCLIParity ./internal/backend/paritytest/
+```
+
+The harness spawns a fresh bd daemon in a tmpdir and a fleet-db + miniredis
+instance on an ephemeral port per-test. No external services needed.
+
+### Fixture coverage
+
+See `internal/backend/paritytest/testdata/cli-fixtures/*.json`:
+
+- `01_create_basic.json` — minimal create + show
+- `02_create_full_flags.json` — create with --description/-owner/-assignee/-labels
+- `03_create_with_parent.json` — parent/child via --parent
+- `04_show.json` — the standalone show path
+- `05_list_filters.json` — list with --status/-type/-assignee/-limit
+- `06_update_fields.json` — partial update
+- `07_label_add_remove.json` — label add/remove lifecycle
+- `08_close_reopen.json` — close/reopen lifecycle
+- `09_ready.json` — ready queue
+- `10_blocked.json` — blocked queue after dep add
+- `11_stats.json` — aggregate stats
+- `12_dep_add_remove.json` — dep add / dep remove
+- `13_comments_add_list.json` — comment add (bd plural, fdb singular)
+- `14_search.json` — text search
+- `15_count.json` — count with grouping
+
 ## When complete
 
 1. Fill this file end-to-end

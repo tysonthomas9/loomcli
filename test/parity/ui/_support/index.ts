@@ -15,6 +15,7 @@ export {
     gotoIssueDetail,
     resetBothBackends,
     snapshotState,
+    findFleetIssueByTitle,
     type DualTabs,
     type BackendState,
     type Backend,
@@ -23,6 +24,7 @@ export {
 export {
     attachFleetNetworkSpy,
     assertRoutingForAction,
+    routedFleetRequest,
     type RoutingProof,
     type RoutingVerdict,
 } from "./assert-routing";

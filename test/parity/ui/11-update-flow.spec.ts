@@ -3,7 +3,7 @@
  * reflects the update and routing proofs confirm fleet-db saw it.
  */
 import { parityTest as test, expect, useParityHooks } from "./_support/spec-harness";
-import { assertRoutingForAction, SEED_FIXTURE } from "./_support";
+import { findFleetIssueByTitle, routedFleetRequest, SEED_FIXTURE } from "./_support";
 import { PARITY_URLS } from "./playwright.config";
 
 useParityHooks();
@@ -13,42 +13,24 @@ test.describe("11 update-flow parity", () => {
         tabs,
         fleetSpy,
     }) => {
-        const target = SEED_FIXTURE.children[2]; // "Refactor auth middleware"
-        const j = await fetch(
-            `${PARITY_URLS.fleet}/api/workspaces/${PARITY_URLS.workspace}/issues`,
-        ).then((r) => r.json());
-        const issue = (j.data ?? []).find((i: any) => i.title === target);
-        expect(issue).toBeTruthy();
+        const { id } = await findFleetIssueByTitle(SEED_FIXTURE.children[2]); // "Refactor auth middleware"
 
         await tabs.fleet.goto(
-            `${PARITY_URLS.fleet}/ws/${PARITY_URLS.workspace}/issues/${issue.id}`,
+            `${PARITY_URLS.fleet}/ws/${PARITY_URLS.workspace}/issues/${id}`,
         );
 
-        await assertRoutingForAction(
-            tabs.testId,
-            "update-priority-description",
-            fleetSpy,
-            async () => {
-                await tabs.fleet.evaluate(
-                    async ({ id, ws }) => {
-                        const r = await fetch(`/api/workspaces/${ws}/issues/${id}`, {
-                            method: "PATCH",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({
-                                priority: 1,
-                                description: "bumped to P1 via parity-11 test",
-                            }),
-                        });
-                        if (!r.ok) throw new Error(`PATCH failed: ${r.status}`);
-                    },
-                    { id: issue.id, ws: PARITY_URLS.workspace },
-                );
+        await routedFleetRequest(tabs, fleetSpy, "update-priority-description", {
+            path: `issues/${id}`,
+            method: "PATCH",
+            body: {
+                priority: 1,
+                description: "bumped to P1 via parity-11 test",
             },
-        );
+        });
 
         // Verify via API that the change landed.
         const after = await fetch(
-            `${PARITY_URLS.fleet}/api/workspaces/${PARITY_URLS.workspace}/issues/${issue.id}`,
+            `${PARITY_URLS.fleet}/api/workspaces/${PARITY_URLS.workspace}/issues/${id}`,
         ).then((r) => r.json());
         const updated = after?.data ?? after;
         expect(updated.priority).toBe(1);

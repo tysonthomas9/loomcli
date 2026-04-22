@@ -3,8 +3,8 @@
  */
 import { parityTest as test, expect, useParityHooks } from "./_support/spec-harness";
 import {
-    assertRoutingForAction,
     apiResponseDiff,
+    routedFleetRequest,
     snapshotState,
     stateSyncDiff,
 } from "./_support";
@@ -21,24 +21,16 @@ test.describe("10 create-flow parity", () => {
         const title = `parity-create-${Date.now()}`;
         await tabs.fleet.goto(`${PARITY_URLS.fleet}/ws/${PARITY_URLS.workspace}/kanban`);
 
-        await assertRoutingForAction(tabs.testId, "create-issue", fleetSpy, async () => {
-            const resp = await tabs.fleet.evaluate(
-                async ({ title, ws }) => {
-                    const r = await fetch(`/api/workspaces/${ws}/issues`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            title,
-                            issue_type: "task",
-                            priority: 2,
-                            description: "created by parity test 10",
-                        }),
-                    });
-                    return { ok: r.ok, status: r.status };
-                },
-                { title, ws: PARITY_URLS.workspace },
-            );
-            expect(resp.ok || resp.status === 201, `POST status=${resp.status}`).toBeTruthy();
+        await routedFleetRequest(tabs, fleetSpy, "create-issue", {
+            path: "issues",
+            method: "POST",
+            body: {
+                title,
+                issue_type: "task",
+                priority: 2,
+                description: "created by parity test 10",
+            },
+            acceptStatus: [201],
         });
 
         // Verify via the canonical listing endpoint.

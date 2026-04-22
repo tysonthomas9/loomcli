@@ -17,8 +17,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alicebob/miniredis/v2"
-
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 )
 
@@ -206,8 +204,7 @@ func spawnCLIHarness(t *testing.T) *cliHarness {
 	bdDir := t.TempDir()
 	initBeadsWorkspace(t, bdDir)
 
-	bdCtx, bdCancel := context.WithCancel(context.Background())
-	daemonCmd := startBeadsDaemon(t, bdCtx, bdDir, bdCancel)
+	daemonCmd := startBeadsDaemon(t, bdDir)
 
 	// Wait for the daemon socket so subsequent bd subprocesses talk to the
 	// same daemon instead of each spawning their own short-lived one.
@@ -216,13 +213,11 @@ func spawnCLIHarness(t *testing.T) *cliHarness {
 		if buf, ok := daemonCmd.Stderr.(*bytes.Buffer); ok && buf.Len() > 0 {
 			t.Logf("bd daemon stderr: %s", buf.String())
 		}
-		bdCancel()
-		_ = daemonCmd.Wait()
+		terminateProcess(daemonCmd, 2*time.Second)
 		t.Fatalf("bd daemon did not become ready in %s: %v", beadsSpawnTimeout, err)
 	}
 	t.Cleanup(func() {
-		bdCancel()
-		waitForProcessExit(daemonCmd, 2*time.Second)
+		terminateProcess(daemonCmd, 2*time.Second)
 	})
 
 	// --- fdb / fleet-db side ---
@@ -232,27 +227,26 @@ func spawnCLIHarness(t *testing.T) *cliHarness {
 	port := pickFreePortOrFatal(t)
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 
-	fleetCtx, fleetCancel := context.WithCancel(context.Background())
-	cmd, logPath := startFleetDBProcess(t, fleetCtx, fleetBinary, addr, mr.Addr())
+	cmd, logPath := startFleetDBProcess(t, fleetBinary, addr, mr.Addr())
 
 	baseURL := "http://" + addr
 	if err := waitForHealthz(baseURL, fleetSpawnTimeout); err != nil {
 		logDump, _ := os.ReadFile(logPath) // #nosec G304 — test log diagnostic
 		t.Logf("fleet-db log:\n%s", string(logDump))
-		fleetCancel()
-		_ = cmd.Wait()
+		terminateProcess(cmd, 3*time.Second)
 		t.Fatalf("fleet-db did not become healthy in %s: %v", fleetSpawnTimeout, err)
 	}
 	if err := createFleetWorkspace(baseURL, defaultWorkspaceID); err != nil {
-		fleetCancel()
-		_ = cmd.Wait()
+		terminateProcess(cmd, 3*time.Second)
 		t.Fatalf("create workspace: %v", err)
 	}
 	t.Cleanup(func() {
-		fleetCancel()
-		waitForProcessExit(cmd, 3*time.Second)
+		terminateProcess(cmd, 3*time.Second)
 	})
-	_ = miniredisKeepAlive(mr)
+	// mr is registered for Close inside startMiniRedis; retain the handle
+	// locally so a future diagnostic path can poke at redis state without
+	// needing another spawner. Referenced once to keep the Go import live.
+	_ = mr
 
 	return &cliHarness{
 		bdDir:      bdDir,
@@ -260,14 +254,6 @@ func spawnCLIHarness(t *testing.T) *cliHarness {
 		fdbWS:      defaultWorkspaceID,
 		fdbBinary:  fdbBinary,
 	}
-}
-
-// miniredisKeepAlive prevents the unused-import linter from flagging
-// miniredis even though the miniredis handle is owned by t.Cleanup
-// (registered inside startMiniRedis). Returning the instance also makes
-// future diagnostics easier — e.g. a test can inject data directly.
-func miniredisKeepAlive(mr *miniredis.Miniredis) *miniredis.Miniredis {
-	return mr
 }
 
 // cliSocketPath resolves the bd daemon RPC socket for the given workspace
@@ -803,15 +789,15 @@ var cliIgnoredFields = map[string]bool{
 // shared name. Applied before diffing so "issue_type" (bd) and "type"
 // (fdb) collapse to a single row.
 var cliFieldAliases = map[string]string{
-	"issue_type": "type",        // bd: issue_type; fdb: type
-	"parent":     "parent_id",   // bd: parent; fdb: parent_id
-	"text":       "body",        // bd comment text; fdb comment body
-	"status":     "status",      // identity — kept explicit so tests make the shared set obvious
-	"title":      "title",       // identity
-	"priority":   "priority",    // identity
-	"owner":      "owner",       // identity
-	"assignee":   "assignee",    // identity
-	"labels":     "labels",      // identity
+	"issue_type":  "type",        // bd: issue_type; fdb: type
+	"parent":      "parent_id",   // bd: parent; fdb: parent_id
+	"text":        "body",        // bd comment text; fdb comment body
+	"status":      "status",      // identity — kept explicit so tests make the shared set obvious
+	"title":       "title",       // identity
+	"priority":    "priority",    // identity
+	"owner":       "owner",       // identity
+	"assignee":    "assignee",    // identity
+	"labels":      "labels",      // identity
 	"description": "description", // identity
 }
 
@@ -856,56 +842,33 @@ func normalizeIssueMap(m map[string]any) map[string]any {
 	return out
 }
 
-// diffMapsCLI returns DiffEntry rows for fields whose values disagree
-// between the two CLIs. Uses the expanded cliIgnoredFields set to absorb
-// known bd-vs-fdb schema drift (e.g., bd's "source_repo" doesn't appear
-// on fdb), and the cliFieldAliases set to collapse renamed-but-same
-// fields (e.g., bd's "issue_type" == fdb's "type").
+// diffMapsCLI delegates to the shared DiffMaps routine with the
+// CLI-level ignore set (expanded from the RPC set to absorb bd-vs-fdb
+// schema drift — e.g. bd's "source_repo" doesn't appear on fdb) and a
+// NormalizeMap hook that handles both the nested fdb {issue, blockers}
+// hoist AND cliFieldAliases collapsing in one pass. Aliases in DiffOpts
+// are deliberately empty because normalizeIssueMap already applies them.
+// Uses fieldsEqualNormalized so priority strings like "P2" compare equal
+// to the int 2.
+//
+// Note on argument order: DiffMaps's left/right slots map to FleetDB/Beads
+// output columns by convention. bdMap is beads output (right), fdbMap is
+// fleet-db output (left) — so we pass (fdbMap, bdMap) into DiffMaps.
 func diffMapsCLI(fixtureID, stepID, method string, bdMap, fdbMap map[string]any) []DiffEntry {
-	bdMap = normalizeIssueMap(bdMap)
-	fdbMap = normalizeIssueMap(fdbMap)
-
-	keys := map[string]bool{}
-	for k := range bdMap {
-		keys[k] = true
+	opts := DiffOpts{
+		Ignored:      cliIgnoredFields,
+		NormalizeMap: normalizeIssueMap,
+		Equal: func(_ string, a, b any) bool {
+			return fieldsEqualNormalized(a, b)
+		},
 	}
-	for k := range fdbMap {
-		keys[k] = true
-	}
-
-	sorted := make([]string, 0, len(keys))
-	for k := range keys {
-		sorted = append(sorted, k)
-	}
-	sort.Strings(sorted)
-
-	var diffs []DiffEntry
-	for _, k := range sorted {
-		if cliIgnoredFields[k] {
-			continue
-		}
-		bv := bdMap[k]
-		fv := fdbMap[k]
-		if fieldsEqualNormalized(bv, fv) {
-			continue
-		}
-		diffs = append(diffs, DiffEntry{
-			FixtureID: fixtureID,
-			StepID:    stepID,
-			Method:    method,
-			Field:     k,
-			DriftTag:  "strict",
-			FleetDB:   fv,
-			Beads:     bv,
-			Verdict:   "fail",
-		})
-	}
-	return diffs
+	return DiffMaps(opts, fixtureID, stepID, method, fdbMap, bdMap)
 }
 
-// fieldsEqualNormalized is like runner.go:fieldsEqual but additionally
-// treats empty lists as equal to nil (bd emits [] for empty labels, fdb
-// pre-B1 sometimes omitted the key entirely).
+// fieldsEqualNormalized is CLI-side field equality: a superset of
+// diffcore.go:defaultFieldsEqual that additionally treats empty lists as
+// equal to nil (bd emits [] for empty labels, fdb pre-B1 sometimes
+// omitted the key entirely) and normalizes priority strings ("P2" -> 2).
 func fieldsEqualNormalized(a, b any) bool {
 	if a == nil && b == nil {
 		return true

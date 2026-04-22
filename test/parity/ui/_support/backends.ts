@@ -226,3 +226,33 @@ async function captureOne(b: Backend): Promise<BackendState> {
 function pick<T>(s: PromiseSettledResult<T>): T | null {
     return s.status === "fulfilled" ? s.value : null;
 }
+
+/**
+ * Look up a fleet-side issue by its title and return enough identity to
+ * drive a follow-up write. Throws with the seed's full title list if no
+ * match — specs surface "seed drift" clearly rather than crashing later
+ * on a missing ID. Write-flow specs previously maintained hand-rolled
+ * copies of this lookup; consolidating it here keeps their flow uniform.
+ */
+export async function findFleetIssueByTitle(
+    title: string,
+): Promise<{ id: string; issue: any }> {
+    const r = await fetch(
+        `${PARITY_URLS.fleet}/api/workspaces/${PARITY_URLS.workspace}/issues`,
+    );
+    if (!r.ok) {
+        throw new Error(
+            `findFleetIssueByTitle(${title}): list request failed ${r.status}`,
+        );
+    }
+    const j = await r.json();
+    const issues: any[] = j.data ?? [];
+    const match = issues.find((i: any) => i.title === title);
+    if (!match) {
+        const titles = issues.map((i: any) => i.title).join(", ");
+        throw new Error(
+            `findFleetIssueByTitle(${title}): no seed match; titles=[${titles}]`,
+        );
+    }
+    return { id: match.id, issue: match };
+}

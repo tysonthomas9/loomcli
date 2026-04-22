@@ -209,6 +209,67 @@ export async function assertRoutingForAction(
     return proof;
 }
 
+/**
+ * Convenience wrapper that issues a workspace-scoped fleet-tab fetch
+ * inside an assertRoutingForAction block. The write specs repeatedly
+ * materialized this same pattern by hand:
+ *
+ *   await assertRoutingForAction(testId, actionName, spy, async () => {
+ *       await tabs.fleet.evaluate(async ({ id, ws }) => {
+ *           const r = await fetch(`/api/workspaces/${ws}/<path>`, {
+ *               method: "<M>",
+ *               headers: { "Content-Type": "application/json" },
+ *               body: JSON.stringify(<body>),
+ *           });
+ *           if (!r.ok) throw new Error(...);
+ *       }, {...});
+ *   });
+ *
+ * routedFleetRequest reduces each of those sites to a single call and
+ * threads the routing assertion through uniformly. Returns whatever
+ * assertRoutingForAction returns so callers can inspect the proof.
+ */
+export async function routedFleetRequest(
+    tabs: { fleet: Page; testId: string },
+    spy: ReturnType<typeof attachFleetNetworkSpy>,
+    actionName: string,
+    opts: {
+        path: string; // e.g. "issues" or `issues/${id}/close`
+        method: "POST" | "PUT" | "PATCH" | "DELETE";
+        body?: unknown; // JSON body; omit or pass null for a bodyless request
+        acceptStatus?: number[]; // status codes considered success (default: 2xx)
+    },
+): Promise<RoutingProof> {
+    const { path: suffix, method, body, acceptStatus } = opts;
+    return assertRoutingForAction(tabs.testId, actionName, spy, async () => {
+        await tabs.fleet.evaluate(
+            async ({ suffix, method, body, ws, acceptStatus }) => {
+                const init: RequestInit = {
+                    method,
+                    headers: { "Content-Type": "application/json" },
+                };
+                if (body !== undefined && body !== null) {
+                    init.body = JSON.stringify(body);
+                }
+                const r = await fetch(`/api/workspaces/${ws}/${suffix}`, init);
+                const ok =
+                    r.ok ||
+                    (acceptStatus ?? []).includes(r.status);
+                if (!ok) {
+                    throw new Error(`${method} /${suffix}: ${r.status}`);
+                }
+            },
+            {
+                suffix,
+                method,
+                body: body ?? null,
+                ws: PARITY_URLS.workspace,
+                acceptStatus: acceptStatus ?? [],
+            },
+        );
+    });
+}
+
 const ROUTING_PROOF_PATH = path.join(ARTIFACTS_DIR, "reports", "routing-proof.json");
 
 async function appendRoutingProof(proof: RoutingProof): Promise<void> {

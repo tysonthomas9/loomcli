@@ -197,7 +197,13 @@ async function runAllChecks(): Promise<PreflightResult> {
         });
     }
 
-    // 4. Probe POST to :8082 must cause fleet-db to log POST /api/v1/PARITY/issues
+    // 4. Probe POST to :8082 must cause fleet-db to log POST /api/v1/PARITY/issues.
+    //
+    // We poll the log tail rather than sleeping a fixed 2s because CI can
+    // take longer to flush stdout on busy runners — a fixed sleep produces
+    // false-negatives that abort the whole suite. Success detection breaks
+    // out of the poll as soon as the log entry lands; the total budget
+    // (5s) is the fail threshold.
     try {
         const before = await fleetDBLogTail(5);
         const probe = await httpPost(`${PARITY_URLS.fleet}/api/issues`, {
@@ -206,12 +212,22 @@ async function runAllChecks(): Promise<PreflightResult> {
             priority: 3,
             description: "preflight routing probe — safe to delete",
         });
-        // 2-second wait per spec.
-        await new Promise((r) => setTimeout(r, 2000));
-        const after = await fleetDBLogTail(30);
-        const delta = after.slice(before.length);
-        const sawInbound = /POST\s+\/api\/v1\/PARITY\/issues/.test(delta) ||
+        const sawInboundPattern = (delta: string) =>
+            /POST\s+\/api\/v1\/PARITY\/issues/.test(delta) ||
             /POST .*\/PARITY\/issues/.test(delta);
+
+        const pollDeadline = Date.now() + 5000;
+        let sawInbound = false;
+        let lastDelta = "";
+        while (Date.now() < pollDeadline) {
+            const after = await fleetDBLogTail(30);
+            lastDelta = after.slice(before.length);
+            if (sawInboundPattern(lastDelta)) {
+                sawInbound = true;
+                break;
+            }
+            await new Promise((r) => setTimeout(r, 200));
+        }
         checks.push({
             name: "Probe POST to :8082 shows up in fleet-db logs",
             expected: "yes",
