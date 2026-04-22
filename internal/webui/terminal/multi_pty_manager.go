@@ -343,9 +343,6 @@ func (mm *MultiPTYManager) SessionCount() int {
 // SessionCountFor returns the number of live sessions owned by the
 // per-workspace PTYManager for wsID. Returns 0 when the workspace is
 // unknown or its per-workspace manager has not yet been lazily created.
-// Callers enforcing the per-workspace cap (e.g. the terminal WS handler)
-// must use this rather than SessionCount, which aggregates across all
-// workspaces and would reject workspace B once A saturates the cap.
 func (mm *MultiPTYManager) SessionCountFor(wsID string) int {
 	m := mm.existingManagerForWS(wsID)
 	if m == nil {

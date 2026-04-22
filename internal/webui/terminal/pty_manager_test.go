@@ -455,10 +455,8 @@ func TestChildExitRemovesSession(t *testing.T) {
 		"session to be removed after child exits")
 }
 
-// TestShutdown_RejectsFutureAttach pins the contract exploited by
-// MultiPTYManager.Deregister: once Shutdown has run, new AttachSession
-// calls must fail rather than spawn fresh children into a manager the
-// outer dispatcher can no longer reach.
+// TestShutdown_RejectsFutureAttach — MultiPTYManager.Deregister relies on
+// this contract to prevent orphan sessions after the entry is dropped.
 func TestShutdown_RejectsFutureAttach(t *testing.T) {
 	m := NewPTYManager("cat", 0, t.TempDir())
 	if err := m.Shutdown(); err != nil {
@@ -473,10 +471,8 @@ func TestShutdown_RejectsFutureAttach(t *testing.T) {
 	}
 }
 
-// TestShutdown_Idempotent confirms Shutdown may be called multiple times
-// without panicking (e.g. from both MultiPTYManager.Deregister and
-// MultiPTYManager.Close). Without the closed guard, the second call would
-// panic on `close(m.reaperStop)`.
+// TestShutdown_Idempotent — called from both Deregister and Close paths;
+// a naive implementation would panic on the second close(reaperStop).
 func TestShutdown_Idempotent(t *testing.T) {
 	m := NewPTYManager("cat", 0, t.TempDir())
 	if err := m.Shutdown(); err != nil {

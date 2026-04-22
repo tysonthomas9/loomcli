@@ -22,6 +22,21 @@ func newTestMultiManager(t *testing.T, maxPerWS int) *MultiPTYManager {
 	return mm
 }
 
+// captureManager returns the per-workspace *PTYManager under mm.mu. Used
+// by Deregister-race tests to hold a reference that outlives the outer
+// map entry — the whole point is asserting on the inner manager after
+// the outer dispatcher can no longer route to it.
+func captureManager(t *testing.T, mm *MultiPTYManager, wsID string) *PTYManager {
+	t.Helper()
+	mm.mu.RLock()
+	defer mm.mu.RUnlock()
+	entry := mm.entries[wsID]
+	if entry == nil || entry.mgr == nil {
+		t.Fatalf("captureManager(%q): no per-ws manager (call AttachSession first)", wsID)
+	}
+	return entry.mgr
+}
+
 func TestNewMultiPTYManager_Empty(t *testing.T) {
 	mm := NewMultiPTYManager("cat", 7)
 	t.Cleanup(func() { _ = mm.Close() })
@@ -588,12 +603,9 @@ func TestSessionCountFor_PerWorkspace(t *testing.T) {
 	}
 }
 
-// TestDeregister_CapturedManagerRejectsAttach pins the P2 fix
-// deterministically: a caller that captured the per-workspace *PTYManager
-// via managerForWS cannot resurrect it with an orphan session after
-// Deregister has returned. Pre-fix, the captured manager would spawn a
-// fresh session into a map the outer MultiPTYManager no longer indexes,
-// leaking the child process.
+// TestDeregister_CapturedManagerRejectsAttach — a caller that captured
+// the per-workspace *PTYManager via managerForWS must not be able to
+// spawn new sessions after Deregister returns.
 func TestDeregister_CapturedManagerRejectsAttach(t *testing.T) {
 	mm := newTestMultiManager(t, 50)
 	mm.SetGracePeriod(5 * time.Second)
@@ -605,19 +617,10 @@ func TestDeregister_CapturedManagerRejectsAttach(t *testing.T) {
 		t.Fatalf("warmup attach: %v", err)
 	}
 
-	// Simulate the race winner: capture entry.mgr before Deregister runs.
-	mm.mu.RLock()
-	captured := mm.entries["ws1"].mgr
-	mm.mu.RUnlock()
-	if captured == nil {
-		t.Fatal("captured per-ws manager is nil")
-	}
+	captured := captureManager(t, mm, "ws1")
 
 	mm.Deregister("ws1")
 
-	// The captured manager's Shutdown has now completed. A late
-	// AttachSession against it — the exact path the pre-fix race
-	// exploited — must reject rather than spawn an orphan session.
 	_, _, err := captured.AttachSession(
 		SessionKey{Workspace: "ws1", Name: "post-dereg"},
 		80, 24, []string{"-c", "cat"},
@@ -630,10 +633,8 @@ func TestDeregister_CapturedManagerRejectsAttach(t *testing.T) {
 	}
 }
 
-// TestDeregister_ConcurrentAttach exercises the same scenario under the
-// race detector to catch any lock-ordering or visibility bug in the
-// closed-flag guard. All attackers must terminate cleanly with one of the
-// expected errors — never a successful attach that outlives Deregister.
+// TestDeregister_ConcurrentAttach — race-detector coverage for the
+// Deregister / AttachSession lock-ordering and visibility guarantees.
 func TestDeregister_ConcurrentAttach(t *testing.T) {
 	mm := newTestMultiManager(t, 50)
 	mm.SetGracePeriod(5 * time.Second)
@@ -644,17 +645,11 @@ func TestDeregister_ConcurrentAttach(t *testing.T) {
 		t.Fatalf("warmup attach: %v", err)
 	}
 
-	// Capture the per-ws *PTYManager before the race so we can assert on
-	// it after Deregister has removed the mm.entries reference. Without
-	// this capture, a post-Shutdown orphan-spawn bug would be invisible —
-	// the outer mm.SessionCount() hits the (now-empty) map and reports 0
-	// regardless of whether the inner manager has leaked sessions.
-	mm.mu.RLock()
-	captured := mm.entries["ws1"].mgr
-	mm.mu.RUnlock()
-	if captured == nil {
-		t.Fatal("captured per-ws manager is nil")
-	}
+	// Hold a reference to the inner manager: once Deregister drops the
+	// outer entry, mm.SessionCount() hits the empty map and reports 0
+	// regardless of any leaked orphan — captured.SessionCount() is the
+	// only assertion that can see the bug.
+	captured := captureManager(t, mm, "ws1")
 
 	const attackers = 20
 	var wg sync.WaitGroup

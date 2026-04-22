@@ -186,10 +186,6 @@ func (m *PTYManager) AttachSession(key SessionKey, cols, rows uint16, argv []str
 	const maxAttachRetries = 3
 	for attempt := 0; attempt < maxAttachRetries; attempt++ {
 		m.mu.Lock()
-		// Reject attaches after Shutdown so a goroutine that captured
-		// this manager via MultiPTYManager.managerForWS before a
-		// concurrent Deregister cannot resurrect it with an orphan
-		// session.
 		if m.closed {
 			m.mu.Unlock()
 			return nil, false, ErrPTYManagerClosed
