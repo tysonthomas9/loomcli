@@ -11,6 +11,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlermux"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 // --- Supervisor handler tests ---
@@ -236,7 +237,7 @@ func TestHandleDaemonConfig_MinimalJSON(t *testing.T) {
 // --- Queue handler tests ---
 
 func TestHandleAgentQueue_HappyPath(t *testing.T) {
-	fn := func(name string) ([]webui.AgentQueueEntry, error) {
+	fn := func(wsID, name string) ([]webui.AgentQueueEntry, error) {
 		return []webui.AgentQueueEntry{
 			{IssueID: "proj-1.5", Title: "Feature X", Priority: 0, Score: 170, Reason: "base:100 skills:+50 priority:+20", Labels: []string{"phase-3"}, Parent: "proj-1"},
 			{IssueID: "proj-1.8", Title: "Write tests", Priority: 1, Score: 116, Reason: "base:100 priority:+16", Labels: []string{"phase-3"}, Parent: "proj-1"},
@@ -279,7 +280,7 @@ func TestHandleAgentQueue_HappyPath(t *testing.T) {
 }
 
 func TestHandleAgentQueue_EmptyQueue(t *testing.T) {
-	fn := func(name string) ([]webui.AgentQueueEntry, error) {
+	fn := func(wsID, name string) ([]webui.AgentQueueEntry, error) {
 		return nil, nil
 	}
 
@@ -315,7 +316,7 @@ func TestHandleAgentQueue_EmptyQueue(t *testing.T) {
 }
 
 func TestHandleAgentQueue_AgentNotFound(t *testing.T) {
-	fn := func(name string) ([]webui.AgentQueueEntry, error) {
+	fn := func(wsID, name string) ([]webui.AgentQueueEntry, error) {
 		return nil, webui.ErrAgentNotFound
 	}
 
@@ -348,7 +349,7 @@ func TestHandleAgentQueue_AgentNotFound(t *testing.T) {
 }
 
 func TestHandleAgentQueue_ConfigError(t *testing.T) {
-	fn := func(name string) ([]webui.AgentQueueEntry, error) {
+	fn := func(wsID, name string) ([]webui.AgentQueueEntry, error) {
 		return nil, errors.New("load daemon config: syntax error")
 	}
 
@@ -367,7 +368,7 @@ func TestHandleAgentQueue_ConfigError(t *testing.T) {
 
 func TestHandleAgentQueue_NameExtraction(t *testing.T) {
 	var captured string
-	fn := func(name string) ([]webui.AgentQueueEntry, error) {
+	fn := func(wsID, name string) ([]webui.AgentQueueEntry, error) {
 		captured = name
 		return nil, nil
 	}
@@ -385,10 +386,31 @@ func TestHandleAgentQueue_NameExtraction(t *testing.T) {
 	}
 }
 
+func TestHandleAgentQueue_PassesWorkspaceID(t *testing.T) {
+	var capturedWSID string
+	fn := func(wsID, name string) ([]webui.AgentQueueEntry, error) {
+		capturedWSID = wsID
+		return nil, nil
+	}
+
+	h := webui.HandleAgentQueue(fn)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/queue", h)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/workspaces/ws-uuid-123/agents/falcon/queue", nil)
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "ws-uuid-123"))
+	mux.ServeHTTP(rec, req)
+
+	if capturedWSID != "ws-uuid-123" {
+		t.Errorf("expected wsID 'ws-uuid-123', got %q", capturedWSID)
+	}
+}
+
 // --- Route registration tests ---
 
 func TestWorkspaceOpsModule_QueueRouteRegistered(t *testing.T) {
-	fn := func(name string) ([]webui.AgentQueueEntry, error) {
+	fn := func(wsID, name string) ([]webui.AgentQueueEntry, error) {
 		return nil, nil
 	}
 	mod := handlermux.NewWorkspaceOpsModule(&mockWorkspaceService{}, &stubErrorPool{}, webui.HandleAgentQueue(fn))

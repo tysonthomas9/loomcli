@@ -171,10 +171,11 @@ func HandleDaemonConfigScoped(
 
 // HandleAgentQueue returns a handler for GET /api/workspaces/{ws}/agents/{name}/queue.
 // Maps ErrAgentNotFound to 404, other errors to 503.
-func HandleAgentQueue(fn func(string) ([]AgentQueueEntry, error)) http.HandlerFunc {
+func HandleAgentQueue(fn func(wsID, agentName string) ([]AgentQueueEntry, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		wsID := middleware.WorkspaceFromContext(r.Context())
 		name := r.PathValue("name")
-		entries, err := fn(name)
+		entries, err := fn(wsID, name)
 		if err != nil {
 			if errors.Is(err, ErrAgentNotFound) {
 				handler.WriteJSON(w, http.StatusNotFound,

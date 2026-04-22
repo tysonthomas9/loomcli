@@ -385,6 +385,9 @@ func applyWorkspaceConfig(cfg *webui.ServerConfig) {
 		workspacemgr.BuildWorkspaceInfoForID,
 		daemonwire.ListWorkspaces,
 	)
+	if cfg.WorkspaceDaemonResolver != nil {
+		cfg.AgentQueueFn = daemonwire.BuildWorkspaceAgentQueueFn(cfg.WorkspaceDaemonResolver)
+	}
 }
 
 func applyCORSConfig(cfg *webui.ServerConfig) {

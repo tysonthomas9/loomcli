@@ -187,17 +187,21 @@ func BuildDaemonConfigFn() func() (json.RawMessage, error) {
 	}
 }
 
-// BuildAgentQueueFn returns a callback that fetches and scores ready issues
-// for a named agent using the task router. Returns nil if the working
-// directory cannot be resolved.
-func BuildAgentQueueFn() func(string) ([]webui.AgentQueueEntry, error) {
-	projectDir, err := os.Getwd()
-	if err != nil {
+// BuildWorkspaceAgentQueueFn returns a workspace-aware callback that fetches
+// and scores ready issues for a named agent. The resolver maps wsID to daemon
+// paths; the returned function loads loom.yaml from the resolved workspace's
+// WorkDir on each call.
+func BuildWorkspaceAgentQueueFn(resolver func(wsID string) (*webui.WorkspaceDaemonPaths, error)) func(wsID, agentName string) ([]webui.AgentQueueEntry, error) {
+	if resolver == nil {
 		return nil
 	}
+	return func(wsID, agentName string) ([]webui.AgentQueueEntry, error) {
+		resolved, err := resolver(wsID)
+		if err != nil {
+			return nil, fmt.Errorf("resolve workspace %q daemon: %w", wsID, err)
+		}
 
-	return func(agentName string) ([]webui.AgentQueueEntry, error) {
-		cfg, err := config.LoadDaemonConfig(projectDir)
+		cfg, err := config.LoadDaemonConfig(resolved.WorkDir)
 		if err != nil {
 			return nil, fmt.Errorf("load daemon config: %w", err)
 		}
