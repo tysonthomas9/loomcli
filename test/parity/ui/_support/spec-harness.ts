@@ -1,0 +1,99 @@
+/**
+ * Shared test harness used by every spec. Implements the §2 skeleton from
+ * ui-test-plan.md so every spec body can focus on the action + assertions.
+ *
+ * Usage:
+ *   import { parityTest } from "./_support/spec-harness";
+ *   parityTest("does X", async ({ tabs, recordRouteHit }) => {
+ *       ...
+ *   });
+ */
+import { test as base, expect, BrowserContext, Page } from "@playwright/test";
+import {
+    openDualTabs,
+    resetBothBackends,
+    snapshotState,
+    preflight,
+    saveForensics,
+    normalizeUrlToRoute,
+    recordRoutes,
+    attachFleetNetworkSpy,
+    type DualTabs,
+} from ".";
+
+/** Extended fixture bag handed to each spec body. */
+export interface ParityFixtures {
+    tabs: DualTabs;
+    /** Append a normalized route to the coverage record for this test. */
+    recordRouteHit: (url: string) => void;
+    /** Network spy on the fleet tab, attached automatically. */
+    fleetSpy: ReturnType<typeof attachFleetNetworkSpy>;
+    /** Pre-action state snapshot (populated in beforeEach). */
+    stateBefore: Awaited<ReturnType<typeof snapshotState>>;
+}
+
+export const parityTest = base.extend<ParityFixtures>({
+    tabs: async ({ browser }, use, testInfo) => {
+        const tabs = await openDualTabs(browser, testInfo.titlePath.join("::"));
+        // Track EVERY request so the coverage helper can normalize URLs on
+        // both tabs without manual recordRouteHit calls in simple specs.
+        const urls: string[] = [];
+        const collect = (req: any) => urls.push(req.url());
+        tabs.beads.on("request", collect);
+        tabs.fleet.on("request", collect);
+        try {
+            await use(tabs);
+        } finally {
+            // Flush coverage for this test.
+            const normalized = urls
+                .map(normalizeUrlToRoute)
+                .filter((r): r is string => !!r);
+            recordRoutes(testInfo.titlePath.join(" > "), [...new Set(normalized)]);
+            if (testInfo.status !== testInfo.expectedStatus) {
+                await saveForensics(tabs.testId, tabs.beads, tabs.fleet);
+            }
+            await tabs.close();
+        }
+    },
+
+    fleetSpy: async ({ tabs }, use) => {
+        const spy = attachFleetNetworkSpy(tabs.fleet);
+        await use(spy);
+        spy.detach();
+    },
+
+    recordRouteHit: async ({}, use, testInfo) => {
+        const hits: string[] = [];
+        await use((url: string) => {
+            const rt = normalizeUrlToRoute(url);
+            if (rt) hits.push(rt);
+        });
+        if (hits.length > 0) {
+            recordRoutes(`${testInfo.titlePath.join(" > ")} [manual]`, [
+                ...new Set(hits),
+            ]);
+        }
+    },
+
+    stateBefore: async ({ tabs }, use, testInfo) => {
+        const s = await snapshotState("before", tabs.testId);
+        await use(s);
+    },
+});
+
+/**
+ * Convenience: every spec's beforeAll calls this, and every spec's
+ * beforeEach resets state. Both are idempotent.
+ */
+export function useParityHooks() {
+    parityTest.beforeAll(async () => {
+        // Runs once per worker — preflight caches, so cheap to call again.
+        await preflight();
+    });
+
+    parityTest.beforeEach(async () => {
+        await resetBothBackends({ reseed: true });
+    });
+}
+
+export { expect };

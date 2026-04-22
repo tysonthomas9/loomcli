@@ -1,0 +1,4 @@
+# Keep this directory in git. Actual artifacts are .gitignore'd — see
+# test/parity/ui/.gitignore. This file exists only so the artifacts tree
+# (reports/, screenshots/, network-traces/, forensics/) has a landing place
+# when the suite first runs.

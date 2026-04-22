@@ -1,0 +1,225 @@
+/**
+ * Three-way verification that a fleet-tab write action actually reached
+ * fleet-db. Without this guard, an adapter bug could silently fall back
+ * to the local beads store and every "parity pass" result would be
+ * meaningless.
+ *
+ * Per ui-test-plan.md §3, we verify a fleet-tab write through three
+ * independent observation channels:
+ *   1. Playwright network intercept — the fleet tab emitted a matching
+ *      /api/issues XHR (evidence the frontend made the call).
+ *   2. Fleet-db access log delta — fleet-db received a request (evidence
+ *      the loom-fleet adapter didn't swallow it).
+ *   3. Redis XLEN events:PARITY — the event stream grew (evidence fleet-db
+ *      actually applied the write).
+ *
+ * If ANY signal is zero on a write action, we fail the test with
+ * "silent fallback detected" and dump forensics.
+ */
+import { Page, Request } from "@playwright/test";
+import { execSync } from "node:child_process";
+import * as path from "node:path";
+import * as fs from "node:fs/promises";
+import { PARITY_URLS, ARTIFACTS_DIR } from "../playwright.config";
+
+const REPO_ROOT = path.resolve(__dirname, "../../../..");
+
+export type RoutingVerdict = "confirmed" | "silent-fallback" | "not-a-write";
+
+export interface RoutingProof {
+    test_id: string;
+    action: string;
+    write_verb: string;
+    request_url: string;
+    browser_request_count: number;
+    fleetdb_log_delta: number;
+    redis_xlen_before: number;
+    redis_xlen_after: number;
+    redis_xlen_delta: number;
+    verdict: RoutingVerdict;
+    notes: string[];
+}
+
+/**
+ * Install a network listener on the fleet tab before any action runs.
+ * Returns a handle used to assert a subsequent action hit fleet-db through
+ * all three channels.
+ */
+export function attachFleetNetworkSpy(fleet: Page) {
+    const writes: Array<{
+        url: string;
+        method: string;
+        at: number;
+    }> = [];
+    const listener = (req: Request) => {
+        const method = req.method();
+        if (!["POST", "PUT", "PATCH", "DELETE"].includes(method)) return;
+        const url = req.url();
+        if (!/\/api\/(workspaces\/[^/]+\/)?issues/.test(url) &&
+            !/\/api\/(workspaces\/[^/]+\/)?(comments|deps|labels|close|reopen|search)/.test(url)) {
+            return;
+        }
+        writes.push({ url, method, at: Date.now() });
+    };
+    fleet.on("request", listener);
+    return {
+        writes,
+        detach: () => fleet.off("request", listener),
+    };
+}
+
+function redisXLen(): number {
+    try {
+        const out = execSync(
+            `docker compose -f test/parity/docker-compose.parity.yml exec -T redis redis-cli XLEN events:${PARITY_URLS.workspace}`,
+            {
+                cwd: REPO_ROOT,
+                encoding: "utf-8",
+                timeout: 5000,
+            },
+        ).trim();
+        const n = parseInt(out, 10);
+        return Number.isFinite(n) ? n : 0;
+    } catch {
+        return 0;
+    }
+}
+
+function fleetDBRequestCount(): number {
+    // fleet-db's /metrics exposes a counter we can read. Fall back to
+    // log-line count if metrics aren't available.
+    try {
+        const m = execSync(
+            `curl -sf ${PARITY_URLS.fleetDB}/metrics 2>/dev/null || true`,
+            { encoding: "utf-8", timeout: 3000 },
+        );
+        const match = m.match(/^http_requests_total(?:\{[^}]*\})?\s+(\d+(?:\.\d+)?)/m);
+        if (match) return Math.floor(parseFloat(match[1]));
+    } catch {
+        // fall through
+    }
+    try {
+        const logs = execSync(
+            `docker compose -f test/parity/docker-compose.parity.yml logs --tail=1000 fleet-db 2>&1 | grep -cE 'POST|PUT|PATCH|DELETE' || true`,
+            { cwd: REPO_ROOT, encoding: "utf-8", timeout: 5000 },
+        );
+        return parseInt(logs.trim(), 10) || 0;
+    } catch {
+        return 0;
+    }
+}
+
+async function dumpForensics(testId: string, proof: RoutingProof): Promise<void> {
+    const dir = path.join(ARTIFACTS_DIR, "forensics", testId);
+    await fs.mkdir(dir, { recursive: true });
+    // Proof JSON
+    await fs.writeFile(
+        path.join(dir, `routing-${proof.action.replace(/[^a-z0-9]/gi, "_")}.json`),
+        JSON.stringify(proof, null, 2),
+    );
+    // Fleet-db log tail
+    try {
+        const logs = execSync(
+            `docker compose -f test/parity/docker-compose.parity.yml logs --tail=200 fleet-db 2>&1`,
+            { cwd: REPO_ROOT, encoding: "utf-8", timeout: 5000 },
+        );
+        await fs.writeFile(path.join(dir, `fleet-db-log.txt`), logs);
+    } catch (e: any) {
+        await fs.writeFile(path.join(dir, `fleet-db-log.txt`), `(unreachable: ${e?.message})`);
+    }
+}
+
+/**
+ * Perform the fleet-tab write action inside the `action` thunk, then
+ * prove it reached fleet-db through three independent channels.
+ *
+ * Usage:
+ *   const spy = attachFleetNetworkSpy(tabs.fleet);
+ *   await assertRoutingForAction("create-issue", spy, async () => {
+ *       await tabs.fleet.click('text=Create');
+ *       await tabs.fleet.waitForResponse(/\/issues$/);
+ *   });
+ */
+export async function assertRoutingForAction(
+    testId: string,
+    actionName: string,
+    spy: ReturnType<typeof attachFleetNetworkSpy>,
+    action: () => Promise<void>,
+): Promise<RoutingProof> {
+    const logBefore = fleetDBRequestCount();
+    const xBefore = redisXLen();
+    const writesBefore = spy.writes.length;
+
+    await action();
+    // Wait up to 3s for fleet-db to see and Redis to propagate the write.
+    // Poll every 200ms.
+    const deadline = Date.now() + 3000;
+    let logAfter = logBefore;
+    let xAfter = xBefore;
+    while (Date.now() < deadline) {
+        logAfter = fleetDBRequestCount();
+        xAfter = redisXLen();
+        if (logAfter > logBefore && xAfter > xBefore) break;
+        await new Promise((r) => setTimeout(r, 200));
+    }
+
+    const browserDelta = spy.writes.length - writesBefore;
+    const logDelta = Math.max(0, logAfter - logBefore);
+    const redisDelta = Math.max(0, xAfter - xBefore);
+    const lastWrite = spy.writes[spy.writes.length - 1];
+
+    let verdict: RoutingVerdict = "confirmed";
+    const notes: string[] = [];
+    if (browserDelta === 0) {
+        verdict = "not-a-write";
+        notes.push("Browser emitted no /api/issues write XHR — action was a read-only navigation?");
+    } else if (logDelta === 0) {
+        verdict = "silent-fallback";
+        notes.push("Browser sent a write but fleet-db's request count did NOT grow — silent fallback to beads.");
+    } else if (redisDelta === 0) {
+        verdict = "silent-fallback";
+        notes.push("Fleet-db saw the request but Redis events:PARITY did NOT grow — fleet-db rejected or stream not wired.");
+    }
+
+    const proof: RoutingProof = {
+        test_id: testId,
+        action: actionName,
+        write_verb: lastWrite?.method ?? "(none)",
+        request_url: lastWrite?.url ?? "(none)",
+        browser_request_count: browserDelta,
+        fleetdb_log_delta: logDelta,
+        redis_xlen_before: xBefore,
+        redis_xlen_after: xAfter,
+        redis_xlen_delta: redisDelta,
+        verdict,
+        notes,
+    };
+
+    // Always persist the proof so the afterAll coverage report can include it.
+    await appendRoutingProof(proof);
+
+    if (verdict === "silent-fallback") {
+        await dumpForensics(testId, proof);
+        throw new Error(
+            `silent-fallback detected: ${actionName}\n` +
+                `  browser writes=${browserDelta}  fleet-db delta=${logDelta}  redis delta=${redisDelta}\n` +
+                `  notes: ${notes.join("; ")}`,
+        );
+    }
+    return proof;
+}
+
+const ROUTING_PROOF_PATH = path.join(ARTIFACTS_DIR, "reports", "routing-proof.json");
+
+async function appendRoutingProof(proof: RoutingProof): Promise<void> {
+    await fs.mkdir(path.dirname(ROUTING_PROOF_PATH), { recursive: true });
+    let existing: RoutingProof[] = [];
+    try {
+        const s = await fs.readFile(ROUTING_PROOF_PATH, "utf-8");
+        existing = JSON.parse(s);
+    } catch {
+        // First write.
+    }
+    existing.push(proof);
+    await fs.writeFile(ROUTING_PROOF_PATH, JSON.stringify(existing, null, 2));
+}

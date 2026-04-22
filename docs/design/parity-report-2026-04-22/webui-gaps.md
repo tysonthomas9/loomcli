@@ -2,6 +2,15 @@
 
 **Status:** scaffold ready, execution pending operator
 
+> **Note on automation (2026-04-22):** the UI Parity Test Suite is now
+> implemented at `test/parity/ui/` (Playwright). Every time it runs, its
+> preflight rewrites the Step 0 table below with real pass/fail results
+> and timestamps the table with an HTML comment footer. The most recent
+> recorded run was a FAIL (docker-compose stack was not reachable in the
+> implementation sandbox — not a suite regression). Bring up the stack
+> with `docker compose -f test/parity/docker-compose.parity.yml up -d`
+> then `make test-parity-ui` to re-populate this table with real data.
+
 ## Status
 
 The Phase 3 webui parity pass is the last uncompleted piece of the
@@ -61,15 +70,15 @@ and fix the compose / env config first.
 
 | Check | Expected | Actual | Pass/Fail |
 |---|---|---|---|
-| `GET :8081/api/config .issue_backend` | `beads` | _TBD_ | _TBD_ |
-| `GET :8082/api/config .issue_backend` | `fleet` | _TBD_ | _TBD_ |
-| Container healthchecks all green | healthy | _TBD_ | _TBD_ |
-| Probe POST to :8082 shows up in fleet-db logs | yes | _TBD_ | _TBD_ |
-| `loom-fleet` env `LOOM_FLEET_URL` | `http://fleet-db:8080` | _TBD_ | _TBD_ |
-| `loom-fleet` env `LOOM_WORKSPACE` | `PARITY` | _TBD_ | _TBD_ |
-| fleet-db has workspace `PARITY` | yes | _TBD_ | _TBD_ |
-| Settings page shows "beads" on :8081 | yes | _TBD_ | _TBD_ |
-| Settings page shows "fleet" on :8082 | yes | _TBD_ | _TBD_ |
+| `GET :8081/api/config .issue_backend` | `beads` | UNREACHABLE | FAIL |
+| `GET :8082/api/config .issue_backend` | `fleet` | UNREACHABLE | FAIL |
+| Container healthchecks all green | healthy | loom-beads=(not found) loom-fleet=(not found) fleet-db=(not found) | FAIL |
+| Probe POST to :8082 shows up in fleet-db logs | yes | probe failed | FAIL |
+| `loom-fleet` env `LOOM_FLEET_URL` | `http://fleet-db:8080` | docker exec failed | FAIL |
+| `loom-fleet` env `LOOM_WORKSPACE` | `PARITY` | docker exec failed | FAIL |
+| fleet-db has workspace `PARITY` | yes | admin/workspaces unreachable | FAIL |
+| Settings page shows "beads" on :8081 | yes | UNREACHABLE | FAIL |
+| Settings page shows "fleet" on :8082 | yes | UNREACHABLE | FAIL |
 
 ## Findings template
 
@@ -163,3 +172,5 @@ and not accidentally falling through to beads:
 3. Close bd ticket `loomcli-7w9tc.13`
 4. Optionally: capture screenshots into a `screenshots/` sibling dir
    and link from the relevant rows
+
+<!-- preflight: 2026-04-22T19:31:15.401Z all_passed=false -->

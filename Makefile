@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-integration test-all test-parity lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-api-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install install-bd help frontend sync-beads update-beads check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
+.PHONY: all build build-frontend build-all test test-integration test-all test-parity test-parity-cli test-parity-ui lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-api-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install install-bd help frontend sync-beads update-beads check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
 
 # Default target
 all: build
@@ -31,6 +31,41 @@ test-all:
 test-parity:
 	@echo "Running loomcli parity harness..."
 	go test -tags parity -race -timeout 15m -v ./internal/backend/paritytest/...
+
+# Run the CLI-parity harness — exercises bd vs fdb at the CLI boundary
+# (stdout JSON diffs per step). Writes test/parity/ui/cli-report.json.
+# Prerequisites: bd on PATH (`make install-bd`), and both sibling-repo
+# binaries built:
+#   cd ~/codebase/fleet-db && go build -o /tmp/fleet-db ./cmd/fleet-db
+#   cd ~/codebase/fleet-db && go build -o /tmp/fdb ./cmd/fdb
+test-parity-cli:
+	@echo "Running loomcli CLI-parity harness..."
+	go test -tags parity -race -timeout 10m -v ./internal/backend/paritytest/... -run TestCLIParity
+
+# Run the UI Parity Test Suite (Playwright; beads :8081 vs fleet :8082).
+# Assumes docker-compose.parity.yml is already up AND seeded — the suite's
+# preflight will abort with an actionable error if anything is missing
+# (never silently "skip because no stack" — see ui-test-plan.md §0).
+#
+# Usage:
+#   docker compose -f test/parity/docker-compose.parity.yml up -d
+#   docker compose -f test/parity/docker-compose.parity.yml run --rm parity-seed
+#   make test-parity-ui
+#
+# Environment overrides accepted (see playwright.config.ts):
+#   LOOM_BEADS_URL   default http://localhost:8081
+#   LOOM_FLEET_URL   default http://localhost:8082
+#   FLEET_DB_URL     default http://localhost:8080
+#   PARITY_WORKSPACE default PARITY
+test-parity-ui:
+	@echo "Running UI parity suite (Playwright)..."
+	@cd test/parity/ui && \
+	  if [ ! -d node_modules ]; then \
+	    echo "[test-parity-ui] installing npm deps..."; \
+	    npm install --no-audit --no-fund --silent || exit 1; \
+	    npx playwright install --with-deps chromium || exit 1; \
+	  fi && \
+	  npx playwright test
 
 # Run tests with race detector and coverage
 test-race-cover:
