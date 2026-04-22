@@ -1,0 +1,746 @@
+{
+  "contract_file": "frontend/kanban.md",
+  "validation_report": "reports/validation-kanban.json",
+  "audit_date": "2026-04-22T23:38:10Z",
+  "spec_files_searched": [
+    "internal/webui/frontend/tests/e2e/kanban.spec.ts",
+    "internal/webui/frontend/tests/e2e/kanban-redesign.spec.ts",
+    "internal/webui/frontend/tests/e2e/kanban-column-redesign.spec.ts",
+    "internal/webui/frontend/tests/e2e/kanban-ui-redesign.spec.ts",
+    "internal/webui/frontend/tests/e2e/kanban-agent-row.spec.ts",
+    "internal/webui/frontend/tests/e2e/integration/kanban-crud.integration.spec.ts",
+    "internal/webui/frontend/tests/e2e/swimlane-board.spec.ts",
+    "internal/webui/frontend/tests/e2e/swimlane-collapse.spec.ts",
+    "internal/webui/frontend/tests/e2e/swimlane-wiring.spec.ts",
+    "internal/webui/frontend/tests/e2e/groupby-assignee.spec.ts",
+    "internal/webui/frontend/tests/e2e/groupby-dropdown.spec.ts",
+    "internal/webui/frontend/tests/e2e/groupby-epic.spec.ts",
+    "internal/webui/frontend/tests/e2e/groupby-label.spec.ts",
+    "internal/webui/frontend/tests/e2e/groupby-none.spec.ts",
+    "internal/webui/frontend/tests/e2e/groupby-priority.spec.ts",
+    "internal/webui/frontend/tests/e2e/groupby-type.spec.ts",
+    "internal/webui/frontend/tests/e2e/groupby-url-sync.spec.ts"
+  ],
+  "go_test_files_searched": [
+    "internal/webui/handlers/issues/coverage_test.go"
+  ],
+  "summary": {
+    "total_passing": 81,
+    "covered": 17,
+    "partial": 14,
+    "uncovered": 50,
+    "coverage_pct": 21.0
+  },
+  "assertions": [
+    {
+      "id": "VAL-FE-KANBAN-001",
+      "title": "Kanban board loads with 6 status columns when empty workspace",
+      "coverage": "covered",
+      "spec_files": ["kanban-column-redesign.spec.ts", "kanban.spec.ts"],
+      "test_names": [
+        "renders 6 columns in order: Backlog, Open, Blocked, In Progress, Review, Done",
+        "handles empty API response gracefully",
+        "empty columns show 0 issues badge"
+      ],
+      "notes": "kanban-column-redesign.spec.ts verifies all 6 data-status columns (backlog, ready, blocked, in_progress, review, done) render in correct order. kanban.spec.ts verifies the board loads with empty data (0 issues)."
+    },
+    {
+      "id": "VAL-FE-KANBAN-002",
+      "title": "Empty column shows contextual message per status",
+      "coverage": "partial",
+      "spec_files": ["kanban-column-redesign.spec.ts"],
+      "test_names": ["empty columns show 0 issues badge"],
+      "notes": "Test verifies '0 issues' count badge on empty columns but does NOT verify the contextual placeholder message text that should vary per status (e.g., 'No tasks in backlog' vs 'Nothing in progress')."
+    },
+    {
+      "id": "VAL-FE-KANBAN-003",
+      "title": "Single column with 1 card displays card title, ID, and priority indicator",
+      "coverage": "partial",
+      "spec_files": ["kanban.spec.ts", "kanban-ui-redesign.spec.ts"],
+      "test_names": [
+        "issues load into correct Kanban columns",
+        "card title uses h3 element with normal weight",
+        "P0 badge renders with data-priority=0"
+      ],
+      "notes": "Title rendering (h3) and priority badge (data-priority) are verified. The issue ID badge on the card is NOT explicitly asserted in any test — only title and priority are covered."
+    },
+    {
+      "id": "VAL-FE-KANBAN-004",
+      "title": "All 5 columns visible and unobstructed in single screen when few issues",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test verifies layout fit / obstruction behavior at a given viewport. (Note: board now has 6 columns, not 5 — the assertion is stale but still tests a distinct layout property.)"
+    },
+    {
+      "id": "VAL-FE-KANBAN-005",
+      "title": "Board height fills available container; columns scrollable vertically when tall",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test checks container-height filling or per-column vertical scroll behavior with long card lists."
+    },
+    {
+      "id": "VAL-FE-KANBAN-012",
+      "title": "None grouping (flat board) delegates to KanbanBoard component",
+      "coverage": "covered",
+      "spec_files": ["swimlane-board.spec.ts", "groupby-none.spec.ts", "swimlane-wiring.spec.ts"],
+      "test_names": [
+        "groupBy=\"none\" shows flat KanbanBoard without swim lanes",
+        "flat view renders KanbanBoard without any swim lane elements",
+        "KanbanBoard renders when groupBy is none",
+        "no grouping headers shown in flat view"
+      ],
+      "notes": "Flat view (groupBy=none) is explicitly verified to render KanbanBoard without swim lane elements across multiple specs."
+    },
+    {
+      "id": "VAL-FE-KANBAN-013",
+      "title": "Issue card displays title, ID, priority color, type icon, assignee avatar",
+      "coverage": "partial",
+      "spec_files": ["kanban.spec.ts", "kanban-redesign.spec.ts", "kanban-ui-redesign.spec.ts", "kanban-agent-row.spec.ts"],
+      "test_names": [
+        "issues load into correct Kanban columns",
+        "P0 badge has warm red background (#e24b3b)",
+        "in-progress card with matching agent shows AgentRow with status"
+      ],
+      "notes": "Title and priority-color badge are covered across redesign specs. AgentRow (assignee presence) is tested for in_progress cards. The ID badge and type icon are NOT explicitly asserted. Assignee avatar is only covered for in_progress state."
+    },
+    {
+      "id": "VAL-FE-KANBAN-014",
+      "title": "Long card title truncates with ellipsis when exceeds single line",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test seeds a long title and asserts CSS ellipsis/truncation behavior."
+    },
+    {
+      "id": "VAL-FE-KANBAN-015",
+      "title": "Priority color-coding consistent across all cards (P0-P4, undefined default)",
+      "coverage": "covered",
+      "spec_files": ["kanban-redesign.spec.ts", "kanban-ui-redesign.spec.ts"],
+      "test_names": [
+        "P0 badge has warm red background (#e24b3b)",
+        "P1 badge has orange background (#ef7f4a)",
+        "P2 badge has warm yellow background (#f0b24a)",
+        "P3 badge has soft blue background (#5b85f7)",
+        "P4 badge has gray background (#6b7280)",
+        "all priority badges render with correct text across columns"
+      ],
+      "notes": "Explicit P0-P4 background-color assertions plus cross-column rendering check. Undefined/default priority is not explicitly covered but P0-P4 consistency is proven."
+    },
+    {
+      "id": "VAL-FE-KANBAN-016",
+      "title": "Blocked badge shows N on card when issue blocked by dependencies",
+      "coverage": "partial",
+      "spec_files": ["kanban-ui-redesign.spec.ts"],
+      "test_names": ["blocked cards display blocked badge with count"],
+      "notes": "Test seeds blocked_by_count=2 and asserts the article has data-blocked=\"true\" and is visible — but does NOT assert the badge text displays the count number '2'."
+    },
+    {
+      "id": "VAL-FE-KANBAN-017",
+      "title": "Blocked badge tooltip shows blocker issue IDs and titles on hover",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No hover-tooltip test for the blocked badge listing blocker IDs/titles."
+    },
+    {
+      "id": "VAL-FE-KANBAN-019",
+      "title": "Review badge (Plan/Code/Help) appears on cards in review status with feedback",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test for Plan/Code/Help review-feedback badge variants on review-status cards."
+    },
+    {
+      "id": "VAL-FE-KANBAN-020",
+      "title": "Open status badge shows two-state system: Needs Plan vs Ready",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No kanban card test distinguishes Needs Plan vs Ready sub-states for open issues. (Needs Planning appears in monitor/dashboard tests but not kanban cards.)"
+    },
+    {
+      "id": "VAL-FE-KANBAN-022",
+      "title": "Card shows repo badge when in multi-repo workspace",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test seeds a multi-repo workspace state and verifies a repo badge on the card."
+    },
+    {
+      "id": "VAL-FE-KANBAN-025",
+      "title": "Drag handle icon visible on all cards (6-dot grip icon)",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test asserts the presence of a 6-dot grip-icon drag handle. Cards are draggable but the handle icon is not checked."
+    },
+    {
+      "id": "VAL-FE-KANBAN-026",
+      "title": "Card shows pending/optimistic update indicator (skeleton or muted opacity)",
+      "coverage": "partial",
+      "spec_files": ["kanban.spec.ts"],
+      "test_names": ["drag shows visual feedback during operation"],
+      "notes": "Opacity 0.5 during active drag is asserted, but this is drag-visual-feedback, not a pending/optimistic update skeleton state while awaiting server response. Non-drag optimistic indicators are untested."
+    },
+    {
+      "id": "VAL-FE-KANBAN-027",
+      "title": "Drag open issue to in_progress column triggers assignee prompt modal",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test exercises the assignee-prompt modal that should appear when dragging into in_progress without an assignee."
+    },
+    {
+      "id": "VAL-FE-KANBAN-028",
+      "title": "Assignee modal Assign sends PATCH with both status and assignee",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test verifies the modal Assign path sends PATCH with both status and assignee fields."
+    },
+    {
+      "id": "VAL-FE-KANBAN-029",
+      "title": "Assignee modal skip sends PATCH with status only (no assignee)",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test verifies the modal Skip path sends PATCH with status only."
+    },
+    {
+      "id": "VAL-FE-KANBAN-030",
+      "title": "Drag in_progress to review column sends PATCH with status change",
+      "coverage": "partial",
+      "spec_files": ["kanban.spec.ts"],
+      "test_names": [
+        "drag issue from Ready to In Progress updates status and persists",
+        "drag issue from Ready to Review updates status",
+        "drag issue from Review to Closed updates status"
+      ],
+      "notes": "Drag-and-PATCH is tested for Ready→In Progress, Ready→Review, and Review→Closed, but in_progress→review specifically is not tested."
+    },
+    {
+      "id": "VAL-FE-KANBAN-031",
+      "title": "Drag review to in_progress sends PATCH with status change",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "Reverse direction (review→in_progress) is not exercised by any drag test."
+    },
+    {
+      "id": "VAL-FE-KANBAN-033",
+      "title": "Drag to same column (no status change) results in no-op (no API call)",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test asserts that dragging a card back to its own column issues zero PATCH calls."
+    },
+    {
+      "id": "VAL-FE-KANBAN-034",
+      "title": "Blocked issue drag restricted to allowed targets only",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test asserts drag-from-blocked is constrained to a specific whitelist of target columns."
+    },
+    {
+      "id": "VAL-FE-KANBAN-035",
+      "title": "Drag overlay (ghost card) follows cursor during drag",
+      "coverage": "covered",
+      "spec_files": ["kanban.spec.ts"],
+      "test_names": ["drag shows visual feedback during operation"],
+      "notes": "Explicitly asserts the DragOverlay element is visible during the drag (targets [class*=\"overlay\"] with an article descendant) and has elevated box-shadow."
+    },
+    {
+      "id": "VAL-FE-KANBAN-036",
+      "title": "Drop zone highlight appears on column when hovering during drag",
+      "coverage": "covered",
+      "spec_files": ["kanban.spec.ts"],
+      "test_names": ["drag shows visual feedback during operation"],
+      "notes": "Asserts data-is-over=\"true\" on the drop target and that the contentDropOver class is applied while hovering."
+    },
+    {
+      "id": "VAL-FE-KANBAN-037",
+      "title": "Drag blocked→closed succeeds (drag enabled out of blocked column)",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test drags a blocked card into the closed/done column."
+    },
+    {
+      "id": "VAL-FE-KANBAN-038",
+      "title": "Drag restricted by allowedDropTargets (whitelist of column IDs)",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test verifies the allowedDropTargets whitelist semantics."
+    },
+    {
+      "id": "VAL-FE-KANBAN-040",
+      "title": "Cross-lane drag moves card to target lane's column (when ungrouped)",
+      "coverage": "uncovered",
+      "spec_files": ["swimlane-board.spec.ts"],
+      "test_names": ["drag issue within same lane changes status"],
+      "notes": "Only within-same-lane drag is tested. Cross-lane drag behavior (swim-lane→swim-lane) is not covered."
+    },
+    {
+      "id": "VAL-FE-KANBAN-041",
+      "title": "PATCH request body includes correct workspaceId and issueId in URL",
+      "coverage": "partial",
+      "spec_files": ["kanban.spec.ts"],
+      "test_names": ["drag issue from Ready to In Progress updates status and persists"],
+      "notes": "Test asserts the URL includes /api/issues/<issueId>, but the current URL shape does not carry a workspaceId segment — so workspaceId-in-URL is unverified (and may not match the contract)."
+    },
+    {
+      "id": "VAL-FE-KANBAN-042",
+      "title": "Drag failure shows error toast with message; card snaps back to original column",
+      "coverage": "covered",
+      "spec_files": ["kanban.spec.ts"],
+      "test_names": ["shows error toast and rolls back card on drag failure"],
+      "notes": "500 PATCH triggers the error-toast testid with role=\"alert\" and the card is verified back in the original Ready column."
+    },
+    {
+      "id": "VAL-FE-KANBAN-043",
+      "title": "Drag during network failure shows Network error toast",
+      "coverage": "partial",
+      "spec_files": ["kanban.spec.ts"],
+      "test_names": ["shows error toast and rolls back card on drag failure"],
+      "notes": "Covers server 500 responses with an error toast, but does NOT exercise a network-failure path (e.g., aborted fetch / offline) nor assert a 'Network error' toast message specifically."
+    },
+    {
+      "id": "VAL-FE-KANBAN-044",
+      "title": "Simultaneous drag by two users results in last-write-wins (no conflict UI)",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No multi-user concurrency scenario is simulated."
+    },
+    {
+      "id": "VAL-FE-KANBAN-045",
+      "title": "PATCH includes only changed fields (status, assignee as applicable)",
+      "coverage": "covered",
+      "spec_files": ["kanban.spec.ts", "swimlane-board.spec.ts"],
+      "test_names": [
+        "drag issue from Ready to In Progress updates status and persists",
+        "drag issue within same lane changes status"
+      ],
+      "notes": "Both tests assert patchCalls[0].body.toEqual({ status: ... }) — proving the PATCH body contains only the changed status field, no unrelated fields."
+    },
+    {
+      "id": "VAL-FE-KANBAN-046",
+      "title": "Optimistic update reflects card in new column before API responds",
+      "coverage": "partial",
+      "spec_files": ["kanban.spec.ts"],
+      "test_names": ["drag shows visual feedback during operation"],
+      "notes": "Drag moves the card and the new column shows the card, but the assertion is strictly that this happens BEFORE the API responds. Tests waitForResponse on PATCH before checking position — optimistic-before-response is not isolated."
+    },
+    {
+      "id": "VAL-FE-KANBAN-047",
+      "title": "Assignee modal remembers recent selections (localStorage)",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No localStorage-persisted assignee modal test."
+    },
+    {
+      "id": "VAL-FE-KANBAN-048",
+      "title": "New issue created by another user appears in board in real-time",
+      "coverage": "covered",
+      "spec_files": ["integration/kanban-crud.integration.spec.ts"],
+      "test_names": ["create issue via API appears in UI"],
+      "notes": "Integration test creates an issue via API and waits for it to appear in the ready column via SSE connection. Requires RUN_INTEGRATION_TESTS=1."
+    },
+    {
+      "id": "VAL-FE-KANBAN-049",
+      "title": "Issue status change via SSE moves card to new column (remote update)",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "Integration tests only cover create and close via SSE. No SSE-driven status-change-moves-card test."
+    },
+    {
+      "id": "VAL-FE-KANBAN-050",
+      "title": "Issue updated with assignee change reflects on card immediately",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No SSE assignee-change test."
+    },
+    {
+      "id": "VAL-FE-KANBAN-051",
+      "title": "Drag mid-flight + SSE arrival: card stays in drag target (optimistic wins)",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test simulates an SSE arriving during an in-progress drag."
+    },
+    {
+      "id": "VAL-FE-KANBAN-052",
+      "title": "Issue deleted via SSE is removed from board (card disappears)",
+      "coverage": "covered",
+      "spec_files": ["integration/kanban-crud.integration.spec.ts"],
+      "test_names": ["close issue via API removes from ready column"],
+      "notes": "Integration test closes an issue via API and verifies SSE propagation removes it from the ready column. Requires RUN_INTEGRATION_TESTS=1."
+    },
+    {
+      "id": "VAL-FE-KANBAN-053",
+      "title": "Column count updates live when issue added/removed via SSE",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test asserts the count badge increments/decrements on SSE add/remove events."
+    },
+    {
+      "id": "VAL-FE-KANBAN-054",
+      "title": "Blocked status change via SSE updates blocked badge on affected cards",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No SSE-driven blocked-badge update test."
+    },
+    {
+      "id": "VAL-FE-KANBAN-055",
+      "title": "Filter-active board: SSE card moves but remains filtered (if filter matches)",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test combining active filter and SSE-driven update."
+    },
+    {
+      "id": "VAL-FE-KANBAN-056",
+      "title": "Filter active: only matching cards displayed; other cards hidden",
+      "coverage": "covered",
+      "spec_files": ["groupby-none.spec.ts", "swimlane-wiring.spec.ts"],
+      "test_names": [
+        "priority filter reduces visible issues in flat view",
+        "type filter works with flat view",
+        "groupBy works with type filter",
+        "groupBy works with priority filter"
+      ],
+      "notes": "groupby-none flat kanban tests verify priority-filter and type-filter reduce visible articles to only matching cards. swimlane-wiring also covers the filtered+grouped case."
+    },
+    {
+      "id": "VAL-FE-KANBAN-059",
+      "title": "Drag of filtered card within column has no effect (reorder not supported when filter active)",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test combines active filter with drag-reorder and asserts no-op."
+    },
+    {
+      "id": "VAL-FE-KANBAN-060",
+      "title": "Column with 200+ cards uses virtual scrolling (not all DOM nodes rendered)",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No virtualization test in any kanban/swimlane/groupby spec (grep for 'virtual' returns zero hits)."
+    },
+    {
+      "id": "VAL-FE-KANBAN-061",
+      "title": "Virtual scroll preserves card state when scrolling in/out",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No virtualization test."
+    },
+    {
+      "id": "VAL-FE-KANBAN-062",
+      "title": "Tab key navigates between cards in reading order",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Tab-focus-between-cards test in kanban specs."
+    },
+    {
+      "id": "VAL-FE-KANBAN-063",
+      "title": "Enter key on focused card opens detail panel",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "Click-opens-detail-panel is covered, but keyboard Enter is not tested for kanban cards."
+    },
+    {
+      "id": "VAL-FE-KANBAN-064",
+      "title": "Space key on focused card initiates drag",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "Space-to-drag keyboard initiation is not tested on kanban cards (swimlane-collapse uses Space for collapse toggle, not drag)."
+    },
+    {
+      "id": "VAL-FE-KANBAN-065",
+      "title": "Escape key cancels drag and returns card to original position",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No Escape-cancels-drag test."
+    },
+    {
+      "id": "VAL-FE-KANBAN-066",
+      "title": "Arrow keys navigate to adjacent columns during keyboard drag",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No arrow-key-keyboard-drag test."
+    },
+    {
+      "id": "VAL-FE-KANBAN-068",
+      "title": "Blocked badge has aria-label describing blocker count",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No aria-label assertion on the blocked badge."
+    },
+    {
+      "id": "VAL-FE-KANBAN-069",
+      "title": "At 768px width (tablet), board reflows to 2-3 columns per row",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No tablet-viewport test in kanban/swimlane/groupby specs (grep for '768' returns zero hits)."
+    },
+    {
+      "id": "VAL-FE-KANBAN-070",
+      "title": "At 480px width (mobile), board shows single column or horizontal scroll",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No mobile-viewport test."
+    },
+    {
+      "id": "VAL-FE-KANBAN-071",
+      "title": "Column header shows count and auto-updates when cards added/removed",
+      "coverage": "covered",
+      "spec_files": ["kanban-column-redesign.spec.ts", "kanban.spec.ts"],
+      "test_names": [
+        "column count badges show correct counts",
+        "drag issue from Ready to In Progress updates status and persists"
+      ],
+      "notes": "Column counts are verified via getByLabel('N issue(s)'). The drag test implicitly confirms count updates (source column goes from 2→1, destination 1→2)."
+    },
+    {
+      "id": "VAL-FE-KANBAN-072",
+      "title": "Closed column shows Completed status label and distinct styling",
+      "coverage": "partial",
+      "spec_files": ["kanban-column-redesign.spec.ts"],
+      "test_names": [
+        "column headers display correct labels",
+        "renders 6 columns in order: Backlog, Open, Blocked, In Progress, Review, Done"
+      ],
+      "notes": "Done column header text is verified as 'Done' (not 'Completed' per the assertion). Distinct styling for the closed column is not asserted."
+    },
+    {
+      "id": "VAL-FE-KANBAN-073",
+      "title": "Column header has aria-label describing column",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No aria-label assertion on column section headers (only the 'N issue(s)' count badge uses aria-label)."
+    },
+    {
+      "id": "VAL-FE-KANBAN-084",
+      "title": "Drag with invalid status target rejected silently",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test drags to an invalid target and asserts silent rejection."
+    },
+    {
+      "id": "VAL-FE-KANBAN-087",
+      "title": "Drag with network timeout (>30s) shows error toast and rolls back",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "Timeout-specific path is not simulated. (Note: standard Playwright makes 30s+ scenarios unsuitable; may need a specialized mock-delay test.)"
+    },
+    {
+      "id": "VAL-FE-KANBAN-088",
+      "title": "Very long issue ID displays without truncation in card",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No long-ID rendering test."
+    },
+    {
+      "id": "VAL-FE-KANBAN-090",
+      "title": "Reassigning card to same assignee does not trigger change (PATCH still sent)",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No same-assignee-reselect test."
+    },
+    {
+      "id": "VAL-FE-KANBAN-091",
+      "title": "Clicking card opens issue detail panel on right side",
+      "coverage": "covered",
+      "spec_files": ["kanban-ui-redesign.spec.ts"],
+      "test_names": ["clicking a card opens the IssueDetailPanel"],
+      "notes": "Explicit click-opens-panel test asserts the issue-detail-panel testid or equivalent locator becomes visible after clicking a card."
+    },
+    {
+      "id": "VAL-FE-KANBAN-092",
+      "title": "Closing detail panel does not navigate away from Kanban view",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test closes the panel from kanban and verifies the URL/kanban view persists."
+    },
+    {
+      "id": "VAL-FE-KANBAN-093",
+      "title": "Kanban board updates when issue changed in detail panel",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test edits an issue in the detail panel and verifies the board card reflects the change."
+    },
+    {
+      "id": "VAL-FE-KANBAN-094",
+      "title": "Kanban board respects workspace-level filter state (from FilterBar)",
+      "coverage": "covered",
+      "spec_files": ["groupby-none.spec.ts", "groupby-dropdown.spec.ts", "groupby-url-sync.spec.ts"],
+      "test_names": [
+        "priority filter reduces visible issues in flat view",
+        "type filter works with flat view",
+        "groupBy persists after applying other filters",
+        "groupBy combines with priority filter in URL",
+        "groupBy combines with type filter in URL"
+      ],
+      "notes": "FilterBar controls (priority-filter, type-filter testids) are verified to filter visible kanban cards in flat view and swim-lane view."
+    },
+    {
+      "id": "VAL-FE-KANBAN-096",
+      "title": "Store optimistic update shows card in new column before API response",
+      "coverage": "partial",
+      "spec_files": ["kanban.spec.ts"],
+      "test_names": ["drag shows visual feedback during operation"],
+      "notes": "Cards do move to the target column after drag completes, but tests wait for PATCH response before asserting final position. Optimistic-before-response timing is not isolated."
+    },
+    {
+      "id": "VAL-FE-KANBAN-097",
+      "title": "Store rollback on PATCH failure restores card to original column + status",
+      "coverage": "covered",
+      "spec_files": ["kanban.spec.ts"],
+      "test_names": ["shows error toast and rolls back card on drag failure"],
+      "notes": "500 PATCH triggers a verified rollback: card returns to Ready, In Progress column drops to 0 articles."
+    },
+    {
+      "id": "VAL-FE-KANBAN-098",
+      "title": "Refetch issues repopulates board from API (full sync)",
+      "coverage": "partial",
+      "spec_files": ["kanban.spec.ts"],
+      "test_names": ["drag issue from Ready to In Progress updates status and persists"],
+      "notes": "The drag test calls page.reload() and verifies cards repopulate via /api/ready, but this is a page-reload refetch, not an explicit store-level refetch call."
+    },
+    {
+      "id": "VAL-FE-KANBAN-099",
+      "title": "Drag animation is smooth (60 fps) without jank",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "Performance (60fps/jank) is not measurable with standard Playwright assertions and has no test."
+    },
+    {
+      "id": "VAL-FE-KANBAN-100",
+      "title": "Board does not re-render all columns when single card changes",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No render-count test (React DevTools/profiler)."
+    },
+    {
+      "id": "VAL-FE-KANBAN-200",
+      "title": "Keyboard drag-drop with Space/arrows/Esc",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No keyboard drag-and-drop test on kanban cards."
+    },
+    {
+      "id": "VAL-FE-KANBAN-201",
+      "title": "Keyboard drag announces state to screen readers",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No aria-live / screen-reader announcement test for drag state."
+    },
+    {
+      "id": "VAL-FE-KANBAN-203",
+      "title": "Virtualization or memoization prevents all-column re-render on drag",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No render-count-on-drag test."
+    },
+    {
+      "id": "VAL-FE-KANBAN-204",
+      "title": "SSE burst of 100 mutations in 1s coalesces to ≤10 re-renders",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No burst/throttle test; inherently hard to verify with standard Playwright."
+    },
+    {
+      "id": "VAL-FE-KANBAN-205",
+      "title": "Optimistic UI rollback on 409 conflict",
+      "coverage": "partial",
+      "spec_files": ["kanban.spec.ts"],
+      "test_names": ["shows error toast and rolls back card on drag failure"],
+      "notes": "Rollback is tested for HTTP 500 but NOT 409 specifically. The contract specifically calls out 409 conflict handling."
+    },
+    {
+      "id": "VAL-FE-KANBAN-206",
+      "title": "Optimistic rollback preserves other local edits",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No scenario where concurrent local edits exist during a failing drag to verify preservation."
+    },
+    {
+      "id": "VAL-FE-KANBAN-207",
+      "title": "URL deep link round-trips groupBy, filter, search",
+      "coverage": "covered",
+      "spec_files": ["groupby-url-sync.spec.ts"],
+      "test_names": [
+        "groupBy combines with priority filter in URL",
+        "groupBy combines with type filter in URL",
+        "groupBy combines with search filter in URL",
+        "changing groupBy preserves other filter params",
+        "loading page with groupBy param restores dropdown selection"
+      ],
+      "notes": "Explicit tests verify groupBy+filter+search URL params round-trip and mutually persist."
+    },
+    {
+      "id": "VAL-FE-KANBAN-208",
+      "title": "Deep link is shareable across sessions",
+      "coverage": "covered",
+      "spec_files": ["groupby-url-sync.spec.ts"],
+      "test_names": [
+        "shared/bookmarked URL loads correct groupBy state",
+        "groupBy state preserved through page refresh"
+      ],
+      "notes": "Simulates opening a bookmarked URL and verifies the state (dropdown + swim-lane-board testid) matches the URL params."
+    },
+    {
+      "id": "VAL-FE-KANBAN-209",
+      "title": "Invalid URL params fall back to defaults without crash",
+      "coverage": "covered",
+      "spec_files": ["groupby-url-sync.spec.ts", "swimlane-wiring.spec.ts", "groupby-dropdown.spec.ts"],
+      "test_names": [
+        "invalid groupBy value falls back to 'epic'",
+        "groupBy values are case-sensitive",
+        "invalid groupBy URL param defaults to epic swim lane view",
+        "invalid URL param defaults to 'Epic'"
+      ],
+      "notes": "Multiple specs verify invalid/unknown groupBy values fall back to the epic default without error."
+    },
+    {
+      "id": "VAL-FE-KANBAN-300",
+      "title": "Drag failure rolls back card and surfaces error toast without auto-retry",
+      "coverage": "partial",
+      "spec_files": ["kanban.spec.ts"],
+      "test_names": ["shows error toast and rolls back card on drag failure"],
+      "notes": "Rollback and error toast are verified on 500. But the 'without auto-retry' property (no duplicate PATCH calls after failure) is not explicitly asserted — patchCalls length after the failed drag is not checked."
+    }
+  ]
+}
