@@ -1,0 +1,615 @@
+{
+  "contract_file": "frontend/issue-detail-crud.md",
+  "validation_report": "reports/validation-issue-detail-crud.json",
+  "audit_date": "2026-04-22T23:04:12Z",
+  "spec_files_searched": [
+    "internal/webui/frontend/tests/e2e/issue-detail-panel.spec.ts",
+    "internal/webui/frontend/tests/e2e/issue-detail-panel-wiring.spec.ts",
+    "internal/webui/frontend/tests/e2e/editable-title.spec.ts",
+    "internal/webui/frontend/tests/e2e/editable-description.spec.ts",
+    "internal/webui/frontend/tests/e2e/comment-form.spec.ts",
+    "internal/webui/frontend/tests/e2e/comments-section.spec.ts",
+    "internal/webui/frontend/tests/e2e/dependencies-section.spec.ts",
+    "internal/webui/frontend/tests/e2e/review-approve-reject.spec.ts",
+    "internal/webui/frontend/tests/e2e/status-dropdown.spec.ts",
+    "internal/webui/frontend/tests/e2e/priority-dropdown.spec.ts",
+    "internal/webui/frontend/tests/e2e/type-dropdown.spec.ts",
+    "internal/webui/frontend/tests/e2e/journey-create-triage.spec.ts",
+    "internal/webui/frontend/tests/e2e/journey-issue-dependencies.spec.ts",
+    "internal/webui/frontend/tests/e2e/keyboard-escape-layers.spec.ts",
+    "internal/webui/frontend/tests/e2e/keyboard-focus-management.spec.ts"
+  ],
+  "go_test_files_searched": [
+    "internal/webui/handlers/issues/write_test.go",
+    "internal/webui/handlers/issues/handlers_integration_test.go",
+    "internal/webui/handlers/issues/comments_test.go",
+    "internal/webui/handlers/issues/deps_test.go",
+    "internal/entity/issue_test.go",
+    "internal/webui/frontend/tests/e2e/api/issue-crud-roundtrip.api.spec.ts",
+    "internal/webui/frontend/tests/e2e/api/issue-lifecycle.api.spec.ts",
+    "internal/webui/frontend/tests/e2e/api/dependency-management.api.spec.ts",
+    "internal/webui/frontend/tests/e2e/api/review-workflow.api.spec.ts"
+  ],
+  "summary": {
+    "total_passing": 66,
+    "covered": 34,
+    "partial": 8,
+    "uncovered": 24,
+    "coverage_pct": 51.5
+  },
+  "assertions": [
+    {
+      "id": "VAL-FE-DETAIL-003",
+      "title": "Issue header displays ID badge",
+      "coverage": "covered",
+      "spec_files": ["issue-detail-panel.spec.ts"],
+      "test_names": ["panel displays correct issue ID and title"],
+      "notes": "Covered by issue-detail-panel.spec.ts:285 which verifies the ID badge text content in the detail panel header."
+    },
+    {
+      "id": "VAL-FE-DETAIL-004",
+      "title": "Title is prominently displayed",
+      "coverage": "covered",
+      "spec_files": ["issue-detail-panel.spec.ts"],
+      "test_names": ["panel displays correct issue ID and title"],
+      "notes": "Covered by issue-detail-panel.spec.ts:285 which verifies title text in the panel h2 heading."
+    },
+    {
+      "id": "VAL-FE-DETAIL-005",
+      "title": "Type field shows issue type",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test verifies the type field rendering in the detail panel metadata bar. type-dropdown.spec.ts tests the inline type editor component but not its presence/correctness in the issue detail metadata display."
+    },
+    {
+      "id": "VAL-FE-DETAIL-006",
+      "title": "Status dropdown allows inline status change",
+      "coverage": "covered",
+      "spec_files": ["status-dropdown.spec.ts"],
+      "test_names": ["changing status calls API with correct parameters"],
+      "notes": "Covered by status-dropdown.spec.ts:232 which verifies the PATCH API is called when status is changed via the dropdown in the detail panel."
+    },
+    {
+      "id": "VAL-FE-DETAIL-007",
+      "title": "Priority indicator in metadata",
+      "coverage": "partial",
+      "spec_files": ["priority-dropdown.spec.ts"],
+      "test_names": ["kanban cards show priority badges"],
+      "notes": "Partial: priority-dropdown.spec.ts:188 verifies priority badges on kanban cards, not in the detail panel metadata bar. No test asserts priority is displayed as a metadata field when a detail panel opens."
+    },
+    {
+      "id": "VAL-FE-DETAIL-008",
+      "title": "Owner and Assignee in metadata",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test verifies owner/assignee display in the detail panel metadata. groupby-assignee tests assignee grouping on kanban, not the detail panel metadata display."
+    },
+    {
+      "id": "VAL-FE-DETAIL-009",
+      "title": "Created/Updated timestamps in metadata",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test verifies created_at or updated_at timestamps display in the detail panel metadata. Timestamps appear only in test fixtures, not in UI assertions."
+    },
+    {
+      "id": "VAL-FE-DETAIL-010",
+      "title": "Description rendered as Markdown",
+      "coverage": "covered",
+      "spec_files": ["editable-description.spec.ts"],
+      "test_names": ["renders description as markdown in view mode"],
+      "notes": "Covered by editable-description.spec.ts:174 which verifies Markdown is rendered to HTML in view mode."
+    },
+    {
+      "id": "VAL-FE-DETAIL-011",
+      "title": "Code blocks in description highlighted",
+      "coverage": "partial",
+      "spec_files": ["editable-description.spec.ts"],
+      "test_names": ["markdown elements render correctly in preview"],
+      "notes": "Partial: editable-description.spec.ts:282 tests Markdown rendering in the edit preview pane (including a code block in the fixture), but no test asserts syntax highlighting of code blocks in the view-mode rendering."
+    },
+    {
+      "id": "VAL-FE-DETAIL-014",
+      "title": "Dependencies list shows blocking issues",
+      "coverage": "covered",
+      "spec_files": ["dependencies-section.spec.ts"],
+      "test_names": [
+        "Blocked By section renders when dependencies exist",
+        "Each dependency shows ID",
+        "Each dependency shows title",
+        "Each dependency shows type badge",
+        "Dependency count shown in section header"
+      ],
+      "notes": "Covered by dependencies-section.spec.ts:373,429,440,449,469 which verify the full list of blocking dependencies renders with ID, title, type badge, and count."
+    },
+    {
+      "id": "VAL-FE-DETAIL-015",
+      "title": "Dependents list shows issues blocked by this",
+      "coverage": "covered",
+      "spec_files": ["dependencies-section.spec.ts"],
+      "test_names": [
+        "Blocks section renders when dependents exist",
+        "Blocks section shows correct count",
+        "Blocks section shows dependent ID and title"
+      ],
+      "notes": "Covered by dependencies-section.spec.ts:387,856,865 which verify the Blocks section renders with correct count, ID, and title for dependents."
+    },
+    {
+      "id": "VAL-FE-DETAIL-016",
+      "title": "Dependency click navigates to issue",
+      "coverage": "covered",
+      "spec_files": ["journey-issue-dependencies.spec.ts"],
+      "test_names": ["Click dependency chip to navigate to blocker issue"],
+      "notes": "Covered by journey-issue-dependencies.spec.ts:393 which verifies clicking a dependency chip navigates to the blocker issue."
+    },
+    {
+      "id": "VAL-FE-DETAIL-017",
+      "title": "Comments section shows chronological list",
+      "coverage": "covered",
+      "spec_files": ["comments-section.spec.ts"],
+      "test_names": ["comments displayed chronologically (oldest first)"],
+      "notes": "Covered by comments-section.spec.ts:310 which verifies comments are displayed in chronological order (oldest first)."
+    },
+    {
+      "id": "VAL-FE-DETAIL-018",
+      "title": "Labels displayed as tags",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test verifies label display as tags in the detail panel. journey-create-triage only exercises the add-label PATCH API, not the display of existing labels."
+    },
+    {
+      "id": "VAL-FE-DETAIL-021",
+      "title": "Copy Link button",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test verifies the Copy Link button. Grep for 'Copy Link' or 'clipboard' in e2e specs returned no matches."
+    },
+    {
+      "id": "VAL-FE-EDIT-001",
+      "title": "Click title enters edit mode",
+      "coverage": "covered",
+      "spec_files": ["editable-title.spec.ts"],
+      "test_names": ["click title enters edit mode with focused input"],
+      "notes": "Covered by editable-title.spec.ts:153 which verifies clicking the title shows the input and the input is focused."
+    },
+    {
+      "id": "VAL-FE-EDIT-002",
+      "title": "Title input autofocuses and selects all text",
+      "coverage": "covered",
+      "spec_files": ["editable-title.spec.ts"],
+      "test_names": [
+        "click title enters edit mode with focused input",
+        "input contains current title value"
+      ],
+      "notes": "Covered by editable-title.spec.ts:153,179 which verify the input is focused and pre-filled. The 'selects all text' criterion is not explicitly asserted but is inferred from focused-with-value behavior."
+    },
+    {
+      "id": "VAL-FE-EDIT-003",
+      "title": "Blur (unfocus) saves title",
+      "coverage": "covered",
+      "spec_files": ["editable-title.spec.ts"],
+      "test_names": ["blur input with changes triggers save"],
+      "notes": "Covered by editable-title.spec.ts:362 which verifies blur with changes triggers the save API call."
+    },
+    {
+      "id": "VAL-FE-EDIT-004",
+      "title": "Enter key saves title",
+      "coverage": "covered",
+      "spec_files": ["editable-title.spec.ts"],
+      "test_names": ["typing new title and pressing Enter saves"],
+      "notes": "Covered by editable-title.spec.ts:191 which verifies typing a new title and pressing Enter triggers save."
+    },
+    {
+      "id": "VAL-FE-EDIT-005",
+      "title": "Escape key cancels title edit",
+      "coverage": "partial",
+      "spec_files": ["editable-title.spec.ts"],
+      "test_names": ["Escape key discards changes and returns to display mode"],
+      "notes": "Partial: editable-title.spec.ts:232 uses mocks and exercises the component in isolation where Escape correctly cancels the edit. However, the validation report's actual_result documents that in the integrated app Escape closes the entire detail panel rather than just cancelling the title edit. No existing Playwright test catches this integration-level divergence, so the component-level coverage is insufficient to guarantee the contract behavior."
+    },
+    {
+      "id": "VAL-FE-DETAIL-022",
+      "title": "Status dropdown changes issue status",
+      "coverage": "covered",
+      "spec_files": ["status-dropdown.spec.ts"],
+      "test_names": ["changing status calls API with correct parameters"],
+      "notes": "Covered by status-dropdown.spec.ts:232 which verifies status change triggers PATCH with correct params."
+    },
+    {
+      "id": "VAL-FE-DETAIL-023",
+      "title": "Optimistic status update",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test explicitly verifies the UI updates status before the server response completes. status-dropdown.spec.ts:255 comment notes status-dropdown does NOT do optimistic updates directly (updates come via parent state/WebSocket)."
+    },
+    {
+      "id": "VAL-FE-EDIT-009",
+      "title": "Click priority opens dropdown",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "priority-dropdown.spec.ts:261 'click opens dropdown menu' tests kanban card priority dropdown, not the detail panel priority editor. No detail-panel-context test exists."
+    },
+    {
+      "id": "VAL-FE-EDIT-010",
+      "title": "Select priority sends PATCH",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "priority-dropdown.spec.ts:301 'changing priority calls PATCH API' is for kanban card context, not the detail panel dropdown."
+    },
+    {
+      "id": "VAL-FE-EDIT-011",
+      "title": "Optimistic priority update",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test verifies optimistic priority update in the detail panel. priority-dropdown.spec.ts:341 tests revert-on-failure for kanban context only."
+    },
+    {
+      "id": "VAL-FE-EDIT-013",
+      "title": "Click assignee opens dropdown",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test verifies the assignee dropdown opens in the detail panel. groupby-assignee.spec.ts tests assignee grouping on kanban only."
+    },
+    {
+      "id": "VAL-FE-EDIT-014",
+      "title": "Select agent as assignee",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test verifies selecting an agent from the assignee dropdown."
+    },
+    {
+      "id": "VAL-FE-EDIT-015",
+      "title": "Type name in assignee input",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test verifies typing a custom name (with [H] prefix) in the assignee input."
+    },
+    {
+      "id": "VAL-FE-EDIT-017",
+      "title": "Unassign option",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test verifies the unassign option clears the assignee via PATCH."
+    },
+    {
+      "id": "VAL-FE-EDIT-018",
+      "title": "Agent status indicators",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test verifies agent status indicators in the assignee dropdown."
+    },
+    {
+      "id": "VAL-FE-EDIT-020",
+      "title": "Labels displayed as removable tags",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test verifies labels are displayed as removable tags with an X affordance."
+    },
+    {
+      "id": "VAL-FE-EDIT-021",
+      "title": "Add label via modal or input",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No dedicated label-add test. journey-create-triage.spec.ts:583 exercises the add-label PATCH indirectly as part of the create/triage journey, but does not verify the label-add UI flow."
+    },
+    {
+      "id": "VAL-FE-EDIT-022",
+      "title": "Remove label",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test verifies removing a label via an X button triggers a PATCH with remove_labels."
+    },
+    {
+      "id": "VAL-FE-EDIT-023",
+      "title": "Click description enters edit mode",
+      "coverage": "covered",
+      "spec_files": ["editable-description.spec.ts"],
+      "test_names": ["click edit button enters edit mode with textarea and preview"],
+      "notes": "Covered by editable-description.spec.ts:217 which verifies clicking the edit button shows the textarea and preview pane."
+    },
+    {
+      "id": "VAL-FE-EDIT-024",
+      "title": "Description edit Cmd+Enter saves",
+      "coverage": "covered",
+      "spec_files": ["editable-description.spec.ts"],
+      "test_names": [
+        "Cmd+Enter keyboard shortcut saves description (Mac)",
+        "Ctrl+Enter keyboard shortcut saves description"
+      ],
+      "notes": "Covered by editable-description.spec.ts:347,379 for both Ctrl+Enter and Cmd+Enter."
+    },
+    {
+      "id": "VAL-FE-EDIT-026",
+      "title": "Description live Markdown preview",
+      "coverage": "covered",
+      "spec_files": ["editable-description.spec.ts"],
+      "test_names": [
+        "preview updates as user types",
+        "markdown elements render correctly in preview"
+      ],
+      "notes": "Covered by editable-description.spec.ts:254,282 which verify live preview updates as the user types and Markdown elements render correctly."
+    },
+    {
+      "id": "VAL-FE-EDIT-027",
+      "title": "Description save button",
+      "coverage": "covered",
+      "spec_files": ["editable-description.spec.ts"],
+      "test_names": ["save button calls API with new description"],
+      "notes": "Covered by editable-description.spec.ts:310 which verifies clicking the save button triggers PATCH with the new description."
+    },
+    {
+      "id": "VAL-FE-EDIT-028",
+      "title": "Description cancel button",
+      "coverage": "covered",
+      "spec_files": ["editable-description.spec.ts"],
+      "test_names": ["cancel button discards changes", "escape key discards changes"],
+      "notes": "Covered by editable-description.spec.ts:469,500 which verify cancel button and Escape both discard changes."
+    },
+    {
+      "id": "VAL-FE-EDIT-029",
+      "title": "Description empty handling",
+      "coverage": "covered",
+      "spec_files": ["editable-description.spec.ts"],
+      "test_names": ["shows placeholder for empty description", "can add description to empty issue"],
+      "notes": "Covered by editable-description.spec.ts:529,540 which verify the empty description placeholder and adding a description to an issue with no existing description."
+    },
+    {
+      "id": "VAL-FE-CREATE-001",
+      "title": "FAB opens CreateIssueModal",
+      "coverage": "covered",
+      "spec_files": ["journey-create-triage.spec.ts"],
+      "test_names": ["1. Load kanban and open create modal"],
+      "notes": "Covered by journey-create-triage.spec.ts:354 which verifies the create modal can be opened."
+    },
+    {
+      "id": "VAL-FE-CREATE-002",
+      "title": "Title field focused on open",
+      "coverage": "partial",
+      "spec_files": ["keyboard-focus-management.spec.ts"],
+      "test_names": ["CreateIssueModal: Tab cycles within modal fields"],
+      "notes": "Partial: keyboard-focus-management.spec.ts:30 verifies focus trap/tab cycling within the modal, but no test explicitly asserts the title input is auto-focused immediately on modal open."
+    },
+    {
+      "id": "VAL-FE-CREATE-003",
+      "title": "Create with required title only",
+      "coverage": "covered",
+      "spec_files": ["journey-create-triage.spec.ts"],
+      "test_names": ["2. Fill form and submit — card appears in Ready column"],
+      "notes": "Covered by journey-create-triage.spec.ts:389 which verifies submitting with the required title creates an issue that appears in the Ready column."
+    },
+    {
+      "id": "VAL-FE-CREATE-004",
+      "title": "Create with full form",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test exercises creation with all form fields filled (title + type + priority + description)."
+    },
+    {
+      "id": "VAL-FE-CREATE-005",
+      "title": "Empty title blocks submit",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test verifies the submit button is disabled when the title field is empty in the CreateIssueModal."
+    },
+    {
+      "id": "VAL-FE-CREATE-008",
+      "title": "Cancel button closes modal without saving",
+      "coverage": "partial",
+      "spec_files": ["keyboard-escape-layers.spec.ts"],
+      "test_names": ["CreateIssueModal (layer 40) closes on Escape"],
+      "notes": "Partial: keyboard-escape-layers.spec.ts:72 verifies Escape closes the modal, but no test exercises clicking the dedicated Cancel button. keyboard-focus-management.spec.ts:57 references 'create-issue-cancel' in the tab order but does not click it."
+    },
+    {
+      "id": "VAL-FE-CREATE-010",
+      "title": "Form resets on success",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test verifies CreateIssueModal form fields are reset after successful creation."
+    },
+    {
+      "id": "VAL-FE-CREATE-012",
+      "title": "Type dropdown shows all types",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "type-dropdown.spec.ts:339 'shows all 5 type options' tests the inline type editor on an existing issue, not the CreateIssueModal's type dropdown which is a different component/context."
+    },
+    {
+      "id": "VAL-FE-CREATE-013",
+      "title": "Priority dropdown shows P0-P4",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "priority-dropdown.spec.ts tests the inline priority editor on kanban cards, not the CreateIssueModal's priority dropdown."
+    },
+    {
+      "id": "VAL-FE-CREATE-015",
+      "title": "Initial status is open",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test verifies newly created issues default to status=open."
+    },
+    {
+      "id": "VAL-FE-CREATE-017",
+      "title": "Click overlay closes modal",
+      "coverage": "uncovered",
+      "spec_files": [],
+      "test_names": [],
+      "notes": "No test verifies clicking the overlay/backdrop closes the CreateIssueModal. issue-detail-panel.spec.ts:239 covers backdrop-click for the detail panel, not the create modal."
+    },
+    {
+      "id": "VAL-FE-DELETE-004",
+      "title": "Close issue sends status PATCH",
+      "coverage": "partial",
+      "spec_files": ["status-dropdown.spec.ts"],
+      "test_names": ["changing status calls API with correct parameters"],
+      "notes": "Partial: status-dropdown.spec.ts:232 verifies status changes via the dropdown trigger PATCH, but the contract describes a dedicated Close button that fires the PATCH. No test for a distinct Close button."
+    },
+    {
+      "id": "VAL-FE-DELETE-005",
+      "title": "Reopen issue sends status PATCH",
+      "coverage": "partial",
+      "spec_files": ["status-dropdown.spec.ts"],
+      "test_names": ["changing status calls API with correct parameters"],
+      "notes": "Partial: status-dropdown.spec.ts:232 covers status changes generically via the dropdown, but the contract describes a dedicated Reopen button. No test for a distinct Reopen button."
+    },
+    {
+      "id": "VAL-FE-DETAIL-025",
+      "title": "Comment form available",
+      "coverage": "covered",
+      "spec_files": ["comment-form.spec.ts"],
+      "test_names": ["comment form renders below comments list"],
+      "notes": "Covered by comment-form.spec.ts:236 which verifies the comment form renders in the detail panel below the comments list."
+    },
+    {
+      "id": "VAL-FE-DETAIL-026",
+      "title": "Add comment via form",
+      "coverage": "covered",
+      "spec_files": ["comment-form.spec.ts"],
+      "test_names": ["clicking submit calls API with correct parameters"],
+      "notes": "Covered by comment-form.spec.ts:316 which verifies submitting triggers the POST /comments API with the correct body."
+    },
+    {
+      "id": "VAL-FE-DETAIL-027",
+      "title": "Comment added to activity log",
+      "coverage": "covered",
+      "spec_files": ["comment-form.spec.ts"],
+      "test_names": ["new comment appears at bottom of list after submission"],
+      "notes": "Covered by comment-form.spec.ts:368 which verifies new comments are displayed at the bottom of the list after successful submission."
+    },
+    {
+      "id": "VAL-FE-DETAIL-028",
+      "title": "Empty comment validation",
+      "coverage": "covered",
+      "spec_files": ["comment-form.spec.ts"],
+      "test_names": [
+        "submit button disabled when textarea is empty",
+        "submit button disabled for whitespace-only content",
+        "empty submission does not call API"
+      ],
+      "notes": "Covered by comment-form.spec.ts:477,501,513 which verify validation for empty and whitespace-only comments."
+    },
+    {
+      "id": "VAL-FE-DETAIL-029",
+      "title": "Cmd+Enter submits comment",
+      "coverage": "covered",
+      "spec_files": ["comment-form.spec.ts"],
+      "test_names": [
+        "Cmd+Enter submits comment (Mac)",
+        "Ctrl+Enter submits comment (Windows/Linux)"
+      ],
+      "notes": "Covered by comment-form.spec.ts:789,816 for both Ctrl+Enter and Cmd+Enter."
+    },
+    {
+      "id": "VAL-FE-DETAIL-030",
+      "title": "Comment form reset on submit",
+      "coverage": "covered",
+      "spec_files": ["comment-form.spec.ts"],
+      "test_names": ["form clears after successful submit"],
+      "notes": "Covered by comment-form.spec.ts:425 which verifies the textarea is cleared after a successful submit."
+    },
+    {
+      "id": "VAL-FE-DETAIL-031",
+      "title": "Activity log shows chronological timeline",
+      "coverage": "covered",
+      "spec_files": ["comments-section.spec.ts"],
+      "test_names": ["comments displayed chronologically (oldest first)"],
+      "notes": "Covered by comments-section.spec.ts:310 which verifies chronological ordering. Note: system events (status/priority changes) alongside comments are not tested separately."
+    },
+    {
+      "id": "VAL-FE-DETAIL-045",
+      "title": "Side panel opens when issue selected",
+      "coverage": "covered",
+      "spec_files": ["issue-detail-panel.spec.ts"],
+      "test_names": [
+        "click issue card opens panel with slide animation",
+        "clicking table row opens panel"
+      ],
+      "notes": "Covered by issue-detail-panel.spec.ts:154,401 for both kanban card and table row entry points."
+    },
+    {
+      "id": "VAL-FE-DETAIL-046",
+      "title": "Panel close button",
+      "coverage": "covered",
+      "spec_files": ["issue-detail-panel.spec.ts"],
+      "test_names": ["clicking X button closes panel"],
+      "notes": "Covered by issue-detail-panel.spec.ts:197 which verifies the X close button."
+    },
+    {
+      "id": "VAL-FE-DETAIL-047",
+      "title": "Panel Escape key closes",
+      "coverage": "covered",
+      "spec_files": ["issue-detail-panel.spec.ts"],
+      "test_names": ["pressing Escape closes panel"],
+      "notes": "Covered by issue-detail-panel.spec.ts:218 which verifies Escape closes the detail panel."
+    },
+    {
+      "id": "VAL-FE-DETAIL-048",
+      "title": "Panel list interaction while open",
+      "coverage": "covered",
+      "spec_files": ["issue-detail-panel.spec.ts"],
+      "test_names": [
+        "closing panel then clicking different issue shows new content",
+        "opening issues sequentially shows each correctly"
+      ],
+      "notes": "Covered by issue-detail-panel.spec.ts:319,473 which verify switching between issues updates the panel content correctly."
+    },
+    {
+      "id": "VAL-FE-DETAIL-050",
+      "title": "Dependency chip click navigates",
+      "coverage": "covered",
+      "spec_files": [
+        "dependencies-section.spec.ts",
+        "journey-issue-dependencies.spec.ts"
+      ],
+      "test_names": ["Click dependency chip to navigate to blocker issue"],
+      "notes": "Covered by journey-issue-dependencies.spec.ts:393 with supporting dependency rendering tests in dependencies-section.spec.ts."
+    },
+    {
+      "id": "VAL-FE-DETAIL-051",
+      "title": "Dependency status indicator",
+      "coverage": "partial",
+      "spec_files": ["dependencies-section.spec.ts"],
+      "test_names": [
+        "Closed dependency has strikethrough styling",
+        "Open dependency has normal styling (no strikethrough)",
+        "Blocks section shows closed dependents with strikethrough"
+      ],
+      "notes": "Partial: dependencies-section.spec.ts:505,519,875 test strikethrough styling for closed deps, but the contract describes colored status dots which are not asserted by any test."
+    },
+    {
+      "id": "VAL-FE-DETAIL-053",
+      "title": "Description with XSS script",
+      "coverage": "covered",
+      "spec_files": [
+        "editable-description.spec.ts",
+        "editable-title.spec.ts"
+      ],
+      "test_names": [
+        "special characters in description render safely",
+        "special characters in title render safely"
+      ],
+      "notes": "Covered by editable-description.spec.ts:777 and editable-title.spec.ts:712 which verify special characters (including XSS-relevant input) render safely without executing."
+    }
+  ]
+}
