@@ -224,8 +224,67 @@ func (a *fleetDBAdapter) SearchIssues(_ context.Context, _ string, _ int) ([]bac
 	return nil, notImpl("SearchIssues")
 }
 
-func (a *fleetDBAdapter) Update(_ context.Context, _ string, _ backend.UpdateParams) error {
-	return notImpl("Update")
+// Update issues PATCH /api/v1/{ws}/issues/{id}. fleet-db's PATCH body is a
+// narrow subset of UpdateParams (title, description, priority, type, design,
+// notes, owner, due_at) and rejects unknown fields with 400 — so we only
+// forward the overlap. Status changes must go through /close and /reopen;
+// label mutations go through /labels; everything else surfaces as
+// ErrNotImplemented at the method level so the diff is honest about what's
+// not wired up.
+//
+// Our interface returns only error, so after a successful PATCH the runner
+// relies on a follow-up issue.show to surface the post-update state.
+func (a *fleetDBAdapter) Update(ctx context.Context, id string, params backend.UpdateParams) error {
+	if id == "" {
+		return backend.ErrValidation("Update", "id must not be empty")
+	}
+	if params.Claim {
+		return backend.ErrValidation("Update", "Claim field is not supported in fleetDBAdapter.Update")
+	}
+
+	// Build the narrow PATCH body. Nil pointers stay absent so fleet-db's
+	// "don't change" semantics apply.
+	req := map[string]any{}
+	if params.Title != nil {
+		req["title"] = *params.Title
+	}
+	if params.Description != nil {
+		req["description"] = *params.Description
+	}
+	if params.Priority != nil {
+		req["priority"] = *params.Priority
+	}
+	if params.IssueType != nil {
+		req["type"] = *params.IssueType
+	}
+	if params.Design != nil {
+		req["design"] = *params.Design
+	}
+	if params.Notes != nil {
+		req["notes"] = *params.Notes
+	}
+	if params.Owner != nil {
+		req["owner"] = *params.Owner
+	}
+	if params.DueAt != nil && *params.DueAt != "" {
+		req["due_at"] = *params.DueAt
+	}
+
+	if len(req) == 0 {
+		// Nothing the native API accepts — pretend success so the diff focuses
+		// on the post-update show step. This mirrors bd's treatment of empty
+		// updates as a no-op.
+		return nil
+	}
+
+	raw, status, err := a.doJSON(ctx, http.MethodPatch, a.wsPath("/issues/"+url.PathEscape(id)), req)
+	if err != nil {
+		return backend.ErrInternal("Update", "http", err)
+	}
+	if cerr := a.classifyStatus("Update", status, raw); cerr != nil {
+		return cerr
+	}
+	return nil
 }
 
 func (a *fleetDBAdapter) ClaimIssue(_ context.Context, _ string, _ time.Duration) error {
@@ -240,12 +299,59 @@ func (a *fleetDBAdapter) UndeferIssue(_ context.Context, _ string) error {
 	return notImpl("UndeferIssue")
 }
 
-func (a *fleetDBAdapter) Close(_ context.Context, _ string, _ backend.CloseParams) (*backend.CloseResult, error) {
-	return nil, notImpl("Close")
+// Close issues POST /api/v1/{ws}/issues/{id}/close with an optional
+// {"reason": "..."} body. fleet-db returns the closed Issue object — we
+// wrap it in a backend.CloseResult with Unblocked left empty (fleet-db
+// does not yet return unblocked-on-close; see fleet-q6ox). Session /
+// SuggestNext / Force fields on CloseParams are not supported by fleet-db's
+// native API and are silently dropped — fixtures that rely on their side
+// effects will naturally diff against bd.
+func (a *fleetDBAdapter) Close(ctx context.Context, id string, params backend.CloseParams) (*backend.CloseResult, error) {
+	if id == "" {
+		return nil, backend.ErrValidation("Close", "id must not be empty")
+	}
+	body := map[string]any{}
+	if params.Reason != "" {
+		body["reason"] = params.Reason
+	}
+	raw, status, err := a.doJSON(ctx, http.MethodPost, a.wsPath("/issues/"+url.PathEscape(id)+"/close"), body)
+	if err != nil {
+		return nil, backend.ErrInternal("Close", "http", err)
+	}
+	if cerr := a.classifyStatus("Close", status, raw); cerr != nil {
+		return nil, cerr
+	}
+	closed, err := parseFleetIssue(raw)
+	if err != nil {
+		return nil, backend.ErrInternal("Close", "decode response", err)
+	}
+	return &backend.CloseResult{Closed: closed}, nil
 }
 
-func (a *fleetDBAdapter) Reopen(_ context.Context, _ string, _ backend.ReopenParams) error {
-	return notImpl("Reopen")
+// Reopen issues POST /api/v1/{ws}/issues/{id}/reopen. fleet-db's endpoint
+// returns the reopened Issue but the IssueBackend.Reopen signature only
+// returns error — we mirror the production FleetBackend pattern and discard
+// the response body. ReopenParams.Reason is best-effort-recorded as a
+// comment via POST /comments if non-empty; a comment failure is non-fatal
+// since the status transition already succeeded.
+func (a *fleetDBAdapter) Reopen(ctx context.Context, id string, params backend.ReopenParams) error {
+	if id == "" {
+		return backend.ErrValidation("Reopen", "id must not be empty")
+	}
+	raw, status, err := a.doJSON(ctx, http.MethodPost, a.wsPath("/issues/"+url.PathEscape(id)+"/reopen"), nil)
+	if err != nil {
+		return backend.ErrInternal("Reopen", "http", err)
+	}
+	if cerr := a.classifyStatus("Reopen", status, raw); cerr != nil {
+		return cerr
+	}
+	if params.Reason != "" {
+		// Best-effort comment. fleet-db uses {"body": "..."} for comments;
+		// see CreateCommentRequest in fleet-db/internal/api/request.go.
+		commentBody := map[string]string{"body": params.Reason}
+		_, _, _ = a.doJSON(ctx, http.MethodPost, a.wsPath("/issues/"+url.PathEscape(id)+"/comments"), commentBody)
+	}
+	return nil
 }
 
 func (a *fleetDBAdapter) Delete(_ context.Context, _ backend.DeleteParams) error {

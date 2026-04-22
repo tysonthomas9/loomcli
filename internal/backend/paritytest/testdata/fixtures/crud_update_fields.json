@@ -1,0 +1,40 @@
+{
+  "id": "crud_update_fields",
+  "title": "Partial update changes only specified fields",
+  "description": "Creates an issue with several fields, updates only title + priority + description, then shows the issue to verify the partial update landed (and didn't clobber fields the update didn't mention). Exercises issue.update.",
+  "tags": ["crud", "update", "partial"],
+  "steps": [
+    {
+      "id": "step_01",
+      "description": "Create issue with multiple fields set",
+      "method": "issue.create",
+      "params": {
+        "title": "Original title",
+        "description": "Original description",
+        "priority": 2,
+        "type": "task",
+        "owner": "parity-harness",
+        "actor": "parity-harness"
+      }
+    },
+    {
+      "id": "step_02",
+      "description": "Partial update: change title, priority, and description only",
+      "method": "issue.update",
+      "params": {
+        "id": "${issue_id}",
+        "title": "Updated title",
+        "priority": 1,
+        "description": "Updated description"
+      }
+    },
+    {
+      "id": "step_03",
+      "description": "Show the updated issue and diff every projected field",
+      "method": "issue.show",
+      "params": {
+        "id": "${issue_id}"
+      }
+    }
+  ]
+}

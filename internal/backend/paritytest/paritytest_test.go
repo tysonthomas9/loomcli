@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -151,4 +152,97 @@ func TestParityTest_CrudCreateShow(t *testing.T) {
 	if report.Fixtures[0].FixtureID != fx.ID {
 		t.Errorf("FixtureID: got %q want %q", report.Fixtures[0].FixtureID, fx.ID)
 	}
+}
+
+// TestParityTest_AllFixtures auto-discovers every fixture JSON file under
+// testdata/fixtures/ and runs each as a subtest against a single shared
+// bd + fleet-db pair. Each fixture gets an isolated beads workspace / fleet
+// workspace so state bleed between fixtures is impossible.
+//
+// Semantic (same as TestParityTest_CrudCreateShow):
+//   - infra failures (spawn, fixture load) fail the subtest
+//   - diff entries are DATA, not failures — a fixture with 10 diffs still
+//     passes the subtest; operators inspect the report JSON for signal
+//   - the test failing indicates broken wiring, not backend drift
+//
+// The aggregated report is written to one file per invocation so operators
+// can triage cross-fixture drift in a single pass. See doc.go for the wire
+// format.
+func TestParityTest_AllFixtures(t *testing.T) {
+	fixtures, err := discoverFixtures("testdata/fixtures")
+	if err != nil {
+		t.Fatalf("discoverFixtures: %v", err)
+	}
+	if len(fixtures) == 0 {
+		t.Fatal("no fixtures found under testdata/fixtures — expected at least one")
+	}
+
+	report := NewReport("1.0.0", "dual_run")
+
+	for _, path := range fixtures {
+		fx, err := LoadFixture(path)
+		if err != nil {
+			t.Fatalf("LoadFixture(%s): %v", path, err)
+		}
+
+		t.Run(fx.ID, func(t *testing.T) {
+			// Spawn backends per-subtest so workspaces are isolated and a
+			// failure in one fixture can't poison another. spawnBeads +
+			// spawnFleetDB both register t.Cleanup, so this is safe.
+			beadsBE, _ := spawnBeads(t)
+			fleetBE, _ := spawnFleetDB(t)
+
+			runner := New(beadsBE, fleetBE, report)
+			diffs, err := runner.RunFixture(t.Context(), *fx)
+			if err != nil {
+				t.Fatalf("RunFixture: %v", err)
+			}
+
+			report.AddFixture(fx.ID, fx.Title, diffs, len(fx.Steps))
+
+			// Compact per-fixture log: one line per diff so operators can
+			// eyeball the report without opening the JSON.
+			t.Logf("fixture %s: %d diffs", fx.ID, len(diffs))
+			for _, d := range diffs {
+				fleetJSON, _ := json.Marshal(d.FleetDB)
+				beadsJSON, _ := json.Marshal(d.Beads)
+				t.Logf("  diff: step=%s method=%s field=%s fleet=%s beads=%s verdict=%s",
+					d.StepID, d.Method, d.Field, string(fleetJSON), string(beadsJSON), d.Verdict)
+			}
+		})
+	}
+
+	report.Finalize()
+	outPath := filepath.Join(t.TempDir(), "parity-report-all.json")
+	if err := report.WriteJSON(outPath); err != nil {
+		t.Fatalf("WriteJSON: %v", err)
+	}
+	t.Logf("aggregate report: fixtures=%d steps=%d diffs=%d verdict=%s path=%s",
+		report.Summary.FixturesRun, report.Summary.StepsExecuted,
+		report.Summary.DiffsFound, report.Verdict, outPath)
+
+	// Structural assertion — we should have exactly one FixtureReport per
+	// discovered fixture.
+	if report.Summary.FixturesRun != len(fixtures) {
+		t.Errorf("FixturesRun: got %d want %d", report.Summary.FixturesRun, len(fixtures))
+	}
+}
+
+// discoverFixtures returns sorted absolute paths to every *.json file under
+// dir. Sort order keeps test output deterministic so flaky runs are easy
+// to bisect.
+func discoverFixtures(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		paths = append(paths, filepath.Join(dir, e.Name()))
+	}
+	sort.Strings(paths)
+	return paths, nil
 }

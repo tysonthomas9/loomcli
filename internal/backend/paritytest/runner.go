@@ -133,6 +133,96 @@ func (r *DualRunner) executeStep(ctx context.Context, be backend.IssueBackend, m
 		}
 		return issueDataToMap(&details.IssueData), nil
 
+	case "issue.update":
+		// Fixtures send flat params (e.g. {"id": "...", "title": "new",
+		// "priority": 1}). We split out `id` and unmarshal the rest into
+		// UpdateParams. Pointer fields on UpdateParams make partial updates
+		// work naturally — absent keys remain nil.
+		var idOnly struct {
+			ID string `json:"id"`
+		}
+		if err := unmarshalParams(rawParams, &idOnly); err != nil {
+			return nil, err
+		}
+		// Translate flat fixture shape -> UpdateParams. We map the fixture's
+		// bare scalar fields to pointers by using an intermediate struct —
+		// json.Unmarshal into pointer fields sets them only when the JSON
+		// key is present, which is exactly the semantic we want.
+		var flat struct {
+			Title       *string `json:"title,omitempty"`
+			Description *string `json:"description,omitempty"`
+			Status      *string `json:"status,omitempty"`
+			Priority    *int    `json:"priority,omitempty"`
+			Design      *string `json:"design,omitempty"`
+			Notes       *string `json:"notes,omitempty"`
+			Assignee    *string `json:"assignee,omitempty"`
+			Owner       *string `json:"owner,omitempty"`
+			IssueType   *string `json:"type,omitempty"`
+			DueAt       *string `json:"due_at,omitempty"`
+		}
+		if err := unmarshalParams(rawParams, &flat); err != nil {
+			return nil, err
+		}
+		up := backend.UpdateParams{
+			Title:       flat.Title,
+			Description: flat.Description,
+			Status:      flat.Status,
+			Priority:    flat.Priority,
+			Design:      flat.Design,
+			Notes:       flat.Notes,
+			Assignee:    flat.Assignee,
+			Owner:       flat.Owner,
+			IssueType:   flat.IssueType,
+			DueAt:       flat.DueAt,
+		}
+		if err := be.Update(ctx, idOnly.ID, up); err != nil {
+			return nil, err
+		}
+		// Update returns no payload — echo the id so the diff engine sees a
+		// trivially-equal response on success. The real signal lives in the
+		// follow-up issue.show step.
+		return map[string]any{"id": idOnly.ID}, nil
+
+	case "issue.close":
+		var p struct {
+			ID          string `json:"id"`
+			Reason      string `json:"reason,omitempty"`
+			Session     string `json:"session,omitempty"`
+			SuggestNext bool   `json:"suggest_next,omitempty"`
+			Force       bool   `json:"force,omitempty"`
+		}
+		if err := unmarshalParams(rawParams, &p); err != nil {
+			return nil, err
+		}
+		cr, err := be.Close(ctx, p.ID, backend.CloseParams{
+			Reason:      p.Reason,
+			Session:     p.Session,
+			SuggestNext: p.SuggestNext,
+			Force:       p.Force,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if cr == nil || cr.Closed == nil {
+			// Backends that don't return a body on close (shouldn't happen, but
+			// keeps the runner defensive) still get a sane response map.
+			return map[string]any{"id": p.ID}, nil
+		}
+		return issueDataToMap(cr.Closed), nil
+
+	case "issue.reopen":
+		var p struct {
+			ID     string `json:"id"`
+			Reason string `json:"reason,omitempty"`
+		}
+		if err := unmarshalParams(rawParams, &p); err != nil {
+			return nil, err
+		}
+		if err := be.Reopen(ctx, p.ID, backend.ReopenParams{Reason: p.Reason}); err != nil {
+			return nil, err
+		}
+		return map[string]any{"id": p.ID}, nil
+
 	default:
 		return nil, fmt.Errorf("paritytest: unsupported method %q", method)
 	}
