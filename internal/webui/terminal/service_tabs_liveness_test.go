@@ -43,8 +43,9 @@ func (f *fakePTYSource) AttachmentCount(key SessionKey) int {
 	}
 	return 0
 }
-func (f *fakePTYSource) SessionCount() int { return len(f.alive) }
-func (f *fakePTYSource) MaxSessions() int  { return 100 }
+func (f *fakePTYSource) SessionCount() int            { return len(f.alive) }
+func (f *fakePTYSource) SessionCountFor(_ string) int { return len(f.alive) }
+func (f *fakePTYSource) MaxSessions() int             { return 100 }
 
 // newLivenessTestSvc wires a terminalServiceImpl over miniredis + a fake PTY
 // source so each test can arrange metadata and liveness independently.

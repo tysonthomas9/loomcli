@@ -542,6 +542,132 @@ func TestAttachmentCount_UnknownWorkspace_Zero(t *testing.T) {
 	}
 }
 
+// TestSessionCountFor_PerWorkspace verifies the new PTYSource method returns
+// the per-workspace count, not the global aggregate. Required so the
+// terminal WS handler's cap gate (`SessionCountFor(ws) >= MaxSessions()`)
+// does not reject workspace B whenever workspace A saturates the cap.
+func TestSessionCountFor_PerWorkspace(t *testing.T) {
+	mm := newTestMultiManager(t, 0)
+	mm.SetGracePeriod(5 * time.Second)
+	if err := mm.Register("ws1", t.TempDir()); err != nil {
+		t.Fatalf("Register ws1: %v", err)
+	}
+	if err := mm.Register("ws2", t.TempDir()); err != nil {
+		t.Fatalf("Register ws2: %v", err)
+	}
+
+	// ws1 holds 2 sessions; ws2 holds 3.
+	for i := 0; i < 2; i++ {
+		k := SessionKey{Workspace: "ws1", Name: fmt.Sprintf("s-%d", i)}
+		if _, _, err := mm.AttachSession(k, 80, 24, []string{"-c", "cat"}); err != nil {
+			t.Fatalf("ws1 attach: %v", err)
+		}
+	}
+	for i := 0; i < 3; i++ {
+		k := SessionKey{Workspace: "ws2", Name: fmt.Sprintf("s-%d", i)}
+		if _, _, err := mm.AttachSession(k, 80, 24, []string{"-c", "cat"}); err != nil {
+			t.Fatalf("ws2 attach: %v", err)
+		}
+	}
+
+	if got := mm.SessionCountFor("ws1"); got != 2 {
+		t.Errorf("SessionCountFor(ws1)=%d want 2", got)
+	}
+	if got := mm.SessionCountFor("ws2"); got != 3 {
+		t.Errorf("SessionCountFor(ws2)=%d want 3", got)
+	}
+	if got := mm.SessionCountFor("unknown"); got != 0 {
+		t.Errorf("SessionCountFor(unknown)=%d want 0", got)
+	}
+	// Registered but no AttachSession yet → count 0.
+	if err := mm.Register("ws3", t.TempDir()); err != nil {
+		t.Fatalf("Register ws3: %v", err)
+	}
+	if got := mm.SessionCountFor("ws3"); got != 0 {
+		t.Errorf("SessionCountFor(ws3 uncreated)=%d want 0", got)
+	}
+}
+
+// TestDeregister_CapturedManagerRejectsAttach pins the P2 fix
+// deterministically: a caller that captured the per-workspace *PTYManager
+// via managerForWS cannot resurrect it with an orphan session after
+// Deregister has returned. Pre-fix, the captured manager would spawn a
+// fresh session into a map the outer MultiPTYManager no longer indexes,
+// leaking the child process.
+func TestDeregister_CapturedManagerRejectsAttach(t *testing.T) {
+	mm := newTestMultiManager(t, 50)
+	mm.SetGracePeriod(5 * time.Second)
+	if err := mm.Register("ws1", t.TempDir()); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	// Force lazy-create so the per-ws *PTYManager actually exists.
+	if _, _, err := mm.AttachSession(SessionKey{Workspace: "ws1", Name: "warmup"}, 80, 24, []string{"-c", "cat"}); err != nil {
+		t.Fatalf("warmup attach: %v", err)
+	}
+
+	// Simulate the race winner: capture entry.mgr before Deregister runs.
+	mm.mu.RLock()
+	captured := mm.entries["ws1"].mgr
+	mm.mu.RUnlock()
+	if captured == nil {
+		t.Fatal("captured per-ws manager is nil")
+	}
+
+	mm.Deregister("ws1")
+
+	// The captured manager's Shutdown has now completed. A late
+	// AttachSession against it — the exact path the pre-fix race
+	// exploited — must reject rather than spawn an orphan session.
+	_, _, err := captured.AttachSession(
+		SessionKey{Workspace: "ws1", Name: "post-dereg"},
+		80, 24, []string{"-c", "cat"},
+	)
+	if !errors.Is(err, ErrPTYManagerClosed) {
+		t.Errorf("post-Deregister captured.AttachSession err = %v, want ErrPTYManagerClosed", err)
+	}
+	if got := captured.SessionCount(); got != 0 {
+		t.Errorf("captured.SessionCount=%d after post-Shutdown attach; want 0 (orphan session)", got)
+	}
+}
+
+// TestDeregister_ConcurrentAttach exercises the same scenario under the
+// race detector to catch any lock-ordering or visibility bug in the
+// closed-flag guard. All attackers must terminate cleanly with one of the
+// expected errors — never a successful attach that outlives Deregister.
+func TestDeregister_ConcurrentAttach(t *testing.T) {
+	mm := newTestMultiManager(t, 50)
+	mm.SetGracePeriod(5 * time.Second)
+	if err := mm.Register("ws1", t.TempDir()); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if _, _, err := mm.AttachSession(SessionKey{Workspace: "ws1", Name: "warmup"}, 80, 24, []string{"-c", "cat"}); err != nil {
+		t.Fatalf("warmup attach: %v", err)
+	}
+
+	const attackers = 20
+	var wg sync.WaitGroup
+	wg.Add(attackers + 1)
+	go func() {
+		defer wg.Done()
+		mm.Deregister("ws1")
+	}()
+	for i := 0; i < attackers; i++ {
+		go func(i int) {
+			defer wg.Done()
+			key := SessionKey{Workspace: "ws1", Name: fmt.Sprintf("attack-%d", i)}
+			_, _, err := mm.AttachSession(key, 80, 24, []string{"-c", "cat"})
+			if err != nil && !errors.Is(err, ErrWorkspaceNotRegistered) && !errors.Is(err, ErrPTYManagerClosed) {
+				t.Errorf("attack %d err = %v, want nil / ErrWorkspaceNotRegistered / ErrPTYManagerClosed", i, err)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	if mm.hasManager("ws1") {
+		t.Errorf("hasManager(ws1)=true after Deregister")
+	}
+}
+
 func TestDispatch_LazyUncreated_NoOps(t *testing.T) {
 	// After Register but before any AttachSession, no per-ws PTYManager
 	// exists. The no-op-on-miss dispatch methods must not create one.

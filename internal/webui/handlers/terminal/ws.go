@@ -110,8 +110,12 @@ func validateTerminalWSRequest(w http.ResponseWriter, r *http.Request, manager w
 	// Reconnects to an existing (workspace, session) must still pass —
 	// AttachSession doesn't count them against the cap, and a 503 here
 	// would lock users out of live sessions until one is killed.
+	//
+	// Count is scoped to this workspace: MaxSessions is a per-workspace
+	// cap, and comparing it against a global aggregate would reject
+	// workspace B whenever A saturates the cap despite B having headroom.
 	key := webuterminal.SessionKey{Workspace: workspace, Name: session}
-	if !manager.HasSession(key) && manager.SessionCount() >= manager.MaxSessions() {
+	if !manager.HasSession(key) && manager.SessionCountFor(workspace) >= manager.MaxSessions() {
 		handler.WriteJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
 			"success": false, "error": "maximum terminal sessions reached",
 		})

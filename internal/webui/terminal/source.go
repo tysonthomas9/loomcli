@@ -40,10 +40,19 @@ type PTYSource interface {
 	AttachmentCount(key SessionKey) int
 
 	// SessionCount returns the number of live sessions, including detached
-	// ones still within the grace/idle windows.
+	// ones still within the grace/idle windows. For per-workspace
+	// implementations this is the sum across workspaces and is intended for
+	// diagnostics only — gate decisions should use SessionCountFor.
 	SessionCount() int
 
-	// MaxSessions returns the configured concurrent-session cap.
+	// SessionCountFor returns the live-session count scoped to wsID. This
+	// is the value a per-workspace cap should be measured against; for
+	// non-scoped implementations it is equivalent to SessionCount.
+	SessionCountFor(wsID string) int
+
+	// MaxSessions returns the configured concurrent-session cap. For
+	// per-workspace implementations this is the per-workspace cap, not a
+	// sum across workspaces.
 	MaxSessions() int
 }
 

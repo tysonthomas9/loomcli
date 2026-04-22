@@ -89,6 +89,13 @@ type PTYManager struct {
 
 	reaperStop chan struct{}
 	reaperWG   sync.WaitGroup
+
+	// closed is set by Shutdown under mu. Once true, AttachSession returns
+	// ErrPTYManagerClosed instead of spawning a new session. Prevents a
+	// concurrent AttachSession racing with MultiPTYManager.Deregister from
+	// resurrecting a shut-down manager with an orphan session that the
+	// outer dispatcher can no longer route Detach/Kill to.
+	closed bool
 }
 
 // NewPTYManager constructs a manager. command is the default shell command
@@ -179,6 +186,14 @@ func (m *PTYManager) AttachSession(key SessionKey, cols, rows uint16, argv []str
 	const maxAttachRetries = 3
 	for attempt := 0; attempt < maxAttachRetries; attempt++ {
 		m.mu.Lock()
+		// Reject attaches after Shutdown so a goroutine that captured
+		// this manager via MultiPTYManager.managerForWS before a
+		// concurrent Deregister cannot resurrect it with an orphan
+		// session.
+		if m.closed {
+			m.mu.Unlock()
+			return nil, false, ErrPTYManagerClosed
+		}
 		sess, existed := m.sessions[key]
 		if !existed {
 			if len(m.sessions) >= m.max {
@@ -272,6 +287,13 @@ func (m *PTYManager) SessionCount() int {
 	return len(m.sessions)
 }
 
+// SessionCountFor satisfies PTYSource. A bare PTYManager owns a single
+// session namespace, so the returned count is the same as SessionCount
+// regardless of wsID. MultiPTYManager provides the per-workspace variant.
+func (m *PTYManager) SessionCountFor(_ string) int {
+	return m.SessionCount()
+}
+
 // HasSession reports whether a (live or gracefully-detached) session exists
 // for key. "Live" means not yet killed by Kill / Shutdown / reaper — it does
 // not guarantee the underlying child process is still running, only that the
@@ -314,8 +336,18 @@ func (m *PTYManager) IdleTimeout() time.Duration {
 	return m.idleTimeout
 }
 
-// Shutdown terminates every live session and stops the reaper.
+// Shutdown terminates every live session and stops the reaper. Idempotent:
+// once closed, future AttachSession calls return ErrPTYManagerClosed and
+// repeat Shutdown calls are no-ops.
 func (m *PTYManager) Shutdown() error {
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return nil
+	}
+	m.closed = true
+	m.mu.Unlock()
+
 	close(m.reaperStop)
 	m.reaperWG.Wait()
 

@@ -2,6 +2,7 @@ package terminal
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -452,4 +453,36 @@ func TestChildExitRemovesSession(t *testing.T) {
 	}
 	waitUntil(t, func() bool { return m.SessionCount() == 0 }, 2*time.Second,
 		"session to be removed after child exits")
+}
+
+// TestShutdown_RejectsFutureAttach pins the contract exploited by
+// MultiPTYManager.Deregister: once Shutdown has run, new AttachSession
+// calls must fail rather than spawn fresh children into a manager the
+// outer dispatcher can no longer reach.
+func TestShutdown_RejectsFutureAttach(t *testing.T) {
+	m := NewPTYManager("cat", 0, t.TempDir())
+	if err := m.Shutdown(); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	_, _, err := m.AttachSession(SessionKey{Workspace: "ws1", Name: "s"}, 80, 24, []string{"-c", "cat"})
+	if !errors.Is(err, ErrPTYManagerClosed) {
+		t.Errorf("post-Shutdown AttachSession err = %v, want ErrPTYManagerClosed", err)
+	}
+	if got := m.SessionCount(); got != 0 {
+		t.Errorf("post-Shutdown SessionCount=%d want 0 (attach must not have spawned)", got)
+	}
+}
+
+// TestShutdown_Idempotent confirms Shutdown may be called multiple times
+// without panicking (e.g. from both MultiPTYManager.Deregister and
+// MultiPTYManager.Close). Without the closed guard, the second call would
+// panic on `close(m.reaperStop)`.
+func TestShutdown_Idempotent(t *testing.T) {
+	m := NewPTYManager("cat", 0, t.TempDir())
+	if err := m.Shutdown(); err != nil {
+		t.Fatalf("first Shutdown: %v", err)
+	}
+	if err := m.Shutdown(); err != nil {
+		t.Errorf("second Shutdown: %v, want nil", err)
+	}
 }

@@ -20,7 +20,9 @@ var ErrInvalidWorkspacePath = errors.New("invalid workspace path")
 var ErrWorkspaceNotRegistered = errors.New("workspace not registered")
 
 // ErrPTYManagerClosed is returned by Register when the MultiPTYManager has
-// already been closed via Close().
+// already been closed via Close(), and by PTYManager.AttachSession once its
+// Shutdown has run. Callers can errors.Is against this to detect "workspace
+// was deleted / server is shutting down" during an in-flight attach.
 var ErrPTYManagerClosed = errors.New("pty manager closed")
 
 // wsEntry holds the per-workspace state kept by a MultiPTYManager. The
@@ -336,6 +338,20 @@ func (mm *MultiPTYManager) SessionCount() int {
 		}
 	}
 	return total
+}
+
+// SessionCountFor returns the number of live sessions owned by the
+// per-workspace PTYManager for wsID. Returns 0 when the workspace is
+// unknown or its per-workspace manager has not yet been lazily created.
+// Callers enforcing the per-workspace cap (e.g. the terminal WS handler)
+// must use this rather than SessionCount, which aggregates across all
+// workspaces and would reject workspace B once A saturates the cap.
+func (mm *MultiPTYManager) SessionCountFor(wsID string) int {
+	m := mm.existingManagerForWS(wsID)
+	if m == nil {
+		return 0
+	}
+	return m.SessionCount()
 }
 
 // MaxSessions returns the per-workspace session cap. Intentionally not a
