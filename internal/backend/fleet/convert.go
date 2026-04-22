@@ -1,7 +1,9 @@
 package fleet
 
 import (
+	"encoding/json"
 	"strconv"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/types"
@@ -233,6 +235,117 @@ func closeResultJSONToData(cr *closeResultJSON) *backend.CloseResult {
 		if u != nil {
 			result.Unblocked = append(result.Unblocked, issueToData(u))
 		}
+	}
+	return result
+}
+
+// fleetMutationEvent mirrors fleet-db's Event shape (see openapi.yaml
+// components.schemas.Event). It is distinct from types.Event, which models an
+// audit-trail row keyed by a numeric issue-scoped ID; fleet's Event is a
+// Redis Stream entry keyed by a timestamped string ID with action/entity
+// dimensions and before/after JSON snapshots.
+type fleetMutationEvent struct {
+	ID          string            `json:"id"`
+	Timestamp   time.Time         `json:"timestamp"`
+	Actor       string            `json:"actor"`
+	Action      string            `json:"action"`
+	EntityType  string            `json:"entity_type"`
+	EntityID    string            `json:"entity_id"`
+	WorkspaceID string            `json:"workspace_id"`
+	Before      string            `json:"before,omitempty"`
+	After       string            `json:"after,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+}
+
+// fleetMutationsResponse mirrors fleet-db's MutationsResponse envelope.
+type fleetMutationsResponse struct {
+	Events  []fleetMutationEvent `json:"events"`
+	Cursor  string               `json:"cursor"`
+	HasMore bool                 `json:"has_more"`
+}
+
+// actionToMutationType maps fleet-db Action values (issue.create, ...) to the
+// backend.Mutation* string constants. Fleet emits fine-grained actions; loom's
+// mutation-type space is coarser, so several actions fold into MutationUpdate.
+func actionToMutationType(action, entityType string) string {
+	switch action {
+	case "issue.create":
+		return backend.MutationCreate
+	case "issue.delete":
+		return backend.MutationDelete
+	case "issue.close", "issue.reopen", "issue.update", "issue.claim",
+		"issue.release", "issue.assign", "issue.defer", "issue.undefer":
+		// All status / metadata transitions on an issue collapse into "update"
+		// from the subscriber's point of view — callers that care about the
+		// specific transition read OldStatus/NewStatus.
+		if action == "issue.close" || action == "issue.reopen" {
+			return backend.MutationStatus
+		}
+		return backend.MutationUpdate
+	case "comment.add":
+		return backend.MutationComment
+	case "dep.add", "dep.remove", "label.add", "label.remove":
+		return backend.MutationUpdate
+	}
+	// Workspace-level actions and any future additions fall back to
+	// MutationRefresh so SSE consumers invalidate their caches.
+	if entityType == "workspace" {
+		return backend.MutationRefresh
+	}
+	return backend.MutationUpdate
+}
+
+// fleetEventToMutationData converts a single fleet mutation event into
+// backend.MutationData. Title/status/parent fields come from the event's
+// after-snapshot JSON when present; fields absent from fleet's event model
+// (StepCount, Assignee for non-assign actions) remain zero.
+func fleetEventToMutationData(e *fleetMutationEvent) backend.MutationData {
+	md := backend.MutationData{
+		Type:      actionToMutationType(e.Action, e.EntityType),
+		IssueID:   e.EntityID,
+		Actor:     e.Actor,
+		Timestamp: e.Timestamp,
+	}
+	// Best-effort extraction from before/after snapshots. Errors are ignored —
+	// the minimum viable mutation already has Type/IssueID/Timestamp.
+	if e.After != "" {
+		var after struct {
+			Title    string `json:"title"`
+			Status   string `json:"status"`
+			Assignee string `json:"assignee"`
+			ParentID string `json:"parent_id"`
+			Parent   string `json:"parent"`
+			Repo     string `json:"repo"`
+		}
+		if err := json.Unmarshal([]byte(e.After), &after); err == nil {
+			md.Title = after.Title
+			md.Assignee = after.Assignee
+			md.NewStatus = after.Status
+			if after.ParentID != "" {
+				md.ParentID = after.ParentID
+			} else {
+				md.ParentID = after.Parent
+			}
+			md.SourceRepo = after.Repo
+		}
+	}
+	if e.Before != "" {
+		var before struct {
+			Status string `json:"status"`
+		}
+		if err := json.Unmarshal([]byte(e.Before), &before); err == nil {
+			md.OldStatus = before.Status
+		}
+	}
+	return md
+}
+
+// fleetEventsToMutationData converts a slice of fleetMutationEvent to
+// []backend.MutationData. Always returns a non-nil slice.
+func fleetEventsToMutationData(events []fleetMutationEvent) []backend.MutationData {
+	result := make([]backend.MutationData, 0, len(events))
+	for i := range events {
+		result = append(result, fleetEventToMutationData(&events[i]))
 	}
 	return result
 }

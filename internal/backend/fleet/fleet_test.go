@@ -1185,34 +1185,17 @@ func TestListEvents_HappyPath(t *testing.T) {
 	}
 }
 
-// --- Not implemented methods ---
-
-func TestNotImplementedMethods(t *testing.T) {
-	fb, _ := New(Config{BaseURL: "http://x", WorkspaceID: "ws"})
-	ctx := context.Background()
-
-	tests := []struct {
-		name string
-		fn   func() error
-	}{
-		{"Count", func() error { _, err := fb.Count(ctx, backend.CountOpts{}); return err }},
-		{"Batch", func() error { _, err := fb.Batch(ctx, nil); return err }},
-		{"GetMutations", func() error { _, err := fb.GetMutations(ctx, 0); return err }},
-		{"WaitForMutations", func() error { _, err := fb.WaitForMutations(ctx, 0, 0); return err }},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := tt.fn()
-			if err == nil {
-				t.Fatal("expected error, got nil")
-			}
-			if !backend.IsKind(err, backend.KindNotImplemented) {
-				t.Fatalf("expected KindNotImplemented, got %v", err)
-			}
-		})
-	}
-}
+// --- Not implemented surfaces (partial — implemented methods moved out) ---
+//
+// Count, Batch, GetMutations, and WaitForMutations used to live here as
+// ErrNotImplemented stubs; they are now wired against fleet-db endpoints
+// (see tests above). The only remaining KindNotImplemented paths are:
+//
+//   - Count with GroupBy set — Count cannot return grouped data through its
+//     int return value; callers must use Stats or (future) a GroupedCount API.
+//     This is exercised by TestCount_GroupByRejected.
+//
+// If future refactors reintroduce unimplemented stubs, add cases here.
 
 // --- Connection refused test ---
 
@@ -1524,5 +1507,558 @@ func TestUndeferIssue_EmptyID(t *testing.T) {
 	}
 	if !backend.IsKind(err, backend.KindValidation) {
 		t.Errorf("expected KindValidation, got %v", err)
+	}
+}
+
+// --- Count tests ---
+
+func TestCount_NoFilters(t *testing.T) {
+	var gotPath, gotQuery string
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		respondOK(w, countIssuesResponse{Total: 42, Groups: map[string]int64{}})
+	})
+	defer ts.Close()
+
+	n, err := fb.Count(context.Background(), backend.CountOpts{})
+	if err != nil {
+		t.Fatalf("Count: %v", err)
+	}
+	if n != 42 {
+		t.Errorf("count = %d, want 42", n)
+	}
+	if !strings.HasSuffix(gotPath, "/issues/count") {
+		t.Errorf("path = %q, want suffix /issues/count", gotPath)
+	}
+	if gotQuery != "" {
+		t.Errorf("query = %q, want empty", gotQuery)
+	}
+}
+
+func TestCount_WithFilters(t *testing.T) {
+	var gotQuery string
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		respondOK(w, countIssuesResponse{Total: 7, Groups: map[string]int64{}})
+	})
+	defer ts.Close()
+
+	n, err := fb.Count(context.Background(), backend.CountOpts{
+		Status:    "open",
+		IssueType: "task",
+		Assignee:  "agent-1",
+		Labels:    []string{"urgent"},
+	})
+	if err != nil {
+		t.Fatalf("Count: %v", err)
+	}
+	if n != 7 {
+		t.Errorf("count = %d, want 7", n)
+	}
+	for _, want := range []string{"status=open", "type=task", "assignee=agent-1", "label=urgent"} {
+		if !strings.Contains(gotQuery, want) {
+			t.Errorf("query %q missing %q", gotQuery, want)
+		}
+	}
+}
+
+func TestCount_GroupByRejected(t *testing.T) {
+	fb, ts := newTestServer(t, func(_ http.ResponseWriter, _ *http.Request) {
+		t.Fatal("server should not be called when GroupBy is set")
+	})
+	defer ts.Close()
+
+	_, err := fb.Count(context.Background(), backend.CountOpts{GroupBy: "status"})
+	if err == nil {
+		t.Fatal("expected error for GroupBy")
+	}
+	if !backend.IsKind(err, backend.KindNotImplemented) {
+		t.Errorf("expected KindNotImplemented, got %v", err)
+	}
+}
+
+func TestCount_ServerError(t *testing.T) {
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		respondErr(w, 500, "boom")
+	})
+	defer ts.Close()
+
+	_, err := fb.Count(context.Background(), backend.CountOpts{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !backend.IsKind(err, backend.KindInternal) {
+		t.Errorf("expected KindInternal, got %v", err)
+	}
+}
+
+func TestCount_NilData(t *testing.T) {
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(apiResponse{Success: true})
+	})
+	defer ts.Close()
+
+	_, err := fb.Count(context.Background(), backend.CountOpts{})
+	if err == nil {
+		t.Fatal("expected error for nil data")
+	}
+}
+
+// --- GetMutations tests ---
+
+func TestGetMutations_HappyPath(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	var gotPath, gotQuery string
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		respondOK(w, fleetMutationsResponse{
+			Events: []fleetMutationEvent{
+				{
+					ID:         "1708000000000-0",
+					Timestamp:  now,
+					Actor:      "agent-a",
+					Action:     "issue.create",
+					EntityType: "issue",
+					EntityID:   "bd-1",
+					After:      `{"title":"New issue","status":"open","parent":"ep-1","repo":"org/repo"}`,
+				},
+				{
+					ID:         "1708000000001-0",
+					Timestamp:  now.Add(time.Second),
+					Actor:      "agent-b",
+					Action:     "issue.close",
+					EntityType: "issue",
+					EntityID:   "bd-2",
+					Before:     `{"status":"open"}`,
+					After:      `{"status":"closed"}`,
+				},
+			},
+			Cursor:  "1708000000001-0",
+			HasMore: false,
+		})
+	})
+	defer ts.Close()
+
+	got, err := fb.GetMutations(context.Background(), 1700000000000)
+	if err != nil {
+		t.Fatalf("GetMutations: %v", err)
+	}
+	if !strings.HasSuffix(gotPath, "/events/mutations") {
+		t.Errorf("path = %q, want suffix /events/mutations", gotPath)
+	}
+	if !strings.Contains(gotQuery, "since=1700000000000") {
+		t.Errorf("query %q missing since=1700000000000", gotQuery)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d mutations, want 2", len(got))
+	}
+	if got[0].Type != backend.MutationCreate {
+		t.Errorf("got[0].Type = %q, want %q", got[0].Type, backend.MutationCreate)
+	}
+	if got[0].IssueID != "bd-1" || got[0].Title != "New issue" || got[0].ParentID != "ep-1" || got[0].SourceRepo != "org/repo" {
+		t.Errorf("got[0] = %+v, after-snapshot fields not extracted", got[0])
+	}
+	if got[1].Type != backend.MutationStatus {
+		t.Errorf("got[1].Type = %q, want %q (issue.close -> status)", got[1].Type, backend.MutationStatus)
+	}
+	if got[1].OldStatus != "open" || got[1].NewStatus != "closed" {
+		t.Errorf("got[1] old/new status = %q/%q, want open/closed", got[1].OldStatus, got[1].NewStatus)
+	}
+}
+
+func TestGetMutations_EmptyResponse(t *testing.T) {
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		respondOK(w, fleetMutationsResponse{Events: []fleetMutationEvent{}, Cursor: "0", HasMore: false})
+	})
+	defer ts.Close()
+
+	got, err := fb.GetMutations(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("GetMutations: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected non-nil slice")
+	}
+	if len(got) != 0 {
+		t.Errorf("len = %d, want 0", len(got))
+	}
+}
+
+func TestGetMutations_NullDataReturnsEmpty(t *testing.T) {
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true,"data":null}`))
+	})
+	defer ts.Close()
+
+	got, err := fb.GetMutations(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("GetMutations: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("len = %d, want 0", len(got))
+	}
+}
+
+func TestGetMutations_ActionFolding(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		respondOK(w, fleetMutationsResponse{
+			Events: []fleetMutationEvent{
+				{Timestamp: now, Action: "issue.update", EntityType: "issue", EntityID: "a"},
+				{Timestamp: now, Action: "issue.delete", EntityType: "issue", EntityID: "b"},
+				{Timestamp: now, Action: "comment.add", EntityType: "comment", EntityID: "c"},
+				{Timestamp: now, Action: "label.add", EntityType: "label", EntityID: "d"},
+				{Timestamp: now, Action: "workspace.update", EntityType: "workspace", EntityID: "ws"},
+				{Timestamp: now, Action: "unknown.weird", EntityType: "issue", EntityID: "e"},
+			},
+		})
+	})
+	defer ts.Close()
+
+	got, err := fb.GetMutations(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("GetMutations: %v", err)
+	}
+	wantTypes := []string{
+		backend.MutationUpdate, backend.MutationDelete, backend.MutationComment,
+		backend.MutationUpdate, backend.MutationRefresh, backend.MutationUpdate,
+	}
+	if len(got) != len(wantTypes) {
+		t.Fatalf("len = %d, want %d", len(got), len(wantTypes))
+	}
+	for i, wantT := range wantTypes {
+		if got[i].Type != wantT {
+			t.Errorf("got[%d].Type = %q, want %q", i, got[i].Type, wantT)
+		}
+	}
+}
+
+// --- WaitForMutations tests ---
+
+func TestWaitForMutations_TimeoutEmpty(t *testing.T) {
+	var gotQuery string
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		respondOK(w, fleetMutationsResponse{Events: []fleetMutationEvent{}, Cursor: "0"})
+	})
+	defer ts.Close()
+
+	got, err := fb.WaitForMutations(context.Background(), 1000, 5000)
+	if err != nil {
+		t.Fatalf("WaitForMutations: %v", err)
+	}
+	if !strings.Contains(gotQuery, "since=1000") || !strings.Contains(gotQuery, "timeout=5000") {
+		t.Errorf("query %q missing since=1000 and/or timeout=5000", gotQuery)
+	}
+	if len(got) != 0 {
+		t.Errorf("expected empty on timeout, got %d", len(got))
+	}
+}
+
+func TestWaitForMutations_DeliversEvents(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		respondOK(w, fleetMutationsResponse{
+			Events: []fleetMutationEvent{
+				{Timestamp: now, Action: "issue.update", EntityType: "issue", EntityID: "x"},
+			},
+		})
+	})
+	defer ts.Close()
+
+	got, err := fb.WaitForMutations(context.Background(), 0, 2000)
+	if err != nil {
+		t.Fatalf("WaitForMutations: %v", err)
+	}
+	if len(got) != 1 || got[0].IssueID != "x" {
+		t.Errorf("got %+v, want 1 mutation for x", got)
+	}
+}
+
+func TestWaitForMutations_ServerError(t *testing.T) {
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		respondErr(w, 400, "timeout out of range")
+	})
+	defer ts.Close()
+
+	_, err := fb.WaitForMutations(context.Background(), 0, 500)
+	if err == nil {
+		t.Fatal("expected error for bad timeout")
+	}
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Errorf("expected KindValidation, got %v", err)
+	}
+}
+
+// --- Batch tests ---
+
+func TestBatch_EmptyOpsReturnsEmpty(t *testing.T) {
+	fb, ts := newTestServer(t, func(_ http.ResponseWriter, _ *http.Request) {
+		t.Fatal("server should not be called for empty ops")
+	})
+	defer ts.Close()
+
+	got, err := fb.Batch(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("Batch: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("len = %d, want 0", len(got))
+	}
+}
+
+func TestBatch_Creates_Aggregated(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	var gotPath string
+	var gotBody map[string]interface{}
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		respondOK(w, map[string]interface{}{
+			"issues": []types.Issue{
+				{ID: "new-1", Title: "One", Status: types.StatusOpen, CreatedAt: now, UpdatedAt: now},
+				{ID: "new-2", Title: "Two", Status: types.StatusOpen, CreatedAt: now, UpdatedAt: now},
+			},
+			"count": 2,
+		})
+	})
+	defer ts.Close()
+
+	ops := []backend.BatchOp{
+		{Operation: "create", Args: json.RawMessage(`{"title":"One","issue_type":"task","priority":2}`)},
+		{Operation: "create", Args: json.RawMessage(`{"title":"Two","issue_type":"task","priority":2}`)},
+	}
+	results, err := fb.Batch(context.Background(), ops)
+	if err != nil {
+		t.Fatalf("Batch: %v", err)
+	}
+	if !strings.HasSuffix(gotPath, "/issues/batch") {
+		t.Errorf("path = %q, want suffix /issues/batch", gotPath)
+	}
+	issues, ok := gotBody["issues"].([]interface{})
+	if !ok || len(issues) != 2 {
+		t.Errorf("body.issues len = %d, want 2 (body=%+v)", len(issues), gotBody)
+	}
+	if len(results) != 2 {
+		t.Fatalf("results len = %d, want 2", len(results))
+	}
+	for i, r := range results {
+		if !r.Success {
+			t.Errorf("results[%d].Success = false, error = %q", i, r.Error)
+		}
+		if len(r.Data) == 0 {
+			t.Errorf("results[%d].Data is empty", i)
+		}
+	}
+}
+
+func TestBatch_Creates_AllOrNothingError(t *testing.T) {
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		respondErr(w, 400, "validation failed on issue 0")
+	})
+	defer ts.Close()
+
+	ops := []backend.BatchOp{
+		{Operation: "create", Args: json.RawMessage(`{"title":"Bad"}`)},
+		{Operation: "create", Args: json.RawMessage(`{"title":"Good","issue_type":"task","priority":2}`)},
+	}
+	results, err := fb.Batch(context.Background(), ops)
+	if err != nil {
+		t.Fatalf("Batch: %v (transport error should not bubble for per-op failures)", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("len = %d, want 2", len(results))
+	}
+	for i, r := range results {
+		if r.Success {
+			t.Errorf("results[%d].Success = true, want false", i)
+		}
+		if r.Error == "" {
+			t.Errorf("results[%d].Error should be non-empty", i)
+		}
+	}
+}
+
+func TestBatch_Closes_Aggregated(t *testing.T) {
+	var gotPath string
+	var gotBody map[string]interface{}
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		// fleet-db returns 204; simulate a wrapped-envelope success with nil data.
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(apiResponse{Success: true})
+	})
+	defer ts.Close()
+
+	ops := []backend.BatchOp{
+		{Operation: "close", Args: json.RawMessage(`{"id":"bd-1","reason":"done"}`)},
+		{Operation: "close", Args: json.RawMessage(`{"id":"bd-2"}`)},
+	}
+	results, err := fb.Batch(context.Background(), ops)
+	if err != nil {
+		t.Fatalf("Batch: %v", err)
+	}
+	if !strings.HasSuffix(gotPath, "/issues/batch/close") {
+		t.Errorf("path = %q, want suffix /issues/batch/close", gotPath)
+	}
+	ids, _ := gotBody["issue_ids"].([]interface{})
+	if len(ids) != 2 {
+		t.Errorf("issue_ids len = %d, want 2", len(ids))
+	}
+	if gotBody["reason"] != "done" {
+		t.Errorf("reason = %v, want %q (first non-empty reason should be propagated)", gotBody["reason"], "done")
+	}
+	for i, r := range results {
+		if !r.Success {
+			t.Errorf("results[%d].Success = false, error = %q", i, r.Error)
+		}
+	}
+}
+
+func TestBatch_Mixed_FanOut(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	var calls []string
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.Method+" "+r.URL.Path)
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/issues/batch"):
+			respondOK(w, map[string]interface{}{
+				"issues": []types.Issue{
+					{ID: "new-1", Title: "Created", Status: types.StatusOpen, CreatedAt: now, UpdatedAt: now},
+				},
+				"count": 1,
+			})
+		case strings.HasSuffix(r.URL.Path, "/issues/batch/close"):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(apiResponse{Success: true})
+		case strings.Contains(r.URL.Path, "/issues/") && r.Method == "PATCH":
+			respondOK(w, map[string]interface{}{"id": "bd-u"})
+		case strings.Contains(r.URL.Path, "/issues/") && r.Method == "DELETE":
+			respondOK(w, map[string]interface{}{})
+		default:
+			t.Errorf("unexpected call: %s %s", r.Method, r.URL.Path)
+			respondErr(w, 500, "unexpected path")
+		}
+	})
+	defer ts.Close()
+
+	newTitle := "New Title"
+	updateArgs, _ := json.Marshal(map[string]interface{}{
+		"id":    "bd-u",
+		"title": newTitle,
+	})
+	ops := []backend.BatchOp{
+		{Operation: "create", Args: json.RawMessage(`{"title":"Created","issue_type":"task","priority":2}`)},
+		{Operation: "update", Args: updateArgs},
+		{Operation: "close", Args: json.RawMessage(`{"id":"bd-c"}`)},
+		{Operation: "delete", Args: json.RawMessage(`{"id":"bd-d","force":true}`)},
+	}
+	results, err := fb.Batch(context.Background(), ops)
+	if err != nil {
+		t.Fatalf("Batch: %v", err)
+	}
+	if len(results) != 4 {
+		t.Fatalf("len = %d, want 4", len(results))
+	}
+	for i, r := range results {
+		if !r.Success {
+			t.Errorf("results[%d] not successful (err=%q)", i, r.Error)
+		}
+	}
+	// Verify each endpoint was hit at least once.
+	need := map[string]bool{"batch": false, "batch/close": false, "PATCH": false, "DELETE": false}
+	for _, c := range calls {
+		switch {
+		case strings.Contains(c, "/issues/batch/close"):
+			need["batch/close"] = true
+		case strings.Contains(c, "/issues/batch"):
+			need["batch"] = true
+		case strings.HasPrefix(c, "PATCH"):
+			need["PATCH"] = true
+		case strings.HasPrefix(c, "DELETE"):
+			need["DELETE"] = true
+		}
+	}
+	for k, v := range need {
+		if !v {
+			t.Errorf("expected %s call, got none (calls=%v)", k, calls)
+		}
+	}
+}
+
+func TestBatch_UnknownOperation(t *testing.T) {
+	fb, ts := newTestServer(t, func(_ http.ResponseWriter, _ *http.Request) {
+		t.Fatal("server should not be hit for unknown op")
+	})
+	defer ts.Close()
+
+	ops := []backend.BatchOp{
+		{Operation: "teleport", Args: json.RawMessage(`{}`)},
+	}
+	results, err := fb.Batch(context.Background(), ops)
+	if err != nil {
+		t.Fatalf("Batch: %v", err)
+	}
+	if len(results) != 1 || results[0].Success {
+		t.Errorf("results = %+v, want single failed result", results)
+	}
+	if !strings.Contains(results[0].Error, "unsupported batch operation") {
+		t.Errorf("error = %q, want to mention unsupported batch operation", results[0].Error)
+	}
+}
+
+func TestBatch_Update_MissingID(t *testing.T) {
+	fb, ts := newTestServer(t, func(_ http.ResponseWriter, _ *http.Request) {
+		t.Fatal("server should not be hit for missing id")
+	})
+	defer ts.Close()
+
+	ops := []backend.BatchOp{
+		{Operation: "update", Args: json.RawMessage(`{"title":"x"}`)},
+	}
+	results, err := fb.Batch(context.Background(), ops)
+	if err != nil {
+		t.Fatalf("Batch: %v", err)
+	}
+	if len(results) != 1 || results[0].Success {
+		t.Fatalf("results = %+v, want single failure", results)
+	}
+	if !strings.Contains(results[0].Error, "missing id") {
+		t.Errorf("error = %q, want to mention missing id", results[0].Error)
+	}
+}
+
+func TestBatch_Update_NestedParamsShape(t *testing.T) {
+	var gotBody map[string]interface{}
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "PATCH" {
+			t.Errorf("method = %q, want PATCH", r.Method)
+		}
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		respondOK(w, map[string]interface{}{})
+	})
+	defer ts.Close()
+
+	// Nested params shape: {"id": "bd-1", "params": {...UpdateParams...}}
+	args, _ := json.Marshal(map[string]interface{}{
+		"id":     "bd-1",
+		"params": map[string]interface{}{"title": "Nested Title"},
+	})
+	results, err := fb.Batch(context.Background(), []backend.BatchOp{
+		{Operation: "update", Args: args},
+	})
+	if err != nil {
+		t.Fatalf("Batch: %v", err)
+	}
+	if !results[0].Success {
+		t.Fatalf("result not successful: %q", results[0].Error)
+	}
+	if gotBody["title"] != "Nested Title" {
+		t.Errorf("title = %v, want Nested Title (PATCH body should carry the nested params)", gotBody["title"])
 	}
 }

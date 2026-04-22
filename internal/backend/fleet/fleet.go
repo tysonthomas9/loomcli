@@ -263,8 +263,37 @@ func (b *FleetBackend) Stats(ctx context.Context) (*backend.StatsData, error) {
 	}, nil
 }
 
-func (b *FleetBackend) Count(_ context.Context, _ backend.CountOpts) (int, error) {
-	return 0, backend.ErrNotImplemented("Count", "fleet server has no count endpoint")
+// Count returns the number of issues matching opts via fleet-db's
+// /issues/count endpoint. It wires a subset of backend.CountOpts into the
+// endpoint's supported query params (status/type/assignee/label/repo) and
+// returns the Total field from the response.
+//
+// Grouping is rejected: when opts.GroupBy is non-empty, the caller wants a
+// breakdown that cannot fit into a single int return value. The grouped
+// variant is exposed through Stats(), which calls /issues/count?group_by=status
+// directly. Future work (fleet-08yg) may expand Stats to cover more groupings
+// without changing Count's signature.
+func (b *FleetBackend) Count(ctx context.Context, opts backend.CountOpts) (int, error) {
+	if opts.GroupBy != "" {
+		return 0, backend.ErrNotImplemented("Count",
+			"group_by is not supported by Count (use Stats for grouped status counts)")
+	}
+	path := "/issues/count"
+	if q := countOptsToQuery(opts); q != "" {
+		path += "?" + q
+	}
+	resp, err := b.exec(ctx, "Count", "GET", path, nil)
+	if err != nil {
+		return 0, err
+	}
+	if !hasData(resp) {
+		return 0, backend.ErrInternal("Count", "empty response from server", nil)
+	}
+	var countResp countIssuesResponse
+	if err := json.Unmarshal(resp.Data, &countResp); err != nil {
+		return 0, backend.ErrInternal("Count", "unmarshal response", err)
+	}
+	return int(countResp.Total), nil
 }
 
 // GetChildren returns the direct children of the given issue (typically an epic)
@@ -550,16 +579,309 @@ func (b *FleetBackend) ListEvents(ctx context.Context, id string, limit int) ([]
 
 // --- Batch operations ---
 
-func (b *FleetBackend) Batch(_ context.Context, _ []backend.BatchOp) ([]backend.BatchResult, error) {
-	return nil, backend.ErrNotImplemented("Batch", "fleet server has no batch endpoint")
+// Batch executes a heterogeneous set of BatchOps against fleet-db by grouping
+// ops by operation type and fanning out to the specialized or per-issue
+// endpoints:
+//
+//   - "create" ops are aggregated into a single POST /issues/batch call
+//     (all-or-nothing per fleet-db's contract).
+//   - "close" ops are aggregated into a single POST /issues/batch/close call
+//     (best-effort; already-closed issues are silently skipped by fleet-db).
+//   - "update" and "delete" ops are dispatched one at a time via the per-issue
+//     endpoints. This costs N round-trips per group but lets each op report an
+//     independent outcome in its BatchResult slot.
+//
+// Semantic caveats versus beads:
+//   - Fleet-db does NOT provide a polymorphic batch endpoint, so this method
+//     is NOT transactionally atomic across operation types: a failure inside
+//     the create batch does not roll back earlier close/update/delete calls
+//     (or vice versa). Within a single create batch, fleet-db does roll back
+//     on validation failure, so callers expecting "all-or-nothing" for pure
+//     create batches still get that semantic. This is acceptable for P2
+//     parity goals; a polymorphic batch endpoint can be added to fleet-db
+//     later (see fleet-08yg follow-ups).
+//   - Result ordering preserves the caller's input order regardless of which
+//     sub-call actually executed each op.
+//
+// The method-level error is reserved for transport/marshaling failures that
+// prevent issuing any request; per-op failures surface in each BatchResult.
+func (b *FleetBackend) Batch(ctx context.Context, ops []backend.BatchOp) ([]backend.BatchResult, error) {
+	if len(ops) == 0 {
+		return []backend.BatchResult{}, nil
+	}
+	results := make([]backend.BatchResult, len(ops))
+
+	// First pass: collect indices grouped by op type so we can fan out in bulk.
+	var (
+		createIdx []int
+		closeIdx  []int
+	)
+	for i, op := range ops {
+		switch strings.ToLower(op.Operation) {
+		case "create":
+			createIdx = append(createIdx, i)
+		case "close":
+			closeIdx = append(closeIdx, i)
+		}
+	}
+
+	// Batch-create: aggregate all "create" ops into one call. Fleet-db is
+	// all-or-nothing here, so on failure every create slot gets the same error.
+	if len(createIdx) > 0 {
+		b.runBatchCreates(ctx, ops, createIdx, results)
+	}
+
+	// Batch-close: fleet-db returns 204 No Content, so we only need to know
+	// whether the call succeeded to populate per-op results.
+	if len(closeIdx) > 0 {
+		b.runBatchCloses(ctx, ops, closeIdx, results)
+	}
+
+	// Fan-out: update/delete/unknown ops run one at a time.
+	for i, op := range ops {
+		switch strings.ToLower(op.Operation) {
+		case "create", "close":
+			// handled above
+		case "update":
+			results[i] = b.runSingleUpdate(ctx, op)
+		case "delete":
+			results[i] = b.runSingleDelete(ctx, op)
+		default:
+			results[i] = backend.BatchResult{
+				Success: false,
+				Error: fmt.Sprintf("unsupported batch operation %q (supported: create, update, close, delete)",
+					op.Operation),
+			}
+		}
+	}
+	return results, nil
+}
+
+// runBatchCreates aggregates CreateParams from the given indices and fires one
+// POST /issues/batch. Results are written back into `results` at the original
+// indices.
+func (b *FleetBackend) runBatchCreates(ctx context.Context, ops []backend.BatchOp, idx []int, results []backend.BatchResult) {
+	type batchCreateReq struct {
+		Issues []backend.CreateParams `json:"issues"`
+	}
+	type batchCreateResp struct {
+		Issues []types.Issue `json:"issues"`
+		Count  int           `json:"count"`
+	}
+	req := batchCreateReq{Issues: make([]backend.CreateParams, 0, len(idx))}
+	for _, i := range idx {
+		var p backend.CreateParams
+		if err := json.Unmarshal(ops[i].Args, &p); err != nil {
+			results[i] = backend.BatchResult{Success: false, Error: "unmarshal create args: " + err.Error()}
+			continue
+		}
+		req.Issues = append(req.Issues, p)
+	}
+	// If every op had a marshal error we have nothing to send.
+	if len(req.Issues) == 0 {
+		return
+	}
+	resp, err := b.exec(ctx, "Batch", "POST", "/issues/batch", req)
+	if err != nil {
+		errMsg := err.Error()
+		for _, i := range idx {
+			if results[i].Error != "" {
+				continue // marshal error already recorded
+			}
+			results[i] = backend.BatchResult{Success: false, Error: errMsg}
+		}
+		return
+	}
+	// Parse response and map issues back to input slots in order.
+	var parsed batchCreateResp
+	if hasData(resp) {
+		if uerr := json.Unmarshal(resp.Data, &parsed); uerr != nil {
+			for _, i := range idx {
+				if results[i].Error != "" {
+					continue
+				}
+				results[i] = backend.BatchResult{Success: false, Error: "unmarshal batch response: " + uerr.Error()}
+			}
+			return
+		}
+	}
+	// The response's issues slice is positionally aligned with req.Issues,
+	// which we built by walking idx in order and skipping marshal-failures.
+	respIdx := 0
+	for _, i := range idx {
+		if results[i].Error != "" {
+			continue // marshal error; skip
+		}
+		if respIdx < len(parsed.Issues) {
+			issueData := issueToData(&parsed.Issues[respIdx])
+			respIdx++
+			raw, merr := json.Marshal(issueData)
+			if merr != nil {
+				results[i] = backend.BatchResult{Success: false, Error: "marshal result: " + merr.Error()}
+				continue
+			}
+			results[i] = backend.BatchResult{Success: true, Data: raw}
+		} else {
+			results[i] = backend.BatchResult{Success: true}
+		}
+	}
+}
+
+// runBatchCloses aggregates issue IDs from the given indices and fires one
+// POST /issues/batch/close. Fleet-db returns 204 with no body on success; our
+// apiResponse envelope may therefore be empty. Any non-error response counts
+// as success for every slot.
+func (b *FleetBackend) runBatchCloses(ctx context.Context, ops []backend.BatchOp, idx []int, results []backend.BatchResult) {
+	type closeArg struct {
+		ID     string `json:"id"`
+		Reason string `json:"reason,omitempty"`
+	}
+	type batchCloseReq struct {
+		IssueIDs []string `json:"issue_ids"`
+		Reason   string   `json:"reason,omitempty"`
+	}
+	req := batchCloseReq{IssueIDs: make([]string, 0, len(idx))}
+	for _, i := range idx {
+		var arg closeArg
+		if err := json.Unmarshal(ops[i].Args, &arg); err != nil {
+			results[i] = backend.BatchResult{Success: false, Error: "unmarshal close args: " + err.Error()}
+			continue
+		}
+		if arg.ID == "" {
+			results[i] = backend.BatchResult{Success: false, Error: "close op missing id"}
+			continue
+		}
+		req.IssueIDs = append(req.IssueIDs, arg.ID)
+		if req.Reason == "" && arg.Reason != "" {
+			// Fleet-db applies one reason to the whole batch; record the first
+			// non-empty reason we see. Callers needing per-op reasons must use
+			// single-close.
+			req.Reason = arg.Reason
+		}
+	}
+	if len(req.IssueIDs) == 0 {
+		return
+	}
+	_, err := b.exec(ctx, "Batch", "POST", "/issues/batch/close", req)
+	for _, i := range idx {
+		if results[i].Error != "" {
+			continue // already recorded local error
+		}
+		if err != nil {
+			results[i] = backend.BatchResult{Success: false, Error: err.Error()}
+		} else {
+			results[i] = backend.BatchResult{Success: true}
+		}
+	}
+}
+
+// runSingleUpdate executes a single update op via Update() and wraps the
+// outcome in a BatchResult.
+func (b *FleetBackend) runSingleUpdate(ctx context.Context, op backend.BatchOp) backend.BatchResult {
+	// Support two shapes for args:
+	//   1. Nested: {"id": "...", "params": {<UpdateParams fields>}}
+	//   2. Flat:   {"id": "...", <UpdateParams fields at top level>}
+	// The beads backend accepts both (callers in the codebase use the flat
+	// form for historical reasons); we unmarshal into the nested struct first
+	// and fall back to flat if "params" is absent.
+	var nested struct {
+		ID     string                `json:"id"`
+		Params *backend.UpdateParams `json:"params"`
+	}
+	if err := json.Unmarshal(op.Args, &nested); err != nil {
+		return backend.BatchResult{Success: false, Error: "unmarshal update args: " + err.Error()}
+	}
+	if nested.ID == "" {
+		return backend.BatchResult{Success: false, Error: "update op missing id"}
+	}
+	var params backend.UpdateParams
+	if nested.Params != nil {
+		params = *nested.Params
+	} else {
+		// Flat shape: parse top-level into UpdateParams. The "id" field in the
+		// JSON is simply ignored because UpdateParams has no ID field.
+		if err := json.Unmarshal(op.Args, &params); err != nil {
+			return backend.BatchResult{Success: false, Error: "unmarshal update args (flat): " + err.Error()}
+		}
+	}
+	if err := b.Update(ctx, nested.ID, params); err != nil {
+		return backend.BatchResult{Success: false, Error: err.Error()}
+	}
+	return backend.BatchResult{Success: true}
+}
+
+// runSingleDelete executes a single delete op via Delete() and wraps the
+// outcome in a BatchResult.
+func (b *FleetBackend) runSingleDelete(ctx context.Context, op backend.BatchOp) backend.BatchResult {
+	var arg struct {
+		ID      string   `json:"id"`
+		IDs     []string `json:"ids"`
+		Force   bool     `json:"force"`
+		Cascade bool     `json:"cascade"`
+		Reason  string   `json:"reason"`
+	}
+	if err := json.Unmarshal(op.Args, &arg); err != nil {
+		return backend.BatchResult{Success: false, Error: "unmarshal delete args: " + err.Error()}
+	}
+	ids := arg.IDs
+	if len(ids) == 0 && arg.ID != "" {
+		ids = []string{arg.ID}
+	}
+	if len(ids) == 0 {
+		return backend.BatchResult{Success: false, Error: "delete op missing id/ids"}
+	}
+	if err := b.Delete(ctx, backend.DeleteParams{
+		IDs: ids, Force: arg.Force, Cascade: arg.Cascade, Reason: arg.Reason,
+	}); err != nil {
+		return backend.BatchResult{Success: false, Error: err.Error()}
+	}
+	return backend.BatchResult{Success: true}
 }
 
 // --- Mutation polling ---
 
-func (b *FleetBackend) GetMutations(_ context.Context, _ int64) ([]backend.MutationData, error) {
-	return nil, backend.ErrNotImplemented("GetMutations", "fleet mode uses SSE for real-time updates")
+// GetMutations returns mutation events from fleet-db's cursor-based events
+// stream. The caller passes sinceMs as a millisecond epoch, but fleet-db's
+// cursor is a Redis Stream ID of the form "<ms>-<seq>"; we pass the integer
+// as-is because fleet's handler accepts any numeric prefix and treats it as a
+// millisecond timestamp when a dash is absent. Callers that hold a real
+// cursor from a previous response should thread it back via the sinceMs
+// parameter (the backend interface uses int64, so until a generic cursor API
+// lands — cf. fleet-0qcs — we cannot round-trip the "<ms>-<seq>" form and will
+// re-receive events emitted within the same millisecond).
+func (b *FleetBackend) GetMutations(ctx context.Context, sinceMs int64) ([]backend.MutationData, error) {
+	path := "/events/mutations?since=" + strconv.FormatInt(sinceMs, 10)
+	resp, err := b.exec(ctx, "GetMutations", "GET", path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if !hasData(resp) {
+		return []backend.MutationData{}, nil
+	}
+	var fresp fleetMutationsResponse
+	if err := json.Unmarshal(resp.Data, &fresp); err != nil {
+		return nil, backend.ErrInternal("GetMutations", "unmarshal response", err)
+	}
+	return fleetEventsToMutationData(fresp.Events), nil
 }
 
-func (b *FleetBackend) WaitForMutations(_ context.Context, _ int64, _ int64) ([]backend.MutationData, error) {
-	return nil, backend.ErrNotImplemented("WaitForMutations", "fleet mode uses SSE for real-time updates")
+// WaitForMutations long-polls fleet-db's events endpoint. Fleet-db's contract
+// is that `timeout` must be 0 (non-blocking) or 1000-120000 (ms); we forward
+// timeoutMs unchanged and let the server return a 400 for out-of-range values
+// so callers see a classified validation error rather than silent truncation.
+// On timeout, fleet-db returns an empty events array (not an error).
+func (b *FleetBackend) WaitForMutations(ctx context.Context, sinceMs int64, timeoutMs int64) ([]backend.MutationData, error) {
+	path := fmt.Sprintf("/events/mutations?since=%d&timeout=%d", sinceMs, timeoutMs)
+	resp, err := b.exec(ctx, "WaitForMutations", "GET", path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if !hasData(resp) {
+		return []backend.MutationData{}, nil
+	}
+	var fresp fleetMutationsResponse
+	if err := json.Unmarshal(resp.Data, &fresp); err != nil {
+		return nil, backend.ErrInternal("WaitForMutations", "unmarshal response", err)
+	}
+	return fleetEventsToMutationData(fresp.Events), nil
 }

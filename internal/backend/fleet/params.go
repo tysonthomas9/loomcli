@@ -213,6 +213,31 @@ func readyOptsToQuery(opts backend.ReadyOpts) string {
 	return q.Encode()
 }
 
+// countOptsToQuery serializes the subset of backend.CountOpts fields that the
+// fleet-db count endpoint evaluates server-side (see openapi.yaml
+// /issues/count). Unsupported fields are silently dropped here; callers
+// validate via checkFleetUnsupportedCountFilters before invoking if they need
+// strict "filter actually applied" semantics.
+//
+// Supported: Status, IssueType (mapped to "type"), Assignee, Labels
+// (mapped to singular "label"; fleet's count endpoint accepts a single label
+// filter, not a list), SourceRepos (mapped to singular "repo"), GroupBy.
+func countOptsToQuery(opts backend.CountOpts) string {
+	q := url.Values{}
+	setNonEmpty(q, "status", opts.Status)
+	setNonEmpty(q, "type", opts.IssueType)
+	setNonEmpty(q, "assignee", opts.Assignee)
+	// fleet-db's count endpoint takes a single label/repo; take the first if set.
+	if len(opts.Labels) > 0 {
+		q.Set("label", opts.Labels[0])
+	}
+	if len(opts.SourceRepos) > 0 {
+		q.Set("repo", opts.SourceRepos[0])
+	}
+	setNonEmpty(q, "group_by", opts.GroupBy)
+	return q.Encode()
+}
+
 func blockedOptsToQuery(opts backend.BlockedOpts) string {
 	q := url.Values{}
 	setNonEmpty(q, "parent_id", opts.ParentID)
