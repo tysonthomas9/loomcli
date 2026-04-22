@@ -158,7 +158,11 @@ func GetConfigPath() string {
 // Within fn, use loadConfigUnlocked and saveConfigUnlocked instead of
 // LoadConfig and SaveConfig to avoid deadlock from nested lock acquisition
 // (POSIX flock does NOT allow re-locking from the same process via a
-// different file descriptor).
+// different file descriptor). Likewise, do not call LoadConfigCached from
+// inside fn: its miss path calls LoadConfig, which would re-acquire this
+// flock. When fn calls SaveConfigUnlocked, InvalidateConfigCache runs — that
+// is a single atomic store and is safe under the flock. See the cache.go
+// header comment for the full lock-order invariant (loomcli-rc1s2).
 //
 // WithConfigLock is NOT reentrant — do not call from within an already-locked
 // section.

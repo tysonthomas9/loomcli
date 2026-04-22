@@ -1,6 +1,8 @@
 package config
 
 import (
+	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -210,5 +212,122 @@ func TestLoadConfigCached_ConcurrentReaderAndWriterNoDeadlock(t *testing.T) {
 		// Completed cleanly.
 	case <-time.After(5 * time.Second):
 		t.Fatal("concurrent reader+writer deadlocked after 5s — cache lock inversion regressed")
+	}
+}
+
+// TestLoadConfigCached_NoDeadlockWithWriter is the primary regression guard
+// for the workspace-create-vs-monitor-poll AB-BA deadlock documented in
+// loomcli-rc1s2. It drives 4 writers (mirroring CreateWorkspace ->
+// finalizeWorkspace: WithConfigLock { LoadConfigUnlocked -> mutate ->
+// SaveConfigUnlocked }) and 8 readers (mirroring monitor/HandleAgents ->
+// NewResolver -> LoadConfigCached) concurrently for ~2s. If any lock holder
+// re-introduces the cycle (e.g., taking a cache-level lock across the config
+// flock), this test hangs — the 10s hard deadline fails it.
+func TestLoadConfigCached_NoDeadlockWithWriter(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", dir)
+	InvalidateConfigCache()
+
+	// Seed the file at CurrentConfigVersion so the writer path doesn't keep
+	// re-triggering autoMigrateFile's InvalidateConfigCache side-effect (see
+	// config_migrate.go:182) — migration churn would add noise without
+	// testing the deadlock.
+	seed := &LoomConfig{
+		Version:    CurrentConfigVersion,
+		Workspaces: map[string]WorkspaceConfig{"seed": {Path: "/tmp/seed"}},
+	}
+	if err := SaveConfig(seed); err != nil {
+		t.Fatalf("SaveConfig(seed) error = %v", err)
+	}
+	InvalidateConfigCache()
+
+	const numWriters = 4
+	const numReaders = 8
+	const runFor = 2 * time.Second
+	const hardTimeout = 10 * time.Second
+
+	ctx, cancel := context.WithTimeout(context.Background(), runFor)
+	defer cancel()
+
+	var (
+		wg    sync.WaitGroup
+		errMu sync.Mutex
+		errs  []error
+	)
+	recordErr := func(err error) {
+		errMu.Lock()
+		errs = append(errs, err)
+		errMu.Unlock()
+	}
+
+	for i := 0; i < numWriters; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			iter := 0
+			for ctx.Err() == nil {
+				err := WithConfigLock(func() error {
+					cfg, err := LoadConfigUnlocked()
+					if err != nil {
+						return fmt.Errorf("writer %d: LoadConfigUnlocked: %w", idx, err)
+					}
+					if cfg == nil {
+						cfg = &LoomConfig{
+							Version:    CurrentConfigVersion,
+							Workspaces: map[string]WorkspaceConfig{},
+						}
+					}
+					if cfg.Workspaces == nil {
+						cfg.Workspaces = map[string]WorkspaceConfig{}
+					}
+					name := fmt.Sprintf("w%d-%d", idx, iter)
+					cfg.Workspaces[name] = WorkspaceConfig{Path: "/tmp/" + name}
+					if err := SaveConfigUnlocked(cfg); err != nil {
+						return fmt.Errorf("writer %d: SaveConfigUnlocked: %w", idx, err)
+					}
+					return nil
+				})
+				if err != nil {
+					recordErr(err)
+					return
+				}
+				iter++
+			}
+		}(i)
+	}
+
+	for i := 0; i < numReaders; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			for ctx.Err() == nil {
+				if _, err := LoadConfigCached(); err != nil {
+					recordErr(fmt.Errorf("reader %d: LoadConfigCached: %w", idx, err))
+					return
+				}
+			}
+		}(i)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Clean finish.
+	case <-time.After(hardTimeout):
+		// Do NOT wg.Wait() here — workers are likely stuck on a lock.
+		// Letting the go test -timeout mechanism produce a goroutine dump
+		// gives the best diagnostic for a deadlock regression.
+		t.Fatalf("deadlock: workers did not finish within %s (lock-order invariant regressed — see cache.go header)", hardTimeout)
+	}
+
+	errMu.Lock()
+	defer errMu.Unlock()
+	for _, err := range errs {
+		t.Errorf("worker error: %v", err)
 	}
 }

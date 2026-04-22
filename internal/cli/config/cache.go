@@ -1,3 +1,36 @@
+// Lock-order invariant for this package (see loomcli-rc1s2 for the incident
+// this prevents). The workspace-create path and the monitor/agent-poll path
+// used to deadlock when the cache took an in-process mutex that was acquired
+// in the opposite order relative to the config file flock. The current design
+// dissolves the cycle; the rules below keep future edits from reintroducing
+// it.
+//
+//	Rule A (cache has no mutex):
+//	  cachedConfig is an atomic.Pointer[cachedSnapshot]. Readers publish and
+//	  load snapshots with one atomic op; they never hold a lock across
+//	  LoadConfig (which acquires the configlock flock). Keep it that way — do
+//	  not wrap the cache in a sync.Mutex / sync.RWMutex without also removing
+//	  every flock acquisition that could run while the lock is held.
+//
+//	Rule B (*Unlocked inside WithConfigLock):
+//	  When holding the flock (inside WithConfigLock's fn) use LoadConfigUnlocked
+//	  and SaveConfigUnlocked. SaveConfigUnlocked calls InvalidateConfigCache —
+//	  that is exactly one atomic.Store(nil), so it is safe under any caller
+//	  lock. Never call LoadConfig, SaveConfig, or LoadConfigCached from inside
+//	  WithConfigLock: they each re-acquire the flock (LoadConfigCached does so
+//	  transitively via the singleflight miss-path) and would self-deadlock —
+//	  POSIX flock is not reentrant via distinct fds from the same process.
+//
+//	Rule C (InvalidateConfigCache stays lock-free):
+//	  InvalidateConfigCache must perform a single atomic.Store(nil) and
+//	  acquire no other lock. Every atomicfile.WriteFile on the config path
+//	  must be followed by InvalidateConfigCache (see config.go
+//	  SaveConfigUnlocked and config_migrate.go autoMigrateFile) so cache
+//	  staleness is bounded without introducing a second lock that could
+//	  re-invert.
+//
+// The regression tests TestLoadConfigCached_ConcurrentReaderAndWriterNoDeadlock
+// and TestLoadConfigCached_NoDeadlockWithWriter guard this contract.
 package config
 
 import (
