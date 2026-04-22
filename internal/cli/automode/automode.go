@@ -223,9 +223,7 @@ func applyAutoModeDefaults(opts *AutoModeOptions) {
 		opts.Deps = cli.GetDeps(nil)
 	}
 	if opts.WorkspaceID == "" {
-		if cfg, err := config.LoadConfig(); err == nil && cfg != nil && cfg.DefaultWorkspaceID != "" {
-			opts.WorkspaceID = cfg.DefaultWorkspaceID
-		}
+		opts.WorkspaceID = DefaultWorkspaceID()
 	}
 	if opts.BackoffBase == 0 {
 		opts.BackoffBase = 30 * time.Second

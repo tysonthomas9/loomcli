@@ -33,6 +33,7 @@ type tmuxLoopCtx struct {
 
 func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
 	opts.WorktreePath = canonicalizePath(opts.WorktreePath)
+	applyAutoModeDefaults(&opts)
 	ctx := initTmuxLoop(opts)
 	printTmuxHeader(ctx)
 

@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -197,8 +198,13 @@ func runPlanSingleTask(deps *cli.Deps, worktreePath, agentName string, routerChe
 }
 
 // adoptOrCreateSession either inherits a parent session or creates a new one.
+// Adoption requires LOOM_SESSION_ID to reference a session that actually
+// exists on disk; stale env vars (e.g. leaked from a prior shell into
+// `loom plan` runs) otherwise silently suppress new session creation and the
+// run captures nothing.
 func adoptOrCreateSession(agentName, parentID, prompt, phase string) *sessions.Session {
-	if inheritedSID := os.Getenv("LOOM_SESSION_ID"); inheritedSID != "" {
+	inheritedSID := os.Getenv("LOOM_SESSION_ID")
+	if inheritedSID != "" && inheritedSessionExists(inheritedSID) {
 		inheritedBeads := os.Getenv("LOOM_BEADS_DIR")
 		if inheritedBeads == "" {
 			inheritedBeads = cli.GetBeadsDir()
@@ -210,9 +216,22 @@ func adoptOrCreateSession(agentName, parentID, prompt, phase string) *sessions.S
 	return createAgentSession(agentName, parentID, prompt, phase)
 }
 
-// createAgentSession creates a new session for tracking.
+func inheritedSessionExists(sid string) bool {
+	if dir, err := workspace.CentralSessionsDir(os.Getenv("LOOM_WORKSPACE_ID")); err == nil {
+		if _, err := os.Stat(filepath.Join(dir, sid, "metadata.json")); err == nil {
+			return true
+		}
+	}
+	if beads := os.Getenv("LOOM_BEADS_DIR"); beads != "" {
+		if _, err := os.Stat(filepath.Join(beads, "sessions", sid, "metadata.json")); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
 func createAgentSession(agentName, parentID, prompt, phase string) *sessions.Session {
-	wsID := workspace.ResolveWorkspaceID("")
+	wsID := automode.DefaultWorkspaceID()
 	sessStore, sessErr := sessions.NewStoreForWorkspace(wsID, cli.GetBeadsDir())
 	if sessErr != nil {
 		log.Printf("[agent] Warning: session store unavailable: %v", sessErr)
