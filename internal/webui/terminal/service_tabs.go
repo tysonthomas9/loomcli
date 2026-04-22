@@ -11,6 +11,13 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
+// terminalUIStateKey builds the per-workspace Redis hash key that holds
+// persisted terminal UI state (currently just active_tab). Scoping by
+// workspace prevents cross-workspace clobbering of the active tab.
+func terminalUIStateKey(wsID string) string {
+	return "terminal:ui-state:" + wsID
+}
+
 func (s *terminalServiceImpl) ListTabs(ctx context.Context, wsID string) ([]tabmeta.TabMetadata, error) {
 	if s.tabStore == nil {
 		return nil, service.ErrUnavailable("tab metadata not available (no Redis)")
@@ -167,7 +174,7 @@ func (s *terminalServiceImpl) GetTerminalState(ctx context.Context, wsID string)
 	if s.redisClient == nil {
 		return "", service.ErrUnavailable("terminal state not available (no Redis)")
 	}
-	vals, err := s.redisClient.HGetAll(ctx, terminalUIStateKeyImpl).Result()
+	vals, err := s.redisClient.HGetAll(ctx, terminalUIStateKey(wsID)).Result()
 	if err != nil {
 		slog.Warn("failed to get terminal state", "err", err)
 		return "", nil // graceful degradation
@@ -193,14 +200,14 @@ func (s *terminalServiceImpl) GetTerminalState(ctx context.Context, wsID string)
 	return "", nil
 }
 
-func (s *terminalServiceImpl) PatchTerminalState(ctx context.Context, _ string, activeTab string) error {
+func (s *terminalServiceImpl) PatchTerminalState(ctx context.Context, wsID string, activeTab string) error {
 	if s.redisClient == nil {
 		return service.ErrUnavailable("terminal state not available (no Redis)")
 	}
 	fields := map[string]interface{}{
 		"active_tab": activeTab,
 	}
-	if err := s.redisClient.HSet(ctx, terminalUIStateKeyImpl, fields).Err(); err != nil {
+	if err := s.redisClient.HSet(ctx, terminalUIStateKey(wsID), fields).Err(); err != nil {
 		return service.ErrInternal("failed to save terminal state", err)
 	}
 	return nil

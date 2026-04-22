@@ -72,7 +72,7 @@ type Server struct {
 	initialWorkspaceID string
 
 	// Terminal
-	ptyMgr       *terminal.PTYManager       // main web terminal (PTY-backed)
+	ptyMgr       *terminal.MultiPTYManager  // main web terminal (per-workspace dispatch)
 	agentTmuxMgr *terminal.AgentTmuxManager // agent-view only; nil if tmux unavailable
 	termAuth     *appstores.TerminalAuth    // one-time token issuer (nil disables auth)
 
@@ -313,8 +313,8 @@ func (app *Server) run(ctx context.Context) error { //nolint:funlen // server li
 
 	// Stop terminal managers (close PTYs; detach agent-view tmux attaches)
 	if app.ptyMgr != nil {
-		if err := app.ptyMgr.Shutdown(); err != nil {
-			logger.Warn("error shutting down pty manager", "component", "terminal", "err", err)
+		if err := app.ptyMgr.Close(); err != nil {
+			logger.Warn("error closing pty manager", "component", "terminal", "err", err)
 		} else {
 			logger.Info("pty manager stopped", "component", "terminal")
 		}

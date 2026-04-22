@@ -38,7 +38,7 @@ func NewIssueModules(issueSvc service.IssueService, sessSvc service.SessionServi
 type TerminalModuleDeps struct {
 	TermSvc         service.TerminalService
 	AgentSvc        service.AgentService
-	PTYMgr          *terminal.PTYManager
+	PTYMgr          terminal.PTYSource
 	AgentTmuxMgr    *terminal.AgentTmuxManager // may be nil when tmux is missing
 	TermAuth        *realtime.TerminalAuth
 	CORSOrigins     []string

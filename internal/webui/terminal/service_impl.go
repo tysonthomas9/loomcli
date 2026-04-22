@@ -10,8 +10,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
-const terminalUIStateKeyImpl = "terminal:ui-state"
-
 // terminalServiceImpl is the concrete implementation of TerminalService.
 // After the tmux removal, the service only handles Redis-backed tab
 // metadata, Redis-backed UI state, and WebSocket auth token generation.

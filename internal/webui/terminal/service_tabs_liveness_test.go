@@ -43,8 +43,9 @@ func (f *fakePTYSource) AttachmentCount(key SessionKey) int {
 	}
 	return 0
 }
-func (f *fakePTYSource) SessionCount() int { return len(f.alive) }
-func (f *fakePTYSource) MaxSessions() int  { return 100 }
+func (f *fakePTYSource) SessionCount() int            { return len(f.alive) }
+func (f *fakePTYSource) SessionCountFor(_ string) int { return len(f.alive) }
+func (f *fakePTYSource) MaxSessions() int             { return 100 }
 
 // newLivenessTestSvc wires a terminalServiceImpl over miniredis + a fake PTY
 // source so each test can arrange metadata and liveness independently.
@@ -198,7 +199,7 @@ func TestGetTerminalState_ClearsStaleActiveTab(t *testing.T) {
 	// Persist active_tab pointing at a session with neither PTY nor
 	// metadata — fully stale; service should clear it so the UI doesn't
 	// start by attaching to a ghost.
-	if err := svc.redisClient.HSet(ctx, terminalUIStateKeyImpl, "active_tab", "ghost").Err(); err != nil {
+	if err := svc.redisClient.HSet(ctx, terminalUIStateKey(ws), "active_tab", "ghost").Err(); err != nil {
 		t.Fatalf("seed active_tab: %v", err)
 	}
 
@@ -219,7 +220,7 @@ func TestGetTerminalState_KeepsActiveTabWithDeadPTYButLiveMetadata(t *testing.T)
 	// Metadata exists but PTY is dead — the UI wants to render this tab
 	// in its "session ended" state, so keep the active_tab reference.
 	putTestTab(t, svc, ws, "just-metadata")
-	if err := svc.redisClient.HSet(ctx, terminalUIStateKeyImpl, "active_tab", "just-metadata").Err(); err != nil {
+	if err := svc.redisClient.HSet(ctx, terminalUIStateKey(ws), "active_tab", "just-metadata").Err(); err != nil {
 		t.Fatalf("seed active_tab: %v", err)
 	}
 
@@ -229,5 +230,40 @@ func TestGetTerminalState_KeepsActiveTabWithDeadPTYButLiveMetadata(t *testing.T)
 	}
 	if got != "just-metadata" {
 		t.Errorf("expected active_tab kept (so UI can show ended-state), got %q", got)
+	}
+}
+
+// TestTerminalState_WorkspaceIsolation proves that active_tab is scoped
+// per-workspace so a PATCH on one workspace doesn't clobber another's
+// selection. Before the key rescoping, both GETs returned "tab-b".
+func TestTerminalState_WorkspaceIsolation(t *testing.T) {
+	svc, fake, _ := newLivenessTestSvc(t)
+	ctx := context.Background()
+
+	putTestTab(t, svc, "ws-a", "tab-a")
+	putTestTab(t, svc, "ws-b", "tab-b")
+	fake.alive[SessionKey{Workspace: "ws-a", Name: "tab-a"}] = true
+	fake.alive[SessionKey{Workspace: "ws-b", Name: "tab-b"}] = true
+
+	if err := svc.PatchTerminalState(ctx, "ws-a", "tab-a"); err != nil {
+		t.Fatalf("PatchTerminalState ws-a: %v", err)
+	}
+	if err := svc.PatchTerminalState(ctx, "ws-b", "tab-b"); err != nil {
+		t.Fatalf("PatchTerminalState ws-b: %v", err)
+	}
+
+	gotA, err := svc.GetTerminalState(ctx, "ws-a")
+	if err != nil {
+		t.Fatalf("GetTerminalState ws-a: %v", err)
+	}
+	if gotA != "tab-a" {
+		t.Errorf("ws-a active_tab: got %q, want %q", gotA, "tab-a")
+	}
+	gotB, err := svc.GetTerminalState(ctx, "ws-b")
+	if err != nil {
+		t.Fatalf("GetTerminalState ws-b: %v", err)
+	}
+	if gotB != "tab-b" {
+		t.Errorf("ws-b active_tab: got %q, want %q", gotB, "tab-b")
 	}
 }

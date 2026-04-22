@@ -316,7 +316,7 @@ Search decorations use orange for active match (`#EE8B17`) and gray for other ma
 
 Active tab is persisted on every tab switch (debounced 300ms):
 1. **sessionStorage**: `sessionStorage.setItem('terminal-active-tab', tabId)` — survives page navigation
-2. **Redis**: `PATCH /api/terminal/state` -> `HSET terminal:ui-state active_tab {tabId}` — survives browser close
+2. **Redis**: `PATCH /api/terminal/state` -> `HSET terminal:ui-state:{ws} active_tab {tabId}` — survives browser close
 
 On startup, `useSessionRestore` fetches `GET /api/terminal/state` (Redis). Falls back to `sessionStorage`.
 
@@ -340,7 +340,7 @@ Metadata survives session death — tabs remember custom labels even after the t
 ```
 useSessionRestore mounts
   -> GET /api/terminal/state
-      -> client.HGetAll("terminal:ui-state") -> { active_tab: "myws--lead-claude-2" }
+      -> client.HGetAll("terminal:ui-state:{ws}") -> { active_tab: "myws--lead-claude-2" }
   -> setActiveTabId("myws--lead-claude-2")
 
 useTabInit runs (after metaLoading=false, configLoading=false, isViewActive=true)
@@ -460,7 +460,7 @@ A separate `"terminal_session_change"` event is broadcast when issue linkage cha
 
 | State | Storage | Scope | Lifetime |
 |-------|---------|-------|---------|
-| Active tab ID | Redis `terminal:ui-state` hash | Server-wide | Until overwritten |
+| Active tab ID | Redis `terminal:ui-state:{ws}` hash | Per workspace | Until overwritten |
 | Active tab ID (fast) | `sessionStorage["terminal-active-tab"]` | Browser tab | Browser tab close |
 | Tab metadata | Redis `terminal:meta:{ws}:{session}` | Per workspace | Until DELETE |
 | Onboarding dismissed | `localStorage["terminal-onboarding-dismissed"]` | Browser profile | Until cleared |
