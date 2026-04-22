@@ -56,18 +56,39 @@ func (c *cachedCollector) startBackground(ctx context.Context, interval time.Dur
 	// The first HTTP request hitting get() will trigger a singleflight collection
 	// if the background hasn't finished yet — this avoids blocking server startup.
 	go func() {
-		// Immediate first collection to warm the cache
-		result := c.collectFn()
-		collectedAt := time.Now()
-		c.mu.Lock()
-		// Don't roll back fresher data written by an in-flight get().
-		// Don't touch inflight/waitCh — those are owned by the get()
-		// collector and double-closing waitCh would panic.
-		if collectedAt.After(c.cachedAt) {
-			c.cached = result
-			c.cachedAt = collectedAt
+		// Helper: run collectFn and update cache atomically. Sets inflight/waitCh
+		// so concurrent get() callers wait instead of starting competing collections.
+		// Uses a local ch per invocation to avoid double-close if a get() collector
+		// is already inflight when refresh() starts.
+		refresh := func() {
+			c.mu.Lock()
+			c.inflight = true
+			ch := make(chan struct{})
+			c.waitCh = ch
+			c.mu.Unlock()
+
+			result := c.collectFn()
+			collectedAt := time.Now()
+
+			c.mu.Lock()
+			// Don't roll back fresher data written by a concurrent get() collector.
+			if collectedAt.After(c.cachedAt) {
+				c.cached = result
+				c.cachedAt = collectedAt
+			}
+			// Only clear inflight if we still own the current claim. A concurrent
+			// get() collector may have overwritten c.waitCh with its own channel;
+			// in that case we must not prematurely clear inflight or new callers
+			// could start a third competing collection.
+			if c.waitCh == ch {
+				c.inflight = false
+			}
+			close(ch)
+			c.mu.Unlock()
 		}
-		c.mu.Unlock()
+
+		// Immediate first collection to warm the cache
+		refresh()
 
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
@@ -76,17 +97,7 @@ func (c *cachedCollector) startBackground(ctx context.Context, interval time.Dur
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				result := c.collectFn()
-				collectedAt := time.Now()
-				c.mu.Lock()
-				// Don't roll back fresher data written by an in-flight get().
-				// Don't touch inflight/waitCh — those are owned by the get()
-				// collector and double-closing waitCh would panic.
-				if collectedAt.After(c.cachedAt) {
-					c.cached = result
-					c.cachedAt = collectedAt
-				}
-				c.mu.Unlock()
+				refresh()
 			}
 		}
 	}()
@@ -98,17 +109,22 @@ func (c *cachedCollector) get() *monitor.MonitorData {
 	c.mu.Lock()
 
 	// Fast path: cache is fresh
-	if c.cached != nil && time.Since(c.cachedAt) < c.ttl {
+	if !c.cachedAt.IsZero() && time.Since(c.cachedAt) < c.ttl {
 		data := c.cached
 		c.mu.Unlock()
 		return data
 	}
 
-	// If another goroutine is already collecting, wait for it
+	// If another goroutine is already collecting, wait for it (with timeout)
 	if c.inflight {
 		ch := c.waitCh
 		c.mu.Unlock()
-		<-ch // block until collection finishes
+		timer := time.NewTimer(5 * time.Second)
+		select {
+		case <-ch: // collection finished
+		case <-timer.C: // don't block HTTP handler indefinitely
+		}
+		timer.Stop()
 		c.mu.Lock()
 		data := c.cached
 		c.mu.Unlock()
@@ -122,9 +138,13 @@ func (c *cachedCollector) get() *monitor.MonitorData {
 	c.mu.Unlock()
 
 	// Ensure waiters are always unblocked, even if collectFn panics.
+	// Only clear inflight if we still own the current claim — a background
+	// refresh() may have overwritten c.waitCh while we were collecting.
 	defer func() {
 		c.mu.Lock()
-		c.inflight = false
+		if c.waitCh == ch {
+			c.inflight = false
+		}
 		close(ch)
 		c.mu.Unlock()
 	}()
