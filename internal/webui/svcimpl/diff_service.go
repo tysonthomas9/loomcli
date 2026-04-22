@@ -3,6 +3,7 @@ package svcimpl
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -19,12 +20,50 @@ var _ service.DiffService = (*diffServiceImpl)(nil)
 // diffServiceImpl is the concrete implementation of DiffService.
 type diffServiceImpl struct {
 	gitOps ops.GitOps
-	pool   daemon.Pool
+	// multiPool is the sole pool; every RPC routes through the per-workspace
+	// daemon picked from the request context. A default-pool fallback would
+	// silently serve the wrong daemon's data when middleware is missing.
+	multiPool *daemon.MultiPool
 }
 
 // NewDiffService creates a new DiffService implementation.
-func NewDiffService(gitOps ops.GitOps, pool daemon.Pool) service.DiffService {
-	return &diffServiceImpl{gitOps: gitOps, pool: pool}
+func NewDiffService(gitOps ops.GitOps, multiPool *daemon.MultiPool) service.DiffService {
+	return &diffServiceImpl{gitOps: gitOps, multiPool: multiPool}
+}
+
+// acquireClient borrows a workspace-scoped client. A missing workspace in
+// context is a server bug (middleware missing) and surfaces as ErrInternal
+// so it's a loud 500 rather than a silent cross-workspace read.
+func (s *diffServiceImpl) acquireClient(ctx context.Context) (*rpc.Client, error) {
+	if s.multiPool == nil {
+		return nil, service.ErrUnavailable("multi-pool not initialized")
+	}
+	client, err := s.multiPool.Get(ctx)
+	if err != nil {
+		switch {
+		case errors.Is(err, daemon.ErrNoWorkspaceInContext):
+			return nil, service.ErrInternal("no workspace in request context — middleware.Workspace missing on this route", err)
+		case errors.Is(err, daemon.ErrWorkspaceNotRegistered):
+			return nil, service.ErrNotFound("workspace not registered")
+		case errors.Is(err, daemon.ErrDaemonStarting):
+			return nil, service.ErrStarting("workspace is loading")
+		case errors.Is(err, context.DeadlineExceeded):
+			return nil, service.ErrTimeout("timeout connecting to daemon")
+		}
+		return nil, service.ErrUnavailable("daemon not available")
+	}
+	return client, nil
+}
+
+// releaseClient puts the connection back when *ok is true, discards when
+// false. Discarding on RPC error avoids reusing a connection whose read
+// buffer may still hold stale bytes from a failed response.
+func (s *diffServiceImpl) releaseClient(client *rpc.Client, ok *bool) {
+	if *ok {
+		s.multiPool.Put(client)
+	} else {
+		s.multiPool.Discard(client)
+	}
 }
 
 func (s *diffServiceImpl) resolveAgent(wsID, agentName string) (*ops.AgentWorktree, error) {
@@ -169,29 +208,20 @@ func (s *diffServiceImpl) DiffFilePatch(_ context.Context, wsID, agentName, from
 	return result, nil
 }
 
-func (s *diffServiceImpl) GetIssueDiffStat(ctx context.Context, wsID, issueID string) (*service.IssueDiffStatResult, error) { //nolint:funlen // linear pool+RPC flow with conditional Discard guard
+func (s *diffServiceImpl) GetIssueDiffStat(ctx context.Context, wsID, issueID string) (*service.IssueDiffStatResult, error) {
 	if issueID == "" {
 		return nil, service.ErrValidation("missing issue ID")
-	}
-	if s.pool == nil {
-		return nil, service.ErrUnavailable("daemon not available")
 	}
 
 	rpcCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	client, err := s.pool.Get(rpcCtx)
+	client, err := s.acquireClient(rpcCtx)
 	if err != nil {
-		return nil, service.ErrUnavailable("daemon not available")
+		return nil, err
 	}
 	rpcOK := false
-	defer func() {
-		if rpcOK {
-			s.pool.Put(client)
-		} else {
-			s.pool.Discard(client)
-		}
-	}()
+	defer s.releaseClient(client, &rpcOK)
 
 	resp, err := client.Show(&rpc.ShowArgs{ID: issueID})
 	if err != nil {
@@ -200,6 +230,7 @@ func (s *diffServiceImpl) GetIssueDiffStat(ctx context.Context, wsID, issueID st
 		}
 		return nil, service.ErrInternal("failed to get issue", err)
 	}
+	rpcOK = true
 
 	var issue struct {
 		Assignee string `json:"assignee"`
@@ -210,7 +241,6 @@ func (s *diffServiceImpl) GetIssueDiffStat(ctx context.Context, wsID, issueID st
 	if issue.Assignee == "" {
 		return nil, service.ErrNotFound("issue has no assignee (no agent worktree)")
 	}
-	rpcOK = true
 
 	wt, err := s.gitOps.ResolveAgentWorktree(wsID, issue.Assignee)
 	if err != nil {
