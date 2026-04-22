@@ -79,8 +79,6 @@ func (s *Supervisor) NewAgent(entry config.AgentEntry, idx int) (*AgentProcess, 
 
 // Start launches supervisor goroutines for all configured agents.
 func (s *Supervisor) Start() error {
-	s.Shutdown = make(chan struct{})
-
 	// Sweep orphaned sessions from prior daemon runs before launching agents.
 	if sessStore, err := sessions.NewStore(cli.GetBeadsDir()); err != nil {
 		slog.Warn("session store unavailable, skipping orphan sweep", "err", err)
