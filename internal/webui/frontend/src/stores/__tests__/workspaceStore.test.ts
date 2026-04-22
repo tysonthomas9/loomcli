@@ -172,6 +172,28 @@ describe("workspaceStore", () => {
       await vi.advanceTimersByTimeAsync(5000);
       expect(mockFetchWorkspaceApi).toHaveBeenCalledTimes(3);
     });
+
+    it("passes workspaceId to fetchWorkspaceApi on initial fetch and every poll tick", async () => {
+      const ws = makeWorkspace({ id: "ws-bravo", name: "bravo" });
+      mockFetchWorkspaceApi.mockResolvedValue(ws);
+
+      store
+        .getState()
+        .startPolling({ workspaceId: "ws-bravo", pollInterval: 5000 });
+
+      // Initial fetch — must target the scoped workspace, not the server
+      // default. Nth-call + count matchers catch zero-arg regressions that a
+      // loose toHaveBeenCalledWith("ws-bravo") would miss if mixed with
+      // additional unscoped calls.
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockFetchWorkspaceApi).toHaveBeenCalledTimes(1);
+      expect(mockFetchWorkspaceApi).toHaveBeenNthCalledWith(1, "ws-bravo");
+
+      // Poll tick must also stay scoped.
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(mockFetchWorkspaceApi).toHaveBeenCalledTimes(2);
+      expect(mockFetchWorkspaceApi).toHaveBeenNthCalledWith(2, "ws-bravo");
+    });
   });
 
   describe("stopPolling", () => {
@@ -254,6 +276,25 @@ describe("workspaceStore", () => {
       await vi.advanceTimersByTimeAsync(0);
 
       expect(store.getState().workspace?.name).toBe("ws-2");
+    });
+
+    it("preserves the active workspaceId from the prior startPolling call", async () => {
+      const ws = makeWorkspace({ id: "ws-bravo", name: "bravo" });
+      mockFetchWorkspaceApi.mockResolvedValue(ws);
+
+      store
+        .getState()
+        .startPolling({ workspaceId: "ws-bravo", pollInterval: 60000 });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockFetchWorkspaceApi).toHaveBeenNthCalledWith(1, "ws-bravo");
+
+      store.getState().refetch();
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Regression guard: refetch must not drop the scope and fall back to
+      // the server default — every call stays pinned to ws-bravo.
+      expect(mockFetchWorkspaceApi).toHaveBeenCalledTimes(2);
+      expect(mockFetchWorkspaceApi).toHaveBeenNthCalledWith(2, "ws-bravo");
     });
   });
 

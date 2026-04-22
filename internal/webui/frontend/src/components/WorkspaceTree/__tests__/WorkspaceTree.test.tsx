@@ -15,17 +15,13 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import "@testing-library/jest-dom";
+import type { RepoInfo } from "@/api/workspace";
 import { WorkspaceTree } from "../WorkspaceTree";
 
 // Default mock return values
 const defaultReposReturn = {
   workspace: null,
-  repos: [] as Array<{
-    name: string;
-    path: string;
-    default_branch: string;
-    remote: string;
-  }>,
+  repos: [] as RepoInfo[],
   isLoading: false,
   error: null as string | null,
   refetch: vi.fn(),
@@ -166,12 +162,14 @@ describe("WorkspaceTree", () => {
             path: "/repos/alpha",
             default_branch: "main",
             remote: "origin",
+            groups: [],
           },
           {
             name: "beta",
             path: "/repos/beta",
             default_branch: "main",
             remote: "origin",
+            groups: [],
           },
         ],
       };
@@ -180,6 +178,32 @@ describe("WorkspaceTree", () => {
 
       expect(screen.getByText("alpha")).toBeInTheDocument();
       expect(screen.getByText("beta")).toBeInTheDocument();
+    });
+
+    it("renders a repo with is_linked_worktree: true (sibling-collision workspace)", () => {
+      // Regression guard for the "No repos in workspace" bug: if the
+      // sidebar ever re-introduces a .filter(!r.is_linked_worktree)
+      // predicate, a workspace whose only repo is a linked worktree would
+      // render the empty state instead of its repo. That must not happen.
+      reposOverride = {
+        repos: [
+          {
+            name: "bravo",
+            path: "/root/.loom/workspaces/bravo/bravo",
+            default_branch: "main",
+            remote: "origin",
+            groups: [],
+            is_linked_worktree: true,
+          },
+        ],
+      };
+
+      render(<WorkspaceTree defaultCollapsed={false} />);
+
+      expect(screen.getByText("bravo")).toBeInTheDocument();
+      expect(
+        screen.queryByText("No repos in workspace"),
+      ).not.toBeInTheDocument();
     });
   });
 
@@ -192,6 +216,7 @@ describe("WorkspaceTree", () => {
             path: "/repos/alpha",
             default_branch: "main",
             remote: "origin",
+            groups: [],
           },
         ],
       };
@@ -210,6 +235,7 @@ describe("WorkspaceTree", () => {
             path: "/repos/alpha",
             default_branch: "main",
             remote: "origin",
+            groups: [],
           },
         ],
       };
@@ -233,6 +259,7 @@ describe("WorkspaceTree", () => {
             path: "/repos/alpha",
             default_branch: "main",
             remote: "origin",
+            groups: [],
           },
         ],
       };
@@ -278,6 +305,7 @@ describe("WorkspaceTree", () => {
             path: "/repos/alpha",
             default_branch: "main",
             remote: "origin",
+            groups: [],
           },
         ],
       };
@@ -358,6 +386,7 @@ describe("WorkspaceTree", () => {
             path: "/repos/alpha",
             default_branch: "main",
             remote: "origin",
+            groups: [],
           },
         ],
       };

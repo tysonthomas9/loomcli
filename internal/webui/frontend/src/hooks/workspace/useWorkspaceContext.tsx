@@ -325,6 +325,9 @@ export function WorkspaceProvider({
 
   // Derived read-only values from store. Zero useState.
   const activeWorkspaceName = workspace?.name ?? null;
+  // Surface every repo the API returns — do NOT filter on is_linked_worktree.
+  // A workspace's source repo can legitimately be a linked worktree; the
+  // agent/source distinction belongs on the backend (see workspaceinfo.buildRepoList).
   const repos = workspace?.repos ?? EMPTY_REPOS;
   const groups = workspace?.groups ?? EMPTY_GROUPS;
   const agents = workspace?.agents ?? EMPTY_AGENTS;

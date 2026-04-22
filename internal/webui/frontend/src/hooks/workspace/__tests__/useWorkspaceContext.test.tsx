@@ -178,6 +178,51 @@ describe("useWorkspaceContext", () => {
       expect(result.current.repos[1].name).toBe("frontend");
     });
 
+    it("surfaces linked-worktree repos (no is_linked_worktree filter)", async () => {
+      // Regression guard: a prior implementation in the deleted
+      // useWorkspaceRepos hook filtered out every repo with
+      // is_linked_worktree=true, which wiped the sidebar whenever a
+      // workspace's source repo was created as a linked worktree. The
+      // current provider must surface such repos verbatim.
+      const repos = [
+        createMockRepo({
+          name: "bravo",
+          path: "/root/.loom/workspaces/bravo/bravo",
+          is_linked_worktree: true,
+        }),
+      ];
+      setupMockWorkspaceApi({ repos });
+
+      const { result } = renderHook(() => useWorkspaceContext(), {
+        wrapper,
+      });
+
+      await flushPromises();
+
+      expect(result.current.repos).toHaveLength(1);
+      expect(result.current.repos[0].name).toBe("bravo");
+      expect(result.current.repos[0].is_linked_worktree).toBe(true);
+    });
+
+    it("surfaces a mix of linked and non-linked repos without filtering", async () => {
+      const repos = [
+        createMockRepo({ name: "api", is_linked_worktree: false }),
+        createMockRepo({ name: "bravo", is_linked_worktree: true }),
+      ];
+      setupMockWorkspaceApi({ repos });
+
+      const { result } = renderHook(() => useWorkspaceContext(), {
+        wrapper,
+      });
+
+      await flushPromises();
+
+      expect(result.current.repos).toHaveLength(2);
+      expect(result.current.repos.map((r) => r.name)).toEqual(["api", "bravo"]);
+      expect(result.current.getRepoByName("api")).toBeDefined();
+      expect(result.current.getRepoByName("bravo")).toBeDefined();
+    });
+
     it("provides groups from workspace data", async () => {
       setupMockWorkspaceApi({ groups: ["backend", "frontend", "infra"] });
 
