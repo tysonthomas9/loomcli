@@ -74,6 +74,9 @@ services:
     environment:
       LOOM_ISSUE_BACKEND: beads
       BD_ACTOR: parity-harness
+      # Must NOT be set on this service — if LOOM_FLEET_URL is defined
+      # here, a misconfigured resolver could flip the backend to fleet
+      # silently. We deliberately leave it unset so a fallback is loud.
     # bd serve path: init a workspace on startup, then loom serve.
     command:
       - /bin/sh
@@ -92,6 +95,18 @@ services:
     networks: [parity]
     ports:
       - "8081:8080"
+    healthcheck:
+      # Sanity: confirm this loom instance really is on the beads backend.
+      # If a default/fallback kicks in and it reports "fleet", fail.
+      test:
+        - CMD-SHELL
+        - |
+          BACKEND=$$(wget -qO- http://localhost:8080/api/config 2>/dev/null | grep -oE '"issue_backend":"[^"]*"' | cut -d'"' -f4)
+          [ "$$BACKEND" = "beads" ] || exit 1
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
     # volumes:
     #   - beads-data:/workspace
 
@@ -107,16 +122,46 @@ services:
       LOOM_FLEET_URL: http://fleet-db:8080
       LOOM_WORKSPACE: PARITY
       LOOM_AGENT_NAME: parity-harness
+      # Fail fast if loom boots thinking it has a local beads backend.
+      # Any fallback to an embedded beads path in fleet mode should surface
+      # as a startup error, not a silent re-route.
+      LOOM_FLEET_REQUIRED: "1"
     command:
       - /bin/sh
       - -c
       - |
         set -e
         cd /workspace
+        # Pre-flight: confirm fleet-db is reachable from inside this
+        # container before starting loom. If fleet-db isn't responding,
+        # stop now rather than letting loom come up with a broken backend.
+        echo "[loom-fleet] checking fleet-db reachability at $$LOOM_FLEET_URL ..."
+        for i in $$(seq 1 30); do
+          if wget -qO- "$$LOOM_FLEET_URL/healthz" > /dev/null 2>&1; then
+            echo "[loom-fleet] fleet-db OK"
+            break
+          fi
+          echo "[loom-fleet] waiting for fleet-db ($$i/30)"
+          sleep 1
+        done
+        wget -qO- "$$LOOM_FLEET_URL/healthz" > /dev/null || { echo "[loom-fleet] FATAL: fleet-db unreachable"; exit 1; }
+
         exec loom serve --bind 0.0.0.0 --port 8080
     networks: [parity]
     ports:
       - "8082:8080"
+    healthcheck:
+      # Sanity: confirm loom-fleet's own config endpoint reports the
+      # expected backend. Healthcheck fails if a default/fallback kicks in.
+      test:
+        - CMD-SHELL
+        - |
+          BACKEND=$$(wget -qO- http://localhost:8080/api/config 2>/dev/null | grep -oE '"issue_backend":"[^"]*"' | cut -d'"' -f4)
+          [ "$$BACKEND" = "fleet" ] || exit 1
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
 
   # One-shot fixture seeder. Runs after both loom-* services are up.
   # Builds a tiny image containing fdb (copied from fleet-db image) and bd

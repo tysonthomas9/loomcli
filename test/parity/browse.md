@@ -10,6 +10,90 @@ Walk through the checklist below, comparing both tabs. For each step,
 record pass/fail + screenshot reference in
 `docs/design/parity-report-2026-04-22/webui-gaps.md`.
 
+## ⚠ Pre-flight: backend sanity check (DO NOT SKIP)
+
+Before running ANY visual comparison, prove that the two loom instances
+are actually using different backends. Otherwise every "parity pass"
+result is meaningless.
+
+### 1. Config endpoint (most authoritative)
+
+Each loom instance exposes its active issue backend via `/api/config`:
+
+```bash
+curl -s http://localhost:8081/api/config | jq -r '.issue_backend'
+# Expected: "beads"
+
+curl -s http://localhost:8082/api/config | jq -r '.issue_backend'
+# Expected: "fleet"
+```
+
+If either returns a different value than expected, STOP. The compose is
+misconfigured or a service fell back to a default.
+
+### 2. Network-level verification (loom-fleet actually talks to fleet-db)
+
+From inside the compose network, confirm loom-fleet's outbound issue
+traffic hits fleet-db (not a local daemon):
+
+```bash
+# Tail fleet-db's access log while hitting loom-fleet's API
+docker compose -f test/parity/docker-compose.parity.yml logs -f fleet-db &
+LOGS_PID=$!
+sleep 1
+
+# Create an issue via loom-fleet's webui API
+curl -s -X POST http://localhost:8082/api/issues \
+    -H 'Content-Type: application/json' \
+    -d '{"title":"sanity-check issue","issue_type":"task","priority":3}'
+
+# Watch the fleet-db logs for an inbound request — should show a
+# POST /api/v1/{ws}/issues line within a second.
+sleep 2
+kill $LOGS_PID
+```
+
+If fleet-db's logs show no activity, loom-fleet is NOT actually routing
+through it. Likely a misconfiguration; check `LOOM_FLEET_URL` env var.
+
+### 3. Same issue, both backends
+
+Create an issue via each loom instance, then fetch it via the other side's
+native listing. If both lists look identical, the two instances are
+(wrongly) sharing state.
+
+```bash
+curl -s http://localhost:8081/api/issues | jq '.data | length'
+curl -s http://localhost:8082/api/issues | jq '.data | length'
+```
+
+After seeding with identical fixtures both should show the same count —
+but seeding is supposed to happen via TWO separate API calls (one per
+backend). If both were populated by a single call, the stacks are bleeding
+into each other. Inspect `seed.sh` to confirm dual-write.
+
+### 4. Fleet-db workspace key
+
+```bash
+# Confirm fleet-db has the seeded workspace
+curl -s http://localhost:8080/api/v1/admin/workspaces | jq '.data[] | .key'
+# Expected: "PARITY"
+
+# Confirm loom-fleet is pointing at that workspace
+docker compose -f test/parity/docker-compose.parity.yml exec loom-fleet \
+    printenv LOOM_WORKSPACE
+# Expected: "PARITY"
+```
+
+### 5. Backend indicator in the UI
+
+The webui Settings page (or status bar) should show the active backend
+string. Both tabs' Settings should render a DIFFERENT value. If they
+render the same, the frontend may not be reading from `/api/config`
+correctly — file as a webui bug before walking the checklist.
+
+**Only after all 5 sanity checks pass**, proceed.
+
 ## Kanban view
 
 - [ ] Both tabs show 13 issues (3 epics + 10 children) in the correct

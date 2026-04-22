@@ -21,14 +21,28 @@ cd /home/admin/codebase/2/loomcli
 # Build containers (one-time; takes 5-10 min first run)
 docker compose -f test/parity/docker-compose.parity.yml build
 
-# Bring up stack
+# Bring up stack — healthchecks will fail loudly if either loom instance
+# reports the wrong backend (fleet instead of beads or vice versa)
 docker compose -f test/parity/docker-compose.parity.yml up -d
 
-# Wait for services
+# Wait for services; both loom-* healthchecks must show "healthy"
 docker compose -f test/parity/docker-compose.parity.yml ps
 
 # Seed identical fixtures into both backends
 docker compose -f test/parity/docker-compose.parity.yml run --rm parity-seed
+
+# --- Step 0: backend sanity check (see browse.md §Pre-flight) ---
+# These MUST pass before any visual comparison has meaning:
+curl -s http://localhost:8081/api/config | jq -r '.issue_backend'  # beads
+curl -s http://localhost:8082/api/config | jq -r '.issue_backend'  # fleet
+
+# And confirm loom-fleet really routes to fleet-db (not a local fallback):
+docker compose -f test/parity/docker-compose.parity.yml logs -f fleet-db &
+LOGS_PID=$!
+curl -s -X POST http://localhost:8082/api/issues -H 'Content-Type: application/json' \
+    -d '{"title":"probe","issue_type":"task","priority":3}'
+sleep 2; kill $LOGS_PID
+# fleet-db's logs must show an inbound POST /api/v1/PARITY/issues entry.
 
 # Open both webuis side-by-side
 # beads: http://localhost:8081
@@ -39,6 +53,23 @@ docker compose -f test/parity/docker-compose.parity.yml run --rm parity-seed
 # Teardown
 docker compose -f test/parity/docker-compose.parity.yml down -v
 ```
+
+## Step 0: pre-flight verification log
+
+Fill before proceeding to any view-level test. If ANY row says FAIL, stop
+and fix the compose / env config first.
+
+| Check | Expected | Actual | Pass/Fail |
+|---|---|---|---|
+| `GET :8081/api/config .issue_backend` | `beads` | _TBD_ | _TBD_ |
+| `GET :8082/api/config .issue_backend` | `fleet` | _TBD_ | _TBD_ |
+| Container healthchecks all green | healthy | _TBD_ | _TBD_ |
+| Probe POST to :8082 shows up in fleet-db logs | yes | _TBD_ | _TBD_ |
+| `loom-fleet` env `LOOM_FLEET_URL` | `http://fleet-db:8080` | _TBD_ | _TBD_ |
+| `loom-fleet` env `LOOM_WORKSPACE` | `PARITY` | _TBD_ | _TBD_ |
+| fleet-db has workspace `PARITY` | yes | _TBD_ | _TBD_ |
+| Settings page shows "beads" on :8081 | yes | _TBD_ | _TBD_ |
+| Settings page shows "fleet" on :8082 | yes | _TBD_ | _TBD_ |
 
 ## Findings template
 
