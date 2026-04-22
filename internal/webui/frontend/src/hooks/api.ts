@@ -43,4 +43,5 @@ export {
   createWorkspace,
   createWorkspaceEpic,
   createWorkspaceTask,
+  updateRepoDefaultBranch,
 } from "@/api/workspace";

@@ -1559,6 +1559,12 @@ type PatchIssueRequestAgentState string
 // PatchIssueRequestStatus defines model for PatchIssueRequest.Status.
 type PatchIssueRequestStatus string
 
+// RepoDefaultBranchPatchRequest defines model for RepoDefaultBranchPatchRequest.
+type RepoDefaultBranchPatchRequest struct {
+	// Branch New default (integration) branch for the repo
+	Branch string `json:"branch"`
+}
+
 // SeedRequest defines model for SeedRequest.
 type SeedRequest struct {
 	Blockers *[]struct {
@@ -2267,6 +2273,9 @@ type SaveIssueTabsJSONRequestBody SaveIssueTabsJSONBody
 
 // RenameWorkspaceJSONRequestBody defines body for RenameWorkspace for application/json ContentType.
 type RenameWorkspaceJSONRequestBody = WorkspaceRenameRequest
+
+// PatchRepoDefaultBranchJSONRequestBody defines body for PatchRepoDefaultBranch for application/json ContentType.
+type PatchRepoDefaultBranchJSONRequestBody = RepoDefaultBranchPatchRequest
 
 // SeedTerminalSessionJSONRequestBody defines body for SeedTerminalSession for application/json ContentType.
 type SeedTerminalSessionJSONRequestBody = SeedRequest

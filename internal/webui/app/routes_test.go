@@ -1602,6 +1602,61 @@ func TestSetupRoutes_WorkspaceBackendPatchReadsBody(t *testing.T) {
 	}
 }
 
+// TestSetupRoutes_RepoDefaultBranchPatchEndpoint verifies that
+// PATCH /api/workspaces/{ws}/repos/{repo}/default-branch is registered on the
+// outer mux and actually receives the request body at the handler.
+func TestSetupRoutes_RepoDefaultBranchPatchEndpoint(t *testing.T) {
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
+	_ = multiPool.Register("test-ws", &stubPool{})
+
+	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
+	workspaceConfigFn := func() (*ops.WorkspaceData, error) {
+		return &ops.WorkspaceData{Name: "test-ws", Path: "/tmp/test"}, nil
+	}
+
+	var capturedRepo, capturedBranch string
+	wsSvc := &mockWorkspaceService{
+		patchRepoDefaultBranchFn: func(_ context.Context, _, repoName, branch string) (*ops.WorkspaceData, error) {
+			capturedRepo = repoName
+			capturedBranch = branch
+			return &ops.WorkspaceData{Name: "test-ws", Path: "/tmp/test"}, nil
+		},
+	}
+	app := &Server{multiPool: multiPool, config: webui.ServerConfig{WorkspaceConfigFn: workspaceConfigFn}, wsExistsFn: wsExistsFn, workspaceSvc: wsSvc}
+	app.sessSvc = svcimpl.NewSessionService(nil, nil)
+	setupTestRoutes(t, app)
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/workspaces/test-ws/repos/backend/default-branch",
+		strings.NewReader(`{"branch":"develop"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	app.mux.ServeHTTP(rr, req)
+
+	ct := rr.Header().Get("Content-Type")
+	if ct == "text/html; charset=utf-8" {
+		t.Fatal("expected repo default-branch PATCH route to be registered, but request fell through to frontend handler")
+	}
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d, body=%s", rr.Code, rr.Body.String())
+	}
+
+	if capturedRepo != "backend" {
+		t.Errorf("handler did not receive repo from path; got %q, want %q", capturedRepo, "backend")
+	}
+	if capturedBranch != "develop" {
+		t.Errorf("handler did not receive branch from body; got %q, want %q", capturedBranch, "develop")
+	}
+
+	var body map[string]interface{}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to parse response JSON: %v", err)
+	}
+	if success, _ := body["success"].(bool); !success {
+		t.Errorf("response success = false, want true; body=%v", body)
+	}
+}
+
 // --- Terminal token route conditional registration tests ---
 
 // TestSetupRoutes_FlatTerminalTokenReturns404 verifies that GET /api/terminal/token

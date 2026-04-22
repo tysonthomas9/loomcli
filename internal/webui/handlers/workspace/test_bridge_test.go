@@ -22,24 +22,26 @@ var handleGetWorkspace = HandleGetWorkspace
 var handleGetWorkspaceJob = HandleGetWorkspaceJob
 var handleSetDefaultWorkspace = HandleSetDefaultWorkspace
 var handleClearDefaultWorkspace = HandleClearDefaultWorkspace
+var handleRepoDefaultBranchPatch = HandleRepoDefaultBranchPatch
 
 // ---------------------------------------------------------------------------
 // mockWorkspaceService — local copy for handler-level testing
 // ---------------------------------------------------------------------------
 
 type mockWorkspaceService struct {
-	getActiveWorkspaceFn    func(ctx context.Context) (*ops.WorkspaceData, error)
-	listWorkspacesFn        func(ctx context.Context) ([]service.WorkspaceListItem, error)
-	getWorkspaceFn          func(ctx context.Context, wsID string) (*ops.WorkspaceData, error)
-	createWorkspaceFn       func(ctx context.Context, req service.WorkspaceCreateRequest) (*ops.WorkspaceData, []string, error)
-	startAsyncCreateFn      func(ctx context.Context, req service.WorkspaceCreateRequest) (string, error)
-	getWorkspaceJobFn       func(ctx context.Context, jobID string) (*service.WorkspaceJob, error)
-	deleteWorkspaceFn       func(ctx context.Context, wsID string) (*ops.WorkspaceData, error)
-	renameWorkspaceFn       func(ctx context.Context, wsID string, newName string) (*ops.WorkspaceData, error)
-	reorderWorkspacesFn     func(ctx context.Context, order []string) (*ops.WorkspaceData, error)
-	setDefaultWorkspaceFn   func(ctx context.Context, name string) (*ops.WorkspaceData, error)
-	clearDefaultWorkspaceFn func(ctx context.Context) (*ops.WorkspaceData, error)
-	patchWorkspaceBackendFn func(ctx context.Context, wsID string, backend string) (*ops.WorkspaceData, error)
+	getActiveWorkspaceFn     func(ctx context.Context) (*ops.WorkspaceData, error)
+	listWorkspacesFn         func(ctx context.Context) ([]service.WorkspaceListItem, error)
+	getWorkspaceFn           func(ctx context.Context, wsID string) (*ops.WorkspaceData, error)
+	createWorkspaceFn        func(ctx context.Context, req service.WorkspaceCreateRequest) (*ops.WorkspaceData, []string, error)
+	startAsyncCreateFn       func(ctx context.Context, req service.WorkspaceCreateRequest) (string, error)
+	getWorkspaceJobFn        func(ctx context.Context, jobID string) (*service.WorkspaceJob, error)
+	deleteWorkspaceFn        func(ctx context.Context, wsID string) (*ops.WorkspaceData, error)
+	renameWorkspaceFn        func(ctx context.Context, wsID string, newName string) (*ops.WorkspaceData, error)
+	reorderWorkspacesFn      func(ctx context.Context, order []string) (*ops.WorkspaceData, error)
+	setDefaultWorkspaceFn    func(ctx context.Context, name string) (*ops.WorkspaceData, error)
+	clearDefaultWorkspaceFn  func(ctx context.Context) (*ops.WorkspaceData, error)
+	patchWorkspaceBackendFn  func(ctx context.Context, wsID string, backend string) (*ops.WorkspaceData, error)
+	patchRepoDefaultBranchFn func(ctx context.Context, wsID, repoName, branch string) (*ops.WorkspaceData, error)
 }
 
 func (m *mockWorkspaceService) GetActiveWorkspace(ctx context.Context) (*ops.WorkspaceData, error) {
@@ -111,6 +113,12 @@ func (m *mockWorkspaceService) ClearDefaultWorkspace(ctx context.Context) (*ops.
 func (m *mockWorkspaceService) PatchWorkspaceBackend(ctx context.Context, wsID string, backend string) (*ops.WorkspaceData, error) {
 	if m.patchWorkspaceBackendFn != nil {
 		return m.patchWorkspaceBackendFn(ctx, wsID, backend)
+	}
+	return nil, service.ErrUnavailable("not available")
+}
+func (m *mockWorkspaceService) PatchRepoDefaultBranch(ctx context.Context, wsID, repoName, branch string) (*ops.WorkspaceData, error) {
+	if m.patchRepoDefaultBranchFn != nil {
+		return m.patchRepoDefaultBranchFn(ctx, wsID, repoName, branch)
 	}
 	return nil, service.ErrUnavailable("not available")
 }

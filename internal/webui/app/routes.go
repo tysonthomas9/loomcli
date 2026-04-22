@@ -140,6 +140,7 @@ func (app *Server) registerWorkspaceRoutes() {
 	// PATCH requests routed through a nested mux via wildcard subtree pattern.
 	app.mux.Handle("PATCH /api/workspaces/{ws}/name", middleware.Workspace(app.wsExistsFn)(handlermux.HandleWorkspaceRename(app.workspaceSvc)))
 	app.mux.Handle("PATCH /api/workspaces/{ws}/config/backend", middleware.Workspace(app.wsExistsFn)(handlermux.HandleWorkspaceBackendPatch(app.workspaceSvc)))
+	app.mux.Handle("PATCH /api/workspaces/{ws}/repos/{repo}/default-branch", middleware.Workspace(app.wsExistsFn)(handlermux.HandleRepoDefaultBranchPatch(app.workspaceSvc)))
 
 	wsMux := http.NewServeMux()
 	for _, mod := range app.wsModules {

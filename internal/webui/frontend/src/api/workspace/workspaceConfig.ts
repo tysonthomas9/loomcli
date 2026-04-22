@@ -3,7 +3,7 @@
  * Uses openapi-fetch generated client.
  */
 
-import { api, ApiError, apiErrorFromResponse } from "@/api/common";
+import { api, ApiError, apiErrorFromResponse, patch } from "@/api/common";
 import type { WorkspaceData } from "./workspace";
 
 /**
@@ -32,4 +32,25 @@ export async function updateWorkspaceBackend(
   // Refetch full workspace data after backend update
   const { fetchWorkspaceApi } = await import("./workspace");
   return fetchWorkspaceApi(workspaceId);
+}
+
+/**
+ * Update a repo's default_branch within a workspace. Returns the refreshed
+ * workspace data wrapped by the server in WorkspaceResponse.
+ */
+export async function updateRepoDefaultBranch(
+  workspaceId: string,
+  repoName: string,
+  branch: string,
+): Promise<WorkspaceData> {
+  const response = await patch<
+    { success: true; data: WorkspaceData } | { success: false; error: string }
+  >(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/repos/${encodeURIComponent(repoName)}/default-branch`,
+    { branch },
+  );
+  if (!response.success) {
+    throw new ApiError(0, response.error);
+  }
+  return response.data;
 }

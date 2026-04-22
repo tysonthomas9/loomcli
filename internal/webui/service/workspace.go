@@ -72,4 +72,11 @@ type WorkspaceService interface {
 	// Caller must pre-validate the backend name (isValidBackend).
 	// Returns refreshed workspace data.
 	PatchWorkspaceBackend(ctx context.Context, wsID string, backend string) (*ops.WorkspaceData, error)
+
+	// PatchRepoDefaultBranch updates the default_branch for a repo within a
+	// workspace. Caller must pre-validate the branch name.
+	// Returns ErrNotFound if the workspace UUID or repo name is unknown.
+	// Returns ErrValidation if branch is empty.
+	// Returns refreshed workspace data.
+	PatchRepoDefaultBranch(ctx context.Context, wsID, repoName, branch string) (*ops.WorkspaceData, error)
 }

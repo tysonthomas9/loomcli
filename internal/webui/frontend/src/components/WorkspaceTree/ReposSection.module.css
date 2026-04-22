@@ -51,3 +51,33 @@
   font-family: monospace;
   white-space: nowrap;
 }
+
+.branchEditable {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.branchEditable:hover {
+  text-decoration: underline;
+  color: var(--color-text-primary);
+}
+
+.branchInput {
+  font-size: 0.75rem;
+  font-family: monospace;
+  color: var(--color-text-primary);
+  background: var(--color-bg-secondary, transparent);
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  padding: 0.0625rem 0.25rem;
+  width: 7rem;
+  outline: none;
+}
+
+.branchInput:focus {
+  border-color: var(--color-accent, var(--color-text-primary));
+}

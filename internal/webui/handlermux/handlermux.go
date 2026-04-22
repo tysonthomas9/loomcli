@@ -79,6 +79,9 @@ func HandleWorkspaceRename(svc service.WorkspaceService) http.HandlerFunc {
 func HandleWorkspaceBackendPatch(svc service.WorkspaceService) http.HandlerFunc {
 	return workspace.HandleWorkspaceBackendPatch(svc)
 }
+func HandleRepoDefaultBranchPatch(svc service.WorkspaceService) http.HandlerFunc {
+	return workspace.HandleRepoDefaultBranchPatch(svc)
+}
 func HandleActiveWorkspace(svc service.WorkspaceService) http.HandlerFunc {
 	return workspace.HandleActiveWorkspace(svc)
 }

@@ -298,6 +298,23 @@ export interface paths {
     patch: operations["patchWorkspaceBackend"];
     trace?: never;
   };
+  "/api/workspaces/{ws}/repos/{repo}/default-branch": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /** Set default (integration) branch for a repo in a workspace */
+    patch: operations["patchRepoDefaultBranch"];
+    trace?: never;
+  };
   "/api/workspaces/{ws}/daemon/status": {
     parameters: {
       query?: never;
@@ -2230,6 +2247,10 @@ export interface components {
     WorkspaceBackendPatchRequest: {
       backend: string;
     };
+    RepoDefaultBranchPatchRequest: {
+      /** @description New default (integration) branch for the repo */
+      branch: string;
+    };
     BackendConfigResponse: {
       success: boolean;
       data?: {
@@ -3371,6 +3392,53 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["MessageResponse"];
+        };
+      };
+    };
+  };
+  patchRepoDefaultBranch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Repo name as declared in workspace config */
+        repo: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["RepoDefaultBranchPatchRequest"];
+      };
+    };
+    responses: {
+      /** @description Updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MessageResponse"];
+        };
+      };
+      /** @description Invalid branch or missing field */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Workspace or repo not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
         };
       };
     };

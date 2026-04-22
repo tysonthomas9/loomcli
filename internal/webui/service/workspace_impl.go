@@ -423,6 +423,60 @@ func (s *workspaceServiceImpl) PatchWorkspaceBackend(_ context.Context, wsID str
 	return s.refreshWorkspaceData()
 }
 
+func (s *workspaceServiceImpl) PatchRepoDefaultBranch(_ context.Context, wsID, repoName, branch string) (*ops.WorkspaceData, error) {
+	if branch == "" {
+		return nil, ErrValidation("branch is required")
+	}
+	if repoName == "" {
+		return nil, ErrValidation("repo name is required")
+	}
+
+	dir := loomConfigDir()
+	unlock, lockErr := configlock.ConfigLock(dir)
+	if lockErr != nil {
+		return nil, ErrInternal("failed to acquire config lock", lockErr)
+	}
+
+	cfg, err := loadLoomConfigForRepoBranchUnlocked()
+	if err != nil {
+		unlock()
+		return nil, ErrInternal("failed to load config", err)
+	}
+	if cfg == nil {
+		unlock()
+		return nil, ErrNotFound("no config found")
+	}
+
+	wsName, ws, found := resolveWorkspaceNameByIDForRepoBranch(cfg, wsID)
+	if !found {
+		unlock()
+		return nil, ErrNotFound(fmt.Sprintf("workspace with ID %q not found", wsID))
+	}
+
+	repoIdx := -1
+	for i := range ws.Repos {
+		if ws.Repos[i].Name == repoName {
+			repoIdx = i
+			break
+		}
+	}
+	if repoIdx == -1 {
+		unlock()
+		return nil, ErrNotFound(fmt.Sprintf("repo %q not found in workspace %q", repoName, wsName))
+	}
+
+	ws.Repos[repoIdx].DefaultBranch = branch
+	cfg.Workspaces[wsName] = ws
+
+	if err := saveLoomConfigForRepoBranchUnlocked(cfg); err != nil {
+		unlock()
+		return nil, ErrInternal("failed to save config", err)
+	}
+	unlock() // Release before refreshWorkspaceData which also acquires the lock
+
+	return s.refreshWorkspaceData()
+}
+
 func poolStatsFromDaemon(d daemon.PoolStats) PoolStats {
 	return PoolStats{
 		Size:      d.Size,

@@ -502,6 +502,44 @@ paths:
               schema:
                 $ref: "#/components/schemas/MessageResponse"
 
+  /api/workspaces/{ws}/repos/{repo}/default-branch:
+    patch:
+      operationId: patchRepoDefaultBranch
+      tags: [workspaces]
+      summary: Set default (integration) branch for a repo in a workspace
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: repo
+          in: path
+          required: true
+          schema: { type: string }
+          description: Repo name as declared in workspace config
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RepoDefaultBranchPatchRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "400":
+          description: Invalid branch or missing field
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Workspace or repo not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/workspaces/{ws}/daemon/status:
     get:
       operationId: getWorkspaceDaemonStatus
@@ -3874,6 +3912,14 @@ components:
       properties:
         backend:
           type: string
+
+    RepoDefaultBranchPatchRequest:
+      type: object
+      required: [branch]
+      properties:
+        branch:
+          type: string
+          description: New default (integration) branch for the repo
 
     # ── Config Schemas ──────────────────────────────────────────────────
     BackendConfigResponse:

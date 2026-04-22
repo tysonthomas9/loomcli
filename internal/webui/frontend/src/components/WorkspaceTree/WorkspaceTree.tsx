@@ -11,6 +11,7 @@ import { useStore } from "zustand";
 import { useWorkspaceContext, useAgentStoreInstance } from "@/hooks";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
 import { ErrorDisplay } from "@/components/ErrorDisplay";
+import { updateRepoDefaultBranch } from "@/hooks/api";
 
 import { WorkspaceSelectorBar } from "./WorkspaceSelectorBar";
 import { AgentSection } from "./AgentSection";
@@ -76,7 +77,21 @@ export function WorkspaceTree({
     error,
     connectionState: wsConnectionState,
     retryNow,
+    refetch,
   } = useWorkspaceContext();
+
+  const handleDefaultBranchChange = useCallback(
+    (repoName: string, newBranch: string) => {
+      if (!workspaceId) return;
+      updateRepoDefaultBranch(workspaceId, repoName, newBranch)
+        .then(() => refetch())
+        .catch((err) => {
+          console.error("Failed to update default branch", err);
+          refetch();
+        });
+    },
+    [workspaceId, refetch],
+  );
 
   // Load initial collapsed state from scoped localStorage
   const [isCollapsed, setIsCollapsed] = useState(() => {
@@ -197,7 +212,11 @@ export function WorkspaceTree({
           <RunningSection onSelect={onTreeSelect} />
 
           {/* Static repo inventory */}
-          <ReposSection repos={repos} />
+          <ReposSection
+            repos={repos}
+            workspaceId={workspaceId}
+            onDefaultBranchChange={handleDefaultBranchChange}
+          />
         </div>
       )}
 
