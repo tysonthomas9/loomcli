@@ -342,7 +342,7 @@ describe("databaseHooks: email domain restriction", () => {
     assert.ok(hook, "user.create.before hook should exist");
 
     await assert.rejects(
-      () => hook({ email: "attacker@evil.com", emailVerified: true }),
+      () => hook({ email: "attacker@evil.com", emailVerified: true }, null),
       (err: Error & { body?: { message?: string } }) => {
         const msg = err.body?.message ?? err.message;
         assert.ok(msg.includes("restricted"), `expected 'restricted' in: ${msg}`);
@@ -358,7 +358,7 @@ describe("databaseHooks: email domain restriction", () => {
     const hook = auth.options.databaseHooks?.user?.create?.before;
 
     await assert.rejects(
-      () => hook({ email: "nodomain", emailVerified: true }),
+      () => hook({ email: "nodomain", emailVerified: true }, null),
       (err: Error & { body?: { message?: string } }) => {
         const msg = err.body?.message ?? err.message;
         assert.ok(msg.includes("restricted"), `expected 'restricted' in: ${msg}`);
@@ -373,7 +373,7 @@ describe("databaseHooks: email domain restriction", () => {
     const hook = auth.options.databaseHooks?.user?.create?.before;
 
     // Should succeed — domain comparison lowercases both sides
-    const result = await hook({ email: "user@example.com", emailVerified: true });
+    const result = await hook({ email: "user@example.com", emailVerified: true }, null);
     assert.ok(result?.data, "should return { data: user }");
     assert.equal(result.data.email, "user@example.com");
   });
@@ -383,7 +383,7 @@ describe("databaseHooks: email domain restriction", () => {
     const { auth } = await importAuthFresh();
     const hook = auth.options.databaseHooks?.user?.create?.before;
 
-    const result = await hook({ email: "user@anything.org", emailVerified: true });
+    const result = await hook({ email: "user@anything.org", emailVerified: true }, null);
     assert.ok(result?.data, "should return { data: user }");
   });
 
@@ -392,7 +392,7 @@ describe("databaseHooks: email domain restriction", () => {
     const { auth } = await importAuthFresh();
     const hook = auth.options.databaseHooks?.user?.create?.before;
 
-    const result = await hook({ email: "alice@corp.io", emailVerified: true });
+    const result = await hook({ email: "alice@corp.io", emailVerified: true }, null);
     assert.ok(result?.data, "should return { data: user }");
     assert.equal(result.data.email, "alice@corp.io");
   });
@@ -407,14 +407,41 @@ describe("databaseHooks: unverified email rejection", () => {
     mock.restoreAll();
   });
 
-  it("rejects user with emailVerified === false", async () => {
+  // OAuth context mocks BetterAuth's GenericEndpointContext. Only `path` is
+  // consulted by the hook; the path template is "/callback/:id" during an
+  // OAuth callback, so any "/callback/..." string triggers the OAuth branch.
+  const oauthContext = { path: "/callback/github" };
+  const emailSignupContext = { path: "/sign-up/email" };
+
+  it("rejects generic-oauth signup with emailVerified === false", async () => {
+    setupMocks({ ALLOWED_EMAIL_DOMAINS: [] });
+    const { auth } = await importAuthFresh();
+    const hook = auth.options.databaseHooks?.user?.create?.before;
+
+    // The generic-oauth plugin uses "/oauth2/callback/:providerId" rather
+    // than "/callback/:id". Both paths must trigger the OAuth branch.
+    await assert.rejects(
+      () =>
+        hook(
+          { email: "user@example.com", emailVerified: false },
+          { path: "/oauth2/callback/okta" },
+        ),
+      (err: Error & { body?: { message?: string } }) => {
+        const msg = err.body?.message ?? err.message;
+        assert.ok(msg.includes("verified"), `expected 'verified' in error: ${msg}`);
+        return true;
+      },
+    );
+  });
+
+  it("rejects OAuth signup with emailVerified === false", async () => {
     setupMocks({ ALLOWED_EMAIL_DOMAINS: [] });
     const { auth } = await importAuthFresh();
     const hook = auth.options.databaseHooks?.user?.create?.before;
     assert.ok(hook, "user.create.before hook should exist");
 
     await assert.rejects(
-      () => hook({ email: "user@example.com", emailVerified: false }),
+      () => hook({ email: "user@example.com", emailVerified: false }, oauthContext),
       (err: Error & { body?: { message?: string } }) => {
         const msg = err.body?.message ?? err.message;
         assert.ok(
@@ -426,32 +453,79 @@ describe("databaseHooks: unverified email rejection", () => {
     );
   });
 
-  it("allows user with emailVerified === true", async () => {
+  it("allows OAuth signup with emailVerified === true", async () => {
     setupMocks({ ALLOWED_EMAIL_DOMAINS: [] });
     const { auth } = await importAuthFresh();
     const hook = auth.options.databaseHooks?.user?.create?.before;
 
-    const result = await hook({ email: "user@example.com", emailVerified: true });
+    const result = await hook(
+      { email: "user@example.com", emailVerified: true },
+      oauthContext,
+    );
     assert.ok(result?.data, "should return { data: user }");
   });
 
-  it("allows user when emailVerified is undefined (not explicitly false)", async () => {
+  it("rejects OAuth signup when emailVerified is undefined (provider didn't vouch)", async () => {
     setupMocks({ ALLOWED_EMAIL_DOMAINS: [] });
     const { auth } = await importAuthFresh();
     const hook = auth.options.databaseHooks?.user?.create?.before;
 
-    // emailVerified undefined !== false, so it should pass
-    const result = await hook({ email: "user@example.com" });
+    // During OAuth, undefined !== true, so defense-in-depth rejects.
+    await assert.rejects(
+      () => hook({ email: "user@example.com" }, oauthContext),
+      (err: Error & { body?: { message?: string } }) => {
+        const msg = err.body?.message ?? err.message;
+        assert.ok(
+          msg.includes("verified"),
+          `expected 'verified' in error: ${msg}`,
+        );
+        return true;
+      },
+    );
+  });
+
+  it("allows email/password signup with emailVerified === false", async () => {
+    setupMocks({ ALLOWED_EMAIL_DOMAINS: [] });
+    const { auth } = await importAuthFresh();
+    const hook = auth.options.databaseHooks?.user?.create?.before;
+
+    // Email/password signups start unverified by design.
+    const result = await hook(
+      { email: "user@example.com", emailVerified: false },
+      emailSignupContext,
+    );
     assert.ok(result?.data, "should return { data: user }");
   });
 
-  it("domain check runs before emailVerified check (disallowed domain + unverified)", async () => {
+  it("allows email/password signup when emailVerified is undefined", async () => {
+    setupMocks({ ALLOWED_EMAIL_DOMAINS: [] });
+    const { auth } = await importAuthFresh();
+    const hook = auth.options.databaseHooks?.user?.create?.before;
+
+    const result = await hook({ email: "user@example.com" }, emailSignupContext);
+    assert.ok(result?.data, "should return { data: user }");
+  });
+
+  it("allows unverified signup when context is null (fallback safe)", async () => {
+    setupMocks({ ALLOWED_EMAIL_DOMAINS: [] });
+    const { auth } = await importAuthFresh();
+    const hook = auth.options.databaseHooks?.user?.create?.before;
+
+    // Null context means we can't determine the flow — default to allow.
+    const result = await hook(
+      { email: "user@example.com", emailVerified: false },
+      null,
+    );
+    assert.ok(result?.data, "should return { data: user }");
+  });
+
+  it("domain check runs before emailVerified check (disallowed domain + unverified OAuth)", async () => {
     setupMocks({ ALLOWED_EMAIL_DOMAINS: ["example.com"] });
     const { auth } = await importAuthFresh();
     const hook = auth.options.databaseHooks?.user?.create?.before;
 
     await assert.rejects(
-      () => hook({ email: "user@evil.com", emailVerified: false }),
+      () => hook({ email: "user@evil.com", emailVerified: false }, oauthContext),
       (err: Error & { body?: { message?: string } }) => {
         const msg = err.body?.message ?? err.message;
         // The domain check fires first, so the error should be about domain restriction

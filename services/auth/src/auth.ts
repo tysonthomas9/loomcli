@@ -100,7 +100,7 @@ export const auth = betterAuth({
   databaseHooks: {
     user: {
       create: {
-        before: async (user) => {
+        before: async (user, context) => {
           const email = user.email as string;
 
           // SECURITY: Email domain restriction.
@@ -120,9 +120,18 @@ export const auth = betterAuth({
 
           // SECURITY: Defense-in-depth — reject unverified emails from
           // OAuth providers. Email/password signups start unverified by
-          // design (no OAuth provider to vouch), so only block when an
-          // OAuth provider explicitly reports email_verified=false.
-          const isOAuthSignup = "providerId" in user || "accountId" in user;
+          // design (no OAuth provider to vouch), so only block when the
+          // call comes from an OAuth callback endpoint. The hook's
+          // context.path is the endpoint template: "/callback/:id" for
+          // built-in social providers (github, google) and
+          // "/oauth2/callback/:providerId" for the generic-oauth plugin.
+          // "/sign-up/email" is the password-signup route. When context
+          // is null we cannot determine the flow, so we default to
+          // allowing (the domain check above already ran).
+          const path = context?.path;
+          const isOAuthSignup =
+            path?.startsWith("/callback/") === true ||
+            path?.startsWith("/oauth2/callback/") === true;
           if (isOAuthSignup && user.emailVerified !== true) {
             throw new APIError("FORBIDDEN", {
               message:
