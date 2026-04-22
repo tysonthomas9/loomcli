@@ -1,0 +1,28 @@
+{
+  "id": "crud_create_show",
+  "title": "Create an issue and read it back",
+  "description": "MVP smoke fixture. Creates an issue with minimal params on both backends, captures the assigned id via ${issue_id}, then shows the issue and diffs every projected field.",
+  "tags": ["crud", "create", "show", "mvp"],
+  "steps": [
+    {
+      "id": "step_01",
+      "description": "Create a basic issue with title + priority + type",
+      "method": "issue.create",
+      "params": {
+        "title": "Parity smoke",
+        "priority": 2,
+        "type": "task",
+        "owner": "parity-harness",
+        "actor": "parity-harness"
+      }
+    },
+    {
+      "id": "step_02",
+      "description": "Show the issue just created — verifies round-trip",
+      "method": "issue.show",
+      "params": {
+        "id": "${issue_id}"
+      }
+    }
+  ]
+}

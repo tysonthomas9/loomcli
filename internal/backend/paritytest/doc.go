@@ -31,4 +31,27 @@
 //
 // Build tag: this package compiles only under -tags parity. It is excluded
 // from default builds and the standard `go test ./...` run.
+//
+// # MVP Scope + Known Limitations
+//
+// This package currently runs ONE fixture (crud_create_show) end-to-end.
+// The first implementation (loomcli-7w9tc.4 + .5) landed the scaffolding:
+// fixture loader, subprocess spawn helpers (bd daemon + fleet-db binary
+// with embedded miniredis), a minimal fleet-db HTTP adapter
+// (see fleetadapter.go for why loomcli's FleetBackend cannot target
+// fleet-db directly), and a diff engine.
+//
+// Only five methods are dispatched today — issue.create and issue.show in
+// the runner, Create + Get in the fleet adapter. Adding a fixture that
+// exercises more surface (list, close, update, comment, dep) requires:
+//  1. Extending DualRunner.executeStep with a new case
+//  2. Extending fleetDBAdapter with a real implementation (currently
+//     returns backend.ErrNotImplemented for unimplemented methods)
+//  3. Writing the fixture JSON file under testdata/fixtures/
+//
+// Fields known to diverge by design (created_at, updated_at, id) are
+// excluded from diff output in runner.go:diffMaps. Normalization rules
+// for other drift (e.g., source_repo populated by bd but empty on
+// fleet-db) should be tracked as contract drift entries or waivers —
+// not added to the ignore list — once the waiver plumbing lands.
 package paritytest

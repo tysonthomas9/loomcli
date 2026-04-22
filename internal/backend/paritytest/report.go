@@ -146,7 +146,7 @@ func (r *Report) WriteJSON(path string) error {
 		return err
 	}
 	tmp := path + ".tmp"
-	f, err := os.Create(tmp)
+	f, err := os.Create(tmp) // #nosec G304 — path is a caller-supplied report destination
 	if err != nil {
 		return err
 	}
