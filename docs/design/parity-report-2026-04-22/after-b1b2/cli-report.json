@@ -1,0 +1,427 @@
+{
+  "version": 1,
+  "generated_at": "2026-04-22T19:31:50.20676895Z",
+  "contract_version": "1.0.0",
+  "mode": "dual_run",
+  "beads_available": true,
+  "summary": {
+    "fixtures_run": 15,
+    "steps_executed": 62,
+    "total_comparisons": 26,
+    "diffs_found": 26,
+    "unapproved_diffs": 26,
+    "waived_diffs": 0,
+    "normalized_diffs": 0,
+    "expired_waivers": 0
+  },
+  "verdict": "fail",
+  "fixtures": [
+    {
+      "fixture_id": "cli_create_basic",
+      "title": "Create issue with --title --priority --type",
+      "diffs": null,
+      "verdict": "pass"
+    },
+    {
+      "fixture_id": "cli_create_full_flags",
+      "title": "Create with description, owner, assignee, labels",
+      "diffs": [
+        {
+          "fixture_id": "cli_create_full_flags",
+          "step_id": "step_01",
+          "method": "bd --json create --title full flags --description a thorough description --owner parity-harness --assignee alice --labels bug,urgent --type bug --priority 1 | fdb -json create -title full flags -descr...",
+          "field": "labels",
+          "drift_tag": "strict",
+          "fleet_db": [
+            "bug",
+            "urgent"
+          ],
+          "verdict": "fail"
+        }
+      ],
+      "verdict": "fail"
+    },
+    {
+      "fixture_id": "cli_create_with_parent",
+      "title": "Create parent epic + child task with --parent",
+      "diffs": null,
+      "verdict": "pass"
+    },
+    {
+      "fixture_id": "cli_show",
+      "title": "Show issue details via JSON",
+      "diffs": null,
+      "verdict": "pass"
+    },
+    {
+      "fixture_id": "cli_list_filters",
+      "title": "List with --status / --type / --assignee / --limit filters",
+      "diffs": null,
+      "verdict": "pass"
+    },
+    {
+      "fixture_id": "cli_update_fields",
+      "title": "Update title / priority / description",
+      "diffs": null,
+      "verdict": "pass"
+    },
+    {
+      "fixture_id": "cli_label_add_remove",
+      "title": "Add and remove labels",
+      "diffs": [
+        {
+          "fixture_id": "cli_label_add_remove",
+          "step_id": "step_02",
+          "method": "bd update 001-612 --add-label frontend | fdb label add PARITY-10 frontend",
+          "field": "_stdout_text",
+          "drift_tag": "text",
+          "fleet_db": "✓ added label \"frontend\" to PARITY-10",
+          "beads": "✓ Updated issue: 001-612",
+          "verdict": "fail"
+        },
+        {
+          "fixture_id": "cli_label_add_remove",
+          "step_id": "step_03",
+          "method": "bd update 001-612 --add-label urgent | fdb label add PARITY-10 urgent",
+          "field": "_stdout_text",
+          "drift_tag": "text",
+          "fleet_db": "✓ added label \"urgent\" to PARITY-10",
+          "beads": "✓ Updated issue: 001-612",
+          "verdict": "fail"
+        },
+        {
+          "fixture_id": "cli_label_add_remove",
+          "step_id": "step_04",
+          "method": "bd update 001-612 --remove-label frontend | fdb label remove PARITY-10 frontend",
+          "field": "_stdout_text",
+          "drift_tag": "text",
+          "fleet_db": "✓ removed label \"frontend\" from PARITY-10",
+          "beads": "✓ Updated issue: 001-612",
+          "verdict": "fail"
+        }
+      ],
+      "verdict": "fail"
+    },
+    {
+      "fixture_id": "cli_close_reopen",
+      "title": "Close with --reason, show, reopen",
+      "diffs": [
+        {
+          "fixture_id": "cli_close_reopen",
+          "step_id": "step_02",
+          "method": "bd close 001-450 --reason done via parity | fdb close PARITY-11 -reason done via parity",
+          "field": "_stdout_text",
+          "drift_tag": "text",
+          "fleet_db": "✓ closed 1 issue(s)",
+          "beads": "✓ Closed 001-450: done via parity",
+          "verdict": "fail"
+        },
+        {
+          "fixture_id": "cli_close_reopen",
+          "step_id": "step_04",
+          "method": "bd reopen 001-450 | fdb reopen PARITY-11",
+          "field": "_stdout_text",
+          "drift_tag": "text",
+          "fleet_db": "✓ reopened PARITY-11",
+          "beads": "↻ Reopened 001-450",
+          "verdict": "fail"
+        }
+      ],
+      "verdict": "fail"
+    },
+    {
+      "fixture_id": "cli_ready",
+      "title": "ready queue output",
+      "diffs": [
+        {
+          "fixture_id": "cli_ready",
+          "step_id": "step_ready",
+          "method": "bd --json ready --limit 10 | fdb -json ready -limit 10",
+          "field": "_result_count",
+          "drift_tag": "strict",
+          "fleet_db": 8,
+          "beads": 10,
+          "verdict": "fail"
+        },
+        {
+          "fixture_id": "cli_ready",
+          "step_id": "step_ready_priority_filter",
+          "method": "bd --json ready --priority 1 --limit 10 | fdb -json ready -priority 1 -limit 10",
+          "field": "_result_count",
+          "drift_tag": "strict",
+          "fleet_db": 2,
+          "beads": 5,
+          "verdict": "fail"
+        }
+      ],
+      "verdict": "fail"
+    },
+    {
+      "fixture_id": "cli_blocked",
+      "title": "Add a blocking dep then check blocked queue",
+      "diffs": [
+        {
+          "fixture_id": "cli_blocked",
+          "step_id": "dep_add",
+          "method": "bd dep add 001-1o5 001-3ag | fdb dep add PARITY-15 PARITY-14",
+          "field": "_stdout_text",
+          "drift_tag": "text",
+          "fleet_db": "✓ added blocks dependency: PARITY-15 → PARITY-14",
+          "beads": "✓ Added dependency: 001-1o5 depends on 001-3ag (blocks)",
+          "verdict": "fail"
+        },
+        {
+          "fixture_id": "cli_blocked",
+          "step_id": "step_blocked",
+          "method": "bd --json blocked | fdb -json blocked",
+          "field": "owner",
+          "drift_tag": "strict",
+          "fleet_db": "parity-harness",
+          "verdict": "fail"
+        }
+      ],
+      "verdict": "fail"
+    },
+    {
+      "fixture_id": "cli_stats",
+      "title": "Aggregate stats snapshot",
+      "diffs": [
+        {
+          "fixture_id": "cli_stats",
+          "step_id": "close_one",
+          "method": "bd close 001-q9s --reason seed for stats | fdb close PARITY-17 -reason seed for stats",
+          "field": "_stdout_text",
+          "drift_tag": "text",
+          "fleet_db": "✓ closed 1 issue(s)",
+          "beads": "✓ Closed 001-q9s: seed for stats",
+          "verdict": "fail"
+        },
+        {
+          "fixture_id": "cli_stats",
+          "step_id": "step_stats",
+          "method": "bd --json status | fdb -json stats",
+          "field": "by_priority",
+          "drift_tag": "strict",
+          "fleet_db": {
+            "1": 6,
+            "2": 9,
+            "3": 3
+          },
+          "verdict": "fail"
+        },
+        {
+          "fixture_id": "cli_stats",
+          "step_id": "step_stats",
+          "method": "bd --json status | fdb -json stats",
+          "field": "by_status",
+          "drift_tag": "strict",
+          "fleet_db": {
+            "closed": 1,
+            "open": 17
+          },
+          "verdict": "fail"
+        },
+        {
+          "fixture_id": "cli_stats",
+          "step_id": "step_stats",
+          "method": "bd --json status | fdb -json stats",
+          "field": "by_type",
+          "drift_tag": "strict",
+          "fleet_db": {
+            "bug": 3,
+            "epic": 1,
+            "task": 14
+          },
+          "verdict": "fail"
+        },
+        {
+          "fixture_id": "cli_stats",
+          "step_id": "step_stats",
+          "method": "bd --json status | fdb -json stats",
+          "field": "summary",
+          "drift_tag": "strict",
+          "fleet_db": null,
+          "beads": {
+            "average_lead_time_hours": 0.00001722201704978943,
+            "blocked_issues": 1,
+            "closed_issues": 1,
+            "deferred_issues": 0,
+            "epics_eligible_for_closure": 0,
+            "in_progress_issues": 0,
+            "open_issues": 17,
+            "pinned_issues": 0,
+            "ready_issues": 16,
+            "tombstone_issues": 0,
+            "total_issues": 18
+          },
+          "verdict": "fail"
+        },
+        {
+          "fixture_id": "cli_stats",
+          "step_id": "step_stats",
+          "method": "bd --json status | fdb -json stats",
+          "field": "total",
+          "drift_tag": "strict",
+          "fleet_db": 18,
+          "verdict": "fail"
+        }
+      ],
+      "verdict": "fail"
+    },
+    {
+      "fixture_id": "cli_dep_add_remove",
+      "title": "Add and remove dependency",
+      "diffs": [
+        {
+          "fixture_id": "cli_dep_add_remove",
+          "step_id": "dep_add",
+          "method": "bd dep add 001-8cs 001-7gm | fdb dep add PARITY-19 PARITY-20",
+          "field": "_stdout_text",
+          "drift_tag": "text",
+          "fleet_db": "✓ added blocks dependency: PARITY-19 → PARITY-20",
+          "beads": "✓ Added dependency: 001-8cs depends on 001-7gm (blocks)",
+          "verdict": "fail"
+        },
+        {
+          "fixture_id": "cli_dep_add_remove",
+          "step_id": "dep_remove",
+          "method": "bd dep remove 001-8cs 001-7gm | fdb dep remove PARITY-19 PARITY-20",
+          "field": "_stdout_text",
+          "drift_tag": "text",
+          "fleet_db": "✓ removed blocks dependency: PARITY-19 → PARITY-20",
+          "beads": "✓ Removed dependency: 001-8cs no longer depends on 001-7gm",
+          "verdict": "fail"
+        },
+        {
+          "fixture_id": "cli_dep_add_remove",
+          "step_id": "blocked_after_remove",
+          "method": "bd --json blocked | fdb -json blocked",
+          "field": "owner",
+          "drift_tag": "strict",
+          "fleet_db": "parity-harness",
+          "verdict": "fail"
+        }
+      ],
+      "verdict": "fail"
+    },
+    {
+      "fixture_id": "cli_comments_add_list",
+      "title": "Add comments and list them",
+      "diffs": [
+        {
+          "fixture_id": "cli_comments_add_list",
+          "step_id": "comment_add_1",
+          "method": "bd comments add 001-6in first comment | fdb comment add PARITY-21 -body first comment",
+          "field": "_stdout_text",
+          "drift_tag": "text",
+          "fleet_db": "--- #PARITY-21 by parity-harness (2026-04-22 19:31) ---\nfirst comment",
+          "beads": "Comment added to 001-6in",
+          "verdict": "fail"
+        },
+        {
+          "fixture_id": "cli_comments_add_list",
+          "step_id": "comment_add_2",
+          "method": "bd comments add 001-6in second comment | fdb comment add PARITY-21 -body second comment",
+          "field": "_stdout_text",
+          "drift_tag": "text",
+          "fleet_db": "--- #PARITY-21 by parity-harness (2026-04-22 19:31) ---\nsecond comment",
+          "beads": "Comment added to 001-6in",
+          "verdict": "fail"
+        }
+      ],
+      "verdict": "fail"
+    },
+    {
+      "fixture_id": "cli_search",
+      "title": "Search issues by text query",
+      "diffs": null,
+      "verdict": "pass"
+    },
+    {
+      "fixture_id": "cli_count",
+      "title": "Count with grouping flags",
+      "diffs": [
+        {
+          "fixture_id": "cli_count",
+          "step_id": "count_all",
+          "method": "bd --json count | fdb -json count",
+          "field": "count",
+          "drift_tag": "strict",
+          "fleet_db": null,
+          "beads": 26,
+          "verdict": "fail"
+        },
+        {
+          "fixture_id": "cli_count",
+          "step_id": "count_all",
+          "method": "bd --json count | fdb -json count",
+          "field": "groups",
+          "drift_tag": "strict",
+          "fleet_db": {},
+          "verdict": "fail"
+        },
+        {
+          "fixture_id": "cli_count",
+          "step_id": "count_all",
+          "method": "bd --json count | fdb -json count",
+          "field": "total",
+          "drift_tag": "strict",
+          "fleet_db": 26,
+          "verdict": "fail"
+        },
+        {
+          "fixture_id": "cli_count",
+          "step_id": "count_by_type",
+          "method": "bd --json count --by-type | fdb -json count -by-type",
+          "field": "groups",
+          "drift_tag": "strict",
+          "fleet_db": {
+            "bug": 5,
+            "epic": 1,
+            "task": 20
+          },
+          "beads": [
+            {
+              "count": 5,
+              "group": "bug"
+            },
+            {
+              "count": 20,
+              "group": "task"
+            },
+            {
+              "count": 1,
+              "group": "epic"
+            }
+          ],
+          "verdict": "fail"
+        },
+        {
+          "fixture_id": "cli_count",
+          "step_id": "count_by_status",
+          "method": "bd --json count --by-status | fdb -json count -by-status",
+          "field": "groups",
+          "drift_tag": "strict",
+          "fleet_db": {
+            "closed": 1,
+            "open": 25
+          },
+          "beads": [
+            {
+              "count": 25,
+              "group": "open"
+            },
+            {
+              "count": 1,
+              "group": "closed"
+            }
+          ],
+          "verdict": "fail"
+        }
+      ],
+      "verdict": "fail"
+    }
+  ],
+  "waivers_used": null,
+  "warnings": null
+}

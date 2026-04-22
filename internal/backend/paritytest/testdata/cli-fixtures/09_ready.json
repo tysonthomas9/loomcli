@@ -1,0 +1,30 @@
+{
+  "id": "cli_ready",
+  "title": "ready queue output",
+  "description": "Seed a small graph, then query the ready queue on both CLIs. Exercises the work-selection semantics. Counts are diffed; specific IDs drift because each backend assigns its own.",
+  "tags": ["cli", "ready", "queue"],
+  "steps": [
+    {
+      "id": "seed_a",
+      "bd_args":  ["--json", "create", "--title", "ready A (no deps)", "--type", "task", "--priority", "1"],
+      "fdb_args": ["-json", "create", "-title", "ready A (no deps)", "-type", "task", "-priority", "1"]
+    },
+    {
+      "id": "seed_b",
+      "bd_args":  ["--json", "create", "--title", "ready B (no deps)", "--type", "task", "--priority", "2"],
+      "fdb_args": ["-json", "create", "-title", "ready B (no deps)", "-type", "task", "-priority", "2"]
+    },
+    {
+      "id": "step_ready",
+      "description": "List ready issues",
+      "bd_args":  ["--json", "ready", "--limit", "10"],
+      "fdb_args": ["-json", "ready", "-limit", "10"]
+    },
+    {
+      "id": "step_ready_priority_filter",
+      "description": "Ready with priority filter",
+      "bd_args":  ["--json", "ready", "--priority", "1", "--limit", "10"],
+      "fdb_args": ["-json", "ready", "-priority", "1", "-limit", "10"]
+    }
+  ]
+}

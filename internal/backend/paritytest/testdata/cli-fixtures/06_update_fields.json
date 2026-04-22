@@ -1,0 +1,26 @@
+{
+  "id": "cli_update_fields",
+  "title": "Update title / priority / description",
+  "description": "Create an issue with starter fields, update three of them, and verify via show. Exercises the partial-update path.",
+  "tags": ["cli", "update", "partial"],
+  "steps": [
+    {
+      "id": "step_01",
+      "bd_args":  ["--json", "create", "--title", "Initial title", "--description", "Initial description", "--type", "task", "--priority", "2"],
+      "fdb_args": ["-json", "create", "-title", "Initial title", "-description", "Initial description", "-type", "task", "-priority", "2"],
+      "capture_vars": {"issue_id": "$.id"}
+    },
+    {
+      "id": "step_02",
+      "description": "Partial update",
+      "bd_args":  ["--json", "update", "${issue_id}", "--title", "Updated title", "--description", "Updated description", "--priority", "1"],
+      "fdb_args": ["-json", "update", "${issue_id}", "-title", "Updated title", "-description", "Updated description", "-priority", "1"]
+    },
+    {
+      "id": "step_03",
+      "description": "Show — verify updated fields persist",
+      "bd_args":  ["--json", "show", "${issue_id}"],
+      "fdb_args": ["-json", "show", "${issue_id}"]
+    }
+  ]
+}

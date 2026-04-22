@@ -1,0 +1,37 @@
+{
+  "id": "cli_stats",
+  "title": "Aggregate stats snapshot",
+  "description": "Create issues with varied statuses (open, closed), then run stats on both CLIs. bd calls it `bd status`, fdb calls it `fdb stats` — both accept --json and should emit aggregate counts. Schemas differ substantially; operators should inspect raw stdout via _stdout_json diff.",
+  "tags": ["cli", "stats", "aggregate"],
+  "steps": [
+    {
+      "id": "seed_01",
+      "bd_args":  ["--json", "create", "--title", "s1", "--type", "task", "--priority", "2"],
+      "fdb_args": ["-json", "create", "-title", "s1", "-type", "task", "-priority", "2"],
+      "capture_vars": {"id_open_1": "$.id"}
+    },
+    {
+      "id": "seed_02",
+      "bd_args":  ["--json", "create", "--title", "s2", "--type", "bug", "--priority", "1"],
+      "fdb_args": ["-json", "create", "-title", "s2", "-type", "bug", "-priority", "1"],
+      "capture_vars": {"id_to_close": "$.id"}
+    },
+    {
+      "id": "seed_03",
+      "bd_args":  ["--json", "create", "--title", "s3", "--type", "task", "--priority", "3"],
+      "fdb_args": ["-json", "create", "-title", "s3", "-type", "task", "-priority", "3"]
+    },
+    {
+      "id": "close_one",
+      "description": "Close one issue so stats see status=closed",
+      "bd_args":  ["close", "${id_to_close}", "--reason", "seed for stats"],
+      "fdb_args": ["close", "${id_to_close}", "-reason", "seed for stats"]
+    },
+    {
+      "id": "step_stats",
+      "description": "Query stats — bd calls it 'status' (alias of stats), fdb is just 'stats'",
+      "bd_args":  ["--json", "status"],
+      "fdb_args": ["-json", "stats"]
+    }
+  ]
+}

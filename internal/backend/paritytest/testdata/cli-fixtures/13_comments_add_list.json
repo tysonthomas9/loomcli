@@ -1,0 +1,32 @@
+{
+  "id": "cli_comments_add_list",
+  "title": "Add comments and list them",
+  "description": "Create an issue, add two comments, list them — the count and ordering should match. Note the subcommand name: bd plural (`bd comments`), fdb singular (`fdb comment`).",
+  "tags": ["cli", "comments"],
+  "steps": [
+    {
+      "id": "seed_issue",
+      "bd_args":  ["--json", "create", "--title", "comments probe", "--type", "task", "--priority", "2"],
+      "fdb_args": ["-json", "create", "-title", "comments probe", "-type", "task", "-priority", "2"],
+      "capture_vars": {"issue_id": "$.id"}
+    },
+    {
+      "id": "comment_add_1",
+      "description": "First comment (bd: positional, fdb: --body)",
+      "bd_args":  ["comments", "add", "${issue_id}", "first comment"],
+      "fdb_args": ["comment", "add", "${issue_id}", "-body", "first comment"]
+    },
+    {
+      "id": "comment_add_2",
+      "description": "Second comment",
+      "bd_args":  ["comments", "add", "${issue_id}", "second comment"],
+      "fdb_args": ["comment", "add", "${issue_id}", "-body", "second comment"]
+    },
+    {
+      "id": "comment_list",
+      "description": "List comments",
+      "bd_args":  ["--json", "comments", "${issue_id}"],
+      "fdb_args": ["-json", "comment", "list", "${issue_id}"]
+    }
+  ]
+}

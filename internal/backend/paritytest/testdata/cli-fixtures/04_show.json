@@ -1,0 +1,21 @@
+{
+  "id": "cli_show",
+  "title": "Show issue details via JSON",
+  "description": "Create an issue then show it. Exercises the fundamental read path on both CLIs.",
+  "tags": ["cli", "show", "read"],
+  "steps": [
+    {
+      "id": "step_01",
+      "description": "Create a plain issue",
+      "bd_args":  ["--json", "create", "--title", "show probe", "--type", "task", "--priority", "3"],
+      "fdb_args": ["-json", "create", "-title", "show probe", "-type", "task", "-priority", "3"],
+      "capture_vars": {"issue_id": "$.id"}
+    },
+    {
+      "id": "step_02",
+      "description": "Show via ID",
+      "bd_args":  ["--json", "show", "${issue_id}"],
+      "fdb_args": ["-json", "show", "${issue_id}"]
+    }
+  ]
+}
