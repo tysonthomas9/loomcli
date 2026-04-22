@@ -23,6 +23,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/observability"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/opsimpl"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
+	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	webuiapp "github.com/tysonthomas9/loomcli/internal/webui/app"
 )
@@ -164,10 +165,8 @@ func runServe(cmd *cobra.Command, args []string) {
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
-	daemonWeStarted := ensureIssueBackend()
-	if daemonWeStarted {
-		defer stopIssueBackend()
-	}
+	initialWSID := workspacemgr.ResolveInitialWorkspaceID()
+	ensureInitialWorkspaceDaemon(ctx, initialWSID)
 
 	fleetState := resolveFleetState(ctx)
 
@@ -218,28 +217,44 @@ func checkTmuxInstalled() {
 	}
 }
 
-func ensureIssueBackend() bool {
+// ensureInitialWorkspaceDaemon synchronously starts the bd daemon for the
+// initial workspace before the web server constructs its connection pool.
+// NewConnectionPoolAutoDiscover runs synchronously in server_app.go before
+// DaemonStartupFn fires in a goroutine, so the initial workspace's daemon
+// must be up beforehand or the circuit breaker opens on first-load.
+// Other workspaces start asynchronously via DaemonStartupFn.
+//
+// Resolution order for the workspace path: resolver → CWD. On resolver failure
+// a warn log is emitted; on CWD failure the pool initializes without a live
+// daemon (endpoints will return circuit-breaker errors until one comes up).
+func ensureInitialWorkspaceDaemon(ctx context.Context, initialWSID string) {
 	if serveNoDaemon {
-		return false
+		return
 	}
-	started, err := cli.EnsureIssueBackendRunning(cli.GetDeps(nil), 5*time.Second)
-	if err != nil {
-		log.Printf("Warning: failed to auto-start issue backend: %v (endpoints may return incomplete data)", err)
-		return false
+	wsPath := ""
+	if initialWSID != "" {
+		if info, err := workspacemgr.BuildWorkspaceInfoForID(initialWSID); err == nil && info != nil {
+			wsPath = info.Path
+		} else if err != nil {
+			slog.Warn("could not resolve initial workspace for daemon pre-start; falling back to CWD",
+				"workspace_id", initialWSID, "err", err)
+		}
 	}
-	if started {
-		log.Printf("Auto-started issue backend daemon")
-		return true
+	if wsPath == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			slog.Warn("could not determine CWD for daemon pre-start; pool will initialize without a running daemon",
+				"err", err)
+			return
+		}
+		wsPath = cwd
 	}
-	log.Printf("Issue backend daemon already running")
-	return false
-}
-
-func stopIssueBackend() {
-	result := cli.GetDeps(nil).Exec.Run(cli.GetBeadsDir(), "bd", "daemon", "stop")
-	if result.Err != nil {
-		log.Printf("Warning: failed to stop issue backend daemon: %v", result.Err)
+	if err := workspace.EnsureDaemonForWorkspace(cli.GetDeps(nil), ctx, wsPath, 5*time.Second); err != nil {
+		slog.Warn("failed to auto-start initial workspace daemon; endpoints may return incomplete data",
+			"path", wsPath, "err", err)
+		return
 	}
+	slog.Info("initial workspace daemon ready", "path", wsPath)
 }
 
 // fleetState bundles fleet-related configuration resolved during startup.
@@ -327,12 +342,8 @@ func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimp
 		SocketPath:             serveWebUISocket,
 		APIOnly:                apiOnly,
 		MonitorHandlers:        monitorHandlers,
-		AgentControlFn:         daemonwire.BuildAgentControlFn(),
-		DaemonSupervisorFn:     daemonwire.BuildDaemonSupervisorFn(),
-		DaemonConfigFn:         daemonwire.BuildDaemonConfigFn(),
 		LoadDaemonSupervisorFn: daemonwire.LoadDaemonSupervisor,
 		LoadDaemonConfigFn:     daemonwire.LoadDaemonConfigRaw,
-		AgentQueueFn:           daemonwire.BuildAgentQueueFn(),
 		TerminalCmd:            fmt.Sprintf("loom lead --backend %s", backend),
 		HSTSEnabled:            serveHSTS,
 		ExtAuthURL:             serveAuthURL,

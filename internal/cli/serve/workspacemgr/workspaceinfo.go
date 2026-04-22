@@ -149,6 +149,12 @@ func buildWorkspaceSummaries(cfg *config.LoomConfig, activeWS string) []ops.Work
 
 // BuildWorkspaceInfoForID loads workspace topology for a specific workspace UUID.
 // Resolves the UUID to a config name, then delegates to BuildWorkspaceInfoForName.
+//
+// Falls back to matching the targetID against the workspace map key (name) when
+// no UUID matches. This keeps pre-UUID configs working — ResolveInitialWorkspaceID
+// returns filepath.Base(cwd) for legacy single-workspace setups, and that basename
+// should resolve to the config entry whose map key matches. A warn log fires on
+// the name-match path so the pending migration is visible.
 func BuildWorkspaceInfoForID(targetID string) (*ops.WorkspaceData, error) {
 	cfg, err := config.LoadConfig()
 	if err != nil {
@@ -162,6 +168,11 @@ func BuildWorkspaceInfoForID(targetID string) (*ops.WorkspaceData, error) {
 		if ws.ID == targetID {
 			return BuildWorkspaceInfoForName(name)
 		}
+	}
+	if _, ok := cfg.Workspaces[targetID]; ok {
+		slog.Warn("workspace resolved by name (pre-UUID config); run `loom workspace migrate` to assign a stable ID",
+			"name", targetID)
+		return BuildWorkspaceInfoForName(targetID)
 	}
 	return nil, fmt.Errorf("workspace not found: %s", targetID)
 }

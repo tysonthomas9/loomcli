@@ -128,11 +128,24 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	if config.SocketPath != "" {
 		rawPool, poolErr = appinfra.NewConnectionPool(config.SocketPath, config.PoolSize)
 	} else {
-		cwd, err := appinfra.GetCwd()
-		if err != nil {
-			logger.Warn("failed to get current directory", "err", err)
-		} else {
-			rawPool, poolErr = appinfra.NewConnectionPoolAutoDiscover(cwd, config.PoolSize)
+		discoverDir := ""
+		if config.WorkspaceDaemonResolver != nil && app.initialWorkspaceID != "" {
+			if paths, rErr := config.WorkspaceDaemonResolver(app.initialWorkspaceID); rErr == nil && paths != nil {
+				discoverDir = paths.WorkDir
+			} else if rErr != nil {
+				logger.Warn("initial workspace resolver failed; falling back to CWD for pool discovery",
+					"workspace_id", app.initialWorkspaceID, "err", rErr)
+			}
+		}
+		if discoverDir == "" {
+			if cwd, err := appinfra.GetCwd(); err != nil {
+				logger.Warn("failed to get current directory", "err", err)
+			} else {
+				discoverDir = cwd
+			}
+		}
+		if discoverDir != "" {
+			rawPool, poolErr = appinfra.NewConnectionPoolAutoDiscover(discoverDir, config.PoolSize)
 		}
 	}
 
@@ -287,7 +300,12 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	if app.pool != nil {
 		appinfra.SetPrebuiltPool(registeredHooks.BeadsPool, app.initialWorkspaceID, app.pool)
 		var initialWSPath string
-		if config.WorkspaceListFn != nil {
+		if config.WorkspaceDaemonResolver != nil && app.initialWorkspaceID != "" {
+			if paths, rErr := config.WorkspaceDaemonResolver(app.initialWorkspaceID); rErr == nil && paths != nil {
+				initialWSPath = paths.WorkDir
+			}
+		}
+		if initialWSPath == "" && config.WorkspaceListFn != nil {
 			if wsMap, listErr := config.WorkspaceListFn(); listErr == nil {
 				initialWSPath = wsMap[app.initialWorkspaceID]
 			}

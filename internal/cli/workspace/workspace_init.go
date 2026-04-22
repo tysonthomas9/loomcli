@@ -364,9 +364,11 @@ func EnsureCurrentProjectRegistered() {
 }
 
 // EnsureDaemonsForAllWorkspaces starts bd daemons for all configured workspaces
-// that have a .beads/ directory. Runs staggered (200ms between each) to avoid
-// thundering-herd on system resources. Skips the CWD workspace (already started
-// by EnsureIssueBackendRunning in serve.go). Best-effort: errors are logged, not fatal.
+// that have a .beads/ directory, EXCEPT the initial (CWD) workspace which is
+// started synchronously before the web server by ensureInitialWorkspaceDaemon
+// in serve.go — starting it here would race the pre-start check. Runs staggered
+// (200ms between each) to avoid thundering-herd on system resources.
+// Best-effort: errors are logged, not fatal.
 //
 // When onReady is non-nil, it is called with the workspace UUID after each
 // daemon is confirmed running. This is used to defer SSE subscriber activation
@@ -388,7 +390,12 @@ func EnsureDaemonsForAllWorkspaces(deps *cli.Deps, ctx context.Context, onReady 
 		if ctx.Err() != nil {
 			return
 		}
-		// Skip the CWD workspace — its daemon is managed by the main serve loop.
+		// Skip the CWD workspace — the initial workspace's daemon is pre-started
+		// synchronously in serve.go's ensureInitialWorkspaceDaemon, before the web
+		// server runs. When the initial workspace resolves to a non-CWD path
+		// (DefaultWorkspaceID set to another workspace), this skip misses it and
+		// the async loop also calls bd daemon start; that is harmless because
+		// `bd daemon start` is idempotent (already-running is a non-error here).
 		if ws.Path == cwd {
 			continue
 		}
