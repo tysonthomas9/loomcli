@@ -22,13 +22,29 @@
  *   *                                      → NotFound (404 page)
  */
 
-import { createBrowserRouter, Navigate } from "react-router-dom";
+import { createBrowserRouter, replace } from "react-router-dom";
 
 import App from "@/App";
 import { WorkspaceLayout } from "@/components/WorkspaceLayout";
 import { RedirectToWorkspace } from "@/components/RedirectToWorkspace";
 import { NotFound } from "@/components/NotFound";
 import { KeyboardShortcutProvider } from "@/hooks";
+
+// Loader used by the index and catch-all routes under /ws/:workspaceId.
+// Returning an absolute `replace(...)` bypasses React Router v7's
+// splat-relative path resolution, which otherwise causes `<Navigate to="kanban">`
+// to compound `/kanban` segments on every render. `replace` (not `redirect`)
+// preserves the existing semantics of the element-based `<Navigate replace>`:
+// the bad URL does not get left in the back-history stack.
+export function redirectToKanbanLoader({
+  params,
+}: {
+  params: { workspaceId?: string };
+}) {
+  const id = params.workspaceId;
+  if (!id) return replace("/");
+  return replace(`/ws/${id}/kanban`);
+}
 
 const devRoutes = import.meta.env.DEV
   ? [
@@ -86,7 +102,7 @@ const devRoutes = import.meta.env.DEV
  * solely for URL matching; the Component renders null.
  */
 const viewRoutes = [
-  { index: true, element: <Navigate to="kanban" replace /> },
+  { index: true, loader: redirectToKanbanLoader },
   {
     path: "kanban",
     children: [
@@ -200,7 +216,7 @@ const viewRoutes = [
         Component: m.IssueDetailPage,
       })),
   },
-  { path: "*", element: <Navigate to="kanban" replace /> },
+  { path: "*", loader: redirectToKanbanLoader },
 ];
 
 export const router = createBrowserRouter([

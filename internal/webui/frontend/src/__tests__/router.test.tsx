@@ -69,7 +69,7 @@ vi.mock("react-router-dom", async () => {
   };
 });
 
-import { router } from "@/router";
+import { router, redirectToKanbanLoader } from "@/router";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -81,6 +81,7 @@ type RouteObject = {
   element?: React.ReactElement;
   lazy?: () => Promise<{ Component: React.ComponentType }>;
   Component?: React.ComponentType;
+  loader?: (args: { params: Record<string, string | undefined> }) => unknown;
   children?: RouteObject[];
 };
 
@@ -198,26 +199,49 @@ describe("router view routes", () => {
   });
 
   describe("index route redirects to kanban", () => {
-    it("renders a Navigate element to kanban with replace", () => {
+    it("uses the redirect loader", () => {
       const indexRoute = getViewRoutes().find((r) => r.index === true);
       expect(indexRoute).toBeDefined();
-      expect(indexRoute!.element).toBeDefined();
-
-      const element = indexRoute!.element as React.ReactElement;
-      expect(element.props.to).toBe("kanban");
-      expect(element.props.replace).toBe(true);
+      expect(indexRoute!.loader).toBe(redirectToKanbanLoader);
     });
   });
 
   describe("catch-all route redirects to kanban", () => {
-    it("renders a Navigate element to kanban with replace", () => {
+    it("uses the redirect loader", () => {
       const catchAll = findRoute("*");
-      expect(catchAll.element).toBeDefined();
-
-      const element = catchAll.element as React.ReactElement;
-      expect(element.props.to).toBe("kanban");
-      expect(element.props.replace).toBe(true);
+      expect(catchAll.loader).toBe(redirectToKanbanLoader);
     });
+  });
+});
+
+describe("redirectToKanbanLoader", () => {
+  it("returns an absolute replace redirect to /ws/<id>/kanban when workspaceId is present", () => {
+    const response = redirectToKanbanLoader({
+      params: { workspaceId: "test-ws" },
+    }) as Response;
+    expect(response).toBeInstanceOf(Response);
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toBe("/ws/test-ws/kanban");
+    // replace() sets this header so React Router uses history.replaceState,
+    // preserving the back-button semantics of the original `<Navigate replace />`.
+    expect(response.headers.get("X-Remix-Replace")).toBe("true");
+  });
+
+  it("falls back to / when workspaceId is missing", () => {
+    const response = redirectToKanbanLoader({ params: {} }) as Response;
+    expect(response).toBeInstanceOf(Response);
+    expect(response.headers.get("Location")).toBe("/");
+    expect(response.headers.get("X-Remix-Replace")).toBe("true");
+  });
+
+  it("does not construct a path that can compound on re-match", () => {
+    const response = redirectToKanbanLoader({
+      params: { workspaceId: "abc" },
+    }) as Response;
+    const location = response.headers.get("Location") ?? "";
+    // Absolute path — cannot compound under splat resolution.
+    expect(location.startsWith("/")).toBe(true);
+    expect(location).toBe("/ws/abc/kanban");
   });
 });
 
