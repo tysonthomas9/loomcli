@@ -159,6 +159,60 @@ func TestClassifyError(t *testing.T) {
 	}
 }
 
+// Regression (loomcli-7w9tc.15): rpc.Client.Execute returns BOTH a non-nil
+// resp AND a non-nil err when the daemon responds with resp.Success=false.
+// classifyError must inspect resp.Error BEFORE treating the err as a
+// transport failure — otherwise semantic errors like "issue not found"
+// get misclassified as KindUnavailable.
+func TestClassifyError_RespErrorWithWrappedErr_NotFound(t *testing.T) {
+	resp := &rpc.Response{Success: false, Error: "issue not found: bd-xyz"}
+	err := fmt.Errorf("operation failed: %s", resp.Error)
+
+	got := classifyError("Get", err, resp)
+	var be *backend.BackendError
+	if !errors.As(got, &be) {
+		t.Fatalf("classifyError() = %T, want *backend.BackendError", got)
+	}
+	if be.Kind != backend.KindNotFound {
+		t.Errorf("Kind = %q, want %q (resp.Error must win over transport-err default)",
+			be.Kind, backend.KindNotFound)
+	}
+}
+
+// Regression: bd's id_parser emits "no issue found matching %q" — which
+// does NOT contain the substring "not found". The classifier must still
+// recognize it as KindNotFound.
+func TestClassifyError_NoIssueFoundMatching_IsNotFound(t *testing.T) {
+	resp := &rpc.Response{Success: false, Error: `no issue found matching "bogus"`}
+	err := fmt.Errorf("operation failed: %s", resp.Error)
+
+	got := classifyError("Get", err, resp)
+	var be *backend.BackendError
+	if !errors.As(got, &be) {
+		t.Fatalf("classifyError() = %T, want *backend.BackendError", got)
+	}
+	if be.Kind != backend.KindNotFound {
+		t.Errorf("Kind = %q, want %q", be.Kind, backend.KindNotFound)
+	}
+}
+
+// Cancel/deadline still take precedence over resp.Success=false so that
+// explicit cancellation stays visible even if the daemon also happened to
+// return an error response on the way out.
+func TestClassifyError_CanceledBeatsRespSuccessFalse(t *testing.T) {
+	resp := &rpc.Response{Success: false, Error: "something went wrong"}
+	err := fmt.Errorf("wrapped: %w", context.Canceled)
+
+	got := classifyError("Get", err, resp)
+	var be *backend.BackendError
+	if !errors.As(got, &be) {
+		t.Fatalf("classifyError() = %T, want *backend.BackendError", got)
+	}
+	if be.Kind != backend.KindCanceled {
+		t.Errorf("Kind = %q, want %q", be.Kind, backend.KindCanceled)
+	}
+}
+
 func TestClassifyError_TransportErrorPreservesWrappedCause(t *testing.T) {
 	cause := errors.New("dial unix: no such file")
 	got := classifyError("Get", cause, nil)

@@ -373,6 +373,18 @@ func (b *BeadsBackend) UndeferIssue(_ context.Context, id string) error {
 }
 
 // Close marks an issue as closed and returns the closed issue with unblocked issues.
+//
+// Response-shape handling: the beads daemon returns two different JSON shapes
+// from the OpClose handler depending on the SuggestNext flag:
+//
+//   - SuggestNext=true: {"closed": <Issue>, "unblocked": [<Issue>, ...]}
+//     (rpc.CloseResult wrapper)
+//   - SuggestNext=false: <Issue> (bare issue object, top-level)
+//
+// Unmarshaling the bare-issue shape into rpc.CloseResult silently succeeds
+// with Closed=nil, which caused downstream callers to see null title/status/
+// priority/etc (loomcli-7w9tc.14). We disambiguate by probing for the
+// "closed" key — if absent, we unmarshal the payload as a bare *types.Issue.
 func (b *BeadsBackend) Close(_ context.Context, id string, params backend.CloseParams) (*backend.CloseResult, error) {
 	rpcArgs := &rpc.CloseArgs{
 		ID:          id,
@@ -387,11 +399,11 @@ func (b *BeadsBackend) Close(_ context.Context, id string, params backend.CloseP
 	if err != nil {
 		return nil, err
 	}
-	var cr rpc.CloseResult
-	if err := json.Unmarshal(resp.Data, &cr); err != nil {
+	cr, err := parseCloseResponse(resp.Data)
+	if err != nil {
 		return nil, backend.ErrInternal("Close", "unmarshal response", err)
 	}
-	return closeResultToData(&cr), nil
+	return closeResultToData(cr), nil
 }
 
 // Delete permanently removes one or more issues.

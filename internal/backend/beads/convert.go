@@ -1,6 +1,7 @@
 package beads
 
 import (
+	"encoding/json"
 	"strconv"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -267,6 +268,44 @@ func closeResultToData(cr *rpc.CloseResult) *backend.CloseResult {
 		}
 	}
 	return result
+}
+
+// parseCloseResponse decodes the bd daemon's OpClose response payload, which
+// comes in two shapes: either a rpc.CloseResult wrapper (when SuggestNext is
+// true) or a bare types.Issue (when SuggestNext is false; see
+// third_party/beads/internal/rpc/server_issues_epics.go handleClose). We
+// probe for the "closed" key to pick the right decoder — a bare issue has no
+// such key at the top level.
+func parseCloseResponse(data []byte) (*rpc.CloseResult, error) {
+	if len(data) == 0 {
+		return &rpc.CloseResult{}, nil
+	}
+	// Cheap key-probe: unmarshal into a RawMessage map. If "closed" is
+	// present, the wrapper decoder applies; otherwise the payload is a bare
+	// issue.
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(data, &probe); err != nil {
+		// Not a JSON object — fall through to wrapper decode which will
+		// return its own error.
+		var cr rpc.CloseResult
+		if uerr := json.Unmarshal(data, &cr); uerr != nil {
+			return nil, uerr
+		}
+		return &cr, nil
+	}
+	if _, hasClosed := probe["closed"]; hasClosed {
+		var cr rpc.CloseResult
+		if err := json.Unmarshal(data, &cr); err != nil {
+			return nil, err
+		}
+		return &cr, nil
+	}
+	// Bare issue shape — promote into CloseResult.Closed with no unblocked.
+	var issue types.Issue
+	if err := json.Unmarshal(data, &issue); err != nil {
+		return nil, err
+	}
+	return &rpc.CloseResult{Closed: &issue}, nil
 }
 
 // mutationToData converts rpc.MutationEvent to backend.MutationData.

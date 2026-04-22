@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -2014,6 +2015,229 @@ func TestUndeferIssue_RPCError(t *testing.T) {
 	err := b.UndeferIssue(context.Background(), "bd-1")
 	if err == nil {
 		t.Fatal("expected transport error")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Regression: Close returns fully-populated fields when bd emits the bare-
+// issue shape (loomcli-7w9tc.14). bd's daemon returns two distinct JSON
+// shapes from the OpClose handler depending on SuggestNext:
+//   - SuggestNext=true  → {"closed": <Issue>, "unblocked": [...]} (wrapper)
+//   - SuggestNext=false → <Issue>                                  (bare)
+// Prior to the fix, the adapter unconditionally unmarshaled into
+// rpc.CloseResult, which silently succeeded with Closed=nil for the bare
+// shape and produced null title/status/priority/owner/type in the return
+// value.
+// ---------------------------------------------------------------------------
+
+func TestClose_BareIssueShape_PopulatesAllFields(t *testing.T) {
+	now := time.Now().Truncate(time.Second).UTC()
+	closedAt := now
+
+	// Bare issue payload — exactly what bd's handleClose marshals when
+	// SuggestNext is false. Note: no "closed" key at top level.
+	bare := &types.Issue{
+		ID:              "bd-42",
+		Title:           "Lifecycle fixture",
+		Description:     "body",
+		Status:          types.StatusClosed,
+		Priority:        2,
+		IssueType:       types.TypeTask,
+		Owner:           "parity-harness",
+		Assignee:        "alice",
+		Labels:          []string{"backend", "parity"},
+		SourceRepo:      ".",
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		ClosedAt:        &closedAt,
+		CloseReason:     "parity close test",
+		ClosedBySession: "session-xyz",
+	}
+
+	mc := &mockClient{
+		CloseIssueFn: func(args *rpc.CloseArgs) (*rpc.Response, error) {
+			if args.ID != "bd-42" {
+				t.Errorf("CloseArgs.ID = %q, want %q", args.ID, "bd-42")
+			}
+			if args.SuggestNext {
+				t.Error("test assumes SuggestNext=false (bare-issue shape)")
+			}
+			return successResponse(t, bare), nil
+		},
+	}
+
+	b := New(mc)
+	got, err := b.Close(context.Background(), "bd-42", backend.CloseParams{
+		Reason: "parity close test",
+	})
+	if err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if got == nil || got.Closed == nil {
+		t.Fatalf("Close() returned nil Closed; want populated issue")
+	}
+	c := got.Closed
+	if c.ID != "bd-42" {
+		t.Errorf("Closed.ID = %q, want %q", c.ID, "bd-42")
+	}
+	if c.Title != "Lifecycle fixture" {
+		t.Errorf("Closed.Title = %q, want %q", c.Title, "Lifecycle fixture")
+	}
+	if c.Status != "closed" {
+		t.Errorf("Closed.Status = %q, want %q", c.Status, "closed")
+	}
+	if c.Priority != 2 {
+		t.Errorf("Closed.Priority = %d, want 2", c.Priority)
+	}
+	if c.IssueType != "task" {
+		t.Errorf("Closed.IssueType = %q, want %q", c.IssueType, "task")
+	}
+	if c.Owner != "parity-harness" {
+		t.Errorf("Closed.Owner = %q, want %q", c.Owner, "parity-harness")
+	}
+	if c.Assignee != "alice" {
+		t.Errorf("Closed.Assignee = %q, want %q", c.Assignee, "alice")
+	}
+	if c.SourceRepo != "." {
+		t.Errorf("Closed.SourceRepo = %q, want %q", c.SourceRepo, ".")
+	}
+	if len(c.Labels) != 2 || c.Labels[0] != "backend" || c.Labels[1] != "parity" {
+		t.Errorf("Closed.Labels = %v, want [backend parity]", c.Labels)
+	}
+	if !c.CreatedAt.Equal(now) {
+		t.Errorf("Closed.CreatedAt = %v, want %v", c.CreatedAt, now)
+	}
+	if !c.UpdatedAt.Equal(now) {
+		t.Errorf("Closed.UpdatedAt = %v, want %v", c.UpdatedAt, now)
+	}
+	if len(got.Unblocked) != 0 {
+		t.Errorf("Unblocked = %v, want empty (bare-issue shape carries no unblocked)", got.Unblocked)
+	}
+}
+
+// Regression: the wrapper shape (SuggestNext=true) still works after the
+// bare-shape fix. Guard against accidentally breaking the wrapper path.
+func TestClose_WrapperShape_PopulatesAllFields(t *testing.T) {
+	now := time.Now().Truncate(time.Second).UTC()
+
+	mc := &mockClient{
+		CloseIssueFn: func(args *rpc.CloseArgs) (*rpc.Response, error) {
+			if !args.SuggestNext {
+				t.Error("test assumes SuggestNext=true (wrapper shape)")
+			}
+			cr := rpc.CloseResult{
+				Closed: &types.Issue{
+					ID:        "bd-42",
+					Title:     "Lifecycle fixture",
+					Status:    types.StatusClosed,
+					Priority:  1,
+					IssueType: types.TypeTask,
+					Owner:     "parity-harness",
+					CreatedAt: now,
+					UpdatedAt: now,
+				},
+				Unblocked: []*types.Issue{
+					{
+						ID: "bd-43", Title: "Unblocked child",
+						Status: types.StatusOpen, Priority: 2,
+						CreatedAt: now, UpdatedAt: now,
+					},
+				},
+			}
+			return successResponse(t, cr), nil
+		},
+	}
+
+	b := New(mc)
+	got, err := b.Close(context.Background(), "bd-42", backend.CloseParams{
+		Reason:      "done",
+		SuggestNext: true,
+	})
+	if err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if got == nil || got.Closed == nil {
+		t.Fatalf("Close() returned nil Closed in wrapper path")
+	}
+	if got.Closed.ID != "bd-42" || got.Closed.Title != "Lifecycle fixture" {
+		t.Errorf("Closed = {id=%q title=%q}, want {id=bd-42 title=Lifecycle fixture}", got.Closed.ID, got.Closed.Title)
+	}
+	if got.Closed.Status != "closed" {
+		t.Errorf("Closed.Status = %q, want closed", got.Closed.Status)
+	}
+	if got.Closed.Priority != 1 {
+		t.Errorf("Closed.Priority = %d, want 1", got.Closed.Priority)
+	}
+	if got.Closed.Owner != "parity-harness" {
+		t.Errorf("Closed.Owner = %q, want parity-harness", got.Closed.Owner)
+	}
+	if len(got.Unblocked) != 1 || got.Unblocked[0].ID != "bd-43" {
+		t.Errorf("Unblocked = %v, want 1 entry (bd-43)", got.Unblocked)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Regression: Get on a nonexistent ID returns KindNotFound (loomcli-7w9tc.15).
+// bd's RPC Client wraps resp.Error into a non-nil err while ALSO returning
+// the resp — classifyError previously saw err!=nil and short-circuited to
+// KindUnavailable, bypassing the resp.Error string match. Fixture
+// crud_show_not_found asserts the error kind is "not_found".
+// ---------------------------------------------------------------------------
+
+func TestGet_NotFound_ClassifiesAsKindNotFound(t *testing.T) {
+	// Exact error shape emitted by bd when the ID doesn't resolve:
+	// handleShow returns Response{Success: false, Error: "issue not found: <id>"}
+	// and rpc.Client.Execute additionally wraps the message as an err.
+	mc := &mockClient{
+		ShowFn: func(args *rpc.ShowArgs) (*rpc.Response, error) {
+			resp := &rpc.Response{
+				Success: false,
+				Error:   "issue not found: " + args.ID,
+			}
+			return resp, fmt.Errorf("operation failed: %s", resp.Error)
+		},
+	}
+
+	b := New(mc)
+	_, err := b.Get(context.Background(), "does-not-exist")
+	if err == nil {
+		t.Fatal("Get() on missing id should return an error")
+	}
+	var be *backend.BackendError
+	if !errors.As(err, &be) {
+		t.Fatalf("error is %T, want *backend.BackendError", err)
+	}
+	if be.Kind != backend.KindNotFound {
+		t.Errorf("error Kind = %q, want %q (unavailable misclassification regressed)",
+			be.Kind, backend.KindNotFound)
+	}
+}
+
+// Regression: bd's id_parser emits "no issue found matching %q" when a
+// partial/short ID fails to resolve. The classifier must recognize this
+// phrasing (which does NOT contain "not found" as a substring) as KindNotFound.
+func TestGet_NoIssueFoundMatching_ClassifiesAsKindNotFound(t *testing.T) {
+	mc := &mockClient{
+		ShowFn: func(args *rpc.ShowArgs) (*rpc.Response, error) {
+			resp := &rpc.Response{
+				Success: false,
+				Error:   fmt.Sprintf("no issue found matching %q", args.ID),
+			}
+			return resp, fmt.Errorf("operation failed: %s", resp.Error)
+		},
+	}
+
+	b := New(mc)
+	_, err := b.Get(context.Background(), "bogus")
+	if err == nil {
+		t.Fatal("Get() on missing partial id should return an error")
+	}
+	var be *backend.BackendError
+	if !errors.As(err, &be) {
+		t.Fatalf("error is %T, want *backend.BackendError", err)
+	}
+	if be.Kind != backend.KindNotFound {
+		t.Errorf("error Kind = %q, want %q", be.Kind, backend.KindNotFound)
 	}
 }
 
