@@ -330,6 +330,98 @@ func startSubscriptionMockServer(t *testing.T, countHandler func(req rpc.Request
 	return startSubscriptionMockServerRaw(t, handler)
 }
 
+// startSubscriptionMockServerWithDrop behaves like startSubscriptionMockServer but
+// closes the connection mid-response for any request whose Operation+callIndex
+// matches dropCond. callIndex is 1-based across all ops on the same connection.
+// Closing the conn without writing a response causes the client's ReadBytes('\n')
+// to return EOF — simulating a transport-level failure that leaves the read
+// buffer in an unsafe state (ref: loomcli-67meg).
+//
+// countHandler is invoked for "count" operations that are NOT being dropped.
+// listHandler is invoked for "list" operations that are NOT being dropped.
+// Both may be nil; the defaults return Success: true with an empty body.
+func startSubscriptionMockServerWithDrop(
+	t *testing.T,
+	dropCond func(op string, callIndex int) bool,
+	countHandler func(req rpc.Request) rpc.Response,
+	listHandler func(req rpc.Request) rpc.Response,
+) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "sub-test-drop-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	socketPath := filepath.Join(dir, "bd.sock")
+
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("failed to create mock server: %v", err)
+	}
+
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return // listener closed
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				callIndex := 0
+				reader := bufio.NewReader(c)
+				for {
+					line, err := reader.ReadBytes('\n')
+					if err != nil {
+						return
+					}
+					var req rpc.Request
+					if err := json.Unmarshal(line, &req); err != nil {
+						return
+					}
+					callIndex++
+					if dropCond != nil && dropCond(req.Operation, callIndex) {
+						// Close without writing a response — triggers EOF on the client.
+						return
+					}
+					var resp rpc.Response
+					switch req.Operation {
+					case "health":
+						healthData, _ := json.Marshal(rpc.HealthResponse{
+							Status: "healthy", Version: "0.0.0", Compatible: true,
+						})
+						resp = rpc.Response{Success: true, Data: healthData}
+					case "ping":
+						resp = rpc.Response{Success: true}
+					case "count":
+						if countHandler != nil {
+							resp = countHandler(req)
+						} else {
+							countData, _ := json.Marshal(struct {
+								Count int64 `json:"count"`
+							}{Count: 0})
+							resp = rpc.Response{Success: true, Data: countData}
+						}
+					case "list":
+						if listHandler != nil {
+							resp = listHandler(req)
+						} else {
+							resp = rpc.Response{Success: true, Data: []byte("[]")}
+						}
+					default:
+						resp = rpc.Response{Success: false, Error: "unknown operation: " + req.Operation}
+					}
+					respJSON, _ := json.Marshal(resp)
+					respJSON = append(respJSON, '\n')
+					c.Write(respJSON)
+				}
+			}(conn)
+		}
+	}()
+
+	t.Cleanup(func() { listener.Close() })
+	return socketPath
+}
+
 // startSubscriptionMockServerRaw creates a Unix socket server that handles RPC requests.
 // The handler receives the decoded rpc.Request and returns an rpc.Response.
 // Returns the socket path. The server and temp dir are cleaned up via t.Cleanup.
@@ -379,10 +471,14 @@ func startSubscriptionMockServerRaw(t *testing.T, handler func(req rpc.Request) 
 }
 
 // subscriptionMockPool implements daemon.Pool for testing, using a real Unix socket mock server.
+// Counts put/discard calls so tests can verify the connection-pool discipline
+// in pollDBChanges (ref: loomcli-67meg).
 type subscriptionMockPool struct {
-	socketPath string
-	clients    []*rpc.Client
-	mu         sync.Mutex
+	socketPath   string
+	clients      []*rpc.Client
+	mu           sync.Mutex
+	putCount     int32
+	discardCount int32
 }
 
 func newSubscriptionMockPool(socketPath string) *subscriptionMockPool {
@@ -405,6 +501,7 @@ func (p *subscriptionMockPool) Get(ctx context.Context) (*rpc.Client, error) {
 }
 
 func (p *subscriptionMockPool) Put(client *rpc.Client) {
+	atomic.AddInt32(&p.putCount, 1)
 	if client != nil {
 		client.Close()
 	}
@@ -413,9 +510,20 @@ func (p *subscriptionMockPool) Put(client *rpc.Client) {
 func (p *subscriptionMockPool) PutAfterError(client *rpc.Client) { p.Put(client) }
 
 func (p *subscriptionMockPool) Discard(client *rpc.Client) {
+	atomic.AddInt32(&p.discardCount, 1)
 	if client != nil {
 		client.Close()
 	}
+}
+
+// PutCount returns the number of times Put was called.
+func (p *subscriptionMockPool) PutCount() int32 {
+	return atomic.LoadInt32(&p.putCount)
+}
+
+// DiscardCount returns the number of times Discard was called.
+func (p *subscriptionMockPool) DiscardCount() int32 {
+	return atomic.LoadInt32(&p.discardCount)
 }
 
 func (p *subscriptionMockPool) Stats() daemon.PoolStats {

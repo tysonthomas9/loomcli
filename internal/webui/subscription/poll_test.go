@@ -1,8 +1,12 @@
 package subscription
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"net"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1121,5 +1125,486 @@ func TestMutationPayload_PriorityField(t *testing.T) {
 
 	if decoded2.Priority != nil {
 		t.Errorf("expected nil priority when not set, got %v", decoded2.Priority)
+	}
+}
+
+// --- Tests for connection-pool discipline in pollDBChanges (loomcli-67meg) ---
+//
+// These tests verify that pollDBChanges Discards the connection on transport-level
+// failures (the connection's read buffer may hold partial bytes) but Puts on
+// clean logical failures (Success=false / JSON parse errors on fully-received
+// bodies). See subscriber.go:pollDBChanges for the invariant.
+
+// TestPollDBChanges_PutsOnAllSuccess verifies the happy path: every RPC succeeds,
+// connection returned via Put.
+func TestPollDBChanges_PutsOnAllSuccess(t *testing.T) {
+	callNumber := int32(0)
+	socketPath := startSubscriptionMockServerRaw(t, func(req rpc.Request) rpc.Response {
+		switch req.Operation {
+		case "health":
+			hd, _ := json.Marshal(rpc.HealthResponse{Status: "healthy", Version: "0.0.0", Compatible: true})
+			return rpc.Response{Success: true, Data: hd}
+		case "ping":
+			return rpc.Response{Success: true}
+		case "count":
+			n := atomic.AddInt32(&callNumber, 1)
+			if n == 1 {
+				countData, _ := json.Marshal(struct {
+					Count int64 `json:"count"`
+				}{Count: 10})
+				return rpc.Response{Success: true, Data: countData}
+			}
+			// UpdatedAfter: no updates
+			countData, _ := json.Marshal(struct {
+				Count int64 `json:"count"`
+			}{Count: 0})
+			return rpc.Response{Success: true, Data: countData}
+		default:
+			return rpc.Response{Success: false, Error: "unknown"}
+		}
+	})
+
+	pool := newSubscriptionMockPool(socketPath)
+	defer pool.Close()
+
+	hub := realtime.NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	subscriber := NewDaemonSubscriber(pool, hub)
+	subscriber.countInitialized = true
+	subscriber.lastKnownCount = 10
+	subscriber.lastPollTime = time.Now().Add(-5 * time.Second)
+
+	subscriber.pollDBChanges()
+
+	if got := pool.PutCount(); got != 1 {
+		t.Errorf("PutCount = %d, want 1 (happy path)", got)
+	}
+	if got := pool.DiscardCount(); got != 0 {
+		t.Errorf("DiscardCount = %d, want 0 (no transport error)", got)
+	}
+}
+
+// TestPollDBChanges_PutsOnCleanCountFailure verifies that Success=false on the
+// initial Count RPC Puts the connection (connection intact).
+func TestPollDBChanges_PutsOnCleanCountFailure(t *testing.T) {
+	socketPath := startSubscriptionMockServer(t, func(req rpc.Request) rpc.Response {
+		return rpc.Response{Success: false, Error: "permission denied"}
+	})
+
+	pool := newSubscriptionMockPool(socketPath)
+	defer pool.Close()
+
+	hub := realtime.NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	subscriber := NewDaemonSubscriber(pool, hub)
+	subscriber.countInitialized = true
+	subscriber.lastKnownCount = 10
+	subscriber.lastPollTime = time.Now().Add(-5 * time.Second)
+
+	subscriber.pollDBChanges()
+
+	if got := pool.PutCount(); got != 1 {
+		t.Errorf("PutCount = %d, want 1 (Success=false is a clean logical failure)", got)
+	}
+	if got := pool.DiscardCount(); got != 0 {
+		t.Errorf("DiscardCount = %d, want 0 (Success=false does not taint connection)", got)
+	}
+}
+
+// TestPollDBChanges_PutsOnParseError verifies that a sub-payload JSON parse
+// error on a fully-received response Puts the connection (the frame was read
+// cleanly, only the inner {"count": int} shape is wrong). Using a valid JSON
+// string ensures the client's top-level unmarshal succeeds so the server's
+// frame is fully consumed before our sub-payload parse fails.
+func TestPollDBChanges_PutsOnParseError(t *testing.T) {
+	socketPath := startSubscriptionMockServer(t, func(req rpc.Request) rpc.Response {
+		return rpc.Response{Success: true, Data: []byte(`"not a count object"`)}
+	})
+
+	pool := newSubscriptionMockPool(socketPath)
+	defer pool.Close()
+
+	hub := realtime.NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	subscriber := NewDaemonSubscriber(pool, hub)
+	subscriber.countInitialized = true
+	subscriber.lastKnownCount = 10
+	subscriber.lastPollTime = time.Now().Add(-5 * time.Second)
+
+	subscriber.pollDBChanges()
+
+	if got := pool.PutCount(); got != 1 {
+		t.Errorf("PutCount = %d, want 1 (parse error on received body is clean)", got)
+	}
+	if got := pool.DiscardCount(); got != 0 {
+		t.Errorf("DiscardCount = %d, want 0 (parse error does not taint connection)", got)
+	}
+}
+
+// TestPollDBChanges_DiscardsOnCountTransportError verifies that a transport-level
+// failure on the initial Count RPC Discards the connection.
+func TestPollDBChanges_DiscardsOnCountTransportError(t *testing.T) {
+	// Drop on the first count RPC (fresh connection → 1st call after health/ping).
+	// Since TryConnectWithTimeout performs health check first, callIndex for count
+	// on the same conn is 2 (health + count).
+	socketPath := startSubscriptionMockServerWithDrop(t,
+		func(op string, callIndex int) bool {
+			return op == "count"
+		},
+		nil, nil,
+	)
+
+	pool := newSubscriptionMockPool(socketPath)
+	defer pool.Close()
+
+	hub := realtime.NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	subscriber := NewDaemonSubscriber(pool, hub)
+	subscriber.countInitialized = true
+	subscriber.lastKnownCount = 10
+	subscriber.lastPollTime = time.Now().Add(-5 * time.Second)
+
+	subscriber.pollDBChanges()
+
+	if got := pool.DiscardCount(); got != 1 {
+		t.Errorf("DiscardCount = %d, want 1 (transport error must Discard)", got)
+	}
+	if got := pool.PutCount(); got != 0 {
+		t.Errorf("PutCount = %d, want 0 (transport error must not Put)", got)
+	}
+}
+
+// TestPollDBChanges_DiscardsOnUpdatedAfterTransportError verifies that when the
+// initial count succeeds but the Count(UpdatedAfter) call hits a transport
+// error, the connection is Discarded.
+func TestPollDBChanges_DiscardsOnUpdatedAfterTransportError(t *testing.T) {
+	// First count succeeds (returns same total count); second count is dropped.
+	countCalls := int32(0)
+	socketPath := startSubscriptionMockServerWithDrop(t,
+		func(op string, callIndex int) bool {
+			// Drop only the 2nd count call on this connection.
+			if op != "count" {
+				return false
+			}
+			return atomic.AddInt32(&countCalls, 1) == 2
+		},
+		func(req rpc.Request) rpc.Response {
+			countData, _ := json.Marshal(struct {
+				Count int64 `json:"count"`
+			}{Count: 10})
+			return rpc.Response{Success: true, Data: countData}
+		},
+		nil,
+	)
+
+	pool := newSubscriptionMockPool(socketPath)
+	defer pool.Close()
+
+	hub := realtime.NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	subscriber := NewDaemonSubscriber(pool, hub)
+	subscriber.countInitialized = true
+	subscriber.lastKnownCount = 10 // Same as server → triggers UpdatedAfter path
+	subscriber.lastPollTime = time.Now().Add(-5 * time.Second)
+
+	subscriber.pollDBChanges()
+
+	if got := pool.DiscardCount(); got != 1 {
+		t.Errorf("DiscardCount = %d, want 1 (UpdatedAfter transport error must Discard)", got)
+	}
+	if got := pool.PutCount(); got != 0 {
+		t.Errorf("PutCount = %d, want 0", got)
+	}
+}
+
+// TestPollDBChanges_DiscardsOnListTransportError verifies that when the count
+// succeeds but the subsequent List (fetchChangedIssues) hits a transport
+// error, the connection is Discarded.
+func TestPollDBChanges_DiscardsOnListTransportError(t *testing.T) {
+	countCalls := int32(0)
+	socketPath := startSubscriptionMockServerWithDrop(t,
+		func(op string, callIndex int) bool {
+			return op == "list"
+		},
+		func(req rpc.Request) rpc.Response {
+			n := atomic.AddInt32(&countCalls, 1)
+			if n == 1 {
+				// First count: same as lastKnownCount (triggers UpdatedAfter check)
+				countData, _ := json.Marshal(struct {
+					Count int64 `json:"count"`
+				}{Count: 10})
+				return rpc.Response{Success: true, Data: countData}
+			}
+			// UpdatedAfter: 1 updated issue (triggers fetchChangedIssues → List)
+			countData, _ := json.Marshal(struct {
+				Count int64 `json:"count"`
+			}{Count: 1})
+			return rpc.Response{Success: true, Data: countData}
+		},
+		nil,
+	)
+
+	pool := newSubscriptionMockPool(socketPath)
+	defer pool.Close()
+
+	hub := realtime.NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	subscriber := NewDaemonSubscriber(pool, hub)
+	subscriber.countInitialized = true
+	subscriber.lastKnownCount = 10
+	subscriber.lastPollTime = time.Now().Add(-5 * time.Second)
+	subscriber.knownIssues = make(map[string]knownIssueState)
+
+	subscriber.pollDBChanges()
+
+	if got := pool.DiscardCount(); got != 1 {
+		t.Errorf("DiscardCount = %d, want 1 (List transport error must Discard)", got)
+	}
+	if got := pool.PutCount(); got != 0 {
+		t.Errorf("PutCount = %d, want 0", got)
+	}
+}
+
+// TestPollDBChanges_DiscardsOnFirstPollListTransportError verifies that when
+// the subscriber is uninitialized, count succeeds, and the first-poll
+// loadKnownIssues List hits a transport error, the connection is Discarded.
+func TestPollDBChanges_DiscardsOnFirstPollListTransportError(t *testing.T) {
+	socketPath := startSubscriptionMockServerWithDrop(t,
+		func(op string, callIndex int) bool {
+			return op == "list"
+		},
+		func(req rpc.Request) rpc.Response {
+			countData, _ := json.Marshal(struct {
+				Count int64 `json:"count"`
+			}{Count: 7})
+			return rpc.Response{Success: true, Data: countData}
+		},
+		nil,
+	)
+
+	pool := newSubscriptionMockPool(socketPath)
+	defer pool.Close()
+
+	hub := realtime.NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	subscriber := NewDaemonSubscriber(pool, hub)
+	// countInitialized left false — triggers first-poll path.
+
+	subscriber.pollDBChanges()
+
+	if got := pool.DiscardCount(); got != 1 {
+		t.Errorf("DiscardCount = %d, want 1 (first-poll List transport error must Discard)", got)
+	}
+	if got := pool.PutCount(); got != 0 {
+		t.Errorf("PutCount = %d, want 0", got)
+	}
+	// State initialization still happens even when loadKnownIssues fails.
+	if !subscriber.countInitialized {
+		t.Error("countInitialized should be true after first poll even if loadKnownIssues fails")
+	}
+}
+
+// TestPollDBChanges_DiscardsOnPerRepoCountTransportError verifies that when the
+// granular-fallback path calls emitPerRepoRefreshes and a per-repo Count hits
+// a transport error, the connection is Discarded. Uses a raw mock server that
+// closes the connection when it sees a per-repo Count (SourceRepos set).
+func TestPollDBChanges_DiscardsOnPerRepoCountTransportError(t *testing.T) {
+	// Build a list response with >threshold issues to force the per-repo fallback path.
+	type simpleIssue struct {
+		ID     string `json:"id"`
+		Title  string `json:"title"`
+		Status string `json:"status"`
+	}
+	many := make([]simpleIssue, granularMutationThreshold+1)
+	for i := range many {
+		many[i] = simpleIssue{
+			ID:     "bd-" + string(rune('a'+i%26)) + string(rune('0'+i/26)),
+			Title:  "Issue",
+			Status: "open",
+		}
+	}
+	manyData, _ := json.Marshal(many)
+
+	dir, err := os.MkdirTemp("/tmp", "sub-test-perrepo-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	socketPath := filepath.Join(dir, "bd.sock")
+
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("failed to create listener: %v", err)
+	}
+	t.Cleanup(func() { listener.Close() })
+
+	countCalls := int32(0)
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				reader := bufio.NewReader(c)
+				for {
+					line, err := reader.ReadBytes('\n')
+					if err != nil {
+						return
+					}
+					var req rpc.Request
+					if err := json.Unmarshal(line, &req); err != nil {
+						return
+					}
+					var resp rpc.Response
+					switch req.Operation {
+					case "health":
+						hd, _ := json.Marshal(rpc.HealthResponse{Status: "healthy", Version: "0.0.0", Compatible: true})
+						resp = rpc.Response{Success: true, Data: hd}
+					case "ping":
+						resp = rpc.Response{Success: true}
+					case "count":
+						var args rpc.CountArgs
+						_ = json.Unmarshal(req.Args, &args)
+						if len(args.SourceRepos) > 0 {
+							// Per-repo Count — close the connection without writing
+							// to simulate a transport-level failure mid-RPC.
+							return
+						}
+						n := atomic.AddInt32(&countCalls, 1)
+						if n == 1 {
+							countData, _ := json.Marshal(struct {
+								Count int64 `json:"count"`
+							}{Count: 10})
+							resp = rpc.Response{Success: true, Data: countData}
+						} else {
+							countData, _ := json.Marshal(struct {
+								Count int64 `json:"count"`
+							}{Count: int64(granularMutationThreshold + 1)})
+							resp = rpc.Response{Success: true, Data: countData}
+						}
+					case "list":
+						var args rpc.ListArgs
+						_ = json.Unmarshal(req.Args, &args)
+						if args.Limit > 0 {
+							resp = rpc.Response{Success: true, Data: []byte("[]")}
+						} else {
+							resp = rpc.Response{Success: true, Data: manyData}
+						}
+					default:
+						resp = rpc.Response{Success: false, Error: "unknown"}
+					}
+					respJSON, _ := json.Marshal(resp)
+					respJSON = append(respJSON, '\n')
+					c.Write(respJSON)
+				}
+			}(conn)
+		}
+	}()
+
+	pool := newSubscriptionMockPool(socketPath)
+	defer pool.Close()
+
+	hub := realtime.NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	// Filtered client forces emitPerRepoRefreshes to make a per-repo Count call.
+	client := realtime.NewClient(1, 256, 0, []string{"repo-a"}, "test-ws")
+	hub.RegisterClient(client)
+	time.Sleep(50 * time.Millisecond)
+
+	subscriber := NewDaemonSubscriber(pool, hub)
+	subscriber.workspaceID = "test-ws"
+	subscriber.countInitialized = true
+	subscriber.lastKnownCount = 10
+	subscriber.lastPollTime = time.Now().Add(-5 * time.Second)
+	subscriber.knownIssues = make(map[string]knownIssueState)
+
+	subscriber.pollDBChanges()
+
+	// Drain any global refresh broadcast triggered by the fallback path.
+	drained := 0
+	for drained < 5 {
+		select {
+		case <-client.Send():
+			drained++
+		case <-time.After(100 * time.Millisecond):
+			drained = 5
+		}
+	}
+
+	if got := pool.DiscardCount(); got != 1 {
+		t.Errorf("DiscardCount = %d, want 1 (per-repo count transport error must Discard)", got)
+	}
+	if got := pool.PutCount(); got != 0 {
+		t.Errorf("PutCount = %d, want 0", got)
+	}
+}
+
+// TestPollDBChanges_DiscardsOnDeletionRefreshListTransportError verifies that on
+// the deletion-detected branch, if the follow-up loadKnownIssues List hits a
+// transport error, the connection is Discarded.
+func TestPollDBChanges_DiscardsOnDeletionRefreshListTransportError(t *testing.T) {
+	socketPath := startSubscriptionMockServerWithDrop(t,
+		func(op string, callIndex int) bool {
+			return op == "list"
+		},
+		func(req rpc.Request) rpc.Response {
+			// Count returns 5 (less than lastKnownCount 10 → deletion detected).
+			countData, _ := json.Marshal(struct {
+				Count int64 `json:"count"`
+			}{Count: 5})
+			return rpc.Response{Success: true, Data: countData}
+		},
+		nil,
+	)
+
+	pool := newSubscriptionMockPool(socketPath)
+	defer pool.Close()
+
+	hub := realtime.NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	client := realtime.NewClient(1, 64, 0, nil, "test-ws")
+	hub.RegisterClient(client)
+	time.Sleep(50 * time.Millisecond)
+
+	subscriber := NewDaemonSubscriber(pool, hub)
+	subscriber.workspaceID = "test-ws"
+	subscriber.countInitialized = true
+	subscriber.lastKnownCount = 10
+	subscriber.lastPollTime = time.Now().Add(-5 * time.Second)
+	subscriber.knownIssues = make(map[string]knownIssueState)
+
+	subscriber.pollDBChanges()
+
+	// Drain the refresh broadcast so the hub goroutine does not block.
+	select {
+	case <-client.Send():
+	case <-time.After(500 * time.Millisecond):
+	}
+
+	if got := pool.DiscardCount(); got != 1 {
+		t.Errorf("DiscardCount = %d, want 1 (deletion loadKnownIssues transport error must Discard)", got)
+	}
+	if got := pool.PutCount(); got != 0 {
+		t.Errorf("PutCount = %d, want 0", got)
 	}
 }

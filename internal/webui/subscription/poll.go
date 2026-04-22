@@ -117,21 +117,35 @@ func (s *DaemonSubscriber) updateKnownIssues(changed []changedIssue, now time.Ti
 }
 
 // fetchChangedIssues calls List with UpdatedAfter to get issues changed since lastPollTime.
-// Returns nil if the RPC call fails or the response cannot be parsed.
-func (s *DaemonSubscriber) fetchChangedIssues(client *rpc.Client, since time.Time) []changedIssue {
+//
+// Returns (issues, clientHealthy):
+//   - clientHealthy == false iff the List RPC hit a transport error and the
+//     connection's read buffer may be poisoned. The caller must Discard.
+//   - (nil, true) means "List succeeded logically but body was empty or
+//     unparseable" — the caller may fall back to a blanket refresh.
+//   - (issues, true) on the happy path.
+//
+// Note the distinction: returning nil does NOT imply an unhealthy connection.
+// Callers must check clientHealthy separately (ref: loomcli-67meg).
+func (s *DaemonSubscriber) fetchChangedIssues(client *rpc.Client, since time.Time) ([]changedIssue, bool) {
 	resp, err := client.List(&rpc.ListArgs{
 		UpdatedAfter: since.UTC().Format(time.RFC3339),
 	})
 	if err != nil {
-		slog.Error("external poll: list changed issues error", "err", err)
-		return nil
+		if resp == nil {
+			slog.Error("external poll: list changed issues transport error", "err", err)
+			return nil, false
+		}
+		// resp != nil — Success=false. Logical failure, connection intact.
+		slog.Error("external poll: list changed issues failed", "err", resp.Error)
+		return nil, true
 	}
 	if !resp.Success {
 		slog.Error("external poll: list changed issues failed", "err", resp.Error)
-		return nil
+		return nil, true
 	}
 
-	return parseChangedIssues(resp.Data)
+	return parseChangedIssues(resp.Data), true
 }
 
 // parseChangedIssues parses a List RPC response into changedIssue structs.
@@ -179,18 +193,31 @@ func (s *DaemonSubscriber) broadcastRefresh(now time.Time, totalCount int64) {
 }
 
 // loadKnownIssues builds or rebuilds the knownIssues map from the current database state.
-// Best-effort: if the List RPC fails, knownIssues is left unchanged.
+// Best-effort: if the List RPC logically fails, knownIssues is left unchanged.
+//
+// Returns clientHealthy: false only when the List RPC hit a transport error
+// (resp == nil && err != nil), indicating the caller must Discard the
+// connection. A Success=false or parse error keeps clientHealthy = true
+// because the response frame was fully received (ref: loomcli-67meg).
+//
 // Note: Limit 500 matches other callers in the codebase. For workspaces with >500 issues,
 // issues beyond this snapshot may produce spurious MutationCreate events, but the frontend
 // dedup logic in useMutationHandler handles this gracefully (treating duplicate creates as updates).
-func (s *DaemonSubscriber) loadKnownIssues(client *rpc.Client) {
+func (s *DaemonSubscriber) loadKnownIssues(client *rpc.Client) bool {
 	resp, err := client.List(&rpc.ListArgs{Limit: 500, Lightweight: true})
-	if err != nil || !resp.Success {
-		return
+	if err != nil {
+		if resp == nil {
+			return false
+		}
+		// Success=false — logical failure, connection intact.
+		return true
+	}
+	if !resp.Success {
+		return true
 	}
 	issues := parseChangedIssues(resp.Data)
 	if issues == nil {
-		return
+		return true
 	}
 	known := make(map[string]knownIssueState, len(issues))
 	for _, issue := range issues {
@@ -207,4 +234,5 @@ func (s *DaemonSubscriber) loadKnownIssues(client *rpc.Client) {
 	s.mu.Lock()
 	s.knownIssues = known
 	s.mu.Unlock()
+	return true
 }

@@ -267,6 +267,13 @@ func (s *DaemonSubscriber) externalChangeLoop() {
 // When changes are detected, it emits granular per-issue mutations instead of a
 // blanket MutationRefresh, falling back to MutationRefresh only for deletions,
 // List RPC failures, or when too many issues changed at once.
+//
+// Connection-pool discipline (ref: loomcli-67meg): rpcOK is set true only after
+// every RPC on `client` has completed at the transport level — i.e. the daemon
+// sent a full response frame. A transport-level failure (err != nil && resp == nil
+// from any client.X call) may leave unread bytes on the wire, so the connection
+// must be Discarded, not Put back. This matches the invariant documented in
+// waitForMutations (subscriber.go:178-188).
 func (s *DaemonSubscriber) pollDBChanges() {
 	ctx, cancel := context.WithTimeout(context.Background(), subscriptionAcquireTimeout)
 	defer cancel()
@@ -284,119 +291,170 @@ func (s *DaemonSubscriber) pollDBChanges() {
 		}
 	}()
 
-	totalCount, ok := s.fetchTotalCount(client)
-	if !ok {
+	totalCount, countOK, healthy := s.fetchTotalCount(client)
+	if !healthy {
+		return // Discard: transport error left bytes on the wire
+	}
+	if !countOK {
+		rpcOK = true // Clean logical failure — connection intact
 		return
 	}
-	rpcOK = true
 
 	now := time.Now()
 
 	// First poll: initialize state without broadcasting
-	if s.initPollStateIfNeeded(client, totalCount, now) {
+	firstPoll, initHealthy := s.initPollStateIfNeeded(client, totalCount, now)
+	if firstPoll {
+		rpcOK = initHealthy
 		return
 	}
 
-	changeDetected, deletionDetected, lastPollTime := s.detectExternalChanges(client, totalCount)
+	changeDetected, deletionDetected, lastPollTime, detectHealthy := s.detectExternalChanges(client, totalCount)
+	if !detectHealthy {
+		return // Discard
+	}
 
 	if !changeDetected {
 		s.mu.Lock()
 		s.lastPollTime = now
 		s.mu.Unlock()
+		rpcOK = true
 		return
 	}
 
-	s.handleExternalChanges(client, now, totalCount, lastPollTime, deletionDetected)
+	rpcOK = s.handleExternalChanges(client, now, totalCount, lastPollTime, deletionDetected)
 }
 
 // fetchTotalCount calls the Count RPC and returns the total issue count.
-// Returns (0, false) if the RPC fails or the response cannot be parsed.
-func (s *DaemonSubscriber) fetchTotalCount(client *rpc.Client) (int64, bool) {
+//
+// Returns (count, countOK, clientHealthy):
+//   - countOK == false when the logical result is unusable (RPC failure,
+//     Success=false, or JSON parse error). In these cases count is 0.
+//   - clientHealthy == false when the RPC call returned a transport error
+//     with no response frame (resp == nil && err != nil). In that state the
+//     connection's read buffer may hold partial bytes and the caller must
+//     Discard it. Parse errors of a fully-received body keep the connection
+//     healthy.
+func (s *DaemonSubscriber) fetchTotalCount(client *rpc.Client) (count int64, countOK, clientHealthy bool) {
 	resp, err := client.Count(&rpc.CountArgs{})
 	if err != nil {
-		slog.Error("external poll: count error", "err", err)
-		return 0, false
+		if resp == nil {
+			slog.Error("external poll: count transport error", "err", err)
+			return 0, false, false
+		}
+		// resp != nil — the daemon sent a full "Success: false" response;
+		// connection is intact, just a logical failure.
+		return 0, false, true
 	}
 	if !resp.Success {
-		return 0, false
+		return 0, false, true
 	}
 	var countResult struct {
 		Count int64 `json:"count"`
 	}
 	if err := json.Unmarshal(resp.Data, &countResult); err != nil {
+		// Parse error on a fully-received body — connection is fine.
 		slog.Error("external poll: parse count error", "err", err)
-		return 0, false
+		return 0, false, true
 	}
-	return countResult.Count, true
+	return countResult.Count, true, true
 }
 
 // initPollStateIfNeeded initializes poll state on the first invocation.
-// Returns true if this was the first poll (caller should return early).
-func (s *DaemonSubscriber) initPollStateIfNeeded(client *rpc.Client, totalCount int64, now time.Time) bool {
+//
+// Returns (firstPoll, clientHealthy):
+//   - firstPoll == true on the initial call; the caller should return early.
+//   - clientHealthy reflects the health of the inner loadKnownIssues RPC on
+//     first poll; on subsequent calls it is always true (no RPC performed).
+func (s *DaemonSubscriber) initPollStateIfNeeded(client *rpc.Client, totalCount int64, now time.Time) (firstPoll, clientHealthy bool) {
 	s.mu.Lock()
 	if s.countInitialized {
 		s.mu.Unlock()
-		return false
+		return false, true
 	}
 	s.lastKnownCount = totalCount
 	s.lastPollTime = now
 	s.countInitialized = true
 	s.mu.Unlock()
-	// Build initial knownIssues snapshot (best-effort, non-blocking)
-	s.loadKnownIssues(client)
-	return true
+	// Build initial knownIssues snapshot (best-effort, non-blocking).
+	// loadKnownIssues surfaces its transport-health bit so a first-poll List
+	// failure correctly Discards the connection instead of poisoning the pool.
+	return true, s.loadKnownIssues(client)
 }
 
 // detectExternalChanges compares the current count against the last known count
-// and checks for in-place updates via the Count(UpdatedAfter) RPC.
-func (s *DaemonSubscriber) detectExternalChanges(client *rpc.Client, totalCount int64) (changed, deleted bool, lastPoll time.Time) {
+// and checks for in-place updates via the Count(UpdatedAfter) RPC. Returns
+// (changed, deleted, lastPoll, clientHealthy). clientHealthy is false only if
+// the inner Count RPC hit a transport error.
+func (s *DaemonSubscriber) detectExternalChanges(client *rpc.Client, totalCount int64) (changed, deleted bool, lastPoll time.Time, clientHealthy bool) {
 	s.mu.RLock()
 	lastKnown := s.lastKnownCount
 	lastPoll = s.lastPollTime
 	s.mu.RUnlock()
 
 	if totalCount != lastKnown {
-		return true, totalCount < lastKnown, lastPoll
+		return true, totalCount < lastKnown, lastPoll, true
 	}
 	// Count unchanged — check for in-place updates
 	updatedAfter := lastPoll.UTC().Format(time.RFC3339)
 	resp, err := client.Count(&rpc.CountArgs{UpdatedAfter: updatedAfter})
-	if err == nil && resp.Success {
-		var result struct {
-			Count int64 `json:"count"`
+	if err != nil {
+		if resp == nil {
+			// Transport error — connection unsafe, caller must Discard.
+			return false, false, lastPoll, false
 		}
-		if err := json.Unmarshal(resp.Data, &result); err == nil && result.Count > 0 {
-			return true, false, lastPoll
-		}
+		// Success=false — logical failure, connection intact.
+		return false, false, lastPoll, true
 	}
-	return false, false, lastPoll
+	if !resp.Success {
+		return false, false, lastPoll, true
+	}
+	var result struct {
+		Count int64 `json:"count"`
+	}
+	if err := json.Unmarshal(resp.Data, &result); err == nil && result.Count > 0 {
+		return true, false, lastPoll, true
+	}
+	return false, false, lastPoll, true
 }
 
 // handleExternalChanges responds to detected external DB changes by emitting
-// granular per-issue mutations or falling back to a blanket refresh.
-func (s *DaemonSubscriber) handleExternalChanges(client *rpc.Client, now time.Time, totalCount int64, lastPollTime time.Time, deletionDetected bool) {
+// granular per-issue mutations or falling back to a blanket refresh. Returns
+// clientHealthy: false if any inner RPC on `client` hit a transport error,
+// requiring the caller to Discard the connection.
+func (s *DaemonSubscriber) handleExternalChanges(client *rpc.Client, now time.Time, totalCount int64, lastPollTime time.Time, deletionDetected bool) (clientHealthy bool) {
 	// Deletion detected — fall back to global MutationRefresh.
 	if deletionDetected {
 		s.broadcastRefresh(now, totalCount)
-		s.loadKnownIssues(client)
-		return
+		return s.loadKnownIssues(client)
 	}
 
-	changed := s.fetchChangedIssues(client, lastPollTime)
+	changed, fetchHealthy := s.fetchChangedIssues(client, lastPollTime)
+	if !fetchHealthy {
+		return false
+	}
+
 	if changed == nil || len(changed) > granularMutationThreshold {
-		// List RPC failed or too many changes — fall back to per-repo refresh.
-		s.emitPerRepoRefreshes(client, now, lastPollTime, totalCount)
+		// List RPC logically failed or too many changes — fall back to per-repo refresh.
+		repoHealthy := s.emitPerRepoRefreshes(client, now, lastPollTime, totalCount)
 		s.mu.Lock()
 		s.lastKnownCount = totalCount
 		s.lastPollTime = now
 		s.mu.Unlock()
-		if changed != nil {
-			s.loadKnownIssues(client)
+		if !repoHealthy {
+			return false
 		}
-		return
+		if changed != nil {
+			// List succeeded but exceeded threshold — rebuild known snapshot.
+			if !s.loadKnownIssues(client) {
+				return false
+			}
+		}
+		return true
 	}
 
 	s.emitGranularMutations(changed, now, totalCount)
+	return true
 }
 
 // waitWithDone waits for the specified duration or until done is signaled.
