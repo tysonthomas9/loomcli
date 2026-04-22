@@ -644,6 +644,18 @@ func TestDeregister_ConcurrentAttach(t *testing.T) {
 		t.Fatalf("warmup attach: %v", err)
 	}
 
+	// Capture the per-ws *PTYManager before the race so we can assert on
+	// it after Deregister has removed the mm.entries reference. Without
+	// this capture, a post-Shutdown orphan-spawn bug would be invisible —
+	// the outer mm.SessionCount() hits the (now-empty) map and reports 0
+	// regardless of whether the inner manager has leaked sessions.
+	mm.mu.RLock()
+	captured := mm.entries["ws1"].mgr
+	mm.mu.RUnlock()
+	if captured == nil {
+		t.Fatal("captured per-ws manager is nil")
+	}
+
 	const attackers = 20
 	var wg sync.WaitGroup
 	wg.Add(attackers + 1)
@@ -665,6 +677,13 @@ func TestDeregister_ConcurrentAttach(t *testing.T) {
 
 	if mm.hasManager("ws1") {
 		t.Errorf("hasManager(ws1)=true after Deregister")
+	}
+	// A racer that won against Deregister legitimately attached, but
+	// Deregister's Shutdown must have reaped it — the captured inner
+	// manager must hold zero sessions. A non-zero count means an attacker
+	// spawned after Shutdown returned, i.e. the P2 race re-opened.
+	if got := captured.SessionCount(); got != 0 {
+		t.Errorf("captured.SessionCount=%d after race; want 0 (orphan session leaked)", got)
 	}
 }
 
