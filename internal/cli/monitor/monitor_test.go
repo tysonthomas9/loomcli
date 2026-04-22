@@ -1168,7 +1168,7 @@ func TestCollectAgentStatus(t *testing.T) {
 		}}
 		deps.Git = &execBridgeGitRunner{Exec: deps.Exec}
 
-		agents, _ := collectAgentStatusDeps(deps, nil, "")
+		agents, _ := collectAgentStatusDepsScoped(deps, "", nil, nil, "")
 
 		if len(agents) != 1 {
 			t.Fatalf("expected 1 agent, got %d", len(agents))
@@ -1215,7 +1215,7 @@ func TestCollectAgentStatus(t *testing.T) {
 		}}
 		deps.Git = &execBridgeGitRunner{Exec: deps.Exec}
 
-		agents, _ := collectAgentStatusDeps(deps, nil, "")
+		agents, _ := collectAgentStatusDepsScoped(deps, "", nil, nil, "")
 
 		if len(agents) != 1 {
 			t.Fatalf("expected 1 agent, got %d", len(agents))
@@ -1265,7 +1265,7 @@ func TestCollectAgentStatus(t *testing.T) {
 			"spark": {ID: "T-123", Status: "in_progress"},
 		}
 
-		agents, _ := collectAgentStatusDeps(deps, agentTasks, "")
+		agents, _ := collectAgentStatusDepsScoped(deps, "", nil, agentTasks, "")
 
 		if len(agents) != 1 {
 			t.Fatalf("expected 1 agent, got %d", len(agents))
@@ -1312,7 +1312,7 @@ func TestCollectAgentStatus(t *testing.T) {
 		}}
 		deps.Git = &execBridgeGitRunner{Exec: deps.Exec}
 
-		agents, _ := collectAgentStatusDeps(deps, nil, "")
+		agents, _ := collectAgentStatusDepsScoped(deps, "", nil, nil, "")
 
 		if len(agents) != 1 {
 			t.Fatalf("expected 1 agent, got %d", len(agents))
@@ -1377,7 +1377,7 @@ func TestCollectAgentStatus(t *testing.T) {
 		}}
 		deps.Git = &execBridgeGitRunner{Exec: deps.Exec}
 
-		_, taskIDToAgents := collectAgentStatusDeps(deps, nil, "")
+		_, taskIDToAgents := collectAgentStatusDepsScoped(deps, "", nil, nil, "")
 
 		if len(taskIDToAgents["T-conflict"]) != 2 {
 			t.Errorf("expected 2 agents claiming same task, got %d", len(taskIDToAgents["T-conflict"]))
@@ -1430,7 +1430,7 @@ func TestCollectMonitorData(t *testing.T) {
 	mock.StatsResult = &backend.StatsData{TotalIssues: 10, OpenIssues: 3, ClosedIssues: 7}
 	deps.IssueBackend = mock
 
-	data := collectMonitorDataDeps(deps, 100, "")
+	data := collectMonitorDataDepsScoped(deps, "", nil, 100, "")
 
 	// Verify all sections populated
 	if data.Timestamp.IsZero() {

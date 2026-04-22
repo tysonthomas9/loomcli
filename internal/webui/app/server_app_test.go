@@ -1,11 +1,14 @@
 package app
 
 import (
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/webui"
+	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 // TestServer_Close_ZeroValue verifies that calling Close on a zero-value
@@ -178,6 +181,123 @@ func TestServer_ConfigDefaults_AllAtOnce(t *testing.T) {
 	}
 	if config.BindAddress != "127.0.0.1" {
 		t.Errorf("BindAddress = %q, want %q", config.BindAddress, "127.0.0.1")
+	}
+}
+
+// TestServer_BuildHandlers_MultiPTYManagerEmpty verifies that buildHandlers
+// reads GracePeriod/IdleTimeout/MaxSessions off an empty (no workspaces
+// registered) *MultiPTYManager without panicking. This exercises the
+// server.go:143-146 aggregation now that ptyMgr has changed type.
+func TestServer_BuildHandlers_MultiPTYManagerEmpty(t *testing.T) {
+	ptyMgr := terminal.NewMultiPTYManager("bash", 0)
+	t.Cleanup(func() { _ = ptyMgr.Close() })
+
+	app := &Server{ptyMgr: ptyMgr}
+	app.buildHandlers()
+	t.Cleanup(func() {
+		app.handlers.ClientErrLimiter.Stop()
+		app.handlers.CSPLimiter.Stop()
+		app.handlers.AuthCfgLimiter.Stop()
+	})
+
+	if app.handlers == nil || app.handlers.GetTerminalConfig == nil {
+		t.Fatal("buildHandlers did not wire GetTerminalConfig")
+	}
+
+	// Zero grace/idle and MaxSessions == default should round-trip through
+	// the /api/config/terminal handler.
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/config/terminal", nil)
+	app.handlers.GetTerminalConfig.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var env struct {
+		Success bool `json:"success"`
+		Data    struct {
+			GracePeriodMS int64 `json:"grace_period_ms"`
+			IdleTimeoutMS int64 `json:"idle_timeout_ms"`
+			MaxSessions   int   `json:"max_sessions"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+		t.Fatalf("unmarshal: %v; body=%s", err, rec.Body.String())
+	}
+	if !env.Success {
+		t.Error("success = false, want true")
+	}
+	if env.Data.GracePeriodMS != 0 {
+		t.Errorf("gracePeriodMs = %d, want 0 (unset)", env.Data.GracePeriodMS)
+	}
+	if env.Data.IdleTimeoutMS != 0 {
+		t.Errorf("idleTimeoutMs = %d, want 0 (unset)", env.Data.IdleTimeoutMS)
+	}
+	// MaxSessions should be the default cap returned by MultiPTYManager
+	// (see multi_pty_manager.go MaxSessions). We only care that it is > 0,
+	// since the exact value is owned by the terminal package.
+	if env.Data.MaxSessions <= 0 {
+		t.Errorf("maxSessions = %d, want > 0 (default per-workspace cap)", env.Data.MaxSessions)
+	}
+}
+
+// TestServer_BuildHandlers_MultiPTYManagerCustom verifies that grace/idle
+// timeouts set on the *MultiPTYManager propagate through buildHandlers to
+// the /api/config/terminal response.
+func TestServer_BuildHandlers_MultiPTYManagerCustom(t *testing.T) {
+	ptyMgr := terminal.NewMultiPTYManager("bash", 42)
+	ptyMgr.SetGracePeriod(7 * time.Second)
+	ptyMgr.SetIdleTimeout(11 * time.Second)
+	t.Cleanup(func() { _ = ptyMgr.Close() })
+
+	app := &Server{ptyMgr: ptyMgr}
+	app.buildHandlers()
+	t.Cleanup(func() {
+		app.handlers.ClientErrLimiter.Stop()
+		app.handlers.CSPLimiter.Stop()
+		app.handlers.AuthCfgLimiter.Stop()
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/config/terminal", nil)
+	app.handlers.GetTerminalConfig.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var env struct {
+		Data struct {
+			GracePeriodMS int64 `json:"grace_period_ms"`
+			IdleTimeoutMS int64 `json:"idle_timeout_ms"`
+			MaxSessions   int   `json:"max_sessions"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if env.Data.GracePeriodMS != 7000 {
+		t.Errorf("gracePeriodMs = %d, want 7000", env.Data.GracePeriodMS)
+	}
+	if env.Data.IdleTimeoutMS != 11000 {
+		t.Errorf("idleTimeoutMs = %d, want 11000", env.Data.IdleTimeoutMS)
+	}
+	if env.Data.MaxSessions != 42 {
+		t.Errorf("maxSessions = %d, want 42", env.Data.MaxSessions)
+	}
+}
+
+// TestServer_ClosePTYMgr_IdempotentWithShutdownPath verifies that the
+// Close() call invoked by server_app.go's cleanup closure is safe to run
+// after the graceful-shutdown path (run() in server.go) has already called
+// Close(). The MultiPTYManager must not double-error.
+func TestServer_ClosePTYMgr_IdempotentWithShutdownPath(t *testing.T) {
+	ptyMgr := terminal.NewMultiPTYManager("bash", 0)
+	// Simulate the graceful-shutdown path (server.go run()).
+	if err := ptyMgr.Close(); err != nil {
+		t.Fatalf("first Close (graceful shutdown path) err = %v, want nil", err)
+	}
+	// Simulate the cleanup closure registered in server_app.go.
+	if err := ptyMgr.Close(); err != nil {
+		t.Fatalf("second Close (cleanup closure) err = %v, want nil", err)
 	}
 }
 

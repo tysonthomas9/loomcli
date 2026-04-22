@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -44,14 +45,20 @@ type TerminalContextTasks struct {
 	Backlog          int `json:"backlog"`
 }
 
-// FetchTerminalContext queries the loom server /api/status endpoint
-// and returns the parsed context. Returns an error if the server is
-// unavailable or returns invalid data.
-func FetchTerminalContext(loomServerURL string) (*TerminalContext, error) {
+// FetchTerminalContext queries the loom server's workspace-scoped monitor
+// status endpoint for the given workspace and returns the parsed context.
+// Returns an error if the server is unavailable or returns invalid data.
+// An empty wsID is rejected — every caller that needed a banner already
+// had the workspace ID from middleware.WorkspaceFromContext.
+func FetchTerminalContext(loomServerURL, wsID string) (*TerminalContext, error) {
+	if wsID == "" {
+		return nil, fmt.Errorf("workspace id required for terminal context")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), contextFetchTimeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, loomServerURL+"/api/monitor/status", nil)
+	endpoint := loomServerURL + "/api/workspaces/" + url.PathEscape(wsID) + "/monitor/status"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}

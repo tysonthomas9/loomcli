@@ -19,7 +19,7 @@ func newTestTerminalAuth(t *testing.T) *TerminalAuth {
 func TestTerminalAuth_GenerateAndValidate(t *testing.T) {
 	ta := newTestTerminalAuth(t)
 
-	token, err := ta.GenerateToken("sess-1", "user-1")
+	token, err := ta.GenerateToken("sess-1", "", "user-1")
 	if err != nil {
 		t.Fatalf("GenerateToken: %v", err)
 	}
@@ -27,7 +27,7 @@ func TestTerminalAuth_GenerateAndValidate(t *testing.T) {
 		t.Fatal("expected non-empty token")
 	}
 
-	uid, err := ta.ValidateToken(token, "sess-1")
+	uid, err := ta.ValidateToken(token, "sess-1", "")
 	if err != nil {
 		t.Fatalf("ValidateToken: %v", err)
 	}
@@ -39,12 +39,12 @@ func TestTerminalAuth_GenerateAndValidate(t *testing.T) {
 func TestTerminalAuth_SessionBinding(t *testing.T) {
 	ta := newTestTerminalAuth(t)
 
-	token, err := ta.GenerateToken("sess-1", "user-1")
+	token, err := ta.GenerateToken("sess-1", "", "user-1")
 	if err != nil {
 		t.Fatalf("GenerateToken: %v", err)
 	}
 
-	_, err = ta.ValidateToken(token, "sess-2")
+	_, err = ta.ValidateToken(token, "sess-2", "")
 	if err == nil {
 		t.Fatal("expected error for session mismatch")
 	}
@@ -53,21 +53,44 @@ func TestTerminalAuth_SessionBinding(t *testing.T) {
 	}
 }
 
+func TestTerminalAuth_WorkspaceBinding(t *testing.T) {
+	ta := newTestTerminalAuth(t)
+
+	token, err := ta.GenerateToken("sess-1", "ws-a", "user-1")
+	if err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+
+	if _, err := ta.ValidateToken(token, "sess-1", "ws-b"); err == nil {
+		t.Fatal("expected workspace-mismatch error for token replayed at ws-b")
+	} else if !strings.Contains(err.Error(), "workspace mismatch") {
+		t.Errorf("expected 'workspace mismatch', got: %v", err)
+	}
+
+	token2, err := ta.GenerateToken("sess-2", "ws-a", "user-1")
+	if err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+	if _, err := ta.ValidateToken(token2, "sess-2", "ws-a"); err != nil {
+		t.Errorf("expected matching (session, ws) to validate, got: %v", err)
+	}
+}
+
 func TestTerminalAuth_SingleUse(t *testing.T) {
 	ta := newTestTerminalAuth(t)
 
-	token, err := ta.GenerateToken("sess-1", "user-1")
+	token, err := ta.GenerateToken("sess-1", "", "user-1")
 	if err != nil {
 		t.Fatalf("GenerateToken: %v", err)
 	}
 
 	// First use
-	if _, err := ta.ValidateToken(token, "sess-1"); err != nil {
+	if _, err := ta.ValidateToken(token, "sess-1", ""); err != nil {
 		t.Fatalf("first ValidateToken: %v", err)
 	}
 
 	// Second use
-	_, err = ta.ValidateToken(token, "sess-1")
+	_, err = ta.ValidateToken(token, "sess-1", "")
 	if err == nil {
 		t.Fatal("expected error on second use")
 	}
@@ -80,12 +103,12 @@ func TestTerminalAuth_EmptyUserID(t *testing.T) {
 	ta := newTestTerminalAuth(t)
 
 	// Empty userID is allowed (open mode)
-	token, err := ta.GenerateToken("sess-1", "")
+	token, err := ta.GenerateToken("sess-1", "", "")
 	if err != nil {
 		t.Fatalf("GenerateToken with empty userID: %v", err)
 	}
 
-	uid, err := ta.ValidateToken(token, "sess-1")
+	uid, err := ta.ValidateToken(token, "sess-1", "")
 	if err != nil {
 		t.Fatalf("ValidateToken: %v", err)
 	}
@@ -97,13 +120,13 @@ func TestTerminalAuth_EmptyUserID(t *testing.T) {
 func TestTerminalAuth_Tampering(t *testing.T) {
 	ta := newTestTerminalAuth(t)
 
-	token, err := ta.GenerateToken("sess-1", "user-1")
+	token, err := ta.GenerateToken("sess-1", "", "user-1")
 	if err != nil {
 		t.Fatalf("GenerateToken: %v", err)
 	}
 
 	tampered := token + "X"
-	_, err = ta.ValidateToken(tampered, "sess-1")
+	_, err = ta.ValidateToken(tampered, "sess-1", "")
 	if err == nil {
 		t.Fatal("expected error for tampered token")
 	}
@@ -112,7 +135,7 @@ func TestTerminalAuth_Tampering(t *testing.T) {
 func TestTerminalAuth_MalformedToken(t *testing.T) {
 	ta := newTestTerminalAuth(t)
 
-	_, err := ta.ValidateToken("garbage", "sess-1")
+	_, err := ta.ValidateToken("garbage", "sess-1", "")
 	if err == nil {
 		t.Fatal("expected error for malformed token")
 	}
@@ -124,8 +147,8 @@ func TestTerminalAuth_MalformedToken(t *testing.T) {
 func TestTerminalAuth_UniqueTokens(t *testing.T) {
 	ta := newTestTerminalAuth(t)
 
-	t1, _ := ta.GenerateToken("sess-1", "user-1")
-	t2, _ := ta.GenerateToken("sess-1", "user-1")
+	t1, _ := ta.GenerateToken("sess-1", "", "user-1")
+	t2, _ := ta.GenerateToken("sess-1", "", "user-1")
 	if t1 == t2 {
 		t.Error("expected different tokens (different nonces)")
 	}
@@ -140,8 +163,8 @@ func TestTerminalAuth_StopIdempotent(t *testing.T) {
 func TestTerminalAuth_Cleanup(t *testing.T) {
 	ta := newTestTerminalAuth(t)
 
-	token, _ := ta.GenerateToken("sess-1", "user-1")
-	ta.ValidateToken(token, "sess-1")
+	token, _ := ta.GenerateToken("sess-1", "", "user-1")
+	ta.ValidateToken(token, "sess-1", "")
 
 	ta.mu.Lock()
 	usedCount := len(ta.used)

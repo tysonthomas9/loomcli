@@ -52,7 +52,18 @@ for spec in $EXTRA_WORKSPACES; do
     fi
 done
 
-# ── 3. Register extra workspaces via the loom CLI (writes to LOOM_CONFIG_DIR) ──
+# ── 3a. Register the primary workspace as default ──
+#
+# Must match PRIMARY_PATH (= cwd when loom serve starts). Otherwise the
+# server's initialWorkspaceID (read from cfg.DefaultWorkspaceID) resolves to
+# a different workspace than cwd auto-discovers the bd socket for, and the
+# prebuilt pool gets associated with the wrong workspace — cross-workspace
+# data leak.
+log "registering primary workspace '$PRIMARY_NAME' as default via loom CLI"
+loom workspace create "$PRIMARY_NAME" --repos "$PRIMARY_PATH" --path "$PRIMARY_PATH" --default \
+    2>/dev/null || log "  (already registered or create failed — continuing)"
+
+# ── 3b. Register extra workspaces via the loom CLI (writes to LOOM_CONFIG_DIR) ──
 for spec in $EXTRA_WORKSPACES; do
     ws_name=${spec%%:*}
     ws_path=${spec#*:}
@@ -61,16 +72,41 @@ for spec in $EXTRA_WORKSPACES; do
         2>/dev/null || log "  (already registered or create failed — continuing)"
 done
 
-# ── 4. Start bd daemon in the primary workspace ──
-log "starting bd daemon in $PRIMARY_PATH"
-(cd "$PRIMARY_PATH" && bd daemon start) || true
+# ── 4. Start bd daemon in every workspace ──
+#
+# loom serve's per-workspace pools try to connect on first use. Without a
+# daemon already running, the pool fails once, trips the circuit breaker,
+# and the workspace is unreachable for ~30s on first request. Starting all
+# daemons up front avoids that cold-start.
+start_bd_daemon() {
+    local ws_path="$1"
+    local ws_name="$2"
+    log "starting bd daemon in $ws_path"
+    (cd "$ws_path" && bd daemon start) || true
+
+    local socket="$ws_path/.beads/bd.sock"
+    for _ in $(seq 1 10); do
+        [ -S "$socket" ] && return 0
+        sleep 0.5
+    done
+    log "  bd daemon socket never appeared for '$ws_name' at $socket"
+    return 1
+}
+
+start_bd_daemon "$PRIMARY_PATH" "$PRIMARY_NAME" \
+    || { log "primary daemon startup failed"; exit 1; }
+for spec in $EXTRA_WORKSPACES; do
+    ws_name=${spec%%:*}
+    ws_path=${spec#*:}
+    # bd init is needed for extra workspaces before starting their daemon
+    if [ ! -d "$ws_path/.beads" ]; then
+        log "initializing bd in $ws_path"
+        (cd "$ws_path" && bd init --prefix "$ws_name" --skip-hooks -q) || true
+    fi
+    start_bd_daemon "$ws_path" "$ws_name" || true
+done
 
 SOCKET="$PRIMARY_PATH/.beads/bd.sock"
-for _ in $(seq 1 10); do
-    [ -S "$SOCKET" ] && break
-    sleep 0.5
-done
-[ -S "$SOCKET" ] || { log "bd daemon socket never appeared at $SOCKET"; exit 1; }
 
 # ── 5. Cleanup hook ──
 cleanup() {
@@ -80,11 +116,17 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # ── 6. Start loom serve from within the primary workspace ──
+#
+# No --webui-socket: that flag builds a single "prebuilt" pool from the
+# flagged socket that the server hands to whichever workspace registers
+# first (SetPrebuiltPool uses initialWorkspaceID). With two+ workspaces
+# that causes cross-workspace data leaks — bravo's pool ends up bound to
+# alpha's bd daemon. Letting each workspace auto-discover its own
+# <wsPath>/.beads/bd.sock keeps the per-workspace multiPool routing honest.
 log "starting loom serve on :${API_PORT}"
 cd "$PRIMARY_PATH"
 loom serve \
     --bind 127.0.0.1 --port "$API_PORT" \
-    --webui-socket "$SOCKET" \
     --frontend-url "${LOOM_FRONTEND_URL:-http://localhost:${UI_PORT}}" \
     --frontend-url "http://localhost:${UI_PORT}" \
     --no-daemon &

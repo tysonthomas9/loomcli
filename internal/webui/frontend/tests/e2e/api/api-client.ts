@@ -287,28 +287,6 @@ export interface ApiHealthResponse {
   }
 }
 
-/** Statistics response */
-export interface StatsResponse {
-  success: boolean
-  data?: Statistics
-  error?: string
-}
-
-/** Project statistics */
-export interface Statistics {
-  total_issues: number
-  open_issues: number
-  in_progress_issues: number
-  closed_issues: number
-  blocked_issues: number
-  deferred_issues: number
-  ready_issues: number
-  tombstone_issues: number
-  pinned_issues: number
-  epics_eligible_for_closure: number
-  average_lead_time_hours: number
-}
-
 /** Metrics response */
 export interface MetricsResponse {
   success: boolean
@@ -328,33 +306,6 @@ export interface SSEMetrics {
 export interface GraphResponse {
   success: boolean
   data?: GraphIssue[]
-  error?: string
-}
-
-/** Daemon status data - runtime configuration from the daemon */
-export interface DaemonStatusData {
-  version: string
-  workspace_path: string
-  database_path: string
-  socket_path: string
-  pid: number
-  uptime_seconds: number
-  last_activity_time: string
-  exclusive_lock_active: boolean
-  exclusive_lock_holder?: string
-  // Configuration fields - these are what we test
-  auto_commit: boolean
-  auto_push: boolean
-  auto_pull: boolean
-  local_mode: boolean
-  sync_interval: string
-  daemon_mode: string
-}
-
-/** Daemon status response */
-export interface DaemonStatusResponse {
-  success: boolean
-  data?: DaemonStatusData
   error?: string
 }
 
@@ -402,32 +353,12 @@ export class LoomApiClient {
     return this.parseResponse<ApiHealthResponse>(response)
   }
 
-  /** GET /api/stats - Project statistics */
-  async stats(): Promise<Statistics> {
-    const response = await this.request.get(`${this.baseURL}/api/stats`)
-    const result = await this.parseResponse<StatsResponse>(response)
-    if (!result.success || !result.data) {
-      throw new Error(`Stats request failed: ${result.error}`)
-    }
-    return result.data
-  }
-
   /** GET /api/metrics - SSE hub metrics */
   async metrics(): Promise<SSEMetrics> {
     const response = await this.request.get(`${this.baseURL}/api/metrics`)
     const result = await this.parseResponse<MetricsResponse>(response)
     if (!result.success || !result.data) {
       throw new Error(`Metrics request failed: ${result.error}`)
-    }
-    return result.data
-  }
-
-  /** GET /api/daemon/status - Daemon runtime configuration */
-  async daemonStatus(): Promise<DaemonStatusData> {
-    const response = await this.request.get(`${this.baseURL}/api/daemon/status`)
-    const result = await this.parseResponse<DaemonStatusResponse>(response)
-    if (!result.success || !result.data) {
-      throw new Error(`Daemon status request failed: ${result.error}`)
     }
     return result.data
   }

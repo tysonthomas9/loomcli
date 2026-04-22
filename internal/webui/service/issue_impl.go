@@ -32,28 +32,37 @@ const (
 )
 
 type issueServiceImpl struct {
-	pool            daemon.Pool
+	// multiPool is the sole pool; every RPC routes through the per-workspace
+	// daemon picked from the request context. A default-pool fallback would
+	// silently serve the wrong daemon's data when middleware is missing.
 	multiPool       *daemon.MultiPool
 	withWorkspaceFn func(ctx context.Context, wsID string) context.Context
 }
 
-// NewIssueService creates a new IssueService implementation.
-// withWorkspaceFn injects the workspace ID into the context for MultiPool routing
-// (avoids import cycle with the webui package where the context key is defined).
-func NewIssueService(pool daemon.Pool, multiPool *daemon.MultiPool, withWorkspaceFn func(ctx context.Context, wsID string) context.Context) IssueService {
-	return &issueServiceImpl{pool: pool, multiPool: multiPool, withWorkspaceFn: withWorkspaceFn}
+// NewIssueService builds an IssueService. withWorkspaceFn is only used by
+// MoveIssue to synthesize a context scoped to the target workspace — the
+// source workspace flows in via the request context.
+func NewIssueService(multiPool *daemon.MultiPool, withWorkspaceFn func(ctx context.Context, wsID string) context.Context) IssueService {
+	return &issueServiceImpl{multiPool: multiPool, withWorkspaceFn: withWorkspaceFn}
 }
 
+// acquireClient borrows a workspace-scoped client. A missing workspace in
+// context is a server bug (middleware missing) and surfaces as ErrInternal
+// so it's a loud 500 rather than a silent cross-workspace read.
 func (s *issueServiceImpl) acquireClient(ctx context.Context) (*rpc.Client, error) {
-	if s.pool == nil {
-		return nil, ErrUnavailable("connection pool not initialized")
+	if s.multiPool == nil {
+		return nil, ErrUnavailable("multi-pool not initialized")
 	}
-	client, err := s.pool.Get(ctx)
+	client, err := s.multiPool.Get(ctx)
 	if err != nil {
-		if errors.Is(err, daemon.ErrDaemonStarting) {
+		switch {
+		case errors.Is(err, daemon.ErrNoWorkspaceInContext):
+			return nil, ErrInternal("no workspace in request context — middleware.Workspace missing on this route", err)
+		case errors.Is(err, daemon.ErrWorkspaceNotRegistered):
+			return nil, ErrNotFound("workspace not registered")
+		case errors.Is(err, daemon.ErrDaemonStarting):
 			return nil, ErrStarting("workspace is loading")
-		}
-		if errors.Is(err, context.DeadlineExceeded) {
+		case errors.Is(err, context.DeadlineExceeded):
 			return nil, ErrTimeout("timeout connecting to daemon")
 		}
 		return nil, ErrUnavailable("daemon not available")
@@ -61,8 +70,8 @@ func (s *issueServiceImpl) acquireClient(ctx context.Context) (*rpc.Client, erro
 	return client, nil
 }
 
-// releaseClient returns the connection to the pool when *ok is true, or
-// closes (Discards) it when *ok is false. Use the conditional defer pattern:
+// releaseClient puts the connection back when *ok is true, discards when
+// false. Conditional defer pattern:
 //
 //	rpcOK := false
 //	defer s.releaseClient(client, &rpcOK)
@@ -70,14 +79,13 @@ func (s *issueServiceImpl) acquireClient(ctx context.Context) (*rpc.Client, erro
 //	if err != nil { return err }
 //	rpcOK = true
 //
-// On RPC error, the connection's read buffer may retain stale bytes that
-// would corrupt the next borrower. Discarding closes the connection so a
-// fresh one is opened next time.
+// Discarding on RPC error avoids reusing a connection whose read buffer may
+// still hold stale bytes from a failed response.
 func (s *issueServiceImpl) releaseClient(client *rpc.Client, ok *bool) {
 	if *ok {
-		s.pool.Put(client)
+		s.multiPool.Put(client)
 	} else {
-		s.pool.Discard(client)
+		s.multiPool.Discard(client)
 	}
 }
 

@@ -68,7 +68,7 @@ async function setupMocks(
   })
 
   // Mock /api/stats endpoint
-  await page.route("**/api/stats", async (route) => {
+  await page.route("**/api/workspaces/*/stats", async (route) => {
     // Optional delay for loading state tests
     if (options?.statsDelay) {
       await new Promise((resolve) => setTimeout(resolve, options.statsDelay))
@@ -215,7 +215,7 @@ test.describe("StatsHeader Real-time Updates", () => {
     await expect(statsHeader.getByText("22")).toBeVisible()
 
     // Update mock to return different unique values
-    await page.route("**/api/stats", async (route) => {
+    await page.route("**/api/workspaces/*/stats", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -361,7 +361,7 @@ test.describe("StatsHeader Error State", () => {
       })
     })
 
-    await page.route("**/api/stats", async (route) => {
+    await page.route("**/api/workspaces/*/stats", async (route) => {
       requestCount++
       if (requestCount === 1) {
         // First request fails
@@ -410,7 +410,7 @@ test.describe("StatsHeader Error State", () => {
     await expect(statsHeader.getByText("25")).toBeVisible()
 
     // Now update mock to fail on subsequent requests
-    await page.route("**/api/stats", async (route) => {
+    await page.route("**/api/workspaces/*/stats", async (route) => {
       await route.fulfill({
         status: 500,
         contentType: "application/json",

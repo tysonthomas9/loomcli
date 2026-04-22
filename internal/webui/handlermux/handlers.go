@@ -21,9 +21,7 @@ type Handlers struct {
 	ClientErrors        http.HandlerFunc
 	CSPReport           http.HandlerFunc
 	AuthConfig          http.HandlerFunc
-	Stats               http.HandlerFunc
 	Metrics             http.HandlerFunc // pre-built by caller (requires fleet types)
-	DaemonStatus        http.HandlerFunc
 	GetBackendConfig    http.HandlerFunc
 	PatchBackendConfig  http.HandlerFunc
 	GetTerminalConfig   http.HandlerFunc
@@ -31,8 +29,6 @@ type Handlers struct {
 	ListEditors         http.HandlerFunc
 	OpenEditor          http.HandlerFunc
 	NotifySessionChange http.HandlerFunc // pre-built by caller, may be nil
-	DaemonSupervisor    http.HandlerFunc
-	DaemonConfig        http.HandlerFunc
 
 	// Closers for cleanup
 	ClientErrLimiter Stopper
@@ -52,8 +48,6 @@ type HandlerDeps struct {
 	ExtAuthURL         string
 	BackendsHealthH    http.HandlerFunc // pre-built; nil disables endpoint
 	NotifyToken        string
-	DaemonSupervisor   http.HandlerFunc    // pre-built; nil = disabled
-	DaemonConfig       http.HandlerFunc    // pre-built; nil = disabled
 	FleetTimeoutsFn    func() int64        // nil = no fleet
 	ClaimMetrics       *fleet.ClaimMetrics // nil = no fleet
 	TerminalGraceMS    int64               // 0 = disabled
@@ -75,9 +69,7 @@ func BuildHandlers(deps HandlerDeps) *Handlers {
 		ClientErrors:       misc.HandleClientErrors(clientErrLimiter),
 		CSPReport:          misc.HandleCSPReport(cspLimiter),
 		AuthConfig:         misc.HandleAuthConfig(deps.ExtAuthURL, authCfgLimiter),
-		Stats:              healthhandlers.HandleStats(deps.Pool),
 		Metrics:            healthhandlers.HandleMetrics(deps.Hub, deps.FleetTimeoutsFn, deps.ClaimMetrics),
-		DaemonStatus:       healthhandlers.HandleDaemonStatus(deps.Pool),
 		GetBackendConfig:   hterminal.HandleGetBackendConfig(deps.Pool),
 		PatchBackendConfig: hterminal.HandlePatchBackendConfig(deps.Pool),
 		GetTerminalConfig: hterminal.HandleGetTerminalConfig(hterminal.TerminalLifecycleConfig{
@@ -87,8 +79,6 @@ func BuildHandlers(deps HandlerDeps) *Handlers {
 		}),
 		ListEditors:      misc.HandleListEditors(editorCache),
 		OpenEditor:       misc.HandleOpenEditorDefault(editorCache),
-		DaemonSupervisor: deps.DaemonSupervisor,
-		DaemonConfig:     deps.DaemonConfig,
 		ClientErrLimiter: clientErrLimiter,
 		CSPLimiter:       cspLimiter,
 		AuthCfgLimiter:   authCfgLimiter,

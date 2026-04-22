@@ -71,7 +71,7 @@ describe("fetchAgents", () => {
       response: new Response(),
     } as never);
 
-    const result = await fetchAgents();
+    const result = await fetchAgents("test-ws");
 
     expect(result).toEqual(agents);
     expect(result).toHaveLength(2);
@@ -85,7 +85,7 @@ describe("fetchAgents", () => {
       response: new Response(),
     } as never);
 
-    const result = await fetchAgents();
+    const result = await fetchAgents("test-ws");
 
     expect(result).toEqual([]);
   });
@@ -100,7 +100,7 @@ describe("fetchAgents", () => {
       }),
     } as never);
 
-    await expect(fetchAgents()).rejects.toThrow();
+    await expect(fetchAgents("test-ws")).rejects.toThrow();
   });
 
   it("throws ApiError on non-OK HTTP response", async () => {
@@ -113,7 +113,7 @@ describe("fetchAgents", () => {
       }),
     } as never);
 
-    await expect(fetchAgents()).rejects.toThrow(ApiError);
+    await expect(fetchAgents("test-ws")).rejects.toThrow(ApiError);
   });
 
   it("throws ApiError on server error (500)", async () => {
@@ -126,7 +126,7 @@ describe("fetchAgents", () => {
       }),
     } as never);
 
-    await expect(fetchAgents()).rejects.toThrow(ApiError);
+    await expect(fetchAgents("test-ws")).rejects.toThrow(ApiError);
   });
 
   it("passes correct path to api.GET()", async () => {
@@ -136,11 +136,15 @@ describe("fetchAgents", () => {
       response: new Response(),
     } as never);
 
-    await fetchAgents();
+    await fetchAgents("test-ws");
 
-    expect(mockApiGet).toHaveBeenCalledWith("/api/monitor/agents", {
-      signal: expect.any(AbortSignal),
-    });
+    expect(mockApiGet).toHaveBeenCalledWith(
+      "/api/workspaces/{ws}/monitor/agents",
+      {
+        params: { path: { ws: "test-ws" } },
+        signal: expect.any(AbortSignal),
+      },
+    );
   });
 });
 
@@ -218,7 +222,7 @@ describe("fetchStatus", () => {
       response: new Response(),
     } as never);
 
-    const result = await fetchStatus();
+    const result = await fetchStatus("test-ws");
 
     expect(result.tasks.needs_planning).toBe(5);
     expect(result.tasks.ready_to_implement).toBe(3);
@@ -255,7 +259,7 @@ describe("fetchStatus", () => {
       response: new Response(),
     } as never);
 
-    const result = await fetchStatus();
+    const result = await fetchStatus("test-ws");
 
     expect(result.tasks).toHaveProperty("backlog");
     expect(result.tasks.backlog).toBe(10);
@@ -289,7 +293,7 @@ describe("fetchStatus", () => {
       response: new Response(),
     } as never);
 
-    const result = await fetchStatus();
+    const result = await fetchStatus("test-ws");
 
     expect(result.tasks.backlog).toBe(0);
   });
@@ -322,7 +326,7 @@ describe("fetchStatus", () => {
       response: new Response(),
     } as never);
 
-    const result = await fetchStatus();
+    const result = await fetchStatus("test-ws");
 
     expect(result.tasks.needs_planning).toBe(10);
     expect(result.tasks.ready_to_implement).toBe(20);
@@ -370,7 +374,7 @@ describe("fetchStatus", () => {
       response: new Response(),
     } as never);
 
-    const result: FetchStatusResult = await fetchStatus();
+    const result: FetchStatusResult = await fetchStatus("test-ws");
 
     expect(result).toHaveProperty("agents");
     expect(result).toHaveProperty("tasks");
@@ -394,7 +398,7 @@ describe("fetchStatus", () => {
       }),
     } as never);
 
-    await expect(fetchStatus()).rejects.toThrow(ApiError);
+    await expect(fetchStatus("test-ws")).rejects.toThrow(ApiError);
   });
 
   it("throws on network failure", async () => {
@@ -407,7 +411,7 @@ describe("fetchStatus", () => {
       }),
     } as never);
 
-    await expect(fetchStatus()).rejects.toThrow();
+    await expect(fetchStatus("test-ws")).rejects.toThrow();
   });
 
   it("passes correct path to api.GET()", async () => {
@@ -424,11 +428,15 @@ describe("fetchStatus", () => {
       response: new Response(),
     } as never);
 
-    await fetchStatus();
+    await fetchStatus("test-ws");
 
-    expect(mockApiGet).toHaveBeenCalledWith("/api/monitor/status", {
-      signal: expect.any(AbortSignal),
-    });
+    expect(mockApiGet).toHaveBeenCalledWith(
+      "/api/workspaces/{ws}/monitor/status",
+      {
+        params: { path: { ws: "test-ws" } },
+        signal: expect.any(AbortSignal),
+      },
+    );
   });
 });
 
@@ -478,7 +486,7 @@ describe("fetchTasks", () => {
       response: new Response(),
     } as never);
 
-    const result = await fetchTasks();
+    const result = await fetchTasks("test-ws");
 
     expect(result.needsPlanning).toEqual(taskLists.needsPlanning);
     expect(result.readyToImplement).toEqual(taskLists.readyToImplement);
@@ -515,7 +523,7 @@ describe("fetchTasks", () => {
       response: new Response(),
     } as never);
 
-    const result: LoomTaskLists = await fetchTasks();
+    const result: LoomTaskLists = await fetchTasks("test-ws");
 
     expect(result).toHaveProperty("backlog");
     expect(result.backlog).toEqual(backlogTasks);
@@ -534,7 +542,7 @@ describe("fetchTasks", () => {
       response: new Response(),
     } as never);
 
-    const result = await fetchTasks();
+    const result = await fetchTasks("test-ws");
 
     expect(result.backlog).toEqual([]);
   });
@@ -559,7 +567,7 @@ describe("fetchTasks", () => {
       response: new Response(),
     } as never);
 
-    const result = await fetchTasks();
+    const result = await fetchTasks("test-ws");
 
     expect(result.backlog).toHaveLength(5);
     expect(result.backlog).toEqual(backlogTasks);
@@ -597,7 +605,7 @@ describe("fetchTasks", () => {
       response: new Response(),
     } as never);
 
-    const result = await fetchTasks();
+    const result = await fetchTasks("test-ws");
 
     expect(result.needsPlanning).toEqual(taskLists.needsPlanning);
     expect(result.readyToImplement).toEqual(taskLists.readyToImplement);
@@ -642,7 +650,7 @@ describe("fetchTasks", () => {
       response: new Response(),
     } as never);
 
-    const result: LoomTaskLists = await fetchTasks();
+    const result: LoomTaskLists = await fetchTasks("test-ws");
 
     expect(result).toHaveProperty("needsPlanning");
     expect(result).toHaveProperty("readyToImplement");
@@ -658,7 +666,7 @@ describe("fetchTasks", () => {
       response: new Response(null, { status: 404, statusText: "Not Found" }),
     } as never);
 
-    await expect(fetchTasks()).rejects.toThrow(ApiError);
+    await expect(fetchTasks("test-ws")).rejects.toThrow(ApiError);
   });
 
   it("throws on network failure", async () => {
@@ -671,7 +679,7 @@ describe("fetchTasks", () => {
       }),
     } as never);
 
-    await expect(fetchTasks()).rejects.toThrow(ApiError);
+    await expect(fetchTasks("test-ws")).rejects.toThrow(ApiError);
   });
 
   it("passes correct path to api.GET()", async () => {
@@ -687,11 +695,15 @@ describe("fetchTasks", () => {
       response: new Response(),
     } as never);
 
-    await fetchTasks();
+    await fetchTasks("test-ws");
 
-    expect(mockApiGet).toHaveBeenCalledWith("/api/monitor/tasks", {
-      signal: expect.any(AbortSignal),
-    });
+    expect(mockApiGet).toHaveBeenCalledWith(
+      "/api/workspaces/{ws}/monitor/tasks",
+      {
+        params: { path: { ws: "test-ws" } },
+        signal: expect.any(AbortSignal),
+      },
+    );
   });
 });
 
@@ -729,7 +741,7 @@ describe("API field consistency", () => {
       response: new Response(),
     } as never);
 
-    const statusResult = await fetchStatus();
+    const statusResult = await fetchStatus("test-ws");
 
     expect(statusResult.tasks.backlog).toBe(7);
 
@@ -747,7 +759,7 @@ describe("API field consistency", () => {
       response: new Response(),
     } as never);
 
-    const tasksResult = await fetchTasks();
+    const tasksResult = await fetchTasks("test-ws");
 
     expect(tasksResult.backlog).toHaveLength(1);
     expect(tasksResult.backlog[0].id).toBe("bd-100");

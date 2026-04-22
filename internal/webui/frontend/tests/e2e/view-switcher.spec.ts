@@ -49,7 +49,7 @@ async function setupMocks(page: Page) {
     await route.abort()
   })
   // Mock /api/stats to prevent proxy errors
-  await page.route("**/api/stats", async (route) => {
+  await page.route("**/api/workspaces/*/stats", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -100,7 +100,7 @@ test.describe("ViewSwitcher", () => {
     })
 
     // Mock /api/stats to prevent proxy errors
-    await page.route("**/api/stats", async (route) => {
+    await page.route("**/api/workspaces/*/stats", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",

@@ -242,7 +242,7 @@ async function setupInfrastructureMocks(page: Page) {
     });
   });
 
-  await page.route("**/api/monitor/**", async (route) => {
+  await page.route("**/monitor/**", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",

@@ -39,9 +39,6 @@ export type {
   UseRepoFilterParamReturn,
 } from "./useRepoFilterParam";
 
-export { useWorkspace } from "./useWorkspace";
-export type { UseWorkspaceOptions, UseWorkspaceReturn } from "./useWorkspace";
-
 export {
   WorkspaceProvider,
   useWorkspaceContext,
@@ -50,14 +47,9 @@ export {
 } from "./useWorkspaceContext";
 export type {
   WorkspaceContextValue,
+  WorkspaceConnectionState,
   WorkspaceProviderProps,
 } from "./useWorkspaceContext";
-
-export { useWorkspaceRepos } from "./useWorkspaceRepos";
-export type {
-  UseWorkspaceReposReturn,
-  WorkspaceConnectionState,
-} from "./useWorkspaceRepos";
 
 export {
   useWorkspaceState,

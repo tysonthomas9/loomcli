@@ -8,6 +8,12 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 
 import { fetchAgents, fetchStatus, fetchTasks } from "../api/agents";
+import {
+  DEFAULT_TASKS,
+  DEFAULT_SYNC,
+  DEFAULT_STATS,
+  DEFAULT_TASK_LISTS,
+} from "../api/agents/defaults";
 import type {
   LoomAgentStatus,
   LoomTaskSummary,
@@ -34,42 +40,6 @@ const WATCHDOG_TIMEOUT_MS = 20_000;
 // Default values (moved from useAgents.ts)
 // ---------------------------------------------------------------------------
 
-const DEFAULT_TASKS: LoomTaskSummary = {
-  needs_planning: 0,
-  ready_to_implement: 0,
-  in_progress: 0,
-  need_review: 0,
-  backlog: 0,
-  epics: 0,
-};
-
-const DEFAULT_SYNC: LoomSyncInfo = {
-  db_synced: true,
-  db_last_sync: "",
-  git_needs_push: 0,
-  git_needs_pull: 0,
-};
-
-const DEFAULT_STATS: LoomStats = {
-  open: 0,
-  closed: 0,
-  total: 0,
-  completion: 0,
-  remaining: 0,
-  in_progress: 0,
-  review: 0,
-  blocked: 0,
-};
-
-const DEFAULT_TASK_LISTS: LoomTaskLists = {
-  needsPlanning: [],
-  readyToImplement: [],
-  needsReview: [],
-  inProgress: [],
-  backlog: [],
-  done: [],
-};
-
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
@@ -80,6 +50,9 @@ export interface AgentStoreConfig {
 
 export interface PollingOptions {
   pollInterval?: number; // ms, default 5000
+  // workspaceId is required for workspace-scoped fetches. Empty or unknown
+  // values result in empty responses rather than cross-workspace data leaks.
+  workspaceId: string;
 }
 
 export interface AgentStoreState {
@@ -205,6 +178,29 @@ export function createAgentStore(
   let consecutiveFailuresAtCeiling = 0;
   let visibilityHandler: (() => void) | null = null;
   let isPolling = false;
+  // Active workspace ID set by startPolling. fetchData reads it per call so
+  // callers don't pass it on every invocation, and so retryNow/visibility
+  // refetches use the same workspace as the polling loop.
+  let activeWorkspaceID = "";
+
+  // Drops entries from `patch` whose serialized value equals the current
+  // store value, so polling ticks that return identical data don't fire a
+  // new reference to subscribers (zustand's default equality is Object.is).
+  // JSON.stringify is fine here: payloads are API responses without
+  // undefineds, functions, or circular refs.
+  function skipIfEqual<K extends keyof AgentStore>(
+    patch: Partial<AgentStore>,
+    current: AgentStore,
+    keys: readonly K[],
+  ): Partial<AgentStore> {
+    const out: Partial<AgentStore> = { ...patch };
+    for (const k of keys) {
+      if (k in out && JSON.stringify(out[k]) === JSON.stringify(current[k])) {
+        delete out[k];
+      }
+    }
+    return out;
+  }
 
   // --- Internal timer helpers ---
 
@@ -325,22 +321,33 @@ export function createAgentStore(
       fetchStartTime = Date.now();
       set({ isLoading: true });
 
+      // Pin wsID so awaits in this cycle can't splice data across a
+      // workspace switch.
+      const wsID = activeWorkspaceID;
+
       try {
         const agentsResult = await withTimeout(
-          fetchAgents(),
+          fetchAgents(wsID),
           FETCH_TIMEOUT_MS,
           "Agent fetch",
         );
+        if (wsID !== activeWorkspaceID) return;
 
         // Primary success
         const now = Date.now();
-        set({
-          agents: agentsResult,
-          isConnected: true,
-          error: null,
-          lastUpdated: now,
-          isLoading: false,
-        });
+        set(
+          skipIfEqual(
+            {
+              agents: agentsResult,
+              isConnected: true,
+              error: null,
+              lastUpdated: now,
+              isLoading: false,
+            },
+            get(),
+            ["agents"] as const,
+          ),
+        );
 
         reportSuccess(set);
 
@@ -359,16 +366,23 @@ export function createAgentStore(
         void (async () => {
           try {
             const statusResult = await withTimeout(
-              fetchStatus(),
+              fetchStatus(wsID),
               FETCH_TIMEOUT_MS,
               "Status fetch",
             );
-            set({
-              tasks: statusResult.tasks,
-              agentTasks: statusResult.agentTasks,
-              sync: statusResult.sync,
-              stats: statusResult.stats,
-            });
+            if (wsID !== activeWorkspaceID) return;
+            set(
+              skipIfEqual(
+                {
+                  tasks: statusResult.tasks,
+                  agentTasks: statusResult.agentTasks,
+                  sync: statusResult.sync,
+                  stats: statusResult.stats,
+                },
+                get(),
+                ["tasks", "agentTasks", "sync", "stats"] as const,
+              ),
+            );
           } catch (statusError) {
             console.warn(
               "Loom status fetch failed:",
@@ -382,11 +396,16 @@ export function createAgentStore(
         void (async () => {
           try {
             const tasksResult = await withTimeout(
-              fetchTasks(),
+              fetchTasks(wsID),
               FETCH_TIMEOUT_MS,
               "Tasks fetch",
             );
-            set({ taskLists: tasksResult });
+            if (wsID !== activeWorkspaceID) return;
+            set(
+              skipIfEqual({ taskLists: tasksResult }, get(), [
+                "taskLists",
+              ] as const),
+            );
           } catch (taskError) {
             console.warn(
               "Loom tasks fetch failed:",
@@ -428,7 +447,25 @@ export function createAgentStore(
         get().stopPolling();
       }
 
+      // Empty workspaceId would cause every poll tick to fire a doomed
+      // /api/workspaces//monitor/agents request — the backend rejects it and
+      // the store would churn state on each tick. The caller hasn't resolved
+      // a workspace yet; wait for the next startPolling call with a real ID.
+      const wsID = options?.workspaceId ?? "";
+      if (wsID === "") {
+        return;
+      }
+
       const interval = options?.pollInterval ?? 5000;
+
+      // Reset backoff so a new workspace doesn't inherit stale retry delay
+      // from a previous workspace's failure streak.
+      if (wsID !== activeWorkspaceID) {
+        currentRetryDelay = INITIAL_RETRY_DELAY_S;
+        consecutiveFailuresAtCeiling = 0;
+      }
+
+      activeWorkspaceID = wsID;
       isPolling = true;
 
       // Initial fetch

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"sync"
 	"testing"
 	"time"
 )
@@ -116,7 +117,7 @@ func TestInvalidateConfigCache_ForcesReload(t *testing.T) {
 	}
 }
 
-func TestConfigCache_ExpiresByTTL(t *testing.T) {
+func TestConfigCache_ExpiresOnStaleMarker(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", dir)
 	InvalidateConfigCache()
@@ -132,16 +133,82 @@ func TestConfigCache_ExpiresByTTL(t *testing.T) {
 
 	got1, _ := LoadConfigCached()
 
-	// Force cache to expire by setting expires to the past.
-	configCache.Lock()
-	configCache.expires = time.Now().Add(-1 * time.Second)
-	configCache.Unlock()
+	// Force the cache to appear stale relative to the real file mtime.
+	expireCachedConfigForTest()
 
 	got2, err := LoadConfigCached()
 	if err != nil {
-		t.Fatalf("LoadConfigCached() after TTL error = %v", err)
+		t.Fatalf("LoadConfigCached() after expire error = %v", err)
 	}
 	if got1 == got2 {
-		t.Error("LoadConfigCached() returned same pointer after TTL expiry — cache not refreshed")
+		t.Error("LoadConfigCached() returned same pointer after expire hook — cache not refreshed")
+	}
+}
+
+// A concurrent reader and writer must not deadlock. The prior mutex-based
+// cache took an in-process write lock inside LoadConfigCached while waiting
+// for the config file flock; InvalidateConfigCache wanted the same write
+// lock from inside the flock. That AB-BA deadlocked the server. The
+// 5 s deadline catches a regression of that lock inversion.
+func TestLoadConfigCached_ConcurrentReaderAndWriterNoDeadlock(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", dir)
+	InvalidateConfigCache()
+
+	// Seed a config so LoadConfig has something to parse.
+	seed := &LoomConfig{Workspaces: map[string]WorkspaceConfig{"seed": {Path: "/tmp/seed"}}}
+	if err := SaveConfig(seed); err != nil {
+		t.Fatalf("SaveConfig(seed) error = %v", err)
+	}
+	InvalidateConfigCache()
+
+	var wg sync.WaitGroup
+	done := make(chan struct{})
+
+	// Writer: acquire flock via WithConfigLock, save (which invalidates the
+	// cache). This is the path SaveConfigUnlocked takes during workspace
+	// creation.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 50; i++ {
+			err := WithConfigLock(func() error {
+				return SaveConfigUnlocked(&LoomConfig{
+					Workspaces: map[string]WorkspaceConfig{
+						"w": {Path: "/tmp/w"},
+					},
+				})
+			})
+			if err != nil {
+				t.Errorf("writer: WithConfigLock error = %v", err)
+				return
+			}
+		}
+	}()
+
+	// Reader: spin calling LoadConfigCached. Before the redesign this would
+	// race the writer on the cache mutex while holding it across LoadConfig's
+	// flock acquisition.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 200; i++ {
+			if _, err := LoadConfigCached(); err != nil {
+				t.Errorf("reader: LoadConfigCached error = %v", err)
+				return
+			}
+		}
+	}()
+
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Completed cleanly.
+	case <-time.After(5 * time.Second):
+		t.Fatal("concurrent reader+writer deadlocked after 5s — cache lock inversion regressed")
 	}
 }

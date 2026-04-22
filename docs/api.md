@@ -2262,7 +2262,7 @@ Returns `{"active_tab": ""}` if no state has been set or if Redis fails.
   - `400` — empty workspace ID
   - `404` — workspace not found
 
-- **Note:** The Redis key (`terminal:ui-state`) is global, not workspace-partitioned. The workspace in the URL provides routing consistency and access control.
+- **Note:** The Redis key is `terminal:ui-state:{ws}` — workspace-scoped, so each workspace has an independent active-tab record.
 
 ### `PATCH /api/workspaces/{ws}/terminal/state`
 

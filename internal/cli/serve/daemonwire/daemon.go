@@ -105,72 +105,85 @@ func sendControlRequest(socketPath, op, agentName string, force bool, readDeadli
 	return &result, nil
 }
 
-// BuildDaemonSupervisorFn returns a callback that reads the daemon state file
-// and converts it to webui DTO types. Returns nil if the working directory
-// cannot be resolved.
+// LoadDaemonSupervisor reads the loom supervisor state file for the given
+// project directory and converts it to webui DTO types. Returns os.ErrNotExist
+// if the daemon is not running for that directory.
+func LoadDaemonSupervisor(projectDir string) (*webui.DaemonSupervisorData, error) {
+	statePath := config.ResolveDaemonStatePath(projectDir)
+	state, err := daemon.ReadStateFile(statePath)
+	if err != nil {
+		return nil, err
+	}
+	agents := make([]webui.DaemonAgentEntry, len(state.Agents))
+	for i, a := range state.Agents {
+		agents[i] = webui.DaemonAgentEntry{
+			Worktree:       a.Worktree,
+			Role:           a.Role,
+			Repo:           a.Repo,
+			PID:            a.PID,
+			Status:         a.Status,
+			TaskID:         a.TaskID,
+			EpicID:         a.EpicID,
+			CurrentBackend: a.CurrentBackend,
+			RestartCount:   a.RestartCount,
+			LastStart:      a.LastStart,
+			LastExit:       a.LastExit,
+			LastExitCode:   a.LastExitCode,
+			StopReason:     a.StopReason,
+			StoppedAt:      a.StoppedAt,
+			WorktreePath:   a.WorktreePath,
+			LastErrorClass: a.LastErrorClass,
+			NoWorkCount:    a.NoWorkCount,
+			BackoffUntil:   a.BackoffUntil,
+			RemoteBranch:   a.RemoteBranch,
+		}
+	}
+	return &webui.DaemonSupervisorData{
+		PID:           state.PID,
+		StartedAt:     state.StartedAt,
+		UptimeSeconds: time.Since(state.StartedAt).Seconds(),
+		Agents:        agents,
+	}, nil
+}
+
+// LoadDaemonConfigRaw loads the loom.yaml for the given project directory and
+// returns it as JSON.
+func LoadDaemonConfigRaw(projectDir string) (json.RawMessage, error) {
+	cfg, err := config.LoadDaemonConfig(projectDir)
+	if err != nil {
+		return nil, err
+	}
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("marshal daemon config: %w", err)
+	}
+	return json.RawMessage(data), nil
+}
+
+// BuildDaemonSupervisorFn returns a callback bound to the server's working
+// directory — used by the global /api/daemon/supervisor route. The
+// workspace-scoped /api/workspaces/{ws}/daemon/supervisor route uses
+// LoadDaemonSupervisor directly with the workspace's resolved path.
 func BuildDaemonSupervisorFn() func() (*webui.DaemonSupervisorData, error) {
 	projectDir, err := os.Getwd()
 	if err != nil {
 		return nil
 	}
-
 	return func() (*webui.DaemonSupervisorData, error) {
-		statePath := config.ResolveDaemonStatePath(projectDir)
-		state, err := daemon.ReadStateFile(statePath)
-		if err != nil {
-			return nil, err // os.ErrNotExist if file missing
-		}
-		agents := make([]webui.DaemonAgentEntry, len(state.Agents))
-		for i, a := range state.Agents {
-			agents[i] = webui.DaemonAgentEntry{
-				Worktree:       a.Worktree,
-				Role:           a.Role,
-				Repo:           a.Repo,
-				PID:            a.PID,
-				Status:         a.Status,
-				TaskID:         a.TaskID,
-				EpicID:         a.EpicID,
-				CurrentBackend: a.CurrentBackend,
-				RestartCount:   a.RestartCount,
-				LastStart:      a.LastStart,
-				LastExit:       a.LastExit,
-				LastExitCode:   a.LastExitCode,
-				StopReason:     a.StopReason,
-				StoppedAt:      a.StoppedAt,
-				WorktreePath:   a.WorktreePath,
-				LastErrorClass: a.LastErrorClass,
-				NoWorkCount:    a.NoWorkCount,
-				BackoffUntil:   a.BackoffUntil,
-				RemoteBranch:   a.RemoteBranch,
-			}
-		}
-		return &webui.DaemonSupervisorData{
-			PID:           state.PID,
-			StartedAt:     state.StartedAt,
-			UptimeSeconds: time.Since(state.StartedAt).Seconds(),
-			Agents:        agents,
-		}, nil
+		return LoadDaemonSupervisor(projectDir)
 	}
 }
 
-// BuildDaemonConfigFn returns a callback that loads and marshals the daemon
-// config to JSON. Returns nil if the working directory cannot be resolved.
+// BuildDaemonConfigFn returns a callback bound to the server's working
+// directory — global /api/daemon/config counterpart to the workspace-scoped
+// route (see BuildDaemonSupervisorFn).
 func BuildDaemonConfigFn() func() (json.RawMessage, error) {
 	projectDir, err := os.Getwd()
 	if err != nil {
 		return nil
 	}
-
 	return func() (json.RawMessage, error) {
-		cfg, err := config.LoadDaemonConfig(projectDir)
-		if err != nil {
-			return nil, err
-		}
-		data, err := json.Marshal(cfg)
-		if err != nil {
-			return nil, fmt.Errorf("marshal daemon config: %w", err)
-		}
-		return json.RawMessage(data), nil
+		return LoadDaemonConfigRaw(projectDir)
 	}
 }
 

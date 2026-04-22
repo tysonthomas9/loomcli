@@ -23,7 +23,7 @@ import (
 type Module struct {
 	termSvc               service.TerminalService
 	agentSvc              service.AgentService // may be nil — agent routes skipped
-	ptyMgr                *webuterminal.PTYManager
+	ptyMgr                webuterminal.PTYSource
 	agentTmuxMgr          *webuterminal.AgentTmuxManager // may be nil — tmux missing
 	termAuth              *realtime.TerminalAuth         // may be nil — token routes skipped
 	allowedOrigins        []string
@@ -36,10 +36,12 @@ type Module struct {
 
 // NewModule returns a Module. Any of agentSvc, agentTmuxMgr, and termAuth
 // may be nil — routes that depend on them will simply not be registered.
+// ptyMgr must be non-nil when terminal routes should be served; pass nil
+// (the interface, not a typed-nil pointer) to skip registration.
 func NewModule(
 	termSvc service.TerminalService,
 	agentSvc service.AgentService,
-	ptyMgr *webuterminal.PTYManager,
+	ptyMgr webuterminal.PTYSource,
 	agentTmuxMgr *webuterminal.AgentTmuxManager,
 	termAuth *realtime.TerminalAuth,
 	allowedOrigins []string,

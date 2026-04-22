@@ -3,7 +3,7 @@ package realtime
 import (
 	"testing"
 
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 )
 
 func TestTruncateUTF8_ShortString(t *testing.T) {

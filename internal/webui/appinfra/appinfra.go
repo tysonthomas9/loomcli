@@ -90,16 +90,17 @@ func InitProtectedPool(rawPool *daemon.ConnectionPool, logger *slog.Logger) daem
 
 // HookConfig holds the dependencies for registering lifecycle hooks.
 type HookConfig struct {
-	MultiPool *daemon.MultiPool
-	PoolSize  int
-	MultiSub  *subscription.MultiWorkspaceSubscriber
-	TermMgr   *terminal.AgentTmuxManager
-	FleetReg  *fleet.StoreRegistry
-	FleetURL  string
-	FleetWS   string
-	FleetKey  string
-	FleetMode bool
-	Logger    *slog.Logger
+	MultiPool   *daemon.MultiPool
+	PoolSize    int
+	MultiSub    *subscription.MultiWorkspaceSubscriber
+	TermMgr     *terminal.AgentTmuxManager
+	PTYMultiMgr *terminal.MultiPTYManager
+	FleetReg    *fleet.StoreRegistry
+	FleetURL    string
+	FleetWS     string
+	FleetKey    string
+	FleetMode   bool
+	Logger      *slog.Logger
 }
 
 // RegisteredHooks returns references to hooks that require post-registration
@@ -128,6 +129,9 @@ func RegisterHooks(registry *WorkspaceRegistry, cfg HookConfig) RegisteredHooks 
 
 	if cfg.TermMgr != nil {
 		_ = registry.AddHook(hooks.NewTerminalHook(cfg.TermMgr, cfg.Logger))
+	}
+	if cfg.PTYMultiMgr != nil {
+		_ = registry.AddHook(hooks.NewPTYHook(cfg.PTYMultiMgr, cfg.Logger))
 	}
 	if cfg.FleetReg != nil {
 		_ = registry.AddHook(hooks.NewFleetStoreHook(cfg.FleetReg, cfg.Logger))
@@ -236,6 +240,9 @@ func GetCwd() (string, error) {
 
 // BeadsPoolHook re-exports hooks.BeadsPoolHook for type references.
 type BeadsPoolHook = hooks.BeadsPoolHook
+
+// PTYHook re-exports hooks.PTYHook for type references.
+type PTYHook = hooks.PTYHook
 
 // FleetModule is a type alias for fleet.Module.
 type FleetModule = fleet.Module

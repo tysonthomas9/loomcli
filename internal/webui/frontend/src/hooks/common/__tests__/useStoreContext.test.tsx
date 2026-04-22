@@ -349,16 +349,35 @@ describe("useStoreContext", () => {
   });
 
   // -----------------------------------------------------------------------
-  // 7. Initial fetchIssues
+  // 7. Initial mount: no reset, no fetchIssues
   // -----------------------------------------------------------------------
 
-  describe("Initial reset (issue fetching delegated to App.tsx)", () => {
-    it("resets issueStore on mount (does not call fetchIssues — App.tsx drives that)", () => {
+  describe("Initial mount (issue fetching delegated to App.tsx)", () => {
+    it("does NOT reset stores on initial mount", () => {
+      // Initial mount must not reset the stores. App.tsx fires its own
+      // fetchIssues(...) before this parent effect runs (children-first
+      // effect ordering); calling reset() here would abort the in-flight
+      // fetch via activeController.abort() and leave the store empty
+      // until the user switches tabs (historical bug).
       renderHook(() => useIssueStoreInstance(), { wrapper });
 
-      expect(issueMethodsRef.current.reset).toHaveBeenCalled();
+      expect(issueMethodsRef.current.reset).not.toHaveBeenCalled();
+      expect(agentMethodsRef.current.reset).not.toHaveBeenCalled();
       // fetchIssues is NOT called by StoreWiring — App.tsx drives mode-based fetching
       expect(issueMethodsRef.current.fetchIssues).not.toHaveBeenCalled();
+    });
+
+    it("does NOT reset on re-render when workspaceId is unchanged", () => {
+      const { rerender } = renderHook(() => useIssueStoreInstance(), {
+        wrapper,
+      });
+      issueMethodsRef.current.reset.mockClear();
+      agentMethodsRef.current.reset.mockClear();
+
+      rerender();
+
+      expect(issueMethodsRef.current.reset).not.toHaveBeenCalled();
+      expect(agentMethodsRef.current.reset).not.toHaveBeenCalled();
     });
   });
 
@@ -372,6 +391,7 @@ describe("useStoreContext", () => {
 
       expect(agentMethodsRef.current.startPolling).toHaveBeenCalledWith({
         pollInterval: 5000,
+        workspaceId: "test-ws-id",
       });
     });
   });
@@ -403,6 +423,7 @@ describe("useStoreContext", () => {
       expect(issueMethodsRef.current.fetchIssues).not.toHaveBeenCalled();
       expect(agentMethodsRef.current.startPolling).toHaveBeenCalledWith({
         pollInterval: 5000,
+        workspaceId: "new-ws-id",
       });
     });
   });

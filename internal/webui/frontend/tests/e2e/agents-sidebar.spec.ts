@@ -404,7 +404,7 @@ async function setupMocks(
   );
 
   // Consolidated monitor API handler
-  await page.route("**/api/monitor/**", async (route) => {
+  await page.route("**/monitor/**", async (route) => {
     const url = route.request().url();
 
     if (!loomServerAvailable) {
@@ -416,7 +416,7 @@ async function setupMocks(
       return;
     }
 
-    if (url.includes("/api/monitor/agents")) {
+    if (url.includes("/monitor/agents")) {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -425,7 +425,7 @@ async function setupMocks(
           timestamp: "2026-01-24T12:00:00Z",
         }),
       });
-    } else if (url.includes("/api/monitor/status")) {
+    } else if (url.includes("/monitor/status")) {
       const status = emptyAgents
         ? { ...mockLoomStatus, agents: [], agent_tasks: {} }
         : customAgents
@@ -436,7 +436,7 @@ async function setupMocks(
         contentType: "application/json",
         body: JSON.stringify(status),
       });
-    } else if (url.includes("/api/monitor/tasks")) {
+    } else if (url.includes("/monitor/tasks")) {
       await route.fulfill({
         status: 200,
         contentType: "application/json",

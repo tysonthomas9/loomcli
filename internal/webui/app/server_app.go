@@ -158,7 +158,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	}
 
 	// Initialize issue service layer
-	app.issueSvc = service.NewIssueService(app.pool, app.multiPool, middleware.WithWorkspace)
+	app.issueSvc = service.NewIssueService(app.multiPool, middleware.WithWorkspace)
 
 	// Create SSE hub for real-time push notifications
 	app.hub = appstores.NewHub()
@@ -184,11 +184,13 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	app.multiSub = appstores.NewMultiSub(app.hub, app.multiPool, agentStatePathFn, config.Logger)
 	cleanups = append(cleanups, func() { app.multiSub.Stop() })
 
-	// Main web terminal manager: one fresh PTY per WebSocket connection, no
-	// tmux. Mirrors wterm/examples/local/server.ts on the Go side.
-	app.ptyMgr = terminal.NewPTYManager(config.TerminalCmd, config.MaxTerminalSessions)
-	cleanups = append(cleanups, func() { _ = app.ptyMgr.Shutdown() })
-	logger.Info("pty manager initialized", "component", "terminal", "default_command", config.TerminalCmd)
+	// Main web terminal manager: one *PTYManager per workspace, dispatched by
+	// SessionKey.Workspace. Per-workspace managers are created lazily on first
+	// AttachSession and use workspace.Path as the shell's cwd. Workspaces are
+	// registered via PTYHook (see appinfra.RegisterHooks wiring).
+	app.ptyMgr = terminal.NewMultiPTYManager(config.TerminalCmd, config.MaxTerminalSessions)
+	cleanups = append(cleanups, func() { _ = app.ptyMgr.Close() })
+	logger.Info("multi pty manager initialized", "component", "terminal", "default_command", config.TerminalCmd)
 
 	// Agent-view tmux manager: kept only so the web UI can attach to tmux
 	// sessions that the CLI auto-mode creates for agents. Missing tmux is a
@@ -268,16 +270,17 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	cleanups = append(cleanups, func() { _ = app.registry.Close() })
 
 	registeredHooks := appinfra.RegisterHooks(app.registry, appinfra.HookConfig{
-		MultiPool: app.multiPool,
-		PoolSize:  config.PoolSize,
-		MultiSub:  app.multiSub,
-		TermMgr:   app.agentTmuxMgr,
-		FleetReg:  app.fleetRegistry,
-		FleetURL:  config.FleetClientURL,
-		FleetWS:   config.FleetClientWorkspace,
-		FleetKey:  config.FleetClientAPIKey,
-		FleetMode: config.FleetMode,
-		Logger:    config.Logger,
+		MultiPool:   app.multiPool,
+		PoolSize:    config.PoolSize,
+		MultiSub:    app.multiSub,
+		TermMgr:     app.agentTmuxMgr,
+		PTYMultiMgr: app.ptyMgr,
+		FleetReg:    app.fleetRegistry,
+		FleetURL:    config.FleetClientURL,
+		FleetWS:     config.FleetClientWorkspace,
+		FleetKey:    config.FleetClientAPIKey,
+		FleetMode:   config.FleetMode,
+		Logger:      config.Logger,
 	})
 
 	// Register the initial workspace.

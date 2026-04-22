@@ -76,8 +76,16 @@ type StatusResponse struct {
 	Timestamp      time.Time                   `json:"timestamp"`
 }
 
-// HandleStatus returns an HTTP handler for the full status endpoint.
-func HandleStatus(collectDataFn func() *monitor.MonitorData) http.HandlerFunc {
+// HandleAgentsScoped returns an HTTP handler for
+// GET /api/workspaces/{ws}/monitor/agents. It resolves the workspace ID to a
+// workspace name via nameFn, then filters the global monitor data to only
+// that workspace's agents. An unknown workspace returns an empty list rather
+// than the cross-workspace data that the old global endpoint leaked into
+// every workspace's sidebar.
+func HandleAgentsScoped(
+	collectDataFn func() *monitor.MonitorData,
+	nameFn func(wsID string) string,
+) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		data := collectDataFn()
 		if data == nil {
@@ -86,101 +94,37 @@ func HandleStatus(collectDataFn func() *monitor.MonitorData) http.HandlerFunc {
 			_, _ = w.Write([]byte(`{"error":"data collection unavailable"}`))
 			return
 		}
-		writeJSON(w, StatusResponse{
-			Workspace:      getWorkspaceInfo(),
-			Agents:         data.Agents,
-			Tasks:          data.Tasks,
-			InProgressList: data.InProgressTasks,
-			AgentTasks:     data.AgentTasks,
-			Stats:          data.Stats,
-			Sync:           data.SyncStatus,
-			Timestamp:      data.Timestamp,
-		})
-	}
-}
-
-// HandleAgents returns an HTTP handler for the agents endpoint.
-func HandleAgents(collectDataFn func() *monitor.MonitorData) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		data := collectDataFn()
-		if data == nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = w.Write([]byte(`{"error":"data collection unavailable"}`))
-			return
-		}
-		wsInfo := getWorkspaceInfo()
-
-		response := AgentsResponse{
-			Workspace: wsInfo,
-			Agents:    data.Agents,
-			Timestamp: data.Timestamp,
-		}
-
-		// Group agents by workspace if in workspace mode
-		if wsInfo.Mode == "workspace" {
-			response.ByWorkspace = groupAgentsByWorkspace(data.Agents)
-		}
-
-		writeJSON(w, response)
-	}
-}
-
-// HandleTasks returns an HTTP handler for the tasks endpoint.
-func HandleTasks(collectDataFn func() *monitor.MonitorData) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		data := collectDataFn()
-		if data == nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = w.Write([]byte(`{"error":"data collection unavailable"}`))
-			return
-		}
-		writeJSON(w, TasksResponse{
-			Summary:          data.Tasks,
-			NeedsPlanning:    data.NeedsPlanningTasks,
-			ReadyToImplement: data.ReadyToImplement,
-			NeedsReview:      data.ReviewTasks,
-			InProgress:       data.InProgressTasks,
-			Backlog:          data.BacklogTasks,
-			Closed:           data.ClosedTasks,
-			Timestamp:        data.Timestamp,
-		})
-	}
-}
-
-// HandleStats returns an HTTP handler for the stats endpoint.
-func HandleStats(collectDataFn func() *monitor.MonitorData) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		data := collectDataFn()
-		if data == nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = w.Write([]byte(`{"error":"data collection unavailable"}`))
-			return
-		}
-		writeJSON(w, StatsResponse{
-			Stats:     data.Stats,
+		wsID := workspaceIDFromPath(r)
+		wsName := nameFn(wsID)
+		agents := filterAgentsByWorkspaceName(data.Agents, wsName)
+		writeJSON(w, AgentsResponse{
+			Workspace: WorkspaceInfo{Mode: "workspace", Name: wsName},
+			Agents:    agents,
 			Timestamp: data.Timestamp,
 		})
 	}
 }
 
-// HandleSync returns an HTTP handler for the sync endpoint.
-func HandleSync(collectDataFn func() *monitor.MonitorData) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		data := collectDataFn()
-		if data == nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = w.Write([]byte(`{"error":"data collection unavailable"}`))
-			return
-		}
-		writeJSON(w, SyncResponse{
-			Sync:      data.SyncStatus,
-			Timestamp: data.Timestamp,
-		})
+// workspaceIDFromPath reads the {ws} path value. Kept local to avoid pulling
+// the middleware package into metricscmd.
+func workspaceIDFromPath(r *http.Request) string {
+	return r.PathValue("ws")
+}
+
+// filterAgentsByWorkspaceName returns the subset of agents whose Workspace
+// field matches. Empty wsName returns nothing — callers that want all agents
+// must use the unscoped HandleAgents.
+func filterAgentsByWorkspaceName(all []monitor.AgentStatus, wsName string) []monitor.AgentStatus {
+	out := make([]monitor.AgentStatus, 0, len(all))
+	if wsName == "" {
+		return out
 	}
+	for _, a := range all {
+		if a.Workspace == wsName {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 // HandleWorkspaces returns an HTTP handler for the workspaces endpoint.
