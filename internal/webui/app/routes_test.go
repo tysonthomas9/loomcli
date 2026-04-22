@@ -2191,3 +2191,152 @@ func TestLegacyGlobalMonitorRoutesRemoved(t *testing.T) {
 		})
 	}
 }
+
+// --- /api/ catch-all method-aware 405 tests ---
+
+// TestAPICatchAll_MethodNotAllowed_ReturnsAllowHeader verifies that requests to
+// paths registered on the top-level mux for other methods return 405 with an
+// Allow header listing the registered methods (rather than a flat 404). This
+// exercises the catch-all's probe loop, which queries the mux for each standard
+// HTTP method to discover which methods are actually registered for the path.
+func TestAPICatchAll_MethodNotAllowed_ReturnsAllowHeader(t *testing.T) {
+	app := &Server{}
+	setupTestRoutes(t, app)
+
+	cases := []struct {
+		name           string
+		method         string
+		path           string
+		expectAllowHas []string
+	}{
+		{"POST /api/health", http.MethodPost, "/api/health", []string{"GET", "HEAD"}},
+		{"POST /api/config", http.MethodPost, "/api/config", []string{"GET", "HEAD"}},
+		{"DELETE /api/config/backend", http.MethodDelete, "/api/config/backend", []string{"GET", "HEAD", "PATCH"}},
+		{"OPTIONS /api/config/backend", http.MethodOptions, "/api/config/backend", []string{"GET", "HEAD", "PATCH"}},
+		{"GET /api/csp-report", http.MethodGet, "/api/csp-report", []string{"POST"}},
+		{"GET /api/client-errors", http.MethodGet, "/api/client-errors", []string{"POST"}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			rr := httptest.NewRecorder()
+			app.mux.ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusMethodNotAllowed {
+				t.Errorf("status = %d, want 405", rr.Code)
+			}
+			if ct := rr.Header().Get("Content-Type"); ct != "application/json" {
+				t.Errorf("Content-Type = %q, want application/json", ct)
+			}
+			var body map[string]string
+			if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+				t.Fatalf("response is not JSON: %v", err)
+			}
+			if body["error"] != "method not allowed" {
+				t.Errorf("error = %q, want %q", body["error"], "method not allowed")
+			}
+			allow := rr.Header().Get("Allow")
+			if allow == "" {
+				t.Fatalf("Allow header is missing; want it to list: %v", tc.expectAllowHas)
+			}
+			for _, m := range tc.expectAllowHas {
+				if !strings.Contains(allow, m) {
+					t.Errorf("Allow = %q, expected to contain %q", allow, m)
+				}
+			}
+		})
+	}
+}
+
+// TestAPICatchAll_TrulyUnknownPath_Still404 verifies that paths not registered
+// for any method on the top-level mux continue to return JSON 404 with no
+// Allow header — the 405 path should not fire when there's nothing to 405 for.
+// Includes paths that were moved to the workspace sub-mux (e.g. daemon/status,
+// stats) to confirm they no longer resolve on the top-level mux.
+func TestAPICatchAll_TrulyUnknownPath_Still404(t *testing.T) {
+	app := &Server{}
+	setupTestRoutes(t, app)
+
+	cases := []struct {
+		name   string
+		method string
+		path   string
+	}{
+		{"GET /api/nonexistent", http.MethodGet, "/api/nonexistent"},
+		{"POST /api/nonexistent", http.MethodPost, "/api/nonexistent"},
+		{"PUT /api/some/deep/path", http.MethodPut, "/api/some/deep/path"},
+		{"PUT /api/daemon/status", http.MethodPut, "/api/daemon/status"},
+		{"OPTIONS /api/stats", http.MethodOptions, "/api/stats"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			rr := httptest.NewRecorder()
+			app.mux.ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusNotFound {
+				t.Errorf("status = %d, want 404", rr.Code)
+			}
+			if ct := rr.Header().Get("Content-Type"); ct != "application/json" {
+				t.Errorf("Content-Type = %q, want application/json", ct)
+			}
+			var body map[string]string
+			if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+				t.Fatalf("response is not JSON: %v", err)
+			}
+			if body["error"] != "not found" {
+				t.Errorf("error = %q, want %q", body["error"], "not found")
+			}
+			if allow := rr.Header().Get("Allow"); allow != "" {
+				t.Errorf("Allow header = %q, want empty (no methods registered)", allow)
+			}
+		})
+	}
+}
+
+// TestAPICatchAll_UnregisteredFlatIssueRoutes_Still404 verifies that issue
+// routes, which are only registered on the workspace sub-mux (not the
+// top-level mux), continue to return a flat 404 for every method — the
+// catch-all's method-aware probe must not synthesize a 405 for these.
+func TestAPICatchAll_UnregisteredFlatIssueRoutes_Still404(t *testing.T) {
+	app := &Server{}
+	setupTestRoutes(t, app)
+
+	cases := []struct {
+		name   string
+		method string
+		path   string
+	}{
+		{"GET /api/issues", http.MethodGet, "/api/issues"},
+		{"POST /api/issues", http.MethodPost, "/api/issues"},
+		{"PATCH /api/issues/test-id", http.MethodPatch, "/api/issues/test-id"},
+		{"DELETE /api/issues/test-id", http.MethodDelete, "/api/issues/test-id"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			rr := httptest.NewRecorder()
+			app.mux.ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusNotFound {
+				t.Errorf("status = %d, want 404", rr.Code)
+			}
+			if ct := rr.Header().Get("Content-Type"); ct != "application/json" {
+				t.Errorf("Content-Type = %q, want application/json", ct)
+			}
+			var body map[string]string
+			if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+				t.Fatalf("response is not JSON: %v", err)
+			}
+			if body["error"] != "not found" {
+				t.Errorf("error = %q, want %q", body["error"], "not found")
+			}
+			if allow := rr.Header().Get("Allow"); allow != "" {
+				t.Errorf("Allow header = %q, want empty (path not registered)", allow)
+			}
+		})
+	}
+}

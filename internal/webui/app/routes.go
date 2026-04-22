@@ -2,6 +2,8 @@ package app
 
 import (
 	"net/http"
+	"net/url"
+	"strings"
 
 	beadsbackend "github.com/tysonthomas9/loomcli/internal/backend/beads"
 	"github.com/tysonthomas9/loomcli/internal/webui"
@@ -25,14 +27,47 @@ func (app *Server) registerRoutes() {
 		app.registerWorkspaceRoutes()
 	}
 
-	// Unregistered /api/* paths return JSON 404. Must run after all specific
-	// /api/... routes are registered so Go 1.22+ longest-match prefers real
-	// handlers. When the embedded frontend is enabled, non-/api paths fall
-	// through to the frontend handler below (which serves static assets and
-	// SPA fallback). When --api-only or --frontend-url is set, frontendH is
-	// nil and non-/api paths fall through to Go's default text 404.
-	app.mux.Handle("/api/", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	// Unregistered /api/* paths return JSON 404 — or JSON 405 with an Allow
+	// header when the path IS registered for other methods. A flat 404 would
+	// shadow Go 1.22+ ServeMux's built-in 405 behavior for method-qualified
+	// patterns: without probing, POST /api/health would return 404 instead of
+	// 405 because the method-less catch-all wins the match.
+	//
+	// Must run after all specific /api/... routes are registered so Go 1.22+
+	// longest-match prefers real handlers. When the embedded frontend is
+	// enabled, non-/api paths fall through to the frontend handler below
+	// (which serves static assets and SPA fallback). When --api-only or
+	// --frontend-url is set, frontendH is nil and non-/api paths fall through
+	// to Go's default text 404.
+	app.mux.Handle("/api/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Probe the mux for each standard HTTP method. A returned pattern
+		// other than "/api/" means a method-qualified route is registered
+		// for this path, so the correct response is 405 not 404.
+		// mux.Handler() is a cheap trie lookup (see comment above at the
+		// wsHandler below), making per-request probing acceptable here —
+		// the catch-all only runs for unmatched or wrong-method requests.
+		probeMethods := [...]string{
+			http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut,
+			http.MethodPatch, http.MethodDelete, http.MethodOptions,
+		}
+		var allowed []string
+		for _, m := range probeMethods {
+			if m == r.Method {
+				continue
+			}
+			probe := &http.Request{Method: m, URL: &url.URL{Path: r.URL.Path}}
+			_, pattern := app.mux.Handler(probe)
+			if pattern != "" && pattern != "/api/" {
+				allowed = append(allowed, m)
+			}
+		}
 		w.Header().Set("Content-Type", "application/json")
+		if len(allowed) > 0 {
+			w.Header().Set("Allow", strings.Join(allowed, ", "))
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			_, _ = w.Write([]byte(`{"error":"method not allowed"}`))
+			return
+		}
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = w.Write([]byte(`{"error":"not found"}`))
 	}))
